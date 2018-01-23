@@ -3,7 +3,7 @@ from upload import upload, get_file
 from datetime import datetime, timedelta, timezone
 from multiprocessing import Process,Manager,Queue
 import os
-import asyncio
+import logging
 import psutil
 import requests
 import json
@@ -27,8 +27,12 @@ links_id = {
 headers = {
     'client-id':'jzkbprff40iqj646a697cyrvl0zt2m6'
            }
+logger = logging.getLogger(__name__)
 
 
+# def logg():
+#     # logger = logging.getLogger(__name__)
+#     logger.info('111')
 # class SizeError(Exception):
 #     def __init__(self, info):
 #         Exception.__init__(self)
@@ -40,10 +44,25 @@ headers = {
 
 def kill_child_processes(parent_pid, file_name_, sig=signal.SIGINT):
     file_name_ = file_name_+'.part'
+    last_file_size = 0.0
     while True:
         time.sleep(10)
         if os.path.isfile(file_name_):
             file_size = os.path.getsize(file_name_)/1024/1024/1024
+            if file_size == last_file_size:
+                try:
+                    parent = psutil.Process(parent_pid)
+                except psutil.NoSuchProcess:
+                    return
+                children = parent.children(recursive=True)
+                for process in children:
+                    # print(process)
+                    process.send_signal(sig)
+                logger.info('下载卡死'+file_name_)
+                break
+
+            last_file_size = file_size
+
             if float(file_size) >= 3.9:
                 try:
                     parent = psutil.Process(parent_pid)
@@ -53,6 +72,8 @@ def kill_child_processes(parent_pid, file_name_, sig=signal.SIGINT):
                 for process in children:
                     # print(process)
                     process.send_signal(sig)
+                print('分段下载')
+                logger.info('分段下载'+file_name_)
                 break
             # print(file_name_, '文件大小', file_size) # 单位GB
         # try:
@@ -101,7 +122,7 @@ def monitoring(q):
 def get_twitch_stream (url,value):
     res = requests.get(url, headers=headers)
     s = json.loads(res.text)
-    print(value,s['stream'])
+    print(value)
     return s['stream']
 
 
@@ -111,6 +132,7 @@ def download_twitch_stream(dict, q, status_, key_,url_, file_name_):
         value_ = dict[key_]
         dict.pop(key_)
         print('开始下载',key_)
+        logger.info('开始下载：'+key_)
         ydl_opts = {
             'outtmpl':file_name_,
             'format': '720p'
@@ -134,7 +156,7 @@ def download_twitch_stream(dict, q, status_, key_,url_, file_name_):
                 ydl.download([url_])
         except youtube_dl.utils.DownloadError:
 
-            print('分段下载')
+            # print('分段下载')
             try:
                 os.rename(file_name_ + '.part', file_name_[:-4] + str(time.time())[:10] + '.mp4')
             except FileExistsError:
@@ -142,6 +164,7 @@ def download_twitch_stream(dict, q, status_, key_,url_, file_name_):
         finally:
             dict[key_] = value_
         print('下载完成')
+        logger.info('下载完成'+key_)
         os.rename(file_name_, file_name_[:-4] + str(time.time())[:10] + '.mp4')
         file_list = get_file(file_name_)
         videopath = ''
@@ -154,6 +177,7 @@ def download_twitch_stream(dict, q, status_, key_,url_, file_name_):
 
         for r in file_list:
             os.remove(r)
+            logger.info('删除-'+r)
         # print(links_id)
 
 
@@ -161,6 +185,7 @@ def download_panda_stream(dict, q, key_, url_,file_name_):
     value_ = dict[key_]
     dict.pop(key_)
     print('开始下载', key_)
+    logger.info('开始下载' + key_)
     list_info = []
     with youtube_dl.YoutubeDL() as ydl:
         try:
@@ -168,6 +193,7 @@ def download_panda_stream(dict, q, key_, url_,file_name_):
             for i in info['formats']:
                 list_info.append(i['format_id'])
         except youtube_dl.utils.DownloadError:
+            logger.info('%s未开播或读取下载信息失败' % key_)
             dict[key_] = value_
     if 'HD-m3u8' in list_info:
         ydl_opts = {
@@ -193,7 +219,7 @@ def download_panda_stream(dict, q, key_, url_,file_name_):
 
             ydl.download([url_])
     except youtube_dl.utils.DownloadError:
-        print('分段下载')
+        # print('分段下载')
         try:
             os.rename(file_name_ + '.part', file_name_[:-4] + str(time.time())[:10] + '.mp4')
         except FileExistsError:
@@ -201,6 +227,7 @@ def download_panda_stream(dict, q, key_, url_,file_name_):
     finally:
         dict[key_] = value_
     print('下载完成')
+    logger.info('下载完成'+key_)
     os.rename(file_name_, file_name_[:-4] + str(time.time())[:10] + '.mp4')
     file_list = get_file(file_name_)
     videopath = ''
@@ -213,6 +240,7 @@ def download_panda_stream(dict, q, key_, url_,file_name_):
 
     for r in file_list:
         os.remove(r)
+        logger.info('删除-'+r)
     # print(links_id)
 
 
@@ -223,6 +251,7 @@ def download_stream(dict, q, status_, key_,twitch_url_,panda_url_,file_name_):
 
 if __name__ == '__main__':
     manager = Manager()
+    logger.info('123')
     # d = manager.dict(links_id)
     # while True:
     #     utc_dt = datetime.utcnow().replace(tzinfo=timezone.utc)

@@ -5,9 +5,9 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.keys import Keys
-
+import logging
 # 10800 18000 4110
-
+logger = logging.getLogger(__name__)
 
 # def excision(Path):
 #     file_size = os.path.getsize(Path)/1024/1024/1024
@@ -121,6 +121,7 @@ def upload(video_path, link,title_):
     upload = driver.find_element_by_name('file')
     # time.sleep(5)
     print(driver.title)
+    # logger.info(driver.title)
     upload.send_keys(video_path)  # send_keys
     # print(upload.get_attribute('value'))  # check value
     while True:
@@ -141,6 +142,7 @@ def upload(video_path, link,title_):
 
         if len(aggregate) == 1 and  ('Upload complete' in aggregate or '上传完成' in aggregate):
             break
+    logger.info('上传%s\n个数%s'%(title_,len(info)))
     # print(text)
     # pageSource = driver.page_source
     # print(pageSource)
@@ -206,6 +208,7 @@ def upload(video_path, link,title_):
     driver.find_element_by_xpath('//*[@id="app"]/div[2]/div[2]/div/div[2]/div[2]/div[2]/div[3]/button').click()
 
     print('稿件提交完成！')
+    logger.info('%s提交完成！' % title_)
     driver.quit()
 if __name__ == '__main__':
     # upload('D:\\p2.flv','5','k')

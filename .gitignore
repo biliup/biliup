@@ -7,3 +7,4 @@ chromedriver.exe
 chromedriver.log
 external.py
 *.mp4
+AUTO.log
