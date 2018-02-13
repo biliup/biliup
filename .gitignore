@@ -8,3 +8,5 @@ chromedriver.log
 external.py
 *.mp4
 AUTO.log
+ds_update
+ds_update.log
