@@ -1,6 +1,5 @@
 import logging
 import signal
-from logging import FileHandler
 from logging.handlers import TimedRotatingFileHandler
 from multiprocessing import Process
 import time
@@ -62,10 +61,10 @@ def kill_child_processes(parent_pid, file_name_, sig=signal.SIGINT):
                         # print(process)
                         process.send_signal(sig)
                     logger.info('下载卡死' + file_name_)
-                time.sleep(2)
+                time.sleep(0.5)
                 if os.path.isfile(file_name_):
-                    logger.info('卡死下载进程可能未成功退出')
-                    break
+                    logger.info('卡死下载进程可能未成功退出PID:'+parent_pid+','+children)
+                    continue
                 else:
                     logger.info('卡死下载进程成功退出')
                     break
@@ -102,6 +101,10 @@ def monitoring(q):
         # print('获取到{0}，{1}'.format(pid,file_name))
         p = Process(target=kill_child_processes, args=(pid, file_name))
         p.start()
+
+
+def new_hook(t, v, tb):
+    logger.error("Uncaught exception：", exc_info=(t, v, tb))
 
 
 class SafeRotatingFileHandler(TimedRotatingFileHandler):
