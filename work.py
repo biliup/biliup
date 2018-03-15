@@ -43,7 +43,7 @@ def kill_child_processes(parent_pid, file_name_, sig=signal.SIGINT):
     file_name_ = file_name_ + '.part'
     last_file_size = 0.0
     while True:
-        time.sleep(10)
+        time.sleep(15)
         if os.path.isfile(file_name_):
             file_size = os.path.getsize(file_name_) / 1024 / 1024 / 1024
             file_sizes = os.path.getsize(file_name_)
@@ -61,9 +61,9 @@ def kill_child_processes(parent_pid, file_name_, sig=signal.SIGINT):
                         # print(process)
                         process.send_signal(sig)
                     logger.info('下载卡死' + file_name_)
-                time.sleep(0.5)
+                # time.sleep(1)
                 if os.path.isfile(file_name_):
-                    logger.info('卡死下载进程可能未成功退出PID:'+parent_pid+','+children)
+                    logger.info('卡死下载进程可能未成功退出')
                     continue
                 else:
                     logger.info('卡死下载进程成功退出')
@@ -71,7 +71,7 @@ def kill_child_processes(parent_pid, file_name_, sig=signal.SIGINT):
 
             last_file_size = file_sizes
 
-            if float(file_size) >= 3.9:
+            if float(file_size) >= 3.5:
                 try:
                     parent = psutil.Process(parent_pid)
                 except psutil.NoSuchProcess:
@@ -88,8 +88,10 @@ def kill_child_processes(parent_pid, file_name_, sig=signal.SIGINT):
                     logger.info('分段下载twitch' + file_name_)
                 break
         else:
+            logger.info('退出监控进程')
             return
             # os._exit(0)
+    logger.info('退出监控进程')
 
 
 def monitoring(q):
@@ -98,7 +100,7 @@ def monitoring(q):
         # print('开始监测')
         pid, file_name = q.get()
         time.sleep(5)
-        # print('获取到{0}，{1}'.format(pid,file_name))
+        logger.info('获取到{0}，{1}'.format(pid,file_name))
         p = Process(target=kill_child_processes, args=(pid, file_name))
         p.start()
 

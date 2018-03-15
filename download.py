@@ -20,11 +20,13 @@ links_id = {
     '星际2Scarlett噶姐虫族天梯第一视角': ['scarlettm'],
     '星际2GuMiho砸本人族天梯第一视角': ['gumiho'],
     '星际2Maru人族天梯第一视角': ['maru072'],
+    '星际2TY全教主全太阳人族天梯第一视角': ['sc2tyty'],
     '星际2ByuN武圣人族天梯第一视角': ['byunprime'],
     '星际2小herO神族天梯第一视角': ['dmadkr0818'],
     '星际2Zest神族天梯第一视角': ['sc2_zest'],
-    '星际2PartinG跳跳胖丁神族天梯第一视角':['partingthebigboy']
-    # 'test':['maru072','37229'],
+    '星际2PartinG跳跳胖丁神族天梯第一视角':['partingthebigboy'],
+    '星际2ForGG火车王人族天梯第一视角': ['forgg']
+    # 'test':['expertmma','37229'],
     # 'test1':['byunprime','10003']
 }
 
@@ -37,13 +39,14 @@ def get_twitch_stream(url, key):
     try:
         res = requests.get(url, headers=headers)
         res.close()
-    except requests.exceptions.ConnectionError:
-        logger.exception('During handling of the above exception, another exception occurred:')
-        return None
     except requests.exceptions.SSLError:
         logger.error('获取流信息发生错误')
         logger.error(requests.exceptions.SSLError, exc_info = True)
         return None
+    except requests.exceptions.ConnectionError:
+        logger.exception('During handling of the above exception, another exception occurred:')
+        return None
+
     try:
         s = json.loads(res.text)
         # s = res.json()
@@ -72,14 +75,25 @@ def download_twitch_stream(dict, q, confirm_url, key_, url_, tfile_name_, value_
         logger.info('开始下载twitch：' + key_)
         ydl_opts = {
             'outtmpl': tfile_name_,
-            'format': '720p60'
+            # 'format': '720p'
+            # 'external_downloader_args':['-timeout', '5']
             # 'keep_fragments':True
-            # 'postprocessors': [{
-            #     'key': 'FFmpegFixupM3u8',
-            # 'preferredcodec': 'mp3',
-            # 'preferredquality': '1900',
-            # }],
         }
+        list_info = []
+
+        with youtube_dl.YoutubeDL() as ydl:
+            info = ydl.extract_info(url_, download=False)
+            for i in info['formats']:
+                list_info.append(i['format_id'])
+
+        if key_ in ['星际2ByuN武圣人族天梯第一视角', '星际2Innovation吕布卫星人族天梯第一视角']:
+            pass
+        elif '720p' in list_info:
+            ydl_opts['format'] = '720p'
+        elif '720p60' in list_info:
+            ydl_opts['format'] = '720p60'
+
+
         try:
             with youtube_dl.YoutubeDL(ydl_opts) as ydl:
 
@@ -101,6 +115,7 @@ def download_twitch_stream(dict, q, confirm_url, key_, url_, tfile_name_, value_
                 logger.info('更名{0}为{1}+时间'.format(tfile_name_ + '.part', tfile_name_))
             except FileExistsError:
                 os.rename(tfile_name_ + '.part', tfile_name_[:-4] + str(time.time())[:10] + tfile_name_[-4:])
+                logger.info('FileExistsError更名{0}为{1}'.format(tfile_name_ + '.part', tfile_name_))
 
             download_twitch_stream(dict, q, confirm_url, key_, url_, tfile_name_, value_)
 
@@ -134,22 +149,28 @@ def download_panda_stream(dict, q, key_, url_, pfile_name_, value_=None):
             supplemental_upload(dict, pfile_name_, key_, url_, value_)
             return
 
-    if 'HD-flv' in list_info:
-        ydl_opts = {
-            'outtmpl': pfile_name_,
-            'format': 'HD-flv',
-        }
-    else:
-        ydl_opts = {
-            'outtmpl': pfile_name_,
-            'format': 'SD-flv',
-            # 'keep_fragments':True
-            # 'postprocessors': [{
-            #     'key': 'FFmpegFixupM3u8',
-            # 'preferredcodec': 'mp3',
-            # 'preferredquality': '1900',
-            # }],
-        }
+    ydl_opts = {
+        'outtmpl': pfile_name_,
+        # 'format': 'HD-flv',
+    }
+
+
+    # if 'HD-flv' in list_info:
+    #     ydl_opts = {
+    #         'outtmpl': pfile_name_,
+    #         'format': 'HD-flv',
+    #     }
+    # else:
+    #     ydl_opts = {
+    #         'outtmpl': pfile_name_,
+    #         'format': 'SD-flv',
+    #         # 'keep_fragments':True
+    #         # 'postprocessors': [{
+    #         #     'key': 'FFmpegFixupM3u8',
+    #         # 'preferredcodec': 'mp3',
+    #         # 'preferredquality': '1900',
+    #         # }],
+    #     }
     try:
         with youtube_dl.YoutubeDL(ydl_opts) as ydl:
             pid = os.getpid()
@@ -190,6 +211,7 @@ def download_panda_stream(dict, q, key_, url_, pfile_name_, value_=None):
             logger.info('下载进程发生KeyboardInterrupt更名{0}为{1}+时间'.format(pfile_name_ + '.part', pfile_name_))
         except FileExistsError:
             os.rename(pfile_name_ + '.part', pfile_name_[:-4] + str(time.time())[:10] + pfile_name_[-4:])
+            logger.info('FileExistsError:更名{0}为{1}'.format(pfile_name_ + '.part', pfile_name_))
         download_panda_stream(dict, q, key_, url_, pfile_name_, value_)
     finally:
         dict[key_] = value_

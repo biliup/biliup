@@ -1,3 +1,5 @@
+import json
+
 from selenium import webdriver
 import time
 
@@ -30,6 +32,15 @@ for cookie in cookies:
     driver.add_cookie(cookie)
 
 driver.get("https://member.bilibili.com/video/upload.html")
-time.sleep(20)
+time.sleep(30)
 cookie = driver.get_cookies()
 print(cookie)
+filename = 'bilibili.cookie'
+with open(filename, "w") as f:
+    json.dump(cookie, f)
+
+with open(filename) as f:
+    new_cookie = json.load(f)
+
+print(new_cookie)
+print(type(new_cookie),type([]))

@@ -1,3 +1,4 @@
+import json
 import os
 from selenium import webdriver
 import selenium
@@ -51,30 +52,33 @@ def upload(video_path, link, title_):
         # driver = webdriver.Chrome(executable_path=r'D:\bilibiliupload\chromedriver.exe',service_log_path=service_log_path)
 
         driver.get("https://www.bilibili.com")
-         # driver.delete_all_cookies()
-        cookies = [
-            {'domain': '.bilibili.com', 'expiry': 1611825707.027044, 'httpOnly': False, 'name': 'buvid3', 'path': '/',
-             'secure': False, 'value': 'A558A031-653B-4890-917D-C205F81B84F93220infoc'},
-            {'domain': '.bilibili.com', 'expiry': 1611825706, 'httpOnly': False, 'name': 'fts', 'path': '/',
-             'secure': False, 'value': '1517217707'},
-            {'domain': '.bilibili.com', 'expiry': 1519809706, 'httpOnly': False, 'name': 'finger', 'path': '/',
-             'secure': False, 'value': 'edc6ecda'},
-            {'domain': '.bilibili.com', 'expiry': 1519809723.74952, 'httpOnly': False, 'name': 'DedeUserID',
-             'path': '/', 'secure': False, 'value': '274986200'},
-            {'domain': '.bilibili.com', 'expiry': 1548753707.683233, 'httpOnly': False, 'name': 'sid', 'path': '/',
-             'secure': False, 'value': 'llkelw0h'},
-            {'domain': '.bilibili.com', 'expiry': 1519809723.749743, 'httpOnly': False, 'name': 'bili_jct', 'path': '/',
-             'secure': False, 'value': 'af58729164b6a192b07cd720ded677a5'},
-            {'domain': '.bilibili.com', 'expiry': 1519809723.749621, 'httpOnly': False, 'name': 'DedeUserID__ckMd5',
-             'path': '/', 'secure': False, 'value': '1206e39bc044fe98'},
-            {'domain': '.bilibili.com', 'expiry': 1519809723.749689, 'httpOnly': True, 'name': 'SESSDATA', 'path': '/',
-             'secure': False, 'value': '3e02f3d0%2C1519809723%2C3ee58d91'},
-            {'domain': '.bilibili.com', 'expiry': 2177452800.339961, 'httpOnly': False, 'name': 'LIVE_BUVID',
-             'path': '/', 'secure': False, 'value': 'AUTO7015172177246979'},
-            {'domain': '.bilibili.com', 'expiry': 1517221325.776721, 'httpOnly': True, 'name': '_dfcaptcha',
-             'path': '/', 'secure': False, 'value': 'a32213f1be85682d37cde24aedc2d135'}]
+        # driver.delete_all_cookies()
+        # cookies = [
+        #     {'domain': '.bilibili.com', 'expiry': 1611825707.027044, 'httpOnly': False, 'name': 'buvid3', 'path': '/',
+        #      'secure': False, 'value': 'A558A031-653B-4890-917D-C205F81B84F93220infoc'},
+        #     {'domain': '.bilibili.com', 'expiry': 1611825706, 'httpOnly': False, 'name': 'fts', 'path': '/',
+        #      'secure': False, 'value': '1517217707'},
+        #     {'domain': '.bilibili.com', 'expiry': 1519809706, 'httpOnly': False, 'name': 'finger', 'path': '/',
+        #      'secure': False, 'value': 'edc6ecda'},
+        #     {'domain': '.bilibili.com', 'expiry': 1519809723.74952, 'httpOnly': False, 'name': 'DedeUserID',
+        #      'path': '/', 'secure': False, 'value': '274986200'},
+        #     {'domain': '.bilibili.com', 'expiry': 1548753707.683233, 'httpOnly': False, 'name': 'sid', 'path': '/',
+        #      'secure': False, 'value': 'llkelw0h'},
+        #     {'domain': '.bilibili.com', 'expiry': 1519809723.749743, 'httpOnly': False, 'name': 'bili_jct', 'path': '/',
+        #      'secure': False, 'value': 'af58729164b6a192b07cd720ded677a5'},
+        #     {'domain': '.bilibili.com', 'expiry': 1519809723.749621, 'httpOnly': False, 'name': 'DedeUserID__ckMd5',
+        #      'path': '/', 'secure': False, 'value': '1206e39bc044fe98'},
+        #     {'domain': '.bilibili.com', 'expiry': 1519809723.749689, 'httpOnly': True, 'name': 'SESSDATA', 'path': '/',
+        #      'secure': False, 'value': '3e02f3d0%2C1519809723%2C3ee58d91'},
+        #     {'domain': '.bilibili.com', 'expiry': 2177452800.339961, 'httpOnly': False, 'name': 'LIVE_BUVID',
+        #      'path': '/', 'secure': False, 'value': 'AUTO7015172177246979'},
+        #     {'domain': '.bilibili.com', 'expiry': 1517221325.776721, 'httpOnly': True, 'name': '_dfcaptcha',
+        #      'path': '/', 'secure': False, 'value': 'a32213f1be85682d37cde24aedc2d135'}]
 
-        for cookie in cookies:
+        with open('bilibili.cookie') as f:
+            new_cookie = json.load(f)
+
+        for cookie in new_cookie:
             # cookie.pop('domain')
             # print(cookie)
             driver.add_cookie(cookie)
@@ -86,11 +90,17 @@ def upload(video_path, link, title_):
         driver.get("https://member.bilibili.com/video/upload.html")
 
         # print(driver.title)
-        element = WebDriverWait(driver, 10).until(
+        WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.NAME, 'file')))
         upload = driver.find_element_by_name('file')
 
         print(driver.title)
+
+        cookie = driver.get_cookies()
+
+        with open('bilibili.cookie', "w") as f:
+            json.dump(cookie, f)
+
         # logger.info(driver.title)
         logger.info('开始上传' + title_)
         upload.send_keys(video_path)  # send_keys
@@ -152,6 +162,9 @@ def upload(video_path, link, title_):
         title.send_keys(Keys.BACKSPACE)
         title.send_keys(title_)
 
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, '//*[@id="app"]/div[2]/div[2]/div/div[2]/div[2]/div[2]/div[1]/div[4]/div[2]/div[2]/div[2]/div[last()]/div/input')))
+
         text = driver.find_element_by_xpath(
             '//*[@id="app"]/div[2]/div[2]/div/div[2]/div[2]/div[2]/div[1]/div[4]/div[2]/div[2]/div[2]/div[last()]/div/input')
         text.send_keys('星际争霸2')
@@ -163,6 +176,8 @@ def upload(video_path, link, title_):
         text.send_keys('职业选手')
         text.send_keys(Keys.ENTER)
         time.sleep(0.5)
+        text.send_keys(Keys.CONTROL + 'a')
+
         text.send_keys('虚空之遗')
         text.send_keys(Keys.ENTER)
         time.sleep(0.5)
@@ -181,8 +196,13 @@ def upload(video_path, link, title_):
         logger.info('%s提交完成！' % title_)
     except selenium.common.exceptions.NoSuchElementException:
         logger.exception('发生错误')
+    # except selenium.common.exceptions.TimeoutException:
+    #     logger.exception('超时')
+    # except:
+    #     logger.exception('未知错误')
     finally:
         driver.quit()
+        logger.info('浏览器驱动退出')
 
 
 def uploads(file_name_, url_):

@@ -59,7 +59,7 @@ if __name__ == '__main__':
                 # p = Process(target=download_twitch_stream, args=(d, queue, status, key,twitch_url,tfile_name))
                 # p.start()
             # print(res.get())
-            time.sleep(50)
+            time.sleep(40)
 
     # pool.close()
     # pool.join()
