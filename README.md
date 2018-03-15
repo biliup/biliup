@@ -2,15 +2,15 @@
 自动录制上传直播录像  
 启动方法Linux下后台运行
 
-    nohup python3 start.py >/dev/null 2>&1 &
+`nohup python3 start.py >/dev/null 2>&1 &`
 
 Linux模拟CTRL-c
 
-    kill -SIGINT PID
+`kill -SIGINT PID`
 
 查看系统文件句柄使用
 
-    lsof -n |awk '{print $2}'|sort|uniq -c |sort -nr|more
+`lsof -n |awk '{print $2}'|sort|uniq -c |sort -nr|more`
 
 错误记录：
 
