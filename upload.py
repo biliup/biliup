@@ -30,6 +30,13 @@ def get_file(filename):
     return sorted(file_list)
 
 
+def filter_file(file_list):
+    for r in file_list:
+        file_size = os.path.getsize(r) / 1024 / 1024 / 1024
+        if file_size <= 0.1:
+            os.remove(r)
+            logger.info('过滤删除-' + r)
+
 def upload(video_path, link, title_):
     try:
         service_log_path = "{}/chromedriver.log".format('/home')
@@ -81,6 +88,7 @@ def upload(video_path, link, title_):
         for cookie in new_cookie:
             # cookie.pop('domain')
             # print(cookie)
+            # cookie['expiry']=1537089921
             driver.add_cookie(cookie)
 
         # cookie = driver.get_cookies()
@@ -97,7 +105,7 @@ def upload(video_path, link, title_):
         print(driver.title)
 
         cookie = driver.get_cookies()
-
+        #
         with open('bilibili.cookie', "w") as f:
             json.dump(cookie, f)
 
@@ -162,11 +170,11 @@ def upload(video_path, link, title_):
         title.send_keys(Keys.BACKSPACE)
         title.send_keys(title_)
 
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.XPATH, '//*[@id="app"]/div[2]/div[2]/div/div[2]/div[2]/div[2]/div[1]/div[4]/div[2]/div[2]/div[2]/div[last()]/div/input')))
-
+        # WebDriverWait(driver, 10).until(
+        #     EC.presence_of_element_located((By.XPATH, '//*[@id="app"]/div[2]/div[2]/div/div[2]/div[2]/div[2]/div[1]/div[4]/div[2]/div[2]/div[2]/div[last()]/div/input')))
+        # //*[@id="app"]/div[2]/div[2]/div/div[2]/div[2]/div[2]/div[1]/div[4]/div[2]/div[2]/div[2]/div[last()]/div/input
         text = driver.find_element_by_xpath(
-            '//*[@id="app"]/div[2]/div[2]/div/div[2]/div[2]/div[2]/div[1]/div[4]/div[2]/div[2]/div[2]/div[last()]/div/input')
+            '//*[@id="app"]/div[2]/div[2]/div/div[2]/div[2]/div[2]/div[1]/div[4]/div[2]/div[3]/div[2]/div[last()]/div/input')
         text.send_keys('星际争霸2')
         text.send_keys(Keys.ENTER)
         time.sleep(0.5)
@@ -211,6 +219,8 @@ def uploads(file_name_, url_):
     if os.path.isfile(file_name_):
         os.rename(file_name_, file_name_[:-4] + str(time.time())[:10] + file_name_[-4:])
     file_list = get_file(file_name_)
+    filter_file(file_list)
+    file_list = get_file(file_name_)
     logger.debug('获取%s文件列表' % file_name_[:-4])
     videopath = ''
     root = os.getcwd()
@@ -233,14 +243,18 @@ def supplemental_upload(dict, file_name_, key_, url_, value_):
                     # os.rename(file_name_ + '.part', file_name_[:-4] + str(time.time())[:10] + file_name_[-4:])
                     os.rename(file_name_[:-4] + '.mp4' + '.part',
                               file_name_[:-4] + str(time.time())[:10] + '.mp4')
+                    logger.info('%s存在已更名' % (file_name_[:-4] + '.mp4' + '.part'))
                 except FileNotFoundError:
                     # logger.info('%s不存在' % (file_name_ + '.part'))
-                    logger.info('%s不存在' % (file_name_[:-4] + '.mp4' + '.part'))
+                    # logger.info('%s不存在' % (file_name_[:-4] + '.mp4' + '.part'))
+                    pass
                 try:
                     os.rename(file_name_[:-4] + '.flv' + '.part',
                               file_name_[:-4] + str(time.time())[:10] + '.flv')
+                    logger.info('%s存在已更名' % (file_name_[:-4] + '.flv' + '.part'))
                 except FileNotFoundError:
-                    logger.info('%s不存在' % (file_name_[:-4] + '.flv' + '.part'))
+                    # logger.info('%s不存在' % (file_name_[:-4] + '.flv' + '.part'))
+                    pass
                 logger.info('补充上传' + key_)
                 uploads(file_name_, url_)
                 break
@@ -263,6 +277,6 @@ if __name__ == '__main__':
     # upload(videopath.rstrip(), '5', 'k')
     # for i in range(1):
     #     print(i)
-    os.rename('3', '4')
+    pass
 
 

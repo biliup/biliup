@@ -25,7 +25,8 @@ links_id = {
     '星际2小herO神族天梯第一视角': ['dmadkr0818'],
     '星际2Zest神族天梯第一视角': ['sc2_zest'],
     '星际2PartinG跳跳胖丁神族天梯第一视角':['partingthebigboy'],
-    '星际2ForGG火车王人族天梯第一视角': ['forgg']
+    '星际ForGG火车王人族天梯第一视角': ['forgg'],
+    '星际2NoRegreT莲弟虫族天梯第一视角': ['noregret_']
     # 'test':['expertmma','37229'],
     # 'test1':['byunprime','10003']
 }
@@ -86,7 +87,7 @@ def download_twitch_stream(dict, q, confirm_url, key_, url_, tfile_name_, value_
             for i in info['formats']:
                 list_info.append(i['format_id'])
 
-        if key_ in ['星际2ByuN武圣人族天梯第一视角', '星际2Innovation吕布卫星人族天梯第一视角']:
+        if key_ in ['星际2ByuN武圣人族天梯第一视角', '星际2Innovation吕布卫星人族天梯第一视角', '星际2Maru人族天梯第一视角']:
             pass
         elif '720p' in list_info:
             ydl_opts['format'] = '720p'
