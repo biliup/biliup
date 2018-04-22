@@ -25,8 +25,8 @@ links_id = {
     '星际2小herO神族天梯第一视角': ['dmadkr0818'],
     '星际2Zest神族天梯第一视角': ['sc2_zest'],
     '星际2PartinG跳跳胖丁神族天梯第一视角':['partingthebigboy'],
-    '星际ForGG火车王人族天梯第一视角': ['forgg'],
-    '星际2NoRegreT莲弟虫族天梯第一视角': ['noregret_']
+    # '星际ForGG火车王人族天梯第一视角': ['forgg'],
+    # '星际2NoRegreT莲弟虫族天梯第一视角': ['noregret_']
     # 'test':['expertmma','37229'],
     # 'test1':['byunprime','10003']
 }

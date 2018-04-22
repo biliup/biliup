@@ -30,3 +30,9 @@ old/slider.py
 old/slider_screenshot.png
 old/true_image.png
 old/weibo.py
+bin/__pycache__/slider.cpython-36.pyc
+.idea/workspace.xml
+bin/img2.png
+bin/slider_screenshot.png
+bin/true_image.png
+test.py

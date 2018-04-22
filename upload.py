@@ -3,6 +3,7 @@ import os
 from selenium import webdriver
 import selenium
 import time
+from bin.slider import slider_cracker
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -12,15 +13,8 @@ import logging
 
 # 10800 18000 4110
 
+
 logger = logging.getLogger('log01')
-
-# def excision(Path):
-#     file_size = os.path.getsize(Path)/1024/1024/1024
-#
-#     print(file_size)
-#
-# excision('innovation.flv')
-
 
 def get_file(filename):
     file_list = []
@@ -30,6 +24,11 @@ def get_file(filename):
     return sorted(file_list)
 
 
+def remove_filelist(file_list):
+    for r in file_list:
+        os.remove(r)
+        logger.info('删除-' + r)
+
 def filter_file(file_list):
     for r in file_list:
         file_size = os.path.getsize(r) / 1024 / 1024 / 1024
@@ -37,9 +36,23 @@ def filter_file(file_list):
             os.remove(r)
             logger.info('过滤删除-' + r)
 
-def upload(video_path, link, title_):
+
+def upload(video_list, link, title_):
+
+    filename = 'bin/bilibili.cookie'
+    user_name = ''
+    pass_word = ''
+
+    video_path = assemble_videopath(video_list)
+
+    service_log_path = "{}/chromedriver.log".format('/home')
+    options = webdriver.ChromeOptions()
+
+    options.add_argument('headless')
+    driver = webdriver.Chrome(executable_path='/usr/bin/chromedriver', chrome_options=options,
+                              service_log_path=service_log_path)
     try:
-        service_log_path = "{}/chromedriver.log".format('/home')
+        # service_log_path = "{}/chromedriver.log".format('/home')
         # service_log_path = "{}\\chromedriver.log".format('D:\\bilibiliupload')
 
 
@@ -47,15 +60,16 @@ def upload(video_path, link, title_):
         # video_path = 'D:\\p2.flv\nD:\\p1.flv\nD:\\享受星际！！！看会比赛.flv'
         # link = 'https://www.panda.tv/1160340'
 
-        options = webdriver.ChromeOptions()
+        # options = webdriver.ChromeOptions()
+        #
+        # options.add_argument('headless')
 
-        options.add_argument('headless')
         # options.add_argument('no-sandbox')
         # options.binary_location = '/usr/bin/google-chrome-stable'
 
 
-        driver = webdriver.Chrome(executable_path='/usr/bin/chromedriver', chrome_options=options,
-                                  service_log_path=service_log_path)
+        # driver = webdriver.Chrome(executable_path='/usr/bin/chromedriver', chrome_options=options,
+        #                           service_log_path=service_log_path)
         # driver = webdriver.Chrome(executable_path=r'D:\bilibiliupload\chromedriver.exe',service_log_path=service_log_path)
 
         driver.get("https://www.bilibili.com")
@@ -82,7 +96,7 @@ def upload(video_path, link, title_):
         #     {'domain': '.bilibili.com', 'expiry': 1517221325.776721, 'httpOnly': True, 'name': '_dfcaptcha',
         #      'path': '/', 'secure': False, 'value': 'a32213f1be85682d37cde24aedc2d135'}]
 
-        with open('bilibili.cookie') as f:
+        with open(filename) as f:
             new_cookie = json.load(f)
 
         for cookie in new_cookie:
@@ -106,7 +120,7 @@ def upload(video_path, link, title_):
 
         cookie = driver.get_cookies()
         #
-        with open('bilibili.cookie', "w") as f:
+        with open(filename, "w") as f:
             json.dump(cookie, f)
 
         # logger.info(driver.title)
@@ -202,16 +216,49 @@ def upload(video_path, link, title_):
 
         print('稿件提交完成！')
         logger.info('%s提交完成！' % title_)
+        remove_filelist(video_list)
     except selenium.common.exceptions.NoSuchElementException:
         logger.exception('发生错误')
     # except selenium.common.exceptions.TimeoutException:
     #     logger.exception('超时')
-    # except:
-    #     logger.exception('未知错误')
+    except selenium.common.exceptions.TimeoutException:
+        logger.info('准备更新cookie')
+        # screen_shot = driver.save_screenshot('bin/1.png')
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, r'//*[@id="login-username"]')))
+
+        username = driver.find_element_by_xpath(r'//*[@id="login-username"]')
+        username.send_keys(user_name)
+
+        password = driver.find_element_by_xpath('//*[@id="login-passwd"]')
+        password.send_keys(pass_word)
+
+        cracker = slider_cracker(driver)
+
+        cracker.crack()
+
+        time.sleep(5)
+        if driver.title == '投稿 - 哔哩哔哩弹幕视频网 - ( ゜- ゜)つロ 乾杯~ - bilibili':
+            cookie = driver.get_cookies()
+            print(cookie)
+            with open(filename, "w") as f:
+                json.dump(cookie, f)
+            logger.info('更新cookie成功')
+        else:
+            logger.info('更新cookie失败')
     finally:
         driver.quit()
         logger.info('浏览器驱动退出')
 
+
+def assemble_videopath(file_list):
+    videopath = ''
+    root = os.getcwd()
+    for i in range(len(file_list)):
+        file = file_list[i]
+        videopath += root + '/' + file + '\n'
+    videopath = videopath.rstrip()
+    return videopath
 
 def uploads(file_name_, url_):
 
@@ -222,17 +269,17 @@ def uploads(file_name_, url_):
     filter_file(file_list)
     file_list = get_file(file_name_)
     logger.debug('获取%s文件列表' % file_name_[:-4])
-    videopath = ''
-    root = os.getcwd()
-    for i in range(len(file_list)):
-        file = file_list[i]
-        videopath += root + '/' + file + '\n'
-    videopath = videopath.rstrip()
-    upload(video_path=videopath, link=url_, title_=file_name_[:-4])
+    # videopath = ''
+    # root = os.getcwd()
+    # for i in range(len(file_list)):
+    #     file = file_list[i]
+    #     videopath += root + '/' + file + '\n'
+    # videopath = videopath.rstrip()
+    upload(video_list=file_list, link=url_, title_=file_name_[:-4])
 
-    for r in file_list:
-        os.remove(r)
-        logger.info('删除-' + r)
+    # for r in file_list:
+    #     os.remove(r)
+    #     logger.info('删除-' + r)
 
 
 def supplemental_upload(dict, file_name_, key_, url_, value_):
