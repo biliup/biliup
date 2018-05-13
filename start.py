@@ -1,14 +1,20 @@
 import logging.config
 logging.config.fileConfig('configlog.ini')
+from datetime import datetime, timedelta, timezone
+from multiprocessing import Pool,Manager
+from download import *
+from work import *
+import sys
 if __name__ == '__main__':
-    from datetime import datetime, timedelta, timezone
-    from multiprocessing import Pool,Manager
-    from download import *
-    from work import *
-    import sys
+    # from datetime import datetime, timedelta, timezone
+    # from multiprocessing import Pool,Manager
+    # from download import *
+    # from work import *
+    # import sys
     # logging.basicConfig(filename='AUTO.log', level=logging.INFO)
     # logging.basicConfig(format='%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s',\
     #                     datefmt='%a, %d %b %Y %H:%M',level=logging.INFO)
+
 
     sys.excepthook = new_hook
 
@@ -58,7 +64,6 @@ if __name__ == '__main__':
                                        args=(d, queue, confirm_url, key, twitch_url, tfile_name))
                 # p = Process(target=download_twitch_stream, args=(d, queue, status, key,twitch_url,tfile_name))
                 # p.start()
-            # print(res.get())
             time.sleep(40)
 
     # pool.close()
