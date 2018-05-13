@@ -2,19 +2,13 @@
 
 自动录制上传直播录像
 
-&emsp;&emsp;Linux系统下：
+## Linux系统下：
 
-&emsp;&emsp;&emsp;&emsp;启动
+        启动：    python3 AutoUpload.py start
 
-            python3 AutoUpload.py start
+        退出：    python3 AutoUpload.py stop
 
-&emsp;&emsp;&emsp;&emsp;退出
-
-            python3 AutoUpload.py stop
-
-&emsp;&emsp;&emsp;&emsp;重启
-
-            python3 AutoUpload.py restart
+        重启：    python3 AutoUpload.py restart
 
 Linux模拟CTRL-c
 
