@@ -1,0 +1,7 @@
+selenium==3.8.1
+psutil==5.4.3
+youtube_dl==2018.1.14
+Pillow==5.1.0
+common==0.1.2
+Requests==2.18.4
+utils==0.9.0

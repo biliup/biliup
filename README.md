@@ -1,8 +1,20 @@
 # bilibiliupload
-自动录制上传直播录像  
-启动方法Linux下后台运行
 
-`nohup python3 start.py >/dev/null 2>&1 &`
+自动录制上传直播录像
+
+&emsp;&emsp;Linux系统下：
+
+&emsp;&emsp;&emsp;&emsp;启动
+
+            python3 AutoUpload.py start
+
+&emsp;&emsp;&emsp;&emsp;退出
+
+            python3 AutoUpload.py stop
+
+&emsp;&emsp;&emsp;&emsp;重启
+
+            python3 AutoUpload.py restart
 
 Linux模拟CTRL-c
 
