@@ -36,3 +36,13 @@ bin/img2.png
 bin/slider_screenshot.png
 bin/true_image.png
 test.py
+upload.py
+work.py
+download.py
+configlog.ini
+.idea/workspace.xml
+.gitattributes
+.idea/bilibiliupload.iml
+.idea/misc.xml
+.idea/modules.xml
+.idea/vcs.xml
