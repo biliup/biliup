@@ -1,9 +1,11 @@
 # python模拟linux的守护进程
 
 import sys, os, time, atexit, subprocess, logging, psutil
-from signal import SIGTERM, SIGINT
+from signal import SIGTERM
 import start
+
 logger = logging.getLogger('log01')
+
 
 def _iter_module_files():
     """Iterator to module's source filename of sys.modules (built-in
@@ -28,7 +30,8 @@ def get_p_children(pid, _recursive=True):
 
 class Autoreload(object):
     def __init__(self, _process):
-        self.p = _process       #被监控子进程
+        self.p = _process  # 被监控子进程
+
     @staticmethod
     def _is_any_file_changed(mtimes):
         """Return 1 if there is any source file of sys.modules changed,
@@ -83,9 +86,9 @@ class Autoreload(object):
             return True
 
 
-
 class Daemon(object):
-    def __init__(self, pidfile, change_currentdirectory=False, stdin='/dev/null', stdout='/dev/null', stderr='/dev/null'):
+    def __init__(self, pidfile, change_currentdirectory=False, stdin='/dev/null', stdout='/dev/null',
+                 stderr='/dev/null'):
         # 需要获取调试信息，改为stdin='/dev/stdin', stdout='/dev/stdout', stderr='/dev/stderr'，以root身份运行。
         self.stdin = stdin
         self.stdout = stdout
@@ -118,13 +121,13 @@ class Daemon(object):
         # 重定向文件描述符
         sys.stdout.flush()
         sys.stderr.flush()
-        with open(self.stdin, 'r') as si, open(self.stdout, 'a+') as so, open(self.stderr, 'ab+', 0) as se:
-        # si = file(self.stdin, 'r')
-        # so = file(self.stdout, 'a+')
-        # se = file(self.stderr, 'a+', 0)
-            os.dup2(si.fileno(), sys.stdin.fileno())
-            os.dup2(so.fileno(), sys.stdout.fileno())
-            os.dup2(se.fileno(), sys.stderr.fileno())
+        # with open(self.stdin, 'r') as si, open(self.stdout, 'a+') as so, open(self.stderr, 'ab+', 0) as se:
+        si = open(self.stdin, 'r')
+        so = open(self.stdout, 'a+')
+        se = open(self.stderr, 'ab+', 0)
+        os.dup2(si.fileno(), sys.stdin.fileno())
+        os.dup2(so.fileno(), sys.stdout.fileno())
+        os.dup2(se.fileno(), sys.stderr.fileno())
 
         # 注册退出函数，根据文件pid判断是否存在进程
         atexit.register(self.delpid)
@@ -200,7 +203,6 @@ class Daemon(object):
             logger.info('重启进程')
 
 
-
 if __name__ == '__main__':
     daemon = Daemon('/home/chromeuser/bilibiliupload/watch_process.pid')
     if len(sys.argv) == 2:
@@ -211,7 +213,7 @@ if __name__ == '__main__':
         elif 'restart' == sys.argv[1]:
             daemon.restart()
         else:
-            print( 'unknown command')
+            print('unknown command')
             sys.exit(2)
         sys.exit(0)
     else:
