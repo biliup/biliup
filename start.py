@@ -2,6 +2,7 @@ from Engine import *
 from eventdriven import *
 
 if __name__ == '__main__':
+    from threading import Thread
     from multiprocessing import Manager, Process
     import sys
 
@@ -12,8 +13,8 @@ if __name__ == '__main__':
     queue = manager.Queue()
 
     # 监控
-    p0 = Process(target=work.monitoring, args=(queue,))
-    p0.start()
+    t = Thread(target=work.monitoring, args=(queue,))
+    t.start()
 
     eventManager = event.EventEngine()
     # 注册事件

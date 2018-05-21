@@ -7,6 +7,18 @@ import start
 logger = logging.getLogger('log01')
 
 
+def has_extension(fname_list, *extension):
+    array = []
+    for fname in fname_list:
+        result = list(map(fname.endswith, extension))
+        if True in result:
+            array.append(True)
+        else:
+            array.append(False)
+    if True in array:
+        return True
+    return False
+
 def _iter_module_files():
     """Iterator to module's source filename of sys.modules (built-in
     excluded).
@@ -78,12 +90,18 @@ class Autoreload(object):
             time.sleep(interval)
 
     def _work_free(self):
-        wp = psutil.Process(self.p.pid)
-        more_children = wp.children(recursive=True)
-        children = wp.children()
-        if len(more_children) == len(children):
-            logger.info('进程空闲')
+        # wp = psutil.Process(self.p.pid)
+        # more_children = wp.children(recursive=True)
+        # children = wp.children()
+        # if len(more_children) == len(children):
+        #     logger.info('进程空闲')
+        #     return True
+        # return False
+
+        fname_list = os.listdir('.')
+        if has_extension(fname_list, '.mp4', '.part', '.flv'):
             return True
+        return False
 
 
 class Daemon(object):

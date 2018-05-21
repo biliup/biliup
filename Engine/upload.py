@@ -22,7 +22,7 @@ class Upload(Enginebase):
     def get_file(self):
         file_list = []
         for file_name in os.listdir('.'):
-            if self.file_name[:-11] in file_name:
+            if self.key in file_name:
                 file_list.append(file_name)
         file_list = sorted(file_list)
         return file_list
@@ -122,23 +122,13 @@ class Upload(Enginebase):
             # logger.info(driver.title)
             logger.info('开始上传' + title_)
             upload.send_keys(videopath)  # send_keys
-            # sb = driver.find_element_by_xpath(r'//*[@id="app"]/div[3]/div/div/div/div/div')
-            # sb.click()
-            # with open('bilibili.html', 'w', encoding='utf-8') as f:
-            #     f.write(driver.page_source)  # 保存网页到本地
-            # print('截图')
-            # screen_shot = driver.save_screenshot('bin/1.png')
-            # time.sleep(20)
-            # print(upload.get_attribute('value'))  # check value
 
             time.sleep(1)
             if self.is_element_exist(driver, r'//*[@id="app"]/div[3]/div/div/div/div/div'):
                 sb = driver.find_element_by_xpath(r'//*[@id="app"]/div[3]/div/div/div/div/div')
-                # js = "var q=document.getElementsByClassName('new-feature-guide-container')[0].style.display='none';"
-                # driver.execute_script(js)
+
                 sb.click()
-            # screen_shot = driver.save_screenshot('bin/0.png')
-            # print('截图')
+
             while True:
                 info = driver.find_elements_by_xpath(
                     '//*[@id="item"]/div/div[2]/div[3]/div[1]/div[1]/div/div/div[2]/div[1]/div[3]')
@@ -163,70 +153,24 @@ class Upload(Enginebase):
                     break
             logger.info('上传%s\n个数%s' % (title_, len(info)))
 
-            # print(text)
-            # pageSource = driver.page_source
-            # print(pageSource)
-            # hid = driver.find_element_by_xpath('//*[@id="app"]/div[2]/div[2]/div/div[2]/div[2]/div[2]/div[1]/div[1]/div/div[1]/label[1]/div')
-            # driver.execute_script('arguments[0].style.display="none";',hid)
-            # hid_1 = driver.find_element_by_xpath('//*[@id="app"]/div[2]/div[2]/div/div[2]/div[2]/div[2]/div[1]/div[1]/div/div[1]/label[1]')
-            # driver.execute_script('arguments[0].style.display="none";',hid_1)
-
             js = "var q=document.getElementsByClassName('content-header-right')[0].scrollIntoView();"
             driver.execute_script(js)
 
-            # screen_shot = driver.save_screenshot('bin/0.png')
-            # print('截图')
             # 点击模板
             driver.find_element_by_xpath(r'//*[@id="item"]/div/div[2]/div[3]/div[2]/div[1]/div[2]/div[1]').click()
             driver.find_element_by_xpath(r'//*[@id="item"]/div/div[2]/div[3]/div[2]/div[1]/div[3]/div[1]').click()
-            # 点击转载
-            # click = driver.find_element_by_xpath(
-            #     '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[1]/div[2]/div[2]/div')
-            #
-            # click.click()
 
             # 输入转载来源
             Input = driver.find_element_by_xpath(
                 '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[1]/div[3]/div/div[1]/div/input')
             Input.send_keys(link)
-            # 点击游戏
-            # driver.find_element_by_xpath(
-            #     '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[2]/div[2]/div[1]/div[3]/div').click()
-            # 点击电子竞技
-            # print('第1步')
-            # driver.find_element_by_xpath(
-            #     '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[2]/div[2]/div[1]/div[3]/div[2]/div[6]/span[1]').click()
-            # print('第2步')
+
             # 稿件标题
             title = driver.find_element_by_xpath(
                 '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[3]/div[2]/div[1]/div/input')
             title.send_keys(Keys.CONTROL + 'a')
             title.send_keys(Keys.BACKSPACE)
             title.send_keys(title_)
-            # WebDriverWait(driver, 10).until(
-            #     EC.presence_of_element_located((By.XPATH, '//*[@id="app"]/div[2]/div[2]/div/div[2]/div[2]/div[2]/div[1]/div[4]/div[2]/div[2]/div[2]/div[last()]/div/input')))
-            # //*[@id="app"]/div[2]/div[2]/div/div[2]/div[2]/div[2]/div[1]/div[4]/div[2]/div[2]/div[2]/div[last()]/div/input
-            # //*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[4]/div[2]/div/div[2]/div[2]/div[1]/input
-            # //*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[4]/div[2]/div/div[2]/div[2]/div[last()]/input
-            # //*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[4]/div[2]/div/div[2]/div[2]/div[1]/input
-
-            # text = driver.find_element_by_xpath(
-            #     '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[4]/div[2]/div/div[2]/div[2]/div[1]/input')
-            # text.send_keys('星际争霸2')
-            # text.send_keys(Keys.ENTER)
-            # time.sleep(0.5)
-            # text.send_keys('第一视角')
-            # text.send_keys(Keys.ENTER)
-            # time.sleep(0.5)
-            # text.send_keys('职业选手')
-            # text.send_keys(Keys.ENTER)
-            # time.sleep(0.5)
-            #
-            # text.send_keys(Keys.CONTROL + 'a')
-            #
-            # text.send_keys('虚空之遗')
-            # text.send_keys(Keys.ENTER)
-            # time.sleep(0.5)
 
             # 输入相关游戏
             text_1 = driver.find_element_by_xpath(
@@ -288,11 +232,11 @@ class Upload(Enginebase):
 
     def uploads(self, event, file_name):
         url_ = event.dict_['url']
-        total_url = event.dict_['file_name']
+        total_filename = event.dict_['file_name']
         logger.info('准备上传' + file_name)
-        for tu in total_url:
+        for tu in total_filename:
             if os.path.isfile(tu):
-                os.rename(tu, file_name + str(time.time())[:10] + tu[-4:])
+                os.rename(tu, file_name + str(time.time())[:10] + os.path.splitext(tu)[1])
         bffile_list = self.get_file()
         self.filter_file(bffile_list)
         file_list = self.get_file()
@@ -308,7 +252,7 @@ class Upload(Enginebase):
         self.dic.pop(self.key)
         try:
             for f in os.listdir('.'):
-                if file_name_[:-11] in f:
+                if file_name_ in f:
                     try:
                         # os.rename(file_name_ + '.part', file_name_[:-4] + str(time.time())[:10] + file_name_[-4:])
                         os.rename(file_name_ + '.mp4' + '.part',

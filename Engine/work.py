@@ -6,16 +6,9 @@ import os
 import errno
 import psutil
 import logging
+from threading import Thread
 # from Engine import logger
-# log_fmt = '%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s'
-# formatter = logging.Formatter(log_fmt)
-# log_file_handler = TimedRotatingFileHandler(filename="ds_update.log", when="D", interval=1, backupCount=2)
-# # log_file_handler.suffix = "%Y-%m-%d.log"
-# # log_file_handler.extMatch = re.compile(r"^\d{4}-\d{2}-\d{2}.log$")
-# log_file_handler.setFormatter(formatter)
-# logging.basicConfig(level=logging.INFO)
-# logger = logging.getLogger(__name__)
-# logger.addHandler(log_file_handler)
+
 logger = logging.getLogger('log01')
 
 
@@ -95,14 +88,14 @@ def kill_child_processes(parent_pid, file_name_, sig=signal.SIGINT):
 
 
 def monitoring(q):
-    signal.signal(signal.SIGCHLD, wait_child)
+    # signal.signal(signal.SIGCHLD, wait_child)
     while True:
         # print('开始监测')
         pid, file_name = q.get()
         time.sleep(5)
         logger.info('获取到{0}，{1}'.format(pid, file_name))
-        p = Process(target=kill_child_processes, args=(pid, file_name))
-        p.start()
+        t = Thread(target=kill_child_processes, args=(pid, file_name))
+        t.start()
 
 
 def new_hook(t, v, tb):
