@@ -12,17 +12,20 @@ if __name__ == '__main__':
     d = manager.dict(links_id)
     queue = manager.Queue()
 
-    # 监控
+    # 监控文件、进程
     t = Thread(target=work.monitoring, args=(queue,))
     t.start()
 
+    # 初始化事件管理器
     eventManager = event.EventEngine()
-    # 注册事件
-    evr = eventType.RegisterEvent(eventManager, d)
-    evr.creator(queue)
 
-    # 定时添加事件
-    timer = Putevent(eventManager, d)
-    timer.put()
+    # 批量注册事件
+    evr = eventType.Batch(eventManager, d, queue).register()
+
+    # 定时推送事件
+    put = Putevent(eventManager, d)
+    put.timer(interval=40)
+
+    # 关闭事件管理器
     eventManager.stop()
-    print('引擎停止')
+

@@ -8,6 +8,7 @@ import psutil
 import logging
 from threading import Thread
 # from Engine import logger
+import youtube_dl
 
 logger = logging.getLogger('log01')
 
@@ -32,6 +33,11 @@ def wait_child(signum, frame):
     logger.debug('handle SIGCHLD end')
 
 
+def signal_handler(signum, frame):
+    logger.info('收到Terminate：'+signum)
+    raise youtube_dl.utils.DownloadError(frame)
+
+
 def kill_child_processes(parent_pid, file_name_, sig=signal.SIGINT):
     file_name_ = file_name_ + '.part'
     last_file_size = 0.0
@@ -47,12 +53,14 @@ def kill_child_processes(parent_pid, file_name_, sig=signal.SIGINT):
                     return
                 children = parent.children(recursive=True)
                 if len(children) == 0:
-                    parent.send_signal(sig)
+                    # parent.send_signal(sig)
+                    parent.terminate()
                     logger.info('下载卡死pandaTV' + file_name_)
                 else:
                     for process in children:
                         # print(process)
-                        process.send_signal(sig)
+                        # process.send_signal(sig)
+                        process.terminate()
                     logger.info('下载卡死' + file_name_)
                 # time.sleep(1)
                 if os.path.isfile(file_name_):
@@ -71,20 +79,22 @@ def kill_child_processes(parent_pid, file_name_, sig=signal.SIGINT):
                     return
                 children = parent.children(recursive=True)
                 if len(children) == 0:
-                    parent.send_signal(sig)
+                    # parent.send_signal(sig)
+                    parent.terminate()
                     logger.info('分段下载pandatv' + file_name_)
                 else:
                     for process in children:
                         # print(process)
-                        process.send_signal(sig)
-                    print('分段下载twitch')
-                    logger.info('分段下载twitch' + file_name_)
+                        # process.send_signal(sig)
+                        process.terminate()
+                    print('分段下载')
+                    logger.info('分段下载' + file_name_)
                 break
         else:
-            logger.info('退出监控进程')
+            logger.info('监控线程退出')
             return
             # os._exit(0)
-    logger.info('退出监控进程')
+    logger.info('退出监控线程')
 
 
 def monitoring(q):

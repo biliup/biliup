@@ -10,10 +10,11 @@ class Event:
         self.dict_ = {}  # 字典用于保存具体的事件数据
 
 
-class RegisterEvent(object):
-    def __init__(self, eventManager, dic):
+class Batch(object):
+    def __init__(self, eventManager, dic, Queue):
         self.__eventManager = eventManager
         self.dict = dic
+        self.queue = Queue
 
     def get_dl_obj(self, ddict, key, queue):
         obj = []
@@ -28,10 +29,10 @@ class RegisterEvent(object):
             handler = obj.run
             self.__eventManager.register(event_.type_, handler)
 
-    def creator(self, queue):
+    def register(self):
         for key in self.dict.copy():
             event_ = Event(type_=key)
-            obj = self.get_dl_obj(self.dict[key], key, queue)
+            obj = self.get_dl_obj(self.dict[key], key, self.queue)
             self.addhandler(event_, obj)
             self.__eventManager.register(event_.type_, upload.Upload(self.dict, key).supplemental_upload)
 

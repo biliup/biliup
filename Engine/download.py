@@ -1,9 +1,10 @@
 import os
+import signal
 import requests
 import json
 import time
 import youtube_dl
-from Engine import Enginebase, logger, links_id
+from Engine import Enginebase, logger, links_id, work
 
 # logger = logging.getLogger('log01')
 
@@ -55,38 +56,37 @@ class Downloadbase(Enginebase):
 
         return value_
 
-    def download(self, ydl_opts, event):
-        logger.info('开始下载%s：%s' % (self.__class__.__name__, self.key))
+    def download(self, ydl_opts, event, value):
         self.dl(ydl_opts)
 
     def dl(self, ydl_opts):
         with youtube_dl.YoutubeDL(ydl_opts) as ydl:
             pid = os.getpid()
-            self.queue.put([pid, self.file_name])
+            fname = ydl_opts['outtmpl']
+            self.queue.put([pid, fname])
             ydl.download([self.url[self.__class__.__name__]])
 
         print('下载完成')
         logger.info('下载完成' + self.key)
 
-    def rename(self):
-        file_name = self.file_name
+    def rename(self, file_name):
         fname = os.path.splitext(file_name)[0]
-        suffix = os.path.splitext(file_name)[1]
+        # suffix = os.path.splitext(file_name)[1]
         try:
             # logger.info('更名{0}'.format(pfile_name_+ '.part'))
-            os.rename(file_name + '.part', fname + str(time.time())[:10] + suffix)
-            logger.info('更名{0}为{1}+时间'.format(file_name + '.part', file_name))
+            os.rename(file_name + '.part', fname)
+            logger.info('更名{0}为{1}'.format(file_name + '.part', file_name))
         except FileExistsError:
-            os.rename(file_name + '.part', fname + str(time.time())[:10] + suffix)
+            os.rename(file_name + '.part', fname)
             logger.info('FileExistsError:更名{0}为{1}'.format(file_name + '.part', file_name))
 
     def run(self, event, value=None):
         file_name = self.file_name
         event.dict_['url'] = self.url[self.__class__.__name__]
-        if event.dict_.get('file_name'):
-            event.dict_['file_name'] += [file_name]
-        else:
-            event.dict_['file_name'] = [file_name]
+        # if event.dict_.get('file_name'):
+        #     event.dict_['file_name'] += [file_name]
+        # else:
+        #     event.dict_['file_name'] = [file_name]
         if self.check_stream():
             value = self.is_recursion(value)
             ydl_opts = {
@@ -96,9 +96,10 @@ class Downloadbase(Enginebase):
                 # 'keep_fragments':True
             }
             try:
-                self.download(ydl_opts, event)
-            except youtube_dl.utils.DownloadError or KeyboardInterrupt:
-                self.rename()
+                logger.info('开始下载%s：%s' % (self.__class__.__name__, self.key))
+                self.download(ydl_opts, event, value)
+            except youtube_dl.utils.DownloadError:
+                self.rename(file_name)
                 self.run(event, value)
             finally:
                 self.dic[self.key] = value
@@ -135,9 +136,8 @@ class Twitch(Downloadbase):
             return None
         return stream
 
-    def download(self, ydl_opts, event):
+    def download(self, ydl_opts, event, value):
         print('开始下载twitch', self.key)
-        logger.info('开始下载twitch：' + self.key)
         info_list = self.get_sinfo()
 
         if self.key in ['星际2ByuN武圣人族天梯第一视角', '星际2Innovation吕布卫星人族天梯第一视角', '星际2Maru人族天梯第一视角']:
@@ -151,25 +151,32 @@ class Twitch(Downloadbase):
 
 
 class Panda(Downloadbase):
-    def __init__(self, dictionary, key, queue, suffix='flv'):
+    def __init__(self, dictionary, key, queue, suffix='mp4'):
         Downloadbase.__init__(self, dictionary=dictionary, key=key, suffix=suffix, queue=queue)
 
-    def download(self, ydl_opts, event):
-        file_name = self.file_name
-        fname = os.path.splitext(file_name)[0]
-        suffix = os.path.splitext(file_name)[1]
+    def download(self, ydl_opts, event, value):
+        # file_name = ydl_opts['outtmpl']
+        # fname = os.path.splitext(file_name)[0]
+        # suffix = os.path.splitext(file_name)[1]
 
         print('开始下载panda', self.key)
-        logger.info('开始下载panda：' + self.key)
+        # signal.signal(signal.SIGTERM, work.signal_handler)
+        info_list = self.get_sinfo()
+
+        if 'SD-m3u8' in info_list:
+            ydl_opts['format'] = 'SD-m3u8'
+        elif 'HD-m3u8' in info_list:
+            ydl_opts['format'] = 'HD-m3u8'
+
         self.dl(ydl_opts)
 
         if self.check_stream():
             logger.info('实际未下载完成' + self.key)
-            if os.path.isfile(file_name):
-                os.rename(file_name, fname + str(time.time())[:10] + suffix)
-                logger.info(
-                    '存在{0}更名为{1}'.format(file_name, fname + '时间' + suffix))
-            self.run(event)
+            # if os.path.isfile(file_name):
+            #     os.rename(file_name, fname + str(time.time())[:10] + suffix)
+            #     logger.info(
+            #         '存在{0}更名为{1}'.format(file_name, fname + '时间' + suffix))
+            self.run(event, value=value)
 
 
 if __name__ == '__main__':

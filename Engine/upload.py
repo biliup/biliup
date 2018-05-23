@@ -14,7 +14,6 @@ from Engine import Enginebase, logger
 # 10800 18000 4110
 # logger = logging.getLogger('log01')
 
-
 class Upload(Enginebase):
     def __init__(self, dic, key, suffix='*'):
         Enginebase.__init__(self, dic, key, suffix)
@@ -173,8 +172,9 @@ class Upload(Enginebase):
             title.send_keys(title_)
 
             # 输入相关游戏
-            text_1 = driver.find_element_by_xpath(
-                '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[5]/div/div/div[1]/div[2]/div/div/input')
+            # text_1 = driver.find_element_by_xpath(
+            #     '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[5]/div/div/div[1]/div[2]/div/div/input')
+            text_1 = driver.find_element_by_css_selector(r'#item > div > div.upload-step-two-container > div.step-2-col-right > div.content-container > div.content-body > div.content-normal-container > div.content-desc-container > div > div > div:nth-child(1) > div.content-input-box-container > div > div > input[type="text"]')
             text_1.send_keys('星际争霸2')
             # 简介
             text_2 = driver.find_element_by_xpath(
@@ -230,48 +230,38 @@ class Upload(Enginebase):
             driver.quit()
             logger.info('浏览器驱动退出')
 
-    def uploads(self, event, file_name):
+    def uploads(self, event):
         url_ = event.dict_['url']
-        total_filename = event.dict_['file_name']
-        logger.info('准备上传' + file_name)
-        for tu in total_filename:
-            if os.path.isfile(tu):
-                os.rename(tu, file_name + str(time.time())[:10] + os.path.splitext(tu)[1])
+        # total_filename = event.dict_['file_name']
+        # file_name = self.file_name
+        logger.info('准备上传' + self.file_name)
+        # for tf in total_filename:
+        #     if os.path.isfile(tf):
+        #         os.rename(tf, file_name + str(time.time())[:10] + os.path.splitext(tf)[1])
         bffile_list = self.get_file()
         self.filter_file(bffile_list)
         file_list = self.get_file()
         if len(file_list) == 0:
             logger.info('视频过滤后无文件可传')
             return
-        logger.debug('获取%s文件列表' % file_name)
+        # logger.debug('获取%s文件列表' % file_name)
         self.upload(file_list, link=url_)
 
     def supplemental_upload(self, event):
-        file_name_ = self.file_name
+        # file_name_ = self.file_name
         value_ = self.dic[self.key]
         self.dic.pop(self.key)
         try:
-            for f in os.listdir('.'):
-                if file_name_ in f:
-                    try:
-                        # os.rename(file_name_ + '.part', file_name_[:-4] + str(time.time())[:10] + file_name_[-4:])
-                        os.rename(file_name_ + '.mp4' + '.part',
-                                  file_name_ + str(time.time())[:10] + '.mp4')
-                        logger.info('%s存在已更名' % (file_name_ + '.mp4' + '.part'))
-                    except FileNotFoundError:
-                        # logger.info('%s不存在' % (file_name_ + '.part'))
-                        # logger.info('%s不存在' % (file_name_[:-4] + '.mp4' + '.part'))
-                        pass
-                    try:
-                        os.rename(file_name_ + '.flv' + '.part',
-                                  file_name_ + str(time.time())[:10] + '.flv')
-                        logger.info('%s存在已更名' % (file_name_ + '.flv' + '.part'))
-                    except FileNotFoundError:
-                        # logger.info('%s不存在' % (file_name_[:-4] + '.flv' + '.part'))
-                        pass
-                    logger.debug('补充上传' + self.key)
-                    self.uploads(event, file_name_)
-                    break
+            file_list = self.get_file()
+            if len(file_list) == 0:
+                return
+            for f in file_list:
+                if f.endswith('.part'):
+                    os.rename(f, os.path.splitext(f)[0])
+                    # os.rename(file_name_ + '.part', file_name_[:-4] + str(time.time())[:10] + file_name_[-4:])
+                    logger.info('%s存在已更名' % f)
+            logger.debug('补充上传' + self.key)
+            self.uploads(event)
         finally:
             self.dic[self.key] = value_
             # os._exit(0)

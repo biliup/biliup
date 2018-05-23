@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import logging.config
+import time
 
 logging.config.fileConfig('Engine/configlog.ini', )
 
@@ -55,9 +56,9 @@ class Enginebase(object):
     def file_name(self):
         now = Enginebase.time_now()
         if self.suffix == 'mp4':
-            file_name = '%s%s.mp4' % (self.key, now)
+            file_name = '%s%s%s.mp4' % (self.key, now, str(time.time())[:10])
         elif self.suffix == 'flv':
-            file_name = '%s%s.flv' % (self.key, now)
+            file_name = '%s%s%s.flv' % (self.key, now, str(time.time())[:10])
         else:
             file_name = '%s%s' % (self.key, now)
         return file_name

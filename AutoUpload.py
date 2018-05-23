@@ -100,8 +100,8 @@ class Autoreload(object):
 
         fname_list = os.listdir('.')
         if has_extension(fname_list, '.mp4', '.part', '.flv'):
-            return True
-        return False
+            return False
+        return True
 
 
 class Daemon(object):

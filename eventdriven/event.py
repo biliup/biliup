@@ -110,7 +110,7 @@ class EventEngine:
         # 若要注册的处理器不在该事件的处理器列表中，则注册该事件
         if handler not in handlerList:
             handlerList.append(handler)
-        print(self.__handlers)
+        # print(self.__handlers)
 
     def unregister(self, type_, handler):
         """注销事件处理函数监听"""
