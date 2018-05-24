@@ -1,10 +1,8 @@
 import os
-import signal
 import requests
 import json
-import time
 import youtube_dl
-from Engine import Enginebase, logger, links_id, work
+from Engine import Enginebase, logger, links_id
 
 # logger = logging.getLogger('log01')
 
@@ -69,15 +67,16 @@ class Downloadbase(Enginebase):
         print('下载完成')
         logger.info('下载完成' + self.key)
 
-    def rename(self, file_name):
-        fname = os.path.splitext(file_name)[0]
+    @staticmethod
+    def rename(file_name):
+        # fname = os.path.splitext(file_name)[0]
         # suffix = os.path.splitext(file_name)[1]
         try:
             # logger.info('更名{0}'.format(pfile_name_+ '.part'))
-            os.rename(file_name + '.part', fname)
+            os.rename(file_name + '.part', file_name)
             logger.info('更名{0}为{1}'.format(file_name + '.part', file_name))
         except FileExistsError:
-            os.rename(file_name + '.part', fname)
+            os.rename(file_name + '.part', file_name)
             logger.info('FileExistsError:更名{0}为{1}'.format(file_name + '.part', file_name))
 
     def run(self, event, value=None):
