@@ -122,12 +122,6 @@ class Upload(Enginebase):
             logger.info('开始上传' + title_)
             upload.send_keys(videopath)  # send_keys
 
-            time.sleep(1)
-            if self.is_element_exist(driver, r'//*[@id="app"]/div[3]/div/div/div/div/div'):
-                sb = driver.find_element_by_xpath(r'//*[@id="app"]/div[3]/div/div/div/div/div')
-
-                sb.click()
-
             while True:
                 info = driver.find_elements_by_xpath(
                     '//*[@id="item"]/div/div[2]/div[3]/div[1]/div[1]/div/div/div[2]/div[1]/div[3]')
@@ -152,9 +146,11 @@ class Upload(Enginebase):
                     break
             logger.info('上传%s\n个数%s' % (title_, len(info)))
 
-            js = "var q=document.getElementsByClassName('content-header-right')[0].scrollIntoView();"
-            driver.execute_script(js)
-
+            # js = "var q=document.getElementsByClassName('content-header-right')[0].scrollIntoView();"
+            # driver.execute_script(js)
+            if self.is_element_exist(driver, r'//*[@id="app"]/div[3]/div/div/div/div/div'):
+                sb = driver.find_element_by_xpath(r'//*[@id="app"]/div[3]/div/div/div/div/div')
+                sb.click()
             # 点击模板
             driver.find_element_by_xpath(r'//*[@id="item"]/div/div[2]/div[3]/div[2]/div[1]/div[2]/div[1]').click()
             driver.find_element_by_xpath(r'//*[@id="item"]/div/div[2]/div[3]/div[2]/div[1]/div[3]/div[1]').click()
@@ -164,6 +160,10 @@ class Upload(Enginebase):
                 '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[1]/div[3]/div/div[1]/div/input')
             Input.send_keys(link)
 
+            # 选择分区
+            # driver.find_element_by_xpath(r'//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[2]/div[2]/div[1]/div[3]/div').click()
+            # driver.find_element_by_xpath(r'//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[2]/div[2]/div[1]/div[3]/div[2]/div[6]').click()
+
             # 稿件标题
             title = driver.find_element_by_xpath(
                 '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[3]/div[2]/div[1]/div/input')
@@ -171,10 +171,13 @@ class Upload(Enginebase):
             title.send_keys(Keys.BACKSPACE)
             title.send_keys(title_)
 
+            # js = "var q=document.getElementsByClassName('content-tag-list')[0].scrollIntoView();"
+            # driver.execute_script(js)
+
             # 输入相关游戏
-            # text_1 = driver.find_element_by_xpath(
-            #     '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[5]/div/div/div[1]/div[2]/div/div/input')
-            text_1 = driver.find_element_by_css_selector(r'#item > div > div.upload-step-two-container > div.step-2-col-right > div.content-container > div.content-body > div.content-normal-container > div.content-desc-container > div > div > div:nth-child(1) > div.content-input-box-container > div > div > input[type="text"]')
+            text_1 = driver.find_element_by_xpath(
+                '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[5]/div/div/div[1]/div[2]/div/div/input')
+            # text_1 = driver.find_element_by_css_selector(r'#item > div > div.upload-step-two-container > div.step-2-col-right > div.content-container > div.content-body > div.content-normal-container > div.content-desc-container > div > div > div:nth-child(1) > div.content-input-box-container > div > div > input[type="text"]')
             text_1.send_keys('星际争霸2')
             # 简介
             text_2 = driver.find_element_by_xpath(

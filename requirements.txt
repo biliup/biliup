@@ -1,5 +1,5 @@
 selenium==3.8.1
 psutil==5.4.3
-youtube_dl==2018.1.14
+youtube_dl==2018.5.18
 Requests==2.18.4
 
