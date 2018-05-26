@@ -1,8 +1,7 @@
-# python模拟linux的守护进程
-
+#!/usr/bin/python3
 import sys, os, time, atexit, subprocess, logging, psutil
 from signal import SIGTERM
-import start
+import Bilibili
 
 logger = logging.getLogger('log01')
 
@@ -104,6 +103,7 @@ class Autoreload(object):
         return True
 
 
+# python模拟linux的守护进程
 class Daemon(object):
     def __init__(self, pidfile, change_currentdirectory=False, stdin='/dev/null', stdout='/dev/null',
                  stderr='/dev/null'):
@@ -213,7 +213,7 @@ class Daemon(object):
     def _run(self):
         """ run your fun"""
         while True:
-            args = [sys.executable] + [os.path.abspath(start.__file__)]
+            args = [os.path.abspath(Bilibili.__file__)]
             p = subprocess.Popen(args)
             logger.info('成功启动进程')
             ard = Autoreload(p)
