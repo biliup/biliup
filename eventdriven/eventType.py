@@ -16,25 +16,36 @@ class Batch(object):
         self.dict = dic
         self.queue = Queue
 
-    def get_dl_obj(self, ddict, key, queue):
+    def get_downloader(self, dl_dict, key, queue):
         obj = []
-        for dl in ddict:
+        for dl in dl_dict:
             downloader = getattr(download, dl)(self.dict, key, queue)
             obj.append(downloader)
         return obj
 
-    def addhandler(self, event_, obj):
-        # 注册事件
+    @staticmethod
+    def get_handler(obj):
+        handler = []
         for obj in obj:
-            handler = obj.run
-            self.__eventManager.register(event_.type_, handler)
+            dl = obj.run
+            handler.append(dl)
+        return handler
+
+    def addhandler(self, event_, handler):
+        # 注册事件
+        for dl in handler:
+            self.__eventManager.register(event_.type_, dl)
 
     def register(self):
         for key in self.dict.copy():
             event_ = Event(type_=key)
-            obj = self.get_dl_obj(self.dict[key], key, self.queue)
-            self.addhandler(event_, obj)
-            self.__eventManager.register(event_.type_, upload.Upload(self.dict, key).supplemental_upload)
+
+            dl = self.get_downloader(self.dict[key], key, self.queue)
+            handler = self.get_handler(dl)
+            self.addhandler(event_, handler)
+            
+            uploader = upload.Upload(self.dict, key)
+            self.__eventManager.register(event_.type_, uploader.start)
 
 
 
