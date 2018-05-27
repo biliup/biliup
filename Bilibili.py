@@ -4,7 +4,7 @@ from eventdriven import *
 
 if __name__ == '__main__':
     from threading import Thread
-    from multiprocessing import Manager, Process
+    from multiprocessing import Manager
     import sys
 
     sys.excepthook = work.new_hook
@@ -21,7 +21,7 @@ if __name__ == '__main__':
     eventManager = event.EventEngine()
 
     # 批量注册事件
-    evr = eventType.Batch(eventManager, d, queue).register()
+    eventType.Batch(eventManager, d, queue).register()
 
     # 定时推送事件
     put = Putevent(eventManager, d)

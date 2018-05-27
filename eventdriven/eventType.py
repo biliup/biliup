@@ -43,7 +43,7 @@ class Batch(object):
             dl = self.get_downloader(self.dict[key], key, self.queue)
             handler = self.get_handler(dl)
             self.addhandler(event_, handler)
-            
+
             uploader = upload.Upload(self.dict, key)
             self.__eventManager.register(event_.type_, uploader.start)
 
