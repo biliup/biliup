@@ -18,7 +18,8 @@ class Upload(Enginebase):
     def __init__(self, dic, key, suffix='*'):
         Enginebase.__init__(self, dic, key, suffix)
 
-    def get_file(self):
+    @property
+    def file_list(self):
         file_list = []
         for file_name in os.listdir('.'):
             if self.key in file_name:
@@ -32,13 +33,25 @@ class Upload(Enginebase):
             os.remove(r)
             logger.info('删除-' + r)
 
-    @staticmethod
-    def filter_file(file_list):
+    def filter_file(self):
+        file_list = self.file_list
+        if len(file_list) == 0:
+            return False
         for r in file_list:
             file_size = os.path.getsize(r) / 1024 / 1024 / 1024
             if file_size <= 0.1:
                 os.remove(r)
                 logger.info('过滤删除-' + r)
+        file_list = self.file_list
+        if len(file_list) == 0:
+            logger.info('视频过滤后无文件可传')
+            return False
+        for f in file_list:
+            if f.endswith('.part'):
+                os.rename(f, os.path.splitext(f)[0])
+                logger.info('%s存在已更名' % f)
+        return True
+
 
     @staticmethod
     def assemble_videopath(file_list):
@@ -119,8 +132,9 @@ class Upload(Enginebase):
                 json.dump(cookie, f)
 
             # logger.info(driver.title)
-            logger.info('开始上传' + title_)
+
             upload.send_keys(videopath)  # send_keys
+            logger.info('开始上传' + title_)
 
             while True:
                 info = driver.find_elements_by_xpath(
@@ -233,55 +247,13 @@ class Upload(Enginebase):
             driver.quit()
             logger.info('浏览器驱动退出')
 
-    def uploads(self, event):
-        url_ = event.dict_['url']
-        # total_filename = event.dict_['file_name']
-        # file_name = self.file_name
-        logger.info('准备上传' + self.file_name)
-        # for tf in total_filename:
-        #     if os.path.isfile(tf):
-        #         os.rename(tf, file_name + str(time.time())[:10] + os.path.splitext(tf)[1])
-        bffile_list = self.get_file()
-        self.filter_file(bffile_list)
-        file_list = self.get_file()
-        if len(file_list) == 0:
-            logger.info('视频过滤后无文件可传')
-            return
-        # logger.debug('获取%s文件列表' % file_name)
-        self.upload(file_list, link=url_)
-
-    def supplemental_upload(self, event):
-        # file_name_ = self.file_name
+    def start(self, event):
         value_ = self.dic[self.key]
         self.dic.pop(self.key)
         try:
-            file_list = self.get_file()
-            if len(file_list) == 0:
-                return
-            for f in file_list:
-                if f.endswith('.part'):
-                    os.rename(f, os.path.splitext(f)[0])
-                    # os.rename(file_name_ + '.part', file_name_[:-4] + str(time.time())[:10] + file_name_[-4:])
-                    logger.info('%s存在已更名' % f)
-            logger.debug('补充上传' + self.key)
-            self.uploads(event)
+            url_ = event.dict_['url']
+            if self.filter_file():
+                logger.info('准备上传' + self.file_name)
+                self.upload(self.file_list, link=url_)
         finally:
             self.dic[self.key] = value_
-            # os._exit(0)
-
-
-if __name__ == '__main__':
-    # upload('D:\\p2.flv','5','k')
-    # file_list = get_file('星际2soo输本虫族天梯第一视角.mp4')
-    # videopath = ''
-    # root = os.getcwd()
-    # for i in range(len(file_list)):
-    #     file = file_list[i]
-    #     videopath += root + '/' + file + '\n'
-    # # videopath += 'test2018年01月22日.mp4'
-    # print(file_list)
-    # print(videopath)
-    # upload(videopath.rstrip(), '5', 'k')
-    # for i in range(1):
-    #     print(i)
-    pass
