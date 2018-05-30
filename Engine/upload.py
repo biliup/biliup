@@ -187,8 +187,10 @@ class Upload(Enginebase):
 
             # js = "var q=document.getElementsByClassName('content-tag-list')[0].scrollIntoView();"
             # driver.execute_script(js)
-
+            time.sleep(3)
             # 输入相关游戏
+            # driver.save_screenshot('bin/err.png')
+            # print('截图')
             text_1 = driver.find_element_by_xpath(
                 '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[5]/div/div/div[1]/div[2]/div/div/input')
             # text_1 = driver.find_element_by_css_selector(r'#item > div > div.upload-step-two-container > div.step-2-col-right > div.content-container > div.content-body > div.content-normal-container > div.content-desc-container > div > div > div:nth-child(1) > div.content-input-box-container > div > div > input[type="text"]')
@@ -201,7 +203,7 @@ class Upload(Enginebase):
             driver.find_element_by_xpath('//*[@id="item"]/div/div[2]/div[3]/div[2]/div[3]/div[1]').click()
             # screen_shot = driver.save_screenshot('bin/1.png')
             # print('截图')
-            time.sleep(1)
+            time.sleep(5)
             upload_success = driver.find_element_by_xpath(r'//*[@id="item"]/div/div[3]/p[1]').text
             if upload_success == '':
                 driver.save_screenshot('bin/err.png')

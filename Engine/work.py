@@ -34,8 +34,8 @@ def wait_child(signum, frame):
 
 
 def signal_handler(signum, frame):
-    logger.info('收到Terminate：'+signum)
-    raise youtube_dl.utils.DownloadError(frame)
+    logger.info('收到Terminate信号')
+    raise youtube_dl.utils.DownloadError(signum)
 
 
 def kill_child_processes(parent_pid, file_name_, sig=signal.SIGINT):
@@ -91,10 +91,10 @@ def kill_child_processes(parent_pid, file_name_, sig=signal.SIGINT):
                     logger.info('分段下载' + file_name_)
                 break
         else:
-            logger.info('监控线程退出')
+            logger.info('监控<%s>线程退出' % file_name_)
             return
             # os._exit(0)
-    logger.info('退出监控线程')
+    logger.info('退出监控<%s>线程' % file_name_)
 
 
 def monitoring(q):

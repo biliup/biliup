@@ -1,8 +1,10 @@
 import os
+import signal
+
 import requests
 import json
 import youtube_dl
-from Engine import Enginebase, logger, links_id
+from Engine import Enginebase, logger, links_id, work
 
 # logger = logging.getLogger('log01')
 
@@ -150,7 +152,7 @@ class Twitch(Downloadbase):
 
 
 class Panda(Downloadbase):
-    def __init__(self, dictionary, key, queue, suffix='mp4'):
+    def __init__(self, dictionary, key, queue, suffix='flv'):
         Downloadbase.__init__(self, dictionary=dictionary, key=key, suffix=suffix, queue=queue)
 
     def download(self, ydl_opts, event, value):
@@ -159,13 +161,13 @@ class Panda(Downloadbase):
         # suffix = os.path.splitext(file_name)[1]
 
         print('开始下载panda', self.key)
-        # signal.signal(signal.SIGTERM, work.signal_handler)
-        info_list = self.get_sinfo()
+        signal.signal(signal.SIGTERM, work.signal_handler)
+        # info_list = self.get_sinfo()
 
-        if 'SD-m3u8' in info_list:
-            ydl_opts['format'] = 'SD-m3u8'
-        elif 'HD-m3u8' in info_list:
-            ydl_opts['format'] = 'HD-m3u8'
+        # if 'SD-m3u8' in info_list:
+        #     ydl_opts['format'] = 'SD-m3u8'
+        # elif 'HD-m3u8' in info_list:
+        #     ydl_opts['format'] = 'HD-m3u8'
 
         self.dl(ydl_opts)
 
