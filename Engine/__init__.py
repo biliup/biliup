@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import logging.config
 import time
 
-logging.config.fileConfig('Engine/configlog.ini', )
+# logging.config.fileConfig('Engine/configlog.ini', )
 
 __all__ = ['download', 'upload', 'work', 'links_id', 'Enginebase', 'logger']
 

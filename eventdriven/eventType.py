@@ -46,6 +46,3 @@ class Batch(object):
 
             uploader = upload.Upload(self.dict, key)
             self.__eventManager.register(event_.type_, uploader.start)
-
-
-
