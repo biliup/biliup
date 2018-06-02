@@ -77,8 +77,6 @@ class Upload(Enginebase):
     def upload(self, file_list, link):
 
         filename = 'bin/bilibili.cookie'
-        user_name = 'y446970841@163.com'
-        pass_word = '1122000'
         title_ = self.file_name
         videopath = self.assemble_videopath(file_list)
 
@@ -218,6 +216,10 @@ class Upload(Enginebase):
         # except selenium.common.exceptions.TimeoutException:
         #     logger.exception('超时')
         except selenium.common.exceptions.TimeoutException:
+            with open('bin/user') as f:
+                u = json.load(f)
+            user_name = u['user_name']
+            pass_word = u['pass_word']
             logger.info('准备更新cookie')
             # screen_shot = driver.save_screenshot('bin/1.png')
             WebDriverWait(driver, 10).until(

@@ -47,3 +47,4 @@ configlog.ini
 .idea/modules.xml
 .idea/vcs.xml
 *.pyc
+bin/user
