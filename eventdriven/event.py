@@ -2,15 +2,40 @@
 from queue import Queue, Empty
 from threading import Thread
 from multiprocessing import Pool
+from functools import wraps
+import Engine
+d = {
+    '1':'',
+    '2':'',
+    '3':'',
+    '4':'',
+}
+
+
+def signevent(dic):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self,*args, **kw):
+            value_ = dic[event.type_]
+            dic.pop(event.type_)
+            print(dic)
+            try:
+                func(self, *args, **kw)
+            finally:
+                dic[event.type_] = value_
+                # print('add',event.type_)
+        return wrapper
+    return decorator
 
 
 def process(handlers, event):
+    # print('on')
     """处理事件"""
     # 检查是否存在对该事件进行监听的处理函数
     if event.type_ in handlers:
+        # print('in')
         # 若存在，则按顺序将事件传递给处理函数执行
         # [handler(event) for handler in self.__handlers[event.type_]]
-
         # 以上语句为Python列表解析方式的写法，对应的常规循环写法为：
         for handler in handlers[event.type_]:
             handler(event)
@@ -56,20 +81,18 @@ class EventEngine:
         """初始化事件引擎"""
         # 事件队列
         self.__queue = Queue()
-
-        # 事件引擎开关
-        self.__active = False
-
-        # 事件处理线程
-        self.__thread = Thread(target=self.__run)
-
         # 事件处理进程池
         self.__pool = Pool(3)
+        # 事件引擎开关
+        self.__active = False
+        # 事件处理线程
+        self.__thread = Thread(target=self.__run)
 
         # 这里的__handlers是一个字典，用来保存对应的事件调用关系
         # 其中每个键对应的值是一个列表，列表中保存了对该事件进行监听的函数功能
         self.__handlers = {}
 
+    @signevent(d)
     def __run(self):
         """引擎运行"""
         while self.__active:
@@ -132,3 +155,5 @@ class EventEngine:
     def put(self, event):
         """向事件队列中存入事件"""
         self.__queue.put(event)
+
+
