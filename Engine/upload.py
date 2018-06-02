@@ -52,7 +52,6 @@ class Upload(Enginebase):
                 logger.info('%s存在已更名' % f)
         return True
 
-
     @staticmethod
     def assemble_videopath(file_list):
         root = os.getcwd()
@@ -250,8 +249,6 @@ class Upload(Enginebase):
             logger.info('浏览器驱动退出')
 
     def start(self, event):
-        # value_ = self.dic[self.key]
-        # self.dic.pop(self.key)
         # try:
         url_ = event.dict_['url']
         if self.filter_file():
