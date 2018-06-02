@@ -3,6 +3,29 @@ from queue import Queue, Empty
 from threading import Thread
 from multiprocessing import Pool
 
+d = {
+    '1':'',
+    '2':'',
+    '3':'',
+    '4':'',
+}
+
+
+def signevent(dic):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self,*args, **kw):
+            value_ = dic[event.type_]
+            dic.pop(event.type_)
+            print(dic)
+            try:
+                func(self, *args, **kw)
+            finally:
+                dic[event.type_] = value_
+                # print('add',event.type_)
+        return wrapper
+    return decorator
+
 
 def process(handlers, event):
     """处理事件"""
