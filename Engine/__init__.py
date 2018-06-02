@@ -23,7 +23,7 @@ links_id = {
     '星际2PartinG跳跳胖丁神族天梯第一视角': {'Twitch': 'partingthebigboy'},
     '星际2Rogue脑虫虫族天梯第一视角': {'Twitch': 'roguejinair'}
     # 'test':{'Twitch':'roguejinair', 'Panda':'439695'},
-    # 'test1':{'Twitch':'rotterdam08', 'Panda':'1160340'}
+    # 'test1':{'Twitch':'alivekr1', 'Panda':'1160340'}
 }
 
 root_url = {
@@ -33,13 +33,11 @@ root_url = {
 
 
 class Enginebase(object):
-    def __init__(self, dictionary, key, suffix):
-        self.dic = dictionary
-        self.key = key
-        self.urlpath = self.dic[key]
+    def __init__(self, iterms, suffix):
+
+        self.key, self.urlpath = iterms
         self.url = self.join_url()
         self.suffix = suffix
-        # self.file_name = self.join_filename(suffix)
 
     def join_url(self):
         url = {}

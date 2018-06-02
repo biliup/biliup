@@ -15,8 +15,8 @@ from Engine import Enginebase, logger
 # logger = logging.getLogger('log01')
 
 class Upload(Enginebase):
-    def __init__(self, dic, key, suffix='*'):
-        Enginebase.__init__(self, dic, key, suffix)
+    def __init__(self, items, suffix='*'):
+        Enginebase.__init__(self, items, suffix)
 
     @property
     def file_list(self):
@@ -52,7 +52,6 @@ class Upload(Enginebase):
                 logger.info('%s存在已更名' % f)
         return True
 
-
     @staticmethod
     def assemble_videopath(file_list):
         root = os.getcwd()
@@ -78,8 +77,8 @@ class Upload(Enginebase):
     def upload(self, file_list, link):
 
         filename = 'bin/bilibili.cookie'
-        user_name = ''
-        pass_word = ''
+        user_name = 'y446970841@163.com'
+        pass_word = '1122000'
         title_ = self.file_name
         videopath = self.assemble_videopath(file_list)
 
@@ -250,12 +249,11 @@ class Upload(Enginebase):
             logger.info('浏览器驱动退出')
 
     def start(self, event):
-        value_ = self.dic[self.key]
-        self.dic.pop(self.key)
-        try:
-            url_ = event.dict_['url']
-            if self.filter_file():
-                logger.info('准备上传' + self.file_name)
-                self.upload(self.file_list, link=url_)
-        finally:
-            self.dic[self.key] = value_
+        # try:
+        url_ = event.dict_['url']
+        if self.filter_file():
+            logger.info('准备上传' + self.file_name)
+            self.upload(self.file_list, link=url_)
+        # finally:
+            # self.dic[self.key] = value_
+            # logger.info('退出上传')

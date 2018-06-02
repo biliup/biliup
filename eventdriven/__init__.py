@@ -1,5 +1,5 @@
 import time
-from eventdriven import *
+from eventdriven import eventType, event
 __all__ = ['event', 'eventType', 'Putevent']
 
 
@@ -13,5 +13,8 @@ class Putevent(object):
         while True:
             for type_ in self.dict.copy():
                 _event = eventType.Event(type_)
+                _event.dict_['dict'] = self.dict
                 self.eventManager.put(_event)
                 time.sleep(interval)
+
+
