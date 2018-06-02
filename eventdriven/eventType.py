@@ -16,10 +16,10 @@ class Batch(object):
         self.dict = dic
         self.queue = Queue
 
-    def get_downloader(self, dl_dict, key, queue):
+    def get_downloader(self, dl_dict, items, queue):
         obj = []
         for dl in dl_dict:
-            downloader = getattr(download, dl)(self.dict, key, queue)
+            downloader = getattr(download, dl)(items, queue)
             obj.append(downloader)
         return obj
 
@@ -37,14 +37,15 @@ class Batch(object):
             self.__eventManager.register(event_.type_, dl)
 
     def register(self):
-        for key in self.dict.copy():
+        for d in self.dict.copy().items():
+            key, value = d
             event_ = Event(type_=key)
 
-            dl = self.get_downloader(self.dict[key], key, self.queue)
+            dl = self.get_downloader(value, d, self.queue)
             handler = self.get_handler(dl)
             self.addhandler(event_, handler)
 
-            uploader = upload.Upload(self.dict, key)
+            uploader = upload.Upload(d)
             self.__eventManager.register(event_.type_, uploader.start)
 
 

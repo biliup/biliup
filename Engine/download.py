@@ -1,6 +1,5 @@
 import os
 import signal
-
 import requests
 import json
 import youtube_dl
@@ -15,8 +14,8 @@ headers = {
 
 class Downloadbase(Enginebase):
 
-    def __init__(self, dictionary, key, suffix, queue):
-        Enginebase.__init__(self, dictionary, key, suffix)
+    def __init__(self, items, suffix, queue):
+        Enginebase.__init__(self, items, suffix)
         self.queue = queue
 
     def check_stream(self):
@@ -26,8 +25,6 @@ class Downloadbase(Enginebase):
         except youtube_dl.utils.DownloadError:
             # logger.debug('%s未开播或读取下载信息失败' % self.key)
             print('%s未开播或读取下载信息失败' % self.key)
-            # logger.debug('准备补充上传'+key_)
-            # supplemental_upload(self.dic, pfile_name_, key_, url_, value_)
             return False
 
     def get_sinfo(self):
@@ -44,19 +41,7 @@ class Downloadbase(Enginebase):
             print(info_list)
         return info_list
 
-    def is_recursion(self, value_):
-        if value_ is None:
-
-            value_ = self.dic[self.key]
-            self.dic.pop(self.key)
-
-            value_ = value_
-        else:
-            logger.info('准备递归下载' + self.key)
-
-        return value_
-
-    def download(self, ydl_opts, event, value):
+    def download(self, ydl_opts, event):
         self.dl(ydl_opts)
 
     def dl(self, ydl_opts):
@@ -71,17 +56,14 @@ class Downloadbase(Enginebase):
 
     @staticmethod
     def rename(file_name):
-        # fname = os.path.splitext(file_name)[0]
-        # suffix = os.path.splitext(file_name)[1]
         try:
-            # logger.info('更名{0}'.format(pfile_name_+ '.part'))
             os.rename(file_name + '.part', file_name)
             logger.info('更名{0}为{1}'.format(file_name + '.part', file_name))
         except FileExistsError:
             os.rename(file_name + '.part', file_name)
             logger.info('FileExistsError:更名{0}为{1}'.format(file_name + '.part', file_name))
 
-    def run(self, event, value=None):
+    def run(self, event):
         file_name = self.file_name
         event.dict_['url'] = self.url[self.__class__.__name__]
         # if event.dict_.get('file_name'):
@@ -89,7 +71,6 @@ class Downloadbase(Enginebase):
         # else:
         #     event.dict_['file_name'] = [file_name]
         if self.check_stream():
-            value = self.is_recursion(value)
             ydl_opts = {
                 'outtmpl': file_name,
                 # 'format': '720p'
@@ -98,18 +79,18 @@ class Downloadbase(Enginebase):
             }
             try:
                 logger.info('开始下载%s：%s' % (self.__class__.__name__, self.key))
-                self.download(ydl_opts, event, value)
+                self.download(ydl_opts, event)
             except youtube_dl.utils.DownloadError:
                 self.rename(file_name)
-                self.run(event, value)
+                logger.info('准备递归下载')
+                self.run(event)
             finally:
-                self.dic[self.key] = value
                 logger.info('退出下载')
 
 
 class Twitch(Downloadbase):
-    def __init__(self, dictionary, key, queue, suffix='mp4'):
-        Downloadbase.__init__(self, dictionary=dictionary, key=key, suffix=suffix, queue=queue)
+    def __init__(self, items, queue, suffix='mp4'):
+        Downloadbase.__init__(self, items, suffix=suffix, queue=queue)
 
     def check_stream(self):
         try:
@@ -137,7 +118,7 @@ class Twitch(Downloadbase):
             return None
         return stream
 
-    def download(self, ydl_opts, event, value):
+    def download(self, ydl_opts, event):
         print('开始下载twitch', self.key)
         info_list = self.get_sinfo()
 
@@ -152,13 +133,10 @@ class Twitch(Downloadbase):
 
 
 class Panda(Downloadbase):
-    def __init__(self, dictionary, key, queue, suffix='flv'):
-        Downloadbase.__init__(self, dictionary=dictionary, key=key, suffix=suffix, queue=queue)
+    def __init__(self, items, queue, suffix='flv'):
+        Downloadbase.__init__(self, items, suffix=suffix, queue=queue)
 
-    def download(self, ydl_opts, event, value):
-        # file_name = ydl_opts['outtmpl']
-        # fname = os.path.splitext(file_name)[0]
-        # suffix = os.path.splitext(file_name)[1]
+    def download(self, ydl_opts, event):
 
         print('开始下载panda', self.key)
         signal.signal(signal.SIGTERM, work.signal_handler)
@@ -173,15 +151,12 @@ class Panda(Downloadbase):
 
         if self.check_stream():
             logger.info('实际未下载完成' + self.key)
-            # if os.path.isfile(file_name):
-            #     os.rename(file_name, fname + str(time.time())[:10] + suffix)
-            #     logger.info(
-            #         '存在{0}更名为{1}'.format(file_name, fname + '时间' + suffix))
-            self.run(event, value=value)
+            logger.info('准备递归下载')
+            self.run(event)
 
 
 if __name__ == '__main__':
     # get_twitch_stream('https://api.twitch.tv/kraken/streams/1160340','233')
     for k in links_id:
-        pd = Panda(dictionary=links_id, key=k, queue=1)
+        pd = Panda(k, queue=1)
         pd.check_stream()

@@ -2,31 +2,22 @@
 from queue import Queue, Empty
 from threading import Thread
 from multiprocessing import Pool
-
-d = {
-    '1':'',
-    '2':'',
-    '3':'',
-    '4':'',
-}
+from functools import wraps
 
 
-def signevent(dic):
-    def decorator(func):
-        @wraps(func)
-        def wrapper(self,*args, **kw):
-            value_ = dic[event.type_]
-            dic.pop(event.type_)
-            print(dic)
-            try:
-                func(self, *args, **kw)
-            finally:
-                dic[event.type_] = value_
-                # print('add',event.type_)
-        return wrapper
-    return decorator
+def signevent(func):
+    @wraps(func)
+    def wrapper(handlers, event):
+        value_ = event.dict_['dict'].pop(event.type_)
+        try:
+            func(handlers, event)
+        finally:
+            event.dict_['dict'][event.type_] = value_
+            # print('add',event.type_)
+    return wrapper
 
 
+@signevent
 def process(handlers, event):
     """处理事件"""
     # 检查是否存在对该事件进行监听的处理函数
