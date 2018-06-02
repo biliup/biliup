@@ -78,8 +78,8 @@ class Upload(Enginebase):
     def upload(self, file_list, link):
 
         filename = 'bin/bilibili.cookie'
-        user_name = 'y446970841@163.com'
-        pass_word = '1122000'
+        user_name = ''
+        pass_word = ''
         title_ = self.file_name
         videopath = self.assemble_videopath(file_list)
 
