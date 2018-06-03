@@ -1,19 +1,19 @@
 # 系统模块
 from queue import Queue, Empty
 from threading import Thread
-from multiprocessing import Pool
 from functools import wraps
 
 
 def signevent(func):
     @wraps(func)
     def wrapper(handlers, event):
-        value_ = event.dict_['dict'].pop(event.type_)
+        # value_ = event.dict_['dict'].pop(event.type_)
         try:
             func(handlers, event)
         finally:
-            event.dict_['dict'][event.type_] = value_
+            # event.dict_['dict'][event.type_] = value_
             # print('add',event.type_)
+            process.q.put(event)
     return wrapper
 
 
@@ -66,7 +66,7 @@ class EventEngine:
 
     """
 
-    def __init__(self):
+    def __init__(self, pool):
         """初始化事件引擎"""
         # 事件队列
         self.__queue = Queue()
@@ -78,7 +78,7 @@ class EventEngine:
         self.__thread = Thread(target=self.__run)
 
         # 事件处理进程池
-        self.__pool = Pool(3)
+        self.__pool = pool
 
         # 这里的__handlers是一个字典，用来保存对应的事件调用关系
         # 其中每个键对应的值是一个列表，列表中保存了对该事件进行监听的函数功能

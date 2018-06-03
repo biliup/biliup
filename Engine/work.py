@@ -41,8 +41,9 @@ def signal_handler(signum, frame):
 def kill_child_processes(parent_pid, file_name_, sig=signal.SIGINT):
     file_name_ = file_name_ + '.part'
     last_file_size = 0.0
+    logger.info('获取到{0}，{1}'.format(parent_pid, file_name_))
     while True:
-        time.sleep(15)
+        time.sleep(5)
         if os.path.isfile(file_name_):
             file_size = os.path.getsize(file_name_) / 1024 / 1024 / 1024
             file_sizes = os.path.getsize(file_name_)

@@ -1,11 +1,14 @@
 import os
 import signal
+from threading import Thread
+
 import requests
 import json
 import youtube_dl
 from Engine import Enginebase, logger, links_id, work
 
 # logger = logging.getLogger('log01')
+from Engine.work import kill_child_processes
 
 headers = {
     'client-id': 'jzkbprff40iqj646a697cyrvl0zt2m6'
@@ -14,9 +17,9 @@ headers = {
 
 class Downloadbase(Enginebase):
 
-    def __init__(self, items, suffix, queue):
+    def __init__(self, items, suffix='flv'):
         Enginebase.__init__(self, items, suffix)
-        self.queue = queue
+        # self.queue = queue
 
     def check_stream(self):
         try:
@@ -48,7 +51,9 @@ class Downloadbase(Enginebase):
         with youtube_dl.YoutubeDL(ydl_opts) as ydl:
             pid = os.getpid()
             fname = ydl_opts['outtmpl']
-            self.queue.put([pid, fname])
+            # self.queue.put([pid, fname])
+            t = Thread(target=kill_child_processes, args=(pid, fname))
+            t.start()
             ydl.download([self.url[self.__class__.__name__]])
 
         print('下载完成')
@@ -89,8 +94,8 @@ class Downloadbase(Enginebase):
 
 
 class Twitch(Downloadbase):
-    def __init__(self, items, queue, suffix='mp4'):
-        Downloadbase.__init__(self, items, suffix=suffix, queue=queue)
+    def __init__(self, items, suffix='mp4'):
+        Downloadbase.__init__(self, items, suffix=suffix )
 
     def check_stream(self):
         try:
@@ -133,8 +138,8 @@ class Twitch(Downloadbase):
 
 
 class Panda(Downloadbase):
-    def __init__(self, items, queue, suffix='flv'):
-        Downloadbase.__init__(self, items, suffix=suffix, queue=queue)
+    def __init__(self, items, suffix='flv'):
+        Downloadbase.__init__(self, items, suffix=suffix)
 
     def download(self, ydl_opts, event):
 
