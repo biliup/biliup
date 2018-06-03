@@ -1,8 +1,5 @@
 #!/usr/bin/python3
-from Engine import *
-from eventdriven import *
 from eventdriven.event import process
-
 
 def get_queue(q):
     process.q = q
@@ -11,13 +8,13 @@ def get_queue(q):
 if __name__ == '__main__':
     from multiprocessing.pool import Pool
     from multiprocessing import Queue
+    queue = Queue()
+    pool = Pool(3, initializer=get_queue, initargs=(queue,))
+    from Engine import *
+    from eventdriven import *
     import sys
 
     sys.excepthook = work.new_hook
-
-    queue = Queue()
-    pool = Pool(3, initializer=get_queue, initargs=(queue,))
-
     # 初始化事件管理器
     eventManager = event.EventEngine(pool)
 
