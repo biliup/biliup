@@ -1,14 +1,13 @@
 import os
 import signal
 from threading import Thread
-
 import requests
 import json
 import youtube_dl
 from Engine import Enginebase, logger, links_id, work
-
-# logger = logging.getLogger('log01')
 from Engine.work import kill_child_processes
+# logger = logging.getLogger('log01')
+
 
 headers = {
     'client-id': 'jzkbprff40iqj646a697cyrvl0zt2m6'
@@ -95,7 +94,7 @@ class Downloadbase(Enginebase):
 
 class Twitch(Downloadbase):
     def __init__(self, items, suffix='mp4'):
-        Downloadbase.__init__(self, items, suffix=suffix )
+        Downloadbase.__init__(self, items, suffix=suffix)
 
     def check_stream(self):
         try:
@@ -142,7 +141,6 @@ class Panda(Downloadbase):
         Downloadbase.__init__(self, items, suffix=suffix)
 
     def download(self, ydl_opts, event):
-
         print('开始下载panda', self.key)
         signal.signal(signal.SIGTERM, work.signal_handler)
         # info_list = self.get_sinfo()
@@ -163,5 +161,5 @@ class Panda(Downloadbase):
 if __name__ == '__main__':
     # get_twitch_stream('https://api.twitch.tv/kraken/streams/1160340','233')
     for k in links_id:
-        pd = Panda(k, queue=1)
+        pd = Panda(k, '')
         pd.check_stream()

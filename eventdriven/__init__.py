@@ -1,6 +1,9 @@
 import time
-from eventdriven import eventType, event
+from eventdriven.eventType import Event
+
 __all__ = ['event', 'eventType', 'Putevent']
+
+
 
 
 class Putevent(object):
@@ -12,12 +15,10 @@ class Putevent(object):
     def timer(self, interval=40):
         self.eventManager.start()
         for eventtype in self.dict:
-            __event = eventType.Event(eventtype)
+            __event = Event(eventtype)
             self.q.put(__event)
         while True:
             _event = self.q.get()
             self.eventManager.put(_event)
             # print(self.q.qsize())
             time.sleep(interval)
-
-

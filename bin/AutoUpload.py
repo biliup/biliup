@@ -18,6 +18,7 @@ def has_extension(fname_list, *extension):
         return True
     return False
 
+
 def _iter_module_files():
     """Iterator to module's source filename of sys.modules (built-in
     excluded).
@@ -88,7 +89,8 @@ class Autoreload(object):
                 return
             time.sleep(interval)
 
-    def _work_free(self):
+    @staticmethod
+    def _work_free():
         # wp = psutil.Process(self.p.pid)
         # more_children = wp.children(recursive=True)
         # children = wp.children()
@@ -213,12 +215,16 @@ class Daemon(object):
     def _run(self):
         """ run your fun"""
         while True:
-            args = [os.path.abspath(Bilibili.__file__)]
-            p = subprocess.Popen(args)
-            logger.info('成功启动进程')
-            ard = Autoreload(p)
-            ard.start_change_detector()
-            logger.info('重启进程')
+            try:
+                args = [os.path.abspath(Bilibili.__file__)]
+                p = subprocess.Popen(args)
+                logger.info('成功启动进程')
+                ard = Autoreload(p)
+                ard.start_change_detector()
+                logger.info('重启进程')
+            except:
+                logger.exception('err')
+                return
 
 
 if __name__ == '__main__':

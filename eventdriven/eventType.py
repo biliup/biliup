@@ -1,4 +1,4 @@
-from Engine import *
+from Engine import upload
 
 
 class Event:
@@ -16,8 +16,11 @@ class Batch(object):
         self.dict = dic
         # self.queue = Queue
 
-    def get_downloader(self, dl_dict, items):
+    @staticmethod
+    def get_downloader(dl_dict, items):
+        download = __import__('Engine.download', fromlist=['download'])
         obj = []
+        # from Engine import download
         for dl in dl_dict:
             downloader = getattr(download, dl)(items)
             obj.append(downloader)
@@ -37,6 +40,7 @@ class Batch(object):
             self.__eventManager.register(event_.type_, dl)
 
     def register(self):
+
         for d in self.dict.items():
             key, value = d
             event_ = Event(type_=key)
@@ -47,6 +51,3 @@ class Batch(object):
 
             uploader = upload.Upload(d)
             self.__eventManager.register(event_.type_, uploader.start)
-
-
-

@@ -257,5 +257,5 @@ class Upload(Enginebase):
             logger.info('准备上传' + self.file_name)
             self.upload(self.file_list, link=url_)
         # finally:
-            # self.dic[self.key] = value_
-            # logger.info('退出上传')
+        # self.dic[self.key] = value_
+        # logger.info('退出上传')
