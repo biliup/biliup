@@ -1,30 +1,25 @@
 #!/usr/bin/python3
-from eventdriven.event import process
-
-
-def get_queue(q):
-    process.q = q
-
-
+import sys
+from bin import main
+from bin.Daemon import Daemon
+from bin.Engine import work
 if __name__ == '__main__':
-    from multiprocessing.pool import Pool
-    from multiprocessing import Queue
-    queue = Queue()
-    pool = Pool(3, initializer=get_queue, initargs=(queue,))
-    from Engine import work, links_id
-    from eventdriven import event, eventType, Putevent
-    import sys
-
     sys.excepthook = work.new_hook
-    # 初始化事件管理器
-    eventManager = event.EventEngine(pool)
 
-    # 批量注册事件
-    eventType.Batch(eventManager, links_id).register()
-
-    # 定时推送事件
-    put = Putevent(eventManager, links_id, queue)
-    put.timer(interval=2)
-
-    # 关闭事件管理器
-    eventManager.stop()
+    daemon = Daemon('/home/chromeuser/bilibiliupload/watch_process.pid')
+    if len(sys.argv) == 2:
+        if 'start' == sys.argv[1]:
+            daemon.start()
+        elif 'stop' == sys.argv[1]:
+            daemon.stop()
+        elif 'restart' == sys.argv[1]:
+            daemon.restart()
+        else:
+            print('unknown command')
+            sys.exit(2)
+        sys.exit(0)
+    elif len(sys.argv) == 1:
+        main()
+    else:
+        print('usage: %s start|stop|restart' % sys.argv[0])
+        sys.exit(2)

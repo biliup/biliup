@@ -1,9 +1,7 @@
 import time
-from eventdriven.eventType import Event
+from bin.eventdriven.eventType import Event
 
 __all__ = ['event', 'eventType', 'Putevent']
-
-
 
 
 class Putevent(object):

@@ -116,28 +116,28 @@ class EventEngine:
         """注册事件处理函数监听"""
         # 尝试获取该事件类型对应的处理函数列表，若无则创建
         try:
-            handlerList = self.__handlers[type_]
+            handler_list = self.__handlers[type_]
         except KeyError:
-            handlerList = []
-            self.__handlers[type_] = handlerList
+            handler_list = []
+            self.__handlers[type_] = handler_list
 
         # 若要注册的处理器不在该事件的处理器列表中，则注册该事件
-        if handler not in handlerList:
-            handlerList.append(handler)
+        if handler not in handler_list:
+            handler_list.append(handler)
         # print(self.__handlers)
 
     def unregister(self, type_, handler):
         """注销事件处理函数监听"""
         # 尝试获取该事件类型对应的处理函数列表，若无则忽略该次注销请求
         try:
-            handlerList = self.__handlers[type_]
-            for method in handlerList:
+            handler_list = self.__handlers[type_]
+            for method in handler_list:
                 # 如果该函数存在于列表中，则移除
                 if handler.__qualname__ == method.__qualname__:
-                    handlerList.remove(method)
+                    handler_list.remove(method)
 
                 # 如果函数列表为空，则从引擎中移除该事件类型
-            if not handlerList:
+            if not handler_list:
                 del self.__handlers[type_]
 
         except KeyError:

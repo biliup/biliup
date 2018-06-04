@@ -1,4 +1,4 @@
-from Engine import upload
+from bin.Engine import upload
 
 
 class Event:
@@ -11,14 +11,14 @@ class Event:
 
 
 class Batch(object):
-    def __init__(self, eventManager, dic):
-        self.__eventManager = eventManager
+    def __init__(self, event_manager, dic):
+        self.__eventManager = event_manager
         self.dict = dic
         # self.queue = Queue
 
     @staticmethod
     def get_downloader(dl_dict, items):
-        download = __import__('Engine.download', fromlist=['download'])
+        download = __import__('bin.Engine.download', fromlist=['download'])
         obj = []
         # from Engine import download
         for dl in dl_dict:

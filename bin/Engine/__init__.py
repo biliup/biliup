@@ -1,8 +1,6 @@
 from datetime import datetime, timedelta, timezone
-import logging.config
 import time
-
-logging.config.fileConfig('Engine/configlog.ini', )
+import logging
 
 __all__ = ['download', 'upload', 'work', 'links_id', 'Enginebase', 'logger']
 
@@ -70,8 +68,8 @@ class Enginebase(object):
 
 
 if __name__ == '__main__':
-    for k in links_id.copy():
-        pd = Enginebase(dictionary=links_id, key=k, suffix='mp4')
+    # for k in links_id.copy():
+        # pd = Enginebase(dictionary=links_id, key=k, suffix='mp4')
         # pd.is_recursion(None)
         # if k == '星际2Scarlett噶姐虫族天梯第一视角':
         #     break
