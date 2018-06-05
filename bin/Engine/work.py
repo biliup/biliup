@@ -7,8 +7,6 @@ import psutil
 import logging
 from threading import Thread
 import youtube_dl
-# from Engine import logger
-
 logger = logging.getLogger('log01')
 
 

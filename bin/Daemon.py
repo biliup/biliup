@@ -1,15 +1,14 @@
+import logging
 from signal import SIGTERM
 import sys
 import os
 import time
 import atexit
 from bin import main
+logger = logging.getLogger('log01')
 
 
 # python模拟linux的守护进程
-from bin.AutoUpload import autoreload
-
-
 class Daemon(object):
     def __init__(self, pidfile, change_currentdirectory=False, stdin='/dev/null', stdout='/dev/null',
                  stderr='/dev/null'):
@@ -62,9 +61,11 @@ class Daemon(object):
 
     def delpid(self):
         os.remove(self.pidfile)
+        logger.info('进程结束')
 
     def start(self):
         # 检查pid文件是否存在以探测是否存在进程
+        logger.info('准备启动进程')
         try:
             pf = open(self.pidfile, 'r')
             pid = int(pf.read().strip())
@@ -119,20 +120,7 @@ class Daemon(object):
     @staticmethod
     def _run():
         """ run your fun"""
-        autoreload()
         main()
-
-        # while True:
-        #             try:
-        #                 args = [os.path.abspath(Bilibili.__file__),'restart']
-        #                 p = subprocess.Popen(args)
-        #                 logger.info('成功启动进程')
-        #                 ard = Autoreload(p)
-        #                 ard.start_change_detector()
-        #                 logger.info('重启进程')
-        #             except:
-        #                 logger.exception('err')
-        #                 return
 
 
 # if __name__ == '__main__':

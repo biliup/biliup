@@ -6,7 +6,6 @@ import json
 import youtube_dl
 from bin.Engine import Enginebase, logger, links_id, work
 from bin.Engine.work import kill_child_processes
-# logger = logging.getLogger('log01')
 
 
 headers = {

@@ -5,8 +5,6 @@ import time
 import subprocess
 import logging
 import psutil
-
-
 logger = logging.getLogger('log01')
 
 
@@ -33,11 +31,13 @@ def get_p_children(pid, _recursive=True):
 
 
 class Autoreload(object):
-    def __init__(self, interval=10):
+    def __init__(self, manager, target, interval=10):
         # self.p = _process  # 被监控子进程
         self.__thread = Thread(target=self.start_change_detector, args=(interval,))
-
+        self.manager = manager
+        self._target = target
     def __call__(self, *args, **kwargs):
+        # self.__thread.setDaemon(True)
         self.__thread.start()
 
     @staticmethod
@@ -82,6 +82,7 @@ class Autoreload(object):
         fname_list = os.listdir('.')
         if has_extension(fname_list, '.mp4', '.part', '.flv'):
             return False
+        logger.info('进程空闲')
         return True
 
     def _restart_subp(self, interval=10):
@@ -97,9 +98,14 @@ class Autoreload(object):
                 # for process in children:
                 #     # print(process)
                 #     process.terminate()
-                path = os.path.join(os.getcwd(), 'Bilibili.py')
-                args = [path, 'restart']
+                self._target.stop()
+                # 关闭事件管理器
+                self.manager.stop()
+                parent_path = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))  # 获得所在的目录的父级目
+                path = os.path.join(parent_path, 'Bilibili.py')
+                args = [path, 'start']
                 subprocess.Popen(args)
+                logger.info('重启')
                 # 同属于一个进程组所以不能用killpg
                 # os.killpg(os.getpgid(pid), SIGTERM)
                 return
@@ -116,6 +122,6 @@ class Autoreload(object):
             time.sleep(interval)
 
 
-def autoreload():
-    detector = Autoreload(10)
+def autoreload(manager, put, interval=10):
+    detector = Autoreload(manager, put, interval)
     detector()
