@@ -1,5 +1,5 @@
 import os
-from bin.AutoUpload import autoreload
+from bin.reload import autoreload
 from bin.Engine import links_id
 from multiprocessing.pool import Pool
 from multiprocessing import Queue
@@ -36,4 +36,3 @@ def main():
 
     event_manager.start()
     timer.start()
-
