@@ -1,5 +1,5 @@
-selenium==3.8.1
-psutil==5.4.3
 youtube_dl==2018.5.18
+psutil==5.4.3
+selenium==3.8.1
+Pillow==5.1.0
 Requests==2.18.4
-

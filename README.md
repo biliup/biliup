@@ -6,13 +6,13 @@
 
 ## Linux系统下使用方法：
 
-        Linux下启动成功后输入 `ps -A | grep .py` 查看进程
+        启动：    ./Bilibili.py start
 
-        启动：    ./AutoUpload.py start
+        退出：    ./Bilibili.py stop
 
-        退出：    ./AutoUpload.py stop
+        重启：    ./Bilibili.py restart
 
-        重启：    ./AutoUpload.py restart
+Linux下输入 `ps -A | grep .py` 查看进程是否启动成功
 ***
 
 ## Windows系统下使用方法：
