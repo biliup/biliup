@@ -16,7 +16,6 @@ def get_queue(q):
 
 
 def main():
-
     queue = Queue()
     pool = Pool(3, initializer=get_queue, initargs=(queue,))
 
