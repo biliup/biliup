@@ -48,3 +48,4 @@ configlog.ini
 .idea/vcs.xml
 *.pyc
 bin/user
+.idea/encodings.xml
