@@ -12,7 +12,7 @@
 
         重启：    ./Bilibili.py restart
 
-Linux下输入 `ps -A | grep .py` 查看进程是否启动成功
+ `ps -A | grep .py` 查看进程是否启动成功
 ***
 
 ## Windows系统下使用方法：
