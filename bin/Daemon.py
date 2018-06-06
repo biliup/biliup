@@ -65,7 +65,7 @@ class Daemon(object):
 
     def start(self):
         # 检查pid文件是否存在以探测是否存在进程
-        logger.info('准备启动进程')
+        logger.debug('准备启动进程')
         try:
             pf = open(self.pidfile, 'r')
             pid = int(pf.read().strip())

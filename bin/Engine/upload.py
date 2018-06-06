@@ -123,11 +123,6 @@ class Upload(Enginebase):
 
             print(driver.title)
 
-            cookie = driver.get_cookies()
-            #
-            with open(filename, "w") as f:
-                json.dump(cookie, f)
-
             # logger.info(driver.title)
 
             upload.send_keys(videopath)  # send_keys
@@ -135,7 +130,7 @@ class Upload(Enginebase):
 
             while True:
                 info = driver.find_elements_by_xpath(
-                    '//*[@id="item"]/div/div[2]/div[3]/div[1]/div[1]/div/div/div[2]/div[1]/div[3]')
+                    '//*[@id="app"]/div[2]/div[2]/div[2]/div[2]/div/div/div[2]/div[2]')
                 # print(info)
                 for t in info:
                     # print(t)
@@ -145,30 +140,39 @@ class Upload(Enginebase):
                     #     print('出问题啦')
                 time.sleep(10)
                 text = driver.find_elements_by_xpath(
-                    '//*[@id="item"]/div/div[2]/div[3]/div[1]/div[1]/div/div/div[2]/div[1]/div[2]')
+                    '//*[@id="app"]/div[2]/div[2]/div[2]/div[2]/div/div/div[2]/div[2]/span')
                 aggregate = set()
                 for s in text:
-                    print(s.text)
-                    aggregate.add(s.text)
+                    if s.text != '':
+                        aggregate.add(s.text)
+                        print(s.text)
                 # if text == 'Upload complete' or text == '上传完成':
                 #     break
 
                 if len(aggregate) == 1 and ('Upload complete' in aggregate or '上传完成' in aggregate):
                     break
-            logger.info('上传%s\n个数%s' % (title_, len(info)))
+            logger.info('上传%s个数%s' % (title_, len(info)))
 
             # js = "var q=document.getElementsByClassName('content-header-right')[0].scrollIntoView();"
             # driver.execute_script(js)
-            if self.is_element_exist(driver, r'//*[@id="app"]/div[3]/div/div/div/div/div'):
-                sb = driver.find_element_by_xpath(r'//*[@id="app"]/div[3]/div/div/div/div/div')
+            button = r'//*[@id="app"]/div[3]/div/div/div/div/div[2]'
+            if self.is_element_exist(driver, button):
+                sb = driver.find_element_by_xpath(button)
                 sb.click()
+                logger.info('点击')
+            time.sleep(2)
+            cookie = driver.get_cookies()
+            with open(filename, "w") as f:
+                json.dump(cookie, f)
+
             # 点击模板
-            driver.find_element_by_xpath(r'//*[@id="item"]/div/div[2]/div[3]/div[2]/div[1]/div[2]/div[1]').click()
-            driver.find_element_by_xpath(r'//*[@id="item"]/div/div[2]/div[3]/div[2]/div[1]/div[3]/div[1]').click()
+            driver.find_element_by_xpath(r'//*[@id="app"]/div[2]/div[2]/div[3]/div[1]/div[1]/div/p').click()
+            driver.find_element_by_xpath(
+                r'//*[@id="app"]/div[2]/div[2]/div[3]/div[1]/div[1]/div/div[2]/div[1]').click()
 
             # 输入转载来源
             Input = driver.find_element_by_xpath(
-                '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[1]/div[3]/div/div[1]/div/input')
+                 '//*[@id="app"]/div[2]/div[2]/div[3]/div[1]/div[4]/div[3]/div/div/input')
             Input.send_keys(link)
 
             # 选择分区
@@ -177,31 +181,31 @@ class Upload(Enginebase):
 
             # 稿件标题
             title = driver.find_element_by_xpath(
-                '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[3]/div[2]/div[1]/div/input')
+                '//*[@id="app"]/div[2]/div[2]/div[3]/div[1]/div[8]/div[2]/div/div/input')
             title.send_keys(Keys.CONTROL + 'a')
             title.send_keys(Keys.BACKSPACE)
             title.send_keys(title_)
 
             # js = "var q=document.getElementsByClassName('content-tag-list')[0].scrollIntoView();"
             # driver.execute_script(js)
-            time.sleep(3)
+            # time.sleep(3)
             # 输入相关游戏
             # driver.save_screenshot('bin/err.png')
             # print('截图')
-            text_1 = driver.find_element_by_xpath(
-                '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[5]/div/div/div[1]/div[2]/div/div/input')
+            # text_1 = driver.find_element_by_xpath(
+            #     '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[5]/div/div/div[1]/div[2]/div/div/input')
             # text_1 = driver.find_element_by_css_selector(r'#item > div > div.upload-step-two-container > div.step-2-col-right > div.content-container > div.content-body > div.content-normal-container > div.content-desc-container > div > div > div:nth-child(1) > div.content-input-box-container > div > div > input[type="text"]')
-            text_1.send_keys('星际争霸2')
+            # text_1.send_keys('星际争霸2')
             # 简介
             text_2 = driver.find_element_by_xpath(
-                '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[5]/div/div/div[2]/div[2]/div[1]/textarea')
-            text_2.send_keys('职业选手直播第一视角录像。\n欢迎加入星际交流群一起玩耍，群号：178459358')
+                '//*[@id="app"]/div[2]/div[2]/div[3]/div[1]/div[12]/div[2]/div/textarea')
+            text_2.send_keys('欢迎加入星际交流群一起玩耍，群号：178459358\n职业选手直播第一视角录像。')
 
-            driver.find_element_by_xpath('//*[@id="item"]/div/div[2]/div[3]/div[2]/div[3]/div[1]').click()
+            driver.find_element_by_xpath('//*[@id="app"]/div[2]/div[2]/div[3]/div[5]/span[1]').click()
             # screen_shot = driver.save_screenshot('bin/1.png')
             # print('截图')
-            time.sleep(5)
-            upload_success = driver.find_element_by_xpath(r'//*[@id="item"]/div/div[3]/p[1]').text
+            time.sleep(3)
+            upload_success = driver.find_element_by_xpath(r'//*[@id="app"]/div/div[3]/h3').text
             if upload_success == '':
                 driver.save_screenshot('err.png')
                 logger.info('稿件提交失败，截图记录')
