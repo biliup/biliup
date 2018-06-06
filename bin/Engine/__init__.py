@@ -41,10 +41,10 @@ class Enginebase(object):
         url = {}
         for n in self.urlpath:
             u = root_url[n] + self.urlpath[n]
+            url[n] = u
             cu = root_url.get(n + '_check')
             if cu:
                 url[n + '_check'] = cu + self.urlpath[n]
-            url[n] = u
         # print(url)
         return url
 
@@ -67,10 +67,15 @@ class Enginebase(object):
         return now
 
 
-if __name__ == '__main__':
+# if __name__ == '__main__':
     # for k in links_id.copy():
         # pd = Enginebase(dictionary=links_id, key=k, suffix='mp4')
         # pd.is_recursion(None)
         # if k == '星际2Scarlett噶姐虫族天梯第一视角':
         #     break
-    print(links_id)
+    # n = 'Twitch'
+    # cu = root_url.get(n + '_check')
+    # url = {}
+    # if cu:
+    #     url[n + '_check'] = cu
+    # print(url)

@@ -68,7 +68,7 @@ class Downloadbase(Enginebase):
 
     def run(self, event):
         file_name = self.file_name
-        event.dict_['url'] = self.url[self.__class__.__name__]
+        # event.dict_['url'] = self.url[self.__class__.__name__]
         # if event.dict_.get('file_name'):
         #     event.dict_['file_name'] += [file_name]
         # else:

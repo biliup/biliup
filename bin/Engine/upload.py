@@ -252,7 +252,8 @@ class Upload(Enginebase):
 
     def start(self, event):
         # try:
-        url_ = event.dict_['url']
+        # url_ = event.dict_['url']
+        url_ = list(self.url.values())[0]
         if self.filter_file():
             logger.info('准备上传' + self.file_name)
             self.upload(self.file_list, link=url_)
