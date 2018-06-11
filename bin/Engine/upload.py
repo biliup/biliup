@@ -127,6 +127,12 @@ class Upload(Enginebase):
 
             upload.send_keys(videopath)  # send_keys
             logger.info('开始上传' + title_)
+            time.sleep(2)
+            button = r'//*[@id="app"]/div[3]/div/div/div/div/div[2]'
+            if self.is_element_exist(driver, button):
+                sb = driver.find_element_by_xpath(button)
+                sb.click()
+                logger.debug('点击')
 
             while True:
                 info = driver.find_elements_by_xpath(
@@ -155,12 +161,7 @@ class Upload(Enginebase):
 
             # js = "var q=document.getElementsByClassName('content-header-right')[0].scrollIntoView();"
             # driver.execute_script(js)
-            button = r'//*[@id="app"]/div[3]/div/div/div/div/div[2]'
-            if self.is_element_exist(driver, button):
-                sb = driver.find_element_by_xpath(button)
-                sb.click()
-                logger.info('点击')
-            time.sleep(2)
+
             cookie = driver.get_cookies()
             with open(filename, "w") as f:
                 json.dump(cookie, f)

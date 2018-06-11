@@ -18,7 +18,8 @@ class Batch(object):
 
     @staticmethod
     def get_downloader(dl_dict, items):
-        download = __import__('bin.Engine.download', fromlist=['download'])
+        engine = __import__('bin.Engine', fromlist=['download'])
+        download = engine.download
         obj = []
         # from Engine import download
         for dl in dl_dict:

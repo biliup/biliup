@@ -61,7 +61,7 @@ class Daemon(object):
 
     def delpid(self):
         os.remove(self.pidfile)
-        logger.info('进程结束')
+        logger.debug('进程结束')
 
     def start(self):
         # 检查pid文件是否存在以探测是否存在进程
