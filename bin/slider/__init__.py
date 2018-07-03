@@ -119,7 +119,7 @@ class slider_cracker(object):
         """
         ActionChains(self.driver).click_and_hold(slider).perform()
         for x in track:
-            ActionChains(self.driver).move_by_offset(xoffset=x, yoffset=random.uniform(-2, 2)).perform()
+            ActionChains(self.driver).move_by_offset(xoffset=x, yoffset=random.uniform(-5, 2)).perform()
         time.sleep(0.5)
         ActionChains(self.driver).release().perform()
 
@@ -132,9 +132,12 @@ class slider_cracker(object):
         knob_element = WebDriverWait(self.driver, 50).until(EC.element_to_be_clickable((By.XPATH,r'//*[@id="gc-box"]/div/div[3]/div[2]')))
         self.move_to_gap(knob_element,track)
 
+        # fn = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'result0.png')
+        # fn1 = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'result1.png')
         # time.sleep(0.02)
-        # screen_shot = self.driver.save_screenshot('bin/result0.png')
-        # time.sleep(5)
-        # screen_shot = self.driver.save_screenshot('bin/result1.png')
+        # screen_shot = self.driver.save_screenshot(fn)
+        # time.sleep(2)
+        # screen_shot = self.driver.save_screenshot(fn1)
+
 
 

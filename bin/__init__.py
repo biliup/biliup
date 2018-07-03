@@ -31,7 +31,7 @@ def main():
     timer = Timer(func=put_event, args=(event_manager, queue), interval=40)
 
     # 模块更新自动重启
-    autoreload(event_manager, timer)
+    autoreload(event_manager, timer, interval=10)
 
     event_manager.start()
     timer.start()

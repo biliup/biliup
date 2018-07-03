@@ -128,9 +128,11 @@ class Upload(Enginebase):
             upload.send_keys(videopath)  # send_keys
             logger.info('开始上传' + title_)
             time.sleep(2)
-            button = r'//*[@id="app"]/div[3]/div/div/div/div/div[2]'
+            button = r'//*[@id="app"]/div[3]/div/div/div/div/div[1]'
             if self.is_element_exist(driver, button):
                 sb = driver.find_element_by_xpath(button)
+                sb.click()
+                sb.click()
                 sb.click()
                 logger.debug('点击')
 
@@ -200,7 +202,7 @@ class Upload(Enginebase):
             # 简介
             text_2 = driver.find_element_by_xpath(
                 '//*[@id="app"]/div[2]/div[2]/div[3]/div[1]/div[12]/div[2]/div/textarea')
-            text_2.send_keys('欢迎加入星际交流群一起玩耍，群号：178459358\n职业选手直播第一视角录像。')
+            text_2.send_keys('欢迎加入星际交流群一起玩耍，群号：178459358\n职业选手直播第一视角录像。\n顺便推广一下自己的网站http://web-form.me/是一个帮助收集统计信息的网站，感谢支持！')
 
             driver.find_element_by_xpath('//*[@id="app"]/div[2]/div[2]/div[3]/div[5]/span[1]').click()
             # screen_shot = driver.save_screenshot('bin/1.png')
@@ -236,10 +238,14 @@ class Upload(Enginebase):
             password = driver.find_element_by_xpath('//*[@id="login-passwd"]')
             password.send_keys(pass_word)
             # logger.info('第四步')
-            cracker = slider_cracker(driver)
-
-            cracker.crack()
-
+            try:
+                cracker = slider_cracker(driver)
+                cracker.crack()
+                # driver.find_element_by_xpath('//*[@id="login-app"]/div/div/div[3]/div[3]/div/div/ul/li[5]/a[1]').click()
+                # time.sleep(5)
+                # screen_shot = driver.save_screenshot('result2.png')
+            except:
+                logger.exception('出错')
             time.sleep(5)
             if driver.title == '投稿 - 哔哩哔哩弹幕视频网 - ( ゜- ゜)つロ 乾杯~ - bilibili':
                 cookie = driver.get_cookies()

@@ -117,7 +117,7 @@ class Autoreload(object):
         mtimes = {}
         while 1:
             if self._is_any_file_changed(mtimes):
-                self._restart_subp()
+                self._restart_subp(interval)
                 return
             time.sleep(interval)
 
