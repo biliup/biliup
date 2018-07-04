@@ -51,3 +51,4 @@ bin/user
 .idea/encodings.xml
 *.png
 *.flv
+*.part

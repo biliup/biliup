@@ -52,7 +52,7 @@ class Enginebase(object):
             url[n] = u
             cu = root_url.get(n + '_check')
             if cu:
-                url[n + '_check'] = cu + self.urlpath[n]
+                url[n + '_check'] = cu + str(self.urlpath[n])
         # print(url)
         return url
 

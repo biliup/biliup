@@ -1,5 +1,8 @@
+import hashlib
 import os
 import signal
+import subprocess
+import time
 from threading import Thread
 import requests
 import json
@@ -155,6 +158,55 @@ class Panda(Downloadbase):
             logger.info('实际未下载完成' + self.key)
             logger.info('准备递归下载')
             self.run(event)
+
+
+class Douyu(Downloadbase):
+    def __init__(self, items, suffix='flv'):
+        Downloadbase.__init__(self, items, suffix=suffix)
+
+    def check_stream(self):
+
+        res = requests.get(self.url['Douyu_check'])
+        res.close()
+        s = res.json()
+        print(self.key)
+        status = s['data']['room_status']
+        if status==2:
+            return False
+        else:
+            return True
+
+    def dl(self, ydl_opts):
+        room_id = ydl_opts['room_id']
+        api_url = "http://www.douyutv.com/api/v1/"
+        args = "room/%s?aid=wp&client_sys=wp&time=%d" % (room_id, int(time.time()))
+        auth_md5 = (args + "zNzMV1y4EMxOHS6I5WKm").encode("utf-8")
+        auth_str = hashlib.md5(auth_md5).hexdigest()
+        json_request_url = "%s%s&auth=%s" % (api_url, args, auth_str)
+        # print(json_request_url)
+        content = requests.get(json_request_url, headers=headers)
+        # content = get_content(json_request_url, headers)
+        # print(content.text)
+        json_content = json.loads(content.text)
+        data = json_content['data']
+        server_status = json_content.get('error', 0)
+        if server_status is not 0:
+            raise ValueError("Server returned error:%s" % server_status)
+
+        title = data.get('room_name')
+        print(title)
+        show_status = data.get('show_status')
+        if show_status is not "1":
+            raise ValueError("The live stream is not online! (Errno:%s)" % server_status)
+
+        real_url = data.get('rtmp_url') + '/' + data.get('rtmp_live')
+        Args = ['ffmpeg', '-i', real_url, '-c','copy', '-f', 'flv', ydl_opts['outtmpl']+'.part']
+        subprocess.call(Args)
+        return real_url
+
+    def download(self, ydl_opts, event):
+        ydl_opts['room_id'] = self.urlpath['Douyu']
+        self.dl(ydl_opts)
 
 
 if __name__ == '__main__':
