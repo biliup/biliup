@@ -49,3 +49,5 @@ configlog.ini
 *.pyc
 bin/user
 .idea/encodings.xml
+*.png
+*.flv

@@ -1,5 +1,6 @@
-youtube_dl==2018.5.18
-psutil==5.4.3
 selenium==3.8.1
-Pillow==5.1.0
-Requests==2.18.4
+psutil==5.4.3
+youtube_dl==2018.7.4
+Pillow==5.2.0
+Requests==2.19.1
+PyYAML==3.12

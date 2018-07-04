@@ -1,34 +1,42 @@
 from datetime import datetime, timedelta, timezone
 import time
 import logging
+import yaml
 
 __all__ = ['download', 'upload', 'work', 'links_id', 'Enginebase', 'logger']
 
 logger = logging.getLogger('log01')
-links_id = {
-    '星际2Innovation吕布卫星人族天梯第一视角': {'Twitch': 'innovation_s2', 'Panda': '1160340'},
-    '星际2soO输本虫族天梯第一视角': {'Twitch': 'sc2soo', 'Panda': '1150595'},
-    '星际2sOs狗哥神族天梯第一视角': {'Panda': '1160930'},
-    '星际2Stats拔本神族天梯第一视角': {'Twitch': 'kimdaeyeob3'},
-    '星际2Dark暗本虫族天梯第一视角': {'Twitch': 'qkrfuddn0'},
-    '星际2Scarlett噶姐虫族天梯第一视角': {'Twitch': 'scarlettm'},
-    '星际2GuMiho砸本人族天梯第一视角': {'Twitch': 'gumiho'},
-    '星际2Maru人族天梯第一视角': {'Twitch': 'maru072'},
-    '星际2TY全教主全太阳人族天梯第一视角': {'Twitch': 'sc2tyty'},
-    '星际2ByuN武圣人族天梯第一视角': {'Twitch': 'byunprime'},
-    '星际2小herO神族天梯第一视角': {'Twitch': 'dmadkr0818'},
-    '星际2Zest神族天梯第一视角': {'Twitch': 'sc2_zest'},
-    '星际2PartinG跳跳胖丁神族天梯第一视角': {'Twitch': 'partingthebigboy'},
-    '星际2Rogue脑虫虫族天梯第一视角': {'Twitch': 'roguejinair'}
-    # 'test':{'Twitch':'roguejinair', 'Panda':'439695'},
-    # 'test1':{'Twitch':'alivekr1', 'Panda':'1160340'}
-}
+# links_id = {
+#     '星际2Innovation吕布卫星人族天梯第一视角': {'Twitch': 'innovation_s2', 'Panda': '1160340'},
+#     '星际2soO输本虫族天梯第一视角': {'Twitch': 'sc2soo', 'Panda': '1150595'},
+#     '星际2sOs狗哥神族天梯第一视角': {'Panda': '1160930'},
+#     '星际2Stats拔本神族天梯第一视角': {'Twitch': 'kimdaeyeob3'},
+#     '星际2Dark暗本虫族天梯第一视角': {'Twitch': 'qkrfuddn0'},
+#     '星际2Scarlett噶姐虫族天梯第一视角': {'Twitch': 'scarlettm'},
+#     '星际2GuMiho砸本人族天梯第一视角': {'Twitch': 'gumiho'},
+#     '星际2Maru人族天梯第一视角': {'Twitch': 'maru072'},
+#     '星际2TY全教主全太阳人族天梯第一视角': {'Twitch': 'sc2tyty'},
+#     '星际2ByuN武圣人族天梯第一视角': {'Twitch': 'byunprime'},
+#     '星际2小herO神族天梯第一视角': {'Twitch': 'dmadkr0818'},
+#     '星际2Zest神族天梯第一视角': {'Twitch': 'sc2_zest'},
+#     '星际2PartinG跳跳胖丁神族天梯第一视角': {'Twitch': 'partingthebigboy'},
+#     '星际2Rogue脑虫虫族天梯第一视角': {'Twitch': 'roguejinair'}
+#     # 'test':{'Twitch':'roguejinair', 'Panda':'439695'},
+#     # 'test1':{'Twitch':'alivekr1', 'Panda':'1160340'}
+# }
 
-root_url = {
-    'Twitch': 'https://www.twitch.tv/',
-    'Panda': 'https://www.panda.tv/',
-    'Twitch_check': 'https://api.twitch.tv/kraken/streams/'}
+# root_url = {
+#     'Twitch': 'https://www.twitch.tv/',
+#     'Panda': 'https://www.panda.tv/',
+#     'Twitch_check': 'https://api.twitch.tv/kraken/streams/'}
+with open('bin/config.yaml', encoding='utf-8') as stream:
+    config = yaml.load(stream)
 
+root_url = config['root_url']
+links_id = config['links_id']
+user_name = config['user_name']
+pass_word = config['pass_word']
+chromedrive_path = config['chromedrive_path']
 
 class Enginebase(object):
     def __init__(self, iterms, suffix):
@@ -40,7 +48,7 @@ class Enginebase(object):
     def join_url(self):
         url = {}
         for n in self.urlpath:
-            u = root_url[n] + self.urlpath[n]
+            u = root_url[n] + str(self.urlpath[n])
             url[n] = u
             cu = root_url.get(n + '_check')
             if cu:

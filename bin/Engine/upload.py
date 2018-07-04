@@ -8,7 +8,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.keys import Keys
-from bin.Engine import Enginebase, logger
+from bin.Engine import Enginebase, logger, user_name, pass_word, chromedrive_path
 
 
 # 10800 18000 4110
@@ -84,8 +84,8 @@ class Upload(Enginebase):
         options = webdriver.ChromeOptions()
 
         options.add_argument('headless')
-        driver = webdriver.Chrome(executable_path='/usr/bin/chromedriver', chrome_options=options,
-                                  service_log_path=service_log_path)
+        driver = webdriver.Chrome(executable_path=chromedrive_path, chrome_options=options)
+                                  # service_log_path=service_log_path)
         try:
             # service_log_path = "{}/chromedriver.log".format('/home')
             # service_log_path = "{}\\chromedriver.log".format('D:\\bilibiliupload')
@@ -106,13 +106,13 @@ class Upload(Enginebase):
             # driver = webdriver.Chrome(executable_path=r'D:\bilibiliupload\chromedriver.exe',service_log_path=service_log_path)
             driver.get("https://www.bilibili.com")
             # driver.delete_all_cookies()
+            if os.path.isfile(filename):
+                with open(filename) as f:
+                    new_cookie = json.load(f)
 
-            with open(filename) as f:
-                new_cookie = json.load(f)
-
-            for cookie in new_cookie:
-                # print(cookie)
-                driver.add_cookie(cookie)
+                for cookie in new_cookie:
+                    # print(cookie)
+                    driver.add_cookie(cookie)
 
             driver.get("https://member.bilibili.com/video/upload.html")
 
@@ -223,10 +223,6 @@ class Upload(Enginebase):
         # except selenium.common.exceptions.TimeoutException:
         #     logger.exception('超时')
         except selenium.common.exceptions.TimeoutException:
-            with open('bin/user') as f:
-                u = json.load(f)
-            user_name = u['user_name']
-            pass_word = u['pass_word']
             logger.info('准备更新cookie')
             # screen_shot = driver.save_screenshot('bin/1.png')
             WebDriverWait(driver, 10).until(
