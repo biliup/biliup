@@ -37,6 +37,7 @@ links_id:
 #    test:
 #        Twitch: roguejinair
 #        Panda: 439695
+#        Douyu: 3484
 #    test1:
 #        Twitch: alivekr1
 #        Panda: 1160340
@@ -44,4 +45,6 @@ links_id:
 root_url:
     Twitch: https://www.twitch.tv/
     Panda: https://www.panda.tv/
+    Douyu: https://www.douyu.com/
     Twitch_check: https://api.twitch.tv/kraken/streams/
+    Douyu_check: http://open.douyucdn.cn/api/RoomApi/room/
