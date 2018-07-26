@@ -1,5 +1,5 @@
 selenium==3.8.1
-psutil==5.4.3
+psutil==5.4.6
 youtube_dl==2018.7.4
 Pillow==5.2.0
 Requests==2.19.1

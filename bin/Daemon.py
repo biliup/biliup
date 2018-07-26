@@ -61,11 +61,11 @@ class Daemon(object):
 
     def delpid(self):
         os.remove(self.pidfile)
-        logger.debug('进程结束')
+        # logger.debug('进程结束')
 
     def start(self):
         # 检查pid文件是否存在以探测是否存在进程
-        logger.debug('准备启动进程')
+        # logger.debug('准备启动进程')
         try:
             pf = open(self.pidfile, 'r')
             pid = int(pf.read().strip())

@@ -39,7 +39,7 @@ class Upload(Enginebase):
             return False
         for r in file_list:
             file_size = os.path.getsize(r) / 1024 / 1024 / 1024
-            if file_size <= 0.1:
+            if file_size <= 0.02:
                 os.remove(r)
                 logger.info('过滤删除-' + r)
         file_list = self.file_list
@@ -128,7 +128,7 @@ class Upload(Enginebase):
             upload.send_keys(videopath)  # send_keys
             logger.info('开始上传' + title_)
             time.sleep(2)
-            button = r'//*[@id="app"]/div[3]/div/div/div/div/div[1]'
+            button = r'//*[@id="app"]/div[4]/div/div/div/div/div[1]'
             if self.is_element_exist(driver, button):
                 sb = driver.find_element_by_xpath(button)
                 sb.click()
@@ -138,7 +138,7 @@ class Upload(Enginebase):
 
             while True:
                 info = driver.find_elements_by_xpath(
-                    '//*[@id="app"]/div[2]/div[2]/div[2]/div[2]/div/div/div[2]/div[2]')
+                    '//*[@id="app"]/div[3]/div[2]/div[2]/div[2]/div/div/div[2]/div[2]')
                 # print(info)
                 for t in info:
                     # print(t)
@@ -148,7 +148,7 @@ class Upload(Enginebase):
                     #     print('出问题啦')
                 time.sleep(10)
                 text = driver.find_elements_by_xpath(
-                    '//*[@id="app"]/div[2]/div[2]/div[2]/div[2]/div/div/div[2]/div[2]/span')
+                    '//*[@id="app"]/div[3]/div[2]/div[2]/div[2]/div/div/div[2]/div[2]/span')
                 aggregate = set()
                 for s in text:
                     if s.text != '':
@@ -169,13 +169,13 @@ class Upload(Enginebase):
                 json.dump(cookie, f)
 
             # 点击模板
-            driver.find_element_by_xpath(r'//*[@id="app"]/div[2]/div[2]/div[3]/div[1]/div[1]/div/p').click()
+            driver.find_element_by_xpath(r'//*[@id="app"]/div[3]/div[2]/div[3]/div[1]/div[1]/div/p').click()
             driver.find_element_by_xpath(
-                r'//*[@id="app"]/div[2]/div[2]/div[3]/div[1]/div[1]/div/div[2]/div[1]').click()
+                r'//*[@id="app"]/div[3]/div[2]/div[3]/div[1]/div[1]/div/div[2]/div[1]').click()
 
             # 输入转载来源
             Input = driver.find_element_by_xpath(
-                 '//*[@id="app"]/div[2]/div[2]/div[3]/div[1]/div[4]/div[3]/div/div/input')
+                 '//*[@id="app"]/div[3]/div[2]/div[3]/div[1]/div[4]/div[3]/div/div/input')
             Input.send_keys(link)
 
             # 选择分区
@@ -184,7 +184,7 @@ class Upload(Enginebase):
 
             # 稿件标题
             title = driver.find_element_by_xpath(
-                '//*[@id="app"]/div[2]/div[2]/div[3]/div[1]/div[8]/div[2]/div/div/input')
+                '//*[@id="app"]/div[3]/div[2]/div[3]/div[1]/div[8]/div[2]/div/div/input')
             title.send_keys(Keys.CONTROL + 'a')
             title.send_keys(Keys.BACKSPACE)
             title.send_keys(title_)
@@ -201,10 +201,10 @@ class Upload(Enginebase):
             # text_1.send_keys('星际争霸2')
             # 简介
             text_2 = driver.find_element_by_xpath(
-                '//*[@id="app"]/div[2]/div[2]/div[3]/div[1]/div[12]/div[2]/div/textarea')
-            text_2.send_keys('欢迎加入星际交流群一起玩耍，群号：178459358\n职业选手直播第一视角录像。\n顺便推广一下自己的网站http://web-form.me/是一个帮助收集统计信息的网站，感谢支持！')
+                '//*[@id="app"]/div[3]/div[2]/div[3]/div[1]/div[12]/div[2]/div/textarea')
+            text_2.send_keys('职业选手直播第一视角录像。\n顺便推广一下自己的网站http://web-form.me/是一个帮助收集统计信息的网站，感谢支持！')
 
-            driver.find_element_by_xpath('//*[@id="app"]/div[2]/div[2]/div[3]/div[5]/span[1]').click()
+            driver.find_element_by_xpath('//*[@id="app"]/div[3]/div[2]/div[3]/div[5]/span[1]').click()
             # screen_shot = driver.save_screenshot('bin/1.png')
             # print('截图')
             time.sleep(3)
@@ -251,8 +251,8 @@ class Upload(Enginebase):
                 logger.info('更新cookie成功')
             else:
                 logger.info('更新cookie失败')
-        except:
-            logger.exception('未知错误')
+        # except:
+        #     logger.exception('未知错误')
         finally:
             driver.quit()
             logger.info('浏览器驱动退出')

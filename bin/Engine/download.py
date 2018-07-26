@@ -57,8 +57,6 @@ class Downloadbase(Enginebase):
             t.start()
             ydl.download([self.url[self.__class__.__name__]])
 
-        print('下载完成')
-        logger.info('下载完成' + self.key)
 
     @staticmethod
     def rename(file_name):
@@ -86,6 +84,8 @@ class Downloadbase(Enginebase):
             try:
                 logger.info('开始下载%s：%s' % (self.__class__.__name__, self.key))
                 self.download(ydl_opts, event)
+                logger.info('下载完成' + self.key)
+
             except youtube_dl.utils.DownloadError:
                 self.rename(file_name)
                 logger.info('准备递归下载')
@@ -128,7 +128,7 @@ class Twitch(Downloadbase):
         print('开始下载twitch', self.key)
         info_list = self.get_sinfo()
 
-        if self.key in ['星际2ByuN武圣人族天梯第一视角', '星际2Innovation吕布卫星人族天梯第一视角', '星际2Maru人族天梯第一视角']:
+        if self.key in ['星际2ByuN武圣人族天梯第一视角', '星际2INnoVation吕布卫星人族天梯第一视角', '星际2Maru人族天梯第一视角']:
             pass
         elif '720p' in info_list:
             ydl_opts['format'] = '720p'
@@ -153,7 +153,6 @@ class Panda(Downloadbase):
         #     ydl_opts['format'] = 'HD-m3u8'
 
         self.dl(ydl_opts)
-
         if self.check_stream():
             logger.info('实际未下载完成' + self.key)
             logger.info('准备递归下载')

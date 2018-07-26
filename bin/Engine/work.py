@@ -40,7 +40,7 @@ def kill_child_processes(parent_pid, file_name_, sig=signal.SIGINT):
     last_file_size = 0.0
     logger.info('获取到{0}，{1}'.format(parent_pid, file_name_))
     while True:
-        time.sleep(5)
+        time.sleep(10)
         if os.path.isfile(file_name_):
             file_size = os.path.getsize(file_name_) / 1024 / 1024 / 1024
             file_sizes = os.path.getsize(file_name_)
