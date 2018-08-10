@@ -36,6 +36,7 @@ class Autoreload(object):
         self.__thread = Thread(target=self.start_change_detector, args=(interval,))
         self.manager = manager
         self._target = target
+
     def __call__(self, *args, **kwargs):
         # self.__thread.setDaemon(True)
         self.__thread.start()
@@ -56,6 +57,7 @@ class Autoreload(object):
         """Return 1 if there is any source file of sys.modules changed,
         otherwise 0. mtimes is dict to store the last modify time for
         comparing."""
+
         for filename in self._iter_module_files():
             try:
                 mtime = os.stat(filename).st_mtime
@@ -122,6 +124,6 @@ class Autoreload(object):
             time.sleep(interval)
 
 
-def autoreload(manager, put, interval=10):
-    detector = Autoreload(manager, put, interval)
+def autoreload(manager, timer, interval=10):
+    detector = Autoreload(manager, timer, interval)
     detector()

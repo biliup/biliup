@@ -1,12 +1,12 @@
 #!/usr/bin/python3
 import sys
-from bin import main
-from bin.Daemon import Daemon
-from bin.Engine import work
+from Engine import work, main
+from common.Daemon import Daemon
+
 if __name__ == '__main__':
     sys.excepthook = work.new_hook
 
-    daemon = Daemon('/home/chromeuser/bilibiliupload/watch_process.pid')
+    daemon = Daemon('watch_process.pid')
     if len(sys.argv) == 2:
         if 'start' == sys.argv[1]:
             daemon.start()
