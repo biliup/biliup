@@ -19,12 +19,12 @@ class Download(object):
     @property
     def file_name(self):
         now = Engine.work.time_now()
-        if self.suffix == 'mp4':
-            file_name = '%s%s%s.mp4' % (self.fname, now, str(time.time())[:10])
-        elif self.suffix == 'flv':
-            file_name = '%s%s%s.flv' % (self.fname, now, str(time.time())[:10])
-        else:
-            raise ValueError
+        # if self.suffix == 'mp4':
+        file_name = '%s%s%s.%s' % (self.fname, now, str(time.time())[:10], self.suffix)
+        # elif self.suffix == 'flv':
+        #     file_name = '%s%s%s.flv' % (self.fname, now, str(time.time())[:10])
+        # else:
+        #     raise ValueError
         return file_name
 
     def check_stream(self):
@@ -97,6 +97,7 @@ class Download(object):
                 self.run(event)
             finally:
                 logger.info('退出下载')
+        return
 
 
 class BatchCheckBase(object):

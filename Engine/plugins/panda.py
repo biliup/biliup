@@ -35,6 +35,7 @@ class BatchCheck(BatchCheckBase):
             return
         url = API_ROOMS + ','.join(self.usr_list)
         res = requests.get(url)
+        res.close()
         for i in res.json()['data']:
             if type(i) == str:
                 status = res.json()['data'][i]['stream_status']
@@ -52,7 +53,7 @@ class BatchCheck(BatchCheckBase):
                     live.append(i['id'])
                 else:
                     print('err')
-        res.close()
+
         return map(lambda x: self.usr_dict.get(x.lower()), live)
 
 

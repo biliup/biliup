@@ -26,8 +26,11 @@ class CheckAll(object):
                 res = batch.check()
                 if res:
                     live += res
-            except requests.exceptions.ConnectionError:
-                logger.exception(batch.__class__.__module__)
+            except requests.exceptions.SSLError as sslerr:
+                logger.info(batch.__class__.__module__+',requests.exceptions.SSLError:'+str(sslerr))
+            except requests.exceptions.ConnectionError as connerr:
+                # logger.exception(batch.__class__.__module__)
+                logger.info(batch.__class__.__module__ + ',requests.exceptions.SSLError:' + str(connerr))
 
             # except:
             #     logger.exception()
