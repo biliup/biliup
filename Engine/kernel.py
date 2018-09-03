@@ -141,7 +141,7 @@ def free_upload(event_manager, urls):
     # urls, = urls.args
     # print(urlstatus)
     # try:
-    print(urls)
+    # print(urls)
     for title, v in links_id.items():
         # names = list(map(find_name, urls))
         url = v[0]
