@@ -1,8 +1,7 @@
-user_name : y446970841@163.com
-pass_word : 1122000
+user_name:
+pass_word:
 
-chromedrive_path: /usr/bin/chromedriver
-#chromedrive_path: D:\\bilibiliupload\\chromedriver.exe
+chromedrive_path: D:\\bilibiliupload\\chromedriver.exe
 
 links_id:
     星际2INnoVation吕布卫星人族天梯第一视角:
@@ -38,16 +37,3 @@ links_id:
         - https://www.twitch.tv/roguejinair
     星际2Classic经典神皇神族第一视角:
         - https://www.twitch.tv/kimclassic
-#    test:
-#        - https://www.twitch.tv/roguejinair
-#        - https://www.panda.tv/2068335
-#    测试:
-#        - https://www.douyu.com/scboy
-#        - https://www.panda.tv/15109
-
-# root_url:
-#     https://www.twitch.tv/https://www.twitch.tv/
-#     https://www.panda.tv/https://www.panda.tv/
-#     Douyu: https://www.douyu.com/
-#     Twitch_check: https://api.twitch.tv/kraken/streams/
-#     Douyu_check: http://open.douyucdn.cn/api/RoomApi/room/
