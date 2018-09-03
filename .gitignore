@@ -12,7 +12,7 @@
 config.yaml
 chromedriver.exe
 chromedriver.log
-configlog.ini
+/configlog.ini
 cookie.py
 download.py
 ds_update.log
