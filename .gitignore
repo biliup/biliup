@@ -52,3 +52,4 @@ bin/user
 *.png
 *.flv
 *.part
+config.yaml
