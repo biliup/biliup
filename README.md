@@ -4,8 +4,8 @@
 
 使用需要修改文件名**config(demo).yaml** ➡ **config.yaml**
 
-需要python3
-
+>语言：python3
+>
 >## Linux系统下使用方法：
 >
 >        启动：    ./Bilibili.py start
