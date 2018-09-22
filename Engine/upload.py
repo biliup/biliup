@@ -1,14 +1,14 @@
 import json
 import os
 from selenium import webdriver
-import selenium
+import selenium.common
 import time
 import Engine
 import Engine.kernel
 from Engine.slider import slider_cracker
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.common.keys import Keys
 from common import logger
 
@@ -89,12 +89,12 @@ class Upload(object):
         title_ = self.file_name
         videopath = self.assemble_videopath(file_list)
 
-        service_log_path = "{}/chromedriver.log".format('/home')
+        # service_log_path = "{}/chromedriver.log".format('/home')
         options = webdriver.ChromeOptions()
 
         options.add_argument('headless')
         driver = webdriver.Chrome(executable_path=Engine.kernel.chromedrive_path, chrome_options=options)
-                                  # service_log_path=service_log_path)
+        # service_log_path=service_log_path)
         try:
             # service_log_path = "{}/chromedriver.log".format('/home')
             # service_log_path = "{}\\chromedriver.log".format('D:\\bilibiliupload')
@@ -112,7 +112,8 @@ class Upload(object):
 
             # driver = webdriver.Chrome(executable_path='/usr/bin/chromedriver', chrome_options=options,
             #                           service_log_path=service_log_path)
-            # driver = webdriver.Chrome(executable_path=r'D:\bilibiliupload\chromedriver.exe',service_log_path=service_log_path)
+            # driver = webdriver.Chrome(executable_path=r'D:\bilibiliupload\chromedriver.exe',\
+            # service_log_path=service_log_path)
             driver.get("https://www.bilibili.com")
             # driver.delete_all_cookies()
             if os.path.isfile(filename):
@@ -127,7 +128,7 @@ class Upload(object):
 
             # print(driver.title)
             WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((By.NAME, 'file')))
+                ec.presence_of_element_located((By.NAME, 'file')))
             upload = driver.find_element_by_name('file')
 
             print(driver.title)
@@ -137,7 +138,7 @@ class Upload(object):
             upload.send_keys(videopath)  # send_keys
             logger.info('开始上传' + title_)
             time.sleep(2)
-            button = r'//*[@id="app"]/div[4]/div/div/div/div/div[1]'
+            button = r'//*[@class="new-feature-guide-v2-container"]/div/div/div/div/div[1]'
             if self.is_element_exist(driver, button):
                 sb = driver.find_element_by_xpath(button)
                 sb.click()
@@ -146,9 +147,10 @@ class Upload(object):
                 logger.debug('点击')
 
             while True:
-                info = driver.find_elements_by_xpath(
-                    '//*[@id="app"]/div[3]/div[2]/div[2]/div[2]/div/div/div[2]/div[2]')
+                # info = driver.find_elements_by_xpath(
+                #     '//*[@id="app"]/div[3]/div[2]/div[2]/div[2]/div/div/div[2]/div[2]')
                 # print(info)
+                info = driver.find_elements_by_class_name(r'item-upload-info')
                 for t in info:
                     # print(t)
                     if t.text != '':
@@ -156,8 +158,9 @@ class Upload(object):
                     # else:
                     #     print('出问题啦')
                 time.sleep(10)
-                text = driver.find_elements_by_xpath(
-                    '//*[@id="app"]/div[3]/div[2]/div[2]/div[2]/div/div/div[2]/div[2]/span')
+                # text = driver.find_elements_by_xpath(
+                #     '//*[@id="app"]/div[3]/div[2]/div[2]/div[2]/div/div/div[2]/div[2]/span')
+                text = driver.find_elements_by_xpath(r'//*[@class="item-upload-info"]/span')
                 aggregate = set()
                 for s in text:
                     if s.text != '':
@@ -178,14 +181,14 @@ class Upload(object):
                 json.dump(cookie, f)
 
             # 点击模板
-            driver.find_element_by_xpath(r'//*[@id="app"]/div[3]/div[2]/div[3]/div[1]/div[1]/div/p').click()
-            driver.find_element_by_xpath(
-                r'//*[@id="app"]/div[3]/div[2]/div[3]/div[1]/div[1]/div/div[2]/div[1]').click()
-
+            driver.find_element_by_xpath(r'//*[@class="normal-title-wrp"]/div/p').click()
+            driver.find_element_by_class_name(r'template-list-small-item').click()
+            # driver.find_element_by_xpath(
+            #     r'//*[@id="app"]/div[3]/div[2]/div[3]/div[1]/div[1]/div/div[2]/div[1]').click()
             # 输入转载来源
-            Input = driver.find_element_by_xpath(
-                 '//*[@id="app"]/div[3]/div[2]/div[3]/div[1]/div[4]/div[3]/div/div/input')
-            Input.send_keys(link)
+            input_o = driver.find_element_by_xpath(
+                 '//*[@class="upload-v2-container"]/div[2]/div[3]/div[1]/div[4]/div[3]/div/div/input')
+            input_o.send_keys(link)
 
             # 选择分区
             # driver.find_element_by_xpath(r'//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[2]/div[2]/div[1]/div[3]/div').click()
@@ -193,7 +196,7 @@ class Upload(object):
 
             # 稿件标题
             title = driver.find_element_by_xpath(
-                '//*[@id="app"]/div[3]/div[2]/div[3]/div[1]/div[8]/div[2]/div/div/input')
+                '//*[@class="upload-v2-container"]/div[2]/div[3]/div[1]/div[8]/div[2]/div/div/input')
             title.send_keys(Keys.CONTROL + 'a')
             title.send_keys(Keys.BACKSPACE)
             title.send_keys(title_)
@@ -206,14 +209,13 @@ class Upload(object):
             # print('截图')
             # text_1 = driver.find_element_by_xpath(
             #     '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[5]/div/div/div[1]/div[2]/div/div/input')
-            # text_1 = driver.find_element_by_css_selector(r'#item > div > div.upload-step-two-container > div.step-2-col-right > div.content-container > div.content-body > div.content-normal-container > div.content-desc-container > div > div > div:nth-child(1) > div.content-input-box-container > div > div > input[type="text"]')
             # text_1.send_keys('星际争霸2')
             # 简介
             text_2 = driver.find_element_by_xpath(
-                '//*[@id="app"]/div[3]/div[2]/div[3]/div[1]/div[12]/div[2]/div/textarea')
+                '//*[@class="upload-v2-container"]/div[2]/div[3]/div[1]/div[12]/div[2]/div/textarea')
             text_2.send_keys('职业选手直播第一视角录像。\n顺便推广一下自己的网站http://web-form.me/')
 
-            driver.find_element_by_xpath('//*[@id="app"]/div[3]/div[2]/div[3]/div[5]/span[1]').click()
+            driver.find_element_by_xpath('//*[@class="upload-v2-container"]/div[2]/div[3]/div[5]/span[1]').click()
             # screen_shot = driver.save_screenshot('bin/1.png')
             # print('截图')
             time.sleep(3)
@@ -235,7 +237,7 @@ class Upload(object):
             logger.info('准备更新cookie')
             # screen_shot = driver.save_screenshot('bin/1.png')
             WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, r'//*[@id="login-username"]')))
+                ec.presence_of_element_located((By.XPATH, r'//*[@id="login-username"]')))
 
             username = driver.find_element_by_xpath(r'//*[@id="login-username"]')
             username.send_keys(Engine.kernel.user_name)
@@ -243,14 +245,11 @@ class Upload(object):
             password = driver.find_element_by_xpath('//*[@id="login-passwd"]')
             password.send_keys(Engine.kernel.pass_word)
             # logger.info('第四步')
-            try:
-                cracker = slider_cracker(driver)
-                cracker.crack()
-                # driver.find_element_by_xpath('//*[@id="login-app"]/div/div/div[3]/div[3]/div/div/ul/li[5]/a[1]').click()
-                # time.sleep(5)
-                # screen_shot = driver.save_screenshot('result2.png')
-            except:
-                logger.exception('出错')
+            # try:
+            cracker = slider_cracker(driver)
+            cracker.crack()
+            # except:
+            #     logger.exception('出错')
             time.sleep(5)
             if driver.title == '投稿 - 哔哩哔哩弹幕视频网 - ( ゜- ゜)つロ 乾杯~ - bilibili':
                 cookie = driver.get_cookies()
@@ -266,7 +265,7 @@ class Upload(object):
             driver.quit()
             logger.info('浏览器驱动退出')
 
-    def start(self, event=None):
+    def start(self):
         # try:
         # url_ = event.dict_['url']
         # url_ = list(self.url.values())[0]
