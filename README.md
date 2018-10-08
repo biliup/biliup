@@ -18,4 +18,4 @@
 >## Windows系统下使用方法：
 >
 >        启动：    python Bilibili.py
->语言：python3
+>python3
