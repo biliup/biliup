@@ -3,7 +3,6 @@ import re
 import time
 from threading import Thread
 import youtube_dl
-import Engine.work
 from Engine.work import kill_child_processes
 from common import logger
 
@@ -18,9 +17,9 @@ class Download(object):
 
     @property
     def file_name(self):
-        now = Engine.work.time_now()
+        # now = Engine.work.time_now()
         # if self.suffix == 'mp4':
-        file_name = '%s%s%s.%s' % (self.fname, now, str(time.time())[:10], self.suffix)
+        file_name = '%s%s.%s' % (self.fname, str(time.time())[:10], self.suffix)
         # elif self.suffix == 'flv':
         #     file_name = '%s%s%s.flv' % (self.fname, now, str(time.time())[:10])
         # else:

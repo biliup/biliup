@@ -1,6 +1,8 @@
 import time
 import requests
 import yaml
+
+import Engine
 from Engine.downloader import Extractor, download
 from Engine.upload import Upload
 from common import logger
@@ -117,11 +119,12 @@ def modify(event_manager, live_m):
 
 def process(name, url, mod):
     try:
+        now = Engine.work.time_now()
         if mod == 'dl':
             download(name, url)
-            Upload(name, url).start()
+            Upload(name).start(url, now)
         elif mod == 'up':
-            Upload(name, url).start()
+            Upload(name).start(url, now)
         else:
             return url
     finally:
@@ -146,7 +149,7 @@ def free_upload(event_manager, urls):
         # names = list(map(find_name, urls))
         url = v[0]
         # if title not in names and url_status[url] == 0 and Upload(title, url).filter_file():
-        if free(v) and Upload(title, url).filter_file():
+        if free(v) and Upload(title).filter_file():
             event_d = Event('download_upload')
             event_d.args = (title, url, 'up')
 

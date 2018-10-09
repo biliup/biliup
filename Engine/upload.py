@@ -17,15 +17,16 @@ from common import logger
 
 
 class Upload(object):
-    def __init__(self, title, url):
+    def __init__(self, title):
         self.title = title
-        self.url = url
+        # self.date = date
+        # self.url = url
 
-    @property
-    def file_name(self):
-        now = Engine.work.time_now()
-        file_name = '%s%s' % (now, self.title)
-        return file_name
+    # @property
+    # def file_name(self):
+    #     now = Engine.work.time_now()
+    #     file_name = '%s%s' % (now, self.title)
+    #     return file_name
 
     @property
     def file_list(self):
@@ -83,10 +84,10 @@ class Upload(object):
             print("找到%s个元素：%s" % (len(s), xpath))
             return False
 
-    def upload(self, file_list, link):
+    def upload(self, title_, file_list, link):
 
         filename = 'Engine/bilibili.cookie'
-        title_ = self.file_name
+        # title_ = self.r_title
         videopath = self.assemble_videopath(file_list)
 
         # service_log_path = "{}/chromedriver.log".format('/home')
@@ -213,7 +214,9 @@ class Upload(object):
             # 简介
             text_2 = driver.find_element_by_xpath(
                 '//*[@class="upload-v2-container"]/div[2]/div[3]/div[1]/div[12]/div[2]/div/textarea')
-            text_2.send_keys('职业选手直播第一视角录像。\n顺便推广一下自己的网站http://web-form.me/')
+            text_2.send_keys('职业选手直播第一视角录像。这个自动录制上传的小程序开源在Github：'
+                             'http://t.cn/RgapTpf(或者在Github搜索ForgQi)交流群：837362626'
+                             '\n顺便推广一下自己的网站http://web-form.me/')
 
             driver.find_element_by_xpath('//*[@class="upload-v2-container"]/div[2]/div[3]/div[5]/span[1]').click()
             # screen_shot = driver.save_screenshot('bin/1.png')
@@ -265,13 +268,16 @@ class Upload(object):
             driver.quit()
             logger.info('浏览器驱动退出')
 
-    def start(self):
+    def start(self, url, date=None):
         # try:
         # url_ = event.dict_['url']
         # url_ = list(self.url.values())[0]
+        title = self.title
+        if date:
+            title = str(date) + self.title
         if self.filter_file():
-            logger.info('准备上传' + self.file_name)
-            self.upload(self.file_list, link=self.url)
+            logger.info('准备上传' + title)
+            self.upload(title, self.file_list, link=url)
         # finally:
         # self.dic[self.key] = value_
         # logger.info('退出上传')
