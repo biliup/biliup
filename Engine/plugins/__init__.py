@@ -7,7 +7,7 @@ from Engine.work import kill_child_processes
 from common import logger
 
 
-class Download(object):
+class Download:
     url_list = None
 
     def __init__(self, fname, url, suffix='flv'):
@@ -116,3 +116,7 @@ class BatchCheckBase(object):
 
     def check(self):
         pass
+
+
+class General:
+    pass

@@ -28,21 +28,31 @@ class CheckAll(object):
                 res = batch.check()
                 if res:
                     live += res
+            except requests.exceptions.ReadTimeout as timeout:
+                logger.error(batch.__class__.__module__ + ',ReadTimeout:' + str(timeout))
             except requests.exceptions.SSLError as sslerr:
-                logger.info(batch.__class__.__module__+',requests.exceptions.SSLError:'+str(sslerr))
+                logger.error(batch.__class__.__module__+',SSLError:'+str(sslerr))
             except requests.exceptions.ConnectionError as connerr:
-                # logger.exception(batch.__class__.__module__)
-                logger.info(batch.__class__.__module__ + ',requests.exceptions.SSLError:' + str(connerr))
-
-            # except:
-            #     logger.exception()
+                logger.error(batch.__class__.__module__ + ',ConnectionError:' + str(connerr))
+            except requests.exceptions.RequestException:
+                logger.exception(batch.__class__.__module__)
 
         for one in onebyone:
             for url in one.__plugin__.url_list:
-                if one.__plugin__('检测' + url, url).check_stream():
-                    live += [url]
+                try:
+                    if one.__plugin__('检测' + url, url).check_stream():
+                        live += [url]
+                except requests.exceptions.ReadTimeout as timeout:
+                    logger.error(one.__plugin__.__module__ + ',ReadTimeout:' + str(timeout))
+                except requests.exceptions.ConnectTimeout as timeout:
+                    logger.error(one.__plugin__.__module__ + ',ConnectTimeout:' + str(timeout))
+                except requests.exceptions.ConnectionError as connerr:
+                    logger.error(one.__plugin__.__module__ + ',ConnectionError:' + str(connerr))
+                except requests.exceptions.RequestException:
+                    logger.exception(one.__plugin__.__module__)
+
                 if url != one.__plugin__.url_list[-1]:
-                    print('歇息会')
+                    logger.debug('歇息会')
                     time.sleep(15)
         return live
 
@@ -114,7 +124,7 @@ def modify(event_manager, live_m):
         url_status.update(live_d)
         # url_status = {**url_status_base, **live_d}
     else:
-        print('无人直播')
+        logger.debug('无人直播')
 
 
 def process(name, url, mod):
@@ -144,7 +154,7 @@ def free_upload(event_manager, urls):
     # urls, = urls.args
     # print(urlstatus)
     # try:
-    # print(urls)
+    logger.debug(urls)
     for title, v in links_id.items():
         # names = list(map(find_name, urls))
         url = v[0]
@@ -187,6 +197,3 @@ def getmany():
 
 
 Urls, url_status, url_status_base = getmany()
-
-if __name__ == '__main__':
-    print(list(map(lambda x: x, [])))

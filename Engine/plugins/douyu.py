@@ -7,6 +7,7 @@ import requests
 from Engine import work
 from Engine.plugins import Download
 from Engine.plugins.twitch import headers
+from common import logger
 
 VALID_URL_BASE = r'(?:https?://)?(?:(?:www|m)\.)?douyu\.com'
 _API_URL = "http://www.douyutv.com/api/v1/"
@@ -15,10 +16,10 @@ _API_URL = "http://www.douyutv.com/api/v1/"
 class Douyu(Download):
     def check_stream(self):
         check_url = re.sub(r'.*douyu.com', 'http://open.douyucdn.cn/api/RoomApi/room', self.url)
-        res = requests.get(check_url)
+        res = requests.get(check_url, timeout=5)
         res.close()
         s = res.json()
-        print(self.fname)
+        logger.debug(self.fname)
         status = s['data']['room_status']
         if status == '2':
             return False
@@ -27,7 +28,7 @@ class Douyu(Download):
 
     def dl(self, ydl_opts):
         url = re.sub(r'.*douyu.com', 'https://m.douyu.com/room', self.url)
-        res = requests.get(url)
+        res = requests.get(url, timeout=5)
         res.close()
         html = res.text
         room_id_patt = r'"rid"\s*:\s*(\d+),'
@@ -39,7 +40,7 @@ class Douyu(Download):
         auth_str = hashlib.md5(auth_md5).hexdigest()
         json_request_url = "%s%s&auth=%s" % (_API_URL, args, auth_str)
         # print(json_request_url)
-        content = requests.get(json_request_url, headers=headers)
+        content = requests.get(json_request_url, headers=headers, timeout=5)
         content.close()
         # content = get_content(json_request_url, headers)
         # print(content.text)
@@ -50,7 +51,7 @@ class Douyu(Download):
             raise ValueError("Server returned error:%s" % server_status)
 
         title = data.get('room_name')
-        print(title)
+        logger.debug(title)
         show_status = data.get('show_status')
         if show_status is not "1":
             raise ValueError("The live stream is not online! (Errno:%s)" % server_status)

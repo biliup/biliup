@@ -34,7 +34,7 @@ class BatchCheck(BatchCheckBase):
         if not self.usr_list:
             return
         url = API_ROOMS + ','.join(self.usr_list)
-        res = requests.get(url)
+        res = requests.get(url, timeout=5)
         res.close()
         for i in res.json()['data']:
             if type(i) == str:

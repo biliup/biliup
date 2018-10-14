@@ -70,3 +70,4 @@ def download(fname, url):
         if re.match(plugin.VALID_URL_BASE, url):
             plugin.__plugin__(fname, url).run()
             return
+    # 都不满足调用General，待补充
