@@ -47,7 +47,6 @@ class DownloadBase:
             #     self.rename(file_name)
             #     logger.info('准备递归下载')
             #     self.run()
-
             finally:
                 logger.info('退出下载')
         return
@@ -256,8 +255,9 @@ class SDownload(DownloadBase):
                             self.flag = True
                             return 1
                     return 0
-        finally:
+        except OSError:
             self.rename(self.ydl_opts['outtmpl'])
+            raise
 
 
 class FFmpegdl(DownloadBase):
