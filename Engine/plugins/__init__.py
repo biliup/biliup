@@ -30,29 +30,30 @@ class DownloadBase:
         file_name = self.file_name
         self.ydl_opts = {'outtmpl': file_name}
         if self.check_stream():
-            # try:
-            logger.info('开始下载%s：%s' % (self.__class__.__name__, self.fname))
-            pid = os.getpid()
-            t = Thread(target=self.kill_child_processes, args=(pid, file_name))
-            t.start()
-            retval = self.download()
-            if retval != 0:
+            try:
+                logger.info('开始下载%s：%s' % (self.__class__.__name__, self.fname))
+                pid = os.getpid()
+                t = Thread(target=self.kill_child_processes, args=(pid, file_name))
+                t.start()
+                retval = self.download()
                 self.rename(file_name)
-                logger.info('准备递归下载')
-                self.run()
-            else:
-                logger.info('下载完成' + self.fname)
+                if retval != 0:
+                    logger.info('准备递归下载')
+                    self.run()
+                else:
+                    logger.info('下载完成' + self.fname)
 
             # except youtube_dl.utils.DownloadError:
             #     self.rename(file_name)
             #     logger.info('准备递归下载')
             #     self.run()
-            # finally:
-            #     logger.info('退出下载')
+
+            finally:
+                logger.info('退出下载')
         return
 
-    def kill_child_processes(self, parent_pid, file_name_):
-        file_name_ = file_name_ + '.part'
+    def kill_child_processes(self, parent_pid, file_name):
+        file_name_ = file_name + '.part'
         last_file_size = 0.0
         logger.info('获取到{0}，{1}'.format(parent_pid, file_name_))
         while True:
@@ -68,14 +69,15 @@ class DownloadBase:
                     children = parent.children(recursive=True)
                     if len(children) == 0:
                         # parent.send_signal(sig)
-                        self.flag = False
+                        # self.flag = False
+                        logger.info('下载卡死' + self.__class__.__name__ + file_name_)
                         # parent.terminate()
                     else:
                         for process in children:
                             # print(process)
                             # process.send_signal(sig)
                             process.terminate()
-                    logger.info('下载卡死' + self.__class__.__name__ + file_name_)
+                        logger.info('下载卡死' + self.__class__.__name__ + file_name_)
                     # time.sleep(1)
                     if os.path.isfile(file_name_):
                         logger.info('卡死下载进程可能未成功退出')
@@ -117,6 +119,8 @@ class DownloadBase:
         try:
             os.rename(file_name + '.part', file_name)
             logger.info('更名{0}为{1}'.format(file_name + '.part', file_name))
+        except FileNotFoundError:
+            logger.info('FileNotFoundError')
         except FileExistsError:
             os.rename(file_name + '.part', file_name)
             logger.info('FileExistsError:更名{0}为{1}'.format(file_name + '.part', file_name))
@@ -252,9 +256,8 @@ class SDownload(DownloadBase):
                             self.flag = True
                             return 1
                     return 0
-        except streamlink.StreamlinkError:
-            logger.exception()
-            return 0
+        finally:
+            self.rename(self.ydl_opts['outtmpl'])
 
 
 class FFmpegdl(DownloadBase):
