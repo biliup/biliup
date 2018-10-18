@@ -2,6 +2,7 @@ import pkgutil
 import importlib
 import re
 import Engine.plugins.douyu
+from Engine.plugins import general
 from common.DesignPattern import singleton
 
 
@@ -49,17 +50,22 @@ class Extractor(object):
         for url in urls:
             if re.match(pattern, url):
                 sorted_url.append(url)
+                urls.remove(url)
         return sorted_url
 
     def sorted_checker(self, urls, signature='API_ROOMS'):
+        curls = urls.copy()
         batches = []
         onebyone = []
         for plugin in self.plugins:
-            plugin.__plugin__.url_list = self.suit_url(plugin.VALID_URL_BASE, urls)
+            plugin.__plugin__.url_list = self.suit_url(plugin.VALID_URL_BASE, curls)
             if hasattr(plugin, signature):
                 batches.append(plugin.BatchCheck(plugin.__plugin__.url_list))
             else:
                 onebyone.append(plugin)
+        general.__plugin__.url_list = curls
+        onebyone.append(general)
+        # onebyone.append(__import__('Engine.plugins.general', fromlist=['general',]))
         return batches, onebyone
 
 
@@ -67,7 +73,8 @@ def download(fname, url):
     extractor = Extractor()
     plugins = extractor.get_plugins()
     for plugin in plugins:
-        if re.match(plugin.VALID_URL_BASE, url):
-            plugin.__plugin__(fname, url).run()
-            return
-    # 都不满足调用General，待补充
+        if hasattr(plugin, "VALID_URL_BASE"):
+            if re.match(plugin.VALID_URL_BASE, url):
+                plugin.__plugin__(fname, url).run()
+                return
+    general.__plugin__(fname, url).run()

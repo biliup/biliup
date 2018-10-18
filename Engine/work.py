@@ -1,12 +1,5 @@
 import re
-import signal
 from datetime import datetime, timezone, timedelta
-import time
-import os
-import errno
-import psutil
-from threading import Thread
-import youtube_dl
 from common import logger
 
 
@@ -33,102 +26,6 @@ def match1(text, *patterns):
             if match:
                 ret.append(match.group(1))
         return ret
-
-
-def wait_child(signum, frame):
-    logger.debug('receive SIGCHLD')
-    try:
-        while True:
-            # -1 表示任意子进程
-            # os.WNOHANG 表示如果没有可用的需要 wait 退出状态的子进程，立即返回不阻塞
-            cpid, status = os.waitpid(-1, os.WNOHANG)
-            if cpid == 0:
-                logger.debug('no child process was immediately available')
-                break
-            exitcode = status >> 8
-            logger.debug('child process %s exit with exitcode %s', cpid, exitcode)
-    except OSError as e:
-        if e.errno == errno.ECHILD:
-            logger.error('current process has no existing unwaited-for child processes.')
-        else:
-            raise
-    logger.debug('handle SIGCHLD end')
-
-
-def signal_handler(signum, frame):
-    logger.info('收到Terminate信号')
-    raise youtube_dl.utils.DownloadError(signum)
-
-
-def kill_child_processes(parent_pid, file_name_, sig=signal.SIGINT):
-    file_name_ = file_name_ + '.part'
-    last_file_size = 0.0
-    logger.info('获取到{0}，{1}'.format(parent_pid, file_name_))
-    while True:
-        time.sleep(15)
-        if os.path.isfile(file_name_):
-            file_size = os.path.getsize(file_name_) / 1024 / 1024 / 1024
-            file_sizes = os.path.getsize(file_name_)
-            if float(file_sizes) == last_file_size:
-                try:
-                    parent = psutil.Process(parent_pid)
-                except psutil.NoSuchProcess:
-                    return
-                children = parent.children(recursive=True)
-                if len(children) == 0:
-                    # parent.send_signal(sig)
-                    parent.terminate()
-                    logger.info('下载卡死pandaTV' + file_name_)
-                else:
-                    for process in children:
-                        # print(process)
-                        # process.send_signal(sig)
-                        process.terminate()
-                    logger.info('下载卡死' + file_name_)
-                # time.sleep(1)
-                if os.path.isfile(file_name_):
-                    logger.info('卡死下载进程可能未成功退出')
-                    continue
-                else:
-                    logger.info('卡死下载进程成功退出')
-                    break
-
-            last_file_size = file_sizes
-
-            if float(file_size) >= 2.5:
-                try:
-                    parent = psutil.Process(parent_pid)
-                except psutil.NoSuchProcess:
-                    return
-                children = parent.children(recursive=True)
-                if len(children) == 0:
-                    # parent.send_signal(sig)
-                    parent.terminate()
-                    logger.info('分段下载pandatv' + file_name_)
-                else:
-                    for process in children:
-                        # print(process)
-                        # process.send_signal(sig)
-                        process.terminate()
-                    print('分段下载')
-                    logger.info('分段下载' + file_name_)
-                break
-        else:
-            logger.info('监控<%s>线程退出' % file_name_)
-            return
-            # os._exit(0)
-    logger.info('退出监控<%s>线程' % file_name_)
-
-
-def monitoring(q):
-    # signal.signal(signal.SIGCHLD, wait_child)
-    while True:
-        # print('开始监测')
-        pid, file_name = q.get()
-        time.sleep(5)
-        logger.info('获取到{0}，{1}'.format(pid, file_name))
-        t = Thread(target=kill_child_processes, args=(pid, file_name))
-        t.start()
 
 
 def new_hook(t, v, tb):

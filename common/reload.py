@@ -105,7 +105,10 @@ class Autoreload(object):
                 self.manager.stop()
                 parent_path = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))  # 获得所在的目录的父级目
                 path = os.path.join(parent_path, 'Bilibili.py')
-                args = [path, 'start']
+                if sys.platform == 'win32':
+                    args = ["python", path]
+                else:
+                    args = [path, 'start']
                 subprocess.Popen(args)
                 logger.info('重启')
                 # 同属于一个进程组所以不能用killpg

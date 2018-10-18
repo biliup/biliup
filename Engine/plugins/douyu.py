@@ -1,11 +1,10 @@
 import hashlib
 import json
 import re
-import subprocess
 import time
 import requests
 from Engine import work
-from Engine.plugins import Download
+from Engine.plugins import FFmpegdl
 from Engine.plugins.twitch import headers
 from common import logger
 
@@ -13,20 +12,22 @@ VALID_URL_BASE = r'(?:https?://)?(?:(?:www|m)\.)?douyu\.com'
 _API_URL = "http://www.douyutv.com/api/v1/"
 
 
-class Douyu(Download):
-    def check_stream(self):
-        check_url = re.sub(r'.*douyu.com', 'http://open.douyucdn.cn/api/RoomApi/room', self.url)
-        res = requests.get(check_url, timeout=5)
-        res.close()
-        s = res.json()
-        logger.debug(self.fname)
-        status = s['data']['room_status']
-        if status == '2':
-            return False
-        else:
-            return True
+class Douyu(FFmpegdl):
+    def __init__(self, fname, url, suffix='flv'):
+        super().__init__(fname, url, suffix)
 
-    def dl(self, ydl_opts):
+    def check_stream(self):
+        # check_url = re.sub(r'.*douyu.com', 'http://open.douyucdn.cn/api/RoomApi/room', self.url)
+        # res = requests.get(check_url, timeout=5)
+        # res.close()
+        # s = res.json()
+        # logger.debug(self.fname)
+        # status = s['data']['room_status']
+        # if status == '2':
+        #     return False
+        # else:
+        #     return True
+        logger.debug(self.fname)
         url = re.sub(r'.*douyu.com', 'https://m.douyu.com/room', self.url)
         res = requests.get(url, timeout=5)
         res.close()
@@ -54,15 +55,10 @@ class Douyu(Download):
         logger.debug(title)
         show_status = data.get('show_status')
         if show_status is not "1":
-            raise ValueError("The live stream is not online! (Errno:%s)" % server_status)
-
-        real_url = data.get('rtmp_url') + '/' + data.get('rtmp_live')
-        arg = ['ffmpeg', '-y', '-i', real_url, '-c', 'copy', '-f', 'flv', ydl_opts['outtmpl']+'.part']
-        subprocess.call(arg)
-        return real_url
-
-    def download(self, ydl_opts, event):
-        self.dl(ydl_opts)
+            # raise ValueError("The live stream is not online! (Errno:%s)" % server_status)
+            return
+        self.ydl_opts['absurl'] = data.get('rtmp_url') + '/' + data.get('rtmp_live')
+        return True
 
 
 __plugin__ = Douyu

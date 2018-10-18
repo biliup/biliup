@@ -1,28 +1,30 @@
-import signal
 import requests
-from Engine import work
-from Engine.plugins import Download, BatchCheckBase
+from Engine.plugins import BatchCheckBase, SDownload
 from common import logger
 
 VALID_URL_BASE = r'(?:https?://)?(?:www\.)?panda\.tv/(?P<id>[0-9]+)'
 API_ROOMS = 'https://www.panda.tv/api_rooms_videoinfo?roomids='
 
 
-class Panda(Download):
-    def download(self, ydl_opts, event):
-        signal.signal(signal.SIGTERM, work.signal_handler)
-        # info_list = self.get_sinfo()
-
-        # if 'SD-m3u8' in info_list:
-        #     ydl_opts['format'] = 'SD-m3u8'
-        # elif 'HD-m3u8' in info_list:
-        #     ydl_opts['format'] = 'HD-m3u8'
-
-        self.dl(ydl_opts)
-        if self.check_stream():
-            logger.info('实际未下载完成' + self.fname)
-            logger.info('准备递归下载')
-            self.run(event)
+class Panda(SDownload):
+    def download(self):
+        #     # signal.signal(signal.SIGTERM, common.DesignPattern.signal_handler)
+        #     # info_list = self.get_sinfo()
+        #
+        #     # if 'SD-m3u8' in info_list:
+        #     #     ydl_opts['format'] = 'SD-m3u8'
+        #     # elif 'HD-m3u8' in info_list:
+        #     #     ydl_opts['format'] = 'HD-m3u8'
+        #
+        retval = super().download()
+        if retval == 0:
+            if self.check_stream():
+                logger.info('实际未下载完成' + self.fname)
+                self.rename(self.ydl_opts['outtmpl'])
+                logger.info('准备递归下载')
+                self.run()
+                return 0
+        return retval
 
 
 class BatchCheck(BatchCheckBase):

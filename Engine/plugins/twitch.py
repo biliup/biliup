@@ -1,7 +1,7 @@
 # import json
 # import re
 import requests
-from Engine.plugins import Download, BatchCheckBase
+from Engine.plugins import YDownload, BatchCheckBase
 from common import logger
 
 headers = {
@@ -12,9 +12,9 @@ API_ROOMS = 'https://api.twitch.tv/helix/streams'
 _API_USER = 'https://api.twitch.tv/helix/users'
 
 
-class Twitch(Download):
+class Twitch(YDownload):
     def __init__(self, fname, url, suffix='mp4'):
-        Download.__init__(self, fname, url, suffix=suffix)
+        YDownload.__init__(self, fname, url, suffix=suffix)
 
     # def check_stream(self):
     #
@@ -44,25 +44,29 @@ class Twitch(Download):
     #         return None
     #     return stream
 
-    def download(self, ydl_opts, event):
+    def dl(self):
         info_list = self.get_sinfo()
 
         if self.fname in ['星际2ByuN武圣人族天梯第一视角', '星际2INnoVation吕布卫星人族天梯第一视角', '星际2Maru人族天梯第一视角']:
             pass
         elif '720p' in info_list:
-            ydl_opts['format'] = '720p'
+            self.ydl_opts['format'] = '720p'
         elif '720p60' in info_list:
-            ydl_opts['format'] = '720p60'
+            self.ydl_opts['format'] = '720p60'
 
-        self.dl(ydl_opts)
+        super().dl()
 
 
 class BatchCheck(BatchCheckBase):
     def __init__(self, urls):
         BatchCheckBase.__init__(self, pattern_id=VALID_URL_BASE, urls=urls)
         self.use_id = {}
-        login = requests.get(_API_USER, headers=headers, params={'login': self.usr_list}, timeout=5)
-        login.close()
+        if self.usr_list:
+            login = requests.get(_API_USER, headers=headers, params={'login': self.usr_list}, timeout=5)
+            login.close()
+        else:
+            logger.debug('无twitch主播')
+            return
         try:
             for pair in login.json()['data']:
                 self.use_id[pair['id']] = pair['login']
