@@ -5,6 +5,7 @@ import selenium.common
 import time
 import Engine
 import Engine.kernel
+import Engine.work
 from Engine.slider import slider_cracker
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -94,7 +95,7 @@ class Upload(object):
         options = webdriver.ChromeOptions()
 
         options.add_argument('headless')
-        driver = webdriver.Chrome(executable_path=Engine.kernel.chromedrive_path, chrome_options=options)
+        driver = webdriver.Chrome(executable_path=Engine.work.chromedrive_path, chrome_options=options)
         # service_log_path=service_log_path)
         try:
             # service_log_path = "{}/chromedriver.log".format('/home')
@@ -243,10 +244,10 @@ class Upload(object):
                 ec.presence_of_element_located((By.XPATH, r'//*[@id="login-username"]')))
 
             username = driver.find_element_by_xpath(r'//*[@id="login-username"]')
-            username.send_keys(Engine.kernel.user_name)
+            username.send_keys(Engine.work.user_name)
 
             password = driver.find_element_by_xpath('//*[@id="login-passwd"]')
-            password.send_keys(Engine.kernel.pass_word)
+            password.send_keys(Engine.work.pass_word)
             # logger.info('第四步')
             # try:
             cracker = slider_cracker(driver)

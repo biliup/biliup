@@ -7,6 +7,9 @@ API_ROOMS = 'https://www.panda.tv/api_rooms_videoinfo?roomids='
 
 
 class Panda(SDownload):
+    def __init__(self, fname, url):
+        super().__init__(fname, url, suffix='flv')
+
     def download(self):
         #     # signal.signal(signal.SIGTERM, common.DesignPattern.signal_handler)
         #     # info_list = self.get_sinfo()

@@ -1,19 +1,11 @@
 import time
 import requests
-import yaml
-
 import Engine
 from Engine.downloader import Extractor, download
 from Engine.upload import Upload
+from Engine.work import find_name, url_status, links_id
 from common import logger
 from common.event import Event
-
-with open(r'config.yaml', encoding='utf-8') as stream:
-    config = yaml.load(stream)
-    links_id = config['links_id']
-    user_name = config['user_name']
-    pass_word = config['pass_word']
-    chromedrive_path = config['chromedrive_path']
 
 
 class CheckAll(object):
@@ -31,7 +23,7 @@ class CheckAll(object):
             except requests.exceptions.ReadTimeout as timeout:
                 logger.error(batch.__class__.__module__ + ',ReadTimeout:' + str(timeout))
             except requests.exceptions.SSLError as sslerr:
-                logger.error(batch.__class__.__module__+',SSLError:'+str(sslerr))
+                logger.error(batch.__class__.__module__ + ',SSLError:' + str(sslerr))
             except requests.exceptions.ConnectionError as connerr:
                 logger.error(batch.__class__.__module__ + ',ConnectionError:' + str(connerr))
             except requests.exceptions.RequestException:
@@ -48,6 +40,8 @@ class CheckAll(object):
                     logger.error(one.__plugin__.__module__ + ',ConnectTimeout:' + str(timeout))
                 except requests.exceptions.ConnectionError as connerr:
                     logger.error(one.__plugin__.__module__ + ',ConnectionError:' + str(connerr))
+                except requests.exceptions.ChunkedEncodingError as ceer:
+                    logger.error(one.__plugin__.__module__ + ',ChunkedEncodingError:' + str(ceer))
                 except requests.exceptions.RequestException:
                     logger.exception(one.__plugin__.__module__)
 
@@ -55,27 +49,6 @@ class CheckAll(object):
                     logger.debug('歇息会')
                     time.sleep(15)
         return live
-
-
-# 用来包装需要多进程的函数（多进程执行避免主进程阻塞）
-class Service:
-    def __init__(self, pool, func, callback):
-        # 事件处理进程池
-        self.__pool = pool
-        self.__func = func
-        self.callback = callback
-
-    def __run(self, args):
-        self.__pool.apply_async(func=self.__func, args=args, callback=self.callback)
-        # self.__pool.apply(func=self.__func, args=args)
-
-    def start(self, event):
-        args = event.args
-        self.__run(args)
-
-    def stop(self):
-        self.__pool.close()
-        self.__pool.join()
 
 
 class CallBack(object):
@@ -87,12 +60,6 @@ class CallBack(object):
         # if result:
         self.event.args = (result,)
         self.event_manager.send_event(self.event)
-
-
-def find_name(url):
-    for name in links_id:
-        if url in links_id[name]:
-            return name
 
 
 def callback2(event_manager, result):
@@ -184,16 +151,3 @@ def revise(url):
         url_status.update({url: 0})
         # print('更新字典')
         # print(url_status)
-
-
-def getmany():
-    urls = []
-    urlstatus = {}
-    for k, v in links_id.items():
-        urls += v
-        for url in v:
-            urlstatus[url] = 0
-    return urls, urlstatus, urlstatus.copy()
-
-
-Urls, url_status, url_status_base = getmany()

@@ -1,8 +1,9 @@
 from functools import partial
 from multiprocessing.pool import Pool
 import common
-from Engine.kernel import Service, CheckAll, CallBack, modify, process, revise, links_id, getmany, Urls, free_upload, \
+from Engine.kernel import CheckAll, CallBack, modify, process, revise, free_upload, \
     callback2
+from Engine.work import links_id, Service, getmany, Urls
 from common.event import Event
 from common.reload import autoreload
 from common.timer import Timer
@@ -66,4 +67,4 @@ def main():
     # 定时推送事件
 
 
-__all__ = ['downloader', 'upload', 'work', 'plugins', 'main', 'Urls']
+__all__ = ['downloader', 'upload', 'work', 'plugins', 'main']

@@ -3,11 +3,12 @@ import re
 import subprocess
 import sys
 import time
-from threading import Thread
+from threading import Thread, Event
 import psutil
 import streamlink
 import youtube_dl
 from common import logger
+from common.timer import Timer
 
 
 class DownloadBase:
@@ -17,7 +18,7 @@ class DownloadBase:
         self.fname = fname
         self.url = url
         self.suffix = suffix
-        self.flag = True
+        self.flag = None
         self.ydl_opts = {}
 
     def check_stream(self):
@@ -33,7 +34,10 @@ class DownloadBase:
             try:
                 logger.info('开始下载%s：%s' % (self.__class__.__name__, self.fname))
                 pid = os.getpid()
-                t = Thread(target=self.kill_child_processes, args=(pid, file_name))
+                # t = Thread(target=self.kill_child_processes, args=(pid, file_name))
+                monitor = Monitoring(pid, file_name)
+                self.flag = monitor.flag
+                t = Thread(target=monitor.start)
                 t.start()
                 retval = self.download()
                 self.rename(file_name)
@@ -47,71 +51,11 @@ class DownloadBase:
             #     self.rename(file_name)
             #     logger.info('准备递归下载')
             #     self.run()
+            # except:
+            #     logger.exception('?')
             finally:
                 logger.info('退出下载')
         return
-
-    def kill_child_processes(self, parent_pid, file_name):
-        file_name_ = file_name + '.part'
-        last_file_size = 0.0
-        logger.info('获取到{0}，{1}'.format(parent_pid, file_name_))
-        while True:
-            time.sleep(15)
-            if os.path.isfile(file_name_):
-                file_size = os.path.getsize(file_name_) / 1024 / 1024 / 1024
-                file_sizes = os.path.getsize(file_name_)
-                if float(file_sizes) == last_file_size:
-                    try:
-                        parent = psutil.Process(parent_pid)
-                    except psutil.NoSuchProcess:
-                        return
-                    children = parent.children(recursive=True)
-                    if len(children) == 0:
-                        # parent.send_signal(sig)
-                        # self.flag = False
-                        logger.info('下载卡死' + self.__class__.__name__ + file_name_)
-                        # parent.terminate()
-                    else:
-                        for process in children:
-                            # print(process)
-                            # process.send_signal(sig)
-                            process.terminate()
-                        logger.info('下载卡死' + self.__class__.__name__ + file_name_)
-                    # time.sleep(1)
-                    if os.path.isfile(file_name_):
-                        logger.info('卡死下载进程可能未成功退出')
-                        continue
-                    else:
-                        logger.info('卡死下载进程成功退出')
-                        break
-
-                last_file_size = file_sizes
-
-                if float(file_size) >= 2.5:
-                    try:
-                        parent = psutil.Process(parent_pid)
-                    except psutil.NoSuchProcess:
-                        return
-                    children = parent.children(recursive=True)
-                    if len(children) == 0:
-                        # parent.send_signal(sig)
-                        # parent.terminate()
-                        # logger.info('分段下载pandatv' + file_name_)
-                        self.flag = False
-                    else:
-                        for process in children:
-                            # print(process)
-                            # process.send_signal(sig)
-                            process.terminate()
-                        # print('分段下载')
-                        # logger.info('分段下载' + file_name_)
-                    logger.info('分段下载' + self.__class__.__name__ + file_name_)
-                    break
-            else:
-                logger.info('监控<%s>线程退出' % file_name_)
-                return
-                # os._exit(0)
-        logger.info('退出监控<%s>线程' % file_name_)
 
     @staticmethod
     def rename(file_name):
@@ -119,7 +63,7 @@ class DownloadBase:
             os.rename(file_name + '.part', file_name)
             logger.info('更名{0}为{1}'.format(file_name + '.part', file_name))
         except FileNotFoundError:
-            logger.info('FileNotFoundError:'+file_name)
+            logger.info('FileNotFoundError:' + file_name)
         except FileExistsError:
             os.rename(file_name + '.part', file_name)
             logger.info('FileExistsError:更名{0}为{1}'.format(file_name + '.part', file_name))
@@ -135,20 +79,6 @@ class YDownload(DownloadBase):
 
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
-        # self.fname = fname
-        # self.url = url
-        # self.suffix = suffix
-
-    # @property
-    # def file_name(self):
-    #     # now = Engine.work.time_now()
-    #     # if self.suffix == 'mp4':
-    #     file_name = '%s%s.%s' % (self.fname, str(time.time())[:10], self.suffix)
-    #     # elif self.suffix == 'flv':
-    #     #     file_name = '%s%s%s.flv' % (self.fname, now, str(time.time())[:10])
-    #     # else:
-    #     #     raise ValueError
-    #     return file_name
 
     def check_stream(self):
         try:
@@ -185,47 +115,6 @@ class YDownload(DownloadBase):
             # ydl.download([self.url[self.__class__.__name__]])
             ydl.download([self.url])
 
-    # @staticmethod
-    # def rename(file_name):
-    #     try:
-    #         os.rename(file_name + '.part', file_name)
-    #         logger.info('更名{0}为{1}'.format(file_name + '.part', file_name))
-    #     except FileExistsError:
-    #         os.rename(file_name + '.part', file_name)
-    #         logger.info('FileExistsError:更名{0}为{1}'.format(file_name + '.part', file_name))
-
-    # def run(self):
-    #     file_name = self.file_name
-    #     # event.dict_['url'] = self.url[self.__class__.__name__]
-    #     # if event.dict_.get('file_name'):
-    #     #     event.dict_['file_name'] += [file_name]
-    #     # else:
-    #     #     event.dict_['file_name'] = [file_name]
-    #     if self.check_stream():
-    #         ydl_opts = {
-    #             'outtmpl': file_name,
-    #             # 'format': '720p'
-    #             # 'external_downloader_args':['-timeout', '5']
-    #             # 'keep_fragments':True
-    #         }
-    #         try:
-    #             logger.info('开始下载%s：%s' % (self.__class__.__name__, self.fname))
-    #             pid = os.getpid()
-    #             # fname = ydl_opts['outtmpl']
-    #             # self.queue.put([pid, fname])
-    #             t = Thread(target=kill_child_processes, args=(pid, file_name))
-    #             t.start()
-    #             self.download(ydl_opts)
-    #             logger.info('下载完成' + self.fname)
-    #
-    #         except youtube_dl.utils.DownloadError:
-    #             self.rename(file_name)
-    #             logger.info('准备递归下载')
-    #             self.run()
-    #         finally:
-    #             logger.info('退出下载')
-    #     return
-
 
 class SDownload(DownloadBase):
     def __init__(self, fname, url, suffix='mp4'):
@@ -251,8 +140,8 @@ class SDownload(DownloadBase):
                 with open(self.ydl_opts['outtmpl'] + '.part', 'wb') as file:
                     for f in fd:
                         file.write(f)
-                        if not self.flag:
-                            self.flag = True
+                        if self.flag.is_set():
+                            # self.flag.clear()
                             return 1
                     return 0
         except OSError:
@@ -291,3 +180,82 @@ class BatchCheckBase:
 
     def check(self):
         pass
+
+
+class Monitoring(Timer):
+    def __init__(self, parent_pid, file_name):
+        super().__init__(func=self.kill_child_processes)
+        self.parent = self.children = self.numc = None
+        self.parent_pid = parent_pid
+        self.file_name = file_name + '.part'
+        self.last_file_size = 0.0
+        self.flag = Event()
+
+    def terminate(self):
+        if self.numc == 0:
+            logger.error("ChildrenProcess doesn't exist")
+        else:
+            for process in self.children:
+                process.terminate()
+            # logger.info('下载卡死' + self.file_name)
+
+    def get_process(self, parent_pid):
+        try:
+            parent = psutil.Process(parent_pid)
+        except psutil.NoSuchProcess:
+            self.stop()
+            logger.error("Process doesn't exist")
+            return
+        children = parent.children(recursive=True)
+        numc = len(children)
+        return parent, children, numc
+
+    def kill_child_processes(self):
+        file_size = os.path.getsize(self.file_name) / 1024 / 1024 / 1024
+        if file_size <= self.last_file_size:
+            logger.error('下载卡死' + self.file_name)
+            if self.numc == 0:
+                self.parent.terminate()
+            else:
+                self.terminate()
+            time.sleep(1)
+            if os.path.isfile(self.file_name):
+                logger.info('卡死下载进程可能未成功退出')
+                return
+            else:
+                self.stop()
+                logger.info('卡死下载进程成功退出')
+                return
+        self.last_file_size = file_size
+        if file_size >= 2.5:
+            if self.numc == 0:
+                self.flag.set()
+            else:
+                self.terminate()
+            self.stop()
+            logger.info('分段下载' + self.file_name)
+            # time.sleep(1)
+            # if not os.path.isfile(self.file_name):
+            #     self.stop()
+
+    def __timer(self):
+        logger.info('获取到{0}，{1}'.format(self.parent_pid, self.file_name))
+        retry = 0
+
+        while not self._flag.wait(self.interval):
+            self.parent, self.children, self.numc = self.get_process(self.parent_pid)
+            if os.path.isfile(self.file_name):
+                self._func(*self._args, **self._kwargs)
+            else:
+                logger.info('%s不存在' % self.file_name)
+                if retry >= 3:
+                    logger.info('找不到%s' % self.file_name)
+                    return
+                retry += 1
+                # logger.info('监控<%s>线程退出' % self.file_name)
+
+    def start(self):
+        try:
+            self.__timer()
+        finally:
+            logger.info('退出监控<%s>线程' % self.file_name + '.part')
