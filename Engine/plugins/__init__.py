@@ -248,7 +248,7 @@ class Monitoring(Timer):
                 self._func(*self._args, **self._kwargs)
             else:
                 logger.info('%s不存在' % self.file_name)
-                if retry >= 3:
+                if retry >= 2:
                     logger.info('找不到%s' % self.file_name)
                     return
                 retry += 1
