@@ -41,6 +41,7 @@ class DownloadBase:
                 t.start()
                 retval = self.download()
                 self.rename(file_name)
+                monitor.stop()
                 if retval != 0:
                     logger.info('准备递归下载')
                     self.run()
@@ -232,11 +233,7 @@ class Monitoring(Timer):
                 self.flag.set()
             else:
                 self.terminate()
-            self.stop()
             logger.info('分段下载' + self.file_name)
-            # time.sleep(1)
-            # if not os.path.isfile(self.file_name):
-            #     self.stop()
 
     def __timer(self):
         logger.info('获取到{0}，{1}'.format(self.parent_pid, self.file_name))
