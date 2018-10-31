@@ -130,8 +130,8 @@ class Upload(object):
 
             # print(driver.title)
             WebDriverWait(driver, 20).until(
-                ec.presence_of_element_located((By.NAME, 'file')))
-            upload = driver.find_element_by_name('file')
+                ec.presence_of_element_located((By.NAME, 'buploader')))
+            upload = driver.find_element_by_name('buploader')
 
             print(driver.title)
 
