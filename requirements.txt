@@ -2,6 +2,6 @@ selenium==3.8.1
 psutil==5.4.6
 youtube_dl==2018.10.5
 Pillow==5.2.0
-Requests==2.19.1
+Requests==2.20.0
 PyYAML==3.12
 streamlink==0.14.2

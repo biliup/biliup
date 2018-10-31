@@ -255,4 +255,4 @@ class Monitoring(Timer):
         try:
             self.__timer()
         finally:
-            logger.info('退出监控<%s>线程' % self.file_name + '.part')
+            logger.info('退出监控<%s>线程' % self.file_name)
