@@ -23,7 +23,6 @@ class Extractor(object):
 
         """
         for loader, name, ispkg in pkgutil.iter_modules([path]):
-
             # set the full plugin module name
             module_name = "Engine.plugins.{0}".format(name)
             # print(module_name)
@@ -47,10 +46,10 @@ class Extractor(object):
     @staticmethod
     def suit_url(pattern, urls):
         sorted_url = []
-        for url in urls:
-            if re.match(pattern, url):
-                sorted_url.append(url)
-                urls.remove(url)
+        for i in range(len(urls) - 1, -1, -1):
+            if re.match(pattern, urls[i]):
+                sorted_url.append(urls[i])
+                urls.remove(urls[i])
         return sorted_url
 
     def sorted_checker(self, urls, signature='API_ROOMS'):

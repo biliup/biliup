@@ -87,7 +87,7 @@ class YDownload(DownloadBase):
             return True
         except youtube_dl.utils.DownloadError:
             # logger.debug('%s未开播或读取下载信息失败' % self.key)
-            print('%s未开播或读取下载信息失败' % self.fname)
+            logger.debug('%s未开播或读取下载信息失败' % self.fname)
             return False
 
     def get_sinfo(self):
@@ -97,11 +97,11 @@ class YDownload(DownloadBase):
             if self.url:
                 info = ydl.extract_info(self.url, download=False)
             else:
-                print('%s不存在' % self.__class__.__name__)
+                logger.debug('%s不存在' % self.__class__.__name__)
                 return
             for i in info['formats']:
                 info_list.append(i['format_id'])
-            print(info_list)
+            logger.debug(info_list)
         return info_list
 
     def download(self):
@@ -123,6 +123,7 @@ class SDownload(DownloadBase):
         self.stream = None
 
     def check_stream(self):
+        logger.debug(self.fname)
         streams = streamlink.streams(self.url)
         try:
             if streams:
@@ -256,3 +257,20 @@ class Monitoring(Timer):
             self.__timer()
         finally:
             logger.info('退出监控<%s>线程' % self.file_name)
+
+
+def match1(text, *patterns):
+    if len(patterns) == 1:
+        pattern = patterns[0]
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1)
+        else:
+            return None
+    else:
+        ret = []
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                ret.append(match.group(1))
+        return ret

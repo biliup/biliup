@@ -3,8 +3,7 @@ import json
 import re
 import time
 import requests
-from Engine import work
-from Engine.plugins import FFmpegdl
+from Engine.plugins import FFmpegdl, match1
 from Engine.plugins.twitch import headers
 from common import logger
 
@@ -33,7 +32,7 @@ class Douyu(FFmpegdl):
         res.close()
         html = res.text
         room_id_patt = r'"rid"\s*:\s*(\d+),'
-        room_id = work.match1(html, room_id_patt)
+        room_id = match1(html, room_id_patt)
         if room_id == "0":
             room_id = url[url.rfind('/') + 1:]
         args = "room/%s?aid=wp&client_sys=wp&time=%d" % (room_id, int(time.time()))

@@ -1,9 +1,13 @@
 from functools import partial
 from multiprocessing.pool import Pool
+
+import yaml
+
 import common
-from Engine.kernel import CheckAll, CallBack, modify, process, revise, free_upload, \
-    callback2
-from Engine.work import links_id, Service, getmany, Urls
+from Engine.downloader import Extractor
+from Engine.kernel import CallBack, modify, process, revise, free_upload, \
+    callback2, all_check
+from common.DesignPattern import Service
 from common.event import Event
 from common.reload import autoreload
 from common.timer import Timer
@@ -14,11 +18,30 @@ DOWNLOAD_UPLOAD = 'download_upload'
 BE_MODIFIED = 'be_modified'
 UPLOAD = 'upload'
 
-
 # print(Urls, url_status, url_status_base)
 
 # def get_queue(q):
 #     process.q = q
+with open(r'config.yaml', encoding='utf-8') as stream:
+    config = yaml.load(stream)
+    links_id = config['links_id']
+    user_name = config['user_name']
+    pass_word = config['pass_word']
+    chromedrive_path = config['chromedrive_path']
+
+
+def getmany():
+    urls = []
+    urlstatus = {}
+    for k, v in links_id.items():
+        urls += v
+        for url in v:
+            urlstatus[url] = 0
+    return urls, urlstatus, urlstatus.copy()
+
+
+Urls, url_status, url_status_base = getmany()
+batches, onebyone = Extractor().sorted_checker(Urls)
 
 
 def main():
@@ -43,7 +66,7 @@ def main():
     # ud = Event(UPLOAD)
     callback_2 = partial(callback2, event_manager)
 
-    service_check = service_p(CheckAll(Urls).check, callback_2)
+    service_check = service_p(all_check, callback_2)
     modify_p = partial(modify, event_manager)
     service_download = service_p(process, CallBack(event_manager, Event(BE_MODIFIED)).send)
     # service_upload = service_p(free_upload, None)
@@ -67,4 +90,4 @@ def main():
     # 定时推送事件
 
 
-__all__ = ['downloader', 'upload', 'work', 'plugins', 'main']
+__all__ = ['downloader', 'upload', 'plugins', 'main', 'links_id']

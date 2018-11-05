@@ -1,10 +1,11 @@
 #!/usr/bin/python3
 import sys
-from Engine import work, main
+import common
+from Engine import main
 from common.Daemon import Daemon
 
 if __name__ == '__main__':
-    sys.excepthook = work.new_hook
+    sys.excepthook = common.new_hook
 
     daemon = Daemon('watch_process.pid')
     if len(sys.argv) == 2:

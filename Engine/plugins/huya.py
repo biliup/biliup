@@ -1,6 +1,8 @@
 import json
 import requests
-from Engine import work
+
+import Engine.plugins
+import Engine.plugins.douyu
 from Engine.plugins import FFmpegdl
 from common import logger
 
@@ -19,7 +21,7 @@ class Huya(FFmpegdl):
         res = requests.get(self.url, timeout=5, headers=user_agent)
         res.close()
         data = res.text
-        huya = work.match1(data, r'({"sCdnType":"TX".*?})')
+        huya = Engine.plugins.match1(data, r'({"sCdnType":"TX".*?})')
         if huya:
             huyajson = json.loads(huya)
             self.ydl_opts["absurl"] = huyajson["sFlvUrl"] + '/' + huyajson["sStreamName"] + '.' + \
