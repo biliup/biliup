@@ -1,6 +1,6 @@
 # bilibiliupload
 
-自动录制上传星际选手直播录像，在config.yaml文件中可以进行相关设置
+支持自动录制各大直播平台，上传直播录像到bilibili。相关设置在config.yaml文件中
 
 使用需要修改文件名**config(demo).yaml** ➡ **config.yaml**
 
