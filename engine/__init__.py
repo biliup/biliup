@@ -37,8 +37,7 @@ DOWNLOAD_UPLOAD = 'download_upload'
 BE_MODIFIED = 'be_modified'
 UPLOAD = 'upload'
 
-# def get_queue(q):
-#     process.q = q
+
 with open(r'config.yaml', encoding='utf-8') as stream:
     config = yaml.load(stream)
     links_id = config['links_id']

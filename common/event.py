@@ -15,9 +15,9 @@ class EventManager:
         # 事件管理器开关
         self.__active = False
         # 事件处理线程
-        self.__thread = Thread(target=self.__run)
+        self.__thread = Thread(target=self.__run, name='Synchronous')
         # 事件处理线程池
-        self.__pool = ThreadPoolExecutor(3)
+        self.__pool = ThreadPoolExecutor(3, thread_name_prefix='Asynchronous')
         # 阻塞函数列表
         self.__block = []
 
@@ -62,7 +62,6 @@ class EventManager:
         self.__pool.shutdown()
         # 等待事件处理线程退出
         self.__thread.join()
-
 
     def add_event_listener(self, type_, handler):
         """绑定事件和监听器处理函数"""

@@ -1,7 +1,7 @@
 import pkgutil
 import importlib
 import re
-import engine.plugins.douyu
+import engine
 from engine.plugins import general
 # from common.DesignPattern import singleton
 

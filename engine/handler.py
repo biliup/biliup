@@ -97,7 +97,7 @@ class KernelFunc:
             for live in live_m:
                 if self.url_status[live] == 1:
                     # 已开播正在下载
-                    print('已开播正在下载')
+                    # print('已开播正在下载')
                     pass
                 else:
                     name = engine.find_name(live)
