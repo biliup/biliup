@@ -1,20 +1,20 @@
 import pkgutil
 import importlib
 import re
-import Engine.plugins.douyu
-from Engine.plugins import general
-from common.DesignPattern import singleton
+import engine.plugins.douyu
+from engine.plugins import general
+# from common.DesignPattern import singleton
 
 
-@singleton
+# @singleton
 class Extractor(object):
     def __init__(self):
         self.plugins = []
-        self.load_plugins(Engine.plugins.__path__[0])
+        self.load_plugins(engine.plugins.__path__[0])
 
-    def get_plugins(self):
-        # self.load_plugins(Engine.plugins.__path__[0])
-        return self.plugins
+    # def get_plugins(self):
+    #     # self.load_plugins(engine.plugins.__path__[0])
+    #     return self.plugins
 
     def load_plugins(self, path):
         """Attempt to load plugins from the path specified.
@@ -24,7 +24,7 @@ class Extractor(object):
         """
         for loader, name, ispkg in pkgutil.iter_modules([path]):
             # set the full plugin module name
-            module_name = "Engine.plugins.{0}".format(name)
+            module_name = "engine.plugins.{0}".format(name)
             # print(module_name)
             self.load_plugin(module_name)
         # print(self.plugins)
@@ -61,16 +61,16 @@ class Extractor(object):
             if hasattr(plugin, signature):
                 batches.append(plugin.BatchCheck(plugin.__plugin__.url_list))
             else:
-                onebyone.append(plugin)
+                onebyone.append(plugin.__plugin__)
         general.__plugin__.url_list = curls
-        onebyone.append(general)
-        # onebyone.append(__import__('Engine.plugins.general', fromlist=['general',]))
+        onebyone.append(general.__plugin__)
+        # onebyone.append(__import__('engine.plugins.general', fromlist=['general',]))
         return batches, onebyone
 
 
 def download(fname, url):
     extractor = Extractor()
-    plugins = extractor.get_plugins()
+    plugins = extractor.plugins
     for plugin in plugins:
         if hasattr(plugin, "VALID_URL_BASE"):
             if re.match(plugin.VALID_URL_BASE, url):

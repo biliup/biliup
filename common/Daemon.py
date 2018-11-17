@@ -4,7 +4,8 @@ import sys
 import os
 import time
 import atexit
-from Engine import main
+from engine import main
+from engine.handler import event_manager
 
 logger = logging.getLogger('log01')
 
@@ -121,7 +122,7 @@ class Daemon(object):
     @staticmethod
     def _run():
         """ run your fun"""
-        main()
+        main(event_manager)
 
 
 # if __name__ == '__main__':

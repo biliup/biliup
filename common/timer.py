@@ -1,5 +1,7 @@
 import threading
 
+from common import logger
+
 
 class Timer(object):
     def __init__(self, func, args=(), kwargs=None, interval=15):

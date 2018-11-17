@@ -3,9 +3,9 @@ import os
 from selenium import webdriver
 import selenium.common
 import time
-import Engine
-import Engine.kernel
-from Engine.slider import slider_cracker
+import engine
+import engine.handler
+from engine.slider import slider_cracker
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as ec
@@ -24,7 +24,7 @@ class Upload(object):
 
     # @property
     # def file_name(self):
-    #     now = Engine.work.time_now()
+    #     now = engine.work.time_now()
     #     file_name = '%s%s' % (now, self.title)
     #     return file_name
 
@@ -86,7 +86,7 @@ class Upload(object):
 
     def upload(self, title_, file_list, link):
 
-        filename = 'Engine/bilibili.cookie'
+        filename = 'engine/bilibili.cookie'
         # title_ = self.r_title
         videopath = self.assemble_videopath(file_list)
 
@@ -94,7 +94,7 @@ class Upload(object):
         options = webdriver.ChromeOptions()
 
         options.add_argument('headless')
-        driver = webdriver.Chrome(executable_path=Engine.chromedrive_path, chrome_options=options)
+        driver = webdriver.Chrome(executable_path=engine.chromedrive_path, chrome_options=options)
         # service_log_path=service_log_path)
         try:
             # service_log_path = "{}/chromedriver.log".format('/home')
@@ -243,10 +243,10 @@ class Upload(object):
                 ec.presence_of_element_located((By.XPATH, r'//*[@id="login-username"]')))
 
             username = driver.find_element_by_xpath(r'//*[@id="login-username"]')
-            username.send_keys(Engine.user_name)
+            username.send_keys(engine.user_name)
 
             password = driver.find_element_by_xpath('//*[@id="login-passwd"]')
-            password.send_keys(Engine.pass_word)
+            password.send_keys(engine.pass_word)
             # logger.info('第四步')
             # try:
             cracker = slider_cracker(driver)

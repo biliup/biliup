@@ -1,7 +1,7 @@
 # import json
 # import re
 import requests
-from Engine.plugins import YDownload, BatchCheckBase
+from engine.plugins import YDownload, BatchCheckBase
 from common import logger
 
 headers = {
@@ -16,38 +16,10 @@ class Twitch(YDownload):
     def __init__(self, fname, url, suffix='mp4'):
         YDownload.__init__(self, fname, url, suffix=suffix)
 
-    # def check_stream(self):
-    #
-    #     check_url = re.sub(r'.*twitch.tv', 'https://api.twitch.tv/kraken/streams', self.url)
-    #     try:
-    #         res = requests.get(check_url, headers=headers)
-    #         res.close()
-    #     except requests.exceptions.SSLError:
-    #         logger.error('获取流信息发生错误')
-    #         logger.error(requests.exceptions.SSLError, exc_info=True)
-    #         return None
-    #     except requests.exceptions.ConnectionError:
-    #         logger.exception('During handling of the above exception, another exception occurred:')
-    #         return None
-    #
-    #     try:
-    #         s = json.loads(res.text)
-    #         # s = res.json()  https://api.twitch.tv/kraken/streams/
-    #     except json.decoder.JSONDecodeError:
-    #         logger.exception('Expecting value')
-    #         return None
-    #     print(self.fname)
-    #     try:
-    #         stream = s['stream']
-    #     except KeyError:
-    #         logger.error(KeyError, exc_info=True)
-    #         return None
-    #     return stream
-
     def dl(self):
         info_list = self.get_sinfo()
 
-        if self.fname in ['星际2ByuN武圣人族天梯第一视角', '星际2INnoVation吕布卫星人族天梯第一视角', '星际2Maru人族天梯第一视角']:
+        if self.fname not in ['星际2PartinG跳跳胖丁神族天梯第一视角']:
             pass
         elif '720p' in info_list:
             self.ydl_opts['format'] = '720p'
@@ -56,6 +28,34 @@ class Twitch(YDownload):
 
         super().dl()
 
+
+# def check_stream(self):
+#
+#     check_url = re.sub(r'.*twitch.tv', 'https://api.twitch.tv/kraken/streams', self.url)
+#     try:
+#         res = requests.get(check_url, headers=headers)
+#         res.close()
+#     except requests.exceptions.SSLError:
+#         logger.error('获取流信息发生错误')
+#         logger.error(requests.exceptions.SSLError, exc_info=True)
+#         return None
+#     except requests.exceptions.ConnectionError:
+#         logger.exception('During handling of the above exception, another exception occurred:')
+#         return None
+#
+#     try:
+#         s = json.loads(res.text)
+#         # s = res.json()  https://api.twitch.tv/kraken/streams/
+#     except json.decoder.JSONDecodeError:
+#         logger.exception('Expecting value')
+#         return None
+#     print(self.fname)
+#     try:
+#         stream = s['stream']
+#     except KeyError:
+#         logger.error(KeyError, exc_info=True)
+#         return None
+#     return stream
 
 class BatchCheck(BatchCheckBase):
     def __init__(self, urls):

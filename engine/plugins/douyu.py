@@ -3,8 +3,8 @@ import json
 import re
 import time
 import requests
-from Engine.plugins import FFmpegdl, match1
-from Engine.plugins.twitch import headers
+from engine.plugins import FFmpegdl, match1
+from engine.plugins.twitch import headers
 from common import logger
 
 VALID_URL_BASE = r'(?:https?://)?(?:(?:www|m)\.)?douyu\.com'

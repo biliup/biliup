@@ -1,4 +1,4 @@
-from Engine.plugins import SDownload
+from engine.plugins import SDownload
 
 
 class Generic(SDownload):

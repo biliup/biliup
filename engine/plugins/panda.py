@@ -1,5 +1,5 @@
 import requests
-from Engine.plugins import BatchCheckBase, SDownload
+from engine.plugins import BatchCheckBase, SDownload
 from common import logger
 
 VALID_URL_BASE = r'(?:https?://)?(?:www\.)?panda\.tv/(?P<id>[0-9]+)'

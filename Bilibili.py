@@ -1,10 +1,12 @@
 #!/usr/bin/python3
 import sys
 import common
-from Engine import main
+from engine.handler import event_manager
+from engine import main
 from common.Daemon import Daemon
 
 if __name__ == '__main__':
+
     sys.excepthook = common.new_hook
 
     daemon = Daemon('watch_process.pid')
@@ -20,7 +22,7 @@ if __name__ == '__main__':
             sys.exit(2)
         sys.exit(0)
     elif len(sys.argv) == 1:
-        main()
+        main(event_manager)
     else:
         print('usage: %s start|stop|restart' % sys.argv[0])
         sys.exit(2)

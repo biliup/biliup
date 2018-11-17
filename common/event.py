@@ -1,7 +1,10 @@
 # encoding: UTF-8
 # 系统模块
+import inspect
+from concurrent.futures.thread import ThreadPoolExecutor
 from queue import Queue, Empty
 from threading import *
+import functools
 
 
 class EventManager:
@@ -13,10 +16,16 @@ class EventManager:
         self.__active = False
         # 事件处理线程
         self.__thread = Thread(target=self.__run)
+        # 事件处理线程池
+        self.__pool = ThreadPoolExecutor(3)
+        # 阻塞函数列表
+        self.__block = []
 
         # 这里的__handlers是一个字典，用来保存对应的事件的响应函数
         # 其中每个键对应的值是一个列表，列表中保存了对该事件监听的响应函数，一对多
         self.__handlers = {}
+
+        self.__method = {}
 
     def __run(self):
         """引擎运行"""
@@ -34,7 +43,10 @@ class EventManager:
         if event.type_ in self.__handlers:
             # 若存在，则按顺序将事件传递给处理函数执行
             for handler in self.__handlers[event.type_]:
-                handler(event)
+                if handler.__qualname__ in self.__block:
+                    self.__pool.submit(handler, event)
+                else:
+                    handler(event)
 
     def start(self):
         """启动"""
@@ -47,8 +59,10 @@ class EventManager:
         """停止"""
         # 将事件管理器设为停止
         self.__active = False
+        self.__pool.shutdown()
         # 等待事件处理线程退出
         self.__thread.join()
+
 
     def add_event_listener(self, type_, handler):
         """绑定事件和监听器处理函数"""
@@ -83,10 +97,66 @@ class EventManager:
         """发送事件，向事件队列中存入事件"""
         self.__eventQueue.put(event)
 
+    def register(self, type_, block=False):
+        classname = inspect.getouterframes(inspect.currentframe())[1][3]
+
+        def callback(result):
+            if not result:
+                pass
+            elif isinstance(result, tuple):
+                for event in result:
+                    self.send_event(event)
+            else:
+                self.send_event(result)
+
+        def appendblock(fc, blk):
+            if blk:
+                self.__block.append(fc.__qualname__)
+
+        if classname == '<module>':
+            def decorator(func):
+                appendblock(func, block)
+
+                @functools.wraps(func)
+                def wrapper(event):
+                    _event = func(*event.args)
+                    callback(_event)
+                    return _event
+
+                self.add_event_listener(type_, wrapper)
+
+                return wrapper
+        else:
+            def decorator(func):
+                appendblock(func, block)
+
+                self.__method.setdefault(type_, [])
+                self.__method[type_].append(func.__name__)
+
+                @functools.wraps(func)
+                def wrapper(this, event):
+                    _event = func(this, *event.args)
+                    callback(_event)
+                    return _event
+
+                return wrapper
+        return decorator
+
+    def server(self, *args):
+        def decorator(cls):
+            for type_ in self.__method:
+                for handler in self.__method[type_]:
+                    self.add_event_listener(type_, getattr(cls(*args), handler))
+            self.__method = {}
+            return cls
+
+        return decorator
+
 
 class Event:
     """事件对象"""
+
     def __init__(self, type_=None):
-        self.type_ = type_      # 事件类型
-        self.dict = {}          # 字典用于保存具体的事件数据
+        self.type_ = type_  # 事件类型
+        self.dict = {}  # 字典用于保存具体的事件数据
         self.args = ()

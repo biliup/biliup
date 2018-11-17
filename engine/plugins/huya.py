@@ -1,9 +1,9 @@
 import json
 import requests
 
-import Engine.plugins
-import Engine.plugins.douyu
-from Engine.plugins import FFmpegdl
+import engine.plugins
+import engine.plugins.douyu
+from engine.plugins import FFmpegdl
 from common import logger
 
 VALID_URL_BASE = r'(?:https?://)?(?:(?:www|m)\.)?huya\.com'
@@ -21,7 +21,7 @@ class Huya(FFmpegdl):
         res = requests.get(self.url, timeout=5, headers=user_agent)
         res.close()
         data = res.text
-        huya = Engine.plugins.match1(data, r'({"sCdnType":"TX".*?})')
+        huya = engine.plugins.match1(data, r'({"sCdnType":"TX".*?})')
         if huya:
             huyajson = json.loads(huya)
             self.ydl_opts["absurl"] = huyajson["sFlvUrl"] + '/' + huyajson["sStreamName"] + '.' + \
