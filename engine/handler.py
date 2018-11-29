@@ -57,7 +57,7 @@ def all_check():
         event_t.args = (live,)
         event_u = Event(UPLOAD)
         event_u.args = (live,)
-        return event_u, event_t
+        return event_t, event_u 
 
 
 @event_manager.register(DOWNLOAD_UPLOAD, block=True)
