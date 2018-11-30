@@ -14,52 +14,6 @@ from common.event import Event
 event_manager = common.event.EventManager()
 
 
-@event_manager.register(CHECK, block=True)
-def all_check():
-    batches, onebyone = Extractor().sorted_checker(urls)
-    live = []
-    try:
-        for batch in batches:
-            try:
-                res = batch.check()
-                if res:
-                    live += res
-            except requests.exceptions.ReadTimeout as timeout:
-                logger.error(batch.__class__.__module__ + ',ReadTimeout:' + str(timeout))
-            except requests.exceptions.SSLError as sslerr:
-                logger.error(batch.__class__.__module__ + ',SSLError:' + str(sslerr))
-            except requests.exceptions.ConnectionError as connerr:
-                logger.error(batch.__class__.__module__ + ',ConnectionError:' + str(connerr))
-            except requests.exceptions.RequestException:
-                logger.exception(batch.__class__.__module__)
-
-        for one in onebyone:
-            for url in one.url_list:
-                try:
-                    if one('检测' + url, url).check_stream():
-                        live += [url]
-                except requests.exceptions.ReadTimeout as timeout:
-                    logger.error(one.__plugin__.__module__ + ',ReadTimeout:' + str(timeout))
-                except requests.exceptions.ConnectTimeout as timeout:
-                    logger.error(one.__plugin__.__module__ + ',ConnectTimeout:' + str(timeout))
-                except requests.exceptions.ConnectionError as connerr:
-                    logger.error(one.__plugin__.__module__ + ',ConnectionError:' + str(connerr))
-                except requests.exceptions.ChunkedEncodingError as ceer:
-                    logger.error(one.__plugin__.__module__ + ',ChunkedEncodingError:' + str(ceer))
-                except requests.exceptions.RequestException:
-                    logger.exception(one.__plugin__.__module__)
-
-                if url != one.url_list[-1]:
-                    logger.debug('歇息会')
-                    time.sleep(15)
-    finally:
-        event_t = Event(TO_MODIFY)
-        event_t.args = (live,)
-        event_u = Event(UPLOAD)
-        event_u.args = (live,)
-        return event_t, event_u 
-
-
 @event_manager.register(DOWNLOAD_UPLOAD, block=True)
 def process(name, url, mod):
     try:
@@ -87,6 +41,51 @@ class KernelFunc:
         self.urls = _urls
         self.url_status = _url_status
         self.url_status_base = _url_status_base
+        self.batches, self.onebyone = Extractor().sorted_checker(_urls)
+
+    @event_manager.register(CHECK, block=True)
+    def all_check(self):
+        live = []
+        try:
+            for batch in self.batches:
+                try:
+                    res = batch.check()
+                    if res:
+                        live += res
+                except requests.exceptions.ReadTimeout as timeout:
+                    logger.error(batch.__class__.__module__ + ',ReadTimeout:' + str(timeout))
+                except requests.exceptions.SSLError as sslerr:
+                    logger.error(batch.__class__.__module__ + ',SSLError:' + str(sslerr))
+                except requests.exceptions.ConnectionError as connerr:
+                    logger.error(batch.__class__.__module__ + ',ConnectionError:' + str(connerr))
+                except requests.exceptions.RequestException:
+                    logger.exception(batch.__class__.__module__)
+
+            for one in self.onebyone:
+                for url in one.url_list:
+                    try:
+                        if one('检测' + url, url).check_stream():
+                            live += [url]
+                    except requests.exceptions.ReadTimeout as timeout:
+                        logger.error(one.__plugin__.__module__ + ',ReadTimeout:' + str(timeout))
+                    except requests.exceptions.ConnectTimeout as timeout:
+                        logger.error(one.__plugin__.__module__ + ',ConnectTimeout:' + str(timeout))
+                    except requests.exceptions.ConnectionError as connerr:
+                        logger.error(one.__plugin__.__module__ + ',ConnectionError:' + str(connerr))
+                    except requests.exceptions.ChunkedEncodingError as ceer:
+                        logger.error(one.__plugin__.__module__ + ',ChunkedEncodingError:' + str(ceer))
+                    except requests.exceptions.RequestException:
+                        logger.exception(one.__plugin__.__module__)
+
+                    if url != one.url_list[-1]:
+                        logger.debug('歇息会')
+                        time.sleep(15)
+        finally:
+            event_t = Event(TO_MODIFY)
+            event_t.args = (live,)
+            event_u = Event(UPLOAD)
+            event_u.args = (live,)
+            return event_t, event_u
 
     @event_manager.register(engine.TO_MODIFY)
     def modify(self, live_m):
