@@ -17,6 +17,8 @@
 >***
 >
 >## Windows系统下使用方法：
->
+>     命令行版
 >        启动：    python Bilibili.py
+>     图形界面版
+>        在release中下载
 >python3
