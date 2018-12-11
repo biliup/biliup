@@ -1,24 +1,16 @@
 import requests
-from engine.plugins import BatchCheckBase, SDownload
+from engine.plugins import BatchCheckBase, SDownload, YDownload
 from common import logger
 
 VALID_URL_BASE = r'(?:https?://)?(?:www\.)?panda\.tv/(?P<id>[0-9]+)'
 API_ROOMS = 'https://www.panda.tv/api_rooms_videoinfo?roomids='
 
 
-class Panda(SDownload):
+class PandaS(SDownload):
     def __init__(self, fname, url):
         super().__init__(fname, url, suffix='flv')
 
     def download(self):
-        #     # signal.signal(signal.SIGTERM, common.DesignPattern.signal_handler)
-        #     # info_list = self.get_sinfo()
-        #
-        #     # if 'SD-m3u8' in info_list:
-        #     #     ydl_opts['format'] = 'SD-m3u8'
-        #     # elif 'HD-m3u8' in info_list:
-        #     #     ydl_opts['format'] = 'HD-m3u8'
-        #
         retval = super().download()
         if retval == 0:
             if self.check_stream():
@@ -28,6 +20,21 @@ class Panda(SDownload):
                 self.run()
                 return 0
         return retval
+
+
+class PandaY(YDownload):
+    def __init__(self, fname, url):
+        super().__init__(fname, url, suffix='flv')
+
+    # def download(self):
+        #     # signal.signal(signal.SIGTERM, common.DesignPattern.signal_handler)
+        #     # info_list = self.get_sinfo()
+        #
+        #     # if 'SD-m3u8' in info_list:
+        #     #     ydl_opts['format'] = 'SD-m3u8'
+        #     # elif 'HD-m3u8' in info_list:
+        #     #     ydl_opts['format'] = 'HD-m3u8'
+        #
 
 
 class BatchCheck(BatchCheckBase):
@@ -62,4 +69,4 @@ class BatchCheck(BatchCheckBase):
         return map(lambda x: self.usr_dict.get(x.lower()), live)
 
 
-__plugin__ = Panda
+__plugin__ = PandaY
