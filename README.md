@@ -1,6 +1,7 @@
 # bilibiliupload
 
-支持自动录制各大直播平台，上传直播录像到bilibili。相关设置在config.yaml文件中
+支持自动录制各大直播平台，上传直播录像到bilibili。  
+相关设置在config.yaml文件中，如直播间地址，b站账号密码
 
 使用需要修改文件名**config(demo).yaml** ➡ **config.yaml**
 
@@ -16,6 +17,8 @@
 >***
 >
 >## Windows系统下使用方法：
->
+>     图形界面版
+>        在release中下载AutoTool.msi进行安装
+>     命令行版
 >        启动：    python Bilibili.py
 >python3
