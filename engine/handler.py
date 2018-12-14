@@ -50,13 +50,13 @@ class KernelFunc:
             for batch in self.batches:
                 res = batch.check()
                 if res:
-                    live += res
-                
+                    live.extend(res)
+
             for one in self.onebyone:
                 for url in one.url_list:
 
                     if one('检测' + url, url).check_stream():
-                        live += [url]
+                        live.append(url)
 
                     if url != one.url_list[-1]:
                         logger.debug('歇息会')
