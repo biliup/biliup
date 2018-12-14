@@ -48,38 +48,31 @@ class KernelFunc:
         live = []
         try:
             for batch in self.batches:
-                try:
-                    res = batch.check()
-                    if res:
-                        live += res
-                except requests.exceptions.ReadTimeout as timeout:
-                    logger.error(batch.__class__.__module__ + ',ReadTimeout:' + str(timeout))
-                except requests.exceptions.SSLError as sslerr:
-                    logger.error(batch.__class__.__module__ + ',SSLError:' + str(sslerr))
-                except requests.exceptions.ConnectionError as connerr:
-                    logger.error(batch.__class__.__module__ + ',ConnectionError:' + str(connerr))
-                except requests.exceptions.RequestException:
-                    logger.exception(batch.__class__.__module__)
-
+                res = batch.check()
+                if res:
+                    live += res
+                
             for one in self.onebyone:
                 for url in one.url_list:
-                    try:
-                        if one('检测' + url, url).check_stream():
-                            live += [url]
-                    except requests.exceptions.ReadTimeout as timeout:
-                        logger.error(one.__plugin__.__module__ + ',ReadTimeout:' + str(timeout))
-                    except requests.exceptions.ConnectTimeout as timeout:
-                        logger.error(one.__plugin__.__module__ + ',ConnectTimeout:' + str(timeout))
-                    except requests.exceptions.ConnectionError as connerr:
-                        logger.error(one.__plugin__.__module__ + ',ConnectionError:' + str(connerr))
-                    except requests.exceptions.ChunkedEncodingError as ceer:
-                        logger.error(one.__plugin__.__module__ + ',ChunkedEncodingError:' + str(ceer))
-                    except requests.exceptions.RequestException:
-                        logger.exception(one.__plugin__.__module__)
+
+                    if one('检测' + url, url).check_stream():
+                        live += [url]
 
                     if url != one.url_list[-1]:
                         logger.debug('歇息会')
                         time.sleep(15)
+        except requests.exceptions.ReadTimeout as timeout:
+            logger.error("ReadTimeout:" + str(timeout))
+        except requests.exceptions.SSLError as sslerr:
+            logger.error("SSLError:" + str(sslerr))
+        except requests.exceptions.ConnectTimeout as timeout:
+            logger.error("ConnectTimeout:" + str(timeout))
+        except requests.exceptions.ConnectionError as connerr:
+            logger.error("ConnectionError:" + str(connerr))
+        except requests.exceptions.ChunkedEncodingError as ceer:
+            logger.error("ChunkedEncodingError:" + str(ceer))
+        except requests.exceptions.RequestException:
+            logger.exception("unknown")
         finally:
             event_t = Event(TO_MODIFY)
             event_t.args = (live,)
