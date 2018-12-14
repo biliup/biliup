@@ -247,7 +247,8 @@ class Monitoring(Timer):
             else:
                 logger.info('%s不存在' % self.file_name)
                 if retry >= 2:
-                    logger.info('找不到%s' % self.file_name)
+                    self.terminate()
+                    logger.info('结束进程，找不到%s' % self.file_name)
                     return
                 retry += 1
                 # logger.info('监控<%s>线程退出' % self.file_name)
