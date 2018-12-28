@@ -22,12 +22,6 @@ class Upload(object):
         # self.date = date
         # self.url = url
 
-    # @property
-    # def file_name(self):
-    #     now = engine.work.time_now()
-    #     file_name = '%s%s' % (now, self.title)
-    #     return file_name
-
     @property
     def file_list(self):
         file_list = []
@@ -97,24 +91,7 @@ class Upload(object):
         driver = webdriver.Chrome(executable_path=engine.chromedrive_path, chrome_options=options)
         # service_log_path=service_log_path)
         try:
-            # service_log_path = "{}/chromedriver.log".format('/home')
-            # service_log_path = "{}\\chromedriver.log".format('D:\\bilibiliupload')
 
-            # video_path = '/home/wardiii.mp4'
-            # video_path = 'D:\\p2.flv\nD:\\p1.flv\nD:\\享受星际！！！看会比赛.flv'
-            # link = 'https://www.panda.tv/1160340'
-
-            # options = webdriver.ChromeOptions()
-            #
-            # options.add_argument('headless')
-
-            # options.add_argument('no-sandbox')
-            # options.binary_location = '/usr/bin/google-chrome-stable'
-
-            # driver = webdriver.Chrome(executable_path='/usr/bin/chromedriver', chrome_options=options,
-            #                           service_log_path=service_log_path)
-            # driver = webdriver.Chrome(executable_path=r'D:\bilibiliupload\chromedriver.exe',\
-            # service_log_path=service_log_path)
             driver.get("https://www.bilibili.com")
             # driver.delete_all_cookies()
             if os.path.isfile(filename):
@@ -132,7 +109,7 @@ class Upload(object):
                 ec.presence_of_element_located((By.NAME, 'buploader')))
             upload = driver.find_element_by_name('buploader')
 
-            print(driver.title)
+            # print(driver.title)
 
             # logger.info(driver.title)
 
@@ -269,15 +246,9 @@ class Upload(object):
             logger.info('浏览器驱动退出')
 
     def start(self, url, date=None):
-        # try:
-        # url_ = event.dict_['url']
-        # url_ = list(self.url.values())[0]
         title = self.title
         if date:
             title = str(date) + self.title
         if self.filter_file():
             logger.info('准备上传' + title)
             self.upload(title, self.file_list, link=url)
-        # finally:
-        # self.dic[self.key] = value_
-        # logger.info('退出上传')
