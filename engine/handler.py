@@ -78,7 +78,7 @@ class KernelFunc:
             event_t.args = (live,)
             event_u = Event(UPLOAD)
             event_u.args = (live,)
-            return event_t, event_u
+            return event_u, event_t
 
     @event_manager.register(engine.TO_MODIFY)
     def modify(self, live_m):
