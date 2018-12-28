@@ -21,9 +21,9 @@
 >        在release中下载AutoTool.msi进行安装
 >     命令行版
 >        启动：    python Bilibili.py
->python3
+>python3 QQ群：837362626
 
-daemon进程启动，结果写入日志文件。
+以daemon进程启动，结果写入日志文件。
 
 直播监测、下载的自动化用youtube-dl，但是有一些网站不支持，或者支持不够好，通过抓包分析api解决。
 
