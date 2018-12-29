@@ -21,7 +21,7 @@
 >        在release中下载AutoTool.msi进行安装
 >     命令行版
 >        启动：    python Bilibili.py
->python3 QQ群：837362626
+>python3 FFmpeg QQ群：837362626
 
 以daemon进程启动，结果写入日志文件。
 
