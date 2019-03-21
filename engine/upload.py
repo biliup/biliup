@@ -239,8 +239,7 @@ class Upload(object):
                 logger.info('更新cookie成功')
             else:
                 logger.info('更新cookie失败')
-        # except:
-        #     logger.exception('未知错误')
+
         finally:
             driver.quit()
             logger.info('浏览器驱动退出')
@@ -251,4 +250,7 @@ class Upload(object):
             title = str(date) + self.title
         if self.filter_file():
             logger.info('准备上传' + title)
-            self.upload(title, self.file_list, link=url)
+            try:
+                self.upload(title, self.file_list, link=url)
+            except selenium.common.exceptions.WebDriverException:
+                logger.exception('WebDriverException')
