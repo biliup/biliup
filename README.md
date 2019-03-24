@@ -23,7 +23,9 @@
 >        启动：    python Bilibili.py
 >python3 FFmpeg QQ群：837362626
 
-Linux下以daemon进程启动，结果写入日志文件。
+Linux下以daemon进程启动
+
+结果写入日志文件
 
 下载部分使用youtube-dl，有一些网站不支持或者支持的不够好，通过爬虫或api解决。
 
