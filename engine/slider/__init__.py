@@ -12,19 +12,30 @@ class slider_cracker(object):
     def __init__(self, driver):
         self.driver = driver
         self.driver.maximize_window()  # 最大化窗口
+        self.driver.set_window_size(1024, 768)
         self.fn = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'true_image.png')
 
     def get_true_image(self, slider_xpath=r'//*[@id="gc-box"]/div/div[3]/div[1]'):
-        element = WebDriverWait(self.driver, 50).until(EC.element_to_be_clickable((By.XPATH, slider_xpath)))
+        # element = WebDriverWait(self.driver, 50).until(EC.element_to_be_clickable((By.XPATH, slider_xpath)))
+        element = WebDriverWait(self.driver, 50).until(EC.element_to_be_clickable((By.CLASS_NAME, "geetest_slider_button")))
         ActionChains(self.driver).move_to_element(element).perform()  # 鼠标移动到滑动框以显示图片
+        js = 'document.querySelector("body > div.geetest_panel.geetest_wind ' \
+             '> div.geetest_panel_box.geetest_no_logo.geetest_panelshowslide ' \
+             '> div.geetest_panel_next > div > div.geetest_wrap > div.geetest_widget ' \
+             '> div > a > div.geetest_canvas_img.geetest_absolute > canvas").' \
+             'style.display = "%s";'
+        self.driver.execute_script(js % "inline")
         time.sleep(1)
         true_image = self.get_img(self.fn)
+        self.driver.execute_script(js % "none")
         return true_image
 
     def get_img(self, img_name, img_xpath=r'//*[@id="gc-box"]/div/div[1]/div[2]/div[1]/a[2]'):  # 260*116
         fn = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'slider_screenshot.png')
+
         screen_shot = self.driver.save_screenshot(fn)
-        image_element = self.driver.find_element_by_xpath(img_xpath)
+        # image_element = self.driver.find_element_by_xpath(img_xpath)
+        image_element = self.driver.find_element_by_class_name(r'geetest_window')
         left = image_element.location['x']
         top = image_element.location['y']  # selenium截图并获取验证图片location后将其截出保存
         right = image_element.location['x'] + image_element.size['width']
@@ -37,7 +48,8 @@ class slider_cracker(object):
     def analysis(self, true_image, knob_xpath=r'//*[@id="gc-box"]/div/div[3]/div[2]'):
         fn = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'img2.png')
         img1 = Image.open(self.fn)
-        slider_element = self.driver.find_element_by_xpath(knob_xpath)
+        # slider_element = self.driver.find_element_by_xpath(knob_xpath)
+        slider_element = self.driver.find_element_by_class_name("geetest_slider_button")
         ActionChains(self.driver).click_and_hold(slider_element).perform()  # 点击滑块后截取残缺图
         time.sleep(1)
         img2 = self.get_img(fn)
@@ -46,7 +58,7 @@ class slider_cracker(object):
         left = 0
         flag = False
 
-        for i in range(65, img1_width):  # 遍历x>65的像素点（x<65是拼图块）
+        for i in range(69, img1_width):  # 遍历x>65的像素点（x<65是拼图块）
             for j in range(0, img1_height):
                 if not self.is_pixel_equal(img1, img2, i, j):
                     left = i
@@ -55,7 +67,7 @@ class slider_cracker(object):
             if flag:
                 break
         if left >= 73:
-            left = left + 7  # 误差纠正
+            left = left -3  # 误差纠正
         else:
             left = left
         return left
@@ -130,7 +142,7 @@ class slider_cracker(object):
 
         track = self.get_track(x_offset)
         knob_element = WebDriverWait(self.driver, 50).until(
-            EC.element_to_be_clickable((By.XPATH, r'//*[@id="gc-box"]/div/div[3]/div[2]')))
+            EC.element_to_be_clickable((By.XPATH, r'/html/body/div[2]/div[2]/div[6]/div/div[1]/div[2]/div[2]')))
         self.move_to_gap(knob_element, track)
 
         # fn = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'result0.png')

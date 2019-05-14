@@ -224,6 +224,8 @@ class Upload(object):
 
             password = driver.find_element_by_xpath('//*[@id="login-passwd"]')
             password.send_keys(engine.pass_word)
+
+            driver.find_element_by_class_name("btn-login").click()
             # logger.info('第四步')
             # try:
             cracker = slider_cracker(driver)
@@ -254,3 +256,6 @@ class Upload(object):
                 self.upload(title, self.file_list, link=url)
             except selenium.common.exceptions.WebDriverException:
                 logger.exception('WebDriverException')
+            # except :
+            #     logger.exception('?')
+
