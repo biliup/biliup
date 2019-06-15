@@ -54,3 +54,5 @@ Linux下以daemon进程启动
 def modify(self, live_m):
     pass
 ```
+## Credits
+* Thanks `zhangn1985/ykdl` provides Douyu-downloader.
