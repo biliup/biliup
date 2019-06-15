@@ -2,7 +2,6 @@ import json
 import requests
 
 import engine.plugins
-import engine.plugins.douyu
 from engine.plugins import FFmpegdl
 from common import logger
 

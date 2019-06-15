@@ -20,3 +20,4 @@ Engine/bilibili.cookie
 test.py
 /upload.py
 /work.py
+*.zip

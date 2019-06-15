@@ -39,7 +39,7 @@ UPLOAD = 'upload'
 
 
 with open(r'config.yaml', encoding='utf-8') as stream:
-    config = yaml.load(stream)
+    config = yaml.load(stream, Loader=yaml.FullLoader)
     links_id = config['links_id']
     user_name = config['user_name']
     pass_word = config['pass_word']
