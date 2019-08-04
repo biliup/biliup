@@ -12,7 +12,7 @@ user_agent = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebK
 
 
 class Huya(FFmpegdl):
-    def __init__(self, fname, url, suffix='flv'):
+    def __init__(self, fname, url, suffix='mp4'):
         super().__init__(fname, url, suffix)
 
     def check_stream(self):
@@ -23,8 +23,8 @@ class Huya(FFmpegdl):
         huya = engine.plugins.match1(data, r'({"sCdnType":"TX".*?})')
         if huya:
             huyajson = json.loads(huya)
-            self.ydl_opts["absurl"] = huyajson["sFlvUrl"] + '/' + huyajson["sStreamName"] + '.' + \
-                huyajson["sFlvUrlSuffix"] + '?' + huyajson["sFlvAntiCode"] + "&ratio=2000"
+            self.ydl_opts["absurl"] = huyajson["sHlsUrl"] + '/' + huyajson["sStreamName"] + '.' + \
+                huyajson["sHlsUrlSuffix"] + '?' + huyajson["sHlsAntiCode"]
             return True
 
 

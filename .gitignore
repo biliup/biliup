@@ -8,6 +8,7 @@
 .idea/encodings.xml
 *.png
 *.flv
+*.mp4
 *.part
 old/
 config.yaml
