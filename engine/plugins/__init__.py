@@ -151,9 +151,11 @@ class SDownload(DownloadBase):
             raise
 
 
+# ffmpeg.exe -i  http://vfile1.grtn.cn/2018/1542/0254/3368/154202543368.ssm/154202543368.m3u8
+# -c copy -bsf:a aac_adtstoasc -movflags +faststart output.mp4
 class FFmpegdl(DownloadBase):
     def download(self):
-        args = ['ffmpeg', '-y', '-i', self.ydl_opts['absurl'], '-c', 'copy', '-f', 'flv',
+        args = ['ffmpeg', '-y', '-i', self.ydl_opts['absurl'], '-c', 'copy', '-f', self.suffix,
                 self.ydl_opts['outtmpl'] + '.part']
         proc = subprocess.Popen(args, stdin=subprocess.PIPE)
         try:
