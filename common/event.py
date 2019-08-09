@@ -143,9 +143,10 @@ class EventManager:
 
     def server(self, *args):
         def decorator(cls):
+            instance = cls(*args)
             for type_ in self.__method:
                 for handler in self.__method[type_]:
-                    self.add_event_listener(type_, getattr(cls(*args), handler))
+                    self.add_event_listener(type_, getattr(instance, handler))
             self.__method = {}
             return cls
 

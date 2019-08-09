@@ -105,51 +105,7 @@ class Upload(object):
             driver.get("https://member.bilibili.com/video/upload.html")
 
             # print(driver.title)
-            WebDriverWait(driver, 20).until(
-                ec.presence_of_element_located((By.NAME, 'buploader')))
-            upload = driver.find_element_by_name('buploader')
-
-            # print(driver.title)
-
-            # logger.info(driver.title)
-
-            upload.send_keys(videopath)  # send_keys
-            logger.info('开始上传' + title_)
-            time.sleep(2)
-            button = r'//*[@class="new-feature-guide-v2-container"]/div/div/div/div/div[1]'
-            if self.is_element_exist(driver, button):
-                sb = driver.find_element_by_xpath(button)
-                sb.click()
-                sb.click()
-                sb.click()
-                logger.debug('点击')
-
-            while True:
-                # info = driver.find_elements_by_xpath(
-                #     '//*[@id="app"]/div[3]/div[2]/div[2]/div[2]/div/div/div[2]/div[2]')
-                # print(info)
-                info = driver.find_elements_by_class_name(r'item-upload-info')
-                for t in info:
-                    # print(t)
-                    if t.text != '':
-                        print(t.text)
-                    # else:
-                    #     print('出问题啦')
-                time.sleep(10)
-                # text = driver.find_elements_by_xpath(
-                #     '//*[@id="app"]/div[3]/div[2]/div[2]/div[2]/div/div/div[2]/div[2]/span')
-                text = driver.find_elements_by_xpath(r'//*[@class="item-upload-info"]/span')
-                aggregate = set()
-                for s in text:
-                    if s.text != '':
-                        aggregate.add(s.text)
-                        print(s.text)
-                # if text == 'Upload complete' or text == '上传完成':
-                #     break
-
-                if len(aggregate) == 1 and ('Upload complete' in aggregate or '上传完成' in aggregate):
-                    break
-            logger.info('上传%s个数%s' % (title_, len(info)))
+            self.add_videos(driver, title_, videopath)
 
             # js = "var q=document.getElementsByClassName('content-header-right')[0].scrollIntoView();"
             # driver.execute_script(js)
@@ -158,42 +114,7 @@ class Upload(object):
             with open(filename, "w") as f:
                 json.dump(cookie, f)
 
-            # 点击模板
-            driver.find_element_by_xpath(r'//*[@class="normal-title-wrp"]/div/p').click()
-            driver.find_element_by_class_name(r'template-list-small-item').click()
-            # driver.find_element_by_xpath(
-            #     r'//*[@id="app"]/div[3]/div[2]/div[3]/div[1]/div[1]/div/div[2]/div[1]').click()
-            # 输入转载来源
-            input_o = driver.find_element_by_xpath(
-                 '//*[@class="upload-v2-container"]/div[2]/div[3]/div[1]/div[4]/div[3]/div/div/input')
-            input_o.send_keys(link)
-
-            # 选择分区
-            # driver.find_element_by_xpath(r'//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[2]/div[2]/div[1]/div[3]/div').click()
-            # driver.find_element_by_xpath(r'//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[2]/div[2]/div[1]/div[3]/div[2]/div[6]').click()
-
-            # 稿件标题
-            title = driver.find_element_by_xpath(
-                '//*[@class="upload-v2-container"]/div[2]/div[3]/div[1]/div[8]/div[2]/div/div/input')
-            title.send_keys(Keys.CONTROL + 'a')
-            title.send_keys(Keys.BACKSPACE)
-            title.send_keys(title_)
-
-            # js = "var q=document.getElementsByClassName('content-tag-list')[0].scrollIntoView();"
-            # driver.execute_script(js)
-            # time.sleep(3)
-            # 输入相关游戏
-            # driver.save_screenshot('bin/err.png')
-            # print('截图')
-            # text_1 = driver.find_element_by_xpath(
-            #     '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[5]/div/div/div[1]/div[2]/div/div/input')
-            # text_1.send_keys('星际争霸2')
-            # 简介
-            text_2 = driver.find_element_by_xpath(
-                '//*[@class="upload-v2-container"]/div[2]/div[3]/div[1]/div[12]/div[2]/div/textarea')
-            text_2.send_keys('职业选手直播第一视角录像。这个自动录制上传的小程序开源在Github：'
-                             'http://t.cn/RgapTpf(或者在Github搜索ForgQi)交流群：837362626'
-                             '\n顺便推广一下自己的网站http://web-form.me/')
+            self.add_information(driver, link, title_)
 
             driver.find_element_by_xpath('//*[@class="upload-v2-container"]/div[2]/div[3]/div[5]/span[1]').click()
             # screen_shot = driver.save_screenshot('bin/1.png')
@@ -246,6 +167,89 @@ class Upload(object):
             driver.quit()
             logger.info('浏览器驱动退出')
 
+    def add_videos(self, driver, title_, videopath):
+        WebDriverWait(driver, 20).until(
+            ec.presence_of_element_located((By.NAME, 'buploader')))
+        upload = driver.find_element_by_name('buploader')
+        # print(driver.title)
+        # logger.info(driver.title)
+        upload.send_keys(videopath)  # send_keys
+        logger.info('开始上传' + title_)
+        time.sleep(2)
+        button = r'//*[@class="new-feature-guide-v2-container"]/div/div/div/div/div[1]'
+        if self.is_element_exist(driver, button):
+            sb = driver.find_element_by_xpath(button)
+            sb.click()
+            sb.click()
+            sb.click()
+            logger.debug('点击')
+        while True:
+            # info = driver.find_elements_by_xpath(
+            #     '//*[@id="app"]/div[3]/div[2]/div[2]/div[2]/div/div/div[2]/div[2]')
+            # print(info)
+            info = driver.find_elements_by_class_name(r'item-upload-info')
+            for t in info:
+                # print(t)
+                try:
+                    if t.text != '':
+                        print(t.text)
+                except selenium.common.exceptions.StaleElementReferenceException:
+                    logger.exception("selenium.common.exceptions.StaleElementReferenceException")
+
+                # else:
+                #     print('出问题啦')
+            time.sleep(10)
+            # text = driver.find_elements_by_xpath(
+            #     '//*[@id="app"]/div[3]/div[2]/div[2]/div[2]/div/div/div[2]/div[2]/span')
+            text = driver.find_elements_by_xpath(r'//*[@class="item-upload-info"]/span')
+            aggregate = set()
+            for s in text:
+                if s.text != '':
+                    aggregate.add(s.text)
+                    print(s.text)
+            # if text == 'Upload complete' or text == '上传完成':
+            #     break
+
+            if len(aggregate) == 1 and ('Upload complete' in aggregate or '上传完成' in aggregate):
+                break
+        logger.info('上传%s个数%s' % (title_, len(info)))
+
+    @staticmethod
+    def add_information(driver, link, title_):
+        # 点击模板
+        driver.find_element_by_xpath(r'//*[@class="normal-title-wrp"]/div/p').click()
+        driver.find_element_by_class_name(r'template-list-small-item').click()
+        # driver.find_element_by_xpath(
+        #     r'//*[@id="app"]/div[3]/div[2]/div[3]/div[1]/div[1]/div/div[2]/div[1]').click()
+        # 输入转载来源
+        input_o = driver.find_element_by_xpath(
+            '//*[@class="upload-v2-container"]/div[2]/div[3]/div[1]/div[4]/div[3]/div/div/input')
+        input_o.send_keys(link)
+        # 选择分区
+        # driver.find_element_by_xpath(r'//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[2]/div[2]/div[1]/div[3]/div').click()
+        # driver.find_element_by_xpath(r'//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[2]/div[2]/div[1]/div[3]/div[2]/div[6]').click()
+        # 稿件标题
+        title = driver.find_element_by_xpath(
+            '//*[@class="upload-v2-container"]/div[2]/div[3]/div[1]/div[8]/div[2]/div/div/input')
+        title.send_keys(Keys.CONTROL + 'a')
+        title.send_keys(Keys.BACKSPACE)
+        title.send_keys(title_)
+        # js = "var q=document.getElementsByClassName('content-tag-list')[0].scrollIntoView();"
+        # driver.execute_script(js)
+        # time.sleep(3)
+        # 输入相关游戏
+        # driver.save_screenshot('bin/err.png')
+        # print('截图')
+        # text_1 = driver.find_element_by_xpath(
+        #     '//*[@id="item"]/div/div[2]/div[3]/div[2]/div[2]/div[1]/div[5]/div/div/div[1]/div[2]/div/div/input')
+        # text_1.send_keys('星际争霸2')
+        # 简介
+        text_2 = driver.find_element_by_xpath(
+            '//*[@class="upload-v2-container"]/div[2]/div[3]/div[1]/div[12]/div[2]/div/textarea')
+        text_2.send_keys('职业选手直播第一视角录像。这个自动录制上传的小程序开源在Github：'
+                         'http://t.cn/RgapTpf(或者在Github搜索ForgQi)交流群：837362626'
+                         '\n顺便推广一下自己的网站http://web-form.me/')
+
     def start(self, url, date=None):
         title = self.title
         if date:
@@ -258,4 +262,3 @@ class Upload(object):
                 logger.exception('WebDriverException')
             # except :
             #     logger.exception('?')
-
