@@ -61,18 +61,8 @@ class KernelFunc:
                     if url != one.url_list[-1]:
                         logger.debug('歇息会')
                         time.sleep(15)
-        except requests.exceptions.ReadTimeout as timeout:
-            logger.error("ReadTimeout:" + str(timeout))
-        except requests.exceptions.SSLError as sslerr:
-            logger.error("SSLError:" + str(sslerr))
-        except requests.exceptions.ConnectTimeout as timeout:
-            logger.error("ConnectTimeout:" + str(timeout))
-        except requests.exceptions.ConnectionError as connerr:
-            logger.error("ConnectionError:" + str(connerr))
-        except requests.exceptions.ChunkedEncodingError as ceer:
-            logger.error("ChunkedEncodingError:" + str(ceer))
-        except requests.exceptions.RequestException:
-            logger.exception("unknown")
+        except IOError:
+            logger.exception("IOError")
         finally:
             event_t = Event(TO_MODIFY)
             event_t.args = (live,)
