@@ -1,7 +1,7 @@
 user_name: your usrname
 pass_word: your password
 
-chromedrive_path: e.g. D:\\bilibiliupload\\chromedriver.exe
+chromedrive_path: /usr/local/bin/chromedriver
 
 links_id:
     星际2INnoVation吕布卫星人族天梯第一视角:

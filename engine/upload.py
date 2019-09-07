@@ -135,37 +135,38 @@ class Upload(object):
         # except selenium.common.exceptions.TimeoutException:
         #     logger.exception('超时')
         except selenium.common.exceptions.TimeoutException:
-            logger.info('准备更新cookie')
-            # screen_shot = driver.save_screenshot('bin/1.png')
-            WebDriverWait(driver, 10).until(
-                ec.presence_of_element_located((By.XPATH, r'//*[@id="login-username"]')))
-
-            username = driver.find_element_by_xpath(r'//*[@id="login-username"]')
-            username.send_keys(engine.user_name)
-
-            password = driver.find_element_by_xpath('//*[@id="login-passwd"]')
-            password.send_keys(engine.pass_word)
-
-            driver.find_element_by_class_name("btn-login").click()
-            # logger.info('第四步')
-            # try:
-            cracker = slider_cracker(driver)
-            cracker.crack()
-            # except:
-            #     logger.exception('出错')
-            time.sleep(5)
-            if driver.title == '投稿 - 哔哩哔哩弹幕视频网 - ( ゜- ゜)つロ 乾杯~ - bilibili':
-                cookie = driver.get_cookies()
-                print(cookie)
-                with open(filename, "w") as f:
-                    json.dump(cookie, f)
-                logger.info('更新cookie成功')
-            else:
-                logger.info('更新cookie失败')
+            self.login(driver, filename)
 
         finally:
             driver.quit()
             logger.info('浏览器驱动退出')
+
+    @staticmethod
+    def login(driver, filename):
+        logger.info('准备更新cookie')
+        # screen_shot = driver.save_screenshot('bin/1.png')
+        WebDriverWait(driver, 10).until(
+            ec.presence_of_element_located((By.XPATH, r'//*[@id="login-username"]')))
+        username = driver.find_element_by_xpath(r'//*[@id="login-username"]')
+        username.send_keys(engine.user_name)
+        password = driver.find_element_by_xpath('//*[@id="login-passwd"]')
+        password.send_keys(engine.pass_word)
+        driver.find_element_by_class_name("btn-login").click()
+        # logger.info('第四步')
+        # try:
+        cracker = slider_cracker(driver)
+        cracker.crack()
+        # except:
+        #     logger.exception('出错')
+        time.sleep(5)
+        if driver.title == '投稿 - 哔哩哔哩弹幕视频网 - ( ゜- ゜)つロ 乾杯~ - bilibili':
+            cookie = driver.get_cookies()
+            print(cookie)
+            with open(filename, "w") as f:
+                json.dump(cookie, f)
+            logger.info('更新cookie成功')
+        else:
+            logger.info('更新cookie失败')
 
     def add_videos(self, driver, title_, videopath):
         WebDriverWait(driver, 20).until(
