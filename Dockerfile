@@ -40,6 +40,7 @@ COPY common /opt/common
 COPY engine /opt/engine
 COPY ykdl /opt/ykdl
 COPY Bilibili.py /opt/
+RUN chmod 755 /opt/Blibili.py
 COPY ["config(demo).yaml", "/opt/config.yaml"]
 
 WORKDIR /opt
