@@ -5,6 +5,18 @@
 
 使用需要修改文件名**config(demo).yaml** ➡ **config.yaml**
 
+## docker一键使用 🔨 
+```bash
+cd bilibiliupload
+sudo docker build . -t sc2
+sudo docker -d run sc2
+```
+## 进入容器 📦
+```bash
+sudo docker ps (找到你的imageId)
+sudo docker exec -it imageId /bin/bash     
+```
+
 >## Linux系统下使用方法：
 >
 >        启动：    ./Bilibili.py start
