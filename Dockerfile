@@ -1,6 +1,8 @@
 FROM jrottenberg/ffmpeg
 #VOLUME /opt/data
-
+RUN apt-get update && apt-get install -y locales && rm -rf /var/lib/apt/lists/* \
+    && localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
+ENV LANG en_US.utf8
 RUN export DEBIAN_FRONTEND=noninteractive \
   && apt-get update \
   && apt-get install -y curl \
@@ -40,10 +42,10 @@ COPY common /opt/common
 COPY engine /opt/engine
 COPY ykdl /opt/ykdl
 COPY Bilibili.py /opt/
-RUN chmod 755 /opt/Blibili.py
+RUN  chmod 755 /opt/Bilibili.py
 COPY ["config(demo).yaml", "/opt/config.yaml"]
 
 WORKDIR /opt
-ENTRYPOINT ["./Bilibili.py", "start"]
+ENTRYPOINT ["./Bilibili.py"]
 
-#EXPOSE 9515/tcp
+EXPOSE 9515/tcp
