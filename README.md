@@ -3,6 +3,19 @@
 支持自动录制各大直播平台，上传直播录像到bilibili。  
 相关设置在config.yaml文件中，如直播间地址，b站账号密码
 
+## docker一键使用 🔨 
+```bash
+cd bilibiliupload
+sudo docker build . -t sc2
+sudo docker -d run sc2
+```
+## 进入容器 📦
+```bash
+sudo docker ps (找到你的imageId)
+sudo docker exec -it imageId /bin/bash     
+```
+
+## 其他使用
 使用需要修改文件名**config(demo).yaml** ➡ **config.yaml**
 
 >## Linux系统下使用方法：
