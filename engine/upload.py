@@ -100,6 +100,8 @@ class Upload(object):
 
                 for cookie in new_cookie:
                     # print(cookie)
+                    if isinstance(cookie.get("expiry"), float):
+                        cookie["expiry"] = int(cookie["expiry"])
                     driver.add_cookie(cookie)
 
             driver.get("https://member.bilibili.com/video/upload.html")

@@ -2,7 +2,9 @@ FROM jrottenberg/ffmpeg
 #VOLUME /opt/data
 
 RUN export DEBIAN_FRONTEND=noninteractive \
-  && apt-get update \
+  && apt-get update \ 
+  && apt-get install -y locales \
+  && localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8 \
   && apt-get install -y curl \
   && apt-get install -y python3-pip \
   && apt-get install \
@@ -31,6 +33,8 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     /var/cache/* \
     /var/lib/apt/lists/* \
     /var/tmp/*
+
+ENV LANG en_US.utf8
 
 COPY requirements.txt /opt/
 RUN cd /opt \
