@@ -1,14 +1,11 @@
 FROM jrottenberg/ffmpeg
 #VOLUME /opt/data
-
 RUN export DEBIAN_FRONTEND=noninteractive \
-  && apt-get update \ 
-  && apt-get install -y locales \
-  && localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8 \
+  && apt-get update \
   && apt-get install -y curl \
   && apt-get install -y python3-pip \
-  && apt-get install \
-    unzip \
+  && apt-get install -y zip \
+#  && apt-get install -y unzip \
   && \
   DL=https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
   && curl -sL "$DL" > /tmp/chrome.deb \
@@ -23,6 +20,8 @@ RUN export DEBIAN_FRONTEND=noninteractive \
   && unzip /tmp/driver.zip \
   && chmod 755 chromedriver \
   && mv chromedriver /usr/local/bin/ \
+  && apt-get install -y locales \
+  && localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8 \
   # Remove obsolete files:
   && apt-get autoremove --purge -y \
     unzip \
@@ -48,6 +47,6 @@ RUN chmod 755 /opt/Bilibili.py
 COPY ["config(demo).yaml", "/opt/config.yaml"]
 
 WORKDIR /opt
-ENTRYPOINT ["./Bilibili.py", "start"]
+ENTRYPOINT ["./Bilibili.py"]
 
 #EXPOSE 9515/tcp

@@ -187,34 +187,23 @@ class Upload(object):
             sb.click()
             logger.debug('点击')
         while True:
-            # info = driver.find_elements_by_xpath(
-            #     '//*[@id="app"]/div[3]/div[2]/div[2]/div[2]/div/div/div[2]/div[2]')
-            # print(info)
-            info = driver.find_elements_by_class_name(r'item-upload-info')
-            for t in info:
-                # print(t)
-                try:
+            try:
+                info = driver.find_elements_by_class_name(r'item-upload-info')
+                for t in info:
                     if t.text != '':
                         print(t.text)
-                except selenium.common.exceptions.StaleElementReferenceException:
-                    logger.exception("selenium.common.exceptions.StaleElementReferenceException")
+                time.sleep(10)
+                text = driver.find_elements_by_xpath(r'//*[@class="item-upload-info"]/span')
+                aggregate = set()
+                for s in text:
+                    if s.text != '':
+                        aggregate.add(s.text)
+                        print(s.text)
 
-                # else:
-                #     print('出问题啦')
-            time.sleep(10)
-            # text = driver.find_elements_by_xpath(
-            #     '//*[@id="app"]/div[3]/div[2]/div[2]/div[2]/div/div/div[2]/div[2]/span')
-            text = driver.find_elements_by_xpath(r'//*[@class="item-upload-info"]/span')
-            aggregate = set()
-            for s in text:
-                if s.text != '':
-                    aggregate.add(s.text)
-                    print(s.text)
-            # if text == 'Upload complete' or text == '上传完成':
-            #     break
-
-            if len(aggregate) == 1 and ('Upload complete' in aggregate or '上传完成' in aggregate):
-                break
+                if len(aggregate) == 1 and ('Upload complete' in aggregate or '上传完成' in aggregate):
+                    break
+            except selenium.common.exceptions.StaleElementReferenceException:
+                logger.exception("selenium.common.exceptions.StaleElementReferenceException")
         logger.info('上传%s个数%s' % (title_, len(info)))
 
     @staticmethod

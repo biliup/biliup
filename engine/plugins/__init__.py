@@ -28,41 +28,35 @@ class DownloadBase:
         pass
 
     def run(self):
+        try:
+            logger.info('开始下载%s：%s' % (self.__class__.__name__, self.fname))
+            self.start()
+        finally:
+            logger.info('退出下载')
+
+    def start(self):
         file_name = self.file_name
         self.ydl_opts = {'outtmpl': file_name}
         if self.check_stream():
-            try:
-                logger.info('开始下载%s：%s' % (self.__class__.__name__, self.fname))
-                pid = os.getpid()
-                # t = Thread(target=self.kill_child_processes, args=(pid, file_name))
-                monitor = Monitoring(pid, file_name)
-                self.flag = monitor.flag
-                t = Thread(target=monitor.start)
-                t.start()
-                retval = self.download()
-                self.rename(file_name)
-                monitor.stop()
-                if retval != 0:
-                    logger.info('准备递归下载')
-                    self.run()
-                else:
-                    logger.info('下载完成' + self.fname)
-
-            # except youtube_dl.utils.DownloadError:
-            #     self.rename(file_name)
-            #     logger.info('准备递归下载')
-            #     self.run()
-            # except:
-            #     logger.exception('?')
-            finally:
-                logger.info('退出下载')
-        return
+            pid = os.getpid()
+            monitor = Monitoring(pid, file_name)
+            self.flag = monitor.flag
+            t = Thread(target=monitor.start)
+            t.start()
+            retval = self.download()
+            self.rename(file_name)
+            monitor.stop()
+            if retval != 0:
+                logger.debug('准备递归下载')
+                self.start()
+            else:
+                logger.info('下载完成' + self.fname)
 
     @staticmethod
     def rename(file_name):
         try:
             os.rename(file_name + '.part', file_name)
-            logger.info('更名{0}为{1}'.format(file_name + '.part', file_name))
+            logger.debug('更名{0}为{1}'.format(file_name + '.part', file_name))
         except FileNotFoundError:
             logger.info('FileNotFoundError:' + file_name)
         except FileExistsError:
@@ -239,7 +233,7 @@ class Monitoring(Timer):
             logger.info('分段下载' + self.file_name)
 
     def __timer(self):
-        logger.info('获取到{0}，{1}'.format(self.parent_pid, self.file_name))
+        logger.debug('获取到{0}，{1}'.format(self.parent_pid, self.file_name))
         retry = 0
 
         while not self._flag.wait(self.interval):
@@ -259,7 +253,7 @@ class Monitoring(Timer):
         try:
             self.__timer()
         finally:
-            logger.info('退出监控<%s>线程' % self.file_name)
+            logger.debug('退出监控<%s>线程' % self.file_name)
 
 
 def match1(text, *patterns):
