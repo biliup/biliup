@@ -5,6 +5,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
   && apt-get install -y curl \
   && apt-get install -y python3-pip \
   && apt-get install -y zip \
+  && apt-get install -y nodejs \
 #  && apt-get install -y unzip \
   && \
   DL=https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
