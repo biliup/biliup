@@ -1,6 +1,5 @@
 import multiprocessing
 import time
-import requests
 import engine
 import common
 from engine import CHECK, BE_MODIFIED, DOWNLOAD_UPLOAD, TO_MODIFY, UPLOAD, urls, url_status, url_status_base
@@ -31,7 +30,6 @@ def process(name, url, mod):
     finally:
         event = Event(BE_MODIFIED)
         event.args = (url,)
-        # return url
         return event
 
 
@@ -73,14 +71,11 @@ class KernelFunc:
     @event_manager.register(engine.TO_MODIFY)
     def modify(self, live_m):
         live_d = {}
-        # print(live_m)
         if live_m:
             event = []
             for live in live_m:
                 if self.url_status[live] == 1:
-                    # 已开播正在下载
-                    # print('已开播正在下载')
-                    pass
+                    logger.debug('已开播正在下载')
                 else:
                     name = engine.find_name(live)
                     logger.debug(name + '刚刚开播，去下载')
@@ -98,39 +93,29 @@ class KernelFunc:
 
     def free(self, list_url):
         status_num = list(map(lambda x: self.url_status.get(x), list_url))
-        # print(status_num)
-        if 1 in status_num or 2 in status_num:
-            return False
-        else:
-            return True
+        # if 1 in status_num or 2 in status_num:
+        #     return False
+        # else:
+        #     return True
+        return not (1 in status_num or 2 in status_num)
 
     @event_manager.register(engine.UPLOAD)
     def free_upload(self, _urls):
         logger.debug(_urls)
         event = []
         for title, v in engine.links_id.items():
-            # names = list(map(find_name, urls))
             url = v[0]
-            # if title not in names and url_status[url] == 0 and Upload(title, url).filter_file():
             if self.free(v) and Upload(title).filter_file():
                 event_d = Event(DOWNLOAD_UPLOAD)
                 event_d.args = (title, url, 'up')
                 event.append(event_d)
-
                 # self.event_manager.send_event(event_d)
                 self.url_status[url] = 2
-                # print('up')
         return tuple(event)
-        # Upload(title, url).start()
-
-        # except:
-        #     logger.exception()
-        # print('寻找结束')
 
     @event_manager.register(engine.BE_MODIFIED)
     def revise(self, url):
         if url:
+            # 更新字典
             # url_status = {**url_status, **{url: 0}}
             self.url_status.update({url: 0})
-            # print('更新字典')
-            # print(url_status)
