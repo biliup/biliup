@@ -11,24 +11,32 @@ from .acbase import AcBase
 
 class AcVideo(AcBase):
 
-    name = u'ACfun 弹幕视频网'
+    name = u'AcFun 弹幕视频网'
 
     def get_page_info(self, html):
-        pageInfo = json.loads(match1(html, u'var pageInfo = ({.+?})</script>'))
+        pageInfo = json.loads(match1(html, u'(?:pageInfo|videoInfo) = ({.+?});'))
         videoList = pageInfo['videoList']
-        videoInfo = videoList[pageInfo['P']]
+        videoInfo = pageInfo.get('currentVideoInfo')
+        assert videoInfo, bgmInfo.get('playErrorMessage') or "can't play this video!!"
+
         title = pageInfo['title']
         sub_title = videoInfo['title']
-        artist = pageInfo['username']
-        sourceVid = pageInfo['videoId']
-        if sub_title != 'Part1' or len(videoList) > 1:
+        artist = pageInfo['user']['name']
+        if sub_title not in ('noTitle', 'Part1', title) or len(videoList) > 1:
             title = u'{} - {}'.format(title, sub_title)
+        sourceVid = videoInfo['id']
 
-        return title, artist, sourceVid
+        m3u8Info = videoInfo.get('playInfos')
+        if m3u8Info:
+            m3u8Info = m3u8Info[0]
+        else:
+            m3u8Info = videoInfo.get('ksPlayJson')
+
+        return title, artist, sourceVid, m3u8Info
 
     def get_path_list(self):
         html = get_content(self.url)
-        videos = matchall(html, ['href="(/v/[a-zA-Z0-9_]+)" title="'])
+        videos = matchall(html, ['href=[\'"](/v/[a-zA-Z0-9_]+)[\'"] title=[\'"]'])
         return videos
 
 site = AcVideo()

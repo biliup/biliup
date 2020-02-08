@@ -32,7 +32,7 @@ class SohuBase(VideoExtractor):
         'superVid',
         'highVid',
         'norVid'
-        ]
+    ]
     types_2_id = {
         'h2654kVid': '4k',
         'h2654mVid': '4k',
@@ -45,8 +45,14 @@ class SohuBase(VideoExtractor):
         'superVid': 'TD',
         'highVid': 'HD',
         'norVid': 'SD'
-        }
-    id_2_profile = { '4k': u'4K', 'BD': u'原画', 'TD': u'超清', 'HD': u'高清', 'SD': u'标清' }
+    }
+    id_2_profile = {
+        '4k': u'4K',
+        'BD': u'原画',
+        'TD': u'超清',
+        'HD': u'高清',
+        'SD': u'标清'
+    }
 
     def parser_info(self, video, info, stream, lvid, uid):
         if not 'allot' in info or lvid != info['id']:
@@ -54,38 +60,38 @@ class SohuBase(VideoExtractor):
         stream_id = self.types_2_id[stream]
         stream_profile = self.id_2_profile[stream_id]
         host = info['allot']
-        prot = info['prot']
-        tvid = info['tvid']
         data = info['data']
-        size = sum(map(int,data['clipsBytes']))
+        size = sum(map(int, data['clipsBytes']))
         urls = []
         assert len(data['clipsURL']) == len(data['clipsBytes']) == len(data['su'])
-        for new, clip, ck, in zip(data['su'], data['clipsURL'], data['ck']):
+        for new, ck, in zip(data['su'], data['ck']):
             params = {
-                'vid': self.vid,
-                'tvid': tvid,
-                'file': urlparse(clip).path,
+                'ch': data['ch'],
+                'num': data['num'],
                 'new': new,
                 'key': ck,
                 'uid': uid,
-                't': random(),
-                'prod': 'h5',
-                'prot': prot,
+                'prod': 'h5n',
                 'pt': 1,
-                'rb': 1,
+                'pg': 2,
             }
             if urlparse(new).netloc == '':
-                cdnurl = 'https://'+host+'/cdnList?' + urlencode(params)
-                url = json.loads(get_content(cdnurl))['url']
+                cdnurl = 'https://{}/ip?{}'.format(host, urlencode(params))
+                url = json.loads(get_content(cdnurl))['servers'][0]['url']
             else:
                 url = new
             urls.append(url)
-        video.streams[stream_id] = {'container': 'mp4', 'video_profile': stream_profile, 'src': urls, 'size' : size}
+        video.streams[stream_id] = {
+            'container': 'mp4',
+            'video_profile': stream_profile,
+            'src': urls,
+            'size' : size
+        }
         video.stream_types.append(stream_id)
 
     def prepare(self):
         if self.url and not self.vid:
-            self.vid = match1(self.url, '\Wvid=(\d+)', '\Wid=(\d+)', 'share_play.html#(\d+)_')
+            self.vid = match1(self.url, '\Wvid=(\d+)', '\Wid=(\d+)', '\Wbid=(\d+)', 'share_play.html#(\d+)_')
             if not self.vid:
                 html = get_content(self.url)
                 self.vid = match1(html, '/(\d+)/v\.swf', 'vid="(\d+)"', '\&id=(\d+)')

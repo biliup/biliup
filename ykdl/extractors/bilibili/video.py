@@ -3,8 +3,11 @@
 
 from ykdl.util.html import get_content
 from ykdl.util.match import match1, matchall
+from ykdl.compact import urlencode
 
 from .bilibase import BiliBase, sign_api_url
+
+import json
 
 
 APPKEY = 'iVGUTjsxvpLeuDCf'
@@ -14,38 +17,38 @@ api_url = 'https://interface.bilibili.com/v2/playurl'
 class BiliVideo(BiliBase):
     name = u'哔哩哔哩 (Bilibili)'
 
-    def get_vid_title(self):
-        av_id = match1(self.url, '(?:/av|aid=)(\d+)')
-        page_index = '1'
-        if "#page=" in self.url or "?p=" in self.url or 'index_' in self.url:
-            page_index = match1(self.url, '(?:#page|\?p)=(\d+)', 'index_(\d+)\.')
-        if page_index == '1':
-            self.url = 'https://www.bilibili.com/av{}/'.format(av_id)
-        else:
-            self.url = 'https://www.bilibili.com/av{}/?p={}'.format(av_id, page_index)
-        if not self.vid:
-            html = get_content(self.url)
-            #vid = match1(html, 'cid=(\d+)', 'cid="(\d+)', '"cid":(\d+)')
-            title = match1(html, '"title":"([^"]+)', '<h1 title="([^"]+)', '<title>([^<]+)').strip()
-            video_list = matchall(html, ['"cid":(\d+),"page":(\d+),"from":"[^"]+","part":"([^"]*)",'])
-            for cid, page, part in video_list:
-               if page == page_index:
-                   vid = cid
-                   if len(video_list) > 1:
-                       title = u'{} - {} - {}'.format(title, page, part)
-                   elif part:
-                       title = u'{} - {}'.format(title, part)
-                   break
+    def get_page_info(self):
+        page_index = match1(self.url, '\?p=(\d+)', 'index_(\d+)\.') or '1'
+        html = get_content(self.url)
+        date = json.loads(match1(html, '__INITIAL_STATE__=({.+?});'))['videoData']
+        title = date['title']
+        artist = date['owner']['name']
+        pages = date['pages']
+        for page in pages:
+           index = str(page['page'])
+           subtitle = page['part']
+           if index == page_index:
+               vid = page['cid']
+               if len(pages) > 1:
+                   title = u'{} - {} - {}'.format(title, index, subtitle)
+               elif subtitle and subtitle != title:
+                   title = u'{} - {}'.format(title, subtitle)
+               break
 
-        return vid, title
+        return vid, title, artist
 
     def get_api_url(self, qn):
-        params_str = 'appkey={}&cid={}&player=0&qn={}'.format(APPKEY, self.vid, qn)
+        params_str = urlencode([
+            ('appkey', APPKEY),
+            ('cid', self.vid),
+            ('platform', 'html5'),
+            ('player', 0),
+            ('qn', qn)
+        ])
         return sign_api_url(api_url, params_str, SECRETKEY)
 
     def prepare_list(self):
-        av_id = match1(self.url, '(?:/av|aid=)(\d+)')
-        self.url = 'https://www.bilibili.com/av{}/'.format(av_id)
+        av_id = match1(self.url, '/av(\d+)')
         html = get_content(self.url)
         video_list = matchall(html, ['"page":(\d+),'])
         if video_list:

@@ -4,15 +4,14 @@
 import re
 
 def get_extractor(url):
-
-    if re.search('my.tv.sohu.com', url):
+    if 'my.tv.sohu.com' in url:
         from . import my as s
-        return s.site
-    elif re.search('edu.tv.sohu.com', url):
+        return s.site, url
+    elif 'edu.tv.sohu.com' in url:
         from . import edu as s
-        return s.site
+        return s.site, url
     else:
         from . import tv as s
-        return s.site
+        return s.site, url
+
     raise NotImplementedError(url)
- 

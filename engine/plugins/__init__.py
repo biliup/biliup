@@ -10,6 +10,13 @@ import youtube_dl
 from common import logger
 from common.timer import Timer
 
+fake_headers = {
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Encoding': 'gzip, deflate',
+    'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:38.0) Gecko/20100101 Firefox/38.0 Iceweasel/38.2.1'
+}
+
 
 class DownloadBase:
     url_list = None
@@ -149,7 +156,8 @@ class SDownload(DownloadBase):
 # -c copy -bsf:a aac_adtstoasc -movflags +faststart output.mp4
 class FFmpegdl(DownloadBase):
     def download(self):
-        args = ['ffmpeg', '-y', '-i', self.ydl_opts['absurl'], '-c', 'copy', '-f', self.suffix,
+        args = ['ffmpeg', '-headers', ''.join('%s: %s\r\n' % x for x in fake_headers.items()),
+                '-y', '-i', self.ydl_opts['absurl'], '-c', 'copy', '-f', self.suffix,
                 self.ydl_opts['outtmpl'] + '.part']
         proc = subprocess.Popen(args, stdin=subprocess.PIPE)
         try:

@@ -5,9 +5,9 @@ from ykdl.extractor import VideoExtractor
 from ykdl.videoinfo import VideoInfo
 from ykdl.util.html import get_content, add_header
 from ykdl.util.match import match1
-from ykdl.compact import urlencode
+from ykdl.compact import urlencode, parse_qs
 
-from .util import get_random_str, get_macid, cmd5x
+from .util import get_random_str, get_macid, cmd5x_iqiyi3 as cmd5x
 
 import json
 import time
@@ -68,27 +68,40 @@ class IqiyiLive(VideoExtractor):
         data = data['data']
 
         for stream in data['streams']:
-            # TODO: parse more format types.
-            # Streams which use formatType 'TS' are slow,
-            # and rolling playback use formatType 'HLFLV' with scheme 'hcdnlive://'.
-            # Its host and path encoded as like:
-            #   'AMAAAAD3PV2R2QI7MXRQ4L2BD5Y...'
-            # the real url is:
-            #   'https://hlslive.video.iqiyi.com/live/{hl_slid}.flv?{params}'
-            # Request it, the response is a json data which contains CDN informations.
-            if stream['formatType'] == 'TS':
-                m3u8 = stream['url']
-                # miswrote 'streamType' to 'steamType'
-                stream_type = stream['steamType']
-                stream_profile = stream['screenSize']
-                stream_id = self.type_2_id[stream_type]
-                info.stream_types.append(stream_id)
-                info.streams[stream_id] = {
-                    'video_profile': stream_profile,
-                    'container': 'm3u8',
-                    'src' : [m3u8],
-                    'size': float('inf')
+            stream_type = stream['steamType']  # typo 'streamType' to 'steamType'
+            stream_id = self.type_2_id[stream_type]
+
+            if stream['formatType'] == 'HLFLV':
+                stream_params = stream['url'].split('?')[-1]
+                stream_params_dict = dict((k, v[0]) for k, v in parse_qs(stream_params).items())
+                if stream_params_dict['hl_sttp'] != 'flv':
+                    continue
+                params = {
+                    'streamName': stream['streamName'],
+                    'streamParams': stream_params,
+                    'hl_stid': stream_params_dict['hl_stid'],
+                    'hl_stft': stream_params_dict['hl_stft'],
+                    'hl_stapp': stream_params_dict['hl_stapp']
                 }
+                url = 'https://flvlive.video.iqiyi.com/{hl_stapp}/{streamName}.{hl_stft}?{streamParams}'.format(**params)
+                url = json.loads(get_content(url))['l']
+                url = url.replace('{streamName}.'.format(**params), '{hl_stid}.'.format(**params))
+                ext = 'flv'
+            elif stream_id in info.streams:
+                continue
+            elif stream['formatType'] == 'TS':
+                url = stream['url']
+                ext = 'm3u8'
+
+            stream_profile = stream['screenSize']
+            if stream_id not in info.streams:
+                 info.stream_types.append(stream_id)
+            info.streams[stream_id] = {
+                'video_profile': stream_profile,
+                'container': ext,
+                'src' : [url],
+                'size': float('inf')
+            }
 
         assert info.stream_types, 'can\'t play this live video!!'
         if len(info.stream_types) == 1:

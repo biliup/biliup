@@ -4,17 +4,15 @@
 from ykdl.extractor import VideoExtractor
 from ykdl.videoinfo import VideoInfo
 from ykdl.util.match import match1
-from ykdl.util.html import default_proxy_handler, get_content
-from ykdl.compact import build_opener, HTTPCookieProcessor, install_opener
+from ykdl.util.html import add_default_handler, install_default_handlers, get_content
+from ykdl.compact import HTTPCookieProcessor
 
 class BoBo(VideoExtractor):
     name = u"bobo娱乐 美女直播"
 
     def prepare(self):
-        handlers = [HTTPCookieProcessor()]
-        if default_proxy_handler:
-            handlers += default_proxy_handler
-        install_opener(build_opener(*handlers))
+        add_default_handler(HTTPCookieProcessor)
+        install_default_handlers()
 
         info = VideoInfo(self.name, True)
         html = get_content(self.url)

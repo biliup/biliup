@@ -104,10 +104,22 @@ class RangeFetch():
         self.max_threads = min(self.threads * 2, self.pool_size)
 
         if self.http is None:
+            connection_pool_kw = {
+                'block': True,
+                'timeout': self.timeout,
+                'maxsize': self.pool_size
+            }
             if self.proxy:
-                self.__class__.http = urllib3.ProxyManager(self.proxy, block=True, timeout=self.timeout, maxsize=self.pool_size)
+                if self.proxy.lower().startswith('socks'):
+                    from urllib3.contrib.socks import SOCKSProxyManager as ProxyManager
+                else:
+                    ProxyManager = urllib3.ProxyManager
+                http = ProxyManager(self.proxy, **connection_pool_kw)
+                if ProxyManager is not urllib3.ProxyManager:
+                    http.connection_pool_kw['_socks_options']['rdns'] = True
             else:
-                self.__class__.http = urllib3.PoolManager(block=True, timeout=self.timeout, maxsize=self.pool_size)
+                http = urllib3.PoolManager(**connection_pool_kw)
+            self.__class__.http = http
 
         self.firstrange = range_start, range_start + self.first_size - 1
 

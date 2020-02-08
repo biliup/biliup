@@ -4,7 +4,8 @@
 import re
 
 def get_extractor(url):
-    if re.search("music.baidu", url):
+    if 'music.baidu' in url:
         from . import music as s
-        return s.site
+        return s.site, url
+
     raise NotImplementedError(url)

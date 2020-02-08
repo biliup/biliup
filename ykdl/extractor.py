@@ -15,6 +15,8 @@ class VideoExtractor():
         self.__init__()
         if compact_isstr(url) and url.startswith('http'):
             self.url = url
+            if self.list_only():
+                return self.parser_list(url)
         else:
             self.vid= url
 

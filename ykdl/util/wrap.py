@@ -11,6 +11,7 @@ from logging import getLogger
 logger = getLogger("wrap")
 
 from ykdl.compact import compact_tempfile
+from .html import fake_headers
 
 posix = os.name == 'posix'
 
@@ -22,7 +23,45 @@ else:
     # Used in Windows CreateProcess is 32K
     ARG_MAX = 32 * 1024
 
-def launch_player(player, urls, ext, **args):
+class PlayerHandle(object):
+    def __init__(self, cmds, env, cleanup=[]):
+        self.handle = None
+        self.cmds = cmds
+        self.env = env
+        if cleanup:
+            if callable(cleanup):
+                cleanup = [cleanup]
+            else:
+                try:
+                    cleanup = [c for c in cleanup if callable(c)]
+                except:
+                    cleanup = []
+        self.cleanup = cleanup
+
+    def __getattr__(self, name):
+        return getattr(self.handle, name)
+
+    def wait(self, *args, **kwargs):
+        if not self.handle:
+            self.play()
+
+    def play(self):
+        try:
+            for cmd in self.cmds:
+                self.handle = handle = subprocess.Popen(cmd, env=self.env)
+                handle.wait()
+        finally:
+            self.terminate()
+
+    def terminate(self):
+        if self.handle:
+            self.handle.terminate()
+        while self.cleanup:
+            self.cleanup.pop()()
+
+    kill = terminate
+
+def launch_player(player, urls, ext, play=True, **args):
     if ' ' in player:
         cmd = shlex.split(player, posix=posix)
         if not posix:
@@ -32,15 +71,15 @@ def launch_player(player, urls, ext, **args):
 
     if 'mpv' in cmd[0]:
         if ext == 'm3u8' and any(os.path.isfile(url) for url in urls):
-            cmd += ['--demuxer-lavf-o', 'protocol_whitelist=[file,http,https,tls,rtp,tcp,udp,crypto,httpproxy]']
+            cmd += ['--demuxer-lavf-o=protocol_whitelist=[file,http,https,tls,rtp,tcp,udp,crypto,httpproxy]']
         if args['ua']:
-            cmd += ['--user-agent', args['ua']]
+            cmd += ['--user-agent=' + args['ua']]
         if args['referer']:
-            cmd += ['--referrer', args['referer']]
+            cmd += ['--referrer=' + args['referer']]
         if args['title']:
-            cmd += ['--force-media-title', encode_for_wrap(args['title'], 'ignore')]
+            cmd += ['--force-media-title=' + encode_for_wrap(args['title'], 'ignore')]
         if args['header']:
-            cmd += ['--http-header-fields', args['header']]
+            cmd += ['--http-header-fields=' + args['header']]
 
     urls = [encode_for_wrap(url) for url in urls]
     if args['rangefetch']:
@@ -50,21 +89,21 @@ def launch_player(player, urls, ext, **args):
         env.pop('HTTP_PROXY', None)
         env.pop('HTTPS_PROXY', None)
         from ykdl.util.rangefetch_server import start_new_server
-        new_server = start_new_server(**args['rangefetch'])
-        for cmd in cmds:
-            subprocess.call(cmd, env=env)
-        new_server.server_close()
+        cleanup = start_new_server(**args['rangefetch']).server_close
+        phandle = PlayerHandle(cmds, env, cleanup=cleanup)
     else:
         urls = list(urls)
         cmds = split_cmd_urls(cmd, urls)
-        if args['proxy']:
+        if args['proxy'].lower().startswith('http'):
             env = os.environ.copy()
             env['HTTP_PROXY'] = args['proxy']
             env['HTTPS_PROXY'] = args['proxy']
         else:
             env = None
-        for cmd in cmds:
-            subprocess.call(cmd, env=env)
+        phandle = PlayerHandle(cmds, env)
+    if play:
+        phandle.play()
+    return phandle
 
 def split_cmd_urls(cmd, urls):
     _cmd = cmd + urls
@@ -132,7 +171,7 @@ def launch_ffmpeg_download(url, name, live):
     if live:
         print('stop downloading by press \'q\'')
 
-    cmd = ['ffmpeg', '-y']
+    cmd = ['ffmpeg', '-headers', ''.join('%s: %s\r\n' % x for x in fake_headers.items()), '-y']
 
     url = encode_for_wrap(url)
     if os.path.isfile(url):

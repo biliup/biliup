@@ -13,43 +13,30 @@ from .acbase import AcBase
 
 class AcBan(AcBase):
 
-    name = u'ACfun 弹幕视频网 (番剧)'
-
-    def list_only(self):
-        return '/bangumi/aa' in self.url
+    name = u'AcFun 弹幕视频网 (番剧)'
 
     def get_page_info(self, html):
         artist = None
-        bgmInfo = json.loads(match1(html, u'var bgmInfo = ({.+?})</script>'))
-        videoInfo = bgmInfo['video']['videos'][0]
-        title = u'{} - {} {}'.format(
-                bgmInfo['album']['title'],
-                videoInfo['episodeName'],
-                videoInfo['newTitle']
-        ).rstrip()
-        sourceVid = videoInfo['videoId']
+        bgmInfo = json.loads(match1(html, u'(?:pageInfo|bangumiData) = ({.+?});'))
+        videoInfo = bgmInfo.get('currentVideoInfo')
+        assert videoInfo, bgmInfo.get('playErrorMessage') or "can't play this video!!"
 
-        return title, artist, sourceVid
+        title = u'{} - {}'.format(
+                bgmInfo['bangumiTitle'],
+                bgmInfo['episodeName'],
+        )
+        sourceVid = videoInfo['id']
+        m3u8Info = videoInfo.get('playInfos')
+        if m3u8Info:
+            m3u8Info = m3u8Info[0]
+        else:
+            m3u8Info = videoInfo.get('ksPlayJson')
+
+        return title, artist, sourceVid, m3u8Info
 
     def get_path_list(self):
         html = get_content(self.url)
-        albumId = match1(self.url, '/a[ab](\d+)')
-        groupId = match1(html, '"groups":[{[^}]*?"id":(\d+)')
-        contentsCount = int(match1(html, '"contentsCount":(\d+)'))
-        params = {
-            'albumId': albumId,
-            'groupId': groupId,
-            'num': 1,
-            'size': max(contentsCount, 20),
-            '_': int(time.time() * 1000),
-        }
-        data = json.loads(get_content('https://www.acfun.cn/album/abm/bangumis/video?' + urlencode(params)))
-        videos = []
-        for c in data['data']['content']:
-            vid = c['videos'][0]['id']
-            v = '/bangumi/ab{}_{}_{}'.format(albumId, groupId, vid)
-            videos.append(v)
-
+        videos = matchall(html, ['href=[\'"](/bangumi/aa\d+_\d+_\d+)[\'"] data-title=[\'"]'])
         return videos
 
 site = AcBan()

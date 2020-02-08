@@ -4,9 +4,9 @@
 import re
 
 def get_extractor(url):
-    if re.search("v.huya", url):
+    if 'v.huya' in url:
         from . import video as s
     else:
         from . import live as s
-    return s.site
 
+    return s.site, url

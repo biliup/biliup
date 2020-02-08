@@ -4,12 +4,13 @@
 import re
 
 def get_extractor(url):
-    if re.search("/program", url):
+    if '/program' in url:
         from . import program as s
-    elif re.search("/dj", url):
+    elif '/dj' in url:
         from . import program as s
-    elif re.search("/mv", url):
+    elif '/mv' in url:
         from . import mv as s
     else:
         from . import music as s
-    return s.site
+
+    return s.site, url

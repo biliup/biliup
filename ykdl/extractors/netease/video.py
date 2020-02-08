@@ -15,14 +15,21 @@ class NeteaseVideo(VideoExtractor):
 
     def prepare(self):
         info = VideoInfo(self.name)
+
         if not self.vid:
-            html = get_content(self.url)
-            topiccid = match1(html, 'topicid : \"([^\"]+)', 'topicid=([^&]+)')
-            vid = match1(html, 'vid : \"([^\"]+)', 'vid=([^&]+)')
-            self.vid = (topiccid, vid)
-        topiccid, _vid = self.vid
+            topicid = match1(self.url, 'topicid=([^&]+)')
+            vid = match1(self.url, 'vid=([^&]+)')
+
+            if not topicid or not vid:
+                html = get_content(self.url)
+                topicid = topicid or match1(html, 'topicid : \"([^\"]+)', 'topicid=([^&]+)')
+                vid = vid or match1(html, 'vid : \"([^\"]+)', 'vid=([^&]+)')
+        
+            self.vid = (topicid, vid)
+
+        topicid, _vid = self.vid
         code = _vid[-2:]
-        video_xml = get_content('http://xml.ws.126.net/video/{}/{}/{}_{}.xml'.format(code[0], code[1], topiccid, _vid))
+        video_xml = get_content('http://xml.ws.126.net/video/{}/{}/{}_{}.xml'.format(code[0], code[1], topicid, _vid))
         info.title = compact_unquote(match1(video_xml, '<title>([^<]+)'))
 
         for tp in self.sopported_stream_types:

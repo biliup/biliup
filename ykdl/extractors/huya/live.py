@@ -3,6 +3,7 @@
 
 from ykdl.extractor import VideoExtractor
 from ykdl.videoinfo import VideoInfo
+from ykdl.compact import unescape
 from ykdl.util.html import get_content, add_header
 from ykdl.util.match import match1, matchall
 
@@ -13,27 +14,33 @@ class HuyaLive(VideoExtractor):
     name = u"Huya Live (虎牙直播)"
 
     def prepare(self):
-        info = VideoInfo(self.name)
+        info = VideoInfo(self.name, True)
 
         html  = get_content(self.url)
 
-        json_script = match1(html, '"stream": ({.+?})\s*};')
-        assert json_script, "live video is offline"
-        data = json.loads(json_script)
+        json_stream = match1(html, '"stream": ({.+?})\s*};')
+        assert json_stream, "live video is offline"
+        data = json.loads(json_stream)
         assert data['status'] == 200, data['msg']
 
         room_info = data['data'][0]['gameLiveInfo']
-        info.title = room_info['roomName']
+        info.title = u'{}「{} - {}」'.format(room_info['roomName'], room_info['nick'], room_info['introduction'])
+        info.artist = room_info['nick']
 
         stream_info = random.choice(data['data'][0]['gameStreamInfoList'])
-        sFlvUrl = stream_info['sFlvUrl']
+        sHlsUrl = stream_info['sHlsUrl']
         sStreamName = stream_info['sStreamName']
-        sFlvUrlSuffix = stream_info['sFlvUrlSuffix']
-        sFlvAntiCode = stream_info['sFlvAntiCode']
-        flv_url = '{}/{}.{}?{}'.format(sFlvUrl, sStreamName, sFlvUrlSuffix, sFlvAntiCode)
+        sHlsUrlSuffix = stream_info['sHlsUrlSuffix']
+        sHlsAntiCode = stream_info['sHlsAntiCode']
+        hls_url = u'{}/{}.{}?{}'.format(sHlsUrl, sStreamName, sHlsUrlSuffix, sHlsAntiCode)
 
         info.stream_types.append("current")
-        info.streams["current"] = {'container': 'mp4', 'video_profile': "current", 'src': [flv_url], 'size' : float('inf')}
+        info.streams["current"] = {
+            'container': 'm3u8',
+            'video_profile': 'current',
+            'src': [unescape(hls_url)],
+            'size' : float('inf')
+        }
         return info
 
 site = HuyaLive()

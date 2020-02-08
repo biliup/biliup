@@ -5,45 +5,54 @@ from ykdl.util.html import get_content
 from ykdl.util.match import match1
 from ykdl.extractor import VideoExtractor
 from ykdl.videoinfo import VideoInfo
-from ykdl.compact import unescape
 import json
-import time
+
 
 class QQEGame(VideoExtractor):
     name = u'QQ EGAME (企鹅电竟)'
 
-    mutli_bitrate = ['0', '900', '550']
 
-    bitrate_2_type = {'0': 'BD', '900': 'HD', '550': 'SD'}
-
-    bitrate_2_profile = {'0': u'超清', '900': u'高清', '550': u'标清'}
+    stream_ids = ['BD8M', 'BD6M', 'BD', 'TD', 'HD', 'SD']
+    
+    profile_2_id = {
+        u'蓝光8M': 'BD8M',
+        u'蓝光6M': 'BD6M',
+        u'蓝光': 'BD',
+        u'超清': 'TD',
+        u'高清': 'HD',
+        u'流畅': 'SD',
+    }
 
     def prepare(self):
         info = VideoInfo(self.name, True)
         if not self.vid:
             self.vid = match1(self.url, '/(\d+)')
-        if not self.vid:
-            html = get_content(self.url)
-            self.vid = match1(html, '"liveAddr":"([0-9\_]+)"')
-        self.pid = self.vid
+        if not self.url:
+            self.url = 'https://egame.qq.com/' + self.vid
+        html = get_content(self.url)
 
-        # from upstream!!
-        serverDataTxt = match1(html, 'serverData = {([\S\ ]+)};')
-        serverDataTxt = '{%s}' % (serverDataTxt)
-        self.logger.debug("serverDataTxt => %s" % (serverDataTxt))
+        title = match1(html, 'title:"([^"]*)"')
+        info.artist = artist = match1(html, 'nickName:"([^"]+)"')
+        info.title = u'{} - {}'.format(title, artist)
 
-        serverData = json.loads(serverDataTxt)
-        self.logger.debug(serverData)
+        playerInfo = match1(html, '_playerInfo = ({.+?});')
+        self.logger.debug("playerInfo => %s" % (playerInfo))
 
-        assert serverData["liveInfo"]["data"]["profileInfo"]["isLive"] == 1, 'error: live show is not on line!!'
+        assert playerInfo, 'error: live show is not on line!!'
+        playerInfo = json.loads(playerInfo)
 
-        info.title = serverData["liveInfo"]["data"]["videoInfo"]["title"]
-        info.artist = serverData["liveInfo"]["data"]["profileInfo"]["nickName"]
+        for u in playerInfo['urlArray']:
+            video_profile = u['desc']
+            stream = self.profile_2_id[video_profile]
+            info.stream_types.append(stream)
+            info.streams[stream] = {
+                'container': 'flv',
+                'video_profile': video_profile,
+                'src': [u['playUrl']],
+                'size': float('inf')
+            }
 
-        for data in serverData["liveInfo"]["data"]["videoInfo"]["streamInfos"]:
-            info.stream_types.append(self.bitrate_2_type[data["bitrate"]])
-            info.streams[self.bitrate_2_type[data["bitrate"]]] = {'container': 'flv', 'video_profile': data["desc"], 'src': ["%s&_t=%s000"%(unescape(data["playUrl"]),int(time.time()))], 'size': float('inf')}
-
+        info.stream_types = sorted(info.stream_types, key=self.stream_ids.index)
         return info
 
 site = QQEGame()

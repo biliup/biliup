@@ -6,8 +6,8 @@ import platform
 import struct
 
 if sys.version_info[0] == 3:
-    from urllib.request import Request, urlopen, HTTPSHandler, build_opener, HTTPCookieProcessor, install_opener, ProxyHandler
-    from urllib.parse import urlencode, urlparse, urlsplit
+    from urllib.request import Request, urlopen, HTTPSHandler, build_opener, HTTPCookieProcessor, install_opener, ProxyHandler, getproxies
+    from urllib.parse import urlencode, urlparse, urlsplit, urljoin, parse_qs
     from http.client import HTTPConnection
     from http.server import BaseHTTPRequestHandler
     import socketserver as SocketServer
@@ -29,8 +29,8 @@ if sys.version_info[0] == 3:
         return isinstance(s, str)
 else:
     from urllib2 import Request, urlopen, HTTPSHandler, build_opener, HTTPCookieProcessor, install_opener, ProxyHandler
-    from urllib import urlencode
-    from urlparse import urlparse, urlsplit
+    from urllib import urlencode, getproxies
+    from urlparse import urlparse, urlsplit, urljoin, parse_qs
     from httplib import HTTPConnection
     from BaseHTTPServer import BaseHTTPRequestHandler
     import SocketServer

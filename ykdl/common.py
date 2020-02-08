@@ -16,7 +16,8 @@ alias = {
         'cntv' : 'cctv',
         'letv' : 'le',
         'douyutv' : 'douyu',
-        'aixifan' : 'acfun'
+        'aixifan' : 'acfun',
+        'wetv': 'qq'
 }
 exclude_list = ['com', 'net', 'org']
 def url_to_module(url):
@@ -37,7 +38,7 @@ def url_to_module(url):
     try:
         m = import_module('.'.join(['ykdl','extractors', short_name]))
         if hasattr(m, "get_extractor"):
-            site = m.get_extractor(url)
+            site, url = m.get_extractor(url)
         else:
             site = m.site
         return site, url

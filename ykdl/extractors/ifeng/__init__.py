@@ -4,10 +4,11 @@
 import re
 
 def get_extractor(url):
-    if re.search("video", url):
+    if 'video' in url:
         from . import video as s
-    elif re.search("gongkaike", url):
+    elif 'gongkaike' in url:
         from . import gongkaike as s
     else:
         from . import news as s
-    return s.site
+
+    return s.site, url

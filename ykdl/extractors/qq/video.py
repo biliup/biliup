@@ -115,10 +115,11 @@ class QQ(VideoExtractor):
                     cdn_url_2 = cdn_url
             elif not cdn_url_1:
                 cdn_url_1 = cdn_url
-        if self.limit:
-            cdn_url = cdn_url_3 or cdn_url_1 or cdn_url_2
-        else:
-            cdn_url = cdn_url_1 or cdn_url_2 or cdn_url_3
+        #if self.limit:
+        #    cdn_url = cdn_url_3 or cdn_url_1 or cdn_url_2
+        #else:
+        #    cdn_url = cdn_url_1 or cdn_url_2 or cdn_url_3
+        cdn_url = cdn_url_1 or cdn_url_2 or cdn_url_3
 
         dt = cdn['dt']
         if dt == 1:
@@ -129,23 +130,23 @@ class QQ(VideoExtractor):
             type_name = fn.split('.')[-1]
 
         _num_clips = video['cl']['fc']
-        self.limit = video.get('type', 0) > 1000
-        if self.limit:
-            if _num_clips > 1:
-                self.logger.warning('Only parsed first video part!')
-            for fmt in data['fl']['fi']:
-                if fmt['sl']:
-                    fmt_name = fmt['name']
-                    fmt_cname = fmt['cname']
-                    break
-            fns = fn.split('.')
-            fns.insert(-1, '1')
-            filename = '.'.join(fns)
-            url = '{}{}?vkey={}'.format(cdn_url, filename, fvkey)
-            size = video['cl']['ci'][0]['cs'] # not correct, real size is smaller.
-            rate = size // float(video['cl']['ci'][0]['cd'])
-            yield title, fmt_name, fmt_cname, type_name, [url], size, rate
-            return
+        #self.limit = video.get('type', 0) > 1000
+        #if self.limit:
+        #    if _num_clips > 1:
+        #        self.logger.warning('Only parsed first video part!')
+        #    for fmt in data['fl']['fi']:
+        #        if fmt['sl']:
+        #            fmt_name = fmt['name']
+        #            fmt_cname = fmt['cname']
+        #            break
+        #    fns = fn.split('.')
+        #    fns.insert(-1, '1')
+        #    filename = '.'.join(fns)
+        #    url = '{}{}?vkey={}'.format(cdn_url, filename, fvkey)
+        #    size = video['cl']['ci'][0]['cs'] # not correct, real size is smaller.
+        #    rate = size // float(video['cl']['ci'][0]['cd'])
+        #    yield title, fmt_name, fmt_cname, type_name, [url], size, rate
+        #    return
 
         for fmt in data['fl']['fi']:
             fmt_id = fmt['id']
@@ -253,16 +254,16 @@ class QQ(VideoExtractor):
         info.stream_types = sorted(info.stream_types, key = self.stream_ids.index)
         info.title = title
 
-        if self.limit:
-            # Downloading some videos is very slow, use multithreading range fetch to speed up.
-            # Only for video players now.
-            info.extra['rangefetch'] = {
-                'first_size': 1024 * 16,
-                'max_size': 1024 * 32,
-                'threads': 10,
-                'video_rate': video_rate
-            }
-            self.logger.warning('This is a restricted video!')
+        #if self.limit:
+        #    # Downloading some videos is very slow, use multithreading range fetch to speed up.
+        #    # Only for video players now.
+        #    info.extra['rangefetch'] = {
+        #        'first_size': 1024 * 16,
+        #        'max_size': 1024 * 32,
+        #        'threads': 10,
+        #        'video_rate': video_rate
+        #    }
+        #    self.logger.warning('This is a restricted video!')
 
         info.extra['referer'] = 'https://v.qq.com/'
         return info

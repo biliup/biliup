@@ -4,8 +4,9 @@
 import re
 
 def get_extractor(url):
-    if re.search("open.sina", url):
+    if 'open.sina' in url:
         from . import openc as s
     else:
         from . import video as s
-    return s.site
+
+    return s.site, url

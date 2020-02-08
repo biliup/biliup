@@ -7,6 +7,32 @@ import hashlib
 import random
 
 macids = {}
+js_ctx = None
+
+def init_jsengine():
+    global js_ctx
+    if js_ctx is None:
+        from ykdl.util.jsengine import JSEngine
+        assert JSEngine, "No JS Interpreter found, can't use cmd5x!"
+        js_ctx = JSEngine()
+
+        from pkgutil import get_data
+        # code from https://zsaim.github.io/2019/08/23/Iqiyi-cmd5x-Analysis/
+        try:
+            # try load local .js file first
+            js = get_data(__name__, 'cmd5x.js')
+        except IOError:
+            # origin https://raw.githubusercontent.com/ZSAIm/ZSAIm.github.io/master/misc/2019-08-23/iqiyi_cmd5x.js
+            js = get_content('https://raw.githubusercontent.com/zhangn1985/ykdl/master/ykdl/extractors/iqiyi/cmd5x.js')
+        js_ctx.append(js)
+
+        # code from https://github.com/lldy/js
+        try:
+            # try load local .js file first
+            js = get_data(__name__, 'cmd5x_iqiyi3.js')
+        except IOError:
+            js = get_content('https://raw.githubusercontent.com/zhangn1985/ykdl/master/ykdl/extractors/iqiyi/cmd5x_iqiyi3.js')
+        js_ctx.append(js)
 
 def get_random_str(l):
     string = []
@@ -17,7 +43,6 @@ def get_random_str(l):
     return ''.join(string)
 
 def get_macid(l=32):
-    '''获取macid,此值是通过mac地址经过算法变换而来,对同一设备不变'''
     try:
         macid = macids[l]
     except KeyError:
@@ -51,4 +76,15 @@ def cmd5x(s):
     #    03030031010010000000
     #    02020031010000000000
     #    02020031010010000000
-    return md5(s + 'h2l6suw16pbtikmotf0j79cej4n8uw13')
+    #if len(s) < 6:
+    #    return '0'
+    #return md5(s + 'h2l6suw16pbtikmotf0j79cej4n8uw13')
+    # out of date
+
+    init_jsengine()
+    return js_ctx.call('cmd5x_exports.cmd5x', s)
+
+def cmd5x_iqiyi3(s):
+    # used for live
+    init_jsengine()
+    return js_ctx.call('cmd5x', s)

@@ -4,15 +4,16 @@
 import re
 
 def get_extractor(url):
-    if re.search("cc.163", url):
+    if 'cc.163' in url:
         from . import live as s
-    elif re.search("open.163", url):
+    elif 'open.163' in url:
         from . import openc as s
-    elif re.search("music.163", url):
+    elif 'music.163' in url:
         from . import music as s
         return s.get_extractor(url)
-    elif re.search("3g.163", url):
+    elif '3g.163' in url:
         from . import m3g as s
     else:
         from . import video as s
-    return s.site
+
+    return s.site, url

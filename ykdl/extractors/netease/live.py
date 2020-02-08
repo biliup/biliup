@@ -14,14 +14,17 @@ class NeteaseLive(VideoExtractor):
         info = VideoInfo(self.name, True)
         if not self.vid:
             html = get_content(self.url)
-            self.vid = match1(html, "anchorCcId\s*:\s*\'([^\']+)")
-            info.title = match1(html, "title:\s*\'([^\']+)")
-            info.artist = match1(html, "anchorName\s*:\s*\'([^\']+)")
+            raw_data = match1(html, '<script id="__NEXT_DATA__".*?>(.*?)</script>')
+            data = json.loads(raw_data)
+            self.vid = data['props']['pageProps']['roomInfoInitData']['live']['ccid']
+            assert self.vid != 0, 'live video is offline'
+            info.title = data['props']['pageProps']['roomInfoInitData']['live']['title']
+            info.artist = data['props']['pageProps']['roomInfoInitData']['micfirst']['nickname']
 
         data = json.loads(get_content("http://cgi.v.cc.163.com/video_play_url/{}".format(self.vid)))
 
         info.stream_types.append("current")
-        info.streams["current"] = {'container': 'flv', 'video_profile': "current", 'src' : [data["videourl"]], 'size': 0}
+        info.streams["current"] = {'container': 'flv', 'video_profile': "current", 'src': [data["videourl"]], 'size': 0}
         return info
 
 site = NeteaseLive()

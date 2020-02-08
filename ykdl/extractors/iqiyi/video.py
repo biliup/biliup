@@ -30,32 +30,43 @@ def getdash(tvid, vid, bid=500):
     tm = int(time.time() * 1000)
     host = 'https://cache.video.iqiyi.com'
     params = {
+        #'uid': '',
+        'k_uid': get_macid(), # necessary
+        #'dfp': dfp,
+        #'pck': '',
+        #'bop': '{{"version":"10.0","dfp":"{dfp}"}}'.format(dfp=dfp),
+        # keys above are relative to cookies
         'tvid': tvid,
         'bid': bid,
         'vid': vid,
         'src': '01010031010000000000',
         'vt': 0,
         'rs': 1,
-        'uid': '',
         'ori': 'pcw',
-        'ps': 0,
-        'tm': tm,
-        'qd_v': 1,
-        'k_uid': get_macid(),
+        'ps': 1,
         'pt': 0,
         'd': 0,
         's': '',
         'lid': '',
         'cf': '',
         'ct': '',
-        'authKey': cmd5x('0{}{}'.format(tm, tvid)),
+        'authKey': cmd5x('{}{}{}'.format(cmd5x(''), tm, tvid)),
         'k_tag': 1,
         'ost': 0,
         'ppt': 0,
         'locale': 'zh_cn',
-        'pck': '',
+        'prio': '{"ff":"f4v","code":2}',
         'k_err_retries': 0,
-        'ut': 0
+        'up': '',
+        'qd_v': 2,
+        'tm': tm,
+        'qdy': 'a',
+        'qds': 0,
+        'ut': 0, # 600 bid isn't available
+        # relative to encode
+        #'k_ft1': ,
+        #'k_ft4': ,
+        #'k_ft5': ,
     }
     src = '/dash?{}'.format(urlencode(params))
     vf = cmd5x(src)
@@ -154,10 +165,12 @@ class Iqiyi(VideoExtractor):
         def push_stream_vd(vs):
             vd = vs['vd']
             stream = self.vd_2_id[vd]
-            if not stream in info.streams:
+            if stream in info.streams:
+                # prefer H264 than H265
+                if vs.get('fileFormat') == 'H265':
+                    return
+            else:
                 info.stream_types.append(stream)
-            elif int(vd) < 10: 
-                return
             m3u8 = vs['m3utx']
             stream_profile = self.id_2_profile[stream]
             info.streams[stream] = {
@@ -197,7 +210,8 @@ class Iqiyi(VideoExtractor):
                 push_stream_vd(vs)
             vip_conf = tmts_data['data'].get('ctl', {}).get('configs')
             if vip_conf:
-                for vds in (('10', '19'), ('18', '5')):
+                # prefer H264 than H265
+                for vds in (('5', '18'), ('10', '19')):
                     for vd in vds:
                         if vd in vip_conf:
                             tmts_data = gettmts(tvid, vip_conf[vd]['vid'])
