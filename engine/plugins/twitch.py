@@ -6,6 +6,7 @@ from common import logger
 
 headers = {
     'client-id': 'jzkbprff40iqj646a697cyrvl0zt2m6'
+    'Accept': 'application/vnd.twitchtv.v5+json'
 }
 VALID_URL_BASE = r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)'
 API_ROOMS = 'https://api.twitch.tv/kraken/streams'
