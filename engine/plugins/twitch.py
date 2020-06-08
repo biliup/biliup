@@ -9,8 +9,8 @@ headers = {
     'client-id': 'kimne78kx3ncx6brgo4mv6wki5h1ko'
 }
 VALID_URL_BASE = r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)'
-API_ROOMS = 'https://api.twitch.tv/helix/streams'
-_API_USER = 'https://api.twitch.tv/helix/users'
+API_ROOMS = 'https://api.twitch.tv/kraken/streams'
+_API_USER = 'https://api.twitch.tv/kraken/users'
 
 
 class Twitch(YDownload):
