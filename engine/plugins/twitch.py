@@ -69,8 +69,8 @@ class BatchCheck(BatchCheckBase):
             logger.debug('无twitch主播')
             return
         try:
-            for pair in login.json()['data']:
-                self.use_id[pair['id']] = pair['login']
+            for pair in login.json()['users']:
+                self.use_id[pair['_id']] = pair['login']
         except KeyError:
             logger.info(login.json())
             return
