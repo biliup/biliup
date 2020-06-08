@@ -1,7 +1,7 @@
 # import json
 # import re
 import requests
-from engine.plugins import YDownload, BatchCheckBase
+from engine.plugins import YDownload
 from common import logger
 
 headers = {
@@ -9,7 +9,7 @@ headers = {
     'Accept': 'application/vnd.twitchtv.v5+json'
 }
 VALID_URL_BASE = r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)'
-API_ROOMS = 'https://api.twitch.tv/kraken/streams'
+API_ROOMSS = 'https://api.twitch.tv/kraken/streams'
 _API_USER = 'https://api.twitch.tv/kraken/users'
 
 
