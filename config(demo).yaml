@@ -1,17 +1,14 @@
-user_name: your usrname
-pass_word: your password
+user_name: 18616533246
+pass_word: whosyourdaddy
 
 chromedrive_path: /usr/local/bin/chromedriver
 
 links_id:
     星际2INnoVation吕布卫星人族天梯第一视角:
         - https://www.twitch.tv/innovation_s2
-        - https://www.panda.tv/1160340
     星际2soO输本虫族天梯第一视角:
         - https://www.twitch.tv/sc2soo
-        - https://www.panda.tv/1150595
     星际2sOs狗哥神族天梯第一视角:
-        - https://www.panda.tv/1160930
         - https://www.twitch.tv/jinairsos1
     星际2Stats拔本神族天梯第一视角:
         - https://www.twitch.tv/kimdaeyeob3
@@ -25,8 +22,6 @@ links_id:
         - https://www.twitch.tv/maru072
     星际2TY全教主全太阳人族天梯第一视角:
         - https://www.twitch.tv/sc2tyty
-    星际2ByuN武圣人族天梯第一视角:
-        - https://www.twitch.tv/byunprime
     星际2小herO神族天梯第一视角:
         - https://www.twitch.tv/dmadkr0818
     星际2Zest神族天梯第一视角:
@@ -35,5 +30,4 @@ links_id:
         - https://www.twitch.tv/partingthebigboy
     星际2Rogue脑虫虫族天梯第一视角:
         - https://www.twitch.tv/roguejinair
-    星际2Classic经典神皇神族第一视角:
-        - https://www.twitch.tv/kimclassic
+
