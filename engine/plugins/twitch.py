@@ -58,43 +58,43 @@ class Twitch(YDownload):
 #         return None
 #     return stream
 
-class BatchCheck(BatchCheckBase):
-    def __init__(self, urls):
-        BatchCheckBase.__init__(self, pattern_id=VALID_URL_BASE, urls=urls)
-        self.use_id = {}
-        if self.usr_list:
-            login = requests.get(_API_USER, headers=headers, params={'login': self.usr_list}, timeout=5)
-            login.close()
-        else:
-            logger.debug('无twitch主播')
-            return
-        try:
-            for pair in login.json()['users']:
-                self.use_id[pair['_id']] = pair['login']
-        except KeyError:
-            logger.info(login.json())
-            return
+# class BatchCheck(BatchCheckBase):
+#     def __init__(self, urls):
+#         BatchCheckBase.__init__(self, pattern_id=VALID_URL_BASE, urls=urls)
+#         self.use_id = {}
+#         if self.usr_list:
+#             login = requests.get(_API_USER, headers=headers, params={'login': self.usr_list}, timeout=5)
+#             login.close()
+#         else:
+#             logger.debug('无twitch主播')
+#             return
+#         try:
+#             for pair in login.json()['users']:
+#                 self.use_id[pair['_id']] = pair['login']
+#         except KeyError:
+#             logger.info(login.json())
+#             return
 
-    def check(self):
+#     def check(self):
 
-        live = []
-        usr_list = self.usr_list
-        if not usr_list:
-            logger.debug('无用户列表')
-            return
-        # url = 'https://api.twitch.tv/kraken/streams/sc2_ragnarok'
+#         live = []
+#         usr_list = self.usr_list
+#         if not usr_list:
+#             logger.debug('无用户列表')
+#             return
+#         # url = 'https://api.twitch.tv/kraken/streams/sc2_ragnarok'
 
-        stream = requests.get(API_ROOMS, headers=headers, params={'user_login': usr_list}, timeout=5)
-        stream.close()
+#         stream = requests.get(API_ROOMS, headers=headers, params={'user_login': usr_list}, timeout=5)
+#         stream.close()
 
-        data = stream.json()['data']
-        if data:
-            for i in data:
-                live.append(self.use_id[i['user_id']])
-        else:
-            logger.debug('twitch无开播')
+#         data = stream.json()['data']
+#         if data:
+#             for i in data:
+#                 live.append(self.use_id[i['user_id']])
+#         else:
+#             logger.debug('twitch无开播')
 
-        return map(lambda x: self.usr_dict.get(x.lower()), live)
+#         return map(lambda x: self.usr_dict.get(x.lower()), live)
 
 
 __plugin__ = Twitch
