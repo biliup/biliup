@@ -5,8 +5,8 @@ from engine.plugins import YDownload
 from common import logger
 
 headers = {
-    'client-id': 'jzkbprff40iqj646a697cyrvl0zt2m6',
-    'Accept': 'application/vnd.twitchtv.v5+json'
+    'client-id': '5qnc2cacngon0bg6yy42633v2y9anf',
+    'Authorization: Bearer wx8vi6yxg9mvgg8t365ekmuka3a1fz',
 }
 VALID_URL_BASE = r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)'
 API_ROOMSS = 'https://api.twitch.tv/kraken/streams'
@@ -58,43 +58,43 @@ class Twitch(YDownload):
 #         return None
 #     return stream
 
-# class BatchCheck(BatchCheckBase):
-#     def __init__(self, urls):
-#         BatchCheckBase.__init__(self, pattern_id=VALID_URL_BASE, urls=urls)
-#         self.use_id = {}
-#         if self.usr_list:
-#             login = requests.get(_API_USER, headers=headers, params={'login': self.usr_list}, timeout=5)
-#             login.close()
-#         else:
-#             logger.debug('无twitch主播')
-#             return
-#         try:
-#             for pair in login.json()['users']:
-#                 self.use_id[pair['_id']] = pair['login']
-#         except KeyError:
-#             logger.info(login.json())
-#             return
+class BatchCheck(BatchCheckBase):
+    def __init__(self, urls):
+        BatchCheckBase.__init__(self, pattern_id=VALID_URL_BASE, urls=urls)
+        self.use_id = {}
+        if self.usr_list:
+            login = requests.get(_API_USER, headers=headers, params={'login': self.usr_list}, timeout=5)
+            login.close()
+        else:
+            logger.debug('无twitch主播')
+            return
+        try:
+            for pair in login.json()['users']:
+                self.use_id[pair['_id']] = pair['login']
+        except KeyError:
+            logger.info(login.json())
+            return
 
-#     def check(self):
+    def check(self):
 
-#         live = []
-#         usr_list = self.usr_list
-#         if not usr_list:
-#             logger.debug('无用户列表')
-#             return
-#         # url = 'https://api.twitch.tv/kraken/streams/sc2_ragnarok'
+        live = []
+        usr_list = self.usr_list
+        if not usr_list:
+            logger.debug('无用户列表')
+            return
+        # url = 'https://api.twitch.tv/kraken/streams/sc2_ragnarok'
 
-#         stream = requests.get(API_ROOMS, headers=headers, params={'user_login': usr_list}, timeout=5)
-#         stream.close()
+        stream = requests.get(API_ROOMS, headers=headers, params={'user_login': usr_list}, timeout=5)
+        stream.close()
 
-#         data = stream.json()['data']
-#         if data:
-#             for i in data:
-#                 live.append(self.use_id[i['user_id']])
-#         else:
-#             logger.debug('twitch无开播')
+        data = stream.json()['data']
+        if data:
+            for i in data:
+                live.append(self.use_id[i['user_id']])
+        else:
+            logger.debug('twitch无开播')
 
-#         return map(lambda x: self.usr_dict.get(x.lower()), live)
+        return map(lambda x: self.usr_dict.get(x.lower()), live)
 
 
 __plugin__ = Twitch
