@@ -1,7 +1,7 @@
 # import json
 # import re
 import requests
-from engine.plugins import YDownload
+from engine.plugins import YDownload, BatchCheckBase
 from common import logger
 
 headers = {
