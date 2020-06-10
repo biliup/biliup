@@ -9,8 +9,8 @@ headers = {
     'Authorization': 'Bearer wx8vi6yxg9mvgg8t365ekmuka3a1fz'
 }
 VALID_URL_BASE = r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)'
-API_ROOMSS = 'https://api.twitch.tv/kraken/streams'
-_API_USER = 'https://api.twitch.tv/kraken/users'
+API_ROOMS = 'https://api.twitch.tv/helix/streams'
+_API_USER = 'https://api.twitch.tv/helix/users'
 
 
 class Twitch(YDownload):
@@ -69,8 +69,8 @@ class BatchCheck(BatchCheckBase):
             logger.debug('无twitch主播')
             return
         try:
-            for pair in login.json()['users']:
-                self.use_id[pair['_id']] = pair['login']
+            for pair in login.json()['data']:
+                self.use_id[pair['id']] = pair['login']
         except KeyError:
             logger.info(login.json())
             return
