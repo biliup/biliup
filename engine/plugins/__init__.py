@@ -157,7 +157,7 @@ class SDownload(DownloadBase):
 class FFmpegdl(DownloadBase):
     def download(self):
         args = ['ffmpeg', '-headers', ''.join('%s: %s\r\n' % x for x in fake_headers.items()),
-                '-y', '-i', self.ydl_opts['absurl'], '-c', 'copy', '-f', self.suffix,
+                '-y', '-i', self.ydl_opts['absurl'], '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-f', self.suffix,
                 self.ydl_opts['outtmpl'] + '.part']
         proc = subprocess.Popen(args, stdin=subprocess.PIPE)
         try:
