@@ -8,6 +8,7 @@ from ykdl.util.html import get_content, add_header
 from ykdl.util.match import match1, matchall
 
 import json
+import base64
 import random
 
 class HuyaLive(VideoExtractor):
@@ -18,9 +19,9 @@ class HuyaLive(VideoExtractor):
 
         html  = get_content(self.url)
 
-        json_stream = match1(html, '"stream": ({.+?})\s*};')
+        json_stream = match1(html, '"stream": "([a-zA-Z0-9+=/]+)"')
         assert json_stream, "live video is offline"
-        data = json.loads(json_stream)
+        data = json.loads(base64.b64decode(json_stream).decode())
         assert data['status'] == 200, data['msg']
 
         room_info = data['data'][0]['gameLiveInfo']
