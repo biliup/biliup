@@ -242,7 +242,7 @@ class Upload(object):
             '//*[@class="upload-v2-container"]/div[2]/div[3]/div[1]/div[12]/div[2]/div/textarea')
         text_2.send_keys('职业选手直播第一视角录像。这个自动录制上传的小程序开源在Github：'
                          'http://t.cn/RgapTpf(或者在Github搜索ForgQi)交流群：837362626'
-                         '\n顺便推广一下自己的网站http://web-form.me/')
+                         )
 
     def start(self, url, date=None):
         title = self.title
