@@ -16,7 +16,7 @@ chromedriver.*
 /configlog.ini
 cookie.py
 download.py
-ds_update.log
+ds_update.log*
 Engine/bilibili.cookie
 test.py
 /upload.py
