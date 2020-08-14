@@ -5,7 +5,8 @@ from engine.plugins import YDownload, BatchCheckBase
 from common import logger
 
 headers = {
-    'client-id': 'jzkbprff40iqj646a697cyrvl0zt2m6'
+    'client-id': 'jzkbprff40iqj646a697cyrvl0zt2m6',
+    'Authorization': 'Bearer wx8vi6yxg9mvgg8t365ekmuka3a1fz'
 }
 VALID_URL_BASE = r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)'
 API_ROOMS = 'https://api.twitch.tv/helix/streams'
