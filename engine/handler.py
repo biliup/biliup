@@ -104,8 +104,8 @@ class KernelFunc:
         logger.debug(_urls)
         event = []
         for title, v in engine.links_id.items():
-            url = v[0]
-            if self.free(v) and Upload(title).filter_file():
+            url = v['url'][0]
+            if self.free(v['url']) and Upload(title).filter_file():
                 event_d = Event(DOWNLOAD_UPLOAD)
                 event_d.args = (title, url, 'up')
                 event.append(event_d)

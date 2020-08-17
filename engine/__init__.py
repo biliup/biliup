@@ -8,15 +8,15 @@ def getmany(_links_id):
     _urls = []
     urlstatus = {}
     for k, v in _links_id.items():
-        _urls += v
-        for url in v:
+        _urls += v['url']
+        for url in v['url']:
             urlstatus[url] = 0
     return _urls, urlstatus, urlstatus.copy()
 
 
 def find_name(url):
     for name in links_id:
-        if url in links_id[name]:
+        if url in links_id[name][url]:
             return name
 
 
@@ -44,7 +44,6 @@ with open(r'config.yaml', encoding='utf-8') as stream:
     user_name = config['user_name']
     pass_word = config['pass_word']
     chromedrive_path = config['chromedrive_path']
-
 urls, url_status, url_status_base = getmany(links_id)
 __all__ = ['downloader', 'upload', 'plugins', 'main',
            'urls', 'url_status', 'url_status_base',
