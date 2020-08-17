@@ -92,7 +92,6 @@ class Upload:
         options.add_argument('headless')
         self.driver = webdriver.Chrome(executable_path=engine.chromedrive_path, chrome_options=options)
         # service_log_path=service_log_path)
-
         try:
             self.driver.get("https://www.bilibili.com")
             # driver.delete_all_cookies()
@@ -143,7 +142,6 @@ class Upload:
         finally:
             self.driver.quit()
             logger.info('浏览器驱动退出')
-
 
     def login(self, filename):
         logger.info('准备更新cookie')
@@ -263,7 +261,6 @@ class Upload:
                          '交流群：837362626')
 
     def start(self, url, date=None):
-        # try:
         self.date_title = self.title
         if date:
             self.date_title = str(date) + self.title

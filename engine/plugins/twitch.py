@@ -5,7 +5,7 @@ from engine.plugins import YDownload, BatchCheckBase
 from common import logger
 
 headers = {
-    'client-id': '5qnc2cacngon0bg6yy42633v2y9anf',
+    'client-id': 'jzkbprff40iqj646a697cyrvl0zt2m6',
     'Authorization': 'Bearer wx8vi6yxg9mvgg8t365ekmuka3a1fz'
 }
 VALID_URL_BASE = r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)'
