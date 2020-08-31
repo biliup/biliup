@@ -7,7 +7,7 @@
 ```bash
 cd bilibiliupload
 sudo docker build . -t sc2
-sudo docker -d run sc2
+sudo docker run -d sc2
 ```
 ## 进入容器 📦
 ```bash
@@ -67,7 +67,7 @@ Linux下以daemon进程启动
 def modify(self, live_m):
     pass
 ```
-## 其他版本
+## 类似项目
 * [nodejs版](https://github.com/ZhangMingZhao1/StreamerHelper)
 ## Credits
 * Thanks `zhangn1985/ykdl` provides Douyu-downloader.
