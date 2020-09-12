@@ -21,7 +21,7 @@ class Huya(FFmpegdl):
         if huya:
             huyajson = json.loads(base64.b64decode(huya).decode())['data'][0]['gameStreamInfoList'][0]
             absurl = u'{}/{}.{}?{}'.format(huyajson["sFlvUrl"], huyajson["sStreamName"], huyajson["sFlvUrlSuffix"], huyajson["sFlvAntiCode"])
-            self.ydl_opts["absurl"] = html.unescape(absurl)
+            self.raw_stream_url = html.unescape(absurl)
             return True
 
 

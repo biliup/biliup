@@ -26,12 +26,11 @@ class DownloadBase:
         self.url = url
         self.suffix = suffix
         self.flag = None
-        self.ydl_opts = {}
 
     def check_stream(self):
         logger.debug(self.fname)
 
-    def download(self):
+    def download(self, filename):
         pass
 
     def run(self):
@@ -43,14 +42,14 @@ class DownloadBase:
 
     def start(self):
         file_name = self.file_name
-        self.ydl_opts = {'outtmpl': file_name}
         if self.check_stream():
+            file_name += "." + self.suffix
             pid = os.getpid()
             monitor = Monitoring(pid, file_name)
             self.flag = monitor.flag
             t = Thread(target=monitor.start)
             t.start()
-            retval = self.download()
+            retval = self.download(file_name)
             self.rename(file_name)
             monitor.stop()
             if retval != 0:
@@ -72,7 +71,7 @@ class DownloadBase:
 
     @property
     def file_name(self):
-        file_name = '%s%s.%s' % (self.fname, str(time.time())[:10], self.suffix)
+        file_name = '%s%s' % (self.fname, str(time.time())[:10])
         return file_name
 
 
@@ -81,13 +80,13 @@ class YDownload(DownloadBase):
 
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
+        self.ydl_opts = {}
 
     def check_stream(self):
         try:
             self.get_sinfo()
             return True
         except youtube_dl.utils.DownloadError:
-            # logger.debug('%s未开播或读取下载信息失败' % self.key)
             logger.debug('%s未开播或读取下载信息失败' % self.fname)
             return False
 
@@ -105,8 +104,9 @@ class YDownload(DownloadBase):
             logger.debug(info_list)
         return info_list
 
-    def download(self):
+    def download(self, filename):
         try:
+            self.ydl_opts = {'outtmpl': filename}
             self.dl()
         except youtube_dl.utils.DownloadError:
             return 1
@@ -125,22 +125,23 @@ class SDownload(DownloadBase):
 
     def check_stream(self):
         logger.debug(self.fname)
-        streams = streamlink.streams(self.url)
         try:
+            streams = streamlink.streams(self.url)
             if streams:
                 self.stream = streams["best"]
                 fd = self.stream.open()
                 fd.close()
+                streams.close()
                 return True
         except streamlink.StreamlinkError:
             return
 
-    def download(self):
+    def download(self, filename):
 
         # fd = stream.open()
         try:
             with self.stream.open() as fd:
-                with open(self.ydl_opts['outtmpl'] + '.part', 'wb') as file:
+                with open(filename + '.part', 'wb') as file:
                     for f in fd:
                         file.write(f)
                         if self.flag.is_set():
@@ -148,17 +149,21 @@ class SDownload(DownloadBase):
                             return 1
                     return 0
         except OSError:
-            self.rename(self.ydl_opts['outtmpl'])
+            self.rename(filename)
             raise
 
 
 # ffmpeg.exe -i  http://vfile1.grtn.cn/2018/1542/0254/3368/154202543368.ssm/154202543368.m3u8
 # -c copy -bsf:a aac_adtstoasc -movflags +faststart output.mp4
 class FFmpegdl(DownloadBase):
-    def download(self):
+    def __init__(self, fname, url, suffix=None):
+        super().__init__(fname, url, suffix)
+        self.raw_stream_url = None
+
+    def download(self, filename):
         args = ['ffmpeg','-headers', ''.join('%s: %s\r\n' % x for x in fake_headers.items()),
-                '-y', '-i', self.ydl_opts['absurl'], '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-f', self.suffix,
-                self.ydl_opts['outtmpl'] + '.part']
+                '-y', '-i', self.raw_stream_url, '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-f', self.suffix,
+                filename + '.part']
         proc = subprocess.Popen(args, stdin=subprocess.PIPE)
         try:
             retval = proc.wait()

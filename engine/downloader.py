@@ -7,7 +7,7 @@ from engine.plugins import general
 
 
 # @singleton
-class Extractor(object):
+class Extractor:
     def __init__(self):
         self.plugins = []
         self.load_plugins(engine.plugins.__path__[0])

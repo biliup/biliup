@@ -42,7 +42,7 @@ class AfreecaTV(FFmpegdl):
         }
         res = requests.get(STREAM_INFO_URLS.format(rmd=rmd), params=params, timeout=5)
         res.close()
-        self.ydl_opts['absurl'] = res.json()["view_url"] + "?aid=" + aid
+        self.raw_stream_url = res.json()["view_url"] + "?aid=" + aid
         return True
 
 
