@@ -67,7 +67,8 @@ Linux下以daemon进程启动
 def modify(self, live_m):
     pass
 ```
-## 类似项目
-* [nodejs版](https://github.com/ZhangMingZhao1/StreamerHelper)
+
 ## Credits
 * Thanks `zhangn1985/ykdl` provides Douyu-downloader.
+
+类似项目`ZhangMingZhao1/StreamerHelper`
