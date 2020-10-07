@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import subprocess
@@ -7,7 +8,6 @@ from threading import Thread, Event
 import psutil
 import streamlink
 import youtube_dl
-from common import logger
 from common.timer import Timer
 
 fake_headers = {
@@ -16,6 +16,7 @@ fake_headers = {
     'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:38.0) Gecko/20100101 Firefox/38.0 Iceweasel/38.2.1'
 }
+logger = logging.getLogger('log01')
 
 
 class DownloadBase:
@@ -215,13 +216,15 @@ class Monitoring(Timer):
             parent = psutil.Process(parent_pid)
         except psutil.NoSuchProcess:
             self.stop()
-            logger.error("Process doesn't exist")
-            return
+            return logger.error("Process doesn't exist")
         children = parent.children(recursive=True)
         numc = len(children)
         return parent, children, numc
 
     def kill_child_processes(self):
+        if self.flag.is_set():
+            self.stop()
+            return
         file_size = os.path.getsize(self.file_name) / 1024 / 1024 / 1024
         if file_size <= self.last_file_size:
             logger.error('下载卡死' + self.file_name)
@@ -231,24 +234,19 @@ class Monitoring(Timer):
                 self.terminate()
             time.sleep(1)
             if os.path.isfile(self.file_name):
-                logger.info('卡死下载进程可能未成功退出')
-                return
+                return logger.info('卡死下载进程可能未成功退出')
             else:
                 self.stop()
-                logger.info('卡死下载进程成功退出')
-                return
+                return logger.info('卡死下载进程成功退出')
         self.last_file_size = file_size
         if file_size >= 2.5:
-            if self.numc == 0:
-                self.flag.set()
-            else:
-                self.terminate()
+            self.flag.set()
+            self.terminate()
             logger.info('分段下载' + self.file_name)
 
     def __timer(self):
         logger.debug('获取到{0}，{1}'.format(self.parent_pid, self.file_name))
         retry = 0
-
         while not self._flag.wait(self.interval):
             self.parent, self.children, self.numc = self.get_process(self.parent_pid)
             if os.path.isfile(self.file_name):
@@ -257,8 +255,7 @@ class Monitoring(Timer):
                 logger.info('%s不存在' % self.file_name)
                 if retry >= 2:
                     self.terminate()
-                    logger.info('结束进程，找不到%s' % self.file_name)
-                    return
+                    return logger.info('结束进程，找不到%s' % self.file_name)
                 retry += 1
                 # logger.info('监控<%s>线程退出' % self.file_name)
 

@@ -3,13 +3,12 @@ import time
 import engine
 import common
 from engine import CHECK, BE_MODIFIED, DOWNLOAD_UPLOAD, TO_MODIFY, UPLOAD, urls, url_status, url_status_base
-from engine.downloader import download, Extractor
-from engine.upload import Upload
+from engine.downloader import download, sorted_checker
 from common import logger
 from common.event import Event
+from engine.uploader import upload, filter_file
 
 # 初始化事件管理器
-
 event_manager = common.event.EventManager()
 
 
@@ -22,9 +21,9 @@ def process(name, url, mod):
             p.start()
             p.join()
             # download(name, url)
-            Upload(name).start(url, now)
+            upload("bilibili", name, url, now)
         elif mod == 'up':
-            Upload(name).start(url, now)
+            upload("bilibili", name, url, now)
         else:
             return url
     finally:
@@ -39,7 +38,7 @@ class KernelFunc:
         self.urls = _urls
         self.url_status = _url_status
         self.url_status_base = _url_status_base
-        self.batches, self.onebyone = Extractor().sorted_checker(_urls)
+        self.batches, self.onebyone = sorted_checker(_urls)
 
     @event_manager.register(CHECK, block=True)
     def all_check(self):
@@ -50,13 +49,13 @@ class KernelFunc:
                 if res:
                     live.extend(res)
 
-            for one in self.onebyone:
-                for url in one.url_list:
+            for single in self.onebyone:
+                for url in single.url_list:
 
-                    if one('检测' + url, url).check_stream():
+                    if single('检测' + url, url).check_stream():
                         live.append(url)
 
-                    if url != one.url_list[-1]:
+                    if url != single.url_list[-1]:
                         logger.debug('歇息会')
                         time.sleep(15)
         except IOError:
@@ -105,7 +104,7 @@ class KernelFunc:
         event = []
         for title, v in engine.links_id.items():
             url = v[0]
-            if self.free(v) and Upload(title).filter_file():
+            if self.free(v) and filter_file(title):
                 event_d = Event(DOWNLOAD_UPLOAD)
                 event_d.args = (title, url, 'up')
                 event.append(event_d)

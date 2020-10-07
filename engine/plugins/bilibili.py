@@ -4,25 +4,21 @@ from selenium import webdriver
 import selenium.common
 import time
 import engine
-import engine.handler
+from common.decorators import Plugin
+from engine.plugins import logger
 from engine.slider import slider_cracker
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.common.keys import Keys
-from common import logger
 
 
-# 10800 18000 4110
-
-
+@Plugin.upload("bilibili")
 class Upload:
     def __init__(self, title):
         self.title = title
         self.date_title = None
         self.driver = None
-        # self.date = date
-        # self.url = url
 
     @property
     def file_list(self):
@@ -83,7 +79,6 @@ class Upload:
     def upload(self, file_list, link):
 
         filename = 'engine/bilibili.cookie'
-        # title_ = self.r_title
         videopath = self.assemble_videopath(file_list)
 
         # service_log_path = "{}/chromedriver.log".format('/home')
@@ -100,7 +95,6 @@ class Upload:
                     new_cookie = json.load(f)
 
                 for cookie in new_cookie:
-                    # print(cookie)
                     if isinstance(cookie.get("expiry"), float):
                         cookie["expiry"] = int(cookie["expiry"])
                     self.driver.add_cookie(cookie)
@@ -130,7 +124,6 @@ class Upload:
                 return
             else:
                 logger.info(upload_success)
-            # print('稿件提交完成！')
             # logger.info('%s提交完成！' % title_)
             self.remove_filelist(file_list)
         except selenium.common.exceptions.NoSuchElementException:
@@ -174,7 +167,6 @@ class Upload:
         WebDriverWait(self.driver, 20).until(
             ec.presence_of_element_located((By.NAME, 'buploader')))
         upload = self.driver.find_element_by_name('buploader')
-        # print(driver.title)
         # logger.info(driver.title)
         upload.send_keys(videopath)  # send_keys
         logger.info('开始上传' + self.date_title)

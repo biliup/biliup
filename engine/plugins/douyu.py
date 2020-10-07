@@ -1,10 +1,9 @@
-from common import logger
-from engine.plugins import FFmpegdl
+from common.decorators import Plugin
+from engine.plugins import FFmpegdl, logger
 from ykdl.common import url_to_module
 
-VALID_URL_BASE = r'(?:https?://)?(?:(?:www|m)\.)?douyu\.com'
 
-
+@Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?douyu\.com')
 class Douyu(FFmpegdl):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
@@ -21,6 +20,3 @@ class Douyu(FFmpegdl):
         self.raw_stream_url = urls[0]
         # print(info.title)
         return True
-
-
-__plugin__ = Douyu

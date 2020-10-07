@@ -46,6 +46,6 @@ with open(r'config.yaml', encoding='utf-8') as stream:
     chromedrive_path = config['chromedrive_path']
 
 urls, url_status, url_status_base = getmany(links_id)
-__all__ = ['downloader', 'upload', 'plugins', 'main',
+__all__ = ['downloader', 'uploader', 'plugins', 'main',
            'urls', 'url_status', 'url_status_base',
            'CHECK', 'BE_MODIFIED', 'DOWNLOAD_UPLOAD', 'TO_MODIFY', 'UPLOAD']

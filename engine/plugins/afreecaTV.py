@@ -1,7 +1,7 @@
 import requests
 
-from common import logger
-from engine.plugins import FFmpegdl, match1
+from common.decorators import Plugin
+from engine.plugins import FFmpegdl, match1, logger
 
 VALID_URL_BASE = r"https?://play\.afreecatv\.com/(?P<username>\w+)(?:/\d+)?"
 
@@ -11,6 +11,7 @@ CHANNEL_API_URL = "http://live.afreecatv.com:8057/afreeca/player_live_api.php"
 QUALITIES = ["original", "hd", "sd"]
 
 
+@Plugin.download(regexp=r"https?://play\.afreecatv\.com/(?P<username>\w+)(?:/\d+)?")
 class AfreecaTV(FFmpegdl):
     def __init__(self, fname, url, suffix='mp4'):
         super().__init__(fname, url, suffix)
@@ -44,6 +45,3 @@ class AfreecaTV(FFmpegdl):
         res.close()
         self.raw_stream_url = res.json()["view_url"] + "?aid=" + aid
         return True
-
-
-__plugin__ = AfreecaTV
