@@ -28,9 +28,7 @@ def process(name, url, mod):
         else:
             return url
     finally:
-        event = Event(BE_MODIFIED)
-        event.args = (url,)
-        return event
+        return Event(BE_MODIFIED, args=(url,))
 
 
 @event_manager.server(urls, url_status, url_status_base)
@@ -62,11 +60,7 @@ class KernelFunc:
         except IOError:
             logger.exception("IOError")
         finally:
-            event_t = Event(TO_MODIFY)
-            event_t.args = (live,)
-            event_u = Event(UPLOAD)
-            event_u.args = (live,)
-            return event_u, event_t
+            return Event(UPLOAD, args=(live,)), Event(TO_MODIFY, args=(live,))
 
     @event_manager.register(engine.TO_MODIFY)
     def modify(self, live_m):
@@ -79,9 +73,7 @@ class KernelFunc:
                 else:
                     name = engine.find_name(live)
                     logger.debug(name + '刚刚开播，去下载')
-                    event_d = Event(DOWNLOAD_UPLOAD)
-                    event_d.args = (name, live, 'dl')
-                    event.append(event_d)
+                    event.append(Event(DOWNLOAD_UPLOAD, args=(name, live, 'dl')))
 
                 live_d[live] = 1
             self.url_status.update(live_d)
@@ -106,9 +98,7 @@ class KernelFunc:
         for title, v in engine.links_id.items():
             url = v[0]
             if self.free(v) and UploadBase.filter_file(title):
-                event_d = Event(DOWNLOAD_UPLOAD)
-                event_d.args = (title, url, 'up')
-                event.append(event_d)
+                event.append(Event(DOWNLOAD_UPLOAD, args=(title, url, 'up')))
                 # self.event_manager.send_event(event_d)
                 self.url_status[url] = 2
         return tuple(event)

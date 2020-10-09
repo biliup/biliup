@@ -156,7 +156,9 @@ class EventManager:
 class Event:
     """事件对象"""
 
-    def __init__(self, type_=None):
-        self.type_ = type_  # 事件类型
-        self.dict = {}  # 字典用于保存具体的事件数据
-        self.args = ()
+    def __init__(self, event_type, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+        self.type_ = event_type  # 事件类型
+        self.dict = kwargs  # 字典用于保存具体的事件数据
+        self.args = args
