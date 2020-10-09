@@ -6,7 +6,8 @@ from engine import CHECK, BE_MODIFIED, DOWNLOAD_UPLOAD, TO_MODIFY, UPLOAD, urls,
 from engine.downloader import download, sorted_checker
 from common import logger
 from common.event import Event
-from engine.uploader import upload, filter_file
+from engine.plugins.base_adapter import UploadBase
+from engine.uploader import upload
 
 # 初始化事件管理器
 event_manager = common.event.EventManager()
@@ -15,15 +16,15 @@ event_manager = common.event.EventManager()
 @event_manager.register(DOWNLOAD_UPLOAD, block=True)
 def process(name, url, mod):
     try:
-        now = common.time_now()
+        data = {"url": url, "date": common.time_now()}
         if mod == 'dl':
             p = multiprocessing.Process(target=download, args=(name, url))
             p.start()
             p.join()
             # download(name, url)
-            upload("bilibili", name, url, now)
+            upload("bilibili", name, data)
         elif mod == 'up':
-            upload("bilibili", name, url, now)
+            upload("bilibili", name, data)
         else:
             return url
     finally:
@@ -104,7 +105,7 @@ class KernelFunc:
         event = []
         for title, v in engine.links_id.items():
             url = v[0]
-            if self.free(v) and filter_file(title):
+            if self.free(v) and UploadBase.filter_file(title):
                 event_d = Event(DOWNLOAD_UPLOAD)
                 event_d.args = (title, url, 'up')
                 event.append(event_d)

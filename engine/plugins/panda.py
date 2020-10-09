@@ -1,5 +1,6 @@
 import requests
-from engine.plugins import BatchCheckBase, SDownload, YDownload, logger
+from engine.plugins import BatchCheckBase, logger
+from engine.plugins.base_adapter import YDownload, SDownload
 
 VALID_URL_BASE = r'(?:https?://)?(?:www\.)?panda\.tv/(?P<id>[0-9]+)'
 API_ROOMS = 'https://www.panda.tv/api_rooms_videoinfo?roomids='

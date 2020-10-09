@@ -6,6 +6,7 @@ import time
 import engine
 from common.decorators import Plugin
 from engine.plugins import logger
+from engine.plugins.base_adapter import UploadBase
 from engine.slider import slider_cracker
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -14,45 +15,12 @@ from selenium.webdriver.common.keys import Keys
 
 
 @Plugin.upload("bilibili")
-class Upload:
-    def __init__(self, title):
-        self.title = title
-        self.date_title = None
+class Bilibili(UploadBase):
+    def __init__(self, principal, data):
+        super().__init__(principal, data, 'engine/bilibili.cookie')
+        # self.title = title
+        # self.date_title = None
         self.driver = None
-
-    @property
-    def file_list(self):
-        file_list = []
-        for file_name in os.listdir('.'):
-            if self.title in file_name:
-                file_list.append(file_name)
-        file_list = sorted(file_list)
-        return file_list
-
-    @staticmethod
-    def remove_filelist(file_list):
-        for r in file_list:
-            os.remove(r)
-            logger.info('删除-' + r)
-
-    def filter_file(self):
-        file_list = self.file_list
-        if len(file_list) == 0:
-            return False
-        for r in file_list:
-            file_size = os.path.getsize(r) / 1024 / 1024 / 1024
-            if file_size <= 0.02:
-                os.remove(r)
-                logger.info('过滤删除-' + r)
-        file_list = self.file_list
-        if len(file_list) == 0:
-            logger.info('视频过滤后无文件可传')
-            return False
-        for f in file_list:
-            if f.endswith('.part'):
-                os.rename(f, os.path.splitext(f)[0])
-                logger.info('%s存在已更名' % f)
-        return True
 
     @staticmethod
     def assemble_videopath(file_list):
@@ -76,9 +44,9 @@ class Upload:
             print("找到%s个元素：%s" % (len(s), xpath))
             return False
 
-    def upload(self, file_list, link):
+    def upload(self, file_list):
 
-        filename = 'engine/bilibili.cookie'
+        filename = self.persistence_path
         videopath = self.assemble_videopath(file_list)
 
         # service_log_path = "{}/chromedriver.log".format('/home')
@@ -111,7 +79,7 @@ class Upload:
             with open(filename, "w") as f:
                 json.dump(cookie, f)
 
-            self.add_information(link)
+            self.add_information()
 
             self.driver.find_element_by_xpath('//*[@class="upload-v2-container"]/div[2]/div[3]/div[5]/span[1]').click()
             # screen_shot = driver.save_screenshot('bin/1.png')
@@ -164,12 +132,13 @@ class Upload:
             logger.info('更新cookie失败')
 
     def add_videos(self, videopath):
+        formate_title = self.data["format_title"]
         WebDriverWait(self.driver, 20).until(
             ec.presence_of_element_located((By.NAME, 'buploader')))
         upload = self.driver.find_element_by_name('buploader')
         # logger.info(driver.title)
         upload.send_keys(videopath)  # send_keys
-        logger.info('开始上传' + self.date_title)
+        logger.info('开始上传' + formate_title)
         time.sleep(2)
         button = r'//*[@class="new-feature-guide-v2-container"]/div/div/div/div/div[1]'
         if self.is_element_exist(self.driver, button):
@@ -196,9 +165,10 @@ class Upload:
                     break
             except selenium.common.exceptions.StaleElementReferenceException:
                 logger.exception("selenium.common.exceptions.StaleElementReferenceException")
-        logger.info('上传%s个数%s' % (self.date_title, len(info)))
+        logger.info('上传%s个数%s' % (formate_title, len(info)))
 
-    def add_information(self, link):
+    def add_information(self):
+        link = self.data.get("url")
         # 点击模板
         self.driver.find_element_by_xpath(r'//*[@class="normal-title-wrp"]/div/p').click()
         self.driver.find_element_by_class_name(r'template-list-small-item').click()
@@ -216,7 +186,7 @@ class Upload:
             '//*[@class="upload-v2-container"]/div[2]/div[3]/div[1]/div[8]/div[2]/div/div/input')
         title.send_keys(Keys.CONTROL + 'a')
         title.send_keys(Keys.BACKSPACE)
-        title.send_keys(self.date_title)
+        title.send_keys(self.data["format_title"])
         # js = "var q=document.getElementsByClassName('content-tag-list')[0].scrollIntoView();"
         # driver.execute_script(js)
         # time.sleep(3)
@@ -233,15 +203,19 @@ class Upload:
                          'http://t.cn/RgapTpf(或者在Github搜索ForgQi)\n'
                          '交流群：837362626')
 
-    def start(self, url, date=None):
-        self.date_title = self.title
-        if date:
-            self.date_title = str(date) + self.title
-        if self.filter_file():
-            logger.info('准备上传' + self.date_title)
-            try:
-                self.upload(self.file_list, link=url)
-            except selenium.common.exceptions.WebDriverException:
-                logger.exception('WebDriverException')
-            # except :
-            #     logger.exception('?')
+    def start(self):
+        # self.date_title = self.title
+        # if date:
+        #     self.date_title = str(date) + self.title
+        # if self.filter_file():
+        #     logger.info('准备上传' + self.date_title)
+        #     try:
+        #         self.upload(self.file_list, link=url)
+        #     except selenium.common.exceptions.WebDriverException:
+        #         logger.exception('WebDriverException')
+        #     # except :
+        #     #     logger.exception('?')
+        try:
+            super().start()
+        except selenium.common.exceptions.WebDriverException:
+            logger.exception('WebDriverException')

@@ -1,7 +1,8 @@
 import requests
 
 from common.decorators import Plugin
-from engine.plugins import FFmpegdl, match1, logger
+from engine.plugins import match1, logger
+from engine.plugins.base_adapter import FFmpegdl
 
 VALID_URL_BASE = r"https?://play\.afreecatv\.com/(?P<username>\w+)(?:/\d+)?"
 

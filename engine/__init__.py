@@ -22,13 +22,13 @@ def find_name(url):
 
 def main(event_manager):
     # 初始化定时器
-    timer_ = Timer(func=event_manager.send_event, args=(Event(CHECK),), interval=40)
+    timer = Timer(func=event_manager.send_event, args=(Event(CHECK),), interval=40)
 
     # 模块更新自动重启
-    autoreload(event_manager, timer_, interval=15)
+    autoreload(event_manager, timer, interval=15)
 
     event_manager.start()
-    timer_.start()
+    timer.start()
 
 
 CHECK = 'check'

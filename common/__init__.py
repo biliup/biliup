@@ -10,7 +10,7 @@ def time_now():
     utc_dt = datetime.utcnow().replace(tzinfo=timezone.utc)
     bj_dt = utc_dt.astimezone(timezone(timedelta(hours=8)))
     # now = bj_dt.strftime('%Y{0}%m{1}%d{2}').format(*'...')
-    now = bj_dt.strftime('%Y{0}%m{1}%d').format(*'..')
+    now = bj_dt.strftime('%Y.%m.%d')
     return now
 
 
@@ -43,30 +43,6 @@ def load_plugins(path):
 PLUGINS = load_plugins(engine.plugins.__path__[0])
 
 
-# class Extractor:
-#     plugins = []
-#
-#     def __init__(self):
-#         self.plugins = []
-#         load_plugins(engine.plugins.__path__[0])
-#
-#     def get_plugins(self):
-#         # self.load_plugins(engine.plugins.__path__[0])
-#         return self.plugins
-#
-#     def load_plugin(self, name):
-#         # Set the global http session for this plugin
-#         module = importlib.import_module(name)
-#
-#         if hasattr(module, "VALID_URL_BASE"):
-#             # module_name = getattr(module, "__name__")
-#             # plugin_name = module_name.split(".")[-1]  # get the plugin part of the module name
-#             print(module.__dict__)
-#             if module in self.plugins:
-#                 print('存在')
-#                 return
-#
-#             self.plugins.append(module)
 log_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'configlog.ini')
 logging.config.fileConfig(log_file_path)
 logger = logging.getLogger('log01')

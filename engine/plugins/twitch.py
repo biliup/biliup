@@ -3,7 +3,8 @@
 import requests
 
 from common.decorators import Plugin
-from engine.plugins import YDownload, BatchCheckBase, logger
+from engine.plugins import BatchCheckBase, logger
+from engine.plugins.base_adapter import YDownload
 
 headers = {
     'client-id': 'jzkbprff40iqj646a697cyrvl0zt2m6',

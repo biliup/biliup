@@ -1,4 +1,5 @@
-from engine.plugins import FFmpegdl, SDownload, YDownload, logger
+from engine.plugins import logger
+from engine.plugins.base_adapter import YDownload, SDownload, FFmpegdl
 from ykdl.common import url_to_module
 
 

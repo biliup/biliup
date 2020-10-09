@@ -1,5 +1,6 @@
 from common.decorators import Plugin
-from engine.plugins import FFmpegdl, logger
+from engine.plugins import logger
+from engine.plugins.base_adapter import FFmpegdl
 from ykdl.common import url_to_module
 
 
