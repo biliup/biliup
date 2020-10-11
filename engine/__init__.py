@@ -32,8 +32,9 @@ def main(event_manager):
 
 
 CHECK = 'check'
+CHECK_UPLOAD = 'check_upload'
 TO_MODIFY = 'to_modify'
-DOWNLOAD_UPLOAD = 'download_upload'
+DOWNLOAD = 'download'
 BE_MODIFIED = 'be_modified'
 UPLOAD = 'upload'
 
@@ -48,4 +49,4 @@ with open(r'config.yaml', encoding='utf-8') as stream:
 urls, url_status, url_status_base = getmany(links_id)
 __all__ = ['downloader', 'uploader', 'plugins', 'main',
            'urls', 'url_status', 'url_status_base',
-           'CHECK', 'BE_MODIFIED', 'DOWNLOAD_UPLOAD', 'TO_MODIFY', 'UPLOAD']
+           'CHECK', 'BE_MODIFIED', 'DOWNLOAD', 'TO_MODIFY', 'UPLOAD', 'CHECK_UPLOAD']

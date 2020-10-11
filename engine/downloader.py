@@ -1,6 +1,13 @@
 import re
+import time
+from functools import reduce
+
+from common import logger
 from common.decorators import Plugin
 from engine.plugins import general
+
+batches = []
+onebyone = []
 
 
 def suit_url(pattern, urls):
@@ -14,8 +21,8 @@ def suit_url(pattern, urls):
 
 def sorted_checker(urls):
     curls = urls.copy()
-    batches = []
-    onebyone = []
+    if batches or onebyone:
+        return batches, onebyone
     for plugin in Plugin.download_plugins:
         plugin.url_list = suit_url(plugin.VALID_URL_BASE, curls)
         if hasattr(plugin, "BatchCheck"):
@@ -36,16 +43,38 @@ def download(fname, url):
     general.__plugin__(fname, url).run()
 
 
-# def load_download_plugin():
-#     # Set the global http session for this plugin
-#     module = importlib.import_module(name)
-#     plugins = []
-#     for module in PLUGINS:
-#         if hasattr(module, "download_plugin"):
-#             # module_name = getattr(module, "__name__")
-#             # plugin_name = module_name.split(".")[-1]  # get the plugin part of the module name
-#             if module in plugins:
-#                 print('存在')
-#                 continue
-#             plugins.append(module)
-#     return Plugin.download_plugins
+def batch_check(live, plugin):
+    try:
+        res = plugin.check()
+        if res:
+            live.extend(res)
+    except IOError:
+        logger.exception("IOError")
+    finally:
+        return live
+
+
+def single_check(live, plugin):
+    try:
+        for url in plugin.url_list:
+            if plugin(f'检测{url}', url).check_stream():
+                live.append(url)
+            if url != plugin.url_list[-1]:
+                logger.debug('歇息会')
+                time.sleep(15)
+    except IOError:
+        logger.exception("IOError")
+    finally:
+        return live
+
+
+def check(url_list, mode="ALL"):
+    batch, single = sorted_checker(url_list)
+    if mode == "batch":
+        live = reduce(batch_check, batch, [])
+    elif mode == "single":
+        live = reduce(single_check, single, [])
+    else:
+        live = reduce(batch_check, batch, [])
+        live = reduce(single_check, single, live)
+    return live
