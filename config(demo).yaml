@@ -1,39 +1,65 @@
-user_name: your usrname
-pass_word: your password
+user: # cookies和account二选一填写即可
+    cookies: # 默认通过网页接口上传
+        SESSDATA: your SESSDATA
+        bili_jct: your bili_jct
+        DedeUserID: your DedeUserID
+    account: # 这种方式目前依赖chromedriver
+        username: your usrname
+        password: your password
 
 chromedrive_path: /usr/local/bin/chromedriver
 
-links_id:
+streamers:
     星际2INnoVation吕布卫星人族天梯第一视角:
-        - https://www.twitch.tv/innovation_s2
-        - https://www.panda.tv/1160340
+        url:
+            - https://www.twitch.tv/innovation_s2
+            - https://www.panda.tv/1160340
+        tid: 171
+        cover_path: /cover/up.jpg
+        tags:
+          - 星际争霸2
+          - 电子竞技
     星际2soO输本虫族天梯第一视角:
-        - https://www.twitch.tv/sc2soo
-        - https://www.panda.tv/1150595
+        url:
+            - https://www.twitch.tv/sc2soo
+            - https://www.panda.tv/1150595
     星际2sOs狗哥神族天梯第一视角:
-        - https://www.panda.tv/1160930
-        - https://www.twitch.tv/jinairsos1
+        url:
+            - https://www.panda.tv/1160930
+            - https://www.twitch.tv/jinairsos1
     星际2Stats拔本神族天梯第一视角:
-        - https://www.twitch.tv/kimdaeyeob3
+        url:
+            - https://www.twitch.tv/kimdaeyeob3
     星际2Dark暗本虫族天梯第一视角:
-        - https://www.twitch.tv/qkrfuddn0
+        url:
+            - https://www.twitch.tv/qkrfuddn0
     星际2Scarlett噶姐虫族天梯第一视角:
-        - https://www.twitch.tv/scarlettm
+        url:
+            - https://www.twitch.tv/scarlettm
     星际2GuMiho砸本人族天梯第一视角:
-        - https://www.twitch.tv/gumiho
+        url:
+            - https://www.twitch.tv/gumiho
     星际2Maru人族天梯第一视角:
-        - https://www.twitch.tv/maru072
+        url:
+            - https://www.twitch.tv/maru072
     星际2TY全教主全太阳人族天梯第一视角:
-        - https://www.twitch.tv/sc2tyty
+        url:
+            - https://www.twitch.tv/sc2tyty
     星际2ByuN武圣人族天梯第一视角:
-        - https://www.twitch.tv/byunprime
+        url:
+            - https://www.twitch.tv/byunprime
     星际2小herO神族天梯第一视角:
-        - https://www.twitch.tv/dmadkr0818
+        url:
+            - https://www.twitch.tv/dmadkr0818
     星际2Zest神族天梯第一视角:
-        - https://www.twitch.tv/sc2_zest
+        url:
+            - https://www.twitch.tv/sc2_zest
     星际2PartinG跳跳胖丁神族天梯第一视角:
-        - https://www.twitch.tv/partingthebigboy
+        url:
+            - https://www.twitch.tv/partingthebigboy
     星际2Rogue脑虫虫族天梯第一视角:
-        - https://www.twitch.tv/roguejinair
+        url:
+            - https://www.twitch.tv/roguejinair
     星际2Classic经典神皇神族第一视角:
-        - https://www.twitch.tv/kimclassic
+        url:
+            - https://www.twitch.tv/kimclassic

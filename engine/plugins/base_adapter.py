@@ -35,6 +35,8 @@ class DownloadBase:
         try:
             logger.info('开始下载%s：%s' % (self.__class__.__name__, self.fname))
             self.start()
+        except:
+            logger.exception("Uncaught exception:")
         finally:
             logger.info('退出下载')
 
@@ -172,7 +174,7 @@ class FFmpegdl(DownloadBase):
 
 
 class UploadBase:
-    def __init__(self, principal, data, persistence_path):
+    def __init__(self, principal, data, persistence_path=None):
         self.principal = principal
         self.persistence_path = persistence_path
         self.data = data

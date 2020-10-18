@@ -15,7 +15,7 @@ def time_now():
 
 
 def new_hook(t, v, tb):
-    logger.error("Uncaught exception：", exc_info=(t, v, tb))
+    logger.error("Uncaught exception:", exc_info=(t, v, tb))
 
 
 # @singleton

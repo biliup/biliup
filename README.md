@@ -1,4 +1,5 @@
 # bilibiliupload
+![](https://img.shields.io/badge/python-v3.7%2B-blue)
 
 支持自动录制各大直播平台，上传直播录像到bilibili。  
 相关设置在config.yaml文件中，如直播间地址，b站账号密码

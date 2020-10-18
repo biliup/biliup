@@ -9,7 +9,7 @@ from engine.plugins.base_adapter import UploadBase
 from engine.uploader import upload
 
 # 初始化事件管理器
-event_manager = common.event.EventManager()
+event_manager = common.event.EventManager(context)
 
 
 @event_manager.register(DOWNLOAD, block=True)
@@ -20,7 +20,7 @@ def process(name, url):
         p.start()
         p.join()
         # download(name, url)
-        upload("bilibili", name, data)
+        upload("bili_web", name, data)
     finally:
         return Event(BE_MODIFIED, args=(url,))
 
@@ -29,17 +29,17 @@ def process(name, url):
 def process_upload(name, url):
     try:
         data = {"url": url, "date": common.time_now()}
-        upload("bilibili", name, data)
+        upload("bili_web", name, data)
     finally:
         return Event(BE_MODIFIED, args=(url,))
 
 
-@event_manager.server(urls, url_status, url_status_base)
+@event_manager.server()
 class KernelFunc:
-    def __init__(self, _urls, _url_status, _url_status_base):
-        self.urls = _urls
-        self.url_status = _url_status
-        self.url_status_base = _url_status_base
+    def __init__(self, urls, url_status: dict):
+        self.urls = urls
+        self.url_status = url_status
+        self.__raw_streamer_status = url_status.copy()
 
     @event_manager.register(CHECK, block=True)
     def batch_check(self):
@@ -60,13 +60,13 @@ class KernelFunc:
             if self.url_status[live] == 1:
                 logger.debug('已开播正在下载')
             else:
-                name = engine.find_name(live)
+                name = inverted_index[live]
                 logger.debug(f'{name}刚刚开播，去下载')
                 event_manager.send_event(Event(DOWNLOAD, args=(name, live)))
 
             live_d[live] = 1
         self.url_status.update(live_d)
-        # url_status = {**url_status_base, **live_d}
+        # self.url_status = {**self.__raw_streamer_status, **live_d}
 
     def free(self, list_url):
         status_num = list(map(lambda x: self.url_status.get(x), list_url))
@@ -79,7 +79,7 @@ class KernelFunc:
     @event_manager.register(CHECK_UPLOAD)
     def free_upload(self, _urls):
         logger.debug(_urls)
-        for title, v in engine.links_id.items():
+        for title, v in engine.streamer_url.items():
             url = v[0]
             if self.free(v) and UploadBase.filter_file(title):
                 event_manager.send_event(Event(UPLOAD, args=(title, url)))

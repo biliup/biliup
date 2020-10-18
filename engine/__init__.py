@@ -3,21 +3,29 @@ from common.event import Event
 from common.reload import autoreload
 from common.timer import Timer
 
+with open(r'config.yaml', encoding='utf-8') as stream:
+    config = yaml.load(stream, Loader=yaml.FullLoader)
 
-def getmany(_links_id):
-    _urls = []
-    urlstatus = {}
-    for k, v in _links_id.items():
-        _urls += v
-        for url in v:
-            urlstatus[url] = 0
-    return _urls, urlstatus, urlstatus.copy()
+streamers = config['streamers']
+user_name = config['user']['account']['username']
+pass_word = config['user']['account']['password']
+chromedrive_path = config['chromedrive_path']
 
 
-def find_name(url):
-    for name in links_id:
-        if url in links_id[name]:
-            return name
+def invert_dict(d: dict):
+    inverse_dict = {}
+    for k, v in d.items():
+        for item in v:
+            inverse_dict[item] = k
+    return inverse_dict
+
+
+streamer_url = {k: v['url'] for k, v in streamers.items()}
+inverted_index = invert_dict(streamer_url)
+urls = list(inverted_index.keys())
+url_status = dict.fromkeys(inverted_index, 0)
+
+context = {**config, "urls": urls, "url_status": url_status}
 
 
 def main(event_manager):
@@ -37,16 +45,6 @@ TO_MODIFY = 'to_modify'
 DOWNLOAD = 'download'
 BE_MODIFIED = 'be_modified'
 UPLOAD = 'upload'
-
-
-with open(r'config.yaml', encoding='utf-8') as stream:
-    config = yaml.load(stream, Loader=yaml.FullLoader)
-    links_id = config['links_id']
-    user_name = config['user_name']
-    pass_word = config['pass_word']
-    chromedrive_path = config['chromedrive_path']
-
-urls, url_status, url_status_base = getmany(links_id)
 __all__ = ['downloader', 'uploader', 'plugins', 'main',
-           'urls', 'url_status', 'url_status_base',
+           'context', 'inverted_index',
            'CHECK', 'BE_MODIFIED', 'DOWNLOAD', 'TO_MODIFY', 'UPLOAD', 'CHECK_UPLOAD']

@@ -8,8 +8,9 @@ import functools
 
 
 class EventManager:
-    def __init__(self):
+    def __init__(self, kwargs):
         """初始化事件管理器"""
+        self._kwargs = kwargs
         # 事件对象列表
         self.__eventQueue = Queue()
         # 事件管理器开关
@@ -17,7 +18,7 @@ class EventManager:
         # 事件处理线程
         self.__thread = Thread(target=self.__run, name='Synchronous')
         # 事件处理线程池
-        self.__pool = ThreadPoolExecutor(3)
+        self.__pool = ThreadPoolExecutor(3, thread_name_prefix='Asynchronous')
         # 阻塞函数列表
         self.__block = []
 
@@ -141,15 +142,18 @@ class EventManager:
                 return wrapper
         return decorator
 
-    def server(self, *args):
+    def server(self):
         def decorator(cls):
-            instance = cls(*args)
+            sig = inspect.signature(cls)
+            kwargs = {}
+            for k in sig.parameters:
+                kwargs[k] = self._kwargs[k]
+            instance = cls(**kwargs)
             for type_ in self.__method:
                 for handler in self.__method[type_]:
                     self.add_event_listener(type_, getattr(instance, handler))
-            self.__method = {}
+            self.__method.clear()
             return cls
-
         return decorator
 
 
