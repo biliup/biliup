@@ -1,12 +1,16 @@
+import base64
+import hashlib
 import json
 import os
 import time
 from dataclasses import dataclass, field, InitVar, asdict
 from os.path import basename, splitext
 from typing import Any, Union
+from urllib import parse
 from urllib.parse import quote
 
 import requests
+import rsa
 import selenium.common
 from requests import utils
 from selenium import webdriver
@@ -23,7 +27,7 @@ from engine.slider import slider_cracker
 
 
 @Plugin.upload("bilibili")
-class Bilibili(UploadBase):
+class BiliChrome(UploadBase):
     def __init__(self, principal, data):
         super().__init__(principal, data, 'engine/bilibili.cookie')
         # self.title = title
@@ -61,7 +65,7 @@ class Bilibili(UploadBase):
         options = webdriver.ChromeOptions()
 
         options.add_argument('headless')
-        self.driver = webdriver.Chrome(executable_path=engine.chromedrive_path, chrome_options=options)
+        self.driver = webdriver.Chrome(executable_path=engine.chromedriver_path, chrome_options=options)
         # service_log_path=service_log_path)
         try:
             self.driver.get("https://www.bilibili.com")
@@ -230,56 +234,128 @@ class Bilibili(UploadBase):
 
 
 @Plugin.upload(platform="bili_web")
-class Upload(UploadBase):
+class BiliWeb(UploadBase):
     def __init__(self, principal, data):
-        super().__init__(principal, data)
+        super().__init__(principal, data, persistence_path='engine/bili.cookie')
         # cookie = data['cookie']
         # self.__data: Upload.Data = data['config']
-        self.video = Data()
-        self.__bili_jct = ''
-        self.__session = None
 
     def upload(self, file_list):
-        with requests.Session() as self.__session:
-            self.login()
+        video = Data()
+        with BiliBili(video) as bili:
+            self.login(bili)
             for file in file_list:
-                video_part = self.upload_file(file)  # 上传视频
-                self.video.videos.append(video_part)  # 添加已经上传的视频
-            # bilivideo.setDesc(f'转载于：{url}') #添加简介
-            self.video.title = self.data["format_title"]
-            self.video.desc = '''这个自动录制上传的小程序开源在Github：http://t.cn/RgapTpf(或者在Github搜索ForgQi)
+                video_part = bili.upload_file(file)  # 上传视频
+                video.videos.append(video_part)  # 添加已经上传的视频
+            video.title = self.data["format_title"]
+            video.desc = '''这个自动录制上传的小程序开源在Github：http://t.cn/RgapTpf(或者在Github搜索ForgQi)
                 交流群：837362626'''
-            self.video.source = self.data["url"]  # 添加转载地址说明
-            # 设置视频分区,默认为 生活，其他分区
+            video.source = self.data["url"]  # 添加转载地址说明
+            # 设置视频分区,默认为174 生活，其他分区
             tid = engine.config['streamers'][self.principal].get('tid')
             if tid:
-                self.video.tid = tid
+                video.tid = tid
             tags = engine.config['streamers'][self.principal].get('tags', ['星际争霸2', '电子竞技'])
             if tags:
-                self.video.set_tag(tags)
+                video.set_tag(tags)
             img_path = engine.config['streamers'][self.principal].get('cover_path')
             if img_path:
-                self.video.cover = self.cover_up(img_path).replace('http:', '')
-            ret = self.submit()  # 提交视频
-            logger.info(f"upload_success:{ret}")
-            self.remove_filelist(file_list)
+                video.cover = bili.cover_up(img_path).replace('http:', '')
+            ret = bili.submit()  # 提交视频
+        logger.info(f"upload_success:{ret}")
+        self.remove_filelist(file_list)
 
-    def login(self):
-        cookie = engine.config['user']['cookies']
-        # self.__session = requests.session()
+    def login(self, b):
+        user = engine.config['user']
+        cookies = None
+        if os.path.isfile(self.persistence_path):
+            print('使用持久化内容上传')
+            with open(self.persistence_path) as f:
+                cookies = json.load(f)
+        elif user.get('cookies'):
+            cookies = user['cookies']
+        if cookies:
+            try:
+                b.login_by_cookies(cookies)
+            except:
+                logger.exception('login error')
+                cookies = b.login_by_password(**user['account'])
+        else:
+            cookies = b.login_by_password(**user['account'])
+        with open(self.persistence_path, "w") as f:
+            json.dump(cookies, f)
+
+
+class BiliBili:
+    def __init__(self, video: 'Data'):
+        self.app_key = 'bca7e84c2d947ac6'
+        self.__session = requests.Session()
+        self.video = video
+
         self.__session.headers.update({
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/63.0.3239.108",
             "Referer": "https://www.bilibili.com/", 'Connection': 'keep-alive'
         })
+        self.__bili_jct = None
+
+    def login_by_password(self, username, password):
+        print('使用账号上传')
+        key_hash, pub_key = self.get_key()
+        encrypt_password = base64.b64encode(rsa.encrypt(f'{key_hash}{password}'.encode(), pub_key))
+        payload = {
+            "actionKey": 'appkey',
+            "appkey": self.app_key,
+            "build": 6040500,
+            "captcha": '',
+            "challenge": '',
+            "channel": 'bili',
+            "device": 'phone',
+            "mobi_app": 'android',
+            "password": encrypt_password,
+            "permission": 'ALL',
+            "platform": 'android',
+            "seccode": "",
+            "subid": 1,
+            "ts": int(time.time()),
+            "username": username,
+            "validate": "",
+        }
+        response = self.__session.post("https://passport.bilibili.com/api/v3/oauth2/login",
+                                       data={**payload, 'sign': self.sign(parse.urlencode(payload))})
+        r = response.json()
+        if r['code'] != 0 and r.get('data') and r['data'].get('status'):
+            raise RuntimeError(r)
+        for cookie in r['data']['cookie_info']['cookies']:
+            self.__session.cookies.set(cookie['name'], cookie['value'])
+            if 'bili_jct' == cookie['name']:
+                self.__bili_jct = cookie['value']
+        return self.__session.cookies.get_dict()
+
+    def login_by_cookies(self, cookie):
+        print('使用cookies上传')
         requests.utils.add_dict_to_cookiejar(self.__session.cookies, cookie)
         if 'bili_jct' in cookie:
             self.__bili_jct = cookie["bili_jct"]
 
         data = self.__session.get("https://api.bilibili.com/x/web-interface/nav").json()
         if data["code"] != 0:
-            raise Exception(data["message"])
-        # self.__name = data["data"]["uname"]
-        # self.__uid = data["data"]["mid"]
+            raise Exception(data)
+
+    @staticmethod
+    def sign(param):
+        salt = '60698ba2f68e01ce44738920a0ffe768'
+        return hashlib.md5(f"{param}{salt}".encode()).hexdigest()
+
+    def get_key(self):
+        url = "https://passport.bilibili.com/api/oauth2/getKey"
+        payload = {
+            'appkey': f'{self.app_key}',
+            'sign': self.sign(f"appkey={self.app_key}"),
+        }
+        response = self.__session.post(url, data=payload)
+        r = response.json()
+        if r and r["code"] == 0:
+            return r['data']['hash'], rsa.PublicKey.load_pkcs1_openssl_pem(r['data']['key'].encode())
 
     def upload_file(self, filepath: str):
         """上传本地视频文件,返回视频信息dict, fsize=8388608"""
@@ -313,7 +389,7 @@ class Upload(UploadBase):
                     f'&start={i * chunk_size}&end={i * chunk_size + len(chunks_data)}&total={total}',
                     data=chunks_data, headers={"X-Upos-Auth": auth})
                 parts.append({"partNumber": i + 1, "eTag": "etag"})  # 添加分块信息，partNumber从1开始
-                print(f'{(i+1)/chunks:.1%}')  # 输出上传进度
+                print(f'{(i + 1) / chunks:.1%}')  # 输出上传进度
 
         prefix = splitext(name)[0]
         r = self.__session.post(
@@ -339,7 +415,6 @@ class Upload(UploadBase):
         :param img: img path or stream
         :return: img URL
         """
-        import base64
         # from PIL import Image
         # from io import BytesIO
         #
@@ -348,9 +423,10 @@ class Upload(UploadBase):
         #     xsize, ysize = im.size
         #     if xsize / ysize > 1.6:
         #         delta = xsize - ysize * 1.6
+        #         region = im.crop((delta / 2, 0, xsize - delta / 2, ysize))
         #     else:
         #         delta = ysize - xsize * 10 /16
-        #     region = im.crop((delta/2, 0, xsize-delta/2, ysize))
+        #         region = im.crop((0, delta / 2, xsize, ysize - delta / 2))
         #     buffered = BytesIO()
         #     region.save(buffered, format=im.format)
         with open(img, 'rb') as f:
@@ -382,6 +458,16 @@ class Upload(UploadBase):
               f'&groupid={groupid}&vfea={vfea}'
         return self.__session.get(url=url).json()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, e_t, e_v, t_b):
+        self.close()
+
+    def close(self):
+        """Closes all adapters and as such the session"""
+        self.__session.close()
+
 
 @dataclass
 class Data:
@@ -402,6 +488,7 @@ class Data:
     videos: list = field(default_factory=list)
     dtime: Any = None
     open_subtitle: InitVar[bool] = False
+
     # interactive: int = 0
     # no_reprint: int 1
     # open_elec: int 1

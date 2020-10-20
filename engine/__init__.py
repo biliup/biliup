@@ -9,7 +9,7 @@ with open(r'config.yaml', encoding='utf-8') as stream:
 streamers = config['streamers']
 user_name = config['user']['account']['username']
 pass_word = config['user']['account']['password']
-chromedrive_path = config['chromedrive_path']
+chromedriver_path = config.get('chromedriver_path')
 
 
 def invert_dict(d: dict):

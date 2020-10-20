@@ -1,13 +1,13 @@
-user: # cookies和account二选一填写即可
-    cookies: # 默认通过网页接口上传
+user: # 在填了cookies的情况下优先使用cookies上传，如需使用用户名密码上传请注释掉cookies
+    cookies:
         SESSDATA: your SESSDATA
         bili_jct: your bili_jct
         DedeUserID: your DedeUserID
-    account: # 这种方式目前依赖chromedriver
+    account:
         username: your usrname
         password: your password
-
-chromedrive_path: /usr/local/bin/chromedriver
+# 默认通过网页接口上传,可选通过操作chrome上传,此时需要填写chromedriver路径
+chromedriver_path: /usr/local/bin/chromedriver
 
 streamers:
     星际2INnoVation吕布卫星人族天梯第一视角:

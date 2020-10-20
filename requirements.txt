@@ -6,3 +6,4 @@ Requests>=2.20.0
 PyYAML>=4.2b1
 streamlink>=0.14.2
 git+https://github.com/zhangn1985/ykdl.git
+rsa>=4.6
