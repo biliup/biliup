@@ -11,6 +11,8 @@ def upload(platform, index, data):
     :return:
     """
     try:
+        date = data.get("date") if data.get("date") else ""
+        data["format_title"] = f"{date}{index}"
         return Plugin.upload_plugins.get(platform)(index, data).start()
     except:
         logger.exception("Uncaught exception:")

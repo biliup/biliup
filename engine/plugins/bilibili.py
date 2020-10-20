@@ -26,6 +26,59 @@ from engine.plugins.base_adapter import UploadBase
 from engine.slider import slider_cracker
 
 
+@Plugin.upload(platform="bili_web")
+class BiliWeb(UploadBase):
+    def __init__(self, principal, data):
+        super().__init__(principal, data, persistence_path='engine/bili.cookie')
+        # cookie = data['cookie']
+        # self.__data: Upload.Data = data['config']
+
+    def upload(self, file_list):
+        video = Data()
+        with BiliBili(video) as bili:
+            self.login(bili)
+            for file in file_list:
+                video_part = bili.upload_file(file)  # 上传视频
+                video.videos.append(video_part)  # 添加已经上传的视频
+            video.title = self.data["format_title"]
+            video.desc = '''这个自动录制上传的小程序开源在Github：http://t.cn/RgapTpf(或者在Github搜索ForgQi)
+                交流群：837362626'''
+            video.source = self.data["url"]  # 添加转载地址说明
+            # 设置视频分区,默认为174 生活，其他分区
+            tid = engine.config['streamers'][self.principal].get('tid')
+            if tid:
+                video.tid = tid
+            tags = engine.config['streamers'][self.principal].get('tags', ['星际争霸2', '电子竞技'])
+            if tags:
+                video.set_tag(tags)
+            img_path = engine.config['streamers'][self.principal].get('cover_path')
+            if img_path:
+                video.cover = bili.cover_up(img_path).replace('http:', '')
+            ret = bili.submit()  # 提交视频
+        logger.info(f"upload_success:{ret}")
+        self.remove_filelist(file_list)
+
+    def login(self, b):
+        user = engine.config['user']
+        cookies = None
+        if os.path.isfile(self.persistence_path):
+            print('使用持久化内容上传')
+            with open(self.persistence_path) as f:
+                cookies = json.load(f)
+        elif user.get('cookies'):
+            cookies = user['cookies']
+        if cookies:
+            try:
+                b.login_by_cookies(cookies)
+            except:
+                logger.exception('login error')
+                cookies = b.login_by_password(**user['account'])
+        else:
+            cookies = b.login_by_password(**user['account'])
+        with open(self.persistence_path, "w") as f:
+            json.dump(cookies, f)
+
+
 @Plugin.upload("bilibili")
 class BiliChrome(UploadBase):
     def __init__(self, principal, data):
@@ -215,76 +268,6 @@ class BiliChrome(UploadBase):
                          'http://t.cn/RgapTpf(或者在Github搜索ForgQi)\n'
                          '交流群：837362626')
 
-    def start(self):
-        # self.date_title = self.title
-        # if date:
-        #     self.date_title = str(date) + self.title
-        # if self.filter_file():
-        #     logger.info('准备上传' + self.date_title)
-        #     try:
-        #         self.upload(self.file_list, link=url)
-        #     except selenium.common.exceptions.WebDriverException:
-        #         logger.exception('WebDriverException')
-        #     # except :
-        #     #     logger.exception('?')
-        try:
-            super().start()
-        except selenium.common.exceptions.WebDriverException:
-            logger.exception('WebDriverException')
-
-
-@Plugin.upload(platform="bili_web")
-class BiliWeb(UploadBase):
-    def __init__(self, principal, data):
-        super().__init__(principal, data, persistence_path='engine/bili.cookie')
-        # cookie = data['cookie']
-        # self.__data: Upload.Data = data['config']
-
-    def upload(self, file_list):
-        video = Data()
-        with BiliBili(video) as bili:
-            self.login(bili)
-            for file in file_list:
-                video_part = bili.upload_file(file)  # 上传视频
-                video.videos.append(video_part)  # 添加已经上传的视频
-            video.title = self.data["format_title"]
-            video.desc = '''这个自动录制上传的小程序开源在Github：http://t.cn/RgapTpf(或者在Github搜索ForgQi)
-                交流群：837362626'''
-            video.source = self.data["url"]  # 添加转载地址说明
-            # 设置视频分区,默认为174 生活，其他分区
-            tid = engine.config['streamers'][self.principal].get('tid')
-            if tid:
-                video.tid = tid
-            tags = engine.config['streamers'][self.principal].get('tags', ['星际争霸2', '电子竞技'])
-            if tags:
-                video.set_tag(tags)
-            img_path = engine.config['streamers'][self.principal].get('cover_path')
-            if img_path:
-                video.cover = bili.cover_up(img_path).replace('http:', '')
-            ret = bili.submit()  # 提交视频
-        logger.info(f"upload_success:{ret}")
-        self.remove_filelist(file_list)
-
-    def login(self, b):
-        user = engine.config['user']
-        cookies = None
-        if os.path.isfile(self.persistence_path):
-            print('使用持久化内容上传')
-            with open(self.persistence_path) as f:
-                cookies = json.load(f)
-        elif user.get('cookies'):
-            cookies = user['cookies']
-        if cookies:
-            try:
-                b.login_by_cookies(cookies)
-            except:
-                logger.exception('login error')
-                cookies = b.login_by_password(**user['account'])
-        else:
-            cookies = b.login_by_password(**user['account'])
-        with open(self.persistence_path, "w") as f:
-            json.dump(cookies, f)
-
 
 class BiliBili:
     def __init__(self, video: 'Data'):
@@ -439,7 +422,6 @@ class BiliBili:
                 },
             )
         # buffered.close()
-        # {"code":0,"data":{"url":"http://i0.hdslb.com/bfs/archive/67db4a6eae398c309244e74f6e85ae8d813bd7c9.jpg"},"message":"","ttl":1}
         return r.json()['data']['url']
 
     def get_tags(self, upvideo, typeid="", desc="", cover="", groupid=1, vfea=""):

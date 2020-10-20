@@ -220,8 +220,6 @@ class UploadBase:
         raise NotImplementedError()
 
     def start(self):
-        date = self.data.get("date") if self.data.get("date") else ""
-        self.data["format_title"] = f"{date}{self.principal}"
         if self.filter_file(self.principal):
             logger.info('准备上传' + self.data["format_title"])
             self.upload(UploadBase.file_list(self.principal))
