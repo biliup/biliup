@@ -323,7 +323,7 @@ class BiliBili:
         response = self.__session.post("https://passport.bilibili.com/api/v3/oauth2/login",
                                        data={**payload, 'sign': self.sign(parse.urlencode(payload))})
         r = response.json()
-        if r['code'] != 0 and r.get('data') and r['data'].get('status'):
+        if r['code'] != 0 and r.get('data') is None:
             raise RuntimeError(r)
         for cookie in r['data']['cookie_info']['cookies']:
             self.__session.cookies.set(cookie['name'], cookie['value'])

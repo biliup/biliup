@@ -27,9 +27,10 @@ class DownloadBase:
 
     def check_stream(self):
         logger.debug(self.fname)
+        raise NotImplementedError()
 
     def download(self, filename):
-        pass
+        raise NotImplementedError()
 
     def run(self):
         try:
@@ -216,7 +217,7 @@ class UploadBase:
         return True
 
     def upload(self, file_list):
-        pass
+        raise NotImplementedError()
 
     def start(self):
         date = self.data.get("date") if self.data.get("date") else ""
