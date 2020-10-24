@@ -3,7 +3,7 @@ import threading
 
 class Timer(threading.Thread):
     def __init__(self, func, args=(), kwargs=None, interval=15):
-        threading.Thread.__init__(self)
+        threading.Thread.__init__(self, daemon=True)
         if kwargs is None:
             kwargs = {}
         self._args = args

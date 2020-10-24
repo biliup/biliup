@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-#coding:utf8
+# coding:utf8
 import sys
 import common
 from engine.handler import event_manager
