@@ -1,13 +1,37 @@
+import importlib
+import logging
+import pkgutil
 import re
 import time
-from functools import reduce
 
-from common import logger
 from common.decorators import Plugin
 from engine.plugins import general
+logger = logging.getLogger('log01')
 
-batches = []
-onebyone = []
+
+# @singleton
+def load_plugins():
+    """Attempt to load plugins from the path specified.
+    engine.plugins.__path__[0]: full path to a directory where to look for plugins
+    """
+    import engine.plugins
+
+    plugins = []
+
+    for loader, name, ispkg in pkgutil.iter_modules([engine.plugins.__path__[0]]):
+        # set the full plugin module name
+        module_name = "engine.plugins.{0}".format(name)
+        # print(module_name)
+        module = importlib.import_module(module_name)
+        if module in plugins:
+            continue
+        plugins.append(module)
+        # self.load_plugin(module_name)
+    # print(self.plugins)
+    return plugins
+
+
+load_plugins()
 
 
 def suit_url(pattern, urls):
@@ -21,18 +45,22 @@ def suit_url(pattern, urls):
 
 def sorted_checker(urls):
     curls = urls.copy()
-    if batches or onebyone:
-        return batches, onebyone
+    checker_plugins = {}
     for plugin in Plugin.download_plugins:
-        plugin.url_list = suit_url(plugin.VALID_URL_BASE, curls)
-        if hasattr(plugin, "BatchCheck"):
-            batches.append(plugin.BatchCheck(plugin.url_list))
+        url_list = suit_url(plugin.VALID_URL_BASE, curls)
+        if not url_list:
+            continue
+        elif hasattr(plugin, "BatchCheck"):
+            checker_plugins[plugin.__name__] = plugin.BatchCheck(url_list)
         else:
-            onebyone.append(plugin)
+            plugin.url_list = url_list
+            checker_plugins[plugin.__name__] = plugin
+        if not curls:
+            return checker_plugins
     general.__plugin__.url_list = curls
-    onebyone.append(general.__plugin__)
+    checker_plugins[general.__plugin__.__name__] = general.__plugin__
     # onebyone.append(__import__('engine.plugins.general', fromlist=['general',]))
-    return batches, onebyone
+    return checker_plugins
 
 
 def download(fname, url):
@@ -43,7 +71,8 @@ def download(fname, url):
     general.__plugin__(fname, url).run()
 
 
-def batch_check(live, plugin):
+def batch_check(plugin):
+    live = []
     try:
         res = plugin.check()
         if res:
@@ -54,7 +83,8 @@ def batch_check(live, plugin):
         return live
 
 
-def single_check(live, plugin):
+def singleton_check(plugin):
+    live = []
     try:
         for url in plugin.url_list:
             if plugin(f'检测{url}', url).check_stream():
@@ -66,15 +96,3 @@ def single_check(live, plugin):
         logger.exception("IOError")
     finally:
         return live
-
-
-def check(url_list, mode="ALL"):
-    batch, single = sorted_checker(url_list)
-    if mode == "batch":
-        live = reduce(batch_check, batch, [])
-    elif mode == "single":
-        live = reduce(single_check, single, [])
-    else:
-        live = reduce(batch_check, batch, [])
-        live = reduce(single_check, single, live)
-    return live

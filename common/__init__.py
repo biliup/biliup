@@ -1,6 +1,4 @@
-import importlib
 import os
-import pkgutil
 from datetime import datetime, timezone, timedelta
 import logging.config
 
@@ -15,31 +13,6 @@ def time_now():
 
 def new_hook(t, v, tb):
     logger.error("Uncaught exception:", exc_info=(t, v, tb))
-
-
-# @singleton
-def load_plugins():
-    """Attempt to load plugins from the path specified.
-    engine.plugins.__path__[0]: full path to a directory where to look for plugins
-    """
-    import engine.plugins
-
-    plugins = []
-
-    for loader, name, ispkg in pkgutil.iter_modules([engine.plugins.__path__[0]]):
-        # set the full plugin module name
-        module_name = "engine.plugins.{0}".format(name)
-        # print(module_name)
-        module = importlib.import_module(module_name)
-        if module in plugins:
-            continue
-        plugins.append(module)
-        # self.load_plugin(module_name)
-    # print(self.plugins)
-    return plugins
-
-
-load_plugins()
 
 
 log_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'configlog.ini')

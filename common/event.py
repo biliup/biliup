@@ -45,10 +45,10 @@ class EventManager(Thread):
         # 若存在，则按顺序将事件传递给处理函数执行
         for handler in self.__handlers[event.type_]:
             if handler.__qualname__ in self.__block:
-                if event.type_ == 'upload':
-                    self._pool2.submit(handler, event)
-                else:
+                if event.type_ == 'download':
                     self._pool1.submit(handler, event)
+                else:
+                    self._pool2.submit(handler, event)
             else:
                 handler(event)
 

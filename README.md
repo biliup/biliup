@@ -18,7 +18,7 @@ sudo docker exec -it imageId /bin/bash
 
 ## 其他使用
 使用需要修改文件名**config(demo).yaml** ➡ **config.yaml**\
-下载依赖ffmpeg，可以参考Lawliet大神的[安装教程](https://blog.csdn.net/major_zhang/article/details/88945455)
+下载依赖ffmpeg
 >## Linux系统下使用方法：
 >
 >        启动：    ./Bilibili.py start

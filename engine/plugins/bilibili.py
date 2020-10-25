@@ -176,9 +176,9 @@ class BiliChrome(UploadBase):
         WebDriverWait(self.driver, 10).until(
             ec.presence_of_element_located((By.XPATH, r'//*[@id="login-username"]')))
         username = self.driver.find_element_by_xpath(r'//*[@id="login-username"]')
-        username.send_keys(engine.user_name)
+        username.send_keys(engine.config['user']['account']['username'])
         password = self.driver.find_element_by_xpath('//*[@id="login-passwd"]')
-        password.send_keys(engine.pass_word)
+        password.send_keys(engine.config['user']['account']['password'])
         self.driver.find_element_by_class_name("btn-login").click()
         # logger.info('第四步')
         # try:

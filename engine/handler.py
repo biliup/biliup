@@ -2,9 +2,10 @@ import multiprocessing
 import engine
 import common
 from engine import *
-from engine.downloader import download, check
+from engine.downloader import download, batch_check, singleton_check
 from common import logger
 from common.event import Event
+from engine.plugins import BatchCheckBase
 from engine.plugins.base_adapter import UploadBase
 from engine.uploader import upload
 
@@ -31,7 +32,7 @@ def process_upload(name, url, date):
         data = {"url": url, "date": date}
         upload("bili_web", name, data)
     finally:
-        return Event(BE_MODIFIED, args=(url, 0))
+        yield Event(BE_MODIFIED, args=(url, 0))
 
 
 @event_manager.server()
@@ -42,13 +43,12 @@ class KernelFunc:
         self.__raw_streamer_status = url_status.copy()
 
     @event_manager.register(CHECK, block=True)
-    def batch_check(self):
-        live = check(self.urls, "batch")
-        return Event(CHECK_UPLOAD, args=(live,)), Event(TO_MODIFY, args=(live,))
-
-    @event_manager.register(CHECK, block=True)
-    def singleton_check(self):
-        live = check(self.urls, "single")
+    def singleton_check(self, platform):
+        plugin = checker[platform]
+        if isinstance(plugin, BatchCheckBase):
+            live = batch_check(plugin)
+        else:
+            live = singleton_check(plugin)
         return Event(TO_MODIFY, args=(live,))
 
     @event_manager.register(TO_MODIFY)
@@ -70,15 +70,10 @@ class KernelFunc:
 
     def free(self, list_url):
         status_num = list(map(lambda x: self.url_status.get(x), list_url))
-        # if 1 in status_num or 2 in status_num:
-        #     return False
-        # else:
-        #     return True
         return not (1 in status_num or 2 in status_num)
 
     @event_manager.register(CHECK_UPLOAD)
-    def free_upload(self, _urls):
-        logger.debug(_urls)
+    def free_upload(self):
         for title, urls in engine.streamer_url.items():
             if self.free(urls) and UploadBase.filter_file(title):
                 yield Event(UPLOAD, args=(title, urls[0], common.time_now()))

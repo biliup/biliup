@@ -4,11 +4,10 @@ RUN export DEBIAN_FRONTEND=noninteractive \
   && apt-get update \
   && apt install build-essential -y \
   && apt install libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev -y \
-  && apt install zlib1g-dev \
-  && apt install wget \
-  && apt install openssl \
-  && apt install curl \
-  && apt install libsqlite3-dev \
+  && apt install wget -y \
+  && apt install openssl -y \
+  && apt install curl -y \
+  && apt install libsqlite3-dev -y \
   && wget https://www.python.org/ftp/python/3.7.3/Python-3.7.3.tgz \
   && tar -xvf Python-3.7.3.tgz \
   && cd Python-3.7.3 \
