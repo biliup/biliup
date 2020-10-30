@@ -6,7 +6,6 @@
 .idea/vcs.xml
 *.pyc
 .idea/encodings.xml
-*.png
 *.flv
 *.mp4
 *.part
