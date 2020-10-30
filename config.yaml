@@ -3,11 +3,10 @@ pass_word:
 
 chromedrive_path: /root/chromedriver
 
-links_id:
+streamers:
    INnoVation天下第一人吕布人族天梯第一视角星际2:
       url:
-       - https://www.twitch.tv/innovation_s2
-      #   - https://www.huya.com/igxy520
+       - https://www.twitch.tv/trap321
       picture_path: /root/bilibili/picture/INnoVation.png
       tag:
          - 星际争霸2
@@ -15,206 +14,206 @@ links_id:
          - 第一视角
          - INnoVation
          - 人族
-   soO直播录像输本虫族天梯第一视角星际2:
-      url:
-         - https://www.twitch.tv/sc2soo
-         - https://play.afreecatv.com/djdbstn
-      picture_path: /root/bilibili/picture/soO.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - soO
-         - 虫族
-   sOs直播录像狗哥神族天梯第一视角星际2:
-      url:
-         - https://www.twitch.tv/jinairsos1
-      picture_path: /root/bilibili/picture/sOs.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - sOs
-         - 神族
-   Stats直播录像拔本神族天梯第一视角星际2:
-      url:
-         - https://www.twitch.tv/kimdaeyeob3
-         - https://play.afreecatv.com/kimdaeyeob11
-      picture_path: /root/bilibili/picture/Stats.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - Stats
-         - 神族
-   Dark直播录像暗本虫族天梯第一视角星际2:
-      url:
-         - https://www.twitch.tv/qkrfuddn0
-      picture_path: /root/bilibili/picture/Dark.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - Dark
-         - 虫族
-   Maru直播录像人族天梯第一视角星际2:
-      url:
-         - https://www.twitch.tv/maru072
-      picture_path: /root/bilibili/picture/Maru.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - Maru
-         - 人族
-   TY直播录像全教主全太阳人族天梯第一视角星际2:
-      url:
-         - https://www.twitch.tv/sc2tyty
-         - https://play.afreecatv.com/sunstar1994
-      picture_path: /root/bilibili/picture/TY.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - TY
-         - 人族
-   Zest直播录像神族天梯第一视角星际2:
-      url:
-         - https://www.twitch.tv/sc2_zest
-      picture_path: /root/bilibili/picture/Zest.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - Zest
-         - 神族
-   PartinG直播录像跳跳胖丁神族天梯第一视角星际2:
-      url:
-         - https://www.twitch.tv/partingthebigboy
-      picture_path: /root/bilibili/picture/PartinG.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - PartinG
-         - 神族
-   SHOWTIME直播录像神族第一视角星际2:
-      url:
-         - https://www.twitch.tv/sc2showtime
-      picture_path: /root/bilibili/picture/SHOWTIME.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - SHOWTIM
-         - 神族
-   Serral直播录像虫族天梯第一视角星际2:
-      url:
-         - https://www.twitch.tv/serral
-      picture_path: /root/bilibili/picture/Serral.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - Serral
-         - 虫族
-   Solar直播录像虫族天梯第一视角星际2:
-      url:
-         - https://www.twitch.tv/sc2solar
-      picture_path: /root/bilibili/picture/Solar.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - Solar
-         - 虫族
-   UThermal直播录像常威打人族天梯第一视角星际2:
-      url:
-         - https://www.twitch.tv/liquidthermy
-      picture_path: /root/bilibili/picture/UThermal.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - UThermal
-         - 人族
-   XY直播录像鸟哥游戏大厅天梯第一视角星际2:
-      url:
-         - https://www.huya.com/igxy520
-      picture_path: /root/bilibili/picture/XY.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - INnoXY
-         - 人族
-   TIME直播录像开酒人族第一视角星际2:
-      url:
-         - https://www.douyu.com/1858651
-      picture_path: /root/bilibili/picture/TIME.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - INnoTIME
-         - 人族
-   HeroMarine直播录像人族第一视角星际2:
-      url:
-         - https://www.twitch.tv/heromarine
-      picture_path: /root/bilibili/picture/HeroMarine.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - HeroMarine
-         - 人族
-   Harstem直播录像神族第一视角星际2:
-      url:
-         - https://www.twitch.tv/harstem
-      picture_path: /root/bilibili/picture/Harstem.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - Harstem
-         - 神族
-   printf直播录像地堡王神族第一视角星际2:
-      url:
-         - https://www.twitch.tv/quasarprintf
-      picture_path: /root/bilibili/picture/printf.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - printf
-         - 神族
-   SuperNova直播录像人族第一视角星际2:
-      url:
-         - https://www.twitch.tv/root_supernova
-      picture_path: /root/bilibili/picture/SuperNova.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - SuperNova
-         - 人族
-   Trap直播录像神族之新神族第一视角星际2:
-      url:
-         - https://www.twitch.tv/trap321
-      picture_path: /root/bilibili/picture/Trap.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - Trap
-         - 神族
-   Cure直播录像人族第一视角星际2:
-      url:
-         - https://www.twitch.tv/dpgcure
-      picture_path: /root/bilibili/picture/Cure.png
-      tag:
-         - 星际争霸2
-         - 虚空之遗
-         - 第一视角
-         - Cure
-         - 人族
+#   soO直播录像输本虫族天梯第一视角星际2:
+#      url:
+#         - https://www.twitch.tv/sc2soo
+#         - https://play.afreecatv.com/djdbstn
+#      picture_path: /root/bilibili/picture/soO.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - soO
+#         - 虫族
+#   sOs直播录像狗哥神族天梯第一视角星际2:
+#      url:
+#         - https://www.twitch.tv/jinairsos1
+#      picture_path: /root/bilibili/picture/sOs.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - sOs
+#         - 神族
+#   Stats直播录像拔本神族天梯第一视角星际2:
+#      url:
+#         - https://www.twitch.tv/kimdaeyeob3
+#         - https://play.afreecatv.com/kimdaeyeob11
+#      picture_path: /root/bilibili/picture/Stats.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - Stats
+#         - 神族
+#   Dark直播录像暗本虫族天梯第一视角星际2:
+#      url:
+#         - https://www.twitch.tv/qkrfuddn0
+#      picture_path: /root/bilibili/picture/Dark.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - Dark
+#         - 虫族
+#   Maru直播录像人族天梯第一视角星际2:
+#      url:
+#         - https://www.twitch.tv/maru072
+#      picture_path: /root/bilibili/picture/Maru.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - Maru
+#         - 人族
+#   TY直播录像全教主全太阳人族天梯第一视角星际2:
+#      url:
+#         - https://www.twitch.tv/sc2tyty
+#         - https://play.afreecatv.com/sunstar1994
+#      picture_path: /root/bilibili/picture/TY.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - TY
+#         - 人族
+#   Zest直播录像神族天梯第一视角星际2:
+#      url:
+#         - https://www.twitch.tv/sc2_zest
+#      picture_path: /root/bilibili/picture/Zest.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - Zest
+#         - 神族
+#   PartinG直播录像跳跳胖丁神族天梯第一视角星际2:
+#      url:
+#         - https://www.twitch.tv/partingthebigboy
+#      picture_path: /root/bilibili/picture/PartinG.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - PartinG
+#         - 神族
+#   SHOWTIME直播录像神族第一视角星际2:
+#      url:
+#         - https://www.twitch.tv/sc2showtime
+#      picture_path: /root/bilibili/picture/SHOWTIME.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - SHOWTIM
+#         - 神族
+#   Serral直播录像虫族天梯第一视角星际2:
+#      url:
+#         - https://www.twitch.tv/serral
+#      picture_path: /root/bilibili/picture/Serral.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - Serral
+#         - 虫族
+#   Solar直播录像虫族天梯第一视角星际2:
+#      url:
+#         - https://www.twitch.tv/sc2solar
+#      picture_path: /root/bilibili/picture/Solar.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - Solar
+#         - 虫族
+#   UThermal直播录像常威打人族天梯第一视角星际2:
+#      url:
+#         - https://www.twitch.tv/liquidthermy
+#      picture_path: /root/bilibili/picture/UThermal.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - UThermal
+#         - 人族
+#   XY直播录像鸟哥游戏大厅天梯第一视角星际2:
+#      url:
+#         - https://www.huya.com/igxy520
+#      picture_path: /root/bilibili/picture/XY.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - INnoXY
+#         - 人族
+#   TIME直播录像开酒人族第一视角星际2:
+#      url:
+#         - https://www.douyu.com/1858651
+#      picture_path: /root/bilibili/picture/TIME.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - INnoTIME
+#         - 人族
+#   HeroMarine直播录像人族第一视角星际2:
+#      url:
+#         - https://www.twitch.tv/heromarine
+#      picture_path: /root/bilibili/picture/HeroMarine.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - HeroMarine
+#         - 人族
+#   Harstem直播录像神族第一视角星际2:
+#      url:
+#         - https://www.twitch.tv/harstem
+#      picture_path: /root/bilibili/picture/Harstem.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - Harstem
+#         - 神族
+#   printf直播录像地堡王神族第一视角星际2:
+#      url:
+#         - https://www.twitch.tv/quasarprintf
+#      picture_path: /root/bilibili/picture/printf.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - printf
+#         - 神族
+#   SuperNova直播录像人族第一视角星际2:
+#      url:
+#         - https://www.twitch.tv/root_supernova
+#      picture_path: /root/bilibili/picture/SuperNova.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - SuperNova
+#         - 人族
+#   Trap直播录像神族之新神族第一视角星际2:
+#      url:
+#         - https://www.twitch.tv/trap321
+#      picture_path: /root/bilibili/picture/Trap.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - Trap
+#         - 神族
+#   Cure直播录像人族第一视角星际2:
+#      url:
+#         - https://www.twitch.tv/dpgcure
+#      picture_path: /root/bilibili/picture/Cure.png
+#      tag:
+#         - 星际争霸2
+#         - 虚空之遗
+#         - 第一视角
+#         - Cure
+#         - 人族

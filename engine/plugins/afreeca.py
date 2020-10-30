@@ -1,7 +1,8 @@
 import requests
-from engine.plugins import FFmpegdl
 from common import logger
 import re
+
+from engine.plugins.base_adapter import FFmpegdl
 
 QUALITYS = ["original", "hd", "sd"]
 QUALITY_WEIGHTS = {
