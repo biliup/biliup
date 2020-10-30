@@ -2,49 +2,56 @@ import yaml
 from common.event import Event
 from common.reload import autoreload
 from common.timer import Timer
+from engine.downloader import sorted_checker
+
+with open(r'config.yaml', encoding='utf-8') as stream:
+    config = yaml.load(stream, Loader=yaml.FullLoader)
+
+streamers = config['streamers']
+chromedriver_path = config.get('chromedriver_path')
 
 
-def getmany(_links_id):
-    _urls = []
-    urlstatus = {}
-    for k, v in _links_id.items():
-        _urls += v['url']
-        for url in v['url']:
-            urlstatus[url] = 0
-    return _urls, urlstatus, urlstatus.copy()
+def invert_dict(d: dict):
+    inverse_dict = {}
+    for k, v in d.items():
+        for item in v:
+            inverse_dict[item] = k
+    return inverse_dict
 
 
-def find_name(url):
-    for name in links_id:
-        if url in links_id[name][url]:
-            return name
+streamer_url = {k: v['url'] for k, v in streamers.items()}
+inverted_index = invert_dict(streamer_url)
+urls = list(inverted_index.keys())
+url_status = dict.fromkeys(inverted_index, 0)
+checker = sorted_checker(urls)
+platforms = checker.keys()
+
+context = {**config, "urls": urls, "url_status": url_status}
+
+
+def check_timer(event_manager):
+    event_manager.send_event(Event(CHECK_UPLOAD))
+    for k in platforms:
+        event_manager.send_event(Event(CHECK, (k,)))
 
 
 def main(event_manager):
     # 初始化定时器
-    timer_ = Timer(func=event_manager.send_event, args=(Event(CHECK),), interval=40)
+    timer = Timer(func=check_timer, args=(event_manager,), interval=40)
 
     # 模块更新自动重启
-    autoreload(event_manager, timer_, interval=15)
+    autoreload(event_manager, timer, interval=15)
 
     event_manager.start()
-    timer_.start()
+    timer.start()
 
 
 CHECK = 'check'
+CHECK_UPLOAD = 'check_upload'
 TO_MODIFY = 'to_modify'
-DOWNLOAD_UPLOAD = 'download_upload'
+DOWNLOAD = 'download'
 BE_MODIFIED = 'be_modified'
 UPLOAD = 'upload'
-
-
-with open(r'config.yaml', encoding='utf-8') as stream:
-    config = yaml.load(stream, Loader=yaml.FullLoader)
-    links_id = config['links_id']
-    user_name = config['user_name']
-    pass_word = config['pass_word']
-    chromedrive_path = config['chromedrive_path']
-urls, url_status, url_status_base = getmany(links_id)
-__all__ = ['downloader', 'upload', 'plugins', 'main',
-           'urls', 'url_status', 'url_status_base',
-           'CHECK', 'BE_MODIFIED', 'DOWNLOAD_UPLOAD', 'TO_MODIFY', 'UPLOAD']
+__all__ = ['downloader', 'uploader', 'plugins', 'main',
+           'context', 'inverted_index', 'checker',
+           'CHECK', 'BE_MODIFIED', 'DOWNLOAD', 'TO_MODIFY', 'UPLOAD', 'CHECK_UPLOAD']

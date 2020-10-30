@@ -2,8 +2,22 @@ FROM jrottenberg/ffmpeg
 #VOLUME /opt/data
 RUN export DEBIAN_FRONTEND=noninteractive \
   && apt-get update \
-  && apt-get install -y curl \
-  && apt-get install -y python3-pip \
+  && apt install build-essential -y \
+  && apt install libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev -y \
+  && apt install wget -y \
+  && apt install openssl -y \
+  && apt install curl -y \
+  && apt install libsqlite3-dev -y \
+  && wget https://www.python.org/ftp/python/3.7.3/Python-3.7.3.tgz \
+  && tar -xvf Python-3.7.3.tgz \
+  && cd Python-3.7.3 \
+  && ./configure --enable-loadable-sqlite-extensions \
+  && make \
+  && make install \
+  && ln -s /usr/local/bin/pip3 /usr/bin/pip3 \
+  && ln -s /usr/local/bin/python3 /usr/bin/python3 \
+#  && apt-get install -y python3-pip \
+  && apt-get install -y git \
   && apt-get install -y zip \
   && apt-get install -y nodejs \
 #  && apt-get install -y unzip \
@@ -42,7 +56,6 @@ RUN cd /opt \
 #USER webdriver
 COPY common /opt/common
 COPY engine /opt/engine
-COPY ykdl /opt/ykdl
 COPY Bilibili.py /opt/
 RUN chmod 755 /opt/Bilibili.py
 COPY ["config(demo).yaml", "/opt/config.yaml"]

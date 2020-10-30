@@ -1,23 +1,27 @@
 # encoding: UTF-8
 # 系统模块
 import inspect
+from collections import Generator
 from concurrent.futures.thread import ThreadPoolExecutor
-from queue import Queue, Empty
+from dataclasses import dataclass, field
+from queue import Queue
 from threading import *
 import functools
 
 
-class EventManager:
-    def __init__(self):
+class EventManager(Thread):
+    def __init__(self, kwargs):
         """初始化事件管理器"""
+        super().__init__(name='Synchronous')
+        self.__kwargs = kwargs
         # 事件对象列表
         self.__eventQueue = Queue()
         # 事件管理器开关
-        self.__active = False
-        # 事件处理线程
-        self.__thread = Thread(target=self.__run, name='Synchronous')
-        # 事件处理线程池
-        self.__pool = ThreadPoolExecutor(3)
+        self.__active = True
+        # 事件处理线程池1
+        self._pool1 = ThreadPoolExecutor(3, thread_name_prefix='Asynchronous1')
+        # 事件处理线程池2
+        self._pool2 = ThreadPoolExecutor(3, thread_name_prefix='Asynchronous2')
         # 阻塞函数列表
         self.__block = []
 
@@ -27,41 +31,34 @@ class EventManager:
 
         self.__method = {}
 
-    def __run(self):
-        """引擎运行"""
-        while self.__active is True:
-            try:
-                # 获取事件的阻塞时间设为1秒
-                event = self.__eventQueue.get(block=True, timeout=1)
+    def run(self):
+        while self.__active:
+            event = self.__eventQueue.get()
+            if event is not None:
                 self.__event_process(event)
-            except Empty:
-                pass
 
     def __event_process(self, event):
         """处理事件"""
         # 检查是否存在对该事件进行监听的处理函数
-        if event.type_ in self.__handlers:
-            # 若存在，则按顺序将事件传递给处理函数执行
-            for handler in self.__handlers[event.type_]:
-                if handler.__qualname__ in self.__block:
-                    self.__pool.submit(handler, event)
+        if not self.__active or event.type_ not in self.__handlers:
+            return
+        # 若存在，则按顺序将事件传递给处理函数执行
+        for handler in self.__handlers[event.type_]:
+            if handler.__qualname__ in self.__block:
+                if event.type_ == 'download':
+                    self._pool1.submit(handler, event)
                 else:
-                    handler(event)
-
-    def start(self):
-        """启动"""
-        # 将事件管理器设为启动
-        self.__active = True
-        # 启动事件处理线程
-        self.__thread.start()
+                    self._pool2.submit(handler, event)
+            else:
+                handler(event)
 
     def stop(self):
         """停止"""
         # 将事件管理器设为停止
         self.__active = False
-        self.__pool.shutdown()
-        # 等待事件处理线程退出
-        self.__thread.join()
+        self.__eventQueue.put(None)
+        self._pool1.shutdown()
+        self._pool2.shutdown()
 
     def add_event_listener(self, type_, handler):
         """绑定事件和监听器处理函数"""
@@ -102,7 +99,7 @@ class EventManager:
         def callback(result):
             if not result:
                 pass
-            elif isinstance(result, tuple):
+            elif isinstance(result, (tuple, Generator)):
                 for event in result:
                     self.send_event(event)
             else:
@@ -141,22 +138,24 @@ class EventManager:
                 return wrapper
         return decorator
 
-    def server(self, *args):
+    def server(self):
         def decorator(cls):
-            instance = cls(*args)
+            sig = inspect.signature(cls)
+            kwargs = {}
+            for k in sig.parameters:
+                kwargs[k] = self.__kwargs[k]
+            instance = cls(**kwargs)
             for type_ in self.__method:
                 for handler in self.__method[type_]:
                     self.add_event_listener(type_, getattr(instance, handler))
-            self.__method = {}
+            self.__method.clear()
             return cls
-
         return decorator
 
 
+@dataclass
 class Event:
     """事件对象"""
-
-    def __init__(self, type_=None):
-        self.type_ = type_  # 事件类型
-        self.dict = {}  # 字典用于保存具体的事件数据
-        self.args = ()
+    type_: str  # 事件类型
+    args: tuple = ()
+    dict: dict = field(default_factory=dict) # 字典用于保存具体的事件数据

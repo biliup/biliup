@@ -30,7 +30,7 @@ def get_p_children(pid, _recursive=True):
     return children
 
 
-class Autoreload(object):
+class Autoreload:
     def __init__(self, manager, target, interval=10):
         # self.p = _process  # 被监控子进程
         self.__thread = Thread(target=self.start_change_detector, args=(interval,))
@@ -38,7 +38,7 @@ class Autoreload(object):
         self._target = target
 
     def __call__(self, *args, **kwargs):
-        # self.__thread.setDaemon(True)
+        self.__thread.setDaemon(True)
         self.__thread.start()
 
     @staticmethod

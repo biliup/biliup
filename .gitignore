@@ -17,7 +17,7 @@ chromedriver.*
 cookie.py
 download.py
 ds_update.log*
-Engine/bilibili.cookie
+*.cookie
 test.py
 /upload.py
 /work.py
