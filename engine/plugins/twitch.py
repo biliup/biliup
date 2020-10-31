@@ -4,7 +4,7 @@ import requests
 
 from common.decorators import Plugin
 from engine.plugins import BatchCheckBase, logger
-from engine.plugins.base_adapter import YDownload
+from engine.plugins.base_adapter import YDownload ,FFmpegdl
 
 headers = {
     'client-id': '',

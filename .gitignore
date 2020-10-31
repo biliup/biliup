@@ -21,3 +21,4 @@ test.py
 /upload.py
 /work.py
 *.zip
+config.yaml
