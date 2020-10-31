@@ -367,10 +367,13 @@ class BiliBili:
             chunks = math.ceil(total / chunk_size)  # 获取分块数量
             for i in range(chunks):  # 单线程分块上传，官方支持三线程
                 chunks_data = f.read(chunk_size)  # 一次读取一个分块大小
-                self.__session.put(
-                    f'{url}?partNumber={i + 1}&uploadId={upload_id}&chunk={i}&chunks={chunks}&size={len(chunks_data)}'
-                    f'&start={i * chunk_size}&end={i * chunk_size + len(chunks_data)}&total={total}', timeout=30,
-                    data=chunks_data, headers={"X-Upos-Auth": auth})
+                try:
+                    self.__session.put(f'{url}?partNumber={i + 1}&uploadId={upload_id}&chunk={i}&chunks={chunks}'
+                                       f'&size={len(chunks_data)}&start={i * chunk_size}'
+                                       f'&end={i * chunk_size + len(chunks_data)}&total={total}', timeout=30,
+                                       data=chunks_data, headers={"X-Upos-Auth": auth})
+                except requests.ConnectionError:
+                    raise RuntimeError(url)
                 parts.append({"partNumber": i + 1, "eTag": "etag"})  # 添加分块信息，partNumber从1开始
                 print(f'{(i + 1) / chunks:.1%}')  # 输出上传进度
 

@@ -159,11 +159,12 @@ class FFmpegdl(DownloadBase):
     def __init__(self, fname, url, suffix=None):
         super().__init__(fname, url, suffix)
         self.raw_stream_url = None
+        self.opt_args = []
 
     def download(self, filename):
         args = ['ffmpeg', '-headers', ''.join('%s: %s\r\n' % x for x in fake_headers.items()),
-                '-y', '-i', self.raw_stream_url, '-bsf:a', 'aac_adtstoasc', '-c', 'copy', '-f', self.suffix,
-                filename + '.part']
+                '-y', '-i', self.raw_stream_url, '-bsf:a', 'aac_adtstoasc', *self.opt_args,
+                '-c', 'copy', '-f', self.suffix, filename + '.part']
         proc = subprocess.Popen(args, stdin=subprocess.PIPE)
         try:
             retval = proc.wait()
