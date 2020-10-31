@@ -48,9 +48,9 @@ class BiliWeb(UploadBase):
             tid = engine.config['streamers'][self.principal].get('tid')
             if tid:
                 video.tid = tid
-            tags = engine.config['streamers'][self.principal].get('tags', ['星际争霸2', '电子竞技'])
-            if tags:
-                video.set_tag(tags)
+            tagss = engine.config['streamers'][self.principal].get('tagss', ['星际争霸2', '电子竞技'])
+            if tagss:
+                video.set_tags(tagss)
             img_path = engine.config['streamers'][self.principal].get('cover_path')
             if img_path:
                 video.cover = bili.cover_up(img_path).replace('http:', '')
@@ -252,7 +252,7 @@ class BiliChrome(UploadBase):
         title.send_keys(Keys.CONTROL + 'a')
         title.send_keys(Keys.BACKSPACE)
         title.send_keys(self.data["format_title"])
-        # js = "var q=document.getElementsByClassName('content-tag-list')[0].scrollIntoView();"
+        # js = "var q=document.getElementsByClassName('content-tags-list')[0].scrollIntoView();"
         # driver.execute_script(js)
         # time.sleep(3)
         # 输入相关游戏
@@ -303,7 +303,7 @@ class BiliBili:
             "username": username,
             "validate": "",
         }
-        response = self.__session.post("https://passport.bilibili.com/api/v3/oauth2/login",
+        response = self.__session.post("https://passport.bilibili.com/api/v3/oauth2/login", timeout=5,
                                        data={**payload, 'sign': self.sign(parse.urlencode(payload))})
         r = response.json()
         if r['code'] != 0 and r.get('data') is None:
@@ -320,7 +320,7 @@ class BiliBili:
         if 'bili_jct' in cookie:
             self.__bili_jct = cookie["bili_jct"]
 
-        data = self.__session.get("https://api.bilibili.com/x/web-interface/nav").json()
+        data = self.__session.get("https://api.bilibili.com/x/web-interface/nav", timeout=5).json()
         if data["code"] != 0:
             raise Exception(data)
 
@@ -335,7 +335,7 @@ class BiliBili:
             'appkey': f'{self.app_key}',
             'sign': self.sign(f"appkey={self.app_key}"),
         }
-        response = self.__session.post(url, data=payload)
+        response = self.__session.post(url, data=payload, timeout=5)
         r = response.json()
         if r and r["code"] == 0:
             return r['data']['hash'], rsa.PublicKey.load_pkcs1_openssl_pem(r['data']['key'].encode())
@@ -351,7 +351,7 @@ class BiliBili:
             # 申请上传返回上传信息
             ret = self.__session.get(f'https://member.bilibili.com/preupload?name={quote(name)}&size={total}'
                                      f'&r=upos&profile=ugcupos%2Fbup&ssl=0&version=2.8.9'
-                                     f'&build=2080900&upcdn=bda2&probe_version=20200628').json()
+                                     f'&build=2080900&upcdn=bda2&probe_version=20200628', timeout=5).json()
             chunk_size = ret['chunk_size']
             auth = ret["auth"]
             endpoint = ret["endpoint"]
@@ -360,7 +360,7 @@ class BiliBili:
             url = f"https:{endpoint}/{upos_uri.replace('upos://', '')}"  # 视频上传路径
 
             # 向上传地址申请上传，得到上传id等信息
-            upload_id = self.__session.post(f'{url}?uploads&output=json',
+            upload_id = self.__session.post(f'{url}?uploads&output=json', timeout=5,
                                             headers={"X-Upos-Auth": auth}).json()["upload_id"]
             # 开始上传
             parts = []  # 分块信息
@@ -369,15 +369,15 @@ class BiliBili:
                 chunks_data = f.read(chunk_size)  # 一次读取一个分块大小
                 self.__session.put(
                     f'{url}?partNumber={i + 1}&uploadId={upload_id}&chunk={i}&chunks={chunks}&size={len(chunks_data)}'
-                    f'&start={i * chunk_size}&end={i * chunk_size + len(chunks_data)}&total={total}',
+                    f'&start={i * chunk_size}&end={i * chunk_size + len(chunks_data)}&total={total}', timeout=30,
                     data=chunks_data, headers={"X-Upos-Auth": auth})
-                parts.append({"partNumber": i + 1, "eTag": "etag"})  # 添加分块信息，partNumber从1开始
+                parts.append({"partNumber": i + 1, "etags": "etags"})  # 添加分块信息，partNumber从1开始
                 print(f'{(i + 1) / chunks:.1%}')  # 输出上传进度
 
         prefix = splitext(name)[0]
         r = self.__session.post(
             f'{url}?output=json&name={quote(name)}&profile=ugcupos%2Fbup&uploadId={upload_id}&biz_id={biz_id}',
-            json={"parts": parts}, headers={"X-Upos-Auth": auth}).json()
+            json={"parts": parts}, headers={"X-Upos-Auth": auth}, timeout=5).json()
         if r["OK"] != 1:
             raise Exception(r)
         return {"title": prefix, "filename": splitext(basename(upos_uri))[0], "desc": ""}
@@ -386,7 +386,7 @@ class BiliBili:
         if not self.video.title:
             self.video.title = self.video.videos[0]["title"]
         self.__session.get('https://member.bilibili.com/x/geetest/pre/add')
-        ret = self.__session.post(f'https://member.bilibili.com/x/vu/web/add?csrf={self.__bili_jct}',
+        ret = self.__session.post(f'https://member.bilibili.com/x/vu/web/add?csrf={self.__bili_jct}', timeout=5,
                                   json=asdict(self.video)).json()
         if ret["code"] == 0:
             return ret
@@ -419,12 +419,12 @@ class BiliBili:
                 data={
                     'cover': b'data:image/jpeg;base64,' + (base64.b64encode(f.read())),
                     'csrf': self.__bili_jct
-                },
+                }, timeout=30
             )
         # buffered.close()
         return r.json()['data']['url']
 
-    def get_tags(self, upvideo, typeid="", desc="", cover="", groupid=1, vfea=""):
+    def get_tagss(self, upvideo, typeid="", desc="", cover="", groupid=1, vfea=""):
         """
         上传视频后获得推荐标签
         :param vfea:
@@ -433,12 +433,12 @@ class BiliBili:
         :param desc:
         :param cover:
         :param upvideo:
-        :return: 返回官方推荐的tag
+        :return: 返回官方推荐的tags
         """
-        url = f'https://member.bilibili.com/x/web/archive/tags?' \
+        url = f'https://member.bilibili.com/x/web/archive/tagss?' \
               f'typeid={typeid}&title={quote(upvideo["title"])}&filename=filename&desc={desc}&cover={cover}' \
               f'&groupid={groupid}&vfea={vfea}'
-        return self.__session.get(url=url).json()
+        return self.__session.get(url=url, timeout=5).json()
 
     def __enter__(self):
         return self
@@ -466,7 +466,7 @@ class Data:
     desc: str = ''
     dynamic: str = ''
     subtitle: dict = field(init=False)
-    tag: Union[list, str] = ''
+    tags: Union[list, str] = ''
     videos: list = field(default_factory=list)
     dtime: Any = None
     open_subtitle: InitVar[bool] = False
@@ -479,16 +479,16 @@ class Data:
         self.subtitle = {"open": int(open_subtitle), "lan": ""}
         if self.dtime and self.dtime - int(time.time()) <= 14400:
             self.dtime = None
-        if isinstance(self.tag, list):
-            self.dynamic = f"#{'##'.join(self.tag)}#"
-            self.tag = ','.join(self.tag)
+        if isinstance(self.tags, list):
+            self.dynamic = f"#{'##'.join(self.tags)}#"
+            self.tags = ','.join(self.tags)
 
     def delay_time(self, dtime: int):
         """设置延时发布时间，距离提交大于4小时，格式为10位时间戳"""
         if dtime - int(time.time()) > 14400:
             self.dtime = dtime
 
-    def set_tag(self, tag: list):
-        """设置标签，tag为数组"""
-        self.dynamic = f"#{'##'.join(tag)}#"
-        self.tag = ','.join(tag)
+    def set_tags(self, tags: list):
+        """设置标签，tags为数组"""
+        self.dynamic = f"#{'##'.join(tags)}#"
+        self.tags = ','.join(tags)

@@ -9,9 +9,9 @@ streamers:
       url:
          - https://www.twitch.tv/innovation_s2
 #         - https://www.huya.com/igxy520
-      picture_path: picture/INnoVation.png
-#      picture_path: E:/bilibili/bilibili/picture/INnoVation.png
-      tag:
+      cover_path: picture/INnoVation.png
+#      cover_path: E:/bilibili/bilibili/picture/INnoVation.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -20,8 +20,8 @@ streamers:
    # Alphaxsc2比赛解说频道星际2:
    #    url:
    #       - http://play.afreecatv.com/alphaxsc2/null
-   #    picture_path: picture/AlphaX.png
-   #    tag:
+   #    cover_path: picture/AlphaX.png
+   #    tags:
    #       - 星际争霸2
    #       - 虚空之遗
    #       - AlphaX
@@ -31,8 +31,8 @@ streamers:
       tid: 171
       url:
          - http://play.afreecatv.com/bau6660
-      picture_path: picture/Rogue.png
-      tag:
+      cover_path: picture/Rogue.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -42,8 +42,8 @@ streamers:
       tid: 171
       url:
          - https://www.twitch.tv/sc2byun
-      picture_path: picture/ByuN.png
-      tag:
+      cover_path: picture/ByuN.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -53,8 +53,8 @@ streamers:
       tid: 171
       url:
          - https://play.afreecatv.com/djdbstn
-      picture_path: picture/soO.png
-      tag:
+      cover_path: picture/soO.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -64,8 +64,8 @@ streamers:
       tid: 171
       url:
          - https://www.twitch.tv/jinairsos1
-      picture_path: picture/sOs.png
-      tag:
+      cover_path: picture/sOs.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -75,8 +75,8 @@ streamers:
       tid: 171
       url:
          - https://play.afreecatv.com/kimdaeyeob11
-      picture_path: picture/Stats.png
-      tag:
+      cover_path: picture/Stats.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -86,8 +86,8 @@ streamers:
       tid: 171
       url:
          - https://www.twitch.tv/qkrfuddn0
-      picture_path: picture/Dark.png
-      tag:
+      cover_path: picture/Dark.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -97,8 +97,8 @@ streamers:
       tid: 171
       url:
          - https://www.twitch.tv/maru072
-      picture_path: picture/Maru.png
-      tag:
+      cover_path: picture/Maru.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -108,8 +108,8 @@ streamers:
       tid: 171
       url:
          - https://play.afreecatv.com/sunstar1994
-      picture_path: picture/TY.png
-      tag:
+      cover_path: picture/TY.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -118,8 +118,8 @@ streamers:
    # Zest直播录像神族天梯第一视角星际2:
    #    url:
    #       - https://www.twitch.tv/sc2_zest
-   #    picture_path: picture/Zest.png
-   #    tag:
+   #    cover_path: picture/Zest.png
+   #    tags:
    #       - 星际争霸2
    #       - 虚空之遗
    #       - 第一视角
@@ -129,8 +129,8 @@ streamers:
       tid: 171
       url:
          - https://www.twitch.tv/partingthebigboy
-      picture_path: picture/PartinG.png
-      tag:
+      cover_path: picture/PartinG.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -140,8 +140,8 @@ streamers:
       tid: 171
       url:
          - https://www.twitch.tv/sc2showtime
-      picture_path: picture/SHOWTIME.png
-      tag:
+      cover_path: picture/SHOWTIME.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -150,8 +150,8 @@ streamers:
    # Serral直播录像虫族天梯第一视角星际2:
    #    url:
    #       - https://www.twitch.tv/serral
-   #    picture_path: picture/Serral.png
-   #    tag:
+   #    cover_path: picture/Serral.png
+   #    tags:
    #       - 星际争霸2
    #       - 虚空之遗
    #       - 第一视角
@@ -161,8 +161,8 @@ streamers:
       tid: 171
       url:
          - https://www.twitch.tv/sc2solar
-      picture_path: picture/Solar.png
-      tag:
+      cover_path: picture/Solar.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -172,8 +172,8 @@ streamers:
       tid: 171
       url:
          - https://www.twitch.tv/liquidthermy
-      picture_path: picture/UThermal.png
-      tag:
+      cover_path: picture/UThermal.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -182,8 +182,8 @@ streamers:
    # XY直播录像鸟哥游戏大厅天梯第一视角星际2:
    #    url:
    #       - https://www.huya.com/igxy520
-   #    picture_path: picture/XY.png
-   #    tag:
+   #    cover_path: picture/XY.png
+   #    tags:
    #       - 星际争霸2
    #       - 虚空之遗
    #       - 第一视角
@@ -192,8 +192,8 @@ streamers:
    # TIME直播录像开酒人族第一视角星际2:
    #    url:
    #       - https://www.douyu.com/1858651
-   #    picture_path: picture/TIME.png
-   #    tag:
+   #    cover_path: picture/TIME.png
+   #    tags:
    #       - 星际争霸2
    #       - 虚空之遗
    #       - 第一视角
@@ -203,8 +203,8 @@ streamers:
       tid: 171
       url:
          - https://www.twitch.tv/heromarine
-      picture_path: picture/HeroMarine.png
-      tag:
+      cover_path: picture/HeroMarine.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -214,8 +214,8 @@ streamers:
       tid: 171
       url:
          - https://www.twitch.tv/harstem
-      picture_path: picture/Harstem.png
-      tag:
+      cover_path: picture/Harstem.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -224,8 +224,8 @@ streamers:
    # printf直播录像地堡王神族第一视角星际2:
    #    url:
    #       - https://www.twitch.tv/quasarprintf
-   #    picture_path:
-   #    tag:
+   #    cover_path:
+   #    tags:
    #       - 星际争霸2
    #       - 虚空之遗
    #       - 第一视角
@@ -234,8 +234,8 @@ streamers:
    # SuperNova直播录像人族第一视角星际2:
    #    url:
    #       - https://www.twitch.tv/root_supernova
-   #    picture_path: picture/SuperNova.png
-   #    tag:
+   #    cover_path: picture/SuperNova.png
+   #    tags:
    #       - 星际争霸2
    #       - 虚空之遗
    #       - 第一视角
@@ -245,8 +245,8 @@ streamers:
       tid: 171
       url:
          - https://www.twitch.tv/trap321
-      picture_path: picture/Trap.png
-      tag:
+      cover_path: picture/Trap.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -256,8 +256,8 @@ streamers:
       tid: 171
       url:
          - https://www.twitch.tv/dpgcure
-      picture_path: picture/Cure.png
-      tag:
+      cover_path: picture/Cure.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -266,8 +266,8 @@ streamers:
    # Stephano直播录像虫族第一视角星际2:
    #    url:
    #       - https://www.twitch.tv/gostephano
-   #    picture_path: picture/Stephano.png
-   #    tag:
+   #    cover_path: picture/Stephano.png
+   #    tags:
    #       - 星际争霸2
    #       - 虚空之遗
    #       - 第一视角
@@ -276,8 +276,8 @@ streamers:
    # RagnaroK直播录像虫族第一视角星际2:
    #    url:
    #       - https://www.twitch.tv/SC2_Ragnarok
-   #    picture_path: picture/RagnaroK.png
-   #    tag:
+   #    cover_path: picture/RagnaroK.png
+   #    tags:
    #       - 星际争霸2
    #       - 虚空之遗
    #       - 第一视角
@@ -287,8 +287,8 @@ streamers:
       tid: 171
       url:
          - https://www.twitch.tv/clem__sc2
-      picture_path: picture/Clem.png
-      tag:
+      cover_path: picture/Clem.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -298,8 +298,8 @@ streamers:
       tid: 171
       url:
          - https://www.twitch.tv/rb_reynor
-      picture_path: picture/reynor.png
-      tag:
+      cover_path: picture/reynor.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -309,8 +309,8 @@ streamers:
       tid: 171
       url:
          - http://www.twitch.tv/maxpaxsc2
-      picture_path:
-      tag:
+      cover_path:
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -320,8 +320,8 @@ streamers:
       tid: 171
       url:
          - https://www.twitch.tv/dream_sc2
-      picture_path: picture/dream.png
-      tag:
+      cover_path: picture/dream.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -331,8 +331,8 @@ streamers:
       tid: 171
       url:
          - https://www.douyu.com/5718
-      picture_path: picture/cyan.png
-      tag:
+      cover_path: picture/cyan.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -342,8 +342,8 @@ streamers:
       tid: 171
       url:
          - https://www.twitch.tv/scarlettm
-      picture_path: picture/scarlett.png
-      tag:
+      cover_path: picture/scarlett.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -353,8 +353,8 @@ streamers:
       tid: 171
       url:
          - https://www.huya.com/cloudy
-      picture_path: picture/cloudy.png
-      tag:
+      cover_path: picture/cloudy.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -364,8 +364,8 @@ streamers:
       tid: 171
       url:
          - https://www.twitch.tv/zoun123
-      picture_path: picture/zoun.png
-      tag:
+      cover_path: picture/zoun.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角
@@ -375,8 +375,8 @@ streamers:
       tid: 171
       url:
          - https://www.twitch.tv/special_
-      picture_path: picture/special.png
-      tag:
+      cover_path: picture/special.png
+      tags:
          - 星际争霸2
          - 虚空之遗
          - 第一视角

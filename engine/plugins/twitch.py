@@ -7,8 +7,8 @@ from engine.plugins import BatchCheckBase, logger
 from engine.plugins.base_adapter import YDownload
 
 headers = {
-    'client-id': '5qnc2cacngon0bg6yy42633v2y9anf',
-    'Authorization': 'Bearer qyy3x103y1d8dj1qyb7ebdnga8iixx'
+    'client-id': '',
+    'Authorization': ''
 }
 VALID_URL_BASE = r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)'
 API_ROOMS = 'https://api.twitch.tv/helix/streams'
@@ -16,21 +16,29 @@ _API_USER = 'https://api.twitch.tv/helix/users'
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)')
-class Twitch(YDownload):
+class Twitch(FFmpegdl,YDownload):
     def __init__(self, fname, url, suffix='mp4'):
-        YDownload.__init__(self, fname, url, suffix=suffix)
+        FFmpegdl.__init__(self, fname, url, suffix=suffix)
 
-    def dl(self):
-        info_list = self.get_sinfo()
+    def check_stream(self):
+        return True
 
-        if self.fname not in ['星际2PartinG跳跳胖丁神族天梯第一视角']:
-            pass
-        elif '720p' in info_list:
-            self.ydl_opts['format'] = '720p'
-        elif '720p60' in info_list:
-            self.ydl_opts['format'] = '720p60'
-
-        super().dl()
+    def download(self, filename):
+        if self.raw_stream_url == None:
+            _,Url_list = self.get_sinfo()
+            self.opt_args = ['-ss', "00:00:16"]
+            self.raw_stream_url = Url_list[-1]["url"]
+            if self.fname in ['SuperNova星际2英雄联盟或者魔兽世界第一视角']:
+                self.raw_stream_url = Url_list[-2]["url"]
+        else:
+            self.opt_args = []
+        # retval = super().download(filename)
+        # if retval != 0:
+        #     super().download(filename)
+        # print(self.raw_stream_url)
+        # try:
+        # else:
+        return super().download(filename)
 
     class BatchCheck(BatchCheckBase):
         def __init__(self, urls):
