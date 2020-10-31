@@ -48,9 +48,9 @@ class BiliWeb(UploadBase):
             tid = engine.config['streamers'][self.principal].get('tid')
             if tid:
                 video.tid = tid
-            tagss = engine.config['streamers'][self.principal].get('tagss', ['星际争霸2', '电子竞技'])
-            if tagss:
-                video.set_tags(tagss)
+            tags = engine.config['streamers'][self.principal].get('tags', ['星际争霸2', '电子竞技'])
+            if tags:
+                video.set_tag(tags)
             img_path = engine.config['streamers'][self.principal].get('cover_path')
             if img_path:
                 video.cover = bili.cover_up(img_path).replace('http:', '')
@@ -252,7 +252,7 @@ class BiliChrome(UploadBase):
         title.send_keys(Keys.CONTROL + 'a')
         title.send_keys(Keys.BACKSPACE)
         title.send_keys(self.data["format_title"])
-        # js = "var q=document.getElementsByClassName('content-tags-list')[0].scrollIntoView();"
+        # js = "var q=document.getElementsByClassName('content-tag-list')[0].scrollIntoView();"
         # driver.execute_script(js)
         # time.sleep(3)
         # 输入相关游戏
@@ -371,7 +371,7 @@ class BiliBili:
                     f'{url}?partNumber={i + 1}&uploadId={upload_id}&chunk={i}&chunks={chunks}&size={len(chunks_data)}'
                     f'&start={i * chunk_size}&end={i * chunk_size + len(chunks_data)}&total={total}', timeout=30,
                     data=chunks_data, headers={"X-Upos-Auth": auth})
-                parts.append({"partNumber": i + 1, "etags": "etags"})  # 添加分块信息，partNumber从1开始
+                parts.append({"partNumber": i + 1, "etag": "etag"})  # 添加分块信息，partNumber从1开始
                 print(f'{(i + 1) / chunks:.1%}')  # 输出上传进度
 
         prefix = splitext(name)[0]
@@ -424,7 +424,7 @@ class BiliBili:
         # buffered.close()
         return r.json()['data']['url']
 
-    def get_tagss(self, upvideo, typeid="", desc="", cover="", groupid=1, vfea=""):
+    def get_tags(self, upvideo, typeid="", desc="", cover="", groupid=1, vfea=""):
         """
         上传视频后获得推荐标签
         :param vfea:
@@ -433,9 +433,9 @@ class BiliBili:
         :param desc:
         :param cover:
         :param upvideo:
-        :return: 返回官方推荐的tags
+        :return: 返回官方推荐的tag
         """
-        url = f'https://member.bilibili.com/x/web/archive/tagss?' \
+        url = f'https://member.bilibili.com/x/web/archive/tags?' \
               f'typeid={typeid}&title={quote(upvideo["title"])}&filename=filename&desc={desc}&cover={cover}' \
               f'&groupid={groupid}&vfea={vfea}'
         return self.__session.get(url=url, timeout=5).json()
@@ -466,7 +466,7 @@ class Data:
     desc: str = ''
     dynamic: str = ''
     subtitle: dict = field(init=False)
-    tags: Union[list, str] = ''
+    tag: Union[list, str] = ''
     videos: list = field(default_factory=list)
     dtime: Any = None
     open_subtitle: InitVar[bool] = False
@@ -479,16 +479,16 @@ class Data:
         self.subtitle = {"open": int(open_subtitle), "lan": ""}
         if self.dtime and self.dtime - int(time.time()) <= 14400:
             self.dtime = None
-        if isinstance(self.tags, list):
-            self.dynamic = f"#{'##'.join(self.tags)}#"
-            self.tags = ','.join(self.tags)
+        if isinstance(self.tag, list):
+            self.dynamic = f"#{'##'.join(self.tag)}#"
+            self.tag = ','.join(self.tag)
 
     def delay_time(self, dtime: int):
         """设置延时发布时间，距离提交大于4小时，格式为10位时间戳"""
         if dtime - int(time.time()) > 14400:
             self.dtime = dtime
 
-    def set_tags(self, tags: list):
-        """设置标签，tags为数组"""
-        self.dynamic = f"#{'##'.join(tags)}#"
-        self.tags = ','.join(tags)
+    def set_tag(self, tag: list):
+        """设置标签，tag为数组"""
+        self.dynamic = f"#{'##'.join(tag)}#"
+        self.tag = ','.join(tag)
