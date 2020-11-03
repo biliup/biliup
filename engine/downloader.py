@@ -3,26 +3,27 @@ import logging
 import pkgutil
 import re
 import time
+import engine.plugins
 
 from common.decorators import Plugin
 from engine.plugins import general
 logger = logging.getLogger('log01')
 
 
-# @singleton
-def load_plugins():
+def load_plugins(pkg=engine.plugins):
     """Attempt to load plugins from the path specified.
     engine.plugins.__path__[0]: full path to a directory where to look for plugins
     """
-    import engine.plugins
 
     plugins = []
 
-    for loader, name, ispkg in pkgutil.iter_modules([engine.plugins.__path__[0]]):
+    for loader, name, ispkg in pkgutil.iter_modules([pkg.__path__[0]]):
         # set the full plugin module name
-        module_name = "engine.plugins.{0}".format(name)
-        # print(module_name)
+        module_name = f"{pkg.__name__}.{name}"
         module = importlib.import_module(module_name)
+        if ispkg:
+            load_plugins(module)
+            continue
         if module in plugins:
             continue
         plugins.append(module)

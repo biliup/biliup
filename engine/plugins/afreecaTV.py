@@ -14,7 +14,7 @@ QUALITIES = ["original", "hd", "sd"]
 
 @Plugin.download(regexp=r"https?://play\.afreecatv\.com/(?P<username>\w+)(?:/\d+)?")
 class AfreecaTV(FFmpegdl):
-    def __init__(self, fname, url, suffix='mp4'):
+    def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 
     def check_stream(self):
