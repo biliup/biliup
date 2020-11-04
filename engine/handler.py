@@ -6,7 +6,7 @@ from engine.downloader import download, batch_check, singleton_check
 from common import logger
 from common.event import Event
 from engine.plugins import BatchCheckBase
-from engine.plugins.base_adapter import UploadBase
+from engine.plugins.upload import UploadBase
 from engine.uploader import upload
 
 # 初始化事件管理器
