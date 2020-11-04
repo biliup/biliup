@@ -166,6 +166,7 @@ class BiliBili:
             if not min_cost or min_cost > cost:
                 auto_os = line
                 min_cost = cost
+        auto_os['cost'] = min_cost
         return auto_os
 
     def upload_file(self, filepath: str):
@@ -184,7 +185,7 @@ class BiliBili:
             self._auto_os = self.probe()
             # self._auto_os = {"os": "kodo", "query": "bucket=bvcupcdnkodobm&probe_version=20200810",
             #                  "probe_url": "//up-na0.qbox.me/crossdomain.xml"}
-            logger.info(f"开始上传{self._auto_os['os']}: {self._auto_os['query']}")
+            logger.info(f"开始上传{self._auto_os['os']}: {self._auto_os['query']}. time: {self._auto_os['cost']}")
         profile = 'ugcupos/bup' if 'upos' == self._auto_os['os'] else "ugcupos/bupfetch"
         query = f"r={self._auto_os['os']}&profile={quote(profile, safe='')}" \
                 f"&ssl=0&version=2.8.9&build=2080900&{self._auto_os['query']}"
@@ -221,11 +222,8 @@ class BiliBili:
             chunks = math.ceil(total / chunk_size)  # 获取分块数量
             for i in range(chunks):
                 chunks_data = f.read(chunk_size)  # 一次读取一个分块大小
-                try:
-                    response = self.__session.post(f'{url}/{len(chunks_data)}', timeout=30,
-                                       data=chunks_data, headers=headers).json()
-                except requests.ConnectionError:
-                    raise RuntimeError(url)
+                response = self.__session.post(f'{url}/{len(chunks_data)}', timeout=30,
+                                   data=chunks_data, headers=headers).json()
                 parts.append({"index": i, "ctx": response['ctx']})
                 print(f'kodo: {(i + 1) / chunks:.1%}')  # 输出上传进度
         self.__session.post(f"{endpoint}/mkfile/{total}/key/{base64.urlsafe_b64encode(key.encode()).decode()}",
