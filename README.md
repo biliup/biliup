@@ -2,6 +2,11 @@
 ![](https://img.shields.io/badge/python-v3.7%2B-blue)
 
 支持自动录制各大直播平台，上传直播录像到bilibili。  
+
+* 自动选择上传线路，保证国内外vps上传质量
+* 可分别控制下载与上传并发量
+* 支持通过API上传与selenium操作浏览器上传两种方式
+
 相关设置在config.yaml文件中，如直播间地址，b站账号密码
 
 ## docker一键使用 🔨 
@@ -17,59 +22,74 @@ sudo docker exec -it imageId /bin/bash
 ```
 
 ## 其他使用
-使用需要修改文件名**config(demo).yaml** ➡ **config.yaml**\
-下载依赖ffmpeg
->## Linux系统下使用方法：
+修改文件名**config(demo).yaml** ➡ **config.yaml**\
+下载 __FFmpeg__\
+依赖安装`pip3 install -r requirements.txt`
+## Linux系统下使用方法：
 >
->        启动：    ./Bilibili.py start
+>     启动： ./Bilibili.py start
 >
->        退出：    ./Bilibili.py stop
+>     退出： ./Bilibili.py stop
 >
->        重启：    ./Bilibili.py restart
+>     重启： ./Bilibili.py restart
 >
 > `ps -A | grep .py` 查看进程是否启动成功
->***
->
->## Windows系统下使用方法：
->     图形界面版
->        在release中下载AutoTool.msi进行安装
+## Windows系统下使用方法：
+~~图形界面版在release中下载AutoTool.msi进行安装~~
 >     命令行版
 >        启动：    python Bilibili.py
->python3 FFmpeg QQ群：837362626
+> QQ群：837362626
+## 使用建议
+国内vps网络费用较高，建议使用国外vps，根据机器的硬盘等资源设置合理并发量。
 
-Linux下以daemon进程启动
+b站上传目前有两种模式，分别为bup和bupfetch模式
+    
+    其中bup模式为国内常用模式，视频直接上传到b站投稿系统。
+    bupfetch模式目前见于国外网络环境，视频首先上传至第三方文件系统，上传结束后通知bilibili投稿系统，再由b站投稿系统从第三方系统拉取视频，以保证某些地区用户的上传体验。
+bup模式支持的上传方式为upos，其线路有：
+* ws（网宿）
+* qn（七牛）
+* bda2（百度）
 
-结果写入日志文件
+bupfetch模式支持的上传方式及线路有：
+1. kodo（七牛）
+2. gcs（谷歌）
+3. bos（百度）
 
-下载部分使用youtube-dl，不支持或者支持的不够好的网站，通过爬虫api解决。
+bilibili上传国内基本选择upos模式的bda2线路。国外多为upos模式的ws和qn线路，也有bupfetch模式的kodo、gcs线路。上传前会先发包测试选择一条延迟最低的线路，保证各个地区的上传质量。
+***
+Linux下以daemon进程启动，程序执行过程可查看日志文件。
 
-上传的自动化需要解决视频分割和验证登陆的问题，有两种方案。
+登录有两种方案：
 
-* 二值化、灰度处理找缺口计算移动像素，直接拖动发现拖到位置不能通过验证，提示：“拼图被怪物吃了”。滑动验证码会上传分析你的拖动行为，不能直接拖动，需要模拟人操作轨迹，加速度、抖动等等，以保证通过验证的成功率。
+* 操作浏览器模拟登录
 
-* 因为app是没有验证码的，所以还可以通过逆向app来分析验证过程。可参考comwrg/bilibiliupload的登陆部分
+* 通过b站的OAuth2接口
 
-通过线程池限制并发数，减少磁盘占满的可能性。同时检测下载情况，如果卡死或者下载超时3次重新下载，保证可用性。
+>对于滑动验证码可进行二值化、灰度处理找缺口计算移动像素，系统会上传分析你的拖动行为，模拟人操作轨迹，提供加速度、抖动等，如直接拖动到目标位置不能通过验证，提示：“拼图被怪物吃了”。滑动验证码系统会学习，需不断更新轨迹策略保证通过验证的成功率。
 
-包含代码更新后在空闲时自动重启的功能，下载和上传是两个独立模块，都可以单独调用，下载模块是通过反射实现插件化的。
+>OAuth2接口要提供key，需逆向分析各端
 
-下载的基类都在`engine/plugins/__init__.py`中
-拓展其他网站，需要继承下载模块的基类，仅需提供下载相关代码。
+线程池限制并发数，减少磁盘占满的可能性。检测下载情况卡死或者下载超时，重试三次保证可用性。代码更新后将在空闲时自动重启。
 
-如需拓展上传的网站，或者修改上传的具体实现，修改`upload.py`文件
 
-实现了一套基于装饰器的事件驱动框架，用装饰器保证可读性和易用性。在现有的功能上增加其他功能，需要注册发生对应事件时执行的函数，比如下载后转码
+下载整合了ykdl、youtube-dl、streamlink，不支持或者支持的不够好的网站可自行拓展。
+下载和上传模块插件化，如果有上传或下载目前不支持平台的需求便于拓展。
 
+下载基类在`engine/plugins/base_adapter.py`中，拓展其他网站，需要继承下载模块的基类，加装饰器`@Plugin.download`。
+
+拓展上传平台，继承`engine/plugins/upload/__init__.py`文件中上传基类，加装饰器`@Plugin.upload`。
+
+实现了一套基于装饰器的事件驱动框架。增加其他功能监听对应事件即可，比如下载后转码：
 ```python
 # e.p.给函数注册事件
-# block=True 会使用子线程来执行
-# block=False 使用主线程执行
-@event_manager.register("transcoding", block=True)
-def modify(self, live_m):
+# 如果操作耗时请指定block=True, 否则会卡住事件循环
+@event_manager.register("download_finish", block=True)
+def transcoding(data):
     pass
 ```
 
 ## Credits
-* Thanks `zhangn1985/ykdl` provides Douyu-downloader.
+* Thanks `ykdl, youtube-dl, streamlink` provides downloader.
 
 类似项目`ZhangMingZhao1/StreamerHelper`

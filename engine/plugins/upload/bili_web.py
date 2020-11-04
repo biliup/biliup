@@ -5,6 +5,7 @@ import math
 import os
 import time
 from dataclasses import dataclass, field, InitVar, asdict
+from json import JSONDecodeError
 from os.path import basename, splitext
 from typing import Any, Union
 from urllib import parse
@@ -14,7 +15,6 @@ import requests
 import rsa
 
 from requests import utils
-
 
 import engine
 from common.decorators import Plugin
@@ -59,9 +59,12 @@ class BiliWeb(UploadBase):
         cookies = None
         if os.path.isfile(self.persistence_path):
             print('使用持久化内容上传')
-            with open(self.persistence_path) as f:
-                cookies = json.load(f)
-        elif user.get('cookies'):
+            try:
+                with open(self.persistence_path) as f:
+                    cookies = json.load(f)
+            except JSONDecodeError:
+                logger.exception('加载cookie出错')
+        if not cookies and user.get('cookies'):
             cookies = user['cookies']
         if cookies:
             try:
@@ -185,7 +188,7 @@ class BiliBili:
             self._auto_os = self.probe()
             # self._auto_os = {"os": "kodo", "query": "bucket=bvcupcdnkodobm&probe_version=20200810",
             #                  "probe_url": "//up-na0.qbox.me/crossdomain.xml"}
-            logger.info(f"开始上传{self._auto_os['os']}: {self._auto_os['query']}. time: {self._auto_os['cost']}")
+            logger.info(f"自动路线选择{self._auto_os['os']}: {self._auto_os['query']}. time: {self._auto_os['cost']}")
         profile = 'ugcupos/bup' if 'upos' == self._auto_os['os'] else "ugcupos/bupfetch"
         query = f"r={self._auto_os['os']}&profile={quote(profile, safe='')}" \
                 f"&ssl=0&version=2.8.9&build=2080900&{self._auto_os['query']}"
@@ -223,7 +226,7 @@ class BiliBili:
             for i in range(chunks):
                 chunks_data = f.read(chunk_size)  # 一次读取一个分块大小
                 response = self.__session.post(f'{url}/{len(chunks_data)}', timeout=30,
-                                   data=chunks_data, headers=headers).json()
+                                               data=chunks_data, headers=headers).json()
                 parts.append({"index": i, "ctx": response['ctx']})
                 print(f'kodo: {(i + 1) / chunks:.1%}')  # 输出上传进度
         self.__session.post(f"{endpoint}/mkfile/{total}/key/{base64.urlsafe_b64encode(key.encode()).decode()}",
@@ -284,30 +287,28 @@ class BiliBili:
         :param img: img path or stream
         :return: img URL
         """
-        # from PIL import Image
-        # from io import BytesIO
-        #
-        # with Image.open(img) as im:
-        #     # 宽和高,需要16：10
-        #     xsize, ysize = im.size
-        #     if xsize / ysize > 1.6:
-        #         delta = xsize - ysize * 1.6
-        #         region = im.crop((delta / 2, 0, xsize - delta / 2, ysize))
-        #     else:
-        #         delta = ysize - xsize * 10 /16
-        #         region = im.crop((0, delta / 2, xsize, ysize - delta / 2))
-        #     buffered = BytesIO()
-        #     region.save(buffered, format=im.format)
-        with open(img, 'rb') as f:
-            # self.__session.headers['Content-Type'] = 'application/x-www-form-urlencoded', buffered.getvalue()
-            r = self.__session.post(
-                url='https://member.bilibili.com/x/vu/web/cover/up',
-                data={
-                    'cover': b'data:image/jpeg;base64,' + (base64.b64encode(f.read())),
-                    'csrf': self.__bili_jct
-                }, timeout=30
-            )
-        # buffered.close()
+        from PIL import Image
+        from io import BytesIO
+
+        with Image.open(img) as im:
+            # 宽和高,需要16：10
+            xsize, ysize = im.size
+            if xsize / ysize > 1.6:
+                delta = xsize - ysize * 1.6
+                region = im.crop((delta / 2, 0, xsize - delta / 2, ysize))
+            else:
+                delta = ysize - xsize * 10 / 16
+                region = im.crop((0, delta / 2, xsize, ysize - delta / 2))
+            buffered = BytesIO()
+            region.save(buffered, format=im.format)
+        r = self.__session.post(
+            url='https://member.bilibili.com/x/vu/web/cover/up',
+            data={
+                'cover': b'data:image/jpeg;base64,' + (base64.b64encode(buffered.getvalue())),
+                'csrf': self.__bili_jct
+            }, timeout=30
+        )
+        buffered.close()
         return r.json()['data']['url']
 
     def get_tags(self, upvideo, typeid="", desc="", cover="", groupid=1, vfea=""):
