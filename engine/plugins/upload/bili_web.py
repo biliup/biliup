@@ -3,6 +3,7 @@ import hashlib
 import json
 import math
 import os
+import sys
 import time
 from dataclasses import dataclass, field, InitVar, asdict
 from json import JSONDecodeError
@@ -15,6 +16,7 @@ import requests
 import rsa
 
 from requests import utils
+from requests.adapters import HTTPAdapter, Retry
 
 import engine
 from common.decorators import Plugin
@@ -83,7 +85,7 @@ class BiliBili:
         self.app_key = 'bca7e84c2d947ac6'
         self.__session = requests.Session()
         self.video = video
-
+        self.__session.mount('https://', HTTPAdapter(max_retries=Retry(total=5, method_whitelist=False)))
         self.__session.headers.update({
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/63.0.3239.108",
             "Referer": "https://www.bilibili.com/", 'Connection': 'keep-alive'
@@ -152,6 +154,7 @@ class BiliBili:
 
     def probe(self):
         ret = self.__session.get('https://member.bilibili.com/preupload?r=probe', timeout=5).json()
+        logger.info(f"线路:{ret['lines']}")
         data, auto_os = None, None
         min_cost = 0
         if ret['probe'].get('get'):
@@ -179,6 +182,8 @@ class BiliBili:
         "probe_url":"//up-na0.qbox.me/crossdomain.xml"}
         gcs: {"os":"gcs","query":"bucket=bvcupcdngcsus&probe_version=20200810",
         "probe_url":"//storage.googleapis.com/bvcupcdngcsus/OK"},
+        bos: {"os":"bos","query":"bucket=bvcupcdnboshb&probe_version=20200810",
+        "probe_url":"??"}
         upos:
         {"os":"upos","query":"upcdn=ws&probe_version=20200810","probe_url":"//upos-sz-upcdnws.bilivideo.com/OK"}
         {"os":"upos","query":"upcdn=qn&probe_version=20200810","probe_url":"//upos-sz-upcdnqn.bilivideo.com/OK"}
@@ -188,7 +193,7 @@ class BiliBili:
             self._auto_os = self.probe()
             # self._auto_os = {"os": "kodo", "query": "bucket=bvcupcdnkodobm&probe_version=20200810",
             #                  "probe_url": "//up-na0.qbox.me/crossdomain.xml"}
-            logger.info(f"自动路线选择{self._auto_os['os']}: {self._auto_os['query']}. time: {self._auto_os['cost']}")
+            logger.info(f"自动线路选择{self._auto_os['os']}: {self._auto_os['query']}. time: {self._auto_os.get('cost')}")
         profile = 'ugcupos/bup' if 'upos' == self._auto_os['os'] else "ugcupos/bupfetch"
         query = f"r={self._auto_os['os']}&profile={quote(profile, safe='')}" \
                 f"&ssl=0&version=2.8.9&build=2080900&{self._auto_os['query']}"
@@ -223,12 +228,17 @@ class BiliBili:
             # 开始上传
             parts = []  # 分块信息
             chunks = math.ceil(total / chunk_size)  # 获取分块数量
+            start = time.perf_counter()
             for i in range(chunks):
                 chunks_data = f.read(chunk_size)  # 一次读取一个分块大小
                 response = self.__session.post(f'{url}/{len(chunks_data)}', timeout=30,
                                                data=chunks_data, headers=headers).json()
                 parts.append({"index": i, "ctx": response['ctx']})
-                print(f'kodo: {(i + 1) / chunks:.1%}')  # 输出上传进度
+                # 输出上传进度
+                cost = time.perf_counter() - start
+                percent = (i + 1) / chunks
+                sys.stdout.write(f"\r{(i*chunk_size+len(chunks_data))/1000/1000/cost:.2f}MB/s => {percent:.1%}")
+        print(f' >> {name} ended')
         self.__session.post(f"{endpoint}/mkfile/{total}/key/{base64.urlsafe_b64encode(key.encode()).decode()}",
                             data=','.join(map(lambda x: x['ctx'], parts)), headers=headers, timeout=10)
         r = self.__session.post(f"https:{fetch_url}", headers=fetch_headers, timeout=5).json()
@@ -255,18 +265,24 @@ class BiliBili:
             # 开始上传
             parts = []  # 分块信息
             chunks = math.ceil(total / chunk_size)  # 获取分块数量
+            start = time.perf_counter()
             for i in range(chunks):
                 chunks_data = f.read(chunk_size)  # 一次读取一个分块大小
+                uploaded = i * chunk_size + len(chunks_data)
                 self.__session.put(f'{url}?partNumber={i + 1}&uploadId={upload_id}&chunk={i}&chunks={chunks}'
                                    f'&size={len(chunks_data)}&start={i * chunk_size}'
-                                   f'&end={i * chunk_size + len(chunks_data)}&total={total}', timeout=30,
+                                   f'&end={uploaded}&total={total}', timeout=30,
                                    data=chunks_data, headers={"X-Upos-Auth": auth})
 
                 parts.append({"partNumber": i + 1, "eTag": "etag"})  # 添加分块信息，partNumber从1开始
-                print(f'{(i + 1) / chunks:.1%}')  # 输出上传进度
+                # 输出上传进度
+                cost = time.perf_counter() - start
+                percent = (i + 1) / chunks
+                sys.stdout.write(f"\r{uploaded/1000/1000/cost:.2f}MB/s => {percent:.1%}")
+        logger.info(f'{name} uploaded >> {total/1000/1000/cost:.2f}MB/s')
         r = self.__session.post(
             f'{url}?output=json&name={quote(name)}&profile=ugcupos%2Fbup&uploadId={upload_id}&biz_id={biz_id}',
-            json={"parts": parts}, headers={"X-Upos-Auth": auth}, timeout=5).json()
+            json={"parts": parts}, headers={"X-Upos-Auth": auth}, timeout=15).json()
         if r["OK"] != 1:
             raise Exception(r)
         return {"title": splitext(name)[0], "filename": splitext(basename(upos_uri))[0], "desc": ""}
