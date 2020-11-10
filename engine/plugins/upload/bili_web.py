@@ -34,7 +34,7 @@ class BiliWeb(UploadBase):
     def upload(self, file_list):
         video = Data()
         with BiliBili(video) as bili:
-            self.login(bili)
+            bili.login(self.persistence_path)
             for file in file_list:
                 video_part = bili.upload_file(file)  # 上传视频
                 video.videos.append(video_part)  # 添加已经上传的视频
@@ -56,29 +56,6 @@ class BiliWeb(UploadBase):
         logger.info(f"上传成功: {ret}")
         self.remove_filelist(file_list)
 
-    def login(self, b):
-        user = engine.config['user']
-        cookies = None
-        if os.path.isfile(self.persistence_path):
-            print('使用持久化内容上传')
-            try:
-                with open(self.persistence_path) as f:
-                    cookies = json.load(f)
-            except JSONDecodeError:
-                logger.exception('加载cookie出错')
-        if not cookies and user.get('cookies'):
-            cookies = user['cookies']
-        if cookies:
-            try:
-                b.login_by_cookies(cookies)
-            except:
-                logger.exception('login error')
-                cookies = b.login_by_password(**user['account'])
-        else:
-            cookies = b.login_by_password(**user['account'])
-        with open(self.persistence_path, "w") as f:
-            json.dump(cookies, f)
-
 
 class BiliBili:
     def __init__(self, video: 'Data'):
@@ -90,8 +67,45 @@ class BiliBili:
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/63.0.3239.108",
             "Referer": "https://www.bilibili.com/", 'Connection': 'keep-alive'
         })
+        self.cookies = None
+        self.access_token = None
+        self.refresh_token = None
         self.__bili_jct = None
         self._auto_os = None
+        self.persistence_path = 'engine/bili.cookie'
+
+    def login(self, persistence_path):
+        self.persistence_path = persistence_path
+        user = engine.config['user']
+        if os.path.isfile(persistence_path):
+            print('使用持久化内容上传')
+            self.load()
+        if not self.cookies and user.get('cookies'):
+            self.cookies = user['cookies']
+        if self.cookies:
+            try:
+                self.login_by_cookies(self.cookies)
+            except:
+                logger.exception('login error')
+                self.login_by_password(**user['account'])
+        else:
+            self.login_by_password(**user['account'])
+        self.store()
+
+    def load(self):
+        try:
+            with open(self.persistence_path) as f:
+                self.cookies = json.load(f)
+                self.access_token = self.cookies['access_token']
+        except (JSONDecodeError, KeyError):
+            logger.exception('加载cookie出错')
+
+    def store(self):
+        with open(self.persistence_path, "w") as f:
+            json.dump({**self.cookies,
+                       'access_token': self.access_token,
+                       'refresh_token': self.refresh_token
+                       }, f)
 
     def login_by_password(self, username, password):
         print('使用账号上传')
@@ -124,7 +138,10 @@ class BiliBili:
             self.__session.cookies.set(cookie['name'], cookie['value'])
             if 'bili_jct' == cookie['name']:
                 self.__bili_jct = cookie['value']
-        return self.__session.cookies.get_dict()
+        self.cookies = self.__session.cookies.get_dict()
+        self.access_token = r['data']['token_info']['access_token']
+        self.refresh_token = r['data']['token_info']['refresh_token']
+        return r
 
     def login_by_cookies(self, cookie):
         print('使用cookies上传')
@@ -290,9 +307,39 @@ class BiliBili:
     def submit(self):
         if not self.video.title:
             self.video.title = self.video.videos[0]["title"]
-        self.__session.get('https://member.bilibili.com/x/geetest/pre/add')
-        ret = self.__session.post(f'https://member.bilibili.com/x/vu/web/add?csrf={self.__bili_jct}', timeout=5,
+        self.__session.get('https://member.bilibili.com/x/geetest/pre/add', timeout=5)
+        myinfo = self.__session.get('https://member.bilibili.com/x/web/archive/pre?lang=cn',
+                                    timeout=15).json()['data']['myinfo']
+        myinfo['total_info'] = self.__session.get('https://member.bilibili.com/x/web/index/stat',
+                                                  timeout=15).json()['data']
+        user_weight = 2 if myinfo['level'] > 3 \
+                           and myinfo['total_info'] \
+                           and myinfo['total_info']['total_fans'] > 100 else 1
+        if user_weight == 2:
+            logger.info(f'用户权重: {user_weight} => 网页端分p数量不受限制使用网页端api提交')
+            ret = self.__session.post(f'https://member.bilibili.com/x/vu/web/add?csrf={self.__bili_jct}', timeout=5,
                                   json=asdict(self.video)).json()
+            if ret["code"] == 0:
+                return ret
+            elif ret["code"] == 21138:
+                logger.info(f'改用客户端接口提交{ret}')
+            else:
+                raise Exception(ret)
+
+        logger.info(f'用户权重: {user_weight} => 网页端分p数量受到限制使用客户端api端提交')
+        if not self.access_token:
+            self.login_by_password(**engine.config['user']['account'])
+            self.store()
+        while True:
+            ret = self.__session.post(f'http://member.bilibili.com/x/vu/client/add?access_key={self.access_token}',
+                                      timeout=5, json=asdict(self.video)).json()
+            if ret['code'] == -101:
+                logger.info(f'刷新token{ret}')
+                self.login_by_password(**engine.config['user']['account'])
+                self.store()
+                continue
+            break
+
         if ret["code"] == 0:
             return ret
         else:
