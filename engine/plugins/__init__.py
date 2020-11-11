@@ -30,7 +30,7 @@ class BatchCheckBase:
 
 class Monitoring(Timer):
     def __init__(self, parent_pid, file_name):
-        super().__init__(func=self.kill_child_processes)
+        super().__init__(func=self.kill_child_processes, interval=20)
         self.parent = self.children = self.numc = None
         self.parent_pid = parent_pid
         self.file_name = file_name + '.part'

@@ -254,7 +254,8 @@ class BiliBili:
                 # 输出上传进度
                 cost = time.perf_counter() - start
                 percent = (i + 1) / chunks
-                sys.stdout.write(f"\r{(i*chunk_size+len(chunks_data))/1000/1000/cost:.2f}MB/s => {percent:.1%}")
+                sys.stdout.write(
+                    f"\r{(i * chunk_size + len(chunks_data)) / 1000 / 1000 / cost:.2f}MB/s => {percent:.1%}")
         print(f' >> {name} ended')
         self.__session.post(f"{endpoint}/mkfile/{total}/key/{base64.urlsafe_b64encode(key.encode()).decode()}",
                             data=','.join(map(lambda x: x['ctx'], parts)), headers=headers, timeout=10)
@@ -295,8 +296,8 @@ class BiliBili:
                 # 输出上传进度
                 cost = time.perf_counter() - start
                 percent = (i + 1) / chunks
-                sys.stdout.write(f"\r{uploaded/1000/1000/cost:.2f}MB/s => {percent:.1%}")
-        logger.info(f'{name} uploaded >> {total/1000/1000/cost:.2f}MB/s')
+                sys.stdout.write(f"\r{uploaded / 1000 / 1000 / cost:.2f}MB/s => {percent:.1%}")
+        logger.info(f'{name} uploaded >> {total / 1000 / 1000 / cost:.2f}MB/s')
         r = self.__session.post(
             f'{url}?output=json&name={quote(name)}&profile=ugcupos%2Fbup&uploadId={upload_id}&biz_id={biz_id}',
             json={"parts": parts}, headers={"X-Upos-Auth": auth}, timeout=15).json()
@@ -313,12 +314,11 @@ class BiliBili:
         myinfo['total_info'] = self.__session.get('https://member.bilibili.com/x/web/index/stat',
                                                   timeout=15).json()['data']
         user_weight = 2 if myinfo['level'] > 3 \
-                           and myinfo['total_info'] \
-                           and myinfo['total_info']['total_fans'] > 100 else 1
+            and myinfo['total_info'] and myinfo['total_info']['total_fans'] > 100 else 1
         if user_weight == 2:
             logger.info(f'用户权重: {user_weight} => 网页端分p数量不受限制使用网页端api提交')
             ret = self.__session.post(f'https://member.bilibili.com/x/vu/web/add?csrf={self.__bili_jct}', timeout=5,
-                                  json=asdict(self.video)).json()
+                                      json=asdict(self.video)).json()
             if ret["code"] == 0:
                 return ret
             elif ret["code"] == 21138:

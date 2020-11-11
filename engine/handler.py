@@ -55,18 +55,17 @@ class KernelFunc:
     def modify(self, live_m):
         if not live_m:
             return logger.debug('无人直播')
-        live_d = {}
         for live in live_m:
             if self.url_status[live] == 1:
                 logger.debug('已开播正在下载')
-            else:
-                name = inverted_index[live]
-                logger.debug(f'{name}刚刚开播，去下载')
-                yield Event(DOWNLOAD, args=(name, live))
-
-            live_d[live] = 1
-        self.url_status.update(live_d)
-        # self.url_status = {**self.__raw_streamer_status, **live_d}
+                continue
+            if self.url_status[live] == 2:
+                logger.debug('正在上传稍后下载')
+                continue
+            name = inverted_index[live]
+            logger.debug(f'{name}刚刚开播，去下载')
+            self.url_status[live] = 1
+            yield Event(DOWNLOAD, args=(name, live))
 
     def free(self, list_url):
         status_num = list(map(lambda x: self.url_status.get(x), list_url))
