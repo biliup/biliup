@@ -2,10 +2,9 @@ import multiprocessing
 import engine
 import common
 from engine import *
-from engine.downloader import download, batch_check, singleton_check
+from engine.downloader import download, check_url
 from common import logger
 from common.event import Event
-from engine.plugins import BatchCheckBase
 from engine.plugins.upload import UploadBase
 from engine.uploader import upload
 
@@ -45,27 +44,21 @@ class KernelFunc:
     @event_manager.register(CHECK, block=True)
     def singleton_check(self, platform):
         plugin = checker[platform]
-        if isinstance(plugin, BatchCheckBase):
-            live = batch_check(plugin)
-        else:
-            live = singleton_check(plugin)
-        return Event(TO_MODIFY, args=(live,))
+        for url in check_url(plugin):
+            yield Event(TO_MODIFY, args=(url,))
 
     @event_manager.register(TO_MODIFY)
-    def modify(self, live_m):
-        if not live_m:
+    def modify(self, url):
+        if not url:
             return logger.debug('无人直播')
-        for live in live_m:
-            if self.url_status[live] == 1:
-                logger.debug('已开播正在下载')
-                continue
-            if self.url_status[live] == 2:
-                logger.debug('正在上传稍后下载')
-                continue
-            name = inverted_index[live]
-            logger.debug(f'{name}刚刚开播，去下载')
-            self.url_status[live] = 1
-            yield Event(DOWNLOAD, args=(name, live))
+        if self.url_status[url] == 1:
+            return logger.debug('已开播正在下载')
+        if self.url_status[url] == 2:
+            return logger.debug('正在上传稍后下载')
+        name = inverted_index[url]
+        logger.debug(f'{name}刚刚开播，去下载')
+        self.url_status[url] = 1
+        return Event(DOWNLOAD, args=(name, url))
 
     def free(self, list_url):
         status_num = list(map(lambda x: self.url_status.get(x), list_url))

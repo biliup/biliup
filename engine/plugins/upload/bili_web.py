@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hashlib
 import json
@@ -12,6 +13,7 @@ from typing import Any, Union
 from urllib import parse
 from urllib.parse import quote
 
+import aiohttp
 import requests
 import rsa
 
@@ -245,18 +247,21 @@ class BiliBili:
             # 开始上传
             parts = []  # 分块信息
             chunks = math.ceil(total / chunk_size)  # 获取分块数量
+
+            async def upload_chunk(session, chunks_data, params):
+                async with session.post(f'{url}/{len(chunks_data)}',
+                                        data=chunks_data, headers=headers) as response:
+                    end = time.perf_counter() - start
+                    ctx = await response.json()
+                    parts.append({"index": params['chunk'], "ctx": ctx['ctx']})
+                    sys.stdout.write(f"\r{params['end'] / 1000 / 1000 / end:.2f}MB/s "
+                                     f"=> {params['partNumber'] / chunks:.1%}")
+
             start = time.perf_counter()
-            for i in range(chunks):
-                chunks_data = f.read(chunk_size)  # 一次读取一个分块大小
-                response = self.__session.post(f'{url}/{len(chunks_data)}', timeout=30,
-                                               data=chunks_data, headers=headers).json()
-                parts.append({"index": i, "ctx": response['ctx']})
-                # 输出上传进度
-                cost = time.perf_counter() - start
-                percent = (i + 1) / chunks
-                sys.stdout.write(
-                    f"\r{(i * chunk_size + len(chunks_data)) / 1000 / 1000 / cost:.2f}MB/s => {percent:.1%}")
-        print(f' >> {name} ended')
+            asyncio.run(self._upload({}, f, chunk_size, upload_chunk))
+            cost = time.perf_counter() - start
+
+        logger.info(f'{name} uploaded >> {total / 1000 / 1000 / cost:.2f}MB/s')
         self.__session.post(f"{endpoint}/mkfile/{total}/key/{base64.urlsafe_b64encode(key.encode()).decode()}",
                             data=','.join(map(lambda x: x['ctx'], parts)), headers=headers, timeout=10)
         r = self.__session.post(f"https:{fetch_url}", headers=fetch_headers, timeout=5).json()
@@ -276,34 +281,62 @@ class BiliBili:
             biz_id = ret["biz_id"]
             upos_uri = ret["upos_uri"]
             url = f"https:{endpoint}/{upos_uri.replace('upos://', '')}"  # 视频上传路径
-
+            headers = {
+                "X-Upos-Auth": auth
+            }
             # 向上传地址申请上传，得到上传id等信息
             upload_id = self.__session.post(f'{url}?uploads&output=json', timeout=5,
-                                            headers={"X-Upos-Auth": auth}).json()["upload_id"]
+                                            headers=headers).json()["upload_id"]
             # 开始上传
             parts = []  # 分块信息
             chunks = math.ceil(total / chunk_size)  # 获取分块数量
-            start = time.perf_counter()
-            for i in range(chunks):
-                chunks_data = f.read(chunk_size)  # 一次读取一个分块大小
-                uploaded = i * chunk_size + len(chunks_data)
-                self.__session.put(f'{url}?partNumber={i + 1}&uploadId={upload_id}&chunk={i}&chunks={chunks}'
-                                   f'&size={len(chunks_data)}&start={i * chunk_size}'
-                                   f'&end={uploaded}&total={total}', timeout=30,
-                                   data=chunks_data, headers={"X-Upos-Auth": auth})
 
-                parts.append({"partNumber": i + 1, "eTag": "etag"})  # 添加分块信息，partNumber从1开始
-                # 输出上传进度
-                cost = time.perf_counter() - start
-                percent = (i + 1) / chunks
-                sys.stdout.write(f"\r{uploaded / 1000 / 1000 / cost:.2f}MB/s => {percent:.1%}")
+            async def upload_chunk(session, chunks_data, params):
+                async with session.put(url, params=params,
+                                       data=chunks_data, headers=headers):
+                    end = time.perf_counter() - start
+                    parts.append({"partNumber": params['partNumber'], "eTag": "etag"})
+                    sys.stdout.write(f"\r{params['end'] / 1000 / 1000 / end:.2f}MB/s "
+                                     f"=> {params['partNumber'] / chunks:.1%}")
+
+            start = time.perf_counter()
+            asyncio.run(self._upload({
+                'uploadId': upload_id,
+                'chunks': chunks,
+                'total': total
+            }, f, chunk_size, upload_chunk))
+            cost = time.perf_counter() - start
         logger.info(f'{name} uploaded >> {total / 1000 / 1000 / cost:.2f}MB/s')
+        p = {
+            'name': name,
+            'uploadId': upload_id,
+            'biz_id': biz_id
+        }
         r = self.__session.post(
-            f'{url}?output=json&name={quote(name)}&profile=ugcupos%2Fbup&uploadId={upload_id}&biz_id={biz_id}',
-            json={"parts": parts}, headers={"X-Upos-Auth": auth}, timeout=15).json()
+            f'{url}?output=json&profile=ugcupos%2Fbup', params=p,
+            json={"parts": parts}, headers=headers, timeout=15).json()
         if r["OK"] != 1:
             raise Exception(r)
         return {"title": splitext(name)[0], "filename": splitext(basename(upos_uri))[0], "desc": ""}
+
+    @staticmethod
+    async def _upload(params, file, chunk_size, afunc, tasks=3):
+        params['chunk'] = -1
+
+        async def upload_chunk():
+            while True:
+                chunks_data = file.read(chunk_size)
+                if not chunks_data:
+                    return
+                params['chunk'] += 1
+                params['size'] = len(chunks_data)
+                params['partNumber'] = params['chunk'] + 1
+                params['start'] = params['chunk'] * chunk_size
+                params['end'] = params['start'] + params['size']
+                await afunc(session, chunks_data, params)
+
+        async with aiohttp.ClientSession() as session:
+            await asyncio.gather(*[upload_chunk() for _ in range(tasks)])
 
     def submit(self):
         if not self.video.title:

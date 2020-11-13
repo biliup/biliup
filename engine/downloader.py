@@ -6,7 +6,7 @@ import time
 import engine.plugins
 
 from common.decorators import Plugin
-from engine.plugins import general
+from engine.plugins import general, BatchCheckBase
 logger = logging.getLogger('log01')
 
 
@@ -72,28 +72,16 @@ def download(fname, url):
     general.__plugin__(fname, url).run()
 
 
-def batch_check(plugin):
-    live = []
+def check_url(plugin):
     try:
-        res = plugin.check()
-        if res:
-            live.extend(res)
-    except IOError:
-        logger.exception("IOError")
-    finally:
-        return live
-
-
-def singleton_check(plugin):
-    live = []
-    try:
+        if isinstance(plugin, BatchCheckBase):
+            return plugin.check()
         for url in plugin.url_list:
             if plugin(f'检测{url}', url).check_stream():
-                live.append(url)
+                yield url
             if url != plugin.url_list[-1]:
                 logger.debug('歇息会')
                 time.sleep(15)
     except IOError:
         logger.exception("IOError")
-    finally:
-        return live
+
