@@ -1,3 +1,7 @@
+import platform
+
+from ykdl.util.jsengine import chakra_available, quickjs_available, external_interpreter
+
 from common.decorators import Plugin
 from engine.plugins import logger
 from engine.plugins.base_adapter import FFmpegdl
@@ -11,6 +15,12 @@ class Douyu(FFmpegdl):
 
     def check_stream(self):
         logger.debug(self.fname)
+        if platform.system() == 'Linux':
+            if not chakra_available and not quickjs_available and external_interpreter is None:
+                logger.error('''
+        Please install at least one of the following Javascript interpreter.'
+        python packages: PyChakra, quickjs
+        applications: Gjs, CJS, QuickJS, JavaScriptCore, Node.js, etc.''')
         site, url = url_to_module(self.url)
         try:
             info = site.parser(url)

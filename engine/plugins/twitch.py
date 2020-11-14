@@ -1,109 +1,97 @@
-# import json
-# import re
+import random
+from urllib.parse import urlencode
+
 import requests
 
 from common.decorators import Plugin
-from engine.plugins import BatchCheckBase, logger
-from engine.plugins.base_adapter import YDownload ,FFmpegdl
+from engine.plugins import BatchCheckBase, match1
+from engine.plugins.base_adapter import FFmpegdl
 
-headers = {
-    'client-id': '',
-    'Authorization': ''
-}
 VALID_URL_BASE = r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)'
-API_ROOMS = 'https://api.twitch.tv/helix/streams'
-_API_USER = 'https://api.twitch.tv/helix/users'
+_OPERATION_HASHES = {
+    'CollectionSideBar': '27111f1b382effad0b6def325caef1909c733fe6a4fbabf54f8d491ef2cf2f14',
+    'FilterableVideoTower_Videos': 'a937f1d22e269e39a03b509f65a7490f9fc247d7f83d6ac1421523e3b68042cb',
+    'ClipsCards__User': 'b73ad2bfaecfd30a9e6c28fada15bd97032c83ec77a0440766a56fe0bd632777',
+    'ChannelCollectionsContent': '07e3691a1bad77a36aba590c351180439a40baefc1c275356f40fc7082419a84',
+    'StreamMetadata': '1c719a40e481453e5c48d9bb585d971b8b372f8ebb105b17076722264dfa5b3e',
+    'ComscoreStreamingQuery': 'e1edae8122517d013405f237ffcc124515dc6ded82480a88daef69c83b53ac01',
+    'VideoPreviewOverlay': '3006e77e51b128d838fa4e835723ca4dc9a05c5efd4466c1085215c6e437e65c',
+}
+_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko'
 
 
-@Plugin.download(regexp=r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)')
-class Twitch(FFmpegdl,YDownload):
-    def __init__(self, fname, url, suffix='mp4'):
+@Plugin.download(regexp=VALID_URL_BASE)
+class Twitch(FFmpegdl):
+    def __init__(self, fname, url, suffix='flv'):
         FFmpegdl.__init__(self, fname, url, suffix=suffix)
 
     def check_stream(self):
-        return True
-
-    def download(self, filename):
-        if self.raw_stream_url == None:
-            _,Url_list = self.get_sinfo()
-            self.opt_args = ['-ss', "00:00:16"]
-            self.raw_stream_url = Url_list[-1]["url"]
-            if self.fname in ['SuperNova星际2英雄联盟或者魔兽世界第一视角']:
-                self.raw_stream_url = Url_list[-2]["url"]
-        else:
+        if self.raw_stream_url:
             self.opt_args = []
-        # retval = super().download(filename)
-        # if retval != 0:
-        #     super().download(filename)
-        # print(self.raw_stream_url)
-        # try:
-        # else:
-        return super().download(filename)
+            return True
+        channel_name = match1(self.url, VALID_URL_BASE)
+        r = requests.get(f'https://api.twitch.tv/api/channels/{channel_name}/access_token',
+                         headers={
+                             'Accept': 'application/vnd.twitchtv.v5+json; charset=UTF-8',
+                             'Client-ID': _CLIENT_ID,
+                         }, timeout=10)
+        r.close()
+        access_token = r.json()
+        token = access_token['token']
+        query = {
+            'allow_source': 'true',
+            'allow_audio_only': 'true',
+            'allow_spectre': 'true',
+            'p': random.randint(1000000, 10000000),
+            'player': 'twitchweb',
+            'playlist_include_framerate': 'true',
+            'segment_preference': '4',
+            'sig': access_token['sig'],
+            'token': token,
+        }
+        self.opt_args = ['-ss', "00:00:16"]
+        self.raw_stream_url = f'https://usher.ttvnw.net/api/channel/hls/{channel_name}.m3u8?{urlencode(query)}'
+        return True
 
     class BatchCheck(BatchCheckBase):
         def __init__(self, urls):
             BatchCheckBase.__init__(self, pattern_id=VALID_URL_BASE, urls=urls)
-            self.use_id = {}
-            if self.usr_list:
-                login = requests.get(_API_USER, headers=headers, params={'login': self.usr_list}, timeout=5)
-                login.close()
-            else:
-                logger.debug('无twitch主播')
-                return
-            try:
-                for pair in login.json()['data']:
-                    self.use_id[pair['id']] = pair['login']
-            except KeyError:
-                logger.info(login.json())
-                return
 
         def check(self):
+            gql = self.get_streamer()
+            lives = []
+            i = -1
+            for data in gql:
+                i += 1
+                user = data['data'].get('user')
+                if not user:
+                    continue
+                stream = user['stream']
+                if not stream:
+                    continue
+                lives.append(self.usr_dict.get(self.usr_list[i]))
+            return lives
 
-            live = []
-            usr_list = self.usr_list
-            if not usr_list:
-                logger.debug('无用户列表')
-                return
-            # url = 'https://api.twitch.tv/kraken/streams/sc2_ragnarok'
-
-            stream = requests.get(API_ROOMS, headers=headers, params={'user_login': usr_list}, timeout=5)
-            stream.close()
-
-            data = stream.json()['data']
-            if data:
-                for i in data:
-                    live.append(self.use_id[i['user_id']])
-            else:
-                logger.debug('twitch无开播')
-
-            return map(lambda x: self.usr_dict.get(x.lower()), live)
-
-# def check_stream(self):
-#
-#     check_url = re.sub(r'.*twitch.tv', 'https://api.twitch.tv/kraken/streams', self.url)
-#     try:
-#         res = requests.get(check_url, headers=headers)
-#         res.close()
-#     except requests.exceptions.SSLError:
-#         logger.error('获取流信息发生错误')
-#         logger.error(requests.exceptions.SSLError, exc_info=True)
-#         return None
-#     except requests.exceptions.ConnectionError:
-#         logger.exception('During handling of the above exception, another exception occurred:')
-#         return None
-#
-#     try:
-#         s = json.loads(res.text)
-#         # s = res.json()  https://api.twitch.tv/kraken/streams/
-#     except json.decoder.JSONDecodeError:
-#         logger.exception('Expecting value')
-#         return None
-#     print(self.fname)
-#     try:
-#         stream = s['stream']
-#     except KeyError:
-#         logger.error(KeyError, exc_info=True)
-#         return None
-#     return stream
-
-
+        def get_streamer(self):
+            ops = []
+            for channel_name in self.usr_list:
+                op = {
+                    'operationName': 'StreamMetadata',
+                    'variables': {'channelLogin': channel_name.lower()}
+                }
+                op['extensions'] = {
+                    'persistedQuery': {
+                        'version': 1,
+                        'sha256Hash': _OPERATION_HASHES[op['operationName']],
+                    }
+                }
+                ops.append(op)
+            gql = requests.post(
+                'https://gql.twitch.tv/gql',
+                json=ops,
+                headers={
+                    'Content-Type': 'text/plain;charset=UTF-8',
+                    'Client-ID': _CLIENT_ID,
+                }, timeout=15)
+            gql.close()
+            return gql.json()
