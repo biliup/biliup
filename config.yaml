@@ -273,16 +273,16 @@ streamers:
    #       - 第一视角
    #       - Stephano
    #       - 虫族
-   # RagnaroK直播录像虫族第一视角星际2:
-   #    url:
-   #       - https://www.twitch.tv/SC2_Ragnarok
-   #    cover_path: picture/RagnaroK.png
-   #    tags:
-   #       - 星际争霸2
-   #       - 虚空之遗
-   #       - 第一视角
-   #       - RagnaroK
-   #       - 虫族
+   RagnaroK直播录像虫族第一视角星际2:
+      url:
+         - https://www.twitch.tv/SC2_Ragnarok
+      cover_path: picture/RagnaroK.png
+      tags:
+         - 星际争霸2
+         - 虚空之遗
+         - 第一视角
+         - RagnaroK
+         - 虫族
    Clem直播录像人族第一视角星际2:
       tid: 171
       url:
@@ -382,3 +382,14 @@ streamers:
          - 第一视角
          - special
          - 人族
+   Neeb肥宅直播录像人族第一视角星际2:
+      tid: 171
+      url:
+         - https://www.twitch.tv/N33bl3t
+      cover_path: 
+      tags:
+         - 星际争霸2
+         - 虚空之遗
+         - 第一视角
+         - Neeb
+         - 神族
