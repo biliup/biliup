@@ -16,10 +16,10 @@ event_manager = common.event.EventManager(context)
 def process(name, url):
     date = common.time_now()
     try:
-        p = multiprocessing.Process(target=download, args=(name, url))
-        p.start()
-        p.join()
-        # download(name, url)
+        # p = multiprocessing.Process(target=download, args=(name, url))
+        # p.start()
+        # p.join()
+        download(name, url)
     finally:
         return Event(UPLOAD, (name, url, date))
 

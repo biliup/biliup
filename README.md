@@ -40,6 +40,10 @@ sudo docker exec -it imageId /bin/bash
 >        启动：    python Bilibili.py
 > QQ群：837362626
 ## 使用建议
+关于B站为什么不能多p上传\
+目前bilibili网页端是根据用户权重来限制分p数量的，权重不够的用户自动切换到客户端的提交接口。
+>用户等级大于3，且粉丝数>100，web端投稿不限制分p数量
+
 国内vps网络费用较高，建议使用国外vps，根据机器的硬盘等资源设置合理并发量。
 
 b站上传目前有两种模式，分别为bup和bupfetch模式。
