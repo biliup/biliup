@@ -59,7 +59,6 @@ class Twitch(FFmpegdl):
 
         def check(self):
             gql = self.get_streamer()
-            lives = []
             i = -1
             for data in gql:
                 i += 1
@@ -69,8 +68,7 @@ class Twitch(FFmpegdl):
                 stream = user['stream']
                 if not stream:
                     continue
-                lives.append(self.usr_dict.get(self.usr_list[i]))
-            return lives
+                yield self.usr_dict.get(self.usr_list[i])
 
         def get_streamer(self):
             ops = []
