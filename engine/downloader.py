@@ -3,6 +3,8 @@ import logging
 import pkgutil
 import re
 import time
+from urllib.error import HTTPError
+
 import engine.plugins
 
 from common.decorators import Plugin
@@ -75,13 +77,16 @@ def download(fname, url):
 def check_url(plugin):
     try:
         if isinstance(plugin, BatchCheckBase):
-            return plugin.check()
+            yield from plugin.check()
+            return
         for url in plugin.url_list:
             if plugin(f'检测{url}', url).check_stream():
                 yield url
             if url != plugin.url_list[-1]:
                 logger.debug('歇息会')
                 time.sleep(15)
+    except HTTPError as e:
+        logger.error(f'{plugin.__module__} {e.url} => {e}')
     except IOError:
         logger.exception("IOError")
 
