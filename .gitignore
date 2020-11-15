@@ -24,3 +24,4 @@ test.py
 /work.py
 *.zip
 config.yaml
+*.pid

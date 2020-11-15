@@ -210,8 +210,8 @@ class BiliBili:
         """
         if not self._auto_os:
             self._auto_os = self.probe()
-            # self._auto_os = {"os": "kodo", "query": "bucket=bvcupcdnkodobm&probe_version=20200810",
-            #                  "probe_url": "//up-na0.qbox.me/crossdomain.xml"}
+            self._auto_os = {"os": "kodo", "query": "bucket=bvcupcdnkodobm&probe_version=20200810",
+                             "probe_url": "//up-na0.qbox.me/crossdomain.xml"}
             logger.info(f"自动线路选择{self._auto_os['os']}: {self._auto_os['query']}. time: {self._auto_os.get('cost')}")
         profile = 'ugcupos/bup' if 'upos' == self._auto_os['os'] else "ugcupos/bupfetch"
         query = f"r={self._auto_os['os']}&profile={quote(profile, safe='')}" \
@@ -320,7 +320,7 @@ class BiliBili:
         return {"title": splitext(name)[0], "filename": splitext(basename(upos_uri))[0], "desc": ""}
 
     @staticmethod
-    async def _upload(params, file, chunk_size, afunc, tasks=3):
+    async def _upload(params, file, chunk_size, afunc, tasks=2):
         params['chunk'] = -1
 
         async def upload_chunk():
