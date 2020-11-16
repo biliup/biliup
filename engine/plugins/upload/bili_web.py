@@ -262,9 +262,13 @@ class BiliBili:
             cost = time.perf_counter() - start
 
         logger.info(f'{name} uploaded >> {total / 1000 / 1000 / cost:.2f}MB/s')
+        logger.info(parts)
+        parts.sort(key=lambda x: x['index'])
+        logger.info(parts)
         self.__session.post(f"{endpoint}/mkfile/{total}/key/{base64.urlsafe_b64encode(key.encode()).decode()}",
                             data=','.join(map(lambda x: x['ctx'], parts)), headers=headers, timeout=10)
         r = self.__session.post(f"https:{fetch_url}", headers=fetch_headers, timeout=5).json()
+        logger.info(f'{name}: {r}')
         if r["OK"] != 1:
             raise Exception(r)
         return {"title": splitext(name)[0], "filename": bili_filename, "desc": ""}
@@ -310,11 +314,12 @@ class BiliBili:
         p = {
             'name': name,
             'uploadId': upload_id,
-            'biz_id': biz_id
+            'biz_id': biz_id,
+            'output': 'json',
+            'profile': 'ugcupos/bup'
         }
-        r = self.__session.post(
-            f'{url}?output=json&profile=ugcupos%2Fbup', params=p,
-            json={"parts": parts}, headers=headers, timeout=15).json()
+        r = self.__session.post(url, params=p, json={"parts": parts}, headers=headers, timeout=15).json()
+        logger.info(f'{name}: {r}')
         if r["OK"] != 1:
             raise Exception(r)
         return {"title": splitext(name)[0], "filename": splitext(basename(upos_uri))[0], "desc": ""}
