@@ -1,6 +1,8 @@
+import asyncio
+
 import yaml
 from common.event import Event
-from common.reload import autoreload
+from common.reload import AutoReload
 from common.timer import Timer
 from engine.downloader import sorted_checker
 
@@ -29,21 +31,20 @@ platforms = checker.keys()
 context = {**config, "urls": urls, "url_status": url_status}
 
 
-def check_timer(event_manager):
+async def check_timer(event_manager):
     event_manager.send_event(Event(CHECK_UPLOAD))
     for k in platforms:
         event_manager.send_event(Event(CHECK, (k,)))
 
 
-def main(event_manager):
+async def main(event_manager):
+    event_manager.start()
     # 初始化定时器
     timer = Timer(func=check_timer, args=(event_manager,), interval=40)
 
     # 模块更新自动重启
-    autoreload(event_manager, timer, interval=15)
-
-    event_manager.start()
-    timer.start()
+    detector = AutoReload(event_manager, timer, interval=15)
+    await asyncio.gather(detector.astart(), timer.astart())
 
 
 CHECK = 'check'

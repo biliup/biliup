@@ -266,7 +266,6 @@ class BiliBili:
         self.__session.post(f"{endpoint}/mkfile/{total}/key/{base64.urlsafe_b64encode(key.encode()).decode()}",
                             data=','.join(map(lambda x: x['ctx'], parts)), headers=headers, timeout=10)
         r = self.__session.post(f"https:{fetch_url}", headers=fetch_headers, timeout=5).json()
-        logger.info(f'{name}: {r}')
         if r["OK"] != 1:
             raise Exception(r)
         return {"title": splitext(name)[0], "filename": bili_filename, "desc": ""}
