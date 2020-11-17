@@ -51,6 +51,7 @@ class Companion(Timer):
         self.last_file_size = file_size
         if file_size >= self._size:
             self.proc.terminate()
+            self.stop()
             logger.info('分段下载' + self.file_name)
 
     def run(self):
