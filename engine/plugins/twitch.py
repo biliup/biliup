@@ -26,9 +26,6 @@ class Twitch(FFmpegdl):
         FFmpegdl.__init__(self, fname, url, suffix=suffix)
 
     def check_stream(self):
-        if self.raw_stream_url:
-            self.opt_args = []
-            return True
         channel_name = match1(self.url, VALID_URL_BASE)
         r = requests.get(f'https://api.twitch.tv/api/channels/{channel_name}/access_token',
                          headers={

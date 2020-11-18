@@ -17,7 +17,8 @@ class Timer(threading.Thread):
 
     async def astart(self):
         self.asynchronous = True
-        await self.arun()
+        self.task = asyncio.create_task(self.arun())
+        await self.task
 
     async def arun(self):
         while True:

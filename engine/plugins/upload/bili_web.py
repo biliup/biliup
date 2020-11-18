@@ -226,6 +226,7 @@ class BiliBili:
             raise NotImplementedError('bos')
         else:
             logger.error(f"NoSearch:{self._auto_os['os']}")
+            raise NotImplementedError(self._auto_os['os'])
 
     def kodo(self, filepath, query):
         total = os.path.getsize(filepath)

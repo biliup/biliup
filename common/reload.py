@@ -11,16 +11,10 @@ logger = logging.getLogger('log01')
 
 
 def has_extension(fname_list, *extension):
-    array = []
     for fname in fname_list:
         result = list(map(fname.endswith, extension))
         if True in result:
             return True
-            # array.append(True)
-    #     else:
-    #         array.append(False)
-    # if True in array:
-    #     return True
     return False
 
 
