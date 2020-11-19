@@ -55,8 +55,8 @@ class DownloadBase:
         try:
             os.rename(file_name + '.part', file_name)
             logger.debug('更名{0}为{1}'.format(file_name + '.part', file_name))
-        # except FileNotFoundError:
-        #     logger.info('FileNotFoundError:' + file_name)
+        except FileNotFoundError:
+            logger.info('FileNotFoundError:' + file_name)
         except FileExistsError:
             os.rename(file_name + '.part', file_name)
             logger.info('FileExistsError:更名{0}为{1}'.format(file_name + '.part', file_name))

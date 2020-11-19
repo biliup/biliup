@@ -226,6 +226,7 @@ class BiliBili:
             raise NotImplementedError('bos')
         else:
             logger.error(f"NoSearch:{self._auto_os['os']}")
+            raise NotImplementedError(self._auto_os['os'])
 
     def kodo(self, filepath, query):
         total = os.path.getsize(filepath)
@@ -248,12 +249,12 @@ class BiliBili:
             parts = []  # 分块信息
             chunks = math.ceil(total / chunk_size)  # 获取分块数量
 
-            async def upload_chunk(session, chunks_data, params):
+            async def upload_chunk(session, chunks_data, params, index):
                 async with session.post(f'{url}/{len(chunks_data)}',
                                         data=chunks_data, headers=headers) as response:
                     end = time.perf_counter() - start
                     ctx = await response.json()
-                    parts.append({"index": params['chunk'], "ctx": ctx['ctx']})
+                    parts.append({"index": index, "ctx": ctx['ctx']})
                     sys.stdout.write(f"\r{params['end'] / 1000 / 1000 / end:.2f}MB/s "
                                      f"=> {params['partNumber'] / chunks:.1%}")
 
@@ -262,13 +263,10 @@ class BiliBili:
             cost = time.perf_counter() - start
 
         logger.info(f'{name} uploaded >> {total / 1000 / 1000 / cost:.2f}MB/s')
-        logger.info(parts)
         parts.sort(key=lambda x: x['index'])
-        logger.info(parts)
         self.__session.post(f"{endpoint}/mkfile/{total}/key/{base64.urlsafe_b64encode(key.encode()).decode()}",
                             data=','.join(map(lambda x: x['ctx'], parts)), headers=headers, timeout=10)
         r = self.__session.post(f"https:{fetch_url}", headers=fetch_headers, timeout=5).json()
-        logger.info(f'{name}: {r}')
         if r["OK"] != 1:
             raise Exception(r)
         return {"title": splitext(name)[0], "filename": bili_filename, "desc": ""}
@@ -295,11 +293,11 @@ class BiliBili:
             parts = []  # 分块信息
             chunks = math.ceil(total / chunk_size)  # 获取分块数量
 
-            async def upload_chunk(session, chunks_data, params):
+            async def upload_chunk(session, chunks_data, params, index):
                 async with session.put(url, params=params,
                                        data=chunks_data, headers=headers):
                     end = time.perf_counter() - start
-                    parts.append({"partNumber": params['partNumber'], "eTag": "etag"})
+                    parts.append({"partNumber": index+1, "eTag": "etag"})
                     sys.stdout.write(f"\r{params['end'] / 1000 / 1000 / end:.2f}MB/s "
                                      f"=> {params['partNumber'] / chunks:.1%}")
 
@@ -338,7 +336,7 @@ class BiliBili:
                 params['partNumber'] = params['chunk'] + 1
                 params['start'] = params['chunk'] * chunk_size
                 params['end'] = params['start'] + params['size']
-                await afunc(session, chunks_data, params)
+                await afunc(session, chunks_data, params, params['chunk'])
 
         async with aiohttp.ClientSession() as session:
             await asyncio.gather(*[upload_chunk() for _ in range(tasks)])
