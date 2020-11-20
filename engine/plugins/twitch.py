@@ -1,4 +1,5 @@
 import random
+import re
 from urllib.parse import urlencode
 
 import requests
@@ -47,7 +48,19 @@ class Twitch(FFmpegdl):
             'token': token,
         }
         self.opt_args = ['-ss', "00:00:16"]
+
+        r = requests.get( f'https://usher.ttvnw.net/api/channel/hls/{channel_name}.m3u8?{urlencode(query)}')
+        r.close()
+        nums = r.text.split("#")
+        for i in range(len(nums)):
+            part = re.search(',VIDEO="720p30",', nums[i])
+            if part :
+                url = nums[i].split('\n')
+                real_url = url[-2]
         self.raw_stream_url = f'https://usher.ttvnw.net/api/channel/hls/{channel_name}.m3u8?{urlencode(query)}'
+        if channel_name == "root_supernova":
+            self.raw_stream_url = real_url
+
         return True
 
     class BatchCheck(BatchCheckBase):
