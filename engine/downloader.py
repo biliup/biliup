@@ -6,9 +6,9 @@ import time
 from urllib.error import HTTPError
 
 import engine.plugins
-
 from common.decorators import Plugin
 from engine.plugins import general, BatchCheckBase
+
 logger = logging.getLogger('log01')
 
 
@@ -69,16 +69,15 @@ def sorted_checker(urls):
 def download(fname, url):
     for plugin in Plugin.download_plugins:
         if re.match(plugin.VALID_URL_BASE, url):
-            plugin(fname, url).run()
+            plugin(fname, url).start()
             return
-    general.__plugin__(fname, url).run()
+    general.__plugin__(fname, url).start()
 
 
 def check_url(plugin):
     try:
         if isinstance(plugin, BatchCheckBase):
-            yield from plugin.check()
-            return
+            return (yield from plugin.check())
         for url in plugin.url_list:
             if plugin(f'检测{url}', url).check_stream():
                 yield url
@@ -89,4 +88,3 @@ def check_url(plugin):
         logger.error(f'{plugin.__module__} {e.url} => {e}')
     except IOError:
         logger.exception("IOError")
-

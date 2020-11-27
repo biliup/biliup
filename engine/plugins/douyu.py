@@ -1,11 +1,11 @@
 import platform
 
+from ykdl.common import url_to_module
 from ykdl.util.jsengine import chakra_available, quickjs_available, external_interpreter
 
 from common.decorators import Plugin
 from engine.plugins import logger
 from engine.plugins.base_adapter import FFmpegdl
-from ykdl.common import url_to_module
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?douyu\.com')
