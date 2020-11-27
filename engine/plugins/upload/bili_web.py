@@ -16,13 +16,11 @@ from urllib.parse import quote
 import aiohttp
 import requests
 import rsa
-
 from requests import utils
 from requests.adapters import HTTPAdapter, Retry
 
 import engine
 from common.decorators import Plugin
-
 from engine.plugins.upload import UploadBase, logger
 
 
@@ -297,7 +295,7 @@ class BiliBili:
                 async with session.put(url, params=params,
                                        data=chunks_data, headers=headers):
                     end = time.perf_counter() - start
-                    parts.append({"partNumber": index+1, "eTag": "etag"})
+                    parts.append({"partNumber": index + 1, "eTag": "etag"})
                     sys.stdout.write(f"\r{params['end'] / 1000 / 1000 / end:.2f}MB/s "
                                      f"=> {params['partNumber'] / chunks:.1%}")
 

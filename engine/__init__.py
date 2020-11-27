@@ -2,7 +2,6 @@ import asyncio
 
 import yaml
 
-from common import logger
 from common.event import Event
 from common.reload import AutoReload
 from common.timer import Timer
@@ -46,10 +45,7 @@ async def main(event_manager):
 
     # 模块更新自动重启
     detector = AutoReload(event_manager, timer, interval=15)
-    try:
-        await asyncio.gather(detector.astart(), timer.astart())
-    except asyncio.CancelledError:
-        logger.info('main is cancelled now')
+    await asyncio.gather(detector.astart(), timer.astart(), return_exceptions=True)
 
 
 CHECK = 'check'

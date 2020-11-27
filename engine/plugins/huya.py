@@ -1,6 +1,7 @@
 import base64
 import html
 import json
+
 import requests
 
 from common.decorators import Plugin

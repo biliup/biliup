@@ -72,6 +72,7 @@ class AutoReload(Timer):
             if self._work_free():
                 for watched in self.watched:
                     watched.stop()
+                self.stop()
                 parent_path = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))  # 获得所在的目录的父级目
                 path = os.path.join(parent_path, 'Bilibili.py')
                 if sys.platform == 'win32':

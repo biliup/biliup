@@ -1,10 +1,11 @@
 import os
 import random
 import time
+
 from PIL import Image
 from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 
@@ -17,7 +18,8 @@ class slider_cracker(object):
 
     def get_true_image(self, slider_xpath=r'//*[@id="gc-box"]/div/div[3]/div[1]'):
         # element = WebDriverWait(self.driver, 50).until(EC.element_to_be_clickable((By.XPATH, slider_xpath)))
-        element = WebDriverWait(self.driver, 50).until(EC.element_to_be_clickable((By.CLASS_NAME, "geetest_slider_button")))
+        element = WebDriverWait(self.driver, 50).until(
+            EC.element_to_be_clickable((By.CLASS_NAME, "geetest_slider_button")))
         ActionChains(self.driver).move_to_element(element).perform()  # 鼠标移动到滑动框以显示图片
         js = 'document.querySelector("body > div.geetest_panel.geetest_wind ' \
              '> div.geetest_panel_box.geetest_no_logo.geetest_panelshowslide ' \
@@ -67,7 +69,7 @@ class slider_cracker(object):
             if flag:
                 break
         if left >= 73:
-            left = left -3  # 误差纠正
+            left = left - 3  # 误差纠正
         else:
             left = left
         return left

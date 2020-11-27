@@ -9,20 +9,8 @@
 
 相关设置在config.yaml文件中，如直播间地址，b站账号密码
 
-## docker一键使用 🔨 
-```bash
-cd bilibiliupload
-sudo docker build . -t sc2
-sudo docker run -d sc2
-```
-## 进入容器 📦
-```bash
-sudo docker ps (找到你的imageId)
-sudo docker exec -it imageId /bin/bash     
-```
-
-## 其他使用
-修改文件名**config(demo).yaml** ➡ **config.yaml**\
+## 使用准备
+修改文件名**config(demo).yaml** → **config.yaml**\
 下载 __FFmpeg__\
 依赖安装`pip3 install -r requirements.txt`
 ## Linux系统下使用方法：
@@ -34,6 +22,18 @@ sudo docker exec -it imageId /bin/bash
 >     重启： ./Bilibili.py restart
 >
 > `ps -A | grep .py` 查看进程是否启动成功
+
+## docker使用 🔨 
+```bash
+cd bilibiliupload
+sudo docker build . -t sc2
+sudo docker run -d sc2
+```
+## 进入容器 📦
+```bash
+sudo docker ps (找到你的imageId)
+sudo docker exec -it imageId /bin/bash     
+```
 ## Windows系统下使用方法：
 ~~图形界面版在release中下载AutoTool.msi进行安装~~
 >     命令行版

@@ -1,6 +1,7 @@
+from ykdl.common import url_to_module
+
 from engine.plugins import logger
 from engine.plugins.base_adapter import YDownload, SDownload, FFmpegdl
-from ykdl.common import url_to_module
 
 
 class Generic(FFmpegdl):
@@ -13,10 +14,6 @@ class Generic(FFmpegdl):
         try:
             site, url = url_to_module(self.url)
             info = site.parser(url)
-        # except AssertionError:
-        #     self.handler = youtube_dl.handle()
-        #     return self.handler != FallbackHandler()
-
             stream_id = info.stream_types[0]
             urls = info.streams[stream_id]['src']
             self.raw_stream_url = urls[0]
