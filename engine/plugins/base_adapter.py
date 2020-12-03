@@ -7,6 +7,7 @@ from threading import Event
 import streamlink
 import youtube_dl
 
+import engine
 from engine.plugins import logger
 
 fake_headers = {
@@ -35,7 +36,7 @@ class DownloadBase:
             return False
         file_name = f'{self.file_name}.{self.suffix}'
         retval = self.download(file_name)
-        logger.info(f'完成{retval}: {file_name}')
+        logger.info(f'{retval}part: {file_name}')
         self.rename(file_name)
         return retval
 
@@ -43,12 +44,12 @@ class DownloadBase:
         i = 0
         try:
             logger.info('开始下载%s：%s' % (self.__class__.__name__, self.fname))
-            while i < 20:
+            while i < 30:
                 ret = self.run()
                 if ret is False:
                     return
                 elif ret == 1:
-                    time.sleep(15)
+                    time.sleep(45)
                 i += 1
         except:
             logger.exception("Uncaught exception:")
@@ -88,7 +89,6 @@ class YDownload(DownloadBase):
     def get_sinfo(self):
         info_list = []
         with youtube_dl.YoutubeDL() as ydl:
-            # cu = self.url.get(self.__class__.__name__)
             if self.url:
                 info = ydl.extract_info(self.url, download=False)
             else:
@@ -109,7 +109,6 @@ class YDownload(DownloadBase):
 
     def dl(self):
         with youtube_dl.YoutubeDL(self.ydl_opts) as ydl:
-            # ydl.download([self.url[self.__class__.__name__]])
             ydl.download([self.url])
 
 
@@ -127,7 +126,7 @@ class SDownload(DownloadBase):
                 self.stream = streams["best"]
                 fd = self.stream.open()
                 fd.close()
-                streams.close()
+                # streams.close()
                 return True
         except streamlink.StreamlinkError:
             return
@@ -156,14 +155,16 @@ class FFmpegdl(DownloadBase):
         super().__init__(fname, url, suffix)
         self.raw_stream_url = None
         self.opt_args = []
-        self.default_output_args = ['-bsf:a', 'aac_adtstoasc', '-fs', '2621440000']
+        self.default_output_args = [
+            '-bsf:a', 'aac_adtstoasc',
+            '-fs', f"{engine.config.get('file_size') if engine.config.get('file_size') else '2621440000'}"
+        ]
         self.default_input_args = ['-headers', ''.join('%s: %s\r\n' % x for x in fake_headers.items()),
-                                   '-reconnect', '1', '-reconnect_streamed', '1',
-                                   '-reconnect_delay_max', '15', '-rw_timeout', '15000000']
+                                   '-reconnect_streamed', '1', '-reconnect_delay_max', '20', '-rw_timeout', '20000000']
 
     def download(self, filename):
-        args = ['ffmpeg', *self.default_input_args,
-                '-y', '-i', self.raw_stream_url, *self.default_output_args, *self.opt_args,
+        args = ['ffmpeg', '-y', *self.default_input_args,
+                '-i', self.raw_stream_url, *self.default_output_args, *self.opt_args,
                 '-c', 'copy', '-f', self.suffix, f'{filename}.part']
         proc = subprocess.Popen(args, stdin=subprocess.PIPE)
         try:

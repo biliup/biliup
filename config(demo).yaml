@@ -7,7 +7,14 @@ user: # 在填了cookies的情况下优先使用cookies上传，如需使用用�
         username: your usrname
         password: your password
 # 默认通过网页接口上传,可选通过操作chrome上传,此时需要填写chromedriver路径
-chromedriver_path: /usr/local/bin/chromedriver
+#chromedriver_path: /usr/local/bin/chromedriver
+
+# b站上传线路选择，默认为自动模式，目前可手动切换为bda2, kodo, ws, qn。
+lines: AUTO
+# 单文件并发上传数，未达到带宽上限时增大此值可提高上传速度
+threads: 3
+# 录像单文件大小限制，单位Byte，超过此大小分段下载
+file_size: 2621440000
 
 streamers:
     星际2INnoVation吕布卫星人族天梯第一视角:

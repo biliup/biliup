@@ -3,7 +3,6 @@
 import asyncio
 import sys
 import common
-from engine.handler import event_manager
 from engine import main
 from common.Daemon import Daemon
 
@@ -24,7 +23,7 @@ if __name__ == '__main__':
             sys.exit(2)
         sys.exit(0)
     elif len(sys.argv) == 1:
-        asyncio.run(main(event_manager))
+        asyncio.run(main())
     else:
         print('usage: %s start|stop|restart' % sys.argv[0])
         sys.exit(2)

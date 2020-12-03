@@ -10,10 +10,12 @@ import functools
 
 
 class EventManager(Thread):
-    def __init__(self, kwargs):
+    def __init__(self, context=None):
         """初始化事件管理器"""
         super().__init__(name='Synchronous')
-        self.__kwargs = kwargs
+        if context is None:
+            context = {}
+        self.context = context
         # 事件对象列表
         self.__eventQueue = Queue()
         # 事件管理器开关
@@ -143,13 +145,14 @@ class EventManager(Thread):
             sig = inspect.signature(cls)
             kwargs = {}
             for k in sig.parameters:
-                kwargs[k] = self.__kwargs[k]
+                kwargs[k] = self.context[k]
             instance = cls(**kwargs)
             for type_ in self.__method:
                 for handler in self.__method[type_]:
                     self.add_event_listener(type_, getattr(instance, handler))
             self.__method.clear()
             return cls
+
         return decorator
 
 
@@ -158,4 +161,7 @@ class Event:
     """事件对象"""
     type_: str  # 事件类型
     args: tuple = ()
-    dict: dict = field(default_factory=dict) # 字典用于保存具体的事件数据
+    dict: dict = field(default_factory=dict)  # 字典用于保存具体的事件数据
+
+
+event_manager = EventManager()

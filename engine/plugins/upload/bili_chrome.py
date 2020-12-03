@@ -54,7 +54,7 @@ class BiliChrome(UploadBase):
         options = webdriver.ChromeOptions()
 
         options.add_argument('headless')
-        self.driver = webdriver.Chrome(executable_path=engine.chromedriver_path, chrome_options=options)
+        self.driver = webdriver.Chrome(executable_path=engine.config.get('chromedriver_path'), chrome_options=options)
         # service_log_path=service_log_path)
         try:
             self.driver.get("https://www.bilibili.com")
