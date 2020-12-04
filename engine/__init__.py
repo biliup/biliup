@@ -28,17 +28,14 @@ async def main():
     url_status = dict.fromkeys(inverted_index, 0)
     checker = Plugin(engine.plugins).sorted_checker(urls)
     # 初始化事件管理器
-    context = {**config, 'urls': urls, 'url_status': url_status,
-               'checker': checker, 'inverted_index': inverted_index, 'streamer_url': streamer_url}
-    event_manager.context = context
+    event_manager.context = {**config, 'urls': urls, 'url_status': url_status,
+                             'checker': checker, 'inverted_index': inverted_index, 'streamer_url': streamer_url}
     import engine.handler
     event_manager.start()
 
-    platforms = checker.keys()
-
-    def check_timer():
+    async def check_timer():
         event_manager.send_event(Event(CHECK_UPLOAD))
-        for k in platforms:
+        for k in checker.keys():
             event_manager.send_event(Event(CHECK, (k,)))
 
     # 初始化定时器
