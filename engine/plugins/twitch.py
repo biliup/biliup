@@ -55,7 +55,7 @@ class Twitch(FFmpegdl):
         r.close()
         nums = r.text.split("#")
         for i in range(len(nums)):
-            part = re.search(',VIDEO="720p30",', nums[i])
+            part = re.search(',VIDEO="720p60",', nums[i])
             if part :
                 url = nums[i].split('\n')
                 real_url = url[-2]
@@ -87,7 +87,7 @@ class Twitch(FFmpegdl):
             for channel_name in self.usr_list:
                 op = {
                     'operationName': 'StreamMetadata',
-                    'variables': {'channelLogin': channel_name.lower()}
+                    'variables': {'channelLogin': channel_name}
                 }
                 op['extensions'] = {
                     'persistedQuery': {

@@ -24,3 +24,4 @@ test.py
 *.zip
 config.yaml
 *.pid
+*.yaml
