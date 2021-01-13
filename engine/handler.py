@@ -1,10 +1,16 @@
 import common
 from common import logger
 from common.event import Event, event_manager
-from engine import *
 from engine.downloader import download, check_url
 from engine.plugins.upload import UploadBase
 from engine.uploader import upload
+
+CHECK = 'check'
+CHECK_UPLOAD = 'check_upload'
+TO_MODIFY = 'to_modify'
+DOWNLOAD = 'download'
+BE_MODIFIED = 'be_modified'
+UPLOAD = 'upload'
 
 
 @event_manager.register(DOWNLOAD, block=True)
@@ -55,10 +61,6 @@ class KernelFunc:
         self.url_status[url] = 1
         return Event(DOWNLOAD, args=(name, url))
 
-    def free(self, list_url):
-        status_num = list(map(lambda x: self.url_status.get(x), list_url))
-        return not (1 in status_num or 2 in status_num)
-
     @event_manager.register(CHECK_UPLOAD)
     def free_upload(self):
         for title, urls in self.streamer_url.items():
@@ -71,3 +73,7 @@ class KernelFunc:
             # 更新字典
             # url_status = {**url_status, **{url: 0}}
             self.url_status.update({url: status})
+
+    def free(self, list_url):
+        status_num = list(map(lambda x: self.url_status.get(x), list_url))
+        return not (1 in status_num or 2 in status_num)

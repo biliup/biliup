@@ -30,7 +30,7 @@ async def main():
     # 初始化事件管理器
     event_manager.context = {**config, 'urls': urls, 'url_status': url_status,
                              'checker': checker, 'inverted_index': inverted_index, 'streamer_url': streamer_url}
-    import engine.handler
+    from engine.handler import CHECK_UPLOAD, CHECK
     event_manager.start()
 
     async def check_timer():
@@ -46,11 +46,4 @@ async def main():
     await asyncio.gather(detector.astart(), timer.astart(), return_exceptions=True)
 
 
-CHECK = 'check'
-CHECK_UPLOAD = 'check_upload'
-TO_MODIFY = 'to_modify'
-DOWNLOAD = 'download'
-BE_MODIFIED = 'be_modified'
-UPLOAD = 'upload'
-__all__ = ['downloader', 'uploader', 'plugins', 'main',
-           'CHECK', 'BE_MODIFIED', 'DOWNLOAD', 'TO_MODIFY', 'UPLOAD', 'CHECK_UPLOAD']
+__all__ = ['downloader', 'uploader', 'plugins', 'main']

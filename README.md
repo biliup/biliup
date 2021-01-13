@@ -1,18 +1,19 @@
 # bilibiliupload
 ![](https://img.shields.io/badge/python-v3.7%2B-blue)
+![GitHub](https://img.shields.io/github/license/ForgQi/bilibiliupload)
 
 支持自动录制各大直播平台，上传直播录像到bilibili。  
 
 * 自动选择上传线路，保证国内外vps上传质量
 * 可分别控制下载与上传并发量
-* 支持通过API上传与selenium操作浏览器上传两种方式
+* 支持通过API上传~~与selenium操作浏览器上传两种方式~~
 
 相关设置在config.yaml文件中，如直播间地址，b站账号密码
 
 ## 使用准备
-修改文件名**config(demo).yaml** → **config.yaml**\
-下载 __FFmpeg__\
-依赖安装`pip3 install -r requirements.txt`
+1. 修改文件名**config(demo).yaml** → **config.yaml**
+2. 下载 __FFmpeg__
+3. 依赖安装`pip3 install -r requirements.txt`
 ## Linux系统下使用方法：
 >
 >     启动： ./Bilibili.py start
@@ -96,4 +97,5 @@ def transcoding(data):
 ## Credits
 * Thanks `ykdl, youtube-dl, streamlink` provides downloader.
 
-类似项目`ZhangMingZhao1/StreamerHelper`
+类似项目:\
+![ZhangMingZhao1/StreamerHelper](https://avatars2.githubusercontent.com/u/29058747?s=50&u=5f8c3acaa9d09f4396f00256c0ce6ef01452e92f&v=4)
