@@ -26,32 +26,33 @@ from engine.plugins.upload import UploadBase, logger
 
 @Plugin.upload(platform="bili_web")
 class BiliWeb(UploadBase):
-    def __init__(self, principal, data):
+    def __init__(self, principal, data, user, lines='AUTO', threads=3, tid=174, tags=None, cover_path=None):
         super().__init__(principal, data, persistence_path='engine/bili.cookie')
-        # cookie = data['cookie']
-        # self.__data: Upload.Data = data['config']
+        if tags is None:
+            tags = ['星际争霸2', '电子竞技']
+        self.user = user
+        self.lines = lines
+        self.threads = threads
+        self.tid = tid
+        self.tags = tags
+        self.cover_path = cover_path
 
     def upload(self, file_list):
         video = Data()
         with BiliBili(video) as bili:
-            bili.login(self.persistence_path)
+            bili.login(self.persistence_path, self.user)
             for file in file_list:
-                video_part = bili.upload_file(file)  # 上传视频
+                video_part = bili.upload_file(file, self.lines, self.threads)  # 上传视频
                 video.videos.append(video_part)  # 添加已经上传的视频
             video.title = self.data["format_title"]
             video.desc = '''这个自动录制上传的小程序开源在Github：http://t.cn/RgapTpf(或者在Github搜索ForgQi)
                 交流群：837362626'''
             video.source = self.data["url"]  # 添加转载地址说明
             # 设置视频分区,默认为174 生活，其他分区
-            tid = engine.config['streamers'][self.principal].get('tid')
-            if tid:
-                video.tid = tid
-            tags = engine.config['streamers'][self.principal].get('tags', ['星际争霸2', '电子竞技'])
-            if tags:
-                video.set_tag(tags)
-            img_path = engine.config['streamers'][self.principal].get('cover_path')
-            if img_path:
-                video.cover = bili.cover_up(img_path).replace('http:', '')
+            video.tid = self.tid
+            video.set_tag(self.tags)
+            if self.cover_path:
+                video.cover = bili.cover_up(self.cover_path).replace('http:', '')
             ret = bili.submit()  # 提交视频
         logger.info(f"上传成功: {ret}")
         self.remove_filelist(file_list)
@@ -74,9 +75,8 @@ class BiliBili:
         self._auto_os = None
         self.persistence_path = 'engine/bili.cookie'
 
-    def login(self, persistence_path):
+    def login(self, persistence_path, user):
         self.persistence_path = persistence_path
-        user = engine.config['user']
         if os.path.isfile(persistence_path):
             print('使用持久化内容上传')
             self.load()
@@ -192,32 +192,33 @@ class BiliBili:
         auto_os['cost'] = min_cost
         return auto_os
 
-    def upload_file(self, filepath: str):
+    def upload_file(self, filepath: str, lines='AUTO', tasks=3):
         """上传本地视频文件,返回视频信息dict
         b站目前支持4种上传线路upos, kodo, gcs, bos
-        kodo: {"os":"kodo","query": "bucket=bvcupcdnkodobm&probe_version=20200810",
-        "probe_url":"//up-na0.qbox.me/crossdomain.xml"}
         gcs: {"os":"gcs","query":"bucket=bvcupcdngcsus&probe_version=20200810",
         "probe_url":"//storage.googleapis.com/bvcupcdngcsus/OK"},
         bos: {"os":"bos","query":"bucket=bvcupcdnboshb&probe_version=20200810",
         "probe_url":"??"}
-        upos:
-        {"os":"upos","query":"upcdn=ws&probe_version=20200810","probe_url":"//upos-sz-upcdnws.bilivideo.com/OK"}
-        {"os":"upos","query":"upcdn=qn&probe_version=20200810","probe_url":"//upos-sz-upcdnqn.bilivideo.com/OK"}
-        {"os":"upos","query":"upcdn=bda2&probe_version=20200810","probe_url":"//upos-sz-upcdnbda2.bilivideo.com/OK"}
         """
         if not self._auto_os:
             self._auto_os = self.probe()
-            self._auto_os = {"os": "kodo", "query": "bucket=bvcupcdnkodobm&probe_version=20200810",
-                             "probe_url": "//up-na0.qbox.me/crossdomain.xml"}
-            logger.info(f"自动线路选择{self._auto_os['os']}: {self._auto_os['query']}. time: {self._auto_os.get('cost')}")
-        profile = 'ugcupos/bup' if 'upos' == self._auto_os['os'] else "ugcupos/bupfetch"
-        query = f"r={self._auto_os['os']}&profile={quote(profile, safe='')}" \
-                f"&ssl=0&version=2.8.9&build=2080900&{self._auto_os['query']}"
+            if lines == 'kodo':
+                self._auto_os = {"os": "kodo", "query": "bucket=bvcupcdnkodobm&probe_version=20200810",
+                                 "probe_url": "//up-na0.qbox.me/crossdomain.xml"}
+            if lines == 'bda2':
+                self._auto_os = {"os": "upos", "query": "upcdn=bda2&probe_version=20200810",
+                                 "probe_url": "//upos-sz-upcdnbda2.bilivideo.com/OK"}
+            if lines == 'ws':
+                self._auto_os = {"os": "upos", "query": "upcdn=ws&probe_version=20200810",
+                                 "probe_url": "//upos-sz-upcdnws.bilivideo.com/OK"}
+            if lines == 'qn':
+                self._auto_os = {"os": "upos", "query": "upcdn=qn&probe_version=20200810",
+                                 "probe_url": "//upos-sz-upcdnqn.bilivideo.com/OK"}
+            logger.info(f"线路选择{self._auto_os['os']}: {self._auto_os['query']}. time: {self._auto_os.get('cost')}")
         if self._auto_os['os'] == 'upos':
-            return self.upos(filepath, query)
+            upload = self.upos
         elif self._auto_os['os'] == 'kodo':
-            return self.kodo(filepath, query)
+            upload = self.kodo
         elif self._auto_os['os'] == "gcs":
             raise NotImplementedError('gcs')
         elif self._auto_os['os'] == "bos":
@@ -225,100 +226,105 @@ class BiliBili:
         else:
             logger.error(f"NoSearch:{self._auto_os['os']}")
             raise NotImplementedError(self._auto_os['os'])
-
-    def kodo(self, filepath, query):
-        total = os.path.getsize(filepath)
-        chunk_size = 4194304
+        total_size = os.path.getsize(filepath)
         with open(filepath, 'rb') as f:
-            name = f.name
-            ret = self.__session.get(
-                f'https://member.bilibili.com/preupload?name={quote(name)}&size={total}&{query}', timeout=5).json()
-            bili_filename = ret['bili_filename']
-            key = ret['key']
-            endpoint = f"https:{ret['endpoint']}"
-            token = ret['uptoken']
-            fetch_url = ret['fetch_url']
-            fetch_headers = ret['fetch_headers']
-            url = f'{endpoint}/mkblk'
-            headers = {
-                'Authorization': f"UpToken {token}",
+            query = {
+                'r': self._auto_os['os'],
+                'profile': 'ugcupos/bup' if 'upos' == self._auto_os['os'] else "ugcupos/bupfetch",
+                'ssl': 0,
+                'version': '2.8.12',
+                'build': 2081200,
+                'name': f.name,
+                'size': total_size,
             }
-            # 开始上传
-            parts = []  # 分块信息
-            chunks = math.ceil(total / chunk_size)  # 获取分块数量
+            ret = self.__session.get(
+                f"https://member.bilibili.com/preupload?{self._auto_os['query']}", params=query,
+                timeout=5)
+            return asyncio.run(upload(f, total_size, ret.json(), tasks=tasks))
 
-            async def upload_chunk(session, chunks_data, params, index):
-                async with session.post(f'{url}/{len(chunks_data)}',
-                                        data=chunks_data, headers=headers) as response:
-                    end = time.perf_counter() - start
-                    ctx = await response.json()
-                    parts.append({"index": index, "ctx": ctx['ctx']})
-                    sys.stdout.write(f"\r{params['end'] / 1000 / 1000 / end:.2f}MB/s "
-                                     f"=> {params['partNumber'] / chunks:.1%}")
+    async def kodo(self, file, total_size, ret, chunk_size=4194304, tasks=3):
+        filename = file.name
+        bili_filename = ret['bili_filename']
+        key = ret['key']
+        endpoint = f"https:{ret['endpoint']}"
+        token = ret['uptoken']
+        fetch_url = ret['fetch_url']
+        fetch_headers = ret['fetch_headers']
+        url = f'{endpoint}/mkblk'
+        headers = {
+            'Authorization': f"UpToken {token}",
+        }
+        # 开始上传
+        parts = []  # 分块信息
+        chunks = math.ceil(total_size / chunk_size)  # 获取分块数量
 
-            start = time.perf_counter()
-            asyncio.run(self._upload({}, f, chunk_size, upload_chunk))
-            cost = time.perf_counter() - start
+        async def upload_chunk(session, chunks_data, params):
+            async with session.post(f'{url}/{len(chunks_data)}',
+                                    data=chunks_data, headers=headers) as response:
+                end = time.perf_counter() - start
+                ctx = await response.json()
+                parts.append({"index": params['chunk'], "ctx": ctx['ctx']})
+                sys.stdout.write(f"\r{params['end'] / 1000 / 1000 / end:.2f}MB/s "
+                                 f"=> {params['partNumber'] / chunks:.1%}")
 
-        logger.info(f'{name} uploaded >> {total / 1000 / 1000 / cost:.2f}MB/s')
+        start = time.perf_counter()
+        await self._upload({}, file, chunk_size, upload_chunk, tasks=tasks)
+        cost = time.perf_counter() - start
+
+        logger.info(f'{filename} uploaded >> {total_size / 1000 / 1000 / cost:.2f}MB/s')
         parts.sort(key=lambda x: x['index'])
-        self.__session.post(f"{endpoint}/mkfile/{total}/key/{base64.urlsafe_b64encode(key.encode()).decode()}",
+        self.__session.post(f"{endpoint}/mkfile/{total_size}/key/{base64.urlsafe_b64encode(key.encode()).decode()}",
                             data=','.join(map(lambda x: x['ctx'], parts)), headers=headers, timeout=10)
         r = self.__session.post(f"https:{fetch_url}", headers=fetch_headers, timeout=5).json()
         if r["OK"] != 1:
             raise Exception(r)
-        return {"title": splitext(name)[0], "filename": bili_filename, "desc": ""}
+        return {"title": splitext(filename)[0], "filename": bili_filename, "desc": ""}
 
-    def upos(self, filepath, query):
-        total = os.path.getsize(filepath)
-        with open(filepath, 'rb') as f:
-            name = f.name
-            ret = self.__session.get(
-                f'https://member.bilibili.com/preupload?name={quote(name)}&size={total}&{query}', timeout=5).json()
-            chunk_size = ret['chunk_size']
-            auth = ret["auth"]
-            endpoint = ret["endpoint"]
-            biz_id = ret["biz_id"]
-            upos_uri = ret["upos_uri"]
-            url = f"https:{endpoint}/{upos_uri.replace('upos://', '')}"  # 视频上传路径
-            headers = {
-                "X-Upos-Auth": auth
-            }
-            # 向上传地址申请上传，得到上传id等信息
-            upload_id = self.__session.post(f'{url}?uploads&output=json', timeout=5,
-                                            headers=headers).json()["upload_id"]
-            # 开始上传
-            parts = []  # 分块信息
-            chunks = math.ceil(total / chunk_size)  # 获取分块数量
+    async def upos(self, file, total_size, ret, tasks=3):
+        filename = file.name
+        chunk_size = ret['chunk_size']
+        auth = ret["auth"]
+        endpoint = ret["endpoint"]
+        biz_id = ret["biz_id"]
+        upos_uri = ret["upos_uri"]
+        url = f"https:{endpoint}/{upos_uri.replace('upos://', '')}"  # 视频上传路径
+        headers = {
+            "X-Upos-Auth": auth
+        }
+        # 向上传地址申请上传，得到上传id等信息
+        upload_id = self.__session.post(f'{url}?uploads&output=json', timeout=5,
+                                        headers=headers).json()["upload_id"]
+        # 开始上传
+        parts = []  # 分块信息
+        chunks = math.ceil(total_size / chunk_size)  # 获取分块数量
 
-            async def upload_chunk(session, chunks_data, params, index):
-                async with session.put(url, params=params,
-                                       data=chunks_data, headers=headers):
-                    end = time.perf_counter() - start
-                    parts.append({"partNumber": index + 1, "eTag": "etag"})
-                    sys.stdout.write(f"\r{params['end'] / 1000 / 1000 / end:.2f}MB/s "
-                                     f"=> {params['partNumber'] / chunks:.1%}")
+        async def upload_chunk(session, chunks_data, params):
+            async with session.put(url, params=params, raise_for_status=True,
+                                   data=chunks_data, headers=headers):
+                end = time.perf_counter() - start
+                parts.append({"partNumber": params['chunk'] + 1, "eTag": "etag"})
+                sys.stdout.write(f"\r{params['end'] / 1000 / 1000 / end:.2f}MB/s "
+                                 f"=> {params['partNumber'] / chunks:.1%}")
 
-            start = time.perf_counter()
-            asyncio.run(self._upload({
-                'uploadId': upload_id,
-                'chunks': chunks,
-                'total': total
-            }, f, chunk_size, upload_chunk))
-            cost = time.perf_counter() - start
-        logger.info(f'{name} uploaded >> {total / 1000 / 1000 / cost:.2f}MB/s')
+        start = time.perf_counter()
+        await self._upload({
+            'uploadId': upload_id,
+            'chunks': chunks,
+            'total': total_size
+        }, file, chunk_size, upload_chunk, tasks=tasks)
+        cost = time.perf_counter() - start
         p = {
-            'name': name,
+            'name': filename,
             'uploadId': upload_id,
             'biz_id': biz_id,
             'output': 'json',
             'profile': 'ugcupos/bup'
         }
         r = self.__session.post(url, params=p, json={"parts": parts}, headers=headers, timeout=15).json()
-        logger.info(f'{name}: {r}')
-        if r["OK"] != 1:
+        logger.info(f'{filename} uploaded >> {total_size / 1000 / 1000 / cost:.2f}MB/s. {r}')
+        if r.get('OK') != 1:
             raise Exception(r)
-        return {"title": splitext(name)[0], "filename": splitext(basename(upos_uri))[0], "desc": ""}
+        return {"title": splitext(filename)[0], "filename": splitext(basename(upos_uri))[0], "desc": ""}
 
     @staticmethod
     async def _upload(params, file, chunk_size, afunc, tasks=2):
@@ -334,7 +340,13 @@ class BiliBili:
                 params['partNumber'] = params['chunk'] + 1
                 params['start'] = params['chunk'] * chunk_size
                 params['end'] = params['start'] + params['size']
-                await afunc(session, chunks_data, params, params['chunk'])
+                clone = params.copy()
+                for i in range(10):
+                    try:
+                        await afunc(session, chunks_data, clone)
+                        break
+                    except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+                        logger.error(f"retry chunk{clone['chunk']} >> {i+1}. {e}")
 
         async with aiohttp.ClientSession() as session:
             await asyncio.gather(*[upload_chunk() for _ in range(tasks)])

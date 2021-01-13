@@ -1,5 +1,8 @@
+import inspect
+
 from common import logger
 from common.decorators import Plugin
+import engine
 
 
 def upload(platform, index, data):
@@ -11,8 +14,16 @@ def upload(platform, index, data):
     :return:
     """
     try:
+        cls = Plugin.upload_plugins.get(platform)
+        sig = inspect.signature(cls)
+        context = {**engine.config, **engine.config['streamers'][index]}
+        kwargs = {}
+        for k in sig.parameters:
+            v = context.get(k)
+            if v:
+                kwargs[k] = v
         date = data.get("date") if data.get("date") else ""
         data["format_title"] = f"{date}{index}"
-        return Plugin.upload_plugins.get(platform)(index, data).start()
+        return cls(index, data, **kwargs).start()
     except:
         logger.exception("Uncaught exception:")

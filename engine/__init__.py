@@ -2,16 +2,13 @@ import asyncio
 
 import yaml
 
-from common.event import Event
+from common.decorators import Plugin
+from common.event import Event, event_manager
 from common.reload import AutoReload
 from common.timer import Timer
-from engine.downloader import sorted_checker
 
 with open(r'config.yaml', encoding='utf-8') as stream:
     config = yaml.load(stream, Loader=yaml.FullLoader)
-
-streamers = config['streamers']
-chromedriver_path = config.get('chromedriver_path')
 
 
 def invert_dict(d: dict):
@@ -22,26 +19,27 @@ def invert_dict(d: dict):
     return inverse_dict
 
 
-streamer_url = {k: v['url'] for k, v in streamers.items()}
-inverted_index = invert_dict(streamer_url)
-urls = list(inverted_index.keys())
-url_status = dict.fromkeys(inverted_index, 0)
-checker = sorted_checker(urls)
-platforms = checker.keys()
-
-context = {**config, "urls": urls, "url_status": url_status}
-
-
-async def check_timer(event_manager):
-    event_manager.send_event(Event(CHECK_UPLOAD))
-    for k in platforms:
-        event_manager.send_event(Event(CHECK, (k,)))
-
-
-async def main(event_manager):
+async def main():
+    import engine.plugins
+    streamers = config['streamers']
+    streamer_url = {k: v['url'] for k, v in streamers.items()}
+    inverted_index = invert_dict(streamer_url)
+    urls = list(inverted_index.keys())
+    url_status = dict.fromkeys(inverted_index, 0)
+    checker = Plugin(engine.plugins).sorted_checker(urls)
+    # 初始化事件管理器
+    event_manager.context = {**config, 'urls': urls, 'url_status': url_status,
+                             'checker': checker, 'inverted_index': inverted_index, 'streamer_url': streamer_url}
+    import engine.handler
     event_manager.start()
+
+    async def check_timer():
+        event_manager.send_event(Event(CHECK_UPLOAD))
+        for k in checker.keys():
+            event_manager.send_event(Event(CHECK, (k,)))
+
     # 初始化定时器
-    timer = Timer(func=check_timer, args=(event_manager,), interval=40)
+    timer = Timer(func=check_timer, interval=40)
 
     # 模块更新自动重启
     detector = AutoReload(event_manager, timer, interval=15)
@@ -55,5 +53,4 @@ DOWNLOAD = 'download'
 BE_MODIFIED = 'be_modified'
 UPLOAD = 'upload'
 __all__ = ['downloader', 'uploader', 'plugins', 'main',
-           'context', 'inverted_index', 'checker',
            'CHECK', 'BE_MODIFIED', 'DOWNLOAD', 'TO_MODIFY', 'UPLOAD', 'CHECK_UPLOAD']

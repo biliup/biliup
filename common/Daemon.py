@@ -6,7 +6,6 @@ import os
 import time
 import atexit
 from engine import main
-from engine.handler import event_manager
 
 logger = logging.getLogger('log01')
 
@@ -123,4 +122,4 @@ class Daemon(object):
     @staticmethod
     def _run():
         """ run your fun"""
-        asyncio.run(main(event_manager))
+        asyncio.run(main())
