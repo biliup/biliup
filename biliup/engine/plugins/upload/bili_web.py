@@ -19,15 +19,15 @@ import rsa
 from requests import utils
 from requests.adapters import HTTPAdapter, Retry
 
-import engine
-from common.decorators import Plugin
-from engine.plugins.upload import UploadBase, logger
+from ... import config
+from ....common.decorators import Plugin
+from ..upload import UploadBase, logger
 
 
 @Plugin.upload(platform="bili_web")
 class BiliWeb(UploadBase):
     def __init__(self, principal, data, user, lines='AUTO', threads=3, tid=174, tags=None, cover_path=None):
-        super().__init__(principal, data, persistence_path='engine/bili.cookie')
+        super().__init__(principal, data, persistence_path='bili.cookie')
         if tags is None:
             tags = ['星际争霸2', '电子竞技']
         self.user = user
@@ -134,13 +134,16 @@ class BiliBili:
         r = response.json()
         if r['code'] != 0 and r.get('data') is None:
             raise RuntimeError(r)
-        for cookie in r['data']['cookie_info']['cookies']:
-            self.__session.cookies.set(cookie['name'], cookie['value'])
-            if 'bili_jct' == cookie['name']:
-                self.__bili_jct = cookie['value']
-        self.cookies = self.__session.cookies.get_dict()
-        self.access_token = r['data']['token_info']['access_token']
-        self.refresh_token = r['data']['token_info']['refresh_token']
+        try:
+            for cookie in r['data']['cookie_info']['cookies']:
+                self.__session.cookies.set(cookie['name'], cookie['value'])
+                if 'bili_jct' == cookie['name']:
+                    self.__bili_jct = cookie['value']
+            self.cookies = self.__session.cookies.get_dict()
+            self.access_token = r['data']['token_info']['access_token']
+            self.refresh_token = r['data']['token_info']['refresh_token']
+        except:
+            raise RuntimeError(r)
         return r
 
     def login_by_cookies(self, cookie):
@@ -374,14 +377,14 @@ class BiliBili:
 
         logger.info(f'用户权重: {user_weight} => 网页端分p数量受到限制使用客户端api端提交')
         if not self.access_token:
-            self.login_by_password(**engine.config['user']['account'])
+            self.login_by_password(**config['user']['account'])
             self.store()
         while True:
             ret = self.__session.post(f'http://member.bilibili.com/x/vu/client/add?access_key={self.access_token}',
                                       timeout=5, json=asdict(self.video)).json()
             if ret['code'] == -101:
                 logger.info(f'刷新token{ret}')
-                self.login_by_password(**engine.config['user']['account'])
+                self.login_by_password(**config['user']['account'])
                 self.store()
                 continue
             break

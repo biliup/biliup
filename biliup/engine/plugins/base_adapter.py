@@ -7,8 +7,8 @@ from threading import Event
 import streamlink
 import youtube_dl
 
-import engine
-from engine.plugins import logger
+from .. import config
+from ..plugins import logger
 
 fake_headers = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -157,7 +157,7 @@ class FFmpegdl(DownloadBase):
         self.opt_args = []
         self.default_output_args = [
             '-bsf:a', 'aac_adtstoasc',
-            '-fs', f"{engine.config.get('file_size') if engine.config.get('file_size') else '2621440000'}"
+            '-fs', f"{config.get('file_size') if config.get('file_size') else '2621440000'}"
         ]
         self.default_input_args = ['-headers', ''.join('%s: %s\r\n' % x for x in fake_headers.items()),
                                    '-reconnect_streamed', '1', '-reconnect_delay_max', '20', '-rw_timeout', '20000000']

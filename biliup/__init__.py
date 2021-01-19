@@ -1,15 +1,10 @@
-#!/usr/bin/python3
-# coding:utf8
 import asyncio
 import sys
-import common
-from engine import main
-from common.Daemon import Daemon
+from .engine import main
+from .common.Daemon import Daemon
 
-if __name__ == '__main__':
 
-    sys.excepthook = common.new_hook
-
+def _main():
     daemon = Daemon('watch_process.pid')
     if len(sys.argv) == 2:
         if 'start' == sys.argv[1]:

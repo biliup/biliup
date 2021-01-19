@@ -4,9 +4,9 @@ import json
 
 import requests
 
-from common.decorators import Plugin
-from engine.plugins import match1, logger
-from engine.plugins.base_adapter import fake_headers, FFmpegdl
+from ...common.decorators import Plugin
+from ..plugins import match1, logger
+from .base_adapter import fake_headers, FFmpegdl
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?huya\.com')

@@ -1,7 +1,7 @@
 from ykdl.common import url_to_module
 
-from common.decorators import Plugin
-from engine.plugins.base_adapter import FFmpegdl
+from ...common.decorators import Plugin
+from .base_adapter import FFmpegdl
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m|live)\.)?bilibili\.com')

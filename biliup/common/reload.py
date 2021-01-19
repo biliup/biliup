@@ -1,11 +1,10 @@
 import asyncio
 import sys
 import os
-import time
 import subprocess
 import logging
 
-from common.timer import Timer
+from .timer import Timer
 
 logger = logging.getLogger('log01')
 
@@ -73,11 +72,12 @@ class AutoReload(Timer):
                 for watched in self.watched:
                     watched.stop()
                 self.stop()
-                parent_path = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))  # 获得所在的目录的父级目
-                path = os.path.join(parent_path, 'Bilibili.py')
-                if sys.platform == 'win32':
-                    args = ["python", path]
-                else:
-                    args = [path, 'start']
+                # parent_path = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))  # 获得所在的目录的父级目
+                # path = os.path.join(parent_path, '__main__.py')
+                # if sys.platform == 'win32':
+                #     args = ["python", path]
+                # else:
+                #     args = [path, 'start']
+                args = ['biliup', 'start']
                 subprocess.Popen(args)
                 return logger.info('重启')

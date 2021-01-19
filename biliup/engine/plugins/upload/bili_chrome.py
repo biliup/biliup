@@ -9,10 +9,10 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 
-import engine
-from common.decorators import Plugin
-from engine.plugins.upload import UploadBase, logger
-from engine.plugins.upload.slider import slider_cracker
+from ... import config
+from ....common.decorators import Plugin
+from ..upload import UploadBase, logger
+from .slider import slider_cracker
 
 
 @Plugin.upload("bilibili")
@@ -54,7 +54,7 @@ class BiliChrome(UploadBase):
         options = webdriver.ChromeOptions()
 
         options.add_argument('headless')
-        self.driver = webdriver.Chrome(executable_path=engine.config.get('chromedriver_path'), chrome_options=options)
+        self.driver = webdriver.Chrome(executable_path=config.get('chromedriver_path'), chrome_options=options)
         # service_log_path=service_log_path)
         try:
             self.driver.get("https://www.bilibili.com")
@@ -112,9 +112,9 @@ class BiliChrome(UploadBase):
         WebDriverWait(self.driver, 10).until(
             ec.presence_of_element_located((By.XPATH, r'//*[@id="login-username"]')))
         username = self.driver.find_element_by_xpath(r'//*[@id="login-username"]')
-        username.send_keys(engine.config['user']['account']['username'])
+        username.send_keys(config['user']['account']['username'])
         password = self.driver.find_element_by_xpath('//*[@id="login-passwd"]')
-        password.send_keys(engine.config['user']['account']['password'])
+        password.send_keys(config['user']['account']['password'])
         self.driver.find_element_by_class_name("btn-login").click()
         # logger.info('第四步')
         # try:

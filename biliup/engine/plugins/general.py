@@ -1,7 +1,7 @@
 from ykdl.common import url_to_module
 
-from engine.plugins import logger
-from engine.plugins.base_adapter import YDownload, SDownload, FFmpegdl
+from ..plugins import logger
+from .base_adapter import YDownload, SDownload, FFmpegdl
 
 
 class Generic(FFmpegdl):
