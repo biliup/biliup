@@ -24,3 +24,5 @@ test.py
 /work.py
 *.zip
 *.egg-info
+dist/
+build/

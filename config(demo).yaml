@@ -6,8 +6,6 @@ user: # 在填了cookies的情况下优先使用cookies上传，如需使用用�
     account:
         username: your usrname
         password: your password
-# 默认通过网页接口上传,可选通过操作chrome上传,此时需要填写chromedriver路径
-#chromedriver_path: /usr/local/bin/chromedriver
 
 # b站上传线路选择，默认为自动模式，目前可手动切换为bda2, kodo, ws, qn。
 lines: AUTO
@@ -70,3 +68,6 @@ streamers:
     星际2Classic经典神皇神族第一视角:
         url:
             - https://www.twitch.tv/kimclassic
+
+# 默认通过网页接口上传,可选通过操作chrome上传,此时需要填写chromedriver路径
+#chromedriver_path: /usr/local/bin/chromedriver
