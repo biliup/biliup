@@ -49,7 +49,7 @@ class Twitch(FFmpegdl):
         #     'sig': access_token['sig'],
         #     'token': token,
         # }
-        self.opt_args = ['-ss', "00:00:16"]
+        self.opt_args = ['-ss', "00:00:20"]
         #
         # r = requests.get( f'https://usher.ttvnw.net/api/channel/hls/{channel_name}.m3u8?{urlencode(query)}')
         # r.close()
