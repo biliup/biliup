@@ -23,3 +23,6 @@ test.py
 /upload.py
 /work.py
 *.zip
+dist
+*.egg-info
+build

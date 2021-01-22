@@ -10,11 +10,18 @@
 
 相关设置在config.yaml文件中，如直播间地址，b站账号密码
 
+演示视频：[BV1ip4y1x7Gi](https://www.bilibili.com/video/BV1ip4y1x7Gi)
 ## 使用准备
-1. 修改文件名**config(demo).yaml** → **config.yaml**
+1. 创建配置文件**config.yaml**，内容参照**config(demo).yaml**（或可调整配置后直接修改文件名）
 2. 下载 __FFmpeg__
-3. 依赖安装`pip3 install -r requirements.txt`
-## Linux系统下使用方法：
+
+## 1. Linux系统下使用方法：
+### 方式一
+1. 安装pip
+2. 安装biliup：`pip3 install git+https://github.com/ForgQi/bilibiliupload.git@setup`
+3. 启动：`biliup start`
+### 方式二
+依赖安装`pip3 install -r requirements.txt`
 >
 >     启动： ./Bilibili.py start
 >
@@ -24,19 +31,25 @@
 >
 > `ps -A | grep .py` 查看进程是否启动成功
 
-## docker使用 🔨 
+## 2. docker使用 🔨 
 ```bash
 cd bilibiliupload
 sudo docker build . -t sc2
 sudo docker run -d sc2
 ```
-## 进入容器 📦
+### 进入容器 📦
 ```bash
 sudo docker ps (找到你的imageId)
 sudo docker exec -it imageId /bin/bash     
 ```
-## Windows系统下使用方法：
-~~图形界面版在release中下载AutoTool.msi进行安装~~
+## 3. Windows系统下使用方法：
+### 方式一
+1. 安装pip
+2. 安装biliup：`pip3 install git+https://github.com/ForgQi/bilibiliupload.git@setup`
+3. 启动：`biliup`
+### 方式二
+~~图形界面版在release中下载AutoTool.msi进行安装~~\
+依赖安装`pip3 install -r requirements.txt`
 >     命令行版
 >        启动：    python Bilibili.py
 > QQ群：837362626
