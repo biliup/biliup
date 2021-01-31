@@ -1,5 +1,5 @@
 FROM jrottenberg/ffmpeg
-#VOLUME /opt/data
+VOLUME /opt
 RUN export DEBIAN_FRONTEND=noninteractive \
   && apt-get update \
   && apt install build-essential -y \
@@ -50,17 +50,20 @@ RUN export DEBIAN_FRONTEND=noninteractive \
 
 ENV LANG en_US.utf8
 
-COPY requirements.txt /opt/
-RUN cd /opt \
-    && pip3 install -r requirements.txt
+#COPY requirements.txt /opt/
+#RUN cd /opt \
+#    && pip3 install -r requirements.txt
 #USER webdriver
-COPY common /opt/common
-COPY engine /opt/engine
-COPY Bilibili.py /opt/
-RUN chmod 755 /opt/Bilibili.py
+RUN pip3 install git+https://github.com/ForgQi/bilibiliupload.git@setup
+
+#COPY common /opt/common
+#COPY engine /opt/engine
+#COPY Bilibili.py /opt/
+#RUN chmod 755 /opt/Bilibili.py
 COPY ["config(demo).yaml", "/opt/config.yaml"]
 
 WORKDIR /opt
-ENTRYPOINT ["./Bilibili.py"]
+#ENTRYPOINT ["./Bilibili.py"]
+ENTRYPOINT ["biliup"]
 
 #EXPOSE 9515/tcp

@@ -32,6 +32,12 @@
 > `ps -A | grep .py` 查看进程是否启动成功
 
 ## 2. docker使用 🔨 
+###方式一
+```bash
+vim /host/path/config.yaml
+docker run --name biliup -v /host/path:/opt -d docker.pkg.github.com/forgqi/bilibiliupload/caution
+```
+###方式二
 ```bash
 cd bilibiliupload
 sudo docker build . -t sc2
@@ -111,4 +117,4 @@ def transcoding(data):
 * Thanks `ykdl, youtube-dl, streamlink` provides downloader.
 
 类似项目:\
-![ZhangMingZhao1/StreamerHelper](https://avatars2.githubusercontent.com/u/29058747?s=50&u=5f8c3acaa9d09f4396f00256c0ce6ef01452e92f&v=4)
+![ZhangMingZhao1](https://avatars2.githubusercontent.com/u/29058747?s=50&u=5f8c3acaa9d09f4396f00256c0ce6ef01452e92f&v=4) ：StreamerHelper
