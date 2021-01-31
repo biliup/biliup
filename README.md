@@ -32,12 +32,13 @@
 > `ps -A | grep .py` 查看进程是否启动成功
 
 ## 2. docker使用 🔨 
-###方式一
+### 方式一
 ```bash
 vim /host/path/config.yaml
+docker pull docker.pkg.github.com/forgqi/bilibiliupload/caution
 docker run --name biliup -v /host/path:/opt -d docker.pkg.github.com/forgqi/bilibiliupload/caution
 ```
-###方式二
+### 方式二
 ```bash
 cd bilibiliupload
 sudo docker build . -t sc2
@@ -90,8 +91,7 @@ Linux下以daemon进程启动，程序执行过程可查看日志文件。
 
 * 通过b站的OAuth2接口
 
->对于滑动验证码可进行二值化、灰度处理找缺口计算移动像素，系统会上传分析你的拖动行为，模拟人操作轨迹，提供加速度、抖动等，如直接拖动到目标位置不能通过验证，提示：“拼图被怪物吃了”。滑动验证码系统会学习，需不断更新轨迹策略保证通过验证的成功率。
-
+>对于滑动验证码可进行二值化、灰度处理找缺口计算移动像素，系统会上传分析你的拖动行为，模拟人操作轨迹，提供加速度、抖动等，如直接拖动到目标位置不能通过验证，提示：“拼图被怪物吃了”。滑动验证码系统会学习，需不断更新轨迹策略保证通过验证的成功率。\
 >OAuth2接口要提供key，需逆向分析各端
 
 线程池限制并发数，减少磁盘占满的可能性。检测下载情况卡死或者下载超时，重试三次保证可用性。代码更新后将在空闲时自动重启。
