@@ -60,7 +60,8 @@ class BiliWeb(UploadBase):
 
 class BiliBili:
     def __init__(self, video: 'Data'):
-        self.app_key = 'bca7e84c2d947ac6'
+        # self.app_key = 'bca7e84c2d947ac6'
+        self.app_key = 'aae92bc66f3edfab'
         self.__session = requests.Session()
         self.video = video
         self.__session.mount('https://', HTTPAdapter(max_retries=Retry(total=5, method_whitelist=False)))
@@ -132,7 +133,7 @@ class BiliBili:
         response = self.__session.post("https://passport.bilibili.com/api/v3/oauth2/login", timeout=5,
                                        data={**payload, 'sign': self.sign(parse.urlencode(payload))})
         r = response.json()
-        if r['code'] != 0 and r.get('data') is None:
+        if r['code'] != 0 or r.get('data') is None or r['data'].get('cookie_info') is None:
             raise RuntimeError(r)
         for cookie in r['data']['cookie_info']['cookies']:
             self.__session.cookies.set(cookie['name'], cookie['value'])
@@ -155,7 +156,8 @@ class BiliBili:
 
     @staticmethod
     def sign(param):
-        salt = '60698ba2f68e01ce44738920a0ffe768'
+        # salt = '60698ba2f68e01ce44738920a0ffe768'
+        salt = 'af125a0d5279fd576c1b4418a3e8276d'
         return hashlib.md5(f"{param}{salt}".encode()).hexdigest()
 
     def get_key(self):

@@ -35,7 +35,6 @@
 ### 方式一
 ```bash
 vim /host/path/config.yaml
-docker pull docker.pkg.github.com/forgqi/bilibiliupload/caution
 docker run --name biliup -v /host/path:/opt -d docker.pkg.github.com/forgqi/bilibiliupload/caution
 ```
 ### 方式二
