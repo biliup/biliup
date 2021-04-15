@@ -1,11 +1,11 @@
 from ykdl.common import url_to_module
 
 from common.decorators import Plugin
-from engine.plugins.base_adapter import FFmpegdl
+from engine.plugins.general import DownloadBase
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m|live)\.)?bilibili\.com')
-class Bilibili(FFmpegdl):
+class Bilibili(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 

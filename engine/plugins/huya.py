@@ -5,12 +5,12 @@ import json
 import requests
 
 from common.decorators import Plugin
-from engine.plugins import match1, logger
-from engine.plugins.base_adapter import fake_headers, FFmpegdl
+from engine.plugins import match1, logger, fake_headers
+from engine.plugins.general import DownloadBase
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?huya\.com')
-class Huya(FFmpegdl):
+class Huya(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 

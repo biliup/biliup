@@ -5,7 +5,7 @@ import requests
 
 from common.decorators import Plugin
 from engine.plugins import BatchCheckBase, match1
-from engine.plugins.base_adapter import FFmpegdl
+from engine.plugins.general import DownloadBase
 
 VALID_URL_BASE = r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)'
 _OPERATION_HASHES = {
@@ -21,9 +21,9 @@ _CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko'
 
 
 @Plugin.download(regexp=VALID_URL_BASE)
-class Twitch(FFmpegdl):
+class Twitch(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
-        FFmpegdl.__init__(self, fname, url, suffix=suffix)
+        DownloadBase.__init__(self, fname, url, suffix=suffix)
 
     def check_stream(self):
         if not list(Twitch.BatchCheck([self.url]).check()):

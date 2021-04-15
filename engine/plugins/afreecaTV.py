@@ -2,7 +2,7 @@ import requests
 
 from common.decorators import Plugin
 from engine.plugins import match1, logger
-from engine.plugins.base_adapter import FFmpegdl
+from engine.plugins.general import DownloadBase
 
 VALID_URL_BASE = r"https?://play\.afreecatv\.com/(?P<username>\w+)(?:/\d+)?"
 
@@ -13,7 +13,7 @@ QUALITIES = ["original", "hd", "sd"]
 
 
 @Plugin.download(regexp=r"https?://play\.afreecatv\.com/(?P<username>\w+)(?:/\d+)?")
-class AfreecaTV(FFmpegdl):
+class AfreecaTV(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 

@@ -5,11 +5,11 @@ from ykdl.util.jsengine import chakra_available, quickjs_available, external_int
 
 from common.decorators import Plugin
 from engine.plugins import logger
-from engine.plugins.base_adapter import FFmpegdl
+from engine.plugins.general import DownloadBase
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?douyu\.com')
-class Douyu(FFmpegdl):
+class Douyu(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 
