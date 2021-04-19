@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 # coding:utf8
 import asyncio
+import platform
 import sys
 import common
 from engine import main
@@ -11,7 +12,7 @@ if __name__ == '__main__':
     sys.excepthook = common.new_hook
 
     daemon = Daemon('watch_process.pid')
-    if len(sys.argv) == 2:
+    if platform.system() != 'Windows' and len(sys.argv) == 2:
         if 'start' == sys.argv[1]:
             daemon.start()
         elif 'stop' == sys.argv[1]:
@@ -22,7 +23,7 @@ if __name__ == '__main__':
             print('unknown command')
             sys.exit(2)
         sys.exit(0)
-    elif len(sys.argv) == 1:
+    elif platform.system() == 'Windows' or len(sys.argv) == 1:
         asyncio.run(main())
     else:
         print('usage: %s start|stop|restart' % sys.argv[0])

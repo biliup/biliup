@@ -15,14 +15,14 @@
 1. 创建配置文件**config.yaml**，内容参照**config(demo).yaml**（或可调整配置后直接修改文件名）
 2. 下载 __FFmpeg__
 
-## 1. Linux系统下使用方法：
+## 1. 使用方法：
 ### 方式一
 1. 安装pip
 2. 安装biliup：`pip3 install git+https://github.com/ForgQi/bilibiliupload.git@setup`
 3. 启动：`biliup start`
 ### 方式二
 依赖安装`pip3 install -r requirements.txt`
->
+#### Linux:
 >     启动： ./Bilibili.py start
 >
 >     退出： ./Bilibili.py stop
@@ -30,8 +30,13 @@
 >     重启： ./Bilibili.py restart
 >
 > `ps -A | grep .py` 查看进程是否启动成功
-
-## 2. docker使用 🔨 
+> 
+#### Windows: 
+~~图形界面版在release中下载AutoTool.msi进行安装~~
+>     命令行版
+>        启动：    python Bilibili.py
+> QQ群：837362626
+## 2. Docker使用 🔨 
 ### 方式一
 ```bash
 vim /host/path/config.yaml
@@ -48,23 +53,12 @@ sudo docker run -d sc2
 sudo docker ps (找到你的imageId)
 sudo docker exec -it imageId /bin/bash     
 ```
-## 3. Windows系统下使用方法：
-### 方式一
-1. 安装pip
-2. 安装biliup：`pip3 install git+https://github.com/ForgQi/bilibiliupload.git@setup`
-3. 启动：`biliup`
-### 方式二
-~~图形界面版在release中下载AutoTool.msi进行安装~~\
-依赖安装`pip3 install -r requirements.txt`
->     命令行版
->        启动：    python Bilibili.py
-> QQ群：837362626
 ## 使用建议
 关于B站为什么不能多p上传\
 目前bilibili网页端是根据用户权重来限制分p数量的，权重不够的用户自动切换到客户端的提交接口。
 >用户等级大于3，且粉丝数>100，web端投稿不限制分p数量
 
-国内vps网络费用较高，建议使用国外vps，根据机器的硬盘等资源设置合理并发量。
+国内VPS网络费用较高，建议使用国外VPS，根据机器的硬盘等资源设置合理并发量。
 
 b站上传目前有两种模式，分别为bup和bupfetch模式。
 >* bup：国内常用模式，视频直接上传到b站投稿系统。
