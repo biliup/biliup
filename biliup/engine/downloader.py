@@ -3,8 +3,8 @@ import re
 import time
 from urllib.error import HTTPError
 
-from common.decorators import Plugin
-from engine.plugins import general, BatchCheckBase
+from ..common.decorators import Plugin
+from .plugins import general, BatchCheckBase
 
 logger = logging.getLogger('log01')
 

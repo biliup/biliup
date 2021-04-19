@@ -9,7 +9,7 @@ import youtube_dl
 from ykdl.common import url_to_module
 
 import engine
-from engine.plugins import logger, fake_headers
+from ..plugins import logger, fake_headers
 
 
 class DownloadBase:

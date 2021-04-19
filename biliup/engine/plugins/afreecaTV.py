@@ -1,8 +1,8 @@
 import requests
 
-from common.decorators import Plugin
-from engine.plugins import match1, logger
-from engine.plugins.general import DownloadBase
+from ...common.decorators import Plugin
+from ..plugins import match1, logger
+from .general import DownloadBase
 
 VALID_URL_BASE = r"https?://play\.afreecatv\.com/(?P<username>\w+)(?:/\d+)?"
 

@@ -1,9 +1,10 @@
-import common
-from common import logger
-from common.event import Event, event_manager
-from engine.downloader import download, check_url
-from engine.plugins.upload import UploadBase
-from engine.uploader import upload
+# import common
+from .. import common
+from ..common import logger
+from ..common.event import Event, event_manager
+from .downloader import download, check_url
+from .plugins.upload import UploadBase
+from .uploader import upload
 
 CHECK = 'check'
 CHECK_UPLOAD = 'check_upload'

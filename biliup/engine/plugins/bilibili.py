@@ -1,7 +1,7 @@
 from ykdl.common import url_to_module
 
-from common.decorators import Plugin
-from engine.plugins.general import DownloadBase
+from ...common.decorators import Plugin
+from .general import DownloadBase
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m|live)\.)?bilibili\.com')

@@ -2,10 +2,10 @@ import asyncio
 
 import yaml
 
-from common.decorators import Plugin
-from common.event import Event, event_manager
-from common.reload import AutoReload
-from common.timer import Timer
+from ..common.decorators import Plugin
+from ..common.event import Event, event_manager
+from ..common.reload import AutoReload
+from ..common.timer import Timer
 
 with open(r'config.yaml', encoding='utf-8') as stream:
     config = yaml.load(stream, Loader=yaml.FullLoader)
@@ -20,17 +20,17 @@ def invert_dict(d: dict):
 
 
 async def main():
-    import engine.plugins
+    from . import plugins
     streamers = config['streamers']
     streamer_url = {k: v['url'] for k, v in streamers.items()}
     inverted_index = invert_dict(streamer_url)
     urls = list(inverted_index.keys())
     url_status = dict.fromkeys(inverted_index, 0)
-    checker = Plugin(engine.plugins).sorted_checker(urls)
+    checker = Plugin(plugins).sorted_checker(urls)
     # 初始化事件管理器
     event_manager.context = {**config, 'urls': urls, 'url_status': url_status,
                              'checker': checker, 'inverted_index': inverted_index, 'streamer_url': streamer_url}
-    from engine.handler import CHECK_UPLOAD, CHECK
+    from ..engine.handler import CHECK_UPLOAD, CHECK
     event_manager.start()
 
     async def check_timer():

@@ -1,8 +1,8 @@
 import inspect
 
-from common import logger
-from common.decorators import Plugin
-import engine
+from .. import engine
+from ..common import logger
+from ..common.decorators import Plugin
 
 
 def upload(platform, index, data):

@@ -5,7 +5,7 @@ import sys
 import os
 import time
 import atexit
-from engine import main
+from ..engine import main
 
 logger = logging.getLogger('log01')
 

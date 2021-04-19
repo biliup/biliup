@@ -3,9 +3,9 @@ from urllib.parse import urlencode
 
 import requests
 
-from common.decorators import Plugin
-from engine.plugins import BatchCheckBase, match1
-from engine.plugins.general import DownloadBase
+from ...common.decorators import Plugin
+from ..plugins import BatchCheckBase, match1
+from .general import DownloadBase
 
 VALID_URL_BASE = r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)'
 _OPERATION_HASHES = {
