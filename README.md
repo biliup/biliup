@@ -11,30 +11,24 @@
 相关设置在config.yaml文件中，如直播间地址，b站账号密码
 
 演示视频：[BV1ip4y1x7Gi](https://www.bilibili.com/video/BV1ip4y1x7Gi)
-## 使用准备
+## 1.安装使用
 1. 创建配置文件**config.yaml**，内容参照**config(demo).yaml**（或可调整配置后直接修改文件名）
-2. 下载 __FFmpeg__
-
-## 1. 使用方法：
-### 方式一
-1. 安装pip
-2. 安装biliup：`pip3 install git+https://github.com/ForgQi/bilibiliupload.git@setup`
-3. 启动：`biliup start`
-### 方式二
-依赖安装`pip3 install -r requirements.txt`
+2. 安装 __FFmpeg__
+3. 安装 __pip__
+4. 安装 __biliup__：
+`pip3 install git+https://github.com/ForgQi/bilibiliupload.git`
 #### Linux:
->     启动： ./Bilibili.py start
+>     启动： biliup start
 >
->     退出： ./Bilibili.py stop
+>     退出： biliup stop
 >
->     重启： ./Bilibili.py restart
+>     重启： biliup restart
 >
-> `ps -A | grep .py` 查看进程是否启动成功
-> 
+> `ps -A | grep biliup` 查看进程是否启动成功
 #### Windows: 
 ~~图形界面版在release中下载AutoTool.msi进行安装~~
 >     命令行版
->        启动：    python Bilibili.py
+>        启动：    biliup
 > QQ群：837362626
 ## 2. Docker使用 🔨 
 ### 方式一
@@ -53,6 +47,11 @@ sudo docker run -d sc2
 sudo docker ps (找到你的imageId)
 sudo docker exec -it imageId /bin/bash     
 ```
+
+## 3.源码使用
+* 下载源码
+* 安装: `pip3 install -e .`
+* 启动: `biliup`
 ## 使用建议
 关于B站为什么不能多p上传\
 目前bilibili网页端是根据用户权重来限制分p数量的，权重不够的用户自动切换到客户端的提交接口。

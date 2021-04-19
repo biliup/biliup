@@ -3,9 +3,9 @@ import re
 
 import requests
 
-from common.decorators import Plugin
-from engine.plugins import logger, fake_headers
-from engine.plugins.general import DownloadBase
+from ...common.decorators import Plugin
+from . import logger, fake_headers
+from .general import DownloadBase
 
 
 @Plugin.download(regexp=r'(?:https?://)?cc\.163\.com')

@@ -54,7 +54,7 @@ ENV LANG en_US.utf8
 #RUN cd /opt \
 #    && pip3 install -r requirements.txt
 #USER webdriver
-RUN pip3 install git+https://github.com/ForgQi/bilibiliupload.git@setup
+RUN pip3 install git+https://github.com/ForgQi/bilibiliupload.git
 
 #COPY common /opt/common
 #COPY engine /opt/engine
