@@ -1,11 +1,6 @@
-.idea/workspace.xml
+.idea
 .gitattributes
-.idea/bilibiliupload.iml
-.idea/misc.xml
-.idea/modules.xml
-.idea/vcs.xml
 *.pyc
-.idea/encodings.xml
 *.png
 *.jpg
 *.flv
