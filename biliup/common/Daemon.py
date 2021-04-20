@@ -5,20 +5,20 @@ import sys
 import os
 import time
 import atexit
-from ..engine import main
 
 logger = logging.getLogger('log01')
 
 
 # python模拟linux的守护进程
 class Daemon(object):
-    def __init__(self, pidfile, change_currentdirectory=False, stdin='/dev/null', stdout='/dev/null',
+    def __init__(self, pidfile, fn, change_currentdirectory=False, stdin='/dev/null', stdout='/dev/null',
                  stderr='/dev/null'):
         # 需要获取调试信息，改为stdin='/dev/stdin', stdout='/dev/stdout', stderr='/dev/stderr'，以root身份运行。
         self.stdin = stdin
         self.stdout = stdout
         self.stderr = stderr
         self.pidfile = pidfile
+        self.fn = fn
         self.cd = change_currentdirectory
 
     def _daemonize(self):
@@ -119,7 +119,6 @@ class Daemon(object):
         self.stop()
         self.start()
 
-    @staticmethod
-    def _run():
+    def _run(self):
         """ run your fun"""
-        asyncio.run(main())
+        asyncio.run(self.fn())

@@ -162,6 +162,3 @@ class Event:
     type_: str  # 事件类型
     args: tuple = ()
     dict: dict = field(default_factory=dict)  # 字典用于保存具体的事件数据
-
-
-event_manager = EventManager()

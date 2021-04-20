@@ -8,8 +8,8 @@ import streamlink
 import youtube_dl
 from ykdl.common import url_to_module
 
-from .. import config
-from ..plugins import logger, fake_headers
+from ..engine import config
+from . import logger, fake_headers
 
 
 class DownloadBase:

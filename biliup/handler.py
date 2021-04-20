@@ -1,7 +1,7 @@
-# import common
-from .. import common
-from ..common import logger
-from ..common.event import Event, event_manager
+from . import common
+from biliup import event_manager
+from .common import logger
+from .engine.event import Event
 from .downloader import download, check_url
 from .plugins.upload import UploadBase
 from .uploader import upload

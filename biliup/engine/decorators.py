@@ -40,7 +40,7 @@ class Plugin:
 
     @classmethod
     def sorted_checker(cls, urls):
-        from ..engine.plugins import general
+        from ..plugins import general
         curls = urls.copy()
         checker_plugins = {}
         for plugin in cls.download_plugins:

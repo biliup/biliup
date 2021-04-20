@@ -3,7 +3,7 @@ import re
 import time
 from urllib.error import HTTPError
 
-from ..common.decorators import Plugin
+from .engine.decorators import Plugin
 from .plugins import general, BatchCheckBase
 
 logger = logging.getLogger('log01')

@@ -3,7 +3,7 @@ import platform
 from ykdl.common import url_to_module
 from ykdl.util.jsengine import chakra_available, quickjs_available, external_interpreter
 
-from ...common.decorators import Plugin
+from ..engine.decorators import Plugin
 from ..plugins import logger
 from .general import DownloadBase
 

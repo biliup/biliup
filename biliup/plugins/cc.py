@@ -3,7 +3,7 @@ import re
 
 import requests
 
-from ...common.decorators import Plugin
+from ..engine.decorators import Plugin
 from . import logger, fake_headers
 from .general import DownloadBase
 

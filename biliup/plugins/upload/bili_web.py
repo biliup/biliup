@@ -19,8 +19,8 @@ import rsa
 from requests import utils
 from requests.adapters import HTTPAdapter, Retry
 
-from ... import config
-from ....common.decorators import Plugin
+from ...engine import config
+from ...engine.decorators import Plugin
 from ..upload import UploadBase, logger
 
 

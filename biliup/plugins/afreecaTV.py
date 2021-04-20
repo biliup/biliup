@@ -1,6 +1,6 @@
 import requests
 
-from ...common.decorators import Plugin
+from ..engine.decorators import Plugin
 from ..plugins import match1, logger
 from .general import DownloadBase
 

@@ -3,7 +3,7 @@ from urllib.parse import urlencode
 
 import requests
 
-from ...common.decorators import Plugin
+from ..engine.decorators import Plugin
 from ..plugins import BatchCheckBase, match1
 from .general import DownloadBase
 

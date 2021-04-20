@@ -1,6 +1,6 @@
 from ykdl.common import url_to_module
 
-from ...common.decorators import Plugin
+from ..engine.decorators import Plugin
 from .general import DownloadBase
 
 
