@@ -6,22 +6,20 @@ import math
 import os
 import sys
 import time
-from dataclasses import dataclass, field, InitVar, asdict
+from dataclasses import asdict, dataclass, field, InitVar
 from json import JSONDecodeError
-from os.path import basename, splitext
-from typing import Any, Union
+from os.path import splitext, basename
+from typing import Union, Any
 from urllib import parse
 from urllib.parse import quote
 
 import aiohttp
 import requests
 import rsa
-from requests import utils
 from requests.adapters import HTTPAdapter, Retry
 
-from ...engine import config
-from ...engine.decorators import Plugin
-from ..upload import UploadBase, logger
+from biliup import Plugin, config
+from ..engine.upload import UploadBase, logger
 
 
 @Plugin.upload(platform="bili_web")

@@ -13,9 +13,8 @@
 演示视频：[BV1ip4y1x7Gi](https://www.bilibili.com/video/BV1ip4y1x7Gi)
 ## 1.安装使用
 1. 创建配置文件**config.yaml**，内容参照**config(demo).yaml**（或可调整配置后直接修改文件名）
-2. 安装 __FFmpeg__
-3. 安装 __pip__
-4. 安装 __biliup__：
+2. 安装 __FFmpeg__, __pip__
+3. 安装 __biliup__：
 `pip3 install git+https://github.com/ForgQi/bilibiliupload.git`
 #### Linux:
 >     启动： biliup start
@@ -49,7 +48,7 @@ sudo docker exec -it imageId /bin/bash
 ```
 
 ## 3.源码使用
-* 下载源码
+* 下载源码: git clone https://github.com/ForgQi/bilibiliupload.git
 * 安装: `pip3 install -e .`
 * 启动: `biliup`
 ## 使用建议

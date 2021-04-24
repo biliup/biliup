@@ -5,7 +5,7 @@ import requests
 
 from ..engine.decorators import Plugin
 from . import logger, fake_headers
-from .general import DownloadBase
+from ..engine.download import DownloadBase
 
 
 @Plugin.download(regexp=r'(?:https?://)?cc\.163\.com')

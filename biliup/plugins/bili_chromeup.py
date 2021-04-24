@@ -7,11 +7,10 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as ec
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.wait import WebDriverWait
 
-from ...engine import config
-from ...engine.decorators import Plugin
-from ..upload import UploadBase, logger
+from biliup import Plugin, config
+from ..engine.upload import UploadBase, logger
 from .slider import slider_cracker
 
 

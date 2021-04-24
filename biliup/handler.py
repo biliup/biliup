@@ -3,7 +3,7 @@ from biliup import event_manager
 from .common import logger
 from .engine.event import Event
 from .downloader import download, check_url
-from .plugins.upload import UploadBase
+from .engine.upload import UploadBase
 from .uploader import upload
 
 CHECK = 'check'

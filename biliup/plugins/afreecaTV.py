@@ -2,7 +2,7 @@ import requests
 
 from ..engine.decorators import Plugin
 from ..plugins import match1, logger
-from .general import DownloadBase
+from ..engine.download import DownloadBase
 
 VALID_URL_BASE = r"https?://play\.afreecatv\.com/(?P<username>\w+)(?:/\d+)?"
 

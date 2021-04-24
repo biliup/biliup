@@ -5,7 +5,7 @@ from ykdl.util.jsengine import chakra_available, quickjs_available, external_int
 
 from ..engine.decorators import Plugin
 from ..plugins import logger
-from .general import DownloadBase
+from ..engine.download import DownloadBase
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?douyu\.com')

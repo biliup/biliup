@@ -5,7 +5,7 @@ import requests
 
 from ..engine.decorators import Plugin
 from ..plugins import BatchCheckBase, match1
-from .general import DownloadBase
+from ..engine.download import DownloadBase
 
 VALID_URL_BASE = r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)'
 _OPERATION_HASHES = {

@@ -10,8 +10,6 @@ old/
 config.yaml
 chromedriver.*
 /configlog.ini
-cookie.py
-download.py
 ds_update.log*
 *.cookie
 test.py
