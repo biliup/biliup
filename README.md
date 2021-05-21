@@ -15,7 +15,7 @@
 1. 创建配置文件**config.yaml**，内容参照**config(demo).yaml**（或可调整配置后直接修改文件名）
 2. 安装 __FFmpeg__, __pip__
 3. 安装 __biliup__：
-`pip3 install git+https://github.com/ForgQi/bilibiliupload.git`
+`pip3 install biliup`
 #### Linux:
 >     启动： biliup start
 >
