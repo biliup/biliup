@@ -11,24 +11,26 @@
 相关设置在config.yaml文件中，如直播间地址，b站账号密码
 
 演示视频：[BV1ip4y1x7Gi](https://www.bilibili.com/video/BV1ip4y1x7Gi)
-## 1.安装使用
+## 1. 安装使用
 1. 创建配置文件**config.yaml**，内容参照**config(demo).yaml**（或可调整配置后直接修改文件名）
 2. 安装 __FFmpeg__, __pip__
 3. 安装 __biliup__：
 `pip3 install biliup`
-#### Linux:
->     启动： biliup start
->
->     退出： biliup stop
->
->     重启： biliup restart
->
-> `ps -A | grep biliup` 查看进程是否启动成功
-#### Windows: 
-~~图形界面版在release中下载AutoTool.msi进行安装~~
->     命令行版
->        启动：    biliup
-> QQ群：837362626
+```shell
+# 启动
+$ biliup start
+# 退出 
+$ biliup stop
+# 重启 
+$ biliup restart
+```
+
+Linux下以daemon进程启动，录像和日志文件保存在执行目录下，程序执行过程可查看日志文件。
+`ps -A | grep biliup` 查看进程是否启动成功。
+
+
+~~Windows图形界面版在release中下载AutoTool.msi进行安装~~
+QQ群：837362626
 ## 2. Docker使用 🔨 
 ### 方式一
 ```bash
@@ -47,7 +49,7 @@ sudo docker ps (找到你的imageId)
 sudo docker exec -it imageId /bin/bash     
 ```
 
-## 3.源码使用
+## 3. 源码使用
 * 下载源码: git clone https://github.com/ForgQi/bilibiliupload.git
 * 安装: `pip3 install -e .`
 * 启动: `biliup`
@@ -74,8 +76,6 @@ bupfetch模式支持的上传方式及线路有：
 
 国内基本选择upos模式的bda2线路。国外多为upos模式的ws和qn线路，也有bupfetch模式的kodo、gcs线路。bilibili采用客户端和服务器端线路探测相结合的方式，服务器会返回可选线路，客户端上传前会先发包测试选择一条延迟最低的线路，保证各个地区的上传质量。
 ***
-Linux下以daemon进程启动，程序执行过程可查看日志文件。
-
 登录有两种方案：
 
 * 操作浏览器模拟登录
