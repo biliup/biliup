@@ -21,19 +21,28 @@ class DownloadBase:
         self.opt_args = []
         self.default_output_args = [
             '-bsf:a', 'aac_adtstoasc',
-            '-fs', f"{config.get('file_size') if config.get('file_size') else '2621440000'}"
         ]
         self.default_input_args = ['-headers', ''.join('%s: %s\r\n' % x for x in fake_headers.items()),
                                    '-reconnect_streamed', '1', '-reconnect_delay_max', '20', '-rw_timeout', '20000000']
+        if config.get('file_size'):
+            self.default_type_args = ['-fs', f"{config.get('file_size') if config.get('file_size') else '2621440000'}"]
+            self.default_type_num = 1
+        elif config.get('file_time'):
+            self.default_type_args = ['-segment_time', f"{config.get('file_time') if config.get('file_time') else '00:50:00'}"]
+            self.default_type_num = 2
 
     def check_stream(self):
         logger.debug(self.fname)
         raise NotImplementedError()
 
     def download(self, filename):
+        if self.default_type_num == 1:
+            typenum = [f'{filename}.part']
+        elif self.default_type_num == 2:
+            typenum = ['-f', 'segment', f'{self.file_name}-%03d.{self.suffix}']
         args = ['ffmpeg', '-y', *self.default_input_args,
                 '-i', self.raw_stream_url, *self.default_output_args, *self.opt_args,
-                '-c', 'copy', '-f', self.suffix, f'{filename}.part']
+                '-c', 'copy', '-f', self.suffix, *self.default_type_args, *typenum]
         proc = subprocess.Popen(args, stdin=subprocess.PIPE)
         try:
             retval = proc.wait()
