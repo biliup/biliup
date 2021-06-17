@@ -27,8 +27,8 @@ class DownloadBase:
         if config.get('file_size'):
             self.default_type_args = ['-fs', f"{config.get('file_size') if config.get('file_size') else '2621440000'}"]
             self.default_type_num = 1
-        elif config.get('file_time'):
-            self.default_type_args = ['-segment_time', f"{config.get('file_time') if config.get('file_time') else '00:50:00'}"]
+        elif config.get('segment_time'):
+            self.default_type_args = ['-segment_time', f"{config.get('segment_time') if config.get('segment_time') else '00:50:00'}"]
             self.default_type_num = 2
 
     def check_stream(self):
