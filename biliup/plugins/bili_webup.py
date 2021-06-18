@@ -360,8 +360,9 @@ class BiliBili:
         self.__session.get('https://member.bilibili.com/x/geetest/pre/add', timeout=5)
         myinfo = self.__session.get('https://member.bilibili.com/x/web/archive/pre?lang=cn',
                                     timeout=15).json()['data']['myinfo']
-        myinfo['total_info'] = self.__session.get('https://member.bilibili.com/x/web/index/stat',
-                                                  timeout=15).json()['data']
+        total_info = self.__session.get('https://member.bilibili.com/x/web/index/stat', timeout=15).json()
+        print(total_info)
+        myinfo['total_info'] = total_info['data']
         user_weight = 2 if myinfo['level'] > 3 \
             and myinfo['total_info'] and myinfo['total_info']['total_fans'] > 100 else 1
         if user_weight == 2:

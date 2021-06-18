@@ -6,9 +6,9 @@
 
 * 自动选择上传线路，保证国内外vps上传质量
 * 可分别控制下载与上传并发量
-* 支持通过API上传~~与selenium操作浏览器上传两种方式~~
+* 支持Web API与客户端API上传
 
-相关设置在config.yaml文件中，如直播间地址，b站账号密码
+相关配置示例在config.yaml文件中，如直播间地址，b站账号密码
 
 演示视频：[BV1ip4y1x7Gi](https://www.bilibili.com/video/BV1ip4y1x7Gi)
 ## 1. 安装使用
@@ -29,8 +29,6 @@ Linux下以daemon进程启动，录像和日志文件保存在执行目录下，
 `ps -A | grep biliup` 查看进程是否启动成功。
 
 
-~~Windows图形界面版在release中下载AutoTool.msi进行安装~~
-QQ群：837362626
 ## 2. Docker使用 🔨 
 ### 方式一
 ```bash
@@ -104,6 +102,10 @@ def transcoding(data):
     pass
 ```
 
+## Deprecated
+* ~~selenium操作浏览器上传两种方式~~(详见bili_chromeup.py)
+* ~~Windows图形界面版在release中下载AutoTool.msi进行安装~~[AutoTool.msi](https://github.com/ForgQi/bilibiliupload/releases/tag/v0.1.0)
+QQ群：837362626
 ## Credits
 * Thanks `ykdl, youtube-dl, streamlink` provides downloader.
 
