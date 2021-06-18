@@ -38,7 +38,7 @@ class Bilibili(DownloadBase):
         params = {
             'https_url_req': 1,
             'cid': vid,
-            'platform': 'web',
+            'platform': 'h5',
             'qn': 10000,
             'ptype': '16'
         }

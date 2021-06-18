@@ -454,7 +454,6 @@ class BiliBili:
 class Data:
     """
     cover: 封面图片，可由recovers方法得到视频的帧截图
-    tid: 分区,174为生活，其他分区
     """
     copyright: int = 2
     source: str = ''

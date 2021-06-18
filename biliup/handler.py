@@ -1,5 +1,5 @@
 from . import common
-from biliup import event_manager
+from biliup import event_manager, config
 from .common import logger
 from .engine.event import Event
 from .downloader import download, check_url
@@ -18,7 +18,11 @@ UPLOAD = 'upload'
 def process(name, url):
     date = common.time_now()
     try:
-        download(name, url)
+        kwargs = {}
+        suffix = config['streamers'][name].get('format')
+        if suffix:
+            kwargs['suffix'] = suffix
+        download(name, url, **kwargs)
     finally:
         return Event(UPLOAD, (name, url, date))
 

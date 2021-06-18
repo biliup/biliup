@@ -9,10 +9,10 @@ from .plugins import general, BatchCheckBase
 logger = logging.getLogger('log01')
 
 
-def download(fname, url):
+def download(fname, url, **kwargs):
     for plugin in Plugin.download_plugins:
         if re.match(plugin.VALID_URL_BASE, url):
-            plugin(fname, url).start()
+            plugin(fname, url, **kwargs).start()
             return
     general.__plugin__(fname, url).start()
 
