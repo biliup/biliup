@@ -51,6 +51,34 @@ sudo docker exec -it imageId /bin/bash
 * 下载源码: git clone https://github.com/ForgQi/bilibiliupload.git
 * 安装: `pip3 install -e .`
 * 启动: `biliup`
+
+## EMBEDDING BILIUP
+如果你不想使用完全自动托管的功能，而仅仅只是想嵌入biliup作为一个库来使用这里有两个例子可以作为参考
+### 上传
+```python
+from biliup.plugins.bili_webup import BiliBili, Data
+
+video = Data()
+video.title = '视频标题'
+video.desc = '视频简介'
+video.source = '添加转载地址说明'
+# 设置视频分区,默认为174 生活，其他分区
+video.tid = 171
+video.set_tag(['星际争霸2', '电子竞技'])
+with BiliBili(video) as bili:
+    bili.login_by_password("username", "password")
+    for file in file_list:
+        video_part = bili.upload_file(file)  # 上传视频
+        video.videos.append(video_part)  # 添加已经上传的视频
+    video.cover = bili.cover_up('/cover_path').replace('http:', '')
+    ret = bili.submit()  # 提交视频
+```
+### 下载
+```python
+from biliup.downloader import download
+
+download('文件名', 'https://www.panda.tv/1150595', suffix='flv')
+```
 ## 使用建议
 关于B站为什么不能多p上传\
 目前bilibili网页端是根据用户权重来限制分p数量的，权重不够的用户自动切换到客户端的提交接口。

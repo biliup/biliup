@@ -7,7 +7,7 @@ user: # 在填了cookies的情况下优先使用cookies上传，如需使用用�
         username: your usrname
         password: your password
 
-# b站上传线路选择，默认为自动模式，目前可手动切换为bda2, kodo, ws, qn。
+# b站上传线路选择，默认为自动模式，目前可手动切换为bda2, kodo, ws, qn
 lines: AUTO
 # 单文件并发上传数，未达到带宽上限时增大此值可提高上传速度
 threads: 3
@@ -24,6 +24,7 @@ streamers:
         format: mp4 # 视频保存格式
         tid: 171 # 投稿分区码,174为生活，其他分区
         cover_path: /cover/up.jpg
+        description: 视频简介
         tags:
           - 星际争霸2
           - 电子竞技

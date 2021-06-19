@@ -24,7 +24,8 @@ from ..engine.upload import UploadBase, logger
 
 @Plugin.upload(platform="bili_web")
 class BiliWeb(UploadBase):
-    def __init__(self, principal, data, user, lines='AUTO', threads=3, tid=174, tags=None, cover_path=None):
+    def __init__(self, principal, data, user,
+                 lines='AUTO', threads=3, tid=174, tags=None, cover_path=None, description=''):
         super().__init__(principal, data, persistence_path='bili.cookie')
         if tags is None:
             tags = ['星际争霸2', '电子竞技']
@@ -34,6 +35,7 @@ class BiliWeb(UploadBase):
         self.tid = tid
         self.tags = tags
         self.cover_path = cover_path
+        self.desc = description
 
     def upload(self, file_list):
         video = Data()
@@ -43,7 +45,8 @@ class BiliWeb(UploadBase):
                 video_part = bili.upload_file(file, self.lines, self.threads)  # 上传视频
                 video.videos.append(video_part)  # 添加已经上传的视频
             video.title = self.data["format_title"]
-            video.desc = '''这个自动录制上传的小程序开源在Github：http://t.cn/RgapTpf(或者在Github搜索ForgQi)
+            video.desc = self.desc + '''
+            这个自动录制上传的小程序开源在Github：http://t.cn/RgapTpf(或者在Github搜索ForgQi)
                 交流群：837362626'''
             video.source = self.data["url"]  # 添加转载地址说明
             # 设置视频分区,默认为174 生活，其他分区
