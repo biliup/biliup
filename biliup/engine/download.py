@@ -41,7 +41,7 @@ class DownloadBase:
                 '-i', self.raw_stream_url, *self.default_output_args, *self.opt_args,
                 '-c', 'copy', '-f', self.suffix]
         if config.get('segment_time'):
-            args += ['-f', 'segment', f'{self.fname} {time.strftime("%Y-%m-%d", time.localtime())} part-%03d.{self.suffix}']
+            args += ['-f', 'segment', f'{self.fname} {time.strftime("%Y-%m-%d %H_%M_%S", time.localtime())} part-%03d.{self.suffix}']
         else:
             args += [f'{filename}.part']
 
