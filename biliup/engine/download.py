@@ -11,14 +11,16 @@ logger = logging.getLogger('log01')
 
 
 class DownloadBase:
-    def __init__(self, fname, url, suffix=None):
+    def __init__(self, fname, url, suffix=None, opt_args=None):
+        if opt_args is None:
+            opt_args = []
         self.fname = fname
         self.url = url
         self.suffix = suffix
         # ffmpeg.exe -i  http://vfile1.grtn.cn/2018/1542/0254/3368/154202543368.ssm/154202543368.m3u8
         # -c copy -bsf:a aac_adtstoasc -movflags +faststart output.mp4
         self.raw_stream_url = None
-        self.opt_args = []
+        self.opt_args = opt_args
 
         self.default_output_args = [
             '-bsf:a', 'aac_adtstoasc',

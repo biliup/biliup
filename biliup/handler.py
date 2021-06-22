@@ -18,8 +18,9 @@ UPLOAD = 'upload'
 def process(name, url):
     date = common.time_now()
     try:
-        kwargs = {}
-        suffix = config['streamers'][name].get('format')
+        config['streamers'][name].pop('url')
+        kwargs = config['streamers'][name]
+        suffix = kwargs.get('format')
         if suffix:
             kwargs['suffix'] = suffix
         download(name, url, **kwargs)

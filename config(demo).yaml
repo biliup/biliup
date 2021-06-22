@@ -17,20 +17,23 @@ file_size: 2621440000
 #segment_time: '00:50:00'
 
 streamers:
+    星际2Stats拔本神族天梯第一视角: # 最小配置示例
+        url:
+            - https://www.twitch.tv/kimdaeyeob3
     星际2INnoVation吕布卫星人族天梯第一视角: # 完整可选配置示例
         url:
             - https://www.twitch.tv/innovation_s2
             - https://www.panda.tv/1160340
-        format: mp4 # 视频保存格式
         tid: 171 # 投稿分区码,174为生活，其他分区
         cover_path: /cover/up.jpg
         description: 视频简介
         tags:
-          - 星际争霸2
-          - 电子竞技
-    星际2Stats拔本神族天梯第一视角: # 最小配置示例
-        url:
-            - https://www.twitch.tv/kimdaeyeob3
+            - 星际争霸2
+            - 电子竞技
+        format: mp4 # 视频保存格式
+        opt_args: # ffmpeg参数
+            - '-ss' # 跳过开始的16秒
+            - '00:00:16'
     星际2soO输本虫族天梯第一视角:
         url:
             - https://www.twitch.tv/sc2soo

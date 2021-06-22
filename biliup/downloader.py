@@ -12,7 +12,11 @@ logger = logging.getLogger('log01')
 def download(fname, url, **kwargs):
     for plugin in Plugin.download_plugins:
         if re.match(plugin.VALID_URL_BASE, url):
-            plugin(fname, url, **kwargs).start()
+            pg = plugin(fname, url)
+            for k in pg.__dict__:
+                if kwargs.get(k):
+                    pg.__dict__[k] = kwargs.get(k)
+            pg.start()
             return
     general.__plugin__(fname, url).start()
 
