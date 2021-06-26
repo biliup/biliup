@@ -96,7 +96,7 @@ class BiliChrome(UploadBase):
             else:
                 logger.info(upload_success)
             # logger.info('%s提交完成！' % title_)
-            self.remove_filelist(file_list)
+            return file_list
         except selenium.common.exceptions.NoSuchElementException:
             logger.exception('发生错误')
         # except selenium.common.exceptions.TimeoutException:
