@@ -36,47 +36,17 @@ streamers:
         opt_args: # ffmpeg参数
             - '-ss' # 跳过开始的16秒
             - '00:00:16'
-    星际2soO输本虫族天梯第一视角:
-        url:
-            - https://www.twitch.tv/sc2soo
-            - https://www.panda.tv/1150595
-    星际2sOs狗哥神族天梯第一视角:
-        url:
-            - https://www.panda.tv/1160930
-            - https://www.twitch.tv/jinairsos1
-    星际2Dark暗本虫族天梯第一视角:
-        url:
-            - https://www.twitch.tv/qkrfuddn0
-    星际2Scarlett噶姐虫族天梯第一视角:
-        url:
-            - https://www.twitch.tv/scarlettm
-    星际2GuMiho砸本人族天梯第一视角:
-        url:
-            - https://www.twitch.tv/gumiho
-    星际2Maru人族天梯第一视角:
-        url:
-            - https://www.twitch.tv/maru072
-    星际2TY全教主全太阳人族天梯第一视角:
-        url:
-            - https://www.twitch.tv/sc2tyty
-    星际2ByuN武圣人族天梯第一视角:
-        url:
-            - https://www.twitch.tv/byunprime
-    星际2小herO神族天梯第一视角:
-        url:
-            - https://www.twitch.tv/dmadkr0818
-    星际2Zest神族天梯第一视角:
-        url:
-            - https://www.twitch.tv/sc2_zest
-    星际2PartinG跳跳胖丁神族天梯第一视角:
-        url:
-            - https://www.twitch.tv/partingthebigboy
-    星际2Rogue脑虫虫族天梯第一视角:
-        url:
-            - https://www.twitch.tv/roguejinair
-    星际2Classic经典神皇神族第一视角:
-        url:
-            - https://www.twitch.tv/kimclassic
+
+# 检测间隔时间，单位：秒
+event_loop_interval: 40
+# 相同平台检测间隔，单位：秒。不同平台的链接是并发的，不受此参数影响
+checker_sleep: 15
+# 线程池1大小，负责download事件
+pool1_size: 3
+# 线程池2大小，处理除download事件外所有其他事件
+pool2_size: 3
+# 检测源码文件变化间隔，单位：秒，检测源码到变化后，程序会在空闲时自动重启
+check_sourcecode: 15
 
 # 默认通过网页接口上传,可选通过操作chrome上传,此时需要填写chromedriver路径
 #chromedriver_path: /usr/local/bin/chromedriver

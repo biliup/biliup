@@ -21,7 +21,7 @@ def download(fname, url, **kwargs):
     general.__plugin__(fname, url).start()
 
 
-def check_url(plugin):
+def check_url(plugin, secs=15):
     try:
         if isinstance(plugin, BatchCheckBase):
             return (yield from plugin.check())
@@ -30,7 +30,7 @@ def check_url(plugin):
                 yield url
             if url != plugin.url_list[-1]:
                 logger.debug('歇息会')
-                time.sleep(15)
+                time.sleep(secs)
     except HTTPError as e:
         logger.error(f'{plugin.__module__} {e.url} => {e}')
     except IOError:

@@ -18,8 +18,8 @@ UPLOAD = 'upload'
 def process(name, url):
     date = common.time_now()
     try:
-        config['streamers'][name].pop('url')
-        kwargs = config['streamers'][name]
+        kwargs = config['streamers'][name].copy()
+        kwargs.pop('url')
         suffix = kwargs.get('format')
         if suffix:
             kwargs['suffix'] = suffix
@@ -51,7 +51,8 @@ class KernelFunc:
     @event_manager.register(CHECK, block=True)
     def singleton_check(self, platform):
         plugin = self.checker[platform]
-        for url in check_url(plugin):
+        wait = config.get('checker_sleep') if config.get('checker_sleep') else 15
+        for url in check_url(plugin, secs=wait):
             yield Event(TO_MODIFY, args=(url,))
 
     @event_manager.register(TO_MODIFY)
