@@ -33,7 +33,7 @@ Linux下以daemon进程启动，录像和日志文件保存在执行目录下，
 ### 方式一
 ```bash
 vim /host/path/config.yaml
-docker run --name biliup -v /host/path:/opt -d docker.pkg.github.com/forgqi/bilibiliupload/caution
+docker run --name biliup -v /host/path:/opt -d ghcr.io/forgqi/bilibiliupload/caution
 ```
 ### 方式二
 ```bash
@@ -49,8 +49,8 @@ sudo docker exec -it imageId /bin/bash
 
 ## 3. 源码使用
 * 下载源码: git clone https://github.com/ForgQi/bilibiliupload.git
-* 安装: `pip3 install -e .`
-* 启动: `biliup`
+* 安装: `pip3 install -e .` 或者 `pip3 install -r requirements.txt`
+* 启动: `python3 -m biliup`
 
 ## EMBEDDING BILIUP
 如果你不想使用完全自动托管的功能，而仅仅只是想嵌入biliup作为一个库来使用这里有两个例子可以作为参考
