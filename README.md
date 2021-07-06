@@ -4,7 +4,7 @@
 
 支持自动录制各大直播平台，上传直播录像到bilibili。  
 
-* 自动选择上传线路，保证国内外vps上传质量
+* 自动选择上传线路，保证国内外vps上传质量和速度
 * 可分别控制下载与上传并发量
 * 支持Web API与客户端API上传
 
@@ -23,6 +23,8 @@ $ biliup start
 $ biliup stop
 # 重启 
 $ biliup restart
+# 查看版本
+$ biliup --version
 ```
 
 Linux下以daemon进程启动，录像和日志文件保存在执行目录下，程序执行过程可查看日志文件。

@@ -35,3 +35,5 @@ def check_url(plugin, secs=15):
         logger.error(f'{plugin.__module__} {e.url} => {e}')
     except IOError:
         logger.exception("IOError")
+    except:
+        logger.exception("Uncaught exception:")
