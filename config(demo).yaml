@@ -9,6 +9,8 @@ user: # 在填了cookies的情况下优先使用cookies上传，如需使用用�
 
 # b站上传线路选择，默认为自动模式，目前可手动切换为bda2, kodo, ws, qn
 lines: AUTO
+# b站提交接口，默认自动选择，可选web，client
+#submit_api: client
 # 单文件并发上传数，未达到带宽上限时增大此值可提高上传速度
 threads: 3
 # 录像单文件大小限制，单位Byte，超过此大小分段下载
@@ -17,61 +19,34 @@ file_size: 2621440000
 #segment_time: '00:50:00'
 
 streamers:
+    星际2Stats拔本神族天梯第一视角: # 最小配置示例
+        url:
+            - https://www.twitch.tv/kimdaeyeob3
     星际2INnoVation吕布卫星人族天梯第一视角: # 完整可选配置示例
         url:
             - https://www.twitch.tv/innovation_s2
             - https://www.panda.tv/1160340
-        format: mp4 # 视频保存格式
         tid: 171 # 投稿分区码,174为生活，其他分区
         cover_path: /cover/up.jpg
         description: 视频简介
         tags:
-          - 星际争霸2
-          - 电子竞技
-    星际2Stats拔本神族天梯第一视角: # 最小配置示例
-        url:
-            - https://www.twitch.tv/kimdaeyeob3
-    星际2soO输本虫族天梯第一视角:
-        url:
-            - https://www.twitch.tv/sc2soo
-            - https://www.panda.tv/1150595
-    星际2sOs狗哥神族天梯第一视角:
-        url:
-            - https://www.panda.tv/1160930
-            - https://www.twitch.tv/jinairsos1
-    星际2Dark暗本虫族天梯第一视角:
-        url:
-            - https://www.twitch.tv/qkrfuddn0
-    星际2Scarlett噶姐虫族天梯第一视角:
-        url:
-            - https://www.twitch.tv/scarlettm
-    星际2GuMiho砸本人族天梯第一视角:
-        url:
-            - https://www.twitch.tv/gumiho
-    星际2Maru人族天梯第一视角:
-        url:
-            - https://www.twitch.tv/maru072
-    星际2TY全教主全太阳人族天梯第一视角:
-        url:
-            - https://www.twitch.tv/sc2tyty
-    星际2ByuN武圣人族天梯第一视角:
-        url:
-            - https://www.twitch.tv/byunprime
-    星际2小herO神族天梯第一视角:
-        url:
-            - https://www.twitch.tv/dmadkr0818
-    星际2Zest神族天梯第一视角:
-        url:
-            - https://www.twitch.tv/sc2_zest
-    星际2PartinG跳跳胖丁神族天梯第一视角:
-        url:
-            - https://www.twitch.tv/partingthebigboy
-    星际2Rogue脑虫虫族天梯第一视角:
-        url:
-            - https://www.twitch.tv/roguejinair
-    星际2Classic经典神皇神族第一视角:
-        url:
-            - https://www.twitch.tv/kimclassic
+            - 星际争霸2
+            - 电子竞技
+        format: mp4 # 视频保存格式
+        opt_args: # ffmpeg参数
+            - '-ss' # 跳过开始的16秒
+            - '00:00:16'
+
+# 检测间隔时间，单位：秒
+event_loop_interval: 40
+# 相同平台检测间隔，单位：秒。不同平台的链接是并发的，不受此参数影响
+checker_sleep: 15
+# 线程池1大小，负责download事件
+pool1_size: 3
+# 线程池2大小，处理除download事件外所有其他事件
+pool2_size: 3
+# 检测源码文件变化间隔，单位：秒，检测源码到变化后，程序会在空闲时自动重启
+check_sourcecode: 15
 
 # 默认通过网页接口上传,可选通过操作chrome上传,此时需要填写chromedriver路径
 #chromedriver_path: /usr/local/bin/chromedriver

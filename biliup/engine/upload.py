@@ -52,4 +52,10 @@ class UploadBase:
     def start(self):
         if self.filter_file(self.principal):
             logger.info('准备上传' + self.data["format_title"])
-            self.upload(UploadBase.file_list(self.principal))
+            needed2process = self.upload(UploadBase.file_list(self.principal))
+            self.postprocessor(needed2process)
+
+    def postprocessor(self, data):
+        # data = file_list
+        if data:
+            self.remove_filelist(data)

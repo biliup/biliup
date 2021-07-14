@@ -12,12 +12,16 @@ logger = logging.getLogger('log01')
 def download(fname, url, **kwargs):
     for plugin in Plugin.download_plugins:
         if re.match(plugin.VALID_URL_BASE, url):
-            plugin(fname, url, **kwargs).start()
+            pg = plugin(fname, url)
+            for k in pg.__dict__:
+                if kwargs.get(k):
+                    pg.__dict__[k] = kwargs.get(k)
+            pg.start()
             return
     general.__plugin__(fname, url).start()
 
 
-def check_url(plugin):
+def check_url(plugin, secs=15):
     try:
         if isinstance(plugin, BatchCheckBase):
             return (yield from plugin.check())
@@ -26,8 +30,10 @@ def check_url(plugin):
                 yield url
             if url != plugin.url_list[-1]:
                 logger.debug('歇息会')
-                time.sleep(15)
+                time.sleep(secs)
     except HTTPError as e:
         logger.error(f'{plugin.__module__} {e.url} => {e}')
     except IOError:
         logger.exception("IOError")
+    except:
+        logger.exception("Uncaught exception:")

@@ -4,7 +4,7 @@
 
 支持自动录制各大直播平台，上传直播录像到bilibili。  
 
-* 自动选择上传线路，保证国内外vps上传质量
+* 自动选择上传线路，保证国内外vps上传质量和速度
 * 可分别控制下载与上传并发量
 * 支持Web API与客户端API上传
 
@@ -23,6 +23,8 @@ $ biliup start
 $ biliup stop
 # 重启 
 $ biliup restart
+# 查看版本
+$ biliup --version
 ```
 
 Linux下以daemon进程启动，录像和日志文件保存在执行目录下，程序执行过程可查看日志文件。
@@ -33,7 +35,7 @@ Linux下以daemon进程启动，录像和日志文件保存在执行目录下，
 ### 方式一
 ```bash
 vim /host/path/config.yaml
-docker run --name biliup -v /host/path:/opt -d docker.pkg.github.com/forgqi/bilibiliupload/caution
+docker run --name biliup -v /host/path:/opt -d ghcr.io/forgqi/bilibiliupload/caution
 ```
 ### 方式二
 ```bash
@@ -49,8 +51,8 @@ sudo docker exec -it imageId /bin/bash
 
 ## 3. 源码使用
 * 下载源码: git clone https://github.com/ForgQi/bilibiliupload.git
-* 安装: `pip3 install -e .`
-* 启动: `biliup`
+* 安装: `pip3 install -e .` 或者 `pip3 install -r requirements.txt`
+* 启动: `python3 -m biliup`
 
 ## EMBEDDING BILIUP
 如果你不想使用完全自动托管的功能，而仅仅只是想嵌入biliup作为一个库来使用这里有两个例子可以作为参考

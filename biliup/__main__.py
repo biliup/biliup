@@ -5,7 +5,7 @@ import sys
 import asyncio
 
 from .common.Daemon import Daemon
-from . import main
+from . import main, __version__
 
 
 def _main():
@@ -17,6 +17,8 @@ def _main():
             daemon.stop()
         elif 'restart' == sys.argv[1]:
             daemon.restart()
+        elif '--version' == sys.argv[1]:
+            print(__version__)
         else:
             print('unknown command')
             sys.exit(2)

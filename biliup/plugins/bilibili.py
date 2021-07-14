@@ -26,7 +26,6 @@ class Bilibili(DownloadBase):
             return False
         api2_data = api2_data['data']
         if api2_data['live_status'] != 1:
-            logger.debug(api2_data['msg'])
             return False
         title = api2_data['title']
         api3_data = \
