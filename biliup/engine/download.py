@@ -70,11 +70,15 @@ class DownloadBase:
         try:
             logger.info('开始下载%s：%s' % (self.__class__.__name__, self.fname))
             while i < 30:
-                ret = self.run()
-                if ret is False:
-                    return
-                elif ret == 1:
-                    time.sleep(45)
+                try:
+                    ret = self.run()
+                    if ret is False:
+                        return
+                    elif ret == 1:
+                        time.sleep(45)
+                except:
+                    logger.exception("Uncaught exception:")
+                    continue
                 i += 1
         except:
             logger.exception("Uncaught exception:")
