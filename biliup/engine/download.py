@@ -72,13 +72,13 @@ class DownloadBase:
             while i < 30:
                 try:
                     ret = self.run()
+                    if ret is False:
+                        return
+                    elif ret == 1:
+                        time.sleep(45)
                 except:
                     logger.exception("Uncaught exception:")
                     continue
-                if ret is False:
-                    return
-                elif ret == 1:
-                    time.sleep(45)
                 i += 1
         except:
             logger.exception("Uncaught exception:")
