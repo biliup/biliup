@@ -6,7 +6,7 @@ import os
 import time
 import atexit
 
-logger = logging.getLogger('log01')
+logger = logging.getLogger('biliup')
 
 
 # python模拟linux的守护进程

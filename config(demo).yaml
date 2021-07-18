@@ -47,6 +47,34 @@ pool1_size: 3
 pool2_size: 3
 # 检测源码文件变化间隔，单位：秒，检测源码到变化后，程序会在空闲时自动重启
 check_sourcecode: 15
-
+# 日志输出配置
+LOGGING:
+    formatters:
+        verbose:
+            format: '%(asctime)s %(filename)s[line:%(lineno)d](Pid:%(process)d Tname:%(threadName)s) %(levelname)s %(message)s'
+            datefmt: '%Y-%m-%d %H:%M:%S'
+        simple:
+            format: '%(filename)s%(lineno)d[%(levelname)s]Tname:%(threadName)s %(message)s'
+    handlers:
+        console:
+            level: DEBUG
+            class: logging.StreamHandler
+            formatter: simple
+            stream: ext://sys.stdout
+        file:
+            level: DEBUG
+            class: biliup.common.log.SafeRotatingFileHandler
+            when: W0
+            interval: 1
+            backupCount: 1
+            filename: ds_update.log
+            formatter: verbose
+    root:
+        handlers: [ console ]
+        level: INFO
+    loggers:
+        biliup:
+            handlers: [ file ]
+            level: INFO
 # 默认通过网页接口上传,可选通过操作chrome上传,此时需要填写chromedriver路径
 #chromedriver_path: /usr/local/bin/chromedriver

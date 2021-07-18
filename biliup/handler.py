@@ -1,6 +1,7 @@
+import logging
+
 from . import common
 from biliup import event_manager, config
-from .common import logger
 from .engine.event import Event
 from .downloader import download, check_url
 from .engine.upload import UploadBase
@@ -12,6 +13,7 @@ TO_MODIFY = 'to_modify'
 DOWNLOAD = 'download'
 BE_MODIFIED = 'be_modified'
 UPLOAD = 'upload'
+logger = logging.getLogger('biliup')
 
 
 @event_manager.register(DOWNLOAD, block=True)

@@ -6,7 +6,7 @@ import logging
 
 from .timer import Timer
 
-logger = logging.getLogger('log01')
+logger = logging.getLogger('biliup')
 
 
 def has_extension(fname_list, *extension):

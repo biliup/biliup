@@ -6,7 +6,7 @@ from urllib.error import HTTPError
 from .engine.decorators import Plugin
 from .plugins import general, BatchCheckBase
 
-logger = logging.getLogger('log01')
+logger = logging.getLogger('biliup')
 
 
 def download(fname, url, **kwargs):

@@ -1,7 +1,7 @@
 import logging
 import re
 
-logger = logging.getLogger('log01')
+logger = logging.getLogger('biliup')
 
 
 class BatchCheckBase:

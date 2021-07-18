@@ -7,7 +7,7 @@ from .engine.event import EventManager, Event
 from .engine import config, invert_dict, Plugin
 from . import plugins
 
-__version__ = "0.0.8"
+__version__ = "0.0.9"
 
 
 def create_event_manager():

@@ -1,34 +1,83 @@
 #!/usr/bin/python3
 # coding:utf8
+import argparse
+import logging.config
 import platform
-import sys
 import asyncio
+import sys
 
+from biliup import config
 from .common.Daemon import Daemon
 from . import main, __version__
 
+LOG_CONF = {
+    'version': 1,
+    'formatters': {
+        'verbose': {
+            'format': "%(asctime)s %(filename)s[line:%(lineno)d](Pid:%(process)d "
+                      "Tname:%(threadName)s) %(levelname)s %(message)s",
+            # 'datefmt': "%Y-%m-%d %H:%M:%S"
+        },
+        'simple': {
+            'format': '%(filename)s%(lineno)d[%(levelname)s]Tname:%(threadName)s %(message)s'
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': logging.DEBUG,
+            'class': 'logging.StreamHandler',
+            'stream': sys.stdout,
+            'formatter': 'simple'
+        },
+        'file': {
+            'level': logging.DEBUG,
+            'class': 'biliup.common.log.SafeRotatingFileHandler',
+            'when': 'W0',
+            'interval': 1,
+            'backupCount': 1,
+            'filename': 'ds_update.log',
+            'formatter': 'verbose'
+        }
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': logging.INFO,
+    },
+    'loggers': {
+        'biliup': {
+            'handlers': ['file'],
+            'level': logging.INFO,
+        },
+    }
+}
 
-def _main():
+
+def arg_parser():
     daemon = Daemon('watch_process.pid', main)
-    if platform.system() != 'Windows' and len(sys.argv) == 2:
-        if 'start' == sys.argv[1]:
-            daemon.start()
-        elif 'stop' == sys.argv[1]:
-            daemon.stop()
-        elif 'restart' == sys.argv[1]:
-            daemon.restart()
-        elif '--version' == sys.argv[1]:
-            print(__version__)
-        else:
-            print('unknown command')
-            sys.exit(2)
-        sys.exit(0)
-    elif platform.system() == 'Windows' or len(sys.argv) == 1:
+    parser = argparse.ArgumentParser(description='Stream download and upload, not only for bilibili.')
+    parser.add_argument('--version', action='version', version=f"v{__version__}")
+    parser.add_argument('-v', '--verbose', action="store_const", const=logging.DEBUG, default=logging.INFO,
+                        help="Increase output verbosity")
+    subparsers = parser.add_subparsers(help='Windows does not support this sub-command.')
+    # create the parser for the "start" command
+    parser_start = subparsers.add_parser('start', help='Run as a daemon process.')
+    parser_start.set_defaults(func=daemon.start)
+    parser_stop = subparsers.add_parser('stop', help='Stop daemon according to "watch_process.pid".')
+    parser_stop.set_defaults(func=daemon.stop)
+    parser_restart = subparsers.add_parser('restart')
+    parser_restart.set_defaults(func=daemon.restart)
+    parser.set_defaults(func=None)
+    args = parser.parse_args()
+
+    LOG_CONF['loggers']['biliup']['level'] = args.verbose
+    LOG_CONF['root']['level'] = args.verbose
+    logging.config.dictConfig({**LOG_CONF, **config['LOGGING']})
+
+    if platform.system() == 'Windows' or args.func is None:
         asyncio.run(main())
     else:
-        print('usage: %s start|stop|restart' % sys.argv[0])
-        sys.exit(2)
+        args.func()
 
 
 if __name__ == '__main__':
-    _main()
+    arg_parser()

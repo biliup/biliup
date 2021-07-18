@@ -11,7 +11,7 @@
 相关配置示例在config.yaml文件中，如直播间地址，b站账号密码
 
 演示视频：[BV1ip4y1x7Gi](https://www.bilibili.com/video/BV1ip4y1x7Gi)
-## 1. 安装使用
+## INSTALLATION
 1. 创建配置文件**config.yaml**，内容参照**config(demo).yaml**（或可调整配置后直接修改文件名）
 2. 安装 __FFmpeg__, __pip__
 3. 安装 __biliup__：
@@ -25,13 +25,15 @@ $ biliup stop
 $ biliup restart
 # 查看版本
 $ biliup --version
+# 显示帮助
+$ biliup -h
 ```
 
 Linux下以daemon进程启动，录像和日志文件保存在执行目录下，程序执行过程可查看日志文件。
 `ps -A | grep biliup` 查看进程是否启动成功。
 
 
-## 2. Docker使用 🔨 
+## Docker使用 🔨 
 ### 方式一
 ```bash
 vim /host/path/config.yaml
@@ -49,7 +51,7 @@ sudo docker ps (找到你的imageId)
 sudo docker exec -it imageId /bin/bash     
 ```
 
-## 3. 源码使用
+## 源码使用
 * 下载源码: git clone https://github.com/ForgQi/bilibiliupload.git
 * 安装: `pip3 install -e .` 或者 `pip3 install -r requirements.txt`
 * 启动: `python3 -m biliup`

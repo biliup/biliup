@@ -7,7 +7,7 @@ import time
 from biliup import config
 from ..plugins import fake_headers
 
-logger = logging.getLogger('log01')
+logger = logging.getLogger('biliup')
 
 
 class DownloadBase:
