@@ -18,7 +18,8 @@ import requests
 import rsa
 from requests.adapters import HTTPAdapter, Retry
 
-from biliup import Plugin, config
+from biliup import config
+from ..engine import Plugin
 from ..engine.upload import UploadBase, logger
 
 

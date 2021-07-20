@@ -56,8 +56,9 @@ def arg_parser():
     daemon = Daemon('watch_process.pid', main)
     parser = argparse.ArgumentParser(description='Stream download and upload, not only for bilibili.')
     parser.add_argument('--version', action='version', version=f"v{__version__}")
-    parser.add_argument('-v', '--verbose', action="store_const", const=logging.DEBUG, default=logging.INFO,
-                        help="Increase output verbosity")
+    parser.add_argument('-v', '--verbose', action="store_const", const=logging.DEBUG, help="Increase output verbosity")
+    parser.add_argument('--config', type=argparse.FileType(encoding='UTF-8'),
+                        help='Location of the configuration file (default "./config.yaml")')
     subparsers = parser.add_subparsers(help='Windows does not support this sub-command.')
     # create the parser for the "start" command
     parser_start = subparsers.add_parser('start', help='Run as a daemon process.')
@@ -68,11 +69,12 @@ def arg_parser():
     parser_restart.set_defaults(func=daemon.restart)
     parser.set_defaults(func=None)
     args = parser.parse_args()
-
-    LOG_CONF['loggers']['biliup']['level'] = args.verbose
-    LOG_CONF['root']['level'] = args.verbose
-    logging.config.dictConfig({**LOG_CONF, **config['LOGGING']})
-
+    config.load(args.config)
+    LOG_CONF.update(config.get('LOGGING', {}))
+    if args.verbose:
+        LOG_CONF['loggers']['biliup']['level'] = args.verbose
+        LOG_CONF['root']['level'] = args.verbose
+    logging.config.dictConfig(LOG_CONF)
     if platform.system() == 'Windows' or args.func is None:
         asyncio.run(main())
     else:

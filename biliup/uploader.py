@@ -16,7 +16,7 @@ def upload(platform, index, data):
     :return:
     """
     try:
-        cls = Plugin.upload_plugins.get(platform)
+        cls = Plugin.upload_plugins[platform]
         sig = inspect.signature(cls)
         context = {**engine.config, **engine.config['streamers'][index]}
         kwargs = {}
