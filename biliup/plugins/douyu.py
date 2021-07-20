@@ -23,6 +23,15 @@ class Douyu(DownloadBase):
         Please install at least one of the following Javascript interpreter.'
         python packages: PyChakra, quickjs
         applications: Gjs, CJS, QuickJS, JavaScriptCore, Node.js, etc.''')
+        if len(self.url.split("douyu.com/")) < 2:
+            logger.debug("直播间地址错误")
+            return False
+        rid = self.url.split("douyu.com/")[1]
+        videoLoop = json.loads(get_content("https://www.douyu.com/betard/"+rid))['room']['videoLoop']
+        show_status = json.loads(get_content("https://www.douyu.com/betard/"+rid))['room']['show_status']
+        if (show_status != 1 or videoLoop != 0):
+            logger.debug("未开播或正在放录播")
+            return False
         site, url = url_to_module(self.url)
         try:
             info = site.parser(url)
@@ -32,11 +41,4 @@ class Douyu(DownloadBase):
         urls = info.streams[stream_id]['src']
         self.raw_stream_url = urls[0]
         # print(info.title)
-        douyuurl = self.url
-        roomnum = douyuurl.split("douyu.com/")[1]
-        roomloop = json.loads(get_content('https://www.douyu.com/wgapi/live/liveweb/getRoomLoopInfo?rid='+roomnum))
-        roomvid = roomloop['data']['vid']
-        if roomvid != "":
-            return False
-        else:
-            return True
+        return True
