@@ -3,34 +3,14 @@ import asyncio
 from .common.reload import AutoReload
 from .common.timer import Timer
 
-from .engine.event import EventManager, Event
-from .engine import config, invert_dict, Plugin
-from . import plugins
+from .engine.event import Event
+from .engine import config
 
-__version__ = "0.0.9"
-
-
-def create_event_manager():
-    streamer_url = {k: v['url'] for k, v in config['streamers'].items()}
-    inverted_index = invert_dict(streamer_url)
-    urls = list(inverted_index.keys())
-    pool1_size = config.get('pool1_size') if config.get('pool1_size') else 3
-    pool2_size = config.get('pool2_size') if config.get('pool2_size') else 3
-    # 初始化事件管理器
-    app = EventManager(config, pool1_size=pool1_size, pool2_size=pool2_size)
-    app.context['urls'] = urls
-    app.context['url_status'] = dict.fromkeys(inverted_index, 0)
-    app.context['checker'] = Plugin(plugins).sorted_checker(urls)
-    app.context['inverted_index'] = inverted_index
-    app.context['streamer_url'] = streamer_url
-    return app
-
-
-event_manager = create_event_manager()
+__version__ = "0.1.0"
 
 
 async def main():
-    from .handler import CHECK_UPLOAD, CHECK
+    from .handler import CHECK_UPLOAD, CHECK, event_manager
 
     event_manager.start()
 

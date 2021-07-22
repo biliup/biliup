@@ -1,8 +1,9 @@
 import logging
 
+from . import plugins
 from . import common
-from biliup import event_manager, config
-from .engine.event import Event
+from .engine import config, invert_dict, Plugin
+from .engine.event import Event, EventManager
 from .downloader import download, check_url
 from .engine.upload import UploadBase
 from .uploader import upload
@@ -14,6 +15,25 @@ DOWNLOAD = 'download'
 BE_MODIFIED = 'be_modified'
 UPLOAD = 'upload'
 logger = logging.getLogger('biliup')
+
+
+def create_event_manager():
+    streamer_url = {k: v['url'] for k, v in config['streamers'].items()}
+    inverted_index = invert_dict(streamer_url)
+    urls = list(inverted_index.keys())
+    pool1_size = config.get('pool1_size') if config.get('pool1_size') else 3
+    pool2_size = config.get('pool2_size') if config.get('pool2_size') else 3
+    # 初始化事件管理器
+    app = EventManager(config, pool1_size=pool1_size, pool2_size=pool2_size)
+    app.context['urls'] = urls
+    app.context['url_status'] = dict.fromkeys(inverted_index, 0)
+    app.context['checker'] = Plugin(plugins).sorted_checker(urls)
+    app.context['inverted_index'] = inverted_index
+    app.context['streamer_url'] = streamer_url
+    return app
+
+
+event_manager = create_event_manager()
 
 
 @event_manager.register(DOWNLOAD, block=True)
