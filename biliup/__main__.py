@@ -67,7 +67,7 @@ def arg_parser():
     parser_stop.set_defaults(func=daemon.stop)
     parser_restart = subparsers.add_parser('restart')
     parser_restart.set_defaults(func=daemon.restart)
-    parser.set_defaults(func=None)
+    parser.set_defaults(func=lambda: asyncio.run(main()))
     args = parser.parse_args()
     config.load(args.config)
     LOG_CONF.update(config.get('LOGGING', {}))
@@ -75,10 +75,9 @@ def arg_parser():
         LOG_CONF['loggers']['biliup']['level'] = args.verbose
         LOG_CONF['root']['level'] = args.verbose
     logging.config.dictConfig(LOG_CONF)
-    if platform.system() == 'Windows' or args.func is None:
-        asyncio.run(main())
-    else:
-        args.func()
+    if platform.system() == 'Windows':
+        return asyncio.run(main())
+    args.func()
 
 
 if __name__ == '__main__':
