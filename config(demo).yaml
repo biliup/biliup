@@ -26,7 +26,9 @@ streamers:
         url:
             - https://www.twitch.tv/innovation_s2
             - https://www.panda.tv/1160340
+        title: "星际2INnoVation吕布卫星人族天梯第一视角%Y-%m-%d" # 自定义标题的时间格式
         tid: 171 # 投稿分区码,174为生活，其他分区
+        copyright: 2 # 1为自制
         cover_path: /cover/up.jpg
         description: 视频简介
         tags:

@@ -38,7 +38,7 @@ event_manager = create_event_manager()
 
 @event_manager.register(DOWNLOAD, block=True)
 def process(name, url):
-    date = common.time_now()
+    date = common.time_now(config['streamers'][name].get('title'))
     try:
         kwargs = config['streamers'][name].copy()
         kwargs.pop('url')
@@ -55,6 +55,8 @@ def process_upload(name, url, date):
     yield Event(BE_MODIFIED, (url, 2))
     try:
         data = {"url": url, "date": date}
+        if config['streamers'][name].get('title'):
+            data["format_title"] = date
         upload("bili_web", name, data)
     finally:
         yield Event(BE_MODIFIED, args=(url, 0))
@@ -94,7 +96,7 @@ class KernelFunc:
     def free_upload(self):
         for title, urls in self.streamer_url.items():
             if self.free(urls) and UploadBase.filter_file(title):
-                yield Event(UPLOAD, args=(title, urls[0], common.time_now()))
+                yield Event(UPLOAD, args=(title, urls[0], common.time_now(config['streamers'][title].get('title'))))
 
     @event_manager.register(BE_MODIFIED)
     def revise(self, url, status):

@@ -25,7 +25,8 @@ def upload(platform, index, data):
             if v:
                 kwargs[k] = v
         date = data.get("date") if data.get("date") else ""
-        data["format_title"] = f"{date}{index}"
+        if data.get("format_title") is None:
+            data["format_title"] = f"{date}{index}"
         return cls(index, data, **kwargs).start()
     except:
         logger.exception("Uncaught exception:")
