@@ -47,8 +47,12 @@ class DownloadBase:
         else:
             args += [f'{filename}.part']
 
-        proc = subprocess.Popen(args, stdin=subprocess.PIPE)
+        proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
+            with proc.stdout as stdout:
+                for line in iter(stdout.readline, b''):  # b'\n'-separated lines
+                    print(line.decode(), end='', file=sys.stderr)
+                    logger.debug(line.decode().rstrip())
             retval = proc.wait()
         except KeyboardInterrupt:
             if sys.platform != 'win32':
@@ -67,23 +71,20 @@ class DownloadBase:
 
     def start(self):
         i = 0
-        try:
-            logger.info('开始下载%s：%s' % (self.__class__.__name__, self.fname))
-            while i < 30:
-                try:
-                    ret = self.run()
-                    if ret is False:
-                        return
-                    elif ret == 1:
-                        time.sleep(45)
-                except:
-                    logger.exception("Uncaught exception:")
-                    continue
-                i += 1
-        except:
-            logger.exception("Uncaught exception:")
-        finally:
-            logger.info(f'退出下载{i}: {self.fname}')
+        logger.info('开始下载%s：%s' % (self.__class__.__name__, self.fname))
+        while i < 30:
+            try:
+                ret = self.run()
+            except:
+                logger.exception("Uncaught exception:")
+                continue
+            if ret is False:
+                return
+            elif ret == 1:
+                time.sleep(45)
+            i += 1
+
+        logger.info(f'退出下载{i}: {self.fname}')
 
     @staticmethod
     def rename(file_name):
