@@ -37,14 +37,11 @@ class YDownload(DownloadBase):
     def download(self, filename):
         try:
             self.ydl_opts = {'outtmpl': filename}
-            self.dl()
+            with youtube_dl.YoutubeDL(self.ydl_opts) as ydl:
+                ydl.download([self.url])
         except youtube_dl.utils.DownloadError:
             return 1
         return 0
-
-    def dl(self):
-        with youtube_dl.YoutubeDL(self.ydl_opts) as ydl:
-            ydl.download([self.url])
 
 
 class SDownload(DownloadBase):

@@ -2,10 +2,12 @@ import random
 from urllib.parse import urlencode
 
 import requests
+import youtube_dl
 
 from ..engine.decorators import Plugin
 from ..plugins import BatchCheckBase, match1
 from ..engine.download import DownloadBase
+from . import logger
 
 VALID_URL_BASE = r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)'
 _OPERATION_HASHES = {
@@ -28,28 +30,10 @@ class Twitch(DownloadBase):
     def check_stream(self):
         if not list(Twitch.BatchCheck([self.url]).check()):
             return
-        channel_name = match1(self.url, VALID_URL_BASE)
-        r = requests.get(f'https://api.twitch.tv/api/channels/{channel_name}/access_token',
-                         headers={
-                             'Accept': 'application/vnd.twitchtv.v5+json; charset=UTF-8',
-                             'Client-ID': _CLIENT_ID,
-                         }, timeout=10)
-        r.close()
-        access_token = r.json()
-        token = access_token['token']
-        query = {
-            'allow_source': 'true',
-            'allow_audio_only': 'true',
-            'allow_spectre': 'true',
-            'p': random.randint(1000000, 10000000),
-            'player': 'twitchweb',
-            'playlist_include_framerate': 'true',
-            'segment_preference': '4',
-            'sig': access_token['sig'],
-            'token': token,
-        }
-        self.raw_stream_url = f'https://usher.ttvnw.net/api/channel/hls/{channel_name}.m3u8?{urlencode(query)}'
-        return True
+        with youtube_dl.YoutubeDL() as ydl:
+            info = ydl.extract_info(self.url, download=False)
+            self.raw_stream_url = info['formats'][-1]['url']
+            return True
 
     class BatchCheck(BatchCheckBase):
         def __init__(self, urls):
