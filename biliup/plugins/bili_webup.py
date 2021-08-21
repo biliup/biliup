@@ -68,6 +68,7 @@ class BiliBili:
     def __init__(self, video: 'Data'):
         # self.app_key = 'bca7e84c2d947ac6'
         self.app_key = 'aae92bc66f3edfab'
+        self.appsec = 'af125a0d5279fd576c1b4418a3e8276d'
         self.__session = requests.Session()
         self.video = video
         self.__session.mount('https://', HTTPAdapter(max_retries=Retry(total=5, method_whitelist=False)))
@@ -89,6 +90,8 @@ class BiliBili:
             self.load()
         if not self.cookies and user.get('cookies'):
             self.cookies = user['cookies']
+        if not self.access_token and user.get('access_token'):
+            self.access_token = user['access_token']
         if self.cookies:
             try:
                 self.login_by_cookies(self.cookies)
@@ -121,7 +124,7 @@ class BiliBili:
         payload = {
             "actionKey": 'appkey',
             "appkey": self.app_key,
-            "build": 6040500,
+            "build": 6270200,
             "captcha": '',
             "challenge": '',
             "channel": 'bili',
@@ -136,7 +139,7 @@ class BiliBili:
             "username": username,
             "validate": "",
         }
-        response = self.__session.post("https://passport.bilibili.com/api/v3/oauth2/login", timeout=5,
+        response = self.__session.post("https://passport.bilibili.com/x/passport-login/oauth2/login", timeout=5,
                                        data={**payload, 'sign': self.sign(parse.urlencode(payload))})
         r = response.json()
         if r['code'] != 0 or r.get('data') is None or r['data'].get('cookie_info') is None:
@@ -163,19 +166,17 @@ class BiliBili:
         if data["code"] != 0:
             raise Exception(data)
 
-    @staticmethod
-    def sign(param):
+    def sign(self, param):
         # salt = '60698ba2f68e01ce44738920a0ffe768'
-        salt = 'af125a0d5279fd576c1b4418a3e8276d'
-        return hashlib.md5(f"{param}{salt}".encode()).hexdigest()
+        return hashlib.md5(f"{param}{self.appsec}".encode()).hexdigest()
 
     def get_key(self):
-        url = "https://passport.bilibili.com/api/oauth2/getKey"
+        url = "https://passport.bilibili.com/x/passport-login/web/key"
         payload = {
             'appkey': f'{self.app_key}',
             'sign': self.sign(f"appkey={self.app_key}"),
         }
-        response = self.__session.post(url, data=payload, timeout=5)
+        response = self.__session.get(url, data=payload, timeout=5)
         r = response.json()
         if r and r["code"] == 0:
             return r['data']['hash'], rsa.PublicKey.load_pkcs1_openssl_pem(r['data']['key'].encode())

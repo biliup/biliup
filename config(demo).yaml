@@ -3,6 +3,7 @@ user: # 在填了cookies的情况下优先使用cookies上传，如需使用用�
 #        SESSDATA: your SESSDATA
 #        bili_jct: your bili_jct
 #        DedeUserID: your DedeUserID
+#    access_token: your access_key
     account:
         username: your usrname
         password: your password
