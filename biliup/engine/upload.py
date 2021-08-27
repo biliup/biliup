@@ -1,14 +1,17 @@
 import logging
 import os
+import subprocess
+from pathlib import Path
 
 logger = logging.getLogger('biliup')
 
 
 class UploadBase:
-    def __init__(self, principal, data, persistence_path=None):
+    def __init__(self, principal, data, persistence_path=None, postprocessor=None):
         self.principal = principal
         self.persistence_path = persistence_path
         self.data = data
+        self.post_processor = postprocessor
 
     # @property
     @staticmethod
@@ -53,9 +56,27 @@ class UploadBase:
         if self.filter_file(self.principal):
             logger.info('准备上传' + self.data["format_title"])
             needed2process = self.upload(UploadBase.file_list(self.principal))
-            self.postprocessor(needed2process)
+            if needed2process:
+                self.postprocessor(needed2process)
 
     def postprocessor(self, data):
         # data = file_list
-        if data:
-            self.remove_filelist(data)
+        if self.post_processor is None:
+            return self.remove_filelist(data)
+        for post_processor in self.post_processor:
+            if post_processor == 'rm':
+                self.remove_filelist(data)
+                continue
+            if post_processor.get('mv'):
+                for file in data:
+                    path = Path(file)
+                    dest = Path(post_processor['mv'])
+                    if not dest.is_dir():
+                        dest.mkdir(parents=True, exist_ok=True)
+                    path.rename(dest / path.name)
+                    logger.info(f"move to {(dest / path.name).absolute()}")
+            if post_processor.get('run'):
+                process = subprocess.run(
+                    post_processor['run'], shell=True, input=str(Path('\n'.join(data)).absolute()),
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                logger.info(process.stdout.rstrip())

@@ -25,9 +25,9 @@ from ..engine.upload import UploadBase, logger
 
 @Plugin.upload(platform="bili_web")
 class BiliWeb(UploadBase):
-    def __init__(self, principal, data, user, submit_api=None, copyright=2,
+    def __init__(self, principal, data, user, submit_api=None, copyright=2, postprocessor=None,
                  lines='AUTO', threads=3, tid=174, tags=None, cover_path=None, description=''):
-        super().__init__(principal, data, persistence_path='bili.cookie')
+        super().__init__(principal, data, persistence_path='bili.cookie', postprocessor=postprocessor)
         if tags is None:
             tags = ['星际争霸2', '电子竞技']
         self.user = user

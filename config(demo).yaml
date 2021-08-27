@@ -2,6 +2,7 @@ user: # 在填了cookies的情况下优先使用cookies上传，如需使用用�
 #    cookies:
 #        SESSDATA: your SESSDATA
 #        bili_jct: your bili_jct
+#        DedeUserID__ckMd5: your ckMd5
 #        DedeUserID: your DedeUserID
 #    access_token: your access_key
     account:
@@ -32,6 +33,10 @@ streamers:
         copyright: 2 # 1为自制
         cover_path: /cover/up.jpg
         description: 视频简介
+        postprocessor: # 上传完成后，将按自定义顺序执行自定义操作
+            - run: echo hello! # 执行任意命令，等同于在shell中运行,视频文件路径作为标准输入传入
+            - mv: backup/ # 移动文件到backup目录下
+#            - rm # 删除文件，为默认操作
         tags:
             - 星际争霸2
             - 电子竞技

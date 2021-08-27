@@ -51,7 +51,7 @@ sudo docker ps (找到你的imageId)
 sudo docker exec -it imageId /bin/bash     
 ```
 
-## 源码使用
+## 调试源码
 * 下载源码: git clone https://github.com/ForgQi/bilibiliupload.git
 * 安装: `pip3 install -e .` 或者 `pip3 install -r requirements.txt`
 * 启动: `python3 -m biliup`
@@ -84,11 +84,7 @@ from biliup.downloader import download
 download('文件名', 'https://www.panda.tv/1150595', suffix='flv')
 ```
 ## 使用建议
-关于B站为什么不能多p上传\
-目前bilibili网页端是根据用户权重来限制分p数量的，权重不够的用户自动切换到客户端的提交接口。
->用户等级大于3，且粉丝数>100，web端投稿不限制分p数量
-
-国内VPS网络费用较高，建议使用国外VPS，根据机器的硬盘等资源设置合理并发量。
+国内VPS网络费用较高，建议使用国外VPS，根据机器的硬盘等资源设置合理并发量, 选择kodo线路较容易跑满带宽。
 
 b站上传目前有两种模式，分别为bup和bupfetch模式。
 >* bup：国内常用模式，视频直接上传到b站投稿系统。
@@ -138,6 +134,9 @@ def transcoding(data):
 * ~~selenium操作浏览器上传两种方式~~(详见bili_chromeup.py)
 * ~~Windows图形界面版在release中下载AutoTool.msi进行安装~~[AutoTool.msi](https://github.com/ForgQi/bilibiliupload/releases/tag/v0.1.0)
 QQ群：837362626
+>关于B站为什么不能多p上传\
+目前bilibili网页端是根据用户权重来限制分p数量的，权重不够的用户切换到客户端的提交接口即可解除这一限制。
+>用户等级大于3，且粉丝数>100，web端投稿不限制分p数量
 ## Credits
 * Thanks `ykdl, youtube-dl, streamlink` provides downloader.
 
