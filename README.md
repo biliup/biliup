@@ -55,7 +55,18 @@ sudo docker exec -it imageId /bin/bash
 * 下载源码: git clone https://github.com/ForgQi/bilibiliupload.git
 * 安装: `pip3 install -e .` 或者 `pip3 install -r requirements.txt`
 * 启动: `python3 -m biliup`
+## 最小配置文件示例
+```yaml
+user: 
+    account:
+        username: your usrname
+        password: your password
 
+streamers:
+    xxx直播录像: 
+        url:
+            - https://www.twitch.tv/xxx
+```
 ## EMBEDDING BILIUP
 如果你不想使用完全自动托管的功能，而仅仅只是想嵌入biliup作为一个库来使用这里有两个例子可以作为参考
 ### 上传
