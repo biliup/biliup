@@ -12,7 +12,8 @@
 
 演示视频：[BV1ip4y1x7Gi](https://www.bilibili.com/video/BV1ip4y1x7Gi)
 ## INSTALLATION
-1. 创建配置文件**config.yaml**，内容参照**config(demo).yaml**（或可调整配置后直接修改文件名）
+1. 创建配置文件**config.yaml**，内容参照[config(demo).yaml](https://github.com/ForgQi/bilibiliupload/blob/74b507f085c4545f5a1b3d1fbdd4c8fdef2be058/config(demo).yaml)
+（或可调整配置后直接修改文件名）
 2. 安装 __FFmpeg__, __pip__
 3. 安装 __biliup__：
 `pip3 install biliup`
@@ -25,7 +26,7 @@ $ biliup stop
 $ biliup restart
 # 查看版本
 $ biliup --version
-# 显示帮助
+# 显示帮助以查看更多选项
 $ biliup -h
 ```
 

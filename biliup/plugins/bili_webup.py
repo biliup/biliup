@@ -443,7 +443,10 @@ class BiliBili:
             }, timeout=30
         )
         buffered.close()
-        return r.json()['data']['url']
+        res = r.json()
+        if res.get('data') is None:
+            raise Exception(res)
+        return res['data']['url']
 
     def get_tags(self, upvideo, typeid="", desc="", cover="", groupid=1, vfea=""):
         """

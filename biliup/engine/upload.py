@@ -78,5 +78,5 @@ class UploadBase:
             if post_processor.get('run'):
                 process = subprocess.run(
                     post_processor['run'], shell=True, input=str(Path('\n'.join(data)).absolute()),
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=True)
                 logger.info(process.stdout.rstrip())
