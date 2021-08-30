@@ -46,10 +46,10 @@ class BiliWeb(UploadBase):
             bili.login(self.persistence_path, self.user)
             for file in file_list:
                 video_part = bili.upload_file(file, self.lines, self.threads)  # 上传视频
-                video.videos.append(video_part)  # 添加已经上传的视频
+                video.append(video_part)  # 添加已经上传的视频
             video.title = self.data["format_title"]
             video.desc = self.desc + '''
-            这个自动录制上传的小程序开源在Github：https://github.com/ForgQi/bilibiliupload
+            这个自动录制上传的小程序开源在Github：https://github.com/ForgQi/bilibiliupload (或者在Github搜索ForgQi)
                 交流群：837362626'''
             video.copyright = self.copyright
             if self.copyright == 2:
@@ -369,13 +369,11 @@ class BiliBili:
         self.__session.get('https://member.bilibili.com/x/geetest/pre/add', timeout=5)
 
         if submit_api is None:
-            myinfo = self.__session.get('https://member.bilibili.com/x/web/archive/pre?lang=cn',
-                                        timeout=15).json()['data']['myinfo']
-            total_info = self.__session.get('https://member.bilibili.com/x/web/index/stat', timeout=15).json()
+            total_info = self.__session.get('http://api.bilibili.com/x/space/myinfo', timeout=15).json()
             if total_info.get('data') is None:
                 logger.error(total_info)
-            myinfo['total_info'] = total_info.get('data')
-            if myinfo['level'] > 3 and myinfo['total_info'] and myinfo['total_info']['total_fans'] > 100:
+            total_info = total_info.get('data')
+            if total_info['level'] > 3 and total_info['follower'] > 1000:
                 user_weight = 2
             else:
                 user_weight = 1
@@ -515,3 +513,6 @@ class Data:
         """设置标签，tag为数组"""
         self.dynamic = f"#{'##'.join(tag)}#"
         self.tag = ','.join(tag)
+
+    def append(self, video):
+        self.videos.append(video)

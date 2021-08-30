@@ -85,7 +85,7 @@ with BiliBili(video) as bili:
     bili.login_by_password("username", "password")
     for file in file_list:
         video_part = bili.upload_file(file)  # 上传视频
-        video.videos.append(video_part)  # 添加已经上传的视频
+        video.append(video_part)  # 添加已经上传的视频
     video.cover = bili.cover_up('/cover_path').replace('http:', '')
     ret = bili.submit()  # 提交视频
 ```
@@ -148,7 +148,7 @@ def transcoding(data):
 QQ群：837362626
 >关于B站为什么不能多p上传\
 目前bilibili网页端是根据用户权重来限制分p数量的，权重不够的用户切换到客户端的提交接口即可解除这一限制。
->用户等级大于3，且粉丝数>100，web端投稿不限制分p数量
+>用户等级大于3，且粉丝数>1000，web端投稿不限制分p数量
 ## Credits
 * Thanks `ykdl, youtube-dl, streamlink` provides downloader.
 
