@@ -79,6 +79,7 @@ class BiliBili:
         self.cookies = None
         self.access_token = None
         self.refresh_token = None
+        self.account = None
         self.__bili_jct = None
         self._auto_os = None
         self.persistence_path = 'engine/bili.cookie'
@@ -92,14 +93,16 @@ class BiliBili:
             self.cookies = user['cookies']
         if not self.access_token and user.get('access_token'):
             self.access_token = user['access_token']
+        if not self.account and user.get('account'):
+            self.account = user['account']
         if self.cookies:
             try:
                 self.login_by_cookies(self.cookies)
             except:
                 logger.exception('login error')
-                self.login_by_password(**user['account'])
+                self.login_by_password(**self.account)
         else:
-            self.login_by_password(**user['account'])
+            self.login_by_password(**self.account)
         self.store()
 
     def load(self):
@@ -402,7 +405,9 @@ class BiliBili:
     def submit_client(self):
         logger.info('使用客户端api端提交')
         if not self.access_token:
-            self.login_by_password(**config['user']['account'])
+            if self.account is None:
+                raise RuntimeError("Access token is required, but account and access_token does not exist!")
+            self.login_by_password(**self.account)
             self.store()
         while True:
             ret = self.__session.post(f'http://member.bilibili.com/x/vu/client/add?access_key={self.access_token}',

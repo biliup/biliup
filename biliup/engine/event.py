@@ -12,7 +12,7 @@ import functools
 class EventManager(Thread):
     def __init__(self, context=None, pool1_size=3, pool2_size=3):
         """初始化事件管理器"""
-        super().__init__(name='Synchronous')
+        super().__init__(name='Synchronous', daemon=True)
         if context is None:
             context = {}
         self.context = context

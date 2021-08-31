@@ -17,6 +17,9 @@ def time_now(fmt='%Y.%m.%d'):
 
 
 def new_hook(t, v, tb):
+    if issubclass(t, KeyboardInterrupt):
+        sys.__excepthook__(t, v, tb)
+        return
     logging.getLogger('biliup').error("Uncaught exception:", exc_info=(t, v, tb))
 
 
