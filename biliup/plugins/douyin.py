@@ -16,18 +16,25 @@ class Douyin(DownloadBase):
             logger.debug("直播间地址错误")
             return False
         rid = self.url.split("live.douyin.com/")[1]
-        r1 = requests.get('https://live.douyin.com/' + rid).text \
+        headers = {
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36 Edg/91.0.864.67"
+        }
+        r1 = requests.get('https://live.douyin.com/' + rid,headers=headers).text \
             .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]
         r2 = urllib.request.unquote(r1)
-        r3 = json.loads(r2)['routeInitialProps']['errorType']
-        if r3 != 'none':
-            logger.debug("直播间不存在")
-            return False
-        r4 = json.loads(r2)['routeInitialProps']['roomInfo']['roomId']
+        try:
+            r3 = json.loads(r2)['routeInitialProps']['error']
+            if r3:
+                logger.debug("直播间不存在")
+                return False
+        except:
+            logger.debug("直播间存在")
+        r4 = json.loads(r2)['initialState']['roomStore']['roomInfo']['roomId']
         if r4 == '':
             logger.debug("未开播")
             return False
-        r5 = json.loads(r2)['routeInitialProps']['roomInfo']['room']['stream_url']['flv_pull_url']
+        r5 = json.loads(r2)['initialState']['roomStore']['roomInfo']['room']['stream_url']['flv_pull_url']
         i = 0
         for k in r5:
             if i < 1:
