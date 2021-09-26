@@ -18,11 +18,11 @@ class Bilibili(DownloadBase):
         if api1_data['code'] == 0:
             vid = api1_data['data']['room_id']
         else:
-            logger.info('Get room ID from API failed: %s', api1_data['msg'])
+            logger.info('Get room ID from API failed: %s', api1_data)
             vid = rid
         api2_data = requests.get(f"https://api.live.bilibili.com/room/v1/Room/get_info?room_id={vid}").json()
         if api2_data['code'] != 0:
-            logger.debug(api2_data['msg'])
+            logger.debug(api2_data)
             return False
         api2_data = api2_data['data']
         if api2_data['live_status'] != 1:

@@ -14,7 +14,7 @@ from urllib import parse
 from urllib.parse import quote
 
 import aiohttp
-import requests
+import requests.utils
 import rsa
 from requests.adapters import HTTPAdapter, Retry
 
@@ -49,8 +49,8 @@ class BiliWeb(UploadBase):
                 video.append(video_part)  # 添加已经上传的视频
             video.title = self.data["format_title"]
             video.desc = self.desc + '''
-            这个自动录制上传的小程序开源在Github：https://github.com/ForgQi/bilibiliupload (或者在Github搜索ForgQi)
-                交流群：837362626'''
+            Powered By biliup
+            Github：https://github.com/ForgQi/biliup (或者在Github搜索ForgQi)交流群：837362626'''
             video.copyright = self.copyright
             if self.copyright == 2:
                 video.source = self.data["url"]  # 添加转载地址说明

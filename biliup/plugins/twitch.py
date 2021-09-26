@@ -31,7 +31,11 @@ class Twitch(DownloadBase):
         if not list(Twitch.BatchCheck([self.url]).check()):
             return
         with youtube_dl.YoutubeDL() as ydl:
-            info = ydl.extract_info(self.url, download=False)
+            try:
+                info = ydl.extract_info(self.url, download=False)
+            except youtube_dl.utils.DownloadError as e:
+                logger.warning(self.url, exc_info=e)
+                return
             self.raw_stream_url = info['formats'][-1]['url']
             return True
 

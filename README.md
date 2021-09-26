@@ -57,6 +57,7 @@ sudo docker exec -it imageId /bin/bash
 * 安装: `pip3 install -e .` 或者 `pip3 install -r requirements.txt`
 * 启动: `python3 -m biliup`
 ## 最小配置文件示例
+tid投稿分区见[Wiki](https://github.com/ForgQi/biliup/wiki)
 ```yaml
 user: 
     account:
