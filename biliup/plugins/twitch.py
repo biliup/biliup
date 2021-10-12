@@ -1,4 +1,6 @@
 import random
+import subprocess
+import time
 from urllib.parse import urlencode
 
 import requests
@@ -25,19 +27,30 @@ _CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko'
 @Plugin.download(regexp=VALID_URL_BASE)
 class Twitch(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
-        DownloadBase.__init__(self, fname, url, suffix=suffix, opt_args=['-ss', "00:00:16"])
+        DownloadBase.__init__(self, fname, url, suffix=suffix)
 
     def check_stream(self):
         if not list(Twitch.BatchCheck([self.url]).check()):
             return
-        with youtube_dl.YoutubeDL() as ydl:
-            try:
-                info = ydl.extract_info(self.url, download=False)
-            except youtube_dl.utils.DownloadError as e:
-                logger.warning(self.url, exc_info=e)
+        port = random.randint(1025, 65535)
+        proc = subprocess.Popen(["streamlink", "--player-external-http",
+                                 "--player-external-http-port", str(port), self.url, "best"])
+        self.raw_stream_url = f"http://localhost:{port}"
+        i = 0
+        while i < 5:
+            if not (proc.poll() is None):
                 return
-            self.raw_stream_url = info['formats'][-1]['url']
-            return True
+            time.sleep(1)
+            i += 1
+        return True
+        # with youtube_dl.YoutubeDL() as ydl:
+        #     try:
+        #         info = ydl.extract_info(self.url, download=False)
+        #     except youtube_dl.utils.DownloadError as e:
+        #         logger.warning(self.url, exc_info=e)
+        #         return
+        #     self.raw_stream_url = info['formats'][-1]['url']
+        #     return True
 
     class BatchCheck(BatchCheckBase):
         def __init__(self, urls):

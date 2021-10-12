@@ -38,7 +38,7 @@ Linux下以daemon进程启动，录像和日志文件保存在执行目录下，
 ### 方式一
 ```bash
 vim /host/path/config.yaml
-docker run --name biliup -v /host/path:/opt -d ghcr.io/forgqi/bilibiliupload/caution
+docker run --name biliup -v /host/path:/opt -d ghcr.io/forgqi/biliup/caution
 ```
 ### 方式二
 ```bash
