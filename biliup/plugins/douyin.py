@@ -1,6 +1,8 @@
-import requests
-import urllib.request
 import json
+import urllib.request
+
+import requests
+
 from . import logger
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
@@ -20,15 +22,19 @@ class Douyin(DownloadBase):
             "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                           "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36 Edg/91.0.864.67"
         }
-        r1 = requests.get('https://live.douyin.com/' + rid,headers=headers).text \
-            .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]
+        try:
+            r1 = requests.get('https://live.douyin.com/' + rid, headers=headers).text \
+                .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]
+        except IndexError:
+            logger.debug("连接异常")
+            return False
         r2 = urllib.request.unquote(r1)
         try:
             r3 = json.loads(r2)['routeInitialProps']['error']
             if r3:
                 logger.debug("直播间不存在")
                 return False
-        except:
+        except KeyError:
             logger.debug("直播间存在")
         r4 = json.loads(r2)['initialState']['roomStore']['roomInfo']['roomId']
         if r4 == '':
