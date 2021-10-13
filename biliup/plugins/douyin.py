@@ -19,8 +19,9 @@ class Douyin(DownloadBase):
             return False
         rid = self.url.split("live.douyin.com/")[1]
         headers = {
-            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36 Edg/91.0.864.67"
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                          "Chrome/94.0.4606.71 Safari/537.36 Edg/94.0.992.38",
+            "referer": "https://live.douyin.com/"
         }
         try:
             r1 = requests.get('https://live.douyin.com/' + rid, headers=headers).text \
@@ -36,15 +37,15 @@ class Douyin(DownloadBase):
                 return False
         except KeyError:
             logger.debug("直播间存在")
-        r4 = json.loads(r2)['initialState']['roomStore']['roomInfo']['roomId']
-        if r4 == '':
-            logger.debug("未开播")
+        try:
+            r5 = json.loads(r2)['initialState']['roomStore']['roomInfo']['room']['stream_url']['flv_pull_url']
+            i = 0
+            for k in r5:
+                if i < 1:
+                    r6 = k
+                    i = i + 1
+            self.raw_stream_url = r5[r6]
+            return True
+        except KeyError:
+            logger.debug("主播未开播")
             return False
-        r5 = json.loads(r2)['initialState']['roomStore']['roomInfo']['room']['stream_url']['flv_pull_url']
-        i = 0
-        for k in r5:
-            if i < 1:
-                r6 = k
-                i = i + 1
-        self.raw_stream_url = r5[r6]
-        return True
