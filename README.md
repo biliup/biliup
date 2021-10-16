@@ -1,8 +1,8 @@
-# bilibiliupload
+# biliup
 ![](https://img.shields.io/badge/python-v3.7%2B-blue)
 ![GitHub](https://img.shields.io/github/license/ForgQi/bilibiliupload)
 
-支持自动录制各大直播平台，上传直播录像到bilibili。  
+支持自动录制各大直播平台实时流，上传到bilibili。也支持twitch直播回放列表自动搬运至b站，如链接https://www.twitch.tv/xxxx/videos?filter=archives&sort=time 
 
 * 自动选择上传线路，保证国内外vps上传质量和速度
 * 可分别控制下载与上传并发量

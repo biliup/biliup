@@ -24,6 +24,63 @@ _OPERATION_HASHES = {
 _CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko'
 
 
+@Plugin.download(regexp=r'https?://(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[^/]+)/(?:videos|profile)')
+class TwitchVideos(DownloadBase):
+    def __init__(self, fname, url, suffix='mp4'):
+        DownloadBase.__init__(self, fname, url, suffix=suffix)
+
+    def check_stream(self):
+        with youtube_dl.YoutubeDL({'download_archive': 'archive.txt'}) as ydl:
+            info = ydl.extract_info(self.url, download=False)
+            for entry in info['entries']:
+                if ydl.in_download_archive(entry):
+                    continue
+                self.raw_stream_url = entry['url']
+                ydl.record_download_archive(entry)
+                return True
+
+    class BatchCheck(BatchCheckBase):
+        def __init__(self, urls):
+            BatchCheckBase.__init__(self, pattern_id=VALID_URL_BASE, urls=urls)
+
+        def check(self):
+            with youtube_dl.YoutubeDL({'download_archive': 'archive.txt'}) as ydl:
+                for channel_name, url in self.not_live():
+                    info = ydl.extract_info(url, download=False)
+                    for entry in info['entries']:
+                        if ydl.in_download_archive(entry):
+                            continue
+                        yield url
+                    time.sleep(10)
+                        # ydl.record_download_archive(entry)
+
+        def not_live(self):
+            gql = self.get_streamer()
+            i = -1
+            for data in gql:
+                i += 1
+                user = data['data'].get('user')
+                if not user:
+                    continue
+                stream = user['stream']
+                if not stream:
+                    yield self.usr_list[i], self.usr_dict.get(self.usr_list[i])
+
+        def get_streamer(self):
+            for channel_name in self.usr_list:
+                op = {
+                    'operationName': 'StreamMetadata',
+                    'variables': {'channelLogin': channel_name.lower()}
+                }
+                op['extensions'] = {
+                    'persistedQuery': {
+                        'version': 1,
+                        'sha256Hash': _OPERATION_HASHES[op['operationName']],
+                    }
+                }
+                yield get_streamer(op)
+
+
 @Plugin.download(regexp=VALID_URL_BASE)
 class Twitch(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
@@ -83,12 +140,16 @@ class Twitch(DownloadBase):
                     }
                 }
                 ops.append(op)
-            gql = requests.post(
-                'https://gql.twitch.tv/gql',
-                json=ops,
-                headers={
-                    'Content-Type': 'text/plain;charset=UTF-8',
-                    'Client-ID': _CLIENT_ID,
-                }, timeout=15)
-            gql.close()
-            return gql.json()
+            return get_streamer(ops)
+
+
+def get_streamer(ops):
+    gql = requests.post(
+        'https://gql.twitch.tv/gql',
+        json=ops,
+        headers={
+            'Content-Type': 'text/plain;charset=UTF-8',
+            'Client-ID': _CLIENT_ID,
+        }, timeout=15)
+    gql.close()
+    return gql.json()

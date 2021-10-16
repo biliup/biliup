@@ -8,6 +8,8 @@ user: # 在填了cookies的情况下优先使用cookies上传，如需使用用�
     account:
         username: your usrname
         password: your password
+#    app_key: bca7e84c2d947ac6 # 若账号密码方式无法登录可尝试更改此值
+#    appsec: 60698ba2f68e01ce44738920a0ffe768 # 值可以参考 https://github.com/SocialSisterYi/bilibili-API-collect/blob/master/other/API_auth.md
 
 # b站上传线路选择，默认为自动模式，目前可手动切换为bda2, kodo, ws, qn
 lines: AUTO

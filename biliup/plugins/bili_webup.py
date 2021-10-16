@@ -43,6 +43,8 @@ class BiliWeb(UploadBase):
     def upload(self, file_list):
         video = Data()
         with BiliBili(video) as bili:
+            bili.app_key = self.user.get('app_key')
+            bili.appsec = self.user.get('appsec')
             bili.login(self.persistence_path, self.user)
             for file in file_list:
                 video_part = bili.upload_file(file, self.lines, self.threads)  # 上传视频
@@ -66,9 +68,11 @@ class BiliWeb(UploadBase):
 
 class BiliBili:
     def __init__(self, video: 'Data'):
-        # self.app_key = 'bca7e84c2d947ac6'
-        self.app_key = 'aae92bc66f3edfab'
-        self.appsec = 'af125a0d5279fd576c1b4418a3e8276d'
+        self.app_key = None
+        self.appsec = None
+        if self.app_key is None or self.appsec is None:
+            self.app_key = 'aae92bc66f3edfab'
+            self.appsec = 'af125a0d5279fd576c1b4418a3e8276d'
         self.__session = requests.Session()
         self.video = video
         self.__session.mount('https://', HTTPAdapter(max_retries=Retry(total=5, method_whitelist=False)))
@@ -170,7 +174,6 @@ class BiliBili:
             raise Exception(data)
 
     def sign(self, param):
-        # salt = '60698ba2f68e01ce44738920a0ffe768'
         return hashlib.md5(f"{param}{self.appsec}".encode()).hexdigest()
 
     def get_key(self):
