@@ -19,6 +19,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
 #  && apt-get install -y python3-pip \
   && apt-get install -y git \
   && apt-get install -y zip \
+  && curl -fsSL https://deb.nodesource.com/setup_14.x | bash - \
   && apt-get install -y nodejs \
 #  && apt-get install -y unzip \
   && \
