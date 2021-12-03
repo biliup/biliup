@@ -71,8 +71,8 @@ class BiliBili:
         self.app_key = None
         self.appsec = None
         if self.app_key is None or self.appsec is None:
-            self.app_key = 'aae92bc66f3edfab'
-            self.appsec = 'af125a0d5279fd576c1b4418a3e8276d'
+            self.app_key = 'ae57252b0c09105d'
+            self.appsec = 'c75875c596a69eb55bd119e74b07cfe3'
         self.__session = requests.Session()
         self.video = video
         self.__session.mount('https://', HTTPAdapter(max_retries=Retry(total=5, method_whitelist=False)))
