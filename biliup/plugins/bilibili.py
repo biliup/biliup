@@ -3,6 +3,7 @@ import random
 import requests
 
 from . import match1, logger
+from .. import config
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 
@@ -34,10 +35,11 @@ class Bilibili(DownloadBase):
         #     artist = api3_data['data']['info']['uname']
         #     title = '{} - {}'.format(title, artist)
         # logger.debug(title)
+        biliplatform = config.get('biliplatform') if config.get('biliplatform') else 'web'
         params = {
             #'https_url_req': 1,
             'cid': vid,
-            'platform': 'h5',
+            'platform': biliplatform,
             'qn': 10000,
             #'ptype': '16'
         }
