@@ -25,6 +25,8 @@ file_size: 2621440000
 # 如遇到斗鱼录制卡顿可以尝试切换线路，tct-h5（备用线路5），ali-h5（备用线路6），akm-h5（主线路1）
 #huyacdn: AL
 # 如遇到虎牙录制卡顿可以尝试切换线路，AL（阿里），BD（百度），TX（腾讯）
+#biliplatform: web
+# 如遇到哔哩哔哩录制跳帧可以尝试修改platform值，web（flv），h5（m3u8）
 
 streamers:
     星际2Stats拔本神族天梯第一视角: # 最小配置示例

@@ -2,7 +2,6 @@ import platform
 import json
 from urllib.parse import urlencode
 
-from ykdl.common import url_to_module
 from ykdl.extractors.douyu.util import ub98484234
 from ykdl.util.jsengine import chakra_available, quickjs_available, external_interpreter
 from ykdl.util.html import get_content
@@ -52,6 +51,9 @@ class Douyu(DownloadBase):
         html_content = get_content('https://www.douyu.com/lapi/live/getH5Play/{}'.format(self.vid), data=data)
         live_data = json.loads(html_content)
         live_data = live_data["data"]
-        real_url = '{}/{}'.format(live_data['rtmp_url'], live_data['rtmp_live'])
-        self.raw_stream_url = real_url
-        return True
+        try:
+            real_url = '{}/{}'.format(live_data['rtmp_url'], live_data['rtmp_live'])
+            self.raw_stream_url = real_url
+            return True
+        except TypeError:
+            return False
