@@ -35,7 +35,7 @@ class Bilibili(DownloadBase):
         #     artist = api3_data['data']['info']['uname']
         #     title = '{} - {}'.format(title, artist)
         # logger.debug(title)
-        biliplatform = config.get('biliplatform') if config.get('biliplatform') else 'web'
+        biliplatform = config.get('biliplatform') if config.get('biliplatform') else 'h5'
         params = {
             #'https_url_req': 1,
             'cid': vid,

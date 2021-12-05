@@ -11,6 +11,8 @@
 相关配置示例在config.yaml文件中，如直播间地址，b站账号密码
 
 演示视频：[BV1ip4y1x7Gi](https://www.bilibili.com/video/BV1ip4y1x7Gi)
+
+B站投稿客户端GUI：[链接](https://github.com/ForgQi/Caution)
 ## INSTALLATION
 1. 创建配置文件**config.yaml**，内容参照[config(demo).yaml](https://github.com/ForgQi/bilibiliupload/blob/74b507f085c4545f5a1b3d1fbdd4c8fdef2be058/config(demo).yaml)
 （或可调整配置后直接修改文件名）
