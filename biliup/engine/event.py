@@ -1,7 +1,7 @@
 # encoding: UTF-8
 # 系统模块
 import inspect
-from collections import Generator
+from collections.abc import Generator
 from concurrent.futures.thread import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from queue import Queue

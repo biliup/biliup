@@ -20,3 +20,5 @@ test.py
 dist/
 build/
 *.ts
+*.back
+bili.cookie.json

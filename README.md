@@ -1,6 +1,7 @@
 # biliup
 ![](https://img.shields.io/badge/python-v3.7%2B-blue)
 ![GitHub](https://img.shields.io/github/license/ForgQi/bilibiliupload)
+[![Telegram](https://img.shields.io/badge/Telegram-Group-blue.svg?logo=telegram)](https://t.me/+IkpIABHqy6U0ZTQ5)
 
 支持自动录制各大直播平台实时流，上传到bilibili。也支持twitch直播回放列表自动搬运至b站，如链接https://www.twitch.tv/xxxx/videos?filter=archives&sort=time 
 
@@ -11,6 +12,8 @@
 相关配置示例在config.yaml文件中，如直播间地址，b站账号密码
 
 演示视频：[BV1ip4y1x7Gi](https://www.bilibili.com/video/BV1ip4y1x7Gi)
+
+如果遇到B站登录问题尝试使用CLI：[命令行投稿工具](https://github.com/ForgQi/biliup-rs)
 
 B站投稿客户端GUI：[链接](https://github.com/ForgQi/Caution)
 ## INSTALLATION
@@ -31,6 +34,7 @@ $ biliup --version
 # 显示帮助以查看更多选项
 $ biliup -h
 ```
+详细教程可看 [@waitsaber](https://github.com/waitsaber) 的 [博客](https://blog.waitsaber.org/archives/129)
 
 Linux下以daemon进程启动，录像和日志文件保存在执行目录下，程序执行过程可查看日志文件。
 `ps -A | grep biliup` 查看进程是否启动成功。
