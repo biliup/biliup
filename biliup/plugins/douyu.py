@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 from ykdl.extractors.douyu.util import ub98484234
 from ykdl.util.jsengine import chakra_available, quickjs_available, external_interpreter
 from ykdl.util.html import get_content
+from ykdl.util.match import match1
 
 from .. import config
 from ..engine.decorators import Plugin
@@ -28,13 +29,17 @@ class Douyu(DownloadBase):
         python packages: PyChakra, quickjs
         applications: Gjs, CJS, QuickJS, JavaScriptCore, Node.js, etc.''')
         if len(self.url.split("douyu.com/")) < 2:
-            logger.debug("直播间地址错误")
+            logger.debug("直播间地址:" + self.url + " 错误")
             return False
-        rid = self.url.split("douyu.com/")[1]
-        videoloop = json.loads(get_content("https://www.douyu.com/betard/"+rid))['room']['videoLoop']
-        show_status = json.loads(get_content("https://www.douyu.com/betard/"+rid))['room']['show_status']
+        html = get_content(self.url)
+        rid = match1(html, '\$ROOM\.room_id\s*=\s*(\d+)',
+                     'room_id\s*=\s*(\d+)',
+                     '"room_id.?":(\d+)',
+                     'data-onlineid=(\d+)')
+        videoloop = json.loads(get_content("https://www.douyu.com/betard/" + rid))['room']['videoLoop']
+        show_status = json.loads(get_content("https://www.douyu.com/betard/" + rid))['room']['show_status']
         if show_status != 1 or videoloop != 0:
-            logger.debug("未开播或正在放录播")
+            logger.debug("直播间" + rid + "：未开播或正在放录播")
             return False
         douyucdn = config.get('douyucdn') if config.get('douyucdn') else 'tct-h5'
         html_h5enc = get_content('https://www.douyu.com/swf_api/homeH5Enc?rids=' + rid)
@@ -51,9 +56,7 @@ class Douyu(DownloadBase):
         html_content = get_content('https://www.douyu.com/lapi/live/getH5Play/{}'.format(self.vid), data=data)
         live_data = json.loads(html_content)
         live_data = live_data["data"]
-        try:
-            real_url = '{}/{}'.format(live_data['rtmp_url'], live_data['rtmp_live'])
+        if type(live_data) is dict:
+            real_url = '{}/{}'.format(live_data.get('rtmp_url'), live_data.get('rtmp_live'))
             self.raw_stream_url = real_url
             return True
-        except TypeError:
-            return False
