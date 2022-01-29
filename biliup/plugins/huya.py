@@ -29,5 +29,5 @@ class Huya(DownloadBase):
             huyajson = huyajson1[i]
             absurl = u'{}/{}.{}?{}'.format(
                 huyajson["sFlvUrl"], huyajson["sStreamName"], huyajson["sFlvUrlSuffix"], huyajson["sFlvAntiCode"])
-            self.raw_stream_url = html.unescape(absurl)
+            self.raw_stream_url = html.unescape(absurl)+"&ratio=9500"
             return True
