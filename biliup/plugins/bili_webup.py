@@ -29,7 +29,7 @@ class BiliWeb(UploadBase):
                  lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description=''):
         super().__init__(principal, data, persistence_path='bili.cookie', postprocessor=postprocessor)
         if tags is None:
-            tags = ['星际争霸2', '电子竞技']
+            tags = []
         self.user = user
         self.lines = lines
         self.submit_api = submit_api
@@ -52,7 +52,7 @@ class BiliWeb(UploadBase):
             video.title = self.data["format_title"]
             video.desc = self.desc + '''
             Powered By biliup
-            Github：https://github.com/ForgQi/biliup (或者在Github搜索ForgQi)交流群：837362626'''
+            Github：https://github.com/ForgQi/biliup (或者在Github搜索ForgQi)'''
             video.copyright = self.copyright
             if self.copyright == 2:
                 video.source = self.data["url"]  # 添加转载地址说明
@@ -519,6 +519,7 @@ class Data:
 
     def set_tag(self, tag: list):
         """设置标签，tag为数组"""
+        tag.append('biliup')
         self.dynamic = f"#{'##'.join(tag)}#"
         self.tag = ','.join(tag)
 
