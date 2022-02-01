@@ -48,9 +48,9 @@ docker run --name biliup -v /host/path:/opt -d ghcr.io/forgqi/biliup/caution
 ```
 ### 方式二
 ```bash
-cd bilibiliupload
-sudo docker build . -t sc2
-sudo docker run -d sc2
+cd biliup
+sudo docker build . -t biliup
+sudo docker run -d biliup
 ```
 ### 进入容器 📦
 ```bash
