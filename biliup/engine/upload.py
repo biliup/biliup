@@ -1,5 +1,6 @@
 import logging
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -73,7 +74,8 @@ class UploadBase:
                     dest = Path(post_processor['mv'])
                     if not dest.is_dir():
                         dest.mkdir(parents=True, exist_ok=True)
-                    path.rename(dest / path.name)
+                    #path.rename(dest / path.name)
+                    shutil.move(path, dest / path.name)
                     logger.info(f"move to {(dest / path.name).absolute()}")
             if post_processor.get('run'):
                 process = subprocess.run(
