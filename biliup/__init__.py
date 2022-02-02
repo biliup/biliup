@@ -6,7 +6,7 @@ from .common.timer import Timer
 from .engine.event import Event
 from .engine import config
 
-__version__ = "0.1.9"
+__version__ = "0.1.10"
 
 
 async def main():

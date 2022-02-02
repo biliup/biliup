@@ -11,11 +11,9 @@
 
 相关配置示例在config.yaml文件中，如直播间地址，b站账号密码
 
-演示视频：[BV1ip4y1x7Gi](https://www.bilibili.com/video/BV1ip4y1x7Gi)
-
-如果遇到B站登录问题尝试使用CLI：[命令行投稿工具](https://github.com/ForgQi/biliup-rs)
-
-B站投稿客户端GUI：[链接](https://github.com/ForgQi/Caution)
+>演示视频：[BV1ip4y1x7Gi](https://www.bilibili.com/video/BV1ip4y1x7Gi) \
+>登录B站获取cookie和token：[命令行投稿工具](https://github.com/ForgQi/biliup-rs) \
+>B站图形界面：[投稿客户端GUI](https://github.com/ForgQi/Caution)
 ## INSTALLATION
 1. 创建配置文件**config.yaml**，内容参照[config(demo).yaml](https://github.com/ForgQi/bilibiliupload/blob/74b507f085c4545f5a1b3d1fbdd4c8fdef2be058/config(demo).yaml)
 （或可调整配置后直接修改文件名）
@@ -66,9 +64,12 @@ sudo docker exec -it imageId /bin/bash
 tid投稿分区见[Wiki](https://github.com/ForgQi/biliup/wiki)
 ```yaml
 user: 
-    account:
-        username: your usrname
-        password: your password
+    cookies:
+        SESSDATA: your SESSDATA
+        bili_jct: your bili_jct
+        DedeUserID__ckMd5: your ckMd5
+        DedeUserID: your DedeUserID
+    access_token: your access_key
 
 streamers:
     xxx直播录像: 
