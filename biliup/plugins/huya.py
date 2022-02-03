@@ -23,10 +23,10 @@ class Huya(DownloadBase):
         if huya:
             huyacdn = config.get('huyacdn') if config.get('huyacdn') else 'AL'
             huyajson1 = json.loads(base64.b64decode(huya).decode())['data'][0]['gameStreamInfoList']
-            i = 0
-            while huyajson1[i]['sCdnType'] != huyacdn:
-                i = i + 1
-            huyajson = huyajson1[i]
+            huyajson =  huyajson1[0]
+            for cdn in huyajson1:
+                if cdn['sCdnType'] == huyacdn:
+                    huyajson = cdn
             absurl = u'{}/{}.{}?{}'.format(
                 huyajson["sFlvUrl"], huyajson["sStreamName"], huyajson["sFlvUrlSuffix"], huyajson["sFlvAntiCode"])
             self.raw_stream_url = html.unescape(absurl)

@@ -1,26 +1,13 @@
-FROM jrottenberg/ffmpeg
+FROM ubuntu
 VOLUME /opt
 RUN export DEBIAN_FRONTEND=noninteractive \
   && apt-get update \
-  && apt install build-essential -y \
-  && apt install libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev -y \
-  && apt install wget -y \
-  && apt install openssl -y \
   && apt install curl -y \
-  && apt install libsqlite3-dev -y \
-  && wget https://www.python.org/ftp/python/3.7.3/Python-3.7.3.tgz \
-  && tar -xvf Python-3.7.3.tgz \
-  && cd Python-3.7.3 \
-  && ./configure --enable-loadable-sqlite-extensions \
-  && make \
-  && make install \
-  && ln -s /usr/local/bin/pip3 /usr/bin/pip3 \
-  && ln -s /usr/local/bin/python3 /usr/bin/python3 \
-#  && apt-get install -y python3-pip \
+  && apt install ffmpeg -y \
+  && apt install -y python3-pip \
   && apt-get install -y git \
   && apt-get install -y zip \
-  && curl -fsSL https://deb.nodesource.com/setup_14.x | bash - \
-  && apt-get install -y nodejs \
+  && pip install quickjs \
 #  && apt-get install -y unzip \
   && \
   DL=https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
