@@ -50,6 +50,7 @@ class Acfun(DownloadBase):
         d = r2.json()['data']['videoPlayRes']
         e = json.loads(d)['liveAdaptiveManifest'][0]['adaptationSet']['representation']
         self.raw_stream_url = e[-1]['url']
+        self.room_title = r2.json()['data']['caption']
         return True
 
 
