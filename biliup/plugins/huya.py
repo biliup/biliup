@@ -23,11 +23,21 @@ class Huya(DownloadBase):
         if huya:
             huyacdn = config.get('huyacdn') if config.get('huyacdn') else 'AL'
             huyajson1 = json.loads(base64.b64decode(huya).decode())['data'][0]['gameStreamInfoList']
-            huyajson =  huyajson1[0]
+            huyajson2 = json.loads(base64.b64decode(huya).decode())['vMultiStreamInfo']
+            ratio = huyajson2[0]['iBitRate']
+            ibitrate_list = []
+            sdisplayname_list = []
+            for key in huyajson2:
+                ibitrate_list.append(key['iBitRate'])
+                sdisplayname_list.append(key['sDisplayName'])
+                if len(sdisplayname_list) > len(set(sdisplayname_list)):
+                    ratio = max(ibitrate_list)
+            huyajson = huyajson1[0]
             for cdn in huyajson1:
                 if cdn['sCdnType'] == huyacdn:
                     huyajson = cdn
             absurl = u'{}/{}.{}?{}'.format(
                 huyajson["sFlvUrl"], huyajson["sStreamName"], huyajson["sFlvUrlSuffix"], huyajson["sFlvAntiCode"])
-            self.raw_stream_url = html.unescape(absurl)
+            self.raw_stream_url = html.unescape(absurl) + "&ratio=" + str(ratio)
+            self.room_title = json.loads(base64.b64decode(huya).decode())['data'][0]['gameLiveInfo']['roomName']
             return True
