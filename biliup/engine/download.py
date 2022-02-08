@@ -12,6 +12,7 @@ logger = logging.getLogger('biliup')
 
 class DownloadBase:
     def __init__(self, fname, url, suffix=None, opt_args=None):
+        self.room_title = None
         if opt_args is None:
             opt_args = []
         self.fname = fname
@@ -43,7 +44,12 @@ class DownloadBase:
                 '-i', self.raw_stream_url, *self.default_output_args, *self.opt_args,
                 '-c', 'copy', '-f', self.suffix]
         if config.get('segment_time'):
-            args += ['-f', 'segment', f'{self.fname} {time.strftime("%Y-%m-%d %H_%M_%S", time.localtime())} part-%03d.{self.suffix}']
+            if self.room_title:
+                args += ['-f', 'segment', f'[{self.fname}][{time.strftime("%Y-%m-%d %H_%M_%S", time.localtime())}]'
+                                          f'[{self.room_title}] part-%03d.{self.suffix}']
+            else:
+                args += ['-f', 'segment', f'{self.fname} {time.strftime("%Y-%m-%d %H_%M_%S", time.localtime())} part'
+                                          f'-%03d.{self.suffix}']
         else:
             args += [f'{filename}.part']
 
@@ -99,5 +105,8 @@ class DownloadBase:
 
     @property
     def file_name(self):
-        file_name = '%s%s' % (self.fname, str(time.time())[:10])
+        if self.room_title:
+            file_name = '[%s][%s][%s]' % (self.fname, time.strftime("%Y-%m-%d %H_%M_%S", time.localtime()), self.room_title)
+        else:
+            file_name = '%s%s' % (self.fname, str(time.time())[:10])
         return file_name
