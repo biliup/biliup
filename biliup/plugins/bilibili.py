@@ -28,7 +28,7 @@ class Bilibili(DownloadBase):
         api2_data = api2_data['data']
         if api2_data['live_status'] != 1:
             return False
-        # title = api2_data['title']
+        self.room_title = api2_data['title']
         # api3_data = \
         #     requests.get(f"https://api.live.bilibili.com/live_user/v1/UserInfo/get_anchor_in_room?roomid={vid}").json()
         # if api3_data['code'] == 0:
