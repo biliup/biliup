@@ -9,8 +9,8 @@
 * 可分别控制下载与上传并发量
 * 支持Web API与客户端API上传
 
-相关配置示例在config.yaml文件中，如直播间地址，b站账号密码
-
+相关配置示例在config.yaml文件中，如直播间地址，b站账号密码\
+由于目前使用账号密码登录，大概率触发验证。请使用命令行工具登录，将登录返回的信息填入配置文件，且使用引号括起yaml中cookie的数字代表其为字符串
 >演示视频：[BV1ip4y1x7Gi](https://www.bilibili.com/video/BV1ip4y1x7Gi) \
 >登录B站获取cookie和token：[命令行投稿工具](https://github.com/ForgQi/biliup-rs) \
 >B站图形界面：[投稿客户端GUI](https://github.com/ForgQi/Caution)
@@ -32,9 +32,9 @@ $ biliup --version
 # 显示帮助以查看更多选项
 $ biliup -h
 ```
-详细教程可看 [@waitsaber](https://github.com/waitsaber) 的 [博客](https://blog.waitsaber.org/archives/129)
 
-Linux下以daemon进程启动，录像和日志文件保存在执行目录下，程序执行过程可查看日志文件。
+Linux下详细安装过程可看 [@waitsaber](https://github.com/waitsaber) 写的 [Ubuntu](https://blog.waitsaber.org/archives/129) 和 [CentOS](https://blog.waitsaber.org/archives/163) 教程
+，且以daemon进程启动，录像和日志文件保存在执行目录下，程序执行过程可查看日志文件。
 `ps -A | grep biliup` 查看进程是否启动成功。
 
 
