@@ -38,6 +38,7 @@ class Douyu(DownloadBase):
                      'data-onlineid=(\d+)')
         videoloop = json.loads(get_content("https://www.douyu.com/betard/" + rid))['room']['videoLoop']
         show_status = json.loads(get_content("https://www.douyu.com/betard/" + rid))['room']['show_status']
+        room_title = json.loads(get_content("https://www.douyu.com/betard/" + rid))['room']['room_name']
         if show_status != 1 or videoloop != 0:
             logger.debug("直播间" + rid + "：未开播或正在放录播")
             return False
@@ -59,4 +60,5 @@ class Douyu(DownloadBase):
         if type(live_data) is dict:
             real_url = '{}/{}'.format(live_data.get('rtmp_url'), live_data.get('rtmp_live'))
             self.raw_stream_url = real_url
+            self.room_title = room_title
             return True
