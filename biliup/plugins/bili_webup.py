@@ -52,7 +52,7 @@ class BiliWeb(UploadBase):
             video.title = self.data["format_title"]
             video.desc = self.desc + '''
             Powered By biliup
-            Github：https://github.com/ForgQi/biliup (或者在Github搜索ForgQi)'''
+            Github：https://github.com/ForgQi/biliup'''
             video.copyright = self.copyright
             if self.copyright == 2:
                 video.source = self.data["url"]  # 添加转载地址说明
