@@ -1,6 +1,8 @@
 import time
 
 import youtube_dl
+from youtube_dl import MaxDownloadsReached
+
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from ..plugins import BatchCheckBase
@@ -23,6 +25,7 @@ class Youtube(DownloadBase):
             for entry in info['entries']:
                 if ydl.in_download_archive(entry):
                     continue
+                # ydl.record_download_archive()
                 return True
             # for entry in info['entries']:
             #     print(entry)
@@ -46,9 +49,17 @@ class Youtube(DownloadBase):
 
     def download(self, filename):
         try:
-            self.ydl_opts = {'outtmpl': filename, 'ignoreerrors': True, 'download_archive': 'archive.txt'}
+            self.ydl_opts = {
+                'outtmpl': filename,
+                'ignoreerrors': True,
+                'max_downloads': 1,
+                'download_archive': 'archive.txt'
+            }
             with youtube_dl.YoutubeDL(self.ydl_opts) as ydl:
                 ydl.download([self.url])
+        except MaxDownloadsReached:
+            logger.info(f'退出下载: {self.fname}')
+            return False
         except youtube_dl.utils.DownloadError:
             logger.exception(self.fname)
             return 1
