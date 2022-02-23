@@ -85,7 +85,7 @@ class DownloadBase:
                 logger.exception("Uncaught exception:")
                 continue
             if ret is False:
-                return
+                break
             elif ret == 1:
                 time.sleep(45)
             i += 1

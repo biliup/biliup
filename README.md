@@ -3,10 +3,12 @@
 ![GitHub](https://img.shields.io/github/license/ForgQi/bilibiliupload)
 [![Telegram](https://img.shields.io/badge/Telegram-Group-blue.svg?logo=telegram)](https://t.me/+IkpIABHqy6U0ZTQ5)
 
-支持自动录制各大直播平台实时流，上传到bilibili。也支持twitch直播回放列表自动搬运至b站，如链接https://www.twitch.tv/xxxx/videos?filter=archives&sort=time 
+支持自动录制各大直播平台实时流，上传到bilibili。
 
 **文档地址**：<https://forgqi.github.io/biliup>
 
+* 支持YouTube频道自动搬运
+* 支持twitch直播回放列表自动搬运至b站，如链接https://www.twitch.tv/xxxx/videos?filter=archives&sort=time 
 * 自动选择上传线路，保证国内外vps上传质量和速度
 * 可分别控制下载与上传并发量
 * 支持Web API与客户端API上传
