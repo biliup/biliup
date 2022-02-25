@@ -3,10 +3,12 @@
 ![GitHub](https://img.shields.io/github/license/ForgQi/bilibiliupload)
 [![Telegram](https://img.shields.io/badge/Telegram-Group-blue.svg?logo=telegram)](https://t.me/+IkpIABHqy6U0ZTQ5)
 
-支持自动录制各大直播平台实时流，上传到bilibili。
-
 **文档地址**：<https://forgqi.github.io/biliup>
 
+详细安装过程可看 [@waitsaber](https://github.com/waitsaber) 写的 [Ubuntu](https://blog.waitsaber.org/archives/129) 和 [CentOS](https://blog.waitsaber.org/archives/163) 教程
+与 [常见问题](https://blog.waitsaber.org/archives/167) 解决方案
+
+* 支持自动录制各大直播平台实时流，上传到bilibili。
 * 支持YouTube频道自动搬运
 * 支持twitch直播回放列表自动搬运至b站，如链接https://www.twitch.tv/xxxx/videos?filter=archives&sort=time 
 * 自动选择上传线路，保证国内外vps上传质量和速度
@@ -37,8 +39,7 @@ $ biliup --version
 $ biliup -h
 ```
 
-Linux下详细安装过程可看 [@waitsaber](https://github.com/waitsaber) 写的 [Ubuntu](https://blog.waitsaber.org/archives/129) 和 [CentOS](https://blog.waitsaber.org/archives/163) 教程
-，且以daemon进程启动，录像和日志文件保存在执行目录下，程序执行过程可查看日志文件。
+Linux下以daemon进程启动，录像和日志文件保存在执行目录下，程序执行过程可查看日志文件。
 `ps -A | grep biliup` 查看进程是否启动成功。
 
 
