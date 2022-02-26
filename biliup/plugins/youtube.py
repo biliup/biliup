@@ -21,6 +21,10 @@ class Youtube(DownloadBase):
             if info is None:
                 logger.warning(self.url)
                 return False
+            if info.get('entries') is None:
+                if ydl.in_download_archive(info):
+                    return False
+                return True
             for entry in info['entries']:
                 if ydl.in_download_archive(entry):
                     continue
