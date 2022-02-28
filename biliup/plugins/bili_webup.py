@@ -519,7 +519,8 @@ class Data:
 
     def set_tag(self, tag: list):
         """设置标签，tag为数组"""
-        tag.append('biliup')
+        if 'biliup' not in tag:
+            tag.append('biliup')
         self.dynamic = f"#{'##'.join(tag)}#"
         self.tag = ','.join(tag)
 
