@@ -36,7 +36,7 @@ def create_event_manager():
 event_manager = create_event_manager()
 
 
-@event_manager.register(DOWNLOAD, block=True)
+@event_manager.register(DOWNLOAD, block='Asynchronous1')
 def process(name, url):
     date = common.time_now(config['streamers'][name].get('title'))
     try:
@@ -50,7 +50,7 @@ def process(name, url):
         return Event(UPLOAD, (name, url, date))
 
 
-@event_manager.register(UPLOAD, block=True)
+@event_manager.register(UPLOAD, block='Asynchronous2')
 def process_upload(name, url, date):
     yield Event(BE_MODIFIED, (url, 2))
     try:
@@ -72,7 +72,7 @@ class KernelFunc:
         self.inverted_index = inverted_index
         self.streamer_url = streamer_url
 
-    @event_manager.register(CHECK, block=True)
+    @event_manager.register(CHECK, block='Asynchronous1')
     def singleton_check(self, platform):
         plugin = self.checker[platform]
         wait = config.get('checker_sleep') if config.get('checker_sleep') else 15

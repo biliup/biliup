@@ -22,3 +22,4 @@ build/
 *.ts
 *.back
 bili.cookie.json
+archive.txt
