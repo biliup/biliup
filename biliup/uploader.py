@@ -16,7 +16,9 @@ def upload(platform, index, data):
     :return:
     """
     try:
-        cls = Plugin.upload_plugins[platform]
+        cls = Plugin.upload_plugins.get(platform)
+        if cls is None:
+            return logger.error(f"No such uploader: {platform}")
         sig = inspect.signature(cls)
         context = {**engine.config, **engine.config['streamers'][index]}
         kwargs = {}
