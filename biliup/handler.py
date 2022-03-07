@@ -57,7 +57,7 @@ def process_upload(name, url, date):
         data = {"url": url, "date": date}
         if config['streamers'][name].get('title'):
             data["format_title"] = date
-        upload("bili_web", name, data)
+        upload(config.get("uploader") if config.get("uploader") else "bili_web", name, data)
     finally:
         yield Event(BE_MODIFIED, args=(url, 0))
 
