@@ -19,7 +19,7 @@ class UploadBase:
     def file_list(index):
         file_list = []
         for file_name in os.listdir('.'):
-            if index in file_name:
+            if index in file_name and os.path.isfile(file_name):
                 file_list.append(file_name)
         file_list = sorted(file_list)
         return file_list
