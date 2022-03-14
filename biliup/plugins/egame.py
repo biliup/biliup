@@ -1,5 +1,4 @@
 import requests
-import json
 from . import logger
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
@@ -19,7 +18,7 @@ class egame(DownloadBase):
         data = {'param': '''{"0":{"module":"pgg_live_read_svr","method":"get_live_and_profile_info","param":{
         "anchor_id":''' + str(rid) + ''',"layout_id":"hot","index":1,"other_uid":0}}}'''}
         r = requests.post(url=url, data=data).json()
-        if (r['ecode'] != 0):
+        if r['ecode'] != 0:
             logger.debug("直播间地址错误")
             return False
         pid = r['data']["0"]["retBody"]["data"]["video_info"]["pid"]

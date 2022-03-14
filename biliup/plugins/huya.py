@@ -36,8 +36,8 @@ class Huya(DownloadBase):
             for cdn in huyajson1:
                 if cdn['sCdnType'] == huyacdn:
                     huyajson = cdn
-            absurl = u'{}/{}.{}?{}'.format(
-                huyajson["sFlvUrl"], huyajson["sStreamName"], huyajson["sFlvUrlSuffix"], huyajson["sFlvAntiCode"])
+            absurl = f'{huyajson["sFlvUrl"]}/{huyajson["sStreamName"]}.{huyajson["sFlvUrlSuffix"]}?' \
+                     f'{huyajson["sFlvAntiCode"]}'
             self.raw_stream_url = html.unescape(absurl) + "&ratio=" + str(ratio)
             self.room_title = json.loads(base64.b64decode(huya).decode())['data'][0]['gameLiveInfo']['roomName']
             return True

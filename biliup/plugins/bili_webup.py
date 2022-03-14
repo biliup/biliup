@@ -16,6 +16,7 @@ from urllib.parse import quote
 import aiohttp
 import requests.utils
 import rsa
+import urllib3.exceptions
 from requests.adapters import HTTPAdapter, Retry
 
 from biliup import config
@@ -338,11 +339,20 @@ class BiliBili:
             'output': 'json',
             'profile': 'ugcupos/bup'
         }
-        r = self.__session.post(url, params=p, json={"parts": parts}, headers=headers, timeout=15).json()
-        logger.info(f'{filename} uploaded >> {total_size / 1000 / 1000 / cost:.2f}MB/s. {r}')
+        ii = 0
+        while ii <= 3:
+            try:
+                r = self.__session.post(url, params=p, json={"parts": parts}, headers=headers, timeout=15).json()
+                if r.get('OK') == 1:
+                    logger.info(f'{filename} uploaded >> {total_size / 1000 / 1000 / cost:.2f}MB/s. {r}')
+                    return {"title": splitext(filename)[0], "filename": splitext(basename(upos_uri))[0], "desc": ""}
+            except(urllib3.exceptions.ReadTimeoutError, urllib3.exceptions.MaxRetryError,
+                   requests.exceptions.ConnectionError):
+                ii += 1
+                logger.info("上传出现问题，尝试重连，次数：" + str(ii))
+                time.sleep(15)
         if r.get('OK') != 1:
             raise Exception(r)
-        return {"title": splitext(filename)[0], "filename": splitext(basename(upos_uri))[0], "desc": ""}
 
     @staticmethod
     async def _upload(params, file, chunk_size, afunc, tasks=3):
