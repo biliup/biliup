@@ -30,14 +30,14 @@ class UploadBase:
             os.remove(r)
             logger.info('删除-' + r)
 
-    @staticmethod
-    def filter_file(index):
+    def filter_file(self, index):
         file_list = UploadBase.file_list(index)
         if len(file_list) == 0:
             return False
         for r in file_list:
-            file_size = os.path.getsize(r) / 1024 / 1024 / 1024
-            if file_size <= 0.02:
+            file_size = os.path.getsize(r) / 1024 / 1024
+            threshold = self.data.get('threshold') if self.data.get('threshold') else 20
+            if file_size <= threshold:
                 os.remove(r)
                 logger.info('过滤删除-' + r)
         file_list = UploadBase.file_list(index)

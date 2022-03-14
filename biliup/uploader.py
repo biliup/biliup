@@ -27,6 +27,9 @@ def upload(platform, index, data):
             if v:
                 kwargs[k] = v
         date = data.get("date") if data.get("date") else ""
+        threshold = engine.config.get('filtering_threshold')
+        if threshold:
+            data['threshold'] = threshold
         if data.get("format_title") is None:
             data["format_title"] = f"{date}{index}"
         return cls(index, data, **kwargs).start()

@@ -63,7 +63,7 @@ def process_upload(stream_info):
     try:
         data = {"url": url, "date": date}
         if config['streamers'][name].get('title'):
-            data["format_title"] = date.format(title=stream_info.get('title'))
+            data["format_title"] = date.format(title= stream_info.get('title') if stream_info.get('title') else "" )
         upload(config.get("uploader") if config.get("uploader") else "bili_web", name, data)
     finally:
         yield Event(BE_MODIFIED, args=(url, 0))
@@ -102,7 +102,7 @@ class KernelFunc:
     @event_manager.register(CHECK_UPLOAD)
     def free_upload(self):
         for title, urls in self.streamer_url.items():
-            if self.free(urls) and UploadBase.filter_file(title):
+            if self.free(urls):
                 yield Event(UPLOAD, args=({
                     'name': title,
                     'url': urls[0],
