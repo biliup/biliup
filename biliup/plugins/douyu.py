@@ -40,7 +40,7 @@ class Douyu(DownloadBase):
         videoloop = roominfo['videoLoop']
         show_status = roominfo['show_status']
         if show_status != 1 or videoloop != 0:
-            logger.debug("直播间" + rid + "：未开播或正在放录播")
+            logger.debug("直播间" + self.vid + "：未开播或正在放录播")
             return False
         douyucdn = config.get('douyucdn') if config.get('douyucdn') else 'tct-h5'
         html_h5enc = get_content(f'https://www.douyu.com/swf_api/homeH5Enc?rids={self.vid}')
