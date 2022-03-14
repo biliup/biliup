@@ -22,19 +22,19 @@ class Acfun(DownloadBase):
             "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                           "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36 Edg/91.0.864.67"
         }
-        cookies1 = dict(_did=did)
+        cookies = dict(_did=did)
         data1 = {'sid': 'acfun.api.visitor'}
         r1 = requests.post("https://id.app.acfun.cn/rest/app/visitor/login",
-                           headers=headers1, data=data1, cookies=cookies1)
-        userId = r1.json()['userId']
-        visitorSt = r1.json()['acfun.api.visitor_st']
+                           headers=headers1, data=data1, cookies=cookies)
+        userid = r1.json()['userId']
+        visitorst = r1.json()['acfun.api.visitor_st']
         params = {
             "subBiz": "mainApp",
             "kpn": "ACFUN_APP",
             "kpf": "PC_WEB",
-            "userId": str(userId),
+            "userId": str(userid),
             "did": did,
-            "acfun.api.visitor_st": visitorSt
+            "acfun.api.visitor_st": visitorst
         }
         data2 = {'authorId': rid, 'pullStreamType': 'FLV'}
         headers2 = {
@@ -48,12 +48,11 @@ class Acfun(DownloadBase):
             logger.debug(r2.json()['error_msg'])
             return False
         d = r2.json()['data']['videoPlayRes']
-        e = json.loads(d)['liveAdaptiveManifest'][0]['adaptationSet']['representation']
-        self.raw_stream_url = e[-1]['url']
+        self.raw_stream_url = json.loads(d)['liveAdaptiveManifest'][0]['adaptationSet']['representation'][-1]['url']
         self.room_title = r2.json()['data']['caption']
         return True
 
 
-def get_random_name(l):
+def get_random_name(numb):
     return random.choice(string.ascii_lowercase) + \
-        ''.join(random.sample(string.ascii_letters + string.digits, l - 1))
+        ''.join(random.sample(string.ascii_letters + string.digits, numb - 1))
