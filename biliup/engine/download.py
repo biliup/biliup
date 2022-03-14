@@ -89,8 +89,8 @@ class DownloadBase:
             elif ret == 1:
                 time.sleep(45)
             i += 1
-
         logger.info(f'退出下载{i}: {self.fname}')
+        return {'title': self.room_title}
 
     @staticmethod
     def rename(file_name):

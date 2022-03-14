@@ -39,24 +39,31 @@ event_manager = create_event_manager()
 @event_manager.register(DOWNLOAD, block='Asynchronous1')
 def process(name, url):
     date = common.time_now(config['streamers'][name].get('title'))
+    stream_info = {
+        'name': name,
+        'url': url,
+        'date': date
+    }
     try:
         kwargs = config['streamers'][name].copy()
         kwargs.pop('url')
         suffix = kwargs.get('format')
         if suffix:
             kwargs['suffix'] = suffix
-        download(name, url, **kwargs)
+        info = download(name, url, **kwargs)
+        stream_info = {**stream_info, **info}
     finally:
-        return Event(UPLOAD, (name, url, date))
+        return Event(UPLOAD, (stream_info,))
 
 
 @event_manager.register(UPLOAD, block='Asynchronous2')
-def process_upload(name, url, date):
+def process_upload(stream_info):
+    name, url, date = stream_info['name'], stream_info['url'], stream_info['date']
     yield Event(BE_MODIFIED, (url, 2))
     try:
         data = {"url": url, "date": date}
         if config['streamers'][name].get('title'):
-            data["format_title"] = date
+            data["format_title"] = date.format(title=stream_info.get('title'))
         upload(config.get("uploader") if config.get("uploader") else "bili_web", name, data)
     finally:
         yield Event(BE_MODIFIED, args=(url, 0))
@@ -96,7 +103,11 @@ class KernelFunc:
     def free_upload(self):
         for title, urls in self.streamer_url.items():
             if self.free(urls) and UploadBase.filter_file(title):
-                yield Event(UPLOAD, args=(title, urls[0], common.time_now(config['streamers'][title].get('title'))))
+                yield Event(UPLOAD, args=({
+                    'name': title,
+                    'url': urls[0],
+                    'date': common.time_now(config['streamers'][title].get('title'))
+                },))
 
     @event_manager.register(BE_MODIFIED)
     def revise(self, url, status):
