@@ -1,11 +1,9 @@
 import logging
 
 from . import plugins
-from . import common
+from .downloader import download, check_url
 from .engine import config, invert_dict, Plugin
 from .engine.event import Event, EventManager
-from .downloader import download, check_url
-from .engine.upload import UploadBase
 from .uploader import upload
 
 CHECK = 'check'
@@ -38,11 +36,9 @@ event_manager = create_event_manager()
 
 @event_manager.register(DOWNLOAD, block='Asynchronous1')
 def process(name, url):
-    date = common.time_now(config['streamers'][name].get('title'))
     stream_info = {
         'name': name,
         'url': url,
-        'date': date
     }
     try:
         kwargs = config['streamers'][name].copy()
@@ -50,21 +46,17 @@ def process(name, url):
         suffix = kwargs.get('format')
         if suffix:
             kwargs['suffix'] = suffix
-        info = download(name, url, **kwargs)
-        stream_info = {**stream_info, **info}
+        stream_info = download(name, url, **kwargs)
     finally:
         return Event(UPLOAD, (stream_info,))
 
 
 @event_manager.register(UPLOAD, block='Asynchronous2')
 def process_upload(stream_info):
-    name, url, date = stream_info['name'], stream_info['url'], stream_info['date']
+    url = stream_info['url']
     yield Event(BE_MODIFIED, (url, 2))
     try:
-        data = {"url": url, "date": date}
-        if config['streamers'][name].get('title'):
-            data["format_title"] = date.format(title= stream_info.get('title') if stream_info.get('title') else "" )
-        upload(config.get("uploader") if config.get("uploader") else "bili_web", name, data)
+        upload(config.get("uploader") if config.get("uploader") else "bili_web", stream_info)
     finally:
         yield Event(BE_MODIFIED, args=(url, 0))
 
@@ -106,7 +98,6 @@ class KernelFunc:
                 yield Event(UPLOAD, args=({
                     'name': title,
                     'url': urls[0],
-                    'date': common.time_now(config['streamers'][title].get('title'))
                 },))
 
     @event_manager.register(BE_MODIFIED)

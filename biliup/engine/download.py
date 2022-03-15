@@ -6,6 +6,7 @@ import time
 
 from biliup import config
 from ..plugins import fake_headers
+from biliup import common
 
 logger = logging.getLogger('biliup')
 
@@ -18,6 +19,7 @@ class DownloadBase:
         self.fname = fname
         self.url = url
         self.suffix = suffix
+        self.title = None
         # ffmpeg.exe -i  http://vfile1.grtn.cn/2018/1542/0254/3368/154202543368.ssm/154202543368.m3u8
         # -c copy -bsf:a aac_adtstoasc -movflags +faststart output.mp4
         self.raw_stream_url = None
@@ -78,6 +80,7 @@ class DownloadBase:
     def start(self):
         i = 0
         logger.info('开始下载%s：%s' % (self.__class__.__name__, self.fname))
+        date = common.time_now(self.title)
         while i < 30:
             try:
                 ret = self.run()
@@ -90,7 +93,13 @@ class DownloadBase:
                 time.sleep(45)
             i += 1
         logger.info(f'退出下载{i}: {self.fname}')
-        return {'title': self.room_title}
+        return {
+            'name': self.fname,
+            'url': self.url,
+            'title': self.room_title,
+            'date': date,
+            'format_title': date.format(title=self.room_title if self.room_title else '')
+        }
 
     @staticmethod
     def rename(file_name):

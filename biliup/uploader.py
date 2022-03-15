@@ -1,13 +1,14 @@
 import inspect
 import logging
 
+from biliup import common
 from biliup import engine
 from .engine.decorators import Plugin
 
 logger = logging.getLogger('biliup')
 
 
-def upload(platform, index, data):
+def upload(platform, data):
     """
     上传入口
     :param platform:
@@ -15,6 +16,7 @@ def upload(platform, index, data):
     :param data: 现在需包含内容{url,date} 完整包含内容{url,date,format_title}
     :return:
     """
+    index = data['name']
     try:
         cls = Plugin.upload_plugins.get(platform)
         if cls is None:
@@ -26,7 +28,7 @@ def upload(platform, index, data):
             v = context.get(k)
             if v:
                 kwargs[k] = v
-        date = data.get("date") if data.get("date") else ""
+        date = data.get("date") if data.get("date") else common.time_now()
         threshold = engine.config.get('filtering_threshold')
         if threshold:
             data['threshold'] = threshold
