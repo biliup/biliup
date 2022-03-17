@@ -93,12 +93,15 @@ class DownloadBase:
                 time.sleep(45)
             i += 1
         logger.info(f'退出下载{i}: {self.fname}')
+        format_title = None
+        if self.title:
+            format_title = date.format(title=self.room_title if self.room_title else '')
         return {
             'name': self.fname,
             'url': self.url,
             'title': self.room_title,
             'date': date,
-            'format_title': date.format(title=self.room_title if self.room_title else '')
+            'format_title': format_title
         }
 
     @staticmethod

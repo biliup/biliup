@@ -16,7 +16,7 @@ uploader: bili_web
 # b站上传线路选择，默认为自动模式，目前可手动切换为bda2, kodo, ws, qn
 lines: AUTO
 # b站提交接口，默认自动选择，可选web，client
-#submit_api: client
+submit_api: client
 # 单文件并发上传数，未达到带宽上限时增大此值可提高上传速度
 threads: 3
 # 录像单文件大小限制，单位Byte，超过此大小分段下载
