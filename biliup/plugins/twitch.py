@@ -52,7 +52,7 @@ class TwitchVideos(DownloadBase):
                             continue
                         yield url
                     time.sleep(10)
-                        # ydl.record_download_archive(entry)
+                    # ydl.record_download_archive(entry)
 
         def not_live(self):
             gql = self.get_streamer()
@@ -85,17 +85,19 @@ class TwitchVideos(DownloadBase):
 class Twitch(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         DownloadBase.__init__(self, fname, url, suffix=suffix)
+        self.proc = None
 
     def check_stream(self):
         if not list(Twitch.BatchCheck([self.url]).check()):
             return
         port = random.randint(1025, 65535)
-        proc = subprocess.Popen(["streamlink", "--player-external-http",
-                                 "--player-external-http-port", str(port), self.url, "best"])
+        self.proc = subprocess.Popen([
+            "streamlink", "--player-external-http", "--twitch-disable-ads"
+            "--player-external-http-port", str(port),self.url, "best"])
         self.raw_stream_url = f"http://localhost:{port}"
         i = 0
         while i < 5:
-            if not (proc.poll() is None):
+            if not (self.proc.poll() is None):
                 return
             time.sleep(1)
             i += 1
@@ -108,6 +110,12 @@ class Twitch(DownloadBase):
         #         return
         #     self.raw_stream_url = info['formats'][-1]['url']
         #     return True
+
+    def close(self):
+        try:
+            self.proc.terminate()
+        except:
+            logger.exception(f'terminate {self.fname} failed')
 
     class BatchCheck(BatchCheckBase):
         def __init__(self, urls):

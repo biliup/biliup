@@ -92,6 +92,7 @@ class DownloadBase:
             elif ret == 1:
                 time.sleep(45)
             i += 1
+        self.close()
         logger.info(f'退出下载{i}: {self.fname}')
         format_title = None
         if self.title:
@@ -122,3 +123,6 @@ class DownloadBase:
         else:
             file_name = '%s%s' % (self.fname, str(time.time())[:10])
         return file_name
+
+    def close(self):
+        pass
