@@ -3,7 +3,6 @@ import os
 import subprocess
 import sys
 import time
-
 from biliup import config
 from ..plugins import fake_headers
 from biliup import common
@@ -80,7 +79,7 @@ class DownloadBase:
     def start(self):
         i = 0
         logger.info('开始下载%s：%s' % (self.__class__.__name__, self.fname))
-        date = common.time_now(self.title)
+        date = common.time.now()
         while i < 30:
             try:
                 ret = self.run()
@@ -95,15 +94,11 @@ class DownloadBase:
                 time.sleep(45)
             i += 1
         logger.info(f'退出下载{i}: {self.fname}')
-        format_title = None
-        if self.title:
-            format_title = date.format(title=self.room_title if self.room_title else '')
         return {
             'name': self.fname,
             'url': self.url,
             'title': self.room_title,
             'date': date,
-            'format_title': format_title
         }
 
     @staticmethod

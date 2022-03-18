@@ -23,18 +23,29 @@ def upload(data):
         cls = Plugin.upload_plugins.get(platform)
         if cls is None:
             return logger.error(f"No such uploader: {platform}")
+
+        date = data.get("date") if data.get("date") else common.time.now()
+        room_title = data.get('title') if data.get('title') else ''
+        if context.get('title'):
+            data["format_title"] = custom_fmtstr(context.get('title'), date, room_title)
+        else:
+            data["format_title"] = f"{common.time.format_time(date)}{index}"
+        if context.get('description'):
+            context['description'] = custom_fmtstr(context.get('description'), date, room_title)
+        threshold = engine.config.get('filtering_threshold')
+        if threshold:
+            data['threshold'] = threshold
+
         sig = inspect.signature(cls)
         kwargs = {}
         for k in sig.parameters:
             v = context.get(k)
             if v:
                 kwargs[k] = v
-        date = data.get("date") if data.get("date") else common.time_now()
-        threshold = engine.config.get('filtering_threshold')
-        if threshold:
-            data['threshold'] = threshold
-        if data.get("format_title") is None:
-            data["format_title"] = f"{date}{index}"
         return cls(index, data, **kwargs).start()
     except:
         logger.exception("Uncaught exception:")
+
+
+def custom_fmtstr(string, time, title):
+    return common.time.format_time(time, string).format(title=title)
