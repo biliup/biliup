@@ -87,12 +87,13 @@ class DownloadBase:
             except:
                 logger.exception("Uncaught exception:")
                 continue
+            finally:
+                self.close()
             if ret is False:
                 break
             elif ret == 1:
                 time.sleep(45)
             i += 1
-        self.close()
         logger.info(f'退出下载{i}: {self.fname}')
         format_title = None
         if self.title:
