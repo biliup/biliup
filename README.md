@@ -3,10 +3,11 @@
 ![GitHub](https://img.shields.io/github/license/ForgQi/bilibiliupload)
 [![Telegram](https://img.shields.io/badge/Telegram-Group-blue.svg?logo=telegram)](https://t.me/+IkpIABHqy6U0ZTQ5)
 
-**文档地址**：<https://forgqi.github.io/biliup>
-
-详细安装过程可看 [@waitsaber](https://github.com/waitsaber) 写的 [Ubuntu](https://blog.waitsaber.org/archives/129) 和 [CentOS](https://blog.waitsaber.org/archives/163) 教程
+详细安装过程可看 [@waitsaber](https://github.com/waitsaber) 写的 [Ubuntu](https://blog.waitsaber.org/archives/129) 、[CentOS](https://blog.waitsaber.org/archives/163) 
+、[Windows](https://blog.waitsaber.org/archives/169) 教程
 与 [常见问题](https://blog.waitsaber.org/archives/167) 解决方案
+
+**文档地址**：<https://forgqi.github.io/biliup>
 
 * 支持自动录制各大直播平台实时流，上传到bilibili。
 * 支持YouTube频道自动搬运

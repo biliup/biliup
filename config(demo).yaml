@@ -11,8 +11,8 @@ user: # 在填了cookies的情况下优先使用cookies上传，如需使用用�
 #    app_key: bca7e84c2d947ac6 # 若账号密码方式无法登录可尝试更改此值
 #    appsec: 60698ba2f68e01ce44738920a0ffe768 
 
-# 选择上传插件
-uploader: bili_web
+# 选择全局默认上传插件，Noop为不上传，但会执行后处理
+#uploader: Noop
 # b站上传线路选择，默认为自动模式，目前可手动切换为bda2, kodo, ws, qn
 lines: AUTO
 # b站提交接口，默认自动选择，可选web，client
@@ -44,6 +44,8 @@ streamers:
         copyright: 2 # 1为自制
         cover_path: /cover/up.jpg
         description: 视频简介
+        # 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
+        uploader: bili_web
         postprocessor: # 上传完成后，将按自定义顺序执行自定义操作
             - run: echo hello! # 执行任意命令，等同于在shell中运行,视频文件路径作为标准输入传入
             - mv: backup/ # 移动文件到backup目录下

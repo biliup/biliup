@@ -56,7 +56,7 @@ def process_upload(stream_info):
     url = stream_info['url']
     yield Event(BE_MODIFIED, (url, 2))
     try:
-        upload(config.get("uploader") if config.get("uploader") else "bili_web", stream_info)
+        upload(stream_info)
     finally:
         yield Event(BE_MODIFIED, args=(url, 0))
 
