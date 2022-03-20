@@ -25,7 +25,7 @@ def upload(data):
             return logger.error(f"No such uploader: {platform}")
 
         date = data.get("date") if data.get("date") else common.time.now()
-        room_title = data.get('title') if data.get('title') else ''
+        room_title = data.get('title') if data.get('title') else index
         if context.get('title'):
             data["format_title"] = custom_fmtstr(context.get('title'), date, room_title)
         else:
