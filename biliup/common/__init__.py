@@ -15,6 +15,5 @@ def new_hook(t, v, tb):
 
 
 sys.excepthook = new_hook
-print('sys.excepthook = new_hook')
 
 __all__ = ['time', ]

@@ -17,7 +17,8 @@
 * 支持Web API与客户端API上传
 
 相关配置示例在config.yaml文件中，如直播间地址，b站账号密码\
-由于目前使用账号密码登录，大概率触发验证。请使用命令行工具登录，将登录返回的信息填入配置文件，且使用引号括起yaml中cookie的数字代表其为字符串
+由于目前使用账号密码登录，大概率触发验证。请使用命令行工具登录，将登录返回的信息填入配置文件，
+且使用引号括起yaml中cookie的数字代表其为字符串, 如果还有问题可以 [加群讨论](https://github.com/ForgQi/biliup/discussions/58#discussioncomment-2388776) 。
 >演示视频：[BV1ip4y1x7Gi](https://www.bilibili.com/video/BV1ip4y1x7Gi) \
 >登录B站获取cookie和token：[命令行投稿工具](https://github.com/ForgQi/biliup-rs) \
 >B站图形界面：[投稿客户端GUI](https://github.com/ForgQi/Caution)
@@ -159,7 +160,7 @@ def transcoding(data):
 ## Deprecated
 * ~~selenium操作浏览器上传两种方式~~(详见bili_chromeup.py)
 * ~~Windows图形界面版在release中下载AutoTool.msi进行安装~~[AutoTool.msi](https://github.com/ForgQi/bilibiliupload/releases/tag/v0.1.0)
-QQ群：837362626
+
 >关于B站为什么不能多p上传\
 目前bilibili网页端是根据用户权重来限制分p数量的，权重不够的用户切换到客户端的提交接口即可解除这一限制。
 >用户等级大于3，且粉丝数>1000，web端投稿不限制分p数量
