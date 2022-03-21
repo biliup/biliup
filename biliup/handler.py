@@ -1,11 +1,9 @@
 import logging
 
 from . import plugins
-from . import common
+from .downloader import download, check_url
 from .engine import config, invert_dict, Plugin
 from .engine.event import Event, EventManager
-from .downloader import download, check_url
-from .engine.upload import UploadBase
 from .uploader import upload
 
 CHECK = 'check'
@@ -38,26 +36,27 @@ event_manager = create_event_manager()
 
 @event_manager.register(DOWNLOAD, block='Asynchronous1')
 def process(name, url):
-    date = common.time_now(config['streamers'][name].get('title'))
+    stream_info = {
+        'name': name,
+        'url': url,
+    }
     try:
         kwargs = config['streamers'][name].copy()
         kwargs.pop('url')
         suffix = kwargs.get('format')
         if suffix:
             kwargs['suffix'] = suffix
-        download(name, url, **kwargs)
+        stream_info = download(name, url, **kwargs)
     finally:
-        return Event(UPLOAD, (name, url, date))
+        return Event(UPLOAD, (stream_info,))
 
 
 @event_manager.register(UPLOAD, block='Asynchronous2')
-def process_upload(name, url, date):
+def process_upload(stream_info):
+    url = stream_info['url']
     yield Event(BE_MODIFIED, (url, 2))
     try:
-        data = {"url": url, "date": date}
-        if config['streamers'][name].get('title'):
-            data["format_title"] = date
-        upload(config.get("uploader") if config.get("uploader") else "bili_web", name, data)
+        upload(stream_info)
     finally:
         yield Event(BE_MODIFIED, args=(url, 0))
 
@@ -95,8 +94,11 @@ class KernelFunc:
     @event_manager.register(CHECK_UPLOAD)
     def free_upload(self):
         for title, urls in self.streamer_url.items():
-            if self.free(urls) and UploadBase.filter_file(title):
-                yield Event(UPLOAD, args=(title, urls[0], common.time_now(config['streamers'][title].get('title'))))
+            if self.free(urls):
+                yield Event(UPLOAD, args=({
+                    'name': title,
+                    'url': urls[0],
+                },))
 
     @event_manager.register(BE_MODIFIED)
     def revise(self, url, status):

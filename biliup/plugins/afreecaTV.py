@@ -4,7 +4,7 @@ from ..engine.decorators import Plugin
 from ..plugins import match1, logger
 from ..engine.download import DownloadBase
 
-VALID_URL_BASE = r"https?://play\.afreecatv\.com/(?P<username>\w+)(?:/\d+)?"
+VALID_URL_BASE = r"https?://(.*?)\.afreecatv\.com/(?P<username>\w+)(?:/\d+)?"
 
 STREAM_INFO_URLS = "{rmd}/broad_stream_assign.html"
 CHANNEL_API_URL = "http://live.afreecatv.com:8057/afreeca/player_live_api.php"
@@ -12,7 +12,7 @@ CHANNEL_API_URL = "http://live.afreecatv.com:8057/afreeca/player_live_api.php"
 QUALITIES = ["original", "hd", "sd"]
 
 
-@Plugin.download(regexp=r"https?://play\.afreecatv\.com/(?P<username>\w+)(?:/\d+)?")
+@Plugin.download(regexp=r"https?://(.*?)\.afreecatv\.com/(?P<username>\w+)(?:/\d+)?")
 class AfreecaTV(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)

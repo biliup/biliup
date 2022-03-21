@@ -26,8 +26,10 @@ from ..engine.upload import UploadBase, logger
 
 @Plugin.upload(platform="bili_web")
 class BiliWeb(UploadBase):
-    def __init__(self, principal, data, user, submit_api=None, copyright=2, postprocessor=None,
-                 lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description=''):
+    def __init__(
+            self, principal, data, user, submit_api=None, copyright=2, postprocessor=None,
+            dynamic='', lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description=''
+    ):
         super().__init__(principal, data, persistence_path='bili.cookie', postprocessor=postprocessor)
         if tags is None:
             tags = []
@@ -39,10 +41,12 @@ class BiliWeb(UploadBase):
         self.tags = tags
         self.cover_path = cover_path
         self.desc = description
+        self.dynamic = dynamic
         self.copyright = copyright
 
     def upload(self, file_list):
         video = Data()
+        video.dynamic = self.dynamic
         with BiliBili(video) as bili:
             bili.app_key = self.user.get('app_key')
             bili.appsec = self.user.get('appsec')
@@ -519,7 +523,6 @@ class Data:
         if self.dtime and self.dtime - int(time.time()) <= 14400:
             self.dtime = None
         if isinstance(self.tag, list):
-            self.dynamic = f"#{'##'.join(self.tag)}#"
             self.tag = ','.join(self.tag)
 
     def delay_time(self, dtime: int):
@@ -531,7 +534,6 @@ class Data:
         """设置标签，tag为数组"""
         if 'biliup' not in tag:
             tag.append('biliup')
-        self.dynamic = f"#{'##'.join(tag)}#"
         self.tag = ','.join(tag)
 
     def append(self, video):

@@ -11,18 +11,19 @@ user: # 在填了cookies的情况下优先使用cookies上传，如需使用用�
 #    app_key: bca7e84c2d947ac6 # 若账号密码方式无法登录可尝试更改此值
 #    appsec: 60698ba2f68e01ce44738920a0ffe768 
 
-# 选择上传插件
-uploader: bili_web
+# 选择全局默认上传插件，Noop为不上传，但会执行后处理
+#uploader: Noop
 # b站上传线路选择，默认为自动模式，目前可手动切换为bda2, kodo, ws, qn
 lines: AUTO
 # b站提交接口，默认自动选择，可选web，client
-#submit_api: client
+submit_api: client
 # 单文件并发上传数，未达到带宽上限时增大此值可提高上传速度
 threads: 3
 # 录像单文件大小限制，单位Byte，超过此大小分段下载
 file_size: 2621440000
 # 录像单文件时间限制，格式'00:00:00'（时分秒），超过此大小分段下载，如需使用大小分段请注释此字段
 #segment_time: '00:50:00'
+filtering_threshold: 20 # 小于此大小的视频文件将会被过滤删除，单位MB
 # 如遇到斗鱼录制卡顿可以尝试切换线路，tct-h5（备用线路5），ali-h5（备用线路6），akm-h5（主线路1）
 #douyucdn: tct-h5
 # 如遇到虎牙录制卡顿可以尝试切换线路，AL（阿里），BD（百度），TX（腾讯）
@@ -38,11 +39,14 @@ streamers:
         url:
             - https://www.twitch.tv/innovation_s2
             - https://www.panda.tv/1160340
-        title: "星际2INnoVation吕布卫星人族天梯第一视角%Y-%m-%d" # 自定义标题的时间格式
+        title: "{title}第一视角%Y-%m-%d" # 自定义标题的时间格式, {title}代表直播间标题
         tid: 171 # 投稿分区码,174为生活，其他分区
         copyright: 2 # 1为自制
         cover_path: /cover/up.jpg
-        description: 视频简介
+        description: "视频简介: {title} %Y-%m-%d" # 支持strftime, {title}占位符
+        dynamic: '#空间动态#'
+        # 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
+        uploader: bili_web
         postprocessor: # 上传完成后，将按自定义顺序执行自定义操作
             - run: echo hello! # 执行任意命令，等同于在shell中运行,视频文件路径作为标准输入传入
             - mv: backup/ # 移动文件到backup目录下

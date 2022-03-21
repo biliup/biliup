@@ -10,15 +10,15 @@ logger = logging.getLogger('biliup')
 
 
 def download(fname, url, **kwargs):
+    pg = general.__plugin__(fname, url)
     for plugin in Plugin.download_plugins:
         if re.match(plugin.VALID_URL_BASE, url):
             pg = plugin(fname, url)
             for k in pg.__dict__:
                 if kwargs.get(k):
                     pg.__dict__[k] = kwargs.get(k)
-            pg.start()
-            return
-    general.__plugin__(fname, url).start()
+            break
+    return pg.start()
 
 
 def check_url(plugin, secs=15):
