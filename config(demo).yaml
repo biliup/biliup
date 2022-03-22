@@ -32,6 +32,8 @@ filtering_threshold: 20 # 小于此大小的视频文件将会被过滤删除，
 #huyacdn: AL
 # 如遇到哔哩哔哩录制跳帧可以尝试修改platform值，web（flv），h5（m3u8）
 #biliplatform: web
+# 如需要录制抖音请在此填入cookie需要__ac_nonce与__ac_signature的值
+#douyin_cookie: '__ac_nonce=123456; __ac_signature=123456;'
 
 streamers:
     星际2Stats拔本神族天梯第一视角: # 最小配置示例
