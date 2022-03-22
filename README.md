@@ -14,7 +14,7 @@
 * 支持twitch直播回放列表自动搬运至b站，如链接https://www.twitch.tv/xxxx/videos?filter=archives&sort=time 
 * 自动选择上传线路，保证国内外vps上传质量和速度
 * 可分别控制下载与上传并发量
-* 支持Web API与客户端API上传
+* 支持cos-internal，腾讯云上海内网上传，免流 + 大幅提速
 
 相关配置示例在config.yaml文件中，如直播间地址，b站账号密码\
 由于目前使用账号密码登录，大概率触发验证。请使用命令行工具登录，将登录返回的信息填入配置文件，

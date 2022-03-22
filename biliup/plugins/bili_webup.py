@@ -16,7 +16,7 @@ from urllib.parse import quote
 import aiohttp
 import requests.utils
 import rsa
-import urllib3.exceptions
+import xml.etree.ElementTree as ET
 from requests.adapters import HTTPAdapter, Retry
 
 from biliup import config
@@ -237,9 +237,9 @@ class BiliBili:
             if lines == 'qn':
                 self._auto_os = {"os": "upos", "query": "upcdn=qn&probe_version=20200810",
                                  "probe_url": "//upos-sz-upcdnqn.bilivideo.com/OK"}
-            if lines == 'cos':
-                self._auto_os = {"os": "cos", "query": "upcdn=qn&probe_version=20200810",
-                                 "probe_url": "//upos-sz-upcdnqn.bilivideo.com/OK"}
+            if lines == 'cos-internal':
+                self._auto_os = {"os": "cos", "query": "",
+                                 "probe_url": ""}
             logger.info(f"线路选择 => {self._auto_os['os']}: {self._auto_os['query']}. time: {self._auto_os.get('cost')}")
         if self._auto_os['os'] == 'upos':
             upload = self.upos
@@ -269,33 +269,33 @@ class BiliBili:
                 f"https://member.bilibili.com/preupload?{self._auto_os['query']}", params=query,
                 timeout=5)
             return asyncio.run(upload(f, total_size, ret.json(), tasks=tasks))
-    async def cos(self,file,total_size,ret,chunk_size=4194304,tasks=3):
+
+    async def cos(self, file, total_size, ret, chunk_size=4194304, tasks=3):
         filename = file.name
-        accelerate = config["accelerate"]
-        url = ret["url"]
-        if accelerate!="AUTO":
-            accelerate="ap-"+accelerate
-            url=url.replace("accelerate",accelerate)
+        url = ret["url"].replace("accelerate", "ap-shanghai")
         biz_id = ret["biz_id"]
-        post_headers={
-            "Authorization":ret["post_auth"],
+        post_headers = {
+            "Authorization": ret["post_auth"],
         }
-        put_headers={
-            "Authorization":ret["put_auth"],
+        put_headers = {
+            "Authorization": ret["put_auth"],
         }
-        import xmltodict
-        upload_id =  xmltodict.parse(self.__session.post(f'{url}?uploads&output=json', timeout=5,
-                                        headers=post_headers).content)["InitiateMultipartUploadResult"]["UploadId"]
+
+        initiate_multipart_upload_result = ET.fromstring(self.__session.post(f'{url}?uploads&output=json', timeout=5,
+                                                                             headers=post_headers).content)
+        upload_id = initiate_multipart_upload_result.find('UploadId').text
         # 开始上传
         parts = []  # 分块信息
         chunks = math.ceil(total_size / chunk_size)  # 获取分块数量
+
         async def upload_chunk(session, chunks_data, params):
             async with session.put(url, params=params, raise_for_status=True,
                                    data=chunks_data, headers=put_headers) as r:
                 end = time.perf_counter() - start
-                parts.append({"Part":{"PartNumber": params['chunk'] + 1, "ETag": r.headers['Etag']}})                
+                parts.append({"Part": {"PartNumber": params['chunk'] + 1, "ETag": r.headers['Etag']}})
                 sys.stdout.write(f"\r{params['end'] / 1000 / 1000 / end:.2f}MB/s "
                                  f"=> {params['partNumber'] / chunks:.1%}")
+
         start = time.perf_counter()
         await self._upload({
             'uploadId': upload_id,
@@ -303,43 +303,44 @@ class BiliBili:
             'total': total_size
         }, file, chunk_size, upload_chunk, tasks=tasks)
         cost = time.perf_counter() - start
-        fetch_headers={
-            "X-Upos-Fetch-Source":ret["fetch_headers"]["X-Upos-Fetch-Source"],
-            "X-Upos-Auth":ret["fetch_headers"]["X-Upos-Auth"],
-            "Fetch-Header-Authorization":ret["fetch_headers"]["Fetch-Header-Authorization"]
+        fetch_headers = {
+            "X-Upos-Fetch-Source": ret["fetch_headers"]["X-Upos-Fetch-Source"],
+            "X-Upos-Auth": ret["fetch_headers"]["X-Upos-Auth"],
+            "Fetch-Header-Authorization": ret["fetch_headers"]["Fetch-Header-Authorization"]
         }
+        parts = sorted(parts, key=lambda x: x['Part']['PartNumber'])
+        complete_multipart_upload = ET.Element('CompleteMultipartUpload')
+        for part in parts:
+            part_et = ET.SubElement(complete_multipart_upload, 'Part')
+            part_number = ET.SubElement(part_et, 'PartNumber')
+            part_number.text = str(part['Part']['PartNumber'])
+            e_tag = ET.SubElement(part_et, 'ETag')
+            e_tag.text = part['Part']['ETag']
+        xml = ET.tostring(complete_multipart_upload)
         ii = 0
-        import dict2xml
-        parts=sorted(parts,key=lambda x:x['Part']['PartNumber'])
-        xml=dict2xml.Converter(newlines=False).build(parts)
-        xml="<CompleteMultipartUpload>"+xml+"</CompleteMultipartUpload>"
         while ii <= 3:
             try:
-                r = self.__session.post(url, params={'uploadId': upload_id},data=xml, headers=post_headers, timeout=15)
-                if r.status_code == 200:  
+                res = self.__session.post(url, params={'uploadId': upload_id}, data=xml, headers=post_headers, timeout=15)
+                if res.status_code == 200:
                     break
-            except(urllib3.exceptions.ReadTimeoutError, urllib3.exceptions.MaxRetryError,
-                   requests.exceptions.ConnectionError):
+                raise IOError(res.text)
+            except IOError:
                 ii += 1
                 logger.info("请求合并分片出现问题，尝试重连，次数：" + str(ii))
                 time.sleep(15)
-        if r.status_code !=200:
-            raise Exception(r.text)
-        ii=0
+        ii = 0
         while ii <= 3:
             try:
-                r= self.__session.post("https:"+ret["fetch_url"], headers=fetch_headers, timeout=15).json()
-                if r.get('OK') == 1:         
-                    logger.info(f'{filename} uploaded >> {total_size / 1000 / 1000 / cost:.2f}MB/s. {r}')
+                res = self.__session.post("https:" + ret["fetch_url"], headers=fetch_headers, timeout=15).json()
+                if res.get('OK') == 1:
+                    logger.info(f'{filename} uploaded >> {total_size / 1000 / 1000 / cost:.2f}MB/s. {res}')
                     return {"title": splitext(filename)[0], "filename": ret["bili_filename"], "desc": ""}
-            except(urllib3.exceptions.ReadTimeoutError, urllib3.exceptions.MaxRetryError,
-                   requests.exceptions.ConnectionError):
+                raise IOError(res)
+            except IOError:
                 ii += 1
                 logger.info("上传出现问题，尝试重连，次数：" + str(ii))
                 time.sleep(15)
-        if r.get('OK') != 1:
-            raise Exception(r)
-        
+
     async def kodo(self, file, total_size, ret, chunk_size=4194304, tasks=3):
         filename = file.name
         bili_filename = ret['bili_filename']
@@ -425,13 +426,11 @@ class BiliBili:
                 if r.get('OK') == 1:
                     logger.info(f'{filename} uploaded >> {total_size / 1000 / 1000 / cost:.2f}MB/s. {r}')
                     return {"title": splitext(filename)[0], "filename": splitext(basename(upos_uri))[0], "desc": ""}
-            except(urllib3.exceptions.ReadTimeoutError, urllib3.exceptions.MaxRetryError,
-                   requests.exceptions.ConnectionError):
+                raise IOError(r)
+            except IOError:
                 ii += 1
                 logger.info("上传出现问题，尝试重连，次数：" + str(ii))
                 time.sleep(15)
-        if r.get('OK') != 1:
-            raise Exception(r)
 
     @staticmethod
     async def _upload(params, file, chunk_size, afunc, tasks=3):
