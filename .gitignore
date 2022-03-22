@@ -8,6 +8,8 @@
 *.mp4
 *.part
 old/
+venv./
+debug.py
 config.yaml
 chromedriver.*
 /configlog.ini
