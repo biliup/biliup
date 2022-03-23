@@ -27,7 +27,7 @@ from ..engine.upload import UploadBase, logger
 @Plugin.upload(platform="bili_web")
 class BiliWeb(UploadBase):
     def __init__(
-            self, principal, data, user, submit_api=None, copyright=2, postprocessor=None,
+            self, principal, data, user, submit_api=None, copyright=2, postprocessor=None, dtime=None,
             dynamic='', lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description=''
     ):
         super().__init__(principal, data, persistence_path='bili.cookie', postprocessor=postprocessor)
@@ -43,6 +43,7 @@ class BiliWeb(UploadBase):
         self.desc = description
         self.dynamic = dynamic
         self.copyright = copyright
+        self.dtime = dtime
 
     def upload(self, file_list):
         video = Data()
@@ -64,6 +65,8 @@ class BiliWeb(UploadBase):
             # 设置视频分区,默认为174 生活，其他分区
             video.tid = self.tid
             video.set_tag(self.tags)
+            if self.dtime:
+                video.delay_time(int(time.time()) + self.dtime)
             if self.cover_path:
                 video.cover = bili.cover_up(self.cover_path).replace('http:', '')
             ret = bili.submit(self.submit_api)  # 提交视频
@@ -600,8 +603,8 @@ class Data:
             self.tag = ','.join(self.tag)
 
     def delay_time(self, dtime: int):
-        """设置延时发布时间，距离提交大于4小时，格式为10位时间戳"""
-        if dtime - int(time.time()) > 14400:
+        """设置延时发布时间，距离提交大于2小时，格式为10位时间戳"""
+        if dtime - int(time.time()) > 7200:
             self.dtime = dtime
 
     def set_tag(self, tag: list):

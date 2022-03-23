@@ -46,8 +46,9 @@ streamers:
         tid: 171 # 投稿分区码,174为生活，其他分区
         copyright: 2 # 1为自制
         cover_path: /cover/up.jpg
-        description: "视频简介: {title} %Y-%m-%d" # 支持strftime, {title}占位符
+        description: "视频简介: {title} %Y-%m-%d %H:%M:%S" # 支持strftime, {title}占位符
         dynamic: '#空间动态#'
+        dtime: 14400 # 设置延时发布时间，距离提交大于2小时，格式为时间戳
         # 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
         uploader: bili_web
         postprocessor: # 上传完成后，将按自定义顺序执行自定义操作
