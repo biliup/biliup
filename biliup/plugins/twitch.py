@@ -36,6 +36,7 @@ class TwitchVideos(DownloadBase):
                 if ydl.in_download_archive(entry):
                     continue
                 self.raw_stream_url = entry['url']
+                self.room_title = entry.get('title')
                 ydl.record_download_archive(entry)
                 return True
 
@@ -46,7 +47,7 @@ class TwitchVideos(DownloadBase):
         def check(self):
             with youtube_dl.YoutubeDL({'download_archive': 'archive.txt'}) as ydl:
                 for channel_name, url in self.not_live():
-                    info = ydl.extract_info(url, download=False)
+                    info = ydl.extract_info(url, download=False, process=False)
                     for entry in info['entries']:
                         if ydl.in_download_archive(entry):
                             continue
@@ -90,6 +91,9 @@ class Twitch(DownloadBase):
     def check_stream(self):
         if not list(Twitch.BatchCheck([self.url]).check()):
             return
+        gql = Twitch.BatchCheck([self.url]).get_streamer()
+        for data in gql:
+            self.room_title = data.get('data').get('user').get('lastBroadcast').get('title')
         port = random.randint(1025, 65535)
         self.proc = subprocess.Popen([
             "streamlink", "--player-external-http", "--twitch-disable-ads",
