@@ -54,6 +54,7 @@ class BiliWeb(UploadBase):
             bili.login(self.persistence_path, self.user)
             for file in file_list:
                 video_part = bili.upload_file(file, self.lines, self.threads)  # 上传视频
+                video_part['title'] = video_part['title'][:80]
                 video.append(video_part)  # 添加已经上传的视频
             video.title = self.data["format_title"]
             video.desc = self.desc + '''
