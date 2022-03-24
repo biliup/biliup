@@ -274,7 +274,7 @@ class BiliBili:
                 timeout=5)
             return asyncio.run(upload(f, total_size, ret.json(), tasks=tasks))
 
-    async def cos(self, file, total_size, ret, chunk_size=4194304, tasks=3):
+    async def cos(self, file, total_size, ret, chunk_size=10485760, tasks=3):
         filename = file.name
         url = ret["url"].replace("accelerate", "ap-shanghai")
         biz_id = ret["biz_id"]
