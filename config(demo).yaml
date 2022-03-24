@@ -9,7 +9,7 @@ user: # 在填了cookies的情况下优先使用cookies上传，如需使用用�
         username: your usrname
         password: your password
 #    app_key: bca7e84c2d947ac6 # 若账号密码方式无法登录可尝试更改此值
-#    appsec: 60698ba2f68e01ce44738920a0ffe768 
+#    appsec: 60698ba2f68e01ce44738920a0ffe768
 
 # 选择全局默认上传插件，Noop为不上传，但会执行后处理
 #uploader: Noop
@@ -33,6 +33,8 @@ filtering_threshold: 20 # 小于此大小的视频文件将会被过滤删除，
 #biliplatform: web
 # 如需要录制抖音请在此填入cookie需要__ac_nonce与__ac_signature的值
 #douyin_cookie: '__ac_nonce=123456; __ac_signature=123456;'
+# Netscape 格式的 Cookies 文本路径
+#youtube_cookie: 'cookiejar.txt'
 
 streamers:
     星际2Stats拔本神族天梯第一视角: # 最小配置示例
