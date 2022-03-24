@@ -97,7 +97,9 @@ class Twitch(DownloadBase):
         port = random.randint(1025, 65535)
         self.proc = subprocess.Popen([
             "streamlink", "--player-external-http", "--twitch-disable-ads",
-            "--player-external-http-port", str(port),self.url, "best"])
+            "--twitch-disable-hosting", "--twitch-disable-reruns",
+            "--player-external-http-port", str(port),self.url, "best"
+        ])
         self.raw_stream_url = f"http://localhost:{port}"
         i = 0
         while i < 5:
