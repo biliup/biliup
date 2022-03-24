@@ -23,7 +23,7 @@ class Douyin(DownloadBase):
             "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                           "Chrome/94.0.4606.71 Safari/537.36 Edg/94.0.992.38",
             "referer": "https://live.douyin.com/",
-            "cookie": f"{config.get('douyin_cookie')}"
+            "cookie": config.get('douyin_cookie')
         }
         r1 = requests.get('https://live.douyin.com/' + rid, headers=headers).text \
             .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]

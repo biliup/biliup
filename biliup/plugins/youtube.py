@@ -12,7 +12,7 @@ VALID_URL_BASE = r'https?://(?:(?:www|m)\.)?youtube\.com/(?P<id>.*?)\??(.*?)'
 class Youtube(DownloadBase):
     def __init__(self, fname, url, suffix='webm'):
         DownloadBase.__init__(self, fname, url, suffix=suffix)
-        self.cookiejarFile = f"{config.get('youtube_cookie')}"
+        self.cookiejarFile = config.get('youtube_cookie')
 
     def check_stream(self):
         with yt_dlp.YoutubeDL({'download_archive': 'archive.txt', 'ignoreerrors': True, 'extract_flat': True, 'cookiefile': self.cookiejarFile}) as ydl:
