@@ -1,6 +1,7 @@
 import yt_dlp
 from yt_dlp.utils import MaxDownloadsReached
 
+from .. import config
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from . import logger
@@ -11,11 +12,13 @@ VALID_URL_BASE = r'https?://(?:(?:www|m)\.)?youtube\.com/(?P<id>.*?)\??(.*?)'
 class Youtube(DownloadBase):
     def __init__(self, fname, url, suffix='webm'):
         DownloadBase.__init__(self, fname, url, suffix=suffix)
+        self.cookiejarFile = f"{config.get('youtube_cookie')}"
 
     def check_stream(self):
-        with yt_dlp.YoutubeDL({'download_archive': 'archive.txt', 'ignoreerrors': True, 'extract_flat': True}) as ydl:
+        with yt_dlp.YoutubeDL({'download_archive': 'archive.txt', 'ignoreerrors': True, 'extract_flat': True, 'cookiefile': self.cookiejarFile}) as ydl:
             info = ydl.extract_info(self.url, download=False, process=False)
             if info is None:
+                logger.warning(self.cookiejarFile)
                 logger.warning(self.url)
                 return False
             if info.get('entries') is None:
@@ -32,6 +35,8 @@ class Youtube(DownloadBase):
         try:
             self.ydl_opts = {
                 'outtmpl': filename,
+                'cookiefile': self.cookiejarFile,
+                # 'proxy': proxyUrl,
                 'ignoreerrors': True,
                 'max_downloads': 1,
                 'download_archive': 'archive.txt'
