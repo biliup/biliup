@@ -38,7 +38,7 @@ class Douyin(DownloadBase):
             if r4.get('room'):
                 room_info = r4['room']
                 if room_info.get('stream_url'):
-                    r5 = room_info['stream_url']['flv_pull_url']
-                    self.raw_stream_url = list(r5.values())[0]
+                    r5 = room_info['stream_url']['live_core_sdk_data']['pull_data']['stream_data']
+                    self.raw_stream_url = json.loads(r5)['data']['origin']['main']['flv']
                     self.room_title = room_info['title']
                     return True
