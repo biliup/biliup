@@ -253,7 +253,6 @@ class BiliBili:
         elif self._auto_os['os'] == 'cos':
             upload = self.cos
         elif self._auto_os['os'] == 'cos-internal':
-            self._auto_os['os'] = 'cos'
             upload = lambda *args, **kwargs: self.cos(*args, **kwargs, internal=True)
         elif self._auto_os['os'] == 'kodo':
             upload = self.kodo
@@ -267,7 +266,7 @@ class BiliBili:
         total_size = os.path.getsize(filepath)
         with open(filepath, 'rb') as f:
             query = {
-                'r': self._auto_os['os'],
+                'r': self._auto_os['os'] if self._auto_os['os'] != 'cos-internal' else 'cos',
                 'profile': 'ugcupos/bup' if 'upos' == self._auto_os['os'] else "ugcupos/bupfetch",
                 'ssl': 0,
                 'version': '2.8.12',
