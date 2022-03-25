@@ -45,12 +45,8 @@ class DownloadBase:
                 '-i', self.raw_stream_url, *self.default_output_args, *self.opt_args,
                 '-c', 'copy', '-f', self.suffix]
         if config.get('segment_time'):
-            if self.room_title:
-                args += ['-f', 'segment', f'[{self.fname}][{time.strftime("%Y-%m-%d %H_%M_%S", time.localtime())}]'
-                                          f'[{self.room_title}] part-%03d.{self.suffix}']
-            else:
-                args += ['-f', 'segment', f'{self.fname} {time.strftime("%Y-%m-%d %H_%M_%S", time.localtime())} part'
-                                          f'-%03d.{self.suffix}']
+            args += ['-f', 'segment',
+                     f'{self.fname} {time.strftime("%Y-%m-%d %H_%M_%S", time.localtime())} part-%03d.{self.suffix}']
         else:
             args += [f'{filename}.part']
 
@@ -115,11 +111,7 @@ class DownloadBase:
 
     @property
     def file_name(self):
-        if self.room_title:
-            file_name = '[%s][%s][%s]' % (self.fname, time.strftime("%Y-%m-%d %H_%M_%S", time.localtime()), self.room_title)
-        else:
-            file_name = '%s%s' % (self.fname, str(time.time())[:10])
-        return file_name
+        return f'{self.fname}{time.strftime("%Y-%m-%dT%H_%M_%S", time.localtime())}'
 
     def close(self):
         pass
