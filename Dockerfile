@@ -9,6 +9,7 @@ RUN \
   apk add --no-cache ffmpeg musl-dev libffi-dev zlib-dev jpeg-dev ca-certificates && \
   git clone --depth 1 https://github.com/ForgQi/biliup.git && \
   cd biliup && \
+  pip3 install --no-cache-dir quickjs && \
   pip3 install --no-cache-dir -r requirements.txt && \
   pip3 install -e . && \
   apk del .build-deps

@@ -8,4 +8,3 @@ PyYAML>=4.2b1
 streamlink>=0.14.2
 ykdl>=1.7.1
 rsa>=4.6
-quickjs>=1.17.0

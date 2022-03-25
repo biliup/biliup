@@ -256,10 +256,6 @@ class BiliBili:
             upload = lambda *args, **kwargs: self.cos(*args, **kwargs, internal=True)
         elif self._auto_os['os'] == 'kodo':
             upload = self.kodo
-        elif self._auto_os['os'] == "gcs":
-            raise NotImplementedError('gcs')
-        elif self._auto_os['os'] == "bos":
-            raise NotImplementedError('bos')
         else:
             logger.error(f"NoSearch:{self._auto_os['os']}")
             raise NotImplementedError(self._auto_os['os'])
