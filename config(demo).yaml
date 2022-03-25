@@ -14,7 +14,7 @@ user: # 在填了cookies的情况下优先使用cookies上传，如需使用用�
 # 选择全局默认上传插件，Noop为不上传，但会执行后处理
 #uploader: Noop
 
-# b站上传线路选择，默认为自动模式，目前可手动切换为bda2, kodo, ws, qn, cos-internal(支持腾讯云内网免流+提速)
+# b站上传线路选择，默认为自动模式，目前可手动切换为bda2, kodo, ws, qn, cos, cos-internal(支持腾讯云内网免流+提速)
 lines: AUTO
 # b站提交接口，默认自动选择，可选web，client
 submit_api: client

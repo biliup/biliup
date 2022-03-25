@@ -241,14 +241,20 @@ class BiliBili:
             if lines == 'qn':
                 self._auto_os = {"os": "upos", "query": "upcdn=qn&probe_version=20200810",
                                  "probe_url": "//upos-sz-upcdnqn.bilivideo.com/OK"}
-            if lines == 'cos-internal':
+            if lines == 'cos':
                 self._auto_os = {"os": "cos", "query": "",
+                                 "probe_url": ""}
+            if lines == 'cos-internal':
+                self._auto_os = {"os": "cos-internal", "query": "",
                                  "probe_url": ""}
             logger.info(f"线路选择 => {self._auto_os['os']}: {self._auto_os['query']}. time: {self._auto_os.get('cost')}")
         if self._auto_os['os'] == 'upos':
             upload = self.upos
         elif self._auto_os['os'] == 'cos':
             upload = self.cos
+        elif self._auto_os['os'] == 'cos-internal':
+            self._auto_os['os'] = 'cos'
+            upload = lambda *args, **kwargs: self.cos(*args, **kwargs, internal=True)
         elif self._auto_os['os'] == 'kodo':
             upload = self.kodo
         elif self._auto_os['os'] == "gcs":
@@ -274,9 +280,11 @@ class BiliBili:
                 timeout=5)
             return asyncio.run(upload(f, total_size, ret.json(), tasks=tasks))
 
-    async def cos(self, file, total_size, ret, chunk_size=10485760, tasks=3):
+    async def cos(self, file, total_size, ret, chunk_size=10485760, tasks=3, internal=False):
         filename = file.name
-        url = ret["url"].replace("accelerate", "ap-shanghai")
+        url = ret["url"]
+        if internal:
+            url = url.replace("cos.accelerate", "cos-internal.ap-shanghai")
         biz_id = ret["biz_id"]
         post_headers = {
             "Authorization": ret["post_auth"],
