@@ -4,7 +4,7 @@ import time
 from urllib.parse import urlencode
 
 import requests
-import youtube_dl
+import yt_dlp
 
 from ..engine.decorators import Plugin
 from ..plugins import BatchCheckBase, match1
@@ -30,12 +30,13 @@ class TwitchVideos(DownloadBase):
         DownloadBase.__init__(self, fname, url, suffix=suffix)
 
     def check_stream(self):
-        with youtube_dl.YoutubeDL({'download_archive': 'archive.txt'}) as ydl:
+        with yt_dlp.YoutubeDL({'download_archive': 'archive.txt'}) as ydl:
             info = ydl.extract_info(self.url, download=False)
             for entry in info['entries']:
                 if ydl.in_download_archive(entry):
                     continue
                 self.raw_stream_url = entry['url']
+                self.room_title = entry.get('title')
                 ydl.record_download_archive(entry)
                 return True
 
@@ -44,9 +45,9 @@ class TwitchVideos(DownloadBase):
             BatchCheckBase.__init__(self, pattern_id=VALID_URL_BASE, urls=urls)
 
         def check(self):
-            with youtube_dl.YoutubeDL({'download_archive': 'archive.txt'}) as ydl:
+            with yt_dlp.YoutubeDL({'download_archive': 'archive.txt'}) as ydl:
                 for channel_name, url in self.not_live():
-                    info = ydl.extract_info(url, download=False)
+                    info = ydl.extract_info(url, download=False, process=False)
                     for entry in info['entries']:
                         if ydl.in_download_archive(entry):
                             continue
@@ -90,10 +91,15 @@ class Twitch(DownloadBase):
     def check_stream(self):
         if not list(Twitch.BatchCheck([self.url]).check()):
             return
+        gql = Twitch.BatchCheck([self.url]).get_streamer()
+        for data in gql:
+            self.room_title = data.get('data').get('user').get('lastBroadcast').get('title')
         port = random.randint(1025, 65535)
         self.proc = subprocess.Popen([
             "streamlink", "--player-external-http", "--twitch-disable-ads",
-            "--player-external-http-port", str(port),self.url, "best"])
+            "--twitch-disable-hosting", "--twitch-disable-reruns",
+            "--player-external-http-port", str(port),self.url, "best"
+        ])
         self.raw_stream_url = f"http://localhost:{port}"
         i = 0
         while i < 5:
@@ -102,10 +108,10 @@ class Twitch(DownloadBase):
             time.sleep(1)
             i += 1
         return True
-        # with youtube_dl.YoutubeDL() as ydl:
+        # with yt_dlp.YoutubeDL() as ydl:
         #     try:
         #         info = ydl.extract_info(self.url, download=False)
-        #     except youtube_dl.utils.DownloadError as e:
+        #     except yt_dlp.utils.DownloadError as e:
         #         logger.warning(self.url, exc_info=e)
         #         return
         #     self.raw_stream_url = info['formats'][-1]['url']

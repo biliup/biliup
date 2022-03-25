@@ -58,8 +58,9 @@ class DownloadBase:
         try:
             with proc.stdout as stdout:
                 for line in iter(stdout.readline, b''):  # b'\n'-separated lines
-                    print(line.decode(), end='', file=sys.stderr)
-                    logger.debug(line.decode().rstrip())
+                    decode_line = line.decode(errors='ignore')
+                    print(decode_line, end='', file=sys.stderr)
+                    logger.debug(decode_line.rstrip())
             retval = proc.wait()
         except KeyboardInterrupt:
             if sys.platform != 'win32':

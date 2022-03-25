@@ -1,11 +1,8 @@
-import time
-
-import youtube_dl
-from youtube_dl import MaxDownloadsReached
+import yt_dlp
+from yt_dlp.utils import MaxDownloadsReached
 
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
-from ..plugins import BatchCheckBase
 from . import logger
 
 VALID_URL_BASE = r'https?://(?:(?:www|m)\.)?youtube\.com/(?P<id>.*?)\??(.*?)'
@@ -16,7 +13,7 @@ class Youtube(DownloadBase):
         DownloadBase.__init__(self, fname, url, suffix=suffix)
 
     def check_stream(self):
-        with youtube_dl.YoutubeDL({'download_archive': 'archive.txt', 'ignoreerrors': True, 'extract_flat': True}) as ydl:
+        with yt_dlp.YoutubeDL({'download_archive': 'archive.txt', 'ignoreerrors': True, 'extract_flat': True}) as ydl:
             info = ydl.extract_info(self.url, download=False, process=False)
             if info is None:
                 logger.warning(self.url)
@@ -39,11 +36,11 @@ class Youtube(DownloadBase):
                 'max_downloads': 1,
                 'download_archive': 'archive.txt'
             }
-            with youtube_dl.YoutubeDL(self.ydl_opts) as ydl:
+            with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
                 ydl.download([self.url])
         except MaxDownloadsReached:
             return False
-        except youtube_dl.utils.DownloadError:
+        except yt_dlp.utils.DownloadError:
             logger.exception(self.fname)
             return 1
         return 0

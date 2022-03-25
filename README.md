@@ -14,7 +14,7 @@
 * 支持twitch直播回放列表自动搬运至b站，如链接https://www.twitch.tv/xxxx/videos?filter=archives&sort=time 
 * 自动选择上传线路，保证国内外vps上传质量和速度
 * 可分别控制下载与上传并发量
-* 支持Web API与客户端API上传
+* 支持cos-internal，腾讯云上海内网上传，免流 + 大幅提速
 
 相关配置示例在config.yaml文件中，如直播间地址，b站账号密码\
 由于目前使用账号密码登录，大概率触发验证。请使用命令行工具登录，将登录返回的信息填入配置文件，
@@ -23,8 +23,8 @@
 >登录B站获取cookie和token：[命令行投稿工具](https://github.com/ForgQi/biliup-rs) \
 >B站图形界面：[投稿客户端GUI](https://github.com/ForgQi/Caution)
 ## INSTALLATION
-1. 创建配置文件**config.yaml**，内容参照[config(demo).yaml](https://github.com/ForgQi/bilibiliupload/blob/74b507f085c4545f5a1b3d1fbdd4c8fdef2be058/config(demo).yaml)
-（或可调整配置后直接修改文件名）
+1. 创建最小配置文件 [**config.yaml**](#最小配置文件示例)，完整内容可参照 [config(demo).yaml](https://github.com/ForgQi/bilibiliupload/blob/74b507f085c4545f5a1b3d1fbdd4c8fdef2be058/config(demo).yaml)
+
 2. 安装 __FFmpeg__, __pip__
 3. 安装 __biliup__：
 `pip3 install biliup`
@@ -39,6 +39,8 @@ $ biliup restart
 $ biliup --version
 # 显示帮助以查看更多选项
 $ biliup -h
+# 指定配置文件路径
+$ biliup --config ./config.yaml start
 ```
 
 Linux下以daemon进程启动，录像和日志文件保存在执行目录下，程序执行过程可查看日志文件。
