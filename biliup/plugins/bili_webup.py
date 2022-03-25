@@ -263,6 +263,7 @@ class BiliBili:
         else:
             logger.error(f"NoSearch:{self._auto_os['os']}")
             raise NotImplementedError(self._auto_os['os'])
+        logger.info(f"os: {self._auto_os['os']}")
         total_size = os.path.getsize(filepath)
         with open(filepath, 'rb') as f:
             query = {
@@ -331,7 +332,8 @@ class BiliBili:
         ii = 0
         while ii <= 3:
             try:
-                res = self.__session.post(url, params={'uploadId': upload_id}, data=xml, headers=post_headers, timeout=15)
+                res = self.__session.post(url, params={'uploadId': upload_id}, data=xml, headers=post_headers,
+                                          timeout=15)
                 if res.status_code == 200:
                     break
                 raise IOError(res.text)
