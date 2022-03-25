@@ -7,12 +7,15 @@ from biliup import config
 from ..plugins import fake_headers
 from biliup import common
 
+import requests
+
 logger = logging.getLogger('biliup')
 
 
 class DownloadBase:
     def __init__(self, fname, url, suffix=None, opt_args=None):
         self.room_title = None
+        self.room_cover = None
         if opt_args is None:
             opt_args = []
         self.fname = fname
@@ -41,6 +44,29 @@ class DownloadBase:
         raise NotImplementedError()
 
     def download(self, filename):
+        # 下载封面图默认放入目录下
+        if self.room_cover:
+            '''
+            cover_folder：封面图存放目录
+            cover_filename：封面图文件名，不包含路径。为方便后续处理，设定为房间标题
+            room_cover_path：封面图文件完整路径
+            '''
+            cover_folder = "./cover"
+            try:
+                # logger.info(f'尝试创建封面图存放目录{cover_folder}')
+                os.makedirs(cover_folder, exist_ok=True)
+                cover_filename = self.room_title + self.room_cover[self.room_cover.rindex('.'):]
+                self.room_cover_path = os.path.join(cover_folder, cover_filename)
+                # logger.info(f'尝试下载封面图{cover_filename}')
+                cover_res = requests.get(self.room_cover)
+                if cover_res.status_code == 200:
+                    with open(self.room_cover_path, 'wb') as f:
+                        f.write(cover_res.content)
+            except Exception as e:
+                logger.warning('自动下载封面失败：%s，不使用封面' % e)
+                self.room_cover_path = None
+                # logger.warning(room_cover)
+
         args = ['ffmpeg', '-y', *self.default_input_args,
                 '-i', self.raw_stream_url, *self.default_output_args, *self.opt_args,
                 '-c', 'copy', '-f', self.suffix]
@@ -95,6 +121,7 @@ class DownloadBase:
             'url': self.url,
             'title': self.room_title,
             'date': date,
+            'room_cover_path': self.room_cover_path,
         }
 
     @staticmethod

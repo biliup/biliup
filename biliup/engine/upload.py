@@ -30,6 +30,12 @@ class UploadBase:
             os.remove(r)
             logger.info('删除-' + r)
 
+    @staticmethod
+    def remove_autoCover(cover):
+        if cover:
+            os.remove(cover)
+            logger.info('删除自动下载的封面')
+
     def filter_file(self, index):
         file_list = UploadBase.file_list(index)
         if len(file_list) == 0:
@@ -57,6 +63,17 @@ class UploadBase:
         if self.filter_file(self.principal):
             logger.info('准备上传' + self.data["format_title"])
             needed2process = self.upload(UploadBase.file_list(self.principal))
+
+            # 如果设定了自动下载封面，则在上传完毕后先于视频文件移除
+            cover_path = self.cover_path if self.cover_path else None
+            if cover_path:
+                # 自动下载的封面名字与房间标题相同
+                try:
+                    if cover_path.index(self.data["title"]):
+                        self.remove_autoCover(cover_path)
+                except ValueError:
+                    logger.info('与房间标题不匹配，跳过删除')
+
             if needed2process:
                 self.postprocessor(needed2process)
 

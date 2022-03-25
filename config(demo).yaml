@@ -47,7 +47,7 @@ streamers:
         title: "{title}第一视角%Y-%m-%d" # 自定义标题的时间格式, {title}代表直播间标题
         tid: 171 # 投稿分区码,174为生活，其他分区
         copyright: 2 # 1为自制
-        cover_path: /cover/up.jpg
+        cover_path: /cover/up.jpg # 封面图地址，room_cover代表直播间封面
         description: "视频简介: {title} %Y-%m-%d %H:%M:%S" # 支持strftime, {title}占位符
         dynamic: '#空间动态#'
         dtime: 14400 # 设置延时发布时间，距离提交大于2小时，格式为时间戳

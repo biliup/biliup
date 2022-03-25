@@ -1,7 +1,6 @@
 import random
 import subprocess
 import time
-from urllib.parse import urlencode
 
 import requests
 import yt_dlp

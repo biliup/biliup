@@ -1,5 +1,6 @@
 import inspect
 import logging
+import time
 
 from biliup import common
 from biliup import engine
@@ -13,7 +14,7 @@ def upload(data):
     上传入口
     :param platform:
     :param index:
-    :param data: 现在需包含内容{url,date} 完整包含内容{url,date,format_title}
+    :param data: 现在需包含内容{url,date} 完整包含内容{url,date,format_title,room_cover_path}
     :return:
     """
     try:
@@ -35,6 +36,10 @@ def upload(data):
         threshold = engine.config.get('filtering_threshold')
         if threshold:
             data['threshold'] = threshold
+
+        # 过滤自定义封面
+        if context.get('cover_path') == "room_cover":
+            context['cover_path'] = data.get('room_cover_path') if data.get('room_cover_path') else None
 
         sig = inspect.signature(cls)
         kwargs = {}
