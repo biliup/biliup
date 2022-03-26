@@ -14,7 +14,7 @@ def upload(data):
     上传入口
     :param platform:
     :param index:
-    :param data: 现在需包含内容{url,date} 完整包含内容{url,date,format_title,room_cover_path}
+    :param data: 现在需包含内容{url,date} 完整包含内容{url,date,format_title}
     :return:
     """
     try:
