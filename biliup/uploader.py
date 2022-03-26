@@ -1,5 +1,6 @@
 import inspect
 import logging
+import time
 
 from biliup import common
 from biliup import engine
@@ -35,6 +36,10 @@ def upload(data):
         threshold = engine.config.get('filtering_threshold')
         if threshold:
             data['threshold'] = threshold
+
+        # 过滤自定义封面
+        if context.get('cover_path') == "room_cover":
+            context['cover_path'] = data.get('room_cover_path') if data.get('room_cover_path') else None
 
         sig = inspect.signature(cls)
         kwargs = {}
