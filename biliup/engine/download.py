@@ -47,7 +47,7 @@ class DownloadBase:
         if config.get('segment_time'):
             args += ['-f', 'segment', f'{filename} part-%03d.{self.suffix}']
         else:
-            args += [f'{filename}.part']
+            args += [f'{filename}.{self.suffix}.part']
 
         proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
@@ -66,10 +66,10 @@ class DownloadBase:
     def run(self):
         if not self.check_stream():
             return False
-        file_name = f'{self.file_name}.{self.suffix}'
+        file_name = self.file_name
         retval = self.download(file_name)
-        logger.info(f'{retval}part: {file_name}')
-        self.rename(file_name)
+        logger.info(f'{retval}part: {file_name}.{self.suffix}')
+        self.rename(f'{file_name}.{self.suffix}')
         return retval
 
     def start(self):
