@@ -4,7 +4,7 @@ from urllib.parse import urlencode
 
 from ykdl.extractors.douyu.util import ub98484234
 from ykdl.util.jsengine import chakra_available, quickjs_available, external_interpreter
-from ykdl.util.html import get_content
+from ykdl.util.http import get_content
 from ykdl.util.match import match1
 
 from .. import config
