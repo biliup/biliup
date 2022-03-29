@@ -110,3 +110,6 @@ class KernelFunc:
     def free(self, list_url):
         status_num = list(map(lambda x: self.url_status.get(x), list_url))
         return not (1 in status_num or 2 in status_num)
+
+    def get_url_status(self):
+        return self.url_status

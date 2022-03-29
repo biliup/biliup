@@ -146,6 +146,7 @@ class EventManager(Thread):
             for k in sig.parameters:
                 kwargs[k] = self.context[k]
             instance = cls(**kwargs)
+            self.context[cls.__name__] = instance
             for type_ in self.__method:
                 for handler in self.__method[type_]:
                     self.add_event_listener(type_, getattr(instance, handler))

@@ -70,7 +70,11 @@ class AutoReload(Timer):
             await asyncio.sleep(self.interval)
             if self._work_free():
                 for watched in self.watched:
-                    watched.stop()
+                    # if asyncio.iscoroutine()
+                    if asyncio.iscoroutinefunction(watched):
+                        await watched()
+                    else:
+                        watched.stop()
                 self.stop()
                 # parent_path = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))  # 获得所在的目录的父级目
                 # path = os.path.join(parent_path, '__main__.py')
