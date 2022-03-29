@@ -53,13 +53,13 @@ Linux下以daemon进程启动，录像和日志文件保存在执行目录下，
 ### 方式一
 ```bash
 vim /host/path/config.yaml
-docker run --name biliup -v /host/path:/opt -d ghcr.io/biliup/biliup/caution:latest
+docker run -P --name biliup -v /host/path:/opt -d ghcr.io/biliup/biliup/caution:latest
 ```
 ### 方式二
 ```bash
 cd biliup
 sudo docker build . -t biliup
-sudo docker run -d biliup
+sudo docker run -P -d biliup
 ```
 ### 进入容器 📦
 ```bash

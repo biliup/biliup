@@ -15,5 +15,5 @@ RUN \
   apk del .build-deps
 
 WORKDIR /opt
-
-ENTRYPOINT ["biliup"]
+EXPOSE 19159/tcp
+ENTRYPOINT ["biliup", "--http"]
