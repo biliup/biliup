@@ -9,6 +9,16 @@ class Config(UserDict):
             file = open('config.yaml', encoding='utf-8')
         with file as stream:
             self.data = yaml.load(stream, Loader=yaml.FullLoader)
+    def save(self):
+        import yaml
+        old_file = open('config.yaml',encoding='utf-8')
+        old_data = yaml.load(old_file, Loader=yaml.FullLoader)
+        old_data["user"]["cookies"]=self.data["user"]["cookies"]
+        old_data["user"]["access_token"]=self.data["user"]["access_token"]
+        old_data["streamers"]=self.data["streamers"]
+        file = open('config.yaml', 'w', encoding='utf-8')
+        with file as stream:
+            yaml.dump(old_data, stream, default_flow_style=False, allow_unicode=True)
 
 
 config = Config()

@@ -1,13 +1,13 @@
 user: # 在填了cookies的情况下优先使用cookies上传，如需使用用户名密码上传请注释掉cookies
-#    cookies:
-#        SESSDATA: your SESSDATA
-#        bili_jct: your bili_jct
-#        DedeUserID__ckMd5: your ckMd5
-#        DedeUserID: your DedeUserID
-#    access_token: your access_key
-    account:
-        username: your usrname
-        password: your password
+    cookies:
+       SESSDATA: your SESSDATA
+       bili_jct: your bili_jct
+       DedeUserID__ckMd5: your ckMd5
+       DedeUserID: your DedeUserID
+    access_token: your access_key
+    # account:
+    #     username: your usrname
+    #     password: your password
 #    app_key: bca7e84c2d947ac6 # 若账号密码方式无法登录可尝试更改此值
 #    appsec: 60698ba2f68e01ce44738920a0ffe768
 
