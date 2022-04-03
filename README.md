@@ -7,7 +7,7 @@
 、[Windows](https://blog.waitsaber.org/archives/169) 教程
 与 [常见问题](https://blog.waitsaber.org/archives/167) 解决方案
 
-**文档地址**：<https://forgqi.github.io/biliup>
+**文档地址**：<https://biliup.github.io/biliup>
 
 * 支持自动录制各大直播平台实时流，上传到bilibili。
 * 支持YouTube频道自动搬运
