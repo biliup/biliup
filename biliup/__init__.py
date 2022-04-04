@@ -88,6 +88,8 @@ async def main(args):
         app.add_routes([web.get('/api/getconfig',get_streamer_config)])
         app.add_routes([web.post('/api/setconfig',set_streamer_config)])
         app.add_routes([web.get('/api/save',save_config)])
+        app.add_routes([web.static('/public','./public',show_index=False)])
+        app.add_routes([web.static('/build','./public/build',show_index=False)])
         cors = aiohttp_cors.setup(app, defaults={
             "*": aiohttp_cors.ResourceOptions(
                     allow_credentials=True,
