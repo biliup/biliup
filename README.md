@@ -160,7 +160,10 @@ bupfetch模式支持的上传方式及线路有：
 def transcoding(data):
     pass
 ```
-
+'''
+        Please install at least one of the following Javascript interpreter.'
+        python packages: PyChakra, quickjs
+        applications: Gjs, CJS, QuickJS, JavaScriptCore, Node.js, etc.'''
 ## Deprecated
 * ~~selenium操作浏览器上传两种方式~~(详见bili_chromeup.py)
 * ~~Windows图形界面版在release中下载AutoTool.msi进行安装~~[AutoTool.msi](https://github.com/ForgQi/bilibiliupload/releases/tag/v0.1.0)

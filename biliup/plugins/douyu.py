@@ -1,9 +1,7 @@
-import platform
 import json
 from urllib.parse import urlencode
 
 from ykdl.extractors.douyu.util import ub98484234
-from ykdl.util.jsengine import chakra_available, quickjs_available, external_interpreter
 from ykdl.util.http import get_content
 from ykdl.util.match import match1
 
@@ -22,12 +20,6 @@ class Douyu(DownloadBase):
 
     def check_stream(self):
         logger.debug(self.fname)
-        if platform.system() == 'Linux':
-            if not chakra_available and not quickjs_available and external_interpreter is None:
-                logger.error('''
-        Please install at least one of the following Javascript interpreter.'
-        python packages: PyChakra, quickjs
-        applications: Gjs, CJS, QuickJS, JavaScriptCore, Node.js, etc.''')
         if len(self.url.split("douyu.com/")) < 2:
             logger.debug("直播间地址:" + self.url + " 错误")
             return False

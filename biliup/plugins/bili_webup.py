@@ -57,9 +57,7 @@ class BiliWeb(UploadBase):
                 video_part['title'] = video_part['title'][:80]
                 video.append(video_part)  # 添加已经上传的视频
             video.title = self.data["format_title"]
-            video.desc = self.desc + '''
-            Powered By biliup
-            Github：https://github.com/ForgQi/biliup'''
+            video.desc = self.desc
             video.copyright = self.copyright
             if self.copyright == 2:
                 video.source = self.data["url"]  # 添加转载地址说明
@@ -615,8 +613,6 @@ class Data:
 
     def set_tag(self, tag: list):
         """设置标签，tag为数组"""
-        if 'biliup' not in tag:
-            tag.append('biliup')
         self.tag = ','.join(tag)
 
     def append(self, video):
