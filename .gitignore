@@ -9,6 +9,7 @@ old/
 venv./
 debug.py
 config.yaml
+!biliup/public/config.yaml
 chromedriver.*
 /configlog.ini
 ds_update.log*
@@ -25,3 +26,5 @@ build/
 bili.cookie.json
 archive.txt
 /node_modules
+watch_process.pid
+package-lock.json

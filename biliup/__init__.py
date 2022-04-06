@@ -3,6 +3,7 @@ from http import cookies
 from http.client import OK
 import json
 from multiprocessing.sharedctypes import Value
+import os
 
 from aiohttp import streamer
 
@@ -65,31 +66,37 @@ async def main(args):
             return web.json_response(config.data['streamers'])
         async def set_streamer_config(request):
             post_data =await request.json()
-            for i,j in post_data['streamers'].items():
-                if i not in config.data['streamers']:
-                    config.data['streamers'][i]={}
-                for key,Value in j.items():
-                    config.data['streamers'][i][key]=Value
-            for i in config.data['streamers']:
-                if i not in post_data['streamers']:
-                    del config.data['streamers'][i]
+            config.data['streamers']=post_data['streamers'] 
+            # for i,j in post_data['streamers'].items():
+            #     if i not in config.data['streamers']:
+            #         config.data['streamers'][i]={}
+            #     for key,Value in j.items():
+            #         config.data['streamers'][i][key]=Value
+            # for i in config.data['streamers']:
+            #     if i not in post_data['streamers']:
+            #         del config.data['streamers'][i]
                     
             print("sucess")
             return web.json_response({"status":200},status=200)
         async def save_config(reequest):
             config.save()
             return web.json_response({"status":200},status=200)
+        async def root_handler(request):
+            return web.HTTPFound('/index.html')
         app = web.Application()
     
-        
+        web_dir = os.path.dirname(__file__)
+        public_dir=(os.path.join(web_dir, 'public'))
+        build_dir =(os.path.join(public_dir, 'build'))
         app.add_routes([web.get('/url-status', url_status)])
         app.add_routes([web.get('/api/basic',get_basic_config)])
         app.add_routes([web.post('/api/setbasic',set_basic_config)])
         app.add_routes([web.get('/api/getconfig',get_streamer_config)])
         app.add_routes([web.post('/api/setconfig',set_streamer_config)])
         app.add_routes([web.get('/api/save',save_config)])
-        app.add_routes([web.static('/public','./public',show_index=False)])
-        app.add_routes([web.static('/build','./public/build',show_index=False)])
+        app.add_routes([web.get('/', root_handler)])
+        app.add_routes([web.static('/',public_dir,show_index=False)])
+        app.add_routes([web.static('/build',build_dir,show_index=False)])
         cors = aiohttp_cors.setup(app, defaults={
             "*": aiohttp_cors.ResourceOptions(
                     allow_credentials=True,

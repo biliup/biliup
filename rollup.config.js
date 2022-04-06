@@ -37,7 +37,7 @@ export default {
 		sourcemap: true,
 		format: 'iife',
 		name: 'app',
-		file: 'public/build/bundle.js'
+		file: 'biliup/public/build/bundle.js'
 	},
 	plugins: [
 		svelte({

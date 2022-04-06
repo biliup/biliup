@@ -63,6 +63,7 @@
 
     // console.log()
     let tags = selectedTemplate?.tags ? selectedTemplate?.tags : [];
+    let urls = selectedTemplate?.url ? selectedTemplate?.url : [];
     // $: tags = selectedTemplate?.tag.split(',');
 
     let parent = '请选择';
@@ -98,7 +99,7 @@
     }
 
     let tempTag;
-
+    let tempUrl;
 
 
     function handleKeypress() {
@@ -109,15 +110,31 @@
             return;
         }
         tags = [...tags, tempTag];
-        selectedTemplate.tag = tags.join(',');
+        selectedTemplate.tags = tags;
         tempTag = null;
         return false;
     }
-
+    function urlhandleKeypress(){
+        console.log(urls);
+        if(urls.includes(tempUrl)){
+            createPop("已有相同链接");
+            tempUrl = null;
+            return;
+        }
+        urls = [...urls, tempUrl];
+        selectedTemplate.url = urls;
+        tempUrl=null;
+        return false;
+    }
     function removeTag(tag) {
         tags = tags.filter(t => t !== tag);
-        selectedTemplate.tag = tags.join(',');
+        selectedTemplate.tags = tags;
         console.log(tag);
+    }
+    function removeUrl(url) {
+        urls = urls.filter(u => u !== url);
+        selectedTemplate.url = urls;
+        console.log(url);
     }
 
 
@@ -181,13 +198,31 @@
                        placeholder="标题">
 
             </div>
-            <div class="flex flex-col">
-                <label class="label">
-                    <span class="text-sm font-bold text-gray-500 tracking-wide">直播间链接</span>
-                </label>
-                <input bind:value={selectedTemplate.url}
-                       class="text-base p-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500"
-                       placeholder="www.douyu.com/3484">
+<!--            <div class="flex flex-col">-->
+<!--                <label class="label">-->
+<!--                    <span class="text-sm font-bold text-gray-500 tracking-wide">直播间链接</span>-->
+<!--                </label>-->
+<!--                <input bind:value={selectedTemplate.url}-->
+<!--                       class="text-base p-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500"-->
+<!--                       placeholder="www.douyu.com/3484">-->
+<!--            </div>-->
+            <div class="flex flex-wrap rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-600 focus:border-transparent">
+                {#each urls as url(url)}
+                    <span animate:flip="{{duration: 300}}" class="flex  ml-1 my-1.5 px-3 py-0.5 text-base rounded-full text-white  bg-indigo-500 ">
+                        {url}
+                        <button on:click={(e)=>{removeUrl(url)}} class="bg-transparent hover">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor"
+                                 class="ml-2" viewBox="0 0 1792 1792">
+                                <path d="M1490 1322q0 40-28 68l-136 136q-28 28-68 28t-68-28l-294-294-294 294q-28 28-68 28t-68-28l-136-136q-28-28-28-68t28-68l294-294-294-294q-28-28-28-68t28-68l136-136q28-28 68-28t68 28l294 294 294-294q28-28 68-28t68 28l136 136q28 28 28 68t-28 68l-294 294 294 294q28 28 28 68z">
+                                </path>
+                            </svg>
+                        </button>
+                    </span>
+                {/each}
+
+                <input bind:value={tempUrl} class="outline-none rounded-lg flex-1 appearance-none  w-full py-2 px-4 bg-white text-gray-700 placeholder-gray-400 shadow-sm text-base " on:keypress={e=>e.key==='Enter' && urlhandleKeypress()}
+                       placeholder="录制链接"
+                       type="text"/>
             </div>
 
 

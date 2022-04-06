@@ -1,4 +1,8 @@
 from collections import UserDict
+import os
+import shutil
+
+import biliup
 from .decorators import Plugin
 
 
@@ -7,6 +11,18 @@ class Config(UserDict):
         import yaml
         if file is None:
             file = open('config.yaml', encoding='utf-8')
+        with file as stream:
+            self.data = yaml.load(stream, Loader=yaml.FullLoader)
+    def create_without_config_input(self, file):
+        import yaml
+        if file is None:
+            try:
+                file = open('config.yaml', encoding='utf-8')
+            except FileNotFoundError:
+                biliup_dir = os.path.dirname(biliup.__file__)
+                config_data = os.path.join(biliup_dir,"public/","config.yaml")
+                shutil.copy(config_data, os.getcwd())
+                file = open('config.yaml', encoding='utf-8')
         with file as stream:
             self.data = yaml.load(stream, Loader=yaml.FullLoader)
     def save(self):
