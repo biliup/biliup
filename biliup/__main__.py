@@ -59,7 +59,6 @@ def arg_parser():
     parser.add_argument('-H', help='web api host [default: localhost]', dest='host')
     parser.add_argument('-P', help='web api port [default: 19159]', default=19159, dest='port')
     parser.add_argument('--http', action='store_true', help='enable web api')
-    parser.add_argument('--password',help='web ui password ,default username is biliup', dest='password')
     parser.add_argument('-v', '--verbose', action="store_const", const=logging.DEBUG, help="Increase output verbosity")
     parser.add_argument('--config', type=argparse.FileType(encoding='UTF-8'),
                         help='Location of the configuration file (default "./config.yaml")')
@@ -73,10 +72,7 @@ def arg_parser():
     parser_restart.set_defaults(func=daemon.restart)
     parser.set_defaults(func=lambda: asyncio.run(main(args)))
     args = parser.parse_args()
-    if(args.http):
-        config.create_without_config_input(args.config)
-    else:
-        config.load(args.config)
+    config.load(args.config)
     LOG_CONF.update(config.get('LOGGING', {}))
     if args.verbose:
         LOG_CONF['loggers']['biliup']['level'] = args.verbose

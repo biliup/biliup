@@ -2,6 +2,8 @@
 .vscode
 .gitattributes
 *.pyc
+*.png
+*.jpg
 *.flv
 *.mp4
 *.part
@@ -9,7 +11,6 @@ old/
 venv./
 debug.py
 config.yaml
-!biliup/public/config.yaml
 chromedriver.*
 /configlog.ini
 ds_update.log*
@@ -21,10 +22,7 @@ test.py
 *.egg-info
 dist/
 build/
-
+*.ts
 *.back
 bili.cookie.json
 archive.txt
-/node_modules
-watch_process.pid
-package-lock.json
