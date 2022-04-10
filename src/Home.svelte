@@ -6,7 +6,7 @@
 
 
     let map;
-    fetch('http://localhost:19159/api/getconfig',{
+    fetch('/api/getconfig',{
         method: 'GET',
     }).then((res=>res.json())).then(data=>{
         map = data;
@@ -27,7 +27,7 @@
         let data={
             "streamers":$template
         }
-        fetch('http://localhost:19159/api/setconfig',{
+        fetch('/api/setconfig',{
             method: 'POST',
             body: JSON.stringify(data),
             headers: {
@@ -38,7 +38,7 @@
                 console.log(e);
             }
         )
-        fetch('http://localhost:19159/api/save').then(res =>{
+        fetch('/api/save').then(res =>{
             if (res.ok){
                 createPop(`配置已保存`, 5000, 'Success');
             }

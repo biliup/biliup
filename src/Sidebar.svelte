@@ -27,10 +27,10 @@
         };
         // $currentTemplate = $template[name];
         let res;
-        res = await fetch('http://localhost:19159/api/getconfig')
+        res = await fetch('/api/getconfig')
         let res_json = await res.json();
         res_json.streamers = $template;
-        await fetch('http://localhost:19159/api/setconfig',{
+        await fetch('/api/setconfig',{
             method: "POST",
             body:JSON.stringify(res_json)
         })
@@ -57,7 +57,7 @@
     let limit = 3;
 
     async function loadSettings() {
-        let ret = await fetch('http://localhost:19159/api/basic');
+        let ret = await fetch('/api/basic');
         let ret_json = await ret.json();
         console.log(ret_json);
         if (ret_json.line === null) {
@@ -70,7 +70,7 @@
     }
 
     async function saveSettings() {
-        let ret = await fetch('http://localhost:19159/api/basic');
+        let ret = await fetch('/api/basic');
         let ret_json = await ret.json();
         console.log(ret_json);
         if (ret_json.line === null) {
@@ -81,7 +81,7 @@
         ret_json.limit = limit;
         ret_json.user=User;
         console.log(User);
-        await fetch('http://localhost:19159/api/setbasic',{
+        await fetch('/api/setbasic',{
             method: "POST",
             body:JSON.stringify(ret_json)
         })

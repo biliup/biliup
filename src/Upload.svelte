@@ -1,5 +1,5 @@
 <script lang="ts">
-    import {receive, template} from './store.ts';
+    import {receive, template} from './store';
     import {archivePre, createPop, partition} from "./common";
     import {flip} from 'svelte/animate';
 
@@ -28,7 +28,7 @@
             let data={
                 "streamers": $template,
             }
-             fetch('http://localhost:19159/api/setconfig',{
+             fetch('/api/setconfig',{
                 method: 'POST',
                 body: JSON.stringify(data),
                 headers: {
@@ -47,7 +47,7 @@
         }
         console.log($template);
         try {
-            await fetch('http://localhost:19159/api/setconfig',{
+            await fetch('/api/setconfig',{
                 method: 'POST',
                 body: JSON.stringify(data),
                 headers: {

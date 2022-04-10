@@ -1,10 +1,11 @@
 import asyncio
+from asyncore import loop
 from http import cookies
 from http.client import OK
 import json
 from multiprocessing.sharedctypes import Value
 import os
-
+from aiohttp_basicauth_middleware import basic_auth_middleware
 from aiohttp import streamer
 
 import aiohttp_cors
@@ -54,6 +55,8 @@ async def main(args):
         async def set_basic_config(request):
             post_data =await request.json()
             config.data['lines']=post_data['line']
+            if config.data['lines'] == 'cos':
+                config.data['lines']='cos-internal'
             config.data['threads']=post_data['limit']
             config.data['user']['cookies']['SESSDATA']=post_data['user']['SESSDATA']
             config.data['user']['cookies']['bili_jct']=post_data['user']['bili_jct']
@@ -97,6 +100,8 @@ async def main(args):
         app.add_routes([web.get('/', root_handler)])
         app.add_routes([web.static('/',public_dir,show_index=False)])
         app.add_routes([web.static('/build',build_dir,show_index=False)])
+        if args.password:
+            app.middlewares.append(basic_auth_middleware(('/',),{'biliup': args.password} ,))
         cors = aiohttp_cors.setup(app, defaults={
             "*": aiohttp_cors.ResourceOptions(
                     allow_credentials=True,

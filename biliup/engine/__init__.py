@@ -31,6 +31,8 @@ class Config(UserDict):
         old_data = yaml.load(old_file, Loader=yaml.FullLoader)
         old_data["user"]["cookies"]=self.data["user"]["cookies"]
         old_data["user"]["access_token"]=self.data["user"]["access_token"]
+        old_data["lines"]=self.data["lines"]
+        old_data["threads"]=self.data["threads"]
         old_data["streamers"]=self.data["streamers"]
         file = open('config.yaml', 'w', encoding='utf-8')
         with file as stream:
