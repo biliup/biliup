@@ -8,3 +8,4 @@ PyYAML>=4.2b1
 streamlink>=0.14.2
 ykdl>=1.8.0
 rsa>=4.6
+aiohttp_cors
