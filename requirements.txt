@@ -9,3 +9,4 @@ streamlink>=0.14.2
 ykdl>=1.8.0
 rsa>=4.6
 aiohttp_cors
+aiohttp_basicauth_middleware
