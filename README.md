@@ -3,7 +3,7 @@
 ![GitHub](https://img.shields.io/github/license/ForgQi/bilibiliupload)
 [![Telegram](https://img.shields.io/badge/Telegram-Group-blue.svg?logo=telegram)](https://t.me/+IkpIABHqy6U0ZTQ5)
 
-详细安装过程可看 [@waitsaber](https://github.com/waitsaber) 写的 [Ubuntu](https://blog.waitsaber.org/archives/129) 、[CentOS](https://blog.waitsaber.org/archives/163) 
+详细安装过程可看 [@waitsaber](https://github.com/waitsaber) 写的 [Ubuntu](https://blog.waitsaber.org/archives/129) 、[CentOS](https://blog.waitsaber.org/archives/163)
 、[Windows](https://blog.waitsaber.org/archives/169) 教程
 与 [常见问题](https://blog.waitsaber.org/archives/167) 解决方案
 
@@ -11,7 +11,7 @@
 
 * 支持自动录制各大直播平台实时流，上传到bilibili。
 * 支持YouTube频道自动搬运
-* 支持twitch直播回放列表自动搬运至b站，如链接https://www.twitch.tv/xxxx/videos?filter=archives&sort=time 
+* 支持twitch直播回放列表自动搬运至b站，如链接https://www.twitch.tv/xxxx/videos?filter=archives&sort=time
 * 自动选择上传线路，保证国内外vps上传质量和速度
 * 可分别控制下载与上传并发量
 * 支持cos-internal，腾讯云上海内网上传，免流 + 大幅提速
@@ -31,16 +31,16 @@
 ```shell
 # 启动
 $ biliup start
-# 退出 
+# 退出
 $ biliup stop
-# 重启 
+# 重启
 $ biliup restart
 # 查看版本
 $ biliup --version
 # 显示帮助以查看更多选项
 $ biliup -h
 # 启动 web api, 默认 localhost:19159 可配置，访问 /url-status 获取录播状态
-$ biliup --http ./config.yaml start
+$ biliup --http --config ./config.yaml start
 # 指定配置文件路径
 $ biliup --config ./config.yaml start
 ```
@@ -49,7 +49,7 @@ Linux下以daemon进程启动，录像和日志文件保存在执行目录下，
 `ps -A | grep biliup` 查看进程是否启动成功。
 
 
-## Docker使用 🔨 
+## Docker使用 🔨
 ### 方式一
 ```bash
 vim /host/path/config.yaml
@@ -64,7 +64,7 @@ sudo docker run -P -d biliup
 ### 进入容器 📦
 ```bash
 sudo docker ps (找到你的imageId)
-sudo docker exec -it imageId /bin/bash     
+sudo docker exec -it imageId /bin/bash
 ```
 
 ## 调试源码
@@ -74,7 +74,7 @@ sudo docker exec -it imageId /bin/bash
 ## 最小配置文件示例
 tid投稿分区见[Wiki](https://github.com/ForgQi/biliup/wiki)
 ```yaml
-user: 
+user:
     cookies:
         SESSDATA: your SESSDATA
         bili_jct: your bili_jct
@@ -83,7 +83,7 @@ user:
     access_token: your access_key
 
 streamers:
-    xxx直播录像: 
+    xxx直播录像:
         url:
             - https://www.twitch.tv/xxx
 ```
