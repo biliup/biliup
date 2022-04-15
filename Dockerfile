@@ -34,5 +34,4 @@ RUN \
 COPY --from=webui /biliup/biliup/public/build/* /biliup/biliup/public/build/
 WORKDIR /opt
 
-ENTRYPOINT ["biliup"]
-CMD ["--http", "--config", "./config.yaml"]
+ENTRYPOINT ["biliup", "--http"]
