@@ -2,7 +2,7 @@ import json
 import urllib.request
 
 import requests
-
+import re
 from . import logger
 from .. import config
 from ..engine.decorators import Plugin
@@ -15,16 +15,24 @@ class Douyin(DownloadBase):
         super().__init__(fname, url, suffix)
 
     def check_stream(self):
-        if len(self.url.split("live.douyin.com/")) < 2:
-            logger.debug("直播间地址错误")
-            return False
-        rid = self.url.split("live.douyin.com/")[1]
         headers = {
             "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                           "Chrome/94.0.4606.71 Safari/537.36 Edg/94.0.992.38",
             "referer": "https://live.douyin.com/",
             "cookie": config.get('douyin_cookie')
         }
+        if len(self.url.split("live.douyin.com/")) < 2:
+            if len(self.url.split("douyin.com/user/")) < 2:
+                logger.debug("直播间地址错误")
+                return False 
+            else:
+                mainPage=requests.get(self.url, headers=headers).text\
+                .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]
+                txt = urllib.request.unquote(mainPage)
+                rex = re.compile(r'(?<=\"web_rid\":\")[0-9]*(?=\")')
+                rid = rex.findall(txt)[0]    
+        else:
+            rid=self.url.split("live.douyin.com/")[1]
         r1 = requests.get('https://live.douyin.com/' + rid, headers=headers).text \
             .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]
         r2 = urllib.request.unquote(r1)
