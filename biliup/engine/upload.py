@@ -79,6 +79,6 @@ class UploadBase:
                     logger.info(f"move to {(dest / path.name).absolute()}")
             if post_processor.get('run'):
                 process = subprocess.run(
-                    post_processor['run'], shell=True, input=str(Path('\n'.join(data)).absolute()),
+                    post_processor['run'], shell=True, input='\n'.join(map(lambda x: str(Path(x).absolute()), data)),
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=True)
                 logger.info(process.stdout.rstrip())
