@@ -3,7 +3,7 @@ import os
 import subprocess
 import sys
 import time
-from biliup import config
+from . import config
 from ..plugins import fake_headers
 from biliup import common
 

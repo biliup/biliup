@@ -1,7 +1,7 @@
 import yt_dlp
 from yt_dlp.utils import MaxDownloadsReached
 
-from .. import config
+from ..engine import config
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from . import logger

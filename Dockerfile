@@ -23,7 +23,6 @@ RUN \
   git clone --depth 1 https://github.com/ForgQi/biliup.git && \
   cd biliup && \
   pip3 install --no-cache-dir quickjs && \
-  pip3 install --no-cache-dir -r requirements.txt && \
   pip3 install -e . && \
   # Clean up
   apk del --purge .build-deps && \

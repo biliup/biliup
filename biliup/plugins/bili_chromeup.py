@@ -13,7 +13,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 
-from biliup import config
+from biliup.engine import config
 from ..engine import Plugin
 from ..engine.upload import UploadBase, logger
 
