@@ -21,11 +21,24 @@ class Youtube(DownloadBase):
                 logger.warning(self.cookiejarFile)
                 logger.warning(self.url)
                 return False
+            if '_type' in info:
+                # /live 形式链接取标题
+                if info['_type'] in 'url' and info['webpage_url_basename'] in 'live':
+                    live = ydl.extract_info(info['url'], download=False, process=False)
+                    self.room_title = live['title']
+                # Playlist 暂时返回列表名
+                if info['_type'] in 'playlist':
+                    self.room_title = info['title']
+            else:
+                # 视频取标题
+                self.room_title = info['title']
             if info.get('entries') is None:
                 if ydl.in_download_archive(info):
                     return False
                 return True
             for entry in info['entries']:
+                # 取 Playlist 内视频标题
+                # self.title = entry['title']
                 if ydl.in_download_archive(entry):
                     continue
                 # ydl.record_download_archive()
