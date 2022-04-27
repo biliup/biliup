@@ -28,3 +28,4 @@ archive.txt
 /node_modules
 watch_process.pid
 package-lock.json
+biliup/**/public
