@@ -69,9 +69,11 @@ sudo docker exec -it imageId /bin/bash
 
 ## 调试源码
 * 下载源码: git clone https://github.com/ForgQi/bilibiliupload.git
-* 安装: `pip3 install -e .` 或者 `pip3 install -r requirements.txt`
+* 安装: `pip3 install -e .` 
 * 启动: `python3 -m biliup`
+* 构建 `python3 -m build`
 ## 最小配置文件示例
+以下为必填项，可选项见完整配置文件,
 tid投稿分区见[Wiki](https://github.com/ForgQi/biliup/wiki)
 ```yaml
 user:

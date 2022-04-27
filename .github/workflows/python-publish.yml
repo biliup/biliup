@@ -26,12 +26,11 @@ jobs:
         python -m pip install --upgrade pip
         pip install setuptools wheel twine
         npm install 
-        npm install -g rollup
-        rollup -c
     - name: Build and publish
       env:
         TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
         TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
       run: |
+        npm run build
         python -m build
         twine upload dist/*
