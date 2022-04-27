@@ -68,10 +68,11 @@ async def service(args, event_manager):
     async def url_status(request):
         return web.json_response(event_manager.context['KernelFunc'].get_url_status())
     app = web.Application()
-
-    web_dir = os.path.dirname(__file__)
-    public_dir = (os.path.join(web_dir, 'public'))
-    build_dir = (os.path.join(public_dir, 'build'))
+    try:
+        from importlib.resources import files
+    except ImportError:
+        # Try backported to PY<37 `importlib_resources`.
+        from importlib_resources import files
     app.add_routes([web.get('/url-status', url_status)])
     app.add_routes([web.get('/api/basic', get_basic_config)])
     app.add_routes([web.post('/api/setbasic', set_basic_config)])
@@ -79,8 +80,8 @@ async def service(args, event_manager):
     app.add_routes([web.post('/api/setconfig', set_streamer_config)])
     app.add_routes([web.get('/api/save', save_config)])
     app.add_routes([web.get('/', root_handler)])
-    app.add_routes([web.static('/', public_dir, show_index=False)])
-    app.add_routes([web.static('/build', build_dir, show_index=False)])
+    app.add_routes([web.static('/', files('biliup.web').joinpath('public'), show_index=False)])
+    app.add_routes([web.static('/build', files('biliup.web').joinpath('public/build'), show_index=False)])
     if args.password:
         app.middlewares.append(basic_auth_middleware(('/',), {'biliup': args.password}, ))
     cors = aiohttp_cors.setup(app, defaults={

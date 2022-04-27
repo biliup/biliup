@@ -22,6 +22,7 @@ dependencies = [
     "rsa >= 4.6",
     "aiohttp_cors",
     "aiohttp_basicauth_middleware",
+    'importlib-resources; python_version<"3.9"',
 ]
 dynamic = ["version"]
 
