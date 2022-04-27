@@ -30,7 +30,7 @@ RUN \
   rm -rf /tmp/* && \
   rm -rf /var/log/*
 
-COPY --from=webui /biliup/biliup/web/public/* /biliup/biliup/web/public/
+COPY --from=webui /biliup/biliup/web/public/ /biliup/biliup/web/public/
 WORKDIR /opt
 
 ENTRYPOINT ["biliup", "--http"]

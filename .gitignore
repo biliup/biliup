@@ -9,7 +9,7 @@ old/
 venv./
 debug.py
 config.yaml
-!biliup/public/config.yaml
+!public/config.yaml
 chromedriver.*
 /configlog.ini
 ds_update.log*
