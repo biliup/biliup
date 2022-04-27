@@ -103,7 +103,14 @@ video.source = '添加转载地址说明'
 video.tid = 171
 video.set_tag(['星际争霸2', '电子竞技'])
 with BiliBili(video) as bili:
-    bili.login_by_password("username", "password")
+    bili.login("bili.cookie", {
+        'cookies':{
+            'SESSDATA': 'your SESSDATA',
+            'bili_jct': 'your bili_jct',
+            'DedeUserID__ckMd5': 'your ckMd5',
+            'DedeUserID': 'your DedeUserID'
+        },'access_token': 'your access_key'})
+    # bili.login_by_password("username", "password")
     for file in file_list:
         video_part = bili.upload_file(file)  # 上传视频
         video.append(video_part)  # 添加已经上传的视频
