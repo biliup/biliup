@@ -86,19 +86,11 @@
             body:JSON.stringify(ret_json)
         })
     }
-    let urlStatus;
     let streamStatus = {};
     fetch('/url-status',{
             method: "GET",
         }).then(res => res.json())
-    .then(status => {
-        urlStatus = status;
-        console.log(urlStatus);
-        console.log($template);
-        statusToColor();
-    })
-
-    function statusToColor() {
+    .then(urlStatus => {
         for (const item of items) {
             streamStatus[item] = 'green';
             for (const url of $template[item].url) {
@@ -110,8 +102,7 @@
                 }
             }
         }
-    }
-
+    })
 </script>
 <div class="flex flex-col w-72 h-screen px-4 pt-8 bg-white border-r overflow-auto"
      transition:fly={{delay: 400, x: -100}}>

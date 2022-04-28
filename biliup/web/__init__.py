@@ -1,7 +1,6 @@
 from aiohttp import web
 import os
 from biliup.engine import config
-import aiohttp_cors
 from aiohttp_basicauth_middleware import basic_auth_middleware
 
 
@@ -87,15 +86,6 @@ async def service(args, event_manager):
         app.add_routes([web.static('/build', files('biliup.web').joinpath('public/build'), show_index=False)])
     if args.password:
         app.middlewares.append(basic_auth_middleware(('/',), {'biliup': args.password}, ))
-    cors = aiohttp_cors.setup(app, defaults={
-        "*": aiohttp_cors.ResourceOptions(
-            allow_credentials=True,
-            expose_headers="*",
-            allow_headers="*",
-        )
-    })
-    for route in list(app.router.routes()):
-        cors.add(route)
 
     # web.run_app(app, host=host, port=port)
     runner = web.AppRunner(app)

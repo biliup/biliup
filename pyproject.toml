@@ -20,7 +20,6 @@ dependencies = [
     "streamlink >= 0.14.2",
     "ykdl >= 1.8.0",
     "rsa >= 4.6",
-    "aiohttp_cors",
     "aiohttp_basicauth_middleware",
     'importlib-resources; python_version<"3.9"',
 ]
@@ -38,7 +37,7 @@ license-files = ["LICENSE"]
 include-package-data = false
 
 [tool.setuptools.package-data]
-biliup = ["common/*.ini", "public/*", "public/build/*"]
+biliup = ["common/*.ini", "web/public/*", "web/public/build/*"]
 
 [tool.setuptools.packages.find]
 include = ["biliup*"]
