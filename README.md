@@ -15,6 +15,7 @@
 * 自动选择上传线路，保证国内外vps上传质量和速度
 * 可分别控制下载与上传并发量
 * 支持cos-internal，腾讯云上海内网上传，免流 + 大幅提速
+* 实验性功能：启动时加入`--http`选项并访问localhost:19159可使用webUI
 
 相关配置示例在config.yaml文件中，如直播间地址，b站账号密码\
 由于目前使用账号密码登录，大概率触发验证。请使用命令行工具登录，将登录返回的信息填入配置文件，
@@ -71,7 +72,13 @@ sudo docker exec -it imageId /bin/bash
 * 下载源码: git clone https://github.com/ForgQi/bilibiliupload.git
 * 安装: `pip3 install -e .` 
 * 启动: `python3 -m biliup`
-* 构建 `python3 -m build`
+* 构建: 
+  ```shell
+  $ npm install
+  $ npm run build
+  $ python3 -m build
+  ```
+* 调试 webUI: `python3 -m biliup --http --static-dir public`
 ## 最小配置文件示例
 以下为必填项，可选项见完整配置文件,
 tid投稿分区见[Wiki](https://github.com/ForgQi/biliup/wiki)
