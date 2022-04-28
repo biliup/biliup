@@ -220,8 +220,8 @@
                     </span>
                 {/each}
 
-                <input bind:value={tempUrl} class="outline-none rounded-lg flex-1 appearance-none  w-full py-2 px-4 bg-white text-gray-700 placeholder-gray-400 shadow-sm text-base " on:keypress={e=>e.key==='Enter' && urlhandleKeypress()}
-                       placeholder="录制链接"
+                <input bind:value={tempUrl} class="outline-none rounded-lg flex-1 appearance-none w-full py-2 px-4 bg-white text-gray-700 placeholder-gray-400 shadow-sm text-base " on:keypress={e=>e.key==='Enter' && urlhandleKeypress()}
+                       placeholder="录制链接, 回车输入"
                        type="text"/>
             </div>
 

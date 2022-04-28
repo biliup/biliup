@@ -80,8 +80,11 @@ async def service(args, event_manager):
     app.add_routes([web.post('/api/setconfig', set_streamer_config)])
     app.add_routes([web.get('/api/save', save_config)])
     app.add_routes([web.get('/', root_handler)])
-    app.add_routes([web.static('/', files('biliup.web').joinpath('public'), show_index=False)])
-    app.add_routes([web.static('/build', files('biliup.web').joinpath('public/build'), show_index=False)])
+    if args.static_dir:
+        app.add_routes([web.static('/', args.static_dir, show_index=False)])
+    else:
+        app.add_routes([web.static('/', files('biliup.web').joinpath('public'), show_index=False)])
+        app.add_routes([web.static('/build', files('biliup.web').joinpath('public/build'), show_index=False)])
     if args.password:
         app.middlewares.append(basic_auth_middleware(('/',), {'biliup': args.password}, ))
     cors = aiohttp_cors.setup(app, defaults={
