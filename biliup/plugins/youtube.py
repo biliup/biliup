@@ -1,7 +1,7 @@
 import yt_dlp
 from yt_dlp.utils import MaxDownloadsReached
 
-from ..engine import config
+from biliup.config import config
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from . import logger

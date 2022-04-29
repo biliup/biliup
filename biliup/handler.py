@@ -2,7 +2,8 @@ import logging
 
 from . import plugins
 from .downloader import download, check_url
-from .engine import config, invert_dict, Plugin
+from .engine import invert_dict, Plugin
+from biliup.config import config
 from .engine.event import Event, EventManager
 from .uploader import upload
 

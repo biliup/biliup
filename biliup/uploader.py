@@ -1,8 +1,7 @@
 import inspect
 import logging
-
+from biliup.config import config
 from biliup import common
-from biliup import engine
 from .engine.decorators import Plugin
 
 logger = logging.getLogger('biliup')
@@ -18,7 +17,7 @@ def upload(data):
     """
     try:
         index = data['name']
-        context = {**engine.config, **engine.config['streamers'][index]}
+        context = {**config, **config['streamers'][index]}
         platform = context.get("uploader") if context.get("uploader") else "bili_web"
         cls = Plugin.upload_plugins.get(platform)
         if cls is None:
@@ -32,7 +31,7 @@ def upload(data):
             data["format_title"] = f"{common.time.format_time(date)}{index}"
         if context.get('description'):
             context['description'] = custom_fmtstr(context.get('description'), date, room_title)
-        threshold = engine.config.get('filtering_threshold')
+        threshold = config.get('filtering_threshold')
         if threshold:
             data['threshold'] = threshold
 

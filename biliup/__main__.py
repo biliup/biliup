@@ -9,7 +9,7 @@ from . import __version__, LOG_CONF
 from .common.Daemon import Daemon
 from .common.reload import AutoReload
 from .common.timer import Timer
-from .engine import config
+from biliup.config import config
 from .engine.event import Event
 
 

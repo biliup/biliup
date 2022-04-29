@@ -5,7 +5,7 @@ from ykdl.extractors.douyu.util import ub98484234
 from ykdl.util.http import get_content
 from ykdl.util.match import match1
 
-from ..engine import config
+from biliup.config import config
 from ..engine.decorators import Plugin
 from ..plugins import logger
 from ..engine.download import DownloadBase

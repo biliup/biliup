@@ -1,7 +1,7 @@
 from aiohttp import web
-import os
-from biliup.engine import config
-from aiohttp_basicauth_middleware import basic_auth_middleware
+from .aiohttp_basicauth_middleware import basic_auth_middleware
+
+from biliup.config import config
 
 
 async def get_basic_config(request):
