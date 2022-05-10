@@ -47,7 +47,7 @@ class UploadBase:
             return False
         for f in file_list:
             if f.endswith('.part'):
-                shutil.move(f, os.path.splitext(f)[0])
+                os.rename(f, os.path.splitext(f)[0])
                 logger.info('%s存在已更名' % f)
         return True
 
