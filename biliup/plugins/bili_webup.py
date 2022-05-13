@@ -226,25 +226,26 @@ class BiliBili:
         "probe_url":"??"}
         """
         if not self._auto_os:
-            self._auto_os = self.probe()
             if lines == 'kodo':
                 self._auto_os = {"os": "kodo", "query": "bucket=bvcupcdnkodobm&probe_version=20200810",
                                  "probe_url": "//up-na0.qbox.me/crossdomain.xml"}
-            if lines == 'bda2':
+            elif lines == 'bda2':
                 self._auto_os = {"os": "upos", "query": "upcdn=bda2&probe_version=20200810",
                                  "probe_url": "//upos-sz-upcdnbda2.bilivideo.com/OK"}
-            if lines == 'ws':
+            elif lines == 'ws':
                 self._auto_os = {"os": "upos", "query": "upcdn=ws&probe_version=20200810",
                                  "probe_url": "//upos-sz-upcdnws.bilivideo.com/OK"}
-            if lines == 'qn':
+            elif lines == 'qn':
                 self._auto_os = {"os": "upos", "query": "upcdn=qn&probe_version=20200810",
                                  "probe_url": "//upos-sz-upcdnqn.bilivideo.com/OK"}
-            if lines == 'cos':
+            elif lines == 'cos':
                 self._auto_os = {"os": "cos", "query": "",
                                  "probe_url": ""}
-            if lines == 'cos-internal':
+            elif lines == 'cos-internal':
                 self._auto_os = {"os": "cos-internal", "query": "",
                                  "probe_url": ""}
+            else:
+                self._auto_os = self.probe()
             logger.info(f"线路选择 => {self._auto_os['os']}: {self._auto_os['query']}. time: {self._auto_os.get('cost')}")
         if self._auto_os['os'] == 'upos':
             upload = self.upos
