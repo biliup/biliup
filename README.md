@@ -40,8 +40,8 @@ $ biliup restart
 $ biliup --version
 # 显示帮助以查看更多选项
 $ biliup -h
-# 启动 web api, 默认 localhost:19159 可配置，访问 /url-status 获取录播状态
-$ biliup --http --config ./config.yaml start
+# 启动 web ui, 默认 localhost:19159 可配置
+$ biliup --http start
 # 指定配置文件路径
 $ biliup --config ./config.yaml start
 ```
