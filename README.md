@@ -95,6 +95,7 @@ streamers:
     xxx直播录像:
         url:
             - https://www.twitch.tv/xxx
+        tags: biliup
 ```
 ## EMBEDDING BILIUP
 如果你不想使用完全自动托管的功能，而仅仅只是想嵌入biliup作为一个库来使用这里有两个例子可以作为参考
