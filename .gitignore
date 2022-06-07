@@ -24,3 +24,5 @@ archive.txt
 watch_process.pid
 package-lock.json
 biliup/**/public
+cookies.json
+*.log

@@ -10,7 +10,7 @@ keywords = ["bilibili douyu huya"]
 urls = {Homepage = "https://github.com/ForgQi/bilibiliupload"}
 requires-python = ">= 3.7"
 dependencies = [
-    "selenium >= 3.8.1",
+    "stream-gears >= 0.1.0",
     "psutil >= 5.4.6",
     "yt_dlp >= 2022.3.8.2",
     "Pillow >= 5.2.0",
@@ -23,6 +23,9 @@ dependencies = [
     'importlib-resources; python_version<"3.9"',
 ]
 dynamic = ["version"]
+
+[project.optional-dependencies]
+selenium = ["selenium >= 3.8.1"]
 
 [project.readme]
 file = "README.md"
