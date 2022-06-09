@@ -1,55 +1,16 @@
 #!/usr/bin/python3
 # coding:utf8
 import argparse
+import asyncio
 import logging.config
 import platform
-import asyncio
-import sys
 
-from biliup import config
+from . import __version__, LOG_CONF
 from .common.Daemon import Daemon
-from . import main, __version__
-
-LOG_CONF = {
-    'version': 1,
-    'formatters': {
-        'verbose': {
-            'format': "%(asctime)s %(filename)s[line:%(lineno)d](Pid:%(process)d "
-                      "Tname:%(threadName)s) %(levelname)s %(message)s",
-            # 'datefmt': "%Y-%m-%d %H:%M:%S"
-        },
-        'simple': {
-            'format': '%(filename)s%(lineno)d[%(levelname)s]Tname:%(threadName)s %(message)s'
-        },
-    },
-    'handlers': {
-        'console': {
-            'level': logging.DEBUG,
-            'class': 'logging.StreamHandler',
-            'stream': sys.stdout,
-            'formatter': 'simple'
-        },
-        'file': {
-            'level': logging.DEBUG,
-            'class': 'biliup.common.log.SafeRotatingFileHandler',
-            'when': 'W0',
-            'interval': 1,
-            'backupCount': 1,
-            'filename': 'ds_update.log',
-            'formatter': 'verbose'
-        }
-    },
-    'root': {
-        'handlers': ['console'],
-        'level': logging.INFO,
-    },
-    'loggers': {
-        'biliup': {
-            'handlers': ['file'],
-            'level': logging.INFO,
-        },
-    }
-}
+from .common.reload import AutoReload
+from .common.timer import Timer
+from biliup.config import config
+from .engine.event import Event
 
 
 def arg_parser():
@@ -59,7 +20,8 @@ def arg_parser():
     parser.add_argument('-H', help='web api host [default: localhost]', dest='host')
     parser.add_argument('-P', help='web api port [default: 19159]', default=19159, dest='port')
     parser.add_argument('--http', action='store_true', help='enable web api')
-    parser.add_argument('--password',help='web ui password ,default username is biliup', dest='password')
+    parser.add_argument('--static-dir', help='web static files directory for custom ui')
+    parser.add_argument('--password', help='web ui password ,default username is biliup', dest='password')
     parser.add_argument('-v', '--verbose', action="store_const", const=logging.DEBUG, help="Increase output verbosity")
     parser.add_argument('--config', type=argparse.FileType(encoding='UTF-8'),
                         help='Location of the configuration file (default "./config.yaml")')
@@ -73,7 +35,7 @@ def arg_parser():
     parser_restart.set_defaults(func=daemon.restart)
     parser.set_defaults(func=lambda: asyncio.run(main(args)))
     args = parser.parse_args()
-    if(args.http):
+    if args.http:
         config.create_without_config_input(args.config)
     else:
         config.load(args.config)
@@ -85,6 +47,32 @@ def arg_parser():
     if platform.system() == 'Windows':
         return asyncio.run(main(args))
     args.func()
+
+
+async def main(args):
+    from .handler import CHECK_UPLOAD, CHECK, event_manager
+
+    event_manager.start()
+
+    async def check_timer():
+        event_manager.send_event(Event(CHECK_UPLOAD))
+        for k in event_manager.context['checker'].keys():
+            event_manager.send_event(Event(CHECK, (k,)))
+
+    wait = config.get('event_loop_interval') if config.get('event_loop_interval') else 40
+    # 初始化定时器
+    timer = Timer(func=check_timer, interval=wait)
+
+    interval = config.get('check_sourcecode') if config.get('check_sourcecode') else 15
+    if args.http:
+        import biliup.web
+        runner, site = await biliup.web.service(args, event_manager)
+        detector = AutoReload(event_manager, timer, runner.cleanup, interval=interval)
+        await asyncio.gather(detector.astart(), timer.astart(), site.start(), return_exceptions=True)
+    else:
+        # 模块更新自动重启
+        detector = AutoReload(event_manager, timer, interval=interval)
+        await asyncio.gather(detector.astart(), timer.astart(), return_exceptions=True)
 
 
 if __name__ == '__main__':

@@ -3,7 +3,7 @@ import random
 import requests
 
 from . import match1, logger
-from .. import config
+from biliup.config import config
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 

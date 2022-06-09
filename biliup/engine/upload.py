@@ -2,6 +2,7 @@ import logging
 import os
 import shutil
 import subprocess
+from functools import reduce
 from pathlib import Path
 
 logger = logging.getLogger('biliup')
@@ -46,7 +47,7 @@ class UploadBase:
             return False
         for f in file_list:
             if f.endswith('.part'):
-                os.rename(f, os.path.splitext(f)[0])
+                shutil.move(f, os.path.splitext(f)[0])
                 logger.info('%s存在已更名' % f)
         return True
 
@@ -79,6 +80,6 @@ class UploadBase:
                     logger.info(f"move to {(dest / path.name).absolute()}")
             if post_processor.get('run'):
                 process = subprocess.run(
-                    post_processor['run'], shell=True, input=str(Path('\n'.join(data)).absolute()),
+                    post_processor['run'], shell=True, input=reduce(lambda x, y: x + str(Path(y).absolute()) + '\n', data, ''),
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=True)
                 logger.info(process.stdout.rstrip())

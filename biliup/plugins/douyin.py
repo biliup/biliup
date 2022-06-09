@@ -4,7 +4,7 @@ import urllib.request
 import requests
 import re
 from . import logger
-from .. import config
+from biliup.config import config
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 

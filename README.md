@@ -15,6 +15,7 @@
 * 自动选择上传线路，保证国内外vps上传质量和速度
 * 可分别控制下载与上传并发量
 * 支持cos-internal，腾讯云上海内网上传，免流 + 大幅提速
+* 实验性功能：启动时加入`--http`选项并访问localhost:19159可使用webUI
 
 相关配置示例在config.yaml文件中，如直播间地址，b站账号密码\
 由于目前使用账号密码登录，大概率触发验证。请使用命令行工具登录，将登录返回的信息填入配置文件，
@@ -23,7 +24,7 @@
 >登录B站获取cookie和token：[命令行投稿工具](https://github.com/ForgQi/biliup-rs) \
 >B站图形界面：[投稿客户端GUI](https://github.com/ForgQi/Caution)
 ## INSTALLATION
-1. 创建最小配置文件 [**config.yaml**](#最小配置文件示例)，完整内容可参照 [config(demo).yaml](https://github.com/ForgQi/bilibiliupload/blob/74b507f085c4545f5a1b3d1fbdd4c8fdef2be058/config(demo).yaml)
+1. 创建最小配置文件 [**config.yaml**](#最小配置文件示例)，完整内容可参照 [config(demo).yaml](https://github.com/ForgQi/bilibiliupload/blob/master/config(demo).yaml)
 
 2. 安装 __FFmpeg__, __pip__
 3. 安装 __biliup__：
@@ -39,8 +40,8 @@ $ biliup restart
 $ biliup --version
 # 显示帮助以查看更多选项
 $ biliup -h
-# 启动 web api, 默认 localhost:19159 可配置，访问 /url-status 获取录播状态
-$ biliup --http --config ./config.yaml start
+# 启动 web ui, 默认 localhost:19159 可配置
+$ biliup --http start
 # 指定配置文件路径
 $ biliup --config ./config.yaml start
 ```
@@ -69,9 +70,17 @@ sudo docker exec -it imageId /bin/bash
 
 ## 调试源码
 * 下载源码: git clone https://github.com/ForgQi/bilibiliupload.git
-* 安装: `pip3 install -e .` 或者 `pip3 install -r requirements.txt`
+* 安装: `pip3 install -e .` 
 * 启动: `python3 -m biliup`
+* 构建: 
+  ```shell
+  $ npm install
+  $ npm run build
+  $ python3 -m build
+  ```
+* 调试 webUI: `python3 -m biliup --http --static-dir public`
 ## 最小配置文件示例
+以下为必填项，可选项见完整配置文件,
 tid投稿分区见[Wiki](https://github.com/ForgQi/biliup/wiki)
 ```yaml
 user:
@@ -86,6 +95,7 @@ streamers:
     xxx直播录像:
         url:
             - https://www.twitch.tv/xxx
+        tags: biliup
 ```
 ## EMBEDDING BILIUP
 如果你不想使用完全自动托管的功能，而仅仅只是想嵌入biliup作为一个库来使用这里有两个例子可以作为参考
@@ -101,7 +111,14 @@ video.source = '添加转载地址说明'
 video.tid = 171
 video.set_tag(['星际争霸2', '电子竞技'])
 with BiliBili(video) as bili:
-    bili.login_by_password("username", "password")
+    bili.login("bili.cookie", {
+        'cookies':{
+            'SESSDATA': 'your SESSDATA',
+            'bili_jct': 'your bili_jct',
+            'DedeUserID__ckMd5': 'your ckMd5',
+            'DedeUserID': 'your DedeUserID'
+        },'access_token': 'your access_key'})
+    # bili.login_by_password("username", "password")
     for file in file_list:
         video_part = bili.upload_file(file)  # 上传视频
         video.append(video_part)  # 添加已经上传的视频

@@ -1,3 +1,49 @@
 [build-system]
-requires = ["setuptools", "wheel"]
+requires =  ['pip>=20.3', 'setuptools>=62', 'wheel']
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "biliup"
+authors = [{name = "ForgQi"}]
+description = "stream download and upload"
+keywords = ["bilibili douyu huya"]
+urls = {Homepage = "https://github.com/ForgQi/bilibiliupload"}
+requires-python = ">= 3.7"
+dependencies = [
+    "stream-gears >= 0.1.0",
+    "psutil >= 5.4.6",
+    "yt_dlp >= 2022.3.8.2",
+    "Pillow >= 5.2.0",
+    "aiohttp[speedups]",
+    "Requests >= 2.20.0",
+    "PyYAML >= 4.2b1",
+    "streamlink >= 0.14.2",
+    "ykdl >= 1.8.0",
+    "rsa >= 4.6",
+    'importlib-resources; python_version<"3.9"',
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+selenium = ["selenium >= 3.8.1"]
+
+[project.readme]
+file = "README.md"
+content-type = "text/markdown"
+
+[project.scripts]
+biliup = "biliup.__main__:arg_parser"
+
+[tool.setuptools]
+license-files = ["LICENSE"]
+include-package-data = false
+
+[tool.setuptools.package-data]
+biliup = ["common/*.ini", "web/public/*", "web/public/build/*"]
+
+[tool.setuptools.packages.find]
+include = ["biliup*"]
+namespaces = false
+
+[tool.setuptools.dynamic]
+version = {attr = "biliup.__version__"}

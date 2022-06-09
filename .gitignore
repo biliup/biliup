@@ -5,18 +5,13 @@
 *.flv
 *.mp4
 *.part
-old/
+backup
 venv./
-debug.py
 config.yaml
-!biliup/public/config.yaml
-chromedriver.*
+!public/config.yaml
 /configlog.ini
 ds_update.log*
 *.cookie
-test.py
-/upload.py
-/work.py
 *.zip
 *.egg-info
 dist/
@@ -28,3 +23,6 @@ archive.txt
 /node_modules
 watch_process.pid
 package-lock.json
+biliup/**/public
+cookies.json
+*.log

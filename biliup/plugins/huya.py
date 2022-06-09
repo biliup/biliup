@@ -4,7 +4,7 @@ import json
 
 import requests
 
-from .. import config
+from biliup.config import config
 from ..engine.decorators import Plugin
 from ..plugins import match1, logger, fake_headers
 from ..engine.download import DownloadBase

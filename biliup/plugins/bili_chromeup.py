@@ -3,17 +3,9 @@ import os
 import random
 import time
 
-import selenium.common
 from PIL import Image
-from selenium import webdriver
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support import expected_conditions as ec
-from selenium.webdriver.support.ui import WebDriverWait
 
-from biliup import config
+from biliup.config import config
 from ..engine import Plugin
 from ..engine.upload import UploadBase, logger
 
@@ -21,6 +13,14 @@ from ..engine.upload import UploadBase, logger
 @Plugin.upload("bilibili")
 class BiliChrome(UploadBase):
     def __init__(self, principal, data):
+        import selenium.common
+        from selenium import webdriver
+        from selenium.webdriver.common.action_chains import ActionChains
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.common.keys import Keys
+        from selenium.webdriver.support import expected_conditions as EC
+        from selenium.webdriver.support import expected_conditions as ec
+        from selenium.webdriver.support.ui import WebDriverWait
         super().__init__(principal, data, 'engine/bilibili.cookie')
         # self.title = title
         # self.date_title = None
