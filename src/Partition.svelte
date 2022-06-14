@@ -3,7 +3,6 @@
 <script>
     import {createEventDispatcher} from 'svelte';
     import { partition,createPop} from "./common";
-    import {tid_table} from "./tid";
     const dispatch = createEventDispatcher();
 
     export let currentChildren;
