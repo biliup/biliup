@@ -4,7 +4,7 @@ import re
 import requests
 
 from ..engine.decorators import Plugin
-from . import logger, fake_headers
+from . import logger
 from ..engine.download import DownloadBase
 
 
@@ -19,7 +19,7 @@ class CC(DownloadBase):
         res = requests.get(
             f"https://api.cc.163.com/v1/activitylives/anchor/lives?anchor_ccid={rid}",
             timeout=5,
-            headers=fake_headers
+            headers=self.fake_headers
         )
         res.close()
         jsons = json.loads(res.text)
@@ -28,7 +28,7 @@ class CC(DownloadBase):
             res = requests.get(
                 f"https://cc.163.com/live/channel/?channelids={channel_id}",
                 timeout=5,
-                headers=fake_headers
+                headers=self.fake_headers
             )
             res.close()
             jsons = json.loads(res.text)
