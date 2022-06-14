@@ -6,6 +6,7 @@ import math
 import os
 import sys
 import time
+import urllib.parse
 from dataclasses import asdict, dataclass, field, InitVar
 from json import JSONDecodeError
 from os.path import splitext, basename
@@ -56,7 +57,7 @@ class BiliWeb(UploadBase):
                 video_part = bili.upload_file(file, self.lines, self.threads)  # 上传视频
                 video_part['title'] = video_part['title'][:80]
                 video.append(video_part)  # 添加已经上传的视频
-            video.title = self.data["format_title"][:80]  #稿件标题限制80字
+            video.title = self.data["format_title"][:80]  # 稿件标题限制80字
             video.desc = self.desc
             video.copyright = self.copyright
             if self.copyright == 2:
@@ -95,6 +96,42 @@ class BiliBili:
         self._auto_os = None
         self.persistence_path = 'engine/bili.cookie'
 
+    def get_qrcode(self):
+        params = {
+            "appkey": "4409e2ce8ffd12b8",
+            "local_id": "0",
+            "ts": int(time.time()),
+        }
+        params["sign"] = hashlib.md5(
+            f"{urllib.parse.urlencode(params)}59b43e04ad6965f34319062b478f83dd".encode()).hexdigest()
+        response = self.__session.post("http://passport.bilibili.com/x/passport-tv-login/qrcode/auth_code", data=params,
+                                       timeout=5)
+        r = response.json()
+        if r and r["code"] == 0:
+            return r
+
+    async def login_by_qrcode(self, value):
+        params = {
+            "appkey": "4409e2ce8ffd12b8",
+            "auth_code": value["data"]["auth_code"],
+            "local_id": "0",
+            "ts": int(time.time()),
+        }
+        params["sign"] = hashlib.md5(
+            f"{urllib.parse.urlencode(params)}59b43e04ad6965f34319062b478f83dd".encode()).hexdigest()
+        for i in range(0, 120):
+            await asyncio.sleep(1)
+            response = self.__session.post("http://passport.bilibili.com/x/passport-tv-login/qrcode/poll", data=params,
+                                           timeout=5)
+            r = response.json()
+            if r and r["code"] == 0:
+                return r
+        raise "Qrcode timeout"
+    def tid_archive(self,cookies):
+        requests.utils.add_dict_to_cookiejar(self.__session.cookies, cookies)
+        response = self.__session.get("https://member.bilibili.com/x/vupre/web/archive/pre")
+        return response.json()
+
     def login(self, persistence_path, user):
         self.persistence_path = persistence_path
         if os.path.isfile(persistence_path):
@@ -130,6 +167,35 @@ class BiliBili:
                        'access_token': self.access_token,
                        'refresh_token': self.refresh_token
                        }, f)
+
+    def send_sms(self, phone_number, country_code ):
+        params = {
+            "actionKey": "appkey",
+            "appkey": "783bbb7264451d82",
+            "build": 6510400,
+            "channel": "bili",
+            "cid": country_code,
+            "device": "phone",
+            "mobi_app": "android",
+            "platform": "android",
+            "tel": phone_number,
+            "ts": int(time.time()),
+        }
+        sign = hashlib.md5(f"{urllib.parse.urlencode(params)}2653583c8873dea268ab9386918b1d65".encode()).hexdigest()
+        payload = f"{urllib.parse.urlencode(params)}&sign={sign}"
+        response = self.__session.post("https://passport.bilibili.com/x/passport-login/sms/send", data=payload,
+                                       timeout=5)
+        return response.json()
+
+    def login_by_sms(self, code, params):
+        params["code"] = code
+        params["sign"] = hashlib.md5(
+            f"{urllib.parse.urlencode(params)}59b43e04ad6965f34319062b478f83dd".encode()).hexdigest()
+        response = self.__session.post("https://passport.bilibili.com/x/passport-login/login/sms", data=params,
+                                       timeout=5)
+        r = response.json()
+        if r and r["code"] == 0:
+            return r
 
     def login_by_password(self, username, password):
         print('使用账号上传')
@@ -175,7 +241,6 @@ class BiliBili:
         requests.utils.add_dict_to_cookiejar(self.__session.cookies, cookie)
         if 'bili_jct' in cookie:
             self.__bili_jct = cookie["bili_jct"]
-
         data = self.__session.get("https://api.bilibili.com/x/web-interface/nav", timeout=5).json()
         if data["code"] != 0:
             raise Exception(data)

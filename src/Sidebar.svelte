@@ -17,7 +17,7 @@
             url: '',
             copyright: 1,
             source: "",
-            tid: 0,
+            tid: 171,
             description: "",
             tags: '',
             dynamic: "",
@@ -25,7 +25,6 @@
             desc_format_id: 0,
             atomicInt: 0
         };
-        // $currentTemplate = $template[name];
         let res;
         res = await fetch('/api/getconfig')
         let res_json = await res.json();
@@ -34,6 +33,7 @@
             method: "POST",
             body:JSON.stringify(res_json)
         })
+        select(name);
 
     }
 
@@ -60,6 +60,7 @@
         let ret = await fetch('/api/basic');
         let ret_json = await ret.json();
         console.log(ret_json);
+        ret_json.line = ret_json.line.toLowerCase();
         if (ret_json.line === null) {
             line = 'auto';
         } else {
