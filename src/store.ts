@@ -3,7 +3,7 @@ import { writable } from "svelte/store";
 import { crossfade, fly } from "svelte/transition";
 
 
-export const isLogin = writable(true);
+export const isLogin = writable(false);
 export const template = writable({});
 
 export const currentTemplate = writable({
