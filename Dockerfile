@@ -11,7 +11,7 @@ RUN \
 
 # Deploy Biliup
 FROM python:3.9-slim as biliup
-
+ENV TZ=Asia/Shanghai
 EXPOSE 19159/tcp
 VOLUME /opt
 
