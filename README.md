@@ -110,6 +110,10 @@ video.source = '添加转载地址说明'
 # 设置视频分区,默认为122 野生技能协会
 video.tid = 171
 video.set_tag(['星际争霸2', '电子竞技'])
+video.dynamic = '动态内容'
+lines = 'AUTO'
+tasks = 3
+dtime = 7200 # 延后时间，单位秒
 with BiliBili(video) as bili:
     bili.login("bili.cookie", {
         'cookies':{
@@ -120,8 +124,9 @@ with BiliBili(video) as bili:
         },'access_token': 'your access_key'})
     # bili.login_by_password("username", "password")
     for file in file_list:
-        video_part = bili.upload_file(file)  # 上传视频
+        video_part = bili.upload_file(file, lines=lines, tasks=tasks)  # 上传视频，默认线路AUTO自动选择，线程数量3。
         video.append(video_part)  # 添加已经上传的视频
+    video.dtime = dtime # 设置延后发布（2小时~15天）
     video.cover = bili.cover_up('/cover_path').replace('http:', '')
     ret = bili.submit()  # 提交视频
 ```
