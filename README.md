@@ -40,7 +40,7 @@ $ biliup restart
 $ biliup --version
 # 显示帮助以查看更多选项
 $ biliup -h
-# 启动 web ui, 默认 localhost:19159 可配置
+# 启动 web ui, 默认 0.0.0.0:19159。 可使用-H及-P选项配置。考虑到安全性，建议指定本地地址配合web server或者添加验证。
 $ biliup --http start
 # 指定配置文件路径
 $ biliup --config ./config.yaml start
