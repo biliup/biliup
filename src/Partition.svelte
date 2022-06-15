@@ -2,8 +2,7 @@
 </script>
 <script>
     import {createEventDispatcher} from 'svelte';
-    import { partition} from "./common";
-    import {tid_table} from "./tid";
+    import { partition,createPop} from "./common";
     const dispatch = createEventDispatcher();
 
     export let currentChildren;
@@ -15,7 +14,13 @@
     let currentTypelist = [];
     if ($partition === null) {
         $partition = [];
-        $partition = tid_table.typelist;
+        fetch("/api/archive_pre").then(res => res.json()).then(data => {
+            if(data.code!==0){
+                createPop("加载分区表失败");
+            }
+            $partition = data['data']['typelist'];
+            console.log("加载分区表", data);
+        });
 
     }
 

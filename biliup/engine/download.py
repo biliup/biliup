@@ -4,7 +4,6 @@ import subprocess
 import sys
 import time
 from biliup.config import config
-from ..plugins import fake_headers
 from biliup import common
 
 logger = logging.getLogger('biliup')
@@ -23,6 +22,12 @@ class DownloadBase:
         # -c copy -bsf:a aac_adtstoasc -movflags +faststart output.mp4
         self.raw_stream_url = None
         self.opt_args = opt_args
+        self.fake_headers = {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Encoding': 'gzip, deflate',
+            'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:38.0) Gecko/20100101 Firefox/38.0 Iceweasel/38.2.1'
+        }
 
         self.default_output_args = [
             '-bsf:a', 'aac_adtstoasc',
@@ -33,14 +38,15 @@ class DownloadBase:
         else:
             self.default_output_args += \
                 ['-fs', f"{config.get('file_size') if config.get('file_size') else '2621440000'}"]
-        self.default_input_args = ['-headers', ''.join('%s: %s\r\n' % x for x in fake_headers.items()),
-                                   '-reconnect_streamed', '1', '-reconnect_delay_max', '20', '-rw_timeout', '20000000']
+        self.default_input_args = []
 
     def check_stream(self):
         logger.debug(self.fname)
         raise NotImplementedError()
 
     def download(self, filename):
+        self.default_input_args = ['-headers', ''.join('%s: %s\r\n' % x for x in self.fake_headers.items()),
+                                   '-reconnect_streamed', '1', '-reconnect_delay_max', '20', '-rw_timeout', '20000000']
         args = ['ffmpeg', '-y', *self.default_input_args,
                 '-i', self.raw_stream_url, *self.default_output_args, *self.opt_args,
                 '-c', 'copy', '-f', self.suffix]

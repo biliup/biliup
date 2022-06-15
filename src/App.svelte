@@ -1,12 +1,37 @@
 <script lang="ts">
     import Home from './Home.svelte';
     import Modal from "./Modal.svelte";
+    import {isLogin} from './store.ts';
     import {notifyHistory} from "./common";
+    import Login from "./Login.svelte";
+        fetch('/api/login_by_cookie')
+        .then((res) => {
+            if (res.ok) {
+                isLogin.set(true);
+                console.log(`Message: ${res}`);
+            } else {
+                $notifyHistory = [...$notifyHistory, {
+                    type: 'Error',
+                    msg: '校验Cookies失败',
+                    date: new Date(),
+                    duration: 3000
+                }];
+                isLogin.set(false);
+            }
+        }).catch((e) => $notifyHistory = [...$notifyHistory, {
+        type: 'Error',
+        msg: e,
+        date: new Date(),
+    }]);
 </script>
 
 <main class="bg-gray-100" on:dragenter|preventDefault on:dragleave|preventDefault on:dragover|preventDefault
       on:drop|preventDefault>
+    {#if $isLogin}
         <Home/>
+    {:else}
+        <Login/>
+    {/if}
     <div class="fixed space-y-2.5 top-0 right-0 w-1/2" id="alerts">
     </div>
         <ul class="menu bg-base-100 rounded-box fixed bottom-16 right-3 w-max drop-shadow">
