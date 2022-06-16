@@ -30,6 +30,7 @@ RUN \
   pip3 install -e . && \
   # Clean up \
   apt-mark auto '.*' > /dev/null; \
+  apt-mark manual ffmpeg; \
   [ -z "$savedAptMark" ] || apt-mark manual $savedAptMark; \
   find /usr/local -type f -executable -exec ldd '{}' ';' \
      | awk '/=>/ { print $(NF-1) }' \
