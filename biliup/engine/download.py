@@ -3,6 +3,9 @@ import os
 import subprocess
 import sys
 import time
+
+import stream_gears
+
 from biliup.config import config
 from biliup import common
 
@@ -18,6 +21,7 @@ class DownloadBase:
         self.url = url
         self.suffix = suffix
         self.title = None
+        self.downloader = None
         # ffmpeg.exe -i  http://vfile1.grtn.cn/2018/1542/0254/3368/154202543368.ssm/154202543368.m3u8
         # -c copy -bsf:a aac_adtstoasc -movflags +faststart output.mp4
         self.raw_stream_url = None
@@ -38,16 +42,21 @@ class DownloadBase:
         else:
             self.default_output_args += \
                 ['-fs', f"{config.get('file_size') if config.get('file_size') else '2621440000'}"]
-        self.default_input_args = []
 
     def check_stream(self):
         logger.debug(self.fname)
         raise NotImplementedError()
 
     def download(self, filename):
-        self.default_input_args = ['-headers', ''.join('%s: %s\r\n' % x for x in self.fake_headers.items()),
-                                   '-reconnect_streamed', '1', '-reconnect_delay_max', '20', '-rw_timeout', '20000000']
-        args = ['ffmpeg', '-y', *self.default_input_args,
+        if self.downloader == 'stream-gears':
+            stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'), config.get('file_size'))
+        else:
+            self.ffmpeg_download(filename)
+
+    def ffmpeg_download(self, filename):
+        default_input_args = ['-headers', ''.join('%s: %s\r\n' % x for x in self.fake_headers.items()),
+                              '-reconnect_streamed', '1', '-reconnect_delay_max', '20', '-rw_timeout', '20000000']
+        args = ['ffmpeg', '-y', *default_input_args,
                 '-i', self.raw_stream_url, *self.default_output_args, *self.opt_args,
                 '-c', 'copy', '-f', self.suffix]
         if config.get('segment_time'):
@@ -120,3 +129,23 @@ class DownloadBase:
 
     def close(self):
         pass
+
+
+def stream_gears_download(url, headers, file_name, segment_time=None, file_size=None):
+    class Segment:
+        pass
+    segment = Segment()
+    if segment_time:
+        seg_time = segment_time.split(':')
+        print(int(seg_time[0]) * 60 * 60 + int(seg_time[1]) * 60 + int(seg_time[2]))
+        segment.time = int(seg_time[0]) * 60 * 60 + int(seg_time[1]) * 60 + int(seg_time[2])
+    if file_size:
+        segment.size = file_size
+    if file_size is None and segment_time is None:
+        segment.size = 8 * 1024 * 1024 * 1024
+    stream_gears.download(
+        url,
+        headers,
+        file_name,
+        segment
+    )
