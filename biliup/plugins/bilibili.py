@@ -1,5 +1,3 @@
-import random
-
 import requests
 
 from . import match1, logger
@@ -29,28 +27,25 @@ class Bilibili(DownloadBase):
         if api2_data['live_status'] != 1:
             return False
         self.room_title = api2_data['title']
-        # api3_data = \
-        #     requests.get(f"https://api.live.bilibili.com/live_user/v1/UserInfo/get_anchor_in_room?roomid={vid}").json()
-        # if api3_data['code'] == 0:
-        #     artist = api3_data['data']['info']['uname']
-        #     title = '{} - {}'.format(title, artist)
-        # logger.debug(title)
-        biliplatform = config.get('biliplatform') if config.get('biliplatform') else 'h5'
+        biliplatform = config.get('biliplatform') if config.get('biliplatform') else 'web'
         params = {
-            #'https_url_req': 1,
-            'cid': vid,
+            'room_id': rid,
+            'qn': '10000',
             'platform': biliplatform,
-            'qn': 10000,
-            #'ptype': '16'
+            'codec': '0,1',
+            'protocol': '0,1',
+            'format': '0,1,2',
+            'ptype': '8',
+            'dolby': '5'
         }
-        data = requests.get("https://api.live.bilibili.com/xlive/web-room/v1/playUrl/playUrl", params=params).json()
+        data = requests.get("https://api.live.bilibili.com/xlive/web-room/v2/index/getRoomPlayInfo", params=params).json()
         if data['code'] != 0:
             logger.debug(data['msg'])
             return False
-        data = data['data']
-        # qlt = data['current_qn']
-        # aqlts = {x['qn']: x['desc'] for x in data['quality_description']}
-        # logger.debug(qlt)
-        # logger.debug(aqlts)
-        self.raw_stream_url = random.choice(data['durl'])['url']
+        data = data['data']['playurl_info']['playurl']['stream'][0]['format'][0]['codec'][0]
+        stream_number = 0
+        if "mcdn" in data['url_info'][0]['host']:
+            stream_number += 1
+        self.raw_stream_url = data['url_info'][stream_number]['host'] + data['base_url'] + data['url_info'][stream_number]['extra']
+        self.fake_headers['Referer'] = 'https://live.bilibili.com'
         return True

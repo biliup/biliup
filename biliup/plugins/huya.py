@@ -6,7 +6,7 @@ import requests
 
 from biliup.config import config
 from ..engine.decorators import Plugin
-from ..plugins import match1, logger, fake_headers
+from ..plugins import match1, logger
 from ..engine.download import DownloadBase
 
 
@@ -17,7 +17,7 @@ class Huya(DownloadBase):
 
     def check_stream(self):
         logger.debug(self.fname)
-        res = requests.get(self.url, timeout=5, headers=fake_headers)
+        res = requests.get(self.url, timeout=5, headers=self.fake_headers)
         res.close()
         huya = match1(res.text, '"stream": "([a-zA-Z0-9+=/]+)"')
         if huya:
