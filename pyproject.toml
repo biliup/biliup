@@ -21,6 +21,7 @@ dependencies = [
     "ykdl >= 1.8.0",
     "rsa >= 4.6",
     'importlib-resources; python_version<"3.9"',
+    'tomli >= 1.1.0 ; python_version < "3.11"',
 ]
 dynamic = ["version"]
 

@@ -1,15 +1,27 @@
 import pathlib
 import shutil
 from collections import UserDict
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 
 
 class Config(UserDict):
     def load(self, file):
         import yaml
         if file is None:
-            file = open('config.yaml', encoding='utf-8')
+            if pathlib.Path('config.yaml').exists():
+                file = open('config.yaml', 'rb')
+            elif pathlib.Path('config.toml').exists():
+                file = open('config.toml', "rb")
+            else:
+                raise FileNotFoundError('未找到配置文件，请先创建配置文件')
         with file as stream:
-            self.data = yaml.load(stream, Loader=yaml.FullLoader)
+            if file.name.endswith('.toml'):
+                self.data = tomllib.load(stream)
+            else:
+                self.data = yaml.load(stream, Loader=yaml.FullLoader)
 
     def create_without_config_input(self, file):
         import yaml

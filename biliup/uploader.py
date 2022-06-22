@@ -18,7 +18,8 @@ def upload(data):
     try:
         index = data['name']
         context = {**config, **config['streamers'][index]}
-        platform = context.get("uploader") if context.get("uploader") else "bili_web"
+        # platform = context.get("uploader") if context.get("uploader") else "bili_web"
+        platform = context.get("uploader") if context.get("uploader") else "biliup-rs"
         if context.get('user_cookie'):
             platform = 'biliup-rs'
         cls = Plugin.upload_plugins.get(platform)
