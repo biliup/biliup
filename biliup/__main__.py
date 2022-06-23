@@ -23,7 +23,7 @@ def arg_parser():
     parser.add_argument('--static-dir', help='web static files directory for custom ui')
     parser.add_argument('--password', help='web ui password ,default username is biliup', dest='password')
     parser.add_argument('-v', '--verbose', action="store_const", const=logging.DEBUG, help="Increase output verbosity")
-    parser.add_argument('--config', type=argparse.FileType(encoding='UTF-8'),
+    parser.add_argument('--config', type=argparse.FileType(mode='rb'),
                         help='Location of the configuration file (default "./config.yaml")')
     subparsers = parser.add_subparsers(help='Windows does not support this sub-command.')
     # create the parser for the "start" command

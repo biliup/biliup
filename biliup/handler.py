@@ -42,7 +42,8 @@ def process(name, url):
         'url': url,
     }
     try:
-        kwargs = config['streamers'][name].copy()
+        kwargs = {'downloader': config.get('downloader') if config.get('downloader') else 'stream-gears'}
+        kwargs.update(config['streamers'][name].copy())
         kwargs.pop('url')
         suffix = kwargs.get('format')
         if suffix:

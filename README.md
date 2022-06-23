@@ -3,34 +3,32 @@
 ![GitHub](https://img.shields.io/github/license/ForgQi/bilibiliupload)
 [![Telegram](https://img.shields.io/badge/Telegram-Group-blue.svg?logo=telegram)](https://t.me/+IkpIABHqy6U0ZTQ5)
 
-详细安装过程可看 [@waitsaber](https://github.com/waitsaber) 写的 [Ubuntu](https://blog.waitsaber.org/archives/129) 、[CentOS](https://blog.waitsaber.org/archives/163)
-、[Windows](https://blog.waitsaber.org/archives/169) 教程
-与 [常见问题](https://blog.waitsaber.org/archives/167) 解决方案
-
-**文档地址**：<https://biliup.github.io/biliup>
-
-* 支持自动录制各大直播平台实时流，上传到bilibili。
-* 支持YouTube频道自动搬运
-* 支持twitch直播回放列表自动搬运至b站，如链接https://www.twitch.tv/xxxx/videos?filter=archives&sort=time
+* 支持自动录制各大直播平台实时流，上传到bilibili
+* 支持YouTube，twitch直播回放列表自动搬运至b站，如链接https://www.twitch.tv/xxxx/videos?filter=archives&sort=time
 * 自动选择上传线路，保证国内外vps上传质量和速度
 * 可分别控制下载与上传并发量
-* 支持cos-internal，腾讯云上海内网上传，免流 + 大幅提速
+* 支持 cos-internal，腾讯云上海内网上传，免流 + 大幅提速
 * 实验性功能：启动时加入`--http`选项并访问localhost:19159可使用webUI
 
-相关配置示例在config.yaml文件中，如直播间地址，b站账号密码\
-由于目前使用账号密码登录，大概率触发验证。请使用命令行工具登录，将登录返回的信息填入配置文件，
-且使用引号括起yaml中cookie的数字代表其为字符串, 如果还有问题可以 [加群讨论](https://github.com/ForgQi/biliup/discussions/58#discussioncomment-2388776) 。
 >演示视频：[BV1ip4y1x7Gi](https://www.bilibili.com/video/BV1ip4y1x7Gi) \
->登录B站获取cookie和token：[命令行投稿工具](https://github.com/ForgQi/biliup-rs) \
->B站图形界面：[投稿客户端GUI](https://github.com/ForgQi/Caution)
+>GUI：[B站投稿客户端 biliup-app](https://github.com/ForgQi/Caution)
 ## INSTALLATION
-1. 创建最小配置文件 [**config.yaml**](#最小配置文件示例)，完整内容可参照 [config(demo).yaml](https://github.com/ForgQi/bilibiliupload/blob/master/config(demo).yaml)
-
-2. 安装 __FFmpeg__, __pip__
-3. 安装 __biliup__：
+1. 创建配置文件 [**config.toml**](#最小配置文件示例)
+    ```toml
+    # 以下为必填项
+    [streamers."1xx直播录像"] # 设置直播间1
+    url = ["https://www.twitch.tv/1xx"]
+    tags = ["biliup"]
+   
+    # 设置直播间2
+    [streamers."2xx直播录像"]
+    url = ["https://www.twitch.tv/2xx"]
+    tags = ["biliup"]            
+    ```
+2. 安装 __pip__ 并通过 pip 安装 __biliup__：
 `pip3 install biliup`
 ```shell
-# 启动
+# 在创建配置文件的目录启动 biliup
 $ biliup start
 # 退出
 $ biliup stop
@@ -45,10 +43,19 @@ $ biliup --http start
 # 指定配置文件路径
 $ biliup --config ./config.yaml start
 ```
+从 v0.2.15 版本开始，配置文件支持 toml 格式，详见 [config.toml](https://github.com/biliup/biliup/blob/master/config.toml)，
+yaml配置文件完整内容可参照 [config(demo).yaml](https://github.com/ForgQi/bilibiliupload/blob/master/config(demo).yaml)。
+__FFmpeg__ 作为可选依赖。如果还有问题可以 [加群讨论](https://github.com/ForgQi/biliup/discussions/58#discussioncomment-2388776) 。
+
+> 使用上传功能需要登录B站，通过 [命令行投稿工具](https://github.com/ForgQi/biliup-rs) 获取 cookies.json，并放入启动 biliup 的路径即可
 
 Linux下以daemon进程启动，录像和日志文件保存在执行目录下，程序执行过程可查看日志文件。
 `ps -A | grep biliup` 查看进程是否启动成功。
+详细安装过程可看 [@waitsaber](https://github.com/waitsaber) 写的 [Ubuntu](https://blog.waitsaber.org/archives/129) 、[CentOS](https://blog.waitsaber.org/archives/163)
+、[Windows](https://blog.waitsaber.org/archives/169) 教程
+与 [常见问题](https://blog.waitsaber.org/archives/167) 解决方案
 
+**文档地址**：<https://biliup.github.io/biliup>
 
 ## Docker使用 🔨
 ### 方式一
@@ -79,8 +86,8 @@ sudo docker exec -it imageId /bin/bash
   $ python3 -m build
   ```
 * 调试 webUI: `python3 -m biliup --http --static-dir public`
-## 最小配置文件示例
-以下为必填项，可选项见完整配置文件,
+## yaml配置文件示例
+可选项见完整配置文件,
 tid投稿分区见[Wiki](https://github.com/ForgQi/biliup/wiki)
 ```yaml
 user:
@@ -190,6 +197,9 @@ def transcoding(data):
 * ~~selenium操作浏览器上传两种方式~~(详见bili_chromeup.py)
 * ~~Windows图形界面版在release中下载AutoTool.msi进行安装~~[AutoTool.msi](https://github.com/ForgQi/bilibiliupload/releases/tag/v0.1.0)
 
+* 相关配置示例在config.yaml文件中，如直播间地址，b站账号密码\
+由于目前使用账号密码登录，大概率触发验证。请使用命令行工具登录，将登录返回的信息填入配置文件，
+且使用引号括起yaml中cookie的数字代表其为字符串, 
 >关于B站为什么不能多p上传\
 目前bilibili网页端是根据用户权重来限制分p数量的，权重不够的用户切换到客户端的提交接口即可解除这一限制。
 >用户等级大于3，且粉丝数>1000，web端投稿不限制分p数量
