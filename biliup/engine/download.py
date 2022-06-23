@@ -49,7 +49,7 @@ class DownloadBase:
 
     def download(self, filename):
         if self.downloader == 'stream-gears':
-            stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'), config.get('file_size'))
+            stream_gears_download(self.raw_stream_url, self.fake_headers, self.fname, config.get('segment_time'), config.get('file_size'))
         else:
             self.ffmpeg_download(filename)
 
@@ -101,7 +101,7 @@ class DownloadBase:
                 self.close()
             if ret is False:
                 break
-            elif ret == 1:
+            elif ret == 1 or self.downloader == 'stream-gears':
                 time.sleep(45)
             i += 1
         logger.info(f'退出下载{i}: {self.fname}')
