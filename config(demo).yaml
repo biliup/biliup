@@ -64,6 +64,7 @@ streamers:
             - run: echo hello! # 执行任意命令，等同于在shell中运行,视频文件路径作为标准输入传入
             - mv: backup/ # 移动文件到backup目录下
             - run: python3 path/to/mail.py # 执行一个 Python 脚本，可以用来发送邮件等，详见 https://biliup.github.io/biliup/Guide.html#%E4%B8%8A%E4%BC%A0%E5%AE%8C%E6%88%90%E5%90%8E%E5%8F%91%E9%80%81%E9%82%AE%E4%BB%B6%E9%80%9A%E7%9F%A5
+            - run: sh ./run.sh # 执行一个shell脚本，用途多样，主要调用系统内的cli工具。示例 https://gist.github.com/UVJkiNTQ/ae4282e8f9fe4e45b3144b57605b4178
 #            - rm # 删除文件，为默认操作
         tags:
             - biliup # 希望你可以保留软件出处
