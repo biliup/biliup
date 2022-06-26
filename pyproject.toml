@@ -10,7 +10,7 @@ keywords = ["bilibili douyu huya"]
 urls = {Homepage = "https://github.com/ForgQi/bilibiliupload"}
 requires-python = ">= 3.7"
 dependencies = [
-    "stream-gears >= 0.1.5",
+    "stream-gears >= 0.1.6",
     "psutil >= 5.4.6",
     "yt_dlp >= 2022.3.8.2",
     "Pillow >= 5.2.0",
