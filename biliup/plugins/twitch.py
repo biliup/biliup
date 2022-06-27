@@ -116,7 +116,6 @@ class Twitch(DownloadBase):
                 logger.warning(self.url, exc_info=e)
                 return
             self.raw_stream_url = info['formats'][-1]['url']
-            print(self.raw_stream_url)
             return False
 
     def close(self):
