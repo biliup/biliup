@@ -13,23 +13,18 @@ class Bilibili(DownloadBase):
 
     def check_stream(self):
         rid = match1(self.url, r'/(\d+)')
-        api1_data = requests.get(f"https://api.live.bilibili.com/room/v1/Room/room_init?id={rid}").json()
-        if api1_data['code'] == 0:
-            vid = api1_data['data']['room_id']
+        room_info = requests.get(f"https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id={rid}").json()
+        if room_info['code'] == 0:
+            vid = room_info['data']['room_info']['room_id']
         else:
-            logger.info('Get room ID from API failed: %s', api1_data)
-            vid = rid
-        api2_data = requests.get(f"https://api.live.bilibili.com/room/v1/Room/get_info?room_id={vid}").json()
-        if api2_data['code'] != 0:
-            logger.debug(api2_data)
+            logger.debug(room_info['message'])
             return False
-        api2_data = api2_data['data']
-        if api2_data['live_status'] != 1:
+        if room_info['data']['room_info']['live_status'] != 1:
             return False
-        self.room_title = api2_data['title']
+        self.room_title = room_info['data']['room_info']['title']
         biliplatform = config.get('biliplatform') if config.get('biliplatform') else 'web'
         params = {
-            'room_id': rid,
+            'room_id': vid,
             'qn': '10000',
             'platform': biliplatform,
             'codec': '0,1',
