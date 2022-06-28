@@ -94,28 +94,29 @@ class Twitch(DownloadBase):
         gql = Twitch.BatchCheck([self.url]).get_streamer()
         for data in gql:
             self.room_title = data.get('data').get('user').get('lastBroadcast').get('title')
-        port = random.randint(1025, 65535)
-        self.proc = subprocess.Popen([
-            "streamlink", "--player-external-http", "--twitch-disable-ads",
-            "--twitch-disable-hosting", "--twitch-disable-reruns",
-            "--player-external-http-port", str(port),self.url, "best"
-        ])
-        self.raw_stream_url = f"http://localhost:{port}"
-        i = 0
-        while i < 5:
-            if not (self.proc.poll() is None):
+        if self.downloader == 'ffmpeg':
+            port = random.randint(1025, 65535)
+            self.proc = subprocess.Popen([
+                "streamlink", "--player-external-http", "--twitch-disable-ads",
+                "--twitch-disable-hosting", "--twitch-disable-reruns",
+                "--player-external-http-port", str(port),self.url, "best"
+            ])
+            self.raw_stream_url = f"http://localhost:{port}"
+            i = 0
+            while i < 5:
+                if not (self.proc.poll() is None):
+                    return
+                time.sleep(1)
+                i += 1
+            return True
+        with yt_dlp.YoutubeDL() as ydl:
+            try:
+                info = ydl.extract_info(self.url, download=False)
+            except yt_dlp.utils.DownloadError as e:
+                logger.warning(self.url, exc_info=e)
                 return
-            time.sleep(1)
-            i += 1
-        return True
-        # with yt_dlp.YoutubeDL() as ydl:
-        #     try:
-        #         info = ydl.extract_info(self.url, download=False)
-        #     except yt_dlp.utils.DownloadError as e:
-        #         logger.warning(self.url, exc_info=e)
-        #         return
-        #     self.raw_stream_url = info['formats'][-1]['url']
-        #     return True
+            self.raw_stream_url = info['formats'][-1]['url']
+            return False
 
     def close(self):
         try:

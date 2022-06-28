@@ -1,4 +1,5 @@
 import json
+import requests
 from urllib.parse import urlencode
 
 from ykdl.extractors.douyu.util import ub98484234
@@ -28,7 +29,7 @@ class Douyu(DownloadBase):
                      'room_id\s*=\s*(\d+)',
                      '"room_id.?":(\d+)',
                      'data-onlineid=(\d+)')
-        roominfo = json.loads(get_content(f"https://www.douyu.com/betard/{self.vid}"))['room']
+        roominfo = requests.get(f"https://www.douyu.com/betard/{self.vid}").json()['room']
         videoloop = roominfo['videoLoop']
         show_status = roominfo['show_status']
         if show_status != 1 or videoloop != 0:
