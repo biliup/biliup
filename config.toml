@@ -22,7 +22,8 @@ filtering_threshold = 20 # 小于此大小的视频文件将会被过滤删除�
 #douyin_cookie = '__ac_nonce=123456; __ac_signature=123456;'
 # Netscape 格式的 Cookies 文本路径
 #youtube_cookie = 'cookiejar.txt'
-
+# 检测到主播下播后延迟再次检测，单位：秒，避免特殊情况提早启动上传导致漏录
+delay = 10
 # 检测间隔时间，单位：秒
 event_loop_interval = 40
 # 相同平台检测间隔，单位：秒。不同平台的链接是并发的，不受此参数影响
