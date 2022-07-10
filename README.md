@@ -12,7 +12,7 @@
     - 防止录制花屏
     - 启动时加入`--http`选项并访问localhost:19159可使用webUI
 
->演示视频：[BV1ip4y1x7Gi](https://www.bilibili.com/video/BV1ip4y1x7Gi) \
+>快速上手教程视频：[BV1jB4y1p7TK](https://www.bilibili.com/video/BV1jB4y1p7TK/) \
 >GUI：[B站投稿客户端 biliup-app](https://github.com/ForgQi/Caution)
 ## INSTALLATION
 1. 创建配置文件 [**config.toml**](#最小配置文件示例)
