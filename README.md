@@ -57,6 +57,33 @@ Linux下以daemon进程启动，录像和日志文件保存在执行目录下，
 、[Windows](https://blog.waitsaber.org/archives/169) 教程
 与 [常见问题](https://blog.waitsaber.org/archives/167) 解决方案
 
+开机自启可参照以下模板创建systemd unit:
+
+创建service文件：
+> $ nano ~/.config/systemd/user/biliupd.service
+```
+[Unit]
+Description=Biliup Startup
+Documentation="https://biliup.github.io/biliup"
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=[在此填入你的config所在目录]
+ExecStart=/usr/bin/biliup -v
+ExecReload=/usr/bin/biliup restart
+ExecStop=/usr/bin/biliup stop
+
+[Install]
+WantedBy=default.target
+```
+启用service并启动：
+```shell
+$ systemctl --user enable biliupd
+$ systemctl --user start biliupd
+```
+
 **文档地址**：<https://biliup.github.io/biliup>
 
 ## Docker使用 🔨
