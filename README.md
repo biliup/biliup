@@ -8,10 +8,17 @@
 * 自动选择上传线路，保证国内外vps上传质量和速度
 * 可分别控制下载与上传并发量
 * 支持 cos-internal，腾讯云上海内网上传，免流 + 大幅提速
-* 实验性功能：启动时加入`--http`选项并访问localhost:19159可使用webUI
+* 实验性功能：
+    - 防止录制花屏
+    - 启动时加入`--http`选项并访问localhost:19159可使用webUI
 
->演示视频：[BV1ip4y1x7Gi](https://www.bilibili.com/video/BV1ip4y1x7Gi) \
->GUI：[B站投稿客户端 biliup-app](https://github.com/ForgQi/Caution)
+> 详细安装教程:
+> * [快速上手视频](https://www.bilibili.com/video/BV1jB4y1p7TK/)教程 by [@milk](https://github.com/by123456by)
+> * [Ubuntu](https://blog.waitsaber.org/archives/129) 、[CentOS](https://blog.waitsaber.org/archives/163)
+、[Windows](https://blog.waitsaber.org/archives/169) 教程
+与 [常见问题](https://blog.waitsaber.org/archives/167) 解决方案 by [@waitsaber](https://github.com/waitsaber)
+
+**文档地址**：<https://biliup.github.io/biliup>
 ## INSTALLATION
 1. 创建配置文件 [**config.toml**](#最小配置文件示例)
     ```toml
@@ -51,11 +58,6 @@ __FFmpeg__ 作为可选依赖。如果还有问题可以 [加群讨论](https://
 
 Linux下以daemon进程启动，录像和日志文件保存在执行目录下，程序执行过程可查看日志文件。
 `ps -A | grep biliup` 查看进程是否启动成功。
-详细安装过程可看 [@waitsaber](https://github.com/waitsaber) 写的 [Ubuntu](https://blog.waitsaber.org/archives/129) 、[CentOS](https://blog.waitsaber.org/archives/163)
-、[Windows](https://blog.waitsaber.org/archives/169) 教程
-与 [常见问题](https://blog.waitsaber.org/archives/167) 解决方案
-
-**文档地址**：<https://biliup.github.io/biliup>
 
 ## Docker使用 🔨
 ### 方式一
@@ -193,6 +195,34 @@ def transcoding(data):
         Please install at least one of the following Javascript interpreter.'
         python packages: PyChakra, quickjs
         applications: Gjs, CJS, QuickJS, JavaScriptCore, Node.js, etc.'''
+
+开机自启可参照以下模板创建systemd unit:
+
+创建service文件：
+> $ nano ~/.config/systemd/user/biliupd.service
+```
+[Unit]
+Description=Biliup Startup
+Documentation="https://biliup.github.io/biliup"
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=[在此填入你的config所在目录]
+ExecStart=/usr/bin/biliup -v
+ExecReload=/usr/bin/biliup restart
+ExecStop=/usr/bin/biliup stop
+
+[Install]
+WantedBy=default.target
+```
+启用service并启动：
+```shell
+$ systemctl --user enable biliupd
+$ systemctl --user start biliupd
+```
+
 ## Deprecated
 * ~~selenium操作浏览器上传两种方式~~(详见bili_chromeup.py)
 * ~~Windows图形界面版在release中下载AutoTool.msi进行安装~~[AutoTool.msi](https://github.com/ForgQi/bilibiliupload/releases/tag/v0.1.0)
@@ -205,6 +235,7 @@ def transcoding(data):
 >用户等级大于3，且粉丝数>1000，web端投稿不限制分p数量
 ## Credits
 * Thanks `ykdl, youtube-dl, streamlink` provides downloader.
+>GUI：[B站投稿客户端 biliup-app](https://github.com/ForgQi/Caution)
 
 类似项目:\
 ![ZhangMingZhao1](https://avatars2.githubusercontent.com/u/29058747?s=50&u=5f8c3acaa9d09f4396f00256c0ce6ef01452e92f&v=4) ：StreamerHelper

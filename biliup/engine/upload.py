@@ -37,7 +37,7 @@ class UploadBase:
             return False
         for r in file_list:
             file_size = os.path.getsize(r) / 1024 / 1024
-            threshold = self.data.get('threshold') if self.data.get('threshold') else 20
+            threshold = self.data.get('threshold') if self.data.get('threshold') else 2
             if file_size <= threshold:
                 os.remove(r)
                 logger.info('过滤删除-' + r)

@@ -26,3 +26,4 @@ package-lock.json
 biliup/**/public
 cookie*.json
 *.log
+./*.ts

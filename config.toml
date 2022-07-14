@@ -10,7 +10,7 @@ threads = 3
 # 录像单文件大小限制，单位Byte，超过此大小分段下载
 file_size = 2621440000
 # 录像单文件时间限制，格式'00:00:00'（时分秒），超过此大小分段下载，如需使用大小分段请注释此字段
-#segment_time: '00:50:00'
+#segment_time = '00:50:00'
 filtering_threshold = 20 # 小于此大小的视频文件将会被过滤删除，单位MB
 # 如遇到斗鱼录制卡顿可以尝试切换线路，tct-h5（备用线路5），ali-h5（备用线路6），akm-h5（主线路1）
 #douyucdn = "tct-h5"
@@ -22,7 +22,8 @@ filtering_threshold = 20 # 小于此大小的视频文件将会被过滤删除�
 #douyin_cookie = '__ac_nonce=123456; __ac_signature=123456;'
 # Netscape 格式的 Cookies 文本路径
 #youtube_cookie = 'cookiejar.txt'
-
+# 检测到主播下播后延迟再次检测，单位：秒，避免特殊情况提早启动上传导致漏录
+delay = 10
 # 检测间隔时间，单位：秒
 event_loop_interval = 40
 # 相同平台检测间隔，单位：秒。不同平台的链接是并发的，不受此参数影响
@@ -64,6 +65,7 @@ postprocessor = [
     {run = "echo hello!"}, # 执行任意命令，等同于在shell中运行,视频文件路径作为标准输入传入
     {mv = "backup/"}, # 移动文件到backup目录下
     {run = "python3 path/to/mail.py"}, # 执行一个 Python 脚本，可以用来发送邮件等，详见 https://biliup.github.io/biliup/Guide.html#%E4%B8%8A%E4%BC%A0%E5%AE%8C%E6%88%90%E5%90%8E%E5%8F%91%E9%80%81%E9%82%AE%E4%BB%B6%E9%80%9A%E7%9F%A5
+    {run = "sh ./run.sh"} # 执行一个shell脚本，主要调用系统内的cli工具。示例 https://gist.github.com/UVJkiNTQ/ae4282e8f9fe4e45b3144b57605b4178
 #    'rm',  # 删除文件，为默认操作
 ]
 

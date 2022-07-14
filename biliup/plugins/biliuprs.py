@@ -9,14 +9,13 @@ from ..engine.upload import UploadBase, logger
 @Plugin.upload(platform="biliup-rs")
 class BiliWeb(UploadBase):
     def __init__(
-            self, principal, data, user, submit_api=None, copyright=2, postprocessor=None, dtime=None,
+            self, principal, data, submit_api=None, copyright=2, postprocessor=None, dtime=None,
             dynamic='', lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description='',
             user_cookie='cookies.json'
     ):
         super().__init__(principal, data, persistence_path='bili.cookie', postprocessor=postprocessor)
         if tags is None:
             tags = []
-        self.user = user
         self.lines = lines
         self.submit_api = submit_api
         self.threads = threads
