@@ -8,6 +8,12 @@ from .timer import Timer
 
 logger = logging.getLogger('biliup')
 
+global global_reloader
+
+
+
+
+
 
 def has_extension(fname_list, *extension):
     for fname in fname_list:
@@ -22,6 +28,8 @@ class AutoReload(Timer):
         super().__init__(interval)
         self.watched = watched
         self.mtimes = {}
+        self.triggered = False
+
 
     @staticmethod
     def _iter_module_files():
@@ -64,7 +72,7 @@ class AutoReload(Timer):
         """Check file state ervry interval. If any change is detected, exit this
         process with a special code, so that deamon will to restart a new process.
         """
-        if not self._is_any_file_changed():
+        if not self._is_any_file_changed() and not self.triggered:
             return
         while True:
             await asyncio.sleep(self.interval)
@@ -85,3 +93,5 @@ class AutoReload(Timer):
                 args = ['biliup', 'start']
                 subprocess.Popen(args)
                 return logger.info('重启')
+
+

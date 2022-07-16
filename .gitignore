@@ -27,3 +27,4 @@ biliup/**/public
 cookie*.json
 *.log
 ./*.ts
+/biliup/stream-gears/
