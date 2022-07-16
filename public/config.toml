@@ -3,8 +3,6 @@
 
 # b站上传线路选择，默认为自动模式，目前可手动切换为bda2, kodo, ws, qn, cos, cos-internal(支持腾讯云内网免流+提速)
 lines = "AUTO"
-# b站提交接口，默认自动选择，可选web，client
-submit_api = "client"
 # 单文件并发上传数，未达到带宽上限时增大此值可提高上传速度
 threads = 3
 # 录像单文件大小限制，单位Byte，超过此大小分段下载
@@ -57,7 +55,7 @@ description = """
 Powered By biliup - Github: https://github.com/ForgQi/biliup"""
 dynamic = "#空间动态#"
 dtime = 14_400 # 设置延时发布时间，距离提交大于2小时，格式为时间戳
-uploader = "bili_web"  # 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
+uploader = "biliup-rs"  # 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
 user_cookie = "cookies.json" # 使用指定的账号上传
 tags = [ "biliup", "视频标签" ]
 # 上传完成后，将按自定义顺序执行自定义操作
