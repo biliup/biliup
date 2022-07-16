@@ -128,15 +128,28 @@
             tempTag = null;
             return;
         }
-        if(tags.length > 10) {
-            createPop("标签数量超过10个，无法添加");
+        if(tags.length > 12) {
+            createPop("标签数量超过12个，无法添加");
             tempTag = null;
             return;
         }
-        tags = [...tags, tempTag];
-        selectedTemplate.tags = tags;
-        tempTag = null;
-        return false;
+        fetch('/api/check_tag?'+new URLSearchParams({
+            tag:tempTag
+        }), {
+            method: 'get',
+        }).then(res=>{
+            if(!res.ok){
+                createPop("标签违禁")
+                tempTag = null;
+            }else{
+                tags = [...tags, tempTag];
+                selectedTemplate.tags = tags;
+                tempTag = null;
+            }
+        })
+
+
+        // return false;
     }
 
     function urlhandleKeypress() {

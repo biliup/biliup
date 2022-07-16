@@ -44,6 +44,7 @@
 
 
     let lines = ['ws', 'qn', 'auto', 'bda2', 'kodo','cos'];
+    let is_toml = false;
     let User={
         SESSDATA:"",
         bili_jct:"",
@@ -66,6 +67,7 @@
         } else {
             line = ret_json.line;
         }
+        is_toml = ret_json.toml;
         User=ret_json.user;
         limit = <number>ret_json['limit'];
     }
@@ -130,46 +132,48 @@
                             <input type="radio" bind:group={line} value="{l}" data-title="{l}"  class="btn btn-outline">
                         {/each}
                     </div>
-                    <div class="flex flex-col">
-                        <label class="label">
-                            <span class="text-sm font-bold text-gray-500 tracking-wide">SESSDATA</span>
-                        </label>
-                        <input bind:value={User.SESSDATA}
-                               class="text-base p-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500"
-                               placeholder="SESSDATA">
-                    </div>
-                    <div class="flex flex-col">
-                        <label class="label">
-                            <span class="text-sm font-bold text-gray-500 tracking-wide">DedeUserID__ckMd5</span>
-                        </label>
-                        <input bind:value={User.DedeUserID__ckMd5}
-                               class="text-base p-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500"
-                               placeholder="DedeUserID__ckMd5">
-                    </div>
-                    <div class="flex flex-col">
-                        <label class="label">
-                            <span class="text-sm font-bold text-gray-500 tracking-wide">bili_jct</span>
-                        </label>
-                        <input bind:value={User.bili_jct}
-                               class="text-base p-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500"
-                               placeholder="bili_jct">
-                    </div>
-                    <div class="flex flex-col">
-                        <label class="label">
-                            <span class="text-sm font-bold text-gray-500 tracking-wide">access_token</span>
-                        </label>
-                        <input bind:value={User.access_token}
-                               class="text-base p-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500"
-                               placeholder="access_token">
-                    </div>
-                    <div class="flex flex-col">
-                        <label class="label">
-                            <span class="text-sm font-bold text-gray-500 tracking-wide">DedeUserID</span>
-                        </label>
-                        <input bind:value={User.DedeUserID}
-                               class="text-base p-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500"
-                               placeholder="DedeUserID">
-                    </div>
+                    {#if !is_toml}
+                        <div class="flex flex-col">
+                            <label class="label">
+                                <span class="text-sm font-bold text-gray-500 tracking-wide">SESSDATA</span>
+                            </label>
+                            <input bind:value={User.SESSDATA}
+                                   class="text-base p-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500"
+                                   placeholder="SESSDATA">
+                        </div>
+                        <div class="flex flex-col">
+                            <label class="label">
+                                <span class="text-sm font-bold text-gray-500 tracking-wide">DedeUserID__ckMd5</span>
+                            </label>
+                            <input bind:value={User.DedeUserID__ckMd5}
+                                   class="text-base p-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500"
+                                   placeholder="DedeUserID__ckMd5">
+                        </div>
+                        <div class="flex flex-col">
+                            <label class="label">
+                                <span class="text-sm font-bold text-gray-500 tracking-wide">bili_jct</span>
+                            </label>
+                            <input bind:value={User.bili_jct}
+                                   class="text-base p-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500"
+                                   placeholder="bili_jct">
+                        </div>
+                        <div class="flex flex-col">
+                            <label class="label">
+                                <span class="text-sm font-bold text-gray-500 tracking-wide">access_token</span>
+                            </label>
+                            <input bind:value={User.access_token}
+                                   class="text-base p-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500"
+                                   placeholder="access_token">
+                        </div>
+                        <div class="flex flex-col">
+                            <label class="label">
+                                <span class="text-sm font-bold text-gray-500 tracking-wide">DedeUserID</span>
+                            </label>
+                            <input bind:value={User.DedeUserID}
+                                   class="text-base p-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500"
+                                   placeholder="DedeUserID">
+                        </div>
+                    {/if}
                 </div>
 
                 <div class="modal-action">

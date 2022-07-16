@@ -1,6 +1,8 @@
+import json
 import pathlib
 import shutil
 from collections import UserDict
+
 try:
     import tomllib
 except ModuleNotFoundError:
@@ -8,12 +10,22 @@ except ModuleNotFoundError:
 
 
 class Config(UserDict):
+    def load_cookies(self):
+        self.data["user"] = {"cookies": {}}
+        with open('cookies.json', encoding='utf-8') as stream:
+            s = json.load(stream)
+            for i in s["cookie_info"]["cookies"]:
+                name = i["name"]
+                self.data["user"]["cookies"][name] = i["value"]
+            self.data["user"]["access_token"] = s["token_info"]["access_token"]
+
     def load(self, file):
         import yaml
         if file is None:
             if pathlib.Path('config.yaml').exists():
                 file = open('config.yaml', 'rb')
             elif pathlib.Path('config.toml').exists():
+                self.data['toml'] = True
                 file = open('config.toml', "rb")
             else:
                 raise FileNotFoundError('未找到配置文件，请先创建配置文件')
@@ -36,21 +48,33 @@ class Config(UserDict):
                     from importlib_resources import files
                 shutil.copy(files("biliup.web").joinpath('public/config.yaml'), 'common')
                 file = open('config.yaml', encoding='utf-8')
+
         with file as stream:
-            self.data = yaml.load(stream, Loader=yaml.FullLoader)
+            if file.name.endswith('.toml'):
+                self.data = tomllib.load(stream)
+                self.data['toml'] = True
+            else:
+                self.data = yaml.load(stream, Loader=yaml.FullLoader)
 
     def save(self):
-        import yaml
-        old_file = open('config.yaml', encoding='utf-8')
-        old_data = yaml.load(old_file, Loader=yaml.FullLoader)
-        old_data["user"]["cookies"] = self.data["user"]["cookies"]
-        old_data["user"]["access_token"] = self.data["user"]["access_token"]
-        old_data["lines"] = self.data["lines"]
-        old_data["threads"] = self.data["threads"]
-        old_data["streamers"] = self.data["streamers"]
-        file = open('config.yaml', 'w', encoding='utf-8')
-        with file as stream:
-            yaml.dump(old_data, stream, default_flow_style=False, allow_unicode=True)
+        if self.data['toml']:
+            with open('config.toml', 'w+', encoding='utf-8') as stream:
+                import toml
+                old_data = toml.load(stream)
+                old_data["lines"] = self.data["lines"]
+                old_data["threads"] = self.data["threads"]
+                old_data["streamers"] = self.data["streamers"]
+                toml.dump(old_data, stream)
+        else:
+            import yaml
+            with open('config.yaml', 'w+', encoding='utf-8') as stream:
+                old_data = yaml.load(stream, Loader=yaml.FullLoader)
+                old_data["user"]["cookies"] = self.data["user"]["cookies"]
+                old_data["user"]["access_token"] = self.data["user"]["access_token"]
+                old_data["lines"] = self.data["lines"]
+                old_data["threads"] = self.data["threads"]
+                old_data["streamers"] = self.data["streamers"]
+                yaml.dump(old_data, stream, default_flow_style=False, allow_unicode=True)
 
 
 config = Config()

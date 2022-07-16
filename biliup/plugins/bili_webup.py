@@ -96,6 +96,13 @@ class BiliBili:
         self._auto_os = None
         self.persistence_path = 'engine/bili.cookie'
 
+    def check_tag(self, tag):
+        r = self.__session.get("https://member.bilibili.com/x/vupre/web/topic/tag/check?tag=" + tag).json()
+        if r["code"] == 0:
+            return True
+        else:
+            return False
+
     def get_qrcode(self):
         params = {
             "appkey": "4409e2ce8ffd12b8",
@@ -127,7 +134,8 @@ class BiliBili:
             if r and r["code"] == 0:
                 return r
         raise "Qrcode timeout"
-    def tid_archive(self,cookies):
+
+    def tid_archive(self, cookies):
         requests.utils.add_dict_to_cookiejar(self.__session.cookies, cookies)
         response = self.__session.get("https://member.bilibili.com/x/vupre/web/archive/pre")
         return response.json()
@@ -168,7 +176,7 @@ class BiliBili:
                        'refresh_token': self.refresh_token
                        }, f)
 
-    def send_sms(self, phone_number, country_code ):
+    def send_sms(self, phone_number, country_code):
         params = {
             "actionKey": "appkey",
             "appkey": "783bbb7264451d82",
@@ -533,6 +541,8 @@ class BiliBili:
     def submit(self, submit_api=None):
         if not self.video.title:
             self.video.title = self.video.videos[0]["title"]
+        for v in self.video.videos:
+            v["title"] = ""
         self.__session.get('https://member.bilibili.com/x/geetest/pre/add', timeout=5)
 
         if submit_api is None:
