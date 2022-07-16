@@ -8,18 +8,11 @@ from .timer import Timer
 
 logger = logging.getLogger('biliup')
 
-
-def _init():
-    global global_reloader
+global global_reloader
 
 
-def set_reloader(reloader):
-    global global_reloader
-    global_reloader = reloader
 
 
-def get_reloader():
-    return global_reloader
 
 
 def has_extension(fname_list, *extension):

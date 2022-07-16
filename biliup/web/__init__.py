@@ -3,7 +3,7 @@ import json
 from aiohttp import web
 from .aiohttp_basicauth_middleware import basic_auth_middleware
 import stream_gears
-from biliup.common.reload import get_reloader
+import biliup.common.reload
 from biliup.config import config
 from biliup.plugins.bili_webup import BiliBili, Data
 
@@ -68,8 +68,7 @@ async def set_streamer_config(request):
 
 async def save_config(reequest):
     config.save()
-    reloader = get_reloader()
-    reloader.triggered = True
+    biliup.common.reload.global_reloader.triggered = True
     import logging
     logger = logging.getLogger('biliup')
     logger.info("配置保存，将在进程空闲时重启")
