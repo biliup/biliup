@@ -3,6 +3,7 @@ import pathlib
 import shutil
 from collections import UserDict
 
+
 try:
     import tomllib
 except ModuleNotFoundError:
@@ -38,16 +39,27 @@ class Config(UserDict):
     def create_without_config_input(self, file):
         import yaml
         if file is None:
-            if pathlib.Path('config.yaml').exists():
-                file = open('config.yaml', encoding='utf-8')
+            if pathlib.Path('config.toml').exists():
+                file = open('config.toml')
             else:
                 try:
                     from importlib.resources import files
                 except ImportError:
                     # Try backported to PY<37 `importlib_resources`.
                     from importlib_resources import files
-                shutil.copy(files("biliup.web").joinpath('public/config.yaml'), 'common')
-                file = open('config.yaml', encoding='utf-8')
+                shutil.copy(files("biliup.web").joinpath('public/config.toml'), 'common')
+                file = open('config.toml')
+                 # file = open('config.yaml', encoding='utf-8')
+            # if pathlib.Path('config.yaml').exists():
+            #     file = open('config.yaml', encoding='utf-8')
+            # else:
+            #     try:
+            #         from importlib.resources import files
+            #     except ImportError:
+            #         # Try backported to PY<37 `importlib_resources`.
+            #         from importlib_resources import files
+            #     shutil.copy(files("biliup.web").joinpath('public/config.yaml'), 'common')
+            #     file = open('config.yaml', encoding='utf-8')
 
         with file as stream:
             if file.name.endswith('.toml'):
@@ -58,13 +70,14 @@ class Config(UserDict):
 
     def save(self):
         if self.data['toml']:
-            with open('config.toml', 'w+', encoding='utf-8') as stream:
-                import toml
-                old_data = toml.load(stream)
+            import tomli_w
+            with open('config.toml', 'rb') as stream:
+                old_data = tomllib.load(stream)
                 old_data["lines"] = self.data["lines"]
                 old_data["threads"] = self.data["threads"]
                 old_data["streamers"] = self.data["streamers"]
-                toml.dump(old_data, stream)
+            with open('config.toml', 'wb') as stream:
+                tomli_w.dump(old_data, stream)
         else:
             import yaml
             with open('config.yaml', 'w+', encoding='utf-8') as stream:

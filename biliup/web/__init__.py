@@ -53,15 +53,15 @@ async def get_streamer_config(request):
 
 async def set_streamer_config(request):
     post_data = await request.json()
-    config.data['streamers'] = post_data['streamers']
-    # for i,j in post_data['streamers'].items():
-    #     if i not in config.data['streamers']:
-    #         config.data['streamers'][i]={}
-    #     for key,Value in j.items():
-    #         config.data['streamers'][i][key]=Value
-    # for i in config.data['streamers']:
-    #     if i not in post_data['streamers']:
-    #         del config.data['streamers'][i]
+    # config.data['streamers'] = post_data['streamers']
+    for i,j in post_data['streamers'].items():
+        if i not in config.data['streamers']:
+            config.data['streamers'][i]={}
+        for key,Value in j.items():
+            config.data['streamers'][i][key]=Value
+    for i in config.data['streamers']:
+        if i not in post_data['streamers']:
+            del config.data['streamers'][i]
 
     return web.json_response({"status": 200}, status=200)
 
