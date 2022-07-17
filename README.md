@@ -50,8 +50,8 @@ $ biliup --http start
 # 指定配置文件路径
 $ biliup --config ./config.yaml start
 ```
-从 v0.2.15 版本开始，配置文件支持 toml 格式，详见 [config.toml](https://github.com/biliup/biliup/blob/master/config.toml)，
-yaml配置文件完整内容可参照 [config(demo).yaml](https://github.com/ForgQi/bilibiliupload/blob/master/config(demo).yaml)。
+从 v0.2.15 版本开始，配置文件支持 toml 格式，详见 [config.toml](https://github.com/biliup/biliup/blob/master/public/config.toml)，
+yaml配置文件完整内容可参照 [config.yaml](https://github.com/ForgQi/bilibiliupload/blob/master/public/config.yaml)。
 __FFmpeg__ 作为可选依赖。如果还有问题可以 [加群讨论](https://github.com/ForgQi/biliup/discussions/58#discussioncomment-2388776) 。
 
 > 使用上传功能需要登录B站，通过 [命令行投稿工具](https://github.com/ForgQi/biliup-rs) 获取 cookies.json，并放入启动 biliup 的路径即可
@@ -92,14 +92,6 @@ sudo docker exec -it imageId /bin/bash
 可选项见完整配置文件,
 tid投稿分区见[Wiki](https://github.com/ForgQi/biliup/wiki)
 ```yaml
-user:
-    cookies:
-        SESSDATA: your SESSDATA
-        bili_jct: your bili_jct
-        DedeUserID__ckMd5: your ckMd5
-        DedeUserID: your DedeUserID
-    access_token: your access_key
-
 streamers:
     xxx直播录像:
         url:
