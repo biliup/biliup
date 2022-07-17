@@ -3,7 +3,6 @@ import pathlib
 import shutil
 from collections import UserDict
 
-
 try:
     import tomllib
 except ModuleNotFoundError:
@@ -40,18 +39,17 @@ class Config(UserDict):
         import yaml
         if file is None:
             if pathlib.Path('config.toml').exists():
-                file = open('config.toml')
+                file = open('config.toml', 'rb')
+            elif pathlib.Path('config.yaml').exists():
+                file = open('config.yaml', encoding='utf-8')
             else:
                 try:
                     from importlib.resources import files
                 except ImportError:
-                    # Try backported to PY<37 `importlib_resources`.
                     from importlib_resources import files
-                shutil.copy(files("biliup.web").joinpath('public/config.toml'), 'common')
-                file = open('config.toml')
-                 # file = open('config.yaml', encoding='utf-8')
-            # if pathlib.Path('config.yaml').exists():
-            #     file = open('config.yaml', encoding='utf-8')
+                shutil.copy(files("biliup.web").joinpath('public/config.toml'), '.')
+                file = open('config.toml', 'rb')
+
             # else:
             #     try:
             #         from importlib.resources import files
