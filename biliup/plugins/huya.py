@@ -19,11 +19,19 @@ class Huya(DownloadBase):
         logger.debug(self.fname)
         res = requests.get(self.url, timeout=5, headers=self.fake_headers)
         res.close()
-        huya = match1(res.text, '"stream": "([a-zA-Z0-9+=/]+)"')
+        huya = None
+        if match1(res.text, '"stream": "([a-zA-Z0-9+=/]+)"'):
+            huya = base64.b64decode(match1(res.text, '"stream": "([a-zA-Z0-9+=/]+)"')).decode()
+        elif match1(res.text, 'stream: ([\w\W]+)'):
+            huya = res.text.split('stream: ')[1].split('};')[0].strip()
+            if json.loads(huya)['vMultiStreamInfo']:
+                huya = res.text.split('stream: ')[1].split('};')[0].strip()
+            else:
+                huya = None
         if huya:
             huyacdn = config.get('huyacdn') if config.get('huyacdn') else 'AL'
-            huyajson1 = json.loads(base64.b64decode(huya).decode())['data'][0]['gameStreamInfoList']
-            huyajson2 = json.loads(base64.b64decode(huya).decode())['vMultiStreamInfo']
+            huyajson1 = json.loads(huya)['data'][0]['gameStreamInfoList']
+            huyajson2 = json.loads(huya)['vMultiStreamInfo']
             ratio = huyajson2[0]['iBitRate']
             ibitrate_list = []
             sdisplayname_list = []
@@ -39,5 +47,5 @@ class Huya(DownloadBase):
             absurl = f'{huyajson["sFlvUrl"]}/{huyajson["sStreamName"]}.{huyajson["sFlvUrlSuffix"]}?' \
                      f'{huyajson["sFlvAntiCode"]}'
             self.raw_stream_url = html.unescape(absurl) + "&ratio=" + str(ratio)
-            self.room_title = json.loads(base64.b64decode(huya).decode())['data'][0]['gameLiveInfo']['roomName']
+            self.room_title = json.loads(huya)['data'][0]['gameLiveInfo']['roomName']
             return True
