@@ -116,11 +116,12 @@ class Twitch(DownloadBase):
                 logger.warning(self.url, exc_info=e)
                 return
             self.raw_stream_url = info['formats'][-1]['url']
-            return False
+            return True
 
     def close(self):
         try:
-            self.proc.terminate()
+            if self.proc is not None:
+                self.proc.terminate()
         except:
             logger.exception(f'terminate {self.fname} failed')
 

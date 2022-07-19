@@ -18,6 +18,8 @@
 
 
     function login_by_sms() {
+        createPop("Not Support", 5000);
+        return
         fetch('/api/login_by_sms', {
             method: 'POST'
         })
@@ -31,6 +33,8 @@
     }
 
     function sendSms() {
+        createPop("Not Support", 5000);
+        return
         throttle = true;
 
         function CountDown() {
@@ -111,6 +115,9 @@
     }
 
     function login() {
+        createPop("Not Support", 5000);
+        return
+
         console.log(rememberMe);
         invoke('login', {username: username, password: password, rememberMe: rememberMe})
             .then((res) => {

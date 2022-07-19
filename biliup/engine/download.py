@@ -100,6 +100,12 @@ class DownloadBase:
             finally:
                 self.close()
             if ret is False:
+                if config.get('delay'):
+                    time.sleep(config.get('delay'))
+                    logger.info(f"delay: {config.get('delay')}")
+                    if self.check_stream():
+                        time.sleep(5)
+                        continue
                 break
             elif ret == 1 or self.downloader == 'stream-gears':
                 time.sleep(45)
