@@ -37,6 +37,7 @@ def arg_parser():
     parser_restart.set_defaults(func=daemon.restart)
     parser.set_defaults(func=lambda: asyncio.run(main(args)))
     args = parser.parse_args()
+    biliup.common.reload.program_args = args.__dict__
     if args.http:
         config.create_without_config_input(args.config)
     else:

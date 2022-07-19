@@ -9,10 +9,7 @@ from .timer import Timer
 logger = logging.getLogger('biliup')
 
 global global_reloader
-
-
-
-
+global program_args
 
 
 def has_extension(fname_list, *extension):
@@ -29,7 +26,6 @@ class AutoReload(Timer):
         self.watched = watched
         self.mtimes = {}
         self.triggered = False
-
 
     @staticmethod
     def _iter_module_files():
@@ -90,8 +86,30 @@ class AutoReload(Timer):
                 #     args = ["python", path]
                 # else:
                 #     args = [path, 'start']
-                args = ['biliup', 'start']
-                subprocess.Popen(args)
+                if not is_docker():
+                    args = unparser_args(program_args)
+                    subprocess.Popen(args)
                 return logger.info('重启')
 
 
+def unparser_args(args):
+    s = ['biliup', 'start']
+    for i, j in args.items():
+        if i == 'start':
+            continue
+        elif type(j) == str or type(j) == int:
+            s.append(f'--{i}={j}')
+        elif type(j) == bool:
+            s.append(f'--{i}')
+    return s
+
+
+import os
+
+
+def is_docker():
+    path = '/proc/self/cgroup'
+    return (
+            os.path.exists('/.dockerenv') or
+            os.path.isfile(path) and any('docker' in line for line in open(path))
+    )
