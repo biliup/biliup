@@ -10,7 +10,7 @@
 * 支持 cos-internal，腾讯云上海内网上传，免流 + 大幅提速
 * 实验性功能：
     - 防止录制花屏
-    - 启动时加入`--http`选项并访问localhost:19159可使用webUI
+    - 启动时加入`--http`选项并访问localhost:19159可使用webUI (建议使用toml配置文件)
 
 > 详细安装教程:
 > * [快速上手视频](https://www.bilibili.com/video/BV1jB4y1p7TK/)教程 by [@milk](https://github.com/by123456by)
@@ -60,12 +60,26 @@ Linux下以daemon进程启动，录像和日志文件保存在执行目录下，
 `ps -A | grep biliup` 查看进程是否启动成功。
 
 ## Docker使用 🔨
-### 方式一
+### 方式一 拉取镜像
+#### 从配置文件启动
 ```bash
-vim /host/path/config.yaml
+vim /host/path/config.toml
 docker run -P --name biliup -v /host/path:/opt -d ghcr.io/biliup/biliup/caution:latest
 ```
-### 方式二
+#### 从配置文件启动，并启动web-ui
+```bash
+vim /host/path/config.toml
+docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/biliup/caution:latest --http --password yourpassword
+```
+yourpassword为web-ui的密码，用户名为biliup
+
+#### 直接启动web-ui 自动生成配置文件
+```bash
+docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/biliup/caution:latest --http --password yourpassword
+```
+
+
+### 方式二 手动构建镜像
 ```bash
 cd biliup
 sudo docker build . -t biliup
