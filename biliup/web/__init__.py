@@ -80,7 +80,7 @@ async def root_handler(request):
 
 
 async def cookie_login(request):
-    if config.data['toml']:
+    if config.data.get("toml"):
         print("trying to login by cookie")
         try:
             stream_gears.login_by_cookies()
