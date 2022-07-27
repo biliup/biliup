@@ -514,7 +514,7 @@ class BiliBili:
                 time.sleep(15)
 
     @staticmethod
-    async def _upload(params, file, chunk_size, afunc, tasks=2):
+    async def _upload(params, file, chunk_size, afunc, tasks=3):
         params['chunk'] = -1
 
         async def upload_chunk():
