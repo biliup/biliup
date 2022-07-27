@@ -7,7 +7,7 @@ from ..engine.download import DownloadBase
 VALID_URL_BASE = r"https?://(.*?)\.afreecatv\.com/(?P<username>\w+)(?:/\d+)?"
 
 STREAM_INFO_URLS = "{rmd}/broad_stream_assign.html"
-CHANNEL_API_URL = "http://live.afreecatv.com/afreeca/player_live_api.php"
+CHANNEL_API_URL = "http://live.afreecatv.com:8057/afreeca/player_live_api.php"
 
 QUALITIES = ["original", "hd", "sd"]
 
@@ -21,11 +21,11 @@ class AfreecaTV(DownloadBase):
         logger.debug(self.fname)
         username = match1(self.url, VALID_URL_BASE)
         res_bno = requests.post(CHANNEL_API_URL, data={"bid": username, "mode": "landing", "player_type": "html5"},
-                                timeout=5000)
+                                timeout=5)
         res_bno.close()
-        print('123')
-        # if res_bno.json()["CHANNEL"]["RESULT"] == 0:
-        #     return
+
+        if res_bno.json()["CHANNEL"]["RESULT"] == 0:
+            return
         bno = res_bno.json()["CHANNEL"]["BNO"]
         cdn = res_bno.json()["CHANNEL"]["CDN"]
         rmd = res_bno.json()["CHANNEL"]["RMD"]
