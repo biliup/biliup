@@ -1,10 +1,11 @@
 # Build biliup's web-ui
 FROM node:16-alpine as webui
-
+ARG repo_url
+ENV REPO_URL $repo_url
 RUN \
   set -eux && \
   apk add --no-cache git && \
-  git clone --depth 1 https://github.com/ForgQi/biliup.git && \
+  git clone --depth 1 $REPO_URL && \
   cd biliup && \
   npm install && \
   npm run build
@@ -12,6 +13,8 @@ RUN \
 # Deploy Biliup
 FROM python:3.9-slim as biliup
 ENV TZ=Asia/Shanghai
+ARG repo_url
+ENV REPO_URL $repo_url
 EXPOSE 19159/tcp
 VOLUME /opt
 
@@ -24,7 +27,7 @@ RUN \
 #  apk add --no-cache --virtual .build-deps git curl gcc g++ && \
 #  apk add --no-cache ffmpeg musl-dev libffi-dev zlib-dev jpeg-dev ca-certificates && \
   apt-get install -y --no-install-recommends ffmpeg git; \
-  git clone --depth 1 https://github.com/ForgQi/biliup.git && \
+  git clone --depth 1 $REPO_URL  && \
   cd biliup && \
   pip3 install --no-cache-dir quickjs && \
   pip3 install -e . && \
