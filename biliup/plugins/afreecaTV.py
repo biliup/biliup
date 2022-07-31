@@ -20,7 +20,8 @@ class AfreecaTV(DownloadBase):
     def check_stream(self):
         logger.debug(self.fname)
         username = match1(self.url, VALID_URL_BASE)
-        res_bno = requests.post(CHANNEL_API_URL + "?bjid=" + username,data={"bid": username, "mode": "landing", "player_type": "html5"},timeout=5)
+        res_bno = requests.post(CHANNEL_API_URL + "?bjid=" + username,
+                                data={"bid": username, "mode": "landing", "player_type": "html5"}, timeout=5)
         res_bno.close()
         if res_bno.json()["CHANNEL"]["RESULT"] == 0:
             return

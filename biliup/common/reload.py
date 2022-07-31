@@ -1,15 +1,13 @@
 import asyncio
+import logging
+import subprocess
 import sys
 import os
-import subprocess
-import logging
-
 from .timer import Timer
 
 logger = logging.getLogger('biliup')
 
 global global_reloader
-global program_args
 
 
 def has_extension(fname_list, *extension):
@@ -87,24 +85,8 @@ class AutoReload(Timer):
                 # else:
                 #     args = [path, 'start']
                 if not is_docker():
-                    args = unparser_args(program_args)
-                    subprocess.Popen(args)
+                    subprocess.Popen(sys.argv)
                 return logger.info('重启')
-
-
-def unparser_args(args):
-    s = ['biliup', 'start']
-    for i, j in args.items():
-        if i == 'start':
-            continue
-        elif type(j) == str or type(j) == int:
-            s.append(f'--{i}={j}')
-        elif type(j) == bool:
-            s.append(f'--{i}')
-    return s
-
-
-import os
 
 
 def is_docker():

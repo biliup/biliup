@@ -1,7 +1,6 @@
 from urllib.parse import urlencode
 from collections import namedtuple
 import requests
-from ykdl.extractors.douyu.util import ub98484234
 from ykdl.util.http import get_content, get_response
 from ykdl.util.match import match1
 
@@ -18,6 +17,7 @@ class Douyu(DownloadBase):
 
     def check_stream(self):
         logger.debug(self.fname)
+        from ykdl.extractors.douyu.util import ub98484234
         if len(self.url.split("douyu.com/")) < 2:
             logger.debug("直播间地址:" + self.url + " 错误")
             return False
