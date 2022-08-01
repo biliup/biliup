@@ -1,9 +1,7 @@
-from urllib.parse import urlencode
 from collections import namedtuple
 import requests
-from ykdl.util.http import get_content, get_response
-from ykdl.util.match import match1
 
+from ykdl.util.match import match1
 from biliup.config import config
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
@@ -44,8 +42,7 @@ class Douyu(DownloadBase):
         Extractor = namedtuple('Extractor', ['vid', 'logger'])
         ub98484234(js_enc, Extractor(vid, logger), params)
         params['rate'] = 0
-        data = urlencode(params).encode('utf-8')
-        html_content = requests.get(f'https://www.douyu.com/lapi/live/getH5Play/{vid}', params=data).json()
+        html_content = requests.get(f'https://www.douyu.com/lapi/live/getH5Play/{vid}', params=params).json()
         live_data = html_content["data"]
         if type(live_data) is dict:
             self.raw_stream_url = f"{live_data.get('rtmp_url')}/{live_data.get('rtmp_live')}"
