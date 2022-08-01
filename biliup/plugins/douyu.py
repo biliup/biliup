@@ -21,7 +21,7 @@ class Douyu(DownloadBase):
         if len(self.url.split("douyu.com/")) < 2:
             logger.debug("直播间地址:" + self.url + " 错误")
             return False
-        html = get_content(self.url)
+        html = requests.get(self.url).text
         vid = match1(html, r'\$ROOM\.room_id\s*=\s*(\d+)',
                      r'room_id\s*=\s*(\d+)',
                      r'"room_id.?":(\d+)',
@@ -40,12 +40,12 @@ class Douyu(DownloadBase):
             'iar': 0,
             'ive': 0
         }
-
+        # print(js_enc)
         Extractor = namedtuple('Extractor', ['vid', 'logger'])
         ub98484234(js_enc, Extractor(vid, logger), params)
         params['rate'] = 0
         data = urlencode(params).encode('utf-8')
-        html_content = get_response(f'https://www.douyu.com/lapi/live/getH5Play/{vid}', data=data).json()
+        html_content = requests.get(f'https://www.douyu.com/lapi/live/getH5Play/{vid}', params=data).json()
         live_data = html_content["data"]
         if type(live_data) is dict:
             self.raw_stream_url = f"{live_data.get('rtmp_url')}/{live_data.get('rtmp_live')}"
