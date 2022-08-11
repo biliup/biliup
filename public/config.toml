@@ -46,7 +46,7 @@ url = [
 title = "{title}第一视角%Y-%m-%d" # 自定义标题的时间格式, {title}代表直播间标题
 tid = 171 # 投稿分区码,171为电子竞技分区
 copyright = 2 # 1为自制
-cover_path = "/cover/up.jpg"
+# cover_path = "/cover/up.jpg"
 # 支持strftime, {title}占位符。 希望你可以保留软件出处
 description = """
 视频简介: {title} %Y-%m-%d %H:%M:%S
