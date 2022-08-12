@@ -1,4 +1,3 @@
-ffmpeg
 pyyaml
 requests
 rsa
