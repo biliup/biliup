@@ -4,7 +4,10 @@ import argparse
 import asyncio
 import logging.config
 import platform
-import stream_gears
+try:
+    import stream_gears
+except:
+    pass
 
 from . import __version__, LOG_CONF
 from .common.Daemon import Daemon

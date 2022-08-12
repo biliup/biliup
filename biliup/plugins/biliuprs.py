@@ -1,6 +1,8 @@
 import time
-
-import stream_gears
+try:
+    import stream_gears
+except:
+    pass
 
 from ..engine import Plugin
 from ..engine.upload import UploadBase, logger

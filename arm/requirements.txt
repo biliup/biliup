@@ -1,0 +1,9 @@
+ffmpeg
+pyyaml
+requests
+rsa
+aiohttp
+pillow
+yt_dlp
+ykdl
+tomli

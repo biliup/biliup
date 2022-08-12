@@ -4,7 +4,10 @@ import subprocess
 import sys
 import time
 
-import stream_gears
+try:
+    import stream_gears
+except:
+    pass
 
 from biliup.config import config
 from biliup import common
