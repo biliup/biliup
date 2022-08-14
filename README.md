@@ -64,18 +64,18 @@ Linux下以daemon进程启动，录像和日志文件保存在执行目录下，
 #### 从配置文件启动
 ```bash
 vim /host/path/config.toml
-docker run -P --name biliup -v /host/path:/opt -d ghcr.io/biliup/biliup/caution:latest
+docker run -P --name biliup -v /host/path:/opt -d ghcr.io/biliup/caution:master
 ```
 #### 从配置文件启动，并启动web-ui
 ```bash
 vim /host/path/config.toml
-docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/biliup/caution:latest --http --password yourpassword
+docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/caution:latest --http --password yourpassword
 ```
 yourpassword为web-ui的密码，用户名为biliup
 
 #### 直接启动web-ui 自动生成配置文件
 ```bash
-docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/biliup/caution:latest --http --password yourpassword
+docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/caution --http --password yourpassword
 ```
 
 
