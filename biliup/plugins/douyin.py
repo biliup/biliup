@@ -32,21 +32,22 @@ class Douyin(DownloadBase):
                 rex = re.compile(r'(?<=\"web_rid\":\")[0-9]*(?=\")')
                 rid = rex.findall(txt)[0]    
         else:
-            rid=self.url.split("live.douyin.com/")[1]
+            rid = self.url.split("live.douyin.com/")[1]
         r1 = requests.get('https://live.douyin.com/' + rid, headers=headers).text \
             .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]
         r2 = urllib.request.unquote(r1)
 
-        r3 = json.loads(r2)['routeInitialProps']
+        r3 = json.loads(r2)['28']
         if r3.get('error'):
             logger.debug("直播间不存在")
             return False
         else:
-            r4 = json.loads(r2)['initialState']['roomStore']['roomInfo']
-            if r4.get('room'):
-                room_info = r4['room']
-                if room_info.get('stream_url'):
-                    r5 = room_info['stream_url']['live_core_sdk_data']['pull_data']['stream_data']
-                    self.raw_stream_url = json.loads(r5)['data']['origin']['main']['flv']
-                    self.room_title = room_info['title']
-                    return True
+            room_info = json.loads(r2)['app']['initialState']['roomStore']['roomInfo']['room']
+            if room_info.get('status') != 2:
+                logger.debug("主播未开播")
+                return False
+            if room_info.get('stream_url'):
+                r5 = room_info['stream_url']['live_core_sdk_data']['pull_data']['stream_data']
+                self.raw_stream_url = json.loads(r5)['data']['origin']['main']['flv']
+                self.room_title = room_info['title']
+                return True
