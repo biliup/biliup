@@ -1,8 +1,6 @@
 from threading import Event
-
-import streamlink
-import yt_dlp
 from ykdl.common import url_to_module
+import yt_dlp
 
 from ..engine.download import DownloadBase
 from . import logger
@@ -52,6 +50,7 @@ class SDownload(DownloadBase):
 
     def check_stream(self):
         logger.debug(self.fname)
+        import streamlink
         try:
             streams = streamlink.streams(self.url)
             if streams:

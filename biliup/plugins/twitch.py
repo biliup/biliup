@@ -1,15 +1,14 @@
 import random
 import subprocess
 import time
-from urllib.parse import urlencode
 
 import requests
 import yt_dlp
 
-from ..engine.decorators import Plugin
-from ..plugins import BatchCheckBase, match1
-from ..engine.download import DownloadBase
 from . import logger
+from ..engine.decorators import Plugin
+from ..engine.download import DownloadBase
+from ..plugins import BatchCheckBase
 
 VALID_URL_BASE = r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)'
 _OPERATION_HASHES = {
@@ -99,7 +98,7 @@ class Twitch(DownloadBase):
             self.proc = subprocess.Popen([
                 "streamlink", "--player-external-http", "--twitch-disable-ads",
                 "--twitch-disable-hosting", "--twitch-disable-reruns",
-                "--player-external-http-port", str(port),self.url, "best"
+                "--player-external-http-port", str(port), self.url, "best"
             ])
             self.raw_stream_url = f"http://localhost:{port}"
             i = 0

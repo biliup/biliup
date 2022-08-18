@@ -81,5 +81,8 @@ class UploadBase:
             if post_processor.get('run'):
                 process = subprocess.run(
                     post_processor['run'], shell=True, input=reduce(lambda x, y: x + str(Path(y).absolute()) + '\n', data, ''),
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=True)
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                if process.returncode != 0:
+                    logger.error(process.stdout)
+                    raise Exception("PostProcessorRunTimeError")
                 logger.info(process.stdout.rstrip())

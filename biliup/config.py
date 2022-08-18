@@ -67,7 +67,7 @@ class Config(UserDict):
                 self.data = yaml.load(stream, Loader=yaml.FullLoader)
 
     def save(self):
-        if self.data['toml']:
+        if self.data.get('toml'):
             import tomli_w
             with open('config.toml', 'rb') as stream:
                 old_data = tomllib.load(stream)

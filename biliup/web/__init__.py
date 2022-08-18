@@ -15,7 +15,7 @@ async def get_basic_config(request):
         "line": config.data['lines'],
         "limit": config.data['threads'],
     }
-    if config.data['toml']:
+    if config.data.get("toml"):
         res['toml'] = True
     else:
         res['user'] = {
@@ -35,7 +35,7 @@ async def set_basic_config(request):
     if config.data['lines'] == 'cos':
         config.data['lines'] = 'cos-internal'
     config.data['threads'] = post_data['limit']
-    if not config.data['toml']:
+    if not config.data.get("toml"):
         cookies = {
             "SESSDATA": str(post_data['user']['SESSDATA']),
             "bili_jct": str(post_data['user']['bili_jct']),
@@ -80,7 +80,7 @@ async def root_handler(request):
 
 
 async def cookie_login(request):
-    if config.data['toml']:
+    if config.data.get("toml"):
         print("trying to login by cookie")
         try:
             stream_gears.login_by_cookies()
@@ -107,7 +107,7 @@ async def sms_send(request):
 
 
 async def qrcode_get(request):
-    if config.data['toml']:
+    if config.data.get("toml"):
         try:
             r = eval(stream_gears.get_qrcode())
         except Exception as e:
@@ -119,7 +119,7 @@ async def qrcode_get(request):
 
 async def qrcode_login(request):
     post_data = await request.json()
-    if config.data['toml']:
+    if config.data.get("toml"):
         try:
             if stream_gears.login_by_qrcode(json.dumps(post_data)):
                 return web.json_response({"status": 200})
@@ -137,7 +137,7 @@ async def qrcode_login(request):
 
 
 async def pre_archive(request):
-    if config.data['toml']:
+    if config.data.get("toml"):
         config.load_cookies()
     cookies = config.data['user']['cookies']
     return web.json_response(BiliBili.tid_archive(cookies))

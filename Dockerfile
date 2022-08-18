@@ -23,7 +23,7 @@ RUN \
   apt-get update; \
 #  apk add --no-cache --virtual .build-deps git curl gcc g++ && \
 #  apk add --no-cache ffmpeg musl-dev libffi-dev zlib-dev jpeg-dev ca-certificates && \
-  apt-get install -y --no-install-recommends ffmpeg git; \
+  apt-get install -y --no-install-recommends ffmpeg git g++; \
   git clone --depth 1 https://github.com/ForgQi/biliup.git && \
   cd biliup && \
   pip3 install --no-cache-dir quickjs && \

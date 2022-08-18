@@ -8,6 +8,7 @@ from . import logger
 
 VALID_URL_BASE = r'https?://(?:(?:www|m)\.)?youtube\.com/(?P<id>.*?)\??(.*?)'
 
+
 @Plugin.download(regexp=VALID_URL_BASE)
 class Youtube(DownloadBase):
     def __init__(self, fname, url, suffix='webm'):
@@ -15,7 +16,8 @@ class Youtube(DownloadBase):
         self.cookiejarFile = config.get('youtube_cookie')
 
     def check_stream(self):
-        with yt_dlp.YoutubeDL({'download_archive': 'archive.txt', 'ignoreerrors': True, 'extract_flat': True, 'cookiefile': self.cookiejarFile}) as ydl:
+        with yt_dlp.YoutubeDL({'download_archive': 'archive.txt', 'ignoreerrors': True, 'extract_flat': True,
+                               'cookiefile': self.cookiejarFile}) as ydl:
             info = ydl.extract_info(self.url, download=False, process=False)
             if info is None:
                 logger.warning(self.cookiejarFile)
@@ -38,7 +40,7 @@ class Youtube(DownloadBase):
                 return True
             for entry in info['entries']:
                 # 取 Playlist 内视频标题
-                # self.title = entry['title']
+                # self.room_title = entry['title']
                 if ydl.in_download_archive(entry):
                     continue
                 # ydl.record_download_archive()
@@ -46,7 +48,7 @@ class Youtube(DownloadBase):
 
     def download(self, filename):
         try:
-            self.ydl_opts = {
+            ydl_opts = {
                 'outtmpl': filename,
                 'cookiefile': self.cookiejarFile,
                 # 'proxy': proxyUrl,
@@ -54,7 +56,7 @@ class Youtube(DownloadBase):
                 'max_downloads': 1,
                 'download_archive': 'archive.txt'
             }
-            with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([self.url])
         except MaxDownloadsReached:
             return False
