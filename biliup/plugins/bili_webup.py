@@ -541,8 +541,6 @@ class BiliBili:
     def submit(self, submit_api=None):
         if not self.video.title:
             self.video.title = self.video.videos[0]["title"]
-        for v in self.video.videos:
-            v["title"] = ""
         self.__session.get('https://member.bilibili.com/x/geetest/pre/add', timeout=5)
 
         if submit_api is None:
