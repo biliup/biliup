@@ -36,18 +36,12 @@ class Douyin(DownloadBase):
         r1 = requests.get('https://live.douyin.com/' + rid, headers=headers).text \
             .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]
         r2 = urllib.request.unquote(r1)
-
-        r3 = json.loads(r2)['28']
-        if r3.get('error'):
-            logger.debug("直播间不存在")
+        room_info = json.loads(r2)['app']['initialState']['roomStore']['roomInfo']['room']
+        if room_info.get('status') != 2:
+            logger.debug("主播未开播")
             return False
-        else:
-            room_info = json.loads(r2)['app']['initialState']['roomStore']['roomInfo']['room']
-            if room_info.get('status') != 2:
-                logger.debug("主播未开播")
-                return False
-            if room_info.get('stream_url'):
-                r5 = room_info['stream_url']['live_core_sdk_data']['pull_data']['stream_data']
-                self.raw_stream_url = json.loads(r5)['data']['origin']['main']['flv']
-                self.room_title = room_info['title']
-                return True
+        if room_info.get('stream_url'):
+            r5 = room_info['stream_url']['live_core_sdk_data']['pull_data']['stream_data']
+            self.raw_stream_url = json.loads(r5)['data']['origin']['main']['flv']
+            self.room_title = room_info['title']
+            return True
