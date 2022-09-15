@@ -236,16 +236,14 @@ $ systemctl --user start biliupd
 ## Deprecated
 * ~~selenium操作浏览器上传两种方式~~(详见bili_chromeup.py)
 * ~~Windows图形界面版在release中下载AutoTool.msi进行安装~~[AutoTool.msi](https://github.com/ForgQi/bilibiliupload/releases/tag/v0.1.0)
-
 * 相关配置示例在config.yaml文件中，如直播间地址，b站账号密码\
 由于目前使用账号密码登录，大概率触发验证。请使用命令行工具登录，将登录返回的信息填入配置文件，
-且使用引号括起yaml中cookie的数字代表其为字符串, 
+且使用引号括起yaml中cookie的数字代表其为字符串
+
 >关于B站为什么不能多p上传\
 目前bilibili网页端是根据用户权重来限制分p数量的，权重不够的用户切换到客户端的提交接口即可解除这一限制。
 >用户等级大于3，且粉丝数>1000，web端投稿不限制分p数量
+
 ## Credits
 * Thanks `ykdl, youtube-dl, streamlink` provides downloader.
 >GUI：[B站投稿客户端 biliup-app](https://github.com/ForgQi/Caution)
-
-类似项目:\
-![ZhangMingZhao1](https://avatars2.githubusercontent.com/u/29058747?s=50&u=5f8c3acaa9d09f4396f00256c0ce6ef01452e92f&v=4) ：StreamerHelper
