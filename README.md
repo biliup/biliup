@@ -2,6 +2,10 @@
 ![](https://img.shields.io/badge/python-v3.7%2B-blue)
 ![GitHub](https://img.shields.io/github/license/ForgQi/bilibiliupload)
 [![Telegram](https://img.shields.io/badge/Telegram-Group-blue.svg?logo=telegram)](https://t.me/+IkpIABHqy6U0ZTQ5)
+[![Discord chat][discord-badge]][discord-url]
+
+[discord-badge]: https://img.shields.io/discord/1015494098481852447.svg?logo=discord
+[discord-url]: https://discord.gg/shZmdxDFB7
 
 * 支持自动录制各大直播平台实时流，上传到bilibili
 * 支持YouTube，twitch直播回放列表自动搬运至b站，如链接https://www.twitch.tv/xxxx/videos?filter=archives&sort=time

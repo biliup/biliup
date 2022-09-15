@@ -30,19 +30,20 @@ class Douyu(DownloadBase):
         if show_status != 1 or videoloop != 0:
             logger.debug("直播间" + vid + "：未开播或正在放录播")
             return False
-        douyucdn = config.get('douyucdn') if config.get('douyucdn') else 'tct-h5'
+        # tct-h5
+        douyucdn = config.get('douyucdn') if config.get('douyucdn') else ''
         html_h5enc = requests.get(f'https://www.douyu.com/swf_api/homeH5Enc?rids={vid}').json()
         js_enc = html_h5enc['data']['room' + vid]
         params = {
             'cdn': douyucdn,
             'iar': 0,
-            'ive': 0
+            'ive': 0,
         }
         # print(js_enc)
         Extractor = namedtuple('Extractor', ['vid', 'logger'])
         ub98484234(js_enc, Extractor(vid, logger), params)
         params['rate'] = 0
-        html_content = requests.get(f'https://www.douyu.com/lapi/live/getH5Play/{vid}', params=params).json()
+        html_content = requests.post(f'https://www.douyu.com/lapi/live/getH5Play/{vid}', headers=self.fake_headers, params=params).json()
         live_data = html_content["data"]
         if type(live_data) is dict:
             self.raw_stream_url = f"{live_data.get('rtmp_url')}/{live_data.get('rtmp_live')}"
