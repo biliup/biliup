@@ -40,7 +40,7 @@ class Youtube(DownloadBase):
                 return True
             for entry in info['entries']:
                 # 取 Playlist 内视频标题
-                # self.room_title = entry['title']
+                self.room_title = entry['title']
                 if ydl.in_download_archive(entry):
                     continue
                 # ydl.record_download_archive()
