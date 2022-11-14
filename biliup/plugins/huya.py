@@ -47,5 +47,5 @@ class Huya(DownloadBase):
             absurl = f'{huyajson["sFlvUrl"]}/{huyajson["sStreamName"]}.{huyajson["sFlvUrlSuffix"]}?' \
                      f'{huyajson["sFlvAntiCode"]}'
             self.raw_stream_url = html.unescape(absurl) + "&ratio=" + str(ratio)
-            self.room_title = json.loads(huya)['data'][0]['gameLiveInfo']['roomName']
+            self.room_title = json.loads(huya)['data'][0]['gameLiveInfo']['introduction']
             return True
