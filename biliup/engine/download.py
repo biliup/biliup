@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -155,3 +156,20 @@ def stream_gears_download(url, headers, file_name, segment_time=None, file_size=
         file_name,
         segment
     )
+
+
+def get_valid_filename(name):
+    """
+    Return the given string converted to a string that can be used for a clean
+    filename. Remove leading and trailing spaces; convert other spaces to
+    underscores; and remove anything that is not an alphanumeric, dash,
+    underscore, or dot.
+    # >>> get_valid_filename("john's portrait in 2004.jpg")
+    >>> get_valid_filename("{self.fname}%Y-%m-%dT%H_%M_%S")
+    '{self.fname}%Y-%m-%dT%H_%M_%S'
+    """
+    s = str(name).strip().replace(" ", "_")
+    s = re.sub(r"(?u)[^-\w.%{}\[\]【】]", "", s)
+    if s in {"", ".", ".."}:
+        raise RuntimeError("Could not derive file name from '%s'" % name)
+    return s
