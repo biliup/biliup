@@ -58,6 +58,9 @@ streamers:
 #biliplatform: web
 # 如需要录制抖音请在此填入cookie需要__ac_nonce与__ac_signature的值
 #douyin_cookie: '__ac_nonce=123456; __ac_signature=123456;'
+# 如录制Twitch时遇见视频流中广告过多的情况，可尝试在此填入cookie，可以大幅减少视频流中的twitch广告
+# twitch_cookie获取方式：在浏览器中打开Twitch.tv，F12调出控制台，在控制台中执行：document.cookie.split("; ").find(item=>item.startsWith("auth-token="))?.split("=")[1]
+#twitch_cookie: 'aisjdoiuasdoihansdoh3ooi209'
 # Netscape 格式的 Cookies 文本路径
 #youtube_cookie: 'cookiejar.txt'
 # b站提交接口，默认自动选择，可选web，client

@@ -95,11 +95,15 @@ class Twitch(DownloadBase):
             self.room_title = data.get('data').get('user').get('lastBroadcast').get('title')
         if self.downloader == 'ffmpeg':
             port = random.randint(1025, 65535)
-            self.proc = subprocess.Popen([
+            stream_shell = [
                 "streamlink", "--player-external-http", "--twitch-disable-ads",
                 "--twitch-disable-hosting", "--twitch-disable-reruns",
                 "--player-external-http-port", str(port), self.url, "best"
-            ])
+            ]
+            if config.get('twitch_cookie'): 
+                twitch_cookie = "--twitch-api-header=Authorization=OAuth " + config.get('twitch_cookie')
+                stream_shell.insert(1, twitch_cookie)
+            self.proc = subprocess.Popen(stream_shell)
             self.raw_stream_url = f"http://localhost:{port}"
             i = 0
             while i < 5:
