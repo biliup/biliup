@@ -54,9 +54,6 @@ streamers:
 #douyucdn: tct-h5
 # 如遇到虎牙录制卡顿可以尝试切换线路，AL, HW, TX, WS
 #huyacdn: AL
-# 如遇到哔哩哔哩录制跳帧可以尝试修改platform值，web（flv），h5（m3u8）
-# 因切换到 v2 api，此选项已废弃，请使用 bili_protocol
-#biliplatform: web
 # 哔哩哔哩直播流协议.可选 stream（Flv）、hls
 #bili_protocol: stream
 # 哔哩哔哩直播优选CDN
