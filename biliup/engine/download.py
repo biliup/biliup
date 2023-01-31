@@ -50,9 +50,17 @@ class DownloadBase:
 
     def download(self, filename):
         if self.downloader == 'stream-gears':
-            stream_gears_download(self.raw_stream_url, self.fake_headers, f'{self.fname}%Y-%m-%dT%H_%M_%S', config.get('segment_time'), config.get('file_size'))
+            if config.get('filename_prefix'):
+                filename = config.get('filename_prefix').format(self=self, nowtime=time.strftime(config.get('time_prefix')))
+            else:
+                filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
+            stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'), config.get('file_size'))
         else:
-            self.ffmpeg_download(filename)
+            if config.get('filename_prefix'):
+                filename = config.get('filename_prefix').format(self=self, nowtime=time.strftime(config.get('time_prefix')))
+            else:
+                filename = filename
+        self.ffmpeg_download(filename)
 
     def ffmpeg_download(self, filename):
         default_input_args = ['-headers', ''.join('%s: %s\r\n' % x for x in self.fake_headers.items()),
