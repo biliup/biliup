@@ -22,7 +22,7 @@ streamers:
             - https://www.twitch.tv/innovation_s2
             - https://www.panda.tv/1160340
         title: "{title}第一视角%Y-%m-%d" # 自定义标题的时间格式, {title}代表直播间标题
-        tid: 171 # 投稿分区码,171为电子竞技分区 
+        tid: 171 # 投稿分区码,171为电子竞技分区
         copyright: 2 # 1为自制
         cover_path: /cover/up.jpg
         description: |- # 支持strftime, {title}占位符。 希望你可以保留软件出处
@@ -54,8 +54,14 @@ streamers:
 #douyucdn: tct-h5
 # 如遇到虎牙录制卡顿可以尝试切换线路，AL, HW, TX, WS
 #huyacdn: AL
-# 如遇到哔哩哔哩录制跳帧可以尝试修改platform值，web（flv），h5（m3u8）
-#biliplatform: web
+# 哔哩哔哩直播流协议.可选 stream（Flv）、hls
+#bili_protocol: stream
+# 哔哩哔哩直播优选CDN
+#bili_perfCDN: cn-gotcha01
+# 哔哩哔哩直播强制原画（仅限HLS流的 cn-gotcha01 CDN）
+#bili_forceScoure: False
+# 自定义哔哩哔哩直播api
+#bili_liveapi: 'https://api.live.bilibili.com'
 # 如需要录制抖音请在此填入cookie需要__ac_nonce与__ac_signature的值
 #douyin_cookie: '__ac_nonce=123456; __ac_signature=123456;'
 # 如录制Twitch时遇见视频流中广告过多的情况，可尝试在此填入cookie，可以大幅减少视频流中的twitch广告（经测试需要在该Cookie所属账号开了TwitchTurbo会员才有用），该cookie有过期风险，cookie过期后会导致无法获取到直播流
