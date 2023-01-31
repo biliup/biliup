@@ -1,6 +1,5 @@
 # 选择全局默认上传插件，Noop为不上传，但会执行后处理,可选bili_web，biliup-rs
 #uploader = "Noop"
-
 # b站上传线路选择，默认为自动模式，目前可手动切换为bda2, kodo, ws, qn, cos, cos-internal(支持腾讯云内网免流+提速)
 lines = "AUTO"
 # 单文件并发上传数，未达到带宽上限时增大此值可提高上传速度
@@ -14,6 +13,10 @@ filtering_threshold = 20 # 小于此大小的视频文件将会被过滤删除�
 #douyucdn = "tct-h5"
 # 如遇到虎牙录制卡顿可以尝试切换线路，AL, HW, TX, WS
 #huyacdn = "AL"
+# 自定义录播文件命名规则 可使用参数 {self.fname}:你在配置里设置的直播间名 {nowtime}:创建文件的时间，可以通过time_prefix修改格式 {self.room_title} 当场直播间标题
+#filename_prefix: '[{self.fname}][{nowtime}][{self.room_title}]'
+# 自定义录播文件命名中时间的格式
+#time_prefix: '%Y-%m-%d %H_%M_%S'
 # 哔哩哔哩直播流协议.可选 stream（Flv）、hls
 #bili_protocol = "stream"
 # 哔哩哔哩直播优选CDN
