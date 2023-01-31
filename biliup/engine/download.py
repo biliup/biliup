@@ -17,7 +17,8 @@ class DownloadBase:
     def __init__(self, fname, url, suffix=None, opt_args=None):
         self.room_title = None
         if opt_args is None:
-            opt_args = []
+            opt_args = [] 
+        #主播单独传参设置。例如新增了一个filename_prefix参数，在下面添加self.filename_prefix = None,然后即可通过self.filename_prefix在下载或者上传时候传递主播单独的设置参数用于调用。（仅需要全局设置的话，无需设置）
         self.fname = fname
         self.url = url
         self.suffix = suffix
@@ -26,6 +27,8 @@ class DownloadBase:
         # ffmpeg.exe -i  http://vfile1.grtn.cn/2018/1542/0254/3368/154202543368.ssm/154202543368.m3u8
         # -c copy -bsf:a aac_adtstoasc -movflags +faststart output.mp4
         self.raw_stream_url = None
+        self.filename_prefix= None
+        self.time_prefix= None
         self.opt_args = opt_args
         self.fake_headers = {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -49,17 +52,24 @@ class DownloadBase:
         raise NotImplementedError()
 
     def download(self, filename):
+        print(self)
         if self.downloader == 'stream-gears':
-            if config.get('filename_prefix'):
-                filename = config.get('filename_prefix').format(self=self, nowtime=time.strftime(f"{config.get('time_prefix') if config.get('time_prefix') else '%Y-%m-%d %H_%M_%S'}"))
-            else:
-                filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
+            if self.filename_prefix: #判断是否存在主播单独自定义录播命名设置
+                filename = self.filename_prefix.format(self=self,streamer = self.fname, nowtime=time.strftime(f"{self.time_prefix if self.time_prefix else '%Y-%m-%d %H_%M_%S'}"), room_title = self.room_title)
+            elif config.get('filename_prefix'): #判断是否存在全局自定义录播命名设置
+                filename = config.get('filename_prefix').format(self=self,streamer = self.fname, nowtime=time.strftime(f"{config.get('time_prefix') if config.get('time_prefix') else '%Y-%m-%d %H_%M_%S'}"), room_title = self.room_title)
+            else: #无全局自定义录播命名设置
+                filename = filename
+            filename = get_valid_filename(filename)
             stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'), config.get('file_size'))
         else:
-            if config.get('filename_prefix'):
-                filename = config.get('filename_prefix').format(self=self, nowtime=time.strftime(f"{config.get('time_prefix') if config.get('time_prefix') else '%Y-%m-%d %H_%M_%S'}"))
-            else:
+            if self.filename_prefix: #判断是否存在主播单独自定义录播命名设置
+                filename = self.filename_prefix.format(self=self,streamer = self.fname, nowtime=time.strftime(f"{self.time_prefix if self.time_prefix else '%Y-%m-%d %H_%M_%S'}"), room_title = self.room_title)
+            elif config.get('filename_prefix'): #判断是否存在全局自定义录播命名设置
+                filename = config.get('filename_prefix').format(self=self,streamer = self.fname, nowtime=time.strftime(f"{config.get('time_prefix') if config.get('time_prefix') else '%Y-%m-%d %H_%M_%S'}"), room_title = self.room_title)
+            else: #无全局自定义录播命名设置
                 filename = filename
+        filename = get_valid_filename(filename)
         self.ffmpeg_download(filename)
 
     def ffmpeg_download(self, filename):
@@ -177,7 +187,7 @@ def get_valid_filename(name):
     '{self.fname}%Y-%m-%dT%H_%M_%S'
     """
     s = str(name).strip().replace(" ", "_")
-    s = re.sub(r"(?u)[^-\w.%{}\[\]【】]", "", s)
+    s = re.sub(r"(?u)[^-\w.%{}\[\]【】「」-]", "", s)
     if s in {"", ".", ".."}:
         raise RuntimeError("Could not derive file name from '%s'" % name)
     return s
