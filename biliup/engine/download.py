@@ -187,7 +187,7 @@ def get_valid_filename(name):
     '{self.fname}%Y-%m-%dT%H_%M_%S'
     """
     s = str(name).strip().replace(" ", "_")
-    s = re.sub(r"(?u)[^-\w.%{}\[\]【】「」-]", "", s)
+    s = re.sub(r"(?u)[^-\w.%{}\[\]【】「」]", "", s)
     if s in {"", ".", ".."}:
         raise RuntimeError("Could not derive file name from '%s'" % name)
     return s
