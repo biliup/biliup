@@ -51,13 +51,13 @@ class DownloadBase:
     def download(self, filename):
         if self.downloader == 'stream-gears':
             if config.get('filename_prefix'):
-                filename = config.get('filename_prefix').format(self=self, nowtime=time.strftime(config.get('time_prefix')))
+                filename = config.get('filename_prefix').format(self=self, nowtime=time.strftime(f"{config.get('time_prefix') if config.get('time_prefix') else '%Y-%m-%d %H_%M_%S'}"))
             else:
                 filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
             stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'), config.get('file_size'))
         else:
             if config.get('filename_prefix'):
-                filename = config.get('filename_prefix').format(self=self, nowtime=time.strftime(config.get('time_prefix')))
+                filename = config.get('filename_prefix').format(self=self, nowtime=time.strftime(f"{config.get('time_prefix') if config.get('time_prefix') else '%Y-%m-%d %H_%M_%S'}"))
             else:
                 filename = filename
         self.ffmpeg_download(filename)
