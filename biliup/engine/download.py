@@ -52,15 +52,12 @@ class DownloadBase:
         raise NotImplementedError()
 
     def download(self, filename):
-        if self.downloader == 'stream-gears':
-            if self.filename_prefix: #判断是否存在自定义录播命名设置
+        if self.filename_prefix: #判断是否存在自定义录播命名设置
                 filename = self.filename_prefix.format(self=self,streamer = self.fname, nowtime = time.strftime(f"{self.time_prefix if self.time_prefix else config.get('time_prefix', '%Y-%m-%d %H_%M_%S')}"), room_title = self.room_title)
-            filename = get_valid_filename(filename)
+        filename = get_valid_filename(filename)
+        if self.downloader == 'stream-gears':
             stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'), config.get('file_size'))
         else:
-            if self.filename_prefix: #判断是否存在自定义录播命名设置
-                filename = self.filename_prefix.format(self=self,streamer = self.fname, nowtime = time.strftime(f"{self.time_prefix if self.time_prefix else config.get('time_prefix', '%Y-%m-%d %H_%M_%S')}"), room_title = self.room_title)
-            filename = get_valid_filename(filename)
             self.ffmpeg_download(filename)
 
     def ffmpeg_download(self, filename):
