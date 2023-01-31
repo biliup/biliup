@@ -55,7 +55,7 @@ class DownloadBase:
         print(self)
         if self.downloader == 'stream-gears':
             if self.filename_prefix: #判断是否存在主播单独自定义录播命名设置
-                filename = self.filename_prefix.format(self=self,streamer = self.fname, nowtime=time.strftime(f"{self.time_prefix if self.time_prefix else '%Y-%m-%d %H_%M_%S'}"), room_title = self.room_title)
+                filename = self.filename_prefix.format(self=self,streamer = self.fname, nowtime = time.strftime(f"{self.time_prefix if self.time_prefix else config.get('time_prefix', '%Y-%m-%d %H_%M_%S')}"), room_title = self.room_title)
             elif config.get('filename_prefix'): #判断是否存在全局自定义录播命名设置
                 filename = config.get('filename_prefix').format(self=self,streamer = self.fname, nowtime=time.strftime(f"{config.get('time_prefix') if config.get('time_prefix') else '%Y-%m-%d %H_%M_%S'}"), room_title = self.room_title)
             else: #无全局自定义录播命名设置
@@ -64,7 +64,7 @@ class DownloadBase:
             stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'), config.get('file_size'))
         else:
             if self.filename_prefix: #判断是否存在主播单独自定义录播命名设置
-                filename = self.filename_prefix.format(self=self,streamer = self.fname, nowtime=time.strftime(f"{self.time_prefix if self.time_prefix else '%Y-%m-%d %H_%M_%S'}"), room_title = self.room_title)
+                filename = self.filename_prefix.format(self=self,streamer = self.fname, nowtime = time.strftime(f"{self.time_prefix if self.time_prefix else config.get('time_prefix', '%Y-%m-%d %H_%M_%S')}"), room_title = self.room_title)
             elif config.get('filename_prefix'): #判断是否存在全局自定义录播命名设置
                 filename = config.get('filename_prefix').format(self=self,streamer = self.fname, nowtime=time.strftime(f"{config.get('time_prefix') if config.get('time_prefix') else '%Y-%m-%d %H_%M_%S'}"), room_title = self.room_title)
             else: #无全局自定义录播命名设置
