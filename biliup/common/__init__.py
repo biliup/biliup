@@ -1,6 +1,5 @@
 import logging
 import sys
-from . import time
 
 # logging.SafeRotatingFileHandler = SafeRotatingFileHandler
 # log_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'configlog.ini')
@@ -16,4 +15,3 @@ def new_hook(t, v, tb):
 
 sys.excepthook = new_hook
 
-__all__ = ['time', ]

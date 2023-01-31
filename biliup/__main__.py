@@ -4,14 +4,13 @@ import argparse
 import asyncio
 import logging.config
 import platform
-import stream_gears
 
+import biliup.common.reload
+from biliup.config import config
 from . import __version__, LOG_CONF
 from .common.Daemon import Daemon
 from .common.reload import AutoReload
-import biliup.common.reload
 from .common.timer import Timer
-from biliup.config import config
 from .engine.event import Event
 
 
