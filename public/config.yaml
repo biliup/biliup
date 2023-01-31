@@ -49,7 +49,11 @@ streamers:
         opt_args: # ffmpeg参数
             - '-ss' # 跳过开始的16秒
             - '00:00:16'
-
+            
+# 自定义录播文件命名规则 可使用参数 {self.fname}:你在配置里设置的直播间名 {nowtime}:创建文件的时间，可以通过time_prefix修改格式 {self.room_title} 当场直播间标题
+#filename_prefix: '[{self.fname}][{nowtime}][{self.room_title}]'
+# 自定义录播文件命名中时间的格式
+#time_prefix: '%Y-%m-%d %H_%M_%S'
 # 如遇到斗鱼录制卡顿可以尝试切换线路，tct-h5（备用线路5），ali-h5（备用线路6），akm-h5（主线路1）
 #douyucdn: tct-h5
 # 如遇到虎牙录制卡顿可以尝试切换线路，AL, HW, TX, WS
