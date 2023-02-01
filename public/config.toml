@@ -1,5 +1,7 @@
 # 选择全局默认上传插件，Noop为不上传，但会执行后处理,可选bili_web，biliup-rs
 #uploader = "Noop"
+# 选择全局默认的下载插件，默认为stream-gears。可选ffmpeg与stream-gears。
+#downloader= "ffmpeg"
 # b站上传线路选择，默认为自动模式，目前可手动切换为bda2, kodo, ws, qn, cos, cos-internal(支持腾讯云内网免流+提速)
 lines = "AUTO"
 # 单文件并发上传数，未达到带宽上限时增大此值可提高上传速度

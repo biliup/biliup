@@ -75,14 +75,19 @@ class UploadBase:
                     dest = Path(post_processor['mv'])
                     if not dest.is_dir():
                         dest.mkdir(parents=True, exist_ok=True)
-                    #path.rename(dest / path.name)
-                    shutil.move(path, dest / path.name)
+                    try:
+                        shutil.move(path, dest / path.name)
+                    except Exception as e:
+                        logger.exception(e)
+                        continue
                     logger.info(f"move to {(dest / path.name).absolute()}")
             if post_processor.get('run'):
-                process = subprocess.run(
-                    post_processor['run'], shell=True, input=reduce(lambda x, y: x + str(Path(y).absolute()) + '\n', data, ''),
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                if process.returncode != 0:
-                    logger.error(process.stdout)
-                    raise Exception("PostProcessorRunTimeError")
-                logger.info(process.stdout.rstrip())
+                try:
+                    process_output = subprocess.check_output(
+                        post_processor['run'], shell=True, 
+                        input=reduce(lambda x, y: x + str(Path(y).absolute()) + '\n', data, ''),
+                        stderr=subprocess.STDOUT, text=True)
+                    logger.info(process_output.rstrip())
+                except subprocess.CalledProcessError as e:
+                    logger.exception(e.output)
+                    continue
