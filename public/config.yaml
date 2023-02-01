@@ -34,7 +34,7 @@ streamers:
         dtime: 14400 # 设置延时发布时间，距离提交大于2小时，格式为时间戳
         # 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
         uploader: biliup-rs
-        #filename_prefix = '{streamer}%Y-%m-%d %H_%M_%S{room_title}'  # 覆盖全局自定义录播文件命名规则
+        #filename_prefix: '{streamer}%Y-%m-%d %H_%M_%S{room_title}'  # 覆盖全局自定义录播文件命名规则
         # 使用指定的账号上传
         user_cookie: cookies.json
         postprocessor: # 上传完成后，将按自定义顺序执行自定义操作
@@ -53,7 +53,7 @@ streamers:
             
 # 自定义录播文件名模板, 支持变量 {streamer}:你在配置里设置的直播间名 %Y-%m-%d %H_%M_%S:创建文件的时间, {room_title}:当场直播间标题
 # 如果上传文件，文件名必须包含设定的模板名。其次，如果没有定义时间，文件分片可能会互相覆盖，所以推荐设置时间来避免分段文件名重复。
-#filename_prefix = '{streamer}%Y-%m-%d %H_%M_%S{room_title}'
+#filename_prefix: '{streamer}%Y-%m-%d %H_%M_%S{room_title}'
 # 如遇到斗鱼录制卡顿可以尝试切换线路，tct-h5（备用线路5），ali-h5（备用线路6），akm-h5（主线路1）
 #douyucdn: tct-h5
 # 如遇到虎牙录制卡顿可以尝试切换线路，AL, HW, TX, WS
