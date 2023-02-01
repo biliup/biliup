@@ -176,7 +176,7 @@ def get_valid_filename(name):
     >>> get_valid_filename("{self.fname}%Y-%m-%dT%H_%M_%S")
     '{self.fname}%Y-%m-%dT%H_%M_%S'
     """
-    s = str(name).strip().replace(" ", "_")
+    #s = str(name).strip().replace(" ", "_") #因为有些人会在主播名中间加入空格，为了避免和录播完毕自动改名冲突，所以注销掉
     s = re.sub(r"(?u)[^-\w.%{}\[\]【】「」]", "", s)
     if s in {"", ".", ".."}:
         raise RuntimeError("Could not derive file name from '%s'" % name)
