@@ -53,7 +53,9 @@ class DownloadBase:
 
     def download(self, filename):
         if self.filename_prefix:  # 判断是否存在自定义录播命名设置
-            filename = time.strftime(self.filename_prefix.format(streamer=self.fname, room_title=self.room_title).encode('unicode-escape').decode()).encode().decode("unicode-escape")
+            filename = (self.filename_prefix.format(streamer=self.fname, room_title=self.room_title).encode('unicode-escape').decode()).encode().decode("unicode-escape")
+        else:
+            filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
         filename = get_valid_filename(filename)
         if self.downloader == 'stream-gears':
             stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
@@ -68,9 +70,9 @@ class DownloadBase:
                 '-i', self.raw_stream_url, *self.default_output_args, *self.opt_args,
                 '-c', 'copy', '-f', self.suffix]
         if config.get('segment_time'):
-            args += ['-f', 'segment', f'{filename} part-%03d.{self.suffix}']
+            args += ['-f', 'segment', f'{time.strftime(filename)} part-%03d.{self.suffix}']
         else:
-            args += [f'{filename}.{self.suffix}.part']
+            args += [f'{time.strftime(filename)}.{self.suffix}.part']
 
         proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
