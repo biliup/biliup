@@ -60,7 +60,7 @@ title = "{title}第一视角%Y-%m-%d" # 自定义标题的时间格式, {title}�
 tid = 171 # 投稿分区码,171为电子竞技分区
 copyright = 2 # 1为自制
 # cover_path = "/cover/up.jpg"
-# 支持strftime, {title}占位符。 希望你可以保留软件出处
+# 支持strftime, {title}占位符。
 description = """
 视频简介: {title} %Y-%m-%d %H:%M:%S
 
@@ -76,8 +76,8 @@ tags = [ "biliup", "视频标签" ]
 #postprocessor = [
 #    {run = "echo hello!"}, # 执行任意命令，等同于在shell中运行,视频文件路径作为标准输入传入
 #    {mv = "backup/"}, # 移动文件到backup目录下
-#    {run = "python3 path/to/mail.py"}, # 执行一个 Python 脚本，可以用来发送邮件等，详见 https://biliup.github.io/biliup/Guide.html#%E4%B8%8A%E4%BC%A0%E5%AE%8C%E6%88%90%E5%90%8E%E5%8F%91%E9%80%81%E9%82%AE%E4%BB%B6%E9%80%9A%E7%9F%A5
-#    {run = "sh ./run.sh"} # 执行一个shell脚本，主要调用系统内的cli工具。示例 https://gist.github.com/UVJkiNTQ/ae4282e8f9fe4e45b3144b57605b4178
+#    {run = "python3 path/to/mail.py"}, # 执行一个 Python 脚本，可以用来发送邮件等。自动发信通知脚本示例 https://biliup.github.io/biliup/Guide.html#%E4%B8%8A%E4%BC%A0%E5%AE%8C%E6%88%90%E5%90%8E%E5%8F%91%E9%80%81%E9%82%AE%E4%BB%B6%E9%80%9A%E7%9F%A5
+#    {run = "sh ./run.sh"} # 执行一个shell脚本，用途多样，主要调用系统内的cli工具。自动上传网盘脚本示例 https://gist.github.com/UVJkiNTQ/ae4282e8f9fe4e45b3144b57605b4178
 ##    'rm',  # 删除文件，为默认操作
 #]
 
