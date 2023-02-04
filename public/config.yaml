@@ -105,10 +105,10 @@ streamers:
         title: "{title}第一视角%Y-%m-%d" ### 自定义标题的时间格式, {title}代表直播间标题
         tid: 171 ### 投稿分区码,171为电子竞技分区
         copyright: 2 ### 1为自制
-        cover_path: /cover/up.jpg
-        description: |- ### 支持strftime, {title}占位符。 希望你可以保留软件出处
+        cover_path: /cover/up.jpg ###封面
+        description: |- ### 支持strftime, {title}占位符。注：此处请注意缩进，确保所有文字的缩进都与"视频简介"相同或者更多。
          视频简介: {title} %Y-%m-%d %H:%M:%S
-
+         喜欢就点个关注吧。
          ---
          Powered By biliup - Github: https://github.com/ForgQi/biliup
         dynamic: '#空间动态#'
@@ -123,7 +123,7 @@ streamers:
             - run: sh ./run.sh ### 执行一个shell脚本，用途多样，主要调用系统内的cli工具。示例 https://gist.github.com/UVJkiNTQ/ae4282e8f9fe4e45b3144b57605b4178
             #- rm ### 删除文件，为默认操作
         tags:
-            - biliup ### 希望你可以保留软件出处
+            - biliup 
             - 视频标签
         format: mp4 ### 视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg。
         opt_args: ### ffmpeg参数
