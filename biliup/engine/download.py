@@ -72,7 +72,7 @@ class DownloadBase:
         if config.get('segment_time'):
             args += ['-f', 'segment', f'{(time.strftime(filename).encode("unicode-escape").decode()).encode().decode("unicode-escape")} part-%03d.{self.suffix}']
         else:
-            args += [f'{(time.strftime(filename).encode("unicode-escape").decode()).encode().decode("unicode-escape")}.{self.suffix}']
+            args += [f'{(time.strftime(filename).encode("unicode-escape").decode()).encode().decode("unicode-escape")}.{self.suffix}.part']
             
         proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
