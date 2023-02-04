@@ -7,7 +7,7 @@
 [discord-badge]: https://img.shields.io/discord/1015494098481852447.svg?logo=discord
 [discord-url]: https://discord.gg/shZmdxDFB7
 
-* 支持自动录制各大主流直播平台实时直播流，包括但不限于afcun，afreecaTV，哔哩哔哩，斗鱼，抖音，虎牙，网易CC，猫耳FM，Twitch，YY直播等，并于录制结束后上传到哔哩哔哩视频网站。
+* 支持自动录制各大主流直播平台实时直播流，包括但不限于afcun，afreecaTV，哔哩哔哩，斗鱼，抖音，虎牙，网易CC，猫耳FM，Twitch，熊猫直播，YY直播等，并于录制结束后上传到哔哩哔哩视频网站。
 * 支持YouTube，twitch直播回放列表自动搬运至b站，如链接https://www.twitch.tv/xxxx/videos?filter=archives&sort=time
 * 自动选择上传线路，保证国内外vps上传质量和速度
 * 可分别控制下载与上传并发量
