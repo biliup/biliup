@@ -293,24 +293,30 @@ class BiliBili:
     def upload_file(self, filepath: str, lines='AUTO', tasks=3):
         """上传本地视频文件,返回视频信息dict
         b站目前支持4种上传线路upos, kodo, gcs, bos
-        gcs: {"os":"gcs","query":"bucket=bvcupcdngcsus&probe_version=20200810",
+        gcs: {"os":"gcs","query":"bucket=bvcupcdngcsus&probe_version=20221109",
         "probe_url":"//storage.googleapis.com/bvcupcdngcsus/OK"},
-        bos: {"os":"bos","query":"bucket=bvcupcdnboshb&probe_version=20200810",
+        bos: {"os":"bos","query":"bucket=bvcupcdnboshb&probe_version=20221109",
         "probe_url":"??"}
         """
         if not self._auto_os:
             if lines == 'kodo':
-                self._auto_os = {"os": "kodo", "query": "bucket=bvcupcdnkodobm&probe_version=20200810",
+                self._auto_os = {"os": "kodo", "query": "bucket=bvcupcdnkodobm&probe_version=20221109",
                                  "probe_url": "//up-na0.qbox.me/crossdomain.xml"}
             elif lines == 'bda2':
-                self._auto_os = {"os": "upos", "query": "upcdn=bda2&probe_version=20200810",
+                self._auto_os = {"os": "upos", "query": "upcdn=bda2&probe_version=20221109",
                                  "probe_url": "//upos-sz-upcdnbda2.bilivideo.com/OK"}
+            elif lines == 'cs-bda2':
+                self._auto_os = {"os": "upos", "query": "upcdn=bda2&probe_version=20221109",
+                                 "probe_url": "//upos-cs-upcdnbda2.bilivideo.com/OK"}
             elif lines == 'ws':
-                self._auto_os = {"os": "upos", "query": "upcdn=ws&probe_version=20200810",
+                self._auto_os = {"os": "upos", "query": "upcdn=ws&probe_version=20221109",
                                  "probe_url": "//upos-sz-upcdnws.bilivideo.com/OK"}
             elif lines == 'qn':
-                self._auto_os = {"os": "upos", "query": "upcdn=qn&probe_version=20200810",
+                self._auto_os = {"os": "upos", "query": "upcdn=qn&probe_version=20221109",
                                  "probe_url": "//upos-sz-upcdnqn.bilivideo.com/OK"}
+            elif lines == 'cs-qn':
+                self._auto_os = {"os": "upos", "query": "upcdn=qn&probe_version=20221109",
+                                 "probe_url": "//upos-cs-upcdnqn.bilivideo.com/OK"}
             elif lines == 'cos':
                 self._auto_os = {"os": "cos", "query": "",
                                  "probe_url": ""}
