@@ -7,7 +7,7 @@
 [discord-badge]: https://img.shields.io/discord/1015494098481852447.svg?logo=discord
 [discord-url]: https://discord.gg/shZmdxDFB7
 
-* 支持自动录制各大主流直播平台实时直播流，包括但不限于afcun，afreecaTV，哔哩哔哩，斗鱼，抖音，虎牙，网易CC，猫耳FM，Twitch，熊猫直播，YY直播等，并于录制结束后上传到哔哩哔哩视频网站。
+* 支持自动录制各大主流直播平台实时直播流，包括但不限于acfun，afreecaTV，哔哩哔哩，斗鱼，抖音，虎牙，网易CC，猫耳FM，Twitch，YY直播等，并于录制结束后上传到哔哩哔哩视频网站。
 * 支持YouTube，twitch直播回放列表自动搬运至b站，如链接https://www.twitch.tv/xxxx/videos?filter=archives&sort=time
 * 自动选择上传线路，保证国内外vps上传质量和速度
 * 可分别控制下载与上传并发量
@@ -169,6 +169,8 @@ bup模式支持的上传方式为upos，其线路有：
 
 bupfetch模式支持的上传方式及线路有：
 * kodo（七牛）
+* ~~gcs (谷歌）已失效~~
+* ~~bos (百度）已失效~~
 
 国内基本选择upos模式的bda2线路。国外多为upos模式的ws和qn线路，也有bupfetch模式的kodo、gcs线路。bilibili采用客户端和服务器端线路探测相结合的方式，服务器会返回可选线路，客户端上传前会先发包测试选择一条延迟最低的线路，保证各个地区的上传质量。
 ***
