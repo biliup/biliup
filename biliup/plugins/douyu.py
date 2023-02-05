@@ -24,6 +24,9 @@ class Douyu(DownloadBase):
                      r'room_id\s*=\s*(\d+)',
                      r'"room_id.?":(\d+)',
                      r'data-onlineid=(\d+)')
+        if not vid:
+            logger.debug("直播间" + vid + "：被关闭或不存在")
+            return False
         roominfo = requests.get(f"https://www.douyu.com/betard/{vid}").json()['room']
         videoloop = roominfo['videoLoop']
         show_status = roominfo['show_status']
