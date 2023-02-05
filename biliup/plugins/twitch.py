@@ -9,6 +9,7 @@ from . import logger
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from ..plugins import BatchCheckBase
+from biliup.config import config
 
 VALID_URL_BASE = r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)'
 _OPERATION_HASHES = {
