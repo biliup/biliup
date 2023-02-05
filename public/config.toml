@@ -30,6 +30,7 @@ filtering_threshold = 20 # 小于此大小的视频文件将会被过滤删除�
 #douyin_cookie = '__ac_nonce=123456; __ac_signature=123456;'
 # 如录制Twitch时遇见视频流中广告过多的情况，可尝试在此填入cookie，可以大幅减少视频流中的twitch广告（经测试需要在该Cookie所属账号开了TwitchTurbo会员才有用），该cookie有过期风险，cookie过期后会导致无法获取到直播流
 # twitch_cookie获取方式：在浏览器中打开Twitch.tv，F12调出控制台，在控制台中执行：document.cookie.split("; ").find(item=>item.startsWith("auth-token="))?.split("=")[1]
+# twitch_cookie需要在downloader= "ffmpeg"时候才会生效
 #twitch_cookie = 'asdiouo2h987r23hf2893fh923y7'
 # Netscape 格式的 Cookies 文本路径
 #youtube_cookie = 'cookiejar.txt'
