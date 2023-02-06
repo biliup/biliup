@@ -145,7 +145,7 @@ with BiliBili(video) as bili:
     for file in file_list:
         video_part = bili.upload_file(file, lines=lines, tasks=tasks)  # 上传视频，默认线路AUTO自动选择，线程数量3。
         video.append(video_part)  # 添加已经上传的视频
-    video.dtime = dtime # 设置延后发布（2小时~15天）
+    video.delay_time(dtime) # 设置延后发布（2小时~15天）
     video.cover = bili.cover_up('/cover_path').replace('http:', '')
     ret = bili.submit()  # 提交视频
 ```
