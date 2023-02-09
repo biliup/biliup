@@ -24,23 +24,6 @@ lines: AUTO
 ### 单文件并发上传数，未达到带宽上限时增大此值可提高上传速度
 threads: 3
 
-### 默认通过网页接口上传,可选通过操作chrome上传,此时需要填写chromedriver路径
-#chromedriver_path: /usr/local/bin/chromedriver
-
-### 在填了cookies的情况下优先使用cookies上传，如需使用用户名密码上传请注释掉cookies
-#user: 
-#    cookies:
-#       SESSDATA: your SESSDATA
-#       bili_jct: your bili_jct
-#       DedeUserID__ckMd5: your ckMd5
-#       DedeUserID: your DedeUserID
-#    access_token: your access_key
-    # account:
-    #     username: your usrname
-    #     password: your password
-#    app_key: bca7e84c2d947ac6 ### 若账号密码方式无法登录可尝试更改此值
-#    appsec: 60698ba2f68e01ce44738920a0ffe768
-
 #------杂项------#
 ### 检测到主播下播后延迟再次检测，单位：秒，避免特殊情况提早启动上传导致漏录
 delay: 10
@@ -75,24 +58,7 @@ check_sourcecode: 15
 ### 自定义哔哩哔哩直播api
 #bili_liveapi: 'https://api.live.bilibili.com'
 
-#------抖音------#
-### 如需要录制抖音请在此填入cookie需要__ac_nonce与__ac_signature的值
-#douyin_cookie: '__ac_nonce=123456; __ac_signature=123456;'
-
-#------Twitch------#
-### 如录制Twitch时遇见视频流中广告过多的情况，可尝试在此填入cookie，可以大幅减少视频流中的twitch广告（经测试需要在该Cookie所属账号开了TwitchTurbo会员才有用），该cookie有过期风险，cookie过期后会导致无法获取到直播流
-# twitch_cookie获取方式：在浏览器中打开Twitch.tv，F12调出控制台，在控制台中执行：document.cookie.split("; ").find(item=>item.startsWith("auth-token="))?.split("=")[1]
-# twitch_cookie需要在downloader= "ffmpeg"时候才会生效
-#twitch_cookie: 'aisjdoiuasdoihansdoh3ooi209'
-
-#------YouTube------#
-### 使用Cookies登陆YouTube帐号，可用于下载会限，私享等未登录账号无法访问的内容。请使用Netscape 格式的 Cookies 文本路径。
-### 可以使用Chrome插件Get cookies.txt来生成txt文件。
-#youtube_cookie: 'cookiejar.txt'
-
 #########录制主播设置#########
-
-
 streamers:
 ### 最小配置示例
     星际2Stats拔本神族天梯第一视角: 
@@ -131,6 +97,35 @@ streamers:
             - '-ss' # 跳过开始的16秒
             - '00:00:16'
 
+### 在填了cookies的情况下优先使用cookies上传，如需使用用户名密码上传请注释掉cookies
+#user:
+    #------抖音------#
+    ### 如需要录制抖音请在此填入cookie需要__ac_nonce与__ac_signature的值
+    #douyin_cookie: '__ac_nonce=123456; __ac_signature=123456;'
+
+    #------Twitch------#
+    ### 如录制Twitch时遇见视频流中广告过多的情况，可尝试在此填入cookie，可以大幅减少视频流中的twitch广告（经测试需要在该Cookie所属账号开了TwitchTurbo会员才有用），该cookie有过期风险，cookie过期后会导致无法获取到直播流
+    # twitch_cookie获取方式：在浏览器中打开Twitch.tv，F12调出控制台，在控制台中执行：document.cookie.split("; ").find(item=>item.startsWith("auth-token="))?.split("=")[1]
+    # twitch_cookie需要在downloader= "ffmpeg"时候才会生效
+    #twitch_cookie: 'aisjdoiuasdoihansdoh3ooi209'
+
+    #------YouTube------#
+    ### 使用Cookies登陆YouTube帐号，可用于下载会限，私享等未登录账号无法访问的内容。请使用Netscape 格式的 Cookies 文本路径。
+    ### 可以使用Chrome插件Get cookies.txt来生成txt文件。
+    #youtube_cookie: 'cookiejar.txt'
+#    cookies:
+#       SESSDATA: your SESSDATA
+#       bili_jct: your bili_jct
+#       DedeUserID__ckMd5: your ckMd5
+#       DedeUserID: your DedeUserID
+#    access_token: your access_key
+    # account:
+    #     username: your usrname
+    #     password: your password
+#    app_key: bca7e84c2d947ac6 ### 若账号密码方式无法登录可尝试更改此值
+#    appsec: 60698ba2f68e01ce44738920a0ffe768
+
+
 #########日志输出配置#########
 
 LOGGING:
@@ -161,3 +156,6 @@ LOGGING:
         biliup:
             handlers: [ file ]
             level: INFO
+
+### 默认通过网页接口上传,可选通过操作chrome上传,此时需要填写chromedriver路径
+#chromedriver_path: /usr/local/bin/chromedriver

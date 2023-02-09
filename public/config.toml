@@ -23,17 +23,9 @@ filtering_threshold = 20 # 小于此大小的视频文件将会被过滤删除�
 # 哔哩哔哩直播优选CDN
 #bili_perfCDN = "cn-gotcha01"
 # 哔哩哔哩直播强制原画（仅限HLS流的 cn-gotcha01 CDN）
-#bili_forceScoure = False
+#bili_forceScoure = false
 # 自定义哔哩哔哩直播api
 #bili_liveapi = "https://api.live.bilibili.com"
-# 如需要录制抖音请在此填入cookie需要__ac_nonce与__ac_signature的值
-#douyin_cookie = '__ac_nonce=123456; __ac_signature=123456;'
-# 如录制Twitch时遇见视频流中广告过多的情况，可尝试在此填入cookie，可以大幅减少视频流中的twitch广告（经测试需要在该Cookie所属账号开了TwitchTurbo会员才有用），该cookie有过期风险，cookie过期后会导致无法获取到直播流
-# twitch_cookie获取方式：在浏览器中打开Twitch.tv，F12调出控制台，在控制台中执行：document.cookie.split("; ").find(item=>item.startsWith("auth-token="))?.split("=")[1]
-# twitch_cookie需要在downloader= "ffmpeg"时候才会生效
-#twitch_cookie = 'asdiouo2h987r23hf2893fh923y7'
-# Netscape 格式的 Cookies 文本路径
-#youtube_cookie = 'cookiejar.txt'
 # 检测到主播下播后延迟再次检测，单位：秒，避免特殊情况提早启动上传导致漏录
 delay = 10
 # 检测间隔时间，单位：秒
@@ -46,6 +38,16 @@ pool1_size = 3
 pool2_size = 3
 # 检测源码文件变化间隔，单位：秒，检测源码到变化后，程序会在空闲时自动重启
 check_sourcecode = 15
+
+[user]
+# 如需要录制抖音请在此填入cookie需要__ac_nonce与__ac_signature的值
+douyin_cookie = '__ac_nonce=123456; __ac_signature=123456;'
+# 如录制Twitch时遇见视频流中广告过多的情况，可尝试在此填入cookie，可以大幅减少视频流中的twitch广告（经测试需要在该Cookie所属账号开了TwitchTurbo会员才有用），该cookie有过期风险，cookie过期后会导致无法获取到直播流
+# twitch_cookie获取方式：在浏览器中打开Twitch.tv，F12调出控制台，在控制台中执行：document.cookie.split("; ").find(item=>item.startsWith("auth-token="))?.split("=")[1]
+# twitch_cookie需要在downloader= "ffmpeg"时候才会生效
+#twitch_cookie = 'asdiouo2h987r23hf2893fh923y7'
+# Netscape 格式的 Cookies 文本路径
+#youtube_cookie = 'cookiejar.txt'
 
 # 最小配置示例
 [streamers."星际2Stats拔本神族天梯第一视角"]

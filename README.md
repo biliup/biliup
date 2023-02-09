@@ -22,6 +22,8 @@
 、[Windows](https://blog.waitsaber.org/archives/169) 教程
 与 [常见问题](https://blog.waitsaber.org/archives/167) 解决方案 by [@waitsaber](https://github.com/waitsaber)
 
+**更新日志**：[CHANGELOG.md](CHANGELOG.md)
+
 **文档地址**：<https://biliup.github.io/biliup>
 ## INSTALLATION
 1. 创建配置文件 [**config.toml**](#最小配置文件示例)

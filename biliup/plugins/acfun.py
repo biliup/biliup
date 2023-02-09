@@ -44,7 +44,7 @@ class Acfun(DownloadBase):
         }
         r2 = requests.post("https://api.kuaishouzt.com/rest/zt/live/web/startPlay",
                            headers=headers2, data=data2, params=params)
-        if r2.json()['result'] != 1:
+        if r2.json().get('result') != 1:
             logger.debug(r2.json()['error_msg'])
             return False
         d = r2.json()['data']['videoPlayRes']

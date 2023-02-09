@@ -101,8 +101,9 @@ class Twitch(DownloadBase):
                 "--twitch-disable-hosting", "--twitch-disable-reruns",
                 "--player-external-http-port", str(port), self.url, "best"
             ]
-            if config.get('twitch_cookie'): 
-                twitch_cookie = "--twitch-api-header=Authorization=OAuth " + config.get('twitch_cookie')
+            twitch_cookie = config.get('user', {}).get('twitch_cookie')
+            if twitch_cookie:
+                twitch_cookie = "--twitch-api-header=Authorization=OAuth " + twitch_cookie
                 stream_shell.insert(1, twitch_cookie)
             self.proc = subprocess.Popen(stream_shell)
             self.raw_stream_url = f"http://localhost:{port}"
