@@ -32,32 +32,33 @@ class Bilibili(DownloadBase):
         self.fake_headers['Referer'] = 'https://live.bilibili.com'
 
         # 获取直播状态与房间标题
-        roomInfo = requests.get(f"https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id={params['room_id']}").json()
-        if roomInfo['code'] == 0:
-            if roomInfo['data']['room_info']['live_status'] != 1:
+        with requests.Session() as s:
+            roomInfo = s.get(f"https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByRoom?room_id={params['room_id']}", timeout=5).json()
+            if roomInfo['code'] == 0:
+                if roomInfo['data']['room_info']['live_status'] != 1:
+                    return False
+                params['room_id'] = roomInfo['data']['room_info']['room_id']
+                self.room_title = roomInfo['data']['room_info']['title']
+            else:
+                logger.debug(roomInfo['message'])
                 return False
-            params['room_id'] = roomInfo['data']['room_info']['room_id']
-            self.room_title = roomInfo['data']['room_info']['title']
-        else:
-            logger.debug(roomInfo['message'])
-            return False
 
-
-        playInfo = requests.get(f"{liveapi}/xlive/web-room/v2/index/getRoomPlayInfo", params=params).json()
-        if playInfo['code'] != 0:
-            logger.debug(playInfo['message'])
-            return False
-        streams = playInfo['data']['playurl_info']['playurl']['stream']
-        stream = streams[1] if "hls" in protocol else streams[0]
-        stream_info = stream['format'][0]['codec'][0]
-        for url_info in stream_info['url_info']:
-            if 'mcdn' in url_info['host']:
-                continue
-            if perfCDN in url_info['extra']:
-                if forceScoure and "cn-gotcha01" in perfCDN:
-                    stream_info['base_url'] = re.sub(r'\_bluray(?=.*m3u8)', "", stream_info['base_url'])
-                self.raw_stream_url = url_info['host']+stream_info['base_url']+url_info['extra']
+            playInfo = requests.get(f"{liveapi}/xlive/web-room/v2/index/getRoomPlayInfo", params=params).json()
+            if playInfo['code'] != 0:
+                logger.debug(playInfo['message'])
+                return False
+            streams = playInfo['data']['playurl_info']['playurl']['stream']
+            stream = streams[1] if "hls" in protocol else streams[0]
+            stream_info = stream['format'][0]['codec'][0]
+            for url_info in stream_info['url_info']:
+                if 'mcdn' in url_info['host']:
+                    continue
+                if perfCDN in url_info['extra']:
+                    if forceScoure and "cn-gotcha01" in perfCDN:
+                        stream_info['base_url'] = re.sub(r'\_bluray(?=.*m3u8)', "", stream_info['base_url'])
+                    self.raw_stream_url = url_info['host']+stream_info['base_url']+url_info['extra']
+            # 尝试回退
+            if s.get(self.raw_stream_url, stream=True).status_code != 404:
                 return True
-        stream_number = len(stream_info['url_info']) - 1
-        self.raw_stream_url = stream_info['url_info'][stream_number]['host']+stream_info['base_url']+stream_info['url_info'][stream_number]['extra']
-        return True
+            self.raw_stream_url = stream_info['url_info'][-1]['host']+stream_info['base_url']+stream_info['url_info'][-1]['extra']
+            return True
