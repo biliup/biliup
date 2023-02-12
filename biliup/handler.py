@@ -1,4 +1,5 @@
 import logging
+import subprocess
 
 from . import plugins
 from .downloader import download, check_url
@@ -6,6 +7,7 @@ from .engine import invert_dict, Plugin
 from biliup.config import config
 from .engine.event import Event, EventManager
 from .uploader import upload
+from functools import reduce
 
 CHECK = 'check'
 CHECK_UPLOAD = 'check_upload'
@@ -88,6 +90,8 @@ class KernelFunc:
         if self.url_status[url] == 2:
             return logger.debug('正在上传稍后下载')
         name = self.inverted_index[url]
+        if config['streamers'].get(name, {}).get('preprocessor', None):
+        	preprocessor(config['streamers'].get(name, {}).get('preprocessor', None))
         logger.debug(f'{name}刚刚开播，去下载')
         self.url_status[url] = 1
         return Event(DOWNLOAD, args=(name, url))
@@ -114,3 +118,17 @@ class KernelFunc:
 
     def get_url_status(self):
         return self.url_status
+
+def preprocessor(preprocessor):
+    for pre_processor in preprocessor:
+        if pre_processor.get('run'):
+            try:
+                process_output = subprocess.check_output(
+                    pre_processor['run'], shell=True, 
+                    input=reduce(lambda x, y: x + str(Path(y).absolute()) + '\n', '', ''),
+                    stderr=subprocess.STDOUT, text=True)
+                logger.info(process_output.rstrip())
+            except subprocess.CalledProcessError as e:
+                logger.exception(e.output)
+                continue
+
