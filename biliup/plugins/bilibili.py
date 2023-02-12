@@ -31,7 +31,6 @@ class Bilibili(DownloadBase):
         liveapi = config.get('bili_liveapi').rstrip('/') if config.get('bili_liveapi') else 'https://api.live.bilibili.com'
         self.fake_headers['Referer'] = 'https://live.bilibili.com'
         s = requests.Session()
-        s.adapters
 
         with s:
             # 获取直播状态与房间标题
