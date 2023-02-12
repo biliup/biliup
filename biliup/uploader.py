@@ -23,13 +23,13 @@ def upload(data):
         cls = Plugin.upload_plugins.get(platform)
         if cls is None:
             return logger.error(f"No such uploader: {platform}")
-
+        streamers = data.get('streamers', index)
         date = data.get("date", time.localtime())
         room_title = data.get('title', index)
-        data["format_title"] = custom_fmtstr(context.get('title', f'%Y.%m.%d{index}'), date, room_title)
-
+        data["format_title"] = custom_fmtstr(context.get('title', f'%Y.%m.%d{index}'), date, room_title, streamers)
         if context.get('description'):
-            context['description'] = custom_fmtstr(context.get('description'), date, room_title)
+            context['description'] = custom_fmtstr(context.get('description'), date, room_title, streamers)
+            print(context['description'])
         threshold = config.get('filtering_threshold')
         if threshold:
             data['threshold'] = threshold
@@ -45,5 +45,5 @@ def upload(data):
         logger.exception("Uncaught exception:")
 
 
-def custom_fmtstr(string, date, title):
-    return time.strftime(string.encode('unicode-escape').decode(), date).encode().decode("unicode-escape").format(title=title)
+def custom_fmtstr(string, date, title, streamers):
+    return time.strftime(string.encode('unicode-escape').decode(), date).encode().decode("unicode-escape").format(title=title, streamers=streamers)
