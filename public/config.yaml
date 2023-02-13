@@ -103,7 +103,11 @@ streamers:
 #user:
     #------哔哩哔哩------#
     ### 参照https://github.com/BililiveRecorder/BililiveRecorder/issues/263
-    # bili_cookie: ''
+    #bili_cookie: ''
+    ### 重要！！！
+    ###是否将cookie传入第三方API。将Cookie传入未知的第三方API有几率泄露帐号登录信息。
+    ###在开启了自定义Cookie（bili_cookie）又同时设置了第三方API（bili_liveapi）的情况下，如果打开了允许第三方API使用Cookie，那么就使用第三方API，如果没有允许（默认），那么设置的第三方API就不生效
+    #customAPI_use_cookie : False
 
     #------抖音------#
     ### 如需要录制抖音请在此填入cookie需要__ac_nonce与__ac_signature的值

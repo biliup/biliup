@@ -13,6 +13,7 @@ class Bilibili(DownloadBase):
         super().__init__(fname, url, suffix)
         self.fake_headers['Referer'] = 'https://live.bilibili.com'
         self.fake_headers['cookie'] = config.get('user', {}).get('bili_cookie')
+        self.customAPI_use_cookie = config.get('user', {}).get('customAPI_use_cookie', False)
 
     def check_stream(self):
         # 预读配置
@@ -49,8 +50,13 @@ class Bilibili(DownloadBase):
                 return False
             params['room_id'] = roomInfo['data']['room_info']['room_id']
             self.room_title = roomInfo['data']['room_info']['title']
-            # 当 Cookie 存在时，仅使用官方 Api
-            roomPlayInfoUrl = (lambda a, b, c : a if not c else b)(customApiHost, officialApiHost, self.fake_headers['cookie'])+'/xlive/web-room/v2/index/getRoomPlayInfo'
+            # 当 Cookie 存在，并且自定义APi使用Cookie开关关闭时，仅使用官方 Api
+            if self.fake_headers['cookie'] and self.customAPI_use_cookie is False:
+                roomPlayInfoUrl = officialApiHost
+            else:
+                roomPlayInfoUrl = customApiHost
+            roomPlayInfoUrl += '/xlive/web-room/v2/index/getRoomPlayInfo'
+
             # 尝试获取直播流
             try:
                 playInfo = s.get(roomPlayInfoUrl, params=params, timeout=5).json()
