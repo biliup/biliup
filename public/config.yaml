@@ -2,13 +2,13 @@
 
 #------录制与下载------#
 ### 选择全局默认的下载插件，默认为stream-gears。可选ffmpeg与stream-gears。
-#downloader: ffmpeg 
+#downloader: ffmpeg
 ### 录像单文件大小限制，单位Byte，超过此大小分段下载
 file_size: 2621440000
 ### 录像单文件时间限制，格式'00:00:00'（时分秒），超过此大小分段下载，如需使用大小分段请注释此字段
 #segment_time: '00:50:00'
 ### 小于此大小的视频文件将会被过滤删除，单位MB
-filtering_threshold: 20 
+filtering_threshold: 20
 
 ### 自定义录播文件名模板, 支持变量 {streamer}:你在配置里设置的直播间名 %Y-%m-%d %H_%M_%S:创建文件的时间, {room_title}:当场直播间标题
 ### 如果上传文件，文件名必须包含设定的模板名。其次，如果没有定义时间，文件分片可能会互相覆盖，所以推荐设置时间来避免分段文件名重复。
@@ -61,11 +61,11 @@ check_sourcecode: 15
 #########录制主播设置#########
 streamers:
 ### 最小配置示例
-    星际2Stats拔本神族天梯第一视角: 
+    星际2Stats拔本神族天梯第一视角:
         url:
             - https://www.twitch.tv/kimdaeyeob3
-### 完整可选配置示例     
-    星际2INnoVation吕布卫星人族天梯第一视角: 
+### 完整可选配置示例
+    星际2INnoVation吕布卫星人族天梯第一视角:
         url:
             - https://www.twitch.tv/innovation_s2
             - https://www.panda.tv/1160340
@@ -92,7 +92,7 @@ streamers:
             - run: sh ./run.sh ### 执行一个shell脚本，用途多样，主要调用系统内的cli工具。自动上传网盘脚本示例 https://gist.github.com/UVJkiNTQ/ae4282e8f9fe4e45b3144b57605b4178
             #- rm ### 删除文件，为默认操作
         tags:
-            - biliup 
+            - biliup
             - 视频标签
         format: mp4 ### 视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg。
         opt_args: ### ffmpeg参数
@@ -101,6 +101,10 @@ streamers:
 
 ### 在填了cookies的情况下优先使用cookies上传，如需使用用户名密码上传请注释掉cookies
 #user:
+    #------哔哩哔哩------#
+    ### 参照https://github.com/BililiveRecorder/BililiveRecorder/issues/263
+    # bili_cookie: ''
+
     #------抖音------#
     ### 如需要录制抖音请在此填入cookie需要__ac_nonce与__ac_signature的值
     #douyin_cookie: '__ac_nonce=123456; __ac_signature=123456;'
