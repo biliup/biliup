@@ -4,14 +4,27 @@
 - 💡新添加的功能
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
+
+## 0.4.2
+-  更新时间：2023.02.15
+- 💡为YouTube视频下载增加指定封装格式，最大纵向分辨率，最大单视频大小的设置。 [@haha114514](https://github.com/haha114514)
+- ⚠️上一条由于为Config新增了一些设置，如需使用相关功能请参考最新的config示例添加缺失的部分。
+- 🔧修复上一版本由于新增的哔哩哔哩登录Cookie导致报错的问题。 [@haha114514](https://github.com/haha114514)
+- 🔧修复Twitch的Clips无法下载的问题。 [@haha114514](https://github.com/haha114514)
+- 🔧为上一版本的B站Fallback机制启用开关。[@haha114514](https://github.com/haha114514)
+- ⚠️上一条由于为Config新增了一些设置，如需使用相关功能请参考最新的config示例添加缺失的部分。
+
 ## 0.4.1
 -  更新时间：2023.02.13
 - 💡增加Preprocessor功能，支持开始录制时执行指定Shell指令 [@haha114514](https://github.com/haha114514)
 - 💡为上传标题与简介增加streamers变量 [@haha114514](https://github.com/haha114514)
+- ⚠️上两条由于为Config新增了一些设置，如需使用相关功能请参考最新的config示例添加缺失的部分。
 - 🔧修复访问acfun过于频繁导致ip被拉黑之后报错卡住的问题 [@haha114514](https://github.com/haha114514)
 - 🔧修复嵌入示例中延后发布时间的错误 [@stevenlele](https://github.com/setvenlele)
 - 🔧修复twitch_cookie配置不生效问题 [@v2wy](https://github.com/v2wy)
 - 🔧尝试为B站直播录制启用Fallback机制，当指定CDN反复无法下载之后，自动尝试另外的CDN [@xxxxuanran](https://github.com/xxxxuanran)
+- 🔧增加Cookie登录B站功能，可用于下载付费直播与大航海专属直播 [@xxxxuanran](https://github.com/xxxxuanran)
+- ⚠️上一条由于为Config新增了一些设置，如需使用相关功能请参考最新的config示例添加缺失的部分。
 
 ## 0.4.0
 -  更新时间：2023.02.10
@@ -25,6 +38,7 @@
 - 🔧修复ffmpeg录制参数缺失.part后缀，导致录制出来的文件都没有.part后缀的问题 [@haha114514](https://github.com/haha114514)
 - 🔧修复了ffmpeg录制情况下，按大小分段录制时，分段之后上一段的.part后缀不会被去掉的问题 [@haha114514](https://github.com/haha114514)
 - 🔧完善config示例，增加postprocessor可参考用法的描述 [@haha114514](https://github.com/haha114514)
+- ⚠️上一条由于为Config新增了一些设置，如需使用相关功能请参考最新的config示例添加缺失的部分。
 
 ## 0.3.11
 -  更新时间：2023.02.02
