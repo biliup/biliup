@@ -8,12 +8,20 @@ from . import logger
 
 VALID_URL_BASE = r'https?://(?:(?:www|m)\.)?youtube\.com/(?P<id>.*?)\??(.*?)'
 
+format_dict = {
+    "webm": ("webm", "webm"),
+    "mkv": ("webm", "m4a"),
+    "mp4": ("mp4", "m4a")
+}
 
 @Plugin.download(regexp=VALID_URL_BASE)
 class Youtube(DownloadBase):
     def __init__(self, fname, url, suffix='webm'):
         DownloadBase.__init__(self, fname, url, suffix=suffix)
         self.cookiejarFile = config.get('user', {}).get('youtube_cookie')
+        self.youtube_format = config.get('youtube_prefer_format','webm')
+        self.resolution = config.get('youtube_max_resolution','4320')
+        self.filesize = config.get('youtube_max_videosize','100G')
 
     def check_stream(self):
         with yt_dlp.YoutubeDL({'download_archive': 'archive.txt', 'ignoreerrors': True, 'extract_flat': True,
@@ -47,9 +55,11 @@ class Youtube(DownloadBase):
                 return True
 
     def download(self, filename):
+        video_format, audio_format = format_dict.get(self.youtube_format)
         try:
             ydl_opts = {
-                'outtmpl': filename,
+                'outtmpl': filename+ '.%(ext)s',
+                'format': f'bestvideo[ext={video_format}][height<={self.resolution}][filesize<{self.filesize}]+bestaudio[ext={audio_format}]/best[height<={self.resolution}]/best',
                 'cookiefile': self.cookiejarFile,
                 # 'proxy': proxyUrl,
                 'ignoreerrors': True,
@@ -64,3 +74,4 @@ class Youtube(DownloadBase):
             logger.exception(self.fname)
             return 1
         return 0
+
