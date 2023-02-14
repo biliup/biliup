@@ -12,8 +12,10 @@ class Bilibili(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
         self.fake_headers['Referer'] = 'https://live.bilibili.com'
-        self.fake_headers['cookie'] = config.get('user', {}).get('bili_cookie')
+        if config.get('user', {}).get('bili_cookie'):
+            self.fake_headers['cookie'] =  config.get('user', {}).get('bili_cookie')
         self.customAPI_use_cookie = config.get('user', {}).get('customAPI_use_cookie', False)
+        self.bili_cdn_fallback = config.get('bili_cdn_fallback', True)
 
     def check_stream(self):
         # 预读配置
@@ -34,7 +36,7 @@ class Bilibili(DownloadBase):
         forceScoure = config.get('bili_forceScoure', False)
         customApiHost = (lambda a : a if a.startswith(('http://', 'https://')) else 'http://'+a)(config.get('bili_liveapi', officialApiHost).rstrip('/'))
         s = requests.Session()
-        s.headers = self.fake_headers
+        s.headers = self.fake_headers.copy()
 
         with s:
             # 获取直播状态与房间标题
@@ -81,18 +83,19 @@ class Bilibili(DownloadBase):
                         stream_info['base_url'] = re.sub(r'\_bluray(?=.*m3u8)', "", stream_info['base_url'])
                     self.raw_stream_url = url_info['host']+stream_info['base_url']+url_info['extra']
             index = 0
+            if self.bili_cdn_fallback is True:
             # 检查直播流是否可用
-            while s.head(self.raw_stream_url, stream=True).status_code == 404:
-                # 以倒序尝试回退
-                if stream_info['url_info'][index]['host'] in self.raw_stream_url:
-                    index-=1
-                try:
-                    url_info = stream_info['url_info'][index]
-                    self.raw_stream_url = url_info['host']+stream_info['base_url']+url_info['extra']
-                except Exception:
-                    self.raw_stream_url = None
-            # 如当前协议无可用直播流，回退到 flv 的首个链接
-            if not self.raw_stream_url:
-                stream_info = streams[0]['format'][0]['codec'][0]
-                self.raw_stream_url = stream_info['url_info'][0]['host']+stream_info['base_url']+stream_info['url_info'][0]['extra']
+                while s.head(self.raw_stream_url, stream=True).status_code == 404:
+                    # 以顺序尝试回退
+                    if stream_info['url_info'][index]['host'] in self.raw_stream_url:
+                        index+=1
+                    try:
+                        url_info = stream_info['url_info'][index]
+                        self.raw_stream_url = url_info['host']+stream_info['base_url']+url_info['extra']
+                    except Exception:
+                        self.raw_stream_url = None
+                # 如当前协议无可用直播流，回退到 flv 的首个链接
+                if not self.raw_stream_url:
+                    stream_info = streams[0]['format'][0]['codec'][0]
+                    self.raw_stream_url = stream_info['url_info'][0]['host']+stream_info['base_url']+stream_info['url_info'][0]['extra']
         return True
