@@ -50,8 +50,6 @@ class Youtube(DownloadBase):
                 return True
 
     def download(self, filename):
-        print(self.vcodec)
-        print(self.acodec)
         try:
             ydl_opts = {
                 'outtmpl': filename+ '.%(ext)s',
