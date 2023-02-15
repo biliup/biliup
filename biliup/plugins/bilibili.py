@@ -13,7 +13,7 @@ class Bilibili(DownloadBase):
         super().__init__(fname, url, suffix)
         self.fake_headers['Referer'] = 'https://live.bilibili.com'
         if config.get('user', {}).get('bili_cookie'):
-            self.fake_headers['cookie'] =  config.get('user', {}).get('bili_cookie', ''))
+            self.fake_headers['cookie'] =  config.get('user', {}).get('bili_cookie', '')
         self.customAPI_use_cookie = config.get('user', {}).get('customAPI_use_cookie', False)
         self.bili_cdn_fallback = config.get('bili_cdn_fallback', True)
 
