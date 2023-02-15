@@ -8,18 +8,13 @@ from . import logger
 
 VALID_URL_BASE = r'https?://(?:(?:www|m)\.)?youtube\.com/(?P<id>.*?)\??(.*?)'
 
-format_dict = {
-    "webm": ("webm", "webm"),
-    "mkv": ("webm", "m4a"),
-    "mp4": ("mp4", "m4a")
-}
-
 @Plugin.download(regexp=VALID_URL_BASE)
 class Youtube(DownloadBase):
     def __init__(self, fname, url, suffix='webm'):
         DownloadBase.__init__(self, fname, url, suffix=suffix)
         self.cookiejarFile = config.get('user', {}).get('youtube_cookie')
-        self.youtube_format = config.get('youtube_prefer_format','webm')
+        self.vcodec = config.get('youtube_prefer_vcodec','av01|vp9|avc')
+        self.acodec = config.get('youtube_prefer_acodec','opus|mp4a')
         self.resolution = config.get('youtube_max_resolution','4320')
         self.filesize = config.get('youtube_max_videosize','100G')
 
@@ -55,11 +50,12 @@ class Youtube(DownloadBase):
                 return True
 
     def download(self, filename):
-        video_format, audio_format = format_dict.get(self.youtube_format)
+        print(self.vcodec)
+        print(self.acodec)
         try:
             ydl_opts = {
                 'outtmpl': filename+ '.%(ext)s',
-                'format': f'bestvideo[ext={video_format}][height<={self.resolution}][filesize<{self.filesize}]+bestaudio[ext={audio_format}]/best[height<={self.resolution}]/best',
+                'format': f"bestvideo[vcodec~='^({self.vcodec})'][height<={self.resolution}][filesize<{self.filesize}]+bestaudio[acodec~='^({self.acodec})']/best[height<={self.resolution}]/best",
                 'cookiefile': self.cookiejarFile,
                 # 'proxy': proxyUrl,
                 'ignoreerrors': True,
