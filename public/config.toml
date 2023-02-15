@@ -43,10 +43,12 @@ check_sourcecode = 15
 #------YouTube------#
 ### 设置偏好的YouTube下载封装格式
 ### 请务必记得安装ffmpeg
-### 其中mp4封装为h264视频编码+aac音频编码，一般最高可以下载到1080p的版本；
-### mkv封装为vp9/av1视频编码+aac音频编码，视频部分最高可以下载到8k，音频采样率最高44.1khz
-### webm封装为vp9/av1视频编码+opus音频编码,一般opus版本音质最高。
-#youtube_prefer_format = "webm" ### 支持mkv, webm, mp4 3种封装后缀。
+### 支持同时添加多个编码，自动优选指定编码格式里最好的画质/音质版本。
+### 视频：其中avc编码最高可以下载到1080p的内容，vp9最高可以下载到4k以及很少部分8k内容，av01画质不是所有视频都有，但是大部分8k视频的8k画质只有av01编码。
+### 音频：其中opus编码最高48KHz采样，mp4a（AAC）最高44.1KHz采样，理论上来说opus音质会更好一些。
+### 如需指定封装格式，请按以下推荐设置。mp4：avc+mp4a;av01+mp4a. mkv:vp9+mp4a,avc+opus. webm:av01+opus;vp9+opus.
+#youtube_prefer_vcodec = "av01|vp9|avc" ### 可用av01,vp9,avc
+#youtube_prefer_acodec = "opus|mp4a" ### 可用opus,mp4a
 ### 设置偏好的YouTube下载最高纵向分辨率
 ### 最高纵向分辨率，也就是xxxxP.如果youtube_prefer_format指定为mp4，将最高只能下载1080p的视频。
 #youtube_max_resolution = "440" 
