@@ -53,7 +53,7 @@ class Bilibili(DownloadBase):
             params['room_id'] = roomInfo['data']['room_info']['room_id']
             self.room_title = roomInfo['data']['room_info']['title']
             # 当 Cookie 存在，并且自定义APi使用Cookie开关关闭时，仅使用官方 Api
-            if self.fake_headers['cookie'] and self.customAPI_use_cookie is False:
+            if config.get('user', {}).get('bili_cookie') and self.customAPI_use_cookie is False:
                 roomPlayInfoUrl = officialApiHost
             else:
                 roomPlayInfoUrl = customApiHost
