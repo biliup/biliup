@@ -32,7 +32,7 @@ class Bilibili(DownloadBase):
         }
         officialApiHost = "https://api.live.bilibili.com"
         protocol = config.get('bili_protocol', 'stream')
-        perfCDN = config.get('bili_perfCDN', 'None')
+        perfCDN = config.get('bili_perfCDN', '')
         forceScoure = config.get('bili_forceScoure', False)
         customApiHost = (lambda a : a if a.startswith(('http://', 'https://')) else 'http://'+a)(config.get('bili_liveapi', officialApiHost).rstrip('/'))
         s = requests.Session()
@@ -53,7 +53,7 @@ class Bilibili(DownloadBase):
             params['room_id'] = roomInfo['data']['room_info']['room_id']
             self.room_title = roomInfo['data']['room_info']['title']
             # 当 Cookie 存在，并且自定义APi使用Cookie开关关闭时，仅使用官方 Api
-            if self.fake_headers['cookie'] and self.customAPI_use_cookie is False:
+            if config.get('user', {}).get('bili_cookie') and self.customAPI_use_cookie is False:
                 roomPlayInfoUrl = officialApiHost
             else:
                 roomPlayInfoUrl = customApiHost
@@ -75,13 +75,25 @@ class Bilibili(DownloadBase):
             ### 直播开启后需要约 2Min 缓冲时间以提供 Hevc 编码 与 fmp4 封装，故仅使用 Avc 编码
             stream_info = stream['format'][0]['codec'][0]
             for url_info in stream_info['url_info']:
-                # 默认跳过 p2pCDN
-                if 'mcdn' in url_info['host']:
-                    continue
-                if perfCDN in url_info['extra']:
-                    if forceScoure and "cn-gotcha01" in perfCDN:
+                # 匹配PerfCDN
+                if perfCDN and perfCDN in url_info['extra']:
+                    if forceScoure is True and "cn-gotcha01" in perfCDN:
                         stream_info['base_url'] = re.sub(r'\_bluray(?=.*m3u8)', "", stream_info['base_url'])
-                    self.raw_stream_url = url_info['host']+stream_info['base_url']+url_info['extra']
+                    self.raw_stream_url = url_info['host']+stream_info['base_url']+url_info['extra']   
+                    logger.debug(f"获取到{url_info['host']}节点,找到了prefCDN")   
+                    break
+                else:
+                    self.raw_stream_url = None
+                    logger.debug(f"获取到{url_info['host']}节点,没有找到prefCDN") 
+                    continue
+            if not self.raw_stream_url:
+                for url_info in stream_info['url_info']:
+                    # 默认跳过 p2pCDN
+                    if 'mcdn' in url_info['host']:
+                        continue
+                    self.raw_stream_url = url_info['host']+stream_info['base_url']+url_info['extra'] 
+                    logger.debug(f"回落跳过所有pCDN节点，选择{self.raw_stream_url}尝试下载") 
+                    break
             index = 0
             if self.bili_cdn_fallback is True:
             # 检查直播流是否可用
@@ -95,7 +107,7 @@ class Bilibili(DownloadBase):
                     except Exception:
                         self.raw_stream_url = None
                 # 如当前协议无可用直播流，回退到 flv 的首个链接
-                if not self.raw_stream_url:
-                    stream_info = streams[0]['format'][0]['codec'][0]
-                    self.raw_stream_url = stream_info['url_info'][0]['host']+stream_info['base_url']+stream_info['url_info'][0]['extra']
+            if not self.raw_stream_url:
+                stream_info = streams[0]['format'][0]['codec'][0]
+                self.raw_stream_url = stream_info['url_info'][0]['host']+stream_info['base_url']+stream_info['url_info'][0]['extra']
         return True
