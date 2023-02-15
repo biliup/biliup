@@ -28,7 +28,6 @@ def upload(data):
         data["format_title"] = custom_fmtstr(context.get('title', f'%Y.%m.%d{index}'), date, room_title, streamers)
         if context.get('description'):
             context['description'] = custom_fmtstr(context.get('description'), date, room_title, streamers)
-            print(context['description'])
         threshold = config.get('filtering_threshold')
         if threshold:
             data['threshold'] = threshold
