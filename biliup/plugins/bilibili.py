@@ -32,7 +32,7 @@ class Bilibili(DownloadBase):
         }
         officialApiHost = "https://api.live.bilibili.com"
         protocol = config.get('bili_protocol', 'stream')
-        perfCDN = config.get('bili_perfCDN', '')
+        perfCDN = config.get('bili_perfCDN', 'None')
         forceScoure = config.get('bili_forceScoure', False)
         customApiHost = (lambda a : a if a.startswith(('http://', 'https://')) else 'http://'+a)(config.get('bili_liveapi', officialApiHost).rstrip('/'))
         s = requests.Session()
