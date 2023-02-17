@@ -18,16 +18,31 @@ filtering_threshold = 20 # 小于此大小的视频文件将会被过滤删除�
 # 自定义录播文件名模板, 支持变量 {streamer}:你在配置里设置的直播间名 %Y-%m-%d %H_%M_%S:创建文件的时间, {room_title}:当场直播间标题
 # 如果上传文件，文件名必须包含设定的模板名。其次，如果没有定义时间，文件分片可能会互相覆盖，所以推荐设置时间来避免分段文件名重复。
 #filename_prefix = '{streamer}%Y-%m-%d %H_%M_%S{room_title}'
-# 哔哩哔哩直播流协议.可选 stream（Flv）、hls
-#bili_protocol = "stream"
-# 哔哩哔哩直播优选CDN
-#bili_perfCDN = "cn-gotcha01"
-# 哔哩哔哩直播强制原画（仅限HLS流的 cn-gotcha01 CDN）
+#------哔哩哔哩------#
+### 哔哩哔哩直播流协议.可选 stream（Flv）、hls，默认为stream
+#bili_protocol = stream
+### 哔哩哔哩直播优选CDN，默认无
+#bili_perfCDN = cn-gotcha01
+### 哔哩哔哩直播强制原画（仅限HLS流的 cn-gotcha01 CDN），默认为关闭
 #bili_forceScoure = false
-# 自定义哔哩哔哩直播api
-#bili_liveapi = "https://api.live.bilibili.com"
-# CDN自动Fallback开关，默认为开启
+### 自定义哔哩哔哩直播api，默认无
+#bili_liveapi = 'https://api.live.bilibili.com'
+### CDN自动Fallback开关，默认为开启
 #bili_cdn_fallback = true
+### 强制替换ov-gotcha05的下载地址为指定的自选IP
+#bili_force_ov05 = true
+#bili_force_ov05_ip = '163.171.197.234'
+### 强制替换cn-gotcha01（叔叔自建，理论上最稳定）为指定的自选域名组（可多个域名，请用逗号分隔）
+### 完整CDN列表请参考 https://rec.danmuji.org/dev/bilibili-cdn/ 中"B站视频云"的部分
+### 此功能需要设置bili_perfCDN为cn-gotcha01，并且设置bili_protocol为hls。
+### 此功能目前会和stream-gears冲突导致很多分段，请考虑使用ffmpeg录制
+### 如果海外机器需要使用此功能，需要在bili_liveapi中指定国内的反代API来获取cn-gotcha01的节点信息。
+### 海外机的玩法：配合一个国内的机器（例如便宜的腾讯云，阿里云等等）自建反代api.live.bilibili.com
+### 如果海外机到联通或者移动网络线路还不错，就可以参考https://rec.danmuji.org/dev/bilibili-cdn/ 选取一些联通或者移动的节点并填入下面
+### 每次会随机返回填入的其中一个线路，并且会自动判断所填入的节点是否可用
+#bili_force_cn01 = true
+#bili_force_cn01_domains = 'cn-gdst-cm-01-15.bilivideo.com,cn-gdst-cm-01-06.bilivideo.com,cn-fjqz-cm-01-06.bilivideo.com,cn-jssz-cm-01-02.bilivideo.com,cn-jxnc-cm-01-02.bilivideo.com'
+
 # 检测到主播下播后延迟再次检测，单位：秒，避免特殊情况提早启动上传导致漏录
 delay = 10
 # 检测间隔时间，单位：秒
