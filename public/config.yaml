@@ -10,9 +10,9 @@ file_size: 2621440000
 ### 小于此大小的视频文件将会被过滤删除，单位MB
 filtering_threshold: 20
 
-### 自定义录播文件名模板, 支持变量 {streamer}:你在配置里设置的直播间名 %Y-%m-%d %H_%M_%S:创建文件的时间, {room_title}:当场直播间标题
+### 自定义录播文件名模板, 支持变量 {streamer}:你在配置里设置的直播间名 %Y-%m-%d %H_%M_%S:创建文件的时间, {title}:当场直播间标题
 ### 如果上传文件，文件名必须包含设定的模板名。其次，如果没有定义时间，文件分片可能会互相覆盖，所以推荐设置时间来避免分段文件名重复。
-#filename_prefix: '{streamer}%Y-%m-%d %H_%M_%S{room_title}'
+#filename_prefix: '{streamer}%Y-%m-%d %H_%M_%S{title}'
 
 #------上传------#
 ### 选择全局默认上传插件，Noop为不上传，但会执行后处理,可选bili_web，biliup-rs
@@ -59,6 +59,19 @@ check_sourcecode: 15
 #bili_liveapi: 'https://api.live.bilibili.com'
 ### CDN自动Fallback开关，默认为开启
 #bili_cdn_fallback: true
+### 强制替换ov-gotcha05的下载地址为指定的自选IP
+#bili_force_ov05: true
+#bili_force_ov05_ip: '163.171.197.234'
+### 强制替换cn-gotcha01（叔叔自建，理论上最稳定）为指定的自选域名组（可多个域名，请用逗号分隔）
+### 完整CDN列表请参考 https://rec.danmuji.org/dev/bilibili-cdn/ 中"B站视频云"的部分
+### 此功能需要设置bili_perfCDN为cn-gotcha01，并且设置bili_protocol为hls。
+### 此功能目前会和stream-gears冲突导致很多分段，请考虑使用ffmpeg录制
+### 如果海外机器需要使用此功能，需要在bili_liveapi中指定国内的反代API来获取cn-gotcha01的节点信息。
+### 海外机的玩法：配合一个国内的机器（例如便宜的腾讯云，阿里云等等）自建反代api.live.bilibili.com
+### 如果海外机到联通或者移动网络线路还不错，就可以参考https://rec.danmuji.org/dev/bilibili-cdn/ 选取一些联通或者移动的节点并填入下面
+### 每次会随机返回填入的其中一个线路，并且会自动判断所填入的节点是否可用
+#bili_force_cn01: true
+#bili_force_cn01_domains: 'cn-gdst-cm-01-15.bilivideo.com,cn-gdst-cm-01-06.bilivideo.com,cn-fjqz-cm-01-06.bilivideo.com,cn-jssz-cm-01-02.bilivideo.com,cn-jxnc-cm-01-02.bilivideo.com'
 
 #------YouTube------#
 ### 设置偏好的YouTube下载封装格式
@@ -89,19 +102,19 @@ streamers:
         url:
             - https://www.twitch.tv/innovation_s2
             - https://www.panda.tv/1160340
-        title: "{title}第一视角%Y-%m-%d{streamer}" ### 自定义标题的时间格式, {title}代表当场直播间标题 {streamers}代表在本config里面设置的主播名称
+        title: "{title}第一视角%Y-%m-%d{streamer}{url}" ### 自定义标题的时间格式, {title}代表当场直播间标题 {streamer}代表在本config里面设置的主播名称 {url}代表设置的该主播的第一条直播间链接
         tid: 171 ### 投稿分区码,171为电子竞技分区
         copyright: 2 ### 1为自制
         cover_path: /cover/up.jpg ###封面
-        description: |- ### 支持strftime, {title}, {streamers}占位符。注：此处请注意缩进，确保所有文字的缩进都与"视频简介"相同或者更多。
-         视频简介: {title} %Y-%m-%d %H:%M:%S {streamers}
-         喜欢就点个关注吧。
+        description: |- ### 支持strftime, {title}, {streamer}, {url}占位符。注：此处请注意缩进，确保所有文字的缩进都与"视频简介"相同或者更多。
+         视频简介: {title} %Y-%m-%d %H:%M:%S
+         {streamers}主播直播间地址：{url}
          ---
          Powered By biliup - Github: https://github.com/ForgQi/biliup
         dynamic: '#空间动态#'
         dtime: 14400 ### 设置延时发布时间，距离提交大于2小时，格式为时间戳
         uploader: biliup-rs ### 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
-        #filename_prefix: '{streamer}%Y-%m-%d %H_%M_%S{room_title}'  ### 覆盖全局自定义录播文件命名规则
+        #filename_prefix: '{streamer}%Y-%m-%d %H_%M_%S{title}'  ### 覆盖全局自定义录播文件命名规则
         user_cookie: cookies.json ### 使用指定的账号上传
         preprocessor: ### 开始下载直播时，将按自定义顺序执行自定义操作 注：preprocessor仅支持shell指令
             #- run: sh ./run.sh
