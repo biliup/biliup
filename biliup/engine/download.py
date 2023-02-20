@@ -8,6 +8,7 @@ import time
 import stream_gears
 
 from biliup.config import config
+from urllib.parse import urlparse
 
 logger = logging.getLogger('biliup')
 
@@ -66,6 +67,10 @@ class DownloadBase:
     def ffmpeg_download(self, filename):
         default_input_args = ['-headers', ''.join('%s: %s\r\n' % x for x in self.fake_headers.items()),
                               '-reconnect_streamed', '1', '-reconnect_delay_max', '20', '-rw_timeout', '20000000']
+        parsed_url = urlparse(self.raw_stream_url)
+        path = parsed_url.path
+        if '.m3u8' in path:
+                default_input_args += ['-max_reload', '2']
         args = ['ffmpeg', '-y', *default_input_args,
                 '-i', self.raw_stream_url, *self.default_output_args, *self.opt_args,
                 '-c', 'copy', '-f', self.suffix]
