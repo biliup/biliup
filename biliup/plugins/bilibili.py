@@ -82,6 +82,7 @@ class Bilibili(DownloadBase):
                         while i < 6: #测试随机到的节点是否可用
                             random_choice = random.choice(force_cn01_domain.split(","))
                             if i == 5:
+                                logger.error(f"强制替换hls流的cn-gotcha01的节点为指定节点失败啦")
                                 return False
                             i += 1
                             try: # 发起 HEAD 请求，并获取响应状态码
