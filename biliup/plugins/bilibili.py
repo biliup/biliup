@@ -78,8 +78,12 @@ class Bilibili(DownloadBase):
                         stream_info['base_url'] = re.sub(r'_bluray(?=.*m3u8)', "", stream_info['base_url'])
                     # 强制替换hls流的cn-gotcha01的节点为指定节点 注意：只有大陆ip才能获取到cn-gotcha01的节点。
                     if force_cn01 is True and force_cn01_domain is not None and "cn-gotcha01" in perf_cdn and protocol == "hls":
-                        while True: #测试随机到的节点是否可用
+                        i = 0               
+                        while i < 6: #测试随机到的节点是否可用
                             random_choice = random.choice(force_cn01_domain.split(","))
+                            if i == 5:
+                                return False
+                            i += 1
                             try: # 发起 HEAD 请求，并获取响应状态码
                                 status_code = s.head(f"https://{random_choice}{stream_info['base_url']}{url_info['extra']}", stream=True).status_code
                                 if status_code == 200: # 如果响应状态码是 200，跳出循环
