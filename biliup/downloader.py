@@ -21,13 +21,16 @@ def download(fname, url, **kwargs):
     return pg.start()
 
 
-def check_url(plugin, secs=15):
+def check_url(plugin, url_status, secs=15):
     try:
         if isinstance(plugin, BatchCheckBase):
             return (yield from plugin.check())
         for url in plugin.url_list:
             if plugin(f'检测{url}', url).check_stream():
                 yield url
+            if url_status[url] == 1:
+                logger.debug(f'{url}正在下载中，已跳过检测')
+                continue
             if url != plugin.url_list[-1]:
                 logger.debug('歇息会')
                 time.sleep(secs)
