@@ -1,6 +1,6 @@
 import logging
 import subprocess
-import time
+
 from . import plugins
 from .downloader import download, check_url
 from .engine import invert_dict, Plugin
@@ -95,8 +95,6 @@ class KernelFunc:
         	preprocessor(config['streamers'].get(name, {}).get('preprocessor'))
         logger.debug(f'{name}刚刚开播，去下载')
         self.url_status[url] = 1
-        self.start_time = time.localtime()
-        print("开始时间为" + self.start_time)
         return Event(DOWNLOAD, args=(name, url))
 
     @event_manager.register(CHECK_UPLOAD)
