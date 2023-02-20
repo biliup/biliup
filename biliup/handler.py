@@ -1,6 +1,6 @@
 import logging
 import subprocess
-
+import time
 from . import plugins
 from .downloader import download, check_url
 from .engine import invert_dict, Plugin
@@ -78,8 +78,8 @@ class KernelFunc:
     def singleton_check(self, platform):
         plugin = self.checker[platform]
         wait = config.get('checker_sleep') if config.get('checker_sleep') else 15
-        for url in check_url(plugin, secs=wait):
-            yield Event(TO_MODIFY, args=(url,))
+        for url in check_url(plugin, self.url_status[url], secs=wait):
+            yield Event(TO_MODIFY, args=(url,)
 
     @event_manager.register(TO_MODIFY)
     def modify(self, url):
@@ -90,10 +90,13 @@ class KernelFunc:
         if self.url_status[url] == 2:
             return logger.debug('正在上传稍后下载')
         name = self.inverted_index[url]
+
         if config['streamers'].get(name, {}).get('preprocessor', None):
         	preprocessor(config['streamers'].get(name, {}).get('preprocessor'))
         logger.debug(f'{name}刚刚开播，去下载')
         self.url_status[url] = 1
+        self.start_time = time.localtime()
+        print("开始时间为" + self.start_time)
         return Event(DOWNLOAD, args=(name, url))
 
     @event_manager.register(CHECK_UPLOAD)
