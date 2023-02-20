@@ -79,7 +79,7 @@ class KernelFunc:
         plugin = self.checker[platform]
         wait = config.get('checker_sleep') if config.get('checker_sleep') else 15
         for url in check_url(plugin, self.url_status, secs=wait):
-            yield Event(TO_MODIFY, args=(url,)
+            yield Event(TO_MODIFY, args=(url,))
 
     @event_manager.register(TO_MODIFY)
     def modify(self, url):
