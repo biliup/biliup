@@ -53,7 +53,7 @@ class DownloadBase:
 
     def download(self, filename):
         if self.filename_prefix:  # 判断是否存在自定义录播命名设置
-            filename = (self.filename_prefix.format(streamer=self.fname, room_title=self.room_title).encode('unicode-escape').decode()).encode().decode("unicode-escape")
+            filename = (self.filename_prefix.format(streamer=self.fname, title=self.room_title).encode('unicode-escape').decode()).encode().decode("unicode-escape")
         else:
             filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
         filename = get_valid_filename(filename)
@@ -142,11 +142,11 @@ class DownloadBase:
     @property
     def file_name(self):
         if self.filename_prefix:  # 判断是否存在自定义录播命名设置
-            filename = (self.filename_prefix.format(streamer=self.fname, room_title=self.room_title).encode('unicode-escape').decode()).encode().decode("unicode-escape")
+            filename = (self.filename_prefix.format(streamer=self.fname, title=self.room_title).encode('unicode-escape').decode()).encode().decode("unicode-escape")
         else:
             filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
         filename = get_valid_filename(filename)
-        return time.strftime(filename.encode("unicode-escape").decode()).encode().decode("unicode-escape")
+        return f'{(time.strftime(filename).encode("unicode-escape").decode()).encode().decode("unicode-escape")}'
 
     def close(self):
         pass
