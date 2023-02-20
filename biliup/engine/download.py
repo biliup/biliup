@@ -102,8 +102,6 @@ class DownloadBase:
         logger.info('开始下载%s：%s' % (self.__class__.__name__, self.fname))
         date = time.localtime()
         while i < 30:
-            if i == 5:
-                return False
             try:
                 ret = self.run()
             except:
