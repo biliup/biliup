@@ -97,8 +97,8 @@ class Bilibili(DownloadBase):
                     # 强制替换ov05 302redirect之后的真实地址为指定的域名或ip达到自选ov05节点的目的
                     if force_ov05 is True and force_ov05_ip is not None and "ov-gotcha05" in url_info['host']:
                         response = requests.get(url_info['host']+stream_info['base_url']+url_info['extra'] )
-                        self.raw_stream_url = re.sub(r"https://([a-z0-9]+)\.ourdvsss\.com", f"http://{ov05_ip}", response.url)
-                        logger.debug(f"将ov-gotcha05的节点ip替换为了{ov05_ip}")
+                        self.raw_stream_url = re.sub(r"https://([a-z0-9]+)\.ourdvsss\.com", f"http://{force_ov05_ip}", response.url)
+                        logger.debug(f"将ov-gotcha05的节点ip替换为了{force_ov05_ip}")
                         break
                     self.raw_stream_url = url_info['host'] + stream_info['base_url'] + url_info['extra']
                     logger.debug(f"获取到{url_info['host']}节点,找到了prefCDN")
