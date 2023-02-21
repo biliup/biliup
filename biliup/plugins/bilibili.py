@@ -32,10 +32,8 @@ class Bilibili(DownloadBase):
         }
         protocol = config.get('bili_protocol', 'stream')
         perf_cdn = config.get('bili_perfCDN')
-        force_source = config.get('bili_force_source', False)
-        force_ov05 = config.get('bili_force_ov05', False)
+        force_source = config.get('bili_force_source')
         force_ov05_ip = config.get('bili_force_ov05_ip')
-        force_cn01 = config.get('bili_force_cn01', False)
         force_cn01_domain = config.get('bili_force_cn01_domains')
         official_api_host = "https://api.live.bilibili.com"
 
@@ -67,43 +65,49 @@ class Bilibili(DownloadBase):
             stream_info = stream['format'][0]['codec'][0]
             self.raw_stream_url = stream_info['url_info'][0]['host'] + stream_info['base_url'] \
                                   + stream_info['url_info'][0]['extra']
+            find = False
             for url_info in stream_info['url_info']:
                 # 跳过p2pCDN
                 if 'mcdn' in url_info['host']:
                     continue
+                # 哔哩哔哩直播强制原画（仅限HLS流的 cn-gotcha01 CDN). 并且仅当主播有二压的时候才自动去掉m3u8的_bluray前缀，避免stream-gears的疯狂分段bug
+                if force_source is True and "cn-gotcha01" in url_info['extra'] and "_bluray" in stream_info['base_url']:
+                    stream_info['base_url'] = re.sub(r'_bluray(?=.*m3u8)', "", stream_info['base_url'])
+                    find = True
+                # 强制替换hls流的cn-gotcha01的节点为指定节点 注意：只有大陆ip才能获取到cn-gotcha01的节点。
+                if force_cn01_domain and "cn-gotcha01" in perf_cdn and protocol == "hls":
+                    i = 0
+                    while i < 6:  # 测试随机到的节点是否可用
+                        random_choice = random.choice(force_cn01_domain.split(","))
+                        i += 1
+                        try:  # 发起 HEAD 请求，并获取响应状态码
+                            status_code = s.head(f"https://{random_choice}{stream_info['base_url']}{url_info['extra']}",
+                                                 stream=True).status_code
+                            if status_code == 200:  # 如果响应状态码是 200，跳出循环
+                                break
+                        except requests.exceptions.ConnectionError:  # 如果发生连接异常，继续下一次循环
+                            logger.debug(f"随机到的域名 {random_choice} 无法访问，尝试重新发起随机。")
+                            continue
+                    else:
+                        logger.error(f"强制替换hls流的cn-gotcha01的节点为指定节点失败啦")
+                        return False
+                    logger.debug(f"随机到的域名 {random_choice} 返回了 200 状态码。")
+                    url_info['host'] = "https://" + random_choice
+                    find = True
+                # 强制替换ov05 302redirect之后的真实地址为指定的域名或ip达到自选ov05节点的目的
+                if force_ov05_ip and "ov-gotcha05" in url_info['host']:
+                    response = requests.get(url_info['host'] + stream_info['base_url'] + url_info['extra'])
+                    self.raw_stream_url = re.sub(r"https://([a-z0-9]+)\.ourdvsss\.com", f"http://{force_ov05_ip}",
+                                                 response.url)
+                    logger.debug(f"将ov-gotcha05的节点ip替换为了{force_ov05_ip}")
+                    break
                 # 匹配PerfCDN
                 if perf_cdn and perf_cdn in url_info['extra']:
-                    # 哔哩哔哩直播强制原画（仅限HLS流的 cn-gotcha01 CDN). 并且仅当主播有二压的时候才自动去掉m3u8的_bluray前缀，避免stream-gears的疯狂分段bug
-                    if force_source is True and "cn-gotcha01" in perf_cdn and "_bluray" in stream_info['base_url'] :
-                        stream_info['base_url'] = re.sub(r'_bluray(?=.*m3u8)', "", stream_info['base_url'])
-                    # 强制替换hls流的cn-gotcha01的节点为指定节点 注意：只有大陆ip才能获取到cn-gotcha01的节点。
-                    if force_cn01 is True and force_cn01_domain is not None and "cn-gotcha01" in perf_cdn and protocol == "hls":
-                        i = 0               
-                        while i < 6: #测试随机到的节点是否可用
-                            random_choice = random.choice(force_cn01_domain.split(","))
-                            if i == 5:
-                                logger.error(f"强制替换hls流的cn-gotcha01的节点为指定节点失败啦")
-                                return False
-                            i += 1
-                            try: # 发起 HEAD 请求，并获取响应状态码
-                                status_code = s.head(f"https://{random_choice}{stream_info['base_url']}{url_info['extra']}", stream=True).status_code
-                                if status_code == 200: # 如果响应状态码是 200，跳出循环
-                                    break
-                            except requests.exceptions.ConnectionError: # 如果发生连接异常，继续下一次循环
-                                logger.debug(f"随机到的域名 {random_choice} 无法访问，尝试重新发起随机。")   
-                                continue
-                        logger.debug(f"随机到的域名 {random_choice} 返回了 200 状态码。")   
-                        url_info['host'] = "https://" + random_choice
-                    # 强制替换ov05 302redirect之后的真实地址为指定的域名或ip达到自选ov05节点的目的
-                    if force_ov05 is True and force_ov05_ip is not None and "ov-gotcha05" in url_info['host']:
-                        response = requests.get(url_info['host']+stream_info['base_url']+url_info['extra'] )
-                        self.raw_stream_url = re.sub(r"https://([a-z0-9]+)\.ourdvsss\.com", f"http://{force_ov05_ip}", response.url)
-                        logger.debug(f"将ov-gotcha05的节点ip替换为了{force_ov05_ip}")
-                        break
-                    self.raw_stream_url = url_info['host'] + stream_info['base_url'] + url_info['extra']
+                    find = True
                     logger.debug(f"获取到{url_info['host']}节点,找到了prefCDN")
-                    break
                 self.raw_stream_url = url_info['host'] + stream_info['base_url'] + url_info['extra']
+                if find:
+                    break
             if self.bili_cdn_fallback is False:
                 return True
             stream_info['url_info'].reverse()

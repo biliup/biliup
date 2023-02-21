@@ -151,7 +151,7 @@ class DownloadBase:
         else:
             filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
         filename = get_valid_filename(filename)
-        return f'{(time.strftime(filename).encode("unicode-escape").decode()).encode().decode("unicode-escape")}'
+        return time.strftime(filename.encode("unicode-escape").decode()).encode().decode("unicode-escape")
 
     def close(self):
         pass
