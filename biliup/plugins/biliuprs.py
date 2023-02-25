@@ -44,6 +44,8 @@ class BiliWeb(UploadBase):
             line = stream_gears.UploadLine.CosInternal
         tag = ','.join(self.tags)
         source = self.data["url"] if self.copyright == 2 else ""
+        if self.data["live_cover_path"]:
+            self.cover_path = self.data["live_cover_path"] 
         cover = self.cover_path if self.cover_path is not None else ""
         dtime = None
         if self.dtime:

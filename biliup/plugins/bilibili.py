@@ -1,4 +1,5 @@
 import requests
+import os
 import re
 import random
 from . import match1, logger
@@ -16,6 +17,7 @@ class Bilibili(DownloadBase):
             self.fake_headers['cookie'] = config.get('user', {}).get('bili_cookie')
         self.customAPI_use_cookie = config.get('user', {}).get('customAPI_use_cookie')
         self.bili_cdn_fallback = config.get('bili_cdn_fallback', True)
+        self.use_live_cover = config.get('use_live_cover', False)
 
     def check_stream(self):
         # 预读配置
@@ -36,7 +38,6 @@ class Bilibili(DownloadBase):
         force_ov05_ip = config.get('bili_force_ov05_ip')
         force_cn01_domain = config.get('bili_force_cn01_domains')
         official_api_host = "https://api.live.bilibili.com"
-
         with requests.Session() as s:
             s.headers = self.fake_headers.copy()
             # 获取直播状态与房间标题
@@ -49,6 +50,14 @@ class Bilibili(DownloadBase):
             if room_info['code'] != 0 or room_info['data']['room_info']['live_status'] != 1:
                 logger.debug(room_info['message'])
                 return False
+            if self.use_live_cover is True: # 获取直播封面并保存到bili_cover_cache目录下
+                try:
+                    room_id = room_info['data']['room_info']['room_id']
+                    cover_url = room_info['data']['room_info']['cover']
+                    live_start_time = room_info['data']['room_info']['live_start_time']
+                    self.live_cover_path = get_live_cover(room_id, live_start_time, cover_url)
+                except:
+                    logger.error(f"获取直播封面失败")
             params['room_id'] = room_info['data']['room_info']['room_id']
             self.room_title = room_info['data']['room_info']['title']
             custom_api = config.get('bili_liveapi') is not None
@@ -132,3 +141,20 @@ def get_play_info(s, custom_api, official_api_host, params):
         except requests.exceptions.ConnectionError:
             logger.error(f"{custom_api_host}连接失败，尝试回退至官方Api")
     return s.get(official_api_host + '/xlive/web-room/v2/index/getRoomPlayInfo', params=params, timeout=5).json()
+
+def get_live_cover(room_id, live_start_time, cover_url):
+    headers = {
+        "origin": "https://www.bilibili.com",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36 Edg/110.0.1587.41"
+    }
+    response = requests.get(cover_url, headers=headers, timeout=5)
+    save_dir = f'bili_cover_cache/'
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    live_cover_path = f'{save_dir}{room_id}_{live_start_time}.png'
+    if os.path.exists(live_cover_path):
+        return live_cover_path
+    else:
+        with open(live_cover_path, 'wb') as f:
+            f.write(response.content)       
+            return live_cover_path 
