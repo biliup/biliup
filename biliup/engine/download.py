@@ -24,12 +24,13 @@ class DownloadBase:
         self.url = url
         self.suffix = suffix
         self.title = None
+        self.live_cover_path = None
         self.downloader = config.get('downloader', 'stream-gears')
         # ffmpeg.exe -i  http://vfile1.grtn.cn/2018/1542/0254/3368/154202543368.ssm/154202543368.m3u8
         # -c copy -bsf:a aac_adtstoasc -movflags +faststart output.mp4
         self.raw_stream_url = None
         self.filename_prefix = config.get('filename_prefix')
-
+        self.use_live_cover = config.get('use_live_cover')
         self.opt_args = opt_args
         self.fake_headers = {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -131,6 +132,7 @@ class DownloadBase:
             'url': self.url,
             'title': self.room_title,
             'date': date,
+            'live_cover_path': self.live_cover_path,
         }
 
     @staticmethod
