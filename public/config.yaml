@@ -49,7 +49,7 @@ check_sourcecode: 15
 #huyacdn: AL
 
 #------哔哩哔哩------#
-### 获取BILIBILI直播间封面并作为投稿封面。（直播封面将会保存于bili_cover_cache下，请自行定期删除）
+### 获取BILIBILI直播间封面并作为投稿封面。此封面优先级低于单个主播指定的自定义封面。（直播封面将会保存于bili_cover_cache下，请自行定期删除）
 #use_live_cover: true
 ### 哔哩哔哩直播流协议.可选 stream（Flv）、hls，默认为stream
 #bili_protocol: stream
@@ -116,7 +116,7 @@ streamers:
         uploader: biliup-rs ### 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
         #filename_prefix: '{streamer}%Y-%m-%d %H_%M_%S{title}'  ### 覆盖全局自定义录播文件命名规则
         user_cookie: cookies.json ### 使用指定的账号上传
-        #use_live_cover: true ### 获取BILIBILI直播间封面并作为投稿封面。
+        #use_live_cover: true ### 获取BILIBILI直播间封面并作为投稿封面。此封面优先级低于单个主播指定的自定义封面。
         preprocessor: ### 开始下载直播时，将按自定义顺序执行自定义操作 注：preprocessor仅支持shell指令
             #- run: sh ./run.sh
         postprocessor: ### 上传完成后，将按自定义顺序执行自定义操作
