@@ -26,7 +26,7 @@ def upload(data):
         date = data.get("date", time.localtime())
         title = data.get('title', index)
         url = data.get('url')
-        live_cover_path = data.get('live_cover_path')
+        live_cover_path = data.get('live_cover_path', None)
         data["format_title"] = custom_fmtstr(context.get('title', f'%Y.%m.%d{index}'), date, title, streamer, url)
         if context.get('description'):
             context['description'] = custom_fmtstr(context.get('description'), date, title, streamer, url)
