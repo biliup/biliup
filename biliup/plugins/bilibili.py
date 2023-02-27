@@ -1,8 +1,11 @@
+import asyncio
+
 import requests
 import re
 import random
 from . import match1, logger
 from biliup.config import config
+from .Danmaku.danmaku_main import Danmaku
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 
@@ -118,6 +121,16 @@ class Bilibili(DownloadBase):
                     continue
                 break
         return True
+
+    def danmaku_download_start(self, filename):
+        if self.huya_danmaku:
+            self.danmaku = None
+            self.danmaku = Danmaku(filename, self.url)
+            self.danmaku.start()
+
+    def danmaku_download_stop(self):
+        if self.huya_danmaku:
+            asyncio.run(self.danmaku.stop())
 
 
 def get_play_info(s, custom_api, official_api_host, params):
