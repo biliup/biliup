@@ -83,30 +83,33 @@ class DanmakuClient:
         tree = etree.parse(self.__filename, parser=parser)
         root = tree.getroot()
         msg_i = 0
-        msg_col = {'1': '16717077', '2': '2000880', '3': '8046667', '4': '16744192', '5': '10172916', '6': '16738740'}
+        msg_col = {'0': '16777215', '1': '16717077', '2': '2000880', '3': '8046667', '4': '16744192', '5': '10172916',
+                   '6': '16738740'}
         while not self.__stop:
-            try:
-                m = await self.__dm_queue.get()
-                if m['msg_type'] == 'danmaku':
-                    # print(f'{m["name"]}：{m["content"]}')
-                    d = etree.SubElement(root, 'd')
-                    if 'col' in m:
-                        color = msg_col[m["col"]]
-                    else:
-                        color = '16777215'
-                    msg_time = format(time.time() - self.__starttime, '.3f')
-                    d.set('p', f"{msg_time},1,25,{color},0,0,0,0")
-                    d.text = m["content"]
+            # try:
+            m = await self.__dm_queue.get()
+            # print(m)
+            if m['msg_type'] == 'danmaku':
+                d = etree.SubElement(root, 'd')
+                if 'col' in m:
+                    color = msg_col[m["col"]]
+                elif 'color' in m:
+                    color = m["color"]
+                # else:
+                #     color = '16777215'
+                msg_time = format(time.time() - self.__starttime, '.3f')
+                d.set('p', f"{msg_time},1,25,{color},0,0,0,0")
+                d.text = m["content"]
 
-                    if msg_i >= 20:
-                        etree.indent(root, "\t")
-                        tree.write(self.__filename, encoding="UTF-8", xml_declaration=True, pretty_print=True)
-                        msg_i = 0
-                    else:
-                        msg_i = msg_i + 1
-
-            except Exception as Error:
-                print(f"捕获到异常：{Error}")
+                if msg_i >= 20:
+                    etree.indent(root, "\t")
+                    tree.write(self.__filename, encoding="UTF-8", xml_declaration=True, pretty_print=True)
+                    msg_i = 0
+                else:
+                    msg_i = msg_i + 1
+            #
+            # except Exception as Error:
+            #     print(f"捕获到异常：{Error}")
 
     async def start(self):
         await self.init_ws()

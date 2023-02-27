@@ -74,8 +74,8 @@ class Huya:
                     color = 16777215
 
         if name != "":
-            msg = {"name": name, "col": f"{color:06x}", "content": content, "msg_type": "danmaku"}
-        else:
-            msg = {"name": "", "content": "", "msg_type": "other"}
-        msgs.append(msg)
+            msg = {"name": name, "color": f"{color}", "content": content, "msg_type": "danmaku"}
+        # else:
+        #     msg = {"name": "", "content": "", "msg_type": "other"}
+            msgs.append(msg)
         return msgs

@@ -19,6 +19,7 @@ class Bilibili(DownloadBase):
             self.fake_headers['cookie'] = config.get('user', {}).get('bili_cookie')
         self.customAPI_use_cookie = config.get('user', {}).get('customAPI_use_cookie')
         self.bili_cdn_fallback = config.get('bili_cdn_fallback', True)
+        self.bilibili_danmaku = config.get('bilibili_danmaku', False)
 
     def check_stream(self):
         # 预读配置
@@ -123,13 +124,13 @@ class Bilibili(DownloadBase):
         return True
 
     def danmaku_download_start(self, filename):
-        if self.huya_danmaku:
+        if self.bilibili_danmaku:
             self.danmaku = None
             self.danmaku = Danmaku(filename, self.url)
             self.danmaku.start()
 
     def danmaku_download_stop(self):
-        if self.huya_danmaku:
+        if self.bilibili_danmaku:
             asyncio.run(self.danmaku.stop())
 
 
