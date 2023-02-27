@@ -1,11 +1,18 @@
+import asyncio
+import subprocess
+import sys
 from collections import namedtuple
+import time
+from urllib.parse import urlparse
+
 import requests
 
 from ykdl.util.match import match1
 from biliup.config import config
 from ..engine.decorators import Plugin
-from ..engine.download import DownloadBase
+from ..engine.download import DownloadBase, get_valid_filename, stream_gears_download
 from ..plugins import logger
+from .Danmaku.danmaku_main import Danmaku
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?douyu\.com')
@@ -46,9 +53,18 @@ class Douyu(DownloadBase):
         Extractor = namedtuple('Extractor', ['vid', 'logger'])
         ub98484234(js_enc, Extractor(vid, logger), params)
         params['rate'] = 0
-        html_content = requests.post(f'https://www.douyu.com/lapi/live/getH5Play/{vid}', headers=self.fake_headers, params=params).json()
+        html_content = requests.post(f'https://www.douyu.com/lapi/live/getH5Play/{vid}', headers=self.fake_headers,
+                                     params=params).json()
         live_data = html_content["data"]
         if type(live_data) is dict:
             self.raw_stream_url = f"{live_data.get('rtmp_url')}/{live_data.get('rtmp_live')}"
             self.room_title = roominfo['room_name']
             return True
+
+    def danmaku_download_start(self, filename):
+        self.danmaku = None
+        self.danmaku = Danmaku(filename, self.url)
+        self.danmaku.start()
+
+    def danmaku_download_stop(self):
+        asyncio.run(self.danmaku.stop())
