@@ -12,6 +12,7 @@ import aiohttp
 
 from .douyu import Douyu
 from .huya import Huya
+from .bilibili import Bilibili
 
 __all__ = ['DanmakuClient']
 
@@ -33,7 +34,7 @@ class DanmakuClient:
             self.__url = url
         else:
             self.__url = 'http://' + url
-        for u, s in {'douyu.com': Douyu, 'huya.com': Huya}.items():
+        for u, s in {'douyu.com': Douyu, 'huya.com': Huya, 'live.bilibili.com': Bilibili}.items():
             if re.match(r'^(?:http[s]?://)?.*?%s/(.+?)$' % u, url):
                 self.__site = s
                 self.__u = u
@@ -82,17 +83,20 @@ class DanmakuClient:
         tree = etree.parse(self.__filename, parser=parser)
         root = tree.getroot()
         msg_i = 0
-        msg_col = {'1': '16717077', '2': '2000880', '3': '8046667', '4': '16744192', '5': '10172916', '6': '16738740'}
+        msg_col = {'0': '16777215', '1': '16717077', '2': '2000880', '3': '8046667', '4': '16744192', '5': '10172916',
+                   '6': '16738740'}
         while not self.__stop:
             try:
                 m = await self.__dm_queue.get()
+            # print(m)
                 if m['msg_type'] == 'danmaku':
-                    # print(f'{m["name"]}：{m["content"]}')
                     d = etree.SubElement(root, 'd')
                     if 'col' in m:
                         color = msg_col[m["col"]]
-                    else:
-                        color = '16777215'
+                    elif 'color' in m:
+                        color = m["color"]
+                    # else:
+                    #     color = '16777215'
                     msg_time = format(time.time() - self.__starttime, '.3f')
                     d.set('p', f"{msg_time},1,25,{color},0,0,0,0")
                     d.text = m["content"]

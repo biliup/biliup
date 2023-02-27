@@ -35,15 +35,17 @@ class Douyu:
     def decode_msg(data):
         msgs = []
         for msg in re.findall(b'(type@=.*?)\x00', data):
+            msga = {}
             try:
                 msg = msg.replace(b'@=', b'":"').replace(b'/', b'","')
                 msg = msg.replace(b'@A', b'@').replace(b'@S', b'/')
                 msg = json.loads((b'{"' + msg[:-2] + b'}').decode('utf8', 'ignore'))
-                msg['name'] = msg.get('nn', '')
-                msg['content'] = msg.get('txt', '')
-                msg['msg_type'] = {'dgb': 'gift', 'chatmsg': 'danmaku',
+                msga['name'] = msg.get('nn', '')
+                msga['content'] = msg.get('txt', '')
+                msga['msg_type'] = {'dgb': 'gift', 'chatmsg': 'danmaku',
                                    'uenter': 'enter'}.get(msg['type'], 'other')
-                msgs.append(msg)
+                msga['col'] = msg.get('col', '0')
+                msgs.append(msga)
             except Exception as Error:
                 print(f"捕获到异常：{Error}")
         return msgs
