@@ -43,14 +43,18 @@ check_sourcecode: 15
 #------斗鱼------#
 ### 如遇到斗鱼录制卡顿可以尝试切换线路，tct-h5（备用线路5），ali-h5（备用线路6），akm-h5（主线路1）
 #douyucdn: tct-h5
+# 录制斗鱼弹幕，只有使用FFMPEG作为下载器才支持，默认关闭
 #douyu_danmaku: false
 
 #------虎牙------#
 ### 如遇到虎牙录制卡顿可以尝试切换线路，AL, HW, TX, WS
 #huyacdn: AL
+# 录制虎牙弹幕，只有使用FFMPEG作为下载器才支持，默认关闭
 #huya_danmaku: false
 
-#------哔哩哔哩------#
+#------哔哩哔哩------#\
+# 录制BILIBILI弹幕，只有使用FFMPEG作为下载器才支持，默认关闭
+# bilibili_danmaku: false
 ### 哔哩哔哩直播流协议.可选 stream（Flv）、hls，默认为stream
 #bili_protocol: stream
 ### 哔哩哔哩直播优选CDN，默认无
