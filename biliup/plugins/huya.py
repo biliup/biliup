@@ -16,6 +16,7 @@ from ..engine.download import DownloadBase
 class Huya(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
+        self.huya_danmaku = config.get('huya_danmaku', False)
 
     def check_stream(self):
         logger.debug(self.fname)
@@ -53,9 +54,11 @@ class Huya(DownloadBase):
             return True
 
     def danmaku_download_start(self, filename):
-        self.danmaku = None
-        self.danmaku = Danmaku(filename, self.url)
-        self.danmaku.start()
+        if self.huya_danmaku:
+            self.danmaku = None
+            self.danmaku = Danmaku(filename, self.url)
+            self.danmaku.start()
 
     def danmaku_download_stop(self):
-        asyncio.run(self.danmaku.stop())
+        if self.huya_danmaku:
+            asyncio.run(self.danmaku.stop())

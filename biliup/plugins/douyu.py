@@ -19,6 +19,7 @@ from .Danmaku.danmaku_main import Danmaku
 class Douyu(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
+        self.douyu_danmaku = config.get('douyu_danmaku', False)
 
     def check_stream(self):
         logger.debug(self.fname)
@@ -62,9 +63,11 @@ class Douyu(DownloadBase):
             return True
 
     def danmaku_download_start(self, filename):
-        self.danmaku = None
-        self.danmaku = Danmaku(filename, self.url)
-        self.danmaku.start()
+        if self.douyu_danmaku:
+            self.danmaku = None
+            self.danmaku = Danmaku(filename, self.url)
+            self.danmaku.start()
 
     def danmaku_download_stop(self):
-        asyncio.run(self.danmaku.stop())
+        if self.douyu_danmaku:
+            asyncio.run(self.danmaku.stop())
