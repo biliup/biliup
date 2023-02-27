@@ -87,7 +87,7 @@ class DanmakuClient:
             try:
                 m = await self.__dm_queue.get()
                 if m['msg_type'] == 'danmaku':
-                    print(f'{m["name"]}：{m["content"]}')
+                    # print(f'{m["name"]}：{m["content"]}')
                     d = etree.SubElement(root, 'd')
                     if 'col' in m:
                         color = msg_col[m["col"]]
