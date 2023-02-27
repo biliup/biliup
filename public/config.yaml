@@ -43,10 +43,12 @@ check_sourcecode: 15
 #------斗鱼------#
 ### 如遇到斗鱼录制卡顿可以尝试切换线路，tct-h5（备用线路5），ali-h5（备用线路6），akm-h5（主线路1）
 #douyucdn: tct-h5
+#douyu_danmaku: false
 
 #------虎牙------#
 ### 如遇到虎牙录制卡顿可以尝试切换线路，AL, HW, TX, WS
 #huyacdn: AL
+#huya_danmaku: false
 
 #------哔哩哔哩------#
 ### 哔哩哔哩直播流协议.可选 stream（Flv）、hls，默认为stream
@@ -133,12 +135,26 @@ streamers:
 ### 在填了cookies的情况下优先使用cookies上传，如需使用用户名密码上传请注释掉cookies
 #user:
     #------哔哩哔哩------#
+    #------哔哩哔哩获取直播流用COOKIE------#
     ### 参照https://github.com/BililiveRecorder/BililiveRecorder/issues/263
     #bili_cookie: ''
     ### 重要！！！
     ###是否将cookie传入第三方API。将Cookie传入未知的第三方API有几率泄露帐号登录信息。
     ###在开启了自定义Cookie（bili_cookie）又同时设置了第三方API（bili_liveapi）的情况下，如果打开了允许第三方API使用Cookie，那么就使用第三方API，如果没有允许（默认），那么设置的第三方API就不生效
     #customAPI_use_cookie : False
+
+    #------已过时，无视我------#
+        #    cookies:
+        #       SESSDATA: your SESSDATA
+        #       bili_jct: your bili_jct
+        #       DedeUserID__ckMd5: your ckMd5
+        #       DedeUserID: your DedeUserID
+        #    access_token: your access_key
+        # account:
+        #     username: your usrname
+        #     password: your password
+    #    app_key: bca7e84c2d947ac6 ### 若账号密码方式无法登录可尝试更改此值
+    #    appsec: 60698ba2f68e01ce44738920a0ffe768
 
     #------抖音------#
     ### 如需要录制抖音请在此填入cookie需要__ac_nonce与__ac_signature的值
@@ -154,17 +170,7 @@ streamers:
     ### 使用Cookies登陆YouTube帐号，可用于下载会限，私享等未登录账号无法访问的内容。请使用Netscape 格式的 Cookies 文本路径。
     ### 可以使用Chrome插件Get cookies.txt来生成txt文件。
     #youtube_cookie: 'cookiejar.txt'
-#    cookies:
-#       SESSDATA: your SESSDATA
-#       bili_jct: your bili_jct
-#       DedeUserID__ckMd5: your ckMd5
-#       DedeUserID: your DedeUserID
-#    access_token: your access_key
-    # account:
-    #     username: your usrname
-    #     password: your password
-#    app_key: bca7e84c2d947ac6 ### 若账号密码方式无法登录可尝试更改此值
-#    appsec: 60698ba2f68e01ce44738920a0ffe768
+
 
 
 #########日志输出配置#########

@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import html
 import json
@@ -5,6 +6,7 @@ import json
 import requests
 
 from biliup.config import config
+from .Danmaku.danmaku_main import Danmaku
 from ..engine.decorators import Plugin
 from ..plugins import match1, logger
 from ..engine.download import DownloadBase
@@ -14,6 +16,7 @@ from ..engine.download import DownloadBase
 class Huya(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
+        self.huya_danmaku = config.get('huya_danmaku', False)
 
     def check_stream(self):
         logger.debug(self.fname)
@@ -49,3 +52,13 @@ class Huya(DownloadBase):
             self.raw_stream_url = html.unescape(absurl) + "&ratio=" + str(ratio)
             self.room_title = json.loads(huya)['data'][0]['gameLiveInfo']['introduction']
             return True
+
+    def danmaku_download_start(self, filename):
+        if self.huya_danmaku:
+            self.danmaku = None
+            self.danmaku = Danmaku(filename, self.url)
+            self.danmaku.start()
+
+    def danmaku_download_stop(self):
+        if self.huya_danmaku:
+            asyncio.run(self.danmaku.stop())
