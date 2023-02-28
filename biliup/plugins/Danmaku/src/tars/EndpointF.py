@@ -13,7 +13,7 @@
 # specific language governing permissions and limitations under the License.
 #
 
-from core import tarscore
+from biliup.plugins.Danmaku.src.tars.core import tarscore
 
 
 class EndpointF(tarscore.struct):
