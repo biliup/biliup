@@ -6,7 +6,12 @@
 - ⚠️需要手动操作的更新信息
 
 =======
-## 0.4.5 
+## 0.4.7 
+- 更新时间：2023.02.28
+- 🔧修复0.4.5的BUG并添加缺失的依赖[@haha114514](https://github.com/haha114514)
+
+=======
+## 0.4.5 ⚠️⚠️有重大问题，请勿使用该版本。
 - 更新时间：2023.02.28
 - 💡新增斗鱼，虎牙，B站的弹幕录制功能，默认关闭，需要在config文件中开启，只支持FFMPEG（目前）[@KNaiFen](https://github.com/KNaiFen) （感谢：[THMonster/danmaku](https://github.com/THMonster/danmaku) ）
 - 🔧修复了BILIBILI录制中OV05节点的BUG[@haha114514](https://github.com/haha114514)
