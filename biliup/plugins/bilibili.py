@@ -50,7 +50,7 @@ class Bilibili(DownloadBase):
             if room_info['code'] != 0 or room_info['data']['room_info']['live_status'] != 1:
                 logger.debug(room_info['message'])
                 return False
-            if self.use_live_cover is True: # 获取直播封面并保存到bili_cover_cache目录下
+            if self.use_live_cover is True: # 获取直播封面并保存到cover目录下
                 try:
                     room_id = room_info['data']['room_info']['room_id']
                     cover_url = room_info['data']['room_info']['cover']
@@ -148,7 +148,7 @@ def get_live_cover(room_id, live_start_time, cover_url):
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36 Edg/110.0.1587.41"
     }
     response = requests.get(cover_url, headers=headers, timeout=5)
-    save_dir = f'bili_cover_cache/'
+    save_dir = f'cover/'
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     live_cover_path = f'{save_dir}{room_id}_{live_start_time}.png'
