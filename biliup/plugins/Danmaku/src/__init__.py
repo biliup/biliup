@@ -101,7 +101,7 @@ class DanmakuClient:
                     d.set('p', f"{msg_time},1,25,{color},0,0,0,0")
                     d.text = m["content"]
 
-                    if msg_i >= 20:
+                    if msg_i >= 5:
                         etree.indent(root, "\t")
                         tree.write(self.__filename, encoding="UTF-8", xml_declaration=True, pretty_print=True)
                         msg_i = 0
