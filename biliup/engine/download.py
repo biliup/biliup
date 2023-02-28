@@ -1,16 +1,16 @@
+import asyncio
 import logging
 import os
 import re
 import subprocess
 import sys
+import threading
 import time
+from urllib.parse import urlparse
 
 import stream_gears
 
 from biliup.config import config
-from urllib.parse import urlparse
-
-from biliup.plugins.Danmaku.danmaku_main import Danmaku
 
 logger = logging.getLogger('biliup')
 
@@ -63,11 +63,13 @@ class DownloadBase:
         else:
             filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
         filename = get_valid_filename(filename)
+        fmtname = time.strftime(filename.encode("unicode-escape").decode()).encode().decode("unicode-escape")
+        threading.Thread(target=asyncio.run, args=(self.danmaku_download_start(fmtname),)).start()
         if self.downloader == 'stream-gears':
             stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
                                   config.get('file_size'))
         else:
-            self.ffmpeg_download(filename)
+            self.ffmpeg_download(fmtname)
 
     def ffmpeg_download(self, filename):
         default_input_args = ['-headers', ''.join('%s: %s\r\n' % x for x in self.fake_headers.items()),
@@ -81,13 +83,12 @@ class DownloadBase:
                 '-c', 'copy', '-f', self.suffix]
         if config.get('segment_time'):
             args += ['-f', 'segment',
-                     f'{(time.strftime(filename).encode("unicode-escape").decode()).encode().decode("unicode-escape")} part-%03d.{self.suffix}']
+                     f'{filename} part-%03d.{self.suffix}']
         else:
             args += [
-                f'{(time.strftime(filename).encode("unicode-escape").decode()).encode().decode("unicode-escape")}.{self.suffix}.part']
+                f'{filename}.{self.suffix}.part']
 
         proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        self.danmaku_download_start(filename)
         try:
             with proc.stdout as stdout:
                 for line in iter(stdout.readline, b''):  # b'\n'-separated lines
@@ -95,18 +96,13 @@ class DownloadBase:
                     print(decode_line, end='', file=sys.stderr)
                     logger.debug(decode_line.rstrip())
             retval = proc.wait()
-            self.danmaku_download_stop()
         except KeyboardInterrupt:
-            self.danmaku_download_stop()
             if sys.platform != 'win32':
                 proc.communicate(b'q')
             raise
         return retval
 
-    def danmaku_download_start(self, filename):
-        pass
-
-    def danmaku_download_stop(self):
+    async def danmaku_download_start(self, filename):
         pass
 
     def run(self):

@@ -26,12 +26,12 @@ import threading
 import time
 
 # from __packet import ResponsePacket
-from biliup.plugins.Danmaku.src.tars.__TimeoutQueue import ReqMessage
-from biliup.plugins.Danmaku.src.tars.__logger import tarsLogger
-from biliup.plugins.Danmaku.src.tars.__packet import RequestPacket
-from biliup.plugins.Danmaku.src.tars.__util import util
-from biliup.plugins.Danmaku.src.tars import exception
-from biliup.plugins.Danmaku.src.tars.exception import TarsException
+from biliup.plugins.Danmaku.tars.__TimeoutQueue import ReqMessage
+from biliup.plugins.Danmaku.tars.__logger import tarsLogger
+from biliup.plugins.Danmaku.tars.__packet import RequestPacket
+from biliup.plugins.Danmaku.tars.__util import util
+from biliup.plugins.Danmaku.tars import exception
+from biliup.plugins.Danmaku.tars.exception import TarsException
 
 
 class ServantProxy(object):

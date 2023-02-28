@@ -1,12 +1,12 @@
-import asyncio
+import os
+import random
+import re
 
 import requests
-import os
-import re
-import random
-from . import match1, logger
+
 from biliup.config import config
-from .Danmaku.danmaku_main import Danmaku
+from . import match1, logger
+from biliup.plugins.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 
@@ -132,15 +132,17 @@ class Bilibili(DownloadBase):
                 break
         return True
 
-    def danmaku_download_start(self, filename):
+    async def danmaku_download_start(self, filename):
         if self.bilibili_danmaku:
-            self.danmaku = None
-            self.danmaku = Danmaku(filename, self.url)
-            self.danmaku.start()
+            logger.info("开始弹幕录制")
+            self.danmaku = DanmakuClient(self.url, filename + ".xml")
+            await self.danmaku.start()
 
-    def danmaku_download_stop(self):
+    def close(self):
         if self.bilibili_danmaku:
-            asyncio.run(self.danmaku.stop())
+            self.danmaku.stop()
+            logger.info("结束弹幕录制")
+            # asyncio.run(self.danmaku.stop())
 
 
 def get_play_info(s, custom_api, official_api_host, params):

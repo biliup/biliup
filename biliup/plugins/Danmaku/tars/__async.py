@@ -27,9 +27,9 @@ import threading
 
 from urllib3.connectionpool import xrange
 
-from biliup.plugins.Danmaku.src.tars.__logger import tarsLogger
-from biliup.plugins.Danmaku.src.tars.__packet import ResponsePacket
-from biliup.plugins.Danmaku.src.tars.__servantproxy import ServantProxy
+from biliup.plugins.Danmaku.tars.__logger import tarsLogger
+from biliup.plugins.Danmaku.tars.__packet import ResponsePacket
+from biliup.plugins.Danmaku.tars.__servantproxy import ServantProxy
 
 
 class AsyncProcThread:
