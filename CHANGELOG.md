@@ -5,11 +5,13 @@
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+=======
 ## 0.4.5 
--  更新时间：2023.02.27
-- 💡新增获取BILIBILI直播间封面并作为投稿封面的设置。 [@haha114514](https://github.com/haha114514)
-- ⚠️上一条由于为Config新增了一些设置，如需使用相关功能请参考最新的config示例添加缺失的部分。
-- 🔧修正一些错误。[@ForgQi](https://github.com/ForgQi)
+- 更新时间：2023.02.28
+- 💡新增斗鱼，虎牙，B站的弹幕录制功能，默认关闭，需要在config文件中开启，只支持FFMPEG（目前）[@KNaiFen](https://github.com/KNaiFen) （感谢：[THMonster/danmaku](https://github.com/THMonster/danmaku) ）
+- 🔧修复了BILIBILI录制中OV05节点的BUG[@haha114514](https://github.com/haha114514)
+- ⚠️由于为Config新增了弹幕录制的设置，如需使用相关功能请参考最新的config示例添加缺失的部分。
+- 🔧优化代码[@ForgQi](https://github.com/ForgQi)
 
 ## 0.4.4 ⚠️⚠️本次修改了config内部分参数的名称，请需要使用的用户参考最新的config示例修改
 -  更新时间：2023.02.20

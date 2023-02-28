@@ -36,11 +36,12 @@ class UploadBase:
         if len(file_list) == 0:
             return False
         for r in file_list:
-            file_size = os.path.getsize(r) / 1024 / 1024
-            threshold = self.data.get('threshold') if self.data.get('threshold') else 2
-            if file_size <= threshold:
-                os.remove(r)
-                logger.info('过滤删除-' + r)
+            if os.path.splitext(r)[1] != '.xml':
+                file_size = os.path.getsize(r) / 1024 / 1024
+                threshold = self.data.get('threshold') if self.data.get('threshold') else 2
+                if file_size <= threshold:
+                    os.remove(r)
+                    logger.info('过滤删除-' + r)
         file_list = UploadBase.file_list(index)
         if len(file_list) == 0:
             logger.info('视频过滤后无文件可传')

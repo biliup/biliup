@@ -1,9 +1,12 @@
+import asyncio
+
 import requests
 import os
 import re
 import random
 from . import match1, logger
 from biliup.config import config
+from .Danmaku.danmaku_main import Danmaku
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 
@@ -18,6 +21,7 @@ class Bilibili(DownloadBase):
         self.customAPI_use_cookie = config.get('user', {}).get('customAPI_use_cookie')
         self.bili_cdn_fallback = config.get('bili_cdn_fallback', True)
         self.use_live_cover = config.get('use_live_cover', False)
+        self.bilibili_danmaku = config.get('bilibili_danmaku', False)
 
     def check_stream(self):
         # 预读配置
@@ -127,6 +131,16 @@ class Bilibili(DownloadBase):
                     continue
                 break
         return True
+
+    def danmaku_download_start(self, filename):
+        if self.bilibili_danmaku:
+            self.danmaku = None
+            self.danmaku = Danmaku(filename, self.url)
+            self.danmaku.start()
+
+    def danmaku_download_stop(self):
+        if self.bilibili_danmaku:
+            asyncio.run(self.danmaku.stop())
 
 
 def get_play_info(s, custom_api, official_api_host, params):

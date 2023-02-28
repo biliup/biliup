@@ -10,11 +10,14 @@ import stream_gears
 from biliup.config import config
 from urllib.parse import urlparse
 
+from biliup.plugins.Danmaku.danmaku_main import Danmaku
+
 logger = logging.getLogger('biliup')
 
 
 class DownloadBase:
     def __init__(self, fname, url, suffix=None, opt_args=None):
+        self.danmaku = None
         self.room_title = None
         if opt_args is None:
             opt_args = []
@@ -55,7 +58,8 @@ class DownloadBase:
 
     def download(self, filename):
         if self.filename_prefix:  # 判断是否存在自定义录播命名设置
-            filename = (self.filename_prefix.format(streamer=self.fname, title=self.room_title).encode('unicode-escape').decode()).encode().decode("unicode-escape")
+            filename = (self.filename_prefix.format(streamer=self.fname, title=self.room_title).encode(
+                'unicode-escape').decode()).encode().decode("unicode-escape")
         else:
             filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
         filename = get_valid_filename(filename)
@@ -71,16 +75,19 @@ class DownloadBase:
         parsed_url = urlparse(self.raw_stream_url)
         path = parsed_url.path
         if '.m3u8' in path:
-                default_input_args += ['-max_reload', '2']
+            default_input_args += ['-max_reload', '2']
         args = ['ffmpeg', '-y', *default_input_args,
                 '-i', self.raw_stream_url, *self.default_output_args, *self.opt_args,
                 '-c', 'copy', '-f', self.suffix]
         if config.get('segment_time'):
-            args += ['-f', 'segment', f'{(time.strftime(filename).encode("unicode-escape").decode()).encode().decode("unicode-escape")} part-%03d.{self.suffix}']
+            args += ['-f', 'segment',
+                     f'{(time.strftime(filename).encode("unicode-escape").decode()).encode().decode("unicode-escape")} part-%03d.{self.suffix}']
         else:
-            args += [f'{(time.strftime(filename).encode("unicode-escape").decode()).encode().decode("unicode-escape")}.{self.suffix}.part']
-            
+            args += [
+                f'{(time.strftime(filename).encode("unicode-escape").decode()).encode().decode("unicode-escape")}.{self.suffix}.part']
+
         proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        self.danmaku_download_start(filename)
         try:
             with proc.stdout as stdout:
                 for line in iter(stdout.readline, b''):  # b'\n'-separated lines
@@ -88,11 +95,19 @@ class DownloadBase:
                     print(decode_line, end='', file=sys.stderr)
                     logger.debug(decode_line.rstrip())
             retval = proc.wait()
+            self.danmaku_download_stop()
         except KeyboardInterrupt:
+            self.danmaku_download_stop()
             if sys.platform != 'win32':
                 proc.communicate(b'q')
             raise
         return retval
+
+    def danmaku_download_start(self, filename):
+        pass
+
+    def danmaku_download_stop(self):
+        pass
 
     def run(self):
         if not self.check_stream():
@@ -149,7 +164,8 @@ class DownloadBase:
     @property
     def file_name(self):
         if self.filename_prefix:  # 判断是否存在自定义录播命名设置
-            filename = (self.filename_prefix.format(streamer=self.fname, title=self.room_title).encode('unicode-escape').decode()).encode().decode("unicode-escape")
+            filename = (self.filename_prefix.format(streamer=self.fname, title=self.room_title).encode(
+                'unicode-escape').decode()).encode().decode("unicode-escape")
         else:
             filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
         filename = get_valid_filename(filename)
@@ -190,7 +206,7 @@ def get_valid_filename(name):
     >>> get_valid_filename("{self.fname}%Y-%m-%dT%H_%M_%S")
     '{self.fname}%Y-%m-%dT%H_%M_%S'
     """
-    #s = str(name).strip().replace(" ", "_") #因为有些人会在主播名中间加入空格，为了避免和录播完毕自动改名冲突，所以注释掉
+    # s = str(name).strip().replace(" ", "_") #因为有些人会在主播名中间加入空格，为了避免和录播完毕自动改名冲突，所以注释掉
     s = re.sub(r"(?u)[^-\w.%{}\[\]【】「」\s]", "", str(name))
     if s in {"", ".", ".."}:
         raise RuntimeError("Could not derive file name from '%s'" % name)
