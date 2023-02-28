@@ -49,13 +49,15 @@ check_sourcecode = 15
 #douyu_danmaku = false
 
 #------虎牙------#
-# 如遇到虎牙录制卡顿可以尝试切换线路，AL, HW, TX, WS
+### 如遇到虎牙录制卡顿可以尝试切换线路，AL, HW, TX, WS
 #huyacdn = "AL"
-# 录制虎牙弹幕，只有使用FFMPEG作为下载器才支持，默认关闭
+### 录制虎牙弹幕，只有使用FFMPEG作为下载器才支持，默认关闭
 #huya_danmaku = false
 
 #------哔哩哔哩------#
-# 录制BILIBILI弹幕，只有使用FFMPEG作为下载器才支持，默认关闭
+### 获取BILIBILI直播间封面并作为投稿封面。此封面优先级低于单个主播指定的自定义封面。（直播封面将会保存于bili_cover_cache下，请自行定期删除）
+#use_live_cover = true
+### 录制BILIBILI弹幕，只有使用FFMPEG作为下载器才支持，默认关闭
 # bilibili_danmaku = false
 ### 哔哩哔哩直播流协议.可选 stream（Flv）、hls，默认为stream
 #bili_protocol = stream
@@ -125,6 +127,7 @@ dynamic = "#空间动态#"
 uploader = "biliup-rs"  # 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
 #filename_prefix = '{streamer}%Y-%m-%d %H_%M_%S{title}'  # 覆盖全局自定义录播文件命名规则
 user_cookie = "cookies.json" # 使用指定的账号上传
+#use_live_cover = true # 获取BILIBILI直播间封面并作为投稿封面。此封面优先级低于单个主播指定的自定义封面。
 tags = [ "biliup", "视频标签" ]
 # 上传完成后，将按自定义顺序执行自定义操作
 #postprocessor = [
