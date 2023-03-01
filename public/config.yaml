@@ -114,7 +114,7 @@ streamers:
         cover_path: /cover/up.jpg ###封面
         description: |- ### 支持strftime, {title}, {streamer}, {url}占位符。注：此处请注意缩进，确保所有文字的缩进都与"视频简介"相同或者更多。
          视频简介: {title} %Y-%m-%d %H:%M:%S
-         {streamers}主播直播间地址：{url}
+         {streamer}主播直播间地址：{url}
          ---
          Powered By biliup - Github: https://github.com/ForgQi/biliup
         dynamic: '#空间动态#'
