@@ -60,7 +60,7 @@ class Douyu(DownloadBase):
     async def danmaku_download_start(self, filename):
         if self.douyu_danmaku:
             logger.info("开始弹幕录制")
-            self.danmaku = DanmakuClient(self.url, filename + ".xml")
+            self.danmaku = DanmakuClient(self.url, filename + "." + self.suffix)
             await self.danmaku.start()
 
     def close(self):
