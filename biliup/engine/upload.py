@@ -43,7 +43,7 @@ class UploadBase:
             name, ext = os.path.splitext(r)
             if ext != '.xml':
                 file_size = os.path.getsize(r) / 1024 / 1024
-                threshold = self.data.get('threshold') or 2
+                threshold = self.data.get('threshold',2)
                 if file_size <= threshold:
                     self.remove_file(r)
                     logger.info(f'过滤删除-{r}')
