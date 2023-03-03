@@ -7,6 +7,7 @@ import os
 import re
 import ssl
 import time
+from functools import partial
 
 import lxml.etree as etree
 import aiofiles
@@ -22,7 +23,8 @@ __all__ = ['DanmakuClient']
 class DanmakuClient:
     def __init__(self, url, filename):
         self.__starttime = time.time()
-        self.__filename = filename
+        self.__filename = os.path.splitext(filename)[0] + '.xml'
+        self.__filename_video_suffix = filename
         self.__url = ''
         self.__site = None
         self.__hs = None
@@ -89,6 +91,12 @@ class DanmakuClient:
         msg_i = 0
         msg_col = {'0': '16777215', '1': '16717077', '2': '2000880', '3': '8046667', '4': '16744192', '5': '10172916',
                    '6': '16738740'}
+
+        def write_file(filename):
+            with open(filename, "wb") as f:
+                etree.indent(root, "\t")
+                tree.write(f, encoding="UTF-8", xml_declaration=True, pretty_print=True)
+
         while not self.__stop:
             try:
                 m = await self.__dm_queue.get()
@@ -101,15 +109,15 @@ class DanmakuClient:
                         color = msg_col[m["col"]]
                     elif 'color' in m:
                         color = m["color"]
-                    # else:
-                    #     color = '16777215'
+                    else:
+                        color = '16777215'
                     msg_time = format(time.time() - self.__starttime, '.3f')
                     d.set('p', f"{msg_time},1,25,{color},0,0,0,0")
                     d.text = m["content"]
 
                     if msg_i >= 5:
-                        etree.indent(root, "\t")
-                        tree.write(self.__filename, encoding="UTF-8", xml_declaration=True, pretty_print=True)
+                        loop = asyncio.get_running_loop()
+                        await loop.run_in_executor(None, partial(write_file, self.__filename))
                         msg_i = 0
                     else:
                         msg_i = msg_i + 1
@@ -130,6 +138,9 @@ class DanmakuClient:
 
     def stop(self):
         self.__stop = True
+        if not (os.path.exists(f"{self.__filename_video_suffix}.part") or
+                os.path.exists(f"{self.__filename_video_suffix}")):
+            os.remove(self.__filename)
 
 
 
