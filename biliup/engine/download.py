@@ -71,7 +71,7 @@ class DownloadBase:
         elif self.downloader == 'streamlink': 
             parsed_url = urlparse(self.raw_stream_url)
             path = parsed_url.path
-            if 'flv' in path: #streamlink无法处理flv,所以回退到ffmpeg
+            if '.flv' in path: #streamlink无法处理flv,所以回退到ffmpeg
                 self.ffmpeg_download(fmtname)
             self.streamlink_download(fmtname)
         else:
