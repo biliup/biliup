@@ -1,7 +1,7 @@
 import os
 import random
 import re
-
+import time
 import requests
 
 from biliup.config import config
@@ -54,11 +54,12 @@ class Bilibili(DownloadBase):
             if room_info['code'] != 0 or room_info['data']['room_info']['live_status'] != 1:
                 logger.debug(room_info['message'])
                 return False
+            room_id = room_info['data']['room_info']['room_id']
+            cover_url = room_info['data']['room_info']['cover']
+            live_start_time = room_info['data']['room_info']['live_start_time']
+            uname = room_info['data']['anchor_info']['base_info']['uname']
             if self.use_live_cover is True: # 获取直播封面并保存到cover目录下
                 try:
-                    room_id = room_info['data']['room_info']['room_id']
-                    cover_url = room_info['data']['room_info']['cover']
-                    live_start_time = room_info['data']['room_info']['live_start_time']
                     self.live_cover_path = get_live_cover(room_id, live_start_time, cover_url)
                 except:
                     logger.error(f"获取直播封面失败")
@@ -73,9 +74,26 @@ class Bilibili(DownloadBase):
                 logger.debug(play_info['message'])
                 return False
             streams = play_info['data']['playurl_info']['playurl']['stream']
-            stream = streams[1] if "hls" in protocol else streams[0]
-            # 直播开启后需要约 2Min 缓冲时间以提供 Hevc 编码 与 fmp4 封装，故仅使用 Avc 编码
-            stream_info = stream['format'][0]['codec'][0]
+            live_start_time = room_info['data']['room_info']['live_start_time']
+            if protocol == "stream":
+                stream = streams[0] 
+                stream_info = stream['format'][0]['codec'][0]
+            elif protocol == "hls_ts":
+                stream = streams[1] 
+                stream_info = stream['format'][0]['codec'][0]
+            elif protocol == "hls_fmp4":
+                try:
+                	stream = streams[1]
+                	stream_info = stream['format'][1]['codec'][0]
+                	logger.error(f"获取到{uname}房间的fmp4流")
+                except:
+                    now_timestamp = int(time.time())
+                    if now_timestamp - live_start_time <= 45:  #等待45s，如果还没有fmp4流就回退到flv流
+                        return False
+                    else:   	
+                        stream = streams[0] 
+                        stream_info = stream['format'][0]['codec'][0]
+                        logger.error(f"获取{uname}房间fmp4流失败，回退到flv流")
             self.raw_stream_url = stream_info['url_info'][0]['host'] + stream_info['base_url'] \
                                   + stream_info['url_info'][0]['extra']
             find = False
@@ -84,7 +102,7 @@ class Bilibili(DownloadBase):
                 if 'mcdn' in url_info['host']:
                     continue
                 # 哔哩哔哩直播强制原画（仅限HLS流的 cn-gotcha01 CDN). 并且仅当主播有二压的时候才自动去掉m3u8的_bluray前缀，避免stream-gears的疯狂分段bug
-                if force_source is True and "cn-gotcha01" in url_info['extra'] and "_bluray" in stream_info['base_url']:
+                if force_source is True and "cn-gotcha01" in url_info['extra'] and "_bluray.m3u8" in stream_info['base_url']:
                     stream_info['base_url'] = re.sub(r'_bluray(?=.*m3u8)', "", stream_info['base_url'])
                     find = True
                 # 强制替换hls流的cn-gotcha01的节点为指定节点 注意：只有大陆ip才能获取到cn-gotcha01的节点。
