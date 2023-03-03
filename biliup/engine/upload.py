@@ -57,7 +57,7 @@ class UploadBase:
                     logger.info(f'无视频，已过滤删除-{r}')
 
         file_list = UploadBase.file_list(index)
-        if not file_list:
+        if len(file_list) == 0:
             logger.info('视频过滤后无文件可传')
             return False
 
