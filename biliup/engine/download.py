@@ -68,8 +68,40 @@ class DownloadBase:
         if self.downloader == 'stream-gears':
             stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
                                   config.get('file_size'))
+        elif self.downloader == 'streamlink': 
+            parsed_url = urlparse(self.raw_stream_url)
+            path = parsed_url.path
+            if 'flv' in path: #streamlink无法处理flv,所以回退到ffmpeg
+                self.ffmpeg_download(fmtname)
+            self.streamlink_download(fmtname)
         else:
             self.ffmpeg_download(fmtname)
+  
+    def streamlink_download(self, filename):
+        streamlink_input_args = ['--stream-segment-threads', '5']
+        streamlink_cmd = ['streamlink', *streamlink_input_args, self.raw_stream_url, 'best', '-O']
+        ffmpeg_input_args = ['-reconnect_streamed', '1', '-reconnect_delay_max', '20', '-rw_timeout', '20000000']
+        ffmpeg_cmd = ['ffmpeg', '-re', '-i', 'pipe:0', '-y',*ffmpeg_input_args, *self.default_output_args, *self.opt_args, '-c', 'copy', '-f', self.suffix]
+        if config.get('segment_time'):
+            ffmpeg_cmd += ['-f', 'segment',
+                     f'{filename} part-%03d.{self.suffix}']
+        else:
+            ffmpeg_cmd += [
+                f'{filename}.{self.suffix}.part']
+        streamlink_proc = subprocess.Popen(streamlink_cmd, stdout=subprocess.PIPE)
+        ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=streamlink_proc.stdout, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        try:
+            with ffmpeg_proc.stdout as stdout:
+                for line in iter(stdout.readline, b''):  # b'\n'-separated lines
+                    decode_line = line.decode(errors='ignore')
+                    print(decode_line, end='', file=sys.stderr)
+                    logger.debug(decode_line.rstrip())
+            retval = ffmpeg_proc.wait()
+        except KeyboardInterrupt:
+            if sys.platform != 'win32':
+                ffmpeg_proc.communicate(b'q')
+            raise
+        return retval
 
     def ffmpeg_download(self, filename):
         default_input_args = ['-headers', ''.join('%s: %s\r\n' % x for x in self.fake_headers.items()),
