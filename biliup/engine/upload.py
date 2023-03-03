@@ -36,7 +36,7 @@ class UploadBase:
     def filter_file(self, index):
         media_extensions = ['.mp4', '.flv', '.ts']
         file_list = UploadBase.file_list(index)
-        if not file_list:
+        if len(file_list) == 0:
             return False
 
         for r in file_list:
