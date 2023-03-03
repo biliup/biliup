@@ -78,7 +78,7 @@ class Bilibili(DownloadBase):
             if protocol == "stream":
                 stream = streams[0] 
                 stream_info = stream['format'][0]['codec'][0]
-            elif protocol == "hls_ts":
+            elif protocol == "hls_ts" or "hls":
                 stream = streams[1] 
                 stream_info = stream['format'][0]['codec'][0]
             elif protocol == "hls_fmp4":
