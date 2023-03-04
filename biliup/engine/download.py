@@ -78,7 +78,7 @@ class DownloadBase:
             self.ffmpeg_download(fmtname)
   
     def streamlink_download(self, filename):
-        streamlink_input_args = ['--stream-segment-threads', '5']
+        streamlink_input_args = ['--stream-segment-threads', '10']
         streamlink_cmd = ['streamlink', *streamlink_input_args, self.raw_stream_url, 'best', '-O']
         ffmpeg_input_args = ['-reconnect_streamed', '1', '-reconnect_delay_max', '20', '-rw_timeout', '20000000']
         ffmpeg_cmd = ['ffmpeg', '-re', '-i', 'pipe:0', '-y',*ffmpeg_input_args, *self.default_output_args, *self.opt_args, '-c', 'copy', '-f', self.suffix]
@@ -109,7 +109,7 @@ class DownloadBase:
         parsed_url = urlparse(self.raw_stream_url)
         path = parsed_url.path
         if '.m3u8' in path:
-            default_input_args += ['-max_reload', '2']
+            default_input_args += ['-max_reload', '3']
         args = ['ffmpeg', '-y', *default_input_args,
                 '-i', self.raw_stream_url, *self.default_output_args, *self.opt_args,
                 '-c', 'copy', '-f', self.suffix]
