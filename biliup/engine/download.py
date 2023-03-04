@@ -73,7 +73,8 @@ class DownloadBase:
             path = parsed_url.path
             if '.flv' in path: #streamlink无法处理flv,所以回退到ffmpeg
                 self.ffmpeg_download(fmtname)
-            self.streamlink_download(fmtname)
+            else:
+                self.streamlink_download(fmtname)
         else:
             self.ffmpeg_download(fmtname)
   
