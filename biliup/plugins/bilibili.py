@@ -106,7 +106,7 @@ class Bilibili(DownloadBase):
                     stream_info['base_url'] = re.sub(r'_bluray(?=.*m3u8)', "", stream_info['base_url'])
                     find = True
                 # 强制替换hls流的cn-gotcha01的节点为指定节点 注意：只有大陆ip才能获取到cn-gotcha01的节点。
-                if force_cn01_domain and "cn-gotcha01" in perf_cdn and protocol == "hls":
+                if force_cn01_domain and "cn-gotcha01" in perf_cdn and ".m3u8" in stream_info['base_url']:
                     i = 0
                     while i < 6:  # 测试随机到的节点是否可用
                         random_choice = random.choice(force_cn01_domain.split(","))
