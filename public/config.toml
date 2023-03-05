@@ -6,17 +6,17 @@
 ### 使用该模式下载flv流时，将会仅使用ffmpeg。请手动安装streamlink以及ffmpeg。
 ### 2.ffmpeg（纯ffmpeg下载），请手动安装ffmpeg。
 ### 3.stream-gears
-#downloader = ffmpeg
+#downloader = "ffmpeg"
 # 录像单文件大小限制，单位Byte，超过此大小分段下载
 file_size = 2621440000
 # 录像单文件时间限制，格式'00:00:00'（时分秒），超过此大小分段下载，如需使用大小分段请注释此字段
-#segment_time = '00:50:00'
+#segment_time = "00:50:00"
 # 小于此大小的视频文件将会被过滤删除，单位MB
 filtering_threshold = 20
 
 # 自定义录播文件名模板, 支持变量 {streamer}:你在配置里设置的直播间名 %Y-%m-%d %H_%M_%S:创建文件的时间, {title}:当场直播间标题
 # 如果上传文件，文件名必须包含设定的模板名。其次，如果没有定义时间，文件分片可能会互相覆盖，所以推荐设置时间来避免分段文件名重复。
-#filename_prefix = '{streamer}%Y-%m-%d %H_%M_%S{title}'
+#filename_prefix = "{streamer}%Y-%m-%d %H_%M_%S{title}"
 
 #------上传------#
 ### b站提交接口，默认自动选择，可选web，client
@@ -68,18 +68,18 @@ check_sourcecode = 15
 ### 由于fmp4出现需要一定时间，或者某些小主播（大部分只有原画选项的主播）无fmp4流。
 ### 目前的策略是，如果开播时间小于45s，将会反复尝试获取fmp4流，如果没获取到就回退到flv流。
 ### 由于ffmpeg只能单线程下载，并且stream-gears录制有问题，所以目前fmp4流只能使用streamlink+ffmpeg混合模式。
-#bili_protocol = stream
+#bili_protocol = "stream"
 ### 哔哩哔哩直播优选CDN，默认无
-#bili_perfCDN = cn-gotcha01
+#bili_perfCDN = "cn-gotcha01"
 ### 哔哩哔哩直播强制原画（仅限HLS流的 cn-gotcha01 CDN），默认为关闭
 #bili_forceScoure = false
 ### 自定义哔哩哔哩直播api，默认无
-#bili_liveapi = 'https://api.live.bilibili.com'
+#bili_liveapi = "https://api.live.bilibili.com"
 ### CDN自动Fallback开关，默认为开启
 #bili_cdn_fallback = true
 ### 强制替换ov-gotcha05的下载地址为指定的自选IP
 #bili_force_ov05 = true
-#bili_force_ov05_ip = '163.171.197.234'
+#bili_force_ov05_ip = "163.171.197.234"
 ### 强制替换cn-gotcha01（叔叔自建，理论上最稳定）为指定的自选域名组（可多个域名，请用逗号分隔）
 ### 完整CDN列表请参考 https://rec.danmuji.org/dev/bilibili-cdn/ 中"B站视频云"的部分
 ### 此功能需要设置bili_perfCDN为cn-gotcha01，并且设置bili_protocol为hls。
@@ -89,7 +89,7 @@ check_sourcecode = 15
 ### 如果海外机到联通或者移动网络线路还不错，就可以参考https://rec.danmuji.org/dev/bilibili-cdn/ 选取一些联通或者移动的节点并填入下面
 ### 每次会随机返回填入的其中一个线路，并且会自动判断所填入的节点是否可用
 #bili_force_cn01 = true
-#bili_force_cn01_domains = 'cn-gdst-cm-01-15.bilivideo.com,cn-gdst-cm-01-06.bilivideo.com,cn-fjqz-cm-01-06.bilivideo.com,cn-jssz-cm-01-02.bilivideo.com,cn-jxnc-cm-01-02.bilivideo.com'
+#bili_force_cn01_domains = "cn-gdst-cm-01-15.bilivideo.com,cn-gdst-cm-01-06.bilivideo.com,cn-fjqz-cm-01-06.bilivideo.com,cn-jssz-cm-01-02.bilivideo.com,cn-jxnc-cm-01-02.bilivideo.com"
 
 #------YouTube------#
 ### 设置偏好的YouTube下载封装格式
@@ -131,7 +131,7 @@ description = """
 ---
 Powered By biliup - Github: https://github.com/ForgQi/biliup"""
 dynamic = "#空间动态#"
-# dtime = 14_400 # 设置延时发布时间，距离提交大于2小时，格式为时间戳
+# dtime = 14400 # 设置延时发布时间，距离提交大于2小时，格式为时间戳
 uploader = "biliup-rs"  # 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
 #filename_prefix = '{streamer}%Y-%m-%d %H_%M_%S{title}'  # 覆盖全局自定义录播文件命名规则
 user_cookie = "cookies.json" # 使用指定的账号上传
@@ -152,7 +152,7 @@ tags = [ "biliup", "视频标签" ]
 #------哔哩哔哩------#
 #------哔哩哔哩获取直播流用COOKIE------#
 ### 参照https://github.com/BililiveRecorder/BililiveRecorder/issues/263
-#bili_cookie = ''
+#bili_cookie = ""
 ### 重要！！！
 ###是否将cookie传入第三方API。将Cookie传入未知的第三方API有几率泄露帐号登录信息。
 ###在开启了自定义Cookie（bili_cookie）又同时设置了第三方API（bili_liveapi）的情况下，如果打开了允许第三方API使用Cookie，那么就使用第三方API，如果没有允许（默认），那么设置的第三方API就不生效
