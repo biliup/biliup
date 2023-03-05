@@ -22,8 +22,9 @@ class BiliWeb(UploadBase):
         self.tid = tid
         self.tags = tags
         if "live_cover_path" in self.data:
-            self.cover_path = self.data["live_cover_path"] 
-        self.cover_path = cover_path #自定义封面的优先级比直播封面高
+            self.cover_path = self.data["live_cover_path"]
+        if cover_path:
+            self.cover_path = cover_path #自定义封面的优先级比直播封面高
         self.desc = description
         self.dynamic = dynamic
         self.copyright = copyright
