@@ -48,11 +48,12 @@ class BiliWeb(UploadBase):
         tag = ','.join(self.tags)
         source = self.data["url"] if self.copyright == 2 else ""
         cover = self.cover_path if self.cover_path is not None else ""
+        filtered_list = [file for file in file_list if not file.endswith('.xml')]
         dtime = None
         if self.dtime:
             dtime = int(time.time() + self.dtime)
         stream_gears.upload(
-            file_list,
+            filtered_list,
             self.user_cookie,
             self.data["format_title"][:80],
             self.tid,
