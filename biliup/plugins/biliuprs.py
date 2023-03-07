@@ -1,4 +1,5 @@
 import time
+
 import stream_gears
 
 from ..engine import Plugin
@@ -49,7 +50,7 @@ class BiliWeb(UploadBase):
         tag = ','.join(self.tags)
         source = self.data["url"] if self.copyright == 2 else ""
         cover = self.cover_path
-        filtered_list = [file for file in file_list if not file.endswith('.xml')]
+        filtered_list = [file for file in file_list if not file.endswith(('.xml', '.webp', '.jpg'))] #自动过滤非视频文件
         dtime = None
         if self.dtime:
             dtime = int(time.time() + self.dtime)
