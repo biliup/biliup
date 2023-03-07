@@ -107,7 +107,8 @@ check_sourcecode = 15
 ### 注意：此参数优先级高于分辨率设置，并且不包括音频部分的大小，仅仅只是视频部分的大小。
 ### 如果某个视频实在没有低于此大小的分辨率版本，将会选择最低画质的版本下载。
 #youtube_max_videosize = "5G"  ###参考格式，例如100M，5G，10G。
-
+### YouTube转载视频自动获取视频封面并用于作投稿封面。获取webp封面之后自动转换格式为jpg，并保存在cover/youtube文件夹中，请注意定期清理。
+#use_youtube_cover = true
 #########录制主播设置#########
 
 # 最小配置示例
@@ -131,7 +132,7 @@ description = """
 ---
 Powered By biliup - Github: https://github.com/ForgQi/biliup"""
 dynamic = "#空间动态#"
-# dtime = 14400 # 设置延时发布时间，距离提交大于2小时，格式为时间戳
+# dtime = 14_400 # 设置延时发布时间，距离提交大于2小时，格式为时间戳
 uploader = "biliup-rs"  # 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
 #filename_prefix = '{streamer}%Y-%m-%d %H_%M_%S{title}'  # 覆盖全局自定义录播文件命名规则
 user_cookie = "cookies.json" # 使用指定的账号上传

@@ -38,16 +38,20 @@ class UploadBase:
         file_list = UploadBase.file_list(index)
         if len(file_list) == 0:
             return False
-
+        for f in file_list:
+            if f.endswith('.part'):
+                new_name = os.path.splitext(f)[0]
+                shutil.move(f, new_name)
+                logger.info(f'{f}存在已更名为{new_name}')
         for r in file_list:
             name, ext = os.path.splitext(r)
-            if ext != '.xml':
+            if ext in ('.mp4', '.flv', '.ts'):
                 file_size = os.path.getsize(r) / 1024 / 1024
                 threshold = self.data.get('threshold',2)
                 if file_size <= threshold:
                     self.remove_file(r)
                     logger.info(f'过滤删除-{r}')
-            else: #过滤不存在对应视频的xml弹幕文件
+            if ext == '.xml': #过滤不存在对应视频的xml弹幕文件
                 xml_file_name = name
                 media_regex = re.compile(r'^{}({})(\.part)?$'.format(
                     re.escape(xml_file_name), '|'.join(map(re.escape, media_extensions))
@@ -55,17 +59,12 @@ class UploadBase:
                 if not any(media_regex.match(x) for x in file_list):
                     self.remove_file(r)
                     logger.info(f'无视频，已过滤删除-{r}')
-
         file_list = UploadBase.file_list(index)
         if len(file_list) == 0:
             logger.info('视频过滤后无文件可传')
             return False
 
-        for f in file_list:
-            if f.endswith('.part'):
-                new_name = os.path.splitext(f)[0]
-                shutil.move(f, new_name)
-                logger.info(f'{f}存在已更名为{new_name}')
+
 
         return True
 

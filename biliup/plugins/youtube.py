@@ -1,4 +1,7 @@
 import yt_dlp
+import os
+import time
+from PIL import Image
 from yt_dlp.utils import MaxDownloadsReached
 
 from biliup.config import config
@@ -17,6 +20,7 @@ class Youtube(DownloadBase):
         self.acodec = config.get('youtube_prefer_acodec','opus|mp4a')
         self.resolution = config.get('youtube_max_resolution','4320')
         self.filesize = config.get('youtube_max_videosize','100G')
+        self.use_youtube_cover = config.get('use_youtube_cover', False)
 
     def check_stream(self):
         with yt_dlp.YoutubeDL({'download_archive': 'archive.txt', 'ignoreerrors': True, 'extract_flat': True,
@@ -58,14 +62,29 @@ class Youtube(DownloadBase):
                 # 'proxy': proxyUrl,
                 'ignoreerrors': True,
                 'max_downloads': 1,
-                'download_archive': 'archive.txt'
+                'download_archive': 'archive.txt',
             }
+            if self.use_youtube_cover is True:
+                ydl_opts['writethumbnail'] = True
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([self.url])
         except MaxDownloadsReached:
+            save_dir = f'cover/youtube/'
+            webp_cover_path = f'{filename}.webp'
+            jpg_cover_path = f'{filename}.jpg'
+            if os.path.exists(webp_cover_path):
+                with Image.open(webp_cover_path) as img:
+                	img = img.convert('RGB')
+                	if not os.path.exists(save_dir):
+                		os.makedirs(save_dir)
+                	img.save(f'{save_dir}{filename}.jpg', format='JPEG')
+                os.remove(webp_cover_path)
+                self.live_cover_path = f'{save_dir}{filename}.jpg'
+            elif os.path.exists(jpg_cover_path):
+                os.rename(jpg_cover_path, f'{save_dir}{filename}.jpg')
+                self.live_cover_path = f'{save_dir}{filename}.jpg'
             return False
         except yt_dlp.utils.DownloadError:
             logger.exception(self.fname)
             return 1
         return 0
-

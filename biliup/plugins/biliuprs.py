@@ -21,10 +21,10 @@ class BiliWeb(UploadBase):
         self.threads = threads
         self.tid = tid
         self.tags = tags
-        if "live_cover_path" in self.data:
-            self.cover_path = self.data["live_cover_path"]
         if cover_path:
-            self.cover_path = cover_path #自定义封面的优先级比直播封面高
+            self.cover_path = cover_path
+        elif "live_cover_path" in self.data:
+            self.cover_path = self.data["live_cover_path"]
         self.desc = description
         self.dynamic = dynamic
         self.copyright = copyright
@@ -48,7 +48,7 @@ class BiliWeb(UploadBase):
         tag = ','.join(self.tags)
         source = self.data["url"] if self.copyright == 2 else ""
         cover = self.cover_path if self.cover_path is not None else ""
-        filtered_list = [file for file in file_list if not file.endswith('.xml')]
+        filtered_list = [file for file in file_list if not file.endswith(('.xml', '.webp', '.jpg'))] #自动过滤非视频文件
         dtime = None
         if self.dtime:
             dtime = int(time.time() + self.dtime)
