@@ -1,5 +1,4 @@
 import time
-
 import stream_gears
 
 from ..engine import Plugin
@@ -21,10 +20,12 @@ class BiliWeb(UploadBase):
         self.threads = threads
         self.tid = tid
         self.tags = tags
-        if "live_cover_path" in self.data:
+        if "cover_path" in self.data:
+            self.cover_path = self.data["cover_path"]
+        elif "live_cover_path" in self.data:
             self.cover_path = self.data["live_cover_path"]
-        if cover_path:
-            self.cover_path = cover_path #自定义封面的优先级比直播封面高
+        else:
+            self.cover_path = ""
         self.desc = description
         self.dynamic = dynamic
         self.copyright = copyright
@@ -47,7 +48,7 @@ class BiliWeb(UploadBase):
             line = stream_gears.UploadLine.CosInternal
         tag = ','.join(self.tags)
         source = self.data["url"] if self.copyright == 2 else ""
-        cover = self.cover_path if self.cover_path is not None else ""
+        cover = self.cover_path
         filtered_list = [file for file in file_list if not file.endswith('.xml')]
         dtime = None
         if self.dtime:
