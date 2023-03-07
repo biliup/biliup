@@ -26,7 +26,7 @@ class BiliWeb(UploadBase):
         elif "live_cover_path" in self.data:
             self.cover_path = self.data["live_cover_path"]
         else:
-            self.cover_path = ""
+            self.cover_path = ''
         self.desc = description
         self.dynamic = dynamic
         self.copyright = copyright
@@ -49,7 +49,7 @@ class BiliWeb(UploadBase):
             line = stream_gears.UploadLine.CosInternal
         tag = ','.join(self.tags)
         source = self.data["url"] if self.copyright == 2 else ""
-        cover = self.cover_path
+        #cover = self.cover_path
         filtered_list = [file for file in file_list if not file.endswith(('.xml', '.webp', '.jpg'))] #自动过滤非视频文件
         dtime = None
         if self.dtime:
@@ -64,7 +64,7 @@ class BiliWeb(UploadBase):
             source,
             self.desc,
             self.dynamic,
-            cover,
+            self.cover_path,
             dtime,
             line,
             self.threads,
