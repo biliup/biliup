@@ -15,6 +15,7 @@ from ..engine.download import DownloadBase
 class Bilibili(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
+        self.fake_headers['User-Agent'] = 'Mozilla/5.0 (X11; Linux x86_64; rv:60.1) Gecko/20100101 Firefox/60.1'
         self.fake_headers['Referer'] = 'https://live.bilibili.com'
         if config.get('user', {}).get('bili_cookie'):
             self.fake_headers['cookie'] = config.get('user', {}).get('bili_cookie')
@@ -58,9 +59,10 @@ class Bilibili(DownloadBase):
             cover_url = room_info['data']['room_info']['cover']
             live_start_time = room_info['data']['room_info']['live_start_time']
             uname = room_info['data']['anchor_info']['base_info']['uname']
+            room_title = room_info['data']['room_info']['title']
             if self.use_live_cover is True: # 获取直播封面并保存到cover目录下
                 try:
-                    self.live_cover_path = get_live_cover(room_id, live_start_time, cover_url)
+                    self.live_cover_path = get_live_cover(uname, room_id, room_title, live_start_time, cover_url)
                 except:
                     logger.error(f"获取直播封面失败")
             params['room_id'] = room_info['data']['room_info']['room_id']
@@ -101,18 +103,18 @@ class Bilibili(DownloadBase):
                 # 跳过p2pCDN
                 if 'mcdn' in url_info['host']:
                     continue
-                # 哔哩哔哩直播强制原画（仅限HLS流的 cn-gotcha01 CDN). 并且仅当主播有二压的时候才自动去掉m3u8的_bluray前缀，避免stream-gears的疯狂分段bug
+                # 哔哩哔哩直播强制原画（仅限HLS_ts流的 cn-gotcha01 CDN). 并且仅当主播有二压的时候才自动去掉m3u8的_bluray前缀，避免stream-gears的疯狂分段bug
                 if force_source is True and "cn-gotcha01" in url_info['extra'] and "_bluray.m3u8" in stream_info['base_url']:
                     stream_info['base_url'] = re.sub(r'_bluray(?=.*m3u8)', "", stream_info['base_url'])
                     find = True
-                # 强制替换hls流的cn-gotcha01的节点为指定节点 注意：只有大陆ip才能获取到cn-gotcha01的节点。
-                if force_cn01_domain and "cn-gotcha01" in perf_cdn and ".m3u8" in stream_info['base_url']:
+                # 强制替换cn-gotcha01的节点为指定节点 注意：只有大陆ip才能获取到cn-gotcha01的节点。
+                if force_cn01_domain and "cn-gotcha01" in perf_cdn:
                     i = 0
                     while i < 6:  # 测试随机到的节点是否可用
                         random_choice = random.choice(force_cn01_domain.split(","))
                         i += 1
                         try:  # 发起 HEAD 请求，并获取响应状态码
-                            status_code = s.head(f"https://{random_choice}{stream_info['base_url']}{url_info['extra']}",
+                            status_code = s.get(f"https://{random_choice}{stream_info['base_url']}{url_info['extra']}",
                                                  stream=True).status_code
                             if status_code == 200:  # 如果响应状态码是 200，跳出循环
                                 break
@@ -176,19 +178,38 @@ def get_play_info(s, custom_api, official_api_host, params):
             logger.error(f"{custom_api_host}连接失败，尝试回退至官方Api")
     return s.get(official_api_host + '/xlive/web-room/v2/index/getRoomPlayInfo', params=params, timeout=5).json()
 
-def get_live_cover(room_id, live_start_time, cover_url):
+def get_live_cover(uname, room_id, room_title, live_start_time, cover_url):
     headers = {
         "origin": "https://www.bilibili.com",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36 Edg/110.0.1587.41"
     }
     response = requests.get(cover_url, headers=headers, timeout=5)
-    save_dir = f'cover/'
+    save_dir = f'cover/{uname}_{room_id}/'
+    local_time = time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime(live_start_time))
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
-    live_cover_path = f'{save_dir}{room_id}_{live_start_time}.png'
+    cover_file_name = f'{room_title}_{local_time}.png'
+    cover_file_name = get_valid_filename(cover_file_name)
+    live_cover_path = f'{save_dir}{cover_file_name}'
     if os.path.exists(live_cover_path):
         return live_cover_path
     else:
         with open(live_cover_path, 'wb') as f:
             f.write(response.content)       
             return live_cover_path 
+            
+def get_valid_filename(name):
+    """
+    Return the given string converted to a string that can be used for a clean
+    filename. Remove leading and trailing spaces; convert other spaces to
+    underscores; and remove anything that is not an alphanumeric, dash,
+    underscore, or dot.
+    # >>> get_valid_filename("john's portrait in 2004.jpg")
+    >>> get_valid_filename("{self.fname}%Y-%m-%dT%H_%M_%S")
+    '{self.fname}%Y-%m-%dT%H_%M_%S'
+    """
+    # s = str(name).strip().replace(" ", "_") #因为有些人会在主播名中间加入空格，为了避免和录播完毕自动改名冲突，所以注释掉
+    s = re.sub(r"(?u)[^-\w.%{}\[\]【】「」\s]", "", str(name))
+    if s in {"", ".", ".."}:
+        raise RuntimeError("Could not derive file name from '%s'" % name)
+    return s
