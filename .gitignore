@@ -8,6 +8,7 @@
 backup
 venv./
 config.yaml
+config.toml
 !public/config.yaml
 /configlog.ini
 ds_update.log*
