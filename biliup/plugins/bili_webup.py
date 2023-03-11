@@ -7,20 +7,21 @@ import os
 import sys
 import time
 import urllib.parse
-from dataclasses import asdict, dataclass, field, InitVar
+import xml.etree.ElementTree as ET
+from dataclasses import InitVar, asdict, dataclass, field
 from json import JSONDecodeError
-from os.path import splitext, basename
-from typing import Union, Any
+from os.path import basename, splitext
+from typing import Any, Union
 from urllib import parse
 from urllib.parse import quote
 
 import aiohttp
 import requests.utils
 import rsa
-import xml.etree.ElementTree as ET
 from requests.adapters import HTTPAdapter, Retry
 
 from biliup.config import config
+
 from ..engine import Plugin
 from ..engine.upload import UploadBase, logger
 
@@ -64,7 +65,11 @@ class BiliWeb(UploadBase):
             if self.credits:
                 video.desc_v2 = self.creditsToDesc_v2()
             else:
-                video.desc_v2 = self.desc
+                video.desc_v2=[{
+                    "raw_text": self.desc,
+                    "biz_id": "",
+                    "type": 1
+                }]
             video.desc = self.desc
             video.copyright = self.copyright
             if self.copyright == 2:
@@ -85,26 +90,29 @@ class BiliWeb(UploadBase):
         desc_v2 = []
         desc_v2_tmp = self.desc
         for credit in self.credits:
-            num = desc_v2_tmp.index("@credit")
-            desc_v2.append({
-                "raw_text": " "+desc_v2_tmp[:num],
-                "biz_id": "",
-                "type": 1
-            })
-            desc_v2.append({
-                "raw_text": credit["username"],
-                "biz_id": str(credit["uid"]),
-                "type": 2
-            })
-            self.desc = self.desc.replace(
-                "@credit", "@"+credit["username"]+"  ", 1)
-            desc_v2_tmp = desc_v2_tmp[num+7:]
+            try :
+                num = desc_v2_tmp.index("@credit")
+                desc_v2.append({
+                    "raw_text": " "+desc_v2_tmp[:num],
+                    "biz_id": "",
+                    "type": 1
+                })
+                desc_v2.append({
+                    "raw_text": credit["username"],
+                    "biz_id": str(credit["uid"]),
+                    "type": 2
+                })
+                self.desc = self.desc.replace(
+                    "@credit", "@"+credit["username"]+"  ", 1)
+                desc_v2_tmp = desc_v2_tmp[num+7:]
+            except IndexError:
+                logger.error('简介中的@credit占位符少于credits的数量,替换失败')
         desc_v2.append({
             "raw_text": " "+desc_v2_tmp,
             "biz_id": "",
             "type": 1
         })
-        desc_v2[0]["raw_text"] = desc_v2[0]["raw_text"][1:] #开头空格会导致识别简介过长
+        desc_v2[0]["raw_text"] = desc_v2[0]["raw_text"][1:]  # 开头空格会导致识别简介过长
         return desc_v2
 
 
@@ -658,8 +666,9 @@ class BiliBili:
         :param img: img path or stream
         :return: img URL
         """
-        from PIL import Image
         from io import BytesIO
+
+        from PIL import Image
 
         with Image.open(img) as im:
             # 宽和高,需要16：10

@@ -17,7 +17,7 @@ ds_update.log*
 *.egg-info
 dist/
 build/
-
+cover/*
 *.back
 bili.cookie.json
 archive.txt
