@@ -4,7 +4,7 @@ import time
 from urllib.error import HTTPError
 
 from .engine.decorators import Plugin
-from .plugins import general, BatchCheckBase
+from .plugins import BatchCheckBase, general
 
 logger = logging.getLogger('biliup')
 

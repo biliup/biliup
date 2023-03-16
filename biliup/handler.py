@@ -1,14 +1,15 @@
 import logging
 import subprocess
+from functools import reduce
 from pathlib import Path
 
-from . import plugins
-from .downloader import download, check_url
-from .engine import invert_dict, Plugin
 from biliup.config import config
+
+from . import plugins
+from .downloader import check_url, download
+from .engine import Plugin, invert_dict
 from .engine.event import Event, EventManager
 from .uploader import upload
-from functools import reduce
 
 CHECK = 'check'
 CHECK_UPLOAD = 'check_upload'

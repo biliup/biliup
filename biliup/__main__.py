@@ -7,7 +7,8 @@ import platform
 
 import biliup.common.reload
 from biliup.config import config
-from . import __version__, LOG_CONF
+
+from . import LOG_CONF, __version__
 from .common.Daemon import Daemon
 from .common.reload import AutoReload
 from .common.timer import Timer
@@ -52,7 +53,7 @@ def arg_parser():
 
 
 async def main(args):
-    from .handler import CHECK_UPLOAD, CHECK, event_manager
+    from .handler import CHECK, CHECK_UPLOAD, event_manager
 
     event_manager.start()
 
