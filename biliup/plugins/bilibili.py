@@ -60,7 +60,7 @@ class Bilibili(DownloadBase):
             live_start_time = room_info['data']['room_info']['live_start_time']
             uname = room_info['data']['anchor_info']['base_info']['uname']
             room_title = room_info['data']['room_info']['title']
-            if self.use_live_cover is True: # 获取直播封面并保存到cover目录下
+            if self.use_live_cover is True:  # 获取直播封面并保存到cover目录下
                 try:
                     self.live_cover_path = get_live_cover(uname, room_id, room_title, live_start_time, cover_url)
                 except:
@@ -69,7 +69,7 @@ class Bilibili(DownloadBase):
             self.room_title = room_info['data']['room_info']['title']
             custom_api = config.get('bili_liveapi') is not None
             # 当 Cookie 存在，并且自定义APi使用Cookie开关关闭时，仅使用官方 Api
-            if config.get('user', {}).get('bili_cookie') and self.customAPI_use_cookie is not True: 
+            if config.get('user', {}).get('bili_cookie') and self.customAPI_use_cookie is not True:
                 custom_api = False
             play_info = get_play_info(s, custom_api, official_api_host, params)
             if play_info['code'] != 0:
@@ -78,78 +78,72 @@ class Bilibili(DownloadBase):
             streams = play_info['data']['playurl_info']['playurl']['stream']
             live_start_time = room_info['data']['room_info']['live_start_time']
             if protocol == "stream":
-                stream = streams[0] 
+                stream = streams[0]
                 stream_info = stream['format'][0]['codec'][0]
-            elif protocol == "hls_ts" or "hls":
-                stream = streams[1] 
+            elif protocol == "hls_ts" or protocol == "hls":
+                stream = streams[1]
                 stream_info = stream['format'][0]['codec'][0]
             elif protocol == "hls_fmp4":
                 try:
-                	stream = streams[1]
-                	stream_info = stream['format'][1]['codec'][0]
-                	logger.error(f"获取到{uname}房间的fmp4流")
+                    stream = streams[1]
+                    stream_info = stream['format'][1]['codec'][0]
+                    logger.debug(f"获取到{uname}房间的fmp4流")
                 except:
                     now_timestamp = int(time.time())
-                    if now_timestamp - live_start_time <= 45:  #等待45s，如果还没有fmp4流就回退到flv流
+                    if now_timestamp - live_start_time <= 45:  # 等待45s，如果还没有fmp4流就回退到flv流
                         return False
-                    else:   	
-                        stream = streams[0] 
-                        stream_info = stream['format'][0]['codec'][0]
-                        logger.error(f"获取{uname}房间fmp4流失败，回退到flv流")
-            self.raw_stream_url = stream_info['url_info'][0]['host'] + stream_info['base_url'] \
-                                  + stream_info['url_info'][0]['extra']
-            find = False
-            for url_info in stream_info['url_info']:
-                # 跳过p2pCDN
-                if 'mcdn' in url_info['host']:
-                    continue
-                # 哔哩哔哩直播强制原画（仅限HLS_ts流的 cn-gotcha01 CDN). 并且仅当主播有二压的时候才自动去掉m3u8的_bluray前缀，避免stream-gears的疯狂分段bug
-                if force_source is True and "cn-gotcha01" in url_info['extra'] and "_bluray.m3u8" in stream_info['base_url']:
-                    stream_info['base_url'] = re.sub(r'_bluray(?=.*m3u8)', "", stream_info['base_url'])
-                    find = True
-                # 强制替换cn-gotcha01的节点为指定节点 注意：只有大陆ip才能获取到cn-gotcha01的节点。
-                if force_cn01_domain and "cn-gotcha01" in perf_cdn:
-                    i = 0
-                    while i < 6:  # 测试随机到的节点是否可用
-                        random_choice = random.choice(force_cn01_domain.split(","))
-                        i += 1
-                        try:  # 发起 HEAD 请求，并获取响应状态码
-                            status_code = s.get(f"https://{random_choice}{stream_info['base_url']}{url_info['extra']}",
-                                                 stream=True).status_code
-                            if status_code == 200:  # 如果响应状态码是 200，跳出循环
-                                break
-                        except requests.exceptions.ConnectionError:  # 如果发生连接异常，继续下一次循环
-                            logger.debug(f"随机到的域名 {random_choice} 无法访问，尝试重新发起随机。")
-                            continue
                     else:
-                        logger.error(f"强制替换hls流的cn-gotcha01的节点为指定节点失败啦")
-                        return False
-                    logger.debug(f"随机到的域名 {random_choice} 返回了 200 状态码。")
-                    url_info['host'] = "https://" + random_choice
-                    find = True
-                # 强制替换ov05 302redirect之后的真实地址为指定的域名或ip达到自选ov05节点的目的
-                if force_ov05_ip and "ov-gotcha05" in url_info['host']:
-                    response = requests.get(url_info['host'] + stream_info['base_url'] + url_info['extra'])
-                    self.raw_stream_url = re.sub(r"https://([a-z0-9]+)\.ourdvsss\.com", f"http://{force_ov05_ip}",
-                                                 response.url)
-                    logger.debug(f"将ov-gotcha05的节点ip替换为了{force_ov05_ip}")
-                    break
-                # 匹配PerfCDN
+                        stream = streams[0]
+                        stream_info = stream['format'][0]['codec'][0]
+                        logger.debug(f"获取{uname}房间fmp4流失败，回退到flv流")
+            found_perf_cdn = False #优选CDN节点
+            for url_info in stream_info['url_info']:
                 if perf_cdn and perf_cdn in url_info['extra']:
-                    find = True
-                    logger.debug(f"获取到{url_info['host']}节点,找到了prefCDN")
-                self.raw_stream_url = url_info['host'] + stream_info['base_url'] + url_info['extra']
-                if find:
+                    found_perf_cdn = True
+                    logger.debug(f"找到了perfCDN{url_info['extra']}")
                     break
-            if self.bili_cdn_fallback is False:
-                return True
-            stream_info['url_info'].reverse()
-            # 检查直播流是否可用以倒叙尝试回退
-            for stream_url in stream_info['url_info']:
-                self.raw_stream_url = stream_url['host'] + stream_info['base_url'] + stream_url['extra']
-                if s.get(self.raw_stream_url, stream=True).status_code == 404:
+        if not found_perf_cdn: #没找到优选CDN就回到第一个节点
+            url_info['host'] = stream_info['url_info'][0]['host']
+            url_info['extra'] = stream_info['url_info'][0]['extra']
+            logger.debug(f"没找到perfCDN哦")
+            # 哔哩哔哩直播强制原画（仅限HLS_ts流的 cn-gotcha01 CDN). 并且仅当主播有二压的时候才自动去掉m3u8的_bluray前缀，避免stream-gears的疯狂分段bug
+        if force_source is True and "cn-gotcha01" in url_info['extra'] and "_bluray.m3u8" in stream_info['base_url']:
+            stream_info['base_url'] = re.sub(r'_bluray(?=.*m3u8)', "", stream_info['base_url'])
+            # 强制替换cn-gotcha01的节点为指定节点 注意：只有大陆ip才能获取到cn-gotcha01的节点。
+        if force_cn01_domain and "cn-gotcha01" in url_info['extra']:
+            i = 0
+            while i < 6:  # 测试随机到的节点是否可用
+                random_choice = random.choice(force_cn01_domain.split(","))
+                i += 1
+                try:  # 发起 GET 请求，并获取响应状态码
+                    status_code = s.get(f"https://{random_choice}{stream_info['base_url']}{url_info['extra']}",
+                                        stream=True).status_code
+                    if status_code == 200:  # 如果响应状态码是 200，跳出循环
+                        break
+                except requests.exceptions.ConnectionError:  # 如果发生连接异常，继续下一次循环
+                    logger.debug(f"随机到的域名 {random_choice} 无法访问，尝试重新发起随机。")
                     continue
-                break
+            else:
+                logger.error(f"强制替换hls流的cn-gotcha01的节点为指定节点失败啦")
+                return False
+            logger.debug(f"随机到的域名 {random_choice} 返回了 200 状态码。")
+            url_info['host'] = "https://" + random_choice
+            # 强制替换ov05 302redirect之后的真实地址为指定的域名或ip达到自选ov05节点的目的
+        if force_ov05_ip and "ov-gotcha05" in url_info['host']:
+            response = requests.get(url_info['host'] + stream_info['base_url'] + url_info['extra'])
+            self.raw_stream_url = re.sub(r"https://([a-z0-9]+)\.ourdvsss\.com", f"http://{force_ov05_ip}",
+                                         response.url)
+            logger.debug(f"将ov-gotcha05的节点ip替换为了{force_ov05_ip}")
+        self.raw_stream_url = url_info['host'] + stream_info['base_url'] + url_info['extra']
+        if self.bili_cdn_fallback is False:
+            return True
+        stream_info['url_info'].reverse()
+        # 检查直播流是否可用以倒叙尝试回退
+        for stream_url in stream_info['url_info']:
+            self.raw_stream_url = stream_url['host'] + stream_info['base_url'] + stream_url['extra']
+            if s.get(self.raw_stream_url, stream=True).status_code == 404:
+                continue
+            break
         return True
 
     async def danmaku_download_start(self, filename):
