@@ -71,13 +71,14 @@ class Bilibili(DownloadBase):
             return False
         streams = play_info['data']['playurl_info']['playurl']['stream']
         stream = streams[1] if protocol.startswith('hls') else streams[0]
-        if protocol == "hls_fmp4" and len(stream['format']) > 1:
-            stream_info = stream['format'][1]['codec'][0]
-        elif int(time.time()) - live_start_time <= 45:  # 等待45s，如果还没有fmp4流就回退到flv流
-            return False
-        else:
-            stream = streams[0]
-            logger.debug(f"获取{uname}房间fmp4流失败，回退到flv流")
+        if protocol == "hls_fmp4":
+            if len(stream['format']) > 1:
+                stream_info = stream['format'][1]['codec'][0]
+            elif int(time.time()) - live_start_time <= 45:  # 等待45s，如果还没有fmp4流就回退到flv流
+                return False
+            else:
+                stream = streams[0]
+                logger.debug(f"获取{uname}房间fmp4流失败，回退到flv流")
         stream_info = stream['format'][0]['codec'][0]
         stream_url = {'base_url': stream_info['base_url']}
         if perf_cdn is not None:
