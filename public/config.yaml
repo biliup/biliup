@@ -43,22 +43,23 @@ pool2_size: 3
 check_sourcecode: 15
 
 #########各平台分设置#########
+### 使用直播间封面作为投稿封面。此封面优先级低于单个主播指定的自定义封面。（直播封面将会保存于cover文件夹下，请自行定期删除）
+#use_live_cover: true
 
 #------斗鱼------#
-### 如遇到斗鱼录制卡顿可以尝试切换线路，tct-h5（备用线路5），ali-h5（备用线路6），akm-h5（主线路1）
+### 如遇到斗鱼录制卡顿可以尝试切换线路。可选以下线路
+### tctc-h5（备用线路4）, tct-h5（备用线路5）, ali-h5（备用线路6）, hw-h5（备用线路7）, hs-h5（备用线路13）
 #douyucdn: tct-h5
 # 录制斗鱼弹幕，目前暂时不支持视频按时长分段下的弹幕文件自动分段，只有使用ffmpeg（包括streamlink混合模式）作为下载器才支持，默认关闭默认关闭
 #douyu_danmaku: false
 
 #------虎牙------#
-### 如遇到虎牙录制卡顿可以尝试切换线路，AL, HW, TX, WS
+### 如遇到虎牙录制卡顿可以尝试切换线路，AL, HW, TX, WS, HS
 #huyacdn: AL
 ### 录制虎牙弹幕，目前暂时不支持视频按时长分段下的弹幕文件自动分段，只有使用ffmpeg（包括streamlink混合模式）作为下载器才支持，默认关闭默认关闭
 #huya_danmaku: false
 
 #------哔哩哔哩------#
-### 获取BILIBILI直播间封面并作为投稿封面。此封面优先级低于单个主播指定的自定义封面。（直播封面将会保存于cover文件夹下，请自行定期删除）
-#use_live_cover: true
 ### 录制BILIBILI弹幕，目前暂时不支持视频按时长分段下的弹幕文件自动分段，只有使用ffmpeg（包括streamlink混合模式）作为下载器才支持，默认关闭默认关闭
 # bilibili_danmaku: false
 ### 哔哩哔哩直播流协议.可选 stream（flv流）,hls_ts(ts流）与hls_fmp4（fmp4流），默认为stream
@@ -70,7 +71,7 @@ check_sourcecode: 15
 ### 哔哩哔哩直播优选CDN，默认无
 #bili_perfCDN: cn-gotcha01
 ### 哔哩哔哩直播强制原画（仅限HLS流的 cn-gotcha01 CDN），默认为关闭
-#bili_forceScoure: false
+#bili_force_source: false
 ### 自定义哔哩哔哩直播api，默认无
 #bili_liveapi: 'https://api.live.bilibili.com'
 ### CDN自动Fallback开关，默认为开启
@@ -83,9 +84,9 @@ check_sourcecode: 15
 ### 此功能目前会和stream-gears冲突导致很多分段，请考虑使用ffmpeg录制
 ### 如果海外机器需要使用此功能，需要在bili_liveapi中指定国内的反代API来获取cn-gotcha01的节点信息。
 ### 海外机的玩法：配合一个国内的机器（例如便宜的腾讯云，阿里云等等）自建反代api.live.bilibili.com
-### 如果海外机到联通或者移动网络线路还不错，就可以参考https://rec.danmuji.org/dev/bilibili-cdn/ 选取一些联通或者移动的节点并填入下面
+### 如果海外机到联通或者移动网络线路还不错，就可以参考***完整CDN列表***选取一些联通或者移动的节点并填入下面
 ### 每次会随机返回填入的其中一个线路，并且会自动判断所填入的节点是否可用
-#bili_force_cn01_domains: 'cn-gdst-cm-01-15.bilivideo.com,cn-gdst-cm-01-06.bilivideo.com,cn-fjqz-cm-01-06.bilivideo.com,cn-jssz-cm-01-02.bilivideo.com,cn-jxnc-cm-01-02.bilivideo.com'
+#bili_force_cn01_domains: 'cn-jxnc-cm-01-16.bilivideo.com,cn-gddg-cm-01-06.bilivideo.com,cn-fjqz-cm-01-06.bilivideo.com,cn-jssz-cm-01-02.bilivideo.com,cn-gddg-ct-01-12.bilivideo.com'
 
 #------YouTube------#
 ### 设置偏好的YouTube下载封装格式
@@ -99,7 +100,7 @@ check_sourcecode: 15
 ### 设置偏好的YouTube下载最高纵向分辨率
 ### 最高纵向分辨率，也就是xxxxP。如果youtube_prefer_vcodec指定AVC，将最高只能下载1080p的视频。
 #youtube_max_videosize: "5G"
-#youtube_max_resolution: 1440 
+#youtube_max_resolution: 1440
 ### 限制单个视频的最大大小。
 ### 注意：此参数优先级高于分辨率设置，并且不包括音频部分的大小，仅仅只是视频部分的大小。
 ### 如果某个视频实在没有低于此大小的分辨率版本，将会选择最低画质的版本下载。

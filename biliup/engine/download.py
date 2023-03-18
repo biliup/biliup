@@ -39,7 +39,7 @@ class DownloadBase:
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Encoding': 'gzip, deflate',
             'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
-            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:60.1) Gecko/20100101 Firefox/60.1'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36'
         }
 
         self.default_output_args = [
@@ -68,7 +68,7 @@ class DownloadBase:
         if self.downloader == 'stream-gears':
             stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
                                   config.get('file_size'))
-        elif self.downloader == 'streamlink': 
+        elif self.downloader == 'streamlink':
             parsed_url = urlparse(self.raw_stream_url)
             path = parsed_url.path
             if '.flv' in path: #streamlink无法处理flv,所以回退到ffmpeg
@@ -77,7 +77,24 @@ class DownloadBase:
                 self.streamlink_download(fmtname)
         else:
             self.ffmpeg_download(fmtname)
-  
+
+    def get_live_cover(self, uname, room_id, filename, timestamp, cover_url):
+        import requests
+        headers = self.fake_headers.copy()
+        response = requests.get(cover_url, headers=headers, timeout=5)
+        save_dir = f'cover/{uname}_{room_id}/'
+        local_time = time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime(timestamp))
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        cover_file_name = get_valid_filename(f'{filename}_{local_time}.png')
+        live_cover_path = f'{save_dir}{cover_file_name}'
+        if os.path.exists(live_cover_path):
+            return live_cover_path
+        else:
+            with open(live_cover_path, 'wb') as f:
+                f.write(response.content)
+                return live_cover_path
+
     def streamlink_download(self, filename): #streamlink+ffmpeg混合下载模式，适用于下载hls流
         streamlink_input_args = ['--stream-segment-threads', '5']
         streamlink_cmd = ['streamlink', *streamlink_input_args, self.raw_stream_url, 'best', '-O']
@@ -93,7 +110,7 @@ class DownloadBase:
         ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=streamlink_proc.stdout, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
             with ffmpeg_proc.stdout as stdout:
-                for line in iter(stdout.readline, b''):  
+                for line in iter(stdout.readline, b''):
                     decode_line = line.decode(errors='ignore')
                     print(decode_line, end='', file=sys.stderr)
                     logger.debug(decode_line.rstrip())
