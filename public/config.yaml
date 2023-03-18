@@ -54,7 +54,8 @@ check_sourcecode: 15
 #douyu_danmaku: false
 
 #------虎牙------#
-### 如遇到虎牙录制卡顿可以尝试切换线路，AL, HW, TX, WS, HS
+### 如遇到虎牙录制卡顿可以尝试切换线路。可选以下线路
+### AL（阿里云）, HW（华为云）, TX（腾讯云）, WS（网宿）, HS（火山引擎）, AL13（阿里云）, HW16（华为云）
 #huyacdn: AL
 ### 录制虎牙弹幕，目前暂时不支持视频按时长分段下的弹幕文件自动分段，只有使用ffmpeg（包括streamlink混合模式）作为下载器才支持，默认关闭默认关闭
 #huya_danmaku: false
@@ -154,25 +155,12 @@ streamers:
 #user:
     #------哔哩哔哩------#
     #------哔哩哔哩获取直播流用COOKIE------#
-    ### 参照https://github.com/BililiveRecorder/BililiveRecorder/issues/263
-    #bili_cookie: ''
+    ### 参照https://github.com/BililiveRecorder/BililiveRecorder/issues/263. 请至少填入以下项目.
+    #bili_cookie: 'SESSDATA=none; bili_jct=none;DedeUserID__ckMd5=none;DedeUserID=123;access_token=none;'
     ### 重要！！！
     ###是否将cookie传入第三方API。将Cookie传入未知的第三方API有几率泄露帐号登录信息。
     ###在开启了自定义Cookie（bili_cookie）又同时设置了第三方API（bili_liveapi）的情况下，如果打开了允许第三方API使用Cookie，那么就使用第三方API，如果没有允许（默认），那么设置的第三方API就不生效
     #customAPI_use_cookie : False
-
-    #------bili-web用（已过时，无视我）------#
-        #    cookies:
-        #       SESSDATA: your SESSDATA
-        #       bili_jct: your bili_jct
-        #       DedeUserID__ckMd5: your ckMd5
-        #       DedeUserID: your DedeUserID
-        #    access_token: your access_key
-        # account:
-        #     username: your usrname
-        #     password: your password
-    #    app_key: bca7e84c2d947ac6 ### 若账号密码方式无法登录可尝试更改此值
-    #    appsec: 60698ba2f68e01ce44738920a0ffe768
 
     #------抖音------#
     ### 如需要录制抖音请在此填入cookie需要__ac_nonce与__ac_signature的值
