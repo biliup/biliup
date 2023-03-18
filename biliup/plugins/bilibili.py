@@ -25,7 +25,7 @@ class Bilibili(DownloadBase):
         params = {
             'room_id': match1(self.url, r'/(\d+)'),
             'protocol': '0,1',# 0: http_stream, 1: http_hls
-            'format': '0,1',# 0: flv, 1: ts, 2: fmp4
+            'format': '0,1,2',# 0: flv, 1: ts, 2: fmp4
             'codec': '0', # 0: avc, 1: hevc
             'qn': '10000',
             'platform': config.get('biliplatform', 'web'),
@@ -110,7 +110,7 @@ class Bilibili(DownloadBase):
                 stream_url['host'] = "https://" + host
             # 强制去除 hls_ts 的 _bluray 文件名
             if force_source:
-                stream_url['base_url'] = re.sub(r'_bluray(?=\.m3u8)?', "", stream_url['base_url'])
+                stream_url['base_url'] = re.sub(r'_bluray(?=\.m3u8)?', "", stream_url['base_url'], 1)
         self.raw_stream_url = stream_url['host'] + stream_url['base_url'] + stream_url['extra']
         # 强制替换ov05 302redirect之后的真实地址为指定的域名或ip达到自选ov05节点的目的
         if ov05_ip and "ov-gotcha05" in stream_url['host']:
