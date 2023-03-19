@@ -23,7 +23,6 @@ class Youtube(DownloadBase):
         self.filesize = config.get('youtube_max_videosize','100G')
         self.beforedate = config.get('youtube_before_date','20770707')
         self.afterdate = config.get('youtube_after_date','19700101')
-
         self.use_youtube_cover = config.get('use_youtube_cover', False)
 
     def check_stream(self):
