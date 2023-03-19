@@ -78,8 +78,10 @@ class Bilibili(DownloadBase):
                 return False
             else:
                 stream = streams[0]
+                stream_info = stream['format'][0]['codec'][0]
                 logger.debug(f"获取{uname}房间fmp4流失败，回退到flv流")
-        stream_info = stream['format'][0]['codec'][0]
+        else:
+            stream_info = stream['format'][0]['codec'][0]
         stream_url = {'base_url': stream_info['base_url']}
         if perf_cdn is not None:
             for url_info in stream_info['url_info']:
@@ -87,7 +89,7 @@ class Bilibili(DownloadBase):
                     stream_url['host'] = url_info['host']
                     stream_url['extra'] = url_info['extra']
                     logger.debug(f"找到了perfCDN{stream_url['host']}")
-        else:
+        if len(stream_url) < 3:
             stream_url['host'] = stream_info['url_info'][-1]['host']
             stream_url['extra'] = stream_info['url_info'][-1]['extra']
         if "cn-gotcha01" in stream_url['extra']:
