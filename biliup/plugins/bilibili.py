@@ -30,7 +30,7 @@ class Bilibili(DownloadBase):
             'room_id': match1(self.url, r'/(\d+)'),
             'protocol': '0,1',
             'format': '0,1,2',
-            'codec': '0,1',
+            'codec': '0',
             'qn': '10000',
             'platform': config.get('biliplatform', 'web'),
             # 'ptype': '8',
