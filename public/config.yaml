@@ -108,6 +108,10 @@ check_sourcecode: 15
 #youtube_max_videosize: "5G" ###参考格式，例如100M，5G，10G。
 ### YouTube转载视频自动获取视频封面并用于作投稿封面。获取webp封面之后自动转换格式为jpg，并保存在cover/youtube文件夹中，请注意定期清理。
 #use_youtube_cover: true
+### 仅下载该日期之后的视频
+#youtube_after_date: '20220201'
+### 仅下载该日期之前的视频（可与上面的youtube_after_date配合使用，构成指定下载范围区间）
+#youtube_before_date: '20230501'
 
 #########录制主播设置#########
 streamers:

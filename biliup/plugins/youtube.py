@@ -4,6 +4,7 @@ import time
 from PIL import Image
 from yt_dlp.utils import MaxDownloadsReached
 
+from yt_dlp.utils import DateRange
 from biliup.config import config
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
@@ -20,6 +21,8 @@ class Youtube(DownloadBase):
         self.acodec = config.get('youtube_prefer_acodec','opus|mp4a')
         self.resolution = config.get('youtube_max_resolution','4320')
         self.filesize = config.get('youtube_max_videosize','100G')
+        self.beforedate = config.get('youtube_before_date','20770707')
+        self.afterdate = config.get('youtube_after_date','19700101')
         self.use_youtube_cover = config.get('use_youtube_cover', False)
 
     def check_stream(self):
@@ -62,6 +65,8 @@ class Youtube(DownloadBase):
                 # 'proxy': proxyUrl,
                 'ignoreerrors': True,
                 'max_downloads': 1,
+                'daterange' : DateRange(self.afterdate, self.beforedate),
+                'break_on_reject': True,
                 'download_archive': 'archive.txt',
             }
             if self.use_youtube_cover is True:
@@ -83,6 +88,9 @@ class Youtube(DownloadBase):
             elif os.path.exists(jpg_cover_path):
                 os.rename(jpg_cover_path, f'{save_dir}{filename}.jpg')
                 self.live_cover_path = f'{save_dir}{filename}.jpg'
+            return False
+        except yt_dlp.utils.RejectedVideoReached:
+            logger.info("已下载完毕指定日期内的视频，结束本次任务")
             return False
         except yt_dlp.utils.DownloadError:
             logger.exception(self.fname)
