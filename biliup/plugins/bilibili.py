@@ -61,11 +61,9 @@ class Bilibili(DownloadBase):
                     super().get_live_cover(uname, params['room_id'], self.room_title, live_start_time, cover_url)
                 except:
                     logger.error(f"获取直播封面失败")
-            custom_api = config.get('bili_liveapi') is not None
             # 当 Cookie 存在，并且自定义APi使用Cookie开关关闭时，仅使用官方 Api
-            if config.get('user', {}).get('bili_cookie') and self.customAPI_use_cookie:
-                custom_api = False
-            play_info = get_play_info(s, custom_api, official_api_host, params)
+            isallow = True if s.headers.get('cookie') is not None and self.customAPI_use_cookie else False
+            play_info = get_play_info(s, isallow, official_api_host, params)
         if play_info['code'] != 0:
             logger.debug(play_info['message'])
             return False
@@ -145,11 +143,11 @@ class Bilibili(DownloadBase):
             # asyncio.run(self.danmaku.stop())
 
 
-def get_play_info(s, custom_api, official_api_host, params):
-    if custom_api:
+def get_play_info(s, isallow, official_api_host, params):
+    if isallow:
         custom_api_host = \
-            (lambda a: a if a.startswith(('http://', 'https://')) else 'http://' + a)(config.get('bili_liveapi')
-                                                                                      .rstrip('/'))
+            (lambda a: a if a.startswith(('http://', 'https://')) else 'http://' + a) \
+            (config.get('bili_liveapi').rstrip('/'))
         try:
             return s.get(custom_api_host + '/xlive/web-room/v2/index/getRoomPlayInfo', params=params,
                          timeout=5).json()
