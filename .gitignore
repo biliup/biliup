@@ -7,7 +7,7 @@
 *.part
 backup
 venv./
-config.yaml
+config*.yaml
 !public/config.yaml
 /configlog.ini
 ds_update.log*
@@ -16,6 +16,7 @@ ds_update.log*
 *.egg-info
 dist/
 build/
+cover/
 
 *.back
 bili.cookie.json
