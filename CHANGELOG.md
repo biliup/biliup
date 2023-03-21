@@ -4,7 +4,12 @@
 - 💡新添加的功能
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
-- 
+
+## 0.4.15
+- 更新时间：2023.03.21
+- 🔧修复上一版本关于b站下载部分的优化相关的问题。[@xxxxuanran](https://github.com/xxxxuanran)
+- 🔧优化YouTube下载相关参数。[@haha114514](https://github.com/haha114514)
+
 ## 0.4.14
 - 更新时间：2023.03.19
 - 🔧回滚@xxxxuanran关于b站下载部分的优化。[@haha114514](https://github.com/haha114514)
