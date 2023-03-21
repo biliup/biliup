@@ -63,7 +63,6 @@ check_sourcecode = 15
 #huya_danmaku = false
 
 #------哔哩哔哩------#
-
 ### 录制BILIBILI弹幕，目前暂时不支持视频按时长分段下的弹幕文件自动分段，默认关闭
 # bilibili_danmaku = false
 ### 哔哩哔哩直播流协议.可选 stream（flv流）,hls_ts(ts流）与hls_fmp4（fmp4流），默认为stream
