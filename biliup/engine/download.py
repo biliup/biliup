@@ -96,7 +96,7 @@ class DownloadBase:
                 return live_cover_path
 
     def streamlink_download(self, filename): #streamlink+ffmpeg混合下载模式，适用于下载hls流
-        streamlink_input_args = ['--stream-segment-threads', '5']
+        streamlink_input_args = ['--stream-segment-threads', '6', '--hls-playlist-reload-attempts', '1']
         streamlink_cmd = ['streamlink', *streamlink_input_args, self.raw_stream_url, 'best', '-O']
         ffmpeg_input_args = ['-reconnect_streamed', '1', '-reconnect_delay_max', '20', '-rw_timeout', '20000000']
         ffmpeg_cmd = ['ffmpeg', '-re', '-i', 'pipe:0', '-y',*ffmpeg_input_args, *self.default_output_args, *self.opt_args, '-c', 'copy', '-f', self.suffix]

@@ -4,6 +4,19 @@
 - 💡新添加的功能
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
+- 
+## 0.4.14
+- 更新时间：2023.03.19
+- 🔧回滚@xxxxuanran关于b站下载部分的优化。[@haha114514](https://github.com/haha114514)
+
+## 0.4.13 ⚠️⚠️有重大问题，请勿使用该版本。
+- 更新时间：2023.03.19
+- 🔧优化部分下载逻辑，并将封面下载功能移动到download.py中，方便以后适配更多平台的直播间封面下载。[@xxxxuanran](https://github.com/xxxxuanran)
+- 🔧修复配置文件错误。[@xxxxuanran](https://github.com/xxxxuanran)
+- 🔧优化streamlink下载参数。[@haha114514](https://github.com/haha114514)
+- 💡新增跳过斗鱼scdn，并增加了斗鱼与虎牙最新的CDN的支持。[@xxxxuanran](https://github.com/xxxxuanran)
+- 💡新增指定YouTube视频下载时间范围区间的功能。[@haha114514](https://github.com/haha114514)
+- ⚠️上一条由于为Config新增了一些设置，如需使用相关功能请参考最新的config示例添加缺失的部分。
 
 ## 0.4.12
 - 更新时间：2023.03.17
