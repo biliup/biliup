@@ -14,7 +14,6 @@ class Bilibili(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
         self.fake_headers['Referer'] = 'https://live.bilibili.com'
-        self.customAPI_use_cookie = config.get('user', {}).get('customAPI_use_cookie', False)
         self.use_live_cover = config.get('use_live_cover', False)
         self.bilibili_danmaku = config.get('bilibili_danmaku', False)
         if config.get('user', {}).get('bili_cookie') is not None:
@@ -62,7 +61,7 @@ class Bilibili(DownloadBase):
                 except:
                     logger.error(f"获取直播封面失败")
             # 当 Cookie 存在，并且自定义APi使用Cookie开关关闭时，仅使用官方 Api
-            isallow = True if s.headers.get('cookie') is not None and self.customAPI_use_cookie else False
+            isallow = True if s.headers.get('cookie') is None else config.get('user', {}).get('customAPI_use_cookie', False)
             play_info = get_play_info(s, isallow, official_api_host, params)
         if play_info['code'] != 0:
             logger.debug(play_info['message'])
@@ -96,22 +95,22 @@ class Bilibili(DownloadBase):
                 import random
                 i = len(cn01_domains)
                 while i:  # 测试节点是否可用
+                    host = cn01_domains.pop(random.choice(range(i)))
                     i-=1
-                    host = cn01_domains[i]
                     try:
                         if s.get(f"https://{host}{stream_url['base_url']}{stream_url['extra']}",
                                             stream=True).status_code == 200:  # 如果响应状态码是 200，跳出循环
+                            stream_url['host'] = "https://" + host
+                            logger.debug(f"节点 {host} 可用，替换为该节点")
                             break
                     except requests.exceptions.ConnectionError:  # 如果发生连接异常，继续下一次循环
                         logger.debug(f"节点 {host} 无法访问，尝试下一个节点。")
                         continue
                 else:
                     logger.error(f"配置文件中的cn-gotcha01节点均不可用")
-                logger.debug(f"节点 {host} 可用，替换为该节点")
-                stream_url['host'] = "https://" + host
             # 强制去除 hls_ts 的 _bluray 文件名
             if force_source:
-                stream_url['base_url'] = re.sub(r'_bluray(?=\.m3u8)?', "", stream_url['base_url'], 1)
+                stream_url['base_url'] = re.sub(r'_bluray(?=\.m3u8)', "", stream_url['base_url'], 1)
         self.raw_stream_url = stream_url['host'] + stream_url['base_url'] + stream_url['extra']
         # 强制替换ov05 302redirect之后的真实地址为指定的域名或ip达到自选ov05节点的目的
         if ov05_ip and "ov-gotcha05" in stream_url['host']:
