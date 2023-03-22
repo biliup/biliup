@@ -83,7 +83,6 @@ check_sourcecode = 15
 #bili_force_ov05_ip = "163.171.197.234"
 ### 强制替换cn-gotcha01（叔叔自建，理论上最稳定）为指定的自选域名组（可多个域名，请用逗号分隔）
 ### 完整CDN列表请参考 https://rec.danmuji.org/dev/bilibili-cdn/ 中"B站视频云"的部分
-### 此功能需要设置bili_perfCDN为cn-gotcha01，并且设置bili_protocol为hls。
 ### 此功能目前会和stream-gears冲突导致很多分段，请考虑使用ffmpeg录制
 ### 如果海外机器需要使用此功能，需要在bili_liveapi中指定国内的反代API来获取cn-gotcha01的节点信息。
 ### 海外机的玩法：配合一个国内的机器（例如便宜的腾讯云，阿里云等等）自建反代api.live.bilibili.com
