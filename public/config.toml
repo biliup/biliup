@@ -160,7 +160,7 @@ tags = [ "biliup", "视频标签" ]
 #------哔哩哔哩获取直播流用COOKIE------#
 ### 可参照https://github.com/BililiveRecorder/BililiveRecorder/issues/263.
 ### 也可使用biliup-rs来获取以下项目.
-#bili_cookie: 'SESSDATA=none;bili_jct=none;DedeUserID__ckMd5=none;DedeUserID=none;access_token=none;'
+#bili_cookie = 'SESSDATA=none;bili_jct=none;DedeUserID__ckMd5=none;DedeUserID=none;access_token=none;'
 ### 重要！！！
 ###是否将cookie传入第三方API。将Cookie传入未知的第三方API有几率泄露帐号登录信息。
 ###在开启了自定义Cookie（bili_cookie）又同时设置了第三方API（bili_liveapi）的情况下，如果打开了允许第三方API使用Cookie，那么就使用第三方API，如果没有允许（默认），那么设置的第三方API就不生效
