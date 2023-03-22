@@ -5,6 +5,11 @@
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 0.4.16
+- 更新时间：2023.03.23
+- 🔧修复B站自定义API不生效的问题。[@xxxxuanran](https://github.com/xxxxuanran)
+- 🔧修复部分config示例的错误。[@haha114514](https://github.com/haha114514)
+
 ## 0.4.15
 - 更新时间：2023.03.21
 - 🔧修复上一版本关于b站下载部分的优化相关的问题。[@xxxxuanran](https://github.com/xxxxuanran)
