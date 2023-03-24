@@ -146,7 +146,7 @@ def get_play_info(s, isallow, official_api_host, params):
     if isallow:
         custom_api_host = \
             (lambda a: a if a.startswith(('http://', 'https://')) else 'http://' + a) \
-            (config.get('bili_liveapi').rstrip('/'))
+            (config.get('bili_liveapi', official_api_host).rstrip('/'))
         try:
             return s.get(custom_api_host + '/xlive/web-room/v2/index/getRoomPlayInfo', params=params,
                          timeout=5).json()
