@@ -5,7 +5,11 @@
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
-## 0.4.16
+## 0.4.17
+- 更新时间：2023.03.24
+- 🔧修复不填B站自定义API就无法开始录制的问题。[@xxxxuanran](https://github.com/xxxxuanran)
+
+## 0.4.16 ⚠️⚠️有重大问题，请勿使用该版本。
 - 更新时间：2023.03.23
 - 🔧修复B站自定义API不生效的问题。[@xxxxuanran](https://github.com/xxxxuanran)
 - 🔧修复部分config示例的错误。[@haha114514](https://github.com/haha114514)
