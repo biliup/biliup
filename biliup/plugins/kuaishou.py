@@ -17,7 +17,7 @@ class Kuaishou(DownloadBase):
             res = s.get(self.url, timeout=5, headers=self.fake_headers)
         initial_state = res.text.split('window.__INITIAL_STATE__=')[1].split(';(')[0]
         liveroom = json.loads(initial_state)['liveroom']
-        if not liveroom['errorType']['type']:
+        if liveroom['errorType']['type'] != '1':
             logger.error("直播间不存在或链接错误")
             return False
         liveStream = liveroom['liveStream']
