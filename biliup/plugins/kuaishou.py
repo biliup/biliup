@@ -17,7 +17,7 @@ class Kuaishou(DownloadBase):
             res = s.get(self.url, timeout=5, headers=self.fake_headers)
         initial_state = res.text.split('window.__INITIAL_STATE__=')[1].split(';(')[0]
         liveroom = json.loads(initial_state)['liveroom']
-        if liveroom['errorType']['type'] != '1':
+        if liveroom['errorType']['type'] != 1:
             logger.error("直播间不存在或链接错误")
             return False
         liveStream = liveroom['liveStream']
@@ -26,7 +26,7 @@ class Kuaishou(DownloadBase):
             return False
         self.raw_stream_url = liveStream['playUrls'][0]['adaptationSet']['representation'][-1]['url']
         self.room_title = liveStream['caption']
-        author = liveroom['author']
+        # author = liveroom['author']
         # if self.use_live_cover is True:
         #     try:
         #         self.live_cover_path = \
