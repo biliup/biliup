@@ -68,7 +68,7 @@ check_sourcecode = 15
 ### 哔哩哔哩直播流协议.可选 stream（flv流）,hls_ts(ts流）与hls_fmp4（fmp4流），默认为stream
 ### 仅国内IP可以解析到fmp4流。海外IP只能获取到flv流（ov05与ov07）和ts流（ov105）
 ### 由于fmp4出现需要一定时间，或者某些小主播（大部分只有原画选项的主播）无fmp4流。
-### 目前的策略是，如果开播时间小于45s，将会反复尝试获取fmp4流，如果没获取到就回退到flv流。
+### 目前的策略是，如果开播时间小于60s，将会反复尝试获取fmp4流，如果没获取到就回退到flv流。
 ### 由于ffmpeg只能单线程下载，并且stream-gears录制有问题，所以目前fmp4流只能使用streamlink+ffmpeg混合模式。
 #bili_protocol = "stream"
 ### 哔哩哔哩直播优选CDN，默认无

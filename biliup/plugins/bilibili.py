@@ -71,7 +71,7 @@ class Bilibili(DownloadBase):
         if protocol == "hls_fmp4":
             if len(stream['format']) > 1:
                 stream_info = stream['format'][1]['codec'][0]
-            elif int(time.time()) - live_start_time <= 45:  # 等待45s，如果还没有fmp4流就回退到flv流
+            elif int(time.time()) - live_start_time <= 60:  # 等待60s，如果还没有fmp4流就回退到flv流
                 return False
             else:
                 stream = streams[0]
