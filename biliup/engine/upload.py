@@ -53,10 +53,10 @@ class UploadBase:
                     logger.info(f'过滤删除-{r}')
             if ext == '.xml': #过滤不存在对应视频的xml弹幕文件
                 xml_file_name = name
-                media_regex = re.compile(r'^{}({})(\.part)?$'.format(
-                    re.escape(xml_file_name), '|'.join(map(re.escape, media_extensions))
+                media_regex = re.compile(r'^{}(\.(mp4|flv|ts))?$'.format(
+                    re.escape(xml_file_name)
                 ))
-                if not any(media_regex.match(x) for x in file_list):
+                if not any(media_regex.match(f'{xml_file_name}{ext2}') for ext2 in media_extensions for x in file_list):
                     self.remove_file(r)
                     logger.info(f'无视频，已过滤删除-{r}')
         file_list = UploadBase.file_list(index)
