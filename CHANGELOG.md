@@ -13,6 +13,7 @@
 - 🔧增加B站fmp4流的等待时间，因为有些主播开播到推流时间较慢。[@zclkkk](https://github.com/zclkkk)
 - 💡B站直播优选CDN支持同时添加多个节点。[@haha114514](https://github.com/haha114514)
 - 💡新增B站自定义fmp4流获取不到时，重新获取一遍flv直播流的API。[@haha114514](https://github.com/haha114514)
+- 💡新增对快手平台的支持。[@xxxxuanran](https://github.com/xxxxuanran)
 
 ## 0.4.17
 - 更新时间：2023.03.24
