@@ -23,7 +23,7 @@ filtering_threshold = 20
 #submit_api = "client"
 # 选择全局默认上传插件，Noop为不上传，但会执行后处理,可选bili_web，biliup-rs
 #uploader = "Noop"
-# b站上传线路选择，默认为自动模式，目前可手动切换为bda2, kodo, ws, qn, cos, cos-internal(支持腾讯云内网免流+提速)
+# b站上传线路选择，默认为自动模式，目前可手动切换为bda2, kodo, ws, qn, cos, cos-internal(支持腾讯云内网免流+提速，目前已失效)
 lines = "AUTO"
 # 单文件并发上传数，未达到带宽上限时增大此值可提高上传速度
 threads = 3
@@ -72,11 +72,16 @@ check_sourcecode = 15
 ### 由于ffmpeg只能单线程下载，并且stream-gears录制有问题，所以目前fmp4流只能使用streamlink+ffmpeg混合模式。
 #bili_protocol = "stream"
 ### 哔哩哔哩直播优选CDN，默认无
-#bili_perfCDN = "cn-gotcha01"
+#bili_perfCDN = "cn-gotcha208,ov-gotcha05"
 ### 哔哩哔哩直播强制原画（仅限HLS流的 cn-gotcha01 CDN），默认为关闭
 #bili_force_source = false
-### 自定义哔哩哔哩直播api，默认无
+### 自定义哔哩哔哩直播API，用于获取指定区域（大陆或者海外）的直播流链接，默认使用官方API。
 #bili_liveapi = "https://api.live.bilibili.com"
+### 自定义fmp4流获取不到时，重新获取一遍flv直播流的api，默认不重新使用其他api重新获取一遍。
+### 海外机器玩法：bili_liveapi设置为能获取大陆直播流的API，并将bili_fallback_api设置为官方API，然后优选fmp4流并使用streamlink下载器，最后设置优选cn-gotcha208,ov-gotcha05两个节点。
+### 大陆机器玩法：bili_liveapi取消注释保持默认使用官方API，并将bili_fallback_api设置为能获取到海外节点API，然后优选fmp4流并使用streamlink下载器，最后设置优选cn-gotcha208,ov-gotcha05两个节点。
+### 这样大主播可以使用cn208的fmp4流稳定录制（海外机如需可以通过自建dns优选指定线路的cn208节点），没有fmp4流的小主播也可以回退到ov05（网宿线路，包括大陆与海外节点）录制flv流。
+#bili_fallback_api = 'https://api.live.bilibili.com'
 ### CDN自动Fallback开关，默认为开启
 #bili_cdn_fallback = true
 ### 强制替换ov-gotcha05的下载地址为指定的自选IP
@@ -143,7 +148,7 @@ uploader = "biliup-rs"  # 覆盖全局默认上传插件，Noop为不上传，�
 user_cookie = "cookies.json" # 使用指定的账号上传
 #use_live_cover = true # 获取BILIBILI直播间封面并作为投稿封面。此封面优先级低于单个主播指定的自定义封面。
 tags = [ "biliup", "视频标签" ]
-format = "mp4" # 视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg。
+format = "mp4" # 视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg或者streamlink。
 # 上传完成后，将按自定义顺序执行自定义操作
 #postprocessor = [
 #    {run = "echo hello!"}, # 执行任意命令，等同于在shell中运行,视频文件路径作为标准输入传入

@@ -36,6 +36,7 @@ class Bilibili(DownloadBase):
         bili_cdn_fallback = config.get('bili_cdn_fallback', True)
         force_source = config.get('bili_force_source', False)
         ov05_ip = config.get('bili_force_ov05_ip')
+        bili_fallback_api = config.get('bili_fallback_api')
         cn01_domains = config.get('bili_force_cn01_domains', '').split(",")
         official_api_host = "https://api.live.bilibili.com"
         with requests.Session() as s:
@@ -53,7 +54,8 @@ class Bilibili(DownloadBase):
             cover_url = room_info['data']['room_info']['cover']
             live_start_time = room_info['data']['room_info']['live_start_time']
             uname = room_info['data']['anchor_info']['base_info']['uname']
-            self.room_title = room_info['data']['room_info']['title']
+            if self.room_title is None:
+                self.room_title = room_info['data']['room_info']['title']
             if self.use_live_cover is True:  # 获取直播封面并保存到cover目录下
                 try:
                     self.live_cover_path = \
@@ -74,6 +76,9 @@ class Bilibili(DownloadBase):
             elif int(time.time()) - live_start_time <= 60:  # 等待60s，如果还没有fmp4流就回退到flv流
                 return False
             else:
+                if bili_fallback_api: #找不到fmp4流就自动回退到指定API请求flv流，适用于海外机下载
+                    play_info = s.get(bili_fallback_api + '/xlive/web-room/v2/index/getRoomPlayInfo', params=params, timeout=5).json()
+                    streams = play_info['data']['playurl_info']['playurl']['stream']
                 stream = streams[0]
                 stream_info = stream['format'][0]['codec'][0]
                 logger.debug(f"获取{uname}房间fmp4流失败，回退到flv流")
@@ -81,11 +86,16 @@ class Bilibili(DownloadBase):
             stream_info = stream['format'][0]['codec'][0]
         stream_url = {'base_url': stream_info['base_url']}
         if perf_cdn is not None:
+            perf_cdn_list = perf_cdn.split(',')
             for url_info in stream_info['url_info']:
-                if perf_cdn in url_info['extra']:
-                    stream_url['host'] = url_info['host']
-                    stream_url['extra'] = url_info['extra']
-                    logger.debug(f"找到了perfCDN{stream_url['host']}")
+                for cdn in perf_cdn_list:
+                    if cdn in url_info['extra']:
+                        stream_url['host'] = url_info['host']
+                        stream_url['extra'] = url_info['extra']
+                        logger.debug(f"找到了perfCDN{stream_url['host']}")
+                        break
+                if 'host' in stream_url:
+                    break
         if len(stream_url) < 3:
             stream_url['host'] = stream_info['url_info'][-1]['host']
             stream_url['extra'] = stream_info['url_info'][-1]['extra']

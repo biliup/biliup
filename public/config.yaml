@@ -36,9 +36,9 @@ event_loop_interval: 40
 ### 相同平台检测间隔，单位：秒。不同平台的链接是并发的，不受此参数影响
 checker_sleep: 15
 ### 线程池1大小，负责download事件
-pool1_size: 3
+pool1_size: 5
 ### 线程池2大小，处理除download事件外所有其他事件
-pool2_size: 3
+pool2_size: 5
 ### 检测源码文件变化间隔，单位：秒，检测源码到变化后，程序会在空闲时自动重启
 check_sourcecode: 15
 
@@ -69,17 +69,22 @@ check_sourcecode: 15
 ### 目前的策略是，如果开播时间小于60s，将会反复尝试获取fmp4流，如果没获取到就回退到flv流。
 ### 由于ffmpeg只能单线程下载，并且stream-gears录制有问题，所以目前fmp4流只能使用streamlink+ffmpeg混合模式。
 #bili_protocol: stream
-### 哔哩哔哩直播优选CDN，默认无
-#bili_perfCDN: cn-gotcha01
+### 哔哩哔哩直播优选CDN，默认无，支持同时填入多个CDN节点。
+#bili_perfCDN: 'cn-gotcha208,ov-gotcha05'
 ### 哔哩哔哩直播强制原画（仅限HLS流的 cn-gotcha01 CDN），默认为关闭
 #bili_force_source: false
-### 自定义哔哩哔哩直播api，默认无
+### 自定义哔哩哔哩直播API，用于获取指定区域（大陆或者海外）的直播流链接，默认使用官方API。
 #bili_liveapi: 'https://api.live.bilibili.com'
+### 自定义fmp4流获取不到时，重新获取一遍flv直播流的api，默认不重新使用其他api重新获取一遍。
+### 海外机器玩法：bili_liveapi设置为能获取大陆直播流的API，并将bili_fallback_api设置为官方API，然后优选fmp4流并使用streamlink下载器，最后设置优选cn-gotcha208,ov-gotcha05两个节点。
+### 大陆机器玩法：bili_liveapi取消注释保持默认使用官方API，并将bili_fallback_api设置为能获取到海外节点API，然后优选fmp4流并使用streamlink下载器，最后设置优选cn-gotcha208,ov-gotcha05两个节点。
+### 这样大主播可以使用cn208的fmp4流稳定录制（海外机如需可以通过自建dns优选指定线路的cn208节点），没有fmp4流的小主播也可以会退到ov05录制flv流。
+#bili_fallback_api: 'https://api.live.bilibili.com'
 ### CDN自动Fallback开关，默认为开启
 #bili_cdn_fallback: true
 ### 强制替换ov-gotcha05的下载地址为指定的自选IP
 #bili_force_ov05_ip: '163.171.197.234'
-### 强制替换cn-gotcha01（叔叔自建，理论上最稳定）为指定的自选域名组（可多个域名，请用逗号分隔）
+### 强制替换cn-gotcha01（叔叔自建）为指定的自选域名组（可多个域名，请用逗号分隔）
 ### 完整CDN列表请参考 https://rec.danmuji.org/dev/bilibili-cdn/ 中"B站视频云"的部分
 ### 此功能目前会和stream-gears冲突导致很多分段，请考虑使用ffmpeg录制
 ### 如果海外机器需要使用此功能，需要在bili_liveapi中指定国内的反代API来获取cn-gotcha01的节点信息。
@@ -149,7 +154,7 @@ streamers:
         tags:
             - biliup
             - 视频标签
-        format: mp4 ### 视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg。
+        format: mp4 ### 视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg或者streamlink。
         opt_args: ### ffmpeg参数
             - '-ss' # 跳过开始的16秒
             - '00:00:16'
