@@ -58,7 +58,11 @@ $ biliup --config ./config.yaml start
 ```
 从 v0.2.15 版本开始，配置文件支持 toml 格式，详见 [config.toml](https://github.com/biliup/biliup/blob/master/public/config.toml)，
 yaml配置文件完整内容可参照 [config.yaml](https://github.com/ForgQi/bilibiliupload/blob/master/public/config.yaml)。
-__FFmpeg__ 作为可选依赖。如果还有问题可以 [加群讨论](https://github.com/ForgQi/biliup/discussions/58#discussioncomment-2388776) 。
+
+__FFmpeg__ 作为可选依赖。由于各发行版提供的FFmpeg版本并不统一，为了避免问题，建议使用 @q3aql 的static builds。
+[FFmpeg-builds](https://gitlab.com/q3aql/ffmpeg-builds)
+
+如果还有问题可以 [加群讨论](https://github.com/ForgQi/biliup/discussions/58#discussioncomment-2388776) 。
 
 > 使用上传功能需要登录B站，通过 [命令行投稿工具](https://github.com/ForgQi/biliup-rs) 获取 cookies.json，并放入启动 biliup 的路径即可
 
