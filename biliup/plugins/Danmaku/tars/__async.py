@@ -25,8 +25,6 @@
 import queue
 import threading
 
-from urllib3.connectionpool import xrange
-
 from biliup.plugins.Danmaku.tars.__logger import tarsLogger
 from biliup.plugins.Danmaku.tars.__packet import ResponsePacket
 from biliup.plugins.Danmaku.tars.__servantproxy import ServantProxy
@@ -118,7 +116,7 @@ class AsyncProcThread:
         @rtype: None
         '''
         tarsLogger.debug('AsyncProcThread:start')
-        for i in xrange(self.__nrunner):
+        for i in range(self.__nrunner):
             runner = AsyncProcThreadRunner()
             runner.initialize(self)
             runner.start()
