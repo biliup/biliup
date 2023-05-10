@@ -5,6 +5,11 @@
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 0.4.19
+- 更新时间：2023.05.11
+- 🔧修复新版本urllib3.connectionpool下xrange报错的问题。[@zclkkk](https://github.com/zclkkk)
+- 🔧修复新版本urllib3 2下method_whitelist报错的问题。[@Weidows](https://github.com/Weidows)
+
 ## 0.4.18
 - 更新时间：2023.04.21
 - 🔧修复录制B站直播，自动上传标题里面的title为下播前的最后一个标题的bug（正确的应该是开播之后的第一个标题）。[@haha114514](https://github.com/haha114514)
