@@ -33,10 +33,16 @@ class Douyin(DownloadBase):
                 rid = rex.findall(txt)[0]    
         else:
             rid = self.url.split("live.douyin.com/")[1]
-        r1 = requests.get('https://live.douyin.com/' + rid, headers=headers).text \
-            .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]
-        r2 = urllib.request.unquote(r1)
-        room_info = json.loads(r2)['app']['initialState']['roomStore']['roomInfo']['room']
+        try:
+            r1 = requests.get('https://live.douyin.com/' + rid, headers=headers).text \
+                .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]
+            r2 = urllib.request.unquote(r1)
+            room_info = json.loads(r2)['app']['initialState']['roomStore']['roomInfo']['room']
+        except:
+            r1 = None
+            r2 = None
+            room_info = None
+            return False
         if room_info.get('status') != 2:
             logger.debug("主播未开播")
             return False
