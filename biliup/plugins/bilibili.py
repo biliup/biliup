@@ -136,7 +136,7 @@ class Bilibili(DownloadBase):
                         if s.get(self.raw_stream_url, stream=True).status_code == 200:
                             break
             except Exception:
-                logger.error('')
+                pass
         return True
 
     async def danmaku_download_start(self, filename):

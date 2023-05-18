@@ -31,7 +31,7 @@ class Huya(DownloadBase):
             else:
                 huya = None
         if huya:
-            huyacdn = config.get('huyacdn') if config.get('huyacdn') else 'AL'
+            huyacdn = config.get('huyacdn', 'AL')
             huyajson1 = json.loads(huya)['data'][0]['gameStreamInfoList']
             huyajson2 = json.loads(huya)['vMultiStreamInfo']
             ratio = huyajson2[0]['iBitRate']
