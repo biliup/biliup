@@ -39,9 +39,6 @@ class Douyin(DownloadBase):
             r2 = urllib.request.unquote(r1)
             room_info = json.loads(r2)['app']['initialState']['roomStore']['roomInfo']['room']
         except:
-            r1 = None
-            r2 = None
-            room_info = None
             return False
         if room_info.get('status') != 2:
             logger.debug("主播未开播")
