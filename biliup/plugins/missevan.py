@@ -31,7 +31,7 @@ class Missevan(DownloadBase):
                 end = user_page.text.find('"', start)
                 rid = user_page.text[start:end]
             else:
-                logger.error(user_page.status_code)
+                logger.debug(user_page.status_code)
         if self.url.split("live"):
             rid = match1(self.url, r'/(\d+)')
 
@@ -39,13 +39,13 @@ class Missevan(DownloadBase):
 
         # 无直播间的情况
         if room_info['code'] != 0:
-            logger.error(room_info['info'])
+            logger.debug(room_info['info'])
             return False
 
         # 开播状态
         if room_info['info']['room']['status']['open'] == 0:
             creator_username = room_info['info']['room']['creator_username']
-            logger.error(f"猫耳FM：主播{creator_username}未开播")
+            logger.debug(f"主播{creator_username}未开播")
             return False
 
         self.room_title = room_info['info']['room']['name']
