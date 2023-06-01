@@ -32,11 +32,11 @@
     [streamers."1xx直播录像"] # 设置直播间1
     url = ["https://www.twitch.tv/1xx"]
     tags = ["biliup"]
-   
+
     # 设置直播间2
     [streamers."2xx直播录像"]
     url = ["https://www.twitch.tv/2xx"]
-    tags = ["biliup"]            
+    tags = ["biliup"]
     ```
 2. 安装 __pip__ 并通过 pip 安装 __biliup__：
 `pip3 install biliup`
