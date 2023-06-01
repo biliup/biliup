@@ -19,8 +19,11 @@ class Huya(DownloadBase):
 
     def check_stream(self):
         logger.debug(self.fname)
-        res = requests.get(self.url, timeout=5, headers=self.fake_headers)
-        res.close()
+        try:
+            res = requests.get(self.url, timeout=5, headers=self.fake_headers)
+            res.close()
+        except:
+            return False
         huya = None
         if match1(res.text, '"stream": "([a-zA-Z0-9+=/]+)"'):
             huya = base64.b64decode(match1(res.text, '"stream": "([a-zA-Z0-9+=/]+)"')).decode()
