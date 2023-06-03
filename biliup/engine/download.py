@@ -178,8 +178,8 @@ class DownloadBase:
                 self.close()
             if ret is False:
                 if i < 4:
-                    logger.error(f"获取直播流失败{i}，等待10秒尝试重新获取")
-                    time.sleep(10)
+                    logger.info(f"获取直播流失败{i}，等待5秒尝试重新获取")
+                    time.sleep(5)
                     continue
                 else:
                     if config.get('delay'):
