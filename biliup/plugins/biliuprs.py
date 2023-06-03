@@ -25,7 +25,7 @@ class BiliWeb(UploadBase):
             self.cover_path = cover_path
         elif "live_cover_path" in self.data:
             self.cover_path = self.data["live_cover_path"]
-        else: 
+        else:
             self.cover_path = None
         self.desc = description
         self.dynamic = dynamic
