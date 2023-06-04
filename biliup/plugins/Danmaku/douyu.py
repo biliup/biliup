@@ -6,10 +6,9 @@ import aiohttp
 
 
 class Douyu:
-    wss_url = 'wss://danmuproxy.douyu.com:8503/'
-    heartbeat = b'\x14\x00\x00\x00\x14\x00\x00\x00\xb1\x02\x00\x00\x74\x79\x70\x65\x40\x3d\x6d\x72\x6b\x6c' \
-                b'\x2f\x00 '
-    heartbeatInterval = 60
+    wss_url = 'wss://danmuproxy.douyu.com:8506/'
+    heartbeat = b"\x14\x00\x00\x00\x14\x00\x00\x00\xb1\x02\x00\x00\x74\x79\x70\x65\x40\x3d\x6d\x72\x6b\x6c\x2f\x00"
+    heartbeatInterval = 30
 
     @staticmethod
     async def get_ws_info(url):
@@ -47,5 +46,6 @@ class Douyu:
                 msga['col'] = msg.get('col', '0')
                 msgs.append(msga)
             except Exception as Error:
-                print(f"捕获到异常：{Error}")
+                # print(f"decode_msg：捕获到异常：{Error}")
+                pass
         return msgs
