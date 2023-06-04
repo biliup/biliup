@@ -32,6 +32,9 @@ class Douyin(DownloadBase):
                 rex = re.compile(r'(?<=\"web_rid\":\")[0-9]*(?=\")')
                 rid = rex.findall(txt)[0]
         else:
+            uid_room = re.search(r"/(\d+)/?$", self.url)
+            if uid_room:
+                self.url = re.sub(r"(\d+)/?$", r"+\1", self.url) if re.search(r"/(\d+)/?$", self.url) else self.url
             rid = self.url.split("live.douyin.com/")[1]
         try:
             r1 = requests.get('https://live.douyin.com/' + rid, headers=headers).text \
