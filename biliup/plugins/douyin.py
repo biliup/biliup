@@ -30,7 +30,7 @@ class Douyin(DownloadBase):
                 .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]
                 txt = urllib.request.unquote(mainPage)
                 rex = re.compile(r'(?<=\"web_rid\":\")[0-9]*(?=\")')
-                rid = rex.findall(txt)[0]    
+                rid = rex.findall(txt)[0]
         else:
             rid = self.url.split("live.douyin.com/")[1]
         try:
