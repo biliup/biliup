@@ -179,7 +179,7 @@ class DownloadBase:
                 thistime_download = time.time()
                 interval = thistime_download - lasttime_download
                 if interval < delay:
-                    logger.info(f"delay: {config.get('delay')}")
+                    logger.info(f"频繁请求：等待{interval}秒后再次请求直播流")
                     time.sleep(config.get('delay') - interval)
                 ret = self.run()
             except:
