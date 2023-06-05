@@ -64,7 +64,9 @@ class DownloadBase:
             filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
         filename = get_valid_filename(filename)
         fmtname = time.strftime(filename.encode("unicode-escape").decode()).encode().decode("unicode-escape")
-        threading.Thread(target=asyncio.run, args=(self.danmaku_download_start(fmtname),)).start()
+        # threading.Thread(target=asyncio.run, args=(self.danmaku_download_start(fmtname),)).start()
+        loop = asyncio.new_event_loop()
+        threading.Thread(target=loop.run_until_complete, args=(self.danmaku_download_start(fmtname),)).start()
         if self.downloader == 'stream-gears':
             stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
                                   config.get('file_size'))
@@ -168,8 +170,17 @@ class DownloadBase:
         i = 0
         logger.info('开始下载%s：%s' % (self.__class__.__name__, self.fname))
         date = time.localtime()
+        lasttime_download = 0
+        thistime_download = 0
+        delay = config.get('delay') if (config.get('delay') > 5) else 5
         while i < 30:
             try:
+                # 限制每次拉流的时间间隔必须大于config.get('delay')，防止主播还没推流的时候疯狂重复请求
+                thistime_download = time.time()
+                interval = thistime_download - lasttime_download
+                if interval < delay:
+                    logger.info(f"频繁请求：等待{interval}秒后再次请求直播流")
+                    time.sleep(config.get('delay') - interval)
                 ret = self.run()
             except:
                 logger.exception("Uncaught exception:")
@@ -177,21 +188,17 @@ class DownloadBase:
             finally:
                 self.close()
             if ret is False:
-                if i < 4:
-                    logger.info(f"获取直播流失败{i}，等待5秒尝试重新获取")
-                    time.sleep(5)
-                    i += 1
-                    continue
-                else:
-                    if config.get('delay'):
-                        time.sleep(config.get('delay'))
-                        logger.info(f"delay: {config.get('delay')}")
-                        if self.check_stream():
-                            time.sleep(5)
-                            continue
+                if config.get('delay'):
+                    time.sleep(config.get('delay'))
+                    logger.info(f"delay: {config.get('delay')}")
+                    if self.check_stream():
+                        time.sleep(5)
+                        continue
                 break
             elif ret == 1 or self.downloader == 'stream-gears':
                 time.sleep(45)
+
+            lasttime_download = thistime_download
             i += 1
         logger.info(f'退出下载{i}: {self.fname}')
         return {
