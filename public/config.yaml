@@ -144,7 +144,7 @@ streamers:
          ---
          Powered By biliup - Github: https://github.com/ForgQi/biliup
         dynamic: '#空间动态#'
-        dtime: 14_400 ### 设置延时发布时间，距离提交大于2小时，格式为时间戳
+        #dtime: 14_400 ### 设置延时发布时间，距离提交大于2小时，格式为时间戳
         uploader: biliup-rs ### 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
         #filename_prefix: '{streamer}%Y-%m-%d %H_%M_%S{title}'  ### 覆盖全局自定义录播文件命名规则
         user_cookie: cookies.json ### 使用指定的账号上传
