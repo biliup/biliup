@@ -91,6 +91,7 @@ check_sourcecode: 15
 ### 海外机的玩法：配合一个国内的机器（例如便宜的腾讯云，阿里云等等）自建反代api.live.bilibili.com。或者使用https://docs.qq.com/doc/DV2dvbXBrckNscU9x 此处提供的公用反代API。
 ### 如果海外机到联通或者移动网络线路还不错，就可以参考***完整CDN列表***选取一些联通或者移动的节点并填入下面
 ### 每次会随机返回填入的其中一个线路，并且会自动判断所填入的节点是否可用
+#bili_force_cn01: false
 #bili_force_cn01_domains: 'cn-jxnc-cm-01-16.bilivideo.com,cn-gddg-cm-01-06.bilivideo.com,cn-fjqz-cm-01-06.bilivideo.com,cn-jssz-cm-01-02.bilivideo.com,cn-gddg-ct-01-12.bilivideo.com'
 
 #------YouTube------#
@@ -104,7 +105,6 @@ check_sourcecode: 15
 #youtube_prefer_acodec: "opus|mp4a" ### 可用opus,mp4a
 ### 设置偏好的YouTube下载最高纵向分辨率
 ### 最高纵向分辨率，也就是xxxxP。如果youtube_prefer_vcodec指定AVC，将最高只能下载1080p的视频。
-#youtube_max_videosize: "5G"
 #youtube_max_resolution: 1440
 ### 限制单个视频的最大大小。
 ### 注意：此参数优先级高于分辨率设置，并且不包括音频部分的大小，仅仅只是视频部分的大小。
@@ -149,6 +149,9 @@ streamers:
         #filename_prefix: '{streamer}%Y-%m-%d %H_%M_%S{title}'  ### 覆盖全局自定义录播文件命名规则
         user_cookie: cookies.json ### 使用指定的账号上传
         #use_live_cover: true ### 获取BILIBILI直播间封面并作为投稿封面。此封面优先级低于单个主播指定的自定义封面。
+        tags:
+            - biliup
+            - 视频标签
         preprocessor: ### 开始下载直播时，将按自定义顺序执行自定义操作 注：preprocessor仅支持shell指令
             #- run: sh ./run.sh
         postprocessor: ### 上传完成后，将按自定义顺序执行自定义操作
@@ -157,13 +160,10 @@ streamers:
             - run: python3 path/to/mail.py ### 执行一个 Python 脚本，可以用来发送邮件等。自动发信通知脚本示例 https://biliup.github.io/biliup/Guide.html#%E4%B8%8A%E4%BC%A0%E5%AE%8C%E6%88%90%E5%90%8E%E5%8F%91%E9%80%81%E9%82%AE%E4%BB%B6%E9%80%9A%E7%9F%A5
             - run: sh ./run.sh ### 执行一个shell脚本，用途多样，主要调用系统内的cli工具。自动上传网盘脚本示例 https://gist.github.com/UVJkiNTQ/ae4282e8f9fe4e45b3144b57605b4178
             #- rm ### 删除文件，为默认操作
-        tags:
-            - biliup
-            - 视频标签
         format: mp4 ### 视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg或者streamlink。
-        opt_args: ### ffmpeg参数
-            - '-ss' # 跳过开始的16秒
-            - '00:00:16'
+        #opt_args: ### ffmpeg参数
+        #    - '-ss'
+        #    - '00:00:16' # 跳过开始的16秒
 
 ### 在填了cookies的情况下优先使用cookies上传，如需使用用户名密码上传请注释掉cookies
 #user:
