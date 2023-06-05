@@ -88,6 +88,7 @@ class Twitch(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         DownloadBase.__init__(self, fname, url, suffix=suffix)
         self.twitch_danmaku = config.get('twitch_danmaku', False)
+        self.twitch_disable_ads = config.get('twitch_disable_ads', True)
         self.proc = None
 
     def check_stream(self):
@@ -99,10 +100,16 @@ class Twitch(DownloadBase):
         if self.downloader == 'ffmpeg':
             port = random.randint(1025, 65535)
             stream_shell = [
-                "streamlink", "--player-external-http", "--twitch-disable-ads",
-                "--twitch-disable-hosting", "--twitch-disable-reruns",
-                "--player-external-http-port", str(port), self.url, "best"
+                "streamlink",
+                "--player-external-http",  # 为外部程序提供流媒体数据
+                # "--twitch-disable-ads",                     # 去广告，去掉、跳过嵌入的广告流
+                # "--twitch-disable-hosting",               # 该参数从5.0起已被禁用
+                "--twitch-disable-reruns",  # 如果该频道正在重放回放，不打开流
+                "--player-external-http-port", str(port),  # 对外部输出流的端口
+                self.url, "best"  # 流链接
             ]
+            if self.twitch_disable_ads:  # 去广告，去掉、跳过嵌入的广告流
+                stream_shell.insert(1, "--twitch-disable-ads")
             twitch_cookie = config.get('user', {}).get('twitch_cookie')
             if twitch_cookie:
                 twitch_cookie = "--twitch-api-header=Authorization=OAuth " + twitch_cookie

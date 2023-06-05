@@ -172,21 +172,26 @@ class DownloadBase:
         date = time.localtime()
         lasttime_download = 0
         thistime_download = 0
-        delay = config.get('delay') if (config.get('delay') > 5) else 5
+        # delay = config.get('delay') if (config.get('delay') > 5) else 5
+        delay = 30  # 有人的delay会设置的过长，遂写死为30
         while i < 30:
             try:
-                # 限制每次拉流的时间间隔必须大于config.get('delay')，防止主播还没推流的时候疯狂重复请求
                 thistime_download = time.time()
-                interval = thistime_download - lasttime_download
-                if interval < delay:
-                    logger.info(f"频繁请求：等待{interval}秒后再次请求直播流")
-                    time.sleep(config.get('delay') - interval)
                 ret = self.run()
             except:
                 logger.exception("Uncaught exception:")
                 continue
             finally:
                 self.close()
+
+            # 限制每次拉流的时间间隔必须大于delay，防止主播还没推流的时候疯狂重复请求
+            interval = thistime_download - lasttime_download
+            if interval < delay:
+                logger.info(f"频繁请求：等待{interval}秒后再次请求直播流")
+                time.sleep(delay - interval)
+                lasttime_download = thistime_download
+                continue
+
             if ret is False:
                 if config.get('delay'):
                     time.sleep(config.get('delay'))
@@ -198,7 +203,7 @@ class DownloadBase:
             elif ret == 1 or self.downloader == 'stream-gears':
                 time.sleep(45)
 
-            lasttime_download = thistime_download
+
             i += 1
         logger.info(f'退出下载{i}: {self.fname}')
         return {
