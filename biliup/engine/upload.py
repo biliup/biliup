@@ -34,7 +34,7 @@ class UploadBase:
 
 
     def filter_file(self, index):
-        media_extensions = ['.mp4', '.flv', '.ts']
+        media_extensions = ['.mp4', '.flv', '.ts', '.flv.part']
         file_list = UploadBase.file_list(index)
         if len(file_list) == 0:
             return False
@@ -53,10 +53,16 @@ class UploadBase:
                     logger.info(f'过滤删除-{r}')
             if ext == '.xml': #过滤不存在对应视频的xml弹幕文件
                 xml_file_name = name
-                media_regex = re.compile(r'^{}(\.(mp4|flv|ts))?$'.format(
-                    re.escape(xml_file_name)
-                ))
-                if not any(media_regex.match(f'{xml_file_name}{ext2}') for ext2 in media_extensions for x in file_list):
+                # media_regex = re.compile(r'^{}(\.(mp4|flv|ts))?$'.format(
+                #     re.escape(xml_file_name)
+                # ))
+                # if not any(media_regex.match(f'{xml_file_name}{ext2}') for ext2 in media_extensions for x in file_list):
+                #     self.remove_file(r)
+                #     logger.info(f'无视频，已过滤删除-{r}')
+                have_video = False
+                for video_ext in media_extensions:
+                    if f"{xml_file_name}{video_ext}" in file_list: have_video = True
+                if not have_video:
                     self.remove_file(r)
                     logger.info(f'无视频，已过滤删除-{r}')
         file_list = UploadBase.file_list(index)

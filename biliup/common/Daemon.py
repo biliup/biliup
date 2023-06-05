@@ -121,4 +121,5 @@ class Daemon(object):
 
     def _run(self):
         """ run your fun"""
-        asyncio.run(self.fn())
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self.fn())
