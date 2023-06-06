@@ -199,6 +199,20 @@ streamers:
     ### 可以使用Chrome插件Get cookies.txt来生成txt文件。
     #youtube_cookie: 'cookiejar.txt'
 
+    #------NICO------#
+    ### The email or phone number associated with your Niconico account
+    ### 【翻译：与您的Niconico账户相关的电子邮件或电话号码】
+    # niconico-email: xxxxxxxxxxx
+    ### The password of your Niconico account
+    ### 【翻译：您的Niconico账户的密码】
+    # niconico-password: xxxxxxxxxxxx
+    ### Value of the user-session token. Can be used as an alternative to providing a password.
+    ### 【翻译：用户会话令牌的值。可作为提供密码的替代方法。】
+    # niconico-user-session: xxxxxxxxxxx
+    ### Purge cached Niconico credentials to initiate a new session and reauthenticate.
+    ### 【翻译：清除缓存的 Niconico 凭证，以启动一个新的会话并重新认证。】
+    # niconico-purge-credentials: xxxxxxxxxxxx
+
 
 
 #########日志输出配置#########
