@@ -64,9 +64,7 @@ class DownloadBase:
             filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
         filename = get_valid_filename(filename)
         fmtname = time.strftime(filename.encode("unicode-escape").decode()).encode().decode("unicode-escape")
-        # threading.Thread(target=asyncio.run, args=(self.danmaku_download_start(fmtname),)).start()
-        loop = asyncio.new_event_loop()
-        threading.Thread(target=loop.run_until_complete, args=(self.danmaku_download_start(fmtname),)).start()
+        threading.Thread(target=asyncio.run, args=(self.danmaku_download_start(fmtname),)).start()
         if self.downloader == 'stream-gears':
             stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
                                   config.get('file_size'))

@@ -94,8 +94,7 @@ class Youtube(DownloadBase):
                 filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
             filename = get_valid_filename(filename)
             fmtname = time.strftime(filename.encode("unicode-escape").decode()).encode().decode("unicode-escape")
-            loop = asyncio.new_event_loop()
-            threading.Thread(target=loop.run_until_complete, args=(self.danmaku_download_start(fmtname),)).start()
+            threading.Thread(target=asyncio.run, args=(self.danmaku_download_start(fmtname),)).start()
             self.ffmpeg_download(fmtname)
         else:
             try:
