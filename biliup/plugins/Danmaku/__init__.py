@@ -41,7 +41,11 @@ class DanmakuClient:
             self.__url = url
         else:
             self.__url = 'http://' + url
-        for u, s in {'douyu.com': Douyu, 'huya.com': Huya, 'live.bilibili.com': Bilibili, 'twitch.tv': Twitch}.items():
+        for u, s in {'douyu.com': Douyu,
+                     'huya.com': Huya,
+                     'live.bilibili.com': Bilibili,
+                     'twitch.tv': Twitch
+                     }.items():
             if re.match(r'^(?:http[s]?://)?.*?%s/(.+?)$' % u, url):
                 self.__site = s
                 self.__u = u
