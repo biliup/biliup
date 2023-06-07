@@ -21,11 +21,10 @@ class Huya(DownloadBase):
         logger.debug(self.fname)
         try:
             res = requests.get(self.url, timeout=5, headers=self.fake_headers)
+            res.close()
         except:
             logger.warning("虎牙：" + self.url + "：获取res错误")
             return False
-        finally:
-            res.close()
         huya = None
         if match1(res.text, '"stream": "([a-zA-Z0-9+=/]+)"'):
             huya = base64.b64decode(match1(res.text, '"stream": "([a-zA-Z0-9+=/]+)"')).decode()
