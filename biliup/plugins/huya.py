@@ -58,7 +58,7 @@ class Huya(DownloadBase):
                 return True
             except:
                 logger.warning("虎牙：" + self.url + "：json解析错误")
-            return False
+                return False
 
     async def danmaku_download_start(self, filename):
         if self.huya_danmaku:
