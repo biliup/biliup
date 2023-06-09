@@ -24,7 +24,7 @@ class Douyin(DownloadBase):
         if len(self.url.split("live.douyin.com/")) < 2:
             if len(self.url.split("douyin.com/user/")) < 2:
                 logger.debug("直播间地址错误")
-                return False 
+                return False
             else:
                 mainPage=requests.get(self.url, headers=headers).text\
                 .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]
@@ -42,6 +42,7 @@ class Douyin(DownloadBase):
             r2 = urllib.request.unquote(r1)
             room_info = json.loads(r2)['app']['initialState']['roomStore']['roomInfo']['room']
         except:
+            logger.warning("抖音：https://live.douyin.com/" + rid + "：获取地址错误")
             return False
         if room_info.get('status') != 2:
             logger.debug("主播未开播")
