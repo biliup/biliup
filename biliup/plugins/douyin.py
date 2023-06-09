@@ -33,9 +33,8 @@ class Douyin(DownloadBase):
                 rid = rex.findall(txt)[0]
         else:
             #判断是否为纯数字房间号
-            if (re.search(r"/(\d+)/?$", self.url)):
-                self.url = re.sub(r"(\d+)/?$", r"+\1", self.url) if re.search(r"/(\d+)/?$", self.url) else self.url
             rid = self.url.split("live.douyin.com/")[1]
+            rid = '+{}'.format(rid) if rid.isdigit() else rid
         try:
             r1 = requests.get('https://live.douyin.com/' + rid, headers=headers).text \
                 .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]
