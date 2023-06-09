@@ -42,7 +42,7 @@ class Douyin(DownloadBase):
             r2 = urllib.request.unquote(r1)
             room_info = json.loads(r2)['app']['initialState']['roomStore']['roomInfo']['room']
         except:
-            logger.warning("抖音：https://live.douyin.com/" + rid + "：获取地址错误")
+            logger.warning("抖音：" + self.url + "：获取地址错误，本次跳过")
             return False
         if room_info.get('status') != 2:
             logger.debug("主播未开播")
