@@ -7,6 +7,10 @@ from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from ..plugins import logger
 
+# import http.client
+# http.client.HTTPConnection._http_vsn = 10
+# http.client.HTTPConnection._http_vsn_str = 'HTTP/1.0'
+
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?douyu\.com')
 class Douyu(DownloadBase):
@@ -16,29 +20,40 @@ class Douyu(DownloadBase):
 
     def check_stream(self):
         if len(self.url.split("douyu.com/")) < 2:
-            logger.debug("直播间地址:" + self.url + " 错误")
+            logger.error("斗鱼：" + self.url + "：地址错误")
             return False
-        html = requests.get(self.url).text
-        vid = match1(html, r'\$ROOM\.room_id\s*=\s*(\d+)',
-                     r'room_id\s*=\s*(\d+)',
-                     r'"room_id.?":(\d+)',
-                     r'data-onlineid=(\d+)')
-        if not vid:
-            logger.debug("直播间" + vid + "：被关闭或不存在")
+        
+        try:
+            html = requests.get(self.url).text
+            vid = match1(html, r'\$ROOM\.room_id\s*=\s*(\d+)',
+                        r'room_id\s*=\s*(\d+)',
+                        r'"room_id.?":(\d+)',
+                        r'data-onlineid=(\d+)')
+            if not vid:
+                logger.debug("斗鱼：" + self.url + "：被关闭或不存在")
+                return False
+        except:
+            logger.warning("斗鱼：" + self.url + "：获取vid错误")
             return False
-        roominfo = requests.get(f"https://www.douyu.com/betard/{vid}").json()['room']
-        if roominfo['show_status'] != 1 or roominfo['videoLoop'] != 0:
-            logger.debug("直播间" + vid + "：未开播或正在放录播")
+        
+        try:
+            roominfo = requests.get(f"https://www.douyu.com/betard/{vid}").json()['room']
+            if roominfo['show_status'] != 1 or roominfo['videoLoop'] != 0:
+                logger.debug("斗鱼：" + vid + "：未开播或正在放录播")
+                return False
+            self.room_title = roominfo['room_name']
+            html_h5enc = requests.get(f'https://www.douyu.com/swf_api/homeH5Enc?rids={vid}').json()
+            js_enc = html_h5enc['data']['room' + vid]
+            params = {
+                'cdn': config.get('douyucdn', 'tct-h5'),
+                'iar': 0,
+                'ive': 0,
+                'rate': 0,
+            }
+        except:
+            logger.warning("斗鱼：" + vid + "：获取roominfo错误")
             return False
-        self.room_title = roominfo['room_name']
-        html_h5enc = requests.get(f'https://www.douyu.com/swf_api/homeH5Enc?rids={vid}').json()
-        js_enc = html_h5enc['data']['room' + vid]
-        params = {
-            'cdn': config.get('douyucdn', 'tct-h5'),
-            'iar': 0,
-            'ive': 0,
-            'rate': 0,
-        }
+        
         try:
             ub98484234(js_enc, vid, params)
         except:
@@ -62,9 +77,15 @@ class Douyu(DownloadBase):
             logger.info("结束弹幕录制")
 
 def get_play_info(vid, headers, params):
-    html_content = requests.post(f'https://www.douyu.com/lapi/live/getH5Play/{vid}', headers=headers, params=params).json()
-    live_data = html_content["data"]
+    try:
+        html_content = requests.post(f'https://www.douyu.com/lapi/live/getH5Play/{vid}', headers=headers, params=params).json()
+        live_data = html_content["data"]
+    except:
+        logger.warning(f"douyu：get_play_info：请求出错：https://www.douyu.com/lapi/live/getH5Play/{vid}")
+        return None
     # 禁用斗鱼主线路
+    if not type(live_data) == type({}):
+        return live_data
     if not live_data['rtmp_cdn'].endswith('h5') or 'akm' in live_data['rtmp_cdn']:
         params['cdn'] = 'tct-h5'
         return get_play_info(vid, headers, params)

@@ -42,7 +42,7 @@ pool2_size: 5
 ### 检测源码文件变化间隔，单位：秒，检测源码到变化后，程序会在空闲时自动重启
 check_sourcecode: 15
 
-#########各平台分设置#########
+#########各平台录播设置#########
 ### 使用直播间封面作为投稿封面。此封面优先级低于单个主播指定的自定义封面。（直播封面将会保存于cover文件夹下，请自行定期删除）
 #use_live_cover: true
 
@@ -50,14 +50,14 @@ check_sourcecode: 15
 ### 如遇到斗鱼录制卡顿可以尝试切换线路。可选以下线路
 ### tctc-h5（备用线路4）, tct-h5（备用线路5）, ali-h5（备用线路6）, hw-h5（备用线路7）, hs-h5（备用线路13）
 #douyucdn: tct-h5
-# 录制斗鱼弹幕，目前暂时不支持视频按时长分段下的弹幕文件自动分段，只有使用ffmpeg（包括streamlink混合模式）作为下载器才支持，默认关闭默认关闭
+### 录制斗鱼弹幕，默认关闭【目前暂时不支持视频按时长分段下的弹幕文件自动分段，只有使用ffmpeg（包括streamlink混合模式）作为下载器才支持】
 #douyu_danmaku: false
 
 #------虎牙------#
 ### 如遇到虎牙录制卡顿可以尝试切换线路。可选以下线路
 ### AL（阿里云）, HW（华为云）, TX（腾讯云）, WS（网宿）, HS（火山引擎）, AL13（阿里云）, HW16（华为云）
 #huyacdn: AL
-### 录制虎牙弹幕，目前暂时不支持视频按时长分段下的弹幕文件自动分段，只有使用ffmpeg（包括streamlink混合模式）作为下载器才支持，默认关闭默认关闭
+### 录制虎牙弹幕，默认关闭【目前暂时不支持视频按时长分段下的弹幕文件自动分段，只有使用ffmpeg（包括streamlink混合模式）作为下载器才支持】
 #huya_danmaku: false
 
 #------哔哩哔哩------#
@@ -91,6 +91,7 @@ check_sourcecode: 15
 ### 海外机的玩法：配合一个国内的机器（例如便宜的腾讯云，阿里云等等）自建反代api.live.bilibili.com。或者使用https://docs.qq.com/doc/DV2dvbXBrckNscU9x 此处提供的公用反代API。
 ### 如果海外机到联通或者移动网络线路还不错，就可以参考***完整CDN列表***选取一些联通或者移动的节点并填入下面
 ### 每次会随机返回填入的其中一个线路，并且会自动判断所填入的节点是否可用
+#bili_force_cn01: false
 #bili_force_cn01_domains: 'cn-jxnc-cm-01-16.bilivideo.com,cn-gddg-cm-01-06.bilivideo.com,cn-fjqz-cm-01-06.bilivideo.com,cn-jssz-cm-01-02.bilivideo.com,cn-gddg-ct-01-12.bilivideo.com'
 
 #------YouTube------#
@@ -104,7 +105,6 @@ check_sourcecode: 15
 #youtube_prefer_acodec: "opus|mp4a" ### 可用opus,mp4a
 ### 设置偏好的YouTube下载最高纵向分辨率
 ### 最高纵向分辨率，也就是xxxxP。如果youtube_prefer_vcodec指定AVC，将最高只能下载1080p的视频。
-#youtube_max_videosize: "5G"
 #youtube_max_resolution: 1440
 ### 限制单个视频的最大大小。
 ### 注意：此参数优先级高于分辨率设置，并且不包括音频部分的大小，仅仅只是视频部分的大小。
@@ -116,6 +116,19 @@ check_sourcecode: 15
 #youtube_after_date: '20220201'
 ### 仅下载该日期之前的视频（可与上面的youtube_after_date配合使用，构成指定下载范围区间）
 #youtube_before_date: '20230501'
+### YouTube的Streamlink下载器模式，开启之后会调用Streamlink获取直播流并且使用FFMPEG下载，默认关闭【仅当下载器是FFMPEG时才有效】
+### 开启之后上面关于YOUTUBE的选项全部无效【我也不知道这个功能有什么屌用】
+use_new_ytb_downloader: false
+
+#------Twitch------#
+### 录制Twitch弹幕，默认关闭【只有下载器为FFMPEG时才有效】
+#twitch_danmaku: false
+### 去除Twitch广告功能，默认开启【只有下载器为FFMPEG时才有效】
+### 这个功能会导致Twitch录播分段，因为遇到广告就自动断开了，这就是去广告。若需要录播完整一整段可以关闭这个，但是关了之后就会有紫色屏幕的CommercialTime
+### 还有一个不想视频分段的办法是去花钱开一个Turbo会员，能不看广告，然后下面的user里把twitch的cookie填上，也能不看广告，自然就不会分段了
+#twitch_disable_ads: true
+
+
 
 #########录制主播设置#########
 streamers:
@@ -138,11 +151,14 @@ streamers:
          ---
          Powered By biliup - Github: https://github.com/ForgQi/biliup
         dynamic: '#空间动态#'
-        dtime: 14_400 ### 设置延时发布时间，距离提交大于2小时，格式为时间戳
+        #dtime: 14_400 ### 设置延时发布时间，距离提交大于2小时，格式为时间戳
         uploader: biliup-rs ### 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
         #filename_prefix: '{streamer}%Y-%m-%d %H_%M_%S{title}'  ### 覆盖全局自定义录播文件命名规则
         user_cookie: cookies.json ### 使用指定的账号上传
         #use_live_cover: true ### 获取BILIBILI直播间封面并作为投稿封面。此封面优先级低于单个主播指定的自定义封面。
+        tags:
+            - biliup
+            - 视频标签
         preprocessor: ### 开始下载直播时，将按自定义顺序执行自定义操作 注：preprocessor仅支持shell指令
             #- run: sh ./run.sh
         postprocessor: ### 上传完成后，将按自定义顺序执行自定义操作
@@ -151,13 +167,10 @@ streamers:
             - run: python3 path/to/mail.py ### 执行一个 Python 脚本，可以用来发送邮件等。自动发信通知脚本示例 https://biliup.github.io/biliup/Guide.html#%E4%B8%8A%E4%BC%A0%E5%AE%8C%E6%88%90%E5%90%8E%E5%8F%91%E9%80%81%E9%82%AE%E4%BB%B6%E9%80%9A%E7%9F%A5
             - run: sh ./run.sh ### 执行一个shell脚本，用途多样，主要调用系统内的cli工具。自动上传网盘脚本示例 https://gist.github.com/UVJkiNTQ/ae4282e8f9fe4e45b3144b57605b4178
             #- rm ### 删除文件，为默认操作
-        tags:
-            - biliup
-            - 视频标签
         format: mp4 ### 视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg或者streamlink。
-        opt_args: ### ffmpeg参数
-            - '-ss' # 跳过开始的16秒
-            - '00:00:16'
+        #opt_args: ### ffmpeg参数
+        #    - '-ss'
+        #    - '00:00:16' # 跳过开始的16秒
 
 ### 在填了cookies的情况下优先使用cookies上传，如需使用用户名密码上传请注释掉cookies
 #user:
@@ -175,7 +188,8 @@ streamers:
     #douyin_cookie: '__ac_nonce=123456; __ac_signature=123456;'
 
     #------Twitch------#
-    ### 如录制Twitch时遇见视频流中广告过多的情况，可尝试在此填入cookie，可以大幅减少视频流中的twitch广告（经测试需要在该Cookie所属账号开了TwitchTurbo会员才有用），该cookie有过期风险，cookie过期后会导致无法获取到直播流
+    ### 如录制Twitch时遇见视频流中广告过多的情况，可尝试在此填入cookie，可以大幅减少视频流中的twitch广告（经测试需要在该Cookie所属账号开了TwitchTurbo会员才有用）
+    # 该cookie有过期风险，cookie过期后会导致无法获取到直播流（我个人用了四个月都没过期）
     # twitch_cookie获取方式：在浏览器中打开Twitch.tv，F12调出控制台，在控制台中执行：document.cookie.split("; ").find(item=>item.startsWith("auth-token="))?.split("=")[1]
     # twitch_cookie需要在downloader= "ffmpeg"时候才会生效
     #twitch_cookie: 'aisjdoiuasdoihansdoh3ooi209'
@@ -184,6 +198,20 @@ streamers:
     ### 使用Cookies登陆YouTube帐号，可用于下载会限，私享等未登录账号无法访问的内容。请使用Netscape 格式的 Cookies 文本路径。
     ### 可以使用Chrome插件Get cookies.txt来生成txt文件。
     #youtube_cookie: 'cookiejar.txt'
+
+    #------NICO------#
+    ### The email or phone number associated with your Niconico account
+    ### 【翻译：与您的Niconico账户相关的电子邮件或电话号码】
+    # niconico-email: xxxxxxxxxxx
+    ### The password of your Niconico account
+    ### 【翻译：您的Niconico账户的密码】
+    # niconico-password: xxxxxxxxxxxx
+    ### Value of the user-session token. Can be used as an alternative to providing a password.
+    ### 【翻译：用户会话令牌的值。可作为提供密码的替代方法。】
+    # niconico-user-session: xxxxxxxxxxx
+    ### Purge cached Niconico credentials to initiate a new session and reauthenticate.
+    ### 【翻译：清除缓存的 Niconico 凭证，以启动一个新的会话并重新认证。】
+    # niconico-purge-credentials: xxxxxxxxxxxx
 
 
 
