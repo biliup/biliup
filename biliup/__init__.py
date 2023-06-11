@@ -1,7 +1,7 @@
 import logging
 import sys
 
-__version__ = "0.4.20"
+__version__ = "0.4.21"
 
 LOG_CONF = {
     'version': 1,
