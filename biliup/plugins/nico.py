@@ -1,4 +1,5 @@
 import random
+import re
 import string
 import json
 import subprocess
@@ -11,7 +12,6 @@ import json
 from biliup.config import config
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
-from bs4 import BeautifulSoup
 from ..plugins import logger
 
 
@@ -23,12 +23,11 @@ class Nico(DownloadBase):
     def check_stream(self):
         try:
             response = requests.get(self.url)
-            soup = BeautifulSoup(response.text, 'html.parser')
-            script_tag = soup.find('script', {'type': 'application/ld+json'})
-            if script_tag:
-                data = script_tag.string
-                json_sc = json.loads(data)
-                self.room_title = json_sc['name']
+            # 正则表达式
+            pattern = r'"name":"(.*?)","description":"(.*?)"'
+            # 执行匹配
+            matches = re.findall(pattern, response.text)[0]
+            self.room_title = matches[0]
         except:
             logger.info("获取标题失败")
         port = random.randint(1025, 65535)
@@ -55,7 +54,7 @@ class Nico(DownloadBase):
         i = 0
         while i < 5:
             if not (self.proc.poll() is None):
-                return False
+                return
             time.sleep(1)
             i += 1
         return True

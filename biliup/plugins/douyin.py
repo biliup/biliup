@@ -24,7 +24,7 @@ class Douyin(DownloadBase):
         if len(self.url.split("live.douyin.com/")) < 2:
             if len(self.url.split("douyin.com/user/")) < 2:
                 logger.debug("直播间地址错误")
-                return False 
+                return False
             else:
                 mainPage=requests.get(self.url, headers=headers).text\
                 .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]
@@ -33,15 +33,15 @@ class Douyin(DownloadBase):
                 rid = rex.findall(txt)[0]
         else:
             #判断是否为纯数字房间号
-            if (re.search(r"/(\d+)/?$", self.url)):
-                self.url = re.sub(r"(\d+)/?$", r"+\1", self.url) if re.search(r"/(\d+)/?$", self.url) else self.url
             rid = self.url.split("live.douyin.com/")[1]
+            rid = '+{}'.format(rid) if rid.isdigit() else rid
         try:
             r1 = requests.get('https://live.douyin.com/' + rid, headers=headers).text \
                 .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]
             r2 = urllib.request.unquote(r1)
             room_info = json.loads(r2)['app']['initialState']['roomStore']['roomInfo']['room']
         except:
+            logger.warning("抖音：" + self.url + "：获取地址错误，本次跳过")
             return False
         if room_info.get('status') != 2:
             logger.debug("主播未开播")

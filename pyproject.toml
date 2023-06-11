@@ -15,6 +15,7 @@ dependencies = [
     "psutil >= 5.4.6",
     "aiofiles >= 22.1.0",
     "yt_dlp >= 2023.3.3",
+    "quickjs >= 1.19.0",
     "Pillow >= 5.2.0",
     "aiohttp[speedups]",
     "Requests >= 2.20.0",
