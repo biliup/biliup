@@ -66,13 +66,13 @@ class DanmakuClient:
                 else:
                     await self.__ws.send_bytes(reg_data)
         except Exception as Error:
-            logger.debug(f"init_ws：捕获到异常：{Error}")
+            logger.debug(f"init_ws：{self.__filename}：捕获到异常：{Error}")
         if not os.path.exists(self.__filename):
             async with aiofiles.open(self.__filename, mode='w') as f:
                 await f.write("<?xml version='1.0' encoding='UTF-8'?>\n"
-                            "<i xmlns:ns0='http://www.w3.org/1999/XSL/Transform'>\n"
-                            "</i>"
-                            )
+                              "<i xmlns:ns0='http://www.w3.org/1999/XSL/Transform'>\n"
+                              "</i>"
+                              )
 
     async def heartbeats(self):
         while not self.__stop and self.__site.heartbeat:
@@ -83,12 +83,12 @@ class DanmakuClient:
                 else:
                     await self.__ws.send_bytes(self.__site.heartbeat)
             except Exception as Error:
-                logger.debug(f"heartbeats：捕获到异常：{Error}")
+                logger.debug(f"heartbeats：{self.__filename}：捕获到异常：{Error}")
                 if not self.__stop:
                     logger.info(f'触发弹幕重连')
                     await self.init_ws()
                     await asyncio.sleep(3)
-                
+
         await self.__hs.close()
 
     async def fetch_danmaku(self):
@@ -106,7 +106,7 @@ class DanmakuClient:
                 for m in ms:
                     await self.__dm_queue.put(m)
             except Exception as Error:
-                logger.debug(f"fetch_danmaku：弹幕处理异常：{Error}")
+                logger.debug(f"fetch_danmaku：{self.__filename}：弹幕处理异常：{Error}")
                 await asyncio.sleep(10)
 
     async def print_danmaku(self):
@@ -139,8 +139,8 @@ class DanmakuClient:
                     d.set('p', f"{msg_time},1,25,{color},0,0,0,0")
                     d.text = m["content"]
             except Exception as Error:
-                logger.debug(f"print_danmaku：弹幕处理异常：{Error}")
-                
+                logger.debug(f"print_danmaku：{self.__filename}：弹幕处理异常：{Error}")
+
             try:
                 if m['msg_type'] == 'danmaku' and msg_i >= 5:
                     # loop = asyncio.get_running_loop()
@@ -150,8 +150,7 @@ class DanmakuClient:
                 else:
                     msg_i = msg_i + 1
             except Exception as Error:
-                logger.debug(f"print_danmaku：弹幕写入异常：{Error}")
-
+                logger.debug(f"print_danmaku：{self.__filename}：弹幕写入异常：{Error}")
 
     async def start(self):
         self.__dm_queue = asyncio.Queue()
