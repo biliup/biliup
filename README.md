@@ -18,7 +18,7 @@ Twitch，YY直播等，并于录制结束后自动上传到哔哩哔哩视频网
     - 防止录制花屏（使用默认的stream-gears下载器就会有这个功能）
     - 启动时加入`--http`选项并访问localhost:19159可使用webUI (建议使用toml配置文件)
 
-**更新日志**：[CHANGELOG.md](CHANGELOG.md)
+**更新日志**：[CHANGELOG.md](https://github.com/biliup/biliup/blob/master/CHANGELOG.md)
 
 **文档地址**：<https://biliup.github.io/biliup>
 
@@ -31,7 +31,7 @@ Twitch，YY直播等，并于录制结束后自动上传到哔哩哔哩视频网
 
 
 ## INSTALLATION
-1. 创建配置文件 **[config.toml](./public/config.toml)** (推荐从配置文件模板开始进行修改)
+1. 创建配置文件 **[config.toml](https://github.com/biliup/biliup/tree/master/publicconfig.toml)** 
     ```toml
     # 以下为必填项
     [streamers."1xx直播录像"] # 设置直播间1
@@ -61,8 +61,8 @@ $ biliup --http start
 # 指定配置文件路径
 $ biliup --config ./config.yaml start
 ```
-从 v0.2.15 版本开始，配置文件支持 toml 格式，详见 [config.toml](./public/config.toml)，
-yaml配置文件完整内容可参照 [config.yaml](./public/config.yaml)。
+从 v0.2.15 版本开始，配置文件支持 toml 格式，详见 [config.toml](https://github.com/biliup/biliup/tree/master/publicconfig.toml) ，
+yaml配置文件完整内容可参照 [config.yaml](https://github.com/biliup/biliup/tree/master/publicconfig.yaml) 。
 __FFmpeg__ 作为可选依赖。如果还有问题可以 [加群讨论](https://github.com/ForgQi/biliup/discussions/58#discussioncomment-2388776) 。
 
 > 使用上传功能需要登录B站，通过 [命令行投稿工具](https://github.com/ForgQi/biliup-rs) 获取 cookies.json，并放入启动 biliup 的路径即可
@@ -76,12 +76,16 @@ __FFmpeg__ 作为可选依赖。如果还有问题可以 [加群讨论](https://
 ### 方式一 拉取镜像
 1. 从配置文件启动
 ```bash
+# 在指定目录创建配置文件
 vim /host/path/config.toml
+# 启动biliup的docker容器
 docker run -P --name biliup -v /host/path:/opt -d ghcr.io/biliup/caution:master
 ```
 2. 从配置文件启动，并启动web-ui
 ```bash
+# 在指定目录创建配置文件
 vim /host/path/config.toml
+# 启动biliup的docker容器
 docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/caution:latest --http --password yourpassword
 ```
 > yourpassword为web-ui的密码，用户名为biliup
@@ -91,8 +95,11 @@ docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart alway
 ```
 ### 方式二 手动构建镜像
 ```bash
+# 进入biliup目录
 cd biliup
+# 构建镜像
 sudo docker build . -t biliup
+# 启动镜像
 sudo docker run -P -d biliup
 ```
 ### 进入容器 📦
@@ -107,7 +114,7 @@ sudo docker exec -it imageId /bin/bash
 
 
 ## 从源码运行biliup
-* 下载源码: git clone https://github.com/ForgQi/bilibiliupload.git
+* 下载源码: `git clone https://github.com/ForgQi/bilibiliupload.git`
 * 安装: `pip3 install -e .` 
 * 启动: `python3 -m biliup`
 * 构建: 
@@ -120,7 +127,7 @@ sudo docker exec -it imageId /bin/bash
 
 
 ## yaml配置文件示例
-可选项见[完整配置文件](./public/config.yaml),
+可选项见[完整配置文件](https://github.com/biliup/biliup/tree/master/publicconfig.yaml),
 tid投稿分区见[Wiki](https://github.com/ForgQi/biliup/wiki)
 ```yaml
 streamers:
@@ -267,7 +274,7 @@ $ systemctl --user start biliupd
 ## Deprecated
 * ~~selenium操作浏览器上传两种方式(详见bili_chromeup.py)~~
 * ~~Windows图形界面版在release中下载AutoTool.msi进行安装~~[~~AutoTool.msi~~](https://github.com/ForgQi/bilibiliupload/releases/tag/v0.1.0)
-* 相关配置示例在[config.yaml](./public/config.yaml)、[config.toml](./public/config.toml)文件中，如直播间地址，b站账号密码等等
+* 相关配置示例在[config.yaml](https://github.com/biliup/biliup/tree/master/publicconfig.yaml)、[config.toml](https://github.com/biliup/biliup/tree/master/publicconfig.toml)文件中，如直播间地址，b站账号密码等等
 * 由于目前使用账号密码登录，大概率触发验证。请使用命令行工具登录，将登录返回的信息填入配置文件，且使用引号括起yaml中cookie的数字代表其为字符串
 
 > 关于B站为什么不能多p上传\
