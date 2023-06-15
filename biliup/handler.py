@@ -88,7 +88,7 @@ class KernelFunc:
             return logger.debug('无人直播')
         if self.url_status[url] == 1:
             return logger.debug('已开播正在下载')
-        if self.url_status[url] == 2:
+        if self.url_status[url] == 2 and not config.get('uploading_record'):
             return logger.debug('正在上传稍后下载')
         name = self.inverted_index[url]
 
