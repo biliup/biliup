@@ -47,7 +47,7 @@ class DownloadBase:
         ]
         if config.get('segment_time'):
             self.default_output_args += \
-                ['-segment_time', f"{config.get('segment_time', '00:50:00')}"]
+                ['-to', f"{config.get('segment_time', '00:50:00')}"]
         else:
             self.default_output_args += \
                 ['-fs', f"{config.get('file_size', '2621440000')}"]
@@ -131,12 +131,13 @@ class DownloadBase:
         args = ['ffmpeg', '-y', *default_input_args,
                 '-i', self.raw_stream_url, *self.default_output_args, *self.opt_args,
                 '-c', 'copy', '-f', self.suffix]
-        if config.get('segment_time'):
-            args += ['-f', 'segment',
-                     f'{filename} part-%03d.{self.suffix}']
-        else:
-            args += [
-                f'{filename}.{self.suffix}.part']
+        # if config.get('segment_time'):
+        #     args += ['-f', 'segment',
+        #              f'{filename} part-%03d.{self.suffix}']
+        # else:
+        #     args += [
+        #         f'{filename}.{self.suffix}.part']
+        args += [f'{filename}.{self.suffix}.part']
 
         proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
@@ -173,6 +174,13 @@ class DownloadBase:
         # delay = config.get('delay') if (config.get('delay') > 5) else 5
         delay = 30  # 有人的delay会设置的过长，遂写死为30
         while i < 30:
+            # 限制每次拉流的时间间隔必须大于delay，防止主播还没推流的时候疯狂重复请求
+            thistime_download = time.time()
+            interval = thistime_download - lasttime_download
+            if interval < delay:
+                logger.info(f"频繁请求：等待{format(delay - interval, '.2f')}秒后再次请求直播流")
+                time.sleep(delay - interval)
+
             try:
                 thistime_download = time.time()
                 ret = self.run()
@@ -180,15 +188,8 @@ class DownloadBase:
                 logger.exception("Uncaught exception:")
                 continue
             finally:
-                self.close()
-
-            # 限制每次拉流的时间间隔必须大于delay，防止主播还没推流的时候疯狂重复请求
-            interval = thistime_download - lasttime_download
-            if interval < delay:
-                logger.info(f"频繁请求：等待{interval}秒后再次请求直播流")
-                time.sleep(delay - interval)
                 lasttime_download = thistime_download
-                continue
+                self.close()
 
             if ret is False:
                 if config.get('delay'):

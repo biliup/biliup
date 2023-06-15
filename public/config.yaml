@@ -1,5 +1,4 @@
-#########全局录播与上传设置#########
-
+######### 全局录播与上传设置 #########
 #------录制与下载------#
 ### 选择全局默认的下载插件，默认为stream-gears。可选：
 ### 1.streamlink(streamlink配合ffmpeg混合下载模式，适合用于下载hls_fmp4与hls_ts流，因为streamlink支持多线程拉取）。
@@ -13,7 +12,6 @@ file_size: 2621440000
 #segment_time: '00:50:00'
 ### 小于此大小的视频文件将会被过滤删除，单位MB
 filtering_threshold: 20
-
 ### 自定义录播文件名模板, 支持变量 {streamer}:你在配置里设置的直播间名 %Y-%m-%d %H_%M_%S:创建文件的时间, {title}:当场直播间标题
 ### 如果上传文件，文件名必须包含设定的模板名。其次，如果没有定义时间，文件分片可能会互相覆盖，所以推荐设置时间来避免分段文件名重复。
 #filename_prefix: '{streamer}%Y-%m-%d %H_%M_%S{title}'
@@ -42,7 +40,9 @@ pool2_size: 5
 ### 检测源码文件变化间隔，单位：秒，检测源码到变化后，程序会在空闲时自动重启
 check_sourcecode: 15
 
-#########各平台录播设置#########
+
+
+######### 各平台录播设置 #########
 ### 使用直播间封面作为投稿封面。此封面优先级低于单个主播指定的自定义封面。（直播封面将会保存于cover文件夹下，请自行定期删除）
 #use_live_cover: true
 
@@ -118,9 +118,9 @@ check_sourcecode: 15
 #youtube_before_date: '20230501'
 ### YouTube的Streamlink下载器模式，开启之后会调用Streamlink获取直播流并且使用FFMPEG下载，默认关闭【仅当下载器是FFMPEG时才有效】
 ### 开启之后上面关于YOUTUBE的选项全部无效【我也不知道这个功能有什么屌用】
-use_new_ytb_downloader: false
+#use_new_ytb_downloader: false
 
-#------Twitch------#
+#------Twitch直播录制------#
 ### 录制Twitch弹幕，默认关闭【只有下载器为FFMPEG时才有效】
 #twitch_danmaku: false
 ### 去除Twitch广告功能，默认开启【只有下载器为FFMPEG时才有效】
@@ -130,7 +130,7 @@ use_new_ytb_downloader: false
 
 
 
-#########录制主播设置#########
+######### 录制主播设置 #########
 streamers:
 ### 最小配置示例
     星际2Stats拔本神族天梯第一视角:
@@ -172,6 +172,9 @@ streamers:
         #    - '-ss'
         #    - '00:00:16' # 跳过开始的16秒
 
+
+
+################### 用户cookie ###################
 ### 在填了cookies的情况下优先使用cookies上传，如需使用用户名密码上传请注释掉cookies
 #user:
     #------哔哩哔哩------#
@@ -179,19 +182,20 @@ streamers:
     ### 参照https://github.com/BililiveRecorder/BililiveRecorder/issues/263. 请至少填入以下项目.
     #bili_cookie: 'SESSDATA=none; bili_jct=none;DedeUserID__ckMd5=none;DedeUserID=123;access_token=none;'
     ### 重要！！！
-    ###是否将cookie传入第三方API。将Cookie传入未知的第三方API有几率泄露帐号登录信息。
-    ###在开启了自定义Cookie（bili_cookie）又同时设置了第三方API（bili_liveapi）的情况下，如果打开了允许第三方API使用Cookie，那么就使用第三方API，如果没有允许（默认），那么设置的第三方API就不生效
+    ### 是否将cookie传入第三方API。将Cookie传入未知的第三方API有几率泄露帐号登录信息。
+    ### 在开启了自定义Cookie（bili_cookie）又同时设置了第三方API（bili_liveapi）的情况下，如果打开了允许第三方API使用Cookie，那么就使用第三方API，如果没有允许（默认），那么设置的第三方API就不生效
     #customAPI_use_cookie : False
 
     #------抖音------#
     ### 如需要录制抖音请在此填入cookie需要__ac_nonce与__ac_signature的值
     #douyin_cookie: '__ac_nonce=123456; __ac_signature=123456;'
 
-    #------Twitch------#
+    #------Twitch直播录制------#
+    ### 只在录制twitch直播时才生效
     ### 如录制Twitch时遇见视频流中广告过多的情况，可尝试在此填入cookie，可以大幅减少视频流中的twitch广告（经测试需要在该Cookie所属账号开了TwitchTurbo会员才有用）
-    # 该cookie有过期风险，cookie过期后会导致无法获取到直播流（我个人用了四个月都没过期）
-    # twitch_cookie获取方式：在浏览器中打开Twitch.tv，F12调出控制台，在控制台中执行：document.cookie.split("; ").find(item=>item.startsWith("auth-token="))?.split("=")[1]
-    # twitch_cookie需要在downloader= "ffmpeg"时候才会生效
+    ### 该cookie有过期风险，cookie过期后会导致无法获取到直播流（我个人用了四个月都没过期）
+    ### twitch_cookie获取方式：在浏览器中打开Twitch.tv，F12调出控制台，在控制台中执行：document.cookie.split("; ").find(item=>item.startsWith("auth-token="))?.split("=")[1]
+    ### twitch_cookie需要在downloader= "ffmpeg"时候才会生效
     #twitch_cookie: 'aisjdoiuasdoihansdoh3ooi209'
 
     #------YouTube------#
@@ -215,8 +219,7 @@ streamers:
 
 
 
-#########日志输出配置#########
-
+######### 日志输出配置 #########
 LOGGING:
     formatters:
         verbose:

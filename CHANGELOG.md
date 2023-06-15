@@ -12,6 +12,7 @@
 - 🔧同步yaml配置文件的更新到toml中。[@Kataick](https://github.com/Kataick)
 - 🔧NICO标题获取从BS4改为正则，开播后仍然重复请求的BUG的修复。[@KNaiFen](https://github.com/KNaiFen)
 - 🔧添加quickjs依赖。[@haha114514](https://github.com/haha114514)
+- 💡新增NICO录播。[@KNaiFen](https://github.com/KNaiFen)
 - 💡增加NICO用户配置文件模板。[@KNaiFen](https://github.com/KNaiFen)
 - 💡增加Twitch的去广告开关（解决广告分段问题）[@KNaiFen](https://github.com/KNaiFen)
 - 💡增加Twitch弹幕录播、修复斗鱼、虎牙的弹幕录制BUG并增加报错提示，修改了XML文件的删除部分，修改了部分代码的协程的调用，优化断流时频繁重复请求。[@KNaiFen](https://github.com/KNaiFen)
