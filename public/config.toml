@@ -1,5 +1,4 @@
-#########全局录播与上传设置#########
-
+######### 全局录播与上传设置 #########
 #------录制与下载------#
 ### 选择全局默认的下载插件，默认为stream-gears。可选：
 ### 1.streamlink(streamlink配合ffmpeg混合下载模式，适合用于下载hls_fmp4与hls_ts流，因为streamlink支持多线程拉取）。
@@ -13,7 +12,6 @@ file_size = 2621440000
 #segment_time = "00:50:00"
 # 小于此大小的视频文件将会被过滤删除，单位MB
 filtering_threshold = 20
-
 # 自定义录播文件名模板, 支持变量 {streamer}:你在配置里设置的直播间名 %Y-%m-%d %H_%M_%S:创建文件的时间, {title}:当场直播间标题
 # 如果上传文件，文件名必须包含设定的模板名。其次，如果没有定义时间，文件分片可能会互相覆盖，所以推荐设置时间来避免分段文件名重复。
 #filename_prefix = "{streamer}%Y-%m-%d %H_%M_%S{title}"
@@ -44,7 +42,7 @@ check_sourcecode = 15
 
 
 
-#########各平台录播设置#########
+######### 各平台录播设置 #########
 ### 使用直播间封面作为投稿封面。此封面优先级低于单个主播指定的自定义封面。（目前仅支持bilibili。直播封面将会保存于cover文件夹下，请自行定期删除）
 #use_live_cover = true
 
@@ -111,7 +109,7 @@ check_sourcecode = 15
 ### 限制单个视频的最大大小。
 ### 注意：此参数优先级高于分辨率设置，并且不包括音频部分的大小，仅仅只是视频部分的大小。
 ### 如果某个视频实在没有低于此大小的分辨率版本，将会选择最低画质的版本下载。
-#youtube_max_videosize = "5G"  ###参考格式，例如100M，5G，10G。
+#youtube_max_videosize = "5G"  ### 参考格式，例如100M，5G，10G。
 ### YouTube转载视频自动获取视频封面并用于作投稿封面。获取webp封面之后自动转换格式为jpg，并保存在cover/youtube文件夹中，请注意定期清理。
 #use_youtube_cover = true
 ### 仅下载该日期之后的视频
@@ -122,8 +120,7 @@ check_sourcecode = 15
 ### 开启之后上面关于YOUTUBE的选项全部无效【我也不知道这个功能有什么屌用】
 #use_new_ytb_downloader = false
 
-
-#------Twitch------#
+#------Twitch直播录制------#
 ### 录制Twitch弹幕，默认关闭【只有下载器为FFMPEG时才有效】
 #twitch_danmaku = false
 ### 去除Twitch广告功能，默认开启【只有下载器为FFMPEG时才有效】
@@ -133,8 +130,7 @@ check_sourcecode = 15
 
 
 
-#########录制主播设置#########
-
+######### 录制主播设置 #########
 # 最小配置示例
 [streamers."星际2Stats拔本神族天梯第一视角"]
 url = ["https://www.twitch.tv/kimdaeyeob3"]
@@ -179,6 +175,8 @@ format = "mp4" # 视频保存格式。如需使用mp4格式，必须切换downlo
 #opt_args = [ "-ss", "00:00:16" # 跳过开始的16秒 ]
 
 
+
+################### 用户cookie ###################
 ### 在填了cookies的情况下优先使用cookies上传，如需使用用户名密码上传请注释掉cookies
 [user]
 #------哔哩哔哩------#
@@ -187,18 +185,20 @@ format = "mp4" # 视频保存格式。如需使用mp4格式，必须切换downlo
 ### 也可使用biliup-rs来获取以下项目.
 #bili_cookie = 'SESSDATA=none;bili_jct=none;DedeUserID__ckMd5=none;DedeUserID=none;access_token=none;'
 ### 重要！！！
-###是否将cookie传入第三方API。将Cookie传入未知的第三方API有几率泄露帐号登录信息。
-###在开启了自定义Cookie（bili_cookie）又同时设置了第三方API（bili_liveapi）的情况下，如果打开了允许第三方API使用Cookie，那么就使用第三方API，如果没有允许（默认），那么设置的第三方API就不生效
+### 是否将cookie传入第三方API。将Cookie传入未知的第三方API有几率泄露帐号登录信息。
+### 在开启了自定义Cookie（bili_cookie）又同时设置了第三方API（bili_liveapi）的情况下，如果打开了允许第三方API使用Cookie，那么就使用第三方API，如果没有允许（默认），那么设置的第三方API就不生效
 #customAPI_use_cookie = false
 
 #------抖音------#
 # 如需要录制抖音请在此填入cookie需要__ac_nonce与__ac_signature的值
 douyin_cookie = '__ac_nonce=123456; __ac_signature=123456;'
 
-#------Twitch------#
-# 如录制Twitch时遇见视频流中广告过多的情况，可尝试在此填入cookie，可以大幅减少视频流中的twitch广告（经测试需要在该Cookie所属账号开了TwitchTurbo会员才有用），该cookie有过期风险，cookie过期后会导致无法获取到直播流
-# twitch_cookie获取方式：在浏览器中打开Twitch.tv，F12调出控制台，在控制台中执行：document.cookie.split("; ").find(item=>item.startsWith("auth-token="))?.split("=")[1]
-# twitch_cookie需要在downloader= "ffmpeg"时候才会生效
+#------Twitch直播录制------#
+### 只在录制twitch直播时才生效
+### 如录制Twitch时遇见视频流中广告过多的情况，可尝试在此填入cookie，可以大幅减少视频流中的twitch广告（经测试需要在该Cookie所属账号开了TwitchTurbo会员才有用）
+### 该cookie有过期风险，cookie过期后会导致无法获取到直播流（我个人用了四个月都没过期）
+### twitch_cookie获取方式：在浏览器中打开Twitch.tv，F12调出控制台，在控制台中执行：document.cookie.split("; ").find(item=>item.startsWith("auth-token="))?.split("=")[1]
+### twitch_cookie需要在downloader= "ffmpeg"时候才会生效
 #twitch_cookie = 'asdiouo2h987r23hf2893fh923y7'
 
 #------YouTube------#
@@ -222,7 +222,7 @@ douyin_cookie = '__ac_nonce=123456; __ac_signature=123456;'
 
 
 
-# 日志输出配置
+########### 日志输出配置 ###########
 [LOGGING.formatters.verbose]
 format = "%(asctime)s %(filename)s[line:%(lineno)d](Pid:%(process)d Tname:%(threadName)s) %(levelname)s %(message)s"
 datefmt = "%Y-%m-%d %H:%M:%S"
