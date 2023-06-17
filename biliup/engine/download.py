@@ -192,16 +192,21 @@ class DownloadBase:
                 self.close()
 
             if ret is False:
-                if config.get('delay'):
-                    time.sleep(config.get('delay'))
-                    logger.info(f"delay: {config.get('delay')}")
-                    if self.check_stream():
-                        time.sleep(5)
-                        continue
+                if i < 4:
+                    logger.info(f"获取直播流失败{i}，等待5秒尝试重新获取")
+                    time.sleep(5)
+                    i += 1
+                    continue
+                else:
+                    if config.get('delay'):
+                        time.sleep(config.get('delay'))
+                        logger.info(f"delay: {config.get('delay')}")
+                        if self.check_stream():
+                            time.sleep(5)
+                            continue
                 break
             elif ret == 1 or self.downloader == 'stream-gears':
                 time.sleep(45)
-
 
             i += 1
         logger.info(f'退出下载{i}: {self.fname}')
