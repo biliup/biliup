@@ -23,7 +23,7 @@ class Huya(DownloadBase):
             res = requests.get(self.url, timeout=5, headers=self.fake_headers)
             res.close()
         except:
-            logger.warning("虎牙：" + self.url + "：获取res错误")
+            logger.warning("虎牙 " + self.url.split("huya.com/")[1] + "：获取错误，本次跳过")
             return False
         huya = None
         if match1(res.text, '"stream": "([a-zA-Z0-9+=/]+)"'):
@@ -57,7 +57,7 @@ class Huya(DownloadBase):
                 self.room_title = json.loads(huya)['data'][0]['gameLiveInfo']['introduction']
                 return True
             except:
-                logger.warning("虎牙：" + self.url + "：json解析错误")
+                logger.warning("虎牙 " + self.url.split("huya.com/")[1] + "：json解析错误")
                 return False
 
     async def danmaku_download_start(self, filename):
