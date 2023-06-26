@@ -15,13 +15,14 @@ class Douyin(DownloadBase):
         super().__init__(fname, url, suffix)
 
     def check_stream(self):
+        douyin_url="https://live.douyin.com/"
         headers = {
             "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                           "Chrome/94.0.4606.71 Safari/537.36 Edg/94.0.992.38",
-            "referer": "https://live.douyin.com/",
+            "referer": douyin_url,
             "cookie": config.get('user', {}).get('douyin_cookie')
         }
-        if len(self.url.split("live.douyin.com/")) < 2:
+        if len(self.url.split(douyin_url)) < 2:
             if len(self.url.split("douyin.com/user/")) < 2:
                 logger.debug("直播间地址错误")
                 return False
@@ -33,10 +34,10 @@ class Douyin(DownloadBase):
                 rid = rex.findall(txt)[0]
         else:
             #判断是否为纯数字房间号
-            rid = self.url.split("live.douyin.com/")[1]
+            rid = self.url.split(douyin_url)[1]
             rid = '+{}'.format(rid) if rid.isdigit() else rid
         try:
-            r1 = requests.get('https://live.douyin.com/' + rid, headers=headers).text \
+            r1 = requests.get(douyin_url + rid, headers=headers).text \
                 .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]
             r2 = urllib.request.unquote(r1)
             room_info = json.loads(r2)['app']['initialState']['roomStore']['roomInfo']['room']
