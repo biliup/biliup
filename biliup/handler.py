@@ -93,7 +93,7 @@ class KernelFunc:
         name = self.inverted_index[url]
 
         if config['streamers'].get(name, {}).get('preprocessor'):
-            preprocessor(config['streamers'].get(name, {}).get('preprocessor'))
+            preprocessor(config['streamers'].get(name, {}).get('preprocessor'), [name, url])
         logger.debug(f'{name}刚刚开播，去下载')
         self.url_status[url] = 1
         return Event(DOWNLOAD, args=(name, url))
@@ -122,13 +122,13 @@ class KernelFunc:
         return self.url_status
 
 
-def preprocessor(pre_processors):
+def preprocessor(pre_processors, data):
     for pre_processor in pre_processors:
         if pre_processor.get('run'):
             try:
                 process_output = subprocess.check_output(
                     pre_processor['run'], shell=True,
-                    input=reduce(lambda x, y: x + str(Path(y).absolute()) + '\n', '', ''),
+                    input='\n'.join(data),
                     stderr=subprocess.STDOUT, text=True)
                 logger.info(process_output.rstrip())
             except subprocess.CalledProcessError as e:
