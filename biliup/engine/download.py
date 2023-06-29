@@ -171,13 +171,12 @@ class DownloadBase:
         date = time.localtime()
         lasttime_download = 0
         thistime_download = 0
-        # delay = config.get('delay') if (config.get('delay') > 5) else 5
-        delay = 30  # 有人的delay会设置的过长，遂写死为30
+        delay = 5 if (config.get('delay') > 30) else 30
         while i < 30:
             # 限制每次拉流的时间间隔必须大于delay，防止主播还没推流的时候疯狂重复请求
             thistime_download = time.time()
             interval = thistime_download - lasttime_download
-            if interval < delay:
+            if ('ret' in locals() and ret) and interval < delay:
                 logger.info(f"频繁请求：等待{format(delay - interval, '.2f')}秒后再次请求直播流")
                 time.sleep(delay - interval)
 
