@@ -75,7 +75,7 @@ check_sourcecode = 15
 #bili_protocol = "stream"
 ### 哔哩哔哩直播优选CDN，默认无
 #bili_perfCDN = "cn-gotcha208,ov-gotcha05"
-### 哔哩哔哩直播强制原画（仅限HLS流的 cn-gotcha01 CDN），默认为关闭
+### 哔哩哔哩直播强制原画（仅限HLS与FMP4流「beta」的 cn-gotcha01 CDN），默认为关闭
 #bili_force_source = false
 ### 自定义哔哩哔哩直播API，用于获取指定区域（大陆或者海外）的直播流链接，默认使用官方API。
 #bili_liveapi = "https://api.live.bilibili.com"
