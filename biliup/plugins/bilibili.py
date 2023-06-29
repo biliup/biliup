@@ -118,7 +118,7 @@ class Bilibili(DownloadBase):
                         continue
                 else:
                     logger.error(f"配置文件中的cn-gotcha01节点均不可用")
-            # 强制去除 hls_ts 的 _bluray 文件名
+            # 强制去除 cn01线路的hls_ts与hls_fmp4流（beta）的 _bluray 文件名，从而实现获取真实原画流的目的
             if force_source:
                 stream_url['base_url'] = re.sub(r'_bluray(?=(/index\.m3u8\?|\.m3u8\?))', "", stream_url['base_url'], 1)
         self.raw_stream_url = stream_url['host'] + stream_url['base_url'] + stream_url['extra']
