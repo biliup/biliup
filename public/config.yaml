@@ -32,7 +32,7 @@ threads: 3
 
 #------杂项------#
 ### 检测到主播下播后延迟再次检测，单位：秒，避免特殊情况提早启动上传导致漏录
-### delay最大值为1800。如果delay设置超过60秒，将启动分段检测，每隔 60 秒检测一次开播状态
+### 当delay不存在时，默认延迟时间为10秒，最长延迟时间为30分钟(1800秒)。若设置的延迟时间超过60秒，则会启用分段检测机制，每隔60秒进行一次开播状态的检测。
 delay: 10
 ### 检测间隔时间，单位：秒
 event_loop_interval: 40
@@ -211,16 +211,16 @@ streamers:
     #------NICO------#
     ### The email or phone number associated with your Niconico account
     ### 【翻译：与您的Niconico账户相关的电子邮件或电话号码】
-    # niconico-email: xxxxxxxxxxx
+    #niconico-email: xxxxxxxxxxx
     ### The password of your Niconico account
     ### 【翻译：您的Niconico账户的密码】
-    # niconico-password: xxxxxxxxxxxx
+    #niconico-password: xxxxxxxxxxxx
     ### Value of the user-session token. Can be used as an alternative to providing a password.
     ### 【翻译：用户会话令牌的值。可作为提供密码的替代方法。】
-    # niconico-user-session: xxxxxxxxxxx
+    #niconico-user-session: xxxxxxxxxxx
     ### Purge cached Niconico credentials to initiate a new session and reauthenticate.
     ### 【翻译：清除缓存的 Niconico 凭证，以启动一个新的会话并重新认证。】
-    # niconico-purge-credentials: xxxxxxxxxxxx
+    #niconico-purge-credentials: xxxxxxxxxxxx
 
 
 
