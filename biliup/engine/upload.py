@@ -110,7 +110,7 @@ class UploadBase:
             if post_processor.get('run'):
                 try:
                     process_output = subprocess.check_output(
-                        post_processor['run'], shell=True, 
+                        post_processor['run'], shell=True,
                         input=reduce(lambda x, y: x + str(Path(y).absolute()) + '\n', data, ''),
                         stderr=subprocess.STDOUT, text=True)
                     logger.info(process_output.rstrip())
