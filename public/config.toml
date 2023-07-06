@@ -32,6 +32,7 @@ threads = 3
 
 #------杂项------#
 # 检测到主播下播后延迟再次检测，单位：秒，避免特殊情况提早启动上传导致漏录
+### delay最大值为1800。如果delay设置超过60秒，将启动分段检测，每隔 60 秒检测一次开播状态
 delay = 10
 # 检测间隔时间，单位：秒
 event_loop_interval = 40
@@ -194,8 +195,8 @@ format = "mp4" # 视频保存格式。如需使用mp4格式，必须切换downlo
 #customAPI_use_cookie = false
 
 #------抖音------#
-# 如需要录制抖音请在此填入cookie需要__ac_nonce与__ac_signature的值
-douyin_cookie = '__ac_nonce=123456; __ac_signature=123456;'
+### 如需要录制抖音请在此填入cookie需要__ac_nonce与__ac_signature的值
+#douyin_cookie = '__ac_nonce=123456; __ac_signature=123456;'
 
 #------Twitch直播录制------#
 ### 只在录制twitch直播时才生效
