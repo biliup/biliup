@@ -167,25 +167,26 @@ class DownloadBase:
 
     def start(self):
         i = 0
-        logger.info('开始下载%s：%s' % (self.__class__.__name__, self.fname))
+        logger.info(f'开始下载{self.__class__.__name__}: {self.fname}')
         date = time.localtime()
         lasttime_download = 0
-        thistime_download = 0
-        delay = 5 if (config.get('delay') > 30) else 30
+        delay = min(config.get('delay'), 1800) if config.get('delay') else 10
+        sleep_time = 5 if (delay > 30) else 30
+        check_delay = delay
         ret = None
-        while i < 30:
+        while i < 60:
             # 限制每次拉流的时间间隔必须大于delay，防止主播还没推流的时候疯狂重复请求
             thistime_download = time.time()
             interval = thistime_download - lasttime_download
-            if not ret is False and interval < delay:
-                logger.info(f"频繁请求：等待{format(delay - interval, '.2f')}秒后再次请求直播流")
-                time.sleep(delay - interval)
+            if not ret is False and interval < sleep_time:
+                logger.info(f'频繁请求：等待 {sleep_time - interval:.2f} 秒后再次请求直播流')
+                time.sleep(sleep_time - interval)
 
             try:
                 thistime_download = time.time()
                 ret = self.run()
             except:
-                logger.exception("Uncaught exception:")
+                logger.exception('Uncaught exception:')
                 continue
             finally:
                 lasttime_download = thistime_download
@@ -193,23 +194,34 @@ class DownloadBase:
 
             if ret is False:
                 if i < 4:
-                    logger.info(f"获取直播流失败{i}，等待5秒尝试重新获取")
-                    time.sleep(5)
+                    logger.info(f'获取失败 {i} ：无法获取直播流，等待 10 秒重试')
+                    time.sleep(10)
                     i += 1
                     continue
                 else:
-                    if config.get('delay'):
-                        time.sleep(config.get('delay'))
-                        logger.info(f"delay: {config.get('delay')}")
+                    if delay:
+                        if i == 4:
+                            logger.info(f'检测到delay设置 {delay} 秒，将分为 {-int(-(delay / 60) // 1)} 次检测，每隔 60 秒检测一次开播状态')
+                        if check_delay > 60:
+                            check_delay -= 60
+                            time.sleep(60)
+                            i += 1
+                        else:
+                            time.sleep(check_delay)
                         if self.check_stream():
-                            time.sleep(5)
-                            continue
+                            i = 0
+                            check_delay = delay
+                        else:
+                            if check_delay > 60:
+                                continue
+                            else:
+                                logger.info(f'delay: {delay} 结束，即将退出下载')
                 break
             elif ret == 1 or self.downloader == 'stream-gears':
                 time.sleep(45)
 
             i += 1
-        logger.info(f'退出下载{i}: {self.fname}')
+        logger.info(f'退出下载 {i} : {self.fname}')
         return {
             'name': self.fname,
             'url': self.url,
