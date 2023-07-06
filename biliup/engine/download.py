@@ -167,11 +167,11 @@ class DownloadBase:
 
     def start(self):
         i = 0
-        logger.info(f'开始下载{self.__class__.__name__}: {self.fname}')
+        logger.info(f'开始下载 {self.__class__.__name__}：{self.fname}')
         date = time.localtime()
         lasttime_download = 0
-        delay = min(config.get('delay'), 1800) if config.get('delay') else 10
-        sleep_time = 5 if (delay > 30) else 30
+        delay = min(config.get('delay', 10), 1800)
+        sleep_time = 5 if delay > 30 else 30
         check_delay = delay
         ret = None
         while i < 60:
