@@ -19,7 +19,7 @@ filtering_threshold = 20
 #------上传------#
 ### b站提交接口，默认自动选择，可选web，client
 #submit_api = "client"
-### 选择全局默认上传插件，Noop为不上传，但会执行后处理,可选bili_web，biliup-rs
+### 选择全局默认上传插件，Noop为不上传，但会执行后处理,可选bili_web，biliup-rs(默认值)
 #uploader = "Noop"
 ### b站上传线路选择，默认为自动模式，目前可手动切换为bda2, kodo, ws, qn, cos, cos-internal(支持腾讯云内网免流+提速，目前已失效)
 lines = "AUTO"
