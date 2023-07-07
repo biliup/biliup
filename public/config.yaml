@@ -32,6 +32,7 @@ threads: 3
 
 #------杂项------#
 ### 检测到主播下播后延迟再次检测，单位：秒，避免特殊情况提早启动上传导致漏录
+### 当delay不存在时，默认延迟时间为0秒，最长延迟时间为30分钟(1800秒)。若设置的延迟时间超过60秒，则会启用分段检测机制，每隔60秒进行一次开播状态的检测。
 delay: 10
 ### 检测间隔时间，单位：秒
 event_loop_interval: 40
@@ -163,15 +164,15 @@ streamers:
         tags:
             - biliup
             - 视频标签
-        preprocessor: ### 开始下载直播时，将按自定义顺序执行自定义操作 注：preprocessor仅支持shell指令
+        #preprocessor: ### 开始下载直播时，将按自定义顺序执行自定义操作 注：preprocessor仅支持shell指令
             #- run: sh ./run.sh
-        postprocessor: ### 上传完成后，将按自定义顺序执行自定义操作
-            - run: echo hello! ### 执行任意命令，等同于在shell中运行,视频文件路径作为标准输入传入
-            - mv: backup/ ### 移动文件到backup目录下
-            - run: python3 path/to/mail.py ### 执行一个 Python 脚本，可以用来发送邮件等。自动发信通知脚本示例 https://biliup.github.io/biliup/Guide.html#%E4%B8%8A%E4%BC%A0%E5%AE%8C%E6%88%90%E5%90%8E%E5%8F%91%E9%80%81%E9%82%AE%E4%BB%B6%E9%80%9A%E7%9F%A5
-            - run: sh ./run.sh ### 执行一个shell脚本，用途多样，主要调用系统内的cli工具。自动上传网盘脚本示例 https://gist.github.com/UVJkiNTQ/ae4282e8f9fe4e45b3144b57605b4178
+        #postprocessor: ### 上传完成后，将按自定义顺序执行自定义操作 当postprocessor不存在时 默认执行删除文件操作
+        #    - run: echo hello! ### 执行任意命令，等同于在shell中运行,视频文件路径作为标准输入传入
+        #    - mv: backup/ ### 移动文件到backup目录下
+        #    - run: python3 path/to/mail.py ### 执行一个 Python 脚本，可以用来发送邮件等。自动发信通知脚本示例 https://biliup.github.io/biliup/Guide.html#%E4%B8%8A%E4%BC%A0%E5%AE%8C%E6%88%90%E5%90%8E%E5%8F%91%E9%80%81%E9%82%AE%E4%BB%B6%E9%80%9A%E7%9F%A5
+        #    - run: sh ./run.sh ### 执行一个shell脚本，用途多样，主要调用系统内的cli工具。自动上传网盘脚本示例 https://gist.github.com/UVJkiNTQ/ae4282e8f9fe4e45b3144b57605b4178
             #- rm ### 删除文件，为默认操作
-        format: mp4 ### 视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg或者streamlink。
+        #format: mp4 ### 视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg或者streamlink。
         #opt_args: ### ffmpeg参数
         #    - '-ss'
         #    - '00:00:16' # 跳过开始的16秒
@@ -210,16 +211,16 @@ streamers:
     #------NICO------#
     ### The email or phone number associated with your Niconico account
     ### 【翻译：与您的Niconico账户相关的电子邮件或电话号码】
-    # niconico-email: xxxxxxxxxxx
+    #niconico-email: xxxxxxxxxxx
     ### The password of your Niconico account
     ### 【翻译：您的Niconico账户的密码】
-    # niconico-password: xxxxxxxxxxxx
+    #niconico-password: xxxxxxxxxxxx
     ### Value of the user-session token. Can be used as an alternative to providing a password.
     ### 【翻译：用户会话令牌的值。可作为提供密码的替代方法。】
-    # niconico-user-session: xxxxxxxxxxx
+    #niconico-user-session: xxxxxxxxxxx
     ### Purge cached Niconico credentials to initiate a new session and reauthenticate.
     ### 【翻译：清除缓存的 Niconico 凭证，以启动一个新的会话并重新认证。】
-    # niconico-purge-credentials: xxxxxxxxxxxx
+    #niconico-purge-credentials: xxxxxxxxxxxx
 
 
 
