@@ -193,13 +193,13 @@ class DownloadBase:
                 self.close()
 
             if ret is False:
-                if i < 4:
-                    logger.info(f'获取失败 {i} ：无法获取直播流，等待 10 秒重试')
-                    time.sleep(10)
-                    i += 1
-                    continue
-                else:
-                    if delay:
+                if delay:
+                    if i < 4:
+                        logger.info(f'获取失败 {i} ：无法获取直播流，等待 10 秒重试')
+                        time.sleep(10)
+                        i += 1
+                        continue
+                    else:
                         if i == 4:
                             logger.info(f'检测到delay设置 {delay} 秒，将分为 {-int(-(delay / 60) // 1)} 次检测，每隔 60 秒检测一次开播状态')
                         if check_delay > 60:
