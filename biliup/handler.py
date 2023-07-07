@@ -23,8 +23,8 @@ def create_event_manager():
     streamer_url = {k: v['url'] for k, v in config['streamers'].items()}
     inverted_index = invert_dict(streamer_url)
     urls = list(inverted_index.keys())
-    pool1_size = config.get('pool1_size') if config.get('pool1_size') else 3
-    pool2_size = config.get('pool2_size') if config.get('pool2_size') else 3
+    pool1_size = config.get('pool1_size', 3)
+    pool2_size = config.get('pool2_size', 3)
     # 初始化事件管理器
     app = EventManager(config, pool1_size=pool1_size, pool2_size=pool2_size)
     app.context['urls'] = urls
@@ -78,7 +78,7 @@ class KernelFunc:
     @event_manager.register(CHECK, block='Asynchronous1')
     def singleton_check(self, platform):
         plugin = self.checker[platform]
-        wait = config.get('checker_sleep') if config.get('checker_sleep') else 15
+        wait = config.get('checker_sleep', 15)
         for url in check_url(plugin, self.url_status, secs=wait):
             yield Event(TO_MODIFY, args=(url,))
 
