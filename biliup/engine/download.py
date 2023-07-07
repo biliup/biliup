@@ -170,7 +170,7 @@ class DownloadBase:
         logger.info(f'开始下载 {self.__class__.__name__}：{self.fname}')
         date = time.localtime()
         lasttime_download = 0
-        delay = min(config.get('delay', 10), 1800)
+        delay = min(config.get('delay', 0), 1800)
         sleep_time = 5 if delay > 30 else 30
         check_delay = delay
         ret = None
