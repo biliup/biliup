@@ -108,6 +108,7 @@ class Youtube(DownloadBase):
                     'daterange' : DateRange(self.afterdate, self.beforedate),
                     'break_on_reject': True,
                     'download_archive': 'archive.txt',
+                    'lazy_playlist': config.get('youtube_lazy_playlist', False)
                 }
                 if self.use_youtube_cover is True:
                     ydl_opts['writethumbnail'] = True
