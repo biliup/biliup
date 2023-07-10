@@ -107,7 +107,7 @@ streamers:
 
 ### B站上传选项
 
-    uploader                    上传插件，可选biliup-rs（默认），bili_web，Noop（不上传）
+    uploader                    上传器，可选biliup-rs（默认），bili_web，Noop（不上传）
     submit_api                  上传提交接口，默认自动选择，可选web，client
     lines                       上传线路，可选AUTO（默认），bda2，kodo，ws，qn，cos，
                                 cos-internal
@@ -194,21 +194,21 @@ streamers:
                                 （%Y-%m-%d %H-%M-%S）：文件创建时间，{url}：主播的第一条直
                                 播间链接
     tid                         投稿分区码
-    copyright                   可选1（自制，默认），2（转载）
-    cover_path                  指定B站上传封面
+    copyright                   投稿类型，可选1（自制，默认），2（转载）
+    cover_path                  指定哔哩哔哩投稿封面文件
     use_live_cover              使用直播间封面作为投稿封面，优先级低于cover_path，目前仅支
                                 持哔哩哔哩。直播封面将会保存于cover目录下
     description                 投稿简介，支持变量{streamer}，{title}，{url}，strftime
                                 （%Y-%m-%d %H-%M-%S）
     dynamic                     哔哩哔哩投稿动态
     dtime                       延时发布时间戳，需距离投稿时间2小时~15天
-    uploader                    上传插件，将覆盖全局选项，可选biliup-rs（默认），
+    uploader                    上传器，将覆盖全局选项，可选biliup-rs（默认），
                                 bili_web，Noop（不上传）
     filename_prefix             自定义录播文件名模板，将覆盖全局选项，支持变量{streamer}：
                                 配置文件中设置的直播间名，strftime（%Y-%m-%d %H-%M-%S）：
                                 文件创建时间，{title}：直播间标题
-    user_cookie                 指定上传账号配置文件
-    tags                        哔哩哔哩投稿时带的tag（如果要投稿到B站为必选项）
+    user_cookie                 指定投稿的哔哩哔哩账号cookie文件
+    tags                        哔哩哔哩投稿tag（如果要投稿到B站为必选项）
     preprocessor                直播开始时按自定义顺序执行命令，仅支持shell指令
     preprocessor                上传完成后（若不上传则为直播结束时）按自定义顺序执行命令，
                                 仅支持shell指令。不使用该选项时，默认删除视频文件
