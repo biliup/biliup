@@ -38,7 +38,7 @@ class AfreecaTV(DownloadBase):
             }, timeout=5)
             res_aid.close()
         except:
-            logger.warning("afreecatv " + self.url + "：获取错误，本次跳过")
+            logger.warning(f"afreecaTV {self.url}：获取错误，本次跳过")
             return False
         aid = res_aid.json()["CHANNEL"]["AID"]
         params = {
