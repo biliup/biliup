@@ -251,14 +251,14 @@ streamers:
 ```bash
 # 在指定目录创建配置文件
 $ vim /host/path/config.toml
-# 启动biliup的docker 容器
+# 启动biliup的docker容器
 $ docker run -P --name biliup -v /host/path:/opt -d ghcr.io/biliup/caution:latest
 ```
 * 从配置文件启动，并启动webUI
 ```bash
 # 在指定目录创建配置文件
 $ vim /host/path/config.toml
-# 启动biliup的docker容器，webUI的用户名为 biliup，密码为password
+# 启动biliup的docker容器，webUI的用户名为biliup，密码为password
 $ docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d ghcr.io/biliup/caution:latest --http --password password
 ```
 * 直接启动webUI并自动生成配置文件
@@ -426,7 +426,7 @@ $ systemctl --user start biliupd
 
 # 弃用
 * ~~selenium操作浏览器上传两种方式（详见bili_chromeup.py）~~
-* ~~Windows图形界面版在release中下载AutoTool.msi进行安装~~ [~~AutoTool.msi~~](https://github.com/ForgQi/bilibiliupload/releases/tag/v0.1.0)
+* ~~Windows图形界面版在release中下载[AutoTool.msi](https://github.com/biliup/biliup/releases/tag/v0.1.0)进行安装~~
 
 
 # 感谢
