@@ -25,17 +25,21 @@ class AfreecaTV(DownloadBase):
         res_bno.close()
         if res_bno.json()["CHANNEL"]["RESULT"] == 0:
             return
-        bno = res_bno.json()["CHANNEL"]["BNO"]
-        cdn = res_bno.json()["CHANNEL"]["CDN"]
-        rmd = res_bno.json()["CHANNEL"]["RMD"]
-        res_aid = requests.post(CHANNEL_API_URL, data={
-            "bid": username,
-            "bno": bno,
-            "pwd": "",
-            "quality": QUALITIES[0],
-            "type": "pwd"
-        }, timeout=5)
-        res_aid.close()
+        try:
+            bno = res_bno.json()["CHANNEL"]["BNO"]
+            cdn = res_bno.json()["CHANNEL"]["CDN"]
+            rmd = res_bno.json()["CHANNEL"]["RMD"]
+            res_aid = requests.post(CHANNEL_API_URL, data={
+                "bid": username,
+                "bno": bno,
+                "pwd": "",
+                "quality": QUALITIES[0],
+                "type": "pwd"
+            }, timeout=5)
+            res_aid.close()
+        except:
+            logger.warning("afreecatv " + self.url + "：获取错误，本次跳过")
+            return False
         aid = res_aid.json()["CHANNEL"]["AID"]
         params = {
             "return_type": cdn,
