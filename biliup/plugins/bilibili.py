@@ -61,10 +61,13 @@ class Bilibili(DownloadBase):
                     self.live_cover_path = \
                     super().get_live_cover(uname, params['room_id'], self.room_title, live_start_time, cover_url)
                 except:
-                    logger.error(f"获取直播封面失败")
+                    logger.error("获取直播封面失败")
             # 当 Cookie 存在，并且自定义APi使用Cookie开关关闭时，仅使用官方 Api
             isallow = True if s.headers.get('cookie') is None else config.get('user', {}).get('customAPI_use_cookie', False)
-            play_info = get_play_info(s, isallow, official_api_host, params)
+            try:
+                play_info = get_play_info(s, isallow, official_api_host, params)
+            except:
+                logger.error("使用官方 Api 失败")
         if play_info['code'] != 0:
             logger.debug(play_info['message'])
             return False
@@ -117,7 +120,7 @@ class Bilibili(DownloadBase):
                         logger.debug(f"节点 {host} 无法访问，尝试下一个节点。")
                         continue
                 else:
-                    logger.error(f"配置文件中的cn-gotcha01节点均不可用")
+                    logger.error("配置文件中的cn-gotcha01节点均不可用")
             # 强制去除 cn01线路的hls_ts与hls_fmp4流（beta）的 _bluray 文件名，从而实现获取真实原画流的目的
             if force_source:
                 stream_url['base_url'] = re.sub(r'_bluray(?=(/index\.m3u8\?|\.m3u8\?))', "", stream_url['base_url'], 1)
