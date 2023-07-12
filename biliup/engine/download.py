@@ -21,8 +21,8 @@ class DownloadBase:
         self.room_title = None
         if opt_args is None:
             opt_args = []
-            # 主播单独传参覆盖全局设置。例如新增了一个全局的filename_prefix参数，在下面添加self.filename_prefix = config.get('filename_prefix'),
-            # 即可通过self.filename_prefix在下载或者上传时候传递主播单独的设置参数用于调用（如果该主播有设置单独参数，将会优先使用单独参数；如无，则会优先你用全局参数。）
+        # 主播单独传参会覆盖全局设置。例如新增了一个全局的filename_prefix参数，在下面添加self.filename_prefix = config.get('filename_prefix'),
+        # 即可通过self.filename_prefix在下载或者上传时候传递主播单独的设置参数用于调用（如果该主播有设置单独参数，将会优先使用单独参数；如无，则会优先你用全局参数。）
         self.fname = fname
         self.url = url
         self.suffix = suffix
@@ -33,7 +33,7 @@ class DownloadBase:
         # -c copy -bsf:a aac_adtstoasc -movflags +faststart output.mp4
         self.raw_stream_url = None
         self.filename_prefix = config.get('filename_prefix')
-        self.use_live_cover = config.get('use_live_cover')
+        self.use_live_cover = config.get('use_live_cover', False)
         self.opt_args = opt_args
         self.fake_headers = {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',

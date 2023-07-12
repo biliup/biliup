@@ -30,7 +30,7 @@ def upload(data):
         data["format_title"] = custom_fmtstr(context.get('title', f'%Y.%m.%d{index}'), date, title, streamer, url)
         if context.get('description'):
             context['description'] = custom_fmtstr(context.get('description'), date, title, streamer, url)
-        threshold = config.get('filtering_threshold')
+        threshold = config.get('filtering_threshold', 0)
         if threshold:
             data['threshold'] = threshold
 

@@ -61,11 +61,11 @@ async def main(args):
         for k in event_manager.context['checker'].keys():
             event_manager.send_event(Event(CHECK, (k,)))
 
-    wait = config.get('event_loop_interval') if config.get('event_loop_interval') else 40
+    wait = config.get('event_loop_interval', 40)
     # 初始化定时器
     timer = Timer(func=check_timer, interval=wait)
 
-    interval = config.get('check_sourcecode') if config.get('check_sourcecode') else 15
+    interval = config.get('check_sourcecode', 15)
     if args.http:
         import biliup.web
         runner, site = await biliup.web.service(args, event_manager)
