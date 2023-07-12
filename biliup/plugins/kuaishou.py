@@ -49,7 +49,11 @@ class Kuaishou(DownloadBase):
         headers['User-Agent'] = 'Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1'
         with requests.Session() as s:
             s.headers.update(headers)
-            r = s.get(self.url)
+            try:
+                r = s.get(self.url)
+            except:
+                logger.warning(f"快手 {self.url}：获取错误，本次跳过")
+                return False
             from urllib.parse import urlparse, parse_qs
             parsed_url = urlparse(r.url)
             query_params = parse_qs(parsed_url.query)
