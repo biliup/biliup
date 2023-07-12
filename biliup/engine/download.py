@@ -100,12 +100,13 @@ class DownloadBase:
         streamlink_cmd = ['streamlink', *streamlink_input_args, self.raw_stream_url, 'best', '-O']
         ffmpeg_input_args = ['-reconnect_streamed', '1', '-reconnect_delay_max', '20', '-rw_timeout', '20000000']
         ffmpeg_cmd = ['ffmpeg', '-re', '-i', 'pipe:0', '-y',*ffmpeg_input_args, *self.default_output_args, *self.opt_args, '-c', 'copy', '-f', self.suffix]
-        if config.get('segment_time'):
-            ffmpeg_cmd += ['-f', 'segment',
-                     f'{filename} part-%03d.{self.suffix}']
-        else:
-            ffmpeg_cmd += [
-                f'{filename}.{self.suffix}.part']
+        # if config.get('segment_time'):
+        #     ffmpeg_cmd += ['-f', 'segment',
+        #              f'{filename} part-%03d.{self.suffix}']
+        # else:
+        #     ffmpeg_cmd += [
+        #         f'{filename}.{self.suffix}.part']
+        ffmpeg_cmd += [f'{filename}.{self.suffix}.part']
         streamlink_proc = subprocess.Popen(streamlink_cmd, stdout=subprocess.PIPE)
         ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=streamlink_proc.stdout, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
