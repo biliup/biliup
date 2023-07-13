@@ -25,7 +25,8 @@ Twitch，YY直播等，并于录制结束后自动上传到哔哩哔哩视频网
 
 ## 详细安装教程:
 * [快速上手视频教程](https://www.bilibili.com/video/BV1jB4y1p7TK/) by [@milk](https://github.com/by123456by)
-* [Ubuntu](https://blog.waitsaber.org/archives/129) 、[CentOS](https://blog.waitsaber.org/archives/163)、[Windows](https://blog.waitsaber.org/archives/169) 教程 by [@waitsaber](https://github.com/waitsaber)
+* [Ubuntu](https://blog.waitsaber.org/archives/129) 、[CentOS](https://blog.waitsaber.org/archives/163)
+、[Windows](https://blog.waitsaber.org/archives/169) 教程 by [@waitsaber](https://github.com/waitsaber)
 * [常见问题解决方案](https://blog.waitsaber.org/archives/167) by [@waitsaber](https://github.com/waitsaber)
 
 
@@ -97,7 +98,7 @@ vim /host/path/config.toml
 # 启动biliup的docker容器，并启用用户验证。请注意替换 yourpassword 为你的密码。
 docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/caution:latest --http --password yourpassword
 ```
- > 如设置了默认用户名为 biliup。
+ > Web-UI 默认用户名为 biliup。
 * 从默认配置文件启动，并启动Web-UI
 ```bash
 docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/caution:latest --http --password yourpassword
