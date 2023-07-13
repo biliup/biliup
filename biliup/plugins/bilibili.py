@@ -15,13 +15,11 @@ class Bilibili(DownloadBase):
         super().__init__(fname, url, suffix)
         self.fake_headers['Referer'] = 'https://live.bilibili.com'
         self.bilibili_danmaku = config.get('bilibili_danmaku', False)
-        self.tick = 0
         if config.get('user', {}).get('bili_cookie') is not None:
             self.fake_headers['cookie'] = config.get('user', {}).get('bili_cookie')
 
     def check_stream(self):
-        import time
-        logger.debug(int(time.time()))
+
         # 预读配置
         params = {
             'room_id': match1(self.url, r'/(\d+)'),
@@ -41,6 +39,7 @@ class Bilibili(DownloadBase):
         bili_fallback_api = config.get('bili_fallback_api')
         cn01_domains = config.get('bili_force_cn01_domains', '').split(",")
         official_api_host = "https://api.live.bilibili.com"
+
         with requests.Session() as s:
             s.headers = self.fake_headers.copy()
             # 获取直播状态与房间标题
@@ -89,24 +88,21 @@ class Bilibili(DownloadBase):
                 logger.debug(f"获取{uname}房间fmp4流失败，回退到flv流")
         else:
             stream_info = stream['format'][0]['codec'][0]
-        stream_url = {
-            'base_url': stream_info['base_url'],
-        }
+        stream_url = {'base_url': stream_info['base_url'],}
         if perf_cdn is not None:
             perf_cdn_list = perf_cdn.split(',')
             for url_info in stream_info['url_info']:
+                if 'host' in stream_url:
+                    break
                 for cdn in perf_cdn_list:
                     if cdn in url_info['extra']:
                         stream_url['host'] = url_info['host']
                         stream_url['extra'] = url_info['extra']
                         logger.debug(f"找到了perfCDN{stream_url['host']}")
                         break
-                if 'host' in stream_url:
-                    print(stream_url)
         if len(stream_url) < 3:
             stream_url['host'] = stream_info['url_info'][-1]['host']
             stream_url['extra'] = stream_info['url_info'][-1]['extra']
-        print()
 
         # 低级设置
         if "cn-gotcha01" in stream_url['extra']:
