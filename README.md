@@ -25,26 +25,32 @@ Twitch，YY直播等，并于录制结束后自动上传到哔哩哔哩视频网
 
 ## 详细安装教程:
 * [快速上手视频教程](https://www.bilibili.com/video/BV1jB4y1p7TK/) by [@milk](https://github.com/by123456by)
-* [Ubuntu](https://blog.waitsaber.org/archives/129) 、[CentOS](https://blog.waitsaber.org/archives/163)
-、[Windows](https://blog.waitsaber.org/archives/169) 教程 by [@waitsaber](https://github.com/waitsaber)
+* [Ubuntu](https://blog.waitsaber.org/archives/129) 、[CentOS](https://blog.waitsaber.org/archives/163)、[Windows](https://blog.waitsaber.org/archives/169) 教程 by [@waitsaber](https://github.com/waitsaber)
 * [常见问题解决方案](https://blog.waitsaber.org/archives/167) by [@waitsaber](https://github.com/waitsaber)
 
 
 ## INSTALLATION
-1. 创建配置文件 **[config.toml](https://github.com/biliup/biliup/tree/master/public/config.toml)** 
+0. 安装 __Python 3.7+__ 和 __pip__
+ > 如需录制 斗鱼(Douyu) 平台，请额外安装至少一个 __JavaScript 解释器__。
+ > 支持且不限于以下的  __JavaScript 解释器__，点击名字可跳转至下载页。
+ > Please install at least one of the following Javascript interpreter.
+ > python packages: [QuickJS](https://pypi.org/project/quickjs/)
+ > applications: [Node.js](https://nodejs.org/zh-cn/download)
+1. 创建配置文件 **[config.toml](https://github.com/biliup/biliup/tree/master/public/config.toml)**
     ```toml
     # 以下为必填项
-    [streamers."1xx直播录像"] # 设置直播间1
+    [streamers."1xx直播录像"] # 替换 1xx直播录像 为 主播名
     url = ["https://www.twitch.tv/1xx"]
     tags = ["biliup"]
 
     # 设置直播间2
-    [streamers."2xx直播录像"]
+    [streamers."2xx直播录像"] # 注意不能与其他 主播名 重复
     url = ["https://www.twitch.tv/2xx"]
     tags = ["biliup"]
     ```
-2. 安装 __pip__ 并通过 pip 安装 __biliup__：
+2. 通过 pip 安装 __biliup__：
 `pip3 install biliup`
+3. 开始使用 __biliup__：
 ```shell
 # 在创建配置文件的目录启动 biliup
 $ biliup start
@@ -56,7 +62,9 @@ $ biliup restart
 $ biliup --version
 # 显示帮助以查看更多选项
 $ biliup -h
-# 启动 web ui, 默认 0.0.0.0:19159。 可使用-H及-P选项配置。考虑到安全性，建议指定本地地址配合web server或者添加验证。
+# 带 web-ui 启动 biliup。
+# 默认监听 0.0.0.0:19159。可使用-H及-P选项配置。
+# 考虑到安全性，建议指定本地地址配合web server或者添加验证。
 $ biliup --http start
 # 指定配置文件路径
 $ biliup --config ./config.yaml start
@@ -74,24 +82,25 @@ __FFmpeg__ 作为可选依赖。如果还有问题可以 [加群讨论](https://
 
 ## Docker使用 🔨
 ### 方式一 拉取镜像
-* 从配置文件启动
+ > 请注意替换 /host/path 为宿主机下载目录
+* 从自定义的配置文件启动
 ```bash
-# 在指定目录创建配置文件
+# 在下载目录创建配置文件
 vim /host/path/config.toml
 # 启动biliup的docker容器
 docker run -P --name biliup -v /host/path:/opt -d ghcr.io/biliup/caution:master
 ```
-* 从配置文件启动，并启动web-ui
+* 从自定义的配置文件启动，并启动Web-UI
 ```bash
-# 在指定目录创建配置文件
+# 在下载目录创建配置文件
 vim /host/path/config.toml
-# 启动biliup的docker容器
+# 启动biliup的docker容器，并启用用户验证。请注意替换 yourpassword 为你的密码。
 docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/caution:latest --http --password yourpassword
 ```
-> yourpassword为web-ui的密码，用户名为biliup
-* 直接启动web-ui 自动生成配置文件
+ > 如设置了默认用户名为 biliup。
+* 从默认配置文件启动，并启动Web-UI
 ```bash
-docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/caution --http --password yourpassword
+docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/caution:latest --http --password yourpassword
 ```
 ### 方式二 手动构建镜像
 ```bash
@@ -115,9 +124,9 @@ sudo docker exec -it imageId /bin/bash
 
 ## 从源码运行biliup
 * 下载源码: `git clone https://github.com/ForgQi/bilibiliupload.git`
-* 安装: `pip3 install -e .` 
+* 安装: `pip3 install -e .`
 * 启动: `python3 -m biliup`
-* 构建: 
+* 构建:
   ```shell
   $ npm install
   $ npm run build
@@ -185,7 +194,7 @@ download('文件名', 'https://www.panda.tv/1150595', suffix='flv')
 
 b站上传目前有两种模式，分别为bup和bupfetch模式。
 > bup：国内常用模式，视频直接上传到b站投稿系统。
-> 
+>
 > bupfetch：目前见于国外网络环境，视频首先上传至第三方文件系统，上传结束后通知bilibili投稿系统，再由b站投稿系统从第三方系统拉取视频，以保证某些地区用户的上传体验。
 
 bup模式支持的上传方式为upos，其线路有：
@@ -234,11 +243,6 @@ bupfetch模式支持的上传方式及线路有：
 def transcoding(data):
     pass
 ```
-'''
-        Please install at least one of the following Javascript interpreter.'
-        python packages: PyChakra, quickjs
-        applications: Gjs, CJS, QuickJS, JavaScriptCore, Node.js, etc.'''
-
 
 ## LINUX下配置开机自启
 开机自启可参照以下模板创建systemd unit:
