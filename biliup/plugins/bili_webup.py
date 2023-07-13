@@ -66,9 +66,6 @@ class BiliWeb(UploadBase):
                     "biz_id": "",
                     "type": 1
                 }]
-                video_part['title'] = video_part['title'][:80]
-                video.append(video_part)  # 添加已经上传的视频
-            video.title = self.data["format_title"][:80]  # 稿件标题限制80字
             video.desc = self.desc
             video.copyright = self.copyright
             if self.copyright == 2:
