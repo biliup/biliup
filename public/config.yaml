@@ -152,7 +152,7 @@ streamers:
         title: "{title}第一视角%Y-%m-%d{streamer}{url}" ### 自定义标题的时间格式, {title}代表当场直播间标题 {streamer}代表在本config里面设置的主播名称 {url}代表设置的该主播的第一条直播间链接
         tid: 171 ### 投稿分区码,171为电子竞技分区
         copyright: 2 ### 1为自制
-        cover_path: /cover/up.jpg ###封面
+        #cover_path: /cover/up.jpg ###封面
         description: |- ### 支持strftime, {title}, {streamer}, {url}占位符。注：此处请注意缩进，确保所有文字的缩进都与"视频简介"相同或者更多。
          视频简介: {title} %Y-%m-%d %H:%M:%S
          {streamer}主播直播间地址：{url}
