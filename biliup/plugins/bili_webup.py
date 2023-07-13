@@ -42,6 +42,7 @@ class BiliWeb(UploadBase):
         self.tags = tags
         self.cover_path = cover_path
         self.desc = description
+        self.credits = credits
         self.dynamic = dynamic
         self.copyright = copyright
         self.dtime = dtime

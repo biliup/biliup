@@ -28,6 +28,7 @@ class BiliWeb(UploadBase):
         else:
             self.cover_path = None
         self.desc = description
+        self.credits = credits
         self.dynamic = dynamic
         self.copyright = copyright
         self.dtime = dtime
