@@ -29,7 +29,7 @@ from ..engine.upload import UploadBase, logger
 class BiliWeb(UploadBase):
     def __init__(
             self, principal, data, user, submit_api=None, copyright=2, postprocessor=None, dtime=None,
-            dynamic='', lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description=''
+            dynamic='', lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description='', credits=[]
     ):
         super().__init__(principal, data, persistence_path='bili.cookie', postprocessor=postprocessor)
         if tags is None:
@@ -58,6 +58,17 @@ class BiliWeb(UploadBase):
                 video_part['title'] = video_part['title'][:80]
                 video.append(video_part)  # 添加已经上传的视频
             video.title = self.data["format_title"][:80]  # 稿件标题限制80字
+            if self.credits:
+                video.desc_v2 = self.creditsToDesc_v2()
+            else:
+                video.desc_v2=[{
+                    "raw_text": self.desc,
+                    "biz_id": "",
+                    "type": 1
+                }]
+                video_part['title'] = video_part['title'][:80]
+                video.append(video_part)  # 添加已经上传的视频
+            video.title = self.data["format_title"][:80]  # 稿件标题限制80字
             video.desc = self.desc
             video.copyright = self.copyright
             if self.copyright == 2:
@@ -73,6 +84,34 @@ class BiliWeb(UploadBase):
         logger.info(f"上传成功: {ret}")
         return file_list
 
+    def creditsToDesc_v2(self):
+            desc_v2 = []
+            desc_v2_tmp = self.desc
+            for credit in self.credits:
+                try :
+                    num = desc_v2_tmp.index("@credit")
+                    desc_v2.append({
+                        "raw_text": " "+desc_v2_tmp[:num],
+                        "biz_id": "",
+                        "type": 1
+                    })
+                    desc_v2.append({
+                        "raw_text": credit["username"],
+                        "biz_id": str(credit["uid"]),
+                        "type": 2
+                    })
+                    self.desc = self.desc.replace(
+                        "@credit", "@"+credit["username"]+"  ", 1)
+                    desc_v2_tmp = desc_v2_tmp[num+7:]
+                except IndexError:
+                    logger.error('简介中的@credit占位符少于credits的数量,替换失败')
+            desc_v2.append({
+                "raw_text": " "+desc_v2_tmp,
+                "biz_id": "",
+                "type": 1
+            })
+            desc_v2[0]["raw_text"] = desc_v2[0]["raw_text"][1:]  # 开头空格会导致识别简介过长
+            return desc_v2
 
 class BiliBili:
     def __init__(self, video: 'Data'):
