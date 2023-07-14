@@ -14,12 +14,12 @@ class Bilibili(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
         self.fake_headers['Referer'] = 'https://live.bilibili.com'
-        self.use_live_cover = config.get('use_live_cover', False)
         self.bilibili_danmaku = config.get('bilibili_danmaku', False)
         if config.get('user', {}).get('bili_cookie') is not None:
             self.fake_headers['cookie'] = config.get('user', {}).get('bili_cookie')
 
     def check_stream(self):
+
         # 预读配置
         params = {
             'room_id': match1(self.url, r'/(\d+)'),
@@ -39,6 +39,7 @@ class Bilibili(DownloadBase):
         bili_fallback_api = config.get('bili_fallback_api')
         cn01_domains = config.get('bili_force_cn01_domains', '').split(",")
         official_api_host = "https://api.live.bilibili.com"
+
         with requests.Session() as s:
             s.headers = self.fake_headers.copy()
             # 获取直播状态与房间标题
@@ -68,11 +69,12 @@ class Bilibili(DownloadBase):
                 play_info = get_play_info(s, isallow, official_api_host, params)
             except:
                 logger.error("使用官方 Api 失败")
+                return False
         if play_info['code'] != 0:
             logger.debug(play_info['message'])
             return False
         streams = play_info['data']['playurl_info']['playurl']['stream']
-        stream = streams[1] if protocol.startswith('hls') else streams[0]
+        stream = streams[1] if protocol.startswith('hls') and len(streams) > 1 else streams[0]
         if protocol == "hls_fmp4":
             if len(stream['format']) > 1:
                 stream_info = stream['format'][1]['codec'][0]
@@ -87,21 +89,23 @@ class Bilibili(DownloadBase):
                 logger.debug(f"获取{uname}房间fmp4流失败，回退到flv流")
         else:
             stream_info = stream['format'][0]['codec'][0]
-        stream_url = {'base_url': stream_info['base_url']}
+        stream_url = {'base_url': stream_info['base_url'],}
         if perf_cdn is not None:
             perf_cdn_list = perf_cdn.split(',')
             for url_info in stream_info['url_info']:
+                if 'host' in stream_url:
+                    break
                 for cdn in perf_cdn_list:
                     if cdn in url_info['extra']:
                         stream_url['host'] = url_info['host']
                         stream_url['extra'] = url_info['extra']
                         logger.debug(f"找到了perfCDN{stream_url['host']}")
                         break
-                if 'host' in stream_url:
-                    break
         if len(stream_url) < 3:
             stream_url['host'] = stream_info['url_info'][-1]['host']
             stream_url['extra'] = stream_info['url_info'][-1]['extra']
+
+        # 低级设置
         if "cn-gotcha01" in stream_url['extra']:
             # 强制替换cn-gotcha01的节点为指定节点 注意：只有大陆ip才能获取到cn-gotcha01的节点。
             if cn01_domains[0] != '':
@@ -123,13 +127,15 @@ class Bilibili(DownloadBase):
                     logger.error("配置文件中的cn-gotcha01节点均不可用")
             # 强制去除 cn01线路的hls_ts与hls_fmp4流（beta）的 _bluray 文件名，从而实现获取真实原画流的目的
             if force_source:
-                stream_url['base_url'] = re.sub(r'_bluray(?=(/index\.m3u8\?|\.m3u8\?))', "", stream_url['base_url'], 1)
+                stream_url['base_url'] = re.sub(r'_bluray(?=(/index)?\.m3u8)', "", stream_url['base_url'], 1)
         self.raw_stream_url = stream_url['host'] + stream_url['base_url'] + stream_url['extra']
+
         # 强制替换ov05 302redirect之后的真实地址为指定的域名或ip达到自选ov05节点的目的
         if ov05_ip and "ov-gotcha05" in stream_url['host']:
             r = s.get(self.raw_stream_url, stream=True)
             self.raw_stream_url = re.sub(r".*(?=/d1--ov-gotcha05)", f"http://{ov05_ip}", r.url, 1)
             logger.debug(f"将ov-gotcha05的节点ip替换为了{ov05_ip}")
+
         if bili_cdn_fallback:
             try:
                 if s.get(self.raw_stream_url, stream=True).status_code == 404:

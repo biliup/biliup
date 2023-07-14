@@ -11,6 +11,7 @@ class BiliWeb(UploadBase):
     def __init__(
             self, principal, data, submit_api=None, copyright=2, postprocessor=None, dtime=None,
             dynamic='', lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description='',
+            dolby=0, hires=0, no_reprint=0, open_elec=0,credits=[]
             user_cookie='cookies.json'
     ):
         super().__init__(principal, data, persistence_path='bili.cookie', postprocessor=postprocessor)
@@ -28,9 +29,14 @@ class BiliWeb(UploadBase):
         else:
             self.cover_path = None
         self.desc = description
+        self.credits = credits
         self.dynamic = dynamic
         self.copyright = copyright
         self.dtime = dtime
+        self.dolby = dolby
+        self.hires = hires
+        self.no_reprint = no_reprint
+        self.open_elec = open_elec
         self.user_cookie = user_cookie
 
     def upload(self, file_list):
@@ -48,6 +54,14 @@ class BiliWeb(UploadBase):
         elif self.lines == 'cos-internal':
             line = stream_gears.UploadLine.CosInternal
         tag = ','.join(self.tags)
+        if self.credits:
+            self.desc_v2 = self.creditsToDesc_v2()
+        else:
+            self.desc_v2 = [{
+                    "raw_text": self.desc,
+                    "biz_id": "",
+                    "type": 1
+                }]
         source = self.data["url"] if self.copyright == 2 else ""
         cover = self.cover_path if self.cover_path is not None else ""
         filtered_list = [file for file in file_list if not file.endswith(('.xml', '.webp', '.jpg'))] #自动过滤非视频文件
@@ -66,8 +80,42 @@ class BiliWeb(UploadBase):
             self.dynamic,
             cover,
             dtime,
+            self.dolby,
+            self.hires,
+            self.no_reprint,
+            self.open_elec,
             line,
             self.threads,
+            self.desc_v2,
         )
         logger.info(f"上传成功: {self.principal}")
         return file_list
+
+    def creditsToDesc_v2(self):
+        desc_v2 = []
+        desc_v2_tmp = self.desc
+        for credit in self.credits:
+            try :
+                num = desc_v2_tmp.index("@credit")
+                desc_v2.append({
+                    "raw_text": " "+desc_v2_tmp[:num],
+                    "biz_id": "",
+                    "type": 1
+                })
+                desc_v2.append({
+                    "raw_text": credit["username"],
+                    "biz_id": str(credit["uid"]),
+                    "type": 2
+                })
+                self.desc = self.desc.replace(
+                    "@credit", "@"+credit["username"]+"  ", 1)
+                desc_v2_tmp = desc_v2_tmp[num+7:]
+            except IndexError:
+                logger.error('简介中的@credit占位符少于credits的数量,替换失败')
+        desc_v2.append({
+            "raw_text": " "+desc_v2_tmp,
+            "biz_id": "",
+            "type": 1
+        })
+        desc_v2[0]["raw_text"] = desc_v2[0]["raw_text"][1:]  # 开头空格会导致识别简介过长
+        return desc_v2    

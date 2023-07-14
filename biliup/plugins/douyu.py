@@ -7,10 +7,6 @@ from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from ..plugins import logger
 
-# import http.client
-# http.client.HTTPConnection._http_vsn = 10
-# http.client.HTTPConnection._http_vsn_str = 'HTTP/1.0'
-
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?douyu\.com')
 class Douyu(DownloadBase):
@@ -22,7 +18,7 @@ class Douyu(DownloadBase):
         if len(self.url.split("douyu.com/")) < 2:
             logger.error("斗鱼：" + self.url + "：地址错误")
             return False
-        
+
         try:
             html = requests.get(self.url).text
             vid = match1(html, r'\$ROOM\.room_id\s*=\s*(\d+)',
@@ -35,7 +31,7 @@ class Douyu(DownloadBase):
         except:
             logger.warning("斗鱼：" + self.url + "：获取vid错误")
             return False
-        
+
         try:
             roominfo = requests.get(f"https://www.douyu.com/betard/{vid}").json()['room']
             if roominfo['show_status'] != 1 or roominfo['videoLoop'] != 0:
@@ -53,11 +49,11 @@ class Douyu(DownloadBase):
         except:
             logger.warning("斗鱼：" + vid + "：获取roominfo错误")
             return False
-        
+
         try:
             ub98484234(js_enc, vid, params)
-        except:
-            logger.error('请至少安装一个 Javascript 解释器')
+        except TypeError:
+            logger.error("请安装至少一个 Javascript 解释器")
             return False
         live_data = get_play_info(vid, self.fake_headers, params)
         if type(live_data) is not dict:
@@ -84,8 +80,6 @@ def get_play_info(vid, headers, params):
         logger.warning(f"douyu：get_play_info：请求出错：https://www.douyu.com/lapi/live/getH5Play/{vid}")
         return None
     # 禁用斗鱼主线路
-    if not type(live_data) == type({}):
-        return live_data
     if not live_data['rtmp_cdn'].endswith('h5') or 'akm' in live_data['rtmp_cdn']:
         params['cdn'] = 'tct-h5'
         return get_play_info(vid, headers, params)
