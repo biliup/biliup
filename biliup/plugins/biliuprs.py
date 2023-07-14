@@ -79,14 +79,14 @@ class BiliWeb(UploadBase):
             self.desc,
             self.dynamic,
             cover,
-            dtime,
             self.dolby,
             self.hires,
             self.no_reprint,
             self.open_elec,
-            line,
             self.threads,
             self.desc_v2,
+            dtime,
+            line
         )
         logger.info(f"上传成功: {self.principal}")
         return file_list
