@@ -212,6 +212,7 @@ class DownloadBase:
                         if self.check_stream():
                             i = 0
                             check_delay = delay
+                            continue
                         else:
                             if check_delay > 60:
                                 continue
