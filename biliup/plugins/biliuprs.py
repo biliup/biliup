@@ -11,7 +11,7 @@ class BiliWeb(UploadBase):
     def __init__(
             self, principal, data, submit_api=None, copyright=2, postprocessor=None, dtime=None,
             dynamic='', lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description='',
-            dolby=0, hires=0, no_reprint=0, open_elec=0,credits=[]
+            dolby=0, hires=0, no_reprint=0, open_elec=0, credits=[],
             user_cookie='cookies.json'
     ):
         super().__init__(principal, data, persistence_path='bili.cookie', postprocessor=postprocessor)
@@ -118,4 +118,4 @@ class BiliWeb(UploadBase):
             "type": 1
         })
         desc_v2[0]["raw_text"] = desc_v2[0]["raw_text"][1:]  # 开头空格会导致识别简介过长
-        return desc_v2    
+        return desc_v2
