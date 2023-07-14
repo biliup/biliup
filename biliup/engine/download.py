@@ -197,7 +197,7 @@ class DownloadBase:
                 if delay:
                     if i < 5:
                         i += 1
-                        logger.info(f'获取失败：无法获取直播流，剩余重试次数 {5-i} 次，等待 10 秒')
+                        logger.info(f'获取失败：无法获取直播流，将在 5 秒后重试，重试次数 {i}/{5}')
                         time.sleep(5)
                         continue
                     else:
