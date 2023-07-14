@@ -19,6 +19,7 @@ from biliup.plugins.Danmaku.douyu import Douyu
 from biliup.plugins.Danmaku.huya import Huya
 from biliup.plugins.Danmaku.bilibili import Bilibili
 from biliup.plugins.Danmaku.twitch import Twitch
+from biliup.plugins.Danmaku.douyin import Douyin
 
 logger = logging.getLogger('biliup')
 __all__ = ['DanmakuClient']
@@ -31,6 +32,7 @@ class DanmakuClient:
         self.__filename_video_suffix = filename
         self.__url = ''
         self.__site = None
+        self.__site_douyin = None
         self.__hs = None
         self.__ws = None
         self.__stop = False
@@ -41,6 +43,8 @@ class DanmakuClient:
             self.__url = url
         else:
             self.__url = 'http://' + url
+        if re.match(r'^(?:http[s]?://)?.*?live.douyin.com/(.+?)$', url):
+            self.__site_douyin = Douyin(url, filename)
         for u, s in {'douyu.com': Douyu,
                      'huya.com': Huya,
                      'live.bilibili.com': Bilibili,
@@ -50,7 +54,8 @@ class DanmakuClient:
                 self.__site = s
                 self.__u = u
                 break
-        if self.__site is None:
+
+        if self.__site is None and self.__site_douyin is None:
             print('Invalid link!')
             exit()
 
@@ -153,21 +158,27 @@ class DanmakuClient:
                 logger.debug(f"print_danmaku：{self.__filename}：弹幕写入异常：{Error}")
 
     async def start(self):
-        self.__dm_queue = asyncio.Queue()
-        self.__hs = aiohttp.ClientSession()
-        await self.init_ws()
-        await asyncio.gather(
-            self.heartbeats(),
-            self.fetch_danmaku(),
-            self.print_danmaku(),
-        )
+        if self.__site_douyin is not None:
+            await self.__site_douyin.start()
+        else:
+            self.__dm_queue = asyncio.Queue()
+            self.__hs = aiohttp.ClientSession()
+            await self.init_ws()
+            await asyncio.gather(
+                self.heartbeats(),
+                self.fetch_danmaku(),
+                self.print_danmaku(),
+            )
 
     def stop(self):
-        self.__stop = True
-        self.__hs.close()
-        if not (os.path.exists(f"{self.__filename_video_suffix}.part") or
-                os.path.exists(f"{self.__filename_video_suffix}")):
-            os.remove(self.__filename)
+        if self.__site_douyin is not None:
+            self.__site_douyin.stop()
+        else:
+            self.__stop = True
+            self.__hs.close()
+            if not (os.path.exists(f"{self.__filename_video_suffix}.part") or
+                    os.path.exists(f"{self.__filename_video_suffix}")):
+                os.remove(self.__filename)
 
 
 

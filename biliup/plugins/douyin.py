@@ -7,12 +7,14 @@ from . import logger
 from biliup.config import config
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
+from biliup.plugins.Danmaku import DanmakuClient
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m|live)\.)?douyin\.com')
 class Douyin(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
+        self.douyin_danmaku = config.get('douyin_danmaku', False)
 
     def check_stream(self):
         douyin_url="https://live.douyin.com/"
@@ -52,3 +54,9 @@ class Douyin(DownloadBase):
             self.raw_stream_url = json.loads(r5)['data']['origin']['main']['flv']
             self.room_title = room_info['title']
             return True
+
+    async def danmaku_download_start(self, filename):
+        if self.douyin_danmaku:
+            logger.info("开始弹幕录制")
+            self.danmaku = DanmakuClient(self.url, filename + "." + self.suffix)
+            await self.danmaku.start()
