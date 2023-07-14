@@ -33,7 +33,10 @@ def upload(data):
         threshold = config.get('filtering_threshold', 0)
         if threshold:
             data['threshold'] = threshold
-
+        data['dolby'] = config.get('dolby', 0)
+        data['hires'] = config.get('hires', 0)
+        data['no_reprint'] = config.get('no_reprint', 0)
+        data['open_elec'] = config.get('open_elec', 0)
         sig = inspect.signature(cls)
         kwargs = {}
         for k in sig.parameters:
