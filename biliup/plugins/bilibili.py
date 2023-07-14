@@ -69,6 +69,7 @@ class Bilibili(DownloadBase):
                 play_info = get_play_info(s, isallow, official_api_host, params)
             except:
                 logger.error("使用官方 Api 失败")
+                return False
         if play_info['code'] != 0:
             logger.debug(play_info['message'])
             return False
