@@ -76,7 +76,7 @@ class Bilibili(DownloadBase):
         playurl_info = play_info['data']['playurl_info']['playurl']
         if playurl_info is None:
             logger.debug(play_info)
-            logger.error('Region restrictions may apply')
+            logger.error('可能遇到地区限制，无法获取到直播流')
             return False
         streams = playurl_info['stream']
         stream = streams[1] if protocol.startswith('hls') and len(streams) > 1 else streams[0]
