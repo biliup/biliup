@@ -70,7 +70,7 @@ class Kuaishou(DownloadBase):
             }
             # 我不好说，但距离上面获取移动端页面的请求必须间隔 1s 以上
             import time
-            time.sleep(3)
+            time.sleep(1)
             live_data = s.post(f"https://livev.m.chenzhongtech.com/rest/k/live/byUser?kpn={kpn}",
                                 json=data).json()
         if not live_data['result'] == 1 :
@@ -79,19 +79,33 @@ class Kuaishou(DownloadBase):
         liveStream = live_data.get('liveStream')
         if liveStream is None:
             formatted_log("error", BANNED=live_data['error_msg'])
+            return False
         # liveStream['type'] != 2 or liveStream['streamType'] != 1 可能是视频轮播，未发现相关主播
         if not liveStream['living']:
             logger.debug(liveStream['user']['user_name'] + "未开播")
             return False
         self.room_title = liveStream['caption']
         if config.get('kwai_protocol', "FLV").lower() == 'hls':
-            self.raw_stream_url = liveStream['hlsPlayUrl']
+            PlayUrlInfo = liveStream['multiResolutionHlsPlayUrls'][-1]
+            PlayUrls = PlayUrlInfo['urls'][0]
+            self.raw_stream_url = PlayUrls['url']
         elif config.get('kwai_cdn') is not None:
-            for playUrl in liveStream['playUrls']:
-                if config.get('kwai_cdn').lower() in playUrl['cdn'].lower():
+            PlayUrlInfo = liveStream['multiResolutionPlayUrls'][-1]
+            PlayUrls = PlayUrlInfo['urls']
+            for playUrlInfo in PlayUrls:
+                if config.get('kwai_cdn').lower() in playUrlInfo['cdn'].lower():
+                    playUrl = playUrlInfo
                     self.raw_stream_url = playUrl['url']
+
         if self.raw_stream_url is None:
-            self.raw_stream_url = liveStream['playUrls'][0]['url']
+            import random
+            liveAdaptiveManifest = random.choice(liveStream['liveAdaptiveManifest'])
+            PlayUrlInfo = liveAdaptiveManifest['adaptationSet']['representation'][-1]
+            self.raw_stream_url = PlayUrlInfo['url']
+        else:
+            streamName = self.raw_stream_url.split('/gifshow/')[1].split('.')[0]
+            formatted_log('', QUALITY=PlayUrlInfo['type'], QUALITY_NAME=PlayUrlInfo['name'], LEVEL=PlayUrlInfo['level'],
+                        URLTYPE=PlayUrls['urlType'], STREAMNAME=streamName)
 
         '''
         PC_WEB
@@ -124,12 +138,15 @@ class Kuaishou(DownloadBase):
         #         logger.error(f"获取直播封面失败")
         return True
 
-def formatted_log(level, **kwargs):
+def formatted_log(*args, **kwargs):
+    level = args[0] if args else ''
     for key, value in kwargs.items():
-        if level in "error":
+        if level == "error":
             logger.error(f"Kuaishou {key}: {value}")
-        elif level in "warning":
+        elif level == "warning":
             logger.warning(f"Kuaishou {key}: {value}")
+        elif level == "info":
+            logger.info(f"Kuaishou {key}: {value}")
         else:
             logger.debug(f"Kuaishou {key}: {value}")
 
