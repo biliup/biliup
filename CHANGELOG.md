@@ -5,6 +5,27 @@
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 0.4.23
+- 更新时间：2023.07.17
+- 🔧preprocessor增加开播时返回主播名字和开播地址 [@Kataick](https://github.com/Kataick)
+- 🔧修复当获取流失败后会触发获取流频繁的问题 [@Kataick](https://github.com/Kataick)
+- 🔧优化设置大delay会出现漏录的问题 [@Kataick](https://github.com/Kataick)
+- 🔧优化在config中读取值的代码写法 [@Kataick](https://github.com/Kataick)
+- 🔧增加对yt-dlp的lazy_playlist功能支持 [@Kataick](https://github.com/Kataick)
+- 🔧修复format为mp4时无法时间分段的问题 [@Kataick](https://github.com/Kataick)
+- 🔧修复bilibili导致进程卡死问题(get_play_info) [@Kataick](https://github.com/Kataick)
+- 🔧修复afreecaTV导致进程卡死问题 [@Kataick](https://github.com/Kataick)
+- 🔧修复快手导致进程卡死问题 [@Kataick](https://github.com/Kataick)
+- 🔧去除 quickjs 依赖。相对应的修改了 Readme 和 Douyu [@xxxxuanran](https://github.com/xxxxuanran)
+- 🔧Bililive 兼容 `APEX分区。[@xxxxuanran](https://github.com/xxxxuanran)
+- 🔧Kuaishou 新增 协议切换 和 CDN 优选。[@xxxxuanran](https://github.com/xxxxuanran)
+- 🔧修正快手 HLS 流原画 [@xxxxuanran](https://github.com/xxxxuanran) 
+- 🔧修复biliup-rs的参数绑定[@hguandl](https://github.com/hguandl)
+- 💡增加由于地区限制导致无法下载指定区域直播间的提示。[@xxxxuanran](https://github.com/xxxxuanran)
+- 💡增加对biliup-rs的支持(杜比音效、Hi-Res、转载、充电) [@Kataick](https://github.com/Kataick)
+- 💡bili_web上传插件新增简介@功能 [@zzc10086](https://github.com/zzc10086)
+- 💡增加抖音弹幕录制支持 [@KNaiFen](https://github.com/KNaiFen)
+
 ## 0.4.22
 - 更新时间：2023.06.29
 - 🔧优化虎牙错误提示和抖音代码与错误提示。[@Kataick](https://github.com/Kataick)
