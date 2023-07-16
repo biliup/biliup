@@ -27,7 +27,7 @@ class Bilibili(DownloadBase):
             'format': '0,1,2',# 0: flv, 1: ts, 2: fmp4
             'codec': '0', # 0: avc, 1: hevc
             'qn': '10000',
-            'platform': config.get('biliplatform', 'web'),
+            'platform': config.get('biliplatform', 'h5'), # 使用 h5 时默认屏蔽 p2p
             'dolby': '5',
             'panorama': '1'
         }
@@ -73,7 +73,12 @@ class Bilibili(DownloadBase):
         if play_info['code'] != 0:
             logger.debug(play_info['message'])
             return False
-        streams = play_info['data']['playurl_info']['playurl']['stream']
+        playurl_info = play_info['data']['playurl_info']['playurl']
+        if playurl_info is None:
+            logger.debug(play_info)
+            logger.error('Region restrictions may apply')
+            return False
+        streams = playurl_info['stream']
         stream = streams[1] if protocol.startswith('hls') and len(streams) > 1 else streams[0]
         if protocol == "hls_fmp4":
             if len(stream['format']) > 1:
