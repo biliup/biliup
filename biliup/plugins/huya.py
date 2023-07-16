@@ -25,6 +25,7 @@ class Huya(DownloadBase):
         except:
             logger.warning("虎牙 " + self.url.split("huya.com/")[1] + "：获取错误，本次跳过")
             return False
+
         huya = None
         if match1(res.text, '"stream": "([a-zA-Z0-9+=/]+)"'):
             huya = base64.b64decode(match1(res.text, '"stream": "([a-zA-Z0-9+=/]+)"')).decode()
@@ -36,24 +37,41 @@ class Huya(DownloadBase):
                 huya = None
         if huya:
             try:
+                # 自选cdn
                 huyacdn = config.get('huyacdn', 'AL')
-                huyajson1 = json.loads(huya)['data'][0]['gameStreamInfoList']
-                huyajson2 = json.loads(huya)['vMultiStreamInfo']
-                ratio = huyajson2[0]['iBitRate']
-                ibitrate_list = []
-                sdisplayname_list = []
-                for key in huyajson2:
-                    ibitrate_list.append(key['iBitRate'])
-                    sdisplayname_list.append(key['sDisplayName'])
-                    if len(sdisplayname_list) > len(set(sdisplayname_list)):
-                        ratio = max(ibitrate_list)
-                huyajson = huyajson1[0]
-                for cdn in huyajson1:
+                # 最大录制码率
+                huya_max_ratio = config.get('huya_max_ratio', 0)
+
+                # 流信息
+                stream_items = json.loads(huya)['data'][0]['gameStreamInfoList']
+                # 码率信息
+                ratio_items = json.loads(huya)['vMultiStreamInfo']
+                # 最大码率(不含hdr)
+                max_ratio = json.loads(huya)['data'][0]['gameLiveInfo']['bitRate']
+
+                # 录制码率
+                record_ratio = 0
+                # 挑选合适的码率
+                for key in ratio_items:
+                    # iBitRate = 0的就是最大码率
+                    if key['iBitRate'] == 0:
+                        key['iBitRate'] = max_ratio
+                    # 不录制大于最大码率的
+                    if huya_max_ratio >= key['iBitRate'] > record_ratio:
+                        record_ratio = key['iBitRate']
+
+                # 没挑选到则为最大码率
+                if record_ratio == 0:
+                    record_ratio = max_ratio
+
+                huyajson = stream_items[0]
+                for cdn in stream_items:
                     if cdn['sCdnType'] == huyacdn:
                         huyajson = cdn
-                absurl = f'{huyajson["sFlvUrl"]}/{huyajson["sStreamName"]}.{huyajson["sFlvUrlSuffix"]}?' \
-                        f'{huyajson["sFlvAntiCode"]}'
-                self.raw_stream_url = html.unescape(absurl) + "&ratio=" + str(ratio)
+                        break
+
+                absurl = f'{huyajson["sFlvUrl"]}/{huyajson["sStreamName"]}.{huyajson["sFlvUrlSuffix"]}?{huyajson["sFlvAntiCode"]}'
+                self.raw_stream_url = html.unescape(absurl) + "&ratio=" + str(record_ratio)
                 self.room_title = json.loads(huya)['data'][0]['gameLiveInfo']['introduction']
                 return True
             except:
