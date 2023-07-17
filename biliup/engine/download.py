@@ -198,7 +198,7 @@ class DownloadBase:
                 retry_count = 0
                 retry_count_delay = 0
             else:
-                if retry_count < 5:
+                if retry_count < 3:
                     retry_count += 1
                     logger.info(f'直播流获取失败：{self.__class__.__name__}:{self.fname}，将在 10 秒后重试，重试次数 {retry_count}/3')
                     time.sleep(10)
