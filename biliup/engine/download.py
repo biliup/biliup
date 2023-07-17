@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import math
 import os
 import re
 import subprocess
@@ -65,18 +66,20 @@ class DownloadBase:
         filename = get_valid_filename(filename)
         fmtname = time.strftime(filename.encode("unicode-escape").decode()).encode().decode("unicode-escape")
         threading.Thread(target=asyncio.run, args=(self.danmaku_download_start(fmtname),)).start()
-        if self.downloader == 'stream-gears':
-            stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
-                                  config.get('file_size'))
-        elif self.downloader == 'streamlink':
+
+        if self.downloader == 'streamlink':
             parsed_url = urlparse(self.raw_stream_url)
             path = parsed_url.path
-            if '.flv' in path: #streamlink无法处理flv,所以回退到ffmpeg
-                self.ffmpeg_download(fmtname)
+            if '.flv' in path:  # streamlink无法处理flv,所以回退到ffmpeg
+                return self.ffmpeg_download(fmtname)
             else:
-                self.streamlink_download(fmtname)
-        else:
-            self.ffmpeg_download(fmtname)
+                return self.streamlink_download(fmtname)
+        elif self.downloader == 'ffmpeg':
+            return self.ffmpeg_download(fmtname)
+
+        stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
+                              config.get('file_size'))
+        return True
 
     def get_live_cover(self, uname, room_id, filename, timestamp, cover_url):
         import requests
@@ -95,11 +98,12 @@ class DownloadBase:
                 f.write(response.content)
                 return live_cover_path
 
-    def streamlink_download(self, filename): #streamlink+ffmpeg混合下载模式，适用于下载hls流
+    def streamlink_download(self, filename):  # streamlink+ffmpeg混合下载模式，适用于下载hls流
         streamlink_input_args = ['--stream-segment-threads', '3', '--hls-playlist-reload-attempts', '1']
         streamlink_cmd = ['streamlink', *streamlink_input_args, self.raw_stream_url, 'best', '-O']
-        ffmpeg_input_args = ['-reconnect_streamed', '1', '-reconnect_delay_max', '20', '-rw_timeout', '20000000']
-        ffmpeg_cmd = ['ffmpeg', '-re', '-i', 'pipe:0', '-y',*ffmpeg_input_args, *self.default_output_args, *self.opt_args, '-c', 'copy', '-f', self.suffix]
+        ffmpeg_input_args = ['-rw_timeout', '20000000']
+        ffmpeg_cmd = ['ffmpeg', '-re', '-i', 'pipe:0', '-y', *ffmpeg_input_args, *self.default_output_args,
+                      *self.opt_args, '-c', 'copy', '-f', self.suffix]
         # if config.get('segment_time'):
         #     ffmpeg_cmd += ['-f', 'segment',
         #              f'{filename} part-%03d.{self.suffix}']
@@ -108,7 +112,8 @@ class DownloadBase:
         #         f'{filename}.{self.suffix}.part']
         ffmpeg_cmd += [f'{filename}.{self.suffix}.part']
         streamlink_proc = subprocess.Popen(streamlink_cmd, stdout=subprocess.PIPE)
-        ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=streamlink_proc.stdout, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=streamlink_proc.stdout, stdout=subprocess.PIPE,
+                                       stderr=subprocess.STDOUT)
         try:
             with ffmpeg_proc.stdout as stdout:
                 for line in iter(stdout.readline, b''):
@@ -120,11 +125,13 @@ class DownloadBase:
             if sys.platform != 'win32':
                 ffmpeg_proc.communicate(b'q')
             raise
-        return retval
+        if retval != 0:
+            return False
+        return True
 
     def ffmpeg_download(self, filename):
-        default_input_args = ['-headers', ''.join('%s: %s\r\n' % x for x in self.fake_headers.items()),
-                              '-reconnect_streamed', '1', '-reconnect_delay_max', '20', '-rw_timeout', '20000000']
+        default_input_args = ['-headers', ''.join('%s: %s\r\n' % x for x in self.fake_headers.items()), '-rw_timeout',
+                              '20000000']
         parsed_url = urlparse(self.raw_stream_url)
         path = parsed_url.path
         if '.m3u8' in path:
@@ -152,7 +159,9 @@ class DownloadBase:
             if sys.platform != 'win32':
                 proc.communicate(b'q')
             raise
-        return retval
+        if retval != 0:
+            return False
+        return True
 
     async def danmaku_download_start(self, filename):
         pass
@@ -162,68 +171,55 @@ class DownloadBase:
             return False
         file_name = self.file_name
         retval = self.download(file_name)
-        logger.info(f'{retval}part: {file_name}.{self.suffix}')
+        logger.info(f'part: {file_name}.{self.suffix}')
         self.rename(f'{file_name}.{self.suffix}')
         return retval
 
     def start(self):
-        i = 0
-        logger.info(f'开始下载 {self.__class__.__name__}：{self.fname}')
+        logger.info(f'开始下载：{self.__class__.__name__}:{self.fname}')
         date = time.localtime()
-        lasttime_download = 0
         delay = min(config.get('delay', 0), 1800)
-        sleep_time = 5 if delay > 30 else 30
-        check_delay = delay
-        ret = None
-        while i < 60:
-            # 限制每次拉流的时间间隔必须大于delay，防止主播还没推流的时候疯狂重复请求
-            thistime_download = time.time()
-            interval = thistime_download - lasttime_download
-            if not ret is False and interval < sleep_time:
-                logger.info(f'频繁请求：等待 {sleep_time - interval:.2f} 秒后再次请求直播流')
-                time.sleep(sleep_time - interval)
-
+        # 重试次数
+        retry_count = 0
+        # delay 重试次数
+        retry_count_delay = 0
+        # delay 重试次数
+        delay_all_retry_count = math.ceil(delay / 60)
+        while True:
+            ret = False
             try:
-                thistime_download = time.time()
                 ret = self.run()
             except:
                 logger.exception('Uncaught exception:')
-                continue
             finally:
-                lasttime_download = thistime_download
                 self.close()
+            if ret:
+                # 成功下载重置重试次数
+                retry_count = 0
+                retry_count_delay = 0
+            else:
+                if retry_count < 5:
+                    retry_count += 1
+                    logger.info(f'直播流获取失败：{self.__class__.__name__}:{self.fname}，将在 10 秒后重试，重试次数 {retry_count}/3')
+                    time.sleep(10)
+                    continue
 
-            if ret is False:
                 if delay:
-                    if i < 5:
-                        i += 1
-                        logger.info(f'获取失败：无法获取直播流，将在 5 秒后重试，重试次数 {i}/{5}')
-                        time.sleep(5)
-                        continue
+                    retry_count_delay += 1
+                    if retry_count_delay > delay_all_retry_count:
+                        logger.info(f'下播延迟检测结束：{self.__class__.__name__}:{self.fname}')
+                        break
                     else:
-                        if i == 5:
-                            logger.info(f'检测到delay设置 {delay} 秒，将分为 {-int(-(delay / 60) // 1)} 次检测，每隔 60 秒检测一次开播状态')
-                        if check_delay > 60:
-                            i += 1
-                            check_delay -= 60
+                        if delay < 60:
+                            logger.info(f'下播延迟检测：{self.__class__.__name__}:{self.fname}，将在 {delay} 秒后检测开播状态')
+                            time.sleep(delay)
+                        else:
+                            logger.info(
+                                f'下播延迟检测：{self.__class__.__name__}:{self.fname}，将在 60 秒后检测开播状态，检测次数 {retry_count_delay}/{delay_all_retry_count}')
                             time.sleep(60)
-                        else:
-                            time.sleep(check_delay)
-                        if self.check_stream():
-                            i = 0
-                            check_delay = delay
-                            continue
-                        else:
-                            if check_delay > 60:
-                                continue
-                            else:
-                                logger.info(f'delay: {delay} 结束，即将退出下载')
-                break
-            elif ret == 1 or self.downloader == 'stream-gears':
-                time.sleep(45)
+                        continue
 
-            i += 1
-        logger.info(f'退出下载 {i} : {self.fname}')
+        logger.info(f'退出下载：{self.__class__.__name__}:{self.fname}')
         return {
             'name': self.fname,
             'url': self.url,
