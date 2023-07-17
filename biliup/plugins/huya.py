@@ -51,18 +51,20 @@ class Huya(DownloadBase):
 
                 # 录制码率
                 record_ratio = 0
-                # 挑选合适的码率
-                for key in ratio_items:
-                    # iBitRate = 0的就是最大码率
-                    if key['iBitRate'] == 0:
-                        key['iBitRate'] = max_ratio
-                    # 不录制大于最大码率的
-                    if huya_max_ratio >= key['iBitRate'] > record_ratio:
-                        record_ratio = key['iBitRate']
+                # 如果限制了最大码率
+                if huya_max_ratio != 0:
+                    # 挑选合适的码率
+                    for ratio_item in ratio_items:
+                        # iBitRate = 0的就是最大码率
+                        if ratio_item['iBitRate'] == 0:
+                            ratio_item['iBitRate'] = max_ratio
+                        # 不录制大于最大码率的
+                        if huya_max_ratio >= ratio_item['iBitRate'] > record_ratio:
+                            record_ratio = ratio_item['iBitRate']
 
-                # 没挑选到则为最大码率
-                if record_ratio == 0:
-                    record_ratio = max_ratio
+                    # 原画
+                    if record_ratio == max_ratio:
+                        record_ratio = 0
 
                 huyajson = stream_items[0]
                 for cdn in stream_items:
