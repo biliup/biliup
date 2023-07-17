@@ -24,7 +24,8 @@ dependencies = [
     "rsa >= 4.6",
     'importlib-resources; python_version<"3.9"',
     'tomli >= 1.1.0 ; python_version < "3.11"',
-     'protobuf >= 4.23.0'
+    'protobuf >= 4.23.0',
+    "peewee>=3.16.2",
 ]
 dynamic = ["version"]
 

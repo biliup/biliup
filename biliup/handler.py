@@ -6,6 +6,7 @@ from . import plugins
 from .downloader import download, check_url
 from .engine import invert_dict, Plugin
 from biliup.config import config
+from biliup.database import DB as db
 from .engine.event import Event, EventManager
 from .uploader import upload
 from functools import reduce
@@ -50,8 +51,10 @@ def process(name, url):
         suffix = kwargs.get('format')
         if suffix:
             kwargs['suffix'] = suffix
-        stream_info = download(name, url, **kwargs)
+        download(name, url, **kwargs)
     finally:
+        stream_info.update(db.get_stream_info(name=name))
+        db.delete_stream_info(name=name)
         return Event(UPLOAD, (stream_info,))
 
 

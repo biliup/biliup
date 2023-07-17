@@ -7,6 +7,7 @@ import platform
 
 import biliup.common.reload
 from biliup.config import config
+from biliup.database import DB as db
 from . import __version__, LOG_CONF
 from .common.Daemon import Daemon
 from .common.reload import AutoReload
@@ -64,6 +65,8 @@ async def main(args):
     wait = config.get('event_loop_interval', 40)
     # 初始化定时器
     timer = Timer(func=check_timer, interval=wait)
+    # 初始化数据库
+    db.init()
 
     interval = config.get('check_sourcecode', 15)
     if args.http:

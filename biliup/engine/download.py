@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 import stream_gears
 
 from biliup.config import config
+from biliup.database import DB as db
 
 logger = logging.getLogger('biliup')
 
@@ -224,13 +225,13 @@ class DownloadBase:
 
             i += 1
         logger.info(f'退出下载 {i} : {self.fname}')
-        return {
-            'name': self.fname,
-            'url': self.url,
-            'title': self.room_title,
-            'date': date,
-            'live_cover_path': self.live_cover_path,
-        }
+        db.add_stream_info(
+            name=self.fname,
+            url=self.url,
+            title=self.room_title,
+            date=date,
+            live_cover_path=self.live_cover_path,
+        )
 
     @staticmethod
     def rename(file_name):
