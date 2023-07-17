@@ -44,7 +44,7 @@ class Douyu(DownloadBase):
                 'cdn': config.get('douyucdn', 'tct-h5'),
                 'iar': 0,
                 'ive': 0,
-                'rate': 0,
+                'rate': config.get('douyu_rate', 0),
             }
         except:
             logger.warning("斗鱼：" + vid + "：获取roominfo错误")
