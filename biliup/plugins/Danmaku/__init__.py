@@ -172,10 +172,10 @@ class DanmakuClient:
 
     def stop(self):
         if self.__site_douyin is not None:
-            self.__site_douyin.stop()
+            asyncio.run(self.__site_douyin.stop())
         else:
             self.__stop = True
-            self.__hs.close()
+            asyncio.run(self.__hs.close())
             if not (os.path.exists(f"{self.__filename_video_suffix}.part") or
                     os.path.exists(f"{self.__filename_video_suffix}")):
                 os.remove(self.__filename)
