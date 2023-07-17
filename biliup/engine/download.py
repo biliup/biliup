@@ -218,6 +218,8 @@ class DownloadBase:
                                 f'下播延迟检测：{self.__class__.__name__}:{self.fname}，将在 60 秒后检测开播状态，检测次数 {retry_count_delay}/{delay_all_retry_count}')
                             time.sleep(60)
                         continue
+                else:
+                    break
 
         logger.info(f'退出下载：{self.__class__.__name__}:{self.fname}')
         return {
