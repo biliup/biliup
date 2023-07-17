@@ -26,7 +26,7 @@ class Bilibili(DownloadBase):
             'protocol': '0,1',# 0: http_stream, 1: http_hls
             'format': '0,1,2',# 0: flv, 1: ts, 2: fmp4
             'codec': '0', # 0: avc, 1: hevc
-            'qn': '10000',
+            'qn': config.get('bili_qn', '10000'),
             'platform': config.get('biliplatform', 'h5'), # 使用 h5 时默认屏蔽 p2p
             'dolby': '5',
             'panorama': '1'

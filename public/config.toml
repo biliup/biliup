@@ -121,6 +121,12 @@ check_sourcecode = 15
 ### 每次会随机返回填入的其中一个线路，并且会自动判断所填入的节点是否可用
 #bili_force_cn01 = true
 #bili_force_cn01_domains = "cn-jxnc-cm-01-16.bilivideo.com,cn-gddg-cm-01-06.bilivideo.com,cn-fjqz-cm-01-06.bilivideo.com,cn-jssz-cm-01-02.bilivideo.com,cn-gddg-ct-01-12.bilivideo.com"
+### 哔哩哔哩自选画质
+### 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段时录制设置的画质
+### 30000 杜比,20000 4K,10000 原画,401 蓝光(杜比),400 蓝光,250 超清,150 高清,80 流畅,0 B站默认(多数情况下是蓝光 400)
+### 没有选中的画质则会自动选择相近的画质
+#bili_qn = 10000
+
 
 #------YouTube------#
 ### 设置偏好的YouTube下载封装格式
