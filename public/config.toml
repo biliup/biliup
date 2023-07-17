@@ -172,6 +172,17 @@ description = """
 {streamer}主播直播间地址：{url}
 ---
 Powered By biliup - Github: https://github.com/ForgQi/biliup"""
+### 如需在简介中@别人 请使用以下模版
+#credits = [
+#  { username = "需要@的用户名", uid = 需要@的uid }
+#]
+#description = """
+#视频简介: {title} %Y-%m-%d %H:%M:%S
+#{streamer}主播直播间地址：{url}
+#【@credit】
+#---
+#Powered By biliup - Github: https://github.com/ForgQi/biliup
+#"""
 dynamic = "#空间动态#"
 #dtime = 14_400 ### 设置延时发布时间，距离提交大于2小时，格式为时间戳
 #dolby = 0 ### 是否开启杜比音效, 1为开启
