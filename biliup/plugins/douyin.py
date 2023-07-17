@@ -17,7 +17,7 @@ class Douyin(DownloadBase):
         self.douyin_danmaku = config.get('douyin_danmaku', False)
 
     def check_stream(self):
-        douyin_url="https://live.douyin.com/"
+        douyin_url = "https://live.douyin.com/"
         headers = {
             "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                           "Chrome/94.0.4606.71 Safari/537.36 Edg/94.0.992.38",
@@ -29,13 +29,13 @@ class Douyin(DownloadBase):
                 logger.debug("直播间地址错误")
                 return False
             else:
-                mainPage=requests.get(self.url, headers=headers).text\
-                .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]
+                mainPage = requests.get(self.url, headers=headers).text \
+                    .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]
                 txt = urllib.request.unquote(mainPage)
                 rex = re.compile(r'(?<=\"web_rid\":\")[0-9]*(?=\")')
                 rid = rex.findall(txt)[0]
         else:
-            #判断是否为纯数字房间号
+            # 判断是否为纯数字房间号
             rid = self.url.split(douyin_url)[1]
             rid = '+{}'.format(rid) if rid.isdigit() else rid
         try:
@@ -51,7 +51,42 @@ class Douyin(DownloadBase):
             return False
         if room_info.get('stream_url'):
             r5 = room_info['stream_url']['live_core_sdk_data']['pull_data']['stream_data']
-            self.raw_stream_url = json.loads(r5)['data']['origin']['main']['flv']
+            stream_data = json.loads(r5)['data']
+
+            # 原画origin 蓝光uhd 超清hd 高清sd 标清ld 流畅md 仅音频ao
+            quality_items = ['origin', 'uhd', 'hd', 'sd', 'ld', 'md']
+            quality = config.get('douyin_quality', 'origin')
+            if quality not in quality_items:
+                quality = quality_items[0]
+
+            # 如果没有这个画质则取相近的 优先低清晰度
+            if quality not in stream_data:
+                # 可选的清晰度 含自身
+                optional_quality_items = [x for x in quality_items if x in stream_data.keys() or x == quality]
+                # 自身在可选清晰度的位置
+                optional_quality_index = optional_quality_items.index(quality)
+                # 自身在所有清晰度的位置
+                quality_index = quality_items.index(quality)
+                # 高清晰度偏移
+                quality_left_offset = None
+                # 低清晰度偏移
+                quality_right_offset = None
+
+                if optional_quality_index + 1 < len(optional_quality_items):
+                    quality_right_offset = quality_items.index(optional_quality_items[optional_quality_index + 1]) - quality_index
+
+                if optional_quality_index - 1 >= 0:
+                    quality_left_offset = quality_index - quality_items.index(optional_quality_items[optional_quality_index - 1])
+
+                # 取相邻的清晰度
+                if quality_right_offset <= quality_left_offset:
+                    quality = optional_quality_items[optional_quality_index + 1]
+                else:
+                    quality = optional_quality_items[optional_quality_index - 1]
+
+
+
+            self.raw_stream_url = json.loads(r5)['data'][quality]['main']['flv']
             self.room_title = room_info['title']
             return True
 
