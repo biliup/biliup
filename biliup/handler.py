@@ -6,7 +6,6 @@ from . import plugins
 from .downloader import download, check_url
 from .engine import invert_dict, Plugin
 from biliup.config import config
-from biliup.database import DB as db
 from .engine.event import Event, EventManager
 from .uploader import upload
 from functools import reduce
