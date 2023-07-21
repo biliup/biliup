@@ -51,7 +51,7 @@ class DB:
     @classmethod
     def delete_stream_info(cls, name: str):
         """删除下载信息"""
-        return StreamerInfo.delete(name=name)
+        return StreamerInfo.delete_(name=name)
 
     @classmethod
     def update_stream_info(cls, name: str, url: str, title: str, date: time.struct_time, live_cover_path: str):

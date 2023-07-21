@@ -33,7 +33,7 @@ class BaseModel(Model):
                 return False
 
     @classmethod
-    def delete(cls, **kwargs):
+    def delete_(cls, **kwargs):
         """删除行"""
         with db.connection_context():
             try:
