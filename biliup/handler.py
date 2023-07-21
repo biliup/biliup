@@ -51,10 +51,8 @@ def process(name, url):
         suffix = kwargs.get('format')
         if suffix:
             kwargs['suffix'] = suffix
-        download(name, url, **kwargs)
+        stream_info = download(name, url, **kwargs)
     finally:
-        stream_info.update(db.get_stream_info(name=name))
-        db.delete_stream_info(name=name)
         return Event(UPLOAD, (stream_info,))
 
 

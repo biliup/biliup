@@ -6,6 +6,8 @@ import subprocess
 from functools import reduce
 from pathlib import Path
 
+from biliup.database import DB as db
+
 logger = logging.getLogger('biliup')
 
 
@@ -86,6 +88,7 @@ class UploadBase:
             needed2process = self.upload(UploadBase.file_list(self.principal))
             if needed2process:
                 self.postprocessor(needed2process)
+        db.delete_stream_info(self.principal)
 
     def postprocessor(self, data):
         # data = file_list

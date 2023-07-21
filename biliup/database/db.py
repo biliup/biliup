@@ -29,8 +29,8 @@ class DB:
         db.close()
 
     @classmethod
-    def get_stream_info(cls, name: str):
-        """获取下载信息"""
+    def get_stream_info(cls, name: str) -> dict:
+        """获取下载信息, 若不存在则返回空字典"""
         res = StreamerInfo.get_dict(name=name)
         if res:
             res["date"] = datetime_to_struct_time(res["date"])
@@ -38,7 +38,7 @@ class DB:
         return {}
 
     @classmethod
-    def add_stream_info(cls, name: str, url: str, title: str, date: time.struct_time, live_cover_path: str):
+    def add_stream_info(cls, name: str, url: str, title: str, date: time.struct_time, live_cover_path: str) -> bool:
         """添加下载信息"""
         return StreamerInfo.add(
             name=name,
@@ -49,8 +49,8 @@ class DB:
         )
 
     @classmethod
-    def delete_stream_info(cls, name: str):
-        """删除下载信息"""
+    def delete_stream_info(cls, name: str) -> int:
+        """删除下载信息, 返回删除的行数, 若不存在则返回0"""
         return StreamerInfo.delete_(name=name)
 
     @classmethod

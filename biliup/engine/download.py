@@ -225,13 +225,18 @@ class DownloadBase:
 
             i += 1
         logger.info(f'退出下载 {i} : {self.fname}')
-        db.add_stream_info(
-            name=self.fname,
-            url=self.url,
-            title=self.room_title,
-            date=date,
-            live_cover_path=self.live_cover_path,
-        )
+        stream_info = {
+            "name":self.fname,
+            "url":self.url,
+            "title":self.room_title,
+            "date":date,
+            "live_cover_path":self.live_cover_path,
+        }
+        # 如果用户在上传前退出并删除文件，可能导致数据库中记录未删除
+        if not db.add_stream_info(**stream_info):
+            db.update_stream_info(**stream_info)
+
+        return stream_info
 
     @staticmethod
     def rename(file_name):

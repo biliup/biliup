@@ -18,7 +18,7 @@ def download(fname, url, **kwargs):
                 if kwargs.get(k):
                     pg.__dict__[k] = kwargs.get(k)
             break
-    pg.start()
+    return pg.start()
 
 
 def check_url(plugin, url_status, secs=15):
