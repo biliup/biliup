@@ -194,9 +194,11 @@ streamers:
         tags:
             - biliup
             - 视频标签
-        #preprocessor: ### 开始下载直播时，将按自定义顺序执行自定义操作 注：preprocessor仅支持shell指令
-            #- run: sh ./run.sh
-        #postprocessor: ### 上传完成后，将按自定义顺序执行自定义操作 当postprocessor不存在时 默认执行删除文件操作
+        #preprocessor: ### 开始下载直播时触发，将按自定义顺序执行自定义操作 注：preprocessor仅支持shell指令
+            #- run: sh ./run.sh, ### 执行任意命令，等同于在shell中运行,preprocessor输出的数据为JSON格式，包含主播名字(name)和开播地址(url)信息
+        #downloaded_processor: ### 结束下载直播时触发，将按自定义顺序执行自定义操作 注：downloaded_processor仅支持shell指令
+        #    - run: sh ./run.sh, ### 执行任意命令，等同于在shell中运行,downloaded_processor输出的数据为JSON格式，包含主播名字(name)、直播间地址(url)、直播间标题(room_title)以及开播时间(start_time)信息
+        #postprocessor: ### 上传完成后触发，将按自定义顺序执行自定义操作 当postprocessor不存在时 默认执行删除文件操作
         #    - run: echo hello! ### 执行任意命令，等同于在shell中运行,视频文件路径作为标准输入传入
         #    - mv: backup/ ### 移动文件到backup目录下
         #    - run: python3 path/to/mail.py ### 执行一个 Python 脚本，可以用来发送邮件等。自动发信通知脚本示例 https://biliup.github.io/biliup/Guide.html#%E4%B8%8A%E4%BC%A0%E5%AE%8C%E6%88%90%E5%90%8E%E5%8F%91%E9%80%81%E9%82%AE%E4%BB%B6%E9%80%9A%E7%9F%A5
