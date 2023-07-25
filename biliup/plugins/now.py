@@ -26,7 +26,7 @@ class now(DownloadBase):
         jsons = json.loads(r1.text)
         if jsons:
             if jsons.get('retcode') == 100001:
-                logger.debug("直播间地址错误")
+                logger.error("直播间地址错误")
                 return False
             if jsons['result']['is_on_live']:
                 self.room_title = jsons['result']['room_name']
