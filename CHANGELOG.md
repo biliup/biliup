@@ -4,7 +4,10 @@
 - 💡新添加的功能
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
-
+  
+## 0.4.24
+- 🔧修复哔哩哔哩flv流403的问题。 [@xxxxuanran](https://github.com/xxxxuanran)
+  
 ## 0.4.23
 - 更新时间：2023.07.17
 - 🔧preprocessor增加开播时返回主播名字和开播地址 [@Kataick](https://github.com/Kataick)

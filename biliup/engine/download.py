@@ -232,6 +232,8 @@ class DownloadBase:
                     break
 
         logger.info(f'退出下载：{self.__class__.__name__}:{self.fname}')
+        if config['streamers'].get(self.fname, {}).get('downloaded_processor'):
+            downloaded_processor(config['streamers'].get(self.fname, {}).get('downloaded_processor'), f'{{"name": "{self.fname}", "url": "{self.url}", "room_title": "{self.room_title}", "start_time": "{time.strftime("%Y-%m-%d %H:%M:%S", date)}"}}')
         return {
             'name': self.fname,
             'url': self.url,
@@ -302,3 +304,17 @@ def get_valid_filename(name):
     if s in {"", ".", ".."}:
         raise RuntimeError("Could not derive file name from '%s'" % name)
     return s
+
+
+def downloaded_processor(processors, data):
+    for processor in processors:
+        if processor.get('run'):
+            try:
+                process_output = subprocess.check_output(
+                    processor['run'], shell = True,
+                    input = data,
+                    stderr = subprocess.STDOUT, text = True)
+                logger.info(process_output.rstrip())
+            except subprocess.CalledProcessError as e:
+                logger.exception(e.output)
+                continue
