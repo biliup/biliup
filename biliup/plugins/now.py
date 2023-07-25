@@ -15,7 +15,7 @@ class now(DownloadBase):
         super().__init__(fname, url, suffix)
 
     def check_stream(self):
-        #logger.debug(self.fname)
+        logger.debug(self.fname)
         rid = re.search(r'roomid=([a-zA-Z0-9]+)', self.url).group(1)
         r1 = requests.get(
             f"https://now.qq.com/cgi-bin/now/web/room/get_room_info_v2?room_id={rid}",
