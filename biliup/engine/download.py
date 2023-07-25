@@ -179,7 +179,7 @@ class DownloadBase:
     def start(self):
         logger.info(f'开始下载：{self.__class__.__name__}:{self.fname}')
         date = time.localtime()
-        delay = int(min(config.get('delay', 0), 1800))
+        delay = int(config.get('delay', 0))
         # 重试次数
         retry_count = 0
         # delay 重试次数
