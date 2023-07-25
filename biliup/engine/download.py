@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import math
 import os
 import re
 import subprocess
@@ -180,13 +179,13 @@ class DownloadBase:
     def start(self):
         logger.info(f'开始下载：{self.__class__.__name__}:{self.fname}')
         date = time.localtime()
-        delay = min(config.get('delay', 0), 1800)
+        delay = int(min(config.get('delay', 0), 1800))
         # 重试次数
         retry_count = 0
         # delay 重试次数
         retry_count_delay = 0
-        # delay 重试次数
-        delay_all_retry_count = math.ceil(delay / 60)
+        # delay 重试次数 向上取整
+        delay_all_retry_count = -(-delay // 60)
         while True:
             ret = False
             try:
@@ -208,15 +207,17 @@ class DownloadBase:
                     break
                 if retry_count < 3:
                     retry_count += 1
-                    logger.info(
-                        f'直播流获取失败：{self.__class__.__name__}:{self.fname}，将在 10 秒后重试，重试次数 {retry_count}/3')
+                    if retry_count == 1:
+                        # 只有第一次显示
+                        logger.info(
+                            f'直播流获取失败：{self.__class__.__name__}:{self.fname}，每隔 10 秒重新获取，共重试3次')
                     time.sleep(10)
                     continue
 
                 if delay:
                     retry_count_delay += 1
                     if retry_count_delay > delay_all_retry_count:
-                        logger.info(f'下播延迟检测结束：{self.__class__.__name__}:{self.fname}')
+                        # logger.info(f'下播延迟检测结束：{self.__class__.__name__}:{self.fname}')
                         break
                     else:
                         if delay < 60:
@@ -224,8 +225,10 @@ class DownloadBase:
                                 f'下播延迟检测：{self.__class__.__name__}:{self.fname}，将在 {delay} 秒后检测开播状态')
                             time.sleep(delay)
                         else:
-                            logger.info(
-                                f'下播延迟检测：{self.__class__.__name__}:{self.fname}，将在 60 秒后检测开播状态，检测次数 {retry_count_delay}/{delay_all_retry_count}')
+                            if retry_count_delay == 1:
+                                # 只有第一次显示
+                                logger.info(
+                                    f'下播延迟检测：{self.__class__.__name__}:{self.fname}，每隔 60 秒检测开播状态，共检测{delay_all_retry_count}次')
                             time.sleep(60)
                         continue
                 else:
