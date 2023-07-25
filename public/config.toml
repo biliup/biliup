@@ -58,7 +58,7 @@ check_sourcecode = 15
 ### 录制斗鱼弹幕，默认关闭【目前暂时不支持视频按时长分段下的弹幕文件自动分段，只有使用ffmpeg（包括streamlink混合模式）作为下载器才支持】
 #douyu_danmaku = false
 ### 斗鱼自选画质
-### 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段时录制设置的画质
+### 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段(仅ffmpeg streamlink)时录制设置的画质
 ### 0 原画,4 蓝光4m,3 超清,2 高清
 #douyu_rate = 0
 
@@ -79,7 +79,7 @@ check_sourcecode = 15
 ### 录制抖音弹幕，默认关闭【目前暂时不支持视频按时长分段下的弹幕文件自动分段，只有使用ffmpeg（包括streamlink混合模式）作为下载器才支持】
 #douyin_danmaku = false
 ### 抖音自选画质
-### 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段时录制设置的画质
+### 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段(仅ffmpeg streamlink)时录制设置的画质
 ### origin 原画,uhd 蓝光,hd 超清,sd 高清,ld 标清,md 流畅
 ### 没有选中的画质则会自动选择相近的画质优先低清晰度
 #douyin_quality = origin
@@ -127,7 +127,7 @@ check_sourcecode = 15
 #bili_force_cn01 = true
 #bili_force_cn01_domains = "cn-jxnc-cm-01-16.bilivideo.com,cn-gddg-cm-01-06.bilivideo.com,cn-fjqz-cm-01-06.bilivideo.com,cn-jssz-cm-01-02.bilivideo.com,cn-gddg-ct-01-12.bilivideo.com"
 ### 哔哩哔哩自选画质
-### 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段时录制设置的画质
+### 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段(仅ffmpeg streamlink)时录制设置的画质
 ### 30000 杜比,20000 4K,10000 原画,401 蓝光(杜比),400 蓝光,250 超清,150 高清,80 流畅,0 B站默认(多数情况下是蓝光 400)
 ### 没有选中的画质则会自动选择相近的画质
 #bili_qn = 10000
@@ -155,9 +155,6 @@ check_sourcecode = 15
 #youtube_after_date = '20220201'
 ### 仅下载该日期之前的视频（可与上面的youtube_after_date配合使用，构成指定下载范围区间）
 #youtube_before_date = '20230501'
-### 默认情况下，会先提取完所有页面后才会启动下载视频
-### 开启后，将在视频的每个播放列表页面提取后，启动下载【默认关闭】
-#youtube_lazy_playlist = true
 ### YouTube的Streamlink下载器模式，开启之后会调用Streamlink获取直播流并且使用FFMPEG下载，默认关闭【仅当下载器是FFMPEG时才有效】
 ### 开启之后上面关于YOUTUBE的选项全部无效【我也不知道这个功能有什么屌用】
 #use_new_ytb_downloader = false

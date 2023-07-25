@@ -36,6 +36,8 @@ class DownloadBase:
         self.filename_prefix = config.get('filename_prefix')
         self.use_live_cover = config.get('use_live_cover', False)
         self.opt_args = opt_args
+        # 是否是下载模式 跳过下播检测
+        self.is_download = False
         self.fake_headers = {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Encoding': 'gzip, deflate',
@@ -197,10 +199,17 @@ class DownloadBase:
                 # 成功下载重置重试次数
                 retry_count = 0
                 retry_count_delay = 0
+                if self.is_download:
+                    # 成功下载后也不检测下一个需要下载的视频而是先上传等待下次检测保证上传时使用下载视频的标题
+                    # 开启边录边传会快些
+                    break
             else:
+                if self.is_download:
+                    break
                 if retry_count < 3:
                     retry_count += 1
-                    logger.info(f'直播流获取失败：{self.__class__.__name__}:{self.fname}，将在 10 秒后重试，重试次数 {retry_count}/3')
+                    logger.info(
+                        f'直播流获取失败：{self.__class__.__name__}:{self.fname}，将在 10 秒后重试，重试次数 {retry_count}/3')
                     time.sleep(10)
                     continue
 
@@ -211,7 +220,8 @@ class DownloadBase:
                         break
                     else:
                         if delay < 60:
-                            logger.info(f'下播延迟检测：{self.__class__.__name__}:{self.fname}，将在 {delay} 秒后检测开播状态')
+                            logger.info(
+                                f'下播延迟检测：{self.__class__.__name__}:{self.fname}，将在 {delay} 秒后检测开播状态')
                             time.sleep(delay)
                         else:
                             logger.info(
@@ -228,6 +238,7 @@ class DownloadBase:
             'title': self.room_title,
             'date': date,
             'live_cover_path': self.live_cover_path,
+            'is_download': self.is_download,
         }
 
     @staticmethod
@@ -236,7 +247,7 @@ class DownloadBase:
             os.rename(file_name + '.part', file_name)
             logger.debug('更名{0}为{1}'.format(file_name + '.part', file_name))
         except FileNotFoundError:
-            logger.info('FileNotFoundError:' + file_name)
+            logger.debug('FileNotFoundError:' + file_name)
         except FileExistsError:
             os.rename(file_name + '.part', file_name)
             logger.info('FileExistsError:更名{0}为{1}'.format(file_name + '.part', file_name))

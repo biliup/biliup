@@ -2,23 +2,22 @@ import asyncio
 import random
 import subprocess
 import threading
-from urllib.parse import urlparse
 
+import yaml
 import yt_dlp
 import streamlink
 import os
 import time
 from PIL import Image
-from yt_dlp.utils import MaxDownloadsReached
 
 from yt_dlp.utils import DateRange
 from biliup.config import config
-from biliup.plugins.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
-from ..engine.download import DownloadBase, get_valid_filename, stream_gears_download
+from ..engine.download import DownloadBase, get_valid_filename
 from . import logger
 
 VALID_URL_BASE = r'https?://(?:(?:www|m)\.)?youtube\.com/(?P<id>.*?)\??(.*?)'
+
 
 @Plugin.download(regexp=VALID_URL_BASE)
 class Youtube(DownloadBase):
@@ -27,15 +26,18 @@ class Youtube(DownloadBase):
         self.use_new_ytb_downloader = config.get('use_new_ytb_downloader', False)
         self.ytb_danmaku = config.get('ytb_danmaku', False)
         self.cookiejarFile = config.get('user', {}).get('youtube_cookie')
-        self.vcodec = config.get('youtube_prefer_vcodec','av01|vp9|avc')
-        self.acodec = config.get('youtube_prefer_acodec','opus|mp4a')
-        self.resolution = config.get('youtube_max_resolution','4320')
-        self.filesize = config.get('youtube_max_videosize','100G')
-        self.beforedate = config.get('youtube_before_date','20770707')
-        self.afterdate = config.get('youtube_after_date','19700101')
+        self.vcodec = config.get('youtube_prefer_vcodec', 'av01|vp9|avc')
+        self.acodec = config.get('youtube_prefer_acodec', 'opus|mp4a')
+        self.resolution = config.get('youtube_max_resolution', '4320')
+        self.filesize = config.get('youtube_max_videosize', '100G')
+        self.beforedate = config.get('youtube_before_date', '20770707')
+        self.afterdate = config.get('youtube_after_date', '19700101')
         self.use_youtube_cover = config.get('use_youtube_cover', False)
+        # 需要下载的url
+        self.download_url = None
 
     def check_stream(self):
+        self.download_url = None
         if self.use_new_ytb_downloader and self.downloader == 'ffmpeg':
             _fname, self.room_title = self.get_stream_info(self.url)
             port = random.randint(1025, 65535)
@@ -50,7 +52,7 @@ class Youtube(DownloadBase):
             i = 0
             while i < 5:
                 if not (self.proc.poll() is None):
-                    return
+                    return False
                 time.sleep(1)
                 i += 1
             return True
@@ -62,28 +64,55 @@ class Youtube(DownloadBase):
                     logger.warning(self.cookiejarFile)
                     logger.warning(self.url)
                     return False
-                if '_type' in info:
-                    # /live 形式链接取标题
-                    if info['_type'] in 'url' and info['webpage_url_basename'] in 'live':
-                        live = ydl.extract_info(info['url'], download=False, process=False)
-                        self.room_title = live['title']
-                    # Playlist 暂时返回列表名
-                    if info['_type'] in 'playlist':
-                        self.room_title = info['title']
-                else:
-                    # 视频取标题
-                    self.room_title = info['title']
+
+                # 视频取标题
+                self.room_title = info['title']
+
                 if info.get('entries') is None:
                     if ydl.in_download_archive(info):
                         return False
+                    self.download_url = self.url
                     return True
+
+                # 时间范围缓存避免每次都要读取
+                if not os.path.exists('./yt_dlp_cache.yaml'):
+                    with open('./yt_dlp_cache.yaml', 'w') as f:
+                        f.close()
+
+                cache = yaml.load(open('./yt_dlp_cache.yaml', 'r'), Loader=yaml.FullLoader)
+                if cache is None:
+                    cache = {}
+
+                self.is_download = True
+
                 for entry in info['entries']:
                     # 取 Playlist 内视频标题
                     self.room_title = entry['title']
+
+                    try:
+                        # 检测时间范围
+                        if entry['id'] not in cache:
+                            cache[entry['id']] = {}
+                        upload_date = cache.get(entry['id']).get('upload_date')
+                        if upload_date is None:
+                            upload_date = ydl.extract_info(entry['url'], download=False).get('upload_date')
+
+                        cache[entry['id']]['upload_date'] = upload_date
+                        if upload_date not in DateRange(self.afterdate, self.beforedate):
+                            continue
+                    except:
+                        continue
+                    # 检测是否已下载
                     if ydl.in_download_archive(entry):
                         continue
-                    # ydl.record_download_archive()
-                    return True
+
+                    self.download_url = entry['url']
+                    break
+
+                with open("./yt_dlp_cache.yaml", "w") as f:
+                    yaml.dump(cache, f, encoding='utf-8', allow_unicode=True)
+
+                return self.download_url is not None
 
     def download(self, filename):
         if self.use_new_ytb_downloader and self.downloader == 'ffmpeg':
@@ -99,23 +128,20 @@ class Youtube(DownloadBase):
         else:
             try:
                 ydl_opts = {
-                    'outtmpl': filename+ '.%(ext)s',
+                    'outtmpl': filename + '.%(ext)s',
                     'format': f"bestvideo[vcodec~='^({self.vcodec})'][height<={self.resolution}][filesize<{self.filesize}]+bestaudio[acodec~='^({self.acodec})']/best[height<={self.resolution}]/best",
                     'cookiefile': self.cookiejarFile,
                     # 'proxy': proxyUrl,
                     'ignoreerrors': True,
-                    'max_downloads': 1,
-                    'daterange' : DateRange(self.afterdate, self.beforedate),
                     'break_on_reject': True,
                     'download_archive': 'archive.txt',
-                    'lazy_playlist': config.get('youtube_lazy_playlist', False)
                 }
                 if self.use_youtube_cover is True:
                     ydl_opts['writethumbnail'] = True
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([self.url])
-            except MaxDownloadsReached:
+                    ydl.download([self.download_url])
                 save_dir = f'cover/youtube/'
+
                 webp_cover_path = f'{filename}.webp'
                 jpg_cover_path = f'{filename}.jpg'
                 if os.path.exists(webp_cover_path):
@@ -129,14 +155,10 @@ class Youtube(DownloadBase):
                 elif os.path.exists(jpg_cover_path):
                     os.rename(jpg_cover_path, f'{save_dir}{filename}.jpg')
                     self.live_cover_path = f'{save_dir}{filename}.jpg'
-                return False
-            except yt_dlp.utils.RejectedVideoReached:
-                logger.info("已下载完毕指定日期内的视频，结束本次任务")
-                return False
-            except yt_dlp.utils.DownloadError:
+            except:
                 logger.exception(self.fname)
-                return 1
-            return 0
+                return False
+            return True
 
     def get_stream_info(self, url):
         session = streamlink.Streamlink()
