@@ -32,9 +32,11 @@ class TwitchVideos(DownloadBase):
     def __init__(self, fname, url, suffix='mp4'):
         DownloadBase.__init__(self, fname, url, suffix=suffix)
         self.is_download = True
+        self.cookiejarFile = config.get('user', {}).get('twitch_cookie_file')
 
     def check_stream(self, is_check=False):
-        with yt_dlp.YoutubeDL({'download_archive': 'archive.txt'}) as ydl:
+
+        with yt_dlp.YoutubeDL({'download_archive': 'archive.txt', 'cookiefile': self.cookiejarFile}) as ydl:
             try:
                 info = ydl.extract_info(self.url, download=False, process=False)
             except:
