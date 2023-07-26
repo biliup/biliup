@@ -1,6 +1,7 @@
+import copy
 import logging
 import subprocess
-from pathlib import Path
+import time
 
 from . import plugins
 from .downloader import download, check_url
@@ -8,7 +9,6 @@ from .engine import invert_dict, Plugin
 from biliup.config import config
 from .engine.event import Event, EventManager
 from .uploader import upload
-from functools import reduce
 
 CHECK = 'check'
 CHECK_UPLOAD = 'check_upload'
@@ -44,6 +44,8 @@ def process(name, url):
         'name': name,
         'url': url,
     }
+    # 下载开始
+    yield Event(BE_MODIFIED, (url, 1))
     try:
         kwargs: dict = config['streamers'][name].copy()
         kwargs.pop('url')
@@ -52,25 +54,31 @@ def process(name, url):
             kwargs['suffix'] = suffix
         stream_info = download(name, url, **kwargs)
     finally:
-        return Event(UPLOAD, (stream_info,))
+        # 下载结束
+        yield Event(BE_MODIFIED, (url, 0))
+        yield Event(UPLOAD, (stream_info,))
 
 
 @event_manager.register(UPLOAD, block='Asynchronous2')
 def process_upload(stream_info):
     url = stream_info['url']
-    yield Event(BE_MODIFIED, (url, 2))
+    # 上传开始
+    yield Event(BE_MODIFIED, (url, None, 1))
     try:
         upload(stream_info)
     finally:
-        yield Event(BE_MODIFIED, args=(url, 0))
+        # 上传结束
+        yield Event(BE_MODIFIED, args=(url, None, 0))
 
 
 @event_manager.server()
 class KernelFunc:
     def __init__(self, urls, url_status: dict, checker, inverted_index, streamer_url):
         self.urls = urls
+        # 录制状态 0等待录制 1正在录制 2正在上传(废弃)
         self.url_status = url_status
-        self.__raw_streamer_status = url_status.copy()
+        # 上传状态 0未上传 1正在上传
+        self.url_upload_status = copy.deepcopy(self.url_status)
         self.checker = checker
         self.inverted_index = inverted_index
         self.streamer_url = streamer_url
@@ -79,47 +87,50 @@ class KernelFunc:
     def singleton_check(self, platform):
         plugin = self.checker[platform]
         wait = config.get('checker_sleep', 15)
-        for url in check_url(plugin, self.url_status, secs=wait):
+        for url in check_url(plugin, self.url_status, self.url_upload_status, secs=wait):
             yield Event(TO_MODIFY, args=(url,))
 
     @event_manager.register(TO_MODIFY)
     def modify(self, url):
         if not url:
-            return logger.debug('无人直播')
-        if self.url_status[url] == 1:
-            return logger.debug('已开播正在下载')
-        if self.url_status[url] == 2 and not config.get('uploading_record'):
-            return logger.debug('正在上传稍后下载')
-        name = self.inverted_index[url]
+            # ?????
+            logger.debug('无人直播')
+            return
 
+        name = self.inverted_index[url]
         if config['streamers'].get(name, {}).get('preprocessor'):
             preprocessor(config['streamers'].get(name, {}).get('preprocessor'), f'{{"name": "{name}", "url": "{url}"}}')
         logger.debug(f'{name}刚刚开播，去下载')
-        self.url_status[url] = 1
         return Event(DOWNLOAD, args=(name, url))
 
     @event_manager.register(CHECK_UPLOAD)
     def free_upload(self):
+        # 检测之前可能未上传的视频
         for title, urls in self.streamer_url.items():
-            if self.free(urls):
-                yield Event(UPLOAD, args=({
-                                              'name': title,
-                                              'url': urls[0],
-                                          },))
+            for url in urls:
+                if self.url_status[url] == 1 or self.url_upload_status[url] == 1:
+                    continue
+                yield Event(UPLOAD, args=({'name': title, 'url': url},))
 
     @event_manager.register(BE_MODIFIED)
-    def revise(self, url, status):
+    def revise(self, url, status=None, upload_status=None):
         if url:
-            # 更新字典
-            # url_status = {**url_status, **{url: 0}}
-            self.url_status.update({url: status})
-
-    def free(self, list_url):
-        status_num = list(map(lambda x: self.url_status.get(x), list_url))
-        return not (1 in status_num or 2 in status_num)
+            if status:
+                self.url_status.update({url: status})
+            if upload_status:
+                self.url_upload_status.update({url: upload_status})
 
     def get_url_status(self):
-        return self.url_status
+        # 这里是为webui准备的
+        # webui fix
+        url_status = copy.deepcopy(self.url_status)
+
+        # 上传的情况下修改status 2
+        for url in self.url_upload_status:
+            if self.url_upload_status[url] == 1:
+                url_status[url] = 2
+
+        return url_status
 
 
 def preprocessor(processors, data):
@@ -127,9 +138,9 @@ def preprocessor(processors, data):
         if processor.get('run'):
             try:
                 process_output = subprocess.check_output(
-                    processor['run'], shell = True,
-                    input = data,
-                    stderr = subprocess.STDOUT, text = True)
+                    processor['run'], shell=True,
+                    input=data,
+                    stderr=subprocess.STDOUT, text=True)
                 logger.info(process_output.rstrip())
             except subprocess.CalledProcessError as e:
                 logger.exception(e.output)

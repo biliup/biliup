@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import logging.config
 import platform
+import time
 
 import biliup.common.reload
 from biliup.config import config
@@ -58,10 +59,14 @@ async def main(args):
 
     async def check_timer():
         event_manager.send_event(Event(CHECK_UPLOAD))
+        # 需要等待CHECK_UPLOAD完成后再检测下载
+        # 避免在边下边传关闭的时候导致不应该的下载
+        # event_manager 不支持检测事件运行或阻塞执行 所以暂时sleep
+        time.sleep(3)
         for k in event_manager.context['checker'].keys():
             event_manager.send_event(Event(CHECK, (k,)))
 
-    wait = config.get('event_loop_interval', 40)
+    wait = max(config.get('event_loop_interval', 40) - 3, 3)
     # 初始化定时器
     timer = Timer(func=check_timer, interval=wait)
 
