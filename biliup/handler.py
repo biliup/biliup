@@ -28,6 +28,8 @@ def create_event_manager():
     app.context['urls'] = urls
     app.context['url_status'] = dict.fromkeys(inverted_index, 0)
     app.context['url_upload_count'] = dict.fromkeys(inverted_index, 0)
+    # 正在上传的文件 用于同时上传一个url的时候过滤掉正在上传的
+    app.context['upload_filename'] = []
     app.context['checker'] = Plugin(plugins).sorted_checker(urls)
     app.context['inverted_index'] = inverted_index
     app.context['streamer_url'] = streamer_url

@@ -24,6 +24,10 @@ class UploadBase:
             if index in file_name and os.path.isfile(file_name):
                 file_list.append(file_name)
         file_list = sorted(file_list)
+        from biliup.handler import event_manager
+        # 去掉正在上传的
+        upload_filename: list = event_manager.context['upload_filename']
+        file_list = list(set(file_list) - set(upload_filename))
         return file_list
 
     @staticmethod
@@ -31,7 +35,6 @@ class UploadBase:
         for r in file_list:
             os.remove(r)
             logger.info('删除-' + r)
-
 
     def filter_file(self, index):
         media_extensions = ['.mp4', '.flv', '.3gp', '.webm', '.mkv', '.ts', '.flv.part']
@@ -51,7 +54,7 @@ class UploadBase:
                 if file_size <= threshold:
                     self.remove_file(r)
                     logger.info(f'过滤删除-{r}')
-            if ext == '.xml': #过滤不存在对应视频的xml弹幕文件
+            if ext == '.xml':  # 过滤不存在对应视频的xml弹幕文件
                 xml_file_name = name
                 # media_regex = re.compile(r'^{}(\.(mp4|flv|ts))?$'.format(
                 #     re.escape(xml_file_name)
@@ -70,8 +73,6 @@ class UploadBase:
             logger.info('视频过滤后无文件可传')
             return False
 
-
-
         return True
 
     def remove_file(self, file_path):
@@ -83,9 +84,16 @@ class UploadBase:
     def start(self):
         if self.filter_file(self.principal):
             logger.info('准备上传' + self.data["format_title"])
-            needed2process = self.upload(UploadBase.file_list(self.principal))
-            if needed2process:
-                self.postprocessor(needed2process)
+            file_list = UploadBase.file_list(self.principal)
+            from biliup.handler import event_manager
+            upload_filename: list = event_manager.context['upload_filename']
+            try:
+                event_manager.context['upload_filename'].extend(file_list)
+                needed2process = self.upload(file_list)
+                if needed2process:
+                    self.postprocessor(needed2process)
+            finally:
+                event_manager.context['upload_filename'] = list(set(upload_filename) - set(file_list))
 
     def postprocessor(self, data):
         # data = file_list
