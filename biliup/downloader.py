@@ -22,7 +22,7 @@ def download(fname, url, **kwargs):
     return pg.start()
 
 
-def check_url(plugin, url_status, url_upload_status, secs=15):
+def check_url(plugin, url_status, url_upload_count, secs=15):
     try:
         if isinstance(plugin, BatchCheckBase):
             return (yield from plugin.check())
@@ -30,7 +30,7 @@ def check_url(plugin, url_status, url_upload_status, secs=15):
             if url_status[url] == 1:
                 logger.debug(f'{url}正在下载中，跳过检测')
                 continue
-            if url_upload_status[url] == 1 and not config.get('uploading_record', False):
+            if url_upload_count[url] > 0 and not config.get('uploading_record', False):
                 logger.debug(f'{url}正在上传中，跳过检测')
                 continue
 
