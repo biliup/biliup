@@ -1,14 +1,16 @@
+import os
 import random
 import subprocess
 import time
 
 import requests
 import yt_dlp
+from PIL import Image
+from yt_dlp.utils import UserNotLive
 
 from . import logger
 from ..engine.decorators import Plugin
-from ..engine.download import DownloadBase
-from ..plugins import BatchCheckBase
+from ..engine.download import DownloadBase, get_valid_filename
 from biliup.config import config
 from biliup.plugins.Danmaku import DanmakuClient
 
@@ -29,58 +31,28 @@ _CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko'
 class TwitchVideos(DownloadBase):
     def __init__(self, fname, url, suffix='mp4'):
         DownloadBase.__init__(self, fname, url, suffix=suffix)
+        self.is_download = True
 
-    def check_stream(self):
+    def check_stream(self, is_check=False):
         with yt_dlp.YoutubeDL({'download_archive': 'archive.txt'}) as ydl:
-            info = ydl.extract_info(self.url, download=False)
+            try:
+                info = ydl.extract_info(self.url, download=False, process=False)
+            except:
+                logger.warning(f"{self.url}：获取错误，本次跳过")
+                return False
             for entry in info['entries']:
                 if ydl.in_download_archive(entry):
                     continue
-                self.raw_stream_url = entry['url']
-                self.room_title = entry.get('title')
-                ydl.record_download_archive(entry)
+                if not is_check:
+                    download_info = ydl.extract_info(entry['url'], download=False)
+                    self.raw_stream_url = download_info['url']
+                    for thumbnail in download_info['thumbnails']:
+                        if 'preference' in thumbnail and thumbnail['preference'] == 1:
+                            self.live_cover_url = thumbnail['url']
+                            break
+                    self.room_title = entry['title']
                 return True
-
-    class BatchCheck(BatchCheckBase):
-        def __init__(self, urls):
-            BatchCheckBase.__init__(self, pattern_id=VALID_URL_BASE, urls=urls)
-
-        def check(self):
-            with yt_dlp.YoutubeDL({'download_archive': 'archive.txt'}) as ydl:
-                for channel_name, url in self.not_live():
-                    info = ydl.extract_info(url, download=False, process=False)
-                    for entry in info['entries']:
-                        if ydl.in_download_archive(entry):
-                            continue
-                        yield url
-                    time.sleep(10)
-                    # ydl.record_download_archive(entry)
-
-        def not_live(self):
-            gql = self.get_streamer()
-            i = -1
-            for data in gql:
-                i += 1
-                user = data['data'].get('user')
-                if not user:
-                    continue
-                stream = user['stream']
-                if not stream:
-                    yield self.usr_list[i], self.usr_dict.get(self.usr_list[i])
-
-        def get_streamer(self):
-            for channel_name in self.usr_list:
-                op = {
-                    'operationName': 'StreamMetadata',
-                    'variables': {'channelLogin': channel_name.lower()}
-                }
-                op['extensions'] = {
-                    'persistedQuery': {
-                        'version': 1,
-                        'sha256Hash': _OPERATION_HASHES[op['operationName']],
-                    }
-                }
-                yield get_streamer(op)
+        return False
 
 
 @Plugin.download(regexp=VALID_URL_BASE)
@@ -91,46 +63,55 @@ class Twitch(DownloadBase):
         self.twitch_disable_ads = config.get('twitch_disable_ads', True)
         self.proc = None
 
-    def check_stream(self):
-        if not list(Twitch.BatchCheck([self.url]).check()):
-            return
-        gql = Twitch.BatchCheck([self.url]).get_streamer()
-        for data in gql:
-            self.room_title = data.get('data').get('user').get('lastBroadcast').get('title')
-        if self.downloader == 'ffmpeg':
-            port = random.randint(1025, 65535)
-            stream_shell = [
-                "streamlink",
-                "--player-external-http",  # 为外部程序提供流媒体数据
-                # "--twitch-disable-ads",                     # 去广告，去掉、跳过嵌入的广告流
-                # "--twitch-disable-hosting",               # 该参数从5.0起已被禁用
-                "--twitch-disable-reruns",  # 如果该频道正在重放回放，不打开流
-                "--player-external-http-port", str(port),  # 对外部输出流的端口
-                self.url, "best"  # 流链接
-            ]
-            if self.twitch_disable_ads:  # 去广告，去掉、跳过嵌入的广告流
-                stream_shell.insert(1, "--twitch-disable-ads")
-            twitch_cookie = config.get('user', {}).get('twitch_cookie')
-            if twitch_cookie:
-                twitch_cookie = "--twitch-api-header=Authorization=OAuth " + twitch_cookie
-                stream_shell.insert(1, twitch_cookie)
-            self.proc = subprocess.Popen(stream_shell)
-            self.raw_stream_url = f"http://localhost:{port}"
-            i = 0
-            while i < 5:
-                if not (self.proc.poll() is None):
-                    return
-                time.sleep(1)
-                i += 1
-            return True
+    def check_stream(self, is_check=False):
         with yt_dlp.YoutubeDL() as ydl:
             try:
                 info = ydl.extract_info(self.url, download=False)
-            except yt_dlp.utils.DownloadError as e:
-                logger.warning(self.url, exc_info=e)
-                return
-            self.raw_stream_url = info['formats'][-1]['url']
-            return True
+            except UserNotLive:
+                return False
+            except:
+                logger.warning(f"{self.url}：获取错误，本次跳过")
+                return False
+            if is_check:
+                # 检测模式不获取流
+                return True
+
+            self.room_title = info['title']
+
+            for thumbnail in info['thumbnails']:
+                if 'preference' in thumbnail and thumbnail['preference'] == 1:
+                    self.live_cover_url = thumbnail['url']
+                    break
+
+            if self.downloader == 'ffmpeg':
+                port = random.randint(1025, 65535)
+                stream_shell = [
+                    "streamlink",
+                    "--player-external-http",  # 为外部程序提供流媒体数据
+                    # "--twitch-disable-ads",                     # 去广告，去掉、跳过嵌入的广告流
+                    # "--twitch-disable-hosting",               # 该参数从5.0起已被禁用
+                    "--twitch-disable-reruns",  # 如果该频道正在重放回放，不打开流
+                    "--player-external-http-port", str(port),  # 对外部输出流的端口
+                    self.url, "best"  # 流链接
+                ]
+                if self.twitch_disable_ads:  # 去广告，去掉、跳过嵌入的广告流
+                    stream_shell.insert(1, "--twitch-disable-ads")
+                twitch_cookie = config.get('user', {}).get('twitch_cookie')
+                if twitch_cookie:
+                    twitch_cookie = "--twitch-api-header=Authorization=OAuth " + twitch_cookie
+                    stream_shell.insert(1, twitch_cookie)
+                self.proc = subprocess.Popen(stream_shell)
+                self.raw_stream_url = f"http://localhost:{port}"
+                i = 0
+                while i < 5:
+                    if not (self.proc.poll() is None):
+                        return
+                    time.sleep(1)
+                    i += 1
+                return True
+            else:
+                self.raw_stream_url = info['url']
+                return True
 
     async def danmaku_download_start(self, filename):
         if self.twitch_danmaku:
@@ -147,48 +128,3 @@ class Twitch(DownloadBase):
                 self.proc.terminate()
         except:
             logger.exception(f'terminate {self.fname} failed')
-
-    class BatchCheck(BatchCheckBase):
-        def __init__(self, urls):
-            BatchCheckBase.__init__(self, pattern_id=VALID_URL_BASE, urls=urls)
-
-        def check(self):
-            gql = self.get_streamer()
-            i = -1
-            for data in gql:
-                i += 1
-                user = data['data'].get('user')
-                if not user:
-                    continue
-                stream = user['stream']
-                if not stream:
-                    continue
-                yield self.usr_dict.get(self.usr_list[i])
-
-        def get_streamer(self):
-            ops = []
-            for channel_name in self.usr_list:
-                op = {
-                    'operationName': 'StreamMetadata',
-                    'variables': {'channelLogin': channel_name.lower()}
-                }
-                op['extensions'] = {
-                    'persistedQuery': {
-                        'version': 1,
-                        'sha256Hash': _OPERATION_HASHES[op['operationName']],
-                    }
-                }
-                ops.append(op)
-            return get_streamer(ops)
-
-
-def get_streamer(ops):
-    gql = requests.post(
-        'https://gql.twitch.tv/gql',
-        json=ops,
-        headers={
-            'Content-Type': 'text/plain;charset=UTF-8',
-            'Client-ID': _CLIENT_ID,
-        }, timeout=15)
-    gql.close()
-    return gql.json()

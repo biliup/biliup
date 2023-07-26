@@ -4,7 +4,7 @@ import time
 from urllib.error import HTTPError
 
 from .engine.decorators import Plugin
-from .plugins import general, BatchCheckBase
+from .plugins import general
 
 logger = logging.getLogger('biliup')
 
@@ -23,8 +23,6 @@ def download(fname, url, **kwargs):
 
 def check_url(plugin, url_status, secs=15):
     try:
-        if isinstance(plugin, BatchCheckBase):
-            return (yield from plugin.check())
         for url in plugin.url_list:
             # print(f"URL：{url}")
             # print(f"URL_STATUS：{url_status[url]}")

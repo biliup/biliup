@@ -16,7 +16,7 @@ class Douyin(DownloadBase):
         super().__init__(fname, url, suffix)
         self.douyin_danmaku = config.get('douyin_danmaku', False)
 
-    def check_stream(self):
+    def check_stream(self, is_check=False):
         douyin_url = "https://live.douyin.com/"
         headers = {
             "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "

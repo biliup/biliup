@@ -13,7 +13,7 @@ class CC(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 
-    def check_stream(self):
+    def check_stream(self, is_check=False):
         logger.debug(self.fname)
         rid = re.search(r"[0-9]{4,}", self.url).group(0)
         res = requests.get(

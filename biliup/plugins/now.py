@@ -14,7 +14,7 @@ class now(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 
-    def check_stream(self):
+    def check_stream(self, is_check=False):
         logger.debug(self.fname)
         rid = re.search(r'roomid=([a-zA-Z0-9]+)', self.url).group(1)
         r1 = requests.get(

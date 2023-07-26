@@ -8,6 +8,7 @@ import threading
 import time
 from urllib.parse import urlparse
 
+import requests
 import stream_gears
 
 from biliup.config import config
@@ -37,6 +38,7 @@ class DownloadBase:
         self.opt_args = opt_args
         # 是否是下载模式 跳过下播检测
         self.is_download = False
+        self.live_cover_url = None
         self.fake_headers = {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Encoding': 'gzip, deflate',
@@ -54,18 +56,27 @@ class DownloadBase:
             self.default_output_args += \
                 ['-fs', f"{config.get('file_size', '2621440000')}"]
 
-    def check_stream(self):
-        logger.debug(self.fname)
+    def check_stream(self, is_check=False):
+        # is_check 是否是检测可以避免在检测是否可以录制的时候忽略一些耗时的操作
+        logger.debug(self.fname, is_check)
         raise NotImplementedError()
 
-    def download(self, filename):
+    def get_filename(self, is_fmt=False):
         if self.filename_prefix:  # 判断是否存在自定义录播命名设置
             filename = (self.filename_prefix.format(streamer=self.fname, title=self.room_title).encode(
                 'unicode-escape').decode()).encode().decode("unicode-escape")
         else:
             filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
         filename = get_valid_filename(filename)
+        if is_fmt:
+            return time.strftime(filename.encode("unicode-escape").decode()).encode().decode("unicode-escape")
+        else:
+            return filename
+
+    def download(self, filename):
+        filename = self.get_filename()
         fmtname = time.strftime(filename.encode("unicode-escape").decode()).encode().decode("unicode-escape")
+
         threading.Thread(target=asyncio.run, args=(self.danmaku_download_start(fmtname),)).start()
 
         if self.downloader == 'streamlink':
@@ -81,23 +92,6 @@ class DownloadBase:
         stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
                               config.get('file_size'))
         return True
-
-    def get_live_cover(self, uname, room_id, filename, timestamp, cover_url):
-        import requests
-        headers = self.fake_headers.copy()
-        response = requests.get(cover_url, headers=headers, timeout=5)
-        save_dir = f'cover/{uname}_{room_id}/'
-        local_time = time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime(timestamp))
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-        cover_file_name = get_valid_filename(f'{filename}_{local_time}.png')
-        live_cover_path = f'{save_dir}{cover_file_name}'
-        if os.path.exists(live_cover_path):
-            return live_cover_path
-        else:
-            with open(live_cover_path, 'wb') as f:
-                f.write(response.content)
-                return live_cover_path
 
     def streamlink_download(self, filename):  # streamlink+ffmpeg混合下载模式，适用于下载hls流
         streamlink_input_args = ['--stream-segment-threads', '3', '--hls-playlist-reload-attempts', '1']
@@ -136,7 +130,7 @@ class DownloadBase:
         parsed_url = urlparse(self.raw_stream_url)
         path = parsed_url.path
         if '.m3u8' in path:
-            default_input_args += ['-max_reload', '3']
+            default_input_args += ['-max_reload', '1000']
         args = ['ffmpeg', '-y', *default_input_args,
                 '-i', self.raw_stream_url, *self.default_output_args, *self.opt_args,
                 '-c', 'copy', '-f', self.suffix]
@@ -186,6 +180,7 @@ class DownloadBase:
         retry_count_delay = 0
         # delay 重试次数 向上取整
         delay_all_retry_count = -(-delay // 60)
+
         while True:
             ret = False
             try:
@@ -195,24 +190,24 @@ class DownloadBase:
             finally:
                 self.close()
             if ret:
-                # 成功下载重置重试次数
-                retry_count = 0
-                retry_count_delay = 0
                 if self.is_download:
                     # 成功下载后也不检测下一个需要下载的视频而是先上传等待下次检测保证上传时使用下载视频的标题
                     # 开启边录边传会快些
                     break
+                # 成功下载重置重试次数
+                retry_count = 0
+                retry_count_delay = 0
             else:
-                if self.is_download:
-                    break
                 if retry_count < 3:
                     retry_count += 1
                     if retry_count == 1:
                         # 只有第一次显示
-                        logger.info(
-                            f'直播流获取失败：{self.__class__.__name__}:{self.fname}，每隔 10 秒重新获取，共重试3次')
-                    time.sleep(10)
+                        logger.info(f'获取流失败：{self.__class__.__name__}:{self.fname}，每隔 10 秒重新获取，共重试3次')
+                        time.sleep(10)
                     continue
+                if self.is_download:
+                    # 下载模式如果下载失败重试三次后直接跳出
+                    break
 
                 if delay:
                     retry_count_delay += 1
@@ -234,9 +229,44 @@ class DownloadBase:
                 else:
                     break
 
+        # 获取封面
+        if self.use_live_cover and self.live_cover_url is not None:
+            try:
+                save_dir = f'cover/{self.__class__.__name__}/{self.fname}/'
+                if not os.path.exists(save_dir):
+                    os.makedirs(save_dir)
+                fmtname = time.strftime(self.get_filename().encode("unicode-escape").decode(), date).encode().decode(
+                    "unicode-escape")
+
+                url_path = urlparse(self.live_cover_url).path
+                suffix = None
+                if '.jpg' in url_path:
+                    suffix = 'jpg'
+                elif '.png' in url_path:
+                    suffix = 'png'
+
+                if suffix:
+                    live_cover_path = f'{save_dir}{fmtname}.{suffix}'
+                    if os.path.exists(live_cover_path):
+                        self.live_cover_path = live_cover_path
+                    else:
+                        response = requests.get(self.live_cover_url, headers=self.fake_headers, timeout=30)
+                        with open(live_cover_path, 'wb') as f:
+                            f.write(response.content)
+                            f.close()
+                            self.live_cover_path = live_cover_path
+                    logger.info(
+                        f'封面下载成功：{self.__class__.__name__}：{self.fname}：{os.path.abspath(self.live_cover_path)}')
+                else:
+                    logger.warning('封面下载失败：{self.__class__.__name__}:{self.fname}：封面格式不支持')
+
+            except:
+                logger.exception('封面下载失败：{self.__class__.__name__}:{self.fname}')
+
         logger.info(f'退出下载：{self.__class__.__name__}:{self.fname}')
         if config['streamers'].get(self.fname, {}).get('downloaded_processor'):
-            downloaded_processor(config['streamers'].get(self.fname, {}).get('downloaded_processor'), f'{{"name": "{self.fname}", "url": "{self.url}", "room_title": "{self.room_title}", "start_time": "{time.strftime("%Y-%m-%d %H:%M:%S", date)}"}}')
+            downloaded_processor(config['streamers'].get(self.fname, {}).get('downloaded_processor'),
+                                 f'{{"name": "{self.fname}", "url": "{self.url}", "room_title": "{self.room_title}", "start_time": "{time.strftime("%Y-%m-%d %H:%M:%S", date)}"}}')
         return {
             'name': self.fname,
             'url': self.url,
@@ -314,9 +344,9 @@ def downloaded_processor(processors, data):
         if processor.get('run'):
             try:
                 process_output = subprocess.check_output(
-                    processor['run'], shell = True,
-                    input = data,
-                    stderr = subprocess.STDOUT, text = True)
+                    processor['run'], shell=True,
+                    input=data,
+                    stderr=subprocess.STDOUT, text=True)
                 logger.info(process_output.rstrip())
             except subprocess.CalledProcessError as e:
                 logger.exception(e.output)

@@ -10,7 +10,7 @@ import os
 import time
 from PIL import Image
 
-from yt_dlp.utils import DateRange
+from yt_dlp.utils import DateRange, UserNotLive
 from biliup.config import config
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase, get_valid_filename
@@ -36,7 +36,7 @@ class Youtube(DownloadBase):
         # 需要下载的url
         self.download_url = None
 
-    def check_stream(self):
+    def check_stream(self, is_check=False):
         self.download_url = None
         if self.use_new_ytb_downloader and self.downloader == 'ffmpeg':
             _fname, self.room_title = self.get_stream_info(self.url)
@@ -57,12 +57,15 @@ class Youtube(DownloadBase):
                 i += 1
             return True
         else:
-            with yt_dlp.YoutubeDL({'download_archive': 'archive.txt', 'ignoreerrors': True, 'extract_flat': True,
-                                   'cookiefile': self.cookiejarFile}) as ydl:
-                info = ydl.extract_info(self.url, download=False, process=False)
-                if info is None:
-                    logger.warning(self.cookiejarFile)
-                    logger.warning(self.url)
+            with yt_dlp.YoutubeDL({'download_archive': 'archive.txt', 'cookiefile': self.cookiejarFile,
+                                   'format': f"bestvideo[vcodec~='^({self.vcodec})'][height<={self.resolution}][filesize<{self.filesize}]+bestaudio[acodec~='^({self.acodec})']/best[height<={self.resolution}]/best",
+                                   }) as ydl:
+                try:
+                    info = ydl.extract_info(self.url, download=False, process=False)
+                except UserNotLive:
+                    return False
+                except:
+                    logger.warning(f"{self.url}：获取错误，本次跳过")
                     return False
 
                 # 视频取标题
@@ -75,19 +78,24 @@ class Youtube(DownloadBase):
                     return True
 
                 # 时间范围缓存避免每次都要读取
-                if not os.path.exists('./yt_dlp_cache.yaml'):
-                    with open('./yt_dlp_cache.yaml', 'w') as f:
+                cache_save_dir = './cache'
+                cache_filename = f'{cache_save_dir}/yt_dlp_cache.yaml'
+                if not os.path.exists(cache_save_dir):
+                    os.makedirs(cache_save_dir)
+                if not os.path.exists(cache_filename):
+                    with open(cache_filename, 'w') as f:
                         f.close()
 
-                cache = yaml.load(open('./yt_dlp_cache.yaml', 'r'), Loader=yaml.FullLoader)
+                cache = yaml.load(open(cache_filename, 'r'), Loader=yaml.FullLoader)
                 if cache is None:
                     cache = {}
 
                 self.is_download = True
 
                 for entry in info['entries']:
-                    # 取 Playlist 内视频标题
-                    self.room_title = entry['title']
+                    # 检测是否已下载
+                    if ydl.in_download_archive(entry):
+                        continue
 
                     try:
                         # 检测时间范围
@@ -102,14 +110,13 @@ class Youtube(DownloadBase):
                             continue
                     except:
                         continue
-                    # 检测是否已下载
-                    if ydl.in_download_archive(entry):
-                        continue
 
+                    # 取 Playlist 内视频标题
+                    self.room_title = entry['title']
                     self.download_url = entry['url']
                     break
 
-                with open("./yt_dlp_cache.yaml", "w") as f:
+                with open(cache_filename, "w") as f:
                     yaml.dump(cache, f, encoding='utf-8', allow_unicode=True)
 
                 return self.download_url is not None
@@ -132,28 +139,30 @@ class Youtube(DownloadBase):
                     'format': f"bestvideo[vcodec~='^({self.vcodec})'][height<={self.resolution}][filesize<{self.filesize}]+bestaudio[acodec~='^({self.acodec})']/best[height<={self.resolution}]/best",
                     'cookiefile': self.cookiejarFile,
                     # 'proxy': proxyUrl,
-                    'ignoreerrors': True,
                     'break_on_reject': True,
                     'download_archive': 'archive.txt',
                 }
-                if self.use_youtube_cover is True:
+                if self.use_youtube_cover:
                     ydl_opts['writethumbnail'] = True
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([self.download_url])
-                save_dir = f'cover/youtube/'
 
-                webp_cover_path = f'{filename}.webp'
-                jpg_cover_path = f'{filename}.jpg'
-                if os.path.exists(webp_cover_path):
-                    with Image.open(webp_cover_path) as img:
-                        img = img.convert('RGB')
-                        if not os.path.exists(save_dir):
-                            os.makedirs(save_dir)
-                        img.save(f'{save_dir}{filename}.jpg', format='JPEG')
-                    os.remove(webp_cover_path)
-                    self.live_cover_path = f'{save_dir}{filename}.jpg'
-                elif os.path.exists(jpg_cover_path):
-                    os.rename(jpg_cover_path, f'{save_dir}{filename}.jpg')
+                if self.use_youtube_cover:
+                    save_dir = f'cover/{self.__class__.__name__}/{self.fname}/'
+                    if not os.path.exists(save_dir):
+                        os.makedirs(save_dir)
+                    webp_cover_path = f'{filename}.webp'
+                    jpg_cover_path = f'{filename}.jpg'
+                    if os.path.exists(webp_cover_path):
+                        with Image.open(webp_cover_path) as img:
+                            img = img.convert('RGB')
+                            if not os.path.exists(save_dir):
+                                os.makedirs(save_dir)
+                            img.save(f'{save_dir}{filename}.jpg', format='JPEG')
+                        os.remove(webp_cover_path)
+                    elif os.path.exists(jpg_cover_path):
+                        os.rename(jpg_cover_path, f'{save_dir}{filename}.jpg')
+
                     self.live_cover_path = f'{save_dir}{filename}.jpg'
             except:
                 logger.exception(self.fname)
