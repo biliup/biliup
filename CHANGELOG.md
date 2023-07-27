@@ -5,6 +5,10 @@
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 0.4.26
+- 更新时间：2023.07.27
+- 🔧修复虎牙直播流下载的问题。 [@xxxxuanran](https://github.com/xxxxuanran)
+
 ## 0.4.25
 - 更新时间：2023.07.27
 - 💡新增NOW直播[@Kataick](https://github.com/Kataick)
