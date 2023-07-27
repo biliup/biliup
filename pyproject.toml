@@ -11,7 +11,7 @@ urls = {Homepage = "https://github.com/ForgQi/bilibiliupload"}
 requires-python = ">= 3.7"
 dependencies = [
     "tomli_w>=1.0.0",
-    "stream-gears >= 0.1.17",
+    "stream-gears >= 0.1.18,<0.2",
     "psutil >= 5.4.6",
     "aiofiles >= 22.1.0",
     "yt_dlp >= 2023.3.3",
