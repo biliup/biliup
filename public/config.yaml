@@ -245,15 +245,10 @@ streamers:
     ### 如需要录制抖音请在此填入cookie需要__ac_nonce与__ac_signature的值
     #douyin_cookie: '__ac_nonce=123456; __ac_signature=123456;'
 
-    #------Twitch视频录制------#
-    ### 使用Cookies登陆Twitch帐号，可用于下载会限，私享等未登录账号无法访问的内容。请使用Netscape 格式的 Cookies 文本路径。
-    ### 可以使用Chrome插件Get cookies.txt来生成txt文件。
-    #twitch_cookie_file: 'cookiejar.txt'
-
     #------Twitch直播录制------#
     ### 只在录制twitch直播时才生效
     ### 如录制Twitch时遇见视频流中广告过多的情况，可尝试在此填入cookie，可以大幅减少视频流中的twitch广告（经测试需要在该Cookie所属账号开了TwitchTurbo会员才有用）
-    ### 该cookie有过期风险，cookie过期后会导致无法获取到直播流（我个人用了四个月都没过期）
+    ### 该cookie有过期风险，cookie过期后会在日志输出警告请及时更换cookie，cookie失效的情况下后续录制将忽略cookie（我个人用了四个月都没过期）
     ### twitch_cookie获取方式：在浏览器中打开Twitch.tv，F12调出控制台，在控制台中执行：document.cookie.split("; ").find(item=>item.startsWith("auth-token="))?.split("=")[1]
     ### twitch_cookie需要在downloader= "ffmpeg"时候才会生效
     #twitch_cookie: 'aisjdoiuasdoihansdoh3ooi209'

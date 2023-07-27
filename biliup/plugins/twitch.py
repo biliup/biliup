@@ -1,33 +1,27 @@
-import os
 import random
+import re
 import subprocess
 import time
+from typing import Generator
+from urllib.parse import urlencode
 
 import requests
 import yt_dlp
-from PIL import Image
-from yt_dlp.utils import UserNotLive
 
 from . import logger
 from ..engine.decorators import Plugin
-from ..engine.download import DownloadBase, get_valid_filename
+from ..engine.download import DownloadBase
 from biliup.config import config
 from biliup.plugins.Danmaku import DanmakuClient
 
 VALID_URL_BASE = r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)'
-_OPERATION_HASHES = {
-    'CollectionSideBar': '27111f1b382effad0b6def325caef1909c733fe6a4fbabf54f8d491ef2cf2f14',
-    'FilterableVideoTower_Videos': 'a937f1d22e269e39a03b509f65a7490f9fc247d7f83d6ac1421523e3b68042cb',
-    'ClipsCards__User': 'b73ad2bfaecfd30a9e6c28fada15bd97032c83ec77a0440766a56fe0bd632777',
-    'ChannelCollectionsContent': '07e3691a1bad77a36aba590c351180439a40baefc1c275356f40fc7082419a84',
-    'StreamMetadata': '1c719a40e481453e5c48d9bb585d971b8b372f8ebb105b17076722264dfa5b3e',
-    'ComscoreStreamingQuery': 'e1edae8122517d013405f237ffcc124515dc6ded82480a88daef69c83b53ac01',
-    'VideoPreviewOverlay': '3006e77e51b128d838fa4e835723ca4dc9a05c5efd4466c1085215c6e437e65c',
-}
+VALID_URL_VIDEOS = r'https?://(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[^/]+)/(?:videos|profile|clips)'
 _CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko'
 
+# Twitch 授权信息是否到期
+AUTH_EXPIRE_STATUS = False
 
-@Plugin.download(regexp=r'https?://(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[^/]+)/(?:videos|profile|clips)')
+@Plugin.download(regexp=VALID_URL_VIDEOS)
 class TwitchVideos(DownloadBase):
     def __init__(self, fname, url, suffix='mp4'):
         DownloadBase.__init__(self, fname, url, suffix=suffix)
@@ -35,8 +29,8 @@ class TwitchVideos(DownloadBase):
         self.cookiejarFile = config.get('user', {}).get('twitch_cookie_file')
 
     def check_stream(self, is_check=False):
-
-        with yt_dlp.YoutubeDL({'download_archive': 'archive.txt', 'cookiefile': self.cookiejarFile}) as ydl:
+        # TODO 这里原本的批量检测是有问题的 先用yt_dlp实现 等待后续新增新的批量检测方式 后续这里的auth信息和直播一样采用twitch_cookie
+        with yt_dlp.YoutubeDL({'download_archive': 'archive.txt'}) as ydl:
             try:
                 info = ydl.extract_info(self.url, download=False, process=False)
             except:
@@ -53,6 +47,7 @@ class TwitchVideos(DownloadBase):
                             self.live_cover_url = thumbnail['url']
                             break
                     self.room_title = entry['title']
+                    ydl.record_download_archive(entry)
                 return True
         return False
 
@@ -66,54 +61,112 @@ class Twitch(DownloadBase):
         self.proc = None
 
     def check_stream(self, is_check=False):
-        with yt_dlp.YoutubeDL() as ydl:
-            try:
-                info = ydl.extract_info(self.url, download=False)
-            except UserNotLive:
-                return False
-            except:
-                logger.warning(f"{self.url}：获取错误，本次跳过")
-                return False
-            if is_check:
-                # 检测模式不获取流
-                return True
+        channel_name = re.match(VALID_URL_BASE, self.url).group('id').lower()
+        user = post_gql({
+            "query": '''
+                query query($channel_name:String!) {
+                    user(login: $channel_name){
+                        stream {
+                            id
+                            title
+                            type
+                            previewImageURL(width: 0,height: 0)
+                            playbackAccessToken(
+                                params: {
+                                    platform: "web",
+                                    playerBackend: "mediaplayer",
+                                    playerType: "site"
+                                }
+                            ) {
+                                signature
+                                value             
+                            }
+                        }
+                    }
+                }
+            ''',
+            'variables': {'channel_name': channel_name}
+        }).get('data', {}).get('user')
+        if not user:
+            logger.warning(f"{Twitch.__name__}: {self.url}: 获取错误，本次跳过")
+            return False
+        elif not user['stream'] or user['stream']['type'] != 'live':
+            return False
 
-            self.room_title = info['title']
+        self.room_title = user['stream']['title']
+        self.live_cover_url = user['stream']['previewImageURL']
+        if is_check:
+            return True
 
-            for thumbnail in info['thumbnails']:
-                if 'preference' in thumbnail and thumbnail['preference'] == 1:
-                    self.live_cover_url = thumbnail['url']
-                    break
+        if self.downloader == 'ffmpeg':
+            port = random.randint(1025, 65535)
+            stream_shell = [
+                "streamlink",
+                "--player-external-http",  # 为外部程序提供流媒体数据
+                # "--twitch-disable-ads",                     # 去广告，去掉、跳过嵌入的广告流
+                # "--twitch-disable-hosting",               # 该参数从5.0起已被禁用
+                "--twitch-disable-reruns",  # 如果该频道正在重放回放，不打开流
+                "--player-external-http-port", str(port),  # 对外部输出流的端口
+                self.url, "best"  # 流链接
+            ]
+            if self.twitch_disable_ads:  # 去广告，去掉、跳过嵌入的广告流
+                stream_shell.insert(1, "--twitch-disable-ads")
 
-            if self.downloader == 'ffmpeg':
-                port = random.randint(1025, 65535)
-                stream_shell = [
-                    "streamlink",
-                    "--player-external-http",  # 为外部程序提供流媒体数据
-                    # "--twitch-disable-ads",                     # 去广告，去掉、跳过嵌入的广告流
-                    # "--twitch-disable-hosting",               # 该参数从5.0起已被禁用
-                    "--twitch-disable-reruns",  # 如果该频道正在重放回放，不打开流
-                    "--player-external-http-port", str(port),  # 对外部输出流的端口
-                    self.url, "best"  # 流链接
-                ]
-                if self.twitch_disable_ads:  # 去广告，去掉、跳过嵌入的广告流
-                    stream_shell.insert(1, "--twitch-disable-ads")
-                twitch_cookie = config.get('user', {}).get('twitch_cookie')
-                if twitch_cookie:
-                    twitch_cookie = "--twitch-api-header=Authorization=OAuth " + twitch_cookie
-                    stream_shell.insert(1, twitch_cookie)
-                self.proc = subprocess.Popen(stream_shell)
-                self.raw_stream_url = f"http://localhost:{port}"
-                i = 0
-                while i < 5:
-                    if not (self.proc.poll() is None):
-                        return
-                    time.sleep(1)
-                    i += 1
-                return True
-            else:
-                self.raw_stream_url = info['url']
-                return True
+            twitch_cookie = config.get('user', {}).get('twitch_cookie')
+            # 在设置且有效的情况下使用
+            if twitch_cookie and not AUTH_EXPIRE_STATUS:
+                stream_shell.insert(1, "--twitch-api-header=Authorization=OAuth " + twitch_cookie)
+
+            self.proc = subprocess.Popen(stream_shell)
+            self.raw_stream_url = f"http://localhost:{port}"
+            i = 0
+            while i < 5:
+                if not (self.proc.poll() is None):
+                    return False
+                time.sleep(1)
+                i += 1
+            return True
+        else:
+            query = {
+                "player": "twitchweb",
+                "p": random.randint(1000000, 10000000),
+                "allow_source": "true",
+                "allow_audio_only": "true",
+                "allow_spectre": "false",
+                'fast_bread': "true",
+                'sig': user.get('stream').get('playbackAccessToken').get('signature'),
+                'token': user.get('stream').get('playbackAccessToken').get('value'),
+            }
+            self.raw_stream_url = f'https://usher.ttvnw.net/api/channel/hls/{channel_name}.m3u8?{urlencode(query)}'
+            return True
+
+    @staticmethod
+    def batch_check(check_urls: list[str]) -> Generator[str, None, None]:
+        ops = []
+        for url in check_urls:
+            channel_name = re.match(VALID_URL_BASE, url).group('id')
+            op = {
+                "query": '''
+                    query query($login:String!) {
+                        user(login: $login){
+                            stream {
+                              type
+                            }
+                        }
+                    }
+                ''',
+                'variables': {'login': channel_name.lower()}
+            }
+            ops.append(op)
+        gql = post_gql(ops)
+        for index, data in enumerate(gql):
+            user = data.get('data', {}).get('user')
+            if not user:
+                logger.warning(f"{Twitch.__name__}: {check_urls[index]}: 获取错误，本次跳过")
+                continue
+            elif not user['stream'] or user['stream']['type'] != 'live':
+                continue
+            yield check_urls[index]
 
     async def danmaku_download_start(self, filename):
         if self.twitch_danmaku:
@@ -130,3 +183,29 @@ class Twitch(DownloadBase):
                 self.proc.terminate()
         except:
             logger.exception(f'terminate {self.fname} failed')
+
+
+def post_gql(ops):
+    global AUTH_EXPIRE_STATUS
+    headers = {
+        'Content-Type': 'text/plain;charset=UTF-8',
+        'Client-ID': _CLIENT_ID,
+    }
+    twitch_cookie = config.get('user', {}).get('twitch_cookie')
+    if not AUTH_EXPIRE_STATUS and twitch_cookie:
+        headers['Authorization'] = f'OAuth {twitch_cookie}'
+
+    gql = requests.post(
+        'https://gql.twitch.tv/gql',
+        json=ops,
+        headers=headers,
+        timeout=15)
+    gql.close()
+    data = gql.json()
+
+    if isinstance(data, dict) and data.get('error') == 'Unauthorized':
+        AUTH_EXPIRE_STATUS = True
+        logger.warning("Twitch Cookie已失效请及时更换，之后操作将忽略Twitch Cookie")
+        return post_gql(ops)
+
+    return data

@@ -6,6 +6,7 @@ import subprocess
 import sys
 import threading
 import time
+from typing import Generator
 from urllib.parse import urlparse
 
 import requests
@@ -59,6 +60,12 @@ class DownloadBase:
     def check_stream(self, is_check=False):
         # is_check 是否是检测可以避免在检测是否可以录制的时候忽略一些耗时的操作
         logger.debug(self.fname, is_check)
+        raise NotImplementedError()
+
+    @staticmethod
+    def batch_check(check_urls: list[str]) -> Generator[str, None, None]:
+        # 批量检测直播或下载状态
+        # 返回的是url_list
         raise NotImplementedError()
 
     def get_filename(self, is_fmt=False):
