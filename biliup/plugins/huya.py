@@ -16,9 +16,9 @@ class Huya(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
         self.huya_danmaku = config.get('huya_danmaku', False)
+        self.fake_headers['Referer'] = 'https://www.huya.com/'
 
     def check_stream(self, is_check=False):
-        logger.debug(self.fname)
         try:
             res = requests.get(self.url, timeout=5, headers=self.fake_headers)
             res.close()
