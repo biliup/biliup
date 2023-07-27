@@ -6,6 +6,7 @@
 - ⚠️需要手动操作的更新信息
 
 ## 0.4.25
+- 更新时间：2023.07.27
 - 💡新增NOW直播[@Kataick](https://github.com/Kataick)
 - 💡新增映客直播[@Kataick](https://github.com/Kataick)
 - 💡增加downloaded_processor功能，支持结束录制时执行指定Shell指令[@Kataick](https://github.com/Kataick)
