@@ -35,6 +35,14 @@ class Huya(DownloadBase):
             logger.warning(f"{Huya.__name__}: {self.url}: 获取错误，本次跳过")
             return False
 
+        if '"exceptionType":0' in res.text:
+            logger.warning(f"{Huya.__name__}: {self.url}: 直播间地址错误")
+            return False
+
+        if '"eLiveStatus":2' not in res.text:
+            # 没开播
+            return False
+
         live_info = json.loads(res.text.split('"tLiveInfo":')[1].split(',"_classname":"LiveRoom.LiveInfo"}')[0] + '}')
         if live_info:
             try:
