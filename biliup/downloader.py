@@ -3,8 +3,10 @@ import re
 import time
 from urllib.error import HTTPError
 
+from .config import config
 from .engine.decorators import Plugin
-from .plugins import general, BatchCheckBase
+from .engine.download import DownloadBase
+from .plugins import general
 
 logger = logging.getLogger('biliup')
 
@@ -23,20 +25,31 @@ def download(fname, url, **kwargs):
 
 def check_url(plugin, url_status, secs=15):
     try:
-        if isinstance(plugin, BatchCheckBase):
-            return (yield from plugin.check())
+        # 待检测url
+        check_urls = []
+        # 过滤url
         for url in plugin.url_list:
-            # print(f"URL：{url}")
-            # print(f"URL_STATUS：{url_status[url]}")
             if url_status[url] == 1:
                 logger.debug(f'{url}正在下载中，已跳过检测')
-                # print(f"正在下载中，已跳过检测")
                 continue
-            if plugin(f'检测{url}', url).check_stream():
-                yield url
-            if url != plugin.url_list[-1]:
-                logger.debug('歇息会')
-                time.sleep(secs)
+            if url_status[url] == 2 and not config.get('uploading_record'):
+                logger.debug(f'{url}正在上传中，已跳过检测')
+                continue
+            check_urls.append(url)
+
+        if DownloadBase.batch_check != getattr(plugin.static_class, DownloadBase.batch_check.__name__):
+            # 如果支持批量检测
+            yield from plugin.static_class.batch_check(check_urls)
+        else:
+            # 不支持批量检测
+            for url in check_urls:
+                from .handler import event_manager
+                if plugin(event_manager.context['inverted_index'][url], url).check_stream(True):
+                    yield url
+                if url != check_urls[-1]:
+                    logger.debug('歇息会')
+                    time.sleep(secs)
+
     except HTTPError as e:
         logger.error(f'{plugin.__module__} {e.url} => {e}')
     except IOError:

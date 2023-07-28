@@ -1,6 +1,5 @@
 import logging
 import subprocess
-from pathlib import Path
 
 from . import plugins
 from .downloader import download, check_url
@@ -8,7 +7,6 @@ from .engine import invert_dict, Plugin
 from biliup.config import config
 from .engine.event import Event, EventManager
 from .uploader import upload
-from functools import reduce
 
 CHECK = 'check'
 CHECK_UPLOAD = 'check_upload'
@@ -86,10 +84,6 @@ class KernelFunc:
     def modify(self, url):
         if not url:
             return logger.debug('无人直播')
-        if self.url_status[url] == 1:
-            return logger.debug('已开播正在下载')
-        if self.url_status[url] == 2 and not config.get('uploading_record'):
-            return logger.debug('正在上传稍后下载')
         name = self.inverted_index[url]
 
         if config['streamers'].get(name, {}).get('preprocessor'):

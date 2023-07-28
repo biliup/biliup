@@ -18,7 +18,7 @@ class Bilibili(DownloadBase):
         if config.get('user', {}).get('bili_cookie') is not None:
             self.fake_headers['cookie'] = config.get('user', {}).get('bili_cookie')
 
-    def check_stream(self):
+    def check_stream(self, is_check=False):
 
         # 预读配置
         params = {
@@ -26,7 +26,7 @@ class Bilibili(DownloadBase):
             'protocol': '0,1',# 0: http_stream, 1: http_hls
             'format': '0,1,2',# 0: flv, 1: ts, 2: fmp4
             'codec': '0', # 0: avc, 1: hevc
-            'qn': '10000',
+            'qn': config.get('bili_qn', '10000'),
             'platform': 'html5', # 使用 html5 时默认屏蔽 p2p
             'dolby': '5',
             'panorama': '1'
@@ -52,17 +52,12 @@ class Bilibili(DownloadBase):
             if room_info['code'] != 0 or room_info['data']['room_info']['live_status'] != 1:
                 logger.debug(room_info['message'])
                 return False
-            cover_url = room_info['data']['room_info']['cover']
+            self.live_cover_url = room_info['data']['room_info']['cover']
             live_start_time = room_info['data']['room_info']['live_start_time']
             uname = room_info['data']['anchor_info']['base_info']['uname']
             if self.room_title is None:
                 self.room_title = room_info['data']['room_info']['title']
-            if self.use_live_cover is True:  # 获取直播封面并保存到cover目录下
-                try:
-                    self.live_cover_path = \
-                    super().get_live_cover(uname, params['room_id'], self.room_title, live_start_time, cover_url)
-                except:
-                    logger.error("获取直播封面失败")
+
             # 当 Cookie 存在，并且自定义APi使用Cookie开关关闭时，仅使用官方 Api
             isallow = True if s.headers.get('cookie') is None else config.get('user', {}).get('customAPI_use_cookie', False)
             try:

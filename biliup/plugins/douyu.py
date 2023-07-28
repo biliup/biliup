@@ -14,7 +14,7 @@ class Douyu(DownloadBase):
         super().__init__(fname, url, suffix)
         self.douyu_danmaku = config.get('douyu_danmaku', False)
 
-    def check_stream(self):
+    def check_stream(self, is_check=False):
         if len(self.url.split("douyu.com/")) < 2:
             logger.error("斗鱼：" + self.url + "：地址错误")
             return False
@@ -44,7 +44,7 @@ class Douyu(DownloadBase):
                 'cdn': config.get('douyucdn', 'tct-h5'),
                 'iar': 0,
                 'ive': 0,
-                'rate': 0,
+                'rate': config.get('douyu_rate', 0),
             }
         except:
             logger.warning("斗鱼：" + vid + "：获取roominfo错误")
