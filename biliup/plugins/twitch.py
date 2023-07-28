@@ -21,12 +21,14 @@ _CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko'
 # Twitch 授权信息是否到期
 AUTH_EXPIRE_STATUS = False
 
+
 @Plugin.download(regexp=VALID_URL_VIDEOS)
 class TwitchVideos(DownloadBase):
     def __init__(self, fname, url, suffix='mp4'):
         DownloadBase.__init__(self, fname, url, suffix=suffix)
         self.is_download = True
         self.cookiejarFile = config.get('user', {}).get('twitch_cookie_file')
+        self.download_entry = None
 
     def check_stream(self, is_check=False):
         # TODO 这里原本的批量检测是有问题的 先用yt_dlp实现 等待后续新增新的批量检测方式 后续这里的auth信息和直播一样采用twitch_cookie
@@ -42,14 +44,23 @@ class TwitchVideos(DownloadBase):
                 if not is_check:
                     download_info = ydl.extract_info(entry['url'], download=False)
                     self.raw_stream_url = download_info['url']
-                    for thumbnail in download_info['thumbnails']:
-                        if 'preference' in thumbnail and thumbnail['preference'] == 1:
-                            self.live_cover_url = thumbnail['url']
-                            break
+                    thumbnails = download_info.get('thumbnails')
+                    if thumbnails:
+                        for thumbnail in download_info.get('thumbnails', []):
+                            if 'preference' in thumbnail and thumbnail['preference'] == 1:
+                                self.live_cover_url = thumbnail['url']
+                                break
                     self.room_title = entry['title']
-                    ydl.record_download_archive(entry)
+                    self.download_entry = entry
                 return True
         return False
+
+    def start(self):
+        result = super().start()
+        with yt_dlp.YoutubeDL({'download_archive': 'archive.txt'}) as ydl:
+            # hook 在下载完成退出后记录已下载
+            ydl.record_download_archive(self.download_entry)
+        return result
 
 
 @Plugin.download(regexp=VALID_URL_BASE)
