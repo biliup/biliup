@@ -9,7 +9,7 @@ class egame(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 
-    def check_stream(self):
+    def check_stream(self, is_check=False):
         if len(self.url.split("egame.qq.com/")) < 2:
             logger.debug("直播间格式错误")
             return False

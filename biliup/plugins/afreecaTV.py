@@ -17,7 +17,7 @@ class AfreecaTV(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 
-    def check_stream(self):
+    def check_stream(self, is_check=False):
         logger.debug(self.fname)
         username = match1(self.url, VALID_URL_BASE)
         res_bno = requests.post(CHANNEL_API_URL + "?bjid=" + username,

@@ -20,7 +20,7 @@ class Nico(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 
-    def check_stream(self):
+    def check_stream(self, is_check=False):
         try:
             response = requests.get(self.url)
             # 正则表达式

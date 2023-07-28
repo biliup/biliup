@@ -16,7 +16,7 @@ class Missevan(DownloadBase):
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:106.0) Gecko/20100101 Firefox/106.0'
         }
 
-    def check_stream(self):
+    def check_stream(self, is_check=False):
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:106.0) Gecko/20100101 Firefox/106.0'
         }

@@ -27,6 +27,7 @@ class Plugin:
             def wrapper(*args, **kw):
                 return cls(*args, **kw)
             wrapper.VALID_URL_BASE = regexp
+            wrapper.static_class = cls
             Plugin.download_plugins.append(wrapper)
             return wrapper
         return decorator
@@ -47,8 +48,6 @@ class Plugin:
             url_list = suit_url(plugin.VALID_URL_BASE, curls)
             if not url_list:
                 continue
-            elif hasattr(plugin, "BatchCheck"):
-                checker_plugins[plugin.__name__] = plugin.BatchCheck(url_list)
             else:
                 plugin.url_list = url_list
                 checker_plugins[plugin.__name__] = plugin

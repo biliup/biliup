@@ -100,6 +100,7 @@ class KernelFunc:
             logger.debug('无人直播')
             return
 
+
         name = self.inverted_index[url]
         if config['streamers'].get(name, {}).get('preprocessor'):
             preprocessor(config['streamers'].get(name, {}).get('preprocessor'), f'{{"name": "{name}", "url": "{url}"}}')

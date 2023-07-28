@@ -12,7 +12,7 @@ class Acfun(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 
-    def check_stream(self):
+    def check_stream(self, is_check=False):
         if len(self.url.split("acfun.cn/live/")) < 2:
             logger.debug("直播间地址错误")
             return False
