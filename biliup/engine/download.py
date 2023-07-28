@@ -222,13 +222,13 @@ class DownloadBase:
                     else:
                         if delay < 60:
                             logger.info(
-                                f'下播延迟检测：{self.__class__.__name__}:{self.fname}，将在 {delay} 秒后检测开播状态')
+                                f'下播延迟检测：{self.__class__.__name__} - {self.fname}，将在 {delay} 秒后检测开播状态')
                             time.sleep(delay)
                         else:
                             if retry_count_delay == 1:
                                 # 只有第一次显示
                                 logger.info(
-                                    f'下播延迟检测：{self.__class__.__name__}:{self.fname}，每隔 60 秒检测开播状态，共检测 {delay_all_retry_count} 次')
+                                    f'下播延迟检测：{self.__class__.__name__} - {self.fname}，每隔 60 秒检测开播状态，共检测 {delay_all_retry_count} 次')
                             time.sleep(60)
                         continue
                 else:
@@ -261,12 +261,12 @@ class DownloadBase:
                             f.close()
                             self.live_cover_path = live_cover_path
                     logger.info(
-                        f'封面下载成功：{self.__class__.__name__}：{self.fname}：{os.path.abspath(self.live_cover_path)}')
+                        f'封面下载成功：{self.__class__.__name__} - {self.fname}：{os.path.abspath(self.live_cover_path)}')
                 else:
-                    logger.warning(f'封面下载失败：{self.__class__.__name__}:{self.fname}：封面格式不支持')
+                    logger.warning(f'封面下载失败：{self.__class__.__name__} - {self.fname}：封面格式不支持')
 
             except:
-                logger.exception(f'封面下载失败：{self.__class__.__name__}:{self.fname}')
+                logger.exception(f'封面下载失败：{self.__class__.__name__} - {self.fname}')
 
         logger.info(f'退出下载：{self.__class__.__name__} - {self.fname}')
         if config['streamers'].get(self.fname, {}).get('downloaded_processor'):
