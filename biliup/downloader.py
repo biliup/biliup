@@ -5,8 +5,10 @@ from urllib.error import HTTPError
 
 from .config import config
 from .engine.decorators import Plugin
+
 from .engine.download import DownloadBase
 from .plugins import general
+from biliup.config import config
 
 logger = logging.getLogger('biliup')
 
@@ -23,17 +25,17 @@ def download(fname, url, **kwargs):
     return pg.start()
 
 
-def check_url(plugin, url_status, secs=15):
+def check_url(plugin, url_status, url_upload_count, secs=15):
     try:
         # 待检测url
         check_urls = []
         # 过滤url
         for url in plugin.url_list:
             if url_status[url] == 1:
-                logger.debug(f'{url}正在下载中，已跳过检测')
+                logger.debug(f'{url}正在下载中，跳过检测')
                 continue
-            if url_status[url] == 2 and not config.get('uploading_record'):
-                logger.debug(f'{url}正在上传中，已跳过检测')
+            if url_upload_count[url] > 0 and not config.get('uploading_record', False):
+                logger.debug(f'{url}正在上传中，跳过检测')
                 continue
             check_urls.append(url)
 
