@@ -178,14 +178,14 @@ class DownloadBase:
         return retval
 
     def start(self):
-        logger.info(f'开始下载：{self.__class__.__name__}:{self.fname}')
+        logger.info(f'开始下载：{self.__class__.__name__} - {self.fname}')
         date = time.localtime()
         delay = int(config.get('delay', 0))
         # 重试次数
         retry_count = 0
         # delay 重试次数
         retry_count_delay = 0
-        # delay 重试次数 向上取整
+        # delay 总重试次数 向上取整
         delay_all_retry_count = -(-delay // 60)
 
         while True:
@@ -207,10 +207,8 @@ class DownloadBase:
             else:
                 if retry_count < 3:
                     retry_count += 1
-                    if retry_count == 1:
-                        # 只有第一次显示
-                        logger.info(f'获取流失败：{self.__class__.__name__}:{self.fname}，每隔 10 秒重新获取，共重试3次')
-                        time.sleep(10)
+                    logger.info(f'获取流失败：{self.__class__.__name__} - {self.fname}，将在 10 秒后重试，重试次数 {retry_count} / 3')
+                    time.sleep(10)
                     continue
                 if self.is_download:
                     # 下载模式如果下载失败重试三次后直接跳出
@@ -230,7 +228,7 @@ class DownloadBase:
                             if retry_count_delay == 1:
                                 # 只有第一次显示
                                 logger.info(
-                                    f'下播延迟检测：{self.__class__.__name__}:{self.fname}，每隔 60 秒检测开播状态，共检测{delay_all_retry_count}次')
+                                    f'下播延迟检测：{self.__class__.__name__}:{self.fname}，每隔 60 秒检测开播状态，共检测 {delay_all_retry_count} 次')
                             time.sleep(60)
                         continue
                 else:
@@ -265,12 +263,12 @@ class DownloadBase:
                     logger.info(
                         f'封面下载成功：{self.__class__.__name__}：{self.fname}：{os.path.abspath(self.live_cover_path)}')
                 else:
-                    logger.warning('封面下载失败：{self.__class__.__name__}:{self.fname}：封面格式不支持')
+                    logger.warning(f'封面下载失败：{self.__class__.__name__}:{self.fname}：封面格式不支持')
 
             except:
-                logger.exception('封面下载失败：{self.__class__.__name__}:{self.fname}')
+                logger.exception(f'封面下载失败：{self.__class__.__name__}:{self.fname}')
 
-        logger.info(f'退出下载：{self.__class__.__name__}:{self.fname}')
+        logger.info(f'退出下载：{self.__class__.__name__} - {self.fname}')
         if config['streamers'].get(self.fname, {}).get('downloaded_processor'):
             downloaded_processor(config['streamers'].get(self.fname, {}).get('downloaded_processor'),
                                  f'{{"name": "{self.fname}", "url": "{self.url}", "room_title": "{self.room_title}", "start_time": "{time.strftime("%Y-%m-%d %H:%M:%S", date)}"}}')
@@ -287,12 +285,12 @@ class DownloadBase:
     def rename(file_name):
         try:
             os.rename(file_name + '.part', file_name)
-            logger.debug('更名{0}为{1}'.format(file_name + '.part', file_name))
+            logger.debug(f'更名 {file_name + ".part"} 为 {file_name}')
         except FileNotFoundError:
-            logger.debug('FileNotFoundError:' + file_name)
+            logger.debug(f'FileNotFoundError: {file_name}')
         except FileExistsError:
             os.rename(file_name + '.part', file_name)
-            logger.info('FileExistsError:更名{0}为{1}'.format(file_name + '.part', file_name))
+            logger.info(f'FileExistsError: 更名 {file_name + ".part"} 为 {file_name}')
 
     @property
     def file_name(self):
