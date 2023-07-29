@@ -19,7 +19,7 @@ class UploadBase:
     def __init__(self, principal, data, persistence_path=None, postprocessor=None):
         self.principal = principal
         self.persistence_path = persistence_path
-        self.data = data
+        self.data: dict = data
         self.post_processor = postprocessor
 
     @staticmethod
@@ -113,6 +113,9 @@ class UploadBase:
     def postprocessor(self, data: list[FileInfo]):
         # data = file_list
         if self.post_processor is None:
+            # 删除封面
+            if self.data.get('live_cover_path') is not None:
+                os.remove(self.data['live_cover_path'])
             return self.remove_filelist(data)
 
         file_list = []
@@ -123,6 +126,9 @@ class UploadBase:
 
         for post_processor in self.post_processor:
             if post_processor == 'rm':
+                # 删除封面
+                if self.data.get('live_cover_path') is not None:
+                    os.remove(self.data['live_cover_path'])
                 self.remove_filelist(data)
                 continue
             if post_processor.get('mv'):
