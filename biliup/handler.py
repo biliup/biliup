@@ -55,6 +55,7 @@ def process(name, url):
     url_status = event_manager.context['url_status']
     # 下载开始
     url_status[url] = 1
+    upload_list = []
     try:
         kwargs: dict = config['streamers'][name].copy()
         kwargs.pop('url')
@@ -63,7 +64,6 @@ def process(name, url):
             kwargs['suffix'] = suffix
         stream_info = download(name, url, **kwargs)
 
-        upload_list = []
         if UploadBase(stream_info['name'],{}).filter_file(stream_info['name']):
             upload_list = UploadBase.file_list(stream_info['name'])
     finally:
