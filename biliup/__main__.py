@@ -5,7 +5,6 @@ import asyncio
 import logging.config
 import platform
 import threading
-import time
 
 import biliup.common.reload
 from biliup.config import config
@@ -13,8 +12,6 @@ from biliup.downloader import check_url
 from . import __version__, LOG_CONF
 from .common.Daemon import Daemon
 from .common.reload import AutoReload
-from .common.timer import Timer
-from .engine.event import Event
 
 
 def arg_parser():

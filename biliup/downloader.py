@@ -44,7 +44,7 @@ def check_url(checker):
                     continue
 
                 # 检测之前可能未上传的视频
-                if UploadBase(context['inverted_index'][url], {}).filter_file():
+                if len(UploadBase.file_list(context['inverted_index'][url])) > 0:
                     event_manager.send_event(
                         Event(UPLOAD, args=({'name': context['inverted_index'][url], 'url': url},)))
                     # 这里不能直接修改url_upload_count 因为UPLOAD Event中有url_upload_count的修改

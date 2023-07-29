@@ -30,9 +30,6 @@ def upload(data):
         data["format_title"] = custom_fmtstr(context.get('title', f'%Y.%m.%d{index}'), date, title, streamer, url)
         if context.get('description'):
             context['description'] = custom_fmtstr(context.get('description'), date, title, streamer, url)
-        threshold = config.get('filtering_threshold', 0)
-        if threshold:
-            data['threshold'] = threshold
         data['dolby'] = config.get('dolby', 0)
         data['hires'] = config.get('hires', 0)
         data['no_reprint'] = config.get('no_reprint', 0)
