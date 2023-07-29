@@ -47,7 +47,7 @@ class BiliWeb(UploadBase):
         self.copyright = copyright
         self.dtime = dtime
 
-    def upload(self, file_list):
+    def upload(self, file_list: list[UploadBase.FileInfo]) -> list[UploadBase.FileInfo]:
         video = Data()
         video.dynamic = self.dynamic
         with BiliBili(video) as bili:
@@ -55,7 +55,7 @@ class BiliWeb(UploadBase):
             bili.appsec = self.user.get('appsec')
             bili.login(self.persistence_path, self.user)
             for file in file_list:
-                video_part = bili.upload_file(file, self.lines, self.threads)  # 上传视频
+                video_part = bili.upload_file(file.video, self.lines, self.threads)  # 上传视频
                 video_part['title'] = video_part['title'][:80]
                 video.append(video_part)  # 添加已经上传的视频
             video.title = self.data["format_title"][:80]  # 稿件标题限制80字
