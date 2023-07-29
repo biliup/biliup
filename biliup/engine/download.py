@@ -6,7 +6,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Generator
+from typing import Generator, List
 from urllib.parse import urlparse
 
 import requests
@@ -63,7 +63,7 @@ class DownloadBase:
         raise NotImplementedError()
 
     @staticmethod
-    def batch_check(check_urls: list[str]) -> Generator[str, None, None]:
+    def batch_check(check_urls: List[str]) -> Generator[str, None, None]:
         # 批量检测直播或下载状态
         # 返回的是url_list
         raise NotImplementedError()

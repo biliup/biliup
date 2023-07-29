@@ -1,6 +1,7 @@
 import time
 
 import stream_gears
+from typing import List
 
 from ..engine import Plugin
 from ..engine.upload import UploadBase, logger
@@ -39,7 +40,7 @@ class BiliWeb(UploadBase):
         self.open_elec = open_elec
         self.user_cookie = user_cookie
 
-    def upload(self, file_list: list[UploadBase.FileInfo]) -> list[UploadBase.FileInfo]:
+    def upload(self, file_list: List[UploadBase.FileInfo]) -> List[UploadBase.FileInfo]:
         line = None
         if self.lines == 'kodo':
             line = stream_gears.UploadLine.Kodo

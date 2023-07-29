@@ -4,7 +4,7 @@ import shutil
 import subprocess
 from functools import reduce
 from pathlib import Path
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, List
 
 from biliup.config import config
 
@@ -23,7 +23,7 @@ class UploadBase:
         self.post_processor = postprocessor
 
     @staticmethod
-    def file_list(index) -> list[FileInfo]:
+    def file_list(index) -> List[FileInfo]:
         from biliup.handler import event_manager
         media_extensions = ['.mp4', '.flv', '.3gp', '.webm', '.mkv', '.ts']
 
@@ -86,7 +86,7 @@ class UploadBase:
         return results
 
     @staticmethod
-    def remove_filelist(file_list: list[FileInfo]):
+    def remove_filelist(file_list: List[FileInfo]):
         for f in file_list:
             UploadBase.remove_file(f.video)
             if f.danmaku is not None:
@@ -100,7 +100,7 @@ class UploadBase:
         except:
             logger.warning(f'删除失败-{file}')
 
-    def upload(self, file_list: list[FileInfo]) -> list[FileInfo]:
+    def upload(self, file_list: List[FileInfo]) -> List[FileInfo]:
         raise NotImplementedError()
 
     def start(self):
@@ -118,7 +118,7 @@ class UploadBase:
             finally:
                 event_manager.context['upload_filename'] = list(set(upload_filename) - set(video_list))
 
-    def postprocessor(self, data: list[FileInfo]):
+    def postprocessor(self, data: List[FileInfo]):
         # data = file_list
         if self.post_processor is None:
             # 删除封面

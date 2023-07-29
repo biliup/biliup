@@ -10,7 +10,7 @@ import urllib.parse
 from dataclasses import asdict, dataclass, field, InitVar
 from json import JSONDecodeError
 from os.path import splitext, basename
-from typing import Union, Any
+from typing import Union, Any, List
 from urllib import parse
 from urllib.parse import quote
 
@@ -47,7 +47,7 @@ class BiliWeb(UploadBase):
         self.copyright = copyright
         self.dtime = dtime
 
-    def upload(self, file_list: list[UploadBase.FileInfo]) -> list[UploadBase.FileInfo]:
+    def upload(self, file_list: List[UploadBase.FileInfo]) -> List[UploadBase.FileInfo]:
         video = Data()
         video.dynamic = self.dynamic
         with BiliBili(video) as bili:
