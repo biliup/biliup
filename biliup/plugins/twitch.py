@@ -27,8 +27,6 @@ class TwitchVideos(DownloadBase):
     def __init__(self, fname, url, suffix='mp4'):
         DownloadBase.__init__(self, fname, url, suffix=suffix)
         self.is_download = True
-        self.cookiejarFile = config.get('user', {}).get('twitch_cookie_file')
-        self.download_entry = None
 
     def check_stream(self, is_check=False):
         # TODO 这里原本的批量检测是有问题的 先用yt_dlp实现 等待后续新增新的批量检测方式 后续这里的auth信息和直播一样采用twitch_cookie
@@ -43,24 +41,15 @@ class TwitchVideos(DownloadBase):
                     continue
                 if not is_check:
                     download_info = ydl.extract_info(entry['url'], download=False)
+                    self.room_title = download_info['title']
                     self.raw_stream_url = download_info['url']
                     thumbnails = download_info.get('thumbnails')
-                    if thumbnails:
-                        for thumbnail in download_info.get('thumbnails', []):
-                            if 'preference' in thumbnail and thumbnail['preference'] == 1:
-                                self.live_cover_url = thumbnail['url']
-                                break
-                    self.room_title = entry['title']
-                    self.download_entry = entry
+                    if type(thumbnails) is list:
+                        self.live_cover_url = thumbnails[len(thumbnails) - 1].get('url')
+                    ydl.record_download_archive(entry)
                 return True
         return False
 
-    def start(self):
-        result = super().start()
-        with yt_dlp.YoutubeDL({'download_archive': 'archive.txt'}) as ydl:
-            # hook 在下载完成退出后记录已下载
-            ydl.record_download_archive(self.download_entry)
-        return result
 
 
 @Plugin.download(regexp=VALID_URL_BASE)

@@ -10,5 +10,4 @@ from ..engine import Plugin
 class NoopUploader(UploadBase):
     def upload(self, file_list: List[UploadBase.FileInfo]) -> List[UploadBase.FileInfo]:
         logger.info("NoopUploader")
-        time.sleep(10000)
         return file_list
