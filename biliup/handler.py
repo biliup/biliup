@@ -113,8 +113,6 @@ class KernelFunc:
             # ?????
             logger.debug('无人直播')
             return
-        logger.info("modify")
-        logger.info(self)
         name = self.inverted_index[url]
         logger.debug(f'{name} 刚刚开播，去下载')
         return Event(DOWNLOAD, args=(name, url))
