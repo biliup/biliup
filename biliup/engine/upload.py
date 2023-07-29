@@ -122,7 +122,7 @@ class UploadBase:
         for i in data:
             file_list.append(i.video)
             if i.danmaku is not None:
-                file_list.append(i.video)
+                file_list.append(i.danmaku)
 
         for post_processor in self.post_processor:
             if post_processor == 'rm':
