@@ -4,6 +4,6 @@ from ..engine import Plugin
 
 @Plugin.upload(platform="Noop")
 class NoopUploader(UploadBase):
-    def upload(self, file_list):
+    def upload(self, file_list: list[UploadBase.FileInfo]) -> list[UploadBase.FileInfo]:
         logger.info("NoopUploader")
         return file_list
