@@ -62,14 +62,18 @@ class Youtube(DownloadBase):
                                    }) as ydl:
                 try:
                     info = ydl.extract_info(self.url, download=False, process=False)
+                    if type(info) is not dict:
+                        logger.warning(f"{self.url}：获取错误，本次跳过")
+                        return False
                 except UserNotLive:
+                    logger.warning(f"{self.url}：地址填写错误")
                     return False
                 except:
                     logger.warning(f"{self.url}：获取错误，本次跳过")
                     return False
 
                 # 视频取标题
-                self.room_title = info['title']
+                self.room_title = info.get('title')
 
                 if info.get('entries') is None:
                     if ydl.in_download_archive(info):
@@ -156,8 +160,6 @@ class Youtube(DownloadBase):
                     if os.path.exists(webp_cover_path):
                         with Image.open(webp_cover_path) as img:
                             img = img.convert('RGB')
-                            if not os.path.exists(save_dir):
-                                os.makedirs(save_dir)
                             img.save(f'{save_dir}{filename}.jpg', format='JPEG')
                         os.remove(webp_cover_path)
                     elif os.path.exists(jpg_cover_path):
