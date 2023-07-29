@@ -27,7 +27,6 @@ class Plugin:
             def wrapper(*args, **kw):
                 return cls(*args, **kw)
             wrapper.VALID_URL_BASE = regexp
-            wrapper.static_class = cls
             Plugin.download_plugins.append(wrapper)
             return wrapper
         return decorator
