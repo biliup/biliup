@@ -33,6 +33,7 @@ def check_url(checker):
     # 平台检测延迟
     event_loop_interval = config.get('event_loop_interval', 40)
     context = event_manager.context
+    class_reference = type(checker('', ''))
     while True:
         try:
             # 待检测url
@@ -60,7 +61,7 @@ def check_url(checker):
                 check_urls.append(url)
 
             result_urls = []
-            if DownloadBase.batch_check != getattr(checker.static_class, DownloadBase.batch_check.__name__):
+            if DownloadBase.batch_check != getattr(class_reference, DownloadBase.batch_check.__name__):
                 # 如果支持批量检测
                 result_urls = list(checker.static_class.batch_check(check_urls))
             else:
