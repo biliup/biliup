@@ -5,6 +5,19 @@
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 0.4.27
+- 更新时间：2023.07.29
+- 🔧修复虎牙拉流403分段问题[@CoolZxp](https://github.com/CoolZxp)
+- 🔧统一download.py的输出格式[@Kataick](https://github.com/Kataick)
+- 🔧修复抖音弹幕分段与录制stop的问题[@CoolZxp](https://github.com/CoolZxp)
+- 🔧调整直播流获取失败及下播延迟检测功能[@CoolZxp](https://github.com/CoolZxp)
+- 🔧优化下载流程与下载日志逻辑以及下播检测延迟阈值[@CoolZxp](https://github.com/CoolZxp)
+- 🔧虎牙画质修复[@CoolZxp](https://github.com/CoolZxp)
+- 🔧调整封面下载逻辑[@CoolZxp](https://github.com/CoolZxp)
+- 🔧调整批量检测功能[@CoolZxp](https://github.com/CoolZxp)
+- 🔧优化youtube与twitch下载策略[@CoolZxp](https://github.com/CoolZxp)
+- 💡添加斗鱼,虎牙,哔哩哔哩,抖音自选画质[@CoolZxp](https://github.com/CoolZxp)
+
 ## 0.4.26
 - 更新时间：2023.07.27
 - 🔧修复虎牙直播流下载的问题。 [@xxxxuanran](https://github.com/xxxxuanran)
