@@ -55,7 +55,7 @@ class Douyu(DownloadBase):
 
         try:
             ctx = jsengine.jsengine()
-            ub98484234_fun = match1(html, r'(function ub98484234.+?)function k927cea2d4369').replace('return eval','return strc;')
+            ub98484234_fun = match1(html, r'(var vdwdae325w_64we.+?)function k927cea2d4369').replace('return eval','return strc;')
             sign_fun = ctx.eval(f'{ub98484234_fun};ub98484234();').rstrip(';').replace('CryptoJS.MD5(cb).toString()','md5(cb)')
             sign_fun += f'("{room_id}","10000000000000000000000000001501","{int(time.time())}");{MD5FUN}'
             params = parse_qs(ctx.eval(sign_fun))

@@ -41,18 +41,27 @@ class UploadBase:
         upload_filename: list = event_manager.context['upload_filename']
 
         results = []
-        danmakus = []
-        for file in file_list:
+        for index, file in enumerate(file_list):
             if file.endswith('.part'):
                 new_name = os.path.splitext(file)[0]
                 shutil.move(file, new_name)
-                logger.info(f'{file}存在已更名为{new_name}')
+                logger.info(f'{file}已更名为{new_name}')
+                file_list[index] = new_name
                 file = new_name
 
             name, ext = os.path.splitext(file)
 
-            # 过滤不是视频的
+            # 过滤不是视频的 如果是弹幕检测下弹幕存不存在
             if ext not in media_extensions:
+                if ext == '.xml':
+                    have_video = False
+                    for media_extension in media_extensions:
+                        if f"{name}{media_extension}" in file_list:
+                            have_video = True
+                            break
+                    if not have_video:
+                        logger.info(f'无视频，过滤删除-{file}')
+                        UploadBase.remove_file(file)
                 continue
             # 过滤正在上传的
             if file in upload_filename:
@@ -61,36 +70,35 @@ class UploadBase:
             file_size = os.path.getsize(file) / 1024 / 1024
             threshold = config.get('filtering_threshold', 0)
             if file_size <= threshold:
-                os.remove(file)
                 logger.info(f'过滤删除-{file}')
+                UploadBase.remove_file(file)
                 continue
 
             video = file
             danmaku = None
             if f'{name}.xml' in file_list:
                 danmaku = f'{name}.xml'
-                danmakus.append(f'{name}.xml')
 
             result = UploadBase.FileInfo(video=video, danmaku=danmaku)
 
             results.append(result)
-
-        # 删除弹幕文件
-        for file in file_list:
-            if file.endswith('.xml'):
-                if file not in danmakus:
-                    os.remove(file)
-                    logger.info(f'无视频，已过滤删除-{file}')
 
         return results
 
     @staticmethod
     def remove_filelist(file_list: list[FileInfo]):
         for f in file_list:
-            os.remove(f.video)
+            UploadBase.remove_file(f.video)
             if f.danmaku is not None:
-                os.remove(f.danmaku)
-            logger.info('删除-' + f.video)
+                UploadBase.remove_file(f.video)
+
+    @staticmethod
+    def remove_file(file: str):
+        try:
+            os.remove(file)
+            logger.info(f'删除-{file}')
+        except:
+            logger.warning(f'删除失败-{file}')
 
     def upload(self, file_list: list[FileInfo]) -> list[FileInfo]:
         raise NotImplementedError()
@@ -115,7 +123,7 @@ class UploadBase:
         if self.post_processor is None:
             # 删除封面
             if self.data.get('live_cover_path') is not None:
-                os.remove(self.data['live_cover_path'])
+                UploadBase.remove_file(self.data['live_cover_path'])
             return self.remove_filelist(data)
 
         file_list = []
@@ -128,7 +136,7 @@ class UploadBase:
             if post_processor == 'rm':
                 # 删除封面
                 if self.data.get('live_cover_path') is not None:
-                    os.remove(self.data['live_cover_path'])
+                    UploadBase.remove_file(self.data['live_cover_path'])
                 self.remove_filelist(data)
                 continue
             if post_processor.get('mv'):
