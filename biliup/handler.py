@@ -1,6 +1,7 @@
 import copy
 import logging
 import subprocess
+import time
 
 from . import plugins
 from .downloader import download
@@ -8,6 +9,7 @@ from .engine import invert_dict, Plugin
 from biliup.config import config
 from .engine.event import Event, EventManager
 from .uploader import upload
+from .engine.upload import UploadBase
 
 TO_MODIFY = 'to_modify'
 DOWNLOAD = 'download'
@@ -43,6 +45,11 @@ def process(name, url):
         'name': name,
         'url': url,
     }
+
+    start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    if config['streamers'].get(name, {}).get('preprocessor'):
+        processor(config['streamers'].get(name, {}).get('preprocessor'), f'{{"name": "{name}", "url": "{url}", "start_time": "{start_time}"}}')
+
     url_status = event_manager.context['url_status']
     # 下载开始
     url_status[url] = 1
@@ -53,6 +60,13 @@ def process(name, url):
         if suffix:
             kwargs['suffix'] = suffix
         stream_info = download(name, url, **kwargs)
+
+
+        video_list = [file.video for file in UploadBase.file_list(stream_info['name'])]
+
+        if config['streamers'].get(name, {}).get('downloaded_processor'):
+            processor(config['streamers'].get(name, {}).get('downloaded_processor'),
+                f'{{"name": "{name}", "url": "{url}", "room_title": "{stream_info.get("title", "")}", "start_time": "{start_time}", "end_time": "{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}", "file_list": "{video_list}"}}')
     finally:
         # 下载结束
         url_status[url] = 0
@@ -90,11 +104,8 @@ class KernelFunc:
             # ?????
             logger.debug('无人直播')
             return
-
         name = self.inverted_index[url]
-        if config['streamers'].get(name, {}).get('preprocessor'):
-            preprocessor(config['streamers'].get(name, {}).get('preprocessor'), f'{{"name": "{name}", "url": "{url}"}}')
-        logger.debug(f'{name}刚刚开播，去下载')
+        logger.debug(f'{name} 刚刚开播，去下载')
         return Event(DOWNLOAD, args=(name, url))
 
     def get_url_status(self):
@@ -110,7 +121,7 @@ class KernelFunc:
         return url_status
 
 
-def preprocessor(processors, data):
+def processor(processors, data):
     for processor in processors:
         if processor.get('run'):
             try:

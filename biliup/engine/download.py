@@ -207,7 +207,7 @@ class DownloadBase:
             else:
                 if retry_count < 3:
                     retry_count += 1
-                    logger.info(f'获取流失败：{self.__class__.__name__} - {self.fname}，将在 10 秒后重试，重试次数 {retry_count} / 3')
+                    logger.info(f'获取流失败：{self.__class__.__name__} - {self.fname}，重试次数 {retry_count} / 3，等待 10 秒')
                     time.sleep(10)
                     continue
                 if self.is_download:
@@ -217,7 +217,7 @@ class DownloadBase:
                 if delay:
                     retry_count_delay += 1
                     if retry_count_delay > delay_all_retry_count:
-                        # logger.info(f'下播延迟检测结束：{self.__class__.__name__}:{self.fname}')
+                        logger.info(f'下播延迟检测结束：{self.__class__.__name__}:{self.fname}')
                         break
                     else:
                         if delay < 60:
@@ -269,9 +269,6 @@ class DownloadBase:
                 logger.exception(f'封面下载失败：{self.__class__.__name__} - {self.fname}')
 
         logger.info(f'退出下载：{self.__class__.__name__} - {self.fname}')
-        if config['streamers'].get(self.fname, {}).get('downloaded_processor'):
-            downloaded_processor(config['streamers'].get(self.fname, {}).get('downloaded_processor'),
-                                 f'{{"name": "{self.fname}", "url": "{self.url}", "room_title": "{self.room_title}", "start_time": "{time.strftime("%Y-%m-%d %H:%M:%S", date)}"}}')
         return {
             'name': self.fname,
             'url': self.url,
@@ -342,17 +339,3 @@ def get_valid_filename(name):
     if s in {"", ".", ".."}:
         raise RuntimeError("Could not derive file name from '%s'" % name)
     return s
-
-
-def downloaded_processor(processors, data):
-    for processor in processors:
-        if processor.get('run'):
-            try:
-                process_output = subprocess.check_output(
-                    processor['run'], shell=True,
-                    input=data,
-                    stderr=subprocess.STDOUT, text=True)
-                logger.info(process_output.rstrip())
-            except subprocess.CalledProcessError as e:
-                logger.exception(e.output)
-                continue
