@@ -220,7 +220,7 @@ tags = [ "biliup", "视频标签" ]
 #    {run = "sh ./run.sh"}, ### 执行任意命令，等同于在shell中运行,preprocessor输出的数据为JSON格式，包含主播名字(name)、开播地址(url)和开播时间(start_time)
 #]
 ### 结束下载直播时触发，将按自定义顺序执行自定义操作 注：downloaded_processor仅支持shell指令
-#downloaded_processor[
+#downloaded_processor = [
 #    {run = "sh ./run.sh"}, ### 执行任意命令，等同于在shell中运行,downloaded_processor输出的数据为JSON格式，包含主播名字(name)、直播间地址(url)、直播间标题(room_title)、开播时间(start_time)、下播时间(end_time)和视频列表(file_list)
 #]
 ### 上传完成后触发，将按自定义顺序执行自定义操作 当postprocessor不存在时 默认执行删除文件操作
