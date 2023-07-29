@@ -2,7 +2,7 @@ import random
 import re
 import subprocess
 import time
-from typing import Generator
+from typing import Generator, List
 from urllib.parse import urlencode
 
 import requests
@@ -152,7 +152,7 @@ class Twitch(DownloadBase):
             return True
 
     @staticmethod
-    def batch_check(check_urls: list[str]) -> Generator[str, None, None]:
+    def batch_check(check_urls: List[str]) -> Generator[str, None, None]:
         ops = []
         for url in check_urls:
             channel_name = re.match(VALID_URL_BASE, url).group('id')

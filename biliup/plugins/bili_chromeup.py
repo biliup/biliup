@@ -4,6 +4,7 @@ import random
 import time
 
 from PIL import Image
+from typing import List
 
 from biliup.config import config
 from ..engine import Plugin
@@ -48,7 +49,7 @@ class BiliChrome(UploadBase):
             print("找到%s个元素：%s" % (len(s), xpath))
             return False
 
-    def upload(self, file_list: list[UploadBase.FileInfo]) -> list[UploadBase.FileInfo]:
+    def upload(self, file_list: List[UploadBase.FileInfo]) -> List[UploadBase.FileInfo]:
 
         filename = self.persistence_path
         videopath = self.assemble_videopath(file_list)
