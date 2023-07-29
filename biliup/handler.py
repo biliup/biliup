@@ -66,12 +66,13 @@ def process(name, url):
 
         if UploadBase(stream_info['name'],{}).filter_file(stream_info['name']):
             upload_list = UploadBase.file_list(stream_info['name'])
-    finally:
-        # 下载结束
-        url_status[url] = 0
+
         if config['streamers'].get(name, {}).get('downloaded_processor'):
             processor(config['streamers'].get(name, {}).get('downloaded_processor'),
                 f'{{"name": "{name}", "url": "{url}", "room_title": "{stream_info.get("title", "")}", "start_time": "{start_time}", "end_time": "{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}", "file_list": "{upload_list}"}}')
+    finally:
+        # 下载结束
+        url_status[url] = 0
         yield Event(UPLOAD, (stream_info,))
 
 
