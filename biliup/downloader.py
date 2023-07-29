@@ -60,10 +60,11 @@ def check_url(checker):
                         continue
                 check_urls.append(url)
 
-            result_urls = []
             if DownloadBase.batch_check != getattr(class_reference, DownloadBase.batch_check.__name__):
                 # 如果支持批量检测
-                result_urls = list(checker.static_class.batch_check(check_urls))
+                # 发送下载的事件
+                for url in class_reference.batch_check(check_urls):
+                    event_manager.send_event(Event(TO_MODIFY, args=(url,)))
             else:
                 # 不支持批量检测
                 for (index, url) in enumerate(check_urls):
@@ -74,7 +75,7 @@ def check_url(checker):
                             time.sleep(checker_sleep)
 
                         if checker(context['inverted_index'][url], url).check_stream(True):
-                            result_urls.append(url)
+                            event_manager.send_event(Event(TO_MODIFY, args=(url,)))
                     except HTTPError as e:
                         logger.error(f'{checker.__module__} {e.url} => {e}')
                     except IOError:
@@ -82,9 +83,7 @@ def check_url(checker):
                     except:
                         logger.exception("Uncaught exception:")
 
-            # 发送下载的事件
-            for result_url in result_urls:
-                event_manager.send_event(Event(TO_MODIFY, args=(result_url,)))
+
 
         except:
             # 除了单个检测异常 其他异常会影响整体 直接略过本次 等待下次整体检测
