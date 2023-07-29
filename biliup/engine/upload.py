@@ -36,9 +36,9 @@ class UploadBase:
             os.remove(r)
             logger.info('删除-' + r)
 
-    def filter_file(self, index):
+    def filter_file(self):
         media_extensions = ['.mp4', '.flv', '.3gp', '.webm', '.mkv', '.ts', '.flv.part']
-        file_list = UploadBase.file_list(index)
+        file_list = UploadBase.file_list(self.principal)
         if len(file_list) == 0:
             return False
         for f in file_list:
@@ -68,7 +68,7 @@ class UploadBase:
                 if not have_video:
                     self.remove_file(r)
                     logger.info(f'无视频，已过滤删除-{r}')
-        file_list = UploadBase.file_list(index)
+        file_list = UploadBase.file_list(self.principal)
         if len(file_list) == 0:
             logger.info('视频过滤后无文件可传')
             return False
@@ -82,7 +82,7 @@ class UploadBase:
         raise NotImplementedError()
 
     def start(self):
-        if self.filter_file(self.principal):
+        if self.filter_file():
             logger.info('准备上传' + self.data["format_title"])
             file_list = UploadBase.file_list(self.principal)
             from biliup.handler import event_manager
