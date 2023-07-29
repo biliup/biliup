@@ -4,15 +4,13 @@ import subprocess
 import time
 
 from . import plugins
-from .downloader import download, check_url
+from .downloader import download
 from .engine import invert_dict, Plugin
 from biliup.config import config
 from .engine.event import Event, EventManager
 from .uploader import upload
 from .engine.upload import UploadBase
 
-CHECK = 'check'
-CHECK_UPLOAD = 'check_upload'
 TO_MODIFY = 'to_modify'
 DOWNLOAD = 'download'
 UPLOAD = 'upload'
@@ -55,7 +53,6 @@ def process(name, url):
     url_status = event_manager.context['url_status']
     # 下载开始
     url_status[url] = 1
-    upload_list = []
     try:
         kwargs: dict = config['streamers'][name].copy()
         kwargs.pop('url')
@@ -64,12 +61,12 @@ def process(name, url):
             kwargs['suffix'] = suffix
         stream_info = download(name, url, **kwargs)
 
-        if UploadBase(stream_info['name'],{}).filter_file(stream_info['name']):
-            upload_list = UploadBase.file_list(stream_info['name'])
+
+        video_list = [file.video for file in UploadBase.file_list(stream_info['name'])]
 
         if config['streamers'].get(name, {}).get('downloaded_processor'):
             processor(config['streamers'].get(name, {}).get('downloaded_processor'),
-                f'{{"name": "{name}", "url": "{url}", "room_title": "{stream_info.get("title", "")}", "start_time": "{start_time}", "end_time": "{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}", "file_list": "{upload_list}"}}')
+                f'{{"name": "{name}", "url": "{url}", "room_title": "{stream_info.get("title", "")}", "start_time": "{start_time}", "end_time": "{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}", "file_list": "{video_list}"}}')
     finally:
         # 下载结束
         url_status[url] = 0
@@ -101,13 +98,6 @@ class KernelFunc:
         self.inverted_index = inverted_index
         self.streamer_url = streamer_url
 
-    @event_manager.register(CHECK, block='Asynchronous1')
-    def singleton_check(self, platform):
-        plugin = self.checker[platform]
-        wait = config.get('checker_sleep', 15)
-        for url in check_url(plugin, self.url_status, self.url_upload_count, secs=wait):
-            yield Event(TO_MODIFY, args=(url,))
-
     @event_manager.register(TO_MODIFY)
     def modify(self, url):
         if not url:
@@ -117,15 +107,6 @@ class KernelFunc:
         name = self.inverted_index[url]
         logger.debug(f'{name} 刚刚开播，去下载')
         return Event(DOWNLOAD, args=(name, url))
-
-    @event_manager.register(CHECK_UPLOAD)
-    def free_upload(self):
-        # 检测之前可能未上传的视频
-        for title, urls in self.streamer_url.items():
-            for url in urls:
-                if self.url_status[url] == 1 or self.url_upload_count[url] > 0:
-                    continue
-                yield Event(UPLOAD, args=({'name': title, 'url': url},))
 
     def get_url_status(self):
         # 这里是为webui准备的
