@@ -127,7 +127,7 @@ class Youtube(DownloadBase):
                     self.download_url = entry['url']
                     break
 
-                with open(cache_filename, "w") as f:
+                with open(cache_filename, "w", encoding='utf-8') as f:
                     yaml.dump(cache, f, encoding='utf-8', allow_unicode=True)
 
                 return self.download_url is not None
