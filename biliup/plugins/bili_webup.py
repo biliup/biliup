@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import sys
 import time
 import urllib.parse
@@ -327,7 +328,7 @@ class BiliBili:
         auto_os['cost'] = min_cost
         return auto_os
 
-    def upload_file(self, filepath: str, lines='AUTO', tasks=3):
+    def upload_file(self, filepath: str, lines='AUTO', tasks=3, preferred_upos_cdn: str = None):
         """上传本地视频文件,返回视频信息dict
         b站目前支持4种上传线路upos, kodo, gcs, bos
         gcs: {"os":"gcs","query":"bucket=bvcupcdngcsus&probe_version=20221109",
@@ -391,6 +392,17 @@ class BiliBili:
                 timeout=5)
             ret = resp.json()
             logger.debug(f"preupload: {ret}")
+            if self._auto_os['os'] == 'upos' and preferred_upos_cdn:
+                original_endpoint: str = ret['endpoint']
+                if re.match(r'upos-(sz|cs)-upcdn(bda2|ws|qn)\.bilivideo\.com', original_endpoint):
+                    if re.match(r'bda2|qn|ws', preferred_upos_cdn):
+                        new_endpoint = re.sub(r'uncdn(bda2|qn|ws)', preferred_upos_cdn, original_endpoint)
+                        logger.debug(f"{original_endpoint} => {new_endpoint}")
+                        ret['endpoint'] = new_endpoint
+                    else:
+                        logger.error(f"Unrecognized preferred_upos_cdn: {preferred_upos_cdn}")
+                else:
+                    logger.warning("Assigned UPOS endpoint was never seen before, something else might have changed, so will not modify it")
             return asyncio.run(upload(f, total_size, ret, tasks=tasks))
 
     async def cos(self, file, total_size, ret, chunk_size=10485760, tasks=3, internal=False):
