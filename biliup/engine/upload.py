@@ -32,7 +32,7 @@ class UploadBase:
         for file_name in os.listdir('.'):
             if index in file_name and os.path.isfile(file_name):
                 file_list.append(file_name)
-        file_list = sorted(file_list)
+        file_list = sorted(file_list, key=lambda x: os.path.getctime(x))
 
         if len(file_list) == 0:
             return []
