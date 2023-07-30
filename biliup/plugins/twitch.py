@@ -33,21 +33,21 @@ class TwitchVideos(DownloadBase):
         with yt_dlp.YoutubeDL({'download_archive': 'archive.txt'}) as ydl:
             try:
                 info = ydl.extract_info(self.url, download=False, process=False)
+                for entry in info['entries']:
+                    if ydl.in_download_archive(entry):
+                        continue
+                    if not is_check:
+                        download_info = ydl.extract_info(entry['url'], download=False)
+                        self.room_title = download_info['title']
+                        self.raw_stream_url = download_info['url']
+                        thumbnails = download_info.get('thumbnails')
+                        if type(thumbnails) is list:
+                            self.live_cover_url = thumbnails[len(thumbnails) - 1].get('url')
+                        ydl.record_download_archive(entry)
+                    return True
             except:
-                logger.warning(f"{self.url}：获取错误，本次跳过")
+                logger.warning(f"{self.url}：获取错误")
                 return False
-            for entry in info['entries']:
-                if ydl.in_download_archive(entry):
-                    continue
-                if not is_check:
-                    download_info = ydl.extract_info(entry['url'], download=False)
-                    self.room_title = download_info['title']
-                    self.raw_stream_url = download_info['url']
-                    thumbnails = download_info.get('thumbnails')
-                    if type(thumbnails) is list:
-                        self.live_cover_url = thumbnails[len(thumbnails) - 1].get('url')
-                    ydl.record_download_archive(entry)
-                return True
         return False
 
 
@@ -88,7 +88,7 @@ class Twitch(DownloadBase):
             'variables': {'channel_name': channel_name}
         }).get('data', {}).get('user')
         if not user:
-            logger.warning(f"{Twitch.__name__}: {self.url}: 获取错误，本次跳过")
+            logger.warning(f"{Twitch.__name__}: {self.url}: 获取错误")
             return False
         elif not user['stream'] or user['stream']['type'] != 'live':
             return False
@@ -162,7 +162,7 @@ class Twitch(DownloadBase):
         for index, data in enumerate(gql):
             user = data.get('data', {}).get('user')
             if not user:
-                logger.warning(f"{Twitch.__name__}: {check_urls[index]}: 获取错误，本次跳过")
+                logger.warning(f"{Twitch.__name__}: {check_urls[index]}: 获取错误")
                 continue
             elif not user['stream'] or user['stream']['type'] != 'live':
                 continue
