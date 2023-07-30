@@ -49,7 +49,7 @@ class DownloadBase:
         }
 
         self.default_output_args = [
-            '-bsf:a', 'aac_adtstoasc',
+            '-bsf:a', 'aac_adtstoasc', '-fflags', '+discardcorrupt+genpts+igndts'
         ]
         if config.get('segment_time'):
             self.default_output_args += \
