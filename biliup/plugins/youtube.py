@@ -1,5 +1,6 @@
 import asyncio
 import random
+import shutil
 import subprocess
 import threading
 
@@ -8,7 +9,6 @@ import yt_dlp
 import streamlink
 import os
 import time
-from PIL import Image
 
 from yt_dlp.utils import DateRange, UserNotLive
 from biliup.config import config
@@ -32,7 +32,6 @@ class Youtube(DownloadBase):
         self.filesize = config.get('youtube_max_videosize', '100G')
         self.beforedate = config.get('youtube_before_date', '20770707')
         self.afterdate = config.get('youtube_after_date', '19700101')
-        self.use_youtube_cover = config.get('use_youtube_cover', False)
         # 需要下载的url
         self.download_url = None
 
@@ -63,21 +62,21 @@ class Youtube(DownloadBase):
                 try:
                     info = ydl.extract_info(self.url, download=False, process=False)
                     if type(info) is not dict:
-                        logger.warning(f"{self.url}：获取错误，本次跳过")
+                        logger.warning(f"{self.url}：获取错误")
                         return False
                 except UserNotLive:
                     logger.warning(f"{self.url}：地址填写错误")
                     return False
                 except:
-                    logger.warning(f"{self.url}：获取错误，本次跳过")
+                    logger.warning(f"{self.url}：获取错误")
                     return False
-
-                # 视频取标题
-                self.room_title = info.get('title')
 
                 if info.get('entries') is None:
                     if ydl.in_download_archive(info):
                         return False
+                    # 视频取标题
+                    self.room_title = info.get('title')
+                    self.live_cover_url = info.get('thumbnail')
                     self.download_url = self.url
                     return True
 
@@ -90,9 +89,14 @@ class Youtube(DownloadBase):
                     with open(cache_filename, 'w') as f:
                         f.close()
 
-                cache = yaml.load(open(cache_filename, 'r'), Loader=yaml.FullLoader)
-                if cache is None:
-                    cache = {}
+                cache = {}
+                try:
+                    with open(cache_filename, 'r', encoding='utf-8') as file:
+                        cache = yaml.load(file, Loader=yaml.FullLoader)
+                        if type(cache) is not dict:
+                            cache = {}
+                except:
+                    logger.exception(f'读取{Youtube.__class__}缓存失败，将重置缓存')
 
                 self.is_download = True
 
@@ -117,6 +121,9 @@ class Youtube(DownloadBase):
 
                     # 取 Playlist 内视频标题
                     self.room_title = entry['title']
+                    thumbnails = entry.get('thumbnails', [])
+                    if type(thumbnails) is list and len(thumbnails) > 0:
+                        self.live_cover_url = thumbnails[len(thumbnails) - 1].get('url')
                     self.download_url = entry['url']
                     break
 
@@ -137,38 +144,39 @@ class Youtube(DownloadBase):
             threading.Thread(target=asyncio.run, args=(self.danmaku_download_start(fmtname),)).start()
             self.ffmpeg_download(fmtname)
         else:
+            # ydl下载的文件在下载失败时不可控
+            # 临时存储在其他地方
+            if self.is_download:
+                download_dir = f'./cache/youtube/{filename}'
+            else:
+                download_dir = '.'
             try:
                 ydl_opts = {
-                    'outtmpl': filename + '.%(ext)s',
+                    'outtmpl': f'{download_dir}/{filename}.%(ext)s',
                     'format': f"bestvideo[vcodec~='^({self.vcodec})'][height<={self.resolution}][filesize<{self.filesize}]+bestaudio[acodec~='^({self.acodec})']/best[height<={self.resolution}]/best",
                     'cookiefile': self.cookiejarFile,
                     # 'proxy': proxyUrl,
                     'break_on_reject': True,
-                    'download_archive': 'archive.txt',
                 }
-                if self.use_youtube_cover:
-                    ydl_opts['writethumbnail'] = True
+                if self.is_download:
+                    # 只有下载时记录已下载
+                    ydl_opts['download_archive'] = 'archive.txt'
+
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([self.download_url])
 
-                if self.use_youtube_cover:
-                    save_dir = f'cover/{self.__class__.__name__}/{self.fname}/'
-                    if not os.path.exists(save_dir):
-                        os.makedirs(save_dir)
-                    webp_cover_path = f'{filename}.webp'
-                    jpg_cover_path = f'{filename}.jpg'
-                    if os.path.exists(webp_cover_path):
-                        with Image.open(webp_cover_path) as img:
-                            img = img.convert('RGB')
-                            img.save(f'{save_dir}{filename}.jpg', format='JPEG')
-                        os.remove(webp_cover_path)
-                    elif os.path.exists(jpg_cover_path):
-                        os.rename(jpg_cover_path, f'{save_dir}{filename}.jpg')
-
-                    self.live_cover_path = f'{save_dir}{filename}.jpg'
+                if self.is_download:
+                    for file in os.listdir(download_dir):
+                        shutil.move(f'{download_dir}/{file}', './')
             except:
                 logger.exception(self.fname)
                 return False
+            finally:
+                # 删除引用 让gc回收ydl释放文件句柄
+                del ydl
+                if self.is_download:
+                    # 清理意外退出可能产生的多余文件
+                    shutil.rmtree(download_dir)
             return True
 
     def get_stream_info(self, url):
