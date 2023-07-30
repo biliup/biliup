@@ -41,7 +41,7 @@ class TwitchVideos(DownloadBase):
                         self.room_title = download_info['title']
                         self.raw_stream_url = download_info['url']
                         thumbnails = download_info.get('thumbnails')
-                        if type(thumbnails) is list:
+                        if type(thumbnails) is list and len(thumbnails) > 0:
                             self.live_cover_url = thumbnails[len(thumbnails) - 1].get('url')
                         ydl.record_download_archive(entry)
                     return True

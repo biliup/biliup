@@ -9,14 +9,12 @@ import yt_dlp
 import streamlink
 import os
 import time
-from PIL import Image
 
 from yt_dlp.utils import DateRange, UserNotLive
 from biliup.config import config
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase, get_valid_filename
 from . import logger
-from ..engine.upload import UploadBase
 
 VALID_URL_BASE = r'https?://(?:(?:www|m)\.)?youtube\.com/(?P<id>.*?)\??(.*?)'
 
@@ -34,7 +32,6 @@ class Youtube(DownloadBase):
         self.filesize = config.get('youtube_max_videosize', '100G')
         self.beforedate = config.get('youtube_before_date', '20770707')
         self.afterdate = config.get('youtube_after_date', '19700101')
-        self.use_youtube_cover = config.get('use_youtube_cover', False)
         # 需要下载的url
         self.download_url = None
 
@@ -79,6 +76,7 @@ class Youtube(DownloadBase):
                         return False
                     # 视频取标题
                     self.room_title = info.get('title')
+                    self.live_cover_url = info.get('thumbnail')
                     self.download_url = self.url
                     return True
 
@@ -91,9 +89,14 @@ class Youtube(DownloadBase):
                     with open(cache_filename, 'w') as f:
                         f.close()
 
-                cache = yaml.load(open(cache_filename, 'r'), Loader=yaml.FullLoader)
-                if cache is None:
-                    cache = {}
+                cache = {}
+                try:
+                    with open(cache_filename, 'r', encoding='utf-8') as file:
+                        cache = yaml.load(file, Loader=yaml.FullLoader)
+                        if type(cache) is not dict:
+                            cache = {}
+                except:
+                    logger.exception(f'读取{Youtube.__class__}缓存失败，将重置缓存')
 
                 self.is_download = True
 
@@ -118,6 +121,9 @@ class Youtube(DownloadBase):
 
                     # 取 Playlist 内视频标题
                     self.room_title = entry['title']
+                    thumbnails = entry.get('thumbnails', [])
+                    if type(thumbnails) is list and len(thumbnails) > 0:
+                        self.live_cover_url = thumbnails[len(thumbnails) - 1].get('url')
                     self.download_url = entry['url']
                     break
 
@@ -140,11 +146,11 @@ class Youtube(DownloadBase):
         else:
             # ydl下载的文件在下载失败时不可控
             # 临时存储在其他地方
-            download_dir = f'./cache/youtube/{filename}'
+            if self.is_download:
+                download_dir = f'./cache/youtube/{filename}'
+            else:
+                download_dir = '.'
             try:
-                cover_save_dir = f'cover/{self.__class__.__name__}/{self.fname}/'
-                if not os.path.exists(cover_save_dir):
-                    os.makedirs(cover_save_dir)
                 ydl_opts = {
                     'outtmpl': f'{download_dir}/{filename}.%(ext)s',
                     'format': f"bestvideo[vcodec~='^({self.vcodec})'][height<={self.resolution}][filesize<{self.filesize}]+bestaudio[acodec~='^({self.acodec})']/best[height<={self.resolution}]/best",
@@ -156,32 +162,21 @@ class Youtube(DownloadBase):
                     # 只有下载时记录已下载
                     ydl_opts['download_archive'] = 'archive.txt'
 
-                if self.use_youtube_cover:
-                    ydl_opts['writethumbnail'] = True
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([self.download_url])
 
-                if self.use_youtube_cover:
-                    webp_cover_path = f'{download_dir}/{filename}.webp'
-                    jpg_cover_path = f'{download_dir}/{filename}.jpg'
-                    if os.path.exists(webp_cover_path):
-                        with Image.open(webp_cover_path) as img:
-                            img = img.convert('RGB')
-                            img.save(f'{cover_save_dir}{filename}.jpg', format='JPEG')
-                        os.remove(webp_cover_path)
-                    elif os.path.exists(jpg_cover_path):
-                        os.rename(jpg_cover_path, f'{cover_save_dir}{filename}.jpg')
-                    self.live_cover_path = f'{cover_save_dir}{filename}.jpg'
-                for file in os.listdir(download_dir):
-                    shutil.move(f'{download_dir}/{file}', './')
+                if self.is_download:
+                    for file in os.listdir(download_dir):
+                        shutil.move(f'{download_dir}/{file}', './')
             except:
                 logger.exception(self.fname)
                 return False
             finally:
                 # 删除引用 让gc回收ydl释放文件句柄
                 del ydl
-                # 清理意外退出可能产生的多余文件
-                shutil.rmtree(download_dir)
+                if self.is_download:
+                    # 清理意外退出可能产生的多余文件
+                    shutil.rmtree(download_dir)
             return True
 
     def get_stream_info(self, url):
