@@ -5,6 +5,26 @@
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 0.4.28
+- 更新时间：2023.07.30
+- 🔧在读取youtube缓存失败时增加提示[@CoolZxp](https://github.com/CoolZxp)
+- 🔧调整twitch日志输出[@CoolZxp](https://github.com/CoolZxp)
+- 🔧调整twitch youtube封面下载逻辑[@CoolZxp](https://github.com/CoolZxp)
+- 🔧修复youtube视频录制异常中断时多余文件不删除[@CoolZxp](https://github.com/CoolZxp)
+- 🔧兼容低版本python[@CoolZxp](https://github.com/CoolZxp)
+- 🔧斗鱼请求优化[@CoolZxp](https://github.com/CoolZxp)
+- 🔧斗鱼适配移动端url[@CoolZxp](https://github.com/CoolZxp)
+- 🔧斗鱼避免下播时可能的异常[@CoolZxp](https://github.com/CoolZxp)
+- 🔧避免上传时由于操作文件权限不足导致后处理失败[@CoolZxp](https://github.com/CoolZxp)
+- 🔧补充downloaded_processor toml配置[@Kataick](https://github.com/Kataick)
+- 🔧删除多余日志输出[@Kataick](https://github.com/Kataick)
+- 🔧让检测后能更快的开始下载[@CoolZxp](https://github.com/CoolZxp)
+- 🔧修复快手录制问题[@CoolZxp](https://github.com/CoolZxp)
+- 💡上传后封面自动删除[@CoolZxp](https://github.com/CoolZxp)
+- 💡downloaded_processor增加返回参数(下播时间和视频列表)[@Kataick](https://github.com/Kataick)
+- 💡stream-gears升级至0.1.19
+
+
 ## 0.4.27
 - 更新时间：2023.07.29
 - 🔧修复虎牙拉流403分段问题[@CoolZxp](https://github.com/CoolZxp)
