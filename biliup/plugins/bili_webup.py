@@ -390,7 +390,7 @@ class BiliBili:
                 f"https://member.bilibili.com/preupload?{self._auto_os['query']}", params=query,
                 timeout=5)
             ret = resp.json()
-            logger.debug(ret)
+            logger.debug(f"preupload: {ret}")
             return asyncio.run(upload(f, total_size, ret, tasks=tasks))
 
     async def cos(self, file, total_size, ret, chunk_size=10485760, tasks=3, internal=False):
