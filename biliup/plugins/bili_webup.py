@@ -536,7 +536,7 @@ class BiliBili:
             "X-Upos-Auth": auth
         }
         # 向上传地址申请上传，得到上传id等信息
-        upload_id = self.__session.post(f'{url}?uploads&output=json', timeout=5,
+        upload_id = self.__session.post(f'{url}?uploads&output=json', timeout=15,
                                         headers=headers).json()["upload_id"]
         # 开始上传
         parts = []  # 分块信息
@@ -564,8 +564,8 @@ class BiliBili:
             'output': 'json',
             'profile': 'ugcupos/bup'
         }
-        ii = 0
-        while ii <= 3:
+        attempt = 0
+        while attempt <= 5:  # 一旦放弃就会丢失前面所有的进度，多试几次吧
             try:
                 r = self.__session.post(url, params=p, json={"parts": parts}, headers=headers, timeout=15).json()
                 if r.get('OK') == 1:
@@ -573,8 +573,8 @@ class BiliBili:
                     return {"title": splitext(filename)[0], "filename": splitext(basename(upos_uri))[0], "desc": ""}
                 raise IOError(r)
             except IOError:
-                ii += 1
-                logger.info(f"请求合并分片时出现问题，尝试重连，次数：" + str(ii))
+                attempt += 1
+                logger.info(f"请求合并分片时出现问题，尝试重连，次数：" + str(attempt))
                 time.sleep(15)
 
     @staticmethod
