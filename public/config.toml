@@ -25,10 +25,6 @@ filtering_threshold = 20
 lines = "AUTO"
 ### 单文件并发上传数，未达到带宽上限时增大此值可提高上传速度
 threads = 3
-### 默认情况下，会等待上传录像完成后才开始新的录制。在这段等待上传完成期间，如果同一主播开播了，就会导致直播内容漏录。
-### 如开启后遇到bug或问题请提交issues
-### 开启后，即使正在上传文件，当检测到主播开播，就会立即开始新的直播录制并创建新的稿件【默认关闭】
-#uploading_record = true
 
 #------杂项------#
 ### 检测到主播下播后延迟再次检测，单位：秒，避免特殊情况提早启动上传导致漏录
@@ -189,7 +185,7 @@ url = ["https://www.twitch.tv/kimdaeyeob3"]
 url = [
   "https://www.twitch.tv/innovation_s2",
   "https://www.panda.tv/1160340"
-]
+] #填写多个url时只能同时下载一个，如需多个同时下载请单独配置
 title = "{title}第一视角%Y-%m-%d{streamer}{url}" ### 自定义标题的时间格式, {title}代表当场直播间标题 {streamer}代表在本config里面设置的主播名称 {url}代表设置的该主播的第一条直播间链接
 tid = 171 ### 投稿分区码,171为电子竞技分区
 copyright = 2 ### 1为自制
@@ -222,7 +218,7 @@ dynamic = "#空间动态#"
 user_cookie = "cookies.json" ### 使用指定的账号上传
 #use_live_cover = true # 获取BILIBILI直播间封面并作为投稿封面。此封面优先级低于单个主播指定的自定义封面。
 tags = [ "biliup", "视频标签" ]
-#format = "mp4" ### 视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg或者streamlink。
+#format = "mp4" ### 视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg或者streamlink，youtube不支持。
 ### 开始下载直播时触发，将按自定义顺序执行自定义操作 注：preprocessor仅支持shell指令
 #preprocessor = [
 #    {run = "sh ./run.sh"}, ### 执行任意命令，等同于在shell中运行,preprocessor输出的数据为JSON格式，包含主播名字(name)、开播地址(url)和开播时间(start_time)

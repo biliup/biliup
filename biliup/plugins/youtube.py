@@ -1,4 +1,6 @@
 import copy
+import os
+import shutil
 from typing import Optional
 
 import yt_dlp
@@ -101,9 +103,12 @@ class Youtube(DownloadBase):
                 return False
 
     def download(self, filename):
+        # ydl下载的文件在下载失败时不可控
+        # 临时存储在其他地方
+        download_dir = f'./cache/youtube/{filename}'
         try:
             ydl_opts = {
-                'outtmpl': f'{filename}.%(ext)s',
+                'outtmpl': f'{download_dir}/{filename}.%(ext)s',
                 'cookiefile': self.cookiejarFile,
                 'break_on_reject': True,
                 'download_archive': 'archive.txt',
@@ -121,16 +126,30 @@ class Youtube(DownloadBase):
             ydl_opts['format'] += "+bestaudio"
             if self.acodec is not None:
                 ydl_opts['format'] += f"[acodec~='^({self.acodec})']"
-
+            # 不能由yt_dlp创建会占用文件夹
+            if not os.path.exists(download_dir):
+                os.makedirs(download_dir)
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 if not self.is_download:
                     # 直播模式不过滤但是能写入过滤
                     ydl.archive = None
                 ydl.download([self.download_url])
+            # 下载成功的情况下移动到运行目录
+            for file in os.listdir(download_dir):
+                shutil.move(f'{download_dir}/{file}', '.')
         except DownloadError as e:
             if 'Requested format is not available' in e.msg:
                 logger.error(f"{Youtube.__name__}: {self.url}: 无法获取到流，请检查vcodec,acodec,height,filesize设置")
+            elif 'ffmpeg is not installed' in e.msg:
+                logger.error(f"{Youtube.__name__}: {self.url}: ffmpeg未安装，无法下载")
             else:
-                logger.exception(self.fname)
+                logger.error(f"{Youtube.__name__}: {self.url}: {e.msg}")
             return False
+        finally:
+            # 清理意外退出可能产生的多余文件
+            try:
+                del ydl
+                shutil.rmtree(download_dir)
+            except:
+                logger.error(f"{Youtube.__name__}: {self.url}: 清理残留文件失败，请手动删除{download_dir}")
         return True

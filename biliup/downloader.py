@@ -3,11 +3,11 @@ import re
 import time
 from urllib.error import HTTPError
 
+from .common.tools import NamedLock
 from .engine.decorators import Plugin
 
 from .engine.download import DownloadBase
 from .engine.event import Event
-from .engine.upload import UploadBase
 from .plugins import general
 from biliup.config import config
 
@@ -27,44 +27,40 @@ def download(fname, url, **kwargs):
 
 
 def check_url(checker):
-    from .handler import event_manager, TO_MODIFY, UPLOAD
+    from .handler import event_manager
     # 单主播检测延迟
-    checker_sleep = config.get('checker_sleep', 15)
+    checker_sleep = config.get('checker_sleep', 10)
     # 平台检测延迟
-    event_loop_interval = config.get('event_loop_interval', 40)
+    event_loop_interval = config.get('event_loop_interval', 30)
     context = event_manager.context
     class_reference = type(checker('', ''))
+
     while True:
         try:
             # 待检测url
             check_urls = []
             # 过滤url
             for url in checker.url_list:
-                if context['url_status'][url] == 1:
-                    logger.debug(f'{url}正在下载中，跳过检测')
+                # 同一主播多个url
+                # 多个url只能同时下载一个
+                is_download = False
+                streamer_urls = context['streamers'][context['inverted_index'][url]]['url']
+                for streamer_url in streamer_urls:
+                    if context['url_status'][streamer_url] == 1:
+                        logger.debug(f'{url}-{streamer_url}-正在下载中，跳过检测')
+                        is_download = True
+                        break
+                if is_download:
                     continue
 
-                # 检测之前可能未上传的视频
-                if len(UploadBase.file_list(context['inverted_index'][url])) > 0:
-                    event_manager.send_event(
-                        Event(UPLOAD, args=({'name': context['inverted_index'][url], 'url': url},)))
-                    # 这里不能直接修改url_upload_count 因为UPLOAD Event中有url_upload_count的修改
-                    # 所以单独判断
-                    if config.get('uploading_record', False):
-                        logger.debug(f'{url}正在上传中，跳过检测')
-                        continue
-                else:
-                    # 没有等待上传的视频
-                    if context['url_upload_count'][url] > 0 and not config.get('uploading_record', False):
-                        logger.debug(f'{url}正在上传中，跳过检测')
-                        continue
+                send_upload_event({'name': context['inverted_index'][url], 'url': url})
                 check_urls.append(url)
 
             if DownloadBase.batch_check != getattr(class_reference, DownloadBase.batch_check.__name__):
                 # 如果支持批量检测
                 # 发送下载的事件
                 for url in class_reference.batch_check(check_urls):
-                    event_manager.send_event(Event(TO_MODIFY, args=(url,)))
+                    send_download_event(context['inverted_index'][url], url)
             else:
                 # 不支持批量检测
                 for (index, url) in enumerate(check_urls):
@@ -75,7 +71,7 @@ def check_url(checker):
                             time.sleep(checker_sleep)
 
                         if checker(context['inverted_index'][url], url).check_stream(True):
-                            event_manager.send_event(Event(TO_MODIFY, args=(url,)))
+                            send_download_event(context['inverted_index'][url], url)
                     except HTTPError as e:
                         logger.error(f'{checker.__module__} {e.url} => {e}')
                     except IOError:
@@ -83,10 +79,31 @@ def check_url(checker):
                     except:
                         logger.exception("Uncaught exception:")
 
-
-
         except:
             # 除了单个检测异常 其他异常会影响整体 直接略过本次 等待下次整体检测
             logger.exception("Uncaught exception:")
 
         time.sleep(event_loop_interval)
+
+
+def send_download_event(name, url):
+    # 永远不可能对同一个url同时发送两次下载事件
+    from .handler import event_manager, DOWNLOAD
+    content = event_manager.context
+    # 需要等待上传文件列表检索完成后才可以开始下次下载
+    with NamedLock(f'upload_file_list_{name}'):
+        for streamer_url in content['streamers'][content['inverted_index'][url]]['url']:
+            if content['url_status'][streamer_url] == 1:
+                return False
+        content['url_status'][url] = 1
+        event_manager.send_event(Event(DOWNLOAD, args=(name, url,)))
+    return True
+
+
+def send_upload_event(stream_info):
+    # 可能对同一个url同时发送两次上传事件
+    with NamedLock(f"upload_count_{stream_info['url']}"):
+        from .handler import event_manager, UPLOAD
+        # += 不是原子操作
+        event_manager.context['url_upload_count'][stream_info['url']] += 1
+        event_manager.send_event(Event(UPLOAD, (stream_info,)))

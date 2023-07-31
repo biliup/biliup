@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 import requests
 import stream_gears
+from PIL import Image
 
 from biliup.config import config
 
@@ -204,15 +205,16 @@ class DownloadBase:
                 retry_count = 0
                 retry_count_delay = 0
             else:
+                if self.is_download:
+                    # 下载模式如果下载失败直接跳出
+                    break
+
                 if retry_count < 3:
                     retry_count += 1
                     logger.info(
                         f'获取流失败：{self.__class__.__name__} - {self.fname}，重试次数 {retry_count} / 3，等待 10 秒')
                     time.sleep(10)
                     continue
-                if self.is_download:
-                    # 下载模式如果下载失败重试三次后直接跳出
-                    break
 
                 if delay:
                     retry_count_delay += 1
@@ -233,15 +235,26 @@ class DownloadBase:
                         continue
                 else:
                     break
+        self.download_cover(time.strftime(self.get_filename().encode("unicode-escape").decode(), date).encode().decode("unicode-escape"))
+        logger.info(f'退出下载：{self.__class__.__name__} - {self.fname}')
+        return {
+            'name': self.fname,
+            'url': self.url,
+            'title': self.room_title,
+            'date': date,
+            'live_cover_path': self.live_cover_path,
+            'is_download': self.is_download,
+            'start_time': date,
+            'end_time': time.localtime(),
+        }
 
+    def download_cover(self, fmtname):
         # 获取封面
         if self.use_live_cover and self.live_cover_url is not None:
             try:
                 save_dir = f'cover/{self.__class__.__name__}/{self.fname}/'
                 if not os.path.exists(save_dir):
                     os.makedirs(save_dir)
-                fmtname = time.strftime(self.get_filename().encode("unicode-escape").decode(), date).encode().decode(
-                    "unicode-escape")
 
                 url_path = urlparse(self.live_cover_url).path
                 suffix = None
@@ -249,6 +262,8 @@ class DownloadBase:
                     suffix = 'jpg'
                 elif '.png' in url_path:
                     suffix = 'png'
+                elif '.webp' in url_path:
+                    suffix = 'webp'
 
                 if suffix:
                     live_cover_path = f'{save_dir}{fmtname}.{suffix}'
@@ -258,25 +273,22 @@ class DownloadBase:
                         response = requests.get(self.live_cover_url, headers=self.fake_headers, timeout=30)
                         with open(live_cover_path, 'wb') as f:
                             f.write(response.content)
-                            f.close()
-                            self.live_cover_path = live_cover_path
+
+                    if suffix == 'webp':
+                        with Image.open(live_cover_path) as img:
+                            img = img.convert('RGB')
+                            img.save(f'{save_dir}{fmtname}.jpg', format='JPEG')
+                        os.remove(live_cover_path)
+                        live_cover_path = f'{save_dir}{fmtname}.jpg'
+
+                    self.live_cover_path = live_cover_path
                     logger.info(
                         f'封面下载成功：{self.__class__.__name__} - {self.fname}：{os.path.abspath(self.live_cover_path)}')
                 else:
-                    logger.warning(f'封面下载失败：{self.__class__.__name__} - {self.fname}：封面格式不支持')
-
+                    logger.warning(
+                        f'封面下载失败：{self.__class__.__name__} - {self.fname}：封面格式不支持：{self.live_cover_url}')
             except:
                 logger.exception(f'封面下载失败：{self.__class__.__name__} - {self.fname}')
-
-        logger.info(f'退出下载：{self.__class__.__name__} - {self.fname}')
-        return {
-            'name': self.fname,
-            'url': self.url,
-            'title': self.room_title,
-            'date': date,
-            'live_cover_path': self.live_cover_path,
-            'is_download': self.is_download,
-        }
 
     @staticmethod
     def rename(file_name):

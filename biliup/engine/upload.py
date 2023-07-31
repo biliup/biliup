@@ -2,13 +2,17 @@ import logging
 import os
 import shutil
 import subprocess
+import threading
 from functools import reduce
 from pathlib import Path
 from typing import NamedTuple, Optional, List
 
+from biliup.common.tools import NamedLock
 from biliup.config import config
 
 logger = logging.getLogger('biliup')
+
+upload_lock = threading.Lock()
 
 
 class UploadBase:
@@ -32,24 +36,26 @@ class UploadBase:
         for file_name in os.listdir('.'):
             if index in file_name and os.path.isfile(file_name):
                 file_list.append(file_name)
-        file_list = sorted(file_list, key=lambda x: os.path.getctime(x))
-
         if len(file_list) == 0:
             return []
-
         # 正在上传的文件列表
         upload_filename: list = event_manager.context['upload_filename']
 
         results = []
         for index, file in enumerate(file_list):
+            old_name = file
             if file.endswith('.part'):
-                new_name = os.path.splitext(file)[0]
-                shutil.move(file, new_name)
-                logger.info(f'{file}已更名为{new_name}')
-                file_list[index] = new_name
-                file = new_name
+                file_list[index] = os.path.splitext(file)[0]
+                file = os.path.splitext(file)[0]
 
             name, ext = os.path.splitext(file)
+            # 过滤正在上传的
+            if name in upload_filename:
+                continue
+
+            if old_name != file:
+                logger.info(f'{old_name}已更名为{file}')
+                shutil.move(old_name, file)
 
             # 过滤不是视频的 如果是弹幕检测下弹幕存不存在
             if ext not in media_extensions:
@@ -62,9 +68,6 @@ class UploadBase:
                     if not have_video:
                         logger.info(f'无视频，过滤删除-{file}')
                         UploadBase.remove_file(file)
-                continue
-            # 过滤正在上传的
-            if file in upload_filename:
                 continue
 
             file_size = os.path.getsize(file) / 1024 / 1024
@@ -80,9 +83,9 @@ class UploadBase:
                 danmaku = f'{name}.xml'
 
             result = UploadBase.FileInfo(video=video, danmaku=danmaku)
-
             results.append(result)
 
+        results = sorted(results, key=lambda x: os.path.getctime(x.video))
         return results
 
     @staticmethod
@@ -104,19 +107,38 @@ class UploadBase:
         raise NotImplementedError()
 
     def start(self):
-        file_list = UploadBase.file_list(self.principal)
-        if len(file_list) > 0:
-            video_list = [file.video for file in file_list]
-            logger.info('准备上传' + self.data["format_title"])
-            from biliup.handler import event_manager
-            upload_filename: list = event_manager.context['upload_filename']
-            try:
-                event_manager.context['upload_filename'].extend(video_list)
-                needed2process = self.upload(file_list)
-                if needed2process:
-                    self.postprocessor(needed2process)
-            finally:
-                event_manager.context['upload_filename'] = list(set(upload_filename) - set(video_list))
+        from biliup.handler import event_manager
+        # 保证一个name同时只有一个上传线程扫描文件列表
+        lock = NamedLock(f'upload_file_list_{self.principal}')
+        upload_filename_list = []
+        try:
+            lock.acquire()
+            file_list = UploadBase.file_list(self.principal)
+            if len(file_list) > 0:
+                # 下载后处理 上传前处理
+                downloaded_processor = config['streamers'].get(self.principal, {}).get('downloaded_processor')
+                if downloaded_processor:
+                    from biliup.handler import processor
+                    processor(downloaded_processor,
+                              f'{{"name": "{self.principal}", "url": "{self.data["url"]}", "room_title": "{self.data["title"]}", "start_time": "{self.data["start_time"]}", "end_time": "{self.data["end_time"]}", "file_list": "{[file.video for file in file_list]}"}}')
+                    # 后处理完成后重新扫描文件列表
+                    file_list = UploadBase.file_list(self.principal)
+
+                if len(file_list) > 0:
+                    logger.info('准备上传' + self.data["format_title"])
+                    upload_filename_list = [os.path.splitext(file.video)[0] for file in file_list]
+                    with NamedLock('upload_filename'):
+                        event_manager.context['upload_filename'].extend(upload_filename_list)
+                    lock.release()
+                    needed2process = self.upload(file_list)
+                    if needed2process:
+                        self.postprocessor(needed2process)
+        finally:
+            with NamedLock('upload_filename'):
+                event_manager.context['upload_filename'] = list(
+                    set(event_manager.context['upload_filename']) - set(upload_filename_list))
+            if lock.locked():
+                lock.release()
 
     def postprocessor(self, data: List[FileInfo]):
         # data = file_list
