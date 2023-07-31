@@ -398,18 +398,18 @@ class BiliBili:
                 timeout=5)
             ret = resp.json()
             logger.debug(f"preupload: {ret}")
-            if self._auto_os['os'] == 'upos' and preferred_upos_cdn:
+            if preferred_upos_cdn:
                 original_endpoint: str = ret['endpoint']
                 if re.match(r'//upos-(sz|cs)-upcdn(bda2|ws|qn)\.bilivideo\.com', original_endpoint):
                     if re.match(r'bda2|qn|ws', preferred_upos_cdn):
-                        logger.debug(f"Preferred UPOS CDN: {preferred_upos_cdn}")
+                        logger.debug(f"Preferred UpOS CDN: {preferred_upos_cdn}")
                         new_endpoint = re.sub(r'upcdn(bda2|qn|ws)', f'upcdn{preferred_upos_cdn}', original_endpoint)
                         logger.debug(f"{original_endpoint} => {new_endpoint}")
                         ret['endpoint'] = new_endpoint
                     else:
                         logger.error(f"Unrecognized preferred_upos_cdn: {preferred_upos_cdn}")
                 else:
-                    logger.warning(f"Assigned UPOS endpoint {original_endpoint} was never seen before, something else might have changed, so will not modify it")
+                    logger.warning(f"Assigned UpOS endpoint {original_endpoint} was never seen before, something else might have changed, so will not modify it")
             return asyncio.run(upload(f, total_size, ret, tasks=tasks))
 
     async def cos(self, file, total_size, ret, chunk_size=10485760, tasks=3, internal=False):
