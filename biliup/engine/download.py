@@ -173,7 +173,6 @@ class DownloadBase:
             return False
         file_name = self.file_name
         retval = self.download(file_name)
-        logger.info(f'part: {file_name}.{self.suffix}')
         self.rename(f'{file_name}.{self.suffix}')
         return retval
 
@@ -207,7 +206,8 @@ class DownloadBase:
             else:
                 if retry_count < 3:
                     retry_count += 1
-                    logger.info(f'获取流失败：{self.__class__.__name__} - {self.fname}，重试次数 {retry_count} / 3，等待 10 秒')
+                    logger.info(
+                        f'获取流失败：{self.__class__.__name__} - {self.fname}，重试次数 {retry_count} / 3，等待 10 秒')
                     time.sleep(10)
                     continue
                 if self.is_download:
@@ -282,12 +282,12 @@ class DownloadBase:
     def rename(file_name):
         try:
             os.rename(file_name + '.part', file_name)
-            logger.debug(f'更名 {file_name + ".part"} 为 {file_name}')
+            logger.info(f'更名 {file_name + ".part"} 为 {file_name}')
         except FileNotFoundError:
-            logger.debug(f'FileNotFoundError: {file_name}')
+            logger.debug(f'文件不存在: {file_name}')
         except FileExistsError:
             os.rename(file_name + '.part', file_name)
-            logger.info(f'FileExistsError: 更名 {file_name + ".part"} 为 {file_name}')
+            logger.info(f'更名 {file_name + ".part"} 为 {file_name} 失败, {file_name} 已存在')
 
     @property
     def file_name(self):

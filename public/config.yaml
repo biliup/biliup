@@ -142,12 +142,14 @@ check_sourcecode: 15
 #youtube_prefer_vcodec: "av01|vp9|avc" ### 可用av01,vp9,avc
 #youtube_prefer_acodec: "opus|mp4a" ### 可用opus,mp4a
 ### 设置偏好的YouTube下载最高纵向分辨率
-### 最高纵向分辨率，也就是xxxxP。如果youtube_prefer_vcodec指定AVC，将最高只能下载1080p的视频。
-#youtube_max_resolution: 1440
-### 限制单个视频的最大大小。
+### 可以用此限制画质
+### 例如设置为1080最高只会下载1080P画质
+#youtube_max_resolution: 1080
+### 限制单个视频的最大大小
+### 直播无此功能
 ### 注意：此参数优先级高于分辨率设置，并且不包括音频部分的大小，仅仅只是视频部分的大小。
-### 如果某个视频实在没有低于此大小的分辨率版本，将会选择最低画质的版本下载。
-#youtube_max_videosize: "5G" ###参考格式，例如100M，5G，10G。
+### 此功能在一部分视频上无法使用 推荐使用画质限制不开启此功能
+#youtube_max_videosize: "10G" ###参考格式，例如100M，5G，10G。
 ### 仅下载该日期之后的视频
 #youtube_after_date: '20220201'
 ### 仅下载该日期之前的视频（可与上面的youtube_after_date配合使用，构成指定下载范围区间）
@@ -155,6 +157,18 @@ check_sourcecode: 15
 ### YouTube的Streamlink下载器模式，开启之后会调用Streamlink获取直播流并且使用FFMPEG下载，默认关闭【仅当下载器是FFMPEG时才有效】
 ### 开启之后上面关于YOUTUBE的选项全部无效【我也不知道这个功能有什么屌用】
 #use_new_ytb_downloader: false
+### 是否下载直播 默认开启
+### 关闭后将忽略直播下载（可以下载回放） 避免网络被风控(有些网络只能下载回放无法下载直播)的时候还会尝试下载直播
+### 大量下载时极易风控 如对实时性要求不高推荐关闭
+### 一个人同时开启多个直播只能录制最新录制的那个
+### 如果正在录制直播将无法下载回放
+### 例如录制https://www.youtube.com/@NeneAmanoCh/streams，关闭后将忽略正在直播
+#youtube_enable_download_live: true
+### 是否下载直播回放 默认开启
+### 关闭后将忽略直播下载回放(不会影响正常的视频下载) 只想录制直播的可以开启
+### 如果正在下载回放将无法录制直播
+### 例如录制https://www.youtube.com/@NeneAmanoCh/streams，关闭后将忽略直播回放
+#youtube_enable_download_playback: true
 
 #------Twitch直播录制------#
 ### 录制Twitch弹幕，默认关闭【只有下载器为FFMPEG时才有效】
