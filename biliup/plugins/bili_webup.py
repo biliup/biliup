@@ -574,7 +574,7 @@ class BiliBili:
                 raise IOError(r)
             except IOError:
                 ii += 1
-                logger.info("上传出现问题，尝试重连，次数：" + str(ii))
+                logger.info(f"请求合并分片时出现问题，尝试重连，次数：" + str(ii))
                 time.sleep(15)
 
     @staticmethod
