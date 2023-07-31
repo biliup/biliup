@@ -3,7 +3,9 @@
 import argparse
 import asyncio
 import logging.config
+import os
 import platform
+import shutil
 import threading
 
 import biliup.common.reload
@@ -60,6 +62,9 @@ async def main(args):
         # 线程数量是固定的在开始运行的时候创建不会产生变化也不会闲置或者复用线程 所以无需使用线程池
         # 这里也无需使用异步方法 一个线程一个检测 异步方法让渡控制权没用
         threading.Thread(target=check_url, args=(event_manager.context['checker'][plugin],)).start()
+
+    # 启动时删除临时文件夹
+    shutil.rmtree('./cache/temp', ignore_errors=True)
 
     interval = config.get('check_sourcecode', 15)
     if args.http:

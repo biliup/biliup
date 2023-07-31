@@ -105,7 +105,7 @@ class Youtube(DownloadBase):
     def download(self, filename):
         # ydl下载的文件在下载失败时不可控
         # 临时存储在其他地方
-        download_dir = f'./cache/youtube/{filename}'
+        download_dir = f'./cache/temp/youtube/{filename}'
         try:
             ydl_opts = {
                 'outtmpl': f'{download_dir}/{filename}.%(ext)s',
