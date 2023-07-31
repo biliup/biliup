@@ -2,7 +2,7 @@ import random
 import re
 import subprocess
 import time
-from typing import Generator
+from typing import Generator, List
 from urllib.parse import urlencode
 
 import requests
@@ -27,40 +27,29 @@ class TwitchVideos(DownloadBase):
     def __init__(self, fname, url, suffix='mp4'):
         DownloadBase.__init__(self, fname, url, suffix=suffix)
         self.is_download = True
-        self.cookiejarFile = config.get('user', {}).get('twitch_cookie_file')
-        self.download_entry = None
 
     def check_stream(self, is_check=False):
         # TODO 这里原本的批量检测是有问题的 先用yt_dlp实现 等待后续新增新的批量检测方式 后续这里的auth信息和直播一样采用twitch_cookie
         with yt_dlp.YoutubeDL({'download_archive': 'archive.txt'}) as ydl:
             try:
                 info = ydl.extract_info(self.url, download=False, process=False)
+                for entry in info['entries']:
+                    if ydl.in_download_archive(entry):
+                        continue
+                    if not is_check:
+                        download_info = ydl.extract_info(entry['url'], download=False)
+                        self.room_title = download_info['title']
+                        self.raw_stream_url = download_info['url']
+                        thumbnails = download_info.get('thumbnails')
+                        if type(thumbnails) is list and len(thumbnails) > 0:
+                            self.live_cover_url = thumbnails[len(thumbnails) - 1].get('url')
+                        ydl.record_download_archive(entry)
+                    return True
             except:
-                logger.warning(f"{self.url}：获取错误，本次跳过")
+                logger.warning(f"{self.url}：获取错误")
                 return False
-            for entry in info['entries']:
-                if ydl.in_download_archive(entry):
-                    continue
-                if not is_check:
-                    download_info = ydl.extract_info(entry['url'], download=False)
-                    self.raw_stream_url = download_info['url']
-                    thumbnails = download_info.get('thumbnails')
-                    if thumbnails:
-                        for thumbnail in download_info.get('thumbnails', []):
-                            if 'preference' in thumbnail and thumbnail['preference'] == 1:
-                                self.live_cover_url = thumbnail['url']
-                                break
-                    self.room_title = entry['title']
-                    self.download_entry = entry
-                return True
         return False
 
-    def start(self):
-        result = super().start()
-        with yt_dlp.YoutubeDL({'download_archive': 'archive.txt'}) as ydl:
-            # hook 在下载完成退出后记录已下载
-            ydl.record_download_archive(self.download_entry)
-        return result
 
 
 @Plugin.download(regexp=VALID_URL_BASE)
@@ -99,7 +88,7 @@ class Twitch(DownloadBase):
             'variables': {'channel_name': channel_name}
         }).get('data', {}).get('user')
         if not user:
-            logger.warning(f"{Twitch.__name__}: {self.url}: 获取错误，本次跳过")
+            logger.warning(f"{Twitch.__name__}: {self.url}: 获取错误")
             return False
         elif not user['stream'] or user['stream']['type'] != 'live':
             return False
@@ -152,7 +141,7 @@ class Twitch(DownloadBase):
             return True
 
     @staticmethod
-    def batch_check(check_urls: list[str]) -> Generator[str, None, None]:
+    def batch_check(check_urls: List[str]) -> Generator[str, None, None]:
         ops = []
         for url in check_urls:
             channel_name = re.match(VALID_URL_BASE, url).group('id')
@@ -173,7 +162,7 @@ class Twitch(DownloadBase):
         for index, data in enumerate(gql):
             user = data.get('data', {}).get('user')
             if not user:
-                logger.warning(f"{Twitch.__name__}: {check_urls[index]}: 获取错误，本次跳过")
+                logger.warning(f"{Twitch.__name__}: {check_urls[index]}: 获取错误")
                 continue
             elif not user['stream'] or user['stream']['type'] != 'live':
                 continue

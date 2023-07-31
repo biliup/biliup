@@ -26,7 +26,7 @@ lines = "AUTO"
 ### 单文件并发上传数，未达到带宽上限时增大此值可提高上传速度
 threads = 3
 ### 默认情况下，会等待上传录像完成后才开始新的录制。在这段等待上传完成期间，如果同一主播开播了，就会导致直播内容漏录。
-### 本功能为测试功能，默认关闭，如开启后遇到bug或问题请提交issues
+### 如开启后遇到bug或问题请提交issues
 ### 开启后，即使正在上传文件，当检测到主播开播，就会立即开始新的直播录制并创建新的稿件【默认关闭】
 #uploading_record = true
 
@@ -34,15 +34,14 @@ threads = 3
 ### 检测到主播下播后延迟再次检测，单位：秒，避免特殊情况提早启动上传导致漏录
 ### 当delay不存在时，默认延迟时间为0秒，没有快速上传的需求推荐设置5分钟(300秒)或按需设置。若设置的延迟时间超过60秒，则会启用分段检测机制，每隔60秒进行一次开播状态的检测。
 delay = 300
-### 检测间隔时间，单位：秒
-### event_loop_interval的值应 = 最多的相同平台直播间数 * checker_sleep + 5~10秒的余量
-### 比如：当有5个哔哩哔哩、3个斗鱼、8个虎牙，event_loop_interval为8 * 15(checker_sleep) + 5~10秒的余量 = 125~130
-event_loop_interval = 40
-### 相同平台检测间隔，单位：秒。不同平台的链接是并发的，不受此参数影响
-checker_sleep = 15
-### 线程池1大小，负责download事件
+### 平台检测间隔时间，单位：秒。比如虎牙所有主播检测完后会等待30秒 再去从新检测
+event_loop_interval = 30
+### 单个主播检测间隔时间，单位：秒。比如虎牙有10个主播，每个主播会间隔10秒检测
+checker_sleep = 10
+### 线程池1大小，负责下载事件。每个下载都会占用1。应该设置为比主播数量要多一点的数。
 pool1_size = 3
-### 线程池2大小，处理除download事件外所有其他事件
+### 线程池2大小，负责上传事件。每个上传都会占用1。
+### 应该设置为比主播数量要多一点的数，如果开启uploading_record需要设置的更多。
 pool2_size = 3
 ### 检测源码文件变化间隔，单位：秒，检测源码到变化后，程序会在空闲时自动重启
 check_sourcecode = 15
@@ -50,7 +49,7 @@ check_sourcecode = 15
 
 
 ######### 各平台录播设置 #########
-### 使用直播间封面作为投稿封面。此封面优先级低于单个主播指定的自定义封面。（目前支持bilibili,TWITCH。直播封面将会保存于cover文件夹下，请自行定期删除）
+### 使用直播间封面作为投稿封面。此封面优先级低于单个主播指定的自定义封面。（目前支持bilibili,twitch,youtube。直播封面将会保存于cover文件夹下，上传后自动删除）
 #use_live_cover = true
 
 #------斗鱼------#
@@ -151,8 +150,6 @@ check_sourcecode = 15
 ### 注意：此参数优先级高于分辨率设置，并且不包括音频部分的大小，仅仅只是视频部分的大小。
 ### 如果某个视频实在没有低于此大小的分辨率版本，将会选择最低画质的版本下载。
 #youtube_max_videosize = "5G"  ### 参考格式，例如100M，5G，10G。
-### YouTube转载视频自动获取视频封面并用于作投稿封面。获取webp封面之后自动转换格式为jpg，并保存在cover/youtube文件夹中，请注意定期清理。
-#use_youtube_cover = true
 ### 仅下载该日期之后的视频
 #youtube_after_date = '20220201'
 ### 仅下载该日期之前的视频（可与上面的youtube_after_date配合使用，构成指定下载范围区间）
@@ -217,11 +214,11 @@ tags = [ "biliup", "视频标签" ]
 #format = "mp4" ### 视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg或者streamlink。
 ### 开始下载直播时触发，将按自定义顺序执行自定义操作 注：preprocessor仅支持shell指令
 #preprocessor = [
-#    {run = "sh ./run.sh"}, ### 执行任意命令，等同于在shell中运行,preprocessor输出的数据为JSON格式，包含主播名字(name)和开播地址(url)信息
+#    {run = "sh ./run.sh"}, ### 执行任意命令，等同于在shell中运行,preprocessor输出的数据为JSON格式，包含主播名字(name)、开播地址(url)和开播时间(start_time)
 #]
 ### 结束下载直播时触发，将按自定义顺序执行自定义操作 注：downloaded_processor仅支持shell指令
-#downloaded_processor[
-#    {run = "sh ./run.sh"}, ### 执行任意命令，等同于在shell中运行,downloaded_processor输出的数据为JSON格式，包含主播名字(name)、直播间地址(url)、直播间标题(room_title)以及开播时间(start_time)信息
+#downloaded_processor = [
+#    {run = "sh ./run.sh"}, ### 执行任意命令，等同于在shell中运行,downloaded_processor输出的数据为JSON格式，包含主播名字(name)、直播间地址(url)、直播间标题(room_title)、开播时间(start_time)、下播时间(end_time)和视频列表(file_list)
 #]
 ### 上传完成后触发，将按自定义顺序执行自定义操作 当postprocessor不存在时 默认执行删除文件操作
 #postprocessor = [

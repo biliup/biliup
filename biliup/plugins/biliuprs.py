@@ -1,6 +1,7 @@
 import time
 
 import stream_gears
+from typing import List
 
 from ..engine import Plugin
 from ..engine.upload import UploadBase, logger
@@ -39,7 +40,7 @@ class BiliWeb(UploadBase):
         self.open_elec = open_elec
         self.user_cookie = user_cookie
 
-    def upload(self, file_list):
+    def upload(self, file_list: List[UploadBase.FileInfo]) -> List[UploadBase.FileInfo]:
         line = None
         if self.lines == 'kodo':
             line = stream_gears.UploadLine.Kodo
@@ -64,12 +65,12 @@ class BiliWeb(UploadBase):
                 }]
         source = self.data["url"] if self.copyright == 2 else ""
         cover = self.cover_path if self.cover_path is not None else ""
-        filtered_list = [file for file in file_list if not file.endswith(('.xml', '.webp', '.jpg'))] #自动过滤非视频文件
+        video_list = [file.video for file in file_list]
         dtime = None
         if self.dtime:
             dtime = int(time.time() + self.dtime)
         stream_gears.upload(
-            filtered_list,
+            video_list,
             self.user_cookie,
             self.data["format_title"][:80],
             self.tid,
