@@ -1,7 +1,6 @@
 import time
 from urllib.parse import parse_qs
 
-import jsengine
 import requests
 from ykdl.util.match import match1
 
@@ -54,13 +53,14 @@ class Douyu(DownloadBase):
             return True
 
         try:
+            import jsengine
             ctx = jsengine.jsengine()
             ub98484234_fun = match1(html, r'(var vdwdae325w_64we.+?)function k927cea2d4369').replace('return eval','return strc;')
             sign_fun = ctx.eval(f'{ub98484234_fun};ub98484234();').rstrip(';').replace('CryptoJS.MD5(cb).toString()','md5(cb)')
             sign_fun += f'("{room_id}","10000000000000000000000000001501","{int(time.time())}");{MD5FUN}'
             params = parse_qs(ctx.eval(sign_fun))
         except TypeError:
-            logger.error(f"{Douyu.__name__}: {self.url}: 请安装至少一个 Javascript 解释器")
+            logger.error(f"{Douyu.__name__}: {self.url}: 请安装至少一个 Javascript 解释器，如 pip install quickjs")
             return False
         except:
             logger.warning(f"{Douyu.__name__}: {self.url}: 获取签名参数异常")
