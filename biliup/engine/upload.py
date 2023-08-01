@@ -2,7 +2,6 @@ import logging
 import os
 import shutil
 import subprocess
-import threading
 from functools import reduce
 from pathlib import Path
 from typing import NamedTuple, Optional, List
@@ -11,9 +10,6 @@ from biliup.common.tools import NamedLock
 from biliup.config import config
 
 logger = logging.getLogger('biliup')
-
-upload_lock = threading.Lock()
-
 
 class UploadBase:
     class FileInfo(NamedTuple):

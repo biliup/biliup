@@ -3,7 +3,6 @@
 import argparse
 import asyncio
 import logging.config
-import os
 import platform
 import shutil
 import threading
