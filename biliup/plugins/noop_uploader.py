@@ -1,5 +1,3 @@
-import time
-
 from typing import List
 
 from ..engine.upload import UploadBase, logger

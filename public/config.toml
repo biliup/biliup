@@ -25,10 +25,6 @@ filtering_threshold = 20
 lines = "AUTO"
 ### 单文件并发上传数，未达到带宽上限时增大此值可提高上传速度
 threads = 3
-### 默认情况下，会等待上传录像完成后才开始新的录制。在这段等待上传完成期间，如果同一主播开播了，就会导致直播内容漏录。
-### 如开启后遇到bug或问题请提交issues
-### 开启后，即使正在上传文件，当检测到主播开播，就会立即开始新的直播录制并创建新的稿件【默认关闭】
-#uploading_record = true
 
 #------杂项------#
 ### 检测到主播下播后延迟再次检测，单位：秒，避免特殊情况提早启动上传导致漏录
@@ -144,19 +140,30 @@ check_sourcecode = 15
 #youtube_prefer_vcodec = "av01|vp9|avc" ### 可用av01,vp9,avc
 #youtube_prefer_acodec = "opus|mp4a" ### 可用opus,mp4a
 ### 设置偏好的YouTube下载最高纵向分辨率
-### 最高纵向分辨率，也就是xxxxP.如果youtube_prefer_format指定为mp4，将最高只能下载1080p的视频。
-#youtube_max_resolution = "440"
-### 限制单个视频的最大大小。
+### 可以用此限制画质
+### 例如设置为1080最高只会下载1080P画质
+#youtube_max_resolution = "1080"
+### 限制单个视频的最大大小
+### 直播无此功能
 ### 注意：此参数优先级高于分辨率设置，并且不包括音频部分的大小，仅仅只是视频部分的大小。
-### 如果某个视频实在没有低于此大小的分辨率版本，将会选择最低画质的版本下载。
-#youtube_max_videosize = "5G"  ### 参考格式，例如100M，5G，10G。
+### 此功能在一部分视频上无法使用 推荐使用画质限制不开启此功能
+#youtube_max_videosize = "10G"  ### 参考格式，例如100M，5G，10G。
 ### 仅下载该日期之后的视频
 #youtube_after_date = '20220201'
 ### 仅下载该日期之前的视频（可与上面的youtube_after_date配合使用，构成指定下载范围区间）
 #youtube_before_date = '20230501'
-### YouTube的Streamlink下载器模式，开启之后会调用Streamlink获取直播流并且使用FFMPEG下载，默认关闭【仅当下载器是FFMPEG时才有效】
-### 开启之后上面关于YOUTUBE的选项全部无效【我也不知道这个功能有什么屌用】
-#use_new_ytb_downloader = false
+### 是否下载直播 默认开启
+### 关闭后将忽略直播下载（可以下载回放） 避免网络被风控(有些网络只能下载回放无法下载直播)的时候还会尝试下载直播
+### 大量下载时极易风控 如对实时性要求不高推荐关闭
+### 一个人同时开启多个直播只能录制最新录制的那个
+### 如果正在录制直播将无法下载回放
+### 例如录制https://www.youtube.com/@NeneAmanoCh/streams，关闭后将忽略正在直播
+#youtube_enable_download_live = true
+### 是否下载直播回放 默认开启
+### 关闭后将忽略直播下载回放(不会影响正常的视频下载) 只想录制直播的可以开启
+### 如果正在下载回放将无法录制直播
+### 例如录制https://www.youtube.com/@NeneAmanoCh/streams，关闭后将忽略直播回放
+#youtube_enable_download_playback = true
 
 #------Twitch直播录制------#
 ### 录制Twitch弹幕，默认关闭【只有下载器为FFMPEG时才有效】
@@ -178,7 +185,7 @@ url = ["https://www.twitch.tv/kimdaeyeob3"]
 url = [
   "https://www.twitch.tv/innovation_s2",
   "https://www.panda.tv/1160340"
-]
+] #填写多个url时只能同时下载一个，如需多个同时下载请单独配置
 title = "{title}第一视角%Y-%m-%d{streamer}{url}" ### 自定义标题的时间格式, {title}代表当场直播间标题 {streamer}代表在本config里面设置的主播名称 {url}代表设置的该主播的第一条直播间链接
 tid = 171 ### 投稿分区码,171为电子竞技分区
 copyright = 2 ### 1为自制
@@ -211,7 +218,7 @@ dynamic = "#空间动态#"
 user_cookie = "cookies.json" ### 使用指定的账号上传
 #use_live_cover = true # 获取BILIBILI直播间封面并作为投稿封面。此封面优先级低于单个主播指定的自定义封面。
 tags = [ "biliup", "视频标签" ]
-#format = "mp4" ### 视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg或者streamlink。
+#format = "mp4" ### 视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg或者streamlink，youtube不支持。
 ### 开始下载直播时触发，将按自定义顺序执行自定义操作 注：preprocessor仅支持shell指令
 #preprocessor = [
 #    {run = "sh ./run.sh"}, ### 执行任意命令，等同于在shell中运行,preprocessor输出的数据为JSON格式，包含主播名字(name)、开播地址(url)和开播时间(start_time)

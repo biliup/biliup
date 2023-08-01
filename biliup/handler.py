@@ -4,14 +4,13 @@ import subprocess
 import time
 
 from . import plugins
-from .downloader import download
+from .common.tools import NamedLock
+from .downloader import download, send_upload_event
 from .engine import invert_dict, Plugin
 from biliup.config import config
-from .engine.event import Event, EventManager
+from .engine.event import EventManager
 from .uploader import upload
-from .engine.upload import UploadBase
 
-TO_MODIFY = 'to_modify'
 DOWNLOAD = 'download'
 UPLOAD = 'upload'
 logger = logging.getLogger('biliup')
@@ -48,11 +47,11 @@ def process(name, url):
 
     start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     if config['streamers'].get(name, {}).get('preprocessor'):
-        processor(config['streamers'].get(name, {}).get('preprocessor'), f'{{"name": "{name}", "url": "{url}", "start_time": "{start_time}"}}')
+        processor(config['streamers'].get(name, {}).get('preprocessor'),
+                  f'{{"name": "{name}", "url": "{url}", "start_time": "{start_time}"}}')
 
     url_status = event_manager.context['url_status']
     # 下载开始
-    url_status[url] = 1
     try:
         kwargs: dict = config['streamers'][name].copy()
         kwargs.pop('url')
@@ -60,17 +59,11 @@ def process(name, url):
         if suffix:
             kwargs['suffix'] = suffix
         stream_info = download(name, url, **kwargs)
-
-
-        video_list = [file.video for file in UploadBase.file_list(stream_info['name'])]
-
-        if config['streamers'].get(name, {}).get('downloaded_processor'):
-            processor(config['streamers'].get(name, {}).get('downloaded_processor'),
-                f'{{"name": "{name}", "url": "{url}", "room_title": "{stream_info.get("title", "")}", "start_time": "{start_time}", "end_time": "{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}", "file_list": "{video_list}"}}')
     finally:
         # 下载结束
+        # 永远不可能有两个同url的下载线程
+        send_upload_event(stream_info)
         url_status[url] = 0
-        yield Event(UPLOAD, (stream_info,))
 
 
 @event_manager.register(UPLOAD, block='Asynchronous2')
@@ -78,12 +71,13 @@ def process_upload(stream_info):
     url = stream_info['url']
     url_upload_count = event_manager.context['url_upload_count']
     # 上传开始
-    url_upload_count[url] += 1
     try:
         upload(stream_info)
     finally:
         # 上传结束
-        url_upload_count[url] -= 1
+        # 有可能有两个同url的上传线程 保证计数正确
+        with NamedLock(f'upload_count_{stream_info.url}'):
+            url_upload_count[url] -= 1
 
 
 @event_manager.server()
@@ -97,16 +91,6 @@ class KernelFunc:
         self.checker = checker
         self.inverted_index = inverted_index
         self.streamer_url = streamer_url
-
-    @event_manager.register(TO_MODIFY)
-    def modify(self, url):
-        if not url:
-            # ?????
-            logger.debug('无人直播')
-            return
-        name = self.inverted_index[url]
-        logger.debug(f'{name} 刚刚开播，去下载')
-        return Event(DOWNLOAD, args=(name, url))
 
     def get_url_status(self):
         # 这里是为webui准备的
