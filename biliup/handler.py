@@ -44,11 +44,10 @@ def process(name, url):
         'name': name,
         'url': url,
     }
-
-    start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    if config['streamers'].get(name, {}).get('preprocessor'):
-        processor(config['streamers'].get(name, {}).get('preprocessor'),
-                  f'{{"name": "{name}", "url": "{url}", "start_time": "{start_time}"}}')
+    preprocessor = config['streamers'].get(name, {}).get('preprocessor')
+    if preprocessor:
+        processor(preprocessor,
+                  f'{{"name": "{name}", "url": "{url}", "start_time": "{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}"}}')
 
     url_status = event_manager.context['url_status']
     # 下载开始
