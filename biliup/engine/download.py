@@ -211,9 +211,9 @@ class DownloadBase:
 
                 if retry_count < 3:
                     retry_count += 1
-                    # logger.info(
-                    #     f'获取流失败：{self.__class__.__name__} - {self.fname}，重试次数 {retry_count} / 3，等待 10 秒')
-                    # time.sleep(10)
+                    logger.info(
+                        f'获取流失败：{self.__class__.__name__} - {self.fname}，重试次数 {retry_count} / 3，等待 10 秒')
+                    time.sleep(10)
                     continue
 
                 if delay:
