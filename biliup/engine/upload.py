@@ -11,6 +11,7 @@ from biliup.config import config
 
 logger = logging.getLogger('biliup')
 
+
 class UploadBase:
     class FileInfo(NamedTuple):
         video: str
@@ -34,6 +35,8 @@ class UploadBase:
                 file_list.append(file_name)
         if len(file_list) == 0:
             return []
+        file_list = sorted(file_list, key=lambda x: os.path.getctime(x))
+
         # 正在上传的文件列表
         upload_filename: list = event_manager.context['upload_filename']
 
@@ -45,6 +48,9 @@ class UploadBase:
                 file = os.path.splitext(file)[0]
 
             name, ext = os.path.splitext(file)
+            # 过滤不是视频的
+            if ext not in media_extensions:
+                continue
             # 过滤正在上传的
             if name in upload_filename:
                 continue
@@ -52,19 +58,6 @@ class UploadBase:
             if old_name != file:
                 logger.info(f'{old_name}已更名为{file}')
                 shutil.move(old_name, file)
-
-            # 过滤不是视频的 如果是弹幕检测下弹幕存不存在
-            if ext not in media_extensions:
-                if ext == '.xml':
-                    have_video = False
-                    for media_extension in media_extensions:
-                        if f"{name}{media_extension}" in file_list:
-                            have_video = True
-                            break
-                    if not have_video:
-                        logger.info(f'无视频，过滤删除-{file}')
-                        UploadBase.remove_file(file)
-                continue
 
             file_size = os.path.getsize(file) / 1024 / 1024
             threshold = config.get('filtering_threshold', 0)
@@ -81,7 +74,17 @@ class UploadBase:
             result = UploadBase.FileInfo(video=video, danmaku=danmaku)
             results.append(result)
 
-        results = sorted(results, key=lambda x: os.path.getctime(x.video))
+        # 过滤弹幕
+        for file in file_list:
+            if os.path.splitext(file)[1] == '.xml':
+                have_video = False
+                for result in results:
+                    if result.danmaku == file:
+                        have_video = True
+                        break
+                if not have_video:
+                    logger.info(f'无视频，过滤删除-{file}')
+                    UploadBase.remove_file(file)
         return results
 
     @staticmethod
@@ -89,7 +92,7 @@ class UploadBase:
         for f in file_list:
             UploadBase.remove_file(f.video)
             if f.danmaku is not None:
-                UploadBase.remove_file(f.video)
+                UploadBase.remove_file(f.danmaku)
 
     @staticmethod
     def remove_file(file: str):
