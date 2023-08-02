@@ -12,6 +12,7 @@
 - 🔧下载上传逻辑调整[@CoolZxp](https://github.com/CoolZxp)
 - 🔧上传后正确的删除弹幕[@CoolZxp](https://github.com/CoolZxp)
 - 🔧downloaded_processor的时间被正确格式化[@Kataick](https://github.com/Kataick)
+- 🔧bili_web强制选择UpOS模式下的线路[@1toldyou](https://github.com/1toldyou)
 - 💡youtube添加单独下载直播和回放选项[@CoolZxp](https://github.com/CoolZxp)
 - 💡youtube添加streams playlists shorts类型链接支持[@CoolZxp](https://github.com/CoolZxp)
 - 💡youtube添加筛选无效时提示[@CoolZxp](https://github.com/CoolZxp)
