@@ -131,7 +131,7 @@ check_sourcecode: 15
 #------YouTube------#
 ### 设置偏好的YouTube下载封装格式
 ### 请务必记得安装ffmpeg
-### 如无特殊需求不介意筛选封装格式 特别是录制直播时 多数直播mp4都是不可用的
+### 如无特殊需求不建议筛选封装格式 特别是录制直播时 多数直播mp4都是不可用的
 ### bilibili支持 mp4 mkv webm 无需筛选也能上传
 ### 支持同时添加多个编码，自动优选指定编码格式里最好的画质/音质版本。
 ### 视频：其中avc编码最高可以下载到1080p的内容，vp9最高可以下载到4k以及很少部分8k内容，av01画质不是所有视频都有，但是大部分8k视频的8k画质只有av01编码。
@@ -223,7 +223,10 @@ streamers:
             - 视频标签
         #preprocessor: ### 开始下载直播时触发，将按自定义顺序执行自定义操作 注：preprocessor仅支持shell指令
             #- run: sh ./run.sh, ### 执行任意命令，等同于在shell中运行,preprocessor输出的数据为JSON格式，包含主播名字(name)、开播地址(url)和开播时间(start_time)
-        #downloaded_processor: ### 结束下载直播时触发，将按自定义顺序执行自定义操作 注：downloaded_processor仅支持shell指令
+        ### 准备上传直播时触发，将按自定义顺序执行自定义操作 注：downloaded_processor仅支持shell指令
+        ### 如果对上传的视频进行修改需要保证和filename_prefix命名规则一致 会自动检测上传
+        ### 上传顺序会按照文件创建时间排序
+        #downloaded_processor:
         #    - run: sh ./run.sh, ### 执行任意命令，等同于在shell中运行,downloaded_processor输出的数据为JSON格式，包含主播名字(name)、直播间地址(url)、直播间标题(room_title)、开播时间(start_time)、下播时间(end_time)和视频列表(file_list)
         #postprocessor: ### 上传完成后触发，将按自定义顺序执行自定义操作 当postprocessor不存在时 默认执行删除文件操作
         #    - run: echo hello! ### 执行任意命令，等同于在shell中运行,视频文件路径作为标准输入传入
