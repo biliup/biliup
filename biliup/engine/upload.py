@@ -123,7 +123,7 @@ class UploadBase:
                 if downloaded_processor:
                     from biliup.handler import processor
                     processor(downloaded_processor,
-                              f'{{"name": "{self.principal}", "url": "{self.data["url"]}", "room_title": "{self.data["title"]}", "start_time": "{self.data["start_time"]}", "end_time": "{self.data["end_time"]}", "file_list": "{[file.video for file in file_list]}"}}')
+                              f'{{"name": "{self.principal}", "url": "{self.data["url"]}", "room_title": "{self.data.get("title")}", "start_time": "{self.data.get("start_time")}", "end_time": "{self.data.get("end_time")}", "file_list": "{[file.video for file in file_list]}"}}')
                     # 后处理完成后重新扫描文件列表
                     file_list = UploadBase.file_list(self.principal)
 
