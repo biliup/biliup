@@ -5,6 +5,20 @@
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 0.4.29
+- 更新时间：2023.08.02
+- 🔧youtube配置说明修改[@CoolZxp](https://github.com/CoolZxp)
+- 🔧将上传录像时可以开始新的录制调整为默认功能[@CoolZxp](https://github.com/CoolZxp)
+- 🔧下载上传逻辑调整[@CoolZxp](https://github.com/CoolZxp)
+- 🔧上传后正确的删除弹幕[@CoolZxp](https://github.com/CoolZxp)
+- 🔧downloaded_processor的时间被正确格式化[@Kataick](https://github.com/Kataick)
+- 💡youtube添加单独下载直播和回放选项[@CoolZxp](https://github.com/CoolZxp)
+- 💡youtube添加streams playlists shorts类型链接支持[@CoolZxp](https://github.com/CoolZxp)
+- 💡youtube添加筛选无效时提示[@CoolZxp](https://github.com/CoolZxp)
+- 💡youtube不会在运行目录产生多余文件了[@CoolZxp](https://github.com/CoolZxp)
+- 💡封面下载支持webp[@CoolZxp](https://github.com/CoolZxp)
+- 💡启动时删除临时缓存文件[@CoolZxp](https://github.com/CoolZxp)
+
 ## 0.4.28
 - 更新时间：2023.07.30
 - 🔧在读取youtube缓存失败时增加提示[@CoolZxp](https://github.com/CoolZxp)
