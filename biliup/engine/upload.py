@@ -48,11 +48,11 @@ class UploadBase:
                 file = os.path.splitext(file)[0]
 
             name, ext = os.path.splitext(file)
-            # 过滤不是视频的
-            if ext not in media_extensions:
-                continue
             # 过滤正在上传的
             if name in upload_filename:
+                continue
+            # 过滤不是视频的
+            if ext not in media_extensions:
                 continue
 
             if old_name != file:
@@ -76,7 +76,11 @@ class UploadBase:
 
         # 过滤弹幕
         for file in file_list:
-            if os.path.splitext(file)[1] == '.xml':
+            name, ext = os.path.splitext(file)
+            # 过滤正在上传的
+            if name in upload_filename:
+                continue
+            if ext == '.xml':
                 have_video = False
                 for result in results:
                     if result.danmaku == file:
@@ -119,7 +123,7 @@ class UploadBase:
                 if downloaded_processor:
                     from biliup.handler import processor
                     processor(downloaded_processor,
-                              f'{{"name": "{self.principal}", "url": "{self.data["url"]}", "room_title": "{self.data["title"]}", "start_time": "{self.data["start_time"]}", "end_time": "{self.data["end_time"]}", "file_list": "{[file.video for file in file_list]}"}}')
+                              f'{{"name": "{self.principal}", "url": "{self.data["url"]}", "room_title": "{self.data.get("title")}", "start_time": "{self.data.get("start_time")}", "end_time": "{self.data.get("end_time")}", "file_list": "{[file.video for file in file_list]}"}}')
                     # 后处理完成后重新扫描文件列表
                     file_list = UploadBase.file_list(self.principal)
 
