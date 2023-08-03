@@ -246,7 +246,6 @@ class DownloadBase:
             'date': date,
             'live_cover_path': self.live_cover_path,
             'is_download': self.is_download,
-            'start_time': time.strftime("%Y-%m-%d %H:%M:%S", date),
             'end_time': time.strftime("%Y-%m-%d %H:%M:%S", end_date),
         }
 
