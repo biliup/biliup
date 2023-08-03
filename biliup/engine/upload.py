@@ -3,6 +3,8 @@ import os
 import shutil
 import subprocess
 import json
+import time
+
 from functools import reduce
 from pathlib import Path
 from typing import NamedTuple, Optional, List
@@ -126,9 +128,9 @@ class UploadBase:
                     processor(downloaded_processor, json.dumps({
                         "name": self.principal,
                         "url": self.data.get('url'),
-                        "room_title": self.data.get('title'),
-                        "start_time": self.data.get('start_time'),
-                        "end_time": self.data.get('end_time'),
+                        "room_title": self.data.get('title', self.principal),
+                        "start_time": self.data.get('start_time', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())),
+                        "end_time": self.data.get('end_time', time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())),
                         "file_list": [file.video for file in file_list]
                     }, ensure_ascii=False))
                     # 后处理完成后重新扫描文件列表
