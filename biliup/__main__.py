@@ -9,7 +9,7 @@ import threading
 
 import biliup.common.reload
 from biliup.config import config
-from biliup.downloader import check_url
+from biliup.downloader import check_url, check_flag
 from . import __version__, LOG_CONF
 from .common.Daemon import Daemon
 from .common.reload import AutoReload
@@ -69,12 +69,12 @@ async def main(args):
     if args.http:
         import biliup.web
         runner, site = await biliup.web.service(args, event_manager)
-        detector = AutoReload(event_manager, runner.cleanup, interval=interval)
+        detector = AutoReload(event_manager, runner.cleanup, check_flag.set, interval=interval)
         biliup.common.reload.global_reloader = detector
         await asyncio.gather(detector.astart(), site.start(), return_exceptions=True)
     else:
         # 模块更新自动重启
-        detector = AutoReload(event_manager, interval=interval)
+        detector = AutoReload(event_manager, check_flag.set, interval=interval)
         await asyncio.gather(detector.astart(), return_exceptions=True)
 
 
