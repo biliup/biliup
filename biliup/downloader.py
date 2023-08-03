@@ -1,5 +1,6 @@
 import logging
 import re
+import threading
 import time
 from urllib.error import HTTPError
 
@@ -12,7 +13,7 @@ from .plugins import general
 from biliup.config import config
 
 logger = logging.getLogger('biliup')
-
+check_flag = threading.Event()
 
 def download(fname, url, **kwargs):
     pg = general.__plugin__(fname, url)
@@ -35,7 +36,7 @@ def check_url(checker):
     context = event_manager.context
     class_reference = type(checker('', ''))
 
-    while True:
+    while not check_flag.is_set():
         try:
             # 待检测url
             check_urls = []

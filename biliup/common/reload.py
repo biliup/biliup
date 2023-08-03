@@ -57,7 +57,7 @@ class AutoReload(Timer):
     @staticmethod
     def _work_free():
         fname_list = os.listdir('.')
-        if has_extension(fname_list, '.mp4', '.part', '.flv'):
+        if has_extension(fname_list, '.mp4', '.flv', '.3gp', '.webm', '.mkv', '.ts', '.part'):
             return False
         logger.info('进程空闲')
         return True
@@ -72,9 +72,11 @@ class AutoReload(Timer):
             await asyncio.sleep(self.interval)
             if self._work_free():
                 for watched in self.watched:
-                    # if asyncio.iscoroutine()
-                    if asyncio.iscoroutinefunction(watched):
-                        await watched()
+                    if callable(watched):
+                        if asyncio.iscoroutinefunction(watched):
+                            await watched()
+                        else:
+                            watched()
                     else:
                         watched.stop()
                 self.stop()
@@ -84,9 +86,10 @@ class AutoReload(Timer):
                 #     args = ["python", path]
                 # else:
                 #     args = [path, 'start']
+                logger.info('重启')
                 if not is_docker():
                     subprocess.Popen(sys.argv)
-                return logger.info('重启')
+                return
 
 
 def is_docker():
