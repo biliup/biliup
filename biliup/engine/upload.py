@@ -2,6 +2,7 @@ import logging
 import os
 import shutil
 import subprocess
+import json
 from functools import reduce
 from pathlib import Path
 from typing import NamedTuple, Optional, List
@@ -56,13 +57,13 @@ class UploadBase:
                 continue
 
             if old_name != file:
-                logger.info(f'{old_name}已更名为{file}')
+                logger.info(f'{old_name} 已更名为 {file}')
                 shutil.move(old_name, file)
 
             file_size = os.path.getsize(file) / 1024 / 1024
             threshold = config.get('filtering_threshold', 0)
             if file_size <= threshold:
-                logger.info(f'过滤删除-{file}')
+                logger.info(f'过滤删除 - {file}')
                 UploadBase.remove_file(file)
                 continue
 
@@ -87,7 +88,7 @@ class UploadBase:
                         have_video = True
                         break
                 if not have_video:
-                    logger.info(f'无视频，过滤删除-{file}')
+                    logger.info(f'无视频，过滤删除 - {file}')
                     UploadBase.remove_file(file)
         return results
 
@@ -102,9 +103,9 @@ class UploadBase:
     def remove_file(file: str):
         try:
             os.remove(file)
-            logger.info(f'删除-{file}')
+            logger.info(f'删除 - {file}')
         except:
-            logger.warning(f'删除失败-{file}')
+            logger.warning(f'删除失败 - {file}')
 
     def upload(self, file_list: List[FileInfo]) -> List[FileInfo]:
         raise NotImplementedError()
@@ -122,8 +123,14 @@ class UploadBase:
                 downloaded_processor = config['streamers'].get(self.principal, {}).get('downloaded_processor')
                 if downloaded_processor:
                     from biliup.handler import processor
-                    processor(downloaded_processor,
-                              f'{{"name": "{self.principal}", "url": "{self.data["url"]}", "room_title": "{self.data.get("title")}", "start_time": "{self.data.get("start_time")}", "end_time": "{self.data.get("end_time")}", "file_list": "{[file.video for file in file_list]}"}}')
+                    processor(downloaded_processor, json.dumps({
+                        "name": self.principal,
+                        "url": self.data.get('url'),
+                        "room_title": self.data.get('title'),
+                        "start_time": self.data.get('start_time'),
+                        "end_time": self.data.get('end_time'),
+                        "file_list": [file.video for file in file_list]
+                    }, ensure_ascii=False))
                     # 后处理完成后重新扫描文件列表
                     file_list = UploadBase.file_list(self.principal)
 
