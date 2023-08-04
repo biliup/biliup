@@ -224,6 +224,8 @@ streamers:
         #preprocessor: ### 开始下载直播时触发，将按自定义顺序执行自定义操作 注：preprocessor仅支持shell指令
             #- run: sh ./run.sh, ### 执行任意命令，等同于在shell中运行,preprocessor输出的数据为JSON格式，包含主播名字(name)、开播地址(url)和开播时间(start_time)
         ### 准备上传直播时触发，将按自定义顺序执行自定义操作 注：downloaded_processor仅支持shell指令
+        ### room_title 在重启后会丢失 默认为当前配置名称
+        ### start_time end_time在重启后会丢失时间 默认为当前时间
         ### 如果对上传的视频进行修改需要保证和filename_prefix命名规则一致 会自动检测上传
         ### 上传顺序会按照文件创建时间排序
         #downloaded_processor:

@@ -2,6 +2,7 @@ import copy
 import logging
 import subprocess
 import time
+import json
 
 from . import plugins
 from .common.tools import NamedLock
@@ -46,8 +47,11 @@ def process(name, url):
     }
     preprocessor = config['streamers'].get(name, {}).get('preprocessor')
     if preprocessor:
-        processor(preprocessor,
-                  f'{{"name": "{name}", "url": "{url}", "start_time": "{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}"}}')
+        processor(preprocessor, json.dumps({
+            "name": name,
+            "url": url,
+            "start_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        }, ensure_ascii=False))
 
     url_status = event_manager.context['url_status']
     # 下载开始
