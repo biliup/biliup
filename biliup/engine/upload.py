@@ -125,12 +125,13 @@ class UploadBase:
                 downloaded_processor = config['streamers'].get(self.principal, {}).get('downloaded_processor')
                 if downloaded_processor:
                     from biliup.handler import processor
+                    default_date = time.localtime()
                     processor(downloaded_processor, json.dumps({
                         "name": self.principal,
                         "url": self.data.get('url'),
                         "room_title": self.data.get('title', self.principal),
-                        "start_time": time.strftime("%Y-%m-%d %H:%M:%S", self.data.get('date', time.localtime())),
-                        "end_time": time.strftime("%Y-%m-%d %H:%M:%S", self.data.get('end_time', time.localtime())),
+                        "start_time": time.strftime("%Y-%m-%d %H:%M:%S", self.data.get('date', default_date)),
+                        "end_time": time.strftime("%Y-%m-%d %H:%M:%S", self.data.get('end_time', default_date)),
                         "file_list": [file.video for file in file_list]
                     }, ensure_ascii=False))
                     # 后处理完成后重新扫描文件列表
