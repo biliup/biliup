@@ -180,6 +180,7 @@ class DownloadBase:
     def start(self):
         logger.info(f'开始下载：{self.__class__.__name__} - {self.fname}')
         date = time.localtime()
+        end_time = None
         delay = int(config.get('delay', 0))
         # 重试次数
         retry_count = 0
@@ -228,15 +229,18 @@ class DownloadBase:
                             time.sleep(delay)
                         else:
                             if retry_count_delay == 1:
-                                end_date = time.localtime()
+                                end_time = time.localtime()
                                 # 只有第一次显示
                                 logger.info(
                                     f'下播延迟检测：{self.__class__.__name__} - {self.fname}，每隔 60 秒检测开播状态，共检测 {delay_all_retry_count} 次')
                             time.sleep(60)
                         continue
                 else:
-                    end_date = time.localtime()
+                    end_time = time.localtime()
                     break
+
+        if end_time is None:
+            end_time = time.localtime()
         self.download_cover(time.strftime(self.get_filename().encode("unicode-escape").decode(), date).encode().decode("unicode-escape"))
         logger.info(f'退出下载：{self.__class__.__name__} - {self.fname}')
         return {
@@ -246,7 +250,8 @@ class DownloadBase:
             'date': date,
             'live_cover_path': self.live_cover_path,
             'is_download': self.is_download,
-            'end_time': time.strftime("%Y-%m-%d %H:%M:%S", end_date),
+            # 内部使用时间戳传递
+            'end_time': end_time,
         }
 
     def download_cover(self, fmtname):
