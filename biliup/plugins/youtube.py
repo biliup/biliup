@@ -47,15 +47,24 @@ class Youtube(DownloadBase):
                 info = ydl.extract_info(self.download_url, download=False)
             else:
                 info = ydl.extract_info(self.url, download=False, process=False)
-
             if type(info) is not dict:
                 logger.warning(f"{Youtube.__name__}: {self.url}: 获取错误")
                 return False
 
+            cache = KVFileStore(f"./cache/youtube/{self.fname}.txt")
+
             def loop_entries(entrie):
                 if type(entrie) is not dict:
                     return None
-                elif entrie.get('_type') == 'url':
+                elif entrie.get('_type') == 'playlist':
+                    # 播放列表递归
+                    for e in entrie.get('entries'):
+                        le = loop_entries(e)
+                        if type(le) is dict:
+                            return le
+                        elif le == "stop":
+                            return None
+                elif type(entrie) is dict:
                     # is_upcoming 等待开播 is_live 直播中 was_live结束直播(回放)
                     if entrie.get('live_status') == 'is_upcoming':
                         return None
@@ -68,22 +77,32 @@ class Youtube(DownloadBase):
                         if not self.enable_download_playback:
                             return None
 
-                    return loop_entries(ydl.extract_info(entrie.get('url'), download=False, process=False))
-                elif entrie.get('_type') == 'playlist':
-                    # 播放列表递归
-                    for e in entrie.get('entries'):
-                        le = loop_entries(e)
-                        if type(le) is dict:
-                            return le
-                elif type(entrie) is dict:
                     # 检测是否已下载
                     if ydl._make_archive_id(entrie) in ydl_archive:
                         # 如果已下载但是还在直播则不算下载
                         if entrie.get('live_status') != 'is_live':
                             return None
 
+                    upload_date = cache.query(entrie.get('id'))
+                    if upload_date is None:
+                        if entrie.get('upload_date') is not None:
+                            upload_date = entrie['upload_date']
+                        else:
+                            entrie = ydl.extract_info(entrie.get('url'), download=False, process=False)
+                            if type(entrie) is dict and entrie.get('upload_date') is not None:
+                                upload_date = entrie['upload_date']
+
+                        # 时间是必然存在的如果不存在说明出了问题 暂时跳过
+                        if upload_date is None:
+                            return None
+                        else:
+                            cache.add(entrie.get('id'), upload_date)
+
+                    if self.afterdate is not None and upload_date < self.afterdate:
+                        return 'stop'
+
                     # 检测时间范围
-                    if entrie.get('upload_date') not in DateRange(self.afterdate, self.beforedate):
+                    if upload_date not in DateRange(self.afterdate, self.beforedate):
                         return None
 
                     return entrie
@@ -95,9 +114,12 @@ class Youtube(DownloadBase):
                     self.is_download = False
                 else:
                     self.is_download = True
-                self.room_title = download_entry.get('title')
-                self.live_cover_url = download_entry.get('thumbnail')
-                self.download_url = download_entry.get('webpage_url')
+                if not is_check:
+                    if download_entry.get('_type') == 'url':
+                        download_entry = ydl.extract_info(download_entry.get('url'), download=False, process=False)
+                    self.room_title = download_entry.get('title')
+                    self.live_cover_url = download_entry.get('thumbnail')
+                    self.download_url = download_entry.get('webpage_url')
                 return True
             else:
                 return False
@@ -153,3 +175,38 @@ class Youtube(DownloadBase):
             except:
                 logger.error(f"{Youtube.__name__}: {self.url}: 清理残留文件失败，请手动删除{download_dir}")
         return True
+
+
+class KVFileStore:
+    def __init__(self, file_path):
+        self.file_path = file_path
+        self.cache = {}
+        self._preload_data()
+
+    def _ensure_file_and_folder_exists(self):
+        folder_path = os.path.dirname(self.file_path)
+        # 如果文件夹不存在，则创建文件夹
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+        # 如果文件不存在，则创建空文件
+        if not os.path.exists(self.file_path):
+            with open(self.file_path, "w") as f:
+                pass
+
+    def _preload_data(self):
+        self._ensure_file_and_folder_exists()
+        with open(self.file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                k, v = line.strip().split("=")
+                self.cache[k] = v
+
+    def add(self, key, value):
+        with open(self.file_path, "a", encoding="utf-8") as f:
+            f.write(f"{key}={value}\n")
+        # 更新缓存
+        self.cache[key] = value
+
+    def query(self, key, default=None):
+        if key in self.cache:
+            return self.cache[key]
+        return default
