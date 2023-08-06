@@ -130,6 +130,7 @@ check_sourcecode: 15
 
 #------YouTube------#
 ### 设置偏好的YouTube下载封装格式
+### 默认不限制
 ### 请务必记得安装ffmpeg
 ### 如无特殊需求不建议筛选封装格式 特别是录制直播时 多数直播mp4都是不可用的
 ### bilibili支持 mp4 mkv webm 无需筛选也能上传
@@ -140,21 +141,22 @@ check_sourcecode: 15
 #youtube_prefer_vcodec: "av01|vp9|avc" ### 可用av01,vp9,avc
 #youtube_prefer_acodec: "opus|mp4a" ### 可用opus,mp4a
 ### 设置偏好的YouTube下载最高纵向分辨率
+### 默认不限制
 ### 可以用此限制画质
 ### 例如设置为1080最高只会下载1080P画质
 #youtube_max_resolution: 1080
 ### 限制单个视频的最大大小
+### 默认不限制
 ### 直播无此功能
 ### 注意：此参数优先级高于分辨率设置，并且不包括音频部分的大小，仅仅只是视频部分的大小。
 ### 此功能在一部分视频上无法使用 推荐使用画质限制不开启此功能
 #youtube_max_videosize: "10G" ###参考格式，例如100M，5G，10G。
 ### 仅下载该日期之后的视频
+### 默认不限制
 #youtube_after_date: '20220201'
 ### 仅下载该日期之前的视频（可与上面的youtube_after_date配合使用，构成指定下载范围区间）
+### 默认不限制
 #youtube_before_date: '20230501'
-### YouTube的Streamlink下载器模式，开启之后会调用Streamlink获取直播流并且使用FFMPEG下载，默认关闭【仅当下载器是FFMPEG时才有效】
-### 开启之后上面关于YOUTUBE的选项全部无效【我也不知道这个功能有什么屌用】
-#use_new_ytb_downloader: false
 ### 是否下载直播 默认开启
 ### 关闭后将忽略直播下载（可以下载回放） 避免网络被风控(有些网络只能下载回放无法下载直播)的时候还会尝试下载直播
 ### 大量下载时极易风控 如对实时性要求不高推荐关闭
