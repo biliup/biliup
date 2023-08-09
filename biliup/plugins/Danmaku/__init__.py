@@ -9,7 +9,7 @@ import re
 import ssl
 import time
 import logging
-from typing import Optional
+from typing import Optional, List
 
 import lxml.etree as etree
 import aiohttp
@@ -36,10 +36,7 @@ class DanmakuClient:
         self.__hs = None
         self.__ws = None
         self.__dm_queue = None
-        # 正在运行中的任务
-        self.__danmaku_tasks: Optional[asyncio.Task] = None
-        # 弹幕启动时的事件循环 为了保证被正确的关闭
-        self.__loop = None
+        self.gather_task = None
 
         if 'http://' == url[:7] or 'https://' == url[:8]:
             self.__url = url
@@ -66,7 +63,7 @@ class DanmakuClient:
             ws_url, reg_datas = await self.__site.get_ws_info(self.__url)
             ctx = ssl.create_default_context()
             ctx.set_ciphers('DEFAULT')
-            self.__ws = await self.__hs.ws_connect(ws_url, ssl_context=ctx, headers=getattr(self.__site, 'headers',{}))
+            self.__ws = await self.__hs.ws_connect(ws_url, ssl_context=ctx, headers=getattr(self.__site, 'headers', {}))
             for reg_data in reg_datas:
                 if type(reg_data) == str:
                     await self.__ws.send_str(reg_data)
@@ -111,6 +108,8 @@ class DanmakuClient:
 
                 for m in ms:
                     await self.__dm_queue.put(m)
+            except asyncio.CancelledError:
+                raise
             except Exception as Error:
                 logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕接收异常：{Error}")
                 continue
@@ -169,44 +168,48 @@ class DanmakuClient:
             if not (os.path.exists(f"{self.__filename_video_suffix}.part") or
                     os.path.exists(f"{self.__filename_video_suffix}")):
                 os.remove(self.__filename)
+            raise
 
     async def start(self):
-        self.__loop = asyncio.get_event_loop()
-        self.__dm_queue = asyncio.Queue()
-        is_first_error = True
         while True:
+            is_retry = False
+            danmaku_tasks: Optional[List[asyncio.Task]] = None
             try:
+                self.__dm_queue = asyncio.Queue()
                 self.__hs = aiohttp.ClientSession()
                 await self.init_ws()
-                # 保存以便取消
-                self.__danmaku_tasks = asyncio.gather(self.heartbeats(), self.fetch_danmaku(), self.print_danmaku())
-                await self.__danmaku_tasks
-            except self.WebsocketErrorException:
-                self.stop()
-                if is_first_error:
-                    # 减少日志输出量
-                    logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕连接异常，将在 30 秒后重试")
-                    is_first_error = False
-
-                # 连接断开等30秒重连
-                # 在关闭之前一直重试
-                await asyncio.sleep(30)
-                continue
+                danmaku_tasks = [asyncio.create_task(self.heartbeats()),
+                                 asyncio.create_task(self.fetch_danmaku()),
+                                 asyncio.create_task(self.print_danmaku())]
+                self.gather_task = asyncio.gather(*danmaku_tasks)
+                await self.gather_task
             except asyncio.CancelledError:
                 pass
+            except self.WebsocketErrorException:
+                # 连接断开等30秒重连
+                # 在关闭之前一直重试
+                logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕连接异常，将在 30 秒后重试")
+                is_retry = True
+            except Exception as Error:
+                # 记录异常不到外部处理
+                logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕异常，将在 30 秒后重试：{Error}")
+                is_retry = True
+            finally:
+                if type(danmaku_tasks) is list:
+                    for task in danmaku_tasks:
+                        task.cancel()
+                if self.__ws is not None and not self.__ws.closed:
+                    await self.__ws.close()
+                if self.__hs is not None and not self.__hs.closed:
+                    await self.__hs.close()
+                if is_retry:
+                    await asyncio.sleep(30)
+                    continue
             break
 
     def stop(self):
-        # 关闭任务后loop就会被自动关闭 这里让他先保留一下 等待其他close完成后手动关闭
-        sleep_task = asyncio.run_coroutine_threadsafe(asyncio.sleep(9999), self.__loop)
-        # 关闭任务
-        if self.__danmaku_tasks is not None:
-            self.__danmaku_tasks.cancel()
-        if self.__ws is not None:
-            asyncio.run_coroutine_threadsafe(self.__ws.close(), self.__loop)
-        if self.__hs is not None:
-            asyncio.run_coroutine_threadsafe(self.__hs.close(), self.__loop)
-        sleep_task.cancel()
+        if self.gather_task is not None:
+            self.gather_task.cancel()
 
 # 虎牙直播：https://www.huya.com/lpl
 # 斗鱼直播：https://www.douyu.com/9999
