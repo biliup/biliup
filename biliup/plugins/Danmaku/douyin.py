@@ -5,6 +5,7 @@ import gzip
 import time
 import re
 from urllib.parse import unquote
+from biliup.config import config
 
 import requests
 import json
@@ -16,8 +17,12 @@ from .douyin_util.dy_pb2 import PushFrame, Response, ChatMessage  # 反序列化
 
 class Douyin:
     headers = {
-        'authority': 'live.douyin.com',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.5112.81 Safari/537.36 Edg/104.0.1293.54',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Encoding': 'gzip, deflate',
+        'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36',
+        'Referer': 'https://live.douyin.com/',
+        'Cookie': config.get('user', {}).get('douyin_cookie')
     }
     heartbeat = b':\x02hb'
     heartbeatInterval = 10
@@ -25,18 +30,8 @@ class Douyin:
     @staticmethod
     async def get_ws_info(url):
         web_rid = url.split('/')[-1]
-        if not Douyin.headers.get('cookie'):
-            response = requests.get(f'https://live.douyin.com/{web_rid}', headers=Douyin.headers, timeout=5)
-            Douyin.headers['cookie'] = '__ac_nonce=' + response.cookies.get('__ac_nonce')
-            response = requests.get(f'https://live.douyin.com/{web_rid}', headers=Douyin.headers, timeout=5)
-            Douyin.headers['cookie'] += '; ttwid=' + response.cookies.get('ttwid')
-        else:
-            response = requests.get(f'https://live.douyin.com/{web_rid}', headers=Douyin.headers, timeout=5)
-
-        render_data = re.findall(r"<script id=\"RENDER_DATA\" type=\"application/json\">.*?</script>", response.text)[0]
-        render_data = unquote(render_data)
-        render_data = re.sub(r'(<script.*?>|</script>)', '', render_data)
-        data = json.loads(render_data)
+        page = requests.get(f'https://live.douyin.com/{web_rid}', headers=Douyin.headers, timeout=5).text
+        data = json.loads(unquote(page.split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]))
         real_rid = data['app']['initialState']['roomStore']['roomInfo']['roomId']
         user_unique_id = data['app']['odin']['user_unique_id']
 
