@@ -171,6 +171,7 @@ class DanmakuClient:
             raise
 
     async def start(self):
+        logger.info(f'开始弹幕录制：{self.__url}')
         while True:
             is_retry = False
             danmaku_tasks: Optional[List[asyncio.Task]] = None
@@ -208,6 +209,7 @@ class DanmakuClient:
             break
 
     def stop(self):
+        logger.info(f'结束弹幕录制：{self.__url}')
         if self.gather_task is not None:
             self.gather_task.cancel()
 

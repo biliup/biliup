@@ -81,14 +81,12 @@ class Douyu(DownloadBase):
 
     async def danmaku_download_start(self, filename):
         if self.douyu_danmaku:
-            logger.info("开始弹幕录制")
             self.danmaku = DanmakuClient(self.url, filename + "." + self.suffix)
             await self.danmaku.start()
 
     def close(self):
         if self.douyu_danmaku:
             self.danmaku.stop()
-            logger.info("结束弹幕录制")
 
     def get_play_info(self, room_id, params):
         live_data = requests.post(f'https://www.douyu.com/lapi/live/getH5Play/{room_id}', headers=self.fake_headers,

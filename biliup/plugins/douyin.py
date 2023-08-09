@@ -92,11 +92,9 @@ class Douyin(DownloadBase):
 
     async def danmaku_download_start(self, filename):
         if self.douyin_danmaku:
-            logger.info("开始弹幕录制")
             self.danmaku = DanmakuClient(self.url, filename + "." + self.suffix)
             await self.danmaku.start()
 
     def close(self):
         if self.douyin_danmaku:
             self.danmaku.stop()
-            logger.info("结束弹幕录制")

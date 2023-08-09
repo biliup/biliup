@@ -100,11 +100,9 @@ class Huya(DownloadBase):
 
     async def danmaku_download_start(self, filename):
         if self.huya_danmaku:
-            logger.info("开始弹幕录制")
             self.danmaku = DanmakuClient(self.url, filename + "." + self.suffix)
             await self.danmaku.start()
 
     def close(self):
         if self.huya_danmaku:
             self.danmaku.stop()
-            logger.info("结束弹幕录制")
