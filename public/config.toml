@@ -265,7 +265,7 @@ tags = [ "biliup", "视频标签" ]
 #customAPI_use_cookie = false
 
 #------抖音------#
-### 如需要录制抖音请在此填入cookie需要__ac_nonce、__ac_signature、ttwid、sessionid的值或者将所有cookie填入
+### 如需要录制抖音请在此填入cookie需要__ac_nonce、__ac_signature、ttwid、sessionid的值请不要将所有cookie填入
 #douyin_cookie = '__ac_nonce=123456; __ac_signature=123456; ttwid=123456; sessionid=123456;'
 
 #------Twitch直播录制------#
