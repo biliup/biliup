@@ -29,7 +29,7 @@ class Douyin(DownloadBase):
                 logger.debug("直播间地址错误")
                 return False
             else:
-                mainPage = requests.get(self.url, headers=headers).text \
+                mainPage = requests.get(self.url, headers=headers, timeout=5).text \
                     .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]
                 txt = urllib.request.unquote(mainPage)
                 rex = re.compile(r'(?<=\"web_rid\":\")[0-9]*(?=\")')
@@ -39,7 +39,7 @@ class Douyin(DownloadBase):
             rid = self.url.split(douyin_url)[1]
             rid = '+{}'.format(rid) if rid.isdigit() else rid
         try:
-            r1 = requests.get(douyin_url + rid, headers=headers).text \
+            r1 = requests.get(douyin_url + rid, headers=headers, timeout=5).text \
                 .split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]
             r2 = urllib.request.unquote(r1)
             room_info = json.loads(r2)['app']['initialState']['roomStore']['roomInfo']['room']
