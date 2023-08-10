@@ -85,7 +85,7 @@ class DownloadBase:
         filename = self.get_filename()
         fmtname = time.strftime(filename.encode("unicode-escape").decode()).encode().decode("unicode-escape")
 
-        threading.Thread(target=asyncio.run, args=(self.danmaku_download_start(fmtname),)).start()
+        self.danmaku_download_start(fmtname)
 
         if self.downloader == 'streamlink':
             parsed_url = urlparse(self.raw_stream_url)
@@ -166,7 +166,7 @@ class DownloadBase:
             return False
         return True
 
-    async def danmaku_download_start(self, filename):
+    def danmaku_download_start(self, filename):
         pass
 
     def run(self):
