@@ -168,7 +168,7 @@ class Twitch(DownloadBase):
                 continue
             yield check_urls[index]
 
-    async def danmaku_download_start(self, filename):
+    def danmaku_download_start(self, filename):
         if self.twitch_danmaku:
             self.danmaku = DanmakuClient(self.url, filename + "." + self.suffix)
             self.danmaku.start()
