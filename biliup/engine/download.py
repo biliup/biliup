@@ -1,10 +1,8 @@
-import asyncio
 import logging
 import os
 import re
 import subprocess
 import sys
-import threading
 import time
 from typing import Generator, List
 from urllib.parse import urlparse

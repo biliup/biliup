@@ -174,7 +174,7 @@ class Twitch(DownloadBase):
             self.danmaku.start()
 
     def close(self):
-        if self.twitch_danmaku:
+        if self.danmaku:
             self.danmaku.stop()
         try:
             if self.proc is not None:

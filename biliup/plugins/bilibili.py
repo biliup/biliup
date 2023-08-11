@@ -154,7 +154,7 @@ class Bilibili(DownloadBase):
             self.danmaku.start()
 
     def close(self):
-        if self.bilibili_danmaku:
+        if self.danmaku:
             self.danmaku.stop()
 
 

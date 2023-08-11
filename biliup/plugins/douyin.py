@@ -95,5 +95,5 @@ class Douyin(DownloadBase):
             self.danmaku.start()
 
     def close(self):
-        if self.douyin_danmaku:
+        if self.danmaku:
             self.danmaku.stop()

@@ -1,6 +1,5 @@
 import base64
 import hashlib
-import html
 import json
 import random
 import time
@@ -104,5 +103,5 @@ class Huya(DownloadBase):
             self.danmaku.start()
 
     def close(self):
-        if self.huya_danmaku:
+        if self.danmaku:
             self.danmaku.stop()

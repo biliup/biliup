@@ -85,7 +85,7 @@ class Douyu(DownloadBase):
             self.danmaku.start()
 
     def close(self):
-        if self.douyu_danmaku:
+        if self.danmaku:
             self.danmaku.stop()
 
     def get_play_info(self, room_id, params):
