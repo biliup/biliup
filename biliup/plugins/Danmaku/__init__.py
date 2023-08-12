@@ -55,7 +55,6 @@ class DanmakuClient:
                 break
 
         if self.__site is None:
-            logger.warning(f"{DanmakuClient.__name__}:{self.__url}: 不支持录制弹幕")
             # 抛出异常由外部处理 exit()会导致进程退出
             raise Exception(f"{DanmakuClient.__name__}:{self.__url}: 不支持录制弹幕")
 
@@ -70,7 +69,9 @@ class DanmakuClient:
                     await self.__ws.send_str(reg_data)
                 else:
                     await self.__ws.send_bytes(reg_data)
-        except:
+        except asyncio.CancelledError:
+            raise
+        except Exception:
             raise self.WebsocketErrorException()
 
     async def __heartbeats(self):
@@ -131,8 +132,8 @@ class DanmakuClient:
                 with open(filename, "wb") as f:
                     etree.indent(root, "\t")
                     tree.write(f, encoding="UTF-8", xml_declaration=True, pretty_print=True)
-            except Exception as Error:
-                logger.warning(f"{DanmakuClient.__name__}:{self.__url}: 弹幕写入异常 - {Error}")
+            except Exception as e:
+                logger.warning(f"{DanmakuClient.__name__}:{self.__url}: 弹幕写入异常 - {e}")
 
         try:
             while True:
@@ -172,10 +173,10 @@ class DanmakuClient:
             raise
 
     def start(self):
-        logger.info(f'开始弹幕录制: {self.__filename}')
         init_event = threading.Event()
 
         async def __init():
+            logger.info(f'开始弹幕录制: {self.__filename}')
             self.__record_task = asyncio.create_task(self.__run())
             init_event.set()
             try:
