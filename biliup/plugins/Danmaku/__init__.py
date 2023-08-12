@@ -47,7 +47,7 @@ class DanmakuClient:
                      'huya.com': Huya,
                      'live.bilibili.com': Bilibili,
                      'twitch.tv': Twitch,
-                     'live.douyin.com': Douyin
+                     'douyin.com': Douyin
                      }.items():
             if re.match(r'^(?:http[s]?://)?.*?%s/(.+?)$' % u, url):
                 self.__site = s

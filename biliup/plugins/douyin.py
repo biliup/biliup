@@ -15,26 +15,35 @@ class Douyin(DownloadBase):
         super().__init__(fname, url, suffix)
         self.douyin_danmaku = config.get('douyin_danmaku', False)
         self.fake_headers['Referer'] = "https://live.douyin.com/"
-        self.fake_headers['Cookie'] = config.get('user', {}).get('douyin_cookie')
+        self.fake_headers['Cookie'] = config.get('user', {}).get('douyin_cookie','')
 
     def check_stream(self, is_check=False):
-        url = self.url
         if "/user/" in self.url:
             try:
                 user_page = requests.get(self.url, headers=self.fake_headers, timeout=5).text
                 user_page_data = unquote(
                     user_page.split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0])
-                rid = match1(user_page_data, r'"web_rid":"([^"]+)"')
-                if rid is None:
+                room_id = match1(user_page_data, r'"web_rid":"([^"]+)"')
+                if room_id is None or not room_id:
                     logger.debug(f"{Douyin.__name__}: {self.url}: 未开播")
                     return False
-                url = f"https://live.douyin.com/{rid}"
             except:
-                logger.warning(f"{Douyin.__name__}: {self.url}: 获取用户信息错误")
+                logger.warning(f"{Douyin.__name__}: {self.url}: 获取房间ID错误")
+                return False
+        else:
+            try:
+                room_id = self.url.split('douyin.com/')[1].split('/')[0].split('?')[0]
+                if not room_id:
+                    raise
+            except:
+                logger.warning(f"{Douyin.__name__}: {self.url}: 直播间地址错误")
                 return False
 
+        if room_id[0] == "+":
+            room_id = room_id[1:]
+
         try:
-            page = requests.get(url, headers=self.fake_headers, timeout=5).text
+            page = requests.get(f"https://live.douyin.com/+{room_id}", headers=self.fake_headers, timeout=5).text
             page_data = unquote(
                 page.split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0])
             room_info = json.loads(page_data)['app']['initialState']['roomStore']['roomInfo']['room']

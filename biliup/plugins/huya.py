@@ -24,6 +24,8 @@ class Huya(DownloadBase):
     def check_stream(self, is_check=False):
         try:
             room_id = self.url.split('huya.com/')[1].split('/')[0].split('?')[0]
+            if not room_id:
+                raise
         except:
             logger.warning(f"{Huya.__name__}: {self.url}: 直播间地址错误")
             return False
