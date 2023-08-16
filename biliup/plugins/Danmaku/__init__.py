@@ -5,8 +5,10 @@
 
 import asyncio
 import os
+import platform
 import re
 import ssl
+import sys
 import threading
 import time
 import logging
@@ -181,10 +183,12 @@ class DanmakuClient:
             init_event.set()
             try:
                 await self.__record_task
-                # fix event loop is close
-                await asyncio.sleep(2)
             except asyncio.CancelledError:
                 pass
+            finally:
+                # fix event loop is close
+                if sys.version_info < (3, 11) and platform.system() == 'Windows':
+                    await asyncio.sleep(2)
             logger.info(f'结束弹幕录制: {self.__filename}')
 
         threading.Thread(target=asyncio.run, args=(__init(),)).start()

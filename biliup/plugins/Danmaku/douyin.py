@@ -35,10 +35,12 @@ class Douyin:
             room_id = url.split('douyin.com/')[1].split('/')[0].split('?')[0]
         if room_id[0] == "+":
             room_id = room_id[1:]
+        if room_id.isdigit():
+            room_id = f"+{room_id}"
 
-        response = requests.get(f'https://live.douyin.com/+{room_id}', headers=Douyin.headers, timeout=5)
+        response = requests.get(f'https://live.douyin.com/{room_id}', headers=Douyin.headers, timeout=5)
         if "ttwid" not in Douyin.headers['Cookie']:
-            Douyin.headers['Cookie'] = f'ttwid={response.cookies.get("ttwid", "")};' + Douyin.headers['Cookie']
+            Douyin.headers['Cookie'] = f'ttwid={response.cookies.get("ttwid", "")};{Douyin.headers["Cookie"]}'
         data = json.loads(
             unquote(response.text.split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0]))
         real_rid = data['app']['initialState']['roomStore']['roomInfo']['roomId']

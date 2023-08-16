@@ -15,7 +15,7 @@ class Douyin(DownloadBase):
         super().__init__(fname, url, suffix)
         self.douyin_danmaku = config.get('douyin_danmaku', False)
         self.fake_headers['Referer'] = "https://live.douyin.com/"
-        self.fake_headers['Cookie'] = config.get('user', {}).get('douyin_cookie','')
+        self.fake_headers['Cookie'] = config.get('user', {}).get('douyin_cookie', '')
 
     def check_stream(self, is_check=False):
         if "/user/" in self.url:
@@ -41,12 +41,17 @@ class Douyin(DownloadBase):
 
         if room_id[0] == "+":
             room_id = room_id[1:]
+        if room_id.isdigit():
+            room_id = f"+{room_id}"
 
         try:
-            page = requests.get(f"https://live.douyin.com/+{room_id}", headers=self.fake_headers, timeout=5).text
+            page = requests.get(f"https://live.douyin.com/{room_id}", headers=self.fake_headers, timeout=5).text
             page_data = unquote(
                 page.split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0])
             room_info = json.loads(page_data)['app']['initialState']['roomStore']['roomInfo']['room']
+        except (KeyError, IndexError):
+            logger.warning(f"{Douyin.__name__}: {self.url}: 获取错误,请检查Cookie设置")
+            return False
         except:
             logger.warning(f"{Douyin.__name__}: {self.url}: 获取错误")
             return False
