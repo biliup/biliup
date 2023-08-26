@@ -1,5 +1,8 @@
+import logging
 import random
 import re
+
+logger = logging.getLogger('biliup')
 
 
 class Twitch:
@@ -36,7 +39,5 @@ class Twitch:
                     # print(msgt)
                     msgs.append(msgt)
                 except Exception as Error:
-                    # print(f"twitch：decode_msg：捕获到异常：{Error}")
-                    # traceback.print_exc()
-                    pass
+                    logger.warning(f"{Twitch.__name__}: 弹幕接收异常 - {Error}")
         return msgs

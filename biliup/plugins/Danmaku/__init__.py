@@ -114,8 +114,8 @@ class DanmakuClient:
                     await self.__dm_queue.put(m)
             except asyncio.CancelledError:
                 raise
-            except Exception as Error:
-                logger.warning(f"{DanmakuClient.__name__}:{self.__url}: 弹幕接收异常 - {Error}")
+            except Exception:
+                logger.exception(f"{DanmakuClient.__name__}:{self.__url}: 弹幕接收异常")
                 continue
                 # await asyncio.sleep(10) 无需等待 直接获取下一条websocket消息
                 # 这里出现异常只会是 decode_msg 的问题
@@ -216,7 +216,7 @@ class DanmakuClient:
                 is_retry = True
             except Exception as Error:
                 # 记录异常不到外部处理
-                logger.warning(f"{DanmakuClient.__name__}:{self.__filename}: 弹幕异常,将在 30 秒后重试 - {Error}")
+                logger.exception(f"{DanmakuClient.__name__}:{self.__filename}: 弹幕异常,将在 30 秒后重试")
                 is_retry = True
             finally:
                 if type(danmaku_tasks) is list:

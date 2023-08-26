@@ -1,8 +1,11 @@
 import json
+import logging
 import random
 from struct import pack, unpack
 import aiohttp
 import zlib
+
+logger = logging.getLogger('biliup')
 
 
 class Bilibili:
@@ -16,7 +19,7 @@ class Bilibili:
         url = 'https://api.live.bilibili.com/room/v1/Room/room_init?id=' + url.split('/')[-1]
         reg_datas = []
         async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
+            async with session.get(url, timeout=5) as resp:
                 room_json = json.loads(await resp.text())
                 room_id = room_json['data']['room_id']
                 data = json.dumps({
@@ -38,38 +41,38 @@ class Bilibili:
         msgs = []
         while True:
             try:
-                packetLen, headerLen, ver, op, seq = unpack('!IHHII', data[0:16])
-            except Exception as e:
+                packet_len, header_len, ver, op, seq = unpack('!IHHII', data[0:16])
+            except Exception:
                 break
-            if len(data) < packetLen:
+            if len(data) < packet_len:
                 break
             if ver == 1 or ver == 0:
                 ops.append(op)
-                dm_list.append(data[16:packetLen])
+                dm_list.append(data[16:packet_len])
             elif ver == 2:
-                dm_list_compressed.append(data[16:packetLen])
-            if len(data) == packetLen:
+                dm_list_compressed.append(data[16:packet_len])
+            if len(data) == packet_len:
                 data = b''
                 break
             else:
-                data = data[packetLen:]
+                data = data[packet_len:]
 
         for dm in dm_list_compressed:
             d = zlib.decompress(dm)
             while True:
                 try:
-                    packetLen, headerLen, ver, op, seq = unpack('!IHHII', d[0:16])
-                except Exception as e:
+                    packet_len, header_len, ver, op, seq = unpack('!IHHII', d[0:16])
+                except Exception:
                     break
-                if len(d) < packetLen:
+                if len(d) < packet_len:
                     break
                 ops.append(op)
-                dm_list.append(d[16:packetLen])
-                if len(d) == packetLen:
+                dm_list.append(d[16:packet_len])
+                if len(d) == packet_len:
                     d = b''
                     break
                 else:
-                    d = d[packetLen:]
+                    d = d[packet_len:]
 
         for i, d in enumerate(dm_list):
             try:
@@ -85,22 +88,21 @@ class Bilibili:
                     }.get(j.get('cmd'), 'other')
 
                     # 2021-06-03 bilibili 字段更新, 形如 DANMU_MSG:4:0:2:2:2:0
-                    if      msg.get('msg_type', 'UNKNOWN').startswith('DANMU_MSG'):
+                    if msg.get('msg_type', 'UNKNOWN').startswith('DANMU_MSG'):
                         msg['msg_type'] = 'danmaku'
 
-                    if      msg['msg_type'] == 'danmaku':
+                    if msg['msg_type'] == 'danmaku':
                         msg['name'] = (j.get('info', ['', '', ['', '']])[2][1] or
                                        j.get('data', {}).get('uname', ''))
                         msg['content'] = j.get('info', ['', ''])[1]
                         msg["color"] = f"{j.get('info', '16777215')[0][3]}"
 
-
-                    elif    msg['msg_type'] == 'interactive_danmaku':
+                    elif msg['msg_type'] == 'interactive_danmaku':
                         msg['name'] = j.get('data', {}).get('uname', '')
                         msg['content'] = j.get('data', {}).get('msg', '')
                         msg["color"] = '16777215'
 
-                    elif    msg['msg_type'] == 'broadcast':
+                    elif msg['msg_type'] == 'broadcast':
                         msg['type'] = j.get('msg_type', 0)
                         msg['roomid'] = j.get('real_roomid', 0)
                         msg['content'] = j.get('msg_common', '')
@@ -111,6 +113,6 @@ class Bilibili:
                     msg = {'name': '', 'content': d, 'msg_type': 'other'}
                 msgs.append(msg)
             except Exception as Error:
-                print(Error)
+                logger.warning(f"{Bilibili.__name__}: 弹幕接收异常 - {Error}")
 
         return msgs

@@ -1,10 +1,13 @@
 import json
+import logging
 import re
 from struct import pack
 
 import aiohttp
 
 from biliup.plugins import match1
+
+logger = logging.getLogger('biliup')
 
 
 class Douyu:
@@ -48,10 +51,9 @@ class Douyu:
                 msga['name'] = msg.get('nn', '')
                 msga['content'] = msg.get('txt', '')
                 msga['msg_type'] = {'dgb': 'gift', 'chatmsg': 'danmaku',
-                                   'uenter': 'enter'}.get(msg['type'], 'other')
+                                    'uenter': 'enter'}.get(msg['type'], 'other')
                 msga['col'] = msg.get('col', '0')
                 msgs.append(msga)
             except Exception as Error:
-                # print(f"decode_msg：捕获到异常：{Error}")
-                pass
+                logger.warning(f"{Douyu.__name__}: 弹幕接收异常 - {Error}")
         return msgs
