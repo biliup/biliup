@@ -41,19 +41,44 @@ class Douyu:
 
     @staticmethod
     def decode_msg(data):
+        def stt_loads(stt_str):
+            if '/' in stt_str:
+                stt_items = stt_str.split('/')
+                stt_list = []
+                stt_dict = {}
+                for stt_item in stt_items:
+                    if stt_item == '':
+                        continue
+                    stt_item_decode = stt_loads(stt_item)
+                    if type(stt_item_decode) is dict:
+                        stt_dict.update(stt_item_decode)
+                    else:
+                        stt_list.append(stt_item_decode)
+                if len(stt_list) > 0:
+                    return stt_list
+                else:
+                    return stt_dict
+            elif '@=' in stt_str:
+                key, value = stt_str.split('@=')
+                return {stt_loads(key): stt_loads(value)}
+            else:
+                return stt_str.replace("@A", "@").replace('@S', '/')
+
         msgs = []
         for msg in re.findall(b'(type@=.*?)\x00', data):
-            msga = {}
             try:
-                msg = msg.replace(b'@=', b'":"').replace(b'/', b'","')
-                msg = msg.replace(b'@A', b'@').replace(b'@S', b'/')
-                msg = json.loads((b'{"' + msg[:-2] + b'}').decode('utf8', 'ignore'))
-                msga['name'] = msg.get('nn', '')
-                msga['content'] = msg.get('txt', '')
-                msga['msg_type'] = {'dgb': 'gift', 'chatmsg': 'danmaku',
-                                    'uenter': 'enter'}.get(msg['type'], 'other')
-                msga['col'] = msg.get('col', '0')
-                msgs.append(msga)
+                msg = stt_loads(msg.decode('utf-8'))
+                if type(msg) is dict:
+                    msgs.append({
+                        'name': msg.get('nn', ''),
+                        'content': msg.get('txt', ''),
+                        'msg_type': {
+                            'dgb': 'gift',
+                            'chatmsg': 'danmaku',
+                            'uenter': 'enter'
+                        }.get(msg['type'], 'other'),
+                        'col': msg.get('col', '0')
+                    })
             except Exception as Error:
                 logger.warning(f"{Douyu.__name__}: 弹幕接收异常 - {Error}")
         return msgs

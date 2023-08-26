@@ -38,6 +38,6 @@ class Twitch:
                     msgt["msg_type"] = "danmaku"
                     # print(msgt)
                     msgs.append(msgt)
-                except Exception as Error:
-                    logger.warning(f"{Twitch.__name__}: 弹幕接收异常 - {Error}")
+                except Exception:
+                    pass
         return msgs
