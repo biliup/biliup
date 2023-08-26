@@ -27,9 +27,9 @@ class Douyu(DownloadBase):
             if 'm.douyu.com' in self.url:
                 # 傻瓜化适配 m
                 room_no = self.url.split('m.douyu.com/')[1].split('/')[0].split('?')[0]
-                html = requests.get(f'https://www.douyu.com/{room_no}', headers=self.fake_headers).text
+                html = requests.get(f'https://www.douyu.com/{room_no}', headers=self.fake_headers, timeout=5).text
             else:
-                html = requests.get(self.url, headers=self.fake_headers).text
+                html = requests.get(self.url, headers=self.fake_headers, timeout=5).text
 
             room_id = match1(html, r'\$ROOM\.room_id\s*=\s*(\d+)')
             show_status = int(match1(html, r'\$ROOM\.show_status\s*=\s*(\d+)'))
@@ -79,20 +79,18 @@ class Douyu(DownloadBase):
         self.raw_stream_url = f"{live_data.get('rtmp_url')}/{live_data.get('rtmp_live')}"
         return True
 
-    async def danmaku_download_start(self, filename):
+    def danmaku_download_start(self, filename):
         if self.douyu_danmaku:
-            logger.info("开始弹幕录制")
             self.danmaku = DanmakuClient(self.url, filename + "." + self.suffix)
-            await self.danmaku.start()
+            self.danmaku.start()
 
     def close(self):
-        if self.douyu_danmaku:
+        if self.danmaku:
             self.danmaku.stop()
-            logger.info("结束弹幕录制")
 
     def get_play_info(self, room_id, params):
         live_data = requests.post(f'https://www.douyu.com/lapi/live/getH5Play/{room_id}', headers=self.fake_headers,
-                                  params=params).json().get('data')
+                                  params=params, timeout=5).json().get('data')
         if type(live_data) is dict:
             # 禁用斗鱼主线路
             if not live_data.get('rtmp_cdn', '').endswith('h5') or 'akm' in live_data.get('rtmp_cdn', ''):

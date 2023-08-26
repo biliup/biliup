@@ -62,6 +62,8 @@ def process(name, url):
         if suffix:
             kwargs['suffix'] = suffix
         stream_info = download(name, url, **kwargs)
+    except Exception as e:
+        logger.exception(f"下载错误: {stream_info['name']} - {e}")
     finally:
         # 下载结束
         # 永远不可能有两个同url的下载线程
@@ -76,6 +78,8 @@ def process_upload(stream_info):
     # 上传开始
     try:
         upload(stream_info)
+    except Exception as e:
+        logger.exception(f"上传错误: {stream_info['name']} - {e}")
     finally:
         # 上传结束
         # 有可能有两个同url的上传线程 保证计数正确

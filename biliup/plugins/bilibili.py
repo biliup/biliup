@@ -148,17 +148,14 @@ class Bilibili(DownloadBase):
                 pass
         return True
 
-    async def danmaku_download_start(self, filename):
+    def danmaku_download_start(self, filename):
         if self.bilibili_danmaku:
-            logger.info("开始弹幕录制")
             self.danmaku = DanmakuClient(self.url, filename + "." + self.suffix)
-            await self.danmaku.start()
+            self.danmaku.start()
 
     def close(self):
-        if self.bilibili_danmaku:
+        if self.danmaku:
             self.danmaku.stop()
-            logger.info("结束弹幕录制")
-            # asyncio.run(self.danmaku.stop())
 
 
 def get_play_info(s, isallow, official_api_host, params):

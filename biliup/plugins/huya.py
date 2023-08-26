@@ -1,6 +1,5 @@
 import base64
 import hashlib
-import html
 import json
 import random
 import time
@@ -25,6 +24,8 @@ class Huya(DownloadBase):
     def check_stream(self, is_check=False):
         try:
             room_id = self.url.split('huya.com/')[1].split('/')[0].split('?')[0]
+            if not room_id:
+                raise
         except:
             logger.warning(f"{Huya.__name__}: {self.url}: 直播间地址错误")
             return False
@@ -98,13 +99,11 @@ class Huya(DownloadBase):
 
         return False
 
-    async def danmaku_download_start(self, filename):
+    def danmaku_download_start(self, filename):
         if self.huya_danmaku:
-            logger.info("开始弹幕录制")
             self.danmaku = DanmakuClient(self.url, filename + "." + self.suffix)
-            await self.danmaku.start()
+            self.danmaku.start()
 
     def close(self):
-        if self.huya_danmaku:
+        if self.danmaku:
             self.danmaku.stop()
-            logger.info("结束弹幕录制")
