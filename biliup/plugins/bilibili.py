@@ -49,6 +49,9 @@ class Bilibili(DownloadBase):
             except requests.exceptions.ConnectionError:
                 logger.error(f"在连接到 {info_by_room_url} 时出现错误")
                 return False
+            except:
+                logger.error("在连接到 {info_by_room_url} 时失败")
+                return False
             if room_info['code'] != 0 or room_info['data']['room_info']['live_status'] != 1:
                 logger.debug(room_info['message'])
                 return False
@@ -60,11 +63,7 @@ class Bilibili(DownloadBase):
 
             # 当 Cookie 存在，并且自定义APi使用Cookie开关关闭时，仅使用官方 Api
             isallow = True if s.headers.get('cookie') is None else config.get('user', {}).get('customAPI_use_cookie', False)
-            try:
-                play_info = get_play_info(s, isallow, official_api_host, params)
-            except:
-                logger.error("使用官方 Api 失败")
-                return False
+            play_info = get_play_info(s, isallow, official_api_host, params)
         if play_info['code'] != 0:
             logger.debug(play_info['message'])
             return False
@@ -168,4 +167,5 @@ def get_play_info(s, isallow, official_api_host, params):
                          timeout=5).json()
         except requests.exceptions.ConnectionError:
             logger.error(f"{custom_api_host}连接失败，尝试回退至官方Api")
+
     return s.get(official_api_host + '/xlive/web-room/v2/index/getRoomPlayInfo', params=params, timeout=5).json()
