@@ -78,7 +78,7 @@ check_sourcecode: 15
 ### 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段(仅ffmpeg streamlink)时录制设置的画质
 ### origin 原画,uhd 蓝光,hd 超清,sd 高清,ld 标清,md 流畅
 ### 没有选中的画质则会自动选择相近的画质优先低清晰度
-#douyin_quality: origin
+#douyin_quality: 'origin'
 
 #------快手直播（中国大陆）------#
 ### 如遇到快手录制卡顿可以尝试切换线路。默认随机。可选以下线路
