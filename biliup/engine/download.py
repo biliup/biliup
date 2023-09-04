@@ -227,18 +227,18 @@ class DownloadBase:
                             time.sleep(delay)
                         else:
                             if retry_count_delay == 1:
-                                end_time = time.localtime()
+                                end_time = int(time.time())
                                 # 只有第一次显示
                                 logger.info(
                                     f'下播延迟检测：{self.__class__.__name__} - {self.fname}，每隔 60 秒检测开播状态，共检测 {delay_all_retry_count} 次')
                             time.sleep(60)
                         continue
                 else:
-                    end_time = time.localtime()
+                    end_time = int(time.time())
                     break
 
         if end_time is None:
-            end_time = time.localtime()
+            end_time = int(time.time())
         self.download_cover(time.strftime(self.get_filename().encode("unicode-escape").decode(), date).encode().decode("unicode-escape"))
         logger.info(f'退出下载：{self.__class__.__name__} - {self.fname}')
         return {
@@ -249,6 +249,7 @@ class DownloadBase:
             'live_cover_path': self.live_cover_path,
             'is_download': self.is_download,
             # 内部使用时间戳传递
+            'start_time': time.mktime(date),
             'end_time': end_time,
         }
 
