@@ -130,7 +130,7 @@ class UploadBase:
                         "name": self.principal,
                         "url": self.data.get('url'),
                         "room_title": self.data.get('title', self.principal),
-                        "start_time": self.data.get('date', default_date),
+                        "start_time": self.data.get('start_time', default_date),
                         "end_time": self.data.get('end_time', default_date),
                         "file_list": [file.video for file in file_list]
                     }, ensure_ascii=False))
