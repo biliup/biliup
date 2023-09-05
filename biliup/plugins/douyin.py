@@ -29,8 +29,11 @@ class Douyin(DownloadBase):
                 if room_id is None or not room_id:
                     logger.debug(f"{Douyin.__name__}: {self.url}: 未开播")
                     return False
+            except (KeyError, IndexError):
+                logger.warning(f"{Douyin.__name__}: {self.url}: 获取房间ID失败,请检查Cookie设置")
+                return False
             except:
-                logger.warning(f"{Douyin.__name__}: {self.url}: 获取房间ID错误")
+                logger.warning(f"{Douyin.__name__}: {self.url}: 获取房间ID失败")
                 return False
         else:
             try:
@@ -55,7 +58,7 @@ class Douyin(DownloadBase):
             else:
                 room_info = {}
         except:
-            logger.warning(f"{Douyin.__name__}: {self.url}: 获取错误")
+            logger.warning(f"{Douyin.__name__}: {self.url}: 获取失败")
             return False
 
         try:
