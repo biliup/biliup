@@ -1,12 +1,14 @@
 import json
-from urllib.parse import unquote
+from typing import Optional
+from urllib.parse import unquote, urlparse, parse_qs, urlencode, urlunparse
 
 import requests
 from . import logger, match1
 from biliup.config import config
+from .Danmaku import DanmakuClient
+from ..common.tools import NamedLock
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
-from biliup.plugins.Danmaku import DanmakuClient
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m|live)\.)?douyin\.com')
@@ -27,8 +29,11 @@ class Douyin(DownloadBase):
                 if room_id is None or not room_id:
                     logger.debug(f"{Douyin.__name__}: {self.url}: 未开播")
                     return False
+            except (KeyError, IndexError):
+                logger.warning(f"{Douyin.__name__}: {self.url}: 获取房间ID失败,请检查Cookie设置")
+                return False
             except:
-                logger.warning(f"{Douyin.__name__}: {self.url}: 获取房间ID错误")
+                logger.warning(f"{Douyin.__name__}: {self.url}: 获取房间ID失败")
                 return False
         else:
             try:
@@ -41,19 +46,19 @@ class Douyin(DownloadBase):
 
         if room_id[0] == "+":
             room_id = room_id[1:]
-        if room_id.isdigit():
-            room_id = f"+{room_id}"
-
         try:
-            page = requests.get(f"https://live.douyin.com/{room_id}", headers=self.fake_headers, timeout=5).text
-            page_data = unquote(
-                page.split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0])
-            room_info = json.loads(page_data)['app']['initialState']['roomStore']['roomInfo']['room']
-        except (KeyError, IndexError):
-            logger.warning(f"{Douyin.__name__}: {self.url}: 获取错误,请检查Cookie设置")
-            return False
+            if "ttwid" not in self.fake_headers['Cookie']:
+                self.fake_headers['Cookie'] = f'ttwid={DouyinUtils.get_ttwid()};{self.fake_headers["Cookie"]}'
+            page = requests.get(
+                DouyinUtils.build_request_url(f"https://live.douyin.com/webcast/room/web/enter/?web_rid={room_id}"),
+                headers=self.fake_headers, timeout=5).text
+            room_info = json.loads(page)['data']['data']
+            if len(room_info) > 0:
+                room_info = room_info[0]
+            else:
+                room_info = {}
         except:
-            logger.warning(f"{Douyin.__name__}: {self.url}: 获取错误")
+            logger.warning(f"{Douyin.__name__}: {self.url}: 获取失败")
             return False
 
         try:
@@ -111,3 +116,37 @@ class Douyin(DownloadBase):
     def close(self):
         if self.danmaku:
             self.danmaku.stop()
+
+
+class DouyinUtils:
+    # 抖音ttwid
+    _douyin_ttwid: Optional[str] = None
+
+    @staticmethod
+    def get_ttwid() -> Optional[str]:
+        with NamedLock("douyin_ttwid_get"):
+            if not DouyinUtils._douyin_ttwid:
+                page = requests.get("https://live.douyin.com/1-2-3-4-5-6-7-8-9-0", timeout=5)
+                DouyinUtils._douyin_ttwid = page.cookies.get("ttwid")
+            return DouyinUtils._douyin_ttwid
+
+    @staticmethod
+    def build_request_url(url: str) -> str:
+        parsed_url = urlparse(url)
+        existing_params = parse_qs(parsed_url.query)
+        existing_params['aid'] = ['6383']
+        existing_params['device_platform'] = ['web']
+        existing_params['browser_language'] = ['zh-CN']
+        existing_params['browser_platform'] = ['Win32']
+        existing_params['browser_name'] = ['Chrome']
+        existing_params['browser_version'] = ['92.0.4515.159']
+        new_query_string = urlencode(existing_params, doseq=True)
+        new_url = urlunparse((
+            parsed_url.scheme,
+            parsed_url.netloc,
+            parsed_url.path,
+            parsed_url.params,
+            new_query_string,
+            parsed_url.fragment
+        ))
+        return new_url
