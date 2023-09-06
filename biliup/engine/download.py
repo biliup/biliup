@@ -249,7 +249,6 @@ class DownloadBase:
             'live_cover_path': self.live_cover_path,
             'is_download': self.is_download,
             # 内部使用时间戳传递
-            'start_time': date,
             'end_time': end_time,
         }
 
