@@ -5,7 +5,11 @@
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
-## 0.4.30
+## 0.4.31
+- 更新时间：2023.09.12
+- 🔧修复抖音弹幕问题[@CoolZxp](https://github.com/CoolZxp)
+
+## 0.4.30 ⚠️⚠️有重大问题，请勿使用该版本。
 - 更新时间：2023.09.12
 - 🔧youtube配置说明修改[@CoolZxp](https://github.com/CoolZxp)
 - 🔧避免Windows可能的弹幕录制任务关闭失败[@CoolZxp](https://github.com/CoolZxp)
