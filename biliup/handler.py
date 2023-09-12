@@ -50,7 +50,7 @@ def process(name, url):
         processor(preprocessor, json.dumps({
             "name": name,
             "url": url,
-            "start_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            "start_time": int(time.time())
         }, ensure_ascii=False))
 
     url_status = event_manager.context['url_status']

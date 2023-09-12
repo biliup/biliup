@@ -130,8 +130,8 @@ class UploadBase:
                         "name": self.principal,
                         "url": self.data.get('url'),
                         "room_title": self.data.get('title', self.principal),
-                        "start_time": time.strftime("%Y-%m-%d %H:%M:%S", self.data.get('date', default_date)),
-                        "end_time": time.strftime("%Y-%m-%d %H:%M:%S", self.data.get('end_time', default_date)),
+                        "start_time": int(time.mktime(self.data.get('date', default_date))),
+                        "end_time": int(time.mktime(self.data.get('end_time', default_date))),
                         "file_list": [file.video for file in file_list]
                     }, ensure_ascii=False))
                     # 后处理完成后重新扫描文件列表
