@@ -5,6 +5,25 @@
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 0.4.30
+- 更新时间：2023.09.12
+- 🔧youtube配置说明修改[@CoolZxp](https://github.com/CoolZxp)
+- 🔧避免Windows可能的弹幕录制任务关闭失败[@CoolZxp](https://github.com/CoolZxp)
+- 🔧为部分检测添加超时时间避免检测时间过长[@CoolZxp](https://github.com/CoolZxp)
+- 🔧调整弹幕录制日志[@CoolZxp](https://github.com/CoolZxp)
+- 🔧斗鱼录制及弹幕对URL支持同步[@CoolZxp](https://github.com/CoolZxp)
+- 🔧修复斗鱼弹幕缺失[@CoolZxp](https://github.com/CoolZxp)
+- 🔧修复Bilibili弹幕缺失[@CoolZxp](https://github.com/CoolZxp)
+- 🔧抖音录制及弹幕对URL支持同步[@CoolZxp](https://github.com/CoolZxp)
+- 🔧抖音弹幕也会使用配置内的Cookie[@CoolZxp](https://github.com/CoolZxp)
+- 🔧适配新版抖音录制及弹幕[@CoolZxp](https://github.com/CoolZxp)
+- 🔧优化Bilibili提示报错[@Kataick](https://github.com/Kataick)
+- 🔧补全yaml配置文件抖音画质符号[@Kataick](https://github.com/Kataick)
+- 💡youtube添加缓存[@CoolZxp](https://github.com/CoolZxp)
+- 💡youtube跳过检测after_date日期后的视频及直播[@CoolZxp](https://github.com/CoolZxp)
+- ⚠️修改preprocessor(下载直播),downloaded_processor(上传直播)时返回的开播及下播时间为时间戳[@Kataick](https://github.com/Kataick)
+
+
 ## 0.4.29
 - 更新时间：2023.08.04
 - 🔧youtube配置说明修改[@CoolZxp](https://github.com/CoolZxp)
