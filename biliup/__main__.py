@@ -63,9 +63,6 @@ async def main(args):
         # 这里也无需使用异步方法 一个线程一个检测 异步方法让渡控制权没用
         threading.Thread(target=check_url, args=(event_manager.context['checker'][plugin],)).start()
 
-    wait = config.get('event_loop_interval', 40)
-    # 初始化定时器
-    timer = Timer(func=check_timer, interval=wait)
     # 初始化数据库
     db.init()
     # 启动时删除临时文件夹
