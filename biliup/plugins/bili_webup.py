@@ -4,13 +4,14 @@ import hashlib
 import json
 import math
 import os
+import re
 import sys
 import time
 import urllib.parse
 from dataclasses import asdict, dataclass, field, InitVar
 from json import JSONDecodeError
 from os.path import splitext, basename
-from typing import Union, Any
+from typing import Union, Any, List
 from urllib import parse
 from urllib.parse import quote
 
@@ -47,7 +48,7 @@ class BiliWeb(UploadBase):
         self.copyright = copyright
         self.dtime = dtime
 
-    def upload(self, file_list):
+    def upload(self, file_list: List[UploadBase.FileInfo]) -> List[UploadBase.FileInfo]:
         video = Data()
         video.dynamic = self.dynamic
         with BiliBili(video) as bili:
@@ -55,7 +56,7 @@ class BiliWeb(UploadBase):
             bili.appsec = self.user.get('appsec')
             bili.login(self.persistence_path, self.user)
             for file in file_list:
-                video_part = bili.upload_file(file, self.lines, self.threads)  # 上传视频
+                video_part = bili.upload_file(file.video, self.lines, self.threads)  # 上传视频
                 video_part['title'] = video_part['title'][:80]
                 video.append(video_part)  # 添加已经上传的视频
             video.title = self.data["format_title"][:80]  # 稿件标题限制80字
@@ -335,6 +336,7 @@ class BiliBili:
         bos: {"os":"bos","query":"bucket=bvcupcdnboshb&probe_version=20221109",
         "probe_url":"??"}
         """
+        preferred_upos_cdn = None
         if not self._auto_os:
             if lines == 'kodo':
                 self._auto_os = {"os": "kodo", "query": "bucket=bvcupcdnkodobm&probe_version=20221109",
@@ -342,18 +344,23 @@ class BiliBili:
             elif lines == 'bda2':
                 self._auto_os = {"os": "upos", "query": "upcdn=bda2&probe_version=20221109",
                                  "probe_url": "//upos-sz-upcdnbda2.bilivideo.com/OK"}
+                preferred_upos_cdn = 'bda2'
             elif lines == 'cs-bda2':
                 self._auto_os = {"os": "upos", "query": "upcdn=bda2&probe_version=20221109",
                                  "probe_url": "//upos-cs-upcdnbda2.bilivideo.com/OK"}
+                preferred_upos_cdn = 'bda2'
             elif lines == 'ws':
                 self._auto_os = {"os": "upos", "query": "upcdn=ws&probe_version=20221109",
                                  "probe_url": "//upos-sz-upcdnws.bilivideo.com/OK"}
+                preferred_upos_cdn = 'ws'
             elif lines == 'qn':
                 self._auto_os = {"os": "upos", "query": "upcdn=qn&probe_version=20221109",
                                  "probe_url": "//upos-sz-upcdnqn.bilivideo.com/OK"}
+                preferred_upos_cdn = 'qn'
             elif lines == 'cs-qn':
                 self._auto_os = {"os": "upos", "query": "upcdn=qn&probe_version=20221109",
                                  "probe_url": "//upos-cs-upcdnqn.bilivideo.com/OK"}
+                preferred_upos_cdn = 'qn'
             elif lines == 'cos':
                 self._auto_os = {"os": "cos", "query": "",
                                  "probe_url": ""}
@@ -386,10 +393,24 @@ class BiliBili:
                 'name': f.name,
                 'size': total_size,
             }
-            ret = self.__session.get(
+            resp = self.__session.get(
                 f"https://member.bilibili.com/preupload?{self._auto_os['query']}", params=query,
                 timeout=5)
-            return asyncio.run(upload(f, total_size, ret.json(), tasks=tasks))
+            ret = resp.json()
+            logger.debug(f"preupload: {ret}")
+            if preferred_upos_cdn:
+                original_endpoint: str = ret['endpoint']
+                if re.match(r'//upos-(sz|cs)-upcdn(bda2|ws|qn)\.bilivideo\.com', original_endpoint):
+                    if re.match(r'bda2|qn|ws', preferred_upos_cdn):
+                        logger.debug(f"Preferred UpOS CDN: {preferred_upos_cdn}")
+                        new_endpoint = re.sub(r'upcdn(bda2|qn|ws)', f'upcdn{preferred_upos_cdn}', original_endpoint)
+                        logger.debug(f"{original_endpoint} => {new_endpoint}")
+                        ret['endpoint'] = new_endpoint
+                    else:
+                        logger.error(f"Unrecognized preferred_upos_cdn: {preferred_upos_cdn}")
+                else:
+                    logger.warning(f"Assigned UpOS endpoint {original_endpoint} was never seen before, something else might have changed, so will not modify it")
+            return asyncio.run(upload(f, total_size, ret, tasks=tasks))
 
     async def cos(self, file, total_size, ret, chunk_size=10485760, tasks=3, internal=False):
         filename = file.name
@@ -515,7 +536,7 @@ class BiliBili:
             "X-Upos-Auth": auth
         }
         # 向上传地址申请上传，得到上传id等信息
-        upload_id = self.__session.post(f'{url}?uploads&output=json', timeout=5,
+        upload_id = self.__session.post(f'{url}?uploads&output=json', timeout=15,
                                         headers=headers).json()["upload_id"]
         # 开始上传
         parts = []  # 分块信息
@@ -543,8 +564,8 @@ class BiliBili:
             'output': 'json',
             'profile': 'ugcupos/bup'
         }
-        ii = 0
-        while ii <= 3:
+        attempt = 0
+        while attempt <= 5:  # 一旦放弃就会丢失前面所有的进度，多试几次吧
             try:
                 r = self.__session.post(url, params=p, json={"parts": parts}, headers=headers, timeout=15).json()
                 if r.get('OK') == 1:
@@ -552,8 +573,8 @@ class BiliBili:
                     return {"title": splitext(filename)[0], "filename": splitext(basename(upos_uri))[0], "desc": ""}
                 raise IOError(r)
             except IOError:
-                ii += 1
-                logger.info("上传出现问题，尝试重连，次数：" + str(ii))
+                attempt += 1
+                logger.info(f"请求合并分片时出现问题，尝试重连，次数：" + str(attempt))
                 time.sleep(15)
 
     @staticmethod

@@ -16,54 +16,54 @@ class Huya:
 
     @staticmethod
     async def get_ws_info(url):
-        try:
-            reg_datas = []
-            url = 'https://m.huya.com/' + url.split('/')[-1]
-            headers = {
-                'user-agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, '
-                            'like Gecko) Chrome/79.0.3945.88 Mobile Safari/537.36'}
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers) as resp:
-                    room_page = await resp.text()
-                    m = re.search(r"lYyid\":([0-9]+)", room_page, re.MULTILINE)
-                    ayyuid = m.group(1)
-                    m = re.search(r"lChannelId\":([0-9]+)", room_page, re.MULTILINE)
-                    tid = m.group(1)
-                    m = re.search(r"lSubChannelId\":([0-9]+)", room_page, re.MULTILINE)
-                    sid = m.group(1)
+        reg_datas = []
+        url = 'https://m.huya.com/' + url.split('/')[-1]
+        headers = {
+            'user-agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, '
+                          'like Gecko) Chrome/79.0.3945.88 Mobile Safari/537.36'}
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=5) as resp:
+                room_page = await resp.text()
+                m = re.search(r"lYyid\":([0-9]+)", room_page, re.MULTILINE)
+                ayyuid = m.group(1)
+                m = re.search(r"lChannelId\":([0-9]+)", room_page, re.MULTILINE)
+                tid = m.group(1)
+                m = re.search(r"lSubChannelId\":([0-9]+)", room_page, re.MULTILINE)
+                sid = m.group(1)
 
-            oos = tarscore.TarsOutputStream()
-            oos.write(tarscore.int64, 0, int(ayyuid))
-            oos.write(tarscore.boolean, 1, True)  # Anonymous
-            oos.write(tarscore.string, 2, "")  # sGuid
-            oos.write(tarscore.string, 3, "")
-            oos.write(tarscore.int64, 4, int(tid))
-            oos.write(tarscore.int64, 5, int(sid))
-            oos.write(tarscore.int64, 6, 0)
-            oos.write(tarscore.int64, 7, 0)
+        oos = tarscore.TarsOutputStream()
+        oos.write(tarscore.int64, 0, int(ayyuid))
+        oos.write(tarscore.boolean, 1, True)  # Anonymous
+        oos.write(tarscore.string, 2, "")  # sGuid
+        oos.write(tarscore.string, 3, "")
+        oos.write(tarscore.int64, 4, int(tid))
+        oos.write(tarscore.int64, 5, int(sid))
+        oos.write(tarscore.int64, 6, 0)
+        oos.write(tarscore.int64, 7, 0)
 
-            wscmd = tarscore.TarsOutputStream()
-            wscmd.write(tarscore.int32, 0, 1)
-            wscmd.write(tarscore.bytes, 1, oos.getBuffer())
+        wscmd = tarscore.TarsOutputStream()
+        wscmd.write(tarscore.int32, 0, 1)
+        wscmd.write(tarscore.bytes, 1, oos.getBuffer())
 
-            reg_datas.append(wscmd.getBuffer())
-        except:
-            print("huya：get_ws_info()执行错误")
-        finally:
-            return Huya.wss_url, reg_datas
+        reg_datas.append(wscmd.getBuffer())
+
+        return Huya.wss_url, reg_datas
 
     @staticmethod
     def decode_msg(data):
-        class user(tarscore.struct):
+        class User(tarscore.struct):
+            @staticmethod
             def readFrom(ios):
                 return ios.read(tarscore.string, 2, False).decode("utf8")
 
-        class dcolor(tarscore.struct):
+        class DColor(tarscore.struct):
+            @staticmethod
             def readFrom(ios):
                 return ios.read(tarscore.int32, 0, False)
 
         name = ""
         content = ""
+        color = 16777215
         msgs = []
         ios = tarscore.TarsInputStream(data)
 
@@ -71,15 +71,15 @@ class Huya:
             ios = tarscore.TarsInputStream(ios.read(tarscore.bytes, 1, False))
             if ios.read(tarscore.int64, 1, False) == 1400:
                 ios = tarscore.TarsInputStream(ios.read(tarscore.bytes, 2, False))
-                name = ios.read(user, 0, False)  # username
+                name = ios.read(User, 0, False)  # username
                 content = ios.read(tarscore.string, 3, False).decode("utf8")  # content
-                color = ios.read(dcolor, 6, False)  # danmaku color
+                color = ios.read(DColor, 6, False)  # danmaku color
                 if color == -1:
                     color = 16777215
 
         if name != "":
             msg = {"name": name, "color": f"{color}", "content": content, "msg_type": "danmaku"}
-        # else:
-        #     msg = {"name": "", "content": "", "msg_type": "other"}
+            # else:
+            #     msg = {"name": "", "content": "", "msg_type": "other"}
             msgs.append(msg)
         return msgs

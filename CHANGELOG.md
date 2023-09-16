@@ -5,6 +5,93 @@
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 0.4.31
+- 更新时间：2023.09.12
+- 🔧修复抖音弹幕问题[@CoolZxp](https://github.com/CoolZxp)
+
+## 0.4.30 ⚠️⚠️有重大问题，请勿使用该版本。
+- 更新时间：2023.09.12
+- 🔧youtube配置说明修改[@CoolZxp](https://github.com/CoolZxp)
+- 🔧避免Windows可能的弹幕录制任务关闭失败[@CoolZxp](https://github.com/CoolZxp)
+- 🔧为部分检测添加超时时间避免检测时间过长[@CoolZxp](https://github.com/CoolZxp)
+- 🔧调整弹幕录制日志[@CoolZxp](https://github.com/CoolZxp)
+- 🔧斗鱼录制及弹幕对URL支持同步[@CoolZxp](https://github.com/CoolZxp)
+- 🔧修复斗鱼弹幕缺失[@CoolZxp](https://github.com/CoolZxp)
+- 🔧修复Bilibili弹幕缺失[@CoolZxp](https://github.com/CoolZxp)
+- 🔧抖音录制及弹幕对URL支持同步[@CoolZxp](https://github.com/CoolZxp)
+- 🔧抖音弹幕也会使用配置内的Cookie[@CoolZxp](https://github.com/CoolZxp)
+- 🔧适配新版抖音录制及弹幕[@CoolZxp](https://github.com/CoolZxp)
+- 🔧优化Bilibili提示报错[@Kataick](https://github.com/Kataick)
+- 🔧补全yaml配置文件抖音画质符号[@Kataick](https://github.com/Kataick)
+- 💡youtube添加缓存[@CoolZxp](https://github.com/CoolZxp)
+- 💡youtube跳过检测after_date日期后的视频及直播[@CoolZxp](https://github.com/CoolZxp)
+- ⚠️修改preprocessor(下载直播),downloaded_processor(上传直播)时返回的开播及下播时间为时间戳[@Kataick](https://github.com/Kataick)
+
+
+## 0.4.29
+- 更新时间：2023.08.04
+- 🔧youtube配置说明修改[@CoolZxp](https://github.com/CoolZxp)
+- 🔧将上传录像时可以开始新的录制调整为默认功能[@CoolZxp](https://github.com/CoolZxp)
+- 🔧下载上传逻辑调整[@CoolZxp](https://github.com/CoolZxp)
+- 🔧上传后正确的删除弹幕[@CoolZxp](https://github.com/CoolZxp)
+- 🔧downloaded_processor的时间被正确格式化以及明确时间默认值[@Kataick](https://github.com/Kataick)
+- 🔧downloaded_processor的参数被正确格式化[@Kataick](https://github.com/Kataick)
+- 🔧bili_web强制选择UpOS模式下的线路[@1toldyou](https://github.com/1toldyou)
+- 🔧正确的检测进程空闲状态[@CoolZxp](https://github.com/CoolZxp)
+- 🔧正确的重启进程[@CoolZxp](https://github.com/CoolZxp)
+- 💡youtube添加单独下载直播和回放选项[@CoolZxp](https://github.com/CoolZxp)
+- 💡youtube添加streams playlists shorts类型链接支持[@CoolZxp](https://github.com/CoolZxp)
+- 💡youtube添加筛选无效时提示[@CoolZxp](https://github.com/CoolZxp)
+- 💡youtube不会在运行目录产生多余文件了[@CoolZxp](https://github.com/CoolZxp)
+- 💡封面下载支持webp[@CoolZxp](https://github.com/CoolZxp)
+- 💡启动时删除临时缓存文件[@CoolZxp](https://github.com/CoolZxp)
+
+## 0.4.28
+- 更新时间：2023.07.30
+- 🔧在读取youtube缓存失败时增加提示[@CoolZxp](https://github.com/CoolZxp)
+- 🔧调整twitch日志输出[@CoolZxp](https://github.com/CoolZxp)
+- 🔧调整twitch youtube封面下载逻辑[@CoolZxp](https://github.com/CoolZxp)
+- 🔧修复youtube视频录制异常中断时多余文件不删除[@CoolZxp](https://github.com/CoolZxp)
+- 🔧兼容低版本python[@CoolZxp](https://github.com/CoolZxp)
+- 🔧斗鱼请求优化[@CoolZxp](https://github.com/CoolZxp)
+- 🔧斗鱼适配移动端url[@CoolZxp](https://github.com/CoolZxp)
+- 🔧斗鱼避免下播时可能的异常[@CoolZxp](https://github.com/CoolZxp)
+- 🔧避免上传时由于操作文件权限不足导致后处理失败[@CoolZxp](https://github.com/CoolZxp)
+- 🔧补充downloaded_processor toml配置[@Kataick](https://github.com/Kataick)
+- 🔧删除多余日志输出[@Kataick](https://github.com/Kataick)
+- 🔧让检测后能更快的开始下载[@CoolZxp](https://github.com/CoolZxp)
+- 🔧修复快手录制问题[@CoolZxp](https://github.com/CoolZxp)
+- 💡上传后封面自动删除[@CoolZxp](https://github.com/CoolZxp)
+- 💡downloaded_processor增加返回参数(下播时间和视频列表)[@Kataick](https://github.com/Kataick)
+- 💡stream-gears升级至0.1.19
+
+
+## 0.4.27
+- 更新时间：2023.07.29
+- 🔧修复虎牙拉流403分段问题[@CoolZxp](https://github.com/CoolZxp)
+- 🔧统一download.py的输出格式[@Kataick](https://github.com/Kataick)
+- 🔧修复抖音弹幕分段与录制stop的问题[@CoolZxp](https://github.com/CoolZxp)
+- 🔧调整直播流获取失败及下播延迟检测功能[@CoolZxp](https://github.com/CoolZxp)
+- 🔧优化下载流程与下载日志逻辑以及下播检测延迟阈值[@CoolZxp](https://github.com/CoolZxp)
+- 🔧虎牙画质修复[@CoolZxp](https://github.com/CoolZxp)
+- 🔧调整封面下载逻辑[@CoolZxp](https://github.com/CoolZxp)
+- 🔧调整批量检测功能[@CoolZxp](https://github.com/CoolZxp)
+- 🔧优化youtube与twitch下载策略[@CoolZxp](https://github.com/CoolZxp)
+- 💡添加斗鱼,虎牙,哔哩哔哩,抖音自选画质[@CoolZxp](https://github.com/CoolZxp)
+
+## 0.4.26
+- 更新时间：2023.07.27
+- 🔧修复虎牙直播流下载的问题。 [@xxxxuanran](https://github.com/xxxxuanran)
+
+## 0.4.25
+- 更新时间：2023.07.27
+- 💡新增NOW直播[@Kataick](https://github.com/Kataick)
+- 💡新增映客直播[@Kataick](https://github.com/Kataick)
+- 💡增加downloaded_processor功能，支持结束录制时执行指定Shell指令[@Kataick](https://github.com/Kataick)
+
+## 0.4.24
+- 🔧修复哔哩哔哩flv流403的问题。 [@xxxxuanran](https://github.com/xxxxuanran)
+  
 ## 0.4.23
 - 更新时间：2023.07.17
 - 🔧preprocessor增加开播时返回主播名字和开播地址 [@Kataick](https://github.com/Kataick)

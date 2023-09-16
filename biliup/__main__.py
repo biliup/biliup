@@ -4,15 +4,16 @@ import argparse
 import asyncio
 import logging.config
 import platform
+import shutil
+import threading
 
 import biliup.common.reload
 from biliup.config import config
 from biliup.database import DB as db
+from biliup.downloader import check_url, check_flag
 from . import __version__, LOG_CONF
 from .common.Daemon import Daemon
 from .common.reload import AutoReload
-from .common.timer import Timer
-from .engine.event import Event
 
 
 def arg_parser():
@@ -53,32 +54,34 @@ def arg_parser():
 
 
 async def main(args):
-    from .handler import CHECK_UPLOAD, CHECK, event_manager
+    from .handler import event_manager
 
     event_manager.start()
 
-    async def check_timer():
-        event_manager.send_event(Event(CHECK_UPLOAD))
-        for k in event_manager.context['checker'].keys():
-            event_manager.send_event(Event(CHECK, (k,)))
+    for plugin in event_manager.context['checker']:
+        # 线程数量是固定的在开始运行的时候创建不会产生变化也不会闲置或者复用线程 所以无需使用线程池
+        # 这里也无需使用异步方法 一个线程一个检测 异步方法让渡控制权没用
+        threading.Thread(target=check_url, args=(event_manager.context['checker'][plugin],)).start()
 
     wait = config.get('event_loop_interval', 40)
     # 初始化定时器
     timer = Timer(func=check_timer, interval=wait)
     # 初始化数据库
     db.init()
+    # 启动时删除临时文件夹
+    shutil.rmtree('./cache/temp', ignore_errors=True)
 
     interval = config.get('check_sourcecode', 15)
     if args.http:
         import biliup.web
         runner, site = await biliup.web.service(args, event_manager)
-        detector = AutoReload(event_manager, timer, runner.cleanup, interval=interval)
+        detector = AutoReload(event_manager, runner.cleanup, check_flag.set, interval=interval)
         biliup.common.reload.global_reloader = detector
-        await asyncio.gather(detector.astart(), timer.astart(), site.start(), return_exceptions=True)
+        await asyncio.gather(detector.astart(), site.start(), return_exceptions=True)
     else:
         # 模块更新自动重启
-        detector = AutoReload(event_manager, timer, interval=interval)
-        await asyncio.gather(detector.astart(), timer.astart(), return_exceptions=True)
+        detector = AutoReload(event_manager, check_flag.set, interval=interval)
+        await asyncio.gather(detector.astart(), return_exceptions=True)
 
 
 if __name__ == '__main__':

@@ -10,7 +10,7 @@ class YY(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 
-    def check_stream(self):
+    def check_stream(self, is_check=False):
         headers = {
             'content-type': 'text/plain;charset=UTF-8',
             'referer': 'https://www.yy.com/',

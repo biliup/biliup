@@ -9,7 +9,7 @@ class egame(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 
-    def check_stream(self):
+    def check_stream(self, is_check=False):
         if len(self.url.split("egame.qq.com/")) < 2:
             logger.debug("直播间格式错误")
             return False
@@ -17,7 +17,7 @@ class egame(DownloadBase):
         url = 'https://share.egame.qq.com/cgi-bin/pgg_async_fcgi'
         data = {'param': '''{"0":{"module":"pgg_live_read_svr","method":"get_live_and_profile_info","param":{
         "anchor_id":''' + str(rid) + ''',"layout_id":"hot","index":1,"other_uid":0}}}'''}
-        r = requests.post(url=url, data=data).json()
+        r = requests.post(url=url, data=data, timeout=5).json()
         if r['ecode'] != 0:
             logger.debug("直播间地址错误")
             return False
