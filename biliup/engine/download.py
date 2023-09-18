@@ -12,6 +12,7 @@ import stream_gears
 from PIL import Image
 
 from biliup.config import config
+from biliup.database import DB as db
 
 logger = logging.getLogger('biliup')
 
@@ -241,7 +242,7 @@ class DownloadBase:
             end_time = time.localtime()
         self.download_cover(time.strftime(self.get_filename().encode("unicode-escape").decode(), date).encode().decode("unicode-escape"))
         logger.info(f'退出下载：{self.__class__.__name__} - {self.fname}')
-        return {
+        stream_info = {
             'name': self.fname,
             'url': self.url,
             'title': self.room_title,
@@ -251,6 +252,11 @@ class DownloadBase:
             # 内部使用时间戳传递
             'end_time': end_time,
         }
+        # 如果用户在上传前退出并删除文件，可能导致数据库中记录未删除
+        if not db.add_stream_info(**stream_info):
+            db.update_stream_info(**stream_info)
+
+        return stream_info
 
     def download_cover(self, fmtname):
         # 获取封面

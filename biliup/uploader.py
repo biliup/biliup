@@ -3,6 +3,7 @@ import logging
 import time
 
 from biliup.config import config
+from biliup.database import DB as db
 from .engine.decorators import Plugin
 
 logger = logging.getLogger('biliup')
@@ -17,6 +18,8 @@ def upload(data):
     """
     try:
         index = data['name']
+        # 尝试获取数据库中对应的数据, 并降低旧数据误用的可能性
+        data = {**db.get_stream_info(index), **data}
         context = {**config, **config['streamers'][index]}
         platform = context.get("uploader", "biliup-rs")
         cls = Plugin.upload_plugins.get(platform)

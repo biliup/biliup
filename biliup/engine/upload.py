@@ -12,6 +12,8 @@ from typing import NamedTuple, Optional, List
 from biliup.common.tools import NamedLock
 from biliup.config import config
 
+from biliup.database import DB as db
+
 logger = logging.getLogger('biliup')
 
 
@@ -146,6 +148,7 @@ class UploadBase:
                     needed2process = self.upload(file_list)
                     if needed2process:
                         self.postprocessor(needed2process)
+                    db.delete_stream_info(self.principal)
         finally:
             with NamedLock('upload_filename'):
                 event_manager.context['upload_filename'] = list(

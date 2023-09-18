@@ -9,6 +9,7 @@ import threading
 
 import biliup.common.reload
 from biliup.config import config
+from biliup.database import DB as db
 from biliup.downloader import check_url, check_flag
 from . import __version__, LOG_CONF
 from .common.Daemon import Daemon
@@ -62,6 +63,8 @@ async def main(args):
         # 这里也无需使用异步方法 一个线程一个检测 异步方法让渡控制权没用
         threading.Thread(target=check_url, args=(event_manager.context['checker'][plugin],)).start()
 
+    # 初始化数据库
+    db.init()
     # 启动时删除临时文件夹
     shutil.rmtree('./cache/temp', ignore_errors=True)
 
