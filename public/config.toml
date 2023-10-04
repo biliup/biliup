@@ -89,6 +89,9 @@ check_sourcecode = 15
 ### FLV, HLS
 ### 使用 HLS 时，推荐指定 format 为 mp4，且 kwai_cdn 选项失效。
 # kwai_protocol = "HLS"
+### 快手cookie，如遇错误 “操作太快了，请稍微休息一下”，请按下面格式粘贴您的cookie
+### 其中did为设备绑定码，如某设备被封禁，请更换其他设备重新抓取cookie
+# kwai_cookie = "did=web_f9cf7c2d67ddxxxxxxxxxxxxxxxxxxxx; didv=169xxxxxxxxxx;"
 
 #------哔哩哔哩------#
 ### 录制BILIBILI弹幕，目前暂时不支持视频按时长分段下的弹幕文件自动分段，默认关闭

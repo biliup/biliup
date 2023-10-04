@@ -61,6 +61,7 @@ class Kuaishou(DownloadBase):
                 'Origin': 'https://livev.m.chenzhongtech.com',
                 'Referer': murl,
                 'Content-Type': 'application/json',
+                'Cookie' : config.get('kwai_cookie')
             })
             data = {
                 'source': 6,
