@@ -1,148 +1,212 @@
-import asyncio
-import random
-import subprocess
-import threading
-from urllib.parse import urlparse
+import copy
+import os
+import shutil
+from typing import Optional
 
 import yt_dlp
-import streamlink
-import os
-import time
-from PIL import Image
-from yt_dlp.utils import MaxDownloadsReached
 
+from yt_dlp import DownloadError
 from yt_dlp.utils import DateRange
 from biliup.config import config
-from biliup.plugins.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
-from ..engine.download import DownloadBase, get_valid_filename, stream_gears_download
 from . import logger
+from ..engine.download import DownloadBase
 
 VALID_URL_BASE = r'https?://(?:(?:www|m)\.)?youtube\.com/(?P<id>.*?)\??(.*?)'
 
+
 @Plugin.download(regexp=VALID_URL_BASE)
 class Youtube(DownloadBase):
-    def __init__(self, fname, url, suffix='webm'):
-        DownloadBase.__init__(self, fname, url, suffix=suffix)
-        self.use_new_ytb_downloader = config.get('use_new_ytb_downloader', False)
+    def __init__(self, fname, url):
+        super().__init__(fname, url)
         self.ytb_danmaku = config.get('ytb_danmaku', False)
         self.cookiejarFile = config.get('user', {}).get('youtube_cookie')
-        self.vcodec = config.get('youtube_prefer_vcodec','av01|vp9|avc')
-        self.acodec = config.get('youtube_prefer_acodec','opus|mp4a')
-        self.resolution = config.get('youtube_max_resolution','4320')
-        self.filesize = config.get('youtube_max_videosize','100G')
-        self.beforedate = config.get('youtube_before_date','20770707')
-        self.afterdate = config.get('youtube_after_date','19700101')
-        self.use_youtube_cover = config.get('use_youtube_cover', False)
+        self.vcodec = config.get('youtube_prefer_vcodec')
+        self.acodec = config.get('youtube_prefer_acodec')
+        self.resolution = config.get('youtube_max_resolution')
+        self.filesize = config.get('youtube_max_videosize')
+        self.beforedate = config.get('youtube_before_date')
+        self.afterdate = config.get('youtube_after_date')
+        self.enable_download_live = config.get('youtube_enable_download_live', True)
+        self.enable_download_playback = config.get('youtube_enable_download_playback', True)
+        # 需要下载的 url
+        self.download_url = None
 
-    def check_stream(self):
-        if self.use_new_ytb_downloader and self.downloader == 'ffmpeg':
-            _fname, self.room_title = self.get_stream_info(self.url)
-            port = random.randint(1025, 65535)
-            stream_shell = [
-                "streamlink",
-                "--player-external-http",  # 为外部程序提供流媒体数据
-                "--player-external-http-port", str(port),  # 对外部输出流的端口
-                self.url, "best"  # 流链接
-            ]
-            self.proc = subprocess.Popen(stream_shell)
-            self.raw_stream_url = f"http://localhost:{port}"
-            i = 0
-            while i < 5:
-                if not (self.proc.poll() is None):
-                    return
-                time.sleep(1)
-                i += 1
-            return True
-        else:
-            with yt_dlp.YoutubeDL({'download_archive': 'archive.txt', 'ignoreerrors': True, 'extract_flat': True,
-                                   'cookiefile': self.cookiejarFile}) as ydl:
+    def check_stream(self, is_check=False):
+        with yt_dlp.YoutubeDL({
+            'download_archive': 'archive.txt',
+            'cookiefile': self.cookiejarFile,
+            'ignoreerrors': True,
+            'extractor_retries': 0,
+        }) as ydl:
+            # 获取信息的时候不要过滤
+            ydl_archive = copy.deepcopy(ydl.archive)
+            ydl.archive = None
+            if self.download_url is not None:
+                # 直播在重试的时候特别处理
+                info = ydl.extract_info(self.download_url, download=False)
+            else:
                 info = ydl.extract_info(self.url, download=False, process=False)
-                if info is None:
-                    logger.warning(self.cookiejarFile)
-                    logger.warning(self.url)
-                    return False
-                if '_type' in info:
-                    # /live 形式链接取标题
-                    if info['_type'] in 'url' and info['webpage_url_basename'] in 'live':
-                        live = ydl.extract_info(info['url'], download=False, process=False)
-                        self.room_title = live['title']
-                    # Playlist 暂时返回列表名
-                    if info['_type'] in 'playlist':
-                        self.room_title = info['title']
+            if type(info) is not dict:
+                logger.warning(f"{Youtube.__name__}: {self.url}: 获取错误")
+                return False
+
+            cache = KVFileStore(f"./cache/youtube/{self.fname}.txt")
+
+            def loop_entries(entrie):
+                if type(entrie) is not dict:
+                    return None
+                elif entrie.get('_type') == 'playlist':
+                    # 播放列表递归
+                    for e in entrie.get('entries'):
+                        le = loop_entries(e)
+                        if type(le) is dict:
+                            return le
+                        elif le == "stop":
+                            return None
+                elif type(entrie) is dict:
+                    # is_upcoming 等待开播 is_live 直播中 was_live结束直播(回放)
+                    if entrie.get('live_status') == 'is_upcoming':
+                        return None
+                    elif entrie.get('live_status') == 'is_live':
+                        # 未开启直播下载忽略
+                        if not self.enable_download_live:
+                            return None
+                    elif entrie.get('live_status') == 'was_live':
+                        # 未开启回放下载忽略
+                        if not self.enable_download_playback:
+                            return None
+
+                    # 检测是否已下载
+                    if ydl._make_archive_id(entrie) in ydl_archive:
+                        # 如果已下载但是还在直播则不算下载
+                        if entrie.get('live_status') != 'is_live':
+                            return None
+
+                    upload_date = cache.query(entrie.get('id'))
+                    if upload_date is None:
+                        if entrie.get('upload_date') is not None:
+                            upload_date = entrie['upload_date']
+                        else:
+                            entrie = ydl.extract_info(entrie.get('url'), download=False, process=False)
+                            if type(entrie) is dict and entrie.get('upload_date') is not None:
+                                upload_date = entrie['upload_date']
+
+                        # 时间是必然存在的如果不存在说明出了问题 暂时跳过
+                        if upload_date is None:
+                            return None
+                        else:
+                            cache.add(entrie.get('id'), upload_date)
+
+                    if self.afterdate is not None and upload_date < self.afterdate:
+                        return 'stop'
+
+                    # 检测时间范围
+                    if upload_date not in DateRange(self.afterdate, self.beforedate):
+                        return None
+
+                    return entrie
+                return None
+
+            download_entry: Optional[dict] = loop_entries(info)
+            if type(download_entry) is dict:
+                if download_entry.get('live_status') == 'is_live':
+                    self.is_download = False
                 else:
-                    # 视频取标题
-                    self.room_title = info['title']
-                if info.get('entries') is None:
-                    if ydl.in_download_archive(info):
-                        return False
-                    return True
-                for entry in info['entries']:
-                    # 取 Playlist 内视频标题
-                    self.room_title = entry['title']
-                    if ydl.in_download_archive(entry):
-                        continue
-                    # ydl.record_download_archive()
-                    return True
+                    self.is_download = True
+                if not is_check:
+                    if download_entry.get('_type') == 'url':
+                        download_entry = ydl.extract_info(download_entry.get('url'), download=False, process=False)
+                    self.room_title = download_entry.get('title')
+                    self.live_cover_url = download_entry.get('thumbnail')
+                    self.download_url = download_entry.get('webpage_url')
+                return True
+            else:
+                return False
 
     def download(self, filename):
-        if self.use_new_ytb_downloader and self.downloader == 'ffmpeg':
-            if self.filename_prefix:  # 判断是否存在自定义录播命名设置
-                filename = (self.filename_prefix.format(streamer=self.fname, title=self.room_title).encode(
-                    'unicode-escape').decode()).encode().decode("unicode-escape")
-            else:
-                filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
-            filename = get_valid_filename(filename)
-            fmtname = time.strftime(filename.encode("unicode-escape").decode()).encode().decode("unicode-escape")
-            threading.Thread(target=asyncio.run, args=(self.danmaku_download_start(fmtname),)).start()
-            self.ffmpeg_download(fmtname)
-        else:
-            try:
-                ydl_opts = {
-                    'outtmpl': filename+ '.%(ext)s',
-                    'format': f"bestvideo[vcodec~='^({self.vcodec})'][height<={self.resolution}][filesize<{self.filesize}]+bestaudio[acodec~='^({self.acodec})']/best[height<={self.resolution}]/best",
-                    'cookiefile': self.cookiejarFile,
-                    # 'proxy': proxyUrl,
-                    'ignoreerrors': True,
-                    'max_downloads': 1,
-                    'daterange' : DateRange(self.afterdate, self.beforedate),
-                    'break_on_reject': True,
-                    'download_archive': 'archive.txt',
-                }
-                if self.use_youtube_cover is True:
-                    ydl_opts['writethumbnail'] = True
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([self.url])
-            except MaxDownloadsReached:
-                save_dir = f'cover/youtube/'
-                webp_cover_path = f'{filename}.webp'
-                jpg_cover_path = f'{filename}.jpg'
-                if os.path.exists(webp_cover_path):
-                    with Image.open(webp_cover_path) as img:
-                        img = img.convert('RGB')
-                        if not os.path.exists(save_dir):
-                            os.makedirs(save_dir)
-                        img.save(f'{save_dir}{filename}.jpg', format='JPEG')
-                    os.remove(webp_cover_path)
-                    self.live_cover_path = f'{save_dir}{filename}.jpg'
-                elif os.path.exists(jpg_cover_path):
-                    os.rename(jpg_cover_path, f'{save_dir}{filename}.jpg')
-                    self.live_cover_path = f'{save_dir}{filename}.jpg'
-                return False
-            except yt_dlp.utils.RejectedVideoReached:
-                logger.info("已下载完毕指定日期内的视频，结束本次任务")
-                return False
-            except yt_dlp.utils.DownloadError:
-                logger.exception(self.fname)
-                return 1
-            return 0
+        # ydl下载的文件在下载失败时不可控
+        # 临时存储在其他地方
+        download_dir = f'./cache/temp/youtube/{filename}'
+        try:
+            ydl_opts = {
+                'outtmpl': f'{download_dir}/{filename}.%(ext)s',
+                'cookiefile': self.cookiejarFile,
+                'break_on_reject': True,
+                'download_archive': 'archive.txt',
+                'format': 'bestvideo',
+                # 'proxy': proxyUrl,
+            }
 
-    def get_stream_info(self, url):
-        session = streamlink.Streamlink()
-        # Streamlink 插件系统的内部运行机制，通过 URL 匹配到 YouTube 插件
-        plugin = session.resolve_url(url)[1]
-        streams = plugin(session=session, url=url)
-        streams._get_streams()
-        author = streams.get_author()
-        title = streams.get_title()
-        return author, title
+            if self.vcodec is not None:
+                ydl_opts['format'] += f"[vcodec~='^({self.vcodec})']"
+            if self.filesize is not None and self.is_download:
+                # 直播时无需限制文件大小
+                ydl_opts['format'] += f"[filesize<{self.filesize}]"
+            if self.resolution is not None:
+                ydl_opts['format'] += f"[height<={self.resolution}]"
+            ydl_opts['format'] += "+bestaudio"
+            if self.acodec is not None:
+                ydl_opts['format'] += f"[acodec~='^({self.acodec})']"
+            # 不能由yt_dlp创建会占用文件夹
+            if not os.path.exists(download_dir):
+                os.makedirs(download_dir)
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                if not self.is_download:
+                    # 直播模式不过滤但是能写入过滤
+                    ydl.archive = None
+                ydl.download([self.download_url])
+            # 下载成功的情况下移动到运行目录
+            for file in os.listdir(download_dir):
+                shutil.move(f'{download_dir}/{file}', '.')
+        except DownloadError as e:
+            if 'Requested format is not available' in e.msg:
+                logger.error(f"{Youtube.__name__}: {self.url}: 无法获取到流，请检查vcodec,acodec,height,filesize设置")
+            elif 'ffmpeg is not installed' in e.msg:
+                logger.error(f"{Youtube.__name__}: {self.url}: ffmpeg未安装，无法下载")
+            else:
+                logger.error(f"{Youtube.__name__}: {self.url}: {e.msg}")
+            return False
+        finally:
+            # 清理意外退出可能产生的多余文件
+            try:
+                del ydl
+                shutil.rmtree(download_dir)
+            except:
+                logger.error(f"{Youtube.__name__}: {self.url}: 清理残留文件失败，请手动删除{download_dir}")
+        return True
+
+
+class KVFileStore:
+    def __init__(self, file_path):
+        self.file_path = file_path
+        self.cache = {}
+        self._preload_data()
+
+    def _ensure_file_and_folder_exists(self):
+        folder_path = os.path.dirname(self.file_path)
+        # 如果文件夹不存在，则创建文件夹
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+        # 如果文件不存在，则创建空文件
+        if not os.path.exists(self.file_path):
+            with open(self.file_path, "w") as f:
+                pass
+
+    def _preload_data(self):
+        self._ensure_file_and_folder_exists()
+        with open(self.file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                k, v = line.strip().split("=")
+                self.cache[k] = v
+
+    def add(self, key, value):
+        with open(self.file_path, "a", encoding="utf-8") as f:
+            f.write(f"{key}={value}\n")
+        # 更新缓存
+        self.cache[key] = value
+
+    def query(self, key, default=None):
+        if key in self.cache:
+            return self.cache[key]
+        return default

@@ -1,5 +1,4 @@
-#########全局录播与上传设置#########
-
+######### 全局录播与上传设置 #########
 #------录制与下载------#
 ### 选择全局默认的下载插件，默认为stream-gears。可选：
 ### 1.streamlink(streamlink配合ffmpeg混合下载模式，适合用于下载hls_fmp4与hls_ts流，因为streamlink支持多线程拉取）。
@@ -13,13 +12,12 @@ file_size: 2621440000
 #segment_time: '00:50:00'
 ### 小于此大小的视频文件将会被过滤删除，单位MB
 filtering_threshold: 20
-
 ### 自定义录播文件名模板, 支持变量 {streamer}:你在配置里设置的直播间名 %Y-%m-%d %H_%M_%S:创建文件的时间, {title}:当场直播间标题
 ### 如果上传文件，文件名必须包含设定的模板名。其次，如果没有定义时间，文件分片可能会互相覆盖，所以推荐设置时间来避免分段文件名重复。
 #filename_prefix: '{streamer}%Y-%m-%d %H_%M_%S{title}'
 
 #------上传------#
-### 选择全局默认上传插件，Noop为不上传，但会执行后处理,可选bili_web，biliup-rs
+### 选择全局默认上传插件，Noop为不上传，但会执行后处理,可选bili_web，biliup-rs(默认值)
 #uploader: Noop
 ### b站提交接口，默认自动选择，可选web，client
 #submit_api: client
@@ -30,20 +28,24 @@ threads: 3
 
 #------杂项------#
 ### 检测到主播下播后延迟再次检测，单位：秒，避免特殊情况提早启动上传导致漏录
-delay: 10
-### 检测间隔时间，单位：秒
-event_loop_interval: 40
-### 相同平台检测间隔，单位：秒。不同平台的链接是并发的，不受此参数影响
-checker_sleep: 15
-### 线程池1大小，负责download事件
-pool1_size: 5
-### 线程池2大小，处理除download事件外所有其他事件
-pool2_size: 5
+### 当delay不存在时，默认延迟时间为0秒，没有快速上传的需求推荐设置5分钟(300秒)或按需设置。若设置的延迟时间超过60秒，则会启用分段检测机制，每隔60秒进行一次开播状态的检测。
+delay: 300
+### 平台检测间隔时间，单位：秒。比如虎牙所有主播检测完后会等待30秒 再去从新检测
+event_loop_interval: 30
+### 单个主播检测间隔时间，单位：秒。比如虎牙有10个主播，每个主播会间隔10秒检测
+checker_sleep: 10
+### 线程池1大小，负责下载事件。每个下载都会占用1。应该设置为比主播数量要多一点的数。
+pool1_size: 3
+### 线程池2大小，负责上传事件。每个上传都会占用1。
+### 应该设置为比主播数量要多一点的数，如果开启uploading_record需要设置的更多。
+pool2_size: 3
 ### 检测源码文件变化间隔，单位：秒，检测源码到变化后，程序会在空闲时自动重启
 check_sourcecode: 15
 
-#########各平台录播设置#########
-### 使用直播间封面作为投稿封面。此封面优先级低于单个主播指定的自定义封面。（直播封面将会保存于cover文件夹下，请自行定期删除）
+
+
+######### 各平台录播设置 #########
+### 使用直播间封面作为投稿封面。此封面优先级低于单个主播指定的自定义封面。（目前支持bilibili,twitch,youtube。直播封面将会保存于cover文件夹下，上传后自动删除）
 #use_live_cover: true
 
 #------斗鱼------#
@@ -52,6 +54,10 @@ check_sourcecode: 15
 #douyucdn: tct-h5
 ### 录制斗鱼弹幕，默认关闭【目前暂时不支持视频按时长分段下的弹幕文件自动分段，只有使用ffmpeg（包括streamlink混合模式）作为下载器才支持】
 #douyu_danmaku: false
+### 斗鱼自选画质
+### 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段(仅ffmpeg streamlink)时录制设置的画质
+### 0 原画,4 蓝光4m,3 超清,2 高清
+#douyu_rate:  0
 
 #------虎牙------#
 ### 如遇到虎牙录制卡顿可以尝试切换线路。可选以下线路
@@ -59,6 +65,29 @@ check_sourcecode: 15
 #huyacdn: AL
 ### 录制虎牙弹幕，默认关闭【目前暂时不支持视频按时长分段下的弹幕文件自动分段，只有使用ffmpeg（包括streamlink混合模式）作为下载器才支持】
 #huya_danmaku: false
+### 虎牙自选录制码率
+### 可以避免录制如20M的码率，每小时8G左右大小，上传及转码耗时过长。
+### 20000（蓝光20M）, 10000（蓝光10M）, 8000（蓝光8M）, 2000（超清）, 500（流畅）
+### 设置为10000则录制小于等于蓝光10M的画质
+#huya_max_ratio: 10000
+
+#------抖音------#
+### 录制抖音弹幕，默认关闭【目前暂时不支持视频按时长分段下的弹幕文件自动分段，只有使用ffmpeg（包括streamlink混合模式）作为下载器才支持】
+#douyin_danmaku: false
+### 抖音自选画质
+### 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段(仅ffmpeg streamlink)时录制设置的画质
+### origin 原画,uhd 蓝光,hd 超清,sd 高清,ld 标清,md 流畅
+### 没有选中的画质则会自动选择相近的画质优先低清晰度
+#douyin_quality: origin
+
+#------快手直播（中国大陆）------#
+### 如遇到快手录制卡顿可以尝试切换线路。默认随机。可选以下线路
+### Tencent(腾讯), Alibaba(阿里), Baidu(百度)
+# kwai_cdn: Alibaba
+### 如遇到快手录制卡顿可以尝试切换协议。默认 FLV。可选以下协议
+### FLV, HLS
+### 使用 HLS 时，推荐指定 format 为 mp4，且 kwai_cdn 选项失效。
+# kwai_protocol: FLV
 
 #------哔哩哔哩------#
 ### 录制BILIBILI弹幕，目前暂时不支持视频按时长分段下的弹幕文件自动分段，只有使用ffmpeg（包括streamlink混合模式）作为下载器才支持，默认关闭默认关闭
@@ -71,7 +100,7 @@ check_sourcecode: 15
 #bili_protocol: stream
 ### 哔哩哔哩直播优选CDN，默认无，支持同时填入多个CDN节点。
 #bili_perfCDN: 'cn-gotcha208,ov-gotcha05'
-### 哔哩哔哩直播强制原画（仅限HLS流的 cn-gotcha01 CDN），默认为关闭
+### 哔哩哔哩直播强制原画（仅限HLS与FMP4流「beta」的 cn-gotcha01 CDN），默认为关闭
 #bili_force_source: false
 ### 自定义哔哩哔哩直播API，用于获取指定区域（大陆或者海外）的直播流链接，默认使用官方API。
 #bili_liveapi: 'https://api.live.bilibili.com'
@@ -80,7 +109,7 @@ check_sourcecode: 15
 ### 大陆机器玩法：bili_liveapi取消注释保持默认使用官方API，并将bili_fallback_api设置为能获取到海外节点API，然后优选fmp4流并使用streamlink下载器，最后设置优选cn-gotcha208,ov-gotcha05两个节点。
 ### 这样大主播可以使用cn208的fmp4流稳定录制（海外机如需可以通过自建dns优选指定线路的cn208节点），没有fmp4流的小主播也可以会退到ov05录制flv流。
 #bili_fallback_api: 'https://api.live.bilibili.com'
-### CDN自动Fallback开关，默认为开启
+### CDN自动Fallback开关，默认为开启，例如海外机器优选ov05之后，如果ov05流一直无法下载，将会自动fallback到ov07进行下载。
 #bili_cdn_fallback: true
 ### 强制替换ov-gotcha05的下载地址为指定的自选IP
 #bili_force_ov05_ip: '163.171.197.234'
@@ -93,10 +122,18 @@ check_sourcecode: 15
 ### 每次会随机返回填入的其中一个线路，并且会自动判断所填入的节点是否可用
 #bili_force_cn01: false
 #bili_force_cn01_domains: 'cn-jxnc-cm-01-16.bilivideo.com,cn-gddg-cm-01-06.bilivideo.com,cn-fjqz-cm-01-06.bilivideo.com,cn-jssz-cm-01-02.bilivideo.com,cn-gddg-ct-01-12.bilivideo.com'
+### 哔哩哔哩自选画质
+### 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段(仅ffmpeg streamlink)时录制设置的画质
+### 30000 杜比,20000 4K,10000 原画,401 蓝光(杜比),400 蓝光,250 超清,150 高清,80 流畅,0 B站默认(多数情况下是蓝光 400)
+### 没有选中的画质则会自动选择相近的画质
+#bili_qn: 10000
 
 #------YouTube------#
 ### 设置偏好的YouTube下载封装格式
+### 默认不限制
 ### 请务必记得安装ffmpeg
+### 如无特殊需求不建议筛选封装格式 特别是录制直播时 多数直播mp4都是不可用的
+### bilibili支持 mp4 mkv webm 无需筛选也能上传
 ### 支持同时添加多个编码，自动优选指定编码格式里最好的画质/音质版本。
 ### 视频：其中avc编码最高可以下载到1080p的内容，vp9最高可以下载到4k以及很少部分8k内容，av01画质不是所有视频都有，但是大部分8k视频的8k画质只有av01编码。
 ### 音频：其中opus编码最高48KHz采样，mp4a（AAC）最高44.1KHz采样，理论上来说opus音质会更好一些。
@@ -104,23 +141,36 @@ check_sourcecode: 15
 #youtube_prefer_vcodec: "av01|vp9|avc" ### 可用av01,vp9,avc
 #youtube_prefer_acodec: "opus|mp4a" ### 可用opus,mp4a
 ### 设置偏好的YouTube下载最高纵向分辨率
-### 最高纵向分辨率，也就是xxxxP。如果youtube_prefer_vcodec指定AVC，将最高只能下载1080p的视频。
-#youtube_max_resolution: 1440
-### 限制单个视频的最大大小。
+### 默认不限制
+### 可以用此限制画质
+### 例如设置为1080最高只会下载1080P画质
+#youtube_max_resolution: 1080
+### 限制单个视频的最大大小
+### 默认不限制
+### 直播无此功能
 ### 注意：此参数优先级高于分辨率设置，并且不包括音频部分的大小，仅仅只是视频部分的大小。
-### 如果某个视频实在没有低于此大小的分辨率版本，将会选择最低画质的版本下载。
-#youtube_max_videosize: "5G" ###参考格式，例如100M，5G，10G。
-### YouTube转载视频自动获取视频封面并用于作投稿封面。获取webp封面之后自动转换格式为jpg，并保存在cover/youtube文件夹中，请注意定期清理。
-#use_youtube_cover: true
+### 此功能在一部分视频上无法使用 推荐使用画质限制不开启此功能
+#youtube_max_videosize: "10G" ###参考格式，例如100M，5G，10G。
 ### 仅下载该日期之后的视频
+### 默认不限制
 #youtube_after_date: '20220201'
 ### 仅下载该日期之前的视频（可与上面的youtube_after_date配合使用，构成指定下载范围区间）
+### 默认不限制
 #youtube_before_date: '20230501'
-### YouTube的Streamlink下载器模式，开启之后会调用Streamlink获取直播流并且使用FFMPEG下载，默认关闭【仅当下载器是FFMPEG时才有效】
-### 开启之后上面关于YOUTUBE的选项全部无效【我也不知道这个功能有什么屌用】
-use_new_ytb_downloader: false
+### 是否下载直播 默认开启
+### 关闭后将忽略直播下载（可以下载回放） 避免网络被风控(有些网络只能下载回放无法下载直播)的时候还会尝试下载直播
+### 大量下载时极易风控 如对实时性要求不高推荐关闭
+### 一个人同时开启多个直播只能录制最新录制的那个
+### 如果正在录制直播将无法下载回放
+### 例如录制https://www.youtube.com/@NeneAmanoCh/streams，关闭后将忽略正在直播
+#youtube_enable_download_live: true
+### 是否下载直播回放 默认开启
+### 关闭后将忽略直播下载回放(不会影响正常的视频下载) 只想录制直播的可以开启
+### 如果正在下载回放将无法录制直播
+### 例如录制https://www.youtube.com/@NeneAmanoCh/streams，关闭后将忽略直播回放
+#youtube_enable_download_playback: true
 
-#------Twitch------#
+#------Twitch直播录制------#
 ### 录制Twitch弹幕，默认关闭【只有下载器为FFMPEG时才有效】
 #twitch_danmaku: false
 ### 去除Twitch广告功能，默认开启【只有下载器为FFMPEG时才有效】
@@ -130,7 +180,7 @@ use_new_ytb_downloader: false
 
 
 
-#########录制主播设置#########
+######### 录制主播设置 #########
 streamers:
 ### 最小配置示例
     星际2Stats拔本神族天梯第一视角:
@@ -140,18 +190,32 @@ streamers:
     星际2INnoVation吕布卫星人族天梯第一视角:
         url:
             - https://www.twitch.tv/innovation_s2
-            - https://www.panda.tv/1160340
+            - https://www.panda.tv/1160340 #填写多个url时只能同时下载一个，如需多个同时下载请单独配置
         title: "{title}第一视角%Y-%m-%d{streamer}{url}" ### 自定义标题的时间格式, {title}代表当场直播间标题 {streamer}代表在本config里面设置的主播名称 {url}代表设置的该主播的第一条直播间链接
         tid: 171 ### 投稿分区码,171为电子竞技分区
         copyright: 2 ### 1为自制
-        cover_path: /cover/up.jpg ###封面
+        #cover_path: /cover/up.jpg ###封面
         description: |- ### 支持strftime, {title}, {streamer}, {url}占位符。注：此处请注意缩进，确保所有文字的缩进都与"视频简介"相同或者更多。
          视频简介: {title} %Y-%m-%d %H:%M:%S
          {streamer}主播直播间地址：{url}
          ---
          Powered By biliup - Github: https://github.com/ForgQi/biliup
+        ### 如需在简介中@别人 请使用以下模版
+        # credits:
+        #    - username: 需要@的用户名
+        #      uid: 需要@的uid
+        #description: |-
+        # 视频简介: {title} %Y-%m-%d %H:%M:%S
+        # {streamer}主播直播间地址：{url}
+        # 【@credit】
+        # ---
+        # Powered By biliup - Github: https://github.com/ForgQi/biliup
         dynamic: '#空间动态#'
         #dtime: 14_400 ### 设置延时发布时间，距离提交大于2小时，格式为时间戳
+        #dolby: 0 ### 是否开启杜比音效, 1为开启
+        #hires: 0 ### 是否开启Hi-Res, 1为开启
+        #open_elec: 0 ### 是否开启充电面板, 1为开启
+        #no_reprint: 0 ### 自制声明, 1为未经允许禁止转载
         uploader: biliup-rs ### 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
         #filename_prefix: '{streamer}%Y-%m-%d %H_%M_%S{title}'  ### 覆盖全局自定义录播文件命名规则
         user_cookie: cookies.json ### 使用指定的账号上传
@@ -159,19 +223,29 @@ streamers:
         tags:
             - biliup
             - 视频标签
-        preprocessor: ### 开始下载直播时，将按自定义顺序执行自定义操作 注：preprocessor仅支持shell指令
-            #- run: sh ./run.sh
-        postprocessor: ### 上传完成后，将按自定义顺序执行自定义操作
-            - run: echo hello! ### 执行任意命令，等同于在shell中运行,视频文件路径作为标准输入传入
-            - mv: backup/ ### 移动文件到backup目录下
-            - run: python3 path/to/mail.py ### 执行一个 Python 脚本，可以用来发送邮件等。自动发信通知脚本示例 https://biliup.github.io/biliup/Guide.html#%E4%B8%8A%E4%BC%A0%E5%AE%8C%E6%88%90%E5%90%8E%E5%8F%91%E9%80%81%E9%82%AE%E4%BB%B6%E9%80%9A%E7%9F%A5
-            - run: sh ./run.sh ### 执行一个shell脚本，用途多样，主要调用系统内的cli工具。自动上传网盘脚本示例 https://gist.github.com/UVJkiNTQ/ae4282e8f9fe4e45b3144b57605b4178
+        #preprocessor: ### 开始下载直播时触发，将按自定义顺序执行自定义操作 注：preprocessor仅支持shell指令
+            #- run: sh ./run.sh, ### 执行任意命令，等同于在shell中运行,preprocessor输出的数据为JSON格式，包含主播名字(name)、开播地址(url)和开播时间(start_time)(时间戳)
+        ### 准备上传直播时触发，将按自定义顺序执行自定义操作 注：downloaded_processor仅支持shell指令
+        ### room_title 在重启后会丢失 默认为当前配置名称
+        ### start_time end_time在重启后会丢失时间 默认为当前时间
+        ### 如果对上传的视频进行修改需要保证和filename_prefix命名规则一致 会自动检测上传
+        ### 上传顺序会按照文件创建时间排序
+        #downloaded_processor:
+        #    - run: sh ./run.sh, ### 执行任意命令，等同于在shell中运行,downloaded_processor输出的数据为JSON格式，包含主播名字(name)、直播间地址(url)、直播间标题(room_title)、开播时间(start_time)(时间戳)、下播时间(end_time)(时间戳)和视频列表(file_list)
+        #postprocessor: ### 上传完成后触发，将按自定义顺序执行自定义操作 当postprocessor不存在时 默认执行删除文件操作
+        #    - run: echo hello! ### 执行任意命令，等同于在shell中运行,视频文件路径作为标准输入传入
+        #    - mv: backup/ ### 移动文件到backup目录下
+        #    - run: python3 path/to/mail.py ### 执行一个 Python 脚本，可以用来发送邮件等。自动发信通知脚本示例 https://biliup.github.io/biliup/Guide.html#%E4%B8%8A%E4%BC%A0%E5%AE%8C%E6%88%90%E5%90%8E%E5%8F%91%E9%80%81%E9%82%AE%E4%BB%B6%E9%80%9A%E7%9F%A5
+        #    - run: sh ./run.sh ### 执行一个shell脚本，用途多样，主要调用系统内的cli工具。自动上传网盘脚本示例 https://gist.github.com/UVJkiNTQ/ae4282e8f9fe4e45b3144b57605b4178
             #- rm ### 删除文件，为默认操作
-        format: mp4 ### 视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg或者streamlink。
+        #format: mp4 ### 视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg或者streamlink，youtube不支持。
         #opt_args: ### ffmpeg参数
         #    - '-ss'
         #    - '00:00:16' # 跳过开始的16秒
 
+
+
+################### 用户cookie ###################
 ### 在填了cookies的情况下优先使用cookies上传，如需使用用户名密码上传请注释掉cookies
 #user:
     #------哔哩哔哩------#
@@ -179,19 +253,21 @@ streamers:
     ### 参照https://github.com/BililiveRecorder/BililiveRecorder/issues/263. 请至少填入以下项目.
     #bili_cookie: 'SESSDATA=none; bili_jct=none;DedeUserID__ckMd5=none;DedeUserID=123;access_token=none;'
     ### 重要！！！
-    ###是否将cookie传入第三方API。将Cookie传入未知的第三方API有几率泄露帐号登录信息。
-    ###在开启了自定义Cookie（bili_cookie）又同时设置了第三方API（bili_liveapi）的情况下，如果打开了允许第三方API使用Cookie，那么就使用第三方API，如果没有允许（默认），那么设置的第三方API就不生效
+    ### 是否将cookie传入第三方API。将Cookie传入未知的第三方API有几率泄露帐号登录信息。
+    ### 在开启了自定义Cookie（bili_cookie）又同时设置了第三方API（bili_liveapi）的情况下，如果打开了允许第三方API使用Cookie，那么就使用第三方API，如果没有允许（默认），那么设置的第三方API就不生效
     #customAPI_use_cookie : False
 
     #------抖音------#
-    ### 如需要录制抖音请在此填入cookie需要__ac_nonce与__ac_signature的值
-    #douyin_cookie: '__ac_nonce=123456; __ac_signature=123456;'
+    ### 如需要录制抖音www.douyin.com/user/类型链接或被风控
+    ### 请在此填入cookie需要__ac_nonce、__ac_signature、sessionid的值请不要将所有cookie填入
+    #douyin_cookie: '__ac_nonce=123456; __ac_signature=123456; sessionid=123456;'
 
-    #------Twitch------#
+    #------Twitch直播录制------#
+    ### 只在录制twitch直播时才生效
     ### 如录制Twitch时遇见视频流中广告过多的情况，可尝试在此填入cookie，可以大幅减少视频流中的twitch广告（经测试需要在该Cookie所属账号开了TwitchTurbo会员才有用）
-    # 该cookie有过期风险，cookie过期后会导致无法获取到直播流（我个人用了四个月都没过期）
-    # twitch_cookie获取方式：在浏览器中打开Twitch.tv，F12调出控制台，在控制台中执行：document.cookie.split("; ").find(item=>item.startsWith("auth-token="))?.split("=")[1]
-    # twitch_cookie需要在downloader= "ffmpeg"时候才会生效
+    ### 该cookie有过期风险，cookie过期后会在日志输出警告请及时更换cookie，cookie失效的情况下后续录制将忽略cookie（我个人用了四个月都没过期）
+    ### twitch_cookie获取方式：在浏览器中打开Twitch.tv，F12调出控制台，在控制台中执行：document.cookie.split("; ").find(item=>item.startsWith("auth-token="))?.split("=")[1]
+    ### twitch_cookie需要在downloader= "ffmpeg"时候才会生效
     #twitch_cookie: 'aisjdoiuasdoihansdoh3ooi209'
 
     #------YouTube------#
@@ -202,21 +278,20 @@ streamers:
     #------NICO------#
     ### The email or phone number associated with your Niconico account
     ### 【翻译：与您的Niconico账户相关的电子邮件或电话号码】
-    # niconico-email: xxxxxxxxxxx
+    #niconico-email: xxxxxxxxxxx
     ### The password of your Niconico account
     ### 【翻译：您的Niconico账户的密码】
-    # niconico-password: xxxxxxxxxxxx
+    #niconico-password: xxxxxxxxxxxx
     ### Value of the user-session token. Can be used as an alternative to providing a password.
     ### 【翻译：用户会话令牌的值。可作为提供密码的替代方法。】
-    # niconico-user-session: xxxxxxxxxxx
+    #niconico-user-session: xxxxxxxxxxx
     ### Purge cached Niconico credentials to initiate a new session and reauthenticate.
     ### 【翻译：清除缓存的 Niconico 凭证，以启动一个新的会话并重新认证。】
-    # niconico-purge-credentials: xxxxxxxxxxxx
+    #niconico-purge-credentials: xxxxxxxxxxxx
 
 
 
-#########日志输出配置#########
-
+######### 日志输出配置 #########
 LOGGING:
     formatters:
         verbose:

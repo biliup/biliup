@@ -1,5 +1,8 @@
+import logging
 import random
 import re
+
+logger = logging.getLogger('biliup')
 
 
 class Twitch:
@@ -35,8 +38,6 @@ class Twitch:
                     msgt["msg_type"] = "danmaku"
                     # print(msgt)
                     msgs.append(msgt)
-                except Exception as Error:
-                    # print(f"twitch：decode_msg：捕获到异常：{Error}")
-                    # traceback.print_exc()
+                except Exception:
                     pass
         return msgs

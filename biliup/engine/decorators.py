@@ -47,8 +47,6 @@ class Plugin:
             url_list = suit_url(plugin.VALID_URL_BASE, curls)
             if not url_list:
                 continue
-            elif hasattr(plugin, "BatchCheck"):
-                checker_plugins[plugin.__name__] = plugin.BatchCheck(url_list)
             else:
                 plugin.url_list = url_list
                 checker_plugins[plugin.__name__] = plugin

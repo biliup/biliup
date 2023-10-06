@@ -12,7 +12,7 @@ class Acfun(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 
-    def check_stream(self):
+    def check_stream(self, is_check=False):
         if len(self.url.split("acfun.cn/live/")) < 2:
             logger.debug("直播间地址错误")
             return False
@@ -25,7 +25,7 @@ class Acfun(DownloadBase):
         cookies = dict(_did=did)
         data1 = {'sid': 'acfun.api.visitor'}
         r1 = requests.post("https://id.app.acfun.cn/rest/app/visitor/login",
-                           headers=headers1, data=data1, cookies=cookies)
+                           headers=headers1, data=data1, cookies=cookies, timeout=5)
         userid = r1.json()['userId']
         visitorst = r1.json()['acfun.api.visitor_st']
         params = {
@@ -43,7 +43,7 @@ class Acfun(DownloadBase):
             "Referer": "https://live.acfun.cn/"
         }
         r2 = requests.post("https://api.kuaishouzt.com/rest/zt/live/web/startPlay",
-                           headers=headers2, data=data2, params=params)
+                           headers=headers2, data=data2, params=params, timeout=5)
         if r2.json().get('result') != 1:
             logger.debug(r2.json())
             return False

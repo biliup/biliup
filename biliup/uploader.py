@@ -3,6 +3,7 @@ import logging
 import time
 
 from biliup.config import config
+from biliup.database import DB as db
 from .engine.decorators import Plugin
 
 logger = logging.getLogger('biliup')
@@ -17,6 +18,8 @@ def upload(data):
     """
     try:
         index = data['name']
+        # 尝试获取数据库中对应的数据, 并降低旧数据误用的可能性
+        data = {**db.get_stream_info(index), **data}
         context = {**config, **config['streamers'][index]}
         platform = context.get("uploader", "biliup-rs")
         cls = Plugin.upload_plugins.get(platform)
@@ -30,10 +33,10 @@ def upload(data):
         data["format_title"] = custom_fmtstr(context.get('title', f'%Y.%m.%d{index}'), date, title, streamer, url)
         if context.get('description'):
             context['description'] = custom_fmtstr(context.get('description'), date, title, streamer, url)
-        threshold = config.get('filtering_threshold')
-        if threshold:
-            data['threshold'] = threshold
-
+        data['dolby'] = config.get('dolby', 0)
+        data['hires'] = config.get('hires', 0)
+        data['no_reprint'] = config.get('no_reprint', 0)
+        data['open_elec'] = config.get('open_elec', 0)
         sig = inspect.signature(cls)
         kwargs = {}
         for k in sig.parameters:

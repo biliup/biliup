@@ -7,6 +7,9 @@
 *.part
 backup
 venv./
+.venv/
+pdm.lock
+.pdm-python
 config*.yaml
 !public/config.yaml
 /configlog.ini
@@ -29,3 +32,4 @@ cookie*.json
 *.log
 ./*.ts
 /biliup/stream-gears/
+data/
