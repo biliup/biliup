@@ -95,7 +95,7 @@ class DownloadBase:
         elif self.downloader == 'ffmpeg':
             return self.ffmpeg_download(fmtname)
 
-        if self.suffix in ['flv', 'ts']:  # stream_gears处理flv和ts流会导致有bug,所以使用ffmpeg
+        if self.suffix in ['flv', 'ts']:  # 当使用stream_gears时,format不为flv和ts,使用ffmpeg
             stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
                                   config.get('file_size'))
         else:
