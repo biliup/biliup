@@ -296,6 +296,13 @@ tags = [ "biliup", "视频标签" ]
 ### 【翻译：清除缓存的 Niconico 凭证，以启动一个新的会话并重新认证。】
 #niconico-purge-credentials = xxxxxxxxxxxx
 
+#------AfreecaTV------#
+### 录制部分直播时需要登陆
+### AfreecaTV 用户名
+#afreecatv_username = xxxxxxxxxxx
+### AfreecaTV 密码
+#afreecatv_password = xxxxxxxxxxxx
+
 
 
 ########### 日志输出配置 ###########
