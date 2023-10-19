@@ -123,6 +123,8 @@ class DownloadBase:
                     print(decode_line, end='', file=sys.stderr)
                     logger.debug(decode_line.rstrip())
             retval = ffmpeg_proc.wait()
+            streamlink_proc.terminate()
+            streamlink_proc.wait()
         except KeyboardInterrupt:
             if sys.platform != 'win32':
                 ffmpeg_proc.communicate(b'q')
