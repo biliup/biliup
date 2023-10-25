@@ -102,18 +102,11 @@ class Bililive(DownloadBase):
         playurl_info = play_info['data']['playurl_info']['playurl']
         streams = playurl_info['stream']
         stream = streams[1] if protocol.startswith('hls') and len(streams) > 1 else streams[0]
-
-        if protocol == "hls_fmp4":
-            if len(stream['format']) > 1:
-                stream_format = stream['format'][1]
-            elif int(time.time()) - live_start_time <= 60:  # 60s 宽容等待 fmp4
-                return False
-            else:
-                streams = play_info_fb['data']['playurl_info']['playurl']['stream']
-                stream = streams[1] if protocol.startswith('hls') and len(streams) > 1 else streams[0]
-                stream_format = stream['format'][0]
-        else:
-            stream_format = stream['format'][0]
+        stream_format = stream['format'][0]
+        if protocol == "hls_fmp4" and len(stream['format']) > 1:
+            stream_format = stream['format'][1]
+        elif int(time.time()) - live_start_time <= 60:  # 60s 宽容等待 fmp4
+            return False
 
         if self.downloader == 'stream-gears' and stream_format['format_name'] == 'fmp4':
             logger.warning('stream-gears 不支持 fmp4 格式，请修改配置文件内的 downloader')
