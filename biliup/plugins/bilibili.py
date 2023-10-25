@@ -20,6 +20,7 @@ class Bililive(DownloadBase):
         official_api = "https://api.live.bilibili.com"
 
         room_id = match1(self.url, r'/(\d+)')
+        qualityNumber = config.get('bili_qn', '10000')
 
         with requests.Session() as s:
             s.headers = self.fake_headers.copy()
@@ -32,22 +33,27 @@ class Bililive(DownloadBase):
                 logger.error(f"在连接到 {info_by_room_url} 时出现错误")
                 return False
             if room_info['code'] != 0:
-                logger.debug(f"Room-{room_id}: {room_info}")
+                logger.debug(f"Bililive-{room_id}: {room_info}")
                 return False
             self.live_cover_url = room_info['data']['room_info']['cover']
             live_start_time = room_info['data']['room_info']['live_start_time']
             uname = room_info['data']['anchor_info']['base_info']['uname']
             if room_info['data']['room_info']['live_status'] != 1:
-                logger.debug(f"Room-{room_id}: 直播间未开播")
-                # db.delete_stream_info(room_info['data']['anchor_info']['base_info']['uname'])
+                logger.debug(f"Bililive-{room_id}: 直播间未开播")
+                db.delete_stream_info(room_info['data']['anchor_info']['base_info']['uname'])
+                logger.debug("移除数据库内容")
                 return False
             if self.room_title is None:
                 self.room_title = room_info['data']['room_info']['title']
 
-        # latest_info = db.get_stream_info(uname)
-        # if latest_info is not None:
-        #     self.raw_stream_url = latest_info.get('url')
         if is_check:
+            return True
+        # 防止新版分段时，因下方检查而丢失过多内容
+        latest_info = db.get_stream_info(uname)
+        if latest_info is not None and qualityNumber >= 10000 \
+            and self.downloader != 'stream-gears':
+            self.raw_stream_url = latest_info.get('url')
+            logger.debug("从数据库内读取链接")
             return True
 
         s = requests.Session()
@@ -62,7 +68,6 @@ class Bililive(DownloadBase):
         else:
             logger.info(f"用户名：{user_data['uname']}, mid：{user_data['mid']}, isLogin：{is_login}")
 
-        qualityNumber = config.get('bili_qn', '10000')
         protocol = config.get('bili_protocol', 'stream')
         perf_cdn = config.get('bili_perfCDN')
         bili_cdn_fallback = config.get('bili_cdn_fallback', True)
@@ -184,7 +189,7 @@ class Bililive(DownloadBase):
             except Exception:
                 pass
 
-        # db.add_stream_info(name=uname, url=self.raw_stream_url, title=self.room_title, date=time.localtime(live_start_time), live_cover_path=self.live_cover_path)
+        db.add_stream_info(name=uname, url=self.raw_stream_url, title=self.room_title, date=time.localtime(live_start_time), live_cover_path=self.live_cover_path)
 
         s.close()
         return True
