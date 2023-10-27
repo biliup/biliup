@@ -74,9 +74,9 @@ class StreamerInfo(BaseModel):
     id = AutoField(primary_key=True)  # 自增主键
     name = CharField()  # streamer 名称
     url = CharField()  # 录制的 url
-    title = CharField()  # 直播标题
+    title = CharField(null=True)  # 直播标题
     date = DateTimeField()  # 开播时间
-    live_cover_path = CharField()  # 封面存储路径
+    live_cover_path = CharField(null=True)  # 封面存储路径
 
 
 class FileList(BaseModel):

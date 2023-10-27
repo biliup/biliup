@@ -55,12 +55,11 @@ class DB:
                 return {}
 
     @classmethod
-    def add_stream_info(cls, name: str, url: str, title: str, date: time.struct_time) -> int:
+    def add_stream_info(cls, name: str, url: str, date: time.struct_time) -> int:
         """添加下载信息, 返回所添加行的 id """
         return StreamerInfo.add(
             name=name,
             url=url,
-            title=title,
             date=struct_time_to_datetime(date),
         )
 
@@ -88,6 +87,14 @@ class DB:
         with db.connection_context():
             return StreamerInfo.update(
                 live_cover_path=live_cover_path
+            ).where(StreamerInfo.id == database_row_id).execute()
+
+    @classmethod
+    def update_room_title(cls, database_row_id: int, title: str):
+        """更新直播标题"""
+        with db.connection_context():
+            return StreamerInfo.update(
+                title=title
             ).where(StreamerInfo.id == database_row_id).execute()
 
     @classmethod

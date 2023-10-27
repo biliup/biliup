@@ -175,8 +175,9 @@ class DownloadBase:
         if not self.check_stream():
             return False
         file_name = self.file_name
-        # 将文件名存储到数据库
+        # 将文件名和直播标题存储到数据库
         db.update_file_list(self.database_row_id, file_name)
+        db.update_room_title(self.database_row_id, self.room_title)
         retval = self.download(file_name)
         self.rename(f'{file_name}.{self.suffix}')
         return retval
@@ -196,7 +197,6 @@ class DownloadBase:
         stream_info = {
             'name': self.fname,
             'url': self.url,
-            'title': self.room_title,
             'date': date,
         }
         self.database_row_id = db.add_stream_info(**stream_info)  # 返回数据库中此行记录的 id
