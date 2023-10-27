@@ -11,7 +11,7 @@ from typing import NamedTuple, Optional, List
 
 from biliup.common.tools import NamedLock
 from biliup.config import config
-
+from biliup.uploader import fmt_title_and_desc
 from biliup.database import DB as db
 
 logger = logging.getLogger('biliup')
@@ -142,6 +142,7 @@ class UploadBase:
                 if len(file_list) > 0:
                     logger.info('准备上传' + self.data["format_title"])
                     upload_filename_list = [os.path.splitext(file.video)[0] for file in file_list]
+                    self.data.update(fmt_title_and_desc(db.get_stream_info_by_filename(upload_filename_list[0])))
                     with NamedLock('upload_filename'):
                         event_manager.context['upload_filename'].extend(upload_filename_list)
                     lock.release()

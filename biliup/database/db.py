@@ -1,6 +1,7 @@
 import time
 import json
 from datetime import datetime, timedelta
+from playhouse.shortcuts import model_to_dict
 
 from .models import StreamerInfo, FileList, db
 
@@ -40,6 +41,18 @@ class DB:
             res["date"] = datetime_to_struct_time(res["date"])
             return res
         return {}
+
+    @classmethod
+    def get_stream_info_by_filename(cls, filename: str) -> dict:
+        """通过文件名获取下载信息, 若不存在则返回空字典"""
+        with db.connection_context():
+            try:
+                stream_info = FileList.get(FileList.file == filename).streamer_info
+                stream_info_dict = model_to_dict(stream_info)
+                stream_info_dict["date"] = datetime_to_struct_time(stream_info_dict["date"])
+                return stream_info_dict
+            except FileList.DoesNotExist:
+                return {}
 
     @classmethod
     def add_stream_info(cls, name: str, url: str, title: str, date: time.struct_time) -> int:
