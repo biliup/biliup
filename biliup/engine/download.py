@@ -30,6 +30,7 @@ class DownloadBase:
         self.suffix = suffix
         self.title = None
         self.live_cover_path = None
+        self.database_row_id = 0
         self.downloader = config.get('downloader', 'stream-gears')
         # ffmpeg.exe -i  http://vfile1.grtn.cn/2018/1542/0254/3368/154202543368.ssm/154202543368.m3u8
         # -c copy -bsf:a aac_adtstoasc -movflags +faststart output.mp4
@@ -174,6 +175,8 @@ class DownloadBase:
         if not self.check_stream():
             return False
         file_name = self.file_name
+        # 将文件名存储到数据库
+        db.update_file_list(self.database_row_id, file_name)
         retval = self.download(file_name)
         self.rename(f'{file_name}.{self.suffix}')
         return retval
@@ -189,6 +192,14 @@ class DownloadBase:
         retry_count_delay = 0
         # delay 总重试次数 向上取整
         delay_all_retry_count = -(-delay // 60)
+
+        stream_info = {
+            'name': self.fname,
+            'url': self.url,
+            'title': self.room_title,
+            'date': date,
+        }
+        self.database_row_id = db.add_stream_info(**stream_info)  # 返回数据库中此行记录的 id
 
         while True:
             ret = False
@@ -243,6 +254,8 @@ class DownloadBase:
         if end_time is None:
             end_time = time.localtime()
         self.download_cover(time.strftime(self.get_filename().encode("unicode-escape").decode(), date).encode().decode("unicode-escape"))
+        # 更新数据库中封面存储路径
+        db.update_cover_path(self.database_row_id, self.live_cover_path)
         logger.info(f'退出下载：{self.__class__.__name__} - {self.fname}')
         stream_info = {
             'name': self.fname,
@@ -254,10 +267,6 @@ class DownloadBase:
             # 内部使用时间戳传递
             'end_time': end_time,
         }
-        # 如果用户在上传前退出并删除文件，可能导致数据库中记录未删除
-        if not db.add_stream_info(**stream_info):
-            db.update_stream_info(**stream_info)
-
         return stream_info
 
     def download_cover(self, fmtname):

@@ -148,6 +148,8 @@ class UploadBase:
                     needed2process = self.upload(file_list)
                     if needed2process:
                         self.postprocessor(needed2process)
+                if db.delete_stream_info_by_date(self.principal, self.data.get('date')) == 0:
+                    # 如果按开播时间删除失败，则尝试按照 streamer 删除
                     db.delete_stream_info(self.principal)
         finally:
             with NamedLock('upload_filename'):
