@@ -83,7 +83,7 @@ def process_upload(stream_info):
     finally:
         # 上传结束
         # 有可能有两个同url的上传线程 保证计数正确
-        with NamedLock(f'upload_count_{stream_info.url}'):
+        with NamedLock(f'upload_count_{url}'):
             url_upload_count[url] -= 1
 
 

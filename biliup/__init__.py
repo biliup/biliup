@@ -1,4 +1,5 @@
 import logging
+import platform
 import sys
 
 __version__ = "0.4.31"
@@ -43,3 +44,11 @@ LOG_CONF = {
         },
     }
 }
+
+if (3, 10, 6) > sys.version_info >= (3, 8) and platform.system() == 'Windows':
+    # fix 'Event loop is closed' RuntimeError in Windows
+    from asyncio import proactor_events
+    from biliup.common.tools import silence_event_loop_closed
+
+    proactor_events._ProactorBasePipeTransport.__del__ = silence_event_loop_closed(
+        proactor_events._ProactorBasePipeTransport.__del__)

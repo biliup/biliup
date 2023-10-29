@@ -1,5 +1,5 @@
 import time
-from typing import Optional
+from typing import Optional, Dict
 
 import requests
 
@@ -81,11 +81,11 @@ class AfreecaTV(DownloadBase):
 
 
 class AfreecaTVUtils:
-    _cookie: Optional[dict[str, str]] = None
+    _cookie: Optional[Dict[str, str]] = None
     _cookie_expires = None
 
     @staticmethod
-    def get_cookie() -> Optional[dict[str, str]]:
+    def get_cookie() -> Optional[Dict[str, str]]:
         with NamedLock("AfreecaTV_cookie_get"):
             if not AfreecaTVUtils._cookie or AfreecaTVUtils._cookie_expires <= time.time():
                 username = config.get('user', {}).get('afreecatv_username', '')

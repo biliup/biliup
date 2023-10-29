@@ -10,3 +10,16 @@ class NamedLock:
         if name not in cls._lock_dict:
             cls._lock_dict[name] = threading.Lock()
         return cls._lock_dict[name]
+
+
+def silence_event_loop_closed(func):
+    from functools import wraps
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return func(self, *args, **kwargs)
+        except RuntimeError as e:
+            if str(e) != 'Event loop is closed':
+                raise
+
+    return wrapper
