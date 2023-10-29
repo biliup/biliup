@@ -56,7 +56,10 @@ class BaseModel(Model):
     def get_by_id_(cls, pk):
         """根据主键获取记录"""
         with db.connection_context():
-            return cls.get_by_id(pk)
+            try:
+                return cls.get_by_id(pk)
+            except cls.DoesNotExist:
+                return cls()  # 若不存在, 则返回一个空对象
 
     @classmethod
     def get_dict(cls, **kwargs):
@@ -66,7 +69,7 @@ class BaseModel(Model):
                 obj = cls.get(**kwargs)
                 return model_to_dict(obj)
             except cls.DoesNotExist:
-                return False
+                return {}
 
 
 class StreamerInfo(BaseModel):
@@ -74,9 +77,9 @@ class StreamerInfo(BaseModel):
     id = AutoField(primary_key=True)  # 自增主键
     name = CharField()  # streamer 名称
     url = CharField()  # 录制的 url
-    title = CharField(null=True)  # 直播标题
+    title = CharField()  # 直播标题
     date = DateTimeField()  # 开播时间
-    live_cover_path = CharField(null=True)  # 封面存储路径
+    live_cover_path = CharField()  # 封面存储路径
 
 
 class FileList(BaseModel):
