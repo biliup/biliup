@@ -1,8 +1,20 @@
+<div align="center">
+
 # biliup
-![](https://img.shields.io/badge/python-v3.7%2B-blue)
-![GitHub](https://img.shields.io/github/license/ForgQi/bilibiliupload)
+![python](https://img.shields.io/badge/python-3.7%2B-blue)
+[![PyPI](https://img.shields.io/pypi/v/biliup)](https://pypi.org/project/biliup)
+[![PyPI - Downloads](https://img.shields.io/pypi/dm/biliup)](https://pypi.org/project/biliup)
+[![license](https://img.shields.io/github/license/biliup/biliup)](https://github.com/biliup/biliup/blob/master/LICENSE)
 [![Telegram](https://img.shields.io/badge/Telegram-Group-blue.svg?logo=telegram)](https://t.me/+IkpIABHqy6U0ZTQ5)
 [![Discord chat][discord-badge]][discord-url]
+
+[![issues](https://img.shields.io/github/issues/biliup/biliup?label=Github%20issues)](https://github.com/biliup/biliup/issues)
+[![STARS](https://img.shields.io/github/stars/biliup/biliup)](https://github.com/biliup/biliup/stargazers)
+[![forks](https://img.shields.io/github/forks/biliup/biliup)](https://github.com/biliup/biliup/network)
+[![downloads](https://img.shields.io/github/downloads/biliup/biliup/total?color=%239F7AEA&logo=github)](https://github.com/biliup/biliup/releases/latest)
+
+
+</div>
 
 [discord-badge]: https://img.shields.io/discord/1015494098481852447.svg?logo=discord
 [discord-url]: https://discord.gg/shZmdxDFB7
