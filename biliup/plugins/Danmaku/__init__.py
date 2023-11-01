@@ -164,15 +164,9 @@ class DanmakuClient:
                         msg_i = 0
                     else:
                         msg_i = msg_i + 1
-        except asyncio.CancelledError:
-            # 在这段代码中只有执行m = await self.__dm_queue.get()的时候可能会被取消 所以无需担心其他问题
-            # 任务被取消之前需要写入一下 不然会丢失没写入的
+        finally:
+            # 发生异常时写入 避免丢失未写入
             write_file(self.__filename)
-            # 如果不存在对应的视频则删除弹幕
-            if not (os.path.exists(f"{self.__filename_video_suffix}.part") or
-                    os.path.exists(f"{self.__filename_video_suffix}")):
-                os.remove(self.__filename)
-            raise
 
     def start(self):
         init_event = threading.Event()
@@ -185,10 +179,6 @@ class DanmakuClient:
                 await self.__record_task
             except asyncio.CancelledError:
                 pass
-            finally:
-                # fix event loop is close
-                if sys.version_info < (3, 11) and platform.system() == 'Windows':
-                    await asyncio.sleep(2)
             logger.info(f'结束弹幕录制: {self.__filename}')
 
         threading.Thread(target=asyncio.run, args=(__init(),)).start()
@@ -197,43 +187,37 @@ class DanmakuClient:
 
     async def __run(self):
         while True:
-            is_retry = False
-            danmaku_tasks: Optional[List[asyncio.Task]] = None
+            danmaku_task = None
             try:
                 self.__dm_queue = asyncio.Queue()
                 self.__hs = aiohttp.ClientSession()
                 await self.__init_ws()
-                danmaku_tasks = [asyncio.create_task(self.__heartbeats()),
-                                 asyncio.create_task(self.__fetch_danmaku()),
-                                 asyncio.create_task(self.__print_danmaku())]
-                await asyncio.gather(*danmaku_tasks)
+                danmaku_task = asyncio.gather(asyncio.create_task(self.__heartbeats()),
+                                              asyncio.create_task(self.__fetch_danmaku()),
+                                              asyncio.create_task(self.__print_danmaku()))
+                await danmaku_task
             except asyncio.CancelledError:
                 raise
             except self.WebsocketErrorException:
                 # 连接断开等30秒重连
                 # 在关闭之前一直重试
                 logger.warning(f"{DanmakuClient.__name__}:{self.__filename}: 弹幕连接异常,将在 30 秒后重试")
-                is_retry = True
-            except Exception as Error:
+            except:
                 # 记录异常不到外部处理
                 logger.exception(f"{DanmakuClient.__name__}:{self.__filename}: 弹幕异常,将在 30 秒后重试")
-                is_retry = True
             finally:
-                if type(danmaku_tasks) is list:
-                    for task in danmaku_tasks:
-                        task.cancel()
+                if danmaku_task is not None:
+                    danmaku_task.cancel()
                 if self.__ws is not None and not self.__ws.closed:
                     await self.__ws.close()
                 if self.__hs is not None and not self.__hs.closed:
                     await self.__hs.close()
-                if is_retry:
-                    await asyncio.sleep(30)
-                    continue
-            break
+            await asyncio.sleep(30)
 
     def stop(self):
         if self.__record_task is not None:
             self.__record_task.cancel()
+            self.__record_task = None
 
 # 虎牙直播：https://www.huya.com/lpl
 # 斗鱼直播：https://www.douyu.com/9999
