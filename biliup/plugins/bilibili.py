@@ -6,7 +6,6 @@ from . import match1, logger
 from biliup.plugins.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
-from biliup.database import DB as db
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m|live)\.)?bilibili\.com')
 class Bililive(DownloadBase):
@@ -18,7 +17,6 @@ class Bililive(DownloadBase):
     def check_stream(self, is_check=False):
 
         official_api = "https://api.live.bilibili.com"
-
         room_id = match1(self.url, r'/(\d+)')
 
         with requests.Session() as s:
