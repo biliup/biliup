@@ -163,12 +163,14 @@ class Bililive(DownloadBase):
         if bili_cdn_fallback:
             try:
                 stream_info['url_info'].reverse()
-                while not check_url_healthy(s, self.raw_stream_url):
-                    for i in len(stream_info['url_info']):
-                        self.raw_stream_url = stream_info['url_info'][i]['host'] \
-                            + stream_info['base_url'] + stream_info['url_info'][i]['extra']
-            except Exception:
-                pass
+                if not check_url_healthy(s, self.raw_stream_url):
+                    for url_info in stream_info['url_info']:
+                        self.raw_stream_url = url_info['host'] + stream_info['base_url'] + url_info['extra']
+                        if check_url_healthy(s, self.raw_stream_url):
+                            break
+            except Exception as e:
+                logger.debug(e)
+                logger.debug(play_info)
 
         s.close()
         return True
