@@ -246,11 +246,3 @@ def oversea_expand(s, url, ov05_ip):
     r = s.get(url, stream=True)
     logger.debug(f'将ov-gotcha05的节点ip替换为了{ov05_ip}')
     return re.sub(r".*(?=/d1--ov-gotcha05)", f"http://{ov05_ip}", r.url, 1)
-
-def replace1(text, *patterns):
-    if len(patterns) == 1:
-        pattern = patterns[0]
-        replace = text
-    else:
-        replace = text.replace(f"_{patterns[0].split('_')[-1]}", patterns[1])
-    return replace
