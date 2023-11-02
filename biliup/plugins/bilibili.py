@@ -20,7 +20,6 @@ class Bililive(DownloadBase):
         official_api = "https://api.live.bilibili.com"
 
         room_id = match1(self.url, r'/(\d+)')
-        qualityNumber = config.get('bili_qn', '10000')
 
         with requests.Session() as s:
             s.headers = self.fake_headers.copy()
@@ -40,20 +39,11 @@ class Bililive(DownloadBase):
             uname = room_info['data']['anchor_info']['base_info']['uname']
             if room_info['data']['room_info']['live_status'] != 1:
                 logger.debug(f"Bililive-{room_id}: 直播间未开播")
-                db.delete_stream_info(room_info['data']['anchor_info']['base_info']['uname'])
-                logger.debug("移除数据库内容")
                 return False
             if self.room_title is None:
                 self.room_title = room_info['data']['room_info']['title']
 
         if is_check:
-            return True
-        # 防止新版分段时，因下方检查而丢失过多内容
-        latest_info = db.get_stream_info(uname)
-        if latest_info is not None and qualityNumber >= 10000 \
-            and self.downloader != 'stream-gears':
-            self.raw_stream_url = latest_info.get('url')
-            logger.debug("从数据库内读取链接")
             return True
 
         s = requests.Session()
@@ -68,6 +58,7 @@ class Bililive(DownloadBase):
         else:
             logger.info(f"用户名：{user_data['uname']}, mid：{user_data['mid']}, isLogin：{is_login}")
 
+        qualityNumber = config.get('bili_qn', '10000')
         protocol = config.get('bili_protocol', 'stream')
         perf_cdn = config.get('bili_perfCDN')
         bili_cdn_fallback = config.get('bili_cdn_fallback', True)
@@ -118,12 +109,6 @@ class Bililive(DownloadBase):
             return False
         stream_info = stream_format['codec'][0]
 
-        if config.get('bili_nologin_high_quality', False) and not is_login \
-            and stream['protocol_name'] == 'http_hls' \
-            and len(stream_info['accept_qn']) > 1:
-                perf_cdn = 'cn-gotcha01'
-                force_source = True
-
         stream_url = {
             'base_url': stream_info['base_url'],
         }
@@ -168,8 +153,7 @@ class Bililive(DownloadBase):
         # 移除 streamName 内画质标签
         if streamName is not None and is_cn01 \
             and force_source and qualityNumber >= 10000:
-            new_base_url = replace1(stream_url['base_url'], streamName) if is_login \
-                else replace1(stream_url['base_url'], streamName, '_bluray')
+            new_base_url = replace1(stream_url['base_url'], streamName)
             if check_url_healthy(s, f"{stream_url['host']}{new_base_url}{stream_url['extra']}"):
                 stream_url['base_url'] = new_base_url
                 logger.debug(f"{stream_url['base_url']}")
@@ -188,8 +172,6 @@ class Bililive(DownloadBase):
                             + stream_info['base_url'] + stream_info['url_info'][i]['extra']
             except Exception:
                 pass
-
-        db.add_stream_info(name=uname, url=self.raw_stream_url, title=self.room_title, date=time.localtime(live_start_time), live_cover_path=self.live_cover_path)
 
         s.close()
         return True
