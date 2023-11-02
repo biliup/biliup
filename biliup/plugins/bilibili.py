@@ -22,7 +22,7 @@ class Bililive(DownloadBase):
         with requests.Session() as s:
             s.headers = self.fake_headers.copy()
             # 获取直播状态与房间标题
-            info_by_room_url = f"{official_api}/xlive/web-room/v1/index/getInfoByRoom?room_id={room_id}"
+            info_by_room_url = f"{official_api}/xlive/web-room/v1/index/getH5InfoByRoom?room_id={room_id}"
             try:
                 room_info = s.get(info_by_room_url, timeout=5).json()
             except Exception as e:
@@ -34,7 +34,6 @@ class Bililive(DownloadBase):
                 return False
             self.live_cover_url = room_info['data']['room_info']['cover']
             live_start_time = room_info['data']['room_info']['live_start_time']
-            uname = room_info['data']['anchor_info']['base_info']['uname']
             if room_info['data']['room_info']['live_status'] != 1:
                 logger.debug(f"Bililive-{room_id}: 直播间未开播")
                 return False
