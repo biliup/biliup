@@ -116,7 +116,7 @@ class Bililive(DownloadBase):
         stream_format = stream['format'][0]
         if protocol == "hls_fmp4" and len(stream['format']) > 1:
             stream_format = stream['format'][1]
-        elif int(time.time()) - self.live_start_time <= 60:  # 60s 宽容等待 fmp4
+        elif int(time.time()) - live_start_time <= 60:  # 60s 宽容等待 fmp4
             return False
 
         if self.downloader == 'stream-gears' and stream_format['format_name'] == 'fmp4':
