@@ -51,10 +51,10 @@ class Bililive(DownloadBase):
             return True
 
         s = requests.Session()
-        if config.get('user', {}).get('bili_cookie_file') is not None:
-            self.fake_headers['cookie'] = load_cookies(config.get('user', {}).get('bili_cookie_file'))
-        elif config.get('user', {}).get('bili_cookie') is not None:
-            self.fake_headers['cookie'] = config.get('user', {}).get('bili_cookie')
+        self.fake_headers['cookie'] = (
+            load_cookies(config.get('user', {}).get('bili_cookie_file')) or
+            config.get('user', {}).get('bili_cookie')
+        )
         s.headers = self.fake_headers
         user_data = do_login(s).get('data', {})
         is_login = user_data.get('isLogin', False)
@@ -152,27 +152,26 @@ class Bililive(DownloadBase):
         streamName = match1(stream_url['base_url'], streamname_regexp)
 
         is_cn01 = "cn-gotcha01" in stream_url['extra']
-        if is_cn01:
-            # 替换 cn-gotcha01 域名
-            if cn01_domains[0] != '':
-                import random
-                i = len(cn01_domains)
-                while i:  # 测试节点是否可用
-                    host = cn01_domains.pop(random.choice(range(i)))
-                    i-=1
-                    try:
-                        if check_url_healthy(s, f"https://{host}{url_path}"):
-                            stream_url['host'] = "https://" + host
-                            logger.debug(f'节点 {host} 可用，替换为该节点')
-                            break
-                    except Exception as e:
-                        logger.debug(e)
-                        logger.debug(f'节点 {host} 无法访问，尝试下一个节点。')
-                        continue
-                else:
-                    logger.error("配置文件中的cn-gotcha01节点均不可用")
+        # 替换 cn-gotcha01 域名
+        if is_cn01 and cn01_domains[0] != '':
+            import random
+            i = len(cn01_domains)
+            while i:  # 测试节点是否可用
+                host = cn01_domains.pop(random.choice(range(i)))
+                i-=1
+                try:
+                    if check_url_healthy(s, f"https://{host}{url_path}"):
+                        stream_url['host'] = "https://" + host
+                        logger.debug(f'节点 {host} 可用，替换为该节点')
+                        break
+                except Exception as e:
+                    logger.debug(e)
+                    logger.debug(f'节点 {host} 无法访问，尝试下一个节点。')
+                    continue
+            else:
+                logger.error("配置文件中的cn-gotcha01节点均不可用")
 
-        # 移除 streamName 内画质标签
+        # 移除 streamName 内画质标签。匹配到真原画时 streamName 为 None。
         if streamName is not None and is_cn01 \
             and force_source and qualityNumber >= 10000:
             logger.debug(streamName) # 替换了 FLV 不会通过健康检查，不用添加判断
@@ -254,10 +253,16 @@ def oversea_expand(s, url, ov05_ip):
     return re.sub(r".*(?=/d1--ov-gotcha05)", f"http://{ov05_ip}", r.url, 1)
 
 def load_cookies(filename):
-    import json
-    cookies = ""
-    with open(filename, encoding='utf-8') as stream:
-        s = json.load(stream)
-        for i in s["cookie_info"]["cookies"]:
-            cookies += f"{i['name']}={i['value']};"
-    return cookies
+    if filename is not None:
+        try:
+            import json
+            cookies = ""
+            with open(filename, encoding='utf-8') as stream:
+                s = json.load(stream)
+                for i in s["cookie_info"]["cookies"]:
+                    cookies += f"{i['name']}={i['value']};"
+                return cookies
+        except Exception as e:
+            logger.debug(e)
+            logger.error(f"读取 {filename} 文件失败")
+    return None
