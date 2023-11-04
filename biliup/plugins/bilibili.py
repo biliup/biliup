@@ -171,7 +171,7 @@ class Bililive(DownloadBase):
             else:
                 logger.error("配置文件中的cn-gotcha01节点均不可用")
 
-        # 移除 streamName 内画质标签。匹配到真原画时 streamName 为 None。
+        # 移除 streamName 内画质标签。
         if streamName is not None and is_cn01 \
             and force_source and qualityNumber >= 10000:
             logger.debug(streamName) # 替换了 FLV 不会通过健康检查，不用添加判断
