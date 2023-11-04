@@ -92,7 +92,8 @@ check_sourcecode = 15
 #bili_protocol = "stream"
 ### 哔哩哔哩直播优选CDN，默认无
 #bili_perfCDN = "cn-gotcha208,ov-gotcha05"
-### 哔哩哔哩直播强制原画（仅限HLS与FMP4流「beta」的 cn-gotcha01 CDN），默认为关闭
+### 哔哩哔哩强制真原画（仅限TS与FMP4流的 cn-gotcha01 CDN，且 bili_qn >= 10000），默认为关闭
+### 不保证可用性。当无法强制获取到真原画时，将会自动回退到二压原画。
 #bili_force_source = false
 ### 自定义哔哩哔哩直播API，用于获取指定区域（大陆或者海外）的直播流链接，默认使用官方API。
 #bili_liveapi = "https://api.live.bilibili.com"
@@ -243,17 +244,16 @@ tags = [ "biliup", "视频标签" ]
 
 
 ################### 用户cookie ###################
-### 在填了cookies的情况下优先使用cookies上传，如需使用用户名密码上传请注释掉cookies
-[user]
+# [user]
 #------哔哩哔哩------#
 #------哔哩哔哩获取直播流用COOKIE------#
-### 可参照https://github.com/BililiveRecorder/BililiveRecorder/issues/263.
-### 也可使用biliup-rs来获取以下项目.
-#bili_cookie = 'SESSDATA=none;bili_jct=none;DedeUserID__ckMd5=none;DedeUserID=none;access_token=none;'
+### 请至少填入以下项目。推荐使用 biliup-rs(https://github.com/biliup/biliup-rs) 来获取。
+#bili_cookie = 'SESSDATA=none;bili_jct=none;DedeUserID__ckMd5=none;DedeUserID=none;'
+### 同时存在时，优先使用文件。只支持 biliup-rs 生成的文件。
+#bili_cookie_file: 'cookies.json'
 ### 重要！！！
-### 是否将cookie传入第三方API。将Cookie传入未知的第三方API有几率泄露帐号登录信息。
-### 在开启了自定义Cookie（bili_cookie）又同时设置了第三方API（bili_liveapi）的情况下，如果打开了允许第三方API使用Cookie，那么就使用第三方API，如果没有允许（默认），那么设置的第三方API就不生效
-#customAPI_use_cookie = false
+### 因 哔哩哔哩 修改画质策略，不使用 Cookie 只返回最低画质，故不再控制 Cookie 使用与否。
+### 将 Cookie 传入不信任的第三方API可能会导致账号被盗，自行斟酌使用。
 
 #------抖音------#
 ### 如需要录制抖音www.douyin.com/user/类型链接或被风控

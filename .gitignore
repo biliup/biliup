@@ -16,6 +16,7 @@ config*.yaml
 ds_update.log*
 *.cookie
 *.zip
+*.exe
 *.egg-info
 dist/
 build/
@@ -28,7 +29,8 @@ archive.txt
 watch_process.pid
 package-lock.json
 biliup/**/public
-cookie*.json
+*.json
+qrcode.png
 *.log
 ./*.ts
 /biliup/stream-gears/
