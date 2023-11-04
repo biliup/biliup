@@ -250,7 +250,7 @@ tags = [ "biliup", "视频标签" ]
 ### 请至少填入以下项目。推荐使用 biliup-rs(https://github.com/biliup/biliup-rs) 来获取。
 #bili_cookie = 'SESSDATA=none;bili_jct=none;DedeUserID__ckMd5=none;DedeUserID=none;'
 ### 同时存在时，优先使用文件。只支持 biliup-rs 生成的文件。
-#bili_cookie_file: 'cookies.json'
+#bili_cookie_file = "cookies.json"
 ### 重要！！！
 ### 因 哔哩哔哩 修改画质策略，不使用 Cookie 只返回最低画质，故不再控制 Cookie 使用与否。
 ### 将 Cookie 传入不信任的第三方API可能会导致账号被盗，自行斟酌使用。
