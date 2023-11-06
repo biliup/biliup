@@ -51,8 +51,6 @@ class DownloadBase:
             '-bsf:a', 'aac_adtstoasc',
         ]
 
-        self.segment_type = 'time' if config.get('segment_time') else 'size'
-
         # if config.get('segment_time'):
         #     self.default_output_args += \
         #         ['-to', f"{config.get('segment_time', '00:50:00')}"]
@@ -88,7 +86,7 @@ class DownloadBase:
         fmtname = time.strftime(filename.encode("unicode-escape").decode()).encode().decode("unicode-escape")
         self.downloader = config['streamers'].get(self.fname, {}).get('downloader', self.downloader)
         self.danmaku_download_start(fmtname)
-        if self.segment_type == 'time':
+        if config.get('segment_time'):
             self.default_output_args += ['-to', f"{config['streamers'].get(self.fname, {}).get('segment_time', config.get('segment_time', '00:50:00'))}"]
         else:
             self.default_output_args += ['-fs', f"{config['streamers'].get(self.fname, {}).get('file_size', config.get('file_size', '2621440000'))}"]
