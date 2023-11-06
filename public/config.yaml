@@ -209,6 +209,9 @@ streamers:
         #open_elec: 0 ### 是否开启充电面板, 1为开启
         #no_reprint: 0 ### 自制声明, 1为未经允许禁止转载
         uploader: biliup-rs ### 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
+        #downloader: ffmpeg ### 覆盖全局的下载器
+        #file_size: 2621440000 ### 覆盖全局的大小分段 与时间分段不能共存
+        #segment_time: '00:50:00' ### 覆盖全局的时间分段 与大小分段不能共存
         #filename_prefix: '{streamer}%Y-%m-%d %H_%M_%S{title}'  ### 覆盖全局自定义录播文件命名规则
         user_cookie: cookies.json ### 使用指定的账号上传
         #use_live_cover: true ### 获取BILIBILI直播间封面并作为投稿封面。此封面优先级低于单个主播指定的自定义封面。

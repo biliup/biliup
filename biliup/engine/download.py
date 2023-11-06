@@ -50,12 +50,15 @@ class DownloadBase:
         self.default_output_args = [
             '-bsf:a', 'aac_adtstoasc',
         ]
-        if config.get('segment_time'):
-            self.default_output_args += \
-                ['-to', f"{config.get('segment_time', '00:50:00')}"]
-        else:
-            self.default_output_args += \
-                ['-fs', f"{config.get('file_size', '2621440000')}"]
+
+        self.segment_type = 'time' if config.get('segment_time') else 'size'
+
+        # if config.get('segment_time'):
+        #     self.default_output_args += \
+        #         ['-to', f"{config.get('segment_time', '00:50:00')}"]
+        # else:
+        #     self.default_output_args += \
+        #         ['-fs', f"{config.get('file_size', '2621440000')}"]
 
     def check_stream(self, is_check=False):
         # is_check 是否是检测可以避免在检测是否可以录制的时候忽略一些耗时的操作
@@ -83,9 +86,12 @@ class DownloadBase:
     def download(self, filename):
         filename = self.get_filename()
         fmtname = time.strftime(filename.encode("unicode-escape").decode()).encode().decode("unicode-escape")
-
+        self.downloader = config['streamers'].get(self.fname, {}).get('downloader', self.downloader)
         self.danmaku_download_start(fmtname)
-
+        if self.segment_type == 'time':
+            self.default_output_args += ['-to', f"{config['streamers'].get(self.fname, {}).get('segment_time', config.get('segment_time', '00:50:00'))}"]
+        else:
+            self.default_output_args += ['-fs', f"{config['streamers'].get(self.fname, {}).get('file_size', config.get('file_size', '2621440000'))}"]
         if self.downloader == 'streamlink':
             parsed_url = urlparse(self.raw_stream_url)
             path = parsed_url.path
@@ -96,8 +102,8 @@ class DownloadBase:
         elif self.downloader == 'ffmpeg':
             return self.ffmpeg_download(fmtname)
 
-        stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
-                              config.get('file_size'))
+        stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config['streamers'].get(self.fname, {}).get('segment_time', config.get('segment_time')),
+                              config['streamers'].get(self.fname, {}).get('file_size', config.get('file_size')))
         return True
 
     def streamlink_download(self, filename):  # streamlink+ffmpeg混合下载模式，适用于下载hls流
