@@ -1,17 +1,18 @@
 <div align="center">
 
 # biliup
-![python](https://img.shields.io/badge/python-3.7%2B-blue)
+
+[![python](https://img.shields.io/badge/python-3.7%2B-blue)](http://www.python.org/download)
 [![PyPI](https://img.shields.io/pypi/v/biliup)](https://pypi.org/project/biliup)
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/biliup)](https://pypi.org/project/biliup)
 [![license](https://img.shields.io/github/license/biliup/biliup)](https://github.com/biliup/biliup/blob/master/LICENSE)
 [![Telegram](https://img.shields.io/badge/Telegram-Group-blue.svg?logo=telegram)](https://t.me/+IkpIABHqy6U0ZTQ5)
 [![Discord chat][discord-badge]][discord-url]
 
-[![issues](https://img.shields.io/github/issues/biliup/biliup?label=Github%20issues)](https://github.com/biliup/biliup/issues)
-[![STARS](https://img.shields.io/github/stars/biliup/biliup)](https://github.com/biliup/biliup/stargazers)
-[![forks](https://img.shields.io/github/forks/biliup/biliup)](https://github.com/biliup/biliup/network)
-[![downloads](https://img.shields.io/github/downloads/biliup/biliup/total?color=%239F7AEA&logo=github)](https://github.com/biliup/biliup/releases/latest)
+[![STARS](https://img.shields.io/github/stars/biliup/biliup?style=social)](https://github.com/biliup/biliup/stargazers)
+[![Forks](https://img.shields.io/github/forks/biliup/biliup?style=social)](https://github.com/biliup/biliup/network)
+[![Downloads](https://img.shields.io/github/downloads/biliup/biliup/total?style=social)](https://github.com/biliup/biliup/releases/latest)
+[![Watchers](https://img.shields.io/github/watchers/biliup/biliup.svg?style=social)](https://github.com/biliup/biliup/watchers)
 
 
 </div>
