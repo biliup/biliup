@@ -86,15 +86,18 @@ class DownloadBase:
 
         self.danmaku_download_start(fmtname)
 
+        parsed_url_path = urlparse(self.raw_stream_url).path
         if self.downloader == 'streamlink':
-            parsed_url = urlparse(self.raw_stream_url)
-            path = parsed_url.path
-            if '.flv' in path:  # streamlink无法处理flv,所以回退到ffmpeg
+            if '.flv' in parsed_url_path:  # streamlink无法处理flv,所以回退到ffmpeg
                 return self.ffmpeg_download(fmtname)
             else:
                 return self.streamlink_download(fmtname)
         elif self.downloader == 'ffmpeg':
             return self.ffmpeg_download(fmtname)
+
+        if not self.suffix in ['flv', 'ts']:
+            self.suffix = 'flv' if '.flv' in parsed_url_path else 'ts'
+            logger.warning(f'stream-gears 不支持除 flv 和 ts 以外的格式，已按流自动修正为 {self.suffix} 格式')
 
         stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
                               config.get('file_size'))
