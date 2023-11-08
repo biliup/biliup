@@ -100,7 +100,7 @@ class DownloadBase:
             logger.error(f'stream-gears 不支持 mp4 格式，已自动修改为 {self.suffix} 格式')
 
         stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
-                                  config.get('file_size'))
+                              config.get('file_size'))
         return True
 
     def streamlink_download(self, filename):  # streamlink+ffmpeg混合下载模式，适用于下载hls流
