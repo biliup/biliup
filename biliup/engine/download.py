@@ -97,7 +97,7 @@ class DownloadBase:
 
         if not self.suffix in ['flv', 'ts']:
             self.suffix = 'flv' if '.flv' in parsed_url_path else 'ts'
-            logger.error(f'stream-gears 不支持 mp4 格式，已自动修改为 {self.suffix} 格式')
+            logger.error(f'stream-gears 不支持除 flv 和 ts 以外的格式，已按流自动修正为 {self.suffix} 格式')
 
         stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
                               config.get('file_size'))
