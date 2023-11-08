@@ -86,8 +86,8 @@ class DownloadBase:
 
         self.danmaku_download_start(fmtname)
 
+        parsed_url_path = urlparse(self.raw_stream_url).path
         if self.downloader == 'streamlink':
-            parsed_url_path = urlparse(self.raw_stream_url).path
             if '.flv' in parsed_url_path:  # streamlink无法处理flv,所以回退到ffmpeg
                 return self.ffmpeg_download(fmtname)
             else:
@@ -95,12 +95,12 @@ class DownloadBase:
         elif self.downloader == 'ffmpeg':
             return self.ffmpeg_download(fmtname)
 
-        if self.suffix in ['flv', 'ts']:  # 当使用stream_gears时,format不为flv和ts,使用ffmpeg
-            stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
-                                  config.get('file_size'))
-        else:
-            return self.ffmpeg_download(fmtname)
+        if not self.suffix in ['flv', 'ts']:
+            self.suffix = 'flv' if '.flv' in parsed_url_path else 'ts'
+            logger.error(f'stream-gears 不支持 mp4 格式，已自动修改为 {self.suffix} 格式')
 
+        stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
+                                  config.get('file_size'))
         return True
 
     def streamlink_download(self, filename):  # streamlink+ffmpeg混合下载模式，适用于下载hls流
