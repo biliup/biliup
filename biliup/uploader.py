@@ -22,7 +22,7 @@ def upload(data):
         cls = Plugin.upload_plugins.get(platform)
         if cls is None:
             return logger.error(f"No such uploader: {platform}")
-        data = fmt_title_and_desc(data)
+        data, context = fmt_title_and_desc(data)
         data['dolby'] = config.get('dolby', 0)
         data['hires'] = config.get('hires', 0)
         data['no_reprint'] = config.get('no_reprint', 0)
@@ -50,7 +50,7 @@ def fmt_title_and_desc(data):
     data["format_title"] = custom_fmtstr(context.get('title', f'%Y.%m.%d{index}'), date, title, streamer, url)
     if context.get('description'):
         context['description'] = custom_fmtstr(context.get('description'), date, title, streamer, url)
-    return data
+    return data, context
 
 
 def custom_fmtstr(string, date, title, streamer, url):
