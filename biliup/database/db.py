@@ -2,7 +2,7 @@ import time
 from datetime import datetime, timedelta
 from playhouse.shortcuts import model_to_dict
 
-from .models import StreamerInfo, FileList, db
+from .models import StreamerInfo, FileList, db, logger, TempStreamerInfo
 
 
 def struct_time_to_datetime(date: time.struct_time):
@@ -21,6 +21,10 @@ class DB:
         """初始化数据库"""
         StreamerInfo.create_table_()
         FileList.create_table_()
+        with db.connection_context():
+            columns_name_list = [column_meta.name for column_meta in db.get_columns('streamerinfo')]
+            if 'id' not in columns_name_list:
+                cls.migrate_streamer_info()
 
     @classmethod
     def connect(cls):
@@ -113,6 +117,20 @@ class DB:
         """获取视频文件列表"""
         file_list = StreamerInfo.get_by_id_(database_row_id).file_list
         return [file.file for file in file_list]
+
+    @classmethod
+    def migrate_streamer_info(cls):
+        """迁移旧版数据库中数据到新版"""
+        logger.info("检测到旧版数据表，正在自动迁移")
+        with db.connection_context():
+            # 创建新的临时表格
+            TempStreamerInfo.create_table()
+            # 将数据从原表格拷贝到新表格
+            db.execute_sql('INSERT INTO temp_streamer_info (name, url, title, date, live_cover_path) SELECT name, url, title, date, live_cover_path FROM streamerinfo')
+            # 删除原表格
+            StreamerInfo.drop_table()
+            # 将新表格重命名为原表格的名字
+            db.execute_sql('ALTER TABLE temp_streamer_info RENAME TO streamerinfo')
 
     def backup(self):
         """备份数据库"""

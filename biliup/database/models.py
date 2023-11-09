@@ -1,7 +1,10 @@
 from pathlib import Path
+import logging
 
 from peewee import CharField, DateTimeField, IntegrityError, ForeignKeyField, AutoField, Model, SqliteDatabase
 from playhouse.shortcuts import ReconnectMixin, model_to_dict
+
+logger = logging.getLogger('biliup')
 
 
 def get_path(*other):
@@ -88,3 +91,8 @@ class FileList(BaseModel):
     file = CharField()  # 文件名
     # 外键, 对应 StreamerInfo 中的下载信息, 且启用级联删除
     streamer_info = ForeignKeyField(StreamerInfo, backref='file_list', on_delete='CASCADE')
+
+
+class TempStreamerInfo(StreamerInfo):
+    class Meta:
+        table_name = 'temp_streamer_info'
