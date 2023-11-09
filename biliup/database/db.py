@@ -1,6 +1,7 @@
 import time
 from datetime import datetime, timedelta
 from playhouse.shortcuts import model_to_dict
+from peewee import OperationalError
 
 from .models import StreamerInfo, FileList, db, logger, TempStreamerInfo
 
@@ -23,8 +24,11 @@ class DB:
         FileList.create_table_()
         with db.connection_context():
             columns_name_list = [column_meta.name for column_meta in db.get_columns('streamerinfo')]
-            if 'id' not in columns_name_list:
+        if 'id' not in columns_name_list:
+            try:
                 cls.migrate_streamer_info()
+            except OperationalError as e:
+                logger.error(f"迁移失败: {e}，请手动删除旧数据库后重试")
 
     @classmethod
     def connect(cls):
@@ -78,7 +82,7 @@ class DB:
     def delete_stream_info_by_date(cls, name: str, date: time.struct_time) -> int:
         """根据 streamer 和开播时间删除下载信息, 返回删除的行数, 若不存在则返回 0 """
         start_datetime = struct_time_to_datetime(date)
-        with db.connection_context():
+        with db.atomic():
             dq = StreamerInfo.delete().where(
                 (StreamerInfo.name == name) &
                 (StreamerInfo.date.between(  # 传入的开播时间前后一分钟内都可以匹配
@@ -90,7 +94,7 @@ class DB:
     @classmethod
     def update_cover_path(cls, database_row_id: int, live_cover_path: str):
         """更新封面存储路径"""
-        with db.connection_context():
+        with db.atomic():
             return StreamerInfo.update(
                 live_cover_path=live_cover_path
             ).where(StreamerInfo.id == database_row_id).execute()
@@ -98,7 +102,7 @@ class DB:
     @classmethod
     def update_room_title(cls, database_row_id: int, title: str):
         """更新直播标题"""
-        with db.connection_context():
+        with db.atomic():
             return StreamerInfo.update(
                 title=title
             ).where(StreamerInfo.id == database_row_id).execute()
@@ -122,7 +126,7 @@ class DB:
     def migrate_streamer_info(cls):
         """迁移旧版数据库中数据到新版"""
         logger.info("检测到旧版数据表，正在自动迁移")
-        with db.connection_context():
+        with db.atomic():
             # 创建新的临时表格
             TempStreamerInfo.create_table()
             # 将数据从原表格拷贝到新表格

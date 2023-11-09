@@ -31,7 +31,7 @@ class BaseModel(Model):
     @classmethod
     def add(cls, **kwargs) -> int:
         """添加行, 返回添加的行的 id 值"""
-        with db.connection_context():
+        with db.atomic():
             try:
                 dq = cls.create(**kwargs)
                 return dq.id
@@ -41,7 +41,7 @@ class BaseModel(Model):
     @classmethod
     def delete_(cls, **kwargs):
         """删除行"""
-        with db.connection_context():
+        with db.atomic():
             try:
                 query = cls.get(**kwargs)
                 return query.delete_instance()
@@ -51,7 +51,7 @@ class BaseModel(Model):
     @classmethod
     def create_table_(cls):
         """创建表"""
-        with db.connection_context():
+        with db.atomic():
             if not cls.table_exists():
                 cls.create_table()
 
