@@ -11,7 +11,7 @@ from typing import NamedTuple, Optional, List
 
 from biliup.common.tools import NamedLock
 from biliup.config import config
-
+from biliup.uploader import fmt_title_and_desc
 from biliup.database import DB as db
 
 logger = logging.getLogger('biliup')
@@ -140,14 +140,23 @@ class UploadBase:
                     file_list = UploadBase.file_list(self.principal)
 
                 if len(file_list) > 0:
-                    logger.info('准备上传' + self.data["format_title"])
                     upload_filename_list = [os.path.splitext(file.video)[0] for file in file_list]
+                    if ("title" not in self.data) or (not self.data["title"]):  # 如果 data 中不存在标题, 说明下载信息已丢失, 则尝试从数据库获取
+                        data, context = fmt_title_and_desc({
+                            **db.get_stream_info_by_filename(upload_filename_list[0]),
+                            "name": self.principal})  # 如果 restart, data 中会缺失 name 项
+                        self.data.update(data)
+                        if hasattr(self, "description"):
+                            self.description = context.get('description', '')
+                    logger.info('准备上传' + self.data["format_title"])
                     with NamedLock('upload_filename'):
                         event_manager.context['upload_filename'].extend(upload_filename_list)
                     lock.release()
                     needed2process = self.upload(file_list)
                     if needed2process:
                         self.postprocessor(needed2process)
+                if db.delete_stream_info_by_date(self.principal, self.data.get('date')) == 0:
+                    # 如果按开播时间删除失败，则尝试按照 streamer 删除
                     db.delete_stream_info(self.principal)
         finally:
             with NamedLock('upload_filename'):

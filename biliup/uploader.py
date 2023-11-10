@@ -3,7 +3,6 @@ import logging
 import time
 
 from biliup.config import config
-from biliup.database import DB as db
 from .engine.decorators import Plugin
 
 logger = logging.getLogger('biliup')
@@ -18,21 +17,12 @@ def upload(data):
     """
     try:
         index = data['name']
-        # 尝试获取数据库中对应的数据, 并降低旧数据误用的可能性
-        data = {**db.get_stream_info(index), **data}
         context = {**config, **config['streamers'][index]}
         platform = context.get("uploader", "biliup-rs")
         cls = Plugin.upload_plugins.get(platform)
         if cls is None:
             return logger.error(f"No such uploader: {platform}")
-        streamer = data.get('streamer', index)
-        date = data.get("date", time.localtime())
-        title = data.get('title', index)
-        url = data.get('url')
-        live_cover_path = data.get('live_cover_path')
-        data["format_title"] = custom_fmtstr(context.get('title', f'%Y.%m.%d{index}'), date, title, streamer, url)
-        if context.get('description'):
-            context['description'] = custom_fmtstr(context.get('description'), date, title, streamer, url)
+        data, context = fmt_title_and_desc(data)
         data['dolby'] = config.get('dolby', 0)
         data['hires'] = config.get('hires', 0)
         data['no_reprint'] = config.get('no_reprint', 0)
@@ -46,6 +36,21 @@ def upload(data):
         return cls(index, data, **kwargs).start()
     except:
         logger.exception("Uncaught exception:")
+
+
+# 将格式化标题和简介拆分出来方便复用
+def fmt_title_and_desc(data):
+    index = data['name']
+    context = {**config, **config['streamers'][index]}
+    streamer = data.get('streamer', index)
+    date = data.get("date", time.localtime())
+    title = data.get('title', index)
+    url = data.get('url')
+    live_cover_path = data.get('live_cover_path')
+    data["format_title"] = custom_fmtstr(context.get('title', f'%Y.%m.%d{index}'), date, title, streamer, url)
+    if context.get('description'):
+        context['description'] = custom_fmtstr(context.get('description'), date, title, streamer, url)
+    return data, context
 
 
 def custom_fmtstr(string, date, title, streamer, url):
