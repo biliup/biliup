@@ -59,8 +59,8 @@ class Bililive(DownloadBase):
         user_data = do_login(s).get('data', {})
         is_login = user_data.get('isLogin', False)
         if not is_login:
-            logger.info(f"Bililive: Cookie 不存在或失效")
-            self.fake_headers['cookie'] = None
+            logger.debug(f"Bililive: Cookie 不存在或失效")
+            logger.debug(self.fake_headers.pop('cookie', 'Bililive: Not Found Cookie'))
         else:
             logger.info(f"用户名：{user_data['uname']}, mid：{user_data['mid']}, isLogin：{is_login}")
 
