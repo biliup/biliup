@@ -1,0 +1,78 @@
+name: 错误回报
+description: 在使用 biliup 的过程中遇到了错误
+title: '【错误回报】'
+labels: [ "bug" ]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 请补全标题并认真填写下方内容
+
+        请清晰描述问题，不必严格套用模板。
+
+  - type: input
+    id: system_version
+    attributes:
+      label: 运行环境
+      description: 如 Windows Server 2012、CentOS 8.2 等
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: biliup 版本
+      description: 可通过运行 `biliup --version` 查看
+    validations:
+      required: true
+
+  - type: textarea
+    id: bug_info
+    attributes:
+      label: 错误描述
+      description: 描述你遇到的问题，需要怎么复现？期望的结果是什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: 配置文件
+      description: 请**脱敏**后上传你的配置文件, 或将文件内容复制到下面模板中
+      value: |
+        ### 日志
+        
+        <details>
+        <summary>
+        配置文件
+        </summary>
+        
+        ```bash
+        # 在这里填写你的配置文件
+        ```
+          
+        </details>
+
+  - type: textarea
+    id: log
+    attributes:
+      label: 报错日志以及其他描述（如果有）
+      description: 上传 `ds_update.log` 和 `upload.log` 文件, 或将文件内容复制到下面模板中
+      value: |
+        ### 日志
+        
+        <details>
+        <summary>
+        <!--此处填写报错标题-->
+        </summary>
+        
+        ```bash
+        # 在这里填写你的报错日志
+        ```
+          
+        </details>
+        
+        ### 其他补充描述
+        
+        <!--此处填写补充描述-->
