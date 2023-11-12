@@ -94,6 +94,8 @@ class DB:
     @classmethod
     def update_cover_path(cls, database_row_id: int, live_cover_path: str):
         """更新封面存储路径"""
+        if not live_cover_path:
+            live_cover_path = ""
         with db.atomic():
             return StreamerInfo.update(
                 live_cover_path=live_cover_path
@@ -102,6 +104,8 @@ class DB:
     @classmethod
     def update_room_title(cls, database_row_id: int, title: str):
         """更新直播标题"""
+        if not title:
+            title = ""
         with db.atomic():
             return StreamerInfo.update(
                 title=title
