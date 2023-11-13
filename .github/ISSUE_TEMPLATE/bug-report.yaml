@@ -27,6 +27,14 @@ body:
     validations:
       required: true
 
+  - type: input
+    id: url
+    attributes:
+      label: 所录制的主播网址
+      description: 可以在配置文件中查看
+    validations:
+      required: true
+
   - type: textarea
     id: bug_info
     attributes:
