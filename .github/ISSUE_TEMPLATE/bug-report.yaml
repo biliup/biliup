@@ -49,8 +49,6 @@ body:
       label: 配置文件
       description: 请**脱敏**后上传你的配置文件, 或将文件内容复制到下面模板中
       value: |
-        ### 日志
-        
         <details>
         <summary>
         配置文件
