@@ -4,24 +4,21 @@
 # 仅抓取用户弹幕，不包括入场提醒、礼物赠送等。
 
 import asyncio
+import logging
 import os
-import platform
 import re
-import ssl
-import sys
 import threading
 import time
-import logging
-from typing import Optional, List
+from typing import Optional
 
-import lxml.etree as etree
 import aiohttp
+import lxml.etree as etree
 
+from biliup.plugins.Danmaku.bilibili import Bilibili
+from biliup.plugins.Danmaku.douyin import Douyin
 from biliup.plugins.Danmaku.douyu import Douyu
 from biliup.plugins.Danmaku.huya import Huya
-from biliup.plugins.Danmaku.bilibili import Bilibili
 from biliup.plugins.Danmaku.twitch import Twitch
-from biliup.plugins.Danmaku.douyin import Douyin
 
 logger = logging.getLogger('biliup')
 
@@ -63,9 +60,7 @@ class DanmakuClient:
     async def __init_ws(self):
         try:
             ws_url, reg_datas = await self.__site.get_ws_info(self.__url)
-            ctx = ssl.create_default_context()
-            ctx.set_ciphers('DEFAULT')
-            self.__ws = await self.__hs.ws_connect(ws_url, ssl_context=ctx, headers=getattr(self.__site, 'headers', {}))
+            self.__ws = await self.__hs.ws_connect(ws_url, headers=getattr(self.__site, 'headers', {}))
             for reg_data in reg_datas:
                 if type(reg_data) == str:
                     await self.__ws.send_str(reg_data)
@@ -114,16 +109,16 @@ class DanmakuClient:
                     await self.__dm_queue.put(m)
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except:
                 logger.exception(f"{DanmakuClient.__name__}:{self.__url}: 弹幕接收异常")
                 continue
                 # await asyncio.sleep(10) 无需等待 直接获取下一条websocket消息
                 # 这里出现异常只会是 decode_msg 的问题
 
     async def __print_danmaku(self):
-        parser = etree.XMLParser(recover=True)
         root = etree.Element("root")
-        tree = etree.ElementTree(root, parser=parser)
+        etree.indent(root, "\t")
+        tree = etree.ElementTree(root, parser=etree.XMLParser(recover=True))
         msg_i = 0
         msg_col = {'0': '16777215', '1': '16717077', '2': '2000880', '3': '8046667', '4': '16744192',
                    '5': '10172916',
@@ -132,7 +127,6 @@ class DanmakuClient:
         def write_file(filename):
             try:
                 with open(filename, "wb") as f:
-                    etree.indent(root, "\t")
                     tree.write(f, encoding="UTF-8", xml_declaration=True, pretty_print=True)
             except Exception as e:
                 logger.warning(f"{DanmakuClient.__name__}:{self.__url}: 弹幕写入异常 - {e}")
@@ -152,8 +146,8 @@ class DanmakuClient:
                         msg_time = format(time.time() - self.__starttime, '.3f')
                         d.set('p', f"{msg_time},1,25,{color},0,0,0,0")
                         d.text = m["content"]
-                    except Exception as Error:
-                        logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常 - {Error}")
+                    except:
+                        logger.exception(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常")
                         # 异常后略过本次弹幕
                         continue
 
@@ -165,7 +159,7 @@ class DanmakuClient:
                     else:
                         msg_i = msg_i + 1
         finally:
-            # 发生异常时写入 避免丢失未写入
+            # 发生异常(被取消)时写入 避免丢失未写入
             write_file(self.__filename)
 
     def start(self):
@@ -186,33 +180,38 @@ class DanmakuClient:
         init_event.wait()
 
     async def __run(self):
-        while True:
-            danmaku_task = None
-            try:
-                self.__dm_queue = asyncio.Queue()
-                self.__hs = aiohttp.ClientSession()
-                await self.__init_ws()
-                danmaku_task = asyncio.gather(asyncio.create_task(self.__heartbeats()),
-                                              asyncio.create_task(self.__fetch_danmaku()),
-                                              asyncio.create_task(self.__print_danmaku()))
-                await danmaku_task
-            except asyncio.CancelledError:
-                raise
-            except self.WebsocketErrorException:
-                # 连接断开等30秒重连
-                # 在关闭之前一直重试
-                logger.warning(f"{DanmakuClient.__name__}:{self.__filename}: 弹幕连接异常,将在 30 秒后重试")
-            except:
-                # 记录异常不到外部处理
-                logger.exception(f"{DanmakuClient.__name__}:{self.__filename}: 弹幕异常,将在 30 秒后重试")
-            finally:
-                if danmaku_task is not None:
-                    danmaku_task.cancel()
-                if self.__ws is not None and not self.__ws.closed:
-                    await self.__ws.close()
-                if self.__hs is not None and not self.__hs.closed:
-                    await self.__hs.close()
-            await asyncio.sleep(30)
+        self.__dm_queue = asyncio.Queue()
+        self.__hs = aiohttp.ClientSession()
+        print_task = asyncio.create_task(self.__print_danmaku())
+        try:
+            while True:
+                danmaku_tasks = None
+                try:
+                    await self.__init_ws()
+                    danmaku_tasks = [asyncio.create_task(self.__heartbeats()),
+                                     asyncio.create_task(self.__fetch_danmaku())]
+                    await asyncio.gather(*danmaku_tasks)
+                except asyncio.CancelledError:
+                    raise
+                except self.WebsocketErrorException:
+                    # 连接断开等30秒重连
+                    # 在关闭之前一直重试
+                    logger.warning(f"{DanmakuClient.__name__}:{self.__filename}: 弹幕连接异常,将在 30 秒后重试")
+                except:
+                    # 记录异常不到外部处理
+                    logger.exception(f"{DanmakuClient.__name__}:{self.__filename}: 弹幕异常,将在 30 秒后重试")
+                finally:
+                    if danmaku_tasks is not None:
+                        for danmaku_task in danmaku_tasks:
+                            danmaku_task.cancel()
+                        await asyncio.gather(*danmaku_tasks, return_exceptions=True)
+                    if self.__ws is not None and not self.__ws.closed:
+                        await self.__ws.close()
+                await asyncio.sleep(30)
+        finally:
+            print_task.cancel()
+            await asyncio.gather(print_task, return_exceptions=True)
+            await self.__hs.close()
 
     def stop(self):
         if self.__record_task is not None:
