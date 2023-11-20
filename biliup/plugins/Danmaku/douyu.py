@@ -19,13 +19,11 @@ class Douyu:
     async def get_ws_info(url):
         async with aiohttp.ClientSession() as session:
             if 'm.douyu.com' in url:
-                room_no = url.split('m.douyu.com/')[1].split('/')[0].split('?')[0]
-                async with session.get(f'https://www.douyu.com/{room_no}', timeout=5) as resp:
-                    room_page = await resp.text()
+                room_id = url.split('m.douyu.com/')[1].split('/')[0].split('?')[0]
             else:
                 async with session.get(url, timeout=5) as resp:
                     room_page = await resp.text()
-        room_id = match1(room_page, r'\$ROOM\.room_id\s*=\s*(\d+)')
+                    room_id = match1(room_page, r'\$ROOM\.room_id\s*=\s*(\d+)', r'apm_room_id\s*=\s*(\d+)')[0]
         reg_datas = []
         data = f'type@=loginreq/roomid@={room_id}/'
         s = pack('i', 9 + len(data)) * 2

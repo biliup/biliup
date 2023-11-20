@@ -7,6 +7,7 @@ import asyncio
 import logging
 import os
 import re
+import ssl
 import threading
 import time
 from typing import Optional
@@ -60,7 +61,9 @@ class DanmakuClient:
     async def __init_ws(self):
         try:
             ws_url, reg_datas = await self.__site.get_ws_info(self.__url)
-            self.__ws = await self.__hs.ws_connect(ws_url, headers=getattr(self.__site, 'headers', {}))
+            ctx = ssl.create_default_context()
+            ctx.set_ciphers('DEFAULT')
+            self.__ws = await self.__hs.ws_connect(ws_url, ssl_context=ctx, headers=getattr(self.__site, 'headers', {}))
             for reg_data in reg_datas:
                 if type(reg_data) == str:
                     await self.__ws.send_str(reg_data)
@@ -68,7 +71,7 @@ class DanmakuClient:
                     await self.__ws.send_bytes(reg_data)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except:
             raise self.WebsocketErrorException()
 
     async def __heartbeats(self):
@@ -196,7 +199,8 @@ class DanmakuClient:
                 except self.WebsocketErrorException:
                     # 连接断开等30秒重连
                     # 在关闭之前一直重试
-                    logger.warning(f"{DanmakuClient.__name__}:{self.__filename}: 弹幕连接异常,将在 30 秒后重试")
+                    logger.warning(f"{DanmakuClient.__name__}:{self.__filename}: 弹幕连接异常,将在 30 秒后重试",
+                                   exc_info=True)
                 except:
                     # 记录异常不到外部处理
                     logger.exception(f"{DanmakuClient.__name__}:{self.__filename}: 弹幕异常,将在 30 秒后重试")
