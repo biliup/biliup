@@ -2,6 +2,7 @@ import time
 from datetime import datetime, timedelta
 from playhouse.shortcuts import model_to_dict
 from peewee import OperationalError
+from typing import List
 
 from .models import StreamerInfo, FileList, db, logger, TempStreamerInfo
 
@@ -121,7 +122,7 @@ class DB:
         )
 
     @classmethod
-    def get_file_list(cls, database_row_id: int) -> list[str]:
+    def get_file_list(cls, database_row_id: int) -> List[str]:
         """获取视频文件列表"""
         file_list = StreamerInfo.get_by_id_(database_row_id).file_list
         return [file.file for file in file_list]
