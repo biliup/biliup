@@ -7,7 +7,7 @@ from ..engine.download import DownloadBase
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|fm)\.)?missevan\.com')
 class Missevan(DownloadBase):
-    def __init__(self, fname, url, suffix):
+    def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
         self.fake_headers = {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
