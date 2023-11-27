@@ -304,3 +304,6 @@ $ systemctl --user start biliupd
 * Thanks `ykdl, youtube-dl, streamlink` provides downloader.
 * Thanks `THMonster/danmaku`.
 > GUI：[B站投稿客户端 biliup-app](https://github.com/ForgQi/Caution)
+
+## Stars
+[![Star History Chart](https://api.star-history.com/svg?repos=biliup/biliup&type=Date)](https://star-history.com/#biliup/biliup&Date)
