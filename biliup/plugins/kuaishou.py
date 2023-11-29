@@ -13,20 +13,25 @@ class Kuaishou(DownloadBase):
 
     def check_stream(self, is_check=False):
         try:
+            room_id = get_kwaiId(self.url)
+            if not room_id:
+                logger.warning(f"{Kuaishou.__name__}: {self.url}: 直播间地址错误")
+                return False
+
             with requests.Session() as s:
                 s.headers = self.fake_headers.copy()
                 # 首页低风控生成did
                 s.get("https://live.kuaishou.com", timeout=5)
 
                 room_info = s.get(
-                    f"https://live.kuaishou.com/live_api/liveroom/livedetail?principalId={get_kwaiId(self.url)}",
+                    f"https://live.kuaishou.com/live_api/liveroom/livedetail?principalId={room_id}",
                     timeout=5).json()['data']
 
             if room_info['result'] == 22:
                 logger.warning(f"{Kuaishou.__name__}: {self.url}: 直播间地址错误")
                 return False
             if room_info['result'] == 671:
-                logger.warning(f"{Kuaishou.__name__}: {self.url}: 直播间未开播或非直播")
+                logger.debug(f"{Kuaishou.__name__}: {self.url}: 直播间未开播或非直播")
                 return False
             if room_info['result'] != 1:
                 logger.warning(f"{Kuaishou.__name__}: {self.url}: 错误{room_info['result']}")
