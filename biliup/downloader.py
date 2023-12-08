@@ -4,13 +4,13 @@ import threading
 import time
 from urllib.error import HTTPError
 
+from biliup.config import config
+from .app import context
 from .common.tools import NamedLock
 from .engine.decorators import Plugin
-
 from .engine.download import DownloadBase
 from .engine.event import Event
 from .plugins import general
-from biliup.config import config
 
 logger = logging.getLogger('biliup')
 check_flag = threading.Event()
@@ -28,12 +28,10 @@ def download(fname, url, **kwargs):
 
 
 def check_url(checker):
-    from .handler import event_manager
     # 单主播检测延迟
     checker_sleep = config.get('checker_sleep', 10)
     # 平台检测延迟
     event_loop_interval = config.get('event_loop_interval', 30)
-    context = event_manager.context
     class_reference = type(checker('', ''))
 
     while not check_flag.is_set():
@@ -90,13 +88,13 @@ def check_url(checker):
 def send_download_event(name, url):
     # 永远不可能对同一个url同时发送两次下载事件
     from .handler import event_manager, DOWNLOAD
-    content = event_manager.context
+
     # 需要等待上传文件列表检索完成后才可以开始下次下载
     with NamedLock(f'upload_file_list_{name}'):
-        for streamer_url in content['streamers'][content['inverted_index'][url]]['url']:
-            if content['url_status'][streamer_url] == 1:
+        for streamer_url in context['streamers'][context['inverted_index'][url]]['url']:
+            if context['url_status'][streamer_url] == 1:
                 return False
-        content['url_status'][url] = 1
+        context['url_status'][url] = 1
         event_manager.send_event(Event(DOWNLOAD, args=(name, url,)))
     return True
 
@@ -106,5 +104,5 @@ def send_upload_event(stream_info):
     with NamedLock(f"upload_count_{stream_info['url']}"):
         from .handler import event_manager, UPLOAD
         # += 不是原子操作
-        event_manager.context['url_upload_count'][stream_info['url']] += 1
+        context['url_upload_count'][stream_info['url']] += 1
         event_manager.send_event(Event(UPLOAD, (stream_info,)))

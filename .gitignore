@@ -35,3 +35,5 @@ qrcode.png
 ./*.ts
 /biliup/stream-gears/
 data/
+.next
+out

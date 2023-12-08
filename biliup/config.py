@@ -3,6 +3,10 @@ import pathlib
 import shutil
 from collections import UserDict
 
+from playhouse.shortcuts import model_to_dict
+
+from biliup.database.models import Configuration, LiveStreamers, db, UploadStreamers
+
 try:
     import tomllib
 except ModuleNotFoundError:
@@ -10,14 +14,39 @@ except ModuleNotFoundError:
 
 
 class Config(UserDict):
-    def load_cookies(self):
+    def load_cookies(self, file='cookies.json'):
         self.data["user"] = {"cookies": {}}
-        with open('cookies.json', encoding='utf-8') as stream:
+        with open(file, encoding='utf-8') as stream:
             s = json.load(stream)
             for i in s["cookie_info"]["cookies"]:
                 name = i["name"]
                 self.data["user"]["cookies"][name] = i["value"]
             self.data["user"]["access_token"] = s["token_info"]["access_token"]
+
+    def load_from_db(self):
+        for con in Configuration.select().where(Configuration.key == 'config'):
+            self.data = json.loads(con.value)
+        self['streamers'] = {}
+        for ls in LiveStreamers.select():
+            self['streamers'][ls.remark] = model_to_dict(ls)
+            self['streamers'][ls.remark].pop('upload_streamers')
+            if ls.upload_streamers:
+                self['streamers'][ls.remark].update(model_to_dict(ls.upload_streamers))
+            if self['streamers'][ls.remark].get('tags'):
+                self['streamers'][ls.remark]['tags'] = self['streamers'][ls.remark]['tags'].split(',')
+        # for us in UploadStreamers.select():
+        #     config.data[con.key] = con.value
+
+    def save_to_db(self):
+        with db.connection_context():
+            for k, v in self['streamers'].items():
+                us = UploadStreamers(template_name=k, tags=','.join(v.pop('tags')), **v)
+                us.save()
+                for url in v.pop('url'):
+                    LiveStreamers(upload_streamers=us, remark=k, url=url, **v).save()
+            del self['streamers']
+            Configuration(key='config', value=json.dumps(self.data)).save()
+
 
     def load(self, file):
         import yaml

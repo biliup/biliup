@@ -1,15 +1,21 @@
 import json
+import os
 
+import aiohttp_cors
+import requests
 from aiohttp import web
+from playhouse.shortcuts import model_to_dict
+
 from .aiohttp_basicauth_middleware import basic_auth_middleware
 import stream_gears
 import biliup.common.reload
 from biliup.config import config
 from biliup.plugins.bili_webup import BiliBili, Data
+from ..database.models import UploadStreamers, LiveStreamers, db, Configuration
 
 BiliBili = BiliBili(Data())
 
-
+routes = web.RouteTableDef()
 async def get_basic_config(request):
     res = {
         "line": config.data['lines'],
@@ -28,6 +34,9 @@ async def get_basic_config(request):
 
     return web.json_response(res)
 
+async def url_status(request):
+    from biliup.app import context
+    return web.json_response(context['KernelFunc'].get_url_status())
 
 async def set_basic_config(request):
     post_data = await request.json()
@@ -142,44 +151,209 @@ async def pre_archive(request):
     cookies = config.data['user']['cookies']
     return web.json_response(BiliBili.tid_archive(cookies))
 
-async  def tag_check(request):
+async def tag_check(request):
     if BiliBili.check_tag(request.rel_url.query['tag']):
         return web.json_response({"status": 200})
     else:
         return web.HTTPBadRequest(text="标签违禁")
-async def service(args, event_manager):
-    async def url_status(request):
-        return web.json_response(event_manager.context['KernelFunc'].get_url_status())
 
-    app = web.Application()
+@routes.get('/v1/videos')
+async def streamers(request):
+    media_extensions = ['.mp4', '.flv', '.3gp', '.webm', '.mkv', '.ts']
+    # 获取文件列表
+    file_list = []
+    i = 1
+    for file_name in os.listdir('.'):
+        name, ext = os.path.splitext(file_name)
+        if ext in media_extensions:
+            file_list.append({'key': i,'name': file_name, 'updateTime': os.path.getmtime(file_name), 'size': os.path.getsize(file_name)})
+            i += 1
+    return web.json_response(file_list)
+
+
+@routes.get('/v1/streamers')
+async def streamers(request):
+    from biliup.app import context
+    res = []
+    for ls in LiveStreamers.select():
+        temp = model_to_dict(ls)
+        url = temp['url']
+        status = 'Idle'
+        if context['PluginInfo'].url_status[url] == 1:
+            status = 'Working'
+        if context['url_upload_count'].get(url, 0) > 0:
+            status = 'Inspecting'
+        temp['status'] = status
+        res.append(temp)
+    return web.json_response(res)
+
+@routes.post('/v1/streamers')
+async def add_lives(request):
+    from biliup.app import context
+    json_data = await request.json()
+    uid = json_data.get('upload_id')
+    if uid:
+        us = UploadStreamers.get_by_id(uid)
+        to_save = LiveStreamers(**json_data, upload_streamers=us)
+    else:
+        to_save = LiveStreamers(**json_data)
+    # to_save = LiveStreamers(remark=name, url=url, filename_prefix=None, upload_streamers=us)
+    try:
+        to_save.save()
+    except Exception as e:
+        return web.HTTPBadRequest(text=str(e))
+    config.load_from_db()
+    context['PluginInfo'].add(json_data['remark'], json_data['url'])
+    return web.json_response(model_to_dict(to_save))
+
+@routes.put('/v1/streamers')
+async def lives(request):
+    from biliup.app import context
+    json_data = await request.json()
+    old = LiveStreamers.get_by_id(json_data['id'])
+    old_url = old.url
+    uid = json_data.get('upload_id')
+    try:
+        if uid:
+            us = UploadStreamers.get_by_id(json_data['upload_id'])
+            LiveStreamers.update(**json_data, upload_streamers=us).where(LiveStreamers.id == old.id).execute()
+        else:
+            LiveStreamers.update(**json_data).where(LiveStreamers.id == old.id).execute()
+    except Exception as e:
+        return web.HTTPBadRequest(text=str(e))
+    config.load_from_db()
+    context['PluginInfo'].delete(old_url)
+    context['PluginInfo'].add(json_data['remark'], json_data['url'])
+    return web.json_response(LiveStreamers.get_dict(id=json_data['id']))
+
+@routes.delete('/v1/streamers/{id}')
+async def streamers(request):
+    LiveStreamers.delete_by_id(request.match_info['id'])
+    return web.HTTPOk()
+
+@routes.get('/v1/upload/streamers')
+async def get_streamers(request):
+    res = []
+    for us in UploadStreamers.select():
+        res.append(model_to_dict(us))
+    return web.json_response(res)
+
+@routes.get('/v1/upload/streamers/{id}')
+async def streamers_id(request):
+    id = request.match_info['id']
+    return web.json_response(UploadStreamers.get_dict(id=id))
+@routes.delete('/v1/upload/streamers/{id}')
+async def streamers(request):
+    UploadStreamers.delete_by_id(request.match_info['id'])
+    return web.HTTPOk()
+
+@routes.post('/v1/upload/streamers')
+async def streamers_post(request):
+    json_data = await request.json()
+    to_save = UploadStreamers(**json_data)
+    to_save.save()
+    res = model_to_dict(to_save)
+    return web.json_response(res)
+
+@routes.put('/v1/upload/streamers')
+async def streamers_put(request):
+    json_data = await request.json()
+    UploadStreamers.update(**json_data)
+    return web.json_response(UploadStreamers.get_dict(id=json_data['id']))
+
+@routes.get('/v1/users')
+async def users(request):
+    return web.json_response([{
+        'id': 1,
+        'name': 'cookies.json',
+        'value': 'cookies.json',
+        'platform': 'bilibili',
+    }])
+
+@routes.get('/v1/configuration')
+async def users(request):
+    return web.json_response(json.loads(Configuration.get(Configuration.key == 'config').value))
+
+@routes.put('/v1/configuration')
+async def users(request):
+    json_data = await request.json()
+    to_save = Configuration(key='config', value=json.dumps(json_data))
+    to_save.save()
+    return web.json_response(model_to_dict(to_save))
+
+@routes.get('/bili/archive/pre')
+async def pre_archive(request):
+    config.load_cookies('cookies.json')
+    cookies = config.data['user']['cookies']
+    return web.json_response(BiliBili.tid_archive(cookies))
+
+@routes.get('/bili/space/myinfo')
+async def myinfo(request):
+    config.load_cookies(request.query['user'])
+    cookies = config.data['user']['cookies']
+    return web.json_response(BiliBili.myinfo(cookies))
+
+@routes.get('/bili/proxy')
+async def proxy(request):
+    return web.Response(body=requests.get(request.query['url']).content)
+
+
+def find_all_folders(directory):
+    result = []
+    for foldername, subfolders, filenames in os.walk(directory):
+        for subfolder in subfolders:
+            result.append(os.path.relpath(os.path.join(foldername, subfolder), directory))
+    return result
+
+async def service(args):
     try:
         from importlib.resources import files
     except ImportError:
         # Try backported to PY<37 `importlib_resources`.
         from importlib_resources import files
-    app.add_routes([web.get('/api/check_tag', tag_check)])
-    app.add_routes([web.get('/url-status', url_status)])
-    app.add_routes([web.get('/api/basic', get_basic_config)])
-    app.add_routes([web.post('/api/setbasic', set_basic_config)])
-    app.add_routes([web.get('/api/getconfig', get_streamer_config)])
-    app.add_routes([web.post('/api/setconfig', set_streamer_config)])
-    app.add_routes([web.get('/api/login_by_cookie', cookie_login)])
-    app.add_routes([web.get('/api/login_by_sms', sms_login)])
-    app.add_routes([web.post('/api/send_sms', sms_send)])
-    app.add_routes([web.get('/api/save', save_config)])
-    app.add_routes([web.get('/api/get_qrcode', qrcode_get)])
-    app.add_routes([web.post('/api/login_by_qrcode', qrcode_login)])
-    app.add_routes([web.get('/api/archive_pre', pre_archive)])
-    app.add_routes([web.get('/', root_handler)])
+
+    app = web.Application()
+    app.add_routes([
+        web.get('/api/check_tag', tag_check),
+        web.get('/url-status', url_status),
+        web.get('/api/basic', get_basic_config),
+        web.post('/api/setbasic', set_basic_config),
+        web.get('/api/getconfig', get_streamer_config),
+        web.post('/api/setconfig', set_streamer_config),
+        web.get('/api/login_by_cookie', cookie_login),
+        web.get('/api/login_by_sms', sms_login),
+        web.post('/api/send_sms', sms_send),
+        web.get('/api/save', save_config),
+        web.get('/api/get_qrcode', qrcode_get),
+        web.post('/api/login_by_qrcode', qrcode_login),
+        web.get('/api/archive_pre', pre_archive),
+        web.get('/', root_handler)
+    ])
+    routes.static('/static', '.', show_index = True)
+    app.add_routes(routes)
     if args.static_dir:
         app.add_routes([web.static('/', args.static_dir, show_index=False)])
     else:
-        app.add_routes([web.static('/', files('biliup.web').joinpath('public'), show_index=False)])
-        app.add_routes([web.static('/build', files('biliup.web').joinpath('public/build'), show_index=False)])
+        res = [web.static('/', files('biliup.web').joinpath('public'))]
+        for fdir in find_all_folders(files('biliup.web').joinpath('public')):
+            res.append(web.static('/'+fdir.replace('\\', '/'), files('biliup.web').joinpath('public/'+fdir)))
+        app.add_routes(res)
     if args.password:
         app.middlewares.append(basic_auth_middleware(('/',), {'biliup': args.password}, ))
 
     # web.run_app(app, host=host, port=port)
+    cors = aiohttp_cors.setup(app, defaults={
+        "*": aiohttp_cors.ResourceOptions(
+            allow_credentials=True,
+            allow_methods="*",
+            expose_headers="*",
+            allow_headers="*"
+        )
+    })
+
+    for route in list(app.router.routes()):
+        cors.add(route)
+
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host=args.host, port=args.port)

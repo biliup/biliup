@@ -1,10 +1,12 @@
 import time
 from datetime import datetime, timedelta
-from playhouse.shortcuts import model_to_dict
-from peewee import OperationalError
+from pathlib import Path
 from typing import List
 
-from .models import StreamerInfo, FileList, db, logger, TempStreamerInfo
+from peewee import OperationalError
+from playhouse.shortcuts import model_to_dict
+
+from .models import StreamerInfo, FileList, db, logger, TempStreamerInfo, LiveStreamers, UploadStreamers, Configuration
 
 
 def struct_time_to_datetime(date: time.struct_time):
@@ -21,8 +23,12 @@ class DB:
     @classmethod
     def init(cls):
         """初始化数据库"""
+        run = not Path.cwd().joinpath("data/data.sqlite3").exists()
         StreamerInfo.create_table_()
         FileList.create_table_()
+        LiveStreamers.create_table_()
+        UploadStreamers.create_table_()
+        Configuration.create_table_()
         with db.connection_context():
             columns_name_list = [column_meta.name for column_meta in db.get_columns('streamerinfo')]
         if 'id' not in columns_name_list:
@@ -30,6 +36,7 @@ class DB:
                 cls.migrate_streamer_info()
             except OperationalError as e:
                 logger.error(f"迁移失败: {e}，请手动删除旧数据库后重试")
+        return run
 
     @classmethod
     def connect(cls):

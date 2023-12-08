@@ -13,7 +13,7 @@ LOG_CONF = {
             # 'datefmt': "%Y-%m-%d %H:%M:%S"
         },
         'simple': {
-            'format': '%(filename)s%(lineno)d[%(levelname)s]Tname:%(threadName)s %(message)s'
+            'format': '%(asctime)s %(filename)s%(lineno)d[%(levelname)s]Tname:%(threadName)s %(message)s'
         },
     },
     'handlers': {

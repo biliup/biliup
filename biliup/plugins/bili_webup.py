@@ -178,6 +178,11 @@ class BiliBili:
         response = self.__session.get("https://member.bilibili.com/x/vupre/web/archive/pre")
         return response.json()
 
+    def myinfo(self, cookies):
+        requests.utils.add_dict_to_cookiejar(self.__session.cookies, cookies)
+        response = self.__session.get('http://api.bilibili.com/x/space/myinfo')
+        return response.json()
+
     def login(self, persistence_path, user):
         self.persistence_path = persistence_path
         if os.path.isfile(persistence_path):

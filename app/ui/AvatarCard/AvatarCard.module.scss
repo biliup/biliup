@@ -1,0 +1,38 @@
+.components {
+  .semi-icon-close {
+    visibility: hidden;
+    //color: var(--semi-color-tertiary);
+    color: var(--semi-color-danger);
+  }
+  &:hover {
+    .semi-icon-close {
+      visibility: visible;
+      //cursor: pointer;
+    }
+  }
+}
+
+.components {
+  height: 52px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  &:hover {
+    background-color: var(--semi-color-fill-0);
+  }
+  .info {
+    margin-left: 8px;
+    flex-grow: 1;
+  }
+  .name {
+    font-size: 14px;
+    line-height: 20px;
+  }
+  .email {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--semi-color-text-2);
+  }
+}

@@ -67,8 +67,8 @@ class UploadBase:
             file_size = os.path.getsize(file) / 1024 / 1024
             threshold = config.get('filtering_threshold', 0)
             if file_size <= threshold:
+                os.remove(file)
                 logger.info(f'过滤删除 - {file}')
-                UploadBase.remove_file(file)
                 continue
 
             video = file
@@ -122,89 +122,22 @@ class UploadBase:
         try:
             lock.acquire()
             file_list = UploadBase.file_list(self.principal)
-            if len(file_list) > 0:
-                # 下载后处理 上传前处理
-                downloaded_processor = config['streamers'].get(self.principal, {}).get('downloaded_processor')
-                if downloaded_processor:
-                    from biliup.handler import processor
-                    default_date = time.localtime()
-                    processor(downloaded_processor, json.dumps({
-                        "name": self.principal,
-                        "url": self.data.get('url'),
-                        "room_title": self.data.get('title', self.principal),
-                        "start_time": int(time.mktime(self.data.get('date', default_date))),
-                        "end_time": int(time.mktime(self.data.get('end_time', default_date))),
-                        "file_list": [file.video for file in file_list]
-                    }, ensure_ascii=False))
-                    # 后处理完成后重新扫描文件列表
-                    file_list = UploadBase.file_list(self.principal)
 
-                if len(file_list) > 0:
-                    upload_filename_list = [os.path.splitext(file.video)[0] for file in file_list]
-                    if ("title" not in self.data) or (not self.data["title"]):  # 如果 data 中不存在标题, 说明下载信息已丢失, 则尝试从数据库获取
-                        data, context = fmt_title_and_desc({
-                            **db.get_stream_info_by_filename(upload_filename_list[0]),
-                            "name": self.principal})  # 如果 restart, data 中会缺失 name 项
-                        self.data.update(data)
-                        if hasattr(self, "description"):
-                            self.description = context.get('description', '')
-                    logger.info('准备上传' + self.data["format_title"])
-                    with NamedLock('upload_filename'):
-                        event_manager.context['upload_filename'].extend(upload_filename_list)
-                    lock.release()
-                    needed2process = self.upload(file_list)
-                    if needed2process:
-                        self.postprocessor(needed2process)
+            if len(file_list) > 0:
+                upload_filename_list = [os.path.splitext(file.video)[0] for file in file_list]
+
+                logger.info('准备上传' + self.data["format_title"])
+                with NamedLock('upload_filename'):
+                    event_manager.context['upload_filename'].extend(upload_filename_list)
+                lock.release()
+                file_list = self.upload(file_list)
                 if db.delete_stream_info_by_date(self.principal, self.data.get('date')) == 0:
                     # 如果按开播时间删除失败，则尝试按照 streamer 删除
                     db.delete_stream_info(self.principal)
+                return file_list
         finally:
             with NamedLock('upload_filename'):
                 event_manager.context['upload_filename'] = list(
                     set(event_manager.context['upload_filename']) - set(upload_filename_list))
             if lock.locked():
                 lock.release()
-
-    def postprocessor(self, data: List[FileInfo]):
-        # data = file_list
-        if self.post_processor is None:
-            # 删除封面
-            if self.data.get('live_cover_path') is not None:
-                UploadBase.remove_file(self.data['live_cover_path'])
-            return self.remove_filelist(data)
-
-        file_list = []
-        for i in data:
-            file_list.append(i.video)
-            if i.danmaku is not None:
-                file_list.append(i.danmaku)
-
-        for post_processor in self.post_processor:
-            if post_processor == 'rm':
-                # 删除封面
-                if self.data.get('live_cover_path') is not None:
-                    UploadBase.remove_file(self.data['live_cover_path'])
-                self.remove_filelist(data)
-                continue
-            if post_processor.get('mv'):
-                for file in file_list:
-                    path = Path(file)
-                    dest = Path(post_processor['mv'])
-                    if not dest.is_dir():
-                        dest.mkdir(parents=True, exist_ok=True)
-                    try:
-                        shutil.move(path, dest / path.name)
-                    except Exception as e:
-                        logger.exception(e)
-                        continue
-                    logger.info(f"move to {(dest / path.name).absolute()}")
-            if post_processor.get('run'):
-                try:
-                    process_output = subprocess.check_output(
-                        post_processor['run'], shell=True,
-                        input=reduce(lambda x, y: x + str(Path(y).absolute()) + '\n', file_list, ''),
-                        stderr=subprocess.STDOUT, text=True)
-                    logger.info(process_output.rstrip())
-                except subprocess.CalledProcessError as e:
-                    logger.exception(e.output)
-                    continue

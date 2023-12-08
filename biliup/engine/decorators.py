@@ -56,6 +56,16 @@ class Plugin:
         checker_plugins[general.__plugin__.__name__] = general.__plugin__
         return checker_plugins
 
+    @classmethod
+    def inspect_checker(cls, url):
+        from ..plugins import general
+        for plugin in cls.download_plugins:
+            if not re.match(plugin.VALID_URL_BASE, url):
+                continue
+            else:
+                return plugin
+        return general.__plugin__
+
     def load_plugins(self, pkg):
         """Attempt to load plugins from the path specified.
         engine.plugins.__path__[0]: full path to a directory where to look for plugins

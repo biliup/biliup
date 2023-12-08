@@ -17,6 +17,7 @@ dependencies = [
     "yt-dlp >= 2023.7.6",
     "Pillow >= 5.2.0",
     "aiohttp[speedups]",
+    "aiohttp-cors",
     "Requests >= 2.20.0",
     "PyYAML >= 4.2b1",
     "streamlink >= 5.4.0",
@@ -45,7 +46,7 @@ license-files = ["LICENSE"]
 include-package-data = false
 
 [tool.setuptools.package-data]
-biliup = ["common/*.ini", "web/public/*", "web/public/build/*"]
+biliup = ["common/*.ini", "web/public/**", "web/public/build/*"]
 
 [tool.setuptools.packages.find]
 include = ["biliup*"]

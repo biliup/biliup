@@ -1,13 +1,14 @@
 # encoding: UTF-8
 # 系统模块
 import inspect
+import logging
 from collections.abc import Generator
 from concurrent.futures.thread import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from queue import Queue
 from threading import *
 import functools
-
+logger = logging.getLogger('biliup')
 
 class EventManager(Thread):
     def __init__(self, context=None, pool1_size=3, pool2_size=3):
@@ -71,7 +72,13 @@ class EventManager(Thread):
         self.__handlers[type_] = handlerlist
         # 若要注册的处理器不在该事件的处理器列表中，则注册该事件
         if handler not in handlerlist:
-            handlerlist.append(handler)
+            @functools.wraps(handler)
+            def try_handler(event):
+                try:
+                    handler(event)
+                except:
+                    logger.exception('try_handler')
+            handlerlist.append(try_handler)
 
     def remove_event_listener(self, type_, handler):
         """移除监听器的处理函数"""
@@ -119,8 +126,8 @@ class EventManager(Thread):
                     callback(_event)
                     return _event
 
-                self.add_event_listener(type_, wrapper)
                 wrapper.pool = block
+                self.add_event_listener(type_, wrapper)
                 return wrapper
         else:
             def decorator(func):
