@@ -1,5 +1,5 @@
 # Build biliup's web-ui
-FROM node:16-alpine as webui
+FROM node:21-alpine as webui
 
 RUN \
   set -eux && \
