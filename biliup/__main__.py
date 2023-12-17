@@ -44,8 +44,11 @@ def arg_parser():
     biliup.common.reload.program_args = args.__dict__
     # 初始化数据库
     if db.init():
-        config.load(args.config)
-        config.save_to_db()
+        try:
+            config.load(args.config)
+            config.save_to_db()
+        except FileNotFoundError:
+            print("新版本不依赖配置文件")
     config.load_from_db()
     LOG_CONF.update(config.get('LOGGING', {}))
     if args.verbose:

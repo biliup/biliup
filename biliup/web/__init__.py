@@ -4,6 +4,7 @@ import os
 import aiohttp_cors
 import requests
 from aiohttp import web
+from peewee import DoesNotExist
 from playhouse.shortcuts import model_to_dict
 
 from .aiohttp_basicauth_middleware import basic_auth_middleware
@@ -228,7 +229,10 @@ async def lives(request):
 
 @routes.delete('/v1/streamers/{id}')
 async def streamers(request):
+    from biliup.app import context
+    org = LiveStreamers.get_by_id(request.match_info['id'])
     LiveStreamers.delete_by_id(request.match_info['id'])
+    context['PluginInfo'].delete(org.url)
     return web.HTTPOk()
 
 @routes.get('/v1/upload/streamers')
@@ -242,6 +246,7 @@ async def get_streamers(request):
 async def streamers_id(request):
     id = request.match_info['id']
     return web.json_response(UploadStreamers.get_dict(id=id))
+
 @routes.delete('/v1/upload/streamers/{id}')
 async def streamers(request):
     UploadStreamers.delete_by_id(request.match_info['id'])
@@ -252,6 +257,7 @@ async def streamers_post(request):
     json_data = await request.json()
     to_save = UploadStreamers(**json_data)
     to_save.save()
+    config.load_from_db()
     res = model_to_dict(to_save)
     return web.json_response(res)
 
@@ -259,6 +265,7 @@ async def streamers_post(request):
 async def streamers_put(request):
     json_data = await request.json()
     UploadStreamers.update(**json_data)
+    config.load_from_db()
     return web.json_response(UploadStreamers.get_dict(id=json_data['id']))
 
 @routes.get('/v1/users')
@@ -272,13 +279,18 @@ async def users(request):
 
 @routes.get('/v1/configuration')
 async def users(request):
-    return web.json_response(json.loads(Configuration.get(Configuration.key == 'config').value))
+    try:
+        record = Configuration.get(Configuration.key == 'config')
+    except DoesNotExist:
+        return web.json_response({})
+    return web.json_response(json.loads(record.value))
 
 @routes.put('/v1/configuration')
 async def users(request):
     json_data = await request.json()
     to_save = Configuration(key='config', value=json.dumps(json_data))
     to_save.save()
+    config.load_from_db()
     return web.json_response(model_to_dict(to_save))
 
 @routes.get('/bili/archive/pre')

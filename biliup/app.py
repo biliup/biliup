@@ -1,11 +1,12 @@
 import asyncio
+import logging
 
 from . import plugins
 from biliup.config import config
 from biliup.engine import Plugin, invert_dict
 from biliup.engine.event import EventManager
 from .common.timer import Timer
-
+logger = logging.getLogger('biliup')
 
 def create_event_manager():
     pool1_size = config.get('pool1_size', 3)
@@ -26,6 +27,9 @@ async def shot(event):
     from biliup.handler import CHECK
     index = 0
     while True:
+        if len(event.url_list):
+            logger.info(f"{event}没有任务，退出")
+            return
         if index >= len(event.url_list):
             index = 0
             continue
@@ -47,7 +51,6 @@ class PluginInfo:
         self.init_tasks()
 
     def add(self, name, url):
-        from .plugins.twitch import Twitch
         temp = Plugin(plugins).inspect_checker(url)
         key = temp.__name__
         if key in self.checker:
@@ -55,6 +58,7 @@ class PluginInfo:
         else:
             temp.url_list = [url]
             self.checker[key] = temp
+            from .plugins.twitch import Twitch
             if temp == Twitch:
                 # 如果支持批量检测，目前只有一个支持，第一版先写死按照特例处理
                 self.batch_check_task()
@@ -86,9 +90,6 @@ class PluginInfo:
         for key, plugin in self.checker.items():
             if plugin == Twitch:
                 # 如果支持批量检测，目前只有一个支持，第一版先写死按照特例处理
-                print(getattr(plugin, DownloadBase.batch_check.__name__))
-                print(DownloadBase.batch_check)
-                print('???????')
                 self.batch_check_task()
                 continue
             self.coroutines[key] = asyncio.create_task(shot(plugin))

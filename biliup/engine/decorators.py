@@ -40,6 +40,8 @@ class Plugin:
 
     @classmethod
     def sorted_checker(cls, urls):
+        if not urls:
+            return {}
         from ..plugins import general
         curls = urls.copy()
         checker_plugins = {}

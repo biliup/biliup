@@ -10,7 +10,7 @@ venv./
 .venv/
 pdm.lock
 .pdm-python
-config*.yaml
+config.*.*
 !public/config.yaml
 /configlog.ini
 ds_update.log*
