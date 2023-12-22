@@ -102,7 +102,7 @@ __FFmpeg__ 作为可选依赖。如果还有问题可以 [加群讨论](https://
 # 在下载目录创建配置文件
 vim /host/path/config.toml
 # 启动biliup的docker容器
-docker run -P --name biliup -v /host/path:/opt -d ghcr.io/biliup/caution:master
+docker run -P --name biliup -v /host/path:/opt -d ghcr.io/biliup/caution:latest
 ```
 * 从自定义的配置文件启动，并启动Web-UI
 ```bash
