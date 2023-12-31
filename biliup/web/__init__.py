@@ -12,7 +12,8 @@ import stream_gears
 import biliup.common.reload
 from biliup.config import config
 from biliup.plugins.bili_webup import BiliBili, Data
-from ..database.models import UploadStreamers, LiveStreamers, db, Configuration
+from ..database.models import UploadStreamers, LiveStreamers, Configuration
+from ..database.db import DB as db
 
 BiliBili = BiliBili(Data())
 
@@ -217,9 +218,11 @@ async def lives(request):
     try:
         if uid:
             us = UploadStreamers.get_by_id(json_data['upload_id'])
-            LiveStreamers.update(**json_data, upload_streamers=us).where(LiveStreamers.id == old.id).execute()
+            # LiveStreamers.update(**json_data, upload_streamers=us).where(LiveStreamers.id == old.id).execute()
+            db.update_live_streamer(**{**json_data, "upload_streamers": us})
         else:
-            LiveStreamers.update(**json_data).where(LiveStreamers.id == old.id).execute()
+            # LiveStreamers.update(**json_data).where(LiveStreamers.id == old.id).execute()
+            db.update_live_streamer(**json_data)
     except Exception as e:
         return web.HTTPBadRequest(text=str(e))
     config.load_from_db()
