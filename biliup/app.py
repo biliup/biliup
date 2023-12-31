@@ -27,7 +27,7 @@ async def shot(event):
     from biliup.handler import CHECK
     index = 0
     while True:
-        if len(event.url_list):
+        if not len(event.url_list):
             logger.info(f"{event}没有任务，退出")
             return
         if index >= len(event.url_list):
