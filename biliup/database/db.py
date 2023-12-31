@@ -142,11 +142,21 @@ class DB:
             # 创建新的临时表格
             TempStreamerInfo.create_table()
             # 将数据从原表格拷贝到新表格
-            db.execute_sql('INSERT INTO temp_streamer_info (name, url, title, date, live_cover_path) SELECT name, url, title, date, live_cover_path FROM streamerinfo')
+            db.execute_sql(
+                'INSERT INTO temp_streamer_info (name, url, title, date, live_cover_path) SELECT name, url, title, date, live_cover_path FROM streamerinfo')
             # 删除原表格
             StreamerInfo.drop_table()
             # 将新表格重命名为原表格的名字
             db.execute_sql('ALTER TABLE temp_streamer_info RENAME TO streamerinfo')
+
+    @classmethod
+    def update_live_streamer(cls, id, url, remark, filename_prefix=None, upload_streamers=None, **kwargs):
+        """ 更新 LiveStreamers 表中的数据, 增加一层包装避免多余参数报错 """
+        LiveStreamers.update(
+            url=url,
+            remark=remark,
+            filename_prefix=filename_prefix,
+            upload_streamers=upload_streamers).where(LiveStreamers.id == id).execute()
 
     def backup(self):
         """备份数据库"""

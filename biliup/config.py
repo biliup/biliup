@@ -25,7 +25,8 @@ class Config(UserDict):
 
     def load_from_db(self):
         for con in Configuration.select().where(Configuration.key == 'config'):
-            self.data = json.loads(con.value)
+            # self.data = json.loads(con.value)
+            self.data.update(json.loads(con.value))
         self['streamers'] = {}
         for ls in LiveStreamers.select():
             self['streamers'][ls.remark] = model_to_dict(ls)
