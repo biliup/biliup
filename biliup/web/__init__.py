@@ -76,7 +76,7 @@ async def set_streamer_config(request):
     return web.json_response({"status": 200}, status=200)
 
 
-async def save_config(reequest):
+async def save_config(request):
     config.save()
     biliup.common.reload.global_reloader.triggered = True
     import logging
@@ -270,6 +270,7 @@ async def streamers_put(request):
 
 @routes.get('/v1/users')
 async def users(request):
+    # Todo: 实现扫描当前目录下的cookie文件
     return web.json_response([{
         'id': 1,
         'name': 'cookies.json',

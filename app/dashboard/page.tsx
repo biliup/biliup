@@ -14,6 +14,12 @@ const Dashboard: React.FC = () => {
     const { data: entity, error, isLoading } = useSWR("/v1/configuration", fetcher);
     const { trigger } = useSWRMutation("/v1/configuration", put);
     const formRef = useRef<FormApi>();
+    const [formKey, setFormKey] = useState(0); // 初始化一个key
+
+    // 触发表单重新挂载
+    const remountForm = () => {
+        setFormKey(prevKey => prevKey + 1); // 更新key的值
+    };
 
     const [labelPosition, setLabelPosition] = useState<'top' | 'left' | 'inset'>('inset');
     useEffect(() => {
@@ -27,6 +33,10 @@ const Dashboard: React.FC = () => {
         })
         return () => unRegister();
     }, []);
+
+    useEffect(() => {
+        remountForm();
+    }, [entity]);
 // const handleSelectChange = (value) => {
 //         let text = value === 'male' ? 'Hi male' : 'Hi female!';
 //         formRef.current?.setValue('Note', text);
@@ -50,7 +60,8 @@ const Dashboard: React.FC = () => {
             ></Nav>
         </Header>
         <Content>
-            <Form  initValues={entity}
+            <Form  key = {formKey}
+                   initValues={entity}
                    onSubmit={async (values) => {
                        await trigger(values)
                    }}
@@ -62,11 +73,11 @@ const Dashboard: React.FC = () => {
                         label={{text: "分段大小"} }
                         suffix={'MB'}
                     />
-            <Form.InputNumber
+            <Form.Input
                 field='segment_time'
                 extraText="录像单文件时间限制，格式'00:00:00'（时分秒），超过此大小分段下载，如需使用大小分段请注释此字段"
                 label={{text: '分段时间'} }
-                suffix={'分钟'}
+                style={{width: 400}}
             />
             <Form.InputNumber
                 field="filtering_threshold"
@@ -169,13 +180,11 @@ tctc-h5（备用线路4）, tct-h5（备用线路5）, ali-h5（备用线路6）
 例如录制https://www.youtube.com/@NeneAmanoCh/streams，关闭后将忽略直播回放
 '
                 label="youtube_enable_download_playback"
-                style={{width: 400}}
             />
             <Form.Switch
                 field="twitch_danmaku"
                 extraText='录制Twitch弹幕，默认关闭【只有下载器为FFMPEG时才有效】'
                 label="twitch_danmaku"
-                style={{width: 400}}
             />
             <Form.Switch
                 field="twitch_disable_ads"

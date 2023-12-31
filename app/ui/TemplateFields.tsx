@@ -37,7 +37,7 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
     const {biliUsers} = useBiliUsers();
     const list = biliUsers?.map((item) => {
         return {
-            value: item.id, label: <>
+            value: item.value, label: <>
                 <Avatar size="extra-small" src={item.face} />
                 <span style={{ marginLeft: 8 }}>
                     {item.name}
@@ -64,7 +64,7 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
                     field="copyright"
                     label='类型'
                     direction='vertical'
-                    initValue={1}
+                    // initValue={1}
                 >
                     <div onClick={()=>formApi.setValue('source', '')}>
                         <Radio value={1}>自制</Radio>
@@ -97,7 +97,7 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
                     style={{width: 560}}
                 />
                 <TextArea style={{maxWidth: 560}}
-                    field="desc" label='简介' placeholder="填写更全面的相关信息，让更多的人能找到你的视频吧"
+                    field="description" label='简介' placeholder="填写更全面的相关信息，让更多的人能找到你的视频吧"
                     autosize maxCount={2000} showClear/>
 
                 <div style={{display: 'flex', alignItems: 'center', color: 'var(--semi-color-tertiary)'}}>

@@ -56,7 +56,7 @@ const EditTemplate: React.FC = () => {
                         tid: values?.tid[1],
                         cover: values?.cover ?? '',
                         title: values?.title ?? '',
-                        desc: values?.desc ?? '',
+                        description: values?.description ?? '',
                         dynamic: values?.dynamic ?? '',
                         tag: values?.tag ?? '',
                         interactive: values?.interactive ?? 0,
@@ -68,7 +68,8 @@ const EditTemplate: React.FC = () => {
                         open_elec: values?.open_elec,
                         no_reprint: values?.no_reprint,
                         mission_id: values?.mission_id,
-                        dtime: values?.dtime
+                        dtime: values?.dtime,
+                        user_cookie: values?.user,
                     }
                     const result = await trigger(studioEntity);
                     await mutate(result);
