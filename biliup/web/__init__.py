@@ -295,7 +295,11 @@ async def users(request):
 @routes.put('/v1/configuration')
 async def users(request):
     json_data = await request.json()
-    to_save = Configuration(key='config', value=json.dumps(json_data), id=1)
+    try:
+        record = Configuration.get(Configuration.key == 'config')
+        to_save = Configuration(key='config', value=json.dumps(json_data), id=record.id)
+    except DoesNotExist:
+        to_save = Configuration(key='config', value=json.dumps(json_data))
     to_save.save()
     config.load_from_db()
     return web.json_response(model_to_dict(to_save))
