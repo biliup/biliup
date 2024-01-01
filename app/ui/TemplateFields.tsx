@@ -56,7 +56,7 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
                 ]} field='template_name' label='模板名称' style={{width: 464}}/>
                 <Form.Select rules={[
                     { required: true }
-                ]} field="user" label={{ text: '投稿账号' }} style={{ width: 176 }} optionList={list} />
+                ]} field="user_cookie" label={{ text: '投稿账号' }} style={{ width: 176 }} optionList={list} />
             </Section>
             <Section text={'基本设置'} >
                 <Input field='title' label='视频标题' style={{width: 464}} placeholder='稿件标题'/>
