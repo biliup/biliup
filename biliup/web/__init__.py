@@ -186,6 +186,9 @@ async def streamers(request):
         if context['url_upload_count'].get(url, 0) > 0:
             status = 'Inspecting'
         temp['status'] = status
+        if temp.get("upload_streamers"):  # 返回 upload_id 而不是 upload_streamers
+            temp["upload_id"] = temp["upload_streamers"]["id"]
+        temp.pop("upload_streamers")
         res.append(temp)
     return web.json_response(res)
 
@@ -292,7 +295,11 @@ async def users(request):
 @routes.put('/v1/configuration')
 async def users(request):
     json_data = await request.json()
-    to_save = Configuration(key='config', value=json.dumps(json_data))
+    try:
+        record = Configuration.get(Configuration.key == 'config')
+        to_save = Configuration(key='config', value=json.dumps(json_data), id=record.id)
+    except DoesNotExist:
+        to_save = Configuration(key='config', value=json.dumps(json_data))
     to_save.save()
     config.load_from_db()
     return web.json_response(model_to_dict(to_save))

@@ -24,9 +24,14 @@ class Config(UserDict):
             self.data["user"]["access_token"] = s["token_info"]["access_token"]
 
     def load_from_db(self):
+        context = {
+            'url_upload_count': self.data.get('url_upload_count', {}),
+            'upload_filename': self.data.get('upload_filename', []),
+            'PluginInfo': self.data.get('PluginInfo')
+        }
         for con in Configuration.select().where(Configuration.key == 'config'):
-            # self.data = json.loads(con.value)
-            self.data.update(json.loads(con.value))
+            self.data = json.loads(con.value)
+        self.data.update(context)
         self['streamers'] = {}
         for ls in LiveStreamers.select():
             self['streamers'][ls.remark] = model_to_dict(ls)

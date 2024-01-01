@@ -69,7 +69,7 @@ const EditTemplate: React.FC = () => {
                         no_reprint: values?.no_reprint,
                         mission_id: values?.mission_id,
                         dtime: values?.dtime,
-                        user_cookie: values?.user,
+                        user_cookie: values?.user_cookie,
                     }
                     const result = await trigger(studioEntity);
                     await mutate(result);
