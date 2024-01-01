@@ -186,6 +186,9 @@ async def streamers(request):
         if context['url_upload_count'].get(url, 0) > 0:
             status = 'Inspecting'
         temp['status'] = status
+        if temp.get("upload_streamers"):  # 返回 upload_id 而不是 upload_streamers
+            temp["upload_id"] = temp["upload_streamers"]["id"]
+        temp.pop("upload_streamers")
         res.append(temp)
     return web.json_response(res)
 
