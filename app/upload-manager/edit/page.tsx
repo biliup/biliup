@@ -41,7 +41,7 @@ const EditTemplate: React.FC = () => {
         tag: data.tags?.length === 0 ? [] : data.tags?.split(','),
         tid: [typeTree.find((tt: BiliType) => {
             return tt.children.some(ct => ct.id === data?.tid);
-        }).value, data.tid]
+        })?.value, data.tid]
     };
     return (<>
         <div style={{display: 'flex', flexDirection: 'row-reverse', paddingRight: 12}}>
