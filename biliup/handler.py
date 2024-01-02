@@ -120,7 +120,7 @@ def process_upload(stream_info):
     try:
         file_list = UploadBase.file_list(name)
         if len(file_list) <= 0:
-            logger.info("无需上传")
+            logger.debug("无需上传")
             return
         if ("title" not in stream_info) or (not stream_info["title"]):  # 如果 data 中不存在标题, 说明下载信息已丢失, 则尝试从数据库获取
             data, _ = fmt_title_and_desc({
