@@ -27,9 +27,9 @@ bili.cookie.json
 archive.txt
 /node_modules
 watch_process.pid
-package-lock.json
 biliup/**/public
 *.json
+!package-lock.json
 qrcode.png
 *.log
 ./*.ts
