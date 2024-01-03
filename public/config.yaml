@@ -314,6 +314,7 @@ LOGGING:
             backupCount: 1
             filename: ds_update.log
             formatter: verbose
+            encoding: utf-8
     root:
         handlers: [ console ]
         level: INFO

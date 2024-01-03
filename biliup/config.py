@@ -46,7 +46,7 @@ class Config(UserDict):
     def save_to_db(self):
         with db.connection_context():
             for k, v in self['streamers'].items():
-                us = UploadStreamers(template_name=k, tags=','.join(v.pop('tags')), **v)
+                us = UploadStreamers(template_name=k, tags=','.join(v.pop('tags', 'biliup')), **v)
                 us.save()
                 for url in v.pop('url'):
                     LiveStreamers(upload_streamers=us, remark=k, url=url, **v).save()
