@@ -16,10 +16,10 @@ class Bigo(DownloadBase):
         except:
             logger.warning(f"{Bigo.__name__}: {self.url}: 直播间地址错误")
             return False
-
         try:
-            room_info = requests.post(f'https://ta.bigo.tv/official_website/studio/getInternalStudioInfo', timeout=5,
-                                      headers=self.fake_headers, data={"siteId": room_id}).json()
+            room_info = requests.post(f'https://ta.bigo.tv/official_website/studio/getInternalStudioInfo', timeout=10,
+                                      headers={**self.fake_headers, 'Accept': 'application/json'},
+                                      data={"siteId": room_id}).json()
             if room_info['code'] != 0:
                 raise
         except:
