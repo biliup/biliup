@@ -46,7 +46,7 @@ def fmt_title_and_desc(data):
     date = data.get("date", time.localtime())
     title = data.get('title', index)
     url = data.get('url')
-    data["format_title"] = custom_fmtstr(context.get('title', f'%Y.%m.%d{index}'), date, title, streamer, url)
+    data["format_title"] = custom_fmtstr(context.get('title') or f'%Y.%m.%d{index}', date, title, streamer, url)
     if context.get('description'):
         context['description'] = custom_fmtstr(context.get('description'), date, title, streamer, url)
     return data, context
