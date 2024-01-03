@@ -27,6 +27,7 @@ class DownloadBase:
         # 即可通过self.filename_prefix在下载或者上传时候传递主播单独的设置参数用于调用（如果该主播有设置单独参数，将会优先使用单独参数；如无，则会优先你用全局参数。）
         self.fname = fname
         self.url = url
+        # 录制后保存文件格式而非源流格式 对应原配置文件format 仅ffmpeg及streamlink生效
         self.suffix = suffix
         self.title = None
         self.live_cover_path = None
