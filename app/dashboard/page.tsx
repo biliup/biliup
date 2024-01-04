@@ -1,7 +1,7 @@
 'use client'
 import React, {useEffect, useRef, useState} from "react";
 import EditTemplate from "@/app/upload-manager/edit/page";
-import {Button, Form, Layout, Nav} from "@douyinfe/semi-ui";
+import {Button, Form, Layout, Nav, Collapse} from "@douyinfe/semi-ui";
 import {registerMediaQuery, responsiveMap} from "@/app/lib/utils";
 import {IconPlusCircle, IconStar, IconVideoListStroked} from "@douyinfe/semi-icons";
 import useSWR from "swr";
@@ -67,24 +67,44 @@ const Dashboard: React.FC = () => {
                    }}
                    getFormApi={formApi => formRef.current = formApi}
                    style={{padding: '10px', marginLeft: '30px'}} labelPosition={labelPosition} labelWidth='300px'>
+            <Form.Section text="全局录播与上传设置">
+            <Form.Select
+                field="downloader"
+                extraText="选择全局默认的下载插件，可选streamlink（streamlink配合ffmpeg混合下载模式，适合用于下载hls_fmp4与hls_ts流，因为streamlink支持多线程拉取, 使用该模式下载flv流时，将会仅使用ffmpeg。请手动安装streamlink以及ffmpeg）
+                    ffmpeg（纯ffmpeg下载。请手动安装ffmpeg）
+                    stream-gears（默认）"
+                style={{ width: 250 }}>
+                <Form.Select.Option value="streamlink">streamlink</Form.Select.Option>
+                <Form.Select.Option value="ffmpeg">ffmpeg</Form.Select.Option>
+                <Form.Select.Option value="stream-gears">stream-gears</Form.Select.Option>
+            </Form.Select>
             <Form.InputNumber
                         field='file_size'
                         extraText='录像单文件大小限制，单位Byte，超过此大小分段下载'
                         label={{text: "分段大小"} }
                         suffix={'MB'}
+                        style={{width: 250}}
                     />
             <Form.Input
                 field='segment_time'
                 extraText="录像单文件时间限制，格式'00:00:00'（时分秒），超过此大小分段下载，如需使用大小分段请注释此字段"
                 label={{text: '分段时间'} }
-                style={{width: 400}}
+                style={{width: 250}}
             />
             <Form.InputNumber
                 field="filtering_threshold"
                 extraText="小于此大小的视频文件将会被过滤删除，单位MB"
                 label="filtering_threshold"
                 suffix={'MB'}
+                style={{width: 250}}
             />
+            <Form.Select
+                field="submit_api"
+                extraText="b站提交接口，默认自动选择，可选web，client"
+                style={{ width: 250 }}>
+                <Form.Select.Option value="web">web</Form.Select.Option>
+                <Form.Select.Option value="client">client</Form.Select.Option>
+            </Form.Select>
             <Form.Select
                 field="uploader"
                 extraText="选择全局默认上传插件，Noop为不上传，但会执行后处理,可选bili_web，biliup-rs(默认值)"
@@ -106,6 +126,7 @@ const Dashboard: React.FC = () => {
                 field="threads"
                 extraText="单文件并发上传数，未达到带宽上限时增大此值可提高上传速度"
                 label="threads"
+                style={{width: 250}}
             />
             <Form.InputNumber
                 field="delay"
@@ -113,29 +134,37 @@ const Dashboard: React.FC = () => {
 当delay不存在时，默认延迟时间为0秒，没有快速上传的需求推荐设置5分钟(300秒)或按需设置。若设置的延迟时间超过60秒，则会启用分段检测机制，每隔60秒进行一次开播状态的检测。"
                 label="delay"
                 suffix='s'
+                style={{width: 250}}
             />
             <Form.InputNumber
                 field="event_loop_interval"
                 extraText='平台检测间隔时间，单位：秒。比如虎牙所有主播检测完后会等待30秒 再去从新检测'
                 label="event_loop_interval"
                 suffix='s'
+                style={{width: 250}}
             />
             <Form.InputNumber
                 field="pool1_size"
                 extraText='线程池1大小，负责下载事件。每个下载都会占用1。应该设置为比主播数量要多一点的数。'
                 label="pool1_size"
+                style={{width: 250}}
             />
             <Form.InputNumber
                 field="pool2_size"
                 extraText='线程池2大小，负责上传事件。每个上传都会占用1。
  应该设置为比主播数量要多一点的数，如果开启uploading_record需要设置的更多。'
                 label="pool2_size"
+                style={{width: 250}}
             />
             <Form.Switch
                 field="use_live_cover"
                 extraText='使用直播间封面作为投稿封面。此封面优先级低于单个主播指定的自定义封面。（目前支持bilibili,twitch,youtube。直播封面将会保存于cover文件夹下，上传后自动删除）'
                 label="use_live_cover"
             />
+            </Form.Section>
+            <Form.Section text="各平台录播设置">
+            <Collapse keepDOM>
+            <Collapse.Panel header="斗鱼" itemKey="douyu">
             <Form.Input
                 field="douyucdn"
                 extraText='如遇到斗鱼录制卡顿可以尝试切换线路。可选以下线路
@@ -154,6 +183,8 @@ tctc-h5（备用线路4）, tct-h5（备用线路5）, ali-h5（备用线路6）
 0 原画,4 蓝光4m,3 超清,2 高清'
                 label="douyu_rate"
             />
+            </Collapse.Panel>
+            <Collapse.Panel header="YouTube" itemKey="youtube">
             <Form.Input
                 field="youtube_before_date"
                 extraText='仅下载该日期之前的视频（可与上面的youtube_after_date配合使用，构成指定下载范围区间）
@@ -180,18 +211,6 @@ tctc-h5（备用线路4）, tct-h5（备用线路5）, ali-h5（备用线路6）
 例如录制https://www.youtube.com/@NeneAmanoCh/streams，关闭后将忽略直播回放
 '
                 label="youtube_enable_download_playback"
-            />
-            <Form.Switch
-                field="twitch_danmaku"
-                extraText='录制Twitch弹幕，默认关闭【只有下载器为FFMPEG时才有效】'
-                label="twitch_danmaku"
-            />
-            <Form.Switch
-                field="twitch_disable_ads"
-                extraText='去除Twitch广告功能，默认开启【只有下载器为FFMPEG时才有效】
-这个功能会导致Twitch录播分段，因为遇到广告就自动断开了，这就是去广告。若需要录播完整一整段可以关闭这个，但是关了之后就会有紫色屏幕的CommercialTime
-还有一个不想视频分段的办法是去花钱开一个Turbo会员，能不看广告，然后下面的user里把twitch的cookie填上，也能不看广告，自然就不会分段了'
-                label="twitch_disable_ads"
             />
             <Form.Input
                 field="youtube_after_date"
@@ -237,6 +256,22 @@ bilibili支持 mp4 mkv webm 无需筛选也能上传
                 label="youtube_prefer_vcodec"
                 style={{width: 400}}
             />
+            </Collapse.Panel>
+            <Collapse.Panel header="Twitch" itemKey="twitch">
+            <Form.Switch
+                field="twitch_danmaku"
+                extraText='录制Twitch弹幕，默认关闭【只有下载器为FFMPEG时才有效】'
+                label="twitch_danmaku"
+            />
+            <Form.Switch
+                field="twitch_disable_ads"
+                extraText='去除Twitch广告功能，默认开启【只有下载器为FFMPEG时才有效】
+这个功能会导致Twitch录播分段，因为遇到广告就自动断开了，这就是去广告。若需要录播完整一整段可以关闭这个，但是关了之后就会有紫色屏幕的CommercialTime
+还有一个不想视频分段的办法是去花钱开一个Turbo会员，能不看广告，然后下面的user里把twitch的cookie填上，也能不看广告，自然就不会分段了'
+                label="twitch_disable_ads"
+            />
+            </Collapse.Panel>
+            <Collapse.Panel header="Bilibili" itemKey="bilibili">
             <Form.Input
                 field="bili_qn"
                 extraText='哔哩哔哩自选画质
@@ -310,7 +345,8 @@ bilibili支持 mp4 mkv webm 无需筛选也能上传
                 extraText='录制BILIBILI弹幕，目前暂时不支持视频按时长分段下的弹幕文件自动分段，只有使用ffmpeg（包括streamlink混合模式）作为下载器才支持，默认关闭'
                 label="bilibili_danmaku"
             />
-
+            </Collapse.Panel>
+            <Collapse.Panel header="抖音" itemKey="douyin">
             <Form.Input
                 field="douyin_quality"
                 extraText='抖音自选画质
@@ -325,6 +361,8 @@ bilibili支持 mp4 mkv webm 无需筛选也能上传
                 extraText='录制抖音弹幕，默认关闭【目前暂时不支持视频按时长分段下的弹幕文件自动分段，只有使用ffmpeg（包括streamlink混合模式）作为下载器才支持】'
                 label="douyin_danmaku"
             />
+            </Collapse.Panel>
+            <Collapse.Panel header="虎牙" itemKey="huya">
             <Form.Input
                 field="huya_max_ratio"
                 extraText='虎牙自选录制码率
@@ -346,6 +384,9 @@ bilibili支持 mp4 mkv webm 无需筛选也能上传
                 label="huyacdn"
                 style={{width: 400}}
             />
+            </Collapse.Panel>
+            </Collapse>
+            </Form.Section>
         </Form>
         </Content>
     </>
