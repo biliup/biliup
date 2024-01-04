@@ -118,6 +118,7 @@ class UploadStreamers(BaseModel):
     uploader = CharField(null=True)  # 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
     user_cookie = CharField(null=True)  # 使用指定的账号上传
     tags = CharField()
+    format = CharField(null=True)  # 视频保存格式,默认为flv
 
 class LiveStreamers(BaseModel):
     """每个直播间的配置"""
