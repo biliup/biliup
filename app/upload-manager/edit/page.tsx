@@ -50,6 +50,7 @@ const EditTemplate: React.FC = () => {
                 try {
                     const studioEntity = {
                         template_name: values?.template_name,
+                        user_cookie: values?.user_cookie,
                         copyright: values?.copyright,
                         id: values?.id,
                         source: values?.source ?? '',
@@ -69,7 +70,12 @@ const EditTemplate: React.FC = () => {
                         no_reprint: values?.no_reprint,
                         mission_id: values?.mission_id,
                         dtime: values?.dtime,
-                        user_cookie: values?.user_cookie,
+                        format: values?.format,
+                        credits: values?.credits,
+                        preprocessor: values?.preprocessor,
+                        downloaded_processor: values?.downloaded_processor,
+                        postprocessor: values?.postprocessor,
+                        opt_args: values?.opt_args,
                     }
                     const result = await trigger(studioEntity);
                     await mutate(result);

@@ -41,7 +41,7 @@ export default function Add() {
                     try {
                         const studioEntity: StudioEntity = {
                             template_name: values.template_name,
-                            user: values.user,
+                            user_cookie: values.user_cookie,
                             copyright: values.copyright,
                             id: values.id,
                             source: values.source ?? '',
@@ -60,7 +60,13 @@ export default function Add() {
                             open_elec: values.open_elec,
                             no_reprint: values.no_reprint,
                             mission_id: values.mission_id,
-                            dtime: values.dtime
+                            dtime: values.dtime,
+                            format: values.format,
+                            credits: values.credits,
+                            preprocessor: values.preprocessor,
+                            downloaded_processor: values.downloaded_processor,
+                            postprocessor: values.postprocessor,
+                            opt_args: values.opt_args,
                         }
 
                         const result = await trigger(studioEntity);

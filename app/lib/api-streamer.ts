@@ -61,10 +61,15 @@ export async function put<T>(url: string, { arg }: {arg: T}) {
 	return res;
 }
 
+type Credit = {
+	username: string;
+	uid: number;
+};
+
 export interface StudioEntity {
 	id: number;
 	template_name: string;
-	user: number;
+	user_cookie: string;
 	copyright: number;
 	source: string;
 	tid: number;
@@ -83,6 +88,12 @@ export interface StudioEntity {
 	up_close_reply: boolean;
 	up_close_danmu: boolean;
 	open_elec?: number;
+	format?: string;
+	credits?: Credit[];
+	preprocessor?: string;
+    downloaded_processor?: string;
+    postprocessor?: string;
+    opt_args?: string;
 }
 
 export interface LiveStreamerEntity {

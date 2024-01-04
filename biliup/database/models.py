@@ -1,9 +1,10 @@
 from pathlib import Path
 import logging
 
-from peewee import CharField, DateTimeField, IntegrityError, ForeignKeyField, AutoField, Model, SqliteDatabase, \
+from peewee import CharField, DateTimeField, IntegrityError, ForeignKeyField, AutoField, Model, \
     TextField, IntegerField
 from playhouse.shortcuts import ReconnectMixin, model_to_dict
+from playhouse.sqlite_ext import SqliteExtDatabase, JSONField
 
 logger = logging.getLogger('biliup')
 
@@ -18,7 +19,7 @@ def get_path(*other):
 
 
 # 自动重连, 避免报错导致连接丢失
-class ReconnectSqliteDatabase(ReconnectMixin, SqliteDatabase):
+class ReconnectSqliteDatabase(ReconnectMixin, SqliteExtDatabase):
     pass
 
 
@@ -106,18 +107,24 @@ class UploadStreamers(BaseModel):
     title = CharField(null=True)  # 自定义标题的时间格式, {title}代表当场直播间标题 {streamer}代表在本config里面设置的主播名称 {url}代表设置的该主播的第一条直播间链接
     tid = IntegerField(null=True)  # 投稿分区码,171为电子竞技分区
     copyright = IntegerField(null=True)  # 1为自制
-    cover_path = CharField(null=True)
-    ### 支持strftime, {title}, {streamer}, {url}占位符。
-    description = TextField(null=True)
-    dynamic = CharField(null=True)
-    dtime = IntegerField(null=True) # 设置延时发布时间，距离提交大于2小时，格式为时间戳
-    dolby = IntegerField(null=True) # 是否开启杜比音效, 1为开启
-    hires = IntegerField(null=True) # 是否开启Hi-Res, 1为开启
-    open_elec = IntegerField(null=True) # 是否开启充电面板, 1为开启
-    no_reprint = IntegerField(null=True) # 自制声明, 1为未经允许禁止转载
+    cover_path = CharField(null=True)  # 封面路径
+    # 支持strftime, {title}, {streamer}, {url}占位符。
+    description = TextField(null=True)  # 视频简介
+    dynamic = CharField(null=True)  # 粉丝动态
+    dtime = IntegerField(null=True)  # 设置延时发布时间，距离提交大于2小时，格式为时间戳
+    dolby = IntegerField(null=True)  # 是否开启杜比音效, 1为开启
+    hires = IntegerField(null=True)  # 是否开启Hi-Res, 1为开启
+    open_elec = IntegerField(null=True)  # 是否开启充电面板, 1为开启
+    no_reprint = IntegerField(null=True)  # 自制声明, 1为未经允许禁止转载
     uploader = CharField(null=True)  # 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
     user_cookie = CharField(null=True)  # 使用指定的账号上传
-    tags = CharField()
+    tags = CharField()  # 标签
+    format = CharField(null=True)  # 视频格式
+    credits = JSONField(null=True)  # 简介@模板
+    preprocessor = JSONField(null=True)  # 开始下载直播时触发
+    downloaded_processor = JSONField(null=True)  # 准备上传直播时触发
+    postprocessor = JSONField(null=True)  # 上传完成后触发
+    opt_args = JSONField(null=True)  # ffmpeg参数
 
 class LiveStreamers(BaseModel):
     """每个直播间的配置"""
