@@ -18,7 +18,7 @@ def upload(data):
     try:
         index = data['name']
         context = {**config, **config['streamers'][index]}
-        platform = context.get("uploader", "biliup-rs")
+        platform = context.get("uploader") if context.get("uploader") else "biliup-rs"
         cls = Plugin.upload_plugins.get(platform)
         if cls is None:
             return logger.error(f"No such uploader: {platform}")
