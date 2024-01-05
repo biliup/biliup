@@ -88,12 +88,7 @@ export interface StudioEntity {
 	up_close_reply: boolean;
 	up_close_danmu: boolean;
 	open_elec?: number;
-	format?: string;
 	credits?: Credit[];
-	preprocessor?: string;
-    downloaded_processor?: string;
-    postprocessor?: string;
-    opt_args?: string;
 }
 
 export interface LiveStreamerEntity {
@@ -105,6 +100,11 @@ export interface LiveStreamerEntity {
 	split_size?: number;
 	upload_id?: number;
 	status?: string | React.ReactNode;
+	format?: string;
+	preprocessor?: string;
+    downloaded_processor?: string;
+    postprocessor?: string;
+    opt_args?: string;
 }
 
 export interface BiliType {

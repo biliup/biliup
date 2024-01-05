@@ -1,7 +1,7 @@
 import React, {useState} from "react";
 import {FormFCChild} from "@douyinfe/semi-ui/lib/es/form";
-import {IconChevronDown, IconChevronUp} from "@douyinfe/semi-icons";
-import {Avatar, Button, Collapsible, Form, InputGroup, Space, Typography} from "@douyinfe/semi-ui";
+import {IconChevronDown, IconChevronUp, IconMinusCircle, IconPlusCircle } from "@douyinfe/semi-icons";
+import {Avatar, Button, Collapsible, Form, InputGroup, Space, Typography, ArrayField} from "@douyinfe/semi-ui";
 import useSWR from "swr";
 import {BiliType, fetcher, StudioEntity} from "../lib/api-streamer";
 import {useBiliUsers, useTypeTree} from "../lib/use-streamers";
@@ -33,23 +33,32 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
         ]} direction='horizontal' label='互动设置' />
         <Input field='dynamic' label='粉丝动态' style={{width: 464}}/>
         <Input field='format' label='视频格式' style={{width: 464}}/>
-        <InputGroup>
-        <Input field="credits[0].username" label='需要@的用户名' placeholder='username' />
-        <Input field="credits[0].uid" label='需要@的uid' placeholder='uid' />
-        </InputGroup>
-        {/* <TextArea field='preprocessor' label='preprocessor' autosize placeholder='[{run = "sh ./run.sh"}]'
-        extraText='开始下载直播时触发，将按自定义顺序执行自定义操作，仅支持shell指令执行任意命令，等同于在shell中运行,preprocessor输出的数据为JSON格式，包含主播名字(name)、开播地址(url)和开播时间(start_time)(时间戳)'
-        />
-        <TextArea field='downloaded_processor' label='downloaded_processor' autosize placeholder='[{run = "sh ./run.sh"}]'
-        extraText='准备上传直播时触发，将按自定义顺序执行自定义操作'
-        />
-        <TextArea field='postprocessor' label='postprocessor' autosize
-        placeholder='[{run = "echo hello!"},{mv = "backup/"},{run = "python3 path/to/mail.py"},{run = "sh ./run.sh"},"rm"]'
-        extraText='上传完成后触发，将按自定义顺序执行自定义操作。当postprocessor不存在时，默认执行删除文件操作'
-        />
-        <TextArea field='opt_args' label='opt_args' autosize placeholder='[ "-ss", "00:00:16" ]'
-        extraText='ffmpeg参数'
-        /> */}
+        <Form.Section text="简介@替换">
+            <ArrayField field='credits'>
+                {({ add, arrayFields }) => (
+                    <React.Fragment>
+                        <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+                            Add new line
+                        </Button>
+                        {arrayFields.map(({ field, key, remove }, i) => (
+                            <div key={key} style={{ width: 1000, display: "flex" }}>
+                                <InputGroup>
+                                    <Input field={`${field}.username`} label='需要@的用户名' placeholder='username' />
+                                    <Input field={`${field}.uid`} label='需要@的uid' placeholder='uid' />
+                                </InputGroup>
+                                <Button
+                                    type="danger"
+                                    theme="borderless"
+                                    icon={<IconMinusCircle />}
+                                    onClick={remove}
+                                    style={{ margin: 12 }}
+                                />
+                            </div>
+                        ))}
+                    </React.Fragment>
+                )}
+            </ArrayField>
+        </Form.Section>
     </>);
     const [isOpen, setOpen] = useState(false);
     const {biliUsers} = useBiliUsers();

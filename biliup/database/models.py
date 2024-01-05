@@ -119,12 +119,7 @@ class UploadStreamers(BaseModel):
     uploader = CharField(null=True)  # 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
     user_cookie = CharField(null=True)  # 使用指定的账号上传
     tags = CharField()  # 标签
-    format = CharField(null=True)  # 视频格式
     credits = JSONField(null=True)  # 简介@模板
-    preprocessor = JSONField(null=True)  # 开始下载直播时触发
-    downloaded_processor = JSONField(null=True)  # 准备上传直播时触发
-    postprocessor = JSONField(null=True)  # 上传完成后触发
-    opt_args = JSONField(null=True)  # ffmpeg参数
 
 class LiveStreamers(BaseModel):
     """每个直播间的配置"""
@@ -134,6 +129,11 @@ class LiveStreamers(BaseModel):
     filename_prefix = CharField(null=True)  # filename_prefix 支持模板
     # 外键, 对应 UploadStreamers, 且启用级联删除
     upload_streamers = ForeignKeyField(UploadStreamers, backref='live_streamers', on_delete='CASCADE', null=True)
+    format = CharField(null=True)  # 视频格式
+    preprocessor = JSONField(null=True)  # 开始下载直播时触发
+    downloaded_processor = JSONField(null=True)  # 准备上传直播时触发
+    postprocessor = JSONField(null=True)  # 上传完成后触发
+    opt_args = JSONField(null=True)  # ffmpeg参数
 
 class TempStreamerInfo(StreamerInfo):
     class Meta:

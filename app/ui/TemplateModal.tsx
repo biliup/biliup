@@ -1,4 +1,5 @@
-import { Form, Modal, Notification, Typography } from "@douyinfe/semi-ui";
+import { Form, Modal, Notification, Typography, Collapse, ArrayField, Button } from "@douyinfe/semi-ui";
+import { IconPlusCircle, IconMinusCircle } from '@douyinfe/semi-icons';
 import { FormApi } from "@douyinfe/semi-ui/lib/es/form";
 import React, { useRef } from "react";
 import { useState } from "react";
@@ -50,7 +51,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
         <>
             {childrenWithProps}
             <Modal
-                title="新建"
+                title="录播管理"
                 visible={visible}
                 onOk={handleOk}
                 // style={{ width: 600 }}
@@ -83,6 +84,121 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                         placeholder='{streamer}%Y-%m-%d %H_%M_%S{title}'
                     />
                     <Form.Select showClear field="upload_id" label={{ text: '投稿模板', optional: true }} style={{ width: 176 }} optionList={list} />
+                    <Collapse keepDOM>
+                    <Collapse.Panel header="更多设置" itemKey="processors">
+                    <Form.Section text="preprocessor">
+                    <ArrayField field='preprocessor'>
+                        {({ add, arrayFields }) => (
+                            <React.Fragment>
+                                <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+                                    Add new line
+                                </Button>
+                                {arrayFields.map(({ field, key, remove }, i) => (
+                                    <div key={key} style={{ width: 1000, display: "flex" }}>
+                                        <Form.Input
+                                            field={`${field}[run]`}
+                                            label={`run = `}
+                                            style={{ width: 200, marginRight: 16 }}></Form.Input>
+                                        <Button
+                                            type="danger"
+                                            theme="borderless"
+                                            icon={<IconMinusCircle />}
+                                            onClick={remove}
+                                            style={{ margin: 12 }}
+                                        />
+                                    </div>
+                                ))}
+                            </React.Fragment>
+                        )}
+                    </ArrayField>
+                    </Form.Section>
+                    <Form.Section text="downloaded_processor">
+                    <ArrayField field='downloaded_processor'>
+                        {({ add, arrayFields }) => (
+                            <React.Fragment>
+                                <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+                                    Add new line
+                                </Button>
+                                {arrayFields.map(({ field, key, remove }, i) => (
+                                    <div key={key} style={{ width: 1000, display: "flex" }}>
+                                        <Form.Input
+                                            field={`${field}[run]`}
+                                            label={`run = `}
+                                            style={{ width: 200, marginRight: 16 }}></Form.Input>
+                                        <Button
+                                            type="danger"
+                                            theme="borderless"
+                                            icon={<IconMinusCircle />}
+                                            onClick={remove}
+                                            style={{ margin: 12 }}
+                                        />
+                                    </div>
+                                ))}
+                            </React.Fragment>
+                        )}
+                    </ArrayField>
+                    </Form.Section>
+                    <Form.Section text="postprocessor">
+                    <ArrayField field='postprocessor'>
+                        {({ add, arrayFields }) => (
+                            <React.Fragment>
+                                <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+                                    Add new line
+                                </Button>
+                                {arrayFields.map(({ field, key, remove }, i) => (
+                                    <div key={key} style={{ width: 1000, display: "flex" }}>
+                                        <Form.Select
+                                            field={field}
+                                            label="操作"
+                                            optionList={[{value: "run", label: "run"}, {value: "mv", label: "mv"}, {value: "rm", label: "rm"}]}
+                                        ></Form.Select>
+                                        {api.current?.getValue(`${field}`) !== 'rm' ? (
+                                            <Form.Input
+                                            field={`${field}[${api.current?.getValue(`${field}`)}]`}
+                                            label={`${api.current?.getValue(`${field}`)} = `}
+                                            style={{ width: 200, marginRight: 16 }}></Form.Input>
+                                        ) : null}
+                                        <Button
+                                            type="danger"
+                                            theme="borderless"
+                                            icon={<IconMinusCircle />}
+                                            onClick={remove}
+                                            style={{ margin: 12 }}
+                                        />
+                                    </div>
+                                ))}
+                            </React.Fragment>
+                        )}
+                    </ArrayField>
+                    </Form.Section>
+                    <Form.Section text="ffmpeg参数">
+                    <ArrayField field='opt_args'>
+                        {({ add, arrayFields }) => (
+                            <React.Fragment>
+                                <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+                                    Add new line
+                                </Button>
+                                {arrayFields.map(({ field, key, remove }, i) => (
+                                    <div key={key} style={{ width: 1000, display: "flex" }}>
+                                        <Form.Input
+                                            field={field}
+                                            label={`参数${i+1}`}
+                                        ></Form.Input>
+                                        <Button
+                                            type="danger"
+                                            theme="borderless"
+                                            icon={<IconMinusCircle />}
+                                            onClick={remove}
+                                            style={{ margin: 12 }}
+                                        />
+                                    </div>
+                                ))}
+                            </React.Fragment>
+                        )}
+                    </ArrayField>
+                    </Form.Section>
+                    </Collapse.Panel>
+                    </Collapse>
                 </Form>
             </Modal>
         </>

@@ -70,9 +70,16 @@ const Dashboard: React.FC = () => {
             <Form.Section text="全局录播与上传设置">
             <Form.Select
                 field="downloader"
-                extraText="选择全局默认的下载插件，可选streamlink（streamlink配合ffmpeg混合下载模式，适合用于下载hls_fmp4与hls_ts流，因为streamlink支持多线程拉取, 使用该模式下载flv流时，将会仅使用ffmpeg。请手动安装streamlink以及ffmpeg）
-                    ffmpeg（纯ffmpeg下载。请手动安装ffmpeg）
-                    stream-gears（默认）"
+                extraText={
+                <div style={{ fontSize: "14px" }}>
+                    选择全局默认的下载插件, 可选:
+                    <br />
+                    1. streamlink（streamlink配合ffmpeg混合下载模式，适合用于下载hls_fmp4与hls_ts流，因为streamlink支持多线程拉取, 使用该模式下载flv流时，将会仅使用ffmpeg。请手动安装streamlink以及ffmpeg）
+                    <br />
+                    2. ffmpeg（纯ffmpeg下载。请手动安装ffmpeg）
+                    <br />
+                    3. stream-gears（默认）
+                </div>}
                 style={{ width: 250 }}>
                 <Form.Select.Option value="streamlink">streamlink</Form.Select.Option>
                 <Form.Select.Option value="ffmpeg">ffmpeg</Form.Select.Option>

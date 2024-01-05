@@ -61,12 +61,7 @@ export default function Add() {
                             no_reprint: values.no_reprint,
                             mission_id: values.mission_id,
                             dtime: values.dtime,
-                            format: values.format,
                             credits: values.credits,
-                            preprocessor: values.preprocessor,
-                            downloaded_processor: values.downloaded_processor,
-                            postprocessor: values.postprocessor,
-                            opt_args: values.opt_args,
                         }
 
                         const result = await trigger(studioEntity);
