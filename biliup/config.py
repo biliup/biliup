@@ -34,8 +34,8 @@ class Config(UserDict):
         self.data.update(context)
         self['streamers'] = {}
         for ls in LiveStreamers.select():
-            self['streamers'][ls.remark] = {k: v for k, v in model_to_dict(ls).items() if v}
-            self['streamers'][ls.remark].pop('upload_streamers')
+            self['streamers'][ls.remark] = {k: v for k, v in model_to_dict(ls).items() if v and (k != 'upload_streamers')}
+            # self['streamers'][ls.remark].pop('upload_streamers')
             if ls.upload_streamers:
                 self['streamers'][ls.remark].update({k: v for k, v in model_to_dict(ls.upload_streamers).items() if v})
             if self['streamers'][ls.remark].get('tags'):
