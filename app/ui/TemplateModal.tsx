@@ -54,7 +54,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                 title="录播管理"
                 visible={visible}
                 onOk={handleOk}
-                // style={{ width: 600 }}
+                style={{ width: 600 }}
                 onCancel={handleCancel}
                 bodyStyle={{ overflow: 'auto', maxHeight: 'calc(100vh - 320px)', paddingLeft: 10, paddingRight: 10 }}
             >
@@ -86,6 +86,8 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                     <Form.Select showClear field="upload_id" label={{ text: '投稿模板', optional: true }} style={{ width: 176 }} optionList={list} />
                     <Collapse keepDOM>
                     <Collapse.Panel header="更多设置" itemKey="processors">
+                    <Form.Input field='format' label='视频格式' placeholder='flv' style={{ width: 176 }}
+                    helpText='视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg或者streamlink，youtube不支持。' />
                     <Form.Section text="preprocessor">
                     <ArrayField field='preprocessor'>
                         {({ add, arrayFields }) => (
@@ -98,7 +100,8 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                                         <Form.Input
                                             field={`${field}[run]`}
                                             label={`run = `}
-                                            style={{ width: 200, marginRight: 16 }}></Form.Input>
+                                            labelPosition='inset'
+                                            style={{ width: 400, marginRight: 16 }}></Form.Input>
                                         <Button
                                             type="danger"
                                             theme="borderless"
@@ -124,7 +127,8 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                                         <Form.Input
                                             field={`${field}[run]`}
                                             label={`run = `}
-                                            style={{ width: 200, marginRight: 16 }}></Form.Input>
+                                            labelPosition='inset'
+                                            style={{ width: 400, marginRight: 16 }}></Form.Input>
                                         <Button
                                             type="danger"
                                             theme="borderless"
@@ -150,13 +154,17 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                                         <Form.Select
                                             field={field}
                                             label="操作"
-                                            optionList={[{value: "run", label: "run"}, {value: "mv", label: "mv"}, {value: "rm", label: "rm"}]}
-                                        ></Form.Select>
+                                            noLabel>
+                                            <Form.Select.Option value="run">run</Form.Select.Option>
+                                            <Form.Select.Option value="mv">mv</Form.Select.Option>
+                                            <Form.Select.Option value="rm">rm</Form.Select.Option>
+                                        </Form.Select>
                                         {api.current?.getValue(`${field}`) !== 'rm' ? (
                                             <Form.Input
                                             field={`${field}[${api.current?.getValue(`${field}`)}]`}
-                                            label={`${api.current?.getValue(`${field}`)} = `}
-                                            style={{ width: 200, marginRight: 16 }}></Form.Input>
+                                            label={`${api.current?.getValue(field) ?? '请选择操作'} = `}
+                                            labelPosition="inset"
+                                            style={{ width: 350, marginRight: 16 }}></Form.Input>
                                         ) : null}
                                         <Button
                                             type="danger"
@@ -183,6 +191,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                                         <Form.Input
                                             field={field}
                                             label={`参数${i+1}`}
+                                            labelPosition="left"
                                         ></Form.Input>
                                         <Button
                                             type="danger"

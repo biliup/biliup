@@ -32,7 +32,6 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
             { label: '开启精选评论', value: 'up_selection_reply' },
         ]} direction='horizontal' label='互动设置' />
         <Input field='dynamic' label='粉丝动态' style={{width: 464}}/>
-        <Input field='format' label='视频格式' style={{width: 464}}/>
         <Form.Section text="简介@替换">
             <ArrayField field='credits'>
                 {({ add, arrayFields }) => (
