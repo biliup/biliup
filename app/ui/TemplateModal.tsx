@@ -152,17 +152,20 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                                 {arrayFields.map(({ field, key, remove }, i) => (
                                     <div key={key} style={{ width: 1000, display: "flex" }}>
                                         <Form.Select
-                                            field={field}
+                                            field={`${field}.cmd`}
                                             label="操作"
+                                            rules={[
+                                                { required: true, message },
+                                            ]}
                                             noLabel>
                                             <Form.Select.Option value="run">run</Form.Select.Option>
                                             <Form.Select.Option value="mv">mv</Form.Select.Option>
                                             <Form.Select.Option value="rm">rm</Form.Select.Option>
                                         </Form.Select>
-                                        {api.current?.getValue(`${field}`) !== 'rm' ? (
+                                        {api.current?.getValue(field)?.cmd !== 'rm' ? (
                                             <Form.Input
-                                            field={`${field}[${api.current?.getValue(`${field}`)}]`}
-                                            label={`${api.current?.getValue(field) ?? '请选择操作'} = `}
+                                            field={`${field}[${api.current?.getValue(field)?.cmd}]`}
+                                            label='='
                                             labelPosition="inset"
                                             style={{ width: 350, marginRight: 16 }}></Form.Input>
                                         ) : null}
