@@ -35,6 +35,13 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
         <ArrayField field='credits'>
             {({ add, arrayFields }) => (
                 <Form.Section text="简介@替换">
+                    <div className="semi-form-field-extra" style={{fontSize: "14px"}}>
+                        如需在简介中@别人，请使用此项。示例：
+                        <br />
+                        简介：{'\u007B'}streamer{'\u007D'}主播直播间地址：{'\u007B'}url{'\u007D'} 【@credit】
+                        <br />
+                        其中的"@credits"会依次替换为下面输入的@
+                    </div>
                     <Button icon={<IconPlusCircle />} onClick={add} theme="light">
                         添加行
                     </Button>

@@ -92,8 +92,8 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                     <ArrayField field='preprocessor'>
                         {({ add, arrayFields }) => (
                             <Form.Section text="下载前处理">
-                                <div id="format-helpText">
-                                    开始下载直播时触发，将按自定义顺序执行自定义操作 仅支持shell指令
+                                <div className="semi-form-field-extra">
+                                    开始下载直播时触发，将按自定义顺序执行自定义操作，仅支持shell指令
                                 </div>
                                 <Button icon={<IconPlusCircle />} onClick={add} theme="light">
                                     添加行
@@ -104,6 +104,9 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                                             field={`${field}[run]`}
                                             label={`run = `}
                                             labelPosition='inset'
+                                            rules={[
+                                                { required: true, message },
+                                            ]}
                                             style={{ width: 400, marginRight: 16 }}></Form.Input>
                                         <Button
                                             type="danger"
@@ -121,8 +124,8 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                     <ArrayField field='downloaded_processor'>
                         {({ add, arrayFields }) => (
                             <Form.Section text="下载后处理" >
-                                <div id="format-helpText">
-                                    准备上传直播时触发，将按自定义顺序执行自定义操作，仅支持shell指令，如果对上传的视频进行修改需要保证和filename_prefix命名规则一致 会自动检测上传
+                                <div className="semi-form-field-extra">
+                                    准备上传直播时触发，将按自定义顺序执行自定义操作，仅支持shell指令，如果对上传的视频进行修改，需要保证和filename_prefix命名规则一致，会自动检测上传
                                 </div>
                                 <Button icon={<IconPlusCircle />} onClick={add} theme="light">
                                     添加行
@@ -133,6 +136,9 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                                             field={`${field}[run]`}
                                             label={`run = `}
                                             labelPosition='inset'
+                                            rules={[
+                                                { required: true, message },
+                                            ]}
                                             style={{ width: 400, marginRight: 16 }}></Form.Input>
                                         <Button
                                             type="danger"
@@ -150,8 +156,8 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                     <ArrayField field='postprocessor'>
                         {({ add, arrayFields }) => (
                             <Form.Section text="上传完成后处理">
-                                <div id="format-helpText">
-                                    上传完成后触发，将按自定义顺序执行自定义操作 当postprocessor不存在时 默认执行删除文件操作，示例：
+                                <div className="semi-form-field-extra" >
+                                    上传完成后触发，将按自定义顺序执行自定义操作，当postprocessor不存在时，默认执行删除文件操作，示例：
                                     <br />
                                     <code>run = echo hello!</code> 执行任意命令，等同于在shell中运行,视频文件路径作为标准输入传入
                                     <br />
@@ -175,16 +181,19 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                                                 { required: true, message },
                                             ]}
                                             noLabel>
-                                            <Form.Select.Option value="run">run</Form.Select.Option>
-                                            <Form.Select.Option value="mv">mv</Form.Select.Option>
-                                            <Form.Select.Option value="rm">rm</Form.Select.Option>
+                                            <Form.Select.Option value="run">run（运行）</Form.Select.Option>
+                                            <Form.Select.Option value="mv">mv（移动到）</Form.Select.Option>
+                                            <Form.Select.Option value="rm">rm（删除文件）</Form.Select.Option>
                                         </Form.Select>
                                         {api.current?.getValue(field)?.cmd !== 'rm' ? (
                                             <Form.Input
                                             field={`${field}[${api.current?.getValue(field)?.cmd}]`}
                                             label='='
                                             labelPosition="inset"
-                                            style={{ width: 350, marginRight: 16 }}></Form.Input>
+                                            rules={[
+                                                { required: true, message },
+                                            ]}
+                                            style={{ width: 300, marginRight: 16 }}></Form.Input>
                                         ) : null}
                                         <Button
                                             type="danger"
@@ -199,10 +208,12 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                         )}
                     </ArrayField>
 
-                    <Form.Section text="ffmpeg参数">
                     <ArrayField field='opt_args'>
                         {({ add, arrayFields }) => (
-                            <React.Fragment>
+                            <Form.Section text="ffmpeg参数">
+                                <div className="semi-form-field-extra">
+                                    如："-ss"、"00:00:16"，每个参数需单独一行
+                                </div>
                                 <Button icon={<IconPlusCircle />} onClick={add} theme="light">
                                     添加行
                                 </Button>
@@ -212,6 +223,9 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                                             field={field}
                                             label={`参数${i+1}`}
                                             labelPosition="left"
+                                            rules={[
+                                                { required: true, message },
+                                            ]}
                                         ></Form.Input>
                                         <Button
                                             type="danger"
@@ -222,10 +236,9 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                                         />
                                     </div>
                                 ))}
-                            </React.Fragment>
+                            </Form.Section>
                         )}
                     </ArrayField>
-                    </Form.Section>
                     </Collapse.Panel>
                     </Collapse>
                 </Form>
