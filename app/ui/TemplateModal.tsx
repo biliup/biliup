@@ -88,12 +88,15 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                     <Collapse.Panel header="更多设置" itemKey="processors">
                     <Form.Input field='format' label='视频格式' placeholder='flv' style={{ width: 176 }}
                     helpText='视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg或者streamlink，youtube不支持。' />
-                    <Form.Section text="preprocessor">
+
                     <ArrayField field='preprocessor'>
                         {({ add, arrayFields }) => (
-                            <React.Fragment>
+                            <Form.Section text="下载前处理">
+                                <div id="format-helpText">
+                                    开始下载直播时触发，将按自定义顺序执行自定义操作 仅支持shell指令
+                                </div>
                                 <Button icon={<IconPlusCircle />} onClick={add} theme="light">
-                                    Add new line
+                                    添加行
                                 </Button>
                                 {arrayFields.map(({ field, key, remove }, i) => (
                                     <div key={key} style={{ width: 1000, display: "flex" }}>
@@ -111,16 +114,18 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                                         />
                                     </div>
                                 ))}
-                            </React.Fragment>
+                            </Form.Section>
                         )}
                     </ArrayField>
-                    </Form.Section>
-                    <Form.Section text="downloaded_processor">
+
                     <ArrayField field='downloaded_processor'>
                         {({ add, arrayFields }) => (
-                            <React.Fragment>
+                            <Form.Section text="下载后处理" >
+                                <div id="format-helpText">
+                                    准备上传直播时触发，将按自定义顺序执行自定义操作，仅支持shell指令，如果对上传的视频进行修改需要保证和filename_prefix命名规则一致 会自动检测上传
+                                </div>
                                 <Button icon={<IconPlusCircle />} onClick={add} theme="light">
-                                    Add new line
+                                    添加行
                                 </Button>
                                 {arrayFields.map(({ field, key, remove }, i) => (
                                     <div key={key} style={{ width: 1000, display: "flex" }}>
@@ -138,16 +143,28 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                                         />
                                     </div>
                                 ))}
-                            </React.Fragment>
+                            </Form.Section>
                         )}
                     </ArrayField>
-                    </Form.Section>
-                    <Form.Section text="postprocessor">
+
                     <ArrayField field='postprocessor'>
                         {({ add, arrayFields }) => (
-                            <React.Fragment>
+                            <Form.Section text="上传完成后处理">
+                                <div id="format-helpText">
+                                    上传完成后触发，将按自定义顺序执行自定义操作 当postprocessor不存在时 默认执行删除文件操作，示例：
+                                    <br />
+                                    <code>run = echo hello!</code> 执行任意命令，等同于在shell中运行,视频文件路径作为标准输入传入
+                                    <br />
+                                    <code>mv = backup/</code> 移动文件到backup目录下
+                                    <br />
+                                    <code>run = python3 path/to/mail.py</code> 执行一个 Python 脚本，可以用来发送邮件等。<a href="https://biliup.github.io/biliup/Guide.html#%E4%B8%8A%E4%BC%A0%E5%AE%8C%E6%88%90%E5%90%8E%E5%8F%91%E9%80%81%E9%82%AE%E4%BB%B6%E9%80%9A%E7%9F%A5" target="_blank">自动发信通知脚本示例</a>
+                                    <br />
+                                    <code>run = sh ./run.sh</code> 执行一个shell脚本，用途多样，主要调用系统内的cli工具。<a href="https://gist.github.com/UVJkiNTQ/ae4282e8f9fe4e45b3144b57605b4178" target="_blank">自动上传网盘脚本示例</a>
+                                    <br />
+                                    <code>rm</code>  删除文件，为默认操作
+                                </div>
                                 <Button icon={<IconPlusCircle />} onClick={add} theme="light">
-                                    Add new line
+                                    添加行
                                 </Button>
                                 {arrayFields.map(({ field, key, remove }, i) => (
                                     <div key={key} style={{ width: 1000, display: "flex" }}>
@@ -178,16 +195,16 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                                         />
                                     </div>
                                 ))}
-                            </React.Fragment>
+                            </Form.Section>
                         )}
                     </ArrayField>
-                    </Form.Section>
+
                     <Form.Section text="ffmpeg参数">
                     <ArrayField field='opt_args'>
                         {({ add, arrayFields }) => (
                             <React.Fragment>
                                 <Button icon={<IconPlusCircle />} onClick={add} theme="light">
-                                    Add new line
+                                    添加行
                                 </Button>
                                 {arrayFields.map(({ field, key, remove }, i) => (
                                     <div key={key} style={{ width: 1000, display: "flex" }}>

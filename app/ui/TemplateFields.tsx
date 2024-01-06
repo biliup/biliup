@@ -31,33 +31,31 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
             { label: '关闭评论', value: 'up_close_reply' },
             { label: '开启精选评论', value: 'up_selection_reply' },
         ]} direction='horizontal' label='互动设置' />
-        <Input field='dynamic' label='粉丝动态' style={{width: 464}}/>
-        <Form.Section text="简介@替换">
-            <ArrayField field='credits'>
-                {({ add, arrayFields }) => (
-                    <React.Fragment>
-                        <Button icon={<IconPlusCircle />} onClick={add} theme="light">
-                            Add new line
-                        </Button>
-                        {arrayFields.map(({ field, key, remove }, i) => (
-                            <div key={key} style={{ width: 1000, display: "flex" }}>
-                                <InputGroup>
-                                    <Input field={`${field}.username`} label='需要@的用户名' placeholder='username' />
-                                    <Input field={`${field}.uid`} label='需要@的uid' placeholder='uid' />
-                                </InputGroup>
-                                <Button
-                                    type="danger"
-                                    theme="borderless"
-                                    icon={<IconMinusCircle />}
-                                    onClick={remove}
-                                    style={{ margin: 12 }}
-                                />
-                            </div>
-                        ))}
-                    </React.Fragment>
-                )}
-            </ArrayField>
-        </Form.Section>
+        <Input field='dynamic' label='粉丝动态' style={{ width: 464 }} />
+        <ArrayField field='credits'>
+            {({ add, arrayFields }) => (
+                <Form.Section text="简介@替换">
+                    <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+                        添加行
+                    </Button>
+                    {arrayFields.map(({ field, key, remove }, i) => (
+                        <div key={key} style={{ width: 1000, display: "flex" }}>
+                            <InputGroup>
+                                <Input field={`${field}.username`} label='需要@的用户名' placeholder='username' />
+                                <Input field={`${field}.uid`} label='需要@的uid' placeholder='uid' />
+                            </InputGroup>
+                            <Button
+                                type="danger"
+                                theme="borderless"
+                                icon={<IconMinusCircle />}
+                                onClick={remove}
+                                style={{ margin: 12 }}
+                            />
+                        </div>
+                    ))}
+                </Form.Section>
+            )}
+        </ArrayField>
     </>);
     const [isOpen, setOpen] = useState(false);
     const {biliUsers} = useBiliUsers();
