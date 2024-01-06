@@ -1,13 +1,14 @@
 'use client'
 import React, {useEffect, useRef, useState} from "react";
 import EditTemplate from "@/app/upload-manager/edit/page";
-import {Button, Form, Layout, Nav, Collapse} from "@douyinfe/semi-ui";
+import {Button, Form, Layout, Nav, Collapse, Avatar} from "@douyinfe/semi-ui";
 import {registerMediaQuery, responsiveMap} from "@/app/lib/utils";
 import {IconPlusCircle, IconStar, IconVideoListStroked} from "@douyinfe/semi-icons";
 import useSWR from "swr";
 import {fetcher, put} from "@/app/lib/api-streamer";
 import useSWRMutation from "swr/mutation";
 import {FormApi} from "@douyinfe/semi-ui/lib/es/form";
+import {useBiliUsers} from "../lib/use-streamers";
 
 const Dashboard: React.FC = () => {
     const {Header, Content} = Layout;
@@ -37,6 +38,17 @@ const Dashboard: React.FC = () => {
     useEffect(() => {
         remountForm();
     }, [entity]);
+
+    const {biliUsers} = useBiliUsers();
+    const list = biliUsers?.map((item) => {
+        return {
+            value: item.value, label: <>
+                <Avatar size="extra-small" src={item.face} />
+                <span style={{ marginLeft: 8 }}>
+                    {item.name}
+                </span></>
+        }
+    })
 // const handleSelectChange = (value) => {
 //         let text = value === 'male' ? 'Hi male' : 'Hi female!';
 //         formRef.current?.setValue('Note', text);
@@ -389,6 +401,85 @@ bilibili支持 mp4 mkv webm 无需筛选也能上传
                 extraText='如遇到虎牙录制卡顿可以尝试切换线路。可选以下线路
  AL（阿里云）, HW（华为云）, TX（腾讯云）, WS（网宿）, HS（火山引擎）, AL13（阿里云）, HW16（华为云）'
                 label="huyacdn"
+                style={{width: 400}}
+            />
+            </Collapse.Panel>
+            <Collapse.Panel header="用户cookie" itemKey="user">
+            <Form.Input
+                field="user.bili_cookie"
+                extraText='请至少填入bilibili cookie之一。推荐使用 biliup-rs(https://github.com/biliup/biliup-rs) 来获取。'
+                label="bili_cookie"
+                style={{width: 400}}
+            />
+            <Form.Select field="user.bili_cookie_file" label={{ text: 'bili_cookie_file' }} style={{ width: 176 }} optionList={list} 
+                extraText='和上一个配置项同时存在时，优先使用文件。只支持 biliup-rs 生成的文件。'
+            />
+            <Form.Input
+                field="user.douyin_cookie"
+                extraText='如需要录制抖音www.douyin.com/user/类型链接或被风控,
+                请在此填入cookie需要__ac_nonce、__ac_signature、sessionid的值请不要将所有cookie填入'
+                label="douyin_cookie"
+                style={{width: 400}}
+            />
+            <Form.Input
+                field="user.twitch_cookie"
+                extraText={
+                    <div className="semi-form-field-extra">
+                    如录制Twitch时遇见视频流中广告过多的情况，可尝试在此填入cookie，可以大幅减少视频流中的twitch广告（经测试需要在该Cookie所属账号开了TwitchTurbo会员才有用）
+                    <br />
+                    该cookie有过期风险，cookie过期后会在日志输出警告请及时更换cookie，cookie失效的情况下后续录制将忽略cookie（我个人用了四个月都没过期）
+                    <br />
+                    twitch_cookie获取方式：在浏览器中打开Twitch.tv，F12调出控制台，在控制台中执行：
+                    <br />
+                    <code>document.cookie.split("; ").find(item={'>'}item.startsWith("auth-token="))?.split("=")[1]</code>
+                    <br />
+                    twitch_cookie需要在downloader= "ffmpeg"时候才会生效
+                    </div>
+                }
+                label="twitch_cookie"
+                style={{width: 400}}
+            />
+            <Form.Input
+                field="user.youtube_cookie"
+                extraText='使用Cookies登陆YouTube帐号，可用于下载会限，私享等未登录账号无法访问的内容。请使用 Netscape 格式的 Cookies 文本路径。
+                可以使用Chrome插件Get cookies.txt来生成txt文件。'
+                label="youtube_cookie"
+                style={{width: 400}}
+            />
+            <Form.Input
+                field="user.niconico-email"
+                extraText='与您的Niconico账户相关的电子邮件或电话号码'
+                label="niconico-email"
+                style={{width: 400}}
+            />
+            <Form.Input
+                field="user.niconico-password"
+                extraText='您的Niconico账户的密码'
+                label="niconico-password"
+                style={{width: 400}}
+            />
+            <Form.Input
+                field="user.niconico-user-session"
+                extraText='用户会话令牌的值。可作为提供密码的替代方法。'
+                label="niconico-user-session"
+                style={{width: 400}}
+            />
+            <Form.Input
+                field="user.niconico-purge-credentials"
+                extraText='清除缓存的 Niconico 凭证，以启动一个新的会话并重新认证。'
+                label="niconico-purge-credentials"
+                style={{width: 400}}
+            />
+            <Form.Input
+                field="user.afreecatv_username"
+                extraText='AfreecaTV 用户名'
+                label="afreecatv_username"
+                style={{width: 400}}
+            />
+            <Form.Input
+                field="user.afreecatv_password"
+                extraText='AfreecaTV 密码'
+                label="afreecatv_password"
                 style={{width: 400}}
             />
             </Collapse.Panel>
