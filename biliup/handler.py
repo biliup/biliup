@@ -141,7 +141,7 @@ def process_upload(stream_info):
 @event_manager.register(UPLOADED, block='Asynchronous2')
 def uploaded(name, live_cover_path, data: List):
     # data = file_list
-    post_processor = config['streamers'][name]
+    post_processor = config['streamers'].get(name, {}).get("postprocessor", None)
     if post_processor is None:
         # 删除封面
         if live_cover_path is not None:

@@ -1,7 +1,7 @@
 import React, {useState} from "react";
 import {FormFCChild} from "@douyinfe/semi-ui/lib/es/form";
-import {IconChevronDown, IconChevronUp} from "@douyinfe/semi-icons";
-import {Avatar, Button, Collapsible, Form, Space, Typography} from "@douyinfe/semi-ui";
+import {IconChevronDown, IconChevronUp, IconMinusCircle, IconPlusCircle } from "@douyinfe/semi-icons";
+import {Avatar, Button, Collapsible, Form, InputGroup, Space, Typography, ArrayField} from "@douyinfe/semi-ui";
 import useSWR from "swr";
 import {BiliType, fetcher, StudioEntity} from "../lib/api-streamer";
 import {useBiliUsers, useTypeTree} from "../lib/use-streamers";
@@ -31,7 +31,38 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
             { label: '关闭评论', value: 'up_close_reply' },
             { label: '开启精选评论', value: 'up_selection_reply' },
         ]} direction='horizontal' label='互动设置' />
-        <Input field='dynamic' label='粉丝动态' style={{width: 464}}/>
+        <Input field='dynamic' label='粉丝动态' style={{ width: 464 }} />
+        <ArrayField field='credits'>
+            {({ add, arrayFields }) => (
+                <Form.Section text="简介@替换">
+                    <div className="semi-form-field-extra" style={{fontSize: "14px"}}>
+                        如需在简介中@别人，请使用此项。示例：
+                        <br />
+                        简介：{'\u007B'}streamer{'\u007D'}主播直播间地址：{'\u007B'}url{'\u007D'} 【@credit】
+                        <br />
+                        其中的"@credits"会依次替换为下面输入的@
+                    </div>
+                    <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+                        添加行
+                    </Button>
+                    {arrayFields.map(({ field, key, remove }, i) => (
+                        <div key={key} style={{ width: 1000, display: "flex" }}>
+                            <InputGroup>
+                                <Input field={`${field}.username`} label='需要@的用户名' placeholder='username' />
+                                <Input field={`${field}.uid`} label='需要@的uid' placeholder='uid' />
+                            </InputGroup>
+                            <Button
+                                type="danger"
+                                theme="borderless"
+                                icon={<IconMinusCircle />}
+                                onClick={remove}
+                                style={{ margin: 12 }}
+                            />
+                        </div>
+                    ))}
+                </Form.Section>
+            )}
+        </ArrayField>
     </>);
     const [isOpen, setOpen] = useState(false);
     const {biliUsers} = useBiliUsers();
@@ -110,7 +141,7 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
             </Section>
 
             <Section style={{paddingBottom: 40}} text={<div style={{cursor: 'pointer'}} onClick={toggle}>更多设置 {isOpen? <IconChevronUp style={{marginLeft: 12}} />:<IconChevronDown style={{marginLeft: 12}} />}</div>}>
-                <Collapsible isOpen={isOpen} >
+                <Collapsible isOpen={isOpen} keepDOM >
                     {collapsed}
                 </Collapsible>
             </Section>

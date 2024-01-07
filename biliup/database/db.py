@@ -150,13 +150,27 @@ class DB:
             db.execute_sql('ALTER TABLE temp_streamer_info RENAME TO streamerinfo')
 
     @classmethod
-    def update_live_streamer(cls, id, url, remark, filename_prefix=None, upload_streamers=None, **kwargs):
+    def update_live_streamer(
+            cls, id, url, remark,
+            filename_prefix=None,
+            upload_streamers=None,
+            format=None,
+            preprocessor=None,
+            downloaded_processor=None,
+            postprocessor=None,
+            opt_args=None, **kwargs):
         """ 更新 LiveStreamers 表中的数据, 增加一层包装避免多余参数报错 """
         LiveStreamers.update(
             url=url,
             remark=remark,
             filename_prefix=filename_prefix,
-            upload_streamers=upload_streamers).where(LiveStreamers.id == id).execute()
+            upload_streamers=upload_streamers,
+            format=format,
+            preprocessor=preprocessor,
+            downloaded_processor=downloaded_processor,
+            postprocessor=postprocessor,
+            opt_args=opt_args,
+        ).where(LiveStreamers.id == id).execute()
 
     def backup(self):
         """备份数据库"""
