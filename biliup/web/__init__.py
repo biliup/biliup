@@ -276,13 +276,33 @@ async def streamers_put(request):
 
 @routes.get('/v1/users')
 async def users(request):
-    # Todo: 实现扫描当前目录下的cookie文件
+    records = Configuration.select().where(Configuration.key == 'bilibili-cookies')
+    res = []
+    for record in records:
+        res.append({
+            'id': record.id,
+            'name': record.value,
+            'value': record.value,
+            'platform': 'bilibili-cookies',
+        })
+    return web.json_response(res)
+
+@routes.post('/v1/users')
+async def users(request):
+    json_data = await request.json()
+    to_save = Configuration(key=json_data['platform'], value=json_data['value'])
+    to_save.save()
     return web.json_response([{
-        'id': 1,
-        'name': 'cookies.json',
-        'value': 'cookies.json',
-        'platform': 'bilibili',
+        'id': to_save.id,
+        'name': to_save.value,
+        'value': to_save.value,
+        'platform': 'bilibili-cookies',
     }])
+
+@routes.delete('/v1/users/{id}')
+async def users(request):
+    Configuration.delete_by_id(request.match_info['id'])
+    return web.HTTPOk()
 
 @routes.get('/v1/configuration')
 async def users(request):
