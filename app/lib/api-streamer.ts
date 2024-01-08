@@ -75,20 +75,21 @@ export interface StudioEntity {
 	tid: number;
 	cover: string;
 	title: string;
-	desc: string;
+	description: string;
 	dynamic: string;
-	tags: string;
-	dtime?: number;
-	interactive: number;
+	tags: string[];
+	dtime: number;
+	// interactive: number;
 	mission_id?: number;
 	dolby: number;
-	lossless_music: number;
-	no_reprint?: number;
-	up_selection_reply: boolean;
-	up_close_reply: boolean;
-	up_close_danmu: boolean;
-	open_elec?: number;
-	credits?: Credit[];
+	hires: number;
+	no_reprint: number;
+	up_selection_reply: number;
+	up_close_reply: number;
+	up_close_danmu: number;
+	open_elec: number;
+	credits: Credit[];
+	uploader: string;
 }
 
 export interface LiveStreamerEntity {
