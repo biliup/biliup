@@ -30,12 +30,10 @@ class DB:
         UploadStreamers.create_table_()
         Configuration.create_table_()
         with db.connection_context():
-            columns_name_list = [column_meta.name for column_meta in db.get_columns('streamerinfo')]
-        if 'id' not in columns_name_list:
-            try:
-                cls.migrate_streamer_info()
-            except OperationalError as e:
-                logger.error(f"迁移失败: {e}，请手动删除旧数据库后重试")
+            columns_name_list = [column_meta.name for column_meta in db.get_columns('uploadstreamers')]
+        if 'up_selection_reply' not in columns_name_list:
+            logger.error(f"检测到旧数据库，请手动删除data文件夹后重试")
+            return False
         return run
 
     @classmethod
