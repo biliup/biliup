@@ -68,7 +68,7 @@ const EditTemplate: React.FC = () => {
                         dynamic: values?.dynamic ?? '',
                         tags: values?.tags ?? [],
                         // interactive: values?.interactive ?? 0,
-                        dolby:  values?.sound.includes("dolby") ? 1 : 0,
+                        dolby: values?.sound.includes("dolby") ? 1 : 0,
                         hires: values?.sound.includes("hires") ? 1 : 0,
                         up_selection_reply: values?.interaction.includes("up_selection_reply") ? 1 : 0,
                         up_close_reply: values?.interaction.includes("up_close_reply") ? 1 : 0,
