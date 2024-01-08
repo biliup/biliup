@@ -38,10 +38,17 @@ const EditTemplate: React.FC = () => {
     if (!data || !typeTree) return null;
     let uploadStreamers = {
         ...data,
-        tag: data.tags?.length === 0 ? [] : data.tags?.split(','),
         tid: [typeTree.find((tt: BiliType) => {
             return tt.children.some(ct => ct.id === data?.tid);
-        })?.value, data.tid]
+        })?.value, data.tid],
+        sound: (data.dolby === 1 ? ["dolby"] : [])
+        .concat(data.hires === 1 ? ["hires"] : []),
+        interaction: (data.up_close_danmu === 1 ? ["up_close_danmu"] : [])
+        .concat(data.up_close_reply === 1 ? ["up_close_reply"] : [])
+        .concat(data.up_selection_reply === 1 ? ["up_selection_reply"] : []),
+        open_elec: data.open_elec === 1,
+        no_reprint: data.no_reprint === 1,
+        isDtime: data.dtime ? true : false,
     };
     return (<>
         <div style={{display: 'flex', flexDirection: 'row-reverse', paddingRight: 12}}>
@@ -59,18 +66,19 @@ const EditTemplate: React.FC = () => {
                         title: values?.title ?? '',
                         description: values?.description ?? '',
                         dynamic: values?.dynamic ?? '',
-                        tag: values?.tag ?? '',
-                        interactive: values?.interactive ?? 0,
-                        dolby: values?.dolby ?? 0,
-                        lossless_music: values?.lossless_music ?? 0,
-                        up_selection_reply: values?.up_selection_reply ?? false,
-                        up_close_reply: values?.up_close_reply ?? false,
-                        up_close_danmu: values?.up_close_danmu ?? false,
-                        open_elec: values?.open_elec,
-                        no_reprint: values?.no_reprint,
+                        tags: values?.tags ?? [],
+                        // interactive: values?.interactive ?? 0,
+                        dolby: values?.sound.includes("dolby") ? 1 : 0,
+                        hires: values?.sound.includes("hires") ? 1 : 0,
+                        up_selection_reply: values?.interaction.includes("up_selection_reply") ? 1 : 0,
+                        up_close_reply: values?.interaction.includes("up_close_reply") ? 1 : 0,
+                        up_close_danmu: values?.interaction.includes("up_close_danmu") ? 1 : 0,
+                        open_elec: values?.open_elec ? 1 : 0,
+                        no_reprint: values?.no_reprint ? 1 : 0,
                         mission_id: values?.mission_id,
-                        dtime: values?.dtime,
+                        dtime: values?.isDtime ? values?.dtime : null,
                         credits: values?.credits,
+                        uploader: values?.uploader,
                     }
                     const result = await trigger(studioEntity);
                     await mutate(result);

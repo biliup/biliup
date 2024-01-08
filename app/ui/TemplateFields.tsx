@@ -24,7 +24,7 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
     const collapsed = (<>
         <CheckboxGroup field='sound' options={[
             { label: '杜比音效', value: 'dolby' },
-            { label: 'Hi-Res无损音质', value: 'lossless_music' },
+            { label: 'Hi-Res无损音质', value: 'hires' },
         ]} direction='horizontal' label='音效设置' />
         <CheckboxGroup field='interaction' options={[
             { label: '关闭弹幕', value: 'up_close_danmu' },
@@ -32,6 +32,19 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
             { label: '开启精选评论', value: 'up_selection_reply' },
         ]} direction='horizontal' label='互动设置' />
         <Input field='dynamic' label='粉丝动态' style={{ width: 464 }} />
+        <Form.Select
+            field="uploader"
+            label='上传插件'
+            style={{ width: 250 }} showClear>
+            <Form.Select.Option value="bili_web">bili_web</Form.Select.Option>
+            <Form.Select.Option value="biliup-rs">biliup-rs</Form.Select.Option>
+            <Form.Select.Option value="Noop">Noop</Form.Select.Option>
+        </Form.Select>
+        <Switch field='no_reprint' label='自制声明' />
+        <Form.Switch
+            field="open_elec"
+            label="开启充电面板"
+        />
         <ArrayField field='credits'>
             {({ add, arrayFields }) => (
                 <Form.Section text="简介@替换">
@@ -121,7 +134,7 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
                     ]}
                 />
                 <TagInput
-                    field="tag"
+                    field="tags"
                     label='标签'
                     placeholder='输入标签，Enter 确定'
                     onChange={v => console.log(v)}

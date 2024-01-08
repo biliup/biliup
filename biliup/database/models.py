@@ -118,8 +118,11 @@ class UploadStreamers(BaseModel):
     no_reprint = IntegerField(null=True)  # 自制声明, 1为未经允许禁止转载
     uploader = CharField(null=True)  # 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
     user_cookie = CharField(null=True)  # 使用指定的账号上传
-    tags = CharField()  # 标签
+    tags = JSONField()  # 标签
     credits = JSONField(null=True)  # 简介@模板
+    up_selection_reply = IntegerField(null=True)  # 精选评论
+    up_close_reply = IntegerField(null=True)  # 关闭评论
+    up_close_danmu = IntegerField(null=True)  # 精选评论
 
 class LiveStreamers(BaseModel):
     """每个直播间的配置"""
