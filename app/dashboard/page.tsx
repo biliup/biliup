@@ -431,9 +431,9 @@ bilibili支持 mp4 mkv webm 无需筛选也能上传
                     <br />
                     twitch_cookie获取方式：在浏览器中打开Twitch.tv，F12调出控制台，在控制台中执行：
                     <br />
-                    <code>document.cookie.split("; ").find(item={'>'}item.startsWith("auth-token="))?.split("=")[1]</code>
+                    <code>{`document.cookie.split("; ").find(item={'>'}item.startsWith("auth-token="))?.split("=")[1]`}</code>
                     <br />
-                    twitch_cookie需要在downloader= "ffmpeg"时候才会生效
+                    twitch_cookie需要在downloader= &quot;ffmpeg&quot;时候才会生效
                     </div>
                 }
                 label="twitch_cookie"

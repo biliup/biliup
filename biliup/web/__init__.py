@@ -1,5 +1,6 @@
 import json
 import os
+import pathlib
 
 import aiohttp_cors
 import requests
@@ -381,9 +382,17 @@ async def service(args):
     if args.static_dir:
         app.add_routes([web.static('/', args.static_dir, show_index=False)])
     else:
-        res = [web.static('/', files('biliup.web').joinpath('public'))]
-        for fdir in find_all_folders(files('biliup.web').joinpath('public')):
-            res.append(web.static('/'+fdir.replace('\\', '/'), files('biliup.web').joinpath('public/'+fdir)))
+        # res = [web.static('/', files('biliup.web').joinpath('public'))]
+        res = []
+        for fdir in pathlib.Path(files('biliup.web').joinpath('public')).glob('*.html'):
+            fname = fdir.relative_to(files('biliup.web').joinpath('public'))
+            def _copy(fname):
+                async def static_view(request):
+                    return web.FileResponse(files('biliup.web').joinpath('public/' + str(fname)))
+                return static_view
+            res.append(web.get('/' + str(fname.with_suffix('')), _copy(fname)))
+            # res.append(web.static('/'+fdir.replace('\\', '/'), files('biliup.web').joinpath('public/'+fdir)))
+        res.append(web.static('/', files('biliup.web').joinpath('public')))
         app.add_routes(res)
     if args.password:
         app.middlewares.append(basic_auth_middleware(('/',), {'biliup': args.password}, ))
@@ -402,6 +411,37 @@ async def service(args):
         cors.add(route)
 
     runner = web.AppRunner(app)
+    setup_middlewares(app)
     await runner.setup()
     site = web.TCPSite(runner, host=args.host, port=args.port)
     return runner, site
+
+
+async def handle_404(request):
+    return web.HTTPFound('404')
+
+
+def create_error_middleware(overrides):
+
+    @web.middleware
+    async def error_middleware(request, handler):
+        try:
+            return await handler(request)
+        except web.HTTPException as ex:
+            override = overrides.get(ex.status)
+            if override:
+                return await override(request)
+
+            raise
+        except Exception:
+            request.protocol.logger.exception("Error handling request")
+            return await overrides[500](request)
+
+    return error_middleware
+
+
+def setup_middlewares(app):
+    error_middleware = create_error_middleware({
+        404: handle_404
+    })
+    app.middlewares.append(error_middleware)

@@ -18,7 +18,7 @@ const Players: React.FC<{url: string}> = ({url}) => {
             player?.destroy();
             player = null;
         };
-    }, [])
+    }, [url])
     return  <div id="mse"></div>;
 }
 

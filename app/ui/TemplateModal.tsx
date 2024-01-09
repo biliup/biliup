@@ -212,7 +212,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                         {({ add, arrayFields }) => (
                             <Form.Section text="ffmpeg参数">
                                 <div className="semi-form-field-extra">
-                                    如："-ss"、"00:00:16"，每个参数需单独一行
+                                    如：&quot;-ss&quot;、&quot;00:00:16&quot;，每个参数需单独一行
                                 </div>
                                 <Button icon={<IconPlusCircle />} onClick={add} theme="light">
                                     添加行
