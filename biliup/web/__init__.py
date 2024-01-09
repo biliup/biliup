@@ -181,7 +181,7 @@ async def streamers(request):
         temp = model_to_dict(ls)
         url = temp['url']
         status = 'Idle'
-        if context['PluginInfo'].url_status[url] == 1:
+        if context['PluginInfo'].url_status.get(url) == 1:
             status = 'Working'
         if context['url_upload_count'].get(url, 0) > 0:
             status = 'Inspecting'
@@ -283,7 +283,7 @@ async def users(request):
             'id': record.id,
             'name': record.value,
             'value': record.value,
-            'platform': 'bilibili-cookies',
+            'platform': record.key,
         })
     return web.json_response(res)
 
@@ -296,7 +296,7 @@ async def users(request):
         'id': to_save.id,
         'name': to_save.value,
         'value': to_save.value,
-        'platform': 'bilibili-cookies',
+        'platform': to_save.key,
     }])
 
 @routes.delete('/v1/users/{id}')
@@ -326,7 +326,11 @@ async def users(request):
 
 @routes.get('/bili/archive/pre')
 async def pre_archive(request):
-    config.load_cookies('cookies.json')
+    path = 'cookies.json'
+    conf = Configuration.get_or_none(Configuration.key == 'bilibili-cookies')
+    if conf is not None:
+        path = conf.value
+    config.load_cookies(path)
     cookies = config.data['user']['cookies']
     return web.json_response(BiliBili.tid_archive(cookies))
 

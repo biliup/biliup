@@ -39,14 +39,14 @@ class Config(UserDict):
             if ls.upload_streamers:
                 self['streamers'][ls.remark].update({k: v for k, v in model_to_dict(ls.upload_streamers).items() if v})
             if self['streamers'][ls.remark].get('tags'):
-                self['streamers'][ls.remark]['tags'] = self['streamers'][ls.remark]['tags'].split(',')
+                self['streamers'][ls.remark]['tags'] = self['streamers'][ls.remark]['tags']
         # for us in UploadStreamers.select():
         #     config.data[con.key] = con.value
 
     def save_to_db(self):
         with db.connection_context():
             for k, v in self['streamers'].items():
-                us = UploadStreamers(template_name=k, tags=','.join(v.pop('tags', 'biliup')), **v)
+                us = UploadStreamers(template_name=k, tags=v.pop('tags', ['biliup']), **v)
                 us.save()
                 for url in v.pop('url'):
                     LiveStreamers(upload_streamers=us, remark=k, url=url, **v).save()
