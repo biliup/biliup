@@ -399,7 +399,7 @@ bilibili支持 mp4 mkv webm 无需筛选也能上传
             <Form.Input
                 field="huyacdn"
                 extraText='如遇到虎牙录制卡顿可以尝试切换线路。可选以下线路
- AL（阿里云）, HW（华为云）, TX（腾讯云）, WS（网宿）, HS（火山引擎）, AL13（阿里云）, HW16（华为云）'
+ AL（阿里云 - 直播线路3）, TX（腾讯云 - 直播线路5）, HW（华为云 - 直播线路6）, WS（网宿）, HS（火山引擎 - 直播线路14）, AL13（阿里云）, HW16（华为云）, HY(星域云 - 直播线路66)'
                 label="huyacdn"
                 style={{width: 400}}
             />
