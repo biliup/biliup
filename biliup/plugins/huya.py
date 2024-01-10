@@ -11,7 +11,7 @@ from biliup.config import config
 from biliup.plugins.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
-from ..plugins import match1, logger
+from ..plugins import match1, logger, random_user_agent
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?huya\.com')
@@ -19,8 +19,7 @@ class Huya(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
         self.huya_danmaku = config.get('huya_danmaku', False)
-        self.fake_headers['User-Agent'] = 'Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36'
-
+        self.fake_headers['User-Agent'] = random_user_agent('mobile')
     def check_stream(self, is_check=False):
         try:
             room_id = self.url.split('huya.com/')[1].split('/')[0].split('?')[0]

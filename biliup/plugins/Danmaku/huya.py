@@ -1,6 +1,7 @@
 import re
 
 import aiohttp
+from biliup.plugins import random_user_agent
 
 from .tars import tarscore
 
@@ -19,8 +20,7 @@ class Huya:
         reg_datas = []
         url = 'https://m.huya.com/' + url.split('/')[-1]
         headers = {
-            'user-agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, '
-                          'like Gecko) Chrome/79.0.3945.88 Mobile Safari/537.36'}
+            'User-Agent': random_user_agent('mobile')}
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, timeout=5) as resp:
                 room_page = await resp.text()
