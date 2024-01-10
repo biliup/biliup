@@ -30,7 +30,7 @@ class TwitchVideos(DownloadBase):
 
     def check_stream(self, is_check=False):
         # TODO 这里原本的批量检测是有问题的 先用yt_dlp实现 等待后续新增新的批量检测方式 后续这里的auth信息和直播一样采用twitch_cookie
-        with yt_dlp.YoutubeDL({'download_archive': 'archive.txt'}) as ydl:
+        with yt_dlp.YoutubeDL({'download_archive': 'archive.txt', 'live_from_start': config.get('twitch_live_from_start', False)}) as ydl:
             try:
                 info = ydl.extract_info(self.url, download=False, process=False)
                 for entry in info['entries']:
@@ -79,7 +79,7 @@ class Twitch(DownloadBase):
                                 }
                             ) {
                                 signature
-                                value             
+                                value
                             }
                         }
                     }

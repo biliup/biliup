@@ -289,6 +289,11 @@ bilibili支持 mp4 mkv webm 无需筛选也能上传
 还有一个不想视频分段的办法是去花钱开一个Turbo会员，能不看广告，然后下面的user里把twitch的cookie填上，也能不看广告，自然就不会分段了'
                 label="twitch_disable_ads"
             />
+            <Form.Switch
+                field="twitch_live_from_start"
+                extraText='当主播直播时，将在下播后下载最新回放，防止下载最新回放不完整，默认关闭'
+                label="twitch_live_from_start"
+            />
             </Collapse.Panel>
             <Collapse.Panel header="Bilibili" itemKey="bilibili">
             <Form.Input

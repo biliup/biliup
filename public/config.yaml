@@ -170,6 +170,8 @@ check_sourcecode: 15
 ### 这个功能会导致Twitch录播分段，因为遇到广告就自动断开了，这就是去广告。若需要录播完整一整段可以关闭这个，但是关了之后就会有紫色屏幕的CommercialTime
 ### 还有一个不想视频分段的办法是去花钱开一个Turbo会员，能不看广告，然后下面的user里把twitch的cookie填上，也能不看广告，自然就不会分段了
 #twitch_disable_ads: true
+### 当主播直播时，将在下播后下载最新回放，防止下载最新回放不完整，默认关闭
+#twitch_live_from_start: true
 
 
 
