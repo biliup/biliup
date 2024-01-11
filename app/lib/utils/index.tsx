@@ -41,15 +41,13 @@ export const registerMediaQuery = (media: string, { match, unmatch, callInInit =
     return () => undefined;
 };
 
-export const humDate = function (time: number) : string {
-    return new Date(time * 1000).toLocaleString('zh-CN', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-        timeZone: 'Asia/Shanghai'
-    }).replace(/\//g, '-')
-}
+export const humDate = (time: number) : string => new Date(time * 1000).toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    timeZone: 'Asia/Shanghai'
+}).replace(/\//g, '-')
