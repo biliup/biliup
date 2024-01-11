@@ -44,10 +44,10 @@ class DownloadBase:
         self.is_download = False
         self.live_cover_url = None
         self.fake_headers = {
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Encoding': 'gzip, deflate',
-            'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
-            'User-Agent': random_user_agent(),
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'accept-encoding': 'gzip, deflate',
+            'accept-language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
+            'user-agent': random_user_agent(),
         }
 
         self.default_output_args = [

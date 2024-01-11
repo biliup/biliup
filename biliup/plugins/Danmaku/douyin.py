@@ -14,7 +14,7 @@ from google.protobuf import json_format
 
 class Douyin:
     headers = {
-        'User-Agent': random_user_agent(),
+        'user-agent': random_user_agent(),
         'Referer': 'https://live.douyin.com/',
         'Cookie': config.get('user', {}).get('douyin_cookie', '')
     }

@@ -33,7 +33,7 @@ class Acfun(DownloadBase):
             "acfun.api.visitor_st": visitorst
         }
         data2 = {'authorId': rid, 'pullStreamType': 'FLV'}
-        self.fake_headers['Referer'] = "https://live.acfun.cn/"
+        self.fake_headers['referer'] = "https://live.acfun.cn/"
         r2 = requests.post("https://api.kuaishouzt.com/rest/zt/live/web/startPlay",
                            headers=self.fake_headers, data=data2, params=params, timeout=5)
         if r2.json().get('result') != 1:

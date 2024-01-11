@@ -5,7 +5,7 @@ from biliup.plugins import random_user_agent
 # The core codes for YouTube support are basically from taizan-hokuto/pytchat
 
 headers = {
-    'User-Agent': random_user_agent(),
+    'user-agent': random_user_agent(),
 }
 
 
@@ -73,7 +73,7 @@ class Youtube:
             "context": {
                 "client": {
                     "visitorData": "",
-                    "userAgent": headers["User-Agent"],
+                    "userAgent": headers["user-agent"],
                     "clientName": "WEB",
                     "clientVersion": "".join(
                         (

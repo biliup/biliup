@@ -20,7 +20,7 @@ class Huya:
         reg_datas = []
         url = 'https://m.huya.com/' + url.split('/')[-1]
         headers = {
-            'User-Agent': random_user_agent('mobile')}
+            'user-agent': random_user_agent('mobile')}
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, timeout=5) as resp:
                 room_page = await resp.text()

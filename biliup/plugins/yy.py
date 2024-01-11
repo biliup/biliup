@@ -11,8 +11,8 @@ class YY(DownloadBase):
         super().__init__(fname, url, suffix)
 
     def check_stream(self, is_check=False):
-        self.fake_headers['Content-Type'] = 'text/plain;charset=UTF-8'
-        self.fake_headers['Referer'] = 'https://www.yy.com/'
+        self.fake_headers['content-type'] = 'text/plain;charset=UTF-8'
+        self.fake_headers['referer'] = 'https://www.yy.com/'
 
         if len(self.url.split("www.yy.com/")) < 2:
             logger.debug("直播间地址错误")

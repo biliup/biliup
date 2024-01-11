@@ -11,7 +11,7 @@ from ..engine.download import DownloadBase
 class Bililive(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
-        self.fake_headers['Referer'] = 'https://live.bilibili.com'
+        self.fake_headers['referer'] = 'https://live.bilibili.com'
         self.bilibili_danmaku = config.get('bilibili_danmaku', False)
         self.live_time = 0
 

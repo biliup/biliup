@@ -19,7 +19,7 @@ class Huya(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
         self.huya_danmaku = config.get('huya_danmaku', False)
-        self.fake_headers['User-Agent'] = random_user_agent('mobile')
+        self.fake_headers['user-agent'] = random_user_agent('mobile')
     def check_stream(self, is_check=False):
         try:
             room_id = self.url.split('huya.com/')[1].split('/')[0].split('?')[0]
