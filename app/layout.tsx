@@ -6,7 +6,7 @@ import styles from "./page.module.css";
 import {SetStateAction, useCallback, useMemo, useState} from "react";
 import Link from "next/link";
 import {
-    IconCloudStroked,
+    IconCloudStroked, IconCustomerSupport,
     IconDoubleChevronLeft,
     IconDoubleChevronRight,
     IconMoon,
@@ -63,7 +63,13 @@ export default function RootLayout({children,}: { children: React.ReactNode }) {
                 padding: '4px'
             }}><IconStar size='small'/></div>
         },
-        // {itemKey: 'Job', text: '投稿管理', icon: <IconStar/>},
+        {itemKey: 'job', text: '直播历史', icon: <div style={{
+                backgroundColor: 'rgb(250 102 76)',
+                borderRadius: 'var(--semi-border-radius-medium)',
+                color: 'var(--semi-color-bg-0)',
+                display: 'flex',
+                padding: '4px'
+            }}><IconCustomerSupport size='small'/></div>},
         // {
         //     text: '任务平台',
         //     icon: <IconSetting/>,
@@ -84,6 +90,7 @@ export default function RootLayout({children,}: { children: React.ReactNode }) {
             dashboard: "/dashboard",
             streamers: "/streamers",
             "upload-manager": "/upload-manager",
+            job: "/job",
         };
         if (!routerMap[props.itemKey]) {
             return itemElement;

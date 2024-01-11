@@ -131,9 +131,6 @@ class UploadBase:
                     event_manager.context['upload_filename'].extend(upload_filename_list)
                 lock.release()
                 file_list = self.upload(file_list)
-                if db.delete_stream_info_by_date(self.principal, self.data.get('date')) == 0:
-                    # 如果按开播时间删除失败，则尝试按照 streamer 删除
-                    db.delete_stream_info(self.principal)
                 return file_list
         finally:
             with NamedLock('upload_filename'):
