@@ -28,7 +28,6 @@ archive.txt
 /node_modules
 watch_process.pid
 biliup/**/public
-*.json
 !package-lock.json
 qrcode.png
 *.log
