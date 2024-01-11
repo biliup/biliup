@@ -1,4 +1,6 @@
+import os
 import re
+import shutil
 import yt_dlp
 import requests
 
@@ -42,6 +44,22 @@ class TwitchVideos(DownloadBase):
                 return False
         return False
 
+    def download(self, filename):
+        download_dir = './downloads'
+        ydl_opts = {
+            'outtmpl': os.path.join(download_dir, f'{filename}.%(ext)s'),
+            'format': 'bestvideo+bestaudio/best',
+        }
+
+        if not os.path.exists(download_dir):
+            os.makedirs(download_dir)
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([self.raw_stream_url])
+
+        for file in os.listdir(download_dir):
+            shutil.move(os.path.join(download_dir, file), './')
+
     def _is_live(self):
         channel_name = re.match(VALID_URL_VIDEOS, self.url).group('id').lower()
         response = post_gql({
@@ -58,25 +76,6 @@ class TwitchVideos(DownloadBase):
         })
         user = response.get('data', {}).get('user')
         return user and user['stream'] and user['stream']['type'] == 'live'
-
-    def download(self, filename):
-        download_dir = './downloads'
-        ydl_opts = {
-            'outtmpl': os.path.join(download_dir, f'{filename}.%(ext)s'),
-            'format': 'bestvideo+bestaudio/best',
-        }
-
-        # 确保下载目录存在
-        if not os.path.exists(download_dir):
-            os.makedirs(download_dir)
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([self.raw_stream_url])
-
-        # 下载完成后，移动文件
-        for file in os.listdir(download_dir):
-            file_path = os.path.join(download_dir, file)
-            shutil.move(file_path, './')
 
 def post_gql(ops):
     global AUTH_EXPIRE_STATUS
