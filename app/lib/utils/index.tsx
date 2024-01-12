@@ -49,4 +49,4 @@ export const humDate = (time: number): string => new Date(time * 1000).toLocaleS
     minute: '2-digit',
     second: '2-digit',
     hour12: false
-}).replace(/\//g, '-')
+}).replaceAll('/', '-')
