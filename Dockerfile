@@ -4,7 +4,7 @@ FROM node:21-alpine as webui
 RUN \
   set -eux && \
   apk add --no-cache git && \
-  git clone --depth 1 https://github.com/ForgQi/biliup.git && \
+  git clone --depth 1 https://github.com/nick3/biliup.git && \
   cd biliup && \
   npm install && \
   npm run build
@@ -24,7 +24,7 @@ RUN \
 #  apk add --no-cache --virtual .build-deps git curl gcc g++ && \
 #  apk add --no-cache ffmpeg musl-dev libffi-dev zlib-dev jpeg-dev ca-certificates && \
   apt-get install -y --no-install-recommends ffmpeg git g++; \
-  git clone --depth 1 https://github.com/ForgQi/biliup.git && \
+  git clone --depth 1 https://github.com/nick3/biliup.git && \
   cd biliup && \
   pip3 install --no-cache-dir quickjs && \
   pip3 install -e . && \
