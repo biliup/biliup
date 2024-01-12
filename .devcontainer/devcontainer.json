@@ -9,7 +9,9 @@
 		"dockerfile": "../Dockerfile"
 	},
 	"features": {
-		"ghcr.io/devcontainers/features/github-cli:1": {}
+		"ghcr.io/devcontainers/features/github-cli:1": {},
+		"ghcr.io/devcontainers/features/node:1": {},
+		"ghcr.io/devcontainers-community/npm-features/typescript:1": {}
 	}
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
