@@ -105,34 +105,56 @@ class DownloadBase:
                               config.get('file_size'))
         return True
 
+    # def streamlink_download(self, filename):  # streamlink+ffmpeg混合下载模式，适用于下载hls流
+    #     streamlink_input_args = ['--stream-segment-threads', '3', '--hls-playlist-reload-attempts', '1']
+    #     streamlink_cmd = ['streamlink', *streamlink_input_args, self.raw_stream_url, 'best', '-O']
+    #     ffmpeg_input_args = ['-rw_timeout', '20000000']
+    #     ffmpeg_cmd = ['ffmpeg', '-re', '-i', 'pipe:0', '-y', *ffmpeg_input_args, *self.default_output_args,
+    #                   *self.opt_args, '-c', 'copy', '-f', self.suffix]
+    #     # if config.get('segment_time'):
+    #     #     ffmpeg_cmd += ['-f', 'segment',
+    #     #              f'{filename} part-%03d.{self.suffix}']
+    #     # else:
+    #     #     ffmpeg_cmd += [
+    #     #         f'{filename}.{self.suffix}.part']
+    #     ffmpeg_cmd += [f'{filename}.{self.suffix}.part']
+    #     streamlink_proc = subprocess.Popen(streamlink_cmd, stdout=subprocess.PIPE)
+    #     ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=streamlink_proc.stdout, stdout=subprocess.PIPE,
+    #                                    stderr=subprocess.STDOUT)
+    #     try:
+    #         with ffmpeg_proc.stdout as stdout:
+    #             for line in iter(stdout.readline, b''):
+    #                 decode_line = line.decode(errors='ignore')
+    #                 print(decode_line, end='', file=sys.stderr)
+    #                 logger.debug(decode_line.rstrip())
+    #         retval = ffmpeg_proc.wait()
+    #         streamlink_proc.terminate()
+    #         streamlink_proc.wait()
+    #     except KeyboardInterrupt:
+    #         if sys.platform != 'win32':
+    #             ffmpeg_proc.communicate(b'q')
+    #         raise
+    #     if retval != 0:
+    #         return False
+    #     return True
+
+    # 尝试只使用 streamlink 进行录制
     def streamlink_download(self, filename):  # streamlink+ffmpeg混合下载模式，适用于下载hls流
         streamlink_input_args = ['--stream-segment-threads', '3', '--hls-playlist-reload-attempts', '1']
-        streamlink_cmd = ['streamlink', *streamlink_input_args, self.raw_stream_url, 'best', '-O']
-        ffmpeg_input_args = ['-rw_timeout', '20000000']
-        ffmpeg_cmd = ['ffmpeg', '-re', '-i', 'pipe:0', '-y', *ffmpeg_input_args, *self.default_output_args,
-                      *self.opt_args, '-c', 'copy', '-f', self.suffix]
-        # if config.get('segment_time'):
-        #     ffmpeg_cmd += ['-f', 'segment',
-        #              f'{filename} part-%03d.{self.suffix}']
-        # else:
-        #     ffmpeg_cmd += [
-        #         f'{filename}.{self.suffix}.part']
-        ffmpeg_cmd += [f'{filename}.{self.suffix}.part']
+        streamlink_cmd = ['streamlink', *streamlink_input_args, self.raw_stream_url, 'best', '-o']
+        streamlink_cmd += [f'{filename}.{self.suffix}.part']
         streamlink_proc = subprocess.Popen(streamlink_cmd, stdout=subprocess.PIPE)
-        ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=streamlink_proc.stdout, stdout=subprocess.PIPE,
-                                       stderr=subprocess.STDOUT)
         try:
-            with ffmpeg_proc.stdout as stdout:
+            with streamlink_proc.stdout as stdout:
                 for line in iter(stdout.readline, b''):
                     decode_line = line.decode(errors='ignore')
                     print(decode_line, end='', file=sys.stderr)
                     logger.debug(decode_line.rstrip())
-            retval = ffmpeg_proc.wait()
+            retval = streamlink_proc.wait()
             streamlink_proc.terminate()
-            streamlink_proc.wait()
         except KeyboardInterrupt:
             if sys.platform != 'win32':
-                ffmpeg_proc.communicate(b'q')
+                streamlink_proc.communicate(b'q')
             raise
         if retval != 0:
             return False
