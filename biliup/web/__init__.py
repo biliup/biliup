@@ -1,3 +1,4 @@
+import datetime
 import json
 import os
 import pathlib
@@ -13,7 +14,7 @@ import stream_gears
 import biliup.common.reload
 from biliup.config import config
 from biliup.plugins.bili_webup import BiliBili, Data
-from ..database.models import UploadStreamers, LiveStreamers, Configuration
+from ..database.models import UploadStreamers, LiveStreamers, Configuration, StreamerInfo, FileList
 from ..database.db import DB as db
 
 BiliBili = BiliBili(Data())
@@ -172,6 +173,20 @@ async def streamers(request):
             file_list.append({'key': i,'name': file_name, 'updateTime': os.path.getmtime(file_name), 'size': os.path.getsize(file_name)})
             i += 1
     return web.json_response(file_list)
+
+@routes.get('/v1/streamer-info')
+async def streamers(request):
+    res = []
+    for s_info in StreamerInfo.select():
+        streamer_info = model_to_dict(s_info)
+        streamer_info['files'] = []
+        for file in s_info.file_list:
+            tmp = model_to_dict(file)
+            del tmp['streamer_info']
+            streamer_info['files'].append(tmp)
+        streamer_info['date'] = int(streamer_info['date'].timestamp())
+        res.append(streamer_info)
+    return web.json_response(res)
 
 
 @routes.get('/v1/streamers')

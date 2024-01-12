@@ -29,7 +29,7 @@ Twitch，YY直播等，并于录制结束后自动上传到哔哩哔哩视频网
 * ~~支持 cos-internal，腾讯云上海内网上传，免流 + 大幅提速~~
 * 实验性功能：
     - 防止录制花屏（使用默认的stream-gears下载器就会有这个功能）
-    - 启动时加入`--http`选项并访问localhost:19159可使用webUI (建议使用toml配置文件)
+    - 启动时访问 localhost:19159 可使用webUI，从 v0.4.32 版本开始，不依赖配置文件可直接使用webUI，若想和低于 v0.4.32 时一致使用配置文件，请在启动前删除 data 目录, 如`rm -r data/ && biliup restart`
 
 **更新日志**：[CHANGELOG.md](https://github.com/biliup/biliup/blob/master/CHANGELOG.md)
 
@@ -66,7 +66,8 @@ Twitch，YY直播等，并于录制结束后自动上传到哔哩哔哩视频网
 `pip3 install biliup`
 3. 开始使用 __biliup__：
 ```shell
-# 在创建配置文件的目录启动 biliup
+# 默认监听 0.0.0.0:19159。可使用-H及-P选项配置。
+# 考虑到安全性，建议指定本地地址配合web server或者添加验证。
 $ biliup start
 # 退出
 $ biliup stop
@@ -76,10 +77,6 @@ $ biliup restart
 $ biliup --version
 # 显示帮助以查看更多选项
 $ biliup -h
-# 带 web-ui 启动 biliup。
-# 默认监听 0.0.0.0:19159。可使用-H及-P选项配置。
-# 考虑到安全性，建议指定本地地址配合web server或者添加验证。
-$ biliup --http start
 # 指定配置文件路径
 $ biliup --config ./config.yaml start
 ```
@@ -104,17 +101,17 @@ vim /host/path/config.toml
 # 启动biliup的docker容器
 docker run -P --name biliup -v /host/path:/opt -d ghcr.io/biliup/caution:master
 ```
-* 从自定义的配置文件启动，并启动Web-UI
+* 从自定义的配置文件启动
 ```bash
 # 在下载目录创建配置文件
 vim /host/path/config.toml
 # 启动biliup的docker容器，并启用用户验证。请注意替换 yourpassword 为你的密码。
-docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/caution:latest --http --password yourpassword
+docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/caution:latest --password yourpassword
 ```
  > Web-UI 默认用户名为 biliup。
-* 从默认配置文件启动，并启动Web-UI
+* 从默认配置文件启动
 ```bash
-docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/caution:latest --http --password yourpassword
+docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/caution:latest --password yourpassword
 ```
 ### 方式二 手动构建镜像
 ```bash
@@ -146,7 +143,7 @@ sudo docker exec -it imageId /bin/bash
   $ npm run build
   $ python3 -m build
   ```
-* 调试 webUI: `python3 -m biliup --http --static-dir public`
+* 调试 webUI: `python3 -m biliup --static-dir public`
 
 
 ## yaml配置文件示例

@@ -148,7 +148,7 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
                     <Switch field='isDtime' label={{ text: '定时发布' }} checkedText="｜" uncheckedText="〇"/>
                     <span style={{paddingLeft: 12, fontSize: 12}}>(当前+2小时 ≤ 可选时间 ≤ 当前+15天，转载稿件撞车判定以过审发布时间为准)</span>
                 </div>
-                {values.isDtime === true ? (
+                {values.isDtime ? (
                     <DatePicker field="dtime" label=' ' type='dateTime' fieldStyle={{ paddingTop: 0 }} />
                 ) : null}
             </Section>

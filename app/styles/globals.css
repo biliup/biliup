@@ -1,0 +1,79 @@
+@import '~@douyinfe/semi-ui/dist/css/semi.min.css';
+
+.semi-light-scrollbar::-webkit-scrollbar, .semi-light-scrollbar ::-webkit-scrollbar, ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px
+}
+
+.semi-light-scrollbar::-webkit-scrollbar-track, .semi-light-scrollbar ::-webkit-scrollbar-track, ::-webkit-scrollbar-track {
+    background: transparent
+}
+
+.semi-light-scrollbar::-webkit-scrollbar-corner, .semi-light-scrollbar ::-webkit-scrollbar-corner, ::-webkit-scrollbar-corner {
+    background-color: transparent
+}
+
+.semi-light-scrollbar::-webkit-scrollbar-thumb, .semi-light-scrollbar ::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb {
+    border-radius: 6px;
+    background: transparent;
+    -webkit-transition: all 1s;
+    transition: all 1s
+}
+
+.semi-light-scrollbar:hover::-webkit-scrollbar-thumb, .semi-light-scrollbar :hover::-webkit-scrollbar-thumb, :hover::-webkit-scrollbar-thumb {
+    background: var(--semi-color-fill-2)
+}
+
+.semi-light-scrollbar::-webkit-scrollbar-thumb:hover, .semi-light-scrollbar ::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:hover {
+    background: var(--semi-color-fill-1)
+}
+
+body::-webkit-scrollbar, html::-webkit-scrollbar {
+    width: 8px;
+    height: 8px
+}
+
+body::-webkit-scrollbar-track, html::-webkit-scrollbar-track {
+    background: transparent
+}
+
+body::-webkit-scrollbar-corner, html::-webkit-scrollbar-corner {
+    background-color: transparent
+}
+
+body::-webkit-scrollbar-thumb, html::-webkit-scrollbar-thumb {
+    border-radius: 6px;
+    background: var(--semi-color-fill-2)
+}
+
+body::-webkit-scrollbar-thumb:hover, html::-webkit-scrollbar-thumb:hover {
+    background: var(--semi-color-fill-1)
+}
+
+html,
+body {
+    padding: 0;
+    margin: 0;
+    color: var(--semi-color-text-0);
+    background-color: var(--semi-color-bg-0);
+    /*font-family: var(font-family);*/
+}
+
+/*a {*/
+/*  color: inherit;*/
+/*  text-decoration: none;*/
+/*}*/
+
+/** {*/
+/*  box-sizing: border-box;*/
+/*}*/
+
+/*@media (prefers-color-scheme: dark) {*/
+/*  html {*/
+/*    color-scheme: dark;*/
+/*  }*/
+/*  body {*/
+/*    color: white;*/
+/*    background: black;*/
+/*  }*/
+/*}*/
