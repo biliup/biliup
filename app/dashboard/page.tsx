@@ -101,7 +101,7 @@ const Dashboard: React.FC = () => {
                         field='file_size'
                         extraText='录像单文件大小限制，单位Byte，超过此大小分段下载'
                         label={{text: "分段大小"} }
-                        suffix={'MB'}
+                        suffix={'Byte'}
                         style={{width: 250}}
                     />
             <Form.Input
