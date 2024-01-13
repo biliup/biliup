@@ -75,7 +75,7 @@ const Dashboard: React.FC = () => {
             <Form  key = {formKey}
                    initValues={entity}
                    onSubmit={async (values) => {
-                       await trigger(values)
+                        await trigger(values)
                    }}
                    getFormApi={formApi => formRef.current = formApi}
                    style={{padding: '10px', marginLeft: '30px'}} labelPosition={labelPosition} labelWidth='300px'>
@@ -99,9 +99,9 @@ const Dashboard: React.FC = () => {
             </Form.Select>
             <Form.InputNumber
                         field='file_size'
-                        extraText='录像单文件大小限制，单位Byte，超过此大小分段下载'
+                        extraText='录像单文件大小限制，单位MB，超过此大小分段下载'
                         label={{text: "分段大小"} }
-                        suffix={'Byte'}
+                        suffix={'MB'}
                         style={{width: 250}}
                     />
             <Form.Input
@@ -291,7 +291,7 @@ bilibili支持 mp4 mkv webm 无需筛选也能上传
             />
             </Collapse.Panel>
             <Collapse.Panel header="Bilibili" itemKey="bilibili">
-            <Form.Input
+            <Form.InputNumber
                 field="bili_qn"
                 extraText='哔哩哔哩自选画质
 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段(仅ffmpeg streamlink)时录制设置的画质

@@ -57,7 +57,7 @@ class DownloadBase:
                 ['-to', f"{config.get('segment_time', '00:50:00')}"]
         else:
             self.default_output_args += \
-                ['-fs', f"{config.get('file_size', '2621440000')}"]
+                ['-fs', f"{config.get('file_size', 2500) * 1024 * 1024}"]
 
     def check_stream(self, is_check=False):
         # is_check 是否是检测可以避免在检测是否可以录制的时候忽略一些耗时的操作
@@ -102,7 +102,7 @@ class DownloadBase:
             logger.warning(f'stream-gears 不支持除 flv 和 ts 以外的格式，已按流自动修正为 {self.suffix} 格式')
 
         stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
-                              config.get('file_size'))
+                              config.get('file_size', 2500) * 1024 * 1024)
         return True
 
     def streamlink_download(self, filename):  # streamlink+ffmpeg混合下载模式，适用于下载hls流
