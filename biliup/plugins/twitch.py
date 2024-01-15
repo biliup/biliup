@@ -1,35 +1,29 @@
-import random
+import os
 import re
-import subprocess
-import time
-from typing import Generator, List
-from urllib.parse import urlencode
-
-import requests
 import yt_dlp
+import requests
+import ffmpeg  # 新增导入ffmpeg库  pip install ffmpeg-python
 
 from . import logger
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from biliup.config import config
-from biliup.plugins.Danmaku import DanmakuClient
 
-VALID_URL_BASE = r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)'
 VALID_URL_VIDEOS = r'https?://(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[^/]+)/(?:videos|profile|clips)'
 _CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko'
-
-# Twitch 授权信息是否到期
 AUTH_EXPIRE_STATUS = False
-
 
 @Plugin.download(regexp=VALID_URL_VIDEOS)
 class TwitchVideos(DownloadBase):
     def __init__(self, fname, url, suffix='mp4'):
-        DownloadBase.__init__(self, fname, url, suffix=suffix)
+        super().__init__(fname, url, suffix=suffix)
         self.is_download = True
 
     def check_stream(self, is_check=False):
-        # TODO 这里原本的批量检测是有问题的 先用yt_dlp实现 等待后续新增新的批量检测方式 后续这里的auth信息和直播一样采用twitch_cookie
+        if self._is_live():
+            logger.warning(f"{self.url}：主播正在直播，停止下载回放")
+            return False
+
         with yt_dlp.YoutubeDL({'download_archive': 'archive.txt'}) as ydl:
             try:
                 info = ydl.extract_info(self.url, download=False, process=False)
@@ -41,147 +35,115 @@ class TwitchVideos(DownloadBase):
                         self.room_title = download_info['title']
                         self.raw_stream_url = download_info['url']
                         thumbnails = download_info.get('thumbnails')
-                        if type(thumbnails) is list and len(thumbnails) > 0:
-                            self.live_cover_url = thumbnails[len(thumbnails) - 1].get('url')
+                        if thumbnails and len(thumbnails) > 0:
+                            self.live_cover_url = thumbnails[-1].get('url')
                         ydl.record_download_archive(entry)
                     return True
-            except:
-                logger.warning(f"{self.url}：获取错误")
+            except Exception as e:
+                logger.warning(f"{self.url}：获取错误 - {e}")
                 return False
         return False
 
+    def download(self, filename):
+        download_dir = './downloads'
+        ydl_opts = {
+            'outtmpl': os.path.join(download_dir, f'{filename}.%(ext)s'),
+            'format': 'bestvideo+bestaudio/best',
+        }
 
+        if not os.path.exists(download_dir):
+            os.makedirs(download_dir)
 
-@Plugin.download(regexp=VALID_URL_BASE)
-class Twitch(DownloadBase):
-    def __init__(self, fname, url, suffix='flv'):
-        DownloadBase.__init__(self, fname, url, suffix=suffix)
-        self.twitch_danmaku = config.get('twitch_danmaku', False)
-        self.twitch_disable_ads = config.get('twitch_disable_ads', True)
-        self.proc = None
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            result = ydl.extract_info(self.raw_stream_url, download=True)
+            if 'entries' in result:
+                video = result['entries'][0]
+            else:
+                video = result
 
-    def check_stream(self, is_check=False):
-        channel_name = re.match(VALID_URL_BASE, self.url).group('id').lower()
-        user = post_gql({
+            if video:
+                downloaded_file_path = ydl.prepare_filename(video)
+                if os.path.exists(downloaded_file_path):
+                    duration = self._get_video_duration(downloaded_file_path)
+                    if duration > 36000:  # 10小时
+                        self._split_video(downloaded_file_path, 9 * 3600 + 55 * 60)  # 9小时55分钟
+                    else:
+                        self._move_file(downloaded_file_path, './')
+
+    def _get_video_duration(self, filepath):
+        """获取视频时长（秒）"""
+        try:
+            probe = ffmpeg.probe(filepath)
+            duration = float(probe['format']['duration'])
+            return duration
+        except ffmpeg.Error as e:
+            logger.warning(f'{self.url}：获取视频时长失败: {e}')
+            return 0
+
+    def _split_video(self, filepath, segment_duration):
+        """使用ffmpeg分割视频"""
+        filename, ext = os.path.splitext(filepath)
+        segment_filename = f'{filename}_%03d{ext}'
+        
+        # 保存原始文件名的基础部分
+        self.base_filename = os.path.basename(filename)
+        self.suffix = ext
+
+        ffmpeg.input(filepath).output(segment_filename, f='segment', segment_time=segment_duration, reset_timestamps=1, c='copy').run()
+        logger.warning(f"{self.url}：分段完成: {filepath}")
+
+        os.remove(filepath)  # 删除原文件
+        logger.warning(f"{self.url}：原文件已删除: {filepath}")
+
+        # 获取分段后的文件列表并移动它们
+        segment_files = self._get_segment_files()
+        for seg_file in segment_files:
+            self._move_file(seg_file, './')
+
+    def _get_segment_files(self):
+        """获取分段后的文件列表"""
+        segment_files = []
+        search_dir = './downloads'
+        logger.warning(f"{self.url}：正在搜索目录: {search_dir}")
+
+        for file in os.listdir(search_dir):
+            full_path = os.path.join(search_dir, file)
+            if file.startswith(self.base_filename) and file.endswith(self.suffix):
+                segment_files.append(full_path)
+                logger.warning(f"{self.url}：找到分段文件: {full_path}")
+
+        if not segment_files:
+            logger.warning("{self.url}：未找到分段文件，请确认分段文件的命名格式和存储位置。")
+
+        return segment_files
+
+    def _move_file(self, src, dst):
+        """移动文件"""
+        try:
+            # 构建完整的目标文件路径
+            dst_path = os.path.join(dst, os.path.basename(src))
+            logger.warning(f"{self.url}：正在移动文件: 从 {src} 到 {dst_path}")
+            os.rename(src, dst_path)
+            logger.warning(f"{self.url}：文件移动成功: {src} 到 {dst_path}")
+        except Exception as e:
+            logger.warning(f"{self.url}：文件移动失败: {e}")
+
+    def _is_live(self):
+        channel_name = re.match(VALID_URL_VIDEOS, self.url).group('id').lower()
+        response = post_gql({
             "query": '''
                 query query($channel_name:String!) {
                     user(login: $channel_name){
                         stream {
-                            id
-                            title
                             type
-                            previewImageURL(width: 0,height: 0)
-                            playbackAccessToken(
-                                params: {
-                                    platform: "web",
-                                    playerBackend: "mediaplayer",
-                                    playerType: "site"
-                                }
-                            ) {
-                                signature
-                                value             
-                            }
                         }
                     }
                 }
             ''',
             'variables': {'channel_name': channel_name}
-        }).get('data', {}).get('user')
-        if not user:
-            logger.warning(f"{Twitch.__name__}: {self.url}: 获取错误")
-            return False
-        elif not user['stream'] or user['stream']['type'] != 'live':
-            return False
-
-        self.room_title = user['stream']['title']
-        self.live_cover_url = user['stream']['previewImageURL']
-        if is_check:
-            return True
-
-        if self.downloader == 'ffmpeg':
-            port = random.randint(1025, 65535)
-            stream_shell = [
-                "streamlink",
-                "--player-external-http",  # 为外部程序提供流媒体数据
-                # "--twitch-disable-ads",                     # 去广告，去掉、跳过嵌入的广告流
-                # "--twitch-disable-hosting",               # 该参数从5.0起已被禁用
-                "--twitch-disable-reruns",  # 如果该频道正在重放回放，不打开流
-                "--player-external-http-port", str(port),  # 对外部输出流的端口
-                self.url, "best"  # 流链接
-            ]
-            if self.twitch_disable_ads:  # 去广告，去掉、跳过嵌入的广告流
-                stream_shell.insert(1, "--twitch-disable-ads")
-
-            twitch_cookie = config.get('user', {}).get('twitch_cookie')
-            # 在设置且有效的情况下使用
-            if twitch_cookie and not AUTH_EXPIRE_STATUS:
-                stream_shell.insert(1, "--twitch-api-header=Authorization=OAuth " + twitch_cookie)
-
-            self.proc = subprocess.Popen(stream_shell)
-            self.raw_stream_url = f"http://localhost:{port}"
-            i = 0
-            while i < 5:
-                if not (self.proc.poll() is None):
-                    return False
-                time.sleep(1)
-                i += 1
-            return True
-        else:
-            query = {
-                "player": "twitchweb",
-                "p": random.randint(1000000, 10000000),
-                "allow_source": "true",
-                "allow_audio_only": "true",
-                "allow_spectre": "false",
-                'fast_bread': "true",
-                'sig': user.get('stream').get('playbackAccessToken').get('signature'),
-                'token': user.get('stream').get('playbackAccessToken').get('value'),
-            }
-            self.raw_stream_url = f'https://usher.ttvnw.net/api/channel/hls/{channel_name}.m3u8?{urlencode(query)}'
-            return True
-
-    @staticmethod
-    def batch_check(check_urls: List[str]) -> Generator[str, None, None]:
-        ops = []
-        for url in check_urls:
-            channel_name = re.match(VALID_URL_BASE, url).group('id')
-            op = {
-                "query": '''
-                    query query($login:String!) {
-                        user(login: $login){
-                            stream {
-                              type
-                            }
-                        }
-                    }
-                ''',
-                'variables': {'login': channel_name.lower()}
-            }
-            ops.append(op)
-        gql = post_gql(ops)
-        for index, data in enumerate(gql):
-            user = data.get('data', {}).get('user')
-            if not user:
-                logger.warning(f"{Twitch.__name__}: {check_urls[index]}: 获取错误")
-                continue
-            elif not user['stream'] or user['stream']['type'] != 'live':
-                continue
-            yield check_urls[index]
-
-    def danmaku_download_start(self, filename):
-        if self.twitch_danmaku:
-            self.danmaku = DanmakuClient(self.url, filename + "." + self.suffix)
-            self.danmaku.start()
-
-    def close(self):
-        if self.danmaku:
-            self.danmaku.stop()
-        try:
-            if self.proc is not None:
-                self.proc.terminate()
-        except:
-            logger.exception(f'terminate {self.fname} failed')
-
+        })
+        user = response.get('data',{}).get('user')
+        return user and user['stream'] and user['stream']['type'] == 'live'
 
 def post_gql(ops):
     global AUTH_EXPIRE_STATUS
@@ -207,3 +169,4 @@ def post_gql(ops):
         return post_gql(ops)
 
     return data
+
