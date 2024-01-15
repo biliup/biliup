@@ -21,7 +21,6 @@ class Huya:
     @staticmethod
     async def get_ws_info(url):
         reg_datas = []
-        url = 'https://m.huya.com/' + url.split('/')[-1]
         room_id = url.split('huya.com/')[1].split('/')[0].split('?')[0]
         async with aiohttp.ClientSession() as session:
             async with session.get(f'https://www.huya.com/{room_id}', headers=Huya.headers, timeout=5) as resp:
