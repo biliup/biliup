@@ -1,8 +1,7 @@
-import re
-
 import aiohttp
 
 from .tars import tarscore
+from .. import match1
 
 
 class Huya:
@@ -13,23 +12,21 @@ class Huya:
                 b'\x77\x61\x70\x46\x00\x0b\x12\x03\xae\xf0\x0f\x22\x03\xae\xf0\x0f\x3c\x42\x6d\x52\x02\x60\x5c\x60' \
                 b'\x01\x7c\x82\x00\x0b\xb0\x1f\x9c\xac\x0b\x8c\x98\x0c\xa8\x0c '
     heartbeatInterval = 60
+    # 等待统一ua后修改
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36',
+    }
 
     @staticmethod
     async def get_ws_info(url):
         reg_datas = []
-        url = 'https://m.huya.com/' + url.split('/')[-1]
-        headers = {
-            'user-agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, '
-                          'like Gecko) Chrome/79.0.3945.88 Mobile Safari/537.36'}
+        room_id = url.split('huya.com/')[1].split('/')[0].split('?')[0]
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=5) as resp:
+            async with session.get(f'https://www.huya.com/{room_id}', headers=Huya.headers, timeout=5) as resp:
                 room_page = await resp.text()
-                m = re.search(r"lYyid\":([0-9]+)", room_page, re.MULTILINE)
-                ayyuid = m.group(1)
-                m = re.search(r"lChannelId\":([0-9]+)", room_page, re.MULTILINE)
-                tid = m.group(1)
-                m = re.search(r"lSubChannelId\":([0-9]+)", room_page, re.MULTILINE)
-                sid = m.group(1)
+                ayyuid = match1(room_page, r"yyid\":\"?(\d+)\"?")
+                tid = match1(room_page, r"lChannelId\":\"?(\d+)\"?")
+                sid = match1(room_page, r"lSubChannelId\":\"?(\d+)\"?")
 
         oos = tarscore.TarsOutputStream()
         oos.write(tarscore.int64, 0, int(ayyuid))
