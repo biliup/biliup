@@ -41,16 +41,12 @@ export const registerMediaQuery = (media: string, { match, unmatch, callInInit =
     return () => undefined;
 };
 
-export const humDate = function (time: number) {
-    const updateTime = new Date(time * 1000)
-    //日期
-    const DD = String(updateTime.getDate()).padStart(2, '0'); // 获取日
-    const MM = String(updateTime.getMonth() + 1).padStart(2, '0'); //获取月份，1 月为 0
-    const yyyy = updateTime.getFullYear(); // 获取年
-
-    // 时间
-    const hh =  String(updateTime.getHours()).padStart(2, '0');       //获取当前小时数(0-23)
-    const mm = String(updateTime.getMinutes()).padStart(2, '0');     //获取当前分钟数(0-59)
-    const ss = String(updateTime.getSeconds()).padStart(2, '0');
-    return yyyy + '-' + MM + '-' + DD + ' ' + hh + ':' + mm + ':' + ss;
-}
+export const humDate = (time: number): string => new Date(time * 1000).toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+}).replaceAll('/', '-')
