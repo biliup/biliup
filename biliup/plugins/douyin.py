@@ -16,8 +16,8 @@ class Douyin(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
         self.douyin_danmaku = config.get('douyin_danmaku', False)
-        self.fake_headers['Referer'] = "https://live.douyin.com/"
-        self.fake_headers['Cookie'] = config.get('user', {}).get('douyin_cookie', '')
+        self.fake_headers['referer'] = "https://live.douyin.com/"
+        self.fake_headers['cookie'] = config.get('user', {}).get('douyin_cookie', '')
 
     def check_stream(self, is_check=False):
         if "/user/" in self.url:
@@ -47,8 +47,8 @@ class Douyin(DownloadBase):
         if room_id[0] == "+":
             room_id = room_id[1:]
         try:
-            if "ttwid" not in self.fake_headers['Cookie']:
-                self.fake_headers['Cookie'] = f'ttwid={DouyinUtils.get_ttwid()};{self.fake_headers["Cookie"]}'
+            if "ttwid" not in self.fake_headers['cookie']:
+                self.fake_headers['Cookie'] = f'ttwid={DouyinUtils.get_ttwid()};{self.fake_headers["cookie"]}'
             page = requests.get(
                 DouyinUtils.build_request_url(f"https://live.douyin.com/webcast/room/web/enter/?web_rid={room_id}"),
                 headers=self.fake_headers, timeout=5).text

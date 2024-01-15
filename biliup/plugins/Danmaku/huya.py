@@ -1,4 +1,5 @@
 import aiohttp
+from biliup.plugins import random_user_agent
 
 from .tars import tarscore
 from .. import match1
@@ -14,7 +15,7 @@ class Huya:
     heartbeatInterval = 60
     # 等待统一ua后修改
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36',
+        'user-agent': random_user_agent(),
     }
 
     @staticmethod

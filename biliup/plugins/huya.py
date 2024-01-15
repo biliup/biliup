@@ -11,8 +11,7 @@ from biliup.config import config
 from biliup.plugins.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
-from ..plugins import logger
-
+from ..plugins import logger, random_user_agent
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?huya\.com')
 class Huya(DownloadBase):

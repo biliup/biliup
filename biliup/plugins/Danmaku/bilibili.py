@@ -3,6 +3,7 @@ import logging
 from struct import pack, unpack
 import aiohttp
 import zlib
+from biliup.plugins import random_user_agent
 
 import brotli
 
@@ -17,7 +18,7 @@ class Bilibili:
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Encoding': 'gzip, deflate',
         'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36',
+        'user-agent': random_user_agent(),
         'Referer': 'https://live.bilibili.com/',
     }
 

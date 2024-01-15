@@ -9,22 +9,12 @@ from ..engine.download import DownloadBase
 class Missevan(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
-        self.fake_headers = {
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Encoding': 'gzip, deflate',
-            'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:106.0) Gecko/20100101 Firefox/106.0'
-        }
 
     def check_stream(self, is_check=False):
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:106.0) Gecko/20100101 Firefox/106.0'
-        }
-
         rid = 0
         # 用户主页获取直播间地址
         if self.url.split('www'):
-            user_page = requests.get(self.url, timeout=30, headers=headers)
+            user_page = requests.get(self.url, timeout=30, headers=self.fake_headers)
             # 取硬编码在网页内的直播间号
             if user_page.status_code == 200:
                 start = user_page.text.find('data-id="') + 9
