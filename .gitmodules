@@ -1,0 +1,3 @@
+[submodule "docs/themes/adidoks"]
+	path = docs/themes/adidoks
+	url = https://github.com/aaranxu/adidoks.git
