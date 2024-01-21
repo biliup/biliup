@@ -1,18 +1,11 @@
 import logging
 import os
 import shutil
-import subprocess
-import json
-import time
 
-from functools import reduce
-from pathlib import Path
 from typing import NamedTuple, Optional, List
 
-from biliup.common.tools import NamedLock
+from biliup.common.tools import NamedLock, get_file_create_timestamp
 from biliup.config import config
-from biliup.uploader import fmt_title_and_desc
-from biliup.database import DB as db
 
 logger = logging.getLogger('biliup')
 
@@ -40,7 +33,8 @@ class UploadBase:
                 file_list.append(file_name)
         if len(file_list) == 0:
             return []
-        file_list = sorted(file_list, key=lambda x: os.path.getctime(x))
+
+        file_list = sorted(file_list, key=lambda x: get_file_create_timestamp(x))
 
         # 正在上传的文件列表
         upload_filename: list = event_manager.context['upload_filename']
