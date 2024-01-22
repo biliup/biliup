@@ -5,7 +5,8 @@ import {
     Layout,
     List,
     Nav,
-    Popconfirm
+    Popconfirm,
+    Notification,
 } from "@douyinfe/semi-ui";
 import {
     IconCloudStroked,
@@ -21,6 +22,7 @@ import useSWR from "swr";
 import {useRouter} from "next/navigation";
 import UserList from "../ui/UserList";
 import useSWRMutation from "swr/mutation";
+import {useBiliUsers} from "../lib/use-streamers";
 
 export default function Union() {
     const { Meta } = Card;
@@ -29,6 +31,19 @@ export default function Union() {
     const router = useRouter();
     const {trigger: deleteUpload} = useSWRMutation('/v1/upload/streamers', requestDelete);
     const { data: templates, error, isLoading } = useSWR<StudioEntity[]>("/v1/upload/streamers", fetcher);
+    const {biliUsers} = useBiliUsers();
+    const handleAddLinkClick = (event: React.MouseEvent) => {
+        if (biliUsers.length === 0) {
+            event.preventDefault(); // 阻止Link的默认跳转事件
+            change(); // 运行change函数
+            Notification.info({
+                title: '用户列表为空',
+                position: 'top',
+                content: '请先在右侧点击新增用户',
+                duration: 3,
+            })
+        }
+    };
 
     const change = () => {
         setVisible(!visible);
@@ -60,7 +75,7 @@ export default function Union() {
                             borderRadius: 'var(--semi-border-radius-circle)',
                             marginRight: '12px',
                         }} />
-                    <Link href='/upload-manager/add'>
+                    <Link href='/upload-manager/add' onClick={handleAddLinkClick}>
                         <Button icon={<IconPlusCircle />} theme="solid" style={{ marginRight: 10 }}>新建</Button>
                     </Link>
 
