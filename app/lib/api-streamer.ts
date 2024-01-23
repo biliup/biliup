@@ -102,10 +102,10 @@ export interface LiveStreamerEntity {
 	upload_id?: number;
 	status?: string | React.ReactNode;
 	format?: string;
-	preprocessor?: string;
-    downloaded_processor?: string;
-    postprocessor?: string;
-    opt_args?: string;
+	preprocessor?: Record<'run', string>[];
+	downloaded_processor?: Record<'run', string>[];
+	postprocessor?: (Record<'run' | 'mv', string> | 'rm')[];
+	opt_args?: string[];
 }
 
 export interface BiliType {

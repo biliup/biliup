@@ -29,7 +29,22 @@ export default function Home() {
 
     const onConfirm = async (id: number) => {
         await deleteStreamers(id);
-    }
+    };
+    const handleEntityPostprocessor = (values: any) => {
+        if (values?.postprocessor) {
+            values.postprocessor = values.postprocessor.map((element: { [key: string]: string } | string) => {
+                if (element === "rm") {
+                    return { cmd: "rm" };
+                } else if (typeof element === "object" && !element.cmd) {
+                    const [key, value] = Object.entries(element)[0];
+                    return { cmd: key, value: value };
+                }
+                return element
+            });
+            // console.log(values.postprocessor);
+        }
+        return values;
+    };
     const data: LiveStreamerEntity[] | undefined = streamers?.map((live) => {
         let status;
         switch (live.status) {
@@ -38,10 +53,15 @@ export default function Home() {
             case 'Pending': status = <Tag color='grey'>未知</Tag>; break;
             case 'Inspecting': status = <Tag color='indigo'>检测中</Tag>; break;
         }
-        return {...live, status};
+        return {...handleEntityPostprocessor(live), status};
     });
 
     const handleOk = async (values: any) => {
+        if (values?.postprocessor) {
+            values.postprocessor = values.postprocessor.map(
+                ({ cmd, value }: { cmd: string; value: string; }) => (cmd === "rm" ? "rm" : {[cmd]: value})
+            );
+        }
         try {
             const res = await trigger(values);
         } catch (e: any) {
@@ -55,8 +75,13 @@ export default function Home() {
     };
 
     const handleUpdate = async (values: any) => {
-        console.log(values)
+        // console.log(values);
         delete values.status;
+        if (values?.postprocessor) {
+            values.postprocessor = values.postprocessor.map(
+                ({ cmd, value }: { cmd: string; value: string; }) => (cmd === "rm" ? "rm" : {[cmd]: value})
+            );
+        }
         try {
             const res = await updateStreamers(values);
         } catch (e: any) {

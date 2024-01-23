@@ -187,7 +187,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                                         </Form.Select>
                                         {api.current?.getValue(field)?.cmd !== 'rm' ? (
                                             <Form.Input
-                                            field={`${field}[${api.current?.getValue(field)?.cmd}]`}
+                                            field={`${field}.value`}
                                             label='='
                                             labelPosition="inset"
                                             rules={[
