@@ -25,7 +25,7 @@ class Missevan(DownloadBase):
         if self.url.split("live"):
             rid = match1(self.url, r'/(\d+)')
 
-        room_info = requests.get(f"https://fm.missevan.com/api/v2/live/{rid}", timeout=30, headers=headers).json()
+        room_info = requests.get(f"https://fm.missevan.com/api/v2/live/{rid}", timeout=30, headers=self.fake_headers).json()
 
         # 无直播间的情况
         if room_info['code'] != 0:
