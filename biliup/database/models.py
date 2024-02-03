@@ -138,6 +138,6 @@ class LiveStreamers(BaseModel):
     postprocessor = JSONField(null=True)  # 上传完成后触发
     opt_args = JSONField(null=True)  # ffmpeg参数
 
-class TempStreamerInfo(StreamerInfo):
-    class Meta:
-        table_name = 'temp_streamer_info'
+# class TempStreamerInfo(StreamerInfo):
+#     class Meta:
+#         table_name = 'temp_streamer_info'

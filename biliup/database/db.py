@@ -1,12 +1,14 @@
 import time
+import inspect
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
 
-from peewee import OperationalError
+from peewee import Field, ForeignKeyField
 from playhouse.shortcuts import model_to_dict
+from playhouse.migrate import SqliteMigrator, migrate
 
-from .models import StreamerInfo, FileList, db, logger, TempStreamerInfo, LiveStreamers, UploadStreamers, Configuration
+from .models import StreamerInfo, FileList, db, logger, LiveStreamers, UploadStreamers, Configuration
 
 
 def struct_time_to_datetime(date: time.struct_time):
@@ -29,10 +31,15 @@ class DB:
         LiveStreamers.create_table_()
         UploadStreamers.create_table_()
         Configuration.create_table_()
-        with db.connection_context():
-            columns_name_list = [column_meta.name for column_meta in db.get_columns('uploadstreamers')]
-        if 'up_selection_reply' not in columns_name_list:
-            logger.error(f"检测到旧数据库，请手动删除data文件夹后重试")
+        # with db.connection_context():
+        #     columns_name_list = [column_meta.name for column_meta in db.get_columns('uploadstreamers')]
+        # if 'up_selection_reply' not in columns_name_list:
+        #     logger.error(f"检测到旧数据库，请手动删除data文件夹后重试")
+        #     return False
+        try:
+            cls.auto_migrate(StreamerInfo, FileList, LiveStreamers, UploadStreamers, Configuration)
+        except Exception as e:
+            logger.error(f"自动迁移旧数据库失败，请手动删除data文件夹后重试: {e}")
             return False
         return run
 
@@ -133,19 +140,24 @@ class DB:
         return [file.file for file in file_list]
 
     @classmethod
-    def migrate_streamer_info(cls):
-        """迁移旧版数据库中数据到新版"""
-        logger.info("检测到旧版数据表，正在自动迁移")
-        with db.atomic():
-            # 创建新的临时表格
-            TempStreamerInfo.create_table()
-            # 将数据从原表格拷贝到新表格
-            db.execute_sql(
-                'INSERT INTO temp_streamer_info (name, url, title, date, live_cover_path) SELECT name, url, title, date, live_cover_path FROM streamerinfo')
-            # 删除原表格
-            StreamerInfo.drop_table()
-            # 将新表格重命名为原表格的名字
-            db.execute_sql('ALTER TABLE temp_streamer_info RENAME TO streamerinfo')
+    def auto_migrate(cls, *models):
+        """迁移不同版本数据库"""
+        migrator = SqliteMigrator(db)
+        migrate_action = []  # 需要进行的操作列表
+        for model in models:
+            old_columns_name_list = [  # 当前数据库文件中的列名列表
+                column_meta.name for column_meta in db.get_columns(model._meta.table_name)
+            ]
+
+            for name, value in inspect.getmembers(model):  # 遍历模型中的成员变量
+                if isinstance(value, ForeignKeyField) and not name.endswith("_id"):
+                    name += "_id"  # 基于 Django 约定, 外键会自动加 _id 后缀
+                if (not isinstance(value, Field)) or (name in old_columns_name_list):  # 排除无关成员变量和已经存在的列
+                    continue
+                logger.info(f"添加行: {name}")
+                migrate_action.append(migrator.add_column(model._meta.table_name, name, value))
+        if len(migrate_action) > 0:
+            migrate(*migrate_action)
 
     @classmethod
     def update_live_streamer(
