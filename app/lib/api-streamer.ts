@@ -73,7 +73,7 @@ export interface StudioEntity {
 	copyright: number;
 	source: string;
 	tid: number;
-	cover: string;
+	cover_path: string;
 	title: string;
 	description: string;
 	dynamic: string;

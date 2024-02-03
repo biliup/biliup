@@ -62,7 +62,7 @@ const EditTemplate: React.FC = () => {
                         id: values?.id,
                         source: values?.source ?? '',
                         tid: values?.tid[1],
-                        cover: values?.cover ?? '',
+                        cover_path: values?.cover_path ?? '',
                         title: values?.title ?? '',
                         description: values?.description ?? '',
                         dynamic: values?.dynamic ?? '',
