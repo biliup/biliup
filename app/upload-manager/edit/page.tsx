@@ -77,8 +77,8 @@ const EditTemplate: React.FC = () => {
                         no_reprint: values?.no_reprint ? 1 : 0,
                         mission_id: values?.mission_id,
                         dtime: values?.isDtime ? values?.dtime : null,
-                        credits: values?.credits,
-                        uploader: values?.uploader,
+                        credits: values?.credits ?? null,
+                        uploader: values?.uploader ?? null,
                     }
                     const result = await trigger(studioEntity);
                     await mutate(result);
