@@ -140,6 +140,7 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
                     onChange={v => console.log(v)}
                     style={{width: 560}}
                 />
+                <Input field='cover_path' label='视频封面' style={{width: 464}} placeholder='/cover/up.jpg'/>
                 <TextArea style={{maxWidth: 560}}
                     field="description" label='简介' placeholder="填写更全面的相关信息，让更多的人能找到你的视频吧"
                     autosize maxCount={2000} showClear/>

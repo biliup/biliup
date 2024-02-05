@@ -359,6 +359,13 @@ bilibili支持 mp4 mkv webm 无需筛选也能上传
                 label="bili_protocol"
                 style={{width: 400}}
             />
+            <Form.Input
+                field="bili_perfCDN"
+                extraText='哔哩哔哩直播优选CDN，默认无'
+                label="bili_perfCDN"
+                placeholder="cn-gotcha208,ov-gotcha05"
+                style={{width: 400}}
+            />
             <Form.Switch
                 field="bilibili_danmaku"
                 extraText='录制BILIBILI弹幕，目前暂时不支持视频按时长分段下的弹幕文件自动分段，只有使用ffmpeg（包括streamlink混合模式）作为下载器才支持，默认关闭'
