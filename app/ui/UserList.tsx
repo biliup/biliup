@@ -119,6 +119,7 @@ const UserList: React.FC<UserListProps> = ({onCancel, visible}) => {
                     field='value'
                     label="Cookie路径"
                     trigger='blur'
+                    placeholder='cookies.json'
                     rules={[
                         {required: true},
                     ]}
