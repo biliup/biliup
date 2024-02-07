@@ -36,7 +36,7 @@ def singleton_check(platform, name, url):
             yield Event(PRE_DOWNLOAD, args=(name, turl,))
         return
     if context['PluginInfo'].url_status[url] == 1:
-        logger.info(f'{url}-{url}-正在下载中，跳过检测')
+        logger.debug(f'{url}-{url}-正在下载中，跳过检测')
         return
     # 可能对同一个url同时发送两次上传事件
     with NamedLock(f"upload_count_{url}"):
