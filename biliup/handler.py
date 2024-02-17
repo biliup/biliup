@@ -33,6 +33,9 @@ def singleton_check(platform, name, url):
     if platform == Twitch:
         # 如果支持批量检测，目前只有一个支持，第一版先写死按照特例处理
         for turl in Twitch.batch_check.__func__(Twitch.url_list):
+            for k, v in config['streamers'].items():
+                if v.get("url", "") == turl:
+                    name = k
             yield Event(PRE_DOWNLOAD, args=(name, turl,))
         return
     if context['PluginInfo'].url_status[url] == 1:
