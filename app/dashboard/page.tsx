@@ -247,7 +247,7 @@ tctc-h5（备用线路4）, tct-h5（备用线路5）, ali-h5（备用线路6）
                 label="youtube_max_videosize"
                 style={{width: 400}}
             />
-            <Form.Input
+            <Form.InputNumber
                 field="youtube_max_resolution"
                 extraText='设置偏好的YouTube下载最高纵向分辨率
 默认不限制
