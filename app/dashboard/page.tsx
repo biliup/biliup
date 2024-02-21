@@ -212,6 +212,7 @@ tctc-h5（备用线路4）, tct-h5（备用线路5）, ali-h5（备用线路6）
                 style={{width: 400}}
             />
             <Form.Switch
+                initValue={entity?.hasOwnProperty('youtube_enable_download_live') ? entity['youtube_enable_download_live'] : true}
                 field="youtube_enable_download_live"
                 extraText='### 是否下载直播 默认开启
 关闭后将忽略直播下载（可以下载回放） 避免网络被风控(有些网络只能下载回放无法下载直播)的时候还会尝试下载直播
@@ -223,6 +224,7 @@ tctc-h5（备用线路4）, tct-h5（备用线路5）, ali-h5（备用线路6）
                 label="youtube_enable_download_live"
             />
             <Form.Switch
+                initValue={entity?.hasOwnProperty('youtube_enable_download_playback') ? entity['youtube_enable_download_playback'] : true}
                 field="youtube_enable_download_playback"
                 extraText='是否下载直播回放 默认开启
 关闭后将忽略直播下载回放(不会影响正常的视频下载) 只想录制直播的可以开启
@@ -283,6 +285,7 @@ bilibili支持 mp4 mkv webm 无需筛选也能上传
                 label="twitch_danmaku"
             />
             <Form.Switch
+                initValue={entity?.hasOwnProperty('twitch_disable_ads') ? entity['twitch_disable_ads'] : true}
                 field="twitch_disable_ads"
                 extraText='去除Twitch广告功能，默认开启【只有下载器为FFMPEG时才有效】
 这个功能会导致Twitch录播分段，因为遇到广告就自动断开了，这就是去广告。若需要录播完整一整段可以关闭这个，但是关了之后就会有紫色屏幕的CommercialTime
