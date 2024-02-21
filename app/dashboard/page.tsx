@@ -291,7 +291,7 @@ bilibili支持 mp4 mkv webm 无需筛选也能上传
             />
             </Collapse.Panel>
             <Collapse.Panel header="Bilibili" itemKey="bilibili">
-            <Form.Input
+            <Form.InputNumber
                 field="bili_qn"
                 extraText='哔哩哔哩自选画质
 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段(仅ffmpeg streamlink)时录制设置的画质
@@ -389,7 +389,7 @@ bilibili支持 mp4 mkv webm 无需筛选也能上传
             />
             </Collapse.Panel>
             <Collapse.Panel header="虎牙" itemKey="huya">
-            <Form.Input
+            <Form.InputNumber
                 field="huya_max_ratio"
                 extraText='虎牙自选录制码率
  可以避免录制如20M的码率，每小时8G左右大小，上传及转码耗时过长。
