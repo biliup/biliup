@@ -19,7 +19,10 @@ logger = logging.getLogger('biliup')
 
 
 class DownloadBase:
-    def __init__(self, fname, url, suffix='flv', opt_args=None):
+    def __init__(self, fname, url, suffix=None, opt_args=None):
+        if not suffix:
+            logger.error(f'检测到suffix不存在，请补充后缀')
+            return
         self.danmaku = None
         self.room_title = None
         if opt_args is None:
