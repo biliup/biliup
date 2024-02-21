@@ -1,7 +1,7 @@
 import React, {useState} from "react";
 import {FormFCChild} from "@douyinfe/semi-ui/lib/es/form";
 import {IconChevronDown, IconChevronUp, IconMinusCircle, IconPlusCircle } from "@douyinfe/semi-icons";
-import {Avatar, Button, Collapsible, Form, InputGroup, Space, Typography, ArrayField} from "@douyinfe/semi-ui";
+import {Avatar, Button, Collapsible, Form, InputGroup, Space, Typography, ArrayField, Notification} from "@douyinfe/semi-ui";
 import useSWR from "swr";
 import {BiliType, fetcher, StudioEntity} from "../lib/api-streamer";
 import {useBiliUsers, useTypeTree} from "../lib/use-streamers";
@@ -134,11 +134,33 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
                     ]}
                 />
                 <TagInput
+                    max={12}
+                    maxLength={20}
                     field="tags"
                     label='标签'
+                    allowDuplicates={false}
                     placeholder='输入标签，Enter 确定'
                     onChange={v => console.log(v)}
                     style={{width: 560}}
+                    rules={[
+                        { required: true, message: 'Tag不能为空' },
+                    ]}
+                    onExceed={v => {
+                        Notification.warning({
+                            title: '标签输入错误',
+                            position: 'top',
+                            content: '标签数量不能超过12个',
+                            duration: 3,
+                        });
+                    }}
+                    onInputExceed={v => {
+                        Notification.warning({
+                            title: '标签输入错误',
+                            position: 'top',
+                            content: '单个标签字数不能超过20',
+                            duration: 3,
+                        });
+                    }}
                 />
                 <Input field='cover_path' label='视频封面' style={{width: 464}} placeholder='/cover/up.jpg'/>
                 <TextArea style={{maxWidth: 560}}
