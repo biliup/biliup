@@ -8,13 +8,13 @@ import json
 from urllib.parse import unquote
 from biliup.config import config
 from .douyin_util.dy_pb2 import ChatMessage, PushFrame, Response
-from .. import match1
+from .. import match1, random_user_agent
 from google.protobuf import json_format
 
 
 class Douyin:
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36',
+        'user-agent': random_user_agent(),
         'Referer': 'https://live.douyin.com/',
         'Cookie': config.get('user', {}).get('douyin_cookie', '')
     }

@@ -101,7 +101,7 @@ const Dashboard: React.FC = () => {
                         field='file_size'
                         extraText='录像单文件大小限制，单位Byte，超过此大小分段下载'
                         label={{text: "分段大小"} }
-                        suffix={'MB'}
+                        suffix={'Byte'}
                         style={{width: 250}}
                     />
             <Form.Input
@@ -357,6 +357,13 @@ bilibili支持 mp4 mkv webm 无需筛选也能上传
  由于ffmpeg只能单线程下载，并且stream-gears录制有问题，所以目前fmp4流只能使用streamlink+ffmpeg混合模式。
 '
                 label="bili_protocol"
+                style={{width: 400}}
+            />
+            <Form.Input
+                field="bili_perfCDN"
+                extraText='哔哩哔哩直播优选CDN，默认无'
+                label="bili_perfCDN"
+                placeholder="cn-gotcha208,ov-gotcha05"
                 style={{width: 400}}
             />
             <Form.Switch

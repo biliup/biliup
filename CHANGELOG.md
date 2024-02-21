@@ -4,6 +4,33 @@
 - 💡新添加的功能
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
+# 更新日志
+
+## 0.4.34
+- 更新时间：2024.01.27
+- 新增随机UA功能以及统一使用来解决部分平台请求API/弹幕录制风控问题[@Kataick](https://github.com/Kataick)
+- 优化webui处理时间的函数[@Kataick](https://github.com/Kataick)
+- 解决文件上传乱序的问题 [@storyxc](https://github.com/storyxc)
+- 解决从旧版Config中读取postprocessor指令并写入数据库的格式错误，导致postprocessor无法执行的问题 [@boxie123](https://github.com/boxie123)
+
+
+## 0.4.32-0.4.33
+⚠️⚠️⚠️⚠️⚠️⚠️超大版本更新，在升级到此版本之前请认真阅读说明。
+- 🔧自动修正stream_gears设置不支持的format [@Kataick](https://github.com/Kataick)
+- 🔧修复分段下载时streamlink不会退出的问题  [@dreammu](https://github.com/dreammu)
+- 💡AfreecaTV添加账号密码登陆,直播间标题 [@CoolZxp](https://github.com/CoolZxp)
+- 🔧修复快手直播录制,因风控严格暂时移除快手cdn及流类型选择 [@CoolZxp](https://github.com/CoolZxp)
+- 🔧优化 BiliLive 部分运行逻辑 （添加登录验证，原画链接复用 使用移动端房间信息，获取正确 emoji 标题）[@xxxxuanran](https://github.com/xxxxuanran)
+- 💡数据库存档 （代理原本的config文件，在此版本之后，老版本的config将会在第一次启动被读取并写入新的数据库中，之后将不在使用config文件）[@boxie123](https://github.com/boxie123)
+- 🔧修复在py3.7版本运行问题 [@CoolZxp](https://github.com/CoolZxp)
+- 💡添加bigo支持 [@CoolZxp](https://github.com/CoolZxp)
+- 🔧兼容 stream-gears 在无 Cookie 时的下载 [@xxxxuanran](https://github.com/xxxxuanran)
+- 🔧标题为空时下载报错 [@boxie123](https://github.com/boxie123)
+- 🔧修复弹幕重新连接时覆盖原有弹幕问题 [@CoolZxp](https://github.com/CoolZxp)
+- 🔧修复斗鱼下播后可能会录制回放问题 [@CoolZxp](https://github.com/CoolZxp)
+- 🔧修复使用biliup-rs上传后内存不会清空的问题[@CoolZxp](https://github.com/CoolZxp)
+- 🔧猫耳FM提供格式默认值[@xxxxuanran](https://github.com/xxxxuanran)
+- 💡新增WEBUI支持，可在WEBUI进行所有的设置与管理。 [@boxie123](https://github.com/boxie123)
 
 ## 0.4.31
 - 更新时间：2023.09.12

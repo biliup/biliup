@@ -21,7 +21,7 @@ class AfreecaTV(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
         if AfreecaTVUtils.get_cookie():
-            self.fake_headers['Cookie'] = ';'.join(
+            self.fake_headers['cookie'] = ';'.join(
                 [f"{name}={value}" for name, value in AfreecaTVUtils.get_cookie().items()])
 
     def check_stream(self, is_check=False):

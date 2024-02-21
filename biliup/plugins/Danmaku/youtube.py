@@ -1,10 +1,11 @@
 import json, re, select, random, traceback, urllib, datetime, base64
 import asyncio, aiohttp
+from biliup.plugins import random_user_agent
 
 # The core codes for YouTube support are basically from taizan-hokuto/pytchat
 
 headers = {
-    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.135 Safari/537.36",
+    'user-agent': random_user_agent(),
 }
 
 

@@ -1,10 +1,13 @@
 import json
 import logging
-from struct import pack, unpack
-import aiohttp
 import zlib
+from struct import pack, unpack
 
+import aiohttp
 import brotli
+
+from biliup.plugins import match1
+from biliup.plugins import random_user_agent
 
 logger = logging.getLogger('biliup')
 
@@ -14,45 +17,42 @@ class Bilibili:
                 b'\x4f\x62\x6a\x65\x63\x74\x5d '
     heartbeatInterval = 30
     headers = {
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Encoding': 'gzip, deflate',
-        'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36',
-        'Referer': 'https://live.bilibili.com/',
+        'accept': '*/*',
+        'accept-encoding': 'gzip, deflate',
+        'accept-language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
+        'user-agent': random_user_agent(),
+        'origin': 'https://live.bilibili.com',
+        'referer': 'https://live.bilibili.com',
     }
 
     @staticmethod
     async def get_ws_info(url):
         danmu_wss_url = 'wss://broadcastlv.chat.bilibili.com/sub'
-        danmu_token = ''
-        reg_datas = []
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://api.live.bilibili.com/room/v1/Room/room_init?id={url.split('/')[-1]}",
+        async with aiohttp.ClientSession(headers=Bilibili.headers) as session:
+            async with session.get("https://api.live.bilibili.com/room/v1/Room/room_init?id=" + match1(url, r'/(\d+)'),
                                    timeout=5) as resp:
-                room_json = json.loads(await resp.text())
+                room_json = await resp.json()
                 room_id = room_json['data']['room_id']
             async with session.get(f"https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?id={room_id}",
                                    timeout=5) as resp:
+                danmu_info = await resp.json()
+                danmu_token = danmu_info['data']['token']
                 try:
-                    danmu_info = json.loads(await resp.text())
-                    danmu_token = danmu_info['data']['token']
+                    # 允许可能获取不到返回的host
                     danmu_host = danmu_info['data']['host_list'][0]
-                    if type(danmu_host) is dict:
-                        danmu_wss_url = f"wss://{danmu_host['host']}:{danmu_host.get('wss_port')}/sub"
-                except Exception:
+                    danmu_wss_url = f"wss://{danmu_host['host']}:{danmu_host['wss_port']}/sub"
+                except:
                     pass
 
-                data = json.dumps({
-                    'uid': 0,
-                    'roomid': room_id,
-                    'protover': 3,
-                    'platform': 'web',
-                    'type': 2,
-                    'key': danmu_token,
-                }, separators=(',', ':')).encode('ascii')
-                data = (pack('>i', len(data) + 16) + b'\x00\x10\x00\x01' +
-                        pack('>i', 7) + pack('>i', 1) + data)
-                reg_datas.append(data)
+            data = json.dumps({
+                'uid': 0,
+                'roomid': room_id,
+                'protover': 3,
+                'platform': 'web',
+                'type': 2,
+                'key': danmu_token,
+            }, separators=(',', ':')).encode('ascii')
+            reg_datas = [(pack('>i', len(data) + 16) + b'\x00\x10\x00\x01' + pack('>i', 7) + pack('>i', 1) + data)]
 
         return danmu_wss_url, reg_datas
 

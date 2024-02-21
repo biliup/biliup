@@ -123,8 +123,9 @@ class BiliBili:
         self.video = video
         self.__session.mount('https://', HTTPAdapter(max_retries=Retry(total=5)))
         self.__session.headers.update({
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/63.0.3239.108",
-            "Referer": "https://www.bilibili.com/", 'Connection': 'keep-alive'
+            'user-agent': "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/63.0.3239.108",
+            'referer': "https://www.bilibili.com/",
+            'connection': 'keep-alive'
         })
         self.cookies = None
         self.access_token = None

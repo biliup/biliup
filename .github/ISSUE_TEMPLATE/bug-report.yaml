@@ -1,6 +1,5 @@
 name: 错误回报
 description: 在使用 biliup 的过程中遇到了错误
-title: '【错误回报】'
 labels: [ "bug" ]
 
 body:

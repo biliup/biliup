@@ -26,28 +26,31 @@ export function useBiliUsers() {
   const {data, error, isLoading} = useSWR<User[]>("/v1/users", fetcher);
   const [list, setList] = useState<any[]>([]);
   useEffect(() => {
-    if (data?.length === 0) {
+    if (!data || data.length === 0) {
       setList([]);
+      return;
     }
-    data?.forEach(item => {
-      (async () => {
-        const res = await fetcher(`/bili/space/myinfo?user=${item.value}`, undefined)
-        const pRes = await proxy(`/bili/proxy?url=${res.data.face}`)
-        const myBlob = await pRes.blob()
-        const newList = data.map(value => {
-          if (value.id === item.id) {
-            return {
-              ...value,
-              name: res.data.name,
-              face: URL.createObjectURL(myBlob),
-            };
-          }
-          return value;
-        });
-        setList(newList);
-      })()
-    })
+  
+    const updateList = async (item: User) => {
+      const res = await fetcher(`/bili/space/myinfo?user=${item.value}`, undefined);
+      const pRes = await proxy(`/bili/proxy?url=${res.data.face}`);
+      const myBlob = await pRes.blob();
+  
+      return {
+        ...item,
+        name: res.data.name,
+        face: URL.createObjectURL(myBlob),
+      };
+    };
+  
+    const updateData = async (data: User[]) => {
+      const updatedList = await Promise.all(data.map(updateList));
+      setList(updatedList);
+    };
+  
+    updateData(data);
   }, [data]);
+  
   return {
     isLoading,
     isError: error,
