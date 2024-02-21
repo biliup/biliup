@@ -19,7 +19,7 @@ logger = logging.getLogger('biliup')
 
 
 class DownloadBase:
-    def __init__(self, fname, url, suffix=None, opt_args=None):
+    def __init__(self, fname, url, suffix='flv', opt_args=None):
         self.danmaku = None
         self.room_title = None
         if opt_args is None:
@@ -29,7 +29,7 @@ class DownloadBase:
         self.fname = fname
         self.url = url
         # 录制后保存文件格式而非源流格式 对应原配置文件format 仅ffmpeg及streamlink生效
-        self.suffix = suffix
+        self.suffix = suffix.lower()
         self.title = None
         self.live_cover_path = None
         self.database_row_id = 0
