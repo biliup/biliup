@@ -352,7 +352,11 @@ async def pre_archive(request):
 
 @routes.get('/bili/space/myinfo')
 async def myinfo(request):
-    config.load_cookies(request.query['user'])
+    file = request.query['user']
+    try:
+        config.load_cookies(file)
+    except FileNotFoundError:
+        return web.json_response({"status": 500, 'error': f"找不到 {file} ！！！"})
     cookies = config.data['user']['cookies']
     return web.json_response(BiliBili.myinfo(cookies))
 

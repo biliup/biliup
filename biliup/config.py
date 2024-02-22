@@ -1,6 +1,7 @@
 import json
 import pathlib
 import shutil
+import os
 from collections import UserDict
 
 from playhouse.shortcuts import model_to_dict
@@ -15,6 +16,9 @@ except ModuleNotFoundError:
 
 class Config(UserDict):
     def load_cookies(self, file='cookies.json'):
+        if not os.path.exists(file):
+            raise FileNotFoundError(f"找不到 {file} ！！！")
+
         self.data["user"] = {"cookies": {}}
         with open(file, encoding='utf-8') as stream:
             s = json.load(stream)
