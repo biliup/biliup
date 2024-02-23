@@ -1,0 +1,232 @@
+
+@media screen and (min-width: 640px) {
+    .rootConfigPanel {
+        align-items: center;
+        background: var(--semi-color-bg-0);
+        flex-direction: column;
+        height: auto;
+        overflow: auto;
+        row-gap: 0;
+        min-width: auto;
+        max-width: auto;
+        display: flex;
+        color: var(--semi-color-text-0);
+        font-family: Inter;
+        font-size: 20px;
+        font-weight: 600;
+        letter-spacing: 0.4px;
+        line-height: 28px;
+        text-align: left;
+
+        .main {
+            align-items: center;
+            display: flex;
+            flex-basis: 0;
+            flex-direction: column;
+            flex-grow: 1;
+            padding: 40px 0px 0px;
+            row-gap: 32px;
+            align-self: stretch;
+
+            .content {
+                align-items: flex-start;
+                display: inline-flex;
+                flex-direction: column;
+                row-gap: 32px;
+                flex-shrink: 0;
+
+                .item {
+                    min-width: 175px;
+                    vertical-align: middle;
+                    flex-shrink: 0;
+                }
+
+                .form {
+                    align-items: flex-start;
+                    display: flex;
+                    flex-direction: column;
+                    row-gap: 16px;
+                    min-width: 50px;
+                    max-width: 965px;
+                    flex-shrink: 0;
+                    color: var(--semi-color-text-0);
+                    font-family: "PingFang SC";
+                    font-size: 16px;
+                    font-weight: 500;
+                    letter-spacing: 0.32px;
+                    line-height: 22px;
+                    text-align: left;
+
+                    .frameDownload {
+                        align-items: flex-start;
+                        border-color: rgb(var(--semi-grey-2));
+                        border-radius: 6px;
+                        border-style: solid;
+                        border-width: 1px;
+                        display: flex;
+                        flex-direction: column;
+                        flex-shrink: 0;
+                        padding: 50px;
+                        row-gap: 10px;
+                        align-self: stretch;
+                        min-width: 12px;
+                        max-width: auto;
+
+                        .frameInside {
+                            align-items: center;
+                            column-gap: 4px;
+                            display: inline-flex;
+                            flex-shrink: 0;
+
+                            .group {
+                                height: 20px;
+                                position: relative;
+                                width: 20px;
+                                flex-shrink: 0;
+
+                                .buttonOnlyIconSecond {
+                                    background: #0064faff;
+                                    border-radius: 8px;
+                                    height: 20px;
+                                    left: 0;
+                                    overflow: hidden;
+                                    top: 0;
+                                    width: 20px;
+                                    position: absolute;
+                                }
+
+                                .lineStory {
+                                    height: 10px;
+                                    left: 4.5px;
+                                    overflow: hidden;
+                                    top: 4.5px;
+                                    width: 12px;
+                                    position: absolute;
+                                }
+                            }
+
+                            .meegoSharedWebWorkIt {
+                                min-width: 68px;
+                                vertical-align: bottom;
+                                flex-shrink: 0;
+                            }
+                        }
+                    }
+                    .frameUpload {
+                        align-items: flex-start;
+                        border-color: rgb(var(--semi-grey-2));
+                        border-radius: 6px;
+                        border-style: solid;
+                        border-width: 1px;
+                        display: flex;
+                        flex-direction: column;
+                        flex-shrink: 0;
+                        padding: 50px;
+                        row-gap: 10px;
+                        align-self: stretch;
+
+                        .frameInside {
+                            align-items: center;
+                            column-gap: 4px;
+                            display: inline-flex;
+                            flex-shrink: 0;
+
+                            .group {
+                                height: 20px;
+                                position: relative;
+                                width: 20px;
+                                flex-shrink: 0;
+
+                                .buttonOnlyIconSecond {
+                                    background: #fa0064ff;
+                                    border-radius: 8px;
+                                    height: 20px;
+                                    left: 0;
+                                    overflow: hidden;
+                                    top: 0;
+                                    width: 20px;
+                                    position: absolute;
+                                }
+
+                                .lineStory {
+                                    height: 10px;
+                                    left: 4.5px;
+                                    overflow: hidden;
+                                    top: 4.5px;
+                                    width: 12px;
+                                    position: absolute;
+                                }
+                            }
+
+                            .meegoSharedWebWorkIt {
+                                min-width: 68px;
+                                vertical-align: bottom;
+                                flex-shrink: 0;
+                            }
+                        }
+                    }
+
+                    .framePlatformConfig {
+                        align-items: flex-start;
+                        border-color: rgb(var(--semi-grey-2));
+                        border-radius: 6px;
+                        border-style: solid;
+                        border-width: 1px;
+                        display: flex;
+                        flex-direction: column;
+                        flex-shrink: 0;
+                        padding: 50px;
+                        row-gap: 10px;
+                        align-self: stretch;
+
+                        .frameInside {
+                            align-items: center;
+                            column-gap: 4px;
+                            display: inline-flex;
+                            flex-shrink: 0;
+
+                            .group {
+                                height: 20px;
+                                position: relative;
+                                width: 20px;
+                                flex-shrink: 0;
+
+                                .outlinedVersion {
+                                    height: 10px;
+                                    left: 5px;
+                                    overflow: hidden;
+                                    top: 5px;
+                                    width: 10px;
+                                    position: absolute;
+                                }
+
+                                .buttonOnlyIconSecond {
+                                    background: #fb7299ff;
+                                    border-radius: 8px;
+                                    height: 20px;
+                                    left: 0;
+                                    overflow: hidden;
+                                    top: 0;
+                                    width: 20px;
+                                    position: absolute;
+                                }
+                            }
+
+                            .meegoSharedWebSettin {
+                                min-width: 68px;
+                                vertical-align: bottom;
+                                flex-shrink: 0;
+                            }
+                        }
+                    }
+
+                    .line {
+                        flex-shrink: 0;
+                        height: 0;
+                        align-self: stretch;
+                    }
+                }
+            }
+        }
+    }
+}
