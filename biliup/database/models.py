@@ -18,10 +18,10 @@ def get_path(*other):
     return str(dir_path.joinpath(*other))
 
 
-db_url = f"sqlite:///{get_path('data.sqlite3')}"  # 数据库 URL, 使用默认 DBAPI
+DB_URL = f"sqlite:///{get_path('data.sqlite3')}"  # 数据库 URL, 使用默认 DBAPI
 
 engine = create_engine(
-    db_url,
+    DB_URL,
     echo=True,  # 显示执行的 SQL 记录, 仅调试用, 发布前请注释
 )
 
@@ -39,6 +39,7 @@ class BaseModel(DeclarativeBase):
 
 
 BaseModel.metadata = MetaData(naming_convention=convention)  # 定义命名惯例，用来生成自动迁移脚本
+BaseModel.metadata.reflect(bind=engine)  # 绑定反射
 
 
 class StreamerInfo(BaseModel):
