@@ -1,7 +1,8 @@
+import copy
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import List, Dict, Any
 
 from sqlalchemy import create_engine, ForeignKey, JSON, TEXT, MetaData
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -35,11 +36,25 @@ convention = {
 
 
 class BaseModel(DeclarativeBase):
-    pass
+    """ 数据库表模型基类 """
+    def as_dict(self):
+        """ 将实例转为字典类型 """
+        result = copy.deepcopy(self.__dict__)  # 深复制避免对原数据影响
+        del result['_sa_instance_state']  # 删除多余键值对, 避免 json 报错
+        return result
+
+    @classmethod
+    def filter_parameters(cls, data: Dict[str, Any]):
+        """ 过滤不需要的参数 """
+        result = dict()
+        for k, v in data.items():
+            if (k in cls.__table__.c.keys()) or (k == "id"):
+                result[k] = v
+        return result
 
 
 BaseModel.metadata = MetaData(naming_convention=convention)  # 定义命名惯例，用来生成自动迁移脚本
-BaseModel.metadata.reflect(bind=engine)  # 绑定反射
+# BaseModel.metadata.reflect(bind=engine)  # 绑定反射会导致表重复定义
 
 
 class StreamerInfo(BaseModel):

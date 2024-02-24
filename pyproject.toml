@@ -27,7 +27,6 @@ dependencies = [
     'importlib-resources; python_version<"3.9"',
     'tomli >= 1.1.0 ; python_version < "3.11"',
     'protobuf >= 4.23.0',
-    "peewee>=3.16.2",
     "SQLAlchemy>=2.0.27",
     "alembic>=1.13.1",
 ]

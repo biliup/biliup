@@ -3,10 +3,10 @@ import pathlib
 import shutil
 import os
 from collections import UserDict
+from sqlalchemy import select
 
-from playhouse.shortcuts import model_to_dict
-
-from biliup.database.models import Configuration, LiveStreamers, db, UploadStreamers
+from biliup.database.models import Configuration, LiveStreamers, UploadStreamers
+from biliup.database.db import Session
 
 try:
     import tomllib
@@ -33,30 +33,32 @@ class Config(UserDict):
             'upload_filename': self.data.get('upload_filename', []),
             'PluginInfo': self.data.get('PluginInfo')
         }
-        for con in Configuration.select().where(Configuration.key == 'config'):
+
+        for con in Session.execute(select(Configuration.value).where(Configuration.key == 'config')):
             self.data = json.loads(con.value)
         self.data.update(context)
         self['streamers'] = {}
-        for ls in LiveStreamers.select():
-            self['streamers'][ls.remark] = {k: v for k, v in model_to_dict(ls).items() if v and (k != 'upload_streamers')}
+        for ls in Session.scalars(select(LiveStreamers)):
+            self['streamers'][ls.remark] = {k: v for k, v in ls.__dict__.items() if v and (k != 'upload_streamers')}
             # self['streamers'][ls.remark].pop('upload_streamers')
-            if ls.upload_streamers:
-                self['streamers'][ls.remark].update({k: v for k, v in model_to_dict(ls.upload_streamers).items() if v})
+            if ls.upload_streamers_id:
+                self['streamers'][ls.remark].update({k: v for k, v in ls.uploadstreamers.__dict__.items() if v})
             if self['streamers'][ls.remark].get('tags'):
                 self['streamers'][ls.remark]['tags'] = self['streamers'][ls.remark]['tags']
         # for us in UploadStreamers.select():
         #     config.data[con.key] = con.value
 
     def save_to_db(self):
-        with db.connection_context():
-            for k, v in self['streamers'].items():
-                us = UploadStreamers(template_name=k, tags=v.pop('tags', ['biliup']), **v)
-                us.save()
-                for url in v.pop('url'):
-                    LiveStreamers(upload_streamers=us, remark=k, url=url, **v).save()
-            del self['streamers']
-            Configuration(key='config', value=json.dumps(self.data)).save()
-
+        for k, v in self['streamers'].items():
+            us = UploadStreamers(template_name=k, tags=v.pop('tags', ['biliup']), **v)
+            # us.save()
+            Session.add(us)
+            for url in v.pop('url'):
+                ls = LiveStreamers(upload_streamers=us, remark=k, url=url, **v)
+                Session.add(ls)
+        del self['streamers']
+        configuration = Configuration(key='config', value=json.dumps(self.data))
+        Session.add(configuration)
 
     def load(self, file):
         import yaml
