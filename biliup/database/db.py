@@ -141,31 +141,6 @@ class DB:
         file_list = Session.get(StreamerInfo, database_row_id).filelist
         return [file.file for file in file_list]
 
-    @classmethod
-    def update_live_streamer(
-            cls, id, url, remark,
-            filename_prefix=None,
-            upload_streamers_id=None,
-            format=None,
-            preprocessor=None,
-            downloaded_processor=None,
-            postprocessor=None,
-            opt_args=None, **kwargs):
-        """ 更新 LiveStreamers 表中的数据, 增加一层包装避免多余参数报错 """
-        stmt = update(LiveStreamers).where(LiveStreamers.id == id).values(
-            url=url,
-            remark=remark,
-            filename_prefix=filename_prefix,
-            upload_streamers_id=upload_streamers_id,
-            format=format,
-            preprocessor=preprocessor,
-            downloaded_processor=downloaded_processor,
-            postprocessor=postprocessor,
-            opt_args=opt_args,
-        )
-        Session.execute(stmt)
-        Session.commit()
-
     def backup(self):
         """备份数据库"""
         pass

@@ -252,10 +252,13 @@ async def lives(request):
             # us = UploadStreamers.get_by_id(json_data['upload_id'])
             us = Session.get(UploadStreamers, json_data['upload_id'])
             # LiveStreamers.update(**json_data, upload_streamers=us).where(LiveStreamers.id == old.id).execute()
-            db.update_live_streamer(**{**json_data, "upload_streamers_id": us.id})
+            # db.update_live_streamer(**{**json_data, "upload_streamers_id": us.id})
+            Session.execute(update(LiveStreamers), [{**json_data, "upload_streamers_id": us.id}])
+            Session.commit()
         else:
             # LiveStreamers.update(**json_data).where(LiveStreamers.id == old.id).execute()
-            db.update_live_streamer(**json_data)
+            Session.execute(update(LiveStreamers), [json_data])
+            Session.commit()
     except Exception as e:
         return web.HTTPBadRequest(text=str(e))
     config.load_from_db()
