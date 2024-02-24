@@ -1,4 +1,5 @@
 import copy
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -39,8 +40,14 @@ class BaseModel(DeclarativeBase):
     """ 数据库表模型基类 """
     def as_dict(self):
         """ 将实例转为字典类型 """
-        result = copy.deepcopy(self.__dict__)  # 深复制避免对原数据影响
-        del result['_sa_instance_state']  # 删除多余键值对, 避免 json 报错
+        temp = copy.deepcopy(self.__dict__)  # 深复制避免对原数据影响
+        result = dict()
+        for key, value in temp.items():  # 遍历删除不能被 json 序列化的键值对
+            try:
+                json.dumps(value)
+                result[key] = value
+            except TypeError:
+                continue
         return result
 
     @classmethod

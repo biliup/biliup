@@ -226,9 +226,9 @@ async def add_lives(request):
     uid = json_data.get('upload_id')
     if uid:
         us = Session.get(UploadStreamers, uid)
-        to_save = LiveStreamers(**json_data, upload_streamers_id=us.id)
+        to_save = LiveStreamers(**LiveStreamers.filter_parameters(json_data), upload_streamers_id=us.id)
     else:
-        to_save = LiveStreamers(**json_data)
+        to_save = LiveStreamers(**LiveStreamers.filter_parameters(json_data))
     try:
         Session.add(to_save)
         Session.commit()
@@ -305,14 +305,19 @@ async def streamers(request):
 @routes.post('/v1/upload/streamers')
 async def streamers_post(request):
     json_data = await request.json()
-    # to_save = UploadStreamers(**UploadStreamers.filter_parameters(json_data))
-    # Session.add(to_save)
-    Session.execute(update(UploadStreamers), [json_data])
+    if "id" in json_data.keys():  # 前端未区分更新和新建, 暂时从后端区分
+        Session.execute(update(UploadStreamers), [json_data])
+        id = json_data["id"]
+    else:
+        to_save = UploadStreamers(**UploadStreamers.filter_parameters(json_data))
+        Session.add(to_save)
+        Session.flush()
+        id = to_save.id
     Session.commit()
     config.load_from_db()
     # res = to_save.as_dict()
     # return web.json_response(res)
-    return web.json_response(Session.get(UploadStreamers, json_data['id']).as_dict())
+    return web.json_response(Session.get(UploadStreamers, id).as_dict())
 
 
 @routes.put('/v1/upload/streamers')

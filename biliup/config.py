@@ -50,15 +50,18 @@ class Config(UserDict):
 
     def save_to_db(self):
         for k, v in self['streamers'].items():
-            us = UploadStreamers(template_name=k, tags=v.pop('tags', ['biliup']), **v)
+            us = UploadStreamers(**UploadStreamers.filter_parameters(
+                {"template_name": k, "tags": v.pop('tags', ['biliup']), ** v}))
             # us.save()
             Session.add(us)
             for url in v.pop('url'):
-                ls = LiveStreamers(upload_streamers=us, remark=k, url=url, **v)
+                ls = LiveStreamers(**LiveStreamers.filter_parameters(
+                    {"upload_streamers": us, "remark": k, "url": url, ** v}))
                 Session.add(ls)
         del self['streamers']
         configuration = Configuration(key='config', value=json.dumps(self.data))
         Session.add(configuration)
+        Session.commit()
 
     def load(self, file):
         import yaml
