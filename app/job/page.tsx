@@ -61,7 +61,7 @@ export default function Home() {
                         display: 'flex',
                         padding: '6px'
                     }}><IconCustomerSupport size='large'/></div>
-                     <h4 style={{marginLeft: '12px'}}>录播管理</h4></>}
+                     <h4 style={{marginLeft: '12px'}}>直播历史</h4></>}
                  mode="horizontal"
             ></Nav>
         </Header>

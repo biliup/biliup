@@ -429,10 +429,14 @@ async def service(args):
     for route in list(app.router.routes()):
         cors.add(route)
 
-    runner = web.AppRunner(app)
+    if args.no_access_log:
+        runner = web.AppRunner(app, access_log=None)
+    else:
+        runner = web.AppRunner(app)
     setup_middlewares(app)
     await runner.setup()
     site = web.TCPSite(runner, host=args.host, port=args.port)
+    print(f'WebUI 已启动，请浏览器访问 {site.name}')
     return runner, site
 
 
