@@ -42,7 +42,7 @@ def arg_parser():
     args = parser.parse_args()
     biliup.common.reload.program_args = args.__dict__
     # 初始化数据库
-    if db.init():
+    if db.init(args.no_http):
         try:
             config.load(args.config)
             config.save_to_db()
@@ -62,7 +62,6 @@ def arg_parser():
 async def main(args):
     from .app import event_manager, context
     from biliup.downloader import check_flag
-    import biliup.web
 
     event_manager.start()
     wait = max(config.get('event_loop_interval', 40) - 3, 3)
@@ -72,10 +71,17 @@ async def main(args):
 
     interval = config.get('check_sourcecode', 15)
 
-    runner, site = await biliup.web.service(args)
-    detector = AutoReload(event_manager, runner.cleanup, check_flag.set, interval=interval)
-    biliup.common.reload.global_reloader = detector
-    await asyncio.gather(detector.astart(), site.start())
+    if not args.no_http:
+        import biliup.web
+        runner, site = await biliup.web.service(args)
+        detector = AutoReload(event_manager, runner.cleanup, check_flag.set, interval=interval)
+        biliup.common.reload.global_reloader = detector
+        await asyncio.gather(detector.astart(), site.start())
+    else:
+        import biliup.common.reload
+        detector = AutoReload(event_manager, check_flag.set, interval=interval)
+        biliup.common.reload.global_reloader = detector
+        await asyncio.gather(detector.astart())
 
 
 if __name__ == '__main__':

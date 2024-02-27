@@ -1,3 +1,4 @@
+import os
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -7,6 +8,7 @@ from sqlalchemy import Table, select, desc, delete, update
 from sqlalchemy.orm import sessionmaker, scoped_session
 
 from .models import (
+    DB_PATH,
     engine,
     logger,
     BaseModel,
@@ -31,16 +33,18 @@ class DB:
     """数据库交互类"""
 
     @classmethod
-    def init(cls):
+    def init(cls, no_http):
         """初始化数据库"""
         run = not Path.cwd().joinpath("data/data.sqlite3").exists()
+        if no_http and not run:
+            os.remove(DB_PATH)
         BaseModel.metadata.create_all(engine)  # 创建所有表
         table = Table('uploadstreamers', BaseModel.metadata, autoload_with=engine)
         columns_name_list = table.c.keys()
         if 'up_selection_reply' not in columns_name_list:
             logger.error(f"检测到旧数据库，请手动删除data文件夹后重试")
             return False
-        return run
+        return run or no_http
 
     @classmethod
     def get_stream_info(cls, name: str) -> dict:

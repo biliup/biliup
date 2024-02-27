@@ -20,7 +20,8 @@ def get_path(*other):
     return str(dir_path.joinpath(*other))
 
 
-DB_URL = f"sqlite:///{get_path('data.sqlite3')}"  # 数据库 URL, 使用默认 DBAPI
+DB_PATH = get_path('data.sqlite3')
+DB_URL = f"sqlite:///{DB_PATH}"  # 数据库 URL, 使用默认 DBAPI
 
 engine = create_engine(
     DB_URL,
