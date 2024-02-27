@@ -436,7 +436,7 @@ async def service(args):
     setup_middlewares(app)
     await runner.setup()
     site = web.TCPSite(runner, host=args.host, port=args.port)
-    print(f'WebUI 已启动，请浏览器访问 {site.name}')
+    print(f'WebUI 已启动，请浏览器访问 http://{"0.0.0.0" if args.host is None else args.host}:{args.port}')
     return runner, site
 
 
