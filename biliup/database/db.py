@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
 
-from sqlalchemy import Table, select, desc, delete, update
+from sqlalchemy import Table, select, desc, delete
 from sqlalchemy.orm import sessionmaker, scoped_session
 
 from .models import (
@@ -14,7 +14,6 @@ from .models import (
     BaseModel,
     StreamerInfo,
     FileList,
-    LiveStreamers,
 )
 
 session_factory = sessionmaker(bind=engine)
@@ -39,12 +38,7 @@ class DB:
         if no_http and not run:
             os.remove(DB_PATH)
         BaseModel.metadata.create_all(engine)  # 创建所有表
-        table = Table('uploadstreamers', BaseModel.metadata, autoload_with=engine)
-        columns_name_list = table.c.keys()
-        if 'up_selection_reply' not in columns_name_list:
-            logger.error(f"检测到旧数据库，请手动删除data文件夹后重试")
-            return False
-        return run or no_http
+        return run or cls.migrate() or no_http
 
     @classmethod
     def get_stream_info(cls, name: str) -> dict:
@@ -144,6 +138,21 @@ class DB:
         """获取视频文件列表"""
         file_list = Session.get(StreamerInfo, database_row_id).filelist
         return [file.file for file in file_list]
+
+    @classmethod
+    def migrate(cls) -> bool:
+        """ 自动迁移，通过dump到配置文件再重建数据库实现 """
+        table = Table('uploadstreamers', BaseModel.metadata, autoload_with=engine)
+        columns_name_list = table.c.keys()
+        if 'up_selection_reply' in columns_name_list:  # 暂时使用最后加的列检测，之后改为更优雅的方式
+            return False
+        logger.info(f"检测到旧数据库，正在迁移")
+        from biliup.config import config
+        config.load_from_db()
+        config.dump(None)
+        os.remove(DB_PATH)
+        BaseModel.metadata.create_all(engine)
+        return True
 
     def backup(self):
         """备份数据库"""
