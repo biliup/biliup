@@ -31,6 +31,7 @@ def arg_parser():
     parser.add_argument('-v', '--verbose', action="store_const", const=logging.DEBUG, help="Increase output verbosity")
     parser.add_argument('--config', type=argparse.FileType(mode='rb'),
                         help='Location of the configuration file (default "./config.yaml")')
+    parser.add_argument('--no-access-log', action='store_true', help='disable web access log')
     subparsers = parser.add_subparsers(help='Windows does not support this sub-command.')
     # create the parser for the "start" command
     parser_start = subparsers.add_parser('start', help='Run as a daemon process.')
