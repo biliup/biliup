@@ -39,10 +39,12 @@ class Config(UserDict):
         self.data.update(context)
         self['streamers'] = {}
         for ls in Session.scalars(select(LiveStreamers)):
-            self['streamers'][ls.remark] = {k: v for k, v in ls.__dict__.items() if v and (k != 'upload_streamers')}
+            self['streamers'][ls.remark] = {
+                k: v for k, v in ls.as_dict().items() if v and (k not in ['upload_streamers_id', 'id'])}
             # self['streamers'][ls.remark].pop('upload_streamers')
             if ls.upload_streamers_id:
-                self['streamers'][ls.remark].update({k: v for k, v in ls.uploadstreamers.__dict__.items() if v})
+                self['streamers'][ls.remark].update({
+                    k: v for k, v in ls.uploadstreamers.as_dict().items() if v and k != 'id'})
             if self['streamers'][ls.remark].get('tags'):
                 self['streamers'][ls.remark]['tags'] = self['streamers'][ls.remark]['tags']
         # for us in UploadStreamers.select():
@@ -54,7 +56,9 @@ class Config(UserDict):
                 {"template_name": k, "tags": v.pop('tags', ['biliup']), ** v}))
             # us.save()
             Session.add(us)
-            for url in v.pop('url'):
+            url = v.pop('url')
+            urls = url if isinstance(url, list) else [url]  # 兼容 url 输入字符串和列表
+            for url in urls:
                 ls = LiveStreamers(**LiveStreamers.filter_parameters(
                     {"upload_streamers": us, "remark": k, "url": url, ** v}))
                 Session.add(ls)
@@ -130,6 +134,25 @@ class Config(UserDict):
                 old_data["threads"] = self.data["threads"]
                 old_data["streamers"] = self.data["streamers"]
                 yaml.dump(old_data, stream, default_flow_style=False, allow_unicode=True)
+
+    def dump(self, file):
+        """ 转储到旧版配置文件 """
+        if not file:
+            file = 'config.toml'
+        if os.path.exists(file):
+            from datetime import datetime
+            os.rename(file, f'{file}.backup.{datetime.now().strftime("%Y%m%d%H%M%S")}')
+        exclude_keys = ['PluginInfo', 'upload_filename', 'url_upload_count']
+        temp = {k: v for k, v in self.data.items() if k not in exclude_keys}
+        if self.data.get('yaml') or file.endswith(".yaml"):
+            import yaml
+            with open(file, 'w+', encoding='utf-8') as stream:
+                yaml.dump(temp, stream, default_flow_style=False, allow_unicode=True)
+        else:
+            import tomli_w
+            # print(config)
+            with open(file, 'wb') as stream:
+                tomli_w.dump(temp, stream)
 
 
 config = Config()
