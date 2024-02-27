@@ -49,7 +49,7 @@ def arg_parser():
             config.load(args.config)
             config.save_to_db()
         except FileNotFoundError:
-            print(f'新版本不依赖配置文件,请访问 http://ip:{args.port} 修改配置')
+            print(f'新版本不依赖配置文件,请访问 WebUI 修改配置')
     config.load_from_db()
     LOG_CONF.update(config.get('LOGGING', {}))
     if args.verbose:
