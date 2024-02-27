@@ -40,13 +40,13 @@ class Config(UserDict):
         self['streamers'] = {}
         for ls in Session.scalars(select(LiveStreamers)):
             self['streamers'][ls.remark] = {
-                k: v for k, v in ls.as_dict().items() if v and (k not in ['upload_streamers_id', 'id'])}
+                k: v for k, v in ls.as_dict().items() if v and (k not in ['upload_streamers_id', 'id', 'remark'])}
             # self['streamers'][ls.remark].pop('upload_streamers')
             if ls.upload_streamers_id:
                 self['streamers'][ls.remark].update({
-                    k: v for k, v in ls.uploadstreamers.as_dict().items() if v and k != 'id'})
-            if self['streamers'][ls.remark].get('tags'):
-                self['streamers'][ls.remark]['tags'] = self['streamers'][ls.remark]['tags']
+                    k: v for k, v in ls.uploadstreamers.as_dict().items() if v and k not in ['id', 'template_name']})
+            # if self['streamers'][ls.remark].get('tags'):
+            #     self['streamers'][ls.remark]['tags'] = self['streamers'][ls.remark]['tags']
         # for us in UploadStreamers.select():
         #     config.data[con.key] = con.value
 
@@ -56,11 +56,12 @@ class Config(UserDict):
                 {"template_name": k, "tags": v.pop('tags', ['biliup']), ** v}))
             # us.save()
             Session.add(us)
+            Session.flush()
             url = v.pop('url')
             urls = url if isinstance(url, list) else [url]  # 兼容 url 输入字符串和列表
             for url in urls:
                 ls = LiveStreamers(**LiveStreamers.filter_parameters(
-                    {"upload_streamers": us, "remark": k, "url": url, ** v}))
+                    {"upload_streamers_id": us.id, "remark": k, "url": url, ** v}))
                 Session.add(ls)
         del self['streamers']
         configuration = Configuration(key='config', value=json.dumps(self.data))
@@ -141,7 +142,11 @@ class Config(UserDict):
             file = 'config.toml'
         if os.path.exists(file):
             from datetime import datetime
-            os.rename(file, f'{file}.backup.{datetime.now().strftime("%Y%m%d%H%M%S")}')
+            import logging
+            logger = logging.getLogger('biliup')
+            new_name = f'{file}.backup.{datetime.now().strftime("%Y%m%d%H%M%S")}'
+            logger.info(f"{file} 文件已存在，已将原文件重命名为 {new_name}")
+            os.rename(file, new_name)
         exclude_keys = ['PluginInfo', 'upload_filename', 'url_upload_count']
         temp = {k: v for k, v in self.data.items() if k not in exclude_keys}
         if self.data.get('yaml') or file.endswith(".yaml"):
@@ -153,6 +158,7 @@ class Config(UserDict):
             # print(config)
             with open(file, 'wb') as stream:
                 tomli_w.dump(temp, stream)
+        return file
 
 
 config = Config()

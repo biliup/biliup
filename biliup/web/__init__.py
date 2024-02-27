@@ -13,9 +13,8 @@ import biliup.common.reload
 from biliup.config import config
 from biliup.plugins.bili_webup import BiliBili, Data
 from .aiohttp_basicauth_middleware import basic_auth_middleware
-from ..database.db import DB as db
-from ..database.db import Session
-from ..database.models import UploadStreamers, LiveStreamers, Configuration, StreamerInfo
+from biliup.database.db import Session
+from biliup.database.models import UploadStreamers, LiveStreamers, Configuration, StreamerInfo
 
 BiliBili = BiliBili(Data())
 
@@ -406,6 +405,14 @@ async def users(request):
         return web.json_response({"status": 500, 'error': f"有多个空间配置同时存在: {e}"}, status=500)
     config.load_from_db()
     return web.json_response(record.as_dict())
+
+
+@routes.post('/v1/dump')
+async def dump_config(request):
+    json_data = await request.json()
+    config.load_from_db()
+    file = config.dump(json_data['path'])
+    return web.json_response({'path': file})
 
 
 @routes.get('/bili/archive/pre')
