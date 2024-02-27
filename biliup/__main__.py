@@ -31,6 +31,7 @@ def arg_parser():
     parser.add_argument('-v', '--verbose', action="store_const", const=logging.DEBUG, help="Increase output verbosity")
     parser.add_argument('--config', type=argparse.FileType(mode='rb'),
                         help='Location of the configuration file (default "./config.yaml")')
+    parser.add_argument('--no-access-log', action='store_true', help='disable web access log')
     subparsers = parser.add_subparsers(help='Windows does not support this sub-command.')
     # create the parser for the "start" command
     parser_start = subparsers.add_parser('start', help='Run as a daemon process.')
@@ -48,7 +49,7 @@ def arg_parser():
             config.load(args.config)
             config.save_to_db()
         except FileNotFoundError:
-            print(f'新版本不依赖配置文件,请访问 http://ip:{args.port} 修改配置')
+            print(f'新版本不依赖配置文件,请访问 WebUI 修改配置')
     config.load_from_db()
     LOG_CONF.update(config.get('LOGGING', {}))
     if args.verbose:
