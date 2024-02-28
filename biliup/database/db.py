@@ -1,3 +1,4 @@
+import contextvars
 import os
 import time
 from datetime import datetime, timedelta
@@ -17,7 +18,8 @@ from .models import (
 )
 
 session_factory = sessionmaker(bind=engine)
-Session = scoped_session(session_factory)  # 使用线程本地存储会话
+# 使用 Context ID 区分会话
+Session = scoped_session(session_factory, scopefunc=lambda: id(contextvars.copy_context()))
 
 
 def struct_time_to_datetime(date: time.struct_time):
