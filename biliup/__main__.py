@@ -74,10 +74,10 @@ async def main(args):
 
     if not args.no_http:
         import biliup.web
-        runner, site = await biliup.web.service(args)
+        runner = await biliup.web.service(args)
         detector = AutoReload(event_manager, runner.cleanup, check_flag.set, interval=interval)
         biliup.common.reload.global_reloader = detector
-        await asyncio.gather(detector.astart(), site.start())
+        await detector.astart()
     else:
         import biliup.common.reload
         detector = AutoReload(event_manager, check_flag.set, interval=interval)

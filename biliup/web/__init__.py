@@ -1,3 +1,4 @@
+import socket
 import json
 import os
 import pathlib
@@ -527,15 +528,18 @@ async def service(args):
     setup_middlewares(app)
     await runner.setup()
     site = web.TCPSite(runner, host=args.host, port=args.port)
-    print(f'WebUI 已启动，请浏览器访问 http://{"0.0.0.0" if args.host is None else args.host}:{args.port}')
-    return runner, site
+    await site.start()
+    log_startup(args.host, args.port)
+    return runner
 
 
 async def handle_404(request):
     return web.HTTPFound('404')
 
+
 async def handle_500(request):
     return web.json_response({"status": 500, 'error': "Error handling request"}, status=500)
+
 
 def create_error_middleware(overrides):
     @web.middleware
@@ -561,3 +565,46 @@ def setup_middlewares(app):
         500: handle_500,
     })
     app.middlewares.append(error_middleware)
+
+
+def log_startup(host, port) -> None:
+    """Show information about the address when starting the server."""
+    messages = ['WebUI 已启动，请浏览器访问']
+    host = host if host else "0.0.0.0"
+    scheme = "http"
+    display_hostname = host
+
+    if host in {"0.0.0.0", "::"}:
+        messages.append(f" * Running on all addresses ({host})")
+        if host == "0.0.0.0":
+            localhost = "127.0.0.1"
+            display_hostname = get_interface_ip(socket.AF_INET)
+        else:
+            localhost = "[::1]"
+            display_hostname = get_interface_ip(socket.AF_INET6)
+
+        messages.append(f" * Running on {scheme}://{localhost}:{port}")
+
+    if ":" in display_hostname:
+        display_hostname = f"[{display_hostname}]"
+
+    messages.append(f" * Running on {scheme}://{display_hostname}:{port}")
+
+    print("\n".join(messages))
+
+def get_interface_ip(family: socket.AddressFamily) -> str:
+    """Get the IP address of an external interface. Used when binding to
+    0.0.0.0 or ::1 to show a more useful URL.
+
+    :meta private:
+    """
+    # arbitrary private address
+    host = "fd31:f903:5ab5:1::1" if family == socket.AF_INET6 else "10.253.155.219"
+
+    with socket.socket(family, socket.SOCK_DGRAM) as s:
+        try:
+            s.connect((host, 58162))
+        except OSError:
+            return "::1" if family == socket.AF_INET6 else "127.0.0.1"
+
+        return s.getsockname()[0]  # type: ignore
