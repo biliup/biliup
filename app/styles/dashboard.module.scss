@@ -1,4 +1,3 @@
-
 @media screen and (min-width: 640px) {
     .rootConfigPanel {
         align-items: center;
@@ -85,7 +84,7 @@
                                 flex-shrink: 0;
 
                                 .buttonOnlyIconSecond {
-                                    background: #0064faff;
+                                    background: rgb(16, 192, 25);
                                     border-radius: 8px;
                                     height: 20px;
                                     left: 0;
@@ -138,7 +137,7 @@
                                 flex-shrink: 0;
 
                                 .buttonOnlyIconSecond {
-                                    background: #fa0064ff;
+                                    background: rgb(236, 23, 66);
                                     border-radius: 8px;
                                     height: 20px;
                                     left: 0;
@@ -201,13 +200,21 @@
                                 }
 
                                 .buttonOnlyIconSecond {
-                                    background: #fb7299ff;
+                                    background: rgb(47, 76, 206);
                                     border-radius: 8px;
                                     height: 20px;
                                     left: 0;
                                     overflow: hidden;
                                     top: 0;
                                     width: 20px;
+                                    position: absolute;
+                                }
+                                .lineStory {
+                                    height: 15px;
+                                    left: 4.5px;
+                                    overflow: hidden;
+                                    top: 4.1px;
+                                    width: 12px;
                                     position: absolute;
                                 }
                             }
@@ -220,6 +227,67 @@
                         }
                     }
 
+                    .frameDeveloper {
+                        align-items: flex-start;
+                        border-color: rgb(var(--semi-grey-2));
+                        border-radius: 6px;
+                        border-style: solid;
+                        border-width: 1px;
+                        display: flex;
+                        flex-direction: column;
+                        flex-shrink: 0;
+                        padding: 50px;
+                        row-gap: 10px;
+                        align-self: stretch;
+
+                        .frameInside {
+                            align-items: center;
+                            column-gap: 4px;
+                            display: inline-flex;
+                            flex-shrink: 0;
+
+                            .group {
+                                height: 20px;
+                                position: relative;
+                                width: 20px;
+                                flex-shrink: 0;
+
+                                .outlinedVersion {
+                                    height: 10px;
+                                    left: 5px;
+                                    overflow: hidden;
+                                    top: 5px;
+                                    width: 10px;
+                                    position: absolute;
+                                }
+
+                                .buttonOnlyIconSecond {
+                                    background: rgb(200, 109, 5);
+                                    border-radius: 8px;
+                                    height: 20px;
+                                    left: 0;
+                                    overflow: hidden;
+                                    top: 0;
+                                    width: 20px;
+                                    position: absolute;
+                                }
+                                .lineStory {
+                                    height: 15px;
+                                    left: 4.5px;
+                                    overflow: hidden;
+                                    top: 4.1px;
+                                    width: 12px;
+                                    position: absolute;
+                                }
+                            }
+
+                            .meegoSharedWebSettin {
+                                min-width: 68px;
+                                vertical-align: bottom;
+                                flex-shrink: 0;
+                            }
+                        }
+                    }
                     .line {
                         flex-shrink: 0;
                         height: 0;
