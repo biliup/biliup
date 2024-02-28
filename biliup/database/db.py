@@ -38,7 +38,11 @@ class DB:
         """初始化数据库"""
         run = not Path.cwd().joinpath("data/data.sqlite3").exists()
         if no_http and not run:
-            os.remove(DB_PATH)
+            new_name = f'{DB_PATH}.backup'
+            if os.path.exists(new_name):
+                os.remove(new_name)
+            os.rename(DB_PATH, new_name)
+            logger.info(f"旧数据库已备份为: {new_name}")
         BaseModel.metadata.create_all(engine)  # 创建所有表
         return run or cls.migrate() or no_http
 
