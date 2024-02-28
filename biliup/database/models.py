@@ -28,13 +28,13 @@ engine = create_engine(
     # echo=True,  # 显示执行的 SQL 记录, 仅调试用, 发布前请注释
 )
 
-# convention = {
-#     "ix": 'ix_%(column_0_label)s',
-#     "uq": "uq_%(table_name)s_%(column_0_name)s",
-#     "ck": "ck_%(table_name)s_%(constraint_name)s",
-#     "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
-#     "pk": "pk_%(table_name)s"
-# }
+convention = {
+    "ix": 'ix_%(column_0_label)s',
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s"
+}
 
 
 class BaseModel(DeclarativeBase):
@@ -61,7 +61,7 @@ class BaseModel(DeclarativeBase):
         return result
 
 
-# BaseModel.metadata = MetaData(naming_convention=convention)  # 定义命名惯例，用来生成自动迁移脚本
+BaseModel.metadata = MetaData(naming_convention=convention)  # 定义命名惯例，避免生成自动迁移脚本时约束命名报错
 # BaseModel.metadata.reflect(bind=engine)  # 绑定反射会导致表重复定义
 
 

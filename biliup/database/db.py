@@ -5,13 +5,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
 
-from sqlalchemy import Table, select, desc, delete
+from sqlalchemy import select, desc, delete
 from sqlalchemy.orm import sessionmaker, scoped_session
+from alembic import command, config
 
 from .models import (
     DB_PATH,
     engine,
-    logger,
     BaseModel,
     StreamerInfo,
     FileList,
@@ -42,9 +42,10 @@ class DB:
             if os.path.exists(new_name):
                 os.remove(new_name)
             os.rename(DB_PATH, new_name)
-            logger.info(f"旧数据库已备份为: {new_name}")
+            print(f"旧数据库已备份为: {new_name}")  # 在logger加载配置之前执行，只能使用print
         BaseModel.metadata.create_all(engine)  # 创建所有表
-        return run or cls.migrate() or no_http
+        cls.migrate_via_alembic()
+        return run or no_http
 
     @classmethod
     def get_stream_info(cls, name: str) -> dict:
@@ -146,19 +147,31 @@ class DB:
         return [file.file for file in file_list]
 
     @classmethod
-    def migrate(cls) -> bool:
-        """ 自动迁移，通过dump到配置文件再重建数据库实现 """
-        table = Table('uploadstreamers', BaseModel.metadata, autoload_with=engine)
-        columns_name_list = table.c.keys()
-        if 'up_selection_reply' in columns_name_list:  # 暂时使用最后加的列检测，之后改为更优雅的方式
-            return False
-        logger.info(f"检测到旧数据库，正在迁移")
-        from biliup.config import config
-        config.load_from_db()
-        config.dump(None)
-        os.remove(DB_PATH)
-        BaseModel.metadata.create_all(engine)
-        return True
+    def migrate_via_alembic(cls):
+        """ 自动迁移，通过 alembic 实现 """
+        def process_revision_directives(context, revision, directives):
+            """ 如果无改变，不生成迁移脚本 """
+            script = directives[0]
+            if script.upgrade_ops.is_empty():
+                directives[:] = []
+        alembic_cfg = config.Config()
+        # 获取脚本路径
+        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "migration")
+        versions_scripts_path = os.path.join(script_path, 'versions')
+        if not os.path.exists(versions_scripts_path):
+            os.mkdir(versions_scripts_path, 0o700)
+        alembic_cfg.set_main_option('script_location', script_path)
+        command.stamp(alembic_cfg, 'head', purge=True)  # 将当前标记为最新版
+        scripts = command.revision(  # 自动生成迁移脚本
+            alembic_cfg,
+            autogenerate=True,
+            process_revision_directives=process_revision_directives
+        )
+        if not scripts:
+            print("数据库已是最新版本")
+            return
+        command.upgrade(alembic_cfg, 'head')
+        print("检测到旧版数据库，已完成自动迁移")
 
     def backup(self):
         """备份数据库"""
