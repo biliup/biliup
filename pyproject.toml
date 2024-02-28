@@ -27,7 +27,8 @@ dependencies = [
     'importlib-resources; python_version<"3.9"',
     'tomli >= 1.1.0 ; python_version < "3.11"',
     'protobuf >= 4.23.0',
-    "peewee>=3.16.2",
+    "SQLAlchemy>=2.0.27",
+    "alembic>=1.12.1",
 ]
 dynamic = ["version"]
 
@@ -46,7 +47,7 @@ license-files = ["LICENSE"]
 include-package-data = false
 
 [tool.setuptools.package-data]
-biliup = ["common/*.ini", "web/public/**", "web/public/build/*"]
+biliup = ["common/*.ini", "web/public/**", "web/public/build/*", "database/migration/*"]
 
 [tool.setuptools.packages.find]
 include = ["biliup*"]

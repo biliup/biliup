@@ -1,12 +1,25 @@
+import contextvars
+import os
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
 
-from peewee import OperationalError
-from playhouse.shortcuts import model_to_dict
+from sqlalchemy import select, desc, delete
+from sqlalchemy.orm import sessionmaker, scoped_session
+from alembic import command, config
 
-from .models import StreamerInfo, FileList, db, logger, TempStreamerInfo, LiveStreamers, UploadStreamers, Configuration
+from .models import (
+    DB_PATH,
+    engine,
+    BaseModel,
+    StreamerInfo,
+    FileList,
+)
+
+session_factory = sessionmaker(bind=engine)
+# 使用 Context ID 区分会话
+Session = scoped_session(session_factory, scopefunc=lambda: id(contextvars.copy_context()))
 
 
 def struct_time_to_datetime(date: time.struct_time):
@@ -21,36 +34,29 @@ class DB:
     """数据库交互类"""
 
     @classmethod
-    def init(cls):
+    def init(cls, no_http):
         """初始化数据库"""
         run = not Path.cwd().joinpath("data/data.sqlite3").exists()
-        StreamerInfo.create_table_()
-        FileList.create_table_()
-        LiveStreamers.create_table_()
-        UploadStreamers.create_table_()
-        Configuration.create_table_()
-        with db.connection_context():
-            columns_name_list = [column_meta.name for column_meta in db.get_columns('uploadstreamers')]
-        if 'up_selection_reply' not in columns_name_list:
-            logger.error(f"检测到旧数据库，请手动删除data文件夹后重试")
-            return False
-        return run
-
-    @classmethod
-    def connect(cls):
-        """打开数据库连接"""
-        db.connect()
-
-    @classmethod
-    def close(cls):
-        """关闭数据库连接"""
-        db.close()
+        if no_http and not run:
+            new_name = f'{DB_PATH}.backup'
+            if os.path.exists(new_name):
+                os.remove(new_name)
+            os.rename(DB_PATH, new_name)
+            print(f"旧数据库已备份为: {new_name}")  # 在logger加载配置之前执行，只能使用print
+        BaseModel.metadata.create_all(engine)  # 创建所有表
+        cls.migrate_via_alembic()
+        return run or no_http
 
     @classmethod
     def get_stream_info(cls, name: str) -> dict:
         """根据 streamer 获取下载信息, 若不存在则返回空字典"""
-        res = StreamerInfo.get_dict(name=name)
+        res = Session.execute(
+            select(StreamerInfo).
+            filter_by(name=name).
+            order_by(desc(StreamerInfo.id))
+        ).first()
         if res:
+            res = res._asdict()
             res["date"] = datetime_to_struct_time(res["date"])
             return res
         return {}
@@ -58,12 +64,15 @@ class DB:
     @classmethod
     def get_stream_info_by_filename(cls, filename: str) -> dict:
         """通过文件名获取下载信息, 若不存在则返回空字典"""
-        with db.connection_context():
-            try:
-                stream_info = FileList.get(FileList.file == filename).streamer_info
-                stream_info_dict = model_to_dict(stream_info)
-            except FileList.DoesNotExist:
-                return {}
+        try:
+            # stream_info = FileList.get(FileList.file == filename).streamer_info
+            stream_info = Session.execute(
+                select(FileList).
+                where(FileList.file == filename)
+            ).scalar_one().streamerinfo
+            stream_info_dict = stream_info.as_dict()
+        except Exception:
+            return {}
         stream_info_dict = {key: value for key, value in stream_info_dict.items() if value}  # 清除字典中的空元素
         stream_info_dict["date"] = datetime_to_struct_time(stream_info_dict["date"])  # 将开播时间转回 struct_time 类型
         return stream_info_dict
@@ -71,104 +80,98 @@ class DB:
     @classmethod
     def add_stream_info(cls, name: str, url: str, date: time.struct_time) -> int:
         """添加下载信息, 返回所添加行的 id """
-        return StreamerInfo.add(
+        streamerinfo = StreamerInfo(
             name=name,
             url=url,
             date=struct_time_to_datetime(date),
             title="",
             live_cover_path="",
         )
+        Session.add(streamerinfo)
+        Session.commit()
+        return streamerinfo.id
 
     @classmethod
     def delete_stream_info(cls, name: str) -> int:
         """根据 streamer 删除下载信息, 返回删除的行数, 若不存在则返回 0 """
-        return StreamerInfo.delete_(name=name)
+        result = Session.execute(
+            delete(StreamerInfo).where(StreamerInfo.name == name))
+        Session.commit()
+        return result.rowcount()
 
     @classmethod
     def delete_stream_info_by_date(cls, name: str, date: time.struct_time) -> int:
         """根据 streamer 和开播时间删除下载信息, 返回删除的行数, 若不存在则返回 0 """
         start_datetime = struct_time_to_datetime(date)
-        with db.atomic():
-            dq = StreamerInfo.delete().where(
-                (StreamerInfo.name == name) &
-                (StreamerInfo.date.between(  # 传入的开播时间前后一分钟内都可以匹配
-                    start_datetime - timedelta(minutes=1),
-                    start_datetime + timedelta(minutes=1)))
-            )
-            return dq.execute()
+        stmt = delete(StreamerInfo).where(
+            (StreamerInfo.name == name),
+            StreamerInfo.date.between(
+                start_datetime - timedelta(minutes=1),
+                start_datetime + timedelta(minutes=1)),
+        )
+        result = Session.execute(stmt)
+        Session.commit()
+        return result.rowcount()
 
     @classmethod
     def update_cover_path(cls, database_row_id: int, live_cover_path: str):
         """更新封面存储路径"""
         if not live_cover_path:
             live_cover_path = ""
-        with db.atomic():
-            return StreamerInfo.update(
-                live_cover_path=live_cover_path
-            ).where(StreamerInfo.id == database_row_id).execute()
+        streamerinfo = Session.scalar(select(StreamerInfo).where(StreamerInfo.id == database_row_id))
+        streamerinfo.live_cover_path = live_cover_path
+        Session.commit()
 
     @classmethod
     def update_room_title(cls, database_row_id: int, title: str):
         """更新直播标题"""
         if not title:
             title = ""
-        with db.atomic():
-            return StreamerInfo.update(
-                title=title
-            ).where(StreamerInfo.id == database_row_id).execute()
+        streamerinfo = Session.get(StreamerInfo, database_row_id)
+        streamerinfo.title = title
+        Session.commit()
 
     @classmethod
     def update_file_list(cls, database_row_id: int, file_name: str) -> int:
         """向视频文件列表中添加文件名"""
-        streamer_info = StreamerInfo.get_by_id_(database_row_id)
-        return FileList.add(
-            file=file_name,
-            streamer_info=streamer_info
-        )
+        streamer_info = Session.get(StreamerInfo, database_row_id)
+        file_list = FileList(file=file_name, streamer_info_id=streamer_info.id)
+        Session.add(file_list)
+        Session.commit()
+        return file_list.id
 
     @classmethod
     def get_file_list(cls, database_row_id: int) -> List[str]:
         """获取视频文件列表"""
-        file_list = StreamerInfo.get_by_id_(database_row_id).file_list
+        file_list = Session.get(StreamerInfo, database_row_id).filelist
         return [file.file for file in file_list]
 
     @classmethod
-    def migrate_streamer_info(cls):
-        """迁移旧版数据库中数据到新版"""
-        logger.info("检测到旧版数据表，正在自动迁移")
-        with db.atomic():
-            # 创建新的临时表格
-            TempStreamerInfo.create_table()
-            # 将数据从原表格拷贝到新表格
-            db.execute_sql(
-                'INSERT INTO temp_streamer_info (name, url, title, date, live_cover_path) SELECT name, url, title, date, live_cover_path FROM streamerinfo')
-            # 删除原表格
-            StreamerInfo.drop_table()
-            # 将新表格重命名为原表格的名字
-            db.execute_sql('ALTER TABLE temp_streamer_info RENAME TO streamerinfo')
-
-    @classmethod
-    def update_live_streamer(
-            cls, id, url, remark,
-            filename_prefix=None,
-            upload_streamers=None,
-            format=None,
-            preprocessor=None,
-            downloaded_processor=None,
-            postprocessor=None,
-            opt_args=None, **kwargs):
-        """ 更新 LiveStreamers 表中的数据, 增加一层包装避免多余参数报错 """
-        LiveStreamers.update(
-            url=url,
-            remark=remark,
-            filename_prefix=filename_prefix,
-            upload_streamers=upload_streamers,
-            format=format,
-            preprocessor=preprocessor,
-            downloaded_processor=downloaded_processor,
-            postprocessor=postprocessor,
-            opt_args=opt_args,
-        ).where(LiveStreamers.id == id).execute()
+    def migrate_via_alembic(cls):
+        """ 自动迁移，通过 alembic 实现 """
+        def process_revision_directives(context, revision, directives):
+            """ 如果无改变，不生成迁移脚本 """
+            script = directives[0]
+            if script.upgrade_ops.is_empty():
+                directives[:] = []
+        alembic_cfg = config.Config()
+        # 获取脚本路径
+        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "migration")
+        versions_scripts_path = os.path.join(script_path, 'versions')
+        if not os.path.exists(versions_scripts_path):
+            os.mkdir(versions_scripts_path, 0o700)
+        alembic_cfg.set_main_option('script_location', script_path)
+        command.stamp(alembic_cfg, 'head', purge=True)  # 将当前标记为最新版
+        scripts = command.revision(  # 自动生成迁移脚本
+            alembic_cfg,
+            autogenerate=True,
+            process_revision_directives=process_revision_directives
+        )
+        if not scripts:
+            print("数据库已是最新版本")
+            return
+        command.upgrade(alembic_cfg, 'head')
+        print("检测到旧版数据库，已完成自动迁移")
 
     def backup(self):
         """备份数据库"""
