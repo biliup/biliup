@@ -393,19 +393,22 @@ async def users(request):
         # record = Configuration.get(Configuration.key == 'config')
         record = Session.execute(
             select(Configuration).where(Configuration.key == 'config')
-        ).scalar_one()
+        ).scalar_one()  # 判断是否只有一行空间配置
         record.value = json.dumps(json_data)
-        Session.commit()
+        Session.flush()
+        resp = record.as_dict()
         # to_save = Configuration(key='config', value=json.dumps(json_data), id=record.id)
-    except NoResultFound:
+    except NoResultFound:  # 如果数据库中没有空间配置行，新建
         to_save = Configuration(key='config', value=json.dumps(json_data))
         # to_save.save()
         Session.add(to_save)
-        return web.json_response(to_save.as_dict())
-    except MultipleResultsFound as e:
+        Session.flush()
+        resp = to_save.as_dict()
+    except MultipleResultsFound as e:  # 如果有多行，报错
         return web.json_response({"status": 500, 'error': f"有多个空间配置同时存在: {e}"}, status=500)
+    Session.commit()
     config.load_from_db()
-    return web.json_response(record.as_dict())
+    return web.json_response(resp)
 
 
 @routes.post('/v1/dump')
