@@ -395,17 +395,20 @@ async def users(request):
             select(Configuration).where(Configuration.key == 'config')
         ).scalar_one()
         record.value = json.dumps(json_data)
-        Session.commit()
+        Session.flush()
+        resp = record.as_dict()
         # to_save = Configuration(key='config', value=json.dumps(json_data), id=record.id)
     except NoResultFound:
         to_save = Configuration(key='config', value=json.dumps(json_data))
         # to_save.save()
         Session.add(to_save)
-        return web.json_response(to_save.as_dict())
+        Session.flush()
+        resp = to_save.as_dict()
     except MultipleResultsFound as e:
         return web.json_response({"status": 500, 'error': f"有多个空间配置同时存在: {e}"}, status=500)
+    Session.commit()
     config.load_from_db()
-    return web.json_response(record.as_dict())
+    return web.json_response(resp)
 
 
 @routes.post('/v1/dump')

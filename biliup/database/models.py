@@ -44,6 +44,9 @@ class BaseModel(DeclarativeBase):
         temp = copy.deepcopy(self.__dict__)  # 深复制避免对原数据影响
         result = dict()
         for key, value in temp.items():  # 遍历删除不能被 json 序列化的键值对
+            if isinstance(value, datetime):  # 特殊处理，保留 datetime
+                result[key] = value
+                continue
             try:
                 json.dumps(value)
                 result[key] = value
