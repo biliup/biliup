@@ -44,11 +44,9 @@ import { DropDownMenuItem } from "@douyinfe/semi-ui/lib/es/dropdown";
 import { LiveStreamerEntity } from "./lib/api-streamer";
 
 const Home: React.FC = () => (
-    <div className="Home">
-        <h1 style={{ fontSize: "60px", textAlign: "center" }}>
-            Hello, Welcome to biliup!
-        </h1>
-    </div>
+    <iframe style={{
+        borderWidth: 0
+    }} height="100%" src='https://biliup.github.io/biliup/docs/guide/changelog/'></iframe>
 );
 
 export default Home;
