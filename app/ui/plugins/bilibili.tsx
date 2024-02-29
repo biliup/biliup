@@ -50,6 +50,7 @@ const Bilibili: React.FC<Props> = (props) => {
                             <a
                                 href="https://rec.danmuji.org/dev/bilibili-cdn/"
                                 title="哔哩哔哩CND列表"
+                                target="_blank"
                             >
                                 哔哩哔哩CND列表
                             </a>
@@ -63,7 +64,8 @@ const Bilibili: React.FC<Props> = (props) => {
                             api.live.bilibili.com 。或者使用「
                             <a
                                 href="https://docs.qq.com/doc/DV2dvbXBrckNscU9x"
-                                title="哔哩哔哩CND列表"
+                                title="录播姬反代API文档"
+                                target="_blank"
                             >
                                 录播姬反代API文档
                             </a>

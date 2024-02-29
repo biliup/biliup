@@ -10,6 +10,9 @@ import {
     Avatar,
     Select,
     Space,
+    Toast,
+    Notification,
+    Typography,
 } from "@douyinfe/semi-ui";
 import { registerMediaQuery, responsiveMap } from "@/app/lib/utils";
 import { IconPlusCircle, IconStar, IconGlobe } from "@douyinfe/semi-icons";
@@ -108,7 +111,28 @@ const Dashboard: React.FC = () => {
                     }
                     footer={
                         <Button
-                            onClick={() => formRef.current?.submitForm()}
+                            onClick={() => {
+                                try {
+                                    formRef.current?.submitForm();
+                                    Toast.success("保存成功");
+                                } catch (e: any) {
+                                    // error handling
+                                    Notification.error({
+                                        title: "保存失败",
+                                        content: (
+                                            <Typography
+                                                style={{ maxWidth: 450 }}
+                                            >
+                                                {e.message}
+                                            </Typography>
+                                        ),
+                                        // theme: 'light',
+                                        // duration: 0,
+                                        style: { width: "min-content" },
+                                    });
+                                    throw e;
+                                }
+                            }}
                             icon={<IconPlusCircle />}
                             theme="solid"
                             style={{ marginRight: 10 }}
@@ -182,6 +206,7 @@ const Dashboard: React.FC = () => {
                                         <Cookie entity={entity} list={list} />
                                     </Collapse>
                                 </div>
+                                <Space />
                                 {/* 开发者选项 */}
                                 <Developer />
                                 <Space style={{ height: "160px" }} />

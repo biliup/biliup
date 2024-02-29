@@ -21,6 +21,7 @@ const Cookie: React.FC<Props> = (props) => {
                             <a
                                 href="https://github.com/biliup/biliup-rs"
                                 title="「biliup-rs」 Github 项目主页"
+                                target="_blank"
                             >
                                 biliup-rs
                             </a>
