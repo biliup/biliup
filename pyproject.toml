@@ -27,7 +27,7 @@ dependencies = [
     'importlib-resources; python_version<"3.9"',
     'tomli >= 1.1.0 ; python_version < "3.11"',
     'protobuf >= 4.23.0',
-    "SQLAlchemy>=2.0.27",
+    "SQLAlchemy>=2.0.0",
     "alembic>=1.12.1",
 ]
 dynamic = ["version"]
