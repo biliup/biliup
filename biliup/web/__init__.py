@@ -353,6 +353,7 @@ async def users(request):
     to_save = Configuration(key=json_data['platform'], value=json_data['value'])
     Session.add(to_save)
     # to_save.save()
+    Session.flush()
     resp = {
         'id': to_save.id,
         'name': to_save.value,

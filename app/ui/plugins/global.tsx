@@ -49,8 +49,8 @@ const Global: React.FC = () => {
                         padding: 0,
                     }}
                 >
-                    <Select.Option value="steamlink">
-                        steamlink（混合模式）
+                    <Select.Option value="streamlink">
+                        streamlink（混合模式）
                     </Select.Option>
                     <Select.Option value="ffmpeg">ffmpeg</Select.Option>
                     <Select.Option value="stream-gears">
