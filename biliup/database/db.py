@@ -17,7 +17,7 @@ from .models import (
     FileList,
 )
 
-session_factory = sessionmaker(bind=engine)
+session_factory = sessionmaker(bind=engine, autoflush=False)
 # 使用 Context ID 区分会话
 Session = scoped_session(session_factory, scopefunc=lambda: id(contextvars.copy_context()))
 
