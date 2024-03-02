@@ -20,47 +20,47 @@ top = false
 - ⚠️需要手动操作的更新信息
 
 ## 0.4.39
-* 修复少量bug by @boxie123 in https://github.com/biliup/biliup/pull/832
+* 修复少量bug by @boxie123 in [#832](https://github.com/biliup/biliup/pull/832)
 
 
-**Full Changelog**: https://github.com/biliup/biliup/compare/v0.4.38...v0.4.39
+**Full Changelog**: [v0.4.38...v0.4.39](https://github.com/biliup/biliup/compare/v0.4.38...v0.4.39)
 
 ## 0.4.38
-* WebUI交互优化 by @alpzmj9 in https://github.com/biliup/biliup/pull/826
-* Fix: datetime被过滤、新建空间配置无法保存 by @boxie123 in https://github.com/biliup/biliup/pull/827
+* WebUI交互优化 by @alpzmj9 in [#826](https://github.com/biliup/biliup/pull/826)
+* Fix: datetime被过滤、新建空间配置无法保存 by @boxie123 in [#827](https://github.com/biliup/biliup/pull/827)
 
 
-**Full Changelog**: https://github.com/biliup/biliup/compare/v0.4.37...v0.4.38
+**Full Changelog**: [v0.4.37...v0.4.38](https://github.com/biliup/biliup/compare/v0.4.37...v0.4.38)
 
 ## 0.4.37
-* 紧急修复`URL build`报错 by @boxie123 in https://github.com/biliup/biliup/pull/823
-* UI代码组件化，修复部分选项BUG，文字表述优化，新增日志配置项。 by @alpzmj9 in https://github.com/biliup/biliup/pull/822
-* Refactoring database using sqlalchemy by @boxie123 in https://github.com/biliup/biliup/pull/818
+* 紧急修复`URL build`报错 by @boxie123 in [#823](https://github.com/biliup/biliup/pull/823)
+* UI代码组件化，修复部分选项BUG，文字表述优化，新增日志配置项。 by @alpzmj9 in [#822](https://github.com/biliup/biliup/pull/822)
+* Refactoring database using sqlalchemy by @boxie123 in [#818](https://github.com/biliup/biliup/pull/818)
 
 
-**Full Changelog**: https://github.com/biliup/biliup/compare/v0.4.36...v0.4.37
+**Full Changelog**: [v0.4.36...v0.4.37](https://github.com/biliup/biliup/compare/v0.4.36...v0.4.37)
 
 ## 0.4.36
-* 修复码率类型错误、部分选项默认开启、投稿标签添加限制 by @boxie123 in https://github.com/biliup/biliup/pull/815
-* 保证生成的视频文件后缀为小写 by @Kataick in https://github.com/biliup/biliup/pull/813
-* 增加找不到 cookies 时文件时未知提示 by @buyfakett in https://github.com/biliup/biliup/pull/816
-* Fix: refined the webui. by @alpzmj9 in https://github.com/biliup/biliup/pull/817
-* 添加--no-access-log参数、修改webui启动提示 by @boxie123 in https://github.com/biliup/biliup/pull/821
+* 修复码率类型错误、部分选项默认开启、投稿标签添加限制 by @boxie123 in [#815](https://github.com/biliup/biliup/pull/815)
+* 保证生成的视频文件后缀为小写 by @Kataick in [#813](https://github.com/biliup/biliup/pull/813)
+* 增加找不到 cookies 时文件时未知提示 by @buyfakett in [#816](https://github.com/biliup/biliup/pull/816)
+* Fix: refined the webui. by @alpzmj9 in [#817](https://github.com/biliup/biliup/pull/817)
+* 添加--no-access-log参数、修改webui启动提示 by @boxie123 in [#821](https://github.com/biliup/biliup/pull/821)
 
 ### New Contributors
-* @buyfakett made their first contribution in https://github.com/biliup/biliup/pull/816
-* @alpzmj9 made their first contribution in https://github.com/biliup/biliup/pull/817
+* @buyfakett made their first contribution in [#816](https://github.com/biliup/biliup/pull/816)
+* @alpzmj9 made their first contribution in [#817](https://github.com/biliup/biliup/pull/817)
 
-**Full Changelog**: https://github.com/biliup/biliup/compare/v0.4.35...v0.4.36
+**Full Changelog**: [v0.4.35...v0.4.36](https://github.com/biliup/biliup/compare/v0.4.35...v0.4.36)
 
 ## 0.4.35
-* 添加 webui 缺失的配置项，修复账号信息显示问题 by @boxie123 in https://github.com/biliup/biliup/pull/792
-* Fix: 上传插件和简介艾特无法取消选择、分段大小单位错误 by @boxie123 in https://github.com/biliup/biliup/pull/796
-* Fix: Twitch录制报错 by @boxie123 in https://github.com/biliup/biliup/pull/800
-* 修复webui的某些输入框类型问题 by @Kataick in https://github.com/biliup/biliup/pull/814
+* 添加 webui 缺失的配置项，修复账号信息显示问题 by @boxie123 in [#792](https://github.com/biliup/biliup/pull/792)
+* Fix: 上传插件和简介艾特无法取消选择、分段大小单位错误 by @boxie123 in [#796](https://github.com/biliup/biliup/pull/796)
+* Fix: Twitch录制报错 by @boxie123 in [#800](https://github.com/biliup/biliup/pull/800)
+* 修复webui的某些输入框类型问题 by @Kataick in [#814](https://github.com/biliup/biliup/pull/814)
 
 
-**Full Changelog**: https://github.com/biliup/biliup/compare/v0.4.34...v0.4.35
+**Full Changelog**: [v0.4.34...v0.4.35](https://github.com/biliup/biliup/compare/v0.4.34...v0.4.35)
 
 ## 0.4.34
 - 更新时间：2024.01.27

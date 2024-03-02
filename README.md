@@ -34,7 +34,7 @@ Twitch，YY直播等，并于录制结束后自动上传到哔哩哔哩视频网
 
 **更新日志**：[CHANGELOG.md](https://biliup.github.io/biliup/docs/guide/changelog)
 
-**文档地址**：<https://biliup.github.io/biliup/docs/guide/introduction/>
+**文档地址**：[DOCS.md](https://biliup.github.io/biliup/docs/guide/introduction/)
 
 ## Quick Start
 
