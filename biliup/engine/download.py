@@ -186,6 +186,7 @@ class DownloadBase:
         # 将文件名和直播标题存储到数据库
         db.update_file_list(self.database_row_id, file_name)
         db.update_room_title(self.database_row_id, self.room_title)
+        db.close()
         retval = self.download(file_name)
         self.rename(f'{file_name}.{self.suffix}')
         return retval
@@ -208,6 +209,7 @@ class DownloadBase:
             'date': date,
         }
         self.database_row_id = db.add_stream_info(**stream_info)  # 返回数据库中此行记录的 id
+        db.close()
 
         while True:
             ret = False
@@ -264,6 +266,7 @@ class DownloadBase:
         self.download_cover(time.strftime(self.get_filename().encode("unicode-escape").decode(), date).encode().decode("unicode-escape"))
         # 更新数据库中封面存储路径
         db.update_cover_path(self.database_row_id, self.live_cover_path)
+        db.remove()
         logger.info(f'退出下载：{self.__class__.__name__} - {self.fname}')
         stream_info = {
             'name': self.fname,

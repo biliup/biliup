@@ -132,6 +132,7 @@ def process_upload(stream_info):
             data, _ = fmt_title_and_desc({
                 **DB.get_stream_info_by_filename(os.path.splitext(file_list[0].video)[0]),
                 "name": name})  # 如果 restart, data 中会缺失 name 项
+            DB.remove()
             stream_info.update(data)
         filelist = upload(stream_info)
         if filelist:

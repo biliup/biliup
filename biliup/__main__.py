@@ -50,6 +50,7 @@ def arg_parser():
         except FileNotFoundError:
             print(f'新版本不依赖配置文件,请访问 WebUI 修改配置')
     config.load_from_db()
+    db.remove()
     LOG_CONF.update(config.get('LOGGING', {}))
     if args.verbose:
         LOG_CONF['loggers']['biliup']['level'] = args.verbose
