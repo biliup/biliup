@@ -457,14 +457,6 @@ def find_all_folders(directory):
     return result
 
 
-@web.middleware
-async def get_session(request, handler):
-    """ 中间件，用来在请求结束时关闭对应线程会话 """
-    resp = await handler(request)
-    Session.remove()
-    return resp
-
-
 async def service(args):
     try:
         from importlib.resources import files
@@ -472,7 +464,7 @@ async def service(args):
         # Try backported to PY<37 `importlib_resources`.
         from importlib_resources import files
 
-    app = web.Application(middlewares=[get_session])
+    app = web.Application()
     app.add_routes([
         web.get('/api/check_tag', tag_check),
         web.get('/url-status', url_status),
@@ -559,6 +551,8 @@ def create_error_middleware(overrides):
         except Exception:
             request.protocol.logger.exception("Error handling request")
             return await overrides[500](request)
+        finally:
+            Session.remove()
 
     return error_middleware
 
@@ -595,6 +589,7 @@ def log_startup(host, port) -> None:
     messages.append(f" * Running on {scheme}://{display_hostname}:{port}")
 
     print("\n".join(messages))
+
 
 def get_interface_ip(family: socket.AddressFamily) -> str:
     """Get the IP address of an external interface. Used when binding to
