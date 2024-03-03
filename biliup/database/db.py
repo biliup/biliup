@@ -48,6 +48,16 @@ class DB:
         return run or no_http
 
     @classmethod
+    def close(cls):
+        """ 关闭 Session, 释放连接到连接池 """
+        Session.close()
+
+    @classmethod
+    def remove(cls):
+        """ 释放连接, 并删除注册表中的 Session """
+        Session.remove()
+
+    @classmethod
     def get_stream_info(cls, name: str) -> dict:
         """根据 streamer 获取下载信息, 若不存在则返回空字典"""
         res = Session.execute(
