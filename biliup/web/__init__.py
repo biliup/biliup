@@ -422,15 +422,21 @@ async def dump_config(request):
 
 @routes.get('/bili/archive/pre')
 async def pre_archive(request):
-    path = 'cookies.json'
+    # path = 'cookies.json'
     # conf = Configuration.get_or_none(Configuration.key == 'bilibili-cookies')
-    conf = Session.scalars(
-        select(Configuration).where(Configuration.key == 'bilibili-cookies')).first()
-    if conf is not None:
+    confs = Session.scalars(
+        select(Configuration).where(Configuration.key == 'bilibili-cookies'))
+    # if conf is not None:
+    #     path = conf.value
+    for conf in confs:
         path = conf.value
-    config.load_cookies(path)
-    cookies = config.data['user']['cookies']
-    return web.json_response(BiliBili.tid_archive(cookies))
+        try:
+            config.load_cookies(path)
+            cookies = config.data['user']['cookies']
+            return web.json_response(BiliBili.tid_archive(cookies))
+        except:
+            continue
+    return web.json_response({"status": 500, 'error': "无可用 cookie 文件"}, status=500)
 
 
 @routes.get('/bili/space/myinfo')
