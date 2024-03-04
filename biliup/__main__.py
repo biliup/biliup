@@ -12,7 +12,7 @@ from pathlib import Path
 import biliup.common.reload
 from biliup.common.timer import Timer
 from biliup.config import config
-from biliup.database import DB as db
+from biliup.database.db import SessionLocal, init
 from . import __version__, LOG_CONF
 from .common.Daemon import Daemon
 from .common.reload import AutoReload
@@ -43,14 +43,15 @@ def arg_parser():
     args = parser.parse_args()
     biliup.common.reload.program_args = args.__dict__
     # 初始化数据库
-    if db.init(args.no_http):
-        try:
-            config.load(args.config)
-            config.save_to_db()
-        except FileNotFoundError:
-            print(f'新版本不依赖配置文件,请访问 WebUI 修改配置')
-    config.load_from_db()
-    db.remove()
+    with SessionLocal() as db:
+        if init(args.no_http):
+            try:
+                config.load(args.config)
+                config.save_to_db(db)
+            except FileNotFoundError:
+                print(f'新版本不依赖配置文件,请访问 WebUI 修改配置')
+        config.load_from_db(db)
+    # db.remove()
     LOG_CONF.update(config.get('LOGGING', {}))
     if args.verbose:
         LOG_CONF['loggers']['biliup']['level'] = args.verbose

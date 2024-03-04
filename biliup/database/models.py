@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 from sqlalchemy import create_engine, ForeignKey, JSON, TEXT, MetaData
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import Mapped, mapped_column, relationship, DeclarativeBase
 
 logger = logging.getLogger('biliup')
 
@@ -24,7 +25,7 @@ DB_PATH = get_path('data.sqlite3')
 DB_URL = f"sqlite:///{DB_PATH}"  # 数据库 URL, 使用默认 DBAPI
 
 engine = create_engine(
-    DB_URL,
+    DB_URL, connect_args={"check_same_thread": False}
     # echo=True,  # 显示执行的 SQL 记录, 仅调试用, 发布前请注释
 )
 
@@ -36,7 +37,7 @@ convention = {
     "pk": "pk_%(table_name)s"
 }
 
-
+# Base = declarative_base()
 class BaseModel(DeclarativeBase):
     """ 数据库表模型基类 """
     def as_dict(self):

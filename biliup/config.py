@@ -6,7 +6,6 @@ from collections import UserDict
 from sqlalchemy import select
 
 from biliup.database.models import Configuration, LiveStreamers, UploadStreamers
-from biliup.database.db import Session
 
 try:
     import tomllib
@@ -27,18 +26,18 @@ class Config(UserDict):
                 self.data["user"]["cookies"][name] = i["value"]
             self.data["user"]["access_token"] = s["token_info"]["access_token"]
 
-    def load_from_db(self):
+    def load_from_db(self, db):
         context = {
             'url_upload_count': self.data.get('url_upload_count', {}),
             'upload_filename': self.data.get('upload_filename', []),
             'PluginInfo': self.data.get('PluginInfo')
         }
 
-        for con in Session.execute(select(Configuration.value).where(Configuration.key == 'config')):
+        for con in db.execute(select(Configuration.value).where(Configuration.key == 'config')):
             self.data = json.loads(con.value)
         self.data.update(context)
         self['streamers'] = {}
-        for ls in Session.scalars(select(LiveStreamers)):
+        for ls in db.scalars(select(LiveStreamers)):
             self['streamers'][ls.remark] = {
                 k: v for k, v in ls.as_dict().items() if v and (k not in ['upload_streamers_id', 'id', 'remark'])}
             # self['streamers'][ls.remark].pop('upload_streamers')
@@ -50,23 +49,23 @@ class Config(UserDict):
         # for us in UploadStreamers.select():
         #     config.data[con.key] = con.value
 
-    def save_to_db(self):
+    def save_to_db(self, db):
         for k, v in self['streamers'].items():
             us = UploadStreamers(**UploadStreamers.filter_parameters(
                 {"template_name": k, "tags": v.pop('tags', ['biliup']), ** v}))
             # us.save()
-            Session.add(us)
-            Session.flush()
+            db.add(us)
+            # db.flush(us)
             url = v.pop('url')
             urls = url if isinstance(url, list) else [url]  # 兼容 url 输入字符串和列表
             for url in urls:
                 ls = LiveStreamers(**LiveStreamers.filter_parameters(
                     {"upload_streamers_id": us.id, "remark": k, "url": url, ** v}))
-                Session.add(ls)
+                db.add(ls)
         del self['streamers']
         configuration = Configuration(key='config', value=json.dumps(self.data))
-        Session.add(configuration)
-        Session.commit()
+        db.add(configuration)
+        db.commit()
 
     def load(self, file):
         import yaml

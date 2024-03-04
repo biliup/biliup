@@ -27,16 +27,14 @@ export function useBiliUsers() {
   const [list, setList] = useState<any[]>([]);
   useEffect(() => {
     if (!data || data.length === 0) {
-      setList([]);
       return;
     }
-  
     const updateList = async (item: User) => {
       try {
         const res = await fetcher(`/bili/space/myinfo?user=${item.value}`, undefined);
         const pRes = await proxy(`/bili/proxy?url=${res.data.face}`);
         const myBlob = await pRes.blob();
-    
+
         return {
           ...item,
           name: res.data.name,
@@ -53,15 +51,9 @@ export function useBiliUsers() {
         };
       }
     };
-  
-    const updateData = async (data: User[]) => {
-      const updatedList = await Promise.all(data.map(updateList));
-      setList(updatedList);
-    };
-  
-    updateData(data);
-  }, [data]);
-  
+    Promise.all(data.map(updateList)).then(setList);
+  }, [data])
+
   return {
     isLoading,
     isError: error,

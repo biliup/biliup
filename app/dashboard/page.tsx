@@ -43,33 +43,40 @@ const Dashboard: React.FC = () => {
     } = useSWR("/v1/configuration", fetcher);
     const { trigger } = useSWRMutation("/v1/configuration", put);
     const formRef = useRef<FormApi>();
-    const [formKey, setFormKey] = useState(0); // 初始化一个key
-
+    // const [formKey, setFormKey] = useState(0); // 初始化一个key
     // 触发表单重新挂载
-    const remountForm = () => {
-        setFormKey((prevKey) => prevKey + 1); // 更新key的值
-    };
+    // const remountForm = () => {
+    //     setFormKey((prevKey) => prevKey + 1); // 更新key的值
+    // };
 
-    const [labelPosition, setLabelPosition] = useState<
-        "top" | "left" | "inset"
-    >("inset");
-    useEffect(() => {
-        const unRegister = registerMediaQuery(responsiveMap.lg, {
-            match: () => {
-                setLabelPosition("left");
-            },
-            unmatch: () => {
-                setLabelPosition("top");
-            },
-        });
-        return () => unRegister();
-    }, []);
+    // const [labelPosition, setLabelPosition] = useState<
+    //     "top" | "left" | "inset"
+    // >("inset");
+    // useEffect(() => {
+    //     const unRegister = registerMediaQuery(responsiveMap.lg, {
+    //         match: () => {
+    //             setLabelPosition("left");
+    //         },
+    //         unmatch: () => {
+    //             setLabelPosition("top");
+    //         },
+    //     });
+    //     return () => unRegister();
+    // }, []);
 
-    useEffect(() => {
-        remountForm();
-    }, [entity]);
+    // useEffect(() => {
+    //     remountForm();
+    // }, [entity]);
 
     const { biliUsers } = useBiliUsers();
+
+    if (isLoading) {
+        return <>Loading</>
+    }
+    if (error) {
+        return <>{error}</>
+    }
+
     const list = biliUsers?.map((item) => {
         return {
             value: item.value,
@@ -112,26 +119,7 @@ const Dashboard: React.FC = () => {
                     footer={
                         <Button
                             onClick={() => {
-                                try {
                                     formRef.current?.submitForm();
-                                    Toast.success("保存成功");
-                                } catch (e: any) {
-                                    // error handling
-                                    Notification.error({
-                                        title: "保存失败",
-                                        content: (
-                                            <Typography
-                                                style={{ maxWidth: 450 }}
-                                            >
-                                                {e.message}
-                                            </Typography>
-                                        ),
-                                        // theme: 'light',
-                                        // duration: 0,
-                                        style: { width: "min-content" },
-                                    });
-                                    throw e;
-                                }
                             }}
                             icon={<IconPlusCircle />}
                             theme="solid"
@@ -149,10 +137,29 @@ const Dashboard: React.FC = () => {
                         <div className={styles.content}>
                             <Form
                                 className={styles.form}
-                                key={formKey}
+                                // key={formKey}
                                 initValues={entity}
                                 onSubmit={async (values) => {
-                                    await trigger(values);
+                                    try {
+                                        await trigger(values);
+                                            Toast.success("保存成功");
+                                    } catch (e: any) {
+                                        // error handling
+                                        Notification.error({
+                                            title: "保存失败",
+                                            content: (
+                                                <Typography
+                                                    style={{ maxWidth: 450 }}
+                                                >
+                                                    {e.message}
+                                                </Typography>
+                                            ),
+                                            // theme: 'light',
+                                            // duration: 0,
+                                            style: { width: "min-content" },
+                                        });
+                                        throw e;
+                                    }
                                 }}
                                 getFormApi={(formApi) =>
                                     (formRef.current = formApi)

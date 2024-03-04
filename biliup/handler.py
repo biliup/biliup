@@ -12,11 +12,11 @@ from typing import List
 from biliup.config import config
 from .app import event_manager, context
 from .common.tools import NamedLock
+from .database.db import get_stream_info_by_filename, SessionLocal
 from .downloader import download, send_upload_event
 from .engine.event import Event
 from .engine.upload import UploadBase
 from .uploader import upload, fmt_title_and_desc
-from biliup.database import DB
 
 CHECK = 'check'
 PRE_DOWNLOAD = 'pre_download'
@@ -30,6 +30,7 @@ logger = logging.getLogger('biliup')
 @event_manager.register(CHECK, block='Asynchronous1')
 def singleton_check(platform, name, url):
     from .plugins.twitch import Twitch
+    context['url_upload_count'].setdefault(url, 0)
     if platform == Twitch:
         # 如果支持批量检测，目前只有一个支持，第一版先写死按照特例处理
         for turl in Twitch.batch_check.__func__(Twitch.url_list):
@@ -45,7 +46,6 @@ def singleton_check(platform, name, url):
     with NamedLock(f"upload_count_{url}"):
         # from .handler import event_manager, UPLOAD
         # += 不是原子操作
-        context['url_upload_count'].setdefault(url, 0)
         context['url_upload_count'][url] += 1
         yield Event(UPLOAD, ({'name': name, 'url': url},))
     if platform(name, url).check_stream(True):
@@ -129,10 +129,10 @@ def process_upload(stream_info):
             logger.debug("无需上传")
             return
         if ("title" not in stream_info) or (not stream_info["title"]):  # 如果 data 中不存在标题, 说明下载信息已丢失, 则尝试从数据库获取
-            data, _ = fmt_title_and_desc({
-                **DB.get_stream_info_by_filename(os.path.splitext(file_list[0].video)[0]),
-                "name": name})  # 如果 restart, data 中会缺失 name 项
-            DB.remove()
+            with SessionLocal() as db:
+                data, _ = fmt_title_and_desc({
+                    **get_stream_info_by_filename(db, os.path.splitext(file_list[0].video)[0]),
+                    "name": name})  # 如果 restart, data 中会缺失 name 项
             stream_info.update(data)
         filelist = upload(stream_info)
         if filelist:
