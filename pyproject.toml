@@ -8,10 +8,10 @@ authors = [{ name = "ForgQi" }]
 description = "stream download and upload"
 keywords = ["bilibili douyu huya"]
 urls = { Homepage = "https://github.com/ForgQi/bilibiliupload" }
-requires-python = ">= 3.7"
+requires-python = ">= 3.8"
 dependencies = [
     "tomli-w>=1.0.0",
-    "stream-gears >= 0.1.19,<0.2",
+    "stream-gears >= 0.1.20,<0.2",
     "psutil >= 5.4.6",
     "aiofiles >= 22.1.0",
     "yt-dlp >= 2023.11.16",
