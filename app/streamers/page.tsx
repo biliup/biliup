@@ -112,7 +112,7 @@ export default function Home() {
                         style={{
                             color: 'var(--semi-color-text-2)',
                             marginRight: '12px',
-                        }} />
+                        }} onClick={() => window.location.href = '/static/ds_update.log'} />
                     <TemplateModal onOk={handleOk}>
                         <Button icon={<IconPlusCircle />} theme="solid" style={{ marginRight: 10 }}>新建</Button>
                     </TemplateModal>
