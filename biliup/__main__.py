@@ -63,11 +63,9 @@ def arg_parser():
 
 
 async def main(args):
-    from .app import event_manager, context
-    from biliup.downloader import check_flag
+    from .app import event_manager
 
     event_manager.start()
-    wait = max(config.get('event_loop_interval', 40) - 3, 3)
 
     # 启动时删除临时文件夹
     shutil.rmtree('./cache/temp', ignore_errors=True)
@@ -77,12 +75,12 @@ async def main(args):
     if not args.no_http:
         import biliup.web
         runner = await biliup.web.service(args)
-        detector = AutoReload(event_manager, runner.cleanup, check_flag.set, interval=interval)
+        detector = AutoReload(event_manager, runner.cleanup, interval=interval)
         biliup.common.reload.global_reloader = detector
         await detector.astart()
     else:
         import biliup.common.reload
-        detector = AutoReload(event_manager, check_flag.set, interval=interval)
+        detector = AutoReload(event_manager, interval=interval)
         biliup.common.reload.global_reloader = detector
         await asyncio.gather(detector.astart())
 

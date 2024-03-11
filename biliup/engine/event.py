@@ -11,9 +11,11 @@ import functools
 logger = logging.getLogger('biliup')
 
 class EventManager(Thread):
-    def __init__(self, context=None, pool1_size=3, pool2_size=3):
+    def __init__(self, context=None, pool=None):
         """初始化事件管理器"""
         super().__init__(name='Synchronous', daemon=True)
+        if pool is None:
+            pool = {}
         if context is None:
             context = {}
         self.context = context
@@ -21,11 +23,8 @@ class EventManager(Thread):
         self.__eventQueue = Queue()
         # 事件管理器开关
         self.__active = True
-        # 事件处理线程池1
-        self._pool = {
-            'Asynchronous1': ThreadPoolExecutor(pool1_size, thread_name_prefix='Asynchronous1'),
-            'Asynchronous2': ThreadPoolExecutor(pool2_size, thread_name_prefix='Asynchronous2')
-        }
+        # 事件处理线程池
+        self._pool = pool
         # 阻塞函数列表
         self.__block = []
 

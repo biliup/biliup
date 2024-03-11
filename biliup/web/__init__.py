@@ -440,6 +440,21 @@ async def dump_config(request):
     return web.json_response({'path': file})
 
 
+@routes.get('/v1/status')
+async def app_status(request):
+    from biliup.app import context
+    from biliup.config import Config
+    from biliup.app import PluginInfo
+    res = {}
+    for key, value in context.items():  # 遍历删除不能被 json 序列化的键值对
+        if isinstance(value, Config):
+            continue
+        if isinstance(value, PluginInfo):
+            continue
+        res[key] = value
+    return web.json_response(res)
+
+
 @routes.get('/bili/archive/pre')
 async def pre_archive(request):
     # path = 'cookies.json'

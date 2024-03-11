@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from . import plugins
 from biliup.config import config
@@ -11,8 +12,13 @@ logger = logging.getLogger('biliup')
 def create_event_manager():
     pool1_size = config.get('pool1_size', 3)
     pool2_size = config.get('pool2_size', 3)
+    pool = {
+        'Asynchronous1': ThreadPoolExecutor(pool1_size, thread_name_prefix='Asynchronous1'),
+        'Asynchronous2': ThreadPoolExecutor(pool2_size, thread_name_prefix='Asynchronous2'),
+        'Asynchronous3': ThreadPoolExecutor(2, thread_name_prefix='Asynchronous3'),
+    }
     # 初始化事件管理器
-    app = EventManager(config, pool1_size=pool1_size, pool2_size=pool2_size)
+    app = EventManager(config, pool)
     app.context['url_upload_count'] = {}
     # 正在上传的文件 用于同时上传一个url的时候过滤掉正在上传的
     app.context['upload_filename'] = []
@@ -36,7 +42,7 @@ async def shot(event):
         cur = event.url_list[index]
         event_manager.send_event(Event(CHECK, (event, context['PluginInfo'].inverted_index[cur], cur)))
         index += 1
-        await asyncio.sleep(30)
+        await asyncio.sleep(config.get('event_loop_interval', 30))
 
 
 @event_manager.server()

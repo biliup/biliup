@@ -1,4 +1,3 @@
-import copy
 import json
 import logging
 import os
@@ -13,7 +12,7 @@ from biliup.config import config
 from .app import event_manager, context
 from .common.tools import NamedLock
 from .database.db import get_stream_info_by_filename, SessionLocal
-from .downloader import download, send_upload_event
+from .downloader import download
 from .engine.event import Event
 from .engine.upload import UploadBase
 from .uploader import upload, fmt_title_and_desc
@@ -146,7 +145,7 @@ def process_upload(stream_info):
         with NamedLock(f'upload_count_{url}'):
             url_upload_count[url] -= 1
 
-@event_manager.register(UPLOADED, block='Asynchronous2')
+@event_manager.register(UPLOADED, block='Asynchronous3')
 def uploaded(name, live_cover_path, data: List):
     # data = file_list
     post_processor = config['streamers'].get(name, {}).get("postprocessor", None)

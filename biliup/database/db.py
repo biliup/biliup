@@ -30,10 +30,6 @@ def datetime_to_struct_time(date: datetime):
     return time.localtime(date.timestamp())
 
 
-# class DB:
-    """数据库交互类"""
-
-# @classmethod
 def init(no_http):
     """初始化数据库"""
     run = not Path.cwd().joinpath("data/data.sqlite3").exists()
@@ -47,17 +43,7 @@ def init(no_http):
     migrate_via_alembic()
     return run or no_http
 
-# @classmethod
-def close(db: Session):
-    """ 关闭 Session, 释放连接到连接池 """
-    db.close()
 
-# @classmethod
-# def remove(db: Session):
-#     """ 释放连接, 并删除注册表中的 Session """
-#     db.remove()
-
-# @classmethod
 def get_stream_info(db: Session, name: str) -> dict:
     """根据 streamer 获取下载信息, 若不存在则返回空字典"""
     res = db.execute(
@@ -71,7 +57,7 @@ def get_stream_info(db: Session, name: str) -> dict:
         return res
     return {}
 
-# @classmethod
+
 def get_stream_info_by_filename(db: Session, filename: str) -> dict:
     """通过文件名获取下载信息, 若不存在则返回空字典"""
     try:
@@ -87,7 +73,7 @@ def get_stream_info_by_filename(db: Session, filename: str) -> dict:
     stream_info_dict["date"] = datetime_to_struct_time(stream_info_dict["date"])  # 将开播时间转回 struct_time 类型
     return stream_info_dict
 
-# @classmethod
+
 def add_stream_info(db: Session, name: str, url: str, date: time.struct_time) -> int:
     """添加下载信息, 返回所添加行的 id """
     streamerinfo = StreamerInfo(
@@ -101,7 +87,7 @@ def add_stream_info(db: Session, name: str, url: str, date: time.struct_time) ->
     db.commit()
     return streamerinfo.id
 
-# @classmethod
+
 def delete_stream_info(db: Session, name: str) -> int:
     """根据 streamer 删除下载信息, 返回删除的行数, 若不存在则返回 0 """
     result = db.execute(
@@ -110,7 +96,7 @@ def delete_stream_info(db: Session, name: str) -> int:
     # db.refresh(result)
     return result.rowcount()
 
-# @classmethod
+
 def delete_stream_info_by_date(db: Session, name: str, date: time.struct_time) -> int:
     """根据 streamer 和开播时间删除下载信息, 返回删除的行数, 若不存在则返回 0 """
     start_datetime = struct_time_to_datetime(date)
@@ -124,7 +110,7 @@ def delete_stream_info_by_date(db: Session, name: str, date: time.struct_time) -
     db.commit()
     return result.rowcount()
 
-# @classmethod
+
 def update_cover_path(db: Session, database_row_id: int, live_cover_path: str):
     """更新封面存储路径"""
     if not live_cover_path:
@@ -133,7 +119,7 @@ def update_cover_path(db: Session, database_row_id: int, live_cover_path: str):
     streamerinfo.live_cover_path = live_cover_path
     db.commit()
 
-# @classmethod
+
 def update_room_title(db: Session, database_row_id: int, title: str):
     """更新直播标题"""
     if not title:
@@ -142,7 +128,7 @@ def update_room_title(db: Session, database_row_id: int, title: str):
     streamerinfo.title = title
     db.commit()
 
-# @classmethod
+
 def update_file_list(db: Session, database_row_id: int, file_name: str) -> int:
     """向视频文件列表中添加文件名"""
     streamer_info = db.get(StreamerInfo, database_row_id)
@@ -151,13 +137,13 @@ def update_file_list(db: Session, database_row_id: int, file_name: str) -> int:
     db.commit()
     return file_list.id
 
-# @classmethod
+
 def get_file_list(db: Session, database_row_id: int) -> List[str]:
     """获取视频文件列表"""
     file_list = db.get(StreamerInfo, database_row_id).filelist
     return [file.file for file in file_list]
 
-# @classmethod
+
 def migrate_via_alembic():
     """ 自动迁移，通过 alembic 实现 """
     def process_revision_directives(context, revision, directives):

@@ -139,8 +139,7 @@ const Global: React.FC = () => {
                     field="event_loop_interval"
                     extraText={
                         <div style={{ fontSize: "14px" }}>
-                            平台检测间隔时间，如虎牙所有主播检测完后会等待 30
-                            秒，再去从新检测
+                            单个主播检测间隔时间，单位：秒。比如虎牙有10个主播，每个主播会间隔10秒检测
                             <br />
                             单位：秒
                         </div>
