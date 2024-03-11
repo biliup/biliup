@@ -89,13 +89,14 @@ def process(name, url):
         logger.exception(f"下载错误: {stream_info['name']} - {e}")
     finally:
         # 下载结束
+        url_status[url] = 0
         # 永远不可能有两个同url的下载线程
         # 可能对同一个url同时发送两次上传事件
         with NamedLock(f"upload_count_{stream_info['url']}"):
             # += 不是原子操作
             context['url_upload_count'][stream_info['url']] += 1
             yield Event(DOWNLOADED, (stream_info,))
-        url_status[url] = 0
+        
 
 @event_manager.register(DOWNLOADED, block='Asynchronous1')
 def processed(stream_info):

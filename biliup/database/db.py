@@ -129,7 +129,7 @@ def update_cover_path(db: Session, database_row_id: int, live_cover_path: str):
     """更新封面存储路径"""
     if not live_cover_path:
         live_cover_path = ""
-    streamerinfo = Session.scalar(select(StreamerInfo).where(StreamerInfo.id == database_row_id))
+    streamerinfo = db.scalar(select(StreamerInfo).where(StreamerInfo.id == database_row_id))
     streamerinfo.live_cover_path = live_cover_path
     db.commit()
 
