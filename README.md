@@ -36,6 +36,8 @@ Twitch，YY直播等，并于录制结束后自动上传到哔哩哔哩视频网
 
 **文档地址**：[DOCS.md](https://biliup.github.io/biliup/docs/guide/introduction/)
 
+**社区教程**： [图文教程](https://www.bilibili.com/read/cv33195912) by @
+
 ## Quick Start
 
 1. `pip3 install biliup`
@@ -44,6 +46,13 @@ Twitch，YY直播等，并于录制结束后自动上传到哔哩哔哩视频网
 
 ![](.github/resource/light.png)
 ![](.github/resource/dark.png)
+
+## How to Contribute
+1. 安装足够新的 nodejs `version >= 18`
+2. `npm i`
+3. `npm run dev`
+4. `python3 -m biliup`
+5. 访问`http://localhost:3000`
 
 ## Credits
 * Thanks `ykdl, youtube-dl, streamlink` provides downloader.
