@@ -58,6 +58,20 @@ class DownloadBase:
             '-bsf:a', 'aac_adtstoasc',
         ]
         if config.get('segment_time'):
+            # 处理一些奇怪的时间，例如 00:60:00 应该自动修正为 01:00:00； 00:300:60 应该自动修正为 05:01:00
+            # if ':' in config.get('segment_time', '00:50:00'):
+            #     segment_time = config.get('segment_time').split(':')
+            #     if len(segment_time) == 3:
+            #         if int(segment_time[2]) > 59:
+            #             extra_minutes, seconds = divmod(int(segment_time[2]), 60)
+            #             segment_time[2] = str(seconds)
+            #             segment_time[1] = str(int(segment_time[1]) + extra_minutes)
+            #         if int(segment_time[1]) > 59:
+            #             extra_hours, minutes = divmod(int(segment_time[1]), 60)
+            #             segment_time[1] = str(minutes)
+            #             segment_time[0] = str(int(segment_time[0]) + extra_hours)
+            #         segment_time = ':'.join(segment_time)
+            #         logger.info(f'修正了segment_time参数为 {segment_time}')
             self.default_output_args += \
                 ['-to', f"{config.get('segment_time', '00:50:00')}"]
         else:
@@ -144,8 +158,8 @@ class DownloadBase:
         return True
 
     def ffmpeg_download(self, filename):
-        default_input_args = ['-headers', ''.join('%s: %s\r\n' % x for x in self.fake_headers.items()), '-rw_timeout',
-                              '20000000']
+        default_input_args = ['-headers', ''.join('%s: %s\r\n' % x for x in self.fake_headers.items()),
+                              '-rw_timeout', '20000000']
         parsed_url = urlparse(self.raw_stream_url)
         path = parsed_url.path
         if '.m3u8' in path:
@@ -322,6 +336,26 @@ class DownloadBase:
                         f'封面下载失败：{self.__class__.__name__} - {self.fname}：封面格式不支持：{self.live_cover_url}')
             except:
                 logger.exception(f'封面下载失败：{self.__class__.__name__} - {self.fname}')
+
+    def check_url_healthy(session, url):
+        try:
+            r = session.get(url, stream=True, timeout=5, allow_redirects=False)
+            if 'm3u8' in url:
+                import m3u8
+                m3u8_obj = m3u8.loads(r.text)
+                if m3u8_obj.is_variant:
+                    url = m3u8_obj.playlists[0].uri
+                    logger.info(f'stream url: {url}')
+                    r = s.get(url, stream=True, timeout=5)
+            elif r.headers.get('Location', False):
+                url = r.headers['Location']
+                logger.info(f'stream url: {url}')
+                r = s.get(url, stream=True, timeout=5)
+            if r.status_code == 200:
+                return True, url
+        except Exception as e:
+            logger.debug(e)
+            return False, None
 
     @staticmethod
     def rename(file_name):

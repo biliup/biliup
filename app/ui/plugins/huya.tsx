@@ -2,7 +2,12 @@
 import React from "react";
 import { Form, Collapse } from "@douyinfe/semi-ui";
 
-const Huya: React.FC = () => {
+type Props = {
+    entity: any;
+};
+
+const Huya: React.FC<Props> = (props) => {
+    const entity = props.entity;
     return (
         <>
             <Collapse.Panel header="虎牙" itemKey="huya">
@@ -34,6 +39,16 @@ const Huya: React.FC = () => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                />
+                <Form.Switch
+                    field="huya_cdn_fallback"
+                    extraText="CDN 回退开关，默认为关闭。"
+                    label="CDN 回退（huya_cdn_fallback）"
+                    initValue={
+                        entity?.hasOwnProperty("huya_cdn_fallbackk")
+                            ? entity["huya_cdn_fallback"]
+                            : false
+                    }
                 />
             </Collapse.Panel>
         </>

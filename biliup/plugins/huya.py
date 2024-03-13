@@ -62,6 +62,7 @@ class Huya(DownloadBase):
 
             # 自选cdn
             huya_cdn = config.get('huyacdn', 'AL')
+            cdn_fallback = config.get('huya_cdn_fallback', False)
             # 流信息
             stream_items = live_info['gameStreamInfoList']
             # 自选的流
