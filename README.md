@@ -36,7 +36,7 @@ Twitch，YY直播等，并于录制结束后自动上传到哔哩哔哩视频网
 
 **文档地址**：[DOCS.md](https://biliup.github.io/biliup/docs/guide/introduction/)
 
-**社区教程**： [图文教程](https://www.bilibili.com/read/cv33195912) by @
+**社区教程**： [图文教程](https://www.bilibili.com/read/cv33195912) by [@ikun1993](https://github.com/ikun1993)
 
 ## Quick Start
 
