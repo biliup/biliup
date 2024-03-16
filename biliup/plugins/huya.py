@@ -112,11 +112,11 @@ def _get_info_in_html(room_id, fake_headers):
 
 def _build_stream_url(room_id, perf_cdn, fake_headers):
     html_info = _get_info_in_html(room_id, fake_headers)
-    StreamInfoList = html_info['data'][0]['gameStreamInfoList']
-    stream = StreamInfoList[0]
+    streamInfo = html_info['data'][0]['gameStreamInfoList']
+    stream = streamInfo[0]
     sFlvUrlSuffix, sStreamName, sFlvAntiCode = \
         stream["sFlvUrlSuffix"], stream["sStreamName"], stream["sFlvAntiCode"]
-    sCdns = {item['sCdnType']: item['sFlvUrl'] for item in StreamInfoList if item['sCdnType'] != 'HY'}
+    sCdns = {item['sCdnType']: item['sFlvUrl'] for item in streamInfo if item['sCdnType'] != 'HY'}
     sFlvUrl = sCdns.get(perf_cdn)
     _stream_url = f'{sFlvUrl}/{sStreamName}.{sFlvUrlSuffix}?{_make_query(sStreamName, sFlvAntiCode)}'
     return _stream_url, sCdns
