@@ -275,6 +275,10 @@ const Global: React.FC = () => {
                         </div>
                     }
                     label="使用直播间封面作为投稿封面（use_live_cover)"
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
                 />
             </div>
         </>

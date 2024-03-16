@@ -2,12 +2,7 @@
 import React from "react";
 import { Form, Collapse } from "@douyinfe/semi-ui";
 
-type Props = {
-    entity: any;
-};
-
-const Huya: React.FC<Props> = (props) => {
-    const entity = props.entity;
+const Huya: React.FC = () => {
     return (
         <>
             <Collapse.Panel header="虎牙" itemKey="huya">
@@ -30,10 +25,10 @@ const Huya: React.FC<Props> = (props) => {
                     label="录制弹幕（huya_danmaku）"
                 />
                 <Form.Input
-                    field="huyacdn"
+                    field="huya_cdn"
                     extraText="如遇到虎牙录制卡顿可以尝试切换线路。可选以下线路
  AL（阿里云 - 直播线路3）, TX（腾讯云 - 直播线路5）, HW（华为云 - 直播线路6）, WS（网宿）, HS（火山引擎 - 直播线路14）, AL13（阿里云）, HW16（华为云）, HY(星域云 - 直播线路66)"
-                    label="访问线路（huyacdn）"
+                    label="访问线路（huya_cdn）"
                     style={{ width: "100%" }}
                     fieldStyle={{
                         alignSelf: "stretch",
@@ -42,13 +37,8 @@ const Huya: React.FC<Props> = (props) => {
                 />
                 <Form.Switch
                     field="huya_cdn_fallback"
-                    extraText="CDN 回退开关，默认为关闭。"
+                    extraText="当访问线路（huya_cdn）不可用时，尝试其他线路（huya_cdn_fallback）"
                     label="CDN 回退（huya_cdn_fallback）"
-                    initValue={
-                        entity?.hasOwnProperty("huya_cdn_fallbackk")
-                            ? entity["huya_cdn_fallback"]
-                            : false
-                    }
                 />
             </Collapse.Panel>
         </>
