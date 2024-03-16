@@ -337,25 +337,25 @@ class DownloadBase:
             except:
                 logger.exception(f'封面下载失败：{self.__class__.__name__} - {self.fname}')
 
-    def check_url_healthy(session, url):
+    def check_url_healthy(self, http_session, url):
         try:
-            r = session.get(url, stream=True, timeout=5, allow_redirects=False)
+            r = http_session.get(url, stream=True, timeout=5, allow_redirects=False)
             if 'm3u8' in url:
                 import m3u8
                 m3u8_obj = m3u8.loads(r.text)
                 if m3u8_obj.is_variant:
                     url = m3u8_obj.playlists[0].uri
                     logger.info(f'stream url: {url}')
-                    r = s.get(url, stream=True, timeout=5)
+                    r = http_session.get(url, stream=True, timeout=5)
             elif r.headers.get('Location', False):
                 url = r.headers['Location']
                 logger.info(f'stream url: {url}')
-                r = s.get(url, stream=True, timeout=5)
+                r = http_session.get(url, stream=True, timeout=5)
             if r.status_code == 200:
                 return True, url
         except Exception as e:
-            logger.debug(e)
-            return False, None
+            logger.debug(f"{e} from {url}")
+        return False, None
 
     @staticmethod
     def rename(file_name):
