@@ -18,7 +18,6 @@ class Huya(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
         self.huya_danmaku = config.get('huya_danmaku', False)
-        self.downloader = "stream-gears"
 
     def check_stream(self, is_check=False):
         try:
@@ -57,7 +56,7 @@ class Huya(DownloadBase):
         except Exception as e:
             logger.error(f"{plugin_msg}: 在确定码率时发生错误 {e}")
 
-        huya_cdn = config.get('huyacdn', 'HW')
+        huya_cdn = config.get('huyacdn', 'AL')
         perf_cdn = config.get('huya_cdn', huya_cdn).upper()
         cdn_fallback = config.get('huya_cdn_fallback', False)
         # cdn_fallback = True
