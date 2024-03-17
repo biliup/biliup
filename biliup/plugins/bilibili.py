@@ -107,6 +107,7 @@ class Bililive(DownloadBase):
                         return False
         except Exception as e:
             logger.error(f"{plugin_msg}: {e}")
+            return False
         if play_info['code'] != 0:
             logger.error(f"{plugin_msg}: {play_info}")
             return False
