@@ -45,7 +45,7 @@ class Huya(DownloadBase):
             # 最大码率(不含hdr)
             max_ratio = html_info['data'][0]['gameLiveInfo']['bitRate']
             # 码率信息
-            ratio_items = [r.get("iBitRate", 0) if r.get("iBitRate", 0) != 0 else max_ratio for r in live_rate_info]
+            ratio_items = [r.get('iBitRate', 0) if r.get('iBitRate', 0) != 0 else max_ratio for r in live_rate_info]
             # 符合条件的码率
             ratio_in_items = [x for x in ratio_items if x <= huya_max_ratio]
             # 录制码率
@@ -102,7 +102,7 @@ class Huya(DownloadBase):
 
 def _get_info_in_html(room_id, fake_headers):
     try:
-        html = requests.get(f'https://www.huya.com/{room_id}', timeout=5, headers=fake_headers).text
+        html = requests.get(f"https://www.huya.com/{room_id}", timeout=5, headers=fake_headers).text
         if '找不到这个主播' in html:
             logger.error(f"Huya - {room_id}: 找不到这个主播")
     except Exception as e:
@@ -115,7 +115,7 @@ def _build_stream_url(room_id, perf_cdn, fake_headers):
     streamInfo = html_info['data'][0]['gameStreamInfoList']
     stream = streamInfo[0]
     sFlvUrlSuffix, sStreamName, sFlvAntiCode = \
-        stream["sFlvUrlSuffix"], stream["sStreamName"], stream["sFlvAntiCode"]
+        stream['sFlvUrlSuffix'], stream['sStreamName'], stream['sFlvAntiCode']
     sCdns = {item['sCdnType']: item['sFlvUrl'] for item in streamInfo if item['sCdnType'] != 'HY'}
     sFlvUrl = sCdns.get(perf_cdn)
     _stream_url = f'{sFlvUrl}/{sStreamName}.{sFlvUrlSuffix}?{_make_query(sStreamName, sFlvAntiCode)}'
@@ -128,8 +128,8 @@ def _make_query(sStreamName, sFlvAntiCode):
     convert_uid = (uid << 8 | uid >> (32 - 8)) & 0xFFFFFFFF
     ws_time = url_query['wsTime'][0]
     seq_id = uid + int(time.time() * 1000)
-    ws_secret_prefix = base64.b64decode(unquote(url_query['fm'][0]).encode()).decode().split("_")[0]
-    ws_secret_hash = hashlib.md5(f'{seq_id}|{url_query["ctype"][0]}|{platform_id}'.encode()).hexdigest()
+    ws_secret_prefix = base64.b64decode(unquote(url_query['fm'][0]).encode()).decode().split('_')[0]
+    ws_secret_hash = hashlib.md5(f"{seq_id}|{url_query['ctype'][0]}|{platform_id}".encode()).hexdigest()
     ws_secret = hashlib.md5(f'{ws_secret_prefix}_{convert_uid}_{sStreamName}_{ws_secret_hash}_{ws_time}'.encode()).hexdigest()
     # &codec=av1
     # &codec=264
@@ -139,4 +139,4 @@ def _make_query(sStreamName, sFlvAntiCode):
     # t: 100 平台信息 100 web
     # sv: 2401090219 版本
     # sdk_sid:  _sessionId sdkInRoomTs 当前毫秒时间
-    return f"wsSecret={ws_secret}&wsTime={ws_time}&seqid={seq_id}&ctype={url_query["ctype"][0]}&ver=1&fs={url_query["fs"][0]}&u={convert_uid}&t={platform_id}&sv=2401090219&sdk_sid={int(time.time() * 1000)}&codec=264"
+    return f"wsSecret={ws_secret}&wsTime={ws_time}&seqid={seq_id}&ctype={url_query['ctype'][0]}&ver=1&fs={url_query['fs'][0]}&u={convert_uid}&t={platform_id}&sv=2401090219&sdk_sid={int(time.time() * 1000)}&codec=264"
