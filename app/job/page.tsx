@@ -1,22 +1,30 @@
 'use client'
 
-import {Layout, Nav, Table, Typography} from "@douyinfe/semi-ui";
+import {AutoComplete, Layout, Nav, Spin, Table, Typography} from "@douyinfe/semi-ui";
 import useSWR from "swr";
 import {fetcher, FileList} from "@/app/lib/api-streamer";
-import {JSXElementConstructor, Key, PromiseLikeOfReactNode, ReactElement, ReactNode, ReactPortal,
+import {
+    JSXElementConstructor, Key, ReactElement, ReactNode, ReactPortal, useRef,
     useState
 } from "react";
-import {IconCustomerSupport, IconVideoListStroked} from "@douyinfe/semi-icons";
+import {IconCustomerSupport, IconSearch, IconVideoListStroked} from "@douyinfe/semi-icons";
 import {humDate} from "@/app/lib/utils";
+import Filter from "@/app/job/Filter";
 
 export default function Home() {
     const {Header, Footer, Sider, Content} = Layout;
     const {data: data, error, isLoading} = useSWR<any[]>("/v1/streamer-info", fetcher);
     if (isLoading) {
-        return (<>Loading</>);
+        return (<Spin size="large" />);
     }
     const {Text} = Typography;
     const columns = [
+        {
+            title: '名称',
+            dataIndex: 'name',
+            onFilter: (value: any, record: any) => record.name.includes(value),
+            renderFilterDropdown: Filter
+        },
         {
             title: '标题',
             dataIndex: 'title',
@@ -24,11 +32,11 @@ export default function Home() {
                 return (
                     <Text strong>{text}</Text>
                 );
-            }
-        }, {
-            title: '名称',
-            dataIndex: 'name',
-        }, {
+            },
+            onFilter: (value: any, record: any) => record.title.includes(value),
+            renderFilterDropdown: Filter
+        },
+        {
             title: '链接',
             dataIndex: 'url',
         },
@@ -46,7 +54,7 @@ export default function Home() {
         },
     ];
     const expandRowRender = (record: any, index: number | undefined) => {
-        return <>文件列表：{record.files.map((it: { id: Key | null | undefined; file: string | number | boolean | ReactElement<any, string | JSXElementConstructor<any>> | Iterable<ReactNode> | ReactPortal | PromiseLikeOfReactNode | null | undefined; }) => {
+        return <>文件列表：{record.files.map((it: { id: Key | null | undefined; file: string | number | boolean | ReactElement<any, string | JSXElementConstructor<any>> | Iterable<ReactNode> | ReactPortal | null | undefined; }) => {
             return <div key={it.id}>&nbsp;&nbsp;文件名：{it.file}</div>;
         })}</>;
     };

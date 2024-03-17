@@ -1,6 +1,6 @@
 'use client'
 
-import React, {useEffect, useRef, useState} from "react";
+import React, {Suspense, useEffect, useRef, useState} from "react";
 import {Button, Form, Notification, Toast, Typography} from "@douyinfe/semi-ui";
 import {IconPlusCircle} from "@douyinfe/semi-icons";
 import {BiliType, fetcher, LiveStreamerEntity, sendRequest, StudioEntity} from "@/app/lib/api-streamer";
@@ -12,7 +12,7 @@ import {FormApi} from "@douyinfe/semi-ui/lib/es/form";
 import useSWR from "swr";
 import {useTypeTree} from "@/app/lib/use-streamers";
 
-const EditTemplate: React.FC = () => {
+const Edit = () => {
     const { Paragraph } = Typography;
     const searchParams = useSearchParams();
     const { trigger } = useSWRMutation('/v1/upload/streamers', sendRequest);
@@ -99,6 +99,13 @@ const EditTemplate: React.FC = () => {
         </div>
             <Form initValues={uploadStreamers} style={{paddingLeft: 30, paddingBottom: 40}} getFormApi={formApi => api.current = formApi} autoScrollToError component={TemplateFields} labelWidth='180px' labelPosition={labelPosition}/>
         </>);
+}
+
+
+const EditTemplate: React.FC = () => {
+    return <Suspense>
+        <Edit></Edit>
+    </Suspense>
 }
 
 export default EditTemplate;

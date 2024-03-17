@@ -81,7 +81,7 @@ const Global: React.FC = () => {
                         <div style={{ fontSize: "14px" }}>
                             录像单文件时间限制，超过此时长分段下载。
                             <br />
-                            格式：'00:00:00'（时:分:秒）
+                            格式：&apos;00:00:00&apos;（时:分:秒）
                         </div>
                     }
                     label="视频分段时长（segment_time）"
