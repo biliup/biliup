@@ -1,11 +1,16 @@
 import logging
 import os
+import pathlib
 import shutil
 
 from typing import NamedTuple, Optional, List
 
+from sqlalchemy import desc
+
 from biliup.common.tools import NamedLock, get_file_create_timestamp
 from biliup.config import config
+from biliup.database import models
+from biliup.database.db import SessionLocal
 
 logger = logging.getLogger('biliup')
 
@@ -28,8 +33,17 @@ class UploadBase:
 
         # 获取文件列表
         file_list = []
+        # 数据库中保存的文件名, 不含后缀
+        save = []
+        with SessionLocal() as db:
+            dbinfo = db.query(models.StreamerInfo).filter(models.StreamerInfo.name == index).order_by(
+                desc(models.StreamerInfo.id)).first()
+            if dbinfo:
+                for dbfile in dbinfo.filelist:
+                    save.append(dbfile.file)
         for file_name in os.listdir('.'):
-            if index in file_name and os.path.isfile(file_name):
+            # 可能有两层后缀.with_suffix('')去掉一层.stem取文件名
+            if (index in file_name or pathlib.Path(file_name).with_suffix('').stem in save ) and os.path.isfile(file_name):
                 file_list.append(file_name)
         if len(file_list) == 0:
             return []
