@@ -1,5 +1,6 @@
 import time
 import requests
+import json
 
 from biliup.config import config
 from . import match1, logger
@@ -11,34 +12,38 @@ from ..engine.download import DownloadBase
 class Bililive(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
-        self.fake_headers['referer'] = 'https://live.bilibili.com'
-        self.bilibili_danmaku = config.get('bilibili_danmaku', False)
         self.live_time = 0
+        self.bilibili_danmaku = config.get('bilibili_danmaku', False)
+        self.fake_headers['referer'] = url
+        self.fake_headers['cookie'] = (
+            load_cookies(config.get('user', {}).get('bili_cookie_file')) or
+            config.get('user', {}).get('bili_cookie')
+        )
 
     def check_stream(self, is_check=False):
 
-        official_api = "https://api.live.bilibili.com"
+        OFFICIAL_API = "https://api.live.bilibili.com"
         room_id = match1(self.url, r'/(\d+)')
-        qualityNumber = config.get('bili_qn', 10000)
+        qualityNumber = int(config.get('bili_qn', 10000))
+        plugin_msg = f"Bililive - {room_id}"
 
         with requests.Session() as s:
             s.headers = self.fake_headers.copy()
             # 获取直播状态与房间标题
-            info_by_room_url = f"{official_api}/xlive/web-room/v1/index/getInfoByRoom?room_id={room_id}"
+            info_by_room_url = f"{OFFICIAL_API}/xlive/web-room/v1/index/getInfoByRoom?room_id={room_id}"
             try:
                 room_info = s.get(info_by_room_url, timeout=5).json()
             except Exception as e:
-                logger.debug(e)
-                logger.error(f"在连接到 {info_by_room_url} 时出现错误")
+                logger.error(f"{plugin_msg}: {e}")
                 return False
             if room_info['code'] != 0:
-                logger.debug(f"Bililive-{room_id}: {room_info}")
+                logger.error(f"{plugin_msg}: {room_info}")
+                return False
+            if room_info['data']['room_info']['live_status'] != 1:
+                logger.debug(f"{plugin_msg}: 未开播")
                 return False
             self.live_cover_url = room_info['data']['room_info']['cover']
             live_start_time = room_info['data']['room_info']['live_start_time']
-            if room_info['data']['room_info']['live_status'] != 1:
-                logger.debug(f"Bililive-{room_id}: 直播间未开播")
-                return False
             if self.room_title is None:
                 self.room_title = room_info['data']['room_info']['title']
             if live_start_time > self.live_time:
@@ -46,43 +51,23 @@ class Bililive(DownloadBase):
                 is_new_live = True
             else:
                 is_new_live = False
-
-        if is_check:
-            return True
-
-        s = requests.Session()
-        self.fake_headers['cookie'] = (
-            load_cookies(config.get('user', {}).get('bili_cookie_file')) or
-            config.get('user', {}).get('bili_cookie')
-        )
-        s.headers = self.fake_headers
-        user_data = do_login(s).get('data', {})
-        is_login = user_data.get('isLogin', False)
-        if not is_login:
-            logger.debug(f"Bililive: Cookie 不存在或失效")
-            logger.debug(self.fake_headers.pop('cookie', 'Bililive: Not Found Cookie'))
-        else:
-            logger.info(f"用户名：{user_data['uname']}, mid：{user_data['mid']}, isLogin：{is_login}")
-
-        # 原画链接复用
-        if self.raw_stream_url is not None \
-            and qualityNumber >= 10000 \
-            and not is_new_live:
-            # 同一个 streamName 即可复用，与其他参数无关，目前没有报告说链接会超时失效。
-            # 前面拿不到 streamName，目前使用开播时间判断
-            if check_url_healthy(s, self.raw_stream_url):
-                logger.debug(f"Bililive-{room_id}: 复用 {self.raw_stream_url}")
-                s.close()
+            if is_check:
+                user_data = do_login(s).get('data', {})
+                is_login = user_data.get('isLogin', False)
+                if not is_login:
+                    logger.warning(f"{plugin_msg}: 用户未登录，可能无法获取高清直播流")
+                    logger.debug(self.fake_headers.pop('cookie', f'{plugin_msg}: Not found cookie'))
+                else:
+                    logger.info(f"用户名：{user_data['uname']}, mid：{user_data['mid']}, isLogin：{is_login}")
                 return True
 
         protocol = config.get('bili_protocol', 'stream')
         perf_cdn = config.get('bili_perfCDN')
-        bili_cdn_fallback = config.get('bili_cdn_fallback', True)
+        cdn_fallback = config.get('bili_cdn_fallback', True)
         force_source = config.get('bili_force_source', False)
         ov05_ip = config.get('bili_force_ov05_ip')
-        main_api = config.get('bili_liveapi', official_api).rstrip('/')
-        fallback_api = config.get('bili_fallback_api', main_api).rstrip('/')
-        cn01_domains = config.get('bili_force_cn01_domains', '').split(",")
+        main_api = config.get('bili_liveapi', OFFICIAL_API).rstrip('/')
+        fallback_api = config.get('bili_fallback_api', OFFICIAL_API).rstrip('/')
 
         params = {
             'room_id': room_id,
@@ -97,20 +82,34 @@ class Bililive(DownloadBase):
         }
         streamname_regexp = r"(live_\d+_\w+_\w+_?\w+?)" # 匹配 streamName
 
+        s = requests.Session()
+        s.headers = self.fake_headers
+        if self.raw_stream_url is not None \
+            and qualityNumber >= 10000 \
+            and not is_new_live:
+            # 同一个 streamName 即可复用，与其他参数无关，目前没有报告说链接会超时失效。
+            # 前面拿不到 streamName，目前使用开播时间判断
+            health, url = super().check_url_healthy(s, self.raw_stream_url)
+            if health:
+                logger.debug(f"{plugin_msg}: 复用 {url}")
+                s.close()
+                return True
+            else:
+                self.raw_stream_url = None
+
         try:
             play_info = get_play_info(s, main_api, params)
-            if check_areablock(play_info['data']['playurl_info']['playurl']):
-                logger.debug(f"{main_api} 返回 {play_info}")
-                if fallback_api:
-                    play_info = get_play_info(s, fallback_api, params)
-                if check_areablock(play_info['data']['playurl_info']['playurl']):
-                    logger.debug(f"{fallback_api} 返回 {play_info}")
-                    return False
+            if play_info is None or check_areablock(play_info['data']['playurl_info']['playurl']):
+                logger.debug(f"{plugin_msg}: {main_api} 返回 {play_info}")
+                play_info = get_play_info(s, fallback_api, params)
+                if play_info is None or check_areablock(play_info['data']['playurl_info']['playurl']):
+                        logger.debug(f"{plugin_msg}: {fallback_api} 返回 {play_info}")
+                        return False
         except Exception as e:
-            logger.debug(e)
+            logger.error(f"{plugin_msg}: {e}")
             return False
         if play_info['code'] != 0:
-            logger.debug(play_info)
+            logger.error(f"{plugin_msg}: {play_info}")
             return False
 
         playurl_info = play_info['data']['playurl_info']['playurl']
@@ -122,12 +121,9 @@ class Bililive(DownloadBase):
                 stream_format = stream['format'][1]
             elif int(time.time()) - live_start_time <= 60: # 60s 宽容等待 fmp4
                 return False
-            elif stream_format['format_name'] == 'ts': # 海外无 fmp4，优先回退 FLV
+            elif stream_format['format_name'] == 'ts':
                 stream_format = streams[0]['format'][0]
 
-        if self.downloader == 'stream-gears' and stream_format['format_name'] == 'fmp4':
-            logger.error('stream-gears 不支持 fmp4 格式，请修改配置文件内的 downloader')
-            return False
         stream_info = stream_format['codec'][0]
 
         stream_url = {
@@ -142,41 +138,17 @@ class Bililive(DownloadBase):
                     if cdn in url_info['extra']:
                         stream_url['host'] = url_info['host']
                         stream_url['extra'] = url_info['extra']
-                        logger.debug(f"找到了perfCDN {stream_url['host']}")
+                        logger.debug(f"Found {stream_url['host']}")
                         break
         if len(stream_url) < 3:
             stream_url['host'] = stream_info['url_info'][-1]['host']
             stream_url['extra'] = stream_info['url_info'][-1]['extra']
 
-        url_path = f"{stream_url['base_url']}{stream_url['extra']}"
+        # 移除 streamName 内画质标签
         streamName = match1(stream_url['base_url'], streamname_regexp)
-
-        is_cn01 = "cn-gotcha01" in stream_url['extra']
-        # 替换 cn-gotcha01 域名
-        if is_cn01 and cn01_domains[0] != '':
-            import random
-            i = len(cn01_domains)
-            while i:  # 测试节点是否可用
-                host = cn01_domains.pop(random.choice(range(i)))
-                i-=1
-                try:
-                    if check_url_healthy(s, f"https://{host}{url_path}"):
-                        stream_url['host'] = "https://" + host
-                        logger.debug(f'节点 {host} 可用，替换为该节点')
-                        break
-                except Exception as e:
-                    logger.debug(e)
-                    logger.debug(f'节点 {host} 无法访问，尝试下一个节点。')
-                    continue
-            else:
-                logger.error("配置文件中的cn-gotcha01节点均不可用")
-
-        # 移除 streamName 内画质标签。
-        if streamName is not None and is_cn01 \
-            and force_source and qualityNumber >= 10000:
-            logger.debug(streamName) # 替换了 FLV 不会通过健康检查，不用添加判断
+        if streamName is not None and force_source and qualityNumber >= 10000:
             new_base_url = stream_url['base_url'].replace(f"_{streamName.split('_')[-1]}", '')
-            if check_url_healthy(s, f"{stream_url['host']}{new_base_url}{stream_url['extra']}"):
+            if super().check_url_healthy(s, f"{stream_url['host']}{new_base_url}{stream_url['extra']}"):
                 stream_url['base_url'] = new_base_url
                 logger.debug(stream_url['base_url'])
 
@@ -185,23 +157,29 @@ class Bililive(DownloadBase):
         if ov05_ip and "ov-gotcha05" in stream_url['host']:
             self.raw_stream_url = oversea_expand(s, self.raw_stream_url, ov05_ip)
 
-        if bili_cdn_fallback:
-            stream_info['url_info'].reverse()
-            if not check_url_healthy(s, self.raw_stream_url):
+        url_health, url = super().check_url_healthy(s, self.raw_stream_url)
+        if not url_health:
+            if cdn_fallback:
                 i = len(stream_info['url_info'])
                 while i:
                     i -= 1
                     try:
-                        self.raw_stream_url = stream_info['url_info'][i]['host'] + stream_url['base_url'] + stream_info['url_info'][i]['extra']
-                        if check_url_healthy(s, self.raw_stream_url):
+                        self.raw_stream_url = "{}{}{}".format(stream_info['url_info'][i]['host'], stream_url['base_url'], stream_info['url_info'][i]['extra'])
+                        url_health, url = super().check_url_healthy(s, self.raw_stream_url)
+                        if url_health:
+                            self.raw_stream_url = url
                             break
                     except Exception as e:
                         logger.debug(e)
                         continue
+                    finally:
+                        logger.debug(f"{i} - {self.raw_stream_url}")
                 else:
                     logger.debug(play_info)
                     self.raw_stream_url = None
                     return False
+        else:
+            self.raw_stream_url = url
 
         s.close()
         return True
@@ -217,33 +195,30 @@ class Bililive(DownloadBase):
 
 def get_play_info(s, api, params):
     api = (lambda a: a if a.startswith(('http://', 'https://')) else 'http://' + a) (api)
+    full_url = f"{api}/xlive/web-room/v2/index/getRoomPlayInfo"
     try:
-        return s.get(f'{api}/xlive/web-room/v2/index/getRoomPlayInfo', params=params,
-                        timeout=5).json()
-    except Exception:
-        logger.error(f'{api} 连接失败，尝试回退到官方Api')
-    return s.get('https://api.live.bilibili.com/xlive/web-room/v2/index/getRoomPlayInfo',
-                params=params, timeout=5).json()
+        return s.get(full_url, params=params, timeout=5).json()
+    except Exception as e:
+        logger.warning(f'{api} 获取直播流信息失败 {e}')
+    return None
 
 # Copy from room-player.js
 def check_areablock(data):
+    '''
+    :return: True if area block
+    '''
     if data is None:
         logger.error('Sorry, bilibili is currently not available in your country according to copyright restrictions.')
         logger.error('非常抱歉，根据版权方要求，您所在的地区无法观看本直播')
         return True
     return False
 
-def check_url_healthy(s, url):
-    if s.get(url, stream=True, timeout=5).status_code == 200:
-        return True
-    return False
-
 def do_login(s):
     try:
         return s.get('https://api.bilibili.com/x/web-interface/nav', timeout=5).json()
-    except Exception:
-        logger.error(f'无法验证登录态')
-        return {}
+    except Exception as e:
+        logger.error('Bililive: ' + e)
+    return {}
 
 def oversea_expand(s, url, ov05_ip):
     # 强制替换ov05 302redirect之后的真实地址为指定的域名或ip达到自选ov05节点的目的
@@ -255,14 +230,12 @@ def oversea_expand(s, url, ov05_ip):
 def load_cookies(filename):
     if filename is not None:
         try:
-            import json
             cookies = ""
             with open(filename, encoding='utf-8') as stream:
                 s = json.load(stream)
                 for i in s["cookie_info"]["cookies"]:
-                    cookies += f"{i['name']}={i['value']};"
+                    cookies += "{}={};".format(i['name'], i['value'])
                 return cookies
         except Exception as e:
-            logger.debug(e)
-            logger.error(f"读取 {filename} 文件失败")
+            logger.exception(e)
     return None

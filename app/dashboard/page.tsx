@@ -95,9 +95,10 @@ const Dashboard: React.FC = () => {
 
     return (
         <>
-            <Header style={{ backgroundColor: "var(--semi-color-bg-1)" }}>
+            <Header style={{
+                backgroundColor: 'var(--semi-color-bg-1)', position: 'sticky', top: 0, zIndex: 10
+            }}>
                 <Nav
-                    style={{ border: "none" }}
                     header={
                         <>
                             <div

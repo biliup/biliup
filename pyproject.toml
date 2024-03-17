@@ -14,7 +14,7 @@ dependencies = [
     "stream-gears >= 0.1.21,<0.2",
     "psutil >= 5.4.6",
     "aiofiles >= 22.1.0",
-    "yt-dlp >= 2023.11.16",
+    "yt-dlp >= 2024.3.10",
     "Pillow >= 5.2.0",
     "aiohttp[speedups]",
     "aiohttp-cors",
@@ -29,6 +29,7 @@ dependencies = [
     'protobuf >= 4.23.0',
     "SQLAlchemy>=2.0.0",
     "alembic>=1.12.1",
+    "m3u8",
 ]
 dynamic = ["version"]
 

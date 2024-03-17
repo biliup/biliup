@@ -252,7 +252,7 @@ const Global: React.FC = () => {
                     field="pool2_size"
                     extraText={
                         <div style={{ fontSize: "14px" }}>
-                            负责上传事件的线程池大小。每个下载行为会占用 1
+                            负责上传事件的线程池大小。每个上传行为会占用 1
                             线程，应设置为略大于录制主播总数的数值。
                             <br />
                             若开启 uploading_record ，则需设置为更高的数值
@@ -275,6 +275,10 @@ const Global: React.FC = () => {
                         </div>
                     }
                     label="使用直播间封面作为投稿封面（use_live_cover)"
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
                 />
             </div>
         </>

@@ -17,7 +17,7 @@ const Cookie: React.FC<Props> = (props) => {
                     field="user.bili_cookie"
                     extraText={
                         <div className="semi-form-field-extra">
-                            请至少填入bilibili cookie之一。推荐使用「
+                            根据格式填入cookie。推荐使用「
                             <a
                                 href="https://github.com/biliup/biliup-rs"
                                 title="「biliup-rs」 Github 项目主页"
@@ -29,6 +29,7 @@ const Cookie: React.FC<Props> = (props) => {
                             <br />
                         </div>
                     }
+                    placeholder="SESSDATA=none;bili_jct=none;DedeUserID__ckMd5=none;DedeUserID=none;"
                     label="哔哩哔哩 Cookie 文本（bili_cookie）"
                     style={{ width: "100%" }}
                     fieldStyle={{
