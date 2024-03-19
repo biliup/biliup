@@ -73,7 +73,7 @@ const Cookie: React.FC<Props> = (props) => {
                             填入 Cookie 降低风控风险。
                         </div>
                     }
-                    label="快手 Cookie（douyin_cookie）"
+                    label="快手 Cookie（kuaishou_cookie）"
                     style={{ width: "100%" }}
                     fieldStyle={{
                         alignSelf: "stretch",
