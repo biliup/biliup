@@ -38,9 +38,6 @@ class Kuaishou(DownloadBase):
                     logger.debug(f"{plugin_msg}: {key}")
                     return False
 
-            if is_check:
-                return True
-
             room_info = s.get(
                 f"https://live.kuaishou.com/live_api/liveroom/livedetail?principalId={room_id}",
                 timeout=5).json()['data']
@@ -54,6 +51,9 @@ class Kuaishou(DownloadBase):
         if room_info['result'] != 1:
             logger.error(f"{plugin_msg}: {room_info}")
             return False
+
+        if is_check:
+            return True
 
         try:
             self.room_title = room_info['liveStream']['caption']
