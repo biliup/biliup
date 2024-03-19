@@ -85,6 +85,7 @@ class Huya(DownloadBase):
                     else:
                         return False
 
+        self.room_title = html_info['data'][0]['gameLiveInfo']['introduction']
         self.raw_stream_url = stream_url
 
         if record_ratio != max_ratio:
