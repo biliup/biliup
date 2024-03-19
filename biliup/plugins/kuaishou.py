@@ -1,5 +1,6 @@
 import requests
 
+from biliup.config import config
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from ..plugins import logger
@@ -10,6 +11,7 @@ from ..plugins import logger
 class Kuaishou(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
+        self.fake_headers['Cookie'] = config.get('kuaishou_cookie', '')
 
     def check_stream(self, is_check=False):
         try:
@@ -27,7 +29,8 @@ class Kuaishou(DownloadBase):
             s.headers = self.fake_headers.copy()
             # 首页低风控生成did
             s.get("https://live.kuaishou.com", timeout=5)
-
+            # 不暂停似乎容易风控
+            # time.sleep(3)
             err_keys = ["错误代码22", "主播尚未开播"]
             html = s.get(f"https://live.kuaishou.com/u/{room_id}", timeout=5).text
             for key in err_keys:
@@ -55,7 +58,7 @@ class Kuaishou(DownloadBase):
         try:
             self.room_title = room_info['liveStream']['caption']
         except KeyError:
-            logger.error(f"{plugin_msg}: 直播间标题获取失败，使用快手ID代替")
+            logger.warning(f"{plugin_msg}: 直播间标题获取失败，使用快手ID代替")
             self.room_title = room_id
         self.raw_stream_url = room_info['liveStream']['playUrls'][0]['adaptationSet']['representation'][-1]['url']
 

@@ -96,7 +96,7 @@ const Dashboard: React.FC = () => {
     return (
         <>
             <Header style={{
-                backgroundColor: 'var(--semi-color-bg-1)', position: 'sticky', top: 0, zIndex: 10
+                backgroundColor: 'var(--semi-color-bg-1)', position: 'sticky', top: 0, zIndex: 1
             }}>
                 <Nav
                     header={
@@ -197,7 +197,7 @@ const Dashboard: React.FC = () => {
                                             各平台下载设置
                                         </p>
                                     </div>
-                                    <Collapse keepDOM>
+                                    <Collapse keepDOM style={{ width: '100%' }}>
                                         {/* 哔哩哔哩 */}
                                         <Bilibili entity={entity} />
                                         {/* 抖音 */}

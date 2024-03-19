@@ -31,7 +31,7 @@ class DownloadBase:
         self.url = url
         # 录制后保存文件格式而非源流格式 对应原配置文件format 仅ffmpeg及streamlink生效
         if not suffix:
-            logger.error(f"检测到suffix不存在，请补充后缀")
+            logger.error(f'检测到suffix不存在，请补充后缀')
         else:
             self.suffix = suffix.lower()
         self.title = None
@@ -94,7 +94,7 @@ class DownloadBase:
             filename = (self.filename_prefix.format(streamer=self.fname, title=self.room_title).encode(
                 'unicode-escape').decode()).encode().decode("unicode-escape")
         else:
-            filename = f"{self.fname}%Y-%m-%dT%H_%M_%S"
+            filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
         filename = get_valid_filename(filename)
         if is_fmt:
             return time.strftime(filename.encode("unicode-escape").decode()).encode().decode("unicode-escape")
@@ -118,7 +118,7 @@ class DownloadBase:
 
         if not self.suffix in ['flv', 'ts']:
             self.suffix = 'flv' if '.flv' in parsed_url_path else 'ts'
-            logger.warning(f"stream-gears 不支持除 flv 和 ts 以外的格式，已按流自动修正为 {self.suffix} 格式")
+            logger.warning(f'stream-gears 不支持除 flv 和 ts 以外的格式，已按流自动修正为 {self.suffix} 格式')
 
         stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
                               config.get('file_size'))
@@ -132,11 +132,11 @@ class DownloadBase:
                       *self.opt_args, '-c', 'copy', '-f', self.suffix]
         # if config.get('segment_time'):
         #     ffmpeg_cmd += ['-f', 'segment',
-        #              f"{filename} part-%03d.{self.suffix}"]
+        #              f'{filename} part-%03d.{self.suffix}']
         # else:
         #     ffmpeg_cmd += [
-        #         f"{filename}.{self.suffix}.part"]
-        ffmpeg_cmd += [f"{filename}.{self.suffix}.part"]
+        #         f'{filename}.{self.suffix}.part']
+        ffmpeg_cmd += [f'{filename}.{self.suffix}.part']
         streamlink_proc = subprocess.Popen(streamlink_cmd, stdout=subprocess.PIPE)
         ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=streamlink_proc.stdout, stdout=subprocess.PIPE,
                                        stderr=subprocess.STDOUT)
@@ -173,7 +173,7 @@ class DownloadBase:
         # else:
         #     args += [
         #         f'{filename}.{self.suffix}.part']
-        args += [f"{filename}.{self.suffix}.part"]
+        args += [f'{filename}.{self.suffix}.part']
 
         proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
@@ -203,11 +203,11 @@ class DownloadBase:
             update_file_list(db, self.database_row_id, file_name)
             update_room_title(db, self.database_row_id, self.room_title)
         retval = self.download(file_name)
-        self.rename(f"{file_name}.{self.suffix}")
+        self.rename(f'{file_name}.{self.suffix}')
         return retval
 
     def start(self):
-        logger.info(f"开始下载：{self.__class__.__name__} - {self.fname}")
+        logger.info(f'开始下载：{self.__class__.__name__} - {self.fname}')
         date = time.localtime()
         end_time = None
         delay = int(config.get('delay', 0))
@@ -250,26 +250,26 @@ class DownloadBase:
                 if retry_count < 3:
                     retry_count += 1
                     logger.info(
-                        f"获取流失败：{self.__class__.__name__} - {self.fname}，重试次数 {retry_count} / 3，等待 10 秒")
+                        f'获取流失败：{self.__class__.__name__} - {self.fname}，重试次数 {retry_count} / 3，等待 10 秒')
                     time.sleep(10)
                     continue
 
                 if delay:
                     retry_count_delay += 1
                     if retry_count_delay > delay_all_retry_count:
-                        logger.info(f"下播延迟检测结束：{self.__class__.__name__}:{self.fname}")
+                        logger.info(f'下播延迟检测结束：{self.__class__.__name__}:{self.fname}')
                         break
                     else:
                         if delay < 60:
                             logger.info(
-                                f"下播延迟检测：{self.__class__.__name__} - {self.fname}，将在 {delay} 秒后检测开播状态")
+                                f'下播延迟检测：{self.__class__.__name__} - {self.fname}，将在 {delay} 秒后检测开播状态')
                             time.sleep(delay)
                         else:
                             if retry_count_delay == 1:
                                 end_time = time.localtime()
                                 # 只有第一次显示
                                 logger.info(
-                                    f"下播延迟检测：{self.__class__.__name__} - {self.fname}，每隔 60 秒检测开播状态，共检测 {delay_all_retry_count} 次")
+                                    f'下播延迟检测：{self.__class__.__name__} - {self.fname}，每隔 60 秒检测开播状态，共检测 {delay_all_retry_count} 次')
                             time.sleep(60)
                         continue
                 else:
@@ -282,7 +282,7 @@ class DownloadBase:
         # 更新数据库中封面存储路径
         with SessionLocal() as db:
             update_cover_path(db, self.database_row_id, self.live_cover_path)
-        logger.info(f"退出下载：{self.__class__.__name__} - {self.fname}")
+        logger.info(f'退出下载：{self.__class__.__name__} - {self.fname}')
         stream_info = {
             'name': self.fname,
             'url': self.url,
@@ -299,7 +299,7 @@ class DownloadBase:
         # 获取封面
         if self.use_live_cover and self.live_cover_url is not None:
             try:
-                save_dir = f"cover/{self.__class__.__name__}/{self.fname}/"
+                save_dir = f'cover/{self.__class__.__name__}/{self.fname}/'
                 if not os.path.exists(save_dir):
                     os.makedirs(save_dir)
 
@@ -313,7 +313,7 @@ class DownloadBase:
                     suffix = 'webp'
 
                 if suffix:
-                    live_cover_path = f"{save_dir}{fmtname}.{suffix}"
+                    live_cover_path = f'{save_dir}{fmtname}.{suffix}'
                     if os.path.exists(live_cover_path):
                         self.live_cover_path = live_cover_path
                     else:
@@ -324,18 +324,18 @@ class DownloadBase:
                     if suffix == 'webp':
                         with Image.open(live_cover_path) as img:
                             img = img.convert('RGB')
-                            img.save(f"{save_dir}{fmtname}.jpg", format='JPEG')
+                            img.save(f'{save_dir}{fmtname}.jpg', format='JPEG')
                         os.remove(live_cover_path)
-                        live_cover_path = f"{save_dir}{fmtname}.jpg"
+                        live_cover_path = f'{save_dir}{fmtname}.jpg'
 
                     self.live_cover_path = live_cover_path
                     logger.info(
-                        f"封面下载成功：{self.__class__.__name__} - {self.fname}：{os.path.abspath(self.live_cover_path)}")
+                        f'封面下载成功：{self.__class__.__name__} - {self.fname}：{os.path.abspath(self.live_cover_path)}')
                 else:
                     logger.warning(
-                        f"封面下载失败：{self.__class__.__name__} - {self.fname}：封面格式不支持：{self.live_cover_url}")
+                        f'封面下载失败：{self.__class__.__name__} - {self.fname}：封面格式不支持：{self.live_cover_url}')
             except:
-                logger.exception(f"封面下载失败：{self.__class__.__name__} - {self.fname}")
+                logger.exception(f'封面下载失败：{self.__class__.__name__} - {self.fname}')
 
     def check_url_healthy(self, http_session, url):
         try:
@@ -345,11 +345,11 @@ class DownloadBase:
                 m3u8_obj = m3u8.loads(r.text)
                 if m3u8_obj.is_variant:
                     url = m3u8_obj.playlists[0].uri
-                    logger.info(f"stream url: {url}")
+                    logger.info(f'stream url: {url}')
                     r = http_session.get(url, stream=True, timeout=5)
             elif r.headers.get('Location', False):
                 url = r.headers['Location']
-                logger.info(f"stream url: {url}")
+                logger.info(f'stream url: {url}')
                 r = http_session.get(url, stream=True, timeout=5)
             if r.status_code == 200:
                 return True, url
@@ -361,12 +361,12 @@ class DownloadBase:
     def rename(file_name):
         try:
             os.rename(file_name + '.part', file_name)
-            logger.info(f"更名 {file_name + ".part"} 为 {file_name}")
+            logger.info(f'更名 {file_name + ".part"} 为 {file_name}')
         except FileNotFoundError:
-            logger.debug(f"文件不存在: {file_name}")
+            logger.debug(f'文件不存在: {file_name}')
         except FileExistsError:
             os.rename(file_name + '.part', file_name)
-            logger.info(f"更名 {file_name + '.part'} 为 {file_name} 失败, {file_name} 已存在")
+            logger.info(f'更名 {file_name + ".part"} 为 {file_name} 失败, {file_name} 已存在')
 
     @property
     def file_name(self):
@@ -374,7 +374,7 @@ class DownloadBase:
             filename = (self.filename_prefix.format(streamer=self.fname, title=self.room_title).encode(
                 'unicode-escape').decode()).encode().decode("unicode-escape")
         else:
-            filename = f"{self.fname}%Y-%m-%dT%H_%M_%S"
+            filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
         filename = get_valid_filename(filename)
         return time.strftime(filename.encode("unicode-escape").decode()).encode().decode("unicode-escape")
 
