@@ -1,9 +1,9 @@
 .shadow {
-    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
-    background-color: var(--semi-color-bg-0);
+    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1) !important;
+    background-color: var(--semi-color-bg-0) !important;
     /*margin-left: 11px;*/
 }
 
 body[theme-mode=dark] .shadow {
-    box-shadow: var(--semi-shadow-elevated);
+    box-shadow: var(--semi-shadow-elevated) !important;
 }

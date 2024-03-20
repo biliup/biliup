@@ -345,12 +345,13 @@ class DownloadBase:
                 m3u8_obj = m3u8.loads(r.text)
                 if m3u8_obj.is_variant:
                     url = m3u8_obj.playlists[0].uri
+                    logger.info(f'stream url: {url}')
                     r = http_session.get(url, stream=True, timeout=5)
             elif r.headers.get('Location', False):
                 url = r.headers['Location']
+                logger.info(f'stream url: {url}')
                 r = http_session.get(url, stream=True, timeout=5)
             if r.status_code == 200:
-                logger.info(f'stream url: {url}')
                 return True, url
         except Exception as e:
             logger.debug(f"{e} from {url}")

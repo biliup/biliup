@@ -67,6 +67,20 @@ const Cookie: React.FC<Props> = (props) => {
                     }}
                 />
                 <Form.Input
+                    field="user.kuaishou_cookie"
+                    extraText={
+                        <div className="semi-form-field-extra">
+                            填入 Cookie 降低风控风险。
+                        </div>
+                    }
+                    label="快手 Cookie（kuaishou_cookie）"
+                    style={{ width: "100%" }}
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                />
+                <Form.Input
                     field="user.twitch_cookie"
                     extraText={
                         <div className="semi-form-field-extra">

@@ -252,6 +252,7 @@ export default function RootLayout({
                                         display: "flex",
                                         flexDirection: "row-reverse",
                                         alignSelf: "flex-end",
+                                        zIndex: 2,
                                     }}
                                 >
                                     <Button
@@ -311,6 +312,7 @@ function footer(
                 style={{
                     color: "var(--semi-color-text-2)",
                     // marginRight: '12px',
+                    // zIndex: 100,
                 }}
             />
         </Nav.Footer>

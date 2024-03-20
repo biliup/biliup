@@ -95,7 +95,7 @@ export default function Home() {
     };
     return (<>
         <Header style={{
-            backgroundColor: 'var(--semi-color-bg-1)', position: 'sticky', top: 0, zIndex: 10
+            backgroundColor: 'var(--semi-color-bg-1)', position: 'sticky', top: 0, zIndex: 1
         }}>
             <Nav
                 header={<><div style={{
