@@ -55,8 +55,8 @@ class Bililive(DownloadBase):
                 user_data = do_login(s).get('data', {})
                 is_login = user_data.get('isLogin', False)
                 if not is_login:
-                    logger.warning(f"{plugin_msg}: 用户未登录，可能无法获取高清直播流")
-                    logger.debug(self.fake_headers.pop('cookie', f'{plugin_msg}: Not found cookie'))
+                    # logger.warning(f"{plugin_msg}: 登录态校验失败")
+                    logger.debug(user_data)
                 else:
                     logger.info(f"用户名：{user_data['uname']}, mid：{user_data['mid']}, isLogin：{is_login}")
                 return True
