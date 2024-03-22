@@ -53,9 +53,8 @@ class Config(UserDict):
         for k, v in self['streamers'].items():
             us = UploadStreamers(**UploadStreamers.filter_parameters(
                 {"template_name": k, "tags": v.pop('tags', ['biliup']), ** v}))
-            # us.save()
             db.add(us)
-            # db.flush(us)
+            db.flush()
             url = v.pop('url')
             urls = url if isinstance(url, list) else [url]  # 兼容 url 输入字符串和列表
             for url in urls:
