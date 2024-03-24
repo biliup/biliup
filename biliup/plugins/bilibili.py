@@ -56,7 +56,7 @@ class Bililive(DownloadBase):
                 is_login = user_data.get('isLogin', False)
                 if not is_login:
                     # logger.warning(f"{plugin_msg}: 登录态校验失败")
-                    logger.info("登录态校验失败: " + _res)
+                    logger.info("登录态校验失败: " + str(_res))
                 else:
                     logger.info(f"用户名：{user_data['uname']}, mid：{user_data['mid']}, isLogin：{is_login}")
                 return True
