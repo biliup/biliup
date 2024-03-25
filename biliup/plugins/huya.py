@@ -62,6 +62,10 @@ class Huya(DownloadBase):
         # cdn_fallback = True
 
         stream_url, sCdns = _build_stream_url(room_id, perf_cdn, self.fake_headers)
+        # stream_url = None
+        if not stream_url:
+            logger.error(f"{plugin_msg}: 无法获取流地址")
+            return False
 
         # 虎牙直播流只允许连接一次，非常丑陋的代码
         if cdn_fallback:
@@ -106,14 +110,19 @@ def _get_info_in_html(room_id, fake_headers):
         html = requests.get(f"https://www.huya.com/{room_id}", timeout=5, headers=fake_headers).text
         if '找不到这个主播' in html:
             logger.error(f"Huya - {room_id}: 找不到这个主播")
-    except Exception as e:
-        logger.error(f"Huya - {room_id}: {e}")
+            return {}
+    except:
+        logger.exception(f"Huya - {room_id}: get_info_in_html")
         return {}
     return json.loads(html.split('stream: ')[1].split('};')[0])
 
 def _build_stream_url(room_id, perf_cdn, fake_headers):
     html_info = _get_info_in_html(room_id, fake_headers)
-    streamInfo = html_info['data'][0]['gameStreamInfoList']
+    try:
+        streamInfo = html_info['data'][0]['gameStreamInfoList']
+    except KeyError:
+        logger.exception(f"Huya - {room_id}: build_stream_url {html_info}")
+        return None, None
     stream = streamInfo[0]
     sFlvUrlSuffix, sStreamName, sFlvAntiCode = \
         stream['sFlvUrlSuffix'], stream['sStreamName'], stream['sFlvAntiCode']

@@ -33,7 +33,7 @@ class Douyin(DownloadBase):
                 logger.warning(f"{Douyin.__name__}: {self.url}: 获取房间ID失败,请检查Cookie设置")
                 return False
             except:
-                logger.warning(f"{Douyin.__name__}: {self.url}: 获取房间ID失败")
+                logger.exception(f"{Douyin.__name__}: {self.url}: 获取房间ID失败")
                 return False
         else:
             try:
@@ -58,16 +58,24 @@ class Douyin(DownloadBase):
             else:
                 room_info = {}
         except:
-            logger.warning(f"{Douyin.__name__}: {self.url}: 获取失败")
+            logger.exception(f"{Douyin.__name__} - {self.url}: room_info 获取失败")
             return False
 
         try:
             if room_info.get('status') != 2:
                 logger.debug(f"{Douyin.__name__}: {self.url}: 未开播")
                 return False
+        except:
+            logger.exception(f"{Douyin.__name__} - {self.url}: 获取开播状态失败")
+            return False
 
+        try:
             stream_data = json.loads(room_info['stream_url']['live_core_sdk_data']['pull_data']['stream_data'])['data']
+        except:
+            logger.exception(f"{Douyin.__name__} - {self.url}: 加载清晰度失败")
+            return False
 
+        try:
             # 原画origin 蓝光uhd 超清hd 高清sd 标清ld 流畅md 仅音频ao
             quality_items = ['origin', 'uhd', 'hd', 'sd', 'ld', 'md']
             quality = config.get('douyin_quality', 'origin')
@@ -104,7 +112,7 @@ class Douyin(DownloadBase):
             self.raw_stream_url = stream_data[quality]['main']['flv']
             self.room_title = room_info['title']
         except:
-            logger.warning(f"{Douyin.__name__}: {self.url}: 解析错误")
+            logger.exception(f"{Douyin.__name__} - {self.url}: 寻找清晰度失败")
             return False
         return True
 
