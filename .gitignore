@@ -9,6 +9,7 @@ backup
 venv./
 .venv/
 .run/
+test/
 pdm.lock
 .pdm-python
 config.*.*
