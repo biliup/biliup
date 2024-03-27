@@ -18,10 +18,10 @@ class Config(UserDict):
         if not os.path.exists(file):
             raise FileNotFoundError(file)
 
-        if isinstance(self.data['user'], dict):
-            self.data['user']['cookies'] = {}
-        else:
+        if self.data.get('user') is None:
             self.data['user'] = {'cookies': {}}
+        if self.data["user"].get("cookies") is None:
+            self.data['user']['cookies'] = {}
         with open(file, encoding='utf-8') as stream:
             s = json.load(stream)
             for i in s["cookie_info"]["cookies"]:
