@@ -16,9 +16,12 @@ except ModuleNotFoundError:
 class Config(UserDict):
     def load_cookies(self, file='cookies.json'):
         if not os.path.exists(file):
-            raise FileNotFoundError(f"找不到 {file} ！！！")
+            raise FileNotFoundError(file)
 
-        self.data["user"] = {"cookies": {}}
+        if isinstance(self.data['user'], dict):
+            self.data['user']['cookies'] = {}
+        else:
+            self.data['user'] = {'cookies': {}}
         with open(file, encoding='utf-8') as stream:
             s = json.load(stream)
             for i in s["cookie_info"]["cookies"]:
