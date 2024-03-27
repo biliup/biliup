@@ -4,7 +4,10 @@ import {
     Nav,
     Button,
     Tag,
-    Typography, Popconfirm, Notification
+    Typography,
+    Popconfirm, 
+    Notification,
+    Card
 } from '@douyinfe/semi-ui';
 import {
     IconHelpCircle,
@@ -140,39 +143,44 @@ export default function Home() {
                     }}
                     dataSource={data}
                     renderItem={item => (
-                        <List.Item style={{
-                            border: '1px solid var(--semi-color-border)',
-                            backgroundColor: 'var(--semi-color-bg-2)',
-                            borderRadius: '3px',
-                            paddingLeft: '20px',
-                            paddingRight: '20px',
-                            margin: '8px 2px',
-                            minWidth: 292,
-                            maxWidth: 310,
-                        }}>
-                            <div style={{ flexGrow: 1, maxWidth: 250 }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                    <h3 style={{ color: 'var(--semi-color-text-0)', fontWeight: 500 }}>{item.remark}</h3>
-                                    {item.status}
+                        <List.Item>
+                            <Card
+                            shadows='hover'
+                            style={{
+                                maxWidth: 310,
+                                margin: '8px 2px',
+                                flexGrow: 1,
+                            }}
+                            bodyStyle={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between'
+                            }}>
+                                <div style={{ flexGrow: 1, maxWidth: 250 }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                        <h3 style={{ color: 'var(--semi-color-text-0)', fontWeight: 500 }}>{item.remark}</h3>
+                                        {item.status}
+                                    </div>
+                                    <Text ellipsis={{ showTooltip: { opts: { style: { wordBreak: 'break-all' } } } }} type="tertiary">{item.url}</Text>
+                                    <div style={{ margin: '0', display: 'flex', justifyContent: 'flex-end' }}>
+                                        <ButtonGroup theme='borderless'>
+                                            <TemplateModal onOk={handleUpdate} entity={item}>
+                                                <Button theme='borderless' icon={<IconEdit2Stroked />}></Button>
+                                            </TemplateModal>
+                                            <span className="semi-button-group-line semi-button-group-line-borderless semi-button-group-line-primary"></span>
+                                            <Popconfirm
+                                                title="确定是否要删除？"
+                                                content="此操作将不可逆"
+                                                onConfirm={async () => await onConfirm(item.id)}
+                                                // onCancel={onCancel}
+                                            >
+                                                <Button theme='borderless' icon={<IconDeleteStroked />}></Button>
+                                            </Popconfirm>
+                                        </ButtonGroup>
+                                    </div>
                                 </div>
-                                <Text ellipsis={{ showTooltip: { opts: { style: { wordBreak: 'break-all' } } } }} type="tertiary">{item.url}</Text>
-                                <div style={{ margin: '10px 0', display: 'flex', justifyContent: 'flex-end' }}>
-                                    <ButtonGroup theme='borderless'>
-                                        <TemplateModal onOk={handleUpdate} entity={item}>
-                                            <Button theme='borderless' icon={<IconEdit2Stroked />}></Button>
-                                        </TemplateModal>
-                                        <span className="semi-button-group-line semi-button-group-line-borderless semi-button-group-line-primary"></span>
-                                        <Popconfirm
-                                            title="确定是否要删除？"
-                                            content="此操作将不可逆"
-                                            onConfirm={async () => await onConfirm(item.id)}
-                                            // onCancel={onCancel}
-                                        >
-                                            <Button theme='borderless' icon={<IconDeleteStroked />}></Button>
-                                        </Popconfirm>
-                                    </ButtonGroup>
-                                </div>
-                            </div>
+                            </Card>
+                            
                         </List.Item>
                     )}
                 />
