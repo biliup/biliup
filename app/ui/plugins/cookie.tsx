@@ -71,8 +71,11 @@ const Cookie: React.FC<Props> = (props) => {
                     extraText={
                         <div className="semi-form-field-extra">
                             填入 Cookie 降低风控风险。
+                            需要 client_key,kuaishou.live.bfb1s,kuaishou.live.web_st,kuaishou.live.web_ph,userId 的值，
+                            请不要将所有 Cookie 填入。
                         </div>
                     }
+                    placeholder="client_key=none;kuaishou.live.bfb1s=none;kuaishou.live.web_st=none;kuaishou.live.web_ph=none;userId=none;"
                     label="快手 Cookie（kuaishou_cookie）"
                     style={{ width: "100%" }}
                     fieldStyle={{
