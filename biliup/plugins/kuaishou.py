@@ -1,4 +1,6 @@
 import requests
+import time
+import random
 
 from biliup.config import config
 from ..engine.decorators import Plugin
@@ -29,8 +31,12 @@ class Kuaishou(DownloadBase):
             s.headers = self.fake_headers.copy()
             # 首页低风控生成did
             s.get("https://live.kuaishou.com", timeout=5)
+
             # 不暂停似乎容易风控
-            # time.sleep(3)
+            times = 3 + random.random()
+            logger.debug(f"{plugin_msg}: 暂停 {times} 秒")
+            time.sleep(times)
+
             err_keys = ["错误代码22", "主播尚未开播"]
             html = s.get(f"https://live.kuaishou.com/u/{room_id}", timeout=5).text
             for key in err_keys:
@@ -61,6 +67,7 @@ class Kuaishou(DownloadBase):
             logger.warning(f"{plugin_msg}: 直播间标题获取失败，使用快手ID代替")
             self.room_title = room_id
         self.raw_stream_url = room_info['liveStream']['playUrls'][0]['adaptationSet']['representation'][-1]['url']
+        print(self.raw_stream_url)
 
         return True
 
