@@ -67,7 +67,6 @@ class Kuaishou(DownloadBase):
             logger.warning(f"{plugin_msg}: 直播间标题获取失败，使用快手ID代替")
             self.room_title = room_id
         self.raw_stream_url = room_info['liveStream']['playUrls'][0]['adaptationSet']['representation'][-1]['url']
-        print(self.raw_stream_url)
 
         return True
 
