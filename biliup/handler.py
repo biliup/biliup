@@ -43,6 +43,9 @@ def singleton_check(platform, name, url):
         return
     # 可能对同一个url同时发送两次上传事件
     with NamedLock(f"upload_count_{url}"):
+        if context['url_upload_count'][url] > 0:
+            logger.debug(f'{url}正在上传中，跳过')
+            return
         # from .handler import event_manager, UPLOAD
         # += 不是原子操作
         context['url_upload_count'][url] += 1
