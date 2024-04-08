@@ -155,6 +155,9 @@ class Bililive(DownloadBase):
 
             self.raw_stream_url = f"{stream_url['host']}{stream_url['base_url']}{stream_url['extra']}"
 
+            if normalize_cn204:
+                self.raw_stream_url = re.sub(r"(?<=cn-gotcha204)-[1-4]", "", self.raw_stream_url, 1)
+
             if ov05_ip and "ov-gotcha05" in stream_url['host']:
                 self.raw_stream_url = oversea_expand(s, self.raw_stream_url, ov05_ip)
 
@@ -181,9 +184,6 @@ class Bililive(DownloadBase):
                         return False
             else:
                 self.raw_stream_url = _url
-
-            if normalize_cn204:
-                self.raw_stream_url = re.sub(r"(?<=cn-gotcha204)-[1-4]", "", self.raw_stream_url, 1)
 
             return True
 
