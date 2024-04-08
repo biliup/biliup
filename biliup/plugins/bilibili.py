@@ -149,7 +149,7 @@ class Bililive(DownloadBase):
             streamName = match1(stream_url['base_url'], streamname_regexp)
             if streamName is not None and force_source and qualityNumber >= 10000:
                 new_base_url = stream_url['base_url'].replace(f"_{streamName.split('_')[-1]}", '')
-                if super().check_url_healthy(s, f"{stream_url['host']}{new_base_url}{stream_url['extra']}"):
+                if super().check_url_healthy(s, f"{stream_url['host']}{new_base_url}{stream_url['extra']}")[0]:
                     stream_url['base_url'] = new_base_url
                     logger.debug(stream_url['base_url'])
 
@@ -158,7 +158,7 @@ class Bililive(DownloadBase):
             if ov05_ip and "ov-gotcha05" in stream_url['host']:
                 self.raw_stream_url = oversea_expand(s, self.raw_stream_url, ov05_ip)
 
-            url_health, url = super().check_url_healthy(s, self.raw_stream_url)
+            url_health, _url = super().check_url_healthy(s, self.raw_stream_url)
             if not url_health:
                 if cdn_fallback:
                     i = len(stream_info['url_info'])
@@ -166,9 +166,9 @@ class Bililive(DownloadBase):
                         i -= 1
                         try:
                             self.raw_stream_url = "{}{}{}".format(stream_info['url_info'][i]['host'], stream_url['base_url'], stream_info['url_info'][i]['extra'])
-                            url_health, url = super().check_url_healthy(s, self.raw_stream_url)
+                            url_health, _url = super().check_url_healthy(s, self.raw_stream_url)
                             if url_health:
-                                self.raw_stream_url = url
+                                self.raw_stream_url = _url
                                 break
                         except Exception as e:
                             logger.debug(e)
@@ -180,10 +180,10 @@ class Bililive(DownloadBase):
                         self.raw_stream_url = None
                         return False
             else:
-                self.raw_stream_url = url
+                self.raw_stream_url = _url
 
             if normalize_cn204:
-                stream_url['host'] = re.sub(r"(?<=cn-gotcha204)-[1-4]", "", stream_url['host'])
+                self.raw_stream_url = re.sub(r"(?<=cn-gotcha204)-[1-4]", "", self.raw_stream_url, 1)
 
             return True
 
