@@ -485,7 +485,7 @@ async def myinfo(request):
     try:
         config.load_cookies(file)
     except FileNotFoundError:
-        return web.json_response({"status": 500, 'error': f"找不到 {file} ！！！"}, status=500)
+        return web.json_response({"status": 500, 'error': f"{file} 文件不存在"}, status=500)
     cookies = config.data['user']['cookies']
     return web.json_response(BiliBili.myinfo(cookies))
 

@@ -42,9 +42,10 @@ const UserList: React.FC<UserListProps> = ({onCancel, visible}) => {
             setVisible(false);
             Toast.success('创建成功');
         } catch (e: any) {
+            const messageObj = JSON.parse(e.message);
             return Notification.error({
                 title: '创建失败',
-                content: <Typography.Paragraph style={{maxWidth: 450}}>{e.message}</Typography.Paragraph>,
+                content: <Typography.Paragraph style={{ maxWidth: 450 }}>{messageObj.error}</Typography.Paragraph>,
                 // theme: 'light',
                 // duration: 0,
                 style: {width: 'min-content'}
