@@ -1,6 +1,7 @@
 import time
 import requests
 import json
+import re
 
 from biliup.config import config
 from . import match1, logger
@@ -54,11 +55,10 @@ class Bililive(DownloadBase):
                 _res = do_login(s)
                 user_data = _res.get('data', {})
                 is_login = user_data.get('isLogin', False)
-                if not is_login:
-                    # logger.warning(f"{plugin_msg}: 登录态校验失败")
-                    logger.warning("登录态校验失败: " + str(_res))
-                else:
+                if is_login:
                     logger.info(f"用户名：{user_data['uname']}, mid：{user_data['mid']}, isLogin：{is_login}")
+                else:
+                    logger.warning("登录态校验失败: " + str(_res))
                 return True
 
             protocol = config.get('bili_protocol', 'stream')
@@ -68,6 +68,8 @@ class Bililive(DownloadBase):
             ov05_ip = config.get('bili_force_ov05_ip')
             main_api = config.get('bili_liveapi', OFFICIAL_API).rstrip('/')
             fallback_api = config.get('bili_fallback_api', OFFICIAL_API).rstrip('/')
+            cn01_sids = config.get('bili_replace_cn01_sid', '').split(',')
+            normalize_cn204 = config.get('bili_normalize_cn204', False)
 
             params = {
                 'room_id': room_id,
@@ -93,6 +95,7 @@ class Bililive(DownloadBase):
                     logger.debug(f"{plugin_msg}: 复用 {url}")
                     return True
                 else:
+                    logger.debug(f"{plugin_msg}: health-{health}; url-{self.raw_stream_url}")
                     self.raw_stream_url = None
 
             try:
@@ -179,6 +182,9 @@ class Bililive(DownloadBase):
             else:
                 self.raw_stream_url = url
 
+            if normalize_cn204:
+                stream_url['host'] = re.sub(r"(?<=cn-gotcha204)-[1-4]", "", stream_url['host'])
+
             return True
 
     def danmaku_download_start(self, filename):
@@ -219,7 +225,6 @@ def do_login(s):
 
 def oversea_expand(s, url, ov05_ip):
     # 强制替换ov05 302redirect之后的真实地址为指定的域名或ip达到自选ov05节点的目的
-    import re
     r = s.get(url, stream=True)
     logger.debug(f'将ov-gotcha05的节点ip替换为了{ov05_ip}')
     return re.sub(r".*(?=/d1--ov-gotcha05)", f"http://{ov05_ip}", r.url, 1)

@@ -84,7 +84,7 @@ export default function Home() {
                     display: 'flex',
                     // justifyContent: 'center',
                     padding: '6px'
-                }}><IconVideoListStroked size='large' /></div><h4 style={{ marginLeft: '12px' }}>录播管理</h4></>}
+                }}><IconVideoListStroked size='large' /></div><h4 style={{ marginLeft: '12px' }}>历史记录</h4></>}
                 mode="horizontal"
             ></Nav>
         </Header>

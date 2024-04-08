@@ -4,6 +4,7 @@ import re
 import subprocess
 import sys
 import time
+import shutil
 from typing import Generator, List
 from urllib.parse import urlparse
 
@@ -108,13 +109,17 @@ class DownloadBase:
         self.danmaku_download_start(fmtname)
 
         parsed_url_path = urlparse(self.raw_stream_url).path
-        if self.downloader == 'streamlink':
-            if '.flv' in parsed_url_path:  # streamlink无法处理flv,所以回退到ffmpeg
+        if shutil.which("ffmpeg"):
+            if self.downloader == 'streamlink':
+                if '.flv' in parsed_url_path:  # streamlink无法处理flv,所以回退到ffmpeg
+                    return self.ffmpeg_download(fmtname)
+                else:
+                    return self.streamlink_download(fmtname)
+            elif self.downloader == 'ffmpeg':
                 return self.ffmpeg_download(fmtname)
-            else:
-                return self.streamlink_download(fmtname)
-        elif self.downloader == 'ffmpeg':
-            return self.ffmpeg_download(fmtname)
+        else:
+            logger.error("未安装 FFMpeg 或不存在于 PATH 内，本次下载使用 stream-gears")
+            logger.debug("Current user's PATH is:" + os.getenv("PATH"))
 
         if not self.suffix in ['flv', 'ts']:
             self.suffix = 'flv' if '.flv' in parsed_url_path else 'ts'
@@ -338,8 +343,11 @@ class DownloadBase:
                 logger.exception(f'封面下载失败：{self.__class__.__name__} - {self.fname}')
 
     def check_url_healthy(self, http_session, url):
+        timeout = 5
         try:
-            r = http_session.get(url, stream=True, timeout=5, allow_redirects=False)
+            if 'flv' in url:
+                timeout = 60
+            r = http_session.get(url, stream=True, timeout=timeout, allow_redirects=False)
             if 'm3u8' in url:
                 import m3u8
                 m3u8_obj = m3u8.loads(r.text)
@@ -350,7 +358,7 @@ class DownloadBase:
             elif r.headers.get('Location', False):
                 url = r.headers['Location']
                 logger.info(f'stream url: {url}')
-                r = http_session.get(url, stream=True, timeout=5)
+                r = http_session.get(url, stream=True, timeout=timeout)
             if r.status_code == 200:
                 return True, url
         except Exception as e:

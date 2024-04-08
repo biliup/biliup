@@ -112,7 +112,7 @@ const Bilibili: React.FC<Props> = (props) => {
                     field="bili_fallback_api"
                     extraText={
                         <div style={{ fontSize: "14px" }}>
-                            上方的主要API不可用时，回退使用的 API。默认使用官方 API。
+                            上方的主要 API 不可用或受到区域限制时，回退使用的 API。默认使用官方 API。
                             <br />
                             海外机器玩法：哔哩哔哩直播API（bili_liveapi）设置为能获取大陆直播流的
                             API，并将哔哩哔哩直播回退API（bili_fallback_api）设置为官方
@@ -130,10 +130,10 @@ const Bilibili: React.FC<Props> = (props) => {
                         padding: 0,
                     }}
                 />
-                <Form.Switch
-                    field="bili_force_source"
-                    extraText="哔哩哔哩强制真原画（仅限非 FLV 流，且画质等级 bili_qn >= 10000），默认为关闭，不保证可用性。"
-                    label="强制获取真原画（bili_force_source）"
+                <Form.Input
+                    field="bili_replace_cn01_sid"
+                    label="替换 CN01 sid (bili_replace_cn01_sid)"
+                    style={{ width: "100%" }}
                     fieldStyle={{
                         alignSelf: "stretch",
                         padding: 0,
@@ -143,6 +143,24 @@ const Bilibili: React.FC<Props> = (props) => {
                     field="bili_force_ov05_ip"
                     label="自定义 OV05 IP (bili_force_ov05_ip)"
                     style={{ width: "100%" }}
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                />
+                <Form.Switch
+                    field="bili_force_source"
+                    extraText="哔哩哔哩强制真原画（仅限非 FLV 流，且画质等级 bili_qn >= 10000），默认为关闭，不保证可用性。"
+                    label="强制获取真原画（bili_force_source）"
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                />
+                <Form.Switch
+                    field="bili_normalize_cn204"
+                    extraText="去除 cn-gotcha204 后面的小尾巴（-[1-4]）"
+                    label="标准化 CN204（bili_normalize_cn204）"
                     fieldStyle={{
                         alignSelf: "stretch",
                         padding: 0,

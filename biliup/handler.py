@@ -39,12 +39,12 @@ def singleton_check(platform, name, url):
             yield Event(PRE_DOWNLOAD, args=(name, turl,))
         return
     if context['PluginInfo'].url_status[url] == 1:
-        logger.debug(f'{url}正在下载中，跳过检测')
+        logger.debug(f'{url} 正在下载中，跳过检测')
         return
     # 可能对同一个url同时发送两次上传事件
     with NamedLock(f"upload_count_{url}"):
         if context['url_upload_count'][url] > 0:
-            logger.debug(f'{url}正在上传中，跳过')
+            logger.debug(f'{url} 正在上传中，跳过')
             return
         # from .handler import event_manager, UPLOAD
         # += 不是原子操作
@@ -59,9 +59,9 @@ def singleton_check(platform, name, url):
 @event_manager.register(PRE_DOWNLOAD, block='Asynchronous1')
 def pre_processor(name, url):
     if context['PluginInfo'].url_status[url] == 1:
-        logger.debug(f'{name}-正在下载中，跳过下载')
+        logger.debug(f'{name} 正在下载中，跳过下载')
         return
-    logger.info(f'{name}-{url}-开播了准备下载')
+    logger.info(f'{name} - {url} 开播了准备下载')
     preprocessor = config['streamers'].get(name, {}).get('preprocessor')
     if preprocessor:
         processor(preprocessor, json.dumps({
@@ -98,7 +98,7 @@ def process(name, url):
             # += 不是原子操作
             context['url_upload_count'][stream_info['url']] += 1
             yield Event(DOWNLOADED, (stream_info,))
-        
+
 
 @event_manager.register(DOWNLOADED, block='Asynchronous1')
 def processed(stream_info):

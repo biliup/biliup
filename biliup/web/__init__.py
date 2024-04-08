@@ -445,7 +445,8 @@ async def app_status(request):
     from biliup.app import context
     from biliup.config import Config
     from biliup.app import PluginInfo
-    res = {}
+    from biliup import __version__
+    res = {'version': __version__,}
     for key, value in context.items():  # 遍历删除不能被 json 序列化的键值对
         if isinstance(value, Config):
             continue
