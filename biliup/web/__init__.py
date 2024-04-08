@@ -171,10 +171,13 @@ async def tag_check(request):
 @routes.get('/v1/videos')
 async def streamers(request):
     media_extensions = ['.mp4', '.flv', '.3gp', '.webm', '.mkv', '.ts']
+    _blacklist = ['next-env.d.ts']
     # 获取文件列表
     file_list = []
     i = 1
     for file_name in os.listdir('.'):
+        if file_name in _blacklist:
+            continue
         name, ext = os.path.splitext(file_name)
         if ext in media_extensions:
             file_list.append({'key': i, 'name': file_name, 'updateTime': os.path.getmtime(file_name),
