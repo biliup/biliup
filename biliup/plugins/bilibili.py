@@ -88,7 +88,7 @@ class Bililive(DownloadBase):
             if self.raw_stream_url is not None \
                 and qualityNumber >= 10000 \
                 and not is_new_live:
-                # 同一个 streamName 即可复用，与其他参数无关，目前没有报告说链接会超时失效。
+                # 同一个 streamName 即可复用，除非被超管切断
                 # 前面拿不到 streamName，目前使用开播时间判断
                 health, url = super().check_url_healthy(s, self.raw_stream_url)
                 if health:
@@ -173,8 +173,11 @@ class Bililive(DownloadBase):
                             if url_health:
                                 self.raw_stream_url = _url
                                 break
-                        except Exception as e:
-                            logger.debug(e)
+                        except TimeoutError as e:
+                            logger.debug(f"Timeout Error: {e} at {stream_info['url_info'][i]['host']}")
+                            continue
+                        except Exception:
+                            logger.exception("Uncaught exception:")
                             continue
                         finally:
                             logger.debug(f"{i} - {self.raw_stream_url}")
