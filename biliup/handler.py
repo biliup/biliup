@@ -26,7 +26,7 @@ UPLOADED = 'uploaded'
 logger = logging.getLogger('biliup')
 
 
-@event_manager.register(CHECK, block='Asynchronous1')
+@event_manager.register(CHECK, block='Asynchronous3')
 def singleton_check(platform, name, url):
     from .plugins.twitch import Twitch
     context['url_upload_count'].setdefault(url, 0)
@@ -73,10 +73,6 @@ def pre_processor(name, url):
 
 @event_manager.register(DOWNLOAD, block='Asynchronous1')
 def process(name, url):
-    stream_info = {
-        'name': name,
-        'url': url,
-    }
     url_status = context['PluginInfo'].url_status
     # 下载开始
     try:
@@ -87,17 +83,17 @@ def process(name, url):
             kwargs['suffix'] = suffix
         url_status[url] = 1
         stream_info = download(name, url, **kwargs)
+        # 永远不可能有两个同url的下载线程
+        # 可能对同一个url同时发送两次上传事件
+        with NamedLock(f"upload_count_{url}"):
+            # += 不是原子操作
+            context['url_upload_count'][url] += 1
+            yield Event(DOWNLOADED, (stream_info,))
     except Exception as e:
-        logger.exception(f"下载错误: {stream_info['name']} - {e}")
+        logger.exception(f"下载错误: {name} - {e}")
     finally:
         # 下载结束
         url_status[url] = 0
-        # 永远不可能有两个同url的下载线程
-        # 可能对同一个url同时发送两次上传事件
-        with NamedLock(f"upload_count_{stream_info['url']}"):
-            # += 不是原子操作
-            context['url_upload_count'][stream_info['url']] += 1
-            yield Event(DOWNLOADED, (stream_info,))
         
 
 @event_manager.register(DOWNLOADED, block='Asynchronous1')
@@ -139,7 +135,7 @@ def process_upload(stream_info):
             stream_info.update(data)
         filelist = upload(stream_info)
         if filelist:
-            yield Event(UPLOADED, (name, stream_info.get('live_cover_path'), filelist))
+            uploaded(name, stream_info.get('live_cover_path'), filelist)
     except Exception:
         logger.exception(f"上传错误: {name}")
     finally:
@@ -148,7 +144,6 @@ def process_upload(stream_info):
         with NamedLock(f'upload_count_{url}'):
             url_upload_count[url] -= 1
 
-@event_manager.register(UPLOADED, block='Asynchronous3')
 def uploaded(name, live_cover_path, data: List):
     # data = file_list
     post_processor = config['streamers'].get(name, {}).get("postprocessor", None)
