@@ -59,5 +59,8 @@ Twitch，YY直播等，并于录制结束后自动上传到哔哩哔哩视频网
 * Thanks `THMonster/danmaku`.
 > GUI：[B站投稿客户端 biliup-app](https://github.com/ForgQi/Caution)
 
+## 赞助
+* 爱发电 :`https://afdian.net/a/biliup`
+
 ## Stars
 [![Star History Chart](https://api.star-history.com/svg?repos=biliup/biliup&type=Date)](https://star-history.com/#biliup/biliup&Date)
