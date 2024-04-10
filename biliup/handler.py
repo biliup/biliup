@@ -28,16 +28,17 @@ logger = logging.getLogger('biliup')
 
 @event_manager.register(CHECK, block='Asynchronous3')
 def singleton_check(platform, name, url):
-    from .plugins.twitch import Twitch
-    context['url_upload_count'].setdefault(url, 0)
-    if platform == Twitch:
+    if name is None and url is None:
         # 如果支持批量检测，目前只有一个支持，第一版先写死按照特例处理
+        from .plugins.twitch import Twitch
         for turl in Twitch.batch_check.__func__(Twitch.url_list):
+            context['url_upload_count'].setdefault(turl, 0)
             for k, v in config['streamers'].items():
                 if v.get("url", "") == turl:
                     name = k
             yield Event(PRE_DOWNLOAD, args=(name, turl,))
         return
+    context['url_upload_count'].setdefault(url, 0)
     if context['PluginInfo'].url_status[url] == 1:
         logger.debug(f'{url} 正在下载中，跳过检测')
         return
