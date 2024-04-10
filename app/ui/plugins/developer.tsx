@@ -1,10 +1,12 @@
 "use client";
 import React from "react";
 import styles from "../../styles/dashboard.module.scss";
-import { Form, Select, Space } from "@douyinfe/semi-ui";
+import { Form, Select, useFormApi } from "@douyinfe/semi-ui";
 import { IconSetting } from "@douyinfe/semi-icons";
 
 const Developer: React.FC = () => {
+    const formApi = useFormApi();
+
     return (
         <>
             <div className={styles.frameDeveloper}>
@@ -23,15 +25,18 @@ const Developer: React.FC = () => {
                     </div>
                     <p className={styles.meegoSharedWebWorkIt}>开发者选项</p>
                 </div>
+
                 <Form.Select
                     label=" 控制台日志输出等级（LOGGING.root.level）"
                     field="LOGGING.root.level"
-                    placeholder="INFO"
-                    maxTagCount={3}
+                    placeholder={"INFO"}
                     style={{ width: "100%" }}
                     fieldStyle={{
                         alignSelf: "stretch",
                         padding: 0,
+                    }}
+                    onChange={() => {
+                        formApi.setValue("LOGGING.root.handlers", ["console"]);
                     }}
                 >
                     <Select.Option value="DEBUG">DEBUG</Select.Option>
@@ -43,12 +48,16 @@ const Developer: React.FC = () => {
                 <Form.Select
                     label=" 文件日志输出等级（LOGGING.loggers.biliup.level）"
                     field="LOGGING.loggers.biliup.level"
-                    placeholder="INFO"
-                    maxTagCount={3}
+                    placeholder={"INFO"}
                     style={{ width: "100%" }}
                     fieldStyle={{
                         alignSelf: "stretch",
                         padding: 0,
+                    }}
+                    onChange={() => {
+                        formApi.setValue("LOGGING.loggers.biliup.handlers", [
+                            "file",
+                        ]);
                     }}
                 >
                     <Select.Option value="DEBUG">DEBUG</Select.Option>
