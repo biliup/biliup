@@ -1,6 +1,7 @@
 'use client'
 
-import {AutoComplete, Layout, Nav, Spin, Table, Typography} from "@douyinfe/semi-ui";
+import { AutoComplete, Layout, Nav, Spin, Table, Typography } from "@douyinfe/semi-ui";
+import { SortOrder } from "@douyinfe/semi-ui/lib/es/table/interface";
 import useSWR from "swr";
 import {fetcher, FileList} from "@/app/lib/api-streamer";
 import {
@@ -17,7 +18,8 @@ export default function Home() {
     if (isLoading) {
         return (<Spin size="large" />);
     }
-    const {Text} = Typography;
+    const { Text } = Typography;
+    const ascendSort: SortOrder = "ascend";
     const columns = [
         {
             title: '名称',
@@ -47,6 +49,7 @@ export default function Home() {
         {
             title: '更新日期',
             dataIndex: 'date',
+            defaultSortOrder: ascendSort,
             render: (text: any, record: any, index: any) => {
                 return (<>{humDate(text)}</>);
             },
@@ -54,9 +57,16 @@ export default function Home() {
         },
     ];
     const expandRowRender = (record: any, index: number | undefined) => {
-        return <>文件列表：{record.files.map((it: { id: Key | null | undefined; file: string | number | boolean | ReactElement<any, string | JSXElementConstructor<any>> | Iterable<ReactNode> | ReactPortal | null | undefined; }) => {
-            return <div key={it.id}>&nbsp;&nbsp;文件名：{it.file}</div>;
-        })}</>;
+        return <>文件列表：{record.files.map(
+            (it:
+                {
+                    id: Key | null | undefined;
+                    file: string | number | boolean | ReactElement<any, string | JSXElementConstructor<any>> | Iterable<ReactNode> | ReactPortal | null | undefined;
+                }
+            ) => {
+                return <div key={it.id}>&nbsp;&nbsp;文件名：{it.file}</div>;
+            }
+        )}</>;
     };
     return (<>
         <Header style={{backgroundColor: 'var(--semi-color-bg-1)'}}>

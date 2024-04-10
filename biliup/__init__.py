@@ -30,7 +30,8 @@ LOG_CONF = {
             'interval': 1,
             'backupCount': 1,
             'filename': 'ds_update.log',
-            'formatter': 'verbose'
+            'formatter': 'verbose',
+            'encoding': 'utf-8'
         }
     },
     'root': {

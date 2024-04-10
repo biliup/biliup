@@ -1,6 +1,7 @@
 import time
 import requests
 import json
+import re
 
 from biliup.config import config
 from . import match1, logger
@@ -54,11 +55,10 @@ class Bililive(DownloadBase):
                 _res = do_login(s)
                 user_data = _res.get('data', {})
                 is_login = user_data.get('isLogin', False)
-                if not is_login:
-                    # logger.warning(f"{plugin_msg}: 登录态校验失败")
-                    logger.warning("登录态校验失败: " + str(_res))
-                else:
+                if is_login:
                     logger.info(f"用户名：{user_data['uname']}, mid：{user_data['mid']}, isLogin：{is_login}")
+                else:
+                    logger.warning("登录态校验失败: " + str(_res))
                 return True
 
             protocol = config.get('bili_protocol', 'stream')
@@ -68,6 +68,8 @@ class Bililive(DownloadBase):
             ov05_ip = config.get('bili_force_ov05_ip')
             main_api = config.get('bili_liveapi', OFFICIAL_API).rstrip('/')
             fallback_api = config.get('bili_fallback_api', OFFICIAL_API).rstrip('/')
+            cn01_sids = config.get('bili_replace_cn01_sid', '').split(',')
+            normalize_cn204 = config.get('bili_normalize_cn204', False)
 
             params = {
                 'room_id': room_id,
@@ -86,13 +88,14 @@ class Bililive(DownloadBase):
             if self.raw_stream_url is not None \
                 and qualityNumber >= 10000 \
                 and not is_new_live:
-                # 同一个 streamName 即可复用，与其他参数无关，目前没有报告说链接会超时失效。
+                # 同一个 streamName 即可复用，除非被超管切断
                 # 前面拿不到 streamName，目前使用开播时间判断
                 health, url = super().check_url_healthy(s, self.raw_stream_url)
                 if health:
                     logger.debug(f"{plugin_msg}: 复用 {url}")
                     return True
                 else:
+                    logger.debug(f"{plugin_msg}: health-{health}; url-{self.raw_stream_url}")
                     self.raw_stream_url = None
 
             try:
@@ -146,16 +149,19 @@ class Bililive(DownloadBase):
             streamName = match1(stream_url['base_url'], streamname_regexp)
             if streamName is not None and force_source and qualityNumber >= 10000:
                 new_base_url = stream_url['base_url'].replace(f"_{streamName.split('_')[-1]}", '')
-                if super().check_url_healthy(s, f"{stream_url['host']}{new_base_url}{stream_url['extra']}"):
+                if super().check_url_healthy(s, f"{stream_url['host']}{new_base_url}{stream_url['extra']}")[0]:
                     stream_url['base_url'] = new_base_url
                     logger.debug(stream_url['base_url'])
 
             self.raw_stream_url = f"{stream_url['host']}{stream_url['base_url']}{stream_url['extra']}"
 
+            if normalize_cn204:
+                self.raw_stream_url = re.sub(r"(?<=cn-gotcha204)-[1-4]", "", self.raw_stream_url, 1)
+
             if ov05_ip and "ov-gotcha05" in stream_url['host']:
                 self.raw_stream_url = oversea_expand(s, self.raw_stream_url, ov05_ip)
 
-            url_health, url = super().check_url_healthy(s, self.raw_stream_url)
+            url_health, _url = super().check_url_healthy(s, self.raw_stream_url)
             if not url_health:
                 if cdn_fallback:
                     i = len(stream_info['url_info'])
@@ -163,12 +169,15 @@ class Bililive(DownloadBase):
                         i -= 1
                         try:
                             self.raw_stream_url = "{}{}{}".format(stream_info['url_info'][i]['host'], stream_url['base_url'], stream_info['url_info'][i]['extra'])
-                            url_health, url = super().check_url_healthy(s, self.raw_stream_url)
+                            url_health, _url = super().check_url_healthy(s, self.raw_stream_url)
                             if url_health:
-                                self.raw_stream_url = url
+                                self.raw_stream_url = _url
                                 break
-                        except Exception as e:
-                            logger.debug(e)
+                        except TimeoutError as e:
+                            logger.debug(f"Timeout Error: {e} at {stream_info['url_info'][i]['host']}")
+                            continue
+                        except Exception:
+                            logger.exception("Uncaught exception:")
                             continue
                         finally:
                             logger.debug(f"{i} - {self.raw_stream_url}")
@@ -177,7 +186,7 @@ class Bililive(DownloadBase):
                         self.raw_stream_url = None
                         return False
             else:
-                self.raw_stream_url = url
+                self.raw_stream_url = _url
 
             return True
 
@@ -219,7 +228,6 @@ def do_login(s):
 
 def oversea_expand(s, url, ov05_ip):
     # 强制替换ov05 302redirect之后的真实地址为指定的域名或ip达到自选ov05节点的目的
-    import re
     r = s.get(url, stream=True)
     logger.debug(f'将ov-gotcha05的节点ip替换为了{ov05_ip}')
     return re.sub(r".*(?=/d1--ov-gotcha05)", f"http://{ov05_ip}", r.url, 1)

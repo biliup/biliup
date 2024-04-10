@@ -225,13 +225,15 @@ const Global: React.FC = () => {
                 <Form.Select
                     field="lines"
                     label="上传线路（lines）"
-                    extraText="b站上传线路选择，默认为自动模式，目前可手动切换为bda2, kodo, ws, qn"
+                    extraText="b站上传线路选择，默认为自动模式，可手动切换为bda2, kodo, ws, qn"
+                    placeholder="AUTO（自动，默认）"
                     style={{ width: "100%" }}
                     fieldStyle={{
                         alignSelf: "stretch",
                         padding: 0,
                     }}
                 >
+                    <Form.Select.Option value="AUTO">AUTO（自动，默认）</Form.Select.Option>
                     <Form.Select.Option value="bda2">bda2</Form.Select.Option>
                     <Form.Select.Option value="kodo">kodo</Form.Select.Option>
                     <Form.Select.Option value="ws">ws</Form.Select.Option>

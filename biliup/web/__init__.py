@@ -171,10 +171,13 @@ async def tag_check(request):
 @routes.get('/v1/videos')
 async def streamers(request):
     media_extensions = ['.mp4', '.flv', '.3gp', '.webm', '.mkv', '.ts']
+    _blacklist = ['next-env.d.ts']
     # 获取文件列表
     file_list = []
     i = 1
     for file_name in os.listdir('.'):
+        if file_name in _blacklist:
+            continue
         name, ext = os.path.splitext(file_name)
         if ext in media_extensions:
             file_list.append({'key': i, 'name': file_name, 'updateTime': os.path.getmtime(file_name),
@@ -445,7 +448,8 @@ async def app_status(request):
     from biliup.app import context
     from biliup.config import Config
     from biliup.app import PluginInfo
-    res = {}
+    from biliup import __version__
+    res = {'version': __version__,}
     for key, value in context.items():  # 遍历删除不能被 json 序列化的键值对
         if isinstance(value, Config):
             continue
@@ -481,7 +485,7 @@ async def myinfo(request):
     try:
         config.load_cookies(file)
     except FileNotFoundError:
-        return web.json_response({"status": 500, 'error': f"找不到 {file} ！！！"}, status=500)
+        return web.json_response({"status": 500, 'error': f"{file} 文件不存在"}, status=500)
     cookies = config.data['user']['cookies']
     return web.json_response(BiliBili.myinfo(cookies))
 

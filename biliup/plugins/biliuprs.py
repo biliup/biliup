@@ -19,6 +19,8 @@ class BiliWeb(UploadBase):
         super().__init__(principal, data, persistence_path='bili.cookie', postprocessor=postprocessor)
         if tags is None:
             tags = []
+        else:
+            tags = [str(tag).format(streamer=self.data['name']) for tag in tags]
         self.lines = lines
         self.submit_api = submit_api
         self.threads = threads
