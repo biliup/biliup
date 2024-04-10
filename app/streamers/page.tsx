@@ -134,8 +134,8 @@ export default function Home() {
                 <List
                     grid={{
                         gutter: 12,
-                        xs: 24,
-                        sm: 24,
+                        xs: 20,
+                        sm: 18,
                         md: 12,
                         lg: 8,
                         xl: 6,
@@ -147,7 +147,7 @@ export default function Home() {
                             <Card
                             shadows='hover'
                             style={{
-                                maxWidth: 310,
+                                maxWidth: 360,
                                 margin: '8px 2px',
                                 flexGrow: 1,
                             }}
@@ -156,14 +156,14 @@ export default function Home() {
                                 alignItems: 'center',
                                 justifyContent: 'space-between'
                             }}>
-                                <div style={{ flexGrow: 1, maxWidth: 250 }}>
+                                <div style={{ position: 'absolute', right: "10%", top: 9}}>{item.status}</div>
+                                <div style={{ flexGrow: 1}}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                        <h3 style={{ color: 'var(--semi-color-text-0)', fontWeight: 500 }}>{item.remark}</h3>
-                                        {item.status}
+                                        <h3 style={{ color: 'var(--semi-color-text-0)', fontWeight: 500, maxWidth: '60%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.remark}</h3>
                                     </div>
                                     <Text ellipsis={{ showTooltip: { opts: { style: { wordBreak: 'break-all' } } } }} type="tertiary">{item.url}</Text>
-                                    <div style={{ margin: '0', display: 'flex', justifyContent: 'flex-end' }}>
-                                        <ButtonGroup theme='borderless'>
+                                    <div style={{ margin: '0', display: 'flex', padding: "0 0 32px 0px", justifyContent: 'flex-end' }}>
+                                        <ButtonGroup theme='borderless' style={{ position: 'absolute', right: "10%", bottom: "15%"}}>
                                             <TemplateModal onOk={handleUpdate} entity={item}>
                                                 <Button theme='borderless' icon={<IconEdit2Stroked />}></Button>
                                             </TemplateModal>
