@@ -239,6 +239,18 @@ class DownloadBase:
                 logger.exception('Uncaught exception:')
             finally:
                 self.close()
+                try:
+                    segment_processor = config['streamers'].get(self.fname, {}).get('segment_processor')
+                    if segment_processor:
+                        from biliup.handler import processor
+                        from multiprocessing import Process
+                        from biliup.database.db import get_file_list
+                        with SessionLocal() as db:
+                            file_name = f'{get_file_list(db, self.database_row_id)[-1]}.{self.suffix}'
+                        segment_process = Process(target=processor, args=(segment_processor, os.path.abspath(f'{file_name}.{self.suffix}') + ('\n' + os.path.abspath(f'{file_name}.xml') if os.path.exists(os.path.abspath(f'{file_name}.xml')) else '')))
+                        segment_process.start()
+                except:
+                    logger.exception('Uncaught exception:')
             if ret:
                 if self.is_download:
                     # 成功下载后也不检测下一个需要下载的视频而是先上传等待下次检测保证上传时使用下载视频的标题

@@ -120,6 +120,38 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                             </Form.Section>
                         )}
                     </ArrayField>
+                    
+                    <ArrayField field='segment_processor'>
+                        {({ add, arrayFields }) => (
+                            <Form.Section text="分段时后处理" >
+                                <div className="semi-form-field-extra">
+                                    分段时触发，将按自定义顺序执行自定义操作，仅支持shell指令
+                                </div>
+                                <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+                                    添加行
+                                </Button>
+                                {arrayFields.map(({ field, key, remove }, i) => (
+                                    <div key={key} style={{ width: 1000, display: "flex" }}>
+                                        <Form.Input
+                                            field={`${field}[run]`}
+                                            label={`run = `}
+                                            labelPosition='inset'
+                                            rules={[
+                                                { required: true, message },
+                                            ]}
+                                            style={{ width: 400, marginRight: 16 }}></Form.Input>
+                                        <Button
+                                            type="danger"
+                                            theme="borderless"
+                                            icon={<IconMinusCircle />}
+                                            onClick={remove}
+                                            style={{ margin: 12 }}
+                                        />
+                                    </div>
+                                ))}
+                            </Form.Section>
+                        )}
+                    </ArrayField>
 
                     <ArrayField field='downloaded_processor'>
                         {({ add, arrayFields }) => (
