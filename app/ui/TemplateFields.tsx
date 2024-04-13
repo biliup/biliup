@@ -103,7 +103,21 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
                 ]} field="user_cookie" label={{ text: '投稿账号' }} style={{ width: 176 }} optionList={list} />
             </Section>
             <Section text={'基本设置'} >
-                <Input field='title' label='视频标题' style={{width: 464}} placeholder='稿件标题'/>
+                <Input
+                    field='title'
+                    label='视频标题'
+                    style={{ width: 464 }}
+                    placeholder='稿件标题'
+                    extraText={
+                        <div style={{fontSize: 14}}>
+                            {'\u007B'}streamer{'\u007D'}: 录播备注
+                        <br />
+                            {'\u007B'}title{'\u007D'}: 直播标题
+                        <br />
+                            %Y-%m-%d %H_%M_%S: 开始录制时的 年-月-日 时_分_秒
+                        </div>
+                    }
+                />
                 <RadioGroup
                     field="copyright"
                     label='类型'
