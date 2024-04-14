@@ -11,7 +11,8 @@ from biliup.config import config
 from biliup.plugins.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
-from ..plugins import logger, random_user_agent
+from ..plugins import logger
+
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?huya\.com')
 class Huya(DownloadBase):
@@ -30,7 +31,7 @@ class Huya(DownloadBase):
             return False
 
         html_info = _get_info_in_html(room_id, self.fake_headers)
-        live_rate_info = html_info.get('vMultiStreamInfo', None)
+        live_rate_info = html_info.get('vMultiStreamInfo', [])
         if not live_rate_info:
             # 无流 当做没开播
             logger.debug(f"{plugin_msg} : 未开播")
@@ -55,6 +56,7 @@ class Huya(DownloadBase):
                 record_ratio = max_ratio
         except Exception as e:
             logger.error(f"{plugin_msg}: 在确定码率时发生错误 {e}")
+            return False
 
         huya_cdn = config.get('huyacdn', 'AL')
         perf_cdn = config.get('huya_cdn', huya_cdn).upper()
@@ -105,6 +107,7 @@ class Huya(DownloadBase):
         if self.danmaku:
             self.danmaku.stop()
 
+
 def _get_info_in_html(room_id, fake_headers):
     try:
         html = requests.get(f"https://www.huya.com/{room_id}", timeout=5, headers=fake_headers).text
@@ -115,6 +118,7 @@ def _get_info_in_html(room_id, fake_headers):
         logger.exception(f"Huya - {room_id}: get_info_in_html")
         return {}
     return json.loads(html.split('stream: ')[1].split('};')[0])
+
 
 def _build_stream_url(room_id, perf_cdn, fake_headers):
     html_info = _get_info_in_html(room_id, fake_headers)
@@ -130,6 +134,7 @@ def _build_stream_url(room_id, perf_cdn, fake_headers):
     sFlvUrl = sCdns.get(perf_cdn)
     _stream_url = f'{sFlvUrl}/{sStreamName}.{sFlvUrlSuffix}?{_make_query(sStreamName, sFlvAntiCode)}'
     return _stream_url, sCdns
+
 
 def _make_query(sStreamName, sFlvAntiCode):
     url_query = parse_qs(sFlvAntiCode)
