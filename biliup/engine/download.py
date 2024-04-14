@@ -246,7 +246,7 @@ class DownloadBase:
                         from multiprocessing import Process
                         from biliup.database.db import get_file_list
                         with SessionLocal() as db:
-                            file_name = f'{get_file_list(db, self.database_row_id)[-1]}.{self.suffix}'
+                            file_name = get_file_list(db, self.database_row_id)[-1]
                         segment_process = Process(target=processor, args=(segment_processor, os.path.abspath(f'{file_name}.{self.suffix}') + ('\n' + os.path.abspath(f'{file_name}.xml') if os.path.exists(os.path.abspath(f'{file_name}.xml')) else '')))
                         segment_process.start()
                 except:
