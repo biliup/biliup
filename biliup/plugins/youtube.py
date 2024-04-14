@@ -20,28 +20,28 @@ class Youtube(DownloadBase):
     def __init__(self, fname, url):
         super().__init__(fname, url)
         self.ytb_danmaku = config.get('ytb_danmaku', False)
-        self.cookiejarFile = config.get('user', {}).get('youtube_cookie')
-        self.vcodec = config.get('youtube_prefer_vcodec')
-        self.acodec = config.get('youtube_prefer_acodec')
-        self.resolution = config.get('youtube_max_resolution')
-        self.filesize = config.get('youtube_max_videosize')
-        self.beforedate = config.get('youtube_before_date')
-        self.afterdate = config.get('youtube_after_date')
-        self.enable_download_live = config.get('youtube_enable_download_live', True)
-        self.enable_download_playback = config.get('youtube_enable_download_playback', True)
+        self.youtube_cookie = config.get('user', {}).get('youtube_cookie')
+        self.youtube_prefer_vcodec = config.get('youtube_prefer_vcodec')
+        self.youtube_prefer_acodec = config.get('youtube_prefer_acodec')
+        self.youtube_max_resolution = config.get('youtube_max_resolution')
+        self.youtube_max_videosize = config.get('youtube_max_videosize')
+        self.youtube_before_date = config.get('youtube_before_date')
+        self.youtube_after_date = config.get('youtube_after_date')
+        self.youtube_enable_download_live = config.get('youtube_enable_download_live', True)
+        self.youtube_enable_download_playback = config.get('youtube_enable_download_playback', True)
         # 需要下载的 url
         self.download_url = None
 
     def check_stream(self, is_check=False):
         with yt_dlp.YoutubeDL({
             'download_archive': 'archive.txt',
-            'cookiefile': self.cookiejarFile,
+            'cookiefile': self.youtube_cookie,
             'ignoreerrors': True,
             'extractor_retries': 0,
         }) as ydl:
             # 获取信息的时候不要过滤
             ydl_archive = copy.deepcopy(ydl.archive)
-            ydl.archive = None
+            ydl.archive = set()
             if self.download_url is not None:
                 # 直播在重试的时候特别处理
                 info = ydl.extract_info(self.download_url, download=False)
@@ -70,11 +70,11 @@ class Youtube(DownloadBase):
                         return None
                     elif entrie.get('live_status') == 'is_live':
                         # 未开启直播下载忽略
-                        if not self.enable_download_live:
+                        if not self.youtube_enable_download_live:
                             return None
                     elif entrie.get('live_status') == 'was_live':
                         # 未开启回放下载忽略
-                        if not self.enable_download_playback:
+                        if not self.youtube_enable_download_playback:
                             return None
 
                     # 检测是否已下载
@@ -98,11 +98,11 @@ class Youtube(DownloadBase):
                         else:
                             cache.add(entrie.get('id'), upload_date)
 
-                    if self.afterdate is not None and upload_date < self.afterdate:
+                    if self.youtube_after_date is not None and upload_date < self.youtube_after_date:
                         return 'stop'
 
                     # 检测时间范围
-                    if upload_date not in DateRange(self.afterdate, self.beforedate):
+                    if upload_date not in DateRange(self.youtube_after_date, self.youtube_before_date):
                         return None
 
                     return entrie
@@ -131,30 +131,30 @@ class Youtube(DownloadBase):
         try:
             ydl_opts = {
                 'outtmpl': f'{download_dir}/{filename}.%(ext)s',
-                'cookiefile': self.cookiejarFile,
+                'cookiefile': self.youtube_cookie,
                 'break_on_reject': True,
                 'download_archive': 'archive.txt',
                 'format': 'bestvideo',
                 # 'proxy': proxyUrl,
             }
 
-            if self.vcodec is not None:
-                ydl_opts['format'] += f"[vcodec~='^({self.vcodec})']"
-            if self.filesize is not None and self.is_download:
+            if self.youtube_prefer_vcodec is not None:
+                ydl_opts['format'] += f"[vcodec~='^({self.youtube_prefer_vcodec})']"
+            if self.youtube_max_videosize is not None and self.is_download:
                 # 直播时无需限制文件大小
-                ydl_opts['format'] += f"[filesize<{self.filesize}]"
-            if self.resolution is not None:
-                ydl_opts['format'] += f"[height<={self.resolution}]"
+                ydl_opts['format'] += f"[filesize<{self.youtube_max_videosize}]"
+            if self.youtube_max_resolution is not None:
+                ydl_opts['format'] += f"[height<={self.youtube_max_resolution}]"
             ydl_opts['format'] += "+bestaudio"
-            if self.acodec is not None:
-                ydl_opts['format'] += f"[acodec~='^({self.acodec})']"
+            if self.youtube_prefer_acodec is not None:
+                ydl_opts['format'] += f"[acodec~='^({self.youtube_prefer_acodec})']"
             # 不能由yt_dlp创建会占用文件夹
             if not os.path.exists(download_dir):
                 os.makedirs(download_dir)
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 if not self.is_download:
                     # 直播模式不过滤但是能写入过滤
-                    ydl.archive = None
+                    ydl.archive = set()
                 ydl.download([self.download_url])
             # 下载成功的情况下移动到运行目录
             for file in os.listdir(download_dir):
@@ -190,8 +190,7 @@ class KVFileStore:
             os.makedirs(folder_path)
         # 如果文件不存在，则创建空文件
         if not os.path.exists(self.file_path):
-            with open(self.file_path, "w") as f:
-                pass
+            open(self.file_path, "w").close()
 
     def _preload_data(self):
         self._ensure_file_and_folder_exists()
