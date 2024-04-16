@@ -1,6 +1,9 @@
-import json, re, select, random, traceback, urllib, datetime, base64
-import asyncio, aiohttp
+import json
+
+import aiohttp
+
 from biliup.plugins import random_user_agent
+
 
 class Twitcasting:
     heartbeat = None
@@ -14,23 +17,19 @@ class Twitcasting:
     }
 
     @staticmethod
-    async def get_ws_info(url):
-        from biliup.plugins.twitcasting import TwitcastingUtils
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=Twitcasting.fake_headers) as response:
-                html_text = await response.text()
-            broadcasterInfo = TwitcastingUtils._getBroadcaster(html_text)
-            if broadcasterInfo['MovieID']:
-                data = aiohttp.FormData()
-                data.add_field('movie_id', broadcasterInfo['MovieID'])
-                async with session.post(
+    async def get_ws_info(url, context):
+        async with aiohttp.ClientSession(headers=Twitcasting.fake_headers) as session:
+            async with session.post(
                     url="https://twitcasting.tv/eventpubsuburl.php",
-                    data=data,
-                    headers=Twitcasting.fake_headers,
-                ) as resp:
-                    r_obj = await resp.json()
-                    url = r_obj['url']
-                    return url, []
+                    data={
+                        'movie_id': context['movie_id'],
+                        'password': context['password']
+                    },
+                    timeout=5
+            ) as resp:
+                r_obj = await resp.json()
+                url = r_obj['url']
+                return url, []
 
     @staticmethod
     def decode_msg(data):
@@ -48,4 +47,5 @@ class Twitcasting:
                     msgs.append(msg)
                 except:
                     pass
+        print(msgs)
         return msgs

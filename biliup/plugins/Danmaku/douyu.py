@@ -16,7 +16,7 @@ class Douyu:
     heartbeatInterval = 30
 
     @staticmethod
-    async def get_ws_info(url):
+    async def get_ws_info(url, context):
         async with aiohttp.ClientSession() as session:
             if 'm.douyu.com' in url:
                 room_id = url.split('m.douyu.com/')[1].split('/')[0].split('?')[0]

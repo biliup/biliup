@@ -29,7 +29,9 @@ class DanmakuClient:
     class WebsocketErrorException(Exception):
         pass
 
-    def __init__(self, url, filename):
+    def __init__(self, url, filename, content=None):
+        # TODO 录制任务产生的上下文信息 传递太麻烦了 需要改
+        self.__content = content if content is not None else {}
         self.__starttime = time.time()
         self.__filename = os.path.splitext(filename)[0] + '.xml'
         self.__filename_video_suffix = filename
@@ -62,7 +64,7 @@ class DanmakuClient:
 
     async def __init_ws(self):
         try:
-            ws_url, reg_datas = await self.__site.get_ws_info(self.__url)
+            ws_url, reg_datas = await self.__site.get_ws_info(self.__url, self.__content)
             ctx = ssl.create_default_context()
             ctx.set_ciphers('DEFAULT')
             self.__ws = await self.__hs.ws_connect(ws_url, ssl_context=ctx, headers=getattr(self.__site, 'headers', {}))

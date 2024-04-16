@@ -10,7 +10,7 @@ class Twitch:
     heartbeatInterval = 40
 
     @staticmethod
-    async def get_ws_info(url):
+    async def get_ws_info(url, context):
         reg_datas = []
         room_id = re.search(r"/([^/?]+)[^/]*$", url).group(1)
 

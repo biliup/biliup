@@ -9,6 +9,7 @@ from typing import Generator, List
 from urllib.parse import urlparse
 
 import requests
+from requests.utils import DEFAULT_ACCEPT_ENCODING
 
 from biliup.database.db import add_stream_info, SessionLocal, update_cover_path, update_room_title, update_file_list
 from biliup.plugins import random_user_agent
@@ -50,7 +51,7 @@ class DownloadBase:
         self.live_cover_url = None
         self.fake_headers = {
             'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'accept-encoding': 'gzip, deflate',
+            'accept-encoding': DEFAULT_ACCEPT_ENCODING,
             'accept-language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
             'user-agent': random_user_agent(),
         }
@@ -283,7 +284,8 @@ class DownloadBase:
 
         if end_time is None:
             end_time = time.localtime()
-        self.download_cover(time.strftime(self.get_filename().encode("unicode-escape").decode(), date).encode().decode("unicode-escape"))
+        self.download_cover(time.strftime(self.get_filename().encode("unicode-escape").decode(), date).encode().decode(
+            "unicode-escape"))
         # 更新数据库中封面存储路径
         with SessionLocal() as db:
             update_cover_path(db, self.database_row_id, self.live_cover_path)
