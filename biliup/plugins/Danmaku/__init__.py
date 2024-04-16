@@ -20,6 +20,7 @@ from biliup.plugins.Danmaku.douyin import Douyin
 from biliup.plugins.Danmaku.douyu import Douyu
 from biliup.plugins.Danmaku.huya import Huya
 from biliup.plugins.Danmaku.twitch import Twitch
+from biliup.plugins.Danmaku.twitcasting import Twitcasting
 
 logger = logging.getLogger('biliup')
 
@@ -47,7 +48,8 @@ class DanmakuClient:
                      'huya.com': Huya,
                      'live.bilibili.com': Bilibili,
                      'twitch.tv': Twitch,
-                     'douyin.com': Douyin
+                     'douyin.com': Douyin,
+                     'twitcasting.tv': Twitcasting
                      }.items():
             if re.match(r'^(?:http[s]?://)?.*?%s/(.+?)$' % u, url):
                 self.__site = s
@@ -75,14 +77,15 @@ class DanmakuClient:
             raise self.WebsocketErrorException()
 
     async def __heartbeats(self):
-        while self.__site.heartbeat:
-            # 每隔这么长时间发送一次心跳包
-            await asyncio.sleep(self.__site.heartbeatInterval)
-            # 发送心跳包
-            if type(self.__site.heartbeat) == str:
-                await self.__ws.send_str(self.__site.heartbeat)
-            else:
-                await self.__ws.send_bytes(self.__site.heartbeat)
+        if self.__site.heartbeat is not None:
+            while self.__site.heartbeat:
+                # 每隔这么长时间发送一次心跳包
+                await asyncio.sleep(self.__site.heartbeatInterval)
+                # 发送心跳包
+                if type(self.__site.heartbeat) == str:
+                    await self.__ws.send_str(self.__site.heartbeat)
+                else:
+                    await self.__ws.send_bytes(self.__site.heartbeat)
 
     async def __fetch_danmaku(self):
         while True:
