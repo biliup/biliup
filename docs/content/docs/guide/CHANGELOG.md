@@ -19,6 +19,15 @@ top = false
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 0.4.47-0.4.49
+### What's Changed
+* 修复录播管理页卡片重叠问题 by @alpzmj9 in https://github.com/biliup/biliup/pull/851
+* 录播管理页面卡片样式优化 by @alpzmj9 in https://github.com/biliup/biliup/pull/861
+* 调整功能 by @xxxxuanran in https://github.com/biliup/biliup/pull/860
+* Fix：日志格式以及丢失问题 by @alpzmj9 in https://github.com/biliup/biliup/pull/864
+
+**Full Changelog**: https://github.com/biliup/biliup/compare/v0.4.48...v0.4.49
+
 ## 0.4.40-0.4.46
 * 添加日志下载按钮
 * 修复一些bug

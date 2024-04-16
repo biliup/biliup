@@ -154,8 +154,9 @@ const Global: React.FC = () => {
                 />
                 <Form.InputNumber
                     field="pool1_size"
-                    extraText="负责下载事件的线程池大小。应设置为比主播数量略大，如不确定请设置为999。"
+                    extraText="负责下载事件的线程池大小，用于限制最大同时录制数。"
                     label="下载线程池大小（pool1_size）"
+                    placeholder={5}
                     style={{ width: "100%" }}
                     fieldStyle={{
                         alignSelf: "stretch",
@@ -242,6 +243,7 @@ const Global: React.FC = () => {
                 </Form.Select>
                 <Form.InputNumber
                     field="threads"
+                    placeholder={3}
                     extraText="单文件并发上传数,未达到带宽上限时,增大此值可提高上传速度(不要设置过大,部分线路限制为8,如速度不佳优先调整上传线路)"
                     label="上传并发（threads）"
                     style={{ width: "100%" }}
@@ -255,9 +257,10 @@ const Global: React.FC = () => {
                     field="pool2_size"
                     extraText={
                         <div style={{ fontSize: "14px" }}>
-                            负责上传事件的线程池大小。应设置为比主播数量略大，如不确定请设置为999。
+                            负责上传事件的线程池大小。根据实际带宽设置。
                         </div>
                     }
+                    placeholder={3}
                     label="上传线程池大小（pool2_size）"
                     style={{ width: "100%" }}
                     fieldStyle={{

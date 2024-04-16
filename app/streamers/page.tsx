@@ -24,10 +24,10 @@ import useSWRMutation from "swr/mutation";
 
 export default function Home() {
     const { Header, Content } = Layout;
-    const {Text } = Typography;
+    const { Text } = Typography;
     const { streamers, isLoading } = useStreamers();
-    const {trigger: deleteStreamers} = useSWRMutation('/v1/streamers', requestDelete);
-    const {trigger: updateStreamers} = useSWRMutation('/v1/streamers', put);
+    const { trigger: deleteStreamers} = useSWRMutation('/v1/streamers', requestDelete);
+    const { trigger: updateStreamers} = useSWRMutation('/v1/streamers', put);
     const { trigger } = useSWRMutation('/v1/streamers', sendRequest)
 
     const onConfirm = async (id: number) => {
