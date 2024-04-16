@@ -26,7 +26,7 @@ class Bilibili:
     }
 
     @staticmethod
-    async def get_ws_info(url):
+    async def get_ws_info(url, context):
         danmu_wss_url = 'wss://broadcastlv.chat.bilibili.com/sub'
         async with aiohttp.ClientSession(headers=Bilibili.headers) as session:
             async with session.get("https://api.live.bilibili.com/room/v1/Room/room_init?id=" + match1(url, r'/(\d+)'),

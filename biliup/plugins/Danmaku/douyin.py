@@ -22,7 +22,7 @@ class Douyin:
     heartbeatInterval = 10
 
     @staticmethod
-    async def get_ws_info(url):
+    async def get_ws_info(url, context):
         async with aiohttp.ClientSession() as session:
             from biliup.plugins.douyin import DouyinUtils
             if "/user/" in url:

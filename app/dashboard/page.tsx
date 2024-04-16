@@ -33,6 +33,7 @@ import Huya from "../ui/plugins/huya";
 import Twitch from "../ui/plugins/twitch";
 import YouTube from "../ui/plugins/youtube";
 import Developer from "../ui/plugins/developer";
+import Twitcasting from "@/app/ui/plugins/twitcasting";
 
 const Dashboard: React.FC = () => {
     const { Header, Content } = Layout;
@@ -208,6 +209,8 @@ const Dashboard: React.FC = () => {
                                         <Huya />
                                         {/* 老鼠台 */}
                                         <Twitch entity={entity} />
+                                        {/* Twitcasting */}
+                                        <Twitcasting />
                                         {/* 油管 */}
                                         <YouTube entity={entity} />
                                         {/* 饼干 */}

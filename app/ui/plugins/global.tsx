@@ -154,7 +154,7 @@ const Global: React.FC = () => {
                 />
                 <Form.InputNumber
                     field="pool1_size"
-                    extraText="负责下载事件的线程池大小。每个下载行为会占用 1 线程，应设置为略大于录制主播总数的数值。"
+                    extraText="负责下载事件的线程池大小。应设置为比主播数量略大，如不确定请设置为999。"
                     label="下载线程池大小（pool1_size）"
                     style={{ width: "100%" }}
                     fieldStyle={{
@@ -225,7 +225,7 @@ const Global: React.FC = () => {
                 <Form.Select
                     field="lines"
                     label="上传线路（lines）"
-                    extraText="b站上传线路选择，默认为自动模式，可手动切换为bda2, kodo, ws, qn"
+                    extraText="b站上传线路选择，默认为自动模式，可手动切换为bda2, kodo, ws, qn, bldsa"
                     placeholder="AUTO（自动，默认）"
                     style={{ width: "100%" }}
                     fieldStyle={{
@@ -238,10 +238,11 @@ const Global: React.FC = () => {
                     <Form.Select.Option value="kodo">kodo</Form.Select.Option>
                     <Form.Select.Option value="ws">ws</Form.Select.Option>
                     <Form.Select.Option value="qn">qn</Form.Select.Option>
+                    <Form.Select.Option value="bldsa">bldsa</Form.Select.Option>
                 </Form.Select>
                 <Form.InputNumber
                     field="threads"
-                    extraText="单文件并发上传数，未达到带宽上限时，增大此值可提高上传速度"
+                    extraText="单文件并发上传数,未达到带宽上限时,增大此值可提高上传速度(不要设置过大,部分线路限制为8,如速度不佳优先调整上传线路)"
                     label="上传并发（threads）"
                     style={{ width: "100%" }}
                     fieldStyle={{
@@ -254,10 +255,7 @@ const Global: React.FC = () => {
                     field="pool2_size"
                     extraText={
                         <div style={{ fontSize: "14px" }}>
-                            负责上传事件的线程池大小。每个上传行为会占用 1
-                            线程，应设置为略大于录制主播总数的数值。
-                            <br />
-                            若开启 uploading_record ，则需设置为更高的数值
+                            负责上传事件的线程池大小。应设置为比主播数量略大，如不确定请设置为999。
                         </div>
                     }
                     label="上传线程池大小（pool2_size）"

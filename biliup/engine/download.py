@@ -9,6 +9,7 @@ from typing import Generator, List
 from urllib.parse import urlparse
 
 import requests
+from requests.utils import DEFAULT_ACCEPT_ENCODING
 
 from biliup.database.db import add_stream_info, SessionLocal, update_cover_path, update_room_title, update_file_list
 from biliup.plugins import random_user_agent
@@ -50,7 +51,7 @@ class DownloadBase:
         self.live_cover_url = None
         self.fake_headers = {
             'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'accept-encoding': 'gzip, deflate',
+            'accept-encoding': DEFAULT_ACCEPT_ENCODING,
             'accept-language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
             'user-agent': random_user_agent(),
         }
@@ -121,10 +122,12 @@ class DownloadBase:
             logger.error("未安装 FFMpeg 或不存在于 PATH 内，本次下载使用 stream-gears")
             logger.debug("Current user's PATH is:" + os.getenv("PATH"))
 
-        if not self.suffix in ['flv', 'ts']:
-            self.suffix = 'flv' if '.flv' in parsed_url_path else 'ts'
-            logger.warning(f'stream-gears 不支持除 flv 和 ts 以外的格式，已按流自动修正为 {self.suffix} 格式')
-
+        if '.flv' in parsed_url_path:
+            # 假定flv流
+            self.suffix = 'flv'
+        else:
+            # 其他流stream_gears会按hls保存为ts
+            self.suffix = 'ts'
         stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
                               config.get('file_size'))
         return True
@@ -283,7 +286,8 @@ class DownloadBase:
 
         if end_time is None:
             end_time = time.localtime()
-        self.download_cover(time.strftime(self.get_filename().encode("unicode-escape").decode(), date).encode().decode("unicode-escape"))
+        self.download_cover(time.strftime(self.get_filename().encode("unicode-escape").decode(), date).encode().decode(
+            "unicode-escape"))
         # 更新数据库中封面存储路径
         with SessionLocal() as db:
             update_cover_path(db, self.database_row_id, self.live_cover_path)
