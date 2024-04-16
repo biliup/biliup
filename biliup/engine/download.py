@@ -122,10 +122,12 @@ class DownloadBase:
             logger.error("未安装 FFMpeg 或不存在于 PATH 内，本次下载使用 stream-gears")
             logger.debug("Current user's PATH is:" + os.getenv("PATH"))
 
-        if not self.suffix in ['flv', 'ts']:
-            self.suffix = 'flv' if '.flv' in parsed_url_path else 'ts'
-            logger.warning(f'stream-gears 不支持除 flv 和 ts 以外的格式，已按流自动修正为 {self.suffix} 格式')
-
+        if '.flv' in parsed_url_path:
+            # 假定flv流
+            self.suffix = 'flv'
+        else:
+            # 其他流stream_gears会按hls保存为ts
+            self.suffix = 'ts'
         stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
                               config.get('file_size'))
         return True
