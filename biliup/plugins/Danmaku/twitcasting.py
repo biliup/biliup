@@ -47,5 +47,4 @@ class Twitcasting:
                     msgs.append(msg)
                 except:
                     pass
-        print(msgs)
         return msgs
