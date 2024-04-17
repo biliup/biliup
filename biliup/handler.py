@@ -10,7 +10,7 @@ from typing import List
 
 from biliup.config import config
 from .app import event_manager, context
-from .common.tools import NamedLock
+from .common.tools import NamedLock, processor
 from .database.db import get_stream_info_by_filename, SessionLocal
 from .downloader import download
 from .engine.event import Event
@@ -72,6 +72,7 @@ def pre_processor(name, url):
         }, ensure_ascii=False))
     yield Event(DOWNLOAD, (name, url))
 
+
 @event_manager.register(DOWNLOAD, block='Asynchronous1')
 def process(name, url):
     url_status = context['PluginInfo'].url_status
@@ -95,6 +96,7 @@ def process(name, url):
     finally:
         # 下载结束
         url_status[url] = 0
+
 
 @event_manager.register(DOWNLOADED, block='Asynchronous1')
 def processed(stream_info):
@@ -144,6 +146,7 @@ def process_upload(stream_info):
         with NamedLock(f'upload_count_{url}'):
             url_upload_count[url] -= 1
 
+
 def uploaded(name, live_cover_path, data: List):
     # data = file_list
     post_processor = config['streamers'].get(name, {}).get("postprocessor", None)
@@ -183,20 +186,6 @@ def uploaded(name, live_cover_path, data: List):
                 process_output = subprocess.check_output(
                     post_processor['run'], shell=True,
                     input=reduce(lambda x, y: x + str(Path(y).absolute()) + '\n', file_list, ''),
-                    stderr=subprocess.STDOUT, text=True)
-                logger.info(process_output.rstrip())
-            except subprocess.CalledProcessError as e:
-                logger.exception(e.output)
-                continue
-
-
-def processor(processors, data):
-    for processor in processors:
-        if processor.get('run'):
-            try:
-                process_output = subprocess.check_output(
-                    processor['run'], shell=True,
-                    input=data,
                     stderr=subprocess.STDOUT, text=True)
                 logger.info(process_output.rstrip())
             except subprocess.CalledProcessError as e:

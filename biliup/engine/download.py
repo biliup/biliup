@@ -5,6 +5,7 @@ import subprocess
 import sys
 import time
 import shutil
+from abc import ABC, abstractmethod
 from typing import Generator, List
 from urllib.parse import urlparse
 
@@ -21,7 +22,7 @@ from biliup.config import config
 logger = logging.getLogger('biliup')
 
 
-class DownloadBase:
+class DownloadBase(ABC):
     def __init__(self, fname, url, suffix=None, opt_args=None):
         self.danmaku = None
         self.room_title = None
@@ -80,6 +81,7 @@ class DownloadBase:
             self.default_output_args += \
                 ['-fs', f"{config.get('file_size', '2621440000')}"]
 
+    @abstractmethod
     def check_stream(self, is_check=False):
         # is_check 是否是检测可以避免在检测是否可以录制的时候忽略一些耗时的操作
         logger.debug(self.fname, is_check)
@@ -245,7 +247,7 @@ class DownloadBase:
                 try:
                     segment_processor = config['streamers'].get(self.fname, {}).get('segment_processor')
                     if segment_processor:
-                        from biliup.handler import processor
+                        from biliup.common.tools import processor
                         from multiprocessing import Process
                         from biliup.database.db import get_file_list
                         with SessionLocal() as db:

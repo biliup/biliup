@@ -545,7 +545,6 @@ async def service(args):
 
             res.append(web.get('/' + str(fname.with_suffix('')).replace('\\', '/'), _copy(fname)))
             # res.append(web.static('/'+fdir.replace('\\', '/'), files('biliup.web').joinpath('public/'+fdir)))
-        print(res)
         res.append(web.static('/', files('biliup.web').joinpath('public')))
         app.add_routes(res)
     if args.password:
@@ -574,13 +573,6 @@ async def service(args):
     await site.start()
     log_startup(args.host, args.port)
     return runner
-
-
-# @web.middleware
-# async def get_session(request, handler):
-#
-#         resp = await handler(request)
-#     return resp
 
 
 async def handle_404(request):

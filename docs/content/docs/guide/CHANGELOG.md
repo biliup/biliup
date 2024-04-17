@@ -19,6 +19,17 @@ top = false
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 0.4.50
+### What's Changed
+* 修复排序错误 by @xxxxuanran in https://github.com/biliup/biliup/pull/865
+* 修复Youtube在下载完成前的意外错误 by @CoolZxp in https://github.com/biliup/biliup/pull/869
+* 适配FlexTv by @CoolZxp in https://github.com/biliup/biliup/pull/870
+* 避免虎牙在选取码率时发生错误后依旧继续执行 by @CoolZxp in https://github.com/biliup/biliup/pull/871
+* 适配 Twitcasting.TV by @xxxxuanran in https://github.com/biliup/biliup/pull/874
+
+
+**Full Changelog**: https://github.com/biliup/biliup/compare/v0.4.49...v0.4.50
+
 ## 0.4.47-0.4.49
 ### What's Changed
 * 修复录播管理页卡片重叠问题 by @alpzmj9 in https://github.com/biliup/biliup/pull/851

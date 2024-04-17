@@ -2,8 +2,6 @@
 // The extra argument will be passed via the `arg` property of the 2nd parameter.
 // In the example below, `arg` will be `'my_token'`
 export async function sendRequest<T>(url: string, { arg }: {arg: T}) {
-  console.log(JSON.stringify(arg));
-
   const res =  await fetch((process.env.NEXT_PUBLIC_API_SERVER ?? '') + url, {
       method: 'POST',
       headers: {
@@ -38,7 +36,7 @@ export const proxy = async (input: RequestInfo | URL, init?: RequestInit | undef
 }
 
 export async function requestDelete<T>(url: string, { arg }: {arg: T}) {
-	const res =  await fetch(`${(process.env.NEXT_PUBLIC_API_SERVER ?? '')}${url}/${arg}`, {
+	const res =  await fetch(`${process.env.NEXT_PUBLIC_API_SERVER ?? ''}${url}/${arg}`, {
 		method: 'DELETE',
 	})
 	if (!res.ok) {
@@ -48,7 +46,7 @@ export async function requestDelete<T>(url: string, { arg }: {arg: T}) {
 }
 
 export async function put<T>(url: string, { arg }: {arg: T}) {
-	const res =  await fetch(`${(process.env.NEXT_PUBLIC_API_SERVER ?? '')}${url}`, {
+	const res =  await fetch(`${process.env.NEXT_PUBLIC_API_SERVER ?? ''}${url}`, {
 		method: 'PUT',
 		headers: {
         'Content-Type': 'application/json'
