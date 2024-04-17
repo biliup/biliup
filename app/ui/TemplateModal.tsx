@@ -174,7 +174,6 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                         <Collapse.Panel header="更多设置" itemKey="processors">
                             <Form.Input field='format' label='视频格式' placeholder='flv' style={{width: 176}}
                                         helpText='视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg或者streamlink，youtube不支持。'/>
-
                             <ArrayField field='preprocessor'>
                                 {({add, arrayFields}) => (
                                     <Form.Section text="下载前处理">
@@ -191,6 +190,38 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                                                     label={`run = `}
                                                     labelPosition='inset'
                                                     rules={[
+                                                    { required: true, message },
+                                                ]}
+                                                style={{ width: 400, marginRight: 16 }}></Form.Input>
+                                            <Button
+                                                type="danger"
+                                                theme="borderless"
+                                                icon={<IconMinusCircle />}
+                                                onClick={remove}
+                                                style={{ margin: 12 }}
+                                            />
+                                        </div>
+                                    ))}
+                                </Form.Section>
+                            )}
+                        </ArrayField>
+
+                        <ArrayField field='segment_processor'>
+                            {({ add, arrayFields }) => (
+                                <Form.Section text="分段时后处理" >
+                                    <div className="semi-form-field-extra">
+                                        分段时触发，将按自定义顺序执行自定义操作，仅支持shell指令
+                                    </div>
+                                    <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+                                        添加行
+                                    </Button>
+                                    {arrayFields.map(({ field, key, remove }, i) => (
+                                        <div key={key} style={{ width: 1000, display: "flex" }}>
+                                            <Form.Input
+                                                field={`${field}[run]`}
+                                                label={`run = `}
+                                                labelPosition='inset'
+                                                rules={[
                                                     { required: true, message },
                                                 ]}
                                                 style={{ width: 400, marginRight: 16 }}></Form.Input>
