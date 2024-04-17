@@ -503,7 +503,7 @@ async def proxy(request):
     url = unquote(request.query['url'])
     parsed_url = urlparse(url)
 
-    if not parsed_url.hostname or not parsed_url.hostname.endswith('hdslb.com'):
+    if not parsed_url.hostname or not parsed_url.hostname.endswith('.hdslb.com'):
         return web.HTTPForbidden(reason="Access to the requested domain is forbidden")
 
     async with ClientSession() as session:
