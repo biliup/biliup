@@ -522,18 +522,8 @@ def find_all_folders(directory):
             result.append(os.path.relpath(os.path.join(foldername, subfolder), directory))
     return result
 
-@web.middleware
-async def file_type_check_middleware(request, handler):
-    media_extensions = ['.mp4', '.flv', '.3gp', '.webm', '.mkv', '.ts']
-    text_extensions = ['.xml', '.log']
-    if request.path.startswith('/static/'):
-        filename = request.match_info.get('filename')
-        if filename and not (any(filename.endswith(ext) for ext in media_extensions + text_extensions)):
-            return web.HTTPForbidden(reason="File type not allowed")
-    return await handler(request)
-
 async def service(args):
-    app = web.Application(middlewares=[file_type_check_middleware])
+    app = web.Application()
     app.add_routes([
         web.get('/api/check_tag', tag_check),
         web.get('/url-status', url_status),
@@ -636,11 +626,22 @@ def create_error_middleware(overrides):
 
 
 def setup_middlewares(app):
+    @web.middleware
+    async def file_type_check_middleware(request, handler):
+        media_extensions = ['.mp4', '.flv', '.3gp', '.webm', '.mkv', '.ts']
+        text_extensions = ['.xml', '.log']
+        if request.path.startswith('/static/'):
+            filename = request.match_info.get('filename')
+            if filename and not (any(filename.endswith(ext) for ext in media_extensions + text_extensions)):
+                return web.HTTPForbidden(reason="File type not allowed")
+        return await handler(request)
+
     error_middleware = create_error_middleware({
         404: handle_404,
         500: handle_500,
     })
     app.middlewares.append(error_middleware)
+    app.middlewares.append(file_type_check_middleware)
 
 
 def log_startup(host, port) -> None:
