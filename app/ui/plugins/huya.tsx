@@ -21,7 +21,7 @@ const Huya: React.FC = () => {
                 />
                 <Form.Switch
                     field="huya_danmaku"
-                    extraText="录制虎牙弹幕，默认关闭【目前暂时不支持视频按时长分段下的弹幕文件自动分段，只有使用ffmpeg（包括streamlink混合模式）作为下载器才支持】"
+                    extraText="录制虎牙弹幕，默认关闭【下载器为ffmpeg,streamlink时效果最优】"
                     label="录制弹幕（huya_danmaku）"
                 />
                 <Form.Input

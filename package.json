@@ -9,12 +9,12 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@douyinfe/semi-ui": "^2.55.5",
+    "@douyinfe/semi-ui": "^2.56.1",
     "ncp": "^2.0.0",
-    "next": "^14.1.4",
+    "next": "^14.2.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "sass": "^1.74.1",
+    "sass": "^1.75.0",
     "swr": "^2.2.5",
     "xgplayer": "^3.0.14",
     "xgplayer-flv": "^3.0.16",
@@ -22,10 +22,10 @@
   },
   "devDependencies": {
     "@types/node": "^20.12.7",
-    "@types/react": "^18.2.75",
-    "@types/react-dom": "^18.2.24",
+    "@types/react": "^18.2.79",
+    "@types/react-dom": "^18.2.25",
     "eslint": "^8.57.0",
-    "eslint-config-next": "^14.1.4",
+    "eslint-config-next": "^14.2.1",
     "typescript": "^5.4.5"
   }
 }

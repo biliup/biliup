@@ -7,10 +7,12 @@ from biliup.config import config
 from biliup.engine import Plugin, invert_dict
 from biliup.engine.event import EventManager
 from .common.timer import Timer
+
 logger = logging.getLogger('biliup')
 
+
 def create_event_manager():
-    pool1_size = config.get('pool1_size', 3)
+    pool1_size = config.get('pool1_size', 5)
     pool2_size = config.get('pool2_size', 3)
     pool = {
         'Asynchronous1': ThreadPoolExecutor(pool1_size, thread_name_prefix='Asynchronous1'),
@@ -23,6 +25,7 @@ def create_event_manager():
     # 正在上传的文件 用于同时上传一个url的时候过滤掉正在上传的
     app.context['upload_filename'] = []
     return app
+
 
 event_manager = create_event_manager()
 context = event_manager.context
@@ -107,5 +110,6 @@ class PluginInfo:
 
         async def check_timer():
             event_manager.send_event(Event(CHECK, (Twitch, None, None)))
+
         timer = Timer(func=check_timer, interval=30)
         self.coroutines[Twitch.__name__] = asyncio.create_task(timer.astart())

@@ -20,6 +20,7 @@ from biliup.plugins.Danmaku.douyin import Douyin
 from biliup.plugins.Danmaku.douyu import Douyu
 from biliup.plugins.Danmaku.huya import Huya
 from biliup.plugins.Danmaku.twitch import Twitch
+from biliup.plugins.Danmaku.twitcasting import Twitcasting
 
 logger = logging.getLogger('biliup')
 
@@ -28,7 +29,9 @@ class DanmakuClient:
     class WebsocketErrorException(Exception):
         pass
 
-    def __init__(self, url, filename):
+    def __init__(self, url, filename, content=None):
+        # TODO 录制任务产生的上下文信息 传递太麻烦了 需要改
+        self.__content = content if content is not None else {}
         self.__starttime = time.time()
         self.__filename = os.path.splitext(filename)[0] + '.xml'
         self.__filename_video_suffix = filename
@@ -47,7 +50,8 @@ class DanmakuClient:
                      'huya.com': Huya,
                      'live.bilibili.com': Bilibili,
                      'twitch.tv': Twitch,
-                     'douyin.com': Douyin
+                     'douyin.com': Douyin,
+                     'twitcasting.tv': Twitcasting
                      }.items():
             if re.match(r'^(?:http[s]?://)?.*?%s/(.+?)$' % u, url):
                 self.__site = s
@@ -60,7 +64,7 @@ class DanmakuClient:
 
     async def __init_ws(self):
         try:
-            ws_url, reg_datas = await self.__site.get_ws_info(self.__url)
+            ws_url, reg_datas = await self.__site.get_ws_info(self.__url, self.__content)
             ctx = ssl.create_default_context()
             ctx.set_ciphers('DEFAULT')
             self.__ws = await self.__hs.ws_connect(ws_url, ssl_context=ctx, headers=getattr(self.__site, 'headers', {}))
@@ -75,14 +79,15 @@ class DanmakuClient:
             raise self.WebsocketErrorException()
 
     async def __heartbeats(self):
-        while self.__site.heartbeat:
-            # 每隔这么长时间发送一次心跳包
-            await asyncio.sleep(self.__site.heartbeatInterval)
-            # 发送心跳包
-            if type(self.__site.heartbeat) == str:
-                await self.__ws.send_str(self.__site.heartbeat)
-            else:
-                await self.__ws.send_bytes(self.__site.heartbeat)
+        if self.__site.heartbeat is not None:
+            while self.__site.heartbeat:
+                # 每隔这么长时间发送一次心跳包
+                await asyncio.sleep(self.__site.heartbeatInterval)
+                # 发送心跳包
+                if type(self.__site.heartbeat) == str:
+                    await self.__ws.send_str(self.__site.heartbeat)
+                else:
+                    await self.__ws.send_bytes(self.__site.heartbeat)
 
     async def __fetch_danmaku(self):
         while True:

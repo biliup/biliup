@@ -18,6 +18,12 @@ from biliup.database.db import SessionLocal
 from biliup.database.models import UploadStreamers, LiveStreamers, Configuration, StreamerInfo
 from ..app import logger
 
+try:
+    from importlib.resources import files
+except ImportError:
+    # Try backported to PY<37 `importlib_resources`.
+    from importlib_resources import files
+
 BiliBili = BiliBili(Data())
 
 routes = web.RouteTableDef()
@@ -504,12 +510,6 @@ def find_all_folders(directory):
 
 
 async def service(args):
-    try:
-        from importlib.resources import files
-    except ImportError:
-        # Try backported to PY<37 `importlib_resources`.
-        from importlib_resources import files
-
     app = web.Application()
     app.add_routes([
         web.get('/api/check_tag', tag_check),
@@ -534,17 +534,18 @@ async def service(args):
     else:
         # res = [web.static('/', files('biliup.web').joinpath('public'))]
         res = []
-        for fdir in pathlib.Path(files('biliup.web').joinpath('public')).glob('*.html'):
+        for fdir in pathlib.Path(files('biliup.web').joinpath('public')).glob('**/*.html'):
             fname = fdir.relative_to(files('biliup.web').joinpath('public'))
 
             def _copy(fname):
                 async def static_view(request):
-                    return web.FileResponse(files('biliup.web').joinpath('public/' + str(fname)))
+                    return web.FileResponse(files('biliup.web').joinpath('public').joinpath(fname))
 
                 return static_view
 
-            res.append(web.get('/' + str(fname.with_suffix('')), _copy(fname)))
+            res.append(web.get('/' + str(fname.with_suffix('')).replace('\\', '/'), _copy(fname)))
             # res.append(web.static('/'+fdir.replace('\\', '/'), files('biliup.web').joinpath('public/'+fdir)))
+        print(res)
         res.append(web.static('/', files('biliup.web').joinpath('public')))
         app.add_routes(res)
     if args.password:
@@ -583,7 +584,7 @@ async def service(args):
 
 
 async def handle_404(request):
-    return web.HTTPFound('404')
+    return web.FileResponse(files('biliup.web').joinpath('public').joinpath('404.html'))
 
 
 async def handle_500(request):
