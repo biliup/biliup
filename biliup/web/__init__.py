@@ -524,9 +524,11 @@ def find_all_folders(directory):
 
 @web.middleware
 async def file_type_check_middleware(request, handler):
+    media_extensions = ['.mp4', '.flv', '.3gp', '.webm', '.mkv', '.ts']
+    text_extensions = ['.xml', '.log']
     if request.path.startswith('/static/'):
         filename = request.match_info.get('filename')
-        if filename and not filename.endswith(('.log')):
+        if filename and not (any(filename.endswith(ext) for ext in media_extensions + text_extensions)):
             return web.HTTPForbidden(reason="File type not allowed")
     return await handler(request)
 
