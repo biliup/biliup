@@ -3,8 +3,8 @@
 // In the example below, `arg` will be `'my_token'`
 export async function sendRequest<T>(url: string, { arg }: {arg: T}) {
   console.log(JSON.stringify(arg));
-  
-  const res =  await fetch(process.env.NEXT_PUBLIC_API_SERVER + url, {
+
+  const res =  await fetch((process.env.NEXT_PUBLIC_API_SERVER ?? '') + url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -38,7 +38,7 @@ export const proxy = async (input: RequestInfo | URL, init?: RequestInit | undef
 }
 
 export async function requestDelete<T>(url: string, { arg }: {arg: T}) {
-	const res =  await fetch(`${process.env.NEXT_PUBLIC_API_SERVER}${url}/${arg}`, {
+	const res =  await fetch(`${(process.env.NEXT_PUBLIC_API_SERVER ?? '')}${url}/${arg}`, {
 		method: 'DELETE',
 	})
 	if (!res.ok) {
@@ -48,7 +48,7 @@ export async function requestDelete<T>(url: string, { arg }: {arg: T}) {
 }
 
 export async function put<T>(url: string, { arg }: {arg: T}) {
-	const res =  await fetch(`${process.env.NEXT_PUBLIC_API_SERVER}${url}`, {
+	const res =  await fetch(`${(process.env.NEXT_PUBLIC_API_SERVER ?? '')}${url}`, {
 		method: 'PUT',
 		headers: {
         'Content-Type': 'application/json'
@@ -128,13 +128,4 @@ export interface FileList {
 	name: string;
 	updateTime: number;
 	size: number;
-}
-export function getStreamers() {
-
-}
-
-export async function addTemplate(url: string, {arg}: any) {
-  console.log(url, arg);
-  
-  sendRequest('/v1/upload/streamers', {arg})
 }
