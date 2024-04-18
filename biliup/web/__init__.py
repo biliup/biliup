@@ -628,12 +628,14 @@ def create_error_middleware(overrides):
 def setup_middlewares(app):
     @web.middleware
     async def file_type_check_middleware(request, handler):
-        media_extensions = ['.mp4', '.flv', '.3gp', '.webm', '.mkv', '.ts']
-        text_extensions = ['.xml', '.log']
+        allowed_extensions = {'.mp4', '.flv', '.3gp', '.webm', '.mkv', '.ts', '.xml', '.log'}
+
         if request.path.startswith('/static/'):
             filename = request.match_info.get('filename')
-            if filename and not (any(filename.endswith(ext) for ext in media_extensions + text_extensions)):
-                return web.HTTPForbidden(reason="File type not allowed")
+            if filename:
+                extension = '.' + filename.split('.')[-1]
+                if extension not in allowed_extensions:
+                    return web.HTTPForbidden(reason="File type not allowed")
         return await handler(request)
 
     error_middleware = create_error_middleware({
