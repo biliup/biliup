@@ -21,8 +21,8 @@ top = false
 
 ## 0.4.51
 ### What's Chang
-* 新增分段后处理功能(返回当前分段的视频文件 只支持run指令) by @Kataick in https://github.com/biliup/biliup/pull/868
-* 修复WebUI 405 Method Not Allowed by @CoolZxp in https://github.com/biliup/biliup/pull/878
+* 💡新增分段后处理功能(返回当前分段的视频文件 只支持run指令) by @Kataick in https://github.com/biliup/biliup/pull/868
+* 🔧修复WebUI 405 Method Not Allowed by @CoolZxp in https://github.com/biliup/biliup/pull/878
 
 
 **Full Changelog**: https://github.com/biliup/biliup/compare/v0.4.50...v0.4.51
