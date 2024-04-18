@@ -7,8 +7,10 @@ import aiohttp_cors
 import requests
 import stream_gears
 from aiohttp import web
+from aiohttp.client import ClientSession
 from sqlalchemy import select, update
 from sqlalchemy.exc import NoResultFound, MultipleResultsFound
+from urllib.parse import urlparse, unquote
 
 import biliup.common.reload
 from biliup.config import config
@@ -498,7 +500,19 @@ async def myinfo(request):
 
 @routes.get('/bili/proxy')
 async def proxy(request):
-    return web.Response(body=requests.get(request.query['url']).content)
+    url = unquote(request.query['url'])
+    parsed_url = urlparse(url)
+
+    if not parsed_url.hostname or not parsed_url.hostname.endswith('.hdslb.com'):
+        return web.HTTPForbidden(reason="Access to the requested domain is forbidden")
+
+    async with ClientSession() as session:
+        try:
+            async with session.get(url) as response:
+                content = await response.read()
+                return web.Response(body=content, status=response.status)
+        except Exception as e:
+            return web.HTTPBadRequest(reason=str(e))
 
 
 def find_all_folders(directory):
@@ -507,7 +521,6 @@ def find_all_folders(directory):
         for subfolder in subfolders:
             result.append(os.path.relpath(os.path.join(foldername, subfolder), directory))
     return result
-
 
 async def service(args):
     app = web.Application()
@@ -527,7 +540,7 @@ async def service(args):
         web.get('/api/archive_pre', pre_archive),
         web.get('/', root_handler)
     ])
-    routes.static('/static', '.', show_index=True)
+    routes.static('/static', '.', show_index=False)
     app.add_routes(routes)
     if args.static_dir:
         app.add_routes([web.static('/', args.static_dir, show_index=False)])
@@ -605,11 +618,24 @@ def create_error_middleware(overrides):
 
 
 def setup_middlewares(app):
+    @web.middleware
+    async def file_type_check_middleware(request, handler):
+        allowed_extensions = {'.mp4', '.flv', '.3gp', '.webm', '.mkv', '.ts', '.xml', '.log'}
+
+        if request.path.startswith('/static/'):
+            filename = request.match_info.get('filename')
+            if filename:
+                extension = '.' + filename.split('.')[-1]
+                if extension not in allowed_extensions:
+                    return web.HTTPForbidden(reason="File type not allowed")
+        return await handler(request)
+
     error_middleware = create_error_middleware({
         404: handle_404,
         500: handle_500,
     })
     app.middlewares.append(error_middleware)
+    app.middlewares.append(file_type_check_middleware)
 
 
 def log_startup(host, port) -> None:
