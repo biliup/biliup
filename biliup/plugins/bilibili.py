@@ -9,26 +9,38 @@ from biliup.plugins.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 
-@Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m|live)\.)?bilibili\.com')
+@Plugin.download(regexp=r'(?:https?://)?b23\.tv')
+@Plugin.download(regexp=r'(?:https?://)?(?:(?:live)\.)?bilibili\.com')
 class Bililive(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
         self.live_time = 0
         self.bilibili_danmaku = config.get('bilibili_danmaku', False)
-        self.fake_headers['referer'] = url
-        if config.get('user', {}).get('bili_cookie'):
-            self.fake_headers['cookie'] = config.get('user', {}).get('bili_cookie')
 
     def check_stream(self, is_check=False):
-
-        OFFICIAL_API = "https://api.live.bilibili.com"
-        room_id = match1(self.url, r'/(\d+)')
-        qualityNumber = int(config.get('bili_qn', 10000))
-        plugin_msg = f"Bililive - {room_id}"
-
         with requests.Session() as s:
-            s.headers.update(self.fake_headers.copy())
-            load_cookies(s, config.get('user', {}).get('bili_cookie_file'))
+            s.headers = self.fake_headers
+            if "b23.tv" in self.url:
+                _resp = s.get(self.url, allow_redirects=False)
+                room_url = _resp.headers['Location'].split('?')[0]
+                if room_url.startswith("https://live.bilibili.com"):
+                    logger.warning(f"请修改配置中 {self.fname} 的链接为 {room_url}")
+                else:
+                    logger.error(f"配置 {self.fname} 的链接不是直播")
+                    return False
+                self.url = room_url
+
+            OFFICIAL_API = "https://api.live.bilibili.com"
+            room_id = match1(self.url, r'/(\d+)')
+            qualityNumber = int(config.get('bili_qn', 10000))
+            plugin_msg = f"Bililive - {room_id}"
+            _cookie = (
+                load_cookies(config.get('user', {}).get('bili_cookie_file')) or
+                config.get('user', {}).get('bili_cookie')
+            )
+            if _cookie:
+                self.fake_headers['cookie'] = _cookie
+            self.fake_headers['referer'] = self.url
             # 获取直播状态与房间标题
             info_by_room_url = f"{OFFICIAL_API}/xlive/web-room/v1/index/getInfoByRoom?room_id={room_id}"
             try:
@@ -145,6 +157,9 @@ class Bililive(DownloadBase):
                 stream_url['host'] = stream_info['url_info'][-1]['host']
                 stream_url['extra'] = stream_info['url_info'][-1]['extra']
 
+            if normalize_cn204:
+                stream_url['host'] = re.sub(r"(?<=cn-gotcha204)-[1-4]", "", stream_url['host'])
+
             # 移除 streamName 内画质标签
             streamName = match1(stream_url['base_url'], streamname_regexp)
             if streamName is not None and force_source and qualityNumber >= 10000:
@@ -155,38 +170,33 @@ class Bililive(DownloadBase):
 
             self.raw_stream_url = f"{stream_url['host']}{stream_url['base_url']}{stream_url['extra']}"
 
-            if normalize_cn204:
-                self.raw_stream_url = re.sub(r"(?<=cn-gotcha204)-[1-4]", "", self.raw_stream_url, 1)
-
             if ov05_ip and "ov-gotcha05" in stream_url['host']:
                 self.raw_stream_url = oversea_expand(s, self.raw_stream_url, ov05_ip)
 
-            url_health, _url = super().check_url_healthy(s, self.raw_stream_url)
-            if not url_health:
-                if cdn_fallback:
-                    i = len(stream_info['url_info'])
-                    while i:
-                        i -= 1
-                        try:
-                            self.raw_stream_url = "{}{}{}".format(stream_info['url_info'][i]['host'], stream_url['base_url'], stream_info['url_info'][i]['extra'])
-                            url_health, _url = super().check_url_healthy(s, self.raw_stream_url)
-                            if url_health:
-                                self.raw_stream_url = _url
-                                break
-                        except TimeoutError as e:
-                            logger.debug(f"Timeout Error: {e} at {stream_info['url_info'][i]['host']}")
-                            continue
-                        except Exception:
-                            logger.exception("Uncaught exception:")
-                            continue
-                        finally:
-                            logger.debug(f"{i} - {self.raw_stream_url}")
-                    else:
-                        logger.debug(play_info)
-                        self.raw_stream_url = None
-                        return False
-            else:
-                self.raw_stream_url = _url
+            if cdn_fallback:
+                url_health, _url = super().check_url_healthy(s, self.raw_stream_url)
+                if not url_health:
+                        i = len(stream_info['url_info'])
+                        while i:
+                            i -= 1
+                            try:
+                                self.raw_stream_url = "{}{}{}".format(stream_info['url_info'][i]['host'], stream_url['base_url'], stream_info['url_info'][i]['extra'])
+                                url_health, _url = super().check_url_healthy(s, self.raw_stream_url)
+                                if url_health:
+                                    self.raw_stream_url = _url
+                                    break
+                            except TimeoutError as e:
+                                logger.debug(f"Timeout Error: {e} at {stream_info['url_info'][i]['host']}")
+                                continue
+                            except Exception:
+                                logger.exception("Uncaught exception:")
+                                continue
+                            finally:
+                                logger.debug(f"{i} - {self.raw_stream_url}")
+                        else:
+                            logger.debug(play_info)
+                            self.raw_stream_url = None
+                            return False
 
             return True
 
@@ -232,16 +242,17 @@ def oversea_expand(s, url, ov05_ip):
     logger.debug(f'将ov-gotcha05的节点ip替换为了{ov05_ip}')
     return re.sub(r".*(?=/d1--ov-gotcha05)", f"http://{ov05_ip}", r.url, 1)
 
-def load_cookies(session, filename):
+def load_cookies(filename):
     if filename is not None:
         try:
-            # cookies = ""
+            cookies = ""
             with open(filename, encoding='utf-8') as stream:
                 s = json.load(stream)
                 for i in s["cookie_info"]["cookies"]:
-                    session.cookies.set(i['name'], i['value'])
-                    # cookies += "{}={};".format(i['name'], i['value'])
-                return True
+                    # 设置到 Header 以下载付费直播
+                    # session.cookies.set(i['name'], i['value'])
+                    cookies += "{}={};".format(i['name'], i['value'])
+                return None
         except Exception:
             logger.exception("load_cookies error")
-    return False
+    return None
