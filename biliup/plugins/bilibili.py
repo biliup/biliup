@@ -252,7 +252,7 @@ def load_cookies(filename):
                     # 设置到 Header 以下载付费直播
                     # session.cookies.set(i['name'], i['value'])
                     cookies += "{}={};".format(i['name'], i['value'])
-                return None
+                return cookies
         except Exception:
             logger.exception("load_cookies error")
     return None
