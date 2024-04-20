@@ -11,7 +11,6 @@
 
 [![STARS](https://img.shields.io/github/stars/biliup/biliup?style=social)](https://github.com/biliup/biliup/stargazers)
 [![Forks](https://img.shields.io/github/forks/biliup/biliup?style=social)](https://github.com/biliup/biliup/network)
-[![Downloads](https://img.shields.io/github/downloads/biliup/biliup/total?style=social)](https://github.com/biliup/biliup/releases/latest)
 [![Watchers](https://img.shields.io/github/watchers/biliup/biliup.svg?style=social)](https://github.com/biliup/biliup/watchers)
 
 
