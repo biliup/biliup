@@ -60,10 +60,12 @@ class Huya(DownloadBase):
 
         huya_cdn = config.get('huyacdn', 'AL')
         perf_cdn = config.get('huya_cdn', huya_cdn).upper()
+        # perf_cdn = 'HY'
         cdn_fallback = config.get('huya_cdn_fallback', False)
-        # cdn_fallback = True
+        force_source = config.get('huya_force_source', False) if huya_max_ratio == 0 else False
+        # force_source = True
 
-        stream_url, sCdns = _build_stream_url(room_id, perf_cdn, self.fake_headers)
+        stream_url, sCdns = _build_stream_url(room_id, perf_cdn, self.fake_headers, force_source)
         # stream_url = None
         if not stream_url:
             logger.error(f"{plugin_msg}: 无法获取流地址")
@@ -120,7 +122,7 @@ def _get_info_in_html(room_id, fake_headers):
     return json.loads(html.split('stream: ')[1].split('};')[0])
 
 
-def _build_stream_url(room_id, perf_cdn, fake_headers):
+def _build_stream_url(room_id, perf_cdn, fake_headers, force_source):
     html_info = _get_info_in_html(room_id, fake_headers)
     try:
         streamInfo = html_info['data'][0]['gameStreamInfoList']
@@ -130,8 +132,10 @@ def _build_stream_url(room_id, perf_cdn, fake_headers):
     stream = streamInfo[0]
     sFlvUrlSuffix, sStreamName, sFlvAntiCode = \
         stream['sFlvUrlSuffix'], stream['sStreamName'], stream['sFlvAntiCode']
+    if force_source:
+        sStreamName = sStreamName.replace('-imgplus', '')
     sCdns = {item['sCdnType']: item['sFlvUrl'] for item in streamInfo if item['sCdnType'] != 'HY'}
-    sFlvUrl = sCdns.get(perf_cdn)
+    sFlvUrl = sCdns.get(perf_cdn, next(iter(sCdns.values())))
     _stream_url = f'{sFlvUrl}/{sStreamName}.{sFlvUrlSuffix}?{_make_query(sStreamName, sFlvAntiCode)}'
     return _stream_url, sCdns
 
