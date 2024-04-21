@@ -1,6 +1,6 @@
 "use client";
 import React from "react";
-import { Form, Collapse } from "@douyinfe/semi-ui";
+import { Form, Select, Collapse } from "@douyinfe/semi-ui";
 
 const Huya: React.FC = () => {
     return (
@@ -24,7 +24,7 @@ const Huya: React.FC = () => {
                     extraText="录制虎牙弹幕，默认关闭【下载器为ffmpeg,streamlink时效果最优】"
                     label="录制弹幕（huya_danmaku）"
                 />
-                <Form.Input
+                <Form.Select
                     field="huya_cdn"
                     extraText={
                         <div style={{ fontSize: "14px" }}>
@@ -41,13 +41,23 @@ const Huya: React.FC = () => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
-                    rules={[
-                        {
-                            pattern: /^[A-Z]{2}(?:\d{2})?$/,
-                            message: "请仅输入线路别称"
-                        }
-                    ]}
-                />
+                    allowCreate={true}
+                    filter
+                    // rules={[
+                    //     {
+                    //         pattern: /^[A-Z]{2}(?:\d{2})?$/,
+                    //         message: "请仅输入线路别称"
+                    //     }
+                    // ]}
+                >
+                    <Select.Option value="AL">直播线路3（AL）</Select.Option>
+                    <Select.Option value="TX">直播线路5（TX）</Select.Option>
+                    <Select.Option value="HW">直播线路6（TX）</Select.Option>
+                    {/* <Select.Option value="WS">网宿（WS）</Select.Option> */}
+                    <Select.Option value="AL13">直播线路13（AL13）</Select.Option>
+                    <Select.Option value="HS">直播线路14（HS）</Select.Option>
+                    <Select.Option value="HW16">直播线路16（HW16）</Select.Option>
+                </Form.Select>
                 <Form.Switch
                     field="huya_cdn_fallback"
                     extraText="当访问线路（huya_cdn）不可用时，尝试其他线路（huya_cdn_fallback）"

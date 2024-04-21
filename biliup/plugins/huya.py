@@ -60,10 +60,8 @@ class Huya(DownloadBase):
 
         huya_cdn = config.get('huyacdn', 'AL')
         perf_cdn = config.get('huya_cdn', huya_cdn).upper()
-        # perf_cdn = 'HY'
         cdn_fallback = config.get('huya_cdn_fallback', False)
         force_source = config.get('huya_force_source', False) if huya_max_ratio == 0 else False
-        # force_source = True
 
         stream_url, sCdns = _build_stream_url(room_id, perf_cdn, self.fake_headers, force_source)
         # stream_url = None
@@ -136,6 +134,7 @@ def _build_stream_url(room_id, perf_cdn, fake_headers, force_source):
         sStreamName = sStreamName.replace('-imgplus', '')
     sCdns = {item['sCdnType']: item['sFlvUrl'] for item in streamInfo if item['sCdnType'] != 'HY'}
     sFlvUrl = sCdns.get(perf_cdn, next(iter(sCdns.values())))
+    logger.debug(f"Huya - {room_id}: The current CDN is {sFlvUrl}")
     _stream_url = f'{sFlvUrl}/{sStreamName}.{sFlvUrlSuffix}?{_make_query(sStreamName, sFlvAntiCode)}'
     return _stream_url, sCdns
 
