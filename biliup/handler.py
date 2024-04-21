@@ -32,12 +32,10 @@ def singleton_check(platform, name, url):
         # 如果支持批量检测，目前只有一个支持，第一版先写死按照特例处理
         from .plugins.twitch import Twitch
         for turl in Twitch.batch_check.__func__(Twitch.url_list):
-            context['url_upload_count'].setdefault(turl, 0)
+            # context['url_upload_count'].setdefault(turl, 0)
             for k, v in config['streamers'].items():
                 if v.get("url", "") == turl:
-                    name = k
-            yield Event(PRE_DOWNLOAD, args=(name, turl,))
-        return
+                    name, url = k, turl
     context['url_upload_count'].setdefault(url, 0)
     if context['PluginInfo'].url_status[url] == 1:
         logger.debug(f'{url} 正在下载中，跳过检测')
