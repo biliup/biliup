@@ -16,7 +16,7 @@
     <a href="https://biliup.github.io/biliup/docs/guide/changelog"><strong>更新日志 »</strong></a>
     <br />
     <br />
-    <a href="https://www.bilibili.com/read/cv33195912">图文教程</a>
+    <a href="https://github.com/biliup/biliup/wiki/%E5%AE%89%E8%A3%85-%E8%BF%90%E8%A1%8C-%E6%9B%B4%E6%96%B0-%E5%8D%B8%E8%BD%BD">简易教程</a>
     ·
     <a href="https://biliup.me/">交流社区</a>
     ·
@@ -41,6 +41,8 @@
 
 </details>
 
+**社区教程**： [图文教程](https://www.bilibili.com/read/cv33195912) by [@ikun1993](https://github.com/ikun1993)编写。
+
 
 ## Quick Start
 
@@ -59,13 +61,6 @@
 4. `python3 -m biliup`
 5. 访问`http://localhost:3000`
 ****
-
-## Credits
-* Thanks `ykdl, youtube-dl, streamlink` provides downloader.
-* Thanks `THMonster/danmaku`.
-****
-
-
 ## 支持
 
 | 直播平台 | 支持类型 | 链接示例 | 特殊注释 |
@@ -86,6 +81,12 @@
 | nico | 直播 | https://live.nicovideo.jp/watch/lv123456 | 可配置登录信息 |
 | twitch | 直播/回放 | 直播:https://www.twitch.tv/biliup123<br>回放:https://www.twitch.tv/biliup123/videos?filter=archives&sort=time | 可配置登录信息/尽量录制回放/可录制弹幕 |
 | youtube | 直播/回放 | 直播:https://www.youtube.com/watch?v=biliup123<br>回放:https://www.youtube.com/@biliup123/videos | 可配置登录信息/尽量录制回放/可配置回放下载日期 |
+* 理论上streamlink与yt-dlp支持的都可以下载，但不保证可以正常使用，详见:[streamlink支持列表](https://github.com/streamlink/streamlink/tree/master/src/streamlink/plugins)，[yt-dlp支持列表](https://github.com/yt-dlp/yt-dlp/tree/master/yt_dlp/extractor).
+****
+
+## Credits
+* Thanks `ykdl, youtube-dl, streamlink` provides downloader.
+* Thanks `THMonster/danmaku`.
 ****
 
 ## 捐赠
