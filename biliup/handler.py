@@ -36,6 +36,7 @@ def singleton_check(platform, name, url):
             for k, v in config['streamers'].items():
                 if v.get("url", "") == turl:
                     name, url = k, turl
+                    break
     context['url_upload_count'].setdefault(url, 0)
     if context['PluginInfo'].url_status[url] == 1:
         logger.debug(f'{url} 正在下载中，跳过检测')
