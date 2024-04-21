@@ -1,10 +1,20 @@
 "use client";
-import React from "react";
+import React, { useState } from "react";
 import styles from "../../styles/dashboard.module.scss";
 import { Form, Select, Space } from "@douyinfe/semi-ui";
 import { IconUpload, IconDownload } from "@douyinfe/semi-icons";
 
 const Global: React.FC = () => {
+    const [fileSize, setFileSize] = useState('');
+    const [segmentTime, setSegmentTime] = useState('');
+
+    const handleFileSizeChange = (value: string | number) => {
+        setFileSize(value.toString());
+    };
+
+    const handleSegmentTimeChange = (value: string) => {
+        setSegmentTime(value);
+    };
     return (
         <>
             {/* 全局下载 */}
@@ -61,7 +71,7 @@ const Global: React.FC = () => {
                     label="视频分段大小（file_size）"
                     extraText={
                         <div style={{ fontSize: "14px" }}>
-                            录像单文件大小限制，超过此大小分段下载
+                            录像单文件大小限制，超过此大小分段下载。与 视频分段时长（segment_time） 冲突，仅能设置一个
                             <br />
                             单位：Byte，示例：4294967296（4GB）
                         </div>
@@ -74,12 +84,16 @@ const Global: React.FC = () => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    onChange={handleFileSizeChange}
+                    disabled={segmentTime !== ''}
                 />
                 <Form.Input
                     field="segment_time"
                     extraText={
                         <div style={{ fontSize: "14px" }}>
-                            录像单文件时间限制，超过此时长分段下载。
+                            录像单文件时间限制，超过此时长分段下载。与 视频分段大小（file_size） 冲突，仅能设置一个
+                            <br />
+                            该功能优先于 视频分段大小（file_size）
                             <br />
                             格式：&apos;00:00:00&apos;（时:分:秒）
                         </div>
@@ -91,6 +105,8 @@ const Global: React.FC = () => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    onChange={handleSegmentTimeChange}
+                    disabled={fileSize !== ''}
                 />
                 <Form.InputNumber
                     field="filtering_threshold"
