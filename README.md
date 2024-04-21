@@ -81,7 +81,7 @@
 | nico | 直播 | https://live.nicovideo.jp/watch/lv123456 | 可配置登录信息 |
 | twitch | 直播/回放 | 直播:https://www.twitch.tv/biliup123<br>回放:https://www.twitch.tv/biliup123/videos?filter=archives&sort=time | 可配置登录信息/尽量录制回放/可录制弹幕 |
 | youtube | 直播/回放 | 直播:https://www.youtube.com/watch?v=biliup123<br>回放:https://www.youtube.com/@biliup123/videos | 可配置登录信息/尽量录制回放/可配置回放下载日期 |
-* 理论上streamlink与yt-dlp支持的都可以下载，但不保证可以正常使用，详见:[streamlink支持列表](https://github.com/streamlink/streamlink/tree/master/src/streamlink/plugins)，[yt-dlp支持列表](https://github.com/yt-dlp/yt-dlp/tree/master/yt_dlp/extractor).
+* 理论上streamlink与yt-dlp支持的都可以下载，但不保证可以正常使用，详见:[streamlink支持列表](https://streamlink.github.io/plugins.html)，[yt-dlp支持列表](https://github.com/yt-dlp/yt-dlp/tree/master/yt_dlp/extractor).
 ****
 
 ## Credits
