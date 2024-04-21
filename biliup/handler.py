@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import time
+import inspect
 from functools import reduce
 from pathlib import Path
 from typing import List
@@ -31,17 +32,26 @@ def singleton_check(platform, name, url):
     if name is None and url is None:
         # 如果支持批量检测，目前只有一个支持，第一版先写死按照特例处理
         from .plugins.twitch import Twitch
-        for turl in Twitch.batch_check.__func__(Twitch.url_list):
-            # context['url_upload_count'].setdefault(turl, 0)
+        live_urls = set(Twitch.batch_check.__func__(Twitch.url_list))  # 获取当前在线的 URL 列表
+        for turl in live_urls:
             for k, v in config['streamers'].items():
                 if v.get("url", "") == turl:
                     name, url = k, turl
                     break
+            if url is not None:
+                break
+
+    # 兼容 Twitch 直播的上传事件
+    if url is None and platform.__qualname__ == 'Twitch':
+        for k, v in config['streamers'].items():
+            name, url = k, v.get("url")
+
     context['url_upload_count'].setdefault(url, 0)
-    if context['PluginInfo'].url_status[url] == 1:
+
+    if context['PluginInfo'].url_status.get(url, 0) == 1:
         logger.debug(f'{url} 正在下载中，跳过检测')
         return
-    # 可能对同一个url同时发送两次上传事件
+
     with NamedLock(f"upload_count_{url}"):
         if context['url_upload_count'][url] > 0:
             logger.debug(f'{url} 正在上传中，跳过')
@@ -50,6 +60,7 @@ def singleton_check(platform, name, url):
         # += 不是原子操作
         context['url_upload_count'][url] += 1
         yield Event(UPLOAD, ({'name': name, 'url': url},))
+
     if platform(name, url).check_stream(True):
         # 需要等待上传文件列表检索完成后才可以开始下次下载
         with NamedLock(f'upload_file_list_{name}'):
