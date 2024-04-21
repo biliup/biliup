@@ -26,15 +26,27 @@ const Huya: React.FC = () => {
                 />
                 <Form.Input
                     field="huya_cdn"
-                    extraText="如遇到虎牙录制卡顿可以尝试切换线路。可选以下线路
- AL（阿里云 - 直播线路3）, TX（腾讯云 - 直播线路5）, HW（华为云 - 直播线路6）, WS（网宿）, HS（火山引擎 - 直播线路14）, AL13（阿里云）, HW16（华为云）
-HY(星域云 - 直播线路66) 该线路为 PCDN，已被屏蔽，不要设置该线路"
+                    extraText={
+                        <div style={{ fontSize: "14px" }}>
+                            如遇到虎牙录制卡顿可以尝试切换线路。可选以下线路
+                            <br />
+                            AL（阿里云 - 直播线路3）, TX（腾讯云 - 直播线路5）, HW（华为云 - 直播线路6）, WS（网宿）, HS（火山引擎 - 直播线路14）, AL13（阿里云）, HW16（华为云）
+                            <br />
+                            HY(星域云 - 直播线路66) 该线路为 PCDN，已被屏蔽，不要设置该线路
+                        </div>
+                    }
                     label="访问线路（huya_cdn）"
                     style={{ width: "100%" }}
                     fieldStyle={{
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    rules={[
+                        {
+                            pattern: /^[A-Z]{2}(?:\d{2})?$/,
+                            message: "请仅输入线路别称"
+                        }
+                    ]}
                 />
                 <Form.Switch
                     field="huya_cdn_fallback"
@@ -47,7 +59,7 @@ HY(星域云 - 直播线路66) 该线路为 PCDN，已被屏蔽，不要设置�
                 />
                 <Form.Switch
                     field="huya_force_source"
-                    extraText="但且仅当 虎牙自选录制码率（huya_max_ratio） 为 0（最高画质） 时可用"
+                    extraText="当且仅当 虎牙自选录制码率（huya_max_ratio） 为 0（最高画质） 时可用"
                     label="虎牙强制原画（huya_force_source）"
                     fieldStyle={{
                         alignSelf: "stretch",
