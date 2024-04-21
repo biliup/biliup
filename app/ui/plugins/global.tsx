@@ -107,6 +107,12 @@ const Global: React.FC = () => {
                     }}
                     onChange={handleSegmentTimeChange}
                     disabled={fileSize !== ''}
+                    rules={[
+                        {
+                            pattern: /^(0[0-9]|1[0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9])$/,
+                            message: "请输入正确的时间格式（HH:MM:SS），小时00-23，分钟和秒00-59"
+                        }
+                    ]}
                 />
                 <Form.InputNumber
                     field="filtering_threshold"
