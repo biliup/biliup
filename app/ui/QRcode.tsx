@@ -41,7 +41,7 @@ const Qrcode: React.FC<QrcodeProps> = ({onSuccess}) => {
             console.log(e);
             Notification.error({
                 title: 'QRcode',
-                content: <Typography.Paragraph style={{maxWidth: 450}}>{e}</Typography.Paragraph>,
+                content: <Typography.Paragraph style={{maxWidth: 450}}>{e.message}</Typography.Paragraph>,
                 style: {width: 'min-content'}
             });
         });

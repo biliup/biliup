@@ -157,7 +157,7 @@ async def qrcode_login(request):
         data = json.loads(res)
         filename = f'data/{data["token_info"]["mid"]}.json'
         with open(filename, 'w', encoding='utf-8') as file:
-            file.write(data)
+            file.write(res)
         return web.json_response({
             'filename': filename
         })
