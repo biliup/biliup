@@ -1,7 +1,9 @@
+import asyncio
 import socket
 import json
 import os
 import pathlib
+import concurrent.futures
 
 import aiohttp_cors
 import requests
@@ -132,34 +134,36 @@ async def sms_send(request):
     pass
 
 
+@routes.get('/v1/get_qrcode')
 async def qrcode_get(request):
-    if config.data.get("toml"):
-        try:
-            r = eval(stream_gears.get_qrcode())
-        except Exception as e:
-            return web.HTTPBadRequest(text="get qrcode failed")
-    else:
-        r = BiliBili.get_qrcode()
+    try:
+        r = eval(stream_gears.get_qrcode())
+    except Exception as e:
+        return web.HTTPBadRequest(text="get qrcode failed")
     return web.json_response(r)
 
 
+pool = concurrent.futures.ProcessPoolExecutor()
+
+
+@routes.post('/v1/login_by_qrcode')
 async def qrcode_login(request):
     post_data = await request.json()
-    if config.data.get("toml"):
-        try:
-            if stream_gears.login_by_qrcode(json.dumps(post_data)):
-                return web.json_response({"status": 200})
-        except Exception as e:
-            return web.HTTPBadRequest(text="login failed" + str(e))
-    else:
-        try:
-            r = await BiliBili.login_by_qrcode(post_data)
-        except:
-            return web.HTTPBadRequest(text="timeout for qrcode validate")
-        for cookie in r['data']['cookie_info']['cookies']:
-            config.data['user']['cookies'][cookie['name']] = cookie['value']
-        config.data['user']['access_token'] = r['data']['token_info']['access_token']
-        return web.json_response(r)
+    try:
+        loop = asyncio.get_event_loop()
+        # loop
+        task = loop.run_in_executor(pool, stream_gears.login_by_qrcode, (json.dumps(post_data, )))
+        res = await asyncio.wait_for(task, 180)
+        data = json.loads(res)
+        filename = f'data/{data["token_info"]["mid"]}.json'
+        with open(filename, 'w', encoding='utf-8') as file:
+            file.write(data)
+        return web.json_response({
+            'filename': filename
+        })
+    except Exception as e:
+        logger.exception('login_by_qrcode')
+        return web.HTTPBadRequest(text="login failed" + str(e))
 
 
 async def pre_archive(request):
@@ -308,9 +312,9 @@ async def get_streamers(request):
 
 @routes.get('/v1/upload/streamers/{id}')
 async def streamers_id(request):
-    id = request.match_info['id']
+    _id = request.match_info['id']
     db = request['db']
-    res = db.get(UploadStreamers, id).as_dict()
+    res = db.get(UploadStreamers, _id).as_dict()
     return web.json_response(res)
 
 
@@ -457,7 +461,7 @@ async def app_status(request):
     from biliup.config import Config
     from biliup.app import PluginInfo
     from biliup import __version__
-    res = {'version': __version__,}
+    res = {'version': __version__, }
     for key, value in context.items():  # 遍历删除不能被 json 序列化的键值对
         if isinstance(value, Config):
             continue
@@ -522,6 +526,7 @@ def find_all_folders(directory):
             result.append(os.path.relpath(os.path.join(foldername, subfolder), directory))
     return result
 
+
 async def service(args):
     app = web.Application()
     app.add_routes([
@@ -535,8 +540,8 @@ async def service(args):
         web.get('/api/login_by_sms', sms_login),
         web.post('/api/send_sms', sms_send),
         web.get('/api/save', save_config),
-        web.get('/api/get_qrcode', qrcode_get),
-        web.post('/api/login_by_qrcode', qrcode_login),
+        # web.get('/api/get_qrcode', qrcode_get),
+        # web.post('/api/login_by_qrcode', qrcode_login),
         web.get('/api/archive_pre', pre_archive),
         web.get('/', root_handler)
     ])
