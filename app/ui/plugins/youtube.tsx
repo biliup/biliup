@@ -117,6 +117,18 @@ bilibili支持 mp4 mkv webm 无需筛选也能上传
                         padding: 0,
                     }}
                 />
+                <Form.Input
+                    field="youtube_proxy_url"
+                    extraText="
+默认不使用代理
+添加代理例如：http://127.0.0.1:7890"
+                    label="YouTube下载使用的代理链接（youtube_proxy_url）"
+                    style={{ width: "100%" }}
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                />
             </Collapse.Panel>
         </>
     );

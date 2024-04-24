@@ -31,14 +31,20 @@ class Youtube(DownloadBase):
         self.youtube_enable_download_playback = config.get('youtube_enable_download_playback', True)
         # 需要下载的 url
         self.download_url = None
+        self.youtube_proxy_url = config.get('youtube_proxy_url')
 
     def check_stream(self, is_check=False):
-        with yt_dlp.YoutubeDL({
+        ydl_opts = {
             'download_archive': 'archive.txt',
             'cookiefile': self.youtube_cookie,
             'ignoreerrors': True,
             'extractor_retries': 0,
-        }) as ydl:
+        }
+
+        if self.youtube_proxy_url is not None:
+            ydl_opts['proxy'] = self.youtube_proxy_url
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             # 获取信息的时候不要过滤
             ydl_archive = copy.deepcopy(ydl.archive)
             ydl.archive = set()
@@ -148,6 +154,9 @@ class Youtube(DownloadBase):
             ydl_opts['format'] += "+bestaudio"
             if self.youtube_prefer_acodec is not None:
                 ydl_opts['format'] += f"[acodec~='^({self.youtube_prefer_acodec})']"
+            if self.youtube_proxy_url is not None:
+                ydl_opts['proxy'] = self.youtube_proxy_url
+
             # 不能由yt_dlp创建会占用文件夹
             if not os.path.exists(download_dir):
                 os.makedirs(download_dir)
