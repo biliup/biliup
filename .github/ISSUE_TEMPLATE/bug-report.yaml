@@ -9,6 +9,21 @@ body:
         ## 请补全标题并认真填写下方内容
 
         请清晰描述问题，不必严格套用模板。
+        
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Code of Conduct
+      description: 你必须先同意以下内容
+      options:
+        - label: 我清楚知道，可以在 [Release](https://github.com/biliup/biliup/releases) 检阅最新的 Biliup 版本
+          required: true
+        - label: 我清楚知道，反馈非最新 Release 版的错误是无意义的
+          required: true
+        - label: 我清楚知道，日志中并不包含 Cookie 此类的信息，可以直接上传完整日志
+          required: true
+        - label: 我已经尝试过最新 Release 版，且问题依旧
+          required: true
 
   - type: input
     id: system_version

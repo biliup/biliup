@@ -5,6 +5,7 @@ import subprocess
 import sys
 import time
 import shutil
+from abc import ABC, abstractmethod
 from typing import Generator, List
 from urllib.parse import urlparse
 
@@ -21,7 +22,7 @@ from biliup.config import config
 logger = logging.getLogger('biliup')
 
 
-class DownloadBase:
+class DownloadBase(ABC):
     def __init__(self, fname, url, suffix=None, opt_args=None):
         self.danmaku = None
         self.room_title = None
@@ -80,6 +81,7 @@ class DownloadBase:
             self.default_output_args += \
                 ['-fs', f"{config.get('file_size', '2621440000')}"]
 
+    @abstractmethod
     def check_stream(self, is_check=False):
         # is_check 是否是检测可以避免在检测是否可以录制的时候忽略一些耗时的操作
         logger.debug(self.fname, is_check)
@@ -438,7 +440,7 @@ def get_valid_filename(name):
     '{self.fname}%Y-%m-%dT%H_%M_%S'
     """
     # s = str(name).strip().replace(" ", "_") #因为有些人会在主播名中间加入空格，为了避免和录播完毕自动改名冲突，所以注释掉
-    s = re.sub(r"(?u)[^-\w.%{}\[\]【】「」\s]", "", str(name))
+    s = re.sub(r"(?u)[^-\w.%{}\[\]【】「」（）\s]", "", str(name))
     if s in {"", ".", ".."}:
         raise RuntimeError("Could not derive file name from '%s'" % name)
     return s

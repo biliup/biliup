@@ -19,14 +19,33 @@ top = false
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 0.4.51
+### What's Chang
+* 💡新增分段后处理功能(返回当前分段的视频文件 只支持run指令) by @Kataick in [#868](https://github.com/biliup/biliup/pull/868)
+* 🔧修复WebUI 405 Method Not Allowed by @CoolZxp in [#878](https://github.com/biliup/biliup/pull/878)
+
+
+**Full Changelog**: https://github.com/biliup/biliup/compare/v0.4.50...v0.4.51
+
+## 0.4.50
+### What's Changed
+* 修复排序错误 by @xxxxuanran in [#865](https://github.com/biliup/biliup/pull/865)
+* 修复Youtube在下载完成前的意外错误 by @CoolZxp in [#869](https://github.com/biliup/biliup/pull/869)
+* 适配FlexTv by @CoolZxp in [#870](https://github.com/biliup/biliup/pull/870)
+* 避免虎牙在选取码率时发生错误后依旧继续执行 by @CoolZxp in [#871](https://github.com/biliup/biliup/pull/871)
+* 适配 Twitcasting.TV by @xxxxuanran in [#874](https://github.com/biliup/biliup/pull/874)
+
+
+**Full Changelog**: [v0.4.49...v0.4.50](https://github.com/biliup/biliup/compare/v0.4.49...v0.4.50)
+
 ## 0.4.47-0.4.49
 ### What's Changed
-* 修复录播管理页卡片重叠问题 by @alpzmj9 in https://github.com/biliup/biliup/pull/851
-* 录播管理页面卡片样式优化 by @alpzmj9 in https://github.com/biliup/biliup/pull/861
-* 调整功能 by @xxxxuanran in https://github.com/biliup/biliup/pull/860
-* Fix：日志格式以及丢失问题 by @alpzmj9 in https://github.com/biliup/biliup/pull/864
+* 修复录播管理页卡片重叠问题 by @alpzmj9 in [#851](https://github.com/biliup/biliup/pull/851)
+* 录播管理页面卡片样式优化 by @alpzmj9 in [#861](https://github.com/biliup/biliup/pull/861)
+* 调整功能 by @xxxxuanran in [#860](https://github.com/biliup/biliup/pull/860)
+* Fix：日志格式以及丢失问题 by @alpzmj9 in [#864](https://github.com/biliup/biliup/pull/864)
 
-**Full Changelog**: https://github.com/biliup/biliup/compare/v0.4.48...v0.4.49
+**Full Changelog**: [v0.4.28...v0.4.49](https://github.com/biliup/biliup/compare/v0.4.48...v0.4.49)
 
 ## 0.4.40-0.4.46
 * 添加日志下载按钮

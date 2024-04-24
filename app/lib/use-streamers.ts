@@ -1,16 +1,12 @@
 import useSWR from "swr";
-import useSWRMutation from 'swr/mutation';
 
 import {
-  addTemplate,
   BiliType,
   fetcher,
   LiveStreamerEntity, proxy,
-  requestDelete,
-  sendRequest,
   User
 } from "./api-streamer";
-import React, {useEffect, useState} from "react";
+import {useEffect, useState} from "react";
 
 
 export default function useStreamers() {

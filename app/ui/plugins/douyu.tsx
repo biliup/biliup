@@ -22,7 +22,9 @@ const Douyu: React.FC = () => {
                     extraText="录制斗鱼弹幕，默认关闭【下载器为ffmpeg,streamlink时效果最优】"
                     label="录制弹幕（douyu_danmaku）"
                 />
-                <Form.Input
+                <Form.Select
+                    filter
+                    allowCreate
                     field="douyucdn"
                     extraText="如遇到斗鱼录制卡顿可以尝试切换线路。可选以下线路
 tctc-h5（备用线路4）, tct-h5（备用线路5）, ali-h5（备用线路6）, hw-h5（备用线路7）, hs-h5（备用线路13）"
@@ -32,7 +34,13 @@ tctc-h5（备用线路4）, tct-h5（备用线路5）, ali-h5（备用线路6）
                         alignSelf: "stretch",
                         padding: 0,
                     }}
-                />
+                >
+                    <Select.Option value="tctc-h5">tctc-h5</Select.Option>
+                    <Select.Option value="tct-h5">tct-h5</Select.Option>
+                    <Select.Option value="ali-h5">ali-h5</Select.Option>
+                    <Select.Option value="hw-h5">hw-h5</Select.Option>
+                    <Select.Option value="hs-h5">hs-h5</Select.Option>
+                </Form.Select>
             </Collapse.Panel>
         </>
     );
