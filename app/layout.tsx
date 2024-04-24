@@ -17,7 +17,7 @@ import {
     IconStar,
     IconSun,
     IconVideoListStroked,
-    IconHome,
+    IconHome, IconSetting,
 } from "@douyinfe/semi-icons";
 
 export default function RootLayout({
@@ -139,12 +139,23 @@ export default function RootLayout({
                         </div>
                     ),
                 },
-                // {
-                //     text: '任务平台',
-                //     icon: <IconSetting/>,
-                //     itemKey: 'Job',
-                //     items: [{itemKey: 'About', text: '任务管理'}, {itemKey: 'Dashboard', text: '用户任务查询'}],
-                // },
+                {
+                    text: '任务平台',
+                    icon: <div
+                        style={{
+                            backgroundColor: "rgba(var(--semi-lime-2), 1)",
+                            borderRadius:
+                                "var(--semi-border-radius-medium)",
+                            color: "var(--semi-color-bg-0)",
+                            display: "flex",
+                            padding: "4px",
+                        }}
+                    >
+                        <IconSetting size="small"/>
+                    </div>,
+                    itemKey: 'status',
+                    // items: [{itemKey: 'About', text: '任务管理'}, {itemKey: 'Dashboard', text: '用户任务查询'}],
+                },
             ].map((value: any) => {
                 value.text = (
                     <div
@@ -154,9 +165,9 @@ export default function RootLayout({
                                     (key: string) => value.itemKey === key
                                 ) ||
                                 (selectedKeys.some((key: string) =>
-                                    openKeys.some((o: string | number) =>
-                                        isSub(key, o)
-                                    )
+                                        openKeys.some((o: string | number) =>
+                                            isSub(key, o)
+                                        )
                                 ) &&
                                     openKeys.some(
                                         (key: any) => value.itemKey === key
@@ -182,6 +193,7 @@ export default function RootLayout({
                 streamers: "/streamers",
                 "upload-manager": "/upload-manager",
                 job: "/job",
+                status: "/status",
             };
             if (!routerMap[props.itemKey]) {
                 return itemElement;

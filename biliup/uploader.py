@@ -7,6 +7,7 @@ from .engine.decorators import Plugin
 
 logger = logging.getLogger('biliup')
 
+
 def upload(data):
     """
     上传入口
@@ -38,6 +39,46 @@ def upload(data):
         logger.exception("Uncaught exception:")
 
 
+def biliup_uploader(filelist, data):
+    try:
+        index = data['name']
+        context = {**data}
+        platform = context.get("uploader") if context.get("uploader") else "biliup-rs"
+        cls = Plugin.upload_plugins.get(platform)
+        if cls is None:
+            return logger.error(f"No such uploader: {platform}")
+        data, context = fmt_title_and_desc_m(data)
+        data['dolby'] = data.get('dolby', 0)
+        data['hires'] = data.get('hires', 0)
+        data['no_reprint'] = data.get('no_reprint', 0)
+        data['open_elec'] = data.get('open_elec', 0)
+        sig = inspect.signature(cls)
+        kwargs = {}
+        for k in sig.parameters:
+            v = context.get(k)
+            if v:
+                kwargs[k] = v
+        logger.info("start biliup")
+        return cls(index, data, **kwargs).upload(filelist)
+    except:
+        logger.exception("Uncaught exception:")
+    else:
+        logger.info("stop biliup")
+
+
+def fmt_title_and_desc_m(data):
+    index = data['name']
+    context = {**data}
+    streamer = data.get('streamer', index)
+    date = data.get("date", time.localtime())
+    title = data.get('title', index)
+    url = data.get('url')
+    data["format_title"] = custom_fmtstr(context.get('title') or f'%Y.%m.%d{index}', date, title, streamer, url)
+    if context.get('description'):
+        context['description'] = custom_fmtstr(context.get('description'), date, title, streamer, url)
+    return data, context
+
+
 # 将格式化标题和简介拆分出来方便复用
 def fmt_title_and_desc(data):
     index = data['name']
@@ -53,4 +94,5 @@ def fmt_title_and_desc(data):
 
 
 def custom_fmtstr(string, date, title, streamer, url):
-    return time.strftime(string.encode('unicode-escape').decode(), date).encode().decode("unicode-escape").format(title=title, streamer=streamer, url=url)
+    return time.strftime(string.encode('unicode-escape').decode(), date).encode().decode("unicode-escape").format(
+        title=title, streamer=streamer, url=url)

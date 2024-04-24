@@ -4,6 +4,7 @@ import json
 import os
 import pathlib
 import concurrent.futures
+import threading
 
 import aiohttp_cors
 import requests
@@ -446,6 +447,16 @@ async def users(request):
     return web.json_response(resp)
 
 
+@routes.post('/v1/uploads')
+async def m_upload(request):
+    from ..uploader import biliup_uploader
+    json_data = await request.json()
+    json_data['params']['uploader'] = 'stream_gears'
+    json_data['params']['name'] = json_data['params']['template_name']
+    threading.Thread(target=biliup_uploader, args=(json_data['files'], json_data['params'])).start()
+    return web.json_response({'status': 'ok'})
+
+
 @routes.post('/v1/dump')
 async def dump_config(request):
     json_data = await request.json()
@@ -485,8 +496,12 @@ async def pre_archive(request):
         try:
             config.load_cookies(path)
             cookies = config.data['user']['cookies']
-            return web.json_response(BiliBili.tid_archive(cookies))
+            res = BiliBili.tid_archive(cookies)
+            if res['code'] != 0:
+                continue
+            return web.json_response(res)
         except:
+            logger.exception('pre_archive')
             continue
     return web.json_response({"status": 500, 'error': "无可用 cookie 文件"}, status=500)
 

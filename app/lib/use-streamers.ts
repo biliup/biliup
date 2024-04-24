@@ -28,7 +28,7 @@ export function useBiliUsers() {
     const updateList = async (item: User) => {
       try {
         const res = await fetcher(`/bili/space/myinfo?user=${item.value}`, undefined);
-        const pRes = await proxy(`/bili/proxy?url=${res.data.face}`);
+        const pRes = await proxy(`/bili/proxy?url=${res.data?.face}`);
         const myBlob = await pRes.blob();
 
         return {
