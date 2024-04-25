@@ -19,21 +19,43 @@ top = false
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 0.4.52-0.4.54
+### What's Chang
+- 💡任务平台
+- 💡QRcode扫码登陆
+
+**Full Changelog**：[v0.4.52-v0.4.54](https://github.com/biliup/biliup/compare/v0.4.52...v0.4.54)
+
+## 0.4.52
+### What's Chang
+- Update CHANGELOG.md by @viondw in [#880](https://github.com/biliup/biliup/pull/880)
+- 🔧缓解 HTTP 漏洞 by @xxxxuanran in [#877](https://github.com/biliup/biliup/pull/877)
+- Update CHANGELOG.md by @viondw in [#882](https://github.com/biliup/biliup/pull/882)
+- Update bug-report.yaml by @xxxxuanran in [#885](https://github.com/biliup/biliup/pull/885)
+- remove some shields by @Kataick in [#886](https://github.com/biliup/biliup/pull/886)
+- 小小美化一下 by @viondw in [#888](https://github.com/biliup/biliup/pull/888)
+- Update cookie.tsx by @ikun1993 in [#889](https://github.com/biliup/biliup/pull/889)
+- 优化显示 by @viondw in [#890](https://github.com/biliup/biliup/pull/890)
+- 优化排版/链接 by @viondw in [#891](https://github.com/biliup/biliup/pull/891)
+
+
+**Full Changelog**：[v0.4.51...v0.4.52](https://github.com/biliup/biliup/compare/v0.4.51...v0.4.52)
+
 ## 0.4.51
 ### What's Chang
 * 💡新增分段后处理功能(返回当前分段的视频文件 只支持run指令) by @Kataick in [#868](https://github.com/biliup/biliup/pull/868)
 * 🔧修复WebUI 405 Method Not Allowed by @CoolZxp in [#878](https://github.com/biliup/biliup/pull/878)
 
 
-**Full Changelog**: https://github.com/biliup/biliup/compare/v0.4.50...v0.4.51
+**Full Changelog**: [v0.4.50...v0.4.51](https://github.com/biliup/biliup/compare/v0.4.50...v0.4.51)
 
 ## 0.4.50
 ### What's Changed
-* 修复排序错误 by @xxxxuanran in [#865](https://github.com/biliup/biliup/pull/865)
-* 修复Youtube在下载完成前的意外错误 by @CoolZxp in [#869](https://github.com/biliup/biliup/pull/869)
-* 适配FlexTv by @CoolZxp in [#870](https://github.com/biliup/biliup/pull/870)
-* 避免虎牙在选取码率时发生错误后依旧继续执行 by @CoolZxp in [#871](https://github.com/biliup/biliup/pull/871)
-* 适配 Twitcasting.TV by @xxxxuanran in [#874](https://github.com/biliup/biliup/pull/874)
+* 🔧修复排序错误 by @xxxxuanran in [#865](https://github.com/biliup/biliup/pull/865)
+* 🔧修复Youtube在下载完成前的意外错误 by @CoolZxp in [#869](https://github.com/biliup/biliup/pull/869)
+* 💡适配FlexTv by @CoolZxp in [#870](https://github.com/biliup/biliup/pull/870)
+* 🔧避免虎牙在选取码率时发生错误后依旧继续执行 by @CoolZxp in [#871](https://github.com/biliup/biliup/pull/871)
+* 💡适配 Twitcasting.TV by @xxxxuanran in [#874](https://github.com/biliup/biliup/pull/874)
 
 
 **Full Changelog**: [v0.4.49...v0.4.50](https://github.com/biliup/biliup/compare/v0.4.49...v0.4.50)
@@ -53,7 +75,7 @@ top = false
 
 
 ## 0.4.39
-* 修复少量bug by @boxie123 in [#832](https://github.com/biliup/biliup/pull/832)
+* 🔧修复少量bug by @boxie123 in [#832](https://github.com/biliup/biliup/pull/832)
 
 
 **Full Changelog**: [v0.4.38...v0.4.39](https://github.com/biliup/biliup/compare/v0.4.38...v0.4.39)
@@ -66,7 +88,7 @@ top = false
 **Full Changelog**: [v0.4.37...v0.4.38](https://github.com/biliup/biliup/compare/v0.4.37...v0.4.38)
 
 ## 0.4.37
-* 紧急修复`URL build`报错 by @boxie123 in [#823](https://github.com/biliup/biliup/pull/823)
+* 🔧紧急修复`URL build`报错 by @boxie123 in [#823](https://github.com/biliup/biliup/pull/823)
 * UI代码组件化，修复部分选项BUG，文字表述优化，新增日志配置项。 by @alpzmj9 in [#822](https://github.com/biliup/biliup/pull/822)
 * Refactoring database using sqlalchemy by @boxie123 in [#818](https://github.com/biliup/biliup/pull/818)
 
@@ -88,9 +110,9 @@ top = false
 
 ## 0.4.35
 * 添加 webui 缺失的配置项，修复账号信息显示问题 by @boxie123 in [#792](https://github.com/biliup/biliup/pull/792)
-* Fix: 上传插件和简介艾特无法取消选择、分段大小单位错误 by @boxie123 in [#796](https://github.com/biliup/biliup/pull/796)
-* Fix: Twitch录制报错 by @boxie123 in [#800](https://github.com/biliup/biliup/pull/800)
-* 修复webui的某些输入框类型问题 by @Kataick in [#814](https://github.com/biliup/biliup/pull/814)
+* 🔧Fix: 上传插件和简介艾特无法取消选择、分段大小单位错误 by @boxie123 in [#796](https://github.com/biliup/biliup/pull/796)
+* 🔧Fix: Twitch录制报错 by @boxie123 in [#800](https://github.com/biliup/biliup/pull/800)
+* 🔧修复webui的某些输入框类型问题 by @Kataick in [#814](https://github.com/biliup/biliup/pull/814)
 
 
 **Full Changelog**: [v0.4.34...v0.4.35](https://github.com/biliup/biliup/compare/v0.4.34...v0.4.35)
@@ -99,8 +121,8 @@ top = false
 - 更新时间：2024.01.27
 - 新增随机UA功能以及统一使用来解决部分平台请求API/弹幕录制风控问题[@Kataick](https://github.com/Kataick)
 - 优化webui处理时间的函数[@Kataick](https://github.com/Kataick)
-- 解决文件上传乱序的问题 [@storyxc](https://github.com/storyxc)
-- 解决从旧版Config中读取postprocessor指令并写入数据库的格式错误，导致postprocessor无法执行的问题 [@boxie123](https://github.com/boxie123)
+- 🔧解决文件上传乱序的问题 [@storyxc](https://github.com/storyxc)
+- 🔧解决从旧版Config中读取postprocessor指令并写入数据库的格式错误，导致postprocessor无法执行的问题 [@boxie123](https://github.com/boxie123)
 
 
 ## 0.4.32-0.4.33
