@@ -1,4 +1,12 @@
 <img src="https://socialify.git.ci/biliup/biliup/image?font=Inter&forks=1&issues=1&language=1&name=1&owner=1&pattern=Circuit%20Board&pulls=1&stargazers=1&theme=Auto" alt="biliup"/>
+<div align="center">
+
+[![python](https://img.shields.io/badge/python-3.7%2B-blue)](http://www.python.org/download)
+[![PyPI](https://img.shields.io/pypi/v/biliup)](https://pypi.org/project/biliup)
+[![PyPI - Downloads](https://img.shields.io/pypi/dm/biliup)](https://pypi.org/project/biliup)
+[![license](https://img.shields.io/github/license/biliup/biliup)](https://github.com/biliup/biliup/blob/master/LICENSE)
+[![Telegram](https://img.shields.io/badge/Telegram-Group-blue.svg?logo=telegram)](https://t.me/+IkpIABHqy6U0ZTQ5)
+</div>
 
 
   <p align="center">
