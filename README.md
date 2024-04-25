@@ -1,3 +1,4 @@
+<img src="https://socialify.git.ci/biliup/biliup/image?font=Inter&forks=1&issues=1&language=1&name=1&owner=1&pattern=Circuit%20Board&pulls=1&stargazers=1&theme=Auto" alt="biliup"/>
 <div align="center">
 
 [![python](https://img.shields.io/badge/python-3.7%2B-blue)](http://www.python.org/download)
@@ -7,10 +8,9 @@
 [![Telegram](https://img.shields.io/badge/Telegram-Group-blue.svg?logo=telegram)](https://t.me/+IkpIABHqy6U0ZTQ5)
 </div>
 
-  <h3 align="center">biliup</h3>
 
   <p align="center">
-    录制各大主流直播并上传至哔哩哔哩弹幕网。
+    录制各大主流直播平台并上传至哔哩哔哩弹幕网。
     
 <br />
     <a href="https://biliup.github.io/biliup/docs/guide/changelog"><strong>更新日志 »</strong></a>
@@ -46,6 +46,7 @@
 
 ## Quick Start
 
+0. python `＞3.8`
 1. `pip3 install biliup`
 2. `biliup start`
 3. 启动时访问 `http://your-ip:19159` 使用webUI，
@@ -55,6 +56,7 @@
 ![](.github/resource/dark.png)
 
 ## How to Contribute
+
 1. nodejs `version >= 18`
 2. `npm i`
 3. `npm run dev`
