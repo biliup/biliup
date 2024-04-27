@@ -109,9 +109,11 @@ class DownloadBase(ABC):
         return True
 
     def ffmpeg_segment_download(self):
+        # TODO 无日志
+        # , '-report'
         # ffmpeg 输入参数
         input_args = [
-            '-loglevel', 'quiet', '-report', '-y'
+            '-loglevel', 'quiet', '-y'
         ]
         # ffmpeg 输出参数
         output_args = [

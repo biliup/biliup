@@ -122,19 +122,15 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
                     field="copyright"
                     label='类型'
                     direction='vertical'
-                    // initValue={1}
+                    initValue={2}
                 >
+                    <Radio value={2} style={{alignItems: 'center', flexShrink: 0}}>
+                        <span style={{flexShrink: 0}}>转载</span>
+                        <Input field='source' onClick={()=>formApi.setValue('copyright', 2)} placeholder="转载视频请注明来源（例：转自http://www.xx.com/yy）注明来源会更快地通过审核哦" noLabel fieldStyle={{padding: 0, marginLeft: 24, width: 560}}/>
+                    </Radio>
                     <div onClick={()=>formApi.setValue('source', '')}>
                         <Radio value={1}>自制</Radio>
                     </div>
-                    <Radio value={2} style={{alignItems: 'center', flexShrink: 0}}>
-                        <span style={{flexShrink: 0}}>转载</span>
-                        {/* <div > */}
-                        <Input field='source' onClick={()=>formApi.setValue('copyright', 2)} placeholder="转载视频请注明来源（例：转自http://www.xx.com/yy）注明来源会更快地通过审核哦" noLabel fieldStyle={{padding: 0, marginLeft: 24, width: 560}}/>
-                        {/* </div> */}
-
-                        {/* <Form.DatePicker type='dateTimeRange' noLabel field='customTime'/> */}
-                    </Radio>
                 </RadioGroup>
                 <Cascader
                     field="tid"

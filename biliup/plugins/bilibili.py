@@ -29,7 +29,7 @@ class Bililive(DownloadBase):
                         for i in cookies:
                             cookies_str += f"{i['name']}={i['value']};"
                         self.fake_headers['cookie'] = cookies_str
-                        logger.info(f"未配置bili_cookie使用{cookie_file_name}")
+                        # logger.info(f"未配置bili_cookie使用{cookie_file_name}")
                 except Exception:
                     logger.exception("load_cookies error")
 
