@@ -118,12 +118,17 @@ class Douyin(DownloadBase):
 
     def danmaku_download_start(self, filename):
         if self.douyin_danmaku:
-            self.danmaku = DanmakuClient(self.url, filename + "." + self.suffix)
+            self.danmaku = DanmakuClient(self.url, filename)
             self.danmaku.start()
+
+    def danmaku_segment(self, new_prev_file_name: str):
+        if self.danmaku:
+            self.danmaku.segment(new_prev_file_name)
 
     def close(self):
         if self.danmaku:
             self.danmaku.stop()
+            self.danmaku = None
 
 
 class DouyinUtils:
