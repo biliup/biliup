@@ -75,7 +75,7 @@ class DownloadBase(ABC):
         raise NotImplementedError()
 
     def download(self):
-        self.danmaku_download_start(self.__gen_download_filename())
+        self.danmaku_download_start(self.gen_download_filename())
         if self.is_download:
             if not shutil.which("ffmpeg"):
                 logger.error("未安装 FFMpeg 或不存在于 PATH 内")
@@ -102,7 +102,7 @@ class DownloadBase(ABC):
         else:
             # 其他流stream_gears会按hls保存为ts
             self.suffix = 'ts'
-        stream_gears_download(self.raw_stream_url, self.fake_headers, self.__gen_download_filename(),
+        stream_gears_download(self.raw_stream_url, self.fake_headers, self.gen_download_filename(),
                               config.get('segment_time'),
                               config.get('file_size'),
                               lambda file_name: self.__download_segment_callback(file_name))
@@ -141,14 +141,14 @@ class DownloadBase(ABC):
         args = ['ffmpeg', *input_args, *output_args, f'{self.fname}_{int(time.time() * 1e6)}_%d.{self.suffix}']
         with subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                               stderr=subprocess.DEVNULL) as proc:
-            file_name = self.__gen_download_filename(is_fmt=True)
+            file_name = self.gen_download_filename(is_fmt=True)
             for line in iter(proc.stdout.readline, b''):  # b'\n'-separated lines
                 ffmpeg_file_name = line.rstrip().decode(errors='ignore')
                 time.sleep(1)
                 # 文件重命名
-                self.__download_file_rename(ffmpeg_file_name, f'{file_name}.{self.suffix}')
+                self.download_file_rename(ffmpeg_file_name, f'{file_name}.{self.suffix}')
                 self.__download_segment_callback(f'{file_name}.{self.suffix}')
-                file_name = self.__gen_download_filename(is_fmt=True)
+                file_name = self.gen_download_filename(is_fmt=True)
 
         return proc.returncode == 0
 
@@ -158,7 +158,7 @@ class DownloadBase(ABC):
             streamlink_proc = None
             try:
                 # 文件名不含后戳
-                fmt_file_name = self.__gen_download_filename(is_fmt=True)
+                fmt_file_name = self.gen_download_filename(is_fmt=True)
                 # ffmpeg 输入参数
                 input_args = []
                 # ffmpeg 输出参数
@@ -205,7 +205,7 @@ class DownloadBase(ABC):
 
                 if proc.returncode == 0:
                     # 文件重命名
-                    self.__download_file_rename(f'{fmt_file_name}.{self.suffix}.part', f'{fmt_file_name}.{self.suffix}')
+                    self.download_file_rename(f'{fmt_file_name}.{self.suffix}.part', f'{fmt_file_name}.{self.suffix}')
                     # 触发分段事件
                     self.__download_segment_callback(f'{fmt_file_name}.{self.suffix}')
 
@@ -313,7 +313,7 @@ class DownloadBase(ABC):
                     break
 
         self.download_cover(
-            time.strftime(self.__gen_download_filename().encode("unicode-escape").decode(), start_time).encode().decode(
+            time.strftime(self.gen_download_filename().encode("unicode-escape").decode(), start_time).encode().decode(
                 "unicode-escape"))
         # 更新数据库中封面存储路径
         with SessionLocal() as db:
@@ -403,7 +403,7 @@ class DownloadBase(ABC):
             logger.debug(f"{e} from {url}")
         return False, None
 
-    def __gen_download_filename(self, is_fmt=False):
+    def gen_download_filename(self, is_fmt=False):
         if self.filename_prefix:  # 判断是否存在自定义录播命名设置
             filename = (self.filename_prefix.format(streamer=self.fname, title=self.room_title).encode(
                 'unicode-escape').decode()).encode().decode("unicode-escape")
@@ -416,7 +416,7 @@ class DownloadBase(ABC):
             return filename
 
     @staticmethod
-    def __download_file_rename(old_file_name, file_name):
+    def download_file_rename(old_file_name, file_name):
         try:
             os.rename(old_file_name, file_name)
             logger.info(f'更名 {old_file_name} 为 {file_name}')

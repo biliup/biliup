@@ -34,7 +34,7 @@ class YDownload(DownloadBase):
 
     def download(self):
         try:
-            filename = self.__gen_download_filename(is_fmt=True)
+            filename = self.gen_download_filename(is_fmt=True)
             self.ydl_opts = {'outtmpl': filename}
             with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
                 ydl.download([self.url])
@@ -64,7 +64,7 @@ class SDownload(DownloadBase):
             return
 
     def download(self):
-        filename = self.__gen_download_filename(is_fmt=True)
+        filename = self.gen_download_filename(is_fmt=True)
         # fd = stream.open()
         try:
             with self.stream.open() as fd:
@@ -76,7 +76,7 @@ class SDownload(DownloadBase):
                             return 1
                     return 0
         except OSError:
-            self.__download_file_rename(filename + '.part', filename)
+            self.download_file_rename(filename + '.part', filename)
             raise
 
 
