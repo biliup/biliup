@@ -32,7 +32,7 @@ class TwitchVideos(DownloadBase):
             auth_token = TwitchUtils.get_auth_token()
             if auth_token:
                 cookie = io.StringIO(f"""# Netscape HTTP Cookie File
-.twitch.tv	TRUE	/	FALSE	0	auth-token	{auth_token}1
+.twitch.tv	TRUE	/	FALSE	0	auth-token	{auth_token}
 """)
             else:
                 cookie = None
