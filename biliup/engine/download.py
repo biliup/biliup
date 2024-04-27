@@ -298,6 +298,10 @@ class DownloadBase(ABC):
                     time.sleep(10)
                     continue
 
+                # 下载模式跳过下播延迟检测
+                if self.is_download:
+                    break
+
                 if delay and retry_count_delay < delay_all_retry_count:
                     retry_count_delay += 1
                     if delay < 60:
