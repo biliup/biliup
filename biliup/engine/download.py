@@ -88,7 +88,7 @@ class DownloadBase(ABC):
         if self.downloader == 'streamlink' or self.downloader == 'ffmpeg':
             if shutil.which("ffmpeg"):
                 # streamlink无法处理flv,所以回退到ffmpeg
-                if self.downloader == 'streamlink' and '.flv' in parsed_url_path:
+                if self.downloader == 'streamlink' and '.flv' not in parsed_url_path:
                     return self.ffmpeg_download(use_streamlink=True)
                 else:
                     return self.ffmpeg_download()
