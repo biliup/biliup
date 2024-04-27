@@ -6,7 +6,9 @@ const Douyu: React.FC = () => {
     return (
         <>
             <Collapse.Panel header="斗鱼" itemKey="douyu">
-                <Form.InputNumber
+                <Form.Select
+                    allowCreate={true}
+                    filter
                     field="douyu_rate"
                     extraText="刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段(仅ffmpeg streamlink)时录制设置的画质
 0 原画,4 蓝光4m,3 超清,2 高清"
@@ -16,7 +18,18 @@ const Douyu: React.FC = () => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
-                />
+                    rules={[
+                        {
+                            pattern: /^\d*$/,
+                            message: "请仅输入纯数字"
+                        }
+                    ]}
+                >
+                    <Select.Option value={0}>最高画质（0）</Select.Option>
+                    <Select.Option value={4}>蓝光4M（4）</Select.Option>
+                    <Select.Option value={3}>超清（3）</Select.Option>
+                    <Select.Option value={2}>高清（2）</Select.Option>
+                </Form.Select>
                 <Form.Switch
                     field="douyu_danmaku"
                     extraText="录制斗鱼弹幕，默认关闭【下载器为ffmpeg,streamlink时效果最优】"
