@@ -186,7 +186,7 @@ class DownloadBase(ABC):
                 if self.segment_time:
                     output_args += ['-to', self.segment_time]
                 if self.file_size:
-                    output_args += ['-fs', self.file_size]
+                    output_args += ['-fs', str(self.file_size)]
 
                 output_args += self.opt_args
 
