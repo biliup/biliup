@@ -21,7 +21,7 @@ VALID_URL_VIDEOS = r'https?://(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[^/]+)/(?:vid
 _CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko'
 
 
-@Plugin.download(regexp=VALID_URL_BASE)
+@Plugin.download(regexp=VALID_URL_VIDEOS)
 class TwitchVideos(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         DownloadBase.__init__(self, fname, url, suffix=suffix)
@@ -69,7 +69,7 @@ class TwitchVideos(DownloadBase):
 
 
 
-@Plugin.download(regexp=VALID_URL_VIDEOS)
+@Plugin.download(regexp=VALID_URL_BASE)
 class Twitch(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         DownloadBase.__init__(self, fname, url, suffix=suffix)
