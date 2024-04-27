@@ -23,19 +23,21 @@ class Plugin:
     @staticmethod
     def download(regexp):
         def decorator(cls):
-            @functools.wraps(cls)
-            def wrapper(*args, **kw):
-                return cls(*args, **kw)
-            wrapper.VALID_URL_BASE = regexp
-            Plugin.download_plugins.append(wrapper)
-            return wrapper
+            cls.VALID_URL_BASE = regexp
+            Plugin.download_plugins.append(cls)
+            return cls
         return decorator
 
     @staticmethod
     def upload(platform):
         def decorator(cls):
-            Plugin.upload_plugins[platform] = cls
-            return cls
+            @functools.wraps(cls)
+            def wrapper(*args, **kw):
+                print(f"args {args}")
+                print(f"kw {kw}")
+                return cls(*args, **kw)
+            Plugin.upload_plugins[platform] = wrapper
+            return wrapper
         return decorator
 
     @classmethod

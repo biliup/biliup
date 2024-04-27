@@ -67,10 +67,10 @@ class PluginInfo:
         else:
             temp.url_list = [url]
             self.checker[key] = temp
-            from .plugins.twitch import Twitch
-            if temp == Twitch:
-                # 如果支持批量检测，目前只有一个支持，第一版先写死按照特例处理
-                self.batch_check_task()
+            from .engine.download import BatchCheck
+            if issubclass(temp, BatchCheck):
+                # 如果支持批量检测
+                self.batch_check_task(temp)
             else:
                 self.coroutines[key] = asyncio.create_task(shot(temp))
         self.inverted_index[url] = name
@@ -93,23 +93,21 @@ class PluginInfo:
             del self.coroutines[exec_del]
 
     def init_tasks(self):
-        from .engine.download import DownloadBase
-        from .plugins.twitch import Twitch
+        from .engine.download import BatchCheck
 
         for key, plugin in self.checker.items():
-            if plugin == Twitch:
-                # 如果支持批量检测，目前只有一个支持，第一版先写死按照特例处理
-                self.batch_check_task()
+            if issubclass(plugin, BatchCheck):
+                # 如果支持批量检测
+                self.batch_check_task(plugin)
                 continue
             self.coroutines[key] = asyncio.create_task(shot(plugin))
 
-    def batch_check_task(self):
+    def batch_check_task(self, plugin):
         from biliup.engine.event import Event
         from biliup.handler import CHECK
-        from .plugins.twitch import Twitch
 
         async def check_timer():
-            event_manager.send_event(Event(CHECK, (Twitch, None, None)))
+            event_manager.send_event(Event(CHECK, (plugin, None, None)))
 
         timer = Timer(func=check_timer, interval=30)
-        self.coroutines[Twitch.__name__] = asyncio.create_task(timer.astart())
+        self.coroutines[plugin.__name__] = asyncio.create_task(timer.astart())

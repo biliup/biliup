@@ -29,9 +29,8 @@ logger = logging.getLogger('biliup')
 @event_manager.register(CHECK, block='Asynchronous3')
 def singleton_check(platform, name, url):
     if name is None and url is None:
-        # 如果支持批量检测，目前只有一个支持，第一版先写死按照特例处理
-        from .plugins.twitch import Twitch
-        for turl in Twitch.batch_check.__func__(Twitch.url_list):
+        # 如果支持批量检测
+        for turl in platform.batch_check(platform.url_list):
             context['url_upload_count'].setdefault(turl, 0)
             for k, v in config['streamers'].items():
                 if v.get("url", "") == turl:

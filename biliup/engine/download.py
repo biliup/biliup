@@ -68,12 +68,6 @@ class DownloadBase(ABC):
         # is_check 是否是检测模式 检测模式可以忽略只有下载时需要的耗时操作
         raise NotImplementedError()
 
-    @staticmethod
-    def batch_check(check_urls: List[str]) -> Generator[str, None, None]:
-        # 批量检测直播或下载状态
-        # 返回的是url_list
-        raise NotImplementedError()
-
     def download(self):
         self.danmaku_download_start(self.gen_download_filename())
         if self.is_download:
@@ -494,3 +488,13 @@ def get_valid_filename(name):
     if s in {"", ".", ".."}:
         raise RuntimeError("Could not derive file name from '%s'" % name)
     return s
+
+
+class BatchCheck(ABC):
+    @staticmethod
+    @abstractmethod
+    def batch_check(check_urls: List[str]) -> Generator[str, None, None]:
+        """
+        批量检测直播或下载状态
+        返回的是url_list
+        """

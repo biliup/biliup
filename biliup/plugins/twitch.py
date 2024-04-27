@@ -11,7 +11,7 @@ import yt_dlp
 
 from . import logger
 from ..engine.decorators import Plugin
-from ..engine.download import DownloadBase
+from ..engine.download import DownloadBase, BatchCheck
 from biliup.config import config
 from biliup.plugins.Danmaku import DanmakuClient
 
@@ -66,7 +66,7 @@ class TwitchVideos(DownloadBase):
 
 
 @Plugin.download(regexp=VALID_URL_BASE)
-class Twitch(DownloadBase):
+class Twitch(DownloadBase, BatchCheck):
     def __init__(self, fname, url, suffix='flv'):
         DownloadBase.__init__(self, fname, url, suffix=suffix)
         self.twitch_danmaku = config.get('twitch_danmaku', False)
