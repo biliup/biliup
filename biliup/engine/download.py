@@ -242,7 +242,7 @@ class DownloadBase(ABC):
             except:
                 logger.warning(f'执行后处理失败：{self.__class__.__name__} - {self.fname}', exc_info=True)
 
-    def __download_success_callback(self):
+    def download_success_callback(self):
         pass
 
     def run(self):
@@ -325,7 +325,7 @@ class DownloadBase(ABC):
                 logger.info(f'等待分段后处理完成: {self.__class__.__name__} - {self.fname} - {thread.name}')
                 thread.join()
         if (self.is_download and ret) or not self.is_download:
-            self.__download_success_callback()
+            self.download_success_callback()
         # self.segment_processor_thread
         logger.info(f'退出下载: {self.__class__.__name__} - {self.fname}')
         stream_info = {

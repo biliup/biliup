@@ -53,20 +53,17 @@ class TwitchVideos(DownloadBase):
                                 self.live_cover_url = thumbnails[len(thumbnails) - 1].get('url')
                             self.twitch_download_entry = entry
                         return True
-                except ExtractorError as e:
-                    if 'Unauthorized' in e.msg:
+                except Exception as e:
+                    if 'Unauthorized' in str(e):
                         TwitchUtils.invalid_auth_token()
                         continue
                     else:
                         logger.warning(f"{self.url}：获取错误", exc_info=True)
-                except:
-                    logger.warning(f"{self.url}：获取错误", exc_info=True)
                 return False
 
-    def __download_success_callback(self):
+    def download_success_callback(self):
         with yt_dlp.YoutubeDL({'download_archive': 'archive.txt'}) as ydl:
-                ydl.record_download_archive(self.twitch_download_entry)
-
+            ydl.record_download_archive(self.twitch_download_entry)
 
 
 @Plugin.download(regexp=VALID_URL_BASE)
