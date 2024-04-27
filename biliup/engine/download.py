@@ -249,7 +249,7 @@ class DownloadBase(ABC):
                     try:
                         segment_processor = config['streamers'].get(self.fname, {}).get('segment_processor')
                         if segment_processor:
-                            from biliup.handler import processor
+                            from biliup.common.tools import processor
                             import multiprocessing as mp
                             from biliup.database.db import get_file_list
                             with SessionLocal() as db:
