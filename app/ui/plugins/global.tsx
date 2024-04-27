@@ -61,7 +61,7 @@ const Global: React.FC = () => {
                     label="视频分段大小（file_size）"
                     extraText={
                         <div style={{ fontSize: "14px" }}>
-                            录像单文件大小限制，超过此大小分段下载
+                            录像单文件大小限制，超过此大小分段下载，下载回放时无法使用
                             <br />
                             单位：Byte，示例：4294967296（4GB）
                         </div>

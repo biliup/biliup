@@ -8,7 +8,6 @@ from urllib.parse import urlencode
 
 import requests
 import yt_dlp
-from yt_dlp.utils import ExtractorError
 
 from . import logger
 from ..engine.decorators import Plugin
