@@ -100,12 +100,17 @@ class Huya(DownloadBase):
 
     def danmaku_download_start(self, filename):
         if self.huya_danmaku:
-            self.danmaku = DanmakuClient(self.url, filename + "." + self.suffix)
+            self.danmaku = DanmakuClient(self.url, filename)
             self.danmaku.start()
+
+    def danmaku_segment(self, new_prev_file_name: str):
+        if self.danmaku:
+            self.danmaku.segment(new_prev_file_name)
 
     def close(self):
         if self.danmaku:
             self.danmaku.stop()
+            self.danmaku = None
 
 
 def _get_info_in_html(room_id, fake_headers):

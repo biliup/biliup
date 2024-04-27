@@ -32,7 +32,7 @@ const Douyu: React.FC = () => {
                 </Form.Select>
                 <Form.Switch
                     field="douyu_danmaku"
-                    extraText="录制斗鱼弹幕，默认关闭【下载器为ffmpeg,streamlink时效果最优】"
+                    extraText="录制斗鱼弹幕，默认关闭"
                     label="录制弹幕（douyu_danmaku）"
                 />
                 <Form.Select

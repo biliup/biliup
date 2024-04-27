@@ -9,7 +9,7 @@ const TwitCasting: React.FC = () => {
             <Collapse.Panel header="TwitCasting" itemKey="twitcasting">
                 <Form.Switch
                     field="twitcasting_danmaku"
-                    extraText="录制TwitCasting弹幕，默认关闭【下载器为ffmpeg,streamlink时效果最优】"
+                    extraText="录制TwitCasting弹幕，默认关闭"
                     label="录制弹幕（twitcasting_danmaku）"
                 />
                 <Form.Input
