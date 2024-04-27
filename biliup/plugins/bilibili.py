@@ -19,17 +19,28 @@ class Bililive(DownloadBase):
         self.fake_headers['referer'] = url
         if config.get('user', {}).get('bili_cookie'):
             self.fake_headers['cookie'] = config.get('user', {}).get('bili_cookie')
+        else:
+            cookie_file_name = config.get('user', {}).get('bili_cookie_file')
+            if cookie_file_name:
+                try:
+                    with open(cookie_file_name, encoding='utf-8') as stream:
+                        cookies = json.load(stream)["cookie_info"]["cookies"]
+                        cookies_str = ''
+                        for i in cookies:
+                            cookies_str += f"{i['name']}={i['value']};"
+                        self.fake_headers['cookie'] = cookies_str
+                        logger.info(f"未配置bili_cookie使用{cookie_file_name}")
+                except Exception:
+                    logger.exception("load_cookies error")
 
     def check_stream(self, is_check=False):
-
         OFFICIAL_API = "https://api.live.bilibili.com"
         room_id = match1(self.url, r'/(\d+)')
         qualityNumber = int(config.get('bili_qn', 10000))
         plugin_msg = f"Bililive - {room_id}"
 
         with requests.Session() as s:
-            s.headers.update(self.fake_headers.copy())
-            load_cookies(s, config.get('user', {}).get('bili_cookie_file'))
+            s.headers.update(self.fake_headers)
             # 获取直播状态与房间标题
             info_by_room_url = f"{OFFICIAL_API}/xlive/web-room/v1/index/getInfoByRoom?room_id={room_id}"
             try:
@@ -242,18 +253,3 @@ def oversea_expand(s, url, ov05_ip):
     r = s.get(url, stream=True)
     logger.debug(f'将ov-gotcha05的节点ip替换为了{ov05_ip}')
     return re.sub(r".*(?=/d1--ov-gotcha05)", f"http://{ov05_ip}", r.url, 1)
-
-
-def load_cookies(session, filename):
-    if filename is not None:
-        try:
-            # cookies = ""
-            with open(filename, encoding='utf-8') as stream:
-                s = json.load(stream)
-                for i in s["cookie_info"]["cookies"]:
-                    session.cookies.set(i['name'], i['value'])
-                    # cookies += "{}={};".format(i['name'], i['value'])
-                return True
-        except Exception:
-            logger.exception("load_cookies error")
-    return False
