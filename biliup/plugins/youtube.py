@@ -17,8 +17,8 @@ VALID_URL_BASE = r'https?://(?:(?:www|m)\.)?youtube\.com/(?P<id>.*?)\??(.*?)'
 
 @Plugin.download(regexp=VALID_URL_BASE)
 class Youtube(DownloadBase):
-    def __init__(self, fname, url):
-        super().__init__(fname, url)
+    def __init__(self, fname, url, suffix='flv'):
+        super().__init__(fname, url, suffix)
         self.ytb_danmaku = config.get('ytb_danmaku', False)
         self.youtube_cookie = config.get('user', {}).get('youtube_cookie')
         self.youtube_prefer_vcodec = config.get('youtube_prefer_vcodec')
@@ -124,7 +124,8 @@ class Youtube(DownloadBase):
             else:
                 return False
 
-    def download(self, filename):
+    def download(self):
+        filename = self.gen_download_filename(is_fmt=True)
         # ydl下载的文件在下载失败时不可控
         # 临时存储在其他地方
         download_dir = f'./cache/temp/youtube/{filename}'

@@ -2,11 +2,11 @@ import logging
 import os
 import re
 import subprocess
-import sys
+import threading
 import time
 import shutil
 from abc import ABC, abstractmethod
-from typing import Generator, List
+from typing import Generator, List, Callable
 from urllib.parse import urlparse
 
 import requests
@@ -37,7 +37,6 @@ class DownloadBase(ABC):
             logger.error(f'检测到suffix不存在，请补充后缀')
         else:
             self.suffix = suffix.lower()
-        self.title = None
         self.live_cover_path = None
         self.database_row_id = 0
         self.downloader = config.get('downloader', 'stream-gears')
@@ -47,8 +46,6 @@ class DownloadBase(ABC):
         self.filename_prefix = config.get('filename_prefix')
         self.use_live_cover = config.get('use_live_cover', False)
         self.opt_args = opt_args
-        # 是否是下载模式 跳过下播检测
-        self.is_download = False
         self.live_cover_url = None
         self.fake_headers = {
             'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -56,35 +53,19 @@ class DownloadBase(ABC):
             'accept-language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
             'user-agent': random_user_agent(),
         }
+        self.segment_time = config.get('segment_time')
+        self.file_size = config.get('file_size')
 
-        self.default_output_args = [
-            '-bsf:a', 'aac_adtstoasc',
-        ]
-        if config.get('segment_time'):
-            # 处理一些奇怪的时间，例如 00:60:00 应该自动修正为 01:00:00； 00:300:60 应该自动修正为 05:01:00
-            # if ':' in config.get('segment_time', '00:50:00'):
-            #     segment_time = config.get('segment_time').split(':')
-            #     if len(segment_time) == 3:
-            #         if int(segment_time[2]) > 59:
-            #             extra_minutes, seconds = divmod(int(segment_time[2]), 60)
-            #             segment_time[2] = str(seconds)
-            #             segment_time[1] = str(int(segment_time[1]) + extra_minutes)
-            #         if int(segment_time[1]) > 59:
-            #             extra_hours, minutes = divmod(int(segment_time[1]), 60)
-            #             segment_time[1] = str(minutes)
-            #             segment_time[0] = str(int(segment_time[0]) + extra_hours)
-            #         segment_time = ':'.join(segment_time)
-            #         logger.info(f'修正了segment_time参数为 {segment_time}')
-            self.default_output_args += \
-                ['-to', f"{config.get('segment_time', '00:50:00')}"]
-        else:
-            self.default_output_args += \
-                ['-fs', f"{config.get('file_size', '2621440000')}"]
+        # 是否是下载模式 跳过下播检测
+        self.is_download = False
+
+        # 分段后处理
+        self.segment_processor = config.get('segment_processor')
+        self.segment_processor_thread = []
 
     @abstractmethod
     def check_stream(self, is_check=False):
-        # is_check 是否是检测可以避免在检测是否可以录制的时候忽略一些耗时的操作
-        logger.debug(self.fname, is_check)
+        # is_check 是否是检测模式 检测模式可以忽略只有下载时需要的耗时操作
         raise NotImplementedError()
 
     @staticmethod
@@ -93,36 +74,27 @@ class DownloadBase(ABC):
         # 返回的是url_list
         raise NotImplementedError()
 
-    def get_filename(self, is_fmt=False):
-        if self.filename_prefix:  # 判断是否存在自定义录播命名设置
-            filename = (self.filename_prefix.format(streamer=self.fname, title=self.room_title).encode(
-                'unicode-escape').decode()).encode().decode("unicode-escape")
-        else:
-            filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
-        filename = get_valid_filename(filename)
-        if is_fmt:
-            return time.strftime(filename.encode("unicode-escape").decode()).encode().decode("unicode-escape")
-        else:
-            return filename
-
-    def download(self, filename):
-        filename = self.get_filename()
-        fmtname = time.strftime(filename.encode("unicode-escape").decode()).encode().decode("unicode-escape")
-
-        self.danmaku_download_start(fmtname)
+    def download(self):
+        self.danmaku_download_start(self.gen_download_filename())
+        if self.is_download:
+            if not shutil.which("ffmpeg"):
+                logger.error("未安装 FFMpeg 或不存在于 PATH 内")
+                logger.debug("Current user's PATH is:" + os.getenv("PATH"))
+                return False
+            else:
+                return self.ffmpeg_segment_download()
 
         parsed_url_path = urlparse(self.raw_stream_url).path
-        if shutil.which("ffmpeg"):
-            if self.downloader == 'streamlink':
-                if '.flv' in parsed_url_path:  # streamlink无法处理flv,所以回退到ffmpeg
-                    return self.ffmpeg_download(fmtname)
+        if self.downloader == 'streamlink' or self.downloader == 'ffmpeg':
+            if shutil.which("ffmpeg"):
+                # streamlink无法处理flv,所以回退到ffmpeg
+                if self.downloader == 'streamlink' and '.flv' not in parsed_url_path:
+                    return self.ffmpeg_download(use_streamlink=True)
                 else:
-                    return self.streamlink_download(fmtname)
-            elif self.downloader == 'ffmpeg':
-                return self.ffmpeg_download(fmtname)
-        else:
-            logger.error("未安装 FFMpeg 或不存在于 PATH 内，本次下载使用 stream-gears")
-            logger.debug("Current user's PATH is:" + os.getenv("PATH"))
+                    return self.ffmpeg_download()
+            else:
+                logger.error("未安装 FFMpeg 或不存在于 PATH 内，本次下载使用 stream-gears")
+                logger.debug("Current user's PATH is:" + os.getenv("PATH"))
 
         if '.flv' in parsed_url_path:
             # 假定flv流
@@ -130,96 +102,163 @@ class DownloadBase(ABC):
         else:
             # 其他流stream_gears会按hls保存为ts
             self.suffix = 'ts'
-        stream_gears_download(self.raw_stream_url, self.fake_headers, filename, config.get('segment_time'),
-                              config.get('file_size'))
+        stream_gears_download(self.raw_stream_url, self.fake_headers, self.gen_download_filename(),
+                              config.get('segment_time'),
+                              config.get('file_size'),
+                              lambda file_name: self.__download_segment_callback(file_name))
         return True
 
-    def streamlink_download(self, filename):  # streamlink+ffmpeg混合下载模式，适用于下载hls流
-        streamlink_input_args = ['--stream-segment-threads', '3', '--hls-playlist-reload-attempts', '1']
-        streamlink_cmd = ['streamlink', *streamlink_input_args, self.raw_stream_url, 'best', '-O']
-        ffmpeg_input_args = ['-rw_timeout', '20000000']
-        ffmpeg_cmd = ['ffmpeg', '-re', '-i', 'pipe:0', '-y', *ffmpeg_input_args, *self.default_output_args,
-                      *self.opt_args, '-c', 'copy', '-f', self.suffix]
-        # if config.get('segment_time'):
-        #     ffmpeg_cmd += ['-f', 'segment',
-        #              f'{filename} part-%03d.{self.suffix}']
-        # else:
-        #     ffmpeg_cmd += [
-        #         f'{filename}.{self.suffix}.part']
-        ffmpeg_cmd += [f'{filename}.{self.suffix}.part']
-        streamlink_proc = subprocess.Popen(streamlink_cmd, stdout=subprocess.PIPE)
-        ffmpeg_proc = subprocess.Popen(ffmpeg_cmd, stdin=streamlink_proc.stdout, stdout=subprocess.PIPE,
-                                       stderr=subprocess.STDOUT)
-        try:
-            with ffmpeg_proc.stdout as stdout:
-                for line in iter(stdout.readline, b''):
-                    decode_line = line.decode(errors='ignore')
-                    print(decode_line, end='', file=sys.stderr)
-                    logger.debug(decode_line.rstrip())
-            retval = ffmpeg_proc.wait()
-            streamlink_proc.terminate()
-            streamlink_proc.wait()
-        except KeyboardInterrupt:
-            if sys.platform != 'win32':
-                ffmpeg_proc.communicate(b'q')
-            raise
-        if retval != 0:
-            return False
-        return True
+    def ffmpeg_segment_download(self):
+        # ffmpeg 输入参数
+        input_args = [
+            '-loglevel', 'quiet', '-report', '-y'
+        ]
+        # ffmpeg 输出参数
+        output_args = [
+            '-bsf:a', 'aac_adtstoasc'
+        ]
+        input_args += ['-headers', ''.join('%s: %s\r\n' % x for x in self.fake_headers.items()),
+                       '-rw_timeout', '20000000']
+        if '.m3u8' in urlparse(self.raw_stream_url).path:
+            input_args += ['-max_reload', '1000']
 
-    def ffmpeg_download(self, filename):
-        default_input_args = ['-headers', ''.join('%s: %s\r\n' % x for x in self.fake_headers.items()),
-                              '-rw_timeout', '20000000']
-        parsed_url = urlparse(self.raw_stream_url)
-        path = parsed_url.path
-        if '.m3u8' in path:
-            default_input_args += ['-max_reload', '1000']
-        args = ['ffmpeg', '-y', *default_input_args,
-                '-i', self.raw_stream_url, *self.default_output_args, *self.opt_args,
-                '-c', 'copy', '-f', self.suffix]
-        # if config.get('segment_time'):
-        #     args += ['-f', 'segment',
-        #              f'{filename} part-%03d.{self.suffix}']
-        # else:
-        #     args += [
-        #         f'{filename}.{self.suffix}.part']
-        args += [f'{filename}.{self.suffix}.part']
+        input_args += ['-i', self.raw_stream_url]
 
-        proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        try:
-            with proc.stdout as stdout:
-                for line in iter(stdout.readline, b''):  # b'\n'-separated lines
-                    decode_line = line.decode(errors='ignore')
-                    print(decode_line, end='', file=sys.stderr)
-                    logger.debug(decode_line.rstrip())
-            retval = proc.wait()
-        except KeyboardInterrupt:
-            if sys.platform != 'win32':
-                proc.communicate(b'q')
-            raise
-        if retval != 0:
-            return False
-        return True
+        output_args += ['-f', 'segment']
+        # output_args += ['-segment_format', self.suffix]
+        output_args += ['-segment_list', 'pipe:1']
+        output_args += ['-segment_list_type', 'flat']
+        output_args += ['-reset_timestamps', '1']
+        # output_args += ['-strftime', '1']
+        if self.segment_time:
+            output_args += ['-segment_time', self.segment_time]
+        else:
+            # 避免适配两套
+            output_args += ['-segment_time', '9999:00:00']
 
-    def danmaku_download_start(self, filename):
+        output_args += ['-c', 'copy']
+        output_args += self.opt_args
+        args = ['ffmpeg', *input_args, *output_args, f'{self.fname}_{int(time.time() * 1e6)}_%d.{self.suffix}']
+        with subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL) as proc:
+            file_name = self.gen_download_filename(is_fmt=True)
+            for line in iter(proc.stdout.readline, b''):  # b'\n'-separated lines
+                ffmpeg_file_name = line.rstrip().decode(errors='ignore')
+                time.sleep(1)
+                # 文件重命名
+                self.download_file_rename(ffmpeg_file_name, f'{file_name}.{self.suffix}')
+                self.__download_segment_callback(f'{file_name}.{self.suffix}')
+                file_name = self.gen_download_filename(is_fmt=True)
+
+        return proc.returncode == 0
+
+    def ffmpeg_download(self, use_streamlink=False):
+        while True:
+            # streamlink进程
+            streamlink_proc = None
+            try:
+                # 文件名不含后戳
+                fmt_file_name = self.gen_download_filename(is_fmt=True)
+                # ffmpeg 输入参数
+                input_args = []
+                # ffmpeg 输出参数
+                output_args = [
+                    '-bsf:a', 'aac_adtstoasc',
+                ]
+                if use_streamlink:
+                    streamlink_cmd = [
+                        'streamlink',
+                        '--stream-segment-threads', '3',
+                        '--hls-playlist-reload-attempts', '1',
+                        '--http-header',
+                        ';'.join([f'{key}={value}' for key, value in self.fake_headers.items()]),
+                        self.raw_stream_url,
+                        'best',
+                        '-O'
+                    ]
+                    streamlink_proc = subprocess.Popen(streamlink_cmd, stdout=subprocess.PIPE)
+                    input_uri = 'pipe:0'
+                else:
+                    input_args += ['-headers', ''.join('%s: %s\r\n' % x for x in self.fake_headers.items()),
+                                   '-rw_timeout', '20000000']
+                    if '.m3u8' in urlparse(self.raw_stream_url).path:
+                        input_args += ['-max_reload', '1000']
+                    input_uri = self.raw_stream_url
+
+                input_args += ['-i', input_uri]
+
+                if self.segment_time:
+                    output_args += ['-to', self.segment_time]
+                if self.file_size:
+                    output_args += ['-fs', self.file_size]
+
+                output_args += self.opt_args
+
+                args = ['ffmpeg', '-y', *input_args, *output_args, '-c', 'copy', '-f', self.suffix,
+                        f'{fmt_file_name}.{self.suffix}.part']
+                with subprocess.Popen(args, stdin=subprocess.DEVNULL if not streamlink_proc else streamlink_proc.stdout,
+                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as proc:
+                    for line in iter(proc.stdout.readline, b''):  # b'\n'-separated lines
+                        decode_line = line.rstrip().decode(errors='ignore')
+                        print(decode_line)
+                        logger.debug(decode_line)
+
+                if proc.returncode == 0:
+                    # 文件重命名
+                    self.download_file_rename(f'{fmt_file_name}.{self.suffix}.part', f'{fmt_file_name}.{self.suffix}')
+                    # 触发分段事件
+                    self.__download_segment_callback(f'{fmt_file_name}.{self.suffix}')
+
+                    if not self.check_stream():
+                        return False
+                else:
+                    return False
+            finally:
+                if streamlink_proc:
+                    streamlink_proc.terminate()
+
+    def __download_segment_callback(self, file_name: str):
+        """
+        分段后触发返回含后戳的文件名
+        """
+        exclude_ext_file_name = os.path.splitext(file_name)[0]
+        danmaku_file_name = exclude_ext_file_name + '.xml'
+        self.danmaku_segment(danmaku_file_name)
+        # 将文件名和直播标题存储到数据库
+        with SessionLocal() as db:
+            update_room_title(db, self.database_row_id, self.room_title)
+            update_file_list(db, self.database_row_id, file_name)
+        if self.segment_processor:
+            try:
+                from biliup.common.tools import processor
+                data = os.path.abspath(file_name)
+                if os.path.exists(danmaku_file_name):
+                    data += f'\n{os.path.abspath(danmaku_file_name)}'
+                thread = threading.Thread(target=processor, args=(self.segment_processor, data), daemon=True,
+                                          name=f"segment_processor_{exclude_ext_file_name}")
+                thread.start()
+                self.segment_processor_thread.append(thread)
+            except:
+                logger.warning(f'执行后处理失败：{self.__class__.__name__} - {self.fname}', exc_info=True)
+
+    def download_success_callback(self):
         pass
 
     def run(self):
         if not self.check_stream():
             return False
-        file_name = self.file_name
-        # 将文件名和直播标题存储到数据库
         with SessionLocal() as db:
-            update_file_list(db, self.database_row_id, file_name)
             update_room_title(db, self.database_row_id, self.room_title)
-        retval = self.download(file_name)
-        self.rename(f'{file_name}.{self.suffix}')
+        retval = self.download()
         return retval
 
     def start(self):
-        logger.info(f'开始下载：{self.__class__.__name__} - {self.fname}')
-        date = time.localtime()
+        logger.info(f'开始下载: {self.__class__.__name__} - {self.fname}')
+        # 开始时间
+        start_time = time.localtime()
+        # 结束时间
         end_time = None
+        # 下播延迟检测
         delay = int(config.get('delay', 0))
         # 重试次数
         retry_count = 0
@@ -228,93 +267,78 @@ class DownloadBase(ABC):
         # delay 总重试次数 向上取整
         delay_all_retry_count = -(-delay // 60)
 
-        stream_info = {
-            'name': self.fname,
-            'url': self.url,
-            'date': date,
-        }
         with SessionLocal() as db:
-            self.database_row_id = add_stream_info(db, **stream_info)  # 返回数据库中此行记录的 id
+            self.database_row_id = add_stream_info(db, self.fname, self.url, start_time)  # 返回数据库中此行记录的 id
 
         while True:
+            # 下载结果
             ret = False
             try:
                 ret = self.run()
             except:
-                logger.exception('Uncaught exception:')
+                logger.warning(f'下载失败: {self.__class__.__name__} - {self.fname}', exc_info=True)
             finally:
                 self.close()
+
             if ret:
+                # 下载模式如果下载成功直接跳出
                 if self.is_download:
-                    try:
-                        segment_processor = config['streamers'].get(self.fname, {}).get('segment_processor')
-                        if segment_processor:
-                            from biliup.common.tools import processor
-                            import multiprocessing as mp
-                            from biliup.database.db import get_file_list
-                            with SessionLocal() as db:
-                                file_name = get_file_list(db, self.database_row_id)[-1]
-                            segment_process = mp.get_context('spawn').Process(target=processor, daemon=True, kwargs=(segment_processor, os.path.abspath(f'{file_name}.{self.suffix}') + ('\n' + os.path.abspath(f'{file_name}.xml') if os.path.exists(os.path.abspath(f'{file_name}.xml')) else '')))
-                            segment_process.start()
-                    except:
-                        logger.exception('Uncaught exception:')
-                    # 成功下载后也不检测下一个需要下载的视频而是先上传等待下次检测保证上传时使用下载视频的标题
-                    # 开启边录边传会快些
                     break
                 # 成功下载重置重试次数
                 retry_count = 0
                 retry_count_delay = 0
+                # 最后一次下载完成时间
+                end_time = time.localtime()
             else:
-                if self.is_download:
-                    # 下载模式如果下载失败直接跳出
-                    break
-
                 if retry_count < 3:
                     retry_count += 1
                     logger.info(
-                        f'获取流失败：{self.__class__.__name__} - {self.fname}，重试次数 {retry_count} / 3，等待 10 秒')
+                        f'获取流失败: {self.__class__.__name__} - {self.fname}，重试次数 {retry_count} / 3，等待 10 秒')
                     time.sleep(10)
                     continue
 
-                if delay:
-                    retry_count_delay += 1
-                    if retry_count_delay > delay_all_retry_count:
-                        logger.info(f'下播延迟检测结束：{self.__class__.__name__}:{self.fname}')
-                        break
-                    else:
-                        if delay < 60:
-                            logger.info(
-                                f'下播延迟检测：{self.__class__.__name__} - {self.fname}，将在 {delay} 秒后检测开播状态')
-                            time.sleep(delay)
-                        else:
-                            if retry_count_delay == 1:
-                                end_time = time.localtime()
-                                # 只有第一次显示
-                                logger.info(
-                                    f'下播延迟检测：{self.__class__.__name__} - {self.fname}，每隔 60 秒检测开播状态，共检测 {delay_all_retry_count} 次')
-                            time.sleep(60)
-                        continue
-                else:
-                    end_time = time.localtime()
+                # 下载模式跳过下播延迟检测
+                if self.is_download:
                     break
 
-        if end_time is None:
-            end_time = time.localtime()
-        self.download_cover(time.strftime(self.get_filename().encode("unicode-escape").decode(), date).encode().decode(
-            "unicode-escape"))
+                if delay and retry_count_delay < delay_all_retry_count:
+                    retry_count_delay += 1
+                    if delay < 60:
+                        logger.info(
+                            f'下播延迟检测: {self.__class__.__name__} - {self.fname}，将在 {delay} 秒后检测开播状态')
+                        time.sleep(delay)
+                    else:
+                        logger.info(
+                            f'下播延迟检测: {self.__class__.__name__} - {self.fname}，每隔 60 秒检测开播状态，检测次数 {retry_count_delay} / {delay_all_retry_count}')
+                        time.sleep(60)
+                    continue
+                else:
+                    # 未设置下播延迟检测 or 下播检测次数已到
+                    break
+
+        self.download_cover(
+            time.strftime(self.gen_download_filename().encode("unicode-escape").decode(), start_time).encode().decode(
+                "unicode-escape"))
         # 更新数据库中封面存储路径
         with SessionLocal() as db:
             update_cover_path(db, self.database_row_id, self.live_cover_path)
-        logger.info(f'退出下载：{self.__class__.__name__} - {self.fname}')
+
+        for thread in self.segment_processor_thread:
+            if thread.is_alive():
+                logger.info(f'等待分段后处理完成: {self.__class__.__name__} - {self.fname} - {thread.name}')
+                thread.join()
+        if (self.is_download and ret) or not self.is_download:
+            self.download_success_callback()
+        # self.segment_processor_thread
+        logger.info(f'退出下载: {self.__class__.__name__} - {self.fname}')
         stream_info = {
             'name': self.fname,
             'url': self.url,
             'title': self.room_title,
-            'date': date,
+            'date': start_time,
+            'end_time': end_time if end_time else time.localtime(),
             'live_cover_path': self.live_cover_path,
             'is_download': self.is_download,
-            # 内部使用时间戳传递
-            'end_time': end_time,
         }
         return stream_info
 
@@ -383,32 +407,47 @@ class DownloadBase(ABC):
             logger.debug(f"{e} from {url}")
         return False, None
 
-    @staticmethod
-    def rename(file_name):
-        try:
-            os.rename(file_name + '.part', file_name)
-            logger.info(f'更名 {file_name + ".part"} 为 {file_name}')
-        except FileNotFoundError:
-            logger.debug(f'文件不存在: {file_name}')
-        except FileExistsError:
-            os.rename(file_name + '.part', file_name)
-            logger.info(f'更名 {file_name + ".part"} 为 {file_name} 失败, {file_name} 已存在')
-
-    @property
-    def file_name(self):
+    def gen_download_filename(self, is_fmt=False):
         if self.filename_prefix:  # 判断是否存在自定义录播命名设置
             filename = (self.filename_prefix.format(streamer=self.fname, title=self.room_title).encode(
                 'unicode-escape').decode()).encode().decode("unicode-escape")
         else:
             filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
         filename = get_valid_filename(filename)
-        return time.strftime(filename.encode("unicode-escape").decode()).encode().decode("unicode-escape")
+        if is_fmt:
+            file_time = time.time()
+            while True:
+                fmt_file_name = time.strftime(filename.encode("unicode-escape").decode(),
+                                              time.localtime(file_time)).encode().decode("unicode-escape")
+                if os.path.exists(f"{fmt_file_name}.{self.suffix}"):
+                    file_time += 1
+                else:
+                    return fmt_file_name
+        else:
+            return filename
+
+    @staticmethod
+    def download_file_rename(old_file_name, file_name):
+        try:
+            os.rename(old_file_name, file_name)
+            logger.info(f'更名 {old_file_name} 为 {file_name}')
+        except FileNotFoundError:
+            logger.debug(f'文件不存在: {old_file_name}')
+        except FileExistsError:
+            logger.info(f'更名 {old_file_name} 为 {file_name} 失败, {file_name} 已存在')
+
+    def danmaku_download_start(self, filename):
+        pass
+
+    def danmaku_segment(self, new_prev_file_name: str):
+        pass
 
     def close(self):
         pass
 
 
-def stream_gears_download(url, headers, file_name, segment_time=None, file_size=None):
+def stream_gears_download(url, headers, file_name, segment_time=None, file_size=None,
+                          file_name_callback: Callable[[str], None] = None):
     class Segment:
         pass
 
@@ -421,12 +460,21 @@ def stream_gears_download(url, headers, file_name, segment_time=None, file_size=
         segment.size = file_size
     if file_size is None and segment_time is None:
         segment.size = 8 * 1024 * 1024 * 1024
-    stream_gears.download(
-        url,
-        headers,
-        file_name,
-        segment
-    )
+    if file_name_callback:
+        stream_gears.download_with_callback(
+            url,
+            headers,
+            file_name,
+            segment,
+            file_name_callback
+        )
+    else:
+        stream_gears.download(
+            url,
+            headers,
+            file_name,
+            segment,
+        )
 
 
 def get_valid_filename(name):

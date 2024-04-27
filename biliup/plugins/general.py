@@ -32,8 +32,9 @@ class YDownload(DownloadBase):
             logger.debug(info_list)
         return info_list
 
-    def download(self, filename):
+    def download(self):
         try:
+            filename = self.gen_download_filename(is_fmt=True)
             self.ydl_opts = {'outtmpl': filename}
             with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
                 ydl.download([self.url])
@@ -62,8 +63,8 @@ class SDownload(DownloadBase):
         except streamlink.StreamlinkError:
             return
 
-    def download(self, filename):
-
+    def download(self):
+        filename = self.gen_download_filename(is_fmt=True)
         # fd = stream.open()
         try:
             with self.stream.open() as fd:
@@ -75,7 +76,7 @@ class SDownload(DownloadBase):
                             return 1
                     return 0
         except OSError:
-            self.rename(filename)
+            self.download_file_rename(filename + '.part', filename)
             raise
 
 
@@ -103,10 +104,10 @@ class Generic(DownloadBase):
             return False
         return True
 
-    def download(self, filename):
+    def download(self):
         if self.handler == self:
-            return super(Generic, self).download(filename)
-        return self.handler.download(filename)
+            return super(Generic, self).download()
+        return self.handler.download()
 
 
 __plugin__ = Generic

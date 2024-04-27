@@ -6,7 +6,7 @@
 ### 2.ffmpeg（纯ffmpeg下载），请手动安装ffmpeg。
 ### 3.stream-gears
 #downloader: ffmpeg
-### 录像单文件大小限制，单位Byte，超过此大小分段下载
+### 录像单文件大小限制，单位Byte，超过此大小分段下载，下载回放时无法使用
 file_size: 2621440000
 ### 录像单文件时间限制，格式'00:00:00'（时分秒），超过此大小分段下载，如需使用大小分段请注释此字段
 #segment_time: '00:50:00'
@@ -51,7 +51,7 @@ check_sourcecode: 15
 ### 如遇到斗鱼录制卡顿可以尝试切换线路。可选以下线路
 ### tctc-h5（备用线路4）, tct-h5（备用线路5）, ali-h5（备用线路6）, hw-h5（备用线路7）, hs-h5（备用线路13）
 #douyucdn: tct-h5
-### 录制斗鱼弹幕，默认关闭【下载器为ffmpeg,streamlink时效果最优】
+### 录制斗鱼弹幕，默认关闭
 #douyu_danmaku: false
 ### 斗鱼自选画质
 ### 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段(仅ffmpeg streamlink)时录制设置的画质
@@ -63,7 +63,7 @@ check_sourcecode: 15
 ### AL（阿里云 - 直播线路3）, TX（腾讯云 - 直播线路5）, HW（华为云 - 直播线路6）, WS（网宿）, HS（火山引擎 - 直播线路14）, AL13（阿里云）, HW16（华为云）, HY(星域云 - 直播线路66)
 #huya_cdn: AL
 #huya_cdn_fallback: false
-### 录制虎牙弹幕，默认关闭【下载器为ffmpeg,streamlink时效果最优】
+### 录制虎牙弹幕，默认关闭
 #huya_danmaku: false
 ### 虎牙自选录制码率
 ### 可以避免录制如20M的码率，每小时8G左右大小，上传及转码耗时过长。
@@ -72,7 +72,7 @@ check_sourcecode: 15
 #huya_max_ratio: 10000
 
 #------抖音------#
-### 录制抖音弹幕，默认关闭【下载器为ffmpeg,streamlink时效果最优】
+### 录制抖音弹幕，默认关闭
 #douyin_danmaku: false
 ### 抖音自选画质
 ### 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段(仅ffmpeg streamlink)时录制设置的画质
@@ -164,15 +164,15 @@ check_sourcecode: 15
 #youtube_enable_download_playback: true
 
 #------Twitch直播录制------#
-### 录制Twitch弹幕，默认关闭【下载器为ffmpeg,streamlink时效果最优】
+### 录制Twitch弹幕，默认关闭
 #twitch_danmaku: false
-### 去除Twitch广告功能，默认开启【下载器为ffmpeg,streamlink时效果最优】
+### 去除Twitch广告功能，默认开启
 ### 这个功能会导致Twitch录播分段，因为遇到广告就自动断开了，这就是去广告。若需要录播完整一整段可以关闭这个，但是关了之后就会有紫色屏幕的CommercialTime
 ### 还有一个不想视频分段的办法是去花钱开一个Turbo会员，能不看广告，然后下面的user里把twitch的cookie填上，也能不看广告，自然就不会分段了
 #twitch_disable_ads: true
 
 #------TwitCasting------#
-### 录制Twitch弹幕，默认关闭【下载器为ffmpeg,streamlink时效果最优】
+### 录制Twitch弹幕，默认关闭
 #twitcasting_danmaku: false
 ### TwitCasting直播间密码 (可在录制主播设置中为主播单独配置)
 #twitcasting_password:
