@@ -412,7 +412,14 @@ class DownloadBase(ABC):
             filename = f'{self.fname}%Y-%m-%dT%H_%M_%S'
         filename = get_valid_filename(filename)
         if is_fmt:
-            return time.strftime(filename.encode("unicode-escape").decode()).encode().decode("unicode-escape")
+            file_time = time.time()
+            while True:
+                fmt_file_name = time.strftime(filename.encode("unicode-escape").decode(),
+                                              time.localtime(file_time)).encode().decode("unicode-escape")
+                if os.path.exists(f"{fmt_file_name}.{self.suffix}"):
+                    file_time += 1
+                else:
+                    return fmt_file_name
         else:
             return filename
 
