@@ -34,7 +34,7 @@ class DownloadBase(ABC):
         self.url = url
         # 录制后保存文件格式而非源流格式 对应原配置文件format 仅ffmpeg及streamlink生效
         if not suffix:
-            logger.error(f'检测到suffix不存在，请补充后缀')
+            self.suffix = 'flv'
         else:
             self.suffix = suffix.lower()
         self.live_cover_path = None
@@ -109,9 +109,10 @@ class DownloadBase(ABC):
         return True
 
     def ffmpeg_segment_download(self):
+        # TODO 无日志
         # ffmpeg 输入参数
         input_args = [
-            '-loglevel', 'quiet', '-report', '-y'
+            '-loglevel', 'quiet', '-y'
         ]
         # ffmpeg 输出参数
         output_args = [
