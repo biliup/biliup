@@ -10,6 +10,7 @@ import re
 import ssl
 import threading
 import time
+from asyncio import AbstractEventLoop
 from typing import Optional
 
 import aiohttp
@@ -19,8 +20,8 @@ from biliup.plugins.Danmaku.bilibili import Bilibili
 from biliup.plugins.Danmaku.douyin import Douyin
 from biliup.plugins.Danmaku.douyu import Douyu
 from biliup.plugins.Danmaku.huya import Huya
-from biliup.plugins.Danmaku.twitch import Twitch
 from biliup.plugins.Danmaku.twitcasting import Twitcasting
+from biliup.plugins.Danmaku.twitch import Twitch
 
 logger = logging.getLogger('biliup')
 
@@ -29,18 +30,20 @@ class DanmakuClient:
     class WebsocketErrorException(Exception):
         pass
 
-    def __init__(self, url, filename, content=None):
+    def __init__(self, url, file_name, content=None):
         # TODO 录制任务产生的上下文信息 传递太麻烦了 需要改
         self.__content = content if content is not None else {}
-        self.__starttime = time.time()
-        self.__filename = os.path.splitext(filename)[0] + '.xml'
-        self.__filename_video_suffix = filename
+        self.__file_name = file_name
+        self.__fmt_file_name = None
+        self.__start_time = None
         self.__url = ''
         self.__site = None
         self.__hs = None
         self.__ws = None
         self.__dm_queue = None
         self.__record_task: Optional[asyncio.Task] = None
+        self.__print_task: Optional[asyncio.Task] = None
+        self.__loop: Optional[AbstractEventLoop] = None
 
         if 'http://' == url[:7] or 'https://' == url[:8]:
             self.__url = url
@@ -123,7 +126,7 @@ class DanmakuClient:
                 # await asyncio.sleep(10) 无需等待 直接获取下一条websocket消息
                 # 这里出现异常只会是 decode_msg 的问题
 
-    async def __print_danmaku(self):
+    async def __print_danmaku(self, file_name):
         root = etree.Element("root")
         etree.indent(root, "\t")
         tree = etree.ElementTree(root, parser=etree.XMLParser(recover=True))
@@ -140,6 +143,7 @@ class DanmakuClient:
                 logger.warning(f"{DanmakuClient.__name__}:{self.__url}: 弹幕写入异常 - {e}")
 
         try:
+            write_file(file_name)
             while True:
                 m = await self.__dm_queue.get()
                 if m.get('msg_type') == 'danmaku':
@@ -151,7 +155,7 @@ class DanmakuClient:
                             color = m["color"]
                         else:
                             color = '16777215'
-                        msg_time = format(time.time() - self.__starttime, '.3f')
+                        msg_time = format(time.time() - self.__start_time, '.3f')
                         d.set('p', f"{msg_time},1,25,{color},0,0,0,0")
                         d.text = m["content"]
                     except:
@@ -162,35 +166,61 @@ class DanmakuClient:
                     if msg_i >= 5:
                         # 收到五条弹幕后写入 减少io
                         # 可能会写入失败 会在下次五条或者任务被取消时重新尝试写入
-                        write_file(self.__filename)
+                        write_file(file_name)
                         msg_i = 0
                     else:
                         msg_i = msg_i + 1
         finally:
             # 发生异常(被取消)时写入 避免丢失未写入
-            write_file(self.__filename)
+            write_file(file_name)
 
     def start(self):
         init_event = threading.Event()
 
         async def __init():
-            logger.info(f'开始弹幕录制: {self.__filename}')
+            logger.info(f'开始弹幕录制: {self.__url}')
+            self.__loop = asyncio.get_event_loop()
             self.__record_task = asyncio.create_task(self.__run())
+            self.segment()
             init_event.set()
             try:
                 await self.__record_task
             except asyncio.CancelledError:
                 pass
-            logger.info(f'结束弹幕录制: {self.__filename}')
+            logger.info(f'结束弹幕录制: {self.__url}')
 
         threading.Thread(target=asyncio.run, args=(__init(),)).start()
         # 等待初始化完成避免未初始化完成的时候就停止任务
         init_event.wait()
 
+    def segment(self, new_prev_file_name=None):
+        if self.__record_task and self.__loop:
+            if new_prev_file_name and self.__fmt_file_name and new_prev_file_name != self.__fmt_file_name:
+                try:
+                    if os.path.exists(self.__fmt_file_name):
+                        os.rename(self.__fmt_file_name, new_prev_file_name)
+                        logger.info(
+                            f"{DanmakuClient.__name__}:{self.__url}: 更名 {self.__fmt_file_name} 为 {new_prev_file_name}")
+                except:
+                    logger.error(
+                        f"{DanmakuClient.__name__}:{self.__url}: 更名 {self.__fmt_file_name} 为 {new_prev_file_name} 失败",
+                        exc_info=True)
+            self.__fmt_file_name = time.strftime(self.__file_name.encode("unicode-escape").decode()).encode().decode(
+                "unicode-escape") + '.xml'
+            self.__start_time = time.time()
+            if self.__print_task:
+                self.__print_task.cancel()
+            self.__print_task = self.__loop.create_task(self.__print_danmaku(self.__fmt_file_name))
+
+    def stop(self):
+        if self.__record_task is not None:
+            self.__record_task.cancel()
+            self.__record_task = None
+            self.__loop = None
+
     async def __run(self):
         self.__dm_queue = asyncio.Queue()
         self.__hs = aiohttp.ClientSession()
-        print_task = asyncio.create_task(self.__print_danmaku())
         try:
             while True:
                 danmaku_tasks = None
@@ -204,11 +234,10 @@ class DanmakuClient:
                 except self.WebsocketErrorException:
                     # 连接断开等30秒重连
                     # 在关闭之前一直重试
-                    logger.warning(f"{DanmakuClient.__name__}:{self.__filename}: 弹幕连接异常,将在 30 秒后重试",
-                                   exc_info=True)
+                    logger.warning(f"{DanmakuClient.__name__}:{self.__url}: 弹幕连接异常,将在 30 秒后重试")
                 except:
                     # 记录异常不到外部处理
-                    logger.exception(f"{DanmakuClient.__name__}:{self.__filename}: 弹幕异常,将在 30 秒后重试")
+                    logger.exception(f"{DanmakuClient.__name__}:{self.__url}: 弹幕异常,将在 30 秒后重试")
                 finally:
                     if danmaku_tasks is not None:
                         for danmaku_task in danmaku_tasks:
@@ -218,14 +247,9 @@ class DanmakuClient:
                         await self.__ws.close()
                 await asyncio.sleep(30)
         finally:
-            print_task.cancel()
-            await asyncio.gather(print_task, return_exceptions=True)
+            self.__print_task.cancel()
+            await asyncio.gather(self.__print_task, return_exceptions=True)
             await self.__hs.close()
-
-    def stop(self):
-        if self.__record_task is not None:
-            self.__record_task.cancel()
-            self.__record_task = None
 
 # 虎牙直播：https://www.huya.com/lpl
 # 斗鱼直播：https://www.douyu.com/9999

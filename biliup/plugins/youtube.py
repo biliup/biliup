@@ -124,7 +124,8 @@ class Youtube(DownloadBase):
             else:
                 return False
 
-    def download(self, filename):
+    def download(self):
+        filename = self.__gen_download_filename(is_fmt=True)
         # ydl下载的文件在下载失败时不可控
         # 临时存储在其他地方
         download_dir = f'./cache/temp/youtube/{filename}'

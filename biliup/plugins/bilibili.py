@@ -9,6 +9,7 @@ from biliup.plugins.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 
+
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m|live)\.)?bilibili\.com')
 class Bililive(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
@@ -73,21 +74,20 @@ class Bililive(DownloadBase):
 
             params = {
                 'room_id': room_id,
-                'protocol': '0,1',# 0: http_stream, 1: http_hls
-                'format': '0,1,2',# 0: flv, 1: ts, 2: fmp4
-                'codec': '0', # 0: avc, 1: hevc, 2: av1
+                'protocol': '0,1',  # 0: http_stream, 1: http_hls
+                'format': '0,1,2',  # 0: flv, 1: ts, 2: fmp4
+                'codec': '0',  # 0: avc, 1: hevc, 2: av1
                 'qn': qualityNumber,
-                'platform': 'html5', # web, html5, android, ios
+                'platform': 'html5',  # web, html5, android, ios
                 # 'ptype': '8',
                 'dolby': '5',
                 # 'panorama': '1' # 全景(不支持 html5)
             }
-            streamname_regexp = r"(live_\d+_\w+_\w+_?\w+?)" # 匹配 streamName
-
+            streamname_regexp = r"(live_\d+_\w+_\w+_?\w+?)"  # 匹配 streamName
 
             if self.raw_stream_url is not None \
-                and qualityNumber >= 10000 \
-                and not is_new_live:
+                    and qualityNumber >= 10000 \
+                    and not is_new_live:
                 # 同一个 streamName 即可复用，除非被超管切断
                 # 前面拿不到 streamName，目前使用开播时间判断
                 health, url = super().check_url_healthy(s, self.raw_stream_url)
@@ -104,8 +104,8 @@ class Bililive(DownloadBase):
                     logger.debug(f"{plugin_msg}: {main_api} 返回 {play_info}")
                     play_info = get_play_info(s, fallback_api, params)
                     if play_info is None or check_areablock(play_info['data']['playurl_info']['playurl']):
-                            logger.debug(f"{plugin_msg}: {fallback_api} 返回 {play_info}")
-                            return False
+                        logger.debug(f"{plugin_msg}: {fallback_api} 返回 {play_info}")
+                        return False
             except Exception:
                 logger.exception(f"{plugin_msg}")
                 return False
@@ -120,7 +120,7 @@ class Bililive(DownloadBase):
             if protocol == "hls_fmp4":
                 if len(stream['format']) > 1:
                     stream_format = stream['format'][1]
-                elif int(time.time()) - live_start_time <= 60: # 60s 宽容等待 fmp4
+                elif int(time.time()) - live_start_time <= 60:  # 60s 宽容等待 fmp4
                     return False
                 elif stream_format['format_name'] == 'ts':
                     stream_format = streams[0]['format'][0]
@@ -168,7 +168,9 @@ class Bililive(DownloadBase):
                     while i:
                         i -= 1
                         try:
-                            self.raw_stream_url = "{}{}{}".format(stream_info['url_info'][i]['host'], stream_url['base_url'], stream_info['url_info'][i]['extra'])
+                            self.raw_stream_url = "{}{}{}".format(stream_info['url_info'][i]['host'],
+                                                                  stream_url['base_url'],
+                                                                  stream_info['url_info'][i]['extra'])
                             url_health, _url = super().check_url_healthy(s, self.raw_stream_url)
                             if url_health:
                                 self.raw_stream_url = _url
@@ -192,21 +194,28 @@ class Bililive(DownloadBase):
 
     def danmaku_download_start(self, filename):
         if self.bilibili_danmaku:
-            self.danmaku = DanmakuClient(self.url, filename + "." + self.suffix)
+            self.danmaku = DanmakuClient(self.url, filename)
             self.danmaku.start()
+
+    def danmaku_segment(self, new_prev_file_name: str):
+        if self.danmaku:
+            self.danmaku.segment(new_prev_file_name)
 
     def close(self):
         if self.danmaku:
             self.danmaku.stop()
+            self.danmaku = None
+
 
 def get_play_info(s, api, params):
-    api = (lambda a: a if a.startswith(('http://', 'https://')) else 'http://' + a) (api)
+    api = (lambda a: a if a.startswith(('http://', 'https://')) else 'http://' + a)(api)
     full_url = f"{api}/xlive/web-room/v2/index/getRoomPlayInfo"
     try:
         return s.get(full_url, params=params, timeout=5).json()
     except Exception as e:
         logger.warning(f'{api} 获取直播流信息失败 {e}')
     return None
+
 
 # Copy from room-player.js
 def check_areablock(data):
@@ -219,6 +228,7 @@ def check_areablock(data):
         return True
     return False
 
+
 def do_login(s):
     try:
         return s.get('https://api.bilibili.com/x/web-interface/nav', timeout=5).json()
@@ -226,11 +236,13 @@ def do_login(s):
         logger.exception('Bililive do_login')
     return {}
 
+
 def oversea_expand(s, url, ov05_ip):
     # 强制替换ov05 302redirect之后的真实地址为指定的域名或ip达到自选ov05节点的目的
     r = s.get(url, stream=True)
     logger.debug(f'将ov-gotcha05的节点ip替换为了{ov05_ip}')
     return re.sub(r".*(?=/d1--ov-gotcha05)", f"http://{ov05_ip}", r.url, 1)
+
 
 def load_cookies(session, filename):
     if filename is not None:
