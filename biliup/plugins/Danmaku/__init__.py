@@ -143,7 +143,6 @@ class DanmakuClient:
                 logger.warning(f"{DanmakuClient.__name__}:{self.__url}: 弹幕写入异常 - {e}")
 
         try:
-            write_file(file_name)
             while True:
                 m = await self.__dm_queue.get()
                 if m.get('msg_type') == 'danmaku':
