@@ -248,11 +248,11 @@ class DownloadBase:
                         segment_processor = config['streamers'].get(self.fname, {}).get('segment_processor')
                         if segment_processor:
                             from biliup.handler import processor
-                            from multiprocessing import Process
+                            import multiprocessing as mp
                             from biliup.database.db import get_file_list
                             with SessionLocal() as db:
                                 file_name = get_file_list(db, self.database_row_id)[-1]
-                            segment_process = Process(target=processor, args=(segment_processor, os.path.abspath(f'{file_name}.{self.suffix}') + ('\n' + os.path.abspath(f'{file_name}.xml') if os.path.exists(os.path.abspath(f'{file_name}.xml')) else '')))
+                            segment_process = mp.get_context('spawn').Process(target=processor, daemon=True, kwargs=(segment_processor, os.path.abspath(f'{file_name}.{self.suffix}') + ('\n' + os.path.abspath(f'{file_name}.xml') if os.path.exists(os.path.abspath(f'{file_name}.xml')) else '')))
                             segment_process.start()
                     except:
                         logger.exception('Uncaught exception:')
