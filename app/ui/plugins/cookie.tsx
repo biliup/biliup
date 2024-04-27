@@ -100,7 +100,7 @@ const Cookie: React.FC<Props> = (props) => {
                             <br />
                             <code
                                 style={{ color: "blue" }}
-                            >{`document.cookie.split("; ").find(item={'>'}item.startsWith("auth-token="))?.split("=")[1]`}</code>
+                            >{`document.cookie.split("; ").find(item => item.startsWith("auth-token="))?.split("=")[1]`}</code>
                             <br />
                             twitch_cookie&nbsp;需要在&nbsp;downloader=
                             &quot;ffmpeg&quot;&nbsp;时候才会生效。

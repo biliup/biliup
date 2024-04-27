@@ -1,3 +1,9 @@
+import logging
+import subprocess
+
+logger = logging.getLogger('biliup')
+
+
 class NamedLock:
     """
     简单实现的命名锁
@@ -52,3 +58,17 @@ def get_file_create_timestamp(file: str) -> float:
             pass
 
     return stat_result.st_mtime
+
+
+def processor(processors, data):
+    for process in processors:
+        if process.get('run'):
+            try:
+                process_output = subprocess.check_output(
+                    process['run'], shell=True,
+                    input=data,
+                    stderr=subprocess.STDOUT, text=True)
+                logger.info(process_output.rstrip())
+            except subprocess.CalledProcessError as e:
+                logger.exception(e.output)
+                continue

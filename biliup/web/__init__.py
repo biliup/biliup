@@ -1,14 +1,18 @@
+import asyncio
 import socket
 import json
 import os
 import pathlib
+import concurrent.futures
 
 import aiohttp_cors
 import requests
 import stream_gears
 from aiohttp import web
+from aiohttp.client import ClientSession
 from sqlalchemy import select, update
 from sqlalchemy.exc import NoResultFound, MultipleResultsFound
+from urllib.parse import urlparse, unquote
 
 import biliup.common.reload
 from biliup.config import config
@@ -130,34 +134,36 @@ async def sms_send(request):
     pass
 
 
+@routes.get('/v1/get_qrcode')
 async def qrcode_get(request):
-    if config.data.get("toml"):
-        try:
-            r = eval(stream_gears.get_qrcode())
-        except Exception as e:
-            return web.HTTPBadRequest(text="get qrcode failed")
-    else:
-        r = BiliBili.get_qrcode()
+    try:
+        r = eval(stream_gears.get_qrcode())
+    except Exception as e:
+        return web.HTTPBadRequest(text="get qrcode failed")
     return web.json_response(r)
 
 
+pool = concurrent.futures.ProcessPoolExecutor()
+
+
+@routes.post('/v1/login_by_qrcode')
 async def qrcode_login(request):
     post_data = await request.json()
-    if config.data.get("toml"):
-        try:
-            if stream_gears.login_by_qrcode(json.dumps(post_data)):
-                return web.json_response({"status": 200})
-        except Exception as e:
-            return web.HTTPBadRequest(text="login failed" + str(e))
-    else:
-        try:
-            r = await BiliBili.login_by_qrcode(post_data)
-        except:
-            return web.HTTPBadRequest(text="timeout for qrcode validate")
-        for cookie in r['data']['cookie_info']['cookies']:
-            config.data['user']['cookies'][cookie['name']] = cookie['value']
-        config.data['user']['access_token'] = r['data']['token_info']['access_token']
-        return web.json_response(r)
+    try:
+        loop = asyncio.get_event_loop()
+        # loop
+        task = loop.run_in_executor(pool, stream_gears.login_by_qrcode, (json.dumps(post_data, )))
+        res = await asyncio.wait_for(task, 180)
+        data = json.loads(res)
+        filename = f'data/{data["token_info"]["mid"]}.json'
+        with open(filename, 'w', encoding='utf-8') as file:
+            file.write(res)
+        return web.json_response({
+            'filename': filename
+        })
+    except Exception as e:
+        logger.exception('login_by_qrcode')
+        return web.HTTPBadRequest(text="login failed" + str(e))
 
 
 async def pre_archive(request):
@@ -306,9 +312,9 @@ async def get_streamers(request):
 
 @routes.get('/v1/upload/streamers/{id}')
 async def streamers_id(request):
-    id = request.match_info['id']
+    _id = request.match_info['id']
     db = request['db']
-    res = db.get(UploadStreamers, id).as_dict()
+    res = db.get(UploadStreamers, _id).as_dict()
     return web.json_response(res)
 
 
@@ -455,7 +461,7 @@ async def app_status(request):
     from biliup.config import Config
     from biliup.app import PluginInfo
     from biliup import __version__
-    res = {'version': __version__,}
+    res = {'version': __version__, }
     for key, value in context.items():  # 遍历删除不能被 json 序列化的键值对
         if isinstance(value, Config):
             continue
@@ -498,7 +504,19 @@ async def myinfo(request):
 
 @routes.get('/bili/proxy')
 async def proxy(request):
-    return web.Response(body=requests.get(request.query['url']).content)
+    url = unquote(request.query['url'])
+    parsed_url = urlparse(url)
+
+    if not parsed_url.hostname or not parsed_url.hostname.endswith('.hdslb.com'):
+        return web.HTTPForbidden(reason="Access to the requested domain is forbidden")
+
+    async with ClientSession() as session:
+        try:
+            async with session.get(url) as response:
+                content = await response.read()
+                return web.Response(body=content, status=response.status)
+        except Exception as e:
+            return web.HTTPBadRequest(reason=str(e))
 
 
 def find_all_folders(directory):
@@ -522,12 +540,12 @@ async def service(args):
         web.get('/api/login_by_sms', sms_login),
         web.post('/api/send_sms', sms_send),
         web.get('/api/save', save_config),
-        web.get('/api/get_qrcode', qrcode_get),
-        web.post('/api/login_by_qrcode', qrcode_login),
+        # web.get('/api/get_qrcode', qrcode_get),
+        # web.post('/api/login_by_qrcode', qrcode_login),
         web.get('/api/archive_pre', pre_archive),
         web.get('/', root_handler)
     ])
-    routes.static('/static', '.', show_index=True)
+    routes.static('/static', '.', show_index=False)
     app.add_routes(routes)
     if args.static_dir:
         app.add_routes([web.static('/', args.static_dir, show_index=False)])
@@ -545,7 +563,6 @@ async def service(args):
 
             res.append(web.get('/' + str(fname.with_suffix('')).replace('\\', '/'), _copy(fname)))
             # res.append(web.static('/'+fdir.replace('\\', '/'), files('biliup.web').joinpath('public/'+fdir)))
-        print(res)
         res.append(web.static('/', files('biliup.web').joinpath('public')))
         app.add_routes(res)
     if args.password:
@@ -574,13 +591,6 @@ async def service(args):
     await site.start()
     log_startup(args.host, args.port)
     return runner
-
-
-# @web.middleware
-# async def get_session(request, handler):
-#
-#         resp = await handler(request)
-#     return resp
 
 
 async def handle_404(request):
@@ -613,11 +623,24 @@ def create_error_middleware(overrides):
 
 
 def setup_middlewares(app):
+    @web.middleware
+    async def file_type_check_middleware(request, handler):
+        allowed_extensions = {'.mp4', '.flv', '.3gp', '.webm', '.mkv', '.ts', '.xml', '.log'}
+
+        if request.path.startswith('/static/'):
+            filename = request.match_info.get('filename')
+            if filename:
+                extension = '.' + filename.split('.')[-1]
+                if extension not in allowed_extensions:
+                    return web.HTTPForbidden(reason="File type not allowed")
+        return await handler(request)
+
     error_middleware = create_error_middleware({
         404: handle_404,
         500: handle_500,
     })
     app.middlewares.append(error_middleware)
+    app.middlewares.append(file_type_check_middleware)
 
 
 def log_startup(host, port) -> None:
