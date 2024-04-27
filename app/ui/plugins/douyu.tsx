@@ -36,11 +36,11 @@ const Douyu: React.FC = () => {
                     label="录制弹幕（douyu_danmaku）"
                 />
                 <Form.Select
+                    allowCreate={true}
                     filter
-                    allowCreate
                     field="douyucdn"
                     extraText="如遇到斗鱼录制卡顿可以尝试切换线路。可选以下线路
-tctc-h5（备用线路4）, tct-h5（备用线路5）, ali-h5（备用线路6）, hw-h5（备用线路7）, hs-h5（备用线路13）"
+tctc-h5（线路4）, tct-h5（线路5）, ali-h5（线路6）, hw-h5（线路7）, hs-h5（线路13）"
                     label="访问线路（douyucdn）"
                     style={{ width: "100%" }}
                     fieldStyle={{
@@ -48,11 +48,11 @@ tctc-h5（备用线路4）, tct-h5（备用线路5）, ali-h5（备用线路6）
                         padding: 0,
                     }}
                 >
-                    <Select.Option value="tctc-h5">tctc-h5</Select.Option>
-                    <Select.Option value="tct-h5">tct-h5</Select.Option>
-                    <Select.Option value="ali-h5">ali-h5</Select.Option>
-                    <Select.Option value="hw-h5">hw-h5</Select.Option>
-                    <Select.Option value="hs-h5">hs-h5</Select.Option>
+                    <Select.Option value="tctc-h5">线路4（tctc-h5）</Select.Option>
+                    <Select.Option value="tct-h5">线路5（tct-h5）</Select.Option>
+                    <Select.Option value="ali-h5">线路6（ali-h5）</Select.Option>
+                    <Select.Option value="hw-h5">线路7（hw-h5）</Select.Option>
+                    <Select.Option value="hs-h5">线路13（hs-h5）</Select.Option>
                 </Form.Select>
             </Collapse.Panel>
         </>
