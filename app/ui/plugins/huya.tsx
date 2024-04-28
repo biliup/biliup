@@ -67,7 +67,7 @@ const Huya: React.FC = () => {
                 >
                     <Select.Option value="AL">直播线路3（AL）</Select.Option>
                     <Select.Option value="TX">直播线路5（TX）</Select.Option>
-                    <Select.Option value="HW">直播线路6（TX）</Select.Option>
+                    <Select.Option value="HW">直播线路6（HW）</Select.Option>
                     {/* <Select.Option value="WS">网宿（WS）</Select.Option> */}
                     <Select.Option value="AL13">直播线路13（AL13）</Select.Option>
                     <Select.Option value="HS">直播线路14（HS）</Select.Option>

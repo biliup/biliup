@@ -9,12 +9,15 @@
 ### 录像单文件大小限制，单位Byte，超过此大小分段下载，下载回放时无法使用
 file_size = 2621440000
 ### 录像单文件时间限制，格式'00:00:00'（时分秒），超过此大小分段下载，如需使用大小分段请注释此字段
-#segment_time = "00:50:00"
+#segment_time = "01:00:00"
 ### 小于此大小的视频文件将会被过滤删除，单位MB
 filtering_threshold = 20
 ### 自定义录播文件名模板, 支持变量 {streamer}:你在配置里设置的直播间名 %Y-%m-%d %H_%M_%S:创建文件的时间, {title}:当场直播间标题
 ### 如果上传文件，文件名必须包含设定的模板名。其次，如果没有定义时间，文件分片可能会互相覆盖，所以推荐设置时间来避免分段文件名重复。
 #filename_prefix = "{streamer}%Y-%m-%d %H_%M_%S{title}"
+### 视频分段后处理并行
+### 开启后无法保证分段后处理先后执行顺序
+#segment_processor_parallel = false
 
 #------上传------#
 ### b站提交接口，默认自动选择，可选web，client
@@ -189,8 +192,8 @@ url = ["https://www.twitch.tv/kimdaeyeob3"]
 ### 完整可选配置示例
 [streamers."星际2INnoVation吕布卫星人族天梯第一视角"]
 url = [
-  "https://www.twitch.tv/innovation_s2",
-  "https://www.panda.tv/1160340"
+    "https://www.twitch.tv/innovation_s2",
+    "https://www.panda.tv/1160340"
 ] #填写多个url时只能同时下载一个，如需多个同时下载请单独配置
 title = "{title}第一视角%Y-%m-%d{streamer}{url}" ### 自定义标题的时间格式, {title}代表当场直播间标题 {streamer}代表在本config里面设置的主播名称 {url}代表设置的该主播的第一条直播间链接
 tid = 171 ### 投稿分区码,171为电子竞技分区
@@ -223,7 +226,7 @@ dynamic = "#空间动态#"
 #filename_prefix = '{streamer}%Y-%m-%d %H_%M_%S{title}'  ### 覆盖全局自定义录播文件命名规则
 user_cookie = "cookies.json" ### 使用指定的账号上传
 #use_live_cover = true # 获取BILIBILI直播间封面并作为投稿封面。此封面优先级低于单个主播指定的自定义封面。
-tags = [ "biliup", "视频标签" ]
+tags = ["biliup", "视频标签"]
 #format = "mp4" ### 视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg或者streamlink，youtube不支持。
 ### 开始下载直播时触发，将按自定义顺序执行自定义操作 注：preprocessor仅支持shell指令
 #preprocessor = [
@@ -333,9 +336,9 @@ formatter = "verbose"
 encoding = "utf-8"
 
 [LOGGING.root]
-handlers = [ "console" ]
+handlers = ["console"]
 level = "INFO"
 
 [LOGGING.loggers.biliup]
-handlers = [ "file" ]
+handlers = ["file"]
 level = "INFO"

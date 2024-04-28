@@ -85,8 +85,21 @@ const Global: React.FC = () => {
                         </div>
                     }
                     label="视频分段时长（segment_time）"
-                    placeholder="00:00:00"
+                    placeholder="01:00:00"
                     style={{ width: "100%" }}
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                />
+                <Form.Switch
+                    field="segment_processor_parallel"
+                    extraText={
+                        <div style={{ fontSize: "14px" }}>
+                            开启后无法保证分段后处理先后执行顺序
+                        </div>
+                    }
+                    label="视频分段后处理并行（segment_processor_parallel)"
                     fieldStyle={{
                         alignSelf: "stretch",
                         padding: 0,
