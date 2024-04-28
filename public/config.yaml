@@ -15,6 +15,9 @@ filtering_threshold: 20
 ### 自定义录播文件名模板, 支持变量 {streamer}:你在配置里设置的直播间名 %Y-%m-%d %H_%M_%S:创建文件的时间, {title}:当场直播间标题
 ### 如果上传文件，文件名必须包含设定的模板名。其次，如果没有定义时间，文件分片可能会互相覆盖，所以推荐设置时间来避免分段文件名重复。
 #filename_prefix: '{streamer}%Y-%m-%d %H_%M_%S{title}'
+### 视频分段后处理并行
+### 开启后无法保证分段后处理先后执行顺序
+#segment_processor_parallel: false
 
 #------上传------#
 ### 选择全局默认上传插件，Noop为不上传，但会执行后处理,可选bili_web，biliup-rs(默认值)

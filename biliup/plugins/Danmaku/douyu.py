@@ -1,4 +1,3 @@
-import json
 import logging
 import re
 from struct import pack
@@ -14,6 +13,9 @@ class Douyu:
     wss_url = 'wss://danmuproxy.douyu.com:8506/'
     heartbeat = b"\x14\x00\x00\x00\x14\x00\x00\x00\xb1\x02\x00\x00\x74\x79\x70\x65\x40\x3d\x6d\x72\x6b\x6c\x2f\x00"
     heartbeatInterval = 30
+    msg_col = {'0': '16777215', '1': '16717077', '2': '2000880', '3': '8046667', '4': '16744192',
+               '5': '10172916',
+               '6': '16738740', '7': '16777215'}
 
     @staticmethod
     async def get_ws_info(url, context):
@@ -75,8 +77,8 @@ class Douyu:
                             'chatmsg': 'danmaku',
                             'uenter': 'enter'
                         }.get(msg['type'], 'other'),
-                        'col': msg.get('col', '0')
+                        'color': Douyu.msg_col.get(msg.get('col')),
                     })
-            except Exception as Error:
-                logger.warning(f"{Douyu.__name__}: 弹幕接收异常 - {Error}")
+            except:
+                logger.warning(f"{Douyu.__name__}: 弹幕接收异常", exc_info=True)
         return msgs

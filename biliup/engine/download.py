@@ -53,7 +53,7 @@ class DownloadBase(ABC):
             'accept-language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
             'user-agent': random_user_agent(),
         }
-        self.segment_time = config.get('segment_time')
+        self.segment_time = config.get('segment_time', '01:00:00')
         self.file_size = config.get('file_size')
 
         # 是否是下载模式 跳过下播检测
@@ -62,6 +62,8 @@ class DownloadBase(ABC):
         # 分段后处理
         self.segment_processor = config.get('segment_processor')
         self.segment_processor_thread = []
+        # 分段后处理并行
+        self.segment_processor_parallel = config.get('segment_processor_parallel', False)
 
     @abstractmethod
     def check_stream(self, is_check=False):
@@ -134,17 +136,20 @@ class DownloadBase(ABC):
 
         output_args += ['-c', 'copy']
         output_args += self.opt_args
-        args = ['ffmpeg', *input_args, *output_args, f'{self.fname}_{int(time.time() * 1e6)}_%d.{self.suffix}']
+        file_name = self.gen_download_filename(is_fmt=True)
+        args = ['ffmpeg', *input_args, *output_args, f'{file_name}_%d.{self.suffix}']
         with subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                               stderr=subprocess.DEVNULL) as proc:
-            file_name = self.gen_download_filename(is_fmt=True)
             for line in iter(proc.stdout.readline, b''):  # b'\n'-separated lines
-                ffmpeg_file_name = line.rstrip().decode(errors='ignore')
-                time.sleep(1)
-                # 文件重命名
-                self.download_file_rename(ffmpeg_file_name, f'{file_name}.{self.suffix}')
-                self.__download_segment_callback(f'{file_name}.{self.suffix}')
-                file_name = self.gen_download_filename(is_fmt=True)
+                try:
+                    ffmpeg_file_name = line.rstrip().decode(errors='ignore')
+                    time.sleep(1)
+                    # 文件重命名
+                    self.download_file_rename(ffmpeg_file_name, f'{file_name}.{self.suffix}')
+                    self.__download_segment_callback(f'{file_name}.{self.suffix}')
+                    file_name = self.gen_download_filename(is_fmt=True)
+                except:
+                    logger.error(f'分段事件失败：{self.__class__.__name__} - {self.fname}', exc_info=True)
 
         return proc.returncode == 0
 
@@ -218,24 +223,29 @@ class DownloadBase(ABC):
         分段后触发返回含后戳的文件名
         """
         exclude_ext_file_name = os.path.splitext(file_name)[0]
-        danmaku_file_name = exclude_ext_file_name + '.xml'
-        self.danmaku_segment(danmaku_file_name)
-        # 将文件名和直播标题存储到数据库
-        with SessionLocal() as db:
-            update_room_title(db, self.database_row_id, self.room_title)
-            update_file_list(db, self.database_row_id, file_name)
-        if self.segment_processor:
-            try:
-                from biliup.common.tools import processor
-                data = os.path.abspath(file_name)
-                if os.path.exists(danmaku_file_name):
-                    data += f'\n{os.path.abspath(danmaku_file_name)}'
-                thread = threading.Thread(target=processor, args=(self.segment_processor, data), daemon=True,
-                                          name=f"segment_processor_{exclude_ext_file_name}")
-                thread.start()
-                self.segment_processor_thread.append(thread)
-            except:
-                logger.warning(f'执行后处理失败：{self.__class__.__name__} - {self.fname}', exc_info=True)
+        danmaku_file_name = os.path.splitext(file_name)[0] + '.xml'
+
+        def x():
+            # 将文件名和直播标题存储到数据库
+            with SessionLocal() as db:
+                update_file_list(db, self.database_row_id, file_name)
+            self.danmaku_segment(danmaku_file_name)
+            if self.segment_processor:
+                try:
+                    if not self.segment_processor_parallel and prev_thread:
+                        prev_thread.join()
+                    from biliup.common.tools import processor
+                    data = os.path.abspath(file_name)
+                    if os.path.exists(danmaku_file_name):
+                        data += f'\n{os.path.abspath(danmaku_file_name)}'
+                    processor(self.segment_processor, data)
+                except:
+                    logger.warning(f'执行后处理失败：{self.__class__.__name__} - {self.fname}', exc_info=True)
+
+        thread = threading.Thread(target=x, daemon=True, name=f"segment_processor_{exclude_ext_file_name}")
+        prev_thread = self.segment_processor_thread[-1] if self.segment_processor_thread else None
+        self.segment_processor_thread.append(thread)
+        thread.start()
 
     def download_success_callback(self):
         pass
@@ -427,10 +437,8 @@ class DownloadBase(ABC):
         try:
             os.rename(old_file_name, file_name)
             logger.info(f'更名 {old_file_name} 为 {file_name}')
-        except FileNotFoundError:
-            logger.debug(f'文件不存在: {old_file_name}')
-        except FileExistsError:
-            logger.info(f'更名 {old_file_name} 为 {file_name} 失败, {file_name} 已存在')
+        except:
+            logger.error(f'更名 {old_file_name} 为 {file_name} 失败', exc_info=True)
 
     def danmaku_download_start(self, filename):
         pass
