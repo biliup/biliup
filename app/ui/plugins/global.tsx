@@ -85,7 +85,7 @@ const Global: React.FC = () => {
                         </div>
                     }
                     label="视频分段时长（segment_time）"
-                    placeholder="00:00:00"
+                    placeholder="01:00:00"
                     style={{ width: "100%" }}
                     fieldStyle={{
                         alignSelf: "stretch",
