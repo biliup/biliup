@@ -72,7 +72,7 @@ def fmt_title_and_desc_m(data):
     streamer = data.get('streamer', index)
     date = data.get("date", time.localtime())
     title = data.get('title', index)
-    url = data.get('url')
+    url = data.get('url', 'https://biliup.me')
     data["format_title"] = custom_fmtstr(context.get('title') or f'%Y.%m.%d{index}', date, title, streamer, url)
     if context.get('description'):
         context['description'] = custom_fmtstr(context.get('description'), date, title, streamer, url)
