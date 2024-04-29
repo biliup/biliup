@@ -65,7 +65,7 @@ class BiliWeb(UploadBase):
                 "biz_id": "",
                 "type": 1
             }]
-        source = self.data["url"] if self.copyright == 2 else ""
+        source = self.data.get("url", "https://biliup.me") if self.copyright == 2 else ""
         cover = self.cover_path if self.cover_path is not None else ""
         dtime = None
         if self.dtime:
