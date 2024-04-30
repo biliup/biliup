@@ -48,6 +48,7 @@ const Global: React.FC = () => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
                 >
                     <Select.Option value="streamlink">
                         streamlink（混合模式）
@@ -207,6 +208,7 @@ const Global: React.FC = () => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
                 >
                     <Form.Select.Option value="web">
                         网页端（web）
@@ -225,6 +227,7 @@ const Global: React.FC = () => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
                 >
                     <Form.Select.Option value="bili_web">
                         bili_web
@@ -246,6 +249,7 @@ const Global: React.FC = () => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
                 >
                     <Form.Select.Option value="AUTO">AUTO（自动，默认）</Form.Select.Option>
                     <Form.Select.Option value="bda2">bda2</Form.Select.Option>

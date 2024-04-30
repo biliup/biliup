@@ -30,6 +30,7 @@ const Bilibili: React.FC<Props> = (props) => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
                 >
                     <Select.Option value={30000}>30000（杜比）</Select.Option>
                     <Select.Option value={20000}>20000（4k）</Select.Option>
@@ -65,6 +66,7 @@ const Bilibili: React.FC<Props> = (props) => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
                 >
                     <Select.Option value="stream">
                         stream（flv，默认）

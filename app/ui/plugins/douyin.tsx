@@ -23,6 +23,7 @@ const Douyin: React.FC = () => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
                 >
                     <Select.Option value="origin">原画（origin）</Select.Option>
                     <Select.Option value="uhd">蓝光（uhd）</Select.Option>

@@ -24,6 +24,7 @@ const Douyu: React.FC = () => {
                             message: "请仅输入纯数字"
                         }
                     ]}
+                    showClear={true}
                 >
                     <Select.Option value={0}>最高画质（0）</Select.Option>
                     <Select.Option value={4}>蓝光4M（4）</Select.Option>
@@ -47,6 +48,7 @@ tctc-h5（线路4）, tct-h5（线路5）, ali-h5（线路6）, hw-h5（线路7�
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
                 >
                     <Select.Option value="tctc-h5">线路4（tctc-h5）</Select.Option>
                     <Select.Option value="tct-h5">线路5（tct-h5）</Select.Option>
