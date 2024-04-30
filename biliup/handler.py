@@ -45,11 +45,11 @@ def singleton_check(platform, name, url):
     with NamedLock(f"upload_count_{url}"):
         if context['url_upload_count'][url] > 0:
             logger.debug(f'{url} 正在上传中，跳过')
-            return
-        # from .handler import event_manager, UPLOAD
-        # += 不是原子操作
-        context['url_upload_count'][url] += 1
-        yield Event(UPLOAD, ({'name': name, 'url': url},))
+        else:
+            # from .handler import event_manager, UPLOAD
+            # += 不是原子操作
+            context['url_upload_count'][url] += 1
+            yield Event(UPLOAD, ({'name': name, 'url': url},))
     if platform(name, url).check_stream(True):
         # 需要等待上传文件列表检索完成后才可以开始下次下载
         with NamedLock(f'upload_file_list_{name}'):
