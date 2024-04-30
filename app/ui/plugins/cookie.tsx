@@ -59,6 +59,7 @@ const Cookie: React.FC<Props> = (props) => {
                             Cookie 填入。
                         </div>
                     }
+                    placeholder="__ac_nonce=none;__ac_signature=none;sessionid=none;"
                     label="抖音 Cookie（douyin_cookie）"
                     style={{ width: "100%" }}
                     fieldStyle={{
