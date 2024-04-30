@@ -122,7 +122,7 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
                     field="copyright"
                     label='类型'
                     direction='vertical'
-                    initValue={2}
+                    initValue={formApi.getValue('copyright') || 2}
                 >
                     <Radio value={2} style={{alignItems: 'center', flexShrink: 0}}>
                         <span style={{flexShrink: 0}}>转载</span>
