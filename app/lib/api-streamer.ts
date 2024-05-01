@@ -69,7 +69,7 @@ export interface StudioEntity {
 	template_name: string;
 	user_cookie: string;
 	copyright: number;
-	source: string;
+	copyright_source: string;
 	tid: number;
 	cover_path: string;
 	title: string;

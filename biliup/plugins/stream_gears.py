@@ -13,7 +13,7 @@ class BiliWeb(UploadBase):
             self, principal, data, submit_api=None, copyright=2, postprocessor=None, dtime=None,
             dynamic='', lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description='',
             dolby=0, hires=0, no_reprint=0, open_elec=0, credits=None,
-            user_cookie='cookies.json'
+            user_cookie='cookies.json', copyright_source=None
     ):
         super().__init__(principal, data, persistence_path='bili.cookie', postprocessor=postprocessor)
         if credits is None:
@@ -41,6 +41,7 @@ class BiliWeb(UploadBase):
         self.no_reprint = no_reprint
         self.open_elec = open_elec
         self.user_cookie = user_cookie
+        self.copyright_source = copyright_source
 
     def upload(self, file_list) -> List[UploadBase.FileInfo]:
         line = None
@@ -65,7 +66,8 @@ class BiliWeb(UploadBase):
                 "biz_id": "",
                 "type": 1
             }]
-        source = self.data["url"] if self.copyright == 2 else ""
+
+        source = self.copyright_source if self.copyright_source else "https://github.com/biliup/biliup"
         cover = self.cover_path if self.cover_path is not None else ""
         dtime = None
         if self.dtime:
