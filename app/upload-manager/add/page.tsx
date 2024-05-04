@@ -47,7 +47,7 @@ export default function Add() {
                             user_cookie: values.user_cookie,
                             copyright: values.copyright,
                             id: values.id,
-                            source: values.source ?? '',
+                            copyright_source: values.copyright_source ?? '',
                             tid: values.tid[1],
                             cover_path: values.cover_path ?? '',
                             title: values.title ?? '',
