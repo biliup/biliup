@@ -56,7 +56,10 @@ class Twitcasting(DownloadBase):
 
     def danmaku_download_start(self, filename):
         if self.twitcasting_danmaku:
-            self.danmaku = DanmakuClient(self.url, filename)
+            self.danmaku = DanmakuClient(self.url, filename, {
+                'movie_id': self.movie_id,
+                'password': self.twitcasting_password,
+            })
             self.danmaku.start()
 
     def danmaku_segment(self, new_prev_file_name: str):
