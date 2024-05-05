@@ -126,7 +126,8 @@ class DanmakuClient:
     async def __print_danmaku(self):
         def write_file(filename):
             try:
-                tree.write(filename, encoding="UTF-8", xml_declaration=True, pretty_print=True)
+                if filename and msg_i > 0:
+                    tree.write(filename, encoding="UTF-8", xml_declaration=True, pretty_print=True)
             except:
                 logger.warning(f"{DanmakuClient.__name__}:{self.__url}: 弹幕写入异常", exc_info=True)
 
@@ -141,9 +142,8 @@ class DanmakuClient:
             try:
                 while True:
                     m = await self.__dm_queue.get()
-                    if m.get('msg_type') == "segment":
-                        write_file(fmt_file_name)
-                        if m['new_prev_file_name'] and fmt_file_name != m['new_prev_file_name']:
+                    if m.get('msg_type') == "segment" or m.get('msg_type') == "stop":
+                        if 'new_prev_file_name' in m and fmt_file_name != m['new_prev_file_name']:
                             try:
                                 if os.path.exists(m['new_prev_file_name']):
                                     os.remove(m['new_prev_file_name'])
@@ -153,8 +153,13 @@ class DanmakuClient:
                             except:
                                 logger.exception(
                                     f"{DanmakuClient.__name__}:{self.__url}: 更名 {fmt_file_name} 为 {m['new_prev_file_name']}失败")
-                        logger.debug(f"{DanmakuClient.__name__}:{self.__url}: 弹幕分段")
-                        break
+                            fmt_file_name = m['new_prev_file_name']
+                        logger.debug(f"{DanmakuClient.__name__}:{self.__url}: 弹幕{m.get('msg_type')}")
+                        if m.get('msg_type') == "stop":
+                            self.__record_task.cancel()
+                            return
+                        else:
+                            break
                     elif m.get('msg_type') == 'danmaku':
                         try:
                             if m.get('color'):
@@ -170,13 +175,11 @@ class DanmakuClient:
                             # 异常后略过本次弹幕
                             continue
 
-                        if msg_i >= 5:
-                            # 收到五条弹幕后写入 减少io
+                        msg_i += 1
+                        if msg_i % 5 == 0:
+                            # 每收到五条弹幕后写入 减少io
                             # 可能会写入失败 会在下次五条或者任务被取消时重新尝试写入
                             write_file(fmt_file_name)
-                            msg_i = 0
-                        else:
-                            msg_i = msg_i + 1
             finally:
                 # 发生异常(被取消)时写入 避免丢失未写入
                 write_file(fmt_file_name)
@@ -192,31 +195,33 @@ class DanmakuClient:
                 await self.__record_task
             except asyncio.CancelledError:
                 pass
+            self.__record_task = None
             logger.info(f'结束弹幕录制: {self.__url}')
 
         threading.Thread(target=asyncio.run, args=(__init(),)).start()
         # 等待初始化完成避免未初始化完成的时候就停止任务
         init_event.wait()
 
-    def segment(self, new_prev_file_name=None):
+    def segment(self, new_prev_file_name=None, is_stop=False):
         if self.__record_task:
             self.__dm_queue.put_nowait({
-                "msg_type": "segment",
+                "msg_type": "stop" if is_stop else "segment",
                 "new_prev_file_name": new_prev_file_name,
             })
 
     def stop(self):
         if self.__record_task:
-            self.__record_task.cancel()
-            self.__record_task = None
+            self.__dm_queue.put_nowait({
+                "msg_type": "stop",
+            })
 
     async def __run(self):
-        self.__dm_queue = asyncio.Queue()
-        self.__hs = aiohttp.ClientSession()
-        self.__print_task = asyncio.create_task(self.__print_danmaku())
         try:
+            self.__dm_queue = asyncio.Queue()
+            self.__hs = aiohttp.ClientSession()
+            self.__print_task = asyncio.create_task(self.__print_danmaku())
             while True:
-                danmaku_tasks = None
+                danmaku_tasks = []
                 try:
                     await self.__init_ws()
                     danmaku_tasks = [asyncio.create_task(self.__heartbeats()),
@@ -232,7 +237,7 @@ class DanmakuClient:
                     # 记录异常不到外部处理
                     logger.exception(f"{DanmakuClient.__name__}:{self.__url}: 弹幕异常,将在 30 秒后重试")
                 finally:
-                    if danmaku_tasks is not None:
+                    if danmaku_tasks:
                         for danmaku_task in danmaku_tasks:
                             danmaku_task.cancel()
                         await asyncio.wait(danmaku_tasks)
@@ -240,12 +245,11 @@ class DanmakuClient:
                         await self.__ws.close()
                 await asyncio.sleep(30)
         finally:
-            self.__print_task.cancel()
-            await asyncio.wait([self.__print_task])
-            await self.__hs.close()
-            self.__dm_queue = None
-            self.__hs = None
-            self.__print_task = None
+            if self.__print_task:
+                self.__print_task.cancel()
+                await asyncio.wait([self.__print_task])
+            if self.__hs:
+                await self.__hs.close()
 
 # 虎牙直播：https://www.huya.com/lpl
 # 斗鱼直播：https://www.douyu.com/9999

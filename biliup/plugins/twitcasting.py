@@ -62,9 +62,9 @@ class Twitcasting(DownloadBase):
             })
             self.danmaku.start()
 
-    def danmaku_segment(self, new_prev_file_name: str):
+    def danmaku_segment(self, new_prev_file_name: str, is_stop=False):
         if self.danmaku:
-            self.danmaku.segment(new_prev_file_name)
+            self.danmaku.segment(new_prev_file_name, is_stop)
 
     def close(self):
         if self.danmaku:
