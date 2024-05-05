@@ -13,8 +13,8 @@ class BiliWeb(UploadBase):
     def __init__(
             self, principal, data, submit_api=None, copyright=2, postprocessor=None, dtime=None,
             dynamic='', lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description='',
-            dolby=0, hires=0, no_reprint=0, open_elec=0, credits=[],
-            user_cookie='cookies.json'
+            dolby=0, hires=0, no_reprint=0, open_elec=0, credits=None,
+            user_cookie='cookies.json', copyright_source=None
     ):
         super().__init__(principal, data, persistence_path='bili.cookie', postprocessor=postprocessor)
         if tags is None:
@@ -33,7 +33,7 @@ class BiliWeb(UploadBase):
         else:
             self.cover_path = None
         self.desc = description
-        self.credits = credits
+        self.credits = credits if credits else []
         self.dynamic = dynamic
         self.copyright = copyright
         self.dtime = dtime
@@ -42,6 +42,7 @@ class BiliWeb(UploadBase):
         self.no_reprint = no_reprint
         self.open_elec = open_elec
         self.user_cookie = user_cookie
+        self.copyright_source = copyright_source
 
     def upload(self, file_list: List[UploadBase.FileInfo]) -> List[UploadBase.FileInfo]:
         if self.credits:
@@ -63,7 +64,7 @@ class BiliWeb(UploadBase):
             "tid": self.tid,
             "tag": ','.join(self.tags),
             "copyright": self.copyright,
-            "source": self.data["url"] if self.copyright == 2 else "",
+            "source": self.copyright_source if self.copyright_source else self.data["url"],
             "desc": self.desc,
             "dynamic": self.dynamic,
             "cover": self.cover_path if self.cover_path is not None else "",
