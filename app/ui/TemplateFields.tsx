@@ -122,7 +122,7 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
                     field="copyright"
                     label='类型'
                     direction='vertical'
-                    initValue={formApi.getValue('copyright') || 2}
+                    initValue={formApi.getValue('copyright') ?? 2}
                     extraText={
                         <div style={{fontSize: 14}}>
                             如不填写转载来源默认为直播间地址

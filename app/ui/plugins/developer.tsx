@@ -38,6 +38,7 @@ const Developer: React.FC = () => {
                     onChange={() => {
                         formApi.setValue("LOGGING.root.handlers", ["console"]);
                     }}
+                    showClear={true}
                 >
                     <Select.Option value="DEBUG">DEBUG</Select.Option>
                     <Select.Option value="INFO">INFO</Select.Option>
@@ -59,6 +60,7 @@ const Developer: React.FC = () => {
                             "file",
                         ]);
                     }}
+                    showClear={true}
                 >
                     <Select.Option value="DEBUG">DEBUG</Select.Option>
                     <Select.Option value="INFO">INFO</Select.Option>

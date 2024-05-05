@@ -26,6 +26,7 @@ const Huya: React.FC = () => {
                             message: "请仅输入纯数字"
                         }
                     ]}
+                    showClear={true}
                 >
                     <Select.Option value={0}>最高画质（0）</Select.Option>
                     <Select.Option value={20000}>蓝光20M（20000）</Select.Option>
@@ -64,6 +65,7 @@ const Huya: React.FC = () => {
                             message: "请仅输入线路别称"
                         }
                     ]}
+                    showClear={true}
                 >
                     <Select.Option value="AL">直播线路3（AL）</Select.Option>
                     <Select.Option value="TX">直播线路5（TX）</Select.Option>
