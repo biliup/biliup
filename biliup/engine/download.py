@@ -6,7 +6,7 @@ import threading
 import time
 import shutil
 from abc import ABC, abstractmethod
-from typing import Generator, List, Callable
+from typing import Generator, List, Callable, Optional
 from urllib.parse import urlparse
 
 import requests
@@ -18,13 +18,13 @@ import stream_gears
 from PIL import Image
 
 from biliup.config import config
+from biliup.plugins.Danmaku import IDanmakuClient
 
 logger = logging.getLogger('biliup')
 
 
 class DownloadBase(ABC):
     def __init__(self, fname, url, suffix=None, opt_args=None):
-        self.danmaku = None
         self.room_title = None
         if opt_args is None:
             opt_args = []
@@ -65,13 +65,15 @@ class DownloadBase(ABC):
         # 分段后处理并行
         self.segment_processor_parallel = config.get('segment_processor_parallel', False)
 
+        # 弹幕客户端
+        self.danmaku: Optional[IDanmakuClient] = None
+
     @abstractmethod
     def check_stream(self, is_check=False):
         # is_check 是否是检测模式 检测模式可以忽略只有下载时需要的耗时操作
         raise NotImplementedError()
 
     def download(self):
-        self.danmaku_download_start(self.gen_download_filename())
         if self.is_download:
             if not shutil.which("ffmpeg"):
                 logger.error("未安装 FFMpeg 或不存在于 PATH 内")
@@ -221,7 +223,8 @@ class DownloadBase(ABC):
         """
         exclude_ext_file_name = os.path.splitext(file_name)[0]
         danmaku_file_name = os.path.splitext(file_name)[0] + '.xml'
-        self.danmaku_segment(danmaku_file_name, is_stop)
+        if self.danmaku:
+            self.danmaku.segment(danmaku_file_name, is_stop)
 
         def x():
             # 将文件名和直播标题存储到数据库
@@ -248,12 +251,20 @@ class DownloadBase(ABC):
         pass
 
     def run(self):
-        if not self.check_stream():
-            return False
-        with SessionLocal() as db:
-            update_room_title(db, self.database_row_id, self.room_title)
-        retval = self.download()
-        return retval
+        try:
+            if not self.check_stream():
+                return False
+            with SessionLocal() as db:
+                update_room_title(db, self.database_row_id, self.room_title)
+            self.danmaku_init()
+            if self.danmaku:
+                self.danmaku.start()
+            retval = self.download()
+            return retval
+        finally:
+            if self.danmaku:
+                self.danmaku.stop()
+                self.danmaku = None
 
     def start(self):
         logger.info(f'开始下载: {self.__class__.__name__} - {self.fname}')
@@ -437,10 +448,7 @@ class DownloadBase(ABC):
         except:
             logger.error(f'更名 {old_file_name} 为 {file_name} 失败', exc_info=True)
 
-    def danmaku_download_start(self, filename):
-        pass
-
-    def danmaku_segment(self, new_prev_file_name: str, is_stop=False):
+    def danmaku_init(self):
         pass
 
     def close(self):

@@ -10,6 +10,7 @@ import re
 import ssl
 import threading
 import time
+from abc import ABC, abstractmethod
 from typing import Optional
 
 import aiohttp
@@ -25,7 +26,21 @@ from biliup.plugins.Danmaku.twitch import Twitch
 logger = logging.getLogger('biliup')
 
 
-class DanmakuClient:
+class IDanmakuClient(ABC):
+    @abstractmethod
+    def start(self):
+        pass
+
+    @abstractmethod
+    def stop(self):
+        pass
+
+    @abstractmethod
+    def segment(self, new_prev_file_name: Optional[str] = None, is_stop=False):
+        pass
+
+
+class DanmakuClient(IDanmakuClient):
     class WebsocketErrorException(Exception):
         pass
 
@@ -141,15 +156,20 @@ class DanmakuClient:
             msg_i = 0
             try:
                 while True:
-                    m = await self.__dm_queue.get()
+                    try:
+                        # 无弹幕时更快分段结束
+                        m = await asyncio.wait_for(self.__dm_queue.get(), timeout=1)
+                    except asyncio.TimeoutError:
+                        continue
                     if m.get('msg_type') == "segment" or m.get('msg_type') == "stop":
                         if 'new_prev_file_name' in m and fmt_file_name != m['new_prev_file_name']:
                             try:
                                 if os.path.exists(m['new_prev_file_name']):
                                     os.remove(m['new_prev_file_name'])
-                                os.rename(fmt_file_name, m.get('new_prev_file_name'))
-                                logger.info(
-                                    f"{DanmakuClient.__name__}:{self.__url}: 更名 {fmt_file_name} 为 {m['new_prev_file_name']}")
+                                if os.path.exists(fmt_file_name):
+                                    os.rename(fmt_file_name, m.get('new_prev_file_name'))
+                                    logger.info(
+                                        f"{DanmakuClient.__name__}:{self.__url}: 更名 {fmt_file_name} 为 {m['new_prev_file_name']}")
                             except:
                                 logger.exception(
                                     f"{DanmakuClient.__name__}:{self.__url}: 更名 {fmt_file_name} 为 {m['new_prev_file_name']}失败")

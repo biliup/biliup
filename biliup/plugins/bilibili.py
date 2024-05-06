@@ -203,19 +203,9 @@ class Bililive(DownloadBase):
 
             return True
 
-    def danmaku_download_start(self, filename):
+    def danmaku_init(self):
         if self.bilibili_danmaku:
-            self.danmaku = DanmakuClient(self.url, filename)
-            self.danmaku.start()
-
-    def danmaku_segment(self, new_prev_file_name: str, is_stop=False):
-        if self.danmaku:
-            self.danmaku.segment(new_prev_file_name, is_stop)
-
-    def close(self):
-        if self.danmaku:
-            self.danmaku.stop()
-            self.danmaku = None
+            self.danmaku = DanmakuClient(self.url, self.gen_download_filename())
 
 
 def get_play_info(s, api, params):
