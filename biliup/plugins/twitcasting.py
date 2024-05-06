@@ -54,19 +54,12 @@ class Twitcasting(DownloadBase):
         self.raw_stream_url = f"https://twitcasting.tv/{uploader_id}/metastream.m3u8?mode=source"
         return True
 
-    def danmaku_download_start(self, filename):
+    def danmaku_init(self):
         if self.twitcasting_danmaku:
-            self.danmaku = DanmakuClient(self.url, filename)
-            self.danmaku.start()
-
-    def danmaku_segment(self, new_prev_file_name: str):
-        if self.danmaku:
-            self.danmaku.segment(new_prev_file_name)
-
-    def close(self):
-        if self.danmaku:
-            self.danmaku.stop()
-            self.danmaku = None
+            self.danmaku = DanmakuClient(self.url, self.gen_download_filename(), {
+                'movie_id': self.movie_id,
+                'password': self.twitcasting_password,
+            })
 
 #
 # class TwitcastingUtils:

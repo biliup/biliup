@@ -90,19 +90,9 @@ class Douyu(DownloadBase):
         self.raw_stream_url = f"{live_data.get('rtmp_url')}/{live_data.get('rtmp_live')}"
         return True
 
-    def danmaku_download_start(self, filename):
+    def danmaku_init(self):
         if self.douyu_danmaku:
-            self.danmaku = DanmakuClient(self.url, filename)
-            self.danmaku.start()
-
-    def danmaku_segment(self, new_prev_file_name: str):
-        if self.danmaku:
-            self.danmaku.segment(new_prev_file_name)
-
-    def close(self):
-        if self.danmaku:
-            self.danmaku.stop()
-            self.danmaku = None
+            self.danmaku = DanmakuClient(self.url, self.gen_download_filename())
 
     def get_play_info(self, room_id, params):
         live_data = requests.post(f'https://www.douyu.com/lapi/live/getH5Play/{room_id}', headers=self.fake_headers,
