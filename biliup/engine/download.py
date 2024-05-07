@@ -214,8 +214,14 @@ class DownloadBase(ABC):
             else:
                 return False
         finally:
-            if streamlink_proc:
-                streamlink_proc.terminate()
+            try:
+                if streamlink_proc:
+                    streamlink_proc.terminate()
+                    streamlink_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                streamlink_proc.kill()
+            except:
+                logger.exception(f'terminate {self.fname} failed')
 
     def __download_segment_callback(self, file_name: str, is_stop=False):
         """
