@@ -23,8 +23,8 @@ RUN set -eux; \
 	useApt=false; \
 	apt-get update; \
 	apt-get install -y --no-install-recommends \
-			wget \
-			xz-utils \
+		wget \
+		xz-utils \
 	; \
 	apt-mark auto '.*' > /dev/null; \
 	\
@@ -44,7 +44,7 @@ RUN set -eux; \
 	\
 	if [ "$useApt" = true ] ; then \
 		apt-get install -y --no-install-recommends \
-				ffmpeg \
+			ffmpeg \
 		; \
 	else \
 		wget -O ffmpeg.tar.xz "$url" --progress=dot:giga; \
