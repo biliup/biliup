@@ -1,57 +1,95 @@
 # Build biliup's web-ui
-FROM node:21-alpine as webui
+FROM node:lts as webui
+ARG repo_url
+ENV REPO_URL $repo_url
 
 RUN \
-  set -eux && \
-  apk add --no-cache git && \
-  git clone --depth 1 https://github.com/ForgQi/biliup.git && \
-  cd biliup && \
-  npm install && \
+  set -eux; \
+  git clone --depth 1 $REPO_URL; \
+  cd biliup; \
+  npm install; \
   npm run build
 
 # Deploy Biliup
-FROM python:3.9-slim as biliup
+FROM python:3.12-slim as biliup
+ARG repo_url
+ENV REPO_URL $repo_url
 ENV TZ=Asia/Shanghai
 EXPOSE 19159/tcp
 VOLUME /opt
 
-RUN \
-  set -eux; \
-#  apk update && \
-    # save list of currently installed packages for later so we can clean up
+RUN set -eux; \
+  \
   savedAptMark="$(apt-mark showmanual)"; \
+  useApt=false; \
   apt-get update; \
-#  apk add --no-cache --virtual .build-deps git curl gcc g++ && \
-#  apk add --no-cache ffmpeg musl-dev libffi-dev zlib-dev jpeg-dev ca-certificates && \
-  apt-get install -y --no-install-recommends ffmpeg git g++; \
-  git clone --depth 1 https://github.com/ForgQi/biliup.git && \
-  cd biliup && \
-  pip3 install --no-cache-dir quickjs && \
-  pip3 install -e . && \
-  # Clean up \
+  apt-get install -y --no-install-recommends \
+    wget \
+    xz-utils \
+  ; \
   apt-mark auto '.*' > /dev/null; \
-  apt-mark manual ffmpeg; \
+  \
+  arch="$(dpkg --print-architecture)"; arch="${arch##*-}"; \
+	url='https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2023-10-31-14-21/'; \
+  case "$arch" in \
+		'amd64') \
+			url="${url}ffmpeg-N-112565-g55f28eb627-linux64-gpl.tar.xz"; \
+			;; \
+		'arm64') \
+			url="${url}ffmpeg-N-112565-g55f28eb627-linuxarm64-gpl.tar.xz"; \
+			;; \
+		*) echo >&2 "error: unsupported architecture '$arch' (likely packaging update needed)"; \
+    useApt=true; \
+      ;; \
+	esac; \
+	\
+	if [ "$useApt" = true ] ; then \
+    apt-get install -y --no-install-recommends \
+      ffmpeg \
+    ; \
+  else \
+    wget -O ffmpeg.tar.xz "$url" --progress=dot:giga; \
+    tar -xJf ffmpeg.tar.xz -C /usr/local --strip-components=1; \
+    rm -rf \
+      /usr/local/doc \
+      /usr/local/man; \
+    rm -rf \
+      ffmpeg*; \
+  fi; \
+  # Clean up \
   [ -z "$savedAptMark" ] || apt-mark manual $savedAptMark; \
-  find /usr/local -type f -executable -exec ldd '{}' ';' \
-     | awk '/=>/ { print $(NF-1) }' \
-     | sort -u \
-     | xargs -r dpkg-query --search \
-     | cut -d: -f1 \
-     | sort -u \
-     | xargs -r apt-mark manual \
-     ; \
   apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
   rm -rf \
     /tmp/* \
     /usr/share/doc/* \
     /var/cache/* \
     /var/lib/apt/lists/* \
-    /var/tmp/* && \
-  #  apk del --purge .build-deps && \
-#  rm -rf /var/cache/apk/* && \
-  rm -rf /var/log/*
+    /var/tmp/* \
+    /var/log/*;
+
+RUN set -eux; \
+  savedAptMark="$(apt-mark showmanual)"; \
+  apt-get update; \
+  apt-get install -y --no-install-recommends git g++; \
+  git clone --depth 1 $REPO_URL && \
+  cd biliup && \
+  pip3 install --no-cache-dir quickjs && \
+  pip3 install -e . && \
+  # Clean up \
+  apt-mark auto '.*' > /dev/null; \
+  [ -z "$savedAptMark" ] || apt-mark manual $savedAptMark; \
+  apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
+  rm -rf \
+    /tmp/* \
+    /usr/share/doc/* \
+    /var/cache/* \
+    /var/lib/apt/lists/* \
+    /var/tmp/* \
+    /var/log/*; \
+    printf '#!/bin/sh\nparams="$*"\nwhile true; do\nbiliup $params\nsleep 1\necho "Script restart"\ndone\n' > run_biliup.sh; \
+    chmod a+x run_biliup.sh
 
 COPY --from=webui /biliup/biliup/web/public/ /biliup/biliup/web/public/
 WORKDIR /opt
 
-ENTRYPOINT ["biliup"]
+ENTRYPOINT ["/biliup/run_biliup.sh"]
