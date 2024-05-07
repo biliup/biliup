@@ -114,21 +114,17 @@ class Twitch(DownloadBase, BatchCheck):
 
         if self.downloader == 'ffmpeg':
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                while True:
-                    try:
-                        port = random.randint(1025, 65535)
-                        s.bind(('localhost', port))
-                        break
-                    except:
-                        logger.debug(f"{Twitch.__name__}: {self.url}: 端口占用{port}更换", exc_info=True)
+                s.bind(('localhost', 0))
+                port = s.getsockname()[1]
 
             stream_shell = [
                 "streamlink",
                 "--player-external-http",  # 为外部程序提供流媒体数据
+                "--player-external-http-port", str(port),  # 对外部输出流的端口
+                "--player-external-http-interface", "localhost",
                 # "--twitch-disable-ads",                     # 去广告，去掉、跳过嵌入的广告流
                 # "--twitch-disable-hosting",               # 该参数从5.0起已被禁用
                 "--twitch-disable-reruns",  # 如果该频道正在重放回放，不打开流
-                "--player-external-http-port", str(port),  # 对外部输出流的端口
                 self.url, "best"  # 流链接
             ]
             if self.twitch_disable_ads:  # 去广告，去掉、跳过嵌入的广告流
