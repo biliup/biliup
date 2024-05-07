@@ -1,6 +1,7 @@
 import io
 import random
 import re
+import socket
 import subprocess
 import time
 from typing import Generator, List
@@ -71,7 +72,7 @@ class Twitch(DownloadBase, BatchCheck):
         DownloadBase.__init__(self, fname, url, suffix=suffix)
         self.twitch_danmaku = config.get('twitch_danmaku', False)
         self.twitch_disable_ads = config.get('twitch_disable_ads', True)
-        self.proc = None
+        self.__proc = None
 
     def check_stream(self, is_check=False):
         channel_name = re.match(VALID_URL_BASE, self.url).group('id').lower()
@@ -112,14 +113,18 @@ class Twitch(DownloadBase, BatchCheck):
             return True
 
         if self.downloader == 'ffmpeg':
-            port = random.randint(1025, 65535)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('localhost', 0))
+                port = s.getsockname()[1]
+
             stream_shell = [
                 "streamlink",
                 "--player-external-http",  # 为外部程序提供流媒体数据
+                "--player-external-http-port", str(port),  # 对外部输出流的端口
+                "--player-external-http-interface", "localhost",
                 # "--twitch-disable-ads",                     # 去广告，去掉、跳过嵌入的广告流
                 # "--twitch-disable-hosting",               # 该参数从5.0起已被禁用
                 "--twitch-disable-reruns",  # 如果该频道正在重放回放，不打开流
-                "--player-external-http-port", str(port),  # 对外部输出流的端口
                 self.url, "best"  # 流链接
             ]
             if self.twitch_disable_ads:  # 去广告，去掉、跳过嵌入的广告流
@@ -130,11 +135,11 @@ class Twitch(DownloadBase, BatchCheck):
             if auth_token:
                 stream_shell.insert(1, f"--twitch-api-header=Authorization=OAuth {auth_token}")
 
-            self.proc = subprocess.Popen(stream_shell)
+            self.__proc = subprocess.Popen(stream_shell)
             self.raw_stream_url = f"http://localhost:{port}"
             i = 0
             while i < 5:
-                if not (self.proc.poll() is None):
+                if not (self.__proc.poll() is None):
                     return False
                 time.sleep(1)
                 i += 1
@@ -187,10 +192,15 @@ class Twitch(DownloadBase, BatchCheck):
 
     def close(self):
         try:
-            if self.proc is not None:
-                self.proc.terminate()
+            if self.__proc is not None:
+                self.__proc.terminate()
+                self.__proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.__proc.kill()
         except:
             logger.exception(f'terminate {self.fname} failed')
+        finally:
+            self.__proc = None
 
 
 class TwitchUtils:
