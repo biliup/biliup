@@ -101,8 +101,8 @@ class DownloadBase(ABC):
             # 其他流stream_gears会按hls保存为ts
             self.suffix = 'ts'
         stream_gears_download(self.raw_stream_url, self.fake_headers, self.gen_download_filename(),
-                              config.get('segment_time'),
-                              config.get('file_size'),
+                              self.segment_time,
+                              self.file_size,
                               lambda file_name: self.__download_segment_callback(file_name))
         return True
 
