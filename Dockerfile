@@ -84,12 +84,9 @@ RUN set -eux; \
 		/var/cache/* \
 		/var/lib/apt/lists/* \
 		/var/tmp/* \
-		/var/log/*; \
-	\
-	printf '#!/bin/sh\nparams="$*"\nwhile true; do\nbiliup $params\nsleep 1\necho "Script restart"\ndone\n' > run_biliup.sh; \
-	chmod a+x run_biliup.sh
+		/var/log/*
 
 COPY --from=webui /biliup/biliup/web/public/ /biliup/biliup/web/public/
 WORKDIR /opt
 
-ENTRYPOINT ["/biliup/run_biliup.sh"]
+ENTRYPOINT ["biliup"]
