@@ -1,6 +1,6 @@
 # Build biliup's web-ui
 FROM node:lts as webui
-ARG repo_url
+ARG repo_url=https://github.com/ForgQi/biliup
 
 RUN set -eux; \
 	git clone --depth 1 $repo_url; \
@@ -10,7 +10,7 @@ RUN set -eux; \
 
 # Deploy Biliup
 FROM python:3.12-slim as biliup
-ARG repo_url
+ARG repo_url=https://github.com/ForgQi/biliup
 ENV TZ=Asia/Shanghai
 EXPOSE 19159/tcp
 VOLUME /opt
