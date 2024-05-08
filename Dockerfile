@@ -51,7 +51,10 @@ RUN set -eux; \
 			/usr/local/doc \
 			/usr/local/man; \
 		rm -rf \
+			/usr/local/bin/ffplay; \
+		rm -rf \
 			ffmpeg*; \
+		chmod a+x /usr/local/* ; \
 	fi; \
 	\
 	# Clean up \
