@@ -5,10 +5,10 @@ import random
 import time
 from urllib.parse import parse_qs, unquote
 
-import requests
-
+import biliup.common.util
 from biliup.config import config
 from biliup.plugins.Danmaku import DanmakuClient
+from ..common import tools
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from ..plugins import logger
@@ -20,7 +20,7 @@ class Huya(DownloadBase):
         super().__init__(fname, url, suffix)
         self.huya_danmaku = config.get('huya_danmaku', False)
 
-    def check_stream(self, is_check=False):
+    async def acheck_stream(self, is_check=False):
         try:
             room_id = self.url.split('huya.com/')[1].split('/')[0].split('?')[0]
             if not room_id:
@@ -30,7 +30,7 @@ class Huya(DownloadBase):
             logger.error(f"Huya - {self.url}: 直播间地址错误")
             return False
 
-        html_info = _get_info_in_html(room_id, self.fake_headers)
+        html_info = await _get_info_in_html(room_id, self.fake_headers)
         live_rate_info = html_info.get('vMultiStreamInfo', [])
         if not live_rate_info:
             # 无流 当做没开播
@@ -63,7 +63,7 @@ class Huya(DownloadBase):
         cdn_fallback = config.get('huya_cdn_fallback', False)
         # cdn_fallback = True
 
-        stream_url, sCdns = _build_stream_url(room_id, perf_cdn, self.fake_headers)
+        stream_url, sCdns = await _build_stream_url(room_id, perf_cdn, self.fake_headers)
         # stream_url = None
         if not stream_url:
             logger.error(f"{plugin_msg}: 无法获取流地址")
@@ -71,25 +71,25 @@ class Huya(DownloadBase):
 
         # 虎牙直播流只允许连接一次，非常丑陋的代码
         if cdn_fallback:
-            with requests.Session() as s:
-                s.headers = self.fake_headers.copy()
-                url_health, _ = super().check_url_healthy(s, stream_url)
-                if not url_health:
-                    logger.debug(f"{plugin_msg}: {list(sCdns.keys())}")
-                    for sCdn in sCdns.keys():
-                        if sCdn == perf_cdn:
-                            continue
-                        logger.warning(f"{plugin_msg}: {perf_cdn} 无法连接，尝试 {sCdn}")
-                        stream_url, _ = _build_stream_url(room_id, sCdn, self.fake_headers)
-                        url_health, _ = super().check_url_healthy(s, stream_url)
-                        if url_health:
-                            perf_cdn = sCdn
-                            logger.warning(f"{plugin_msg}: CDN 切换为 {perf_cdn}")
-                            stream_url, _ = _build_stream_url(room_id, perf_cdn, self.fake_headers)
-                            logger.debug(f"{plugin_msg}: {stream_url}")
-                            break
-                    else:
-                        return False
+            # with requests.Session() as s:
+            biliup.common.util.client.headers = self.fake_headers.copy()
+            url_health, _ = self.acheck_url_healthy(stream_url)
+            if not url_health:
+                logger.debug(f"{plugin_msg}: {list(sCdns.keys())}")
+                for sCdn in sCdns.keys():
+                    if sCdn == perf_cdn:
+                        continue
+                    logger.warning(f"{plugin_msg}: {perf_cdn} 无法连接，尝试 {sCdn}")
+                    stream_url, _ = await _build_stream_url(room_id, sCdn, self.fake_headers)
+                    url_health, _ = await self.acheck_url_healthy(stream_url)
+                    if url_health:
+                        perf_cdn = sCdn
+                        logger.warning(f"{plugin_msg}: CDN 切换为 {perf_cdn}")
+                        stream_url, _ = await _build_stream_url(room_id, perf_cdn, self.fake_headers)
+                        logger.debug(f"{plugin_msg}: {stream_url}")
+                        break
+                else:
+                    return False
 
         self.room_title = html_info['data'][0]['gameLiveInfo']['introduction']
         self.raw_stream_url = stream_url
@@ -103,9 +103,9 @@ class Huya(DownloadBase):
             self.danmaku = DanmakuClient(self.url, self.gen_download_filename())
 
 
-def _get_info_in_html(room_id, fake_headers):
+async def _get_info_in_html(room_id, fake_headers):
     try:
-        html = requests.get(f"https://www.huya.com/{room_id}", timeout=5, headers=fake_headers).text
+        html = (await biliup.common.util.client.get(f"https://www.huya.com/{room_id}", timeout=5, headers=fake_headers)).text
         if '找不到这个主播' in html:
             logger.error(f"Huya - {room_id}: 找不到这个主播")
             return {}
@@ -115,8 +115,8 @@ def _get_info_in_html(room_id, fake_headers):
     return json.loads(html.split('stream: ')[1].split('};')[0])
 
 
-def _build_stream_url(room_id, perf_cdn, fake_headers):
-    html_info = _get_info_in_html(room_id, fake_headers)
+async def _build_stream_url(room_id, perf_cdn, fake_headers):
+    html_info = await _get_info_in_html(room_id, fake_headers)
     try:
         streamInfo = html_info['data'][0]['gameStreamInfoList']
     except KeyError:

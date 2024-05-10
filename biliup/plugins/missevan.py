@@ -1,6 +1,6 @@
-import requests
-
+import biliup.common.util
 from . import match1, logger
+from ..common import tools
 # from biliup.config import config
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
@@ -10,11 +10,11 @@ class Missevan(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 
-    def check_stream(self, is_check=False):
+    async def acheck_stream(self, is_check=False):
         rid = 0
         # 用户主页获取直播间地址
         if self.url.split('www'):
-            user_page = requests.get(self.url, timeout=30, headers=self.fake_headers)
+            user_page = await biliup.common.util.client.get(self.url, timeout=30, headers=self.fake_headers)
             # 取硬编码在网页内的直播间号
             if user_page.status_code == 200:
                 start = user_page.text.find('data-id="') + 9
@@ -25,7 +25,7 @@ class Missevan(DownloadBase):
         if self.url.split("live"):
             rid = match1(self.url, r'/(\d+)')
 
-        room_info = requests.get(f"https://fm.missevan.com/api/v2/live/{rid}", timeout=30, headers=self.fake_headers).json()
+        room_info = (await biliup.common.util.client.get(f"https://fm.missevan.com/api/v2/live/{rid}", timeout=30, headers=self.fake_headers)).json()
 
         # 无直播间的情况
         if room_info['code'] != 0:

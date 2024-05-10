@@ -1,14 +1,15 @@
 # encoding: UTF-8
 # 系统模块
+import functools
 import inspect
 import logging
 from collections.abc import Generator
-from concurrent.futures.thread import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from queue import Queue
 from threading import *
-import functools
+
 logger = logging.getLogger('biliup')
+
 
 class EventManager(Thread):
     def __init__(self, context=None, pool=None):
@@ -77,6 +78,7 @@ class EventManager(Thread):
                     handler(event)
                 except:
                     logger.exception('try_handler')
+
             handlerlist.append(try_handler)
 
     def remove_event_listener(self, type_, handler):

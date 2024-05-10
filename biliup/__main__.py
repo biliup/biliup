@@ -5,12 +5,8 @@ import asyncio
 import logging.config
 import platform
 import shutil
-import threading
-import time
-from pathlib import Path
 
 import biliup.common.reload
-from biliup.common.timer import Timer
 from biliup.config import config
 from biliup.database.db import SessionLocal, init
 from . import __version__, LOG_CONF
@@ -83,6 +79,10 @@ async def main(args):
         detector = AutoReload(event_manager, interval=interval)
         biliup.common.reload.global_reloader = detector
         await asyncio.gather(detector.astart())
+
+
+class GracefulExit(SystemExit):
+    code = 1
 
 
 if __name__ == '__main__':

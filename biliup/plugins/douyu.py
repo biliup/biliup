@@ -2,10 +2,10 @@ import hashlib
 import time
 from urllib.parse import parse_qs
 
-import requests
-
+import biliup.common.util
 from biliup.config import config
 from biliup.plugins.Danmaku import DanmakuClient
+from ..common import tools
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from ..plugins import logger, match1
@@ -17,7 +17,7 @@ class Douyu(DownloadBase):
         super().__init__(fname, url, suffix)
         self.douyu_danmaku = config.get('douyu_danmaku', False)
 
-    def check_stream(self, is_check=False):
+    async def acheck_stream(self, is_check=False):
         if len(self.url.split("douyu.com/")) < 2:
             logger.warning(f"{Douyu.__name__}: {self.url}: 直播间地址错误")
             return False
@@ -26,18 +26,18 @@ class Douyu(DownloadBase):
             if 'm.douyu.com' in self.url:
                 room_id = self.url.split('m.douyu.com/')[1].split('/')[0].split('?')[0]
             else:
-                html = requests.get(self.url, headers=self.fake_headers, timeout=5).text
+                html = (await biliup.common.util.client.get(self.url, headers=self.fake_headers, timeout=5)).text
                 room_id = match1(html, r'\$ROOM\.room_id\s*=\s*(\d+)', r'apm_room_id\s*=\s*(\d+)')[0]
             if not room_id:
                 logger.warning(f"{Douyu.__name__}: {self.url}: 直播间不存在或已关闭")
                 return False
         except:
-            logger.warning(f"{Douyu.__name__}: {self.url}: 获取房间号错误")
+            logger.exception(f"{Douyu.__name__}: {self.url}: 获取房间号错误")
             return False
 
         try:
-            room_info = requests.get(f"https://www.douyu.com/betard/{room_id}",
-                                     headers=self.fake_headers, timeout=5).json()['room']
+            room_info = (await biliup.common.util.client.get(f"https://www.douyu.com/betard/{room_id}",
+                                                             headers=self.fake_headers, timeout=5)).json()['room']
             if room_info['show_status'] != 1:
                 logger.debug(f"{Douyu.__name__}: {self.url}: 未开播")
                 return False
@@ -56,8 +56,8 @@ class Douyu(DownloadBase):
         try:
             import jsengine
             ctx = jsengine.jsengine()
-            js_enc = requests.get(f'https://www.douyu.com/swf_api/homeH5Enc?rids={room_id}', headers=self.fake_headers,
-                                  timeout=5).json()['data'][f'room{room_id}']
+            js_enc = (await biliup.common.util.client.get(f'https://www.douyu.com/swf_api/homeH5Enc?rids={room_id}', headers=self.fake_headers,
+                                                          timeout=5)).json()['data'][f'room{room_id}']
             js_enc = js_enc.replace('return eval', 'return [strc, vdwdae325w_64we];')
 
             sign_fun, sign_v = ctx.eval(f'{js_enc};ub98484234();')
@@ -70,17 +70,17 @@ class Douyu(DownloadBase):
 
             params = parse_qs(ctx.eval(sign_fun))
         except TypeError:
-            logger.error(f"{Douyu.__name__}: {self.url}: 请安装至少一个 Javascript 解释器，如 pip install quickjs")
+            logger.exception(f"{Douyu.__name__}: {self.url}: 请安装至少一个 Javascript 解释器，如 pip install quickjs")
             return False
         except:
-            logger.warning(f"{Douyu.__name__}: {self.url}: 获取签名参数异常")
+            logger.exception(f"{Douyu.__name__}: {self.url}: 获取签名参数异常")
             return False
 
         params['cdn'] = config.get('douyucdn', 'tct-h5')
         params['rate'] = config.get('douyu_rate', 0)
 
         try:
-            live_data = self.get_play_info(room_id, params)
+            live_data = await self.get_play_info(room_id, params)
             if type(live_data) is not dict:
                 return False
         except:
@@ -94,14 +94,14 @@ class Douyu(DownloadBase):
         if self.douyu_danmaku:
             self.danmaku = DanmakuClient(self.url, self.gen_download_filename())
 
-    def get_play_info(self, room_id, params):
-        live_data = requests.post(f'https://www.douyu.com/lapi/live/getH5Play/{room_id}', headers=self.fake_headers,
-                                  params=params, timeout=5).json().get('data')
+    async def get_play_info(self, room_id, params):
+        live_data = (await biliup.common.util.client.post(f'https://www.douyu.com/lapi/live/getH5Play/{room_id}', headers=self.fake_headers,
+                                                          params=params, timeout=5)).json().get('data')
         if type(live_data) is dict:
             # 禁用斗鱼主线路
             if not live_data.get('rtmp_cdn', '').endswith('h5') or 'akm' in live_data.get('rtmp_cdn', ''):
                 params['cdn'] = 'tct-h5'
-                return self.get_play_info(room_id, params)
+                return await self.get_play_info(room_id, params)
             return live_data
 
         return None
