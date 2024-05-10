@@ -1,5 +1,5 @@
-import requests
-
+import biliup.common.util
+from ..common import tools
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from ..plugins import logger, match1
@@ -10,12 +10,13 @@ class FlexTvCoKr(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 
-    def check_stream(self, is_check=False):
+    async def acheck_stream(self, is_check=False):
         room_id = match1(self.url, r"/channels/(\d+)/live")
         if not room_id:
             logger.warning(f"{FlexTvCoKr.__name__}: {self.url}: 直播间地址错误")
-        response = requests.get(f"https://api.flextv.co.kr/api/channels/{room_id}/stream?option=all", timeout=5,
-                                headers=self.fake_headers)
+        response = await biliup.common.util.client.get(f"https://api.flextv.co.kr/api/channels/{room_id}/stream?option=all",
+                                                       timeout=5,
+                                                       headers=self.fake_headers)
         if response.status_code != 200:
             if response.status_code == 400:
                 logger.debug(f"{FlexTvCoKr.__name__}: {self.url}: 未开播或直播间不存在")
@@ -30,8 +31,7 @@ class FlexTvCoKr(DownloadBase):
         if is_check:
             return True
 
-        m3u8_content = requests.get(room_info['sources'][0]['url'], timeout=5,
-                                    headers=self.fake_headers).text
+        m3u8_content = (await biliup.common.util.client.get(room_info['sources'][0]['url'], timeout=5, headers=self.fake_headers)).text
         import m3u8
         m3u8_obj = m3u8.loads(m3u8_content)
         if m3u8_obj.is_variant:

@@ -3,9 +3,12 @@ from typing import Optional
 from urllib.parse import unquote, urlparse, parse_qs, urlencode, urlunparse
 
 import requests
+
+import biliup.common.util
 from . import logger, match1
 from biliup.config import config
 from .Danmaku import DanmakuClient
+from ..common import tools
 from ..common.tools import NamedLock
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
@@ -19,10 +22,10 @@ class Douyin(DownloadBase):
         self.fake_headers['referer'] = "https://live.douyin.com/"
         self.fake_headers['cookie'] = config.get('user', {}).get('douyin_cookie', '')
 
-    def check_stream(self, is_check=False):
+    async def acheck_stream(self, is_check=False):
         if "/user/" in self.url:
             try:
-                user_page = requests.get(self.url, headers=self.fake_headers, timeout=5).text
+                user_page = (await biliup.common.util.client.get(self.url, headers=self.fake_headers, timeout=5)).text
                 user_page_data = unquote(
                     user_page.split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0])
                 room_id = match1(user_page_data, r'"web_rid":"([^"]+)"')
@@ -49,9 +52,9 @@ class Douyin(DownloadBase):
         try:
             if "ttwid" not in self.fake_headers['cookie']:
                 self.fake_headers['Cookie'] = f'ttwid={DouyinUtils.get_ttwid()};{self.fake_headers["cookie"]}'
-            page = requests.get(
+            page = (await biliup.common.util.client.get(
                 DouyinUtils.build_request_url(f"https://live.douyin.com/webcast/room/web/enter/?web_rid={room_id}"),
-                headers=self.fake_headers, timeout=5).text
+                headers=self.fake_headers, timeout=5)).text
             room_info = json.loads(page)['data']['data']
             if len(room_info) > 0:
                 room_info = room_info[0]

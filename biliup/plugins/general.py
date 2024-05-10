@@ -11,7 +11,7 @@ class YDownload(DownloadBase):
         super().__init__(fname, url, suffix)
         self.ydl_opts = {}
 
-    def check_stream(self, is_check=False):
+    async def acheck_stream(self, is_check=False):
         try:
             self.get_sinfo()
             return True
@@ -49,7 +49,7 @@ class SDownload(DownloadBase):
         self.stream = None
         self.flag = Event()
 
-    def check_stream(self, is_check=False):
+    async def acheck_stream(self, is_check=False):
         logger.debug(self.fname)
         import streamlink
         try:
@@ -85,7 +85,7 @@ class Generic(DownloadBase):
         super().__init__(fname, url, suffix)
         self.handler = self
 
-    def check_stream(self, is_check=False):
+    async def acheck_stream(self, is_check=False):
         logger.debug(self.fname)
         try:
             site, url = url_to_module(self.url)

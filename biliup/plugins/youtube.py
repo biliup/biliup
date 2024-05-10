@@ -32,7 +32,7 @@ class Youtube(DownloadBase):
         # 需要下载的 url
         self.download_url = None
 
-    def check_stream(self, is_check=False):
+    async def acheck_stream(self, is_check=False):
         with yt_dlp.YoutubeDL({
             'download_archive': 'archive.txt',
             'cookiefile': self.youtube_cookie,

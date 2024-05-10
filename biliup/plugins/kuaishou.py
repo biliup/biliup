@@ -1,8 +1,9 @@
-import requests
 import time
 import random
 
+import biliup.common.util
 from biliup.config import config
+from ..common import tools
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from ..plugins import logger
@@ -15,7 +16,7 @@ class Kuaishou(DownloadBase):
         super().__init__(fname, url, suffix)
         self.fake_headers['Cookie'] = config.get('kuaishou_cookie', '')
 
-    def check_stream(self, is_check=False):
+    async def acheck_stream(self, is_check=False):
         try:
             room_id = get_kwaiId(self.url)
             if not room_id:
@@ -27,26 +28,26 @@ class Kuaishou(DownloadBase):
 
         plugin_msg = f"Kuaishou - {room_id}"
 
-        with requests.Session() as s:
-            s.headers = self.fake_headers.copy()
-            # 首页低风控生成did
-            s.get("https://live.kuaishou.com", timeout=5)
+        # with requests.Session() as s:
+        biliup.common.util.client.headers = self.fake_headers.copy()
+        # 首页低风控生成did
+        await biliup.common.util.client.get("https://live.kuaishou.com", timeout=5)
 
-            # 不暂停似乎容易风控
-            times = 3 + random.random()
-            logger.debug(f"{plugin_msg}: 暂停 {times} 秒")
-            time.sleep(times)
+        # 不暂停似乎容易风控
+        times = 3 + random.random()
+        logger.debug(f"{plugin_msg}: 暂停 {times} 秒")
+        time.sleep(times)
 
-            err_keys = ["错误代码22", "主播尚未开播"]
-            html = s.get(f"https://live.kuaishou.com/u/{room_id}", timeout=5).text
-            for key in err_keys:
-                if key in html:
-                    logger.debug(f"{plugin_msg}: {key}")
-                    return False
+        err_keys = ["错误代码22", "主播尚未开播"]
+        html = (await biliup.common.util.client.get(f"https://live.kuaishou.com/u/{room_id}", timeout=5)).text
+        for key in err_keys:
+            if key in html:
+                logger.debug(f"{plugin_msg}: {key}")
+                return False
 
-            room_info = s.get(
-                f"https://live.kuaishou.com/live_api/liveroom/livedetail?principalId={room_id}",
-                timeout=5).json()['data']
+        room_info = (await biliup.common.util.client.get(
+            f"https://live.kuaishou.com/live_api/liveroom/livedetail?principalId={room_id}",
+            timeout=5)).json()['data']
 
         if room_info['result'] == 22:
             logger.error(f"{plugin_msg}: 直播间地址错误")
@@ -69,6 +70,7 @@ class Kuaishou(DownloadBase):
         self.raw_stream_url = room_info['liveStream']['playUrls'][0]['adaptationSet']['representation'][-1]['url']
 
         return True
+
 
 def get_kwaiId(url):
     split_args = ["/profile/", "/fw/live/", "/u/"]

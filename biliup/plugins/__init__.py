@@ -3,6 +3,7 @@ import re
 
 logger = logging.getLogger('biliup')
 
+
 def match1(text, *patterns):
     if len(patterns) == 1:
         pattern = patterns[0]
@@ -19,7 +20,8 @@ def match1(text, *patterns):
                 ret.append(match.group(1))
         return ret
 
-def random_user_agent(device:str='desktop') -> str:
+
+def random_user_agent(device: str = 'desktop') -> str:
     import random
     chrome_version = random.randint(100, 120)
     if device == 'mobile':

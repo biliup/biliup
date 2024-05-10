@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import re
@@ -12,6 +13,8 @@ from urllib.parse import urlparse
 import requests
 from requests.utils import DEFAULT_ACCEPT_ENCODING
 
+import biliup.common.util
+from biliup.common import tools
 from biliup.database.db import add_stream_info, SessionLocal, update_cover_path, update_room_title, update_file_list
 from biliup.plugins import random_user_agent
 import stream_gears
@@ -69,7 +72,7 @@ class DownloadBase(ABC):
         self.danmaku: Optional[IDanmakuClient] = None
 
     @abstractmethod
-    def check_stream(self, is_check=False):
+    async def acheck_stream(self, is_check=False):
         # is_check 是否是检测模式 检测模式可以忽略只有下载时需要的耗时操作
         raise NotImplementedError()
 
@@ -258,7 +261,7 @@ class DownloadBase(ABC):
 
     def run(self):
         try:
-            if not self.check_stream():
+            if not asyncio.run_coroutine_threadsafe(self.acheck_stream(), biliup.common.util.loop).result():
                 return False
             with SessionLocal() as db:
                 update_room_title(db, self.database_row_id, self.room_title)
@@ -404,27 +407,30 @@ class DownloadBase(ABC):
             except:
                 logger.exception(f'封面下载失败：{self.__class__.__name__} - {self.fname}')
 
-    def check_url_healthy(self, http_session, url):
+    @staticmethod
+    async def acheck_url_healthy(url):
         timeout = 5
         try:
             if 'flv' in url:
                 timeout = 60
-            r = http_session.get(url, stream=True, timeout=timeout, allow_redirects=False)
-            if 'm3u8' in url:
-                import m3u8
-                m3u8_obj = m3u8.loads(r.text)
-                if m3u8_obj.is_variant:
-                    url = m3u8_obj.playlists[0].uri
+            async with biliup.common.util.client.stream("GET", url, timeout=timeout) as r:
+                if 'm3u8' in url:
+                    import m3u8
+                    m3u8_obj = m3u8.loads(r.text)
+                    if m3u8_obj.is_variant:
+                        url = m3u8_obj.playlists[0].uri
+                        logger.info(f'stream url: {url}')
+                        async with biliup.common.util.client.stream("GET", url, timeout=timeout) as r:
+                            pass
+                elif r.headers.get('Location', False):
+                    url = r.headers['Location']
                     logger.info(f'stream url: {url}')
-                    r = http_session.get(url, stream=True, timeout=5)
-            elif r.headers.get('Location', False):
-                url = r.headers['Location']
-                logger.info(f'stream url: {url}')
-                r = http_session.get(url, stream=True, timeout=timeout)
-            if r.status_code == 200:
-                return True, url
+                    async with biliup.common.util.client.stream("GET", url, timeout=timeout) as r:
+                        pass
+                if r.status_code == 200:
+                    return True, url
         except Exception as e:
-            logger.debug(f"{e} from {url}")
+            logger.exception(f"{e} from {url}")
         return False, None
 
     def gen_download_filename(self, is_fmt=False):
@@ -512,7 +518,7 @@ def get_valid_filename(name):
 class BatchCheck(ABC):
     @staticmethod
     @abstractmethod
-    def batch_check(check_urls: List[str]) -> Generator[str, None, None]:
+    async def abatch_check(check_urls: List[str]) -> Generator[str, None, None]:
         """
         批量检测直播或下载状态
         返回的是url_list

@@ -1,10 +1,10 @@
 import json
 import re
 
-import requests
-
-from ..engine.decorators import Plugin
+import biliup.common.util
 from . import logger
+from ..common import tools
+from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 
 
@@ -13,24 +13,24 @@ class CC(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 
-    def check_stream(self, is_check=False):
+    async def acheck_stream(self, is_check=False):
         logger.debug(self.fname)
         rid = re.search(r"[0-9]{4,}", self.url).group(0)
-        res = requests.get(
+        res = await biliup.common.util.client.get(
             f"https://api.cc.163.com/v1/activitylives/anchor/lives?anchor_ccid={rid}",
             timeout=5,
             headers=self.fake_headers
         )
-        res.close()
+        # res.close()
         jsons = json.loads(res.text)
         if jsons["data"]:
             channel_id = jsons["data"][rid]["channel_id"]
-            res = requests.get(
+            res = await biliup.common.util.client.get(
                 f"https://cc.163.com/live/channel/?channelids={channel_id}",
                 timeout=5,
                 headers=self.fake_headers
             )
-            res.close()
+            # res.close()
             jsons = json.loads(res.text)
             self.raw_stream_url = jsons["data"][0]["sharefile"]
             return True

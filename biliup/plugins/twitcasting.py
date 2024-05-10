@@ -1,12 +1,12 @@
 import hashlib
 
-import requests
-
+import biliup.common.util
+from biliup.config import config
+from .Danmaku import DanmakuClient
+from ..common import tools
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from ..plugins import logger, match1
-from biliup.config import config
-from .Danmaku import DanmakuClient
 
 VALID_URL_BASE = r"https?://twitcasting\.tv/([^/]+)"
 
@@ -24,27 +24,27 @@ class Twitcasting(DownloadBase):
         # TODO 传递过于繁琐
         self.movie_id = None
 
-    def check_stream(self, is_check=False):
-        with requests.Session() as s:
-            s.headers = self.fake_headers
+    async def acheck_stream(self, is_check=False):
+        # with requests.Session() as s:
+        biliup.common.util.client.headers = self.fake_headers
 
-            uploader_id = match1(self.url, r'twitcasting.tv/([^/?]+)')
-            response = s.get(f'https://twitcasting.tv/streamserver.php?target={uploader_id}&mode=client&player=pc_web',
-                             timeout=5)
-            if response.status_code != 200:
-                logger.warning(f"{Twitcasting.__name__}: {self.url}: 获取错误，本次跳过")
-                return False
-            room_info = response.json()
-            if not room_info:
-                logger.warning(f"{Twitcasting.__name__}: {self.url}: 直播间地址错误")
-                return False
-            if not room_info['movie']['live']:
-                logger.debug(f"{Twitcasting.__name__}: {self.url}: 未开播")
-                return False
+        uploader_id = match1(self.url, r'twitcasting.tv/([^/?]+)')
+        response = await biliup.common.util.client.get(f'https://twitcasting.tv/streamserver.php?target={uploader_id}&mode=client&player=pc_web',
+                                                       timeout=5)
+        if response.status_code != 200:
+            logger.warning(f"{Twitcasting.__name__}: {self.url}: 获取错误，本次跳过")
+            return False
+        room_info = response.json()
+        if not room_info:
+            logger.warning(f"{Twitcasting.__name__}: {self.url}: 直播间地址错误")
+            return False
+        if not room_info['movie']['live']:
+            logger.debug(f"{Twitcasting.__name__}: {self.url}: 未开播")
+            return False
 
         self.movie_id = room_info['movie']['id']
 
-        room_html = s.get(f'https://twitcasting.tv/{uploader_id}', timeout=5).text
+        room_html = (await biliup.common.util.client.get(f'https://twitcasting.tv/{uploader_id}', timeout=5)).text
         if 'Enter the secret word to access' in room_html:
             logger.warning(f"{Twitcasting.__name__}: {self.url}: 直播间需要密码")
             return False

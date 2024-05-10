@@ -1,15 +1,11 @@
 import random
 import re
-import string
-import json
 import subprocess
 import time
 
-import requests
-from . import logger
-import requests
-import json
+import biliup.common.util
 from biliup.config import config
+from ..common import tools
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from ..plugins import logger
@@ -20,9 +16,9 @@ class Nico(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 
-    def check_stream(self, is_check=False):
+    async def acheck_stream(self, is_check=False):
         try:
-            response = requests.get(self.url, timeout=5)
+            response = await biliup.common.util.client.get(self.url, timeout=5)
             # 正则表达式
             pattern = r'"name":"(.*?)","description":"(.*?)"'
             # 执行匹配

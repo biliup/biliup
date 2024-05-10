@@ -3,7 +3,9 @@ from typing import Optional, Dict
 
 import requests
 
+import biliup.common.util
 from biliup.config import config
+from ..common import tools
 from ..common.tools import NamedLock
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
@@ -24,14 +26,14 @@ class AfreecaTV(DownloadBase):
             self.fake_headers['cookie'] = ';'.join(
                 [f"{name}={value}" for name, value in AfreecaTVUtils.get_cookie().items()])
 
-    def check_stream(self, is_check=False):
+    async def acheck_stream(self, is_check=False):
         try:
             username = match1(self.url, VALID_URL_BASE)
             if not username:
                 logger.warning(f"{AfreecaTV.__name__}: {self.url}: 直播间地址错误")
                 return False
 
-            channel_info = requests.post(CHANNEL_API_URL, data={
+            channel_info = (await biliup.common.util.client.post(CHANNEL_API_URL, data={
                 "bid": username,
                 "bno": "",
                 "type": "live",
@@ -41,7 +43,7 @@ class AfreecaTV(DownloadBase):
                 "quality": QUALITIES[0],
                 "mode": "landing",
                 "from_api": 0,
-            }, headers=self.fake_headers, timeout=5).json()
+            }, headers=self.fake_headers, timeout=5)).json()
 
             if channel_info["CHANNEL"]["RESULT"] == -6:
                 logger.warning(f"{AfreecaTV.__name__}: {self.url}: 检测失败,请检查账号密码设置")
@@ -55,7 +57,7 @@ class AfreecaTV(DownloadBase):
             if is_check:
                 return True
 
-            aid_info = requests.post(CHANNEL_API_URL, data={
+            aid_info = (await biliup.common.util.client.post(CHANNEL_API_URL, data={
                 "bid": username,
                 "bno": channel_info["CHANNEL"]["BNO"],
                 "type": "aid",
@@ -65,12 +67,12 @@ class AfreecaTV(DownloadBase):
                 "quality": QUALITIES[0],
                 "mode": "landing",
                 "from_api": 0,
-            }, headers=self.fake_headers, timeout=5).json()
+            }, headers=self.fake_headers, timeout=5)).json()
 
-            view_info = requests.get(f'{channel_info["CHANNEL"]["RMD"]}/broad_stream_assign.html', params={
+            view_info = (await biliup.common.util.client.get(f'{channel_info["CHANNEL"]["RMD"]}/broad_stream_assign.html', params={
                 "return_type": channel_info["CHANNEL"]["CDN"],
                 "broad_key": f'{channel_info["CHANNEL"]["BNO"]}-common-{QUALITIES[0]}-hls'
-            }, headers=self.fake_headers, timeout=5).json()
+            }, headers=self.fake_headers, timeout=5)).json()
 
             self.raw_stream_url = view_info["view_url"] + "?aid=" + aid_info["CHANNEL"]["AID"]
         except:
