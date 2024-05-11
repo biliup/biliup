@@ -41,7 +41,7 @@
 
 </details>
 
-**社区教程**： [图文教程](https://www.bilibili.com/read/cv33195912) by [@ikun1993](https://github.com/ikun1993)编写。
+**社区教程**： [图文教程](https://www.bilibili.com/opus/908292536945082370) by [@ikun1993](https://github.com/ikun1993)编写。
 
 
 ## Quick Start
