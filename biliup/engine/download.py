@@ -104,8 +104,8 @@ class DownloadBase(ABC):
             # 其他流stream_gears会按hls保存为ts
             self.suffix = 'ts'
         stream_gears_download(self.raw_stream_url, self.fake_headers, self.gen_download_filename(),
-                              config.get('segment_time'),
-                              config.get('file_size'),
+                              self.segment_time,
+                              self.file_size,
                               lambda file_name: self.__download_segment_callback(file_name))
         return True
 
@@ -407,31 +407,31 @@ class DownloadBase(ABC):
             except:
                 logger.exception(f'封面下载失败：{self.__class__.__name__} - {self.fname}')
 
-    @staticmethod
-    async def acheck_url_healthy(url):
-        timeout = 5
-        try:
-            if 'flv' in url:
-                timeout = 60
-            async with biliup.common.util.client.stream("GET", url, timeout=timeout) as r:
-                if 'm3u8' in url:
-                    import m3u8
-                    m3u8_obj = m3u8.loads(r.text)
-                    if m3u8_obj.is_variant:
-                        url = m3u8_obj.playlists[0].uri
-                        logger.info(f'stream url: {url}')
-                        async with biliup.common.util.client.stream("GET", url, timeout=timeout) as r:
-                            pass
-                elif r.headers.get('Location', False):
-                    url = r.headers['Location']
-                    logger.info(f'stream url: {url}')
-                    async with biliup.common.util.client.stream("GET", url, timeout=timeout) as r:
-                        pass
-                if r.status_code == 200:
-                    return True, url
-        except Exception as e:
-            logger.exception(f"{e} from {url}")
-        return False, None
+    # @staticmethod
+    # async def acheck_url_healthy(url):
+    #     timeout = 5
+    #     try:
+    #         if 'flv' in url:
+    #             timeout = 60
+    #         async with biliup.common.util.client.stream("GET", url, timeout=timeout) as r:
+    #             if 'm3u8' in url:
+    #                 import m3u8
+    #                 m3u8_obj = m3u8.loads(r.text)
+    #                 if m3u8_obj.is_variant:
+    #                     url = m3u8_obj.playlists[0].uri
+    #                     logger.info(f'stream url: {url}')
+    #                     async with biliup.common.util.client.stream("GET", url, timeout=timeout) as r:
+    #                         pass
+    #             elif r.headers.get('Location', False):
+    #                 url = r.headers['Location']
+    #                 logger.info(f'stream url: {url}')
+    #                 async with biliup.common.util.client.stream("GET", url, timeout=timeout) as r:
+    #                     pass
+    #             if r.status_code == 200:
+    #                 return True, url
+    #     except Exception as e:
+    #         logger.exception(f"{e} from {url}")
+    #     return False, None
 
     def gen_download_filename(self, is_fmt=False):
         if self.filename_prefix:  # 判断是否存在自定义录播命名设置

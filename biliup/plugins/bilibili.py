@@ -98,18 +98,18 @@ class Bililive(DownloadBase):
         }
         streamname_regexp = r"(live_\d+_\w+_\w+_?\w+?)"  # 匹配 streamName
 
-        if self.raw_stream_url is not None \
-                and qualityNumber >= 10000 \
-                and not is_new_live:
-            # 同一个 streamName 即可复用，除非被超管切断
-            # 前面拿不到 streamName，目前使用开播时间判断
-            health, url = await self.acheck_url_healthy(self.raw_stream_url)
-            if health:
-                logger.debug(f"{plugin_msg}: 复用 {url}")
-                return True
-            else:
-                logger.debug(f"{plugin_msg}: health-{health}; url-{self.raw_stream_url}")
-                self.raw_stream_url = None
+        # if self.raw_stream_url is not None \
+        #         and qualityNumber >= 10000 \
+        #         and not is_new_live:
+        #     # 同一个 streamName 即可复用，除非被超管切断
+        #     # 前面拿不到 streamName，目前使用开播时间判断
+        #     health, url = await self.acheck_url_healthy(self.raw_stream_url)
+        #     if health:
+        #         logger.debug(f"{plugin_msg}: 复用 {url}")
+        #         return True
+        #     else:
+        #         logger.debug(f"{plugin_msg}: health-{health}; url-{self.raw_stream_url}")
+        #         self.raw_stream_url = None
 
         try:
             play_info = await get_play_info(main_api, params)
@@ -159,12 +159,12 @@ class Bililive(DownloadBase):
             stream_url['extra'] = stream_info['url_info'][-1]['extra']
 
         # 移除 streamName 内画质标签
-        streamName = match1(stream_url['base_url'], streamname_regexp)
-        if streamName is not None and force_source and qualityNumber >= 10000:
-            new_base_url = stream_url['base_url'].replace(f"_{streamName.split('_')[-1]}", '')
-            if (await self.acheck_url_healthy(f"{stream_url['host']}{new_base_url}{stream_url['extra']}"))[0]:
-                stream_url['base_url'] = new_base_url
-                logger.debug(stream_url['base_url'])
+        # streamName = match1(stream_url['base_url'], streamname_regexp)
+        # if streamName is not None and force_source and qualityNumber >= 10000:
+        #     new_base_url = stream_url['base_url'].replace(f"_{streamName.split('_')[-1]}", '')
+        #     if (await self.acheck_url_healthy(f"{stream_url['host']}{new_base_url}{stream_url['extra']}"))[0]:
+        #         stream_url['base_url'] = new_base_url
+        #         logger.debug(stream_url['base_url'])
 
         self.raw_stream_url = f"{stream_url['host']}{stream_url['base_url']}{stream_url['extra']}"
 
@@ -174,34 +174,34 @@ class Bililive(DownloadBase):
         if ov05_ip and "ov-gotcha05" in stream_url['host']:
             self.raw_stream_url = await oversea_expand(self.raw_stream_url, ov05_ip)
 
-        url_health, _url = await self.acheck_url_healthy(self.raw_stream_url)
-        if not url_health:
-            if cdn_fallback:
-                i = len(stream_info['url_info'])
-                while i:
-                    i -= 1
-                    try:
-                        self.raw_stream_url = "{}{}{}".format(stream_info['url_info'][i]['host'],
-                                                              stream_url['base_url'],
-                                                              stream_info['url_info'][i]['extra'])
-                        url_health, _url = await self.acheck_url_healthy(self.raw_stream_url)
-                        if url_health:
-                            self.raw_stream_url = _url
-                            break
-                    except TimeoutError as e:
-                        logger.debug(f"Timeout Error: {e} at {stream_info['url_info'][i]['host']}")
-                        continue
-                    except Exception:
-                        logger.exception("Uncaught exception:")
-                        continue
-                    finally:
-                        logger.debug(f"{i} - {self.raw_stream_url}")
-                else:
-                    logger.debug(play_info)
-                    self.raw_stream_url = None
-                    return False
-        else:
-            self.raw_stream_url = _url
+        # url_health, _url = await self.acheck_url_healthy(self.raw_stream_url)
+        # if not url_health:
+        #     if cdn_fallback:
+        #         i = len(stream_info['url_info'])
+        #         while i:
+        #             i -= 1
+        #             try:
+        #                 self.raw_stream_url = "{}{}{}".format(stream_info['url_info'][i]['host'],
+        #                                                       stream_url['base_url'],
+        #                                                       stream_info['url_info'][i]['extra'])
+        #                 url_health, _url = await self.acheck_url_healthy(self.raw_stream_url)
+        #                 if url_health:
+        #                     self.raw_stream_url = _url
+        #                     break
+        #             except TimeoutError as e:
+        #                 logger.debug(f"Timeout Error: {e} at {stream_info['url_info'][i]['host']}")
+        #                 continue
+        #             except Exception:
+        #                 logger.exception("Uncaught exception:")
+        #                 continue
+        #             finally:
+        #                 logger.debug(f"{i} - {self.raw_stream_url}")
+        #         else:
+        #             logger.debug(play_info)
+        #             self.raw_stream_url = None
+        #             return False
+        # else:
+        #     self.raw_stream_url = _url
         print(self.raw_stream_url)
         return True
 
