@@ -12,8 +12,9 @@ from urllib.parse import urlparse
 
 import requests
 from requests.utils import DEFAULT_ACCEPT_ENCODING
+from httpx import HTTPStatusError
 
-import biliup.common.util
+from biliup.common.util import client, loop
 from biliup.common import tools
 from biliup.database.db import add_stream_info, SessionLocal, update_cover_path, update_room_title, update_file_list
 from biliup.plugins import random_user_agent
@@ -261,7 +262,7 @@ class DownloadBase(ABC):
 
     def run(self):
         try:
-            if not asyncio.run_coroutine_threadsafe(self.acheck_stream(), biliup.common.util.loop).result():
+            if not asyncio.run_coroutine_threadsafe(self.acheck_stream(), loop).result():
                 return False
             with SessionLocal() as db:
                 update_room_title(db, self.database_row_id, self.room_title)
@@ -409,28 +410,40 @@ class DownloadBase(ABC):
 
     @staticmethod
     async def acheck_url_healthy(url):
-        timeout = 5
+        timeout = 60 if '.flv' in url else 5
+
+        async def __client_get(url, stream: bool = False):
+            if stream:
+                async with client.stream("GET", url, timeout=timeout) as response:
+                    pass
+            else:
+                response = await client.get(url, timeout=timeout)
+            response.raise_for_status()
+            return response
+
         try:
-            if 'flv' in url:
-                timeout = 60
-            async with biliup.common.util.client.stream("GET", url, timeout=timeout) as r:
-                if 'm3u8' in url:
-                    import m3u8
-                    m3u8_obj = m3u8.loads(r.text)
-                    if m3u8_obj.is_variant:
-                        url = m3u8_obj.playlists[0].uri
-                        logger.info(f'stream url: {url}')
-                        async with biliup.common.util.client.stream("GET", url, timeout=timeout) as r:
-                            pass
-                elif r.headers.get('Location', False):
+            if '.m3u8' in url:
+                r = await __client_get(url)
+                import m3u8
+                m3u8_obj = m3u8.loads(r.text)
+                if m3u8_obj.is_variant:
+                    url = m3u8_obj.playlists[0].uri
+                    logger.info(f'stream url: {url}')
+                    r = await __client_get(url)
+            else: # 处理 Flv
+                r = await __client_get(url, stream=True)
+                if r.headers.get('Location', False):
                     url = r.headers['Location']
                     logger.info(f'stream url: {url}')
-                    async with biliup.common.util.client.stream("GET", url, timeout=timeout) as r:
-                        pass
-                if r.status_code == 200:
-                    return True, url
-        except Exception as e:
-            logger.exception(f"{e} from {url}")
+                    r = await __client_get(url, stream=True)
+            if r.status_code == 200:
+                return True, url
+        except HTTPStatusError as e:
+            logger.error(f'url {url}: status_code-{e.response.status_code}')
+            return False, None
+        except:
+            logger.exception(f'url {url} is not healthy')
+            return False, None
         return False, None
 
     def gen_download_filename(self, is_fmt=False):

@@ -53,6 +53,8 @@ def arg_parser():
         LOG_CONF['loggers']['biliup']['level'] = args.verbose
         LOG_CONF['root']['level'] = args.verbose
     logging.config.dictConfig(LOG_CONF)
+    logging.getLogger('hpack').setLevel(logging.INFO)
+    # logging.getLogger('httpx').setLevel(logging.INFO)
     if platform.system() == 'Windows':
         return asyncio.run(main(args))
     args.func()
