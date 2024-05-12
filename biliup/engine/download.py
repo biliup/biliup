@@ -414,7 +414,7 @@ class DownloadBase(ABC):
 
         async def __client_get(url, stream: bool = False):
             if stream:
-                async with client.stream("GET", url, timeout=timeout) as response:
+                async with client.stream("GET", url, timeout=timeout, follow_redirects=False) as response:
                     pass
             else:
                 response = await client.get(url, timeout=timeout)
@@ -437,14 +437,12 @@ class DownloadBase(ABC):
                     logger.info(f'stream url: {url}')
                     r = await __client_get(url, stream=True)
             if r.status_code == 200:
-                return True, url
+                return url
         except HTTPStatusError as e:
             logger.error(f'url {url}: status_code-{e.response.status_code}')
-            return False, None
         except:
             logger.exception(f'url {url} is not healthy')
-            return False, None
-        return False, None
+        return None
 
     def gen_download_filename(self, is_fmt=False):
         if self.filename_prefix:  # 判断是否存在自定义录播命名设置

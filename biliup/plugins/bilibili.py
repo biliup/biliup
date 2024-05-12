@@ -3,7 +3,7 @@ import requests
 import json
 import re
 
-import biliup.common.util
+from biliup.common.util import client
 from biliup.config import config
 from . import match1, logger
 from biliup.plugins.Danmaku import DanmakuClient
@@ -39,16 +39,15 @@ class Bililive(DownloadBase):
         OFFICIAL_API = "https://api.live.bilibili.com"
         room_id = match1(self.url, r'/(\d+)')
         qualityNumber = int(config.get('bili_qn', 10000))
-        plugin_msg = f"Bililive - {room_id}"
+        plugin_msg = f"Bililive - {self.url}"
 
-        # with requests.Session() as s:
-        biliup.common.util.client.headers.update(self.fake_headers)
+        client.headers.update(self.fake_headers)
         # 获取直播状态与房间标题
         info_by_room_url = f"{OFFICIAL_API}/xlive/web-room/v1/index/getInfoByRoom?room_id={room_id}"
         try:
-            room_info = (await biliup.common.util.client.get(info_by_room_url, timeout=5)).json()
-        except Exception:
-            logger.exception(f"{plugin_msg}")
+            room_info = (await client.get(info_by_room_url, timeout=5)).json()
+        except:
+            logger.exception(f"{plugin_msg}: ")
             return False
         if room_info['code'] != 0:
             logger.error(f"{plugin_msg}: {room_info}")
@@ -66,7 +65,7 @@ class Bililive(DownloadBase):
         else:
             is_new_live = False
         if is_check:
-            _res = (await biliup.common.util.client.get('https://api.bilibili.com/x/web-interface/nav', timeout=5)).json()
+            _res = (await client.get('https://api.bilibili.com/x/web-interface/nav', timeout=5)).json()
             user_data = _res.get('data', {})
             is_login = user_data.get('isLogin', False)
             if is_login:
@@ -77,12 +76,11 @@ class Bililive(DownloadBase):
 
         protocol = config.get('bili_protocol', 'stream')
         perf_cdn = config.get('bili_perfCDN')
-        cdn_fallback = config.get('bili_cdn_fallback', True)
+        cdn_fallback = config.get('bili_cdn_fallback', False)
         force_source = config.get('bili_force_source', False)
-        ov05_ip = config.get('bili_force_ov05_ip')
         main_api = config.get('bili_liveapi', OFFICIAL_API).rstrip('/')
         fallback_api = config.get('bili_fallback_api', OFFICIAL_API).rstrip('/')
-        cn01_sids = config.get('bili_replace_cn01_sid', '').split(',')
+        cn01_sids = config.get('bili_replace_cn01', '').split(',')
         normalize_cn204 = config.get('bili_normalize_cn204', False)
 
         params = {
@@ -103,12 +101,11 @@ class Bililive(DownloadBase):
                 and not is_new_live:
             # 同一个 streamName 即可复用，除非被超管切断
             # 前面拿不到 streamName，目前使用开播时间判断
-            health, url = await self.acheck_url_healthy(self.raw_stream_url)
-            if health:
+            url = await self.acheck_url_healthy(self.raw_stream_url)
+            if url is not None:
                 logger.debug(f"{plugin_msg}: 复用 {url}")
                 return True
             else:
-                logger.debug(f"{plugin_msg}: health-{health}; url-{self.raw_stream_url}")
                 self.raw_stream_url = None
 
         try:
@@ -161,9 +158,9 @@ class Bililive(DownloadBase):
         # 移除 streamName 内画质标签
         streamName = match1(stream_url['base_url'], streamname_regexp)
         if streamName is not None and force_source and qualityNumber >= 10000:
-            new_base_url = stream_url['base_url'].replace(f"_{streamName.split('_')[-1]}", '')
-            if (await self.acheck_url_healthy(f"{stream_url['host']}{new_base_url}{stream_url['extra']}"))[0]:
-                stream_url['base_url'] = new_base_url
+            _base_url = stream_url['base_url'].replace(f"_{streamName.split('_')[-1]}", '')
+            if (await self.acheck_url_healthy(f"{stream_url['host']}{_base_url}{stream_url['extra']}")) is not None:
+                stream_url['base_url'] = _base_url
                 logger.debug(stream_url['base_url'])
 
         self.raw_stream_url = f"{stream_url['host']}{stream_url['base_url']}{stream_url['extra']}"
@@ -171,12 +168,9 @@ class Bililive(DownloadBase):
         if normalize_cn204:
             self.raw_stream_url = re.sub(r"(?<=cn-gotcha204)-[1-4]", "", self.raw_stream_url, 1)
 
-        if ov05_ip and "ov-gotcha05" in stream_url['host']:
-            self.raw_stream_url = await oversea_expand(self.raw_stream_url, ov05_ip)
-
-        url_health, _url = await self.acheck_url_healthy(self.raw_stream_url)
-        if not url_health:
-            if cdn_fallback:
+        if cdn_fallback:
+            _url = await self.acheck_url_healthy(self.raw_stream_url)
+            if _url is None:
                 i = len(stream_info['url_info'])
                 while i:
                     i -= 1
@@ -184,14 +178,11 @@ class Bililive(DownloadBase):
                         self.raw_stream_url = "{}{}{}".format(stream_info['url_info'][i]['host'],
                                                               stream_url['base_url'],
                                                               stream_info['url_info'][i]['extra'])
-                        url_health, _url = await self.acheck_url_healthy(self.raw_stream_url)
-                        if url_health:
+                        _url = await self.acheck_url_healthy(self.raw_stream_url)
+                        if _url is not None:
                             self.raw_stream_url = _url
                             break
-                    except TimeoutError as e:
-                        logger.debug(f"Timeout Error: {e} at {stream_info['url_info'][i]['host']}")
-                        continue
-                    except Exception:
+                    except:
                         logger.exception("Uncaught exception:")
                         continue
                     finally:
@@ -200,8 +191,7 @@ class Bililive(DownloadBase):
                     logger.debug(play_info)
                     self.raw_stream_url = None
                     return False
-        else:
-            self.raw_stream_url = _url
+
         print(self.raw_stream_url)
         return True
 
@@ -214,9 +204,9 @@ async def get_play_info(api, params):
     api = (lambda a: a if a.startswith(('http://', 'https://')) else 'http://' + a)(api)
     full_url = f"{api}/xlive/web-room/v2/index/getRoomPlayInfo"
     try:
-        return (await biliup.common.util.client.get(full_url, params=params, timeout=5)).json()
-    except Exception as e:
-        logger.warning(f'{api} 获取直播流信息失败 {e}')
+        return (await client.get(full_url, params=params, timeout=5)).json()
+    except:
+        logger.exception(f'{api} 获取直播流信息失败: ')
     return None
 
 
@@ -230,10 +220,3 @@ def check_areablock(data):
         logger.error('非常抱歉，根据版权方要求，您所在的地区无法观看本直播')
         return True
     return False
-
-
-async def oversea_expand(url, ov05_ip):
-    # 强制替换ov05 302redirect之后的真实地址为指定的域名或ip达到自选ov05节点的目的
-    r = await biliup.common.util.client.get(url, stream=True)
-    logger.debug(f'将ov-gotcha05的节点ip替换为了{ov05_ip}')
-    return re.sub(r".*(?=/d1--ov-gotcha05)", f"http://{ov05_ip}", r.url, 1)
