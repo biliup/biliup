@@ -36,7 +36,7 @@ class IDanmakuClient(ABC):
         pass
 
     @abstractmethod
-    def segment(self, new_prev_file_name: Optional[str] = None, is_stop=False):
+    def save(self, file_name: Optional[str] = None):
         pass
 
 
@@ -161,25 +161,33 @@ class DanmakuClient(IDanmakuClient):
                         m = await asyncio.wait_for(self.__dm_queue.get(), timeout=1)
                     except asyncio.TimeoutError:
                         continue
-                    if m.get('msg_type') == "segment" or m.get('msg_type') == "stop":
-                        if 'new_prev_file_name' in m and fmt_file_name != m['new_prev_file_name']:
+
+                    logger.debug(f"{DanmakuClient.__name__}:{self.__url}: 弹幕queue-{m.get('msg_type')}")
+                    if m.get('msg_type') == "save":
+                        if 'file_name' in m and fmt_file_name != m['file_name']:
                             try:
-                                if os.path.exists(m['new_prev_file_name']):
-                                    os.remove(m['new_prev_file_name'])
+                                if os.path.exists(m['file_name']):
+                                    os.remove(m['file_name'])
                                 if os.path.exists(fmt_file_name):
-                                    os.rename(fmt_file_name, m.get('new_prev_file_name'))
+                                    os.rename(fmt_file_name, m.get('file_name'))
                                     logger.info(
-                                        f"{DanmakuClient.__name__}:{self.__url}: 更名 {fmt_file_name} 为 {m['new_prev_file_name']}")
+                                        f"{DanmakuClient.__name__}:{self.__url}: 更名 {fmt_file_name} 为 {m['file_name']}")
                             except:
                                 logger.exception(
-                                    f"{DanmakuClient.__name__}:{self.__url}: 更名 {fmt_file_name} 为 {m['new_prev_file_name']}失败")
-                            fmt_file_name = m['new_prev_file_name']
-                        logger.debug(f"{DanmakuClient.__name__}:{self.__url}: 弹幕{m.get('msg_type')}")
-                        if m.get('msg_type') == "stop":
-                            self.__record_task.cancel()
-                            return
-                        else:
-                            break
+                                    f"{DanmakuClient.__name__}:{self.__url}: 更名 {fmt_file_name} 为 {m['file_name']}失败")
+                            fmt_file_name = m['file_name']
+
+                        if callable(m.get('callback')):
+                            m['callback']()
+                        break
+                    elif m.get('msg_type') == "stop":
+                        try:
+                            os.remove(fmt_file_name)
+                        except:
+                            pass
+                        fmt_file_name = None
+                        self.__record_task.cancel()
+                        return
                     elif m.get('msg_type') == 'danmaku':
                         try:
                             if m.get('color'):
@@ -222,15 +230,20 @@ class DanmakuClient(IDanmakuClient):
         # 等待初始化完成避免未初始化完成的时候就停止任务
         init_event.wait()
 
-    def segment(self, new_prev_file_name=None, is_stop=False):
+    def save(self, file_name: Optional[str] = None):
         if self.__record_task:
+            logger.debug(f"{DanmakuClient.__name__}:{self.__url}: 弹幕save")
+            init_event = threading.Event()
             self.__dm_queue.put_nowait({
-                "msg_type": "stop" if is_stop else "segment",
-                "new_prev_file_name": new_prev_file_name,
+                "msg_type": "save",
+                "file_name": file_name,
+                "callback": lambda: init_event.set()
             })
+            init_event.wait()
 
     def stop(self):
         if self.__record_task:
+            logger.debug(f"{DanmakuClient.__name__}:{self.__url}: 弹幕stop")
             self.__dm_queue.put_nowait({
                 "msg_type": "stop",
             })
