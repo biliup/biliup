@@ -53,7 +53,7 @@ check_sourcecode: 15
 #------斗鱼------#
 ### 如遇到斗鱼录制卡顿可以尝试切换线路。可选以下线路
 ### tctc-h5（备用线路4）, tct-h5（备用线路5）, ali-h5（备用线路6）, hw-h5（备用线路7）, hs-h5（备用线路13）
-#douyucdn: tct-h5
+#douyu_cdn: tct-h5
 ### 录制斗鱼弹幕，默认关闭
 #douyu_danmaku: false
 ### 斗鱼自选画质

@@ -87,13 +87,8 @@ const Bilibili: React.FC<Props> = (props) => {
                 />
                 <Form.Switch
                     field="bili_cdn_fallback"
-                    extraText="CDN 回退（Fallback），默认为开启。例如海外机器优选 ov05 之后，如果 ov05 流一直无法下载，将会自动回退到 ov07 进行下载。"
+                    extraText="CDN 回退（Fallback），默认为关闭。例如海外机器优选 ov05 之后，如果 ov05 流一直无法下载，将会自动回退到 ov07 进行下载。仅限相同流协议。"
                     label="CDN 回退（bili_cdn_fallback）"
-                    initValue={
-                        entity?.hasOwnProperty("bili_cdn_fallback")
-                            ? entity["bili_cdn_fallback"]
-                            : true
-                    }
                     fieldStyle={{
                         alignSelf: "stretch",
                         padding: 0,
@@ -132,24 +127,6 @@ const Bilibili: React.FC<Props> = (props) => {
                         padding: 0,
                     }}
                 />
-                <Form.Input
-                    field="bili_replace_cn01_sid"
-                    label="替换 CN01 sid (bili_replace_cn01_sid)"
-                    style={{ width: "100%" }}
-                    fieldStyle={{
-                        alignSelf: "stretch",
-                        padding: 0,
-                    }}
-                />
-                <Form.Input
-                    field="bili_force_ov05_ip"
-                    label="自定义 OV05 IP (bili_force_ov05_ip)"
-                    style={{ width: "100%" }}
-                    fieldStyle={{
-                        alignSelf: "stretch",
-                        padding: 0,
-                    }}
-                />
                 <Form.Switch
                     field="bili_force_source"
                     extraText="哔哩哔哩强制真原画（仅限非 FLV 流，且画质等级 bili_qn >= 10000），默认为关闭，不保证可用性。"
@@ -163,6 +140,15 @@ const Bilibili: React.FC<Props> = (props) => {
                     field="bili_normalize_cn204"
                     extraText="去除 cn-gotcha204 后面的小尾巴（-[1-4]）"
                     label="标准化 CN204（bili_normalize_cn204）"
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                />
+                <Form.Switch
+                    field="bili_replace_cn01_sid"
+                    label="替换 CN01 sid (bili_replace_cn01_sid)"
+                    style={{ width: "100%" }}
                     fieldStyle={{
                         alignSelf: "stretch",
                         padding: 0,

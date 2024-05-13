@@ -28,7 +28,7 @@ class Douyu(DownloadBase):
             if 'm.douyu.com' in self.url:
                 room_id = self.url.split('m.douyu.com/')[1].split('/')[0].split('?')[0]
             else:
-                resp = await client.get(self.url, headers=self.fake_headers, timeout=5, follow_redirects=True)
+                resp = await client.get(self.url, headers=self.fake_headers, timeout=5)
                 room_id = match1(resp.text, r'\$ROOM\.room_id\s*=\s*(\d+)', r'apm_room_id\s*=\s*(\d+)')[0]
             if not room_id:
                 logger.error(f"{plugin_msg}: 直播间不存在或已关闭")
@@ -86,15 +86,16 @@ class Douyu(DownloadBase):
             return False
 
         params['cdn'] = config.get('douyucdn', 'tct-h5')
-        params['cdn'] = config.get('douyu_cdn', params['cdn'] if 'akm' not in params['cdn'] else 'tct-h5')
+        params['cdn'] = config.get('douyu_cdn', params['cdn'])
         params['rate'] = config.get('douyu_rate', 0)
 
         try:
             live_data = await self.get_play_info(room_id, params)
             self.raw_stream_url = f"{live_data['rtmp_url']}/{live_data['rtmp_live']}"
+        except KeyError:
+            logger.debug(f"{plugin_msg}: live_data {live_data}")
         except:
-            logger.exception(f"{plugin_msg}: live_data {live_data}")
-            return False
+            logger.exception(f"{plugin_msg}: ")
 
         return True
 
@@ -103,14 +104,16 @@ class Douyu(DownloadBase):
             self.danmaku = DanmakuClient(self.url, self.gen_download_filename())
 
     async def get_play_info(self, room_id, params, retry=False):
+        __cdn_check = lambda _name, _list: any(_name in _item['cdn'] for _item in _list)
+
         live_data = (
             await client.post(f'https://www.douyu.com/lapi/live/getH5Play/{room_id}',
                                 headers=self.fake_headers, params=params, timeout=5)
                     ).json().get('data')
-        if type(live_data) is dict:
-            cdn = live_data.get('rtmp_cdn', '')
-            if not cdn.endswith('h5') or 'akm' in cdn:
-                params['cdn'] = 'tct-h5'
+        if isinstance(live_data, dict):
+            if live_data['rtmp_cdn'].endswith('h5') or 'akm' in live_data['rtmp_cdn']:
+                params['cdn'] = 'tct-h5' if __cdn_check('tct-h5', live_data['multirates']) \
+                                         else live_data['multirates'][-1]['cdn']
                 return await self.get_play_info(room_id, params)
             return live_data
         return None

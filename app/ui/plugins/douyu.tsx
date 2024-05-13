@@ -39,7 +39,7 @@ const Douyu: React.FC = () => {
                 <Form.Select
                     allowCreate={true}
                     filter
-                    field="douyucdn"
+                    field="douyu_cdn"
                     extraText="如遇到斗鱼录制卡顿可以尝试切换线路。可选以下线路
 tctc-h5（线路4）, tct-h5（线路5）, ali-h5（线路6）, hw-h5（线路7）, hs-h5（线路13）"
                     label="访问线路（douyucdn）"

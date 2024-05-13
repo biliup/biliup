@@ -4,7 +4,7 @@ import re
 import socket
 import subprocess
 import time
-from typing import Generator, List
+from typing import AsyncGenerator, List
 from urllib.parse import urlencode
 
 import yt_dlp
@@ -94,7 +94,7 @@ class Twitch(DownloadBase, BatchCheck):
                                 }
                             ) {
                                 signature
-                                value             
+                                value
                             }
                         }
                     }
@@ -160,7 +160,7 @@ class Twitch(DownloadBase, BatchCheck):
             return True
 
     @staticmethod
-    async def abatch_check(check_urls: List[str]) -> Generator[str, None, None]:
+    async def abatch_check(check_urls: List[str]) -> AsyncGenerator[str, None, None]:
         ops = []
         for url in check_urls:
             channel_name = re.match(VALID_URL_BASE, url).group('id')

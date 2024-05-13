@@ -238,8 +238,9 @@ class DownloadBase(ABC):
 
         def x():
             # 将文件名和直播标题存储到数据库
-            with SessionLocal() as db:
-                update_file_list(db, self.database_row_id, file_name)
+            if self.is_download or self.downloader == 'stream-gears':
+                with SessionLocal() as db:
+                    update_file_list(db, self.database_row_id, file_name)
             if self.segment_processor:
                 try:
                     if not self.segment_processor_parallel and prev_thread:
@@ -341,8 +342,8 @@ class DownloadBase(ABC):
                     break
 
         self.download_cover(
-            time.strftime(self.gen_download_filename().encode("unicode-escape").decode(), start_time).encode().decode(
-                "unicode-escape"))
+            time.strftime(self.gen_download_filename().encode("unicode-escape").decode(), end_time if end_time else time.localtime()
+                           ).encode().decode("unicode-escape"))
         # 更新数据库中封面存储路径
         with SessionLocal() as db:
             update_cover_path(db, self.database_row_id, self.live_cover_path)
@@ -459,6 +460,9 @@ class DownloadBase(ABC):
                 if os.path.exists(f"{fmt_file_name}.{self.suffix}"):
                     file_time += 1
                 else:
+                    if not self.is_download: # stream-gears 不使用 fmt_name
+                        with SessionLocal() as db:
+                            update_file_list(db, self.database_row_id, fmt_file_name)
                     return fmt_file_name
         else:
             return filename
