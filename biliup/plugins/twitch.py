@@ -160,7 +160,7 @@ class Twitch(DownloadBase, BatchCheck):
             return True
 
     @staticmethod
-    async def abatch_check(check_urls: List[str]) -> AsyncGenerator[str, None, None]:
+    async def abatch_check(check_urls: List[str]) -> AsyncGenerator[str, None]:
         ops = []
         for url in check_urls:
             channel_name = re.match(VALID_URL_BASE, url).group('id')

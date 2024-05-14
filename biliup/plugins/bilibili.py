@@ -94,7 +94,6 @@ class Bililive(DownloadBase):
             'dolby': '5',
             # 'panorama': '1' # 全景(不支持 html5)
         }
-        streamname_regexp = r"(live_\d+_\w+_\w+_?\w+?)"  # 匹配 streamName
 
         if self.raw_stream_url is not None \
                 and qualityNumber >= 10000 \
@@ -117,24 +116,25 @@ class Bililive(DownloadBase):
                     logger.debug(f"{plugin_msg}: {fallback_api} 返回 {play_info}")
                     return False
         except Exception:
-            logger.exception(f"{plugin_msg}")
+            logger.exception(f"{plugin_msg}: ")
             return False
         if play_info['code'] != 0:
             logger.error(f"{plugin_msg}: {play_info}")
             return False
 
-        playurl_info = play_info['data']['playurl_info']['playurl']
-        streams = playurl_info['stream']
+        streams = play_info['data']['playurl_info']['playurl']['stream']
         stream = streams[1] if protocol.startswith('hls') and len(streams) > 1 else streams[0]
         stream_format = stream['format'][0]
         if protocol == "hls_fmp4":
-            if len(stream['format']) > 1:
-                stream_format = stream['format'][1]
-            elif int(time.time()) - live_start_time <= 60:  # 60s 宽容等待 fmp4
-                return False
-            elif stream_format['format_name'] == 'ts':
-                stream_format = streams[0]['format'][0]
-
+            if stream_format['format_name'] != 'fmp4':
+                if len(stream['format']) > 1:
+                    stream_format = stream['format'][1]
+                elif int(time.time()) - live_start_time <= 60:
+                    logger.warning(f"{plugin_msg}: 暂时未提供 hls_fmp4 流，等待下一次检测")
+                    return False
+                else:
+                    stream_format = streams[0]['format'][0]
+                    logger.info(f"{plugin_msg}: 已切换为 stream 流")
         stream_info = stream_format['codec'][0]
 
         stream_url = {
@@ -156,12 +156,15 @@ class Bililive(DownloadBase):
             stream_url['extra'] = stream_info['url_info'][-1]['extra']
 
         # 移除 streamName 内画质标签
-        streamName = match1(stream_url['base_url'], streamname_regexp)
-        if streamName is not None and force_source and qualityNumber >= 10000:
-            _base_url = stream_url['base_url'].replace(f"_{streamName.split('_')[-1]}", '')
-            if (await self.acheck_url_healthy(f"{stream_url['host']}{_base_url}{stream_url['extra']}")) is not None:
-                stream_url['base_url'] = _base_url
-                logger.debug(stream_url['base_url'])
+        if force_source:
+            streamname_regexp = r"(live_\d+_\w+_\w+_?\w+?)"  # 匹配 streamName
+            streamName = match1(stream_url['base_url'], streamname_regexp)
+            if streamName is not None and qualityNumber >= 10000:
+                _base_url = stream_url['base_url'].replace(f"_{streamName.split('_')[-1]}", '')
+                if (await self.acheck_url_healthy(f"{stream_url['host']}{_base_url}{stream_url['extra']}")) is not None:
+                    stream_url['base_url'] = _base_url
+                else:
+                    logger.debug(f"{plugin_msg}: force_source {_base_url}")
 
         self.raw_stream_url = f"{stream_url['host']}{stream_url['base_url']}{stream_url['extra']}"
 

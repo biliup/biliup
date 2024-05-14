@@ -9,7 +9,7 @@ import shutil
 import biliup.common.reload
 from biliup.config import config
 from biliup.database.db import SessionLocal, init
-from . import __version__, LOG_CONF
+from . import __version__, LOG_CONF, DebugLevelFilter
 from .common.Daemon import Daemon
 from .common.reload import AutoReload
 
@@ -53,8 +53,7 @@ def arg_parser():
         LOG_CONF['loggers']['biliup']['level'] = args.verbose
         LOG_CONF['root']['level'] = args.verbose
     logging.config.dictConfig(LOG_CONF)
-    # logging.getLogger('hpack').setLevel(logging.INFO)
-    # logging.getLogger('httpx').setLevel(logging.INFO)
+    logging.getLogger('httpx').addFilter(DebugLevelFilter())
     if platform.system() == 'Windows':
         return asyncio.run(main(args))
     args.func()
