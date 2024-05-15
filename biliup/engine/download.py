@@ -72,6 +72,8 @@ class DownloadBase(ABC):
         # 弹幕客户端
         self.danmaku: Optional[IDanmakuClient] = None
 
+        self.plugin_msg = f"{self.__class__.__name__} - {url}"
+
     @abstractmethod
     async def acheck_stream(self, is_check=False):
         # is_check 是否是检测模式 检测模式可以忽略只有下载时需要的耗时操作
@@ -162,6 +164,7 @@ class DownloadBase(ABC):
     def ffmpeg_download(self, use_streamlink=False):
         # streamlink进程
         streamlink_proc = None
+        # updatedFileList = False
         try:
             # 文件名不含后戳
             fmt_file_name = self.gen_download_filename(is_fmt=True)
@@ -204,6 +207,9 @@ class DownloadBase(ABC):
                     f'{fmt_file_name}.{self.suffix}.part']
             with subprocess.Popen(args, stdin=subprocess.DEVNULL if not streamlink_proc else streamlink_proc.stdout,
                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as proc:
+                # with SessionLocal() as db:
+                #     update_file_list(db, self.database_row_id, fmt_file_name)
+                #     updatedFileList = True
                 for line in iter(proc.stdout.readline, b''):  # b'\n'-separated lines
                     decode_line = line.rstrip().decode(errors='ignore')
                     print(decode_line)
@@ -217,6 +223,10 @@ class DownloadBase(ABC):
                 return True
             else:
                 return False
+        # except:
+        #     if updatedFileList:
+        #         with SessionLocal() as db:
+        #             delete_file_list(db, self.database_row_id, None)
         finally:
             try:
                 if streamlink_proc:
@@ -238,9 +248,8 @@ class DownloadBase(ABC):
 
         def x():
             # 将文件名和直播标题存储到数据库
-            if self.is_download or self.downloader == 'stream-gears':
-                with SessionLocal() as db:
-                    update_file_list(db, self.database_row_id, file_name)
+            with SessionLocal() as db:
+                update_file_list(db, self.database_row_id, file_name)
             if self.segment_processor:
                 try:
                     if not self.segment_processor_parallel and prev_thread:
@@ -460,9 +469,6 @@ class DownloadBase(ABC):
                 if os.path.exists(f"{fmt_file_name}.{self.suffix}"):
                     file_time += 1
                 else:
-                    if not self.is_download: # stream-gears 不使用 fmt_name
-                        with SessionLocal() as db:
-                            update_file_list(db, self.database_row_id, fmt_file_name)
                     return fmt_file_name
         else:
             return filename

@@ -39,7 +39,6 @@ class Bililive(DownloadBase):
         OFFICIAL_API = "https://api.live.bilibili.com"
         room_id = match1(self.url, r'/(\d+)')
         qualityNumber = int(config.get('bili_qn', 10000))
-        plugin_msg = f"Bililive - {self.url}"
 
         client.headers.update(self.fake_headers)
         # 获取直播状态与房间标题
@@ -47,13 +46,13 @@ class Bililive(DownloadBase):
         try:
             room_info = (await client.get(info_by_room_url, timeout=5)).json()
         except:
-            logger.exception(f"{plugin_msg}: ")
+            logger.exception(f"{self.plugin_msg}: ")
             return False
         if room_info['code'] != 0:
-            logger.error(f"{plugin_msg}: {room_info}")
+            logger.error(f"{self.plugin_msg}: {room_info}")
             return False
         if room_info['data']['room_info']['live_status'] != 1:
-            logger.debug(f"{plugin_msg}: 未开播")
+            logger.debug(f"{self.plugin_msg}: 未开播")
             return False
         self.live_cover_url = room_info['data']['room_info']['cover']
         live_start_time = room_info['data']['room_info']['live_start_time']
@@ -104,7 +103,7 @@ class Bililive(DownloadBase):
             # 前面拿不到 streamName，目前使用开播时间判断
             url = await self.acheck_url_healthy(self.raw_stream_url)
             if url is not None:
-                logger.debug(f"{plugin_msg}: 复用 {url}")
+                logger.debug(f"{self.plugin_msg}: 复用 {url}")
                 return True
             else:
                 self.raw_stream_url = None
@@ -112,16 +111,16 @@ class Bililive(DownloadBase):
         try:
             play_info = await get_play_info(main_api, params)
             if play_info is None or check_areablock(play_info['data']['playurl_info']['playurl']):
-                logger.debug(f"{plugin_msg}: {main_api} 返回 {play_info}")
+                logger.debug(f"{self.plugin_msg}: {main_api} 返回 {play_info}")
                 play_info = await get_play_info(fallback_api, params)
                 if play_info is None or check_areablock(play_info['data']['playurl_info']['playurl']):
-                    logger.debug(f"{plugin_msg}: {fallback_api} 返回 {play_info}")
+                    logger.debug(f"{self.plugin_msg}: {fallback_api} 返回 {play_info}")
                     return False
         except Exception:
-            logger.exception(f"{plugin_msg}: ")
+            logger.exception(f"{self.plugin_msg}: ")
             return False
         if play_info['code'] != 0:
-            logger.error(f"{plugin_msg}: {play_info}")
+            logger.error(f"{self.plugin_msg}: {play_info}")
             return False
 
         streams = play_info['data']['playurl_info']['playurl']['stream']
@@ -132,11 +131,11 @@ class Bililive(DownloadBase):
                 if len(stream['format']) > 1:
                     stream_format = stream['format'][1]
                 elif int(time.time()) - live_start_time <= 60:
-                    logger.warning(f"{plugin_msg}: 暂时未提供 hls_fmp4 流，等待下一次检测")
+                    logger.warning(f"{self.plugin_msg}: 暂时未提供 hls_fmp4 流，等待下一次检测")
                     return False
                 else:
                     stream_format = streams[0]['format'][0]
-                    logger.info(f"{plugin_msg}: 已切换为 stream 流")
+                    logger.info(f"{self.plugin_msg}: 已切换为 stream 流")
         stream_info = stream_format['codec'][0]
 
         stream_url = {
@@ -166,7 +165,7 @@ class Bililive(DownloadBase):
                 if (await self.acheck_url_healthy(f"{stream_url['host']}{_base_url}{stream_url['extra']}")) is not None:
                     stream_url['base_url'] = _base_url
                 else:
-                    logger.debug(f"{plugin_msg}: force_source {_base_url}")
+                    logger.debug(f"{self.plugin_msg}: force_source {_base_url}")
 
         if cn01_sids:
             if "cn-gotcha01" in stream_url['extra']:
@@ -177,7 +176,7 @@ class Bililive(DownloadBase):
                         stream_url['host'] = _host
                         break
                     else:
-                        logger.debug(f"{plugin_msg}: {sid} is not available")
+                        logger.debug(f"{self.plugin_msg}: {sid} is not available")
 
         self.raw_stream_url = f"{stream_url['host']}{stream_url['base_url']}{stream_url['extra']}"
 

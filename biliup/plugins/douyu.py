@@ -9,6 +9,7 @@ from ..common import tools
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from ..plugins import logger, match1
+from httpx._exceptions import *
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?douyu\.com')
@@ -18,10 +19,8 @@ class Douyu(DownloadBase):
         self.douyu_danmaku = config.get('douyu_danmaku', False)
 
     async def acheck_stream(self, is_check=False):
-        plugin_msg = f"Douyu - {self.url}"
-
         if len(self.url.split("douyu.com/")) < 2:
-            logger.error(f"{plugin_msg}: 直播间地址错误")
+            logger.error(f"{self.plugin_msg}: 直播间地址错误")
             return False
 
         try:
@@ -31,10 +30,10 @@ class Douyu(DownloadBase):
                 resp = await client.get(self.url, headers=self.fake_headers, timeout=5)
                 room_id = match1(resp.text, r'\$ROOM\.room_id\s*=\s*(\d+)', r'apm_room_id\s*=\s*(\d+)')[0]
             if not room_id:
-                logger.error(f"{plugin_msg}: 直播间不存在或已关闭")
+                logger.error(f"{self.plugin_msg}: 直播间不存在或已关闭")
                 return False
         except:
-            logger.exception(f"{plugin_msg}: 获取房间号错误")
+            logger.exception(f"{self.plugin_msg}: 获取房间号错误")
             return False
 
         try:
@@ -42,24 +41,24 @@ class Douyu(DownloadBase):
                 await client.get(f"https://www.douyu.com/betard/{room_id}",
                                  headers=self.fake_headers, timeout=5)
                         ).json()['room']
-            if room_info['show_status'] != 1:
-                logger.debug(f"{plugin_msg}: 未开播")
-                return False
-            if room_info['videoLoop'] != 0:
-                logger.debug(f"{plugin_msg}: 正在放录播")
-                return False
-            self.room_title = room_info['room_name']
         except:
-            logger.exception(f"{plugin_msg}: 获取直播间信息错误")
-            logger.debug(f"{plugin_msg}: room_info {room_info}")
+            logger.exception(f"{self.plugin_msg}: 获取直播间信息错误")
             return False
+
+        if room_info['show_status'] != 1:
+            logger.debug(f"{self.plugin_msg}: 未开播")
+            return False
+        if room_info['videoLoop'] != 0:
+            logger.debug(f"{self.plugin_msg}: 正在放录播")
+            return False
+        self.room_title = room_info['room_name']
 
         if is_check:
             try:
                 import jsengine
                 ctx = jsengine.jsengine()
             except jsengine.exceptions.RuntimeError as e:
-                logger.error(f"{e}\n请至少安装一个 Javascript 解释器")
+                logger.error(f"{e}\n请至少安装一个 Javascript 解释器，如 pip install quickjs")
                 return False
             return True
 
@@ -82,7 +81,7 @@ class Douyu(DownloadBase):
 
             params = parse_qs(ctx.eval(sign_fun))
         except:
-            logger.exception(f"{plugin_msg}: 获取签名参数异常")
+            logger.exception(f"{self.plugin_msg}: 获取签名参数异常")
             return False
 
         params['cdn'] = config.get('douyucdn', 'tct-h5')
@@ -92,10 +91,9 @@ class Douyu(DownloadBase):
         try:
             live_data = await self.get_play_info(room_id, params)
             self.raw_stream_url = f"{live_data['rtmp_url']}/{live_data['rtmp_live']}"
-        except KeyError:
-            logger.debug(f"{plugin_msg}: live_data {live_data}")
         except:
-            logger.exception(f"{plugin_msg}: ")
+            logger.exception(f"{self.plugin_msg}: ")
+            return False
 
         return True
 
@@ -103,7 +101,7 @@ class Douyu(DownloadBase):
         if self.douyu_danmaku:
             self.danmaku = DanmakuClient(self.url, self.gen_download_filename())
 
-    async def get_play_info(self, room_id, params, retry=False):
+    async def get_play_info(self, room_id, params):
         __cdn_check = lambda _name, _list: any(_name in _item['cdn'] for _item in _list)
 
         live_data = (
@@ -111,9 +109,9 @@ class Douyu(DownloadBase):
                                 headers=self.fake_headers, params=params, timeout=5)
                     ).json().get('data')
         if isinstance(live_data, dict):
-            if live_data['rtmp_cdn'].endswith('h5') or 'akm' in live_data['rtmp_cdn']:
-                params['cdn'] = 'tct-h5' if __cdn_check('tct-h5', live_data['multirates']) \
-                                         else live_data['multirates'][-1]['cdn']
+            if not live_data['rtmp_cdn'].endswith('h5') or 'akm' in live_data['rtmp_cdn']:
+                params['cdn'] = 'tct-h5' if __cdn_check('tct-h5', live_data['cdnsWithName']) \
+                                         else live_data['cdnsWithName'][-1]['cdn']
                 return await self.get_play_info(room_id, params)
             return live_data
         return None
