@@ -70,26 +70,26 @@ class Huya(DownloadBase):
             return False
 
         # 虎牙直播流只允许连接一次，非常丑陋的代码
-        if cdn_fallback:
-            # with requests.Session() as s:
-            biliup.common.util.client.headers = self.fake_headers.copy()
-            url_health, _ = self.acheck_url_healthy(stream_url)
-            if not url_health:
-                logger.debug(f"{plugin_msg}: {list(sCdns.keys())}")
-                for sCdn in sCdns.keys():
-                    if sCdn == perf_cdn:
-                        continue
-                    logger.warning(f"{plugin_msg}: {perf_cdn} 无法连接，尝试 {sCdn}")
-                    stream_url, _ = await _build_stream_url(room_id, sCdn, self.fake_headers)
-                    url_health, _ = await self.acheck_url_healthy(stream_url)
-                    if url_health:
-                        perf_cdn = sCdn
-                        logger.warning(f"{plugin_msg}: CDN 切换为 {perf_cdn}")
-                        stream_url, _ = await _build_stream_url(room_id, perf_cdn, self.fake_headers)
-                        logger.debug(f"{plugin_msg}: {stream_url}")
-                        break
-                else:
-                    return False
+        # if cdn_fallback:
+        #     # with requests.Session() as s:
+        #     biliup.common.util.client.headers = self.fake_headers.copy()
+        #     url_health, _ = self.acheck_url_healthy(stream_url)
+        #     if not url_health:
+        #         logger.debug(f"{plugin_msg}: {list(sCdns.keys())}")
+        #         for sCdn in sCdns.keys():
+        #             if sCdn == perf_cdn:
+        #                 continue
+        #             logger.warning(f"{plugin_msg}: {perf_cdn} 无法连接，尝试 {sCdn}")
+        #             stream_url, _ = await _build_stream_url(room_id, sCdn, self.fake_headers)
+        #             url_health, _ = await self.acheck_url_healthy(stream_url)
+        #             if url_health:
+        #                 perf_cdn = sCdn
+        #                 logger.warning(f"{plugin_msg}: CDN 切换为 {perf_cdn}")
+        #                 stream_url, _ = await _build_stream_url(room_id, perf_cdn, self.fake_headers)
+        #                 logger.debug(f"{plugin_msg}: {stream_url}")
+        #                 break
+        #         else:
+        #             return False
 
         self.room_title = html_info['data'][0]['gameLiveInfo']['introduction']
         self.raw_stream_url = stream_url

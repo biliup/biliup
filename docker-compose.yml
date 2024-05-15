@@ -1,0 +1,11 @@
+version: '3'
+services:
+  biliup:
+    image: ghcr.io/biliup/caution:latest
+    container_name: biliup
+    restart: unless-stopped
+    ports:
+      - "<HOST_ADDRESS>:<HOST_PORT>:19159"
+    volumes:
+      - /path/to/save_folder:/opt
+    command: --password <your_password>

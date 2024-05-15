@@ -105,8 +105,8 @@ class DownloadBase(ABC):
             # 其他流stream_gears会按hls保存为ts
             self.suffix = 'ts'
         stream_gears_download(self.raw_stream_url, self.fake_headers, self.gen_download_filename(),
-                              config.get('segment_time'),
-                              config.get('file_size'),
+                              self.segment_time,
+                              self.file_size,
                               lambda file_name: self.__download_segment_callback(file_name))
         return True
 
@@ -213,7 +213,7 @@ class DownloadBase(ABC):
                 # 文件重命名
                 self.download_file_rename(f'{fmt_file_name}.{self.suffix}.part', f'{fmt_file_name}.{self.suffix}')
                 # 触发分段事件
-                self.__download_segment_callback(f'{fmt_file_name}.{self.suffix}', is_stop=True)
+                self.__download_segment_callback(f'{fmt_file_name}.{self.suffix}')
                 return True
             else:
                 return False
@@ -227,14 +227,14 @@ class DownloadBase(ABC):
             except:
                 logger.exception(f'terminate {self.fname} failed')
 
-    def __download_segment_callback(self, file_name: str, is_stop=False):
+    def __download_segment_callback(self, file_name: str):
         """
         分段后触发返回含后戳的文件名
         """
         exclude_ext_file_name = os.path.splitext(file_name)[0]
         danmaku_file_name = os.path.splitext(file_name)[0] + '.xml'
         if self.danmaku:
-            self.danmaku.segment(danmaku_file_name, is_stop)
+            self.danmaku.save(danmaku_file_name)
 
         def x():
             # 将文件名和直播标题存储到数据库

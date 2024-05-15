@@ -12,7 +12,7 @@ import {
     Space,
     Toast,
     Notification,
-    Typography,
+    Typography, Tabs, TabPane,
 } from "@douyinfe/semi-ui";
 import { registerMediaQuery, responsiveMap } from "@/app/lib/utils";
 import { IconPlusCircle, IconStar, IconGlobe } from "@douyinfe/semi-icons";
@@ -134,7 +134,7 @@ const Dashboard: React.FC = () => {
                 ></Nav>
             </Header>
             <Content>
-                <div className={styles.rootConfigPanel}>
+                <main className={styles.rootConfigPanel}>
                     <div className={styles.main}>
                         <div className={styles.content}>
                             <Form
@@ -167,64 +167,76 @@ const Dashboard: React.FC = () => {
                                     (formRef.current = formApi)
                                 }
                             >
-                                {/* 全局设置 */}
-                                <Global />
-                                <Space />
-                                {/* 各平台下载 */}
-                                <div className={styles.framePlatformConfig}>
-                                    <div className={styles.frameInside}>
-                                        <div className={styles.group}>
-                                            <div
-                                                className={
-                                                    styles.buttonOnlyIconSecond
-                                                }
-                                            >
-                                                <div
-                                                    className={styles.lineStory}
-                                                    style={{
-                                                        color: "var(--semi-color-bg-0)",
-                                                        display: "flex",
-                                                    }}
-                                                >
-                                                    <IconGlobe size="small" />
+                                <Tabs type="line" contentStyle={{
+                                    maxWidth: 965,
+                                    // marginLeft: 'auto',
+                                    // marginRight: 'auto',
+                                    margin: '10px auto 0 auto'
+                                }}>
+                                    <TabPane tab="全局设置" itemKey="1">
+                                        {/* 全局设置 */}
+                                        <Global />
+                                    </TabPane>
+                                    <TabPane tab="各平台下载" itemKey="2">
+                                        {/* 各平台下载 */}
+                                        <div className={styles.framePlatformConfig}>
+                                            <div className={styles.frameInside}>
+                                                <div className={styles.group}>
+                                                    <div
+                                                        className={
+                                                            styles.buttonOnlyIconSecond
+                                                        }
+                                                    >
+                                                        <div
+                                                            className={styles.lineStory}
+                                                            style={{
+                                                                color: "var(--semi-color-bg-0)",
+                                                                display: "flex",
+                                                            }}
+                                                        >
+                                                            <IconGlobe size="small" />
+                                                        </div>
+                                                    </div>
                                                 </div>
+                                                <p
+                                                    className={
+                                                        styles.meegoSharedWebSettin
+                                                    }
+                                                >
+                                                    各平台下载设置
+                                                </p>
                                             </div>
+                                            <Collapse keepDOM style={{ width: '100%' }}>
+                                                {/* 哔哩哔哩 */}
+                                                <Bilibili />
+                                                {/* 抖音 */}
+                                                <Douyin />
+                                                {/* 斗鱼 */}
+                                                <Douyu />
+                                                {/* 虎牙 */}
+                                                <Huya />
+                                                {/* 老鼠台 */}
+                                                <Twitch entity={entity} />
+                                                {/* Twitcasting */}
+                                                <Twitcasting />
+                                                {/* 油管 */}
+                                                <YouTube entity={entity} />
+                                                {/* 饼干 */}
+                                                <Cookie entity={entity} list={list} />
+                                            </Collapse>
                                         </div>
-                                        <p
-                                            className={
-                                                styles.meegoSharedWebSettin
-                                            }
-                                        >
-                                            各平台下载设置
-                                        </p>
-                                    </div>
-                                    <Collapse keepDOM style={{ width: '100%' }}>
-                                        {/* 哔哩哔哩 */}
-                                        <Bilibili />
-                                        {/* 抖音 */}
-                                        <Douyin />
-                                        {/* 斗鱼 */}
-                                        <Douyu />
-                                        {/* 虎牙 */}
-                                        <Huya />
-                                        {/* 老鼠台 */}
-                                        <Twitch entity={entity} />
-                                        {/* Twitcasting */}
-                                        <Twitcasting />
-                                        {/* 油管 */}
-                                        <YouTube entity={entity} />
-                                        {/* 饼干 */}
-                                        <Cookie entity={entity} list={list} />
-                                    </Collapse>
-                                </div>
+                                     </TabPane>
+                                    <TabPane tab="开发者选项" itemKey="3">
+                                        {/* 开发者选项 */}
+                                        <Developer />
+                                    </TabPane>
+                                </Tabs>
                                 <Space />
-                                {/* 开发者选项 */}
-                                <Developer />
                                 <Space style={{ height: "160px" }} />
                             </Form>
                         </div>
                     </div>
-                </div>
+                </main>
             </Content>
         </>
     );

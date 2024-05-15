@@ -1,34 +1,36 @@
 @media screen and (min-width: 640px) {
     .rootConfigPanel {
-        align-items: center;
-        background: var(--semi-color-bg-0);
-        flex-direction: column;
-        height: auto;
-        overflow: auto;
-        row-gap: 0;
-        min-width: auto;
-        max-width: auto;
-        display: flex;
-        color: var(--semi-color-text-0);
-        font-family: Inter;
-        font-size: 20px;
-        font-weight: 600;
-        letter-spacing: 0.4px;
-        line-height: 28px;
-        text-align: left;
+        padding: 0px 50px 0px 30px;
+        //align-items: center;
+        //background: var(--semi-color-bg-0);
+        //flex-direction: column;
+        //height: auto;
+        //overflow: auto;
+        //row-gap: 0;
+        //min-width: auto;
+        //max-width: auto;
+        //display: flex;
+        //color: var(--semi-color-text-0);
+        //font-family: Inter;
+        //font-size: 20px;
+        //font-weight: 600;
+        //letter-spacing: 0.4px;
+        //line-height: 28px;
+        //text-align: left;
 
         .main {
-            align-items: center;
+            //align-items: center;
             display: flex;
             flex-basis: 0;
             flex-direction: column;
             flex-grow: 1;
-            padding: 40px 0px 0px;
+            //padding: 40px 0px 0px;
             row-gap: 32px;
             align-self: stretch;
 
             .content {
-                align-items: flex-start;
+                //align-items: flex-start;
+                //align-items: center;
                 display: inline-flex;
                 flex-direction: column;
                 row-gap: 32px;
@@ -41,23 +43,24 @@
                 }
 
                 .form {
-                    align-items: flex-start;
-                    display: flex;
-                    flex-direction: column;
-                    row-gap: 16px;
-                    min-width: 50px;
-                    max-width: 965px;
+                    //align-items: flex-start;
+                    //align-items: center;
+                    //display: flex;
+                    //flex-direction: column;
+                    //row-gap: 16px;
+                    //min-width: 50px;
+                    //max-width: 965px;
                     flex-shrink: 0;
-                    color: var(--semi-color-text-0);
-                    font-family: "PingFang SC";
-                    font-size: 16px;
-                    font-weight: 500;
-                    letter-spacing: 0.32px;
-                    line-height: 22px;
-                    text-align: left;
+                    //color: var(--semi-color-text-0);
+                    //font-family: "PingFang SC";
+                    //font-size: 16px;
+                    //font-weight: 500;
+                    //letter-spacing: 0.32px;
+                    //line-height: 22px;
+                    //text-align: left;
 
                     .frameDownload {
-                        align-items: flex-start;
+                        //align-items: flex-start;
                         border-color: rgb(var(--semi-grey-2));
                         border-radius: 6px;
                         border-style: solid;

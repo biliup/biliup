@@ -32,6 +32,27 @@ event_manager = create_event_manager()
 context = event_manager.context
 
 
+async def singleton_check(platform, name, url):
+    from biliup.handler import PRE_DOWNLOAD, UPLOAD
+    context['url_upload_count'].setdefault(url, 0)
+    if context['PluginInfo'].url_status[url] == 1:
+        logger.debug(f'{url} 正在下载中，跳过检测')
+        return
+    # 可能对同一个url同时发送两次上传事件
+    with NamedLock(f"upload_count_{url}"):
+        if context['url_upload_count'][url] > 0:
+            logger.debug(f'{url} 正在上传中，跳过')
+        else:
+            # from .handler import event_manager, UPLOAD
+            # += 不是原子操作
+            context['url_upload_count'][url] += 1
+            event_manager.send_event(Event(UPLOAD, ({'name': name, 'url': url},)))
+    if await platform(name, url).acheck_stream(True):
+        # 需要等待上传文件列表检索完成后才可以开始下次下载
+        with NamedLock(f'upload_file_list_{name}'):
+            event_manager.send_event(Event(PRE_DOWNLOAD, args=(name, url,)))
+
+
 async def shot(event):
     index = 0
     while True:
@@ -105,39 +126,17 @@ class PluginInfo:
             self.coroutines[key] = asyncio.create_task(shot(plugin))
 
     def batch_check_task(self, plugin):
+        from biliup.handler import PRE_DOWNLOAD
+
         async def check_timer():
-            await singleton_check(plugin, None, None)
+            name = None
+            # 如果支持批量检测
+            for turl in await plugin.abatch_check(plugin.url_list):
+                context['url_upload_count'].setdefault(turl, 0)
+                for k, v in config['streamers'].items():
+                    if v.get("url", "") == turl:
+                        name = k
+                event_manager.send_event(Event(PRE_DOWNLOAD, args=(name, turl,)))
 
         timer = Timer(func=check_timer, interval=30)
         self.coroutines[plugin.__name__] = asyncio.create_task(timer.astart())
-
-
-async def singleton_check(platform, name, url):
-    from biliup.handler import PRE_DOWNLOAD, UPLOAD
-
-    if name is None and url is None:
-        # 如果支持批量检测
-        for turl in await platform.abatch_check(platform.url_list):
-            context['url_upload_count'].setdefault(turl, 0)
-            for k, v in config['streamers'].items():
-                if v.get("url", "") == turl:
-                    name = k
-            event_manager.send_event(Event(PRE_DOWNLOAD, args=(name, turl,)))
-        return
-    context['url_upload_count'].setdefault(url, 0)
-    if context['PluginInfo'].url_status[url] == 1:
-        logger.debug(f'{url} 正在下载中，跳过检测')
-        return
-    # 可能对同一个url同时发送两次上传事件
-    with NamedLock(f"upload_count_{url}"):
-        if context['url_upload_count'][url] > 0:
-            logger.debug(f'{url} 正在上传中，跳过')
-        else:
-            # from .handler import event_manager, UPLOAD
-            # += 不是原子操作
-            context['url_upload_count'][url] += 1
-            event_manager.send_event(Event(UPLOAD, ({'name': name, 'url': url},)))
-    if await platform(name, url).acheck_stream(True):
-        # 需要等待上传文件列表检索完成后才可以开始下次下载
-        with NamedLock(f'upload_file_list_{name}'):
-            event_manager.send_event(Event(PRE_DOWNLOAD, args=(name, url,)))
