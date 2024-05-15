@@ -2,12 +2,7 @@
 import React from "react";
 import { Form, Select, Collapse } from "@douyinfe/semi-ui";
 
-type Props = {
-    entity: any;
-};
-
-const Bilibili: React.FC<Props> = (props) => {
-    const entity = props.entity;
+const Bilibili: React.FC = () => {
     return (
         <>
             <Collapse.Panel header="哔哩哔哩" itemKey="bilibili">
@@ -145,14 +140,34 @@ const Bilibili: React.FC<Props> = (props) => {
                         padding: 0,
                     }}
                 />
-                <Form.Switch
-                    field="bili_replace_cn01_sid"
-                    label="替换 CN01 sid (bili_replace_cn01_sid)"
+                <Form.TagInput
+                    allowDuplicates={false}
+                    addOnBlur={true}
+                    separator=','
+                    field="bili_replace_cn01"
+                    extraText="该功能在 bili_force_source 后生效"
+                    label="替换 CN01 sid (bili_replace_cn01)"
                     style={{ width: "100%" }}
                     fieldStyle={{
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
+                    placeholder="可用英文逗号分隔以批量输入 sid，失焦/Enter 保存"
+                    onChange={v => console.log(v)}
+                    rules={[
+                        {
+                            validator: (rule, value) => {
+                                console.log(value)
+                                console.log(Array.isArray(value))
+                                return Array.isArray(value)
+                            }, message: 'should be Array'
+                        },
+                        {
+                            validator: (rule, value) => !!value.every((item: string) => /^cn-[a-z]{2,6}-[a-z]{2}(-[0-9]{2}){2}$/.test(item)),
+                            message: '例: cn-hjlheb-cu-01-01,cn-tj-ct-01-01'
+                        }
+                    ]}
                 />
             </Collapse.Panel>
         </>

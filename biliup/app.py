@@ -44,7 +44,8 @@ async def shot(event):
         cur = event.url_list[index]
         await singleton_check(event, context['PluginInfo'].inverted_index[cur], cur)
         index += 1
-        if context['PluginInfo'].url_status[cur] == 1:
+        skip = context['PluginInfo'].url_status[cur] == 1 and index < len(event.url_list)
+        if skip:
             continue
         await asyncio.sleep(config.get('event_loop_interval', 30))
 

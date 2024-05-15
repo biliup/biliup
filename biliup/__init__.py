@@ -53,10 +53,3 @@ if (3, 10, 6) > sys.version_info >= (3, 8) and platform.system() == 'Windows':
 
     proactor_events._ProactorBasePipeTransport.__del__ = silence_event_loop_closed(
         proactor_events._ProactorBasePipeTransport.__del__)
-
-class DebugLevelFilter(logging.Filter):
-    """
-    A logging filter that blocks any log messages unless the console level is set to DEBUG
-    """
-    def filter(self, record):
-        return logging.getLogger().isEnabledFor(logging.DEBUG)

@@ -80,7 +80,9 @@ class Bililive(DownloadBase):
         force_source = config.get('bili_force_source', False)
         main_api = config.get('bili_liveapi', OFFICIAL_API).rstrip('/')
         fallback_api = config.get('bili_fallback_api', OFFICIAL_API).rstrip('/')
-        cn01_sids = config.get('bili_replace_cn01', '').split(',')
+        cn01_sids = config.get('bili_replace_cn01', [])
+        if isinstance(cn01_sids, str):
+            cn01_sids = cn01_sids.split(',')
         normalize_cn204 = config.get('bili_normalize_cn204', False)
 
         params = {
@@ -165,6 +167,17 @@ class Bililive(DownloadBase):
                     stream_url['base_url'] = _base_url
                 else:
                     logger.debug(f"{plugin_msg}: force_source {_base_url}")
+
+        if cn01_sids:
+            if "cn-gotcha01" in stream_url['extra']:
+                for sid in cn01_sids:
+                    _host = f"https://{sid}.bilivideo.com"
+                    url = f"{_host}{stream_url['base_url']}{stream_url['extra']}"
+                    if (await self.acheck_url_healthy(url)) is not None:
+                        stream_url['host'] = _host
+                        break
+                    else:
+                        logger.debug(f"{plugin_msg}: {sid} is not available")
 
         self.raw_stream_url = f"{stream_url['host']}{stream_url['base_url']}{stream_url['extra']}"
 

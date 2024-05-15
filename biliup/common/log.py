@@ -1,7 +1,7 @@
 import os
 from logging.handlers import TimedRotatingFileHandler
 import time
-
+import logging
 
 class SafeRotatingFileHandler(TimedRotatingFileHandler):
     def __init__(self, filename, when='h', interval=1, backupCount=0, encoding=None, delay=False, utc=False):
@@ -68,3 +68,10 @@ class SafeRotatingFileHandler(TimedRotatingFileHandler):
                     addend = 3600
                 newRolloverAt += addend
         self.rolloverAt = newRolloverAt
+
+class DebugLevelFilter(logging.Filter):
+    """
+    A logging filter that blocks any log messages unless the console level is set to DEBUG
+    """
+    def filter(self, record):
+        return logging.getLogger().isEnabledFor(logging.DEBUG)

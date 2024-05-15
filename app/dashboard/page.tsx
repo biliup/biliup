@@ -200,7 +200,7 @@ const Dashboard: React.FC = () => {
                                     </div>
                                     <Collapse keepDOM style={{ width: '100%' }}>
                                         {/* 哔哩哔哩 */}
-                                        <Bilibili entity={entity} />
+                                        <Bilibili />
                                         {/* 抖音 */}
                                         <Douyin />
                                         {/* 斗鱼 */}
