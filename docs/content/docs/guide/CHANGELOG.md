@@ -20,7 +20,7 @@ top = false
 - ⚠️需要手动操作的更新信息
 
 ## 0.4.58-0.4.59
-⚠️⚠️⚠️⚠️⚠️此版本twitch无法正常下载，建议升级或者降级。
+⚠️⚠️⚠️⚠️⚠️此版本twitch无法正常下载，建议降级v0.4.57,待修复。
 ### What's Changed
 - Update README.md by @ikun1993 in [#926](https://github.com/biliup/biliup/pull/926)
 - 下载流程调整 by @CoolZxp in [#927](https://github.com/biliup/biliup/pull/927)
@@ -29,6 +29,7 @@ top = false
 **Full Changelog**:[v0.4.58...v0.4.59](https://github.com/biliup/biliup/compare/v0.4.58...v0.4.59)
 
 ## 0.4.57-0.4.58
+⚠️⚠️⚠️⚠️⚠️此版本twitch无法正常下载，建议降级v0.4.57,待修复。
 ### What's Changed
 - 🔧使上传转载来源生效 by @CoolZxp in [#910](https://github.com/biliup/biliup/pull/910)
 - [#909](https://github.com/biliup/biliup/pull/909)补充 by @xxxxuanran in [#916](https://github.com/biliup/biliup/pull/916)
