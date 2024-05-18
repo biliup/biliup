@@ -19,6 +19,15 @@ top = false
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 0.4.59-0.4.60
+### What's Changed
+- Update README.md by @viondw in [#930](https://github.com/biliup/biliup/pull/930)
+- 行为调整 by @xxxxuanran in [#25](https://github.com/biliup/biliup/pull/925)
+- 适配白色背景 by @viondw in [#931](https://github.com/biliup/biliup/pull/931)
+
+
+**Full Changelog**:[v0.4.59...v0.4.60](https://github.com/biliup/biliup/compare/v0.4.59...v0.4.60)
+
 ## 0.4.58-0.4.59
 ⚠️⚠️⚠️⚠️⚠️此版本twitch无法正常下载，建议降级v0.4.57,待修复。
 ### What's Changed
