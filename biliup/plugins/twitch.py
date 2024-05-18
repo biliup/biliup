@@ -13,7 +13,6 @@ import biliup.common.util
 from biliup.config import config
 from biliup.plugins.Danmaku import DanmakuClient
 from . import logger
-from ..common import tools
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase, BatchCheck
 
@@ -77,7 +76,7 @@ class Twitch(DownloadBase, BatchCheck):
 
     async def acheck_stream(self, is_check=False):
         channel_name = re.match(VALID_URL_BASE, self.url).group('id').lower()
-        user = await TwitchUtils.post_gql({
+        user = (await TwitchUtils.post_gql({
             "query": '''
                 query query($channel_name:String!) {
                     user(login: $channel_name){
@@ -101,7 +100,7 @@ class Twitch(DownloadBase, BatchCheck):
                 }
             ''',
             'variables': {'channel_name': channel_name}
-        }).get('data', {}).get('user')
+        })).get('data', {}).get('user')
         if not user:
             logger.warning(f"{Twitch.__name__}: {self.url}: 获取错误", exc_info=True)
             return False

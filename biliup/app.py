@@ -63,11 +63,14 @@ async def shot(event):
             index = 0
             continue
         cur = event.url_list[index]
-        await singleton_check(event, context['PluginInfo'].inverted_index[cur], cur)
-        index += 1
-        skip = context['PluginInfo'].url_status[cur] == 1 and index < len(event.url_list)
-        if skip: # 在一次 url_list 内，如果 url 正在下载，则跳过本次等待以加快下一个检测
-            continue
+        try:
+            await singleton_check(event, context['PluginInfo'].inverted_index[cur], cur)
+            index += 1
+            skip = context['PluginInfo'].url_status[cur] == 1 and index < len(event.url_list)
+            if skip:  # 在一次 url_list 内，如果 url 正在下载，则跳过本次等待以加快下一个检测
+                continue
+        except Exception:
+            logger.exception('shot')
         await asyncio.sleep(config.get('event_loop_interval', 30))
 
 
@@ -131,12 +134,15 @@ class PluginInfo:
         async def check_timer():
             name = None
             # 如果支持批量检测
-            for turl in await plugin.abatch_check(plugin.url_list):
-                context['url_upload_count'].setdefault(turl, 0)
-                for k, v in config['streamers'].items():
-                    if v.get("url", "") == turl:
-                        name = k
-                event_manager.send_event(Event(PRE_DOWNLOAD, args=(name, turl,)))
+            try:
+                async for turl in plugin.abatch_check(plugin.url_list):
+                    context['url_upload_count'].setdefault(turl, 0)
+                    for k, v in config['streamers'].items():
+                        if v.get("url", "") == turl:
+                            name = k
+                    event_manager.send_event(Event(PRE_DOWNLOAD, args=(name, turl,)))
+            except Exception:
+                logger.exception('batch_check_task')
 
         timer = Timer(func=check_timer, interval=30)
         self.coroutines[plugin.__name__] = asyncio.create_task(timer.astart())

@@ -7,7 +7,7 @@ import threading
 import time
 import shutil
 from abc import ABC, abstractmethod
-from typing import Generator, List, Callable, Optional
+from typing import AsyncGenerator, List, Callable, Optional
 from urllib.parse import urlparse
 
 import requests
@@ -539,7 +539,7 @@ def get_valid_filename(name):
 class BatchCheck(ABC):
     @staticmethod
     @abstractmethod
-    async def abatch_check(check_urls: List[str]) -> Generator[str, None, None]:
+    async def abatch_check(check_urls: List[str]) -> AsyncGenerator[str, None]:
         """
         批量检测直播或下载状态
         返回的是url_list
