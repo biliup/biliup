@@ -138,6 +138,21 @@ def update_file_list(db: Session, database_row_id: int, file_name: str) -> int:
     return file_list.id
 
 
+# def delete_file_list(db: Session, database_row_id: int, file_name: str) -> int:
+#     """从视频文件列表中删除指定的文件名，返回删除的行数，若不存在则返回 0"""
+#     # 查询数据库以获取对应的streamer_info
+#     streamer_info = db.get(StreamerInfo, database_row_id)
+#     if not streamer_info:
+#         return 0
+#     stmt = delete(FileList).where(
+#         (FileList.file == file_name),
+#         (FileList.streamer_info_id == streamer_info.id)
+#     )
+#     result = db.execute(stmt)
+#     db.commit()
+#     return result.rowcount
+
+
 def get_file_list(db: Session, database_row_id: int) -> List[str]:
     """获取视频文件列表"""
     file_list = db.get(StreamerInfo, database_row_id).filelist

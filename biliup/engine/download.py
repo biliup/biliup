@@ -12,8 +12,9 @@ from urllib.parse import urlparse
 
 import requests
 from requests.utils import DEFAULT_ACCEPT_ENCODING
+from httpx import HTTPStatusError
 
-import biliup.common.util
+from biliup.common.util import client, loop
 from biliup.common import tools
 from biliup.database.db import add_stream_info, SessionLocal, update_cover_path, update_room_title, update_file_list
 from biliup.plugins import random_user_agent
@@ -70,6 +71,8 @@ class DownloadBase(ABC):
 
         # 弹幕客户端
         self.danmaku: Optional[IDanmakuClient] = None
+
+        self.plugin_msg = f"{self.__class__.__name__} - {url}"
 
     @abstractmethod
     async def acheck_stream(self, is_check=False):
@@ -161,6 +164,7 @@ class DownloadBase(ABC):
     def ffmpeg_download(self, use_streamlink=False):
         # streamlink进程
         streamlink_proc = None
+        # updatedFileList = False
         try:
             # 文件名不含后戳
             fmt_file_name = self.gen_download_filename(is_fmt=True)
@@ -203,6 +207,9 @@ class DownloadBase(ABC):
                     f'{fmt_file_name}.{self.suffix}.part']
             with subprocess.Popen(args, stdin=subprocess.DEVNULL if not streamlink_proc else streamlink_proc.stdout,
                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as proc:
+                # with SessionLocal() as db:
+                #     update_file_list(db, self.database_row_id, fmt_file_name)
+                #     updatedFileList = True
                 for line in iter(proc.stdout.readline, b''):  # b'\n'-separated lines
                     decode_line = line.rstrip().decode(errors='ignore')
                     print(decode_line)
@@ -216,6 +223,10 @@ class DownloadBase(ABC):
                 return True
             else:
                 return False
+        # except:
+        #     if updatedFileList:
+        #         with SessionLocal() as db:
+        #             delete_file_list(db, self.database_row_id, None)
         finally:
             try:
                 if streamlink_proc:
@@ -261,7 +272,7 @@ class DownloadBase(ABC):
 
     def run(self):
         try:
-            if not asyncio.run_coroutine_threadsafe(self.acheck_stream(), biliup.common.util.loop).result():
+            if not asyncio.run_coroutine_threadsafe(self.acheck_stream(), loop).result():
                 return False
             with SessionLocal() as db:
                 update_room_title(db, self.database_row_id, self.room_title)
@@ -340,8 +351,8 @@ class DownloadBase(ABC):
                     break
 
         self.download_cover(
-            time.strftime(self.gen_download_filename().encode("unicode-escape").decode(), start_time).encode().decode(
-                "unicode-escape"))
+            time.strftime(self.gen_download_filename().encode("unicode-escape").decode(), end_time if end_time else time.localtime()
+                           ).encode().decode("unicode-escape"))
         # 更新数据库中封面存储路径
         with SessionLocal() as db:
             update_cover_path(db, self.database_row_id, self.live_cover_path)
@@ -407,31 +418,41 @@ class DownloadBase(ABC):
             except:
                 logger.exception(f'封面下载失败：{self.__class__.__name__} - {self.fname}')
 
-    # @staticmethod
-    # async def acheck_url_healthy(url):
-    #     timeout = 5
-    #     try:
-    #         if 'flv' in url:
-    #             timeout = 60
-    #         async with biliup.common.util.client.stream("GET", url, timeout=timeout) as r:
-    #             if 'm3u8' in url:
-    #                 import m3u8
-    #                 m3u8_obj = m3u8.loads(r.text)
-    #                 if m3u8_obj.is_variant:
-    #                     url = m3u8_obj.playlists[0].uri
-    #                     logger.info(f'stream url: {url}')
-    #                     async with biliup.common.util.client.stream("GET", url, timeout=timeout) as r:
-    #                         pass
-    #             elif r.headers.get('Location', False):
-    #                 url = r.headers['Location']
-    #                 logger.info(f'stream url: {url}')
-    #                 async with biliup.common.util.client.stream("GET", url, timeout=timeout) as r:
-    #                     pass
-    #             if r.status_code == 200:
-    #                 return True, url
-    #     except Exception as e:
-    #         logger.exception(f"{e} from {url}")
-    #     return False, None
+    @staticmethod
+    async def acheck_url_healthy(url):
+        timeout = 60 if '.flv' in url else 5
+
+        async def __client_get(url, stream: bool = False):
+            if stream:
+                async with client.stream("GET", url, timeout=timeout, follow_redirects=False) as response:
+                    pass
+            else:
+                response = await client.get(url, timeout=timeout)
+            response.raise_for_status()
+            return response
+
+        try:
+            if '.m3u8' in url:
+                r = await __client_get(url)
+                import m3u8
+                m3u8_obj = m3u8.loads(r.text)
+                if m3u8_obj.is_variant:
+                    url = m3u8_obj.playlists[0].uri
+                    logger.info(f'stream url: {url}')
+                    r = await __client_get(url)
+            else: # 处理 Flv
+                r = await __client_get(url, stream=True)
+                if r.headers.get('Location', False):
+                    url = r.headers['Location']
+                    logger.info(f'stream url: {url}')
+                    r = await __client_get(url, stream=True)
+            if r.status_code == 200:
+                return url
+        except HTTPStatusError as e:
+            logger.error(f'url {url}: status_code-{e.response.status_code}')
+        except:
+            logger.exception(f'url {url} is not healthy')
+        return None
 
     def gen_download_filename(self, is_fmt=False):
         if self.filename_prefix:  # 判断是否存在自定义录播命名设置

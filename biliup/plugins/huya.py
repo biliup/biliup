@@ -21,11 +21,11 @@ class Huya(DownloadBase):
         self.huya_danmaku = config.get('huya_danmaku', False)
 
     async def acheck_stream(self, is_check=False):
+        plugin_msg = f"Huya - {self.url}"
         try:
             room_id = self.url.split('huya.com/')[1].split('/')[0].split('?')[0]
             if not room_id:
                 raise
-            plugin_msg = f"Huya - {room_id}"
         except:
             logger.error(f"Huya - {self.url}: 直播间地址错误")
             return False

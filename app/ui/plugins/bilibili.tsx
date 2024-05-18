@@ -2,12 +2,7 @@
 import React from "react";
 import { Form, Select, Collapse } from "@douyinfe/semi-ui";
 
-type Props = {
-    entity: any;
-};
-
-const Bilibili: React.FC<Props> = (props) => {
-    const entity = props.entity;
+const Bilibili: React.FC = () => {
     return (
         <>
             <Collapse.Panel header="哔哩哔哩" itemKey="bilibili">
@@ -87,13 +82,8 @@ const Bilibili: React.FC<Props> = (props) => {
                 />
                 <Form.Switch
                     field="bili_cdn_fallback"
-                    extraText="CDN 回退（Fallback），默认为开启。例如海外机器优选 ov05 之后，如果 ov05 流一直无法下载，将会自动回退到 ov07 进行下载。"
+                    extraText="CDN 回退（Fallback），默认为关闭。例如海外机器优选 ov05 之后，如果 ov05 流一直无法下载，将会自动回退到 ov07 进行下载。仅限相同流协议。"
                     label="CDN 回退（bili_cdn_fallback）"
-                    initValue={
-                        entity?.hasOwnProperty("bili_cdn_fallback")
-                            ? entity["bili_cdn_fallback"]
-                            : true
-                    }
                     fieldStyle={{
                         alignSelf: "stretch",
                         padding: 0,
@@ -132,24 +122,6 @@ const Bilibili: React.FC<Props> = (props) => {
                         padding: 0,
                     }}
                 />
-                <Form.Input
-                    field="bili_replace_cn01_sid"
-                    label="替换 CN01 sid (bili_replace_cn01_sid)"
-                    style={{ width: "100%" }}
-                    fieldStyle={{
-                        alignSelf: "stretch",
-                        padding: 0,
-                    }}
-                />
-                <Form.Input
-                    field="bili_force_ov05_ip"
-                    label="自定义 OV05 IP (bili_force_ov05_ip)"
-                    style={{ width: "100%" }}
-                    fieldStyle={{
-                        alignSelf: "stretch",
-                        padding: 0,
-                    }}
-                />
                 <Form.Switch
                     field="bili_force_source"
                     extraText="哔哩哔哩强制真原画（仅限非 FLV 流，且画质等级 bili_qn >= 10000），默认为关闭，不保证可用性。"
@@ -167,6 +139,35 @@ const Bilibili: React.FC<Props> = (props) => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                />
+                <Form.TagInput
+                    allowDuplicates={false}
+                    addOnBlur={true}
+                    separator=','
+                    field="bili_replace_cn01"
+                    extraText="该功能在 bili_force_source 后生效"
+                    label="替换 CN01 sid (bili_replace_cn01)"
+                    style={{ width: "100%" }}
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                    showClear={true}
+                    placeholder="可用英文逗号分隔以批量输入 sid，失焦/Enter 保存"
+                    onChange={v => console.log(v)}
+                    rules={[
+                        {
+                            validator: (rule, value) => {
+                                console.log(value)
+                                console.log(Array.isArray(value))
+                                return Array.isArray(value)
+                            }, message: 'should be Array'
+                        },
+                        {
+                            validator: (rule, value) => !!value.every((item: string) => /^cn-[a-z]{2,6}-[a-z]{2}(-[0-9]{2}){2}$/.test(item)),
+                            message: '例: cn-hjlheb-cu-01-01,cn-tj-ct-01-01'
+                        }
+                    ]}
                 />
             </Collapse.Panel>
         </>

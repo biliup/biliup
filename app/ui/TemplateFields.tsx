@@ -154,7 +154,9 @@ const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) =
                     field="tags"
                     label='标签'
                     allowDuplicates={false}
-                    placeholder='输入标签，Enter 确定'
+                    addOnBlur={true}
+                    separator=','
+                    placeholder="可用英文逗号分隔以批量输入标签，失焦/Enter 以保存"
                     onChange={v => console.log(v)}
                     style={{width: 560}}
                     rules={[

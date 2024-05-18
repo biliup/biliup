@@ -54,7 +54,7 @@ check_sourcecode = 15
 #------斗鱼------#
 ### 如遇到斗鱼录制卡顿可以尝试切换线路。
 ### tctc-h5（备用线路4）, tct-h5（备用线路5）, ali-h5（备用线路6）, hw-h5（备用线路7）, hs-h5（备用线路13）
-#douyucdn = "tct-h5"
+#douyu_cdn = "tct-h5"
 ### 录制斗鱼弹幕，默认关闭
 #douyu_danmaku = false
 ### 斗鱼自选画质
@@ -106,10 +106,8 @@ check_sourcecode = 15
 ### 大陆机器玩法：bili_liveapi取消注释保持默认使用官方API，并将bili_fallback_api设置为能获取到海外节点API，然后优选fmp4流并使用streamlink下载器，最后设置优选cn-gotcha208,ov-gotcha05两个节点。
 ### 这样大主播可以使用cn208的fmp4流稳定录制（海外机如需可以通过自建dns优选指定线路的cn208节点），没有fmp4流的小主播也可以回退到ov05（网宿线路，包括大陆与海外节点）录制flv流。
 #bili_fallback_api = 'https://api.live.bilibili.com'
-### CDN自动Fallback开关，默认为开启
-#bili_cdn_fallback = true
-### 强制替换ov-gotcha05的下载地址为指定的自选IP
-#bili_force_ov05_ip = "163.171.197.234"
+### CDN自动Fallback开关，默认为关闭
+#bili_cdn_fallback = false
 ### 强制替换cn-gotcha01（叔叔自建，理论上最稳定）为指定的自选域名组（可多个域名，请用逗号分隔）
 ### 完整CDN列表请参考 https://rec.danmuji.org/dev/bilibili-cdn/ 中"B站视频云"的部分
 ### 此功能目前会和stream-gears冲突导致很多分段，请考虑使用ffmpeg录制
@@ -117,8 +115,7 @@ check_sourcecode = 15
 ### 海外机的玩法：配合一个国内的机器（例如便宜的腾讯云，阿里云等等）自建反代api.live.bilibili.com。或者使用https://docs.qq.com/doc/DV2dvbXBrckNscU9x 此处提供的公用反代API
 ### 如果海外机到联通或者移动网络线路还不错，就可以参考***完整CDN列表***选取一些联通或者移动的节点并填入下面
 ### 每次会随机返回填入的其中一个线路，并且会自动判断所填入的节点是否可用
-#bili_force_cn01 = true
-#bili_force_cn01_domains = "cn-jxnc-cm-01-16.bilivideo.com,cn-gddg-cm-01-06.bilivideo.com,cn-fjqz-cm-01-06.bilivideo.com,cn-jssz-cm-01-02.bilivideo.com,cn-gddg-ct-01-12.bilivideo.com"
+#bili_replace_cn01 = ["cn-jxnc-cm-01-16", "cn-gddg-cm-01-06", "cn-fjqz-cm-01-06", "cn-jssz-cm-01-02", "cn-gddg-ct-01-12"]
 ### 哔哩哔哩自选画质
 ### 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段(仅ffmpeg streamlink)时录制设置的画质
 ### 30000 杜比,20000 4K,10000 原画,401 蓝光(杜比),400 蓝光,250 超清,150 高清,80 流畅,0 B站默认(多数情况下是蓝光 400)

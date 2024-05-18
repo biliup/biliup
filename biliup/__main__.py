@@ -12,6 +12,7 @@ from biliup.database.db import SessionLocal, init
 from . import __version__, LOG_CONF
 from .common.Daemon import Daemon
 from .common.reload import AutoReload
+from .common.log import DebugLevelFilter
 
 
 def arg_parser():
@@ -53,6 +54,7 @@ def arg_parser():
         LOG_CONF['loggers']['biliup']['level'] = args.verbose
         LOG_CONF['root']['level'] = args.verbose
     logging.config.dictConfig(LOG_CONF)
+    logging.getLogger('httpx').addFilter(DebugLevelFilter())
     if platform.system() == 'Windows':
         return asyncio.run(main(args))
     args.func()

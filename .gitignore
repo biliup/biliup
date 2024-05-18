@@ -5,6 +5,7 @@
 *.flv
 *.mp4
 *.part
+*.webm
 backup
 venv./
 .venv/
@@ -23,6 +24,7 @@ ds_update.log*
 dist/
 build/
 cover/
+cache/
 
 *.back
 bili.cookie.json
