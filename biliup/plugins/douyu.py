@@ -56,9 +56,13 @@ class Douyu(DownloadBase):
         if is_check:
             try:
                 import jsengine
-                ctx = jsengine.jsengine()
-            except jsengine.exceptions.RuntimeError as e:
-                logger.error(f"{e}\n请至少安装一个 Javascript 解释器，如 pip install quickjs")
+                try:
+                    ctx = jsengine.jsengine()
+                except jsengine.exceptions.RuntimeError as e:
+                    logger.error(f"{e}\n请至少安装一个 Javascript 解释器，如 pip install quickjs")
+                    return False
+            except:
+                logger.exception(f"{self.plugin_msg}: ")
                 return False
             return True
 
