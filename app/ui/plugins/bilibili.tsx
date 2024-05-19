@@ -157,13 +157,11 @@ const Bilibili: React.FC = () => {
                     onChange={v => console.log(v)}
                     rules={[
                         {
-                            validator: (rule, value) => (console.log(value),
-                            console.log(Array.isArray(value)),
-                            Array.isArray(value) || undefined === value),
-                            message: 'Value should be an array or undefined'
-                        },
-                        {
-                            validator: (rule, value) => Array.isArray(value) ? value.every(item => /^cn-[a-z]{2,6}-[a-z]{2}(-[0-9]{2}){2}$/.test(item)) : undefined === value,
+                            validator: (rule, value) => {
+                                value = value ?? (console.log(value), []);
+                                return Array.isArray(value) ?
+                                    value.every(item => /^cn-[a-z]{2,6}-[a-z]{2}(-[0-9]{2}){2}$/.test(item)) : false;
+                            },
                             message: '例: cn-hjlheb-cu-01-01,cn-tj-ct-01-01'
                         }
                     ]}
