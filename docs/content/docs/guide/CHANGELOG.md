@@ -19,10 +19,66 @@ top = false
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 0.4.59-0.4.60
+### What's Changed
+- Update README.md by @viondw in [#930](https://github.com/biliup/biliup/pull/930)
+- 行为调整 by @xxxxuanran in [#25](https://github.com/biliup/biliup/pull/925)
+- 适配白色背景 by @viondw in [#931](https://github.com/biliup/biliup/pull/931)
+
+
+**Full Changelog**:[v0.4.59...v0.4.60](https://github.com/biliup/biliup/compare/v0.4.59...v0.4.60)
+
+## 0.4.58-0.4.59
+⚠️⚠️⚠️⚠️⚠️此版本twitch无法正常下载，建议降级v0.4.57,待修复。
+### What's Changed
+- Update README.md by @ikun1993 in [#926](https://github.com/biliup/biliup/pull/926)
+- 下载流程调整 by @CoolZxp in [#927](https://github.com/biliup/biliup/pull/927)
+
+
+**Full Changelog**:[v0.4.58...v0.4.59](https://github.com/biliup/biliup/compare/v0.4.58...v0.4.59)
+
+## 0.4.57-0.4.58
+⚠️⚠️⚠️⚠️⚠️此版本twitch无法正常下载，建议降级v0.4.57,待修复。
+### What's Changed
+- 🔧使上传转载来源生效 by @CoolZxp in [#910](https://github.com/biliup/biliup/pull/910)
+- [#909](https://github.com/biliup/biliup/pull/909)补充 by @xxxxuanran in [#916](https://github.com/biliup/biliup/pull/916)
+- 下载流程优化 by @CoolZxp in [#917](https://github.com/biliup/biliup/pull/917)
+- 避免streamlink进程残留 by @CoolZxp in [#918](https://github.com/biliup/biliup/pull/918)
+- 精简 Docker 镜像 by @xxxxuanran in [#921](https://github.com/biliup/biliup/pull/921)
+
+
+**Full Changelog**:[v0.4.57...v0.4.58](https://github.com/biliup/biliup/compare/v0.4.57...v0.4.58)
+
+## 0.4.56-0.4.57
+### What's Changed
+- 下载流程调整 by @CoolZxp in [#906](https://github.com/biliup/biliup/pull/906)
+
+
+**Full Changelog**: [#v0.4.56...v0.4.57](https://github.com/biliup/biliup/compare/v0.4.56...v0.4.57)
+
+## 0.4.55-0.4.56
+### What's Changed
+- 🔧修复按大小分段 by @CoolZxp in [#904](https://github.com/biliup/biliup/pull/904)
+
+
+**Full Changelog**: [v0.4.55...v0.4.6](https://github.com/biliup/biliup/compare/v0.4.55...v0.4.56)
+
+## 0.4.54-0.4.55
+### What's Changed
+- Update README.md by @viondw in [#899](https://github.com/biliup/biliup/pull/899)
+- Update CHANGELOG.md by @viondw in [#900](https://github.com/biliup/biliup/pull/900)
+- 🔧防止分段后处理超出预期的执行次数 by @Kataick in [#902](https://github.com/biliup/biliup/pull/895)
+- 下载功能调整 by @CoolZxp in [#902](https://github.com/biliup/biliup/pull/902)
+- Webui 优化 by @xxxxuanran in [#903](https://github.com/biliup/biliup/pull/903)
+
+
+**Full Changelog**: [v0.4.54...v0.4.55](https://github.com/biliup/biliup/compare/v0.4.54...v0.4.55)
+
 ## 0.4.52-0.4.54
 ### What's Chang
 - 💡任务平台
 - 💡QRcode扫码登陆
+
 
 **Full Changelog**：[v0.4.52-v0.4.54](https://github.com/biliup/biliup/compare/v0.4.52...v0.4.54)
 
