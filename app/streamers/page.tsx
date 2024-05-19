@@ -134,8 +134,8 @@ export default function Home() {
                 <List
                     grid={{
                         gutter: 12,
-                        xs: 20,
-                        sm: 18,
+                        xs: 24,
+                        sm: 24,
                         md: 12,
                         lg: 8,
                         xl: 6,
@@ -147,37 +147,36 @@ export default function Home() {
                             <Card
                             shadows='hover'
                             style={{
-                                maxWidth: 360,
-                                margin: '8px 2px',
-                                flexGrow: 1,
+                                // maxWidth: 360,
+                                margin: '9px 0px',
+                                width: '100%'
+                                // flexGrow: 1,
                             }}
                             bodyStyle={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between'
+                                // display: 'flex',
+                                // alignItems: 'center',
+                                // justifyContent: 'space-between'
                             }}>
-                                <div style={{ position: 'absolute', right: "10%", top: 9}}>{item.status}</div>
-                                <div style={{ flexGrow: 1}}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                        <h3 style={{ color: 'var(--semi-color-text-0)', fontWeight: 500, maxWidth: '60%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.remark}</h3>
-                                    </div>
-                                    <Text ellipsis={{ showTooltip: { opts: { style: { wordBreak: 'break-all' } } } }} type="tertiary">{item.url}</Text>
-                                    <div style={{ margin: '0', display: 'flex', padding: "0 0 32px 0px", justifyContent: 'flex-end' }}>
-                                        <ButtonGroup theme='borderless' style={{ position: 'absolute', right: "10%", bottom: "15%"}}>
-                                            <TemplateModal onOk={handleUpdate} entity={item}>
-                                                <Button theme='borderless' icon={<IconEdit2Stroked />}></Button>
-                                            </TemplateModal>
-                                            <span className="semi-button-group-line semi-button-group-line-borderless semi-button-group-line-primary"></span>
-                                            <Popconfirm
-                                                title="确定是否要删除？"
-                                                content="此操作将不可逆"
-                                                onConfirm={async () => await onConfirm(item.id)}
-                                                // onCancel={onCancel}
-                                            >
-                                                <Button theme='borderless' icon={<IconDeleteStroked />}></Button>
-                                            </Popconfirm>
-                                        </ButtonGroup>
-                                    </div>
+                                <div style={{ position: 'absolute', right: 20, top: 9}}>{item.status}</div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <h3 style={{ color: 'var(--semi-color-text-0)', fontWeight: 500, maxWidth: '60%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.remark}</h3>
+                                </div>
+                                <Text style={{width: '101%'}} ellipsis={{ showTooltip: true }} type="tertiary">{item.url}</Text>
+                                <div style={{ margin: '0', display: 'flex', padding: "0 0 32px 0px", justifyContent: 'flex-end' }}>
+                                    <ButtonGroup theme='borderless' style={{ position: 'absolute', right: 20, bottom: 15}}>
+                                        <TemplateModal onOk={handleUpdate} entity={item}>
+                                            <Button theme='borderless' icon={<IconEdit2Stroked />}></Button>
+                                        </TemplateModal>
+                                        <span className="semi-button-group-line semi-button-group-line-borderless semi-button-group-line-primary"></span>
+                                        <Popconfirm
+                                            title="确定是否要删除？"
+                                            content="此操作将不可逆"
+                                            onConfirm={async () => await onConfirm(item.id)}
+                                            // onCancel={onCancel}
+                                        >
+                                            <Button theme='borderless' icon={<IconDeleteStroked />}></Button>
+                                        </Popconfirm>
+                                    </ButtonGroup>
                                 </div>
                             </Card>
                             

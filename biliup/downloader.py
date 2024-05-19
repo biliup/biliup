@@ -17,3 +17,11 @@ def download(fname, url, **kwargs):
                     pg.__dict__[k] = kwargs.get(k)
             break
     return pg.start()
+
+
+def biliup_download(name, url, kwargs: dict):
+    kwargs.pop('url')
+    suffix = kwargs.get('format')
+    if suffix:
+        kwargs['suffix'] = suffix
+    return download(name, url, **kwargs)

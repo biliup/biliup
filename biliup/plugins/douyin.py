@@ -54,8 +54,11 @@ class Douyin(DownloadBase):
                 self.fake_headers['Cookie'] = f'ttwid={DouyinUtils.get_ttwid()};{self.fake_headers["cookie"]}'
             page = (await biliup.common.util.client.get(
                 DouyinUtils.build_request_url(f"https://live.douyin.com/webcast/room/web/enter/?web_rid={room_id}"),
-                headers=self.fake_headers, timeout=5)).text
-            room_info = json.loads(page)['data']['data']
+                headers=self.fake_headers, timeout=5)).json()
+            room_info = page.get('data').get('data')
+            if room_info is None:
+                logger.warning(f"{Douyin.__name__}: {self.url}: {page}")
+                return False
             if len(room_info) > 0:
                 room_info = room_info[0]
             else:

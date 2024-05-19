@@ -12,7 +12,7 @@ from biliup.config import config
 from .app import event_manager, context
 from .common.tools import NamedLock, processor
 from .database.db import get_stream_info_by_filename, SessionLocal
-from .downloader import download
+from .downloader import biliup_download
 from .engine.event import Event
 from .engine.upload import UploadBase
 from .uploader import upload, fmt_title_and_desc
@@ -50,13 +50,8 @@ def process(name, url):
     url_status = context['PluginInfo'].url_status
     # 下载开始
     try:
-        kwargs: dict = config['streamers'][name].copy()
-        kwargs.pop('url')
-        suffix = kwargs.get('format')
-        if suffix:
-            kwargs['suffix'] = suffix
         url_status[url] = 1
-        stream_info = download(name, url, **kwargs)
+        stream_info = biliup_download(name, url, config['streamers'][name].copy())
         # 永远不可能有两个同url的下载线程
         # 可能对同一个url同时发送两次上传事件
         with NamedLock(f"upload_count_{url}"):
