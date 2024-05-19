@@ -204,15 +204,15 @@ async def streamers(request):
     res = []
     with SessionLocal() as db:
         result = db.scalars(select(StreamerInfo))
-    for s_info in result:
-        streamer_info = s_info.as_dict()
-        streamer_info['files'] = []
-        for file in s_info.filelist:
-            tmp = file.as_dict()
-            del tmp['streamer_info_id']
-            streamer_info['files'].append(tmp)
-        streamer_info['date'] = int(streamer_info['date'].timestamp())
-        res.append(streamer_info)
+        for s_info in result:
+            streamer_info = s_info.as_dict()
+            streamer_info['files'] = []
+            for file in s_info.filelist:
+                tmp = file.as_dict()
+                del tmp['streamer_info_id']
+                streamer_info['files'].append(tmp)
+            streamer_info['date'] = int(streamer_info['date'].timestamp())
+            res.append(streamer_info)
     return web.json_response(res)
 
 
@@ -222,19 +222,19 @@ async def streamers(request):
     res = []
     with SessionLocal() as db:
         result = db.scalars(select(LiveStreamers))
-    for ls in result:
-        temp = ls.as_dict()
-        url = temp['url']
-        status = 'Idle'
-        if context['PluginInfo'].url_status.get(url) == 1:
-            status = 'Working'
-        if context['url_upload_count'].get(url, 0) > 0:
-            status = 'Inspecting'
-        temp['status'] = status
-        if temp.get("upload_streamers_id"):  # 返回 upload_id 而不是 upload_streamers
-            temp["upload_id"] = temp["upload_streamers_id"]
-        temp.pop("upload_streamers_id")
-        res.append(temp)
+        for ls in result:
+            temp = ls.as_dict()
+            url = temp['url']
+            status = 'Idle'
+            if context['PluginInfo'].url_status.get(url) == 1:
+                status = 'Working'
+            if context['url_upload_count'].get(url, 0) > 0:
+                status = 'Inspecting'
+            temp['status'] = status
+            if temp.get("upload_streamers_id"):  # 返回 upload_id 而不是 upload_streamers
+                temp["upload_id"] = temp["upload_streamers_id"]
+            temp.pop("upload_streamers_id")
+            res.append(temp)
     return web.json_response(res)
 
 
@@ -256,9 +256,9 @@ async def add_lives(request):
         except Exception as e:
             logger.exception("Error handling request")
             return web.HTTPBadRequest(text=str(e))
-    config.load_from_db(db)
-    context['PluginInfo'].add(json_data['remark'], json_data['url'])
-    return web.json_response(to_save.as_dict())
+        config.load_from_db(db)
+        context['PluginInfo'].add(json_data['remark'], json_data['url'])
+        return web.json_response(to_save.as_dict())
 
 
 @routes.put('/v1/streamers')
@@ -300,7 +300,7 @@ async def streamers(request):
     # LiveStreamers.delete_by_id(request.match_info['id'])
         db.delete(org)
         db.commit()
-    context['PluginInfo'].delete(org.url)
+        context['PluginInfo'].delete(org.url)
     return web.HTTPOk()
 
 
@@ -414,11 +414,12 @@ async def users(request):
             record = db.execute(
                 select(Configuration).where(Configuration.key == 'config')
             ).scalar_one()
+            return web.json_response(json.loads(record.value))
     except NoResultFound:
         return web.json_response({})
     except MultipleResultsFound as e:
         return web.json_response({"status": 500, 'error': f"有多个空间配置同时存在: {e}"}, status=500)
-    return web.json_response(json.loads(record.value))
+
 
 
 @routes.put('/v1/configuration')
