@@ -159,8 +159,7 @@ const Bilibili: React.FC = () => {
                         {
                             validator: (rule, value) => {
                                 value = value ?? (console.log(value), []);
-                                return Array.isArray(value) ?
-                                    value.every(item => /^cn-[a-z]{2,6}-[a-z]{2}(-[0-9]{2}){2}$/.test(item)) : false;
+                                return Array.isArray(value) && value.every(item => /^cn-[a-z]{2,6}-[a-z]{2}(-[0-9]{2}){2}$/.test(item));
                             },
                             message: '例: cn-hjlheb-cu-01-01,cn-tj-ct-01-01'
                         }
