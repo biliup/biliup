@@ -32,6 +32,7 @@ class CC(DownloadBase):
                 timeout=5,
                 headers=self.fake_headers
             )).json()["data"][0]
+            self.room_title = channel_info["title"]
             if config.get("cc_protocol", "hls") == "hls":
                 self.raw_stream_url = channel_info["sharefile"]
             else:
