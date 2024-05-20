@@ -418,11 +418,11 @@ class DownloadBase(ABC):
             except:
                 logger.exception(f'封面下载失败：{self.__class__.__name__} - {self.fname}')
 
-    @staticmethod
-    async def acheck_url_healthy(url):
+    async def acheck_url_healthy(self, url):
         timeout = 60 if '.flv' in url else 5
 
         async def __client_get(url, stream: bool = False):
+            client.headers.update(self.fake_headers)
             if stream:
                 async with client.stream("GET", url, timeout=timeout, follow_redirects=False) as response:
                     pass
@@ -451,7 +451,7 @@ class DownloadBase(ABC):
         except HTTPStatusError as e:
             logger.error(f'url {url}: status_code-{e.response.status_code}')
         except:
-            logger.exception(f'url {url} is not healthy')
+            logger.exception(f'url {url}: ')
         return None
 
     def gen_download_filename(self, is_fmt=False):

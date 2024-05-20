@@ -27,6 +27,7 @@ import styles from "../styles/dashboard.module.scss";
 import Global from "../ui/plugins/global";
 import Cookie from "../ui/plugins/cookie";
 import Bilibili from "../ui/plugins/bilibili";
+import CC from "../ui/plugins/cc";
 import Douyin from "../ui/plugins/douyin";
 import Douyu from "../ui/plugins/douyu";
 import Huya from "../ui/plugins/huya";
@@ -209,6 +210,8 @@ const Dashboard: React.FC = () => {
                                             <Collapse keepDOM style={{ width: '100%' }}>
                                                 {/* 哔哩哔哩 */}
                                                 <Bilibili />
+                                                {/* CC直播 */}
+                                                <CC />
                                                 {/* 抖音 */}
                                                 <Douyin />
                                                 {/* 斗鱼 */}

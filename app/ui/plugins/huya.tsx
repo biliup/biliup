@@ -28,7 +28,7 @@ const Huya: React.FC = () => {
                     ]}
                     showClear={true}
                 >
-                    <Select.Option value={0}>最高画质（0）</Select.Option>
+                    <Select.Option value={0}>原画（0）</Select.Option>
                     <Select.Option value={20000}>蓝光20M（20000）</Select.Option>
                     <Select.Option value={10000}>蓝光10M（10000）</Select.Option>
                     <Select.Option value={8000}>蓝光8M（8000）</Select.Option>
@@ -48,9 +48,9 @@ const Huya: React.FC = () => {
                         <div style={{ fontSize: "14px" }}>
                             如遇到虎牙录制卡顿可以尝试切换线路。可选以下线路
                             <br />
-                            AL（阿里云 - 直播线路3）, TX（腾讯云 - 直播线路5）, HW（华为云 - 直播线路6）, WS（网宿）, HS（火山引擎 - 直播线路14）, AL13（阿里云）, HW16（华为云）
+                            AL（阿里云 - 直播线路3）, TX（腾讯云 - 直播线路5）, HW（华为云 - 直播线路6）, WS（网宿）, HS（火山引擎 - 直播线路14）, AL13（阿里云）, TX15（腾讯云）, HW16（华为云）
                             <br />
-                            HY(星域云 - 直播线路66) 该线路为 PCDN，已被屏蔽，不要设置该线路
+                            HYZJ(虎牙自建 - 直播线路66) 该线路已被屏蔽，不要设置该线路
                         </div>
                     }
                     label="访问线路（huya_cdn）"
@@ -73,6 +73,7 @@ const Huya: React.FC = () => {
                     {/* <Select.Option value="WS">网宿（WS）</Select.Option> */}
                     <Select.Option value="AL13">直播线路13（AL13）</Select.Option>
                     <Select.Option value="HS">直播线路14（HS）</Select.Option>
+                    <Select.Option value="TX15">直播线路15（TX15）</Select.Option>
                     <Select.Option value="HW16">直播线路16（HW16）</Select.Option>
                 </Form.Select>
                 <Form.Switch

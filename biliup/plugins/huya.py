@@ -5,7 +5,7 @@ import random
 import time
 from urllib.parse import parse_qs, unquote
 
-import biliup.common.util
+from biliup.common.util import client
 from biliup.config import config
 from biliup.plugins.Danmaku import DanmakuClient
 from ..common import tools
@@ -70,26 +70,25 @@ class Huya(DownloadBase):
             return False
 
         # 虎牙直播流只允许连接一次，非常丑陋的代码
-        # if cdn_fallback:
-        #     # with requests.Session() as s:
-        #     biliup.common.util.client.headers = self.fake_headers.copy()
-        #     url_health, _ = self.acheck_url_healthy(stream_url)
-        #     if not url_health:
-        #         logger.debug(f"{plugin_msg}: {list(sCdns.keys())}")
-        #         for sCdn in sCdns.keys():
-        #             if sCdn == perf_cdn:
-        #                 continue
-        #             logger.warning(f"{plugin_msg}: {perf_cdn} 无法连接，尝试 {sCdn}")
-        #             stream_url, _ = await _build_stream_url(room_id, sCdn, self.fake_headers)
-        #             url_health, _ = await self.acheck_url_healthy(stream_url)
-        #             if url_health:
-        #                 perf_cdn = sCdn
-        #                 logger.warning(f"{plugin_msg}: CDN 切换为 {perf_cdn}")
-        #                 stream_url, _ = await _build_stream_url(room_id, perf_cdn, self.fake_headers)
-        #                 logger.debug(f"{plugin_msg}: {stream_url}")
-        #                 break
-        #         else:
-        #             return False
+        if cdn_fallback:
+            _url = self.acheck_url_healthy(stream_url)
+            if _url is None:
+                logger.info(f"{plugin_msg}: {list(sCdns.keys())}")
+                for sCdn in sCdns.keys():
+                    if sCdn == perf_cdn:
+                        continue
+                    logger.warning(f"{plugin_msg}: cdn_fallback 尝试 {sCdn}")
+                    stream_url, _ = await _build_stream_url(room_id, sCdn, self.fake_headers)
+                    if (await self.acheck_url_healthy(stream_url)) is None:
+                        continue
+                    perf_cdn = sCdn
+                    logger.info(f"{plugin_msg}: CDN 切换为 {perf_cdn}")
+                    stream_url, _ = await _build_stream_url(room_id, perf_cdn, self.fake_headers)
+                    logger.debug(f"{plugin_msg}: {stream_url}")
+                    break
+                else:
+                    logger.error(f"{self.plugin_msg}: cdn_fallback 所有链接无法使用")
+                    return False
 
         self.room_title = html_info['data'][0]['gameLiveInfo']['introduction']
         self.raw_stream_url = stream_url
@@ -105,7 +104,7 @@ class Huya(DownloadBase):
 
 async def _get_info_in_html(room_id, fake_headers):
     try:
-        html = (await biliup.common.util.client.get(f"https://www.huya.com/{room_id}", timeout=5, headers=fake_headers)).text
+        html = (await client.get(f"https://www.huya.com/{room_id}", timeout=5, headers=fake_headers)).text
         if '找不到这个主播' in html:
             logger.error(f"Huya - {room_id}: 找不到这个主播")
             return {}
@@ -115,7 +114,7 @@ async def _get_info_in_html(room_id, fake_headers):
     return json.loads(html.split('stream: ')[1].split('};')[0])
 
 
-async def _build_stream_url(room_id, perf_cdn, fake_headers):
+async def _build_stream_url(room_id, perf_cdn, fake_headers, allow_imgplus=True):
     html_info = await _get_info_in_html(room_id, fake_headers)
     try:
         streamInfo = html_info['data'][0]['gameStreamInfoList']
@@ -125,7 +124,9 @@ async def _build_stream_url(room_id, perf_cdn, fake_headers):
     stream = streamInfo[0]
     sFlvUrlSuffix, sStreamName, sFlvAntiCode = \
         stream['sFlvUrlSuffix'], stream['sStreamName'], stream['sFlvAntiCode']
-    sCdns = {item['sCdnType']: item['sFlvUrl'] for item in streamInfo if item['sCdnType'] != 'HY'}
+    if not allow_imgplus:
+        sStreamName = sStreamName.replace('-imgplus', '')
+    sCdns = {item['sCdnType']: item['sFlvUrl'] for item in streamInfo if 'HY' not in item['sCdnType']}
     sFlvUrl = sCdns.get(perf_cdn)
     _stream_url = f'{sFlvUrl}/{sStreamName}.{sFlvUrlSuffix}?{_make_query(sStreamName, sFlvAntiCode)}'
     return _stream_url, sCdns

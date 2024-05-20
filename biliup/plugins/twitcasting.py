@@ -15,7 +15,7 @@ VALID_URL_BASE = r"https?://twitcasting\.tv/([^/]+)"
 class Twitcasting(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
-        self.twitcasting_danmaku = config.get('twitcasting_danmaku', True)
+        self.twitcasting_danmaku = config.get('twitcasting_danmaku', False)
         self.twitcasting_password = config.get('twitcasting_password', '')
         self.fake_headers['referer'] = "https://twitcasting.tv/"
         if self.twitcasting_password:
