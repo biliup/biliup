@@ -22,7 +22,7 @@ Before using the biliup, you need to install the [python](https://www.python.org
 
 ```bash
 pipx install biliup
-biliup --http
+biliup
 ```
 
 Visit `http://127.0.0.1:19159/` in the browser.
