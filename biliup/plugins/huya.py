@@ -126,7 +126,7 @@ async def _build_stream_url(room_id, perf_cdn, fake_headers, allow_imgplus=True)
         stream['sFlvUrlSuffix'], stream['sStreamName'], stream['sFlvAntiCode']
     if not allow_imgplus:
         sStreamName = sStreamName.replace('-imgplus', '')
-    sCdns = {item['sCdnType']: item['sFlvUrl'] for item in streamInfo if item['sCdnType'] != 'HY'}
+    sCdns = {item['sCdnType']: item['sFlvUrl'] for item in streamInfo if 'HY' not in item['sCdnType']}
     sFlvUrl = sCdns.get(perf_cdn)
     _stream_url = f'{sFlvUrl}/{sStreamName}.{sFlvUrlSuffix}?{_make_query(sStreamName, sFlvAntiCode)}'
     return _stream_url, sCdns
