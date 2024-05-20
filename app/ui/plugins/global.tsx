@@ -27,7 +27,7 @@ const Global: React.FC = () => {
                 <Form.Select
                     label="下载插件（downloader）"
                     field="downloader"
-                    placeholder="stream-gears"
+                    placeholder="stream-gears（默认）"
                     maxTagCount={3}
                     // initValue="stream-gears"
                     extraText={
@@ -35,8 +35,7 @@ const Global: React.FC = () => {
                             选择全局默认的下载插件, 可选:
                             <br />
                             1.
-                            streamlink（streamlink配合ffmpeg混合下载模式，适合用于下载hls_fmp4与hls_ts流，因为streamlink支持多线程拉取,
-                            使用该模式下载flv流时，将会仅使用ffmpeg。请手动安装streamlink以及ffmpeg）
+                            streamlink（streamlink 用于多线程下载 hls 流，对于 FLV 流将仅使用 ffmpeg。请手动安装ffmpeg）
                             <br />
                             2. ffmpeg（纯ffmpeg下载。请手动安装ffmpeg）
                             <br />
@@ -51,7 +50,7 @@ const Global: React.FC = () => {
                     showClear={true}
                 >
                     <Select.Option value="streamlink">
-                        streamlink（混合模式）
+                        streamlink（hls多线程下载）
                     </Select.Option>
                     <Select.Option value="ffmpeg">ffmpeg</Select.Option>
                     <Select.Option value="stream-gears">

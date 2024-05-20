@@ -1,8 +1,6 @@
-import json
-import re
-
-import biliup.common.util
-from . import logger
+from biliup.common.util import client
+from biliup.config import config
+from . import logger, match1
 from ..common import tools
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
@@ -14,23 +12,35 @@ class CC(DownloadBase):
         super().__init__(fname, url, suffix)
 
     async def acheck_stream(self, is_check=False):
-        logger.debug(self.fname)
-        rid = re.search(r"[0-9]{4,}", self.url).group(0)
-        res = await biliup.common.util.client.get(
+        rid = match1(self.url, r"(\d{4,})")
+        room_info = (await client.get(
             f"https://api.cc.163.com/v1/activitylives/anchor/lives?anchor_ccid={rid}",
             timeout=5,
             headers=self.fake_headers
-        )
-        # res.close()
-        jsons = json.loads(res.text)
-        if jsons["data"]:
-            channel_id = jsons["data"][rid]["channel_id"]
-            res = await biliup.common.util.client.get(
+        )).json()
+        if len(room_info["data"][rid]) <= 1:
+            logger.debug(f"{self.plugin_msg}: 未开播")
+            return False
+
+        if is_check:
+            return True
+
+        try:
+            channel_id = room_info["data"][rid]["channel_id"]
+            channel_info = (await client.get(
                 f"https://cc.163.com/live/channel/?channelids={channel_id}",
                 timeout=5,
                 headers=self.fake_headers
-            )
-            # res.close()
-            jsons = json.loads(res.text)
-            self.raw_stream_url = jsons["data"][0]["sharefile"]
-            return True
+            )).json()["data"][0]
+            if config.get("cc_protocol", "flv") == "hls":
+                self.raw_stream_url = channel_info["sharefile"]
+            else:
+                original = {"vbr": 0}
+                for level in channel_info["quickplay"]["resolution"].values():
+                    original = level if level["vbr"] > original["vbr"] else original
+                self.raw_stream_url = list(original["cdn"].values())[0]
+        except:
+            logger.exception(f"{self.plugin_msg}: ")
+            return False
+
+        return True
