@@ -7,5 +7,7 @@ services:
     ports:
       - "<HOST_ADDRESS>:<HOST_PORT>:19159"
     volumes:
-      - /path/to/save_folder:/opt
-    command: --password <your_password>
+      - /path/to/save_folder:/app
+    environment:
+      # - PUID=0 # Uncomment if you want to change the default user 
+      # - PGID=0 # Uncomment if you want to change the default group
