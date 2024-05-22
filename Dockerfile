@@ -13,7 +13,6 @@ FROM python:3.12-slim as biliup
 ARG repo_url=https://github.com/ForgQi/biliup
 ENV TZ=Asia/Shanghai
 EXPOSE 19159/tcp
-VOLUME /opt
 
 RUN set -eux; \
 	\
@@ -90,6 +89,10 @@ RUN set -eux; \
 		/var/log/*
 
 COPY --from=webui /biliup/biliup/web/public/ /biliup/biliup/web/public/
-WORKDIR /opt
+RUN chmod 777 /biliup/docker-entrypoint.sh
 
-ENTRYPOINT ["biliup"]
+# If WORKDIR is modified, please modify the configuration in docker-entrypoint.sh simultaneously.
+WORKDIR /app
+
+ENTRYPOINT ["/biliup/docker-entrypoint.sh"]
+CMD ["biliup"]
