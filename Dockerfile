@@ -1,6 +1,5 @@
 # Build biliup's web-ui
-FROM node:lts as webui
-ARG repo_url=https://github.com/ForgQi/biliup
+FROM node:20-bookworm as webui
 
 RUN set -eux; \
 	git clone --depth 1 $repo_url; \
@@ -9,7 +8,7 @@ RUN set -eux; \
 	npm run build
 
 # Deploy Biliup
-FROM python:3.12-slim as biliup
+FROM python:3.12-slim-bookworm as biliup
 ARG repo_url=https://github.com/ForgQi/biliup
 ENV TZ=Asia/Shanghai
 EXPOSE 19159/tcp
