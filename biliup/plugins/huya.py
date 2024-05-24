@@ -21,7 +21,6 @@ class Huya(DownloadBase):
         self.huya_danmaku = config.get('huya_danmaku', False)
 
     async def acheck_stream(self, is_check=False):
-        plugin_msg = f"Huya - {self.url}"
         try:
             room_id = self.url.split('huya.com/')[1].split('/')[0].split('?')[0]
             if not room_id:
@@ -34,7 +33,7 @@ class Huya(DownloadBase):
         live_rate_info = html_info.get('vMultiStreamInfo', [])
         if not live_rate_info:
             # 无流 当做没开播
-            logger.debug(f"{plugin_msg} : 未开播")
+            logger.debug(f"{self.plugin_msg} : 未开播")
             return False
 
         if is_check:
@@ -55,36 +54,36 @@ class Huya(DownloadBase):
             else:
                 record_ratio = max_ratio
         except Exception as e:
-            logger.error(f"{plugin_msg}: 在确定码率时发生错误 {e}")
+            logger.error(f"{self.plugin_msg}: 在确定码率时发生错误 {e}")
             return False
 
         huya_cdn = config.get('huyacdn', 'AL')
         perf_cdn = config.get('huya_cdn', huya_cdn).upper()
         cdn_fallback = config.get('huya_cdn_fallback', False)
-        # cdn_fallback = True
+        cdn_fallback = True
 
         stream_url, sCdns = await _build_stream_url(room_id, perf_cdn, self.fake_headers)
         # stream_url = None
         if not stream_url:
-            logger.error(f"{plugin_msg}: 无法获取流地址")
+            logger.error(f"{self.plugin_msg}: 无法获取流地址")
             return False
 
         # 虎牙直播流只允许连接一次，非常丑陋的代码
         if cdn_fallback:
             _url = self.acheck_url_healthy(stream_url)
             if _url is None:
-                logger.info(f"{plugin_msg}: {list(sCdns.keys())}")
+                logger.info(f"{self.plugin_msg}: {list(sCdns.keys())}")
                 for sCdn in sCdns.keys():
                     if sCdn == perf_cdn:
                         continue
-                    logger.warning(f"{plugin_msg}: cdn_fallback 尝试 {sCdn}")
+                    logger.warning(f"{self.plugin_msg}: cdn_fallback 尝试 {sCdn}")
                     stream_url, _ = await _build_stream_url(room_id, sCdn, self.fake_headers)
                     if (await self.acheck_url_healthy(stream_url)) is None:
                         continue
                     perf_cdn = sCdn
-                    logger.info(f"{plugin_msg}: CDN 切换为 {perf_cdn}")
+                    logger.info(f"{self.plugin_msg}: CDN 切换为 {perf_cdn}")
                     stream_url, _ = await _build_stream_url(room_id, perf_cdn, self.fake_headers)
-                    logger.debug(f"{plugin_msg}: {stream_url}")
+                    logger.debug(f"{self.plugin_msg}: {stream_url}")
                     break
                 else:
                     logger.error(f"{self.plugin_msg}: cdn_fallback 所有链接无法使用")

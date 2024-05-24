@@ -235,26 +235,27 @@ class TwitchUtils:
             data = []
             for __ops in ops_list:
                 __data = await TwitchUtils.__post_gql(headers, __ops)
-                data.extend(__data)
+                if __data: # 让检测不抛出异常
+                    data.extend(__data)
             return data
 
+        # 正常下载由上层方法处理
         return await TwitchUtils.__post_gql(headers, ops)
 
     @staticmethod
     async def __post_gql(headers, ops):
-        gql = None
         try:
-            gql = (await client.post(
+            _resp = await client.post(
                 'https://gql.twitch.tv/gql',
                 json=ops,
                 headers=headers,
-                timeout=15)).json()
+                timeout=15)
+            _resp.raise_for_status()
+            gql = _resp.json()
             if isinstance(gql, dict) and gql.get('error') == 'Unauthorized':
                 TwitchUtils.invalid_auth_token()
                 return await TwitchUtils.post_gql(ops)
-            if isinstance(gql, dict) and gql.get('error'):
-                raise Exception(gql['error'])
+            return gql
         except:
-            logger.exception(f"Twitch - __post_gql: {ops}")
-
-        return gql
+            logger.exception(f"Twitch - post_gql: {ops}")
+        return {}

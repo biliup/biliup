@@ -206,6 +206,8 @@ class Bililive(DownloadBase):
                     logger.debug(play_info)
                     self.raw_stream_url = None
                     return False
+            else:
+                self.raw_stream_url = _url
 
         print(self.raw_stream_url)
         return True
