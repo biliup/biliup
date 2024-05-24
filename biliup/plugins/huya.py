@@ -29,7 +29,7 @@ class Huya(DownloadBase):
             logger.error(f"Huya - {self.url}: 直播间地址错误")
             return False
 
-        html_info = await _get_info_in_html(room_id, self.fake_headers)
+        html_info = await self._get_info_in_html(room_id, self.fake_headers)
         live_rate_info = html_info.get('vMultiStreamInfo', [])
         if not live_rate_info:
             # 无流 当做没开播
@@ -62,7 +62,7 @@ class Huya(DownloadBase):
         cdn_fallback = config.get('huya_cdn_fallback', False)
         cdn_fallback = True
 
-        stream_url, sCdns = await _build_stream_url(room_id, perf_cdn, self.fake_headers)
+        stream_url, sCdns = await self._build_stream_url(room_id, perf_cdn, self.fake_headers)
         # stream_url = None
         if not stream_url:
             logger.error(f"{self.plugin_msg}: 无法获取流地址")
@@ -77,12 +77,12 @@ class Huya(DownloadBase):
                     if sCdn == perf_cdn:
                         continue
                     logger.warning(f"{self.plugin_msg}: cdn_fallback 尝试 {sCdn}")
-                    stream_url, _ = await _build_stream_url(room_id, sCdn, self.fake_headers)
+                    stream_url, _ = await self._build_stream_url(room_id, sCdn, self.fake_headers)
                     if (await self.acheck_url_healthy(stream_url)) is None:
                         continue
                     perf_cdn = sCdn
                     logger.info(f"{self.plugin_msg}: CDN 切换为 {perf_cdn}")
-                    stream_url, _ = await _build_stream_url(room_id, perf_cdn, self.fake_headers)
+                    stream_url, _ = await self._build_stream_url(room_id, perf_cdn, self.fake_headers)
                     logger.debug(f"{self.plugin_msg}: {stream_url}")
                     break
                 else:
@@ -101,34 +101,38 @@ class Huya(DownloadBase):
             self.danmaku = DanmakuClient(self.url, self.gen_download_filename())
 
 
-async def _get_info_in_html(room_id, fake_headers):
-    try:
-        html = (await client.get(f"https://www.huya.com/{room_id}", timeout=5, headers=fake_headers)).text
-        if '找不到这个主播' in html:
-            logger.error(f"Huya - {room_id}: 找不到这个主播")
-            return {}
-    except:
-        logger.exception(f"Huya - {room_id}: get_info_in_html")
+    async def _get_info_in_html(self, room_id, fake_headers):
+        try:
+            html = (await client.get(f"https://www.huya.com/{room_id}", timeout=5, headers=fake_headers)).text
+            if '找不到这个主播' in html:
+                logger.error(f"{self.plugin_msg}: 找不到这个主播")
+                return {}
+            return json.loads(html.split('stream: ')[1].split('};')[0])
+        except IndexError:
+            logger.debug(f"{self.plugin_msg}: {html}")
+        except:
+            logger.exception(f"{self.plugin_msg}: get_info_in_html")
         return {}
-    return json.loads(html.split('stream: ')[1].split('};')[0])
 
 
-async def _build_stream_url(room_id, perf_cdn, fake_headers, allow_imgplus=True):
-    html_info = await _get_info_in_html(room_id, fake_headers)
-    try:
-        streamInfo = html_info['data'][0]['gameStreamInfoList']
-    except KeyError:
-        logger.exception(f"Huya - {room_id}: build_stream_url {html_info}")
-        return None, None
-    stream = streamInfo[0]
-    sFlvUrlSuffix, sStreamName, sFlvAntiCode = \
-        stream['sFlvUrlSuffix'], stream['sStreamName'], stream['sFlvAntiCode']
-    if not allow_imgplus:
-        sStreamName = sStreamName.replace('-imgplus', '')
-    sCdns = {item['sCdnType']: item['sFlvUrl'] for item in streamInfo if 'HY' not in item['sCdnType']}
-    sFlvUrl = sCdns.get(perf_cdn)
-    _stream_url = f'{sFlvUrl}/{sStreamName}.{sFlvUrlSuffix}?{_make_query(sStreamName, sFlvAntiCode)}'
-    return _stream_url, sCdns
+    async def _build_stream_url(self, room_id, perf_cdn, fake_headers, allow_imgplus=True):
+        html_info = await self._get_info_in_html(room_id, fake_headers)
+        if not html_info:
+            return None, None
+        try:
+            streamInfo = html_info['data'][0]['gameStreamInfoList']
+        except KeyError:
+            logger.exception(f"{self.plugin_msg}: build_stream_url {html_info}")
+            return None, None
+        stream = streamInfo[0]
+        sFlvUrlSuffix, sStreamName, sFlvAntiCode = \
+            stream['sFlvUrlSuffix'], stream['sStreamName'], stream['sFlvAntiCode']
+        if not allow_imgplus:
+            sStreamName = sStreamName.replace('-imgplus', '')
+        sCdns = {item['sCdnType']: item['sFlvUrl'] for item in streamInfo if 'HY' not in item['sCdnType']}
+        sFlvUrl = sCdns.get(perf_cdn)
+        _stream_url = f'{sFlvUrl}/{sStreamName}.{sFlvUrlSuffix}?{_make_query(sStreamName, sFlvAntiCode)}'
+        return _stream_url, sCdns
 
 
 def _make_query(sStreamName, sFlvAntiCode):

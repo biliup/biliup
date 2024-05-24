@@ -427,7 +427,7 @@ class DownloadBase(ABC):
                 async with client.stream("GET", url, timeout=timeout, follow_redirects=False) as response:
                     pass
             else:
-                response = await client.get(url, timeout=timeout, follow_redirects=False)
+                response = await client.get(url, timeout=timeout)
             if response.status_code not in (301, 302):
                 response.raise_for_status()
             return response
