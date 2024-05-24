@@ -14,6 +14,7 @@ test/
 pdm.lock
 .pdm-python
 config.*.*
+config.yaml
 !public/config.yaml
 /configlog.ini
 ds_update.log*
