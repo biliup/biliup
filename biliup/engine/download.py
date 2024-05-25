@@ -428,7 +428,8 @@ class DownloadBase(ABC):
                     pass
             else:
                 response = await client.get(url, timeout=timeout)
-            response.raise_for_status()
+            if response.status_code not in (301, 302):
+                response.raise_for_status()
             return response
 
         try:
@@ -442,7 +443,7 @@ class DownloadBase(ABC):
                     r = await __client_get(url)
             else: # 处理 Flv
                 r = await __client_get(url, stream=True)
-                if r.headers.get('Location', False):
+                if r.headers.get('Location'):
                     url = r.headers['Location']
                     logger.info(f'stream url: {url}')
                     r = await __client_get(url, stream=True)

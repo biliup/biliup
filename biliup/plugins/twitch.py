@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 
 import yt_dlp
 
-import biliup.common.util
+from biliup.common.util import client
 from biliup.config import config
 from biliup.plugins.Danmaku import DanmakuClient
 from . import logger
@@ -229,16 +229,33 @@ class TwitchUtils:
         if auth_token:
             headers['Authorization'] = f'OAuth {auth_token}'
 
-        gql = await biliup.common.util.client.post(
-            'https://gql.twitch.tv/gql',
-            json=ops,
-            headers=headers,
-            timeout=15)
-        # gql.close()
-        data = gql.json()
+        if isinstance(ops, list):
+            limit = 30
+            ops_list = [ops[i:i + limit] for i in range(0, len(ops), limit)]
+            data = []
+            for __ops in ops_list:
+                __data = await TwitchUtils.__post_gql(headers, __ops)
+                if __data: # 让检测不抛出异常
+                    data.extend(__data)
+            return data
 
-        if isinstance(data, dict) and data.get('error') == 'Unauthorized':
-            TwitchUtils.invalid_auth_token()
-            return await TwitchUtils.post_gql(ops)
+        # 正常下载由上层方法处理
+        return await TwitchUtils.__post_gql(headers, ops)
 
-        return data
+    @staticmethod
+    async def __post_gql(headers, ops):
+        try:
+            _resp = await client.post(
+                'https://gql.twitch.tv/gql',
+                json=ops,
+                headers=headers,
+                timeout=15)
+            _resp.raise_for_status()
+            gql = _resp.json()
+            if isinstance(gql, dict) and gql.get('error') == 'Unauthorized':
+                TwitchUtils.invalid_auth_token()
+                return await TwitchUtils.post_gql(ops)
+            return gql
+        except:
+            logger.exception(f"Twitch - post_gql: {ops}")
+        return {}
