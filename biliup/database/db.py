@@ -171,7 +171,7 @@ def migrate_via_alembic():
     script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "migration")
     versions_scripts_path = os.path.join(script_path, 'versions')
     if not os.path.exists(versions_scripts_path):
-        os.mkdir(versions_scripts_path, 0o700)
+        os.makedirs(versions_scripts_path, 0o700)
     alembic_cfg.set_main_option('script_location', script_path)
     command.stamp(alembic_cfg, 'head', purge=True)  # 将当前标记为最新版
     scripts = command.revision(  # 自动生成迁移脚本

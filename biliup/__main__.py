@@ -9,10 +9,10 @@ import shutil
 import biliup.common.reload
 from biliup.config import config
 from biliup.database.db import SessionLocal, init
-from . import __version__, LOG_CONF
-from .common.Daemon import Daemon
-from .common.reload import AutoReload
-from .common.log import DebugLevelFilter
+from biliup import __version__, LOG_CONF
+from biliup.common.Daemon import Daemon
+from biliup.common.reload import AutoReload
+from biliup.common.log import DebugLevelFilter
 
 
 def arg_parser():
@@ -61,7 +61,7 @@ def arg_parser():
 
 
 async def main(args):
-    from .app import event_manager
+    from biliup.app import event_manager
 
     event_manager.start()
 

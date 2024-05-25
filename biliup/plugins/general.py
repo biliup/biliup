@@ -97,7 +97,7 @@ class Generic(DownloadBase):
         except:
             handlers = [YDownload(self.fname, self.url, 'mp4'), SDownload(self.fname, self.url, 'flv')]
             for handler in handlers:
-                if handler.check_stream():
+                if await handler.acheck_stream():
                     self.handler = handler
                     self.suffix = handler.suffix
                     return True
