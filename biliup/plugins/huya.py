@@ -60,7 +60,7 @@ class Huya(DownloadBase):
         huya_cdn = config.get('huyacdn', 'AL')
         perf_cdn = config.get('huya_cdn', huya_cdn).upper()
         cdn_fallback = config.get('huya_cdn_fallback', False)
-        cdn_fallback = True
+        # cdn_fallback = True
 
         stream_url, sCdns = await self._build_stream_url(room_id, perf_cdn, self.fake_headers)
         # stream_url = None

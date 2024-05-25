@@ -51,6 +51,12 @@ class Douyu(DownloadBase):
         if room_info['videoLoop'] != 0:
             logger.debug(f"{self.plugin_msg}: 正在放录播")
             return False
+        if config.get('douyu_disable_interactive_game', False):
+            gift_info = (await client.get(f"https://www.douyu.com/api/interactive/web/v2/list?rid={room_id}",
+                       headers=self.fake_headers, timeout=5)).json().get('data', {})
+            if gift_info:
+                logger.debug(f"{self.plugin_msg}: 正在运行互动游戏")
+                return False
         self.room_title = room_info['room_name']
 
         if is_check:
