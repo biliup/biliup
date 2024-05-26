@@ -35,6 +35,10 @@ const Douyu: React.FC = () => {
                     field="douyu_danmaku"
                     extraText="录制斗鱼弹幕，默认关闭"
                     label="录制弹幕（douyu_danmaku）"
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
                 />
                 <Form.Select
                     allowCreate={true}
@@ -42,7 +46,7 @@ const Douyu: React.FC = () => {
                     field="douyu_cdn"
                     extraText="如遇到斗鱼录制卡顿可以尝试切换线路。可选以下线路
 tctc-h5（线路4）, tct-h5（线路5）, ali-h5（线路6）, hw-h5（线路7）, hs-h5（线路13）"
-                    label="访问线路（douyucdn）"
+                    label="访问线路（douyu_cdn）"
                     style={{ width: "100%" }}
                     fieldStyle={{
                         alignSelf: "stretch",
@@ -56,6 +60,15 @@ tctc-h5（线路4）, tct-h5（线路5）, ali-h5（线路6）, hw-h5（线路7�
                     <Select.Option value="hw-h5">线路7（hw-h5）</Select.Option>
                     <Select.Option value="hs-h5">线路13（hs-h5）</Select.Option>
                 </Form.Select>
+                <Form.Switch
+                    field="douyu_disable_interactive_game"
+                    extraText="当主播运行了互动游戏，下个分段拒绝录制（小窗运行互动游戏也算入在内，谨慎开启）"
+                    label="拒绝互动游戏（douyu_disable_interactive_game）"
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                />
             </Collapse.Panel>
         </>
     );
