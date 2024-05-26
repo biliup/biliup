@@ -8,7 +8,7 @@ logger = logging.getLogger('biliup')
 
 
 def download(fname, url, **kwargs):
-    pg = general.__plugin__(fname, url)
+    pg = None
     for plugin in Plugin.download_plugins:
         if re.match(plugin.VALID_URL_BASE, url):
             pg = plugin(fname, url)
@@ -16,6 +16,9 @@ def download(fname, url, **kwargs):
                 if kwargs.get(k):
                     pg.__dict__[k] = kwargs.get(k)
             break
+    if not pg:
+        pg = general.__plugin__(fname, url)
+        logger.warning(f'Not found plugin for {fname} -> {url} This may cause problems')
     return pg.start()
 
 
