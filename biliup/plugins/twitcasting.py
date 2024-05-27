@@ -2,8 +2,7 @@ import hashlib
 
 import biliup.common.util
 from biliup.config import config
-from .Danmaku import DanmakuClient
-from ..common import tools
+from biliup.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from ..plugins import logger, match1

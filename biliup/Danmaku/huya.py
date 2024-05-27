@@ -2,7 +2,7 @@ import aiohttp
 from biliup.plugins import random_user_agent
 
 from .tars import tarscore
-from .. import match1
+from biliup.plugins import match1
 
 
 class Huya:

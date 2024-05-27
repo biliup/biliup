@@ -7,8 +7,7 @@ import requests
 import biliup.common.util
 from . import logger, match1
 from biliup.config import config
-from .Danmaku import DanmakuClient
-from ..common import tools
+from biliup.Danmaku import DanmakuClient
 from ..common.tools import NamedLock
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase

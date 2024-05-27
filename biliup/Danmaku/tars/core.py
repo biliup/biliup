@@ -19,10 +19,10 @@
 
 __version__ = "0.0.1"
 
-from biliup.plugins.Danmaku.tars.__tars import TarsInputStream
-from biliup.plugins.Danmaku.tars.__tars import TarsOutputStream
-from biliup.plugins.Danmaku.tars.__tup import TarsUniPacket
-from biliup.plugins.Danmaku.tars.__util import util
+from biliup.Danmaku.tars.__tars import TarsInputStream
+from biliup.Danmaku.tars.__tars import TarsOutputStream
+from biliup.Danmaku.tars.__tup import TarsUniPacket
+from biliup.Danmaku.tars.__util import util
 
 
 class tarscore:

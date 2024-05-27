@@ -25,9 +25,9 @@
 import queue
 import threading
 
-from biliup.plugins.Danmaku.tars.__logger import tarsLogger
-from biliup.plugins.Danmaku.tars.__packet import ResponsePacket
-from biliup.plugins.Danmaku.tars.__servantproxy import ServantProxy
+from biliup.Danmaku.tars.__logger import tarsLogger
+from biliup.Danmaku.tars.__packet import ResponsePacket
+from biliup.Danmaku.tars.__servantproxy import ServantProxy
 
 
 class AsyncProcThread:

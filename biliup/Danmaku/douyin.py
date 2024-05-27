@@ -8,7 +8,7 @@ import json
 from urllib.parse import unquote
 from biliup.config import config
 from .douyin_util.dy_pb2 import ChatMessage, PushFrame, Response
-from .. import match1, random_user_agent
+from biliup.plugins import match1, random_user_agent
 from google.protobuf import json_format
 
 

@@ -11,7 +11,7 @@ import yt_dlp
 
 from biliup.common.util import client
 from biliup.config import config
-from biliup.plugins.Danmaku import DanmakuClient
+from biliup.Danmaku import DanmakuClient
 from . import logger
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase, BatchCheck

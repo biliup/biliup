@@ -15,14 +15,13 @@ from requests.utils import DEFAULT_ACCEPT_ENCODING
 from httpx import HTTPStatusError
 
 from biliup.common.util import client, loop
-from biliup.common import tools
 from biliup.database.db import add_stream_info, SessionLocal, update_cover_path, update_room_title, update_file_list
 from biliup.plugins import random_user_agent
 import stream_gears
 from PIL import Image
 
 from biliup.config import config
-from biliup.plugins.Danmaku import IDanmakuClient
+from biliup.Danmaku import IDanmakuClient
 
 logger = logging.getLogger('biliup')
 

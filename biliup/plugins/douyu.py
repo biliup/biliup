@@ -4,12 +4,10 @@ from urllib.parse import parse_qs
 
 from biliup.common.util import client
 from biliup.config import config
-from biliup.plugins.Danmaku import DanmakuClient
-from ..common import tools
+from biliup.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from ..plugins import logger, match1
-from httpx._exceptions import *
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?douyu\.com')
@@ -40,7 +38,7 @@ class Douyu(DownloadBase):
             room_info = (
                 await client.get(f"https://www.douyu.com/betard/{room_id}",
                                  headers=self.fake_headers, timeout=5)
-                        ).json()['room']
+            ).json()['room']
         except:
             logger.exception(f"{self.plugin_msg}: 获取直播间信息错误")
             return False
@@ -53,7 +51,7 @@ class Douyu(DownloadBase):
             return False
         if config.get('douyu_disable_interactive_game', False):
             gift_info = (await client.get(f"https://www.douyu.com/api/interactive/web/v2/list?rid={room_id}",
-                       headers=self.fake_headers, timeout=5)).json().get('data', {})
+                                          headers=self.fake_headers, timeout=5)).json().get('data', {})
             if gift_info:
                 logger.debug(f"{self.plugin_msg}: 正在运行互动游戏")
                 return False
@@ -77,8 +75,8 @@ class Douyu(DownloadBase):
             ctx = jsengine.jsengine()
             js_enc = (
                 await client.get(f'https://www.douyu.com/swf_api/homeH5Enc?rids={room_id}',
-                                headers=self.fake_headers, timeout=5)
-                     ).json()['data'][f'room{room_id}']
+                                 headers=self.fake_headers, timeout=5)
+            ).json()['data'][f'room{room_id}']
             js_enc = js_enc.replace('return eval', 'return [strc, vdwdae325w_64we];')
 
             sign_fun, sign_v = ctx.eval(f'{js_enc};ub98484234();')
@@ -114,14 +112,15 @@ class Douyu(DownloadBase):
     async def get_play_info(self, room_id, params):
         __cdn_check = lambda _name, _list: any(_name in _item['cdn'] for _item in _list)
 
-        live_data = (
-            await client.post(f'https://www.douyu.com/lapi/live/getH5Play/{room_id}',
-                                headers=self.fake_headers, params=params, timeout=5)
-                    ).json().get('data')
+        live_data = await client.post(f'https://www.douyu.com/lapi/live/getH5Play/{room_id}',
+                              headers=self.fake_headers, params=params, timeout=5)
+        if not live_data.is_success:
+            raise RuntimeError(live_data.text)
+        live_data = live_data.json().get('data')
         if isinstance(live_data, dict):
             if not live_data['rtmp_cdn'].endswith('h5') or 'akm' in live_data['rtmp_cdn']:
                 params['cdn'] = 'tct-h5' if __cdn_check('tct-h5', live_data['cdnsWithName']) \
-                                         else live_data['cdnsWithName'][-1]['cdn']
+                    else live_data['cdnsWithName'][-1]['cdn']
                 return await self.get_play_info(room_id, params)
             return live_data
-        return None
+        raise RuntimeError(live_data)
