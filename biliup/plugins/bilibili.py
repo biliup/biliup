@@ -90,7 +90,7 @@ class Bililive(DownloadBase):
             'format': '0,1,2',  # 0: flv, 1: ts, 2: fmp4
             'codec': '0',  # 0: avc, 1: hevc, 2: av1
             'qn': qualityNumber,
-            'platform': 'html5',  # web, html5, android, ios
+            'platform': 'web',  # web, html5, android, ios
             # 'ptype': '8',
             'dolby': '5',
             # 'panorama': '1' # 全景(不支持 html5)
@@ -110,10 +110,10 @@ class Bililive(DownloadBase):
 
         try:
             play_info = await get_play_info(main_api, params)
-            if play_info is None or check_areablock(play_info['data']['playurl_info']['playurl']):
+            if not play_info or check_areablock(play_info):
                 logger.debug(f"{self.plugin_msg}: {main_api} 返回 {play_info}")
                 play_info = await get_play_info(fallback_api, params)
-                if play_info is None or check_areablock(play_info['data']['playurl_info']['playurl']):
+                if not play_info or check_areablock(play_info):
                     logger.debug(f"{self.plugin_msg}: {fallback_api} 返回 {play_info}")
                     return False
         except Exception:
@@ -134,9 +134,18 @@ class Bililive(DownloadBase):
                     logger.warning(f"{self.plugin_msg}: 暂时未提供 hls_fmp4 流，等待下一次检测")
                     return False
                 else:
+                    # hls_ts 大抵是无了，只能回退 Flv
                     stream_format = streams[0]['format'][0]
                     logger.info(f"{self.plugin_msg}: 已切换为 stream 流")
         stream_info = stream_format['codec'][0]
+        # 防止 hls_fmp4 不转码原画
+        if qualityNumber == 10000 \
+            and qualityNumber not in stream_info['accept_qn'] \
+            and stream['protocol_name'] != streams[0]['protocol_name']:
+            stream_info = streams[0]['format'][0]['codec'][0]
+            logger.warning(
+                f"{self.plugin_msg}: 当前 protocol-{protocol} 未提供原画，尝试回退到 stream 流"
+            )
 
         stream_url = {
             'base_url': stream_info['base_url'],
@@ -224,7 +233,7 @@ async def get_play_info(api, params):
         return (await client.get(full_url, params=params, timeout=5)).json()
     except:
         logger.exception(f'{api} 获取直播流信息失败: ')
-    return None
+    return {}
 
 
 # Copy from room-player.js
@@ -232,7 +241,7 @@ def check_areablock(data):
     '''
     :return: True if area block
     '''
-    if data is None:
+    if not data['data']['playurl_info']['playurl']:
         logger.error('Sorry, bilibili is currently not available in your country according to copyright restrictions.')
         logger.error('非常抱歉，根据版权方要求，您所在的地区无法观看本直播')
         return True
