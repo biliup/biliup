@@ -90,7 +90,7 @@ class Bililive(DownloadBase):
             'format': '0,1,2',  # 0: flv, 1: ts, 2: fmp4
             'codec': '0',  # 0: avc, 1: hevc, 2: av1
             'qn': qualityNumber,
-            'platform': 'web',  # web, html5, android, ios
+            'platform': 'html5',  # web, html5, android, ios
             # 'ptype': '8',
             'dolby': '5',
             # 'panorama': '1' # 全景(不支持 html5)
@@ -218,7 +218,6 @@ class Bililive(DownloadBase):
             else:
                 self.raw_stream_url = _url
 
-        print(self.raw_stream_url)
         return True
 
     def danmaku_init(self):
