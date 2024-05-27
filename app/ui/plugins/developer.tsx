@@ -4,8 +4,22 @@ import styles from "../../styles/dashboard.module.scss";
 import { Form, Select, useFormApi } from "@douyinfe/semi-ui";
 import { IconSetting } from "@douyinfe/semi-icons";
 
+const t = {
+         LOGGING: {
+            root: {
+                handlers: []
+            },
+            loggers: {
+                biliup: {
+                    handlers: []
+                }
+            }
+        }
+    }
+
 const Developer: React.FC = () => {
-    const formApi = useFormApi();
+
+    const formApi = useFormApi<typeof t>();
 
     return (
         <>

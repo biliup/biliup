@@ -6,7 +6,7 @@ import useSWR from "swr";
 import {BiliType, fetcher, StudioEntity} from "../lib/api-streamer";
 import {useBiliUsers, useTypeTree} from "../lib/use-streamers";
 
-const TemplateFields: React.FC<FormFCChild> = ({ formState, formApi, values }) => {
+const TemplateFields: React.FC<FormFCChild<StudioEntity & {isDtime: boolean}>> = ({ formState, formApi, values }) => {
     const { Section, Input, DatePicker, TimePicker, Select, Switch, InputNumber, Checkbox, CheckboxGroup, RadioGroup, Radio, Cascader, TagInput, TextArea } = Form;
     const { Text } = Typography;
     const { typeTree, isError, isLoading } = useTypeTree();
