@@ -291,63 +291,25 @@ class DownloadBase(ABC):
         start_time = time.localtime()
         # 结束时间
         end_time = None
-        # 下播延迟检测
-        delay = int(config.get('delay', 0))
-        # 重试次数
-        retry_count = 0
-        # delay 重试次数
-        retry_count_delay = 0
-        # delay 总重试次数 向上取整
-        delay_all_retry_count = -(-delay // 60)
 
         with SessionLocal() as db:
             self.database_row_id = add_stream_info(db, self.fname, self.url, start_time)  # 返回数据库中此行记录的 id
-
-        while True:
+        ret = True
+        while ret:
             # 下载结果
-            ret = False
             try:
                 ret = self.run()
-            except:
+            except Exception:
                 logger.warning(f'下载失败: {self.__class__.__name__} - {self.fname}', exc_info=True)
             finally:
                 self.close()
 
-            if ret:
-                # 下载模式如果下载成功直接跳出
-                if self.is_download:
-                    break
-                # 成功下载重置重试次数
-                retry_count = 0
-                retry_count_delay = 0
-                # 最后一次下载完成时间
-                end_time = time.localtime()
-            else:
-                if retry_count < 3:
-                    retry_count += 1
-                    logger.info(
-                        f'获取流失败: {self.__class__.__name__} - {self.fname}，重试次数 {retry_count} / 3，等待 10 秒')
-                    time.sleep(10)
-                    continue
+            # 下载模式跳过下播延迟检测
+            if self.is_download:
+                break
 
-                # 下载模式跳过下播延迟检测
-                if self.is_download:
-                    break
-
-                if delay and retry_count_delay < delay_all_retry_count:
-                    retry_count_delay += 1
-                    if delay < 60:
-                        logger.info(
-                            f'下播延迟检测: {self.__class__.__name__} - {self.fname}，将在 {delay} 秒后检测开播状态')
-                        time.sleep(delay)
-                    else:
-                        logger.info(
-                            f'下播延迟检测: {self.__class__.__name__} - {self.fname}，每隔 60 秒检测开播状态，检测次数 {retry_count_delay} / {delay_all_retry_count}')
-                        time.sleep(60)
-                    continue
-                else:
-                    # 未设置下播延迟检测 or 下播检测次数已到
-                    break
+        # 最后一次下载完成时间
+        end_time = time.localtime()
 
         self.download_cover(
             time.strftime(self.gen_download_filename().encode("unicode-escape").decode(), end_time if end_time else time.localtime()

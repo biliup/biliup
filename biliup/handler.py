@@ -68,6 +68,7 @@ def process(name, url):
 @event_manager.register(DOWNLOADED, block='Asynchronous1')
 def processed(stream_info):
     name = stream_info['name']
+    url = stream_info['url']
     # 下载后处理 上传前处理
     downloaded_processor = config['streamers'].get(name, {}).get('downloaded_processor')
     if downloaded_processor:
@@ -75,7 +76,7 @@ def processed(stream_info):
         file_list = UploadBase.file_list(name)
         processor(downloaded_processor, json.dumps({
             "name": name,
-            "url": stream_info.get('url'),
+            "url": url,
             "room_title": stream_info.get('title', name),
             "start_time": int(time.mktime(stream_info.get('date', default_date))),
             "end_time": int(time.mktime(stream_info.get('end_time', default_date))),
@@ -92,6 +93,15 @@ def process_upload(stream_info):
     url_upload_count = context['url_upload_count']
     # 上传开始
     try:
+        url_status = context['PluginInfo'].url_status
+        # 上传延迟检测
+        delay = int(config.get('delay', 0))
+        if delay:
+            logger.info(f'{name} -> {url} {delay}s 后检测是否上传')
+            time.sleep(delay)
+            if url_status[url] == 1:
+                # 上传延迟检测，启用的话会在一段时间后检测是否存在下载任务，若存在则跳过本次上传
+                return logger.info(f'{name} -> {url} 存在下载任务, 跳过本次上传')
         file_list = UploadBase.file_list(name)
         if len(file_list) <= 0:
             logger.debug("无需上传")
