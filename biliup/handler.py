@@ -48,6 +48,7 @@ def pre_processor(name, url):
 @event_manager.register(DOWNLOAD, block='Asynchronous1')
 def process(name, url):
     url_status = context['PluginInfo'].url_status
+    url_upload_check = context['url_upload_check']
     # 下载开始
     try:
         url_status[url] = 1
@@ -63,6 +64,9 @@ def process(name, url):
     finally:
         # 下载结束
         url_status[url] = 0
+        logger.debug(f"{url} 下载结束，url_upload_check[url] - {url_upload_check[url]}")
+        # 下载结束后才启用延迟检查
+        url_upload_check[url] = 1
 
 
 @event_manager.register(DOWNLOADED, block='Asynchronous1')
@@ -91,17 +95,22 @@ def process_upload(stream_info):
     url = stream_info['url']
     name = stream_info['name']
     url_upload_count = context['url_upload_count']
+    url_upload_check = context['url_upload_check']
     # 上传开始
     try:
         url_status = context['PluginInfo'].url_status
         # 上传延迟检测
         delay = int(config.get('delay', 0))
-        if delay:
+        if url_upload_check[url] == 1 and delay: # 刚启动时不应该启用延迟检查
             logger.info(f'{name} -> {url} {delay}s 后检测是否上传')
             time.sleep(delay)
             if url_status[url] == 1:
                 # 上传延迟检测，启用的话会在一段时间后检测是否存在下载任务，若存在则跳过本次上传
                 return logger.info(f'{name} -> {url} 存在下载任务, 跳过本次上传')
+            else:
+                # 延迟后依旧没有下载任务，设置为 0
+                url_upload_check[url] = 0
+                logger.debug(f"{url} 上传延迟结束，url_upload_check[url] - {url_upload_check[url]}")
         file_list = UploadBase.file_list(name)
         if len(file_list) <= 0:
             logger.debug("无需上传")
