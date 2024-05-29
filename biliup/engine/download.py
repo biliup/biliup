@@ -308,8 +308,8 @@ class DownloadBase(ABC):
             if self.is_download:
                 break
 
-        # 最后一次下载完成时间
-        end_time = time.localtime()
+            # 最后一次下载完成时间
+            end_time = time.localtime()
 
         self.download_cover(
             time.strftime(self.gen_download_filename().encode("unicode-escape").decode(), end_time if end_time else time.localtime()

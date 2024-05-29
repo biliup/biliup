@@ -69,7 +69,7 @@ class Huya(DownloadBase):
 
         # 虎牙直播流只允许连接一次，非常丑陋的代码
         if cdn_fallback:
-            _url = self.acheck_url_healthy(stream_url)
+            _url = await self.acheck_url_healthy(stream_url)
             if _url is None:
                 logger.info(f"{self.plugin_msg}: {list(sCdns.keys())}")
                 for sCdn in sCdns.keys():
