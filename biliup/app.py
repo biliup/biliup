@@ -34,8 +34,7 @@ context = event_manager.context
 
 async def singleton_check(platform, name, url):
     from biliup.handler import PRE_DOWNLOAD, UPLOAD
-    context['url_upload_count'].setdefault(url, 0) # 是否打开了上传事件
-    context['url_upload_check'].setdefault(url, 0) # 控制上传延迟检查启用
+    context['url_upload_count'].setdefault(url, 0)
     if context['PluginInfo'].url_status[url] == 1:
         logger.debug(f'{url} 正在下载中，跳过检测')
         return

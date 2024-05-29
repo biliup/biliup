@@ -48,7 +48,6 @@ def pre_processor(name, url):
 @event_manager.register(DOWNLOAD, block='Asynchronous1')
 def process(name, url):
     url_status = context['PluginInfo'].url_status
-    url_upload_check = context['url_upload_check']
     # 下载开始
     try:
         url_status[url] = 1
@@ -64,9 +63,6 @@ def process(name, url):
     finally:
         # 下载结束
         url_status[url] = 0
-        logger.debug(f"{url} 下载结束，url_upload_check[url] - {url_upload_check[url]}")
-        # 下载结束后才启用延迟检查
-        url_upload_check[url] = 1
 
 
 @event_manager.register(DOWNLOADED, block='Asynchronous1')

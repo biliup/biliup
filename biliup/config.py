@@ -31,7 +31,6 @@ class Config(UserDict):
 
     def load_from_db(self, db):
         context = {
-            'url_upload_check': self.data.get('url_upload_check', {}),
             'url_upload_count': self.data.get('url_upload_count', {}),
             'upload_filename': self.data.get('upload_filename', []),
             'PluginInfo': self.data.get('PluginInfo')
@@ -149,7 +148,7 @@ class Config(UserDict):
             new_name = f'{file}.backup.{datetime.now().strftime("%Y%m%d%H%M%S")}'
             logger.info(f"{file} 文件已存在，已将原文件重命名为 {new_name}")
             os.rename(file, new_name)
-        exclude_keys = ['PluginInfo', 'upload_filename', 'url_upload_count', 'url_upload_check']
+        exclude_keys = ['PluginInfo', 'upload_filename', 'url_upload_count']
         temp = {k: v for k, v in self.data.items() if k not in exclude_keys}
         if self.data.get('yaml') or file.endswith(".yaml"):
             import yaml
