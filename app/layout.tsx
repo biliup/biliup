@@ -251,9 +251,10 @@ export default function RootLayout({
                         >
                             <Nav.Header
                                 logo={
-                                    <IconSemiLogo
-                                        style={{ height: "36px", fontSize: 36 }}
-                                    />
+                                    // <IconSemiLogo
+                                    //     style={{ height: "36px", fontSize: 36 }}
+                                    // />
+                                    <img src='logo.png' alt='{}'></img>
                                 }
                                 style={{ justifyContent: "flex-start" }}
                                 text="BILIUP"
