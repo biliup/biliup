@@ -22,9 +22,11 @@ class Douyu(DownloadBase):
             return False
 
         try:
-            if 'm.douyu.com' in self.url:
-                room_id = self.url.split('m.douyu.com/')[1].split('/')[0].split('?')[0]
-            else:
+            room_id = self.url.split('douyu.com/')[1].split('/')[0].split('?')[0]
+            # 暂时只判断纯数字的room_id
+            if not room_id.isdigit():
+                room_id = 0
+            if room_id == 0:
                 resp = await client.get(self.url, headers=self.fake_headers, timeout=5)
                 room_id = match1(resp.text, r'\$ROOM\.room_id\s*=\s*(\d+)', r'apm_room_id\s*=\s*(\d+)')[0]
             if not room_id:
