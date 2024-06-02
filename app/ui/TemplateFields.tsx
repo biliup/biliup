@@ -34,7 +34,7 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & {isDtime: boolean}>> =
         <Input field='dynamic' label='粉丝动态' style={{ width: 464 }} />
         <Form.Select
             field="uploader"
-            label='上传插件'
+            label='上传插件' initValue={values.uploader ?? 'biliup-rs'}
             style={{ width: 250 }} showClear>
             <Form.Select.Option value="bili_web">bili_web</Form.Select.Option>
             <Form.Select.Option value="biliup-rs">biliup-rs</Form.Select.Option>

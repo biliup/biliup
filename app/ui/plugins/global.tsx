@@ -222,12 +222,13 @@ const Global: React.FC = () => {
                         padding: 0,
                     }}
                     showClear={true}
+                    initValue='Noop'
                 >
                     <Form.Select.Option value="bili_web">
                         bili_web
                     </Form.Select.Option>
                     <Form.Select.Option value="biliup-rs">
-                        biliup-rs（默认）
+                        biliup-rs
                     </Form.Select.Option>
                     <Form.Select.Option value="Noop">
                         Noop（即不上传，但会执行后处理）

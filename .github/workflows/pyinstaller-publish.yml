@@ -31,3 +31,11 @@ jobs:
     - uses: actions/upload-artifact@v4
       with:
         path: dist/*
+    - name: Upload binaries to release
+      uses: svenstaro/upload-release-action@v2
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+#        file: target/release/${{ matrix.artifact_name }}
+        file: dist/biliup.exe
+        asset_name: biliup_$tag.exe
+        tag: ${{ github.ref }}

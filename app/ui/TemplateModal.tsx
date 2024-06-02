@@ -26,7 +26,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                     'linear-gradient(to bottom, black 0%, rgba(0, 0, 0, 1) 60%, rgba(0, 0, 0, 0.2) 80%, transparent 100%)',
         };
     const collapsed = (<div className="semi-form-field-extra">
-        流程无报错结束时触发，将按自定义顺序执行自定义操作，默认删除视频文件。若要保留文件请设置为 mv ，当postprocessor不存在时，默认执行删除文件操作，示例：
+        流程无报错结束时触发，将按自定义顺序执行自定义操作，默认<Text type="danger">删除</Text>视频文件。若要保留文件请设置为 mv ，当postprocessor不存在时，默认执行删除文件操作，示例：
         <br/>
         <code>run = echo hello!</code> 执行任意命令，等同于在shell中运行,视频文件路径作为标准输入传入
         <br/>
@@ -121,7 +121,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity , onOk})
                         placeholder='{streamer}%Y-%m-%d %H_%M_%S{title}'
                     />
                     <Form.Select showClear field="upload_id" label={{ text: '投稿模板', optional: true }} style={{ width: 176 }} optionList={list} />
-                    <ArrayField field='postprocessor'>
+                    <ArrayField field='postprocessor' initValue={entity === undefined ? [{cmd: 'rm'}] : undefined }>
                             {({ add, arrayFields }) => (
                                 <>
                                     <Form.Slot label={{text: "后处理"}} labelPosition="left">

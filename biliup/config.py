@@ -47,6 +47,8 @@ class Config(UserDict):
             if ls.upload_streamers_id:
                 self['streamers'][ls.remark].update({
                     k: v for k, v in ls.uploadstreamers.as_dict().items() if v and k not in ['id', 'template_name']})
+                if self['streamers'][ls.remark].get('uploader') is None:
+                    self['streamers'][ls.remark]['uploader'] = 'biliup-rs'
             # if self['streamers'][ls.remark].get('tags'):
             #     self['streamers'][ls.remark]['tags'] = self['streamers'][ls.remark]['tags']
         # for us in UploadStreamers.select():
@@ -55,7 +57,7 @@ class Config(UserDict):
     def save_to_db(self, db):
         for k, v in self['streamers'].items():
             us = UploadStreamers(**UploadStreamers.filter_parameters(
-                {"template_name": k, "tags": v.pop('tags', ['biliup']), ** v}))
+                {"template_name": k, "tags": v.pop('tags', [k]), ** v}))
             db.add(us)
             db.flush()
             url = v.pop('url')
