@@ -38,15 +38,8 @@ async def singleton_check(platform, name, url):
     if context['PluginInfo'].url_status[url] == 1:
         logger.debug(f'{url} 正在下载中，跳过检测')
         return
-    # 可能对同一个url同时发送两次上传事件
-    with NamedLock(f"upload_count_{url}"):
-        if context['url_upload_count'][url] > 0:
-            logger.debug(f'{url} 正在上传中，跳过')
-        else:
-            # from .handler import event_manager, UPLOAD
-            # += 不是原子操作
-            context['url_upload_count'][url] += 1
-            event_manager.send_event(Event(UPLOAD, ({'name': name, 'url': url},)))
+
+    event_manager.send_event(Event(UPLOAD, ({'name': name, 'url': url},)))
     if await platform(name, url).acheck_stream(True):
         # 需要等待上传文件列表检索完成后才可以开始下次下载
         with NamedLock(f'upload_file_list_{name}'):

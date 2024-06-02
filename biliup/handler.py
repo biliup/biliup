@@ -28,7 +28,6 @@ logger = logging.getLogger('biliup')
 # @event_manager.register(CHECK, block='Asynchronous3')
 
 
-
 @event_manager.register(PRE_DOWNLOAD, block='Asynchronous1')
 def pre_processor(name, url):
     if context['PluginInfo'].url_status[url] == 1:
@@ -52,12 +51,7 @@ def process(name, url):
     try:
         url_status[url] = 1
         stream_info = biliup_download(name, url, config['streamers'][name].copy())
-        # 永远不可能有两个同url的下载线程
-        # 可能对同一个url同时发送两次上传事件
-        with NamedLock(f"upload_count_{url}"):
-            # += 不是原子操作
-            context['url_upload_count'][url] += 1
-            yield Event(DOWNLOADED, (stream_info,))
+        yield Event(DOWNLOADED, (stream_info,))
     except Exception as e:
         logger.exception(f"下载错误: {name} - {e}")
     finally:
@@ -91,6 +85,14 @@ def process_upload(stream_info):
     url = stream_info['url']
     name = stream_info['name']
     url_upload_count = context['url_upload_count']
+    # 永远不可能有两个同url的下载线程
+    # 可能对同一个url同时发送两次上传事件
+    with NamedLock(f"upload_count_{url}"):
+        if context['url_upload_count'][url] > 0:
+            return logger.debug(f'{url} 正在上传中，跳过')
+        # from .handler import event_manager, UPLOAD
+        # += 不是原子操作
+        context['url_upload_count'][url] += 1
     # 上传开始
     try:
         file_list = UploadBase.file_list(name)
