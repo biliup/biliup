@@ -52,7 +52,7 @@
 ### Windows
 下载 exe: [Release](https://github.com/biliup/biliup/releases/latest)
 
-### Linux
+### Linux or macOS
 0. python`version >= 3.8`
 1. `pip3 install biliup`
 2. `biliup start`
