@@ -23,7 +23,7 @@ class Douyu(DownloadBase):
 
         try:
             room_id = self.url.split('douyu.com/')[1].split('/')[0].split('?')[0]
-            if not 'm.douyu.com' in self.url:
+            if 'm.douyu.com' not in self.url:
                 # 暂时只判断纯数字的room_id
                 if not room_id.isdigit() or len(room_id) < 6:
                     room_id = 0
