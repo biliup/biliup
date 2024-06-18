@@ -10,6 +10,8 @@ from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 
 
+OFFICIAL_API = "https://api.live.bilibili.com"
+
 @Plugin.download(regexp=r'(?:https?://)?live\.bilibili\.com')
 @Plugin.download(regexp=r'(?:https?://)?b23\.tv')
 class Bililive(DownloadBase):
@@ -35,7 +37,6 @@ class Bililive(DownloadBase):
            logger.warning("No cookie provided. The original quality may not be available.")
 
     async def acheck_stream(self, is_check=False):
-        OFFICIAL_API = "https://api.live.bilibili.com"
         room_id = match1(self.url, r'/(\d+)')
         qualityNumber = int(config.get('bili_qn', 10000))
 
@@ -67,12 +68,12 @@ class Bililive(DownloadBase):
             _res = await client.get('https://api.bilibili.com/x/web-interface/nav')
             try:
                 user_data = json.loads(_res.text).get('data')
+                if user_data.get('isLogin'):
+                    logger.info(f"用户名：{user_data['uname']}, mid：{user_data['mid']}, isLogin：{user_data['isLogin']}")
+                else:
+                    logger.warning(f"{self.plugin_msg}: 未登录，或将只能录制到最低画质。")
             except:
-                logger.exception(f"{self.plugin_msg}: Returned {_res.text}")
-            if user_data.get('isLogin'):
-                logger.info(f"用户名：{user_data['uname']}, mid：{user_data['mid']}, isLogin：{user_data['isLogin']}")
-            else:
-                logger.warning(f"{self.plugin_msg}: 未登录，或将只能录制到最低画质。")
+                logger.exception(f"{self.plugin_msg}: 登录态校验失败 {_res.text}")
             return True
 
         protocol = config.get('bili_protocol', 'stream')

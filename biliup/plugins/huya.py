@@ -68,6 +68,7 @@ class Huya(DownloadBase):
 
         stream_urls = await self._build_stream_url(protocol, allow_imgplus)
         if not stream_urls:
+            # 一个错误要打印三行日志，太繁琐了
             logger.error(f"{self.plugin_msg}: 没有可用的链接")
             return False
 
@@ -76,7 +77,7 @@ class Huya(DownloadBase):
             logger.warning(f"{self.plugin_msg}: {perf_cdn} CDN不存在，自动切换到 {cdnNameList[0]}")
             perf_cdn = cdnNameList[0]
 
-        # 虎牙直播流只允许连接一次，非常丑陋的代码
+        # 虎牙直播流只允许连接一次
         if cdn_fallback:
             _url = await self.acheck_url_healthy(stream_urls[perf_cdn])
             if _url is None:
@@ -88,12 +89,12 @@ class Huya(DownloadBase):
                     if (await self.acheck_url_healthy(stream_urls[cdn])) is None:
                         continue
                     perf_cdn = cdn
-                    stream_urls = await self._build_stream_url(protocol, allow_imgplus)
                     logger.info(f"{self.plugin_msg}: CDN 切换为 {perf_cdn}")
                     break
                 else:
                     logger.error(f"{self.plugin_msg}: cdn_fallback 所有链接无法使用")
                     return False
+            stream_urls = await self._build_stream_url(protocol, allow_imgplus)
 
         self.room_title = html_info['data'][0]['gameLiveInfo']['introduction']
         self.raw_stream_url = stream_urls[perf_cdn]
