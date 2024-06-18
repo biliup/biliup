@@ -46,7 +46,7 @@ const Douyin: React.FC = () => {
                 <Form.Select
                     field="douyin_protocol"
                     extraText="hls 仅供测试，请谨慎切换。"
-                    label="抖音流协议（douyin_protocol）"
+                    label="直播流协议（douyin_protocol）"
                     style={{ width: "100%" }}
                     fieldStyle={{
                         alignSelf: "stretch",

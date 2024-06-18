@@ -58,7 +58,7 @@ class Huya(DownloadBase):
             logger.error(f"{self.plugin_msg}: 在确定码率时发生错误 {e}")
             return False
 
-        huya_cdn = config.get('huyacdn', 'HW')
+        huya_cdn = config.get('huyacdn', 'AL')
         perf_cdn = config.get('huya_cdn', huya_cdn).upper()
         protocol = 'Hls' if config.get('huya_protocol') == 'Hls' else 'Flv'
         # protocol = 'Hls'
@@ -67,6 +67,10 @@ class Huya(DownloadBase):
         # cdn_fallback = True
 
         stream_urls = await self._build_stream_url(protocol, allow_imgplus)
+        if not stream_urls:
+            logger.error(f"{self.plugin_msg}: 没有可用的链接")
+            return False
+
         cdnNameList = list(stream_urls.keys())
         if perf_cdn not in cdnNameList:
             logger.warning(f"{self.plugin_msg}: {perf_cdn} CDN不存在，自动切换到 {cdnNameList[0]}")
@@ -135,6 +139,9 @@ class Huya(DownloadBase):
         if not allow_imgplus:
             sStreamName = sStreamName.replace('-imgplus', '')
         sAntiCode = build_query(sStreamName, sAntiCode)
+        if not sAntiCode:
+            logger.error(f"{self.plugin_msg}: build_stream_url {sStreamName} {sAntiCode}")
+            return {}
         # HY 和 HYZJ 均为 P2P
         sStreams = {item['sCdnType']: \
                     f"{item[f's{protocol}Url']}/{sStreamName}.{sSuffix}?{sAntiCode}" \
@@ -142,17 +149,21 @@ class Huya(DownloadBase):
         return sStreams
 
 
-def build_query(sStreamName, sAntiCode):
-    url_query = parse_qs(sAntiCode)
-    platform_id = 100
-    uid = random.randint(12340000, 12349999)
-    convert_uid = (uid << 8 | uid >> (32 - 8)) & 0xFFFFFFFF
-    ws_time = url_query['wsTime'][0]
-    ct = int((int(ws_time, 16) + random.random()) * 1000)
-    seq_id = uid + int(time.time() * 1000)
-    ws_secret_prefix = base64.b64decode(unquote(url_query['fm'][0]).encode()).decode().split('_')[0]
-    ws_secret_hash = hashlib.md5(f"{seq_id}|{url_query['ctype'][0]}|{platform_id}".encode()).hexdigest()
-    ws_secret = hashlib.md5(f'{ws_secret_prefix}_{convert_uid}_{sStreamName}_{ws_secret_hash}_{ws_time}'.encode()).hexdigest()
+def build_query(sStreamName, sAntiCode) -> str:
+    try:
+        url_query = parse_qs(sAntiCode)
+        platform_id = 100
+        uid = random.randint(12340000, 12349999)
+        convert_uid = (uid << 8 | uid >> (32 - 8)) & 0xFFFFFFFF
+        ws_time = url_query['wsTime'][0]
+        ct = int((int(ws_time, 16) + random.random()) * 1000)
+        seq_id = uid + int(time.time() * 1000)
+        ws_secret_prefix = base64.b64decode(unquote(url_query['fm'][0]).encode()).decode().split('_')[0]
+        ws_secret_hash = hashlib.md5(f"{seq_id}|{url_query['ctype'][0]}|{platform_id}".encode()).hexdigest()
+        ws_secret = hashlib.md5(f'{ws_secret_prefix}_{convert_uid}_{sStreamName}_{ws_secret_hash}_{ws_time}'.encode()).hexdigest()
+    except:
+        logger.exception("build_query")
+        return ""
     # &codec=av1
     # &codec=264
     # &codec=265

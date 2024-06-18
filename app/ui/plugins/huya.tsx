@@ -2,7 +2,12 @@
 import React from "react";
 import { Form, Select, Collapse } from "@douyinfe/semi-ui";
 
-const Huya: React.FC = () => {
+type Props = {
+    entity: any;
+};
+
+const Huya: React.FC<Props> = (props) => {
+    const entity = props.entity;
     return (
         <>
             <Collapse.Panel header="虎牙" itemKey="huya">
@@ -84,7 +89,7 @@ const Huya: React.FC = () => {
                 <Form.Select
                     field="huya_protocol"
                     extraText="Hls 仅供测试，请谨慎切换。"
-                    label="虎牙流协议（huya_protocol）"
+                    label="直播流协议（huya_protocol）"
                     style={{ width: "100%" }}
                     fieldStyle={{
                         alignSelf: "stretch",
@@ -97,8 +102,13 @@ const Huya: React.FC = () => {
                 </Form.Select>
                 <Form.Switch
                     field="huya_imgplus"
-                    extraText="是否录制二次编码的流。默认为启用。注意直播间的分辨率超分和HDR画质都依赖于二次编码。"
-                    label="二次编码（huya_imgplus）"
+                    extraText="是否录制二次编码的直播流。默认为启用，关闭后可能无法下载。部分直播间的分辨率超分和HDR画质依赖于二次编码，请谨慎关闭。"
+                    label="虎牙二次编码（huya_imgplus）"
+                    initValue={
+                        entity?.hasOwnProperty("huya_imgplus")
+                            ? entity["huya_imgplus"]
+                            : true
+                    }
                 />
             </Collapse.Panel>
         </>
