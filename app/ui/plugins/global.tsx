@@ -92,6 +92,27 @@ const Global: React.FC = () => {
                         padding: 0,
                     }}
                 />
+                <Form.Input
+                    field="filename_prefix"
+                    extraText={
+                        <div style={{ fontSize: "14px" }}>
+                            全局文件名模板。可被单个主播文件名模板覆盖。可用变量如下
+                            <br />
+                            {'\u007B'}streamer{'\u007D'}: 录播备注
+                            <span style={{ margin: "0 20px"}}></span>
+                            {'\u007B'}title{'\u007D'}: 直播标题
+                            <br />
+                            %Y-%m-%d %H_%M_%S: 开始录制时的 年-月-日 时_分_秒
+                        </div>
+                    }
+                    label="文件名模板（filename_prefix）"
+                    placeholder="{streamer}%Y-%m-%dT%H_%M_%S"
+                    style={{ width: "100%" }}
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                />
                 <Form.Switch
                     field="segment_processor_parallel"
                     extraText={

@@ -111,14 +111,6 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                         ]}
                     />
 
-                    <Form.Input
-                        field='filename_prefix'
-                        label={{ text: "文件名模板", optional: true }}
-                        // initValue='./video/%Y-%m-%d/%H_%M_%S{title}'
-                        placeholder='{streamer}%Y-%m-%dT%H_%M_%S'
-                        extraText=""
-                    />
-
                     <Form.Select showClear field="upload_id" label={{ text: '投稿模板', optional: true }} style={{ width: 176 }} optionList={list} />
 
                     <Form.Input field='format' label='视频格式' placeholder='flv' style={{ width: 176 }}
@@ -179,6 +171,12 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
 
                     <Collapse keepDOM>
                         <Collapse.Panel header="更多设置" itemKey="processors">
+                            <Form.Input
+                                field='filename_prefix'
+                                label={{ text: "文件名模板", optional: true }}
+                                // initValue='./video/%Y-%m-%d/%H_%M_%S{title}'
+                                placeholder='{streamer}%Y-%m-%dT%H_%M_%S'
+                            />
                             <ArrayField field='preprocessor'>
                                 {({ add, arrayFields }) => (
                                     <Form.Section text="下载前处理">

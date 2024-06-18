@@ -112,7 +112,7 @@ class Twitch(DownloadBase, BatchCheck):
         if is_check:
             return True
 
-        if self.downloader == 'ffmpeg':
+        if self.downloader in ['ffmpeg', 'streamlink']:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.bind(('localhost', 0))
                 port = s.getsockname()[1]

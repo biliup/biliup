@@ -56,8 +56,8 @@ class Bililive(DownloadBase):
             return False
         self.live_cover_url = room_info['data']['room_info']['cover']
         live_start_time = room_info['data']['room_info']['live_start_time']
-        if self.room_title is None:
-            self.room_title = room_info['data']['room_info']['title']
+        # 允许分段时更新标题
+        self.room_title = room_info['data']['room_info']['title']
         if live_start_time > self.live_time:
             self.live_time = live_start_time
             is_new_live = True

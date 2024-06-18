@@ -31,8 +31,6 @@ class DownloadBase(ABC):
         self.room_title = None
         if opt_args is None:
             opt_args = []
-        # 主播单独传参会覆盖全局设置。例如新增了一个全局的filename_prefix参数，在下面添加self.filename_prefix = config.get('filename_prefix'),
-        # 即可通过self.filename_prefix在下载或者上传时候传递主播单独的设置参数用于调用（如果该主播有设置单独参数，将会优先使用单独参数；如无，则会优先你用全局参数。）
         self.fname = fname
         self.url = url
         # 录制后保存文件格式而非源流格式 对应原配置文件format 仅ffmpeg及streamlink生效
@@ -46,6 +44,9 @@ class DownloadBase(ABC):
         # ffmpeg.exe -i  http://vfile1.grtn.cn/2018/1542/0254/3368/154202543368.ssm/154202543368.m3u8
         # -c copy -bsf:a aac_adtstoasc -movflags +faststart output.mp4
         self.raw_stream_url = None
+
+        # 主播单独传参会覆盖全局设置。例如新增了一个全局的filename_prefix参数，在下面添加self.filename_prefix = config.get('filename_prefix'),
+        # 即可通过self.filename_prefix在下载或者上传时候传递主播单独的设置参数用于调用（如果该主播有设置单独参数，将会优先使用单独参数；如无，则会优先你用全局参数。）
         self.filename_prefix = config.get('filename_prefix')
         self.use_live_cover = config.get('use_live_cover', False)
         self.opt_args = opt_args
