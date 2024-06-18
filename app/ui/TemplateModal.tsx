@@ -113,9 +113,6 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
 
                     <Form.Select showClear field="upload_id" label={{ text: '投稿模板', optional: true }} style={{ width: 176 }} optionList={list} />
 
-                    <Form.Input field='format' label='视频格式' placeholder='flv' style={{ width: 176 }}
-                                helpText='视频保存格式。不支持stream-gears下载器和Youtube平台。' />
-
                     <ArrayField
                         field='postprocessor'
                         initValue={entity === undefined ? [{ cmd: 'rm' }] : undefined}
@@ -168,6 +165,9 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                                 </div>
                             </>)}
                     </ArrayField>
+
+                    <Form.Input field='format' label='视频格式' placeholder='flv' style={{ width: 176 }}
+                                helpText='视频保存格式。不支持stream-gears下载器和Youtube平台。' />
 
                     <Collapse keepDOM>
                         <Collapse.Panel header="更多设置" itemKey="processors">
