@@ -27,6 +27,7 @@ const Douyu: React.FC = () => {
                     showClear={true}
                 >
                     <Select.Option value={0}>最高画质（0）</Select.Option>
+                    <Select.Option value={8}>蓝光8M（8）</Select.Option>
                     <Select.Option value={4}>蓝光4M（4）</Select.Option>
                     <Select.Option value={3}>超清（3）</Select.Option>
                     <Select.Option value={2}>高清（2）</Select.Option>

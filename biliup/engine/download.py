@@ -380,15 +380,13 @@ class DownloadBase(ABC):
                 logger.exception(f'封面下载失败：{self.__class__.__name__} - {self.fname}')
 
     async def acheck_url_healthy(self, url):
-        timeout = 60 if '.flv' in url else 5
-
         async def __client_get(url, stream: bool = False):
             client.headers.update(self.fake_headers)
             if stream:
-                async with client.stream("GET", url, timeout=timeout, follow_redirects=False) as response:
+                async with client.stream("GET", url, timeout=60, follow_redirects=False) as response:
                     pass
             else:
-                response = await client.get(url, timeout=timeout)
+                response = await client.get(url)
             if response.status_code not in (301, 302):
                 response.raise_for_status()
             return response

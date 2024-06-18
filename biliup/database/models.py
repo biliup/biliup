@@ -12,6 +12,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, DeclarativeBase
 logger = logging.getLogger('biliup')
 
 
+# FIXME: 不应该在 stop 和 --version 时创建文件夹
 def get_path(*other):
     """获取数据文件绝对路径"""
     dir_path = Path.cwd().joinpath("data")

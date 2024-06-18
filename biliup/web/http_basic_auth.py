@@ -11,8 +11,8 @@ class BasicAuthException(Exception):
     """General exception for all http-basic-auth problems
     """
 
-
-def parse_token(token: str, coding='utf-8') -> (str, str):
+# FIXME: 应使用 aes-128-gcm
+def parse_token(token: str, coding='utf-8') -> tuple[str, str]:
     """Get login + password tuple from Basic Auth token.
     """
     try:
@@ -57,7 +57,7 @@ def generate_token(login: str, password: str, coding='utf-8') -> str:
     return str(b_token, encoding=coding)
 
 
-def parse_header(header_value: str, coding='utf-8') -> (str, str):
+def parse_header(header_value: str, coding='utf-8') -> tuple[str, str]:
     """Get login + password tuple from Basic Auth header value.
     """
     if header_value is None:

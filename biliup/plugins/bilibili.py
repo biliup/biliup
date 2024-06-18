@@ -10,7 +10,8 @@ from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 
 
-@Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m|live)\.)?bilibili\.com')
+@Plugin.download(regexp=r'(?:https?://)?live\.bilibili\.com')
+@Plugin.download(regexp=r'(?:https?://)?b23\.tv')
 class Bililive(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
@@ -19,19 +20,19 @@ class Bililive(DownloadBase):
         self.fake_headers['referer'] = url
         if config.get('user', {}).get('bili_cookie'):
             self.fake_headers['cookie'] = config.get('user', {}).get('bili_cookie')
-        else:
+        elif config.get('user', {}).get('bili_cookie_file'):
             cookie_file_name = config.get('user', {}).get('bili_cookie_file')
-            if cookie_file_name:
-                try:
-                    with open(cookie_file_name, encoding='utf-8') as stream:
-                        cookies = json.load(stream)["cookie_info"]["cookies"]
-                        cookies_str = ''
-                        for i in cookies:
-                            cookies_str += f"{i['name']}={i['value']};"
-                        self.fake_headers['cookie'] = cookies_str
-                        # logger.info(f"未配置bili_cookie使用{cookie_file_name}")
-                except Exception:
-                    logger.exception("load_cookies error")
+            try:
+                with open(cookie_file_name, encoding='utf-8') as stream:
+                    cookies = json.load(stream)["cookie_info"]["cookies"]
+                    cookies_str = ''
+                    for i in cookies:
+                        cookies_str += f"{i['name']}={i['value']};"
+                    self.fake_headers['cookie'] = cookies_str
+            except Exception:
+                logger.exception("load_cookies error")
+        else:
+           logger.warning("No cookie provided. The original quality may not be available.")
 
     async def acheck_stream(self, is_check=False):
         OFFICIAL_API = "https://api.live.bilibili.com"
@@ -42,7 +43,7 @@ class Bililive(DownloadBase):
         # 获取直播状态与房间标题
         info_by_room_url = f"{OFFICIAL_API}/xlive/web-room/v1/index/getInfoByRoom?room_id={room_id}"
         try:
-            room_info = (await client.get(info_by_room_url, timeout=5)).json()
+            room_info = (await client.get(info_by_room_url)).json()
         except:
             logger.exception(f"{self.plugin_msg}: ")
             return False
@@ -51,6 +52,7 @@ class Bililive(DownloadBase):
             return False
         if room_info['data']['room_info']['live_status'] != 1:
             logger.debug(f"{self.plugin_msg}: 未开播")
+            self.raw_stream_url = None
             return False
         self.live_cover_url = room_info['data']['room_info']['cover']
         live_start_time = room_info['data']['room_info']['live_start_time']
@@ -62,13 +64,15 @@ class Bililive(DownloadBase):
         else:
             is_new_live = False
         if is_check:
-            _res = (await client.get('https://api.bilibili.com/x/web-interface/nav', timeout=5)).json()
-            user_data = _res.get('data', {})
-            is_login = user_data.get('isLogin', False)
-            if is_login:
-                logger.info(f"用户名：{user_data['uname']}, mid：{user_data['mid']}, isLogin：{is_login}")
+            _res = await client.get('https://api.bilibili.com/x/web-interface/nav')
+            try:
+                user_data = json.loads(_res.text).get('data')
+            except:
+                logger.exception(f"{self.plugin_msg}: Returned {_res.text}")
+            if user_data.get('isLogin'):
+                logger.info(f"用户名：{user_data['uname']}, mid：{user_data['mid']}, isLogin：{user_data['isLogin']}")
             else:
-                logger.warning("登录态校验失败: " + str(_res))
+                logger.warning(f"{self.plugin_msg}: 未登录，或将只能录制到最低画质。")
             return True
 
         protocol = config.get('bili_protocol', 'stream')
@@ -107,10 +111,10 @@ class Bililive(DownloadBase):
                 self.raw_stream_url = None
 
         try:
-            play_info = await get_play_info(main_api, params)
+            play_info = await self._get_play_info(main_api, params)
             if not play_info or check_areablock(play_info):
                 logger.debug(f"{self.plugin_msg}: {main_api} 返回 {play_info}")
-                play_info = await get_play_info(fallback_api, params)
+                play_info = await self._get_play_info(fallback_api, params)
                 if not play_info or check_areablock(play_info):
                     logger.debug(f"{self.plugin_msg}: {fallback_api} 返回 {play_info}")
                     return False
@@ -223,14 +227,15 @@ class Bililive(DownloadBase):
             self.danmaku = DanmakuClient(self.url, self.gen_download_filename())
 
 
-async def get_play_info(api, params):
-    api = (lambda a: a if a.startswith(('http://', 'https://')) else 'http://' + a)(api)
-    full_url = f"{api}/xlive/web-room/v2/index/getRoomPlayInfo"
-    try:
-        return (await client.get(full_url, params=params, timeout=5)).json()
-    except:
-        logger.exception(f'{api} 获取直播流信息失败: ')
-    return {}
+    async def _get_play_info(self, api, params) -> dict:
+        api = (lambda a: a if a.startswith(('http://', 'https://')) else 'http://' + a)(api)
+        full_url = f"{api}/xlive/web-room/v2/index/getRoomPlayInfo"
+        try:
+            _info = await client.get(full_url, params=params)
+            return json.loads(_info.text)
+        except:
+            logger.exception(f"{params['room_id']} <- {api} 返回内容错误: {_info.text}")
+        return {}
 
 
 # Copy from room-player.js

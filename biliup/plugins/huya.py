@@ -18,17 +18,19 @@ class Huya(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
         self.huya_danmaku = config.get('huya_danmaku', False)
+        self.fake_headers['referer'] = url
+        self.__room_id = None
 
     async def acheck_stream(self, is_check=False):
         try:
-            room_id = self.url.split('huya.com/')[1].split('/')[0].split('?')[0]
-            if not room_id:
+            self.__room_id = self.url.split('huya.com/')[1].split('/')[0].split('?')[0]
+            if not self.__room_id:
                 raise
         except:
             logger.error(f"Huya - {self.url}: 直播间地址错误")
             return False
 
-        html_info = await self._get_info_in_html(room_id, self.fake_headers)
+        html_info = await self._get_info_in_html()
         live_rate_info = html_info.get('vMultiStreamInfo', [])
         if not live_rate_info:
             # 无流 当做没开播
@@ -56,40 +58,41 @@ class Huya(DownloadBase):
             logger.error(f"{self.plugin_msg}: 在确定码率时发生错误 {e}")
             return False
 
-        huya_cdn = config.get('huyacdn', 'AL')
+        huya_cdn = config.get('huyacdn', 'HW')
         perf_cdn = config.get('huya_cdn', huya_cdn).upper()
+        protocol = 'Hls' if config.get('huya_protocol') == 'Hls' else 'Flv'
+        # protocol = 'Hls'
+        allow_imgplus = config.get('huya_imgplus', True)
         cdn_fallback = config.get('huya_cdn_fallback', False)
         # cdn_fallback = True
 
-        stream_url, sCdns = await self._build_stream_url(room_id, perf_cdn, self.fake_headers)
-        # stream_url = None
-        if not stream_url:
-            logger.error(f"{self.plugin_msg}: 无法获取流地址")
-            return False
+        stream_urls = await self._build_stream_url(protocol, allow_imgplus)
+        cdnNameList = list(stream_urls.keys())
+        if perf_cdn not in cdnNameList:
+            logger.warning(f"{self.plugin_msg}: {perf_cdn} CDN不存在，自动切换到 {cdnNameList[0]}")
+            perf_cdn = cdnNameList[0]
 
         # 虎牙直播流只允许连接一次，非常丑陋的代码
         if cdn_fallback:
-            _url = await self.acheck_url_healthy(stream_url)
+            _url = await self.acheck_url_healthy(stream_urls[perf_cdn])
             if _url is None:
-                logger.info(f"{self.plugin_msg}: {list(sCdns.keys())}")
-                for sCdn in sCdns.keys():
-                    if sCdn == perf_cdn:
+                logger.info(f"{self.plugin_msg}: 提供如下CDN {cdnNameList}")
+                for cdn in cdnNameList:
+                    if cdn == perf_cdn:
                         continue
-                    logger.warning(f"{self.plugin_msg}: cdn_fallback 尝试 {sCdn}")
-                    stream_url, _ = await self._build_stream_url(room_id, sCdn, self.fake_headers)
-                    if (await self.acheck_url_healthy(stream_url)) is None:
+                    logger.info(f"{self.plugin_msg}: cdn_fallback 尝试 {cdn}")
+                    if (await self.acheck_url_healthy(stream_urls[cdn])) is None:
                         continue
-                    perf_cdn = sCdn
+                    perf_cdn = cdn
+                    stream_urls = await self._build_stream_url(protocol, allow_imgplus)
                     logger.info(f"{self.plugin_msg}: CDN 切换为 {perf_cdn}")
-                    stream_url, _ = await self._build_stream_url(room_id, perf_cdn, self.fake_headers)
-                    logger.debug(f"{self.plugin_msg}: {stream_url}")
                     break
                 else:
                     logger.error(f"{self.plugin_msg}: cdn_fallback 所有链接无法使用")
                     return False
 
         self.room_title = html_info['data'][0]['gameLiveInfo']['introduction']
-        self.raw_stream_url = stream_url
+        self.raw_stream_url = stream_urls[perf_cdn]
 
         if record_ratio != max_ratio:
             self.raw_stream_url += f"&ratio={record_ratio}"
@@ -100,9 +103,9 @@ class Huya(DownloadBase):
             self.danmaku = DanmakuClient(self.url, self.gen_download_filename())
 
 
-    async def _get_info_in_html(self, room_id, fake_headers):
+    async def _get_info_in_html(self) -> dict:
         try:
-            html = (await client.get(f"https://www.huya.com/{room_id}", timeout=5, headers=fake_headers)).text
+            html = (await client.get(f"https://www.huya.com/{self.__room_id}", timeout=5, headers=self.fake_headers)).text
             if '找不到这个主播' in html:
                 logger.error(f"{self.plugin_msg}: 找不到这个主播")
                 return {}
@@ -114,32 +117,38 @@ class Huya(DownloadBase):
         return {}
 
 
-    async def _build_stream_url(self, room_id, perf_cdn, fake_headers, allow_imgplus=True):
-        html_info = await self._get_info_in_html(room_id, fake_headers)
+    async def _build_stream_url(self, protocol, allow_imgplus=True) -> dict:
+        '''
+        返回指定协议的所有CDN流
+        '''
+        html_info = await self._get_info_in_html()
         if not html_info:
-            return None, None
+            return {}
         try:
             streamInfo = html_info['data'][0]['gameStreamInfoList']
         except KeyError:
             logger.exception(f"{self.plugin_msg}: build_stream_url {html_info}")
-            return None, None
+            return {}
         stream = streamInfo[0]
-        sFlvUrlSuffix, sStreamName, sFlvAntiCode = \
-            stream['sFlvUrlSuffix'], stream['sStreamName'], stream['sFlvAntiCode']
+        sStreamName = stream['sStreamName']
+        sSuffix, sAntiCode = stream[f's{protocol}UrlSuffix'], stream[f's{protocol}AntiCode']
         if not allow_imgplus:
             sStreamName = sStreamName.replace('-imgplus', '')
-        sCdns = {item['sCdnType']: item['sFlvUrl'] for item in streamInfo if 'HY' not in item['sCdnType']}
-        sFlvUrl = sCdns.get(perf_cdn)
-        _stream_url = f'{sFlvUrl}/{sStreamName}.{sFlvUrlSuffix}?{_make_query(sStreamName, sFlvAntiCode)}'
-        return _stream_url, sCdns
+        sAntiCode = build_query(sStreamName, sAntiCode)
+        # HY 和 HYZJ 均为 P2P
+        sStreams = {item['sCdnType']: \
+                    f"{item[f's{protocol}Url']}/{sStreamName}.{sSuffix}?{sAntiCode}" \
+                    for item in streamInfo if 'HY' not in item['sCdnType']}
+        return sStreams
 
 
-def _make_query(sStreamName, sFlvAntiCode):
-    url_query = parse_qs(sFlvAntiCode)
+def build_query(sStreamName, sAntiCode):
+    url_query = parse_qs(sAntiCode)
     platform_id = 100
     uid = random.randint(12340000, 12349999)
     convert_uid = (uid << 8 | uid >> (32 - 8)) & 0xFFFFFFFF
     ws_time = url_query['wsTime'][0]
+    ct = int((int(ws_time, 16) + random.random()) * 1000)
     seq_id = uid + int(time.time() * 1000)
     ws_secret_prefix = base64.b64decode(unquote(url_query['fm'][0]).encode()).decode().split('_')[0]
     ws_secret_hash = hashlib.md5(f"{seq_id}|{url_query['ctype'][0]}|{platform_id}".encode()).hexdigest()
@@ -152,4 +161,21 @@ def _make_query(sStreamName, sFlvAntiCode):
     # t: 100 平台信息 100 web
     # sv: 2401090219 版本
     # sdk_sid:  _sessionId sdkInRoomTs 当前毫秒时间
-    return f"wsSecret={ws_secret}&wsTime={ws_time}&seqid={seq_id}&ctype={url_query['ctype'][0]}&ver=1&fs={url_query['fs'][0]}&u={convert_uid}&t={platform_id}&sv=2401090219&sdk_sid={int(time.time() * 1000)}&codec=264"
+
+    # return f"wsSecret={ws_secret}&wsTime={ws_time}&seqid={seq_id}&ctype={url_query['ctype'][0]}&ver=1&fs={url_query['fs'][0]}&u={convert_uid}&t={platform_id}&sv=2401090219&sdk_sid={int(time.time() * 1000)}&codec=264"
+
+    # https://github.com/hua0512/stream-rec/blob/ff0eb668e1f0fc160fe9b406bad79b5f570a4711/platforms/src/main/kotlin/github/hua0512/plugins/huya/download/HuyaExtractor.kt#L309
+    antiCode = {
+        "wsSecret": ws_secret,
+        "wsTime": ws_time,
+        "seqid": str(seq_id),
+        "ctype": url_query['ctype'][0],
+        "fs": url_query['fs'][0],
+        "u": convert_uid,
+        "t": platform_id,
+        "ver": "1",
+        "uuid": str(int((ct % 1e10 + random.random()) * 1e3 % 0xffffffff)),
+        "sdk_sid": str(int(time.time() * 1000)),
+        "codec": "264",
+    }
+    return '&'.join([f"{k}={v}" for k, v in antiCode.items()])

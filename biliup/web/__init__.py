@@ -270,17 +270,20 @@ async def lives(request):
         old = db.get(LiveStreamers, json_data['id'])
         old_url = old.url
         uid = json_data.get('upload_id')
+        # semi-ui 不能直接为 ArrayField 设置空默认值
+        # 当前端更新后，应移除这里的数据修改
+        new_data = {key: json_data.get(key, None) for key in old.as_dict() if key != 'upload_streamers_id'}
         try:
             if uid:
                 # us = UploadStreamers.get_by_id(json_data['upload_id'])
                 us = db.get(UploadStreamers, json_data['upload_id'])
                 # LiveStreamers.update(**json_data, upload_streamers=us).where(LiveStreamers.id == old.id).execute()
                 # db.update_live_streamer(**{**json_data, "upload_streamers_id": us.id})
-                db.execute(update(LiveStreamers), [{**json_data, "upload_streamers_id": us.id}])
+                db.execute(update(LiveStreamers), [{**new_data, "upload_streamers_id": us.id}])
                 db.commit()
             else:
                 # LiveStreamers.update(**json_data).where(LiveStreamers.id == old.id).execute()
-                db.execute(update(LiveStreamers), [json_data])
+                db.execute(update(LiveStreamers), [new_data])
                 db.commit()
         except Exception as e:
             return web.HTTPBadRequest(text=str(e))

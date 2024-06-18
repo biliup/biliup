@@ -55,6 +55,8 @@ def arg_parser():
         LOG_CONF['root']['level'] = args.verbose
     logging.config.dictConfig(LOG_CONF)
     logging.getLogger('httpx').addFilter(DebugLevelFilter())
+    # logging.getLogger('hpack').setLevel(logging.CRITICAL)
+    # logging.getLogger('httpx').setLevel(logging.CRITICAL)
     if platform.system() == 'Windows':
         return asyncio.run(main(args))
     args.func()
