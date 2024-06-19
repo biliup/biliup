@@ -218,8 +218,8 @@ class DownloadBase(ABC):
                 #     updatedFileList = True
                 for line in iter(proc.stdout.readline, b''):  # b'\n'-separated lines
                     decode_line = line.rstrip().decode(errors='ignore')
-                    print(decode_line)
-                    logger.debug(decode_line)
+                    # print(decode_line)
+                    # logger.debug(decode_line)
 
             if proc.returncode == 0:
                 # 文件重命名

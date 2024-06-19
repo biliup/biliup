@@ -8,7 +8,6 @@ import shutil
 
 import biliup.common.reload
 from biliup.config import config
-from biliup.database.db import SessionLocal, init
 from biliup import __version__, LOG_CONF
 from biliup.common.Daemon import Daemon
 from biliup.common.reload import AutoReload
@@ -39,14 +38,18 @@ def arg_parser():
     parser.set_defaults(func=lambda: asyncio.run(main(args)))
     args = parser.parse_args()
     biliup.common.reload.program_args = args.__dict__
+
+
+    from biliup.database.db import SessionLocal, init
     # 初始化数据库
     with SessionLocal() as db:
-        if init(args.no_http):
-            try:
-                config.load(args.config)
+        try:
+            config.load(args.config)
+            # 如果配置文件不存在，不修改已有数据库
+            if init(args.no_http):
                 config.save_to_db(db)
-            except FileNotFoundError:
-                print(f'新版本不依赖配置文件,请访问 WebUI 修改配置')
+        except FileNotFoundError:
+            print(f'新版本不依赖配置文件，请访问 WebUI 修改配置')
         config.load_from_db(db)
     # db.remove()
     LOG_CONF.update(config.get('LOGGING', {}))
