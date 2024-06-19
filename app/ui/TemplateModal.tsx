@@ -27,13 +27,14 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
         };
 
     const collapsed = (<div className="semi-form-field-extra">
-        自动上传正常结束后触发，将按自定义顺序执行操作。<Text type="danger">移除所有项目时，默认删除视频文件。</Text>若要保留文件请设置为 mv。示例：
+        流程无报错结束时触发，将按自定义顺序执行操作。<Text type="danger">移除所有项目时，默认删除视频文件。</Text>若要保留文件请设置为 mv。示例：
         <br />
         <code>rm</code> 删除文件，为默认操作
         <br />
         <code>mv = backup/</code> 移动文件到backup目录下
         <br />
         <code>run = echo hello!</code> 使用当前运行用户在 shell 执行任意命令，<Text type="danger">注意风险。</Text>视频文件路径作为标准输入传入
+        {/* TODO: 在这里塞插件仓库 */}
     </div>);
     const toggle = () => {
         setOpen(!isOpen);

@@ -30,6 +30,7 @@ class Huya(DownloadBase):
             logger.error(f"Huya - {self.url}: 直播间地址错误")
             return False
 
+        print(self.__room_id)
         html_info = await self._get_info_in_html()
         live_rate_info = html_info.get('vMultiStreamInfo', [])
         if not live_rate_info:
@@ -130,23 +131,23 @@ class Huya(DownloadBase):
         if not html_info:
             return {}
         try:
-            streamInfo = html_info['data'][0]['gameStreamInfoList']
+            stream_info = html_info['data'][0]['gameStreamInfoList']
         except KeyError:
             logger.exception(f"{self.plugin_msg}: build_stream_url {html_info}")
             return {}
-        stream = streamInfo[0]
-        sStreamName = stream['sStreamName']
-        sSuffix, sAntiCode = stream[f's{protocol}UrlSuffix'], stream[f's{protocol}AntiCode']
+        stream = stream_info[0]
+        stream_name = stream['sStreamName']
+        suffix, anti_code = stream[f's{protocol}UrlSuffix'], stream[f's{protocol}AntiCode']
         if not allow_imgplus:
-            sStreamName = sStreamName.replace('-imgplus', '')
-        sAntiCode = build_query(sStreamName, sAntiCode)
-        if not sAntiCode:
-            logger.error(f"{self.plugin_msg}: build_stream_url {sStreamName} {sAntiCode}")
+            stream_name = stream_name.replace('-imgplus', '')
+        anti_code = build_query(stream_name, anti_code)
+        if not anti_code:
+            logger.error(f"{self.plugin_msg}: build_stream_url {stream_name} {anti_code}")
             return {}
         # HY 和 HYZJ 均为 P2P
         sStreams = {item['sCdnType']: \
-                    f"{item[f's{protocol}Url']}/{sStreamName}.{sSuffix}?{sAntiCode}" \
-                    for item in streamInfo if 'HY' not in item['sCdnType']}
+                    f"{item[f's{protocol}Url']}/{stream_name}.{suffix}?{anti_code}" \
+                    for item in stream_info if 'HY' not in item['sCdnType']}
         return sStreams
 
 
@@ -177,7 +178,7 @@ def build_query(sStreamName, sAntiCode) -> str:
     # return f"wsSecret={ws_secret}&wsTime={ws_time}&seqid={seq_id}&ctype={url_query['ctype'][0]}&ver=1&fs={url_query['fs'][0]}&u={convert_uid}&t={platform_id}&sv=2401090219&sdk_sid={int(time.time() * 1000)}&codec=264"
 
     # https://github.com/hua0512/stream-rec/blob/ff0eb668e1f0fc160fe9b406bad79b5f570a4711/platforms/src/main/kotlin/github/hua0512/plugins/huya/download/HuyaExtractor.kt#L309
-    antiCode = {
+    anti_code = {
         "wsSecret": ws_secret,
         "wsTime": ws_time,
         "seqid": str(seq_id),
@@ -190,4 +191,4 @@ def build_query(sStreamName, sAntiCode) -> str:
         "sdk_sid": str(int(time.time() * 1000)),
         "codec": "264",
     }
-    return '&'.join([f"{k}={v}" for k, v in antiCode.items()])
+    return '&'.join([f"{k}={v}" for k, v in anticode.items()])
