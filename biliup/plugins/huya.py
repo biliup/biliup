@@ -191,4 +191,4 @@ def build_query(sStreamName, sAntiCode) -> str:
         "sdk_sid": str(int(time.time() * 1000)),
         "codec": "264",
     }
-    return '&'.join([f"{k}={v}" for k, v in anticode.items()])
+    return '&'.join([f"{k}={v}" for k, v in anti_code.items()])
