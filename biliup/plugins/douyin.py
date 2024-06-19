@@ -4,7 +4,7 @@ from urllib.parse import unquote, urlparse, parse_qs, urlencode, urlunparse
 
 import requests
 
-import biliup.common.util
+from biliup.common.util import client
 from . import logger, match1
 from biliup.config import config
 from biliup.Danmaku import DanmakuClient
@@ -24,7 +24,7 @@ class Douyin(DownloadBase):
     async def acheck_stream(self, is_check=False):
         if "/user/" in self.url:
             try:
-                user_page = (await biliup.common.util.client.get(self.url, headers=self.fake_headers, timeout=5)).text
+                user_page = (await client.get(self.url, headers=self.fake_headers)).text
                 user_page_data = unquote(
                     user_page.split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0])
                 room_id = match1(user_page_data, r'"web_rid":"([^"]+)"')
@@ -51,9 +51,9 @@ class Douyin(DownloadBase):
         try:
             if "ttwid" not in self.fake_headers['cookie']:
                 self.fake_headers['Cookie'] = f'ttwid={DouyinUtils.get_ttwid()};{self.fake_headers["cookie"]}'
-            page = (await biliup.common.util.client.get(
+            page = (await client.get(
                 DouyinUtils.build_request_url(f"https://live.douyin.com/webcast/room/web/enter/?web_rid={room_id}"),
-                headers=self.fake_headers, timeout=5)).json()
+                headers=self.fake_headers)).json()
             room_info = page.get('data').get('data')
             if room_info is None:
                 logger.warning(f"{Douyin.__name__}: {self.url}: {page}")
@@ -114,7 +114,9 @@ class Douyin(DownloadBase):
                 else:
                     quality = optional_quality_items[optional_quality_index - 1]
 
-            self.raw_stream_url = stream_data[quality]['main']['flv']
+            protocol = 'hls' if config.get('douyin_protocol') == 'hls' else 'flv'
+            # protocol = 'hls'
+            self.raw_stream_url = stream_data[quality]['main'][protocol]
             self.room_title = room_info['title']
         except:
             logger.exception(f"{Douyin.__name__} - {self.url}: 寻找清晰度失败")
@@ -134,7 +136,7 @@ class DouyinUtils:
     def get_ttwid() -> Optional[str]:
         with NamedLock("douyin_ttwid_get"):
             if not DouyinUtils._douyin_ttwid:
-                page = requests.get("https://live.douyin.com/1-2-3-4-5-6-7-8-9-0", timeout=5)
+                page = requests.get("https://live.douyin.com/1-2-3-4-5-6-7-8-9-0", timeout=15)
                 DouyinUtils._douyin_ttwid = page.cookies.get("ttwid")
             return DouyinUtils._douyin_ttwid
 

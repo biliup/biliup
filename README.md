@@ -21,10 +21,10 @@
 
 
   <p align="center">
-    录制各大主流直播平台并上传至哔哩哔哩弹幕网<br />   
-  自动选择上传线路，保证上传稳定性，可手动调整并发<br />   
-    支持录制哔哩哔哩、斗鱼、虎牙、Twitch直播弹幕用于外挂播放器<br /> 
- 防止录制花屏（使用默认的stream-gears下载器就会有这个功能），解决网络、PK导致的花屏。    
+    录制各大主流直播平台并上传至哔哩哔哩弹幕网<br />
+  自动选择上传线路，保证上传稳定性，可手动调整并发<br />
+    支持录制哔哩哔哩、斗鱼、虎牙、Twitch直播弹幕用于外挂播放器<br />
+ 防止录制花屏（使用默认的stream-gears下载器就会有这个功能），解决网络、PK导致的花屏。
 
 
 <br />
@@ -39,7 +39,7 @@
   </p>
 </div>
 
-    
+
 
 
 
@@ -81,15 +81,15 @@
 | acfun | 直播 | `https://live.acfun.cn/live/123456` |
 | afreecaTV | 直播 | `https://play.afreecatv.com/biliup123/123456` | 录制部分直播时需要登陆 |
 | bigo | 直播 | `https://www.bigo.tv/123456` |
-| 抖音 | 直播 | 直播:`https://live.douyin.com/123456`<br>主页:`https://www.douyin.com/456789(抖音号)` | 录制douyin.com/user/类型链接或被风控需配置cookies |
+| 抖音 | 直播 | 直播:`https://live.douyin.com/123456(直播间数字号)`<br>直播:`https://live.douyin.com/tiktok(抖音号)`<br>主页（不推荐）:`https://www.douyin.com/user/456789(抖音号)` | 使用主页链接或被风控需配置cookies |
 | 快手 | 直播 | `https://live.kuaishou.com/u/biliup123` |
 | 网易CC | 直播 | `https://cc.163.com/123456` |
 | flextv | 直播 | `https://www.flextv.co.kr/channels/123456/live` |
 | 映客 | 直播 | `https://www.inke.cn/liveroom/index.html?uid=123456` |
 | 猫耳FM | 直播 | `https://fm.missevan.com/live/123456` | 猫耳为纯音频流 |
 | nico | 直播 | `https://live.nicovideo.jp/watch/lv123456` | 可配置登录信息 |
-| twitch | 直播/回放 &nbsp; &nbsp; &nbsp; &nbsp; | 直播:`https://www.twitch.tv/biliup123`<br>回放:`https://www.twitch.tv/biliup123/videos?filter=archives&sort=time`  | 可配置登录信息/尽量录制回放/可录制弹幕 |
-| youtube | 直播/回放 &nbsp; &nbsp; &nbsp; &nbsp; | 直播:`https://www.youtube.com/watch?v=biliup123`<br>回放:`https://www.youtube.com/@biliup123/videos` | 可配置登录信息/尽量录制回放/可配置回放下载日期 |
+| twitch | 直播<br>回放 | 直播:`https://www.twitch.tv/biliup123`<br>回放:`https://www.twitch.tv/biliup123/videos?filter=archives&sort=time`  | 可配置登录信息/尽量录制回放/可录制弹幕 |
+| youtube | 直播<br>回放 | 直播:`https://www.youtube.com/watch?v=biliup123(单场)`<br>直播:`https://www.youtube.com/@biliup123/live(最远的预约)`<br>回放:`https://www.youtube.com/@biliup123/videos` | 可配置登录信息/尽量录制回放/可配置回放下载日期 |
 * 理论上streamlink与yt-dlp支持的都可以下载，但不保证可以正常使用，详见:[streamlink支持列表](https://streamlink.github.io/plugins.html)，[yt-dlp支持列表](https://github.com/yt-dlp/yt-dlp/tree/master/yt_dlp/extractor).
 
 

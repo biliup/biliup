@@ -43,6 +43,20 @@ const Douyin: React.FC = () => {
                     }
                     label="录制弹幕（douyin_danmaku）"
                 />
+                <Form.Select
+                    field="douyin_protocol"
+                    extraText="hls 仅供测试，请谨慎切换。"
+                    label="直播流协议（douyin_protocol）"
+                    style={{ width: "100%" }}
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                    showClear={true}
+                >
+                    <Select.Option value="flv">flv（默认）</Select.Option>
+                    <Select.Option value="hls">hls</Select.Option>
+                </Form.Select>
             </Collapse.Panel>
         </>
     );

@@ -31,8 +31,6 @@ class DownloadBase(ABC):
         self.room_title = None
         if opt_args is None:
             opt_args = []
-        # 主播单独传参会覆盖全局设置。例如新增了一个全局的filename_prefix参数，在下面添加self.filename_prefix = config.get('filename_prefix'),
-        # 即可通过self.filename_prefix在下载或者上传时候传递主播单独的设置参数用于调用（如果该主播有设置单独参数，将会优先使用单独参数；如无，则会优先你用全局参数。）
         self.fname = fname
         self.url = url
         # 录制后保存文件格式而非源流格式 对应原配置文件format 仅ffmpeg及streamlink生效
@@ -46,6 +44,9 @@ class DownloadBase(ABC):
         # ffmpeg.exe -i  http://vfile1.grtn.cn/2018/1542/0254/3368/154202543368.ssm/154202543368.m3u8
         # -c copy -bsf:a aac_adtstoasc -movflags +faststart output.mp4
         self.raw_stream_url = None
+
+        # 主播单独传参会覆盖全局设置。例如新增了一个全局的filename_prefix参数，在下面添加self.filename_prefix = config.get('filename_prefix'),
+        # 即可通过self.filename_prefix在下载或者上传时候传递主播单独的设置参数用于调用（如果该主播有设置单独参数，将会优先使用单独参数；如无，则会优先你用全局参数。）
         self.filename_prefix = config.get('filename_prefix')
         self.use_live_cover = config.get('use_live_cover', False)
         self.opt_args = opt_args
@@ -380,15 +381,13 @@ class DownloadBase(ABC):
                 logger.exception(f'封面下载失败：{self.__class__.__name__} - {self.fname}')
 
     async def acheck_url_healthy(self, url):
-        timeout = 60 if '.flv' in url else 5
-
         async def __client_get(url, stream: bool = False):
             client.headers.update(self.fake_headers)
             if stream:
-                async with client.stream("GET", url, timeout=timeout, follow_redirects=False) as response:
+                async with client.stream("GET", url, timeout=60, follow_redirects=False) as response:
                     pass
             else:
-                response = await client.get(url, timeout=timeout)
+                response = await client.get(url)
             if response.status_code not in (301, 302):
                 response.raise_for_status()
             return response
@@ -464,6 +463,7 @@ def stream_gears_download(url, headers, file_name, segment_time=None, file_size=
         segment.size = file_size
     if file_size is None and segment_time is None:
         segment.size = 8 * 1024 * 1024 * 1024
+    # FIXME: 下载时如出现403，这里不会回到上层方法获取新链接
     if file_name_callback:
         stream_gears.download_with_callback(
             url,

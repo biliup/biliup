@@ -217,7 +217,7 @@ const Dashboard: React.FC = () => {
                                                 {/* 斗鱼 */}
                                                 <Douyu />
                                                 {/* 虎牙 */}
-                                                <Huya />
+                                                <Huya entity={entity} />
                                                 {/* 老鼠台 */}
                                                 <Twitch entity={entity} />
                                                 {/* Twitcasting */}

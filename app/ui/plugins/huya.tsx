@@ -2,7 +2,12 @@
 import React from "react";
 import { Form, Select, Collapse } from "@douyinfe/semi-ui";
 
-const Huya: React.FC = () => {
+type Props = {
+    entity: any;
+};
+
+const Huya: React.FC<Props> = (props) => {
+    const entity = props.entity;
     return (
         <>
             <Collapse.Panel header="虎牙" itemKey="huya">
@@ -23,7 +28,7 @@ const Huya: React.FC = () => {
                     rules={[
                         {
                             pattern: /^\d*$/,
-                            message: "请仅输入纯数字"
+                            message: "请输入纯数字"
                         }
                     ]}
                     showClear={true}
@@ -50,7 +55,7 @@ const Huya: React.FC = () => {
                             <br />
                             AL（阿里云 - 直播线路3）, TX（腾讯云 - 直播线路5）, HW（华为云 - 直播线路6）, WS（网宿）, HS（火山引擎 - 直播线路14）, AL13（阿里云）, TX15（腾讯云）, HW16（华为云）
                             <br />
-                            HYZJ(虎牙自建 - 直播线路66) 该线路已被屏蔽，不要设置该线路
+                            HY、HYZJ(虎牙自建 - 直播线路66) 已屏蔽。如设置，将切换为首个可用线路。
                         </div>
                     }
                     label="访问线路（huya_cdn）"
@@ -80,6 +85,30 @@ const Huya: React.FC = () => {
                     field="huya_cdn_fallback"
                     extraText="当访问线路（huya_cdn）不可用时，尝试其他线路（huya_cdn_fallback）"
                     label="CDN 回退（huya_cdn_fallback）"
+                />
+                <Form.Select
+                    field="huya_protocol"
+                    extraText="Hls 仅供测试，请谨慎切换。"
+                    label="直播流协议（huya_protocol）"
+                    style={{ width: "100%" }}
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                    showClear={true}
+                >
+                    <Select.Option value="Flv">Flv（默认）</Select.Option>
+                    <Select.Option value="Hls">Hls</Select.Option>
+                </Form.Select>
+                <Form.Switch
+                    field="huya_imgplus"
+                    extraText="是否录制二次编码的直播流。默认为启用，关闭后可能无法下载。部分直播间的分辨率超分和HDR画质依赖于二次编码，请谨慎关闭。"
+                    label="虎牙二次编码（huya_imgplus）"
+                    initValue={
+                        entity?.hasOwnProperty("huya_imgplus")
+                            ? entity["huya_imgplus"]
+                            : true
+                    }
                 />
             </Collapse.Panel>
         </>

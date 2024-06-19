@@ -58,7 +58,8 @@ def check_access(
     header_value: str,
     strategy: Callable = lambda x: x
 ) -> bool:
-    log.debug('Check access: %r', header_value)
+    # log.debug('Check access: %r', header_value)
+    print('Check access: %r', header_value)
 
     try:
         login, password = parse_header(header_value)

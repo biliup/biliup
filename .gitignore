@@ -37,7 +37,7 @@ biliup/**/public
 !package-lock.json
 qrcode.png
 *.log
-./*.ts
+/*.ts
 /biliup/stream-gears/
 data/
 .next
