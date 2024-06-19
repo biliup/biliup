@@ -73,17 +73,17 @@ class Huya(DownloadBase):
             logger.error(f"{self.plugin_msg}: 没有可用的链接")
             return False
 
-        cdnNameList = list(stream_urls.keys())
-        if perf_cdn not in cdnNameList:
-            logger.warning(f"{self.plugin_msg}: {perf_cdn} CDN不存在，自动切换到 {cdnNameList[0]}")
-            perf_cdn = cdnNameList[0]
+        cdn_name_list = list(stream_urls.keys())
+        if perf_cdn not in cdn_name_list:
+            logger.warning(f"{self.plugin_msg}: {perf_cdn} CDN不存在，自动切换到 {cdn_name_list[0]}")
+            perf_cdn = cdn_name_list[0]
 
         # 虎牙直播流只允许连接一次
         if cdn_fallback:
             _url = await self.acheck_url_healthy(stream_urls[perf_cdn])
             if _url is None:
-                logger.info(f"{self.plugin_msg}: 提供如下CDN {cdnNameList}")
-                for cdn in cdnNameList:
+                logger.info(f"{self.plugin_msg}: 提供如下CDN {cdn_name_list}")
+                for cdn in cdn_name_list:
                     if cdn == perf_cdn:
                         continue
                     logger.info(f"{self.plugin_msg}: cdn_fallback 尝试 {cdn}")
@@ -145,10 +145,10 @@ class Huya(DownloadBase):
             logger.error(f"{self.plugin_msg}: build_stream_url {stream_name} {anti_code}")
             return {}
         # HY 和 HYZJ 均为 P2P
-        sStreams = {item['sCdnType']: \
+        streams = {item['sCdnType']: \
                     f"{item[f's{protocol}Url']}/{stream_name}.{suffix}?{anti_code}" \
                     for item in stream_info if 'HY' not in item['sCdnType']}
-        return sStreams
+        return streams
 
 
 def build_query(sStreamName, sAntiCode) -> str:
