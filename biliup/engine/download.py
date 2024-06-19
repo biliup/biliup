@@ -80,6 +80,7 @@ class DownloadBase(ABC):
         raise NotImplementedError()
 
     def download(self):
+        logger.debug(f"{self.plugin_msg}: Start downloading {self.raw_stream_url}")
         if self.is_download:
             if not shutil.which("ffmpeg"):
                 logger.error("未安装 FFMpeg 或不存在于 PATH 内")
@@ -218,8 +219,8 @@ class DownloadBase(ABC):
                 #     updatedFileList = True
                 for line in iter(proc.stdout.readline, b''):  # b'\n'-separated lines
                     decode_line = line.rstrip().decode(errors='ignore')
-                    # print(decode_line)
-                    # logger.debug(decode_line)
+                    print(decode_line)
+                    logger.debug(decode_line)
 
             if proc.returncode == 0:
                 # 文件重命名
