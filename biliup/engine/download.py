@@ -463,6 +463,7 @@ def stream_gears_download(url, headers, file_name, segment_time=None, file_size=
         segment.size = file_size
     if file_size is None and segment_time is None:
         segment.size = 8 * 1024 * 1024 * 1024
+    # FIXME: 下载时如出现403，这里不会回到上层方法获取新链接
     if file_name_callback:
         stream_gears.download_with_callback(
             url,
