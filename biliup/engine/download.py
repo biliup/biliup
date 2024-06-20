@@ -203,7 +203,13 @@ class DownloadBase(ABC):
 
             output_args += self.opt_args
 
-            args = ['ffmpeg', '-y', *input_args, *output_args, '-c', 'copy', '-f', self.suffix,
+            if self.suffix.lower() == 'ts':
+                output_args += ['-f', 'mpegts']
+            elif self.suffix.lower() == 'mkv':
+                output_args += ['-f', 'matroska']
+            else:
+                output_args += ['-f', self.suffix]
+            args = ['ffmpeg', '-y', *input_args, *output_args, '-c', 'copy',
                     f'{fmt_file_name}.{self.suffix}.part']
             with subprocess.Popen(args, stdin=subprocess.DEVNULL if not streamlink_proc else streamlink_proc.stdout,
                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as proc:
@@ -492,7 +498,7 @@ def get_valid_filename(name):
     '{self.fname}%Y-%m-%dT%H_%M_%S'
     """
     # s = str(name).strip().replace(" ", "_") #因为有些人会在主播名中间加入空格，为了避免和录播完毕自动改名冲突，所以注释掉
-    s = re.sub(r"(?u)[^-\w.%{}\[\]【】「」（）\s]", "", str(name))
+    s = re.sub(r"(?u)[^-\w.%{}\[\]【】「」（）・°\s]", "", str(name))
     if s in {"", ".", ".."}:
         raise RuntimeError("Could not derive file name from '%s'" % name)
     return s
