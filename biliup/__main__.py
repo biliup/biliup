@@ -8,7 +8,6 @@ import shutil
 
 import biliup.common.reload
 from biliup.config import config
-from biliup.database.db import SessionLocal, init
 from biliup import __version__, LOG_CONF
 from biliup.common.Daemon import Daemon
 from biliup.common.reload import AutoReload
@@ -39,25 +38,33 @@ def arg_parser():
     parser.set_defaults(func=lambda: asyncio.run(main(args)))
     args = parser.parse_args()
     biliup.common.reload.program_args = args.__dict__
-    # 初始化数据库
-    with SessionLocal() as db:
-        if init(args.no_http):
+
+    is_stop = args.func == daemon.stop
+
+    if not is_stop:
+        from biliup.database.db import SessionLocal, init
+        # 初始化数据库
+        with SessionLocal() as db:
             try:
                 config.load(args.config)
-                config.save_to_db(db)
+                # 如果配置文件不存在，不修改已有数据库
+                if init(args.no_http):
+                    config.save_to_db(db)
             except FileNotFoundError:
-                print(f'新版本不依赖配置文件,请访问 WebUI 修改配置')
-        config.load_from_db(db)
-    # db.remove()
-    LOG_CONF.update(config.get('LOGGING', {}))
-    if args.verbose:
-        LOG_CONF['loggers']['biliup']['level'] = args.verbose
-        LOG_CONF['root']['level'] = args.verbose
-    logging.config.dictConfig(LOG_CONF)
-    logging.getLogger('httpx').addFilter(DebugLevelFilter())
-    # logging.getLogger('hpack').setLevel(logging.CRITICAL)
-    # logging.getLogger('httpx').setLevel(logging.CRITICAL)
+                print(f'新版本不依赖配置文件，请访问 WebUI 修改配置')
+            config.load_from_db(db)
+        # db.remove()
+        LOG_CONF.update(config.get('LOGGING', {}))
+        if args.verbose:
+            LOG_CONF['loggers']['biliup']['level'] = args.verbose
+            LOG_CONF['root']['level'] = args.verbose
+        logging.config.dictConfig(LOG_CONF)
+        logging.getLogger('httpx').addFilter(DebugLevelFilter())
+        # logging.getLogger('hpack').setLevel(logging.CRITICAL)
+        # logging.getLogger('httpx').setLevel(logging.CRITICAL)
     if platform.system() == 'Windows':
+        if is_stop:
+            return
         return asyncio.run(main(args))
     args.func()
 

@@ -5,7 +5,6 @@ import os
 from collections import UserDict
 from sqlalchemy import select
 
-from biliup.database.models import Configuration, LiveStreamers, UploadStreamers
 
 try:
     import tomllib
@@ -30,6 +29,7 @@ class Config(UserDict):
             self.data["user"]["access_token"] = s["token_info"]["access_token"]
 
     def load_from_db(self, db):
+        from biliup.database.models import Configuration, LiveStreamers
         context = {
             'url_upload_count': self.data.get('url_upload_count', {}),
             'upload_filename': self.data.get('upload_filename', []),
@@ -55,6 +55,7 @@ class Config(UserDict):
         #     config.data[con.key] = con.value
 
     def save_to_db(self, db):
+        from biliup.database.models import Configuration, LiveStreamers, UploadStreamers
         for k, v in self['streamers'].items():
             us = UploadStreamers(**UploadStreamers.filter_parameters(
                 {"template_name": k, "tags": v.pop('tags', [k]), ** v}))
