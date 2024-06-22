@@ -237,7 +237,8 @@ const Global: React.FC = () => {
                     label="上传插件（uploader）"
                     extraText="全局默认上传插件选择。"
                     placeholder="biliup-rs"
-                    style={{ width: "100%" }}
+                    noLabel={true}
+                    style={{ width: "100%", display: 'none' }}
                     fieldStyle={{
                         alignSelf: "stretch",
                         padding: 0,

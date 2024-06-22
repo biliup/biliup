@@ -76,7 +76,7 @@ const Dashboard: React.FC = () => {
         return <>Loading</>
     }
     if (error) {
-        return <>{error}</>
+        return <> error {JSON.stringify(error)}</>
     }
 
     const list = biliUsers?.map((item) => {
