@@ -33,8 +33,8 @@ class Bililive(DownloadBase):
                     self.fake_headers['cookie'] = cookies_str
             except Exception:
                 logger.exception("load_cookies error")
-        else:
-           logger.warning("No cookie provided. The original quality may not be available.")
+        # else:
+        #    logger.warning("No cookie provided. The original quality may not be available.")
 
     async def acheck_stream(self, is_check=False):
         room_id = match1(self.url, r'/(\d+)')

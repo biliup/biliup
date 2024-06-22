@@ -5,6 +5,7 @@ import asyncio
 import logging.config
 import platform
 import shutil
+from pathlib import Path
 
 import biliup.common.reload
 from biliup.config import config
@@ -43,16 +44,17 @@ def arg_parser():
 
     if not is_stop:
         from biliup.database.db import SessionLocal, init
-        # 初始化数据库
+        first_run = not Path.cwd().joinpath("data/data.sqlite3").exists()
         with SessionLocal() as db:
-            if args.no_http or args.config:
-                try:
-                    config.load(args.config)
-                    # 如果配置文件不存在，不修改已有数据库
-                    if init(args.no_http):
-                        config.save_to_db(db)
-                except FileNotFoundError:
-                    print(f'新版本不依赖配置文件，请访问 WebUI 修改配置')
+            try:
+                config.load(args.config)
+                if init(args.no_http, first_run):
+                    config.save_to_db(db)
+                    first_run = False
+            except FileNotFoundError:
+                print(f'新版本不依赖配置文件，请访问 WebUI 修改配置')
+            if first_run:
+                init(args.no_http, first_run)
             config.load_from_db(db)
         # db.remove()
         LOG_CONF.update(config.get('LOGGING', {}))
