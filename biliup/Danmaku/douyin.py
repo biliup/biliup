@@ -53,7 +53,7 @@ class Douyin:
             USER_UNIQUE_ID = DouyinDanmakuUtils.get_user_unique_id()
             VERSION_CODE = 180800 # https://lf-cdn-tos.bytescm.com/obj/static/webcast/douyin_live/7697.782665f8.js -> a.ry
             WEBCAST_SDK_VERSION = "1.0.14-beta.0" # https://lf-cdn-tos.bytescm.com/obj/static/webcast/douyin_live/7697.782665f8.js -> ee.VERSION
-            logger.info(f"user_unique_id: {USER_UNIQUE_ID}")
+            # logger.info(f"user_unique_id: {USER_UNIQUE_ID}")
             sig_params = {
                 "live_id": "1",
                 "aid": "6383",
@@ -70,7 +70,7 @@ class Douyin:
                 "identity": "audience"
             }
             signature = DouyinDanmakuUtils.get_signature(DouyinDanmakuUtils.get_x_ms_stub(sig_params))
-            logger.info(f"signature: {signature}")
+            # logger.info(f"signature: {signature}")
             webcast5_params = {
                 "room_id": room_info['id_str'],
                 "compress": 'gzip',
