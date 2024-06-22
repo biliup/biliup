@@ -61,9 +61,10 @@ class Douyu(DownloadBase):
             try:
                 import jsengine
                 try:
-                    ctx = jsengine.jsengine()
+                    jsengine.jsengine()
                 except jsengine.exceptions.RuntimeError as e:
-                    logger.error(f"{e}\n请至少安装一个 Javascript 解释器，如 pip install quickjs")
+                    extra_msg = "如需录制斗鱼直播，"
+                    logger.error(f"\n{e}\n{extra_msg}请至少安装一个 Javascript 解释器，如 pip install quickjs")
                     return False
             except:
                 logger.exception(f"{self.plugin_msg}: ")
