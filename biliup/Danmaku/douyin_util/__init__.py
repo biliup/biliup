@@ -40,7 +40,7 @@ navigator = {{
             ctx.eval(final_js)
             function_caller = f"get_sign('{X_MS_STUB}')"
             signature = ctx.eval(function_caller)
-            print("signature: ", signature)
+            # print("signature: ", signature)
             return signature
         except:
             logger.exception("get_signature error")
