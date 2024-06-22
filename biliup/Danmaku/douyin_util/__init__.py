@@ -23,7 +23,7 @@ class DouyinDanmakuUtils:
         return hashlib.md5(sig_params.encode()).hexdigest()
 
     @staticmethod
-    def get_signature(X_MS_STUB: str):
+    def get_signature(x_ms_stub: str):
         from biliup.plugins.douyin import DouyinUtils
         try:
             import jsengine
@@ -38,7 +38,7 @@ navigator = {{
             js_enc = DouyinDanmakuUtils.load_webmssdk('webmssdk.js')
             final_js = js_dom + js_enc
             ctx.eval(final_js)
-            function_caller = f"get_sign('{X_MS_STUB}')"
+            function_caller = f"get_sign('{x_ms_stub}')"
             signature = ctx.eval(function_caller)
             # print("signature: ", signature)
             return signature

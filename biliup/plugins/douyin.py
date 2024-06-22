@@ -5,7 +5,7 @@ from urllib.parse import unquote, urlparse, parse_qs, urlencode, urlunparse
 import requests
 
 from biliup.common.util import client
-from . import logger, match1
+from . import logger, match1, random_user_agent
 from biliup.config import config
 from biliup.Danmaku import DanmakuClient
 from ..common.tools import NamedLock
@@ -141,7 +141,8 @@ class Douyin(DownloadBase):
 class DouyinUtils:
     # 抖音ttwid
     _douyin_ttwid: Optional[str] = None
-    DOUYIN_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36'
+    # DOUYIN_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36'
+    DOUYIN_USER_AGENT = random_user_agent()
     DOUYIN_HTTP_HEADERS = {
         'User-Agent': DOUYIN_USER_AGENT
     }
