@@ -50,7 +50,7 @@ license-files = ["LICENSE"]
 include-package-data = false
 
 [tool.setuptools.package-data]
-biliup = ["common/*.ini", "web/public/**", "web/public/build/*", "database/migration/*"]
+biliup = ["common/*.ini", "web/public/**", "web/public/build/*", "database/migration/*", "Danmaku/douyin_util/webmssdk.js"]
 
 [tool.setuptools.packages.find]
 include = ["biliup*"]
