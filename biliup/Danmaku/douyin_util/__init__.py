@@ -1,17 +1,47 @@
-# 抖音的弹幕录制参考了 https://github.com/LyzenX/DouyinLiveRecorder 和 https://github.com/YunzhiYike/live-tool
+import hashlib
+import logging
+import os
 
-from datetime import datetime
-import threading
-import asyncio
-import gzip
-import re
-import time
-import re
-import requests
-import urllib
-import json
+logger = logging.getLogger('biliup')
 
-import websocket
-from google.protobuf import json_format
+class DouyinDanmakuUtils:
+    @staticmethod
+    def load_webmssdk(js_file: str):
+        dir_path = os.path.dirname(os.path.realpath(__file__))
+        js_path = os.path.join(dir_path, js_file)
+        with open(js_path, 'r', encoding='utf-8') as f:
+            return f.read()
 
-from .dy_pb2 import PushFrame, Response, ChatMessage
+    @staticmethod
+    def get_user_unique_id() -> str:
+        import random
+        return str(random.randint(7300000000000000000, 7999999999999999999))
+
+    @staticmethod
+    def get_x_ms_stub(params: dict) -> str:
+        sig_params = ','.join([f'{k}={v}' for k, v in params.items()])
+        return hashlib.md5(sig_params.encode()).hexdigest()
+
+    @staticmethod
+    def get_signature(X_MS_STUB: str):
+        from biliup.plugins.douyin import DouyinUtils
+        try:
+            import jsengine
+            ctx = jsengine.jsengine()
+            js_dom = f"""
+document = {{}}
+window = {{}}
+navigator = {{
+  'userAgent': '{DouyinUtils.DOUYIN_USER_AGENT}'
+}}
+""".strip()
+            js_enc = DouyinDanmakuUtils.load_webmssdk('webmssdk.js')
+            final_js = js_dom + js_enc
+            ctx.eval(final_js)
+            function_caller = f"get_sign('{X_MS_STUB}')"
+            signature = ctx.eval(function_caller)
+            print("signature: ", signature)
+            return signature
+        except:
+            logger.exception("get_signature error")
+        return "00000000"

@@ -18,6 +18,7 @@ class Douyin(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
         self.douyin_danmaku = config.get('douyin_danmaku', False)
+        self.fake_headers['user-agent'] = DouyinUtils.DOUYIN_USER_AGENT
         self.fake_headers['referer'] = "https://live.douyin.com/"
         self.fake_headers['cookie'] = config.get('user', {}).get('douyin_cookie', '')
 
@@ -125,12 +126,25 @@ class Douyin(DownloadBase):
 
     def danmaku_init(self):
         if self.douyin_danmaku:
-            self.danmaku = DanmakuClient(self.url, self.gen_download_filename())
+            try:
+                import jsengine
+                try:
+                    jsengine.jsengine()
+                    self.danmaku = DanmakuClient(self.url, self.gen_download_filename())
+                except jsengine.exceptions.RuntimeError as e:
+                    extra_msg = "如需录制抖音弹幕，"
+                    logger.error(f"\n{e}\n{extra_msg}请至少安装一个 Javascript 解释器，如 pip install quickjs")
+            except:
+                pass
 
 
 class DouyinUtils:
     # 抖音ttwid
     _douyin_ttwid: Optional[str] = None
+    DOUYIN_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36'
+    DOUYIN_HTTP_HEADERS = {
+        'User-Agent': DOUYIN_USER_AGENT
+    }
 
     @staticmethod
     def get_ttwid() -> Optional[str]:
@@ -148,8 +162,8 @@ class DouyinUtils:
         existing_params['device_platform'] = ['web']
         existing_params['browser_language'] = ['zh-CN']
         existing_params['browser_platform'] = ['Win32']
-        existing_params['browser_name'] = ['Chrome']
-        existing_params['browser_version'] = ['92.0.4515.159']
+        existing_params['browser_name'] = [DouyinUtils.DOUYIN_USER_AGENT.split('/')[0]]
+        existing_params['browser_version'] = [DouyinUtils.DOUYIN_USER_AGENT.split(existing_params['browser_name'][0])[-1][1:]]
         new_query_string = urlencode(existing_params, doseq=True)
         new_url = urlunparse((
             parsed_url.scheme,
