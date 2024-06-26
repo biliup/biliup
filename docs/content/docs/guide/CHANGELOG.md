@@ -19,6 +19,35 @@ top = false
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 0.4.69-0.4.70
+### What's Changed
+- fix: first run error by @xxxxuanran in [#968](https://github.com/biliup/biliup/pull/968)
+
+
+**Full Changelog**:[v0.4.69...v0.4.70](https://github.com/biliup/biliup/compare/v0.4.69...v0.4.70)
+
+## 0.4.68-0.4.69
+### What's Changed
+- 🔧feat(download): Support hls for huya, douyin by @xxxxuanran in [#958](https://github.com/biliup/biliup/pull/958)
+- fix: val name err by @xxxxuanran in [#962](https://github.com/biliup/biliup/pull/962)
+- Minimal import by @xxxxuanran in [#963](https://github.com/biliup/biliup/pull/963)
+- 🔧fix(douyin-danmaku): include signature parameter by @xxxxuanran in [#967](https://github.com/biliup/biliup/pull/967)
+
+
+**Full Changelog**:[v0.4.68...v0.4.69](https://github.com/biliup/biliup/compare/v0.4.68...v0.4.69)
+
+## 0.4.60-0.4.68
+### What's Changed
+- 🔧修正不存在配置时出现的错误引用 by @xxxxuanran in [#933](https://github.com/biliup/biliup/pull/933)
+- Update CHANGELOG.md by @viondw in [#932](https://github.com/biliup/biliup/pull/932)
+- 🔧更新 CC 平台 by @xxxxuanran in [#936](https://github.com/biliup/biliup/pull/936)
+- 限制 Twitch 同时查询数量 by @xxxxuanran in [#941](https://github.com/biliup/biliup/pull/941)
+- feat(Douyu): 拒绝互动游戏 by @xxxxuanran in [#943](https://github.com/biliup/biliup/pull/943)
+- Fix(Blive): 原画优先 by @xxxxuanran in [#946](https://github.com/biliup/biliup/pull/946)
+
+
+**Full Changelog**:[v0.4.60...v0.4.68](https://github.com/biliup/biliup/compare/v0.4.60...v0.4.68)
+
 ## 0.4.59-0.4.60
 ### What's Changed
 - Update README.md by @viondw in [#930](https://github.com/biliup/biliup/pull/930)

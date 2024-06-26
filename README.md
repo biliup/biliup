@@ -1,5 +1,5 @@
 <p align="center">
-    <img src="https://img2.imgtp.com/2024/05/18/sCJuKpAg.svg" width="400" alt="logo">
+    <img src="https://image.biliup.me/2024-06-26/1719388842-365149-logo.png" width="400" alt="logo">
 </p>
 
 <div align="center">
