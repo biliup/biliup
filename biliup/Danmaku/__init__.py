@@ -147,7 +147,7 @@ class DanmakuClient(IDanmakuClient):
                 logger.warning(f"{DanmakuClient.__name__}:{self.__url}: 弹幕写入异常", exc_info=True)
 
         while True:
-            root = etree.Element("root")
+            root = etree.Element("i")
             etree.indent(root, "\t")
             tree = etree.ElementTree(root, parser=etree.XMLParser(recover=True))
             start_time = time.time()
