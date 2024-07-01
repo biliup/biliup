@@ -24,7 +24,7 @@ class Huya(DownloadBase):
 
     async def acheck_stream(self, is_check=False):
         try:
-            self.__verify_cookie()
+            await self.__verify_cookie()
             self.__room_id = self.url.split('huya.com/')[1]
             if not self.__room_id:
                 raise
