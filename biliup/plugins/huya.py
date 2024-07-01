@@ -24,6 +24,7 @@ class Huya(DownloadBase):
 
     async def acheck_stream(self, is_check=False):
         try:
+            self.__verify_cookie()
             self.__room_id = self.url.split('huya.com/')[1]
             if not self.__room_id:
                 raise
@@ -46,13 +47,6 @@ class Huya(DownloadBase):
             logger.debug(f"{self.plugin_msg} : 未开播")
             self.raw_stream_url = None
             return False
-
-        # live_rate_info = html_info.get('vMultiStreamInfo', [])
-
-        # if not live_rate_info:
-        #     # 无流 当做没开播
-        #     logger.debug(f"{self.plugin_msg} : 未开播")
-        #     return False
 
         if is_check:
             return True
@@ -78,8 +72,8 @@ class Huya(DownloadBase):
             logger.error(f"{self.plugin_msg}: 在确定码率时发生错误 {e}")
             return False
 
-        huya_cdn = config.get('huyacdn', 'AL')
-        perf_cdn = config.get('huya_cdn', huya_cdn).upper()
+        huya_cdn = config.get('huyacdn', 'AL') # 将于 0.5.0 删除
+        perf_cdn = config.get('huya_cdn', huya_cdn).upper() # 0.5.0 允许为空字符串以使用 Api 内的 CDN 优先级
         protocol = 'Hls' if config.get('huya_protocol') == 'Hls' else 'Flv'
         # protocol = 'Hls'
         allow_imgplus = config.get('huya_imgplus', True)
@@ -94,8 +88,9 @@ class Huya(DownloadBase):
             return False
 
         cdn_name_list = list(stream_urls.keys())
-        if perf_cdn not in cdn_name_list:
-            logger.warning(f"{self.plugin_msg}: {perf_cdn} CDN不存在，自动切换到 {cdn_name_list[0]}")
+        print(cdn_name_list)
+        if not perf_cdn or perf_cdn not in cdn_name_list:
+            logger.warning(f"{self.plugin_msg}: 使用 {cdn_name_list[0]}")
             perf_cdn = cdn_name_list[0]
 
         # 虎牙直播流只允许连接一次
@@ -132,7 +127,8 @@ class Huya(DownloadBase):
 
     async def get_room_profile(self, use_api=False) -> dict:
         if use_api:
-            resp = (await client.get(f"https://mp.huya.com/cache.php?m=Live&do=profileRoom&roomid={self.__room_id}")).json()
+            resp = (await client.get(f"https://mp.huya.com/cache.php?m=Live&do=profileRoom&roomid={self.__room_id}", \
+                                     headers=self.fake_headers)).json()
             if resp['status'] != 200:
                 raise Exception(f"{self.plugin_msg}: {resp['message']}")
             return resp['data']
@@ -156,6 +152,7 @@ class Huya(DownloadBase):
         else:
             stream_info = room_profile['stream']['baseSteamInfoList']
             streams = self.__dict_sorting(json.loads(room_profile['liveData']['mStreamRatioWeb']))
+            print(streams)
         stream = stream_info[0]
         stream_name = stream['sStreamName']
         suffix, anti_code = stream[f's{protocol}UrlSuffix'], stream[f's{protocol}AntiCode']
@@ -170,7 +167,7 @@ class Huya(DownloadBase):
     def __build_query(self, stream_name, anti_code) -> str:
         url_query = parse_qs(anti_code)
         platform_id = 100
-        uid = self.__get_uid(self.fake_headers['cookie'])
+        uid = self.__get_uid(self.fake_headers['cookie'], stream_name)
         convert_uid = (uid << 8 | uid >> (32 - 8)) & 0xFFFFFFFF
         ws_time = url_query['wsTime'][0]
         ct = int((int(ws_time, 16) + random.random()) * 1000)
@@ -204,16 +201,26 @@ class Huya(DownloadBase):
         }
         return '&'.join([f"{k}={v}" for k, v in anti_code.items()])
 
+    async def __verify_cookie(self):
+        if self.fake_headers['cookie']:
+            resp = (await client.post('https://udblgn.huya.com/web/cookie/verify', \
+                                    headers=self.fake_headers, data={'appId': 5002})).json()
+            if resp.json()['returnCode'] != 0:
+                logger.error(f"{self.plugin_msg}: {resp.json()['message']}")
+                self.fake_headers['cookie'] = ''
+
     @staticmethod
     def __dict_sorting(data: dict) -> dict:
         data = {k: v for k, v in data.items() if k not in ['HY', 'HUYA', 'HYZJ']}
         return dict(sorted(data.items(), key=lambda x: x[1], reverse=True))
 
     @staticmethod
-    def __get_uid(cookie: str) -> int:
+    def __get_uid(cookie: str, stream_name: str) -> int:
         if cookie:
             cookie_dict = {k.strip(): v for k, v in (item.split('=') for item in cookie.split(';'))}
             for key in ['udb_uid', 'yyuid']:
                 if key in cookie_dict:
                     return int(cookie_dict[key])
+        if stream_name:
+            return int(stream_name.split('-')[0])
         return random.randint(1400000000000, 1499999999999)
