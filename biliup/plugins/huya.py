@@ -79,7 +79,6 @@ class Huya(DownloadBase):
         allow_imgplus = config.get('huya_imgplus', True)
         cdn_fallback = config.get('huya_cdn_fallback', False)
         use_api = True if config.get('huya_obtain_method', '') == 'api' else False
-        use_api = True
 
         try:
             stream_urls = await self.get_stream_urls(protocol, use_api, allow_imgplus)
