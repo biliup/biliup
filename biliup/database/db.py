@@ -30,9 +30,10 @@ def datetime_to_struct_time(date: datetime):
     return time.localtime(date.timestamp())
 
 
-def init(no_http, first_run):
+def init(no_http, from_config):
     """初始化数据库"""
-    if no_http and not first_run:
+    first_run = not Path.cwd().joinpath("data/data.sqlite3").exists()
+    if no_http and not first_run and not from_config:
         new_name = f'{DB_PATH}.backup'
         if os.path.exists(new_name):
             os.remove(new_name)
@@ -40,7 +41,7 @@ def init(no_http, first_run):
         print(f"旧数据库已备份为: {new_name}")  # 在logger加载配置之前执行，只能使用print
     BaseModel.metadata.create_all(engine)  # 创建所有表
     migrate_via_alembic()
-    return first_run or no_http
+    return first_run or no_http or from_config
 
 
 def get_stream_info(db: Session, name: str) -> dict:

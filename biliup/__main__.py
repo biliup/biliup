@@ -44,17 +44,15 @@ def arg_parser():
 
     if not is_stop:
         from biliup.database.db import SessionLocal, init
-        first_run = not Path.cwd().joinpath("data/data.sqlite3").exists()
         with SessionLocal() as db:
+            from_config = False
             try:
                 config.load(args.config)
-                if init(args.no_http, first_run):
-                    config.save_to_db(db)
-                    first_run = False
+                from_config = True
             except FileNotFoundError:
                 print(f'新版本不依赖配置文件，请访问 WebUI 修改配置')
-            if first_run:
-                init(args.no_http, first_run)
+            if init(args.no_http, from_config):
+                config.save_to_db(db)
             config.load_from_db(db)
         # db.remove()
         LOG_CONF.update(config.get('LOGGING', {}))
