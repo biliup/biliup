@@ -75,7 +75,6 @@ class Huya(DownloadBase):
         huya_cdn = config.get('huyacdn', 'AL') # 将于 0.5.0 删除
         perf_cdn = config.get('huya_cdn', huya_cdn).upper() # 0.5.0 允许为空字符串以使用 Api 内的 CDN 优先级
         protocol = 'Hls' if config.get('huya_protocol') == 'Hls' else 'Flv'
-        # protocol = 'Hls'
         allow_imgplus = config.get('huya_imgplus', True)
         cdn_fallback = config.get('huya_cdn_fallback', False)
         use_api = True if config.get('huya_obtain_method', '') == 'api' else False
@@ -87,7 +86,6 @@ class Huya(DownloadBase):
             return False
 
         cdn_name_list = list(stream_urls.keys())
-        print(cdn_name_list)
         if not perf_cdn or perf_cdn not in cdn_name_list:
             logger.warning(f"{self.plugin_msg}: 使用 {cdn_name_list[0]}")
             perf_cdn = cdn_name_list[0]
