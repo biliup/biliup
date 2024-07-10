@@ -5,7 +5,6 @@ import asyncio
 import logging.config
 import platform
 import shutil
-from pathlib import Path
 
 import biliup.common.reload
 from biliup.config import config
