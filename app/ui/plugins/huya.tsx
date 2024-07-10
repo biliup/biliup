@@ -110,20 +110,16 @@ const Huya: React.FC<Props> = (props) => {
                             : true
                     }
                 />
-                <Form.Select
-                    field="huya_obtain_method"
-                    extraText="如果 web 遇上游客2分30秒限制，配置 cookie 或切换获取方式可能解决。"
-                    label="虎牙获取方式（huya_obtain_method）"
+                <Form.Switch
+                    field="huya_mobile_api"
+                    extraText="使用移动端API可以绕过部分游客观看原画的时长限制"
+                    label="虎牙使用移动端API（huya_mobile_api）"
                     style={{ width: "100%" }}
                     fieldStyle={{
                         alignSelf: "stretch",
                         padding: 0,
                     }}
-                    showClear={true}
-                >
-                    <Select.Option value="web">web（默认）</Select.Option>
-                    <Select.Option value="api">api</Select.Option>
-                </Form.Select>
+                />
             </Collapse.Panel>
         </>
     );

@@ -77,7 +77,7 @@ class Huya(DownloadBase):
         protocol = 'Hls' if config.get('huya_protocol') == 'Hls' else 'Flv'
         allow_imgplus = config.get('huya_imgplus', True)
         cdn_fallback = config.get('huya_cdn_fallback', False)
-        use_api = True if config.get('huya_obtain_method', '') == 'api' else False
+        use_api = config.get('huya_mobile_api', False)
 
         try:
             stream_urls = await self.get_stream_urls(protocol, use_api, allow_imgplus)
@@ -149,7 +149,6 @@ class Huya(DownloadBase):
         else:
             stream_info = room_profile['stream']['baseSteamInfoList']
             streams = self.__dict_sorting(json.loads(room_profile['liveData']['mStreamRatioWeb']))
-            print(streams)
         stream = stream_info[0]
         stream_name = stream['sStreamName']
         suffix, anti_code = stream[f's{protocol}UrlSuffix'], stream[f's{protocol}AntiCode']
