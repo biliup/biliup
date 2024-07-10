@@ -86,6 +86,23 @@ const Cookie: React.FC<Props> = (props) => {
                     }}
                 />
                 <Form.Input
+                    field="user.huya_cookie"
+                    extraText={
+                        <div className="semi-form-field-extra">
+                            填入 Cookie 防止游客2分30秒限制。
+                            需要 udb_biztoken, udb_uid, yyuid 的值，
+                            请不要将所有 Cookie 填入。
+                        </div>
+                    }
+                    placeholder="udb_uid=none;yyuid=none;udb_biztoken=none;"
+                    label="虎牙 Cookie（huya_cookie）"
+                    style={{ width: "100%" }}
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                />
+                <Form.Input
                     field="user.twitch_cookie"
                     extraText={
                         <div className="semi-form-field-extra">
