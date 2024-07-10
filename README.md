@@ -81,8 +81,8 @@
 | acfun | 直播 | `https://live.acfun.cn/live/123456` |
 | afreecaTV | 直播 | `https://play.afreecatv.com/biliup123/123456` | 录制部分直播时需要登陆 |
 | bigo | 直播 | `https://www.bigo.tv/123456` |
-| 抖音 | 直播 | 直播:`https://live.douyin.com/123456(直播间数字号)`<br>直播:`https://live.douyin.com/tiktok(抖音号)`<br>主页（不推荐）:`https://www.douyin.com/user/456789(抖音号)` | 使用主页链接或被风控需配置cookies |
-| 快手 | 直播 | `https://live.kuaishou.com/u/biliup123` |
+| 抖音 | 直播 | 直播:`https://live.douyin.com/123456(直播间数字号)`<br>直播:`https://live.douyin.com/tiktok(抖音号)`<br>主页:`https://www.douyin.com/user/456789(抖音号)` | 使用主页链接或被风控需配置cookies |
+| 快手 | 直播 | `https://live.kuaishou.com/u/biliup123` | 监控开播需使用中国大陆IPv4家宽，<br>且24小时内单直播间最多120次请求 |
 | 网易CC | 直播 | `https://cc.163.com/123456` |
 | flextv | 直播 | `https://www.flextv.co.kr/channels/123456/live` |
 | 映客 | 直播 | `https://www.inke.cn/liveroom/index.html?uid=123456` |
