@@ -114,11 +114,6 @@ const Huya: React.FC<Props> = (props) => {
                     field="huya_mobile_api"
                     extraText="使用移动端API可以绕过部分游客观看原画的时长限制"
                     label="虎牙使用移动端API（huya_mobile_api）"
-                    style={{ width: "100%" }}
-                    fieldStyle={{
-                        alignSelf: "stretch",
-                        padding: 0,
-                    }}
                 />
             </Collapse.Panel>
         </>
