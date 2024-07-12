@@ -51,26 +51,26 @@ class Huya(DownloadBase):
         if is_check:
             return True
 
-        try:
-            # 最大录制码率
-            huya_max_ratio = config.get('huya_max_ratio', 0)
-            # 最大码率(不含hdr)
-            # max_ratio = html_info['data'][0]['gameLiveInfo']['bitRate']
-            max_ratio = room_profile['liveData']['bitRate']
-            # 可选择的码率
-            live_rate_info = json.loads(room_profile['liveData']['bitRateInfo'])
-            # 码率信息
-            ratio_items = [r.get('iBitRate', 0) if r.get('iBitRate', 0) != 0 else max_ratio for r in live_rate_info]
-            # 符合条件的码率
-            ratio_in_items = [x for x in ratio_items if x <= huya_max_ratio]
-            # 录制码率
-            if ratio_in_items:
-                record_ratio = max(ratio_in_items)
-            else:
-                record_ratio = max_ratio
-        except Exception as e:
-            logger.error(f"{self.plugin_msg}: 在确定码率时发生错误 {e}")
-            return False
+        huya_max_ratio = config.get('huya_max_ratio', 0)
+        if huya_max_ratio:
+            try:
+                # 最大码率(不含hdr)
+                # max_ratio = html_info['data'][0]['gameLiveInfo']['bitRate']
+                max_ratio = room_profile['liveData']['bitRate']
+                # 可选择的码率
+                live_rate_info = json.loads(room_profile['liveData']['bitRateInfo'])
+                # 码率信息
+                ratio_items = [r.get('iBitRate', 0) if r.get('iBitRate', 0) != 0 else max_ratio for r in live_rate_info]
+                # 符合条件的码率
+                ratio_in_items = [x for x in ratio_items if x <= huya_max_ratio]
+                # 录制码率
+                if ratio_in_items:
+                    record_ratio = max(ratio_in_items)
+                else:
+                    record_ratio = max_ratio
+            except Exception as e:
+                logger.error(f"{self.plugin_msg}: 在确定码率时发生错误 {e}")
+                return False
 
         huya_cdn = config.get('huyacdn', 'AL') # 将于 0.5.0 删除
         perf_cdn = config.get('huya_cdn', huya_cdn).upper() # 0.5.0 允许为空字符串以使用 Api 内的 CDN 优先级
@@ -113,7 +113,7 @@ class Huya(DownloadBase):
         self.room_title = room_profile['liveData']['introduction']
         self.raw_stream_url = stream_urls[perf_cdn]
 
-        if record_ratio != max_ratio:
+        if huya_max_ratio and record_ratio != max_ratio:
             self.raw_stream_url += f"&ratio={record_ratio}"
         return True
 
