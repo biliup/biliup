@@ -3,6 +3,7 @@ HTTP Basic Auth python lib from https://github.com/bugov/http-basic-auth
 """
 
 import base64
+from typing import Tuple
 
 __version__ = '1.2.0'
 
@@ -11,8 +12,7 @@ class BasicAuthException(Exception):
     """General exception for all http-basic-auth problems
     """
 
-# FIXME: 应使用 aes-128-gcm
-def parse_token(token: str, coding='utf-8') -> tuple[str, str]:
+def parse_token(token: str, coding='utf-8') -> Tuple[str, str]:
     """Get login + password tuple from Basic Auth token.
     """
     try:
@@ -57,7 +57,7 @@ def generate_token(login: str, password: str, coding='utf-8') -> str:
     return str(b_token, encoding=coding)
 
 
-def parse_header(header_value: str, coding='utf-8') -> tuple[str, str]:
+def parse_header(header_value: str, coding='utf-8') -> Tuple[str, str]:
     """Get login + password tuple from Basic Auth header value.
     """
     if header_value is None:

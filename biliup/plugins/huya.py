@@ -4,13 +4,14 @@ import json
 import random
 import time
 from urllib.parse import parse_qs, unquote
+from functools import lru_cache
 
 from biliup.common.util import client
 from biliup.config import config
 from biliup.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
-from ..plugins import logger
+from ..plugins import logger, alru_cache
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?huya\.com')
@@ -19,17 +20,18 @@ class Huya(DownloadBase):
         super().__init__(fname, url, suffix)
         self.fake_headers['referer'] = url
         self.fake_headers['cookie'] = config.get('user', {}).get('huya_cookie', '')
-        self.__room_id = url.split('huya.com/')[1].split('?')[0]
+        self._room_id = url.split('huya.com/')[1].split('?')[0]
         self.huya_danmaku = config.get('huya_danmaku', False)
 
     async def acheck_stream(self, is_check=False):
         try:
             await self.__verify_cookie()
-            if not self.__room_id.isdigit():
-                html_info = await self.get_room_profile()
-                if not html_info:
-                    raise
-                self.__room_id = html_info['data'][0]['gameLiveInfo']['profileRoom']
+            if not self._room_id.isdigit():
+                start = time.time()
+                self._room_id = await self._get_real_rid()
+                used_time = time.time() - start
+                logger.info(f"{self.url} -> {self._room_id}: {used_time:.4f} seconds")
+                self._get_real_rid.cache_info()
             room_profile = await self.get_room_profile(use_api=True)
         except Exception as e:
             logger.error(f"{self.plugin_msg}: {e}")
@@ -121,16 +123,23 @@ class Huya(DownloadBase):
 
     async def get_room_profile(self, use_api=False) -> dict:
         if use_api:
-            resp = (await client.get(f"https://mp.huya.com/cache.php?m=Live&do=profileRoom&roomid={self.__room_id}", \
+            resp = (await client.get(f"https://mp.huya.com/cache.php?m=Live&do=profileRoom&roomid={self._room_id}", \
                                      headers=self.fake_headers)).json()
             if resp['status'] != 200:
                 raise Exception(f"{resp['message']}")
             return resp['data']
         else:
-            html = (await client.get(f"https://www.huya.com/{self.__room_id}", headers=self.fake_headers)).text
+            html = (await client.get(f"https://www.huya.com/{self._room_id}", headers=self.fake_headers)).text
             if '找不到这个主播' in html:
                 raise Exception(f"找不到这个主播")
             return json.loads(html.split('stream: ')[1].split('};')[0])
+
+    @alru_cache
+    async def _get_real_rid(self):
+        html_info = await self.get_room_profile()
+        if not html_info:
+            raise
+        return html_info['data'][0]['gameLiveInfo']['profileRoom']
 
     async def get_stream_urls(self, protocol, use_api=False, allow_imgplus=True) -> dict:
         '''
