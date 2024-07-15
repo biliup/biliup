@@ -14,6 +14,7 @@ from ..plugins import logger, match1
 class Douyu(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
+        self.__room_id = match1(url, r'rid=(\d+)')
         self.douyu_danmaku = config.get('douyu_danmaku', False)
 
     async def acheck_stream(self, is_check=False):
@@ -22,24 +23,18 @@ class Douyu(DownloadBase):
             return False
 
         try:
-            room_id = self.url.split('douyu.com/')[1].split('/')[0].split('?')[0]
-                # 暂时只判断纯数字的room_id
-            if not room_id.isdigit() or len(room_id) < 6:
-                room_id = 0
-            if room_id == 0:
-                resp = await client.get(self.url, headers=self.fake_headers, timeout=5)
-                room_id = match1(resp.text, r'\$ROOM\.room_id\s*=\s*(\d+)', r'apm_room_id\s*=\s*(\d+)')[0]
-            if not room_id:
-                logger.error(f"{self.plugin_msg}: 直播间不存在或已关闭")
-                return False
+            if not self.__room_id:
+                __rid = match1(self.url, r'douyu.com/(\d+)') or self.url.split('douyu.com/')[1].split('/')[0].split('?')[0]
+                __resp = await client.get(f"https://m.douyu.com/{__rid}", headers=self.fake_headers)
+                self.__room_id, *vip_id = match1(__resp.text, r'roomInfo":{"rid":(\d+)', r'"vipId":(\d+)')
+                self.info_upgrade(f"https://www.douyu.com/{self.__room_id}?rid={self.__room_id}")
         except:
             logger.exception(f"{self.plugin_msg}: 获取房间号错误")
             return False
 
         try:
             room_info = (
-                await client.get(f"https://www.douyu.com/betard/{room_id}",
-                                 headers=self.fake_headers, timeout=5)
+                await client.get(f"https://www.douyu.com/betard/{self.__room_id}", headers=self.fake_headers)
             ).json()['room']
         except:
             logger.exception(f"{self.plugin_msg}: 获取直播间信息错误")
@@ -52,8 +47,10 @@ class Douyu(DownloadBase):
             logger.debug(f"{self.plugin_msg}: 正在放录播")
             return False
         if config.get('douyu_disable_interactive_game', False):
-            gift_info = (await client.get(f"https://www.douyu.com/api/interactive/web/v2/list?rid={room_id}",
-                                          headers=self.fake_headers, timeout=5)).json().get('data', {})
+            gift_info = (
+                await client.get(f"https://www.douyu.com/api/interactive/web/v2/list?rid={self.__room_id}",
+                                headers=self.fake_headers)
+            ).json().get('data', {})
             if gift_info:
                 logger.debug(f"{self.plugin_msg}: 正在运行互动游戏")
                 return False
@@ -77,18 +74,18 @@ class Douyu(DownloadBase):
             import jsengine
             ctx = jsengine.jsengine()
             js_enc = (
-                await client.get(f'https://www.douyu.com/swf_api/homeH5Enc?rids={room_id}',
+                await client.get(f'https://www.douyu.com/swf_api/homeH5Enc?rids={self.__room_id}',
                                  headers=self.fake_headers, timeout=5)
-            ).json()['data'][f'room{room_id}']
+            ).json()['data'][f'room{self.__room_id}']
             js_enc = js_enc.replace('return eval', 'return [strc, vdwdae325w_64we];')
 
             sign_fun, sign_v = ctx.eval(f'{js_enc};ub98484234();')
 
             tt = str(int(time.time()))
             did = hashlib.md5(tt.encode('utf-8')).hexdigest()
-            rb = hashlib.md5(f"{room_id}{did}{tt}{sign_v}".encode('utf-8')).hexdigest()
+            rb = hashlib.md5(f"{self.__room_id}{did}{tt}{sign_v}".encode('utf-8')).hexdigest()
             sign_fun = sign_fun.rstrip(';').replace("CryptoJS.MD5(cb).toString()", f'"{rb}"')
-            sign_fun += f'("{room_id}","{did}","{tt}");'
+            sign_fun += f'("{self.__room_id}","{did}","{tt}");'
 
             params = parse_qs(ctx.eval(sign_fun))
         except:
@@ -100,7 +97,7 @@ class Douyu(DownloadBase):
         params['rate'] = config.get('douyu_rate', 0)
 
         try:
-            live_data = await self.get_play_info(room_id, params)
+            live_data = await self.get_play_info(self.__room_id, params)
             self.raw_stream_url = f"{live_data['rtmp_url']}/{live_data['rtmp_live']}"
         except:
             logger.exception(f"{self.plugin_msg}: ")

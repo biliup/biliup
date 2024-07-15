@@ -17,27 +17,24 @@ from ..plugins import logger
 class Huya(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
-        self.huya_danmaku = config.get('huya_danmaku', False)
         self.fake_headers['referer'] = url
         self.fake_headers['cookie'] = config.get('user', {}).get('huya_cookie', '')
-        self.__room_id = None
+        self.__room_id = url.split('huya.com/')[1].split('?')[0]
+        self.huya_danmaku = config.get('huya_danmaku', False)
 
     async def acheck_stream(self, is_check=False):
         try:
             await self.__verify_cookie()
-            self.__room_id = self.url.split('huya.com/')[1]
-            if not self.__room_id:
-                raise
             if not self.__room_id.isdigit():
                 html_info = await self.get_room_profile()
                 if not html_info:
                     raise
                 self.__room_id = html_info['data'][0]['gameLiveInfo']['profileRoom']
+            room_profile = await self.get_room_profile(use_api=True)
         except Exception as e:
             logger.error(f"{self.plugin_msg}: {e}")
             return False
 
-        room_profile = await self.get_room_profile(use_api=True)
         if room_profile['realLiveStatus'] != 'ON' or room_profile['liveStatus'] != 'ON':
             '''
             ON: 直播
@@ -77,7 +74,7 @@ class Huya(DownloadBase):
         protocol = 'Hls' if config.get('huya_protocol') == 'Hls' else 'Flv'
         allow_imgplus = config.get('huya_imgplus', True)
         cdn_fallback = config.get('huya_cdn_fallback', False)
-        use_api = config.get('huya_mobile_api', False)
+        use_api = config.get('huya_mobile_api', True)
 
         try:
             stream_urls = await self.get_stream_urls(protocol, use_api, allow_imgplus)
@@ -127,12 +124,12 @@ class Huya(DownloadBase):
             resp = (await client.get(f"https://mp.huya.com/cache.php?m=Live&do=profileRoom&roomid={self.__room_id}", \
                                      headers=self.fake_headers)).json()
             if resp['status'] != 200:
-                raise Exception(f"{self.plugin_msg}: {resp['message']}")
+                raise Exception(f"{resp['message']}")
             return resp['data']
         else:
             html = (await client.get(f"https://www.huya.com/{self.__room_id}", headers=self.fake_headers)).text
             if '找不到这个主播' in html:
-                raise Exception(f"{self.plugin_msg}: 找不到这个主播")
+                raise Exception(f"找不到这个主播")
             return json.loads(html.split('stream: ')[1].split('};')[0])
 
     async def get_stream_urls(self, protocol, use_api=False, allow_imgplus=True) -> dict:
@@ -145,10 +142,10 @@ class Huya(DownloadBase):
             try:
                 stream_info = room_profile['data'][0]['gameStreamInfoList']
             except KeyError:
-                raise Exception(f"{self.plugin_msg}: {room_profile}")
+                raise Exception(f"{room_profile}")
         else:
             stream_info = room_profile['stream']['baseSteamInfoList']
-            streams = self.__dict_sorting(json.loads(room_profile['liveData']['mStreamRatioWeb']))
+            streams = self.__dict_sorting(json.loads(room_profile['liveData'].get('mStreamRatioWeb', '{}')))
         stream = stream_info[0]
         stream_name = stream['sStreamName']
         suffix, anti_code = stream[f's{protocol}UrlSuffix'], stream[f's{protocol}AntiCode']
@@ -156,8 +153,10 @@ class Huya(DownloadBase):
             stream_name = stream_name.replace('-imgplus', '')
         anti_code = self.__build_query(stream_name, anti_code, )
         for stream in stream_info:
+            print(streams)
+            stream_url = f"{stream[f's{protocol}Url']}/{stream_name}.{suffix}?{anti_code}"
             if stream['sCdnType'] in ['HY', 'HUYA', 'HYZJ']: continue
-            streams[stream['sCdnType']] = f"{stream[f's{protocol}Url']}/{stream_name}.{suffix}?{anti_code}"
+            streams[stream['sCdnType']] = stream_url
         return streams
 
     def __build_query(self, stream_name, anti_code) -> str:
@@ -207,8 +206,10 @@ class Huya(DownloadBase):
 
     @staticmethod
     def __dict_sorting(data: dict) -> dict:
-        data = {k: v for k, v in data.items() if k not in ['HY', 'HUYA', 'HYZJ']}
-        return dict(sorted(data.items(), key=lambda x: x[1], reverse=True))
+        if data:
+            data = {k: v for k, v in data.items() if k not in ['HY', 'HUYA', 'HYZJ']}
+            return dict(sorted(data.items(), key=lambda x: x[1], reverse=True))
+        return {}
 
     @staticmethod
     def __get_uid(cookie: str, stream_name: str) -> int:
