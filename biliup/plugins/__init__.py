@@ -33,9 +33,3 @@ def random_user_agent(device: str = 'desktop') -> str:
         ])
         return f'Mozilla/5.0 (Linux; Android {android_version}; {mobile}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version}.0.0.0 Mobile Safari/537.36'
     return f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version}.0.0.0 Safari/537.36'
-
-def alru_cache(func):
-    @lru_cache
-    def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
-    return wrapper

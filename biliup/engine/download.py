@@ -441,10 +441,6 @@ class DownloadBase(ABC):
         else:
             return filename
 
-    def info_upgrade(self, url):
-        config.data['PluginInfo'].delete(self.url)
-        config.data['PluginInfo'].add(self.fname, url)
-
     @staticmethod
     def download_file_rename(old_file_name, file_name):
         try:

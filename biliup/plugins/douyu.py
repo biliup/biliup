@@ -8,7 +8,7 @@ from biliup.config import config
 from biliup.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
-from ..plugins import logger, match1
+from ..plugins import logger, match1, random_user_agent
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?douyu\.com')
@@ -25,12 +25,7 @@ class Douyu(DownloadBase):
 
         try:
             if not self._room_id:
-                # start = time.time()
                 self._room_id = _get_real_rid(self.url)
-                # used_time = time.time() - start
-                # logger.info(f"{self.url} -> {self._room_id}: {used_time:.4f} seconds")
-                # print(f"Cache info: {_get_real_rid.cache_info()}")
-                # print(f"Current cache: {_get_real_rid.cache_parameters()}")
         except:
             logger.exception(f"{self.plugin_msg}: 获取房间号错误")
             return False
@@ -129,7 +124,7 @@ class Douyu(DownloadBase):
 def _get_real_rid(url):
     import requests
     headers = {
-        "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+        "user-agent": random_user_agent('mobile'),
     }
     rid = url.split('douyu.com/')[1].split('/')[0].split('?')[0] or match1(url, r'douyu.com/(\d+)')
     resp = requests.get(f"https://m.douyu.com/{rid}", headers=headers)

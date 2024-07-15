@@ -209,7 +209,7 @@ const Dashboard: React.FC = () => {
                                             </div>
                                             <Collapse keepDOM style={{ width: '100%' }}>
                                                 {/* 哔哩哔哩 */}
-                                                <Bilibili />
+                                                <Bilibili entity={entity} list={list}/>
                                                 {/* CC直播 */}
                                                 <CC />
                                                 {/* 抖音 */}

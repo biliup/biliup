@@ -11,7 +11,7 @@ from biliup.config import config
 from biliup.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
-from ..plugins import logger, alru_cache
+from ..plugins import logger, random_user_agent
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?huya\.com')
@@ -23,15 +23,12 @@ class Huya(DownloadBase):
         self._room_id = url.split('huya.com/')[1].split('?')[0]
         self.huya_danmaku = config.get('huya_danmaku', False)
 
+
     async def acheck_stream(self, is_check=False):
         try:
-            await self.__verify_cookie()
+            await self.verify_cookie()
             if not self._room_id.isdigit():
-                start = time.time()
-                self._room_id = await self._get_real_rid()
-                used_time = time.time() - start
-                logger.info(f"{self.url} -> {self._room_id}: {used_time:.4f} seconds")
-                self._get_real_rid.cache_info()
+                self._room_id = _get_real_rid(self.url)
             room_profile = await self.get_room_profile(use_api=True)
         except Exception as e:
             logger.error(f"{self.plugin_msg}: {e}")
@@ -45,6 +42,11 @@ class Huya(DownloadBase):
             '''
             logger.debug(f"{self.plugin_msg} : 未开播")
             self.raw_stream_url = None
+            return False
+
+        if not room_profile['liveData'].get('bitRateInfo'):
+            # 主播未推流
+            logger.debug(f"{self.plugin_msg} : 未推流")
             return False
 
         if is_check:
@@ -76,7 +78,7 @@ class Huya(DownloadBase):
         protocol = 'Hls' if config.get('huya_protocol') == 'Hls' else 'Flv'
         allow_imgplus = config.get('huya_imgplus', True)
         cdn_fallback = config.get('huya_cdn_fallback', False)
-        use_api = config.get('huya_mobile_api', True)
+        use_api = config.get('huya_mobile_api', False)
 
         try:
             stream_urls = await self.get_stream_urls(protocol, use_api, allow_imgplus)
@@ -116,6 +118,7 @@ class Huya(DownloadBase):
             self.raw_stream_url += f"&ratio={record_ratio}"
         return True
 
+
     def danmaku_init(self):
         if self.huya_danmaku:
             self.danmaku = DanmakuClient(self.url, self.gen_download_filename())
@@ -124,7 +127,7 @@ class Huya(DownloadBase):
     async def get_room_profile(self, use_api=False) -> dict:
         if use_api:
             resp = (await client.get(f"https://mp.huya.com/cache.php?m=Live&do=profileRoom&roomid={self._room_id}", \
-                                     headers=self.fake_headers)).json()
+                                        headers=self.fake_headers)).json()
             if resp['status'] != 200:
                 raise Exception(f"{resp['message']}")
             return resp['data']
@@ -134,12 +137,6 @@ class Huya(DownloadBase):
                 raise Exception(f"找不到这个主播")
             return json.loads(html.split('stream: ')[1].split('};')[0])
 
-    @alru_cache
-    async def _get_real_rid(self):
-        html_info = await self.get_room_profile()
-        if not html_info:
-            raise
-        return html_info['data'][0]['gameLiveInfo']['profileRoom']
 
     async def get_stream_urls(self, protocol, use_api=False, allow_imgplus=True) -> dict:
         '''
@@ -154,24 +151,24 @@ class Huya(DownloadBase):
                 raise Exception(f"{room_profile}")
         else:
             stream_info = room_profile['stream']['baseSteamInfoList']
-            streams = self.__dict_sorting(json.loads(room_profile['liveData'].get('mStreamRatioWeb', '{}')))
+            streams = _dict_sorting(json.loads(room_profile['liveData'].get('mStreamRatioWeb', '{}')))
         stream = stream_info[0]
         stream_name = stream['sStreamName']
         suffix, anti_code = stream[f's{protocol}UrlSuffix'], stream[f's{protocol}AntiCode']
         if not allow_imgplus:
             stream_name = stream_name.replace('-imgplus', '')
-        anti_code = self.__build_query(stream_name, anti_code, )
+        anti_code = self.__build_query(stream_name, anti_code, self.fake_headers['cookie'])
         for stream in stream_info:
-            print(streams)
             stream_url = f"{stream[f's{protocol}Url']}/{stream_name}.{suffix}?{anti_code}"
             if stream['sCdnType'] in ['HY', 'HUYA', 'HYZJ']: continue
             streams[stream['sCdnType']] = stream_url
         return streams
 
-    def __build_query(self, stream_name, anti_code) -> str:
+    @staticmethod
+    def __build_query(stream_name, anti_code, cookies=None) -> str:
         url_query = parse_qs(anti_code)
         platform_id = 100
-        uid = self.__get_uid(self.fake_headers['cookie'], stream_name)
+        uid = _get_uid(cookies, stream_name)
         convert_uid = (uid << 8 | uid >> (32 - 8)) & 0xFFFFFFFF
         ws_time = url_query['wsTime'][0]
         ct = int((int(ws_time, 16) + random.random()) * 1000)
@@ -205,7 +202,8 @@ class Huya(DownloadBase):
         }
         return '&'.join([f"{k}={v}" for k, v in anti_code.items()])
 
-    async def __verify_cookie(self):
+
+    async def verify_cookie(self):
         if self.fake_headers['cookie']:
             resp = (await client.post('https://udblgn.huya.com/web/cookie/verify', \
                                     headers=self.fake_headers, data={'appId': 5002})).json()
@@ -213,20 +211,32 @@ class Huya(DownloadBase):
                 logger.error(f"{self.plugin_msg}: {resp.json()['message']}")
                 self.fake_headers['cookie'] = ''
 
-    @staticmethod
-    def __dict_sorting(data: dict) -> dict:
-        if data:
-            data = {k: v for k, v in data.items() if k not in ['HY', 'HUYA', 'HYZJ']}
-            return dict(sorted(data.items(), key=lambda x: x[1], reverse=True))
-        return {}
+@lru_cache(maxsize=None)
+def _get_real_rid(url):
+    import requests
+    headers = {
+        'user-agent': random_user_agent(),
+    }
+    html = requests.get(url, headers=headers).text
+    if '找不到这个主播' in html:
+        raise Exception(f"找不到这个主播")
+    html_obj = json.loads(html.split('stream: ')[1].split('};')[0])
+    return html_obj['data'][0]['gameLiveInfo']['profileRoom']
 
-    @staticmethod
-    def __get_uid(cookie: str, stream_name: str) -> int:
-        if cookie:
-            cookie_dict = {k.strip(): v for k, v in (item.split('=') for item in cookie.split(';'))}
-            for key in ['udb_uid', 'yyuid']:
-                if key in cookie_dict:
-                    return int(cookie_dict[key])
-        if stream_name:
-            return int(stream_name.split('-')[0])
-        return random.randint(1400000000000, 1499999999999)
+
+def _dict_sorting(data: dict) -> dict:
+    if data:
+        data = {k: v for k, v in data.items() if k not in ['HY', 'HUYA', 'HYZJ']}
+        return dict(sorted(data.items(), key=lambda x: x[1], reverse=True))
+    return {}
+
+
+def _get_uid(cookie: str, stream_name: str) -> int:
+    if cookie:
+        cookie_dict = {k.strip(): v for k, v in (item.split('=') for item in cookie.split(';'))}
+        for key in ['udb_uid', 'yyuid']:
+            if key in cookie_dict:
+                return int(cookie_dict[key])
+    if stream_name:
+        return int(stream_name.split('-')[0])
+    return random.randint(1400000000000, 1499999999999)

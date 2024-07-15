@@ -13,42 +13,7 @@ const Cookie: React.FC<Props> = (props) => {
     return (
         <>
             <Collapse.Panel header="用户 Cookie" itemKey="user">
-                <Form.Input
-                    field="user.bili_cookie"
-                    extraText={
-                        <div className="semi-form-field-extra">
-                            根据格式填入cookie。推荐使用「
-                            <a
-                                href="https://github.com/biliup/biliup-rs"
-                                title="「biliup-rs」 Github 项目主页"
-                                target="_blank"
-                            >
-                                biliup-rs
-                            </a>
-                            」来获取。
-                            <br />
-                        </div>
-                    }
-                    placeholder="SESSDATA=none;bili_jct=none;DedeUserID__ckMd5=none;DedeUserID=none;"
-                    label="哔哩哔哩 Cookie 文本（bili_cookie）"
-                    style={{ width: "100%" }}
-                    fieldStyle={{
-                        alignSelf: "stretch",
-                        padding: 0,
-                    }}
-                />
-                <Form.Select
-                    field="user.bili_cookie_file"
-                    label="哔哩哔哩 Cookie 文件（bili_cookie_file）"
-                    style={{ width: "100%" }}
-                    fieldStyle={{
-                        alignSelf: "stretch",
-                        padding: 0,
-                    }}
-                    optionList={list}
-                    extraText="只支持「biliup-rs」生成的文件。当与上一个配置项同时存在时，将优先使用文件。"
-                    showClear={true}
-                />
+
                 <Form.Input
                     field="user.douyin_cookie"
                     extraText={
