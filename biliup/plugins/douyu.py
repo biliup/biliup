@@ -75,7 +75,7 @@ class Douyu(DownloadBase):
             ctx = jsengine.jsengine()
             js_enc = (
                 await client.get(f'https://www.douyu.com/swf_api/homeH5Enc?rids={self.__room_id}',
-                                 headers=self.fake_headers, timeout=5)
+                                 headers=self.fake_headers)
             ).json()['data'][f'room{self.__room_id}']
             js_enc = js_enc.replace('return eval', 'return [strc, vdwdae325w_64we];')
 
@@ -113,7 +113,7 @@ class Douyu(DownloadBase):
         __cdn_check = lambda _name, _list: any(_name in _item['cdn'] for _item in _list)
 
         live_data = await client.post(f'https://www.douyu.com/lapi/live/getH5Play/{room_id}',
-                              headers=self.fake_headers, params=params, timeout=5)
+                              headers=self.fake_headers, params=params)
         if not live_data.is_success:
             raise RuntimeError(live_data.text)
         live_data = live_data.json().get('data')

@@ -24,7 +24,7 @@ class Acfun(DownloadBase):
         cookies = dict(_did=did)
         data1 = {'sid': 'acfun.api.visitor'}
         r1 = await biliup.common.util.client.post("https://id.app.acfun.cn/rest/app/visitor/login",
-                                                  headers=self.fake_headers, data=data1, cookies=cookies, timeout=5)
+                                                  headers=self.fake_headers, data=data1, cookies=cookies)
         userid = r1.json()['userId']
         visitorst = r1.json()['acfun.api.visitor_st']
         params = {
@@ -38,7 +38,7 @@ class Acfun(DownloadBase):
         data2 = {'authorId': rid, 'pullStreamType': 'FLV'}
         self.fake_headers['referer'] = "https://live.acfun.cn/"
         r2 = await biliup.common.util.client.post("https://api.kuaishouzt.com/rest/zt/live/web/startPlay",
-                                                  headers=self.fake_headers, data=data2, params=params, timeout=5)
+                                                  headers=self.fake_headers, data=data2, params=params)
         if r2.json().get('result') != 1:
             logger.debug(r2.json())
             return False
