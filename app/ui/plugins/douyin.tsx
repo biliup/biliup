@@ -42,6 +42,29 @@ const Douyin: React.FC = () => {
                         </div>
                     }
                     label="录制弹幕（douyin_danmaku）"
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                />
+                <Form.Input
+                    field="user.douyin_cookie"
+                    extraText={
+                        <div className="semi-form-field-extra">
+                            如需要录制抖音 www.douyin.com/user/
+                            类型链接，或遭到风控，请在此填入 Cookie。
+                            <br />
+                            需要__ac_nonce、__ac_signature、sessionid的值，请不要将所有
+                            Cookie 填入。
+                        </div>
+                    }
+                    placeholder="__ac_nonce=none;__ac_signature=none;sessionid=none;"
+                    label="抖音 Cookie（douyin_cookie）"
+                    style={{ width: "100%" }}
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
                 />
                 <Form.Select
                     field="douyin_protocol"

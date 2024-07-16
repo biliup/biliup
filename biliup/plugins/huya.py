@@ -26,7 +26,8 @@ class Huya(DownloadBase):
 
     async def acheck_stream(self, is_check=False):
         try:
-            await self.verify_cookie()
+            if self.fake_headers.get('cookie'):
+                await self.verify_cookie()
             if not self._room_id.isdigit():
                 self._room_id = _get_real_rid(self.url)
             room_profile = await self.get_room_profile(use_api=True)

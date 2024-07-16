@@ -48,8 +48,12 @@ const Bilibili: React.FC<Props> = (props) => {
                     field="bilibili_danmaku"
                     extraText="录制哔哩哔哩弹幕，目前不支持视频按时长分段下的弹幕文件自动分段。仅限下载插件为非 stream-gears 时生效，默认关闭。"
                     label="录制弹幕（bilibili_danmaku）"
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
                 />
-                                <Form.Input
+                <Form.Input
                     field="user.bili_cookie"
                     extraText={
                         <div className="semi-form-field-extra">

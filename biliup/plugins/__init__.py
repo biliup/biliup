@@ -1,6 +1,5 @@
 import logging
 import re
-from functools import *
 
 logger = logging.getLogger('biliup')
 
