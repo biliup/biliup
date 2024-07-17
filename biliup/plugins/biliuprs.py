@@ -118,18 +118,18 @@ class BiliWeb(UploadBase):
 
 def stream_gears_upload(ex_conn, lines, *args, **kwargs):
     try:
-        if lines == 'kodo':
-            kwargs['line'] = stream_gears.UploadLine.Kodo
+        if lines == 'bda':
+            kwargs['line'] = stream_gears.UploadLine.Bda
         elif lines == 'bda2':
             kwargs['line'] = stream_gears.UploadLine.Bda2
         elif lines == 'ws':
             kwargs['line'] = stream_gears.UploadLine.Ws
         elif lines == 'qn':
             kwargs['line'] = stream_gears.UploadLine.Qn
-        elif lines == 'cos':
-            kwargs['line'] = stream_gears.UploadLine.Cos
-        elif lines == 'cos-internal':
-            kwargs['line'] = stream_gears.UploadLine.CosInternal
+        elif lines == 'tx':
+            kwargs['line'] = stream_gears.UploadLine.Tx
+        elif lines == 'txa':
+            kwargs['line'] = stream_gears.UploadLine.Txa
         elif lines == 'bldsa':
             kwargs['line'] = stream_gears.UploadLine.Bldsa
 

@@ -64,12 +64,6 @@ const Huya: React.FC<Props> = (props) => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
-                    rules={[
-                        {
-                            pattern: /^[A-Z]{2}(?:\d{2})?$/,
-                            message: "请仅输入线路别称"
-                        }
-                    ]}
                     showClear={true}
                 >
                     <Select.Option value="AL">直播线路3（AL）</Select.Option>
@@ -109,11 +103,19 @@ const Huya: React.FC<Props> = (props) => {
                             ? entity["huya_imgplus"]
                             : true
                     }
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
                 />
                 <Form.Switch
                     field="huya_mobile_api"
                     extraText="使用移动端API可以绕过部分游客观看原画的时长限制"
                     label="虎牙使用移动端API（huya_mobile_api）"
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
                 />
             </Collapse.Panel>
         </>

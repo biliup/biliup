@@ -259,7 +259,7 @@ const Global: React.FC = () => {
                 <Form.Select
                     field="lines"
                     label="上传线路（lines）"
-                    extraText="b站上传线路选择，默认为自动模式，可手动切换为bda2, kodo, ws, qn, bldsa"
+                    extraText="b站上传线路选择，默认为自动模式，可手动切换为bda, bda2, ws, qn, bldsa, tx, txa"
                     placeholder="AUTO（自动，默认）"
                     style={{ width: "100%" }}
                     fieldStyle={{
@@ -269,11 +269,13 @@ const Global: React.FC = () => {
                     showClear={true}
                 >
                     <Form.Select.Option value="AUTO">AUTO（自动，默认）</Form.Select.Option>
+                    <Form.Select.Option value="bda">bda</Form.Select.Option>
                     <Form.Select.Option value="bda2">bda2</Form.Select.Option>
-                    <Form.Select.Option value="kodo">kodo</Form.Select.Option>
                     <Form.Select.Option value="ws">ws</Form.Select.Option>
                     <Form.Select.Option value="qn">qn</Form.Select.Option>
                     <Form.Select.Option value="bldsa">bldsa</Form.Select.Option>
+                    <Form.Select.Option value="tx">tx</Form.Select.Option>
+                    <Form.Select.Option value="txa">txa</Form.Select.Option>
                 </Form.Select>
                 <Form.InputNumber
                     field="threads"

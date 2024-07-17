@@ -11,6 +11,10 @@ const TwitCasting: React.FC = () => {
                     field="twitcasting_danmaku"
                     extraText="录制TwitCasting弹幕，默认关闭"
                     label="录制弹幕（twitcasting_danmaku）"
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
                 />
                 <Form.Input
                     field="twitcasting_password"

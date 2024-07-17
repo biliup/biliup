@@ -346,46 +346,45 @@ class BiliBili:
         """
         preferred_upos_cdn = None
         if not self._auto_os:
-            if lines == 'kodo':
-                self._auto_os = {"os": "kodo", "query": "bucket=bvcupcdnkodobm&probe_version=20221109",
-                                 "probe_url": "//up-na0.qbox.me/crossdomain.xml"}
-            elif lines == 'bda2':
-                self._auto_os = {"os": "upos", "query": "upcdn=bda2&probe_version=20221109",
-                                 "probe_url": "//upos-sz-upcdnbda2.bilivideo.com/OK"}
-                preferred_upos_cdn = 'bda2'
-            elif lines == 'cs-bda2':
+            if lines == 'bda':
+                self._auto_os = {"os": "upos", "query": "upcdn=bda&probe_version=20221109",
+                                 "probe_url": "//upos-cs-upcdnbda.bilivideo.com/OK"}
+                preferred_upos_cdn = 'bda'
+            elif lines in {'bda2', 'cs-bda2'}:
                 self._auto_os = {"os": "upos", "query": "upcdn=bda2&probe_version=20221109",
                                  "probe_url": "//upos-cs-upcdnbda2.bilivideo.com/OK"}
                 preferred_upos_cdn = 'bda2'
             elif lines == 'ws':
                 self._auto_os = {"os": "upos", "query": "upcdn=ws&probe_version=20221109",
-                                 "probe_url": "//upos-sz-upcdnws.bilivideo.com/OK"}
+                                 "probe_url": "//upos-cs-upcdnws.bilivideo.com/OK"}
                 preferred_upos_cdn = 'ws'
-            elif lines == 'qn':
-                self._auto_os = {"os": "upos", "query": "upcdn=qn&probe_version=20221109",
-                                 "probe_url": "//upos-sz-upcdnqn.bilivideo.com/OK"}
-                preferred_upos_cdn = 'qn'
-            elif lines == 'cs-qn':
+            elif lines in {'qn', 'cs-qn'}:
                 self._auto_os = {"os": "upos", "query": "upcdn=qn&probe_version=20221109",
                                  "probe_url": "//upos-cs-upcdnqn.bilivideo.com/OK"}
                 preferred_upos_cdn = 'qn'
-            elif lines == 'cos':
-                self._auto_os = {"os": "cos", "query": "",
-                                 "probe_url": ""}
-            elif lines == 'cos-internal':
-                self._auto_os = {"os": "cos-internal", "query": "",
-                                 "probe_url": ""}
+            elif lines == 'bldsa':
+                self._auto_os = {"os": "upos", "query": "upcdn=bldsa&probe_version=20221109",
+                                 "probe_url": "//upos-cs-upcdnbldsa.bilivideo.com/OK"}
+                preferred_upos_cdn = 'bldsa'
+            elif lines == 'tx':
+                self._auto_os = {"os": "upos", "query": "upcdn=tx&probe_version=20221109",
+                                 "probe_url": "//upos-cs-upcdntx.bilivideo.com/OK"}
+                preferred_upos_cdn = 'tx'
+            elif lines == 'txa':
+                self._auto_os = {"os": "upos", "query": "upcdn=txa&probe_version=20221109",
+                                 "probe_url": "//upos-cs-upcdntxa.bilivideo.com/OK"}
+                preferred_upos_cdn = 'txa'
             else:
                 self._auto_os = self.probe()
             logger.info(f"线路选择 => {self._auto_os['os']}: {self._auto_os['query']}. time: {self._auto_os.get('cost')}")
         if self._auto_os['os'] == 'upos':
             upload = self.upos
-        elif self._auto_os['os'] == 'cos':
-            upload = self.cos
-        elif self._auto_os['os'] == 'cos-internal':
-            upload = lambda *args, **kwargs: self.cos(*args, **kwargs, internal=True)
-        elif self._auto_os['os'] == 'kodo':
-            upload = self.kodo
+        # elif self._auto_os['os'] == 'cos':
+        #     upload = self.cos
+        # elif self._auto_os['os'] == 'cos-internal':
+        #     upload = lambda *args, **kwargs: self.cos(*args, **kwargs, internal=True)
+        # elif self._auto_os['os'] == 'kodo':
+        #     upload = self.kodo
         else:
             logger.error(f"NoSearch:{self._auto_os['os']}")
             raise NotImplementedError(self._auto_os['os'])

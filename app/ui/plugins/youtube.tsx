@@ -11,6 +11,24 @@ const YouTube: React.FC<Props> = (props) => {
     return (
         <>
             <Collapse.Panel header="YouTube" itemKey="youtube">
+                <Form.Input
+                    field="user.youtube_cookie"
+                    extraText={
+                        <div style={{ fontSize: "14px" }}>
+                            使用Cookies登陆YouTube帐号，可用于下载会限、私享等未登录账号无法访问的内容。
+                            <br />
+                            <style></style>可以使用 Chrome 插件「Get
+                            cookies.txt」来生成txt文件，请使用 Netscape 格式的
+                            Cookies 文本路径。
+                        </div>
+                    }
+                    label="YouTube Cookie（youtube_cookie）"
+                    style={{ width: "100%" }}
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                />
                 <Form.Switch
                     initValue={
                         entity?.hasOwnProperty("youtube_enable_download_live")
@@ -26,6 +44,10 @@ const YouTube: React.FC<Props> = (props) => {
 例如录制https://www.youtube.com/@NeneAmanoCh/streams，关闭后将忽略正在直播
 "
                     label="下载直播（youtube_enable_download_live）"
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
                 />
                 <Form.Switch
                     initValue={
@@ -42,6 +64,10 @@ const YouTube: React.FC<Props> = (props) => {
 例如录制https://www.youtube.com/@NeneAmanoCh/streams，关闭后将忽略直播回放
 "
                     label="下载回放（youtube_enable_download_playback）"
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
                 />
                 <Form.Input
                     field="youtube_after_date"

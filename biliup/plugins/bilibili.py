@@ -12,8 +12,7 @@ from ..engine.download import DownloadBase
 
 OFFICIAL_API = "https://api.live.bilibili.com"
 
-@Plugin.download(regexp=r'(?:https?://)?live\.bilibili\.com')
-@Plugin.download(regexp=r'(?:https?://)?b23\.tv')
+@Plugin.download(regexp=r'(?:https?://)?(b23\.tv|live\.bilibili\.com)')
 class Bililive(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
@@ -22,7 +21,7 @@ class Bililive(DownloadBase):
         self.fake_headers['referer'] = url
         if config.get('user', {}).get('bili_cookie'):
             self.fake_headers['cookie'] = config.get('user', {}).get('bili_cookie')
-        elif config.get('user', {}).get('bili_cookie_file'):
+        if config.get('user', {}).get('bili_cookie_file'):
             cookie_file_name = config.get('user', {}).get('bili_cookie_file')
             try:
                 with open(cookie_file_name, encoding='utf-8') as stream:
@@ -37,10 +36,23 @@ class Bililive(DownloadBase):
         #    logger.warning("No cookie provided. The original quality may not be available.")
 
     async def acheck_stream(self, is_check=False):
-        room_id = match1(self.url, r'/(\d+)')
-        qualityNumber = int(config.get('bili_qn', 10000))
 
         client.headers.update(self.fake_headers)
+
+        if "b23.tv" in self.url:
+            try:
+                url = (await client.get(self.url, follow_redirects=False)).next_request.url
+                if "live.bilibili" in str(url):
+                    self.url = url
+                else:
+                    raise
+            except:
+                logger.error(f"{self.plugin_msg}: 不支持的链接")
+                return False
+
+        room_id = match1(self.url, r'bilibili.com/(\d+)')
+        qualityNumber = int(config.get('bili_qn', 10000))
+
         # 获取直播状态与房间标题
         info_by_room_url = f"{OFFICIAL_API}/xlive/web-room/v1/index/getInfoByRoom?room_id={room_id}"
         try:
