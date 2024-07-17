@@ -152,6 +152,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                                             theme="borderless"
                                             icon={<IconMinusCircle />}
                                             onClick={remove}
+                                            disabled={arrayFields.length <= 1}
                                             style={{ margin: 12 }}
                                         />
                                     </div>
