@@ -105,7 +105,7 @@ class Bililive(DownloadBase):
             'format': '0,1,2',  # 0: flv, 1: ts, 2: fmp4
             'codec': '0',  # 0: avc, 1: hevc, 2: av1
             'qn': qualityNumber,
-            'platform': 'html5',  # web, html5, android, ios
+            'platform': 'web',  # web, html5, android, ios
             # 'ptype': '8',
             'dolby': '5',
             # 'panorama': '1' # 全景(不支持 html5)
@@ -184,10 +184,13 @@ class Bililive(DownloadBase):
         if force_source:
             streamname_regexp = r"(live_\d+_\w+_\w+_?\w+?)"  # 匹配 streamName
             streamName = match1(stream_url['base_url'], streamname_regexp)
+            sk = match1(stream_url['extra'], r"sk=(.+?)&")
             if streamName is not None and qualityNumber >= 10000:
-                _base_url = stream_url['base_url'].replace(f"_{streamName.split('_')[-1]}", '')
-                if (await self.acheck_url_healthy(f"{stream_url['host']}{_base_url}{stream_url['extra']}")) is not None:
+                _base_url = stream_url['base_url'].replace(f"_{streamName.split('_')[-1]}", "")
+                _extra = stream_url['extra'].replace(f"{sk}", f"{sk[:32]}")
+                if (await self.acheck_url_healthy(f"{stream_url['host']}{_base_url}{_extra}")) is not None:
                     stream_url['base_url'] = _base_url
+                    stream_url['extra'] = _extra
                 else:
                     logger.debug(f"{self.plugin_msg}: force_source {_base_url}")
 
