@@ -216,6 +216,8 @@ class Bililive(DownloadBase):
                 i = len(stream_info['url_info'])
                 while i:
                     i -= 1
+                    if "mcdn" in stream_info['url_info'][i]['host']:
+                        continue
                     try:
                         self.raw_stream_url = "{}{}{}".format(stream_info['url_info'][i]['host'],
                                                               stream_url['base_url'],
@@ -236,6 +238,7 @@ class Bililive(DownloadBase):
             else:
                 self.raw_stream_url = _url
 
+        self.raw_stream_url = "https://cn-gdgz-cm-01-14.bilivideo.com/live-bvc/819976/live_194484313_8775758/index.m3u8?expires=1721744382&len=0&oi=0x24098a5540b2173069fe85f9dbc3d4eb&pt=web&qn=10000&trid=100775f1a08abf51e8b152f73ebf3f669fad&sigparams=cdn,expires,len,oi,pt,qn,trid&cdn=cn-gotcha01&sign=1ae3179d47d9eb1575b3c0c8a2913626&site=4b6a5742c9297ea7af89258d6515af1a&sl=10&free_type=0&mid=42615888&sche=ban&bvchls=1&sid=cn-fjqz-cm-01-06&chash=1&bmt=1&sg=df&score=15&trace=65&deploy_env=prod&pp=rtmp&sk=5bf07b9bbe6df2e0a6bc476fe3d9a642&source=onetier&flvsk=4207df3de646838b084f14f252be3aff3033194328f6029e3e02d13ef8059a83&hot_cdn=909773&score=15&origin_bitrate=1270589&sl=10&p2p_type=1&qp=&zoneid_l=151371779&sid_l=live_194484313_8775758_bluray&suffix=bluray&src=puv3"
         return True
 
     def danmaku_init(self):
