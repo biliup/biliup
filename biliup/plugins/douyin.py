@@ -21,8 +21,8 @@ class Douyin(DownloadBase):
         self.fake_headers['user-agent'] = DouyinUtils.DOUYIN_USER_AGENT
         self.fake_headers['referer'] = "https://live.douyin.com/"
         self.fake_headers['cookie'] = config.get('user', {}).get('douyin_cookie', '')
-        self.web_rid = None
-        self.room_id = None
+        self.web_rid = None # 网页端房间号 或 抖音号
+        self.room_id = None # （单场？）直播的直播房间
         self.sec_uid = None
 
     async def acheck_stream(self, is_check=False):
@@ -45,7 +45,6 @@ class Douyin(DownloadBase):
                     return False
             self.sec_uid = match1(next_url, r"sec_user_id=(.*?)&")
             self.room_id = match1(next_url.split("?")[0], r"(\d+)")
-            self.web_rid = self.get_web_rid(self.sec_uid, self.room_id)
         elif "/user/" in self.url:
             sec_uid = self.url.split("user/")[1].split("?")[0]
             if len(sec_uid) == 55:
@@ -59,24 +58,30 @@ class Douyin(DownloadBase):
                     if not web_rid:
                         logger.debug(f"{self.plugin_msg}: 未开播")
                         return False
+                    self.web_rid = web_rid
                 except (KeyError, IndexError):
-                    logger.error(f"{self.plugin_msg}: 获取房间ID失败,请检查Cookie设置")
+                    logger.error(f"{self.plugin_msg}: 房间号获取失败，请检查Cookie设置")
                     return False
                 except:
-                    logger.exception(f"{self.plugin_msg}: 获取房间ID失败")
+                    logger.exception(f"{self.plugin_msg}: 房间号获取失败")
                     return False
         else:
             web_rid = self.url.split('douyin.com/')[1].split('/')[0].split('?')[0]
             if web_rid[0] == "+":
                 web_rid = web_rid[1:]
-            try:
-                self.sec_uid = self.get_sec_uid(web_rid)
-            except:
-                logger.exception(f"{self.plugin_msg}: web_room_info 获取失败")
-                return False
+            self.web_rid = web_rid
 
         try:
-            room_info = self.get_room_info(self.sec_uid)
+            if not self.sec_uid:
+                if not self.web_rid:
+                    raise
+                self.sec_uid = self.get_sec_uid(web_rid)
+        except:
+            logger.exception(f"{self.plugin_msg}: sec_user_id 获取失败")
+            return False
+
+        try:
+            room_info = self.get_room_info(self.sec_uid, self.room_id)
             if room_info['status_code'] != 0:
                 raise
             room_info = room_info['data']['room']
@@ -92,7 +97,6 @@ class Douyin(DownloadBase):
         except:
             logger.exception(f"{self.plugin_msg}: 加载清晰度失败")
             return False
-
 
         # 原画origin 蓝光uhd 超清hd 高清sd 标清ld 流畅md 仅音频ao
         quality_items = ['origin', 'uhd', 'hd', 'sd', 'ld', 'md']
@@ -149,30 +153,32 @@ class Douyin(DownloadBase):
             except:
                 pass
 
-    def get_web_room_info(self, web_rid):
+    async def get_web_room_info(self, web_rid) -> dict:
         target_url = DouyinUtils.build_request_url(f"https://live.douyin.com/webcast/room/web/enter/?web_rid={web_rid}")
-        web_info = requests.get(target_url, headers=self.fake_headers, timeout=15).json()
+        web_info = (await client.get(target_url, headers=self.fake_headers)).json()
         return web_info
 
-    def get_room_info(self, sec_user_id, room_id=None):
+    async def get_room_info(self, sec_user_id, room_id) -> dict:
         params = {
             'type_id': 0,
             'live_id': 1,
             'version_code': '99.99.99',
             'app_id': 1128,
-            'room_id': room_id if room_id else 2,
+            'room_id': room_id if room_id else 2, # 必要但不校验
             'sec_user_id': sec_user_id
         }
-        info = requests.get("https://webcast.amemv.com/webcast/room/reflow/info/",
-                      params=params, headers=DouyinUtils.DOUYIN_HTTP_HEADERS, timeout=15).json()
+        info = (await client.get("https://webcast.amemv.com/webcast/room/reflow/info/",
+                    params=params, headers=self.fake_headers)).json()
         return info
 
-    def get_web_rid(self, sec_user_id: str, room_id) -> str:
-        room_info = self.get_room_info(sec_user_id, room_id)
-        return room_info['data']['room']['owner']['web_rid']
+    async def get_web_rid(self, sec_user_id, room_id) -> str:
+        info = await self.get_room_info(sec_user_id, room_id)
+        if not info.get('data').get('room'):
+            raise
+        return info['data']['room']['owner']['web_rid']
 
-    def get_sec_uid(self, web_rid) -> str:
-        info = self.get_web_room_info(web_rid)
+    async def get_sec_uid(self, web_rid) -> str:
+        info = await self.get_web_room_info(web_rid)
         if info['status_code'] != 0 or not info['data'].get('user'):
             raise
         return info['data']['user']['sec_uid']
