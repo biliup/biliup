@@ -1,6 +1,7 @@
 import json
 from typing import Optional
 from urllib.parse import unquote, urlparse, parse_qs, urlencode, urlunparse
+from functools import lru_cache
 
 import requests
 
@@ -13,7 +14,7 @@ from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 
 
-@Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m|live)\.)?douyin\.com')
+@Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m|live|v)\.)?douyin\.com')
 class Douyin(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
@@ -23,6 +24,21 @@ class Douyin(DownloadBase):
         self.fake_headers['cookie'] = config.get('user', {}).get('douyin_cookie', '')
 
     async def acheck_stream(self, is_check=False):
+
+        if "v.douyin" in self.url:
+            resp = await client.get(self.url, headers=self.fake_headers, follow_redirects=False)
+            if resp.status_code not in {301, 302}:
+                return False
+            if resp.next_request:
+                next_url = str(resp.next_request.url)
+                if "webcast.amemv" not in next_url:
+                    logger.error(f"{self.plugin_msg}: 不支持的链接")
+                    return False
+            sec_user_id = match1(next_url, r"sec_user_id=(.*?)&")
+            room_id = match1(next_url.split("?")[0], r"(\d+)")
+            self.url = f"https://live.douyin.com/{DouyinUtils.get_web_rid(room_id, sec_user_id)}"
+
+
         if "/user/" in self.url:
             try:
                 user_page = (await client.get(self.url, headers=self.fake_headers)).text
@@ -33,7 +49,7 @@ class Douyin(DownloadBase):
                     logger.debug(f"{Douyin.__name__}: {self.url}: 未开播")
                     return False
             except (KeyError, IndexError):
-                logger.warning(f"{Douyin.__name__}: {self.url}: 获取房间ID失败,请检查Cookie设置")
+                logger.error(f"{Douyin.__name__}: {self.url}: 获取房间ID失败,请检查Cookie设置")
                 return False
             except:
                 logger.exception(f"{Douyin.__name__}: {self.url}: 获取房间ID失败")
@@ -175,3 +191,18 @@ class DouyinUtils:
             parsed_url.fragment
         ))
         return new_url
+
+    @lru_cache(maxsize=None)
+    def get_web_rid(room_id: str, sec_user_id: str):
+        params = {
+            'type_id': 0,
+            'live_id': 1,
+            'version_code': '99.99.99',
+            'app_id': 1128,
+            'room_id': room_id,
+            'sec_user_id': sec_user_id
+        }
+        room_info = requests.get("https://webcast.amemv.com/webcast/room/reflow/info/", params=params, headers=DouyinUtils.DOUYIN_HTTP_HEADERS, timeout=15)
+        room_info = json.loads(room_info.text)
+        web_rid = room_info['data']['room']['owner']['web_rid']
+        return web_rid
