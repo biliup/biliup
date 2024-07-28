@@ -1,7 +1,6 @@
 import json
 from typing import Optional
 from urllib.parse import unquote, urlparse, parse_qs, urlencode, urlunparse
-from functools import lru_cache
 
 import requests
 
@@ -32,7 +31,10 @@ class Douyin(DownloadBase):
             self.fake_headers['Cookie'] = f'ttwid={DouyinUtils.get_ttwid()};{self.fake_headers["cookie"]}'
 
         if "v.douyin" in self.url:
-            resp = await client.get(self.url, headers=self.fake_headers, follow_redirects=False)
+            try:
+                resp = await client.get(self.url, headers=self.fake_headers, follow_redirects=False)
+            except:
+                return False
             if resp.status_code not in {301, 302}:
                 logger.error(f"{self.plugin_msg}: 不支持的链接")
                 return False
