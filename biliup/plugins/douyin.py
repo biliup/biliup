@@ -82,9 +82,10 @@ class Douyin(DownloadBase):
             return False
 
         try:
+            web_room_info = None
             if self.web_rid:
                 web_room_info = await self.get_web_room_info(self.web_rid)
-            if web_room_info['data'].get('data'):
+            if web_room_info and web_room_info['data'].get('data'):
                 room_info = web_room_info
             else:
                 room_info = await self.get_room_info(self.sec_uid, self.room_id)
