@@ -88,8 +88,8 @@ class Douyin(DownloadBase):
                 room_info = web_room_info
             else:
                 room_info = await self.get_room_info(self.sec_uid, self.room_id)
-            if room_info['status_code'] != 0:
-                raise Exception(f"{str(room_info)}")
+            # if room_info['status_code'] != 0:
+            #     raise Exception(f"{str(room_info)}")
             try:
                 room_info = room_info['data']['data'][0]
             except (KeyError, IndexError):
