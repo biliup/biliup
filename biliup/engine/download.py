@@ -80,7 +80,7 @@ class DownloadBase(ABC):
         raise NotImplementedError()
 
     def download(self):
-        logger.debug(f"{self.plugin_msg}: Start downloading {self.raw_stream_url}")
+        logger.info(f"{self.plugin_msg}: Start downloading {self.raw_stream_url}")
         if self.is_download:
             if not shutil.which("ffmpeg"):
                 logger.error("未安装 FFMpeg 或不存在于 PATH 内")

@@ -41,11 +41,13 @@ class Bililive(DownloadBase):
 
         if "b23.tv" in self.url:
             try:
-                url = (await client.get(self.url, follow_redirects=False)).next_request.url
-                if "live.bilibili" in str(url):
-                    self.url = url
-                else:
+                resp = await client.get(self.url, follow_redirects=False)
+                if resp.status_code not in {301, 302}:
                     raise
+                url = str(resp.next_request.url)
+                if "live.bilibili" not in url:
+                    raise
+                self.url = url
             except:
                 logger.error(f"{self.plugin_msg}: 不支持的链接")
                 return False
