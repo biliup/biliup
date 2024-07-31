@@ -100,9 +100,6 @@
 
 ## 捐赠
 * 爱发电 :`https://afdian.net/a/biliup`
-<img src="https://img2.imgtp.com/2024/05/18/y7rU9P6g.jpg" width="400" alt="aifadian">
-
-
 
 
 ## Stars
