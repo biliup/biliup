@@ -22,7 +22,7 @@ class Douyin(DownloadBase):
         self.fake_headers['referer'] = "https://live.douyin.com/"
         self.fake_headers['cookie'] = config.get('user', {}).get('douyin_cookie', '')
         self.web_rid = None # 网页端房间号 或 抖音号
-        self.room_id = None # （单场？）直播的直播房间
+        self.room_id = None # 单场直播的直播房间
         self.sec_uid = None
 
     async def acheck_stream(self, is_check=False):
@@ -75,27 +75,38 @@ class Douyin(DownloadBase):
             if not self.sec_uid:
                 if not self.web_rid:
                     raise
-                self.sec_uid = self.get_sec_uid(web_rid)
+                self.sec_uid = await self.get_sec_uid(web_rid)
         except:
             logger.exception(f"{self.plugin_msg}: sec_user_id 获取失败")
             return False
 
         try:
-            room_info = self.get_room_info(self.sec_uid, self.room_id)
+            if self.web_rid:
+                web_room_info = await self.get_web_room_info(self.web_rid)
+            if web_room_info['data'].get('data'):
+                room_info = web_room_info
+            else:
+                room_info = await self.get_room_info(self.sec_uid, self.room_id)
             if room_info['status_code'] != 0:
-                raise
-            room_info = room_info['data']['room']
+                raise Exception(f"{str(room_info)}")
+            try:
+                room_info = room_info['data']['data'][0]
+            except (KeyError, IndexError):
+                room_info = room_info['data']['room']
             if room_info.get('status') != 2:
                 logger.debug(f"{self.plugin_msg}: 未开播")
                 return False
         except:
-            logger.exception(f"{self.plugin_msg}: 获取开播状态失败")
+            logger.exception(f"{self.plugin_msg}: 获取直播间信息失败")
             return False
 
         try:
-            stream_data = json.loads(room_info['stream_url']['live_core_sdk_data']['pull_data']['stream_data'])['data']
+            pull_data = room_info['stream_url']['live_core_sdk_data']['pull_data']
+            if room_info['stream_url'].get('pull_datas') and config.get('douyin_extra_record', True):
+                pull_data = next(iter(room_info['stream_url']['pull_datas'].values()))
+            stream_data = json.loads(pull_data['stream_data'])['data']
         except:
-            logger.exception(f"{self.plugin_msg}: 加载清晰度失败")
+            logger.exception(f"{self.plugin_msg}: 加载直播流失败")
             return False
 
         # 原画origin 蓝光uhd 超清hd 高清sd 标清ld 流畅md 仅音频ao
