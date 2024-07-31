@@ -35,14 +35,15 @@ class Douyin(DownloadBase):
                 resp = await client.get(self.url, headers=self.fake_headers, follow_redirects=False)
             except:
                 return False
-            if resp.status_code not in {301, 302}:
-                logger.error(f"{self.plugin_msg}: 不支持的链接")
-                return False
-            if resp.next_request:
+            try:
+                if resp.status_code not in {301, 302}:
+                    raise
                 next_url = str(resp.next_request.url)
                 if "webcast.amemv" not in next_url:
-                    logger.error(f"{self.plugin_msg}: 不支持的链接")
-                    return False
+                    raise
+            except:
+                logger.error(f"{self.plugin_msg}: 不支持的链接")
+                return False
             self.sec_uid = match1(next_url, r"sec_user_id=(.*?)&")
             self.room_id = match1(next_url.split("?")[0], r"(\d+)")
         elif "/user/" in self.url:
