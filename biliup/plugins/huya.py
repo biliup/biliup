@@ -30,7 +30,6 @@ class Huya(DownloadBase):
                 await self.verify_cookie()
             if not self.__room_id.isdigit():
                 self.__room_id = _get_real_rid(self.url)
-                print(_get_real_rid.cache_info())
             room_profile = await self.get_room_profile(use_api=True)
         except Exception as e:
             logger.error(f"{self.plugin_msg}: {e}")
