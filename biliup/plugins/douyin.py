@@ -17,7 +17,7 @@ from ..engine.download import DownloadBase
 class Douyin(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
-        self.douyin_danmaku = config.get('douyin_danmaku', True)
+        self.douyin_danmaku = config.get('douyin_danmaku', False)
         self.fake_headers['user-agent'] = DouyinUtils.DOUYIN_USER_AGENT
         self.fake_headers['referer'] = "https://live.douyin.com/"
         self.fake_headers['cookie'] = config.get('user', {}).get('douyin_cookie', '')
