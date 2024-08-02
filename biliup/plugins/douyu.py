@@ -15,7 +15,7 @@ from ..plugins import logger, match1, random_user_agent
 class Douyu(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
-        self._room_id = match1(url, r'rid=(\d+)')
+        self.__room_id = match1(url, r'rid=(\d+)')
         self.douyu_danmaku = config.get('douyu_danmaku', False)
 
     async def acheck_stream(self, is_check=False):
@@ -24,15 +24,15 @@ class Douyu(DownloadBase):
             return False
 
         try:
-            if not self._room_id:
-                self._room_id = _get_real_rid(self.url)
+            if not self.__room_id:
+                self.__room_id = _get_real_rid(self.url)
         except:
             logger.exception(f"{self.plugin_msg}: 获取房间号错误")
             return False
 
         try:
             room_info = (
-                await client.get(f"https://www.douyu.com/betard/{self._room_id}", headers=self.fake_headers)
+                await client.get(f"https://www.douyu.com/betard/{self.__room_id}", headers=self.fake_headers)
             ).json()['room']
         except:
             logger.exception(f"{self.plugin_msg}: 获取直播间信息错误")
@@ -46,7 +46,7 @@ class Douyu(DownloadBase):
             return False
         if config.get('douyu_disable_interactive_game', False):
             gift_info = (
-                await client.get(f"https://www.douyu.com/api/interactive/web/v2/list?rid={self._room_id}",
+                await client.get(f"https://www.douyu.com/api/interactive/web/v2/list?rid={self.__room_id}",
                                 headers=self.fake_headers)
             ).json().get('data', {})
             if gift_info:
@@ -72,18 +72,18 @@ class Douyu(DownloadBase):
             import jsengine
             ctx = jsengine.jsengine()
             js_enc = (
-                await client.get(f'https://www.douyu.com/swf_api/homeH5Enc?rids={self._room_id}',
+                await client.get(f'https://www.douyu.com/swf_api/homeH5Enc?rids={self.__room_id}',
                                  headers=self.fake_headers)
-            ).json()['data'][f'room{self._room_id}']
+            ).json()['data'][f'room{self.__room_id}']
             js_enc = js_enc.replace('return eval', 'return [strc, vdwdae325w_64we];')
 
             sign_fun, sign_v = ctx.eval(f'{js_enc};ub98484234();')
 
             tt = str(int(time.time()))
             did = hashlib.md5(tt.encode('utf-8')).hexdigest()
-            rb = hashlib.md5(f"{self._room_id}{did}{tt}{sign_v}".encode('utf-8')).hexdigest()
+            rb = hashlib.md5(f"{self.__room_id}{did}{tt}{sign_v}".encode('utf-8')).hexdigest()
             sign_fun = sign_fun.rstrip(';').replace("CryptoJS.MD5(cb).toString()", f'"{rb}"')
-            sign_fun += f'("{self._room_id}","{did}","{tt}");'
+            sign_fun += f'("{self.__room_id}","{did}","{tt}");'
 
             params = parse_qs(ctx.eval(sign_fun))
         except:
@@ -95,7 +95,7 @@ class Douyu(DownloadBase):
         params['rate'] = config.get('douyu_rate', 0)
 
         try:
-            live_data = await self.get_play_info(self._room_id, params)
+            live_data = await self.get_play_info(self.__room_id, params)
             self.raw_stream_url = f"{live_data['rtmp_url']}/{live_data['rtmp_live']}"
         except:
             logger.exception(f"{self.plugin_msg}: ")
@@ -105,7 +105,10 @@ class Douyu(DownloadBase):
 
     def danmaku_init(self):
         if self.douyu_danmaku:
-            self.danmaku = DanmakuClient(self.url, self.gen_download_filename())
+            content = {
+                'room_id': self.__room_id,
+            }
+            self.danmaku = DanmakuClient(self.url, self.gen_download_filename(), content)
 
     async def get_play_info(self, room_id, params):
         live_data = await client.post(
