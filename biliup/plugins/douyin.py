@@ -17,7 +17,7 @@ from ..engine.download import DownloadBase
 class Douyin(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
-        self.douyin_danmaku = config.get('douyin_danmaku', False)
+        self.douyin_danmaku = config.get('douyin_danmaku', True)
         self.fake_headers['user-agent'] = DouyinUtils.DOUYIN_USER_AGENT
         self.fake_headers['referer'] = "https://live.douyin.com/"
         self.fake_headers['cookie'] = config.get('user', {}).get('douyin_cookie', '')
@@ -73,34 +73,31 @@ class Douyin(DownloadBase):
             self.web_rid = web_rid
 
         try:
-            if not self.sec_uid:
-                if not self.web_rid:
-                    raise
-                self.sec_uid = await self.get_sec_uid(web_rid)
-        except:
-            logger.exception(f"{self.plugin_msg}: sec_user_id 获取失败")
-            return False
-
-        try:
-            web_room_info = None
+            room_info = None
             if self.web_rid:
-                web_room_info = await self.get_web_room_info(self.web_rid)
-            if web_room_info and web_room_info['data'].get('data'):
-                room_info = web_room_info
+                room_info = await self.get_web_room_info(self.web_rid)
+            if room_info:
+                if not room_info['data'].get('user'):
+                    raise Exception(f"{str(room_info)}")
+                self.sec_uid = room_info['data']['user']['sec_uid']
             else:
                 room_info = await self.get_room_info(self.sec_uid, self.room_id)
-            # if room_info['status_code'] != 0:
-            #     raise Exception(f"{str(room_info)}")
+                if room_info['data'].get('room', {}).get('owner'):
+                    self.web_rid = room_info['data']['room']['owner']['web_rid']
             try:
                 room_info = room_info['data']['data'][0]
             except (KeyError, IndexError):
-                room_info = room_info['data']['room']
+                room_info = room_info['data'].get('room', {})
             if room_info.get('status') != 2:
                 logger.debug(f"{self.plugin_msg}: 未开播")
                 return False
+            self.room_id = room_info['id_str']
         except:
             logger.exception(f"{self.plugin_msg}: 获取直播间信息失败")
             return False
+
+        if is_check:
+            return True
 
         try:
             pull_data = room_info['stream_url']['live_core_sdk_data']['pull_data']
@@ -145,7 +142,6 @@ class Douyin(DownloadBase):
                     quality = optional_quality_items[optional_quality_index - 1]
 
             protocol = 'hls' if config.get('douyin_protocol') == 'hls' else 'flv'
-            # protocol = 'hls'
             self.raw_stream_url = stream_data[quality]['main'][protocol]
             self.room_title = room_info['title']
         except:
@@ -155,11 +151,16 @@ class Douyin(DownloadBase):
 
     def danmaku_init(self):
         if self.douyin_danmaku:
+            content = {
+                'web_rid': self.web_rid,
+                'sec_uid': self.sec_uid,
+                'room_id': self.room_id,
+            }
             try:
                 import jsengine
                 try:
                     jsengine.jsengine()
-                    self.danmaku = DanmakuClient(self.url, self.gen_download_filename())
+                    self.danmaku = DanmakuClient(self.url, self.gen_download_filename(), content)
                 except jsengine.exceptions.RuntimeError as e:
                     extra_msg = "如需录制抖音弹幕，"
                     logger.error(f"\n{e}\n{extra_msg}请至少安装一个 Javascript 解释器，如 pip install quickjs")
@@ -184,17 +185,6 @@ class Douyin(DownloadBase):
                     params=params, headers=self.fake_headers)).json()
         return info
 
-    async def get_web_rid(self, sec_user_id, room_id) -> str:
-        info = await self.get_room_info(sec_user_id, room_id)
-        if not info.get('data').get('room'):
-            raise
-        return info['data']['room']['owner']['web_rid']
-
-    async def get_sec_uid(self, web_rid) -> str:
-        info = await self.get_web_room_info(web_rid)
-        if info['status_code'] != 0 or not info['data'].get('user'):
-            raise
-        return info['data']['user']['sec_uid']
 
 
 class DouyinUtils:

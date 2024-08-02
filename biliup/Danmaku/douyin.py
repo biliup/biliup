@@ -30,25 +30,10 @@ class Douyin:
             from biliup.plugins.douyin import DouyinUtils
             from .douyin_util import DouyinDanmakuUtils
             Douyin.headers['user-agent'] = DouyinUtils.DOUYIN_USER_AGENT
-            if "/user/" in url:
-                async with session.get(url, headers=Douyin.headers, timeout=5) as resp:
-                    user_page = await resp.text()
-                    user_page_data = unquote(
-                        user_page.split('<script id="RENDER_DATA" type="application/json">')[1].split('</script>')[0])
-                    room_id = match1(user_page_data, r'"web_rid":"([^"]+)"')
-            else:
-                room_id = url.split('douyin.com/')[1].split('/')[0].split('?')[0]
-
-            if room_id[0] == "+":
-                room_id = room_id[1:]
 
             if "ttwid" not in Douyin.headers['Cookie']:
                 Douyin.headers['Cookie'] = f'ttwid={DouyinUtils.get_ttwid()};{Douyin.headers["Cookie"]}'
 
-            async with session.get(
-                    DouyinUtils.build_request_url(f"https://live.douyin.com/webcast/room/web/enter/?web_rid={room_id}"),
-                    headers=Douyin.headers, timeout=5) as resp:
-                room_info = json.loads(await resp.text())['data']['data'][0]
 
             USER_UNIQUE_ID = DouyinDanmakuUtils.get_user_unique_id()
             VERSION_CODE = 180800 # https://lf-cdn-tos.bytescm.com/obj/static/webcast/douyin_live/7697.782665f8.js -> a.ry
@@ -59,7 +44,7 @@ class Douyin:
                 "aid": "6383",
                 "version_code": VERSION_CODE,
                 "webcast_sdk_version": WEBCAST_SDK_VERSION,
-                "room_id": room_info['id_str'],
+                "room_id": context['room_id'],
                 "sub_room_id": "",
                 "sub_channel_id": "",
                 "did_rule": "3",
@@ -72,7 +57,7 @@ class Douyin:
             signature = DouyinDanmakuUtils.get_signature(DouyinDanmakuUtils.get_x_ms_stub(sig_params))
             # logger.info(f"signature: {signature}")
             webcast5_params = {
-                "room_id": room_info['id_str'],
+                "room_id": context['room_id'],
                 "compress": 'gzip',
                 # "app_name": "douyin_web",
                 "version_code": VERSION_CODE,
