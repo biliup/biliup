@@ -44,7 +44,11 @@ export default function Home() {
         {
             title: '更新日期',
             dataIndex: 'updateTime',
-            sorter: (a: any, b: any) => (a.updateTime - b.updateTime > 0 ? 1 : -1),
+            sorter: (a: any, b: any) => {
+                const dateA = new Date(a.updateTime.replace(/-/g, '/') + ' UTC');
+                const dateB = new Date(b.updateTime.replace(/-/g, '/') + ' UTC');
+                return dateA.getTime() - dateB.getTime();
+            },
         },
         {
             title: '',
