@@ -228,6 +228,8 @@ async def streamers(request):
             status = 'Idle'
             if context['PluginInfo'].url_status.get(url) == 1:
                 status = 'Working'
+            if context['PluginInfo'].url_status.get(url) == 2:
+                status = 'OutOfSchedule'
             if context['url_upload_count'].get(url, 0) > 0:
                 status = 'Inspecting'
             temp['status'] = status

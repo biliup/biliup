@@ -9,12 +9,13 @@ import shutil
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator, List, Callable, Optional
 from urllib.parse import urlparse
+from datetime import datetime, timedelta
 
 import requests
 from requests.utils import DEFAULT_ACCEPT_ENCODING
 from httpx import HTTPStatusError
 
-from biliup.common.util import client, loop
+from biliup.common.util import client, loop, check_timerange
 from biliup.database.db import add_stream_info, SessionLocal, update_cover_path, update_room_title, update_file_list
 from biliup.plugins import random_user_agent
 import stream_gears
@@ -197,8 +198,9 @@ class DownloadBase(ABC):
 
             input_args += ['-i', input_uri]
 
-            if self.segment_time:
-                output_args += ['-to', self.segment_time]
+            duration = get_duration(self.fname, self.segment_time)
+            if duration:
+                output_args += ['-to', duration]
             if self.file_size:
                 output_args += ['-fs', str(self.file_size)]
 
@@ -279,7 +281,7 @@ class DownloadBase(ABC):
 
     def run(self):
         try:
-            if not asyncio.run_coroutine_threadsafe(self.acheck_stream(), loop).result():
+            if not asyncio.run_coroutine_threadsafe(self.acheck_stream(), loop).result() or not check_timerange(self.fname):
                 return False
             with SessionLocal() as db:
                 update_room_title(db, self.database_row_id, self.room_title)
@@ -503,6 +505,39 @@ def get_valid_filename(name):
     if s in {"", ".", ".."}:
         raise RuntimeError("Could not derive file name from '%s'" % name)
     return s
+
+
+def get_duration(name, segment_time_str):
+    """
+    计算当前时间到给定结束时间的时差
+    如果计算的时差大于segment_time，则返回segment_time。
+    """
+    time_range = config['streamers'].get(name, {}).get('time_range')
+    if not time_range or '-' not in time_range:
+        return segment_time_str
+    end_time_str = time_range.split('-')[1]
+
+    now = datetime.now()
+    end_time_today_str = now.strftime("%Y-%m-%d") + " " + end_time_str
+    end_time_today = datetime.strptime(end_time_today_str, "%Y-%m-%d %H:%M:%S")
+    # 判断结束时间是否是第二天的时间
+    if now > end_time_today:
+        end_time_today += timedelta(days=1)
+
+    time_diff = end_time_today - now
+    if segment_time_str:
+        segment_time_parts = list(map(int, segment_time_str.split(":")))
+        segment_time = timedelta(hours=segment_time_parts[0], minutes=segment_time_parts[1], seconds=segment_time_parts[2])
+
+        if time_diff > segment_time:
+            return segment_time_str
+
+    hours, remainder = divmod(time_diff.total_seconds(), 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    to_parameter = f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"
+
+    return to_parameter
 
 
 class BatchCheck(ABC):
