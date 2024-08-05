@@ -20,7 +20,7 @@ class Huya(DownloadBase):
         super().__init__(fname, url, suffix)
         self.fake_headers['referer'] = url
         self.fake_headers['cookie'] = config.get('user', {}).get('huya_cookie', '')
-        self._room_id = url.split('huya.com/')[1].split('?')[0]
+        self.__room_id = url.split('huya.com/')[1].split('?')[0]
         self.huya_danmaku = config.get('huya_danmaku', False)
 
 
@@ -28,8 +28,8 @@ class Huya(DownloadBase):
         try:
             if self.fake_headers.get('cookie'):
                 await self.verify_cookie()
-            if not self._room_id.isdigit():
-                self._room_id = _get_real_rid(self.url)
+            if not self.__room_id.isdigit():
+                self.__room_id = _get_real_rid(self.url)
             room_profile = await self.get_room_profile(use_api=True)
         except Exception as e:
             logger.error(f"{self.plugin_msg}: {e}")
@@ -127,13 +127,13 @@ class Huya(DownloadBase):
 
     async def get_room_profile(self, use_api=False) -> dict:
         if use_api:
-            resp = (await client.get(f"https://mp.huya.com/cache.php?m=Live&do=profileRoom&roomid={self._room_id}", \
+            resp = (await client.get(f"https://mp.huya.com/cache.php?m=Live&do=profileRoom&roomid={self.__room_id}", \
                                         headers=self.fake_headers)).json()
             if resp['status'] != 200:
                 raise Exception(f"{resp['message']}")
             return resp['data']
         else:
-            html = (await client.get(f"https://www.huya.com/{self._room_id}", headers=self.fake_headers)).text
+            html = (await client.get(f"https://www.huya.com/{self.__room_id}", headers=self.fake_headers)).text
             if '找不到这个主播' in html:
                 raise Exception(f"找不到这个主播")
             return json.loads(html.split('stream: ')[1].split('};')[0])
@@ -222,7 +222,7 @@ def _get_real_rid(url):
     if '找不到这个主播' in html:
         raise Exception(f"找不到这个主播")
     html_obj = json.loads(html.split('stream: ')[1].split('};')[0])
-    return html_obj['data'][0]['gameLiveInfo']['profileRoom']
+    return str(html_obj['data'][0]['gameLiveInfo']['profileRoom'])
 
 
 def _dict_sorting(data: dict) -> dict:
