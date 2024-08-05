@@ -73,21 +73,23 @@ class Douyin(DownloadBase):
             self.__web_rid = web_rid
 
         try:
-            room_info = None
+            _room_info = None
             if self.__web_rid:
-                room_info = await self.get_web_room_info(self.__web_rid)
-            if room_info:
-                if not room_info['data'].get('user'):
-                    raise Exception(f"{str(room_info)}")
-                self.__sec_uid = room_info['data']['user']['sec_uid']
+                _room_info = await self.get_web_room_info(self.__web_rid)
+            if _room_info:
+                if not _room_info['data'].get('user'):
+                    raise Exception(f"{str(_room_info)}")
+                self.__sec_uid = _room_info['data']['user']['sec_uid']
             else:
-                room_info = await self.get_room_info(self.__sec_uid, self.__room_id)
-                if room_info['data'].get('room', {}).get('owner'):
-                    self.__web_rid = room_info['data']['room']['owner']['web_rid']
+                _room_info = await self.get_room_info(self.__sec_uid, self.__room_id)
+                if _room_info['data'].get('room', {}).get('owner'):
+                    self.__web_rid = _room_info['data']['room']['owner']['web_rid']
             try:
-                room_info = room_info['data']['data'][0]
+                room_info = _room_info['data']['data'][0]
             except (KeyError, IndexError):
-                room_info = room_info['data'].get('room', {})
+                room_info = _room_info['data'].get('room', {})
+                if not room_info:
+                    logger.info(f"{self.plugin_msg}: 获取直播间信息失败 {_room_info}")
             if room_info.get('status') != 2:
                 logger.debug(f"{self.plugin_msg}: 未开播")
                 return False

@@ -27,7 +27,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
         };
 
     const collapsed = (<div className="semi-form-field-extra">
-        流程无报错结束时触发，将按自定义顺序执行操作。<Text type="danger">移除所有项目时，默认删除视频文件。</Text>若要保留文件请设置为 mv。示例：
+        流程无报错结束时触发，将按自定义顺序执行操作。默认<Text type="danger">删除</Text>视频文件,若要保留文件请设置为 mv。示例：
         <br />
         <code>rm</code> 删除文件，为默认操作
         <br />
