@@ -532,6 +532,10 @@ def get_duration(name, segment_time_str):
         if time_diff > segment_time:
             return segment_time_str
 
+    # 增加10s，防止time_diff过小多次执行下载
+    if time_diff.total_seconds() <= 60:
+        time_diff = time_diff + timedelta(seconds=10)
+
     hours, remainder = divmod(time_diff.total_seconds(), 3600)
     minutes, seconds = divmod(remainder, 60)
 
