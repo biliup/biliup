@@ -108,7 +108,7 @@ class DownloadBase(ABC):
         else:
             # 其他流stream_gears会按hls保存为ts
             self.suffix = 'ts'
-        stream_gears_download(self.raw_stream_url, self.fake_headers, self.gen_download_filename(),
+        stream_gears_download(self.fname, self.raw_stream_url, self.fake_headers, self.gen_download_filename(),
                               self.segment_time,
                               self.file_size,
                               lambda file_name: self.__download_segment_callback(file_name))
@@ -458,16 +458,17 @@ class DownloadBase(ABC):
         pass
 
 
-def stream_gears_download(url, headers, file_name, segment_time=None, file_size=None,
+def stream_gears_download(fname, url, headers, file_name, segment_time=None, file_size=None,
                           file_name_callback: Callable[[str], None] = None):
     class Segment:
         pass
 
     segment = Segment()
-    if segment_time:
-        seg_time = segment_time.split(':')
+    duration = get_duration(fname, segment_time)
+    if duration:
+        dur_time = duration.split(':')
         # print(int(seg_time[0]) * 60 * 60 + int(seg_time[1]) * 60 + int(seg_time[2]))
-        segment.time = int(seg_time[0]) * 60 * 60 + int(seg_time[1]) * 60 + int(seg_time[2])
+        segment.time = int(dur_time[0]) * 60 * 60 + int(dur_time[1]) * 60 + int(dur_time[2])
     if file_size:
         segment.size = file_size
     if file_size is None and segment_time is None:
