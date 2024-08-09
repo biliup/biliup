@@ -100,6 +100,7 @@ export interface LiveStreamerEntity {
 	upload_id?: number;
 	status?: string | React.ReactNode;
 	format?: string;
+    time_range?: string;
 	preprocessor?: Record<'run', string>[];
 	segment_processor?: Record<'run', string>[];
 	downloaded_processor?: Record<'run', string>[];

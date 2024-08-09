@@ -224,6 +224,7 @@ streamers:
         tags:
             - biliup
             - 视频标签
+        #time_range: "01:00:00-23:00:00" ### 录制时间范围
         #preprocessor: ### 开始下载直播时触发，将按自定义顺序执行自定义操作 注：preprocessor仅支持shell指令
             #- run: sh ./run.sh, ### 执行任意命令，等同于在shell中运行,preprocessor输出的数据为JSON格式，包含主播名字(name)、开播地址(url)和开播时间(start_time)(时间戳)
         ### 分段时触发 返回当前生成的文件

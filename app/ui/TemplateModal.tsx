@@ -179,6 +179,19 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                                 // initValue='./video/%Y-%m-%d/%H_%M_%S{title}'
                                 placeholder='{streamer}%Y-%m-%dT%H_%M_%S'
                             />
+
+                            <Form.Input
+                                field='time_range'
+                                extraText={
+                                    <div style={{ fontSize: "14px" }}>
+                                        格式：&apos;01:00:00-02:00:00&apos;（时:分:秒-时:分:秒）
+                                    </div>
+                                }
+                                        label="录制时间范围"
+                                        placeholder="01:00:00-02:00:00"
+                                        style={{ width: 176 }}
+                            />
+
                             <ArrayField field='preprocessor'>
                                 {({ add, arrayFields }) => (
                                     <Form.Section text="下载前处理">

@@ -141,6 +141,7 @@ class LiveStreamers(BaseModel):
     url: Mapped[str] = mapped_column(nullable=False, unique=True)  # 直播间地址
     remark: Mapped[str] = mapped_column(nullable=False)  # 对应配置文件中 {streamer} 变量
     filename_prefix: Mapped[str] = mapped_column(nullable=True)  # filename_prefix 支持模板
+    time_range: Mapped[str] = mapped_column(nullable=True)  # 录制时间范围
     # 外键, 对应 UploadStreamers, 且启用级联删除
     upload_streamers_id = mapped_column(ForeignKey("uploadstreamers.id", ondelete="CASCADE"), nullable=True)
     uploadstreamers: Mapped[UploadStreamers] = relationship(back_populates="livestreamers")

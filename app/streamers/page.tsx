@@ -5,7 +5,7 @@ import {
     Button,
     Tag,
     Typography,
-    Popconfirm, 
+    Popconfirm,
     Notification,
     Card
 } from '@douyinfe/semi-ui';
@@ -55,6 +55,7 @@ export default function Home() {
             case 'Idle': status = <Tag color='green'>空闲</Tag>; break;
             case 'Pending': status = <Tag color='grey'>未知</Tag>; break;
             case 'Inspecting': status = <Tag color='indigo'>检测中</Tag>; break;
+            case 'OutOfSchedule': status = <Tag color='green'>非录播时间</Tag>; break;
         }
         return {...handleEntityPostprocessor(live), status};
     });
@@ -179,7 +180,7 @@ export default function Home() {
                                     </ButtonGroup>
                                 </div>
                             </Card>
-                            
+
                         </List.Item>
                     )}
                 />
