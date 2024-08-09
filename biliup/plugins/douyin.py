@@ -152,7 +152,7 @@ class Douyin(DownloadBase):
         return True
 
     def danmaku_init(self):
-        if self.douyin_danmaku or True:
+        if self.douyin_danmaku:
             content = {
                 'web_rid': self.__web_rid,
                 'sec_uid': self.__sec_uid,
