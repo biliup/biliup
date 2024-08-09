@@ -36,11 +36,6 @@ def pre_processor(name, url):
         logger.debug(f'{name} 正在下载中，跳过下载')
         return
 
-    url_status[url] = 0 if check_timerange(name) else 2
-    if url_status[url] == 2:
-        logger.debug(f'{name} 不在录制时间范围内，跳过下载')
-        return
-
     logger.info(f'{name} - {url} 开播了准备下载')
     preprocessor = config['streamers'].get(name, {}).get('preprocessor')
     if preprocessor:

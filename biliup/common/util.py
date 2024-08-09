@@ -14,7 +14,6 @@ logger = logging.getLogger('biliup')
 
 
 def check_timerange(name):
-    # 获取被调用函数名称
     time_range = config['streamers'].get(name, {}).get('time_range')
     now = datetime.now(tz=timezone(timedelta(hours=8))).time()
     logger.debug(f"{name}: 校验时间范围 {time_range} 当前时间 {now.strftime('%H:%M:%S')}")

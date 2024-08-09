@@ -59,6 +59,7 @@ class DownloadBase(ABC):
             'user-agent': random_user_agent(),
         }
         self.segment_time = config.get('segment_time', '01:00:00')
+        self.time_range = config.get('time_range')
         self.file_size = config.get('file_size')
 
         # 是否是下载模式 跳过下播检测
@@ -79,6 +80,10 @@ class DownloadBase(ABC):
     async def acheck_stream(self, is_check=False):
         # is_check 是否是检测模式 检测模式可以忽略只有下载时需要的耗时操作
         raise NotImplementedError()
+
+    def pre_check(self):
+        if check_timerange(self.fname):
+            return True
 
     def download(self):
         logger.info(f"{self.plugin_msg}: Start downloading {self.raw_stream_url}")
@@ -108,7 +113,7 @@ class DownloadBase(ABC):
         else:
             # 其他流stream_gears会按hls保存为ts
             self.suffix = 'ts'
-        stream_gears_download(self.fname, self.raw_stream_url, self.fake_headers, self.gen_download_filename(),
+        stream_gears_download(self.raw_stream_url, self.fake_headers, self.gen_download_filename(),
                               self.segment_time,
                               self.file_size,
                               lambda file_name: self.__download_segment_callback(file_name))
@@ -198,7 +203,7 @@ class DownloadBase(ABC):
 
             input_args += ['-i', input_uri]
 
-            duration = get_duration(self.fname, self.segment_time)
+            duration = get_duration(self.segment_time, self.time_range)
             if duration:
                 output_args += ['-to', duration]
             if self.file_size:
@@ -281,7 +286,7 @@ class DownloadBase(ABC):
 
     def run(self):
         try:
-            if not asyncio.run_coroutine_threadsafe(self.acheck_stream(), loop).result() or not check_timerange(self.fname):
+            if not asyncio.run_coroutine_threadsafe(self.acheck_stream(), loop).result() or not self.pre_check():
                 return False
             with SessionLocal() as db:
                 update_room_title(db, self.database_row_id, self.room_title)
@@ -458,17 +463,16 @@ class DownloadBase(ABC):
         pass
 
 
-def stream_gears_download(fname, url, headers, file_name, segment_time=None, file_size=None,
+def stream_gears_download(url, headers, file_name, segment_time=None, file_size=None,
                           file_name_callback: Callable[[str], None] = None):
     class Segment:
         pass
 
     segment = Segment()
-    duration = get_duration(fname, segment_time)
-    if duration:
-        dur_time = duration.split(':')
+    if segment_time:
+        seg_time = segment_time.split(':')
         # print(int(seg_time[0]) * 60 * 60 + int(seg_time[1]) * 60 + int(seg_time[2]))
-        segment.time = int(dur_time[0]) * 60 * 60 + int(dur_time[1]) * 60 + int(dur_time[2])
+        segment.time = int(seg_time[0]) * 60 * 60 + int(seg_time[1]) * 60 + int(seg_time[2])
     if file_size:
         segment.size = file_size
     if file_size is None and segment_time is None:
@@ -508,12 +512,11 @@ def get_valid_filename(name):
     return s
 
 
-def get_duration(name, segment_time_str):
+def get_duration(segment_time_str, time_range):
     """
     计算当前时间到给定结束时间的时差
     如果计算的时差大于segment_time，则返回segment_time。
     """
-    time_range = config['streamers'].get(name, {}).get('time_range')
     if not time_range or '-' not in time_range:
         return segment_time_str
     end_time_str = time_range.split('-')[1]
