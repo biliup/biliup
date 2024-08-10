@@ -49,7 +49,7 @@ export default function Home() {
             title: '更新日期',
             dataIndex: 'date',
             sorter: (a: any, b: any) => ( b.date - a.date > 0 ? 1 : -1),
-			render: (time:number) => humDate(time),
+            render: (time: number) => humDate(time),
         },
     ];
     const expandRowRender = (record: any, index: number | undefined) => {
