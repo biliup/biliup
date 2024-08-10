@@ -48,7 +48,8 @@ export default function Home() {
         {
             title: '更新日期',
             dataIndex: 'date',
-            sorter: (a: any, b: any) => ( b.date - a.date > 0 ? 1 : -1),
+            defaultSortOrder: 'descend',
+            sorter: (a: any, b: any) => ( a.date - b.date > 0 ? 1 : -1),
             render: (time: number) => humDate(time),
         },
     ];

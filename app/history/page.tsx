@@ -45,6 +45,7 @@ export default function Home() {
         {
             title: '更新日期',
             dataIndex: 'updateTime',
+            defaultSortOrder: 'descend',
             sorter: (a: any, b: any) => (a.updateTime - b.updateTime > 0 ? 1 : -1),
             render: (time: number) => humDate(time),
         },
