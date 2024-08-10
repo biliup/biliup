@@ -1,7 +1,7 @@
 "use client";
 import "./globals.css";
 import styles from "./page.module.css";
-import { SetStateAction, useCallback, useMemo, useState } from "react";
+import { SetStateAction, useCallback, useMemo, useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Button, Nav } from "@douyinfe/semi-ui";
@@ -36,6 +36,26 @@ export default function RootLayout({
     const [selectedKeys, setSelectedKeys] = useState<any>([pathname.slice(1)]);
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [mode, setMode] = useState("light");
+
+    useEffect(() => {
+        const mql = window.matchMedia('(prefers-color-scheme: dark)');
+
+        const updateMode = (matches: boolean) => {
+            if (matches) {
+                document.body.setAttribute('theme-mode', 'dark');
+            } else {
+                document.body.removeAttribute('theme-mode');
+            }
+            setMode(matches ? 'dark' : 'light')
+        };
+        if (mql.matches)
+            updateMode(mql.matches);
+
+        mql.addEventListener('change', e => updateMode(e.matches));
+
+        return () => mql.removeEventListener('change', (e) => updateMode(e.matches));
+    }, []);
+
     let navStyle = isCollapsed
         ? { height: "100%", overflow: "visible" }
         : { height: "100%" };
