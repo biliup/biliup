@@ -40,11 +40,13 @@ export default function Home() {
         {
             title: '大小',
             dataIndex: 'size',
+			render: (size:number) => `${(size / 1024 / 1024).toFixed(2)} MB`,
         },
         {
             title: '更新日期',
             dataIndex: 'updateTime',
             sorter: (a: any, b: any) => (a.updateTime - b.updateTime > 0 ? 1 : -1),
+			render: (time:number) => humDate(time),
         },
         {
             title: '',
@@ -96,13 +98,7 @@ export default function Home() {
             }}
         >
             <main>
-                <Table size="small" columns={columns} dataSource={data?.map(res => {
-                    return {
-                        ...res,
-                        size: (res.size / 1024 / 1024).toFixed(2) + ' MB',
-                        updateTime: humDate(res.updateTime)
-                    }
-                })} />
+                <Table size="small" columns={columns} dataSource={data} />
             </main>
             <Modal
                 visible={visible}
