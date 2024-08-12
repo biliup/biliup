@@ -22,14 +22,33 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      - name: Get PR number, repo URL, and branch name
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            pr_number=$(jq -r .number < "$GITHUB_EVENT_PATH")
+            repo_url=$(jq -r .pull_request.head.repo.clone_url < "$GITHUB_EVENT_PATH")
+            branch_name=$GITHUB_HEAD_REF
+          else
+            pr_number=""
+            repo_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY
+            branch_name=$(git rev-parse --abbrev-ref HEAD)
+          fi
+          echo "PR_NUMBER=$pr_number" >> $GITHUB_ENV
+          echo "REPO_URL=$repo_url" >> $GITHUB_ENV
+          echo "BRANCH_NAME=$branch_name" >> $GITHUB_ENV
+
       - name: Run tests
         run: |
           if [ -f docker-compose.test.yml ]; then
             docker-compose --file docker-compose.test.yml build
             docker-compose --file docker-compose.test.yml run sut
           else
-            docker build --build-arg repo_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY . --file Dockerfile
+            docker build \
+              --build-arg repo_url=$REPO_URL \
+              --build-arg branch_name=$BRANCH_NAME \
+              . --file Dockerfile
           fi
+
 
   # Push image to GitHub Packages.
   # See also https://docs.docker.com/docker-hub/builds/
@@ -43,6 +62,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v4
@@ -52,14 +72,17 @@ jobs:
             ghcr.io/biliup/caution
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
+
       - name: Login to DockerHub
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build and push
         uses: docker/build-push-action@v3
         with:
