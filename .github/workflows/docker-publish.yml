@@ -27,7 +27,7 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             pr_number=$(jq -r .number < "$GITHUB_EVENT_PATH")
             repo_url=$(jq -r .pull_request.head.repo.clone_url < "$GITHUB_EVENT_PATH")
-            branch_name=$(jq -r .pull_request.head.ref < "$GITHUB_EVENT_PATH")
+            branch_name=$GITHUB_HEAD_REF
           else
             pr_number=""
             repo_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY
@@ -45,7 +45,7 @@ jobs:
           else
             docker build \
               --build-arg repo_url=$REPO_URL \
-              --build-arg branch_name=$GITHUB_HEAD_REF \
+              --build-arg branch_name=$BRANCH_NAME \
               . --file Dockerfile
           fi
 
