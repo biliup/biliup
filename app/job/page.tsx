@@ -3,17 +3,17 @@
 import { AutoComplete, Layout, Nav, Spin, Table, Typography } from "@douyinfe/semi-ui";
 import { SortOrder } from "@douyinfe/semi-ui/lib/es/table";
 import useSWR from "swr";
-import { fetcher, FileList } from "@/app/lib/api-streamer";
+import {fetcher, FileList} from "@/app/lib/api-streamer";
 import {
     JSXElementConstructor, Key, ReactElement, ReactNode, ReactPortal, useRef,
     useState
 } from "react";
-import { IconCustomerSupport, IconSearch, IconVideoListStroked } from "@douyinfe/semi-icons";
-import { humDate } from "@/app/lib/utils";
+import {IconCustomerSupport, IconSearch, IconVideoListStroked} from "@douyinfe/semi-icons";
+import {humDate} from "@/app/lib/utils";
 import Filter from "@/app/job/Filter";
 
 export default function Home() {
-    const { Header, Footer, Sider, Content } = Layout;
+    const {Header, Footer, Sider, Content} = Layout;
     const {data: data, error, isLoading} = useSWR<any[]>("/v1/streamer-info", fetcher);
     if (isLoading) {
         return (<Spin size="large" />);
@@ -48,7 +48,7 @@ export default function Home() {
         {
             title: '更新日期',
             dataIndex: 'date',
-            defaultSortOrder: 'descend' as SortOrder,
+            defaultSortOrder: 'descend',
             sorter: (a: any, b: any) => ( a.date - b.date > 0 ? 1 : -1),
             render: (time: number) => humDate(time),
         },

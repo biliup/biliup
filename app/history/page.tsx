@@ -1,5 +1,5 @@
 'use client'
-import { Button, ButtonGroup, Layout, List, Modal, Nav, Popconfirm, Typography } from "@douyinfe/semi-ui";
+import {Button, ButtonGroup, Layout, List, Modal, Nav, Popconfirm, Typography} from "@douyinfe/semi-ui";
 import {
     IconDeleteStroked,
     IconEdit2Stroked,
@@ -9,18 +9,17 @@ import {
 } from "@douyinfe/semi-icons";
 import TemplateModal from "../ui/TemplateModal";
 import { Table, Avatar } from '@douyinfe/semi-ui';
-import { SortOrder } from "@douyinfe/semi-ui/lib/es/table";
 import { IconMore } from '@douyinfe/semi-icons';
-import { ColumnProps } from "@douyinfe/semi-ui/lib/es/table/interface";
+import {ColumnProps} from "@douyinfe/semi-ui/lib/es/table/interface";
 import useSWR from "swr";
-import { fetcher, FileList, StudioEntity } from "@/app/lib/api-streamer";
-import { useState } from "react";
+import {fetcher, FileList, StudioEntity} from "@/app/lib/api-streamer";
+import {useState} from "react";
 import Player from 'xgplayer';
 import 'xgplayer/dist/index.min.css';
 import FlvPlugin from "xgplayer-flv";
 import FlvJsPlugin from 'xgplayer-flv.js'
 import Players from "@/app/ui/Player";
-import { humDate } from "@/app/lib/utils";
+import {humDate} from "@/app/lib/utils";
 
 export default function Home() {
     const { Header, Footer, Sider, Content } = Layout;
@@ -46,7 +45,7 @@ export default function Home() {
         {
             title: '更新日期',
             dataIndex: 'updateTime',
-            defaultSortOrder: 'descend' as SortOrder,
+            defaultSortOrder: 'descend',
             sorter: (a: any, b: any) => (a.updateTime - b.updateTime > 0 ? 1 : -1),
             render: (time: number) => humDate(time),
         },
@@ -100,10 +99,7 @@ export default function Home() {
             }}
         >
             <main>
-                <Table size="small"
-                    rowKey="id"
-                    columns={columns}
-                    dataSource={data}
+                <Table size="small" columns={columns} dataSource={data}
                 />
             </main>
             <Modal
