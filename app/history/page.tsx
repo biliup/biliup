@@ -100,7 +100,7 @@ export default function Home() {
             }}
         >
             <main>
-                <Table size="small" rowKey="id" columns={columns} dataSource={data} />
+                <Table size="small" columns={columns} dataSource={data} />
             </main>
             <Modal
                 visible={visible}
