@@ -19,8 +19,6 @@ export default function Home() {
         return (<Spin size="large" />);
     }
     const { Text } = Typography;
-    const ascendSort: SortOrder = "ascend";
-    const descendSort: SortOrder = "descend";
     const columns = [
         {
             title: '名称',
@@ -50,14 +48,9 @@ export default function Home() {
         {
             title: '更新日期',
             dataIndex: 'date',
-            render: (text: any, record: any, index: any) => {
-                return (<>{humDate(text)}</>);
-            },
-            defaultSortOrder: descendSort,
-            sorter: (a: any, b: any, order: any) => {
-                // 后端发来的似乎是时间戳，正常比较大小就好
-                return a.date - b.date
-            },
+            defaultSortOrder: 'descend',
+            sorter: (a: any, b: any) => ( a.date - b.date > 0 ? 1 : -1),
+            render: (time: number) => humDate(time),
         },
     ];
     const expandRowRender = (record: any, index: number | undefined) => {
