@@ -12,8 +12,7 @@ on:
 
   # Run tests for any PRs.
   pull_request:
-    branches:
-      - master
+
 jobs:
   # Run tests.
   # See also https://docs.docker.com/docker-hub/builds/automated-testing/
@@ -46,7 +45,7 @@ jobs:
           else
             docker build \
               --build-arg repo_url=$REPO_URL \
-              --build-arg branch_name=$BRANCH_NAME \
+              --build-arg branch_name=$GITHUB_HEAD_REF \
               . --file Dockerfile
           fi
 
