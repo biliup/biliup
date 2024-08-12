@@ -45,7 +45,7 @@ jobs:
             docker-compose --file docker-compose.test.yml run sut
           else
             docker build \
-              --build-arg repo_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY \
+              --build-arg repo_url=$REPO_URL \
               --build-arg branch_name=$BRANCH_NAME \
               . --file Dockerfile
           fi
