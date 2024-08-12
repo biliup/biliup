@@ -19,7 +19,6 @@ export default function Home() {
         return (<Spin size="large" />);
     }
     const { Text } = Typography;
-    const descendSort: SortOrder = "descend";
     const columns = [
         {
             title: '名称',
@@ -49,7 +48,7 @@ export default function Home() {
         {
             title: '更新日期',
             dataIndex: 'date',
-            defaultSortOrder: descendSort,
+            defaultSortOrder: 'descend' as SortOrder,
             sorter: (a: any, b: any) => ( a.date - b.date > 0 ? 1 : -1),
             render: (time: number) => humDate(time),
         },

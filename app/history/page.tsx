@@ -27,7 +27,6 @@ export default function Home() {
     const { data: data, error, isLoading } = useSWR<FileList[]>("/v1/videos", fetcher);
     const { Text } = Typography;
     const [fileName , setFileName] = useState<string>();
-    const descendSort: SortOrder = "descend";
     const columns = [
         {
             title: '标题',
@@ -47,7 +46,7 @@ export default function Home() {
         {
             title: '更新日期',
             dataIndex: 'updateTime',
-            defaultSortOrder: descendSort,
+            defaultSortOrder: 'descend' as SortOrder,
             sorter: (a: any, b: any) => (a.updateTime - b.updateTime > 0 ? 1 : -1),
             render: (time: number) => humDate(time),
         },
@@ -101,7 +100,11 @@ export default function Home() {
             }}
         >
             <main>
-                <Table size="small" rowKey="id" columns={columns} dataSource={data} />
+                <Table size="small"
+                    rowKey="id"
+                    columns={columns}
+                    dataSource={data}
+                />
             </main>
             <Modal
                 visible={visible}
