@@ -79,7 +79,7 @@ class Huya(DownloadBase):
         protocol = 'Hls' if config.get('huya_protocol') == 'Hls' else 'Flv'
         allow_imgplus = config.get('huya_imgplus', True)
         cdn_fallback = config.get('huya_cdn_fallback', False)
-        use_api = config.get('huya_mobile_api', True)
+        use_api = config.get('huya_mobile_api', False)
 
         try:
             stream_urls = await self.get_stream_urls(protocol, use_api, allow_imgplus)
