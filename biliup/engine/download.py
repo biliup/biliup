@@ -172,9 +172,7 @@ class DownloadBase(ABC):
             # ffmpeg 输入参数
             input_args = []
             # ffmpeg 输出参数
-            output_args = [
-                '-bsf:a', 'aac_adtstoasc',
-            ]
+            output_args = []
             if use_streamlink:
                 streamlink_cmd = [
                     'streamlink',
@@ -204,12 +202,15 @@ class DownloadBase(ABC):
 
             output_args += self.opt_args
 
-            if self.suffix.lower() == 'ts':
+            if self.suffix == 'mp4':
+                output_args += ['-bsf:a', 'aac_adtstoasc', '-f', 'mp4']
+            elif self.suffix == 'ts':
                 output_args += ['-f', 'mpegts']
-            elif self.suffix.lower() == 'mkv':
+            elif self.suffix == 'mkv':
                 output_args += ['-f', 'matroska']
             else:
                 output_args += ['-f', self.suffix]
+
             args = ['ffmpeg', '-y', *input_args, *output_args, '-c', 'copy',
                     f'{fmt_file_name}.{self.suffix}.part']
             with subprocess.Popen(args, stdin=subprocess.DEVNULL if not streamlink_proc else streamlink_proc.stdout,
