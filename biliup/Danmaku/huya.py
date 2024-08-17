@@ -25,19 +25,19 @@ class Huya:
         async with aiohttp.ClientSession() as session:
             async with session.get(f'https://www.huya.com/{room_id}', headers=Huya.headers, timeout=5) as resp:
                 room_page = await resp.text()
-                ayyuid = match1(room_page, r"yyid\":\"?(\d+)\"?")
-                tid = match1(room_page, r"lChannelId\":\"?(\d+)\"?")
-                sid = match1(room_page, r"lSubChannelId\":\"?(\d+)\"?")
+                uid = int(match1(room_page, r"uid\":\"?(\d+)\"?"))
+                # tid = match1(room_page, r"lChannelId\":\"?(\d+)\"?")
+                # sid = match1(room_page, r"lSubChannelId\":\"?(\d+)\"?")
 
         oos = tarscore.TarsOutputStream()
-        oos.write(tarscore.int64, 0, int(ayyuid))
-        oos.write(tarscore.boolean, 1, True)  # Anonymous
+        oos.write(tarscore.int64, 0, uid)
+        oos.write(tarscore.boolean, 1, False)  # Anonymous
         oos.write(tarscore.string, 2, "")  # sGuid
         oos.write(tarscore.string, 3, "")
-        oos.write(tarscore.int64, 4, int(tid))
-        oos.write(tarscore.int64, 5, int(sid))
-        oos.write(tarscore.int64, 6, 0)
-        oos.write(tarscore.int64, 7, 0)
+        oos.write(tarscore.int64, 4, 0)  # tid
+        oos.write(tarscore.int64, 5, 0)  # sid
+        oos.write(tarscore.int64, 6, uid)
+        oos.write(tarscore.int64, 7, 3)
 
         wscmd = tarscore.TarsOutputStream()
         wscmd.write(tarscore.int32, 0, 1)
@@ -64,7 +64,6 @@ class Huya:
         color = 16777215
         msgs = []
         ios = tarscore.TarsInputStream(data)
-
         if ios.read(tarscore.int32, 0, False) == 7:
             ios = tarscore.TarsInputStream(ios.read(tarscore.bytes, 1, False))
             if ios.read(tarscore.int64, 1, False) == 1400:
@@ -74,7 +73,6 @@ class Huya:
                 color = ios.read(DColor, 6, False)  # danmaku color
                 if color == -1:
                     color = 16777215
-
         if name != "":
             msg = {"name": name, "color": f"{color}", "content": content, "msg_type": "danmaku"}
             # else:
