@@ -168,7 +168,8 @@ class Huya(DownloadBase):
     @staticmethod
     def __build_query(stream_name, anti_code, cookies=None) -> str:
         url_query = parse_qs(anti_code)
-        platform_id = 100
+        # platform_id = 100
+        platform_id = url_query.get('t', [100])[0]
         uid = _get_uid(cookies, stream_name)
         convert_uid = (uid << 8 | uid >> (32 - 8)) & 0xFFFFFFFF
         ws_time = url_query['wsTime'][0]
@@ -182,7 +183,7 @@ class Huya(DownloadBase):
         # &codec=265
         # dMod: wcs-25 浏览器解码信息
         # sdkPcdn: 1_1 第一个1连接次数 第二个1是因为什么连接
-        # t: 100 平台信息 100 web
+        # t: 平台信息 100 web(ctype=huya_live) 102 小程序(ctype=tars_mp)
         # sv: 2401090219 版本
         # sdk_sid:  _sessionId sdkInRoomTs 当前毫秒时间
 
