@@ -3,13 +3,13 @@
 import { AutoComplete, Layout, Nav, Spin, Table, Typography } from "@douyinfe/semi-ui";
 import { SortOrder } from "@douyinfe/semi-ui/lib/es/table";
 import useSWR from "swr";
-import {fetcher, FileList} from "@/app/lib/api-streamer";
+import { fetcher, FileList } from "@/app/lib/api-streamer";
 import {
     JSXElementConstructor, Key, ReactElement, ReactNode, ReactPortal, useRef,
     useState
 } from "react";
-import {IconCustomerSupport, IconSearch, IconVideoListStroked} from "@douyinfe/semi-icons";
-import {humDate} from "@/app/lib/utils";
+import { IconCustomerSupport, IconSearch, IconVideoListStroked } from "@douyinfe/semi-icons";
+import { humDate } from "@/app/lib/utils";
 import Filter from "@/app/job/Filter";
 
 export default function Home() {
@@ -19,8 +19,6 @@ export default function Home() {
         return (<Spin size="large" />);
     }
     const { Text } = Typography;
-    const ascendSort: SortOrder = "ascend";
-    const descendSort: SortOrder = "descend";
     const columns = [
         {
             title: '名称',
@@ -50,14 +48,9 @@ export default function Home() {
         {
             title: '更新日期',
             dataIndex: 'date',
-            render: (text: any, record: any, index: any) => {
-                return (<>{humDate(text)}</>);
-            },
-            defaultSortOrder: descendSort,
-            sorter: (a: any, b: any, order: any) => {
-                // 后端发来的似乎是时间戳，正常比较大小就好
-                return a.date - b.date
-            },
+            defaultSortOrder: 'descend' as SortOrder,
+            sorter: (a: any, b: any) => ( a.date - b.date > 0 ? 1 : -1),
+            render: (time: number) => humDate(time),
         },
     ];
     const expandRowRender = (record: any, index: number | undefined) => {
