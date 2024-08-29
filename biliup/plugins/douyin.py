@@ -76,20 +76,25 @@ class Douyin(DownloadBase):
             _room_info = None
             if self.__web_rid:
                 _room_info = await self.get_web_room_info(self.__web_rid)
-            if _room_info:
-                if not _room_info['data'].get('user'):
-                    raise Exception(f"{str(_room_info)}")
-                self.__sec_uid = _room_info['data']['user']['sec_uid']
-            else:
+                if _room_info:
+                    if not _room_info['data'].get('user'):
+                        # 可能是用户被封禁
+                        raise Exception(f"{str(_room_info)}")
+                    self.__sec_uid = _room_info['data']['user']['sec_uid']
+            # PCWeb 端无流 或 没有提供 web_rid
+            if not _room_info.get('data', {}).get('data'):
                 _room_info = await self.get_room_info(self.__sec_uid, self.__room_id)
                 if _room_info['data'].get('room', {}).get('owner'):
                     self.__web_rid = _room_info['data']['room']['owner']['web_rid']
             try:
+                # 出现异常不用提示，直接到 移动网页 端获取
                 room_info = _room_info['data']['data'][0]
             except (KeyError, IndexError):
+                # 如果 移动网页 端也没有数据，当做未开播处理
                 room_info = _room_info['data'].get('room', {})
-                if not room_info:
-                    logger.info(f"{self.plugin_msg}: 获取直播间信息失败 {_room_info}")
+                # 当做未开播处理
+                # if not room_info:
+                #     logger.info(f"{self.plugin_msg}: 获取直播间信息失败 {_room_info}")
             if room_info.get('status') != 2:
                 logger.debug(f"{self.plugin_msg}: 未开播")
                 return False
@@ -175,6 +180,8 @@ class Douyin(DownloadBase):
         return web_info
 
     async def get_room_info(self, sec_user_id, room_id) -> dict:
+        if not sec_user_id:
+            raise ValueError("sec_user_id is None")
         params = {
             'type_id': 0,
             'live_id': 1,
