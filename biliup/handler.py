@@ -96,7 +96,8 @@ def process_upload(stream_info):
     # 上传开始
     try:
         file_list = UploadBase.file_list(name)
-        if len(file_list) <= 0:
+        file_count = len(file_list)
+        if file_count <= 0:
             logger.debug("无需上传")
             return
 
@@ -112,9 +113,14 @@ def process_upload(stream_info):
 
         if ("title" not in stream_info) or (not stream_info["title"]):  # 如果 data 中不存在标题, 说明下载信息已丢失, 则尝试从数据库获取
             with SessionLocal() as db:
-                data, _ = fmt_title_and_desc({
-                    **get_stream_info_by_filename(db, os.path.splitext(file_list[0].video)[0]),
-                    "name": name})  # 如果 restart, data 中会缺失 name 项
+                i = 0
+                # 按创建时间排序可能导致首个结果无法获取到数据
+                while i < file_count:
+                    data = get_stream_info_by_filename(db, file_list[i].video)
+                    if data:
+                        break
+                    i += 1
+            data, _ = fmt_title_and_desc({**data, "name": name})  # 如果 restart, data 中会缺失 name 项
             stream_info.update(data)
         filelist = upload(stream_info)
         if filelist:

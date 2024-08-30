@@ -81,6 +81,11 @@ def fmt_title_and_desc_m(data):
 
 # 将格式化标题和简介拆分出来方便复用
 def fmt_title_and_desc(data):
+    """
+    格式化标题和简介
+    :param data: {name,url,date}
+    :return: {name,url,date,format_title}
+    """
     index = data['name']
     context = {**config, **config['streamers'][index]}
     streamer = data.get('streamer', index)
