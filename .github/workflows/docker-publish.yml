@@ -31,7 +31,7 @@ jobs:
           else
             pr_number=""
             repo_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY
-            branch_name=$(git symbolic-ref --short HEAD)
+            branch_name="master"
           fi
           echo "PR_NUMBER=$pr_number" >> $GITHUB_ENV
           echo "REPO_URL=$repo_url" >> $GITHUB_ENV
