@@ -55,7 +55,7 @@ class SDownload(DownloadBase):
     async def acheck_stream(self, is_check=False):
         logger.debug(self.fname)
         try:
-            streams = streamlink.streams(self.url)
+            streams = self.session.streams(self.url)
             if streams:
                 self.stream = streams["best"]
                 fd = self.stream.open()
