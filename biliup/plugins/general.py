@@ -1,6 +1,7 @@
 from threading import Event
 from ykdl.common import url_to_module
 import yt_dlp
+import streamlink
 
 from ..engine.download import DownloadBase
 from . import logger
@@ -49,11 +50,11 @@ class SDownload(DownloadBase):
         super().__init__(fname, url, suffix)
         self.stream = None
         self.flag = Event()
+        self.session = streamlink.Streamlink()
 
     async def acheck_stream(self, is_check=False):
         logger.debug(self.fname)
         try:
-            import streamlink
             streams = streamlink.streams(self.url)
             if streams:
                 self.stream = streams["best"]
@@ -69,15 +70,18 @@ class SDownload(DownloadBase):
         filename = f"{self.gen_download_filename(is_fmt=True)}.{self.suffix}"
         try:
             with open(filename + '.part', 'wb') as file:
-                with self.stream.open() as fd:
-                    while not self.flag.is_set():
-                        chunk = fd.read(1024)
-                        if not chunk:
-                            break
-                        file.write(chunk)
-                    else:
-                        return 1
-                    return 0
+                try:
+                    with self.stream.open() as fd:
+                        while not self.flag.is_set():
+                                chunk = fd.read(1024)
+                                if not chunk:
+                                    break
+                                file.write(chunk)
+                        else:
+                            return 1
+                except streamlink.StreamError:
+                    pass
+                return 0
         except OSError:
             self.download_file_rename(f"{filename}.part", filename)
             raise
