@@ -12,6 +12,7 @@ class YDownload(DownloadBase):
         self.ydl_opts = {}
 
     async def acheck_stream(self, is_check=False):
+        logger.debug(self.fname)
         try:
             self.get_sinfo()
             return True
@@ -51,32 +52,34 @@ class SDownload(DownloadBase):
 
     async def acheck_stream(self, is_check=False):
         logger.debug(self.fname)
-        import streamlink
         try:
+            import streamlink
             streams = streamlink.streams(self.url)
             if streams:
                 self.stream = streams["best"]
                 fd = self.stream.open()
                 fd.close()
-                # streams.close()
-                return True
         except streamlink.StreamlinkError:
-            return
+            return False
+        except Exception as e:
+            logger.debug(e)
+        return True
 
     def download(self):
-        filename = self.gen_download_filename(is_fmt=True) + '.' + self.suffix
-        # fd = stream.open()
+        filename = f"{self.gen_download_filename(is_fmt=True)}.{self.suffix}"
         try:
-            with self.stream.open() as fd:
-                with open(filename + '.part', 'wb') as file:
-                    for f in fd:
-                        file.write(f)
-                        if self.flag.is_set():
-                            # self.flag.clear()
-                            return 1
+            with open(filename + '.part', 'wb') as file:
+                with self.stream.open() as fd:
+                    while not self.flag.is_set():
+                        chunk = fd.read(1024)
+                        if not chunk:
+                            break
+                        file.write(chunk)
+                    else:
+                        return 1
                     return 0
         except OSError:
-            self.download_file_rename(filename + '.part', filename)
+            self.download_file_rename(f"{filename}.part", filename)
             raise
 
 
@@ -88,6 +91,7 @@ class Generic(DownloadBase):
     async def acheck_stream(self, is_check=False):
         logger.debug(self.fname)
         try:
+            # ykdl
             site, url = url_to_module(self.url)
             info = site.parser(url)
             stream_id = info.stream_types[0]
@@ -95,7 +99,8 @@ class Generic(DownloadBase):
             self.raw_stream_url = urls[0]
         # print(info.title)
         except:
-            handlers = [YDownload(self.fname, self.url, 'mp4'), SDownload(self.fname, self.url, 'flv')]
+            args = [self.fname, self.url, self.suffix]
+            handlers = [SDownload(*args), YDownload(*args)]
             for handler in handlers:
                 if await handler.acheck_stream():
                     self.handler = handler
