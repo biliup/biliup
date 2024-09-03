@@ -62,8 +62,6 @@ class SDownload(DownloadBase):
                 fd.close()
         except streamlink.StreamlinkError:
             return False
-        except Exception as e:
-            logger.debug(e)
         return True
 
     def download(self):
