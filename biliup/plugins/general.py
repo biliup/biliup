@@ -60,7 +60,8 @@ class SDownload(DownloadBase):
                 self.stream = streams["best"]
                 fd = self.stream.open()
                 fd.close()
-        except streamlink.StreamlinkError:
+        except streamlink.StreamlinkError as e:
+            logger.error(f"{self.plugin_msg}: {e}")
             return False
         return True
 
