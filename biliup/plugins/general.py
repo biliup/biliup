@@ -56,10 +56,11 @@ class SDownload(DownloadBase):
         logger.debug(self.fname)
         try:
             streams = self.session.streams(self.url)
-            if streams:
-                self.stream = streams["best"]
-                fd = self.stream.open()
-                fd.close()
+            if not streams:
+                return False
+            self.stream = streams["best"]
+            fd = self.stream.open()
+            fd.close()
         except streamlink.StreamlinkError as e:
             logger.error(f"{self.plugin_msg}: {e}")
             return False
