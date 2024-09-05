@@ -219,6 +219,7 @@ async def streamers(request):
 @routes.get('/v1/streamers')
 async def streamers(request):
     from biliup.app import context
+    from biliup.common.util import check_timerange
     res = []
     with SessionLocal() as db:
         result = db.scalars(select(LiveStreamers))
@@ -228,6 +229,8 @@ async def streamers(request):
             status = 'Idle'
             if context['PluginInfo'].url_status.get(url) == 1:
                 status = 'Working'
+            if not check_timerange(temp['remark']):
+                status = 'OutOfSchedule'
             if context['url_upload_count'].get(url, 0) > 0:
                 status = 'Inspecting'
             temp['status'] = status

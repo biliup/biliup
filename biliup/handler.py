@@ -11,6 +11,7 @@ from typing import List
 from biliup.config import config
 from .app import event_manager, context
 from .common.tools import NamedLock, processor
+from .common.util import check_timerange
 from .database.db import get_stream_info_by_filename, SessionLocal
 from .downloader import biliup_download
 from .engine.event import Event
@@ -30,9 +31,11 @@ logger = logging.getLogger('biliup')
 
 @event_manager.register(PRE_DOWNLOAD, block='Asynchronous1')
 def pre_processor(name, url):
-    if context['PluginInfo'].url_status[url] == 1:
+    url_status = context["PluginInfo"].url_status
+    if url_status[url] == 1:
         logger.debug(f'{name} 正在下载中，跳过下载')
         return
+
     logger.info(f'{name} - {url} 开播了准备下载')
     preprocessor = config['streamers'].get(name, {}).get('preprocessor')
     if preprocessor:
@@ -56,7 +59,7 @@ def process(name, url):
         logger.exception(f"下载错误: {name} - {e}")
     finally:
         # 下载结束
-        url_status[url] = 0
+        url_status[url] = 0 if check_timerange(name) else 2
 
 
 @event_manager.register(DOWNLOADED, block='Asynchronous1')
@@ -103,13 +106,14 @@ def process_upload(stream_info):
 
         # 上传延迟检测
         url_status = context['PluginInfo'].url_status
-        delay = int(config.get('delay', 0))
-        if delay:
-            logger.info(f'{name} -> {url} {delay}s 后检测是否上传')
-            time.sleep(delay)
-            if url_status[url] == 1:
-                # 上传延迟检测，启用的话会在一段时间后检测是否存在下载任务，若存在则跳过本次上传
-                return logger.info(f'{name} -> {url} 存在下载任务, 跳过本次上传')
+        if url_status[url] != 2:
+            delay = int(config.get('delay', 0))
+            if delay:
+                logger.info(f'{name} -> {url} {delay}s 后检测是否上传')
+                time.sleep(delay)
+                if url_status[url] == 1:
+                    # 上传延迟检测，启用的话会在一段时间后检测是否存在下载任务，若存在则跳过本次上传
+                    return logger.info(f'{name} -> {url} 存在下载任务, 跳过本次上传')
 
         if ("title" not in stream_info) or (not stream_info["title"]):  # 如果 data 中不存在标题, 说明下载信息已丢失, 则尝试从数据库获取
             with SessionLocal() as db:
