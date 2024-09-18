@@ -104,17 +104,43 @@ export default function Union() {
                 />
             </Modal>
         <Header style={{ backgroundColor: 'var(--semi-color-bg-1)' }}>
-            <Nav
-                header={<><div style={{
-                    backgroundColor: 'rgba(var(--semi-violet-4), 1)',
-                    borderRadius: 'var(--semi-border-radius-large)',
-                    color: 'var(--semi-color-bg-0)',
-                    display: 'flex',
-                    // justifyContent: 'center',
-                    padding: '6px'
-                }}><IconCloudStroked size='large' /></div><h4 style={{ marginLeft: '12px' }}>投稿管理</h4></>}
-                mode="horizontal"
-                footer={<>
+            <nav
+                style={{
+                    display:'flex',
+                    paddingLeft:'25px',
+                    paddingRight:'25px',
+                    alignItems:'center',
+                    justifyContent:'space-between',
+                    flexWrap:'wrap',
+                    boxShadow:'0 1px 2px 0 rgb(0 0 0 / 0.05)'      
+                }}
+            >
+                <div
+                    style={{
+                        display:'flex',
+                        gap:10,
+                        justifyContent:'center',
+                        alignItems:'center',
+                        flexWrap:'wrap'
+                    }}
+                >
+                    <IconCloudStroked  style={{
+                        backgroundColor: 'rgba(var(--semi-violet-4), 1)',
+                        borderRadius: 'var(--semi-border-radius-large)',
+                        color: 'var(--semi-color-bg-0)',
+                        padding:'6px'
+                    }} size="large"/>
+                    <h4>投稿管理</h4>
+                </div>
+                <div
+                    style={{
+                        display:'flex',
+                        flexWrap:'wrap',
+                        alignItems:'center',
+                        justifyContent:'center',
+                        gap:6
+                    }}
+                >
                     <Button
                         onClick={change}
                         // theme="borderless"
@@ -128,9 +154,8 @@ export default function Union() {
                     <Link href='/upload-manager/add' onClick={handleAddLinkClick}>
                         <Button icon={<IconPlusCircle />} theme="solid" style={{ marginRight: 10 }}>新建</Button>
                     </Link>
-
-                </>}
-            ></Nav>
+                </div>
+            </nav>
         </Header>
         <Content
             style={{
