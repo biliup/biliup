@@ -19,6 +19,7 @@ import {
     IconVideoListStroked,
     IconHome, IconSetting,
 } from "@douyinfe/semi-icons";
+import Image from "next/image";
 
 export default function RootLayout({
     children,
@@ -260,7 +261,7 @@ export default function RootLayout({
                                     // <IconSemiLogo
                                     //     style={{ height: "36px", fontSize: 36 }}
                                     // />
-                                    <img src='logo.png' alt='{}'></img>
+                                    <Image src='logo.png' alt='{}' height={10} width={20}></Image>
                                 }
                                 style={{ justifyContent: "flex-start" }}
                                 text="BILIUP"

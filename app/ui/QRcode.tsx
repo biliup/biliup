@@ -49,7 +49,7 @@ const Qrcode: React.FC<QrcodeProps> = ({onSuccess}) => {
         return () => {
             controller.abort('qrcode exit');
         };
-    }, [])
+    }, [onSuccess])
     if (url === '') {
         return <Spin/>
     }
