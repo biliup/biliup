@@ -29,7 +29,7 @@ class Huya(DownloadBase):
             if self.fake_headers.get('cookie'):
                 await self.verify_cookie()
             if not self.__room_id.isdigit():
-                self.__room_id = _get_real_rid(self.url)
+                self.__room_id = await _get_real_rid(self.url)
             room_profile = await self.get_room_profile(use_api=True)
         except Exception as e:
             logger.error(f"{self.plugin_msg}: {e}")
@@ -90,7 +90,7 @@ class Huya(DownloadBase):
 
         cdn_name = list(stream_urls.keys())
         if not perf_cdn or perf_cdn not in cdn_name:
-            perf_cdn = cdn_name.pop(0)
+            perf_cdn = cdn_name[0]
 
         # 虎牙直播流只允许连接一次
         if cdn_fallback:
@@ -171,14 +171,14 @@ class Huya(DownloadBase):
                 stream['iWebPriorityRate'],
                 stream['iMobilePriorityRate']
             )
-            if all(rate < 0 for rate in priority):
+            if any(rate < 0 for rate in priority):
                 continue
             cdn_name = stream['sCdnType']
             secure_url = stream[f's{protocol}Url'].replace('http://', 'https://')
             stream_url = f"{secure_url}/{stream_name}.{suffix}?{anti_code}"
             streams[cdn_name] = stream_url
             if len(weights) < len(stream_info):
-                weights[cdn_name] = int(sum(priority) / len(priority))
+                weights[cdn_name] = max(0, *priority)
         return _weight_sorting(streams, weights)
 
     @staticmethod
@@ -248,9 +248,9 @@ def _get_uid(cookie: str, stream_name: str) -> int:
         if cookie and "yyuid=" in cookie:
             return int(match1(r'yyuid=(\d+)', cookie))
         if stream_name:
-            author_id = int(stream_name.split('-')[0])
-            if author_id > 0:
-                return author_id
+            anchor_uid = int(stream_name.split('-')[0])
+            if anchor_uid > 0:
+                return anchor_uid
     except:
         pass
     return random.randint(1400000000000, 1499999999999)

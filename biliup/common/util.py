@@ -5,10 +5,13 @@ from datetime import datetime, time, timezone, timedelta
 from biliup.config import config
 import logging
 
-# Set up for non-mainland China networks
-HTTP_TIMEOUT = 15
 
-client = httpx.AsyncClient(http2=True, follow_redirects=True, timeout=HTTP_TIMEOUT)
+# This setup works very well on my Swedish machine, but who knows about others...
+DEFAULT_TIMEOUT = httpx.Timeout(timeout=15.0, connect=10.0)
+DEFAULT_MAX_RETRIES = 2
+DEFAULT_CONNECTION_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=100)
+
+client = httpx.AsyncClient(http2=True, follow_redirects=True, timeout=DEFAULT_TIMEOUT, limits=DEFAULT_CONNECTION_LIMITS)
 loop = asyncio.get_running_loop()
 logger = logging.getLogger('biliup')
 
