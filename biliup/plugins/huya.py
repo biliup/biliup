@@ -11,7 +11,7 @@ from biliup.config import config
 from biliup.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
-from ..plugins import logger, random_user_agent
+from ..plugins import logger, match1, random_user_agent
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?huya\.com')
@@ -70,48 +70,45 @@ class Huya(DownloadBase):
                     record_ratio = max(ratio_in_items)
                 else:
                     record_ratio = max_ratio
-            except Exception as e:
+            except (json.JSONDecodeError, KeyError) as e:
                 logger.error(f"{self.plugin_msg}: 在确定码率时发生错误 {e}")
                 return False
 
-        huya_cdn = config.get('huyacdn', 'AL') # 将于 0.5.0 删除
-        perf_cdn = config.get('huya_cdn', huya_cdn).upper() # 0.5.0 允许为空字符串以使用 Api 内的 CDN 优先级
+        is_xingxiu = room_profile['liveData']['gid'] == 1663
+
+        perf_cdn = config.get('huya_cdn', "").upper() # 不填写时使用主播的CDN优先级
         protocol = 'Hls' if config.get('huya_protocol') == 'Hls' else 'Flv'
         allow_imgplus = config.get('huya_imgplus', True)
         cdn_fallback = config.get('huya_cdn_fallback', False)
         use_api = config.get('huya_mobile_api', False)
 
         try:
-            stream_urls = await self.get_stream_urls(protocol, use_api, allow_imgplus)
-        except:
-            logger.exception(f"{self.plugin_msg}: 没有可用的链接")
+            stream_urls = await self.get_stream_urls(protocol, use_api, allow_imgplus, is_xingxiu)
+        except Exception as e:
+            logger.error(f"{self.plugin_msg}: 没有可用的链接 {e}")
             return False
 
-        cdn_name_list = list(stream_urls.keys())
-        if not perf_cdn or perf_cdn not in cdn_name_list:
-            logger.warning(f"{self.plugin_msg}: 使用 {cdn_name_list[0]}")
-            perf_cdn = cdn_name_list[0]
+        cdn_name = list(stream_urls.keys())
+        if not perf_cdn or perf_cdn not in cdn_name:
+            perf_cdn = cdn_name.pop(0)
 
         # 虎牙直播流只允许连接一次
         if cdn_fallback:
             _url = await self.acheck_url_healthy(stream_urls[perf_cdn])
             if _url is None:
-                logger.info(f"{self.plugin_msg}: 提供如下CDN {cdn_name_list}")
-                for cdn in cdn_name_list:
-                    if cdn == perf_cdn:
-                        continue
-                    logger.info(f"{self.plugin_msg}: cdn_fallback 尝试 {cdn}")
+                logger.info(f"{self.plugin_msg}: cdn_fallback 顺序尝试 {cdn_name}")
+                for cdn in cdn_name:
+                    logger.info(f"{self.plugin_msg}: cdn_fallback-{cdn}")
                     if (await self.acheck_url_healthy(stream_urls[cdn])) is None:
                         continue
                     perf_cdn = cdn
-                    logger.info(f"{self.plugin_msg}: CDN 切换为 {perf_cdn}")
+                    logger.info(f"{self.plugin_msg}: cdn_fallback 回退到 {perf_cdn}")
                     break
                 else:
                     logger.error(f"{self.plugin_msg}: cdn_fallback 所有链接无法使用")
                     return False
-            stream_urls = await self.get_stream_urls(protocol, use_api, allow_imgplus)
+            stream_urls = await self.get_stream_urls(protocol, use_api, allow_imgplus, is_xingxiu)
 
-        # self.room_title = html_info['data'][0]['gameLiveInfo']['introduction']
         self.room_title = room_profile['liveData']['introduction']
         self.raw_stream_url = stream_urls[perf_cdn]
 
@@ -127,23 +124,30 @@ class Huya(DownloadBase):
 
     async def get_room_profile(self, use_api=False) -> dict:
         if use_api:
-            resp = (await client.get(f"https://mp.huya.com/cache.php?m=Live&do=profileRoom&roomid={self.__room_id}", \
-                                        headers=self.fake_headers)).json()
+            params = {
+                'm': 'Live',
+                'do': 'profileRoom',
+                'roomid': self.__room_id,
+                'showSecret': 1,
+            }
+            resp = (await client.get(f"https://mp.huya.com/cache.php", \
+                                        headers=self.fake_headers, params=params)).json()
             if resp['status'] != 200:
                 raise Exception(f"{resp['message']}")
             return resp['data']
         else:
             html = (await client.get(f"https://www.huya.com/{self.__room_id}", headers=self.fake_headers)).text
-            if '找不到这个主播' in html:
+            if "找不到这个主播" in html:
                 raise Exception(f"找不到这个主播")
             return json.loads(html.split('stream: ')[1].split('};')[0])
 
 
-    async def get_stream_urls(self, protocol, use_api=False, allow_imgplus=True) -> dict:
+    async def get_stream_urls(self, protocol, use_api=False, allow_imgplus=True, is_xingxiu=False) -> dict:
         '''
         返回指定协议的所有CDN流
         '''
         streams = {}
+        weights = {} # https://cdnweb.huya.com/getUidsDomainList?anchor_uid={anchor_uid}
         room_profile = await self.get_room_profile(use_api=use_api)
         if not use_api:
             try:
@@ -152,52 +156,67 @@ class Huya(DownloadBase):
                 raise Exception(f"{room_profile}")
         else:
             stream_info = room_profile['stream']['baseSteamInfoList']
-            streams = _dict_sorting(json.loads(room_profile['liveData'].get('mStreamRatioWeb', '{}')))
+            weights = json.loads(room_profile['liveData'].get('mStreamRatioWeb', '{}'))
         stream = stream_info[0]
         stream_name = stream['sStreamName']
         suffix, anti_code = stream[f's{protocol}UrlSuffix'], stream[f's{protocol}AntiCode']
         if not allow_imgplus:
             stream_name = stream_name.replace('-imgplus', '')
-        anti_code = self.__build_query(stream_name, anti_code, self.fake_headers['cookie'])
+        anti_code = anti_code if is_xingxiu else \
+                    self.__build_query(stream_name, anti_code, _get_uid(self.fake_headers['cookie'], stream_name))
         for stream in stream_info:
-            stream_url = f"{stream[f's{protocol}Url']}/{stream_name}.{suffix}?{anti_code}"
-            if stream['sCdnType'] in ['HY', 'HUYA', 'HYZJ']: continue
-            streams[stream['sCdnType']] = stream_url
-        return streams
+            # 优先级<0代表不可用
+            priority = (
+                stream['iPCPriorityRate'],
+                stream['iWebPriorityRate'],
+                stream['iMobilePriorityRate']
+            )
+            if all(rate < 0 for rate in priority):
+                continue
+            cdn_name = stream['sCdnType']
+            secure_url = stream[f's{protocol}Url'].replace('http://', 'https://')
+            stream_url = f"{secure_url}/{stream_name}.{suffix}?{anti_code}"
+            streams[cdn_name] = stream_url
+            if len(weights) < len(stream_info):
+                weights[cdn_name] = int(sum(priority) / len(priority))
+        return _weight_sorting(streams, weights)
 
     @staticmethod
-    def __build_query(stream_name, anti_code, cookies=None) -> str:
+    def __build_query(stream_name, anti_code, uid: int) -> str:
         url_query = parse_qs(anti_code)
         # platform_id = 100
         platform_id = url_query.get('t', [100])[0]
-        uid = _get_uid(cookies, stream_name)
-        convert_uid = (uid << 8 | uid >> (32 - 8)) & 0xFFFFFFFF
         ws_time = url_query['wsTime'][0]
-        ct = int((int(ws_time, 16) + random.random()) * 1000)
+        convert_uid = (uid << 8 | uid >> (32 - 8)) & 0xFFFFFFFF
         seq_id = uid + int(time.time() * 1000)
-        ws_secret_prefix = base64.b64decode(unquote(url_query['fm'][0]).encode()).decode().split('_')[0]
-        ws_secret_hash = hashlib.md5(f"{seq_id}|{url_query['ctype'][0]}|{platform_id}".encode()).hexdigest()
-        ws_secret = hashlib.md5(f'{ws_secret_prefix}_{convert_uid}_{stream_name}_{ws_secret_hash}_{ws_time}'.encode()).hexdigest()
+        ctype = url_query['ctype'][0]
+        fm = unquote(url_query['fm'][0])
+        ct = int((int(ws_time, 16) + random.random()) * 1000)
+        ws_secret_prefix = base64.b64decode(fm.encode()).decode().split('_')[0]
+        ws_secret_hash = hashlib.md5(f"{seq_id}|{ctype}|{platform_id}".encode()).hexdigest()
+        secret_str = f'{ws_secret_prefix}_{convert_uid}_{stream_name}_{ws_secret_hash}_{ws_time}'
+        ws_secret = hashlib.md5(secret_str.encode()).hexdigest()
+
         # &codec=av1
         # &codec=264
         # &codec=265
-        # dMod: wcs-25 浏览器解码信息
+        # dMod: wcs-25 / mesh-0 DecodeMod-SupportMod
+        # chrome > 104 or safari = mseh, chrome = mses
         # sdkPcdn: 1_1 第一个1连接次数 第二个1是因为什么连接
-        # t: 平台信息 100 web(ctype=huya_live) 102 小程序(ctype=tars_mp)
+        # t: 平台信息 100 web(ctype=huya_live/huya_webh5) 102 小程序(ctype=tars_mp)
+        # PLATFORM_TYPE = {'adr': 2, 'huya_liveshareh5': 104, 'ios': 3, 'mini_app': 102, 'wap': 103, 'web': 100}
         # sv: 2401090219 版本
         # sdk_sid:  _sessionId sdkInRoomTs 当前毫秒时间
-
         # return f"wsSecret={ws_secret}&wsTime={ws_time}&seqid={seq_id}&ctype={url_query['ctype'][0]}&ver=1&fs={url_query['fs'][0]}&u={convert_uid}&t={platform_id}&sv=2401090219&sdk_sid={int(time.time() * 1000)}&codec=264"
-
         anti_code = {
             "wsSecret": ws_secret,
             "wsTime": ws_time,
             "seqid": str(seq_id),
-            "ctype": url_query['ctype'][0],
-            "fs": url_query['fs'][0],
-            "u": convert_uid,
-            "t": platform_id,
+            "ctype": ctype,
             "ver": "1",
+            "fs": url_query['fs'][0],
+            "t": platform_id,
+            "u": convert_uid,
             "uuid": str(int((ct % 1e10 + random.random()) * 1e3 % 0xffffffff)),
             "sdk_sid": str(int(time.time() * 1000)),
             "codec": "264",
@@ -205,40 +224,46 @@ class Huya(DownloadBase):
         return '&'.join([f"{k}={v}" for k, v in anti_code.items()])
 
 
-    async def verify_cookie(self):
-        if self.fake_headers['cookie']:
-            resp = (await client.post('https://udblgn.huya.com/web/cookie/verify', \
-                                    headers=self.fake_headers, data={'appId': 5002})).json()
-            if resp.json()['returnCode'] != 0:
-                logger.error(f"{self.plugin_msg}: {resp.json()['message']}")
-                self.fake_headers['cookie'] = ''
-
 @lru_cache(maxsize=None)
-def _get_real_rid(url):
-    import requests
+async def _get_real_rid(url) -> str:
     headers = {
         'user-agent': random_user_agent(),
     }
-    html = requests.get(url, headers=headers).text
-    if '找不到这个主播' in html:
+    resp = await client.get(url, headers=headers)
+    if '找不到这个主播' in resp.text:
         raise Exception(f"找不到这个主播")
-    html_obj = json.loads(html.split('stream: ')[1].split('};')[0])
-    return str(html_obj['data'][0]['gameLiveInfo']['profileRoom'])
+    hy_config = json.loads(resp.text.split('stream: ')[1].split('};')[0])
+    return str(hy_config['data'][0]['gameLiveInfo']['profileRoom'])
 
 
-def _dict_sorting(data: dict) -> dict:
+def _weight_sorting(data: dict, weights: dict) -> dict:
     if data:
         data = {k: v for k, v in data.items() if k not in ['HY', 'HUYA', 'HYZJ']}
-        return dict(sorted(data.items(), key=lambda x: x[1], reverse=True))
+        return dict(sorted(data.items(), key=lambda x: weights[x[0]], reverse=True))
     return {}
 
 
 def _get_uid(cookie: str, stream_name: str) -> int:
-    if cookie:
-        cookie_dict = {k.strip(): v for k, v in (item.split('=') for item in cookie.split(';'))}
-        for key in ['udb_uid', 'yyuid']:
-            if key in cookie_dict:
-                return int(cookie_dict[key])
-    if stream_name:
-        return int(stream_name.split('-')[0])
+    try:
+        if cookie and "yyuid=" in cookie:
+            return int(match1(r'yyuid=(\d+)', cookie))
+        if stream_name:
+            author_id = int(stream_name.split('-')[0])
+            if author_id > 0:
+                return author_id
+    except:
+        pass
     return random.randint(1400000000000, 1499999999999)
+    # udbAnonymousUid = requests.post(
+    #     url='https://udblgn.huya.com/web/anonymousLogin',
+    #     headers={
+    #         'user-agent': random_user_agent(),
+    #     },
+    #     json={
+    #         "appId": 5002,
+    #         "byPass": 3,
+    #         "context": "",
+    #         "version": "2.4",
+    #         "data": {},
+    #     }
+    # )['data']['uid']
