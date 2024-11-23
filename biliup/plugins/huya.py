@@ -29,7 +29,7 @@ class Huya(DownloadBase):
             if self.fake_headers.get('cookie'):
                 await self.verify_cookie()
             if not self.__room_id.isdigit():
-                self.__room_id = await _get_real_rid(self.url)
+                self.__room_id = _get_real_rid(self.url)
             room_profile = await self.get_room_profile(use_api=True)
         except Exception as e:
             logger.error(f"{self.plugin_msg}: {e}")
@@ -225,11 +225,12 @@ class Huya(DownloadBase):
 
 
 @lru_cache(maxsize=None)
-async def _get_real_rid(url) -> str:
+def _get_real_rid(url) -> str:
+    import requests
     headers = {
         'user-agent': random_user_agent(),
     }
-    resp = await client.get(url, headers=headers)
+    resp = requests.get(url, headers=headers)
     if '找不到这个主播' in resp.text:
         raise Exception(f"找不到这个主播")
     hy_config = json.loads(resp.text.split('stream: ')[1].split('};')[0])
