@@ -18,6 +18,7 @@ import {
     IconSun,
     IconVideoListStroked,
     IconHome, IconSetting,
+    IconContrast,
 } from "@douyinfe/semi-icons";
 import Image from "next/image";
 
@@ -36,13 +37,37 @@ export default function RootLayout({
     const [openKeys, setOpenKeys] = useState(initOpenKeys);
     const [selectedKeys, setSelectedKeys] = useState<any>([pathname.slice(1)]);
     const [isCollapsed, setIsCollapsed] = useState(false);
-    const [mode, setMode] = useState(typeof window !== 'undefined' && localStorage.getItem("mode") || "light");
+    const [mode, setMode] = useState(
+      (typeof window !== 'undefined' && localStorage.getItem('mode')) || 'auto'
+    )
+    const useSystemTheme = () => {
+      const [theme, setTheme] = useState<string>('light')
+      useEffect(() => {
+        const getSystemTheme = () =>
+          window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+        setTheme(getSystemTheme)
+        const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+        const handleChange = () => setTheme(getSystemTheme)
+        mediaQuery.addEventListener('change', handleChange)
+        return () => mediaQuery.removeEventListener('change', handleChange)
+      }, [])
+      return theme
+    }
+    const systemTheme = useSystemTheme()
     useEffect(() => {
-        localStorage.setItem("mode", mode);
-        if (mode === "dark") {
-            document.body.setAttribute("theme-mode", "dark");
-        }
-    }, [mode]);
+      localStorage.setItem('mode', mode)
+      switch (mode) {
+        case 'light':
+          document.body.setAttribute('theme-mode', 'light')
+          break
+        case 'dark':
+          document.body.setAttribute('theme-mode', 'dark')
+          break
+        default:
+          document.body.setAttribute('theme-mode', systemTheme)
+          break
+      }
+    }, [mode, systemTheme])
     let navStyle = isCollapsed
         ? { height: "100%", overflow: "visible" }
         : { height: "100%" };
@@ -290,7 +315,9 @@ export default function RootLayout({
                                     />
                                 </div>
                             </Nav.Header>
-                            {footer(mode, setMode)}
+                            <Nav.Footer collapseButton={true}>
+                              <ThemeButton mode={mode} setMode={setMode} systemTheme={systemTheme} />
+                            </Nav.Footer>
                         </Nav>
                     </Sider>
                     <SeLayout style={{ height: "100vh" }}>{children}</SeLayout>
@@ -300,43 +327,59 @@ export default function RootLayout({
     );
 }
 
-function footer(
-    mode: string,
-    setMode: {
-        (value: SetStateAction<string>): void;
-        (arg0: string): void;
+interface ThemeProps {
+  mode: string
+  setMode: {
+    (value: SetStateAction<string>): void
+    (arg0: string): void
+  }
+  systemTheme: string
+}
+
+const ThemeButton: React.FC<ThemeProps> = props => {
+  const switchMode = () => {
+    const body = document.body
+    const currentMode = props.mode
+    let nextMode = currentMode
+    switch (currentMode) {
+      case 'auto':
+        nextMode = 'light'
+        break
+      case 'light':
+        nextMode = 'dark'
+        break
+      default:
+        nextMode = 'auto'
+        break
     }
-) {
-    const switchMode = () => {
-        const body = document.body;
-        if (body.hasAttribute("theme-mode")) {
-            body.removeAttribute("theme-mode");
-            setMode("light");
-        } else {
-            body.setAttribute("theme-mode", "dark");
-            setMode("dark");
-        }
-    };
-    return (
-        <Nav.Footer collapseButton={true}>
-            <Button
-                onClick={switchMode}
-                theme="borderless"
-                icon={
-                    mode === "light" ? (
-                        <IconMoon size="large" />
-                    ) : (
-                        <IconSun size="large" />
-                    )
-                }
-                style={{
-                    color: "var(--semi-color-text-2)",
-                    // marginRight: '12px',
-                    // zIndex: 100,
-                }}
-            />
-        </Nav.Footer>
-    );
+    body.removeAttribute('theme-mode')
+    nextMode === 'auto'
+      ? body.setAttribute('theme-mode', props.systemTheme)
+      : body.setAttribute('theme-mode', nextMode)
+    props.setMode(nextMode)
+  }
+  const getIcon = () => {
+    if (typeof window !== 'undefined')
+      switch (props.mode) {
+        case 'light':
+          return <IconSun size="large" />
+        case 'dark':
+          return <IconMoon size="large" />
+        default:
+          return <IconContrast size="large" />
+      }
+  }
+
+  return (
+    <Button
+      onClick={switchMode}
+      theme="borderless"
+      icon={getIcon()}
+      style={{
+        color: 'var(--semi-color-text-2)',
+      }}
+    />
+  )
 }
 
 function isSub(key1: string, key2: string | number) {
