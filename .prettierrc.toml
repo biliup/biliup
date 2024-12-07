@@ -33,5 +33,17 @@ useTabs = false
 # 后置逗号，多行对象、数组在最后一行增加逗号
 trailingComma = "es5"
 
-# 解析器
+# 解析器，仅指定部分文件格式，避免影响其他语言功能
+[[overrides]]
+files = "*.ts"
+[overrides.options]
 parser = "typescript"
+[[overrides]]
+files = "*.tsx"
+[overrides.options]
+parser = "typescript"
+
+[[overrides]]
+files = "*.css"
+[overrides.options]
+parser = "css"
