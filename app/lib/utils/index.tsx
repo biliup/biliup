@@ -1,3 +1,5 @@
+import { useState, useEffect } from "react";
+
 export const responsiveMap = {
     xs: '(max-width: 575px)',
     sm: '(min-width: 576px)',
@@ -50,3 +52,34 @@ export const humDate = (time: number): string => new Date(time * 1000).toLocaleS
     second: '2-digit',
     hour12: false
 }).replaceAll('/', '-')
+
+export const useSystemTheme = () => {
+  const [theme, setTheme] = useState<string>('light')
+  useEffect(() => {
+    const getSystemTheme = () =>
+      window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+    setTheme(getSystemTheme)
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    const handleChange = () => setTheme(getSystemTheme)
+    mediaQuery.addEventListener('change', handleChange)
+    return () => mediaQuery.removeEventListener('change', handleChange)
+  }, [])
+  return theme
+}
+
+export const useTheme = (mode: string, systemTheme: string) => {
+  useEffect(() => {
+    localStorage.setItem('mode', mode)
+    switch (mode) {
+      case 'light':
+        document.body.setAttribute('theme-mode', 'light')
+        break
+      case 'dark':
+        document.body.setAttribute('theme-mode', 'dark')
+        break
+      default:
+        document.body.setAttribute('theme-mode', systemTheme)
+        break
+    }
+  }, [mode, systemTheme])
+}

@@ -1,9 +1,9 @@
 "use client";
 import "./globals.css";
 import styles from "./page.module.css";
-import { SetStateAction, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { Button, Nav } from "@douyinfe/semi-ui";
 import { OnSelectedData } from "@douyinfe/semi-ui/lib/es/navigation";
 import { Layout as SeLayout } from "@douyinfe/semi-ui/lib/es/layout";
@@ -12,15 +12,13 @@ import {
     IconCustomerSupport,
     IconDoubleChevronLeft,
     IconDoubleChevronRight,
-    IconMoon,
-    IconSemiLogo,
     IconStar,
-    IconSun,
     IconVideoListStroked,
     IconHome, IconSetting,
-    IconContrast,
 } from "@douyinfe/semi-icons";
 import Image from "next/image";
+import ThemeButton from "./ui/ThemeButton";
+import { useSystemTheme, useTheme } from "./lib/utils";
 
 export default function RootLayout({
     children,
@@ -37,37 +35,9 @@ export default function RootLayout({
     const [openKeys, setOpenKeys] = useState(initOpenKeys);
     const [selectedKeys, setSelectedKeys] = useState<any>([pathname.slice(1)]);
     const [isCollapsed, setIsCollapsed] = useState(false);
-    const [mode, setMode] = useState(
-      (typeof window !== 'undefined' && localStorage.getItem('mode')) || 'auto'
-    )
-    const useSystemTheme = () => {
-      const [theme, setTheme] = useState<string>('light')
-      useEffect(() => {
-        const getSystemTheme = () =>
-          window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-        setTheme(getSystemTheme)
-        const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-        const handleChange = () => setTheme(getSystemTheme)
-        mediaQuery.addEventListener('change', handleChange)
-        return () => mediaQuery.removeEventListener('change', handleChange)
-      }, [])
-      return theme
-    }
+    const [mode, setMode] = useState((typeof window !== 'undefined' && localStorage.getItem('mode')) || 'auto')
     const systemTheme = useSystemTheme()
-    useEffect(() => {
-      localStorage.setItem('mode', mode)
-      switch (mode) {
-        case 'light':
-          document.body.setAttribute('theme-mode', 'light')
-          break
-        case 'dark':
-          document.body.setAttribute('theme-mode', 'dark')
-          break
-        default:
-          document.body.setAttribute('theme-mode', systemTheme)
-          break
-      }
-    }, [mode, systemTheme])
+    useTheme(mode,systemTheme)
     let navStyle = isCollapsed
         ? { height: "100%", overflow: "visible" }
         : { height: "100%" };
@@ -315,8 +285,8 @@ export default function RootLayout({
                                     />
                                 </div>
                             </Nav.Header>
-                            <Nav.Footer collapseButton={true}>
-                              <ThemeButton mode={mode} setMode={setMode} systemTheme={systemTheme} />
+                            <Nav.Footer collapseButton={false}>
+                                <ThemeButton mode={mode} setMode={setMode} systemTheme={systemTheme} />
                             </Nav.Footer>
                         </Nav>
                     </Sider>
@@ -327,60 +297,7 @@ export default function RootLayout({
     );
 }
 
-interface ThemeProps {
-  mode: string
-  setMode: {
-    (value: SetStateAction<string>): void
-    (arg0: string): void
-  }
-  systemTheme: string
-}
 
-const ThemeButton: React.FC<ThemeProps> = props => {
-  const switchMode = () => {
-    const body = document.body
-    const currentMode = props.mode
-    let nextMode = currentMode
-    switch (currentMode) {
-      case 'auto':
-        nextMode = 'light'
-        break
-      case 'light':
-        nextMode = 'dark'
-        break
-      default:
-        nextMode = 'auto'
-        break
-    }
-    body.removeAttribute('theme-mode')
-    nextMode === 'auto'
-      ? body.setAttribute('theme-mode', props.systemTheme)
-      : body.setAttribute('theme-mode', nextMode)
-    props.setMode(nextMode)
-  }
-  const getIcon = () => {
-    if (typeof window !== 'undefined')
-      switch (props.mode) {
-        case 'light':
-          return <IconSun size="large" />
-        case 'dark':
-          return <IconMoon size="large" />
-        default:
-          return <IconContrast size="large" />
-      }
-  }
-
-  return (
-    <Button
-      onClick={switchMode}
-      theme="borderless"
-      icon={getIcon()}
-      style={{
-        color: 'var(--semi-color-text-2)',
-      }}
-    />
-  )
-}
 
 function isSub(key1: string, key2: string | number) {
     const routerMap: any = {
