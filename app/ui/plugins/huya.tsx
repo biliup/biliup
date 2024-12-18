@@ -96,7 +96,7 @@ const Huya: React.FC<Props> = (props) => {
                 </Form.Select>
                 <Form.Switch
                     field="huya_imgplus"
-                    extraText="是否录制二次编码的直播流。默认为启用，关闭后可能无法下载。部分直播间的分辨率超分和HDR画质依赖于二次编码，请谨慎关闭。"
+                    extraText="是否录制二次编码的直播流。默认为启用，关闭后可能无法下载。部分直播间的分辨率超分（如2k/4k）和HDR画质依赖于二次编码，请谨慎关闭。"
                     label="虎牙二次编码（huya_imgplus）"
                     initValue={
                         entity?.hasOwnProperty("huya_imgplus")

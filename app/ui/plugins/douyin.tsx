@@ -2,7 +2,12 @@
 import React from "react";
 import { Form, Select, Collapse } from "@douyinfe/semi-ui";
 
-const Douyin: React.FC = () => {
+type Props = {
+    entity: any;
+};
+
+const Douyin: React.FC<Props> = (props) => {
+    const entity = props.entity;
     return (
         <>
             <Collapse.Panel header="抖音" itemKey="douyin">
@@ -65,6 +70,7 @@ const Douyin: React.FC = () => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
                 />
                 <Form.Select
                     field="douyin_protocol"
@@ -80,6 +86,26 @@ const Douyin: React.FC = () => {
                     <Select.Option value="flv">flv（默认）</Select.Option>
                     <Select.Option value="hls">hls</Select.Option>
                 </Form.Select>
+                <Form.Switch
+                    field="douyin_double_screen"
+                    extraText={
+                        <div style={{ fontSize: "14px" }}>
+                            是否录制抖音双屏直播的原像素拼接流，默认关闭。
+                            <br />
+                            关闭时录制 横像素不变的 缩放拼接流，可能存在画质损失；开启时录制 纵像素不变的 raw 双屏拼接流。
+                        </div>
+                    }
+                    label="双屏直播录制方式（douyin_double_screen）"
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                    initValue={
+                        entity?.hasOwnProperty("douyin_double_screen")
+                            ? entity["douyin_double_screen"]
+                            : true
+                    }
+                />
             </Collapse.Panel>
         </>
     );

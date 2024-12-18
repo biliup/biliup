@@ -86,7 +86,7 @@ const Bilibili: React.FC<Props> = (props) => {
                         padding: 0,
                     }}
                     optionList={list}
-                    extraText="只支持「biliup-rs」生成的文件。当与上一个配置项同时存在时，将优先使用文件。"
+                    extraText="只支持「biliup-rs」生成的文件。与 Cookie 文本 同时存在时，优先使用文件。"
                     showClear={true}
                 />
                 <Form.Select
@@ -95,10 +95,9 @@ const Bilibili: React.FC<Props> = (props) => {
                         <div style={{ fontSize: "14px" }}>
                             哔哩哔哩直播流协议。
                             <br />
-                            由于B站转码为 fmp4 需要一定时间，或者某些小主播（大部分只有原画选项的主播）无fmp4流时，
-                            如果开播时间小于60s，将会反复尝试获取 fmp4 流，如果没获取到就回退到 flv 流。
+                            该设置项遵循 hls_fmp4 转码等待时间（bili_hls_transcode_timeout）。
                             <br />
-                            由于 ffmpeg 不支持多并发，且 stream-gears 尚未支持 fmp4，推荐切换为 streamlink 来录制 hls 流。
+                            stream-gears 尚未支持 hls_fmp4，请切换为 ffmpeg 或 streamlink 来录制。
                         </div>
                     }
                     label="直播流协议（bili_protocol）"
@@ -117,26 +116,6 @@ const Bilibili: React.FC<Props> = (props) => {
                     <Select.Option value="hls_fmp4">hls_fmp4</Select.Option>
                 </Form.Select>
                 <Form.Input
-                    field="bili_perfCDN"
-                    extraText="哔哩哔哩直播优选CDN，默认无。"
-                    label="优选CDN（bili_perfCDN）"
-                    placeholder="cn-gotcha208, ov-gotcha05"
-                    style={{ width: "100%" }}
-                    fieldStyle={{
-                        alignSelf: "stretch",
-                        padding: 0,
-                    }}
-                />
-                <Form.Switch
-                    field="bili_cdn_fallback"
-                    extraText="CDN 回退（Fallback），默认为关闭。例如海外机器优选 ov05 之后，如果 ov05 流一直无法下载，将会自动回退到 ov07 进行下载。仅限相同流协议。"
-                    label="CDN 回退（bili_cdn_fallback）"
-                    fieldStyle={{
-                        alignSelf: "stretch",
-                        padding: 0,
-                    }}
-                />
-                <Form.Input
                     field="bili_liveapi"
                     extraText="自定义哔哩哔哩直播主要 API，用于获取指定区域（大陆或海外）的直播流链接，默认使用官方 API。"
                     label="哔哩哔哩直播主要API（bili_liveapi）"
@@ -146,6 +125,13 @@ const Bilibili: React.FC<Props> = (props) => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
+                    rules={[
+                        {
+                            pattern: /^https?:\/\/(?:[\w-]+(?::[\w-]+)?@)?([\w-]+\.)+[\w-]+(?::\d+)?(?:\/[\w-/.]*)?$/,
+                            message: '请输入有效的API地址，必须以 http:// 或 https:// 开头'
+                        }
+                    ]}
                 />
                 <Form.Input
                     field="bili_fallback_api"
@@ -157,7 +143,6 @@ const Bilibili: React.FC<Props> = (props) => {
                             API，并将哔哩哔哩直播回退API（bili_fallback_api）设置为官方
                             API，然后优选「fmp4」流并使用「streamlink」下载插件（downloader），
                             最后设置优选「cn-gotcha204,ov-gotcha05」两个节点。
-                            <br />
                             这样大主播可以使用 cn204 的 fmp4 流稳定录制。
                         </div>
                     }
@@ -168,10 +153,70 @@ const Bilibili: React.FC<Props> = (props) => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
+                    rules={[
+                        {
+                            pattern: /^https?:\/\/(?:[\w-]+(?::[\w-]+)?@)?([\w-]+\.)+[\w-]+(?::\d+)?(?:\/[\w-/.]*)?$/,
+                            message: '请输入有效的API地址，必须以 http:// 或 https:// 开头'
+                        }
+                    ]}
+                />
+                <Form.TagInput
+                    field="bili_cdn"
+                    extraText="哔哩哔哩直播CDN，默认无。"
+                    label="直播CDN（bili_cdn）"
+                    placeholder="例: cn-gotcha204,ov-gotcha05。用英文逗号分隔以批量输入，失焦/Enter保存"
+                    style={{ width: "100%" }}
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                    showClear={true}
+                    rules={[
+                        {
+                            validator: (rule, value) => {
+                                return Array.isArray(value) && value.every(item => /^(cn|ov)-gotcha\d+$/.test(item));
+                            },
+                            message: '例: cn-gotcha204, ov-gotcha05'
+                        }
+                    ]}
+                />
+                <Form.Switch
+                    field="bili_cdn_fallback"
+                    extraText="CDN 回退（Fallback），默认为关闭。例如海外机器优选 ov05 之后，如果 ov05 流一直无法下载，将会自动回退到 ov07 进行下载。仅限相同流协议。"
+                    label="CDN 回退（bili_cdn_fallback）"
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                />
+                <Form.Switch
+                    field="bili_anonymous_origin"
+                    extraText="使用自定义API获取 master.m3u8 内的 hls_fmp4 原画流，无法录制特殊直播。默认关闭。"
+                    label="免登录原画（bili_anonymous_origin）"
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                />
+                <Form.Switch
+                    field="bili_ov2cn"
+                    extraText={
+                        <div style={{ fontSize: "14px" }}>
+                            将海外cdn域名替换为大陆cdn域名，默认关闭。
+                            <br />
+                            例：将海外的 ov-gotcha07 替换为 cn-gotcha07，直播 cdn 处仍然填写 ov-gotcha07。
+                        </div>
+                    }
+                    label="海外转大陆（bili_ov2cn）"
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
                 />
                 <Form.Switch
                     field="bili_force_source"
-                    extraText="哔哩哔哩强制真原画（仅限非 FLV 流，且画质等级 bili_qn >= 10000），默认为关闭，不保证可用性。"
+                    extraText="哔哩哔哩强制真原画（仅限 hls_fmp4 流，且画质等级 bili_qn >= 10000），默认为关闭，不保证可用性。"
                     label="强制获取真原画（bili_force_source）"
                     fieldStyle={{
                         alignSelf: "stretch",
@@ -187,12 +232,23 @@ const Bilibili: React.FC<Props> = (props) => {
                         padding: 0,
                     }}
                 />
+                <Form.InputNumber
+                    field="bili_hls_transcode_timeout"
+                    extraText="hls_fmp4 转码等待时间，超时后回退到 flv 流。默认 60 秒。"
+                    label="hls_fmp4 转码等待时间（bili_hls_transcode_timeout）"
+                    style={{ width: "100%" }}
+                    placeholder="60"
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                />
                 <Form.TagInput
                     allowDuplicates={false}
                     addOnBlur={true}
                     separator=','
                     field="bili_replace_cn01"
-                    extraText="该功能在 bili_force_source 后生效"
+                    extraText="该功能在 强制真原画 之前生效"
                     label="替换 CN01 sid (bili_replace_cn01)"
                     style={{ width: "100%" }}
                     fieldStyle={{
@@ -201,12 +257,12 @@ const Bilibili: React.FC<Props> = (props) => {
                     }}
                     showClear={true}
                     placeholder="可用英文逗号分隔以批量输入 sid，失焦/Enter 保存"
-                    onChange={v => console.log(v)}
+                    // onChange={v => console.log(v)}
                     rules={[
                         {
                             validator: (rule, value) => {
                                 value = value ?? (console.log(value), []);
-                                return Array.isArray(value) && value.every(item => /^cn-[a-z]{2,6}-[a-z]{2}(-[0-9]{2}){2}$/.test(item));
+                                return Array.isArray(value) && value.every(item => /^cn-[a-z]{2,6}-[a-z]{2,4}(-[0-9]{2}){2}$/.test(item));
                             },
                             message: '例: cn-hjlheb-cu-01-01,cn-tj-ct-01-01'
                         }
