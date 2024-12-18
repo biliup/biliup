@@ -124,7 +124,9 @@ class Bililive(DownloadBase):
                 logger.error(f"{self.plugin_msg}: 获取{protocol}流失败")
                 return False
 
-        target_quality_stream = stream_urls.get(quality_number, next(iter(stream_urls.values())))
+        target_quality_stream = stream_urls.get(
+            quality_number, next(iter(stream_urls.values()))
+        )
         stream_url = {}
         if perf_cdn is not None:
             for cdn in perf_cdn:

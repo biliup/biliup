@@ -110,7 +110,7 @@ const Huya: React.FC<Props> = (props) => {
                 />
                 <Form.Switch
                     field="huya_mobile_api"
-                    extraText="使用移动端API可以绕过部分游客观看原画的时长限制"
+                    extraText="使用移动端API可以绕过 PCWEB 端对原画的时长限制"
                     label="虎牙使用移动端API（huya_mobile_api）"
                     fieldStyle={{
                         alignSelf: "stretch",

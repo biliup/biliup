@@ -39,13 +39,7 @@ const Douyin: React.FC<Props> = (props) => {
                 </Form.Select>
                 <Form.Switch
                     field="douyin_danmaku"
-                    extraText={
-                        <div style={{ fontSize: "14px" }}>
-                            录制抖音弹幕，默认关闭。
-                            <br />
-                            暂不支持视频按时长分段下的弹幕文件自动分段；仅在使用ffmpeg（包括streamlink混合模式）时得到支持。
-                        </div>
-                    }
+                    extraText="录制抖音弹幕，默认关闭。"
                     label="录制弹幕（douyin_danmaku）"
                     fieldStyle={{
                         alignSelf: "stretch",

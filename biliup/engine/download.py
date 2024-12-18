@@ -425,7 +425,7 @@ class DownloadBase(ABC):
             if r.status_code == 200:
                 return url
         except HTTPStatusError as e:
-            logger.debug(f'{self.plugin_msg}: url {url}: status_code-{e.response.status_code}')
+            logger.error(f'{self.plugin_msg}: url {url}: status_code-{e.response.status_code}')
         except:
             logger.debug(f'{self.plugin_msg}: url {url}: ', exc_info=True)
         return None

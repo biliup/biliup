@@ -22,7 +22,7 @@ const Bilibili: React.FC<Props> = (props) => {
                             刚开播如果无选择的画质，会先录制原画，
                             后续视频分段时，如果下载插件为非 stream-gears，会切换到选择的画质。
                             <br />
-                            如果选择的画质不提供，会选择更低一档的画质。
+                            如果选择的画质没有提供，会使用次档画质中最接近的画质，免登录原画会使用最高画质。
                         </div>
                     }
                     label="画质等级（bili_qn）"
@@ -112,7 +112,7 @@ const Bilibili: React.FC<Props> = (props) => {
                     <Select.Option value="stream">
                         stream（flv，默认）
                     </Select.Option>
-                    <Select.Option value="hls_ts">hls_ts</Select.Option>
+                    {/* <Select.Option value="hls_ts">hls_ts</Select.Option> */}
                     <Select.Option value="hls_fmp4">hls_fmp4</Select.Option>
                 </Form.Select>
                 <Form.Input
@@ -216,7 +216,7 @@ const Bilibili: React.FC<Props> = (props) => {
                 />
                 <Form.Switch
                     field="bili_force_source"
-                    extraText="哔哩哔哩强制真原画（仅限 hls_fmp4 流，且画质等级 bili_qn >= 10000），默认为关闭，不保证可用性。"
+                    extraText="移除streamName的二压小尾巴（仅限 hls_fmp4 流，且画质等级 bili_qn >= 10000），默认为关闭，不保证可用性。"
                     label="强制获取真原画（bili_force_source）"
                     fieldStyle={{
                         alignSelf: "stretch",
@@ -242,13 +242,14 @@ const Bilibili: React.FC<Props> = (props) => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
                 />
                 <Form.TagInput
                     allowDuplicates={false}
                     addOnBlur={true}
                     separator=','
                     field="bili_replace_cn01"
-                    extraText="该功能在 强制真原画 之前生效"
+                    extraText="该功能在 强制获取真原画 之前生效"
                     label="替换 CN01 sid (bili_replace_cn01)"
                     style={{ width: "100%" }}
                     fieldStyle={{
