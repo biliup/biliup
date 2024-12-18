@@ -94,7 +94,7 @@ check_sourcecode: 15
 ### 由于ffmpeg只能单线程下载，并且stream-gears录制有问题，所以目前fmp4流只能使用streamlink+ffmpeg混合模式。
 #bili_protocol: stream
 ### 哔哩哔哩直播优选CDN，默认无，支持同时填入多个CDN节点。
-#bili_perfCDN: 'cn-gotcha208,ov-gotcha05'
+#bili_cdn: [cn-gotcha204, ov-gotcha05]
 ### 哔哩哔哩强制真原画（仅限TS与FMP4流的 cn-gotcha01 CDN，且 bili_qn >= 10000），默认为关闭
 ### 不保证可用性。当无法强制获取到真原画时，将会自动回退到二压原画。
 #bili_force_source: false
@@ -113,12 +113,7 @@ check_sourcecode: 15
 ### 海外机的玩法：配合一个国内的机器（例如便宜的腾讯云，阿里云等等）自建反代api.live.bilibili.com。或者使用https://docs.qq.com/doc/DV2dvbXBrckNscU9x 此处提供的公用反代API。
 ### 如果海外机到联通或者移动网络线路还不错，就可以参考***完整CDN列表***选取一些联通或者移动的节点并填入下面
 ### 每次会随机返回填入的其中一个线路，并且会自动判断所填入的节点是否可用
-#bili_replace_cn01:
-    # - cn-jxnc-cm-01-16
-    # - cn-gddg-cm-01-06
-    # - cn-fjqz-cm-01-06
-    # - cn-jssz-cm-01-02
-    # - cn-gddg-ct-01-12
+#bili_replace_cn01: [cn-tj-cm-01-03, cn-gddg-cm-01-03, cn-fjqz-cm-01-03, cn-jssz-cm-02-26, cn-gdfs-ct-01-12]
 ### 哔哩哔哩自选画质
 ### 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段(仅ffmpeg streamlink)时录制设置的画质
 ### 30000 杜比,20000 4K,10000 原画,401 蓝光(杜比),400 蓝光,250 超清,150 高清,80 流畅,0 B站默认(多数情况下是蓝光 400)

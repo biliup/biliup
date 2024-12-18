@@ -39,16 +39,19 @@ class Douyin(DownloadBase):
                 if resp.status_code not in {301, 302}:
                     raise
                 next_url = str(resp.next_request.url)
-                if "webcast.amemv" not in next_url:
+                if "webcast.amemv" in next_url:
+                    self.__sec_uid = match1(next_url, r"sec_user_id=(.*?)&")
+                    self.__room_id = match1(next_url.split("?")[0], r"(\d+)")
+                elif "isedouyin.com/share/user" in next_url:
+                    self.__sec_uid = match1(next_url, r"sec_uid=(.*?)&")
+                else:
                     raise
             except:
                 logger.error(f"{self.plugin_msg}: 不支持的链接")
                 return False
-            self.__sec_uid = match1(next_url, r"sec_user_id=(.*?)&")
-            self.__room_id = match1(next_url.split("?")[0], r"(\d+)")
         elif "/user/" in self.url:
             sec_uid = self.url.split("user/")[1].split("?")[0]
-            if len(sec_uid) == 55:
+            if len(sec_uid) in {55, 76}:
                 self.__sec_uid = sec_uid
             else:
                 try:
@@ -73,7 +76,7 @@ class Douyin(DownloadBase):
             self.__web_rid = web_rid
 
         try:
-            _room_info = None
+            _room_info = {}
             if self.__web_rid:
                 _room_info = await self.get_web_room_info(self.__web_rid)
                 if _room_info:
@@ -108,7 +111,7 @@ class Douyin(DownloadBase):
 
         try:
             pull_data = room_info['stream_url']['live_core_sdk_data']['pull_data']
-            if room_info['stream_url'].get('pull_datas') and config.get('douyin_extra_record', True):
+            if room_info['stream_url'].get('pull_datas') and config.get('douyin_double_screen', False):
                 pull_data = next(iter(room_info['stream_url']['pull_datas'].values()))
             stream_data = json.loads(pull_data['stream_data'])['data']
         except:
@@ -149,7 +152,7 @@ class Douyin(DownloadBase):
                     quality = optional_quality_items[optional_quality_index - 1]
 
             protocol = 'hls' if config.get('douyin_protocol') == 'hls' else 'flv'
-            self.raw_stream_url = stream_data[quality]['main'][protocol]
+            self.raw_stream_url = stream_data[quality]['main'][protocol].replace('http://', 'https://')
             self.room_title = room_info['title']
         except:
             logger.exception(f"{self.plugin_msg}: 寻找清晰度失败")

@@ -74,7 +74,7 @@ class DownloadBase(ABC):
         # 弹幕客户端
         self.danmaku: Optional[IDanmakuClient] = None
 
-        self.plugin_msg = f"{self.__class__.__name__} - {url}"
+        self.plugin_msg = f"[{self.__class__.__name__}]{self.fname} - {url}"
 
     @abstractmethod
     async def acheck_stream(self, is_check=False):
@@ -275,7 +275,7 @@ class DownloadBase(ABC):
                         data += f'\n{os.path.abspath(danmaku_file_name)}'
                     processor(self.segment_processor, data)
                 except:
-                    logger.warning(f'执行后处理失败：{self.__class__.__name__} - {self.fname}', exc_info=True)
+                    logger.warning(f'{self.plugin_msg}: 执行后处理失败', exc_info=True)
 
         thread = threading.Thread(target=x, daemon=True, name=f"segment_processor_{exclude_ext_file_name}")
         prev_thread = self.segment_processor_thread[-1] if self.segment_processor_thread else None
@@ -302,7 +302,7 @@ class DownloadBase(ABC):
                 self.danmaku = None
 
     def start(self):
-        logger.info(f'开始下载: {self.__class__.__name__} - {self.fname}')
+        logger.info(f"{self.plugin_msg}: 开始下载")
         # 开始时间
         start_time = time.localtime()
         # 结束时间
@@ -316,7 +316,7 @@ class DownloadBase(ABC):
             try:
                 ret = self.run()
             except Exception:
-                logger.warning(f'下载失败: {self.__class__.__name__} - {self.fname}', exc_info=True)
+                logger.warning(f"{self.plugin_msg}: 下载失败", exc_info=True)
             finally:
                 self.close()
 
@@ -336,12 +336,12 @@ class DownloadBase(ABC):
 
         for thread in self.segment_processor_thread:
             if thread.is_alive():
-                logger.info(f'等待分段后处理完成: {self.__class__.__name__} - {self.fname} - {thread.name}')
+                logger.info(f'{self.plugin_msg}: 等待分段后处理完成 - {thread.name}')
                 thread.join()
         if (self.is_download and ret) or not self.is_download:
             self.download_success_callback()
         # self.segment_processor_thread
-        logger.info(f'退出下载: {self.__class__.__name__} - {self.fname}')
+        logger.info(f'{self.plugin_msg}: 退出下载')
         stream_info = {
             'name': self.fname,
             'url': self.url,
@@ -388,12 +388,12 @@ class DownloadBase(ABC):
 
                     self.live_cover_path = live_cover_path
                     logger.info(
-                        f'封面下载成功：{self.__class__.__name__} - {self.fname}：{os.path.abspath(self.live_cover_path)}')
+                        f'{self.plugin_msg}: 封面下载成功，路径：{os.path.abspath(self.live_cover_path)}')
                 else:
                     logger.warning(
-                        f'封面下载失败：{self.__class__.__name__} - {self.fname}：封面格式不支持：{self.live_cover_url}')
+                        f'{self.plugin_msg}: 封面为不支持的格式：{self.live_cover_url}')
             except:
-                logger.exception(f'封面下载失败：{self.__class__.__name__} - {self.fname}')
+                logger.exception(f'{self.plugin_msg}: 封面下载失败')
 
     async def acheck_url_healthy(self, url):
         async def __client_get(url, stream: bool = False):
@@ -414,20 +414,20 @@ class DownloadBase(ABC):
                 m3u8_obj = m3u8.loads(r.text)
                 if m3u8_obj.is_variant:
                     url = m3u8_obj.playlists[0].uri
-                    logger.info(f'stream url: {url}')
+                    logger.info(f'{self.plugin_msg}: stream url: {url}')
                     r = await __client_get(url)
             else: # 处理 Flv
                 r = await __client_get(url, stream=True)
                 if r.headers.get('Location'):
                     url = r.headers['Location']
-                    logger.info(f'stream url: {url}')
+                    logger.info(f'{self.plugin_msg}: stream url: {url}')
                     r = await __client_get(url, stream=True)
             if r.status_code == 200:
                 return url
         except HTTPStatusError as e:
-            logger.error(f'url {url}: status_code-{e.response.status_code}')
+            logger.error(f'{self.plugin_msg}: url {url}: status_code-{e.response.status_code}')
         except:
-            logger.exception(f'url {url}: ')
+            logger.debug(f'{self.plugin_msg}: url {url}: ', exc_info=True)
         return None
 
     def gen_download_filename(self, is_fmt=False):

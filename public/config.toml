@@ -95,7 +95,7 @@ check_sourcecode = 15
 ### 由于ffmpeg只能单线程下载，并且stream-gears录制有问题，所以目前fmp4流只能使用streamlink+ffmpeg混合模式。
 #bili_protocol = "stream"
 ### 哔哩哔哩直播优选CDN，默认无
-#bili_perfCDN = "cn-gotcha208,ov-gotcha05"
+#bili_cdn = ["cn-gotcha208", "ov-gotcha05"]
 ### 哔哩哔哩强制真原画（仅限TS与FMP4流的 cn-gotcha01 CDN，且 bili_qn >= 10000），默认为关闭
 ### 不保证可用性。当无法强制获取到真原画时，将会自动回退到二压原画。
 #bili_force_source = false

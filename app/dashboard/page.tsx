@@ -213,7 +213,7 @@ const Dashboard: React.FC = () => {
                                                 {/* CC直播 */}
                                                 <CC />
                                                 {/* 抖音 */}
-                                                <Douyin />
+                                                <Douyin entity={entity} />
                                                 {/* 斗鱼 */}
                                                 <Douyu />
                                                 {/* 虎牙 */}

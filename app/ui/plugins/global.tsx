@@ -35,9 +35,9 @@ const Global: React.FC = () => {
                             选择全局默认的下载插件, 可选:
                             <br />
                             1.
-                            streamlink（streamlink 用于多线程下载 hls 流，对于 FLV 流将仅使用 ffmpeg。请手动安装ffmpeg）
+                            streamlink（仅限 hls 流，不支持的流将回退到 ffmpeg。请手动安装ffmpeg）
                             <br />
-                            2. ffmpeg（纯ffmpeg下载。请手动安装ffmpeg）
+                            2. ffmpeg（ffmpeg 下载。请手动安装ffmpeg）
                             <br />
                             3. stream-gears（默认）
                         </div>
@@ -61,7 +61,7 @@ const Global: React.FC = () => {
                     label="视频分段大小（file_size）"
                     extraText={
                         <div style={{ fontSize: "14px" }}>
-                            录像单文件大小限制，超过此大小分段下载，下载回放时无法使用
+                            录像单文件大小限制，超过此大小触发文件分割。下载回放时无法使用。
                             <br />
                             单位：Byte，示例：4294967296（4GB）
                         </div>
@@ -79,7 +79,7 @@ const Global: React.FC = () => {
                     field="segment_time"
                     extraText={
                         <div style={{ fontSize: "14px" }}>
-                            录像单文件时间限制，超过此时长分段下载。
+                            录像单文件时间限制，超过此时长触发文件分割。
                             <br />
                             格式：&apos;00:00:00&apos;（时:分:秒）
                         </div>
@@ -91,6 +91,22 @@ const Global: React.FC = () => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
+                    rules={[
+                        {
+                            pattern: /^[^：]*$/,
+                            message: "请使用英文冒号"
+                        },
+                        {
+                            pattern: /^[0-9:]*$/,
+                            message: "只接受数字和英文冒号"
+                        },
+                        {
+                            pattern: /^[0-9]{2,4}:[0-5][0-9]:[0-5][0-9]$/,
+                            message: "分或秒不符合规范"
+                        }
+                    ]}
+                    stopValidateWithError={true}
                 />
                 <Form.Input
                     field="filename_prefix"
@@ -98,7 +114,7 @@ const Global: React.FC = () => {
                         <div style={{ fontSize: "14px" }}>
                             全局文件名模板。可被单个主播文件名模板覆盖。可用变量如下
                             <br />
-                            {'\u007B'}streamer{'\u007D'}: 录播备注
+                            {'\u007B'}streamer{'\u007D'}: 录播备注（必须保留）
                             <span style={{ margin: "0 20px"}}></span>
                             {'\u007B'}title{'\u007D'}: 直播标题
                             <br />
@@ -112,6 +128,7 @@ const Global: React.FC = () => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
                 />
                 <Form.Switch
                     field="segment_processor_parallel"
@@ -142,6 +159,7 @@ const Global: React.FC = () => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
                 />
 
                 <Form.InputNumber
@@ -163,6 +181,7 @@ const Global: React.FC = () => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
                 />
                 <Form.InputNumber
                     field="event_loop_interval"
@@ -180,6 +199,7 @@ const Global: React.FC = () => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
                 />
                 <Form.InputNumber
                     field="pool1_size"
@@ -191,6 +211,7 @@ const Global: React.FC = () => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
                 />
             </div>
 
@@ -269,13 +290,13 @@ const Global: React.FC = () => {
                     showClear={true}
                 >
                     <Form.Select.Option value="AUTO">AUTO（自动，默认）</Form.Select.Option>
-                    <Form.Select.Option value="bda">bda</Form.Select.Option>
-                    <Form.Select.Option value="bda2">bda2</Form.Select.Option>
-                    <Form.Select.Option value="ws">ws</Form.Select.Option>
-                    <Form.Select.Option value="qn">qn</Form.Select.Option>
-                    <Form.Select.Option value="bldsa">bldsa</Form.Select.Option>
-                    <Form.Select.Option value="tx">tx</Form.Select.Option>
-                    <Form.Select.Option value="txa">txa</Form.Select.Option>
+                    <Form.Select.Option value="alia">alia（海外-阿里云）</Form.Select.Option>
+                    {/* <Form.Select.Option value="bda">bda</Form.Select.Option> */}
+                    <Form.Select.Option value="bda2">bda2（大陆-百度云）</Form.Select.Option>
+                    <Form.Select.Option value="bldsa">bldsa（大陆-B站自建）</Form.Select.Option>
+                    <Form.Select.Option value="qn">qn（全球-七牛）</Form.Select.Option>
+                    <Form.Select.Option value="tx">tx（大陆-腾讯云）</Form.Select.Option>
+                    <Form.Select.Option value="txa">txa（海外-腾讯云）</Form.Select.Option>
                 </Form.Select>
                 <Form.InputNumber
                     field="threads"
@@ -287,6 +308,7 @@ const Global: React.FC = () => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
+                    showClear={true}
                 />
 
                 <Form.InputNumber

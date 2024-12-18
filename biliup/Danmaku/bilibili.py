@@ -26,13 +26,15 @@ class Bilibili:
     }
 
     @staticmethod
-    async def get_ws_info(url, context):
+    async def get_ws_info(url, content):
         danmu_wss_url = 'wss://broadcastlv.chat.bilibili.com/sub'
+        room_id = content.get('room_id')
         async with aiohttp.ClientSession(headers=Bilibili.headers) as session:
-            async with session.get("https://api.live.bilibili.com/room/v1/Room/room_init?id=" + match1(url, r'/(\d+)'),
+            if not room_id:
+                async with session.get("https://api.live.bilibili.com/room/v1/Room/room_init?id=" + match1(url, r'/(\d+)'),
                                    timeout=5) as resp:
-                room_json = await resp.json()
-                room_id = room_json['data']['room_id']
+                    room_json = await resp.json()
+                    room_id = room_json['data']['room_id']
             async with session.get(f"https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?id={room_id}",
                                    timeout=5) as resp:
                 danmu_info = await resp.json()

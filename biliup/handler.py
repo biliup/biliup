@@ -33,10 +33,10 @@ logger = logging.getLogger('biliup')
 def pre_processor(name, url):
     url_status = context["PluginInfo"].url_status
     if url_status[url] == 1:
-        logger.debug(f'{name} 正在下载中，跳过下载')
+        logger.debug(f"{name} - {url} 正在下载中，跳过下载")
         return
 
-    logger.info(f'{name} - {url} 开播了准备下载')
+    logger.debug(f"{name} - {url} 开播了准备下载")
     preprocessor = config['streamers'].get(name, {}).get('preprocessor')
     if preprocessor:
         processor(preprocessor, json.dumps({
