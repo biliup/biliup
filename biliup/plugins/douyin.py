@@ -39,16 +39,19 @@ class Douyin(DownloadBase):
                 if resp.status_code not in {301, 302}:
                     raise
                 next_url = str(resp.next_request.url)
-                if "webcast.amemv" not in next_url:
+                if "webcast.amemv" in next_url:
+                    self.__sec_uid = match1(next_url, r"sec_user_id=(.*?)&")
+                    self.__room_id = match1(next_url.split("?")[0], r"(\d+)")
+                elif "isedouyin.com/share/user" in next_url:
+                    self.__sec_uid = match1(next_url, r"sec_uid=(.*?)&")
+                else:
                     raise
             except:
                 logger.error(f"{self.plugin_msg}: 不支持的链接")
                 return False
-            self.__sec_uid = match1(next_url, r"sec_user_id=(.*?)&")
-            self.__room_id = match1(next_url.split("?")[0], r"(\d+)")
         elif "/user/" in self.url:
             sec_uid = self.url.split("user/")[1].split("?")[0]
-            if len(sec_uid) == 55:
+            if len(sec_uid) in {55, 76}:
                 self.__sec_uid = sec_uid
             else:
                 try:
