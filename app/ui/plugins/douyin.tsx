@@ -100,11 +100,6 @@ const Douyin: React.FC<Props> = (props) => {
                         alignSelf: "stretch",
                         padding: 0,
                     }}
-                    initValue={
-                        entity?.hasOwnProperty("douyin_double_screen")
-                            ? entity["douyin_double_screen"]
-                            : true
-                    }
                 />
             </Collapse.Panel>
         </>

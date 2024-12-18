@@ -113,12 +113,16 @@ class Bililive(DownloadBase):
 
         stream_urls = await self.aget_stream(quality_number, protocol, special_type)
         if not stream_urls:
-            if int(time.time()) - live_start_time <= self.__hls_timeout :
-                logger.warning(f"{self.plugin_msg}: 暂未提供 hls_fmp4 流，等待下一次检测")
-                return False
+            if protocol == 'hls_fmp4':
+                if int(time.time()) - live_start_time <= self.__hls_timeout:
+                    logger.warning(f"{self.plugin_msg}: 暂未提供 hls_fmp4 流，等待下一次检测")
+                    return False
+                else:
+                    # 回退首个可用格式
+                    stream_urls = await self.aget_stream(quality_number, 'stream', special_type)
             else:
-                # 回退首个可用格式
-                stream_urls = await self.aget_stream(quality_number, 'stream', special_type)
+                logger.error(f"{self.plugin_msg}: 获取{protocol}流失败")
+                return False
 
         target_quality_stream = stream_urls.get(quality_number, next(iter(stream_urls.values())))
         stream_url = {}
