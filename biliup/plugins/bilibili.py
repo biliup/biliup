@@ -177,20 +177,20 @@ class Bililive(DownloadBase):
         if config.get('bili_cdn_fallback'):
             __url = await self.acheck_url_healthy(self.raw_stream_url)
             if __url is None:
-                for cdn, stream_url in target_quality_stream.items():
+                for cdn, stream_info in target_quality_stream.items():
+                    stream_url = stream_info['url']
+                    __fallback_url = normalize_cn204(
+                        f"{stream_url['host']}{stream_url['base_url']}{stream_url['extra']}"
+                    )
                     try:
-                        __url = normalize_cn204(
-                            f"{stream_url['host']}{stream_url['base_url']}{stream_url['extra']}"
-                        )
-                        __url = await self.acheck_url_healthy(__url)
+                        __url = await self.acheck_url_healthy(__fallback_url)
                         if __url is not None:
                             self.raw_stream_url = __url
+                            logger.info(f"{self.plugin_msg}: cdn_fallback 回退到 {cdn} - {__fallback_url}")
                             break
                     except Exception as e:
-                        logger.error(f"{self.plugin_msg}: cdn_fallback {cdn} - {self.raw_stream_url}")
+                        logger.error(f"{self.plugin_msg}: cdn_fallback {e} - {__fallback_url}")
                         continue
-                    finally:
-                        logger.debug(f"{self.plugin_msg}: 回退到 {cdn} - {self.raw_stream_url}")
                 else:
                     logger.error(f"{self.plugin_msg}: 所有 cdn 均不可用")
                     self.raw_stream_url = None
