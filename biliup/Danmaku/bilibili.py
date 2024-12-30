@@ -154,13 +154,13 @@ class Bilibili:
                         msg['uid'] = j.get('data', {}).get('uid', '')
                         msg['num'] = j.get('data', {}).get('num', '')
                         if j.get('data', {}).get('guard_level', '') == 1:
-                            msg['gift_name'] == '总督'
+                            msg['gift_name'] = '总督'
                         elif j.get('data', {}).get('guard_level', '') == 2:
-                            msg['gift_name'] == '提督'
+                            msg['gift_name'] = '提督'
                         elif j.get('data', {}).get('guard_level', '') == 3:
-                            msg['gift_name'] == '舰长'
+                            msg['gift_name'] = '舰长'
                         else:
-                            msg['gift_name'] == '见鬼了'
+                            msg['gift_name'] = '见鬼了'
                         msg['num'] = j.get('data', {}).get('num', '')
                         msg['content'] = f"{msg['name']}为主播续费{msg['gift_name']}一个月"
 
