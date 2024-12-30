@@ -31,7 +31,6 @@ class Bilibili:
         cookie_str = content.get('cookie', None)
         if cookie_str == "":
             cookie_str = None
-        buvid3 = None
         buid = 0
         is_login = False
         if not content.get("full", False):
@@ -41,24 +40,25 @@ class Bilibili:
         room_id = content.get('room_id')
         if content.get('cookie', None):
             Bilibili.headers['cookie'] = content.get('cookie')
+        
+        if content.get('cookie', None):
+            async with aiohttp.ClientSession(headers=Bilibili.headers) as session:
+                try:
+                    async with session.get(f"https://api.bilibili.com/x/web-interface/nav", timeout=5) as resp:
+                        resp_data = await resp.json()
+                        buid = resp_data["data"]["mid"]
+                    is_login = True
+                except Exception as e:
+                    buid = 0
+                    Bilibili.headers['cookie'] = ""
+                    pass
+
         async with aiohttp.ClientSession(headers=Bilibili.headers) as session:
             if not room_id:
                 async with session.get("https://api.live.bilibili.com/room/v1/Room/room_init?id=" + match1(url, r'/(\d+)'),
                                    timeout=5) as resp:
                     room_json = await resp.json()
                     room_id = room_json['data']['room_id']
-            # 获取录播号cookie信息
-            if content.get('cookie', None):
-                try:
-                    async with session.get(f"https://www.bilibili.com/", timeout=5) as resp:
-                        buvid3 = session.cookie_jar.filter_cookies(f"https://www.bilibili.com/").get('buvid3').value
-                    async with session.get(f"https://api.bilibili.com/x/web-interface/nav", timeout=5) as resp:
-                        resp_data = await resp.json()
-                        buid = resp_data["data"]["mid"]
-                    is_login = True
-                except:
-                    buid = 0
-                    pass
             async with session.get(f"https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?type=0&id={room_id}",
                                    timeout=5) as resp:
                 danmu_info = await resp.json()
@@ -78,8 +78,7 @@ class Bilibili:
                 'type': 2,
                 'key': danmu_token,
             }
-            if is_login:
-                w_data['buvid'] = buvid3
+            print(w_data)
             data = json.dumps(w_data).encode('utf-8')
             reg_datas = [(pack('>i', len(data) + 16) + b'\x00\x10\x00\x01' + pack('>i', 7) + pack('>i', 1) + data)]
         return danmu_wss_url, reg_datas
