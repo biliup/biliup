@@ -126,29 +126,50 @@ class Bilibili:
                         'WELCOME': 'enter',
                         'NOTICE_MSG': 'broadcast',
                         'SUPER_CHAT_MESSAGE': 'super_chat',
-                        'LIVE_INTERACTIVE_GAME': 'interactive_danmaku'  # 新增互动弹幕，经测试与弹幕内容一致
+                        'LIVE_INTERACTIVE_GAME': 'interactive_danmaku',  # 新增互动弹幕，经测试与弹幕内容一致
+                        'GUARD_BUY': 'guard_buy'
                     }.get(j.get('cmd'), 'other')
                     # 2021-06-03 bilibili 字段更新, 形如 DANMU_MSG:4:0:2:2:2:0
                     if msg.get('msg_type', 'UNKNOWN').startswith('DANMU_MSG'):
                         msg['msg_type'] = 'danmaku'
 
-                    if msg['msg_type'] == 'super_chat':
-                        msg['name'] = j.get('data', {}).get('uname', '')
-                        msg['uid'] = j.get('data', {}).get('uid', '')
-                        msg['content'] = j.get('data', {}).get('message', '')
-                        msg['price'] = j.get('data', {}).get('price', '')
-
-                    if msg['msg_type'] == 'gift':
-                        msg['name'] = j.get('data', {}).get('uname', '')
-                        msg['uid'] = j.get('data', {}).get('uid', '')
-                        msg['content'] = j.get('data', {}).get('giftName', '')
-                        msg['price'] = j.get('data', {}).get('price', '')
-
                     if msg['msg_type'] == 'danmaku':
                         msg['name'] = (j.get('info', ['', '', ['', '']])[2][1] or
                                        j.get('data', {}).get('uname', ''))
+                        msg['uid'] = j.get('info', ['', '', ['', '']])[2][0]
                         msg['content'] = j.get('info', ['', ''])[1]
                         msg["color"] = f"{j.get('info', '16777215')[0][3]}"
+
+                    elif msg['msg_type'] == 'super_chat':
+                        msg['name'] = j.get('data', {}).get('uname', '')
+                        msg['uid'] = j.get('data', {}).get('uid', '')
+                        msg['content'] = j.get('data', {}).get('message', '')
+                        msg['price'] = int(j.get('data', {}).get('price', 0)) * 1000
+                        msg['num'] = 1
+                        msg['gift_name'] = "醒目留言"
+
+                    elif msg['msg_type'] == "guard_buy":
+                        msg['name'] = j.get('data', {}).get('uname', '')
+                        msg['uid'] = j.get('data', {}).get('uid', '')
+                        msg['num'] = j.get('data', {}).get('num', '')
+                        if j.get('data', {}).get('guard_level', '') == 1:
+                            msg['gift_name'] == '总督'
+                        elif j.get('data', {}).get('guard_level', '') == 2:
+                            msg['gift_name'] == '提督'
+                        elif j.get('data', {}).get('guard_level', '') == 3:
+                            msg['gift_name'] == '舰长'
+                        else:
+                            msg['gift_name'] == '见鬼了'
+                        msg['num'] = j.get('data', {}).get('num', '')
+                        msg['content'] = f"{msg['name']}为主播续费{msg['gift_name']}一个月"
+
+                    elif msg['msg_type'] == 'gift':
+                        msg['name'] = j.get('data', {}).get('uname', '')
+                        msg['uid'] = j.get('data', {}).get('uid', '')
+                        msg['gift_name'] = j.get('data', {}).get('giftName', '')
+                        msg['price'] = j.get('data', {}).get('price', '')
+                        msg['num'] = j.get('data', {}).get('num', '')
+                        msg['content'] = f"{msg['name']}投喂了{msg['num']}个{msg['gift_name']}"
 
                     elif msg['msg_type'] == 'interactive_danmaku':
                         msg['name'] = j.get('data', {}).get('uname', '')
