@@ -200,9 +200,10 @@ class DanmakuClient(IDanmakuClient):
                             d = etree.SubElement(root, 'd')
                             d.set('p', f"{msg_time},1,25,{color},0,0,0,0")
                             # 记录弹幕额外信息
-                            d.set('timestamp', str(int(time.time())))
-                            d.set('uid', str(m.get("uid",0)))
-                            d.set('username', m.get("name",""))
+                            if self.__content.get("full", None):
+                                d.set('timestamp', str(int(time.time())))
+                                d.set('uid', str(m.get("uid",0)))
+                                d.set('username', m.get("name",""))
                             d.text = m["content"]
                         except:
                             logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常", exc_info=True)
@@ -210,6 +211,8 @@ class DanmakuClient(IDanmakuClient):
                             continue
                     # 礼物信息记录，支持上舰、SC、礼物，目前仅在B站开启
                     elif m.get('msg_type') in ['gift', 'super_chat' , 'guard_buy'] and self.__u == 'live.bilibili.com':
+                        if not self.__content.get("full", None):
+                            continue
                         try:
                             s = etree.SubElement(root, 's')
                             s.set('timestamp', str(int(time.time())))

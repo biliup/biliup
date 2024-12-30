@@ -34,6 +34,8 @@ class Bilibili:
         buvid3 = None
         buid = 0
         is_login = False
+        if content.get("full", False):
+            cookie_str == None
 
         danmu_wss_url = 'wss://broadcastlv.chat.bilibili.com/sub'
         room_id = content.get('room_id')

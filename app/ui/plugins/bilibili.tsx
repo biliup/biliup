@@ -53,6 +53,15 @@ const Bilibili: React.FC<Props> = (props) => {
                         padding: 0,
                     }}
                 />
+                <Form.Switch
+                    field="bilibili_danmaku_full"
+                    extraText="录制的弹幕信息中包含发送者昵称、用户UID，同时保存SuperChat、上舰、礼物信息。仅 bilibili_danmaku 开启时生效，默认关闭"
+                    label="完整弹幕（bilibili_danmaku_full）"
+                    fieldStyle={{
+                        alignSelf: "stretch",
+                        padding: 0,
+                    }}
+                />
                 <Form.Input
                     field="user.bili_cookie"
                     extraText={

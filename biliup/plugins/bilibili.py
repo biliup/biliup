@@ -20,6 +20,7 @@ class Bililive(DownloadBase):
         super().__init__(fname, url, suffix)
         self.live_start_time = 0
         self.bilibili_danmaku = config.get('bilibili_danmaku', False)
+        self.bilibili_danmaku_full = config.get('bilibili_danmaku_full', False)
         self.__real_room_id = None
         self.__is_login = False
         # self.fake_headers['referer'] = url
@@ -205,7 +206,8 @@ class Bililive(DownloadBase):
             self.danmaku = DanmakuClient(
                 self.url, self.gen_download_filename(), {
                     'room_id': self.__real_room_id, 
-                    'cookie': self.fake_headers.get("cookie")
+                    'cookie': self.fake_headers.get("cookie"),
+                    'full': self.bilibili_danmaku_full
                 }
             )
 
