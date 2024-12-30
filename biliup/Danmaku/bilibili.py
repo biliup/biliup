@@ -30,12 +30,12 @@ class Bilibili:
         # 获取传入的cookie
         cookie_str = content.get('cookie', None)
         if cookie_str == "":
-            cookie_str == None
+            cookie_str = None
         buvid3 = None
         buid = 0
         is_login = False
-        if content.get("full", False):
-            cookie_str == None
+        if not content.get("full", False):
+            cookie_str = None
 
         danmu_wss_url = 'wss://broadcastlv.chat.bilibili.com/sub'
         room_id = content.get('room_id')
