@@ -203,7 +203,10 @@ class Bililive(DownloadBase):
     def danmaku_init(self):
         if self.bilibili_danmaku:
             self.danmaku = DanmakuClient(
-                self.url, self.gen_download_filename(), {'room_id': self.__real_room_id}
+                self.url, self.gen_download_filename(), {
+                    'room_id': self.__real_room_id, 
+                    'cookie': self.fake_headers.get("cookie")
+                }
             )
 
     async def get_play_info(self, api: str, qn: int = 10000) -> dict:
