@@ -1,40 +1,68 @@
-import React, {useEffect} from "react";
+import React, { useEffect, useRef } from "react";
 import Player from 'xgplayer';
 import Artplayer from 'artplayer';
 import 'xgplayer/dist/index.min.css';
 import FlvPlugin from "xgplayer-flv";
-import FlvJsPlugin from 'xgplayer-flv.js'
-import Mp4Plugin from "xgplayer-mp4";
+import FlvJsPlugin from "xgplayer-flv.js";
 
-const Players: React.FC<{url: string}> = ({url}) => {
+type VideoPlayer = Player | Artplayer | null;
+
+interface PlayerConfig {
+  url: string;
+  height?: string;
+  width?: string;
+}
+
+const Players: React.FC<PlayerConfig> = ({ url, height = '100%', width = '100%' }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const playerRef = useRef<VideoPlayer>(null);
+
     useEffect(() => {
-        // let player: Player | null = new Player({
-        //     id: 'mse',
-        //     url: url,
-        //     height: '100%',
-        //     plugins: [FlvPlugin, Mp4Plugin],
-        //     // plugins: [FlvJsPlugin],
-        //     width: '100%',
-        // });
-        // return () => {
-        //     player?.destroy();
-        //     player = null;
-        // };
-        let player: Artplayer | null = new Artplayer({
-            container: '.artplayer-app',
-            url: url,
-            autoSize: true,
-            fullscreen: true,
-            fullscreenWeb: true,
-            autoOrientation: true,
-            plugins: [],
-        });
+        if (!containerRef.current) return;
+
+        try {
+            if (playerRef.current) {
+                playerRef.current.destroy();
+                playerRef.current = null;
+            }
+
+            if (url.endsWith('.flv')) {
+                playerRef.current = new Player({
+                    el: containerRef.current,
+                    url,
+                    height,
+                    width,
+                    plugins: [FlvPlugin],
+                });
+            } else {
+                playerRef.current = new Artplayer({
+                    container: containerRef.current,
+                    url,
+                    autoSize: true,
+                    fullscreen: true,
+                    fullscreenWeb: true,
+                    autoOrientation: true,
+                    plugins: [],
+                });
+            }
+        } catch (error) {
+            console.error('播放器初始化失败:', error);
+        }
+
         return () => {
-            player?.destroy();
-            player = null;
+            if (playerRef.current) {
+                playerRef.current.destroy();
+                playerRef.current = null;
+            }
         };
-    }, [url])
-    return  <div className="artplayer-app" style={{width: '100%', height: '100%'}}></div>;
+    }, [url, height, width]);
+
+    return (
+        <div
+            ref={containerRef}
+            style={{ width, height }}
+        />
+    );
 }
 
 export default Players;
