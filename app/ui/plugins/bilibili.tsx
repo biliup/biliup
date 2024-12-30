@@ -175,6 +175,7 @@ const Bilibili: React.FC<Props> = (props) => {
                     rules={[
                         {
                             validator: (rule, value) => {
+                                value = value ?? (console.log(value), []);
                                 return Array.isArray(value) && value.every(item => /^(cn|ov)-gotcha\d+$/.test(item));
                             },
                             message: '例: cn-gotcha204, ov-gotcha05'

@@ -1,4 +1,4 @@
-import React, {useState} from "react";
+import React, {useState, useMemo} from "react";
 import {FormFCChild} from "@douyinfe/semi-ui/lib/es/form";
 import {IconChevronDown, IconChevronUp, IconMinusCircle, IconPlusCircle } from "@douyinfe/semi-icons";
 import {Avatar, Button, Collapsible, Form, InputGroup, Space, Typography, ArrayField, Notification} from "@douyinfe/semi-ui";
@@ -92,6 +92,20 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & {isDtime: boolean}>> =
         setOpen(!isOpen);
         formApi.scrollToField('isDtime');
     };
+
+    const hourList = useMemo(() => {
+        return Array.from({length: 24 * 15 - 2}, (_, i) => ({
+            label: `${i + 2}小时`,
+            value: i + 2
+        }));
+    }, []);
+    const minuteList = useMemo(() => {
+        return Array.from({length: 60/5}, (_, i) => ({
+            label: `${i * 5}分钟`,
+            value: i * 5
+        }));
+    }, []);
+
     return(
         <>
             <Section text={'基本信息'}>
@@ -188,9 +202,48 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & {isDtime: boolean}>> =
                     <Switch field='isDtime' label={{ text: '定时发布' }} checkedText="｜" uncheckedText="〇"/>
                     <span style={{paddingLeft: 12, fontSize: 12}}>(当前+2小时 ≤ 可选时间 ≤ 当前+15天，转载稿件撞车判定以过审发布时间为准)</span>
                 </div>
-                {values.isDtime ? (
-                    <DatePicker field="dtime" label=' ' type='dateTime' fieldStyle={{ paddingTop: 0 }} />
-                ) : null}
+                {values.isDtime && (
+                    <div style={{ width: 1000, display: 'flex', alignItems: 'flex-end' }}>
+                        <Form.InputNumber
+                            field="delay_hour"
+                            label="延迟小时"
+                            style={{ width: 120, marginRight: 40 }}
+                            min={2}
+                            max={24 * 15 - 1}
+                            shiftStep={10}
+                            innerButtons={true}
+                            suffix={'小时'}
+                            initValue={() => {
+                                const dtime = Number(formApi.getValue('dtime')) || 0;
+                                return Math.floor(dtime / 3600) || 2;
+                            }}
+                            onChange={(hour) => {
+                                formApi.setValue('delay_hour', hour);
+                                const currentHour = Number(hour) || 2;
+                                const currentMinute = Number(formApi.getValue('delay_minute')) || 0;
+                                const totalSeconds = (currentHour * 60 + currentMinute) * 60;
+                                formApi.setValue('dtime', String(totalSeconds));
+                            }}
+                        />
+                        <Form.Select
+                            field="delay_minute"
+                            label="延迟分钟"
+                            style={{ width: 120 }}
+                            optionList={minuteList}
+                            initValue={() => {
+                                const dtime = Number(formApi.getValue('dtime')) || 0;
+                                return Math.floor((dtime % 3600) / 60) || 0;
+                            }}
+                            onChange={(minute) => {
+                                formApi.setValue('delay_minute', minute);
+                                const currentHour = Number(formApi.getValue('delay_hour')) || 2;
+                                const currentMinute = Number(minute) || 0;
+                                const totalSeconds = (currentHour * 60 + currentMinute) * 60;
+                                formApi.setValue('dtime', String(totalSeconds));
+                            }}
+                        />
+                    </div>
+                )}
             </Section>
 
             <Section style={{paddingBottom: 40}} text={<div style={{cursor: 'pointer'}} onClick={toggle}>更多设置 {isOpen? <IconChevronUp style={{marginLeft: 12}} />:<IconChevronDown style={{marginLeft: 12}} />}</div>}>
