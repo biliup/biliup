@@ -29,19 +29,15 @@ class Bilibili:
     async def get_ws_info(url, content):
         # 获取传入的cookie
         cookie_str = content.get('cookie', None)
-        if cookie_str == "":
+        if cookie_str == "" or not content.get("detail", False):
             cookie_str = None
         buid = 0
         is_login = False
-        if not content.get("detail", False):
-            cookie_str = None
 
         danmu_wss_url = 'wss://broadcastlv.chat.bilibili.com/sub'
         room_id = content.get('room_id')
-        if content.get('cookie', None):
-            Bilibili.headers['cookie'] = content.get('cookie')
-        
-        if content.get('cookie', None):
+        if cookie_str:
+            Bilibili.headers['cookie'] = cookie_str
             async with aiohttp.ClientSession(headers=Bilibili.headers) as session:
                 try:
                     async with session.get(f"https://api.bilibili.com/x/web-interface/nav", timeout=5) as resp:
@@ -78,7 +74,7 @@ class Bilibili:
                 'type': 2,
                 'key': danmu_token,
             }
-            print(w_data)
+            #print(w_data)
             data = json.dumps(w_data).encode('utf-8')
             reg_datas = [(pack('>i', len(data) + 16) + b'\x00\x10\x00\x01' + pack('>i', 7) + pack('>i', 1) + data)]
         return danmu_wss_url, reg_datas
