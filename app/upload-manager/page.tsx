@@ -84,6 +84,13 @@ export default function Union() {
             key: v.key,
         };
     });
+    const [transferData, setTransferData] = useState<(string | number)[]>([]);
+
+    const handleTransferChange = (values: (string | number)[], items: any[]) => {
+        setSelectFiles(values);
+        setTransferData(values);
+    };
+
     return (<>
         <UserList visible={visible} onCancel={change}></UserList>
         <Modal
@@ -92,17 +99,18 @@ export default function Union() {
             okText="上传"
             visible={visibleModal}
             onOk={handleOk}
-            afterClose={handleAfterClose} //>=1.16.0
+            afterClose={handleAfterClose}
             onCancel={handleCancel}
             closeOnEsc={true}
         >
-                 <Transfer
-                    style={{ width: 568, height: 416 }}
-                    dataSource={data}
-                    draggable
-                    onChange={(values, items) => setSelectFiles(values)}
-                />
-            </Modal>
+            <Transfer
+                style={{ width: 568, height: 416 }}
+                dataSource={data}
+                draggable
+                value={transferData}
+                onChange={handleTransferChange}
+            />
+        </Modal>
         <Header style={{ backgroundColor: 'var(--semi-color-bg-1)' }}>
             <nav
                 style={{
@@ -112,7 +120,7 @@ export default function Union() {
                     alignItems:'center',
                     justifyContent:'space-between',
                     flexWrap:'wrap',
-                    boxShadow:'0 1px 2px 0 rgb(0 0 0 / 0.05)'      
+                    boxShadow:'0 1px 2px 0 rgb(0 0 0 / 0.05)'
                 }}
             >
                 <div

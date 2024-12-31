@@ -1,7 +1,7 @@
-import React, {useState} from "react";
+import React, {useState, useMemo, useEffect} from "react";
 import {FormFCChild} from "@douyinfe/semi-ui/lib/es/form";
 import {IconChevronDown, IconChevronUp, IconMinusCircle, IconPlusCircle } from "@douyinfe/semi-icons";
-import {Avatar, Button, Collapsible, Form, InputGroup, Space, Typography, ArrayField, Notification} from "@douyinfe/semi-ui";
+import {Avatar, Button, Collapsible, Form, InputGroup, Space, Typography, ArrayField, Notification, ScrollList, ScrollItem} from "@douyinfe/semi-ui";
 import useSWR from "swr";
 import {BiliType, fetcher, StudioEntity} from "../lib/api-streamer";
 import {useBiliUsers, useTypeTree} from "../lib/use-streamers";
@@ -92,6 +92,40 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & {isDtime: boolean}>> =
         setOpen(!isOpen);
         formApi.scrollToField('isDtime');
     };
+    const scrollStyle = {
+        border: 'unset',
+        boxShadow: 'unset',
+        width: 300,
+        height: 300,
+    };
+    const allowedHoursList = new Array(24 * 15).fill(0).map((_, i) => {
+        return {
+            value: i,
+            text: `${i}小时`,
+            disabled: i < 4 || i >= 24 * 15,
+        };
+    });
+    const allowedMinutesList = new Array(60 / 5).fill(0).map((_, i) => {
+        return {
+            value: i * 5,
+            text: `${i * 5}分钟`,
+        };
+    });
+    const [selectedHours, setSelectedHours] = useState(4);
+    const [selectedMinutes, setSelectedMinutes] = useState(0);
+
+    useEffect(() => {
+        const dtime = formApi.getValue('dtime');
+        if (dtime) {
+            const hours = Math.floor(dtime / 3600);
+            const minutes = Math.floor((dtime % 3600) / 60);
+            if (hours >= 4 && hours < 24 * 15) {
+                setSelectedHours(hours);
+                setSelectedMinutes(Math.floor(minutes / 5) * 5);
+            }
+        }
+    }, [formApi]);
+
     return(
         <>
             <Section text={'基本信息'}>
@@ -186,10 +220,41 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & {isDtime: boolean}>> =
 
                 <div style={{display: 'flex', alignItems: 'center', color: 'var(--semi-color-tertiary)'}}>
                     <Switch field='isDtime' label={{ text: '定时发布' }} checkedText="｜" uncheckedText="〇"/>
-                    <span style={{paddingLeft: 12, fontSize: 12}}>(当前+2小时 ≤ 可选时间 ≤ 当前+15天，转载稿件撞车判定以过审发布时间为准)</span>
+                    <span style={{paddingLeft: 12, fontSize: 12}}>(当前+2小时 ≤ 可选时间 ≤ 当前+15天，转载稿件撞车判定以过审发布时间为准。上传速度不佳的机器请谨慎开启，或设置更大的延迟时间。)</span>
                 </div>
                 {values.isDtime ? (
-                    <DatePicker field="dtime" label=' ' type='dateTime' fieldStyle={{ paddingTop: 0 }} />
+                    <ScrollList style={scrollStyle} header={'延迟时间'} footer={
+                        <Button size="small" type="primary" onClick={() => {
+                            const delaySeconds = (selectedHours * 3600) + (selectedMinutes * 60);
+                            formApi.setValue('dtime', delaySeconds);
+                            Notification.success({
+                                title: '保存成功',
+                                content: `延迟时间：${selectedHours}小时${selectedMinutes}分钟`,
+                                duration: 3,
+                                position: 'top'
+                            });
+                            console.log(delaySeconds);
+                        }}>
+                            确认
+                        </Button>
+                    }>
+                        <ScrollItem
+                            mode="wheel"
+                            cycled={true}
+                            list={allowedHoursList}
+                            type={1}
+                            selectedIndex={allowedHoursList.findIndex(item => item.value === selectedHours)}
+                            onSelect={(item) => setSelectedHours(item.value)}
+                        />
+                        <ScrollItem
+                            mode="wheel"
+                            cycled={true}
+                            list={allowedMinutesList}
+                            type={2}
+                            selectedIndex={allowedMinutesList.findIndex(item => item.value === selectedMinutes)}
+                            onSelect={(item) => setSelectedMinutes(item.value)}
+                        />
+                    </ScrollList>
                 ) : null}
             </Section>
 

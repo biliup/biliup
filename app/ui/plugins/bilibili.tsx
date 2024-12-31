@@ -175,9 +175,10 @@ const Bilibili: React.FC<Props> = (props) => {
                     rules={[
                         {
                             validator: (rule, value) => {
+                                value = value ?? [];
                                 return Array.isArray(value) && value.every(item => /^(cn|ov)-gotcha\d+$/.test(item));
                             },
-                            message: '例: cn-gotcha204, ov-gotcha05'
+                            message: '例: cn-gotcha204,ov-gotcha05'
                         }
                     ]}
                 />
@@ -262,7 +263,7 @@ const Bilibili: React.FC<Props> = (props) => {
                     rules={[
                         {
                             validator: (rule, value) => {
-                                value = value ?? (console.log(value), []);
+                                value = value ?? [];
                                 return Array.isArray(value) && value.every(item => /^cn-[a-z]{2,6}-[a-z]{2,4}(-[0-9]{2}){2}$/.test(item));
                             },
                             message: '例: cn-hjlheb-cu-01-01,cn-tj-ct-01-01'
