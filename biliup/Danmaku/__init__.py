@@ -228,6 +228,8 @@ class DanmakuClient(IDanmakuClient):
                             logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常", exc_info=True)
                             # 异常后略过本次弹幕
                             continue
+                    else:
+                        continue
                     msg_i += 1
                     if msg_i % 5 == 0:
                         # 每收到五条弹幕后写入 减少io
