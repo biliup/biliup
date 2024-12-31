@@ -1,26 +1,20 @@
 'use client'
-import {Button, ButtonGroup, Layout, List, Modal, Nav, Popconfirm, Typography} from "@douyinfe/semi-ui";
+import { Layout, Modal, Nav, Typography } from "@douyinfe/semi-ui";
 import {
-    IconDeleteStroked,
-    IconEdit2Stroked,
-    IconHelpCircle,
-    IconPlusCircle, IconUserCardVideo,
+    IconUserCardVideo,
     IconVideoListStroked
 } from "@douyinfe/semi-icons";
-import TemplateModal from "../ui/TemplateModal";
-import { Table, Avatar } from '@douyinfe/semi-ui';
-import { IconMore } from '@douyinfe/semi-icons';
-import { ColumnProps } from "@douyinfe/semi-ui/lib/es/table/interface";
+import { Table } from '@douyinfe/semi-ui';
 import { SortOrder } from "@douyinfe/semi-ui/lib/es/table";
 import useSWR from "swr";
-import { fetcher, FileList, StudioEntity } from "@/app/lib/api-streamer";
+import { fetcher, FileList } from "@/app/lib/api-streamer";
 import { useState } from "react";
-import Player from 'xgplayer';
-import 'xgplayer/dist/index.min.css';
-import FlvPlugin from "xgplayer-flv";
-import FlvJsPlugin from 'xgplayer-flv.js'
-import Players from "@/app/ui/Player";
+import dynamic from 'next/dynamic';
 import { humDate } from "@/app/lib/utils";
+
+const Players = dynamic(() => import("@/app/ui/Player"), {
+    ssr: false
+});
 
 export default function Home() {
     const { Header, Footer, Sider, Content } = Layout;

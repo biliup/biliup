@@ -1,16 +1,40 @@
 import React, { useEffect, useRef } from "react";
-import Player from 'xgplayer';
 import Artplayer from 'artplayer';
-import 'xgplayer/dist/index.min.css';
-import FlvPlugin from "xgplayer-flv";
-import FlvJsPlugin from "xgplayer-flv.js";
+import mpegts from 'mpegts.js';
 
-type VideoPlayer = Player | Artplayer | null;
+type VideoPlayer = Artplayer | null;
 
 interface PlayerConfig {
   url: string;
   height?: string;
   width?: string;
+}
+
+function playFlv(video: HTMLVideoElement, url: string, art: Artplayer) {
+    if (mpegts.isSupported()) {
+        if (art.flv) {
+            art.flv.destroy();
+            art.flv = null;
+        }
+
+        const flv = mpegts.createPlayer({
+            type: 'flv',
+            url: url,
+        });
+
+        art.flv = flv;
+        art.on('destroy', () => {
+            if (art.flv) {
+                art.flv.destroy();
+                art.flv = null;
+            }
+        });
+
+        flv.attachMediaElement(video);
+        flv.load();
+    } else {
+        art.notice.show = 'Unsupported playback format: flv';
+    }
 }
 
 const Players: React.FC<PlayerConfig> = ({ url, height = '100%', width = '100%' }) => {
@@ -27,12 +51,18 @@ const Players: React.FC<PlayerConfig> = ({ url, height = '100%', width = '100%' 
             }
 
             if (url.endsWith('.flv')) {
-                playerRef.current = new Player({
-                    el: containerRef.current,
+                playerRef.current = new Artplayer({
+                    container: containerRef.current,
                     url,
-                    height,
-                    width,
-                    plugins: [FlvPlugin],
+                    type: 'flv',
+                    customType: {
+                        flv: playFlv,
+                    },
+                    autoSize: true,
+                    fullscreen: true,
+                    fullscreenWeb: true,
+                    autoOrientation: true,
+                    plugins: [],
                 });
             } else {
                 playerRef.current = new Artplayer({
