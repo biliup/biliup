@@ -33,7 +33,7 @@ class Bilibili:
             cookie_str = None
         buid = 0
         is_login = False
-        if not content.get("full", False):
+        if not content.get("detail", False):
             cookie_str = None
 
         danmu_wss_url = 'wss://broadcastlv.chat.bilibili.com/sub'
