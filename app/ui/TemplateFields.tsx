@@ -1,7 +1,7 @@
-import React, {useState, useMemo} from "react";
+import React, {useState, useMemo, useEffect} from "react";
 import {FormFCChild} from "@douyinfe/semi-ui/lib/es/form";
 import {IconChevronDown, IconChevronUp, IconMinusCircle, IconPlusCircle } from "@douyinfe/semi-icons";
-import {Avatar, Button, Collapsible, Form, InputGroup, Space, Typography, ArrayField, Notification} from "@douyinfe/semi-ui";
+import {Avatar, Button, Collapsible, Form, InputGroup, Space, Typography, ArrayField, Notification, ScrollList, ScrollItem} from "@douyinfe/semi-ui";
 import useSWR from "swr";
 import {BiliType, fetcher, StudioEntity} from "../lib/api-streamer";
 import {useBiliUsers, useTypeTree} from "../lib/use-streamers";
@@ -92,19 +92,39 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & {isDtime: boolean}>> =
         setOpen(!isOpen);
         formApi.scrollToField('isDtime');
     };
+    const scrollStyle = {
+        border: 'unset',
+        boxShadow: 'unset',
+        width: 300,
+        height: 300,
+    };
+    const allowedHoursList = new Array(24 * 15).fill(0).map((_, i) => {
+        return {
+            value: i,
+            text: `${i}小时`,
+            disabled: i < 4 || i >= 24 * 15,
+        };
+    });
+    const allowedMinutesList = new Array(60 / 5).fill(0).map((_, i) => {
+        return {
+            value: i * 5,
+            text: `${i * 5}分钟`,
+        };
+    });
+    const [selectedHours, setSelectedHours] = useState(4);
+    const [selectedMinutes, setSelectedMinutes] = useState(0);
 
-    const hourList = useMemo(() => {
-        return Array.from({length: 24 * 15 - 2}, (_, i) => ({
-            label: `${i + 2}小时`,
-            value: i + 2
-        }));
-    }, []);
-    const minuteList = useMemo(() => {
-        return Array.from({length: 60/5}, (_, i) => ({
-            label: `${i * 5}分钟`,
-            value: i * 5
-        }));
-    }, []);
+    useEffect(() => {
+        const dtime = formApi.getValue('dtime');
+        if (dtime) {
+            const hours = Math.floor(dtime / 3600);
+            const minutes = Math.floor((dtime % 3600) / 60);
+            if (hours >= 4 && hours < 24 * 15) {
+                setSelectedHours(hours);
+                setSelectedMinutes(Math.floor(minutes / 5) * 5);
+            }
+        }
+    }, [formApi]);
 
     return(
         <>
@@ -200,50 +220,42 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & {isDtime: boolean}>> =
 
                 <div style={{display: 'flex', alignItems: 'center', color: 'var(--semi-color-tertiary)'}}>
                     <Switch field='isDtime' label={{ text: '定时发布' }} checkedText="｜" uncheckedText="〇"/>
-                    <span style={{paddingLeft: 12, fontSize: 12}}>(当前+2小时 ≤ 可选时间 ≤ 当前+15天，转载稿件撞车判定以过审发布时间为准)</span>
+                    <span style={{paddingLeft: 12, fontSize: 12}}>(当前+2小时 ≤ 可选时间 ≤ 当前+15天，转载稿件撞车判定以过审发布时间为准。上传速度不佳的机器请谨慎开启，或设置更大的延迟时间。)</span>
                 </div>
-                {values.isDtime && (
-                    <div style={{ width: 1000, display: 'flex', alignItems: 'flex-end' }}>
-                        <Form.InputNumber
-                            field="delay_hour"
-                            label="延迟小时"
-                            style={{ width: 120, marginRight: 40 }}
-                            min={4}
-                            max={24 * 15 - 1}
-                            shiftStep={10}
-                            innerButtons={true}
-                            suffix={'小时'}
-                            initValue={() => {
-                                const dtime = Number(formApi.getValue('dtime')) || 0;
-                                return Math.floor(dtime / 3600) || 2;
-                            }}
-                            onChange={(hour) => {
-                                formApi.setValue('delay_hour', hour);
-                                const currentHour = Number(hour) || 2;
-                                const currentMinute = Number(formApi.getValue('delay_minute')) || 0;
-                                const totalSeconds = (currentHour * 60 + currentMinute) * 60;
-                                formApi.setValue('dtime', String(totalSeconds));
-                            }}
+                {values.isDtime ? (
+                    <ScrollList style={scrollStyle} header={'延迟时间'} footer={
+                        <Button size="small" type="primary" onClick={() => {
+                            const delaySeconds = (selectedHours * 3600) + (selectedMinutes * 60);
+                            formApi.setValue('dtime', delaySeconds);
+                            Notification.success({
+                                title: '保存成功',
+                                content: `延迟时间：${selectedHours}小时${selectedMinutes}分钟`,
+                                duration: 3,
+                                position: 'top'
+                            });
+                            console.log(delaySeconds);
+                        }}>
+                            确认
+                        </Button>
+                    }>
+                        <ScrollItem
+                            mode="wheel"
+                            cycled={true}
+                            list={allowedHoursList}
+                            type={1}
+                            selectedIndex={allowedHoursList.findIndex(item => item.value === selectedHours)}
+                            onSelect={(item) => setSelectedHours(item.value)}
                         />
-                        <Form.Select
-                            field="delay_minute"
-                            label="延迟分钟"
-                            style={{ width: 120 }}
-                            optionList={minuteList}
-                            initValue={() => {
-                                const dtime = Number(formApi.getValue('dtime')) || 0;
-                                return Math.floor((dtime % 3600) / 60) || 0;
-                            }}
-                            onChange={(minute) => {
-                                formApi.setValue('delay_minute', minute);
-                                const currentHour = Number(formApi.getValue('delay_hour')) || 2;
-                                const currentMinute = Number(minute) || 0;
-                                const totalSeconds = (currentHour * 60 + currentMinute) * 60;
-                                formApi.setValue('dtime', String(totalSeconds));
-                            }}
+                        <ScrollItem
+                            mode="wheel"
+                            cycled={true}
+                            list={allowedMinutesList}
+                            type={2}
+                            selectedIndex={allowedMinutesList.findIndex(item => item.value === selectedMinutes)}
+                            onSelect={(item) => setSelectedMinutes(item.value)}
                         />
-                    </div>
-                )}
+                    </ScrollList>
+                ) : null}
             </Section>
 
             <Section style={{paddingBottom: 40}} text={<div style={{cursor: 'pointer'}} onClick={toggle}>更多设置 {isOpen? <IconChevronUp style={{marginLeft: 12}} />:<IconChevronDown style={{marginLeft: 12}} />}</div>}>
