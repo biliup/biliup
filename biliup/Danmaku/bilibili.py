@@ -138,7 +138,7 @@ class Bilibili:
                         msg["color"] = f"{j.get('info', '16777215')[0][3]}"
 
                     elif msg['msg_type'] == 'super_chat':
-                        msg['name'] = j.get('data', {}).get('uname', '')
+                        msg['name'] = j.get('data', {}).get('user_info', {}).get('uname', "")
                         msg['uid'] = j.get('data', {}).get('uid', '')
                         msg['content'] = j.get('data', {}).get('message', '')
                         msg['price'] = int(j.get('data', {}).get('price', 0)) * 1000
@@ -146,17 +146,10 @@ class Bilibili:
                         msg['gift_name'] = "醒目留言"
 
                     elif msg['msg_type'] == "guard_buy":
-                        msg['name'] = j.get('data', {}).get('uname', '')
+                        msg['name'] = j.get('data', {}).get('username', '')
                         msg['uid'] = j.get('data', {}).get('uid', '')
-                        msg['num'] = j.get('data', {}).get('num', '')
-                        if j.get('data', {}).get('guard_level', '') == 1:
-                            msg['gift_name'] = '总督'
-                        elif j.get('data', {}).get('guard_level', '') == 2:
-                            msg['gift_name'] = '提督'
-                        elif j.get('data', {}).get('guard_level', '') == 3:
-                            msg['gift_name'] = '舰长'
-                        else:
-                            msg['gift_name'] = '见鬼了'
+                        msg['gift_name'] = j.get('data', {}).get('gift_name', '')
+                        msg['price'] = j.get('data', {}).get('price', '')
                         msg['num'] = j.get('data', {}).get('num', '')
                         msg['content'] = f"{msg['name']}为主播续费{msg['gift_name']}一个月"
 
