@@ -6,6 +6,7 @@ import {
     List,
     Nav,
     Popconfirm,
+    CardGroup,
     Notification, Typography, Modal, Transfer,
 } from "@douyinfe/semi-ui";
 import {
@@ -171,18 +172,10 @@ export default function Union() {
                 backgroundColor: 'var(--semi-color-bg-0)'
             }}
         >
-            <List grid={{
-                gutter: 12,
-                xs: 24,
-                sm: 24,
-                md: 12,
-                lg: 8,
-                xl: 6,
-                xxl: 4,
-            }}
-                dataSource={templates}
-                renderItem={item => <List.Item>
-                    <Card
+            <CardGroup spacing={
+                12
+            }>
+                {templates?.map(item => <Card
                         shadows='hover'
                         style={{
                             maxWidth: 360,
@@ -192,16 +185,15 @@ export default function Union() {
                         bodyStyle={{
                             display: 'flex',
                             alignItems: 'center',
-                            justifyContent: 'space-between'
+                            justifyContent: 'space-between',
+                            paddingRight: '12px' // 减去右侧 Button 留白
                         }}
                     >
-                        <Meta title={
-                            <Text ellipsis={{
-                                    showTooltip: true,
-                                    pos: 'middle'
-                                }} style={{ maxWidth: 150}}>
-                                {item.template_name}
-                            </Text>}/>
+                    <Meta title={<Text style={{
+                            minWidth: 80,
+                            maxWidth: 200,
+                            display: 'block',
+                        }}>{item.template_name}</Text>} />
                         <ButtonGroup style={{minWidth: 100}} theme='borderless'>
                             <Button icon={<IconSendStroked />} onClick={()=> showDialog(item)}></Button>
                             <Button icon={<IconEdit2Stroked />} onClick={()=> {
@@ -218,9 +210,8 @@ export default function Union() {
                             </Popconfirm>
                         </ButtonGroup>
                     </Card>
-                </List.Item>}
-            />
+                )}
+            </CardGroup>
         </Content>
     </>);
 }
-
