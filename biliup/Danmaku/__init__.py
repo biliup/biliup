@@ -163,6 +163,7 @@ class DanmakuClient(IDanmakuClient):
                         continue
 
                     logger.debug(f"{DanmakuClient.__name__}:{self.__url}: 弹幕queue-{m.get('msg_type')}")
+                    #print(m)
                     if m.get('msg_type') == "save":
                         if 'file_name' in m and fmt_file_name != m['file_name']:
                             try:
@@ -188,6 +189,7 @@ class DanmakuClient(IDanmakuClient):
                         fmt_file_name = None
                         self.__record_task.cancel()
                         return
+                    # 弹幕信息记录
                     elif m.get('msg_type') == 'danmaku':
                         try:
                             if m.get('color'):
@@ -197,17 +199,42 @@ class DanmakuClient(IDanmakuClient):
                             msg_time = format(time.time() - start_time, '.3f')
                             d = etree.SubElement(root, 'd')
                             d.set('p', f"{msg_time},1,25,{color},0,0,0,0")
+                            # 记录弹幕额外信息
+                            if self.__content.get("detail", None):
+                                d.set('timestamp', str(int(time.time())))
+                                d.set('uid', str(m.get("uid",0)))
+                                d.set('username', m.get("name",""))
                             d.text = m["content"]
                         except:
                             logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常", exc_info=True)
                             # 异常后略过本次弹幕
                             continue
-
-                        msg_i += 1
-                        if msg_i % 5 == 0:
-                            # 每收到五条弹幕后写入 减少io
-                            # 可能会写入失败 会在下次五条或者任务被取消时重新尝试写入
-                            write_file(fmt_file_name)
+                    # 礼物信息记录，支持上舰、SC、礼物，目前仅在B站开启
+                    elif m.get('msg_type') in ['gift', 'super_chat' , 'guard_buy'] and self.__u == 'live.bilibili.com':
+                        if not self.__content.get("detail", None):
+                            continue
+                        try:
+                            s = etree.SubElement(root, 's')
+                            s.set('timestamp', str(int(time.time())))
+                            s.set('uid', str(m.get("uid")))
+                            s.set('username', m.get("name",""))
+                            s.set('price', str(m.get("price")))
+                            s.set('type', m.get('msg_type'))
+                            # 礼物名称
+                            s.set('num', str(m.get('num')))
+                            s.set('giftname', m.get('gift_name'))
+                            s.text = m["content"]
+                        except:
+                            logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常", exc_info=True)
+                            # 异常后略过本次弹幕
+                            continue
+                    else:
+                        continue
+                    msg_i += 1
+                    if msg_i % 5 == 0:
+                        # 每收到五条弹幕后写入 减少io
+                        # 可能会写入失败 会在下次五条或者任务被取消时重新尝试写入
+                        write_file(fmt_file_name)
             finally:
                 # 发生异常(被取消)时写入 避免丢失未写入
                 write_file(fmt_file_name)
