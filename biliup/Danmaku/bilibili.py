@@ -81,8 +81,9 @@ class Bilibili:
                 'type': 2,
                 'key': danmu_token,
             }
-            print(w_data)
+
             data = json.dumps(w_data).encode('utf-8')
+            logger.info(f"danmaku auth info {data}")
             reg_datas = [(pack('>i', len(data) + 16) + b'\x00\x10\x00\x01' + pack('>i', 7) + pack('>i', 1) + data)]
         return danmu_wss_url, reg_datas
 
