@@ -145,6 +145,11 @@ class Bilibili:
                         msg['content'] = j.get('info', ['', ''])[1]
                         msg["color"] = f"{j.get('info', '16777215')[0][3]}"
 
+                        # 区分是表情包还是普通弹幕
+                        msg_extra = json.loads(j.get('info', [['','','','','','','','','','','','','','','',{}]])[0][15].get("extra", "{}"))
+                        if msg_extra.get("emoticon_unique", "") != "":
+                            msg['content'] = f"表情【{msg_extra['emoticon_unique']}】"
+
                     elif msg['msg_type'] == 'super_chat':
                         msg['name'] = j.get('data', {}).get('user_info', {}).get('uname', "")
                         msg['uid'] = j.get('data', {}).get('uid', '')
