@@ -164,7 +164,7 @@ class Bilibili:
                         msg['gift_name'] = j.get('data', {}).get('gift_name', '')
                         msg['price'] = j.get('data', {}).get('price', '')
                         msg['num'] = j.get('data', {}).get('num', '')
-                        msg['content'] = f"{msg['name']}为主播续费{msg['gift_name']}一个月"
+                        msg['content'] = f"{msg['name']}上了{msg['num']}个月{msg['gift_name']}"
 
                     elif msg['msg_type'] == 'gift':
                         msg['name'] = j.get('data', {}).get('uname', '')
