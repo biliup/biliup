@@ -58,6 +58,23 @@
 2. `biliup start`
 3. 启动时访问 `http://your-ip:19159` 使用webUI，
 
+### Docker
+```sh
+docker run -d \
+  --name biliup \
+  --restart unless-stopped \
+  -p 0.0.0.0:19159:19159 \
+  -v /path/to/save_folder:/opt \
+  ghcr.io/biliup/caution:latest \
+  --password password123
+```
+#### docker-compose.yml [点我](https://github.com/biliup/biliup/blob/master/docker-compose.yml) 
+* 用户名为`biliup`
+* 暴露在公网中也许会产生风险，所以设置密码是很有必要的。
+* 以上示例根据需求进行修改，只作为参考。
+
+* * * * * * * * *
+
 
 ![](.github/resource/light.png)
 ![](.github/resource/dark.png)

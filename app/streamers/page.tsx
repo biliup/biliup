@@ -5,7 +5,7 @@ import {
     Button,
     Tag,
     Typography,
-    Popconfirm, 
+    Popconfirm,
     Notification,
     Card
 } from '@douyinfe/semi-ui';
@@ -55,6 +55,7 @@ export default function Home() {
             case 'Idle': status = <Tag color='green'>空闲</Tag>; break;
             case 'Pending': status = <Tag color='grey'>未知</Tag>; break;
             case 'Inspecting': status = <Tag color='indigo'>检测中</Tag>; break;
+            case 'OutOfSchedule': status = <Tag color='green'>非录播时间</Tag>; break;
         }
         return {...handleEntityPostprocessor(live), status};
     });
@@ -100,29 +101,52 @@ export default function Home() {
         <Header style={{
             backgroundColor: 'var(--semi-color-bg-1)', position: 'sticky', top: 0, zIndex: 1
         }}>
-            <Nav
-                header={<><div style={{
-                    backgroundColor: 'rgba(var(--semi-green-4), 1)',
-                    borderRadius: 'var(--semi-border-radius-large)',
-                    color: 'var(--semi-color-bg-0)',
-                    display: 'flex',
-                    // justifyContent: 'center',
-                    padding: '6px'
-                }}><IconVideoListStroked size='large' /></div><h4 style={{ marginLeft: '12px' }}>录播管理</h4></>}
-                mode="horizontal"
-                footer={<>
+            <nav
+                style={{
+                    display:'flex',
+                    paddingLeft:'25px',
+                    paddingRight:'25px',
+                    alignItems:'center',
+                    justifyContent:'space-between',
+                    flexWrap:'wrap',
+                    boxShadow:'0 1px 2px 0 rgb(0 0 0 / 0.05)'         
+                }}
+            >
+                <div style={{
+                    display:'flex',
+                    gap:10,
+                    justifyContent:'center',
+                    alignItems:'center',
+                    flexWrap:'wrap'
+                }}>
+                    <IconVideoListStroked size='large' style={{
+                        backgroundColor: 'rgba(var(--semi-green-4), 1)',
+                        borderRadius: 'var(--semi-border-radius-large)',
+                        color: 'var(--semi-color-bg-0)',
+                        padding:'6px'
+                    }}/>
+                    <h4>录播管理</h4>
+                </div>
+                <div
+                    style={{
+                        display:'flex',
+                        flexWrap:'wrap',
+                        alignItems:'center',
+                        justifyContent:'center',
+                        gap:6
+                    }}
+                >
                     <Button
                         theme="borderless"
                         icon={<IconHelpCircle size="large" />}
                         style={{
                             color: 'var(--semi-color-text-2)',
-                            marginRight: '12px',
                         }} onClick={() => window.location.href = '/static/ds_update.log'} />
                     <TemplateModal onOk={handleOk}>
                         <Button icon={<IconPlusCircle />} theme="solid" style={{ marginRight: 10 }}>新建</Button>
                     </TemplateModal>
-                </>}
-            ></Nav>
+                </div>
+            </nav>
         </Header>
         <Content
             style={{
@@ -179,7 +203,7 @@ export default function Home() {
                                     </ButtonGroup>
                                 </div>
                             </Card>
-                            
+
                         </List.Item>
                     )}
                 />

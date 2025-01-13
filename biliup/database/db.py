@@ -5,6 +5,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List
 
+import logging
+
+logger = logging.getLogger('biliup')
+
 from sqlalchemy import select, desc, delete
 from sqlalchemy.orm import sessionmaker, scoped_session, Session
 from alembic import command, config
@@ -62,12 +66,11 @@ def get_stream_info_by_filename(db: Session, filename: str) -> dict:
     """通过文件名获取下载信息, 若不存在则返回空字典"""
     try:
         # stream_info = FileList.get(FileList.file == filename).streamer_info
-        stream_info = db.execute(
-            select(FileList).
-            where(FileList.file == filename)
-        ).scalar_one().streamerinfo
+        stmt = select(FileList).where(FileList.file == filename)
+        stream_info = db.execute(stmt).scalar_one().streamerinfo
         stream_info_dict = stream_info.as_dict()
-    except Exception:
+    except Exception as e:
+        logger.debug(f"{e}")
         return {}
     stream_info_dict = {key: value for key, value in stream_info_dict.items() if value}  # 清除字典中的空元素
     stream_info_dict["date"] = datetime_to_struct_time(stream_info_dict["date"])  # 将开播时间转回 struct_time 类型

@@ -80,19 +80,18 @@ async def get_streamer_config(request):
     return web.json_response(config.data['streamers'])
 
 
-async def set_streamer_config(request):
-    post_data = await request.json()
-    # config.data['streamers'] = post_data['streamers']
-    for i, j in post_data['streamers'].items():
-        if i not in config.data['streamers']:
-            config.data['streamers'][i] = {}
-        for key, Value in j.items():
-            config.data['streamers'][i][key] = Value
-    for i in config.data['streamers']:
-        if i not in post_data['streamers']:
-            del config.data['streamers'][i]
-
-    return web.json_response({"status": 200}, status=200)
+# async def set_streamer_config(request):
+#     post_data = await request.json()
+#     # config.data['streamers'] = post_data['streamers']
+#     for i, j in post_data['streamers'].items():
+#         if i not in config.data['streamers']:
+#             config.data['streamers'][i] = {}
+#         for key, Value in j.items():
+#             config.data['streamers'][i][key] = Value
+#     for i in config.data['streamers']:
+#         if i not in post_data['streamers']:
+#             del config.data['streamers'][i]
+#     return web.json_response({"status": 200}, status=200)
 
 
 async def save_config(request):
@@ -125,15 +124,27 @@ async def cookie_login(request):
     return web.json_response({"status": 200})
 
 
-async def sms_login(request):
-    pass
+# async def sms_login(request):
+#     pass
 
 
-async def sms_send(request):
-    # post_data = await request.json()
+# async def sms_send(request):
+#     # post_data = await request.json()
 
-    pass
+#     pass
 
+
+def check_similar_remark(json_data):
+    '''
+    :return: True if similar remark exists
+    '''
+    for fname in config['streamers'].keys():
+        if (
+            json_data['remark'] in fname or
+            fname in json_data['remark']
+        ):
+            return True
+    return False
 
 @routes.get('/v1/get_qrcode')
 async def qrcode_get(request):
@@ -219,6 +230,7 @@ async def streamers(request):
 @routes.get('/v1/streamers')
 async def streamers(request):
     from biliup.app import context
+    from biliup.common.util import check_timerange
     res = []
     with SessionLocal() as db:
         result = db.scalars(select(LiveStreamers))
@@ -228,6 +240,8 @@ async def streamers(request):
             status = 'Idle'
             if context['PluginInfo'].url_status.get(url) == 1:
                 status = 'Working'
+            if not check_timerange(temp['remark']):
+                status = 'OutOfSchedule'
             if context['url_upload_count'].get(url, 0) > 0:
                 status = 'Inspecting'
             temp['status'] = status
@@ -242,6 +256,8 @@ async def streamers(request):
 async def add_lives(request):
     from biliup.app import context
     json_data = await request.json()
+    if check_similar_remark(json_data):
+        return web.HTTPBadRequest(text=f"{json_data['remark']} 与现存备注存在部分重复，禁止添加")
     uid = json_data.get('upload_id')
     with SessionLocal() as db:
         if uid:
@@ -266,9 +282,15 @@ async def lives(request):
     from biliup.app import context
     json_data = await request.json()
     # old = LiveStreamers.get_by_id(json_data['id'])
+    # if check_similar_remark(json_data):
+    #     return web.HTTPBadRequest(text=f"{json_data['remark']} 与现存备注存在部分重复，禁止修改")
     with SessionLocal() as db:
         old = db.get(LiveStreamers, json_data['id'])
         old_url = old.url
+        # 如果备注修改，才需要检查是否与现存备注存在部分重复
+        if json_data['remark'] != old.remark:
+            if check_similar_remark(json_data):
+                return web.HTTPBadRequest(text=f"{json_data['remark']} 与现存备注存在部分重复，禁止修改")
         uid = json_data.get('upload_id')
         # semi-ui 不能直接为 ArrayField 设置空默认值
         # 当前端更新后，应移除这里的数据修改
@@ -555,10 +577,10 @@ async def service(args):
         web.get('/api/basic', get_basic_config),
         web.post('/api/setbasic', set_basic_config),
         web.get('/api/getconfig', get_streamer_config),
-        web.post('/api/setconfig', set_streamer_config),
+        # web.post('/api/setconfig', set_streamer_config),
         web.get('/api/login_by_cookie', cookie_login),
-        web.get('/api/login_by_sms', sms_login),
-        web.post('/api/send_sms', sms_send),
+        # web.get('/api/login_by_sms', sms_login),
+        # web.post('/api/send_sms', sms_send),
         web.get('/api/save', save_config),
         # web.get('/api/get_qrcode', qrcode_get),
         # web.post('/api/login_by_qrcode', qrcode_login),

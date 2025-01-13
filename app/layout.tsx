@@ -1,9 +1,9 @@
 "use client";
 import "./globals.css";
 import styles from "./page.module.css";
-import { SetStateAction, useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { Button, Nav } from "@douyinfe/semi-ui";
 import { OnSelectedData } from "@douyinfe/semi-ui/lib/es/navigation";
 import { Layout as SeLayout } from "@douyinfe/semi-ui/lib/es/layout";
@@ -12,13 +12,13 @@ import {
     IconCustomerSupport,
     IconDoubleChevronLeft,
     IconDoubleChevronRight,
-    IconMoon,
-    IconSemiLogo,
     IconStar,
-    IconSun,
     IconVideoListStroked,
     IconHome, IconSetting,
 } from "@douyinfe/semi-icons";
+import Image from "next/image";
+import ThemeButton from "./ui/ThemeButton";
+import { useSystemTheme, useTheme } from "./lib/utils";
 
 export default function RootLayout({
     children,
@@ -35,7 +35,9 @@ export default function RootLayout({
     const [openKeys, setOpenKeys] = useState(initOpenKeys);
     const [selectedKeys, setSelectedKeys] = useState<any>([pathname.slice(1)]);
     const [isCollapsed, setIsCollapsed] = useState(false);
-    const [mode, setMode] = useState("light");
+    const [mode, setMode] = useState((typeof window !== 'undefined' && localStorage.getItem('mode')) || 'auto')
+    const systemTheme = useSystemTheme()
+    useTheme(mode,systemTheme)
     let navStyle = isCollapsed
         ? { height: "100%", overflow: "visible" }
         : { height: "100%" };
@@ -254,7 +256,7 @@ export default function RootLayout({
                                     // <IconSemiLogo
                                     //     style={{ height: "36px", fontSize: 36 }}
                                     // />
-                                    <img src='logo.png' alt='{}'></img>
+                                    <Image src='logo.png' alt='{}' height={10} width={20}></Image>
                                 }
                                 style={{ justifyContent: "flex-start" }}
                                 text="BILIUP"
@@ -283,7 +285,9 @@ export default function RootLayout({
                                     />
                                 </div>
                             </Nav.Header>
-                            {footer(mode, setMode)}
+                            <Nav.Footer collapseButton={false}>
+                                <ThemeButton mode={mode} setMode={setMode} systemTheme={systemTheme} />
+                            </Nav.Footer>
                         </Nav>
                     </Sider>
                     <SeLayout style={{ height: "100vh" }}>{children}</SeLayout>
@@ -293,44 +297,7 @@ export default function RootLayout({
     );
 }
 
-function footer(
-    mode: string,
-    setMode: {
-        (value: SetStateAction<string>): void;
-        (arg0: string): void;
-    }
-) {
-    const switchMode = () => {
-        const body = document.body;
-        if (body.hasAttribute("theme-mode")) {
-            body.removeAttribute("theme-mode");
-            setMode("light");
-        } else {
-            body.setAttribute("theme-mode", "dark");
-            setMode("dark");
-        }
-    };
-    return (
-        <Nav.Footer collapseButton={true}>
-            <Button
-                onClick={switchMode}
-                theme="borderless"
-                icon={
-                    mode === "light" ? (
-                        <IconMoon size="large" />
-                    ) : (
-                        <IconSun size="large" />
-                    )
-                }
-                style={{
-                    color: "var(--semi-color-text-2)",
-                    // marginRight: '12px',
-                    // zIndex: 100,
-                }}
-            />
-        </Nav.Footer>
-    );
-}
+
 
 function isSub(key1: string, key2: string | number) {
     const routerMap: any = {

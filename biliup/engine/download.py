@@ -9,12 +9,13 @@ import shutil
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator, List, Callable, Optional
 from urllib.parse import urlparse
+from datetime import datetime, timedelta
 
 import requests
 from requests.utils import DEFAULT_ACCEPT_ENCODING
 from httpx import HTTPStatusError
 
-from biliup.common.util import client, loop
+from biliup.common.util import client, loop, check_timerange
 from biliup.database.db import add_stream_info, SessionLocal, update_cover_path, update_room_title, update_file_list
 from biliup.plugins import random_user_agent
 import stream_gears
@@ -58,6 +59,7 @@ class DownloadBase(ABC):
             'user-agent': random_user_agent(),
         }
         self.segment_time = config.get('segment_time', '01:00:00')
+        self.time_range = config.get('time_range')
         self.file_size = config.get('file_size')
 
         # 是否是下载模式 跳过下播检测
@@ -72,12 +74,16 @@ class DownloadBase(ABC):
         # 弹幕客户端
         self.danmaku: Optional[IDanmakuClient] = None
 
-        self.plugin_msg = f"{self.__class__.__name__} - {url}"
+        self.plugin_msg = f"[{self.__class__.__name__}]{self.fname} - {url}"
 
     @abstractmethod
     async def acheck_stream(self, is_check=False):
         # is_check 是否是检测模式 检测模式可以忽略只有下载时需要的耗时操作
         raise NotImplementedError()
+
+    def pre_check(self):
+        if check_timerange(self.fname):
+            return True
 
     def download(self):
         logger.info(f"{self.plugin_msg}: Start downloading {self.raw_stream_url}")
@@ -195,8 +201,9 @@ class DownloadBase(ABC):
 
             input_args += ['-i', input_uri]
 
-            if self.segment_time:
-                output_args += ['-to', self.segment_time]
+            duration = get_duration(self.segment_time, self.time_range)
+            if duration:
+                output_args += ['-to', duration]
             if self.file_size:
                 output_args += ['-fs', str(self.file_size)]
 
@@ -268,7 +275,7 @@ class DownloadBase(ABC):
                         data += f'\n{os.path.abspath(danmaku_file_name)}'
                     processor(self.segment_processor, data)
                 except:
-                    logger.warning(f'执行后处理失败：{self.__class__.__name__} - {self.fname}', exc_info=True)
+                    logger.warning(f'{self.plugin_msg}: 执行后处理失败', exc_info=True)
 
         thread = threading.Thread(target=x, daemon=True, name=f"segment_processor_{exclude_ext_file_name}")
         prev_thread = self.segment_processor_thread[-1] if self.segment_processor_thread else None
@@ -280,7 +287,7 @@ class DownloadBase(ABC):
 
     def run(self):
         try:
-            if not asyncio.run_coroutine_threadsafe(self.acheck_stream(), loop).result():
+            if not asyncio.run_coroutine_threadsafe(self.acheck_stream(), loop).result() or not self.pre_check():
                 return False
             with SessionLocal() as db:
                 update_room_title(db, self.database_row_id, self.room_title)
@@ -295,7 +302,7 @@ class DownloadBase(ABC):
                 self.danmaku = None
 
     def start(self):
-        logger.info(f'开始下载: {self.__class__.__name__} - {self.fname}')
+        logger.info(f"{self.plugin_msg}: 开始下载")
         # 开始时间
         start_time = time.localtime()
         # 结束时间
@@ -309,7 +316,7 @@ class DownloadBase(ABC):
             try:
                 ret = self.run()
             except Exception:
-                logger.warning(f'下载失败: {self.__class__.__name__} - {self.fname}', exc_info=True)
+                logger.warning(f"{self.plugin_msg}: 下载失败", exc_info=True)
             finally:
                 self.close()
 
@@ -329,12 +336,12 @@ class DownloadBase(ABC):
 
         for thread in self.segment_processor_thread:
             if thread.is_alive():
-                logger.info(f'等待分段后处理完成: {self.__class__.__name__} - {self.fname} - {thread.name}')
+                logger.info(f'{self.plugin_msg}: 等待分段后处理完成 - {thread.name}')
                 thread.join()
         if (self.is_download and ret) or not self.is_download:
             self.download_success_callback()
         # self.segment_processor_thread
-        logger.info(f'退出下载: {self.__class__.__name__} - {self.fname}')
+        logger.info(f'{self.plugin_msg}: 退出下载')
         stream_info = {
             'name': self.fname,
             'url': self.url,
@@ -381,12 +388,12 @@ class DownloadBase(ABC):
 
                     self.live_cover_path = live_cover_path
                     logger.info(
-                        f'封面下载成功：{self.__class__.__name__} - {self.fname}：{os.path.abspath(self.live_cover_path)}')
+                        f'{self.plugin_msg}: 封面下载成功，路径：{os.path.abspath(self.live_cover_path)}')
                 else:
                     logger.warning(
-                        f'封面下载失败：{self.__class__.__name__} - {self.fname}：封面格式不支持：{self.live_cover_url}')
+                        f'{self.plugin_msg}: 封面为不支持的格式：{self.live_cover_url}')
             except:
-                logger.exception(f'封面下载失败：{self.__class__.__name__} - {self.fname}')
+                logger.exception(f'{self.plugin_msg}: 封面下载失败')
 
     async def acheck_url_healthy(self, url):
         async def __client_get(url, stream: bool = False):
@@ -407,20 +414,20 @@ class DownloadBase(ABC):
                 m3u8_obj = m3u8.loads(r.text)
                 if m3u8_obj.is_variant:
                     url = m3u8_obj.playlists[0].uri
-                    logger.info(f'stream url: {url}')
+                    logger.info(f'{self.plugin_msg}: stream url: {url}')
                     r = await __client_get(url)
             else: # 处理 Flv
                 r = await __client_get(url, stream=True)
                 if r.headers.get('Location'):
                     url = r.headers['Location']
-                    logger.info(f'stream url: {url}')
+                    logger.info(f'{self.plugin_msg}: stream url: {url}')
                     r = await __client_get(url, stream=True)
             if r.status_code == 200:
                 return url
         except HTTPStatusError as e:
-            logger.error(f'url {url}: status_code-{e.response.status_code}')
+            logger.error(f'{self.plugin_msg}: url {url}: status_code-{e.response.status_code}')
         except:
-            logger.exception(f'url {url}: ')
+            logger.debug(f'{self.plugin_msg}: url {url}: ', exc_info=True)
         return None
 
     def gen_download_filename(self, is_fmt=False):
@@ -504,6 +511,42 @@ def get_valid_filename(name):
     if s in {"", ".", ".."}:
         raise RuntimeError("Could not derive file name from '%s'" % name)
     return s
+
+
+def get_duration(segment_time_str, time_range):
+    """
+    计算当前时间到给定结束时间的时差
+    如果计算的时差大于segment_time，则返回segment_time。
+    """
+    if not time_range or '-' not in time_range:
+        return segment_time_str
+    end_time_str = time_range.split('-')[1]
+
+    now = datetime.now()
+    end_time_today_str = now.strftime("%Y-%m-%d") + " " + end_time_str
+    end_time_today = datetime.strptime(end_time_today_str, "%Y-%m-%d %H:%M:%S")
+    # 判断结束时间是否是第二天的时间
+    if now > end_time_today:
+        end_time_today += timedelta(days=1)
+
+    time_diff = end_time_today - now
+    if segment_time_str:
+        segment_time_parts = list(map(int, segment_time_str.split(":")))
+        segment_time = timedelta(hours=segment_time_parts[0], minutes=segment_time_parts[1], seconds=segment_time_parts[2])
+
+        if time_diff > segment_time:
+            return segment_time_str
+
+    # 增加10s，防止time_diff过小多次执行下载
+    if time_diff.total_seconds() <= 60:
+        time_diff = time_diff + timedelta(seconds=10)
+
+    hours, remainder = divmod(time_diff.total_seconds(), 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    to_parameter = f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"
+
+    return to_parameter
 
 
 class BatchCheck(ABC):
