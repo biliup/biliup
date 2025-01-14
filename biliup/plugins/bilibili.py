@@ -23,6 +23,7 @@ class Bililive(DownloadBase):
         self.bilibili_danmaku_detail = config.get('bilibili_danmaku_detail', False)
         self.__real_room_id = None
         self.__is_login = False
+        self.__bili_uid = 0
         # self.fake_headers['referer'] = url
         if config.get('user', {}).get('bili_cookie'):
             self.fake_headers['cookie'] = config.get('user', {}).get('bili_cookie')
@@ -30,10 +31,12 @@ class Bililive(DownloadBase):
             cookie_file_name = config.get('user', {}).get('bili_cookie_file')
             try:
                 with open(cookie_file_name, encoding='utf-8') as stream:
-                    cookies = json.load(stream)["cookie_info"]["cookies"]
+                    user_data = json.load(stream)
+                    cookies = user_data["cookie_info"]["cookies"]
                     cookies_str = ''
                     for i in cookies:
                         cookies_str += f"{i['name']}={i['value']};"
+                    self.__bili_uid = user_data['token_info']['mid']
                     self.fake_headers['cookie'] = cookies_str
             except Exception:
                 logger.exception("load_cookies error")
@@ -207,7 +210,8 @@ class Bililive(DownloadBase):
                 self.url, self.gen_download_filename(), {
                     'room_id': self.__real_room_id, 
                     'cookie': self.fake_headers.get("cookie"),
-                    'detail': self.bilibili_danmaku_detail
+                    'detail': self.bilibili_danmaku_detail,
+                    'bili_uid': self.__bili_uid
                 }
             )
 
