@@ -27,28 +27,35 @@ class Bilibili:
 
     @staticmethod
     async def get_ws_info(url, content):
-        # 获取传入的cookie
-        cookie_str = content.get('cookie', None)
-        if cookie_str == "" or not content.get("detail", False):
-            cookie_str = None
-        buid = 0
-        is_login = False
+        # 判断是否要录制详细弹幕
+        if content.get('detail', False):
+            # 获取传入的用户信息
+            cookie_str = content.get('cookie', "") if content.get('cookie', False) else ""
+            buid = content.get('bili_uid', 0)
+            Bilibili.headers['cookie'] = cookie_str
 
+            # 如buid不为0但没有cookie传入
+            if not cookie_str and buid != 0:
+                build = 0
+
+            # 获取B站用户ID
+            if cookie_str and buid == 0:
+                async with aiohttp.ClientSession(headers=Bilibili.headers) as session:
+                    try:
+                        async with session.get(f"https://api.bilibili.com/x/web-interface/nav", timeout=5) as resp:
+                            resp_data = await resp.json()
+                            buid = resp_data["data"]["mid"]
+                            logger.info(f"获取B站用户ID {buid}")
+                    except Exception as e:
+                        buid = 0
+                        Bilibili.headers['cookie'] = ""
+                        pass
+        else:
+            buid = 0
+
+        # 获取弹幕认证信息
         danmu_wss_url = 'wss://broadcastlv.chat.bilibili.com/sub'
         room_id = content.get('room_id')
-        if cookie_str:
-            Bilibili.headers['cookie'] = cookie_str
-            async with aiohttp.ClientSession(headers=Bilibili.headers) as session:
-                try:
-                    async with session.get(f"https://api.bilibili.com/x/web-interface/nav", timeout=5) as resp:
-                        resp_data = await resp.json()
-                        buid = resp_data["data"]["mid"]
-                    is_login = True
-                except Exception as e:
-                    buid = 0
-                    Bilibili.headers['cookie'] = ""
-                    pass
-
         async with aiohttp.ClientSession(headers=Bilibili.headers) as session:
             if not room_id:
                 async with session.get("https://api.live.bilibili.com/room/v1/Room/room_init?id=" + match1(url, r'/(\d+)'),
@@ -74,8 +81,9 @@ class Bilibili:
                 'type': 2,
                 'key': danmu_token,
             }
-            #print(w_data)
+
             data = json.dumps(w_data).encode('utf-8')
+            logger.info(f"danmaku auth info {data}")
             reg_datas = [(pack('>i', len(data) + 16) + b'\x00\x10\x00\x01' + pack('>i', 7) + pack('>i', 1) + data)]
         return danmu_wss_url, reg_datas
 
@@ -137,6 +145,11 @@ class Bilibili:
                         msg['content'] = j.get('info', ['', ''])[1]
                         msg["color"] = f"{j.get('info', '16777215')[0][3]}"
 
+                        # 区分是表情包还是普通弹幕
+                        msg_extra = json.loads(j.get('info', [['','','','','','','','','','','','','','','',{}]])[0][15].get("extra", "{}"))
+                        if msg_extra.get("emoticon_unique", "") != "":
+                            msg['content'] = f"表情【{msg_extra['emoticon_unique']}】"
+
                     elif msg['msg_type'] == 'super_chat':
                         msg['name'] = j.get('data', {}).get('user_info', {}).get('uname', "")
                         msg['uid'] = j.get('data', {}).get('uid', '')
@@ -151,7 +164,7 @@ class Bilibili:
                         msg['gift_name'] = j.get('data', {}).get('gift_name', '')
                         msg['price'] = j.get('data', {}).get('price', '')
                         msg['num'] = j.get('data', {}).get('num', '')
-                        msg['content'] = f"{msg['name']}为主播续费{msg['gift_name']}一个月"
+                        msg['content'] = f"{msg['name']}上了{msg['num']}个月{msg['gift_name']}"
 
                     elif msg['msg_type'] == 'gift':
                         msg['name'] = j.get('data', {}).get('uname', '')
