@@ -114,7 +114,7 @@ class BiliWebAsync(UploadBase):
         bili = BiliBili(videos)
         bili.login(self.persistence_path, self.user_cookie)
 
-        videos.title = self.data["title"][:80]  # 稿件标题限制80字
+        videos.title = self.data["format_title"][:80]  # 稿件标题限制80字
         if self.credits:
             videos.desc_v2 = self.creditsToDesc_v2()
         else:

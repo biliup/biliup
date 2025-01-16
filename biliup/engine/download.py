@@ -18,7 +18,7 @@ from requests.utils import DEFAULT_ACCEPT_ENCODING
 from httpx import HTTPStatusError
 
 from biliup.common.util import client, loop, check_timerange
-from biliup.database.db import add_stream_info, SessionLocal, update_cover_path, update_room_title, update_file_list
+from biliup.database.db import add_stream_info, SessionLocal, get_stream_info, update_cover_path, update_room_title, update_file_list
 from biliup.plugins import random_user_agent
 import stream_gears
 from PIL import Image
@@ -26,6 +26,7 @@ from PIL import Image
 from biliup.config import config
 from biliup.Danmaku import IDanmakuClient
 from biliup.plugins.bili_webup_sync import BiliWebAsync
+from biliup.uploader import fmt_title_and_desc
 
 from .sync_downloader import SyncDownloader
 
@@ -117,10 +118,12 @@ class DownloadBase(ABC):
         # 同步下载上传器
         if self.downloader == 'sync-downloader':
             logger.info(f"{self.plugin_msg}: 使用同步下载器")
+            stream_info = config.get('streamers', {}).get(self.fname, {})
+            stream_info.update({'name': self.fname})
             sync_download(self.raw_stream_url, self.fake_headers,
                           max_file_size=int(self.file_size / 1024 / 1024),
                           output_prefix=self.gen_download_filename(True),
-                          stream_info=config.get('streamers', {}).get(self.fname, {}))
+                          stream_info=stream_info)
             return True
 
         if '.flv' in parsed_url_path:
@@ -518,9 +521,12 @@ def sync_download(stream_url, headers, segment_duration=60, max_file_size=100, o
     # video_queue.put(b'\x00')
 
     def upload(stream_info, stop_event: threading.Event):
+        with SessionLocal() as db:
+            data = get_stream_info(db, f"{stream_info['name']}")
+        data, _ = fmt_title_and_desc({**data, "name": stream_info['name']})
+        stream_info.update(data)
         # 获取 BiliWebAsync.__init__ 的参数名
         init_params = inspect.signature(BiliWebAsync.__init__).parameters
-
         # 过滤 info 中的无关键
         filtered_info = {key: value for key, value in stream_info.items() if key in init_params}
 
