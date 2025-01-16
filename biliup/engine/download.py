@@ -1,6 +1,8 @@
 import asyncio
+import inspect
 import logging
 import os
+import queue
 import re
 import subprocess
 import threading
@@ -23,6 +25,9 @@ from PIL import Image
 
 from biliup.config import config
 from biliup.Danmaku import IDanmakuClient
+from biliup.plugins.bili_webup_sync import BiliWebAsync
+
+from .sync_downloader import SyncDownloader
 
 logger = logging.getLogger('biliup')
 
@@ -87,6 +92,8 @@ class DownloadBase(ABC):
 
     def download(self):
         logger.info(f"{self.plugin_msg}: Start downloading {self.raw_stream_url}")
+        # 调试使用边录边上传功能
+        # self.downloader = 'sync-downloader'
         if self.is_download:
             if not shutil.which("ffmpeg"):
                 logger.error("未安装 FFMpeg 或不存在于 PATH 内")
@@ -106,6 +113,15 @@ class DownloadBase(ABC):
             else:
                 logger.error("未安装 FFMpeg 或不存在于 PATH 内，本次下载使用 stream-gears")
                 logger.debug("Current user's PATH is:" + os.getenv("PATH"))
+
+        # 同步下载上传器
+        if self.downloader == 'sync-downloader':
+            logger.info(f"{self.plugin_msg}: 使用同步下载器")
+            sync_download(self.raw_stream_url, self.fake_headers,
+                          max_file_size=int(self.file_size / 1024 / 1024),
+                          output_prefix=self.gen_download_filename(True),
+                          stream_info=config.get('streamers', {}).get(self.fname, {}))
+            return True
 
         if '.flv' in parsed_url_path:
             # 假定flv流
@@ -329,7 +345,7 @@ class DownloadBase(ABC):
 
         self.download_cover(
             time.strftime(self.gen_download_filename().encode("unicode-escape").decode(), end_time if end_time else time.localtime()
-                           ).encode().decode("unicode-escape"))
+                          ).encode().decode("unicode-escape"))
         # 更新数据库中封面存储路径
         with SessionLocal() as db:
             update_cover_path(db, self.database_row_id, self.live_cover_path)
@@ -416,7 +432,7 @@ class DownloadBase(ABC):
                     url = m3u8_obj.playlists[0].uri
                     logger.info(f'{self.plugin_msg}: stream url: {url}')
                     r = await __client_get(url)
-            else: # 处理 Flv
+            else:  # 处理 Flv
                 r = await __client_get(url, stream=True)
                 if r.headers.get('Location'):
                     url = r.headers['Location']
@@ -496,6 +512,34 @@ def stream_gears_download(url, headers, file_name, segment_time=None, file_size=
         )
 
 
+def sync_download(stream_url, headers, segment_duration=60, max_file_size=100, output_prefix="segment", stream_info=None):
+    logger.info(f"启动同步下载器 max_file_size {max_file_size}MB")
+    video_queue = queue.SimpleQueue()
+    # video_queue.put(b'\x00')
+
+    def upload(stream_info, stop_event: threading.Event):
+        # 获取 BiliWebAsync.__init__ 的参数名
+        init_params = inspect.signature(BiliWebAsync.__init__).parameters
+
+        # 过滤 info 中的无关键
+        filtered_info = {key: value for key, value in stream_info.items() if key in init_params}
+
+        # 映射 'uploader' 到 'principal'
+        filtered_info['principal'] = ""
+        filtered_info["data"] = stream_info
+        uploader = BiliWebAsync(**filtered_info, video_queue=video_queue)
+        uploader.upload_stream(total_size=max_file_size * 1024 * 1024,
+                               stop_event=stop_event, output_prefix=output_prefix)
+
+    downloader = SyncDownloader(stream_url, headers, segment_duration, max_file_size, output_prefix, video_queue)
+
+    # 启动上传器
+    upload_thread = threading.Thread(target=upload, args=(stream_info, downloader.stop_event), daemon=True)
+    upload_thread.start()
+
+    downloader.run()
+
+
 def get_valid_filename(name):
     """
     Return the given string converted to a string that can be used for a clean
@@ -532,7 +576,8 @@ def get_duration(segment_time_str, time_range):
     time_diff = end_time_today - now
     if segment_time_str:
         segment_time_parts = list(map(int, segment_time_str.split(":")))
-        segment_time = timedelta(hours=segment_time_parts[0], minutes=segment_time_parts[1], seconds=segment_time_parts[2])
+        segment_time = timedelta(hours=segment_time_parts[0],
+                                 minutes=segment_time_parts[1], seconds=segment_time_parts[2])
 
         if time_diff > segment_time:
             return segment_time_str
