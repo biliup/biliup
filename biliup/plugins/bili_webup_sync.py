@@ -168,7 +168,7 @@ class BiliWebAsync(UploadBase):
             file_index += 1
             # print("[consumer] bili.video.videos", bili.video.videos)
             logger.info(f"[consumer] bili.video.videos {bili.video.videos}")
-            if data_size < 100 or file_index > 3:
+            if data_size < 100:
                 # print(f"[consumer] 停止下载回调")
                 logger.info(f"[consumer] 停止下载回调")
                 stop_event.set()
