@@ -120,6 +120,8 @@ class DownloadBase(ABC):
             logger.info(f"{self.plugin_msg}: 使用同步下载器")
             stream_info = config.get('streamers', {}).get(self.fname, {})
             stream_info.update({'name': self.fname})
+            if not self.file_size:
+                self.file_size = 2 * 1024
             sync_download(self.raw_stream_url, self.fake_headers,
                           max_file_size=int(self.file_size / 1024 / 1024),
                           output_prefix=self.gen_download_filename(True),
