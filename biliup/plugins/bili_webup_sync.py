@@ -114,11 +114,32 @@ class BiliWebAsync(UploadBase):
         bili = BiliBili(videos)
         bili.login(self.persistence_path, self.user_cookie)
 
+        videos.title = self.data["title"][:80]  # 稿件标题限制80字
+        if self.credits:
+            videos.desc_v2 = self.creditsToDesc_v2()
+        else:
+            videos.desc_v2 = [{
+                "raw_text": self.desc,
+                "biz_id": "",
+                "type": 1
+            }]
+        videos.desc = self.desc
+        videos.copyright = self.copyright
+        if self.copyright == 2:
+            videos.source = self.data["url"]  # 添加转载地址说明
+        # 设置视频分区,默认为174 生活，其他分区
+        videos.tid = self.tid
+        videos.set_tag(self.tags)
+        if self.dtime:
+            videos.delay_time(int(time.time()) + self.dtime)
+        if self.cover_path:
+            videos.cover = bili.cover_up(self.cover_path).replace('http:', '')
+
         thread_list = []
         while True:
 
             # 调试使用 分p 强制停止
-            # if file_index > 2:
+            # if file_index > 10:
             #     logger.info(f"[consumer debug] 停止下载回调")
             #     stop_event.set()
             #     break
@@ -156,28 +177,9 @@ class BiliWebAsync(UploadBase):
         logger.info("等待上传线程结束")
         for t in thread_list:
             t.join()
-        videos.title = self.data["title"][:80]  # 稿件标题限制80字
-        if self.credits:
-            videos.desc_v2 = self.creditsToDesc_v2()
-        else:
-            videos.desc_v2 = [{
-                "raw_text": self.desc,
-                "biz_id": "",
-                "type": 1
-            }]
-        videos.desc = self.desc
-        videos.copyright = self.copyright
-        if self.copyright == 2:
-            videos.source = self.data["url"]  # 添加转载地址说明
-        # 设置视频分区,默认为174 生活，其他分区
-        videos.tid = self.tid
-        videos.set_tag(self.tags)
-        if self.dtime:
-            videos.delay_time(int(time.time()) + self.dtime)
-        if self.cover_path:
-            videos.cover = bili.cover_up(self.cover_path).replace('http:', '')
-        ret = bili.submit(self.submit_api)  # 提交视频
-        logger.info(f"上传成功: {ret}")
+
+        # ret = bili.submit(self.submit_api)  # 提交视频
+        # logger.info(f"上传成功: {ret}")
         return []
 
     def creditsToDesc_v2(self):
@@ -513,7 +515,7 @@ class BiliBili:
                         f"Assigned UpOS endpoint {original_endpoint} was never seen before, something else might have changed, so will not modify it")
             return asyncio.run(upload(f, total_size, ret, tasks=tasks))
 
-    def upload_stream(self, stream_queue: queue.SimpleQueue, file_name, total_size, lines='AUTO', videos=None):
+    def upload_stream(self, stream_queue: queue.SimpleQueue, file_name, total_size, lines='AUTO', videos: 'Data' = None):
 
         logger.info(f"{file_name} 开始上传")
         preferred_upos_cdn = None
@@ -586,7 +588,15 @@ class BiliBili:
         video_part['title'] = video_part['title'][:80]
         videos.append(video_part)  # 添加已经上传的视频
 
-        logger.info(f"{file_name} 上传完成")
+        edit = False if videos.aid is None else True
+        ret = self.submit(None, edit=edit)
+        # logger.info(f"上传成功: {ret}")
+        if edit:
+            logger.info(f"编辑添加成功: {ret}")
+        else:
+            logger.info(f"上传成功: {ret}")
+        aid = ret['data']['aid']
+        videos.aid = aid
 
     async def cos(self, file, total_size, ret, chunk_size=10485760, tasks=3, internal=False):
         filename = file.name
@@ -918,7 +928,7 @@ class BiliBili:
         async with aiohttp.ClientSession() as session:
             await asyncio.gather(*[upload_chunk() for _ in range(tasks)])
 
-    def submit(self, submit_api=None):
+    def submit(self, submit_api=None, edit=False):
         if not self.video.title:
             self.video.title = self.video.videos[0]["title"]
         self.__session.get('https://member.bilibili.com/x/geetest/pre/add', timeout=5)
@@ -936,12 +946,12 @@ class BiliBili:
             submit_api = 'web' if user_weight == 2 else 'client'
         ret = None
         if submit_api == 'web':
-            ret = self.submit_web()
+            ret = self.submit_web(edit=edit)
             if ret["code"] == 21138:
                 logger.info(f'改用客户端接口提交{ret}')
                 submit_api = 'client'
         if submit_api == 'client':
-            ret = self.submit_client()
+            ret = self.submit_client(edit=edit)
         if not ret:
             raise Exception(f'不存在的选项：{submit_api}')
         if ret["code"] == 0:
@@ -949,21 +959,27 @@ class BiliBili:
         else:
             raise Exception(ret)
 
-    def submit_web(self):
+    def submit_web(self, edit=False):
         logger.info('使用网页端api提交')
-        return self.__session.post(f'https://member.bilibili.com/x/vu/web/add?csrf={self.__bili_jct}', timeout=5,
+        api = 'https://member.bilibili.com/x/vu/web/add?csrf=' + self.__bili_jct
+        if edit:
+            api = 'https://member.bilibili.com/x/vu/web/edit?csrf=' + self.__bili_jct
+        return self.__session.post(api, timeout=5,
                                    json=asdict(self.video)).json()
 
-    def submit_client(self):
+    def submit_client(self, edit=False):
         logger.info('使用客户端api端提交')
         if not self.access_token:
             if self.account is None:
                 raise RuntimeError("Access token is required, but account and access_token does not exist!")
             self.login_by_password(**self.account)
             self.store()
+        api = 'http://member.bilibili.com/x/vu/client/add?access_key=' + self.access_token
+        if edit:
+            api = 'http://member.bilibili.com/x/vu/client/edit?access_key=' + self.access_token
+        print(asdict(self.video))
         while True:
-            ret = self.__session.post(f'http://member.bilibili.com/x/vu/client/add?access_key={self.access_token}',
-                                      timeout=5, json=asdict(self.video)).json()
+            ret = self.__session.post(api, timeout=5, json=asdict(self.video)).json()
             if ret['code'] == -101:
                 logger.info(f'刷新token{ret}')
                 self.login_by_password(**config['user']['account'])
@@ -1050,6 +1066,7 @@ class Data:
     dtime: Any = None
     open_subtitle: InitVar[bool] = False
 
+    aid: int = None
     # interactive: int = 0
     # no_reprint: int 1
     # open_elec: int 1
