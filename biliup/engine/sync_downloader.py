@@ -64,7 +64,7 @@ class SyncDownloader:
         self.stop_event = threading.Event()
 
     def run_ffmpeg_with_url(self, ffmpeg_cmd, output_filename):
-        with subprocess.Popen(ffmpeg_cmd, stderr=subprocess.PIPE) as ffmpeg_proc:
+        with subprocess.Popen(ffmpeg_cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE) as ffmpeg_proc:
             # print("[run] 启动 ffmpeg...")
             logging.info("[run] 启动 ffmpeg...")
             if output_filename == "-":
