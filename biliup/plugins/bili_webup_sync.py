@@ -170,6 +170,7 @@ class BiliWebAsync(UploadBase):
             logger.info(f"[consumer] bili.video.videos {bili.video.videos}")
             if data_size < 100:
                 # print(f"[consumer] 停止下载回调")
+                # n = video_upload_queue.get()
                 logger.info(f"[consumer] 停止下载回调")
                 stop_event.set()
                 break
@@ -787,30 +788,58 @@ class BiliBili:
         # print(upload_id, chunks, chunk_size, total_size)
         logger.info(
             f"{file_name} - upload_id: {upload_id}, chunks: {chunks}, chunk_size: {chunk_size}, total_size: {total_size}")
-        for i in range(chunks):
+        n = 0
+        for index, chunk in enumerate(self.queue_reader_generator(stream_queue, chunk_size, total_size)):
+            logger.info(f"{file_name} - chunks-{index} - size: {len(chunk)}")
+            n += len(chunk)
             params = {
                 'uploadId': upload_id,
                 'chunks': chunks,
                 'total': total_size
             }
-            params['chunk'] = i
+            params['chunk'] = index
             params['size'] = chunk_size
-            params['partNumber'] = i + 1
-            params['start'] = i * chunk_size
+            params['partNumber'] = index + 1
+            params['start'] = index * chunk_size
             params['end'] = params['start'] + params['size']
             params_clone = params.copy()
             async with aiohttp.ClientSession() as session:
                 # print("params: ", params_clone)
                 logger.info(f"{file_name} - params: {params_clone}")
-                data = self.queue_reader(stream_queue, chunk_size, chunk_size)
+                # data = self.queue_reader(stream_queue, chunk_size, chunk_size)
                 # print("data length: ", len(data))
-                async with session.put(url, params=params_clone, raise_for_status=True, data=data, headers=headers) as r:
+                async with session.put(url, params=params_clone, raise_for_status=True, data=chunk, headers=headers) as r:
                     # print("r:----", r.status)
-                    logger.info(f"{file_name} - chunks-{i} - status: {r.status}")
+                    logger.info(f"{file_name} - chunks-{index} - status: {r.status}")
                     end = time.perf_counter() - start
                     parts.append({"partNumber": params['chunk'] + 1, "eTag": "etag"})
-                    # sys.stdout.write(f"\r{params['end'] / 1000 / 1000 / end:.2f}MB/s "
-                    #                 f"=> {params['partNumber'] / chunks:.1%}")
+        # print("n: ", n)
+        logger.info(f"{file_name} - total_size: {total_size}, n: {n}")
+        # for i in range(chunks):
+        #     params = {
+        #         'uploadId': upload_id,
+        #         'chunks': chunks,
+        #         'total': total_size
+        #     }
+        #     params['chunk'] = i
+        #     params['size'] = chunk_size
+        #     params['partNumber'] = i + 1
+        #     params['start'] = i * chunk_size
+        #     params['end'] = params['start'] + params['size']
+        #     params_clone = params.copy()
+        #     async with aiohttp.ClientSession() as session:
+        #         # print("params: ", params_clone)
+        #         logger.info(f"{file_name} - params: {params_clone}")
+        #         data = self.queue_reader(stream_queue, chunk_size, chunk_size)
+        #         # print("data length: ", len(data))
+        #         async with session.put(url, params=params_clone, raise_for_status=True, data=data, headers=headers) as r:
+        #             # print("r:----", r.status)
+        #             logger.info(f"{file_name} - chunks-{i} - status: {r.status}")
+        #             end = time.perf_counter() - start
+        #             parts.append({"partNumber": params['chunk'] + 1, "eTag": "etag"})
+
+        # sys.stdout.write(f"\r{params['end'] / 1000 / 1000 / end:.2f}MB/s "
+        #                 f"=> {params['partNumber'] / chunks:.1%}")
         # await self._upload({
         #     'uploadId': upload_id,
         #     'chunks': chunks,
@@ -887,7 +916,6 @@ class BiliBili:
             if data is None:
                 # 填充 0x00 直到达到 total_size
                 while total_bytes < total_size:
-                    # print(f"data is None 视频数据已经获取完成,需要补 {total_size-total_bytes} 个 0x00")
                     logger.debug(f"视频数据已经获取完成,需要补 {total_size-total_bytes} 个 0x00")
                     chunk_size = total_size - total_bytes
                     total_bytes += chunk_size
@@ -902,6 +930,65 @@ class BiliBili:
             if total_bytes == total_size:
                 break
         return b"".join(result)
+
+    def queue_reader_generator(self, simple_queue, max_bytes, total_size):
+        """
+        从 simple_queue 中读取数据并按 max_bytes 大小分块产出 (yield)。
+        当队列中获取到 None 或者数据总量达到 total_size 后，就用 0x00 补齐到 total_size。
+
+        :param simple_queue: queue.SimpleQueue 实例，数据流会以多个分包 (bytes) 入队，最后以 None 表示结束
+        :param max_bytes: 消费者每次想要获取的数据块大小
+        :param total_size: 需要最终补齐的总大小（单位：字节）
+        :return: 生成器，按 max_bytes 大小分批次产出数据
+        """
+        total_bytes = 0
+        data_buffer = bytearray()  # 用于先暂存所有数据
+
+        while True:
+            # 从队列中取数据（阻塞方式）
+            data = simple_queue.get(1024)
+            if data is None:
+                # 说明上游已经结束，需要补剩余 0x00
+                if total_bytes < total_size:
+                    print(f"视频数据已经获取完成,需要补 {total_size-total_bytes} 个 0x00")
+                    remaining = total_size - total_bytes
+                    if remaining == 0:
+                        break
+                    data_buffer += b'\x00' * remaining
+                    total_bytes += remaining
+                # 数据补齐后跳出循环
+                break
+
+            # 否则，正常累加数据
+            data_buffer += data
+            total_bytes += len(data)
+
+            # 如果超出 total_size，需要截断（只取 total_size 部分）
+            if total_bytes >= total_size:
+                over_bytes = total_bytes - total_size
+                # over_bytes 可能为 0，也可能 > 0
+                if over_bytes > 0:
+                    # 截断掉多余的部分
+                    data_buffer = data_buffer[: -over_bytes]
+                total_bytes = total_size
+                break
+
+            # 当缓冲区内的数据长度 >= max_bytes，就可以分块 yield 出去
+            while len(data_buffer) >= max_bytes:
+                chunk = data_buffer[:max_bytes]
+                data_buffer = data_buffer[max_bytes:]
+                yield bytes(chunk)  # 转为 bytes 再产出
+
+        # 队列结束后或 total_size 达到后，需要把剩余数据继续 yield
+        # 因为 data_buffer 里可能还有最后不足 max_bytes 的那部分
+        while len(data_buffer) >= max_bytes:
+            chunk = data_buffer[:max_bytes]
+            data_buffer = data_buffer[max_bytes:]
+            yield bytes(chunk)
+
+        # 如果最后还有剩余小块，也要 yield
+        if data_buffer:
+            yield bytes(data_buffer)
 
     @staticmethod
     async def _upload(params, file, chunk_size, afunc, tasks=3):

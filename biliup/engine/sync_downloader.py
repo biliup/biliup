@@ -69,7 +69,7 @@ class SyncDownloader:
             logging.info("[run] 启动 ffmpeg...")
             if output_filename == "-":
                 while True:
-                    data = ffmpeg_proc.stdout.read(self.read_block_size)
+                    data = ffmpeg_proc.stdout.read(1024)
                     if not data:
                         break
                     self.video_queue.put(data)
