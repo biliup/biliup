@@ -14,7 +14,7 @@ import urllib.parse
 from dataclasses import asdict, dataclass, field, InitVar
 from json import JSONDecodeError
 from os.path import splitext, basename
-from typing import Callable, Union, Any, List
+from typing import Callable, Dict, Union, Any, List
 from urllib import parse
 from urllib.parse import quote
 
@@ -791,41 +791,73 @@ class BiliBili:
         logger.info(
             f"{file_name} - upload_id: {upload_id}, chunks: {chunks}, chunk_size: {chunk_size}, total_size: {total_size}")
         n = 0
-
-        st = time.perf_counter()
-        for index, chunk in enumerate(self.queue_reader_generator(stream_queue, chunk_size, total_size)):
-            # logger.info(f"{file_name} - chunks-{index} - size: {len(chunk)}")
-            const_time = time.perf_counter() - st
-            # 计算速度 单位是 Mbps
-            speed = len(chunk) * 8 / 1024 / 1024 / const_time
-            logger.info(f"{file_name} - chunks-{index} - speed: {speed:.2f}Mbps  {chunk[:10]}")
-            n += len(chunk)
-            params = {
-                'uploadId': upload_id,
-                'chunks': chunks,
-                'total': total_size
-            }
-            params['chunk'] = index
-            params['size'] = chunk_size
-            params['partNumber'] = index + 1
-            params['start'] = index * chunk_size
-            params['end'] = params['start'] + params['size']
-            params_clone = params.copy()
-            async with aiohttp.ClientSession() as session:
-                # print("params: ", params_clone)
-                logger.info(f"{file_name} - params: {params_clone}")
-                # data = self.queue_reader(stream_queue, chunk_size, chunk_size)
-                # print("data length: ", len(data))
-                async with session.put(url, params=params_clone, raise_for_status=True, data=chunk, headers=headers) as r:
-                    # print("r:----", r.status)
-                    logger.info(f"{file_name} - chunks-{index} - status: {r.status}")
-                    end = time.perf_counter() - start
-                    parts.append({"partNumber": params['chunk'] + 1, "eTag": "etag"})
+        semaphore = asyncio.Semaphore(5)
+        async with aiohttp.ClientSession() as session:
+            upload_tasks = []
             st = time.perf_counter()
-        # print("n: ", n)
-        if len(parts) == 0:
-            return None
-        logger.info(f"{file_name} - total_size: {total_size}, n: {n}")
+            async for index, chunk in self.queue_reader_generator_async(stream_queue, chunk_size, total_size):
+                const_time = time.perf_counter() - st
+                speed = len(chunk) * 8 / 1024 / 1024 / const_time
+                logger.info(f"{file_name} - chunks-{index} - speed: {speed:.2f}Mbps")
+                n += len(chunk)
+                params = {
+                    'uploadId': upload_id,
+                    'chunks': chunks,
+                    'total': total_size,
+                    'chunk': index,
+                    'size': chunk_size,
+                    'partNumber': index + 1,
+                    'start': index * chunk_size,
+                    'end': index * chunk_size + chunk_size
+                }
+                task = asyncio.create_task(self._upload_chunk_with_semaphore(
+                    semaphore, session, url, chunk, params, headers, file_name
+                ))
+                upload_tasks.append((index, task))
+                st = time.perf_counter()
+            # 等待所有分片上传完成，并按顺序收集结果
+            results = []
+            for index, task in sorted(upload_tasks, key=lambda x: x[0]):
+                try:
+                    result = await task
+                    results.append(result)
+                except Exception as e:
+                    logger.error(f"{file_name} - Failed to upload chunk {index}: {str(e)}")
+                    raise
+            parts.extend(results)
+
+        # st = time.perf_counter()
+        # for index, chunk in enumerate(self.queue_reader_generator(stream_queue, chunk_size, total_size)):
+        #     # logger.info(f"{file_name} - chunks-{index} - size: {len(chunk)}")
+        #     const_time = time.perf_counter() - st
+        #     # 计算速度 单位是 Mbps
+        #     speed = len(chunk) * 8 / 1024 / 1024 / const_time
+        #     logger.info(f"{file_name} - chunks-{index} - speed: {speed:.2f}Mbps  {chunk[:10]}")
+        #     n += len(chunk)
+        #     params = {
+        #         'uploadId': upload_id,
+        #         'chunks': chunks,
+        #         'total': total_size
+        #     }
+        #     params['chunk'] = index
+        #     params['size'] = chunk_size
+        #     params['partNumber'] = index + 1
+        #     params['start'] = index * chunk_size
+        #     params['end'] = params['start'] + params['size']
+        #     params_clone = params.copy()
+        #     async with aiohttp.ClientSession() as session:
+        #         # print("params: ", params_clone)
+        #         logger.info(f"{file_name} - params: {params_clone}")
+        #         # data = self.queue_reader(stream_queue, chunk_size, chunk_size)
+        #         # print("data length: ", len(data))
+        #         async with session.put(url, params=params_clone, raise_for_status=True, data=chunk, headers=headers) as r:
+        #             # print("r:----", r.status)
+        #             logger.info(f"{file_name} - chunks-{index} - status: {r.status}")
+        #             end = time.perf_counter() - start
+        #             parts.append({"partNumber": params['chunk'] + 1, "eTag": "etag"})
+        #     st = time.perf_counter()
+        # # print("n: ", n)
+
         # for i in range(chunks):
         #     params = {
         #         'uploadId': upload_id,
@@ -856,6 +888,10 @@ class BiliBili:
         #     'chunks': chunks,
         #     'total': total_size
         # }, file, chunk_size, upload_chunk, tasks=tasks)
+
+        if len(parts) == 0:
+            return None
+        logger.info(f"{file_name} - total_size: {total_size}, n: {n}")
         cost = time.perf_counter() - start
         p = {
             'name': file_name,
@@ -877,6 +913,42 @@ class BiliBili:
                 logger.info(f"请求合并分片时出现问题，尝试重连，次数：" + str(attempt))
                 time.sleep(15)
         pass
+
+    async def upload_chunk(self, session: aiohttp.ClientSession, url: str, chunk: bytes, params: Dict, headers: Dict, file_name: str) -> Dict:
+        """
+        上传单个分片的协程函数
+        """
+        # print(123)
+        params_clone = params.copy()
+        try:
+            async with session.put(url,
+                                   params=params_clone,
+                                   data=chunk,
+                                   headers=headers,
+                                   raise_for_status=True) as r:
+                logger.info(f"{file_name} - chunks-{params['chunk']} - status: {r.status}")
+                return {
+                    "partNumber": params['chunk'] + 1,
+                    "eTag": "etag"
+                }
+        except Exception as e:
+            logger.error(f"{file_name} - chunks-{params['chunk']} upload failed: {str(e)}")
+            raise
+
+    async def _upload_chunk_with_semaphore(self, semaphore: asyncio.Semaphore,
+                                           session: aiohttp.ClientSession,
+                                           url: str,
+                                           chunk: bytes,
+                                           params: Dict,
+                                           headers: Dict,
+                                           file_name: str,) -> Dict:
+        """
+        使用信号量控制的分片上传
+        """
+        print(123321)
+        return
+        async with semaphore:
+            return await self.upload_chunk(session, url, chunk, params, headers, file_name)
 
     async def async_queue_reader(slef, simple_queue, max_bytes, total_size):
         """
