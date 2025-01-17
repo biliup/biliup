@@ -525,7 +525,7 @@ def sync_download(stream_url, headers, segment_duration=60, max_file_size=100, o
     video_queue = queue.SimpleQueue()
     # video_queue.put(b'\x00')
 
-    def upload(stream_info, stop_event: threading.Event):
+    def upload(video_queue, stream_info, stop_event: threading.Event):
         with SessionLocal() as db:
             data = get_stream_info(db, f"{stream_info['name']}")
         data, _ = fmt_title_and_desc({**data, "name": stream_info['name']})
@@ -541,11 +541,13 @@ def sync_download(stream_url, headers, segment_duration=60, max_file_size=100, o
         uploader = BiliWebAsync(**filtered_info, video_queue=video_queue)
         uploader.upload_stream(total_size=max_file_size * 1024 * 1024,
                                stop_event=stop_event, output_prefix=output_prefix)
+        print("上传器结束")
+        video_queue = queue.SimpleQueue()
 
     downloader = SyncDownloader(stream_url, headers, segment_duration, max_file_size, output_prefix, video_queue)
 
     # 启动上传器
-    upload_thread = threading.Thread(target=upload, args=(stream_info, downloader.stop_event), daemon=True)
+    upload_thread = threading.Thread(target=upload, args=(video_queue, stream_info, downloader.stop_event), daemon=True)
     upload_thread.start()
 
     downloader.run()

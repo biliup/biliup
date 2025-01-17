@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import concurrent.futures
 import hashlib
 import json
 import logging
@@ -19,6 +20,8 @@ from urllib import parse
 from urllib.parse import quote
 
 import aiohttp
+from concurrent.futures.thread import ThreadPoolExecutor
+import concurrent
 import requests.utils
 import rsa
 import xml.etree.ElementTree as ET
@@ -137,7 +140,6 @@ class BiliWebAsync(UploadBase):
 
         thread_list = []
         while True:
-
             # 调试使用 分p 强制停止
             # if file_index > 10:
             #     logger.info(f"[consumer debug] 停止下载回调")
@@ -149,12 +151,13 @@ class BiliWebAsync(UploadBase):
             video_upload_queue = queue.SimpleQueue()
 
             t = threading.Thread(target=bili.upload_stream, args=(video_upload_queue,
-                                 file_name, total_size, self.lines, videos), daemon=True, name=f"upload_{file_index}")
+                                 file_name, total_size, self.lines, videos, stop_event), daemon=True, name=f"upload_{file_index}")
             thread_list.append(t)
             t.start()
 
             while True:
                 data = self.video_queue.get()
+                # print("321123")
 
                 if data is None:
                     video_upload_queue.put(None)
@@ -516,7 +519,7 @@ class BiliBili:
                         f"Assigned UpOS endpoint {original_endpoint} was never seen before, something else might have changed, so will not modify it")
             return asyncio.run(upload(f, total_size, ret, tasks=tasks))
 
-    def upload_stream(self, stream_queue: queue.SimpleQueue, file_name, total_size, lines='AUTO', videos: 'Data' = None):
+    def upload_stream(self, stream_queue: queue.SimpleQueue, file_name, total_size, lines='AUTO', videos: 'Data' = None, stop_event: threading.Event = None):
 
         logger.info(f"{file_name} 开始上传")
         preferred_upos_cdn = None
@@ -587,6 +590,8 @@ class BiliBili:
                     f"Assigned UpOS endpoint {original_endpoint} was never seen before, something else might have changed, so will not modify it")
         video_part = asyncio.run(upload(stream_queue, file_name, total_size, ret))
         if not video_part:
+            stop_event.set()
+            print("异常流 直接退出")
             return
         video_part['title'] = video_part['title'][:80]
         videos.append(video_part)  # 添加已经上传的视频
@@ -791,14 +796,16 @@ class BiliBili:
         logger.info(
             f"{file_name} - upload_id: {upload_id}, chunks: {chunks}, chunk_size: {chunk_size}, total_size: {total_size}")
         n = 0
-        semaphore = asyncio.Semaphore(5)
-        async with aiohttp.ClientSession() as session:
-            upload_tasks = []
-            st = time.perf_counter()
-            async for index, chunk in self.queue_reader_generator_async(stream_queue, chunk_size, total_size):
+
+        st = time.perf_counter()
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = []
+            for index, chunk in enumerate(self.queue_reader_generator(stream_queue, chunk_size, total_size)):
+                if not chunk:
+                    break
                 const_time = time.perf_counter() - st
                 speed = len(chunk) * 8 / 1024 / 1024 / const_time
-                logger.info(f"{file_name} - chunks-{index} - speed: {speed:.2f}Mbps")
+                logger.info(f"{file_name} - chunks-{index} - down - speed: {speed:.2f}Mbps")
                 n += len(chunk)
                 params = {
                     'uploadId': upload_id,
@@ -810,21 +817,20 @@ class BiliBili:
                     'start': index * chunk_size,
                     'end': index * chunk_size + chunk_size
                 }
-                task = asyncio.create_task(self._upload_chunk_with_semaphore(
-                    semaphore, session, url, chunk, params, headers, file_name
-                ))
-                upload_tasks.append((index, task))
+                params_clone = params.copy()
+                future = executor.submit(self.upload_chunk_thread,
+                                         url, chunk, params_clone, headers, file_name)
+                futures.append(future)
                 st = time.perf_counter()
-            # 等待所有分片上传完成，并按顺序收集结果
-            results = []
-            for index, task in sorted(upload_tasks, key=lambda x: x[0]):
-                try:
-                    result = await task
-                    results.append(result)
-                except Exception as e:
-                    logger.error(f"{file_name} - Failed to upload chunk {index}: {str(e)}")
-                    raise
-            parts.extend(results)
+                # 等待所有分片上传完成，并按顺序收集结果
+                for future in concurrent.futures.as_completed(futures):
+                    pass
+
+                results = [{
+                    "partNumber": i + 1,
+                    "eTag": "etag"
+                } for i in range(chunks)]
+                parts.extend(results)
 
         # st = time.perf_counter()
         # for index, chunk in enumerate(self.queue_reader_generator(stream_queue, chunk_size, total_size)):
@@ -856,7 +862,7 @@ class BiliBili:
         #             end = time.perf_counter() - start
         #             parts.append({"partNumber": params['chunk'] + 1, "eTag": "etag"})
         #     st = time.perf_counter()
-        # # print("n: ", n)
+        # print("n: ", n)
 
         # for i in range(chunks):
         #     params = {
@@ -914,26 +920,77 @@ class BiliBili:
                 time.sleep(15)
         pass
 
+    def upload_chunk_thread(self, url, chunk, params_clone, headers, file_name, max_retries=3, backoff_factor=1):
+        st = time.perf_counter()
+        retries = 0
+        while retries < max_retries:
+            try:
+                r = requests.put(url=url, params=params_clone, data=chunk, headers=headers)
+
+                # 如果上传成功，退出重试循环
+                if r.status_code == 200:
+                    const_time = time.perf_counter() - st
+                    speed = len(chunk) * 8 / 1024 / 1024 / const_time
+                    logger.info(
+                        f"{file_name} - chunks-{params_clone['chunk']} - up status: {r.status_code} - speed: {speed:.2f}Mbps"
+                    )
+                    return {
+                        "partNumber": params_clone['chunk'] + 1,
+                        "eTag": "etag"
+                    }
+
+                # 如果上传失败，但未达到最大重试次数，等待一段时间后重试
+                else:
+                    retries += 1
+                    logger.warning(
+                        f"{file_name} - chunks-{params_clone['chunk']} - up failed: {r.status_code}. Retrying {retries}/{max_retries}")
+
+                    # 计算退避时间，逐步增加重试间隔
+                    backoff_time = backoff_factor ** retries
+                    time.sleep(backoff_time)
+
+            except Exception as e:
+                retries += 1
+                logger.error(f"upload_chunk_thread err {str(e)}. Retrying {retries}/{max_retries}")
+
+                # 计算退避时间，逐步增加重试间隔
+                backoff_time = backoff_factor ** retries
+                time.sleep(backoff_time)
+
+        # 如果重试了所有次数仍然失败，记录错误
+        logger.error(f"{file_name} - chunks-{params_clone['chunk']} - Upload failed after {max_retries} attempts.")
+        return None
+
     async def upload_chunk(self, session: aiohttp.ClientSession, url: str, chunk: bytes, params: Dict, headers: Dict, file_name: str) -> Dict:
         """
         上传单个分片的协程函数
         """
-        # print(123)
-        params_clone = params.copy()
+
         try:
-            async with session.put(url,
-                                   params=params_clone,
-                                   data=chunk,
-                                   headers=headers,
-                                   raise_for_status=True) as r:
-                logger.info(f"{file_name} - chunks-{params['chunk']} - status: {r.status}")
+            st = time.perf_counter()
+            # print(4321)
+            await asyncio.sleep(0)
+            # asyncio.set_event_loop(asyncio.new_event_loop())
+            # async with aiohttp.ClientSession() as session:
+            async with session.put(url, params=params, raise_for_status=True, data=chunk, headers=headers) as r:
+                # r = await session.put(url, params=params, data=chunk, headers=headers)
+                # print(1234, r.status)
+
+                const_time = time.perf_counter() - st
+                speed = len(chunk) * 8 / 1024 / 1024 / const_time
+                logger.info(
+                    f"{file_name} - chunks-{params['chunk']} - up status: {r.status} - speed: {speed:.2f}Mbps")
+                # et =
                 return {
                     "partNumber": params['chunk'] + 1,
                     "eTag": "etag"
                 }
+
         except Exception as e:
-            logger.error(f"{file_name} - chunks-{params['chunk']} upload failed: {str(e)}")
-            raise
+            import traceback
+            print(traceback.print_exc())
+            logger.info(f"{file_name} - chunks-{params['chunk']} upload failed: {str(e)}")
+            raise e
 
     async def _upload_chunk_with_semaphore(self, semaphore: asyncio.Semaphore,
                                            session: aiohttp.ClientSession,
@@ -946,7 +1003,7 @@ class BiliBili:
         使用信号量控制的分片上传
         """
         print(123321)
-        return
+        # return
         async with semaphore:
             return await self.upload_chunk(session, url, chunk, params, headers, file_name)
 
@@ -1049,7 +1106,7 @@ class BiliBili:
                 # 数据流结束，用0x00填充剩余的块
                 remaining_chunks = total_chunks - chunks_yielded
                 if remaining_chunks == total_chunks:
-                    print("空包跳过")
+                    # print("空包跳过")
                     break
                 if len(current_buffer) > 0:
                     # 处理当前缓冲区中的最后一块数据
@@ -1077,7 +1134,8 @@ class BiliBili:
                 current_buffer = current_buffer[chunk_size:]
                 chunks_yielded += 1
 
-        print("本段分p完成")
+        # print("本段分p完成")
+        yield None
 
     @staticmethod
     async def _upload(params, file, chunk_size, afunc, tasks=3):
