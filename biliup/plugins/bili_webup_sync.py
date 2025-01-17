@@ -70,7 +70,7 @@ class BiliWebAsync(UploadBase):
 
         self.extra_fields = extra_fields
 
-        self.video_queue = video_queue
+        self.video_queue: queue.SimpleQueue = video_queue
 
     def upload(self, file_list: List[UploadBase.FileInfo]) -> List[UploadBase.FileInfo]:
         print('开始上传', file_list)
@@ -154,7 +154,7 @@ class BiliWebAsync(UploadBase):
             t.start()
 
             while True:
-                data = self.video_queue.get(1024)
+                data = self.video_queue.get()
 
                 if data is None:
                     video_upload_queue.put(None)
@@ -586,6 +586,8 @@ class BiliBili:
                 logger.warning(
                     f"Assigned UpOS endpoint {original_endpoint} was never seen before, something else might have changed, so will not modify it")
         video_part = asyncio.run(upload(stream_queue, file_name, total_size, ret))
+        if not video_part:
+            return
         video_part['title'] = video_part['title'][:80]
         videos.append(video_part)  # 添加已经上传的视频
 
@@ -789,8 +791,14 @@ class BiliBili:
         logger.info(
             f"{file_name} - upload_id: {upload_id}, chunks: {chunks}, chunk_size: {chunk_size}, total_size: {total_size}")
         n = 0
+
+        st = time.perf_counter()
         for index, chunk in enumerate(self.queue_reader_generator(stream_queue, chunk_size, total_size)):
-            logger.info(f"{file_name} - chunks-{index} - size: {len(chunk)}")
+            # logger.info(f"{file_name} - chunks-{index} - size: {len(chunk)}")
+            const_time = time.perf_counter() - st
+            # 计算速度 单位是 Mbps
+            speed = len(chunk) * 8 / 1024 / 1024 / const_time
+            logger.info(f"{file_name} - chunks-{index} - speed: {speed:.2f}Mbps  {chunk[:10]}")
             n += len(chunk)
             params = {
                 'uploadId': upload_id,
@@ -813,7 +821,10 @@ class BiliBili:
                     logger.info(f"{file_name} - chunks-{index} - status: {r.status}")
                     end = time.perf_counter() - start
                     parts.append({"partNumber": params['chunk'] + 1, "eTag": "etag"})
+            st = time.perf_counter()
         # print("n: ", n)
+        if len(parts) == 0:
+            return None
         logger.info(f"{file_name} - total_size: {total_size}, n: {n}")
         # for i in range(chunks):
         #     params = {
@@ -879,7 +890,7 @@ class BiliBili:
         total_bytes = 0
         while True:
             # 从队列中获取数据
-            data = simple_queue.get(1024)
+            data = simple_queue.get()
             # 如果接收到 None，则表示结束
             if data is None:
                 # 填充 0x00 直到达到 total_size
@@ -911,7 +922,7 @@ class BiliBili:
         while True:
             # 从队列中获取数据
             # print(simple_queue.empty())
-            data = simple_queue.get(1024)
+            data = simple_queue.get()
             # 如果接收到 None，则表示结束
             if data is None:
                 # 填充 0x00 直到达到 total_size
@@ -931,64 +942,70 @@ class BiliBili:
                 break
         return b"".join(result)
 
-    def queue_reader_generator(self, simple_queue, max_bytes, total_size):
+    async def queue_reader_generator_async(self,
+                                           simple_queue: queue.SimpleQueue,
+                                           chunk_size: int,
+                                           max_size: int):
         """
-        从 simple_queue 中读取数据并按 max_bytes 大小分块产出 (yield)。
-        当队列中获取到 None 或者数据总量达到 total_size 后，就用 0x00 补齐到 total_size。
+        异步版本的队列读取生成器
+        """
+        for index, chunk in enumerate(self.queue_reader_generator(simple_queue, chunk_size, max_size)):
+            yield index, chunk
+
+    def queue_reader_generator(self, simple_queue: queue.SimpleQueue, chunk_size: int, max_size: int):
+        """
+        从 simple_queue 中读取数据并按 chunk_size 大小分块产出 (yield)
+        当队列中获取到 None 或者数据总量达到 max_size 后，就用 0x00 补齐到 chunk_size
 
         :param simple_queue: queue.SimpleQueue 实例，数据流会以多个分包 (bytes) 入队，最后以 None 表示结束
-        :param max_bytes: 消费者每次想要获取的数据块大小
-        :param total_size: 需要最终补齐的总大小（单位：字节）
-        :return: 生成器，按 max_bytes 大小分批次产出数据
+        :param chunk_size: 消费者每次想要获取的数据块大小
+        :param max_size: 需要最终补齐的总大小（单位：字节），必须是 chunk_size 的整数倍
+        :return: 生成器，按 chunk_size 大小分批次产出数据
         """
-        total_bytes = 0
-        data_buffer = bytearray()  # 用于先暂存所有数据
+        if max_size % chunk_size != 0:
+            raise ValueError("max_size must be a multiple of chunk_size")
 
-        while True:
-            # 从队列中取数据（阻塞方式）
-            data = simple_queue.get(1024)
+        total_chunks = max_size // chunk_size
+        chunks_yielded = 0
+        current_buffer = bytearray()
+
+        while chunks_yielded < total_chunks:
+            # 从队列获取数据
+            data = simple_queue.get()
+
             if data is None:
-                # 说明上游已经结束，需要补剩余 0x00
-                if total_bytes < total_size:
-                    print(f"视频数据已经获取完成,需要补 {total_size-total_bytes} 个 0x00")
-                    remaining = total_size - total_bytes
-                    if remaining == 0:
-                        break
-                    data_buffer += b'\x00' * remaining
-                    total_bytes += remaining
-                # 数据补齐后跳出循环
+                # 数据流结束，用0x00填充剩余的块
+                remaining_chunks = total_chunks - chunks_yielded
+                if remaining_chunks == total_chunks:
+                    print("空包跳过")
+                    break
+                if len(current_buffer) > 0:
+                    # 处理当前缓冲区中的最后一块数据
+                    padding_size = chunk_size - len(current_buffer)
+                    if padding_size > 0:
+                        current_buffer += b'\x00' * padding_size
+                        print(f"最后一个包差了 {padding_size} 个字节")
+                    yield bytes(current_buffer)
+                    chunks_yielded += 1
+                    remaining_chunks -= 1
+                print(f"还差 {remaining_chunks} 个完整包")
+
+                # 输出剩余的全0块
+                for _ in range(remaining_chunks):
+                    yield b'\x00' * chunk_size
+                    chunks_yielded += 1
                 break
 
-            # 否则，正常累加数据
-            data_buffer += data
-            total_bytes += len(data)
+            # 将新数据添加到缓冲区
+            current_buffer.extend(data)
 
-            # 如果超出 total_size，需要截断（只取 total_size 部分）
-            if total_bytes >= total_size:
-                over_bytes = total_bytes - total_size
-                # over_bytes 可能为 0，也可能 > 0
-                if over_bytes > 0:
-                    # 截断掉多余的部分
-                    data_buffer = data_buffer[: -over_bytes]
-                total_bytes = total_size
-                break
+            # 输出完整的块
+            while len(current_buffer) >= chunk_size and chunks_yielded < total_chunks:
+                yield bytes(current_buffer[:chunk_size])
+                current_buffer = current_buffer[chunk_size:]
+                chunks_yielded += 1
 
-            # 当缓冲区内的数据长度 >= max_bytes，就可以分块 yield 出去
-            while len(data_buffer) >= max_bytes:
-                chunk = data_buffer[:max_bytes]
-                data_buffer = data_buffer[max_bytes:]
-                yield bytes(chunk)  # 转为 bytes 再产出
-
-        # 队列结束后或 total_size 达到后，需要把剩余数据继续 yield
-        # 因为 data_buffer 里可能还有最后不足 max_bytes 的那部分
-        while len(data_buffer) >= max_bytes:
-            chunk = data_buffer[:max_bytes]
-            data_buffer = data_buffer[max_bytes:]
-            yield bytes(chunk)
-
-        # 如果最后还有剩余小块，也要 yield
-        if data_buffer:
-            yield bytes(data_buffer)
+        print("本段分p完成")
 
     @staticmethod
     async def _upload(params, file, chunk_size, afunc, tasks=3):

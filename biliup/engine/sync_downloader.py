@@ -3,6 +3,7 @@
 
 import logging
 import os
+import queue
 import threading
 import subprocess
 from urllib.parse import urlparse
@@ -60,7 +61,7 @@ class SyncDownloader:
         self.max_file_size = max_file_size
         self.output_prefix = output_prefix
 
-        self.video_queue = video_queue
+        self.video_queue: queue.SimpleQueue = video_queue
         self.stop_event = threading.Event()
 
     def run_ffmpeg_with_url(self, ffmpeg_cmd, output_filename):
