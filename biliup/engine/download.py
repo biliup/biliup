@@ -104,32 +104,30 @@ class DownloadBase(ABC):
                 return self.ffmpeg_segment_download()
 
         parsed_url_path = urlparse(self.raw_stream_url).path
-        if self.downloader == 'streamlink' or self.downloader == 'ffmpeg':
-            if shutil.which("ffmpeg"):
-                # streamlink无法处理flv,所以回退到ffmpeg
-                if self.downloader == 'streamlink' and '.flv' not in parsed_url_path:
-                    return self.ffmpeg_download(use_streamlink=True)
-                else:
-                    return self.ffmpeg_download()
-            else:
+        if self.downloader != 'stream-gears':
+            if not shutil.which("ffmpeg"):
                 logger.error("未安装 FFMpeg 或不存在于 PATH 内，本次下载使用 stream-gears")
                 logger.debug("Current user's PATH is:" + os.getenv("PATH"))
 
-        # 同步下载上传器
-        if self.downloader == 'sync-downloader':
-            logger.info(f"{self.plugin_msg}: 使用同步下载器")
-            stream_info = config.get('streamers', {}).get(self.fname, {})
-            stream_info.update({'name': self.fname})
-            if not self.file_size:
-                self.file_size = 2 * 1024 * 1024 * 1024
-            else:
-                min_size = 10 * 1024 * 1024
-                self.file_size = ((self.file_size + min_size - 1) // min_size) * min_size  # 向上取整
-            sync_download(self.raw_stream_url, self.fake_headers,
-                          max_file_size=int(self.file_size / 1024 / 1024),
-                          output_prefix=self.gen_download_filename(True),
-                          stream_info=stream_info)
-            return True
+            # 同步下载上传器
+            if self.downloader == 'sync-downloader':
+                logger.info(f"{self.plugin_msg}: 使用同步下载器")
+                stream_info = config.get('streamers', {}).get(self.fname, {})
+                stream_info.update({'name': self.fname})
+                if not self.file_size:
+                    self.file_size = 2 * 1024 * 1024 * 1024
+                else:
+                    min_size = 10 * 1024 * 1024
+                    self.file_size = ((self.file_size + min_size - 1) // min_size) * min_size  # 向上取整
+                sync_download(self.raw_stream_url, self.fake_headers,
+                            max_file_size=int(self.file_size / 1024 / 1024),
+                            output_prefix=self.gen_download_filename(True),
+                            stream_info=stream_info)
+                return True
+            # streamlink无法处理flv,所以回退到ffmpeg
+            if self.downloader == 'streamlink' and '.flv' not in parsed_url_path:
+                return self.ffmpeg_download(use_streamlink=True)
+            return self.ffmpeg_download()
 
         if '.flv' in parsed_url_path:
             # 假定flv流
@@ -202,7 +200,10 @@ class DownloadBase(ABC):
             # ffmpeg 输入参数
             input_args = []
             # ffmpeg 输出参数
-            output_args = []
+            output_args = [
+                '-c',
+                'copy',
+            ]
             if use_streamlink:
                 streamlink_cmd = [
                     'streamlink',
@@ -242,7 +243,7 @@ class DownloadBase(ABC):
             else:
                 output_args += ['-f', self.suffix]
 
-            args = ['ffmpeg', '-y', *input_args, *output_args, '-c', 'copy',
+            args = ['ffmpeg', '-y', *input_args, *output_args,
                     f'{fmt_file_name}.{self.suffix}.part']
             with subprocess.Popen(args, stdin=subprocess.DEVNULL if not streamlink_proc else streamlink_proc.stdout,
                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as proc:
@@ -449,7 +450,7 @@ class DownloadBase(ABC):
             if r.status_code == 200:
                 return url
         except HTTPStatusError as e:
-            logger.error(f'{self.plugin_msg}: url {url}: status_code-{e.response.status_code}')
+            logger.debug(f'{self.plugin_msg}: url {url}: status_code-{e.response.status_code}')
         except:
             logger.debug(f'{self.plugin_msg}: url {url}: ', exc_info=True)
         return None
