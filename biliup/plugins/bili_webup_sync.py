@@ -593,7 +593,7 @@ class BiliBili:
         video_part = asyncio.run(upload(stream_queue, file_name, total_size, ret))
         if not video_part:
             stop_event.set()
-            print("异常流 直接退出")
+            # print("异常流 直接退出")
             return
         video_part['title'] = video_part['title'][:80]
         videos.append(video_part)  # 添加已经上传的视频
@@ -800,14 +800,16 @@ class BiliBili:
         n = 0
 
         st = time.perf_counter()
-        with ThreadPoolExecutor(max_workers=3) as executor:
+        max_workers = 3
+        semaphore = threading.Semaphore(max_workers)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = []
             for index, chunk in enumerate(self.queue_reader_generator(stream_queue, chunk_size, total_size)):
                 if not chunk:
                     break
                 const_time = time.perf_counter() - st
                 speed = len(chunk) * 8 / 1024 / 1024 / const_time
-                logger.info(f"{file_name} - chunks-{index} - down - speed: {speed:.2f}Mbps")
+                logger.info(f"{file_name} - chunks-({index+1}/{chunks}) - down - speed: {speed:.2f}Mbps")
                 n += len(chunk)
                 params = {
                     'uploadId': upload_id,
@@ -820,19 +822,26 @@ class BiliBili:
                     'end': index * chunk_size + chunk_size
                 }
                 params_clone = params.copy()
+                semaphore.acquire()
                 future = executor.submit(self.upload_chunk_thread,
                                          url, chunk, params_clone, headers, file_name)
+                future.add_done_callback(lambda x: semaphore.release())
                 futures.append(future)
                 st = time.perf_counter()
-                # 等待所有分片上传完成，并按顺序收集结果
-                for future in concurrent.futures.as_completed(futures):
-                    pass
 
-                results = [{
-                    "partNumber": i + 1,
-                    "eTag": "etag"
-                } for i in range(chunks)]
-                parts.extend(results)
+                for f in list(futures):
+                    if f.done():
+                        futures.remove(f)
+
+                # 等待所有分片上传完成，并按顺序收集结果
+            for future in concurrent.futures.as_completed(futures):
+                pass
+
+            results = [{
+                "partNumber": i + 1,
+                "eTag": "etag"
+            } for i in range(chunks)]
+            parts.extend(results)
 
         # st = time.perf_counter()
         # for index, chunk in enumerate(self.queue_reader_generator(stream_queue, chunk_size, total_size)):
@@ -934,7 +943,7 @@ class BiliBili:
                     const_time = time.perf_counter() - st
                     speed = len(chunk) * 8 / 1024 / 1024 / const_time
                     logger.info(
-                        f"{file_name} - chunks-{params_clone['chunk']} - up status: {r.status_code} - speed: {speed:.2f}Mbps"
+                        f"{file_name} - chunks-{params_clone['chunk'] +1 } - up status: {r.status_code} - speed: {speed:.2f}Mbps"
                     )
                     return {
                         "partNumber": params_clone['chunk'] + 1,
