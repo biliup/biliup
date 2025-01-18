@@ -156,8 +156,10 @@ class BiliWebAsync(UploadBase):
             t.start()
 
             while True:
-                data = self.video_queue.get()
-                # print("321123")
+                try:
+                    data = self.video_queue.get(timeout=10)
+                except queue.Empty:
+                    return
 
                 if data is None:
                     video_upload_queue.put(None)
@@ -1099,8 +1101,10 @@ class BiliBili:
         current_buffer = bytearray()
 
         while chunks_yielded < total_chunks:
-            # 从队列获取数据
-            data = simple_queue.get()
+            try:
+                data = simple_queue.get(timeout=10)
+            except queue.Empty:
+                break
 
             if data is None:
                 # 数据流结束，用0x00填充剩余的块
@@ -1113,11 +1117,11 @@ class BiliBili:
                     padding_size = chunk_size - len(current_buffer)
                     if padding_size > 0:
                         current_buffer += b'\x00' * padding_size
-                        print(f"最后一个包差了 {padding_size} 个字节")
+                        logger.info(f"最后一个包差了 {padding_size} 个字节")
                     yield bytes(current_buffer)
                     chunks_yielded += 1
                     remaining_chunks -= 1
-                print(f"还差 {remaining_chunks} 个完整包")
+                logger.info(f"还差 {remaining_chunks} 个完整包")
 
                 # 输出剩余的全0块
                 for _ in range(remaining_chunks):
