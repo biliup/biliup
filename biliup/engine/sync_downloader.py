@@ -173,8 +173,8 @@ class SyncDownloader:
                 self.run_streamlink_with_ffmpeg(streamlink_cmd, ffmpeg_cmd, output_filename)
 
             # 6. 进入下一段
-            if file_index != 1:
-                self.video_queue.put(None)  # 通知消费者线程本段录制结束
+            # if file_index != 1:
+            self.video_queue.put(None)  # 通知消费者线程本段录制结束
             file_index += 1
 
 
