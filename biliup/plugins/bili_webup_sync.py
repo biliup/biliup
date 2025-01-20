@@ -1130,6 +1130,7 @@ class BiliBili:
                     yield bytes(current_buffer)
                     chunks_yielded += 1
                     remaining_chunks -= 1
+                break
                 logger.info(f"还差 {remaining_chunks} 个完整包")
 
                 # 输出剩余的全0块
