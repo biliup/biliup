@@ -111,8 +111,8 @@ class SyncDownloader:
                 ffmpeg_proc.wait()
                 logging.info("[run] ffmpeg 已到达输出大小并退出。结束本段写入。")
 
-            streamlink_proc.kill()  # 确保终止 streamlink 进程
-            streamlink_proc.wait()
+            # streamlink_proc.kill()  # 确保终止 streamlink 进程
+            # streamlink_proc.wait()
 
         return True  # 如果一切正常，返回 True
 
@@ -120,19 +120,19 @@ class SyncDownloader:
         cmd = [
             "ffmpeg",
             "-loglevel", "quiet",
-            "-i", input_source,  # 输入源
+            # "-"  # 覆盖输出文件
+        ]
+        if headers:
+            cmd += ["-headers", ''.join(f'{key}: {value}\r\n' for key, value in headers.items())]
+        for i in ["-i", input_source,  # 输入源
             # "-t", str(segment_duration),
             "-fs", f"{self.max_file_size}M",
             "-c:v", "copy",
             "-c:a", "copy",
             "-movflags", "+frag_keyframe+empty_moov",
-            "-f", "matroska",
-            "-"  # 覆盖输出文件
-        ]
-        if headers:
-            cmd += ["-headers", ''.join(f'{key}: {value}\r\n' for key, value in headers.items())]
-        # cmd.append(output_filename)
-        # cmd.append("-")
+            "-f", "matroska"]:
+            cmd.append(i)
+        cmd.append("-")
 
         return cmd
 
@@ -159,6 +159,7 @@ class SyncDownloader:
 
             output_filename = f"{self.output_prefix}{file_index:03d}.mkv"
             # print(f"\n[run] ========== 准备录制第 {file_index} 段：{output_filename} ==========")
+            # logging.info(f"\n[run] == 当前下载流地址：{self.stream_url} ==")
             logging.info(f"\n[run] == 准备录制第 {file_index} 段：{output_filename} ==")
             output_filename = "-"
             is_hls = '.m3u8' in urlparse(self.stream_url).path
