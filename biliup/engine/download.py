@@ -120,9 +120,10 @@ class DownloadBase(ABC):
                     min_size = 10 * 1024 * 1024
                     self.file_size = ((self.file_size + min_size - 1) // min_size) * min_size  # 向上取整
                 sync_download(self.raw_stream_url, self.fake_headers,
-                            max_file_size=int(self.file_size / 1024 / 1024),
-                            output_prefix=self.gen_download_filename(True),
-                            stream_info=stream_info)
+                              max_file_size=int(self.file_size / 1024 / 1024),
+                              output_prefix=self.gen_download_filename(True),
+                              stream_info=stream_info,
+                              file_name_callback=lambda file_name: self.__download_segment_callback(file_name))
                 return True
             # streamlink无法处理flv,所以回退到ffmpeg
             if self.downloader == 'streamlink' and '.flv' not in parsed_url_path:
@@ -521,7 +522,7 @@ def stream_gears_download(url, headers, file_name, segment_time=None, file_size=
         )
 
 
-def sync_download(stream_url, headers, segment_duration=60, max_file_size=100, output_prefix="segment", stream_info=None):
+def sync_download(stream_url, headers, segment_duration=60, max_file_size=100, output_prefix="segment", stream_info=None, file_name_callback: Callable[[str], None] = None):
     logger.info(f"启动同步下载器 max_file_size {max_file_size}MB")
     video_queue = queue.SimpleQueue()
     # video_queue.put(b'\x00')
@@ -540,8 +541,9 @@ def sync_download(stream_url, headers, segment_duration=60, max_file_size=100, o
         filtered_info['principal'] = ""
         filtered_info["data"] = stream_info
         uploader = BiliWebAsync(**filtered_info, video_queue=video_queue)
-        uploader.upload_stream(total_size=max_file_size * 1024 * 1024,
-                               stop_event=stop_event, output_prefix=output_prefix)
+        uploader.upload(total_size=max_file_size * 1024 * 1024,
+                        stop_event=stop_event, output_prefix=output_prefix,
+                        file_name_callback=file_name_callback)
         # print("上传器结束")
         logger.info(f"{stream_info['name']} 上传器结束")
         # video_queue = queue.SimpleQueue()

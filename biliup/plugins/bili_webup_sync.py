@@ -75,41 +75,7 @@ class BiliWebAsync(UploadBase):
 
         self.video_queue: queue.SimpleQueue = video_queue
 
-    def upload(self, file_list: List[UploadBase.FileInfo]) -> List[UploadBase.FileInfo]:
-        print('开始上传', file_list)
-        video = Data()
-        video.dynamic = self.dynamic
-        with BiliBili(video) as bili:
-            bili.login(self.persistence_path, self.user_cookie)
-            for file in file_list:
-                video_part = bili.upload_file(file, self.lines, self.threads)  # 上传视频
-                video_part['title'] = video_part['title'][:80]
-                video.append(video_part)  # 添加已经上传的视频
-            video.title = self.data["title"][:80]  # 稿件标题限制80字
-            if self.credits:
-                video.desc_v2 = self.creditsToDesc_v2()
-            else:
-                video.desc_v2 = [{
-                    "raw_text": self.desc,
-                    "biz_id": "",
-                    "type": 1
-                }]
-            video.desc = self.desc
-            video.copyright = self.copyright
-            if self.copyright == 2:
-                video.source = self.data["url"]  # 添加转载地址说明
-            # 设置视频分区,默认为174 生活，其他分区
-            video.tid = self.tid
-            video.set_tag(self.tags)
-            if self.dtime:
-                video.delay_time(int(time.time()) + self.dtime)
-            if self.cover_path:
-                video.cover = bili.cover_up(self.cover_path).replace('http:', '')
-            ret = bili.submit(self.submit_api)  # 提交视频
-        logger.info(f"上传成功: {ret}")
-        return file_list
-
-    def upload_stream(self, total_size: int, stop_event: threading.Event, output_prefix: str) -> List[UploadBase.FileInfo]:
+    def upload(self, total_size: int, stop_event: threading.Event, output_prefix: str, file_name_callback: Callable[[str], None] = None) -> List[UploadBase.FileInfo]:
         # print("开始同步上传")
         logger.info("开始同步上传")
         file_index = 1
@@ -147,11 +113,14 @@ class BiliWebAsync(UploadBase):
             #     break
 
             file_name = f"{output_prefix}_{file_index}.mkv"
+
+            # if file_name_callback:
+            # file_name_callback(file_name)
             data_size = 0
             video_upload_queue = queue.SimpleQueue()
 
             t = threading.Thread(target=bili.upload_stream, args=(video_upload_queue,
-                                 file_name, total_size, self.lines, videos, stop_event), daemon=True, name=f"upload_{file_index}")
+                                 file_name, total_size, self.lines, videos, stop_event, file_name_callback), daemon=True, name=f"upload_{file_index}")
             thread_list.append(t)
             t.start()
 
@@ -159,7 +128,7 @@ class BiliWebAsync(UploadBase):
                 try:
                     data = self.video_queue.get(timeout=10)
                 except queue.Empty:
-                    return
+                    break
 
                 if data is None:
                     video_upload_queue.put(None)
@@ -186,7 +155,11 @@ class BiliWebAsync(UploadBase):
 
         # ret = bili.submit(self.submit_api)  # 提交视频
         # logger.info(f"上传成功: {ret}")
-        return []
+        file_list = []
+        # if config.get('sync_save_dir', None):
+        #     file_list = [os for file_name in os.listdir("sync_downloaded")]
+        # print("上传完成", file_list)
+        return file_list
 
     def creditsToDesc_v2(self):
         desc_v2 = []
@@ -240,6 +213,11 @@ class BiliBili:
         self.__bili_jct = None
         self._auto_os = None
         self.persistence_path = 'engine/bili.cookie'
+
+        self.save_dir = config.get('sync_save_dir', None)
+        self.save_path = ''
+        if self.save_dir and not os.path.exists(self.save_dir):
+            os.makedirs(self.save_dir)
 
     def check_tag(self, tag):
         r = self.__session.get("https://member.bilibili.com/x/vupre/web/topic/tag/check?tag=" + tag).json()
@@ -521,9 +499,11 @@ class BiliBili:
                         f"Assigned UpOS endpoint {original_endpoint} was never seen before, something else might have changed, so will not modify it")
             return asyncio.run(upload(f, total_size, ret, tasks=tasks))
 
-    def upload_stream(self, stream_queue: queue.SimpleQueue, file_name, total_size, lines='AUTO', videos: 'Data' = None, stop_event: threading.Event = None):
+    def upload_stream(self, stream_queue: queue.SimpleQueue, file_name, total_size, lines='AUTO', videos: 'Data' = None, stop_event: threading.Event = None, file_name_callback: Callable[[str], None] = None):
 
         logger.info(f"{file_name} 开始上传")
+        if self.save_dir:
+            self.save_path = os.path.join(self.save_dir, file_name)
         preferred_upos_cdn = None
         if not self._auto_os:
             if lines == 'bda':
@@ -607,6 +587,9 @@ class BiliBili:
             logger.info(f"上传成功: {ret}")
         aid = ret['data']['aid']
         videos.aid = aid
+
+        if file_name_callback:
+            file_name_callback(self.save_path)
 
     async def cos(self, file, total_size, ret, chunk_size=10485760, tasks=3, internal=False):
         filename = file.name
@@ -798,7 +781,6 @@ class BiliBili:
         logger.info(
             f"{file_name} - upload_id: {upload_id}, chunks: {chunks}, chunk_size: {chunk_size}, total_size: {total_size}")
         n = 0
-
         st = time.perf_counter()
         max_workers = 3
         semaphore = threading.Semaphore(max_workers)
@@ -842,69 +824,6 @@ class BiliBili:
                 "eTag": "etag"
             } for i in range(chunks)]
             parts.extend(results)
-
-        # st = time.perf_counter()
-        # for index, chunk in enumerate(self.queue_reader_generator(stream_queue, chunk_size, total_size)):
-        #     # logger.info(f"{file_name} - chunks-{index} - size: {len(chunk)}")
-        #     const_time = time.perf_counter() - st
-        #     # 计算速度 单位是 Mbps
-        #     speed = len(chunk) * 8 / 1024 / 1024 / const_time
-        #     logger.info(f"{file_name} - chunks-{index} - speed: {speed:.2f}Mbps  {chunk[:10]}")
-        #     n += len(chunk)
-        #     params = {
-        #         'uploadId': upload_id,
-        #         'chunks': chunks,
-        #         'total': total_size
-        #     }
-        #     params['chunk'] = index
-        #     params['size'] = chunk_size
-        #     params['partNumber'] = index + 1
-        #     params['start'] = index * chunk_size
-        #     params['end'] = params['start'] + params['size']
-        #     params_clone = params.copy()
-        #     async with aiohttp.ClientSession() as session:
-        #         # print("params: ", params_clone)
-        #         logger.info(f"{file_name} - params: {params_clone}")
-        #         # data = self.queue_reader(stream_queue, chunk_size, chunk_size)
-        #         # print("data length: ", len(data))
-        #         async with session.put(url, params=params_clone, raise_for_status=True, data=chunk, headers=headers) as r:
-        #             # print("r:----", r.status)
-        #             logger.info(f"{file_name} - chunks-{index} - status: {r.status}")
-        #             end = time.perf_counter() - start
-        #             parts.append({"partNumber": params['chunk'] + 1, "eTag": "etag"})
-        #     st = time.perf_counter()
-        # print("n: ", n)
-
-        # for i in range(chunks):
-        #     params = {
-        #         'uploadId': upload_id,
-        #         'chunks': chunks,
-        #         'total': total_size
-        #     }
-        #     params['chunk'] = i
-        #     params['size'] = chunk_size
-        #     params['partNumber'] = i + 1
-        #     params['start'] = i * chunk_size
-        #     params['end'] = params['start'] + params['size']
-        #     params_clone = params.copy()
-        #     async with aiohttp.ClientSession() as session:
-        #         # print("params: ", params_clone)
-        #         logger.info(f"{file_name} - params: {params_clone}")
-        #         data = self.queue_reader(stream_queue, chunk_size, chunk_size)
-        #         # print("data length: ", len(data))
-        #         async with session.put(url, params=params_clone, raise_for_status=True, data=data, headers=headers) as r:
-        #             # print("r:----", r.status)
-        #             logger.info(f"{file_name} - chunks-{i} - status: {r.status}")
-        #             end = time.perf_counter() - start
-        #             parts.append({"partNumber": params['chunk'] + 1, "eTag": "etag"})
-
-        # sys.stdout.write(f"\r{params['end'] / 1000 / 1000 / end:.2f}MB/s "
-        #                 f"=> {params['partNumber'] / chunks:.1%}")
-        # await self._upload({
-        #     'uploadId': upload_id,
-        #     'chunks': chunks,
-        #     'total': total_size
-        # }, file, chunk_size, upload_chunk, tasks=tasks)
 
         if len(parts) == 0:
             return None
@@ -1108,6 +1027,9 @@ class BiliBili:
         total_chunks = max_size // chunk_size
         chunks_yielded = 0
         current_buffer = bytearray()
+        save_file = None
+        if self.save_dir:
+            save_file = open(self.save_path, "wb")
 
         while chunks_yielded < total_chunks:
             try:
@@ -1139,6 +1061,8 @@ class BiliBili:
                     chunks_yielded += 1
                 break
 
+            save_file and save_file.write(data)
+
             # 将新数据添加到缓冲区
             current_buffer.extend(data)
 
@@ -1149,6 +1073,7 @@ class BiliBili:
                 chunks_yielded += 1
 
         # print("本段分p完成")
+        save_file and save_file.close()
         yield None
 
     @staticmethod

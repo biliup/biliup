@@ -125,12 +125,12 @@ class SyncDownloader:
         if headers:
             cmd += ["-headers", ''.join(f'{key}: {value}\r\n' for key, value in headers.items())]
         for i in ["-i", input_source,  # 输入源
-            # "-t", str(segment_duration),
-            "-fs", f"{self.max_file_size}M",
-            "-c:v", "copy",
-            "-c:a", "copy",
-            "-movflags", "+frag_keyframe+empty_moov",
-            "-f", "matroska"]:
+                  # "-t", str(segment_duration),
+                  "-fs", f"{self.max_file_size}M",
+                  "-c:v", "copy",
+                  "-c:a", "copy",
+                  "-movflags", "+frag_keyframe+empty_moov",
+                  "-f", "matroska"]:
             cmd.append(i)
         cmd.append("-")
 
