@@ -53,6 +53,7 @@ class BiliWebAsync(UploadBase):
         self.threads = threads
         self.tid = tid
         self.tags = tags
+        self.dtime = dtime
         if cover_path:
             self.cover_path = cover_path
         elif "live_cover_path" in self.data:
@@ -63,16 +64,14 @@ class BiliWebAsync(UploadBase):
         self.credits = credits
         self.dynamic = dynamic
         self.copyright = copyright
-        self.dtime = dtime
         self.dolby = dolby
         self.hires = hires
         self.no_reprint = no_reprint
         self.open_elec = open_elec
-        self.user_cookie = user_cookie
         self.copyright_source = copyright_source
-
         self.extra_fields = extra_fields
 
+        self.user_cookie = user_cookie
         self.video_queue: queue.SimpleQueue = video_queue
 
     def upload(self, total_size: int, stop_event: threading.Event, output_prefix: str, file_name_callback: Callable[[str], None] = None) -> List[UploadBase.FileInfo]:
@@ -103,6 +102,13 @@ class BiliWebAsync(UploadBase):
             videos.delay_time(int(time.time()) + self.dtime)
         if self.cover_path:
             videos.cover = bili.cover_up(self.cover_path).replace('http:', '')
+
+        # 其他参数设置
+        videos.extra_fields = self.extra_fields
+        videos.dolby = self.dolby
+        videos.hires = self.hires
+        videos.no_reprint = self.no_reprint
+        videos.open_elec = self.open_elec
 
         thread_list = []
         while True:
@@ -1238,6 +1244,11 @@ class Data:
     videos: list = field(default_factory=list)
     dtime: Any = None
     open_subtitle: InitVar[bool] = False
+    dolby: int = 0
+    hires: int = 0
+    no_reprint = 0
+    open_elec = 0
+    extra_fields = ""
 
     aid: int = None
     # interactive: int = 0
