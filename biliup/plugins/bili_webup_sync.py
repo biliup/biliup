@@ -271,7 +271,7 @@ class BiliBili:
 
     def myinfo(self, cookies):
         requests.utils.add_dict_to_cookiejar(self.__session.cookies, cookies)
-        response = self.__session.get('http://api.bilibili.com/x/space/myinfo')
+        response = self.__session.get('https://api.bilibili.com/x/space/myinfo', timeout=15)
         return response.json()
 
     def login(self, persistence_path, user_cookie):
@@ -295,6 +295,7 @@ class BiliBili:
                 self.cookies = json.load(f)
 
                 self.access_token = self.cookies['token_info']['access_token']
+                self.refresh_token = self.cookies['token_info']['refresh_token']
         except (JSONDecodeError, KeyError):
             logger.exception('加载cookie出错')
 
@@ -374,15 +375,14 @@ class BiliBili:
         return r
 
     def login_by_cookies(self, cookie):
-        print('使用cookies上传')
         cookies_dict = {c['name']: c['value'] for c in cookie['cookie_info']['cookies']}
-
         requests.utils.add_dict_to_cookiejar(self.__session.cookies, cookies_dict)
-        if 'bili_jct' in cookie:
-            self.__bili_jct = cookie["bili_jct"]
+        if 'bili_jct' in cookies_dict:
+            self.__bili_jct = cookies_dict['bili_jct']
         data = self.__session.get("https://api.bilibili.com/x/web-interface/nav", timeout=5).json()
         if data["code"] != 0:
             raise Exception(data)
+        print('使用cookies上传')
 
     def sign(self, param):
         return hashlib.md5(f"{param}{self.appsec}".encode()).hexdigest()
@@ -852,6 +852,7 @@ class BiliBili:
         if not self.video.title:
             self.video.title = self.video.videos[0]["title"]
 
+        # 不能提交 extra_fields 字段，提前处理
         post_data = asdict(self.video)
         if post_data.get('extra_fields'):
             for key, value in json.loads(post_data.pop('extra_fields')).items():
@@ -860,7 +861,7 @@ class BiliBili:
         self.__session.get('https://member.bilibili.com/x/geetest/pre/add', timeout=5)
 
         if submit_api is None:
-            total_info = self.__session.get('http://api.bilibili.com/x/space/myinfo', timeout=15).json()
+            total_info = self.myinfo()
             if total_info.get('data') is None:
                 logger.error(total_info)
             total_info = total_info.get('data')
@@ -888,6 +889,8 @@ class BiliBili:
 
     def submit_web(self, post_data, edit=False):
         logger.info('使用网页端api提交')
+        if not self.__bili_jct:
+            raise RuntimeError("bili_jct is required!")
         api = 'https://member.bilibili.com/x/vu/web/add?csrf=' + self.__bili_jct
         if edit:
             api = 'https://member.bilibili.com/x/vu/web/edit?csrf=' + self.__bili_jct
