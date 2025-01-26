@@ -264,13 +264,15 @@ class BiliBili:
                 return r
         raise "Qrcode timeout"
 
-    def tid_archive(self, cookies):
-        requests.utils.add_dict_to_cookiejar(self.__session.cookies, cookies)
+    def tid_archive(self, cookies: dict = None):
+        if cookies:
+            requests.utils.add_dict_to_cookiejar(self.__session.cookies, cookies)
         response = self.__session.get("https://member.bilibili.com/x/vupre/web/archive/pre")
         return response.json()
 
-    def myinfo(self, cookies):
-        requests.utils.add_dict_to_cookiejar(self.__session.cookies, cookies)
+    def myinfo(self, cookies: dict = None):
+        if cookies:
+            requests.utils.add_dict_to_cookiejar(self.__session.cookies, cookies)
         response = self.__session.get('https://api.bilibili.com/x/space/myinfo', timeout=15)
         return response.json()
 
@@ -869,8 +871,9 @@ class BiliBili:
                 user_weight = 2
             else:
                 user_weight = 1
-            logger.info(f'用户权重: {user_weight}')
+            logger.info(f'推测的用户权重: {user_weight}')
             # submit_api = 'web' if user_weight == 2 else 'client'
+            # web 目前（2025-01-26）全量分p功能
             submit_api = 'web'
         ret = None
         if submit_api == 'web':
