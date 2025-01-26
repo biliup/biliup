@@ -9,7 +9,7 @@ from ..engine.download import DownloadBase
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www)\.)?inke\.cn')
-class inke(DownloadBase):
+class Inke(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 

@@ -23,7 +23,6 @@ class Bililive(DownloadBase):
         self.bilibili_danmaku_detail = config.get('bilibili_danmaku_detail', False)
         self.__real_room_id = None
         self.__login_mid = 0
-        # self.fake_headers['referer'] = url
         if config.get('user', {}).get('bili_cookie'):
             self.fake_headers['cookie'] = config.get('user', {}).get('bili_cookie')
         if config.get('user', {}).get('bili_cookie_file'):
@@ -55,6 +54,7 @@ class Bililive(DownloadBase):
 
         room_id = match1(self.url, r'bilibili.com/(\d+)')
         quality_number = int(config.get('bili_qn', 10000))
+        self.fake_headers['referer'] = self.url
 
         # 获取直播状态与房间标题
         info_by_room_url = f"{OFFICIAL_API}/xlive/web-room/v1/index/getInfoByRoom?room_id={room_id}"
