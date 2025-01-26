@@ -5,13 +5,7 @@ import { Form, Select, Space, useFormApi } from '@douyinfe/semi-ui'
 import { IconUpload, IconDownload } from '@douyinfe/semi-icons'
 
 const Global: React.FC = () => {
-  const formApi = useFormApi();
-
-  useEffect(() => {
-    if (formApi.getValue('downloader') !== 'sync-downloader' && formApi.getValue('sync_save_dir')) {
-      formApi.setValue('sync_save_dir', '');
-    }
-  }, [formApi.getValue('downloader')]);
+  const formApi = useFormApi()
 
   return (
     <>
@@ -47,7 +41,8 @@ const Global: React.FC = () => {
               <br />
               3. stream-gears（默认。防 FLV 流花屏）
               <br />
-              4. sync-downloader（流式边录边传，需先为主播设定上传模板。不受 pool2/threads 控制，默认 3 线程上传，请确保上传带宽充足。需安装 FFmpeg）
+              4. sync-downloader（流式边录边传，需先为主播设定上传模板。不受
+              pool2/threads/segment_time 控制，默认 3 线程上传，请确保上传带宽充足。需安装 FFmpeg）
             </div>
           }
           style={{ width: '100%' }}
@@ -67,42 +62,42 @@ const Global: React.FC = () => {
             <Form.Input
               field="sync_save_dir"
               label="边录边传额外保存本地目录（sync_save_dir）"
-            placeholder=""
-            style={{ width: '100%' }}
-            fieldStyle={{
-              alignSelf: 'stretch',
-              padding: 0,
-            }}
-            showClear={true}
-            disabled={formApi.getValue('downloader') === 'sync-downloader' ? false : true}
-            rules={[
-              {
-                pattern: /^[^*|?"<>]*$/,
-                message: '路径中不能包含Windows不允许的字符 * | ? " < >',
-              },
-              {
-                pattern: /^(?![a-zA-Z]：).*$/,
-                message: '以字母开头时，第二个字符不能是中文冒号',
-              },
-              {
-                pattern: /^[^:]*$|^[a-zA-Z]:[\/\\][^:]*$/,
-                message: '冒号只能出现在第二个字符位置，且后面必须连接斜杠',
-              },
-              {
-                pattern: /^(?!.*?\.{3,})(?!.*?\.{2}(?![\/\\])).*$/,
-                message: '点号最多只能连续出现两次，且后面必须连接斜杠',
-              },
-              {
-                pattern: /^(?!.*\/\\)(?!.*\\\/).*$/,
-                message: '不允许连接正反斜杠',
-              },
-              {
-                pattern: /^(?!.*([\\]{3,}|[\/]{2,})).*$/,
-                message: '反斜杠最多只能连续出现两次，正斜杠最多只能连续出现一次',
-              }
-            ]}
-            stopValidateWithError={true}
-          />
+              placeholder=""
+              style={{ width: '100%' }}
+              fieldStyle={{
+                alignSelf: 'stretch',
+                padding: 0,
+              }}
+              showClear={true}
+              disabled={formApi.getValue('downloader') === 'sync-downloader' ? false : true}
+              rules={[
+                {
+                  pattern: /^[^*|?"<>]*$/,
+                  message: '路径中不能包含Windows不允许的字符 * | ? " < >',
+                },
+                {
+                  pattern: /^(?![a-zA-Z]：).*$/,
+                  message: '以字母开头时，第二个字符不能是中文冒号',
+                },
+                {
+                  pattern: /^[^:]*$|^[a-zA-Z]:[\/\\][^:]*$/,
+                  message: '冒号只能出现在第二个字符位置，且后面必须连接斜杠',
+                },
+                {
+                  pattern: /^(?!.*?\.{3,})(?!.*?\.{2}(?![\/\\])).*$/,
+                  message: '点号最多只能连续出现两次，且后面必须连接斜杠',
+                },
+                {
+                  pattern: /^(?!.*\/\\)(?!.*\\\/).*$/,
+                  message: '不允许连接正反斜杠',
+                },
+                {
+                  pattern: /^(?!.*([\\]{3,}|[\/]{2,})).*$/,
+                  message: '反斜杠最多只能连续出现两次，正斜杠最多只能连续出现一次',
+                },
+              ]}
+              stopValidateWithError={true}
+            />
           </>
         ) : null}
         <Form.InputNumber
