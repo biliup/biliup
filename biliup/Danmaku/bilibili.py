@@ -32,6 +32,8 @@ class Bilibili:
         # 传入内容中，如果 uid 不为 0，则 cookie 必然存在，且必然为详细模式
         if uid > 0:
             Bilibili.headers['cookie'] = content['cookie']
+        else:
+            Bilibili.headers['cookie'] = ""
 
         # 获取弹幕认证信息
         danmu_wss_url = 'wss://broadcastlv.chat.bilibili.com/sub'

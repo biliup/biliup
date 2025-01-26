@@ -207,9 +207,9 @@ class Bililive(DownloadBase):
             self.danmaku = DanmakuClient(
                 self.url, self.gen_download_filename(), {
                     'room_id': self.__real_room_id,
-                    'cookie': self.fake_headers.get("cookie") if self.__login_mid else "",
+                    'cookie': self.fake_headers.get('cookie', ''),
                     'detail': self.bilibili_danmaku_detail,
-                    'uid': self.__login_mid if self.bilibili_danmaku_detail else 0
+                    'uid': self.__login_mid
                 }
             )
 

@@ -537,6 +537,8 @@ def sync_download(stream_url, headers, segment_duration=60, max_file_size=100, o
         # 过滤 info 中的无关键
         filtered_info = {key: value for key, value in stream_info.items() if key in init_params}
 
+        filtered_info['submit_api'] = config.get('submit_api')
+        filtered_info['lines'] = config.get('lines', 'AUTO')
         # 映射 'uploader' 到 'principal'
         filtered_info['principal'] = ""
         filtered_info["data"] = stream_info
