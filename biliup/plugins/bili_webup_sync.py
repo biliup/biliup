@@ -225,51 +225,6 @@ class BiliBili:
         if self.save_dir and not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
 
-    def check_tag(self, tag):
-        r = self.__session.get("https://member.bilibili.com/x/vupre/web/topic/tag/check?tag=" + tag).json()
-        if r["code"] == 0:
-            return True
-        else:
-            return False
-
-    def get_qrcode(self):
-        params = {
-            "appkey": "4409e2ce8ffd12b8",
-            "local_id": "0",
-            "ts": int(time.time()),
-        }
-        params["sign"] = hashlib.md5(
-            f"{urllib.parse.urlencode(params)}59b43e04ad6965f34319062b478f83dd".encode()).hexdigest()
-        response = self.__session.post("http://passport.bilibili.com/x/passport-tv-login/qrcode/auth_code", data=params,
-                                       timeout=5)
-        r = response.json()
-        if r and r["code"] == 0:
-            return r
-
-    async def login_by_qrcode(self, value):
-        params = {
-            "appkey": "4409e2ce8ffd12b8",
-            "auth_code": value["data"]["auth_code"],
-            "local_id": "0",
-            "ts": int(time.time()),
-        }
-        params["sign"] = hashlib.md5(
-            f"{urllib.parse.urlencode(params)}59b43e04ad6965f34319062b478f83dd".encode()).hexdigest()
-        for i in range(0, 120):
-            await asyncio.sleep(1)
-            response = self.__session.post("http://passport.bilibili.com/x/passport-tv-login/qrcode/poll", data=params,
-                                           timeout=5)
-            r = response.json()
-            if r and r["code"] == 0:
-                return r
-        raise "Qrcode timeout"
-
-    def tid_archive(self, cookies: dict = None):
-        if cookies:
-            requests.utils.add_dict_to_cookiejar(self.__session.cookies, cookies)
-        response = self.__session.get("https://member.bilibili.com/x/vupre/web/archive/pre")
-        return response.json()
-
     def myinfo(self, cookies: dict = None):
         if cookies:
             requests.utils.add_dict_to_cookiejar(self.__session.cookies, cookies)
@@ -307,35 +262,6 @@ class BiliBili:
                        'access_token': self.access_token,
                        'refresh_token': self.refresh_token
                        }, f)
-
-    def send_sms(self, phone_number, country_code):
-        params = {
-            "actionKey": "appkey",
-            "appkey": "783bbb7264451d82",
-            "build": 6510400,
-            "channel": "bili",
-            "cid": country_code,
-            "device": "phone",
-            "mobi_app": "android",
-            "platform": "android",
-            "tel": phone_number,
-            "ts": int(time.time()),
-        }
-        sign = hashlib.md5(f"{urllib.parse.urlencode(params)}2653583c8873dea268ab9386918b1d65".encode()).hexdigest()
-        payload = f"{urllib.parse.urlencode(params)}&sign={sign}"
-        response = self.__session.post("https://passport.bilibili.com/x/passport-login/sms/send", data=payload,
-                                       timeout=5)
-        return response.json()
-
-    def login_by_sms(self, code, params):
-        params["code"] = code
-        params["sign"] = hashlib.md5(
-            f"{urllib.parse.urlencode(params)}59b43e04ad6965f34319062b478f83dd".encode()).hexdigest()
-        response = self.__session.post("https://passport.bilibili.com/x/passport-login/login/sms", data=params,
-                                       timeout=5)
-        r = response.json()
-        if r and r["code"] == 0:
-            return r
 
     def login_by_password(self, username, password):
         print('使用账号上传')
