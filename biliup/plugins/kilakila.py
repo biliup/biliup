@@ -7,13 +7,19 @@ from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 
 
-@Plugin.download(regexp=r'(?:https?://)?live\.kilakila\.cn')
+@Plugin.download(regexp=r'(?:https?://)?(live\.kilakila\.cn|www\.hongdoufm\.com)')
 class Kilakila(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         self._room_id: str = match1(url, r'(\d+)')
         super().__init__(fname, url, suffix)
 
     async def acheck_stream(self, is_check=False):
+        for path in['/PcLive/index/detail', '/room/']:
+            if path in self.url:
+                break
+        else:
+            logger.error(f"{self.plugin_msg}: Unsupported Type")
+            return False
         self.fake_headers['referer'] = 'https://live.kilakila.cn/'
         try:
             r = await client.get(
