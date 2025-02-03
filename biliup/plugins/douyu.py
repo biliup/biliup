@@ -94,7 +94,7 @@ class Douyu(DownloadBase):
             return False
 
         params['cdn'] = self.douyu_cdn
-        params['rate'] = self.douyu_rate
+        params['rate'] = int(self.douyu_rate)
 
         try:
             live_data = await self.get_play_info(self.__room_id, params)
