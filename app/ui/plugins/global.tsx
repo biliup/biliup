@@ -359,7 +359,7 @@ const Global: React.FC = () => {
             <div style={{ fontSize: '14px' }}>
               使用直播间封面作为投稿封面。此封面优先级低于单个主播指定的自定义封面，保存于cover文件夹下，上传后自动删除。
               <br />
-              目前支持平台：哔哩哔哩，Twitch，YouTube。
+              目前支持平台：哔哩哔哩，克拉克拉，Twitch，YouTube。
             </div>
           }
           label="使用直播间封面作为投稿封面（use_live_cover)"

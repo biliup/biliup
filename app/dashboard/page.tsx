@@ -37,6 +37,7 @@ import Twitch from '../ui/plugins/twitch'
 import YouTube from '../ui/plugins/youtube'
 import Developer from '../ui/plugins/developer'
 import Twitcasting from '@/app/ui/plugins/twitcasting'
+import Kilakila from '@/app/ui/plugins/kilakila'
 
 const Dashboard: React.FC = () => {
   const { Header, Content } = Layout
@@ -205,6 +206,8 @@ const Dashboard: React.FC = () => {
                         <Douyu />
                         {/* 虎牙 */}
                         <Huya entity={entity} />
+                        {/* 克拉克拉 */}
+                        <Kilakila />
                         {/* 老鼠台 */}
                         <Twitch entity={entity} />
                         {/* Twitcasting */}
