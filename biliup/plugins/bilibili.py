@@ -14,7 +14,7 @@ from ..engine.download import DownloadBase
 OFFICIAL_API = "https://api.live.bilibili.com"
 STREAM_NAME_REGEXP = r"/live-bvc/\d+/(live_[^/\.]+)"
 
-@Plugin.download(regexp=r'(?:https?://)?(b23\.tv|live\.bilibili\.com)')
+@Plugin.download(regexp=r'https?://(b23\.tv|live\.bilibili\.com)')
 class Bililive(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)

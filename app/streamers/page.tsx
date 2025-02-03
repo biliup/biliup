@@ -15,11 +15,13 @@ import {
   IconVideoListStroked,
   IconEdit2Stroked,
   IconDeleteStroked,
+  IconWrench,
 } from '@douyinfe/semi-icons'
 import { List, ButtonGroup } from '@douyinfe/semi-ui'
 import React, { useState } from 'react'
 import useStreamers from '../lib/use-streamers'
 import TemplateModal from '../ui/TemplateModal'
+import OverrideModal from '../ui/OverrideModal'
 import { LiveStreamerEntity, put, requestDelete, sendRequest } from '../lib/api-streamer'
 import useSWRMutation from 'swr/mutation'
 
@@ -92,7 +94,7 @@ export default function Home() {
   }
 
   const handleUpdate = async (values: any) => {
-    // console.log(values);
+    console.log(values);
     delete values.status
     if (values?.postprocessor) {
       values.postprocessor = values.postprocessor.map(
@@ -245,6 +247,10 @@ export default function Home() {
                       <TemplateModal onOk={handleUpdate} entity={item}>
                         <Button theme="borderless" icon={<IconEdit2Stroked />}></Button>
                       </TemplateModal>
+                      <span className="semi-button-group-line semi-button-group-line-borderless semi-button-group-line-primary"></span>
+                      <OverrideModal onOk={handleUpdate} entity={item}>
+                        <Button theme="borderless" icon={<IconWrench />}></Button>
+                      </OverrideModal>
                       <span className="semi-button-group-line semi-button-group-line-borderless semi-button-group-line-primary"></span>
                       <Popconfirm
                         title="确定是否要删除？"

@@ -11,7 +11,7 @@ from ..engine.download import DownloadBase
 from ..plugins import logger, match1, random_user_agent
 
 
-@Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?douyu\.com')
+@Plugin.download(regexp=r'https?://(?:(?:www|m)\.)?douyu\.com')
 class Douyu(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)

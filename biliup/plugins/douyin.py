@@ -13,7 +13,7 @@ from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 
 
-@Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m|live|v)\.)?douyin\.com')
+@Plugin.download(regexp=r'https?://(?:(?:www|m|live|v)\.)?douyin\.com')
 class Douyin(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
@@ -81,6 +81,8 @@ class Douyin(DownloadBase):
                 _room_info = await self.get_web_room_info(self.__web_rid)
                 if _room_info:
                     if not _room_info['data'].get('user'):
+                        if _room_info['data'].get('prompts', '') == '直播已结束':
+                            return False
                         # 可能是用户被封禁
                         raise Exception(f"{str(_room_info)}")
                     self.__sec_uid = _room_info['data']['user']['sec_uid']

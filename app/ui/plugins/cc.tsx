@@ -1,8 +1,25 @@
 'use client'
-import React from 'react'
-import { Form, Select, Collapse } from '@douyinfe/semi-ui'
+import React, { useEffect } from 'react'
+import { Form, Select, Collapse, useFormApi } from '@douyinfe/semi-ui'
 
-const CC: React.FC = () => {
+type Props = {
+  entity: any
+  list: any
+  initValues?: Record<string, any>
+}
+
+const CC: React.FC<Props> = props => {
+  const { entity, list, initValues } = props
+  const formApi = useFormApi()
+
+  useEffect(() => {
+    if (initValues) {
+      Object.entries(initValues).forEach(([key, value]) => {
+        formApi.setValue(key, value)
+      })
+    }
+  }, [initValues, formApi])
+
   return (
     <>
       <Collapse.Panel header="CC" itemKey="cc">

@@ -6,7 +6,7 @@ from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 
 
-@Plugin.download(regexp=r'(?:https?://)?cc\.163\.com')
+@Plugin.download(regexp=r'https?://cc\.163\.com')
 class CC(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)

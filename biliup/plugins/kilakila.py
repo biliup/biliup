@@ -7,7 +7,7 @@ from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 
 
-@Plugin.download(regexp=r'(?:https?://)?(live\.kilakila\.cn|www\.hongdoufm\.com)')
+@Plugin.download(regexp=r'https?://(live\.kilakila\.cn|www\.hongdoufm\.com)')
 class Kilakila(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         self._room_id: str = match1(url, r'(\d+)')

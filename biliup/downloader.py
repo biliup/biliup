@@ -25,6 +25,11 @@ def download(fname, url, **kwargs):
 def biliup_download(name, url, kwargs: dict):
     kwargs.pop('url')
     suffix = kwargs.get('format')
+    override = kwargs.get('override')
     if suffix:
         kwargs['suffix'] = suffix
+    if override:
+        for k, v in override.items():
+            if v:
+                kwargs.setdefault(k, v)
     return download(name, url, **kwargs)
