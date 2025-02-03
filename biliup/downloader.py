@@ -9,27 +9,31 @@ logger = logging.getLogger('biliup')
 
 def download(fname, url, **kwargs):
     pg = None
+    override = kwargs.get('override', {})
     for plugin in Plugin.download_plugins:
         if re.match(plugin.VALID_URL_BASE, url):
             pg = plugin(fname, url)
             for k in pg.__dict__:
                 if kwargs.get(k):
                     pg.__dict__[k] = kwargs.get(k)
-            break
     if not pg:
         pg = general.__plugin__(fname, url)
         logger.warning(f'Not found plugin for {fname} -> {url} This may cause problems')
+    if override:
+        if pg.__class__ in Plugin.download_plugins:
+            # 单独适配的plugin允许全覆写
+            pg.__dict__.update(override)
+        else:
+            # 通用插件只允许覆写插件存在的值
+            for k in pg.__dict__:
+                if k in override:
+                    pg.__dict__[k] = override[k]
     return pg.start()
 
 
 def biliup_download(name, url, kwargs: dict):
     kwargs.pop('url')
     suffix = kwargs.get('format')
-    override = kwargs.get('override')
     if suffix:
         kwargs['suffix'] = suffix
-    if override:
-        for k, v in override.items():
-            if v:
-                kwargs.setdefault(k, v)
     return download(name, url, **kwargs)

@@ -63,13 +63,12 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
 
   const platformSetting = () => {
     for (const [pattern, Plugin] of Object.entries(SupportedPlatforms)) {
-      const regex = new RegExp(pattern.slice(1, -1))
-      if (entity?.url.match(regex)) {
-        console.log('匹配到平台:', pattern)
+      if (entity?.url.match(new RegExp(pattern))) {
+        // console.log('匹配到平台:', pattern)
         return Plugin as React.ComponentType<PluginProps>
       }
     }
-    console.log('未匹配到平台')
+    // console.log('未匹配到平台')
     return null
   }
 
@@ -230,7 +229,7 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
 
       <Form.Input
         field="filename_prefix"
-        label="文件名模板"
+        label="文件名模板（filename_prefix）"
         placeholder="{streamer}%Y-%m-%dT%H_%M_%S"
       />
 
