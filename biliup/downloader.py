@@ -23,12 +23,17 @@ def download(fname, url, **kwargs):
         if pg.__class__ in Plugin.download_plugins:
             # 单独适配的plugin允许全覆写
             pg.__dict__.update(override)
+            if override.get('user'):
+                pg.__dict__.pop('user')
+                pg.__dict__.update(override.get('user'))
         else:
             # print("Override General plugin")
             # 通用插件只允许覆写插件存在的值
             for k in pg.__dict__:
                 if k in override:
                     pg.__dict__[k] = override[k]
+        # print(override)
+        del override
     return pg.start()
 
 

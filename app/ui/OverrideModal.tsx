@@ -2,27 +2,20 @@ import {
   Form,
   Modal,
   Notification,
-  Typography,
   Collapse,
-  ArrayField,
-  Button,
-  Collapsible,
-  TextArea,
   Select,
-  InputNumber,
-  Switch,
+  Avatar,
 } from '@douyinfe/semi-ui'
-import { IconPlusCircle, IconMinusCircle } from '@douyinfe/semi-icons'
 import { FormApi } from '@douyinfe/semi-ui/lib/es/form'
-import React, { CSSProperties, useRef } from 'react'
+import React, { useRef } from 'react'
 import { useState } from 'react'
-import { fetcher, LiveStreamerEntity, sendRequest, StudioEntity } from '../lib/api-streamer'
-import useSWR from 'swr'
-import plugins, { SupportedPlatforms } from '@/app/ui/plugins'
+import { LiveStreamerEntity } from '../lib/api-streamer'
+import { SupportedPlatforms } from '@/app/ui/plugins'
+import { useBiliUsers } from '../lib/use-streamers'
 
 type PluginProps = {
   entity?: LiveStreamerEntity
-  list?: { value: number; label: string }[]
+  list?: { value: number; label: React.ReactNode }[]
   initValues?: any
 }
 
@@ -73,11 +66,19 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
   }
 
   const api = useRef<FormApi>()
-  const {
-    data: templates,
-    error,
-    isLoading,
-  } = useSWR<StudioEntity[]>('/v1/upload/streamers', fetcher)
+
+  const { biliUsers } = useBiliUsers()
+  const list = biliUsers?.map(item => {
+    return {
+      value: item.value,
+      label: (
+        <>
+          <Avatar size="extra-small" src={item.face} />
+          <span style={{ marginLeft: 8 }}>{item.name}</span>
+        </>
+      ),
+    }
+  })
 
   const [visible, setVisible] = useState(false)
   const showDialog = () => {
@@ -106,7 +107,7 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
     ])
 
     if (values) {
-      // 处理 override_config_text
+      // 处理 override_text
       if (values.override_text) {
         try {
           values.override = JSON.parse(values.override_text)
@@ -152,13 +153,6 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
           child.props.onClick?.()
         },
       })
-    }
-  })
-
-  const list = templates?.map(template => {
-    return {
-      value: template.id,
-      label: template.template_name,
     }
   })
 

@@ -23,19 +23,8 @@ class Bililive(DownloadBase):
         self.bilibili_danmaku_detail = config.get('bilibili_danmaku_detail', False)
         self.__real_room_id = None
         self.__login_mid = 0
-        if config.get('user', {}).get('bili_cookie'):
-            self.fake_headers['cookie'] = config.get('user', {}).get('bili_cookie')
-        if config.get('user', {}).get('bili_cookie_file'):
-            cookie_file_name = config.get('user', {}).get('bili_cookie_file')
-            try:
-                with open(cookie_file_name, encoding='utf-8') as stream:
-                    cookies = json.load(stream)["cookie_info"]["cookies"]
-                    cookies_str = ''
-                    for i in cookies:
-                        cookies_str += f"{i['name']}={i['value']};"
-                    self.fake_headers['cookie'] = cookies_str
-            except Exception:
-                logger.exception("load_cookies error")
+        self.bili_cookie = config.get('user', {}).get('bili_cookie')
+        self.bili_cookie_file = config.get('user', {}).get('bili_cookie_file')
         self.bili_qn = int(config.get('bili_qn', 20000))
         self.bili_protocol = config.get('bili_protocol', 'stream')
         self.bili_cdn = config.get('bili_cdn', [])
@@ -67,6 +56,18 @@ class Bililive(DownloadBase):
                 return False
 
         room_id = match1(self.url, r'bilibili.com/(\d+)')
+        if self.bili_cookie:
+            self.fake_headers['cookie'] = self.bili_cookie
+        if self.bili_cookie_file:
+            try:
+                with open(self.bili_cookie_file, encoding='utf-8') as stream:
+                    cookies = json.load(stream)["cookie_info"]["cookies"]
+                    cookies_str = ''
+                    for i in cookies:
+                        cookies_str += f"{i['name']}={i['value']};"
+                    self.fake_headers['cookie'] = cookies_str
+            except Exception:
+                logger.exception("load_cookies error")
         self.fake_headers['referer'] = self.url
 
         # 获取直播状态与房间标题
