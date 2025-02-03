@@ -24,6 +24,7 @@ def download(fname, url, **kwargs):
             # 单独适配的plugin允许全覆写
             pg.__dict__.update(override)
         else:
+            # print("Override General plugin")
             # 通用插件只允许覆写插件存在的值
             for k in pg.__dict__:
                 if k in override:
