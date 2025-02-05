@@ -19,6 +19,129 @@ top = false
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 0.4.82
+### What's Changed
+- perf: 优化B站弹幕录制 by @unknown-o in [#1126](https://github.com/biliup/biliup/pull/1126)
+- Style(webui): 执行前端代码格式化 by @alpzmj9 in [#1141](https://github.com/biliup/biliup/pull/1141)
+- 💡Dev 适配 [biliup/biliup-rs#186](https://github.com/biliup/biliup-rs/pull/186) 测试边录边上传功能 by @XiaoMiku01 in [#1140](https://github.com/biliup/biliup/pull/1140)
+- feat: Add Kilakila streaming platform support by @xxxxuanran in [#1148](https://github.com/biliup/biliup/pull/1148)
+
+
+**Full Changelog**:[v0.4.81...v0.4.82](https://github.com/biliup/biliup/compare/v0.4.81...v0.4.82)
+
+## 0.4.81
+### What's Changed
+- feat: B站弹幕录制优化 by @unknown-o in [#1120](https://github.com/biliup/biliup/pull/1120)
+
+### New Contributors
+- @unknown-o made their first contribution in [#1120](https://github.com/biliup/biliup/pull/1120)
+
+
+**Full Changelog**:[v0.4.80...v0.4.81](https://github.com/biliup/biliup/compare/v0.4.80...v0.4.81)
+
+## 0.4.80
+### What's Changed
+- fix: dtime by @xxxxuanran in [#1121](https://github.com/biliup/biliup/pull/1121)
+- 修复延迟发布（来自赞助者的要求）。 resolves [#1106](https://github.com/biliup/biliup/pull/1106)
+- 更换播放器以支持 mp4 封装和 HEVC on FLV。 fixes [#1117](https://github.com/biliup/biliup/pull/1117)
+- fixes [#1116](https://github.com/biliup/biliup/pull/1116)
+
+
+**Full Changelog**:[v0.4.79...v0.4.80](https://github.com/biliup/biliup/compare/v0.4.79...v0.4.80)
+
+## 0.4.79
+### What's Changed
+- web ui 功能更改；增加录制时间范围功能 by @ruinmi in [#1017](https://github.com/biliup/biliup/pull/1017)
+- style: refactor mobile client header style by @see-more in [#1064](https://github.com/biliup/biliup/pull/1064)
+- Update README.md Docker by @viondw in [#1080](https://github.com/biliup/biliup/pull/1080)
+- fix(huya): skip query param generation for "xingxiu" streamers by @xxxxuanran in [#1099](https://github.com/biliup/biliup/pull/1099)
+- Feat(webui): 深色模式添加自动跟随系统，添加格式化配置文件。 by @alpzmj9 in [#1109](https://github.com/biliup/biliup/pull/1109)
+- feat: enhance dashboard and plugin by @xxxxuanran in [#1114](https://github.com/biliup/biliup/pull/1114)
+
+### New Contributors
+- @ruinmi made their first contribution in [#1017](https://github.com/biliup/biliup/pull/1017)
+- @see-more made their first contribution in [#1064](https://github.com/biliup/biliup/pull/1064)
+
+
+**Full Changelog**:[v0.4.78...v0.4.79](https://github.com/biliup/biliup/compare/v0.4.78...v0.4.79)
+
+## 0.4.78
+### What's Changed
+- Fix(Douyin): 修复 PCWeb 直播页电台类型直播录制 by @xxxxuanran in [#1044](https://github.com/biliup/biliup/pull/1044)
+- Fix(Upload): 重传时未能从数据库获取直播信息 by @xxxxuanran in [#1045](https://github.com/biliup/biliup/pull/1045)
+
+
+**Full Changelog**:[v0.4.77...v0.4.78](https://github.com/biliup/biliup/compare/v0.4.77...v0.4.78)
+
+## 0.4.77
+### What's Changed
+- fix[build]: 修复直接提交 commit时，ci 构建失败的问题 by @XiaoMiku01 in [#1037](https://github.com/biliup/biliup/pull/1037)
+- fix: 虎牙弹幕丢失 ([#949](https://github.com/biliup/biliup/pull/949)) by @CoolZxp in [#1035](https://github.com/biliup/biliup/pull/1035)
+- fix(Huya): platform_id error by @xxxxuanran in [#1039](https://github.com/biliup/biliup/pull/1039)
+
+### New Contributors
+- @XiaoMiku01 made their first contribution in [#1037](https://github.com/biliup/biliup/pull/1037)
+
+
+
+**Full Changelog**:[v0.4.76...v0.4.77](https://github.com/biliup/biliup/compare/v0.4.76...v0.4.77)
+
+## 0.4.76
+### What's Changed
+- 修复v0.4.75抖音默认开启录制弹幕的问题 by @hfdem in [#1022](https://github.com/biliup/biliup/pull/1022)
+- fix(webui): 修复直播历史与历史记录排序问题 by @Kataick in [#1025](https://github.com/biliup/biliup/pull/1025)
+- flx(build): 修复[#1025](https://github.com/biliup/biliup/pull/1025) npm会编译失败的问题 by @Kataick in [#1031](https://github.com/biliup/biliup/pull/1031)
+
+### New Contributors
+- @hfdem made their first contribution in [#1022](https://github.com/biliup/biliup/pull/1022)
+
+
+
+**Full Changelog**:[v0.4.75...v0.4.76](https://github.com/biliup/biliup/compare/v0.4.75...v0.4.76)
+
+## 0.4.75
+### What's Changed
+- 支持抖音短链录制弹幕 by @xxxxuanran in [#1015](https://github.com/biliup/biliup/pull/1015)
+
+
+**Full Changelog**:[v0.4.74...v0.4.75](https://github.com/biliup/biliup/compare/v0.4.74...v0.4.75)
+
+## 0.4.74
+### What's Changed
+- 修复变量未定义 by @xxxxuanran in [#1012](https://github.com/biliup/biliup/pull/1012)
+
+
+**Full Changelog**:[v0.4.73...v0.4.74](https://github.com/biliup/biliup/compare/v0.4.73...v0.4.74)
+
+## 0.4.73
+### What's Changed
+- 适配抖音短链、电台、多屏直播 by @xxxxuanran in [#1010](https://github.com/biliup/biliup/pull/1010)
+
+
+**Full Changelog**:[v0.4.72...v0.4.73](https://github.com/biliup/biliup/compare/v0.4.72...v0.4.73)
+
+## 0.4.71-0.4.72
+### What's Changed
+- update Readme by @xxxxuanran in [#992](https://github.com/biliup/biliup/pull/992)
+- fix: 在没有配置最大码率时跳过码率选择 by @xxxxuanran in [#993](https://github.com/biliup/biliup/pull/993)
+- feat: Add cache during runtime by @xxxxuanran in [#995](https://github.com/biliup/biliup/pull/995)
+
+
+**Full Changelog**:[v0.4.71...v0.4.72](https://github.com/biliup/biliup/compare/v0.4.71...v0.4.72)
+
+## 0.4.69-0.4.70
+### What's Changed
+- Add by @viondw in [#976](https://github.com/biliup/biliup/pull/976)
+- feat: danmaku xml 兼容b站格式 by @BugKun in [#985](https://github.com/biliup/biliup/pull/985)
+- 减少douyu通过发送请求获取房间号次数 by @Kataick in [#950](https://github.com/biliup/biliup/pull/950)
+- feat(Huya): use the api to get live streams by @xxxxuanran in [#986](https://github.com/biliup/biliup/pull/986)
+
+### New Contributors
+- @BugKun made their first contribution in [#985](https://github.com/biliup/biliup/pull/985)
+
+
+**Full Changelog**:[v0.4.70...v0.4.71](https://github.com/biliup/biliup/compare/v0.4.70...v0.4.71)
+
 ## 0.4.69-0.4.70
 ### What's Changed
 - fix: first run error by @xxxxuanran in [#968](https://github.com/biliup/biliup/pull/968)
