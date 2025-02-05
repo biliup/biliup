@@ -58,6 +58,20 @@
 
 ---
 
+### 🐋
+```sh
+docker run -d \
+  --name biliup \
+  --restart unless-stopped \
+  -p 0.0.0.0:19159:19159 \
+  -v /path/to/save_folder:/opt \
+  ghcr.io/biliup/caution:latest \
+  --password password123
+```
+* 用户名`biliup`
+* 公网暴露很危险，`password123`为密码，录制文件/日志存储在`/opt`。
+* 根据需求进行修改，只作参考。
+
 ## 界面预览
 
 ![Light Theme](.github/resource/light.png)
