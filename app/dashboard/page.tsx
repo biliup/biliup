@@ -26,18 +26,10 @@ import { useBiliUsers } from '../lib/use-streamers'
 import styles from '../styles/dashboard.module.scss'
 
 // 注册各平台组件
+import plugins from '../ui/plugins'
 import Global from '../ui/plugins/global'
-import Cookie from '../ui/plugins/cookie'
-import Bilibili from '../ui/plugins/bilibili'
-import CC from '../ui/plugins/cc'
-import Douyin from '../ui/plugins/douyin'
-import Douyu from '../ui/plugins/douyu'
-import Huya from '../ui/plugins/huya'
-import Twitch from '../ui/plugins/twitch'
-import YouTube from '../ui/plugins/youtube'
 import Developer from '../ui/plugins/developer'
-import Twitcasting from '@/app/ui/plugins/twitcasting'
-import Kilakila from '@/app/ui/plugins/kilakila'
+
 
 const Dashboard: React.FC = () => {
   const { Header, Content } = Layout
@@ -196,26 +188,12 @@ const Dashboard: React.FC = () => {
                         <p className={styles.meegoSharedWebSettin}>各平台下载设置</p>
                       </div>
                       <Collapse keepDOM style={{ width: '100%' }}>
-                        {/* 哔哩哔哩 */}
-                        <Bilibili entity={entity} list={list} />
-                        {/* CC直播 */}
-                        <CC />
-                        {/* 抖音 */}
-                        <Douyin entity={entity} />
-                        {/* 斗鱼 */}
-                        <Douyu />
-                        {/* 虎牙 */}
-                        <Huya entity={entity} />
-                        {/* 克拉克拉 */}
-                        <Kilakila />
-                        {/* 老鼠台 */}
-                        <Twitch entity={entity} />
-                        {/* Twitcasting */}
-                        <Twitcasting />
-                        {/* 油管 */}
-                        <YouTube entity={entity} />
-                        {/* 饼干 */}
-                        <Cookie entity={entity} list={list} />
+                        {Object.entries(plugins)
+                          .filter(([key]) => key !== 'Cookie')
+                          .map(([key, Plugin]) => (
+                            <Plugin entity={entity} list={list} />
+                          ))}
+                        <plugins.Cookie entity={entity} list={list} />
                       </Collapse>
                     </div>
                   </TabPane>

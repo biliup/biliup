@@ -6,10 +6,11 @@ from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 
 
-@Plugin.download(regexp=r'(?:https?://)?cc\.163\.com')
+@Plugin.download(regexp=r'https?://cc\.163\.com')
 class CC(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
+        self.cc_protocol = config.get('cc_protocol', 'hls')
 
     async def acheck_stream(self, is_check=False):
         rid = match1(self.url, r"(\d{4,})")
@@ -33,7 +34,7 @@ class CC(DownloadBase):
                 headers=self.fake_headers
             )).json()["data"][0]
             self.room_title = channel_info["title"]
-            if config.get("cc_protocol", "hls") == "hls":
+            if self.cc_protocol == "hls":
                 self.raw_stream_url = channel_info["sharefile"]
             else:
                 original = {"vbr": 0}

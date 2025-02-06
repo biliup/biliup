@@ -203,13 +203,6 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
           <Collapse keepDOM>
             <Collapse.Panel header="更多设置" itemKey="processors">
               <Form.Input
-                field="filename_prefix"
-                label={{ text: '文件名模板', optional: true }}
-                // initValue='./video/%Y-%m-%d/%H_%M_%S{title}'
-                placeholder="{streamer}%Y-%m-%dT%H_%M_%S"
-              />
-
-              <Form.Input
                 field="time_range"
                 extraText={
                   <div style={{ fontSize: '14px' }}>

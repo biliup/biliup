@@ -14,7 +14,7 @@ from ..engine.download import DownloadBase
 from ..plugins import logger, match1, random_user_agent
 
 
-@Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?huya\.com')
+@Plugin.download(regexp=r'https?://(?:(?:www|m)\.)?huya\.com')
 class Huya(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
@@ -22,12 +22,15 @@ class Huya(DownloadBase):
         self.fake_headers['cookie'] = config.get('user', {}).get('huya_cookie', '')
         self.__room_id = url.split('huya.com/')[1].split('?')[0]
         self.huya_danmaku = config.get('huya_danmaku', False)
-
+        self.huya_max_ratio = config.get('huya_max_ratio', 0)
+        self.huya_cdn = config.get('huya_cdn', "").upper() # 不填写时使用主播的CDN优先级
+        self.huya_protocol = 'Hls' if config.get('huya_protocol') == 'Hls' else 'Flv'
+        self.huya_imgplus = config.get('huya_imgplus', True)
+        self.huya_cdn_fallback = config.get('huya_cdn_fallback', False)
+        self.huya_mobile_api = config.get('huya_mobile_api', False)
 
     async def acheck_stream(self, is_check=False):
         try:
-            if self.fake_headers.get('cookie'):
-                await self.verify_cookie()
             if not self.__room_id.isdigit():
                 self.__room_id = _get_real_rid(self.url)
             room_profile = await self.get_room_profile(use_api=True)
@@ -53,9 +56,9 @@ class Huya(DownloadBase):
         if is_check:
             return True
 
-        huya_max_ratio = config.get('huya_max_ratio', 0)
-        if huya_max_ratio:
+        if self.huya_max_ratio:
             try:
+                self.huya_max_ratio = int(self.huya_max_ratio)
                 # 最大码率(不含hdr)
                 # max_ratio = html_info['data'][0]['gameLiveInfo']['bitRate']
                 max_ratio = room_profile['liveData']['bitRate']
@@ -64,7 +67,7 @@ class Huya(DownloadBase):
                 # 码率信息
                 ratio_items = [r.get('iBitRate', 0) if r.get('iBitRate', 0) != 0 else max_ratio for r in live_rate_info]
                 # 符合条件的码率
-                ratio_in_items = [x for x in ratio_items if x <= huya_max_ratio]
+                ratio_in_items = [x for x in ratio_items if x <= self.huya_max_ratio]
                 # 录制码率
                 if ratio_in_items:
                     record_ratio = max(ratio_in_items)
@@ -76,43 +79,37 @@ class Huya(DownloadBase):
 
         is_xingxiu = room_profile['liveData']['gid'] == 1663
 
-        perf_cdn = config.get('huya_cdn', "").upper() # 不填写时使用主播的CDN优先级
-        protocol = 'Hls' if config.get('huya_protocol') == 'Hls' else 'Flv'
-        allow_imgplus = config.get('huya_imgplus', True)
-        cdn_fallback = config.get('huya_cdn_fallback', False)
-        use_api = config.get('huya_mobile_api', False)
-
         try:
-            stream_urls = await self.get_stream_urls(protocol, use_api, allow_imgplus, is_xingxiu)
+            stream_urls = await self.get_stream_urls(self.huya_protocol, self.huya_mobile_api, self.huya_imgplus, is_xingxiu)
         except Exception as e:
             logger.error(f"{self.plugin_msg}: 没有可用的链接 {e}")
             return False
 
         cdn_name = list(stream_urls.keys())
-        if not perf_cdn or perf_cdn not in cdn_name:
-            perf_cdn = cdn_name[0]
+        if not self.huya_cdn or self.huya_cdn not in cdn_name:
+            self.huya_cdn = cdn_name[0]
 
         # 虎牙直播流只允许连接一次
-        if cdn_fallback:
-            _url = await self.acheck_url_healthy(stream_urls[perf_cdn])
+        if self.huya_cdn_fallback:
+            _url = await self.acheck_url_healthy(stream_urls[self.huya_cdn])
             if _url is None:
                 logger.info(f"{self.plugin_msg}: cdn_fallback 顺序尝试 {cdn_name}")
                 for cdn in cdn_name:
                     logger.info(f"{self.plugin_msg}: cdn_fallback-{cdn}")
                     if (await self.acheck_url_healthy(stream_urls[cdn])) is None:
                         continue
-                    perf_cdn = cdn
-                    logger.info(f"{self.plugin_msg}: cdn_fallback 回退到 {perf_cdn}")
+                    self.huya_cdn = cdn
+                    logger.info(f"{self.plugin_msg}: cdn_fallback 回退到 {self.huya_cdn}")
                     break
                 else:
                     logger.error(f"{self.plugin_msg}: cdn_fallback 所有链接无法使用")
                     return False
-            stream_urls = await self.get_stream_urls(protocol, use_api, allow_imgplus, is_xingxiu)
+            stream_urls = await self.get_stream_urls(self.huya_protocol, self.huya_mobile_api, self.huya_imgplus, is_xingxiu)
 
         self.room_title = room_profile['liveData']['introduction']
-        self.raw_stream_url = stream_urls[perf_cdn]
+        self.raw_stream_url = stream_urls[self.huya_cdn]
 
-        if huya_max_ratio and record_ratio != max_ratio:
+        if self.huya_max_ratio and record_ratio != max_ratio:
             self.raw_stream_url += f"&ratio={record_ratio}"
         return True
 

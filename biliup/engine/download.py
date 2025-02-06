@@ -343,6 +343,8 @@ class DownloadBase(ABC):
                 ret = self.run()
             except Exception:
                 logger.warning(f"{self.plugin_msg}: 下载失败", exc_info=True)
+                # TODO: 重试等待时间
+                time.sleep(3)
             finally:
                 self.close()
 

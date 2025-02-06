@@ -11,12 +11,15 @@ from ..engine.download import DownloadBase
 from ..plugins import logger, match1, random_user_agent
 
 
-@Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m)\.)?douyu\.com')
+@Plugin.download(regexp=r'https?://(?:(?:www|m)\.)?douyu\.com')
 class Douyu(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
         self.__room_id = match1(url, r'rid=(\d+)')
         self.douyu_danmaku = config.get('douyu_danmaku', False)
+        self.douyu_disable_interactive_game = config.get('douyu_disable_interactive_game', False)
+        self.douyu_cdn = config.get('douyu_cdn', 'tct-h5')
+        self.douyu_rate = config.get('douyu_rate', 0)
 
     async def acheck_stream(self, is_check=False):
         if len(self.url.split("douyu.com/")) < 2:
@@ -44,7 +47,7 @@ class Douyu(DownloadBase):
         if room_info['videoLoop'] != 0:
             logger.debug(f"{self.plugin_msg}: 正在放录播")
             return False
-        if config.get('douyu_disable_interactive_game', False):
+        if self.douyu_disable_interactive_game:
             gift_info = (
                 await client.get(f"https://www.douyu.com/api/interactive/web/v2/list?rid={self.__room_id}",
                                 headers=self.fake_headers)
@@ -90,9 +93,8 @@ class Douyu(DownloadBase):
             logger.exception(f"{self.plugin_msg}: 获取签名参数异常")
             return False
 
-        params['cdn'] = config.get('douyucdn', 'tct-h5')
-        params['cdn'] = config.get('douyu_cdn', params['cdn'])
-        params['rate'] = config.get('douyu_rate', 0)
+        params['cdn'] = self.douyu_cdn
+        params['rate'] = int(self.douyu_rate)
 
         try:
             live_data = await self.get_play_info(self.__room_id, params)

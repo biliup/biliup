@@ -7,10 +7,11 @@ from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 
 
-@Plugin.download(regexp=r'(?:https?://)?(live\.kilakila\.cn|www\.hongdoufm\.com)')
+@Plugin.download(regexp=r'https?://(live\.kilakila\.cn|www\.hongdoufm\.com)')
 class Kilakila(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         self._room_id: str = match1(url, r'(\d+)')
+        self.kila_protocol = config.get('kila_protocol', 'hls')
         super().__init__(fname, url, suffix)
 
     async def acheck_stream(self, is_check=False):
@@ -55,7 +56,7 @@ class Kilakila(DownloadBase):
             # self.background_pic_url = r['b']['defaultBackgroundPicUrl']
             self.room_title = r['b']['title']
             self.live_cover_url = r['b']['backPic']
-            if config.get('kila_protocol') == 'flv':
+            if self.kila_protocol == 'flv':
                 self.raw_stream_url = r['b']['flvPlayUrl']
             else:
                 self.raw_stream_url = r['b']['hlsPlayUrl']

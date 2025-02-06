@@ -16,7 +16,7 @@ from . import logger
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase, BatchCheck
 
-VALID_URL_BASE = r'(?:https?://)?(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)'
+VALID_URL_BASE = r'https?://(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)'
 VALID_URL_VIDEOS = r'https?://(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[^/]+)/(?:videos|profile|clips)'
 _CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko'
 
