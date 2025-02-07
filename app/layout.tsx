@@ -240,7 +240,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   // <IconSemiLogo
                   //     style={{ height: "36px", fontSize: 36 }}
                   // />
-                  <Image src="logo.png" alt="{}" height={10} width={20}></Image>
+                  <Image src="/logo.png" alt="{}" height={10} width={20}></Image>
                 }
                 style={{ justifyContent: 'flex-start' }}
                 text="BILIUP"
