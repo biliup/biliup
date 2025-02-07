@@ -154,7 +154,7 @@ def uploaded(name, live_cover_path, data: List):
             file_list.append(i.danmaku)
 
     for post_processor in post_processor:
-        if post_processor == 'rm':
+        if post_processor == 'rm' or post_processor.get('rm'):
             # 删除封面
             if live_cover_path is not None:
                 UploadBase.remove_file(live_cover_path)
