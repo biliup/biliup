@@ -145,7 +145,7 @@ def check_similar_remark(json_data):
             json_data['remark'] in fname
             or
             fname in json_data['remark']
-            and # 跳过自身
+        ) and (
             json_data['url'] != data['url']
         ):
             return fname
