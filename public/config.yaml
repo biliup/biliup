@@ -242,6 +242,9 @@ streamers:
         #opt_args: ### ffmpeg参数
         #    - '-ss'
         #    - '00:00:16' # 跳过开始的16秒
+        override: # 覆盖全局配置
+            downloader: 'sync-downloader'
+            bili_qn: 30000
 
 
 
