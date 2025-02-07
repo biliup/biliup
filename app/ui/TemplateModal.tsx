@@ -73,6 +73,12 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
   }
   const handleOk = async () => {
     let values = await api.current?.validate()
+    values = {
+      ...values,
+      remark: values?.remark?.trim(),
+      url: values?.url?.trim(),
+      format: values?.format?.trim(),
+    }
     await onOk(values)
     setVisible(false)
   }
