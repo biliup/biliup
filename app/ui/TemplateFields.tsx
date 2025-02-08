@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react'
+import React, { useState, useMemo, useEffect, useCallback } from 'react'
 import { FormFCChild } from '@douyinfe/semi-ui/lib/es/form'
 import {
   IconChevronDown,
@@ -18,6 +18,8 @@ import {
   Notification,
   ScrollList,
   ScrollItem,
+  // TextArea,
+  useFormState,
 } from '@douyinfe/semi-ui'
 import useSWR from 'swr'
 import { BiliType, fetcher, StudioEntity } from '../lib/api-streamer'
@@ -289,6 +291,29 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
           autosize
           maxCount={2000}
           showClear
+        />
+        <TextArea
+          style={{ maxWidth: 560 }}
+          field="extra_fields"
+          label="额外字段"
+          placeholder="Json格式，示例：{key: 'value'}"
+          autosize
+          maxCount={2000}
+          showClear
+          rules={[
+            {
+              validator: (rule, value) => {
+                if (!value) return true;
+                try {
+                  JSON.parse(value);
+                  return true;
+                } catch (e) {
+                  return false;
+                }
+              },
+              message: '请输入正确的Json格式文本',
+            }
+          ]}
         />
 
         <div style={{ display: 'flex', alignItems: 'center', color: 'var(--semi-color-tertiary)' }}>

@@ -13,7 +13,7 @@ from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 
 
-@Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m|live|v)\.)?douyin\.com')
+@Plugin.download(regexp=r'https?://(?:(?:www|m|live|v)\.)?douyin\.com')
 class Douyin(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
@@ -21,6 +21,9 @@ class Douyin(DownloadBase):
         self.fake_headers['user-agent'] = DouyinUtils.DOUYIN_USER_AGENT
         self.fake_headers['referer'] = "https://live.douyin.com/"
         self.fake_headers['cookie'] = config.get('user', {}).get('douyin_cookie', '')
+        self.douyin_quality = config.get('douyin_quality', 'origin')
+        self.douyin_protocol = config.get('douyin_protocol', 'hls')
+        self.douyin_double_screen = config.get('douyin_double_screen', False)
         self.__web_rid = None # 网页端房间号 或 抖音号
         self.__room_id = None # 单场直播的直播房间
         self.__sec_uid = None
@@ -81,6 +84,8 @@ class Douyin(DownloadBase):
                 _room_info = await self.get_web_room_info(self.__web_rid)
                 if _room_info:
                     if not _room_info['data'].get('user'):
+                        if _room_info['data'].get('prompts', '') == '直播已结束':
+                            return False
                         # 可能是用户被封禁
                         raise Exception(f"{str(_room_info)}")
                     self.__sec_uid = _room_info['data']['user']['sec_uid']
@@ -111,7 +116,7 @@ class Douyin(DownloadBase):
 
         try:
             pull_data = room_info['stream_url']['live_core_sdk_data']['pull_data']
-            if room_info['stream_url'].get('pull_datas') and config.get('douyin_double_screen', False):
+            if room_info['stream_url'].get('pull_datas') and self.douyin_double_screen:
                 pull_data = next(iter(room_info['stream_url']['pull_datas'].values()))
             stream_data = json.loads(pull_data['stream_data'])['data']
         except:
@@ -120,7 +125,7 @@ class Douyin(DownloadBase):
 
         # 原画origin 蓝光uhd 超清hd 高清sd 标清ld 流畅md 仅音频ao
         quality_items = ['origin', 'uhd', 'hd', 'sd', 'ld', 'md']
-        quality = config.get('douyin_quality', 'origin')
+        quality = self.douyin_quality
         if quality not in quality_items:
             quality = quality_items[0]
         try:
@@ -151,7 +156,7 @@ class Douyin(DownloadBase):
                 else:
                     quality = optional_quality_items[optional_quality_index - 1]
 
-            protocol = 'hls' if config.get('douyin_protocol') == 'hls' else 'flv'
+            protocol = 'hls' if self.douyin_protocol == 'hls' else 'flv'
             self.raw_stream_url = stream_data[quality]['main'][protocol].replace('http://', 'https://')
             self.room_title = room_info['title']
         except:

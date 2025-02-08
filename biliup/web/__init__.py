@@ -6,6 +6,7 @@ import pathlib
 import concurrent.futures
 import threading
 
+import copy
 import aiohttp_cors
 import requests
 import stream_gears
@@ -136,15 +137,19 @@ async def cookie_login(request):
 
 def check_similar_remark(json_data):
     '''
-    :return: True if similar remark exists
+    :return: similar remark or None
     '''
-    for fname in config['streamers'].keys():
+    _cache = copy.deepcopy(config['streamers'])
+    for fname, data in _cache.items():
         if (
-            json_data['remark'] in fname or
+            json_data['remark'] in fname
+            or
             fname in json_data['remark']
+        ) and (
+            json_data['url'] != data['url']
         ):
-            return True
-    return False
+            return fname
+    return None
 
 @routes.get('/v1/get_qrcode')
 async def qrcode_get(request):
@@ -256,8 +261,10 @@ async def streamers(request):
 async def add_lives(request):
     from biliup.app import context
     json_data = await request.json()
-    if check_similar_remark(json_data):
-        return web.HTTPBadRequest(text=f"{json_data['remark']} 与现存备注存在部分重复，禁止添加")
+    similar_remark = check_similar_remark(json_data)
+    if similar_remark:
+        return web.HTTPBadRequest(text=
+                                  f"{json_data['remark']} 与现存备注 {similar_remark} 存在部分重复，禁止添加")
     uid = json_data.get('upload_id')
     with SessionLocal() as db:
         if uid:
@@ -289,8 +296,10 @@ async def lives(request):
         old_url = old.url
         # 如果备注修改，才需要检查是否与现存备注存在部分重复
         if json_data['remark'] != old.remark:
-            if check_similar_remark(json_data):
-                return web.HTTPBadRequest(text=f"{json_data['remark']} 与现存备注存在部分重复，禁止修改")
+            similar_remark = check_similar_remark(json_data)
+            if similar_remark:
+                return web.HTTPBadRequest(text=
+                                          f"{json_data['remark']} 与现存备注 {similar_remark} 存在部分重复，禁止修改")
         uid = json_data.get('upload_id')
         # semi-ui 不能直接为 ArrayField 设置空默认值
         # 当前端更新后，应移除这里的数据修改
@@ -480,6 +489,7 @@ async def m_upload(request):
     json_data = await request.json()
     json_data['params']['uploader'] = 'stream_gears'
     json_data['params']['name'] = json_data['params']['template_name']
+    # json_data['params']['extra_fields'] = "{\"is_only_self\": 1}"
     threading.Thread(target=biliup_uploader, args=(json_data['files'], json_data['params'])).start()
     return web.json_response({'status': 'ok'})
 

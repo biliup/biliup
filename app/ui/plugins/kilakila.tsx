@@ -8,7 +8,7 @@ type Props = {
   initValues?: Record<string, any>
 }
 
-const CC: React.FC<Props> = props => {
+const Kilakila: React.FC<Props> = props => {
   const { entity, list, initValues } = props
   const formApi = useFormApi()
 
@@ -22,18 +22,12 @@ const CC: React.FC<Props> = props => {
 
   return (
     <>
-      <Collapse.Panel header="CC" itemKey="cc">
+      <Collapse.Panel header="克拉克拉" itemKey="kilakila">
         <Form.Select
-          field="cc_protocol"
-          extraText={
-            <div style={{ fontSize: '14px' }}>
-              CC直播流协议。
-              <br />
-              如果录制经常分段，尝试切换。
-            </div>
-          }
-          label="直播流协议（cc_protocol）"
-          placeholder="hls（默认）"
+          field="kila_protocol"
+          extraText="直播流协议，默认hls"
+          label="直播流协议(kila_protocol)"
+          placeholder="hls"
           style={{ width: '100%' }}
           fieldStyle={{
             alignSelf: 'stretch',
@@ -41,12 +35,12 @@ const CC: React.FC<Props> = props => {
           }}
           showClear={true}
         >
+          <Select.Option value="hls">hls</Select.Option>
           <Select.Option value="flv">flv</Select.Option>
-          <Select.Option value="hls">hls（默认）</Select.Option>
         </Form.Select>
       </Collapse.Panel>
     </>
   )
 }
 
-export default CC
+export default Kilakila

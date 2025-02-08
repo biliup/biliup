@@ -253,7 +253,8 @@ tags = ["biliup", "视频标签"]
 ### ffmpeg参数
 #opt_args = [ "-ss", "00:00:16" # 跳过开始的16秒 ]
 
-
+[streamers."星际2INnoVation吕布卫星人族天梯第一视角".override] ## 覆盖全局配置
+downloader = "sync-downloader"
 
 ################### 用户cookie ###################
 ### 在使用下方配置时，请确认下方第一行（[user]）取消了注释。
