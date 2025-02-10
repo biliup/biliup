@@ -115,7 +115,7 @@ class DownloadBase(ABC):
                 stream_info = config.get('streamers', {}).get(self.fname, {})
                 stream_info.update({'name': self.fname})
                 if not self.file_size:
-                    self.file_size = 2 * 1024 * 1024 * 1024
+                    self.file_size = 2 * 1024 * 1024 * 1024 + (2 * 1024 * 1024)
                 else:
                     min_size = 10 * 1024 * 1024
                     self.file_size = ((self.file_size + min_size - 1) // min_size) * min_size  # 向上取整
