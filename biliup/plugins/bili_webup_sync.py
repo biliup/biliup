@@ -19,7 +19,8 @@ from typing import Callable, Dict, Union, Any, List
 from urllib import parse
 from urllib.parse import quote
 
-import aiohttp
+# import aiohttp
+from biliup.app import context
 from concurrent.futures.thread import ThreadPoolExecutor
 import concurrent
 import requests.utils
@@ -74,14 +75,21 @@ class BiliWebAsync(UploadBase):
         self.user_cookie = user_cookie
         self.video_queue: queue.SimpleQueue = video_queue
 
-    def upload(self, total_size: int, stop_event: threading.Event, output_prefix: str, file_name_callback: Callable[[str], None] = None) -> List[UploadBase.FileInfo]:
+    def upload(self, total_size: int, stop_event: threading.Event, output_prefix: str, file_name_callback: Callable[[str], None] = None, database_row_id=0) -> List[UploadBase.FileInfo]:
         # print("开始同步上传")
         logger.info("开始同步上传")
         file_index = 1
         videos = Data()
-        bili = BiliBili(videos)
-        bili.login(self.persistence_path, self.user_cookie)
+        if context.get('sync_downloader_map', None) is None:
+            context['sync_downloader_map'] = {}
+        else:
+            if context['sync_downloader_map'].get(database_row_id, None) is not None:
+                videos = context['sync_downloader_map'][database_row_id]
 
+        bili = BiliBili(videos)
+        bili.database_row_id = database_row_id
+
+        bili.login(self.persistence_path, self.user_cookie)
         videos.title = self.data["format_title"][:80]  # 稿件标题限制80字
         if self.credits:
             videos.desc_v2 = self.creditsToDesc_v2()
@@ -224,6 +232,8 @@ class BiliBili:
         self.save_path = ''
         if self.save_dir and not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
+
+        self.database_row_id = 0
 
     def myinfo(self, cookies: dict = None):
         if cookies:
@@ -427,7 +437,7 @@ class BiliBili:
             logger.info(f"上传成功: {ret}")
         aid = ret['data']['aid']
         videos.aid = aid
-
+        context['sync_downloader_map'][self.database_row_id] = videos
         if file_name_callback:
             file_name_callback(self.save_path)
 
