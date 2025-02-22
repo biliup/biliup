@@ -77,15 +77,11 @@ class BiliWebAsync(UploadBase):
 
     def upload(self, total_size: int, stop_event: threading.Event, output_prefix: str, file_name_callback: Callable[[str], None] = None, database_row_id=0) -> List[UploadBase.FileInfo]:
         # print("开始同步上传")
-        logger.info("开始同步上传")
+        logger.info(f"开始同步上传 {database_row_id}")
         file_index = 1
         videos = Data()
         if context.get('sync_downloader_map', None) is None:
             context['sync_downloader_map'] = {}
-        else:
-            if context['sync_downloader_map'].get(database_row_id, None) is not None:
-                videos = context['sync_downloader_map'][database_row_id]
-
         bili = BiliBili(videos)
         bili.database_row_id = database_row_id
 
@@ -426,10 +422,15 @@ class BiliBili:
             # print("异常流 直接退出")
             return
         video_part['title'] = video_part['title'][:80]
-        videos.append(video_part)  # 添加已经上传的视频
 
+        if context.get("sync_downloader_map", {}).get(str(self.database_row_id), None) is not None:
+            context_data = context["sync_downloader_map"][str(self.database_row_id)].copy()
+            context_data.pop('subtitle', None)
+            videos = Data(**context_data)
+
+        videos.append(video_part)  # 添加已经上传的视频
         edit = False if videos.aid is None else True
-        ret = self.submit(submit_api=submit_api, edit=edit)
+        ret = self.submit(submit_api=submit_api, edit=edit, videos=videos)
         # logger.info(f"上传成功: {ret}")
         if edit:
             logger.info(f"编辑添加成功: {ret}")
@@ -437,7 +438,7 @@ class BiliBili:
             logger.info(f"上传成功: {ret}")
         aid = ret['data']['aid']
         videos.aid = aid
-        context['sync_downloader_map'][self.database_row_id] = videos
+        context['sync_downloader_map'][str(self.database_row_id)] = videos.__dict__
         if file_name_callback:
             file_name_callback(self.save_path)
 
@@ -521,8 +522,8 @@ class BiliBili:
             'output': 'json',
             'profile': 'ugcupos/bup'
         }
-        attempt = 0
-        while attempt <= 5:  # 一旦放弃就会丢失前面所有的进度，多试几次吧
+        attempt = 1
+        while attempt <= 3:  # 一旦放弃就会丢失前面所有的进度，多试几次吧
             try:
                 r = self.__session.post(url, params=p, json={"parts": parts}, headers=headers, timeout=15).json()
                 if r.get('OK') == 1:
@@ -530,9 +531,9 @@ class BiliBili:
                     return {"title": splitext(file_name)[0], "filename": splitext(basename(upos_uri))[0], "desc": ""}
                 raise IOError(r)
             except IOError:
+                logger.info(f"请求合并分片 {file_name} 时出现问题，尝试重连，次数：" + str(attempt))
                 attempt += 1
-                logger.info(f"请求合并分片时出现问题，尝试重连，次数：" + str(attempt))
-                time.sleep(15)
+                time.sleep(10)
         pass
 
     def upload_chunk_thread(self, url, chunk, params_clone, headers, file_name, max_retries=3, backoff_factor=1):
@@ -641,12 +642,10 @@ class BiliBili:
         save_file and save_file.close()
         yield None
 
-    def submit(self, submit_api=None, edit=False):
-        if not self.video.title:
-            self.video.title = self.video.videos[0]["title"]
+    def submit(self, submit_api=None, edit=False, videos=None):
 
         # 不能提交 extra_fields 字段，提前处理
-        post_data = asdict(self.video)
+        post_data = asdict(videos)
         if post_data.get('extra_fields'):
             for key, value in json.loads(post_data.pop('extra_fields')).items():
                 post_data.setdefault(key, value)
@@ -670,6 +669,7 @@ class BiliBili:
         if submit_api == 'web':
             ret = self.submit_web(post_data, edit=edit)
             if ret["code"] == 21138:
+                time.sleep(5)
                 logger.info(f'改用客户端接口提交{ret}')
                 submit_api = 'client'
         if submit_api == 'client':
@@ -754,9 +754,9 @@ class BiliBili:
         :param upvideo:
         :return: 返回官方推荐的tag
         """
-        url = f'https://member.bilibili.com/x/web/archive/tags?' \
-              f'typeid={typeid}&title={quote(upvideo["title"])}&filename=filename&desc={desc}&cover={cover}' \
-              f'&groupid={groupid}&vfea={vfea}'
+        url = f'https://member.bilibili.com/x/web/archive/tags?'
+        f'typeid={typeid}&title={quote(upvideo["title"])}&filename=filename&desc={desc}&cover={cover}'
+        f'&groupid={groupid}&vfea={vfea}'
         return self.__session.get(url=url, timeout=5).json()
 
     def __enter__(self):
@@ -791,8 +791,8 @@ class Data:
     open_subtitle: InitVar[bool] = False
     dolby: int = 0
     hires: int = 0
-    no_reprint = 0
-    open_elec = 0
+    no_reprint: int = 0
+    open_elec: int = 0
     extra_fields: str = ""
 
     aid: int = None

@@ -347,8 +347,9 @@ class DownloadBase(ABC):
                 time.sleep(3)
             finally:
                 from biliup.app import context
-                if self.database_row_id in context["sync_downloader_map"]:
-                    context["sync_downloader_map"].pop(self.database_row_id)
+                if str(self.database_row_id) in context["sync_downloader_map"]:
+                    context["sync_downloader_map"].pop(str(self.database_row_id))
+                    logger.info(f"{self.plugin_msg} {self.database_row_id}: 从同步下载器列表中移除")
                 self.close()
 
             # 下载模式跳过下播延迟检测
