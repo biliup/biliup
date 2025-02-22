@@ -439,6 +439,7 @@ class BiliBili:
         aid = ret['data']['aid']
         videos.aid = aid
         context['sync_downloader_map'][str(self.database_row_id)] = videos.__dict__
+        logger.info(f"上传完成 {file_name} {context['sync_downloader_map'][str(self.database_row_id)] }")
         if file_name_callback:
             file_name_callback(self.save_path)
 
