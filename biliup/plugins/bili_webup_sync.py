@@ -403,6 +403,9 @@ class BiliBili:
             f"https://member.bilibili.com/preupload?{self._auto_os['query']}", params=query,
             timeout=5)
         ret = resp.json()
+        if "chunk_size" not in ret:
+            stop_event.set()
+            return
         logger.debug(f"preupload: {ret}")
         if preferred_upos_cdn:
             # 如果返回的endpoint不在probe_url中，则尝试在endpoints中校验probe_url是否可用
