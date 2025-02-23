@@ -415,7 +415,7 @@ class BiliBili:
                 else:
                     logger.warning(f"选择的线路 {self._auto_os['os']} 没有返回对应 endpoint，不做修改")
         video_part = asyncio.run(upload(stream_queue, file_name, total_size, ret))
-        if not video_part:
+        if video_part is None:
             stop_event.set()
             # print("异常流 直接退出")
             return
@@ -510,7 +510,7 @@ class BiliBili:
             } for i in range(chunks)]
             parts.extend(results)
 
-        if len(parts) == 0:
+        if n == 0:
             return None
         logger.info(f"{file_name} - total_size: {total_size}, n: {n}")
         cost = time.perf_counter() - start
