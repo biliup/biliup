@@ -27,7 +27,7 @@ def create_event_manager():
     app.context['upload_filename'] = []
 
     # 边录边传的下载器使用的map
-    # app.context['sync_downloader_map'] = {}
+    app.context['sync_downloader_map'] = {}
     return app
 
 

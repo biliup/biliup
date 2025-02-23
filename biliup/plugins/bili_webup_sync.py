@@ -80,8 +80,6 @@ class BiliWebAsync(UploadBase):
         logger.info(f"开始同步上传 {database_row_id}")
         file_index = 1
         videos = Data()
-        if context.get('sync_downloader_map', None) is None:
-            context['sync_downloader_map'] = {}
         bili = BiliBili(videos)
         bili.database_row_id = database_row_id
 
@@ -423,7 +421,7 @@ class BiliBili:
             return
         video_part['title'] = video_part['title'][:80]
 
-        if context.get("sync_downloader_map", {}).get(str(self.database_row_id), None) is not None:
+        if str(self.database_row_id) in context["sync_downloader_map"]:
             context_data = context["sync_downloader_map"][str(self.database_row_id)].copy()
             context_data.pop('subtitle', None)
             videos = Data(**context_data)

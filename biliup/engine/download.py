@@ -29,7 +29,7 @@ from biliup.plugins.bili_webup_sync import BiliWebAsync
 from biliup.uploader import fmt_title_and_desc
 
 from .sync_downloader import SyncDownloader
-
+from biliup.app import context
 logger = logging.getLogger('biliup')
 
 
@@ -346,10 +346,7 @@ class DownloadBase(ABC):
                 # TODO: 重试等待时间
                 time.sleep(3)
             finally:
-                from biliup.app import context
-                if "sync_downloader_map" in context and str(self.database_row_id) in context["sync_downloader_map"]:
-                    context["sync_downloader_map"].pop(str(self.database_row_id))
-                    logger.info(f"{self.plugin_msg} {self.database_row_id}: 从同步下载器列表中移除")
+
                 self.close()
 
             # 下载模式跳过下播延迟检测
@@ -374,6 +371,11 @@ class DownloadBase(ABC):
             self.download_success_callback()
         # self.segment_processor_thread
         logger.info(f'{self.plugin_msg}: 退出下载')
+
+        if str(self.database_row_id) in context["sync_downloader_map"]:
+            context["sync_downloader_map"].pop(str(self.database_row_id))
+            logger.info(f"{self.plugin_msg} {self.database_row_id}: 从同步下载器列表中移除")
+
         stream_info = {
             'name': self.fname,
             'url': self.url,
