@@ -214,8 +214,8 @@ class DanmakuClient(IDanmakuClient):
                           '''
                           if self.__content.get("detail", None):
                               d.set('p', f"{msg_time},1,25,{color},{timestamp},0,{uid},0")
-                              d.set('timestamp', str(int(time.time())))
-                              d.set('uid', str(m.get("uid",0)))
+                              d.set('timestamp', timestamp)
+                              d.set('uid',uid)
                               #兼容DanmakuFactory可识别用户名
                               d.set('user', m.get("name",""))
                               d.text = m["content"]
