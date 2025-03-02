@@ -218,9 +218,9 @@ class DanmakuClient(IDanmakuClient):
                                 d.set('uid',uid)
                                 #兼容DanmakuFactory可识别用户名
                                 d.set('user', m.get("name",""))
-                                d.text = m["content"]
                             else:
                                 d.set('p', f"{msg_time},1,25,{color},0,0,0,0")
+                            d.text = m["content"]
                         except:
                             logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常", exc_info=True)
                             # 异常后略过本次弹幕
