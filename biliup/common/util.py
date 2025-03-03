@@ -1,5 +1,6 @@
 import asyncio
-
+import ssl
+import truststore
 import httpx
 from datetime import datetime, time, timezone, timedelta
 from biliup.config import config
@@ -11,7 +12,14 @@ DEFAULT_TIMEOUT = httpx.Timeout(timeout=15.0, connect=10.0)
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_CONNECTION_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=100)
 
-client = httpx.AsyncClient(http2=True, follow_redirects=True, timeout=DEFAULT_TIMEOUT, limits=DEFAULT_CONNECTION_LIMITS)
+ctx = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+client = httpx.AsyncClient(
+    http2=True,
+    follow_redirects=True,
+    timeout=DEFAULT_TIMEOUT,
+    limits=DEFAULT_CONNECTION_LIMITS,
+    verify=ctx
+)
 loop = asyncio.get_running_loop()
 logger = logging.getLogger('biliup')
 
