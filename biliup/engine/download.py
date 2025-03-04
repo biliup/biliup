@@ -29,7 +29,7 @@ from biliup.plugins.bili_webup_sync import BiliWebAsync
 from biliup.uploader import fmt_title_and_desc
 
 from .sync_downloader import SyncDownloader
-
+from biliup.app import context
 logger = logging.getLogger('biliup')
 
 
@@ -123,7 +123,7 @@ class DownloadBase(ABC):
                               max_file_size=int(self.file_size / 1024 / 1024),
                               output_prefix=self.gen_download_filename(True),
                               stream_info=stream_info,
-                              file_name_callback=lambda file_name: self.__download_segment_callback(file_name))
+                              file_name_callback=lambda file_name: self.__download_segment_callback(file_name), database_row_id=self.database_row_id)
                 return True
             # streamlink无法处理flv,所以回退到ffmpeg
             if self.downloader == 'streamlink' and '.flv' not in parsed_url_path:
@@ -346,6 +346,7 @@ class DownloadBase(ABC):
                 # TODO: 重试等待时间
                 time.sleep(3)
             finally:
+
                 self.close()
 
             # 下载模式跳过下播延迟检测
@@ -370,6 +371,11 @@ class DownloadBase(ABC):
             self.download_success_callback()
         # self.segment_processor_thread
         logger.info(f'{self.plugin_msg}: 退出下载')
+
+        if str(self.database_row_id) in context["sync_downloader_map"]:
+            context["sync_downloader_map"].pop(str(self.database_row_id))
+            logger.info(f"{self.plugin_msg} {self.database_row_id}: 从同步下载器列表中移除")
+
         stream_info = {
             'name': self.fname,
             'url': self.url,
@@ -524,16 +530,16 @@ def stream_gears_download(url, headers, file_name, segment_time=None, file_size=
         )
 
 
-def sync_download(stream_url, headers, segment_duration=60, max_file_size=100, output_prefix="segment", stream_info=None, file_name_callback: Callable[[str], None] = None):
+def sync_download(stream_url, headers, segment_duration=60, max_file_size=100, output_prefix="segment", stream_info=None, file_name_callback: Callable[[str], None] = None, database_row_id=0):
     logger.info(f"启动同步下载器 max_file_size {max_file_size}MB")
     video_queue = queue.SimpleQueue()
-    # video_queue.put(b'\x00')
 
     def upload(video_queue, stream_info, stop_event: threading.Event):
         with SessionLocal() as db:
             data = get_stream_info(db, f"{stream_info['name']}")
         data, _ = fmt_title_and_desc({**data, "name": stream_info['name']})
         stream_info.update(data)
+        logger.info(f"stream_info: {stream_info}")
         # 获取 BiliWebAsync.__init__ 的参数名
         init_params = inspect.signature(BiliWebAsync.__init__).parameters
         # 过滤 info 中的无关键
@@ -547,7 +553,7 @@ def sync_download(stream_url, headers, segment_duration=60, max_file_size=100, o
         uploader = BiliWebAsync(**filtered_info, video_queue=video_queue)
         uploader.upload(total_size=max_file_size * 1024 * 1024,
                         stop_event=stop_event, output_prefix=output_prefix,
-                        file_name_callback=file_name_callback)
+                        file_name_callback=file_name_callback, database_row_id=database_row_id)
         # print("上传器结束")
         logger.info(f"{stream_info['name']} 上传器结束")
         # video_queue = queue.SimpleQueue()

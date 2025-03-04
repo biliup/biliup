@@ -58,7 +58,7 @@ class SyncDownloader:
         self.quality = "best"
         self.headers = headers
         self.segment_duration = segment_duration
-        self.read_block_size = 4096
+        self.read_block_size = 100
         self.max_file_size = max_file_size
         self.output_prefix = output_prefix
 
@@ -70,13 +70,13 @@ class SyncDownloader:
             # print("[run] 启动 ffmpeg...")
             logging.info("[run] 启动 ffmpeg...")
             if output_filename == "-":
-                data = ffmpeg_proc.stdout.read(1024)  # 读取第一个 data
+                data = ffmpeg_proc.stdout.read(self.read_block_size)  # 读取第一个 data
                 if not data:  # 如果第一个 data 为空
                     logging.info("[run] ffmpeg 没有输出数据，返回 False")
                     return False
                 self.video_queue.put(data)  # 将第一个数据放入队列
                 while True:
-                    data = ffmpeg_proc.stdout.read(1024)
+                    data = ffmpeg_proc.stdout.read(self.read_block_size)
                     if not data:
                         logging.info("[run] ffmpeg stdout 已到达 EOF。结束本段写入。")
                         break
@@ -92,7 +92,7 @@ class SyncDownloader:
                 if output_filename == "-":
                     logging.info("[run] 读取 ffmpeg stdout...")
                     # 读取第一个数据
-                    data = ffmpeg_proc.stdout.read(1024)
+                    data = ffmpeg_proc.stdout.read(100)
                     if not data:  # 如果第一个数据为空
                         logging.info("[run] ffmpeg 没有输出数据，返回 False")
                         streamlink_proc.kill()  # 终止 streamlink 进程
@@ -102,7 +102,7 @@ class SyncDownloader:
                     self.video_queue.put(data)  # 将第一个数据放入队列
                     # 继续读取剩余数据
                     while True:
-                        data = ffmpeg_proc.stdout.read(1024)
+                        data = ffmpeg_proc.stdout.read(self.read_block_size)
                         if not data:
                             logging.info("[run] ffmpeg stdout 已到达 EOF。结束本段写入。")
                             break
