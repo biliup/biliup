@@ -533,13 +533,13 @@ def stream_gears_download(url, headers, file_name, segment_time=None, file_size=
 def sync_download(stream_url, headers, segment_duration=60, max_file_size=100, output_prefix="segment", stream_info=None, file_name_callback: Callable[[str], None] = None, database_row_id=0):
     logger.info(f"启动同步下载器 max_file_size {max_file_size}MB")
     video_queue = queue.SimpleQueue()
-    # video_queue.put(b'\x00')
 
     def upload(video_queue, stream_info, stop_event: threading.Event):
         with SessionLocal() as db:
             data = get_stream_info(db, f"{stream_info['name']}")
         data, _ = fmt_title_and_desc({**data, "name": stream_info['name']})
         stream_info.update(data)
+        logger.info(f"stream_info: {stream_info}")
         # 获取 BiliWebAsync.__init__ 的参数名
         init_params = inspect.signature(BiliWebAsync.__init__).parameters
         # 过滤 info 中的无关键
