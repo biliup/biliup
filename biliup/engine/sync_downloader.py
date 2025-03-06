@@ -58,7 +58,7 @@ class SyncDownloader:
         self.quality = "best"
         self.headers = headers
         self.segment_duration = segment_duration
-        self.read_block_size = 100
+        self.read_block_size = 500
         self.max_file_size = max_file_size
         self.output_prefix = output_prefix
 
@@ -92,7 +92,7 @@ class SyncDownloader:
                 if output_filename == "-":
                     logging.info("[run] 读取 ffmpeg stdout...")
                     # 读取第一个数据
-                    data = ffmpeg_proc.stdout.read(100)
+                    data = ffmpeg_proc.stdout.read(self.read_block_size)
                     if not data:  # 如果第一个数据为空
                         logging.info("[run] ffmpeg 没有输出数据，返回 False")
                         streamlink_proc.kill()  # 终止 streamlink 进程
