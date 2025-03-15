@@ -21,6 +21,7 @@ class Bililive(DownloadBase):
         self.live_start_time = 0
         self.bilibili_danmaku = config.get('bilibili_danmaku', False)
         self.bilibili_danmaku_detail = config.get('bilibili_danmaku_detail', False)
+        self.bilibili_danmaku_full = config.get('bilibili_danmaku_full', False)
         self.__real_room_id = None
         self.__login_mid = 0
         self.bili_cookie = config.get('user', {}).get('bili_cookie')
@@ -213,6 +214,7 @@ class Bililive(DownloadBase):
                     'room_id': self.__real_room_id,
                     'cookie': self.fake_headers.get('cookie', ''),
                     'detail': self.bilibili_danmaku_detail,
+                    'full': self.bilibili_danmaku_full,
                     'uid': self.__login_mid
                 }
             )

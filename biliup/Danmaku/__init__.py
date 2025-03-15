@@ -189,8 +189,20 @@ class DanmakuClient(IDanmakuClient):
                         fmt_file_name = None
                         self.__record_task.cancel()
                         return
+                    # 完整弹幕记录
+                    need_record = False
+                    if self.__content.get("full", None):
+                        try:
+                            o = etree.SubElement(root, 'o')
+                            o.set('timestamp', str(int(time.time())))
+                            o.text = m.get("raw_data")
+                            need_record = True
+                        except:
+                            logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常", exc_info=True)
+                            continue
+
                     # 弹幕信息记录
-                    elif m.get('msg_type') == 'danmaku':
+                    if m.get('msg_type') == 'danmaku':
                         try:
                             if m.get('color'):
                                 color = m["color"]
@@ -245,7 +257,8 @@ class DanmakuClient(IDanmakuClient):
                             # 异常后略过本次弹幕
                             continue
                     else:
-                        continue
+                        if not need_record:
+                            continue
                     msg_i += 1
                     if msg_i % 5 == 0:
                         # 每收到五条弹幕后写入 减少io
