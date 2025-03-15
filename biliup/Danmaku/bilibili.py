@@ -176,7 +176,7 @@ class Bilibili:
                 else:
                     msg = {'name': '', 'content': dm.get('body'), 'msg_type': 'other'}
                 try:
-                    msg['raw_data'] = json.dumps(dm, default=bytes_serializer)
+                    msg['raw_data'] = json.dumps(dm, default=bytes_serializer, ensure_ascii=False)
                 except:
                     msg['raw_data'] = ""
                 msgs.append(msg)
