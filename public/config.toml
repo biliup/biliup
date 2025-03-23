@@ -24,7 +24,7 @@ filtering_threshold = 20
 #submit_api = "client"
 ### 选择全局默认上传插件，Noop为不上传，但会执行后处理,可选bili_web，biliup-rs(默认值)
 #uploader = "Noop"
-### b站上传线路选择，默认为自动模式，目前可手动切换为bda2, kodo, ws, qn, bldsa, cos, cos-internal(支持腾讯云内网免流+提速，目前已失效)
+### b站上传线路选择，默认自动选择最优线路。目前可手动切换为alia（海外）, bda2（大陆）, bldsa（大陆）, qn（全球）, tx（大陆）, txa（海外）
 lines = "AUTO"
 ### 单文件并发上传数,未达到带宽上限时,增大此值可提高上传速度(不要设置过大,部分线路限制为8,如速度不佳优先调整上传线路)
 threads = 3

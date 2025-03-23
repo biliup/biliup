@@ -59,10 +59,10 @@ class DownloadBase(ABC):
         self.opt_args = opt_args
         self.live_cover_url = None
         self.fake_headers = {
-            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'accept-encoding': DEFAULT_ACCEPT_ENCODING,
-            'accept-language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
-            'user-agent': random_user_agent(),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Encoding': DEFAULT_ACCEPT_ENCODING,
+            'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
+            'User-Agent': random_user_agent(),
         }
         self.segment_time = config.get('segment_time', '01:00:00')
         self.time_range = config.get('time_range')
