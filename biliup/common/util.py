@@ -34,9 +34,13 @@ logger = logging.getLogger('biliup')
 
 def check_timerange(name):
     try:
-        time_range = json.loads(config['streamers'].get(name, {}).get('time_range'))
+        time_range_str = config['streamers'].get(name, {}).get('time_range')
+        if not time_range_str:
+            return True
+        time_range = json.loads(time_range_str)
         if not isinstance(time_range, (list, tuple)) or len(time_range) != 2:
             return True
+
         start = datetime.fromisoformat(time_range[0].replace('Z', '+00:00')).time()
         end   = datetime.fromisoformat(time_range[1].replace('Z', '+00:00')).time()
     except Exception as e:
