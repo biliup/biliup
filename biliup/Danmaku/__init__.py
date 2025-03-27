@@ -154,6 +154,7 @@ class DanmakuClient(IDanmakuClient):
             fmt_file_name = time.strftime(self.__file_name.encode("unicode-escape").decode()).encode().decode(
                 "unicode-escape") + '.xml'
             msg_i = 0
+            msg_started = time.time()
             try:
                 while True:
                     try:
@@ -260,12 +261,15 @@ class DanmakuClient(IDanmakuClient):
                         if not need_record:
                             continue
                     msg_i += 1
-                    if msg_i % 5 == 0:
-                        # 每收到五条弹幕后写入 减少io
+                    if time.time() - msg_started > 300:
+                        msg_started = time.time()
+                        # 每5分钟写入一次，减少IO
                         # 可能会写入失败 会在下次五条或者任务被取消时重新尝试写入
+                        logger.info(f'写入弹幕：{self.__url}')
                         write_file(fmt_file_name)
             finally:
                 # 发生异常(被取消)时写入 避免丢失未写入
+                logger.info(f'弹幕保底写入：{self.__url}')
                 write_file(fmt_file_name)
 
     def start(self):
