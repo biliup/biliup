@@ -157,7 +157,7 @@ class DanmakuClient(IDanmakuClient):
 
             # 设置弹幕自动保存时间
             msg_started = time.time()
-            if self.__content.get("full", None):
+            if self.__content.get("raw", None):
                 save_interval = 300
             else:
                 save_interval = 10
@@ -199,7 +199,7 @@ class DanmakuClient(IDanmakuClient):
                         return
                     # 完整弹幕记录
                     need_record = False
-                    if self.__content.get("full", None):
+                    if self.__content.get("raw", None):
                         try:
                             o = etree.SubElement(root, 'o')
                             o.set('timestamp', str(int(time.time())))
