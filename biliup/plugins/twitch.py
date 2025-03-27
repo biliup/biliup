@@ -125,7 +125,6 @@ class Twitch(DownloadBase, BatchCheck):
                 "--player-external-http-interface", "localhost",
                 # "--twitch-disable-ads",                     # 去广告，去掉、跳过嵌入的广告流
                 # "--twitch-disable-hosting",               # 该参数从5.0起已被禁用
-                "--twitch-disable-reruns",  # 如果该频道正在重放回放，不打开流
                 self.url, "best"  # 流链接
             ]
             if self.twitch_disable_ads:  # 去广告，去掉、跳过嵌入的广告流
