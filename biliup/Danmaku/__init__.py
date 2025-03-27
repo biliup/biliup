@@ -154,7 +154,14 @@ class DanmakuClient(IDanmakuClient):
             fmt_file_name = time.strftime(self.__file_name.encode("unicode-escape").decode()).encode().decode(
                 "unicode-escape") + '.xml'
             msg_i = 0
+
+            # 设置弹幕自动保存时间
             msg_started = time.time()
+            if self.__content.get("full", None):
+                save_interval = 300
+            else:
+                save_interval = 10
+
             try:
                 while True:
                     try:
@@ -261,10 +268,10 @@ class DanmakuClient(IDanmakuClient):
                         if not need_record:
                             continue
                     msg_i += 1
-                    if time.time() - msg_started > 300:
+
+                    # 每隔指定时间接入一次弹幕
+                    if time.time() - msg_started > save_interval:
                         msg_started = time.time()
-                        # 每5分钟写入一次，减少IO
-                        # 可能会写入失败 会在下次五条或者任务被取消时重新尝试写入
                         logger.info(f'写入弹幕：{self.__url}')
                         write_file(fmt_file_name)
             finally:
