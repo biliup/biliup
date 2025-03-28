@@ -72,6 +72,15 @@ const Bilibili: React.FC<Props> = props => {
             padding: 0,
           }}
         />
+        <Form.Switch
+          field="bilibili_danmaku_raw"
+          extraText="录制B站服务器返回的原始弹幕信息，方便有技术能力的用户对主播弹幕数据进行统计。仅 bilibili_danmaku 开启时生效，默认关闭，开启后弹幕文件会每隔5分钟写入一次（实验性质：可能导致弹幕文件巨大）"
+          label="录制完整弹幕（bilibili_danmaku_raw）"
+          fieldStyle={{
+            alignSelf: 'stretch',
+            padding: 0,
+          }}
+        />
         <Form.Input
           field="user.bili_cookie"
           extraText={

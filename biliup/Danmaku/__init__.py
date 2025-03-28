@@ -154,6 +154,14 @@ class DanmakuClient(IDanmakuClient):
             fmt_file_name = time.strftime(self.__file_name.encode("unicode-escape").decode()).encode().decode(
                 "unicode-escape") + '.xml'
             msg_i = 0
+
+            # 设置弹幕自动保存时间
+            msg_started = time.time()
+            if self.__content.get("raw", None):
+                save_interval = 300
+            else:
+                save_interval = 10
+
             try:
                 while True:
                     try:
@@ -189,8 +197,20 @@ class DanmakuClient(IDanmakuClient):
                         fmt_file_name = None
                         self.__record_task.cancel()
                         return
+                    # 完整弹幕记录
+                    need_record = False
+                    if self.__content.get("raw", None):
+                        try:
+                            o = etree.SubElement(root, 'o')
+                            o.set('timestamp', str(int(time.time())))
+                            o.text = m.get("raw_data")
+                            need_record = True
+                        except:
+                            logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常", exc_info=True)
+                            continue
+
                     # 弹幕信息记录
-                    elif m.get('msg_type') == 'danmaku':
+                    if m.get('msg_type') == 'danmaku':
                         try:
                             if m.get('color'):
                                 color = m["color"]
@@ -245,14 +265,18 @@ class DanmakuClient(IDanmakuClient):
                             # 异常后略过本次弹幕
                             continue
                     else:
-                        continue
+                        if not need_record:
+                            continue
                     msg_i += 1
-                    if msg_i % 5 == 0:
-                        # 每收到五条弹幕后写入 减少io
-                        # 可能会写入失败 会在下次五条或者任务被取消时重新尝试写入
+
+                    # 每隔指定时间接入一次弹幕
+                    if time.time() - msg_started > save_interval:
+                        msg_started = time.time()
+                        logger.info(f'写入弹幕：{self.__url}')
                         write_file(fmt_file_name)
             finally:
                 # 发生异常(被取消)时写入 避免丢失未写入
+                logger.info(f'弹幕保底写入：{self.__url}')
                 write_file(fmt_file_name)
 
     def start(self):
