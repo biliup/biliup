@@ -112,6 +112,7 @@ class Youtube(DownloadBase):
             if type(download_entry) is dict:
                 if download_entry.get('live_status') == 'is_live':
                     self.is_download = False
+                    self.room_title = download_entry.get('title')
                 else:
                     self.is_download = True
                 if not is_check:

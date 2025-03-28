@@ -219,7 +219,38 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                 placeholder="01:00:00-02:00:00"
                 style={{ width: 176 }}
               />
-
+              
+              <ArrayField field="excluded_keywords">
+                {({ add, arrayFields }) => (
+                  <Form.Section text="不录制关键词">
+                    <div className="semi-form-field-extra">
+                      如果房间名包含关键词，则停止或不录制该场直播，每个关键词需单独一行<br/>
+                      暂不支持<strong>cc直播</strong>、<strong>yy直播</strong>、<strong>twitch直播</strong>
+                    </div>
+                    <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+                      添加关键词
+                    </Button>
+                    {arrayFields.map(({ field, key, remove }, i) => (
+                      <div key={key} style={{ width: 1000, display: 'flex' }}>
+                        <Form.Input
+                          field={field}
+                          label={`关键词${i + 1}`}
+                          labelPosition="left"
+                          rules={[{ required: true, message }]}
+                        ></Form.Input>
+                        <Button
+                          type="danger"
+                          theme="borderless"
+                          icon={<IconMinusCircle />}
+                          onClick={remove}
+                          style={{ margin: 12 }}
+                        />
+                      </div>
+                    ))}
+                </Form.Section>
+                )}
+              </ArrayField>
+              
               <ArrayField field="preprocessor">
                 {({ add, arrayFields }) => (
                   <Form.Section text="下载前处理">

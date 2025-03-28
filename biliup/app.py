@@ -43,7 +43,8 @@ async def singleton_check(platform, name, url):
         return
 
     event_manager.send_event(Event(UPLOAD, ({'name': name, 'url': url},)))
-    if await platform(name, url).acheck_stream(True) and platform(name, url).pre_check():
+    p = platform(name, url)
+    if await p.acheck_stream(True) and p.should_record():
         # 需要等待上传文件列表检索完成后才可以开始下次下载
         with NamedLock(f'upload_file_list_{name}'):
             event_manager.send_event(Event(PRE_DOWNLOAD, args=(name, url,)))

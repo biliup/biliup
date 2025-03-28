@@ -59,12 +59,12 @@ class Kuaishou(DownloadBase):
             logger.error(f"{plugin_msg}: {room_info}")
             return False
 
+        self.room_title = room_info.get('liveStream', {}).get('caption', {})
+            
         if is_check:
             return True
 
-        try:
-            self.room_title = room_info['liveStream']['caption']
-        except KeyError:
+        if not self.room_title:
             logger.warning(f"{plugin_msg}: 直播间标题获取失败，使用快手ID代替")
             self.room_title = room_id
         self.raw_stream_url = room_info['liveStream']['playUrls'][0]['adaptationSet']['representation'][-1]['url']
