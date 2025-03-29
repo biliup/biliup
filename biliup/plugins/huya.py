@@ -169,7 +169,7 @@ class Huya(DownloadBase):
             stream_name = stream_name.replace('-imgplus', '')
         anti_code = anti_code + "&codec=264" \
             if is_xingxiu else \
-            self.__build_query(stream_name, anti_code, _get_uid(self.fake_headers.get('cookie', {}), stream_name))
+            self.__build_query(stream_name, anti_code, _get_uid(self.fake_headers.get('cookie', ''), stream_name))
         for stream in stream_info:
             # 优先级<0代表不可用
             priority = stream['iWebPriorityRate']
