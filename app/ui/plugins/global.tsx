@@ -42,7 +42,7 @@ const Global: React.FC = () => {
               3. stream-gears（默认。防 FLV 流花屏）
               <br />
               4. sync-downloader（流式边录边传，需先为主播设定上传模板。不受
-              pool2/threads/segment_time 控制，默认 3 线程上传，请确保上传带宽充足。需安装 FFmpeg）
+              pool2/threads/segment_time 控制，默认 3 线程上传，请确保上传带宽充足。需安装 FFmpeg）详见 Wiki <a href="https://github.com/biliup/biliup/wiki/%E8%BE%B9%E5%BD%95%E8%BE%B9%E4%BC%A0%E5%8A%9F%E8%83%BD" target="_blank" rel="noopener noreferrer" >点击查看</a>
             </div>
           }
           style={{ width: '100%' }}

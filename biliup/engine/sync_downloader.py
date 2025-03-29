@@ -67,36 +67,49 @@ class SyncDownloader:
 
     def run_ffmpeg_with_url(self, ffmpeg_cmd, output_filename):
         with subprocess.Popen(ffmpeg_cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE) as ffmpeg_proc:
-            # print("[run] 启动 ffmpeg...")
-            logging.info("[run] 启动 ffmpeg...")
+            logger.info("[run] 启动 ffmpeg...")
             if output_filename == "-":
                 data = ffmpeg_proc.stdout.read(self.read_block_size)  # 读取第一个 data
                 if not data:  # 如果第一个 data 为空
-                    logging.info("[run] ffmpeg 没有输出数据，返回 False")
+                    logger.info("[run] ffmpeg 没有输出数据，返回 False")
+                    err = ffmpeg_proc.stderr.read()
+                    if err:
+                        logger.error("[run] ffmpeg err " + err.decode("utf-8", errors="replace"))
                     return False
                 self.video_queue.put(data)  # 将第一个数据放入队列
                 while True:
                     data = ffmpeg_proc.stdout.read(self.read_block_size)
                     if not data:
-                        logging.info("[run] ffmpeg stdout 已到达 EOF。结束本段写入。")
+                        logger.info("[run] ffmpeg stdout 已到达 EOF。结束本段写入。")
                         break
                     self.video_queue.put(data)
             ffmpeg_proc.wait()
+            # 输出 ffmpeg 的错误信息（如果有的话）
+            err = ffmpeg_proc.stderr.read()
+            if err:
+                logger.error("[run] ffmpeg err " + err.decode("utf-8", errors="replace"))
         return True  # 如果正常执行，返回 True
 
     def run_streamlink_with_ffmpeg(self, streamlink_cmd, ffmpeg_cmd, output_filename):
         with subprocess.Popen(streamlink_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as streamlink_proc:
-            logging.info("[run] 启动 streamlink...")
-            with subprocess.Popen(ffmpeg_cmd, stdin=streamlink_proc.stdout, stdout=subprocess.PIPE) as ffmpeg_proc:
-                logging.info("[run] 启动 ffmpeg...")
+            logger.info("[run] 启动 streamlink...")
+            with subprocess.Popen(ffmpeg_cmd, stdin=streamlink_proc.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as ffmpeg_proc:
+                logger.info("[run] 启动 ffmpeg...")
                 if output_filename == "-":
-                    logging.info("[run] 读取 ffmpeg stdout...")
+                    logger.info("[run] 读取 ffmpeg stdout...")
                     # 读取第一个数据
                     data = ffmpeg_proc.stdout.read(self.read_block_size)
                     if not data:  # 如果第一个数据为空
-                        logging.info("[run] ffmpeg 没有输出数据，返回 False")
+                        logger.info("[run] ffmpeg 没有输出数据，返回 False")
                         streamlink_proc.kill()  # 终止 streamlink 进程
                         ffmpeg_proc.kill()  # 终止 ffmpeg 进程
+                        # 打印错误输出
+                        ffmpeg_err = ffmpeg_proc.stderr.read()
+                        if ffmpeg_err:
+                            logger.error("[run] ffmpeg err " + ffmpeg_err.decode("utf-8", errors="replace"))
+                        streamlink_err = streamlink_proc.stderr.read()
+                        if streamlink_err:
+                            logger.error("[run] streamlink err " + streamlink_err.decode("utf-8", errors="replace"))
                         return False
 
                     self.video_queue.put(data)  # 将第一个数据放入队列
@@ -104,22 +117,26 @@ class SyncDownloader:
                     while True:
                         data = ffmpeg_proc.stdout.read(self.read_block_size)
                         if not data:
-                            logging.info("[run] ffmpeg stdout 已到达 EOF。结束本段写入。")
+                            logger.info("[run] ffmpeg stdout 已到达 EOF。结束本段写入。")
                             break
                         self.video_queue.put(data)
 
                 ffmpeg_proc.wait()
-                logging.info("[run] ffmpeg 已到达输出大小并退出。结束本段写入。")
-
-            # streamlink_proc.kill()  # 确保终止 streamlink 进程
-            # streamlink_proc.wait()
-
+                logger.info("[run] ffmpeg 已到达输出大小并退出。结束本段写入。")
+                # 打印 ffmpeg 子进程的错误输出
+                ffmpeg_err = ffmpeg_proc.stderr.read()
+                if ffmpeg_err:
+                    logger.error("[run] ffmpeg err " + ffmpeg_err.decode("utf-8", errors="replace"))
+            # 打印 streamlink 子进程的错误输出
+            streamlink_err = streamlink_proc.stderr.read()
+            if streamlink_err:
+                logger.error("[run] streamlink err " + streamlink_err.decode("utf-8", errors="replace"))
         return True  # 如果一切正常，返回 True
 
     def build_ffmpeg_cmd(self, input_source, output_filename, headers, segment_duration):
         cmd = [
             "ffmpeg",
-            "-loglevel", "quiet",
+            "-loglevel", "error",
             # "-"  # 覆盖输出文件
         ]
         if headers:
@@ -160,12 +177,12 @@ class SyncDownloader:
             output_filename = f"{self.output_prefix}{file_index:03d}.mkv"
             # print(f"\n[run] ========== 准备录制第 {file_index} 段：{output_filename} ==========")
             # logging.info(f"\n[run] == 当前下载流地址：{self.stream_url} ==")
-            logging.info(f"\n[run] == 准备录制第 {file_index} 段：{output_filename} ==")
+            logger.info(f"\n[run] == 准备录制第 {file_index} 段：{output_filename} ==")
             output_filename = "-"
             is_hls = '.m3u8' in urlparse(self.stream_url).path
             if not is_hls:
                 # print("[run] 输入源不是 HLS 地址，将直接使用 ffmpeg 进行录制。", self.stream_url)
-                logging.info("[run] 输入源不是 HLS 地址，将直接使用 ffmpeg 进行录制。")
+                logger.info("[run] 输入源不是 HLS 地址，将直接使用 ffmpeg 进行录制。")
                 ffmpeg_cmd = self.build_ffmpeg_cmd(self.stream_url, output_filename,
                                                    self.headers, self.segment_duration)
                 if not self.run_ffmpeg_with_url(ffmpeg_cmd, output_filename):
@@ -174,7 +191,7 @@ class SyncDownloader:
                     continue
             else:
                 # print("[run] 输入源是 HLS 地址，将使用 streamlink + ffmpeg 进行录制。")
-                logging.info("[run] 输入源是 HLS 地址，将使用 streamlink + ffmpeg 进行录制。")
+                logger.info("[run] 输入源是 HLS 地址，将使用 streamlink + ffmpeg 进行录制。")
                 streamlink_cmd = [
                     "streamlink",
                     "--stream-segment-threads", "3",
