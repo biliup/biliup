@@ -197,13 +197,29 @@ class DanmakuClient(IDanmakuClient):
                             else:
                                 color = '16777215'
                             msg_time = format(time.time() - start_time, '.3f')
-                            d = etree.SubElement(root, 'd')
-                            d.set('p', f"{msg_time},1,25,{color},0,0,0,0")
                             # 记录弹幕额外信息
+                            timestamp = str(int(time.time()))
+                            uid = str(m.get("uid",0))
+                            d = etree.SubElement(root, 'd')
+                            '''
+                            弹幕部分的参数兼容bilibili主站弹幕 XML 文件，按顺序含义分别为：
+                            1.弹幕出现时间 (秒)
+                            2.弹幕类型
+                            3.字号
+                            4.颜色
+                            5.发送时间戳
+                            6.固定为 0 (主站弹幕 XML 为弹幕池 ID)
+                            7.发送者 UID (主站弹幕 XML 为发送用户 ID 的 CRC32)
+                            8.固定为 0 (主站弹幕 XML 为弹幕的数据库 ID)
+                            '''
                             if self.__content.get("detail", None):
-                                d.set('timestamp', str(int(time.time())))
-                                d.set('uid', str(m.get("uid",0)))
-                                d.set('username', m.get("name",""))
+                                d.set('p', f"{msg_time},1,25,{color},{timestamp},0,{uid},0")
+                                d.set('timestamp', timestamp)
+                                d.set('uid',uid)
+                                #兼容DanmakuFactory可识别用户名
+                                d.set('user', m.get("name",""))
+                            else:
+                                d.set('p', f"{msg_time},1,25,{color},0,0,0,0")
                             d.text = m["content"]
                         except:
                             logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常", exc_info=True)

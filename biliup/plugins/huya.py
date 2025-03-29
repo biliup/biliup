@@ -13,13 +13,15 @@ from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from ..plugins import logger, match1, random_user_agent
 
+HUYA_WEB_BASE_URL = "https://www.huya.com"
+HUYA_MOBILE_BASE_URL = "https://m.huya.com"
 
 @Plugin.download(regexp=r'https?://(?:(?:www|m)\.)?huya\.com')
 class Huya(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
         self.fake_headers['referer'] = url
-        self.fake_headers['cookie'] = config.get('user', {}).get('huya_cookie', '')
+        # self.fake_headers['cookie'] = config.get('user', {}).get('huya_cookie', '')
         self.__room_id = url.split('huya.com/')[1].split('?')[0]
         self.huya_danmaku = config.get('huya_danmaku', False)
         self.huya_max_ratio = config.get('huya_max_ratio', 0)
@@ -44,13 +46,19 @@ class Huya(DownloadBase):
             REPLAY: 重播
             OFF: 未开播
             '''
-            logger.debug(f"{self.plugin_msg} : 未开播")
+            logger.debug(f"{self.plugin_msg}: 未开播")
             self.raw_stream_url = None
             return False
 
         if not room_profile['liveData'].get('bitRateInfo'):
             # 主播未推流
-            logger.debug(f"{self.plugin_msg} : 未推流")
+            logger.debug(f"{self.plugin_msg}: 未推流")
+            return False
+
+        self.room_title = room_profile['liveData']['introduction']
+        # 虎牙回放
+        if self.room_title.startswith('【回放】'):
+            logger.debug(f"{self.plugin_msg}: {self.room_title}")
             return False
 
         if is_check:
@@ -77,7 +85,7 @@ class Huya(DownloadBase):
                 logger.error(f"{self.plugin_msg}: 在确定码率时发生错误 {e}")
                 return False
 
-        is_xingxiu = room_profile['liveData']['gid'] == 1663
+        is_xingxiu = (room_profile['liveData']['gid'] == 1663)
 
         try:
             stream_urls = await self.get_stream_urls(self.huya_protocol, self.huya_mobile_api, self.huya_imgplus, is_xingxiu)
@@ -88,6 +96,9 @@ class Huya(DownloadBase):
         cdn_name = list(stream_urls.keys())
         if not self.huya_cdn or self.huya_cdn not in cdn_name:
             self.huya_cdn = cdn_name[0]
+
+        # Thx stream-rec
+        update_user_agent(self.fake_headers)
 
         # 虎牙直播流只允许连接一次
         if self.huya_cdn_fallback:
@@ -106,7 +117,6 @@ class Huya(DownloadBase):
                     return False
             stream_urls = await self.get_stream_urls(self.huya_protocol, self.huya_mobile_api, self.huya_imgplus, is_xingxiu)
 
-        self.room_title = room_profile['liveData']['introduction']
         self.raw_stream_url = stream_urls[self.huya_cdn]
 
         if self.huya_max_ratio and record_ratio != max_ratio:
@@ -159,23 +169,20 @@ class Huya(DownloadBase):
         suffix, anti_code = stream[f's{protocol}UrlSuffix'], stream[f's{protocol}AntiCode']
         if not allow_imgplus:
             stream_name = stream_name.replace('-imgplus', '')
-        anti_code = anti_code if is_xingxiu else \
+        anti_code = anti_code + "&codec=264" \
+                    if is_xingxiu else \
                     self.__build_query(stream_name, anti_code, _get_uid(self.fake_headers['cookie'], stream_name))
         for stream in stream_info:
             # 优先级<0代表不可用
-            priority = (
-                stream['iPCPriorityRate'],
-                stream['iWebPriorityRate'],
-                stream['iMobilePriorityRate']
-            )
-            if any(rate < 0 for rate in priority):
+            priority = stream['iWebPriorityRate']
+            if priority < 0:
                 continue
             cdn_name = stream['sCdnType']
             secure_url = stream[f's{protocol}Url'].replace('http://', 'https://')
             stream_url = f"{secure_url}/{stream_name}.{suffix}?{anti_code}"
             streams[cdn_name] = stream_url
-            if len(weights) < len(stream_info):
-                weights[cdn_name] = max(0, *priority)
+            if cdn_name not in weights:
+                weights[cdn_name] = priority
         return _weight_sorting(streams, weights)
 
     @staticmethod
@@ -265,3 +272,6 @@ def _get_uid(cookie: str, stream_name: str) -> int:
     #         "data": {},
     #     }
     # )['data']['uid']
+
+def update_user_agent(headers: dict):
+    headers['User-Agent'] = f"HYSDK(Windows, {int(time.time())})"

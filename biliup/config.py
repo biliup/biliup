@@ -33,7 +33,8 @@ class Config(UserDict):
         context = {
             'url_upload_count': self.data.get('url_upload_count', {}),
             'upload_filename': self.data.get('upload_filename', []),
-            'PluginInfo': self.data.get('PluginInfo')
+            'PluginInfo': self.data.get('PluginInfo'),
+            'sync_downloader_map': self.data.get('sync_downloader_map', {}),
         }
 
         for con in db.execute(select(Configuration.value).where(Configuration.key == 'config')):
