@@ -16,6 +16,7 @@ from ..plugins import logger, match1, random_user_agent
 HUYA_WEB_BASE_URL = "https://www.huya.com"
 HUYA_MOBILE_BASE_URL = "https://m.huya.com"
 
+
 @Plugin.download(regexp=r'https?://(?:(?:www|m)\.)?huya\.com')
 class Huya(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
@@ -25,7 +26,7 @@ class Huya(DownloadBase):
         self.__room_id = url.split('huya.com/')[1].split('?')[0]
         self.huya_danmaku = config.get('huya_danmaku', False)
         self.huya_max_ratio = config.get('huya_max_ratio', 0)
-        self.huya_cdn = config.get('huya_cdn', "").upper() # 不填写时使用主播的CDN优先级
+        self.huya_cdn = config.get('huya_cdn', "").upper()  # 不填写时使用主播的CDN优先级
         self.huya_protocol = 'Hls' if config.get('huya_protocol') == 'Hls' else 'Flv'
         self.huya_imgplus = config.get('huya_imgplus', True)
         self.huya_cdn_fallback = config.get('huya_cdn_fallback', False)
@@ -123,11 +124,9 @@ class Huya(DownloadBase):
             self.raw_stream_url += f"&ratio={record_ratio}"
         return True
 
-
     def danmaku_init(self):
         if self.huya_danmaku:
             self.danmaku = DanmakuClient(self.url, self.gen_download_filename())
-
 
     async def get_room_profile(self, use_api=False) -> dict:
         if use_api:
@@ -137,8 +136,8 @@ class Huya(DownloadBase):
                 'roomid': self.__room_id,
                 'showSecret': 1,
             }
-            resp = (await client.get(f"https://mp.huya.com/cache.php", \
-                                        headers=self.fake_headers, params=params)).json()
+            resp = (await client.get(f"https://mp.huya.com/cache.php",
+                                     headers=self.fake_headers, params=params)).json()
             if resp['status'] != 200:
                 raise Exception(f"{resp['message']}")
             return resp['data']
@@ -148,13 +147,12 @@ class Huya(DownloadBase):
                 raise Exception(f"找不到这个主播")
             return json.loads(html.split('stream: ')[1].split('};')[0])
 
-
     async def get_stream_urls(self, protocol, use_api=False, allow_imgplus=True, is_xingxiu=False) -> dict:
         '''
         返回指定协议的所有CDN流
         '''
         streams = {}
-        weights = {} # https://cdnweb.huya.com/getUidsDomainList?anchor_uid={anchor_uid}
+        weights = {}  # https://cdnweb.huya.com/getUidsDomainList?anchor_uid={anchor_uid}
         room_profile = await self.get_room_profile(use_api=use_api)
         if not use_api:
             try:
@@ -170,8 +168,8 @@ class Huya(DownloadBase):
         if not allow_imgplus:
             stream_name = stream_name.replace('-imgplus', '')
         anti_code = anti_code + "&codec=264" \
-                    if is_xingxiu else \
-                    self.__build_query(stream_name, anti_code, _get_uid(self.fake_headers['cookie'], stream_name))
+            if is_xingxiu else \
+            self.__build_query(stream_name, anti_code, _get_uid(self.fake_headers.get('cookie', {}), stream_name))
         for stream in stream_info:
             # 优先级<0代表不可用
             priority = stream['iWebPriorityRate']
@@ -272,6 +270,7 @@ def _get_uid(cookie: str, stream_name: str) -> int:
     #         "data": {},
     #     }
     # )['data']['uid']
+
 
 def update_user_agent(headers: dict):
     headers['User-Agent'] = f"HYSDK(Windows, {int(time.time())})"
