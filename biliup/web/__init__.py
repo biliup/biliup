@@ -569,6 +569,28 @@ async def proxy(request):
             return web.HTTPBadRequest(reason=str(e))
 
 
+def read_last_n_lines(file_path, n=50):
+    """高效读取文件最后n行，避免一次性读取整个文件"""
+    with open(file_path, 'rb') as f:
+        # 设置初始偏移量和缓冲区大小
+        file_size = f.seek(0, os.SEEK_END)
+        block_size = 1024
+        data = b''
+        lines = []
+
+        while file_size > 0 and len(lines) <= n:
+            # 计算要读取的字节数
+            read_size = min(block_size, file_size)
+            f.seek(file_size - read_size)
+            buffer = f.read(read_size)
+            data = buffer + data
+            file_size -= read_size
+            lines = data.splitlines()
+
+        # 只保留最后 n 行，并解码为字符串列表
+        return [line.decode('utf-8', errors='replace') for line in lines[-n:]]
+
+
 @routes.get('/v1/ws/logs')
 async def websocket_logs(request):
     ws = web.WebSocketResponse()
@@ -586,13 +608,12 @@ async def websocket_logs(request):
 
     log_file = file_param
 
-    # 发送初始内容（前50行）
+    # 发送初始内容（最后50行）
     try:
-        with open(log_file, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            initial_lines = lines[-50:] if len(lines) > 50 else lines
-            for line in initial_lines:
-                await ws.send_str(line.rstrip())
+        # 使用高效方法读取最后50行
+        last_lines = read_last_n_lines(log_file, 50)
+        for line in last_lines:
+            await ws.send_str(line)
         file_size = os.path.getsize(log_file)
     except FileNotFoundError:
         await ws.send_str(f"日志文件 {log_file} 不存在")
@@ -637,11 +658,9 @@ async def websocket_logs(request):
             # 如果文件被截断，重新读取前50行
             if current_size < file_size:
                 await ws.send_str("日志文件被截断，重新加载...")
-                with open(log_file, 'r', encoding='utf-8') as f:
-                    lines = f.readlines()
-                    initial_lines = lines[-50:] if len(lines) > 50 else lines
-                    for line in initial_lines:
-                        await ws.send_str(line.rstrip())
+                last_lines = read_last_n_lines(log_file, 50)
+                for line in last_lines:
+                    await ws.send_str(line)
                 file_size = current_size
                 continue
 
