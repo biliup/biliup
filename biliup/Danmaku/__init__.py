@@ -156,8 +156,8 @@ class DanmakuClient(IDanmakuClient):
             msg_i = 0
 
             # 设置弹幕自动保存时间
-            msg_started = time.time()
-            if self.__content.get("raw", None):
+            last_save_time = int(start_time)
+            if self.__content.get("raw", False):
                 save_interval = 300
             else:
                 save_interval = 10
@@ -170,9 +170,12 @@ class DanmakuClient(IDanmakuClient):
                     except asyncio.TimeoutError:
                         continue
 
-                    logger.debug(f"{DanmakuClient.__name__}:{self.__url}: 弹幕queue-{m.get('msg_type')}")
-                    #print(m)
-                    if m.get('msg_type') == "save":
+                    msg_type = m.get("msg_type")
+                    msg_time = time.time()
+                    logger.debug(f"{DanmakuClient.__name__}:{self.__url}: 弹幕queue-{msg_type}")
+                    # print(m)
+                    # 非弹幕
+                    if msg_type == "save":
                         if 'file_name' in m and fmt_file_name != m['file_name']:
                             try:
                                 if os.path.exists(m['file_name']):
@@ -189,7 +192,7 @@ class DanmakuClient(IDanmakuClient):
                         if callable(m.get('callback')):
                             m['callback']()
                         break
-                    elif m.get('msg_type') == "stop":
+                    elif msg_type == "stop":
                         try:
                             os.remove(fmt_file_name)
                         except:
@@ -197,86 +200,85 @@ class DanmakuClient(IDanmakuClient):
                         fmt_file_name = None
                         self.__record_task.cancel()
                         return
-                    # 完整弹幕记录
-                    need_record = False
-                    if self.__content.get("raw", None):
-                        try:
-                            o = etree.SubElement(root, 'o')
-                            o.set('timestamp', str(int(time.time())))
-                            o.text = m.get("raw_data")
-                            need_record = True
-                        except:
-                            logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常", exc_info=True)
-                            continue
-
-                    # 弹幕信息记录
-                    if m.get('msg_type') == 'danmaku':
-                        try:
-                            if m.get('color'):
-                                color = m["color"]
-                            else:
-                                color = '16777215'
-                            msg_time = format(time.time() - start_time, '.3f')
-                            # 记录弹幕额外信息
-                            timestamp = str(int(time.time()))
-                            uid = str(m.get("uid",0))
-                            d = etree.SubElement(root, 'd')
-                            '''
-                            弹幕部分的参数兼容bilibili主站弹幕 XML 文件，按顺序含义分别为：
-                            1.弹幕出现时间 (秒)
-                            2.弹幕类型
-                            3.字号
-                            4.颜色
-                            5.发送时间戳
-                            6.固定为 0 (主站弹幕 XML 为弹幕池 ID)
-                            7.发送者 UID (主站弹幕 XML 为发送用户 ID 的 CRC32)
-                            8.固定为 0 (主站弹幕 XML 为弹幕的数据库 ID)
-                            '''
-                            if self.__content.get("detail", None):
-                                d.set('p', f"{msg_time},1,25,{color},{timestamp},0,{uid},0")
-                                d.set('timestamp', timestamp)
-                                d.set('uid',uid)
-                                #兼容DanmakuFactory可识别用户名
-                                d.set('user', m.get("name",""))
-                            else:
-                                d.set('p', f"{msg_time},1,25,{color},0,0,0,0")
-                            d.text = m["content"]
-                        except:
-                            logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常", exc_info=True)
-                            # 异常后略过本次弹幕
-                            continue
-                    # 礼物信息记录，支持上舰、SC、礼物，目前仅在B站开启
-                    elif m.get('msg_type') in ['gift', 'super_chat' , 'guard_buy'] and self.__u == 'live.bilibili.com':
-                        if not self.__content.get("detail", None):
-                            continue
-                        try:
-                            s = etree.SubElement(root, 's')
-                            s.set('timestamp', str(int(time.time())))
-                            s.set('uid', str(m.get("uid")))
-                            s.set('username', m.get("name",""))
-                            s.set('price', str(m.get("price")))
-                            s.set('type', m.get('msg_type'))
-                            # 礼物名称
-                            s.set('num', str(m.get('num')))
-                            s.set('giftname', m.get('gift_name'))
-                            s.text = m["content"]
-                        except:
-                            logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常", exc_info=True)
-                            # 异常后略过本次弹幕
-                            continue
-                    else:
-                        if not need_record:
-                            continue
-                    msg_i += 1
+                    else: # 正常弹幕
+                        # print(m)
+                        if msg_type == 'danmaku': # 文字弹幕
+                            try:
+                                if m.get('color'):
+                                    color = m["color"]
+                                else:
+                                    color = '16777215'
+                                msg_time_since_start = format(msg_time - start_time, '.3f')
+                                # 记录弹幕额外信息
+                                timestamp = str(int(msg_time))
+                                uid = str(m.get("uid",0))
+                                d = etree.SubElement(root, 'd')
+                                '''
+                                弹幕部分的参数兼容bilibili主站弹幕 XML 文件，按顺序含义分别为：
+                                1.弹幕出现时间 (秒)
+                                2.弹幕类型
+                                3.字号
+                                4.颜色
+                                5.发送时间戳
+                                6.固定为 0 (主站弹幕 XML 为弹幕池 ID)
+                                7.发送者 UID (主站弹幕 XML 为发送用户 ID 的 CRC32)
+                                8.固定为 0 (主站弹幕 XML 为弹幕的数据库 ID)
+                                '''
+                                d.set('p', f"{msg_time_since_start},1,25,{color},{timestamp},0,{uid},0")
+                                if self.__content.get("detail", False):
+                                    d.set('timestamp', timestamp)
+                                    d.set('uid',uid)
+                                    #兼容DanmakuFactory用户名识别
+                                    d.set('user', m.get("name",""))
+                                d.text = m["content"]
+                            except:
+                                logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常", exc_info=True)
+                                # 异常后略过本次弹幕
+                                continue
+                        # 礼物信息记录，支持上舰、SC、礼物，目前仅在B站开启
+                        elif self.__u == 'live.bilibili.com' and msg_type in ['gift', 'super_chat' , 'guard_buy']:
+                            if not self.__content.get("detail", False):
+                                continue
+                            try:
+                                s = etree.SubElement(root, 's')
+                                s.set('timestamp', str(int(msg_time)))
+                                s.set('uid', str(m.get("uid")))
+                                s.set('username', m.get("name",""))
+                                s.set('price', str(m.get("price")))
+                                s.set('type', msg_type)
+                                # 礼物名称
+                                s.set('num', str(m.get('num')))
+                                s.set('giftname', m.get('gift_name'))
+                                s.text = m["content"]
+                            except:
+                                logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常", exc_info=True)
+                                # 异常后略过本次弹幕
+                                continue
+                        else:
+                            # 完整弹幕记录
+                            if not self.__content.get("raw", False):
+                                continue
+                            try:
+                                o = etree.SubElement(root, 'o')
+                                o.set('timestamp', str(int(msg_time)))
+                                o.text = m.get("raw_data")
+                            except:
+                                logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常", exc_info=True)
+                                continue
+                        msg_i += 1
 
                     # 每隔指定时间接入一次弹幕
-                    if time.time() - msg_started > save_interval:
-                        msg_started = time.time()
-                        logger.info(f'写入弹幕：{self.__url}')
+                    time_since_last_save = int(msg_time) - last_save_time
+                    if msg_i > 0 and time_since_last_save >= save_interval:
+                        logger.debug(f'{DanmakuClient.__name__}:{self.__url}: 写入弹幕')
                         write_file(fmt_file_name)
+                        last_save_time = int(msg_time)
+                        msg_i = 0
+                    # else: # 弹幕未写入原因
+                    #     print(f"time_since_last_save: {time_since_last_save}, msg_i: {msg_i}")
             finally:
                 # 发生异常(被取消)时写入 避免丢失未写入
-                logger.info(f'弹幕保底写入：{self.__url}')
+                logger.debug(f'{DanmakuClient.__name__}:{self.__url}:弹幕保底写入')
                 write_file(fmt_file_name)
 
     def start(self):
