@@ -228,7 +228,16 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                     下载器需使用ffmpeg或streamlink
                   </div>
                 }
-                label={{ text: '录制时间范围', optional: true }}
+                label={{ 
+                    text: '录制时间范围', 
+                    optional: true, 
+                    style: { 
+                        fontSize: '18px',
+                        marginBottom: '4px',
+                        paddingBottom: '8px',
+                        borderBottom: '1px solid var(--semi-color-border)',
+                    } 
+                }}
                 style={{ width: 176 }}
               />
               
