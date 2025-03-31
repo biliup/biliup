@@ -597,7 +597,7 @@ def get_duration(segment_time_str, time_range_str):
     try:
         time_range = json.loads(time_range_str)
         if not isinstance(time_range, (list, tuple)) or len(time_range) != 2:
-            return True
+            return segment_time_str
         end_time = datetime.fromisoformat(time_range[1].replace('Z', '+00:00')).time()
     except Exception as e:
         return segment_time_str
