@@ -594,13 +594,17 @@ def read_last_n_lines(file_path, n=50):
 @routes.get('/v1/ws/logs')
 async def websocket_logs(request):
     ws = web.WebSocketResponse()
-    await ws.prepare(request)
+    try:
+        await ws.prepare(request)
+    except ConnectionResetError as e:
+        logger.warning(e)
+        return ws
 
     # 获取请求参数，默认为 ds_update.log
     file_param = request.query.get('file', 'ds_update.log')
 
     # 安全检查：限制只能查看特定的日志文件
-    allowed_files = ['ds_update.log', 'download.log']
+    allowed_files = ['ds_update.log', 'download.log', 'upload.log']
     if file_param not in allowed_files:
         await ws.send_str(f"不允许访问请求的文件: {file_param}")
         await ws.close()

@@ -151,6 +151,24 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           itemKey: 'status',
           // items: [{itemKey: 'About', text: '任务管理'}, {itemKey: 'Dashboard', text: '用户任务查询'}],
         },
+        {
+          text: 'LogViewer',
+          icon: (
+            <div
+              style={{
+                backgroundColor: 'rgba(var(--semi-lime-2), 1)',
+                borderRadius: 'var(--semi-border-radius-medium)',
+                color: 'var(--semi-color-bg-0)',
+                display: 'flex',
+                padding: '4px',
+              }}
+            >
+              <IconSetting size="small" />
+            </div>
+          ),
+          itemKey: 'logViewer',
+          // items: [{itemKey: 'About', text: '任务管理'}, {itemKey: 'Dashboard', text: '用户任务查询'}],
+        },
       ].map((value: any) => {
         value.text = (
           <div
@@ -182,6 +200,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       'upload-manager': '/upload-manager',
       job: '/job',
       status: '/status',
+      logViewer: '/logviewer',
     }
     if (!routerMap[props.itemKey]) {
       return itemElement
