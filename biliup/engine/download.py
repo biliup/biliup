@@ -215,7 +215,8 @@ class DownloadBase(ABC):
                 '-c',
                 'copy',
             ]
-            if use_streamlink:
+            # https://github.com/biliup/biliup/issues/991
+            if use_streamlink and not self.raw_stream_url.startswith('http://localhost:'):
                 streamlink_cmd = [
                     'streamlink',
                     '--stream-segment-threads', '3',
