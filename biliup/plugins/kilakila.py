@@ -47,6 +47,7 @@ class Kilakila(DownloadBase):
                 '''
                 logger.debug(f"{self.plugin_msg}: 未开播")
                 return False
+            self.room_title = r['b']['title']
 
             if is_check:
                 logger.info(f"{self.plugin_msg}: 直播背景图链接: {r['b']['defaultBackgroundPicUrl']}")
@@ -54,7 +55,6 @@ class Kilakila(DownloadBase):
 
             # 直播视频流为 320*240 黑色背景，可搭配背景图重新压制视频
             # self.background_pic_url = r['b']['defaultBackgroundPicUrl']
-            self.room_title = r['b']['title']
             self.live_cover_url = r['b']['backPic']
             if self.kila_protocol == 'flv':
                 self.raw_stream_url = r['b']['flvPlayUrl']

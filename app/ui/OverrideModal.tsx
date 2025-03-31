@@ -98,6 +98,7 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
       'status',
       'format',
       'time_range',
+      'excluded_keywords',
       'preprocessor',
       'segment_processor',
       'downloaded_processor',

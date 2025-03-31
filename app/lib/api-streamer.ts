@@ -102,6 +102,7 @@ export interface LiveStreamerEntity {
 	status?: string | React.ReactNode;
 	format?: string;
     time_range?: string;
+    excluded_keywords?: string[];
 	preprocessor?: Record<'run', string>[];
 	segment_processor?: Record<'run', string>[];
 	downloaded_processor?: Record<'run', string>[];
