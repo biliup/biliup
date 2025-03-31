@@ -216,22 +216,22 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
             helpText="视频保存格式。不支持stream-gears下载器和Youtube平台。"
           />
           
-          <Form.TimePicker
-              field="time_range"
-              type="timeRange"
-              placeholder=" "
-              extraText={
-                <div style={{ fontSize: '14px' }}>
-                  如果设置了录制时间范围，不在时间范围内，将不进行录制<br/>
-                  下载器需使用ffmpeg或streamlink
-                </div>
-              }
-              label={{ text: '录制时间范围', optional: true }}
-              style={{ width: 176 }}
-          />
-          
           <Collapse keepDOM>
             <Collapse.Panel header="更多设置" itemKey="processors">
+              <Form.TimePicker
+                field="time_range"
+                type="timeRange"
+                placeholder=" "
+                extraText={
+                  <div style={{ fontSize: '14px' }}>
+                    如果设置了录制时间范围，不在时间范围内，将不进行录制<br/>
+                    下载器需使用ffmpeg或streamlink
+                  </div>
+                }
+                label={{ text: '录制时间范围', optional: true }}
+                style={{ width: 176 }}
+              />
+              
               <ArrayField field="excluded_keywords">
                 {({ add, arrayFields }) => (
                   <Form.Section text="不录制关键词">
