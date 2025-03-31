@@ -537,7 +537,7 @@ def sync_download(stream_url, headers, segment_duration=60, max_file_size=100, o
     def upload(video_queue, stream_info, stop_event: threading.Event):
         with SessionLocal() as db:
             data = get_stream_info(db, f"{stream_info['name']}")
-        data, _ = fmt_title_and_desc({**data, "name": stream_info['name'], "title": stream_info['title']})
+        data, _ = fmt_title_and_desc({**data, "name": stream_info['name'], "title": stream_info.get("title","")})
         stream_info.update(data)
         logger.info(f"stream_info: {stream_info}")
         # 获取 BiliWebAsync.__init__ 的参数名
