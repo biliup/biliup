@@ -24,8 +24,37 @@ const LogContent = ({ logs, logContainerRef, isLoading }: LogContentProps) => {
     )
   }
 
+  // 判断滚动条是否接近底部
+  const isScrolledToBottom = () => {
+    const containers = document.getElementsByClassName('log-container');
+    if (containers.length === 0) return false;
+
+    const container = containers[0] as HTMLElement;
+    // 50px 容许
+    const diff = container.scrollHeight - container.scrollTop;
+    return diff - container.clientHeight <= 50;
+  };
+
+  // 滚动到底部
+  const scrollToBottom = () => {
+    const containers = document.getElementsByClassName('log-container');
+    if (containers.length > 0) {
+      const container = containers[0] as HTMLElement;
+      container.scrollTop = container.scrollHeight;
+    }
+  };
+
+  useEffect(() => {
+    // 如果已经滚动到底部，那么在日志更新时自动滚动到底部
+    if (logs.length > 0 && isScrolledToBottom()) {
+      console.log("自动滚动到底部")
+      scrollToBottom();
+    }
+  }, [logs]);
+
   return (
     <div
+      className="log-container"
       ref={logContainerRef}
       style={{
         height: 'calc(100% - 40px)', // 减去 tabs 的高度
