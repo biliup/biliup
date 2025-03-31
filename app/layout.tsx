@@ -16,6 +16,7 @@ import {
   IconVideoListStroked,
   IconHome,
   IconSetting,
+  IconHistory,
 } from '@douyinfe/semi-icons'
 import Image from 'next/image'
 import ThemeButton from './ui/ThemeButton'
@@ -129,9 +130,26 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 padding: '4px',
               }}
             >
+              <IconHistory size="small" />
+            </div>
+          ),
+        },
+        {
+          text: '实时日志',
+          icon: (
+            <div
+              style={{
+                backgroundColor: 'rgba(var(--semi-blue-4), 1)',
+                borderRadius: 'var(--semi-border-radius-medium)',
+                color: 'var(--semi-color-bg-0)',
+                display: 'flex',
+                padding: '4px',
+              }}
+            >
               <IconCustomerSupport size="small" />
             </div>
           ),
+          itemKey: 'logViewer',
         },
         {
           text: '任务平台',
@@ -149,24 +167,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
           ),
           itemKey: 'status',
-          // items: [{itemKey: 'About', text: '任务管理'}, {itemKey: 'Dashboard', text: '用户任务查询'}],
-        },
-        {
-          text: 'LogViewer',
-          icon: (
-            <div
-              style={{
-                backgroundColor: 'rgba(var(--semi-lime-2), 1)',
-                borderRadius: 'var(--semi-border-radius-medium)',
-                color: 'var(--semi-color-bg-0)',
-                display: 'flex',
-                padding: '4px',
-              }}
-            >
-              <IconSetting size="small" />
-            </div>
-          ),
-          itemKey: 'logViewer',
           // items: [{itemKey: 'About', text: '任务管理'}, {itemKey: 'Dashboard', text: '用户任务查询'}],
         },
       ].map((value: any) => {

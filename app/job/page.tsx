@@ -13,7 +13,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { IconCustomerSupport, IconSearch, IconVideoListStroked } from '@douyinfe/semi-icons'
+import { IconHistory } from '@douyinfe/semi-icons'
 import { humDate } from '@/app/lib/utils'
 import Filter from '@/app/job/Filter'
 
@@ -95,7 +95,7 @@ export default function Home() {
                   padding: '6px',
                 }}
               >
-                <IconCustomerSupport size="large" />
+                <IconHistory size="large" />
               </div>
               <h4 style={{ marginLeft: '12px' }}>直播历史</h4>
             </>
