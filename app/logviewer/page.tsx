@@ -5,7 +5,8 @@ import { Layout, Nav, Spin, Typography, Select, Card, Button, Toast, Tabs, TabPa
 import {
   IconCustomerSupport,
   IconRefresh,
-  IconClear
+  IconClear,
+  IconSave,
 } from '@douyinfe/semi-icons'
 
 // 日志内容组件
@@ -121,7 +122,16 @@ export default function LogViewer() {
 
     ws.onerror = (error) => {
       console.error('WebSocket错误:', error)
-      Toast.error('连接错误，请重试')
+
+      // 检查是否是连接建立前WebSocket已关闭的错误
+      // 这种情况通常发生在组件卸载或用户切换标签时
+      if (ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+        console.log('WebSocket在连接建立前已关闭')
+      } else {
+        // 其他错误仍然显示Toast提示
+        Toast.error('连接错误，请重试')
+      }
+
       setIsLoading(false)
     }
 
@@ -203,10 +213,18 @@ export default function LogViewer() {
             tabBarExtraContent={
               <div style={{ display: 'flex', gap: 8, alignItems: 'center'}}>
                 <Button
-                  icon={<IconRefresh />}
-                  onClick={handleRefresh}
+                  icon={<IconSave />}
+                  onClick={() => (window.location.href = `/static/${activeTab}.log`)}
                   type="primary"
                   theme="solid"
+                  size="small"
+                >
+                  下载
+                </Button>
+                <Button
+                  icon={<IconRefresh />}
+                  onClick={handleRefresh}
+                  theme="light"
                   size="small"
                 >
                   刷新
