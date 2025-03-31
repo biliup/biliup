@@ -67,6 +67,7 @@ class DownloadBase(ABC):
         }
         self.segment_time = config.get('segment_time', '01:00:00')
         self.time_range = config.get('time_range')
+        self.excluded_keywords = config.get('excluded_keywords')
         self.file_size = config.get('file_size')
 
         # 是否是下载模式 跳过下播检测
@@ -89,6 +90,12 @@ class DownloadBase(ABC):
         raise NotImplementedError()
 
     def should_record(self):
+        # 检查房间名
+        keywords = config['streamers'].get(self.fname, {}).get('excluded_keywords')
+        if self.room_title and keywords:
+            if any(k.strip() in self.room_title for k in keywords):
+                return False
+
         # 检查时间范围
         if not check_timerange(self.fname):
             return False
@@ -209,7 +216,8 @@ class DownloadBase(ABC):
                 '-c',
                 'copy',
             ]
-            if use_streamlink:
+            # https://github.com/biliup/biliup/issues/991
+            if use_streamlink and not self.raw_stream_url.startswith('http://localhost:'):
                 streamlink_cmd = [
                     'streamlink',
                     '--stream-segment-threads', '3',
@@ -541,7 +549,7 @@ def sync_download(stream_url, headers, segment_duration=60, max_file_size=100, o
     def upload(video_queue, stream_info, stop_event: threading.Event):
         with SessionLocal() as db:
             data = get_stream_info(db, f"{stream_info['name']}")
-        data, _ = fmt_title_and_desc({**data, "name": stream_info['name']})
+        data, _ = fmt_title_and_desc({**data, "name": stream_info['name'], "title": stream_info['title']})
         stream_info.update(data)
         logger.info(f"stream_info: {stream_info}")
         # 获取 BiliWebAsync.__init__ 的参数名

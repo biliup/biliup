@@ -112,8 +112,7 @@ class Twitch(DownloadBase, BatchCheck):
         if is_check:
             return True
 
-        # https://github.com/biliup/biliup/issues/991
-        if self.downloader == 'ffmpeg':
+        if self.downloader in ['streamlink', 'ffmpeg']:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.bind(('localhost', 0))
                 port = s.getsockname()[1]
@@ -125,7 +124,6 @@ class Twitch(DownloadBase, BatchCheck):
                 "--player-external-http-interface", "localhost",
                 # "--twitch-disable-ads",                     # 去广告，去掉、跳过嵌入的广告流
                 # "--twitch-disable-hosting",               # 该参数从5.0起已被禁用
-                "--twitch-disable-reruns",  # 如果该频道正在重放回放，不打开流
                 self.url, "best"  # 流链接
             ]
             if self.twitch_disable_ads:  # 去广告，去掉、跳过嵌入的广告流

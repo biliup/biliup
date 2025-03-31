@@ -87,6 +87,10 @@ check_sourcecode: 15
 #------哔哩哔哩------#
 ### 录制BILIBILI弹幕，下载器为ffmpeg,streamlink时效果最优，默认关闭
 # bilibili_danmaku: false
+### 录制的弹幕信息中包含发送者昵称、用户UID，同时保存醒目留言、上舰、礼物信息。仅 bilibili_danmaku 开启时生效，默认关闭（实验性质：可能与弹幕转ass工具不兼容）
+# bilibili_danmaku_detail: false
+### 录制B站服务器返回的原始弹幕信息，方便有技术能力的用户对主播弹幕数据进行统计。仅 bilibili_danmaku 开启时生效，默认关闭，开启后弹幕文件会每隔5分钟写入一次（实验性质：可能导致弹幕文件巨大）
+# bilibili_danmaku_raw: false
 ### 哔哩哔哩直播流协议.可选 stream（flv流）,hls_ts(ts流）与hls_fmp4（fmp4流），默认为stream
 ### 仅国内IP可以解析到fmp4流。海外IP只能获取到flv流（ov05与ov07）和ts流（ov105）
 ### 由于fmp4出现需要一定时间，或者某些小主播（大部分只有原画选项的主播）无fmp4流。
@@ -220,6 +224,7 @@ streamers:
             - biliup
             - 视频标签
         #time_range: "[\"2025-03-26T16:00:00.000Z\",\"2025-03-27T15:59:59.000Z\"]" ### 录制时间范围 ISO 8601 格式的时间数组字符串
+        #excluded_keywords: ### 如果房间名包含关键词，则停止或不录制该场直播，每个关键词需单独一行
         #preprocessor: ### 开始下载直播时触发，将按自定义顺序执行自定义操作 注：preprocessor仅支持shell指令
             #- run: sh ./run.sh, ### 执行任意命令，等同于在shell中运行,preprocessor输出的数据为JSON格式，包含主播名字(name)、开播地址(url)和开播时间(start_time)(时间戳)
         ### 分段时触发 返回当前生成的文件
