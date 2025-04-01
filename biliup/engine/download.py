@@ -66,6 +66,7 @@ class DownloadBase(ABC):
         }
         self.segment_time = config.get('segment_time', '01:00:00')
         self.time_range = config.get('time_range')
+        self.excluded_keywords = config.get('excluded_keywords')
         self.file_size = config.get('file_size')
 
         # 是否是下载模式 跳过下播检测
@@ -87,9 +88,18 @@ class DownloadBase(ABC):
         # is_check 是否是检测模式 检测模式可以忽略只有下载时需要的耗时操作
         raise NotImplementedError()
 
-    def pre_check(self):
-        if check_timerange(self.fname):
-            return True
+    def should_record(self):
+        # 检查房间名
+        keywords = config['streamers'].get(self.fname, {}).get('excluded_keywords')
+        if self.room_title and keywords:
+            if any(k.strip() in self.room_title for k in keywords):
+                return False
+
+        # 检查时间范围
+        if not check_timerange(self.fname):
+            return False
+
+        return True
 
     def download(self):
         logger.info(f"{self.plugin_msg}: Start downloading {self.raw_stream_url}")
@@ -205,7 +215,8 @@ class DownloadBase(ABC):
                 '-c',
                 'copy',
             ]
-            if use_streamlink:
+            # https://github.com/biliup/biliup/issues/991
+            if use_streamlink and not self.raw_stream_url.startswith('http://localhost:'):
                 streamlink_cmd = [
                     'streamlink',
                     '--stream-segment-threads', '3',
@@ -313,7 +324,7 @@ class DownloadBase(ABC):
 
     def run(self):
         try:
-            if not asyncio.run_coroutine_threadsafe(self.acheck_stream(), loop).result() or not self.pre_check():
+            if not asyncio.run_coroutine_threadsafe(self.acheck_stream(), loop).result() or not self.should_record():
                 return False
             with SessionLocal() as db:
                 update_room_title(db, self.database_row_id, self.room_title)

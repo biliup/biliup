@@ -107,6 +107,7 @@ class Douyin(DownloadBase):
                 logger.debug(f"{self.plugin_msg}: 未开播")
                 return False
             self.__room_id = room_info['id_str']
+            self.room_title = room_info['title']
         except:
             logger.exception(f"{self.plugin_msg}: 获取直播间信息失败")
             return False
@@ -158,7 +159,6 @@ class Douyin(DownloadBase):
 
             protocol = 'hls' if self.douyin_protocol == 'hls' else 'flv'
             self.raw_stream_url = stream_data[quality]['main'][protocol].replace('http://', 'https://')
-            self.room_title = room_info['title']
         except:
             logger.exception(f"{self.plugin_msg}: 寻找清晰度失败")
             return False

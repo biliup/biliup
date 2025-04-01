@@ -101,6 +101,11 @@ class Bilibili:
                     packet_data = packet_data[packet_len:]
             return dm_list
 
+        def bytes_serializer(obj):
+            if isinstance(obj, bytes):
+                return obj.decode('utf-8')
+            raise TypeError("Type not serializable")
+
         dm_list = decode_packet(data)
         for dm in dm_list:
             try:
@@ -170,6 +175,10 @@ class Bilibili:
                         msg['content'] = j
                 else:
                     msg = {'name': '', 'content': dm.get('body'), 'msg_type': 'other'}
+                try:
+                    msg['raw_data'] = json.dumps(dm, default=bytes_serializer, ensure_ascii=False)
+                except:
+                    msg['raw_data'] = ""
                 msgs.append(msg)
             except Exception as Error:
                 logger.warning(f"{Bilibili.__name__}: 弹幕接收异常 - {Error}")
