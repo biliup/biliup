@@ -83,7 +83,14 @@ def fmt_title_and_desc_m(data):
 def fmt_title_and_desc(data):
     """
     格式化标题和简介
-    :param data: {name,url,date}
+    :param data: {name,url,{
+        title,
+        row_id,
+        name,
+        live_cover_path,
+        url,
+        date: time.struct_time()
+    }}
     :return: {name,url,date,format_title}
     """
     index = data['name']

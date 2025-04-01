@@ -151,6 +151,7 @@ def check_similar_remark(json_data):
             return fname
     return None
 
+
 @routes.get('/v1/get_qrcode')
 async def qrcode_get(request):
     try:
@@ -263,8 +264,7 @@ async def add_lives(request):
     json_data = await request.json()
     similar_remark = check_similar_remark(json_data)
     if similar_remark:
-        return web.HTTPBadRequest(text=
-                                  f"{json_data['remark']} 与现存备注 {similar_remark} 存在部分重复，禁止添加")
+        return web.HTTPBadRequest(text=f"{json_data['remark']} 与现存备注 {similar_remark} 存在部分重复，禁止添加")
     uid = json_data.get('upload_id')
     with SessionLocal() as db:
         if uid:
@@ -298,8 +298,7 @@ async def lives(request):
         if json_data['remark'] != old.remark:
             similar_remark = check_similar_remark(json_data)
             if similar_remark:
-                return web.HTTPBadRequest(text=
-                                          f"{json_data['remark']} 与现存备注 {similar_remark} 存在部分重复，禁止修改")
+                return web.HTTPBadRequest(text=f"{json_data['remark']} 与现存备注 {similar_remark} 存在部分重复，禁止修改")
         uid = json_data.get('upload_id')
         # semi-ui 不能直接为 ArrayField 设置空默认值
         # 当前端更新后，应移除这里的数据修改
@@ -386,7 +385,7 @@ async def streamers_post(request):
 async def streamers_put(request):
     json_data = await request.json()
     with SessionLocal() as db:
-    # UploadStreamers.update(**json_data)
+        # UploadStreamers.update(**json_data)
         db.execute(update(UploadStreamers), [json_data])
         db.commit()
         config.load_from_db(db)
@@ -453,7 +452,6 @@ async def users(request):
         return web.json_response({})
     except MultipleResultsFound as e:
         return web.json_response({"status": 500, 'error': f"有多个空间配置同时存在: {e}"}, status=500)
-
 
 
 @routes.put('/v1/configuration')
@@ -569,6 +567,126 @@ async def proxy(request):
                 return web.Response(body=content, status=response.status)
         except Exception as e:
             return web.HTTPBadRequest(reason=str(e))
+
+
+def read_last_n_lines(file_path, n=50):
+    """高效读取文件最后n行，避免一次性读取整个文件"""
+    with open(file_path, 'rb') as f:
+        # 设置初始偏移量和缓冲区大小
+        file_size = f.seek(0, os.SEEK_END)
+        block_size = 1024
+        data = b''
+        lines = []
+
+        while file_size > 0 and len(lines) <= n:
+            # 计算要读取的字节数
+            read_size = min(block_size, file_size)
+            f.seek(file_size - read_size)
+            buffer = f.read(read_size)
+            data = buffer + data
+            file_size -= read_size
+            lines = data.splitlines()
+
+        # 只保留最后 n 行，并解码为字符串列表
+        return [line.decode('utf-8', errors='replace') for line in lines[-n:]]
+
+
+@routes.get('/v1/ws/logs')
+async def websocket_logs(request):
+    ws = web.WebSocketResponse()
+    try:
+        await ws.prepare(request)
+    except ConnectionResetError as e:
+        logger.warning(e)
+        return ws
+
+    # 获取请求参数，默认为 ds_update.log
+    file_param = request.query.get('file', 'ds_update.log')
+
+    # 安全检查：限制只能查看特定的日志文件
+    allowed_files = ['ds_update.log', 'download.log', 'upload.log']
+    if file_param not in allowed_files:
+        await ws.send_str(f"不允许访问请求的文件: {file_param}")
+        await ws.close()
+        return ws
+
+    log_file = file_param
+
+    # 发送初始内容（最后50行）
+    try:
+        # 使用高效方法读取最后50行
+        last_lines = read_last_n_lines(log_file, 50)
+        for line in last_lines:
+            await ws.send_str(line)
+        file_size = os.path.getsize(log_file)
+    except FileNotFoundError:
+        await ws.send_str(f"日志文件 {log_file} 不存在")
+        await ws.close()
+        return ws
+    except Exception as e:
+        await ws.send_str(f"读取日志文件错误: {str(e)}")
+        logger.exception(f"读取日志文件错误: {str(e)}")
+        await ws.close()
+        return ws
+
+    # 监控文件变化并发送新内容
+    try:
+        while True:
+            try:
+                # 使用带超时的接收消息，可以检测客户端是否发送关闭请求
+                msg = await asyncio.wait_for(ws.receive(), timeout=0.5)
+
+                # 如果客户端发送关闭请求，正常响应并退出循环
+                if msg.type == web.WSMsgType.CLOSE:
+                    await ws.close()
+                    break
+                elif msg.type == web.WSMsgType.ERROR:
+                    logger.error(f"WebSocket连接错误: {ws.exception()}")
+                    break
+            except asyncio.TimeoutError:
+                # 超时只是表示客户端没有发送消息，不是错误
+                pass
+
+            # 检查连接是否关闭
+            if ws.closed:
+                logger.debug("WebSocket连接已关闭")
+                break
+
+            # 检查文件是否存在
+            if not os.path.exists(log_file):
+                await ws.send_str(f"日志文件 {log_file} 不再存在")
+                break
+
+            current_size = os.path.getsize(log_file)
+
+            # 如果文件被截断，重新读取前50行
+            if current_size < file_size:
+                await ws.send_str("日志文件被截断，重新加载...")
+                last_lines = read_last_n_lines(log_file, 50)
+                for line in last_lines:
+                    await ws.send_str(line)
+                file_size = current_size
+                continue
+
+            # 如果文件增长，读取新内容
+            if current_size > file_size:
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    f.seek(file_size)
+                    new_content = f.read()
+                    for line in new_content.splitlines():
+                        await ws.send_str(line)
+                file_size = current_size
+    except Exception as e:
+        if not ws.closed:
+            await ws.send_str(f"监控日志文件错误: {str(e)}")
+            logger.exception(f"websocket_logs错误: {str(e)}")
+    finally:
+        # 确保在所有情况下连接都被正确关闭
+        if not ws.closed:
+            await ws.close()
+        logger.debug(f"WebSocket日志会话结束: {file_param}")
+
+    return ws
 
 
 def find_all_folders(directory):
