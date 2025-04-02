@@ -197,14 +197,17 @@ class SyncDownloader:
                 # print("[run] 输入源是 HLS 地址，将使用 streamlink + ffmpeg 进行录制。")
                 logger.info("[run] 输入源是 HLS 地址，将使用 streamlink + ffmpeg 进行录制。")
                 streamlink_cmd = [
-                    "streamlink",
-                    "--stream-segment-threads", "3",
-                    "--hls-playlist-reload-attempts", "1",
-                    "--http-header", ';'.join([f'{key}={value}' for key, value in self.headers.items()]),
+                    'streamlink',
+                    '--stream-segment-threads', '3',
+                    '--hls-playlist-reload-attempts', '1'
+                ]
+                for key, value in self.fake_headers.items():
+                    streamlink_cmd.extend(['--http-header', f'{key}={value}'])
+                streamlink_cmd.extend([
                     self.stream_url,
                     self.quality,
-                    "-O"  # 输出到 stdout
-                ]
+                    '-O'
+                ])
                 # output_filename = "-"
                 ffmpeg_cmd = self.build_ffmpeg_cmd("pipe:0", output_filename, None, self.segment_duration)
                 if not self.run_streamlink_with_ffmpeg(streamlink_cmd, ffmpeg_cmd, output_filename):
