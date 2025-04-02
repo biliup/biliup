@@ -78,6 +78,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
       remark: values?.remark?.trim(),
       url: values?.url?.trim(),
       format: values?.format?.trim(),
+      time_range: JSON.stringify(values?.time_range?.map((date: Date) => date.toISOString())),
     }
     await onOk(values)
     setVisible(false)
@@ -103,6 +104,15 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
       label: template.template_name,
     }
   })
+
+  try {
+    if (entity && entity.time_range && typeof entity.time_range === "string") {
+      const tr: string[] = JSON.parse(entity.time_range)
+      entity.time_range = tr.map(t => new Date(t))
+    }
+  } catch (e) {
+    console.error(e)
+  }
 
   return (
     <>
@@ -205,18 +215,29 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
             style={{ width: 176 }}
             helpText="视频保存格式。不支持stream-gears下载器和Youtube平台。"
           />
-
+          
           <Collapse keepDOM>
             <Collapse.Panel header="更多设置" itemKey="processors">
-              <Form.Input
+              <Form.TimePicker
                 field="time_range"
+                type="timeRange"
+                placeholder=" "
                 extraText={
                   <div style={{ fontSize: '14px' }}>
-                    格式：&apos;01:00:00-02:00:00&apos;（时:分:秒-时:分:秒）
+                    如果设置了录制时间范围，不在时间范围内，将不进行录制<br/>
+                    下载器需使用ffmpeg或streamlink
                   </div>
                 }
-                label="录制时间范围"
-                placeholder="01:00:00-02:00:00"
+                label={{ 
+                    text: '录制时间范围', 
+                    optional: true, 
+                    style: { 
+                        fontSize: '18px',
+                        marginBottom: '4px',
+                        paddingBottom: '8px',
+                        borderBottom: '1px solid var(--semi-color-border)',
+                    } 
+                }}
                 style={{ width: 176 }}
               />
               

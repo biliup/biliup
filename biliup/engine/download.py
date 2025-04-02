@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import json
 import logging
 import os
 import queue
@@ -11,7 +12,7 @@ import shutil
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator, List, Callable, Optional
 from urllib.parse import urlparse
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 
 import requests
 from requests.utils import DEFAULT_ACCEPT_ENCODING
@@ -599,41 +600,40 @@ def get_valid_filename(name):
     return s
 
 
-def get_duration(segment_time_str, time_range):
+def get_duration(segment_time_str, time_range_str):
     """
     计算当前时间到给定结束时间的时差
     如果计算的时差大于segment_time，则返回segment_time。
     """
-    if not time_range or '-' not in time_range:
-        return segment_time_str
-    end_time_str = time_range.split('-')[1]
-
-    now = datetime.now()
-    end_time_today_str = now.strftime("%Y-%m-%d") + " " + end_time_str
-    end_time_today = datetime.strptime(end_time_today_str, "%Y-%m-%d %H:%M:%S")
-    # 判断结束时间是否是第二天的时间
-    if now > end_time_today:
-        end_time_today += timedelta(days=1)
-
-    time_diff = end_time_today - now
-    if segment_time_str:
-        segment_time_parts = list(map(int, segment_time_str.split(":")))
-        segment_time = timedelta(hours=segment_time_parts[0],
-                                 minutes=segment_time_parts[1], seconds=segment_time_parts[2])
-
-        if time_diff > segment_time:
+    try:
+        time_range = json.loads(time_range_str)
+        if not isinstance(time_range, (list, tuple)) or len(time_range) != 2:
             return segment_time_str
+        end_time = datetime.fromisoformat(time_range[1].replace('Z', '+00:00')).time()
+    except Exception as e:
+        return segment_time_str
 
-    # 增加10s，防止time_diff过小多次执行下载
-    if time_diff.total_seconds() <= 60:
-        time_diff = time_diff + timedelta(seconds=10)
+    now = datetime.now(timezone.utc).time()
+    now_sec = now.hour * 3600 + now.minute * 60 + now.second
+    end_sec = end_time.hour * 3600 + end_time.minute * 60 + end_time.second
 
-    hours, remainder = divmod(time_diff.total_seconds(), 3600)
-    minutes, seconds = divmod(remainder, 60)
+    # 计算到结束时间的秒数
+    diff = end_sec - now_sec if end_sec >= now_sec else (24 * 3600 - now_sec + end_sec)
 
-    to_parameter = f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}"
+    try:
+        h, m, s = map(int, segment_time_str.split(':'))
+        segment_sec = h * 3600 + m * 60 + s
+    except Exception:
+        return segment_time_str
 
-    return to_parameter
+    if diff > segment_sec:
+        return segment_time_str
+
+    hours = diff // 3600
+    minutes = (diff % 3600) // 60
+    seconds = diff % 60
+
+    return f"{hours:02}:{minutes:02}:{seconds:02}"
 
 
 class BatchCheck(ABC):

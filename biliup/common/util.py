@@ -1,7 +1,8 @@
 import asyncio
+import json
 
 import httpx
-from datetime import datetime, time, timezone, timedelta
+from datetime import datetime, timezone
 from biliup.config import config
 import logging
 
@@ -32,26 +33,25 @@ logger = logging.getLogger('biliup')
 
 
 def check_timerange(name):
-    time_range = config['streamers'].get(name, {}).get('time_range')
-    now = datetime.now(tz=timezone(timedelta(hours=8))).time()
-    logger.debug(f"{name}: 校验时间范围 {time_range} 当前时间 {now.strftime('%H:%M:%S')}")
-
-    if not time_range or '-' not in time_range:
-        return True
-
     try:
-        start_time, end_time = map(time_string_to_time, time_range.split('-'))
-    except (ValueError, IndexError) as e:
-        logger.exception(f"Invalid time range format: {e}")
+        time_range_str = config['streamers'].get(name, {}).get('time_range')
+        if not time_range_str:
+            return True
+        time_range = json.loads(time_range_str)
+        if not isinstance(time_range, (list, tuple)) or len(time_range) != 2:
+            return True
+
+        start = datetime.fromisoformat(time_range[0].replace('Z', '+00:00')).time()
+        end   = datetime.fromisoformat(time_range[1].replace('Z', '+00:00')).time()
+    except Exception as e:
+        logger.error(f'parsing time range {e}')
         return True
 
-    if start_time > end_time:
-        is_in_range = now >= start_time or now <= end_time
-    else:
-        is_in_range = start_time <= now <= end_time
-    return is_in_range
+    now = datetime.now(timezone.utc).time()
 
+    # Normal interval (e.g. 16:00 → 20:00)
+    if start <= end:
+        return start <= now <= end
 
-def time_string_to_time(time_string):
-    h, m, s = map(int, time_string.split(':'))
-    return time(h, m, s)
+    # Cross‑midnight (e.g. 23:00 → 04:00)
+    return now >= start or now <= end
