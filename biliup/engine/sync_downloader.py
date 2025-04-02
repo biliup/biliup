@@ -85,9 +85,9 @@ class SyncDownloader:
                     self.video_queue.put(data)
             ffmpeg_proc.wait()
             # 输出 ffmpeg 的错误信息（如果有的话）
-            err = ffmpeg_proc.stderr.read()
-            if err:
-                logger.error("[run] ffmpeg err " + err.decode("utf-8", errors="replace"))
+            # err = ffmpeg_proc.stderr.read()
+            # if err:
+            #     logger.error("[run] ffmpeg err " + err.decode("utf-8", errors="replace"))
         return True  # 如果正常执行，返回 True
 
     def run_streamlink_with_ffmpeg(self, streamlink_cmd, ffmpeg_cmd, output_filename):
@@ -124,13 +124,13 @@ class SyncDownloader:
                 ffmpeg_proc.wait()
                 logger.info("[run] ffmpeg 已到达输出大小并退出。结束本段写入。")
                 # 打印 ffmpeg 子进程的错误输出
-                ffmpeg_err = ffmpeg_proc.stderr.read()
-                if ffmpeg_err:
-                    logger.error("[run] ffmpeg err " + ffmpeg_err.decode("utf-8", errors="replace"))
+                # ffmpeg_err = ffmpeg_proc.stderr.read()
+                # if ffmpeg_err:
+                # logger.error("[run] ffmpeg err " + ffmpeg_err.decode("utf-8", errors="replace"))
             # 打印 streamlink 子进程的错误输出
-            streamlink_err = streamlink_proc.stderr.read()
-            if streamlink_err:
-                logger.error("[run] streamlink err " + streamlink_err.decode("utf-8", errors="replace"))
+            # streamlink_err = streamlink_proc.stderr.read()
+            # if streamlink_err:
+            #     logger.error("[run] streamlink err " + streamlink_err.decode("utf-8", errors="replace"))
         return True  # 如果一切正常，返回 True
 
     def build_ffmpeg_cmd(self, input_source, output_filename, headers, segment_duration):
@@ -141,13 +141,17 @@ class SyncDownloader:
         ]
         if headers:
             cmd += ["-headers", ''.join(f'{key}: {value}\r\n' for key, value in headers.items())]
-        for i in ["-i", input_source,  # 输入源
-                  # "-t", str(segment_duration),
-                  "-fs", f"{self.max_file_size}M",
-                  "-c:v", "copy",
-                  "-c:a", "copy",
-                  "-movflags", "+frag_keyframe+empty_moov",
-                  "-f", "matroska"]:
+        for i in [
+            "-fflags", "+genpts",
+            "-i", input_source,  # 输入源
+            # "-t", str(segment_duration),
+            "-fs", f"{self.max_file_size}M",
+            "-c:v", "copy",
+            "-c:a", "copy",
+            "-reset_timestamps", "1",
+            "-avoid_negative_ts", "1",
+            "-movflags", "+frag_keyframe+empty_moov",
+                "-f", "matroska"]:
             cmd.append(i)
         cmd.append("-")
 
@@ -193,14 +197,17 @@ class SyncDownloader:
                 # print("[run] 输入源是 HLS 地址，将使用 streamlink + ffmpeg 进行录制。")
                 logger.info("[run] 输入源是 HLS 地址，将使用 streamlink + ffmpeg 进行录制。")
                 streamlink_cmd = [
-                    "streamlink",
-                    "--stream-segment-threads", "3",
-                    "--hls-playlist-reload-attempts", "1",
-                    "--http-header", ';'.join([f'{key}={value}' for key, value in self.headers.items()]),
+                    'streamlink',
+                    '--stream-segment-threads', '3',
+                    '--hls-playlist-reload-attempts', '1'
+                ]
+                for key, value in self.fake_headers.items():
+                    streamlink_cmd.extend(['--http-header', f'{key}={value}'])
+                streamlink_cmd.extend([
                     self.stream_url,
                     self.quality,
-                    "-O"  # 输出到 stdout
-                ]
+                    '-O'
+                ])
                 # output_filename = "-"
                 ffmpeg_cmd = self.build_ffmpeg_cmd("pipe:0", output_filename, None, self.segment_duration)
                 if not self.run_streamlink_with_ffmpeg(streamlink_cmd, ffmpeg_cmd, output_filename):
