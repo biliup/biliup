@@ -85,9 +85,9 @@ class SyncDownloader:
                     self.video_queue.put(data)
             ffmpeg_proc.wait()
             # 输出 ffmpeg 的错误信息（如果有的话）
-            err = ffmpeg_proc.stderr.read()
-            if err:
-                logger.error("[run] ffmpeg err " + err.decode("utf-8", errors="replace"))
+            # err = ffmpeg_proc.stderr.read()
+            # if err:
+            #     logger.error("[run] ffmpeg err " + err.decode("utf-8", errors="replace"))
         return True  # 如果正常执行，返回 True
 
     def run_streamlink_with_ffmpeg(self, streamlink_cmd, ffmpeg_cmd, output_filename):
@@ -124,13 +124,13 @@ class SyncDownloader:
                 ffmpeg_proc.wait()
                 logger.info("[run] ffmpeg 已到达输出大小并退出。结束本段写入。")
                 # 打印 ffmpeg 子进程的错误输出
-                ffmpeg_err = ffmpeg_proc.stderr.read()
-                if ffmpeg_err:
-                    logger.error("[run] ffmpeg err " + ffmpeg_err.decode("utf-8", errors="replace"))
+                # ffmpeg_err = ffmpeg_proc.stderr.read()
+                # if ffmpeg_err:
+                # logger.error("[run] ffmpeg err " + ffmpeg_err.decode("utf-8", errors="replace"))
             # 打印 streamlink 子进程的错误输出
-            streamlink_err = streamlink_proc.stderr.read()
-            if streamlink_err:
-                logger.error("[run] streamlink err " + streamlink_err.decode("utf-8", errors="replace"))
+            # streamlink_err = streamlink_proc.stderr.read()
+            # if streamlink_err:
+            #     logger.error("[run] streamlink err " + streamlink_err.decode("utf-8", errors="replace"))
         return True  # 如果一切正常，返回 True
 
     def build_ffmpeg_cmd(self, input_source, output_filename, headers, segment_duration):
