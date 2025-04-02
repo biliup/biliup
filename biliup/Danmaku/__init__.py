@@ -201,7 +201,17 @@ class DanmakuClient(IDanmakuClient):
                         self.__record_task.cancel()
                         return
                     else: # 正常弹幕
-                        # print(m)
+                        # 完整弹幕记录
+                        if self.__content.get("raw", False):
+                            try:
+                                o = etree.SubElement(root, 'o')
+                                o.set('timestamp', str(int(msg_time)))
+                                o.text = m.get("raw_data")
+                            except:
+                                logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常", exc_info=True)
+                                continue
+                        
+                        # 正常弹幕记录
                         if msg_type == 'danmaku': # 文字弹幕
                             try:
                                 if m.get('color'):
@@ -255,15 +265,8 @@ class DanmakuClient(IDanmakuClient):
                                 # 异常后略过本次弹幕
                                 continue
                         else:
-                            # 完整弹幕记录
+                            # 如果未开启了原始弹幕，则跳过本次循环
                             if not self.__content.get("raw", False):
-                                continue
-                            try:
-                                o = etree.SubElement(root, 'o')
-                                o.set('timestamp', str(int(msg_time)))
-                                o.text = m.get("raw_data")
-                            except:
-                                logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常", exc_info=True)
                                 continue
                         msg_i += 1
 
