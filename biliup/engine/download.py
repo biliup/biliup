@@ -221,13 +221,15 @@ class DownloadBase(ABC):
                 streamlink_cmd = [
                     'streamlink',
                     '--stream-segment-threads', '3',
-                    '--hls-playlist-reload-attempts', '1',
-                    '--http-header',
-                    ';'.join([f'{key}={value}' for key, value in self.fake_headers.items()]),
+                    '--hls-playlist-reload-attempts', '1'
+                ]
+                for key, value in self.fake_headers.items():
+                    streamlink_cmd.extend(['--http-header', f'{key}={value}'])
+                streamlink_cmd.extend([
                     self.raw_stream_url,
                     'best',
                     '-O'
-                ]
+                ])
                 streamlink_proc = subprocess.Popen(streamlink_cmd, stdout=subprocess.PIPE)
                 input_uri = 'pipe:0'
             else:
