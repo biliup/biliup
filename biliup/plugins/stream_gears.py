@@ -76,25 +76,25 @@ class BiliWeb(UploadBase):
         if self.dtime:
             dtime = int(time.time() + self.dtime)
         stream_gears.upload(
-            file_list,
-            self.user_cookie,
-            self.data["format_title"][:80],
-            self.tid,
-            tag,
-            self.copyright,
-            source,
-            self.desc,
-            self.dynamic,
-            cover,
-            self.dolby,
-            self.hires,
-            self.no_reprint,
-            self.open_elec,
-            self.threads,
-            desc_v2,
-            dtime,
-            line,
-            self.extra_fields
+            video_path=file_list,
+            cookie_file=self.user_cookie,
+            title=self.data["format_title"][:80],
+            tid=self.tid,
+            tag=tag,
+            copyright=self.copyright,
+            source=source,
+            desc=self.desc,
+            dynamic=self.dynamic,
+            cover=cover,
+            dolby=self.dolby,
+            lossless_music=self.hires,
+            no_reprint=self.no_reprint,
+            open_elec=self.open_elec,
+            limit=self.threads,
+            desc_v2=desc_v2,
+            dtime=dtime,
+            line=line,
+            extra_fields=self.extra_fields
         )
         logger.info(f"上传成功: {self.principal}")
         return file_list
