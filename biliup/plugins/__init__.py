@@ -85,3 +85,5 @@ class Wbi:
 
         query[self.W_RID] = sign
         query[self.WTS] = ts_str
+
+wbi = Wbi()

@@ -5,7 +5,7 @@ import asyncio
 
 from biliup.common.util import client
 from biliup.config import config
-from . import match1, logger, Wbi
+from . import match1, logger, wbi
 from biliup.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
@@ -40,7 +40,6 @@ class Bililive(DownloadBase):
         self.bili_normalize_cn204 = config.get('bili_normalize_cn204', False)
         self.cn01_sids = config.get('bili_replace_cn01', [])
         self.bili_cdn_fallback = config.get('bili_cdn_fallback', False)
-        self.wbi = Wbi()
         self.wbi_last_update = 0
         self.wbi_update_interval = 2 * 60 * 60
 
@@ -81,7 +80,7 @@ class Bililive(DownloadBase):
             params = {
                 "room_id": room_id,
             }
-            self.wbi.sign(params)
+            wbi.sign(params)
             room_info = await client.get(
                 f"{OFFICIAL_API}/xlive/web-room/v1/index/getInfoByRoom",
                 params=params,
@@ -322,7 +321,7 @@ class Bililive(DownloadBase):
             if now - self.wbi_last_update <= self.wbi_update_interval:
                 return
             self.wbi_last_update = now
-            self.wbi.update_key(img_key, sub_key)
+            wbi.update_key(img_key, sub_key)
 
     async def check_login_status(self) -> int:
         """
