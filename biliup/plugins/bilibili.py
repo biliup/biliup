@@ -350,7 +350,12 @@ class Bililive(DownloadBase):
             if wbi_key:
                 img_key = _extract_key(wbi_key.get('img_url'))
                 sub_key = _extract_key(wbi_key.get('sub_url'))
-                await self.update_wbi(img_key, sub_key)
+                if img_key and sub_key:
+                    await self.update_wbi(img_key, sub_key)
+                else:
+                    logger.warning(f"{self.plugin_msg}: img_key: {img_key}, sub_key: {sub_key}")
+            else:
+                logger.warning(f"{self.plugin_msg}: Error to refresh wbi")
             if data.get('isLogin'):
                 logger.info(f"用户名：{data['uname']}, mid: {data['mid']}")
                 return data['mid']
