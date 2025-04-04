@@ -348,8 +348,8 @@ class Bililive(DownloadBase):
             data = json.loads(_res.text).get('data', {})
             wbi_key = data.get('wbi_img')
             if wbi_key:
-                img_key = _extract_key(wbi_key.get('img_url'))
-                sub_key = _extract_key(wbi_key.get('sub_url'))
+                img_key = _extract_key(wbi_key.get('img_url', ''))
+                sub_key = _extract_key(wbi_key.get('sub_url', ''))
                 if img_key and sub_key:
                     await self.update_wbi(img_key, sub_key)
                 else:
