@@ -5,7 +5,7 @@ import asyncio
 
 from biliup.common.util import client
 from biliup.config import config
-from . import match1, logger
+from . import match1, logger, Wbi
 from biliup.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
@@ -40,6 +40,9 @@ class Bililive(DownloadBase):
         self.bili_normalize_cn204 = config.get('bili_normalize_cn204', False)
         self.cn01_sids = config.get('bili_replace_cn01', [])
         self.bili_cdn_fallback = config.get('bili_cdn_fallback', False)
+        self.wbi = Wbi()
+        self.wbi_last_update = 0
+        self.wbi_update_interval = 2 * 60 * 60
 
     async def acheck_stream(self, is_check=False):
 
@@ -71,10 +74,19 @@ class Bililive(DownloadBase):
                 logger.exception("load_cookies error")
         self.fake_headers['referer'] = self.url
 
+        self.__login_mid = await self.check_login_status()
+
         # 获取直播状态与房间标题
-        info_by_room_url = f"{OFFICIAL_API}/xlive/web-room/v1/index/getInfoByRoom?room_id={room_id}"
         try:
-            room_info = await client.get(info_by_room_url, headers=self.fake_headers)
+            params = {
+                "room_id": room_id,
+            }
+            self.wbi.sign(params)
+            room_info = await client.get(
+                f"{OFFICIAL_API}/xlive/web-room/v1/index/getInfoByRoom",
+                params=params,
+                headers=self.fake_headers)
+            room_info.raise_for_status()
             room_info = room_info.json()
         except Exception as e:
             logger.error(f"{self.plugin_msg}: {e}")
@@ -102,8 +114,6 @@ class Bililive(DownloadBase):
 
         if is_check:
             return True
-        else:
-            self.__login_mid = await self.check_login_status()
 
         # 复用原画 m3u8 流
         if  self.raw_stream_url is not None \
@@ -306,17 +316,45 @@ class Bililive(DownloadBase):
         # 空字典照常返回，重试交给上层方法处理
         return stream_urls
 
+    async def update_wbi(self, img_key, sub_key):
+        async with asyncio.Lock():
+            now = int(time.time())
+            if now - self.wbi_last_update <= self.wbi_update_interval:
+                return
+            self.wbi_last_update = now
+            self.wbi.update_key(img_key, sub_key)
+
     async def check_login_status(self) -> int:
         """
         检查B站登录状态
         :return: 当前登录用户 mid
         """
+        @staticmethod
+        def _extract_key(url):
+            """
+            从 URL 中提取 key。
+            :param url: 图片或子图的 URL。
+            :return: 提取的 key。
+            """
+            slash = url.rfind('/')
+            dot = url.find('.', slash)
+            if slash == -1 or dot == -1:
+                return None
+            return url[slash + 1:dot]
         try:
-            _res = await client.get('https://api.bilibili.com/x/web-interface/nav', headers=self.fake_headers)
-            user_data = json.loads(_res.text).get('data', {})
-            if user_data.get('isLogin'):
-                logger.info(f"用户名：{user_data['uname']}, mid：{user_data['mid']}, isLogin：{user_data['isLogin']}")
-                return user_data['mid']
+            _res = await client.get(
+                'https://api.bilibili.com/x/web-interface/nav',
+                headers=self.fake_headers
+            )
+            data = json.loads(_res.text).get('data', {})
+            wbi_key = data.get('wbi_img')
+            if wbi_key:
+                img_key = _extract_key(wbi_key.get('img_url'))
+                sub_key = _extract_key(wbi_key.get('sub_url'))
+                await self.update_wbi(img_key, sub_key)
+            if data.get('isLogin'):
+                logger.info(f"用户名：{data['uname']}, mid: {data['mid']}")
+                return data['mid']
             else:
                 logger.warning(f"{self.plugin_msg}: 未登录，或将只能录制到最低画质。")
         except Exception as e:
