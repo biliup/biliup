@@ -236,15 +236,19 @@ class Bililive(DownloadBase):
         full_url = f"{api}/xlive/web-room/v2/index/getRoomPlayInfo"
         try:
             params = {
-                'room_id': self.__real_room_id,
+                'room_id': str(self.__real_room_id),
+                # 'no_playurl': '0',
+                # 'mask': '1',
+                'qn': str(qn),
+                'platform': 'html5',  # 平台名称，web, html5, android, ios
                 'protocol': '0,1',  # 流协议，0: http_stream(flv), 1: http_hls
                 'format': '0,1,2',  # 编码格式，0: flv, 1: ts, 2: fmp4
                 'codec': '0',  # 编码器，0: avc, 1: hevc, 2: av1
-                'qn': qn,
-                'platform': 'html5',  # 平台名称，web, html5, android, ios
                 # 'ptype': '8', # P2P配置，-1: disable, 8: WebRTC, 8192: MisakaTunnel
                 'dolby': '5', # 杜比格式，5: 杜比音频
                 # 'panorama': '1', # 全景(不支持 html5)
+                # 'hdr_type': '0,1', # HDR类型(不支持 html5)，0: SDR, 1: PQ
+                # 'req_reason': '0', # 请求原因，0: Normal, 1: PlayError
                 # 'http': '1', # 优先 http 协议
                 'web_location': WBI_WEB_LOCATION,
             }
