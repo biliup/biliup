@@ -5,7 +5,7 @@ import asyncio
 
 from biliup.common.util import client
 from biliup.config import config
-from . import match1, logger
+from . import match1, logger, wbi
 from biliup.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
@@ -13,6 +13,7 @@ from ..engine.download import DownloadBase
 
 OFFICIAL_API = "https://api.live.bilibili.com"
 STREAM_NAME_REGEXP = r"/live-bvc/\d+/(live_[^/\.]+)"
+WBI_WEB_LOCATION = "444.8"
 
 @Plugin.download(regexp=r'https?://(b23\.tv|live\.bilibili\.com)')
 class Bililive(DownloadBase):
@@ -56,7 +57,7 @@ class Bililive(DownloadBase):
                 logger.error(f"{self.plugin_msg}: {e}")
                 return False
 
-        room_id = match1(self.url, r'bilibili.com/(\d+)')
+        room_id: str = match1(self.url, r'bilibili.com/(\d+)')
         if self.bili_cookie:
             self.fake_headers['cookie'] = self.bili_cookie
         if self.bili_cookie_file:
@@ -71,13 +72,24 @@ class Bililive(DownloadBase):
                 logger.exception("load_cookies error")
         self.fake_headers['referer'] = self.url
 
+        if int(time.time()) - wbi.last_update >= wbi.UPDATE_INTERVAL:
+            await self.update_wbi()
+
         # 获取直播状态与房间标题
-        info_by_room_url = f"{OFFICIAL_API}/xlive/web-room/v1/index/getInfoByRoom?room_id={room_id}"
         try:
-            room_info = await client.get(info_by_room_url, headers=self.fake_headers)
+            params = {
+                "room_id": room_id,
+                "web_location": WBI_WEB_LOCATION,
+            }
+            wbi.sign(params)
+            room_info = await client.get(
+                f"{OFFICIAL_API}/xlive/web-room/v1/index/getInfoByRoom",
+                params=params,
+                headers=self.fake_headers)
+            room_info.raise_for_status()
             room_info = room_info.json()
         except Exception as e:
-            logger.error(f"{self.plugin_msg}: {e}")
+            logger.error(f"{self.plugin_msg}: {e}", exc_info=True)
             return False
         if room_info['code'] != 0:
             logger.error(f"{self.plugin_msg}: {room_info}")
@@ -222,19 +234,25 @@ class Bililive(DownloadBase):
 
     async def get_play_info(self, api: str, qn: int = 10000) -> dict:
         full_url = f"{api}/xlive/web-room/v2/index/getRoomPlayInfo"
-        params = {
-            'room_id': self.__real_room_id,
-            'protocol': '0,1',  # 流协议，0: http_stream(flv), 1: http_hls
-            'format': '0,1,2',  # 编码格式，0: flv, 1: ts, 2: fmp4
-            'codec': '0',  # 编码器，0: avc, 1: hevc, 2: av1
-            'qn': qn,
-            'platform': 'html5',  # 平台名称，web, html5, android, ios
-            # 'ptype': '8', # P2P配置，-1: disable, 8: WebRTC, 8192: MisakaTunnel
-            'dolby': '5', # 杜比格式，5: 杜比音频
-            # 'panorama': '1', # 全景(不支持 html5)
-            # 'http': '1', # 优先 http 协议
-        }
         try:
+            params = {
+                'room_id': str(self.__real_room_id),
+                # 'no_playurl': '0',
+                # 'mask': '1',
+                'qn': str(qn),
+                'platform': 'html5',  # 平台名称，web, html5, android, ios
+                'protocol': '0,1',  # 流协议，0: http_stream(flv), 1: http_hls
+                'format': '0,1,2',  # 编码格式，0: flv, 1: ts, 2: fmp4
+                'codec': '0',  # 编码器，0: avc, 1: hevc, 2: av1
+                # 'ptype': '8', # P2P配置，-1: disable, 8: WebRTC, 8192: MisakaTunnel
+                'dolby': '5', # 杜比格式，5: 杜比音频
+                # 'panorama': '1', # 全景(不支持 html5)
+                # 'hdr_type': '0,1', # HDR类型(不支持 html5)，0: SDR, 1: PQ
+                # 'req_reason': '0', # 请求原因，0: Normal, 1: PlayError
+                # 'http': '1', # 优先 http 协议
+                'web_location': WBI_WEB_LOCATION,
+            }
+            wbi.sign(params)
             api_res = await client.get(
                 full_url, params=params, headers=self.fake_headers
             )
@@ -250,12 +268,16 @@ class Bililive(DownloadBase):
         return {}
 
     async def get_master_m3u8(self, api: str) -> dict:
-        full_url = f"{api}/live-bvc/master.m3u8"
+        full_url = f"{api}/xlive/web-room/v2/index/master_playurl"
         params = {
             "cid": self.__real_room_id,
             "mid": self.__login_mid,
             "pt": "html5", # platform
             # "p2p_type": "-1",
+            # "net": 0,
+            # "free_type": 0,
+            # "build": 0,
+            # "feature": 2 # 1:? 2:?
         }
         try:
             m3u8_res = await client.get(
@@ -306,17 +328,52 @@ class Bililive(DownloadBase):
         # 空字典照常返回，重试交给上层方法处理
         return stream_urls
 
+    async def get_user_status(self) -> dict:
+        try:
+            nav_res = await client.get(
+                'https://api.bilibili.com/x/web-interface/nav',
+                headers=self.fake_headers
+            )
+            nav_res.raise_for_status()
+            nav_res = json.loads(nav_res.text)
+            if nav_res['code'] == 0:
+                return nav_res['data']
+            logger.error(f"{self.plugin_msg}: 获取 nav 失败-{nav_res}")
+        except:
+            logger.error(f"{self.plugin_msg}: 获取 nav 失败", exc_info=True)
+        return {}
+
+    async def update_wbi(self):
+        def _extract_key(url):
+            if not url:
+                return None
+            slash = url.rfind('/')
+            dot = url.find('.', slash)
+            if slash == -1 or dot == -1:
+                return None
+            return url[slash + 1:dot]
+        data = await self.get_user_status()
+        wbi_key = data.get('wbi_img')
+        if wbi_key:
+            img_key = _extract_key(wbi_key.get('img_url'))
+            sub_key = _extract_key(wbi_key.get('sub_url'))
+            if img_key and sub_key:
+                wbi.update_key(img_key, sub_key)
+            else:
+                logger.warning(f"img_key-{img_key}, sub_key-{sub_key}")
+        else:
+            logger.warning(f"Can not get wbi key by {data}")
+
     async def check_login_status(self) -> int:
         """
         检查B站登录状态
         :return: 当前登录用户 mid
         """
         try:
-            _res = await client.get('https://api.bilibili.com/x/web-interface/nav', headers=self.fake_headers)
-            user_data = json.loads(_res.text).get('data', {})
-            if user_data.get('isLogin'):
-                logger.info(f"用户名：{user_data['uname']}, mid：{user_data['mid']}, isLogin：{user_data['isLogin']}")
-                return user_data['mid']
+            data = await self.get_user_status()
+            if data.get('isLogin'):
+                logger.info(f"用户名：{data['uname']}, mid: {data['mid']}")
+                return data['mid']
             else:
                 logger.warning(f"{self.plugin_msg}: 未登录，或将只能录制到最低画质。")
         except Exception as e:
