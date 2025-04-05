@@ -39,7 +39,6 @@ def random_user_agent(device: str = 'desktop') -> str:
 class Wbi:
     WTS = "wts"
     W_RID = "w_rid"
-    LAST_UPDATE = 0
     UPDATE_INTERVAL = 2 * 60 * 60
 
     KEY_MAP = [
@@ -51,6 +50,7 @@ class Wbi:
 
     def __init__(self):
         self.key = None
+        self.last_update = 0
 
     def update_key(self, img, sub):
         """
@@ -60,7 +60,7 @@ class Wbi:
         full = img + sub
         key = [full[self.KEY_MAP[i]] for i in range(KEY_LENGTH)]
         self.key = ''.join(key)
-        self.LAST_UPDATE = int(time.time())
+        self.last_update = int(time.time())
         logger.info(f"Updated wbi key successfully")
 
     def sign(self, query: dict, ts: int = None):

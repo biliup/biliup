@@ -72,7 +72,7 @@ class Bililive(DownloadBase):
                 logger.exception("load_cookies error")
         self.fake_headers['referer'] = self.url
 
-        if int(time.time()) - wbi.LAST_UPDATE >= wbi.UPDATE_INTERVAL:
+        if int(time.time()) - wbi.last_update >= wbi.UPDATE_INTERVAL:
             await self.update_wbi()
 
         # 获取直播状态与房间标题
