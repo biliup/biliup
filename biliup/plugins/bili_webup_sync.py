@@ -428,6 +428,11 @@ class BiliBili:
             context_data = context["sync_downloader_map"][str(self.database_row_id)].copy()
             context_data.pop('subtitle', None)
             videos = Data(**context_data)
+        else:
+            # 对于第一个分片，确保使用正确的格式化标题
+            videos.title = videos.title or self.video.title
+            # 即使第一次上传也存储到context中以便后续分片使用
+            context["sync_downloader_map"][str(self.database_row_id)] = videos.__dict__.copy()
 
         videos.append(video_part)  # 添加已经上传的视频
         edit = False if videos.aid is None else True
