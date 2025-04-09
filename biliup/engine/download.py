@@ -82,7 +82,8 @@ class DownloadBase(ABC):
         # 弹幕客户端
         self.danmaku: Optional[IDanmakuClient] = None
 
-        self.plugin_msg = f"[{self.__class__.__name__}]{self.fname} - {url}"
+        self.platform = self.__class__.__name__
+        self.plugin_msg = f"[{self.platform}]{self.fname} - {self.url}"
 
     @abstractmethod
     async def acheck_stream(self, is_check=False):
@@ -119,27 +120,26 @@ class DownloadBase(ABC):
             if not shutil.which("ffmpeg"):
                 logger.error("未安装 FFMpeg 或不存在于 PATH 内，本次下载使用 stream-gears")
                 logger.debug("Current user's PATH is:" + os.getenv("PATH"))
-
-            # 同步下载上传器
-            if self.downloader == 'sync-downloader':
-                logger.info(f"{self.plugin_msg}: 使用同步下载器")
-                stream_info = config.get('streamers', {}).get(self.fname, {})
-                stream_info.update({'name': self.fname})
-                if not self.file_size:
-                    self.file_size = 2 * 1024 * 1024 * 1024 + (2 * 1024 * 1024)
-                else:
+            else:
+                # 同步下载上传器
+                if self.downloader == 'sync-downloader':
+                    logger.info(f"{self.plugin_msg}: 使用同步下载器")
+                    stream_info = config.get('streamers', {}).get(self.fname, {})
+                    stream_info.update({'name': self.fname})
                     min_size = 10 * 1024 * 1024
+                    if not self.file_size or True:
+                        self.file_size = 2 * 1024 * 1024 * 1024
                     self.file_size = ((self.file_size + min_size - 1) // min_size) * min_size  # 向上取整
-                sync_download(self.raw_stream_url, self.fake_headers,
-                              max_file_size=int(self.file_size / 1024 / 1024),
-                              output_prefix=self.gen_download_filename(True),
-                              stream_info=stream_info,
-                              file_name_callback=lambda file_name: self.__download_segment_callback(file_name), database_row_id=self.database_row_id)
-                return True
-            # streamlink无法处理flv,所以回退到ffmpeg
-            if self.downloader == 'streamlink' and '.flv' not in parsed_url_path:
-                return self.ffmpeg_download(use_streamlink=True)
-            return self.ffmpeg_download()
+                    sync_download(self.raw_stream_url, self.fake_headers,
+                                max_file_size=int(self.file_size / 1024 / 1024),
+                                output_prefix=self.gen_download_filename(True),
+                                stream_info=stream_info,
+                                file_name_callback=lambda file_name: self.__download_segment_callback(file_name), database_row_id=self.database_row_id)
+                    return True
+                # streamlink无法处理flv,所以回退到ffmpeg
+                if self.downloader == 'streamlink' and '.flv' not in parsed_url_path:
+                    return self.ffmpeg_download(use_streamlink=True)
+                return self.ffmpeg_download()
 
         if '.flv' in parsed_url_path:
             # 假定flv流
@@ -398,6 +398,7 @@ class DownloadBase(ABC):
             'end_time': end_time if end_time else time.localtime(),
             'live_cover_path': self.live_cover_path,
             'is_download': self.is_download,
+            'platform': self.platform,
         }
         return stream_info
 
@@ -596,7 +597,7 @@ def get_valid_filename(name):
     '{self.fname}%Y-%m-%dT%H_%M_%S'
     """
     # s = str(name).strip().replace(" ", "_") #因为有些人会在主播名中间加入空格，为了避免和录播完毕自动改名冲突，所以注释掉
-    s = re.sub(r"(?u)[^-\w.%{}\[\]【】「」（）・°\s]", "", str(name))
+    s = re.sub(r"(?u)[^-\w.%{}\[\]【】「」（）・°、。\s]", "", str(name))
     if s in {"", ".", ".."}:
         raise RuntimeError("Could not derive file name from '%s'" % name)
     return s

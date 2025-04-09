@@ -336,7 +336,10 @@ class Bililive(DownloadBase):
             )
             nav_res.raise_for_status()
             nav_res = json.loads(nav_res.text)
-            if nav_res['code'] == 0:
+            if (
+                nav_res['code'] == 0 or
+                (nav_res['code'] == -101 and nav_res['message'] == '账号未登录')
+            ):
                 return nav_res['data']
             logger.error(f"{self.plugin_msg}: 获取 nav 失败-{nav_res}")
         except:
