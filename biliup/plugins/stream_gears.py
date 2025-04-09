@@ -44,22 +44,22 @@ class BiliWeb(UploadBase):
         self.copyright_source = copyright_source
 
         self.extra_fields = extra_fields
-        
+
 
     def upload(self, file_list) -> List[UploadBase.FileInfo]:
         line = None
-        if self.lines == 'kodo':
-            line = stream_gears.UploadLine.Kodo
+        if self.lines == 'bda':
+            line = stream_gears.UploadLine.Bda
         elif self.lines == 'bda2':
             line = stream_gears.UploadLine.Bda2
-        elif self.lines == 'ws':
-            line = stream_gears.UploadLine.Ws
         elif self.lines == 'qn':
             line = stream_gears.UploadLine.Qn
-        elif self.lines == 'cos':
-            line = stream_gears.UploadLine.Cos
-        elif self.lines == 'cos-internal':
-            line = stream_gears.UploadLine.CosInternal
+        elif self.lines == 'tx':
+            line = stream_gears.UploadLine.Tx
+        elif self.lines == 'txa':
+            line = stream_gears.UploadLine.Txa
+        elif self.lines == 'bldsa':
+            line = stream_gears.UploadLine.Bldsa
         tag = ','.join(self.tags)
         if self.credits:
             desc_v2 = self.creditsToDesc_v2()

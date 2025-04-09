@@ -18,9 +18,6 @@ class Douyin(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
         self.douyin_danmaku = config.get('douyin_danmaku', False)
-        self.fake_headers['User-Agent'] = DouyinUtils.DOUYIN_USER_AGENT
-        self.fake_headers['Referer'] = "https://live.douyin.com/"
-        self.fake_headers['Cookie'] = config.get('user', {}).get('douyin_cookie', '')
         self.douyin_quality = config.get('douyin_quality', 'origin')
         self.douyin_protocol = config.get('douyin_protocol', 'flv')
         self.douyin_double_screen = config.get('douyin_double_screen', False)
@@ -30,8 +27,11 @@ class Douyin(DownloadBase):
 
     async def acheck_stream(self, is_check=False):
 
-        if "ttwid" not in self.fake_headers['Cookie']:
-            self.fake_headers['Cookie'] = f'ttwid={DouyinUtils.get_ttwid()};{self.fake_headers["Cookie"]}'
+        self.fake_headers['user-agent'] = DouyinUtils.DOUYIN_USER_AGENT
+        self.fake_headers['referer'] = "https://live.douyin.com/"
+        self.fake_headers['cookie'] = config.get('user', {}).get('douyin_cookie', '')
+        if "ttwid" not in self.fake_headers['cookie']:
+            self.fake_headers['cookie'] = f'ttwid={DouyinUtils.get_ttwid()};{self.fake_headers["cookie"]}'
 
         if "v.douyin" in self.url:
             try:
@@ -210,7 +210,7 @@ class DouyinUtils:
     # DOUYIN_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36'
     DOUYIN_USER_AGENT = random_user_agent()
     DOUYIN_HTTP_HEADERS = {
-        'User-Agent': DOUYIN_USER_AGENT
+        'user-agent': DOUYIN_USER_AGENT
     }
 
     @staticmethod

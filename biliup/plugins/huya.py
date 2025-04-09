@@ -343,7 +343,7 @@ class Huya(DownloadBase):
 
     @staticmethod
     def update_user_agent(headers: dict):
-        headers['User-Agent'] = f"HYSDK(Windows, {int(time.time())})"
+        headers['user-agent'] = f"HYSDK(Windows, {int(time.time())})"
 
 
 def _raise_for_room_block(text: str):
