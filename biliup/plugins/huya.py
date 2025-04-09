@@ -55,15 +55,17 @@ class Huya(DownloadBase):
             self.raw_stream_url = None
             return False
 
+        # 兼容 biliup/biliup#1200
+        self.room_title = room_profile['room_title']
         # 虎牙回放
-        if room_profile['room_title'].startswith('【回放】'):
-            logger.debug(f"{self.plugin_msg}: {room_profile['room_title']}")
+        if self.room_title.startswith('【回放】'):
+            logger.debug(f"{self.plugin_msg}: {self.room_title}")
             return False
 
         if is_check:
             return True
 
-        self.room_title = room_profile['room_title']
+        # self.room_title = room_profile['room_title']
 
         is_xingxiu = (room_profile['gid'] == 1663)
         stream_urls = self.build_stream_urls(room_profile['streams_info'], is_xingxiu)
