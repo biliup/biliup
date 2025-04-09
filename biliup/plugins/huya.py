@@ -36,6 +36,7 @@ class Huya(DownloadBase):
         self.huya_imgplus = config.get('huya_imgplus', True)
         self.huya_cdn_fallback = config.get('huya_cdn_fallback', False)
         self.huya_mobile_api = config.get('huya_mobile_api', False)
+        self.huya_codec = config.get('huya_codec', '264')
 
     async def acheck_stream(self, is_check=False):
         try:
@@ -178,9 +179,9 @@ class Huya(DownloadBase):
             stream_name = self.get_stream_name(stream['sStreamName'])
             cdn = stream['sCdnType']
             suffix = stream[f's{proto}UrlSuffix']
-            anti_code = stream[f's{proto}AntiCode'] + "&codec=264"
+            anti_code = stream[f's{proto}AntiCode'] + f"&codec={self.huya_codec}"
             if not skip_query_build:
-                anti_code = self.__build_query(stream_name, anti_code, self.__get_uid(stream_name))
+                anti_code = self.build_query(stream_name, anti_code, self.__get_uid(stream_name))
             base_url = stream[f's{proto}Url'].replace('http://', 'https://')
             streams[cdn] = f"{base_url}/{stream_name}.{suffix}?{anti_code}"
             weights[cdn] = priority
@@ -258,8 +259,7 @@ class Huya(DownloadBase):
         return self.extract_room_profile(resp)
 
 
-    @staticmethod
-    def __build_query(stream_name, anti_code, uid: int) -> str:
+    def build_query(self, stream_name, anti_code, uid: int) -> str:
         '''
         构建anti_code
         :param stream_name: 流名称
@@ -268,7 +268,6 @@ class Huya(DownloadBase):
         :return: 构建后的anti_code
         '''
         url_query = parse_qs(anti_code)
-        # platform_id = 100
         platform_id = url_query.get('t', [100])[0]
         ws_time = url_query['wsTime'][0]
         convert_uid = (uid << 8 | uid >> (32 - 8)) & 0xFFFFFFFF
@@ -303,7 +302,7 @@ class Huya(DownloadBase):
             "u": convert_uid,
             "uuid": str(int((ct % 1e10 + random.random()) * 1e3 % 0xffffffff)),
             "sdk_sid": str(int(time.time() * 1000)),
-            "codec": "264",
+            "codec": self.huya_codec,
         }
         return '&'.join([f"{k}={v}" for k, v in anti_code.items()])
 
