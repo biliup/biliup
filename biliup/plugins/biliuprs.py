@@ -44,7 +44,7 @@ class BiliWeb(UploadBase):
         self.user_cookie = user_cookie
         self.copyright_source = copyright_source
         self.extra_fields = extra_fields
-        
+
     def upload(self, file_list: List[UploadBase.FileInfo]) -> List[UploadBase.FileInfo]:
         if self.credits:
             desc_v2 = self.creditsToDesc_v2()
@@ -123,8 +123,6 @@ def stream_gears_upload(ex_conn, lines, *args, **kwargs):
             kwargs['line'] = stream_gears.UploadLine.Bda
         elif lines == 'bda2':
             kwargs['line'] = stream_gears.UploadLine.Bda2
-        elif lines == 'ws':
-            kwargs['line'] = stream_gears.UploadLine.Ws
         elif lines == 'qn':
             kwargs['line'] = stream_gears.UploadLine.Qn
         elif lines == 'tx':

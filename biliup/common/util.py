@@ -16,8 +16,12 @@ except ImportError:
 else:
     _ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 
-# This setup works very well on my Swedish machine, but who knows about others...
-DEFAULT_TIMEOUT = httpx.Timeout(timeout=15.0, connect=10.0)
+DEFAULT_TIMEOUT = httpx.Timeout(
+    connect=15.0,
+    read=60.0,
+    write=60.0,
+    pool=15.0,
+)
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_CONNECTION_LIMITS = httpx.Limits(max_connections=100, max_keepalive_connections=100)
 

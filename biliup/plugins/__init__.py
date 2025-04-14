@@ -2,7 +2,17 @@ import logging
 import re
 import hashlib
 import time
+import json
 from urllib.parse import urlencode, quote
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Union,
+)
 
 logger = logging.getLogger('biliup')
 
@@ -35,6 +45,16 @@ def random_user_agent(device: str = 'desktop') -> str:
         ])
         return f'Mozilla/5.0 (Linux; Android {android_version}; {mobile}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version}.0.0.0 Mobile Safari/537.36'
     return f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version}.0.0.0 Safari/537.36'
+
+
+def json_loads(text: Union[str, None]) -> Dict[str, Any]:
+    if not text:
+        raise ValueError("Invalid JSON: None")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON: {text}") from e
+
 
 class Wbi:
     WTS = "wts"
