@@ -527,7 +527,8 @@ def stream_gears_download(url, headers, file_name, segment_time=None, file_size=
             headers,
             file_name,
             segment,
-            file_name_callback
+            file_name_callback,
+            None
         )
     else:
         stream_gears.download(

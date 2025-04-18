@@ -80,6 +80,11 @@ class TarsUniPacket(object):
         oos.write(vtype, 0, value)
         self.__buffer[name] = {vtype.__tars_class__: oos.getBuffer()}
 
+    def put_by_class(self, vtype, name, value):
+        oos = TarsOutputStream()
+        oos.write(vtype, 0, value)
+        self.__buffer[name] = {name: oos.getBuffer()}
+
     def get(self, vtype, name):
         if (name in self.__buffer) == False:
             raise Exception("UniAttribute not found key:%s,type:%s" %
@@ -91,6 +96,14 @@ class TarsUniPacket(object):
                             vtype.__tars_class__)
 
         o = TarsInputStream(t[vtype.__tars_class__])
+        return o.read(vtype, 0, True)
+
+    def get_by_class(self, vtype, name):
+        if (name in self.__buffer) == False:
+            raise Exception("UniAttribute not found key:%s" % name)
+
+        t = self.__buffer[name]
+        o = TarsInputStream(t)
         return o.read(vtype, 0, True)
 
     def encode(self):
@@ -105,12 +118,31 @@ class TarsUniPacket(object):
 
         return struct.pack('!i', 4 + len(sos.getBuffer())) + sos.getBuffer()
 
+    def encode_v3(self):
+        oos = TarsOutputStream()
+        oos.write(self.__mapa, 0, self.__buffer)
+
+        self.__code.iVersion = 3 # Force to use TarsV3
+        self.__code.sBuffer = oos.getBuffer()
+
+        sos = TarsOutputStream()
+        RequestPacket.writeTo(sos, self.__code)
+
+        return struct.pack('!i', 4 + len(sos.getBuffer())) + sos.getBuffer()
+
     def decode(self, buf):
         ois = TarsInputStream(buf[4:])
         self.__code = RequestPacket.readFrom(ois)
 
         sis = TarsInputStream(self.__code.sBuffer)
         self.__buffer = sis.read(self.__mapv, 0, True)
+
+    def decode_v3(self, buf):
+        ois = TarsInputStream(buf[4:])
+        self.__code = RequestPacket.readFrom(ois)
+
+        sis = TarsInputStream(self.__code.sBuffer)
+        self.__buffer = sis.read(self.__mapa, 0, True)
 
     def clear(self):
         self.__code.__init__()

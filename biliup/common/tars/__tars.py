@@ -117,9 +117,22 @@ class TarsOutputStream(object):
     def __writeBytes(self, tag, value):
         DataHead.writeTo(self.__buffer, tag, DataHead.EN_BYTES)
         DataHead.writeTo(self.__buffer, 0,   DataHead.EN_INT8)
-        length = len(value)
-        self.__writeInt32(0, length)
-        self.__buffer.buffer += value
+        if isinstance(value, bytes):
+            length = len(value)
+            self.__writeInt32(0, length)
+            self.__buffer.buffer += value
+        # HACK: 兼容 TarV3 的 newData 格式
+        elif isinstance(value, dict):
+            # WARNING: 只用到一个 func，暂时不考虑其他情况
+            length = len(value)
+            if length != 1:
+                raise TarsTarsUnsupportType("tars unsupport data type: %s" % type(value))
+            _dict_value = list(value.values())[0]
+            if not isinstance(_dict_value, bytes):
+                raise TarsTarsUnsupportType("tars unsupport data type: %s" % type(_dict_value))
+            length = len(_dict_value)
+            self.__writeInt32(0, length)
+            self.__buffer.buffer += _dict_value
         self.__buffer.position += length
 
     def __writeMap(self, coder, tag, value):

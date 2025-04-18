@@ -1,7 +1,7 @@
 import aiohttp
 from biliup.plugins import random_user_agent
 
-from .tars import tarscore
+from biliup.common.tars import tarscore
 from biliup.plugins import match1
 
 
@@ -51,12 +51,12 @@ class Huya:
     def decode_msg(data):
         class User(tarscore.struct):
             @staticmethod
-            def readFrom(ios):
+            def readFrom(ios: tarscore.TarsInputStream):
                 return ios.read(tarscore.string, 2, False).decode("utf8")
 
         class DColor(tarscore.struct):
             @staticmethod
-            def readFrom(ios):
+            def readFrom(ios: tarscore.TarsInputStream):
                 return ios.read(tarscore.int32, 0, False)
 
         name = ""

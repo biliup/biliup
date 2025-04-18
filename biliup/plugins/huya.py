@@ -209,14 +209,15 @@ class Huya(DownloadBase):
             live_info = s_json['data'][0]['gameLiveInfo']
             streams_info = s_json['data'][0]['gameStreamInfoList']
         elif isinstance(data, dict):
-            if data['liveStatus'] != 'ON' or not data.get('liveData', {}).get('bitRateInfo'):
+            data = data.get('data', {})
+            if data.get('liveStatus') != 'ON' or not data.get('liveData', {}).get('bitRateInfo'):
                 return {
                     'live': False,
-                    'message': '未开播' if data['liveStatus'] != 'ON' else '未推流',
+                    'message': '未开播' if data.get('liveStatus') != 'ON' else '未推流',
                 }
             live_info = data['liveData']
             bitrate_info = live_info['bitRateInfo']
-            streams_info = live_info['streamsInfo']
+            streams_info = data['stream']['baseSteamInfoList']
         return {
             'artist': live_info['nick'],
             'artist_img': live_info['avatar180'].replace('http://', 'https://'),
@@ -345,6 +346,7 @@ class Huya(DownloadBase):
     @staticmethod
     def update_user_agent(headers: dict):
         headers['user-agent'] = f"HYSDK(Windows, {int(time.time())})"
+        headers['origin'] = HUYA_WEB_BASE_URL
 
 
 def _raise_for_room_block(text: str):
