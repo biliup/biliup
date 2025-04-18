@@ -1,5 +1,5 @@
 from biliup.common.tars import tarscore
-from biliup.plugins.huya_util import auto_decode_fields
+from .__util import auto_decode_fields
 
 @auto_decode_fields
 class HuyaGetCdnTokenInfoReq(tarscore.struct):

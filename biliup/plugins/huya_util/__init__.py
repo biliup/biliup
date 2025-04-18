@@ -1,26 +1,37 @@
-from functools import wraps
 from biliup.common.tars import tarscore
-from biliup.plugins.huya_util import Wup, HuyaGetCdnTokenInfoReq, HuyaGetCdnTokenInfoRsp
-
-STANDARD_CHARSET = 'utf-8'
+from biliup.common.tars.__tup import TarsUniPacket
+from biliup.plugins.huya_util.packet import *
 
 __all__ = ['Wup', 'HuyaGetCdnTokenInfoReq', 'HuyaGetCdnTokenInfoRsp']
 
-def auto_decode_fields(cls):
-    """自动解码类中的bytes类型数据"""
-    original_read_from = cls.readFrom
+DEFAULT_TICKET_NUMBER = -1
 
-    @staticmethod
-    @wraps(original_read_from)
-    def wrapped_read_from(ios: tarscore.TarsInputStream):
-        value = original_read_from(ios)
-        # 遍历对象的所有属性
-        for attr_name, attr_value in vars(value).items():
-            # 如果是bytes类型
-            if isinstance(attr_value, bytes):
-                # 将其解码为字符串
-                setattr(value, attr_name, attr_value.decode(STANDARD_CHARSET))
-        return value
+class Wup(TarsUniPacket):
+    def __init__(self):
+        super().__init__()
 
-    cls.readFrom = wrapped_read_from
-    return cls
+    @classmethod
+    def writeTo(cls, oos: tarscore.TarsOutputStream):
+        return cls.__code.writeTo(oos)
+
+    @classmethod
+    def readFrom(cls, ios: tarscore.TarsInputStream):
+        return cls.__code.readFrom(ios)
+
+    def encode(self):
+        return super().encode()
+
+    def encode_v3(self):
+        return super().encode_v3()
+
+    def decode(self, buf):
+        super().decode(buf)
+
+    def decode_v3(self, buf):
+        super().decode_v3(buf)
+
+    def get(self, vtype, name):
+        return super().get(vtype, name)
+
+    def get_by_class(self, vtype, name):
+        return super().get_by_class(vtype, name)
