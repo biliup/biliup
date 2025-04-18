@@ -35,3 +35,9 @@ class Wup(TarsUniPacket):
 
     def get_by_class(self, vtype, name):
         return super().get_by_class(vtype, name)
+
+    def put(self, vtype, name, value):
+        super().put(vtype, name, value)
+
+    def put_by_class(self, vtype, name, value):
+        super().put_by_class(vtype, name, value)
