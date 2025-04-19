@@ -37,6 +37,7 @@ class Huya(DownloadBase):
         self.huya_cdn_fallback = config.get('huya_cdn_fallback', False)
         self.huya_mobile_api = config.get('huya_mobile_api', False)
         self.huya_codec = config.get('huya_codec', '264')
+        self.huya_skip_query_build = config.get('huya_skip_query_build', False)
 
     async def acheck_stream(self, is_check=False):
         try:
@@ -68,7 +69,10 @@ class Huya(DownloadBase):
         # self.room_title = room_profile['room_title']
 
         is_xingxiu = (room_profile['gid'] == 1663)
-        stream_urls = self.build_stream_urls(room_profile['streams_info'], is_xingxiu)
+        stream_urls = self.build_stream_urls(
+            room_profile['streams_info'],
+            (is_xingxiu or self.huya_skip_query_build)
+        )
         cdn_list = list(stream_urls.keys())
         if not self.huya_cdn or self.huya_cdn not in cdn_list:
             self.huya_cdn = cdn_list[0]
@@ -146,7 +150,7 @@ class Huya(DownloadBase):
                 # 录制码率
                 if allowed_ratio_list:
                     selected_ratio = max(allowed_ratio_list)
-                if selected_ratio:
+                if selected_ratio and selected_ratio != max_bitrate:
                     return f"{url}&ratio={selected_ratio}"
             except KeyError as e:
                 raise KeyError(f"确定码率时发生错误") from e
@@ -183,7 +187,8 @@ class Huya(DownloadBase):
             suffix = stream[f's{proto}UrlSuffix']
             anti_code = stream[f's{proto}AntiCode'] + f"&codec={self.huya_codec}"
             if not skip_query_build:
-                anti_code = self.build_query(stream_name, anti_code, self.__get_uid(stream_name))
+                anti_code = self.build_query(stream_name, anti_code, self.__get_uid(
+                    stream_name, stream['lPresenterUid']))
             base_url = stream[f's{proto}Url'].replace('http://', 'https://')
             streams[cdn] = f"{base_url}/{stream_name}.{suffix}?{anti_code}"
             weights[cdn] = priority
@@ -216,7 +221,7 @@ class Huya(DownloadBase):
                     'message': '未开播' if data.get('liveStatus') != 'ON' else '未推流',
                 }
             live_info = data['liveData']
-            bitrate_info = live_info['bitRateInfo']
+            bitrate_info = json_loads(live_info['bitRateInfo'])
             streams_info = data['stream']['baseSteamInfoList']
         return {
             'artist': live_info['nick'],
@@ -319,15 +324,16 @@ class Huya(DownloadBase):
         return {}
 
     @staticmethod
-    def __get_uid(stream_name: str) -> int:
+    def __get_uid(stream_name: str, default_uid: int = 0) -> int:
         try:
             if stream_name:
-                anchor_uid = int(stream_name.split('-')[0])
-                if anchor_uid > 0:
+                name_split = stream_name.split('-')
+                anchor_uid = int(name_split[0])
+                if anchor_uid != 0 and anchor_uid == int(name_split[1]):
                     return anchor_uid
-        except IndexError:
+        except (IndexError, ValueError):
             pass
-        return random.randint(1400000000000, 1499999999999)
+        return default_uid or random.randint(1400000000000, 1499999999999)
         # udbAnonymousUid = requests.post(
         #     url='https://udblgn.huya.com/web/anonymousLogin',
         #     headers={
