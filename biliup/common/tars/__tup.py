@@ -26,9 +26,6 @@ class TarsUniPacket(object):
     def __init__(self):
         self.__mapa = util.mapclass(util.string, util.bytes)
         self.__mapv = util.mapclass(util.string, self.__mapa)
-        # HACK: 兼容 Tars.VERSION3 的 newData
-        # 应在子类创建，但 mapa 和 packet 都被设为父类 Private，实在不想在子类重新声明一遍
-        self.__new_buffer = self.__mapa()
         self.__buffer = self.__mapv()
         self.__code = RequestPacket()
 
@@ -83,11 +80,6 @@ class TarsUniPacket(object):
         oos.write(vtype, 0, value)
         self.__buffer[name] = {vtype.__tars_class__: oos.getBuffer()}
 
-    def put_by_class(self, vtype, name, value):
-        oos = TarsOutputStream()
-        oos.write(vtype, 0, value)
-        self.__new_buffer[name] = oos.getBuffer()
-
     def get(self, vtype, name):
         if (name in self.__buffer) == False:
             raise Exception("UniAttribute not found key:%s,type:%s" %
@@ -99,14 +91,6 @@ class TarsUniPacket(object):
                             vtype.__tars_class__)
 
         o = TarsInputStream(t[vtype.__tars_class__])
-        return o.read(vtype, 0, True)
-
-    def get_by_class(self, vtype, name):
-        if (name in self.__new_buffer) == False:
-            raise Exception("UniAttribute not found key:%s" % name)
-
-        t = self.__new_buffer[name]
-        o = TarsInputStream(t)
         return o.read(vtype, 0, True)
 
     def encode(self):
@@ -121,31 +105,12 @@ class TarsUniPacket(object):
 
         return struct.pack('!i', 4 + len(sos.getBuffer())) + sos.getBuffer()
 
-    def encode_v3(self):
-        oos = TarsOutputStream()
-        oos.write(self.__mapa, 0, self.__new_buffer)
-
-        self.__code.iVersion = 3 # Force to use TarsV3
-        self.__code.sBuffer = oos.getBuffer()
-
-        sos = TarsOutputStream()
-        RequestPacket.writeTo(sos, self.__code)
-
-        return struct.pack('!i', 4 + len(sos.getBuffer())) + sos.getBuffer()
-
     def decode(self, buf):
         ois = TarsInputStream(buf[4:])
         self.__code = RequestPacket.readFrom(ois)
 
         sis = TarsInputStream(self.__code.sBuffer)
         self.__buffer = sis.read(self.__mapv, 0, True)
-
-    def decode_v3(self, buf):
-        ois = TarsInputStream(buf[4:])
-        self.__code = RequestPacket.readFrom(ois)
-
-        sis = TarsInputStream(self.__code.sBuffer)
-        self.__new_buffer = sis.read(self.__mapa, 0, True)
 
     def clear(self):
         self.__code.__init__()

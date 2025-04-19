@@ -10,9 +10,9 @@ if __name__ == "__main__":
     import requests
     import time
     # import base64
-    cdn: str = "AL"
-    stream_name: str = "1320365459-1320365459-5670926465173028864-2640854374-10057-A-0-1"
-    presenter_uid: int = 1320365459
+    cdn: str = "HS"
+    stream_name: str = "1708907089-1708907089-7339700059157561344-3417937634-10057-A-0-1-imgplus.flv"
+    presenter_uid: int = 1708907089
     wup_url: str = "https://wup.huya.com"
     huya_headers: dict = {
         "user-agent": f"HYSDK(Windows, {int(time.time())})",
