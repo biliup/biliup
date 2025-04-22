@@ -19,7 +19,7 @@ class Douyu(DownloadBase):
         self.__room_id = match1(url, r'rid=(\d+)')
         self.douyu_danmaku = config.get('douyu_danmaku', False)
         self.douyu_disable_interactive_game = config.get('douyu_disable_interactive_game', False)
-        self.douyu_cdn = config.get('douyu_cdn', 'hw-h5')
+        self.douyu_cdn = config.get('douyu_cdn', 'tct-h5')
         self.douyu_rate = config.get('douyu_rate', 0)
 
     async def acheck_stream(self, is_check=False):
@@ -29,7 +29,7 @@ class Douyu(DownloadBase):
 
         self.fake_headers['referer'] = f"https://www.douyu.com"
         self.fake_headers['origin'] = f"https://www.douyu.com"
-
+        if self.__room_id not in ['11265503']: return False
         try:
             if not self.__room_id:
                 self.__room_id = _get_real_rid(self.url)
@@ -123,7 +123,7 @@ class Douyu(DownloadBase):
         try:
             if self.douyu_cdn == 'hs-h5':
                 host, _, url = await self.build_hs_url(url)
-            elif self.douyu_cdn == 'tct-h5' and live_data['rtmp_url'].index('tc-tct.douyucdn2.cn') == -1:
+            elif self.douyu_cdn == 'tct-h5' and live_data['rtmp_url'].find('tc-tct.douyucdn2.cn') == -1:
                 _, _, url = await self.build_tx_url(url)
         except (RuntimeError, ValueError) as e:
             logger.error(f"{self.plugin_msg}: {e}")
@@ -167,7 +167,7 @@ class Douyu(DownloadBase):
         if mobile or preview:
             return live_data
         if isinstance(live_data, dict):
-            if not live_data.get('rtmp_cdn', '').endswith('h5'):
+            if live_data.get('rtmp_cdn', '').startswith('scdn'):
                 import copy
                 __data = copy.deepcopy(data)
                 __data['cdn'] = live_data['cdnsWithName'][-1]['cdn']
@@ -224,7 +224,7 @@ class Douyu(DownloadBase):
         m_data = await self.get_play_info(self.__room_id, self._req_data, mobile=True)
         _, _, m_query = self.parse_stream_info(m_data['url'])
         m_query = parse_qs(m_query)
-        # m_query = {}
+        m_query.pop('vhost', None)
         query.update({
             'fcdn': ['tct'],
             **m_query,
@@ -242,7 +242,7 @@ class Douyu(DownloadBase):
         else:
             tx_url = url
         query = parse_qs(tx_url.split('?')[-1])
-        encoded_url = quote(tx_url.replace(f"&vhost={query['vhost'][0]}", ""), safe='')
+        encoded_url = quote(tx_url, safe='')
         query.update(
             {
                 'fp_user_url': [encoded_url],
