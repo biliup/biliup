@@ -19,7 +19,7 @@ class Douyu(DownloadBase):
         self.__room_id = match1(url, r'rid=(\d+)')
         self.douyu_danmaku = config.get('douyu_danmaku', False)
         self.douyu_disable_interactive_game = config.get('douyu_disable_interactive_game', False)
-        self.douyu_cdn = config.get('douyu_cdn', 'tct-h5')
+        self.douyu_cdn = config.get('douyu_cdn', 'hw-h5')
         self.douyu_rate = config.get('douyu_rate', 0)
 
     async def acheck_stream(self, is_check=False):
