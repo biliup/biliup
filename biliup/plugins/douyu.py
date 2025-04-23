@@ -29,7 +29,7 @@ class Douyu(DownloadBase):
 
         self.fake_headers['referer'] = f"https://www.douyu.com"
         self.fake_headers['origin'] = f"https://www.douyu.com"
-        if self.__room_id not in ['11265503']: return False
+
         try:
             if not self.__room_id:
                 self.__room_id = _get_real_rid(self.url)
@@ -119,11 +119,12 @@ class Douyu(DownloadBase):
             return False
 
         host = None
+        is_tct = (live_data['rtmp_url'].find('tc-tct.douyucdn2.cn') != -1)
         # HACK: 构建斗鱼直播流链接
         try:
             if self.douyu_cdn == 'hs-h5':
                 host, _, url = await self.build_hs_url(url)
-            elif self.douyu_cdn == 'tct-h5' and live_data['rtmp_url'].find('tc-tct.douyucdn2.cn') == -1:
+            elif self.douyu_cdn == 'tct-h5' and not is_tct:
                 _, _, url = await self.build_tx_url(url)
         except (RuntimeError, ValueError) as e:
             logger.error(f"{self.plugin_msg}: {e}")
@@ -184,17 +185,19 @@ class Douyu(DownloadBase):
         '''
         解析推流信息
         '''
-        def get_tx_app_name(host) -> str:
+        def get_tx_app_name(rtmp_url) -> str:
             '''
             获取腾讯云推流应用名
             '''
+            host = rtmp_url.split('//')[1].split('/')[0]
+            app_name = rtmp_url.split('/')[-1]
             # group 按顺序排序
             i = match1(host, r'.+(sa|3a|1a|3|1)')
             if i:
                 if i == "sa":
                     i = "1"
                 return f"dyliveflv{i}"
-            return "live"
+            return app_name
         list = url.split('?')
         query = parse_qs(list[1])
         origin = query.get('origin', ['0'])[0]
@@ -210,7 +213,7 @@ class Douyu(DownloadBase):
         query_str = urlencode(query, doseq=True, encoding='utf-8')
         stream_id = list[0].split('/')[-1].split('.')[0]
         rtmp_url = list[0].split(stream_id)[0]
-        return get_tx_app_name(rtmp_url), stream_id.split('_')[0], query_str
+        return get_tx_app_name(rtmp_url[:-1]), stream_id.split('_')[0], query_str
 
     async def build_tx_url(self, url, callback=None) -> tuple[str, str, str]:
         '''
