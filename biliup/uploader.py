@@ -27,6 +27,7 @@ def upload(data):
         data['dolby'] = config.get('dolby', 0)
         data['hires'] = config.get('hires', 0)
         data['no_reprint'] = config.get('no_reprint', 0)
+        data['is_only_self'] = config.get('is_only_self', 0)
         data['open_elec'] = config.get('open_elec', 0)
         sig = inspect.signature(cls)
         kwargs = {}
@@ -51,6 +52,7 @@ def biliup_uploader(filelist, data):
         data['dolby'] = data.get('dolby', 0)
         data['hires'] = data.get('hires', 0)
         data['no_reprint'] = data.get('no_reprint', 0)
+        data['is_only_self'] = data.get('is_only_self', 0)
         data['open_elec'] = data.get('open_elec', 0)
         sig = inspect.signature(cls)
         kwargs = {}

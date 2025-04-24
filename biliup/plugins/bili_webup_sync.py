@@ -41,7 +41,7 @@ class BiliWebAsync(UploadBase):
     def __init__(
             self, principal, data, submit_api=None, copyright=2, postprocessor=None, dtime=None,
             dynamic='', lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description='',
-            dolby=0, hires=0, no_reprint=0, open_elec=0, credits=None,
+            dolby=0, hires=0, no_reprint=0, is_only_self=0, open_elec=0, credits=None,
             user_cookie='cookies.json', copyright_source=None, extra_fields="", video_queue=None
     ):
         super().__init__(principal, data, persistence_path='bili.cookie', postprocessor=postprocessor)
@@ -68,6 +68,7 @@ class BiliWebAsync(UploadBase):
         self.dolby = dolby
         self.hires = hires
         self.no_reprint = no_reprint
+        self.is_only_self = is_only_self
         self.open_elec = open_elec
         self.copyright_source = copyright_source
         self.extra_fields = extra_fields
@@ -110,6 +111,7 @@ class BiliWebAsync(UploadBase):
         videos.dolby = self.dolby
         videos.hires = self.hires
         videos.no_reprint = self.no_reprint
+        videos.is_only_self = self.is_only_self
         videos.open_elec = self.open_elec
 
         thread_list = []
@@ -794,6 +796,7 @@ class Data:
     dolby: int = 0
     hires: int = 0
     no_reprint: int = 0
+    is_only_self: int = 0
     open_elec: int = 0
     extra_fields: str = ""
 
