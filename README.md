@@ -52,12 +52,18 @@
 
 ## 🧑‍💻开发
 
+### frontend
+
 1. 确保 Node.js 版本 ≥ 18
 2. 安装依赖：`npm i`
 3. 启动开发服务器：`npm run dev`
-4. 启动 Biliup：`python3 -m biliup`
-5. 访问：`http://localhost:3000`
+4. 访问：`http://localhost:3000`
 
+### backend
+
+1. 安装依赖 `pip install .`
+2. `npm run build` 确保 `/biliup/web/public` 目录存在构建好的前端静态资源
+3. 启动 Biliup：`python3 -m biliup`
 
 ## 🤝Credits
 * Thanks `ykdl, youtube-dl, streamlink` provides downloader.
