@@ -210,7 +210,10 @@ class DownloadBase(ABC):
             # 文件名不含后戳
             fmt_file_name = self.gen_download_filename(is_fmt=True)
             # ffmpeg 输入参数
-            input_args = []
+            input_args = [
+                # '-http_proxy', 'http://127.0.0.1:10808',
+                # "-fflags", "+genpts",
+            ]
             # ffmpeg 输出参数
             output_args = [
                 '-c',
