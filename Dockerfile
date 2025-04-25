@@ -27,7 +27,7 @@ RUN set -eux; \
 		xz-utils \
 	; \
 	apt-mark auto '.*' > /dev/null; \
-	apt-mark manual wget curl; \
+	apt-mark manual curl; \
 	\
 	arch="$(dpkg --print-architecture)"; arch="${arch##*-}"; \
 	url='https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2023-10-31-14-21/'; \
