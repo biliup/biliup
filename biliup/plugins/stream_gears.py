@@ -12,7 +12,7 @@ class BiliWeb(UploadBase):
     def __init__(
             self, principal, data, submit_api=None, copyright=2, postprocessor=None, dtime=None,
             dynamic='', lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description='',
-            dolby=0, hires=0, no_reprint=0, is_only_self=0, open_elec=0, credits=None,
+            dolby=0, hires=0, no_reprint=0, open_elec=0, credits=None,
             user_cookie='cookies.json', copyright_source=None, extra_fields = ""
     ):
         super().__init__(principal, data, persistence_path='bili.cookie', postprocessor=postprocessor)
@@ -39,12 +39,14 @@ class BiliWeb(UploadBase):
         self.dolby = dolby
         self.hires = hires
         self.no_reprint = no_reprint
-        self.is_only_self = is_only_self
         self.open_elec = open_elec
         self.user_cookie = user_cookie
         self.copyright_source = copyright_source
 
-        self.extra_fields = extra_fields
+        if "extra_fields" in self.data:
+            self.extra_fields = self.data["extra_fields"]
+        else:
+            self.extra_fields = extra_fields
 
 
     def upload(self, file_list) -> List[UploadBase.FileInfo]:
@@ -90,7 +92,6 @@ class BiliWeb(UploadBase):
             dolby=self.dolby,
             lossless_music=self.hires,
             no_reprint=self.no_reprint,
-            is_only_self=self.is_only_self,
             open_elec=self.open_elec,
             limit=self.threads,
             desc_v2=desc_v2,
