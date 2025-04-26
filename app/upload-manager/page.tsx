@@ -102,14 +102,18 @@ export default function Union() {
         size="medium"
         title="文件选择"
         okText="上传"
+        style={{ width: 'min(600px, 90vw)' }}
         visible={visibleModal}
         onOk={handleOk}
         afterClose={handleAfterClose}
         onCancel={handleCancel}
+        bodyStyle={{
+            overflow: 'auto',
+        }}
         closeOnEsc={true}
       >
         <Transfer
-          style={{ width: 568, height: 416 }}
+          style={{ height: 416 }}
           dataSource={data}
           draggable
           value={transferData}

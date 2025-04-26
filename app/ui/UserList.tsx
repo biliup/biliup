@@ -131,6 +131,7 @@ const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
     <SideSheet
       title={<Typography.Title heading={4}>用户管理</Typography.Title>}
       visible={visible}
+      width={Math.min(448, window.innerWidth)}
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Button
@@ -173,6 +174,7 @@ const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
         title="新建"
         visible={modalVisible}
         onOk={handleOk}
+        style={{ width: 'min(600px, 90vw)' }}
         afterClose={handleAfterClose} //>=1.16.0
         onCancel={handleCancel}
         closeOnEsc={true}
