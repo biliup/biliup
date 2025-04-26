@@ -133,7 +133,7 @@ const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
     <SideSheet
       title={<Typography.Title heading={4}>用户管理</Typography.Title>}
       visible={visible}
-      width={Math.min(448, width || Number.MIN_VALUE)}
+      width={Math.min(448, width ?? Number.MIN_VALUE)}
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Button

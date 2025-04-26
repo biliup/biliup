@@ -1,7 +1,7 @@
 'use client'
 import './globals.css'
 import styles from './page.module.css'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Button, Nav } from '@douyinfe/semi-ui'
@@ -42,6 +42,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const systemTheme = useSystemTheme()
   useTheme(mode, systemTheme)
   let navStyle = isCollapsed ? { height: '100%', overflow: 'visible' } : { height: '100%' }
+
+  // 兼容 PC 切移动端
+  useEffect(() => {
+    if (width <= 640) {
+      setIsCollapsed(true)
+    }
+  }, [width]);
 
   const items = useMemo(
     () =>
