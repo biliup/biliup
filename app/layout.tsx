@@ -21,6 +21,7 @@ import {
 import Image from 'next/image'
 import ThemeButton from './ui/ThemeButton'
 import { useSystemTheme, useTheme } from './lib/utils'
+import { useWindowSize } from 'react-use';
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const { Sider } = SeLayout
@@ -32,7 +33,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
   const [openKeys, setOpenKeys] = useState(initOpenKeys)
   const [selectedKeys, setSelectedKeys] = useState<any>([pathname.slice(1)])
-  const [isCollapsed, setIsCollapsed] = useState(false)
+
+  const { width } = useWindowSize()
+  const [isCollapsed, setIsCollapsed] = useState(width <= 640)
   const [mode, setMode] = useState(
     (typeof window !== 'undefined' && localStorage.getItem('mode')) || 'auto'
   )
@@ -267,7 +270,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <div
                   style={{
                     flexGrow: 1,
-                    display: 'flex',
+                    display: width <= 640 ? 'none' : 'flex',
                     flexDirection: 'row-reverse',
                     zIndex: 2,
                   }}
