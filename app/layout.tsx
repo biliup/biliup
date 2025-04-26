@@ -261,7 +261,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   // />
                   <Image src="/logo.png" alt="{}" height={10} width={20}></Image>
                 }
-                style={{ justifyContent: 'flex-start' }}
+                style={isCollapsed ? { flexDirection: 'column', paddingLeft: 0, paddingRight: 0, paddingBottom: 0, gap: '8px' } : { justifyContent: 'flex-start' }}
                 text="BILIUP"
               >
                 <div
@@ -269,7 +269,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                     flexGrow: 1,
                     display: 'flex',
                     flexDirection: 'row-reverse',
-                    alignSelf: 'flex-end',
                     zIndex: 2,
                   }}
                 >
