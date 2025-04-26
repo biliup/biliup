@@ -29,6 +29,7 @@ import { FormApi } from '@douyinfe/semi-ui/lib/es/form'
 import useSWRMutation from 'swr/mutation'
 import { useBiliUsers } from '../lib/use-streamers'
 import QRcode from '@/app/ui/QRcode'
+import { useWindowSize } from 'react-use';
 
 type UserListProps = {
   onCancel?: (e: React.MouseEvent<Element, MouseEvent> | React.KeyboardEvent<Element>) => void
@@ -41,6 +42,7 @@ const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
   const { biliUsers: list } = useBiliUsers()
   const [modalVisible, setVisible] = useState(false)
   const [confirmLoading, setConfirmLoading] = useState(false)
+  const { width } = useWindowSize()
   const showDialog = () => {
     setVisible(true)
   }
@@ -131,7 +133,7 @@ const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
     <SideSheet
       title={<Typography.Title heading={4}>用户管理</Typography.Title>}
       visible={visible}
-      width={Math.min(448, window.innerWidth)}
+      width={Math.min(448, width || Number.MIN_VALUE)}
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Button
