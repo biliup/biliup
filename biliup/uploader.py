@@ -8,6 +8,22 @@ from .engine.decorators import Plugin
 
 logger = logging.getLogger('biliup')
 
+def merge_dict(*dicts):
+    """
+    合并多个字典，兼容空字典、None 或 JSON 字符串
+    :param dicts: 任意数量的字典
+    :return: 合并后的字典
+    """
+    result = {}
+    for d in dicts:
+        if isinstance(d, str):  # 如果是 JSON 字符串，尝试解析
+            try:
+                d = json.loads(d)
+            except json.JSONDecodeError:
+                continue
+        if d:  # 检查字典是否为 None 或空
+            result.update(d)
+    return result
 
 def upload(data):
     """
@@ -28,7 +44,8 @@ def upload(data):
         data['dolby'] = config.get('dolby', 0)
         data['hires'] = config.get('hires', 0)
         data['no_reprint'] = config.get('no_reprint', 0)
-        data['is_only_self'] = config.get('is_only_self', 0)
+        data['extra_fields'] = json.dumps(merge_dict(config.get('extra_fields', 0), {"is_only_self": config.get('is_only_self', 0)}))
+
         data['open_elec'] = config.get('open_elec', 0)
         sig = inspect.signature(cls)
         kwargs = {}
@@ -53,9 +70,8 @@ def biliup_uploader(filelist, data):
         data['dolby'] = data.get('dolby', 0)
         data['hires'] = data.get('hires', 0)
         data['no_reprint'] = data.get('no_reprint', 0)
-        data['extra_fields'] = json.dumps({
-            "is_only_self": data.get('is_only_self', 0)
-        })
+        data['extra_fields'] = json.dumps(merge_dict(data.get('extra_fields', ''), {"is_only_self": data.get('is_only_self', 0)}))
+
         data['open_elec'] = data.get('open_elec', 0)
         sig = inspect.signature(cls)
         kwargs = {}

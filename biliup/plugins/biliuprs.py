@@ -73,7 +73,6 @@ class BiliWeb(UploadBase):
             "dolby": self.dolby,
             "lossless_music": self.hires,
             "no_reprint": self.no_reprint,
-            "is_only_self": self.is_only_self,
             "open_elec": self.open_elec,
             "limit": self.threads,
             "desc_v2": desc_v2,
