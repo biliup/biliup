@@ -21,6 +21,7 @@ class Douyin(DownloadBase):
         self.douyin_quality = config.get('douyin_quality', 'origin')
         self.douyin_protocol = config.get('douyin_protocol', 'flv')
         self.douyin_double_screen = config.get('douyin_double_screen', False)
+        self.douyin_true_origin = config.get('douyin_true_origin', False)
         self.__web_rid = None # 网页端房间号 或 抖音号
         self.__room_id = None # 单场直播的直播房间
         self.__sec_uid = None
@@ -158,10 +159,16 @@ class Douyin(DownloadBase):
                     quality = optional_quality_items[optional_quality_index - 1]
 
             protocol = 'hls' if self.douyin_protocol == 'hls' else 'flv'
-            self.raw_stream_url = stream_data[quality]['main'][protocol].replace('http://', 'https://')
+            self.raw_stream_url = stream_data[quality]['main'][protocol]
         except:
             logger.exception(f"{self.plugin_msg}: 寻找清晰度失败")
             return False
+
+        # 抖音FLV真原画
+        if quality == 'origin' and protocol == 'flv' and self.douyin_true_origin:
+            self.raw_stream_url = stream_data['ao']['main']['flv'].replace('only_audio=1', 'only_audio=0')
+
+        self.raw_stream_url = self.raw_stream_url.replace('http://', 'https://')
         return True
 
     def danmaku_init(self):
