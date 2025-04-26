@@ -13,13 +13,11 @@
     "artplayer": "^5.2.1",
     "mpegts.js": "^1.8.0",
     "my-app": "file:",
-    "ncp": "^2.0.0",
     "next": "^14.2.26",
     "qrcode.react": "^3.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-json-tree": "^0.19.0",
-    "sass": "^1.83.0",
     "swr": "^2.3.0"
   },
   "devDependencies": {
@@ -29,6 +27,8 @@
     "eslint": "^9.17.0",
     "eslint-config-next": "^15.1.3",
     "eslint-config-prettier": "^9.1.0",
+    "ncp": "^2.0.0",
+    "sass": "^1.87.0",
     "typescript": "^5.7.2"
   }
 }
