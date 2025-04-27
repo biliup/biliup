@@ -21,6 +21,7 @@ class Douyin(DownloadBase):
         self.douyin_quality = config.get('douyin_quality', 'origin')
         self.douyin_protocol = config.get('douyin_protocol', 'flv')
         self.douyin_double_screen = config.get('douyin_double_screen', False)
+        self.douyin_true_origin = config.get('douyin_true_origin', False)
         self.__web_rid = None # 网页端房间号 或 抖音号
         self.__room_id = None # 单场直播的直播房间
         self.__sec_uid = None
@@ -124,44 +125,58 @@ class Douyin(DownloadBase):
             logger.exception(f"{self.plugin_msg}: 加载直播流失败")
             return False
 
-        # 原画origin 蓝光uhd 超清hd 高清sd 标清ld 流畅md 仅音频ao
-        quality_items = ['origin', 'uhd', 'hd', 'sd', 'ld', 'md']
-        quality = self.douyin_quality
-        if quality not in quality_items:
-            quality = quality_items[0]
-        try:
-            # 如果没有这个画质则取相近的 优先低清晰度
-            if quality not in stream_data:
-                # 可选的清晰度 含自身
-                optional_quality_items = [x for x in quality_items if x in stream_data.keys() or x == quality]
-                # 自身在可选清晰度的位置
-                optional_quality_index = optional_quality_items.index(quality)
-                # 自身在所有清晰度的位置
-                quality_index = quality_items.index(quality)
-                # 高清晰度偏移
-                quality_left_offset = None
-                # 低清晰度偏移
-                quality_right_offset = None
+                # 抖音FLV真原画
+        if (
+            self.douyin_true_origin  # 开启真原画
+            and
+            self.douyin_quality == 'origin' # 请求原画
+            and
+            self.douyin_protocol == 'flv' # 请求FLV
+            # and
+            # self.raw_stream_url.find('_or4.flv') != -1 # or4(origin)
+        ):
+            self.raw_stream_url = stream_data['ao']['main']['flv'].replace('&only_audio=1', '')
+        else:
+            # 原画origin 蓝光uhd 超清hd 高清sd 标清ld 流畅md 仅音频ao
+            quality_items = ['origin', 'uhd', 'hd', 'sd', 'ld', 'md']
+            quality = self.douyin_quality
+            if quality not in quality_items:
+                quality = quality_items[0]
+            try:
+                # 如果没有这个画质则取相近的 优先低清晰度
+                if quality not in stream_data:
+                    # 可选的清晰度 含自身
+                    optional_quality_items = [x for x in quality_items if x in stream_data.keys() or x == quality]
+                    # 自身在可选清晰度的位置
+                    optional_quality_index = optional_quality_items.index(quality)
+                    # 自身在所有清晰度的位置
+                    quality_index = quality_items.index(quality)
+                    # 高清晰度偏移
+                    quality_left_offset = None
+                    # 低清晰度偏移
+                    quality_right_offset = None
 
-                if optional_quality_index + 1 < len(optional_quality_items):
-                    quality_right_offset = quality_items.index(
-                        optional_quality_items[optional_quality_index + 1]) - quality_index
+                    if optional_quality_index + 1 < len(optional_quality_items):
+                        quality_right_offset = quality_items.index(
+                            optional_quality_items[optional_quality_index + 1]) - quality_index
 
-                if optional_quality_index - 1 >= 0:
-                    quality_left_offset = quality_index - quality_items.index(
-                        optional_quality_items[optional_quality_index - 1])
+                    if optional_quality_index - 1 >= 0:
+                        quality_left_offset = quality_index - quality_items.index(
+                            optional_quality_items[optional_quality_index - 1])
 
-                # 取相邻的清晰度
-                if quality_right_offset <= quality_left_offset:
-                    quality = optional_quality_items[optional_quality_index + 1]
-                else:
-                    quality = optional_quality_items[optional_quality_index - 1]
+                    # 取相邻的清晰度
+                    if quality_right_offset <= quality_left_offset:
+                        quality = optional_quality_items[optional_quality_index + 1]
+                    else:
+                        quality = optional_quality_items[optional_quality_index - 1]
 
-            protocol = 'hls' if self.douyin_protocol == 'hls' else 'flv'
-            self.raw_stream_url = stream_data[quality]['main'][protocol].replace('http://', 'https://')
-        except:
-            logger.exception(f"{self.plugin_msg}: 寻找清晰度失败")
-            return False
+                protocol = 'hls' if self.douyin_protocol == 'hls' else 'flv'
+                self.raw_stream_url = stream_data[quality]['main'][protocol]
+            except:
+                logger.exception(f"{self.plugin_msg}: 寻找清晰度失败")
+                return False
+
+        self.raw_stream_url = self.raw_stream_url.replace('http://', 'https://')
         return True
 
     def danmaku_init(self):
