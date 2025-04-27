@@ -123,6 +123,7 @@ class UploadStreamers(BaseModel):
     hires: Mapped[int] = mapped_column(nullable=True)  # 是否开启Hi-Res, 1为开启
     open_elec: Mapped[int] = mapped_column(nullable=True)  # 是否开启充电面板, 1为开启
     no_reprint: Mapped[int] = mapped_column(nullable=True)  # 自制声明, 1为未经允许禁止转载
+    is_only_self: Mapped[int] = mapped_column(nullable=True)  # 可见范围, 1为仅自己可见
     uploader: Mapped[str] = mapped_column(nullable=True)  # 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
     user_cookie: Mapped[str] = mapped_column(nullable=True)  # 使用指定的账号上传
     tags = mapped_column(JSON(), nullable=False)  # JSONField()  # 标签
