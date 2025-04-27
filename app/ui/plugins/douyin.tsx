@@ -105,6 +105,15 @@ const Douyin: React.FC<Props> = props => {
             padding: 0,
           }}
         />
+        <Form.Switch
+          field="douyin_true_origin"
+          extraText="仅限直播流协议为 FLV 时生效，默认关闭。开启后可能录制到 HEVC 编码，而 stream-gears（默认下载器）暂不支持，请切换下载器后录制。"
+          label="抖音真原画（douyin_true_origin）"
+          fieldStyle={{
+            alignSelf: 'stretch',
+            padding: 0,
+          }}
+        />
       </Collapse.Panel>
     </>
   )
