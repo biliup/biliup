@@ -223,6 +223,7 @@ dynamic = "#空间动态#"
 #hires = 0 ### 是否开启Hi-Res, 1为开启
 #open_elec = 0 ### 是否开启充电面板, 1为开启
 #no_reprint = 0 ### 自制声明, 1为未经允许禁止转载
+#is_only_self = 0 ### 可见范围, 1为仅自己可见
 #uploader = "biliup-rs"  ### 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
 #filename_prefix = '{streamer}%Y-%m-%d %H_%M_%S{title}'  ### 覆盖全局自定义录播文件命名规则
 user_cookie = "cookies.json" ### 使用指定的账号上传

@@ -59,6 +59,7 @@ const Edit = () => {
       .concat(data.up_selection_reply === 1 ? ['up_selection_reply'] : []),
     open_elec: data.open_elec === 1,
     no_reprint: data.no_reprint === 1,
+    is_only_self: data.is_only_self === 1,
     isDtime: data.dtime ? true : false,
   }
   return (
@@ -88,6 +89,7 @@ const Edit = () => {
                 up_close_danmu: values?.interaction.includes('up_close_danmu') ? 1 : 0,
                 open_elec: values?.open_elec ? 1 : 0,
                 no_reprint: values?.no_reprint ? 1 : 0,
+                is_only_self: values?.is_only_self ? 1: 0,
                 mission_id: values?.mission_id,
                 dtime: values?.isDtime ? values?.dtime : null,
                 credits: values?.credits ?? null,

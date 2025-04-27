@@ -82,6 +82,7 @@ export interface StudioEntity {
 	dolby: number;
 	hires: number;
 	no_reprint: number;
+	is_only_self: number;
 	up_selection_reply: number;
 	up_close_reply: number;
 	up_close_danmu: number;
