@@ -35,7 +35,7 @@ class Huya(DownloadBase):
         self.huya_protocol = 'Hls' if config.get('huya_protocol') == 'Hls' else 'Flv'
         self.huya_imgplus = config.get('huya_imgplus', True)
         self.huya_cdn_fallback = config.get('huya_cdn_fallback', False)
-        self.huya_mobile_api = config.get('huya_mobile_api', True)
+        self.huya_mobile_api = config.get('huya_mobile_api', False)
         self.huya_codec = config.get('huya_codec', '264')
 
     async def acheck_stream(self, is_check=False):
