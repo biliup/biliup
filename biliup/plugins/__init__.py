@@ -47,7 +47,7 @@ def random_user_agent(device: str = 'desktop') -> str:
     return f'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version}.0.0.0 Safari/537.36'
 
 
-def json_loads(text: Union[str, None]) -> Dict[str, Any]:
+def json_loads(text: str) -> Dict[str, Any]:
     if not text:
         raise ValueError("Invalid JSON: None")
     try:

@@ -1,6 +1,5 @@
 import base64
 import hashlib
-import json
 import random
 import time
 from urllib.parse import parse_qs, unquote
@@ -18,10 +17,18 @@ from ..Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from . import logger, match1, json_loads
+from .huya_util import (
+    Wup,
+    HuyaGetCdnTokenInfoReq,
+    HuyaGetCdnTokenInfoRsp,
+    DEFAULT_TICKET_NUMBER
+)
+from .huya_util.packet.__util import STANDARD_CHARSET
 
 HUYA_WEB_BASE_URL = "https://www.huya.com"
 HUYA_MOBILE_BASE_URL = "https://m.huya.com"
 HUYA_MP_BASE_URL = "https://mp.huya.com"
+HUYA_WUP_URL = "https://wup.huya.com"
 HUYA_WEB_ROOM_DATA_REGEX = r"var TT_ROOM_DATA = (.*?);"
 
 @Plugin.download(regexp=r'https?://(?:(?:www|m)\.)?huya\.com')
@@ -37,6 +44,7 @@ class Huya(DownloadBase):
         self.huya_cdn_fallback = config.get('huya_cdn_fallback', False)
         self.huya_mobile_api = config.get('huya_mobile_api', False)
         self.huya_codec = config.get('huya_codec', '264')
+        self.huya_skip_query_build = config.get('huya_skip_query_build', False)
 
     async def acheck_stream(self, is_check=False):
         try:
@@ -68,9 +76,13 @@ class Huya(DownloadBase):
         # self.room_title = room_profile['room_title']
 
         is_xingxiu = (room_profile['gid'] == 1663)
-        stream_urls = self.build_stream_urls(room_profile['streams_info'], is_xingxiu)
-        cdn_list = list(stream_urls.keys())
+        streams_info = self.build_stream_urls(
+            room_profile['streams_info'],
+            (is_xingxiu or self.huya_skip_query_build)
+        )
+        cdn_list = list(streams_info['streams'].keys())
         if not self.huya_cdn or self.huya_cdn not in cdn_list:
+            logger.debug(f"{self.plugin_msg}: 使用默认CDN {cdn_list[0]}")
             self.huya_cdn = cdn_list[0]
 
         # Thx stream-rec
@@ -78,16 +90,16 @@ class Huya(DownloadBase):
 
         try:
             self.raw_stream_url = self.add_ratio(
-                stream_urls[self.huya_cdn],
+                streams_info['streams'][self.huya_cdn],
                 room_profile['bitrate_info'],
                 room_profile['max_bitrate']
             )
         except KeyError as e:
             logger.error(f"{self.plugin_msg}: {e}", exc_info=True)
             return False
-
+        stream_urls = streams_info['streams']
         # 虎牙直播流只允许连接一次
-        if self.huya_cdn_fallback:
+        if self.huya_cdn_fallback and True:
             _url = await self.acheck_url_healthy(self.raw_stream_url)
             if _url is None:
                 logger.info(f"{self.plugin_msg}: cdn_fallback 顺序尝试 {cdn_list}")
@@ -114,7 +126,8 @@ class Huya(DownloadBase):
             room_profile['bitrate_info'],
             room_profile['max_bitrate']
         )
-
+        self.raw_stream_url = self.raw_stream_url.replace('https://', 'http://')
+        print(self.fake_headers)
         return True
 
 
@@ -146,7 +159,7 @@ class Huya(DownloadBase):
                 # 录制码率
                 if allowed_ratio_list:
                     selected_ratio = max(allowed_ratio_list)
-                if selected_ratio:
+                if selected_ratio and selected_ratio != max_bitrate:
                     return f"{url}&ratio={selected_ratio}"
             except KeyError as e:
                 raise KeyError(f"确定码率时发生错误") from e
@@ -182,12 +195,18 @@ class Huya(DownloadBase):
             cdn = stream['sCdnType']
             suffix = stream[f's{proto}UrlSuffix']
             anti_code = stream[f's{proto}AntiCode'] + f"&codec={self.huya_codec}"
+            presenter_uid = stream['lPresenterUid']
             if not skip_query_build:
-                anti_code = self.build_query(stream_name, anti_code, self.__get_uid(stream_name))
+                anti_code = self.build_query(stream_name, anti_code, presenter_uid)
             base_url = stream[f's{proto}Url'].replace('http://', 'https://')
             streams[cdn] = f"{base_url}/{stream_name}.{suffix}?{anti_code}"
             weights[cdn] = priority
-        return self.__weight_sorting(streams, weights)
+        sorted_streams = self.__weight_sorting(streams, weights)
+        return {
+            "stream_name": stream_name,
+            "presenter_uid": presenter_uid,
+            "streams": sorted_streams,
+        }
 
 
     def extract_room_profile(self, data: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
@@ -209,14 +228,15 @@ class Huya(DownloadBase):
             live_info = s_json['data'][0]['gameLiveInfo']
             streams_info = s_json['data'][0]['gameStreamInfoList']
         elif isinstance(data, dict):
-            if data['liveStatus'] != 'ON' or not data.get('liveData', {}).get('bitRateInfo'):
+            data = data.get('data', {})
+            if data.get('liveStatus') != 'ON' or not data.get('liveData', {}).get('bitRateInfo'):
                 return {
                     'live': False,
-                    'message': '未开播' if data['liveStatus'] != 'ON' else '未推流',
+                    'message': '未开播' if data.get('liveStatus') != 'ON' else '未推流',
                 }
             live_info = data['liveData']
-            bitrate_info = live_info['bitRateInfo']
-            streams_info = live_info['streamsInfo']
+            bitrate_info = json_loads(live_info['bitRateInfo'])
+            streams_info = data['stream']['baseSteamInfoList']
         return {
             'artist': live_info['nick'],
             'artist_img': live_info['avatar180'].replace('http://', 'https://'),
@@ -318,15 +338,16 @@ class Huya(DownloadBase):
         return {}
 
     @staticmethod
-    def __get_uid(stream_name: str) -> int:
+    def __get_uid(stream_name: str, default_uid: int = 0) -> int:
         try:
             if stream_name:
-                anchor_uid = int(stream_name.split('-')[0])
-                if anchor_uid > 0:
+                name_split = stream_name.split('-')
+                anchor_uid = int(name_split[0])
+                if anchor_uid != 0 and anchor_uid == int(name_split[1]):
                     return anchor_uid
-        except IndexError:
+        except (IndexError, ValueError):
             pass
-        return random.randint(1400000000000, 1499999999999)
+        return default_uid or random.randint(1400000000000, 1499999999999)
         # udbAnonymousUid = requests.post(
         #     url='https://udblgn.huya.com/web/anonymousLogin',
         #     headers={
@@ -342,9 +363,44 @@ class Huya(DownloadBase):
         # )['data']['uid']
 
 
+    async def get_true_stream_url(self, cdn: str, stream_name: str, presenter_uid: int):
+        self.update_user_agent(self.fake_headers)
+        wup_req = Wup()
+        wup_req.requestid = abs(DEFAULT_TICKET_NUMBER)
+        wup_req.servant = "liveui"
+        wup_req.func = "getCdnTokenInfo"
+        token_info_req = HuyaGetCdnTokenInfoReq()
+        token_info_req.cdnType = cdn
+        token_info_req.streamName = stream_name
+        token_info_req.presenterUid = presenter_uid
+        wup_req.put_by_class(
+            vtype=HuyaGetCdnTokenInfoReq,
+            name="tReq",
+            value=token_info_req
+        )
+        data = wup_req.encode_v3()
+        logger.debug(f"{self.plugin_msg}: wup_req -> {base64.b64encode(data)}")
+        rsp = await client.post(HUYA_WUP_URL, data=data, headers=self.fake_headers)
+        rsp_bytes = rsp.content
+        logger.debug(f"{self.plugin_msg}: wup_rsp -> {base64.b64encode(rsp_bytes)}")
+        wup_rsp = Wup()
+        wup_rsp.decode_v3(rsp_bytes)
+        # WARNING: readFrom 没有正确解码字符串，需手动编码回 bytes
+        token_info_rsp = wup_rsp.get_by_class(
+            vtype=HuyaGetCdnTokenInfoRsp,
+            name=bytes("tRsp", encoding=STANDARD_CHARSET)
+        )
+        return token_info_rsp.as_dict()
+
+
     @staticmethod
     def update_user_agent(headers: dict):
-        headers['user-agent'] = f"HYSDK(Windows, {int(time.time())})"
+        valid_ts = 20000308
+        current_ts = int(time.time())
+        version = str(current_ts)[-8:]
+        version = version if int(version) > valid_ts else (valid_ts + (current_ts / 100))
+        headers['user-agent'] = f"HYSDK(Windows, {version})"
+        headers['origin'] = HUYA_WEB_BASE_URL
 
 
 def _raise_for_room_block(text: str):
