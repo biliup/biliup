@@ -1,8 +1,8 @@
 from biliup.common.tars import tarscore
 from .__util import auto_decode_fields
-from .UserId import HuyaUserId
-from .BeginLiveNotice import HuyaBeginLiveNotice
-from .StreamSettingNotice import HuyaStreamSettingNotice
+from ..struct.UserId import HuyaUserId
+from ..struct.BeginLiveNotice import HuyaBeginLiveNotice
+from ..struct.StreamSettingNotice import HuyaStreamSettingNotice
 
 
 class HuyaGetLivingInfoReq(tarscore.struct):
@@ -45,26 +45,10 @@ class HuyaGetLivingInfoRsp(tarscore.struct):
 
     @staticmethod
     def writeTo(oos: tarscore.TarsOutputStream, value):
-        oos.write(
-            coder=tarscore.int32,
-            tag=0,
-            value=value.bIsLiving
-        )
-        oos.write(
-            coder=HuyaBeginLiveNotice,
-            tag=1,
-            value=value.tNotice
-        )
-        oos.write(
-            coder=HuyaStreamSettingNotice,
-            tag=2,
-            value=value.tStreamSettingNotice
-        )
-        oos.write(
-            coder=tarscore.int32,
-            tag=3,
-            value=value.bIsSelfLiving
-        )
+        oos.write(tarscore.int32, 0, value.bIsLiving)
+        oos.write(HuyaBeginLiveNotice, 1, value.tNotice)
+        oos.write(HuyaStreamSettingNotice, 2, value.tStreamSettingNotice)
+        oos.write(tarscore.int32, 3, value.bIsSelfLiving)
 
     @staticmethod
     def readFrom(ios: tarscore.TarsInputStream):

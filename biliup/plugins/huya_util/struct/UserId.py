@@ -13,31 +13,11 @@ class HuyaUserId(tarscore.struct):
 
     @staticmethod
     def writeTo(oos: tarscore.TarsOutputStream, value):
-        oos.write(
-            coder=tarscore.int64,
-            tag=0,
-            value=value.lUid
-        )
-        oos.write(
-            coder=tarscore.string,
-            tag=1,
-            value=value.sGuid
-        )
-        oos.write(
-            coder=tarscore.string,
-            tag=2,
-            value=value.sToken
-        )
-        oos.write(
-            coder=tarscore.string,
-            tag=3,
-            value=value.sHuYaUA
-        )
-        oos.write(
-            coder=tarscore.string,
-            tag=4,
-            value=value.sCookie
-        )
+        oos.write(tarscore.int64, 0, value.lUid)
+        oos.write(tarscore.string, 1, value.sGuid)
+        oos.write(tarscore.string, 2, value.sToken)
+        oos.write(tarscore.string, 3, value.sHuYaUA)
+        oos.write(tarscore.string, 4, value.sCookie)
 
     @staticmethod
     def readFrom(ios: tarscore.TarsInputStream):

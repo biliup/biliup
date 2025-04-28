@@ -14,53 +14,21 @@ class HuyaGetCdnTokenInfoReq(tarscore.struct):
 
     @staticmethod
     def writeTo(oos: tarscore.TarsOutputStream, value):
-        oos.write(
-            coder=tarscore.string,
-            tag=0,
-            value=value.url
-        )
-        oos.write(
-            coder=tarscore.string,
-            tag=1,
-            value=value.cdnType
-        )
-        oos.write(
-            coder=tarscore.string,
-            tag=2,
-            value=value.streamName
-        )
-        oos.write(
-            coder=tarscore.int32,
-            tag=3,
-            value=value.presenterUid
-        )
+        oos.write(tarscore.string, 0, value.url)
+        oos.write(tarscore.string, 1, value.cdnType)
+        oos.write(tarscore.string, 2, value.streamName)
+        oos.write(tarscore.int32, 3, value.presenterUid)
 
     @staticmethod
     def readFrom(ios: tarscore.TarsInputStream):
         value = HuyaGetCdnTokenInfoReq()
-        value.url = ios.read(
-            coder=tarscore.string,
-            tag=0,
-            require=False
-        )
+        value.url = ios.read(tarscore.string, 0, False)
         # print(("url = %s" % value.url))
-        value.cdnType = ios.read(
-            coder=tarscore.string,
-            tag=1,
-            require=False
-        )
+        value.cdnType = ios.read(tarscore.string, 1, False)
         # print(("cdnType = %s" % value.cdnType))
-        value.streamName = ios.read(
-            coder=tarscore.string,
-            tag=2,
-            require=False
-        )
+        value.streamName = ios.read(tarscore.string, 2, False)
         # print(("streamName = %s" % value.streamName))
-        value.presenterUid = ios.read(
-            coder=tarscore.int32,
-            tag=3,
-            require=False
-        )
+        value.presenterUid = ios.read(tarscore.int32, 3, False)
         # print(("presenterUid = %d" % value.presenterUid))
         return value
 
@@ -89,97 +57,33 @@ class HuyaGetCdnTokenInfoRsp(tarscore.struct):
 
     @staticmethod
     def writeTo(oos: tarscore.TarsOutputStream, value):
-        oos.write(
-            coder=tarscore.string,
-            tag=0,
-            value=value.url
-        )
-        oos.write(
-            coder=tarscore.string,
-            tag=1,
-            value=value.cdnType
-        )
-        oos.write(
-            coder=tarscore.string,
-            tag=2,
-            value=value.streamName
-        )
-        oos.write(
-            coder=tarscore.int32,
-            tag=3,
-            value=value.presenterUid
-        )
-        oos.write(
-            coder=tarscore.string,
-            tag=4,
-            value=value.antiCode
-        )
-        oos.write(
-            coder=tarscore.string,
-            tag=5,
-            value=value.sTime
-        )
-        oos.write(
-            coder=tarscore.string,
-            tag=6,
-            value=value.flvAntiCode
-        )
-        oos.write(
-            coder=tarscore.string,
-            tag=7,
-            value=value.hlsAntiCode
-        )
+        oos.write(tarscore.string, 0, value.url)
+        oos.write(tarscore.string, 1, value.cdnType)
+        oos.write(tarscore.string, 2, value.streamName)
+        oos.write(tarscore.int32, 3, value.presenterUid)
+        oos.write(tarscore.string, 4, value.antiCode)
+        oos.write(tarscore.string, 5, value.sTime)
+        oos.write(tarscore.string, 6, value.flvAntiCode)
+        oos.write(tarscore.string, 7, value.hlsAntiCode)
 
     @staticmethod
     def readFrom(ios: tarscore.TarsInputStream):
         value = HuyaGetCdnTokenInfoRsp()
-        value.url = ios.read(
-            coder=tarscore.string,
-            tag=0,
-            require=False
-        )
+        value.url = ios.read(tarscore.string, 0, False)
         # print(("url = %s" % value.url))
-        value.cdnType = ios.read(
-            coder=tarscore.string,
-            tag=1,
-            require=False
-        )
+        value.cdnType = ios.read(tarscore.string, 1, False)
         # print(("cdnType = %s" % value.cdnType))
-        value.streamName = ios.read(
-            coder=tarscore.string,
-            tag=2,
-            require=False
-        )
+        value.streamName = ios.read(tarscore.string, 2, False)
         # print(("streamName = %s" % value.streamName))
-        value.presenterUid = ios.read(
-            coder=tarscore.int32,
-            tag=3,
-            require=False
-        )
+        value.presenterUid = ios.read(tarscore.int32, 3, False)
         # print(("presenterUid = %d" % value.presenterUid))
-        value.antiCode = ios.read(
-            coder=tarscore.string,
-            tag=4,
-            require=False
-        )
+        value.antiCode = ios.read(tarscore.string, 4, False)
         # print(("antiCode = %s" % value.antiCode))
-        value.sTime = ios.read(
-            coder=tarscore.string,
-            tag=5,
-            require=False
-        )
+        value.sTime = ios.read(tarscore.string, 5, False)
         # print(("sTime = %s" % value.sTime))
-        value.flvAntiCode = ios.read(
-            coder=tarscore.string,
-            tag=6,
-            require=False
-        )
+        value.flvAntiCode = ios.read(tarscore.string, 6, False)
         # print(("flvAntiCode = %s" % value.flvAntiCode))
-        value.hlsAntiCode = ios.read(
-            coder=tarscore.string,
-            tag=7,
-            require=False
-        )
+        value.hlsAntiCode = ios.read(tarscore.string, 7, False)
         # print(("hlsAntiCode = %s" % value.hlsAntiCode))
         return value
 
