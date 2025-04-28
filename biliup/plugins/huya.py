@@ -342,7 +342,6 @@ class Huya(DownloadBase):
     @staticmethod
     def update_user_agent(headers: dict):
         # copied from stream-rec commit b48c9cd
-        headers['user-agent'] = f"HYSDK(Windows, {int(time.time())})"
         valid_ts = 20000308
         current_ts = int(time.time())
         version = str(current_ts)[-8:]
