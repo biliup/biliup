@@ -183,7 +183,7 @@ class Huya(DownloadBase):
             suffix = stream[f's{proto}UrlSuffix']
             anti_code = stream[f's{proto}AntiCode'] + f"&codec={self.huya_codec}"
             if not skip_query_build:
-                anti_code = self.build_query(stream_name, anti_code, self.__get_uid(stream_name))
+                anti_code = self.build_query(stream_name, anti_code, stream['lPresenterUid'])
             base_url = stream[f's{proto}Url'].replace('http://', 'https://')
             streams[cdn] = f"{base_url}/{stream_name}.{suffix}?{anti_code}"
             weights[cdn] = priority
@@ -209,14 +209,15 @@ class Huya(DownloadBase):
             live_info = s_json['data'][0]['gameLiveInfo']
             streams_info = s_json['data'][0]['gameStreamInfoList']
         elif isinstance(data, dict):
+            data = data['data']
             if data['liveStatus'] != 'ON' or not data.get('liveData', {}).get('bitRateInfo'):
                 return {
                     'live': False,
                     'message': '未开播' if data['liveStatus'] != 'ON' else '未推流',
                 }
             live_info = data['liveData']
-            bitrate_info = live_info['bitRateInfo']
-            streams_info = live_info['streamsInfo']
+            bitrate_info = json_loads(live_info['bitRateInfo'])
+            streams_info = data['stream']['baseSteamInfoList']
         return {
             'artist': live_info['nick'],
             'artist_img': live_info['avatar180'].replace('http://', 'https://'),
@@ -317,34 +318,36 @@ class Huya(DownloadBase):
             return dict(sorted(data.items(), key=lambda x: weights[x[0]], reverse=True))
         return {}
 
-    @staticmethod
-    def __get_uid(stream_name: str) -> int:
+
+    async def get_anonymous_uid(self) -> int:
         try:
-            if stream_name:
-                anchor_uid = int(stream_name.split('-')[0])
-                if anchor_uid > 0:
-                    return anchor_uid
-        except IndexError:
-            pass
-        return random.randint(1400000000000, 1499999999999)
-        # udbAnonymousUid = requests.post(
-        #     url='https://udblgn.huya.com/web/anonymousLogin',
-        #     headers={
-        #         'user-agent': random_user_agent(),
-        #     },
-        #     json={
-        #         "appId": 5002,
-        #         "byPass": 3,
-        #         "context": "",
-        #         "version": "2.4",
-        #         "data": {},
-        #     }
-        # )['data']['uid']
+            rsp = await client.post(
+                url='https://udblgn.huya.com/web/anonymousLogin',
+                headers=self.fake_headers,
+                json={
+                    "appId": 5002,
+                    "byPass": 3,
+                    "context": "",
+                    "version": "2.4",
+                    "data": {},
+                }
+            )
+            data = json_loads(rsp.text)
+        except:
+            return random.randint(1400000000000, 1499999999999)
+        else:
+            return data['data']['uid']
 
 
     @staticmethod
     def update_user_agent(headers: dict):
-        headers['user-agent'] = f"HYSDK(Windows, {int(time.time())})"
+        # copied from stream-rec commit b48c9cd
+        valid_ts = 20000308
+        current_ts = int(time.time())
+        version = str(current_ts)[-8:]
+        version = version if int(version) > valid_ts else (valid_ts + (current_ts / 100))
+        headers['user-agent'] = f"HYSDK(Windows, {version})"
+        headers['origin'] = HUYA_WEB_BASE_URL
 
 
 def _raise_for_room_block(text: str):
