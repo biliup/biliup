@@ -44,7 +44,11 @@ class BiliWeb(UploadBase):
         self.open_elec = open_elec
         self.user_cookie = user_cookie
         self.copyright_source = copyright_source
-        self.extra_fields = extra_fields
+
+        if 'extra_fields' in data:
+            self.extra_fields = data.get('extra_fields', '')
+        else:
+            self.extra_fields = extra_fields
 
     def upload(self, file_list: List[UploadBase.FileInfo]) -> List[UploadBase.FileInfo]:
         if self.credits:
