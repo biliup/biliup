@@ -110,6 +110,7 @@ export default function Home() {
           visible={visible}
           onCancel={handleCancel}
           closeOnEsc={true}
+          style={{ width: 'min(600px, 90vw)' }}
           size="large"
           bodyStyle={{ height: 500 }}
           footer={null}

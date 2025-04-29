@@ -121,7 +121,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
         title="录播管理"
         visible={visible}
         onOk={handleOk}
-        style={{ width: 600 }}
+        style={{ width: 'min(600px, 90vw)' }}
         onCancel={handleCancel}
         bodyStyle={{
           overflow: 'auto',
@@ -215,7 +215,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
             style={{ width: 176 }}
             helpText="视频保存格式。不支持stream-gears下载器和Youtube平台。"
           />
-          
+
           <Collapse keepDOM>
             <Collapse.Panel header="更多设置" itemKey="processors">
               <Form.TimePicker
@@ -228,19 +228,19 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                     下载器需使用ffmpeg或streamlink
                   </div>
                 }
-                label={{ 
-                    text: '录制时间范围', 
-                    optional: true, 
-                    style: { 
+                label={{
+                    text: '录制时间范围',
+                    optional: true,
+                    style: {
                         fontSize: '18px',
                         marginBottom: '4px',
                         paddingBottom: '8px',
                         borderBottom: '1px solid var(--semi-color-border)',
-                    } 
+                    }
                 }}
                 style={{ width: 176 }}
               />
-              
+
               <ArrayField field="excluded_keywords">
                 {({ add, arrayFields }) => (
                   <Form.Section text="不录制关键词">
@@ -271,7 +271,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                 </Form.Section>
                 )}
               </ArrayField>
-              
+
               <ArrayField field="preprocessor">
                 {({ add, arrayFields }) => (
                   <Form.Section text="下载前处理">

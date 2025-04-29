@@ -249,7 +249,7 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
         title="配置覆写"
         visible={visible}
         onOk={handleOk}
-        style={{ width: 600 }}
+        style={{ width: 'min(600px, 90vw)' }}
         onCancel={handleCancel}
         bodyStyle={{
           overflow: 'auto',
