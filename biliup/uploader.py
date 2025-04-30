@@ -44,7 +44,7 @@ def upload(data):
         data['dolby'] = config.get('dolby', 0)
         data['hires'] = config.get('hires', 0)
         data['no_reprint'] = config.get('no_reprint', 0)
-        data['extra_fields'] = json.dumps(merge_dict(config.get('extra_fields', 0), {"is_only_self": config.get('is_only_self', 0)}))
+        data['extra_fields'] = json.dumps(merge_dict(context.get('extra_fields', {}), {"is_only_self": context.get('is_only_self', 0)}))
 
         data['open_elec'] = config.get('open_elec', 0)
         sig = inspect.signature(cls)
