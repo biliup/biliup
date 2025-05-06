@@ -15,48 +15,82 @@ class Twitcasting(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
         self.twitcasting_danmaku = config.get('twitcasting_danmaku', False)
-        self.twitcasting_password = config.get('twitcasting_password', '')
+        self.twitcasting_password = config.get('user.twitcasting_password')
+        self.twitcasting_quality = config.get('twitcasting_quality')
+        self.twitcasting_cookie = config.get('user', {}).get('twitcasting_cookie')
         self.fake_headers['referer'] = "https://twitcasting.tv/"
-        if self.twitcasting_password:
-            self.fake_headers[
-                'cookie'] = f"wpass={hashlib.md5(self.twitcasting_password.encode(encoding='UTF-8')).hexdigest()}"
+
         # TODO 传递过于繁琐
-        self.movie_id = None
+        self._movie_id = None
 
     async def acheck_stream(self, is_check=False):
-        # with requests.Session() as s:
-        biliup.common.util.client.headers = self.fake_headers
+        cookies = {}
+        if self.twitcasting_cookie:
+            cookies = dict(item.strip().split("=", 1) for item in self.twitcasting_cookie.split(";"))
+        if self.twitcasting_password:
+            cookies["wpass"] = hashlib.md5(self.twitcasting_password.encode(encoding='UTF-8')).hexdigest()
+        if cookies:
+            self.fake_headers['cookie'] = "; ".join([f"{k}={v}" for k, v in cookies.items()])
 
-        uploader_id = match1(self.url, r'twitcasting.tv/([^/?]+)')
-        response = await biliup.common.util.client.get(f'https://twitcasting.tv/streamserver.php?target={uploader_id}&mode=client&player=pc_web',
-                                                       timeout=5)
-        if response.status_code != 200:
-            logger.warning(f"{Twitcasting.__name__}: {self.url}: 获取错误，本次跳过")
-            return False
-        room_info = response.json()
-        if not room_info:
-            logger.warning(f"{Twitcasting.__name__}: {self.url}: 直播间地址错误")
-            return False
-        if not room_info['movie']['live']:
-            logger.debug(f"{Twitcasting.__name__}: {self.url}: 未开播")
-            return False
-
-        self.movie_id = room_info['movie']['id']
-
-        room_html = (await biliup.common.util.client.get(f'https://twitcasting.tv/{uploader_id}', timeout=5)).text
+        room_html = (await biliup.common.util.client.get(self.url, headers=self.fake_headers)).text
         if 'Enter the secret word to access' in room_html:
             logger.warning(f"{Twitcasting.__name__}: {self.url}: 直播间需要密码")
             return False
-        self.room_title = match1(room_html, r'<meta name="twitter:title" content="([^"]*)"')
+
         # 尺寸不合适
         # self.live_cover_url = match1(room_html, r'<meta property="og:image" content="([^"]*)"')
-        self.raw_stream_url = f"https://twitcasting.tv/{uploader_id}/metastream.m3u8?mode=source"
+        self.room_title = match1(room_html, r'<meta name="twitter:title" content="([^"]*)"')
+        uploader_id = match1(room_html, r'<meta name="twitter:creator" content="([^"]*)"')
+
+        response = await biliup.common.util.client.get(
+            f'https://twitcasting.tv/streamserver.php?target={uploader_id}&mode=client&player=pc_web',
+            headers=self.fake_headers)
+        if response.status_code != 200:
+            logger.warning(f"{Twitcasting.__name__}: {self.url}: 获取错误，本次跳过")
+            return False
+        stream_info = response.json()
+        if not stream_info:
+            logger.warning(f"{Twitcasting.__name__}: {self.url}: 直播间地址错误")
+            return False
+        if not stream_info['movie']['live']:
+            logger.debug(f"{Twitcasting.__name__}: {self.url}: 未开播")
+            return False
+
+        self._movie_id = stream_info['movie']['id']
+
+        if not stream_info.get("tc-hls", {}).get("streams"):
+            logger.error(f"{Twitcasting.__name__}: {self.url}: 未获取到到直播流 => {stream_info}")
+            return False
+
+        stream_url = None
+        quality_levels = ["high", "medium", "low"]
+        streams = stream_info["tc-hls"]["streams"]
+        if self.twitcasting_quality:
+            quality_levels_filter = quality_levels[quality_levels.index(self.twitcasting_quality):]
+            for quality_level in quality_levels_filter:
+                if quality_level in streams:
+                    stream_url = streams[quality_level]
+                    break
+        if not stream_url:
+            for quality_level in quality_levels:
+                if quality_level in streams:
+                    stream_url = streams[quality_level]
+                    break
+        if not stream_url:
+            stream_url = next(iter(streams.values()))
+
+        if not stream_url:
+            logger.error(f"{Twitcasting.__name__}: {self.url}: 未查找到直播流 => {stream_info}")
+            return False
+
+        self.raw_stream_url = stream_url
+
         return True
 
     def danmaku_init(self):
         if self.twitcasting_danmaku:
             self.danmaku = DanmakuClient(self.url, self.gen_download_filename(), {
-                'movie_id': self.movie_id,
+                'movie_id': self._movie_id,
                 'password': self.twitcasting_password,
             })
 
