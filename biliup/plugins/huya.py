@@ -39,6 +39,9 @@ class Huya(DownloadBase):
         self.huya_codec = config.get('huya_codec', '264')
 
     async def acheck_stream(self, is_check=False):
+        # return False
+        # self.huya_mobile_api = False
+        # self.huya_imgplus = False
         try:
             if not self.__room_id.isdigit():
                 client.headers.update(self.fake_headers)
@@ -68,13 +71,14 @@ class Huya(DownloadBase):
         # self.room_title = room_profile['room_title']
 
         is_xingxiu = (room_profile['gid'] == 1663)
-        stream_urls = self.build_stream_urls(room_profile['streams_info'], is_xingxiu)
+        skip_query_build = (is_xingxiu or self.huya_mobile_api) and self.huya_imgplus
+        stream_urls = self.build_stream_urls(room_profile['streams_info'], skip_query_build)
         cdn_list = list(stream_urls.keys())
         if not self.huya_cdn or self.huya_cdn not in cdn_list:
             self.huya_cdn = cdn_list[0]
 
         # Thx stream-rec
-        self.update_user_agent(self.fake_headers)
+        self.update_headers(self.fake_headers)
 
         try:
             self.raw_stream_url = self.add_ratio(
@@ -86,7 +90,7 @@ class Huya(DownloadBase):
             logger.error(f"{self.plugin_msg}: {e}", exc_info=True)
             return False
 
-        # 虎牙直播流只允许连接一次
+        # HTTPS的直播流只允许连接一次
         if self.huya_cdn_fallback:
             _url = await self.acheck_url_healthy(self.raw_stream_url)
             if _url is None:
@@ -181,10 +185,11 @@ class Huya(DownloadBase):
             stream_name = self.get_stream_name(stream['sStreamName'])
             cdn = stream['sCdnType']
             suffix = stream[f's{proto}UrlSuffix']
-            anti_code = stream[f's{proto}AntiCode'] + f"&codec={self.huya_codec}"
+            anti_code = stream[f's{proto}AntiCode']
             if not skip_query_build:
-                anti_code = self.build_query(stream_name, anti_code, stream['lPresenterUid'])
-            base_url = stream[f's{proto}Url'].replace('http://', 'https://')
+                anti_code = self.build_query(stream_name, anti_code, self.get_uid(stream['lPresenterUid']))
+            anti_code = f"{anti_code}&codec={self.huya_codec}"
+            base_url = stream[f's{proto}Url'].replace('http://', 'https://') # 强制https
             streams[cdn] = f"{base_url}/{stream_name}.{suffix}?{anti_code}"
             weights[cdn] = priority
         return self.__weight_sorting(streams, weights)
@@ -305,7 +310,7 @@ class Huya(DownloadBase):
             "u": convert_uid,
             "uuid": str(int((ct % 1e10 + random.random()) * 1e3 % 0xffffffff)),
             "sdk_sid": str(int(time.time() * 1000)),
-            "codec": self.huya_codec,
+            # "codec": self.huya_codec,
         }
         return '&'.join([f"{k}={v}" for k, v in anti_code.items()])
 
@@ -317,6 +322,16 @@ class Huya(DownloadBase):
             data = {k: v for k, v in data.items() if k not in ['HY', 'HUYA', 'HYZJ']}
             return dict(sorted(data.items(), key=lambda x: weights[x[0]], reverse=True))
         return {}
+
+
+    @staticmethod
+    def get_uid(uid: Union[str, int, None] = None) -> int:
+        try:
+            if isinstance(uid, str):
+                uid = int(uid)
+        except ValueError:
+            pass
+        return uid or random.randint(1400000000000, 1499999999999)
 
 
     async def get_anonymous_uid(self) -> int:
@@ -332,21 +347,44 @@ class Huya(DownloadBase):
                     "data": {},
                 }
             )
-            data = json_loads(rsp.text)
+            rsp = json_loads(rsp.text)
         except:
-            return random.randint(1400000000000, 1499999999999)
-        else:
-            return data['data']['uid']
+            rsp = {}
+        return rsp.get('data', {}).get('uid', self.get_uid())
 
 
     @staticmethod
-    def update_user_agent(headers: dict):
-        # copied from stream-rec commit b48c9cd
-        valid_ts = 20000308
-        current_ts = int(time.time())
-        version = str(current_ts)[-8:]
-        version = version if int(version) > valid_ts else (valid_ts + (current_ts / 100))
-        headers['user-agent'] = f"HYSDK(Windows, {version})"
+    def get_hyapp_ua() -> str:
+        hyapp_platform = 'huya_nftv' # adr or huya_nftv, pc_exe, webh5
+        hyapp_version = '2.5.1.3141' # adr/nftv: LocalVersion or "0.0.0" + hotfix_version, pc_exe: 6070100, ws: 2505091506
+        hyapp_channel = 'official' # adr: live, nftv/pc_exe: official, websocket
+        android_api_level = random.randint(28, 35) # Build.VERSION.SDK_INT
+        ua = f"{hyapp_platform}&{hyapp_version}&{hyapp_channel}"
+        return ua if hyapp_platform in {'pc_exe', 'webh5'} else f"{ua}&{android_api_level}"
+
+    @staticmethod
+    def get_hysdk_ua() -> str:
+        hysdk_platform = 'Android' # Android, Windows
+        hysdk_version = '30000002' # 30000002
+        return f"HYSDK({hysdk_platform}, {hysdk_version})"
+
+    @staticmethod
+    def get_hy_media_player_ua() -> str:
+        hy_mp_platform = 'android' # android
+        hy_mp_version = '20000313' # 20000313
+        return f"{hy_mp_platform}, {hy_mp_version}"
+
+    @staticmethod
+    def get_hy_trans_mod_ua() -> str:
+        hy_trans_mod_name = 'trans' # trans
+        hy_trans_mod_version = '1.24.99-rel-tv' # nftv: 1.24.99-rel-tv, adr: 2.22.13-rel, win: 2.21.0.4784
+        return f"{hy_trans_mod_name}&{hy_trans_mod_version}"
+
+    @staticmethod
+    def update_headers(headers: dict):
+        user_agent = f"{Huya.get_hy_media_player_ua()}_APP({Huya.get_hyapp_ua()})_SDK({Huya.get_hy_trans_mod_ua()})"
+        # user_agent = f"{Huya.get_hysdk_ua()}_APP({Huya.get_hyapp_ua()})_SDK({Huya.get_hy_trans_mod_ua()})"
+        headers['user-agent'] = user_agent
         headers['origin'] = HUYA_WEB_BASE_URL
 
 
