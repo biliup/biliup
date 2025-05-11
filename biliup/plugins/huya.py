@@ -40,9 +40,7 @@ class Huya(DownloadBase):
         self.huya_use_wup = config.get('huya_use_wup', True)
 
     async def acheck_stream(self, is_check=False):
-        # return False
-        self.huya_mobile_api = False
-        self.huya_imgplus = True
+
         try:
             if not self.__room_id.isdigit():
                 client.headers.update(self.fake_headers)
@@ -114,7 +112,7 @@ class Huya(DownloadBase):
             if not room_profile['live']:
                 logger.debug(f"{self.plugin_msg}: {room_profile['message']}")
                 return False
-            stream_urls = self.build_stream_urls(room_profile['streams_info'], is_xingxiu)
+            stream_urls = self.build_stream_urls(room_profile['streams_info'], skip_query_build)
 
         self.raw_stream_url = self.add_ratio(
             stream_urls[self.huya_cdn],
