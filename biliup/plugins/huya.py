@@ -37,11 +37,12 @@ class Huya(DownloadBase):
         self.huya_cdn_fallback = config.get('huya_cdn_fallback', False)
         self.huya_mobile_api = config.get('huya_mobile_api', False)
         self.huya_codec = config.get('huya_codec', '264')
+        self.huya_use_wup = config.get('huya_use_wup', True)
 
     async def acheck_stream(self, is_check=False):
         # return False
-        # self.huya_mobile_api = False
-        # self.huya_imgplus = False
+        self.huya_mobile_api = False
+        self.huya_imgplus = True
         try:
             if not self.__room_id.isdigit():
                 client.headers.update(self.fake_headers)
@@ -70,15 +71,17 @@ class Huya(DownloadBase):
 
         # self.room_title = room_profile['room_title']
 
-        is_xingxiu = (room_profile['gid'] == 1663)
-        skip_query_build = (is_xingxiu or self.huya_mobile_api) and self.huya_imgplus
+        # is_xingxiu = (room_profile['gid'] == 1663)
+        gid_blacklist = [1663, ]
+        skip_query_build = self.huya_imgplus and (self.huya_mobile_api or room_profile['gid'] in gid_blacklist)
         stream_urls = self.build_stream_urls(room_profile['streams_info'], skip_query_build)
         cdn_list = list(stream_urls.keys())
         if not self.huya_cdn or self.huya_cdn not in cdn_list:
             self.huya_cdn = cdn_list[0]
 
         # Thx stream-rec
-        self.update_headers(self.fake_headers)
+        if self.huya_use_wup:
+            self.update_headers(self.fake_headers)
 
         try:
             self.raw_stream_url = self.add_ratio(
