@@ -104,13 +104,16 @@ class DownloadBase(ABC):
         return True
 
     def download(self):
-        logger.info(f"{self.plugin_msg}: Start downloading {self.raw_stream_url}")
+        # print(f"{self.plugin_msg}: Plugin settings - {self.__dict__}")
+        logger.info(f"{self.plugin_msg}: Plugin settings - {self.__dict__}")
+        # logger.info(f"{self.plugin_msg}: Request headers - {self.fake_headers}")
+        logger.info(f"{self.plugin_msg}: Request url - {self.raw_stream_url}")
         # 调试使用边录边上传功能
         # self.downloader = 'sync-downloader'
         if self.is_download:
             if not shutil.which("ffmpeg"):
                 logger.error("未安装 FFMpeg 或不存在于 PATH 内")
-                logger.debug("Current user's PATH is:" + os.getenv("PATH"))
+                logger.info("Current user's PATH is:" + os.getenv("PATH"))
                 return False
             else:
                 return self.ffmpeg_segment_download()
@@ -119,7 +122,7 @@ class DownloadBase(ABC):
         if self.downloader != 'stream-gears':
             if not shutil.which("ffmpeg"):
                 logger.error("未安装 FFMpeg 或不存在于 PATH 内，本次下载使用 stream-gears")
-                logger.debug("Current user's PATH is:" + os.getenv("PATH"))
+                logger.info("Current user's PATH is:" + os.getenv("PATH"))
             else:
                 # 同步下载上传器
                 if self.downloader == 'sync-downloader':

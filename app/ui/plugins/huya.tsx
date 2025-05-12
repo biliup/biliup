@@ -120,8 +120,18 @@ const Huya: React.FC<Props> = props => {
         />
         <Form.Switch
           field="huya_mobile_api"
-          extraText="使用移动端API可以绕过 PCWEB 端对原画的时长限制"
-          label="虎牙使用移动端API（huya_mobile_api）"
+          extraText="移动端 API 请求直播间信息，可能解决部分直播分区 2 分钟分段问题"
+          label="使用移动端 API（huya_mobile_api）"
+          fieldStyle={{
+            alignSelf: 'stretch',
+            padding: 0,
+          }}
+        />
+        <Form.Switch
+          field="huya_use_wup"
+          extraText="使用 WUP 协议的请求头，可能解决部分直播分区 2 分钟分段问题"
+          label="使用 WUP 协议（huya_use_wup）"
+          initValue={entity?.hasOwnProperty('huya_use_wup') ? entity['huya_use_wup'] : true}
           fieldStyle={{
             alignSelf: 'stretch',
             padding: 0,
