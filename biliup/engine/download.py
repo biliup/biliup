@@ -554,8 +554,16 @@ def sync_download(stream_url, headers, segment_duration=60, max_file_size=100, o
         data = {**data, "name": stream_info['name']}
         if "title" not in data:
             data["title"] = stream_info.get("title", "")
-        data, _ = fmt_title_and_desc(data)
+        # 使用 fmt_title_and_desc 生成格式化后的标题和简介
+        # fmt_title_and_desc 返回 (data, context)，其中 context 中包含已格式化的 description
+        data, context_fmt = fmt_title_and_desc(data)
+
+        # 更新基本信息（含 format_title）
         stream_info.update(data)
+
+        # 若存在格式化后的简介，将其写入 stream_info，保证后续上传时使用正确的简介
+        if context_fmt.get('description'):
+            stream_info['description'] = context_fmt['description']
         logger.info(f"stream_info: {stream_info}")
         # 获取 BiliWebAsync.__init__ 的参数名
         init_params = inspect.signature(BiliWebAsync.__init__).parameters
