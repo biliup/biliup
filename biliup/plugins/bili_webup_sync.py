@@ -86,8 +86,6 @@ class BiliWebAsync(UploadBase):
 
         bili.login(self.persistence_path, self.user_cookie)
         videos.title = self.data["format_title"][:80]  # 稿件标题限制80字
-        # 保存初始稿件标题，供后续追加分 P 时复写使用
-        bili.origin_title = videos.title
         if self.credits:
             videos.desc_v2 = self.creditsToDesc_v2()
         else:
@@ -434,9 +432,8 @@ class BiliBili:
             videos = Data(**context_data)
 
         videos.append(video_part)  # 添加已经上传的视频
-        # 复写稿件标题，防止被分 P 标题覆盖
-        if getattr(self, 'origin_title', None):
-            videos.title = self.origin_title
+        # 每次提交前使用最新格式化标题覆盖，防止被分 P 标题覆盖，且支持模板实时更新
+        videos.title = self.video.title
         edit = False if videos.aid is None else True
         ret = self.submit(submit_api=submit_api, edit=edit, videos=videos)
         # logger.info(f"上传成功: {ret}")
