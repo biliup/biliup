@@ -32,53 +32,49 @@ class YoutubeLive(DownloadBase):
             'cookiefile': self.ytb_cookie,
             'ignoreerrors': True,
             'extractor_retries': 0,
-            'proxy': "socks5://127.0.0.1:7890",
+            # 'proxy': "socks5://127.0.0.1:7890",
         }
         try:
-            video_id = self.get_video_id_from_archive(f"{self.cache_dir}/archive.txt")
+            # video_id = self.get_video_id_from_archive(f"{self.cache_dir}/archive.txt")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(self.url, download=False)
-                # 有 video_id 则表示视频信息已缓存为文件
-                if not video_id:
-                    if not isinstance(info, dict):
-                        logger.error(f"{self.plugin_msg}: 获取错误")
-                        return False
-                    if info.get('live_status') != 'is_live':
-                        logger.debug(f"{self.plugin_msg}: 未开启直播")
-                        return False
-            if is_check:
-                archive_id = ydl._make_archive_id(info)
-                # 主动存储，防止下载进程再次提取
-                with open(f"{self.cache_dir}/archive.txt", 'a', encoding='utf-8') as f:
-                    f.write(f'{archive_id}\n')
-                # 存储提取之信息
-                with open(f"{self.cache_dir}/{info['id']}.json", 'w', encoding='utf-8') as f:
-                    json.dump(info, f, ensure_ascii=False, indent=4)
-                return True
-            try:
-                # 在直播链接下，默认只会存档一场直播
-                with open(f"{self.cache_dir}/archive.txt", 'r+', encoding='utf-8') as f:
-                    # 清空文件，让下载重试可以重新提取
-                    f.truncate(0)
-                with open(f"{self.cache_dir}/{video_id}.json", 'r', encoding='utf-8') as f:
-                    info = json.load(f)
+            # if is_check:
+                if not isinstance(info, dict):
+                    logger.debug(f"{self.plugin_msg}: 获取错误")
+                    return False
+                if info.get('live_status') != 'is_live':
+                    logger.debug(f"{self.plugin_msg}: 直播未开启或已结束")
+                    return False
+                # # 没有 video_id 则表示视频信息未缓存
+                # if not video_id:
+                #     # 主动存储，防止下载进程再次提取
+                #     archive_id = ydl._make_archive_id(info)
+                #     with open(f"{self.cache_dir}/archive.txt", 'a', encoding='utf-8') as f:
+                #         f.write(f'{archive_id}\n')
+                #     video_id = info['id']
+                #     # 存储提取之信息
+                #     with open(f"{self.cache_dir}/{video_id}.json", 'w', encoding='utf-8') as f:
+                #         json.dump(info, f, ensure_ascii=False, indent=4)
+                # return True
+                # with open(f"{self.cache_dir}/{video_id}.json", 'r', encoding='utf-8') as f:
+                #     info = json.load(f)
                 self.room_title = info['fulltitle']
                 self.live_cover_url = info['thumbnail']
                 self.__webpage_url = info['webpage_url']
                 self.raw_stream_url = info['manifest_url']
-            except KeyError:
-                logger.error(f"{self.plugin_msg}: 获取错误")
-                return False
+        except KeyError:
+            logger.error(f"{self.plugin_msg}: 提取错误 -> {info}")
+            return False
         except Exception as e:
-            logger.error(f"{self.plugin_msg}: 获取错误 -> {e}")
+            logger.error(f"{self.plugin_msg}: 提取错误 -> {e}")
             return False
         return True
 
     def download(self):
-        # 归档后封面不允许下载，需提前
+        # 归档后封面不允许下载，需提前下载
         self.use_live_cover = True
         if self.use_live_cover:
-            # 使用线程在后台下载封面，不阻塞主要下载流程
+            # 后台下载封面
             cover_thread = threading.Thread(
                 target=self.download_cover,
                 args=(self.fname,),
@@ -86,29 +82,39 @@ class YoutubeLive(DownloadBase):
             )
             cover_thread.start()
 
+        # 清理缓存
+        # os.remove(f"{self.cache_dir}/archive.txt")
+
+        # self.downloader = 'ytarchive'
+
         # stream-gears 和 streamlink(sync-downloader) 交给父类下载器来支持分段
         if self.downloader in ['stream-gears', 'streamlink', 'sync-downloader']:
             if self.downloader != 'stream-gears':
                 # 让 streamlink 自行提取
-                # self.raw_stream_url = self.__webpage_url
-                pass
+                self.raw_stream_url = self.__webpage_url
+                # pass
             return super().download()
 
         filename = self.gen_download_filename(is_fmt=True)
         yta_opts = {
-            'output': f"{self.cache_dir}/{filename}.{self.suffix}",
-            'proxy': "http://127.0.0.1:7890",
+            'temporary-dir': self.cache_dir,
+            'threads': 3,
+            'output': f"{filename}.{self.suffix}",
+            # 'proxy': "http://127.0.0.1:7890",
+            'cookies': self.ytb_cookie,
             'add-metadata': True,
+            'newline': True,
         }
         ydl_opts = {
             'outtmpl': f"{self.cache_dir}/{filename}.%(ext)s",
             'cookiefile': self.ytb_cookie,
             'break_on_reject': True,
             'format': 'best',
-            'proxy': "http://127.0.0.1:7890",
+            # 'proxy': "http://127.0.0.1:7890",
         }
 
         if self.downloader == 'ytarchive':
+            proc = None
             cmd_args = ['ytarchive']
             for key, value in yta_opts.items():
                 if value is True:
@@ -117,20 +123,27 @@ class YoutubeLive(DownloadBase):
                     cmd_args.append(f'--{key}')
                     cmd_args.append(str(value))
             cmd_args = [*cmd_args, self.__webpage_url, 'best']
+            print(cmd_args)
             try:
-                with subprocess.Popen(
+                proc = subprocess.Popen(
                     cmd_args,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    text=True
-                ) as proc:
-                    proc.wait()
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    # text=True
+                )
+                for line in iter(proc.stdout.readline, b''):
+                    decoded_line = line.decode('utf-8', errors='replace').rstrip()
+                    if 'Video Fragments:' in decoded_line:
+                        print(f'\r{decoded_line}', end='', flush=True)
+                    else:
+                        print(decoded_line)
             except Exception as e:
                 logger.error(f"{self.plugin_msg}: {e}")
             finally:
-                proc.terminate()
-                proc.wait()
-                proc.kill()
+                if proc:
+                    proc.wait(timeout=20)
+                    proc.terminate()
+                    proc.kill()
         else:
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -147,13 +160,12 @@ class YoutubeLive(DownloadBase):
             finally:
                 # 清理意外退出可能产生的多余文件
                 try:
-                    del ydl
                     shutil.rmtree(self.cache_dir)
                 except:
                     logger.error(f"{self.plugin_msg}: 清理残留文件失败 -> {self.cache_dir}")
 
-        if cover_thread.is_alive():
-            cover_thread.join()
+        if self.use_live_cover and cover_thread.is_alive():
+            cover_thread.join(timeout=20)
             cover_thread.close()
 
         return True
