@@ -228,8 +228,8 @@ class DownloadBase(ABC):
                     'streamlink',
                     '--stream-segment-threads', '3',
                     '--hls-playlist-reload-attempts', '1',
-                    '--http-proxy', 'http://127.0.0.1:7890',
-                    '--hls-live-restart',
+                    # '--http-proxy', 'http://127.0.0.1:7890',
+                    # '--hls-live-restart',
                 ]
                 for key, value in self.fake_headers.items():
                     streamlink_cmd.extend(['--http-header', f'{key}={value}'])
