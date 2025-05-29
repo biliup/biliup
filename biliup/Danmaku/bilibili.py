@@ -8,6 +8,7 @@ import brotli
 
 from biliup.plugins import match1
 from biliup.plugins import random_user_agent
+from biliup.plugins import wbi
 
 logger = logging.getLogger('biliup')
 
@@ -44,7 +45,14 @@ class Bilibili:
                                    timeout=5) as resp:
                     room_json = await resp.json()
                     room_id = room_json['data']['room_id']
-            async with session.get(f"https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?type=0&id={room_id}",
+            # 2025-05-29 B站新风控需要WBI
+            params = {
+                'id': str(room_id),
+                'type': '0',
+                'web_location': '444.8'
+            }
+            wbi.sign(params)
+            async with session.get(f"https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo",params=params,
                                    timeout=5) as resp:
                 danmu_info = await resp.json()
                 danmu_token = danmu_info['data']['token']
