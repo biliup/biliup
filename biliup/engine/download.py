@@ -105,7 +105,7 @@ class DownloadBase(ABC):
 
     def download(self):
         # print(f"{self.plugin_msg}: Plugin settings - {self.__dict__}")
-        logger.info(f"{self.plugin_msg}: Plugin settings - {self.__dict__}")
+        logger.debug(f"{self.plugin_msg}: Plugin settings - {self.__dict__}")
         # logger.info(f"{self.plugin_msg}: Request headers - {self.fake_headers}")
         logger.info(f"{self.plugin_msg}: Request url - {self.raw_stream_url}")
         # 调试使用边录边上传功能
@@ -227,7 +227,9 @@ class DownloadBase(ABC):
                 streamlink_cmd = [
                     'streamlink',
                     '--stream-segment-threads', '3',
-                    '--hls-playlist-reload-attempts', '1'
+                    '--hls-playlist-reload-attempts', '1',
+                    # '--http-proxy', 'http://127.0.0.1:7890',
+                    # '--hls-live-restart',
                 ]
                 for key, value in self.fake_headers.items():
                     streamlink_cmd.extend(['--http-header', f'{key}={value}'])
@@ -370,7 +372,7 @@ class DownloadBase(ABC):
             end_time = time.localtime()
 
         self.download_cover(
-            time.strftime(self.gen_download_filename().encode("unicode-escape").decode(), end_time if end_time else time.localtime()
+            time.strftime(self.gen_download_filename(), end_time if end_time else time.localtime()
                           ).encode().decode("unicode-escape"))
         # 更新数据库中封面存储路径
         with SessionLocal() as db:
@@ -493,9 +495,9 @@ class DownloadBase(ABC):
                 if os.path.exists(f"{fmt_file_name}.{self.suffix}"):
                     file_time += 1
                 else:
-                    return fmt_file_name
-        else:
-            return filename
+                    filename = fmt_file_name
+                    break
+        return filename.encode("unicode-escape").decode()
 
     @staticmethod
     def download_file_rename(old_file_name, file_name):

@@ -1,6 +1,9 @@
 import copy
+import json
 import os
 import shutil
+import subprocess
+import threading
 from typing import Optional
 
 import yt_dlp
@@ -12,7 +15,177 @@ from ..engine.decorators import Plugin
 from . import logger
 from ..engine.download import DownloadBase
 
-VALID_URL_BASE = r'https?://(?:(?:www|m)\.)?youtube\.com/(?P<id>.*?)\??(.*?)'
+VALID_URL_BASE = r'https?://(?:(?:www|m)\.)?youtube\.com/(?P<id>(?!.*?/live$).*?)\??(.*?)'
+VALID_URL_LIVE = r'https?://(?:(?:www|m)\.)?youtube\.com/(?P<id>.*?)/live'
+
+# proxy = "http://127.0.0.1:7890"
+proxy = None
+
+@Plugin.download(regexp=VALID_URL_LIVE)
+class YoutubeLive(DownloadBase):
+    def __init__(self, fname, url, suffix='flv'):
+        super().__init__(fname, url, suffix)
+        self.youtube_cookie = config.get('user', {}).get('youtube_cookie')
+        self.cache_dir = f"./cache/{self.__class__.__name__}/{self.fname}"
+        self.__webpage_url = None
+
+    async def acheck_stream(self, is_check=False):
+        ydl_opts = {
+            'download_archive': f"{self.cache_dir}/archive.txt",
+            'cookiefile': self.youtube_cookie,
+            'ignoreerrors': True,
+            'extractor_retries': 0,
+            'proxy': proxy,
+        }
+        try:
+            # video_id = self.get_video_id_from_archive(f"{self.cache_dir}/archive.txt")
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(self.url, download=False)
+            # if is_check:
+                if not isinstance(info, dict):
+                    logger.debug(f"{self.plugin_msg}: 获取错误")
+                    return False
+                if info.get('live_status') != 'is_live':
+                    logger.debug(f"{self.plugin_msg}: 直播未开启或已结束")
+                    return False
+                # # 没有 video_id 则表示视频信息未缓存
+                # if not video_id:
+                #     # 主动存储，防止下载进程再次提取
+                #     archive_id = ydl._make_archive_id(info)
+                #     with open(f"{self.cache_dir}/archive.txt", 'a', encoding='utf-8') as f:
+                #         f.write(f'{archive_id}\n')
+                #     video_id = info['id']
+                #     # 存储提取之信息
+                #     with open(f"{self.cache_dir}/{video_id}.json", 'w', encoding='utf-8') as f:
+                #         json.dump(info, f, ensure_ascii=False, indent=4)
+                # return True
+                # with open(f"{self.cache_dir}/{video_id}.json", 'r', encoding='utf-8') as f:
+                #     info = json.load(f)
+                self.room_title = info['fulltitle']
+                self.live_cover_url = info['thumbnail']
+                self.__webpage_url = info['webpage_url']
+                self.raw_stream_url = info['manifest_url']
+        except KeyError:
+            logger.error(f"{self.plugin_msg}: 提取错误 -> {info}")
+            return False
+        except Exception as e:
+            logger.error(f"{self.plugin_msg}: 提取错误 -> {e}")
+            return False
+        return True
+
+    def download(self):
+        # 归档后封面不允许下载，需提前下载
+        # self.use_live_cover = True
+        if self.use_live_cover:
+            # 后台下载封面
+            cover_thread = threading.Thread(
+                target=self.download_cover,
+                args=(self.fname,),
+                daemon=True
+            )
+            cover_thread.start()
+
+        # 清理缓存
+        # os.remove(f"{self.cache_dir}/archive.txt")
+
+        # self.downloader = 'ytarchive'
+
+        # 检查 cache_dir 属性是否存在，如果不存在则创建
+        if not hasattr(self, 'cache_dir'):
+            self.cache_dir = f"./cache/{self.__class__.__name__}/{self.fname}"
+
+        # stream-gears 和 streamlink(sync-downloader) 交给父类下载器来支持分段
+        if self.downloader in ['stream-gears', 'streamlink', 'sync-downloader']:
+            if self.downloader != 'stream-gears' and self.__webpage_url:
+                # 让 streamlink 自行提取
+                self.raw_stream_url = self.__webpage_url
+                # pass
+            return super().download()
+
+        filename = self.gen_download_filename(is_fmt=True)
+        yta_opts = {
+            'temporary-dir': self.cache_dir,
+            'threads': 3,
+            'output': f"{filename}.{self.suffix}",
+            'proxy': proxy,
+            'cookies': self.youtube_cookie,
+            'add-metadata': True,
+            'newline': True,
+        }
+        ydl_opts = {
+            'outtmpl': f"{self.cache_dir}/{filename}.%(ext)s",
+            'cookiefile': self.youtube_cookie,
+            'break_on_reject': True,
+            'format': 'best',
+            'proxy': proxy,
+        }
+
+        if self.downloader == 'ytarchive':
+            proc = None
+            cmd_args = ['ytarchive']
+            for key, value in yta_opts.items():
+                if value is True:
+                    cmd_args.append(f'--{key}')
+                elif value is not None:
+                    cmd_args.append(f'--{key}')
+                    cmd_args.append(str(value))
+            cmd_args = [*cmd_args, self.__webpage_url, 'best']
+            print(cmd_args)
+            try:
+                proc = subprocess.Popen(
+                    cmd_args,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    # text=True
+                )
+                for line in iter(proc.stdout.readline, b''):
+                    decoded_line = line.decode('utf-8', errors='replace').rstrip()
+                    if 'Video Fragments:' in decoded_line:
+                        print(f'\r{decoded_line}', end='', flush=True)
+                    else:
+                        print(decoded_line)
+            except Exception as e:
+                logger.error(f"{self.plugin_msg}: {e}")
+            finally:
+                if proc:
+                    proc.wait(timeout=20)
+                    proc.terminate()
+                    proc.kill()
+        else:
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([self.__webpage_url])
+                    # 下载成功的情况下移动到运行目录
+                    if os.path.exists(self.cache_dir):
+                        for file in os.listdir(self.cache_dir):
+                            shutil.move(f'{self.cache_dir}/{file}', '.')
+            except DownloadError as e:
+                if 'ffmpeg is not installed' in e.msg:
+                    logger.error(f"{self.plugin_msg}: ffmpeg未安装，无法下载")
+                else:
+                    logger.error(f"{self.plugin_msg}: {e.msg}")
+                return False
+            finally:
+                # 清理意外退出可能产生的多余文件
+                try:
+                    if os.path.exists(self.cache_dir):
+                        shutil.rmtree(self.cache_dir)
+                except:
+                    logger.error(f"{self.plugin_msg}: 清理残留文件失败 -> {self.cache_dir}")
+
+        if self.use_live_cover and cover_thread.is_alive():
+            cover_thread.join(timeout=20)
+            cover_thread.close()
+
+        return True
+
+
+    @staticmethod
+    def get_video_id_from_archive(file_path):
+        if not os.path.exists(file_path):
+            return None
+        with open(file_path, 'r+', encoding='utf-8') as f:
+            return f.read().strip().split(" ")[-1]
 
 
 @Plugin.download(regexp=VALID_URL_BASE)
@@ -29,6 +202,7 @@ class Youtube(DownloadBase):
         self.youtube_after_date = config.get('youtube_after_date')
         self.youtube_enable_download_live = config.get('youtube_enable_download_live', True)
         self.youtube_enable_download_playback = config.get('youtube_enable_download_playback', True)
+        self.is_live = False
         # 需要下载的 url
         self.download_url = None
 
@@ -38,6 +212,7 @@ class Youtube(DownloadBase):
             'cookiefile': self.youtube_cookie,
             'ignoreerrors': True,
             'extractor_retries': 0,
+            'proxy': proxy,
         }) as ydl:
             # 获取信息的时候不要过滤
             ydl_archive = copy.deepcopy(ydl.archive)
@@ -121,6 +296,7 @@ class Youtube(DownloadBase):
                     self.room_title = download_entry.get('title')
                     self.live_cover_url = download_entry.get('thumbnail')
                     self.download_url = download_entry.get('webpage_url')
+                    # self.is_live = download_entry.get('live_status') == 'is_live'
                 return True
             else:
                 return False
