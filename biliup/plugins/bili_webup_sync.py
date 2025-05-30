@@ -432,6 +432,8 @@ class BiliBili:
             videos = Data(**context_data)
 
         videos.append(video_part)  # 添加已经上传的视频
+        # 每次提交前使用最新格式化标题覆盖，防止被分 P 标题覆盖，且支持模板实时更新
+        videos.title = self.video.title
         edit = False if videos.aid is None else True
         ret = self.submit(submit_api=submit_api, edit=edit, videos=videos)
         # logger.info(f"上传成功: {ret}")
