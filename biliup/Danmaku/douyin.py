@@ -8,7 +8,7 @@ import aiohttp
 import json
 from urllib.parse import unquote
 from biliup.config import config
-from .douyin_util.dy_pb2 import ChatMessage, PushFrame, Response
+from .douyin_util.dy_pb2 import ChatMessage, PushFrame, Response, GiftMessage
 from biliup.plugins import match1
 from google.protobuf import json_format
 import logging
@@ -106,15 +106,32 @@ class Douyin:
 
         msgs = []
         for msg in payload_package.messagesList:
-            if msg.method == 'WebcastChatMessage':
-                chat_message = ChatMessage()
-                chat_message.ParseFromString(msg.payload)
-                data = json_format.MessageToDict(chat_message, preserving_proto_field_name=True)
-                # name = data['user']['nickName']
+            method = msg.method
+            payload = msg.payload
+            
+            if method == 'WebcastChatMessage':
+                message = ChatMessage()
+                message.ParseFromString(payload)
+                data = json_format.MessageToDict(message, preserving_proto_field_name=True)
+                name = data['user']['nickName']
+                uid = data['user']['id']
                 content = data['content']
                 # print(content)
                 # msg_dict = {"time": now, "name": name, "content": content, "msg_type": "danmaku", "color": "ffffff"}
-                msg_dict = {"content": content, "msg_type": "danmaku"}
+                msg_dict = {"name": name, "uid": uid, "content": content, "msg_type": "danmaku"}
+                msgs.append(msg_dict)
+            elif method == 'WebcastGiftMessage':
+                message = GiftMessage()
+                message.ParseFromString(payload)
+                data = json_format.MessageToDict(message, preserving_proto_field_name=True)
+                if 'combo' in data['gift'] and not 'repeatEnd' in data:
+                    continue
+                name = data['user']['nickName']
+                uid = data['user']['id']
+                gift_name = data['gift']['name']
+                diamond_count = data['gift']['diamondCount']
+                num = data['comboCount']
+                msg_dict = {"name": name, "uid": uid, "gift_name": gift_name, "num": num, "price": diamond_count, "msg_type": "gift"}
                 msgs.append(msg_dict)
 
         return msgs, ack
