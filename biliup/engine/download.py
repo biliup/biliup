@@ -105,7 +105,7 @@ class DownloadBase(ABC):
 
     def download(self):
         # print(f"{self.plugin_msg}: Plugin settings - {self.__dict__}")
-        logger.info(f"{self.plugin_msg}: Plugin settings - {self.__dict__}")
+        logger.debug(f"{self.plugin_msg}: Plugin settings - {self.__dict__}")
         # logger.info(f"{self.plugin_msg}: Request headers - {self.fake_headers}")
         logger.info(f"{self.plugin_msg}: Request url - {self.raw_stream_url}")
         # 调试使用边录边上传功能
@@ -227,7 +227,9 @@ class DownloadBase(ABC):
                 streamlink_cmd = [
                     'streamlink',
                     '--stream-segment-threads', '3',
-                    '--hls-playlist-reload-attempts', '1'
+                    '--hls-playlist-reload-attempts', '1',
+                    # '--http-proxy', 'http://127.0.0.1:7890',
+                    # '--hls-live-restart',
                 ]
                 for key, value in self.fake_headers.items():
                     streamlink_cmd.extend(['--http-header', f'{key}={value}'])
