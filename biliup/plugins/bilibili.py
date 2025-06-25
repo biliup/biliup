@@ -6,10 +6,11 @@ import random
 import hmac
 import hashlib
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Any, Optional
 from httpx import RequestError, HTTPStatusError
 
 from biliup.common.util import client
+from biliup.common.tools import NamedLock
 from biliup.config import config
 from biliup.plugins import match1, logger, wbi, json_loads
 from biliup.Danmaku import DanmakuClient
@@ -249,21 +250,23 @@ class Bililive(DownloadBase):
                 'web_location': WBI_WEB_LOCATION,
             }
             wbi.sign(params)
-            api_res = await client.get(
-                full_url, params=params, headers=self.fake_headers
+            resp = await client.get(
+                full_url, params=params, headers=self.fake_headers, cookies=self.__cookies
             )
-            api_res = json.loads(api_res.text)
-            if api_res['code'] != 0:
-                logger.error(f"{self.plugin_msg}: {api} 返回内容错误: {api_res}")
-                return {}
-            return api_res['data']
-        except json.JSONDecodeError:
-            logger.error(f"{self.plugin_msg}: {api} 返回内容错误: {api_res.text}")
+            resp.raise_for_status()
+            resp = json_loads(resp.text)
+            if resp['code'] != 0:
+                raise ValueError(f"{resp}")
+            return resp['data']
         except Exception as e:
             logger.error(f"{self.plugin_msg}: {api} 获取 play_info 失败 -> {e}", exc_info=True)
         return {}
 
-    async def get_master_m3u8(self, api: str, stream_name: str) -> dict:
+    async def get_master_playlist(
+            self,
+            api: str = BILILIVE_API,
+            stream_name: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         获取 Master playlist
         :param api: 接口地址
@@ -286,7 +289,10 @@ class Bililive(DownloadBase):
             params['stream_name'] = stream_name
         try:
             m3u8_res = await client.get(
-                full_url, params=params, headers=self.fake_headers
+                full_url,
+                params=params,
+                headers=self.fake_headers,
+                cookies=self.__cookies
             )
             if m3u8_res.status_code == 200 and m3u8_res.text.startswith("#EXTM3U"):
                 return self.parse_master_m3u8(m3u8_res.text)
@@ -313,7 +319,7 @@ class Bililive(DownloadBase):
                     if special_type in play_info['all_special_types'] and not self.__login_mid:
                         logger.warn(f"{self.plugin_msg}: 特殊直播{special_type}")
                     else:
-                        stream_urls = await self.get_master_m3u8(api)
+                        stream_urls = await self.get_master_playlist(api)
                         if stream_urls:
                             break
                 # 处理 API 信息
@@ -333,11 +339,12 @@ class Bililive(DownloadBase):
         # 空字典照常返回，重试交给上层方法处理
         return stream_urls
 
-    async def get_user_status(self) -> dict:
+    async def get_user_status(self) -> Dict[str, Any]:
         try:
             nav_res = await client.get(
                 'https://api.bilibili.com/x/web-interface/nav',
-                headers=self.fake_headers
+                headers=self.fake_headers,
+                cookies=self.__cookies
             )
             nav_res.raise_for_status()
             nav_res = json.loads(nav_res.text)
@@ -428,7 +435,7 @@ class Bililive(DownloadBase):
             return streams
         return {}
 
-    def parse_master_m3u8(self, m3u8_content: str) -> dict:
+    def parse_master_m3u8(self, m3u8_content: str) -> Dict[str, Dict[str, Dict[str, Any]]]:
         """
         Returns:
             {
@@ -497,13 +504,14 @@ class BililiveUtils:
         :param mid: 用户 mid，未登录时为 0
         :return: 已添加风控相关 cookies
         """
-        now = int(time.time())
-        entry = self._cookie_store.get(mid)
-        if entry and entry["expires"] > now:
-            return entry["cookies"]
-        full_cookies, expires = await self._refresh_cookies(user_cookies)
-        self._cookie_store[mid] = {"cookies": full_cookies, "expires": expires}
-        return full_cookies
+        with NamedLock("Bililive_cookie_get"):
+            now = int(time.time())
+            entry = self._cookie_store.get(mid)
+            if entry and entry["expires"] > now:
+                return entry["cookies"]
+            full_cookies, expires = await self._refresh_cookies(user_cookies)
+            self._cookie_store[mid] = {"cookies": full_cookies, "expires": expires}
+            return full_cookies
 
     async def get_all_cookies(self) -> dict:
         return self._cookie_store

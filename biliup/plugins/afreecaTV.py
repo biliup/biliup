@@ -5,11 +5,10 @@ import requests
 
 import biliup.common.util
 from biliup.config import config
-from ..common import tools
-from ..common.tools import NamedLock
-from ..engine.decorators import Plugin
-from ..engine.download import DownloadBase
-from ..plugins import match1, logger
+from biliup.common.tools import NamedLock
+from biliup.engine.decorators import Plugin
+from biliup.engine.download import DownloadBase
+from biliup.plugins import match1, logger
 
 # VALID_URL_BASE = r"https?://(.*?)\.afreecatv\.com/(?P<username>\w+)(?:/\d+)?"
 VALID_URL_BASE = r"https?://play\.afreecatv\.com/(?P<username>\w+)(?:/\d+)?"

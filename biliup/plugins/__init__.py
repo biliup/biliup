@@ -67,6 +67,7 @@ class Wbi:
         37, 48, 7,  16, 24, 55, 40, 61, 26, 17, 0,  1,  60, 51, 30, 4,
         22, 25, 54, 21, 56, 59, 6,  63, 57, 62, 11, 36, 20, 34, 44, 52,
     ]
+    KEY_LENGTH = 32
 
     def __init__(self):
         self.key = None
@@ -76,12 +77,16 @@ class Wbi:
         """
         更新 key，基于 img 和 sub 的组合。
         """
-        KEY_LENGTH = 32
-        full = img + sub
-        key = [full[self.KEY_MAP[i]] for i in range(KEY_LENGTH)]
-        self.key = ''.join(key)
-        self.last_update = int(time.time())
-        logger.info(f"Updated wbi key successfully")
+        try:
+            full = img + sub
+            key = [full[self.KEY_MAP[i]] for i in range(self.KEY_LENGTH)]
+            self.key = ''.join(key)
+            self.last_update = int(time.time())
+            logger.info(f"Updated wbi key successfully. New key: {self.key}")
+            
+        except Exception as e:
+            logger.error(f"Failed to update wbi key: {str(e)}")
+            raise
 
     def sign(self, query: dict, ts: Optional[int] = None):
         """

@@ -1,13 +1,11 @@
 import random
 import string
 import json
-import requests
 
 import biliup.common.util
-from . import logger
-from ..common import tools
-from ..engine.decorators import Plugin
-from ..engine.download import DownloadBase
+from biliup.plugins import logger
+from biliup.engine.decorators import Plugin
+from biliup.engine.download import DownloadBase
 
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m|live)\.)?acfun\.cn')
