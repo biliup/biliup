@@ -17,7 +17,7 @@ from typing import (
 logger = logging.getLogger('biliup')
 
 
-def match1(text, *patterns):
+def match1(text, *patterns) -> Optional[Union[str, List[str]]]:
     if len(patterns) == 1:
         pattern = patterns[0]
         match = re.search(pattern, text)
@@ -83,7 +83,7 @@ class Wbi:
         self.last_update = int(time.time())
         logger.info(f"Updated wbi key successfully")
 
-    def sign(self, query: dict, ts: int = None):
+    def sign(self, query: dict, ts: Optional[int] = None):
         """
         生成签名。
         :param query: 请求参数

@@ -5,17 +5,19 @@ import math
 import random
 import hmac
 import hashlib
-from typing import Dict, List, Any, Optional
+
+from typing import Dict, List, Optional
+from httpx import RequestError, HTTPStatusError
 
 from biliup.common.util import client
 from biliup.config import config
-from . import match1, logger, wbi, json_loads
+from biliup.plugins import match1, logger, wbi, json_loads
 from biliup.Danmaku import DanmakuClient
-from ..engine.decorators import Plugin
-from ..engine.download import DownloadBase
+from biliup.engine.decorators import Plugin
+from biliup.engine.download import DownloadBase
 
-
-OFFICIAL_API = "https://api.live.bilibili.com"
+BILIBILI_API = "https://api.bilibili.com"
+BILILIVE_API = "https://api.live.bilibili.com"
 STREAM_NAME_REGEXP = r"/live-bvc/\d+/(live_[^/\.]+)"
 WBI_WEB_LOCATION = "444.8"
 
@@ -23,9 +25,7 @@ WBI_WEB_LOCATION = "444.8"
 class Bililive(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
-        self.__cookies: Dict[str, Any] = dict()
-        self.__cookies_update_time: int = 0
-        self.__cookies_update_interval: int = 60 * 60 * 6 # 6 hours
+        self.__cookies: Dict[str, str] = dict()
         self.live_start_time: int = 0
         self.bilibili_danmaku: bool = config.get('bilibili_danmaku', False)
         self.bilibili_danmaku_detail: bool = config.get('bilibili_danmaku_detail', False)
@@ -39,8 +39,8 @@ class Bililive(DownloadBase):
         self.bili_cdn: List[str] = config.get('bili_cdn', [])
         self.bili_hls_timeout: int = config.get('bili_hls_transcode_timeout', 60)
         self.bili_api_list: List[str] = [
-            normalize_url(config.get('bili_liveapi', OFFICIAL_API)),
-            normalize_url(config.get('bili_fallback_api', OFFICIAL_API)).rstrip('/'),
+            normalize_url(config.get('bili_liveapi', BILILIVE_API)),
+            normalize_url(config.get('bili_fallback_api', BILILIVE_API)).rstrip('/'),
         ]
         self.bili_force_source: bool = config.get('bili_force_source', False)
         self.bili_anonymous_origin: bool = config.get('bili_anonymous_origin', False)
@@ -57,7 +57,7 @@ class Bililive(DownloadBase):
         if "b23.tv" in self.url:
             try:
                 resp = await client.get(self.url, follow_redirects=False)
-                if resp.status_code not in {301, 302}:
+                if resp.status_code not in {301, 302} or resp.next_request is None:
                     raise Exception("不支持的链接")
                 url = str(resp.next_request.url)
                 if "live.bilibili" not in url:
@@ -67,10 +67,10 @@ class Bililive(DownloadBase):
                 logger.error(f"{self.plugin_msg}: {e}")
                 return False
 
-
-        await self.update_cookies()
-        room_id: str = match1(self.url, r'bilibili.com/(\d+)')
         self.fake_headers['referer'] = self.url
+        room_id = match1(self.url, r'bilibili.com/(\d+)')
+        client.headers.update(self.fake_headers)
+        await self.load_cookies()
 
         # 获取直播状态与房间标题
         try:
@@ -80,7 +80,7 @@ class Bililive(DownloadBase):
             }
             wbi.sign(params)
             room_info = await client.get(
-                f"{OFFICIAL_API}/xlive/web-room/v1/index/getInfoByRoom",
+                f"{BILILIVE_API}/xlive/web-room/v1/index/getInfoByRoom",
                 params=params,
                 headers=self.fake_headers,
                 cookies=self.__cookies
@@ -104,7 +104,7 @@ class Bililive(DownloadBase):
         self.room_title = room_info['room_info']['title']
         self.__real_room_id = room_info['room_info']['room_id']
         live_start_time = room_info['room_info']['live_start_time']
-        special_type = room_info['room_info']['special_type'] # 0: 公开直播, 1: 大航海专属
+        special_type = room_info['room_info']['special_type'] # 0: 公开直播, 1: 付费公开直播
         if live_start_time > self.live_start_time:
             self.live_start_time = live_start_time
             is_new_live = True
@@ -113,8 +113,6 @@ class Bililive(DownloadBase):
 
         if is_check:
             return True
-        else:
-            self.__login_mid = await self.check_login_status()
 
         # 复用原画 m3u8 流
         if  self.raw_stream_url is not None \
@@ -230,7 +228,6 @@ class Bililive(DownloadBase):
                 }
             )
 
-
     async def get_play_info(self, api: str, qn: int = 10000) -> dict:
         full_url = f"{api}/xlive/web-room/v2/index/getRoomPlayInfo"
         try:
@@ -266,18 +263,27 @@ class Bililive(DownloadBase):
             logger.error(f"{self.plugin_msg}: {api} 获取 play_info 失败 -> {e}", exc_info=True)
         return {}
 
-    async def get_master_m3u8(self, api: str) -> dict:
-        full_url = f"{api}/xlive/web-room/v2/index/master_playurl"
+    async def get_master_m3u8(self, api: str, stream_name: str) -> dict:
+        """
+        获取 Master playlist
+        :param api: 接口地址
+        :param stream_name: 流名称，用于选择 Codec
+        :return: 解析后的流信息
+        """
+        full_url = f"{api}/xlive/play-gateway/master/url"
         params = {
             "cid": self.__real_room_id,
             "mid": self.__login_mid,
             "pt": "html5", # platform
             # "p2p_type": "-1",
-            # "net": 0,
+            # "net": 0, # 网络类型；0: 有线, 1: Wlan
             # "free_type": 0,
             # "build": 0,
             # "feature": 2 # 1:? 2:?
+            "qn": self.bili_qn,
         }
+        if stream_name:
+            params['stream_name'] = stream_name
         try:
             m3u8_res = await client.get(
                 full_url, params=params, headers=self.fake_headers
@@ -374,7 +380,7 @@ class Bililive(DownloadBase):
         try:
             data = await self.get_user_status()
             if data.get('isLogin'):
-                logger.info(f"用户名：{data['uname']}, mid: {data['mid']}")
+                logger.info(f"{self.plugin_msg}: Login test -> 用户名：{data['uname']}, mid: {data['mid']}")
                 return data['mid']
             else:
                 logger.warning(f"{self.plugin_msg}: 未登录，或将只能录制到最低画质。")
@@ -420,7 +426,7 @@ class Bililive(DownloadBase):
                     'suffix': match1(info['extra'], suffix_regexp)
                 })
             return streams
-
+        return {}
 
     def parse_master_m3u8(self, m3u8_content: str) -> dict:
         """
@@ -460,146 +466,177 @@ class Bililive(DownloadBase):
 
         return dict(sorted(result.items(), key=lambda x: int(x[0]), reverse=True))
 
-
-    async def update_cookies(self):
+    async def load_cookies(self):
         if self.bili_cookie:
             for cookie in self.bili_cookie.split(';'):
                 name, value = cookie.split('=', 1)
-                self.__cookies[name] = value
         if self.bili_cookie_file:
             try:
                 with open(self.bili_cookie_file, encoding='utf-8') as stream:
                     _cookies = json.load(stream)["cookie_info"]["cookies"]
                     for i in _cookies:
                         self.__cookies[i['name']] = i['value']
-            except Exception:
+            except (json.JSONDecodeError, FileNotFoundError, KeyError):
                 logger.exception("load_cookies error")
-        if int(time.time()) - self.__cookies_update_time >= self.__cookies_update_interval:
-            self.__cookies.update(self.gen_b_nut())
-            self.__cookies.update(await self.get_buvid())
-            self.__cookies.update(await self.get_bili_ticket())
-            self.__cookies.update(self.gen_b_lsid())
-            self.__cookies.update(self.gen_uuid())
-            self.__cookies_update_time = int(time.time())
-        print(self.__cookies)
+        self.__login_mid = await self.check_login_status()
+        if self.__login_mid == 0:
+            logger.debug(f"{self.plugin_msg}: 登录校验失败，清空 cookie")
+            self.__cookies = {}
+        self.__cookies.update(await (bililive_utils.get_risk_cookies(self.__cookies, self.__login_mid)))
+        # print(self.__cookies)
 
+class BililiveUtils:
+    def __init__(self):
+        # _cookie_store: {mid: {"cookies": dict, "expires": timestamp}}
+        self._cookie_store = {}
 
-    async def get_buvid(self) -> Dict:
+    async def get_risk_cookies(self, user_cookies: Optional[dict] = None, mid: int = 0) -> dict:
+        """
+        获取风控相关 cookies
+        :param user_cookies: 已登录用户 cookies
+        :param mid: 用户 mid，未登录时为 0
+        :return: 已添加风控相关 cookies
+        """
+        now = int(time.time())
+        entry = self._cookie_store.get(mid)
+        if entry and entry["expires"] > now:
+            return entry["cookies"]
+        full_cookies, expires = await self._refresh_cookies(user_cookies)
+        self._cookie_store[mid] = {"cookies": full_cookies, "expires": expires}
+        return full_cookies
+
+    async def get_all_cookies(self) -> dict:
+        return self._cookie_store
+
+    async def _refresh_cookies(self, cookies: Optional[dict] = None):
+        # 更新风控相关 cookies
+        expire_time = 60 * 60 * 6
+        full_cookies = {} if cookies is None else cookies
+        full_cookies.update(self._gen_b_nut())
+        full_cookies.update(self._gen_b_lsid())
+        full_cookies.update(self._gen_uuid())
+        full_cookies.update(await self._get_buvid())
+        full_cookies.update(await self._get_bili_ticket(cookies))
+        return full_cookies, int(time.time()) + expire_time
+
+    @staticmethod
+    async def _get_buvid(cookies: Optional[dict] = None) -> Dict[str, str]:
+        """
+        :param cookies: 任意用户 Cookies（可选）
+        :return: 获取到的 buvid3 和 buvid4
+        """
+        if not cookies:
+            cookies = {}
         result = {}
+        full_url = f"{BILIBILI_API}/x/frontend/finger/spi"
         try:
-            resp = await client.get(
-                'https://api.bilibili.com/x/frontend/finger/spi',
-                headers=self.fake_headers,
-                cookies=self.__cookies
-            )
+            resp = await client.get(full_url, cookies=cookies)
             resp.raise_for_status()
             resp = json_loads(resp.text)
             if resp['code'] != 0:
-                raise ValueError(f"{resp}")
+                raise ValueError(f"Error content {resp}")
             result = {
                 'buvid3': resp['data']['b_3'],
                 'buvid4': resp['data']['b_4'],
             }
-        except Exception as e:
-            logger.error(f"{self.plugin_msg}: 获取 buvid 失败 {e}", exc_info=True)
+        except RequestError as e:
+            logger.warning(f"请求 {full_url} 失败 -> {e}")
+        except (ValueError, HTTPStatusError) as e:
+            logger.error(f"获取 buvid 失败 {e}")
         return result
 
-
-    async def get_bili_ticket(self) -> Dict:
-        def hmac_sha256(key: str, data: str) -> str:
-            return hmac.new(
-                key.encode('utf-8'), data.encode('utf-8'), hashlib.sha256
-            ).hexdigest()
+    @staticmethod
+    async def _get_bili_ticket(cookies: Optional[dict] = None) -> Dict[str, str]:
+        """
+        :param cookies: 已登录用户的Cookies（可选）
+        :return: 包含 bili_ticket 和 bili_ticket_expires 的字典
+        """
         result = {}
+        if not cookies:
+            cookies = {}
         context = {
             'ts': str(int(time.time())),
         }
+        full_url = f"{BILIBILI_API}/bapis/bilibili.api.ticket.v1.Ticket/GenWebTicket"
         try:
-            # 构建用于签名的字符串
             sign_data = ''.join(f"{k}{v}" for k, v in context.items())
             params = {
                 'key_id': 'ec02',
                 'hexsign': hmac_sha256("XgwSnGZ1p", sign_data),
-                'csrf': self.__cookies.get('bili_jct', ''),
+                'csrf': cookies.get('bili_jct', ''),
                 **{f'context[{k}]': v for k, v in context.items()}
             }
-            resp = await client.post(
-                'https://api.bilibili.com/bapis/bilibili.api.ticket.v1.Ticket/GenWebTicket',
-                headers=self.fake_headers,
-                params=params,
-                cookies=self.__cookies
-            )
+            resp = await client.post(full_url, params=params, cookies=cookies)
             resp.raise_for_status()
             resp = json_loads(resp.text)
             if resp['code'] != 0:
                 raise ValueError(f"{resp}")
             result = {
                 'bili_ticket': resp['data']['ticket'],
-                'bili_ticket_expires': str(resp['data']['created_at'] + resp['data']['ttl']),
+                'bili_ticket_expires': str(int(resp['data']['created_at'] + resp['data']['ttl']))
             }
-        except Exception as e:
-            logger.error(f"{self.plugin_msg}: 获取 bili_ticket 失败 {e}", exc_info=True)
+        except RequestError as e:
+            logger.warning(f"请求 {full_url} 失败 -> {e}")
+        except (ValueError, HTTPStatusError) as e:
+            logger.error(f"获取 buvid 失败 {e}")
         return result
 
-
-    def gen_b_lsid(self, millisecond=None) -> Dict:
+    @staticmethod
+    def _gen_b_lsid(timestamp: Optional[int]=None) -> Dict[str, str]:
         """
-        Args:
-            millisecond: 时间戳（毫秒），如果为None则使用当前时间
-
-        Returns:
-            Dict: {'b_lsid': cookie_value}
+        生成 b_lsid cookie
+        :param timestamp: 时间戳（可选）
+        :return: 包含 b_lsid 的字典
         """
-        def o(e):
-            return format(math.ceil(e), 'X')
-        def a(length: int):
-            t = ""
-            for _ in range(length):
-                t += o(16 * random.random())
-            return pad_string(t, length)
-        if millisecond is None:
-            millisecond = int(time.time())
-        t = o(millisecond)
-        r = f"{a(8)}_{t}"
-        return {
-            'b_lsid': r,
-        }
+        if not timestamp:
+            timestamp = int(time.time())
+        # 生成8位随机字符串
+        random_part = ''.join(format(math.ceil(random.random() * 16), 'X') for _ in range(8))
+        # 确保长度为8，不足则补0
+        random_part = random_part.zfill(8)
+        # 时间戳部分
+        time_part = format(timestamp, 'X')
+        b_lsid = f"{random_part}_{time_part}"
+        return {'b_lsid': b_lsid}
 
+    @staticmethod
+    def _gen_uuid() -> Dict[str, str]:
+        """
+        生成 _uuid cookie
+        :return: 包含 _uuid 的字典
+        """
+        # 生成UUID各部分
+        parts = []
+        lengths = [8, 4, 4, 4, 12]
+        for length in lengths:
+            hex_str = ''.join(format(int(random.random() * 16), 'x') for _ in range(length))
+            # 确保长度正确，不足则补0
+            hex_str = hex_str.zfill(length)
+            parts.append(hex_str)
+        # 时间戳后缀
+        timestamp_suffix = str(int(time.time()) % 100).zfill(5)
+        # 组合UUID
+        uuid_value = f"{'-'.join(parts)}{timestamp_suffix}infoc"
+        return {'_uuid': uuid_value}
 
-    def gen_uuid(self) -> Dict:
-        def o(length: int):
-            result = ""
-            for _ in range(length):
-                result += format(int(16 * random.random()), 'x')
-            return pad_string(result, length)
-
-        # Get current timestamp and format last 5 digits
-        timestamp_part = pad_string(str(int(time.time()) % 100), 5)
-
-        # Combine all parts
-        return {
-            '_uuid': f"{o(8)}-{o(4)}-{o(4)}-{o(4)}-{o(12)}{timestamp_part}infoc",
-        }
-
-
-    def gen_b_nut(self) -> Dict:
-        return {
-            'b_nut': str(int(time.time())),
-        }
-
-
+    @staticmethod
+    def _gen_b_nut() -> Dict[str, str]:
+        """
+        生成 b_nut cookie
+        :return: 包含 b_nut 的字典
+        """
+        return {'b_nut': str(int(time.time()))}
 
 def pad_string(string: str, target_length: int) -> str:
     """Pad string with leading zeros to reach target length"""
     padding = "0" * max((target_length - len(string)), 0)
     return f"{padding}{string}"
 
-
 # Copy from room-player.js
 def check_areablock(data):
-    '''
+    """
     :return: True if area block
-    '''
+    """
     if not data['playurl_info']['playurl']:
         logger.error('Sorry, bilibili is currently not available in your country according to copyright restrictions.')
         logger.error('非常抱歉，根据版权方要求，您所在的地区无法观看本直播')
@@ -607,4 +644,31 @@ def check_areablock(data):
     return False
 
 def normalize_url(url: str) -> str:
-    return OFFICIAL_API if not url else (url if url.startswith(('http://', 'https://')) else 'http://' + url).rstrip('/')
+    return BILILIVE_API if not url else (url if url.startswith(('http://', 'https://')) else 'http://' + url).rstrip('/')
+
+def hmac_sha256(key: str, data: str) -> str:
+    return hmac.new(
+        key.encode('utf-8'), data.encode('utf-8'), hashlib.sha256
+    ).hexdigest()
+
+bililive_utils = BililiveUtils()
+
+# if __name__ == "__main__":
+#     import asyncio
+#     async def main():
+#         # bililive_utils = BililiveUtils()
+#         headers = {
+#             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+#             'Referer': 'https://live.bilibili.com',
+#             'Origin': 'https://live.bilibili.com',
+#             'Accept': '*/*',
+#             'Cache-Control': 'no-cache',
+#             'Host': 'api.bilibili.com',
+#             'Connection': 'keep-alive'
+#         }
+#         client.headers.update(headers)
+#         cookies = await bililive_utils.get_risk_cookies()
+#         print(cookies)
+#         all_cookies = await bililive_utils.get_all_cookies()
+#         print(all_cookies)
+#     asyncio.run(main())
