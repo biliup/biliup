@@ -45,6 +45,14 @@ class Bilibili:
                                    timeout=5) as resp:
                     room_json = await resp.json()
                     room_id = room_json['data']['room_id']
+            # 2025-06-28 B站新风控需要cookies中存在buvid3
+            current_cookie = Bilibili.headers.get('cookie', '')
+            if current_cookie and 'buvid3' not in current_cookie:
+                async with session.get("https://api.bilibili.com/x/frontend/finger/spi",
+                                   timeout=5) as resp:
+                    buvid_json = await resp.json()
+                    current_cookie += f"buvid3={buvid_json['data']['b_3']};buvid4={buvid_json['data']['b_4']};"
+                    Bilibili.headers['cookie'] = current_cookie
             # 2025-05-29 B站新风控需要WBI
             params = {
                 'id': str(room_id),
@@ -52,7 +60,7 @@ class Bilibili:
                 'web_location': '444.8'
             }
             wbi.sign(params)
-            async with session.get(f"https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo",params=params,
+            async with session.get(f"https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo",headers=Bilibili.headers,params=params,
                                    timeout=5) as resp:
                 danmu_info = await resp.json()
                 danmu_token = danmu_info['data']['token']
