@@ -56,7 +56,7 @@ class Bilibili:
             async with session.get(f"https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo",params=params,
                                    timeout=5) as resp:
                 danmu_info = await resp.json()
-                print(danmu_info)
+                #print(danmu_info)
                 danmu_token = danmu_info['data']['token']
                 try:
                     # 允许可能获取不到返回的host
