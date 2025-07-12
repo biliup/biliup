@@ -34,8 +34,8 @@ class Bilibili:
         if uid > 0:
             Bilibili.headers['cookie'] = content['cookie']
         else:
-            Bilibili.headers['cookie'] = ""
-
+            Bilibili.headers['cookie'] = "buvid3=11111"
+            
         # 获取弹幕认证信息
         danmu_wss_url = 'wss://broadcastlv.chat.bilibili.com/sub'
         room_id = content.get('room_id')
@@ -52,6 +52,7 @@ class Bilibili:
                 'web_location': '444.8'
             }
             wbi.sign(params)
+            
             async with session.get(f"https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo",params=params,
                                    timeout=5) as resp:
                 danmu_info = await resp.json()

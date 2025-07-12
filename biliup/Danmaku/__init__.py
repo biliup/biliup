@@ -337,6 +337,10 @@ class DanmakuClient(IDanmakuClient):
                 except self.WebsocketErrorException:
                     # 连接断开等30秒重连
                     # 在关闭之前一直重试
+                    if self.__u == 'live.bilibili.com' and self.__content['uid'] != 0:
+                        self.__content['uid'] = 0
+                        logger.warning(f"{DanmakuClient.__name__}:{self.__url}: 弹幕连接异常,降级至非完整弹幕")
+                        continue
                     logger.warning(f"{DanmakuClient.__name__}:{self.__url}: 弹幕连接异常,将在 30 秒后重试")
                 except:
                     # 记录异常不到外部处理
