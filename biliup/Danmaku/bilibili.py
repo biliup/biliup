@@ -23,18 +23,18 @@ class Bilibili:
         'accept-language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
         'user-agent': random_user_agent(),
         'origin': 'https://live.bilibili.com',
-        'referer': 'https://live.bilibili.com'
+        'referer': 'https://live.bilibili.com',
+        'cookie': ""
     }
 
     @staticmethod
     async def get_ws_info(url, content):
 
         uid = content['uid']
-        # 传入内容中，如果 uid 不为 0，则 cookie 必然存在，且必然为详细模式
-        if uid > 0:
-            Bilibili.headers['cookie'] = content['cookie']
-        else:
-            Bilibili.headers['cookie'] = ""
+        # 默认存在风控Cookie
+        if content.get('cookie'):
+            for k, v in content.get('cookie').items():
+                Bilibili.headers['cookie'] += f"{k}={v};"
 
         # 获取弹幕认证信息
         danmu_wss_url = 'wss://broadcastlv.chat.bilibili.com/sub'

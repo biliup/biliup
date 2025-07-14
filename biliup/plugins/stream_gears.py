@@ -3,8 +3,8 @@ import time
 import stream_gears
 from typing import List
 
-from ..engine import Plugin
-from ..engine.upload import UploadBase, logger
+from biliup.engine import Plugin
+from biliup.engine.upload import UploadBase, logger
 
 
 @Plugin.upload(platform="stream_gears")
