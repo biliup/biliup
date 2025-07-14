@@ -1,5 +1,5 @@
 # Build biliup's web-ui
-FROM node:lts as webui
+FROM node:lts AS webui
 ARG repo_url=https://github.com/biliup/biliup
 ARG branch_name=master
 RUN set -eux; \
@@ -9,10 +9,13 @@ RUN set -eux; \
 	npm run build
 
 # Deploy Biliup
-FROM python:3.12-slim as biliup
+FROM python:3.12-slim AS biliup
 ARG repo_url=https://github.com/biliup/biliup
 ARG branch_name=master
-ENV TZ=Asia/Shanghai
+ENV TZ="Asia/Shanghai"
+ENV LANG="C.UTF-8"
+ENV LANGUAGE="C.UTF-8"
+ENV LC_ALL="C.UTF-8"
 EXPOSE 19159/tcp
 VOLUME /opt
 
