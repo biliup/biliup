@@ -8,7 +8,7 @@ import brotli
 
 from biliup.plugins import match1
 from biliup.plugins import random_user_agent
-from biliup.plugins import wbi
+from biliup.plugins import wbi, generate_fake_buvid3
 
 logger = logging.getLogger('biliup')
 
@@ -31,11 +31,11 @@ class Bilibili:
 
         uid = content['uid']
         # 传入内容中，如果 uid 不为 0，则 cookie 必然存在，且必然为详细模式
+        Bilibili.headers['cookie'] = f"buvid3={generate_fake_buvid3()};"
         if uid > 0:
-            Bilibili.headers['cookie'] = content['cookie']
-        else:
-            Bilibili.headers['cookie'] = ""
-
+            Bilibili.headers['cookie'] += content['cookie']
+            
+            
         # 获取弹幕认证信息
         danmu_wss_url = 'wss://broadcastlv.chat.bilibili.com/sub'
         room_id = content.get('room_id')
@@ -52,9 +52,11 @@ class Bilibili:
                 'web_location': '444.8'
             }
             wbi.sign(params)
+            
             async with session.get(f"https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo",params=params,
                                    timeout=5) as resp:
                 danmu_info = await resp.json()
+                #print(danmu_info)
                 danmu_token = danmu_info['data']['token']
                 try:
                     # 允许可能获取不到返回的host

@@ -3,6 +3,7 @@ import re
 import hashlib
 import time
 import json
+import uuid
 from urllib.parse import urlencode, quote
 from typing import (
     Any,
@@ -55,6 +56,11 @@ def json_loads(text: Union[str, None]) -> Dict[str, Any]:
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid JSON: {text}") from e
 
+def generate_fake_buvid3():
+    u = uuid.uuid4()
+    u_str = str(u).upper().replace('-', '')
+    formatted = f"{u_str[0:8]}-{u_str[8:12]}-{u_str[12:16]}-{u_str[16:20]}-{u_str[20:]}infoc"
+    return formatted
 
 class Wbi:
     WTS = "wts"
