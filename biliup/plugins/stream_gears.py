@@ -78,7 +78,7 @@ class BiliWeb(UploadBase):
         dtime = None
         if self.dtime:
             dtime = int(time.time() + self.dtime)
-        stream_gears.upload(
+        stream_gears.upload_by_app(
             video_path=file_list,
             cookie_file=self.user_cookie,
             title=self.data["format_title"][:80],
