@@ -34,7 +34,7 @@ class BiliWeb(UploadBase):
         data,
         user,
         user_cookie='cookies.json',
-        submit_api: Optional[str] = None,
+        submit_api: Optional[str] = 'web',
         copyright: int = 2,
         postprocessor: Optional[Callable] = None,
         dtime: Optional[int] = None,
@@ -650,7 +650,7 @@ class BiliBili:
         async with aiohttp.ClientSession() as session:
             await asyncio.gather(*[upload_chunk() for _ in range(tasks)])
 
-    def submit(self, submit_api=None):
+    def submit(self, submit_api: Optional[str] = 'web'):
         if not self.video.title:
             self.video.title = self.video.videos[0]["title"]
         self.__session.get('https://member.bilibili.com/x/geetest/pre/add', timeout=5)
@@ -665,21 +665,16 @@ class BiliBili:
             else:
                 user_weight = 1
             logger.info(f'用户权重: {user_weight}')
-            submit_api = 'web' if user_weight == 2 else 'client'
+            submit_api = 'web'
         ret = None
         if submit_api == 'web':
             ret = self.submit_web()
-            if ret["code"] == 21138:
-                logger.info(f'改用客户端接口提交{ret}')
-                submit_api = 'client'
-        if submit_api == 'client':
-            ret = self.submit_client()
+            if ret["code"] != 0:
+                logger.error(f'网页端接口提交失败: {ret}')
+                raise Exception(ret)
         if not ret:
             raise Exception(f'不存在的选项：{submit_api}')
-        if ret["code"] == 0:
-            return ret
-        else:
-            raise Exception(ret)
+        return ret
 
     def submit_web(self):
         logger.info('使用网页端api提交')
