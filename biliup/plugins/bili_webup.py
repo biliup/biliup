@@ -11,7 +11,7 @@ import urllib.parse
 from dataclasses import asdict, dataclass, field, InitVar
 from json import JSONDecodeError
 from os.path import splitext, basename
-from typing import Union, Any, List
+from typing import Union, Any, List, Optional, Callable
 from urllib import parse
 from urllib.parse import quote
 
@@ -29,17 +29,50 @@ from ..engine.upload import UploadBase, logger
 @Plugin.upload(platform="bili_web")
 class BiliWeb(UploadBase):
     def __init__(
-            self, principal, data, user, submit_api=None, copyright=2, postprocessor=None, dtime=None,
-            dynamic='', lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description='', credits=[]
+        self,
+        principal,
+        data,
+        user,
+        user_cookie='cookies.json',
+        submit_api: Optional[str] = None,
+        copyright: int = 2,
+        postprocessor: Optional[Callable] = None,
+        dtime: Optional[int] = None,
+        dynamic='',
+        lines: Optional[str] = 'AUTO',
+        threads: int = 3,
+        tid: int = 122,
+        tags: Optional[List[str]] = None,
+        cover_path=None,
+        description='',
+        credits=[],
     ):
+        """
+        :param principal:
+        :param data:
+        :param user_cookie: 投稿用户cookie文件
+        :param submit_api:
+        :param copyright:
+        :param postprocessor:
+        :param dtime: 延时发布时间。需距离提交大于4小时，格式为10位时间戳
+        :param dynamic:
+        :param lines: 上传线路
+        :param threads: 上传线程数
+        :param tid: 稿件分区
+        :param tags: 稿件标签
+        :param cover_path: 稿件封面路径
+        :param description: 视频简介
+        :param credits: ???
+        """
         super().__init__(principal, data, persistence_path='bili.cookie', postprocessor=postprocessor)
         if tags is None:
             tags = []
         else:
             tags = [str(tag).format(streamer=self.data['name']) for tag in tags]
-        self.user = user
+        self.user = user # 旧版本的登录用户
+        self.user_cookie = user_cookie # 新版本的登录用户cookie文件
         self.lines = lines
-        self.submit_api = submit_api
+        self.submit_api = submit_api or 'web'
         self.threads = threads
         self.tid = tid
         self.tags = tags
@@ -50,13 +83,24 @@ class BiliWeb(UploadBase):
         self.copyright = copyright
         self.dtime = dtime
 
-    def upload(self, file_list: List[UploadBase.FileInfo]) -> List[UploadBase.FileInfo]:
+    def upload(
+        self,
+        file_list: List[UploadBase.FileInfo],
+        database_row_id: int = 0
+    ) -> List[UploadBase.FileInfo]:
+        '''
+        上传视频
+        :param file_list: 视频文件名列表
+        :param database_row_id: 数据库行ID
+        :return: 上传结果
+        '''
+        logger.info(f"开始上传视频 {database_row_id}")
         video = Data()
         video.dynamic = self.dynamic
         with BiliBili(video) as bili:
             bili.app_key = self.user.get('app_key')
             bili.appsec = self.user.get('appsec')
-            bili.login(self.persistence_path, self.user)
+            bili.login(self.persistence_path, self.user_cookie)
             for file in file_list:
                 video_part = bili.upload_file(file.video, self.lines, self.threads)  # 上传视频
                 video_part['title'] = video_part['title'][:80]
@@ -186,17 +230,11 @@ class BiliBili:
         response = self.__session.get('http://api.bilibili.com/x/space/myinfo')
         return response.json()
 
-    def login(self, persistence_path, user):
-        self.persistence_path = persistence_path
-        if os.path.isfile(persistence_path):
+    def login(self, persistence_path, user_cookie):
+        self.persistence_path = user_cookie
+        if os.path.isfile(self.persistence_path):
             print('使用持久化内容上传')
             self.load()
-        if user.get('cookies'):
-            self.cookies = user['cookies']
-        if user.get('access_token'):
-            self.access_token = user['access_token']
-        if user.get('account'):
-            self.account = user['account']
         if self.cookies:
             try:
                 self.login_by_cookies(self.cookies)
@@ -211,7 +249,8 @@ class BiliBili:
         try:
             with open(self.persistence_path) as f:
                 self.cookies = json.load(f)
-                self.access_token = self.cookies['access_token']
+                self.access_token = self.cookies['token_info']['access_token']
+                self.refresh_token = self.cookies['token_info']['refresh_token']
         except (JSONDecodeError, KeyError):
             logger.exception('加载cookie出错')
 
@@ -291,13 +330,15 @@ class BiliBili:
         return r
 
     def login_by_cookies(self, cookie):
-        print('使用cookies上传')
-        requests.utils.add_dict_to_cookiejar(self.__session.cookies, cookie)
-        if 'bili_jct' in cookie:
-            self.__bili_jct = cookie["bili_jct"]
+        logger.info(f'{self.__class__.__name__}: login by cookies')
+        cookies_dict = {c['name']: c['value'] for c in cookie['cookie_info']['cookies']}
+        requests.utils.add_dict_to_cookiejar(self.__session.cookies, cookies_dict)
+        if 'bili_jct' in cookies_dict:
+            self.__bili_jct = cookies_dict['bili_jct']
         data = self.__session.get("https://api.bilibili.com/x/web-interface/nav", timeout=5).json()
         if data["code"] != 0:
             raise Exception(data)
+        print('使用cookies上传')
 
     def sign(self, param):
         return hashlib.md5(f"{param}{self.appsec}".encode()).hexdigest()
