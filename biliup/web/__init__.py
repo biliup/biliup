@@ -155,8 +155,9 @@ def check_similar_remark(json_data):
 @routes.get('/v1/get_qrcode')
 async def qrcode_get(request):
     try:
-        r = eval(stream_gears.get_qrcode())
+        r = eval(stream_gears.get_qrcode(None))
     except Exception as e:
+        logger.exception("get qrcode error")
         return web.HTTPBadRequest(text="get qrcode failed")
     return web.json_response(r)
 
@@ -170,7 +171,7 @@ async def qrcode_login(request):
     try:
         loop = asyncio.get_event_loop()
         # loop
-        task = loop.run_in_executor(pool, stream_gears.login_by_qrcode, (json.dumps(post_data, )))
+        task = loop.run_in_executor(pool, stream_gears.login_by_qrcode, json.dumps(post_data), None)
         res = await asyncio.wait_for(task, 180)
         data = json.loads(res)
         filename = f'data/{data["token_info"]["mid"]}.json'

@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        insert into users (name, value, platform)\n        values ($1, $2, $3)\n        returning id, name as \"name!\", value as \"value!\", platform as \"platform!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Int64"
+      },
+      {
+        "name": "name!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "value!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "platform!",
+        "ordinal": 3,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "af3fa362cf5b5cb5947ed9293a285e206139375fd36cdfbd3680975c775878ad"
+}

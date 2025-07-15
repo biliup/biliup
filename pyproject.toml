@@ -1,6 +1,15 @@
 [build-system]
-requires = ['pip>=24.2', 'setuptools>=74', 'wheel']
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+# "extension-module" tells pyo3 we want to build an extension module (skips linking against libpython.so)
+features = ["pyo3/extension-module"]
+# Include additional files
+include = [ "biliup/web/public/**/*" ]
+#data = "biliup/web/public"
+python-packages = ["biliup"]
+manifest-path = "crates/stream-gears/Cargo.toml"
 
 [project]
 name = "biliup"
@@ -45,16 +54,16 @@ content-type = "text/markdown"
 [project.scripts]
 biliup = "biliup.__main__:arg_parser"
 
-[tool.setuptools]
-license-files = ["LICENSE"]
-include-package-data = false
+#[tool.setuptools]
+#license-files = ["LICENSE"]
+#include-package-data = false
 
-[tool.setuptools.package-data]
-biliup = ["common/*.ini", "web/public/**", "web/public/build/*", "database/migration/*", "Danmaku/douyin_util/webmssdk.js"]
-
-[tool.setuptools.packages.find]
-include = ["biliup*"]
-namespaces = false
-
-[tool.setuptools.dynamic]
-version = { attr = "biliup.__version__" }
+#[tool.setuptools.package-data]
+#biliup = ["common/*.ini", "web/public/**", "web/public/build/*", "database/migration/*", "Danmaku/douyin_util/webmssdk.js"]
+#
+#[tool.setuptools.packages.find]
+#include = ["biliup*"]
+#namespaces = false
+#
+#[tool.setuptools.dynamic]
+#version = { attr = "biliup.__version__" }
