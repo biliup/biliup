@@ -1,93 +1,93 @@
-name: Docker
-
-on:
-  push:
-    # Publish `master` as Docker `latest` image.
-    branches:
-      - master
-
-    # Publish `v1.2.3` tags as releases.
-    tags:
-      - v*
-
-  # Run tests for any PRs.
-  pull_request:
-
-jobs:
-  # Run tests.
-  # See also https://docs.docker.com/docker-hub/builds/automated-testing/
-  test:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v2
-
-      - name: Get PR number, repo URL, and branch name
-        run: |
-          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
-            pr_number=$(jq -r .number < "$GITHUB_EVENT_PATH")
-            repo_url=$(jq -r .pull_request.head.repo.clone_url < "$GITHUB_EVENT_PATH")
-            branch_name=$GITHUB_HEAD_REF
-          else
-            pr_number=""
-            repo_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY
-            branch_name="master"
-          fi
-          echo "PR_NUMBER=$pr_number" >> $GITHUB_ENV
-          echo "REPO_URL=$repo_url" >> $GITHUB_ENV
-          echo "BRANCH_NAME=$branch_name" >> $GITHUB_ENV
-
-      - name: Run tests
-        run: |
-          if [ -f docker-compose.test.yml ]; then
-            docker-compose --file docker-compose.test.yml build
-            docker-compose --file docker-compose.test.yml run sut
-          else
-            docker build \
-              --build-arg repo_url=$REPO_URL \
-              --build-arg branch_name=$BRANCH_NAME \
-              . --file Dockerfile
-          fi
-
-
-  # Push image to GitHub Packages.
-  # See also https://docs.docker.com/docker-hub/builds/
-  push:
-    # Ensure test job passes before pushing image.
-    needs: test
-
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v4
-        with:
-          # list of Docker images to use as base name for tags
-          images: |
-            ghcr.io/biliup/caution
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Login to DockerHub
-        uses: docker/login-action@v2
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push
-        uses: docker/build-push-action@v3
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+#name: Docker
+#
+#on:
+#  push:
+#    # Publish `master` as Docker `latest` image.
+#    branches:
+#      - master
+#
+#    # Publish `v1.2.3` tags as releases.
+#    tags:
+#      - v*
+#
+#  # Run tests for any PRs.
+#  pull_request:
+#
+#jobs:
+#  # Run tests.
+#  # See also https://docs.docker.com/docker-hub/builds/automated-testing/
+#  test:
+#    runs-on: ubuntu-latest
+#
+#    steps:
+#      - uses: actions/checkout@v2
+#
+#      - name: Get PR number, repo URL, and branch name
+#        run: |
+#          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+#            pr_number=$(jq -r .number < "$GITHUB_EVENT_PATH")
+#            repo_url=$(jq -r .pull_request.head.repo.clone_url < "$GITHUB_EVENT_PATH")
+#            branch_name=$GITHUB_HEAD_REF
+#          else
+#            pr_number=""
+#            repo_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY
+#            branch_name="master"
+#          fi
+#          echo "PR_NUMBER=$pr_number" >> $GITHUB_ENV
+#          echo "REPO_URL=$repo_url" >> $GITHUB_ENV
+#          echo "BRANCH_NAME=$branch_name" >> $GITHUB_ENV
+#
+#      - name: Run tests
+#        run: |
+#          if [ -f docker-compose.test.yml ]; then
+#            docker-compose --file docker-compose.test.yml build
+#            docker-compose --file docker-compose.test.yml run sut
+#          else
+#            docker build \
+#              --build-arg repo_url=$REPO_URL \
+#              --build-arg branch_name=$BRANCH_NAME \
+#              . --file Dockerfile
+#          fi
+#
+#
+#  # Push image to GitHub Packages.
+#  # See also https://docs.docker.com/docker-hub/builds/
+#  push:
+#    # Ensure test job passes before pushing image.
+#    needs: test
+#
+#    runs-on: ubuntu-latest
+#    if: github.event_name == 'push'
+#
+#    steps:
+#      - name: Checkout
+#        uses: actions/checkout@v3
+#
+#      - name: Docker meta
+#        id: meta
+#        uses: docker/metadata-action@v4
+#        with:
+#          # list of Docker images to use as base name for tags
+#          images: |
+#            ghcr.io/biliup/caution
+#      - name: Set up QEMU
+#        uses: docker/setup-qemu-action@v2
+#
+#      - name: Set up Docker Buildx
+#        uses: docker/setup-buildx-action@v2
+#
+#      - name: Login to DockerHub
+#        uses: docker/login-action@v2
+#        with:
+#          registry: ghcr.io
+#          username: ${{ github.actor }}
+#          password: ${{ secrets.GITHUB_TOKEN }}
+#
+#      - name: Build and push
+#        uses: docker/build-push-action@v3
+#        with:
+#          context: .
+#          platforms: linux/amd64,linux/arm64
+#          push: true
+#          tags: ${{ steps.meta.outputs.tags }}
+#          labels: ${{ steps.meta.outputs.labels }}

@@ -13,18 +13,21 @@ jobs:
     - uses: actions/setup-node@v4
       with:
         node-version: 20
+    - name: Build frontend
+      run: |
+        npm install
+        npm run build
     - uses: actions/setup-python@v5
       with:
         python-version: '3.x'
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install setuptools wheel twine build pyinstaller
-        npm install
-        pip install .
+    - uses: PyO3/maturin-action@v1
+      with:
+        command: develop
+        args: --release
     - name: Build
       run: |
-        npm run build 
+        python -m pip install --upgrade pip
+        pip install pyinstaller
         pyinstaller biliup.spec
     # Optionally verify that it works (provided that it does not need user interaction)
     #- run: ./dist/your-code/your-code

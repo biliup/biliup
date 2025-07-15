@@ -38,6 +38,13 @@ jobs:
             target: ppc64le
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+      - name: Build frontend
+        run: |
+          npm install
+          npm run build
       - uses: actions/setup-python@v5
         with:
           python-version: 3.x
@@ -47,14 +54,14 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: --release --out dist
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-          manylinux: auto
+          manylinux: ${{ matrix.platform.target == 'aarch64' && '2_28' || 'auto' }}
       - name: Build free-threaded wheels
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.platform.target }}
           args: --release --out dist -i python3.13t
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-          manylinux: auto
+          manylinux: ${{ matrix.platform.target == 'aarch64' && '2_28' || 'auto' }}
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
@@ -76,6 +83,13 @@ jobs:
             target: armv7
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+      - name: Build frontend
+        run: |
+          npm install
+          npm run build
       - uses: actions/setup-python@v5
         with:
           python-version: 3.x
@@ -110,6 +124,13 @@ jobs:
             target: x86
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+      - name: Build frontend
+        run: |
+          npm install
+          npm run build
       - uses: actions/setup-python@v5
         with:
           python-version: 3.x
@@ -147,6 +168,13 @@ jobs:
             target: aarch64
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+      - name: Build frontend
+        run: |
+          npm install
+          npm run build
       - uses: actions/setup-python@v5
         with:
           python-version: 3.x
@@ -172,6 +200,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+      - name: Build frontend
+        run: |
+          npm install
+          npm run build
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
