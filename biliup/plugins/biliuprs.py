@@ -137,6 +137,6 @@ def stream_gears_upload(ex_conn, lines, *args, **kwargs):
         elif lines == 'bldsa':
             kwargs['line'] = stream_gears.UploadLine.Bldsa
 
-        stream_gears.upload(*args, **kwargs)
+        stream_gears.upload_by_app(*args, **kwargs)
     except Exception as e:
         ex_conn.send(e)
