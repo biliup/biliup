@@ -33,7 +33,10 @@ class Bilibili:
         # 传入内容中，如果 uid 不为 0，则 cookie 必然存在，且必然为详细模式
         Bilibili.headers['cookie'] = f"buvid3={generate_fake_buvid3()};"
         if uid > 0:
-            Bilibili.headers['cookie'] += content['cookie']
+            if "buvid3" in content['cookie']:
+                Bilibili.headers['cookie'] = content['cookie']
+            else:
+                Bilibili.headers['cookie'] += content['cookie']
             
             
         # 获取弹幕认证信息
