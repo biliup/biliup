@@ -671,7 +671,7 @@ class BiliBili:
             ret = self.submit_web()
             if ret["code"] != 0:
                 logger.error(f'网页端接口提交失败: {ret}')
-                raise Exception(ret)
+                #raise Exception(ret)
         if not ret:
             raise Exception(f'不存在的选项：{submit_api}')
         return ret
