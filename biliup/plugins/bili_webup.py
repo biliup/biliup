@@ -671,6 +671,9 @@ class BiliBili:
             ret = self.submit_web()
             if ret["code"] != 0:
                 logger.error(f'网页端接口提交失败: {ret}')
+                # 现在B站的投稿接口会实时反馈稿件错误，比如DTS时间戳跳变等等
+                # 在上面的情况下，抛出错误重复投稿也无济于事，还会白白浪费上传宽带以及被B站风控
+                # 后续看看这里能不能加个webhook，上传失败时通知机主
                 #raise Exception(ret)
         if not ret:
             raise Exception(f'不存在的选项：{submit_api}')
