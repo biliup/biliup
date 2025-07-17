@@ -30,6 +30,31 @@ engine = create_engine(
     # echo=True,  # 显示执行的 SQL 记录, 仅调试用, 发布前请注释
 )
 
+# 新增：支持动态设置DB_PATH和DB_URL
+_db_path = DB_PATH
+_db_url = DB_URL
+_engine = engine
+
+def set_db_path(path: str):
+    global _db_path, _db_url, _engine
+    _db_path = path
+    _db_url = f"sqlite:///{_db_path}"
+    _engine = create_engine(_db_url, connect_args={"check_same_thread": False})
+
+def set_db_url(url: str):
+    global _db_url, _engine
+    _db_url = url
+    _engine = create_engine(_db_url, connect_args={"check_same_thread": False})
+
+def get_db_path():
+    return _db_path
+
+def get_db_url():
+    return _db_url
+
+def get_engine():
+    return _engine
+
 convention = {
     "ix": 'ix_%(column_0_label)s',
     "uq": "uq_%(table_name)s_%(column_0_name)s",

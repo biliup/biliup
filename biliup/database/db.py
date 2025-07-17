@@ -19,11 +19,24 @@ from .models import (
     BaseModel,
     StreamerInfo,
     FileList,
+    set_db_path, get_engine
 )
 
-SessionLocal = sessionmaker(bind=engine, autocommit=False)
-# 使用 Context ID 区分会话
-# Session = scoped_session(session_factory, scopefunc=lambda: id(contextvars.copy_context()))
+_SessionLocal = None
+def get_session_local():
+    global _SessionLocal
+    if _SessionLocal is None:
+        _SessionLocal = sessionmaker(bind=get_engine(), autocommit=False)
+    return _SessionLocal
+
+# 兼容原有用法
+SessionLocal = get_session_local()
+
+# 支持动态设置sqlite路径
+def set_sqlite_path(path: str):
+    global _SessionLocal
+    set_db_path(path)
+    _SessionLocal = sessionmaker(bind=get_engine(), autocommit=False)
 
 
 def struct_time_to_datetime(date: time.struct_time):
@@ -36,14 +49,15 @@ def datetime_to_struct_time(date: datetime):
 
 def init(no_http, from_config):
     """初始化数据库"""
-    first_run = not Path.cwd().joinpath("data/data.sqlite3").exists()
+    db_path = get_engine().url.database
+    first_run = not Path(db_path).exists()
     if no_http and not first_run and from_config:
-        new_name = f'{DB_PATH}.backup'
+        new_name = f'{db_path}.backup'
         if os.path.exists(new_name):
             os.remove(new_name)
-        os.rename(DB_PATH, new_name)
+        os.rename(db_path, new_name)
         print(f"旧数据库已备份为: {new_name}")  # 在logger加载配置之前执行，只能使用print
-    BaseModel.metadata.create_all(engine)  # 创建所有表
+    BaseModel.metadata.create_all(get_engine())  # 创建所有表
     migrate_via_alembic()
     return first_run or no_http
 

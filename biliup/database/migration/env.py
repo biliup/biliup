@@ -4,6 +4,7 @@ from alembic import context
 from sqlalchemy import create_engine, pool
 
 from biliup.database.models import BaseModel
+import os
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -29,9 +30,14 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    from biliup.database.models import DB_URL
+    db_path = os.environ.get('BILIUP_SQLITE_PATH')
+    if db_path:
+        db_url = f"sqlite:///{db_path}"
+    else:
+        from biliup.database.models import DB_URL
+        db_url = DB_URL
     context.configure(
-        url=DB_URL,
+        url=db_url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -49,9 +55,14 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    from biliup.database.models import DB_URL
+    db_path = os.environ.get('BILIUP_SQLITE_PATH')
+    if db_path:
+        db_url = f"sqlite:///{db_path}"
+    else:
+        from biliup.database.models import DB_URL
+        db_url = DB_URL
     connectable = create_engine(
-        DB_URL, poolclass=pool.NullPool,
+        db_url, poolclass=pool.NullPool,
     )
 
     with connectable.connect() as connection:
