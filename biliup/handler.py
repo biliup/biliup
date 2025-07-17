@@ -126,7 +126,13 @@ def process_upload(stream_info):
                     i += 1
             data, _ = fmt_title_and_desc({**data, "name": name})  # 如果 restart, data 中会缺失 name 项
             stream_info.update(data)
-        filelist = upload(stream_info)
+        upload_count = UploadBase.get_max_upload_count(file_list)
+        if upload_count < config.get("max_upload_limit", 8):
+            logger.info(f"开始第{upload_count+1}次上传： {name}")
+            filelist = upload(stream_info)
+        else:
+            logger.warning(f"上传次数达到阈值: {name}")
+            filelist = file_list
         if filelist:
             uploaded(name, stream_info.get('live_cover_path'), filelist)
     except Exception:
