@@ -13,6 +13,7 @@ manifest-path = "crates/stream-gears/Cargo.toml"
 
 [project]
 name = "biliup"
+readme = "README.md"
 authors = [{ name = "ForgQi" }]
 description = "stream download and upload"
 keywords = ["bilibili douyu huya"]
@@ -45,10 +46,6 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 selenium = ["selenium >= 3.8.1"]
-
-[project.readme]
-file = "README.md"
-content-type = "text/markdown"
 
 [project.scripts]
 biliup = "biliup.__main__:arg_parser"
