@@ -64,6 +64,7 @@ export default function Add() {
                 title: values.title ?? '',
                 description: values.description ?? '',
                 dynamic: values.dynamic ?? '',
+                upload_webhook: values?.upload_webhook ?? '',
                 tags: values.tags ?? [],
                 // interactive: values.interactive ?? 0,
                 dolby: values.sound?.includes('dolby') ? 1 : 0,

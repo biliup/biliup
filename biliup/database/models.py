@@ -118,6 +118,7 @@ class UploadStreamers(BaseModel):
     # 支持strftime, {title}, {streamer}, {url}占位符。
     description = mapped_column(TEXT(), nullable=True)  # 视频简介
     dynamic: Mapped[str] = mapped_column(nullable=True)  # 粉丝动态
+    upload_webhook: Mapped[str] = mapped_column(nullable=True)  # 上传后WebHook
     dtime: Mapped[int] = mapped_column(nullable=True)  # 设置延时发布时间，距离提交大于2小时，格式为时间戳
     dolby: Mapped[int] = mapped_column(nullable=True)  # 是否开启杜比音效, 1为开启
     hires: Mapped[int] = mapped_column(nullable=True)  # 是否开启Hi-Res, 1为开启
