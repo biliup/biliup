@@ -140,16 +140,17 @@ def process_upload(stream_info):
             except Exception as e:
                 expt = e
             finally:
-                if config['streamers'][stream_info['name']].get("upload_webhook", "") == "":
+                upload_config = config['streamers'][stream_info['name']]
+                if upload_config.get("uploaded_webhook", "") == "":
                     if expt:
                         raise expt
                 else:
-                    logger.info(f"{name}发送webhook： {config['streamers'][stream_info['name']].get("upload_webhook")}")
+                    logger.info(f"{name}发送webhook： {upload_config.get("uploaded_webhook")}")
                     res = requests.post(
-                        url = config['streamers'][stream_info['name']].get("upload_webhook"),
+                        url = upload_config.get("uploaded_webhook"),
                         json = {
                             "stream_info": stream_info,
-                            "upload_config": config['streamers'][stream_info['name']],
+                            "upload_config": upload_config,
                             "catch_error": str(expt) if expt else ""
                         }
                     ).text

@@ -99,23 +99,6 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
         <Form.Select.Option value="biliup-rs">biliup-rs</Form.Select.Option>
         <Form.Select.Option value="Noop">Noop</Form.Select.Option>
       </Form.Select>
-      <Input
-        field={`upload_webhook`}
-        label="上传后WebHook"
-        placeholder={"https://example.com/notify"}
-        style={{ width: 464 }}
-        extraText={
-          <div style={{ fontSize: 14 }}>
-            不填写则是默认的逻辑，上传失败后重试直至达到最大重试次数
-            <br />
-            填写后，<strong>是否上传成功的判断由WebHook给出</strong>，但失败最大重试次数仍会被限制（前往空间配置-上传重试次数限制处配置）
-            <br />
-            上传任务完成后，会将主播信息、稿件信息、捕获的异常等以post模式发送给WebHook，<strong>当WebHook返回success字符串时视为上传成功</strong>，执行正常后处理流程，否则返回其他任意内容或请求失败均尝试重新上传
-          </div>
-        }
-      >
-
-      </Input>
       <Switch field="no_reprint" label="自制声明" />
       <Switch field="is_only_self" label="仅自己可见" />
       <Form.Switch field="open_elec" label="开启充电面板" />

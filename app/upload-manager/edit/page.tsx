@@ -81,7 +81,6 @@ const Edit = () => {
                 description: values?.description ?? '',
                 dynamic: values?.dynamic ?? '',
                 tags: values?.tags ?? [],
-                upload_webhook: values?.upload_webhook ?? '',
                 // interactive: values?.interactive ?? 0,
                 dolby: values?.sound.includes('dolby') ? 1 : 0,
                 hires: values?.sound.includes('hires') ? 1 : 0,

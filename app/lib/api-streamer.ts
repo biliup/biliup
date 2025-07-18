@@ -77,7 +77,6 @@ export interface StudioEntity {
 	dynamic: string;
 	tags: string[];
 	dtime: number;
-	upload_webhook:string;
 	// interactive: number;
 	mission_id?: number;
 	dolby: number;
@@ -105,6 +104,7 @@ export interface LiveStreamerEntity {
 	format?: string;
     time_range?: string | Date[];
     excluded_keywords?: string[];
+    uploaded_webhook?: string[];
 	preprocessor?: Record<'run', string>[];
 	segment_processor?: Record<'run', string>[];
 	downloaded_processor?: Record<'run', string>[];
