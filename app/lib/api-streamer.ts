@@ -104,7 +104,7 @@ export interface LiveStreamerEntity {
 	format?: string;
     time_range?: string | Date[];
     excluded_keywords?: string[];
-    uploaded_webhook?: string[];
+    uploaded_webhook?: string;
 	preprocessor?: Record<'run', string>[];
 	segment_processor?: Record<'run', string>[];
 	downloaded_processor?: Record<'run', string>[];
