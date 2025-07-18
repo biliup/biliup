@@ -149,9 +149,8 @@ def process_upload(stream_info):
                     res = requests.post(
                         url = upload_config.get("uploaded_webhook"),
                         json = {
-                            "stream_info": stream_info,
-                            "upload_config": upload_config,
-                            "catch_error": str(expt) if expt else ""
+                            "stream_info": {**stream_info, **upload_config},
+                            "caught_error": str(expt) if expt else ""
                         }
                     ).text
                     logger.info(f"{name}发送webhook： {res}")
