@@ -26,6 +26,25 @@ class UploadBase:
         self.data: dict = data
         self.post_processor = postprocessor
 
+    # 此方法会返回文件列表中上传次数最大文件的上传次数
+    @staticmethod
+    def get_max_upload_count(filelist: List[FileInfo]) -> int:
+        from biliup.handler import event_manager
+        with NamedLock("file_upload_count"):
+            file_upload_count = event_manager.context['file_upload_count']
+            for file_name in os.listdir('.'):
+                if file_name not in file_upload_count:
+                    file_upload_count[file_name] = 0
+            for file_name in list(file_upload_count):
+                if file_name not in os.listdir('.'):
+                    del file_upload_count[file_name]
+            max = 0
+            for item in filelist:
+                if file_upload_count[item.video] > max:
+                    max = file_upload_count[item.video]
+                file_upload_count[item.video] += 1
+        return max
+
     @staticmethod
     def file_list(index) -> List[FileInfo]:
         from biliup.handler import event_manager

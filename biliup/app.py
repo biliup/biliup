@@ -25,7 +25,8 @@ def create_event_manager():
     app.context['url_upload_count'] = {}
     # 正在上传的文件 用于同时上传一个url的时候过滤掉正在上传的
     app.context['upload_filename'] = []
-
+    # 记录每个文件被上传的次数
+    app.context['file_upload_count'] = {}
     # 边录边传的下载器使用的map
     app.context['sync_downloader_map'] = {}
     return app
