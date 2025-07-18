@@ -27,6 +27,7 @@ jobs:
         command: build
         args: --release
     - name: Build
+      shell: bash
       run: |
         python -m pip install --upgrade pip
         pip install target/wheels/*.whl
