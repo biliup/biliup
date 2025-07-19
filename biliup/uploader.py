@@ -116,13 +116,19 @@ def fmt_title_and_desc(data):
     """
     index = data['name']
     context = {**config, **config['streamers'][index]}
-    streamer = data.get('streamer', index)
-    date = data.get("date", time.localtime())
-    title = data.get('title', index)
-    url = data.get('url')
-    data["format_title"] = custom_fmtstr(context.get('title') or f'%Y.%m.%d{index}', date, title, streamer, url)
+    user_format_string = context.get('title') or f'%Y.%m.%d{index}'
+    live_stream_title = data.get('title', index)
+    streamer_name = data.get('streamer', index)
+    upload_date = data.get("date", time.localtime())
+    stream_url = data.get('url')
+
+    if "{title}" in user_format_string:
+        data["format_title"] = custom_fmtstr(user_format_string, upload_date, live_stream_title, streamer_name, stream_url)
+    else:
+        data["format_title"] = custom_fmtstr(user_format_string, upload_date, streamer_name, streamer_name, stream_url)
+
     if context.get('description'):
-        context['description'] = custom_fmtstr(context.get('description'), date, title, streamer, url)
+        context['description'] = custom_fmtstr(context.get('description'), upload_date, live_stream_title, streamer_name, stream_url)
     return data, context
 
 
