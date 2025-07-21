@@ -31,6 +31,7 @@ class Config(UserDict):
     def load_from_db(self, db):
         from biliup.database.models import Configuration, LiveStreamers
         context = {
+            'file_upload_count': self.data.get('file_upload_count', {}),
             'url_upload_count': self.data.get('url_upload_count', {}),
             'upload_filename': self.data.get('upload_filename', []),
             'PluginInfo': self.data.get('PluginInfo'),

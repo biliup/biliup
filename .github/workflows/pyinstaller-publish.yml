@@ -49,7 +49,8 @@ jobs:
         echo "Moving $SOURCE_PATH to $DESTINATION_PATH"
         
         # 使用PowerShell的Move-Item命令进行移动和重命名
-        Move-Item -Path $SOURCE_PATH -Destination $DESTINATION_PATH
+        #Move-Item -Path $SOURCE_PATH -Destination $DESTINATION_PATH
+        cp -r dist/bbup/* tauri-app/src-tauri/binaries
       shell: pwsh
     # Optionally verify that it works (provided that it does not need user interaction)
     #- run: ./dist/your-code/your-code

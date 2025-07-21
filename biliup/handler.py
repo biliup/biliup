@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import shutil
+import requests
 import subprocess
 import time
 from functools import reduce
@@ -126,7 +127,39 @@ def process_upload(stream_info):
                     i += 1
             data, _ = fmt_title_and_desc({**data, "name": name})  # 如果 restart, data 中会缺失 name 项
             stream_info.update(data)
-        filelist = upload(stream_info)
+
+        upload_count = UploadBase.get_max_upload_count(file_list)
+        filelist = file_list
+        if upload_count < config.get("max_upload_limit", 999):
+            logger.info(f"开始第{upload_count+1}次上传： {name}")
+
+            # 上传webhook部分
+            expt = None
+            try:
+                filelist = upload(stream_info)
+            except Exception as e:
+                expt = e
+            finally:
+                post_processor = config['streamers'].get(name, {}).get("postprocessor", None)
+                if post_processor is not None:
+                    for processor in post_processor:
+                        if isinstance(processor, dict) and processor.get('webhook') is not None:
+
+                            logger.info(f"{name}发送webhook： {processor.get('webhook')}")
+                            res = requests.post(
+                                url = processor.get('webhook'),
+                                json = {
+                                    "stream_info": {**stream_info, **config['streamers'][stream_info['name']]},
+                                    "caught_error": str(expt) if expt else ""
+                                }
+                            ).text
+                            logger.info(f"{name}发送webhook： {res}")
+                            if res != "success":
+                                raise Exception(res)
+                 
+        else:
+            logger.warning(f"上传次数达到阈值: {name}")
+
         if filelist:
             uploaded(name, stream_info.get('live_cover_path'), filelist)
     except Exception:

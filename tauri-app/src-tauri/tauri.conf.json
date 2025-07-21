@@ -31,8 +31,8 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": [
-      "binaries/biliup"
+    "resources": [
+      "binaries/"
     ]
   }
 }
