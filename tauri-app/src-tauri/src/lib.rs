@@ -104,53 +104,53 @@ fn shutdown_sidecar(app_handle: &tauri::AppHandle) -> Result<String, String> {
             .lock()
             .map_err(|_| "[tauri] Failed to acquire lock on sidecar process.")?;
         let shell = app_handle.shell();
-        // let kill_command;
         if let Some(mut process) = child_process.take() {
             let pid = process.pid();
-            process.kill().map_err(|e1| e1.to_string())?;
+            // process.kill().map_err(|e1| e1.to_string())?;
             println!("[tauri] Killing sidecar. Pid: {}", pid);
-            // #[cfg(target_os = "windows")]
-            // {
-            //     // taskkill /F (强制) /T (杀死进程树) /PID <pid>
-            //     // 这是在 Windows 上杀死进程及其所有子进程的最佳方式
-            //     println!("Using 'taskkill' on Windows to force kill process tree.");
-            //     kill_command = shell
-            //         .command("taskkill")
-            //         .args(&["/F", "/T", "/PID", &pid.to_string()])
-            //         .spawn();
-            // }
-            // match kill_command {
-            //     Ok((mut rx, _)) => {
-            //         tauri::async_runtime::block_on(async move {
-            //             let encoding = Encoding::for_label("GBK".as_ref()).unwrap();
-            //             while let Some(event) = rx.recv().await {
-            //                 match event {
-            //                     CommandEvent::Stdout(line) => println!(
-            //                         "Force kill stdout: {:?}",
-            //                         encoding.decode_with_bom_removal(&line).0
-            //                     ),
-            //                     CommandEvent::Stderr(line) => eprintln!(
-            //                         "Force kill stderr: {:?}",
-            //                         encoding.decode_with_bom_removal(&line).0
-            //                     ),
-            //                     CommandEvent::Terminated(payload) => {
-            //                         if payload.code == Some(0) {
-            //                             println!("Sidecar (PID: {}) and its children force killed successfully.", pid);
-            //                         } else {
-            //                             // 在 Windows 上，如果进程已不存在，taskkill 会返回非0代码（如128），这是正常的。
-            //                             // 在 Linux/macOS 上，如果进程已不存在，kill/pkill 会报错，也是正常的。
-            //                             println!("Force kill command finished. Process was likely already dead.");
-            //                         }
-            //                     }
-            //                     _ => {}
-            //                 }
-            //             }
-            //         });
-            //     }
-            //     Err(e) => {
-            //         eprintln!("Failed to execute force kill command: {}", e);
-            //     }
-            // }
+            let kill_command;
+            #[cfg(target_os = "windows")]
+            {
+                // taskkill /F (强制) /T (杀死进程树) /PID <pid>
+                // 这是在 Windows 上杀死进程及其所有子进程的最佳方式
+                println!("Using 'taskkill' on Windows to force kill process tree.");
+                kill_command = shell
+                    .command("taskkill")
+                    .args(&["/F", "/T", "/PID", &pid.to_string()])
+                    .spawn();
+            }
+            match kill_command {
+                Ok((mut rx, _)) => {
+                    tauri::async_runtime::block_on(async move {
+                        let encoding = Encoding::for_label("GBK".as_ref()).unwrap();
+                        while let Some(event) = rx.recv().await {
+                            match event {
+                                CommandEvent::Stdout(line) => println!(
+                                    "Force kill stdout: {:?}",
+                                    encoding.decode_with_bom_removal(&line).0
+                                ),
+                                CommandEvent::Stderr(line) => eprintln!(
+                                    "Force kill stderr: {:?}",
+                                    encoding.decode_with_bom_removal(&line).0
+                                ),
+                                CommandEvent::Terminated(payload) => {
+                                    if payload.code == Some(0) {
+                                        println!("Sidecar (PID: {}) and its children force killed successfully.", pid);
+                                    } else {
+                                        // 在 Windows 上，如果进程已不存在，taskkill 会返回非0代码（如128），这是正常的。
+                                        // 在 Linux/macOS 上，如果进程已不存在，kill/pkill 会报错，也是正常的。
+                                        println!("Force kill command finished. Process was likely already dead.");
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    });
+                }
+                Err(e) => {
+                    eprintln!("Failed to execute force kill command: {}", e);
+                }
+            }
 
             println!("[tauri] Sent 'sidecar shutdown' command to sidecar.");
             Ok("'sidecar shutdown' command sent.".to_string())
