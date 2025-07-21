@@ -1,6 +1,7 @@
 use std::env;
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, RunEvent};
+use tauri::path::BaseDirectory;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent, Encoding};
 use tauri_plugin_shell::ShellExt;
 
@@ -39,25 +40,24 @@ fn spawn_and_monitor_sidecar(app_handle: tauri::AppHandle) -> Result<(), String>
     //         }
     //     }
     // });
-
+    let resource_path = app_handle.path().resolve("binaries/biliup.exe", BaseDirectory::Resource).map_err(|e1| e1.to_string())?;
     // Spawn sidecar
     let sidecar_command = app_handle
         .shell()
-        .sidecar("biliup")
-        .map_err(|e| e.to_string())?;
+        .command(resource_path);
     // 获取当前可执行文件的路径
     let exe_path = env::current_exe().unwrap();
     // 获取可执行文件所在的目录
     let exe_dir = exe_path.parent().unwrap();
     println!("[tauri] Sidecar directory: {}", exe_dir.display());
     let (mut rx, child) = sidecar_command
+        .args(["-P", "19159"])
         .current_dir(exe_dir)
         // .env("PYTHONUTF8", "1")
         .spawn()
         .map_err(|e| e.to_string())?;
     // Store the child process in the app state
     if let Some(state) = app_handle.try_state::<Arc<Mutex<Option<CommandChild>>>>() {
-        println!("child {:?}", child);
         println!("pid {}", child.pid());
         *state.lock().unwrap() = Some(child);
     } else {
@@ -104,52 +104,53 @@ fn shutdown_sidecar(app_handle: &tauri::AppHandle) -> Result<String, String> {
             .lock()
             .map_err(|_| "[tauri] Failed to acquire lock on sidecar process.")?;
         let shell = app_handle.shell();
-        let kill_command;
+        // let kill_command;
         if let Some(mut process) = child_process.take() {
             let pid = process.pid();
+            process.kill().map_err(|e1| e1.to_string())?;
             println!("[tauri] Killing sidecar. Pid: {}", pid);
-            #[cfg(target_os = "windows")]
-            {
-                // taskkill /F (强制) /T (杀死进程树) /PID <pid>
-                // 这是在 Windows 上杀死进程及其所有子进程的最佳方式
-                println!("Using 'taskkill' on Windows to force kill process tree.");
-                kill_command = shell
-                    .command("taskkill")
-                    .args(&["/F", "/T", "/PID", &pid.to_string()])
-                    .spawn();
-            }
-            match kill_command {
-                Ok((mut rx, _)) => {
-                    tauri::async_runtime::block_on(async move {
-                        let encoding = Encoding::for_label("GBK".as_ref()).unwrap();
-                        while let Some(event) = rx.recv().await {
-                            match event {
-                                CommandEvent::Stdout(line) => println!(
-                                    "Force kill stdout: {:?}",
-                                    encoding.decode_with_bom_removal(&line).0
-                                ),
-                                CommandEvent::Stderr(line) => eprintln!(
-                                    "Force kill stderr: {:?}",
-                                    encoding.decode_with_bom_removal(&line).0
-                                ),
-                                CommandEvent::Terminated(payload) => {
-                                    if payload.code == Some(0) {
-                                        println!("Sidecar (PID: {}) and its children force killed successfully.", pid);
-                                    } else {
-                                        // 在 Windows 上，如果进程已不存在，taskkill 会返回非0代码（如128），这是正常的。
-                                        // 在 Linux/macOS 上，如果进程已不存在，kill/pkill 会报错，也是正常的。
-                                        println!("Force kill command finished. Process was likely already dead.");
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    });
-                }
-                Err(e) => {
-                    eprintln!("Failed to execute force kill command: {}", e);
-                }
-            }
+            // #[cfg(target_os = "windows")]
+            // {
+            //     // taskkill /F (强制) /T (杀死进程树) /PID <pid>
+            //     // 这是在 Windows 上杀死进程及其所有子进程的最佳方式
+            //     println!("Using 'taskkill' on Windows to force kill process tree.");
+            //     kill_command = shell
+            //         .command("taskkill")
+            //         .args(&["/F", "/T", "/PID", &pid.to_string()])
+            //         .spawn();
+            // }
+            // match kill_command {
+            //     Ok((mut rx, _)) => {
+            //         tauri::async_runtime::block_on(async move {
+            //             let encoding = Encoding::for_label("GBK".as_ref()).unwrap();
+            //             while let Some(event) = rx.recv().await {
+            //                 match event {
+            //                     CommandEvent::Stdout(line) => println!(
+            //                         "Force kill stdout: {:?}",
+            //                         encoding.decode_with_bom_removal(&line).0
+            //                     ),
+            //                     CommandEvent::Stderr(line) => eprintln!(
+            //                         "Force kill stderr: {:?}",
+            //                         encoding.decode_with_bom_removal(&line).0
+            //                     ),
+            //                     CommandEvent::Terminated(payload) => {
+            //                         if payload.code == Some(0) {
+            //                             println!("Sidecar (PID: {}) and its children force killed successfully.", pid);
+            //                         } else {
+            //                             // 在 Windows 上，如果进程已不存在，taskkill 会返回非0代码（如128），这是正常的。
+            //                             // 在 Linux/macOS 上，如果进程已不存在，kill/pkill 会报错，也是正常的。
+            //                             println!("Force kill command finished. Process was likely already dead.");
+            //                         }
+            //                     }
+            //                     _ => {}
+            //                 }
+            //             }
+            //         });
+            //     }
+            //     Err(e) => {
+            //         eprintln!("Failed to execute force kill command: {}", e);
+            //     }
+            // }
 
             println!("[tauri] Sent 'sidecar shutdown' command to sidecar.");
             Ok("'sidecar shutdown' command sent.".to_string())

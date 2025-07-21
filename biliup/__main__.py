@@ -8,7 +8,7 @@ import shutil
 
 import biliup.common.reload
 from biliup.config import config
-from biliup import __version__, LOG_CONF
+from biliup import __version__, LOG_CONF, IS_FROZEN
 from biliup.common.Daemon import Daemon
 from biliup.common.reload import AutoReload
 from biliup.common.log import DebugLevelFilter
@@ -19,7 +19,16 @@ def arg_parser():
     parser = argparse.ArgumentParser(description='Stream download and upload, not only for bilibili.')
     parser.add_argument('--version', action='version', version=f"v{__version__}")
     parser.add_argument('-H', help='web api host [default: 0.0.0.0]', dest='host')
-    parser.add_argument('-P', help='web api port [default: 19159]', default=19159, dest='port')
+    if IS_FROZEN:
+        parser.add_argument(
+            '-P',
+            help='web api port (REQUIRED)',
+            dest='port',
+            required=True,
+            type=int
+        )
+    else:
+        parser.add_argument('-P', help='web api port [default: 19159]', default=19159, dest='port')
     parser.add_argument('--no-http', action='store_true', help='disable web api')
     parser.add_argument('--static-dir', help='web static files directory for custom ui')
     parser.add_argument('--password', help='web ui password ,default username is biliup', dest='password')

@@ -45,8 +45,17 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
       <code>mv = backup/</code> 移动文件到backup目录下
       <br />
       <code>run = echo hello!</code> 使用当前运行用户在 shell 执行任意命令，
+      <br />
+      <code>webhook = url</code>
+      不填写则是默认的逻辑，上传失败后重试直至达到最大重试次数
+      <br />
+      填写后，<strong>是否上传成功的判断由WebHook给出</strong>，但失败最大重试次数仍会被限制（前往空间配置-上传重试次数限制处配置）
+      <br />
+      上传任务完成后，会将主播信息、稿件信息、捕获的异常等以post模式发送给WebHook，<strong>当WebHook返回success字符串时视为上传成功</strong>，执行正常后处理流程，否则返回其他任意内容或请求失败均尝试重新上传
+      <br />
       <Text type="danger">注意风险。</Text>视频文件路径作为标准输入传入
-      {/* TODO: 在这里塞插件仓库 */}
+      <br />
+       TODO: 在这里塞插件仓库
     </div>
   )
   const toggle = () => {
@@ -177,6 +186,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                       <Form.Select.Option value="run">run（运行）</Form.Select.Option>
                       <Form.Select.Option value="mv">mv（移动到）</Form.Select.Option>
                       <Form.Select.Option value="rm">rm（删除文件）</Form.Select.Option>
+                      <Form.Select.Option value="webhook">webhook</Form.Select.Option>
                     </Form.Select>
                     {api.current?.getValue(field)?.cmd !== 'rm' ? (
                       <Form.Input
@@ -185,6 +195,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                         labelPosition="inset"
                         rules={[{ required: true, message }]}
                         style={{ width: 300, marginRight: 16 }}
+                        placeholder={ api.current?.getValue(field)?.cmd === 'webhook' ? 'https://example.com/notify' : undefined }
                       ></Form.Input>
                     ) : null}
                     <Button
@@ -365,22 +376,6 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                   </Form.Section>
                 )}
               </ArrayField>
-
-              <Form.Section text="上传后判断">
-                <div className="semi-form-field-extra">
-                  不填写则是默认的逻辑，上传失败后重试直至达到最大重试次数
-                  <br />
-                  填写后，<strong>是否上传成功的判断由WebHook给出</strong>，但失败最大重试次数仍会被限制（前往空间配置-上传重试次数限制处配置）
-                  <br />
-                  上传任务完成后，会将主播信息、稿件信息、捕获的异常等以post模式发送给WebHook，<strong>当WebHook返回success字符串时视为上传成功</strong>，执行正常后处理流程，否则返回其他任意内容或请求失败均尝试重新上传
-                </div>
-                <Form.Input
-                  field={"uploaded_webhook"}
-                  label={`WebHook`}
-                  labelPosition="left"
-                  placeholder={"https://example.com/notify"}
-                ></Form.Input>
-              </Form.Section>
 
               <ArrayField field="opt_args">
                 {({ add, arrayFields }) => (

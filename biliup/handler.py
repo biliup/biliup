@@ -130,7 +130,7 @@ def process_upload(stream_info):
 
         upload_count = UploadBase.get_max_upload_count(file_list)
         filelist = file_list
-        if upload_count < config.get("max_upload_limit", 8):
+        if upload_count < config.get("max_upload_limit", 999):
             logger.info(f"开始第{upload_count+1}次上传： {name}")
 
             # 上传webhook部分
@@ -140,22 +140,22 @@ def process_upload(stream_info):
             except Exception as e:
                 expt = e
             finally:
-                upload_config = config['streamers'][stream_info['name']]
-                if upload_config.get("uploaded_webhook", "") == "":
-                    if expt:
-                        raise expt
-                else:
-                    logger.info(f"{name}发送webhook： {upload_config.get("uploaded_webhook")}")
-                    res = requests.post(
-                        url = upload_config.get("uploaded_webhook"),
-                        json = {
-                            "stream_info": {**stream_info, **upload_config},
-                            "caught_error": str(expt) if expt else ""
-                        }
-                    ).text
-                    logger.info(f"{name}发送webhook： {res}")
-                    if res != "success":
-                        raise Exception(res)
+                post_processor = config['streamers'].get(name, {}).get("postprocessor", None)
+                if post_processor is not None:
+                    for processor in post_processor:
+                        if isinstance(processor, dict) and processor.get('webhook') is not None:
+
+                            logger.info(f"{name}发送webhook： {processor.get('webhook')}")
+                            res = requests.post(
+                                url = processor.get('webhook'),
+                                json = {
+                                    "stream_info": {**stream_info, **config['streamers'][stream_info['name']]},
+                                    "caught_error": str(expt) if expt else ""
+                                }
+                            ).text
+                            logger.info(f"{name}发送webhook： {res}")
+                            if res != "success":
+                                raise Exception(res)
                  
         else:
             logger.warning(f"上传次数达到阈值: {name}")
