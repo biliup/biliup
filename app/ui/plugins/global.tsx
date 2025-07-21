@@ -339,6 +339,18 @@ const Global: React.FC = () => {
           }}
           showClear={true}
         />
+        <Form.InputNumber
+          field="max_upload_limit"
+          placeholder={8}
+          extraText="录播上传次数上限，防止因意外情况如B站接口抽风、录播本身损坏导致录播反复上传浪费宽带或被B站风控（注：限制是记录在程序上下文中的，重启程序会重置上传次数限制；且为了保证尽量不改动老用户使用逻辑，默认将此值设置为一个较大的值，一般推荐设置为2-3）"
+          label="上传重试次数限制（max_upload_limit）"
+          style={{ width: '100%' }}
+          fieldStyle={{
+            alignSelf: 'stretch',
+            padding: 0,
+          }}
+          showClear={true}
+        />
 
         <Form.InputNumber
           field="pool2_size"
