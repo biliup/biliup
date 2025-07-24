@@ -47,6 +47,13 @@
 3. 启动：`biliup start`
 4. 访问 WebUI：`http://your-ip:19159`
 
+### Termux
+1. 仅为64位 Android 7.0+预编译wheel(本地编译见Wiki)
+2. 仅支持最新版 Python：`pkg install libxml2 libxslt getconf python -y`
+3. 安装：`pip3 install biliup`
+4. 启动：`biliup start`
+5. 访问 WebUI：`http://your-ip:19159`
+
 
 ---
 
