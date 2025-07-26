@@ -79,6 +79,8 @@ check_sourcecode = 15
 #------抖音------#
 ### 录制抖音弹幕，默认关闭
 #douyin_danmaku = false
+### 录制的弹幕信息中包含发送者昵称、用户UID、礼物信息。仅 douyin_danmaku 开启时生效，默认关闭（实验性质：可能与弹幕转ass工具不兼容）
+# douyin_danmaku_detail = false
 ### 抖音自选画质
 ### 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段(仅ffmpeg streamlink)时录制设置的画质
 ### origin 原画,uhd 蓝光,hd 超清,sd 高清,ld 标清,md 流畅

@@ -18,6 +18,7 @@ class Douyin(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
         self.douyin_danmaku = config.get('douyin_danmaku', False)
+        self.douyin_danmaku_detail = config.get('douyin_danmaku_detail', False)
         self.douyin_quality = config.get('douyin_quality', 'origin')
         self.douyin_protocol = config.get('douyin_protocol', 'flv')
         self.douyin_double_screen = config.get('douyin_double_screen', False)
@@ -185,6 +186,7 @@ class Douyin(DownloadBase):
                 'web_rid': self.__web_rid,
                 'sec_uid': self.__sec_uid,
                 'room_id': self.__room_id,
+                'detail': self.douyin_danmaku_detail,
             }
             try:
                 import jsengine
