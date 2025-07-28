@@ -59,26 +59,19 @@ def check_access(
     strategy: Callable = lambda x: x
 ) -> bool:
     # log.debug('Check access: %r', header_value)
-    print('Check access: %r', header_value)
 
     try:
         login, password = parse_header(header_value)
-        print(f"Parsed login: {login}, password: {password}")
     except BasicAuthException as e:
         print(f"BasicAuthException: {e}")
         return False
 
     hashed_password = auth_dict.get(login)
-    print(f"Expected password: {hashed_password}")
     hashed_request_password = strategy(password)
-    print(f"Actual password: {hashed_request_password}")
-
     if hashed_password != hashed_request_password:
-        print("Password mismatch")
         return False
 
     # log.debug('%r log in successed', "biliup")
-    print("Authentication successful")
     return True
 
 
