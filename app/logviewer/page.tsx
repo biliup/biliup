@@ -8,6 +8,8 @@ import {
   IconClear,
   IconSave,
 } from '@douyinfe/semi-icons'
+import { AuthGuard } from '../lib/auth-guard'
+import ProtectedLayout from '../lib/protected-layout'
 
 // 日志内容组件
 interface LogContentProps {
@@ -87,8 +89,31 @@ export default function LogViewer() {
   const [isConnected, setIsConnected] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('ds_update')
-  const wsRef = useRef<WebSocket | null>(null)
+  const wsRef = useRef<WebSocket | null>(null);
   const logContainerRef = useRef<HTMLDivElement>(null)
+
+  return (
+    <AuthGuard>
+      <ProtectedLayout>
+        <LogViewerContent 
+          logs={logs}
+          setLogs={setLogs}
+          isConnected={isConnected}
+          setIsConnected={setIsConnected}
+          isLoading={isLoading}
+          setIsLoading={setIsLoading}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          wsRef={wsRef}
+          logContainerRef={logContainerRef}
+        />
+      </ProtectedLayout>
+    </AuthGuard>
+  )
+}
+
+function LogViewerContent({ logs, setLogs, isConnected, setIsConnected, isLoading, setIsLoading, activeTab, setActiveTab, wsRef, logContainerRef }: any) {
+  const { Header, Content } = Layout
 
   const connectWebSocket = () => {
     setIsLoading(true)
@@ -105,7 +130,14 @@ export default function LogViewer() {
     const server = isDev
       ? process.env.NEXT_PUBLIC_API_SERVER?.replace(/^http/, 'ws') // 使用环境变量中配置的API服务器地址
       : `${protocol}//${window.location.host}`;
-    const wsUrl = `${server}/v1/ws/logs?file=${activeTab}.log`;
+    
+    // 获取认证信息
+    const auth = typeof window !== 'undefined' ? localStorage.getItem('auth') : null;
+    // 由于WebSocket API不支持自定义头部，我们将认证信息作为URL参数传递
+    // 注意：这不是最佳安全实践，但在当前架构下是可行的解决方案
+    const wsUrl = auth 
+      ? `${server}/ws/logs?file=${activeTab}.log&authorization=Basic%20${encodeURIComponent(auth)}`
+      : `${server}/ws/logs?file=${activeTab}.log`;
 
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
@@ -117,7 +149,7 @@ export default function LogViewer() {
     }
 
     ws.onmessage = (event) => {
-      setLogs(prev => [...prev, event.data])
+      setLogs((prev: string[]) => [...prev, event.data])
     }
 
     ws.onerror = (error) => {
