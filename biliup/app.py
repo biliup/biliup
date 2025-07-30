@@ -62,10 +62,23 @@ async def shot(event):
             continue
         cur = event.url_list[index]
         try:
-            await singleton_check(event, context['PluginInfo'].inverted_index[cur], cur)
+            downloading_count = sum(context['PluginInfo'].url_status.values())
+            # 跳过开播检测
+            need_skip = (
+                # 下载任务数已满，跳过开播检测
+                downloading_count >= config.get('pool1_size', 1)
+            )
+            if not need_skip:
+                await singleton_check(event, context['PluginInfo'].inverted_index[cur], cur)
             index += 1
-            skip = context['PluginInfo'].url_status[cur] == 1 and index < len(event.url_list)
-            if skip:  # 全部主播检测后不应跳过
+            # 跳过等待延迟
+            need_skip = (
+                # 如果不是最后一个任务，可以跳过
+                index < len(event.url_list) and
+                # 如果当前任务正在下载中，应当跳过
+                context['PluginInfo'].url_status[cur] == 1
+            )
+            if need_skip:
                 continue
         except Exception:
             logger.exception('shot')
@@ -127,18 +140,32 @@ class PluginInfo:
             self.coroutines[key] = asyncio.create_task(shot(plugin))
 
     def batch_check_task(self, plugin):
-        from biliup.handler import PRE_DOWNLOAD
+        from biliup.handler import UPLOAD, PRE_DOWNLOAD
 
         async def check_timer():
             name = None
             # 如果支持批量检测
             try:
-                async for turl in plugin.abatch_check(plugin.url_list):
-                    context['url_upload_count'].setdefault(turl, 0)
-                    for k, v in config['streamers'].items():
-                        if v.get("url", "") == turl:
-                            name = k
-                    event_manager.send_event(Event(PRE_DOWNLOAD, args=(name, turl,)))
+                # 构建 url -> name 的映射
+                url_to_name = {v['url']: k for k, v in config['streamers'].items()}
+
+                for url in plugin.url_list:
+                    context['url_upload_count'].setdefault(url, 0)
+
+                # 收集所有需要下载的 URL
+                download_urls = set()
+                async for is_open_url in plugin.abatch_check(plugin.url_list):
+                    download_urls.add(is_open_url)
+                    name = url_to_name.get(is_open_url)
+                    if name:
+                        with NamedLock(f'upload_file_list_{name}'):
+                            event_manager.send_event(Event(PRE_DOWNLOAD, args=(name, is_open_url,)))
+
+                # 对未开播的 URL 发送上传事件
+                for url in set(plugin.url_list) - download_urls:
+                    name = url_to_name.get(url)
+                    if name:
+                        event_manager.send_event(Event(UPLOAD, args=({'name': name, 'url': url},)))
             except Exception:
                 logger.exception('batch_check_task')
 
