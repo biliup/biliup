@@ -1,9 +1,8 @@
 'use client'
-import './globals.css'
-import styles from './page.module.css'
-import { useCallback, useMemo, useState, useEffect } from 'react'
-import Link from 'next/link'
+
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { usePathname } from 'next/navigation'
+import Link from 'next/link'
 import { Button, Nav } from '@douyinfe/semi-ui'
 import { OnSelectedData } from '@douyinfe/semi-ui/lib/es/navigation'
 import { Layout as SeLayout } from '@douyinfe/semi-ui/lib/es/layout'
@@ -19,12 +18,12 @@ import {
   IconHistory,
 } from '@douyinfe/semi-icons'
 import Image from 'next/image'
-import ThemeButton from './ui/ThemeButton'
-import { useSystemTheme, useTheme } from './lib/utils'
+import ThemeButton from '../ui/ThemeButton'
+import { useSystemTheme, useTheme } from './utils'
 import { useWindowSize } from 'react-use';
-import { AuthProvider } from './lib/auth-context';
+import styles from '../page.module.css'
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function ProtectedLayout({ children }: { children: React.ReactNode }) {
   const { Sider } = SeLayout
   const pathname = usePathname()
   let initOpenKeys: any = []
@@ -202,6 +201,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       }),
     [openKeys, selectedKeys]
   )
+  
   const renderWrapper = useCallback(({ itemElement, isSubNav, isInSubNav, props }: any) => {
     const routerMap: Record<string, string> = {
       home: '/',
@@ -239,18 +239,51 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const onCollapseChange = useCallback(() => {
     setIsCollapsed(!isCollapsed)
   }, [isCollapsed])
+  
   return (
-    <html lang="zh-Hans">
-      <body style={{ width: '100%' }}>
-        <AuthProvider>
-          <SeLayout className="components-layout-demo semi-light-scrollbar">
-            <SeLayout style={{ height: '100vh' }}>
-              {children}
-            </SeLayout>
-          </SeLayout>
-        </AuthProvider>
-      </body>
-    </html>
+    <SeLayout className="components-layout-demo semi-light-scrollbar">
+      <Sider>
+        <Nav
+          style={navStyle}
+          openKeys={openKeys}
+          selectedKeys={selectedKeys}
+          isCollapsed={isCollapsed}
+          renderWrapper={renderWrapper}
+          items={items}
+          onOpenChange={onOpenChange}
+          onSelect={onSelect}
+        >
+          <Nav.Header
+            logo={
+              <Image src="/logo.png" alt="{}" height={10} width={20}></Image>
+            }
+            style={isCollapsed ? { flexDirection: 'column', paddingLeft: 0, paddingRight: 0, paddingBottom: 0, gap: '8px' } : { justifyContent: 'flex-start' }}
+            text="BILIUP"
+          >
+            <div
+              style={{
+                flexGrow: 1,
+                display: width <= 640 ? 'none' : 'flex',
+                flexDirection: 'row-reverse',
+                zIndex: 2,
+              }}
+            >
+              <Button
+                onClick={onCollapseChange}
+                type="tertiary"
+                className={styles.shadow}
+                theme="borderless"
+                icon={isCollapsed ? <IconDoubleChevronRight /> : <IconDoubleChevronLeft />}
+              />
+            </div>
+          </Nav.Header>
+          <Nav.Footer collapseButton={false}>
+            <ThemeButton mode={mode} setMode={setMode} systemTheme={systemTheme} />
+          </Nav.Footer>
+        </Nav>
+      </Sider>
+      <SeLayout style={{ height: '100vh' }}>{children}</SeLayout>
+    </SeLayout>
   )
 }
 

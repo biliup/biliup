@@ -5,7 +5,6 @@ import {
   Button,
   Form,
   Layout,
-  Nav,
   Collapse,
   Avatar,
   Select,
@@ -24,6 +23,8 @@ import useSWRMutation from 'swr/mutation'
 import { FormApi } from '@douyinfe/semi-ui/lib/es/form'
 import { useBiliUsers } from '../lib/use-streamers'
 import styles from '../styles/dashboard.module.scss'
+import { AuthGuard } from '../lib/auth-guard'
+import ProtectedLayout from '../lib/protected-layout'
 
 // 注册各平台组件
 import plugins from '../ui/plugins'
@@ -87,129 +88,134 @@ const Dashboard: React.FC = () => {
   //     };
 
   return (
-    <>
-      <Header
-        style={{
-          backgroundColor: 'var(--semi-color-bg-1)',
-          position: 'sticky',
-          top: 0,
-          zIndex: 1,
-        }}
-      >
-        <Nav
-          header={
-            <>
-              <div
-                style={{
-                  backgroundColor: '#6b6c75ff',
-                  borderRadius: 'var(--semi-border-radius-large)',
-                  color: 'var(--semi-color-bg-0)',
-                  display: 'flex',
-                  // justifyContent: 'center',
-                  padding: '6px',
-                }}
-              >
-                <IconStar size="large" />
-              </div>
-              <h4 style={{ marginLeft: '12px' }}>空间配置</h4>
-            </>
-          }
-          footer={
-            <Button
-              onClick={() => {
-                formRef.current?.submitForm()
+    <AuthGuard>
+      <ProtectedLayout>
+        <Header
+          style={{
+            backgroundColor: 'var(--semi-color-bg-1)',
+            position: 'sticky',
+            top: 0,
+            zIndex: 1,
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              padding: '0 20px',
+              height: '60px',
+              backgroundColor: 'var(--semi-color-bg-1)',
+              boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+            }}
+          >
+            <div
+              style={{
+                backgroundColor: '#6b6c75ff',
+                borderRadius: 'var(--semi-border-radius-large)',
+                color: 'var(--semi-color-bg-0)',
+                display: 'flex',
+                padding: '6px',
               }}
-              icon={<IconPlusCircle />}
-              theme="solid"
-              style={{ marginRight: 10 }}
             >
-              保存
-            </Button>
-          }
-          mode="horizontal"
-        ></Nav>
-      </Header>
-      <Content>
-        <main className={styles.rootConfigPanel}>
-          <div className={styles.main}>
-            <div className={styles.content}>
-              <Form
-                className={styles.form}
-                // key={formKey}
-                initValues={entity}
-                onSubmit={async values => {
-                  try {
-                    await trigger(values)
-                    Toast.success('保存成功')
-                  } catch (e: any) {
-                    // error handling
-                    Notification.error({
-                      title: '保存失败',
-                      content: <Typography style={{ maxWidth: 450 }}>{e.message}</Typography>,
-                      // theme: 'light',
-                      // duration: 0,
-                      style: { width: 'min-content' },
-                    })
-                    throw e
-                  }
+              <IconStar size="large" />
+            </div>
+            <h4 style={{ marginLeft: '12px', margin: 0 }}>空间配置</h4>
+            <div style={{ marginLeft: 'auto' }}>
+              <Button
+                onClick={() => {
+                  formRef.current?.submitForm()
                 }}
-                getFormApi={formApi => (formRef.current = formApi)}
+                icon={<IconPlusCircle />}
+                theme="solid"
+                style={{ marginRight: 10 }}
               >
-                <Tabs
-                  type="line"
-                  contentStyle={{
-                    maxWidth: 965,
-                    // marginLeft: 'auto',
-                    // marginRight: 'auto',
-                    margin: '10px auto 0 auto',
-                  }}
-                >
-                  <TabPane tab="全局设置" itemKey="1">
-                    {/* 全局设置 */}
-                    <Global />
-                  </TabPane>
-                  <TabPane tab="各平台下载" itemKey="2">
-                    {/* 各平台下载 */}
-                    <div className={styles.framePlatformConfig}>
-                      <div className={styles.frameInside}>
-                        <div className={styles.group}>
-                          <div className={styles.buttonOnlyIconSecond}>
-                            <div
-                              className={styles.lineStory}
-                              style={{
-                                color: 'var(--semi-color-bg-0)',
-                                display: 'flex',
-                              }}
-                            >
-                              <IconGlobe size="small" />
-                            </div>
-                          </div>
-                        </div>
-                        <p className={styles.meegoSharedWebSettin}>各平台下载设置</p>
-                      </div>
-                      <Collapse keepDOM style={{ width: '100%' }}>
-                        {Object.entries(plugins)
-                          .filter(([key]) => key !== 'Cookie')
-                          .map(([key, Plugin]) => (
-                            <Plugin entity={entity} list={list} />
-                          ))}
-                        <plugins.Cookie entity={entity} list={list} />
-                      </Collapse>
-                    </div>
-                  </TabPane>
-                  <TabPane tab="开发者选项" itemKey="3">
-                    {/* 开发者选项 */}
-                    <Developer />
-                  </TabPane>
-                </Tabs>
-                <Space />
-                <Space style={{ height: '160px' }} />
-              </Form>
+                保存
+              </Button>
             </div>
           </div>
-        </main>
-      </Content>
-    </>
+        </Header>
+        <Content>
+          <main className={styles.rootConfigPanel}>
+            <div className={styles.main}>
+              <div className={styles.content}>
+                <Form
+                  className={styles.form}
+                  // key={formKey}
+                  initValues={entity}
+                  onSubmit={async values => {
+                    try {
+                      await trigger(values)
+                      Toast.success('保存成功')
+                    } catch (e: any) {
+                      // error handling
+                      Notification.error({
+                        title: '保存失败',
+                        content: <Typography style={{ maxWidth: 450 }}>{e.message}</Typography>,
+                        // theme: 'light',
+                        // duration: 0,
+                        style: { width: 'min-content' },
+                      })
+                      throw e
+                    }
+                  }}
+                  getFormApi={formApi => (formRef.current = formApi)}
+                >
+                  <Tabs
+                    type="line"
+                    contentStyle={{
+                      maxWidth: 965,
+                      // marginLeft: 'auto',
+                      // marginRight: 'auto',
+                      margin: '10px auto 0 auto',
+                    }}
+                  >
+                    <TabPane tab="全局设置" itemKey="1">
+                      {/* 全局设置 */}
+                      <Global />
+                    </TabPane>
+                    <TabPane tab="各平台下载" itemKey="2">
+                      {/* 各平台下载 */}
+                      <div className={styles.framePlatformConfig}>
+                        <div className={styles.frameInside}>
+                          <div className={styles.group}>
+                            <div className={styles.buttonOnlyIconSecond}>
+                              <div
+                                className={styles.lineStory}
+                                style={{
+                                  color: 'var(--semi-color-bg-0)',
+                                  display: 'flex',
+                                }}
+                              >
+                                <IconGlobe size="small" />
+                              </div>
+                            </div>
+                          </div>
+                          <p className={styles.meegoSharedWebSettin}>各平台下载设置</p>
+                        </div>
+                        <Collapse keepDOM style={{ width: '100%' }}>
+                          {Object.entries(plugins)
+                            .filter(([key]) => key !== 'Cookie')
+                            .map(([key, Plugin]) => (
+                              <Plugin entity={entity} list={list} />
+                            ))}
+                          <plugins.Cookie entity={entity} list={list} />
+                        </Collapse>
+                      </div>
+                    </TabPane>
+                    <TabPane tab="开发者选项" itemKey="3">
+                      {/* 开发者选项 */}
+                      <Developer />
+                    </TabPane>
+                  </Tabs>
+                  <Space />
+                  <Space style={{ height: '160px' }} />
+                </Form>
+              </div>
+            </div>
+          </main>
+        </Content>
+      </ProtectedLayout>
+    </AuthGuard>
   )
 }
 

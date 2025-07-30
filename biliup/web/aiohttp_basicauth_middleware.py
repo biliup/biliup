@@ -50,7 +50,7 @@ class BaseStrategy:
         self.on_error()
 
     def on_error(self):
-        raise web.HTTPUnauthorized(headers={'WWW-Authenticate': 'Basic'})
+        raise web.HTTPUnauthorized()
 
 
 def check_access(
@@ -59,16 +59,15 @@ def check_access(
     strategy: Callable = lambda x: x
 ) -> bool:
     # log.debug('Check access: %r', header_value)
-    print('Check access: %r', header_value)
 
     try:
         login, password = parse_header(header_value)
-    except BasicAuthException:
+    except BasicAuthException as e:
+        print(f"BasicAuthException: {e}")
         return False
 
     hashed_password = auth_dict.get(login)
     hashed_request_password = strategy(password)
-
     if hashed_password != hashed_request_password:
         return False
 
@@ -98,7 +97,7 @@ def basic_auth_middleware(
                     return await strategy_obj.check()
 
                 if not check_access(auth_dict, request.headers.get('Authorization', ''), strategy):
-                    raise web.HTTPUnauthorized(headers={'WWW-Authenticate': 'Basic'})
+                    raise web.HTTPUnauthorized()
 
                 return await handler(request)
             return await handler(request)
