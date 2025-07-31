@@ -1,0 +1,140 @@
+{
+  "db_name": "SQLite",
+  "query": "\n       select\n            id, template_name as \"template_name!\", user, copyright as \"copyright!: u8\", source as \"source!\", tid as \"tid!: u16\", cover as \"cover!\", title as \"title!\", desc as \"desc!\", dynamic as \"dynamic!\", tag as \"tag!\", dtime as \"dtime: u32\", interactive as \"interactive!: u8\", mission_id as \"mission_id: u32\", dolby as \"dolby!: u8\", lossless_music as \"lossless_music!: u8\", no_reprint as \"no_reprint!: u8\", open_elec as \"open_elec!: u8\", up_selection_reply as \"up_selection_reply!: bool\", up_close_reply as \"up_close_reply!: bool\", up_close_danmu as \"up_close_danmu!: bool\"\n       from upload_streamers\n       where\n            id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Int64"
+      },
+      {
+        "name": "template_name!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "user",
+        "ordinal": 2,
+        "type_info": "Int64"
+      },
+      {
+        "name": "copyright!: u8",
+        "ordinal": 3,
+        "type_info": "Int64"
+      },
+      {
+        "name": "source!",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "tid!: u16",
+        "ordinal": 5,
+        "type_info": "Int64"
+      },
+      {
+        "name": "cover!",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "title!",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "desc!",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "dynamic!",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "tag!",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "dtime: u32",
+        "ordinal": 11,
+        "type_info": "Int64"
+      },
+      {
+        "name": "interactive!: u8",
+        "ordinal": 12,
+        "type_info": "Int64"
+      },
+      {
+        "name": "mission_id: u32",
+        "ordinal": 13,
+        "type_info": "Int64"
+      },
+      {
+        "name": "dolby!: u8",
+        "ordinal": 14,
+        "type_info": "Int64"
+      },
+      {
+        "name": "lossless_music!: u8",
+        "ordinal": 15,
+        "type_info": "Int64"
+      },
+      {
+        "name": "no_reprint!: u8",
+        "ordinal": 16,
+        "type_info": "Int64"
+      },
+      {
+        "name": "open_elec!: u8",
+        "ordinal": 17,
+        "type_info": "Int64"
+      },
+      {
+        "name": "up_selection_reply!: bool",
+        "ordinal": 18,
+        "type_info": "Int64"
+      },
+      {
+        "name": "up_close_reply!: bool",
+        "ordinal": 19,
+        "type_info": "Int64"
+      },
+      {
+        "name": "up_close_danmu!: bool",
+        "ordinal": 20,
+        "type_info": "Int64"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f689c99cd87d324b7bae6f8b299d3bdf541324588021897cb8ca2594e428806c"
+}

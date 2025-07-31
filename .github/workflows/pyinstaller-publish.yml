@@ -7,35 +7,73 @@ on:
 
 jobs:
   build:
+    permissions:
+      contents: write
     runs-on: 'windows-latest'
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-node@v4
       with:
-        node-version: 20
+        node-version: lts/*
+    - name: Build frontend
+      run: |
+        npm install
+        npm run build
     - uses: actions/setup-python@v5
       with:
         python-version: '3.x'
-    - name: Install dependencies
+    - uses: PyO3/maturin-action@v1
+      with:
+        command: build
+        args: --release
+    - name: Build
+      shell: bash
       run: |
         python -m pip install --upgrade pip
-        pip install setuptools wheel twine build pyinstaller
-        npm install
-        pip install .
-    - name: Build
-      run: |
-        npm run build 
+        pip install target/wheels/*.whl
+        pip install Pillow pyinstaller
         pyinstaller biliup.spec
+    - name: Rename and move sidecar
+      run: |
+        # 动态获取rustc的target triple
+        $TARGET_TRIPLE = rustc -Vv | Select-String "host:" | ForEach-Object {$_.Line.split(" ")[1]}
+        echo "Target Triple: $TARGET_TRIPLE"
+        
+        # 创建目标目录 (如果不存在)
+        New-Item -ItemType Directory -Force -Path tauri-app/src-tauri/binaries
+        
+        # 假设的原始路径和新路径
+        $SOURCE_PATH = "dist/biliup.exe"
+        $DESTINATION_PATH = "tauri-app/src-tauri/binaries/biliup-$TARGET_TRIPLE.exe"
+        
+        echo "Moving $SOURCE_PATH to $DESTINATION_PATH"
+        
+        # 使用PowerShell的Move-Item命令进行移动和重命名
+        #Move-Item -Path $SOURCE_PATH -Destination $DESTINATION_PATH
+        cp -r dist/bbup/* tauri-app/src-tauri/binaries
+      shell: pwsh
     # Optionally verify that it works (provided that it does not need user interaction)
     #- run: ./dist/your-code/your-code
-    - uses: actions/upload-artifact@v4
+    - name: install Rust stable
+      uses: dtolnay/rust-toolchain@stable
+    - name: install frontend dependencies
+      run: |
+        cd tauri-app
+        npm install
+    - uses: tauri-apps/tauri-action@v0
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        path: dist/*
-    - name: Upload binaries to release
-      uses: svenstaro/upload-release-action@v2
-      with:
-        repo_token: ${{ secrets.GITHUB_TOKEN }}
-#        file: target/release/${{ matrix.artifact_name }}
-        file: dist/biliup.exe
-        asset_name: biliup_$tag.exe
-        tag: ${{ github.ref }}
+        tagName: ${{ github.ref }} # the action automatically replaces \_\_VERSION\_\_ with the app version.
+        projectPath: tauri-app
+#    - uses: actions/upload-artifact@v4
+#      with:
+#        path: dist/*
+#    - name: Upload binaries to release
+#      uses: svenstaro/upload-release-action@v2
+#      with:
+#        repo_token: ${{ secrets.GITHUB_TOKEN }}
+##        file: target/release/${{ matrix.artifact_name }}
+#        file: dist/biliup.exe
+#        asset_name: biliup_$tag.exe
+#        tag: ${{ github.ref }}

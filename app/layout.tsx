@@ -22,6 +22,7 @@ import Image from 'next/image'
 import ThemeButton from './ui/ThemeButton'
 import { useSystemTheme, useTheme } from './lib/utils'
 import { useWindowSize } from 'react-use';
+import { AuthProvider } from './lib/auth-context';
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const { Sider } = SeLayout
@@ -241,63 +242,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="zh-Hans">
       <body style={{ width: '100%' }}>
-        <SeLayout className="components-layout-demo semi-light-scrollbar">
-          <Sider>
-            <Nav
-              style={navStyle}
-              // toggleIconPosition={'left'}
-              // defaultOpenKeys={['job']}
-              openKeys={openKeys}
-              selectedKeys={selectedKeys}
-              isCollapsed={isCollapsed}
-              // bodyStyle={{height: '100%'}}
-              renderWrapper={renderWrapper}
-              items={items}
-              // onCollapseChange={onCollapseChange}
-              onOpenChange={onOpenChange}
-              onSelect={onSelect}
-              // header={{
-              //     logo: <IconSemiLogo style={{height: '36px', fontSize: 36}}/>,
-              //     text: 'BILIUP'
-              // }}
-              // footer={{
-              //     collapseButton: true,
-              // }}
-            >
-              <Nav.Header
-                logo={
-                  // <IconSemiLogo
-                  //     style={{ height: "36px", fontSize: 36 }}
-                  // />
-                  <Image src="/logo.png" alt="{}" height={10} width={20}></Image>
-                }
-                style={isCollapsed ? { flexDirection: 'column', paddingLeft: 0, paddingRight: 0, paddingBottom: 0, gap: '8px' } : { justifyContent: 'flex-start' }}
-                text="BILIUP"
-              >
-                <div
-                  style={{
-                    flexGrow: 1,
-                    display: width <= 640 ? 'none' : 'flex',
-                    flexDirection: 'row-reverse',
-                    zIndex: 2,
-                  }}
-                >
-                  <Button
-                    onClick={onCollapseChange}
-                    type="tertiary"
-                    className={styles.shadow}
-                    theme="borderless"
-                    icon={isCollapsed ? <IconDoubleChevronRight /> : <IconDoubleChevronLeft />}
-                  />
-                </div>
-              </Nav.Header>
-              <Nav.Footer collapseButton={false}>
-                <ThemeButton mode={mode} setMode={setMode} systemTheme={systemTheme} />
-              </Nav.Footer>
-            </Nav>
-          </Sider>
-          <SeLayout style={{ height: '100vh' }}>{children}</SeLayout>
-        </SeLayout>
+        <AuthProvider>
+          <SeLayout className="components-layout-demo semi-light-scrollbar">
+            <SeLayout style={{ height: '100vh' }}>
+              {children}
+            </SeLayout>
+          </SeLayout>
+        </AuthProvider>
       </body>
     </html>
   )

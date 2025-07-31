@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        select *\n        from users\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Int64"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "value",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "platform",
+        "ordinal": 3,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "fdcd73e1871f34a1d168c12607af22a5031955df6288b09f2f055b3d3e004093"
+}

@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "\n       select id, url as \"url!\", remark as \"remark!\", filename as \"filename!\", split_time, split_size, upload_id from live_streamers\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Int64"
+      },
+      {
+        "name": "url!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "remark!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "filename!",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "split_time",
+        "ordinal": 4,
+        "type_info": "Int64"
+      },
+      {
+        "name": "split_size",
+        "ordinal": 5,
+        "type_info": "Int64"
+      },
+      {
+        "name": "upload_id",
+        "ordinal": 6,
+        "type_info": "Int64"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "c285bb895810306ffb0858fee4f18efb55d357c383329b748c63310e114e6f43"
+}

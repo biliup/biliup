@@ -1,6 +1,6 @@
 'use client'
 
-import { AutoComplete, Layout, Nav, Spin, Table, Typography } from '@douyinfe/semi-ui'
+import { AutoComplete, Layout, Spin, Table, Typography } from '@douyinfe/semi-ui'
 import { SortOrder } from '@douyinfe/semi-ui/lib/es/table'
 import useSWR from 'swr'
 import { fetcher, FileList } from '@/app/lib/api-streamer'
@@ -16,6 +16,8 @@ import {
 import { IconHistory } from '@douyinfe/semi-icons'
 import { humDate } from '@/app/lib/utils'
 import Filter from '@/app/job/Filter'
+import { AuthGuard } from '../lib/auth-guard'
+import ProtectedLayout from '../lib/protected-layout'
 
 export default function Home() {
   const { Header, Footer, Sider, Content } = Layout
@@ -80,46 +82,51 @@ export default function Home() {
     )
   }
   return (
-    <>
-      <Header style={{ backgroundColor: 'var(--semi-color-bg-1)' }}>
-        <Nav
-          style={{ border: 'none' }}
-          header={
-            <>
-              <div
-                style={{
-                  backgroundColor: 'rgb(250 102 76)',
-                  borderRadius: 'var(--semi-border-radius-large)',
-                  color: 'var(--semi-color-bg-0)',
-                  display: 'flex',
-                  padding: '6px',
-                }}
-              >
-                <IconHistory size="large" />
-              </div>
-              <h4 style={{ marginLeft: '12px' }}>直播历史</h4>
-            </>
-          }
-          mode="horizontal"
-        ></Nav>
-      </Header>
-      <Content
-        style={{
-          paddingLeft: 12,
-          paddingRight: 12,
-          backgroundColor: 'var(--semi-color-bg-0)',
-        }}
-      >
-        <main>
-          <Table
-            size="small"
-            rowKey="id"
-            columns={columns}
-            dataSource={data}
-            expandedRowRender={expandRowRender}
-          />
-        </main>
-      </Content>
-    </>
+    <AuthGuard>
+      <ProtectedLayout>
+        <Header style={{ backgroundColor: 'var(--semi-color-bg-1)' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              padding: '0 20px',
+              height: '60px',
+              backgroundColor: 'var(--semi-color-bg-1)',
+              boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+            }}
+          >
+            <div
+              style={{
+                backgroundColor: 'rgb(250 102 76)',
+                borderRadius: 'var(--semi-border-radius-large)',
+                color: 'var(--semi-color-bg-0)',
+                display: 'flex',
+                padding: '6px',
+              }}
+            >
+              <IconHistory size="large" />
+            </div>
+            <h4 style={{ marginLeft: '12px', margin: 0 }}>直播历史</h4>
+          </div>
+        </Header>
+        <Content
+          style={{
+            paddingLeft: 12,
+            paddingRight: 12,
+            backgroundColor: 'var(--semi-color-bg-0)',
+          }}
+        >
+          <main>
+            <Table
+              size="small"
+              rowKey="id"
+              columns={columns}
+              dataSource={data}
+              expandedRowRender={expandRowRender}
+            />
+          </main>
+        </Content>
+      </ProtectedLayout>
+    </AuthGuard>
   )
 }

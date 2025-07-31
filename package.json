@@ -12,7 +12,6 @@
     "@douyinfe/semi-ui": "^2.75.0",
     "artplayer": "^5.2.1",
     "mpegts.js": "^1.8.0",
-    "my-app": "file:",
     "next": "^14.2.26",
     "qrcode.react": "^3.1.0",
     "react": "^18.3.1",

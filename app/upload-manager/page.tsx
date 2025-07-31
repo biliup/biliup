@@ -4,7 +4,6 @@ import {
   ButtonGroup,
   Layout,
   List,
-  Nav,
   Popconfirm,
   Notification,
   Typography,
@@ -22,6 +21,8 @@ import { useRouter } from 'next/navigation'
 import UserList from '../ui/UserList'
 import useSWRMutation from 'swr/mutation'
 import { useBiliUsers } from '../lib/use-streamers'
+import { AuthGuard } from '../lib/auth-guard'
+import ProtectedLayout from '../lib/protected-layout'
 
 export default function Union() {
   const { Meta } = Card
@@ -96,158 +97,161 @@ export default function Union() {
   }
 
   return (
-    <>
-      <UserList visible={visible} onCancel={change}></UserList>
-      <Modal
-        size="medium"
-        title="文件选择"
-        okText="上传"
-        style={{ width: 'min(600px, 90vw)' }}
-        visible={visibleModal}
-        onOk={handleOk}
-        afterClose={handleAfterClose}
-        onCancel={handleCancel}
-        bodyStyle={{
-            overflow: 'auto',
-        }}
-        closeOnEsc={true}
-      >
-        <Transfer
-          style={{ height: 416 }}
-          dataSource={data}
-          draggable
-          value={transferData}
-          onChange={handleTransferChange}
-        />
-      </Modal>
-      <Header style={{ backgroundColor: 'var(--semi-color-bg-1)' }}>
-        <nav
+    <AuthGuard>
+      <ProtectedLayout>
+        <UserList visible={visible} onCancel={change}></UserList>
+        <Modal
+          size="medium"
+          title="文件选择"
+          okText="上传"
+          style={{ width: 'min(600px, 90vw)' }}
+          visible={visibleModal}
+          onOk={handleOk}
+          afterClose={handleAfterClose}
+          onCancel={handleCancel}
+          bodyStyle={{
+              overflow: 'auto',
+          }}
+          closeOnEsc={true}
+        >
+          <Transfer
+            style={{ height: 416 }}
+            dataSource={data}
+            draggable
+            value={transferData}
+            onChange={handleTransferChange}
+          />
+        </Modal>
+        <Header style={{ backgroundColor: 'var(--semi-color-bg-1)' }}>
+          <div
+            style={{
+              display: 'flex',
+              paddingLeft: '25px',
+              paddingRight: '25px',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+              height: '60px',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                gap: 10,
+                justifyContent: 'center',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+              }}
+            >
+              <IconCloudStroked
+                style={{
+                  backgroundColor: 'rgba(var(--semi-violet-4), 1)',
+                  borderRadius: 'var(--semi-border-radius-large)',
+                  color: 'var(--semi-color-bg-0)',
+                  padding: '6px',
+                }}
+                size="large"
+              />
+              <h4 style={{ margin: 0 }}>投稿管理</h4>
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+              }}
+            >
+              <Button
+                onClick={change}
+                // theme="borderless"
+                type="tertiary"
+                icon={<IconUserListStroked />}
+                style={{
+                  // color: 'var(--semi-color-text-2)',
+                  borderRadius: 'var(--semi-border-radius-circle)',
+                  marginRight: '12px',
+                }}
+              />
+              <Link href="/upload-manager/add" onClick={handleAddLinkClick}>
+                <Button icon={<IconPlusCircle />} theme="solid" style={{ marginRight: 10 }}>
+                  新建
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </Header>
+        <Content
           style={{
-            display: 'flex',
-            paddingLeft: '25px',
-            paddingRight: '25px',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+            padding: '24px',
+            backgroundColor: 'var(--semi-color-bg-0)',
           }}
         >
-          <div
-            style={{
-              display: 'flex',
-              gap: 10,
-              justifyContent: 'center',
-              alignItems: 'center',
-              flexWrap: 'wrap',
+          <List
+            grid={{
+              gutter: 12,
+              xs: 24,
+              sm: 24,
+              md: 12,
+              lg: 8,
+              xl: 6,
+              xxl: 4,
             }}
-          >
-            <IconCloudStroked
-              style={{
-                backgroundColor: 'rgba(var(--semi-violet-4), 1)',
-                borderRadius: 'var(--semi-border-radius-large)',
-                color: 'var(--semi-color-bg-0)',
-                padding: '6px',
-              }}
-              size="large"
-            />
-            <h4>投稿管理</h4>
-          </div>
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 6,
-            }}
-          >
-            <Button
-              onClick={change}
-              // theme="borderless"
-              type="tertiary"
-              icon={<IconUserListStroked />}
-              style={{
-                // color: 'var(--semi-color-text-2)',
-                borderRadius: 'var(--semi-border-radius-circle)',
-                marginRight: '12px',
-              }}
-            />
-            <Link href="/upload-manager/add" onClick={handleAddLinkClick}>
-              <Button icon={<IconPlusCircle />} theme="solid" style={{ marginRight: 10 }}>
-                新建
-              </Button>
-            </Link>
-          </div>
-        </nav>
-      </Header>
-      <Content
-        style={{
-          padding: '24px',
-          backgroundColor: 'var(--semi-color-bg-0)',
-        }}
-      >
-        <List
-          grid={{
-            gutter: 12,
-            xs: 24,
-            sm: 24,
-            md: 12,
-            lg: 8,
-            xl: 6,
-            xxl: 4,
-          }}
-          dataSource={templates}
-          renderItem={item => (
-            <List.Item>
-              <Card
-                shadows="hover"
-                style={{
-                  maxWidth: 360,
-                  margin: '8px 2px',
-                  flexGrow: 1,
-                }}
-                bodyStyle={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                }}
-              >
-                <Meta
-                  title={
-                    <Text
-                      ellipsis={{
-                        showTooltip: true,
-                        pos: 'middle',
+            dataSource={templates}
+            renderItem={item => (
+              <List.Item>
+                <Card
+                  shadows="hover"
+                  style={{
+                    maxWidth: 360,
+                    margin: '8px 2px',
+                    flexGrow: 1,
+                  }}
+                  bodyStyle={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <Meta
+                    title={
+                      <Text
+                        ellipsis={{
+                          showTooltip: true,
+                          pos: 'middle',
+                        }}
+                        style={{ maxWidth: 150 }}
+                      >
+                        {item.template_name}
+                      </Text>
+                    }
+                  />
+                  <ButtonGroup style={{ minWidth: 100 }} theme="borderless">
+                    <Button icon={<IconSendStroked />} onClick={() => showDialog(item)}></Button>
+                    <Button
+                      icon={<IconEdit2Stroked />}
+                      onClick={() => {
+                        router.push(`/upload-manager/edit?id=${item.id}`)
                       }}
-                      style={{ maxWidth: 150 }}
+                    ></Button>
+                    <Popconfirm
+                      title="确定是否要删除？"
+                      content="此操作将不可逆"
+                      margin={50}
+                      onConfirm={async () => await onConfirm(item.id)}
+                      // onCancel={onCancel}
                     >
-                      {item.template_name}
-                    </Text>
-                  }
-                />
-                <ButtonGroup style={{ minWidth: 100 }} theme="borderless">
-                  <Button icon={<IconSendStroked />} onClick={() => showDialog(item)}></Button>
-                  <Button
-                    icon={<IconEdit2Stroked />}
-                    onClick={() => {
-                      router.push(`/upload-manager/edit?id=${item.id}`)
-                    }}
-                  ></Button>
-                  <Popconfirm
-                    title="确定是否要删除？"
-                    content="此操作将不可逆"
-                    margin={50}
-                    onConfirm={async () => await onConfirm(item.id)}
-                    // onCancel={onCancel}
-                  >
-                    <Button theme="borderless" icon={<IconDeleteStroked />}></Button>
-                  </Popconfirm>
-                </ButtonGroup>
-              </Card>
-            </List.Item>
-          )}
-        />
-      </Content>
-    </>
+                      <Button theme="borderless" icon={<IconDeleteStroked />}></Button>
+                    </Popconfirm>
+                  </ButtonGroup>
+                </Card>
+              </List.Item>
+            )}
+          />
+        </Content>
+      </ProtectedLayout>
+    </AuthGuard>
   )
 }

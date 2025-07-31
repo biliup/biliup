@@ -1,0 +1,19 @@
+[workspace]
+members = [
+    "crates/biliup",
+    "crates/biliup-cli",
+    "crates/stream-gears",
+    "tauri-app/src-tauri"
+]
+resolver = "2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[profile.minimal]
+inherits = "release"
+opt-level = 's'
+panic = 'abort'

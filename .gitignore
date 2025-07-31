@@ -44,3 +44,6 @@ data/
 .next
 out
 downloads/
+target
+_internal
+.trae/

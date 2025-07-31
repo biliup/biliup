@@ -1,0 +1,140 @@
+{
+  "db_name": "SQLite",
+  "query": "insert into upload_streamers(\n                template_name,\n                user,\n                copyright,\n                source,\n                tid,\n                cover,\n                title,\n                'desc',\n                dynamic,\n                tag,\n                dtime,\n                interactive,\n                mission_id,\n                dolby,\n                lossless_music,\n                no_reprint,\n                open_elec,\n                up_selection_reply,\n                up_close_reply,\n                up_close_danmu\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)\n            returning\n                id,\n                template_name as \"template_name!\",\n                user as \"user!\",\n                copyright as \"copyright!: u8\",\n                source as \"source!\",\n                tid as \"tid!: u16\",\n                cover as \"cover!\",\n                title as \"title!\",\n                \"desc\" as \"desc!\",\n                dynamic as \"dynamic!\",\n                tag as \"tag!\",\n                dtime as \"dtime: u32\",\n                interactive as \"interactive!: u8\",\n                mission_id as \"mission_id: u32\",\n                dolby as \"dolby!: u8\",\n                lossless_music as \"lossless_music!: u8\",\n                no_reprint as \"no_reprint!: u8\",\n                open_elec as \"open_elec!: u8\",\n                up_selection_reply as \"up_selection_reply!: bool\",\n                up_close_reply as \"up_close_reply!: bool\",\n                up_close_danmu as \"up_close_danmu!: bool\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Int64"
+      },
+      {
+        "name": "template_name!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "user!",
+        "ordinal": 2,
+        "type_info": "Int64"
+      },
+      {
+        "name": "copyright!: u8",
+        "ordinal": 3,
+        "type_info": "Int64"
+      },
+      {
+        "name": "source!",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "tid!: u16",
+        "ordinal": 5,
+        "type_info": "Int64"
+      },
+      {
+        "name": "cover!",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "title!",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "desc!",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "dynamic!",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "tag!",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "dtime: u32",
+        "ordinal": 11,
+        "type_info": "Int64"
+      },
+      {
+        "name": "interactive!: u8",
+        "ordinal": 12,
+        "type_info": "Int64"
+      },
+      {
+        "name": "mission_id: u32",
+        "ordinal": 13,
+        "type_info": "Int64"
+      },
+      {
+        "name": "dolby!: u8",
+        "ordinal": 14,
+        "type_info": "Int64"
+      },
+      {
+        "name": "lossless_music!: u8",
+        "ordinal": 15,
+        "type_info": "Int64"
+      },
+      {
+        "name": "no_reprint!: u8",
+        "ordinal": 16,
+        "type_info": "Int64"
+      },
+      {
+        "name": "open_elec!: u8",
+        "ordinal": 17,
+        "type_info": "Int64"
+      },
+      {
+        "name": "up_selection_reply!: bool",
+        "ordinal": 18,
+        "type_info": "Int64"
+      },
+      {
+        "name": "up_close_reply!: bool",
+        "ordinal": 19,
+        "type_info": "Int64"
+      },
+      {
+        "name": "up_close_danmu!: bool",
+        "ordinal": 20,
+        "type_info": "Int64"
+      }
+    ],
+    "parameters": {
+      "Right": 20
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "29f8fa25bd2febaf16f128b46391474b34bcba311abc3e17f1b14ad5f04cfba1"
+}

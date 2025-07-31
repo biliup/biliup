@@ -23,7 +23,7 @@
 * 多主播录制/上传，24X7无人值守运行，高自定义元信息
 * 边录边传不落盘急速上传，节省本地硬盘空间
 
-
+论坛：[BBS](https://bbs.biliup.rs)
 
 ## 📜 更新日志
 
@@ -34,7 +34,7 @@
 
 ## 📜 使用文档
 
-- [使用文档 »](https://docs.biliup.me)
+- [使用文档 »](https://docs.biliup.rs)
 
 ## 🚀 快速开始
 
@@ -46,6 +46,9 @@
 2. 安装：`pip3 install biliup`
 3. 启动：`biliup start`
 4. 访问 WebUI：`http://your-ip:19159`
+
+### Termux
+- 详见[Wiki](https://github.com/biliup/biliup/wiki/Termux-%E4%B8%AD%E4%BD%BF%E7%94%A8-biliup)
 
 
 ---
