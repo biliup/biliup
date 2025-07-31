@@ -205,8 +205,9 @@ class Douyin(DownloadBase):
     async def get_web_room_info(self, web_rid: str) -> dict:
         query = {
             'web_rid': web_rid,
+            # 2025-08-01 服务端暂不校验以下参数的值，只校验参数存在
             'enter_from': random.choice(['link_share', 'web_live']),
-            'a_bogus': '0', # 2025-08-01 服务端暂不校验
+            'a_bogus': '0',
         }
         target_url = DouyinUtils.build_request_url(f"https://live.douyin.com/webcast/room/web/enter/", query)
         logger.debug(f"{self.plugin_msg}: get_web_room_info {target_url}")
@@ -252,7 +253,7 @@ class DouyinUtils:
             return DouyinUtils._douyin_ttwid
 
     @staticmethod
-    def build_request_url(url: str, query: Optional[dict]) -> str:
+    def build_request_url(url: str, query: Optional[dict] = None) -> str:
         parsed_url = urlparse(url)
         existing_params = query or parse_qs(parsed_url.query)
         existing_params['aid'] = ['6383']
