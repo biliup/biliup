@@ -1,11 +1,11 @@
-import json
 from typing import Optional
 from urllib.parse import unquote, urlparse, parse_qs, urlencode, urlunparse
 
 import requests
+import random
 
 from biliup.common.util import client
-from . import logger, match1, random_user_agent
+from . import logger, match1, random_user_agent, json_loads
 from biliup.config import config
 from biliup.Danmaku import DanmakuClient
 from ..common.tools import NamedLock
@@ -92,7 +92,7 @@ class Douyin(DownloadBase):
                     self.__sec_uid = _room_info['data']['user']['sec_uid']
             # PCWeb 端无流 或 没有提供 web_rid
             if not _room_info.get('data', {}).get('data'):
-                _room_info = await self.get_room_info(self.__sec_uid, self.__room_id)
+                _room_info = await self.get_h5_room_info(self.__sec_uid, self.__room_id)
                 if _room_info['data'].get('room', {}).get('owner'):
                     self.__web_rid = _room_info['data']['room']['owner']['web_rid']
             try:
@@ -120,9 +120,10 @@ class Douyin(DownloadBase):
             pull_data = room_info['stream_url']['live_core_sdk_data']['pull_data']
             if room_info['stream_url'].get('pull_datas') and self.douyin_double_screen:
                 pull_data = next(iter(room_info['stream_url']['pull_datas'].values()))
-            stream_data = json.loads(pull_data['stream_data'])['data']
+            stream_data = json_loads(pull_data['stream_data'])['data']
         except:
             logger.exception(f"{self.plugin_msg}: 加载直播流失败")
+            logger.debug(f"{self.plugin_msg}: room_info {room_info}")
             return False
 
                 # 抖音FLV真原画
@@ -135,8 +136,12 @@ class Douyin(DownloadBase):
             # and
             # self.raw_stream_url.find('_or4.flv') != -1 # or4(origin)
         ):
-            self.raw_stream_url = stream_data['ao']['main']['flv'].replace('&only_audio=1', '')
-        else:
+            try:
+                self.raw_stream_url = stream_data['ao']['main']['flv'].replace('&only_audio=1', '')
+            except KeyError:
+                logger.debug(f"{self.plugin_msg}: 未找到 ao 流 {stream_data}")
+
+        if not self.raw_stream_url:
             # 原画origin 蓝光uhd 超清hd 高清sd 标清ld 流畅md 仅音频ao
             quality_items = ['origin', 'uhd', 'hd', 'sd', 'ld', 'md']
             quality = self.douyin_quality
@@ -197,15 +202,24 @@ class Douyin(DownloadBase):
             except:
                 pass
 
-    async def get_web_room_info(self, web_rid) -> dict:
-        target_url = DouyinUtils.build_request_url(f"https://live.douyin.com/webcast/room/web/enter/?web_rid={web_rid}")
-        web_info = (await client.get(target_url, headers=self.fake_headers)).json()
+    async def get_web_room_info(self, web_rid: str) -> dict:
+        query = {
+            'web_rid': web_rid,
+            # 2025-08-01 服务端暂不校验以下参数的值，只校验参数存在
+            'enter_from': random.choice(['link_share', 'web_live']),
+            'a_bogus': '0',
+        }
+        target_url = DouyinUtils.build_request_url(f"https://live.douyin.com/webcast/room/web/enter/", query)
+        logger.debug(f"{self.plugin_msg}: get_web_room_info {target_url}")
+        web_info = await client.get(target_url, headers=self.fake_headers)
+        web_info = json_loads(web_info.text)
+        logger.debug(f"{self.plugin_msg}: get_web_room_info {web_info}")
         return web_info
 
-    async def get_room_info(self, sec_user_id, room_id) -> dict:
+    async def get_h5_room_info(self, sec_user_id: str, room_id: str) -> dict:
         if not sec_user_id:
             raise ValueError("sec_user_id is None")
-        params = {
+        query = {
             'type_id': 0,
             'live_id': 1,
             'version_code': '99.99.99',
@@ -213,8 +227,10 @@ class Douyin(DownloadBase):
             'room_id': room_id if room_id else 2, # 必要但不校验
             'sec_user_id': sec_user_id
         }
-        info = (await client.get("https://webcast.amemv.com/webcast/room/reflow/info/",
-                    params=params, headers=self.fake_headers)).json()
+        info = await client.get("https://webcast.amemv.com/webcast/room/reflow/info/",
+                    params=query, headers=self.fake_headers)
+        info = json_loads(info.text)
+        logger.debug(f"{self.plugin_msg}: get_h5_room_info {info}")
         return info
 
 
@@ -237,9 +253,9 @@ class DouyinUtils:
             return DouyinUtils._douyin_ttwid
 
     @staticmethod
-    def build_request_url(url: str) -> str:
+    def build_request_url(url: str, query: Optional[dict] = None) -> str:
         parsed_url = urlparse(url)
-        existing_params = parse_qs(parsed_url.query)
+        existing_params = query or parse_qs(parsed_url.query)
         existing_params['aid'] = ['6383']
         existing_params['device_platform'] = ['web']
         existing_params['browser_language'] = ['zh-CN']
