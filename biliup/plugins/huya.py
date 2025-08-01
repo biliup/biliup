@@ -79,8 +79,8 @@ class Huya(DownloadBase):
         # self.room_title = room_profile['room_title']
 
         # is_xingxiu = (room_profile['gid'] == 1663)
-        # gid_blacklist = [1663, ]
-        skip_query_build = self.huya_imgplus and (self.huya_mobile_api or self.huya_use_wup)
+        gid_blacklist = [1663, ]
+        skip_query_build = room_profile['gid'] in gid_blacklist
         stream_urls = await self.build_stream_urls(room_profile['streams_info'], skip_query_build)
         cdn_list = list(stream_urls.keys())
         if not self.huya_cdn or self.huya_cdn not in cdn_list:
@@ -173,7 +173,7 @@ class Huya(DownloadBase):
         '''
         构建流地址
         :param streams_info: 流信息
-        :param skip_query_build: 是否跳过构建anti_code
+        :param skip_query_build: 跳过构建anti_code
         :return: 流地址
         '''
         proto = self.huya_protocol
@@ -187,11 +187,20 @@ class Huya(DownloadBase):
             stream_name = self.get_stream_name(stream['sStreamName'])
             cdn = stream['sCdnType']
             suffix = stream[f's{proto}UrlSuffix']
-            if not skip_query_build:
-                anti_code = stream[f's{proto}AntiCode']
+            # 默认不修改 anticode
+            anti_code = stream[f's{proto}AntiCode']
+            if (
+                # 禁用 imgplus
+                not self.huya_imgplus
+                or
+                # 禁用 wup ，流信息不来自移动端，不在分区黑名单中
+                not (self.huya_use_wup or self.huya_mobile_api or skip_query_build)
+            ):
+                logger.debug(f"{self.plugin_msg}: 构建 anticode")
                 anti_code = self.build_query(stream_name, anti_code, self.get_uid(stream['lPresenterUid']))
-            else:
-                # 使用 Wup 获取 anti_code，必须使用 Wup UA 进行连接
+            # 启用 imgplus、wup 且非 mobile api
+            elif self.huya_use_wup and not self.huya_mobile_api:
+                # 使用 Wup 获取的 anti_code，必须使用 Wup UA 进行连接
                 anti_code = await self.get_true_anticode(cdn, stream_name, self.get_uid(stream['lPresenterUid']), proto)
             anti_code = f"{anti_code}&codec={self.huya_codec}"
             base_url = stream[f's{proto}Url'].replace('http://', 'https://') # 强制https
