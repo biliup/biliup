@@ -53,6 +53,9 @@ export default function LoginPage() {
       height: '100vh',
       background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
       backgroundSize: 'cover',
+      ['--semi-color-text-0' as any]: 'rgba(0, 0, 0, 1)', 
+      ['--semi-color-text-1' as any]: 'rgba(0, 0, 0, 0.3)',
+      ['--semi-color-text-2' as any]: 'rgba(0, 0, 0, 0.3)',
     }}>
       <Card 
         shadows='always'
