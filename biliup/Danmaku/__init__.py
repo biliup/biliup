@@ -210,7 +210,7 @@ class DanmakuClient(IDanmakuClient):
                             except:
                                 logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常", exc_info=True)
                                 continue
-                        
+
                         # 正常弹幕记录
                         if msg_type == 'danmaku': # 文字弹幕
                             try:
@@ -341,7 +341,7 @@ class DanmakuClient(IDanmakuClient):
                         self.__content['uid'] = 0
                         logger.warning(f"{DanmakuClient.__name__}:{self.__url}: 弹幕连接异常,降级至非完整弹幕")
                         continue
-                    logger.warning(f"{DanmakuClient.__name__}:{self.__url}: 弹幕连接异常,将在 30 秒后重试")
+                    logger.warning(f"{DanmakuClient.__name__}:{self.__url}: 弹幕连接异常,将在 30 秒后重试", exc_info=True)
                 except:
                     # 记录异常不到外部处理
                     logger.exception(f"{DanmakuClient.__name__}:{self.__url}: 弹幕异常,将在 30 秒后重试")
