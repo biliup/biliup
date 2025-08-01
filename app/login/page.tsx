@@ -13,9 +13,10 @@ export default function LoginPage() {
   
   useEffect(() => {
     // 检查是否需要认证
+    const auth = localStorage.getItem('auth');
     fetch('/api/basic', {
       headers: {
-        'Authorization': 'Basic dGVzdDp0ZXN0' // 使用测试凭据
+        'Authorization': `Basic ${auth}` // 使用测试凭据
       }
     }).then(response => {
       if (response.status !== 401) {
@@ -53,6 +54,9 @@ export default function LoginPage() {
       height: '100vh',
       background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
       backgroundSize: 'cover',
+      ['--semi-color-text-0' as any]: 'rgba(0, 0, 0, 1)', 
+      ['--semi-color-text-1' as any]: 'rgba(0, 0, 0, 0.3)',
+      ['--semi-color-text-2' as any]: 'rgba(0, 0, 0, 0.3)',
     }}>
       <Card 
         shadows='always'
