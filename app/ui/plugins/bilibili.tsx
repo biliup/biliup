@@ -221,7 +221,7 @@ const Bilibili: React.FC<Props> = props => {
         />
         <Form.Switch
           field="bili_anonymous_origin"
-          extraText="使用自定义API获取 master.m3u8 内的 hls_fmp4 原画流，无法录制特殊直播。默认关闭。"
+          extraText="使用自定义API获取 master playlist 内的 hls_fmp4 原画流，无法录制特殊直播。默认关闭。"
           label="免登录原画（bili_anonymous_origin）"
           fieldStyle={{
             alignSelf: 'stretch',
