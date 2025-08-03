@@ -33,13 +33,13 @@ RUN set -eux; \
 	apt-mark manual curl; \
 	\
 	arch="$(dpkg --print-architecture)"; arch="${arch##*-}"; \
-	url='https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2023-10-31-14-21/'; \
+	url='https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2025-07-30-13-56/'; \
 	case "$arch" in \
 		'amd64') \
-			url="${url}ffmpeg-N-112565-g55f28eb627-linux64-gpl.tar.xz"; \
+			url="${url}ffmpeg-N-120411-gf09c834a7d-linux64-gpl.tar.xz"; \
 		;; \
 		'arm64') \
-			url="${url}ffmpeg-N-112565-g55f28eb627-linuxarm64-gpl.tar.xz"; \
+			url="${url}ffmpeg-N-120411-gf09c834a7d-linuxarm64-gpl.tar.xz"; \
 		;; \
 		*) \
 			useApt=true; \
