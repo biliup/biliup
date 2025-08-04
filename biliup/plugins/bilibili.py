@@ -35,11 +35,7 @@ class Bililive(DownloadBase):
             normalize_url(config.get('bili_liveapi', OFFICIAL_API)).rstrip('/'),
             normalize_url(config.get('bili_fallback_api', OFFICIAL_API)).rstrip('/'),
         ]
-        self.bili_force_source = config.get('bili_force_source', False)
         self.bili_anonymous_origin = config.get('bili_anonymous_origin', False)
-        self.bili_ov2cn = config.get('bili_ov2cn', False)
-        self.bili_normalize_cn204 = config.get('bili_normalize_cn204', False)
-        self.cn01_sids = config.get('bili_replace_cn01', [])
         self.bili_cdn_fallback = config.get('bili_cdn_fallback', False)
 
     async def acheck_stream(self, is_check=False):
@@ -144,7 +140,7 @@ class Bililive(DownloadBase):
                 return False
 
         target_quality_stream = stream_urls.get(
-            str(self.bili_qn), next(iter(stream_urls.values()))
+            self.bili_qn, next(iter(stream_urls.values()))
         )
         stream_url = {}
         if self.bili_cdn is not None:
@@ -159,38 +155,7 @@ class Bililive(DownloadBase):
             stream_url = stream_info['url']
             logger.debug(f"{self.plugin_msg}: 使用 {current_cdn} 流")
 
-        self.raw_stream_url = self.normalize_cn204(
-            f"{stream_url['host']}{stream_url['base_url']}{stream_url['extra']}"
-        )
-
-        # 替换 cn-gotcha01 节点
-        if self.cn01_sids and "cn-gotcha01" in current_cdn:
-            if isinstance(self.cn01_sids, str):
-                self.cn01_sids = self.cn01_sids.split(',')
-            for sid in self.cn01_sids:
-                new_url = f"https://{sid}.bilivideo.com{stream_url['base_url']}{stream_url['extra']}"
-                new_url = await self.acheck_url_healthy(new_url)
-                if new_url is not None:
-                    self.raw_stream_url = new_url
-                    break
-                else:
-                    logger.debug(f"{self.plugin_msg}: {sid} is not available")
-
-        # 强制原画
-        if self.bili_qn <= 10000 and self.bili_force_source:
-            # 不处理 qn 20000
-            if stream_info['suffix'] not in {'origin', 'uhd', 'maxhevc'}:
-                __base_url = stream_url['base_url'].replace(f"_{stream_info['suffix']}", "")
-                __sk = match1(stream_url['extra'], r'sk=([^&]+)')
-                __extra = stream_url['extra'].replace(__sk, __sk[:32])
-                __url = self.normalize_cn204(f"{stream_url['host']}{__base_url}{__extra}")
-                if (await self.acheck_url_healthy(__url)) is not None:
-                    self.raw_stream_url = __url
-                    logger.info(f"{self.plugin_msg}: force_source 处理 {current_cdn} 成功 {stream_info['stream_name']}")
-                else:
-                    logger.debug(
-                        f"{self.plugin_msg}: force_source 处理 {current_cdn} 失败 {stream_info['stream_name']}"
-                    )
+        self.raw_stream_url = f"{stream_url['host']}{stream_url['base_url']}{stream_url['extra']}"
 
         # 回退
         if self.bili_cdn_fallback:
@@ -198,9 +163,7 @@ class Bililive(DownloadBase):
             if __url is None:
                 for cdn, stream_info in target_quality_stream.items():
                     stream_url = stream_info['url']
-                    __fallback_url = self.normalize_cn204(
-                        f"{stream_url['host']}{stream_url['base_url']}{stream_url['extra']}"
-                    )
+                    __fallback_url = f"{stream_url['host']}{stream_url['base_url']}{stream_url['extra']}"
                     try:
                         __url = await self.acheck_url_healthy(__fallback_url)
                         if __url is not None:
@@ -272,12 +235,13 @@ class Bililive(DownloadBase):
         params = {
             "cid": self.__real_room_id,
             "mid": self.__login_mid,
-            "pt": "html5", # platform
+            "pt": "web", # platform
             # "p2p_type": "-1",
             # "net": 0,
             # "free_type": 0,
             # "build": 0,
             # "feature": 2 # 1:? 2:?
+            # "codec": "0,1,2",
         }
         try:
             m3u8_res = await client.get(
@@ -382,11 +346,6 @@ class Bililive(DownloadBase):
         except Exception as e:
             logger.error(f"{self.plugin_msg}: 登录态校验失败 {e}")
         return 0
-
-    def normalize_cn204(self, url: str) -> str:
-        if self.bili_normalize_cn204 and "cn-gotcha204" in url:
-            return re.sub(r"(?<=cn-gotcha204)-[1-4]", "", url, 1)
-        return url
 
     def parse_stream_url(self, *args) -> dict:
         suffix_regexp = r'suffix=([^&]+)'
