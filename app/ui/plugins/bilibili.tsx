@@ -228,7 +228,7 @@ const Bilibili: React.FC<Props> = props => {
             padding: 0,
           }}
         />
-        <Form.Switch
+        {/* <Form.Switch
           field="bili_ov2cn"
           extraText={
             <div style={{ fontSize: '14px' }}>
@@ -260,7 +260,7 @@ const Bilibili: React.FC<Props> = props => {
             alignSelf: 'stretch',
             padding: 0,
           }}
-        />
+        /> */}
         <Form.InputNumber
           field="bili_hls_transcode_timeout"
           extraText="hls_fmp4 转码等待时间，超时后回退到 flv 流。默认 60 秒。"
@@ -273,7 +273,7 @@ const Bilibili: React.FC<Props> = props => {
           }}
           showClear={true}
         />
-        <Form.TagInput
+        {/* <Form.TagInput
           allowDuplicates={false}
           addOnBlur={true}
           separator=","
@@ -300,7 +300,7 @@ const Bilibili: React.FC<Props> = props => {
               message: '例: cn-hjlheb-cu-01-01,cn-tj-ct-01-01',
             },
           ]}
-        />
+        /> */}
       </Collapse.Panel>
     </>
   )
