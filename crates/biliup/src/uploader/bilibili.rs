@@ -290,10 +290,10 @@ impl BiliBili {
         }
     }
 
-    #[deprecated(note = "no longer working, fallback to `edit_by_web`")]
+    #[deprecated(note = "no longer working, fallback to `edit_by_app`")]
     pub async fn edit(&self, studio: &Studio, proxy: Option<&str>) -> Result<serde_json::Value> {
-        warn!("客户端接口已失效, 将使用网页接口, 忽略代理{proxy:?}");
-        self.edit_by_web(studio).await
+        warn!("客户端接口已失效, 将使用app接口");
+        self.edit_by_app(studio,proxy).await
     }
 
     pub async fn edit_by_web(&self, studio: &Studio) -> Result<serde_json::Value> {
@@ -314,6 +314,55 @@ impl BiliBili {
             .await?;
         info!("{}", ret);
         if ret["code"] == 0 {
+            info!("稿件修改成功");
+            Ok(ret)
+        } else {
+            Err(Kind::Custom(ret.to_string()))
+        }
+    }
+
+    pub async fn edit_by_app(
+        &self,
+        studio: &Studio,
+        proxy: Option<&str>,)
+        -> Result<serde_json::Value> {
+        let payload = {
+            let mut payload = json!({
+                "access_key": self.login_info.token_info.access_token,
+                "appkey": crate::credential::AppKeyStore::BiliTV.app_key(),
+                "build": 7800300,
+                "c_locale": "zh-Hans_CN",
+                "channel": "bili",
+                "disable_rcmd": 0,
+                "mobi_app": "android",
+                "platform": "android",
+                "s_locale": "zh-Hans_CN",
+                "statistics": "\"appId\":1,\"platform\":3,\"version\":\"7.80.0\",\"abtest\":\"\"",
+                "ts": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+            });
+
+            let urlencoded = serde_urlencoded::to_string(&payload)?;
+            let sign = crate::credential::Credential::sign(
+                &urlencoded,
+                crate::credential::AppKeyStore::BiliTV.appsec(),
+            );
+            payload["sign"] = Value::from(sign);
+            payload
+        };
+
+        let ret: Value = reqwest::Client::proxy_builder(proxy)
+            .user_agent("Mozilla/5.0 BiliDroid/7.80.0 (bbcallen@gmail.com) os/android model/MI 6 mobi_app/android build/7800300 channel/bili innerVer/7800310 osVer/13 network/2")
+            .timeout(Duration::new(60, 0))
+            .build()?
+            .post("https://member.bilibili.com/x/vu/app/edit/full")
+            .query(&payload)
+            .json(studio)
+            .send()
+            .await?
+            .json()
+            .await?;
+        info!("{:?}", ret);
+        if  ret["code"]  == 0 {
             info!("稿件修改成功");
             Ok(ret)
         } else {
