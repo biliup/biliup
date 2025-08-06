@@ -16,16 +16,12 @@ use biliup::downloader::extractor::CallbackFn;
 use biliup::downloader::util::Segmentable;
 use tracing_subscriber::layer::SubscriberExt;
 
-#[derive(FromPyObject)]
-pub enum PySegment {
-    Time {
-        #[pyo3(attribute("time"))]
-        time: u64,
-    },
-    Size {
-        #[pyo3(attribute("size"))]
-        size: u64,
-    },
+#[derive(FromPyObject, Debug)]
+pub struct PySegment {
+    #[pyo3(attribute("time"))]
+    time: Option<u64>,
+    #[pyo3(attribute("size"))]
+    size: Option<u64>,
 }
 
 #[pyfunction]
@@ -74,10 +70,28 @@ fn download_with_callback(
             .with_timer(local_time)
             .with_writer(non_blocking);
 
-        let segment = match segment {
-            PySegment::Time { time } => Segmentable::new(Some(Duration::from_secs(time)), None),
-            PySegment::Size { size } => Segmentable::new(None, Some(size)),
+        // println!("Input segment: {:?}", segment);
+        // println!("Input segment time: {:?}, size: {:?}", segment.time, segment.size);
+
+        let segmentable = match (segment.time, segment.size) {
+            (Some(time), Some(size)) => {
+                // 如果同时有时间和大小，可以选择优先使用哪个，或者创建支持两者的逻辑
+                // 这里假设优先使用时间分割
+                Segmentable::new(Some(Duration::from_secs(time)), Some(size))
+            }
+            (Some(time), None) => {
+                Segmentable::new(Some(Duration::from_secs(time)), None)
+            }
+            (None, Some(size)) => {
+                Segmentable::new(None, Some(size))
+            }
+            (None, None) => {
+                // 如果都没有，使用默认值
+                Segmentable::default()
+            }
         };
+
+        tracing::debug!("Segmentable: {:?}", segmentable);
 
         let file_name_hook = file_name_callback_fn.map(|callback_fn| -> CallbackFn {
             Box::new(move |fmt_file_name| {
@@ -96,7 +110,7 @@ fn download_with_callback(
                 url,
                 map,
                 file_name,
-                segment,
+                segmentable,
                 file_name_hook,
                 proxy.as_deref(),
             ) {

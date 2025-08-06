@@ -30,7 +30,7 @@ pub(crate) async fn parse_flv(
     mut segment: Segmentable,
 ) -> crate::downloader::error::Result<()> {
     let mut flv_tags_cache: Vec<(TagHeader, Bytes, Bytes)> = Vec::new();
-
+    // println!("parse_flv Segment: {:?}", segment);
     let _previous_tag_size = connection.read_frame(4).await?;
 
     let mut out = FlvFile::new(file)?;
