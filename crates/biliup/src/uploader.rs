@@ -13,6 +13,7 @@ use std::task::{Context, Poll};
 pub mod bilibili;
 pub mod credential;
 pub mod line;
+pub mod util;
 
 #[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all = "lowercase")]
