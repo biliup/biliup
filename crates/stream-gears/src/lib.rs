@@ -91,8 +91,6 @@ fn download_with_callback(
             }
         };
 
-        tracing::debug!("Segmentable: {:?}", segmentable);
-
         let file_name_hook = file_name_callback_fn.map(|callback_fn| -> CallbackFn {
             Box::new(move |fmt_file_name| {
                 Python::with_gil(|py| match callback_fn.call1(py, (fmt_file_name,)) {
