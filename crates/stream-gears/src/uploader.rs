@@ -6,7 +6,6 @@ use biliup::uploader::credential::login_by_cookies;
 use biliup::uploader::line::Probe;
 use biliup::uploader::util::SubmitOption;
 use biliup::uploader::{VideoFile, line};
-use clap::ValueEnum;
 use futures::StreamExt;
 use pyo3::prelude::*;
 use pyo3::pyclass;
@@ -191,11 +190,7 @@ pub async fn upload(studio_pre: StudioPre, submit: Option<&str>, proxy: Option<&
     }
 
     let submit = match submit {
-        Some(submit) => match submit.to_lowercase().as_str() {
-            "app" => SubmitOption::App,
-            "bcutandroid" | "b-cut-android" | "bcut_android" => SubmitOption::BCutAndroid,
-            _ => SubmitOption::App,
-        },
+        Some(submit) => SubmitOption::parse_str(submit).unwrap_or(SubmitOption::App),
         _ => SubmitOption::App,
     };
 

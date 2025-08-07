@@ -2,7 +2,6 @@ mod login;
 mod uploader;
 
 use pyo3::prelude::*;
-use clap::ValueEnum;
 use time::macros::format_description;
 use uploader::{PyCredit, StudioPre};
 
