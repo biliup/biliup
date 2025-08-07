@@ -25,9 +25,10 @@ class Bililive(DownloadBase):
         self.bilibili_danmaku_raw = config.get('bilibili_danmaku_raw', False)
         self.__real_room_id = None
         self.__login_mid = 0
+        self.__anchor_mid = 0
         self.bili_cookie = config.get('user', {}).get('bili_cookie')
         self.bili_cookie_file = config.get('user', {}).get('bili_cookie_file')
-        self.bili_qn = int(config.get('bili_qn', 20000))
+        self.bili_qn = int(config.get('bili_qn', 25000))
         self.bili_protocol = config.get('bili_protocol', 'stream')
         self.bili_cdn = config.get('bili_cdn', [])
         self.bili_hls_timeout = config.get('bili_hls_transcode_timeout', 60)
@@ -100,8 +101,9 @@ class Bililive(DownloadBase):
         self.live_cover_url = room_info['room_info']['cover']
         self.room_title = room_info['room_info']['title']
         self.__real_room_id = room_info['room_info']['room_id']
+        self.__anchor_mid = room_info['room_info']['uid']
         live_start_time = room_info['room_info']['live_start_time']
-        special_type = room_info['room_info']['special_type'] # 0: 公开直播, 1: 大航海专属
+        special_type = room_info['room_info']['special_type'] # 0: 公开直播, 1: 付费直播, 199: 纯净页面
         if live_start_time > self.live_start_time:
             self.live_start_time = live_start_time
             is_new_live = True
@@ -231,17 +233,19 @@ class Bililive(DownloadBase):
         return {}
 
     async def get_master_m3u8(self, api: str) -> dict:
-        full_url = f"{api}/xlive/web-room/v2/index/master_playurl"
+        full_url = f"{api}/xlive/play-gateway/master/url"
         params = {
             "cid": self.__real_room_id,
-            "mid": self.__login_mid,
+            "mid": self.__login_mid or self.__anchor_mid,
             "pt": "web", # platform
-            # "p2p_type": "-1",
-            # "net": 0,
-            # "free_type": 0,
-            # "build": 0,
-            # "feature": 2 # 1:? 2:?
-            # "codec": "0,1,2",
+            "p2p_type": "-1",
+            "net": 0,
+            "free_type": 0,
+            "build": 0,
+            "feature": 2,
+            "qn": self.bili_qn,
+            "drm_type": 0,
+            "codec": "0,1",
         }
         try:
             m3u8_res = await client.get(
@@ -281,9 +285,7 @@ class Bililive(DownloadBase):
                     if format['format_name'] == 'fmp4':
                         stream_urls = self.parse_stream_url(format['codec'][0])
                         # fmp4 可能没有原画
-                        if qn == 10000 and qn in stream_urls.keys():
-                            break
-                        else:
+                        if qn in {10000, 25000} and qn not in stream_urls.keys():
                             stream_urls = {}
             else:
                 stream_urls = self.parse_stream_url(streams[0]['format'][0]['codec'][0])
@@ -353,7 +355,7 @@ class Bililive(DownloadBase):
             url = args[0]
             host = "https://" + match1(url, r'https?://([^/]+)')
             stream_url = {
-                'host': host if not self.bili_ov2cn else host.replace("ov-", "cn-"),
+                'host': host,
                 'base_url': url.split("?")[0].split(host)[1] + "?",
                 'extra': url.split("?")[1]
             }
@@ -370,7 +372,7 @@ class Bililive(DownloadBase):
             for info in args[0]['url_info']:
                 cdn_name = match1(info['extra'], r'cdn=([^&]+)')
                 stream_url = {
-                    'host': info['host'] if not self.bili_ov2cn else info['host'].replace("ov-", "cn-"),
+                    'host': info['host'],
                     'base_url': base_url,
                     'extra': info['extra']
                 }
@@ -405,7 +407,7 @@ class Bililive(DownloadBase):
         for line in lines:
             if line.startswith('#EXT-X-STREAM-INF:'):
                 codec = match1(line, r'CODECS="([^"]+)"')
-                current_qn = match1(line, r'BILI-QN=(\d+)')
+                current_qn = int(match1(line, r'BILI-QN=(\d+)'))
 
                 if codec and current_qn:
                     if 'avc' in codec.lower():

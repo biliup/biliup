@@ -66,6 +66,7 @@ class BiliWeb(UploadBase):
         upload_args = {
             "ex_conn": ex_child_conn,
             "lines": self.lines,
+            "submit": self.submit_api,
             "video_path": [file.video for file in file_list],
             "cookie_file": self.user_cookie,
             "title": self.data["format_title"][:80],

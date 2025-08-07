@@ -24,6 +24,8 @@ const Bilibili: React.FC<Props> = props => {
     <>
       <Collapse.Panel header="哔哩哔哩" itemKey="bilibili">
         <Form.Select
+          allowCreate={true}
+          filter
           field="bili_qn"
           extraText={
             <div style={{ fontSize: '14px' }}>
@@ -42,6 +44,12 @@ const Bilibili: React.FC<Props> = props => {
             alignSelf: 'stretch',
             padding: 0,
           }}
+          rules={[
+            {
+              pattern: /^\d*$/,
+              message: '请仅输入纯数字',
+            },
+          ]}
           showClear={true}
         >
           <Select.Option value={30000}>30000（杜比）</Select.Option>
