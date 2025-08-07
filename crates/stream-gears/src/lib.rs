@@ -76,8 +76,7 @@ fn download_with_callback(
 
         let segmentable = match (segment.time, segment.size) {
             (Some(time), Some(size)) => {
-                // 如果同时有时间和大小，可以选择优先使用哪个，或者创建支持两者的逻辑
-                // 这里假设优先使用时间分割
+                // 已支持同时创建时间和大小
                 Segmentable::new(Some(Duration::from_secs(time)), Some(size))
             }
             (Some(time), None) => {
@@ -91,8 +90,6 @@ fn download_with_callback(
                 Segmentable::default()
             }
         };
-
-        tracing::debug!("Segmentable: {:?}", segmentable);
 
         let file_name_hook = file_name_callback_fn.map(|callback_fn| -> CallbackFn {
             Box::new(move |fmt_file_name| {
