@@ -241,6 +241,57 @@ impl BiliBili {
         self.submit_by_app(studio, proxy).await
     }
 
+    /// 使用必剪接口投稿
+    pub async fn submit_by_bcut_android(
+        &self,
+        studio: &Studio,
+        proxy: Option<&str>,
+    ) -> Result<ResponseData> {
+        let payload = {
+            let mut payload = json!({
+                "access_key": self.login_info.token_info.access_token,
+                "appkey": crate::credential::AppKeyStore::BCutAndroid.app_key(),
+                "aurora_version": "2.39.0",
+                "build": 2800030,
+                "c_locale": "zh-Hans_CN",
+                "channel": "master",
+                "mobi_app": "android_bbs",
+                "montage_version": "1.42.1.0",
+                "platform": "android",
+                "s_locale": "zh-Hans_CN",
+                "sdk_type": "mon",
+                "ts": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+            });
+
+            let urlencoded = serde_urlencoded::to_string(&payload)?;
+            let sign = crate::credential::Credential::sign(
+                &urlencoded,
+                crate::credential::AppKeyStore::BCutAndroid.appsec(),
+            );
+            payload["sign"] = Value::from(sign);
+            payload
+        };
+
+        let ret: ResponseData = reqwest::Client::proxy_builder(proxy)
+            .user_agent("Mozilla/5.0 os/android model/Mi 10 Pro mobi_app/android_bbs build/2800030 channel/master osVer/13 kernel_version/V14.0.4.0.TJACNXM BiliDroid/5.6.0 (bbcallen@gmail.com)")
+            .timeout(Duration::new(60, 0))
+            .build()?
+            .post("https://member.bilibili.com/x/vu/mvp/add")
+            .query(&payload)
+            .json(studio)
+            .send()
+            .await?
+            .json()
+            .await?;
+        info!("{:?}", ret);
+        if ret.code == 0 {
+            info!("BCUT接口投稿成功");
+            Ok(ret)
+        } else {
+            Err(Kind::Custom(format!("{:?}", ret)))
+        }
+    }
+
     pub async fn submit_by_app(
         &self,
         studio: &Studio,

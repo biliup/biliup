@@ -62,6 +62,10 @@ def generate_fake_buvid3():
     formatted = f"{u_str[0:8]}-{u_str[8:12]}-{u_str[12:16]}-{u_str[16:20]}-{u_str[20:]}infoc"
     return formatted
 
+class SubmitOption:
+    App = "app"
+    BCutAndroid = "b-cut-android"
+
 class Wbi:
     WTS = "wts"
     W_RID = "w_rid"

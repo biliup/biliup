@@ -50,46 +50,13 @@ impl Segmentable {
 
     /// 检查是否需要分割 - 只要时间或大小任一条件满足就返回 true
     pub fn needed(&self) -> bool {
-        // 检查时间条件
-        let time_exceeded = if let Some(expected_time) = self.time.expected {
-            (self.time.current - self.time.start) >= expected_time
-        } else {
-            false
-        };
-
-        // 检查大小条件
-        let size_exceeded = if let Some(expected_size) = self.size.expected {
-            self.size.current >= expected_size
-        } else {
-            false
-        };
-
-        // 任一条件满足就需要分割
+        let time_exceeded = self.time_needed();
+        let size_exceeded = self.size_needed();
         let result = time_exceeded || size_exceeded;
 
         // 添加调试信息
         if result {
-            if time_exceeded && size_exceeded {
-                tracing::debug!(
-                    "Segmentation needed: Both time ({:?} >= {:?}) and size ({} >= {}) conditions met",
-                    self.time.current - self.time.start,
-                    self.time.expected.unwrap(),
-                    self.size.current,
-                    self.size.expected.unwrap()
-                );
-            } else if time_exceeded {
-                tracing::debug!(
-                    "Segmentation needed: Time condition met ({:?} >= {:?})",
-                    self.time.current - self.time.start,
-                    self.time.expected.unwrap()
-                );
-            } else if size_exceeded {
-                tracing::debug!(
-                    "Segmentation needed: Size condition met ({} >= {})",
-                    self.size.current,
-                    self.size.expected.unwrap()
-                );
-            }
+            self.log_segmentation_reason(time_exceeded, size_exceeded);
         }
 
         result
@@ -110,6 +77,36 @@ impl Segmentable {
             self.size.current >= expected_size
         } else {
             false
+        }
+    }
+
+    /// 记录分割原因的调试信息
+    fn log_segmentation_reason(&self, time_exceeded: bool, size_exceeded: bool) {
+        match (time_exceeded, size_exceeded) {
+            (true, true) => {
+                tracing::info!(
+                    "Segmentation needed: Both time ({:?} >= {:?}) and size ({} >= {}) conditions met",
+                    self.time.current - self.time.start,
+                    self.time.expected.unwrap(),
+                    self.size.current,
+                    self.size.expected.unwrap()
+                );
+            }
+            (true, false) => {
+                tracing::info!(
+                    "Segmentation needed: Time condition met ({:?} >= {:?})",
+                    self.time.current - self.time.start,
+                    self.time.expected.unwrap()
+                );
+            }
+            (false, true) => {
+                tracing::info!(
+                    "Segmentation needed: Size condition met ({} >= {})",
+                    self.size.current,
+                    self.size.expected.unwrap()
+                );
+            }
+            (false, false) => {} // 不应该到达这里，因为只有在需要分割时才调用
         }
     }
 
@@ -159,29 +156,51 @@ impl Segmentable {
         self.time.start = Duration::ZERO;
     }
 
+    /// 格式化进度信息的通用方法
+    fn format_progress<T>(
+        label: &str,
+        current: T,
+        expected: Option<T>,
+        unit: &str,
+        format_fn: impl Fn(T) -> String,
+    ) -> String
+    where
+        T: Copy + Into<f64>,
+    {
+        if let Some(expected_val) = expected {
+            let current_f64 = current.into();
+            let expected_f64 = expected_val.into();
+            let percentage = (current_f64 / expected_f64 * 100.0).min(100.0);
+            format!(
+                "{}: {}/{} {} ({:.1}%)",
+                label,
+                format_fn(current),
+                format_fn(expected_val),
+                unit,
+                percentage
+            )
+        } else {
+            format!("{}: No limit", label)
+        }
+    }
+
     /// 获取当前状态信息
     pub fn get_status(&self) -> String {
-        let time_info = if let Some(expected) = self.time.expected {
-            format!(
-                "Time: {:.1}s/{:.1}s ({:.1}%)",
-                (self.time.current - self.time.start).as_secs_f64(),
-                expected.as_secs_f64(),
-                ((self.time.current - self.time.start).as_secs_f64() / expected.as_secs_f64() * 100.0).min(100.0)
-            )
-        } else {
-            "Time: No limit".to_string()
-        };
+        let time_info = Self::format_progress(
+            "Time",
+            (self.time.current - self.time.start).as_secs_f64(),
+            self.time.expected.map(|d| d.as_secs_f64()),
+            "s",
+            |t| format!("{:.1}", t),
+        );
 
-        let size_info = if let Some(expected) = self.size.expected {
-            format!(
-                "Size: {}/{} bytes ({:.1}%)",
-                self.size.current,
-                expected,
-                (self.size.current as f64 / expected as f64 * 100.0).min(100.0)
-            )
-        } else {
-            "Size: No limit".to_string()
-        };
+        let size_info = Self::format_progress(
+            "Size",
+            self.size.current as f64,
+            self.size.expected.map(|s| s as f64),
+            "bytes",
+            |s| format!("{}", s as u64),
+        );
 
         format!("{}, {}", time_info, size_info)
     }
@@ -227,17 +246,22 @@ impl LifecycleFile {
     }
 
     pub fn create(&mut self) -> Result<&Path, std::io::Error> {
+        // 构建最终文件名
         self.file_name = format!(
             "{}.{}",
             format_filename(&self.fmt_file_name),
             self.extension
         );
+
+        // 构建临时文件路径（带 .part 后缀）
         self.path = PathBuf::from(&self.file_name);
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?
-        }
-        // path.set_extension(&self.extension);
         self.path.set_extension(format!("{}.part", self.extension));
+
+        // 确保父目录存在
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
         info!("Save to {}", self.path.display());
         Ok(self.path.as_path())
     }

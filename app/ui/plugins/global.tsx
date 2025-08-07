@@ -291,8 +291,9 @@ const Global: React.FC = () => {
           }}
           showClear={true}
         >
-          <Form.Select.Option value="web">网页端（web）</Form.Select.Option>
-          <Form.Select.Option value="client">客户端（client）</Form.Select.Option>
+          <Form.Select.Option value="app">安卓APP（app）</Form.Select.Option>
+          <Form.Select.Option value="b-cut-android">BCut安卓APP（b-cut-android）</Form.Select.Option>
+          <Form.Select.Option value="web">网页（web）</Form.Select.Option>
         </Form.Select>
         <Form.Select
           field="uploader"

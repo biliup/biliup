@@ -21,6 +21,7 @@ futures = "0.3.31"
 biliup = { path = "../biliup"}
 time = "0.3"
 typed-builder = "0.20.0"
+clap = { version = "4", features = ["derive"] }
 
 # [target.'cfg(all(target_arch="aarch64", target_os="linux"))'.dependencies]
 # downloader = { path = "../downloader", default-features = false , features = ["rustls-tls"] }
