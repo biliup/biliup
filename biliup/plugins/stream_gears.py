@@ -1,8 +1,9 @@
 import time
 
 import stream_gears
-from typing import List
+from typing import List, Optional, Union
 
+from . import SubmitOption
 from ..engine import Plugin
 from ..engine.upload import UploadBase, logger
 
@@ -10,7 +11,8 @@ from ..engine.upload import UploadBase, logger
 @Plugin.upload(platform="stream_gears")
 class BiliWeb(UploadBase):
     def __init__(
-            self, principal, data, submit_api=None, copyright=2, postprocessor=None, dtime=None,
+            self, principal, data, submit_api: Optional[Union[SubmitOption, str]] = None,
+            copyright=2, postprocessor=None, dtime=None,
             dynamic='', lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description='',
             dolby=0, hires=0, no_reprint=0, open_elec=0, credits=None,
             user_cookie='cookies.json', copyright_source=None, extra_fields = ""
@@ -78,7 +80,7 @@ class BiliWeb(UploadBase):
         dtime = None
         if self.dtime:
             dtime = int(time.time() + self.dtime)
-        stream_gears.upload_by_app(
+        stream_gears.upload(
             video_path=file_list,
             cookie_file=self.user_cookie,
             title=self.data["format_title"][:80],
@@ -97,7 +99,8 @@ class BiliWeb(UploadBase):
             desc_v2=desc_v2,
             dtime=dtime,
             line=line,
-            extra_fields=self.extra_fields
+            extra_fields=self.extra_fields,
+            submit=self.submit_api,
         )
         logger.info(f"上传成功: {self.principal}")
         return file_list

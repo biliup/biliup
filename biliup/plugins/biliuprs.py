@@ -1,9 +1,10 @@
 import multiprocessing as mp
 import time
-from typing import List
 
 import stream_gears
 
+from typing import List, Optional, Union
+from . import SubmitOption
 from ..engine import Plugin
 from ..engine.upload import UploadBase, logger
 
@@ -11,7 +12,8 @@ from ..engine.upload import UploadBase, logger
 @Plugin.upload(platform="biliup-rs")
 class BiliWeb(UploadBase):
     def __init__(
-            self, principal, data, submit_api=None, copyright=2, postprocessor=None, dtime=None,
+            self, principal, data, submit_api: Optional[Union[SubmitOption, str]] = None,
+            copyright=2, postprocessor=None, dtime=None,
             dynamic='', lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description='',
             dolby=0, hires=0, no_reprint=0, is_only_self=0, open_elec=0, credits=None,
             user_cookie='cookies.json', copyright_source=None, extra_fields = ""
@@ -137,6 +139,6 @@ def stream_gears_upload(ex_conn, lines, *args, **kwargs):
         elif lines == 'bldsa':
             kwargs['line'] = stream_gears.UploadLine.Bldsa
 
-        stream_gears.upload_by_app(*args, **kwargs)
+        stream_gears.upload(*args, **kwargs)
     except Exception as e:
         ex_conn.send(e)
