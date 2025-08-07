@@ -542,10 +542,8 @@ class DownloadBase(ABC):
 
 def stream_gears_download(url, headers, file_name, segment_time=None, file_size=None,
                           file_name_callback: Callable[[str], None] = None):
-    class Segment:
-        pass
 
-    segment = Segment()
+    segment = stream_gears.PySegment()
     if segment_time:
         seg_time = segment_time.split(':')
         # print(int(seg_time[0]) * 60 * 60 + int(seg_time[1]) * 60 + int(seg_time[2]))

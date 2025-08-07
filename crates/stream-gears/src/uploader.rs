@@ -12,6 +12,7 @@ use pyo3::pyclass;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::time::Instant;
 use tracing::info;
 
@@ -190,7 +191,7 @@ pub async fn upload(studio_pre: StudioPre, submit: Option<&str>, proxy: Option<&
     }
 
     let submit = match submit {
-        Some(submit) => SubmitOption::parse_str(submit).unwrap_or(SubmitOption::App),
+        Some(submit) => SubmitOption::from_str(submit).unwrap_or(SubmitOption::App),
         _ => SubmitOption::App,
     };
 

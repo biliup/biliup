@@ -17,12 +17,24 @@ use biliup::downloader::util::Segmentable;
 
 use tracing_subscriber::layer::SubscriberExt;
 
-#[derive(FromPyObject, Debug)]
+#[derive(Debug, Clone)]
+#[pyclass(set_all)]
 pub struct PySegment {
-    #[pyo3(attribute("time"))]
+    // #[pyo3(attribute("time"))]
     time: Option<u64>,
-    #[pyo3(attribute("size"))]
+    // #[pyo3(attribute("size"))]
     size: Option<u64>,
+}
+
+#[pymethods]
+impl PySegment {
+    #[new]
+    fn new() -> Self {
+        PySegment{
+            time: None,
+            size: None,
+        }
+    }
 }
 
 #[pyfunction]
@@ -347,6 +359,7 @@ fn stream_gears(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(login_by_web_cookies, m)?)?;
     m.add_function(wrap_pyfunction!(login_by_web_qrcode, m)?)?;
     m.add_class::<UploadLine>()?;
+    m.add_class::<PySegment>()?;
     Ok(())
 }
 
