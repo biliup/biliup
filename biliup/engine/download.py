@@ -236,6 +236,24 @@ class DownloadBase(ABC):
                 ]
                 for key, value in self.stream_headers.items():
                     streamlink_cmd.extend(['--http-header', f'{key}={value}'])
+                if self.__class__.__name__ == 'Bililive':
+                    # Fix: segment 不携带参数时 404
+                    from urllib.parse import parse_qs
+                    def parse_query_params(url: str) -> List[str]:
+                        query_params = []
+                        params = url.split('?')[-1]
+                        whitelist = ['uparams', 'upsig', 'sigparams', 'sign', 'flvsk', 'sk', 'mid', 'site']
+                        data = parse_qs(params)
+                        whitelist.extend(data.get('sigparams', [''])[0].split(','))
+                        whitelist.extend(data.get('uparams', [''])[0].split(','))
+                        if not params or params.startswith('http'):
+                            return query_params
+                        for param in params.split('&'):
+                            if param.split('=')[0] not in whitelist:
+                                continue
+                            query_params.extend(["--http-query-param", param])
+                        return query_params
+                    streamlink_cmd.extend(parse_query_params(self.raw_stream_url))
                 streamlink_cmd.extend([
                     self.raw_stream_url,
                     'best',
