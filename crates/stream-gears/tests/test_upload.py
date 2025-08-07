@@ -89,8 +89,8 @@ if __name__ == '__main__':
         cookie_file=cookie_file,
         copyright=1,
         extra_fields=extra_fields_json,
-        submit="BCutAndroid",
-        title="最小参数测试"
+        submit="b-cut-android",
+        title="必剪投稿接口测试"
     )
 
     print("所有测试用例已完成！")
