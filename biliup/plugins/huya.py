@@ -432,7 +432,7 @@ class UAGenerator:
         },
         Platform.WINDOWS: {
             'platform': Platform.WINDOWS,
-            'version': '6090007',
+            'version': '6100301',
             'channel': 'official'
         },
         Platform.WEBSOCKET: { # UnUsed
