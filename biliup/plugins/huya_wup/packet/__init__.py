@@ -1,8 +1,8 @@
 
 from .getCdnTokenInfo import (
-    HuyaGetCdnTokenInfoReq,
-    HuyaGetCdnTokenInfoRsp
+    HuyaGetCdnTokenReq,
+    HuyaGetCdnTokenRsp
 )
 
-__all__ = ['HuyaGetCdnTokenInfoReq', 'HuyaGetCdnTokenInfoRsp']
+__all__ = ['HuyaGetCdnTokenReq', 'HuyaGetCdnTokenRsp']
 

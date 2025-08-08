@@ -1,7 +1,7 @@
 from biliup.plugins.huya_wup import Wup, DEFAULT_TICKET_NUMBER
 from biliup.plugins.huya_wup.packet import (
-    HuyaGetCdnTokenInfoReq,
-    HuyaGetCdnTokenInfoRsp
+    HuyaGetCdnTokenReq,
+    HuyaGetCdnTokenRsp
 )
 from biliup.plugins.huya_wup.packet.__util import STANDARD_CHARSET
 
@@ -10,9 +10,9 @@ client = httpx.Client()
 
 if __name__ == "__main__":
     # import base64
-    cdn: str = "HS"
-    stream_name: str = "1708907089-1708907089-7339700059157561344-3417937634-10057-A-0-1-imgplus.flv"
-    presenter_uid: int = 1708907089
+    cdn: str = "TX"
+    stream_name: str = "1199627305549-1199627305549-5718448156589424640-2399254734554-10057-A-0-1-imgplus.flv"
+    presenter_uid: int = 1199627305549
     wup_url: str = "https://wup.huya.com"
     huya_headers: dict = {
         "user-agent": f"HYSDK(Windows, 30000002)_APP(pc_exe&6090007&official)_SDK(trans&2.24.0.5157)",
@@ -25,12 +25,12 @@ if __name__ == "__main__":
     wup_req.requestid = abs(DEFAULT_TICKET_NUMBER)
     wup_req.servant = "liveui"
     wup_req.func = "getCdnTokenInfo"
-    token_info_req = HuyaGetCdnTokenInfoReq()
+    token_info_req = HuyaGetCdnTokenReq()
     token_info_req.cdnType = cdn
     token_info_req.streamName = stream_name
     token_info_req.presenterUid = presenter_uid
     wup_req.put(
-        vtype=HuyaGetCdnTokenInfoReq,
+        vtype=HuyaGetCdnTokenRsp,
         name="tReq",
         value=token_info_req
     )
@@ -40,7 +40,7 @@ if __name__ == "__main__":
     wup_rsp = Wup()
     wup_rsp.decode_v3(rsp_bytes)
     token_info_rsp = wup_rsp.get(
-        vtype=HuyaGetCdnTokenInfoRsp,
+        vtype=HuyaGetCdnTokenRsp,
         # name=bytes("tRsp", encoding=STANDARD_CHARSET)
         name="tRsp"
     )

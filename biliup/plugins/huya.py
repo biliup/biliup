@@ -23,8 +23,8 @@ from . import logger, match1, json_loads
 
 from biliup.plugins.huya_wup import Wup, DEFAULT_TICKET_NUMBER
 from biliup.plugins.huya_wup.packet import (
-    HuyaGetCdnTokenInfoReq,
-    HuyaGetCdnTokenInfoRsp
+    HuyaGetCdnTokenReq,
+    HuyaGetCdnTokenRsp
 )
 
 HUYA_WEB_BASE_URL = "https://www.huya.com"
@@ -302,16 +302,16 @@ class Huya(DownloadBase):
         wup_req.requestid = abs(DEFAULT_TICKET_NUMBER)
         wup_req.servant = "liveui"
         wup_req.func = "getCdnTokenInfo"
-        token_info_req = HuyaGetCdnTokenInfoReq()
+        token_info_req = HuyaGetCdnTokenReq()
         token_info_req.cdnType = cdn
         token_info_req.streamName = stream_name
         token_info_req.presenterUid = presenter_uid
-        wup_req.put(HuyaGetCdnTokenInfoReq, "tReq", token_info_req)
+        wup_req.put(HuyaGetCdnTokenReq, "tReq", token_info_req)
         data = wup_req.encode_v3()
         rsp = await client.post(HUYA_WUP_BASE_URL, data=data, headers=headers)
         wup_rsp = Wup()
         wup_rsp.decode_v3(rsp.content)
-        token_info_rsp = wup_rsp.get(HuyaGetCdnTokenInfoRsp,"tRsp")
+        token_info_rsp = wup_rsp.get(HuyaGetCdnTokenRsp,"tRsp")
         # print(token_info_rsp.as_dict())
         token_info = token_info_rsp.as_dict()
         logger.debug(f"{self.plugin_msg}: wup token_info {token_info}")
@@ -432,7 +432,7 @@ class UAGenerator:
         },
         Platform.WINDOWS: {
             'platform': Platform.WINDOWS,
-            'version': '6090007',
+            'version': '6100301',
             'channel': 'official'
         },
         Platform.WEBSOCKET: { # UnUsed
