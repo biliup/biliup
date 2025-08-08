@@ -71,7 +71,7 @@ export default function Add() {
                 up_selection_reply: values.interaction?.includes('up_selection_reply') ? 1 : 0,
                 up_close_reply: values.interaction?.includes('up_close_reply') ? 1 : 0,
                 up_close_danmu: values.interaction?.includes('up_close_danmu') ? 1 : 0,
-                open_elec: values.open_elec ? 1 : 0,
+                charging_pay: values.charging_pay ? 1 : 0,
                 no_reprint: values.no_reprint ? 1 : 0,
                 is_only_self: values.is_only_self ? 1 : 0,
                 mission_id: values.mission_id,

@@ -37,7 +37,7 @@ if __name__ == '__main__':
     #     dolby=0,  # 不开启杜比音效
     #     lossless_music=0,  # 不开启Hi-Res
     #     no_reprint=0,  # 允许转载
-    #     open_elec=0,  # 不开启充电
+    #     charging_pay=0,  # 不开启充电
     #     up_close_reply=False,  # 不关闭评论
     #     up_selection_reply=False,  # 不开启精选评论
     #     up_close_danmu=False,  # 不关闭弹幕

@@ -58,7 +58,7 @@ pub struct StudioPre {
     dolby: u8,
     lossless_music: u8,
     no_reprint: u8,
-    open_elec: u8,
+    charging_pay: u8,
     #[builder(default = false)]
     up_close_reply: bool,
     #[builder(default = false)]
@@ -92,7 +92,7 @@ pub async fn upload(studio_pre: StudioPre, submit: Option<&str>, proxy: Option<&
         dolby,
         lossless_music,
         no_reprint,
-        open_elec,
+        charging_pay,
         up_close_reply,
         up_selection_reply,
         up_close_danmu,
@@ -171,7 +171,7 @@ pub async fn upload(studio_pre: StudioPre, submit: Option<&str>, proxy: Option<&
         .dolby(dolby)
         .lossless_music(lossless_music)
         .no_reprint(no_reprint)
-        .open_elec(open_elec)
+        .charging_pay(charging_pay)
         .up_close_reply(up_close_reply)
         .up_selection_reply(up_selection_reply)
         .up_close_danmu(up_close_danmu)

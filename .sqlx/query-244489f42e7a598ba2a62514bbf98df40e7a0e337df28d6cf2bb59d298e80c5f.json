@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "select id,\n            template_name      as \"template_name!\",\n            user,\n            copyright          as \"copyright!: u8\",\n            \"source\"           as \"source!\",\n            tid                as \"tid!: u16\",\n            cover              as \"cover!\",\n            title              as \"title!\",\n            \"desc\"             as \"desc!\",\n            \"dynamic\"          as \"dynamic!\",\n            tag                as \"tag!\",\n            dtime              as \"dtime: u32\",\n            interactive        as \"interactive!: u8\",\n            mission_id         as \"mission_id: u32\",\n            dolby              as \"dolby!: u8\",\n            lossless_music     as \"lossless_music!: u8\",\n            no_reprint         as \"no_reprint!: u8\",\n            open_elec          as \"open_elec!: u8\",\n            up_selection_reply as \"up_selection_reply!: bool\",\n            up_close_reply     as \"up_close_reply!: bool\",\n            up_close_danmu     as \"up_close_danmu!: bool\"\n     from upload_streamers",
+  "query": "select id,\n            template_name      as \"template_name!\",\n            user,\n            copyright          as \"copyright!: u8\",\n            \"source\"           as \"source!\",\n            tid                as \"tid!: u16\",\n            cover              as \"cover!\",\n            title              as \"title!\",\n            \"desc\"             as \"desc!\",\n            \"dynamic\"          as \"dynamic!\",\n            tag                as \"tag!\",\n            dtime              as \"dtime: u32\",\n            interactive        as \"interactive!: u8\",\n            mission_id         as \"mission_id: u32\",\n            dolby              as \"dolby!: u8\",\n            lossless_music     as \"lossless_music!: u8\",\n            no_reprint         as \"no_reprint!: u8\",\n            charging_pay          as \"charging_pay!: u8\",\n            up_selection_reply as \"up_selection_reply!: bool\",\n            up_close_reply     as \"up_close_reply!: bool\",\n            up_close_danmu     as \"up_close_danmu!: bool\"\n     from upload_streamers",
   "describe": {
     "columns": [
       {
@@ -89,7 +89,7 @@
         "type_info": "Int64"
       },
       {
-        "name": "open_elec!: u8",
+        "name": "charging_pay!: u8",
         "ordinal": 17,
         "type_info": "Int64"
       },

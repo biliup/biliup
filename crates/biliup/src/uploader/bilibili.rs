@@ -107,7 +107,7 @@ pub struct Studio {
     /// 是否开启充电, 0-关闭 1-开启
     #[cfg_attr(feature = "cli", clap(long, default_value = "0"))]
     #[serde(default)]
-    pub open_elec: u8,
+    pub charging_pay: u8,
 
     /// aid 要追加视频的 avid
     #[cfg_attr(feature = "cli", clap(skip))]
