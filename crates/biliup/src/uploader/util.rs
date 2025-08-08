@@ -1,8 +1,9 @@
 use std::str::FromStr;
 #[cfg(feature = "cli")]
 use clap::ValueEnum;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "cli", derive(ValueEnum))]
 pub enum SubmitOption {
     // Client,

@@ -1,4 +1,5 @@
 use crate::uploader::bilibili::Studio;
+use crate::uploader::util::SubmitOption;
 use crate::{Stream, error};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -42,11 +43,17 @@ pub struct Config {
     pub line: Option<String>,
     #[serde(default = "default_limit")]
     pub limit: usize,
+    #[serde(default = "default_submit")]
+    pub submit: SubmitOption,
     pub streamers: HashMap<String, Studio>,
 }
 
 fn default_limit() -> usize {
     3
+}
+
+fn default_submit() -> SubmitOption {
+    SubmitOption::App
 }
 
 pub fn load_config(config: &Path) -> error::Result<Config> {
