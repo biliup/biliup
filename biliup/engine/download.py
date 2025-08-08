@@ -9,13 +9,14 @@ import subprocess
 import threading
 import time
 import shutil
+import copy
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator, List, Callable, Optional
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 
 import requests
-from requests.utils import DEFAULT_ACCEPT_ENCODING
+from requests.utils import DEFAULT_ACCEPT_ENCODING, parse_header_links
 from httpx import HTTPStatusError
 
 from biliup.common.util import client, loop, check_timerange
@@ -65,6 +66,7 @@ class DownloadBase(ABC):
             'accept-language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
             'user-agent': random_user_agent(),
         }
+        self.stream_headers = copy.deepcopy(self.fake_headers)
         self.segment_time = config.get('segment_time', '01:00:00')
         self.time_range = config.get('time_range')
         self.excluded_keywords = config.get('excluded_keywords')
@@ -104,6 +106,7 @@ class DownloadBase(ABC):
         return True
 
     def download(self):
+        self.update_headers(self.stream_headers)
         # print(f"{self.plugin_msg}: Plugin settings - {self.__dict__}")
         logger.debug(f"{self.plugin_msg}: Plugin settings - {self.__dict__}")
         # logger.info(f"{self.plugin_msg}: Request headers - {self.fake_headers}")
@@ -133,7 +136,7 @@ class DownloadBase(ABC):
                     if not self.file_size:
                         self.file_size = 2 * 1024 * 1024 * 1024
                     self.file_size = ((self.file_size + min_size - 1) // min_size) * min_size  # 向上取整
-                    sync_download(self.raw_stream_url, self.fake_headers,
+                    sync_download(self.raw_stream_url, self.stream_headers,
                                 max_file_size=int(self.file_size / 1024 / 1024),
                                 output_prefix=self.gen_download_filename(True),
                                 stream_info=stream_info,
@@ -150,7 +153,7 @@ class DownloadBase(ABC):
         else:
             # 其他流stream_gears会按hls保存为ts
             self.suffix = 'ts'
-        stream_gears_download(self.raw_stream_url, self.fake_headers, self.gen_download_filename(),
+        stream_gears_download(self.raw_stream_url, self.stream_headers, self.gen_download_filename(),
                               self.segment_time,
                               self.file_size,
                               lambda file_name: self.__download_segment_callback(file_name))
@@ -231,8 +234,26 @@ class DownloadBase(ABC):
                     # '--http-proxy', 'http://127.0.0.1:7890',
                     # '--hls-live-restart',
                 ]
-                for key, value in self.fake_headers.items():
+                for key, value in self.stream_headers.items():
                     streamlink_cmd.extend(['--http-header', f'{key}={value}'])
+                if self.__class__.__name__ == 'Bililive':
+                    # Fix: segment 不携带参数时 404
+                    from urllib.parse import parse_qs
+                    def parse_query_params(url: str) -> List[str]:
+                        query_params = []
+                        params = url.split('?')[-1]
+                        whitelist = ['uparams', 'upsig', 'sigparams', 'sign', 'flvsk', 'sk', 'mid', 'site']
+                        data = parse_qs(params)
+                        whitelist.extend(data.get('sigparams', [''])[0].split(','))
+                        whitelist.extend(data.get('uparams', [''])[0].split(','))
+                        if not params or params.startswith('http'):
+                            return query_params
+                        for param in params.split('&'):
+                            if param.split('=')[0] not in whitelist:
+                                continue
+                            query_params.extend(["--http-query-param", param])
+                        return query_params
+                    streamlink_cmd.extend(parse_query_params(self.raw_stream_url))
                 streamlink_cmd.extend([
                     self.raw_stream_url,
                     'best',
@@ -241,7 +262,7 @@ class DownloadBase(ABC):
                 streamlink_proc = subprocess.Popen(streamlink_cmd, stdout=subprocess.PIPE)
                 input_uri = 'pipe:0'
             else:
-                input_args += ['-headers', ''.join('%s: %s\r\n' % x for x in self.fake_headers.items()),
+                input_args += ['-headers', ''.join('%s: %s\r\n' % x for x in self.stream_headers.items()),
                                '-rw_timeout', '20000000']
                 if '.m3u8' in urlparse(self.raw_stream_url).path:
                     input_args += ['-max_reload', '1000']
@@ -470,6 +491,8 @@ class DownloadBase(ABC):
                 r = await __client_get(url, stream=True)
                 if r.headers.get('Location'):
                     url = r.headers['Location']
+                    # logger.info(f'{self.plugin_msg}: stream url: {url}')
+                    # url = self.replace_url(url)
                     logger.info(f'{self.plugin_msg}: stream url: {url}')
                     r = await __client_get(url, stream=True)
             if r.status_code == 200:
@@ -499,6 +522,9 @@ class DownloadBase(ABC):
         else:
             return filename
 
+    def update_headers(self, headers):
+        pass
+
     @staticmethod
     def download_file_rename(old_file_name, file_name):
         try:
@@ -516,10 +542,8 @@ class DownloadBase(ABC):
 
 def stream_gears_download(url, headers, file_name, segment_time=None, file_size=None,
                           file_name_callback: Callable[[str], None] = None):
-    class Segment:
-        pass
 
-    segment = Segment()
+    segment = stream_gears.PySegment()
     if segment_time:
         seg_time = segment_time.split(':')
         # print(int(seg_time[0]) * 60 * 60 + int(seg_time[1]) * 60 + int(seg_time[2]))

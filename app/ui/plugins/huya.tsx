@@ -82,12 +82,12 @@ const Huya: React.FC<Props> = props => {
         >
           <Select.Option value="AL">直播线路3（AL）</Select.Option>
           <Select.Option value="TX">直播线路5（TX）</Select.Option>
-          <Select.Option value="HW">直播线路6（HW）</Select.Option>
+          {/* <Select.Option value="HW">直播线路6（HW）</Select.Option> */}
           {/* <Select.Option value="WS">网宿（WS）</Select.Option> */}
           <Select.Option value="AL13">直播线路13（AL13）</Select.Option>
           <Select.Option value="HS">直播线路14（HS）</Select.Option>
           <Select.Option value="TX15">直播线路15（TX15）</Select.Option>
-          <Select.Option value="HW16">直播线路16（HW16）</Select.Option>
+          {/* <Select.Option value="HW16">直播线路16（HW16）</Select.Option> */}
         </Form.Select>
         <Form.Switch
           field="huya_cdn_fallback"
@@ -129,7 +129,7 @@ const Huya: React.FC<Props> = props => {
         />
         <Form.Switch
           field="huya_use_wup"
-          extraText="使用 WUP 协议的请求头，可能解决部分直播分区 2 分钟分段问题"
+          extraText="使用 WUP 协议获取直播流，可能解决部分直播分区 2 分钟分段问题"
           label="使用 WUP 协议（huya_use_wup）"
           initValue={entity?.hasOwnProperty('huya_use_wup') ? entity['huya_use_wup'] : true}
           fieldStyle={{

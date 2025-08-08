@@ -33,6 +33,7 @@ use url::Url;
 pub(crate) enum AppKeyStore {
     BiliTV,
     Android,
+    BCutAndroid,
 }
 
 impl AppKeyStore {
@@ -40,6 +41,7 @@ impl AppKeyStore {
         match self {
             AppKeyStore::BiliTV => "4409e2ce8ffd12b8",
             AppKeyStore::Android => "783bbb7264451d82",
+            AppKeyStore::BCutAndroid => "5dce947fe22167f9",
         }
     }
 
@@ -47,6 +49,7 @@ impl AppKeyStore {
         match self {
             AppKeyStore::BiliTV => "59b43e04ad6965f34319062b478f83dd",
             AppKeyStore::Android => "2653583c8873dea268ab9386918b1d65",
+            AppKeyStore::BCutAndroid => "5491a31c6bc11fb764a9b1f8d4acf092",
         }
     }
 }

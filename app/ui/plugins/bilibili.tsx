@@ -24,6 +24,8 @@ const Bilibili: React.FC<Props> = props => {
     <>
       <Collapse.Panel header="哔哩哔哩" itemKey="bilibili">
         <Form.Select
+          allowCreate={true}
+          filter
           field="bili_qn"
           extraText={
             <div style={{ fontSize: '14px' }}>
@@ -42,6 +44,12 @@ const Bilibili: React.FC<Props> = props => {
             alignSelf: 'stretch',
             padding: 0,
           }}
+          rules={[
+            {
+              pattern: /^\d*$/,
+              message: '请仅输入纯数字',
+            },
+          ]}
           showClear={true}
         >
           <Select.Option value={30000}>30000（杜比）</Select.Option>
@@ -221,14 +229,14 @@ const Bilibili: React.FC<Props> = props => {
         />
         <Form.Switch
           field="bili_anonymous_origin"
-          extraText="使用自定义API获取 master.m3u8 内的 hls_fmp4 原画流，无法录制特殊直播。默认关闭。"
+          extraText="使用自定义API获取 master playlist 内的 hls_fmp4 原画流，无法录制特殊直播。默认关闭。"
           label="免登录原画（bili_anonymous_origin）"
           fieldStyle={{
             alignSelf: 'stretch',
             padding: 0,
           }}
         />
-        <Form.Switch
+        {/* <Form.Switch
           field="bili_ov2cn"
           extraText={
             <div style={{ fontSize: '14px' }}>
@@ -260,7 +268,7 @@ const Bilibili: React.FC<Props> = props => {
             alignSelf: 'stretch',
             padding: 0,
           }}
-        />
+        /> */}
         <Form.InputNumber
           field="bili_hls_transcode_timeout"
           extraText="hls_fmp4 转码等待时间，超时后回退到 flv 流。默认 60 秒。"
@@ -273,7 +281,7 @@ const Bilibili: React.FC<Props> = props => {
           }}
           showClear={true}
         />
-        <Form.TagInput
+        {/* <Form.TagInput
           allowDuplicates={false}
           addOnBlur={true}
           separator=","
@@ -300,7 +308,7 @@ const Bilibili: React.FC<Props> = props => {
               message: '例: cn-hjlheb-cu-01-01,cn-tj-ct-01-01',
             },
           ]}
-        />
+        /> */}
       </Collapse.Panel>
     </>
   )

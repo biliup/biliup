@@ -1,8 +1,11 @@
 import aiohttp
 from biliup.plugins import random_user_agent
 
-from .tars import tarscore
+from biliup.common.tars import tarscore
 from biliup.plugins import match1
+from biliup.plugins.huya_wup.wup_struct import EWebSocketCommandType
+from biliup.plugins.huya_wup.wup_struct.WebSocketCommand import HuyaWebSocketCommand
+from biliup.plugins.huya_wup.wup_struct.WSUserInfo import HuyaWSUserInfo
 
 
 class Huya:
@@ -29,21 +32,45 @@ class Huya:
                 # tid = match1(room_page, r"lChannelId\":\"?(\d+)\"?")
                 # sid = match1(room_page, r"lSubChannelId\":\"?(\d+)\"?")
 
+        import base64
+        ws_user_info = HuyaWSUserInfo()
+        ws_user_info.iUid = uid
+        ws_user_info.bAnonymous = False
+        ws_user_info.lGroupId = uid
+        ws_user_info.lGroupType = 3
         oos = tarscore.TarsOutputStream()
-        oos.write(tarscore.int64, 0, uid)
-        oos.write(tarscore.boolean, 1, False)  # Anonymous
-        oos.write(tarscore.string, 2, "")  # sGuid
-        oos.write(tarscore.string, 3, "")
-        oos.write(tarscore.int64, 4, 0)  # tid
-        oos.write(tarscore.int64, 5, 0)  # sid
-        oos.write(tarscore.int64, 6, uid)
-        oos.write(tarscore.int64, 7, 3)
+        ws_user_info.writeTo(oos, ws_user_info)
 
-        wscmd = tarscore.TarsOutputStream()
-        wscmd.write(tarscore.int32, 0, 1)
-        wscmd.write(tarscore.bytes, 1, oos.getBuffer())
+        # b64data = base64.b64encode(oos.getBuffer())
+        # print(b64data)
 
-        reg_datas.append(wscmd.getBuffer())
+        ws_cmd = HuyaWebSocketCommand()
+        ws_cmd.iCmdType = EWebSocketCommandType.EWSCmd_RegisterReq
+        ws_cmd.vData = oos.getBuffer()
+        oos = tarscore.TarsOutputStream()
+        ws_cmd.writeTo(oos, ws_cmd)
+
+        # oos = tarscore.TarsOutputStream()
+        # oos.write(tarscore.int64, 0, uid)
+        # oos.write(tarscore.boolean, 1, False)  # Anonymous
+        # oos.write(tarscore.string, 2, "")  # sGuid
+        # oos.write(tarscore.string, 3, "")
+        # oos.write(tarscore.int64, 4, 0)  # tid
+        # oos.write(tarscore.int64, 5, 0)  # sid
+        # oos.write(tarscore.int64, 6, uid)
+        # oos.write(tarscore.int64, 7, 3)
+
+        # b64data = base64.b64encode(oos.getBuffer())
+        # print(b64data)
+
+        # wscmd = tarscore.TarsOutputStream()
+        # wscmd.write(tarscore.int32, 0, 1)
+        # wscmd.write(tarscore.bytes, 1, oos.getBuffer())
+
+        # b64data = base64.b64encode(oos.getBuffer())
+        # print(b64data)
+
+        reg_datas.append(oos.getBuffer())
 
         return Huya.wss_url, reg_datas
 

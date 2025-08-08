@@ -1,10 +1,11 @@
-use crate::cli::{SubmitOption, UploadLine};
+use crate::cli::UploadLine;
 use anyhow::{Context, Result, anyhow};
 use biliup::client::StatelessClient;
 use biliup::error::Kind;
 use biliup::uploader::bilibili::{BiliBili, Studio, Vid, Video};
 use biliup::uploader::credential::{Credential, LoginInfo};
 use biliup::uploader::line::Probe;
+use biliup::uploader::util::SubmitOption;
 use biliup::uploader::{VideoFile, credential, line, load_config};
 use bytes::{Buf, Bytes};
 use clap::ValueEnum;
@@ -84,16 +85,9 @@ pub async fn upload_by_command(
     cover_up(&mut studio, &bili).await?;
     studio.videos = upload(&video_path, &bili, line, limit).await?;
 
-    // if studio.submit_by_app {
-    //     bili.submit_by_app(&studio).await?;
-    // }
-    // else {
-    //     bili.submit(&studio).await?;
-    // }
-    // 说不定会适配 web 呢...?
     match submit {
-        SubmitOption::App => bili.submit_by_app(&studio, proxy).await?,
-        _ => bili.submit(&studio, proxy).await?,
+        SubmitOption::BCutAndroid => bili.submit_by_bcut_android(&studio, proxy).await?,
+        _ => bili.submit_by_app(&studio, proxy).await?,
     };
 
     Ok(())
@@ -139,13 +133,17 @@ pub async fn append(
     video_path: Vec<PathBuf>,
     line: Option<UploadLine>,
     limit: usize,
+    submit: SubmitOption,
     proxy: Option<&str>,
 ) -> Result<()> {
     let bilibili = login_by_cookies(user_cookie, proxy).await?;
     let mut uploaded_videos = upload(&video_path, &bilibili, line, limit).await?;
     let mut studio = bilibili.studio_data(&vid, proxy).await?;
     studio.videos.append(&mut uploaded_videos);
-    bilibili.edit(&studio, proxy).await?;
+    match submit {
+        SubmitOption::App => bilibili.edit_by_app(&studio, proxy).await?,
+        _ => bilibili.edit_by_web(&studio).await?,
+    };
     // studio.edit(&login_info).await?;
     Ok(())
 }
@@ -230,17 +228,13 @@ pub async fn upload(
     let client = StatelessClient::default();
     let line = match line {
         Some(UploadLine::Bda2) => line::bda2(),
-        Some(UploadLine::Ws) => line::ws(),
         Some(UploadLine::Qn) => line::qn(),
-        // Some(UploadLine::Kodo) => line::kodo(),
-        // Some(UploadLine::Cos) => line::cos(),
-        // Some(UploadLine::CosInternal) => line::cos_internal(),
         Some(UploadLine::Bldsa) => line::bldsa(),
         Some(UploadLine::Tx) => line::tx(),
         Some(UploadLine::Txa) => line::txa(),
         Some(UploadLine::Bda) => line::bda(),
         Some(UploadLine::Alia) => line::alia(),
-        None => Probe::probe(&client.client).await.unwrap_or_default(),
+        _ => Probe::probe(&client.client).await.unwrap_or_default(),
     };
     // let line = line::kodo();
     for video_path in video_path {

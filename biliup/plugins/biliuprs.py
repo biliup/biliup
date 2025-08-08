@@ -1,9 +1,10 @@
 import multiprocessing as mp
 import time
-from typing import List
 
 import stream_gears
 
+from typing import List, Optional, Union
+from . import SubmitOption
 from ..engine import Plugin
 from ..engine.upload import UploadBase, logger
 
@@ -11,9 +12,10 @@ from ..engine.upload import UploadBase, logger
 @Plugin.upload(platform="biliup-rs")
 class BiliWeb(UploadBase):
     def __init__(
-            self, principal, data, submit_api=None, copyright=2, postprocessor=None, dtime=None,
+            self, principal, data, submit_api: Optional[Union[SubmitOption, str]] = None,
+            copyright=2, postprocessor=None, dtime=None,
             dynamic='', lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description='',
-            dolby=0, hires=0, no_reprint=0, is_only_self=0, open_elec=0, credits=None,
+            dolby=0, hires=0, no_reprint=0, is_only_self=0, charging_pay=0, credits=None,
             user_cookie='cookies.json', copyright_source=None, extra_fields = ""
     ):
         super().__init__(principal, data, persistence_path='bili.cookie', postprocessor=postprocessor)
@@ -41,7 +43,7 @@ class BiliWeb(UploadBase):
         self.hires = hires
         self.no_reprint = no_reprint
         self.is_only_self = is_only_self
-        self.open_elec = open_elec
+        self.charging_pay = charging_pay
         self.user_cookie = user_cookie
         self.copyright_source = copyright_source
 
@@ -64,6 +66,7 @@ class BiliWeb(UploadBase):
         upload_args = {
             "ex_conn": ex_child_conn,
             "lines": self.lines,
+            "submit": self.submit_api,
             "video_path": [file.video for file in file_list],
             "cookie_file": self.user_cookie,
             "title": self.data["format_title"][:80],
@@ -77,7 +80,7 @@ class BiliWeb(UploadBase):
             "dolby": self.dolby,
             "lossless_music": self.hires,
             "no_reprint": self.no_reprint,
-            "open_elec": self.open_elec,
+            "charging_pay": self.charging_pay,
             "limit": self.threads,
             "desc_v2": desc_v2,
             "extra_fields": self.extra_fields,
@@ -137,6 +140,6 @@ def stream_gears_upload(ex_conn, lines, *args, **kwargs):
         elif lines == 'bldsa':
             kwargs['line'] = stream_gears.UploadLine.Bldsa
 
-        stream_gears.upload_by_app(*args, **kwargs)
+        stream_gears.upload(*args, **kwargs)
     except Exception as e:
         ex_conn.send(e)

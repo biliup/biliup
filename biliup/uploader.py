@@ -46,7 +46,7 @@ def upload(data):
         data['no_reprint'] = config.get('no_reprint', 0)
         data['extra_fields'] = json.dumps(merge_dict(context.get('extra_fields', {}), {"is_only_self": context.get('is_only_self', 0)}))
 
-        data['open_elec'] = config.get('open_elec', 0)
+        data['charging_pay'] = config.get('charging_pay', 0)
         sig = inspect.signature(cls)
         kwargs = {}
         for k in sig.parameters:
@@ -72,7 +72,7 @@ def biliup_uploader(filelist, data):
         data['no_reprint'] = data.get('no_reprint', 0)
         data['extra_fields'] = json.dumps(merge_dict(data.get('extra_fields', ''), {"is_only_self": data.get('is_only_self', 0)}))
 
-        data['open_elec'] = data.get('open_elec', 0)
+        data['charging_pay'] = data.get('charging_pay', 0)
         sig = inspect.signature(cls)
         kwargs = {}
         for k in sig.parameters:

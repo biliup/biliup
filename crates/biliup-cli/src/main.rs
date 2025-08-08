@@ -78,6 +78,7 @@ async fn main() -> Result<()> {
             line,
             limit,
             studio: _,
+            submit,
         } => {
             append(
                 cli.user_cookie,
@@ -85,6 +86,7 @@ async fn main() -> Result<()> {
                 video_path,
                 line,
                 limit,
+                submit,
                 cli.proxy.as_deref(),
             )
             .await?

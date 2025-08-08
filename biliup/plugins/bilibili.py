@@ -25,9 +25,10 @@ class Bililive(DownloadBase):
         self.bilibili_danmaku_raw = config.get('bilibili_danmaku_raw', False)
         self.__real_room_id = None
         self.__login_mid = 0
+        self.__anchor_mid = 0
         self.bili_cookie = config.get('user', {}).get('bili_cookie')
         self.bili_cookie_file = config.get('user', {}).get('bili_cookie_file')
-        self.bili_qn = int(config.get('bili_qn', 20000))
+        self.bili_qn = int(config.get('bili_qn', 25000))
         self.bili_protocol = config.get('bili_protocol', 'stream')
         self.bili_cdn = config.get('bili_cdn', [])
         self.bili_hls_timeout = config.get('bili_hls_transcode_timeout', 60)
@@ -35,11 +36,7 @@ class Bililive(DownloadBase):
             normalize_url(config.get('bili_liveapi', OFFICIAL_API)).rstrip('/'),
             normalize_url(config.get('bili_fallback_api', OFFICIAL_API)).rstrip('/'),
         ]
-        self.bili_force_source = config.get('bili_force_source', False)
         self.bili_anonymous_origin = config.get('bili_anonymous_origin', False)
-        self.bili_ov2cn = config.get('bili_ov2cn', False)
-        self.bili_normalize_cn204 = config.get('bili_normalize_cn204', False)
-        self.cn01_sids = config.get('bili_replace_cn01', [])
         self.bili_cdn_fallback = config.get('bili_cdn_fallback', False)
 
     async def acheck_stream(self, is_check=False):
@@ -104,8 +101,9 @@ class Bililive(DownloadBase):
         self.live_cover_url = room_info['room_info']['cover']
         self.room_title = room_info['room_info']['title']
         self.__real_room_id = room_info['room_info']['room_id']
+        self.__anchor_mid = room_info['room_info']['uid']
         live_start_time = room_info['room_info']['live_start_time']
-        special_type = room_info['room_info']['special_type'] # 0: 公开直播, 1: 大航海专属
+        special_type = room_info['room_info']['special_type'] # 0: 公开直播, 1: 付费直播, 199: 纯净页面
         if live_start_time > self.live_start_time:
             self.live_start_time = live_start_time
             is_new_live = True
@@ -144,7 +142,7 @@ class Bililive(DownloadBase):
                 return False
 
         target_quality_stream = stream_urls.get(
-            str(self.bili_qn), next(iter(stream_urls.values()))
+            self.bili_qn, next(iter(stream_urls.values()))
         )
         stream_url = {}
         if self.bili_cdn is not None:
@@ -159,38 +157,7 @@ class Bililive(DownloadBase):
             stream_url = stream_info['url']
             logger.debug(f"{self.plugin_msg}: 使用 {current_cdn} 流")
 
-        self.raw_stream_url = self.normalize_cn204(
-            f"{stream_url['host']}{stream_url['base_url']}{stream_url['extra']}"
-        )
-
-        # 替换 cn-gotcha01 节点
-        if self.cn01_sids and "cn-gotcha01" in current_cdn:
-            if isinstance(self.cn01_sids, str):
-                self.cn01_sids = self.cn01_sids.split(',')
-            for sid in self.cn01_sids:
-                new_url = f"https://{sid}.bilivideo.com{stream_url['base_url']}{stream_url['extra']}"
-                new_url = await self.acheck_url_healthy(new_url)
-                if new_url is not None:
-                    self.raw_stream_url = new_url
-                    break
-                else:
-                    logger.debug(f"{self.plugin_msg}: {sid} is not available")
-
-        # 强制原画
-        if self.bili_qn <= 10000 and self.bili_force_source:
-            # 不处理 qn 20000
-            if stream_info['suffix'] not in {'origin', 'uhd', 'maxhevc'}:
-                __base_url = stream_url['base_url'].replace(f"_{stream_info['suffix']}", "")
-                __sk = match1(stream_url['extra'], r'sk=([^&]+)')
-                __extra = stream_url['extra'].replace(__sk, __sk[:32])
-                __url = self.normalize_cn204(f"{stream_url['host']}{__base_url}{__extra}")
-                if (await self.acheck_url_healthy(__url)) is not None:
-                    self.raw_stream_url = __url
-                    logger.info(f"{self.plugin_msg}: force_source 处理 {current_cdn} 成功 {stream_info['stream_name']}")
-                else:
-                    logger.debug(
-                        f"{self.plugin_msg}: force_source 处理 {current_cdn} 失败 {stream_info['stream_name']}"
-                    )
+        self.raw_stream_url = f"{stream_url['host']}{stream_url['base_url']}{stream_url['extra']}"
 
         # 回退
         if self.bili_cdn_fallback:
@@ -198,9 +165,7 @@ class Bililive(DownloadBase):
             if __url is None:
                 for cdn, stream_info in target_quality_stream.items():
                     stream_url = stream_info['url']
-                    __fallback_url = self.normalize_cn204(
-                        f"{stream_url['host']}{stream_url['base_url']}{stream_url['extra']}"
-                    )
+                    __fallback_url = f"{stream_url['host']}{stream_url['base_url']}{stream_url['extra']}"
                     try:
                         __url = await self.acheck_url_healthy(__fallback_url)
                         if __url is not None:
@@ -268,16 +233,19 @@ class Bililive(DownloadBase):
         return {}
 
     async def get_master_m3u8(self, api: str) -> dict:
-        full_url = f"{api}/xlive/web-room/v2/index/master_playurl"
+        full_url = f"{api}/xlive/play-gateway/master/url"
         params = {
             "cid": self.__real_room_id,
-            "mid": self.__login_mid,
-            "pt": "html5", # platform
-            # "p2p_type": "-1",
-            # "net": 0,
-            # "free_type": 0,
-            # "build": 0,
-            # "feature": 2 # 1:? 2:?
+            "mid": self.__login_mid or self.__anchor_mid,
+            "pt": "web", # platform
+            "p2p_type": "-1",
+            "net": 0,
+            "free_type": 0,
+            "build": 0,
+            "feature": 2,
+            "qn": self.bili_qn,
+            "drm_type": 0,
+            "codec": "0,1",
         }
         try:
             m3u8_res = await client.get(
@@ -317,9 +285,7 @@ class Bililive(DownloadBase):
                     if format['format_name'] == 'fmp4':
                         stream_urls = self.parse_stream_url(format['codec'][0])
                         # fmp4 可能没有原画
-                        if qn == 10000 and qn in stream_urls.keys():
-                            break
-                        else:
+                        if qn in {10000, 25000} and qn not in stream_urls.keys():
                             stream_urls = {}
             else:
                 stream_urls = self.parse_stream_url(streams[0]['format'][0]['codec'][0])
@@ -383,18 +349,13 @@ class Bililive(DownloadBase):
             logger.error(f"{self.plugin_msg}: 登录态校验失败 {e}")
         return 0
 
-    def normalize_cn204(self, url: str) -> str:
-        if self.bili_normalize_cn204 and "cn-gotcha204" in url:
-            return re.sub(r"(?<=cn-gotcha204)-[1-4]", "", url, 1)
-        return url
-
     def parse_stream_url(self, *args) -> dict:
         suffix_regexp = r'suffix=([^&]+)'
         if isinstance(args[0], str):
             url = args[0]
             host = "https://" + match1(url, r'https?://([^/]+)')
             stream_url = {
-                'host': host if not self.bili_ov2cn else host.replace("ov-", "cn-"),
+                'host': host,
                 'base_url': url.split("?")[0].split(host)[1] + "?",
                 'extra': url.split("?")[1]
             }
@@ -411,7 +372,7 @@ class Bililive(DownloadBase):
             for info in args[0]['url_info']:
                 cdn_name = match1(info['extra'], r'cdn=([^&]+)')
                 stream_url = {
-                    'host': info['host'] if not self.bili_ov2cn else info['host'].replace("ov-", "cn-"),
+                    'host': info['host'],
                     'base_url': base_url,
                     'extra': info['extra']
                 }
@@ -446,7 +407,7 @@ class Bililive(DownloadBase):
         for line in lines:
             if line.startswith('#EXT-X-STREAM-INF:'):
                 codec = match1(line, r'CODECS="([^"]+)"')
-                current_qn = match1(line, r'BILI-QN=(\d+)')
+                current_qn = int(match1(line, r'BILI-QN=(\d+)'))
 
                 if codec and current_qn:
                     if 'avc' in codec.lower():

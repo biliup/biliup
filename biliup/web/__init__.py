@@ -61,7 +61,7 @@ def check_url_auth(auth_header: str) -> bool:
     auth_dict = {'biliup': GLOBAL_PASSWORD}
     return check_access(auth_dict, auth_header)
 
-
+@routes.get('/api/basic')
 async def get_basic_config(request):
     res = {
         "line": config.data.get('lines', 'AUTO'),
@@ -80,12 +80,12 @@ async def get_basic_config(request):
 
     return web.json_response(res)
 
-
+@routes.get('/url-status')
 async def url_status(request):
     from biliup.app import context
     return web.json_response(context['KernelFunc'].get_url_status())
 
-
+@routes.post('/api/setbasic')
 async def set_basic_config(request):
     post_data = await request.json()
     config.data['lines'] = post_data.get('line', 'AUTO')
@@ -104,25 +104,11 @@ async def set_basic_config(request):
         config.data['user']['access_token'] = str(post_data.get('user', {}).get('access_token', ''))
     return web.json_response({"status": 200})
 
-
+@routes.get('/api/getconfig')
 async def get_streamer_config(request):
     return web.json_response(config.data.get('streamers', {}))
 
-
-# async def set_streamer_config(request):
-#     post_data = await request.json()
-#     # config.data['streamers'] = post_data['streamers']
-#     for i, j in post_data['streamers'].items():
-#         if i not in config.data['streamers']:
-#             config.data['streamers'][i] = {}
-#         for key, Value in j.items():
-#             config.data['streamers'][i][key] = Value
-#     for i in config.data['streamers']:
-#         if i not in post_data['streamers']:
-#             del config.data['streamers'][i]
-#     return web.json_response({"status": 200}, status=200)
-
-
+@routes.get('/api/save')
 async def save_config(request):
     config.save()
     biliup.common.reload.global_reloader.triggered = True
@@ -131,11 +117,11 @@ async def save_config(request):
     logger.info("配置保存，将在进程空闲时重启")
     return web.json_response({"status": 200}, status=200)
 
-
+@routes.get('/')
 async def root_handler(request):
     return web.HTTPFound('/index.html')
 
-
+@routes.get('/api/login_by_cookie')
 async def cookie_login(request):
     if config.data.get("toml"):
         print("trying to login by cookie")
@@ -212,14 +198,7 @@ async def qrcode_login(request):
         logger.exception('login_by_qrcode')
         return web.HTTPBadRequest(text="login failed" + str(e))
 
-
-async def pre_archive(request):
-    if config.data.get("toml"):
-        config.load_cookies()
-    cookies = config.data.get('user', {}).get('cookies', {})
-    return web.json_response(BiliBili.tid_archive(cookies))
-
-
+@routes.get('/api/check_tag')
 async def tag_check(request):
     if BiliBili.check_tag(request.rel_url.query['tag']):
         return web.json_response({"status": 200})
@@ -742,22 +721,6 @@ def find_all_folders(directory):
 
 async def service(args):
     app = web.Application()
-    app.add_routes([
-        web.get('/api/check_tag', tag_check),
-        web.get('/url-status', url_status),
-        web.get('/api/basic', get_basic_config),
-        web.post('/api/setbasic', set_basic_config),
-        web.get('/api/getconfig', get_streamer_config),
-        # web.post('/api/setconfig', set_streamer_config),
-        web.get('/api/login_by_cookie', cookie_login),
-        # web.get('/api/login_by_sms', sms_login),
-        # web.post('/api/send_sms', sms_send),
-        web.get('/api/save', save_config),
-        # web.get('/api/get_qrcode', qrcode_get),
-        # web.post('/api/login_by_qrcode', qrcode_login),
-        web.get('/api/archive_pre', pre_archive),
-        web.get('/', root_handler)
-    ])
     routes.static('/static', '.', show_index=False)
     app.add_routes(routes)
     if args.static_dir:

@@ -14,18 +14,27 @@ use biliup::credential::Credential;
 use biliup::downloader::construct_headers;
 use biliup::downloader::extractor::CallbackFn;
 use biliup::downloader::util::Segmentable;
+
 use tracing_subscriber::layer::SubscriberExt;
 
-#[derive(FromPyObject)]
-pub enum PySegment {
-    Time {
-        #[pyo3(attribute("time"))]
-        time: u64,
-    },
-    Size {
-        #[pyo3(attribute("size"))]
-        size: u64,
-    },
+#[derive(Debug, Clone)]
+#[pyclass(set_all)]
+pub struct PySegment {
+    // #[pyo3(attribute("time"))]
+    time: Option<u64>,
+    // #[pyo3(attribute("size"))]
+    size: Option<u64>,
+}
+
+#[pymethods]
+impl PySegment {
+    #[new]
+    fn new() -> Self {
+        PySegment{
+            time: None,
+            size: None,
+        }
+    }
 }
 
 #[pyfunction]
@@ -74,9 +83,24 @@ fn download_with_callback(
             .with_timer(local_time)
             .with_writer(non_blocking);
 
-        let segment = match segment {
-            PySegment::Time { time } => Segmentable::new(Some(Duration::from_secs(time)), None),
-            PySegment::Size { size } => Segmentable::new(None, Some(size)),
+        // println!("Input segment: {:?}", segment);
+        // println!("Input segment time: {:?}, size: {:?}", segment.time, segment.size);
+
+        let segmentable = match (segment.time, segment.size) {
+            (Some(time), Some(size)) => {
+                // 已支持同时创建时间和大小
+                Segmentable::new(Some(Duration::from_secs(time)), Some(size))
+            }
+            (Some(time), None) => {
+                Segmentable::new(Some(Duration::from_secs(time)), None)
+            }
+            (None, Some(size)) => {
+                Segmentable::new(None, Some(size))
+            }
+            (None, None) => {
+                // 如果都没有，使用默认值
+                Segmentable::default()
+            }
         };
 
         let file_name_hook = file_name_callback_fn.map(|callback_fn| -> CallbackFn {
@@ -96,7 +120,7 @@ fn download_with_callback(
                 url,
                 map,
                 file_name,
-                segment,
+                segmentable,
                 file_name_hook,
                 proxy.as_deref(),
             ) {
@@ -217,7 +241,7 @@ fn login_by_web_qrcode(
 
 #[allow(clippy::too_many_arguments)]
 #[pyfunction]
-#[pyo3(signature = (video_path, cookie_file, title, tid=171, tag="".to_string(), copyright=2, source="".to_string(), desc="".to_string(), dynamic="".to_string(), cover="".to_string(), dolby=0, lossless_music=0, no_reprint=0, open_elec=0, limit=3, desc_v2=vec![], dtime=None, line=None, extra_fields="".to_string(), proxy=None))]
+#[pyo3(signature = (video_path, cookie_file, title, tid=171, tag="".to_string(), copyright=2, source="".to_string(), desc="".to_string(), dynamic="".to_string(), cover="".to_string(), dolby=0, lossless_music=0, no_reprint=0, charging_pay=0, up_close_reply=false, up_selection_reply=false, up_close_danmu=false, limit=3, desc_v2=vec![], dtime=None, line=None, extra_fields="".to_string(), submit=None, proxy=None))]
 fn upload(
     py: Python<'_>,
     video_path: Vec<PathBuf>,
@@ -233,95 +257,7 @@ fn upload(
     dolby: u8,
     lossless_music: u8,
     no_reprint: u8,
-    open_elec: u8,
-    limit: usize,
-    desc_v2: Vec<PyCredit>,
-    dtime: Option<u32>,
-    line: Option<UploadLine>,
-    extra_fields: Option<String>,
-    proxy: Option<String>,
-) -> PyResult<()> {
-    py.allow_threads(|| {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?;
-        // 输出到控制台中
-        // use of deprecated function `time::util::local_offset::set_soundness`: no longer needed; TZ is refreshed manually
-        // unsafe {
-        //     time::util::local_offset::set_soundness(time::util::local_offset::Soundness::Unsound);
-        // }
-        let local_time = tracing_subscriber::fmt::time::LocalTime::new(format_description!(
-            "[year]-[month]-[day] [hour]:[minute]:[second]"
-        ));
-        let formatting_layer = tracing_subscriber::FmtSubscriber::builder()
-            // will be written to stdout.
-            // builds the subscriber.
-            .with_timer(local_time.clone())
-            .finish();
-        let file_appender = tracing_appender::rolling::never("", "upload.log");
-        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-        let file_layer = tracing_subscriber::fmt::layer()
-            .with_ansi(false)
-            .with_timer(local_time)
-            .with_writer(non_blocking);
-
-        let collector = formatting_layer.with(file_layer);
-
-        tracing::subscriber::with_default(collector, || -> PyResult<()> {
-            let studio_pre = StudioPre::builder()
-                .video_path(video_path)
-                .cookie_file(cookie_file)
-                .line(line)
-                .limit(limit)
-                .title(title)
-                .tid(tid)
-                .tag(tag)
-                .copyright(copyright)
-                .source(source)
-                .desc(desc)
-                .dynamic(dynamic)
-                .cover(cover)
-                .dtime(dtime)
-                .dolby(dolby)
-                .lossless_music(lossless_music)
-                .no_reprint(no_reprint)
-                .open_elec(open_elec)
-                .desc_v2_credit(desc_v2)
-                .extra_fields(Some(parse_extra_fields(extra_fields)))
-                .build();
-
-            match rt.block_on(uploader::upload(studio_pre, proxy.as_deref())) {
-                Ok(_) => Ok(()),
-                // Ok(_) => {  },
-                Err(err) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "{}, {}",
-                    err.root_cause(),
-                    err
-                ))),
-            }
-        })
-    })
-}
-
-#[allow(clippy::too_many_arguments)]
-#[pyfunction]
-#[pyo3(signature = (video_path, cookie_file, title, tid=171, tag="".to_string(), copyright=2, source="".to_string(), desc="".to_string(), dynamic="".to_string(), cover="".to_string(), dolby=0, lossless_music=0, no_reprint=0, open_elec=0, up_close_reply=false, up_selection_reply=false, up_close_danmu=false, limit=3, desc_v2=vec![], dtime=None, line=None, extra_fields="".to_string(), proxy=None))]
-fn upload_by_app(
-    py: Python<'_>,
-    video_path: Vec<PathBuf>,
-    cookie_file: PathBuf,
-    title: String,
-    tid: u16,
-    tag: String,
-    copyright: u8,
-    source: String,
-    desc: String,
-    dynamic: String,
-    cover: String,
-    dolby: u8,
-    lossless_music: u8,
-    no_reprint: u8,
-    open_elec: u8,
+    charging_pay: u8,
     up_close_reply: bool,
     up_selection_reply: bool,
     up_close_danmu: bool,
@@ -330,6 +266,7 @@ fn upload_by_app(
     dtime: Option<u32>,
     line: Option<UploadLine>,
     extra_fields: Option<String>,
+    submit: Option<String>,
     proxy: Option<String>,
 ) -> PyResult<()> {
     py.allow_threads(|| {
@@ -376,7 +313,7 @@ fn upload_by_app(
                 .dolby(dolby)
                 .lossless_music(lossless_music)
                 .no_reprint(no_reprint)
-                .open_elec(open_elec)
+                .charging_pay(charging_pay)
                 .up_close_reply(up_close_reply)
                 .up_selection_reply(up_selection_reply)
                 .up_close_danmu(up_close_danmu)
@@ -384,7 +321,12 @@ fn upload_by_app(
                 .extra_fields(Some(parse_extra_fields(extra_fields)))
                 .build();
 
-            match rt.block_on(uploader::upload_by_app(studio_pre, proxy.as_deref())) {
+            // let submit = match submit {
+            //     Some(value) => SubmitOption::from_str(&value, true).unwrap(),
+            //     None => SubmitOption::App,
+            // };
+
+            match rt.block_on(uploader::upload(studio_pre, submit.as_deref(), proxy.as_deref())) {
                 Ok(_) => Ok(()),
                 // Ok(_) => {  },
                 Err(err) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
@@ -406,7 +348,7 @@ fn stream_gears(m: &Bound<'_, PyModule>) -> PyResult<()> {
     //     .with_writer(non_blocking)
     //     .init();
     m.add_function(wrap_pyfunction!(upload, m)?)?;
-    m.add_function(wrap_pyfunction!(upload_by_app, m)?)?;
+    // m.add_function(wrap_pyfunction!(upload_by_app, m)?)?;
     m.add_function(wrap_pyfunction!(download, m)?)?;
     m.add_function(wrap_pyfunction!(download_with_callback, m)?)?;
     m.add_function(wrap_pyfunction!(login_by_cookies, m)?)?;
@@ -417,6 +359,7 @@ fn stream_gears(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(login_by_web_cookies, m)?)?;
     m.add_function(wrap_pyfunction!(login_by_web_qrcode, m)?)?;
     m.add_class::<UploadLine>()?;
+    m.add_class::<PySegment>()?;
     Ok(())
 }
 
