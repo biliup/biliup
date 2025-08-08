@@ -15,7 +15,7 @@ class BiliWeb(UploadBase):
             self, principal, data, submit_api: Optional[Union[SubmitOption, str]] = None,
             copyright=2, postprocessor=None, dtime=None,
             dynamic='', lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description='',
-            dolby=0, hires=0, no_reprint=0, is_only_self=0, open_elec=0, credits=None,
+            dolby=0, hires=0, no_reprint=0, is_only_self=0, charging_pay=0, credits=None,
             user_cookie='cookies.json', copyright_source=None, extra_fields = ""
     ):
         super().__init__(principal, data, persistence_path='bili.cookie', postprocessor=postprocessor)
@@ -43,7 +43,7 @@ class BiliWeb(UploadBase):
         self.hires = hires
         self.no_reprint = no_reprint
         self.is_only_self = is_only_self
-        self.open_elec = open_elec
+        self.charging_pay = charging_pay
         self.user_cookie = user_cookie
         self.copyright_source = copyright_source
 
@@ -80,7 +80,7 @@ class BiliWeb(UploadBase):
             "dolby": self.dolby,
             "lossless_music": self.hires,
             "no_reprint": self.no_reprint,
-            "open_elec": self.open_elec,
+            "charging_pay": self.charging_pay,
             "limit": self.threads,
             "desc_v2": desc_v2,
             "extra_fields": self.extra_fields,

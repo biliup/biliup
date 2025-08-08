@@ -778,7 +778,7 @@ class Data:
 
     # interactive: int = 0
     # no_reprint: int 1
-    # open_elec: int 1
+    # charging_pay: int 1
 
     def __post_init__(self, open_subtitle):
         self.subtitle = {"open": int(open_subtitle), "lan": ""}

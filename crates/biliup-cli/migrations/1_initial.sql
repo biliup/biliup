@@ -28,7 +28,7 @@ create table if not exists upload_streamers
     dolby              INTEGER                           not null default 0,
     lossless_music     INTEGER                           not null default 0,
     no_reprint         INTEGER                           not null default 0,
-    open_elec          INTEGER                           not null default 0,
+    charging_pay          INTEGER                           not null default 0,
     up_selection_reply INTEGER                           not null default 0,
     up_close_reply     INTEGER                           not null default 0,
     up_close_danmu     INTEGER                           not null default 0
@@ -76,6 +76,6 @@ create table if not exists videos
 --
 -- create index if not exists users_email_idx on users (email);
 -- insert or ignore into upload_streamers (template_name, copyright, source, cover, title, desc, dynamic, tag, dtime,
---                                         interactive, mission_id, dolby, lossless_music, no_reprint, open_elec,
+--                                         interactive, mission_id, dolby, lossless_music, no_reprint, charging_pay,
 --                                         up_selection_reply, up_close_reply, up_close_danmu)
 -- values ('空模板', 1, '', '', '', '', '', '', null, 0, null, 0, 0, null, 0, 0, 0, null);
