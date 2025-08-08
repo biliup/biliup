@@ -96,6 +96,7 @@ pub async fn upload_by_command(
 pub async fn upload_by_config(
     config: PathBuf,
     user_cookie: PathBuf,
+    submit_override: Option<SubmitOption>,
     proxy: Option<&str>,
 ) -> Result<()> {
     // println!("number of concurrent futures: {limit}");
@@ -122,7 +123,12 @@ pub async fn upload_by_config(
             config.limit,
         )
         .await?;
-        bilibili.submit(&studio, proxy).await?;
+        // 命令行参数优先，如果没有提供则使用配置文件中的设置
+        let submit_option = submit_override.clone().unwrap_or(config.submit.clone());
+        match submit_option {
+            SubmitOption::BCutAndroid => bilibili.submit_by_bcut_android(&studio, proxy).await?,
+            _ => bilibili.submit_by_app(&studio, proxy).await?,
+        };
     }
     Ok(())
 }

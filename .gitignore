@@ -48,3 +48,4 @@ target
 _internal
 .trae/
 pnpm-lock.yaml
+cookies.json

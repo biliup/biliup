@@ -35,8 +35,8 @@ pub enum Commands {
     /// 上传视频
     Upload {
         /// 提交接口
-        #[arg(long, default_value = "app")]
-        submit: SubmitOption,
+        #[arg(long)]
+        submit: Option<SubmitOption>,
 
         // Optional name to operate on
         // name: Option<String>,
@@ -64,8 +64,8 @@ pub enum Commands {
     /// 是否要对某稿件追加视频
     Append {
          /// 提交接口
-        #[arg(long, default_value = "app")]
-        submit: SubmitOption,
+        #[arg(long)]
+        submit: Option<SubmitOption>,
 
         // Optional name to operate on
         // name: Option<String>,
