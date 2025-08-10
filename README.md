@@ -72,10 +72,3 @@
 * Thanks `ykdl, youtube-dl, streamlink` provides downloader.
 * Thanks `THMonster/danmaku`.
 
-
-## 💴捐赠
-[爱发电 »](https://afdian.com/a/biliup)
-
-
-## ⭐Stars
-[![Star History Chart](https://api.star-history.com/svg?repos=biliup/biliup&type=Date)](https://star-history.com/#biliup/biliup&Date)
