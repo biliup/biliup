@@ -2,9 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import logging
-import os
-import queue
-import threading
 import subprocess
 import time
 from urllib.parse import urlparse
