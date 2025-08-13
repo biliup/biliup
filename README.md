@@ -42,8 +42,8 @@
 - 下载 exe: [Release](https://github.com/biliup/biliup/releases/latest)
 
 ### Linux 或 macOS
-1. 确保 Python 版本 ≥ 3.9
-2. 安装：`pip3 install biliup`
+1. 安装 [uv](https://docs.astral.sh/uv/getting-started/installation/) 
+2. 安装：`uv tool install biliup`
 3. 启动：`biliup start`
 4. 访问 WebUI：`http://your-ip:19159`
 
@@ -64,7 +64,7 @@
 
 ### backend
 
-1. 安装依赖 `pip install .`
+1. 安装依赖 `maturin dev`
 2. `npm run build` 确保 `/biliup/web/public` 目录存在构建好的前端静态资源
 3. 启动 Biliup：`python3 -m biliup`
 
