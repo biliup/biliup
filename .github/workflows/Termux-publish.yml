@@ -40,6 +40,7 @@ jobs:
           cp -a python/data/data/com.termux/files/usr/lib/libpython* $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/24
           sed -i 's/pyo3 = { version = "0.24.0", features = \[.*\] }/pyo3 = { version = "0.24.0" }/' crates/stream-gears/Cargo.toml
           sed -i '/dependencies = \[/a\    "quickjs >= 1.19.4",' pyproject.toml
+          sed -i 's/aiohttp\[speedups\] >= 3\.9\.5/aiohttp[speedups] <= 3.9.5/' pyproject.toml
       - name: Build wheel for aarch64 (Termux)
         run: |
           export NDK_BIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
