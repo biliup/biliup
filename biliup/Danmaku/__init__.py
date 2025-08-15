@@ -172,6 +172,7 @@ class DanmakuClient(IDanmakuClient):
 
                     msg_type = m.get("msg_type")
                     msg_time = time.time()
+                    msg_time_since_start = format(msg_time - start_time, '.3f')
                     logger.debug(f"{DanmakuClient.__name__}:{self.__url}: 弹幕queue-{msg_type}")
                     # print(m)
                     # 非弹幕
@@ -218,7 +219,6 @@ class DanmakuClient(IDanmakuClient):
                                     color = m["color"]
                                 else:
                                     color = '16777215'
-                                msg_time_since_start = format(msg_time - start_time, '.3f')
                                 # 记录弹幕额外信息
                                 timestamp = str(int(msg_time))
                                 uid = str(m.get("uid",0))
@@ -245,21 +245,22 @@ class DanmakuClient(IDanmakuClient):
                                 logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常", exc_info=True)
                                 # 异常后略过本次弹幕
                                 continue
-                        # 礼物信息记录，支持上舰、SC、礼物，目前仅在B站开启
-                        elif self.__u == 'live.bilibili.com' and msg_type in ['gift', 'super_chat' , 'guard_buy']:
+                        # 礼物信息记录，目前仅在B站、抖音开启
+                        elif self.__u in ['live.bilibili.com', 'douyin.com'] and msg_type in ['gift', 'super_chat' , 'guard_buy']:
                             if not self.__content.get("detail", False):
                                 continue
                             try:
                                 s = etree.SubElement(root, 's')
+                                s.set('since_start', msg_time_since_start)
                                 s.set('timestamp', str(int(msg_time)))
-                                s.set('uid', str(m.get("uid")))
-                                s.set('username', m.get("name",""))
-                                s.set('price', str(m.get("price")))
+                                s.set('uid', str(m.get("uid", "")))
+                                s.set('user', m.get("name", ""))
+                                s.set('price', str(m.get("price", "")))
                                 s.set('type', msg_type)
                                 # 礼物名称
-                                s.set('num', str(m.get('num')))
-                                s.set('giftname', m.get('gift_name'))
-                                s.text = m["content"]
+                                s.set('num', str(m.get('num', "")))
+                                s.set('giftname', m.get('gift_name', ""))
+                                s.text = m.get("content", "")
                             except:
                                 logger.warning(f"{DanmakuClient.__name__}:{self.__url}:弹幕处理异常", exc_info=True)
                                 # 异常后略过本次弹幕
