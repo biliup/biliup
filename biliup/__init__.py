@@ -21,7 +21,7 @@ LOG_CONF = {
     'handlers': {
         'console': {
             'level': logging.DEBUG,
-            'class': 'logging.StreamHandler',
+            'class': 'biliup.common.log.SafeStreamHandler',
             'stream': sys.stdout,
             'formatter': 'simple'
         },

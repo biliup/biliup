@@ -75,3 +75,33 @@ class DebugLevelFilter(logging.Filter):
     """
     def filter(self, record):
         return logging.getLogger().isEnabledFor(logging.DEBUG)
+
+
+class SafeStreamHandler(logging.StreamHandler):
+    """
+    A StreamHandler that handles encoding issues on Windows systems
+    """
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            stream = self.stream
+            # Handle encoding issues on Windows
+            if hasattr(stream, 'encoding') and stream.encoding:
+                # Try to encode with the stream's encoding
+                try:
+                    stream.write(msg + self.terminator)
+                except UnicodeEncodeError:
+                    # If encoding fails, try to encode with UTF-8 and then decode with errors='replace'
+                    if stream.encoding.lower() in ['gbk', 'gb2312', 'gb18030']:
+                        # For Chinese Windows systems, replace unencodable characters
+                        msg_safe = msg.encode(stream.encoding, errors='replace').decode(stream.encoding)
+                        stream.write(msg_safe + self.terminator)
+                    else:
+                        # For other encodings, try UTF-8
+                        stream.write(msg.encode('utf-8', errors='replace').decode('utf-8') + self.terminator)
+            else:
+                # No encoding info, write as is
+                stream.write(msg + self.terminator)
+            self.flush()
+        except Exception:
+            self.handleError(record)

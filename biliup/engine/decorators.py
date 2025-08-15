@@ -33,8 +33,9 @@ class Plugin:
         def decorator(cls):
             @functools.wraps(cls)
             def wrapper(*args, **kw):
-                print(f"args {args}")
-                print(f"kw {kw}")
+                # 移除可能导致编码问题的print语句
+                # print(f"args {args}")
+                # print(f"kw {kw}")
                 return cls(*args, **kw)
             Plugin.upload_plugins[platform] = wrapper
             return wrapper
