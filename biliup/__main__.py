@@ -15,6 +15,17 @@ from biliup.common.log import DebugLevelFilter
 
 
 def arg_parser():
+    # 处理Windows系统的编码问题
+    import platform
+    if platform.system() == 'Windows':
+        import io
+        import sys
+        # 重新配置stdout和stderr以支持UTF-8
+        if hasattr(sys.stdout, 'buffer'):
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+        if hasattr(sys.stderr, 'buffer'):
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+
     daemon = Daemon('watch_process.pid', lambda: main(args))
     parser = argparse.ArgumentParser(description='Stream download and upload, not only for bilibili.')
     parser.add_argument('--version', action='version', version=f"v{__version__}")
