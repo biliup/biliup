@@ -155,7 +155,6 @@ class UploadStreamers(BaseModel):
     __tablename__ = "uploadstreamers"
 
     id: Mapped[int] = mapped_column(primary_key=True)  # 自增主键
-    template_name: Mapped[str] = mapped_column(nullable=False)  # 模板名称
     template_name: Mapped[str] = mapped_column(String(255), nullable=False)  # 模板名称
     title: Mapped[str] = mapped_column(String(255), nullable=True)  # 自定义标题的时间格式, {title}代表当场直播间标题 {streamer}代表在本config里面设置的主播名称 {url}代表设置的该主播的第一条直播间链接
     tid: Mapped[int] = mapped_column(nullable=True)  # 投稿分区码,171为电子竞技分区
