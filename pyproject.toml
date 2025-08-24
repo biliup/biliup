@@ -42,6 +42,7 @@ dependencies = [
     "truststore >= 0.10.1; python_version >= '3.10'",
     "async-lru >= 2.0.5",
     "PyMySQL >= 1.1.1",
+    "cryptography >= 3.4.8",
     "python-dotenv >= 1.0.1",
 ]
 dynamic = ["version"]
