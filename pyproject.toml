@@ -41,7 +41,7 @@ dependencies = [
     "m3u8 >= 6.0.0",
     "truststore >= 0.10.1; python_version >= '3.10'",
     "async-lru >= 2.0.5",
-    "mysqlclient >= 2.1.0",
+    "PyMySQL >= 1.1.1",
     "python-dotenv >= 1.0.1",
 ]
 dynamic = ["version"]

@@ -41,11 +41,11 @@ def get_database_url():
         password = os.getenv('BILIUP_MYSQL_PASSWORD', '')
         charset = os.getenv('BILIUP_MYSQL_CHARSET', 'utf8mb4')
         
-        # 构建MySQL连接URL
+        # 构建MySQL连接URL，使用PyMySQL驱动
         if password:
-            db_url = f"mysql://{username}:{password}@{host}:{port}/{database}?charset={charset}"
+            db_url = f"mysql+pymysql://{username}:{password}@{host}:{port}/{database}?charset={charset}"
         else:
-            db_url = f"mysql://{username}@{host}:{port}/{database}?charset={charset}"
+            db_url = f"mysql+pymysql://{username}@{host}:{port}/{database}?charset={charset}"
         
         logger.info(f"使用MySQL数据库: {host}:{port}/{database}")
         return db_url
