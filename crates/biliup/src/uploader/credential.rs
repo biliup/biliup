@@ -434,7 +434,7 @@ impl Credential {
             let raw = self
                 .0
                 .client
-                .post("http://passport.bilibili.com/x/passport-tv-login/qrcode/poll")
+                .post("https://passport.bilibili.com/x/passport-tv-login/qrcode/poll")
                 .form(&form)
                 .send()
                 .await?
@@ -502,7 +502,7 @@ impl Credential {
         Ok(self
             .0
             .client
-            .post("http://passport.bilibili.com/x/passport-tv-login/qrcode/auth_code")
+            .post("https://passport.bilibili.com/x/passport-tv-login/qrcode/auth_code")
             .form(&form)
             .send()
             .await?
@@ -545,7 +545,7 @@ impl Credential {
     ) -> Result<LoginInfo> {
         info!("login_by_web_qrcode");
         let qrcode: Value = self.0.client
-            .get("http://passport.bilibili.com/qrcode/getLoginUrl")
+            .get("https://passport.bilibili.com/qrcode/getLoginUrl")
             .header(USER_AGENT, "Mozilla/5.0 (X11; Linux x86_64; rv:38.0) Gecko/20100101 Firefox/38.0 Iceweasel/38.2.1 BiliApp")
             .send()
             .await?
@@ -563,7 +563,7 @@ impl Credential {
             .send()
             .await?.error_for_status()?;
         self.0.client
-            .post("http://passport.bilibili.com/qrcode/getLoginInfo")
+            .post("https://passport.bilibili.com/qrcode/getLoginInfo")
             .header(USER_AGENT, "Mozilla/5.0 (X11; Linux x86_64; rv:38.0) Gecko/20100101 Firefox/38.0 Iceweasel/38.2.1 BiliApp")
             .form(&[("oauthKey", oauth_key)])
             .send()
