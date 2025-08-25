@@ -5,24 +5,24 @@ from ..engine.download import DownloadBase
 from ..plugins import logger, match1
 
 
-@Plugin.download(regexp=r'(?:https?://)?www\.flextv\.co\.kr')
-class FlexTvCoKr(DownloadBase):
+@Plugin.download(regexp=r'(?:https?://)?www\.ttinglive\.com')
+class TTingLive(DownloadBase):
     def __init__(self, fname, url, suffix='flv'):
         super().__init__(fname, url, suffix)
 
     async def acheck_stream(self, is_check=False):
         room_id = match1(self.url, r"/channels/(\d+)/live")
         if not room_id:
-            logger.warning(f"{FlexTvCoKr.__name__}: {self.url}: 直播间地址错误")
-        response = await biliup.common.util.client.get(f"https://api.flextv.co.kr/api/channels/{room_id}/stream?option=all",
+            logger.warning(f"{TTingLive.__name__}: {self.url}: 直播间地址错误")
+        response = await biliup.common.util.client.get(f"https://api.ttinglive.com/api/channels/{room_id}/stream?option=all",
                                                        timeout=5,
                                                        headers=self.fake_headers)
         if response.status_code != 200:
             if response.status_code == 400:
-                logger.debug(f"{FlexTvCoKr.__name__}: {self.url}: 未开播或直播间不存在")
+                logger.debug(f"{TTingLive.__name__}: {self.url}: 未开播或直播间不存在")
                 return False
             else:
-                logger.warning(f"{FlexTvCoKr.__name__}: {self.url}: 获取错误，本次跳过")
+                logger.warning(f"{TTingLive.__name__}: {self.url}: 获取错误，本次跳过")
                 return False
 
         room_info = response.json()
@@ -39,7 +39,7 @@ class FlexTvCoKr(DownloadBase):
             max_ratio_stream = max(m3u8_obj.playlists, key=lambda x: x.stream_info.bandwidth)
             self.raw_stream_url = max_ratio_stream.uri
         else:
-            logger.warning(f"{FlexTvCoKr.__name__}: {self.url}: 解析错误")
+            logger.warning(f"{TTingLive.__name__}: {self.url}: 解析错误")
             return False
 
         return True
