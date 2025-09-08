@@ -56,15 +56,28 @@ def json_loads(text: Union[str, None]) -> Dict[str, Any]:
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid JSON: {text}") from e
 
+
+def test_jsengine():
+    try:
+        import jsengine
+        jsengine.jsengine()
+    except Exception as e:
+        logger.exception(f"jsengine test failed: {e}")
+        return False
+    return True
+
+
 def generate_fake_buvid3():
     u = uuid.uuid4()
     u_str = str(u).upper().replace('-', '')
     formatted = f"{u_str[0:8]}-{u_str[8:12]}-{u_str[12:16]}-{u_str[16:20]}-{u_str[20:]}infoc"
     return formatted
 
+
 class SubmitOption:
     App = "app"
     BCutAndroid = "b-cut-android"
+
 
 class Wbi:
     WTS = "wts"
@@ -93,7 +106,7 @@ class Wbi:
         self.last_update = int(time.time())
         logger.info(f"Updated wbi key successfully")
 
-    def sign(self, query: dict, ts: int = None):
+    def sign(self, query: dict, ts: int = 0):
         """
         生成签名。
         :param query: 请求参数

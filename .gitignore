@@ -49,3 +49,5 @@ _internal
 .trae/
 pnpm-lock.yaml
 cookies.json
+.augment/
+.cunzhi-memory/
