@@ -1,10 +1,10 @@
 import hashlib
 import time
 import httpx
-import threading
+import asyncio
 from urllib.parse import parse_qs, urlencode, quote
 from async_lru import alru_cache
-from typing import Union, Any
+from typing import Union, Any, Optional
 
 
 from ..common.util import client
@@ -85,7 +85,7 @@ class Douyu(DownloadBase):
                 return False
         self.room_title = room_info['room_name']
         if room_info['isVip'] == 1:
-            with DouyuUtils._lock:
+            async with DouyuUtils._lock:
                 DouyuUtils.VipRoom.add(self.room_id)
 
         if is_check:
@@ -363,7 +363,8 @@ class DouyuUtils:
     # enc_data 会校验 UA
     UserAgent: str = ""
     # 防止并发访问
-    _lock: threading.Lock = threading.Lock()
+    _lock: asyncio.Lock = asyncio.Lock()
+    _update_key_event: Optional[asyncio.Event] = None
 
     @staticmethod
     def is_key_valid():
@@ -378,11 +379,24 @@ class DouyuUtils:
         domain: str = DOUYU_WEB_DOMAIN,
         did: str = DOUYU_DEFAULT_DID
     ) -> bool:
-        # 防风控
-        with DouyuUtils._lock:
-            DouyuUtils.UserAgent = random_user_agent()
+        # single-flight
+        async with DouyuUtils._lock:
+            if DouyuUtils._update_key_event is not None:
+                evt = DouyuUtils._update_key_event
+                leader = False
+            else:
+                DouyuUtils._update_key_event = asyncio.Event()
+                evt = DouyuUtils._update_key_event
+                leader = True
+        if not leader:
+            await evt.wait()
+            return DouyuUtils.is_key_valid()
 
         try:
+            # 防风控
+            async with DouyuUtils._lock:
+                DouyuUtils.UserAgent = random_user_agent()
+
             rsp = await client.get(
                 f"https://{domain}/wgapi/livenc/liveweb/websec/getEncryption",
                 params={"did": did},
@@ -396,13 +410,17 @@ class DouyuUtils:
                 raise RuntimeError(f'getEncryption error: code={data["error"]}, msg={data["msg"]}')
             data['data']['cpp']['expire_at'] = int(time.time()) + 86400
 
-            # 只在写入时使用锁
-            with DouyuUtils._lock:
+            async with DouyuUtils._lock:
                 DouyuUtils.WhiteEncryptKey = data['data']
-        except:
+            return True
+        except Exception:
             logger.exception(f"{DouyuUtils.__name__}: 获取加密密钥失败")
             return False
-        return True
+        finally:
+            async with DouyuUtils._lock:
+                if DouyuUtils._update_key_event is not None:
+                    DouyuUtils._update_key_event.set()
+                    DouyuUtils._update_key_event = None
 
 
     @staticmethod
