@@ -14,11 +14,11 @@ from sqlalchemy.orm import sessionmaker, scoped_session, Session
 from alembic import command, config
 
 from .models import (
-    DB_PATH,
     engine,
     BaseModel,
     StreamerInfo,
     FileList,
+    get_path,
 )
 
 SessionLocal = sessionmaker(bind=engine, autocommit=False)
@@ -36,13 +36,19 @@ def datetime_to_struct_time(date: datetime):
 
 def init(no_http, from_config):
     """初始化数据库"""
-    first_run = not Path.cwd().joinpath("data/data.sqlite3").exists()
-    if no_http and not first_run and from_config:
-        new_name = f'{DB_PATH}.backup'
-        if os.path.exists(new_name):
-            os.remove(new_name)
-        os.rename(DB_PATH, new_name)
-        print(f"旧数据库已备份为: {new_name}")  # 在logger加载配置之前执行，只能使用print
+    db_type = os.getenv('BILIUP_DB_TYPE', 'sqlite').lower()
+    if db_type == 'sqlite':
+        DB_PATH = get_path('data.sqlite3')
+        first_run = not Path.cwd().joinpath("data/data.sqlite3").exists()
+        if no_http and not first_run and from_config:
+            new_name = f'{DB_PATH}.backup'
+            if os.path.exists(new_name):
+                os.remove(new_name)
+            os.rename(DB_PATH, new_name)
+            print(f"旧数据库已备份为: {new_name}")  # 在logger加载配置之前执行，只能使用print
+    else:
+        first_run = False
+        logger.info("使用MySQL数据库，跳过文件备份逻辑")
     BaseModel.metadata.create_all(engine)  # 创建所有表
     migrate_via_alembic()
     return first_run or no_http
