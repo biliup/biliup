@@ -4,13 +4,14 @@ from urllib.parse import unquote, urlparse, parse_qs, urlencode, urlunparse
 import requests
 import random
 
-from biliup.common.util import client
-from . import logger, match1, random_user_agent, json_loads
-from biliup.config import config
-from biliup.Danmaku import DanmakuClient
+from ..common.util import client
+from ..config import config
+from ..Danmaku import DanmakuClient
 from ..common.tools import NamedLock
+from ..common.abogus import ABogus
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
+from . import logger, match1, random_user_agent, json_loads, test_jsengine
 
 
 @Plugin.download(regexp=r'https?://(?:(?:www|m|live|v)\.)?douyin\.com')
@@ -30,9 +31,17 @@ class Douyin(DownloadBase):
 
         self.fake_headers['user-agent'] = DouyinUtils.DOUYIN_USER_AGENT
         self.fake_headers['referer'] = "https://live.douyin.com/"
+
         self.fake_headers['cookie'] = config.get('user', {}).get('douyin_cookie', '')
+        if self.fake_headers['cookie'] != "" and not self.fake_headers['cookie'].endswith(';'):
+            self.fake_headers['cookie'] += ";"
         if "ttwid" not in self.fake_headers['cookie']:
-            self.fake_headers['cookie'] = f'ttwid={DouyinUtils.get_ttwid()};{self.fake_headers["cookie"]}'
+            self.fake_headers['cookie'] += f'ttwid={DouyinUtils.get_ttwid()};'
+        if 'odin_ttid=' not in self.fake_headers['cookie']:
+            self.fake_headers['cookie'] += f"odin_ttid={DouyinUtils.generate_odin_ttid()};"
+        if '__ac_nonce=' not in self.fake_headers['cookie']:
+            self.fake_headers['cookie'] += f"__ac_nonce={DouyinUtils.generate_nonce()};"
+
 
         if "v.douyin" in self.url:
             try:
@@ -115,6 +124,9 @@ class Douyin(DownloadBase):
 
         if is_check:
             return True
+        else:
+            # 清理上一次获取的直播流
+            self.raw_stream_url = ""
 
         try:
             pull_data = room_info['stream_url']['live_core_sdk_data']['pull_data']
@@ -126,7 +138,7 @@ class Douyin(DownloadBase):
             logger.debug(f"{self.plugin_msg}: room_info {room_info}")
             return False
 
-                # 抖音FLV真原画
+        # 抖音FLV真原画
         if (
             self.douyin_true_origin  # 开启真原画
             and
@@ -186,28 +198,24 @@ class Douyin(DownloadBase):
 
     def danmaku_init(self):
         if self.douyin_danmaku:
-            content = {
-                'web_rid': self.__web_rid,
-                'sec_uid': self.__sec_uid,
-                'room_id': self.__room_id,
-            }
-            try:
-                import jsengine
-                try:
-                    jsengine.jsengine()
-                    self.danmaku = DanmakuClient(self.url, self.gen_download_filename(), content)
-                except jsengine.exceptions.RuntimeError as e:
-                    extra_msg = "如需录制抖音弹幕，"
-                    logger.error(f"\n{e}\n{extra_msg}请至少安装一个 Javascript 解释器，如 pip install quickjs")
-            except:
-                pass
+            if (js_runable := test_jsengine()):
+                content = {
+                    'web_rid': self.__web_rid,
+                    'sec_uid': self.__sec_uid,
+                    'room_id': self.__room_id,
+                }
+                self.danmaku = DanmakuClient(self.url, self.gen_download_filename(), content)
+            else:
+                logger.error(f"如需录制抖音弹幕，请至少安装一个 Javascript 解释器。如 pip install quickjs")
 
     async def get_web_room_info(self, web_rid: str) -> dict:
         query = {
+            'app_name': 'douyin_web',
+            # 'enter_from': random.choice(['link_share', 'web_live']),
+            'enter_from': 'web_live',
+            'live_id': '1',
             'web_rid': web_rid,
-            # 2025-08-01 服务端暂不校验以下参数的值，只校验参数存在
-            'enter_from': random.choice(['link_share', 'web_live']),
-            'a_bogus': '0',
+            'is_need_double_stream': "false"
         }
         target_url = DouyinUtils.build_request_url(f"https://live.douyin.com/webcast/room/web/enter/", query)
         logger.debug(f"{self.plugin_msg}: get_web_room_info {target_url}")
@@ -217,6 +225,9 @@ class Douyin(DownloadBase):
         return web_info
 
     async def get_h5_room_info(self, sec_user_id: str, room_id: str) -> dict:
+        '''
+        Mobile web 的 API 信息，海外可能不允许使用
+        '''
         if not sec_user_id:
             raise ValueError("sec_user_id is None")
         query = {
@@ -227,8 +238,13 @@ class Douyin(DownloadBase):
             'room_id': room_id if room_id else 2, # 必要但不校验
             'sec_user_id': sec_user_id
         }
-        info = await client.get("https://webcast.amemv.com/webcast/room/reflow/info/",
-                    params=query, headers=self.fake_headers)
+        abogus = ABogus(user_agent=DouyinUtils.DOUYIN_USER_AGENT)
+        query_str, _, _, _ = abogus.generate_abogus(params=urlencode(query, doseq=True), body="")
+        # target_url = DouyinUtils.build_request_url(f"https://live.douyin.com/webcast/room/web/enter/", query)
+        info = await client.get(
+            f"https://webcast.amemv.com/webcast/room/reflow/info/?{query_str}",
+            headers=self.fake_headers
+        )
         info = json_loads(info.text)
         logger.debug(f"{self.plugin_msg}: get_h5_room_info {info}")
         return info
@@ -243,6 +259,8 @@ class DouyinUtils:
     DOUYIN_HTTP_HEADERS = {
         'user-agent': DOUYIN_USER_AGENT
     }
+    CHARSET = "abcdef0123456789"
+    LONG_CHATSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
 
     @staticmethod
     def get_ttwid() -> Optional[str]:
@@ -252,23 +270,48 @@ class DouyinUtils:
                 DouyinUtils._douyin_ttwid = page.cookies.get("ttwid")
             return DouyinUtils._douyin_ttwid
 
+
+    @staticmethod
+    def generate_ms_token() -> str:
+        '''生成随机 msToken'''
+        return ''.join(random.choice(DouyinUtils.LONG_CHATSET) for _ in range(184))
+
+
+    @staticmethod
+    def generate_nonce() -> str:
+        """生成 21 位随机十六进制小写 nonce"""
+        return ''.join(random.choice(DouyinUtils.CHARSET) for _ in range(21))
+
+
+    @staticmethod
+    def generate_odin_ttid() -> str:
+        """生成 160 位随机十六进制小写 odin_ttid"""
+        return ''.join(random.choice(DouyinUtils.CHARSET) for _ in range(160))
+
+
     @staticmethod
     def build_request_url(url: str, query: Optional[dict] = None) -> str:
+        # NOTE: 不能在类级别初始化，否则非首次生成的 abogus 有问题，原因未知
+        abogus = ABogus(user_agent=DouyinUtils.DOUYIN_USER_AGENT)
         parsed_url = urlparse(url)
         existing_params = query or parse_qs(parsed_url.query)
         existing_params['aid'] = ['6383']
+        existing_params['compress'] = ['gzip']
         existing_params['device_platform'] = ['web']
         existing_params['browser_language'] = ['zh-CN']
         existing_params['browser_platform'] = ['Win32']
         existing_params['browser_name'] = [DouyinUtils.DOUYIN_USER_AGENT.split('/')[0]]
         existing_params['browser_version'] = [DouyinUtils.DOUYIN_USER_AGENT.split(existing_params['browser_name'][0])[-1][1:]]
+        if 'msToken' not in existing_params:
+            existing_params['msToken'] = [DouyinUtils.generate_ms_token()]
         new_query_string = urlencode(existing_params, doseq=True)
+        signed_query_string, _, _, _ = abogus.generate_abogus(params=new_query_string, body="")
         new_url = urlunparse((
             parsed_url.scheme,
             parsed_url.netloc,
             parsed_url.path,
             parsed_url.params,
-            new_query_string,
+            signed_query_string,
             parsed_url.fragment
         ))
         return new_url
