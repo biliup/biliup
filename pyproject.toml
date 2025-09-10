@@ -41,6 +41,7 @@ dependencies = [
     "m3u8 >= 6.0.0",
     "truststore >= 0.10.1; python_version >= '3.10'",
     "async-lru >= 2.0.5",
+    "gmssl >= 3.2.2"
 ]
 dynamic = ["version"]
 
