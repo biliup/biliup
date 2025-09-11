@@ -8,7 +8,7 @@ from ..engine.download import DownloadBase, BatchCheck
 
 VALID_URL_BASE = r'(?:https?://)?(?:www\.)?picarto\.tv/(?P<id>[^/?&]+)'
 CHANNEL_URL = 'https://picarto.tv/{user_name}'
-HLS_URL = 'https://edge1-eu-west.picarto.tv/stream/hls/{file_name}/index.m3u8'
+HLS_URL = '{netloc}.picarto.tv/stream/hls/{file_name}/index.m3u8'
 
 @Plugin.download(regexp=VALID_URL_BASE)
 class Picarto(DownloadBase, BatchCheck):
@@ -20,12 +20,12 @@ class Picarto(DownloadBase, BatchCheck):
         API_CHANNEL = "https://ptvintern.picarto.tv/api/channel/detail/{username}"
 
         username = re.match(VALID_URL_BASE, self.url).group('id')
-        # 用户主页获取直播间地址
         channel_detail = await biliup.common.util.client.get(API_CHANNEL.format(username=username), timeout=5)
         channel = channel_detail.json().get('channel', {})
         loadbalancer = channel_detail.json().get('getLoadBalancerUrl', {})
         multistreams = channel_detail.json().get('getMultiStreams', {})
 
+        # 檢查response
         if not channel or not multistreams or not loadbalancer:
             return False
         elif channel.get('private'):
