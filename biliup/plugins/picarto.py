@@ -12,7 +12,6 @@ API_EXPLORE = "https://ptvintern.picarto.tv/api/explore?first=100&page={page}&fi
 CHANNEL_URL = "https://picarto.tv/{user_name}"
 HLS_URL = "https://{netloc}.picarto.tv/stream/hls/{file_name}/index.m3u8"
 
-
 @Plugin.download(regexp=VALID_URL_BASE)
 class Picarto(DownloadBase, BatchCheck):
 
