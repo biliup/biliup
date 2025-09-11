@@ -25,8 +25,8 @@ class Picarto(DownloadBase, BatchCheck):
             API_CHANNEL.format(username=username), timeout=5
         ).json()
         channel = channel_detail.get("channel", {})
-        loadbalancer = channel_detail.json().get("getLoadBalancerUrl", {})
-        multistreams = channel_detail.json().get("getMultiStreams", {})
+        loadbalancer = channel_detail.get("getLoadBalancerUrl", {})
+        multistreams = channel_detail.get("getMultiStreams", {})
 
         # 檢查response
         if not channel or not multistreams or not loadbalancer:
