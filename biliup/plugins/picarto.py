@@ -8,10 +8,9 @@ from ..engine.download import DownloadBase, BatchCheck
 
 VALID_URL_BASE = r"(?:https?://)?(?:www\.)?picarto\.tv/(?P<id>[^/?&]+)"
 API_CHANNEL = "https://ptvintern.picarto.tv/api/channel/detail/{username}"
-API_EXPLORE = "https://ptvintern.picarto.tv/api/explore?first=100&page={page}&order_by%5Border%5D=DESC&type=stream"
+API_EXPLORE = "https://ptvintern.picarto.tv/api/explore?first=100&page={page}&filter_params%5Badult%5D=true&order_by%5Bfield%5D=viewers&order_by%5Border%5D=DESC&type=stream"
 CHANNEL_URL = "https://picarto.tv/{user_name}"
-HLS_URL = "{netloc}.picarto.tv/stream/hls/{file_name}/index.m3u8"
-
+HLS_URL = "https://{netloc}.picarto.tv/stream/hls/{file_name}/index.m3u8"
 
 @Plugin.download(regexp=VALID_URL_BASE)
 class Picarto(DownloadBase, BatchCheck):
@@ -21,9 +20,9 @@ class Picarto(DownloadBase, BatchCheck):
 
     async def acheck_stream(self, is_check=False):
         username = re.match(VALID_URL_BASE, self.url).group("id")
-        channel_detail = await client.get(
+        channel_detail = (await client.get(
             API_CHANNEL.format(username=username), timeout=5
-        ).json()
+        )).json()
         channel = channel_detail.get("channel", {})
         loadbalancer = channel_detail.get("getLoadBalancerUrl", {})
         multistreams = channel_detail.get("getMultiStreams", {})
@@ -55,7 +54,7 @@ class Picarto(DownloadBase, BatchCheck):
             return True
 
         self.raw_stream_url = HLS_URL.format(
-            netloc=loadbalancer.get("url"), file_name=stream.get("stream_name")
+            netloc=loadbalancer.get("origin"), file_name=stream.get("stream_name")
         )
         return True
 
@@ -65,7 +64,7 @@ class Picarto(DownloadBase, BatchCheck):
         page = 1
 
         while True:
-            explore_detail = await client.get(API_EXPLORE, timeout=5).json()
+            explore_detail = (await client.get(API_EXPLORE.format(page=page), timeout=5)).json()
             explore += explore_detail.get("data", [])
             if explore_detail.get("next_page_url"):
                 page += 1
