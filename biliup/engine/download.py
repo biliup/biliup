@@ -633,6 +633,15 @@ def get_valid_filename(name):
     s = re.sub(r"(?u)[^-\w.%{}\[\]【】「」（）・°、。+\s]", "", str(name))
     if s in {"", ".", ".."}:
         raise RuntimeError("Could not derive file name from '%s'" % name)
+
+    # 处理%百分号
+    directives = {
+        'a', 'A', 'w', 'd', 'b', 'B', 'm', 'y', 'Y',
+        'H', 'I', 'p', 'M', 'S', 'f', 'z', 'Z',
+        'j', 'U', 'W', 'c', 'x', 'X', '%'
+    }
+    s = re.sub(r"%(.?)", lambda m: f"%{m[1]}" if m[1] in directives else f"%%{m[1]}", s)
+
     return s
 
 
