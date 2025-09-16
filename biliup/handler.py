@@ -128,6 +128,8 @@ def process_upload(stream_info):
             data, _ = fmt_title_and_desc({**data, "name": name})  # 如果 restart, data 中会缺失 name 项
             stream_info.update(data)
 
+        # 上传计数前刷新文件列表
+        file_list = UploadBase.file_list(name)
         upload_count = UploadBase.get_max_upload_count(file_list)
         filelist = file_list
         if upload_count < config.get("max_upload_limit", 999):
@@ -161,6 +163,10 @@ def process_upload(stream_info):
             logger.warning(f"上传次数达到阈值: {name}")
 
         if filelist:
+            # 清除上传计数
+            with NamedLock("file_upload_count"):
+                for item in filelist:
+                    context['file_upload_count'].pop(item.video, None)
             uploaded(name, stream_info.get('live_cover_path'), filelist)
     except Exception:
         logger.exception(f"上传错误: {name}")
