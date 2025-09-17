@@ -32,16 +32,10 @@ class UploadBase:
         from biliup.handler import event_manager
         with NamedLock("file_upload_count"):
             file_upload_count = event_manager.context['file_upload_count']
-            for file_name in os.listdir('.'):
-                if file_name not in file_upload_count:
-                    file_upload_count[file_name] = 0
-            for file_name in list(file_upload_count):
-                if file_name not in os.listdir('.'):
-                    del file_upload_count[file_name]
             max = 0
             for item in filelist:
-                if file_upload_count[item.video] > max:
-                    max = file_upload_count[item.video]
+                current = file_upload_count.setdefault(item.video, 0)
+                max = current if current > max else max
                 file_upload_count[item.video] += 1
         return max
 
