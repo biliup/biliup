@@ -3,7 +3,6 @@ import random
 
 import biliup.common.util
 from biliup.config import config
-from ..common import tools
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from ..plugins import logger

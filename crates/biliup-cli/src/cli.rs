@@ -63,7 +63,7 @@ pub enum Commands {
     },
     /// 是否要对某稿件追加视频
     Append {
-         /// 提交接口
+        /// 提交接口
         #[arg(long)]
         submit: Option<SubmitOption>,
 
@@ -114,7 +114,6 @@ pub enum Commands {
         #[arg(long)]
         split_time: Option<humantime::Duration>,
     },
-    #[cfg(feature = "server")]
     /// 启动web服务，默认端口19159
     Server {
         /// Specify bind address

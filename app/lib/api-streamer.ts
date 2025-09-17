@@ -1,60 +1,60 @@
-// Fetcher implementation.
-// The extra argument will be passed via the `arg` property of the 2nd parameter.
-// In the example below, `arg` will be `'my_token'`
-export async function sendRequest<T>(url: string, { arg }: {arg: T}) {
-  const res =  await fetch((process.env.NEXT_PUBLIC_API_SERVER ?? '') + url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(arg)
-  });
-  if(!(res.status >=200 && res.status < 300)) {
-    throw new Error(await res.text());
-  }
-  const data =  await res.json();
-  if (!res.ok) {
-    throw new Error(data.message);
-  }
-  return data;
-}
-
-export const fetcher = async (...args: any[]) => {
-	const res = await fetch((process.env.NEXT_PUBLIC_API_SERVER ?? '') + args[0], args[1])
-	if (!res.ok) {
-		throw new Error(await res.text());
-	}
+// Fetcher implementation. // The extra argument will be passed via the `arg` property of the 2nd parameter.// In the example below, `arg` will be `'my_token'`
+export const API_BASE = process.env.NEXT_PUBLIC_API_SERVER ?? '';
+export async function sendRequest<T>(url: string, { arg }: { arg: T }) {
+	const res = await fetch(API_BASE + url, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(arg),
+	});
+	await handleResponse(res);
 	return res.json();
 }
 
-export const proxy = async (input: RequestInfo | URL, init?: RequestInit | undefined) => {
-	const res = await fetch((process.env.NEXT_PUBLIC_API_SERVER ?? '') + input, init)
-	if (!res.ok) {
-		throw new Error(await res.text());
-	}
+export const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
+	const res = await fetch(API_BASE + input, init);
+	await handleResponse(res);
+	return res.json();
+};
+
+export const proxy = async (input: RequestInfo | URL, init?: RequestInit) => {
+	const res = await fetch(API_BASE + input, init);
+	await handleResponse(res);
+	return res;
+};
+
+export async function requestDelete<T>(url: string, { arg }: { arg: T }) {
+	const res = await fetch(`${API_BASE}${url}/${arg}`, { method: 'DELETE' });
+	await handleResponse(res);
 	return res;
 }
 
-export async function requestDelete<T>(url: string, { arg }: {arg: T}) {
-	const res =  await fetch(`${process.env.NEXT_PUBLIC_API_SERVER ?? ''}${url}/${arg}`, {
-		method: 'DELETE',
-	})
-	if (!res.ok) {
-		throw new Error(await res.text());
-	}
-	return res;
-}
-
-export async function put<T>(url: string, { arg }: {arg: T}) {
-	const res =  await fetch(`${process.env.NEXT_PUBLIC_API_SERVER ?? ''}${url}`, {
+export async function put<T>(url: string, { arg }: { arg: T }) {
+	const res = await fetch(`${API_BASE}${url}`, {
 		method: 'PUT',
-		headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(arg)
-	})
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(arg),
+	});
+	await handleResponse(res);
+	return res;
+}
+
+async function handleResponse(res: Response) {
+	// 如果未登录，统一跳转
+	if (res.status === 401) {
+		// 可选：清理本地状态/缓存
+		// localStorage.removeItem('token') 等
+
+		// 跳转登录（带回跳）
+		const returnTo = encodeURIComponent(window.location.pathname + window.location.search);
+		window.location.href = `/login?next=${returnTo}`;
+		// 抛错让 SWR 知道失败（别返回 json）
+		throw new Error('Unauthorized');
+	}
+
 	if (!res.ok) {
-		throw new Error(await res.text());
+		// 尽量返回服务端错误信息
+		const text = await res.text().catch(() => '');
+		throw new Error(text || `HTTP ${res.status}`);
 	}
 	return res;
 }

@@ -3,7 +3,6 @@ import re
 
 import biliup.common.util
 from . import logger
-from ..common import tools
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 

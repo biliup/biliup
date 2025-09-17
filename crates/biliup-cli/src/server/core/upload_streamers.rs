@@ -65,7 +65,6 @@ impl StudioEntity {
             dynamic: self.dynamic,
             subtitle: Default::default(),
             tag: self.tag,
-            topic_id: None,
             videos: vec![],
             desc_v2: None,
             dtime: self.dtime,

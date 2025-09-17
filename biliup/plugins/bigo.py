@@ -1,5 +1,4 @@
 import biliup.common.util
-from ..common import tools
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from ..plugins import logger

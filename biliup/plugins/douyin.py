@@ -7,7 +7,6 @@ import random
 from ..common.util import client
 from ..config import config
 from ..Danmaku import DanmakuClient
-from ..common.tools import NamedLock
 from ..common.abogus import ABogus
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
@@ -264,7 +263,6 @@ class DouyinUtils:
 
     @staticmethod
     def get_ttwid() -> Optional[str]:
-        with NamedLock("douyin_ttwid_get"):
             if not DouyinUtils._douyin_ttwid:
                 page = requests.get("https://live.douyin.com/1-2-3-4-5-6-7-8-9-0", timeout=15)
                 DouyinUtils._douyin_ttwid = page.cookies.get("ttwid")

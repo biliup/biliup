@@ -1,7 +1,7 @@
-use std::str::FromStr;
 #[cfg(feature = "cli")]
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "cli", derive(ValueEnum))]
@@ -20,7 +20,7 @@ impl FromStr for SubmitOption {
         match s.to_lowercase().as_str() {
             "app" => Ok(SubmitOption::App),
             "bcutandroid" | "b-cut-android" | "bcut_android" => Ok(SubmitOption::BCutAndroid),
-            _ => Err(format!("Unknown submit option: {}", s))
+            _ => Err(format!("Unknown submit option: {}", s)),
         }
     }
 }

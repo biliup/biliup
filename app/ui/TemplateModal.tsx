@@ -157,7 +157,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
 
           <Form.Select
             showClear
-            field="upload_id"
+            field="upload_streamers_id"
             label={{ text: '投稿模板', optional: true }}
             style={{ width: 176 }}
             optionList={list}

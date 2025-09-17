@@ -63,59 +63,59 @@ async fn main_loop(mut recv: Receiver<ToMain>) -> Result<()> {
     Ok(())
 }
 
-async fn recording(
-    url: &str,
-    mut site: Site,
-    task: Cycle<StreamStatus>,
-    client: StatelessClient,
-    live_streamers_service: DynLiveStreamersService,
-) {
-    println!("Idle\n {url} \n{site}");
-    let (filename, split_size, split_time) = if let Ok(LiveStreamerDto {
-        filename,
-        split_size,
-        split_time,
-        ..
-    }) =
-        live_streamers_service.get_streamer_by_url(url).await
-    {
-        (filename, split_size, split_time.map(Duration::from_secs))
-    } else {
-        ("./video/%Y-%m-%d/%H_%M_%S{title}".to_string(), None, None)
-    };
-
-    logging_spawn({
-        // let client = client.clone();
-        let url = url.to_string();
-        let task = task.clone();
-        // let live_streamers_service = live_streamers_service.clone();
-        async move {
-            let hook = live_streamers_service
-                .get_studio_by_url(&url)
-                .await
-                .unwrap_or_default()
-                .map(|studio| -> Box<dyn Fn(&str) + Send> {
-                    let handle = UploadActorHandle::new(client, studio);
-                    Box::new(move |file_name| {
-                        if let Ok(metadata) =
-                            std::fs::metadata(file_name).map_err(|err| error!("{}", err))
-                        {
-                            if metadata.len() > 10 * 1024 * 1024 {
-                                info!("开始上传: {}", file_name);
-                                handle.send_file_path(file_name);
-                            }
-                        }
-                    })
-                });
-            if hook.is_none() {
-                debug!(url = %url, "upload template not set.");
-            }
-            let segmentable = Segmentable::new(split_time, split_size);
-            // let segmentable = Segmentable::new( None, Some(16*1024*1024));
-            site.download(&filename, segmentable, hook).await?;
-            task.change(&url, StreamStatus::Idle);
-            Ok::<_, Box<dyn Error + Send + Sync>>(())
-        }
-    });
-    task.change(url, StreamStatus::Working);
-}
+// async fn recording(
+//     url: &str,
+//     mut site: Site,
+//     task: Cycle<StreamStatus>,
+//     client: StatelessClient,
+//     live_streamers_service: DynLiveStreamersService,
+// ) {
+//     println!("Idle\n {url} \n{site}");
+//     let (filename, split_size, split_time) = if let Ok(LiveStreamerDto {
+//         filename,
+//         split_size,
+//         split_time,
+//         ..
+//     }) =
+//         live_streamers_service.get_streamer_by_url(url).await
+//     {
+//         (filename, split_size, split_time.map(Duration::from_secs))
+//     } else {
+//         ("./video/%Y-%m-%d/%H_%M_%S{title}".to_string(), None, None)
+//     };
+//
+//     logging_spawn({
+//         // let client = client.clone();
+//         let url = url.to_string();
+//         let task = task.clone();
+//         // let live_streamers_service = live_streamers_service.clone();
+//         async move {
+//             let hook = live_streamers_service
+//                 .get_studio_by_url(&url)
+//                 .await
+//                 .unwrap_or_default()
+//                 .map(|studio| -> Box<dyn Fn(&str) + Send + Sync> {
+//                     let handle = UploadActorHandle::new(client, studio);
+//                     Box::new(move |file_name| {
+//                         if let Ok(metadata) =
+//                             std::fs::metadata(file_name).map_err(|err| error!("{}", err))
+//                         {
+//                             if metadata.len() > 10 * 1024 * 1024 {
+//                                 info!("开始上传: {}", file_name);
+//                                 handle.send_file_path(file_name);
+//                             }
+//                         }
+//                     })
+//                 });
+//             if hook.is_none() {
+//                 debug!(url = %url, "upload template not set.");
+//             }
+//             let segmentable = Segmentable::new(split_time, split_size);
+//             // let segmentable = Segmentable::new( None, Some(16*1024*1024));
+//             site.download(&filename, segmentable, hook).await?;
+//             task.change(&url, StreamStatus::Idle);
+//             Ok::<_, Box<dyn Error + Send + Sync>>(())
+//         }
+//     });
+//     task.change(url, StreamStatus::Working);
+// }

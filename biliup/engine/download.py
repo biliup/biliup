@@ -20,7 +20,7 @@ from requests.utils import DEFAULT_ACCEPT_ENCODING, parse_header_links
 from httpx import HTTPStatusError
 
 from biliup.common.util import client, loop, check_timerange
-from biliup.database.db import add_stream_info, SessionLocal, get_stream_info, update_cover_path, update_room_title, update_file_list
+
 from biliup.plugins import random_user_agent
 import stream_gears
 from PIL import Image
@@ -28,10 +28,10 @@ from PIL import Image
 from biliup.config import config
 from biliup.Danmaku import IDanmakuClient
 from biliup.plugins.bili_webup_sync import BiliWebAsync
-from biliup.uploader import fmt_title_and_desc
+
 
 from .sync_downloader import SyncDownloader
-from biliup.app import context
+# from biliup.app import context
 logger = logging.getLogger('biliup')
 
 
@@ -68,15 +68,15 @@ class DownloadBase(ABC):
         }
         self.stream_headers = copy.deepcopy(self.fake_headers)
         self.segment_time = config.get('segment_time', '01:00:00')
-        self.time_range = config.get('time_range')
-        self.excluded_keywords = config.get('excluded_keywords')
+        # self.time_range = config.get('time_range')
+        # self.excluded_keywords = config.get('excluded_keywords')
         self.file_size = config.get('file_size')
 
         # 是否是下载模式 跳过下播检测
         self.is_download = False
 
         # 分段后处理
-        self.segment_processor = config.get('segment_processor')
+        # self.segment_processor = config.get('segment_processor')
         self.segment_processor_thread = []
         # 分段后处理并行
         self.segment_processor_parallel = config.get('segment_processor_parallel', False)
@@ -323,36 +323,12 @@ class DownloadBase(ABC):
         if self.danmaku:
             self.danmaku.save(danmaku_file_name)
 
-        def x():
-            # 将文件名和直播标题存储到数据库
-            with SessionLocal() as db:
-                update_file_list(db, self.database_row_id, file_name)
-            if self.segment_processor:
-                try:
-                    if not self.segment_processor_parallel and prev_thread:
-                        prev_thread.join()
-                    from biliup.common.tools import processor
-                    data = os.path.abspath(file_name)
-                    if os.path.exists(danmaku_file_name):
-                        data += f'\n{os.path.abspath(danmaku_file_name)}'
-                    processor(self.segment_processor, data)
-                except:
-                    logger.warning(f'{self.plugin_msg}: 执行后处理失败', exc_info=True)
-
-        thread = threading.Thread(target=x, daemon=True, name=f"segment_processor_{exclude_ext_file_name}")
-        prev_thread = self.segment_processor_thread[-1] if self.segment_processor_thread else None
-        self.segment_processor_thread.append(thread)
-        thread.start()
 
     def download_success_callback(self):
         pass
 
     def run(self):
         try:
-            if not asyncio.run_coroutine_threadsafe(self.acheck_stream(), loop).result() or not self.should_record():
-                return False
-            with SessionLocal() as db:
-                update_room_title(db, self.database_row_id, self.room_title)
             self.danmaku_init()
             if self.danmaku:
                 self.danmaku.start()
@@ -362,67 +338,6 @@ class DownloadBase(ABC):
             if self.danmaku:
                 self.danmaku.stop()
                 self.danmaku = None
-
-    def start(self):
-        logger.info(f"{self.plugin_msg}: 开始下载")
-        # 开始时间
-        start_time = time.localtime()
-        # 结束时间
-        end_time = None
-
-        with SessionLocal() as db:
-            self.database_row_id = add_stream_info(db, self.fname, self.url, start_time)  # 返回数据库中此行记录的 id
-        ret = True
-        while ret:
-            # 下载结果
-            try:
-                ret = self.run()
-            except Exception:
-                logger.warning(f"{self.plugin_msg}: 下载失败", exc_info=True)
-                # TODO: 重试等待时间
-                time.sleep(3)
-            finally:
-
-                self.close()
-
-            # 下载模式跳过下播延迟检测
-            if self.is_download:
-                break
-
-            # 最后一次下载完成时间
-            end_time = time.localtime()
-
-        self.download_cover(
-            time.strftime(self.gen_download_filename().encode("unicode-escape").decode(), end_time if end_time else time.localtime()
-                          ).encode().decode("unicode-escape"))
-        # 更新数据库中封面存储路径
-        with SessionLocal() as db:
-            update_cover_path(db, self.database_row_id, self.live_cover_path)
-
-        for thread in self.segment_processor_thread:
-            if thread.is_alive():
-                logger.info(f'{self.plugin_msg}: 等待分段后处理完成 - {thread.name}')
-                thread.join()
-        if (self.is_download and ret) or not self.is_download:
-            self.download_success_callback()
-        # self.segment_processor_thread
-        logger.info(f'{self.plugin_msg}: 退出下载')
-
-        if str(self.database_row_id) in context["sync_downloader_map"]:
-            context["sync_downloader_map"].pop(str(self.database_row_id))
-            logger.info(f"{self.plugin_msg} {self.database_row_id}: 从同步下载器列表中移除")
-
-        stream_info = {
-            'name': self.fname,
-            'url': self.url,
-            'title': self.room_title,
-            'date': start_time,
-            'end_time': end_time if end_time else time.localtime(),
-            'live_cover_path': self.live_cover_path,
-            'is_download': self.is_download,
-            'platform': self.platform,
-        }
-        return stream_info
 
     def download_cover(self, fmtname):
         # 获取封面

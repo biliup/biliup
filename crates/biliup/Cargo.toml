@@ -8,41 +8,41 @@ license = "MIT OR Apache-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-serde_yaml = "0.9.34"
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 serde_urlencoded = "0.7"
 reqwest_cookie_store = "0.8.0"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-tracing = "0.1"
+tokio = { workspace = true }
+tracing = { workspace = true }
 rsa = "0.9.8"
 base64 = "0.22"
 md-5 = "0.10.6"
 # FIXME: 等 rsa 0.10.0 发布后再更新
 rand = "0.8.5"
-url = "2.5.4"
-thiserror = "2"
+url = { workspace = true }
+thiserror = { workspace = true }
 
 cookie = "0.18.1"
 
-bytes = "1.10.1"
-futures = "0.3.31"
-typed-builder = "0.20.0"
+bytes = { workspace = true }
+futures = { workspace = true }
+typed-builder = { workspace = true }
 reqwest-middleware = { version = "0.4", features = ["json"] }
 reqwest-retry = "0.7.0"
 clap = { version = "4", features = ["derive"], optional = true }
 time = "0.3"
-anyhow = "1.0"
+anyhow = { workspace = true }
 m3u8-rs = "6"
 nom = "8"
-chrono = "0.4"
+chrono = { workspace = true }
 byteorder = "1.5.0"
-regex = "1.11.1"
-async-trait = "0.1.87"
-reqwest = { version = "0.12", default-features = false, features = ["charset", "http2", "macos-system-configuration", "brotli", "gzip", "json", "rustls-tls", "stream"] }
+regex = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true, features = ["charset", "http2", "macos-system-configuration", "brotli", "gzip", "json", "rustls-tls", "stream"] }
 
 [dev-dependencies]
-tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }  # 添加特性（特性是累加的）  }
 
 [features]
 cli = ["clap"]

@@ -44,10 +44,15 @@ pub enum AppError {
     UploadError(#[from] biliup::error::Kind),
     #[error(transparent)]
     ReqwestError(#[from] reqwest::Error),
+    #[error(transparent)]
+    OrmliteError(#[from] ormlite::Error),
+    #[error(transparent)]
+    SerdeJsonError(#[from] serde_json::Error),
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        error!("AppError{}", AppError = self);
         let (status, error_message) = match self {
             Self::InternalServerErrorWithContext(err) => (StatusCode::INTERNAL_SERVER_ERROR, err),
             Self::NotFound(err) => (StatusCode::NOT_FOUND, err),
@@ -68,9 +73,22 @@ impl IntoResponse for AppError {
                 }
                 (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
             }
-            _ => (
+            AppError::Forbidden
+            | AppError::ApplicationStartup(_)
+            | AppError::BadRequest(_)
+            | AppError::InternalServerError
+            | AppError::UnprocessableEntity { .. }
+            | AppError::AxumJsonRejection(_)
+            | AppError::DownloadError(_)
+            | AppError::UploadError(_)
+            | AppError::SerdeJsonError(_)
+            | AppError::ReqwestError(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 String::from("unexpected error occurred"),
+            ),
+            AppError::OrmliteError(ormlite) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                String::from("OrmliteError occurred"),
             ),
         };
 

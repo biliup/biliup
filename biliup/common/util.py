@@ -3,7 +3,6 @@ import json
 
 import httpx
 from datetime import datetime, timezone
-from biliup.config import config
 import logging
 
 try:
@@ -37,6 +36,8 @@ logger = logging.getLogger('biliup')
 
 
 def check_timerange(name):
+    from biliup.config import config
+    
     try:
         time_range_str = config['streamers'].get(name, {}).get('time_range')
         if not time_range_str:

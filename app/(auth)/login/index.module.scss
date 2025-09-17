@@ -1,0 +1,116 @@
+.frame {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: rgb(var(--semi-grey-0));
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  font-family: "PingFang SC";
+
+  .main {
+    display: flex;
+    flex-basis: 0;
+    flex-direction: column;
+    flex-grow: 1;
+    align-items: center;
+    align-self: stretch;
+    justify-content: center;
+    padding: 10px;
+    row-gap: 10px;
+
+    .login {
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      align-items: center;
+      border-radius: 8px;
+      box-shadow: var(
+                      --shadow-elevated,
+                      0px 0px 1px 0px #0000004d,
+                      0px 4px 14px 0px #0000001a
+      );
+      background: var(--semi-color-bg-0);
+      padding: 48px 56px;
+      row-gap: 30px;
+
+      .component66 {
+        display: inline-flex;
+        flex-direction: column;
+        flex-shrink: 0;
+        align-items: center;
+        border-radius: 8px;
+        row-gap: 24px;
+
+        .logo {
+          flex-shrink: 0;
+          width: 72px;
+          height: 72px;
+        }
+
+        .header {
+          display: inline-flex;
+          flex-direction: column;
+          flex-shrink: 0;
+          align-items: center;
+          justify-content: center;
+          row-gap: 6px;
+
+          .title {
+            flex-shrink: 0;
+            min-width: 128px;
+            line-height: 44px;
+            letter-spacing: 0;
+            color: var(--semi-color-text-0);
+            font-size: 32px;
+            font-weight: 600;
+          }
+
+          .text3 {
+            flex-shrink: 0;
+            line-height: 22px;
+            color: var(--semi-color-text-2);
+            font-size: 16px;
+
+            .text {
+              letter-spacing: 0;
+            }
+
+            .text2 {
+              letter-spacing: -0.32px;
+              font-family: Inter;
+            }
+          }
+        }
+      }
+
+      .form {
+        display: flex;
+        flex-direction: column;
+        flex-shrink: 0;
+        align-items: flex-start;
+        align-self: stretch;
+        row-gap: 28px;
+
+        .inputs {
+          display: flex;
+          flex-direction: column;
+          flex-shrink: 0;
+          align-items: flex-start;
+          align-self: stretch;
+          justify-content: flex-start;
+          row-gap: 24px;
+
+          .formField {
+            flex-shrink: 0;
+            align-self: stretch;
+          }
+        }
+
+        .checkbox {
+          flex-shrink: 0;
+        }
+      }
+    }
+  }
+}

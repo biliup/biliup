@@ -7,11 +7,6 @@ from typing import NamedTuple, Optional, List
 
 from sqlalchemy import desc
 
-from biliup.common.tools import NamedLock, get_file_create_timestamp
-from biliup.config import config
-from biliup.database import models
-from biliup.database.db import SessionLocal
-
 logger = logging.getLogger('biliup')
 
 

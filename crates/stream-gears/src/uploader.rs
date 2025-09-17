@@ -70,7 +70,11 @@ pub struct StudioPre {
     extra_fields: Option<HashMap<String, serde_json::Value>>,
 }
 
-pub async fn upload(studio_pre: StudioPre, submit: Option<&str>, proxy: Option<&str>) -> Result<ResponseData> {
+pub async fn upload(
+    studio_pre: StudioPre,
+    submit: Option<&str>,
+    proxy: Option<&str>,
+) -> Result<ResponseData> {
     // let file = std::fs::File::options()
     //     .read(true)
     //     .write(true)

@@ -5,21 +5,67 @@ use crate::server::core::live_streamers::{
 };
 use crate::server::core::upload_streamers::{DynUploadStreamersRepository, StudioEntity};
 use crate::server::core::users::{DynUsersRepository, User};
-use crate::server::errors::AppResult;
+use crate::server::errors::{AppError, AppResult};
 
+use crate::server::infrastructure::connection_pool::ConnectionPool;
+use crate::server::infrastructure::repositories::models::{
+    Configuration, FileItem, LiveStreamer, StreamerInfo, UploadStreamer,
+};
+use crate::server::infrastructure::service_register::ServiceRegister;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
+use biliup::credential::login_by_cookies;
+use ormlite::Model;
+use serde_json::json;
 
 pub async fn get_streamers_endpoint(
-    Extension(streamers_service): Extension<DynLiveStreamersService>,
-    Extension(download_actor_handle): Extension<DownloadActorHandle>,
-) -> AppResult<Json<Vec<LiveStreamerDto>>> {
-    let map = download_actor_handle.get_streamers();
-    let mut vec = streamers_service.get_streamers().await?;
-    for live in vec.iter_mut() {
-        live.status = map.get(&live.url).copied().unwrap_or_default()
-    }
-    Ok(Json(vec))
+    State(pool): State<ConnectionPool>,
+) -> AppResult<Json<Vec<LiveStreamer>>> {
+    let live_streamers = LiveStreamer::select().fetch_all(&pool).await?;
+
+    Ok(Json(live_streamers))
+}
+
+pub async fn get_configuration(
+    State(pool): State<ConnectionPool>,
+) -> AppResult<Json<serde_json::Value>> {
+    let configurations = Configuration::select()
+        .where_("key = 'config'")
+        .fetch_one(&pool)
+        .await?;
+
+    Ok(Json(serde_json::from_str(&configurations.value)?))
+}
+
+pub async fn get_streamer_info(
+    // Extension(streamers_service): Extension<DynUploadStreamersRepository>,
+    State(pool): State<ConnectionPool>,
+) -> AppResult<Json<Vec<StreamerInfo>>> {
+    let streamer_infos = StreamerInfo::select().fetch_all(&pool).await?;
+    let file_items = FileItem::select().fetch_all(&pool).await?;
+    println!("{:?}", file_items);
+
+    Ok(Json(streamer_infos))
+}
+
+pub async fn get_upload_streamers_endpoint(
+    // Extension(streamers_service): Extension<DynUploadStreamersRepository>,
+    State(pool): State<ConnectionPool>,
+) -> AppResult<Json<Vec<UploadStreamer>>> {
+    let uploader_streamers = UploadStreamer::select().fetch_all(&pool).await?;
+    Ok(Json(uploader_streamers))
+}
+
+pub async fn get_upload_streamer_endpoint(
+    State(pool): State<ConnectionPool>,
+    Path(id): Path<i64>,
+) -> AppResult<Json<UploadStreamer>> {
+    let uploader_streamers = UploadStreamer::select()
+        .where_("id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await?;
+    Ok(Json(uploader_streamers))
 }
 
 pub async fn get_streamer_endpoint(
@@ -40,21 +86,18 @@ pub async fn add_streamer_endpoint(
 }
 
 pub async fn delete_streamer_endpoint(
-    State(state): State<DynLiveStreamersRepository>,
     Extension(download_actor_handle): Extension<DownloadActorHandle>,
     Path(id): Path<i64>,
 ) -> AppResult<Json<()>> {
-    download_actor_handle.remove_streamer(&state.get_streamer_by_id(id).await?.url);
-    Ok(Json(state.delete_streamer(id).await?))
+    Ok(Json(()))
 }
 
 pub async fn update_streamer_endpoint(
-    State(state): State<DynLiveStreamersRepository>,
     Extension(download_actor_handle): Extension<DownloadActorHandle>,
     Json(request): Json<LiveStreamerEntity>,
 ) -> AppResult<Json<LiveStreamerDto>> {
     download_actor_handle.update_streamer(&request.url);
-    Ok(Json(state.update_streamer(request).await?.into_dto()))
+    Err(AppError::InvalidLoginAttempt)
 }
 
 pub async fn add_upload_streamer_endpoint(
@@ -78,35 +121,29 @@ pub async fn update_template_endpoint(
     Ok(Json(streamers_service.update_streamer(request).await?))
 }
 
-pub async fn get_upload_streamers_endpoint(
-    Extension(streamers_service): Extension<DynUploadStreamersRepository>,
-) -> AppResult<Json<Vec<StudioEntity>>> {
-    Ok(Json(streamers_service.get_streamers().await?))
-}
-
-pub async fn get_upload_streamer_endpoint(
-    Extension(streamers_service): Extension<DynUploadStreamersRepository>,
-    Path(id): Path<i64>,
-) -> AppResult<Json<StudioEntity>> {
-    Ok(Json(streamers_service.get_streamer_by_id(id).await?))
-}
-
 pub async fn get_users_endpoint(
-    State(state): State<DynUsersRepository>,
-) -> AppResult<Json<Vec<User>>> {
-    Ok(Json(state.get_users().await?))
+    State(pool): State<ConnectionPool>,
+) -> AppResult<Json<Vec<serde_json::Value>>> {
+    let configurations = Configuration::select()
+        .where_("key = 'bilibili-cookies'")
+        .fetch_all(&pool)
+        .await?;
+    let mut res = Vec::new();
+    for cookies in configurations {
+        res.push(json!({
+            "id": cookies.id,
+            "name": cookies.value,
+            "value": cookies.value,
+            "platform": cookies.key,
+        }))
+    }
+    Ok(Json(res))
 }
 
-pub async fn add_user_endpoint(
-    State(state): State<DynUsersRepository>,
-    Json(request): Json<User>,
-) -> AppResult<Json<User>> {
-    Ok(Json(state.create_user(request).await?))
+pub async fn add_user_endpoint(Json(request): Json<User>) -> AppResult<Json<User>> {
+    Err(AppError::InternalServerError)
 }
 
-pub async fn delete_user_endpoint(
-    State(state): State<DynUsersRepository>,
-    Path(id): Path<i64>,
-) -> AppResult<Json<()>> {
-    Ok(Json(state.delete_user(id).await?))
+pub async fn delete_user_endpoint(Path(id): Path<i64>) -> AppResult<Json<()>> {
+    Ok(Json(()))
 }

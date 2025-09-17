@@ -22,63 +22,71 @@ async fn start_monitor(
     task: Cycle<StreamStatus>,
     extractor: &(dyn SiteDefinition + Send + Sync),
     client: StatelessClient,
-    live_streamers_service: DynLiveStreamersService,
+    // live_streamers_service: DynLiveStreamersService,
 ) {
     let n = &mut 0;
     loop {
         let (url, status) = task.get(n);
-        if status != StreamStatus::Working {
-            task.change(&url, StreamStatus::Inspecting);
+        if status != StreamStatus::Working {}
+
+        match status {
+            StreamStatus::Working => {}
+            StreamStatus::Inspecting => {}
+            StreamStatus::Pending => {}
+            StreamStatus::Idle => {
+                task.change(&url, StreamStatus::Inspecting);
+            }
         }
+
         match (extractor.get_site(&url, client.clone()).await, status) {
             (Ok(mut site), StreamStatus::Idle | StreamStatus::Inspecting) => {
                 println!("Idle\n {url} \n{site}");
-                let (filename, split_size, split_time) = if let Ok(LiveStreamerDto {
-                    filename,
-                    split_size,
-                    split_time,
-                    ..
-                }) =
-                    live_streamers_service.get_streamer_by_url(&url).await
-                {
-                    (filename, split_size, split_time.map(Duration::from_secs))
-                } else {
-                    ("./video/%Y-%m-%d/%H_%M_%S{title}".to_string(), None, None)
-                };
-                let live_streamers_service = live_streamers_service.clone();
-                {
-                    let client = client.clone();
-                    let url = url.clone();
-                    let task = task.clone();
-                    logging_spawn(async move {
-                        let hook = live_streamers_service
-                            .get_studio_by_url(&url)
-                            .await
-                            .unwrap_or_default()
-                            .map(|studio| -> Box<dyn Fn(&str) + Send> {
-                                let handle = UploadActorHandle::new(client, studio);
-                                Box::new(move |file_name| {
-                                    if let Ok(metadata) = std::fs::metadata(file_name)
-                                        .map_err(|err| error!("{}", err))
-                                    {
-                                        if metadata.len() > 10 * 1024 * 1024 {
-                                            info!("开始上传: {}", file_name);
-                                            handle.send_file_path(file_name);
-                                        }
-                                    }
-                                })
-                            });
-                        if hook.is_none() {
-                            debug!(url = %url, "upload template not set.");
-                        }
-
-                        let segmentable = Segmentable::new(split_time, split_size);
-                        // let segmentable = Segmentable::new( None, Some(16*1024*1024));
-                        site.download(&filename, segmentable, hook).await?;
-                        task.change(&url, StreamStatus::Idle);
-                        Ok::<_, Box<dyn Error + Send + Sync>>(())
-                    });
-                }
+                // let (filename, split_size, split_time) = if let Ok(LiveStreamerDto {
+                //     filename,
+                //     split_size,
+                //     split_time,
+                //     ..
+                // }) =
+                //     live_streamers_service.get_streamer_by_url(&url).await
+                // {
+                //     (filename, split_size, split_time.map(Duration::from_secs))
+                // } else {
+                //     ("./video/%Y-%m-%d/%H_%M_%S{title}".to_string(), None, None)
+                // };
+                // let live_streamers_service = live_streamers_service.clone();
+                // {
+                //     let client = client.clone();
+                //     let url = url.clone();
+                //     let task = task.clone();
+                //     logging_spawn(async move {
+                //         let hook = live_streamers_service
+                //             .get_studio_by_url(&url)
+                //             .await
+                //             .unwrap_or_default()
+                //             .map(|studio| -> Box<dyn Fn(&str) + Send> {
+                //                 let handle = UploadActorHandle::new(client, studio);
+                //                 Box::new(move |file_name| {
+                //                     if let Ok(metadata) = std::fs::metadata(file_name)
+                //                         .map_err(|err| error!("{}", err))
+                //                     {
+                //                         if metadata.len() > 10 * 1024 * 1024 {
+                //                             info!("开始上传: {}", file_name);
+                //                             handle.send_file_path(file_name);
+                //                         }
+                //                     }
+                //                 })
+                //             });
+                //         if hook.is_none() {
+                //             debug!(url = %url, "upload template not set.");
+                //         }
+                //
+                //         let segmentable = Segmentable::new(split_time, split_size);
+                //         // let segmentable = Segmentable::new( None, Some(16*1024*1024));
+                //         site.download(&filename, segmentable, hook).await?;
+                //         task.change(&url, StreamStatus::Idle);
+                //         Ok::<_, Box<dyn Error + Send + Sync>>(())
+                //     });
+                // }
                 task.change(&url, StreamStatus::Working);
             }
             (Ok(_site), StreamStatus::Pending) => {
@@ -98,16 +106,12 @@ async fn start_monitor(
 
 #[derive(Clone)]
 struct DownloadActor {
-    live_streamers_service: DynLiveStreamersService,
     client: StatelessClient,
 }
 
 impl DownloadActor {
-    fn new(live_streamers_service: DynLiveStreamersService, client: StatelessClient) -> Self {
-        Self {
-            live_streamers_service,
-            client,
-        }
+    fn new(client: StatelessClient) -> Self {
+        Self { client }
     }
 
     fn run(
@@ -140,10 +144,8 @@ impl DownloadActor {
                 let cycle = Cycle::new(indexmap![url => StreamStatus::Idle]);
                 let task = cycle.clone();
                 let client = self.client.clone();
-                let live_streamers_service = self.live_streamers_service.clone();
-                let handle = tokio::spawn(async move {
-                    start_monitor(task, extractor, client, live_streamers_service).await
-                });
+                let handle =
+                    tokio::spawn(async move { start_monitor(task, extractor, client).await });
                 (cycle, handle)
             });
     }
@@ -159,12 +161,8 @@ pub struct DownloadActorHandle {
 }
 
 impl DownloadActorHandle {
-    pub fn new(
-        list: Vec<LiveStreamerDto>,
-        client: StatelessClient,
-        live_streamers_service: DynLiveStreamersService,
-    ) -> Self {
-        let mut actor = DownloadActor::new(live_streamers_service, client);
+    pub fn new(list: Vec<LiveStreamerDto>, client: StatelessClient) -> Self {
+        let mut actor = DownloadActor::new(client);
         let platform_map = Arc::new(RwLock::new(HashMap::default()));
         let platform = Arc::clone(&platform_map);
         // let client_c = client.clone();
@@ -208,7 +206,7 @@ impl DownloadActorHandle {
                     if guard.len() <= 1 {
                         join_handle.abort()
                     }
-                    guard.remove(url)
+                    guard.swap_remove(url)
                 })
         });
     }

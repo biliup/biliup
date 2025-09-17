@@ -1,9 +1,9 @@
+use crate::ReqwestClientBuilderExt;
 use crate::error::{Kind, Result};
 use crate::uploader::credential::LoginInfo;
-use crate::ReqwestClientBuilderExt;
 use serde::ser::Error;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 
 use std::fmt::{Display, Formatter};
@@ -345,7 +345,7 @@ impl BiliBili {
     #[deprecated(note = "no longer working, fallback to `edit_by_app`")]
     pub async fn edit(&self, studio: &Studio, proxy: Option<&str>) -> Result<serde_json::Value> {
         warn!("客户端接口已失效, 将使用app接口");
-        self.edit_by_app(studio,proxy).await
+        self.edit_by_app(studio, proxy).await
     }
 
     pub async fn edit_by_web(&self, studio: &Studio) -> Result<serde_json::Value> {
@@ -376,8 +376,8 @@ impl BiliBili {
     pub async fn edit_by_app(
         &self,
         studio: &Studio,
-        proxy: Option<&str>,)
-        -> Result<serde_json::Value> {
+        proxy: Option<&str>,
+    ) -> Result<serde_json::Value> {
         let payload = {
             let mut payload = json!({
                 "access_key": self.login_info.token_info.access_token,
@@ -414,7 +414,7 @@ impl BiliBili {
             .json()
             .await?;
         info!("{:?}", ret);
-        if  ret["code"]  == 0 {
+        if ret["code"] == 0 {
             info!("稿件修改成功");
             Ok(ret)
         } else {
@@ -597,7 +597,12 @@ impl BiliBili {
         }
     }
 
-    async fn recent_archives_data(&self, status: &str, from_page: u32, max_pages: Option<u32>) -> Result<Vec<Value>> {
+    async fn recent_archives_data(
+        &self,
+        status: &str,
+        from_page: u32,
+        max_pages: Option<u32>,
+    ) -> Result<Vec<Value>> {
         let mut first_page = self.archives(status, from_page).await?;
 
         let (page_size, count) = {
@@ -637,7 +642,12 @@ impl BiliBili {
     }
 
     /// 获取页数范围内的稿件
-    pub async fn recent_archives(&self, status: &str, from_page: u32, max_pages: Option<u32>) -> Result<Vec<Archive>> {
+    pub async fn recent_archives(
+        &self,
+        status: &str,
+        from_page: u32,
+        max_pages: Option<u32>,
+    ) -> Result<Vec<Archive>> {
         let studios = self
             .recent_archives_data(status, from_page, max_pages)
             .await?

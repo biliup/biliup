@@ -5,8 +5,6 @@ import requests
 
 import biliup.common.util
 from biliup.config import config
-from ..common import tools
-from ..common.tools import NamedLock
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from ..plugins import match1, logger
@@ -88,7 +86,6 @@ class AfreecaTVUtils:
 
     @staticmethod
     def get_cookie() -> Optional[Dict[str, str]]:
-        with NamedLock("AfreecaTV_cookie_get"):
             if not AfreecaTVUtils._cookie or AfreecaTVUtils._cookie_expires <= time.time():
                 username = config.get('user', {}).get('afreecatv_username', '')
                 password = config.get('user', {}).get('afreecatv_password', '')

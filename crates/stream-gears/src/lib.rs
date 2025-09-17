@@ -1,21 +1,132 @@
+extern crate core;
+
 mod login;
 mod uploader;
+
+mod server;
 
 use pyo3::prelude::*;
 use time::macros::format_description;
 use uploader::{PyCredit, StudioPre};
 
+use crate::uploader::UploadLine;
+use axum::http::{HeaderMap, HeaderName, HeaderValue};
+use biliup::credential::Credential;
+use biliup::downloader::extractor::CallbackFn;
+use biliup::downloader::util::{LifecycleFile, Segmentable};
+use biliup::downloader::{hls, httpflv};
+use pyo3::types::PyType;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::str::FromStr;
+use std::sync::{Mutex, Once};
 use std::time::Duration;
+use tracing::{debug, error, info};
+use tracing_subscriber::EnvFilter;
 
-use crate::uploader::UploadLine;
-use biliup::credential::Credential;
-use biliup::downloader::construct_headers;
-use biliup::downloader::extractor::CallbackFn;
-use biliup::downloader::util::Segmentable;
-
+use biliup::client::StatelessClient;
+use biliup::downloader::flv_parser::header;
+use biliup::downloader::httpflv::Connection;
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+
+static INIT: Once = Once::new();
+// 全局保存 guard，防止被 drop
+static GUARD: Mutex<Option<tracing_appender::non_blocking::WorkerGuard>> = Mutex::new(None);
+
+fn init_tracing_with_rotation() {
+    INIT.call_once(|| {
+        let local_time = tracing_subscriber::fmt::time::LocalTime::new(format_description!(
+            "[year]-[month]-[day] [hour]:[minute]:[second]"
+        ));
+        // 按日期滚动，每天创建新文件
+        let file_appender = tracing_appender::rolling::daily("logs", "upload.log");
+        // 或者按小时滚动
+        // let file_appender = tracing_appender::rolling::hourly("logs", "upload.log");
+
+        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+
+        // 保存 guard
+        *GUARD.lock().unwrap() = Some(guard);
+
+        let subscriber = tracing_subscriber::registry()
+            .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+            // 控制台输出
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_target(false)
+                    .with_timer(local_time.clone())
+                    .with_file(true) // 打印文件名
+                    .with_line_number(true)
+                    .with_thread_ids(true),
+            )
+            // 文件输出
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(non_blocking)
+                    .with_timer(local_time)
+                    .with_target(true)
+                    .with_thread_ids(true)
+                    .with_file(true)
+                    .with_line_number(true)
+                    .with_ansi(false), // .json() // 可选：使用 JSON 格式便于解析
+            );
+
+        subscriber.init();
+
+        info!("Tracing initialized with daily rotation");
+    });
+}
+
+#[tokio::main]
+pub async fn download_with_hook(
+    url: &str,
+    headers: HeaderMap,
+    file_name: &str,
+    segment: Segmentable,
+    file_name_hook: CallbackFn,
+    proxy: Option<&str>,
+) -> anyhow::Result<()> {
+    let client = StatelessClient::new(headers, proxy);
+    let response = client.retryable(url).await?;
+    let mut connection = Connection::new(response);
+    // let buf = &mut [0u8; 9];
+    let bytes = connection.read_frame(9).await?;
+    // response.read_exact(buf)?;
+    // let out = File::create(format!("{}.flv", file_name)).expect("Unable to create file.");
+    // let mut writer = BufWriter::new(out);
+    // let mut buf = [0u8; 8 * 1024];
+    // response.copy_to(&mut writer)?;
+    // io::copy(&mut resp, &mut out).expect("Unable to copy the content.");
+    match header(&bytes) {
+        Ok((_i, header)) => {
+            debug!("header: {header:#?}");
+            info!("Downloading {}...", url);
+            let file = LifecycleFile::with_hook(file_name, "flv", file_name_hook);
+            httpflv::download(connection, file, segment).await;
+        }
+        Err(nom::Err::Incomplete(needed)) => {
+            error!("needed: {needed:?}")
+        }
+        Err(e) => {
+            error!("{e}");
+            let file = LifecycleFile::with_hook(file_name, "ts", file_name_hook);
+            hls::download(url, &client, file, segment).await?;
+        }
+    }
+    Ok(())
+}
+
+pub fn construct_headers(hash_map: &HashMap<String, String>) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    for (key, value) in hash_map.iter() {
+        headers.insert(
+            HeaderName::from_str(key).unwrap(),
+            HeaderValue::from_str(value).unwrap(),
+        );
+    }
+    headers
+}
 
 #[derive(Debug, Clone)]
 #[pyclass(set_all)]
@@ -30,7 +141,7 @@ pub struct PySegment {
 impl PySegment {
     #[new]
     fn new() -> Self {
-        PySegment{
+        PySegment {
             time: None,
             size: None,
         }
@@ -58,11 +169,11 @@ fn download_with_callback(
     header_map: HashMap<String, String>,
     file_name: &str,
     segment: PySegment,
-    file_name_callback_fn: Option<PyObject>,
+    file_name_callback_fn: Option<Py<PyType>>,
     proxy: Option<String>,
 ) -> PyResult<()> {
-    py.allow_threads(|| {
-        let map = construct_headers(header_map);
+    py.detach(|| {
+        let map = construct_headers(&header_map);
         // 输出到控制台中
         // use of deprecated function `time::util::local_offset::set_soundness`: no longer needed; TZ is refreshed manually
         // unsafe {
@@ -91,12 +202,8 @@ fn download_with_callback(
                 // 已支持同时创建时间和大小
                 Segmentable::new(Some(Duration::from_secs(time)), Some(size))
             }
-            (Some(time), None) => {
-                Segmentable::new(Some(Duration::from_secs(time)), None)
-            }
-            (None, Some(size)) => {
-                Segmentable::new(None, Some(size))
-            }
+            (Some(time), None) => Segmentable::new(Some(Duration::from_secs(time)), None),
+            (None, Some(size)) => Segmentable::new(None, Some(size)),
             (None, None) => {
                 // 如果都没有，使用默认值
                 Segmentable::default()
@@ -105,7 +212,7 @@ fn download_with_callback(
 
         let file_name_hook = file_name_callback_fn.map(|callback_fn| -> CallbackFn {
             Box::new(move |fmt_file_name| {
-                Python::with_gil(|py| match callback_fn.call1(py, (fmt_file_name,)) {
+                Python::attach(|py| match callback_fn.call1(py, (fmt_file_name,)) {
                     Ok(_) => {}
                     Err(_) => {
                         tracing::error!("Unable to invoke the callback function.")
@@ -116,12 +223,12 @@ fn download_with_callback(
 
         let collector = formatting_layer.with(file_layer);
         tracing::subscriber::with_default(collector, || -> PyResult<()> {
-            match biliup::downloader::download(
+            match download_with_hook(
                 url,
                 map,
                 file_name,
                 segmentable,
-                file_name_hook,
+                file_name_hook.unwrap_or(Box::new(|_| {})),
                 proxy.as_deref(),
             ) {
                 Ok(res) => Ok(res),
@@ -269,7 +376,7 @@ fn upload(
     submit: Option<String>,
     proxy: Option<String>,
 ) -> PyResult<()> {
-    py.allow_threads(|| {
+    py.detach(|| {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
@@ -326,7 +433,11 @@ fn upload(
             //     None => SubmitOption::App,
             // };
 
-            match rt.block_on(uploader::upload(studio_pre, submit.as_deref(), proxy.as_deref())) {
+            match rt.block_on(uploader::upload(
+                studio_pre,
+                submit.as_deref(),
+                proxy.as_deref(),
+            )) {
                 Ok(_) => Ok(()),
                 // Ok(_) => {  },
                 Err(err) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
@@ -342,6 +453,7 @@ fn upload(
 /// A Python module implemented in Rust.
 #[pymodule]
 fn stream_gears(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    init_tracing_with_rotation();
     // let file_appender = tracing_appender::rolling::daily("", "upload.log");
     // let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     // tracing_subscriber::fmt()
@@ -358,6 +470,8 @@ fn stream_gears(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(login_by_sms, m)?)?;
     m.add_function(wrap_pyfunction!(login_by_web_cookies, m)?)?;
     m.add_function(wrap_pyfunction!(login_by_web_qrcode, m)?)?;
+    m.add_function(wrap_pyfunction!(server::main_loop, m)?)?;
+    m.add_function(wrap_pyfunction!(server::config::config_bindings, m)?)?;
     m.add_class::<UploadLine>()?;
     m.add_class::<PySegment>()?;
     Ok(())

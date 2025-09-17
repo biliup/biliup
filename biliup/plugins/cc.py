@@ -1,7 +1,6 @@
 from biliup.common.util import client
 from biliup.config import config
 from . import logger, match1
-from ..common import tools
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 

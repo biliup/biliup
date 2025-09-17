@@ -151,7 +151,7 @@ enum Bucket {
     Upos(upos::Bucket),
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Line {
     os: Uploader,
     probe_url: String,

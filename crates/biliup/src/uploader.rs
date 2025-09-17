@@ -16,7 +16,7 @@ pub mod credential;
 pub mod line;
 pub mod util;
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum Uploader {
     Upos,
