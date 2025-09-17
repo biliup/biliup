@@ -19,7 +19,7 @@ from urllib.parse import urlparse, unquote
 import biliup.common.reload
 from biliup.config import config
 from biliup.plugins.bili_webup import BiliBili, Data
-from .aiohttp_basicauth_middleware import basic_auth_middleware, check_access
+from .aiohttp_basicauth_middleware import basic_auth_middleware
 from biliup.database.db import SessionLocal
 from biliup.database.models import UploadStreamers, LiveStreamers, Configuration, StreamerInfo
 from ..app import logger
@@ -34,81 +34,67 @@ BiliBili = BiliBili(Data())
 
 routes = web.RouteTableDef()
 
-# 全局变量存储密码
-GLOBAL_PASSWORD = None
 
-
-def set_global_password(password: str):
-    """
-    设置全局密码
-    :param password: 要设置的密码
-    """
-    global GLOBAL_PASSWORD
-    GLOBAL_PASSWORD = password
-
-
-def check_url_auth(auth_header: str) -> bool:
-    """
-    验证URL参数中的认证信息
-    :param auth_header: 包含认证信息的Authorization头
-    :return: 认证是否成功
-    """
-    # 使用全局密码变量
-    if not GLOBAL_PASSWORD:
-        return True  # 如果没有设置密码，则允许访问
-    
-    # 使用现有的 check_access 函数验证认证信息
-    auth_dict = {'biliup': GLOBAL_PASSWORD}
-    return check_access(auth_dict, auth_header)
-
-@routes.get('/api/basic')
 async def get_basic_config(request):
     res = {
-        "line": config.data.get('lines', 'AUTO'),
-        "limit": config.data.get('threads', 3),
+        "line": config.data['lines'],
+        "limit": config.data['threads'],
     }
     if config.data.get("toml"):
         res['toml'] = True
     else:
         res['user'] = {
-            "SESSDATA": config.data.get('user', {}).get('cookies', {}).get('SESSDATA', ''),
-            "bili_jct": config.data.get('user', {}).get('cookies', {}).get('bili_jct', ''),
-            "DedeUserID__ckMd5": config.data.get('user', {}).get('cookies', {}).get('DedeUserID__ckMd5', ''),
-            "DedeUserID": config.data.get('user', {}).get('cookies', {}).get('DedeUserID', ''),
-            "access_token": config.data.get('user', {}).get('access_token', ''),
+            "SESSDATA": config.data['user']['cookies']['SESSDATA'],
+            "bili_jct": config.data['user']['cookies']['bili_jct'],
+            "DedeUserID__ckMd5": config.data['user']['cookies']['DedeUserID__ckMd5'],
+            "DedeUserID": config.data['user']['cookies']['DedeUserID'],
+            "access_token": config.data['user']['access_token'],
         }
 
     return web.json_response(res)
 
-@routes.get('/url-status')
+
 async def url_status(request):
     from biliup.app import context
     return web.json_response(context['KernelFunc'].get_url_status())
 
-@routes.post('/api/setbasic')
+
 async def set_basic_config(request):
     post_data = await request.json()
-    config.data['lines'] = post_data.get('line', 'AUTO')
+    config.data['lines'] = post_data['line']
     if config.data['lines'] == 'cos':
         config.data['lines'] = 'cos-internal'
-    config.data['threads'] = post_data.get('limit', 3)
+    config.data['threads'] = post_data['limit']
     if not config.data.get("toml"):
         cookies = {
-            "SESSDATA": str(post_data.get('user', {}).get('SESSDATA', '')),
-            "bili_jct": str(post_data.get('user', {}).get('bili_jct', '')),
-            "DedeUserID__ckMd5": str(post_data.get('user', {}).get('DedeUserID__ckMd5', '')),
-            "DedeUserID": str(post_data.get('user', {}).get('DedeUserID', '')),
+            "SESSDATA": str(post_data['user']['SESSDATA']),
+            "bili_jct": str(post_data['user']['bili_jct']),
+            "DedeUserID__ckMd5": str(post_data['user']['DedeUserID__ckMd5']),
+            "DedeUserID": str(post_data['user']['DedeUserID']),
         }
-        config.data['user'] = config.data.get('user', {})
         config.data['user']['cookies'] = cookies
-        config.data['user']['access_token'] = str(post_data.get('user', {}).get('access_token', ''))
+        config.data['user']['access_token'] = str(post_data['user']['access_token'])
     return web.json_response({"status": 200})
 
-@routes.get('/api/getconfig')
-async def get_streamer_config(request):
-    return web.json_response(config.data.get('streamers', {}))
 
-@routes.get('/api/save')
+async def get_streamer_config(request):
+    return web.json_response(config.data['streamers'])
+
+
+# async def set_streamer_config(request):
+#     post_data = await request.json()
+#     # config.data['streamers'] = post_data['streamers']
+#     for i, j in post_data['streamers'].items():
+#         if i not in config.data['streamers']:
+#             config.data['streamers'][i] = {}
+#         for key, Value in j.items():
+#             config.data['streamers'][i][key] = Value
+#     for i in config.data['streamers']:
+#         if i not in post_data['streamers']:
+#             del config.data['streamers'][i]
+#     return web.json_response({"status": 200}, status=200)
+
+
 async def save_config(request):
     config.save()
     biliup.common.reload.global_reloader.triggered = True
@@ -117,11 +103,11 @@ async def save_config(request):
     logger.info("配置保存，将在进程空闲时重启")
     return web.json_response({"status": 200}, status=200)
 
-@routes.get('/')
+
 async def root_handler(request):
     return web.HTTPFound('/index.html')
 
-@routes.get('/api/login_by_cookie')
+
 async def cookie_login(request):
     if config.data.get("toml"):
         print("trying to login by cookie")
@@ -130,7 +116,7 @@ async def cookie_login(request):
         except Exception as e:
             return web.HTTPBadRequest(text="login failed" + str(e))
     else:
-        cookie = config.data.get('user', {}).get('cookies', {})
+        cookie = config.data['user']['cookies']
         try:
             BiliBili.login_by_cookies(cookie)
         except Exception as e:
@@ -153,7 +139,7 @@ def check_similar_remark(json_data):
     '''
     :return: similar remark or None
     '''
-    _cache = copy.deepcopy(config.get('streamers', {}))
+    _cache = copy.deepcopy(config['streamers'])
     for fname, data in _cache.items():
         if (
             json_data['remark'] in fname
@@ -198,7 +184,14 @@ async def qrcode_login(request):
         logger.exception('login_by_qrcode')
         return web.HTTPBadRequest(text="login failed" + str(e))
 
-@routes.get('/api/check_tag')
+
+async def pre_archive(request):
+    if config.data.get("toml"):
+        config.load_cookies()
+    cookies = config.data['user']['cookies']
+    return web.json_response(BiliBili.tid_archive(cookies))
+
+
 async def tag_check(request):
     if BiliBili.check_tag(request.rel_url.query['tag']):
         return web.json_response({"status": 200})
@@ -538,7 +531,7 @@ async def pre_archive(request):
             path = conf.value
             try:
                 config.load_cookies(path)
-                cookies = config.data.get('user', {}).get('cookies', {})
+                cookies = config.data['user']['cookies']
                 res = BiliBili.tid_archive(cookies)
                 if res['code'] != 0:
                     continue
@@ -556,7 +549,7 @@ async def myinfo(request):
         config.load_cookies(file)
     except FileNotFoundError:
         return web.json_response({"status": 500, 'error': f"{file} 文件不存在"}, status=500)
-    cookies = config.data.get('user', {}).get('cookies', {})
+    cookies = config.data['user']['cookies']
     return web.json_response(BiliBili.myinfo(cookies))
 
 
@@ -599,22 +592,8 @@ def read_last_n_lines(file_path, n=50):
         return [line.decode('utf-8', errors='replace') for line in lines[-n:]]
 
 
-@routes.get('/ws/logs')
+@routes.get('/v1/ws/logs')
 async def websocket_logs(request):
-    # 检查URL参数中的认证信息
-    auth_param = request.query.get('authorization')
-    if auth_param:
-        # 验证URL参数中的认证信息
-        if not check_url_auth(auth_param):
-            ws = web.WebSocketResponse()
-            await ws.prepare(request)
-            await ws.send_str("认证失败")
-            await ws.close()
-            return ws
-    else:
-        # 如果没有URL参数认证信息，则继续使用现有的中间件认证
-        pass
-    
     ws = web.WebSocketResponse()
     try:
         await ws.prepare(request)
@@ -721,6 +700,22 @@ def find_all_folders(directory):
 
 async def service(args):
     app = web.Application()
+    app.add_routes([
+        web.get('/api/check_tag', tag_check),
+        web.get('/url-status', url_status),
+        web.get('/api/basic', get_basic_config),
+        web.post('/api/setbasic', set_basic_config),
+        web.get('/api/getconfig', get_streamer_config),
+        # web.post('/api/setconfig', set_streamer_config),
+        web.get('/api/login_by_cookie', cookie_login),
+        # web.get('/api/login_by_sms', sms_login),
+        # web.post('/api/send_sms', sms_send),
+        web.get('/api/save', save_config),
+        # web.get('/api/get_qrcode', qrcode_get),
+        # web.post('/api/login_by_qrcode', qrcode_login),
+        web.get('/api/archive_pre', pre_archive),
+        web.get('/', root_handler)
+    ])
     routes.static('/static', '.', show_index=False)
     app.add_routes(routes)
     if args.static_dir:
@@ -742,10 +737,7 @@ async def service(args):
         res.append(web.static('/', files('biliup.web').joinpath('public')))
         app.add_routes(res)
     if args.password:
-        # 设置全局密码
-        set_global_password(args.password)
-        # 只保护API路径，不保护前端页面路径
-        app.middlewares.append(basic_auth_middleware(('/api/', '/url-status', '/v1/'), {'biliup': args.password}, ))
+        app.middlewares.append(basic_auth_middleware(('/',), {'biliup': args.password}, ))
 
     # web.run_app(app, host=host, port=port)
     cors = aiohttp_cors.setup(app, defaults={

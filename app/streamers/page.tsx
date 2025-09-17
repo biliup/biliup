@@ -1,6 +1,7 @@
 'use client'
 import {
   Layout,
+  Nav,
   Button,
   Tag,
   Typography,
@@ -17,14 +18,12 @@ import {
   IconWrench,
 } from '@douyinfe/semi-icons'
 import { List, ButtonGroup } from '@douyinfe/semi-ui'
-import React from 'react'
+import React, { useState } from 'react'
 import useStreamers from '../lib/use-streamers'
 import TemplateModal from '../ui/TemplateModal'
 import OverrideModal from '../ui/OverrideModal'
 import { LiveStreamerEntity, put, requestDelete, sendRequest } from '../lib/api-streamer'
 import useSWRMutation from 'swr/mutation'
-import { AuthGuard } from '../lib/auth-guard'
-import ProtectedLayout from '../lib/protected-layout'
 
 export default function Home() {
   const { Header, Content } = Layout
@@ -114,92 +113,91 @@ export default function Home() {
     }
   }
   return (
-    <AuthGuard>
-      <ProtectedLayout>
-        <Header
+    <>
+      <Header
+        style={{
+          backgroundColor: 'var(--semi-color-bg-1)',
+          position: 'sticky',
+          top: 0,
+          zIndex: 1,
+        }}
+      >
+        <nav
           style={{
-            backgroundColor: 'var(--semi-color-bg-1)',
-            position: 'sticky',
-            top: 0,
-            zIndex: 1,
+            display: 'flex',
+            paddingLeft: '25px',
+            paddingRight: '25px',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
           }}
         >
-          <nav
+          <div
             style={{
               display: 'flex',
-              paddingLeft: '25px',
-              paddingRight: '25px',
+              gap: 10,
+              justifyContent: 'center',
               alignItems: 'center',
-              justifyContent: 'space-between',
               flexWrap: 'wrap',
-              boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
             }}
           >
-            <div
+            <IconVideoListStroked
+              size="large"
               style={{
-                display: 'flex',
-                gap: 10,
-                justifyContent: 'center',
-                alignItems: 'center',
-                flexWrap: 'wrap',
+                backgroundColor: 'rgba(var(--semi-green-4), 1)',
+                borderRadius: 'var(--semi-border-radius-large)',
+                color: 'var(--semi-color-bg-0)',
+                padding: '6px',
               }}
-            >
-              <IconVideoListStroked
-                size="large"
-                style={{
-                  backgroundColor: 'rgba(var(--semi-green-4), 1)',
-                  borderRadius: 'var(--semi-border-radius-large)',
-                  color: 'var(--semi-color-bg-0)',
-                  padding: '6px',
-                }}
-              />
-              <h4>录播管理</h4>
-            </div>
-            <div
+            />
+            <h4>录播管理</h4>
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+            }}
+          >
+            <Button
+              theme="borderless"
+              icon={<IconHelpCircle size="large" />}
               style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 6,
+                color: 'var(--semi-color-text-2)',
               }}
-            >
-              <Button
-                theme="borderless"
-                icon={<IconHelpCircle size="large" />}
-                style={{
-                  color: 'var(--semi-color-text-2)',
-                }}
-                onClick={() => (window.location.href = '/static/ds_update.log')}
-              />
-              <TemplateModal onOk={handleOk}>
-                <Button icon={<IconPlusCircle />} theme="solid" style={{ marginRight: 10 }}>
-                  新建
-                </Button>
-              </TemplateModal>
-            </div>
-          </nav>
-        </Header>
-        <Content
-          style={{
-            padding: '24px',
-            backgroundColor: 'var(--semi-color-bg-0)',
-          }}
-        >
-          <main>
-            <List
-              grid={{
-                gutter: 12,
-                xs: 24,
-                sm: 24,
-                md: 12,
-                lg: 8,
-                xl: 6,
-                xxl: 4,
-              }}
-              dataSource={data}
-              renderItem={item => (
-                <List.Item>
+              onClick={() => (window.location.href = '/static/ds_update.log')}
+            />
+            <TemplateModal onOk={handleOk}>
+              <Button icon={<IconPlusCircle />} theme="solid" style={{ marginRight: 10 }}>
+                新建
+              </Button>
+            </TemplateModal>
+          </div>
+        </nav>
+      </Header>
+      <Content
+        style={{
+          padding: '24px',
+          backgroundColor: 'var(--semi-color-bg-0)',
+        }}
+      >
+        <main>
+          <List
+            grid={{
+              gutter: 12,
+              xs: 24,
+              sm: 24,
+              md: 12,
+              lg: 8,
+              xl: 6,
+              xxl: 4,
+            }}
+            dataSource={data}
+            renderItem={item => (
+              <List.Item>
                 <Card
                   shadows="hover"
                   style={{
@@ -265,12 +263,11 @@ export default function Home() {
                     </ButtonGroup>
                   </div>
                 </Card>
-                  </List.Item>
-                )}
-              />
-            </main>
-          </Content>
-        </ProtectedLayout>
-      </AuthGuard>
-    )
-  }
+              </List.Item>
+            )}
+          />
+        </main>
+      </Content>
+    </>
+  )
+}
