@@ -279,18 +279,6 @@ export default function ProtectedLayout({ children }: { children: React.ReactNod
           </Nav.Header>
           <Nav.Footer collapseButton={false}>
             <ThemeButton mode={mode} setMode={setMode} systemTheme={systemTheme} />
-            {typeof window !== 'undefined' && localStorage.getItem('auth') && (
-              <Button
-                onClick={() => {
-                  localStorage.removeItem('auth');
-                  window.location.href = '/login';
-                }}
-                type="danger"
-                style={{ marginTop: '10px', width: '100%' }}
-              >
-                退出登录
-              </Button>
-            )}
           </Nav.Footer>
         </Nav>
       </Sider>

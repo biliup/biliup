@@ -14,10 +14,9 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     // 如果用户未认证，则检查是否需要认证
     if (!isAuthenticated) {
       // 检查是否需要认证
-      const auth = localStorage.getItem('auth');
       fetch('/api/basic', {
         headers: {
-          'Authorization': `Basic ${auth}` // 使用测试凭据
+          'Authorization': 'Basic dGVzdDp0ZXN0' // 使用测试凭据
         }
       }).then(response => {
         if (response.status !== 401) {

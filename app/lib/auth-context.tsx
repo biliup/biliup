@@ -39,10 +39,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const checkAuthRequired = async () => {
     try {
-      const auth = localStorage.getItem('auth');
       const response = await fetch('/api/basic', {
         headers: {
-          'Authorization': `Basic ${auth}` // 使用测试凭据
+          'Authorization': 'Basic dGVzdDp0ZXN0' // 使用测试凭据
         }
       });
       // 如果返回401，说明需要认证
