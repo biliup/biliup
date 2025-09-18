@@ -95,7 +95,7 @@ RUN set -eux; \
 		/var/tmp/* \
 		/var/log/*
 
-COPY --from=webui /biliup/biliup/web/public/ /biliup/biliup/web/public/
+COPY --from=webui /biliup/out /biliup/out
 WORKDIR /opt
 
 ENTRYPOINT ["biliup"]

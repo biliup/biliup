@@ -6,7 +6,7 @@ build-backend = "maturin"
 # "extension-module" tells pyo3 we want to build an extension module (skips linking against libpython.so)
 features = ["pyo3/extension-module"]
 # Include additional files
-include = [ "biliup/web/public/**/*" ]
+#include = [ "biliup/web/public/**/*" ]
 #data = "biliup/web/public"
 python-packages = ["biliup"]
 manifest-path = "crates/stream-gears/Cargo.toml"
