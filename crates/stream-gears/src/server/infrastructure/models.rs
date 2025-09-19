@@ -80,7 +80,7 @@ pub struct FileItem {
 }
 
 #[derive(Model, Debug, Clone, Serialize, Deserialize)]
-#[ormlite(table = "configuration")]
+#[ormlite(table = "configuration", insert = "InsertConfiguration")]
 pub struct Configuration {
     pub id: i64,
     pub key: String,

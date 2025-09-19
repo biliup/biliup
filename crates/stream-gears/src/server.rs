@@ -76,11 +76,7 @@ async fn _main() -> AppResult<()> {
     let conn_pool = ConnectionManager::new_pool("data/data.sqlite3")
         .await
         .expect("could not initialize the database connection pool");
-
-    let urls = vec![
-        "https://www.douyu.com/10200986",
-        "https://m.acfun.cn/video/123",
-    ];
+    
     let configs = repositories::get_config(&conn_pool).await?;
     let service_register = ServiceRegister::new(conn_pool, configs);
 

@@ -9,8 +9,9 @@ import stream_gears
 
 import biliup.common.reload
 # from biliup.config import config
-from biliup import __version__, IS_FROZEN
+from biliup import __version__, IS_FROZEN, LOG_CONF
 from biliup.common.Daemon import Daemon
+from biliup.common.log import DebugLevelFilter
 
 
 def arg_parser():
@@ -45,9 +46,12 @@ def arg_parser():
     parser_restart.set_defaults(func=daemon.restart)
     parser.set_defaults(func=lambda: asyncio.run(main(args)))
     args = parser.parse_args()
-    biliup.common.reload.program_args = args.__dict__
 
-    is_stop = args.func == daemon.stop
+    if args.verbose:
+        LOG_CONF['loggers']['biliup']['level'] = args.verbose
+        LOG_CONF['root']['level'] = args.verbose
+    logging.config.dictConfig(LOG_CONF)
+    logging.getLogger('httpx').addFilter(DebugLevelFilter())
 
     args.func()
 

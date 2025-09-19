@@ -1,3 +1,4 @@
+use std::path::Path;
 use anyhow::{Context, Result};
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{Pool, Sqlite};
@@ -9,6 +10,10 @@ pub struct ConnectionManager;
 
 impl ConnectionManager {
     pub async fn new_pool(path: &str) -> Result<ConnectionPool> {
+        // 创建所有父级目录（如果不存在）
+        if let Some(parent) = Path::new(path).parent() {
+            std::fs::create_dir_all(parent)?; // 创建 data/ 目录
+        }
         let db_url = format!("sqlite://{path}");
         /// Start by making a database connection.
         std::fs::OpenOptions::new()

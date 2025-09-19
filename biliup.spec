@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all, copy_metadata
 
-datas = [('biliup/database/migration/', 'biliup/database/migration/'), ('biliup/Danmaku/douyin_util/', 'biliup/Danmaku/douyin_util/')]
+datas = [('biliup/Danmaku/douyin_util/', 'biliup/Danmaku/douyin_util/')]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('biliup.plugins')
