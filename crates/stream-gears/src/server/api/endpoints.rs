@@ -1,4 +1,4 @@
-use crate::server::errors::{AppError, AppResult, report_to_response};
+use crate::server::errors::{AppError, report_to_response};
 use std::sync::{Arc, RwLock};
 
 use crate::server::config::Config;
@@ -9,14 +9,13 @@ use crate::server::infrastructure::models::{
     Configuration, FileItem, InsertLiveStreamer, InsertUploadStreamer, LiveStreamer, StreamerInfo,
     UploadStreamer,
 };
-use crate::server::infrastructure::repositories::{del_streamer, get_all_streamer, get_config};
+use crate::server::infrastructure::repositories::{del_streamer, get_all_streamer};
 use crate::server::infrastructure::service_register::ServiceRegister;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use error_stack::{ResultExt, bail};
-use ormlite::query_builder::OnConflict;
+use error_stack::ResultExt;
 use ormlite::{Insert, Model};
 use serde_json::json;
 use tracing::info;
@@ -40,7 +39,7 @@ pub async fn get_streamers_endpoint(
                     .iter()
                     .find_map(|worker| {
                         if worker.id == x.id {
-                            Some(worker.downloader_status.read().unwrap().clone())
+                            Some(*worker.downloader_status.read().unwrap())
                         } else {
                             None
                         }
@@ -114,7 +113,7 @@ pub async fn delete_streamers_endpoint(
     State(workers): State<Arc<RwLock<Vec<Arc<Worker>>>>>,
     Path(id): Path<i64>,
 ) -> Result<Json<LiveStreamer>, Response> {
-    let _ = service_register
+    service_register
         .del_room(id)
         .await
         .map_err(report_to_response)?;

@@ -1,19 +1,9 @@
 use biliup::client::StatelessClient;
 
-use anyhow::Context;
-use axum::routing::{delete, get, post, put};
-use axum::{Extension, Router, http};
+use axum::{Extension, http};
 
 use crate::server;
 use crate::server::api::auth;
-use crate::server::api::bilibili_endpoints::{
-    archive_pre_endpoint, get_myinfo_endpoint, get_proxy_endpoint,
-};
-use crate::server::api::endpoints::{
-    delete_streamers_endpoint, delete_user_endpoint, get_configuration, get_streamer_info,
-    get_streamers_endpoint, get_upload_streamer_endpoint, get_upload_streamers_endpoint,
-    get_users_endpoint, post_streamers_endpoint, put_streamers_endpoint,
-};
 use crate::server::api::spa::static_handler;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::service_register::ServiceRegister;

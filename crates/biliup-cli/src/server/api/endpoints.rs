@@ -1,20 +1,18 @@
 use crate::server::core::download_actor::DownloadActorHandle;
 use crate::server::core::live_streamers::{
-    AddLiveStreamerDto, DynLiveStreamersRepository, DynLiveStreamersService, LiveStreamerDto,
+    AddLiveStreamerDto, DynLiveStreamersService, LiveStreamerDto,
     LiveStreamerEntity,
 };
 use crate::server::core::upload_streamers::{DynUploadStreamersRepository, StudioEntity};
-use crate::server::core::users::{DynUsersRepository, User};
+use crate::server::core::users::User;
 use crate::server::errors::{AppError, AppResult};
 
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::repositories::models::{
     Configuration, FileItem, LiveStreamer, StreamerInfo, UploadStreamer,
 };
-use crate::server::infrastructure::service_register::ServiceRegister;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
-use biliup::credential::login_by_cookies;
 use ormlite::Model;
 use serde_json::json;
 

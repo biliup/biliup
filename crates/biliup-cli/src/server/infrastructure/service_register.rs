@@ -1,17 +1,11 @@
 use crate::server::core::live_streamers::{
-    DynDownloadRecordsRepository, DynLiveStreamersRepository, DynLiveStreamersService,
+    DynDownloadRecordsRepository,
     DynVideosRepository,
 };
-use crate::server::core::upload_streamers::{
-    DynUploadRecordsRepository, DynUploadStreamersRepository,
-};
-use crate::server::core::users::DynUsersRepository;
+use crate::server::core::upload_streamers::DynUploadRecordsRepository;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::repositories::download_records_repository::SqliteDownloadRecordsRepository;
-use crate::server::infrastructure::repositories::live_streamers_repository::SqliteLiveStreamersRepository;
 use crate::server::infrastructure::repositories::upload_records_repository::SqliteUploadRecordsRepository;
-use crate::server::infrastructure::repositories::upload_streamers_repository::SqliteUploadStreamersRepository;
-use crate::server::infrastructure::repositories::users_repository::SqliteUsersStreamersRepository;
 use crate::server::infrastructure::repositories::videos_repository::SqliteVideosRepository;
 use axum::extract::FromRef;
 use std::sync::Arc;

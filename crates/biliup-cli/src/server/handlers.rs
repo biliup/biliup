@@ -1,8 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
-use std::collections::HashMap;
-use std::path::Path;
 use tokio::fs;
 use tracing::{debug, error, info, warn};
 
@@ -131,6 +129,12 @@ impl EventHandler for DownloadHandler {
 
 /// 下载完成处理器，对应Python的processed
 pub struct DownloadedHandler {}
+
+impl Default for DownloadedHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl DownloadedHandler {
     pub fn new() -> Self {
@@ -263,6 +267,12 @@ impl EventHandler for UploadHandler {
 
 /// 上传完成处理器，对应Python的uploaded函数
 pub struct UploadedHandler {}
+
+impl Default for UploadedHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl UploadedHandler {
     pub fn new() -> Self {

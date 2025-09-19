@@ -3,18 +3,11 @@ use crate::server::config::Config;
 use crate::server::core::download_manager::{ActorHandle, DownloadManager};
 use crate::server::core::monitor::Monitor;
 use crate::server::core::plugin;
-use crate::server::errors::{AppError, AppResult, report_to_response};
+use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::Worker;
-use crate::server::infrastructure::models::{
-    Configuration, LiveStreamer, StreamerInfo, UploadStreamer,
-};
-use crate::server::infrastructure::repositories;
-use crate::server::infrastructure::repositories::del_streamer;
 use axum::extract::FromRef;
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
-use error_stack::{ResultExt, bail};
+use error_stack::bail;
 use ormlite::Model;
 use std::sync::{Arc, RwLock};
 use tracing::info;
@@ -65,12 +58,7 @@ impl ServiceRegister {
     }
 
     pub fn get_manager(&self, url: &str) -> Option<&DownloadManager> {
-        for manager in self.managers.iter() {
-            if manager.matches(url) {
-                return Some(manager);
-            }
-        }
-        None
+        self.managers.iter().find(|&manager| manager.matches(url)).map(|v| v as _)
     }
 
     pub async fn add_room(

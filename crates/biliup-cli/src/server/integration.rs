@@ -3,9 +3,7 @@ use tokio::task::JoinHandle;
 use tracing::{error, info};
 
 use crate::server::{
-    config_manager::ConfigManager, core::live_streamers::DynLiveStreamersService,
-    event_manager::EventManager, handlers::HandlerRegistry,
-    infrastructure::connection_pool::ConnectionManager, plugin_registry::initialize_plugins,
+    core::live_streamers::DynLiveStreamersService, plugin_registry::initialize_plugins,
 };
 
 /// 集成管理器，负责协调所有组件

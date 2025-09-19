@@ -2,15 +2,11 @@ use crate::server::core::downloader::SegmentEvent;
 use crate::server::core::monitor::{Monitor, RoomsHandle};
 use crate::server::core::plugin::{DownloadPlugin, StreamInfo};
 use crate::server::errors::{AppError, AppResult};
-use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Worker, WorkerStatus};
-use crate::uploader::UploadLine;
-use anyhow::Context;
 use async_channel::{Receiver, Sender, bounded};
-use biliup::bilibili::{BiliBili, Credit, Studio, Video};
+use biliup::bilibili::{BiliBili, Studio, Video};
 use biliup::client::StatelessClient;
 use biliup::credential::login_by_cookies;
-use biliup::error::Kind;
 use biliup::uploader::line::{Line, Probe};
 use biliup::uploader::util::SubmitOption;
 use biliup::uploader::{VideoFile, line};
@@ -112,7 +108,7 @@ impl UActor {
 
     async fn run(&mut self) {
         while let Ok(msg) = self.receiver.recv().await {
-            self.handle_message(msg);
+            self.handle_message(msg).await;
         }
     }
 
@@ -148,7 +144,7 @@ impl UActor {
                     config.threads as usize,
                     &client,
                     &line,
-                    &*event.file_path,
+                    &event.file_path,
                 )
                 .await
                 {
@@ -160,7 +156,7 @@ impl UActor {
                         config.threads as usize,
                         &client,
                         &line,
-                        &*event.file_path,
+                        &event.file_path,
                     )
                     .await
                     {
@@ -202,13 +198,11 @@ impl UActor {
                     )
                     .build();
 
-                if !studio.cover.is_empty() {
-                    if let Ok(c) = &std::fs::read(&studio.cover).map_err(|e| error!(e=?e)) {
-                        if let Ok(url) = bilibili.cover_up(c).await.map_err(|e| error!(e=?e)) {
+                if !studio.cover.is_empty()
+                    && let Ok(c) = &std::fs::read(&studio.cover).map_err(|e| error!(e=?e))
+                        && let Ok(url) = bilibili.cover_up(c).await.map_err(|e| error!(e=?e)) {
                             studio.cover = url;
-                        }
-                    }
-                };
+                        };
 
                 let submit = match config.submit_api {
                     Some(submit) => SubmitOption::from_str(&submit).unwrap_or(SubmitOption::App),
@@ -241,11 +235,11 @@ impl UActor {
                 .to_str()
         );
         info!("{line:?}");
-        let video_file = VideoFile::new(&video_path).change_context(AppError::Unknown)?;
+        let video_file = VideoFile::new(video_path).change_context(AppError::Unknown)?;
         let total_size = video_file.total_size;
         let file_name = video_file.file_name.clone();
         let uploader = line
-            .pre_upload(&bilibili, video_file)
+            .pre_upload(bilibili, video_file)
             .await
             .change_context(AppError::Unknown)?;
 

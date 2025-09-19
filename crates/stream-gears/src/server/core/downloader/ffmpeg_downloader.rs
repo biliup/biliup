@@ -4,7 +4,7 @@ use crate::server::core::downloader::{
     DownloadConfig, DownloadStatus, Downloader, DownloaderType, SegmentEvent,
 };
 use crate::server::infrastructure::context::Worker;
-use async_channel::{SendError, Sender, bounded};
+use async_channel::{Sender, bounded};
 use async_trait::async_trait;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -181,7 +181,7 @@ impl FfmpegDownloader {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
-        let mut child = cmd.spawn()?;
+        let child = cmd.spawn()?;
 
         // 保存进程句柄
         {
@@ -199,9 +199,9 @@ impl FfmpegDownloader {
             }
         };
         // let (tx, rx) = bounded(16);
-        let mut i = 0;
+        let i = 0;
         // 分段回调
-        let mut segment_callback = |event: SegmentEvent| {
+        let segment_callback = |event: SegmentEvent| {
             println!("New segment: {:?}", event.file_path);
             // if i == 0 {
             //     match sender.force_send(UploaderMessage::SegmentEvent(event)) {

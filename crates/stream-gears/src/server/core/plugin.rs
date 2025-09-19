@@ -2,11 +2,10 @@ use crate::construct_headers;
 use crate::server::core::download_manager::{ActorHandle, DownloadManager};
 use crate::server::core::downloader::ffmpeg_downloader::FfmpegDownloader;
 use crate::server::core::downloader::stream_gears::StreamGears;
-use crate::server::core::downloader::{DownloadConfig, Downloader, DownloaderType, SegmentEvent};
+use crate::server::core::downloader::{DownloadConfig, Downloader, DownloaderType};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::Worker;
 use crate::server::util::{Recorder, media_ext_from_url, parse_time};
-use async_channel::{Receiver, Sender, bounded};
 use async_trait::async_trait;
 use biliup::downloader::util::Segmentable;
 use error_stack::{Report, ResultExt};
@@ -17,11 +16,8 @@ use pyo3::{Bound, Py, PyAny, PyResult, Python};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::Arc;
 use time::OffsetDateTime;
-use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
 use tracing::{debug, info};
 
 // Stream information structures

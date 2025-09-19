@@ -1,11 +1,9 @@
 use biliup::client::StatelessClient;
 
 use crate::server::core::StreamStatus;
-use crate::server::core::live_streamers::{DynLiveStreamersService, LiveStreamerDto};
-use crate::server::core::upload_actor::UploadActorHandle;
-use crate::server::core::util::{AnyMap, Cycle, logging_spawn};
+use crate::server::core::live_streamers::LiveStreamerDto;
+use crate::server::core::util::{AnyMap, Cycle};
 use biliup::downloader::extractor::{SiteDefinition, find_extractor};
-use biliup::downloader::util::Segmentable;
 
 use indexmap::indexmap;
 
@@ -15,8 +13,7 @@ use std::ops::DerefMut;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::task::JoinHandle;
-use tracing::log::info;
-use tracing::{debug, error};
+use tracing::debug;
 
 async fn start_monitor(
     task: Cycle<StreamStatus>,
@@ -27,7 +24,7 @@ async fn start_monitor(
     let n = &mut 0;
     loop {
         let (url, status) = task.get(n);
-        if status != StreamStatus::Working {}
+        status != StreamStatus::Working;
 
         match status {
             StreamStatus::Working => {}
@@ -39,7 +36,7 @@ async fn start_monitor(
         }
 
         match (extractor.get_site(&url, client.clone()).await, status) {
-            (Ok(mut site), StreamStatus::Idle | StreamStatus::Inspecting) => {
+            (Ok(site), StreamStatus::Idle | StreamStatus::Inspecting) => {
                 println!("Idle\n {url} \n{site}");
                 // let (filename, split_size, split_time) = if let Ok(LiveStreamerDto {
                 //     filename,

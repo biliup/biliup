@@ -129,11 +129,11 @@ pub(crate) async fn parse_flv(
                 }
                 on_meta_data = Some((tag_header, bytes.clone(), previous_tag_size.clone()));
 
-                let flv_tag = FlvTag {
+                
+                FlvTag {
                     header: tag_header,
                     data: TagDataHeader::Script(tag_data),
-                };
-                flv_tag
+                }
             }
         };
         match &flv_tag {

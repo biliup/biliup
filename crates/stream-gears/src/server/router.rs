@@ -7,12 +7,9 @@ use crate::server::api::endpoints::{
     get_upload_streamer_endpoint, get_upload_streamers_endpoint, get_users_endpoint,
     post_streamers_endpoint, put_streamers_endpoint,
 };
-use crate::server::api::spa::static_handler;
 use crate::server::infrastructure::service_register::ServiceRegister;
-use axum::http::HeaderValue;
 use axum::routing::{delete, get, post};
-use axum::{Extension, Router, http};
-use tower_http::cors::{AllowMethods, CorsLayer};
+use axum::Router;
 
 pub fn router(service_register: ServiceRegister) -> Router<()> {
     Router::new()

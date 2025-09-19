@@ -72,8 +72,8 @@ impl SiteDefinition for DouyuLive {
             .await?
             .json()
             .await?;
-        if result["error"] == 0 {
-            if let Some(key) = regex::Regex::new(r"(\d{1,8}[0-9a-zA-Z]+)_?\d{0,4}(/playlist|.m3u8)")
+        if result["error"] == 0
+            && let Some(key) = regex::Regex::new(r"(\d{1,8}[0-9a-zA-Z]+)_?\d{0,4}(/playlist|.m3u8)")
                 .unwrap()
                 .captures(&result["data"]["rtmp_live"].to_string())
             {
@@ -90,7 +90,6 @@ impl SiteDefinition for DouyuLive {
                     client,
                 });
             }
-        }
         Err(Error::Custom(result.to_string()))
     }
 

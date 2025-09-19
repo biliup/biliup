@@ -3,19 +3,18 @@
 # 2024.06.22: 添加来自 https://github.com/hua0512/stream-rec 修改后的 webmssdk.js，以计算 signature
 
 import gzip
+import logging
 
 import aiohttp
-import json
-from urllib.parse import unquote
-from biliup.config import config
-from .douyin_util.dy_pb2 import ChatMessage, PushFrame, Response
-from biliup.plugins import match1
 from google.protobuf import json_format
-import logging
+
+from .douyin_util.dy_pb2 import ChatMessage, PushFrame, Response
 
 logger = logging.getLogger('biliup')
 
 class Douyin:
+    from biliup.config import config
+
     headers = {
         # 'user-agent': random_user_agent(),
         'Referer': 'https://live.douyin.com/',

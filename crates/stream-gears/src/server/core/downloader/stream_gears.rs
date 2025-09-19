@@ -1,17 +1,15 @@
 use crate::server::core::download_manager::UploaderMessage;
 use crate::server::core::downloader::{DownloadStatus, Downloader, SegmentEvent};
 use crate::server::infrastructure::context::Worker;
-use async_channel::{SendError, Sender, bounded};
+use async_channel::{Sender, bounded};
 use async_trait::async_trait;
 use axum::http::HeaderMap;
 use biliup::client::StatelessClient;
-use biliup::downloader::extractor::CallbackFn;
 use biliup::downloader::flv_parser::header;
 use biliup::downloader::httpflv::Connection;
 use biliup::downloader::util::{LifecycleFile, Segmentable};
 use biliup::downloader::{hls, httpflv};
 use nom::Err;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
@@ -51,7 +49,7 @@ impl StreamGears {
         Self {
             url: url.into(),
             header_map,
-            file_name: file_name.into(),
+            file_name: file_name,
             segment,
             proxy,
             status: Arc::new(RwLock::new(DownloadStatus::Downloading)),

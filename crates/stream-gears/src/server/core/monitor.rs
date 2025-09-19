@@ -2,16 +2,11 @@ use crate::server::core::download_manager::{ActorHandle, DownloaderMessage};
 use crate::server::core::plugin::{DownloadPlugin, StreamStatus};
 use crate::server::infrastructure::context::{Worker, WorkerStatus};
 use async_channel::{Receiver, Sender, bounded};
-use pyo3::Py;
-use pyo3::types::PyType;
-use std::collections::HashMap;
-use std::error::Error;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::info;
 
 async fn start_client(
     rooms_handle: Arc<RoomsHandle>,

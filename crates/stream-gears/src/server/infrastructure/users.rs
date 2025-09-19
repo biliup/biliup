@@ -1,12 +1,11 @@
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::models::Configuration;
 use axum_login::{AuthUser, AuthnBackend, UserId};
 use error_stack::FutureExt;
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{ResultExt, bail};
 use password_auth::{generate_hash, verify_password};
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, SqlitePool};
+use sqlx::FromRow;
 use tokio::task;
 
 #[derive(Clone, Serialize, Deserialize, FromRow)]

@@ -5,7 +5,6 @@ use crate::server::core::download_manager::UploaderMessage;
 use crate::server::infrastructure::context::Worker;
 use async_channel::Sender;
 use async_trait::async_trait;
-use ffmpeg_downloader::FfmpegDownloader;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;

@@ -16,7 +16,7 @@ pub async fn get_streamer(pool: &ConnectionPool, id: i64) -> AppResult<LiveStrea
 
 pub async fn del_streamer(pool: &ConnectionPool, id: i64) -> AppResult<LiveStreamer> {
     let streamer = get_streamer(pool, id).await?;
-    let _ = streamer
+    streamer
         .clone()
         .delete(pool)
         .await
@@ -24,10 +24,10 @@ pub async fn del_streamer(pool: &ConnectionPool, id: i64) -> AppResult<LiveStrea
     Ok(streamer)
 }
 pub async fn get_all_streamer(pool: &ConnectionPool) -> AppResult<Vec<LiveStreamer>> {
-    Ok(LiveStreamer::select()
+    LiveStreamer::select()
         .fetch_all(pool)
         .await
-        .change_context(AppError::Unknown)?)
+        .change_context(AppError::Unknown)
 }
 
 pub async fn get_config(pool: &ConnectionPool) -> AppResult<Config> {
@@ -56,8 +56,8 @@ pub async fn get_config(pool: &ConnectionPool) -> AppResult<Config> {
 }
 
 pub async fn get_all_uploader(pool: &ConnectionPool) -> AppResult<Vec<UploadStreamer>> {
-    Ok(UploadStreamer::select()
+    UploadStreamer::select()
         .fetch_all(pool)
         .await
-        .change_context(AppError::Unknown)?)
+        .change_context(AppError::Unknown)
 }

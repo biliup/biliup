@@ -6,7 +6,7 @@ use crate::server::infrastructure::repositories::{get_config, get_streamer};
 use error_stack::ResultExt;
 use ormlite::Model;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 use tracing::info;
 
 pub struct Context {
@@ -62,12 +62,12 @@ impl Worker {
             return Ok(None);
         };
 
-        Ok(UploadStreamer::select()
+        UploadStreamer::select()
             .where_("id = ?")
             .bind(id)
             .fetch_optional(&self.pool)
             .await
-            .change_context(AppError::Unknown)?)
+            .change_context(AppError::Unknown)
     }
 
     pub fn change_status(&self, stage: Stage, status: WorkerStatus) {

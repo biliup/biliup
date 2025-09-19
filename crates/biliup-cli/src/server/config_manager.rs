@@ -330,7 +330,7 @@ impl ConfigManager {
             .streamers
             .as_ref()
             .map(|streamers| streamers.keys().cloned().collect())
-            .unwrap_or_else(Vec::new)
+            .unwrap_or_default()
     }
 
     /// 获取配置值（通用方法）
@@ -348,8 +348,8 @@ impl ConfigManager {
         let content = fs::read_to_string(path).await?;
         let cookies_data: serde_json::Value = serde_json::from_str(&content)?;
 
-        if let Some(cookie_info) = cookies_data.get("cookie_info") {
-            if let Some(cookies) = cookie_info.get("cookies").and_then(|c| c.as_array()) {
+        if let Some(cookie_info) = cookies_data.get("cookie_info")
+            && let Some(cookies) = cookie_info.get("cookies").and_then(|c| c.as_array()) {
                 let mut cookie_map = HashMap::new();
                 for cookie in cookies {
                     if let (Some(name), Some(value)) = (
@@ -370,15 +370,12 @@ impl ConfigManager {
                     user.cookies = Some(cookie_map);
                 }
             }
-        }
 
-        if let Some(token_info) = cookies_data.get("token_info") {
-            if let Some(access_token) = token_info.get("access_token").and_then(|t| t.as_str()) {
-                if let Some(ref mut user) = self.config.user {
+        if let Some(token_info) = cookies_data.get("token_info")
+            && let Some(access_token) = token_info.get("access_token").and_then(|t| t.as_str())
+                && let Some(ref mut user) = self.config.user {
                     user.access_token = Some(access_token.to_string());
                 }
-            }
-        }
 
         Ok(())
     }

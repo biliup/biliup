@@ -6,7 +6,6 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, error, info};
 
-use crate::server::core::live_streamers::LiveStreamerDto;
 
 /// 事件类型枚举，对应Python版本的事件
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

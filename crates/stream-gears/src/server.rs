@@ -7,43 +7,23 @@ pub mod infrastructure;
 mod router;
 mod util;
 
-use anyhow::Context;
-use async_channel::{Receiver, SendError, Sender, bounded};
-use async_trait::async_trait;
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
-use error_stack::{Report, ResultExt};
-use fancy_regex::Regex;
-use futures::{FutureExt, TryFutureExt};
+use error_stack::ResultExt;
+use futures::TryFutureExt;
 use pyo3::exceptions::PyRuntimeError;
-use pyo3::prelude::{PyAnyMethods, PyListMethods, PyModule, PyTypeMethods};
-use pyo3::types::{PyList, PyType};
-use pyo3::{Bound, Py, PyAny, PyObject, PyResult, Python, pyfunction};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use pyo3::prelude::PyListMethods;
+use pyo3::{PyResult, Python, pyfunction};
 use std::net::ToSocketAddrs;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex, RwLock};
-use std::time::Duration;
-use thiserror::Error;
-use tokio::signal;
-use tokio::sync::oneshot;
-use tokio::task::{AbortHandle, JoinHandle};
 // use tokio::sync::mpsc::Receiver;
 use crate::server::app::ApplicationController;
-use crate::server::config::{Config, StreamerConfig};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionManager;
-use crate::server::infrastructure::context::Worker;
 use crate::server::infrastructure::repositories;
 use crate::server::infrastructure::service_register::ServiceRegister;
-use biliup::downloader::httpflv::download;
-use core::download_manager::DownloadManager;
-use tracing::{error, info};
+use tracing::info;
 
 #[pyfunction]
 pub fn main_loop(py: Python<'_>) -> PyResult<()> {
-    py.detach(|| _main())
+    py.detach(_main)
         .map_err(|e| PyRuntimeError::new_err(format!("{e:?}")))
 
     // for item in plugin_list.iter() {

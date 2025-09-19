@@ -4,7 +4,6 @@ use axum::response::{IntoResponse, Response};
 use error_stack::Report;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::error::Error;
 use thiserror::Error;
 use tracing::log::error;
 
@@ -18,7 +17,7 @@ pub enum AppError {
 }
 
 pub fn report_to_response(report: impl Into<Report<AppError>>) -> Response {
-    let mut report = report.into();
+    let report = report.into();
     let (status, error_message) = match report.downcast_ref::<AppError>() {
         Some(AppError::Unknown) => (StatusCode::INTERNAL_SERVER_ERROR, report.to_string()),
         Some(AppError::Custom(msg)) => (StatusCode::INTERNAL_SERVER_ERROR, msg.into()),

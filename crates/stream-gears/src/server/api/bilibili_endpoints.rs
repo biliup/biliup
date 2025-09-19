@@ -1,4 +1,4 @@
-use crate::server::errors::{AppError, AppResult, report_to_response};
+use crate::server::errors::{AppError, report_to_response};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::models::Configuration;
 use axum::extract::{Query, State};
@@ -58,7 +58,7 @@ pub async fn get_proxy_endpoint(
 ) -> Result<Bytes, Response> {
     info!(params = &params["url"]);
     // let bili = login_by_cookies(&params["user"]).await?;
-    Ok(client
+    client
         .client
         .get(&params["url"])
         .send()
@@ -68,5 +68,5 @@ pub async fn get_proxy_endpoint(
         .bytes()
         .await
         .change_context(AppError::Unknown)
-        .map_err(report_to_response)?)
+        .map_err(report_to_response)
 }

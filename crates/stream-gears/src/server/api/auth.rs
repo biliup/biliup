@@ -1,8 +1,7 @@
 use axum::{
-    Form, Router,
-    extract::Query,
+    Router,
     http::StatusCode,
-    response::{Html, IntoResponse, Redirect},
+    response::{IntoResponse, Redirect},
     routing::{get, post},
 };
 use serde::Deserialize;
@@ -93,7 +92,7 @@ mod post {
 
 mod get {
     use super::*;
-    use crate::server::errors::AppResult;
+    
     use tracing::error;
 
     // pub async fn login(
@@ -119,7 +118,7 @@ mod get {
             Ok(false) => StatusCode::NOT_FOUND.into_response(),
             Err(e) => {
                 error!(error = ?e, "Error checking existing user");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
             }
         }
     }

@@ -3,13 +3,13 @@ use crate::server::infrastructure::models::HookStep;
 use anyhow::{Context, bail};
 use pyo3::prelude::PyDictMethods;
 use pyo3::sync::OnceLockExt;
-use pyo3::types::{PyAnyMethods, PyDict, PyMapping, PyString};
-use pyo3::{Bound, FromPyObject, Py, PyAny, PyResult, Python, pyclass, pyfunction, pymethods};
+use pyo3::types::{PyAnyMethods, PyDict};
+use pyo3::{Bound, FromPyObject, PyAny, PyResult, Python, pyclass, pyfunction, pymethods};
 use pythonize::pythonize;
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use std::sync::{Arc, OnceLock, RwLock};
-use std::{collections::HashMap, fs, path::Path, path::PathBuf};
+use std::{collections::HashMap, path::Path, path::PathBuf};
 
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
