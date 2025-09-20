@@ -1,8 +1,10 @@
+pub mod hook_step;
+
 use chrono::NaiveDateTime;
+use hook_step::HookStep;
 use ormlite::{Insert, Model};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
 
 #[derive(Model, Debug, Clone, Serialize, Deserialize)]
 #[ormlite(table = "uploadstreamers")]
@@ -87,14 +89,6 @@ pub struct Configuration {
     pub id: i64,
     pub key: String,
     pub value: String, // TEXT
-}
-
-// 钩子步骤：既支持 key-value 形式（如 {run: "..."}），也支持纯字符串（如 "rm"）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum HookStep {
-    Map(HashMap<String, String>),
-    Symbol(String),
 }
 
 #[derive(Insert, Debug, Serialize, Deserialize)]

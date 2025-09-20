@@ -18,7 +18,8 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::task::JoinHandle;
-use tracing::{error, info};
+use tracing::{error, info, warn};
+use crate::server::infrastructure::models::hook_step::process_video;
 
 pub struct DownloadManager {
     pub monitor: Mutex<Option<Arc<Monitor>>>,
@@ -83,7 +84,35 @@ impl DActor {
 
                 *room.downloader_status.write().unwrap() = WorkerStatus::Working;
 
-                match downloader.download(self.sender.clone(), room.clone()).await {
+                let (tx, rx) = bounded(16);
+                let hook = {
+                    let room = room.clone();
+                    let sender = self.sender.clone();
+                    move |event: SegmentEvent| {
+                        if event.segment_index == 0 {
+                            match sender.force_send(UploaderMessage::SegmentEvent(
+                                    event,
+                                    rx.clone(),
+                                    room.clone(),
+                                )) {
+                                Ok(Some(ret)) => {
+                                    warn!(SegmentEvent = ?ret, "replace an existing message in the channel");
+                                }
+                                Err(_) => {}
+                                Ok(None) => {}
+                            };
+                        } else {
+                            match tx.clone().force_send(event) {
+                                Ok(Some(ret)) => {
+                                    warn!(SegmentEvent = ?ret, "replace an existing message in the channel");
+                                }
+                                Err(_) => {}
+                                Ok(None) => {}
+                            }
+                        }
+                    }
+                };
+                match downloader.download(Box::new(hook)).await {
                     Ok(status) => {
                         println!("Download completed with status: {:?}", status);
                     }
@@ -137,6 +166,7 @@ impl UActor {
                     "alia" => line::alia(),
                     _ => Probe::probe(&client.client).await.unwrap_or_default(),
                 };
+                let mut video_paths = Vec::new();
                 let mut videos = Vec::new();
                 if let Ok(video) = UActor::upload_file(
                     &bilibili,
@@ -145,22 +175,25 @@ impl UActor {
                     &line,
                     &event.file_path,
                 )
-                .await
+                .await.map_err(|e| error!(e=?e))
                 {
                     videos.push(video);
                 }
+                video_paths.push(event.file_path);
+
                 while let Ok(se) = rx.recv().await {
                     if let Ok(video) = UActor::upload_file(
                         &bilibili,
                         config.threads as usize,
                         &client,
                         &line,
-                        &event.file_path,
+                        &se.file_path,
                     )
-                    .await
+                    .await.map_err(|e| error!(e=?e))
                     {
                         videos.push(video);
                     }
+                    video_paths.push(se.file_path);
                 }
 
                 // let mut desc_v2 = Vec::new();
@@ -216,6 +249,15 @@ impl UActor {
                     _ => bilibili.submit_by_app(&studio, None).await,
                 };
                 info!(submit_result=?submit_result);
+                if submit_result.is_ok() {
+                    info!("Submit successful");
+                    let streamer = worker.get_streamer().await.unwrap();
+                    if let Some(post_processor) = streamer.postprocessor {
+                        for video_path in &video_paths {
+                            process_video(video_path, &post_processor).await.map_err(|e| error!(e=?e));
+                        }
+                    }
+                }
             }
         }
     }

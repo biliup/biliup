@@ -60,7 +60,7 @@ impl ApplicationController {
 
         // let vec = service_register.streamers_service.get_streamers().await?;
         // build our application with a route
-        let enable_login_guard = false;
+        let enable_login_guard = true;
         let mut app = server::router::router(service_register);
         if enable_login_guard {
             app = app

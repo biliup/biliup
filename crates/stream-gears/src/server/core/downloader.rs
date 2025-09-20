@@ -88,8 +88,9 @@ pub trait Downloader: Send + Sync {
     /// 开始下载
     async fn download(
         &self,
-        sender: Sender<UploaderMessage>,
-        worker: Arc<Worker>,
+        // sender: Sender<UploaderMessage>,
+        // worker: Arc<Worker>,
+        callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
     ) -> Result<DownloadStatus, Box<dyn std::error::Error>>;
 
     /// 停止下载

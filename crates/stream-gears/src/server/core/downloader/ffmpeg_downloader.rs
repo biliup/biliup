@@ -168,7 +168,7 @@ impl FfmpegDownloader {
     /// 执行外部分段下载
     async fn download_external(
         &self,
-        sender: Sender<UploaderMessage>,
+        callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
     ) -> Result<DownloadStatus, Box<dyn std::error::Error>> {
         let args = self.build_ffmpeg_args_external_segment();
         let output_file = self.generate_output_filename();
@@ -243,8 +243,7 @@ impl FfmpegDownloader {
     /// 执行内部分段下载
     async fn download_internal(
         &self,
-        sender: Sender<UploaderMessage>,
-        worker: Arc<Worker>,
+        callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
     ) -> Result<DownloadStatus, Box<dyn std::error::Error>> {
         let args = self.build_ffmpeg_args_internal_segment();
         let output_pattern = self.output_dir.join("%d.{}");
@@ -281,33 +280,6 @@ impl FfmpegDownloader {
                 eprintln!("[ffmpeg] {line}");
             }
         });
-        let (tx, rx) = bounded(16);
-        // 分段回调
-        let segment_callback = |event: SegmentEvent| {
-            println!("New segment: {:?}", event.file_path);
-            if event.segment_index == 0 {
-                match sender.force_send(UploaderMessage::SegmentEvent(
-                    event,
-                    rx.clone(),
-                    worker.clone(),
-                )) {
-                    Ok(Some(ret)) => {
-                        warn!(SegmentEvent = ?ret, "replace an existing message in the channel");
-                    }
-                    Err(_) => {}
-                    Ok(None) => {}
-                };
-                return;
-            }
-            match tx.force_send(event) {
-                Ok(Some(ret)) => {
-                    warn!(SegmentEvent = ?ret, "replace an existing message in the channel");
-                }
-                Err(_) => {}
-                Ok(None) => {}
-            }
-            // 这里可以触发上传等后续处理
-        };
 
         // 异步读取stdout
         let mut reader = BufReader::new(stdout).lines();
@@ -323,7 +295,7 @@ impl FfmpegDownloader {
 
             // 触发分段回调
 
-            segment_callback(SegmentEvent {
+            callback(SegmentEvent {
                 file_path: file_path.clone(),
                 segment_index,
                 start_time: std::time::SystemTime::now(),
@@ -351,12 +323,11 @@ impl FfmpegDownloader {
 impl Downloader for FfmpegDownloader {
     async fn download(
         &self,
-        sender: Sender<UploaderMessage>,
-        worker: Arc<Worker>,
+        callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
     ) -> Result<DownloadStatus, Box<dyn std::error::Error>> {
         match self.config.downloader_type {
-            DownloaderType::FfmpegExternal => self.download_external(sender).await,
-            DownloaderType::FfmpegInternal => self.download_internal(sender, worker).await,
+            DownloaderType::FfmpegExternal => self.download_external(callback).await,
+            DownloaderType::FfmpegInternal => self.download_internal(callback).await,
             _ => Err("Unsupported downloader type".into()),
         }
     }

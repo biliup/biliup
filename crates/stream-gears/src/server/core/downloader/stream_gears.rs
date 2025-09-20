@@ -15,19 +15,6 @@ use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
 use tracing::{debug, error, info, warn};
 
-// 纯 Rust 的 Segment（代替 PySegment）
-#[derive(Clone, Debug, Default)]
-pub struct Segment {
-    pub time: Option<u64>, // 秒
-    pub size: Option<u64>, // 字节
-}
-
-// 纯 Rust 的文件名回调
-pub type FileNameCallback = Arc<dyn Fn(&str) + Send + Sync + 'static>;
-
-// 若 biliup::downloader::download 接口里用的是这个别名，可以按需对齐
-type BiliupCallbackFn = Box<dyn Fn(&str) + Send + Sync + 'static>;
-
 // 具体下载器实现
 pub struct StreamGears {
     url: String,
@@ -61,8 +48,7 @@ impl StreamGears {
 impl Downloader for StreamGears {
     async fn download(
         &self,
-        sender: Sender<UploaderMessage>,
-        worker: Arc<Worker>,
+        callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
     ) -> Result<DownloadStatus, Box<dyn std::error::Error>> {
         let url = self.url.clone();
         let file_name = self.file_name.clone();
@@ -80,43 +66,18 @@ impl Downloader for StreamGears {
         let mut connection = Connection::new(response);
         // let buf = &mut [0u8; 9];
         let bytes = connection.read_frame(9).await?;
-        let (tx, rx) = bounded(16);
         let mut i = 0;
         let hook = move |s: &str| {
-            if i == 0 {
-                match sender.force_send(UploaderMessage::SegmentEvent(
-                    SegmentEvent {
-                        file_path: PathBuf::from(s),
-                        segment_index: i,
-                        start_time: SystemTime::now(),
-                        end_time: SystemTime::now(),
-                    },
-                    rx.clone(),
-                    worker.clone(),
-                )) {
-                    Ok(Some(ret)) => {
-                        warn!(SegmentEvent = ?ret, "replace an existing message in the channel");
-                    }
-                    Err(_) => {}
-                    Ok(None) => {}
-                };
-            } else {
-                match tx.force_send(SegmentEvent {
-                    file_path: PathBuf::from(s),
-                    segment_index: i,
-                    start_time: SystemTime::now(),
-                    end_time: SystemTime::now(),
-                }) {
-                    Ok(Some(ret)) => {
-                        warn!(SegmentEvent = ?ret, "replace an existing message in the channel");
-                    }
-                    Err(_) => {}
-                    Ok(None) => {}
-                }
-            }
             i += 1;
-            info!(s = s)
+            let event = SegmentEvent {
+                file_path: PathBuf::from(s),
+                segment_index: i,
+                start_time: SystemTime::now(),
+                end_time: SystemTime::now(),
+            };
+            callback(event);
         };
+
         match header(&bytes) {
             Ok((_i, header)) => {
                 debug!("header: {header:#?}");

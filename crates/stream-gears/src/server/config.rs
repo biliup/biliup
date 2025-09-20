@@ -1,5 +1,5 @@
 use crate::server::core::downloader::DownloaderType;
-use crate::server::infrastructure::models::HookStep;
+use crate::server::infrastructure::models::hook_step::HookStep;
 use anyhow::{Context, bail};
 use pyo3::prelude::PyDictMethods;
 use pyo3::sync::OnceLockExt;
