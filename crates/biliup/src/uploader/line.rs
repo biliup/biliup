@@ -132,7 +132,7 @@ impl Line {
     pub async fn pre_upload(&self, bili: &BiliBili, video_file: VideoFile) -> Result<Parcel> {
         let total_size = video_file.total_size;
         let file_name = video_file.file_name.clone();
-        let profile = "ugcfx/bup";
+        let profile = "ugcupos/bup"; // ugcfx/bup 需上传视频metadata和frame.zip
         let params = json!({
             // "probe_version": "20221109",
             // "upcdn": "",
