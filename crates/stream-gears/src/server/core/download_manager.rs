@@ -126,11 +126,10 @@ impl UActor {
                     return;
                 };
                 let config = worker.get_config().await.unwrap();
-                let line = config.lines;
                 let client = StatelessClient::default();
+                let line = config.lines;
                 let line = match line.as_str() {
                     "bda2" => line::bda2(),
-                    "qn" => line::qn(),
                     "bda" => line::bda(),
                     "tx" => line::tx(),
                     "txa" => line::txa(),

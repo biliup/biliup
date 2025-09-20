@@ -144,6 +144,7 @@ impl Upos {
         Ok(stream)
     }
 
+    /// 通知视频上传完成并获取视频信息
     pub(crate) async fn get_ret_video_info(
         &self,
         parts: &[serde_json::Value],

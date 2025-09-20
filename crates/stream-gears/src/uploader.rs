@@ -21,12 +21,20 @@ use typed_builder::TypedBuilder;
 #[pyclass]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum UploadLine {
-    Bda2,
-    Qn,
     Bldsa,
+    Cnbldsa,
+    Andsa,
+    Atdsa,
+    Bda2,
+    Cnbd,
+    Anbd,
+    Atbd,
     Tx,
-    Txa,
+    Cntx,
+    Antx,
+    Attx,
     Bda,
+    Txa,
     Alia,
 }
 
@@ -115,12 +123,20 @@ pub async fn upload(
     let client = StatelessClient::default();
     let mut videos = Vec::new();
     let line = match line {
-        Some(UploadLine::Bda2) => line::bda2(),
-        Some(UploadLine::Qn) => line::qn(),
-        Some(UploadLine::Bda) => line::bda(),
-        Some(UploadLine::Tx) => line::tx(),
-        Some(UploadLine::Txa) => line::txa(),
         Some(UploadLine::Bldsa) => line::bldsa(),
+        Some(UploadLine::Cnbldsa) => line::cnbldsa(),
+        Some(UploadLine::Andsa) => line::andsa(),
+        Some(UploadLine::Atdsa) => line::atdsa(),
+        Some(UploadLine::Bda2) => line::bda2(),
+        Some(UploadLine::Cnbd) => line::cnbd(),
+        Some(UploadLine::Anbd) => line::anbd(),
+        Some(UploadLine::Atbd) => line::atbd(),
+        Some(UploadLine::Tx) => line::tx(),
+        Some(UploadLine::Cntx) => line::cntx(),
+        Some(UploadLine::Antx) => line::antx(),
+        Some(UploadLine::Attx) => line::attx(),
+        // Some(UploadLine::Bda) => line::bda(),
+        Some(UploadLine::Txa) => line::txa(),
         Some(UploadLine::Alia) => line::alia(),
         _ => Probe::probe(&client.client).await.unwrap_or_default(),
     };
