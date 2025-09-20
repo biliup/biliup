@@ -129,7 +129,6 @@ pub(crate) async fn parse_flv(
                 }
                 on_meta_data = Some((tag_header, bytes.clone(), previous_tag_size.clone()));
 
-                
                 FlvTag {
                     header: tag_header,
                     data: TagDataHeader::Script(tag_data),

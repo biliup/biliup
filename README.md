@@ -74,8 +74,8 @@
 
 
 ## 💴捐赠
+![支付宝](.github/resource/Image.jpg)
 [爱发电 »](https://afdian.com/a/biliup)
-
 
 ## ⭐Stars
 [![Star History Chart](https://api.star-history.com/svg?repos=biliup/biliup&type=Date)](https://star-history.com/#biliup/biliup&Date)

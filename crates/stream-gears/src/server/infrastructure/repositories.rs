@@ -1,7 +1,9 @@
 use crate::server::config::Config;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::models::{Configuration, InsertConfiguration, LiveStreamer, UploadStreamer};
+use crate::server::infrastructure::models::{
+    Configuration, InsertConfiguration, LiveStreamer, UploadStreamer,
+};
 use error_stack::ResultExt;
 use ormlite::{Insert, Model};
 
@@ -41,18 +43,20 @@ pub async fn get_config(pool: &ConnectionPool) -> AppResult<Config> {
             serde_json::from_str(&configuration.value).change_context(AppError::Unknown)?;
         Ok(json)
     } else {
-        let config = Config::builder()
-            .streamers(Default::default())
-            .build();
-        let configuration = InsertConfiguration {
-            key: "config".to_string(),
-            value: serde_json::to_string(&config).unwrap(),
-        }.insert(pool).await.change_context(AppError::Unknown)?;
-        let json: Config =
-            serde_json::from_str(&configuration.value).change_context(AppError::Unknown)?;
-        Ok(json)
+        let config = Config::builder().streamers(Default::default()).build();
+        Ok(config)
     }
+}
 
+pub async fn insert_config(pool: &ConnectionPool, config: &Config) -> AppResult<Configuration> {
+    let configuration = InsertConfiguration {
+        key: "config".to_string(),
+        value: serde_json::to_string(config).unwrap(),
+    }
+    .insert(pool)
+    .await
+    .change_context(AppError::Unknown)?;
+    Ok(configuration)
 }
 
 pub async fn get_all_uploader(pool: &ConnectionPool) -> AppResult<Vec<UploadStreamer>> {

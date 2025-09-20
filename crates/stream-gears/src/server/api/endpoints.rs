@@ -1,23 +1,23 @@
-use crate::server::errors::{AppError, report_to_response};
-use std::sync::{Arc, RwLock};
-
 use crate::server::config::Config;
+use crate::server::errors::{AppError, report_to_response, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::Worker;
 use crate::server::infrastructure::dto::LiveStreamerResponse;
-use crate::server::infrastructure::models::{
-    Configuration, FileItem, InsertLiveStreamer, InsertUploadStreamer, LiveStreamer, StreamerInfo,
-    UploadStreamer,
-};
+use crate::server::infrastructure::models::{Configuration, FileItem, InsertConfiguration, InsertLiveStreamer, InsertUploadStreamer, LiveStreamer, StreamerInfo, UploadStreamer};
 use crate::server::infrastructure::repositories::{del_streamer, get_all_streamer};
 use crate::server::infrastructure::service_register::ServiceRegister;
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use biliup::credential::{Credential, LoginInfo};
 use error_stack::ResultExt;
 use ormlite::{Insert, Model};
 use serde_json::json;
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, UNIX_EPOCH};
+use tokio::fs;
+use tokio::io::AsyncWriteExt;
 use tracing::info;
 
 pub async fn get_streamers_endpoint(
@@ -244,6 +244,98 @@ pub async fn get_users_endpoint(
     Ok(Json(res))
 }
 
-pub async fn delete_user_endpoint(Path(id): Path<i64>) -> Result<Json<()>, Response> {
+pub async fn add_user_endpoint(
+    State(pool): State<ConnectionPool>,
+    Json(user): Json<InsertConfiguration>,
+) -> Result<Json<Configuration>, Response> {
+    let res = user.insert(&pool).await.change_context(AppError::Unknown).map_err(report_to_response)?;
+    Ok(Json(res))
+}
+
+pub async fn delete_user_endpoint(Path(id): Path<i64>, State(pool): State<ConnectionPool>) -> Result<Json<()>, Response> {
+    let x = sqlx::query("DELETE FROM configuration WHERE id = ?")
+        .bind(id)
+        .execute(&pool).await.change_context(AppError::Unknown).map_err(report_to_response)?;
+    info!("{:?}", x);
     Ok(Json(()))
+}
+
+pub async fn get_qrcode() -> Result<Json<serde_json::Value>, Response> {
+    let qrcode = Credential::new(None)
+        .get_qrcode()
+        .await
+        .change_context(AppError::Unknown)
+        .map_err(report_to_response)?;
+    Ok(Json(qrcode))
+}
+
+pub async fn login_by_qrcode(
+    Json(value): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, Response> {
+    let info = tokio::time::timeout(
+        Duration::from_secs(300),
+        Credential::new(None).login_by_qrcode(value),
+        // std::future::pending::<AppResult<LoginInfo>>(),
+    )
+    .await
+    .change_context(AppError::Custom("deadline has elapsed".to_string()))
+    .map_err(report_to_response)?
+    .change_context(AppError::Unknown)
+    .map_err(report_to_response)?;
+
+    // extract mid
+    let mid = info.token_info.mid;
+    let filename = format!("data/{}.json", mid);
+
+    let mut file = fs::File::create(&filename)
+        .await
+        .change_context(AppError::Unknown)
+        .map_err(report_to_response)?;
+    file.write_all(&serde_json::to_vec_pretty(&info).unwrap())
+        .await
+        .change_context(AppError::Unknown)
+        .map_err(report_to_response)?;
+
+    Ok(Json(json!({ "filename": filename })))
+}
+
+pub async fn get_videos() -> Result<Json<Vec<serde_json::Value>>, Response> {
+    let media_extensions = [".mp4", ".flv", ".3gp", ".webm", ".mkv", ".ts"];
+    let blacklist = ["next-env.d.ts"];
+
+    let mut file_list = Vec::new();
+    let mut index = 1;
+
+    // **use tokio::fs::read_dir**
+    if let Ok(mut entries) = fs::read_dir(".").await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            let file_name = entry.file_name().to_string_lossy().into_owned();
+
+            if blacklist.contains(&file_name.as_str()) {
+                continue;
+            }
+
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                if media_extensions.iter().any(|allowed| &ext == &allowed.trim_start_matches('.')) {
+                    if let Ok(metadata) = entry.metadata().await {
+                        let mtime = metadata.modified()
+                            .ok()
+                            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+
+                        file_list.push(serde_json::json!({
+                            "key": index,
+                            "name": file_name,
+                            "updateTime": mtime,
+                            "size": metadata.len(),
+                        }));
+                        index += 1;
+                    }
+                }
+            }
+        }
+    }
+    Ok(Json(file_list))
 }

@@ -7,8 +7,9 @@ use pyo3::types::{PyAnyMethods, PyDict};
 use pyo3::{Bound, FromPyObject, PyAny, PyResult, Python, pyclass, pyfunction, pymethods};
 use pythonize::pythonize;
 use serde::{Deserialize, Serialize};
+use std::cell::LazyCell;
 use std::ops::Deref;
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, LazyLock, OnceLock, RwLock};
 use std::{collections::HashMap, path::Path, path::PathBuf};
 
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
@@ -329,10 +330,14 @@ impl Config {
 }
 
 // 进程级全局单例（安全）：OnceLock + Arc + RwLock
-pub(crate) static CONFIG: OnceLock<Arc<RwLock<Config>>> = OnceLock::new();
+pub(crate) static CONFIG: LazyLock<Arc<RwLock<Config>>> = LazyLock::new(|| {
+    Arc::new(RwLock::new(
+        Config::builder().streamers(Default::default()).build(),
+    ))
+});
 
 fn cfg_arc() -> &'static Arc<RwLock<Config>> {
-    CONFIG.get().expect("Config not initialized")
+    &*CONFIG
 }
 
 #[pyclass]

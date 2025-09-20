@@ -1,7 +1,6 @@
 use crate::server::core::download_actor::DownloadActorHandle;
 use crate::server::core::live_streamers::{
-    AddLiveStreamerDto, DynLiveStreamersService, LiveStreamerDto,
-    LiveStreamerEntity,
+    AddLiveStreamerDto, DynLiveStreamersService, LiveStreamerDto, LiveStreamerEntity,
 };
 use crate::server::core::upload_streamers::{DynUploadStreamersRepository, StudioEntity};
 use crate::server::core::users::User;

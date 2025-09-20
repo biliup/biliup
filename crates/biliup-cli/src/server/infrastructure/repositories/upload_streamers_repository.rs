@@ -1,6 +1,5 @@
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 
-
 #[derive(Clone)]
 pub struct SqliteUploadStreamersRepository {
     pool: ConnectionPool,

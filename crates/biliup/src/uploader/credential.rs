@@ -113,7 +113,7 @@ pub struct LoginInfo {
 pub struct TokenInfo {
     pub access_token: String,
     expires_in: u32,
-    mid: u64,
+    pub mid: u64,
     refresh_token: String,
 }
 

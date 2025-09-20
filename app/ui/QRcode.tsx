@@ -29,16 +29,11 @@ const Qrcode: React.FC<QrcodeProps> = ({ onSuccess }) => {
           body: JSON.stringify(qrData),
           signal: signal,
         })
-        if (!(res.status >= 200 && res.status < 300)) {
-          throw new Error(await res.text())
-        }
         const data = await res.json()
-        if (!res.ok) {
-          throw new Error(data.message)
-        }
         onSuccess(data['filename'])
       })().catch(e => {
         console.log(e)
+        setUrl(e.message)
         Notification.error({
           title: 'QRcode',
           content: <Typography.Paragraph style={{ maxWidth: 450 }}>{e.message}</Typography.Paragraph>,
@@ -52,6 +47,10 @@ const Qrcode: React.FC<QrcodeProps> = ({ onSuccess }) => {
   }, [onSuccess])
   if (url === '') {
     return <Spin />
+  }
+
+  if (!url.startsWith("http")) {
+    return <> {url} </>
   }
   return (
     <div

@@ -61,12 +61,14 @@ pub struct LiveStreamer {
     // #[ormlite(json)] 数据库空与json空有区别所以这里不能用
     // pub preprocessor: Option<Vec<String>>,
     // 只能使用 sqlx::types::Json
-    pub preprocessor: sqlx::types::Json<Option<Vec<String>>>,
-
-    pub segment_processor: sqlx::types::Json<Option<Vec<HookStep>>>,
-
-    pub downloaded_processor: sqlx::types::Json<Option<Vec<HookStep>>>,
-    pub postprocessor: sqlx::types::Json<Option<Vec<HookStep>>>,
+    #[ormlite(json)]
+    pub preprocessor: Option<Vec<String>>,
+    #[ormlite(json)]
+    pub segment_processor: Option<Vec<HookStep>>,
+    #[ormlite(json)]
+    pub downloaded_processor: Option<Vec<HookStep>>,
+    #[ormlite(json)]
+    pub postprocessor: Option<Vec<HookStep>>,
     pub opt_args: Option<Value>,
     pub excluded_keywords: Option<Value>,
 }
@@ -80,7 +82,7 @@ pub struct FileItem {
 }
 
 #[derive(Model, Debug, Clone, Serialize, Deserialize)]
-#[ormlite(table = "configuration", insert = "InsertConfiguration")]
+#[ormlite(table = "configuration")]
 pub struct Configuration {
     pub id: i64,
     pub key: String,
@@ -110,12 +112,14 @@ pub struct InsertLiveStreamer {
     // #[ormlite(json)] 数据库空与json空有区别所以这里不能用
     // pub preprocessor: Option<Vec<String>>,
     // 只能使用 sqlx::types::Json
-    pub preprocessor: sqlx::types::Json<Option<Vec<String>>>,
-
-    pub segment_processor: sqlx::types::Json<Option<Vec<HookStep>>>,
-
-    pub downloaded_processor: sqlx::types::Json<Option<Vec<HookStep>>>,
-    pub postprocessor: sqlx::types::Json<Option<Vec<HookStep>>>,
+    #[ormlite(json)]
+    pub preprocessor: Option<Vec<String>>,
+    #[ormlite(json)]
+    pub segment_processor: Option<Vec<HookStep>>,
+    #[ormlite(json)]
+    pub downloaded_processor: Option<Vec<HookStep>>,
+    #[ormlite(json)]
+    pub postprocessor: Option<Vec<HookStep>>,
     pub opt_args: Option<Value>,
     pub excluded_keywords: Option<Value>,
 }
@@ -147,4 +151,11 @@ pub struct InsertUploadStreamer {
     pub up_close_danmu: Option<u8>,
     pub extra_fields: Option<String>,
     pub is_only_self: Option<i64>,
+}
+
+#[derive(Insert, Debug, Clone, Serialize, Deserialize)]
+#[ormlite(returns = "Configuration")]
+pub struct InsertConfiguration {
+    pub key: String,
+    pub value: String, // TEXT
 }

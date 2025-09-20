@@ -92,7 +92,7 @@ mod post {
 
 mod get {
     use super::*;
-    
+
     use tracing::error;
 
     // pub async fn login(

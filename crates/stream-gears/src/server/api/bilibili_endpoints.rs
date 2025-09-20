@@ -53,7 +53,7 @@ pub async fn get_myinfo_endpoint(
 }
 
 pub async fn get_proxy_endpoint(
-    Extension(client): Extension<StatelessClient>,
+    State(client): State<StatelessClient>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Bytes, Response> {
     info!(params = &params["url"]);

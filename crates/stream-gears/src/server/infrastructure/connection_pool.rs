@@ -1,7 +1,7 @@
-use std::path::Path;
 use anyhow::{Context, Result};
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{Pool, Sqlite};
+use std::path::Path;
 use tracing::info;
 
 pub type ConnectionPool = Pool<Sqlite>;

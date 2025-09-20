@@ -349,33 +349,35 @@ impl ConfigManager {
         let cookies_data: serde_json::Value = serde_json::from_str(&content)?;
 
         if let Some(cookie_info) = cookies_data.get("cookie_info")
-            && let Some(cookies) = cookie_info.get("cookies").and_then(|c| c.as_array()) {
-                let mut cookie_map = HashMap::new();
-                for cookie in cookies {
-                    if let (Some(name), Some(value)) = (
-                        cookie.get("name").and_then(|n| n.as_str()),
-                        cookie.get("value").and_then(|v| v.as_str()),
-                    ) {
-                        cookie_map.insert(name.to_string(), value.to_string());
-                    }
-                }
-
-                if self.config.user.is_none() {
-                    self.config.user = Some(UserConfig {
-                        cookies: None,
-                        access_token: None,
-                    });
-                }
-                if let Some(ref mut user) = self.config.user {
-                    user.cookies = Some(cookie_map);
+            && let Some(cookies) = cookie_info.get("cookies").and_then(|c| c.as_array())
+        {
+            let mut cookie_map = HashMap::new();
+            for cookie in cookies {
+                if let (Some(name), Some(value)) = (
+                    cookie.get("name").and_then(|n| n.as_str()),
+                    cookie.get("value").and_then(|v| v.as_str()),
+                ) {
+                    cookie_map.insert(name.to_string(), value.to_string());
                 }
             }
 
+            if self.config.user.is_none() {
+                self.config.user = Some(UserConfig {
+                    cookies: None,
+                    access_token: None,
+                });
+            }
+            if let Some(ref mut user) = self.config.user {
+                user.cookies = Some(cookie_map);
+            }
+        }
+
         if let Some(token_info) = cookies_data.get("token_info")
             && let Some(access_token) = token_info.get("access_token").and_then(|t| t.as_str())
-                && let Some(ref mut user) = self.config.user {
-                    user.access_token = Some(access_token.to_string());
-                }
+            && let Some(ref mut user) = self.config.user
+        {
+            user.access_token = Some(access_token.to_string());
+        }
 
         Ok(())
     }

@@ -5,8 +5,11 @@ use crate::server::core::monitor::Monitor;
 use crate::server::core::plugin;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::context::Worker;
+use crate::server::infrastructure::context::{Context, Worker};
+use crate::server::infrastructure::repositories;
 use axum::extract::FromRef;
+use biliup::client::StatelessClient;
+use biliup::credential::Credential;
 use error_stack::bail;
 use ormlite::Model;
 use std::sync::{Arc, RwLock};
@@ -19,27 +22,19 @@ pub struct ServiceRegister {
     pub managers: Arc<Vec<DownloadManager>>,
     pub config: Arc<RwLock<Config>>,
     pub actor_handle: Arc<ActorHandle>,
+    pub client: StatelessClient,
 }
 
 /// A simple service container responsible for managing the various services our API endpoints will pull from through axum extensions.
 impl ServiceRegister {
-    pub fn new(pool: ConnectionPool, config: Config) -> Self {
+    pub fn new(pool: ConnectionPool, config: Arc<RwLock<Config>>) -> Self {
         info!("initializing utility services...");
+        let client = StatelessClient::default();
 
-        let cf = config::CONFIG.get_or_init(|| {
-            Arc::new(RwLock::new(config))
-            // Arc::new(RwLock::new(Config::builder()
-            //     // .user(UserConfig::default())
-            //     // .douyu_cdn("hw-h5".to_string())
-            //     // .douyu_rate(0)
-            //     .streamers(HashMap::<String, StreamerConfig>::new())
-            //     .build()))
-        });
-
-        info!(config=?cf);
+        info!(config=?config);
         let actor_handle = Arc::new(ActorHandle::new(
-            cf.read().unwrap().pool1_size,
-            cf.read().unwrap().pool2_size,
+            config.read().unwrap().pool1_size,
+            config.read().unwrap().pool2_size,
         ));
 
         info!("utility services initialized, building feature services...");
@@ -52,13 +47,17 @@ impl ServiceRegister {
             pool,
             workers: Arc::new(Default::default()),
             managers: Arc::new(vec),
-            config: cf.clone(),
+            config: config.clone(),
             actor_handle,
+            client,
         }
     }
 
     pub fn get_manager(&self, url: &str) -> Option<&DownloadManager> {
-        self.managers.iter().find(|&manager| manager.matches(url)).map(|v| v as _)
+        self.managers
+            .iter()
+            .find(|&manager| manager.matches(url))
+            .map(|v| v as _)
     }
 
     pub async fn add_room(
@@ -67,7 +66,11 @@ impl ServiceRegister {
         url: &str,
         monitor: Arc<Monitor>,
     ) -> AppResult<Option<()>> {
-        let worker = Arc::new(Worker::new(id, url, self.pool.clone()));
+        let worker = Arc::new(Worker::new(
+            id,
+            url,
+            Context::new(self.pool.clone(), self.client.clone()),
+        ));
         monitor.rooms_handle.add(worker.clone()).await;
         self.workers.write().unwrap().push(worker);
         info!("add {url} success");

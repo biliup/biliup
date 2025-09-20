@@ -3,29 +3,26 @@ use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::models::{Configuration, LiveStreamer, UploadStreamer};
 use crate::server::infrastructure::repositories::{get_config, get_streamer};
+use biliup::client::StatelessClient;
 use error_stack::ResultExt;
 use ormlite::Model;
 use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 use tracing::info;
 
+#[derive(Debug)]
 pub struct Context {
-    uploads: Vec<UploadStreamer>,
-    configuration: Configuration,
-    streamers: Vec<LiveStreamer>,
+    pool: ConnectionPool,
+    pub client: StatelessClient,
 }
 
 impl Context {
-    pub fn new(
-        uploads: Vec<UploadStreamer>,
-        configuration: Configuration,
-        streamers: Vec<LiveStreamer>,
-    ) -> Self {
-        Self {
-            uploads,
-            configuration,
-            streamers,
-        }
+    pub fn new(pool: ConnectionPool, client: StatelessClient) -> Self {
+        Self { pool, client }
+    }
+
+    pub async fn get_config(&self) -> AppResult<Config> {
+        get_config(&self.pool).await
     }
 }
 
@@ -33,16 +30,16 @@ impl Context {
 pub struct Worker {
     pub(crate) id: i64,
     pub url: String,
-    pool: ConnectionPool,
+    pub context: Context,
     pub downloader_status: RwLock<WorkerStatus>,
     pub uploader_status: RwLock<WorkerStatus>,
 }
 
 impl Worker {
-    pub fn new(id: i64, url: &str, pool: ConnectionPool) -> Self {
+    pub fn new(id: i64, url: &str, context: Context) -> Self {
         Self {
             id,
-            pool,
+            context,
             downloader_status: RwLock::new(Default::default()),
             uploader_status: Default::default(),
             url: url.to_string(),
@@ -50,11 +47,11 @@ impl Worker {
     }
 
     pub async fn get_streamer(&self) -> AppResult<LiveStreamer> {
-        get_streamer(&self.pool, self.id).await
+        get_streamer(&self.context.pool, self.id).await
     }
 
     pub async fn get_config(&self) -> AppResult<Config> {
-        get_config(&self.pool).await
+        self.context.get_config().await
     }
 
     pub async fn get_upload_config(&self) -> AppResult<Option<UploadStreamer>> {
@@ -65,7 +62,7 @@ impl Worker {
         UploadStreamer::select()
             .where_("id = ?")
             .bind(id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&self.context.pool)
             .await
             .change_context(AppError::Unknown)
     }

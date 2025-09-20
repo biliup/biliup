@@ -137,7 +137,7 @@ pub fn generate_json(mut file_name: PathBuf) -> Result<()> {
                 script_tag_count += 1;
 
                 let (_, tag_data) = script_data(i).unwrap();
-                
+
                 FlvTag {
                     header: tag_header,
                     data: TagDataHeader::Script(tag_data),

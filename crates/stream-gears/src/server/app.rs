@@ -58,10 +58,9 @@ impl ApplicationController {
 
         // let app = protected::router()
 
-        let client = StatelessClient::default();
         // let vec = service_register.streamers_service.get_streamers().await?;
         // build our application with a route
-        let enable_login_guard = true;
+        let enable_login_guard = false;
         let mut app = server::router::router(service_register);
         if enable_login_guard {
             app = app
@@ -82,7 +81,7 @@ impl ApplicationController {
                     .allow_origin("http://localhost:3000".parse::<HeaderValue>().unwrap())
                     .allow_methods(AllowMethods::any()),
             )
-            .layer(Extension(client.clone()))
+            // .layer(Extension(client.clone()))
             .fallback(static_handler);
         // run our app with hyper
         // `axum::Server` is a re-export of `hyper::Server`

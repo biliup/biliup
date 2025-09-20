@@ -104,9 +104,10 @@ pub fn media_ext_from_url(input: &str) -> Option<String> {
         // a) 从最后一个 path segment 取扩展名
         if let Some(seg) = url.path_segments().and_then(|mut s| s.next_back())
             && let Some((_, ext)) = seg.rsplit_once('.')
-                && let Some(ext) = clean_ext(ext) {
-                    return Some(ext);
-                }
+            && let Some(ext) = clean_ext(ext)
+        {
+            return Some(ext);
+        }
 
         // b) 常见 query 参数中找一次（不重复多轮扫描），忽略大小写
         let keys = ["format", "type", "ext", "filetype", "fmt"];

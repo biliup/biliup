@@ -56,9 +56,8 @@ async fn _main() -> AppResult<()> {
     let conn_pool = ConnectionManager::new_pool("data/data.sqlite3")
         .await
         .expect("could not initialize the database connection pool");
-    
-    let configs = repositories::get_config(&conn_pool).await?;
-    let service_register = ServiceRegister::new(conn_pool, configs);
+    *config::CONFIG.write().unwrap() = repositories::get_config(&conn_pool).await?;
+    let service_register = ServiceRegister::new(conn_pool, config::CONFIG.clone());
 
     let all_streamer = repositories::get_all_streamer(&service_register.pool).await?;
     let all_uploader = repositories::get_all_uploader(&service_register.pool).await?;

@@ -126,7 +126,7 @@ impl UActor {
                     return;
                 };
                 let config = worker.get_config().await.unwrap();
-                let client = StatelessClient::default();
+                let client = worker.context.client.clone();
                 let line = config.lines;
                 let line = match line.as_str() {
                     "bda2" => line::bda2(),
@@ -199,9 +199,10 @@ impl UActor {
 
                 if !studio.cover.is_empty()
                     && let Ok(c) = &std::fs::read(&studio.cover).map_err(|e| error!(e=?e))
-                        && let Ok(url) = bilibili.cover_up(c).await.map_err(|e| error!(e=?e)) {
-                            studio.cover = url;
-                        };
+                    && let Ok(url) = bilibili.cover_up(c).await.map_err(|e| error!(e=?e))
+                {
+                    studio.cover = url;
+                };
 
                 let submit = match config.submit_api {
                     Some(submit) => SubmitOption::from_str(&submit).unwrap_or(SubmitOption::App),

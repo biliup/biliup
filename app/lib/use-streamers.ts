@@ -23,6 +23,7 @@ export function useBiliUsers() {
   const [list, setList] = useState<any[]>([]);
   useEffect(() => {
     if (!data || data.length === 0) {
+      setList([])
       return;
     }
     const updateList = async (item: User) => {

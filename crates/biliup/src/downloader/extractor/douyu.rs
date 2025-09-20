@@ -76,20 +76,20 @@ impl SiteDefinition for DouyuLive {
             && let Some(key) = regex::Regex::new(r"(\d{1,8}[0-9a-zA-Z]+)_?\d{0,4}(/playlist|.m3u8)")
                 .unwrap()
                 .captures(&result["data"]["rtmp_live"].to_string())
-            {
-                return Ok(Site {
-                    name: "douyu",
-                    title: room_info
-                        .get("room")
-                        .and_then(|room| room.get("room_name"))
-                        .and_then(|name| name.as_str())
-                        .unwrap_or_default()
-                        .to_string(),
-                    direct_url: format!("https://hw-tct.douyucdn.cn/live/{}.flv?uuid=", &key[1]),
-                    extension: Extension::Flv,
-                    client,
-                });
-            }
+        {
+            return Ok(Site {
+                name: "douyu",
+                title: room_info
+                    .get("room")
+                    .and_then(|room| room.get("room_name"))
+                    .and_then(|name| name.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                direct_url: format!("https://hw-tct.douyucdn.cn/live/{}.flv?uuid=", &key[1]),
+                extension: Extension::Flv,
+                client,
+            });
+        }
         Err(Error::Custom(result.to_string()))
     }
 

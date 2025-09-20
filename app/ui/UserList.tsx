@@ -37,7 +37,7 @@ type UserListProps = {
   children?: React.ReactNode
 }
 const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
-  const { trigger } = useSWRMutation('/v1/users', sendRequest<User>)
+  const { trigger } = useSWRMutation('/v1/users', sendRequest)
   const { trigger: deleteUser } = useSWRMutation('/v1/users', requestDelete)
   const { biliUsers: list } = useBiliUsers()
   const [modalVisible, setVisible] = useState(false)
@@ -55,10 +55,12 @@ const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
         throw new Error(ret.message)
       }
       await trigger({
-        id: 0,
-        name: value,
-        value: value,
-        platform: 'bilibili-cookies',
+        // id: 0,
+        // name: value,
+        // value: value,
+        // platform: 'bilibili-cookies',
+        key: 'bilibili-cookies',
+        value: value
       })
       setVisible(false)
       Toast.success('创建成功')

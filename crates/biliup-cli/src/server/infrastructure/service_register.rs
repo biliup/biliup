@@ -1,7 +1,4 @@
-use crate::server::core::live_streamers::{
-    DynDownloadRecordsRepository,
-    DynVideosRepository,
-};
+use crate::server::core::live_streamers::{DynDownloadRecordsRepository, DynVideosRepository};
 use crate::server::core::upload_streamers::DynUploadRecordsRepository;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::repositories::download_records_repository::SqliteDownloadRecordsRepository;
