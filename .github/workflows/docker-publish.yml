@@ -18,7 +18,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE_NAME: ghcr.io/${{ github.repository }}
+  IMAGE_NAME: ghcr.io/biliup/caution
 
 jobs:
   # Run tests.
@@ -58,6 +58,7 @@ jobs:
 
 
   build:
+    needs: test
     name: Build for ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
     strategy:
