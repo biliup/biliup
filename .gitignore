@@ -51,4 +51,6 @@ pnpm-lock.yaml
 cookies.json
 .augment/
 .cunzhi-memory/
-logs
+.serena/
+.cargo/
+logs/

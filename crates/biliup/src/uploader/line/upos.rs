@@ -144,6 +144,7 @@ impl Upos {
         Ok(stream)
     }
 
+    /// 通知视频上传完成并获取视频信息
     pub(crate) async fn get_ret_video_info(
         &self,
         parts: &[serde_json::Value],
@@ -155,7 +156,7 @@ impl Upos {
             "uploadId": self.upload_id,
             "biz_id": self.bucket.biz_id,
             "output": "json",
-            "profile": "ugcupos/bup"
+            "profile": "ugcfx/bup"
         });
         // let res: serde_json::Value = self.client.post(url).query(&value).json(&json!({"parts": *parts_cell.borrow()}))
         let res: serde_json::Value = self
