@@ -1,17 +1,20 @@
 use crate::server::config::Config;
-use crate::server::errors::{AppError, report_to_response, AppResult};
+use crate::server::errors::{AppError, AppResult, report_to_response};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::Worker;
 use crate::server::infrastructure::dto::LiveStreamerResponse;
-use crate::server::infrastructure::models::{Configuration, FileItem, InsertConfiguration, InsertLiveStreamer, InsertUploadStreamer, LiveStreamer, StreamerInfo, UploadStreamer};
+use crate::server::infrastructure::models::{
+    Configuration, FileItem, InsertConfiguration, InsertLiveStreamer, InsertUploadStreamer,
+    LiveStreamer, StreamerInfo, UploadStreamer,
+};
 use crate::server::infrastructure::repositories::{del_streamer, get_all_streamer};
 use crate::server::infrastructure::service_register::ServiceRegister;
-use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use axum::{Json, debug_handler};
 use biliup::credential::{Credential, LoginInfo};
-use error_stack::ResultExt;
+use error_stack::{Report, ResultExt};
 use ormlite::{Insert, Model};
 use serde_json::json;
 use std::sync::{Arc, RwLock};
@@ -125,6 +128,91 @@ pub async fn delete_streamers_endpoint(
 pub async fn get_configuration(
     State(config): State<Arc<RwLock<Config>>>,
 ) -> Result<Json<Config>, Response> {
+    Ok(Json(config.read().unwrap().clone()))
+}
+
+// #[axum_macros::debug_handler(state = ServiceRegister)]
+pub async fn put_configuration(
+    State(config): State<Arc<RwLock<Config>>>,
+    State(pool): State<ConnectionPool>,
+    Json(json_data): Json<Config>,
+) -> Result<Json<Config>, Response> {
+    // 将 JSON 序列化为 TEXT 存库
+    let value_txt = serde_json::to_string(&json_data)
+        .change_context(AppError::Unknown)
+        .map_err(report_to_response)?;
+
+    let mut tx = pool
+        .begin()
+        .await
+        .change_context(AppError::Unknown)
+        .map_err(report_to_response)?;
+
+    // 最多取 2 条判断是否多行
+    let ids: Vec<i64> =
+        sqlx::query_scalar::<_, i64>("SELECT id FROM configuration WHERE key = ?1 LIMIT 2")
+            .bind("config")
+            .fetch_all(&mut *tx)
+            .await
+            .change_context(AppError::Unknown)
+            .map_err(report_to_response)?;
+
+    let saved: Configuration = if ids.is_empty() {
+        // 插入
+        sqlx::query("INSERT INTO configuration (key, value) VALUES (?1, ?2)")
+            .bind("config")
+            .bind(&value_txt)
+            .execute(&mut *tx)
+            .await
+            .change_context(AppError::Unknown)
+            .map_err(report_to_response)?;
+
+        // 取 last_insert_rowid 并读回整行
+        let id: i64 = sqlx::query_scalar::<_, i64>("SELECT last_insert_rowid()")
+            .fetch_one(&mut *tx)
+            .await
+            .change_context(AppError::Unknown)
+            .map_err(report_to_response)?;
+
+        sqlx::query_as::<_, Configuration>("SELECT id, key, value FROM configuration WHERE id = ?1")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await
+            .change_context(AppError::Unknown)
+            .map_err(report_to_response)?
+    } else if ids.len() == 1 {
+        // 更新
+        let id = ids[0];
+        sqlx::query("UPDATE configuration SET value = ?1 WHERE id = ?2")
+            .bind(&value_txt)
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .change_context(AppError::Unknown)
+            .map_err(report_to_response)?;
+
+        sqlx::query_as::<_, Configuration>("SELECT id, key, value FROM configuration WHERE id = ?1")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await
+            .change_context(AppError::Unknown)
+            .map_err(report_to_response)?
+    } else {
+        // 多行报错
+        return Err(report_to_response(Report::new(AppError::Custom(
+            format!("有多个空间配置同时存在 (key='config'): {} 行", ids.len()).to_string(),
+        ))));
+    };
+
+    tx.commit()
+        .await
+        .change_context(AppError::Unknown)
+        .map_err(report_to_response)?;
+    // 提交后从 DB 重新加载配置
+    let saved_config: Config = serde_json::from_str(&saved.value)
+        .change_context(AppError::Unknown)
+        .map_err(report_to_response)?;
+    *config.write().unwrap() = saved_config;
     Ok(Json(config.read().unwrap().clone()))
 }
 
@@ -248,14 +336,24 @@ pub async fn add_user_endpoint(
     State(pool): State<ConnectionPool>,
     Json(user): Json<InsertConfiguration>,
 ) -> Result<Json<Configuration>, Response> {
-    let res = user.insert(&pool).await.change_context(AppError::Unknown).map_err(report_to_response)?;
+    let res = user
+        .insert(&pool)
+        .await
+        .change_context(AppError::Unknown)
+        .map_err(report_to_response)?;
     Ok(Json(res))
 }
 
-pub async fn delete_user_endpoint(Path(id): Path<i64>, State(pool): State<ConnectionPool>) -> Result<Json<()>, Response> {
+pub async fn delete_user_endpoint(
+    Path(id): Path<i64>,
+    State(pool): State<ConnectionPool>,
+) -> Result<Json<()>, Response> {
     let x = sqlx::query("DELETE FROM configuration WHERE id = ?")
         .bind(id)
-        .execute(&pool).await.change_context(AppError::Unknown).map_err(report_to_response)?;
+        .execute(&pool)
+        .await
+        .change_context(AppError::Unknown)
+        .map_err(report_to_response)?;
     info!("{:?}", x);
     Ok(Json(()))
 }
@@ -317,9 +415,13 @@ pub async fn get_videos() -> Result<Json<Vec<serde_json::Value>>, Response> {
             }
 
             if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                if media_extensions.iter().any(|allowed| &ext == &allowed.trim_start_matches('.')) {
+                if media_extensions
+                    .iter()
+                    .any(|allowed| &ext == &allowed.trim_start_matches('.'))
+                {
                     if let Ok(metadata) = entry.metadata().await {
-                        let mtime = metadata.modified()
+                        let mtime = metadata
+                            .modified()
                             .ok()
                             .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
                             .map(|d| d.as_secs())

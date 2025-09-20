@@ -74,7 +74,7 @@
 
 
 ## 💴捐赠
-![支付宝](.github/resource/Image.jpg)
+<img src=".github/resource/Image.jpg" width="200" />
 [爱发电 »](https://afdian.com/a/biliup)
 
 ## ⭐Stars
