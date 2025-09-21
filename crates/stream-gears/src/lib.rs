@@ -1,9 +1,8 @@
 extern crate core;
 
 mod login;
-mod uploader;
-
 mod server;
+mod uploader;
 
 use pyo3::prelude::*;
 use time::macros::format_description;
@@ -86,12 +85,12 @@ pub async fn download_with_hook(
     segment: Segmentable,
     file_name_hook: CallbackFn,
     proxy: Option<&str>,
-) -> anyhow::Result<()> {
+) -> PyResult<()> {
     let client = StatelessClient::new(headers, proxy);
-    let response = client.retryable(url).await?;
+    let response = client.retryable(url).await.unwrap();
     let mut connection = Connection::new(response);
     // let buf = &mut [0u8; 9];
-    let bytes = connection.read_frame(9).await?;
+    let bytes = connection.read_frame(9).await.unwrap();
     // response.read_exact(buf)?;
     // let out = File::create(format!("{}.flv", file_name)).expect("Unable to create file.");
     // let mut writer = BufWriter::new(out);
@@ -111,7 +110,7 @@ pub async fn download_with_hook(
         Err(e) => {
             error!("{e}");
             let file = LifecycleFile::with_hook(file_name, "ts", file_name_hook);
-            hls::download(url, &client, file, segment).await?;
+            hls::download(url, &client, file, segment).await.unwrap();
         }
     }
     Ok(())
@@ -233,8 +232,7 @@ fn download_with_callback(
             ) {
                 Ok(res) => Ok(res),
                 Err(err) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "{}, {}",
-                    err.root_cause(),
+                    "{}",
                     err
                 ))),
             }
@@ -249,8 +247,7 @@ fn login_by_cookies(file: String, proxy: Option<String>) -> PyResult<bool> {
     match result {
         Ok(_) => Ok(true),
         Err(err) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
-            "{}, {}",
-            err.root_cause(),
+            "{}",
             err
         ))),
     }
@@ -302,8 +299,8 @@ fn login_by_qrcode(ret: String, proxy: Option<String>) -> PyResult<String> {
         let info = Credential::new(proxy.as_deref())
             .login_by_qrcode(serde_json::from_str(&ret).unwrap())
             .await?;
-        let res = serde_json::to_string_pretty(&info)?;
-        Ok::<_, anyhow::Error>(res)
+        let res = serde_json::to_string_pretty(&info).unwrap();
+        Ok::<_, biliup::error::Kind>(res)
     })
     .map_err(|err| pyo3::exceptions::PyRuntimeError::new_err(format!("{:#?}", err)))
 }
@@ -441,8 +438,7 @@ fn upload(
                 Ok(_) => Ok(()),
                 // Ok(_) => {  },
                 Err(err) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "{}, {}",
-                    err.root_cause(),
+                    "{}",
                     err
                 ))),
             }
@@ -471,7 +467,7 @@ fn stream_gears(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(login_by_web_cookies, m)?)?;
     m.add_function(wrap_pyfunction!(login_by_web_qrcode, m)?)?;
     m.add_function(wrap_pyfunction!(server::main_loop, m)?)?;
-    m.add_function(wrap_pyfunction!(server::config::config_bindings, m)?)?;
+    m.add_function(wrap_pyfunction!(server::config_bindings, m)?)?;
     m.add_class::<UploadLine>()?;
     m.add_class::<PySegment>()?;
     Ok(())

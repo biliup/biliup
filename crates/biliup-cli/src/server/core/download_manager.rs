@@ -3,6 +3,7 @@ use crate::server::core::monitor::{Monitor, RoomsHandle};
 use crate::server::core::plugin::{DownloadPlugin, StreamInfo};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Worker, WorkerStatus};
+use crate::server::infrastructure::models::hook_step::process_video;
 use async_channel::{Receiver, Sender, bounded};
 use biliup::bilibili::{BiliBili, Studio, Video};
 use biliup::client::StatelessClient;
@@ -19,7 +20,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
-use crate::server::infrastructure::models::hook_step::process_video;
 
 pub struct DownloadManager {
     pub monitor: Mutex<Option<Arc<Monitor>>>,
@@ -39,7 +39,7 @@ impl DownloadManager {
         }
     }
 
-    pub(crate) fn ensure_monitor(&self) -> Arc<Monitor> {
+    pub fn ensure_monitor(&self) -> Arc<Monitor> {
         // Monitor::new(self.plugin.name(), url)
         self.monitor
             .lock()
@@ -91,10 +91,10 @@ impl DActor {
                     move |event: SegmentEvent| {
                         if event.segment_index == 0 {
                             match sender.force_send(UploaderMessage::SegmentEvent(
-                                    event,
-                                    rx.clone(),
-                                    room.clone(),
-                                )) {
+                                event,
+                                rx.clone(),
+                                room.clone(),
+                            )) {
                                 Ok(Some(ret)) => {
                                     warn!(SegmentEvent = ?ret, "replace an existing message in the channel");
                                 }
@@ -175,7 +175,8 @@ impl UActor {
                     &line,
                     &event.file_path,
                 )
-                .await.map_err(|e| error!(e=?e))
+                .await
+                .map_err(|e| error!(e=?e))
                 {
                     videos.push(video);
                 }
@@ -189,7 +190,8 @@ impl UActor {
                         &line,
                         &se.file_path,
                     )
-                    .await.map_err(|e| error!(e=?e))
+                    .await
+                    .map_err(|e| error!(e=?e))
                     {
                         videos.push(video);
                     }
@@ -254,7 +256,9 @@ impl UActor {
                     let streamer = worker.get_streamer().await.unwrap();
                     if let Some(post_processor) = streamer.postprocessor {
                         for video_path in &video_paths {
-                            process_video(video_path, &post_processor).await.map_err(|e| error!(e=?e));
+                            process_video(video_path, &post_processor)
+                                .await
+                                .map_err(|e| error!(e=?e));
                         }
                     }
                 }

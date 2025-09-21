@@ -1,11 +1,7 @@
 use crate::server::core::downloader::DownloaderType;
+use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::models::hook_step::HookStep;
-use anyhow::{Context, bail};
-use pyo3::prelude::PyDictMethods;
-use pyo3::sync::OnceLockExt;
-use pyo3::types::{PyAnyMethods, PyDict};
-use pyo3::{Bound, FromPyObject, PyAny, PyResult, Python, pyclass, pyfunction, pymethods};
-use pythonize::pythonize;
+use error_stack::bail;
 use serde::{Deserialize, Serialize};
 use std::cell::LazyCell;
 use std::ops::Deref;
@@ -255,7 +251,7 @@ pub struct Credit {
     pub uid: String,
 }
 
-#[derive(bon::Builder, FromPyObject, Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UserConfig {
     // B 站
     #[serde(default)]
@@ -324,67 +320,10 @@ fn default_check_sourcecode() -> u64 {
 }
 
 impl Config {
-    pub fn load_or_create<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
-        bail!("load_or_create: {:?}", path.as_ref().display())
+    pub fn load_or_create<P: AsRef<Path>>(path: P) -> AppResult<Self> {
+        bail!(AppError::Custom(format!(
+            "load_or_create: {:?}",
+            path.as_ref().display()
+        )))
     }
-}
-
-// 进程级全局单例（安全）：OnceLock + Arc + RwLock
-pub(crate) static CONFIG: LazyLock<Arc<RwLock<Config>>> = LazyLock::new(|| {
-    Arc::new(RwLock::new(
-        Config::builder().streamers(Default::default()).build(),
-    ))
-});
-
-fn cfg_arc() -> &'static Arc<RwLock<Config>> {
-    &*CONFIG
-}
-
-#[pyclass]
-struct ConfigState {
-    // 用 PyObject 存，方便保持任意 Python 对象
-    map: Arc<RwLock<Config>>,
-}
-
-#[pymethods]
-impl ConfigState {
-    /// 获取：config.get("k", default=None)
-    /// - 若 key 存在，返回保存的对象
-    /// - 若不存在，返回 default（默认 None）
-    #[pyo3(signature = (key, default=None))]
-    fn get<'py>(
-        &self,
-        py: Python<'py>,
-        key: &str,
-        default: Option<Bound<'py, PyAny>>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let guard = self.map.read().unwrap();
-        // serde_json::to_value(guard.deref())
-        if let Some(bound) = pythonize(py, guard.deref())?
-            .extract::<Bound<PyDict>>()?
-            .get_item(key)?
-        {
-            if bound.is_none()
-                && let Some(d) = default
-            {
-                return Ok(d);
-            }
-            return Ok(bound);
-        };
-        let Some(default) = default else {
-            return Err(pyo3::exceptions::PyAttributeError::new_err(format!(
-                "object has no attribute '{key}'"
-            )));
-        };
-        Ok(default)
-    }
-}
-
-#[pyfunction]
-pub fn config_bindings(py: Python<'_>) -> PyResult<ConfigState> {
-    let state = ConfigState {
-        map: cfg_arc().clone(),
-    };
-    // pythonize(py, &config)
-    Ok(state)
 }

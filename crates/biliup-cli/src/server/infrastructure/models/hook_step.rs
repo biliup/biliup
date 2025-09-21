@@ -105,7 +105,10 @@ impl HookStep {
 }
 
 /// 处理所有后处理器
-pub async  fn process_video(video_path: &Path, processors: &[HookStep]) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn process_video(
+    video_path: &Path,
+    processors: &[HookStep],
+) -> Result<(), Box<dyn std::error::Error>> {
     for processor in processors {
         processor.execute(video_path).await?;
     }

@@ -1,103 +1,34 @@
-use std::borrow::Cow;
-use std::{collections::HashMap, fmt::Debug};
-
-use axum::response::Response;
-use axum::{Json, http::StatusCode, response::IntoResponse};
+use axum::Json;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use error_stack::Report;
 use serde::{Deserialize, Serialize};
-
+use std::collections::HashMap;
 use thiserror::Error;
 use tracing::log::error;
 
-pub type AppResult<T> = Result<T, AppError>;
-
-pub type ConduitErrorMap = HashMap<Cow<'static, str>, Vec<Cow<'static, str>>>;
-
 #[derive(Error, Debug)]
 pub enum AppError {
-    #[error("authentication is required to access this resource")]
-    Unauthorized,
-    #[error("username or password is incorrect")]
-    InvalidLoginAttempt,
-    #[error("user does not have privilege to access this resource")]
-    Forbidden,
+    #[error("Unknown Error")]
+    Unknown,
+
     #[error("{0}")]
-    NotFound(String),
-    #[error("{0}")]
-    ApplicationStartup(String),
-    #[error("{0}")]
-    BadRequest(String),
-    #[error("unexpected error has occurred")]
-    InternalServerError,
-    #[error("{0}")]
-    InternalServerErrorWithContext(String),
-    #[error("{0}")]
-    ObjectConflict(String),
-    #[error("unprocessable request has occurred")]
-    UnprocessableEntity { errors: ConduitErrorMap },
-    #[error(transparent)]
-    AxumJsonRejection(#[from] axum::extract::rejection::JsonRejection),
-    #[error(transparent)]
-    AnyhowError(#[from] anyhow::Error),
-    #[error(transparent)]
-    DownloadError(#[from] biliup::downloader::error::Error),
-    #[error(transparent)]
-    UploadError(#[from] biliup::error::Kind),
-    #[error(transparent)]
-    ReqwestError(#[from] reqwest::Error),
-    #[error(transparent)]
-    OrmliteError(#[from] ormlite::Error),
-    #[error(transparent)]
-    SerdeJsonError(#[from] serde_json::Error),
+    Custom(String),
 }
 
-impl IntoResponse for AppError {
-    fn into_response(self) -> Response {
-        error!("AppError{}", AppError = self);
-        let (status, error_message) = match self {
-            Self::InternalServerErrorWithContext(err) => (StatusCode::INTERNAL_SERVER_ERROR, err),
-            Self::NotFound(err) => (StatusCode::NOT_FOUND, err),
-            Self::ObjectConflict(err) => (StatusCode::CONFLICT, err),
-            Self::InvalidLoginAttempt => (
-                StatusCode::BAD_REQUEST,
-                Self::InvalidLoginAttempt.to_string(),
-            ),
-            Self::Unauthorized => (StatusCode::UNAUTHORIZED, Self::Unauthorized.to_string()),
-            Self::AnyhowError(err) => 'e: {
-                for cause in err.chain() {
-                    if let Some(error) = cause.downcast_ref::<Box<dyn sqlx::error::DatabaseError>>()
-                    {
-                        println!("121212cause: {}", error.message());
-                        break 'e (StatusCode::BAD_REQUEST, error.to_string());
-                    }
-                    println!("{}", cause);
-                }
-                (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-            }
-            AppError::Forbidden
-            | AppError::ApplicationStartup(_)
-            | AppError::BadRequest(_)
-            | AppError::InternalServerError
-            | AppError::UnprocessableEntity { .. }
-            | AppError::AxumJsonRejection(_)
-            | AppError::DownloadError(_)
-            | AppError::UploadError(_)
-            | AppError::SerdeJsonError(_)
-            | AppError::ReqwestError(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                String::from("unexpected error occurred"),
-            ),
-            AppError::OrmliteError(ormlite) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                String::from("OrmliteError occurred"),
-            ),
-        };
+pub fn report_to_response(report: impl Into<Report<AppError>>) -> Response {
+    let report = report.into();
+    let (status, error_message) = match report.downcast_ref::<AppError>() {
+        Some(AppError::Unknown) => (StatusCode::INTERNAL_SERVER_ERROR, report.to_string()),
+        Some(AppError::Custom(msg)) => (StatusCode::INTERNAL_SERVER_ERROR, msg.into()),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, report.to_string()),
+    };
+    tracing::error!(error = ?report);
+    // I'm not a fan of the error specification, so for the sake of consistency,
+    // serialize singular errors as a map of vectors similar to the 422 validation responses
+    let body = Json(ApiError::new(error_message));
 
-        // I'm not a fan of the error specification, so for the sake of consistency,
-        // serialize singular errors as a map of vectors similar to the 422 validation responses
-        let body = Json(ApiError::new(error_message));
-
-        (status, body).into_response()
-    }
+    (status, body).into_response()
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -121,3 +52,5 @@ impl ApiError {
         Self { errors, message }
     }
 }
+
+pub type AppResult<T> = Result<T, Report<AppError>>;

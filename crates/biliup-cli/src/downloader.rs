@@ -1,4 +1,3 @@
-use anyhow::{Context, Result};
 use biliup::downloader::extractor::find_extractor;
 use biliup::downloader::flv_parser::{
     CodecId, SoundFormat, TagData, aac_audio_packet_header, avc_video_packet_header, header,
@@ -8,10 +7,11 @@ use biliup::downloader::flv_writer;
 use biliup::downloader::flv_writer::{FlvTag, TagDataHeader};
 use biliup::downloader::httpflv::map_parse_err;
 use biliup::downloader::util::Segmentable;
+use biliup_cli::server::errors::{AppError, AppResult};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use error_stack::ResultExt;
 use std::io::{BufReader, BufWriter, ErrorKind, Read};
 use std::path::PathBuf;
-
 use tracing::{error, info, warn};
 
 pub async fn download(
@@ -19,22 +19,27 @@ pub async fn download(
     output: String,
     split_size: Option<u64>,
     split_time: Option<humantime::Duration>,
-) -> Result<()> {
+) -> AppResult<()> {
     let segmentable = Segmentable::new(split_time.map(|t| t.into()), split_size);
     let client = Default::default();
     if let Some(extractor) = find_extractor(url) {
-        let mut site = extractor.get_site(url, client).await?;
-        site.download(&output, segmentable, None).await?;
+        let mut site = extractor
+            .get_site(url, client)
+            .await
+            .change_context_lazy(|| AppError::Unknown)?;
+        site.download(&output, segmentable, None)
+            .await
+            .change_context_lazy(|| AppError::Unknown)?;
     } else {
         warn!("not find extractor for {url}")
     }
     Ok(())
 }
 
-pub fn generate_json(mut file_name: PathBuf) -> Result<()> {
+pub fn generate_json(mut file_name: PathBuf) -> AppResult<()> {
     // let args: Vec<String> = env::args().collect();
     // let file_name = &args[1];
-    let flv_file = std::fs::File::open(&file_name)?;
+    let flv_file = std::fs::File::open(&file_name).change_context_lazy(|| AppError::Unknown)?;
     let buf_reader = BufReader::new(flv_file);
     let mut reader = Reader::new(buf_reader);
 
@@ -43,10 +48,13 @@ pub fn generate_json(mut file_name: PathBuf) -> Result<()> {
     let mut video_tag_count = 0;
     let mut tag_count = 0;
     let _err_count = 0;
-    let flv_header = reader.read_frame(9)?;
+    let flv_header = reader
+        .read_frame(9)
+        .change_context_lazy(|| AppError::Unknown)?;
     // file_name.parent().and_then(|p|p + file_name.file_name()+".json");
     // Vec::clear()
-    let (_, header) = map_parse_err(header(&flv_header), "flv header")?;
+    let (_, header) = map_parse_err(header(&flv_header), "flv header")
+        .change_context_lazy(|| AppError::Unknown)?;
     let mut os_string = file_name.extension().unwrap_or_default().to_owned();
     os_string.push(".json");
     file_name.set_extension(os_string);
@@ -56,13 +64,22 @@ pub fn generate_json(mut file_name: PathBuf) -> Result<()> {
         .create_new(true)
         .write(true)
         .open(&file_name)
-        .with_context(|| format!("file name: {}", file_name.canonicalize().unwrap().display()))?;
+        .change_context_lazy(|| {
+            AppError::Custom(format!(
+                "file name: {}",
+                file_name.canonicalize().unwrap().display()
+            ))
+        })?;
     let mut writer = BufWriter::new(file);
-    flv_writer::to_json(&mut writer, &header)?;
+    flv_writer::to_json(&mut writer, &header).change_context_lazy(|| AppError::Unknown)?;
     loop {
-        let _previous_tag_size = reader.read_frame(4)?;
+        let _previous_tag_size = reader
+            .read_frame(4)
+            .change_context_lazy(|| AppError::Unknown)?;
 
-        let t_header = reader.read_frame(11)?;
+        let t_header = reader
+            .read_frame(11)
+            .change_context_lazy(|| AppError::Unknown)?;
         if t_header.is_empty() {
             break;
         }
@@ -74,7 +91,9 @@ pub fn generate_json(mut file_name: PathBuf) -> Result<()> {
             }
         };
         tag_count += 1;
-        let bytes = reader.read_frame(tag_header.data_size as usize)?;
+        let bytes = reader
+            .read_frame(tag_header.data_size as usize)
+            .change_context_lazy(|| AppError::Unknown)?;
         let (i, flv_tag_data) = match map_parse_err(
             tag_data(tag_header.tag_type, tag_header.data_size as usize)(&bytes),
             "tag data",
@@ -144,7 +163,7 @@ pub fn generate_json(mut file_name: PathBuf) -> Result<()> {
                 }
             }
         };
-        flv_writer::to_json(&mut writer, &flv_tag)?;
+        flv_writer::to_json(&mut writer, &flv_tag).change_context_lazy(|| AppError::Unknown)?;
     }
     info!("tag count: {tag_count}");
     info!("script tag count: {script_tag_count}");

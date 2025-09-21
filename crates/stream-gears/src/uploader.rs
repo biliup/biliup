@@ -1,4 +1,3 @@
-use anyhow::{Context, Result};
 use biliup::client::StatelessClient;
 use biliup::error::Kind;
 use biliup::uploader::bilibili::{Credit, ResponseData, Studio};
@@ -10,12 +9,14 @@ use futures::StreamExt;
 use pyo3::prelude::*;
 use pyo3::pyclass;
 
+use error_stack::ResultExt;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Instant;
 use tracing::info;
 
+use biliup_cli::server::errors::{AppError, AppResult};
 use typed_builder::TypedBuilder;
 
 #[pyclass]
@@ -82,7 +83,7 @@ pub async fn upload(
     studio_pre: StudioPre,
     submit: Option<&str>,
     proxy: Option<&str>,
-) -> Result<ResponseData> {
+) -> AppResult<ResponseData> {
     // let file = std::fs::File::options()
     //     .read(true)
     //     .write(true)
@@ -114,10 +115,13 @@ pub async fn upload(
 
     let bilibili = login_by_cookies(&cookie_file, proxy).await;
     let bilibili = match bilibili {
-        Err(Kind::IO(_)) => bilibili.with_context(|| {
-            String::from("open cookies file: ") + &cookie_file.to_string_lossy()
+        Err(Kind::IO(_)) => bilibili.change_context_lazy(|| {
+            AppError::Custom(format!(
+                "open cookies file: {}",
+                &cookie_file.to_string_lossy()
+            ))
         })?,
-        _ => bilibili?,
+        _ => bilibili.change_context_lazy(|| AppError::Unknown)?,
     };
 
     let client = StatelessClient::default();
@@ -141,12 +145,21 @@ pub async fn upload(
         _ => Probe::probe(&client.client).await.unwrap_or_default(),
     };
     for video_path in video_path {
-        println!("{:?}", video_path.canonicalize()?.to_str());
+        println!(
+            "{:?}",
+            video_path
+                .canonicalize()
+                .change_context_lazy(|| AppError::Unknown)?
+                .to_str()
+        );
         info!("{line:?}");
-        let video_file = VideoFile::new(&video_path)?;
+        let video_file = VideoFile::new(&video_path).change_context_lazy(|| AppError::Unknown)?;
         let total_size = video_file.total_size;
         let file_name = video_file.file_name.clone();
-        let uploader = line.pre_upload(&bilibili, video_file).await?;
+        let uploader = line
+            .pre_upload(&bilibili, video_file)
+            .await
+            .change_context_lazy(|| AppError::Unknown)?;
 
         let instant = Instant::now();
 
@@ -158,7 +171,8 @@ pub async fn upload(
                     Ok((chunk, len))
                 })
             })
-            .await?;
+            .await
+            .change_context_lazy(|| AppError::Unknown)?;
         let t = instant.elapsed().as_millis();
         info!(
             "Upload completed: {file_name} => cost {:.2}s, {:.2} MB/s.",
@@ -203,9 +217,11 @@ pub async fn upload(
         let url = bilibili
             .cover_up(
                 &std::fs::read(&studio.cover)
-                    .with_context(|| format!("cover: {}", studio.cover))?,
+                    .change_context_lazy(|| AppError::Unknown)
+                    .attach_with(|| format!("cover: {}", studio.cover))?,
             )
-            .await?;
+            .await
+            .change_context_lazy(|| AppError::Unknown)?;
         println!("{url}");
         studio.cover = url;
     }
@@ -216,8 +232,14 @@ pub async fn upload(
     };
 
     let submit_result = match submit {
-        SubmitOption::BCutAndroid => bilibili.submit_by_bcut_android(&studio, proxy).await?,
-        _ => bilibili.submit_by_app(&studio, proxy).await?,
+        SubmitOption::BCutAndroid => bilibili
+            .submit_by_bcut_android(&studio, proxy)
+            .await
+            .change_context_lazy(|| AppError::Unknown)?,
+        _ => bilibili
+            .submit_by_app(&studio, proxy)
+            .await
+            .change_context_lazy(|| AppError::Unknown)?,
     };
     Ok(submit_result)
 }

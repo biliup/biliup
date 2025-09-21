@@ -281,11 +281,10 @@ impl Connection {
 
 #[cfg(test)]
 mod tests {
-    use anyhow::Result;
     use bytes::{Buf, BufMut, BytesMut};
 
     #[test]
-    fn byte_it_works() -> Result<()> {
+    fn byte_it_works() -> Result<(), Box<dyn std::error::Error>> {
         let mut bb = bytes::BytesMut::with_capacity(10);
         println!("chunk {:?}", bb.chunk());
         println!("capacity {}", bb.capacity());
@@ -317,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    fn it_works() -> Result<()> {
+    fn it_works() -> Result<(), Box<dyn std::error::Error>> {
         // download(
         //     "test.flv")?;
         Ok(())

@@ -30,7 +30,7 @@ mod post {
     use tracing::log::info;
 
     /// Handler for the "POST /signup" endpoint.
-    pub(crate) async fn signup(
+    pub async fn signup(
         mut auth_session: AuthSession,
         Json(creds): Json<Credentials>,
     ) -> impl IntoResponse {

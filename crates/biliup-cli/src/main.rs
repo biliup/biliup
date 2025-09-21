@@ -2,7 +2,6 @@ mod cli;
 mod downloader;
 mod uploader;
 
-use anyhow::Result;
 use time::macros::format_description;
 
 use crate::cli::{Cli, Commands};
@@ -12,11 +11,12 @@ use biliup::uploader::util::SubmitOption;
 
 use clap::Parser;
 
+use biliup_cli::server::errors::AppResult;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> AppResult<()> {
     // a builder for `FmtSubscriber`.
     // let subscriber = FmtSubscriber::builder()
     //     // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)

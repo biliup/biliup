@@ -72,7 +72,7 @@ impl Backend {
         Ok(user.is_some())
     }
 
-    pub(crate) async fn create_user(&mut self, creds: Credentials) -> AppResult<User> {
+    pub async fn create_user(&mut self, creds: Credentials) -> AppResult<User> {
         // create the new user account...
         // 验证输入
         if creds.username.is_empty() || creds.password.is_empty() {

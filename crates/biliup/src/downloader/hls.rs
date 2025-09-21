@@ -153,11 +153,10 @@ impl Drop for TsFile {
 
 #[cfg(test)]
 mod tests {
-    use anyhow::Result;
     use reqwest::Url;
 
     #[test]
-    fn test_url() -> Result<()> {
+    fn test_url() -> Result<(), Box<dyn std::error::Error>> {
         let url = Url::parse("h://host.path/to/remote/resource.m3u8")?;
         let scheme = url.scheme();
         let new_url = url.join("http://path.host/remote/resource.ts")?;
@@ -167,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn it_works() -> Result<()> {
+    fn it_works() -> Result<(), Box<dyn std::error::Error>> {
         // download(
         //     "test.ts")?;
         Ok(())

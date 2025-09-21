@@ -290,11 +290,10 @@ pub fn format_filename(file_name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::Result;
     use std::path::{Path, PathBuf};
 
     #[test]
-    fn it_works() -> Result<()> {
+    fn it_works() -> Result<(), Box<dyn std::error::Error>> {
         let mut p = PathBuf::from("/feel/the");
 
         p.set_extension("force");
@@ -307,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn test_segmentation_logic() -> Result<()> {
+    fn test_segmentation_logic() -> Result<(), Box<dyn std::error::Error>> {
         // 测试时间分割
         let mut seg = Segmentable::new(Some(Duration::from_secs(10)), None);
         assert!(!seg.needed());

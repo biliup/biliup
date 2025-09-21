@@ -27,11 +27,12 @@ pub async fn static_handler(uri: Uri) -> impl IntoResponse {
             ([(header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
         }
         None => {
-            if path.contains('.') {
-                return not_found().await;
-            }
-
-            index_html().await
+            // if path.contains('.') {
+            //     return not_found().await;
+            // }
+            //
+            // index_html().await
+            not_found().await
         }
     }
 }

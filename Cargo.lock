@@ -359,7 +359,6 @@ checksum = "55248b47b0caf0546f7988906588779981c43bb1bc9d0c44087278f80cdb44ba"
 name = "biliup"
 version = "0.2.4"
 dependencies = [
- "anyhow",
  "async-trait",
  "base64",
  "byteorder",
@@ -395,14 +394,17 @@ dependencies = [
 name = "biliup-cli"
 version = "0.2.4"
 dependencies = [
- "anyhow",
+ "async-channel",
  "async-trait",
  "axum",
+ "axum-login",
  "biliup",
+ "bon",
  "bytes",
  "chrono",
  "clap",
  "dialoguer",
+ "error-stack",
  "futures",
  "glob",
  "humantime",
@@ -410,7 +412,9 @@ dependencies = [
  "indexmap",
  "indicatif",
  "mime_guess",
+ "nom 8.0.0",
  "ormlite",
+ "password-auth",
  "qrcode",
  "regex",
  "reqwest",
@@ -424,9 +428,13 @@ dependencies = [
  "time",
  "tokio",
  "toml",
+ "tower",
  "tower-http",
+ "tower-sessions",
+ "tower-sessions-sqlx-store",
  "tracing",
  "tracing-subscriber",
+ "url",
 ]
 
 [[package]]
@@ -3617,14 +3625,14 @@ checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 
 [[package]]
 name = "stream-gears"
-version = "1.1.4"
+version = "1.1.5"
 dependencies = [
- "anyhow",
  "async-channel",
  "async-trait",
  "axum",
  "axum-login",
  "biliup",
+ "biliup-cli",
  "bon",
  "bytes",
  "chrono",

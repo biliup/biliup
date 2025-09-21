@@ -28,7 +28,7 @@ impl Context {
 
 #[derive(Debug)]
 pub struct Worker {
-    pub(crate) id: i64,
+    pub id: i64,
     pub url: String,
     pub context: Context,
     pub downloader_status: RwLock<WorkerStatus>,
