@@ -1,10 +1,7 @@
-use crate::server::core::download_manager::UploaderMessage;
 use crate::server::core::downloader;
 use crate::server::core::downloader::{
     DownloadConfig, DownloadStatus, Downloader, DownloaderType, SegmentEvent,
 };
-use crate::server::infrastructure::context::Worker;
-use async_channel::{Sender, bounded};
 use async_trait::async_trait;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -12,7 +9,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tracing::info;
 
 /// FFmpeg下载器实现
 pub struct FfmpegDownloader {
@@ -199,7 +196,6 @@ impl FfmpegDownloader {
             }
         };
         // let (tx, rx) = bounded(16);
-        let i = 0;
         // 分段回调
         let segment_callback = |event: SegmentEvent| {
             println!("New segment: {:?}", event.file_path);
@@ -246,7 +242,7 @@ impl FfmpegDownloader {
         callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
     ) -> Result<DownloadStatus, Box<dyn std::error::Error>> {
         let args = self.build_ffmpeg_args_internal_segment();
-        let output_pattern = self.output_dir.join("%d.{}");
+        let _output_pattern = self.output_dir.join("%d.{}");
 
         let mut cmd = Command::new("ffmpeg");
         cmd.args(&args)

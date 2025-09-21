@@ -1,17 +1,12 @@
-use crate::server::config;
 use crate::server::config::Config;
 use crate::server::core::download_manager::{ActorHandle, DownloadManager};
 use crate::server::core::monitor::Monitor;
-use crate::server::core::plugin;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Context, Worker};
-use crate::server::infrastructure::repositories;
 use axum::extract::FromRef;
 use biliup::client::StatelessClient;
-use biliup::credential::Credential;
 use error_stack::bail;
-use ormlite::Model;
 use std::sync::{Arc, RwLock};
 use tracing::info;
 

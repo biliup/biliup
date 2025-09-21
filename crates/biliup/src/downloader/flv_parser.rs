@@ -90,7 +90,7 @@ pub fn tag_header(input: &[u8]) -> IResult<&[u8], TagHeader> {
     .parse(input)
 }
 
-pub fn complete_tag(input: &[u8]) -> IResult<&[u8], Tag> {
+pub fn complete_tag(input: &[u8]) -> IResult<&[u8], Tag<'_>> {
     flat_map(pair(tag_type, be_u24), |(tag_type, data_size)| {
         map(
             (
@@ -194,7 +194,7 @@ pub struct AACAudioPacket<'a> {
     pub aac_data: &'a [u8],
 }
 
-pub fn aac_audio_packet(input: &[u8], size: usize) -> IResult<&[u8], AACAudioPacket> {
+pub fn aac_audio_packet(input: &[u8], size: usize) -> IResult<&[u8], AACAudioPacket<'_>> {
     if input.len() < size {
         return Err(Err::Incomplete(Needed::new(size)));
     }
@@ -232,7 +232,7 @@ pub struct AudioData<'a> {
     pub sound_data: &'a [u8],
 }
 
-pub fn audio_data(input: &[u8], size: usize) -> IResult<&[u8], AudioData> {
+pub fn audio_data(input: &[u8], size: usize) -> IResult<&[u8], AudioData<'_>> {
     if input.len() < size {
         return Err(Err::Incomplete(Needed::new(size)));
     }
@@ -441,7 +441,7 @@ pub struct AVCVideoPacket<'a> {
     pub avc_data: &'a [u8],
 }
 
-pub fn avc_video_packet(input: &[u8], size: usize) -> IResult<&[u8], AVCVideoPacket> {
+pub fn avc_video_packet(input: &[u8], size: usize) -> IResult<&[u8], AVCVideoPacket<'_>> {
     if input.len() < size {
         return Err(Err::Incomplete(Needed::new(size)));
     }
@@ -470,7 +470,7 @@ pub struct VideoData<'a> {
     pub video_data: &'a [u8],
 }
 
-pub fn video_data(input: &[u8], size: usize) -> IResult<&[u8], VideoData> {
+pub fn video_data(input: &[u8], size: usize) -> IResult<&[u8], VideoData<'_>> {
     if input.len() < size {
         return Err(Err::Incomplete(Needed::new(size)));
     }
@@ -600,7 +600,7 @@ pub struct ScriptDataDate {
 #[allow(non_upper_case_globals)]
 static script_data_name_tag: &[u8] = &[2];
 
-pub fn script_data(input: &[u8]) -> IResult<&[u8], ScriptData> {
+pub fn script_data(input: &[u8]) -> IResult<&[u8], ScriptData<'_>> {
     // Must start with a string, i.e. 2
     map(
         (
@@ -613,7 +613,7 @@ pub fn script_data(input: &[u8]) -> IResult<&[u8], ScriptData> {
     .parse(input)
 }
 
-pub fn script_data_value(input: &[u8]) -> IResult<&[u8], ScriptDataValue> {
+pub fn script_data_value(input: &[u8]) -> IResult<&[u8], ScriptDataValue<'_>> {
     be_u8(input).and_then(|v| match v {
         (i, 0) => map(be_f64, ScriptDataValue::Number).parse(i),
         (i, 1) => map(be_u8, |n| ScriptDataValue::Boolean(n != 0)).parse(i),
@@ -631,11 +631,11 @@ pub fn script_data_value(input: &[u8]) -> IResult<&[u8], ScriptDataValue> {
     })
 }
 
-pub fn script_data_objects(input: &[u8]) -> IResult<&[u8], Vec<ScriptDataObject>> {
+pub fn script_data_objects(input: &[u8]) -> IResult<&[u8], Vec<ScriptDataObject<'_>>> {
     terminated(many0(script_data_object), script_data_object_end).parse(input)
 }
 
-pub fn script_data_object(input: &[u8]) -> IResult<&[u8], ScriptDataObject> {
+pub fn script_data_object(input: &[u8]) -> IResult<&[u8], ScriptDataObject<'_>> {
     map(
         pair(script_data_string, script_data_value),
         |(name, data)| ScriptDataObject { name, data },
@@ -669,13 +669,13 @@ pub fn script_data_date(input: &[u8]) -> IResult<&[u8], ScriptDataDate> {
     .parse(input)
 }
 
-pub fn script_data_ecma_array(input: &[u8]) -> IResult<&[u8], Vec<ScriptDataObject>> {
+pub fn script_data_ecma_array(input: &[u8]) -> IResult<&[u8], Vec<ScriptDataObject<'_>>> {
     map(pair(be_u32, script_data_objects), |(_, data_objects)| {
         data_objects
     })
     .parse(input)
 }
 
-pub fn script_data_strict_array(input: &[u8]) -> IResult<&[u8], Vec<ScriptDataValue>> {
+pub fn script_data_strict_array(input: &[u8]) -> IResult<&[u8], Vec<ScriptDataValue<'_>>> {
     flat_map(be_u32, |o| many_m_n(1, o as usize, script_data_value)).parse(input)
 }

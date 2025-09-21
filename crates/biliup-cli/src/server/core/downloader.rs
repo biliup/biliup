@@ -1,15 +1,10 @@
 pub mod ffmpeg_downloader;
 pub mod stream_gears;
 
-use crate::server::core::download_manager::UploaderMessage;
-use crate::server::infrastructure::context::Worker;
-use async_channel::Sender;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::io::AsyncBufReadExt;
 
 /// 下载器配置
 #[derive(Debug, Clone, Deserialize, Serialize)]

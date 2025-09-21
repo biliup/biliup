@@ -256,7 +256,7 @@ impl UActor {
                     let streamer = worker.get_streamer().await.unwrap();
                     if let Some(post_processor) = streamer.postprocessor {
                         for video_path in &video_paths {
-                            process_video(video_path, &post_processor)
+                            let _ = process_video(video_path, &post_processor)
                                 .await
                                 .map_err(|e| error!(e=?e));
                         }
@@ -360,4 +360,17 @@ pub enum DownloaderMessage {
         Arc<Worker>,
         Arc<RoomsHandle>,
     ),
+}
+
+impl Drop for ActorHandle {
+    fn drop(&mut self) {
+        // 发送端随 ActorHandle 一起被 drop，会关闭通道（如果没有其他 sender 克隆）。
+        // 为避免 tokio 任务在后台“挂着”，这里直接 abort。
+        for h in &self.d_kills {
+            h.abort();
+        }
+        for h in &self.u_kills {
+            h.abort();
+        }
+    }
 }

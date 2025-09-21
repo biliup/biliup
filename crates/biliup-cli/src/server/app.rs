@@ -1,6 +1,5 @@
-use biliup::client::StatelessClient;
 
-use axum::{Extension, http};
+use axum::http;
 
 use crate::server;
 use crate::server::api::auth;

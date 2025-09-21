@@ -15,10 +15,10 @@ impl ConnectionManager {
         if let Some(parent) = Path::new(path).parent() {
             std::fs::create_dir_all(parent)
                 .change_context(AppError::Unknown)
-                .attach_lazy(|| path.to_string())?; // 创建 data/ 目录
+                .attach_with(|| path.to_string())?; // 创建 data/ 目录
         }
         let db_url = format!("sqlite://{path}");
-        /// Start by making a database connection.
+        // Start by making a database connection.
         std::fs::OpenOptions::new()
             .write(true)
             .create(true)
@@ -32,8 +32,7 @@ impl ConnectionManager {
                 "error while initializing the database connection pool".to_string(),
             ))?;
 
-        /// Query builder syntax closely follows SQL syntax, translated into chained function calls.
-
+        // Query builder syntax closely follows SQL syntax, translated into chained function calls.
         info!("migrations enabled, running...");
         sqlx::migrate!()
             .run(&pool)

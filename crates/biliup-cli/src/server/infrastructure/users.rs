@@ -1,7 +1,6 @@
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use axum_login::{AuthUser, AuthnBackend, UserId};
-use error_stack::FutureExt;
 use error_stack::{ResultExt, bail};
 use password_auth::{generate_hash, verify_password};
 use serde::{Deserialize, Serialize};

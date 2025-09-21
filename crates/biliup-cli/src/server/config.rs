@@ -3,9 +3,6 @@ use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::models::hook_step::HookStep;
 use error_stack::bail;
 use serde::{Deserialize, Serialize};
-use std::cell::LazyCell;
-use std::ops::Deref;
-use std::sync::{Arc, LazyLock, OnceLock, RwLock};
 use std::{collections::HashMap, path::Path, path::PathBuf};
 
 #[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
@@ -314,9 +311,6 @@ fn default_pool1_size() -> u32 {
 }
 fn default_pool2_size() -> u32 {
     3
-}
-fn default_check_sourcecode() -> u64 {
-    15
 }
 
 impl Config {

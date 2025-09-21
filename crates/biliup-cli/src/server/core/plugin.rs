@@ -1,19 +1,12 @@
-use crate::server::core::download_manager::{ActorHandle, DownloadManager};
-use crate::server::core::downloader::ffmpeg_downloader::FfmpegDownloader;
-use crate::server::core::downloader::stream_gears::StreamGears;
-use crate::server::core::downloader::{DownloadConfig, Downloader, DownloaderType};
+use crate::server::core::downloader::Downloader;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::Worker;
-use crate::server::util::{Recorder, media_ext_from_url, parse_time};
 use async_trait::async_trait;
-use biliup::downloader::util::Segmentable;
-use error_stack::{Report, ResultExt};
+use error_stack::Report;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::path::Path;
 use time::OffsetDateTime;
-use tracing::{debug, info};
 
 // Stream information structures
 #[derive(Debug, Clone, Serialize, Deserialize)]

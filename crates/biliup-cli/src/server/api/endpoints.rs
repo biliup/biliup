@@ -1,5 +1,5 @@
 use crate::server::config::Config;
-use crate::server::errors::{AppError, AppResult, report_to_response};
+use crate::server::errors::{AppError, report_to_response};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::Worker;
 use crate::server::infrastructure::dto::LiveStreamerResponse;
@@ -12,8 +12,8 @@ use crate::server::infrastructure::service_register::ServiceRegister;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::{Json, debug_handler};
-use biliup::credential::{Credential, LoginInfo};
+use axum::Json;
+use biliup::credential::Credential;
 use error_stack::{Report, ResultExt};
 use ormlite::{Insert, Model};
 use serde_json::json;
@@ -65,7 +65,7 @@ pub async fn post_streamers_endpoint(
     };
     let monitor = manager.ensure_monitor();
 
-    /// You can insert the model directly.
+    // You can insert the model directly.
     let live_streamers = payload
         .insert(&pool)
         .await
@@ -113,7 +113,6 @@ pub async fn put_streamers_endpoint(
 pub async fn delete_streamers_endpoint(
     State(service_register): State<ServiceRegister>,
     State(pool): State<ConnectionPool>,
-    State(workers): State<Arc<RwLock<Vec<Arc<Worker>>>>>,
     Path(id): Path<i64>,
 ) -> Result<Json<LiveStreamer>, Response> {
     service_register
@@ -414,12 +413,11 @@ pub async fn get_videos() -> Result<Json<Vec<serde_json::Value>>, Response> {
                 continue;
             }
 
-            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                if media_extensions
+            if let Some(ext) = path.extension().and_then(|e| e.to_str())
+                && media_extensions
                     .iter()
-                    .any(|allowed| &ext == &allowed.trim_start_matches('.'))
-                {
-                    if let Ok(metadata) = entry.metadata().await {
+                    .any(|allowed| ext == allowed.trim_start_matches('.'))
+                    && let Ok(metadata) = entry.metadata().await {
                         let mtime = metadata
                             .modified()
                             .ok()
@@ -435,8 +433,6 @@ pub async fn get_videos() -> Result<Json<Vec<serde_json::Value>>, Response> {
                         }));
                         index += 1;
                     }
-                }
-            }
         }
     }
     Ok(Json(file_list))

@@ -2,7 +2,6 @@ use crate::construct_headers;
 use async_trait::async_trait;
 use biliup::downloader::util::Segmentable;
 use biliup_cli::server::app::ApplicationController;
-use biliup_cli::server::config;
 use biliup_cli::server::config::Config;
 use biliup_cli::server::core::download_manager::{ActorHandle, DownloadManager};
 use biliup_cli::server::core::downloader::ffmpeg_downloader::FfmpegDownloader;
@@ -17,15 +16,13 @@ use biliup_cli::server::infrastructure::service_register::ServiceRegister;
 use biliup_cli::server::util::{Recorder, media_ext_from_url, parse_time};
 use error_stack::{Report, ResultExt};
 use fancy_regex::Regex;
-use futures::TryFutureExt;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::PyDictMethods;
 use pyo3::prelude::{PyAnyMethods, PyListMethods, PyModule};
-use pyo3::sync::OnceLockExt;
 use pyo3::types::PyDict;
 use pyo3::types::{PyList, PyType};
 use pyo3::{Bound, Py, PyAny, PyResult, Python};
-use pyo3::{FromPyObject, pyclass, pyfunction, pymethods};
+use pyo3::{pyclass, pyfunction, pymethods};
 use pythonize::pythonize;
 use std::collections::HashMap;
 use std::net::ToSocketAddrs;
@@ -170,7 +167,7 @@ async fn call_via_threads(obj: Arc<Py<PyType>>, url: &str) -> PyResult<Option<St
             let res = fut.call_method0("result")?;
             let is_live = res.unbind().extract(py)?;
             let info = if is_live {
-                Some(stream_info_from_py(py, &instance)?)
+                Some(stream_info_from_py(&instance)?)
             } else {
                 None
             };
@@ -188,7 +185,7 @@ pub fn from_py(actor_handle: Arc<ActorHandle>) -> PyResult<Vec<DownloadManager>>
         // 获取 Plugin 类
         let plugin_class = decorators.getattr("Plugin")?;
 
-        let instance = plugin_class.call1((plugins,))?;
+        let _instance = plugin_class.call1((plugins,))?;
 
         // 如果要获取类属性（而不是实例属性）
         let bound = plugin_class.getattr("download_plugins")?;
@@ -214,14 +211,14 @@ pub fn from_py(actor_handle: Arc<ActorHandle>) -> PyResult<Vec<DownloadManager>>
 
 /// 从 Python 的 `self`（Bound<PyAny>）与 start_time / end_time 构造 StreamInfo
 /// end_time 的语义与 Python 中一致：若未提供或为“假值”，则使用 time.localtime()
-pub fn stream_info_from_py(py: Python<'_>, self_obj: &Bound<'_, PyAny>) -> PyResult<StreamInfo> {
+pub fn stream_info_from_py(self_obj: &Bound<'_, PyAny>) -> PyResult<StreamInfo> {
     // 从 self 上获取属性并抽取为 Rust 类型
     let name: String = self_obj.getattr("fname")?.extract()?;
     let url: String = self_obj.getattr("url")?.extract()?;
     let raw_stream_url: String = self_obj.getattr("raw_stream_url")?.extract()?;
     let title: String = self_obj.getattr("room_title")?.extract()?;
     let live_cover_path: Option<String> = self_obj.getattr("live_cover_path")?.extract()?;
-    let is_download: bool = self_obj.getattr("is_download")?.extract()?;
+    let _is_download: bool = self_obj.getattr("is_download")?.extract()?;
     let platform: String = self_obj.getattr("platform")?.extract()?;
     let stream_headers: HashMap<String, String> = self_obj.getattr("stream_headers")?.extract()?;
     self_obj.call_method1("update_headers", (&stream_headers,))?;
@@ -292,7 +289,7 @@ impl ConfigState {
 }
 
 #[pyfunction]
-pub fn config_bindings(py: Python<'_>) -> PyResult<ConfigState> {
+pub fn config_bindings() -> PyResult<ConfigState> {
     let state = ConfigState {
         map: cfg_arc().clone(),
     };
@@ -308,7 +305,7 @@ pub static CONFIG: LazyLock<Arc<RwLock<Config>>> = LazyLock::new(|| {
 });
 
 fn cfg_arc() -> &'static Arc<RwLock<Config>> {
-    &*CONFIG
+    &CONFIG
 }
 
 #[pyfunction]

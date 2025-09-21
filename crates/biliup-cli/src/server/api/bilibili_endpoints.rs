@@ -3,7 +3,7 @@ use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::models::Configuration;
 use axum::extract::{Query, State};
 use axum::response::Response;
-use axum::{Extension, Json};
+use axum::Json;
 use biliup::client::StatelessClient;
 use biliup::uploader::credential::login_by_cookies;
 use bytes::Bytes;

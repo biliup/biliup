@@ -344,10 +344,10 @@ pub async fn login_by_password(credential: Credential) -> AppResult<LoginInfo> {
         .with_prompt("请输入密码")
         .interact()
         .change_context_lazy(|| AppError::Unknown)?;
-    Ok(credential
+    credential
         .login_by_password(&username, &password)
         .await
-        .change_context_lazy(|| AppError::Unknown)?)
+        .change_context_lazy(|| AppError::Unknown)
 }
 
 pub async fn login_by_sms(credential: Credential) -> AppResult<LoginInfo> {
@@ -384,10 +384,10 @@ pub async fn login_by_sms(credential: Credential) -> AppResult<LoginInfo> {
         .interact_text()
         .change_context_lazy(|| AppError::Unknown)?;
     // println!("{}", payload);
-    Ok(credential
+    credential
         .login_by_sms(input, res)
         .await
-        .change_context_lazy(|| AppError::Unknown)?)
+        .change_context_lazy(|| AppError::Unknown)
 }
 
 pub async fn login_by_qrcode(credential: Credential) -> AppResult<LoginInfo> {
@@ -415,10 +415,10 @@ pub async fn login_by_qrcode(credential: Credential) -> AppResult<LoginInfo> {
     );
     // Save the image.
     image.save("qrcode.png").unwrap();
-    Ok(credential
+    credential
         .login_by_qrcode(value)
         .await
-        .change_context_lazy(|| AppError::Unknown)?)
+        .change_context_lazy(|| AppError::Unknown)
 }
 
 pub async fn login_by_browser(credential: Credential) -> AppResult<LoginInfo> {
@@ -433,10 +433,10 @@ pub async fn login_by_browser(credential: Credential) -> AppResult<LoginInfo> {
             .ok_or_else(|| AppError::Custom(value.to_string()))?
     );
     println!("请复制此链接至浏览器中完成登录");
-    Ok(credential
+    credential
         .login_by_qrcode(value)
         .await
-        .change_context_lazy(|| AppError::Unknown)?)
+        .change_context_lazy(|| AppError::Unknown)
 }
 
 pub async fn login_by_web_cookies(credential: Credential) -> AppResult<LoginInfo> {
@@ -448,10 +448,10 @@ pub async fn login_by_web_cookies(credential: Credential) -> AppResult<LoginInfo
         .with_prompt("请输入bili_jct")
         .interact_text()
         .change_context_lazy(|| AppError::Unknown)?;
-    Ok(credential
+    credential
         .login_by_web_cookies(&sess_data, &bili_jct)
         .await
-        .change_context_lazy(|| AppError::Unknown)?)
+        .change_context_lazy(|| AppError::Unknown)
 }
 
 pub async fn login_by_webqr_cookies(credential: Credential) -> AppResult<LoginInfo> {
@@ -463,10 +463,10 @@ pub async fn login_by_webqr_cookies(credential: Credential) -> AppResult<LoginIn
         .with_prompt("请输入DedeUserID")
         .interact_text()
         .change_context_lazy(|| AppError::Unknown)?;
-    Ok(credential
+    credential
         .login_by_web_qrcode(&sess_data, &dede_user_id)
         .await
-        .change_context_lazy(|| AppError::Unknown)?)
+        .change_context_lazy(|| AppError::Unknown)
 }
 
 impl From<Progressbar> for Body {

@@ -1,7 +1,7 @@
 use crate::server::config::Config;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::models::{Configuration, LiveStreamer, UploadStreamer};
+use crate::server::infrastructure::models::{LiveStreamer, UploadStreamer};
 use crate::server::infrastructure::repositories::{get_config, get_streamer};
 use biliup::client::StatelessClient;
 use error_stack::ResultExt;

@@ -1,7 +1,4 @@
-use crate::server::core::download_manager::UploaderMessage;
 use crate::server::core::downloader::{DownloadStatus, Downloader, SegmentEvent};
-use crate::server::infrastructure::context::Worker;
-use async_channel::{Sender, bounded};
 use async_trait::async_trait;
 use axum::http::HeaderMap;
 use biliup::client::StatelessClient;
@@ -13,7 +10,7 @@ use nom::Err;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 // 具体下载器实现
 pub struct StreamGears {
@@ -36,7 +33,7 @@ impl StreamGears {
         Self {
             url: url.into(),
             header_map,
-            file_name: file_name,
+            file_name,
             segment,
             proxy,
             status: Arc::new(RwLock::new(DownloadStatus::Downloading)),
