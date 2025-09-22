@@ -33,12 +33,12 @@ jobs:
       - name: Set up CPython interpreter for cross-compilation
         run: |
           BASE_URL="https://packages.termux.dev/apt/termux-main/pool/main/p/python"
-          FNAME=$(curl -s "$BASE_URL/" | grep -oE 'python_[0-9]+\.[0-9]+\.[0-9]+_aarch64\.deb' | { IFS= read -r line; echo "$line"; })
+          FNAME=$(curl -s "$BASE_URL/" | grep -oP '(?<=href=")python_[^"]+_aarch64\.deb' | head -n 1)
           wget -nv "$BASE_URL/$FNAME"
           mkdir python
           dpkg-deb -x $FNAME python
           cp -a python/data/data/com.termux/files/usr/lib/libpython* $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/24
-          sed -i 's/pyo3 = { version = "0.24.0", features = \[.*\] }/pyo3 = { version = "0.24.0" }/' crates/stream-gears/Cargo.toml
+          sed -i 's/"abi3-py38",\? *//g' crates/stream-gears/Cargo.toml
           sed -i '/dependencies = \[/a\    "quickjs >= 1.19.4",' pyproject.toml
           sed -i 's/aiohttp\[speedups\] >= 3\.9\.5/aiohttp[speedups] <= 3.9.5/' pyproject.toml
       - name: Build wheel for aarch64 (Termux)
