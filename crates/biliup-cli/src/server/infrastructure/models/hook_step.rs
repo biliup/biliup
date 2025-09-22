@@ -1,8 +1,10 @@
+use std::borrow::Cow;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
+use tracing::info;
 
 // 钩子步骤：既支持 key-value 形式（如 {run: "..."}），也支持纯字符串（如 "rm"）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,16 +20,16 @@ pub enum HookStep {
 
 impl HookStep {
     /// 执行后处理操作
-    pub async fn execute(&self, video_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn execute(&self, video_paths: &[&Path]) -> Result<(), Box<dyn std::error::Error>> {
         match self {
             HookStep::Run { run } => {
-                self.execute_command(run, video_path).await?;
+                self.execute_command(run, video_paths).await?;
             }
             HookStep::Move { mv } => {
-                self.move_file(video_path, mv).await?;
+                self.move_file(video_paths, mv).await?;
             }
             HookStep::Remove(cmd) if cmd == "rm" => {
-                self.remove_file(video_path).await?;
+                self.remove_file(video_paths).await?;
             }
             HookStep::Remove(cmd) => {
                 return Err(format!("Unknown command: {}", cmd).into());
@@ -40,7 +42,7 @@ impl HookStep {
     async fn execute_command(
         &self,
         cmd: &str,
-        video_path: &Path,
+        video_paths: &[&Path],
     ) -> Result<(), Box<dyn std::error::Error>> {
         println!("Executing: {}", cmd);
 
@@ -57,7 +59,7 @@ impl HookStep {
         // 将视频文件路径写入标准输入
         if let Some(mut stdin) = process.stdin.take() {
             stdin
-                .write_all(video_path.to_string_lossy().as_bytes())
+                .write_all(video_paths.iter().map(|p| p.to_string_lossy()).reduce(|acc, e| Cow::from(acc.to_string() + "\n" + &*e)).expect("REASON").as_bytes())
                 .await?;
         }
 
@@ -72,7 +74,7 @@ impl HookStep {
     /// 移动文件到指定目录
     async fn move_file(
         &self,
-        video_path: &Path,
+        video_paths: &[&Path],
         target_dir: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let target_path = Path::new(target_dir);
@@ -81,34 +83,37 @@ impl HookStep {
         if !target_path.exists() {
             fs::create_dir_all(target_path).await?;
         }
+        for video_path in video_paths {
+            let file_name = video_path.file_name().ok_or("Invalid file name")?;
 
-        let file_name = video_path.file_name().ok_or("Invalid file name")?;
+            let destination = target_path.join(file_name);
 
-        let destination = target_path.join(file_name);
-
-        println!(
-            "Moving {} to {}",
-            video_path.display(),
-            destination.display()
-        );
-        fs::rename(video_path, destination).await?;
-
+            println!(
+                "Moving {} to {}",
+                video_path.display(),
+                destination.display()
+            );
+            fs::rename(video_path, destination).await?; 
+        }
         Ok(())
     }
 
     /// 删除文件
-    async fn remove_file(&self, video_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-        println!("Removing: {}", video_path.display());
-        fs::remove_file(video_path).await?;
+    async fn remove_file(&self, video_paths: &[&Path]) -> Result<(), Box<dyn std::error::Error>> {
+        for video_path in video_paths {
+            println!("Removing: {}", video_path.display());
+            fs::remove_file(video_path).await?;
+        }
         Ok(())
     }
 }
 
 /// 处理所有后处理器
 pub async fn process_video(
-    video_path: &Path,
+    video_path: &[&Path],
     processors: &[HookStep],
 ) -> Result<(), Box<dyn std::error::Error>> {
+    info!("Starting processing...");
     for processor in processors {
         processor.execute(video_path).await?;
     }

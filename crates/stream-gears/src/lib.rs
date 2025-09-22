@@ -1,8 +1,10 @@
-extern crate core;
-
+mod danmaku;
 mod login;
 mod server;
 mod uploader;
+
+// Export DanmakuClient for external use
+pub use danmaku::DanmakuClient;
 
 use pyo3::prelude::*;
 use time::macros::format_description;
@@ -26,6 +28,8 @@ use tracing_subscriber::EnvFilter;
 use biliup::client::StatelessClient;
 use biliup::downloader::flv_parser::header;
 use biliup::downloader::httpflv::Connection;
+use pyo3::exceptions::PyRuntimeError;
+use tracing_appender::rolling::Rotation;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -39,7 +43,13 @@ fn init_tracing_with_rotation() {
             "[year]-[month]-[day] [hour]:[minute]:[second]"
         ));
         // 按日期滚动，每天创建新文件
-        let file_appender = tracing_appender::rolling::daily("logs", "upload.log");
+        let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
+            .rotation(Rotation::DAILY) // rotate log files once every hour
+            .filename_prefix("biliup") // log file names will be prefixed with `myapp.`
+            .filename_suffix("log") // log file names will be suffixed with `.log`
+            .max_log_files(3)
+            .build("logs") // try to build an appender that stores log files in `/var/log`
+            .expect("initializing rolling file appender failed");
         // 或者按小时滚动
         // let file_appender = tracing_appender::rolling::hourly("logs", "upload.log");
 
@@ -446,6 +456,32 @@ fn upload(
     })
 }
 
+#[pyfunction]
+pub fn main_loop(py: Python<'_>) -> PyResult<()> {
+    py.detach(|| server::_main().map_err(|e| PyRuntimeError::new_err(format!("{e:?}"))))
+
+    // for item in plugin_list.iter() {
+    //     // 每个元素都是一个类（type）
+    //     let ty: &Bound<PyType> = item.downcast()?;
+    //
+    //     // 确认是否是 DownloadBase 的子类
+    //     if ty.is_subclass(download_base)? {
+    //         let name: String = ty.getattr("__name__")?.extract()?;
+    //         println!("发现插件类: {name}");
+    //
+    //         // 如果要实例化（若不是抽象类且构造器无参）
+    //         // let obj = ty.call0()?;
+    //         // 或者需要参数：ty.call1((arg1, arg2,))?;
+    //
+    //         // 如果要调用方法（示例）
+    //         // if let Ok(method) = obj.getattr("download") {
+    //         //     let result = method.call0()?;
+    //         //     println!("download() 返回: {}", result.repr()?.extract::<String>()?);
+    //         // }
+    //     }
+    // }
+}
+
 /// A Python module implemented in Rust.
 #[pymodule]
 fn stream_gears(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -466,7 +502,7 @@ fn stream_gears(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(login_by_sms, m)?)?;
     m.add_function(wrap_pyfunction!(login_by_web_cookies, m)?)?;
     m.add_function(wrap_pyfunction!(login_by_web_qrcode, m)?)?;
-    m.add_function(wrap_pyfunction!(server::main_loop, m)?)?;
+    m.add_function(wrap_pyfunction!(main_loop, m)?)?;
     m.add_function(wrap_pyfunction!(server::config_bindings, m)?)?;
     m.add_class::<UploadLine>()?;
     m.add_class::<PySegment>()?;

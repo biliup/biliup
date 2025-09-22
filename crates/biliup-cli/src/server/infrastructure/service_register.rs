@@ -4,6 +4,7 @@ use crate::server::core::monitor::Monitor;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Context, Worker};
+use crate::server::infrastructure::models::{LiveStreamer, UploadStreamer};
 use axum::extract::FromRef;
 use biliup::client::StatelessClient;
 use error_stack::bail;
@@ -56,35 +57,42 @@ impl ServiceRegister {
 
     pub async fn add_room(
         &self,
-        id: i64,
-        url: &str,
         monitor: Arc<Monitor>,
+        live_streamer: LiveStreamer,
+        upload_streamer: Option<UploadStreamer>,
     ) -> AppResult<Option<()>> {
         let worker = Arc::new(Worker::new(
-            id,
-            url,
-            Context::new(self.pool.clone(), self.client.clone()),
+            live_streamer,
+            upload_streamer,
+            self.config.clone(),
+            self.client.clone(),
         ));
         monitor.rooms_handle.add(worker.clone()).await;
-        self.workers.write().unwrap().push(worker);
-        info!("add {url} success");
+        self.workers.write().unwrap().push(worker.clone());
+        info!("add {worker:?} success");
         Ok(Some(()))
     }
 
     pub async fn del_room(&self, id: i64) -> AppResult<()> {
-        let Some(i) = self.workers.read().unwrap().iter().position(|x| x.id == id) else {
+        let Some(i) = self
+            .workers
+            .read()
+            .unwrap()
+            .iter()
+            .position(|x| x.live_streamer.id == id)
+        else {
             return Err(error_stack::Report::new(AppError::Unknown));
         };
 
         let removed = self.workers.write().unwrap().swap_remove(i);
-        let url = &removed.url;
+        let url = &removed.live_streamer.url;
         let Some(manager) = self.get_manager(url) else {
             info!("not found url: {url}");
             bail!(AppError::Unknown)
         };
         let monitor = manager.ensure_monitor();
         let len = monitor.rooms_handle.del(id).await;
-        info!("{id} removed, remained len {len}");
+        info!("id: {id} removed, remained len {len}");
         if len == 0 {
             *manager.monitor.lock().unwrap() = None;
         }

@@ -1,6 +1,8 @@
+use crate::server::common::util::Recorder;
+use crate::server::config::Config;
 use crate::server::core::downloader::Downloader;
 use crate::server::errors::{AppError, AppResult};
-use crate::server::infrastructure::context::Worker;
+use crate::server::infrastructure::context::{Context, Worker};
 use async_trait::async_trait;
 use error_stack::Report;
 use serde::{Deserialize, Serialize};
@@ -43,12 +45,15 @@ pub trait DownloadBase: Send + Sync {
 #[async_trait]
 pub trait DownloadPlugin {
     fn matches(&self, url: &str) -> bool;
-    async fn check_status(&self, url: &str) -> Result<StreamStatus, Report<AppError>>;
+    async fn check_status(&self, ctx: &mut Context) -> Result<StreamStatus, Report<AppError>>;
     async fn create_downloader(
         &self,
         stream_info: &StreamInfo,
-        worker: &Worker,
-    ) -> AppResult<Box<dyn Downloader>>;
+        config: Config,
+        recorder: Recorder,
+    ) -> Box<dyn Downloader>;
+
+    fn danmaku_init(&self) -> Option<Box<dyn Downloader>>;
 
     fn name(&self) -> &str;
 }

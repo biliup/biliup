@@ -16,7 +16,7 @@ pub struct Config {
     pub file_size: u64, // Byte
 
     // 形如 "00:00:00"；保留为字符串以保持直观（你也可以替换为Duration并写自定义反序列化）
-    #[serde(default)]
+    #[serde(default = "default_segment_time")]
     pub segment_time: Option<String>,
 
     #[builder(default = default_filtering_threshold())]
@@ -288,6 +288,11 @@ pub struct UserConfig {
 fn default_file_size() -> u64 {
     2_621_440_000
 }
+
+pub fn default_segment_time() -> Option<String> {
+    Some("02:00:00".to_string())
+}
+
 fn default_filtering_threshold() -> u64 {
     20
 }

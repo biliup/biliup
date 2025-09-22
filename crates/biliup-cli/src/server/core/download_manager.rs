@@ -1,8 +1,9 @@
-use crate::server::core::downloader::SegmentEvent;
+use crate::server::common::util::Recorder;
+use crate::server::core::downloader::{Downloader, SegmentEvent};
 use crate::server::core::monitor::{Monitor, RoomsHandle};
 use crate::server::core::plugin::{DownloadPlugin, StreamInfo};
 use crate::server::errors::{AppError, AppResult};
-use crate::server::infrastructure::context::{Worker, WorkerStatus};
+use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
 use crate::server::infrastructure::models::hook_step::process_video;
 use async_channel::{Receiver, Sender, bounded};
 use biliup::bilibili::{BiliBili, Studio, Video};
@@ -73,22 +74,54 @@ impl DActor {
 
     async fn run(&mut self) {
         while let Ok(msg) = self.receiver.recv().await {
-            self.handle_message(msg).await;
+            if let Err(e) = self.handle_message(msg).await {
+                error!("Error handling message: {}", e);
+            }
         }
     }
 
-    async fn handle_message(&mut self, msg: DownloaderMessage) {
+    async fn handle_message(&mut self, msg: DownloaderMessage) -> AppResult<()> {
         match msg {
-            DownloaderMessage::Start(plugin, stream_info, room, rooms_handle) => {
-                let downloader = plugin.create_downloader(&stream_info, &room).await.unwrap();
+            DownloaderMessage::Start(plugin, stream_info, ctx, rooms_handle) => {
+                let config = ctx.worker.get_config();
+                let streamer = ctx.worker.get_streamer();
+                // info!(stream_info=?stream_info, "Create downloader");
+                let suffix = streamer
+                    .format
+                    .unwrap_or_else(|| stream_info.suffix.clone());
+                // println!("suffix: {suffix}");
+                let recorder = Recorder::new(
+                    streamer.filename_prefix,
+                    &streamer.remark,
+                    &stream_info.title,
+                    &suffix,
+                );
+                let downloader = plugin
+                    .create_downloader(&stream_info, config, recorder)
+                    .await;
 
-                *room.downloader_status.write().unwrap() = WorkerStatus::Working;
+                ctx.worker
+                    .change_status(Stage::Download, WorkerStatus::Working);
+                let mut danmaku_client = None;
+                if let Some(danmaku) = ctx.extension.get::<Arc<dyn Downloader>>() {
+                    danmaku
+                        .download(Box::new(|_| {}))
+                        .await
+                        .inspect_err(|e| error!(e=?e));
+                    danmaku_client = Some(danmaku.clone())
+                }
 
                 let (tx, rx) = bounded(16);
                 let hook = {
-                    let room = room.clone();
+                    let room = ctx.worker.clone();
                     let sender = self.sender.clone();
+                    let danmaku_client = danmaku_client.clone();
                     move |event: SegmentEvent| {
+                        if let Some(danmaku) = &danmaku_client {
+                            danmaku
+                                .rolling(&event.file_path.display().to_string())
+                                .inspect_err(|e| error!(e));
+                        }
                         if event.segment_index == 0 {
                             match sender.force_send(UploaderMessage::SegmentEvent(
                                 event,
@@ -120,8 +153,13 @@ impl DActor {
                         error!("download error: {:?}", err);
                     }
                 };
-                *room.downloader_status.write().unwrap() = WorkerStatus::Idle;
-                rooms_handle.toggle(room).await;
+                if let Some(danmaku) = &danmaku_client {
+                    danmaku.stop().await.inspect_err(|e| error!(e));
+                }
+                ctx.worker
+                    .change_status(Stage::Download, WorkerStatus::Idle);
+                rooms_handle.toggle(ctx.worker).await;
+                Ok(())
             }
         }
     }
@@ -144,18 +182,18 @@ impl UActor {
     async fn handle_message(&mut self, msg: UploaderMessage) {
         match msg {
             UploaderMessage::SegmentEvent(event, rx, worker) => {
-                let Some(upload_config) = worker.get_upload_config().await.unwrap() else {
+                let Some(upload_config) = worker.get_upload_config() else {
                     return;
                 };
                 let cookie_file = upload_config
                     .user_cookie
                     .unwrap_or("cookies.json".to_string());
                 let bilibili = login_by_cookies(&cookie_file, None).await;
-                let Ok(bilibili) = bilibili.map_err(|e| error!(e=?e)) else {
+                let Ok(bilibili) = bilibili.inspect_err(|e| error!(e=?e)) else {
                     return;
                 };
-                let config = worker.get_config().await.unwrap();
-                let client = worker.context.client.clone();
+                let config = worker.get_config();
+                let client = worker.client.clone();
                 let line = config.lines;
                 let line = match line.as_str() {
                     "bda2" => line::bda2(),
@@ -176,7 +214,7 @@ impl UActor {
                     &event.file_path,
                 )
                 .await
-                .map_err(|e| error!(e=?e))
+                .inspect_err(|e| error!(e=?e))
                 {
                     videos.push(video);
                 }
@@ -253,13 +291,13 @@ impl UActor {
                 info!(submit_result=?submit_result);
                 if submit_result.is_ok() {
                     info!("Submit successful");
-                    let streamer = worker.get_streamer().await.unwrap();
+                    let streamer = worker.get_streamer();
                     if let Some(post_processor) = streamer.postprocessor {
-                        for video_path in &video_paths {
-                            let _ = process_video(video_path, &post_processor)
-                                .await
-                                .map_err(|e| error!(e=?e));
-                        }
+
+                        let _ = process_video(&(video_paths.iter().map(|p|p.as_path()).collect::<Vec<_>>()), &post_processor)
+                            .await
+                            .map_err(|e| error!(e=?e));
+
                     }
                 }
             }
@@ -357,7 +395,7 @@ pub enum DownloaderMessage {
     Start(
         Arc<dyn DownloadPlugin + Send + Sync>,
         StreamInfo,
-        Arc<Worker>,
+        Context,
         Arc<RoomsHandle>,
     ),
 }

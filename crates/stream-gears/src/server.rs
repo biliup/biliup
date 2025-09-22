@@ -1,8 +1,9 @@
-use crate::construct_headers;
+use crate::{DanmakuClient, construct_headers};
 use async_trait::async_trait;
 use biliup::downloader::util::Segmentable;
 use biliup_cli::server::app::ApplicationController;
-use biliup_cli::server::config::Config;
+use biliup_cli::server::common::util::{Recorder, media_ext_from_url, parse_time};
+use biliup_cli::server::config::{default_segment_time, Config};
 use biliup_cli::server::core::download_manager::{ActorHandle, DownloadManager};
 use biliup_cli::server::core::downloader::ffmpeg_downloader::FfmpegDownloader;
 use biliup_cli::server::core::downloader::stream_gears::StreamGears;
@@ -10,10 +11,10 @@ use biliup_cli::server::core::downloader::{DownloadConfig, Downloader, Downloade
 use biliup_cli::server::core::plugin::{DownloadPlugin, StreamInfo, StreamStatus};
 use biliup_cli::server::errors::{AppError, AppResult};
 use biliup_cli::server::infrastructure::connection_pool::ConnectionManager;
-use biliup_cli::server::infrastructure::context::Worker;
+use biliup_cli::server::infrastructure::context::{Context, Worker};
 use biliup_cli::server::infrastructure::repositories;
+use biliup_cli::server::infrastructure::repositories::get_upload_config;
 use biliup_cli::server::infrastructure::service_register::ServiceRegister;
-use biliup_cli::server::util::{Recorder, media_ext_from_url, parse_time};
 use error_stack::{Report, ResultExt};
 use fancy_regex::Regex;
 use pyo3::exceptions::PyRuntimeError;
@@ -68,13 +69,20 @@ impl DownloadPlugin for PyPlugin {
         false
     }
 
-    async fn check_status(&self, url: &str) -> Result<StreamStatus, Report<AppError>> {
+    async fn check_status(&self, ctx: &mut Context) -> Result<StreamStatus, Report<AppError>> {
         info!("Checking status");
-        match call_via_threads(self.plugin.clone(), url)
+        match call_via_threads(self.plugin.clone(), &ctx.worker.live_streamer.url)
             .await
             .change_context(AppError::Unknown)?
         {
-            Some(info) => Ok(StreamStatus::Live { stream_info: info }),
+            Some((info, danmaku)) => {
+                if let Some(danmaku) = danmaku {
+                    let danmaku =
+                        Arc::new(DanmakuClient::new(Arc::new(danmaku))) as Arc<dyn Downloader>;
+                    ctx.extension.insert(danmaku);
+                }
+                Ok(StreamStatus::Live { stream_info: info })
+            }
             None => Ok(StreamStatus::Offline),
         }
     }
@@ -82,45 +90,33 @@ impl DownloadPlugin for PyPlugin {
     async fn create_downloader(
         &self,
         stream_info: &StreamInfo,
-        worker: &Worker,
-    ) -> AppResult<Box<dyn Downloader>> {
-        let config = worker.get_config().await?;
-        let streamer = worker.get_streamer().await?;
-        // info!(stream_info=?stream_info, "Create downloader");
+        // worker: &Worker,
+        config: Config,
+        recorder: Recorder,
+    ) -> Box<dyn Downloader> {
         let raw_stream_url = &stream_info.raw_stream_url;
-        let suffix = streamer
-            .format
-            .unwrap_or_else(|| stream_info.suffix.clone());
-        println!("suffix: {suffix}");
-        let recorder = Recorder::new(
-            streamer.filename_prefix,
-            &streamer.remark,
-            &stream_info.title,
-            &suffix,
-        );
-
         match config.downloader {
             Some(DownloaderType::Ffmpeg) => {
                 let config = DownloadConfig {
-                    format: suffix,
-                    segment_time: config.segment_time,
+                    segment_time: config.segment_time.or_else(default_segment_time),
                     file_size: Some(config.file_size), // 2GB
                     headers: stream_info.stream_headers.clone(),
-                    extra_args: vec![],
-                    downloader_type: DownloaderType::FfmpegInternal,
-                    filename_prefix: recorder.generate_filename(),
+                    recorder: recorder,
+                    // output_dir: PathBuf::from("./downloads")
+                    output_dir: PathBuf::from("."),
                 };
 
-                Ok(Box::new(FfmpegDownloader::new(
+                Box::new(FfmpegDownloader::new(
                     raw_stream_url,
                     config,
-                    PathBuf::from("./downloads"),
-                )))
+                    Vec::new(),
+                    DownloaderType::FfmpegInternal,
+                ))
             }
             // Some(DownloaderType::StreamGears) => {
             //
             // },
-            _ => Ok(Box::new(StreamGears::new(
+            _ => Box::new(StreamGears::new(
                 raw_stream_url,
                 construct_headers(&stream_info.stream_headers),
                 recorder.filename_template(),
@@ -129,8 +125,12 @@ impl DownloadPlugin for PyPlugin {
                     Some(config.file_size),
                 ),
                 None,
-            ))),
+            )),
         }
+    }
+
+    fn danmaku_init(&self) -> Option<Box<dyn Downloader>> {
+        todo!()
     }
 
     fn name(&self) -> &str {
@@ -138,11 +138,13 @@ impl DownloadPlugin for PyPlugin {
     }
 }
 
-async fn call_via_threads(obj: Arc<Py<PyType>>, url: &str) -> PyResult<Option<StreamInfo>> {
+async fn call_via_threads(
+    obj: Arc<Py<PyType>>,
+    url: &str,
+) -> PyResult<Option<(StreamInfo, Option<Py<PyAny>>)>> {
     let url = url.to_string();
-    // obj.
     tokio::task::spawn_blocking(move || {
-        Python::attach(|py| -> PyResult<Option<StreamInfo>> {
+        Python::attach(|py| -> PyResult<Option<(StreamInfo, Option<Py<PyAny>>)>> {
             // 从 biliup.util 获取 loop（按你项目里真实的名字来取）
             let util = PyModule::import(py, "biliup.common.util")?;
             // 下面两行二选一（取决于 biliup.util 的 API）：
@@ -211,7 +213,9 @@ pub fn from_py(actor_handle: Arc<ActorHandle>) -> PyResult<Vec<DownloadManager>>
 
 /// 从 Python 的 `self`（Bound<PyAny>）与 start_time / end_time 构造 StreamInfo
 /// end_time 的语义与 Python 中一致：若未提供或为“假值”，则使用 time.localtime()
-pub fn stream_info_from_py(self_obj: &Bound<'_, PyAny>) -> PyResult<StreamInfo> {
+pub fn stream_info_from_py(
+    self_obj: &Bound<'_, PyAny>,
+) -> PyResult<(StreamInfo, Option<Py<PyAny>>)> {
     // 从 self 上获取属性并抽取为 Rust 类型
     let name: String = self_obj.getattr("fname")?.extract()?;
     let url: String = self_obj.getattr("url")?.extract()?;
@@ -222,6 +226,15 @@ pub fn stream_info_from_py(self_obj: &Bound<'_, PyAny>) -> PyResult<StreamInfo> 
     let platform: String = self_obj.getattr("platform")?.extract()?;
     let stream_headers: HashMap<String, String> = self_obj.getattr("stream_headers")?.extract()?;
     self_obj.call_method1("update_headers", (&stream_headers,))?;
+    let danmaku_init = self_obj.call_method0("danmaku_init")?;
+    // let platform: Option<PyAny> = self_obj.getattr("danmaku")?.extract()?;
+    // danmaku 可能在条件下没有设置（比如 bilibili_danmaku 为 False）
+    let self_danmaku = self_obj.getattr("danmaku")?;
+    let danmaku = if !self_danmaku.is_none() {
+        Some(self_danmaku.unbind())
+    } else {
+        None
+    };
 
     // date 直接使用传入的 start_time（保留为 Python 对象）
     let date = OffsetDateTime::now_utc();
@@ -235,17 +248,20 @@ pub fn stream_info_from_py(self_obj: &Bound<'_, PyAny>) -> PyResult<StreamInfo> 
     //     }
     // };self.update_headers(self.stream_headers)
 
-    Ok(StreamInfo {
-        name,
-        url,
-        suffix: media_ext_from_url(&raw_stream_url).unwrap(),
-        raw_stream_url,
-        title,
-        date,
-        live_cover_path,
-        platform,
-        stream_headers,
-    })
+    Ok((
+        StreamInfo {
+            name,
+            url,
+            suffix: media_ext_from_url(&raw_stream_url).unwrap(),
+            raw_stream_url,
+            title,
+            date,
+            live_cover_path,
+            platform,
+            stream_headers,
+        },
+        danmaku,
+    ))
 }
 
 #[pyclass]
@@ -308,35 +324,8 @@ fn cfg_arc() -> &'static Arc<RwLock<Config>> {
     &CONFIG
 }
 
-#[pyfunction]
-pub fn main_loop(py: Python<'_>) -> PyResult<()> {
-    py.detach(_main)
-        .map_err(|e| PyRuntimeError::new_err(format!("{e:?}")))
-
-    // for item in plugin_list.iter() {
-    //     // 每个元素都是一个类（type）
-    //     let ty: &Bound<PyType> = item.downcast()?;
-    //
-    //     // 确认是否是 DownloadBase 的子类
-    //     if ty.is_subclass(download_base)? {
-    //         let name: String = ty.getattr("__name__")?.extract()?;
-    //         println!("发现插件类: {name}");
-    //
-    //         // 如果要实例化（若不是抽象类且构造器无参）
-    //         // let obj = ty.call0()?;
-    //         // 或者需要参数：ty.call1((arg1, arg2,))?;
-    //
-    //         // 如果要调用方法（示例）
-    //         // if let Ok(method) = obj.getattr("download") {
-    //         //     let result = method.call0()?;
-    //         //     println!("download() 返回: {}", result.repr()?.extract::<String>()?);
-    //         // }
-    //     }
-    // }
-}
-
 #[tokio::main]
-async fn _main() -> AppResult<()> {
+pub(crate) async fn _main() -> AppResult<()> {
     info!(
         "environment loaded and configuration parsed, initializing Postgres connection and running migrations..."
     );
@@ -359,8 +348,9 @@ async fn _main() -> AppResult<()> {
         // workers.push(Arc::new(Worker::new(streamer.id, service_register.pool.clone())));
         if let Some(manager) = service_register.get_manager(&streamer.url) {
             let monitor = manager.ensure_monitor();
+            let upload_config = get_upload_config(&service_register.pool, streamer.id).await?;
             let _ = service_register
-                .add_room(streamer.id, &streamer.url, monitor)
+                .add_room(monitor, streamer, upload_config)
                 .await?;
         };
     }

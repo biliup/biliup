@@ -7,12 +7,14 @@ use crate::server::infrastructure::models::{
     Configuration, FileItem, InsertConfiguration, InsertLiveStreamer, InsertUploadStreamer,
     LiveStreamer, StreamerInfo, UploadStreamer,
 };
-use crate::server::infrastructure::repositories::{del_streamer, get_all_streamer};
+use crate::server::infrastructure::repositories::{
+    del_streamer, get_all_streamer, get_upload_config,
+};
 use crate::server::infrastructure::service_register::ServiceRegister;
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use biliup::credential::Credential;
 use error_stack::{Report, ResultExt};
 use ormlite::{Insert, Model};
@@ -41,7 +43,7 @@ pub async fn get_streamers_endpoint(
                     .unwrap()
                     .iter()
                     .find_map(|worker| {
-                        if worker.id == x.id {
+                        if worker.live_streamer.id == x.id {
                             Some(*worker.downloader_status.read().unwrap())
                         } else {
                             None
@@ -71,8 +73,11 @@ pub async fn post_streamers_endpoint(
         .await
         .change_context(AppError::Unknown)
         .map_err(report_to_response)?;
+    let upload_config = get_upload_config(&pool, live_streamers.id)
+        .await
+        .map_err(report_to_response)?;
     service_register
-        .add_room(live_streamers.id, &live_streamers.url, monitor)
+        .add_room(monitor, live_streamers.clone(), upload_config)
         .await
         .map_err(report_to_response)?;
 
@@ -94,15 +99,20 @@ pub async fn put_streamers_endpoint(
         info!("not supported url: {}", &streamer.url);
         return Err((StatusCode::BAD_REQUEST, "Not supported url").into_response());
     };
-    let monitor = manager.ensure_monitor();
 
     service_register
         .del_room(streamer.id)
         .await
         .map_err(report_to_response)?;
 
+    let upload_config = get_upload_config(&pool, streamer.id)
+        .await
+        .map_err(report_to_response)?;
+
+    let monitor = manager.ensure_monitor();
+    
     service_register
-        .add_room(streamer.id, &streamer.url, monitor)
+        .add_room(monitor, streamer.clone(), upload_config)
         .await
         .map_err(report_to_response)?;
 
@@ -417,22 +427,23 @@ pub async fn get_videos() -> Result<Json<Vec<serde_json::Value>>, Response> {
                 && media_extensions
                     .iter()
                     .any(|allowed| ext == allowed.trim_start_matches('.'))
-                    && let Ok(metadata) = entry.metadata().await {
-                        let mtime = metadata
-                            .modified()
-                            .ok()
-                            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-                            .map(|d| d.as_secs())
-                            .unwrap_or(0);
+                && let Ok(metadata) = entry.metadata().await
+            {
+                let mtime = metadata
+                    .modified()
+                    .ok()
+                    .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
 
-                        file_list.push(serde_json::json!({
-                            "key": index,
-                            "name": file_name,
-                            "updateTime": mtime,
-                            "size": metadata.len(),
-                        }));
-                        index += 1;
-                    }
+                file_list.push(serde_json::json!({
+                    "key": index,
+                    "name": file_name,
+                    "updateTime": mtime,
+                    "size": metadata.len(),
+                }));
+                index += 1;
+            }
         }
     }
     Ok(Json(file_list))

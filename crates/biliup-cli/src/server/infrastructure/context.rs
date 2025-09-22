@@ -3,68 +3,81 @@ use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::models::{LiveStreamer, UploadStreamer};
 use crate::server::infrastructure::repositories::{get_config, get_streamer};
+use axum::http::Extensions;
 use biliup::client::StatelessClient;
 use error_stack::ResultExt;
 use ormlite::Model;
 use serde::{Deserialize, Serialize};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use tracing::info;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Context {
-    pool: ConnectionPool,
-    pub client: StatelessClient,
+    pub worker: Arc<Worker>,
+    pub extension: Extensions,
 }
 
 impl Context {
-    pub fn new(pool: ConnectionPool, client: StatelessClient) -> Self {
-        Self { pool, client }
+    pub fn new(worker: Arc<Worker>) -> Self {
+        Self {
+            worker,
+            extension: Default::default(),
+        }
     }
 
-    pub async fn get_config(&self) -> AppResult<Config> {
-        get_config(&self.pool).await
-    }
+    // pub async fn get_config(&self) -> AppResult<Config> {
+    //     get_config(&self.pool).await
+    // }
 }
 
 #[derive(Debug)]
 pub struct Worker {
-    pub id: i64,
-    pub url: String,
-    pub context: Context,
     pub downloader_status: RwLock<WorkerStatus>,
     pub uploader_status: RwLock<WorkerStatus>,
+    pub live_streamer: LiveStreamer,
+    pub upload_streamer: Option<UploadStreamer>,
+    pub config: Arc<RwLock<Config>>,
+    pub client: StatelessClient,
 }
 
 impl Worker {
-    pub fn new(id: i64, url: &str, context: Context) -> Self {
+    pub fn new(
+        live_streamer: LiveStreamer,
+        upload_streamer: Option<UploadStreamer>,
+        config: Arc<RwLock<Config>>,
+        client: StatelessClient,
+    ) -> Self {
         Self {
-            id,
-            context,
             downloader_status: RwLock::new(Default::default()),
             uploader_status: Default::default(),
-            url: url.to_string(),
+            live_streamer,
+            upload_streamer,
+            config,
+            client,
         }
     }
 
-    pub async fn get_streamer(&self) -> AppResult<LiveStreamer> {
-        get_streamer(&self.context.pool, self.id).await
+    pub fn get_streamer(&self) -> LiveStreamer {
+        // get_streamer(&self.context.pool, self.id).await
+        self.live_streamer.clone()
     }
 
-    pub async fn get_config(&self) -> AppResult<Config> {
-        self.context.get_config().await
+    pub fn get_upload_config(&self) -> Option<UploadStreamer> {
+        // let Some(id) = self.get_streamer().await?.upload_streamers_id else {
+        //     return Ok(None);
+        // };
+        //
+        // UploadStreamer::select()
+        //     .where_("id = ?")
+        //     .bind(id)
+        //     .fetch_optional(&self.context.pool)
+        //     .await
+        //     .change_context(AppError::Unknown)
+        self.upload_streamer.clone()
     }
 
-    pub async fn get_upload_config(&self) -> AppResult<Option<UploadStreamer>> {
-        let Some(id) = self.get_streamer().await?.upload_streamers_id else {
-            return Ok(None);
-        };
-
-        UploadStreamer::select()
-            .where_("id = ?")
-            .bind(id)
-            .fetch_optional(&self.context.pool)
-            .await
-            .change_context(AppError::Unknown)
+    pub fn get_config(&self) -> Config {
+        self.config.read().unwrap().clone()
     }
 
     pub fn change_status(&self, stage: Stage, status: WorkerStatus) {
@@ -81,13 +94,13 @@ impl Worker {
 
 impl Drop for Worker {
     fn drop(&mut self) {
-        info!("Dropping worker {}", self.id);
+        info!("Dropping worker {}", self.live_streamer.id);
     }
 }
 
 impl PartialEq for Worker {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
+        self.live_streamer.id == other.live_streamer.id
     }
 }
 

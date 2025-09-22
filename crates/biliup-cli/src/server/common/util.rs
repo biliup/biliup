@@ -1,13 +1,15 @@
 // main.rs
 use chrono::{Duration, Local};
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use url::Url;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Recorder {
     pub filename_prefix: Option<String>,
     pub fname: String,
     pub room_title: String,
+    /// 录制后保存文件格式 (mp4, ts, mkv, flv)
     pub suffix: String, // 不含点，如 "mp4"、"flv"
 }
 
@@ -143,7 +145,7 @@ pub fn parse_time(segment_time: &str) -> std::time::Duration {
 
 #[cfg(test)]
 mod tests {
-    use crate::server::util::media_ext_from_url;
+    use crate::server::common::util::media_ext_from_url;
 
     #[test]
     fn it_works() {

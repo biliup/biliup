@@ -1,4 +1,5 @@
 use crate::server::core::downloader::{DownloadStatus, Downloader, SegmentEvent};
+use crate::server::errors::{AppError, AppResult};
 use async_trait::async_trait;
 use axum::http::HeaderMap;
 use biliup::client::StatelessClient;
@@ -6,6 +7,7 @@ use biliup::downloader::flv_parser::header;
 use biliup::downloader::httpflv::Connection;
 use biliup::downloader::util::{LifecycleFile, Segmentable};
 use biliup::downloader::{hls, httpflv};
+use error_stack::ResultExt;
 use nom::Err;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -46,7 +48,7 @@ impl Downloader for StreamGears {
     async fn download(
         &self,
         callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
-    ) -> Result<DownloadStatus, Box<dyn std::error::Error>> {
+    ) -> AppResult<DownloadStatus> {
         let url = self.url.clone();
         let file_name = self.file_name.clone();
         let headers_in = self.header_map.clone();
@@ -59,10 +61,16 @@ impl Downloader for StreamGears {
         // response.copy_to(&mut writer)?;
         // io::copy(&mut resp, &mut out).expect("Unable to copy the content.");
         let client = StatelessClient::new(self.header_map.clone(), proxy.as_deref());
-        let response = client.retryable(&url).await?;
+        let response = client
+            .retryable(&url)
+            .await
+            .change_context(AppError::Unknown)?;
         let mut connection = Connection::new(response);
         // let buf = &mut [0u8; 9];
-        let bytes = connection.read_frame(9).await?;
+        let bytes = connection
+            .read_frame(9)
+            .await
+            .change_context(AppError::Unknown)?;
         let mut i = 0;
         let hook = move |s: &str| {
             i += 1;
@@ -88,7 +96,9 @@ impl Downloader for StreamGears {
             Err(e) => {
                 error!("{e}");
                 let file = LifecycleFile::with_hook(&file_name, "ts", hook);
-                hls::download(&url, &client, file, self.segment.clone()).await?;
+                hls::download(&url, &client, file, self.segment.clone())
+                    .await
+                    .change_context(AppError::Unknown)?;
             }
         }
         Ok(DownloadStatus::StreamEnded)
@@ -97,10 +107,6 @@ impl Downloader for StreamGears {
     async fn stop(&self) -> Result<(), Box<dyn std::error::Error>> {
         // 仅发出取消信号并更新状态。
         // 如上所述，如果底层下载函数不支持取消，这里不能真正中断正在进行的下载。
-        todo!()
-    }
-
-    async fn get_status(&self) -> DownloadStatus {
         todo!()
     }
 }

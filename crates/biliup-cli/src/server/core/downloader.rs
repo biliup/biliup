@@ -1,6 +1,8 @@
 pub mod ffmpeg_downloader;
 pub mod stream_gears;
 
+use crate::server::common::util::Recorder;
+use crate::server::errors::AppResult;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -9,9 +11,6 @@ use std::path::PathBuf;
 /// 下载器配置
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DownloadConfig {
-    /// 录制后保存文件格式 (mp4, ts, mkv, flv)
-    pub format: String,
-
     /// 分段时长 (格式: "HH:MM:SS")
     pub segment_time: Option<String>,
 
@@ -21,14 +20,18 @@ pub struct DownloadConfig {
     /// HTTP请求头
     pub headers: HashMap<String, String>,
 
-    /// 额外的FFmpeg参数
-    pub extra_args: Vec<String>,
-
-    /// 下载器类型
-    pub downloader_type: DownloaderType,
-
     /// 输出文件名前缀
-    pub filename_prefix: String,
+    pub recorder: Recorder,
+
+    // 输出文件名前缀
+    // pub filename_prefix: String,
+    pub output_dir: PathBuf,
+}
+
+impl DownloadConfig {
+    fn generate_output_filename(&self) -> PathBuf {
+        self.output_dir.join(self.recorder.generate_path())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -86,13 +89,16 @@ pub trait Downloader: Send + Sync {
         // sender: Sender<UploaderMessage>,
         // worker: Arc<Worker>,
         callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
-    ) -> Result<DownloadStatus, Box<dyn std::error::Error>>;
+    ) -> AppResult<DownloadStatus>;
 
     /// 停止下载
     async fn stop(&self) -> Result<(), Box<dyn std::error::Error>>;
 
     /// 获取当前下载状态
-    async fn get_status(&self) -> DownloadStatus;
+    /// async fn get_status(&self) -> DownloadStatus;
+    fn rolling(&self, file_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
 }
 
 /// 解析时长字符串 "HH:MM:SS" 为秒数

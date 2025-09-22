@@ -1,6 +1,6 @@
 use crate::server::core::download_manager::{ActorHandle, DownloaderMessage};
 use crate::server::core::plugin::{DownloadPlugin, StreamStatus};
-use crate::server::infrastructure::context::{Worker, WorkerStatus};
+use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
 use async_channel::{Receiver, Sender, bounded};
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,19 +18,20 @@ async fn start_client(
     info!("start -> [{platform_name}]");
     loop {
         if let Some(room) = rooms_handle.next().await {
-            let ulr = room.get_streamer().await.unwrap().url;
-            interval = room.get_config().await.unwrap().event_loop_interval;
+            let ulr = room.get_streamer().url;
+            interval = room.get_config().event_loop_interval;
             info!("[{platform_name}] room: {ulr}");
-            match plugin.check_status(&ulr).await.unwrap() {
+            let mut ctx = Context::new(room.clone());
+            match plugin.check_status(&mut ctx).await.unwrap() {
                 StreamStatus::Live { stream_info } => {
                     info!("room: {ulr} is live -> {:?}", stream_info);
-                    *room.downloader_status.write().unwrap() = WorkerStatus::Pending;
+                    room.change_status(Stage::Download, WorkerStatus::Pending);
                     if actor_handle
                         .down_sender
                         .send(DownloaderMessage::Start(
                             plugin.clone(),
                             stream_info,
-                            room.clone(),
+                            ctx,
                             rooms_handle.clone(),
                         ))
                         .await
@@ -218,9 +219,9 @@ impl RoomsActor {
     }
 
     fn del(&mut self, id: i64) -> usize {
-        if let Some(i) = self.rooms.iter().position(|x| x.id == id) {
+        if let Some(i) = self.rooms.iter().position(|x| x.live_streamer.id == id) {
             self.rooms.remove(i); // 保序，但 O(n)
-        } else if let Some(i) = self.waiting.iter().position(|x| x.id == id) {
+        } else if let Some(i) = self.waiting.iter().position(|x| x.live_streamer.id == id) {
             self.waiting.swap_remove(i);
         };
         info!("Removed room [{:?}] {}", self.rooms, self.rooms.len());

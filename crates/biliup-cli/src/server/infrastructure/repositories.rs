@@ -16,6 +16,22 @@ pub async fn get_streamer(pool: &ConnectionPool, id: i64) -> AppResult<LiveStrea
         .change_context(AppError::Unknown)
 }
 
+pub async fn get_upload_config(
+    pool: &ConnectionPool,
+    id: i64,
+) -> AppResult<Option<UploadStreamer>> {
+    let Some(id) = get_streamer(pool, id).await?.upload_streamers_id else {
+        return Ok(None);
+    };
+
+    UploadStreamer::select()
+        .where_("id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .change_context(AppError::Unknown)
+}
+
 pub async fn del_streamer(pool: &ConnectionPool, id: i64) -> AppResult<LiveStreamer> {
     let streamer = get_streamer(pool, id).await?;
     streamer

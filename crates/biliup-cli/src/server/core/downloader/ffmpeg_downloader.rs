@@ -2,7 +2,9 @@ use crate::server::core::downloader;
 use crate::server::core::downloader::{
     DownloadConfig, DownloadStatus, Downloader, DownloaderType, SegmentEvent,
 };
+use crate::server::errors::{AppError, AppResult};
 use async_trait::async_trait;
+use error_stack::{ResultExt, bail};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -15,19 +17,30 @@ use tracing::info;
 pub struct FfmpegDownloader {
     config: DownloadConfig,
     url: String,
-    output_dir: PathBuf,
     status: Arc<RwLock<DownloadStatus>>,
     process_handle: Arc<RwLock<Option<tokio::process::Child>>>,
+
+    /// 额外的FFmpeg参数
+    pub extra_args: Vec<String>,
+
+    /// 下载器类型
+    pub downloader_type: DownloaderType,
 }
 
 impl FfmpegDownloader {
-    pub fn new(url: &str, config: DownloadConfig, output_dir: PathBuf) -> Self {
+    pub fn new(
+        url: &str,
+        config: DownloadConfig,
+        extra_args: Vec<String>,
+        downloader_type: DownloaderType,
+    ) -> Self {
         Self {
             config,
             url: url.to_string(),
-            output_dir,
             status: Arc::new(RwLock::new(DownloadStatus::Downloading)),
             process_handle: Arc::new(RwLock::new(None)),
+            extra_args,
+            downloader_type,
         }
     }
 
@@ -90,7 +103,7 @@ impl FfmpegDownloader {
         }
 
         // 添加通用输出参数
-        self.append_common_output_args(&mut args, &self.config.format);
+        self.append_common_output_args(&mut args, &self.config.recorder.suffix);
 
         args
     }
@@ -159,16 +172,16 @@ impl FfmpegDownloader {
         }
 
         // 添加额外参数
-        args.extend(self.config.extra_args.clone());
+        args.extend(self.extra_args.clone());
     }
 
     /// 执行外部分段下载
     async fn download_external(
         &self,
         callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
-    ) -> Result<DownloadStatus, Box<dyn std::error::Error>> {
+    ) -> AppResult<DownloadStatus> {
         let args = self.build_ffmpeg_args_external_segment();
-        let output_file = self.generate_output_filename();
+        let output_file = self.config.generate_output_filename();
 
         let mut cmd = Command::new("ffmpeg");
         cmd.args(&args)
@@ -178,7 +191,7 @@ impl FfmpegDownloader {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
-        let child = cmd.spawn()?;
+        let child = cmd.spawn().change_context(AppError::Unknown)?;
 
         // 保存进程句柄
         {
@@ -190,9 +203,9 @@ impl FfmpegDownloader {
         let status = {
             let mut handle = self.process_handle.write().await;
             if let Some(mut child) = handle.take() {
-                child.wait().await?
+                child.wait().await.change_context(AppError::Unknown)?
             } else {
-                return Err("Process handle not found".into());
+                bail!(AppError::Custom("Process handle not found".to_string()));
             }
         };
         // let (tx, rx) = bounded(16);
@@ -218,7 +231,9 @@ impl FfmpegDownloader {
             Some(0) => {
                 // 正常退出，重命名文件
                 let part_file = format!("{}.part", output_file.display());
-                tokio::fs::rename(&part_file, &output_file).await?;
+                tokio::fs::rename(&part_file, &output_file)
+                    .await
+                    .change_context(AppError::Unknown)?;
 
                 // 触发分段回调
 
@@ -240,15 +255,15 @@ impl FfmpegDownloader {
     async fn download_internal(
         &self,
         callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
-    ) -> Result<DownloadStatus, Box<dyn std::error::Error>> {
+    ) -> AppResult<DownloadStatus> {
         let args = self.build_ffmpeg_args_internal_segment();
-        let _output_pattern = self.output_dir.join("%d.{}");
 
         let mut cmd = Command::new("ffmpeg");
         cmd.args(&args)
             .arg(format!(
                 "{}_%d.{}",
-                self.config.filename_prefix, self.config.format
+                self.config.recorder.generate_filename(),
+                self.config.recorder.suffix
             ))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -256,12 +271,17 @@ impl FfmpegDownloader {
             .kill_on_drop(true);
 
         info!("FFmpeg cmd: {:?}", cmd);
-        let mut child = cmd.spawn()?;
+        let mut child = cmd.spawn().change_context(AppError::Unknown)?;
 
         // 获取stdout用于读取分段文件名
-        let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or(AppError::Custom("Failed to capture stdout".to_string()))?;
 
-        let stderr = child.stderr.take().ok_or("failed to capture stderr pipe")?;
+        let stderr = child.stderr.take().ok_or(AppError::Custom(
+            "failed to capture stderr pipe".to_string(),
+        ))?;
 
         // 保存进程句柄
         {
@@ -281,7 +301,7 @@ impl FfmpegDownloader {
         let mut reader = BufReader::new(stdout).lines();
         let mut segment_index = 0;
 
-        while let Some(line) = reader.next_line().await? {
+        while let Some(line) = reader.next_line().await.change_context(AppError::Unknown)? {
             info!("Received line: {line}");
             // 解析文件名
             let file_path = PathBuf::from(line.trim());
@@ -305,14 +325,6 @@ impl FfmpegDownloader {
 
         Ok(DownloadStatus::StreamEnded)
     }
-
-    fn generate_output_filename(&self) -> PathBuf {
-        let timestamp = chrono::Local::now().format("%Y-%m-%dT%H_%M_%S");
-        self.output_dir.join(format!(
-            "{}_{}.{}",
-            self.config.filename_prefix, timestamp, self.config.format
-        ))
-    }
 }
 
 #[async_trait]
@@ -320,11 +332,17 @@ impl Downloader for FfmpegDownloader {
     async fn download(
         &self,
         callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
-    ) -> Result<DownloadStatus, Box<dyn std::error::Error>> {
-        match self.config.downloader_type {
-            DownloaderType::FfmpegExternal => self.download_external(callback).await,
-            DownloaderType::FfmpegInternal => self.download_internal(callback).await,
-            _ => Err("Unsupported downloader type".into()),
+    ) -> AppResult<DownloadStatus> {
+        match self.downloader_type {
+            DownloaderType::FfmpegExternal => self
+                .download_external(callback)
+                .await
+                .change_context(AppError::Unknown),
+            DownloaderType::FfmpegInternal => self
+                .download_internal(callback)
+                .await
+                .change_context(AppError::Unknown),
+            _ => bail!(AppError::Custom("Unsupported downloader type".to_string())),
         }
     }
 
@@ -336,7 +354,7 @@ impl Downloader for FfmpegDownloader {
         Ok(())
     }
 
-    async fn get_status(&self) -> DownloadStatus {
-        self.status.read().await.clone()
-    }
+    // async fn get_status(&self) -> DownloadStatus {
+    //     self.status.read().await.clone()
+    // }
 }
