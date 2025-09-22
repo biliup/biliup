@@ -14,10 +14,15 @@ use tokio::sync::RwLock;
 use tracing::info;
 
 /// FFmpeg下载器实现
+/// 使用FFmpeg进行直播流下载，支持内部和外部分段
 pub struct FfmpegDownloader {
+    /// 下载配置
     config: DownloadConfig,
+    /// 流URL
     url: String,
+    /// 下载状态
     status: Arc<RwLock<DownloadStatus>>,
+    /// 进程句柄
     process_handle: Arc<RwLock<Option<tokio::process::Child>>>,
 
     /// 额外的FFmpeg参数
@@ -28,6 +33,13 @@ pub struct FfmpegDownloader {
 }
 
 impl FfmpegDownloader {
+    /// 创建新的FFmpeg下载器实例
+    ///
+    /// # 参数
+    /// * `url` - 流URL
+    /// * `config` - 下载配置
+    /// * `extra_args` - 额外的FFmpeg参数
+    /// * `downloader_type` - 下载器类型
     pub fn new(
         url: &str,
         config: DownloadConfig,
@@ -45,6 +57,7 @@ impl FfmpegDownloader {
     }
 
     /// 构建内部分段模式的FFmpeg命令参数
+    /// 使用FFmpeg的segment muxer进行自动分段
     fn build_ffmpeg_args_internal_segment(&self) -> Vec<String> {
         let mut args = Vec::new();
 
@@ -82,6 +95,7 @@ impl FfmpegDownloader {
     }
 
     /// 构建外部分段模式的FFmpeg命令参数
+    /// 通过外部控制进行分段，每次录制固定时长或大小
     fn build_ffmpeg_args_external_segment(&self) -> Vec<String> {
         let mut args = Vec::new();
 
@@ -109,6 +123,7 @@ impl FfmpegDownloader {
     }
 
     /// 添加通用的输入参数
+    /// 包括覆盖文件、HTTP头、超时设置等
     fn append_common_input_args(&self, args: &mut Vec<String>) {
         args.push("-y".to_string()); // 覆盖已存在文件
 
@@ -141,6 +156,7 @@ impl FfmpegDownloader {
     }
 
     /// 添加通用的输出参数
+    /// 包括编码设置、格式特定参数等
     fn append_common_output_args(&self, args: &mut Vec<String>, format: &str) {
         // -c copy: 直接复制编码，不重新编码
         // 减少CPU使用，保持原始质量
@@ -176,6 +192,7 @@ impl FfmpegDownloader {
     }
 
     /// 执行外部分段下载
+    /// 每次录制一个完整的分段文件
     async fn download_external(
         &self,
         callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
@@ -252,6 +269,7 @@ impl FfmpegDownloader {
     }
 
     /// 执行内部分段下载
+    /// 使用FFmpeg的segment muxer自动分段
     async fn download_internal(
         &self,
         callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,

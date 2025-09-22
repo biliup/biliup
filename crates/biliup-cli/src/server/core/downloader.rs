@@ -1,4 +1,6 @@
+/// FFmpeg下载器实现
 pub mod ffmpeg_downloader;
+/// Stream-gears下载器实现
 pub mod stream_gears;
 
 use crate::server::common::util::Recorder;
@@ -9,6 +11,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// 下载器配置
+/// 包含下载过程中需要的各种参数和设置
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DownloadConfig {
     /// 分段时长 (格式: "HH:MM:SS")
@@ -20,41 +23,50 @@ pub struct DownloadConfig {
     /// HTTP请求头
     pub headers: HashMap<String, String>,
 
-    /// 输出文件名前缀
+    /// 录制器实例
     pub recorder: Recorder,
 
-    // 输出文件名前缀
-    // pub filename_prefix: String,
+    /// 输出目录路径
     pub output_dir: PathBuf,
 }
 
 impl DownloadConfig {
+    /// 生成输出文件名
+    /// 
+    /// # 返回
+    /// 返回完整的输出文件路径
     fn generate_output_filename(&self) -> PathBuf {
         self.output_dir.join(self.recorder.generate_path())
     }
 }
 
+/// 下载器类型枚举
+/// 定义支持的各种下载器类型
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DownloaderType {
+    /// Ytarchive下载器
     Ytarchive,
+    /// 同步下载器
     #[serde(rename = "sync-downloader")]
     SyncDownloader,
     /// 使用stream-gears
     #[serde(rename = "stream-gears")]
     StreamGears,
+    /// FFmpeg下载器
     Ffmpeg,
     /// FFmpeg外部分段
     FfmpegExternal,
     /// FFmpeg内部分段
     FfmpegInternal,
-    /// Streamlink
+    /// Streamlink下载器
     Streamlink,
-    /// yt-dlp
+    /// yt-dlp下载器
     YtDlp,
 }
 
 /// 分段事件
+/// 当下载器完成一个分段时触发的事件
 #[derive(Debug, Clone)]
 pub struct SegmentEvent {
     /// 分段文件路径
@@ -68,6 +80,7 @@ pub struct SegmentEvent {
 }
 
 /// 下载状态
+/// 表示下载器当前的状态
 #[derive(Debug, Clone, PartialEq)]
 pub enum DownloadStatus {
     /// 正在下载
@@ -81,27 +94,40 @@ pub enum DownloadStatus {
 }
 
 /// 下载器基础trait
+/// 定义所有下载器必须实现的基本接口
 #[async_trait]
 pub trait Downloader: Send + Sync {
     /// 开始下载
+    /// 
+    /// # 参数
+    /// * `callback` - 分段完成时的回调函数
+    /// 
+    /// # 返回
+    /// 返回下载状态
     async fn download(
         &self,
-        // sender: Sender<UploaderMessage>,
-        // worker: Arc<Worker>,
         callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
     ) -> AppResult<DownloadStatus>;
 
     /// 停止下载
     async fn stop(&self) -> Result<(), Box<dyn std::error::Error>>;
 
-    /// 获取当前下载状态
-    /// async fn get_status(&self) -> DownloadStatus;
+    /// 滚动保存（用于弹幕等）
+    /// 
+    /// # 参数
+    /// * `file_name` - 文件名
     fn rolling(&self, file_name: &str) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 }
 
 /// 解析时长字符串 "HH:MM:SS" 为秒数
+/// 
+/// # 参数
+/// * `duration` - 时长字符串，格式为"HH:MM:SS"
+/// 
+/// # 返回
+/// 返回总秒数
 fn parse_duration(duration: &str) -> u64 {
     let parts: Vec<&str> = duration.split(':').collect();
     if parts.len() == 3 {

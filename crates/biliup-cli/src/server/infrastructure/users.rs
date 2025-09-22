@@ -7,15 +7,19 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use tokio::task;
 
+/// 用户数据结构
+/// 存储用户的基本信息，包括ID、用户名和密码哈希
 #[derive(Clone, Serialize, Deserialize, FromRow)]
 pub struct User {
+    /// 用户ID
     id: i64,
+    /// 用户名
     pub key: String,
+    /// 密码哈希值
     value: String,
 }
 
-// Here we've implemented `Debug` manually to avoid accidentally logging the
-// password hash.
+// 手动实现Debug trait以避免意外记录密码哈希
 impl std::fmt::Debug for User {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("User")
@@ -34,36 +38,45 @@ impl AuthUser for User {
     }
 
     fn session_auth_hash(&self) -> &[u8] {
-        self.value.as_bytes() // We use the password hash as the auth
-        // hash--what this means
-        // is when the user changes their password the
-        // auth session becomes invalid.
+        // 使用密码哈希作为认证哈希
+        // 这意味着当用户更改密码时，认证会话将失效
+        self.value.as_bytes()
     }
 }
 
-// This allows us to extract the authentication fields from forms. We use this
-// to authenticate requests with the backend.
+// 认证凭据结构，用于从表单中提取认证字段
+// 用于与后端进行请求认证
 #[derive(Debug, Clone, Deserialize)]
 pub struct Credentials {
+    /// 用户名
     pub username: String,
+    /// 密码
     pub password: String,
+    /// 登录后跳转的URL（可选）
     pub next: Option<String>,
 }
 
+/// 认证后端
+/// 负责处理用户认证相关的数据库操作
 #[derive(Debug, Clone)]
 pub struct Backend {
+    /// 数据库连接池
     db: ConnectionPool,
 }
 
 impl Backend {
+    /// 创建新的认证后端实例
     pub fn new(db: ConnectionPool) -> Self {
         Self { db }
     }
 
+    /// 检查是否存在用户
+    /// 
+    /// # 返回
+    /// 如果存在用户返回true，否则返回false
     pub async fn exists(&self) -> AppResult<bool> {
-        // check if a user corresponding to the given creds already exists...
+        // 检查是否已存在对应的用户
         let user: Option<User> = sqlx::query_as("select * from configuration where key = ? ")
-            // .bind(creds.username)
             .bind("biliup")
             .fetch_optional(&self.db)
             .await
@@ -71,8 +84,15 @@ impl Backend {
         Ok(user.is_some())
     }
 
+    /// 创建新用户
+    /// 
+    /// # 参数
+    /// * `creds` - 用户凭据
+    /// 
+    /// # 返回
+    /// 返回创建的用户信息
     pub async fn create_user(&mut self, creds: Credentials) -> AppResult<User> {
-        // create the new user account...
+        // 创建新用户账户
         // 验证输入
         if creds.username.is_empty() || creds.password.is_empty() {
             bail!(AppError::Custom("用户名和密码不能为空".into()))
@@ -103,11 +123,14 @@ impl Backend {
     }
 }
 
+/// 认证相关的错误类型
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// 数据库错误
     #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
 
+    /// 任务连接错误
     #[error(transparent)]
     TaskJoin(#[from] task::JoinError),
 }
@@ -117,26 +140,34 @@ impl AuthnBackend for Backend {
     type Credentials = Credentials;
     type Error = Error;
 
+    /// 认证用户
+    /// 
+    /// # 参数
+    /// * `creds` - 用户凭据
+    /// 
+    /// # 返回
+    /// 如果认证成功返回用户信息，否则返回None
     async fn authenticate(
         &self,
         creds: Self::Credentials,
     ) -> Result<Option<Self::User>, Self::Error> {
         let user: Option<Self::User> = sqlx::query_as("select * from configuration where key = ? ")
-            // .bind(creds.username)
             .bind("biliup")
             .fetch_optional(&self.db)
             .await?;
 
-        // Verifying the password is blocking and potentially slow, so we'll do so via
-        // `spawn_blocking`.
+        // 密码验证是阻塞且可能较慢的操作，所以通过spawn_blocking执行
         task::spawn_blocking(|| {
-            // We're using password-based authentication--this works by comparing our form
-            // input with an argon2 password hash.
+            // 使用基于密码的认证 - 通过比较表单输入与argon2密码哈希来工作
             Ok(user.filter(|user| verify_password(creds.password, &user.value).is_ok()))
         })
         .await?
     }
 
+    /// 根据用户ID获取用户信息
+    /// 
+    /// # 参数
+    /// * `user_id` - 用户ID
     async fn get_user(&self, user_id: &UserId<Self>) -> Result<Option<Self::User>, Self::Error> {
         let user = sqlx::query_as("select * from configuration where id = ?")
             .bind(user_id)
@@ -147,7 +178,6 @@ impl AuthnBackend for Backend {
     }
 }
 
-// We use a type alias for convenience.
-//
-// Note that we've supplied our concrete backend here.
+// 为了方便使用的类型别名
+// 注意这里我们提供了具体的后端实现
 pub type AuthSession = axum_login::AuthSession<Backend>;

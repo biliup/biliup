@@ -21,6 +21,12 @@ pub enum HookStep {
 
 impl HookStep {
     /// 执行钩子步骤操作
+    /// 
+    /// # 参数
+    /// * `video_paths` - 视频文件路径列表
+    /// 
+    /// # 返回
+    /// 执行成功返回Ok(())，失败返回错误信息
     pub async fn execute(&self, video_paths: &[&Path]) -> Result<(), Box<dyn std::error::Error>> {
         match self {
             HookStep::Run { run } => {
@@ -36,6 +42,7 @@ impl HookStep {
                 self.remove_file(video_paths).await?;
             }
             HookStep::Remove(cmd) => {
+                // 未知命令，返回错误
                 return Err(format!("Unknown command: {}", cmd).into());
             }
         }
@@ -43,6 +50,10 @@ impl HookStep {
     }
 
     /// 执行自定义命令，将视频路径作为标准输入传入
+    /// 
+    /// # 参数
+    /// * `cmd` - 要执行的命令字符串
+    /// * `video_paths` - 视频文件路径列表
     async fn execute_command(
         &self,
         cmd: &str,
@@ -56,7 +67,7 @@ impl HookStep {
             return Err("Empty command".into());
         }
 
-        // 启动子进程
+        // 启动子进程，配置标准输入管道
         let mut process = Command::new(parts[0])
             .args(&parts[1..])
             .stdin(std::process::Stdio::piped())
@@ -72,7 +83,7 @@ impl HookStep {
             stdin.write_all(paths_str.as_bytes()).await?;
         }
 
-        // 等待进程完成
+        // 等待进程完成并检查退出状态
         let status = process.wait().await?;
         if !status.success() {
             return Err(format!("Command failed with status: {}", status).into());
@@ -82,6 +93,10 @@ impl HookStep {
     }
 
     /// 移动文件到指定目录
+    /// 
+    /// # 参数
+    /// * `video_paths` - 视频文件路径列表
+    /// * `target_dir` - 目标目录路径
     async fn move_file(
         &self,
         video_paths: &[&Path],
@@ -94,7 +109,7 @@ impl HookStep {
             fs::create_dir_all(target_path).await?;
         }
         
-        // 移动每个视频文件
+        // 移动每个视频文件到目标目录
         for video_path in video_paths {
             let file_name = video_path.file_name().ok_or("Invalid file name")?;
             let destination = target_path.join(file_name);
@@ -110,7 +125,11 @@ impl HookStep {
     }
 
     /// 删除指定的视频文件
+    /// 
+    /// # 参数
+    /// * `video_paths` - 要删除的视频文件路径列表
     async fn remove_file(&self, video_paths: &[&Path]) -> Result<(), Box<dyn std::error::Error>> {
+        // 逐个删除视频文件
         for video_path in video_paths {
             println!("Removing: {}", video_path.display());
             fs::remove_file(video_path).await?;
@@ -120,6 +139,12 @@ impl HookStep {
 }
 
 /// 处理所有后处理器步骤
+/// 处理视频文件的主函数
+/// 按顺序执行所有处理器步骤
+/// 
+/// # 参数
+/// * `video_path` - 视频文件路径列表
+/// * `processors` - 处理器步骤列表
 pub async fn process_video(
     video_path: &[&Path],
     processors: &[HookStep],

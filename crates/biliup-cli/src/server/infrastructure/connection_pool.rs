@@ -9,10 +9,17 @@ use tracing::info;
 pub type ConnectionPool = Pool<Sqlite>;
 
 /// 连接管理器
+/// 负责管理SQLite数据库连接池的创建和配置
 pub struct ConnectionManager;
 
 impl ConnectionManager {
     /// 创建新的数据库连接池
+    /// 
+    /// # 参数
+    /// * `path` - 数据库文件路径
+    /// 
+    /// # 返回
+    /// 返回配置好的SQLite连接池
     pub async fn new_pool(path: &str) -> AppResult<ConnectionPool> {
         // 创建所有父级目录（如果不存在）
         if let Some(parent) = Path::new(path).parent() {
@@ -30,7 +37,7 @@ impl ConnectionManager {
             .open(path)
             .change_context(AppError::Unknown)?;
             
-        // 创建连接池
+        // 创建连接池，最大连接数设为2
         let pool = SqlitePoolOptions::new()
             .max_connections(2)
             .connect(&db_url)
@@ -39,7 +46,7 @@ impl ConnectionManager {
                 "error while initializing the database connection pool".to_string(),
             ))?;
 
-        // 运行数据库迁移
+        // 运行数据库迁移，确保数据库结构是最新的
         info!("migrations enabled, running...");
         sqlx::migrate!()
             .run(&pool)
