@@ -1,16 +1,19 @@
-// main.rs
 use chrono::{Duration, Local};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use url::Url;
 
+/// 录制器配置结构体
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Recorder {
+    /// 文件名前缀模板
     pub filename_prefix: Option<String>,
+    /// 主播名称
     pub fname: String,
+    /// 直播间标题
     pub room_title: String,
-    /// 录制后保存文件格式 (mp4, ts, mkv, flv)
-    pub suffix: String, // 不含点，如 "mp4"、"flv"
+    /// 录制后保存文件格式 (mp4, ts, mkv, flv)，不含点
+    pub suffix: String,
 }
 
 impl Recorder {

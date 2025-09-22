@@ -11,36 +11,44 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 use tracing::info;
 
+/// 应用程序上下文，包含工作器和扩展信息
 #[derive(Debug, Clone)]
 pub struct Context {
+    /// 工作器实例
     pub worker: Arc<Worker>,
+    /// 扩展数据容器
     pub extension: Extensions,
 }
 
 impl Context {
+    /// 创建新的上下文实例
     pub fn new(worker: Arc<Worker>) -> Self {
         Self {
             worker,
             extension: Default::default(),
         }
     }
-
-    // pub async fn get_config(&self) -> AppResult<Config> {
-    //     get_config(&self.pool).await
-    // }
 }
 
+/// 工作器结构体，管理单个主播的录制和上传任务
 #[derive(Debug)]
 pub struct Worker {
+    /// 下载器状态
     pub downloader_status: RwLock<WorkerStatus>,
+    /// 上传器状态
     pub uploader_status: RwLock<WorkerStatus>,
+    /// 直播主播信息
     pub live_streamer: LiveStreamer,
+    /// 上传配置（可选）
     pub upload_streamer: Option<UploadStreamer>,
+    /// 全局配置
     pub config: Arc<RwLock<Config>>,
+    /// HTTP客户端
     pub client: StatelessClient,
 }
 
 impl Worker {
+    /// 创建新的工作器实例
     pub fn new(
         live_streamer: LiveStreamer,
         upload_streamer: Option<UploadStreamer>,
@@ -57,29 +65,22 @@ impl Worker {
         }
     }
 
+    /// 获取主播信息
     pub fn get_streamer(&self) -> LiveStreamer {
-        // get_streamer(&self.context.pool, self.id).await
         self.live_streamer.clone()
     }
 
+    /// 获取上传配置
     pub fn get_upload_config(&self) -> Option<UploadStreamer> {
-        // let Some(id) = self.get_streamer().await?.upload_streamers_id else {
-        //     return Ok(None);
-        // };
-        //
-        // UploadStreamer::select()
-        //     .where_("id = ?")
-        //     .bind(id)
-        //     .fetch_optional(&self.context.pool)
-        //     .await
-        //     .change_context(AppError::Unknown)
         self.upload_streamer.clone()
     }
 
+    /// 获取全局配置
     pub fn get_config(&self) -> Config {
         self.config.read().unwrap().clone()
     }
 
+    /// 更改工作器状态
     pub fn change_status(&self, stage: Stage, status: WorkerStatus) {
         match stage {
             Stage::Download => {
@@ -106,18 +107,23 @@ impl PartialEq for Worker {
 
 impl Eq for Worker {}
 
+/// 工作阶段枚举
 #[derive(Debug)]
 pub enum Stage {
+    /// 下载阶段
     Download,
+    /// 上传阶段
     Upload,
 }
 
+/// 工作器状态枚举
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Default, PartialEq)]
 pub enum WorkerStatus {
-    /// Stream is online.
+    /// 正在工作
     Working,
-    /// The status of the stream could not be determined.
+    /// 等待中
     Pending,
+    /// 空闲状态（默认）
     #[default]
     Idle,
 }

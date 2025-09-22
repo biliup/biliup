@@ -5,11 +5,14 @@ use sqlx::{Pool, Sqlite};
 use std::path::Path;
 use tracing::info;
 
+/// SQLite连接池类型别名
 pub type ConnectionPool = Pool<Sqlite>;
 
+/// 连接管理器
 pub struct ConnectionManager;
 
 impl ConnectionManager {
+    /// 创建新的数据库连接池
     pub async fn new_pool(path: &str) -> AppResult<ConnectionPool> {
         // 创建所有父级目录（如果不存在）
         if let Some(parent) = Path::new(path).parent() {
@@ -17,13 +20,17 @@ impl ConnectionManager {
                 .change_context(AppError::Unknown)
                 .attach_with(|| path.to_string())?; // 创建 data/ 目录
         }
+        
         let db_url = format!("sqlite://{path}");
-        // Start by making a database connection.
+        
+        // 创建数据库文件（如果不存在）
         std::fs::OpenOptions::new()
             .write(true)
             .create(true)
             .open(path)
             .change_context(AppError::Unknown)?;
+            
+        // 创建连接池
         let pool = SqlitePoolOptions::new()
             .max_connections(2)
             .connect(&db_url)
@@ -32,7 +39,7 @@ impl ConnectionManager {
                 "error while initializing the database connection pool".to_string(),
             ))?;
 
-        // Query builder syntax closely follows SQL syntax, translated into chained function calls.
+        // 运行数据库迁移
         info!("migrations enabled, running...");
         sqlx::migrate!()
             .run(&pool)

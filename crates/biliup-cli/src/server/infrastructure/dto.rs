@@ -2,10 +2,14 @@ use crate::server::infrastructure::context::WorkerStatus;
 use crate::server::infrastructure::models::LiveStreamer;
 use serde::{Deserialize, Serialize};
 
+/// 直播主播响应数据传输对象
+/// 包含主播信息和当前工作状态
 #[derive(Serialize, Deserialize)]
 pub struct LiveStreamerResponse {
+    /// 主播基本信息（展开到顶层）
     #[serde(flatten)]
     pub inner: LiveStreamer,
 
+    /// 当前工作状态
     pub status: WorkerStatus,
 }
