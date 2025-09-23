@@ -71,7 +71,7 @@ impl Backend {
     }
 
     /// 检查是否存在用户
-    /// 
+    ///
     /// # 返回
     /// 如果存在用户返回true，否则返回false
     pub async fn exists(&self) -> AppResult<bool> {
@@ -85,10 +85,10 @@ impl Backend {
     }
 
     /// 创建新用户
-    /// 
+    ///
     /// # 参数
     /// * `creds` - 用户凭据
-    /// 
+    ///
     /// # 返回
     /// 返回创建的用户信息
     pub async fn create_user(&mut self, creds: Credentials) -> AppResult<User> {
@@ -141,10 +141,10 @@ impl AuthnBackend for Backend {
     type Error = Error;
 
     /// 认证用户
-    /// 
+    ///
     /// # 参数
     /// * `creds` - 用户凭据
-    /// 
+    ///
     /// # 返回
     /// 如果认证成功返回用户信息，否则返回None
     async fn authenticate(
@@ -165,7 +165,7 @@ impl AuthnBackend for Backend {
     }
 
     /// 根据用户ID获取用户信息
-    /// 
+    ///
     /// # 参数
     /// * `user_id` - 用户ID
     async fn get_user(&self, user_id: &UserId<Self>) -> Result<Option<Self::User>, Self::Error> {

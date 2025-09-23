@@ -32,7 +32,7 @@ pub struct DownloadConfig {
 
 impl DownloadConfig {
     /// 生成输出文件名
-    /// 
+    ///
     /// # 返回
     /// 返回完整的输出文件路径
     fn generate_output_filename(&self) -> PathBuf {
@@ -98,10 +98,10 @@ pub enum DownloadStatus {
 #[async_trait]
 pub trait Downloader: Send + Sync {
     /// 开始下载
-    /// 
+    ///
     /// # 参数
     /// * `callback` - 分段完成时的回调函数
-    /// 
+    ///
     /// # 返回
     /// 返回下载状态
     async fn download(
@@ -113,7 +113,7 @@ pub trait Downloader: Send + Sync {
     async fn stop(&self) -> Result<(), Box<dyn std::error::Error>>;
 
     /// 滚动保存（用于弹幕等）
-    /// 
+    ///
     /// # 参数
     /// * `file_name` - 文件名
     fn rolling(&self, file_name: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -122,10 +122,10 @@ pub trait Downloader: Send + Sync {
 }
 
 /// 解析时长字符串 "HH:MM:SS" 为秒数
-/// 
+///
 /// # 参数
 /// * `duration` - 时长字符串，格式为"HH:MM:SS"
-/// 
+///
 /// # 返回
 /// 返回总秒数
 fn parse_duration(duration: &str) -> u64 {

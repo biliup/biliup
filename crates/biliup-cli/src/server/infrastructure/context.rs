@@ -1,13 +1,15 @@
 use crate::server::config::Config;
+use crate::server::core::downloader::Downloader;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::models::{LiveStreamer, UploadStreamer};
 use crate::server::infrastructure::repositories::{get_config, get_streamer};
 use axum::http::Extensions;
 use biliup::client::StatelessClient;
+use core::fmt;
 use error_stack::ResultExt;
 use ormlite::Model;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use std::sync::{Arc, RwLock};
 use tracing::info;
 
@@ -22,7 +24,7 @@ pub struct Context {
 
 impl Context {
     /// 创建新的上下文实例
-    /// 
+    ///
     /// # 参数
     /// * `worker` - 工作器实例的Arc引用
     pub fn new(worker: Arc<Worker>) -> Self {
@@ -52,7 +54,7 @@ pub struct Worker {
 
 impl Worker {
     /// 创建新的工作器实例
-    /// 
+    ///
     /// # 参数
     /// * `live_streamer` - 直播主播信息
     /// * `upload_streamer` - 上传配置（可选）
@@ -93,7 +95,7 @@ impl Worker {
     }
 
     /// 更改工作器状态
-    /// 
+    ///
     /// # 参数
     /// * `stage` - 工作阶段（下载或上传）
     /// * `status` - 新的工作状态
@@ -107,6 +109,10 @@ impl Worker {
             }
         }
     }
+}
+
+pub fn find_worker(workers: &[Arc<Worker>], id: i64) -> Option<&Arc<Worker>> {
+    workers.iter().find(|worker| worker.live_streamer.id == id)
 }
 
 impl Drop for Worker {
@@ -135,13 +141,25 @@ pub enum Stage {
 }
 
 /// 工作器状态枚举
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Default)]
 pub enum WorkerStatus {
     /// 正在工作
-    Working,
+    Working(Arc<dyn Downloader>),
     /// 等待中
     Pending,
     /// 空闲状态（默认）
     #[default]
     Idle,
+}
+
+// 简单 Debug：打印状态名，忽略内部 downloader
+impl fmt::Debug for WorkerStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            WorkerStatus::Working(_) => "Working",
+            WorkerStatus::Pending => "Pending",
+            WorkerStatus::Idle => "Idle",
+        };
+        f.write_str(name)
+    }
 }

@@ -24,7 +24,7 @@ pub async fn archive_pre_endpoint(
         .await
         .change_context(AppError::Unknown)
         .map_err(report_to_response)?;
-    
+
     // 尝试使用每个Cookie进行登录
     for cookies in configurations {
         if let Ok(bili) = login_by_cookies(cookies.value, None).await {
@@ -36,7 +36,7 @@ pub async fn archive_pre_endpoint(
             ));
         }
     }
-    
+
     // 没有可用的Cookie
     Err(report_to_response(Report::from(AppError::Custom(
         "无可用 cookie 文件".to_string(),
@@ -52,7 +52,7 @@ pub async fn get_myinfo_endpoint(
         .await
         .change_context(AppError::Custom(params["user"].to_string()))
         .map_err(report_to_response)?;
-    
+
     // 获取用户信息
     Ok(Json(
         bili.my_info()
@@ -68,7 +68,7 @@ pub async fn get_proxy_endpoint(
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Bytes, Response> {
     info!(params = &params["url"]);
-    
+
     // 代理HTTP请求
     client
         .client

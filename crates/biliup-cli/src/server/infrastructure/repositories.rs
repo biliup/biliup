@@ -8,7 +8,7 @@ use error_stack::ResultExt;
 use ormlite::{Insert, Model};
 
 /// 根据ID获取直播主播信息
-/// 
+///
 /// # 参数
 /// * `pool` - 数据库连接池
 /// * `id` - 主播ID
@@ -22,7 +22,7 @@ pub async fn get_streamer(pool: &ConnectionPool, id: i64) -> AppResult<LiveStrea
 }
 
 /// 获取主播的上传配置
-/// 
+///
 /// # 参数
 /// * `pool` - 数据库连接池
 /// * `id` - 主播ID
@@ -43,11 +43,11 @@ pub async fn get_upload_config(
 }
 
 /// 删除指定的直播主播
-/// 
+///
 /// # 参数
 /// * `pool` - 数据库连接池
 /// * `id` - 主播ID
-/// 
+///
 /// # 返回
 /// 返回被删除的主播信息
 pub async fn del_streamer(pool: &ConnectionPool, id: i64) -> AppResult<LiveStreamer> {
@@ -60,7 +60,7 @@ pub async fn del_streamer(pool: &ConnectionPool, id: i64) -> AppResult<LiveStrea
     Ok(streamer)
 }
 /// 获取所有直播主播信息
-/// 
+///
 /// # 参数
 /// * `pool` - 数据库连接池
 pub async fn get_all_streamer(pool: &ConnectionPool) -> AppResult<Vec<LiveStreamer>> {
@@ -71,10 +71,10 @@ pub async fn get_all_streamer(pool: &ConnectionPool) -> AppResult<Vec<LiveStream
 }
 
 /// 从数据库获取全局配置
-/// 
+///
 /// # 参数
 /// * `pool` - 数据库连接池
-/// 
+///
 /// # 返回
 /// 返回全局配置，如果不存在则返回默认配置
 pub async fn get_config(pool: &ConnectionPool) -> AppResult<Config> {
@@ -96,7 +96,7 @@ pub async fn get_config(pool: &ConnectionPool) -> AppResult<Config> {
 }
 
 /// 插入或更新全局配置到数据库
-/// 
+///
 /// # 参数
 /// * `pool` - 数据库连接池
 /// * `config` - 要保存的配置
@@ -112,7 +112,7 @@ pub async fn insert_config(pool: &ConnectionPool, config: &Config) -> AppResult<
 }
 
 /// 获取所有上传配置
-/// 
+///
 /// # 参数
 /// * `pool` - 数据库连接池
 pub async fn get_all_uploader(pool: &ConnectionPool) -> AppResult<Vec<UploadStreamer>> {

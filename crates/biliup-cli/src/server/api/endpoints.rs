@@ -11,10 +11,10 @@ use crate::server::infrastructure::repositories::{
     del_streamer, get_all_streamer, get_upload_config,
 };
 use crate::server::infrastructure::service_register::ServiceRegister;
-use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use axum::{Json, debug_handler};
 use biliup::credential::Credential;
 use error_stack::{Report, ResultExt};
 use ormlite::{Insert, Model};
@@ -44,7 +44,7 @@ pub async fn get_streamers_endpoint(
                     .iter()
                     .find_map(|worker| {
                         if worker.live_streamer.id == x.id {
-                            Some(*worker.downloader_status.read().unwrap())
+                            Some(format!("{:?}", *worker.downloader_status.read().unwrap()))
                         } else {
                             None
                         }
@@ -65,7 +65,6 @@ pub async fn post_streamers_endpoint(
         info!("not supported url: {}", &payload.url);
         return Err((StatusCode::BAD_REQUEST, "Not supported url").into_response());
     };
-    let monitor = manager.ensure_monitor();
 
     // You can insert the model directly.
     let live_streamers = payload
@@ -77,14 +76,14 @@ pub async fn post_streamers_endpoint(
         .await
         .map_err(report_to_response)?;
     service_register
-        .add_room(monitor, live_streamers.clone(), upload_config)
+        .add_room(&manager, live_streamers.clone(), upload_config)
         .await
         .map_err(report_to_response)?;
 
     info!(workers=?service_register.workers, "successfully inserted new live streamers");
     Ok(Json(live_streamers))
 }
-
+#[debug_handler(state = ServiceRegister)]
 pub async fn put_streamers_endpoint(
     State(service_register): State<ServiceRegister>,
     State(pool): State<ConnectionPool>,
@@ -109,10 +108,8 @@ pub async fn put_streamers_endpoint(
         .await
         .map_err(report_to_response)?;
 
-    let monitor = manager.ensure_monitor();
-    
     service_register
-        .add_room(monitor, streamer.clone(), upload_config)
+        .add_room(&manager, streamer.clone(), upload_config)
         .await
         .map_err(report_to_response)?;
 

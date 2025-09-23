@@ -1,3 +1,4 @@
+use crate::server::common::upload::{execute_postprocessor, process_with_upload};
 use crate::server::common::util::Recorder;
 use crate::server::core::downloader::{Downloader, SegmentEvent};
 use crate::server::core::monitor::{Monitor, RoomsHandle};
@@ -35,7 +36,7 @@ pub struct DownloadManager {
 
 impl DownloadManager {
     /// 创建新的下载管理器实例
-    /// 
+    ///
     /// # 参数
     /// * `plugin` - 下载插件实现
     /// * `actor_handle` - Actor处理器
@@ -51,7 +52,7 @@ impl DownloadManager {
     }
 
     /// 确保监控器存在，如果不存在则创建新的
-    /// 
+    ///
     /// # 返回
     /// 返回监控器的Arc引用
     pub fn ensure_monitor(&self) -> Arc<Monitor> {
@@ -65,10 +66,10 @@ impl DownloadManager {
     }
 
     /// 检查URL是否匹配此下载管理器的插件
-    /// 
+    ///
     /// # 参数
     /// * `url` - 要检查的URL
-    /// 
+    ///
     /// # 返回
     /// 如果URL匹配返回true，否则返回false
     pub fn matches(&self, url: &str) -> bool {
@@ -107,7 +108,7 @@ impl DActor {
     }
 
     /// 处理下载消息
-    /// 
+    ///
     /// # 参数
     /// * `msg` - 要处理的下载消息
     async fn handle_message(&mut self, msg: DownloaderMessage) -> AppResult<()> {
@@ -134,7 +135,7 @@ impl DActor {
 
                 // 更新工作器状态为工作中
                 ctx.worker
-                    .change_status(Stage::Download, WorkerStatus::Working);
+                    .change_status(Stage::Download, WorkerStatus::Working(downloader.clone()));
                 // 初始化弹幕客户端（如果存在）
                 let mut danmaku_client = None;
                 if let Some(danmaku) = ctx.extension.get::<Arc<dyn Downloader>>() {
@@ -228,176 +229,26 @@ impl UActor {
     }
 
     /// 处理上传消息
-    /// 
+    ///
     /// # 参数
     /// * `msg` - 要处理的上传消息
     async fn handle_message(&mut self, msg: UploaderMessage) {
         match msg {
             UploaderMessage::SegmentEvent(event, rx, worker) => {
-                let Some(upload_config) = worker.get_upload_config() else {
-                    return;
-                };
-                let cookie_file = upload_config
-                    .user_cookie
-                    .unwrap_or("cookies.json".to_string());
-                let bilibili = login_by_cookies(&cookie_file, None).await;
-                let Ok(bilibili) = bilibili.inspect_err(|e| error!(e=?e)) else {
-                    return;
-                };
-                let config = worker.get_config();
-                let client = worker.client.clone();
-                let line = config.lines;
-                let line = match line.as_str() {
-                    "bda2" => line::bda2(),
-                    "bda" => line::bda(),
-                    "tx" => line::tx(),
-                    "txa" => line::txa(),
-                    "bldsa" => line::bldsa(),
-                    "alia" => line::alia(),
-                    _ => Probe::probe(&client.client).await.unwrap_or_default(),
-                };
-                let mut video_paths = Vec::new();
-                let mut videos = Vec::new();
-                if let Ok(video) = UActor::upload_file(
-                    &bilibili,
-                    config.threads as usize,
-                    &client,
-                    &line,
-                    &event.file_path,
-                )
-                .await
-                .inspect_err(|e| error!(e=?e))
-                {
-                    videos.push(video);
-                }
-                video_paths.push(event.file_path);
-
-                while let Ok(se) = rx.recv().await {
-                    if let Ok(video) = UActor::upload_file(
-                        &bilibili,
-                        config.threads as usize,
-                        &client,
-                        &line,
-                        &se.file_path,
-                    )
-                    .await
-                    .map_err(|e| error!(e=?e))
-                    {
-                        videos.push(video);
+                let result = match worker.get_upload_config() {
+                    Some(config) => process_with_upload(event, rx, &worker, config).await,
+                    None => {
+                        // 无上传配置时，直接执行后处理
+                        execute_postprocessor(vec![event.file_path], &worker).await
                     }
-                    video_paths.push(se.file_path);
-                }
-
-                // let mut desc_v2 = Vec::new();
-                // for credit in desc_v2_credit {
-                //     desc_v2.push(Credit {
-                //         type_id: credit.type_id,
-                //         raw_text: credit.raw_text,
-                //         biz_id: credit.biz_id,
-                //     });
-                // }
-
-                let mut studio: Studio = Studio::builder()
-                    .desc(upload_config.description.unwrap_or_default())
-                    .dtime(upload_config.dtime)
-                    .copyright(upload_config.copyright.unwrap_or(2))
-                    .cover(upload_config.cover_path.unwrap_or_default())
-                    .dynamic(upload_config.dynamic.unwrap_or_default())
-                    .source(upload_config.copyright_source.unwrap_or_default())
-                    .tag(upload_config.tags.join(","))
-                    .tid(upload_config.tid.unwrap_or(171))
-                    .title(upload_config.title.unwrap_or_default())
-                    .videos(videos)
-                    .dolby(upload_config.dolby.unwrap_or_default())
-                    // .lossless_music(upload_config.)
-                    .no_reprint(upload_config.no_reprint.unwrap_or_default())
-                    .charging_pay(upload_config.charging_pay.unwrap_or_default())
-                    .up_close_reply(upload_config.up_close_reply.unwrap_or_default())
-                    .up_selection_reply(upload_config.up_selection_reply.unwrap_or_default())
-                    .up_close_danmu(upload_config.up_close_danmu.unwrap_or_default())
-                    .desc_v2(None)
-                    .extra_fields(
-                        serde_json::from_str(&upload_config.extra_fields.unwrap_or_default())
-                            .unwrap_or_default(),
-                    )
-                    .build();
-
-                if !studio.cover.is_empty()
-                    && let Ok(c) = &std::fs::read(&studio.cover).map_err(|e| error!(e=?e))
-                    && let Ok(url) = bilibili.cover_up(c).await.map_err(|e| error!(e=?e))
-                {
-                    studio.cover = url;
                 };
 
-                let submit = match config.submit_api {
-                    Some(submit) => SubmitOption::from_str(&submit).unwrap_or(SubmitOption::App),
-                    _ => SubmitOption::App,
-                };
-
-                let submit_result = match submit {
-                    SubmitOption::BCutAndroid => {
-                        bilibili.submit_by_bcut_android(&studio, None).await
-                    }
-                    _ => bilibili.submit_by_app(&studio, None).await,
-                };
-                info!(submit_result=?submit_result);
-                if submit_result.is_ok() {
-                    info!("Submit successful");
-                    let streamer = worker.get_streamer();
-                    if let Some(post_processor) = streamer.postprocessor {
-
-                        let _ = process_video(&(video_paths.iter().map(|p|p.as_path()).collect::<Vec<_>>()), &post_processor)
-                            .await
-                            .map_err(|e| error!(e=?e));
-
-                    }
+                if let Err(e) = result {
+                    error!("Process segment event failed: {}", e);
+                    // 可以添加错误通知机制
                 }
             }
         }
-    }
-
-    async fn upload_file(
-        bilibili: &BiliBili,
-        limit: usize,
-        client: &StatelessClient,
-        line: &Line,
-        video_path: &Path,
-    ) -> AppResult<Video> {
-        println!(
-            "{:?}",
-            video_path
-                .canonicalize()
-                .change_context(AppError::Unknown)?
-                .to_str()
-        );
-        info!("{line:?}");
-        let video_file = VideoFile::new(video_path).change_context(AppError::Unknown)?;
-        let total_size = video_file.total_size;
-        let file_name = video_file.file_name.clone();
-        let uploader = line
-            .pre_upload(bilibili, video_file)
-            .await
-            .change_context(AppError::Unknown)?;
-
-        let instant = Instant::now();
-
-        let video = uploader
-            .upload(client.clone(), limit, |vs| {
-                vs.map(|vs| {
-                    let chunk = vs?;
-                    let len = chunk.len();
-                    Ok((chunk, len))
-                })
-            })
-            .await
-            .change_context(AppError::Unknown)?;
-        let t = instant.elapsed().as_millis();
-        info!(
-            "Upload completed: {file_name} => cost {:.2}s, {:.2} MB/s.",
-            t as f64 / 1000.,
-            total_size as f64 / 1000. / t as f64
-        );
-        Ok(video)
     }
 }
 
@@ -420,7 +271,7 @@ pub struct ActorHandle {
 
 impl ActorHandle {
     /// 创建新的Actor处理器实例
-    /// 
+    ///
     /// # 参数
     /// * `download_semaphore` - 下载Actor数量
     /// * `update_semaphore` - 上传Actor数量

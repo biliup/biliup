@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use biliup::downloader::util::Segmentable;
 use biliup_cli::server::app::ApplicationController;
 use biliup_cli::server::common::util::{Recorder, media_ext_from_url, parse_time};
-use biliup_cli::server::config::{default_segment_time, Config};
+use biliup_cli::server::config::{Config, default_segment_time};
 use biliup_cli::server::core::download_manager::{ActorHandle, DownloadManager};
 use biliup_cli::server::core::downloader::ffmpeg_downloader::FfmpegDownloader;
 use biliup_cli::server::core::downloader::stream_gears::StreamGears;
@@ -93,7 +93,7 @@ impl DownloadPlugin for PyPlugin {
         // worker: &Worker,
         config: Config,
         recorder: Recorder,
-    ) -> Box<dyn Downloader> {
+    ) -> Arc<dyn Downloader> {
         let raw_stream_url = &stream_info.raw_stream_url;
         match config.downloader {
             Some(DownloaderType::Ffmpeg) => {
@@ -106,7 +106,7 @@ impl DownloadPlugin for PyPlugin {
                     output_dir: PathBuf::from("."),
                 };
 
-                Box::new(FfmpegDownloader::new(
+                Arc::new(FfmpegDownloader::new(
                     raw_stream_url,
                     config,
                     Vec::new(),
@@ -116,7 +116,7 @@ impl DownloadPlugin for PyPlugin {
             // Some(DownloaderType::StreamGears) => {
             //
             // },
-            _ => Box::new(StreamGears::new(
+            _ => Arc::new(StreamGears::new(
                 raw_stream_url,
                 construct_headers(&stream_info.stream_headers),
                 recorder.filename_template(),
@@ -347,10 +347,9 @@ pub(crate) async fn _main() -> AppResult<()> {
     for streamer in all_streamer {
         // workers.push(Arc::new(Worker::new(streamer.id, service_register.pool.clone())));
         if let Some(manager) = service_register.get_manager(&streamer.url) {
-            let monitor = manager.ensure_monitor();
             let upload_config = get_upload_config(&service_register.pool, streamer.id).await?;
             let _ = service_register
-                .add_room(monitor, streamer, upload_config)
+                .add_room(&manager, streamer, upload_config)
                 .await?;
         };
     }

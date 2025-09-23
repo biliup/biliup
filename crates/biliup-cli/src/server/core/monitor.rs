@@ -9,7 +9,7 @@ use tokio::task::JoinHandle;
 use tracing::info;
 
 /// 启动客户端监控循环
-/// 
+///
 /// # 参数
 /// * `rooms_handle` - 房间处理器
 /// * `plugin` - 下载插件
@@ -73,7 +73,7 @@ pub struct Monitor {
 
 impl Monitor {
     /// 创建新的监控器实例
-    /// 
+    ///
     /// # 参数
     /// * `plugin` - 下载插件
     /// * `actor_handle` - Actor处理器
@@ -121,7 +121,7 @@ pub struct RoomsHandle {
 
 impl RoomsHandle {
     /// 创建新的房间处理器实例
-    /// 
+    ///
     /// # 参数
     /// * `name` - 平台名称
     pub fn new(name: &str) -> Self {
@@ -139,7 +139,7 @@ impl RoomsHandle {
     }
 
     /// 添加工作器到房间列表
-    /// 
+    ///
     /// # 参数
     /// * `worker` - 要添加的工作器
     pub async fn add(&self, worker: Arc<Worker>) {
@@ -148,10 +148,10 @@ impl RoomsHandle {
     }
 
     /// 删除指定ID的工作器
-    /// 
+    ///
     /// # 参数
     /// * `id` - 要删除的工作器ID
-    /// 
+    ///
     /// # 返回
     /// 返回剩余工作器数量
     pub async fn del(&self, id: i64) -> usize {
@@ -168,7 +168,7 @@ impl RoomsHandle {
     }
 
     /// 获取下一个要处理的工作器
-    /// 
+    ///
     /// # 返回
     /// 返回下一个工作器，如果没有则返回None
     async fn next(&self) -> Option<Arc<Worker>> {
@@ -182,7 +182,7 @@ impl RoomsHandle {
     }
 
     /// 切换工作器状态（在活跃和等待列表之间）
-    /// 
+    ///
     /// # 参数
     /// * `worker` - 要切换的工作器
     pub async fn toggle(&self, worker: Arc<Worker>) {

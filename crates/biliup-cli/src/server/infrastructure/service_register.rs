@@ -3,7 +3,7 @@ use crate::server::core::download_manager::{ActorHandle, DownloadManager};
 use crate::server::core::monitor::Monitor;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::context::{Context, Worker};
+use crate::server::infrastructure::context::{Context, Worker, WorkerStatus};
 use crate::server::infrastructure::models::{LiveStreamer, UploadStreamer};
 use axum::extract::FromRef;
 use biliup::client::StatelessClient;
@@ -32,7 +32,7 @@ pub struct ServiceRegister {
 /// 简单的服务容器，负责管理API端点通过axum扩展获取的各种服务
 impl ServiceRegister {
     /// 创建新的服务注册器实例
-    /// 
+    ///
     /// # 参数
     /// * `pool` - 数据库连接池
     /// * `config` - 全局配置
@@ -65,10 +65,10 @@ impl ServiceRegister {
     }
 
     /// 根据URL获取匹配的下载管理器
-    /// 
+    ///
     /// # 参数
     /// * `url` - 直播流URL
-    /// 
+    ///
     /// # 返回
     /// 返回匹配的下载管理器引用，如果没有匹配的则返回None
     pub fn get_manager(&self, url: &str) -> Option<&DownloadManager> {
@@ -79,14 +79,14 @@ impl ServiceRegister {
     }
 
     /// 添加新的直播间到监控列表
-    /// 
+    ///
     /// # 参数
     /// * `monitor` - 监控器实例
     /// * `live_streamer` - 直播主播信息
     /// * `upload_streamer` - 上传配置（可选）
     pub async fn add_room(
         &self,
-        monitor: Arc<Monitor>,
+        manager: &DownloadManager,
         live_streamer: LiveStreamer,
         upload_streamer: Option<UploadStreamer>,
     ) -> AppResult<Option<()>> {
@@ -98,6 +98,7 @@ impl ServiceRegister {
             self.client.clone(),
         ));
         // 将工作器添加到监控器和工作器列表中
+        let monitor = manager.ensure_monitor();
         monitor.rooms_handle.add(worker.clone()).await;
         self.workers.write().unwrap().push(worker.clone());
         info!("add {worker:?} success");
@@ -105,7 +106,7 @@ impl ServiceRegister {
     }
 
     /// 删除指定ID的直播间
-    /// 
+    ///
     /// # 参数
     /// * `id` - 要删除的直播间ID
     pub async fn del_room(&self, id: i64) -> AppResult<()> {
@@ -136,7 +137,13 @@ impl ServiceRegister {
         if len == 0 {
             *manager.monitor.lock().unwrap() = None;
         }
-
+        let downloader = match &*removed.downloader_status.read().unwrap() {
+            WorkerStatus::Working(downloader) => Some(downloader.clone()),
+            _ => None,
+        };
+        if let Some(downloader) = downloader {
+            let _ = downloader.stop().await;
+        }
         Ok(())
     }
 }

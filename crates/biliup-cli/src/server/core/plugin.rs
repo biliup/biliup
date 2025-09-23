@@ -8,6 +8,7 @@ use error_stack::Report;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use time::OffsetDateTime;
 
 /// 流信息结构
@@ -77,7 +78,7 @@ pub trait DownloadPlugin {
         stream_info: &StreamInfo,
         config: Config,
         recorder: Recorder,
-    ) -> Box<dyn Downloader>;
+    ) -> Arc<dyn Downloader>;
 
     /// 初始化弹幕客户端（可选）
     fn danmaku_init(&self) -> Option<Box<dyn Downloader>>;

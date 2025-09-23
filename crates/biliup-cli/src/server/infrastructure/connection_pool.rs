@@ -14,10 +14,10 @@ pub struct ConnectionManager;
 
 impl ConnectionManager {
     /// 创建新的数据库连接池
-    /// 
+    ///
     /// # 参数
     /// * `path` - 数据库文件路径
-    /// 
+    ///
     /// # 返回
     /// 返回配置好的SQLite连接池
     pub async fn new_pool(path: &str) -> AppResult<ConnectionPool> {
@@ -27,16 +27,16 @@ impl ConnectionManager {
                 .change_context(AppError::Unknown)
                 .attach_with(|| path.to_string())?; // 创建 data/ 目录
         }
-        
+
         let db_url = format!("sqlite://{path}");
-        
+
         // 创建数据库文件（如果不存在）
         std::fs::OpenOptions::new()
             .write(true)
             .create(true)
             .open(path)
             .change_context(AppError::Unknown)?;
-            
+
         // 创建连接池，最大连接数设为2
         let pool = SqlitePoolOptions::new()
             .max_connections(2)

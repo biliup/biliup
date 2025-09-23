@@ -7,11 +7,12 @@ use biliup::downloader::flv_parser::header;
 use biliup::downloader::httpflv::Connection;
 use biliup::downloader::util::{LifecycleFile, Segmentable};
 use biliup::downloader::{hls, httpflv};
-use error_stack::ResultExt;
+use error_stack::{ResultExt, bail};
 use nom::Err;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 
 /// Stream-gears下载器实现
@@ -29,11 +30,13 @@ pub struct StreamGears {
     proxy: Option<String>,
     /// 下载状态
     status: Arc<RwLock<DownloadStatus>>,
+
+    token: CancellationToken,
 }
 
 impl StreamGears {
     /// 创建新的Stream-gears下载器实例
-    /// 
+    ///
     /// # 参数
     /// * `url` - 流URL
     /// * `header_map` - HTTP请求头
@@ -54,17 +57,11 @@ impl StreamGears {
             segment,
             proxy,
             status: Arc::new(RwLock::new(DownloadStatus::Downloading)),
+            token: CancellationToken::new(),
         }
     }
-}
 
-#[async_trait]
-impl Downloader for StreamGears {
-    /// 开始下载流
-    /// 
-    /// # 参数
-    /// * `callback` - 分段完成时的回调函数
-    async fn download(
+    async fn start_download(
         &self,
         callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
     ) -> AppResult<DownloadStatus> {
@@ -73,7 +70,7 @@ impl Downloader for StreamGears {
         let _headers_in = self.header_map.clone();
         let proxy = self.proxy.clone();
         let _status = Arc::clone(&self.status);
-        
+
         // 创建HTTP客户端
         let client = StatelessClient::new(self.header_map.clone(), proxy.as_deref());
         // 获取可重试的响应
@@ -124,11 +121,31 @@ impl Downloader for StreamGears {
         }
         Ok(DownloadStatus::StreamEnded)
     }
+}
+
+#[async_trait]
+impl Downloader for StreamGears {
+    /// 开始下载流
+    ///
+    /// # 参数
+    /// * `callback` - 分段完成时的回调函数
+    async fn download(
+        &self,
+        callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
+    ) -> AppResult<DownloadStatus> {
+        tokio::select! {
+            _ = self.token.cancelled() => {
+                bail!(AppError::Custom("StreamGears token cancelled".into()))
+            }
+            res = self.start_download(callback) => {res}
+        }
+    }
 
     /// 停止下载
     async fn stop(&self) -> Result<(), Box<dyn std::error::Error>> {
         // 仅发出取消信号并更新状态
         // 如果底层下载函数不支持取消，这里不能真正中断正在进行的下载
-        todo!()
+        self.token.cancel();
+        Ok(())
     }
 }

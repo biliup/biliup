@@ -76,7 +76,7 @@ impl ApplicationController {
                     .allow_methods(AllowMethods::any()),
             )
             .fallback(static_handler); // 静态文件处理回退
-        
+
         // 启动HTTP服务器
         info!("routes initialized, listening on {}", addr);
         let listener = tokio::net::TcpListener::bind(addr)
