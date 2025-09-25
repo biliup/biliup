@@ -84,6 +84,15 @@ pub struct FileValidator {
     check_format: bool,
 }
 
+impl FileValidator {
+    pub fn new(min_size: u64, check_format: bool) -> Self {
+        Self {
+            min_size,
+            check_format,
+        }
+    }
+}
+
 impl Default for FileValidator {
     fn default() -> Self {
         Self {
@@ -148,8 +157,11 @@ impl SegmentEventProcessor {
             tx,
             rx,
             uploader,
+            file_validator: FileValidator::new(
+                worker.clone().config.read().unwrap().filtering_threshold * 1000 * 1000,
+                true,
+            ),
             worker,
-            file_validator: FileValidator::default(),
         }
     }
 

@@ -2,11 +2,13 @@ use axum::http;
 
 use crate::server;
 use crate::server::api::auth;
+use crate::server::api::endpoints::ws_logs;
 use crate::server::api::spa::static_handler;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::service_register::ServiceRegister;
 use crate::server::infrastructure::users::Backend;
 use axum::http::HeaderValue;
+use axum::routing::get;
 use axum_login::{AuthManagerLayerBuilder, login_required};
 use error_stack::ResultExt;
 use std::net::SocketAddr;
@@ -75,6 +77,7 @@ impl ApplicationController {
                     .allow_origin("http://localhost:3000".parse::<HeaderValue>().unwrap())
                     .allow_methods(AllowMethods::any()),
             )
+            .route("/v1/ws/logs", get(ws_logs)) // 获取视频列表
             .fallback(static_handler); // 静态文件处理回退
 
         // 启动HTTP服务器

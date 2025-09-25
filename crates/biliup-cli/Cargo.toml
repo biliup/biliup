@@ -1,6 +1,6 @@
 [package]
 name = "biliup-cli"
-version = "0.2.4"
+version.workspace = true
 edition = "2024"
 description = "Upload video to bilibili."
 license = "MIT OR Apache-2.0"
@@ -33,7 +33,7 @@ chrono = { workspace = true, features = ["serde"] }
 indexmap = { version = "2.8.0" }
 async-trait = { workspace = true }
 humantime = "2.2.0"
-axum = { version = "0.8", features = ["macros"] }
+axum = { version = "0.8", features = ["macros", "ws"] }
 tower-http = { version = "0.6.2", features = ["cors"] }
 reqwest = { workspace = true }
 sqlx = { version = "0.8", features = [ "runtime-tokio-rustls", "sqlite" ] }

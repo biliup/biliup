@@ -6,16 +6,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
+use bon::Builder;
 use std::fmt::{Display, Formatter};
 use std::num::ParseIntError;
 use std::str::FromStr;
 use std::time::Duration;
-use bon::Builder;
 use tracing::{info, warn};
 
-
-#[derive(Serialize, Deserialize, Debug)]
-#[derive(Builder)]
+#[derive(Serialize, Deserialize, Debug, Builder)]
 #[cfg_attr(feature = "cli", derive(clap::Args))]
 pub struct Studio {
     /// 是否转载, 1-自制 2-转载

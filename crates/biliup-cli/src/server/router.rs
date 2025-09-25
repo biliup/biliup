@@ -3,10 +3,10 @@ use crate::server::api::bilibili_endpoints::{
 };
 use crate::server::api::endpoints::{
     add_upload_streamer_endpoint, add_user_endpoint, delete_streamers_endpoint,
-    delete_template_endpoint, delete_user_endpoint, get_configuration, get_qrcode,
+    delete_template_endpoint, delete_user_endpoint, get_configuration, get_qrcode, get_status,
     get_streamer_info, get_streamers_endpoint, get_upload_streamer_endpoint,
     get_upload_streamers_endpoint, get_users_endpoint, get_videos, login_by_qrcode,
-    post_streamers_endpoint, put_configuration, put_streamers_endpoint,
+    post_streamers_endpoint, put_configuration, put_streamers_endpoint, ws_logs,
 };
 use crate::server::infrastructure::service_register::ServiceRegister;
 use axum::Router;
@@ -50,5 +50,6 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         .route("/v1/login_by_qrcode", post(login_by_qrcode)) // 二维码登录
         // 视频文件管理路由
         .route("/v1/videos", get(get_videos)) // 获取视频列表
+        .route("/v1/status", get(get_status))
         .with_state(service_register) // 注入服务注册器状态
 }

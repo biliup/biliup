@@ -9,12 +9,12 @@ use futures::StreamExt;
 use pyo3::prelude::*;
 use pyo3::pyclass;
 
+use bon::Builder;
 use error_stack::ResultExt;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Instant;
-use bon::Builder;
 use tracing::info;
 
 use biliup_cli::server::errors::{AppError, AppResult};

@@ -188,9 +188,9 @@ pub struct ActorHandle {
     /// 下载消息发送器
     pub down_sender: Sender<DownloaderMessage>,
     /// 下载Actor任务句柄列表
-    d_kills: Vec<JoinHandle<()>>,
+    pub(crate) d_kills: Vec<JoinHandle<()>>,
     /// 上传Actor任务句柄列表
-    u_kills: Vec<JoinHandle<()>>,
+    pub(crate) u_kills: Vec<JoinHandle<()>>,
 }
 
 impl ActorHandle {
