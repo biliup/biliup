@@ -1,4 +1,4 @@
-use crate::server::core::downloader::{DownloadStatus, Downloader, SegmentEvent};
+use crate::server::core::downloader::{DownloadStatus, Downloader, SegmentEvent, SegmentInfo};
 use crate::server::errors::{AppError, AppResult};
 use async_trait::async_trait;
 use axum::http::HeaderMap;
@@ -85,19 +85,26 @@ impl StreamGears {
             .read_frame(9)
             .await
             .change_context(AppError::Unknown)?;
-        let mut i = 0;
+        // let mut i = 0;
+        // let mut prev_file_path = None;
         // 创建分段回调钩子
-        let hook = move |s: &str| {
-            i += 1;
-            let event = SegmentEvent {
-                file_path: PathBuf::from(s),
-                segment_index: i,
-                start_time: SystemTime::now(),
-                end_time: SystemTime::now(),
-            };
-            callback(event);
-        };
+        let hook = {
+            let mut i = 0;
+            let mut prev_file_path = None::<PathBuf>;
+            move |s: &str| {
+                let file_path = PathBuf::from(s);
 
+                let event = SegmentInfo {
+                    prev_file_path: file_path.clone(),
+                    next_file_path: None,
+                    segment_index: i,
+                };
+                callback(SegmentEvent::Segment(event));
+
+                i += 1;
+                prev_file_path = Some(file_path);
+            }
+        };
         // 解析流头部，判断流类型
         match header(&bytes) {
             Ok((_i, header)) => {

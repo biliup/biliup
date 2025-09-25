@@ -270,6 +270,7 @@ impl LifecycleFile {
     }
 
     pub fn rename(&mut self) {
+        // 去掉 .part 后缀
         match fs::rename(&self.path, &self.file_name) {
             Ok(_) => (self.hook)(&self.file_name),
             Err(e) => {

@@ -1,5 +1,5 @@
 use crate::server::core::download_manager::UActor;
-use crate::server::core::downloader::SegmentEvent;
+use crate::server::core::downloader::{SegmentEvent, SegmentInfo};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::Worker;
 use crate::server::infrastructure::models::UploadStreamer;
@@ -34,16 +34,16 @@ struct UploadedVideos {
 }
 
 pub async fn process_with_upload(
-    first_event: SegmentEvent,
-    rx: Receiver<SegmentEvent>,
+    rx: Receiver<SegmentInfo>,
     worker: &Worker,
     upload_config: UploadStreamer,
 ) -> AppResult<()> {
+    info!(upload_config=?upload_config, "Starting process with upload");
     // 1. 初始化上传环境
     let upload_context = initialize_upload_context(&worker, upload_config).await?;
 
     // 2. 流水线处理视频上传
-    let uploaded_videos = pipeline_upload_videos(first_event, rx, &upload_context).await?;
+    let uploaded_videos = pipeline_upload_videos(rx, &upload_context).await?;
 
     // 3. 提交到B站
     if !uploaded_videos.videos.is_empty() {
@@ -98,8 +98,7 @@ async fn get_upload_line(client: &StatelessClient, line: &str) -> AppResult<Line
 }
 
 async fn pipeline_upload_videos(
-    first_event: SegmentEvent,
-    rx: Receiver<SegmentEvent>,
+    rx: Receiver<SegmentInfo>,
     context: &UploadContext,
 ) -> AppResult<UploadedVideos> {
     // let mut desc_v2 = Vec::new();
@@ -113,16 +112,11 @@ async fn pipeline_upload_videos(
 
     let mut uploaded = UploadedVideos::default();
 
-    // 处理第一个事件
-    let video = upload_single_file(&first_event.file_path, context).await?;
-    uploaded.videos.push(video);
-    uploaded.paths.push(first_event.file_path);
-
     // 流式处理后续事件
     while let Ok(event) = rx.recv().await {
-        let video = upload_single_file(&event.file_path, context).await?;
+        let video = upload_single_file(&event.prev_file_path, context).await?;
         uploaded.videos.push(video);
-        uploaded.paths.push(event.file_path);
+        uploaded.paths.push(event.prev_file_path);
         // 失败的文件不加入路径列表，避免后处理出错
     }
 
@@ -136,7 +130,7 @@ async fn upload_single_file(file_path: &Path, context: &UploadContext) -> AppRes
     let line = &context.line;
     let video_path = file_path;
 
-    println!(
+    info!(
         "{:?}",
         video_path
             .canonicalize()

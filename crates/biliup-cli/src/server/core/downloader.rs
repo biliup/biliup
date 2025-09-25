@@ -65,18 +65,42 @@ pub enum DownloaderType {
     YtDlp,
 }
 
+#[derive(Debug, Clone)]
+pub struct SegmentInfo {
+    /// 分段文件路径
+    pub prev_file_path: PathBuf,
+    pub next_file_path: Option<PathBuf>,
+    /// 分段序号
+    pub segment_index: usize,
+    // /// 分段开始时间戳
+    // start_time: std::time::SystemTime,
+    // /// 分段结束时间戳
+    // end_time: std::time::SystemTime,
+}
+
+impl SegmentInfo {
+    pub fn new(
+        prev_file_path: PathBuf,
+        next_file_path: Option<PathBuf>,
+        segment_index: usize,
+    ) -> Self {
+        Self {
+            prev_file_path,
+            next_file_path,
+            segment_index,
+        }
+    }
+}
+
 /// 分段事件
 /// 当下载器完成一个分段时触发的事件
 #[derive(Debug, Clone)]
-pub struct SegmentEvent {
-    /// 分段文件路径
-    pub file_path: PathBuf,
-    /// 分段序号
-    pub segment_index: usize,
-    /// 分段开始时间戳
-    pub start_time: std::time::SystemTime,
-    /// 分段结束时间戳
-    pub end_time: std::time::SystemTime,
+pub enum SegmentEvent {
+    Start {
+        /// 分段文件路径
+        next_file_path: PathBuf,
+    },
+    Segment(SegmentInfo),
 }
 
 /// 下载状态

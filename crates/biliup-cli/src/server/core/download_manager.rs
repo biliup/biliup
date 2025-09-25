@@ -1,6 +1,7 @@
+use crate::server::common::download::DownloadTask;
 use crate::server::common::upload::{execute_postprocessor, process_with_upload};
 use crate::server::common::util::Recorder;
-use crate::server::core::downloader::{Downloader, SegmentEvent};
+use crate::server::core::downloader::{Downloader, SegmentEvent, SegmentInfo};
 use crate::server::core::monitor::{Monitor, RoomsHandle};
 use crate::server::core::plugin::{DownloadPlugin, StreamInfo};
 use crate::server::errors::{AppError, AppResult};
@@ -114,95 +115,12 @@ impl DActor {
     async fn handle_message(&mut self, msg: DownloaderMessage) -> AppResult<()> {
         match msg {
             DownloaderMessage::Start(plugin, stream_info, ctx, rooms_handle) => {
-                // 获取配置和主播信息
-                let config = ctx.worker.get_config();
-                let streamer = ctx.worker.get_streamer();
-                // 确定文件格式后缀
-                let suffix = streamer
-                    .format
-                    .unwrap_or_else(|| stream_info.suffix.clone());
-                // 创建录制器
-                let recorder = Recorder::new(
-                    streamer.filename_prefix,
-                    &streamer.remark,
-                    &stream_info.title,
-                    &suffix,
-                );
-                // 创建下载器实例
-                let downloader = plugin
-                    .create_downloader(&stream_info, config, recorder)
-                    .await;
+                // 创建下载任务
+                let task = DownloadTask::new(plugin, stream_info, ctx, rooms_handle);
 
-                // 更新工作器状态为工作中
-                ctx.worker
-                    .change_status(Stage::Download, WorkerStatus::Working(downloader.clone()));
-                // 初始化弹幕客户端（如果存在）
-                let mut danmaku_client = None;
-                if let Some(danmaku) = ctx.extension.get::<Arc<dyn Downloader>>() {
-                    let _ = danmaku
-                        .download(Box::new(|_| {}))
-                        .await
-                        .inspect_err(|e| error!(e=?e));
-                    danmaku_client = Some(danmaku.clone())
-                }
+                // 执行下载（使用 Result 链式处理）
+                task.execute(&self.sender).await?;
 
-                // 创建分段事件处理通道
-                let (tx, rx) = bounded(16);
-                let hook = {
-                    let room = ctx.worker.clone();
-                    let sender = self.sender.clone();
-                    let danmaku_client = danmaku_client.clone();
-                    move |event: SegmentEvent| {
-                        // 如果有弹幕客户端，触发滚动保存
-                        if let Some(danmaku) = &danmaku_client {
-                            let _ = danmaku
-                                .rolling(&event.file_path.display().to_string())
-                                .inspect_err(|e| error!(e));
-                        }
-                        // 处理分段事件
-                        if event.segment_index == 0 {
-                            // 第一个分段，发送到上传器
-                            match sender.force_send(UploaderMessage::SegmentEvent(
-                                event,
-                                rx.clone(),
-                                room.clone(),
-                            )) {
-                                Ok(Some(ret)) => {
-                                    warn!(SegmentEvent = ?ret, "replace an existing message in the channel");
-                                }
-                                Err(_) => {}
-                                Ok(None) => {}
-                            };
-                        } else {
-                            // 后续分段，发送到内部通道
-                            match tx.clone().force_send(event) {
-                                Ok(Some(ret)) => {
-                                    warn!(SegmentEvent = ?ret, "replace an existing message in the channel");
-                                }
-                                Err(_) => {}
-                                Ok(None) => {}
-                            }
-                        }
-                    }
-                };
-                // 开始下载
-                match downloader.download(Box::new(hook)).await {
-                    Ok(status) => {
-                        println!("Download completed with status: {:?}", status);
-                    }
-                    Err(err) => {
-                        error!("download error: {:?}", err);
-                    }
-                };
-                // 停止弹幕客户端
-                if let Some(danmaku) = &danmaku_client {
-                    let _ = danmaku.stop().await.inspect_err(|e| error!(e));
-                }
-                // 更新工作器状态为空闲
-                ctx.worker
-                    .change_status(Stage::Download, WorkerStatus::Idle);
-                // 切换房间状态
-                rooms_handle.toggle(ctx.worker).await;
                 Ok(())
             }
         }
@@ -234,12 +152,17 @@ impl UActor {
     /// * `msg` - 要处理的上传消息
     async fn handle_message(&mut self, msg: UploaderMessage) {
         match msg {
-            UploaderMessage::SegmentEvent(event, rx, worker) => {
+            UploaderMessage::SegmentEvent(rx, worker) => {
+                worker.change_status(Stage::Upload, WorkerStatus::Pending);
                 let result = match worker.get_upload_config() {
-                    Some(config) => process_with_upload(event, rx, &worker, config).await,
+                    Some(config) => process_with_upload(rx, &worker, config).await,
                     None => {
+                        let mut paths = Vec::new();
+                        while let Ok(event) = rx.recv().await {
+                            paths.push(event.prev_file_path);
+                        }
                         // 无上传配置时，直接执行后处理
-                        execute_postprocessor(vec![event.file_path], &worker).await
+                        execute_postprocessor(paths, &worker).await
                     }
                 };
 
@@ -247,6 +170,7 @@ impl UActor {
                     error!("Process segment event failed: {}", e);
                     // 可以添加错误通知机制
                 }
+                worker.change_status(Stage::Upload, WorkerStatus::Idle);
             }
         }
     }
@@ -310,7 +234,7 @@ impl ActorHandle {
 #[derive(Debug)]
 pub enum UploaderMessage {
     /// 分段事件消息，包含事件、接收器和工作器
-    SegmentEvent(SegmentEvent, Receiver<SegmentEvent>, Arc<Worker>),
+    SegmentEvent(Receiver<SegmentInfo>, Arc<Worker>),
 }
 
 /// 下载消息枚举

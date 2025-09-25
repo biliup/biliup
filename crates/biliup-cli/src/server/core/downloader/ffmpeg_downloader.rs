@@ -1,6 +1,6 @@
 use crate::server::core::downloader;
 use crate::server::core::downloader::{
-    DownloadConfig, DownloadStatus, Downloader, DownloaderType, SegmentEvent,
+    DownloadConfig, DownloadStatus, Downloader, DownloaderType, SegmentEvent, SegmentInfo,
 };
 use crate::server::errors::{AppError, AppResult};
 use async_trait::async_trait;
@@ -70,10 +70,14 @@ impl FfmpegDownloader {
         // 内部分段特定的输出参数
         // -f segment: 使用segment muxer进行自动分段
         args.extend(["-f".to_string(), "segment".to_string()]);
-        // args.extend(["-segment_format".to_string(), "flv".to_string()]);
+        args.extend([
+            "-segment_format".to_string(),
+            self.config.recorder.suffix.to_string(),
+        ]);
         // -segment_list pipe:1: 将分段文件名输出到stdout
         // 这样我们可以实时获取新生成的分段文件
         args.extend(["-segment_list".to_string(), "pipe:1".to_string()]);
+        args.extend(["-map".to_string(), "0".to_string()]);
 
         // -segment_list_type flat: 输出格式为纯文件名列表
         args.extend(["-segment_list_type".to_string(), "flat".to_string()]);
@@ -81,6 +85,10 @@ impl FfmpegDownloader {
         // -reset_timestamps 1: 每个分段重置时间戳从0开始
         // 确保每个分段文件可以独立播放
         args.extend(["-reset_timestamps".to_string(), "1".to_string()]);
+        // %Y-%m-%dT%H_%M_%S 是 strftime 的时间占位符（需要配合 -strftime 1）
+        // %d 是序号占位符（printf 风格，默认模式）
+        // segment 复用器不能同时用这两种
+        args.extend(["-strftime".to_string(), "1".to_string()]);
 
         // -segment_time: 分段时长（秒）
         if let Some(segment_time) = &self.config.segment_time {
@@ -227,21 +235,6 @@ impl FfmpegDownloader {
         };
         // let (tx, rx) = bounded(16);
         // 分段回调
-        let segment_callback = |event: SegmentEvent| {
-            println!("New segment: {:?}", event.file_path);
-            // if i == 0 {
-            //     match sender.force_send(UploaderMessage::SegmentEvent(event)) {
-            //         Ok(Some(ret)) => {
-            //             warn!(SegmentEvent = ?ret, "replace an existing message in the channel");
-            //         }
-            //         Err(_) => {}
-            //         Ok(None) => {}
-            //     };
-            // } else {
-            //     i += 1;
-            // }
-            // 这里可以触发上传等后续处理
-        };
 
         // 根据退出码判断状态
         match status.code() {
@@ -254,12 +247,12 @@ impl FfmpegDownloader {
 
                 // 触发分段回调
 
-                segment_callback(SegmentEvent {
-                    file_path: output_file,
-                    segment_index: 0,
-                    start_time: std::time::SystemTime::now(),
-                    end_time: std::time::SystemTime::now(),
-                });
+                // segment_callback(SegmentEvent {
+                //     file_path: output_file,
+                //     segment_index: 0,
+                //     start_time: std::time::SystemTime::now(),
+                //     end_time: std::time::SystemTime::now(),
+                // });
 
                 Ok(DownloadStatus::SegmentCompleted)
             }
@@ -279,8 +272,8 @@ impl FfmpegDownloader {
         let mut cmd = Command::new("ffmpeg");
         cmd.args(&args)
             .arg(format!(
-                "{}_%d.{}",
-                self.config.recorder.generate_filename(),
+                "{}.{}.part",
+                self.config.recorder.filename_template(),
                 self.config.recorder.suffix
             ))
             .stdin(Stdio::null())
@@ -318,6 +311,7 @@ impl FfmpegDownloader {
         // 异步读取stdout
         let mut reader = BufReader::new(stdout).lines();
         let mut segment_index = 0;
+        let mut prev_file_path: Option<PathBuf> = None;
 
         while let Some(line) = reader.next_line().await.change_context(AppError::Unknown)? {
             info!("Received line: {line}");
@@ -329,19 +323,61 @@ impl FfmpegDownloader {
 
             // 触发分段回调
 
-            callback(SegmentEvent {
-                file_path: file_path.clone(),
+            // 重命名文件
+            let no_ext = file_path.with_extension("");
+            tokio::fs::rename(&file_path, &no_ext)
+                .await
+                .change_context(AppError::Unknown)?;
+            info!("renamed file: from {file_path:?} to {no_ext:?}");
+
+            callback(SegmentEvent::Segment(SegmentInfo {
+                prev_file_path: no_ext,
+                next_file_path: None,
                 segment_index,
-                start_time: std::time::SystemTime::now(),
-                end_time: std::time::SystemTime::now(),
-            });
+                // start_time: std::time::SystemTime::now(),
+                // end_time: std::time::SystemTime::now(),
+            }));
 
             segment_index += 1;
+            prev_file_path = Some(file_path);
         }
         // 确保读任务结束（忽略它们的返回错误以避免因提前关闭管道导致的 join 错）
         let _ = stderr_task.await;
 
-        Ok(DownloadStatus::StreamEnded)
+        // 等待进程结束
+        let status = {
+            let mut handle = self.process_handle.write().await;
+            if let Some(mut child) = handle.take() {
+                child.wait().await.change_context(AppError::Unknown)?
+            } else {
+                bail!(AppError::Custom("Process handle not found".to_string()));
+            }
+        };
+
+        if let Some(file_path) = prev_file_path {
+            // 重命名文件
+            let no_ext = file_path.with_extension("");
+            tokio::fs::rename(&file_path, &no_ext)
+                .await
+                .change_context(AppError::Unknown)?;
+            callback(SegmentEvent::Segment(SegmentInfo {
+                prev_file_path: no_ext,
+                next_file_path: None,
+                segment_index,
+                // start_time: std::time::SystemTime::now(),
+                // end_time: std::time::SystemTime::now(),
+            }));
+        }
+
+        // 根据退出码判断状态
+        match status.code() {
+            Some(0) => {
+                // 正常退出
+                Ok(DownloadStatus::SegmentCompleted)
+            }
+            Some(255) => Ok(DownloadStatus::StreamEnded),
+            err => Ok(DownloadStatus::Error(format!("FFmpeg error: {err:?}"))),
+        }
     }
 }
 
@@ -366,10 +402,12 @@ impl Downloader for FfmpegDownloader {
 
     async fn stop(&self) -> Result<(), Box<dyn std::error::Error>> {
         let mut handle = self.process_handle.write().await;
-        if let Some(mut child) = handle.take() {
+        if let Some(child) = &mut *handle {
             child.kill().await?;
+            Ok(())
+        } else {
+            Err(AppError::Custom("Process handle not found".to_string()).into())
         }
-        Ok(())
     }
 
     // async fn get_status(&self) -> DownloadStatus {
