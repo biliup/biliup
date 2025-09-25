@@ -14,10 +14,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Instant;
+use bon::Builder;
 use tracing::info;
 
 use biliup_cli::server::errors::{AppError, AppResult};
-use typed_builder::TypedBuilder;
 
 #[pyclass]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -49,7 +49,7 @@ pub struct PyCredit {
     biz_id: Option<String>,
 }
 
-#[derive(TypedBuilder)]
+#[derive(Builder)]
 pub struct StudioPre {
     video_path: Vec<PathBuf>,
     cookie_file: PathBuf,
@@ -75,7 +75,6 @@ pub struct StudioPre {
     #[builder(default = false)]
     up_close_danmu: bool,
     desc_v2_credit: Vec<PyCredit>,
-    #[builder(default)]
     extra_fields: Option<HashMap<String, serde_json::Value>>,
 }
 
@@ -193,7 +192,7 @@ pub async fn upload(
 
     let mut studio: Studio = Studio::builder()
         .desc(desc)
-        .dtime(dtime)
+        .maybe_dtime(dtime)
         .copyright(copyright)
         .cover(cover)
         .dynamic(dynamic)
@@ -209,8 +208,8 @@ pub async fn upload(
         .up_close_reply(up_close_reply)
         .up_selection_reply(up_selection_reply)
         .up_close_danmu(up_close_danmu)
-        .desc_v2(Some(desc_v2))
-        .extra_fields(extra_fields)
+        .desc_v2(desc_v2)
+        .maybe_extra_fields(extra_fields)
         .build();
 
     if !studio.cover.is_empty() {

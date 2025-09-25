@@ -215,13 +215,13 @@ async fn build_studio(context: &UploadContext, videos: Vec<Video>) -> AppResult<
     // 使用 Builder 模式简化构建
     let mut studio: Studio = Studio::builder()
         .desc(upload_config.description.clone().unwrap_or_default())
-        .dtime(upload_config.dtime)
-        .copyright(upload_config.copyright.unwrap_or(2))
+        .maybe_dtime(upload_config.dtime)
+        .maybe_copyright(upload_config.copyright)
         .cover(upload_config.cover_path.clone().unwrap_or_default())
         .dynamic(upload_config.dynamic.clone().unwrap_or_default())
         .source(upload_config.copyright_source.clone().unwrap_or_default())
         .tag(upload_config.tags.join(","))
-        .tid(upload_config.tid.unwrap_or(171))
+        .maybe_tid(upload_config.tid)
         .title(upload_config.title.clone().unwrap_or_default())
         .videos(videos)
         .dolby(upload_config.dolby.unwrap_or_default())
@@ -231,7 +231,7 @@ async fn build_studio(context: &UploadContext, videos: Vec<Video>) -> AppResult<
         .up_close_reply(upload_config.up_close_reply.unwrap_or_default())
         .up_selection_reply(upload_config.up_selection_reply.unwrap_or_default())
         .up_close_danmu(upload_config.up_close_danmu.unwrap_or_default())
-        .desc_v2(None)
+        .maybe_desc_v2(None)
         .extra_fields(
             serde_json::from_str(&upload_config.extra_fields.clone().unwrap_or_default())
                 .unwrap_or_default(), // 处理额外字段

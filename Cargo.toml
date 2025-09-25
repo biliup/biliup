@@ -29,7 +29,6 @@ error-stack = "0.6.0"
 time = { version = "0.3", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 
-typed-builder = "0.20.0"
 bon = "3.7.2"
 regex = "1.11.1"
 reqwest = { version = "0.12", default-features = false }

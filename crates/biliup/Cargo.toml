@@ -27,7 +27,7 @@ cookie = "0.18.1"
 
 bytes = { workspace = true }
 futures = { workspace = true }
-typed-builder = { workspace = true }
+bon = { workspace = true }
 reqwest-middleware = { version = "0.4", features = ["json"] }
 reqwest-retry = "0.7.0"
 clap = { version = "4", features = ["derive"], optional = true }

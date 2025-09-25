@@ -35,7 +35,6 @@ url = { workspace = true }
 time = { workspace = true }
 chrono = { workspace = true }
 fancy-regex = { version = "0.16.1"}
-typed-builder = { workspace = true }
 bon = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 async-trait = { workspace = true }

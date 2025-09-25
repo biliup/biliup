@@ -413,7 +413,7 @@ fn upload(
             let studio_pre = StudioPre::builder()
                 .video_path(video_path)
                 .cookie_file(cookie_file)
-                .line(line)
+                .maybe_line(line)
                 .limit(limit)
                 .title(title)
                 .tid(tid)
@@ -423,7 +423,7 @@ fn upload(
                 .desc(desc)
                 .dynamic(dynamic)
                 .cover(cover)
-                .dtime(dtime)
+                .maybe_dtime(dtime)
                 .dolby(dolby)
                 .lossless_music(lossless_music)
                 .no_reprint(no_reprint)
@@ -432,7 +432,7 @@ fn upload(
                 .up_selection_reply(up_selection_reply)
                 .up_close_danmu(up_close_danmu)
                 .desc_v2_credit(desc_v2)
-                .extra_fields(Some(parse_extra_fields(extra_fields)))
+                .extra_fields(parse_extra_fields(extra_fields))
                 .build();
 
             // let submit = match submit {
