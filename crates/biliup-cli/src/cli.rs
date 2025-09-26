@@ -1,7 +1,8 @@
 use biliup::uploader::bilibili::{Studio, Vid};
 use biliup::uploader::util::SubmitOption;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
 
+use biliup_cli::UploadLine;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -146,25 +147,6 @@ pub enum Commands {
         #[arg(short, long)]
         max_pages: Option<u32>,
     },
-}
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
-pub enum UploadLine {
-    Bldsa,
-    Cnbldsa,
-    Andsa,
-    Atdsa,
-    Bda2,
-    Cnbd,
-    Anbd,
-    Atbd,
-    Tx,
-    Cntx,
-    Antx,
-    Attx,
-    Bda,
-    Txa,
-    Alia,
 }
 
 fn human_size(s: &str) -> Result<u64, String> {

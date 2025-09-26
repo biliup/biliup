@@ -114,9 +114,9 @@ impl DActor {
     /// * `msg` - 要处理的下载消息
     async fn handle_message(&mut self, msg: DownloaderMessage) -> AppResult<()> {
         match msg {
-            DownloaderMessage::Start(plugin, stream_info, ctx, rooms_handle) => {
+            DownloaderMessage::Start(plugin, ctx, rooms_handle) => {
                 // 创建下载任务
-                let task = DownloadTask::new(plugin, stream_info, ctx, rooms_handle);
+                let task = DownloadTask::new(plugin, ctx, rooms_handle);
 
                 // 执行下载（使用 Result 链式处理）
                 task.execute(&self.sender).await?;
@@ -152,17 +152,18 @@ impl UActor {
     /// * `msg` - 要处理的上传消息
     async fn handle_message(&mut self, msg: UploaderMessage) {
         match msg {
-            UploaderMessage::SegmentEvent(rx, worker) => {
-                worker.change_status(Stage::Upload, WorkerStatus::Pending);
-                let result = match worker.get_upload_config() {
-                    Some(config) => process_with_upload(rx, &worker, config).await,
+            UploaderMessage::SegmentEvent(rx, ctx) => {
+                ctx.worker
+                    .change_status(Stage::Upload, WorkerStatus::Pending);
+                let result = match ctx.worker.get_upload_config() {
+                    Some(config) => process_with_upload(rx, &ctx, config).await,
                     None => {
                         let mut paths = Vec::new();
                         while let Ok(event) = rx.recv().await {
                             paths.push(event.prev_file_path);
                         }
                         // 无上传配置时，直接执行后处理
-                        execute_postprocessor(paths, &worker).await
+                        execute_postprocessor(paths, &ctx.worker).await
                     }
                 };
 
@@ -170,7 +171,7 @@ impl UActor {
                     error!("Process segment event failed: {}", e);
                     // 可以添加错误通知机制
                 }
-                worker.change_status(Stage::Upload, WorkerStatus::Idle);
+                ctx.worker.change_status(Stage::Upload, WorkerStatus::Idle);
             }
         }
     }
@@ -234,7 +235,7 @@ impl ActorHandle {
 #[derive(Debug)]
 pub enum UploaderMessage {
     /// 分段事件消息，包含事件、接收器和工作器
-    SegmentEvent(Receiver<SegmentInfo>, Arc<Worker>),
+    SegmentEvent(Receiver<SegmentInfo>, Context),
 }
 
 /// 下载消息枚举
@@ -243,7 +244,6 @@ pub enum DownloaderMessage {
     /// 开始下载消息，包含插件、流信息、上下文和房间句柄
     Start(
         Arc<dyn DownloadPlugin + Send + Sync>,
-        StreamInfo,
         Context,
         Arc<RoomsHandle>,
     ),

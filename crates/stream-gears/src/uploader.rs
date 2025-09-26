@@ -9,6 +9,9 @@ use futures::StreamExt;
 use pyo3::prelude::*;
 use pyo3::pyclass;
 
+use biliup_cli::server::common;
+use biliup_cli::server::common::upload::submit_to_bilibili;
+use biliup_cli::server::errors::{AppError, AppResult};
 use bon::Builder;
 use error_stack::ResultExt;
 use std::collections::HashMap;
@@ -16,8 +19,6 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Instant;
 use tracing::info;
-
-use biliup_cli::server::errors::{AppError, AppResult};
 
 #[pyclass]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -37,6 +38,30 @@ pub enum UploadLine {
     Bda,
     Txa,
     Alia,
+}
+
+impl Into<biliup_cli::UploadLine> for UploadLine {
+    fn into(self) -> biliup_cli::UploadLine {
+        use UploadLine as P;
+        use biliup_cli::UploadLine as C;
+        match self {
+            P::Bldsa => C::Bldsa,
+            P::Cnbldsa => C::Cnbldsa,
+            P::Andsa => C::Andsa,
+            P::Atdsa => C::Atdsa,
+            P::Bda2 => C::Bda2,
+            P::Cnbd => C::Cnbd,
+            P::Anbd => C::Anbd,
+            P::Atbd => C::Atbd,
+            P::Tx => C::Tx,
+            P::Cntx => C::Cntx,
+            P::Antx => C::Antx,
+            P::Attx => C::Attx,
+            P::Bda => C::Bda,
+            P::Txa => C::Txa,
+            P::Alia => C::Alia,
+        }
+    }
 }
 
 #[derive(FromPyObject)]
@@ -112,74 +137,14 @@ pub async fn upload(
         extra_fields,
     } = studio_pre;
 
-    let bilibili = login_by_cookies(&cookie_file, proxy).await;
-    let bilibili = match bilibili {
-        Err(Kind::IO(_)) => bilibili.change_context_lazy(|| {
-            AppError::Custom(format!(
-                "open cookies file: {}",
-                &cookie_file.to_string_lossy()
-            ))
-        })?,
-        _ => bilibili.change_context_lazy(|| AppError::Unknown)?,
-    };
-
-    let client = StatelessClient::default();
-    let mut videos = Vec::new();
-    let line = match line {
-        Some(UploadLine::Bldsa) => line::bldsa(),
-        Some(UploadLine::Cnbldsa) => line::cnbldsa(),
-        Some(UploadLine::Andsa) => line::andsa(),
-        Some(UploadLine::Atdsa) => line::atdsa(),
-        Some(UploadLine::Bda2) => line::bda2(),
-        Some(UploadLine::Cnbd) => line::cnbd(),
-        Some(UploadLine::Anbd) => line::anbd(),
-        Some(UploadLine::Atbd) => line::atbd(),
-        Some(UploadLine::Tx) => line::tx(),
-        Some(UploadLine::Cntx) => line::cntx(),
-        Some(UploadLine::Antx) => line::antx(),
-        Some(UploadLine::Attx) => line::attx(),
-        // Some(UploadLine::Bda) => line::bda(),
-        Some(UploadLine::Txa) => line::txa(),
-        Some(UploadLine::Alia) => line::alia(),
-        _ => Probe::probe(&client.client).await.unwrap_or_default(),
-    };
-    for video_path in video_path {
-        println!(
-            "{:?}",
-            video_path
-                .canonicalize()
-                .change_context_lazy(|| AppError::Unknown)?
-                .to_str()
-        );
-        info!("{line:?}");
-        let video_file = VideoFile::new(&video_path).change_context_lazy(|| AppError::Unknown)?;
-        let total_size = video_file.total_size;
-        let file_name = video_file.file_name.clone();
-        let uploader = line
-            .pre_upload(&bilibili, video_file)
-            .await
-            .change_context_lazy(|| AppError::Unknown)?;
-
-        let instant = Instant::now();
-
-        let video = uploader
-            .upload(client.clone(), limit, |vs| {
-                vs.map(|vs| {
-                    let chunk = vs?;
-                    let len = chunk.len();
-                    Ok((chunk, len))
-                })
-            })
-            .await
-            .change_context_lazy(|| AppError::Unknown)?;
-        let t = instant.elapsed().as_millis();
-        info!(
-            "Upload completed: {file_name} => cost {:.2}s, {:.2} MB/s.",
-            t as f64 / 1000.,
-            total_size as f64 / 1000. / t as f64
-        );
-        videos.push(video);
-    }
+    let (bilibili, videos) = common::upload::upload(
+        &cookie_file,
+        proxy,
+        line.map(Into::into),
+        video_path.as_slice(),
+        limit,
+    )
+    .await?;
 
     let mut desc_v2 = Vec::new();
     for credit in desc_v2_credit {
@@ -225,20 +190,5 @@ pub async fn upload(
         studio.cover = url;
     }
 
-    let submit = match submit {
-        Some(submit) => SubmitOption::from_str(submit).unwrap_or(SubmitOption::App),
-        _ => SubmitOption::App,
-    };
-
-    let submit_result = match submit {
-        SubmitOption::BCutAndroid => bilibili
-            .submit_by_bcut_android(&studio, proxy)
-            .await
-            .change_context_lazy(|| AppError::Unknown)?,
-        _ => bilibili
-            .submit_by_app(&studio, proxy)
-            .await
-            .change_context_lazy(|| AppError::Unknown)?,
-    };
-    Ok(submit_result)
+    Ok(submit_to_bilibili(&bilibili, &studio, submit).await?)
 }

@@ -34,7 +34,7 @@ indexmap = { version = "2.8.0" }
 async-trait = { workspace = true }
 humantime = "2.2.0"
 axum = { version = "0.8", features = ["macros", "ws"] }
-tower-http = { version = "0.6.2", features = ["cors"] }
+tower-http = { version = "0.6.2", features = ["fs", "cors"] }
 reqwest = { workspace = true }
 sqlx = { version = "0.8", features = [ "runtime-tokio-rustls", "sqlite" ] }
 regex = { workspace = true }

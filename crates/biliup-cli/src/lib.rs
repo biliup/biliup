@@ -7,6 +7,7 @@ use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionManager;
 use crate::server::infrastructure::repositories;
 use crate::server::infrastructure::service_register::ServiceRegister;
+use clap::ValueEnum;
 use error_stack::ResultExt;
 use std::net::ToSocketAddrs;
 use std::sync::{Arc, RwLock};
@@ -40,4 +41,23 @@ pub async fn run(addr: (&str, u16)) -> AppResult<()> {
         .await
         .attach("could not initialize application routes")?;
     Ok(())
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+pub enum UploadLine {
+    Bldsa,
+    Cnbldsa,
+    Andsa,
+    Atdsa,
+    Bda2,
+    Cnbd,
+    Anbd,
+    Atbd,
+    Tx,
+    Cntx,
+    Antx,
+    Attx,
+    Bda,
+    Txa,
+    Alia,
 }

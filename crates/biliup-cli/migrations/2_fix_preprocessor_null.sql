@@ -3,34 +3,34 @@
 
 -- 修复 livestreamers 表的 JSON 字段
 UPDATE livestreamers 
-SET preprocessor = '[]' 
-WHERE preprocessor IS NULL OR preprocessor = '' OR preprocessor = 'null';
+SET preprocessor = null
+WHERE preprocessor = '' OR preprocessor = 'null';
 
 UPDATE livestreamers 
-SET segment_processor = '[]' 
-WHERE segment_processor IS NULL OR segment_processor = '' OR segment_processor = 'null';
+SET segment_processor = null
+WHERE segment_processor = '' OR segment_processor = 'null';
 
 UPDATE livestreamers 
-SET downloaded_processor = '[]' 
-WHERE downloaded_processor IS NULL OR downloaded_processor = '' OR downloaded_processor = 'null';
+SET downloaded_processor = null
+WHERE downloaded_processor = '' OR downloaded_processor = 'null';
 
 UPDATE livestreamers 
-SET postprocessor = '[]' 
-WHERE postprocessor IS NULL OR postprocessor = '' OR postprocessor = 'null';
+SET postprocessor = null
+WHERE postprocessor = '' OR postprocessor = 'null';
 
 UPDATE livestreamers
-SET override = ''
-WHERE override IS NULL OR override = 'null';
+SET override = null
+WHERE override = '' OR override = 'null';
 
 UPDATE livestreamers
-SET excluded_keywords = ''
-WHERE excluded_keywords IS NULL OR excluded_keywords = 'null';
+SET excluded_keywords = null
+WHERE excluded_keywords = '' OR excluded_keywords = 'null';
 
 UPDATE livestreamers
-SET opt_args = ''
-WHERE opt_args IS NULL OR opt_args = 'null';
+SET opt_args = null
+WHERE opt_args = '' OR opt_args = 'null';
 
 -- 修复 uploadstreamers 表的 JSON 字段
 UPDATE uploadstreamers 
-SET tags = '[]' 
-WHERE tags IS NULL OR tags = '' OR tags = 'null';
+SET tags = null
+WHERE tags = '' OR tags = 'null';

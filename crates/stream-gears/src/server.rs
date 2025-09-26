@@ -15,6 +15,7 @@ use biliup_cli::server::infrastructure::context::{Context, Worker};
 use biliup_cli::server::infrastructure::repositories;
 use biliup_cli::server::infrastructure::repositories::get_upload_config;
 use biliup_cli::server::infrastructure::service_register::ServiceRegister;
+use chrono::Local;
 use error_stack::{Report, ResultExt};
 use fancy_regex::Regex;
 use pyo3::exceptions::PyRuntimeError;
@@ -237,7 +238,8 @@ pub fn stream_info_from_py(
     };
 
     // date 直接使用传入的 start_time（保留为 Python 对象）
-    let date = OffsetDateTime::now_utc();
+    // let date = OffsetDateTime::now_utc();
+    let date = Local::now();
     // end_time: 若传入 None 或“假值”，则使用 time.localtime()
     // let end_time_obj: PyObject = match end_time {
     //     Some(et) if et.is_true()? => et.to_object(py),

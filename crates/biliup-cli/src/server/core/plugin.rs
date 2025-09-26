@@ -4,6 +4,7 @@ use crate::server::core::downloader::Downloader;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Worker};
 use async_trait::async_trait;
+use chrono::{DateTime, Local};
 use error_stack::Report;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -13,7 +14,7 @@ use time::OffsetDateTime;
 
 /// 流信息结构
 /// 包含直播流的详细信息
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StreamInfo {
     /// 主播名称
     pub name: String,
@@ -24,8 +25,8 @@ pub struct StreamInfo {
     /// 直播标题
     pub title: String,
     /// 直播开始时间
-    #[serde(with = "time::serde::rfc3339")]
-    pub date: OffsetDateTime,
+    // #[serde(with = "time::serde::rfc3339")]
+    pub date: DateTime<Local>,
     /// 直播封面路径（可选）
     pub live_cover_path: Option<String>,
     /// 平台名称

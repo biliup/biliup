@@ -6,12 +6,16 @@ use crate::server::api::endpoints::{
     delete_template_endpoint, delete_user_endpoint, get_configuration, get_qrcode, get_status,
     get_streamer_info, get_streamers_endpoint, get_upload_streamer_endpoint,
     get_upload_streamers_endpoint, get_users_endpoint, get_videos, login_by_qrcode,
-    post_streamers_endpoint, put_configuration, put_streamers_endpoint, ws_logs,
+    post_streamers_endpoint, post_uploads, put_configuration, put_streamers_endpoint,
 };
 use crate::server::infrastructure::service_register::ServiceRegister;
 use axum::Router;
+use axum::body::Body;
+use axum::http::Request;
+use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
-
+use tower::ServiceExt;
+use tower_http::services::ServeFile;
 /// 创建应用程序路由
 pub fn router(service_register: ServiceRegister) -> Router<()> {
     Router::new()
@@ -51,5 +55,15 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         // 视频文件管理路由
         .route("/v1/videos", get(get_videos)) // 获取视频列表
         .route("/v1/status", get(get_status))
+        .route("/v1/uploads", post(post_uploads))
+        .route_service("/static/{path}", get(using_serve_file_from_a_route))
         .with_state(service_register) // 注入服务注册器状态
+}
+
+async fn using_serve_file_from_a_route(
+    axum::extract::Path(path): axum::extract::Path<String>,
+    request: Request<Body>,
+) -> impl IntoResponse {
+    let serve_file = ServeFile::new(path);
+    serve_file.oneshot(request).await
 }

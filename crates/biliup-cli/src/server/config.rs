@@ -1,6 +1,7 @@
 use crate::server::core::downloader::DownloaderType;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::models::hook_step::HookStep;
+use biliup::bilibili::Credit;
 use error_stack::bail;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::Path, path::PathBuf};
@@ -294,15 +295,6 @@ pub struct StreamerConfig {
     // “override” 是字段名，这里改为 override_cfg 避免与保留字混淆
     #[serde(rename = "override", default)]
     pub override_cfg: Option<HashMap<String, serde_json::Value>>,
-}
-
-/// 制作人员信息
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Credit {
-    /// 用户名
-    pub username: String,
-    /// 用户ID
-    pub uid: String,
 }
 
 /// 用户配置结构体

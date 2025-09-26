@@ -144,13 +144,13 @@ pub struct SegmentEventProcessor {
     tx: Sender<SegmentInfo>,
     rx: Receiver<SegmentInfo>,
     uploader: Sender<UploaderMessage>,
-    worker: Arc<Worker>,
+    ctx: Context,
     file_validator: FileValidator,
 }
 
 impl SegmentEventProcessor {
     /// 创建处理器
-    pub fn new(uploader: Sender<UploaderMessage>, worker: Arc<Worker>) -> Self {
+    pub fn new(uploader: Sender<UploaderMessage>, ctx: Context) -> Self {
         let (tx, rx) = async_channel::bounded(32); // Use tokio channel for async
 
         Self {
@@ -158,10 +158,17 @@ impl SegmentEventProcessor {
             rx,
             uploader,
             file_validator: FileValidator::new(
-                worker.clone().config.read().unwrap().filtering_threshold * 1000 * 1000,
+                ctx.worker
+                    .clone()
+                    .config
+                    .read()
+                    .unwrap()
+                    .filtering_threshold
+                    * 1000
+                    * 1000,
                 true,
             ),
-            worker,
+            ctx,
         }
     }
 
@@ -175,7 +182,7 @@ impl SegmentEventProcessor {
                 .uploader
                 .force_send(UploaderMessage::SegmentEvent(
                     self.rx.clone(),
-                    self.worker.clone(),
+                    self.ctx.clone(),
                 ))
                 .change_context(AppError::Custom("Failed to send to uploader".to_string()))?;
             if let Some(prev) = res {
@@ -239,7 +246,6 @@ impl SegmentEventProcessor {
 /// 下载任务
 pub struct DownloadTask {
     plugin: Arc<dyn DownloadPlugin + Send + Sync>,
-    stream_info: StreamInfo,
     ctx: Context,
     rooms_handle: Arc<RoomsHandle>,
 }
@@ -252,13 +258,11 @@ struct DownloadComponents {
 impl DownloadTask {
     pub fn new(
         plugin: Arc<dyn DownloadPlugin + Send + Sync>,
-        stream_info: StreamInfo,
         ctx: Context,
         rooms_handle: Arc<RoomsHandle>,
     ) -> Self {
         Self {
             plugin,
-            stream_info,
             ctx,
             rooms_handle,
         }
@@ -277,7 +281,7 @@ impl DownloadTask {
         );
 
         // 创建事件处理器
-        let processor = SegmentEventProcessor::new(uploader.clone(), self.ctx.worker.clone());
+        let processor = SegmentEventProcessor::new(uploader.clone(), self.ctx.clone());
 
         // 启动弹幕客户端
         if let Some(ref client) = components.danmaku_client {
@@ -307,15 +311,16 @@ impl DownloadTask {
         // 获取配置和主播信息
         let config = self.ctx.worker.get_config();
         let streamer = self.ctx.worker.get_streamer();
+        let stream_info = &self.ctx.stream_info;
         // 确定文件格式后缀
         let suffix = streamer
             .format
-            .unwrap_or_else(|| self.stream_info.suffix.clone());
+            .unwrap_or_else(|| stream_info.suffix.clone());
         // 创建录制器
         let recorder = Recorder::new(
             streamer.filename_prefix,
             &streamer.remark,
-            &self.stream_info.title,
+            &stream_info.title,
             &suffix,
         );
         // 可选的弹幕客户端
@@ -329,7 +334,7 @@ impl DownloadTask {
         // 创建下载器实例
         let downloader = self
             .plugin
-            .create_downloader(&self.stream_info, config, recorder)
+            .create_downloader(stream_info, config, recorder)
             .await;
 
         Ok(DownloadComponents {
@@ -342,7 +347,7 @@ impl DownloadTask {
         // 启动弹幕下载逻辑
         println!(
             "Starting danmaku client for stream: {}",
-            self.stream_info.url
+            self.ctx.stream_info.url
         );
         client.download(Box::new(|_| {})).await?;
         Ok(())

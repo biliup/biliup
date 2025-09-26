@@ -102,7 +102,8 @@ pub struct LiveStreamer {
     pub format: Option<String>,
     /// 覆盖配置（"override"为关键字，字段名避让）
     #[ormlite(column = "override")]
-    pub override_: Option<Value>,
+    #[serde(rename = "override")]
+    pub override_cfg: Option<Value>,
 
     /// 预处理器列表（JSON格式）
     /// 注意：数据库空与json空有区别，所以这里不能用#[ormlite(json)]
@@ -162,7 +163,9 @@ pub struct InsertLiveStreamer {
     pub upload_streamers_id: Option<i64>, // FK，可空
     pub format: Option<String>,
     #[ormlite(column = "override")]
-    pub override_: Option<Value>, // "override" 为关键字，字段名避让
+    // “override” 是字段名，这里改为 override_cfg 避免与保留字混淆
+    #[serde(rename = "override")]
+    pub override_cfg: Option<Value>, // "override" 为关键字，字段名避让
 
     // #[ormlite(json)] 数据库空与json空有区别所以这里不能用
     // pub preprocessor: Option<Vec<String>>,

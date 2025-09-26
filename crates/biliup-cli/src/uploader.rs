@@ -1,4 +1,3 @@
-use crate::cli::UploadLine;
 use biliup::client::StatelessClient;
 use biliup::error::Kind;
 use biliup::uploader::bilibili::{BiliBili, Studio, Vid, Video};
@@ -6,6 +5,7 @@ use biliup::uploader::credential::{Credential, LoginInfo};
 use biliup::uploader::line::Probe;
 use biliup::uploader::util::SubmitOption;
 use biliup::uploader::{VideoFile, credential, line, load_config};
+use biliup_cli::UploadLine;
 use biliup_cli::server::errors::{AppError, AppResult};
 use bytes::{Buf, Bytes};
 use clap::ValueEnum;

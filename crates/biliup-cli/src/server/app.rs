@@ -2,8 +2,8 @@ use axum::http;
 
 use crate::server;
 use crate::server::api::auth;
-use crate::server::api::endpoints::ws_logs;
 use crate::server::api::spa::static_handler;
+use crate::server::api::ws::ws_logs;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::service_register::ServiceRegister;
 use crate::server::infrastructure::users::Backend;
@@ -48,8 +48,8 @@ impl ApplicationController {
         // 配置会话管理层
         let session_layer = SessionManagerLayer::new(session_store)
             .with_secure(false)
-            .with_expiry(Expiry::OnInactivity(Duration::days(1)))
-            .with_signed(key);
+            .with_expiry(Expiry::OnInactivity(Duration::days(7)));
+        // .with_signed(key);
 
         // 认证服务配置
         // 将会话层与后端结合，建立认证服务，将认证会话作为请求扩展提供

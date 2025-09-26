@@ -6,3 +6,4 @@ pub mod bilibili_endpoints;
 pub mod endpoints;
 /// 单页应用静态文件处理
 pub mod spa;
+pub mod ws;

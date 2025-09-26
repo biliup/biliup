@@ -1,4 +1,4 @@
-use chrono::{Duration, Local};
+use chrono::{DateTime, Duration, Local};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use url::Url;
@@ -56,6 +56,13 @@ impl Recorder {
             }
             t += Duration::seconds(1);
         }
+    }
+
+    /// 生成“基名”（不带扩展名）
+    pub fn format_filename(&self, date_time: DateTime<Local>) -> String {
+        let template = self.filename_template();
+
+        date_time.format(&template).to_string()
     }
 
     /// 直接生成带扩展名的完整路径（当前目录下）

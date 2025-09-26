@@ -29,7 +29,7 @@ async fn start_client(
             let ulr = room.get_streamer().url;
             interval = room.get_config().event_loop_interval;
             info!("[{platform_name}] room: {ulr}");
-            let mut ctx = Context::new(room.clone());
+            let mut ctx = Context::new(room.clone(), Default::default());
             // 检查直播状态
             match plugin.check_status(&mut ctx).await.unwrap() {
                 StreamStatus::Live { stream_info } => {
@@ -41,8 +41,7 @@ async fn start_client(
                         .down_sender
                         .send(DownloaderMessage::Start(
                             plugin.clone(),
-                            stream_info,
-                            ctx,
+                            Context::new(room.clone(), stream_info),
                             rooms_handle.clone(),
                         ))
                         .await
