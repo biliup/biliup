@@ -3,13 +3,13 @@ use crate::server::common::upload::{build_studio, submit_to_bilibili, upload};
 use crate::server::common::util::Recorder;
 use crate::server::config::Config;
 use crate::server::core::download_manager::ActorHandle;
-use crate::server::errors::{AppError, report_to_response};
+use crate::server::errors::{report_to_response, AppError};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::Worker;
 use crate::server::infrastructure::dto::LiveStreamerResponse;
 use crate::server::infrastructure::models::{
-    Configuration, FileItem, InsertConfiguration, InsertLiveStreamer, InsertUploadStreamer,
-    LiveStreamer, StreamerInfo, UploadStreamer,
+    Configuration, FileItem, InsertConfiguration,
+    StreamerInfo,
 };
 use crate::server::infrastructure::repositories::{
     del_streamer, get_all_streamer, get_upload_config,
@@ -19,7 +19,7 @@ use axum::extract::ws::{Message, Utf8Bytes, WebSocket};
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::{Json, debug_handler};
+use axum::{debug_handler, Json};
 use biliup::credential::Credential;
 use clap::ValueEnum;
 use error_stack::{Report, ResultExt};
@@ -34,8 +34,10 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, UNIX_EPOCH};
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
-use tokio::time::{MissedTickBehavior, interval};
+use tokio::time::{interval, MissedTickBehavior};
 use tracing::{debug, error, info};
+use crate::server::infrastructure::models::live_streamer::{InsertLiveStreamer, LiveStreamer};
+use crate::server::infrastructure::models::upload_streamer::{InsertUploadStreamer, UploadStreamer};
 
 pub async fn get_streamers_endpoint(
     State(pool): State<ConnectionPool>,
@@ -489,7 +491,7 @@ pub struct PostUploads {
     params: UploadStreamer,
 }
 
-#[debug_handler]
+// #[debug_handler]
 pub async fn post_uploads(
     State(config): State<Arc<RwLock<Config>>>,
     Json(json_data): Json<PostUploads>,

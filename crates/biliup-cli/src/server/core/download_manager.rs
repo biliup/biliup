@@ -3,7 +3,7 @@ use crate::server::common::upload::{execute_postprocessor, process_with_upload};
 use crate::server::common::util::Recorder;
 use crate::server::core::downloader::{Downloader, SegmentEvent, SegmentInfo};
 use crate::server::core::monitor::{Monitor, RoomsHandle};
-use crate::server::core::plugin::{DownloadPlugin, StreamInfo};
+use crate::server::core::plugin::{DownloadPlugin, StreamInfoExt};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
 use crate::server::infrastructure::models::hook_step::process_video;
@@ -23,6 +23,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
+use crate::server::infrastructure::connection_pool::ConnectionPool;
 
 /// 下载管理器
 /// 负责管理特定平台的下载任务，包括监控器和插件
@@ -56,12 +57,12 @@ impl DownloadManager {
     ///
     /// # 返回
     /// 返回监控器的Arc引用
-    pub fn ensure_monitor(&self) -> Arc<Monitor> {
+    pub fn ensure_monitor(&self, pool: ConnectionPool) -> Arc<Monitor> {
         self.monitor
             .lock()
             .unwrap()
             .get_or_insert_with(|| {
-                Arc::new(Monitor::new(self.plugin.clone(), self.actor_handle.clone()))
+                Arc::new(Monitor::new(self.plugin.clone(), self.actor_handle.clone(), pool))
             })
             .clone()
     }
@@ -163,7 +164,7 @@ impl UActor {
                             paths.push(event.prev_file_path);
                         }
                         // 无上传配置时，直接执行后处理
-                        execute_postprocessor(paths, &ctx.worker).await
+                        execute_postprocessor(paths, &ctx).await
                     }
                 };
 

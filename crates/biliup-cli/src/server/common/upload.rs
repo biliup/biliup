@@ -4,7 +4,7 @@ use crate::server::core::download_manager::UActor;
 use crate::server::core::downloader::{SegmentEvent, SegmentInfo};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Worker};
-use crate::server::infrastructure::models::UploadStreamer;
+use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
 use crate::server::infrastructure::models::hook_step::process_video;
 use async_channel::Receiver;
 use biliup::bilibili::{BiliBili, Credit, ResponseData, Studio, Video};
@@ -20,7 +20,9 @@ use futures::StreamExt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Instant;
+use ormlite::Insert;
 use tracing::{error, info};
+use crate::server::infrastructure::models::InsertFileItem;
 
 // 辅助结构体
 struct UploadContext {
@@ -54,7 +56,7 @@ pub async fn process_with_upload(
         let recorder = Recorder::new(
             upload_context.upload_config.title.clone(),
             &ctx.worker.live_streamer.remark,
-            &ctx.stream_info.title,
+            &ctx.stream_info.streamer_info.title,
             "",
         );
         let studio = build_studio(
@@ -70,7 +72,7 @@ pub async fn process_with_upload(
 
     // 4. 执行后处理
     if !uploaded_videos.paths.is_empty() {
-        execute_postprocessor(uploaded_videos.paths, &ctx.worker).await?;
+        execute_postprocessor(uploaded_videos.paths, &ctx).await?;
     }
 
     Ok(())
@@ -263,9 +265,21 @@ pub(crate) async fn build_studio(
     Ok(studio)
 }
 
-pub async fn execute_postprocessor(video_paths: Vec<PathBuf>, worker: &Worker) -> AppResult<()> {
-    if let Some(processor) = worker.get_streamer().postprocessor {
-        let paths: Vec<&Path> = video_paths.iter().map(|p| p.as_path()).collect();
+pub async fn execute_postprocessor(video_paths: Vec<PathBuf>, ctx: &Context) -> AppResult<()> {
+    if let Some(processor) = ctx.worker.get_streamer().postprocessor {
+        let paths: Vec<&Path> = video_paths.iter().map(|p| {
+            let pool = ctx.pool.clone();
+            let file = p.display().to_string();
+            tokio::spawn(async move {
+                let result = InsertFileItem {
+                    file,
+                    streamer_info_id: 0,
+                }.insert(&pool).await; 
+                info!(result=?result);
+            });
+            
+            p.as_path() 
+        }).collect();
         process_video(&paths, &processor).await?;
     }
     Ok(())

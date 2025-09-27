@@ -8,14 +8,14 @@ use biliup_cli::server::core::download_manager::{ActorHandle, DownloadManager};
 use biliup_cli::server::core::downloader::ffmpeg_downloader::FfmpegDownloader;
 use biliup_cli::server::core::downloader::stream_gears::StreamGears;
 use biliup_cli::server::core::downloader::{DownloadConfig, Downloader, DownloaderType};
-use biliup_cli::server::core::plugin::{DownloadPlugin, StreamInfo, StreamStatus};
+use biliup_cli::server::core::plugin::{DownloadPlugin, StreamInfoExt, StreamStatus};
 use biliup_cli::server::errors::{AppError, AppResult};
 use biliup_cli::server::infrastructure::connection_pool::ConnectionManager;
 use biliup_cli::server::infrastructure::context::{Context, Worker};
 use biliup_cli::server::infrastructure::repositories;
 use biliup_cli::server::infrastructure::repositories::get_upload_config;
 use biliup_cli::server::infrastructure::service_register::ServiceRegister;
-use chrono::Local;
+use chrono::{DateTime, Local, NaiveDateTime, Utc};
 use error_stack::{Report, ResultExt};
 use fancy_regex::Regex;
 use pyo3::exceptions::PyRuntimeError;
@@ -33,6 +33,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, RwLock};
 use time::OffsetDateTime;
 use tracing::{debug, info};
+use biliup_cli::server::infrastructure::models::StreamerInfo;
 
 #[derive(Debug)]
 pub struct PyPlugin {
@@ -90,7 +91,7 @@ impl DownloadPlugin for PyPlugin {
 
     async fn create_downloader(
         &self,
-        stream_info: &StreamInfo,
+        stream_info: &StreamInfoExt,
         // worker: &Worker,
         config: Config,
         recorder: Recorder,
@@ -142,10 +143,10 @@ impl DownloadPlugin for PyPlugin {
 async fn call_via_threads(
     obj: Arc<Py<PyType>>,
     url: &str,
-) -> PyResult<Option<(StreamInfo, Option<Py<PyAny>>)>> {
+) -> PyResult<Option<(StreamInfoExt, Option<Py<PyAny>>)>> {
     let url = url.to_string();
     tokio::task::spawn_blocking(move || {
-        Python::attach(|py| -> PyResult<Option<(StreamInfo, Option<Py<PyAny>>)>> {
+        Python::attach(|py| -> PyResult<Option<(StreamInfoExt, Option<Py<PyAny>>)>> {
             // 从 biliup.util 获取 loop（按你项目里真实的名字来取）
             let util = PyModule::import(py, "biliup.common.util")?;
             // 下面两行二选一（取决于 biliup.util 的 API）：
@@ -216,7 +217,7 @@ pub fn from_py(actor_handle: Arc<ActorHandle>) -> PyResult<Vec<DownloadManager>>
 /// end_time 的语义与 Python 中一致：若未提供或为“假值”，则使用 time.localtime()
 pub fn stream_info_from_py(
     self_obj: &Bound<'_, PyAny>,
-) -> PyResult<(StreamInfo, Option<Py<PyAny>>)> {
+) -> PyResult<(StreamInfoExt, Option<Py<PyAny>>)> {
     // 从 self 上获取属性并抽取为 Rust 类型
     let name: String = self_obj.getattr("fname")?.extract()?;
     let url: String = self_obj.getattr("url")?.extract()?;
@@ -239,7 +240,7 @@ pub fn stream_info_from_py(
 
     // date 直接使用传入的 start_time（保留为 Python 对象）
     // let date = OffsetDateTime::now_utc();
-    let date = Local::now();
+
     // end_time: 若传入 None 或“假值”，则使用 time.localtime()
     // let end_time_obj: PyObject = match end_time {
     //     Some(et) if et.is_true()? => et.to_object(py),
@@ -249,16 +250,19 @@ pub fn stream_info_from_py(
     //         lt.to_object(py)
     //     }
     // };self.update_headers(self.stream_headers)
-
+    
     Ok((
-        StreamInfo {
-            name,
-            url,
+        StreamInfoExt {
+            streamer_info: StreamerInfo {
+                id: 0,
+                name,
+                url,
+                title,
+                date: Utc::now(),
+                live_cover_path: live_cover_path.unwrap_or_default(),
+            },
             suffix: media_ext_from_url(&raw_stream_url).unwrap(),
             raw_stream_url,
-            title,
-            date,
-            live_cover_path,
             platform,
             stream_headers,
         },

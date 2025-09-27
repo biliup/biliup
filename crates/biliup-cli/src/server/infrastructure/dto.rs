@@ -1,5 +1,5 @@
 use crate::server::infrastructure::context::WorkerStatus;
-use crate::server::infrastructure::models::LiveStreamer;
+use crate::server::infrastructure::models::live_streamer::LiveStreamer;
 use serde::{Deserialize, Serialize};
 
 /// 直播主播响应数据传输对象

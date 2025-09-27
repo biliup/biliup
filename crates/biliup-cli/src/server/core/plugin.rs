@@ -11,24 +11,15 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use time::OffsetDateTime;
+use crate::server::infrastructure::models::StreamerInfo;
 
 /// 流信息结构
 /// 包含直播流的详细信息
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct StreamInfo {
-    /// 主播名称
-    pub name: String,
-    /// 直播间URL
-    pub url: String,
+pub struct StreamInfoExt {
+    pub streamer_info: StreamerInfo,
     /// 原始流URL
     pub raw_stream_url: String,
-    /// 直播标题
-    pub title: String,
-    /// 直播开始时间
-    // #[serde(with = "time::serde::rfc3339")]
-    pub date: DateTime<Local>,
-    /// 直播封面路径（可选）
-    pub live_cover_path: Option<String>,
     /// 平台名称
     pub platform: String,
     /// 流请求头
@@ -42,7 +33,7 @@ pub struct StreamInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StreamStatus {
     /// 正在直播，包含流信息
-    Live { stream_info: StreamInfo },
+    Live { stream_info: StreamInfoExt },
     /// 离线状态
     Offline,
     /// 未知状态
@@ -56,7 +47,7 @@ pub trait DownloadBase: Send + Sync {
     /// 检查流是否可用
     async fn check_stream(&self) -> Result<bool, Report<AppError>>;
     /// 获取流信息
-    async fn get_stream_info(&self) -> Result<StreamInfo, Report<AppError>>;
+    async fn get_stream_info(&self) -> Result<StreamInfoExt, Report<AppError>>;
     /// 下载到指定路径
     async fn download(&self, output_path: impl AsRef<Path>) -> Result<(), Report<AppError>>;
     /// 判断是否应该录制
@@ -76,7 +67,7 @@ pub trait DownloadPlugin {
     /// 创建下载器实例
     async fn create_downloader(
         &self,
-        stream_info: &StreamInfo,
+        stream_info: &StreamInfoExt,
         config: Config,
         recorder: Recorder,
     ) -> Arc<dyn Downloader>;

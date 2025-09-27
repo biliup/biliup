@@ -1,9 +1,9 @@
 use crate::server::config::Config;
 use crate::server::core::downloader::Downloader;
-use crate::server::core::plugin::StreamInfo;
+use crate::server::core::plugin::StreamInfoExt;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::models::{LiveStreamer, UploadStreamer};
+use crate::server::infrastructure::models::live_streamer::LiveStreamer;
 use crate::server::infrastructure::repositories::{get_config, get_streamer};
 use axum::http::Extensions;
 use biliup::client::StatelessClient;
@@ -13,15 +13,17 @@ use ormlite::Model;
 use serde::{Deserialize, Serialize, Serializer};
 use std::sync::{Arc, RwLock};
 use tracing::info;
+use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
 
 /// 应用程序上下文，包含工作器和扩展信息
 #[derive(Debug, Clone)]
 pub struct Context {
     /// 工作器实例
     pub worker: Arc<Worker>,
-    pub stream_info: StreamInfo,
+    pub stream_info: StreamInfoExt,
     /// 扩展数据容器
     pub extension: Extensions,
+    pub pool: ConnectionPool,
 }
 
 impl Context {
@@ -29,11 +31,12 @@ impl Context {
     ///
     /// # 参数
     /// * `worker` - 工作器实例的Arc引用
-    pub fn new(worker: Arc<Worker>, stream_info: StreamInfo) -> Self {
+    pub fn new(worker: Arc<Worker>, stream_info: StreamInfoExt, pool: ConnectionPool) -> Self {
         Self {
             worker,
             stream_info,
             extension: Default::default(),
+            pool,
         }
     }
 }

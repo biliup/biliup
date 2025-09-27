@@ -4,9 +4,13 @@ use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatu
 use async_channel::{Receiver, Sender, bounded};
 use std::sync::Arc;
 use std::time::Duration;
+use ormlite::Model;
+use ormlite::model::ModelBuilder;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tracing::info;
+use tracing::{error, info};
+use crate::server::infrastructure::connection_pool::ConnectionPool;
+use crate::server::infrastructure::models::StreamerInfo;
 
 /// 启动客户端监控循环
 ///
@@ -19,6 +23,7 @@ async fn start_client(
     rooms_handle: Arc<RoomsHandle>,
     plugin: Arc<dyn DownloadPlugin + Send + Sync>,
     actor_handle: Arc<ActorHandle>,
+    pool: ConnectionPool,
     mut interval: u64,
 ) {
     let platform_name = &rooms_handle.name;
@@ -29,19 +34,34 @@ async fn start_client(
             let ulr = room.get_streamer().url;
             interval = room.get_config().event_loop_interval;
             info!("[{platform_name}] room: {ulr}");
-            let mut ctx = Context::new(room.clone(), Default::default());
+            let mut ctx = Context::new(room.clone(), Default::default(), pool.clone());
             // 检查直播状态
             match plugin.check_status(&mut ctx).await.unwrap() {
-                StreamStatus::Live { stream_info } => {
+                StreamStatus::Live { mut stream_info } => {
+                    let sql_no_id = &stream_info.streamer_info;
+                    let insert = match StreamerInfo::builder()
+                        .url(sql_no_id.url.clone())
+                        .name(room.live_streamer.remark.clone())
+                        .title(sql_no_id.title.clone())
+                        .date(sql_no_id.date.clone())
+                        .live_cover_path(sql_no_id.live_cover_path.clone())
+                        .insert(&ctx.pool).await {
+                        Ok(insert) => {insert}
+                        Err(e) => {
+                            error!(e=?e, "插入数据库失败");
+                            continue
+                        }
+                    };
                     info!("room: {ulr} is live -> {:?}", stream_info);
                     // 更新状态为等待中
                     room.change_status(Stage::Download, WorkerStatus::Pending);
+                    stream_info.streamer_info = insert;
                     // 发送下载开始消息
                     if actor_handle
                         .down_sender
                         .send(DownloaderMessage::Start(
                             plugin.clone(),
-                            Context::new(room.clone(), stream_info),
+                            Context::new(room.clone(), stream_info, pool.clone()),
                             rooms_handle.clone(),
                         ))
                         .await
@@ -79,6 +99,7 @@ impl Monitor {
     pub fn new(
         plugin: Arc<dyn DownloadPlugin + Send + Sync>,
         actor_handle: Arc<ActorHandle>,
+        pool: ConnectionPool
     ) -> Self {
         // 创建房间处理器
         let handle = Arc::new(RoomsHandle::new(plugin.name()));
@@ -86,7 +107,7 @@ impl Monitor {
         let join_handle = tokio::spawn({
             let handle = Arc::clone(&handle);
             async move {
-                start_client(handle, plugin, actor_handle, 10).await;
+                start_client(handle, plugin, actor_handle, pool,10).await;
             }
         });
         Self {

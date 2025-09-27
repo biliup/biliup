@@ -2,7 +2,7 @@ use crate::server::common::util::Recorder;
 use crate::server::core::download_manager::{DownloaderMessage, UploaderMessage};
 use crate::server::core::downloader::{DownloadStatus, Downloader, SegmentEvent, SegmentInfo};
 use crate::server::core::monitor::RoomsHandle;
-use crate::server::core::plugin::{DownloadPlugin, StreamInfo};
+use crate::server::core::plugin::{DownloadPlugin, StreamInfoExt};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
 use async_channel::{Receiver, Sender};
@@ -320,7 +320,7 @@ impl DownloadTask {
         let recorder = Recorder::new(
             streamer.filename_prefix,
             &streamer.remark,
-            &stream_info.title,
+            &stream_info.streamer_info.title,
             &suffix,
         );
         // 可选的弹幕客户端
@@ -347,7 +347,7 @@ impl DownloadTask {
         // 启动弹幕下载逻辑
         println!(
             "Starting danmaku client for stream: {}",
-            self.ctx.stream_info.url
+            self.ctx.stream_info.streamer_info.url
         );
         client.download(Box::new(|_| {})).await?;
         Ok(())

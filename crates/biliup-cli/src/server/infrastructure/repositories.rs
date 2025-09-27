@@ -2,10 +2,12 @@ use crate::server::config::Config;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::models::{
-    Configuration, InsertConfiguration, LiveStreamer, UploadStreamer,
+    Configuration, InsertConfiguration,
 };
 use error_stack::ResultExt;
 use ormlite::{Insert, Model};
+use crate::server::infrastructure::models::live_streamer::LiveStreamer;
+use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
 
 /// 根据ID获取直播主播信息
 ///
