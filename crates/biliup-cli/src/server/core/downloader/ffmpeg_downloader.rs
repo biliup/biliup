@@ -400,10 +400,10 @@ impl Downloader for FfmpegDownloader {
         }
     }
 
-    async fn stop(&self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn stop(&self) -> AppResult<()> {
         let mut handle = self.process_handle.write().await;
         if let Some(child) = &mut *handle {
-            child.kill().await?;
+            child.kill().await.change_context(AppError::Unknown)?;
             Ok(())
         } else {
             Err(AppError::Custom("Process handle not found".to_string()).into())

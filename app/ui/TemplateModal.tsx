@@ -155,6 +155,12 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
             rules={[{ required: true, message }]}
           />
 
+          <Form.Input
+              field="filename_prefix"
+              label="文件名模板（可选）"
+              placeholder="{streamer}%Y-%m-%dT%H_%M_%S"
+          />
+
           <Form.Select
             showClear
             field="upload_streamers_id"

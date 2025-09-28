@@ -72,7 +72,6 @@ impl DownloadPlugin for PyPlugin {
     }
 
     async fn check_status(&self, ctx: &mut Context) -> Result<StreamStatus, Report<AppError>> {
-        info!("Checking status");
         match call_via_threads(self.plugin.clone(), &ctx.worker.live_streamer.url)
             .await
             .change_context(AppError::Unknown)?
@@ -250,7 +249,7 @@ pub fn stream_info_from_py(
     //         lt.to_object(py)
     //     }
     // };self.update_headers(self.stream_headers)
-    
+
     Ok((
         StreamInfoExt {
             streamer_info: StreamerInfo {

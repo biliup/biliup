@@ -57,10 +57,6 @@ impl DownloadGuard {
 
 impl Drop for DownloadGuard {
     fn drop(&mut self) {
-        // 确保状态更新和资源清理
-        self.worker
-            .change_status(Stage::Download, WorkerStatus::Idle);
-
         // 异步清理任务
         let danmaku = self.danmaku_client.clone();
         let rooms_handle = self.rooms_handle.clone();
@@ -72,7 +68,13 @@ impl Drop for DownloadGuard {
                     error!("Error stopping danmaku client: {}", e);
                 }
             }
-            rooms_handle.toggle(worker).await
+            if let WorkerStatus::Pause = *worker.downloader_status.read().unwrap() {
+            } else {
+                // 确保状态更新和资源清理
+                worker
+                    .change_status(Stage::Download, WorkerStatus::Idle);
+                rooms_handle.toggle(worker).await;
+            };
         });
     }
 }
@@ -318,7 +320,7 @@ impl DownloadTask {
             .unwrap_or_else(|| stream_info.suffix.clone());
         // 创建录制器
         let recorder = Recorder::new(
-            streamer.filename_prefix,
+            streamer.filename_prefix.or(config.filename_prefix.clone()),
             &streamer.remark,
             &stream_info.streamer_info.title,
             &suffix,

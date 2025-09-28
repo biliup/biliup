@@ -15,7 +15,7 @@ use rsa::{Pkcs1v15Encrypt, RsaPublicKey, pkcs8::DecodePublicKey};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tracing::info;
+use tracing::{debug, info};
 use url::Url;
 
 // const APP_KEY: &str = "ae57252b0c09105d";
@@ -63,7 +63,7 @@ pub fn bilibili_from_cookies(file: impl AsRef<Path>, proxy: Option<&str>) -> Res
 pub fn bilibili_from_info(login_info: LoginInfo, proxy: Option<&str>) -> Result<BiliBili> {
     let client = Credential::new(proxy);
     client.set_cookie(&login_info.cookie_info);
-    info!("通过cookie登录");
+    debug!("通过cookie登录");
     Ok(BiliBili {
         client: client.0.client,
         login_info,
@@ -85,7 +85,7 @@ pub async fn login_by_cookies(file: impl AsRef<Path>, proxy: Option<&str>) -> Re
         serde_json::to_writer_pretty(std::io::BufWriter::new(&file), &new_info)?;
         bilibili_from_info(new_info, proxy)
     } else {
-        info!("无需更新cookie");
+        debug!("无需更新cookie");
         bilibili_from_info(login_info, proxy)
     }
 }
@@ -174,7 +174,7 @@ impl Credential {
             _ => return Err(Kind::Custom(response.to_string())),
         };
 
-        info!("验证cookie");
+        debug!("验证cookie");
         Ok(refresh)
     }
 

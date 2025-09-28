@@ -1,21 +1,21 @@
 'use client'
 import {
-  Layout,
-  Nav,
-  Button,
-  Tag,
-  Typography,
-  Popconfirm,
-  Notification,
-  Card,
+    Layout,
+    Nav,
+    Button,
+    Tag,
+    Typography,
+    Popconfirm,
+    Notification,
+    Card, Dropdown,
 } from '@douyinfe/semi-ui'
 import {
-  IconHelpCircle,
-  IconPlusCircle,
-  IconVideoListStroked,
-  IconEdit2Stroked,
-  IconDeleteStroked,
-  IconWrench,
+    IconHelpCircle,
+    IconPlusCircle,
+    IconVideoListStroked,
+    IconEdit2Stroked,
+    IconDeleteStroked,
+    IconWrench, IconTreeTriangleDown, IconPause, IconPlay,
 } from '@douyinfe/semi-icons'
 import { List, ButtonGroup } from '@douyinfe/semi-ui'
 import React, { useState } from 'react'
@@ -24,6 +24,7 @@ import TemplateModal from '../../ui/TemplateModal'
 import OverrideModal from '../../ui/OverrideModal'
 import { LiveStreamerEntity, put, requestDelete, sendRequest } from '../../lib/api-streamer'
 import useSWRMutation from 'swr/mutation'
+import {PauseButton} from "@/app/ui/StreamerActions/PauseButton";
 
 export default function Home() {
   const { Header, Content } = Layout
@@ -54,25 +55,28 @@ export default function Home() {
     return values
   }
   const data: LiveStreamerEntity[] | undefined = streamers?.map(live => {
-    let status
+    let statusTag
     switch (live.status) {
       case 'Working':
-        status = <Tag color="red">直播中</Tag>
+        statusTag = <Tag color="red">直播中</Tag>
         break
       case 'Idle':
-        status = <Tag color="green">空闲</Tag>
+        statusTag = <Tag color="green">空闲</Tag>
         break
       case 'Pending':
-        status = <Tag color="grey">未知</Tag>
+        statusTag = <Tag color="grey">等待下载</Tag>
         break
       case 'Inspecting':
-        status = <Tag color="indigo">检测/上传中</Tag>
+        statusTag = <Tag color="indigo">检测/上传中</Tag>
         break
       case 'OutOfSchedule':
-        status = <Tag color="green">非录播时间</Tag>
+        statusTag = <Tag color="green">非录播时间</Tag>
+        break
+      case 'Pause':
+        statusTag = <Tag color="pink">暂停中</Tag>
         break
     }
-    return { ...handleEntityPostprocessor(live), status }
+    return { ...handleEntityPostprocessor(live), statusTag }
   })
 
   const handleOk = async (values: any) => {
@@ -96,6 +100,7 @@ export default function Home() {
   const handleUpdate = async (values: any) => {
     console.log(values);
     delete values.status
+    delete values.statusTag
     if (values?.postprocessor) {
       values.postprocessor = values.postprocessor.map(
         ({ cmd, value }: { cmd: string; value: string }) => (cmd === 'rm' ? 'rm' : { [cmd]: value })
@@ -112,6 +117,7 @@ export default function Home() {
       throw e
     }
   }
+
   return (
     <>
       <Header
@@ -214,7 +220,7 @@ export default function Home() {
                     }
                   }
                 >
-                  <div style={{ position: 'absolute', right: 20, top: 9 }}>{item.status}</div>
+                  <div style={{ position: 'absolute', right: 20, top: 9 }}>{item.statusTag}</div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <h3
                       style={{
@@ -248,9 +254,7 @@ export default function Home() {
                         <Button theme="borderless" icon={<IconEdit2Stroked />}></Button>
                       </TemplateModal>
                       <span className="semi-button-group-line semi-button-group-line-borderless semi-button-group-line-primary"></span>
-                      <OverrideModal onOk={handleUpdate} entity={item}>
-                        <Button theme="borderless" icon={<IconWrench />}></Button>
-                      </OverrideModal>
+                      <PauseButton streamer={item}/>
                       <span className="semi-button-group-line semi-button-group-line-borderless semi-button-group-line-primary"></span>
                       <Popconfirm
                         title="确定是否要删除？"
@@ -260,6 +264,18 @@ export default function Home() {
                       >
                         <Button theme="borderless" icon={<IconDeleteStroked />}></Button>
                       </Popconfirm>
+                        <span className="semi-button-group-line semi-button-group-line-borderless semi-button-group-line-primary"></span>
+                        <Dropdown render={
+                            <Dropdown.Menu>
+                                <Dropdown.Item>
+                                    <OverrideModal onOk={handleUpdate} entity={item}>
+                                        <Button theme="borderless" icon={<IconWrench />}></Button>
+                                    </OverrideModal>
+                                </Dropdown.Item>
+                            </Dropdown.Menu>
+                        } trigger="click" position="bottomRight">
+                            <Button theme="borderless" type="primary" icon={<IconTreeTriangleDown />}></Button>
+                        </Dropdown>
                     </ButtonGroup>
                   </div>
                 </Card>

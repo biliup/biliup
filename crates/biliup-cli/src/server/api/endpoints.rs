@@ -5,7 +5,7 @@ use crate::server::config::Config;
 use crate::server::core::download_manager::ActorHandle;
 use crate::server::errors::{report_to_response, AppError};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::context::Worker;
+use crate::server::infrastructure::context::{Worker, WorkerStatus};
 use crate::server::infrastructure::dto::LiveStreamerResponse;
 use crate::server::infrastructure::models::{
     Configuration, FileItem, InsertConfiguration,
@@ -22,7 +22,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{debug_handler, Json};
 use biliup::credential::Credential;
 use clap::ValueEnum;
-use error_stack::{Report, ResultExt};
+use error_stack::{bail, Report, ResultExt};
 use ormlite::{Insert, Model};
 use serde::Deserialize;
 use serde_json::json;
@@ -36,6 +36,7 @@ use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
 use tokio::time::{interval, MissedTickBehavior};
 use tracing::{debug, error, info};
+use crate::server::core::downloader::Downloader;
 use crate::server::infrastructure::models::live_streamer::{InsertLiveStreamer, LiveStreamer};
 use crate::server::infrastructure::models::upload_streamer::{InsertUploadStreamer, UploadStreamer};
 
@@ -94,7 +95,7 @@ pub async fn post_streamers_endpoint(
         .await
         .map_err(report_to_response)?;
 
-    info!(workers=?service_register.workers, "successfully inserted new live streamers");
+    info!(workers=?live_streamers, "successfully inserted new live streamers");
     Ok(Json(live_streamers))
 }
 
@@ -141,8 +142,58 @@ pub async fn delete_streamers_endpoint(
         .await
         .map_err(report_to_response)?;
     let live_streamers = del_streamer(&pool, id).await.map_err(report_to_response)?;
-    info!(workers=?service_register.workers, "successfully inserted new live streamers");
+    info!(workers=?live_streamers, "successfully inserted new live streamers");
     Ok(Json(live_streamers))
+}
+
+#[axum::debug_handler(state = ServiceRegister)]
+pub async fn pause_streamers_endpoint(
+    State(service_register): State<ServiceRegister>,
+    State(pool): State<ConnectionPool>,
+    State(workers): State<Arc<RwLock<Vec<Arc<Worker>>>>>,
+    Path(id): Path<i64>,
+) -> Result<Json<()>, Response> {
+    let option = workers
+        .read()
+        .unwrap()
+        .clone()
+        .into_iter()
+        .find(|worker| {
+            worker.live_streamer.id == id
+        });
+    if let Some(w) = option {
+        let manager = service_register.get_manager(&w.live_streamer.url).ok_or(AppError::Unknown).map_err(report_to_response)?;
+        let monitor = manager.ensure_monitor(pool.clone());
+        let worker_status = w.downloader_status.read().unwrap().clone();
+        let d = match worker_status {
+            WorkerStatus::Working(d) => {
+                *w.downloader_status.write().unwrap() = WorkerStatus::Pause;
+                Some(d.clone())
+            },
+            WorkerStatus::Pending => {
+                monitor.rooms_handle.toggle(w.clone()).await;
+                *w.downloader_status.write().unwrap() = WorkerStatus::Pause;
+                None
+            }
+            WorkerStatus::Idle => {
+                monitor.rooms_handle.toggle(w.clone()).await;
+                *w.downloader_status.write().unwrap() = WorkerStatus::Pause;
+                None
+            }
+            WorkerStatus::Pause => {
+                monitor.rooms_handle.toggle(w.clone()).await;
+                *w.downloader_status.write().unwrap() = WorkerStatus::Idle;
+                None
+            }
+        };
+
+        if let Some(d) = d {
+            d.stop().await.map_err(report_to_response)?;
+        }
+        info!(workers=?service_register.workers, "successfully pause live streamers");
+    }
+
+    Ok(Json(()))
 }
 
 pub async fn get_configuration(

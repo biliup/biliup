@@ -151,13 +151,13 @@ async fn upload_single_file(file_path: &Path, context: &UploadContext) -> AppRes
     let video_path = file_path;
 
     info!(
-        "{:?}",
+        "开始上传文件：{:?}",
         video_path
             .canonicalize()
             .change_context(AppError::Unknown)?
             .to_str()
     );
-    info!("{line:?}");
+    info!("线路选择：{line:?}");
     let video_file = VideoFile::new(video_path).change_context(AppError::Unknown)?;
     let total_size = video_file.total_size;
     let file_name = video_file.file_name.clone();
@@ -274,11 +274,11 @@ pub async fn execute_postprocessor(video_paths: Vec<PathBuf>, ctx: &Context) -> 
                 let result = InsertFileItem {
                     file,
                     streamer_info_id: 0,
-                }.insert(&pool).await; 
+                }.insert(&pool).await;
                 info!(result=?result);
             });
-            
-            p.as_path() 
+
+            p.as_path()
         }).collect();
         process_video(&paths, &processor).await?;
     }

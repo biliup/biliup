@@ -147,7 +147,7 @@ pub enum Stage {
 }
 
 /// 工作器状态枚举
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub enum WorkerStatus {
     /// 正在工作
     Working(Arc<dyn Downloader>),
@@ -156,6 +156,8 @@ pub enum WorkerStatus {
     /// 空闲状态（默认）
     #[default]
     Idle,
+    /// 下载暂停中
+    Pause
 }
 
 // 简单 Debug：打印状态名，忽略内部 downloader
@@ -165,6 +167,7 @@ impl fmt::Debug for WorkerStatus {
             WorkerStatus::Working(_) => "Working",
             WorkerStatus::Pending => "Pending",
             WorkerStatus::Idle => "Idle",
+            WorkerStatus::Pause => "Pause"
         };
         f.write_str(name)
     }

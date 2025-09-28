@@ -49,7 +49,7 @@ impl Downloader for DanmakuClient {
     }
 
     /// Stops the danmaku recording
-    async fn stop(&self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn stop(&self) -> AppResult<()> {
         let py_client = self.py_client.clone();
         // Call the DanmakuClient's stop method (not the trait method)
         tokio::task::spawn_blocking(move || {
@@ -59,7 +59,7 @@ impl Downloader for DanmakuClient {
                 Ok::<_, PyErr>(())
             })
         })
-        .await??;
+        .await.change_context(AppError::Unknown)?.change_context(AppError::Unknown)?;
         Ok(())
     }
 

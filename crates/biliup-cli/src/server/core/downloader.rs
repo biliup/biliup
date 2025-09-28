@@ -134,7 +134,7 @@ pub trait Downloader: Send + Sync {
     ) -> AppResult<DownloadStatus>;
 
     /// 停止下载
-    async fn stop(&self) -> Result<(), Box<dyn std::error::Error>>;
+    async fn stop(&self) -> AppResult<()>;
 
     /// 滚动保存（用于弹幕等）
     ///

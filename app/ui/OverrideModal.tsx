@@ -222,12 +222,6 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
         stopValidateWithError={true}
       />
 
-      <Form.Input
-        field="filename_prefix"
-        label="文件名模板（filename_prefix）"
-        placeholder="{streamer}%Y-%m-%dT%H_%M_%S"
-      />
-
       <Form.InputNumber
         field="filtering_threshold"
         label="碎片过滤（filtering_threshold）"

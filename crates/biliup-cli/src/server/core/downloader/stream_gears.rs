@@ -149,7 +149,7 @@ impl Downloader for StreamGears {
     }
 
     /// 停止下载
-    async fn stop(&self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn stop(&self) -> AppResult<()> {
         // 仅发出取消信号并更新状态
         // 如果底层下载函数不支持取消，这里不能真正中断正在进行的下载
         self.token.cancel();

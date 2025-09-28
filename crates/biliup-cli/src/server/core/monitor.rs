@@ -31,9 +31,8 @@ async fn start_client(
     loop {
         // 获取下一个要检查的房间
         if let Some(room) = rooms_handle.next().await {
-            let ulr = room.get_streamer().url;
+            let url = room.get_streamer().url;
             interval = room.get_config().event_loop_interval;
-            info!("[{platform_name}] room: {ulr}");
             let mut ctx = Context::new(room.clone(), Default::default(), pool.clone());
             // 检查直播状态
             match plugin.check_status(&mut ctx).await.unwrap() {
@@ -52,7 +51,7 @@ async fn start_client(
                             continue
                         }
                     };
-                    info!("room: {ulr} is live -> {:?}", stream_info);
+                    info!(url=url, "room: is live -> 开播了");
                     // 更新状态为等待中
                     room.change_status(Stage::Download, WorkerStatus::Pending);
                     stream_info.streamer_info = insert;

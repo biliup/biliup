@@ -9,7 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@douyinfe/semi-ui": "^2.75.0",
+    "@douyinfe/semi-ui": "^2.86.0",
     "artplayer": "^5.2.1",
     "mpegts.js": "^1.8.0",
     "next": "^14.2.26",
