@@ -5,12 +5,12 @@ use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Context, Worker, WorkerStatus};
 use crate::server::infrastructure::models::live_streamer::LiveStreamer;
+use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
 use axum::extract::FromRef;
 use biliup::client::StatelessClient;
 use error_stack::bail;
 use std::sync::{Arc, RwLock};
 use tracing::info;
-use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
 
 /// 服务注册器
 /// 负责管理应用程序中的各种服务实例，包括数据库连接池、工作器、下载管理器等

@@ -3,6 +3,7 @@ use crate::server::config::Config;
 use crate::server::core::downloader::Downloader;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Worker};
+use crate::server::infrastructure::models::StreamerInfo;
 use async_trait::async_trait;
 use chrono::{DateTime, Local};
 use error_stack::Report;
@@ -11,7 +12,6 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use time::OffsetDateTime;
-use crate::server::infrastructure::models::StreamerInfo;
 
 /// 流信息结构
 /// 包含直播流的详细信息

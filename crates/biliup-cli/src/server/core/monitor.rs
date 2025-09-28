@@ -1,16 +1,16 @@
 use crate::server::core::download_manager::{ActorHandle, DownloaderMessage};
 use crate::server::core::plugin::{DownloadPlugin, StreamStatus};
+use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
+use crate::server::infrastructure::models::StreamerInfo;
 use async_channel::{Receiver, Sender, bounded};
-use std::sync::Arc;
-use std::time::Duration;
 use ormlite::Model;
 use ormlite::model::ModelBuilder;
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
-use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::models::StreamerInfo;
 
 /// 启动客户端监控循环
 ///
@@ -44,14 +44,16 @@ async fn start_client(
                         .title(sql_no_id.title.clone())
                         .date(sql_no_id.date.clone())
                         .live_cover_path(sql_no_id.live_cover_path.clone())
-                        .insert(&ctx.pool).await {
-                        Ok(insert) => {insert}
+                        .insert(&ctx.pool)
+                        .await
+                    {
+                        Ok(insert) => insert,
                         Err(e) => {
                             error!(e=?e, "插入数据库失败");
-                            continue
+                            continue;
                         }
                     };
-                    info!(url=url, "room: is live -> 开播了");
+                    info!(url = url, "room: is live -> 开播了");
                     // 更新状态为等待中
                     room.change_status(Stage::Download, WorkerStatus::Pending);
                     stream_info.streamer_info = insert;
@@ -98,7 +100,7 @@ impl Monitor {
     pub fn new(
         plugin: Arc<dyn DownloadPlugin + Send + Sync>,
         actor_handle: Arc<ActorHandle>,
-        pool: ConnectionPool
+        pool: ConnectionPool,
     ) -> Self {
         // 创建房间处理器
         let handle = Arc::new(RoomsHandle::new(plugin.name()));
@@ -106,7 +108,7 @@ impl Monitor {
         let join_handle = tokio::spawn({
             let handle = Arc::clone(&handle);
             async move {
-                start_client(handle, plugin, actor_handle, pool,10).await;
+                start_client(handle, plugin, actor_handle, pool, 10).await;
             }
         });
         Self {
@@ -305,13 +307,14 @@ impl RoomsActor {
     fn del(&mut self, id: i64) -> usize {
         // 从活跃房间列表中删除
         if let Some(i) = self.rooms.iter().position(|x| x.live_streamer.id == id) {
+            info!("Removed room [{:?}] {}", self.rooms.len(), i);
             self.rooms.remove(i); // 保序，但O(n)
         } else if let Some(i) = self.waiting.iter().position(|x| x.live_streamer.id == id) {
+            info!("Deleting room [{:?}] {}", self.waiting.len(), i);
             // 从等待房间列表中删除
             self.waiting.swap_remove(i);
         };
-        info!("Removed room [{:?}] {}", self.rooms, self.rooms.len());
-        info!("Deleting room [{:?}] {}", self.waiting, self.waiting.len());
+
         self.rooms.len() + self.waiting.len()
     }
 

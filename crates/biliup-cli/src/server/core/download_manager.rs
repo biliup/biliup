@@ -5,7 +5,9 @@ use crate::server::core::downloader::{Downloader, SegmentEvent, SegmentInfo};
 use crate::server::core::monitor::{Monitor, RoomsHandle};
 use crate::server::core::plugin::{DownloadPlugin, StreamInfoExt};
 use crate::server::errors::{AppError, AppResult};
+use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
+use crate::server::infrastructure::models::InsertFileItem;
 use crate::server::infrastructure::models::hook_step::process_video;
 use async_channel::{Receiver, Sender, bounded};
 use biliup::bilibili::{BiliBili, Studio, Video};
@@ -17,13 +19,14 @@ use biliup::uploader::{VideoFile, line};
 use core::fmt;
 use error_stack::ResultExt;
 use futures::StreamExt;
+use ormlite::Insert;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use tokio::pin;
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
-use crate::server::infrastructure::connection_pool::ConnectionPool;
 
 /// 下载管理器
 /// 负责管理特定平台的下载任务，包括监控器和插件
@@ -62,7 +65,11 @@ impl DownloadManager {
             .lock()
             .unwrap()
             .get_or_insert_with(|| {
-                Arc::new(Monitor::new(self.plugin.clone(), self.actor_handle.clone(), pool))
+                Arc::new(Monitor::new(
+                    self.plugin.clone(),
+                    self.actor_handle.clone(),
+                    pool,
+                ))
             })
             .clone()
     }
@@ -156,11 +163,26 @@ impl UActor {
             UploaderMessage::SegmentEvent(rx, ctx) => {
                 ctx.worker
                     .change_status(Stage::Upload, WorkerStatus::Pending);
+                let inspect = rx.inspect(|f| {
+                    let pool = ctx.pool.clone();
+                    let streamer_info_id = ctx.stream_info.streamer_info.id;
+                    let file = f.prev_file_path.display().to_string();
+                    tokio::spawn(async move {
+                        let result = InsertFileItem {
+                            file,
+                            streamer_info_id,
+                        }
+                        .insert(&pool)
+                        .await;
+                        info!(result=?result, "Insert file");
+                    });
+                });
                 let result = match ctx.worker.get_upload_config() {
-                    Some(config) => process_with_upload(rx, &ctx, config).await,
+                    Some(config) => process_with_upload(inspect, &ctx, config).await,
                     None => {
                         let mut paths = Vec::new();
-                        while let Ok(event) = rx.recv().await {
+                        pin!(inspect);
+                        while let Some(event) = inspect.next().await {
                             paths.push(event.prev_file_path);
                         }
                         // 无上传配置时，直接执行后处理

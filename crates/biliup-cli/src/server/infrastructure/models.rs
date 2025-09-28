@@ -1,7 +1,7 @@
 /// 钩子步骤模块
 pub mod hook_step;
-pub mod upload_streamer;
 pub mod live_streamer;
+pub mod upload_streamer;
 
 use chrono::{DateTime, Utc};
 use ormlite::{Insert, Model};

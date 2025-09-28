@@ -4,6 +4,7 @@ use crate::server::core::plugin::StreamInfoExt;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::models::live_streamer::LiveStreamer;
+use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
 use crate::server::infrastructure::repositories::{get_config, get_streamer};
 use axum::http::Extensions;
 use biliup::client::StatelessClient;
@@ -13,7 +14,6 @@ use ormlite::Model;
 use serde::{Deserialize, Serialize, Serializer};
 use std::sync::{Arc, RwLock};
 use tracing::info;
-use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
 
 /// 应用程序上下文，包含工作器和扩展信息
 #[derive(Debug, Clone)]
@@ -157,7 +157,7 @@ pub enum WorkerStatus {
     #[default]
     Idle,
     /// 下载暂停中
-    Pause
+    Pause,
 }
 
 // 简单 Debug：打印状态名，忽略内部 downloader
@@ -167,7 +167,7 @@ impl fmt::Debug for WorkerStatus {
             WorkerStatus::Working(_) => "Working",
             WorkerStatus::Pending => "Pending",
             WorkerStatus::Idle => "Idle",
-            WorkerStatus::Pause => "Pause"
+            WorkerStatus::Pause => "Pause",
         };
         f.write_str(name)
     }

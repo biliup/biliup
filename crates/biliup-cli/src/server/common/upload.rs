@@ -4,8 +4,9 @@ use crate::server::core::download_manager::UActor;
 use crate::server::core::downloader::{SegmentEvent, SegmentInfo};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Worker};
-use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
+use crate::server::infrastructure::models::InsertFileItem;
 use crate::server::infrastructure::models::hook_step::process_video;
+use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
 use async_channel::Receiver;
 use biliup::bilibili::{BiliBili, Credit, ResponseData, Studio, Video};
 use biliup::client::StatelessClient;
@@ -17,12 +18,13 @@ use biliup::uploader::{VideoFile, line};
 use chrono::Local;
 use error_stack::ResultExt;
 use futures::StreamExt;
+use futures::stream::Inspect;
+use ormlite::Insert;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Instant;
-use ormlite::Insert;
+use tokio::pin;
 use tracing::{error, info};
-use crate::server::infrastructure::models::InsertFileItem;
 
 // 辅助结构体
 struct UploadContext {
@@ -39,11 +41,14 @@ struct UploadedVideos {
     paths: Vec<PathBuf>,
 }
 
-pub async fn process_with_upload(
-    rx: Receiver<SegmentInfo>,
+pub async fn process_with_upload<F>(
+    rx: Inspect<Receiver<SegmentInfo>, F>,
     ctx: &Context,
     upload_config: UploadStreamer,
-) -> AppResult<()> {
+) -> AppResult<()>
+where
+    F: FnMut(&SegmentInfo),
+{
     info!(upload_config=?upload_config, "Starting process with upload");
     // 1. 初始化上传环境
     let upload_context = initialize_upload_context(&ctx.worker, upload_config).await?;
@@ -117,10 +122,13 @@ async fn get_upload_line(client: &StatelessClient, line: &str) -> AppResult<Line
     Ok(line)
 }
 
-async fn pipeline_upload_videos(
-    rx: Receiver<SegmentInfo>,
+async fn pipeline_upload_videos<F>(
+    mut rx: Inspect<Receiver<SegmentInfo>, F>,
     context: &UploadContext,
-) -> AppResult<UploadedVideos> {
+) -> AppResult<UploadedVideos>
+where
+    F: FnMut(&SegmentInfo),
+{
     // let mut desc_v2 = Vec::new();
     // for credit in context.upload_config.desc_v2_credit {
     //     desc_v2.push(Credit {
@@ -131,9 +139,9 @@ async fn pipeline_upload_videos(
     // }
 
     let mut uploaded = UploadedVideos::default();
-
+    pin!(rx);
     // 流式处理后续事件
-    while let Ok(event) = rx.recv().await {
+    while let Some(event) = rx.next().await {
         let video = upload_single_file(&event.prev_file_path, context).await?;
         uploaded.videos.push(video);
         uploaded.paths.push(event.prev_file_path);
@@ -267,19 +275,7 @@ pub(crate) async fn build_studio(
 
 pub async fn execute_postprocessor(video_paths: Vec<PathBuf>, ctx: &Context) -> AppResult<()> {
     if let Some(processor) = ctx.worker.get_streamer().postprocessor {
-        let paths: Vec<&Path> = video_paths.iter().map(|p| {
-            let pool = ctx.pool.clone();
-            let file = p.display().to_string();
-            tokio::spawn(async move {
-                let result = InsertFileItem {
-                    file,
-                    streamer_info_id: 0,
-                }.insert(&pool).await;
-                info!(result=?result);
-            });
-
-            p.as_path()
-        }).collect();
+        let paths: Vec<&Path> = video_paths.iter().map(|p| p.as_path()).collect();
         process_video(&paths, &processor).await?;
     }
     Ok(())

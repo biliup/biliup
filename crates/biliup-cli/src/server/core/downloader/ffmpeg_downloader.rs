@@ -304,7 +304,7 @@ impl FfmpegDownloader {
         // 将 stderr 打印到当前进程的 stderr
         let stderr_task = tokio::spawn(async move {
             while let Ok(Some(line)) = stderr_lines.next_line().await {
-                eprintln!("[ffmpeg] {line}");
+                info!("[ffmpeg] {line}");
             }
         });
 
@@ -314,7 +314,6 @@ impl FfmpegDownloader {
         let mut prev_file_path: Option<PathBuf> = None;
 
         while let Some(line) = reader.next_line().await.change_context(AppError::Unknown)? {
-            info!("Received line: {line}");
             // 解析文件名
             let file_path = PathBuf::from(line.trim());
 

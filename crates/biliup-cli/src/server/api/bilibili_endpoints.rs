@@ -67,8 +67,6 @@ pub async fn get_proxy_endpoint(
     State(client): State<StatelessClient>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Bytes, Response> {
-    info!(params = &params["url"]);
-
     // 代理HTTP请求
     client
         .client

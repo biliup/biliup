@@ -3,13 +3,17 @@ use crate::server::common::upload::{build_studio, submit_to_bilibili, upload};
 use crate::server::common::util::Recorder;
 use crate::server::config::Config;
 use crate::server::core::download_manager::ActorHandle;
-use crate::server::errors::{report_to_response, AppError};
+use crate::server::core::downloader::Downloader;
+use crate::server::errors::{AppError, report_to_response};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::context::{Worker, WorkerStatus};
+use crate::server::infrastructure::context::{Stage, Worker, WorkerStatus};
 use crate::server::infrastructure::dto::LiveStreamerResponse;
+use crate::server::infrastructure::models::live_streamer::{InsertLiveStreamer, LiveStreamer};
+use crate::server::infrastructure::models::upload_streamer::{
+    InsertUploadStreamer, UploadStreamer,
+};
 use crate::server::infrastructure::models::{
-    Configuration, FileItem, InsertConfiguration,
-    StreamerInfo,
+    Configuration, FileItem, InsertConfiguration, StreamerInfo,
 };
 use crate::server::infrastructure::repositories::{
     del_streamer, get_all_streamer, get_upload_config,
@@ -19,10 +23,10 @@ use axum::extract::ws::{Message, Utf8Bytes, WebSocket};
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::{debug_handler, Json};
+use axum::{Json, debug_handler};
 use biliup::credential::Credential;
 use clap::ValueEnum;
-use error_stack::{bail, Report, ResultExt};
+use error_stack::{Report, ResultExt, bail};
 use ormlite::{Insert, Model};
 use serde::Deserialize;
 use serde_json::json;
@@ -34,21 +38,14 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, UNIX_EPOCH};
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
-use tokio::time::{interval, MissedTickBehavior};
+use tokio::time::{MissedTickBehavior, interval};
 use tracing::{debug, error, info};
-use crate::server::core::downloader::Downloader;
-use crate::server::infrastructure::models::live_streamer::{InsertLiveStreamer, LiveStreamer};
-use crate::server::infrastructure::models::upload_streamer::{InsertUploadStreamer, UploadStreamer};
 
 pub async fn get_streamers_endpoint(
     State(pool): State<ConnectionPool>,
     State(workers): State<Arc<RwLock<Vec<Arc<Worker>>>>>,
 ) -> Result<Json<Vec<LiveStreamerResponse>>, Response> {
     let live_streamers = get_all_streamer(&pool).await.map_err(report_to_response)?;
-    info!(
-        "get_streamers_endpoint found {} live streamers",
-        live_streamers.len()
-    );
     Ok(Json(
         live_streamers
             .into_iter()
@@ -158,31 +155,32 @@ pub async fn pause_streamers_endpoint(
         .unwrap()
         .clone()
         .into_iter()
-        .find(|worker| {
-            worker.live_streamer.id == id
-        });
+        .find(|worker| worker.live_streamer.id == id);
     if let Some(w) = option {
-        let manager = service_register.get_manager(&w.live_streamer.url).ok_or(AppError::Unknown).map_err(report_to_response)?;
+        let manager = service_register
+            .get_manager(&w.live_streamer.url)
+            .ok_or(AppError::Unknown)
+            .map_err(report_to_response)?;
         let monitor = manager.ensure_monitor(pool.clone());
         let worker_status = w.downloader_status.read().unwrap().clone();
         let d = match worker_status {
             WorkerStatus::Working(d) => {
-                *w.downloader_status.write().unwrap() = WorkerStatus::Pause;
+                w.change_status(Stage::Download, WorkerStatus::Pause);
                 Some(d.clone())
-            },
+            }
             WorkerStatus::Pending => {
                 monitor.rooms_handle.toggle(w.clone()).await;
-                *w.downloader_status.write().unwrap() = WorkerStatus::Pause;
+                w.change_status(Stage::Download, WorkerStatus::Pause);
                 None
             }
             WorkerStatus::Idle => {
                 monitor.rooms_handle.toggle(w.clone()).await;
-                *w.downloader_status.write().unwrap() = WorkerStatus::Pause;
+                w.change_status(Stage::Download, WorkerStatus::Pause);
                 None
             }
             WorkerStatus::Pause => {
                 monitor.rooms_handle.toggle(w.clone()).await;
-                *w.downloader_status.write().unwrap() = WorkerStatus::Idle;
+                w.change_status(Stage::Download, WorkerStatus::Idle);
                 None
             }
         };
@@ -190,7 +188,7 @@ pub async fn pause_streamers_endpoint(
         if let Some(d) = d {
             d.stop().await.map_err(report_to_response)?;
         }
-        info!(workers=?service_register.workers, "successfully pause live streamers");
+        info!(workers=?&w.live_streamer.url, "successfully pause live streamers");
     }
 
     Ok(Json(()))

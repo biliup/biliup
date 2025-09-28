@@ -12,6 +12,7 @@ use biliup_cli::server::core::plugin::{DownloadPlugin, StreamInfoExt, StreamStat
 use biliup_cli::server::errors::{AppError, AppResult};
 use biliup_cli::server::infrastructure::connection_pool::ConnectionManager;
 use biliup_cli::server::infrastructure::context::{Context, Worker};
+use biliup_cli::server::infrastructure::models::StreamerInfo;
 use biliup_cli::server::infrastructure::repositories;
 use biliup_cli::server::infrastructure::repositories::get_upload_config;
 use biliup_cli::server::infrastructure::service_register::ServiceRegister;
@@ -33,7 +34,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, RwLock};
 use time::OffsetDateTime;
 use tracing::{debug, info};
-use biliup_cli::server::infrastructure::models::StreamerInfo;
 
 #[derive(Debug)]
 pub struct PyPlugin {
@@ -145,37 +145,39 @@ async fn call_via_threads(
 ) -> PyResult<Option<(StreamInfoExt, Option<Py<PyAny>>)>> {
     let url = url.to_string();
     tokio::task::spawn_blocking(move || {
-        Python::attach(|py| -> PyResult<Option<(StreamInfoExt, Option<Py<PyAny>>)>> {
-            // 从 biliup.util 获取 loop（按你项目里真实的名字来取）
-            let util = PyModule::import(py, "biliup.common.util")?;
-            // 下面两行二选一（取决于 biliup.util 的 API）：
-            // let loop_obj: Py<PyAny> = util.getattr("loop")?.into_py(py);
-            // 或：
-            // let loop_obj: Py<PyAny> = util.call_method0("get_loop")?.into_py(py);
+        Python::attach(
+            |py| -> PyResult<Option<(StreamInfoExt, Option<Py<PyAny>>)>> {
+                // 从 biliup.util 获取 loop（按你项目里真实的名字来取）
+                let util = PyModule::import(py, "biliup.common.util")?;
+                // 下面两行二选一（取决于 biliup.util 的 API）：
+                // let loop_obj: Py<PyAny> = util.getattr("loop")?.into_py(py);
+                // 或：
+                // let loop_obj: Py<PyAny> = util.call_method0("get_loop")?.into_py(py);
 
-            // 这里假设是直接暴露了 util.loop
-            let loop_obj = util.getattr("loop")?;
+                // 这里假设是直接暴露了 util.loop
+                let loop_obj = util.getattr("loop")?;
 
-            let asyncio = PyModule::import(py, "asyncio")?;
+                let asyncio = PyModule::import(py, "asyncio")?;
 
-            // 生成协程 self.acheck_stream()
-            let instance = obj.bind(py).call1(("fname", url))?;
-            let coro = instance.call_method0("acheck_stream")?;
+                // 生成协程 self.acheck_stream()
+                let instance = obj.bind(py).call1(("fname", url))?;
+                let coro = instance.call_method0("acheck_stream")?;
 
-            // 调度到指定 loop
-            let fut = asyncio
-                .getattr("run_coroutine_threadsafe")?
-                .call1((coro, loop_obj))?;
+                // 调度到指定 loop
+                let fut = asyncio
+                    .getattr("run_coroutine_threadsafe")?
+                    .call1((coro, loop_obj))?;
 
-            let res = fut.call_method0("result")?;
-            let is_live = res.unbind().extract(py)?;
-            let info = if is_live {
-                Some(stream_info_from_py(&instance)?)
-            } else {
-                None
-            };
-            Ok(info)
-        })
+                let res = fut.call_method0("result")?;
+                let is_live = res.unbind().extract(py)?;
+                let info = if is_live {
+                    Some(stream_info_from_py(&instance)?)
+                } else {
+                    None
+                };
+                Ok(info)
+            },
+        )
     })
     .await
     .expect("spawn_blocking panicked")

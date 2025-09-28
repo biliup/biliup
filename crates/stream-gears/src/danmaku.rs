@@ -59,7 +59,9 @@ impl Downloader for DanmakuClient {
                 Ok::<_, PyErr>(())
             })
         })
-        .await.change_context(AppError::Unknown)?.change_context(AppError::Unknown)?;
+        .await
+        .change_context(AppError::Unknown)?
+        .change_context(AppError::Unknown)?;
         Ok(())
     }
 

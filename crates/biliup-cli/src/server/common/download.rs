@@ -71,8 +71,7 @@ impl Drop for DownloadGuard {
             if let WorkerStatus::Pause = *worker.downloader_status.read().unwrap() {
             } else {
                 // 确保状态更新和资源清理
-                worker
-                    .change_status(Stage::Download, WorkerStatus::Idle);
+                worker.change_status(Stage::Download, WorkerStatus::Idle);
                 rooms_handle.toggle(worker).await;
             };
         });
