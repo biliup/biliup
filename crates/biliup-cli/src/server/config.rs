@@ -116,6 +116,12 @@ pub struct Config {
     /// 抖音画质
     #[serde(default)]
     pub douyin_quality: Option<String>,
+    /// 双屏直播录制方式
+    #[serde(default)]
+    pub douyin_double_screen: Option<bool>,
+    /// 抖音真原画
+    #[serde(default)]
+    pub douyin_true_origin: Option<bool>,
 
     // 哔哩哔哩平台设置
     /// B站弹幕录制
