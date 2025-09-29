@@ -54,6 +54,62 @@
 ---
 
 ## 🧑‍💻开发
+### 架构概览
+
+Rust后端 + Python引擎 + Next.js前端的混合架构。
+
+```mermaid
+graph TB
+    subgraph "🌐 前端层"
+        UI[Next.js Web界面<br/>React + TypeScript<br/>Semi UI组件库]
+    end
+    
+    subgraph "⚡ Rust后端服务"
+        CLI[Web API服务器<br/>biliup-cli<br/>用户认证 & REST API]
+        CORE[核心上传库<br/>biliup<br/>Bilibili API客户端]
+        GEARS[Python绑定<br/>stream-gears<br/>性能优化桥接]
+    end
+    
+    subgraph "🐍 Python引擎"
+        ENGINE[下载引擎<br/>biliup<br/>任务调度 & 流处理]
+        PLUGINS[插件系统<br/>20+平台支持<br/>斗鱼/虎牙/Twitch等]
+        DANMAKU[弹幕系统<br/>实时弹幕获取<br/>多平台协议支持]
+    end
+    
+    subgraph "🗄️ 数据层"
+        DB[(SQLite数据库<br/>配置存储<br/>任务状态 & 日志)]
+        FILES[文件系统<br/>临时视频存储<br/>缓存管理]
+    end
+    
+    subgraph "🌍 外部服务"
+        BILI[Bilibili API<br/>视频上传服务]
+        STREAMS[直播平台<br/>斗鱼/虎牙/B站等<br/>实时流媒体]
+    end
+    
+    UI --> CLI
+    CLI --> CORE
+    CLI --> ENGINE
+    CLI --> DB
+    GEARS --> ENGINE
+    ENGINE --> PLUGINS
+    ENGINE --> DANMAKU
+    ENGINE --> FILES
+    CORE --> BILI
+    PLUGINS --> STREAMS
+    DANMAKU --> STREAMS
+    
+    style UI fill:#e1f5fe
+    style CLI fill:#f3e5f5
+    style CORE fill:#f3e5f5
+    style GEARS fill:#f3e5f5
+    style ENGINE fill:#e8f5e8
+    style PLUGINS fill:#e8f5e8
+    style DANMAKU fill:#e8f5e8
+    style DB fill:#fff3e0
+    style FILES fill:#fff3e0
+    style BILI fill:#ffebee
+    style STREAMS fill:#ffebee
+```
 
 ### frontend
 
@@ -65,7 +121,7 @@
 ### backend
 
 1. 安装依赖 `maturin dev`
-2. `npm run build` 确保 `/biliup/web/public` 目录存在构建好的前端静态资源
+2. `npm run build` 
 3. 启动 Biliup：`python3 -m biliup`
 
 ## 🤝Credits
