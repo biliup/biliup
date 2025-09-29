@@ -35,8 +35,8 @@ async fn start_client(
             interval = room.get_config().event_loop_interval;
             let mut ctx = Context::new(room.clone(), Default::default(), pool.clone());
             // 检查直播状态
-            match plugin.check_status(&mut ctx).await.unwrap() {
-                StreamStatus::Live { mut stream_info } => {
+            match plugin.check_status(&mut ctx).await {
+                Ok(StreamStatus::Live { mut stream_info }) => {
                     let sql_no_id = &stream_info.streamer_info;
                     let insert = match StreamerInfo::builder()
                         .url(sql_no_id.url.clone())
@@ -57,12 +57,13 @@ async fn start_client(
                     // 更新状态为等待中
                     room.change_status(Stage::Download, WorkerStatus::Pending);
                     stream_info.streamer_info = insert;
+                    ctx.stream_info = stream_info;
                     // 发送下载开始消息
                     if actor_handle
                         .down_sender
                         .send(DownloaderMessage::Start(
                             plugin.clone(),
-                            Context::new(room.clone(), stream_info, pool.clone()),
+                            ctx,
                             rooms_handle.clone(),
                         ))
                         .await
@@ -72,8 +73,9 @@ async fn start_client(
                         rooms_handle.toggle(room).await;
                     }
                 }
-                StreamStatus::Offline => {}
-                StreamStatus::Unknown => {}
+                Ok(StreamStatus::Offline) => {}
+                Ok(StreamStatus::Unknown) => {},
+                Err(e) => error!(e=?e, ctx=ctx.worker.live_streamer.url,"检查直播间出错")
             };
         }
         // 等待下一次检查
@@ -272,8 +274,8 @@ impl RoomsActor {
                 let _ = respond_to.send(self.next());
             }
             ActorMessage::Add(worker) => {
+                info!("Added room [{}]", worker.live_streamer.url);
                 self.rooms.push(worker);
-                info!("Added room [{:?}]", self.rooms);
             }
             ActorMessage::Del { respond_to, id } => {
                 // `let _ =` 忽略发送时的任何错误

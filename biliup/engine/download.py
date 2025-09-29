@@ -327,17 +327,6 @@ class DownloadBase(ABC):
     def download_success_callback(self):
         pass
 
-    def run(self):
-        try:
-            self.danmaku_init()
-            if self.danmaku:
-                self.danmaku.start()
-            retval = self.download()
-            return retval
-        finally:
-            if self.danmaku:
-                self.danmaku.stop()
-                self.danmaku = None
 
     def download_cover(self, fmtname):
         # 获取封面

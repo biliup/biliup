@@ -190,10 +190,11 @@ impl UActor {
                     }
                 };
 
-                if let Err(e) = result {
+                if let Err(e) = &result {
                     error!("Process segment event failed: {}", e);
                     // 可以添加错误通知机制
                 }
+                info!(url=ctx.stream_info.streamer_info.url, result=?result, "后处理执行完毕：Finished processing segment event");
                 ctx.worker.change_status(Stage::Upload, WorkerStatus::Idle);
             }
         }

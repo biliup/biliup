@@ -72,7 +72,7 @@ impl DownloadPlugin for PyPlugin {
     }
 
     async fn check_status(&self, ctx: &mut Context) -> Result<StreamStatus, Report<AppError>> {
-        match call_via_threads(self.plugin.clone(), &ctx.worker.live_streamer.url)
+        match call_via_threads(self.plugin.clone(), ctx)
             .await
             .change_context(AppError::Unknown)?
         {
@@ -141,9 +141,10 @@ impl DownloadPlugin for PyPlugin {
 
 async fn call_via_threads(
     obj: Arc<Py<PyType>>,
-    url: &str,
+    ctx: &mut Context,
 ) -> PyResult<Option<(StreamInfoExt, Option<Py<PyAny>>)>> {
-    let url = url.to_string();
+    let url = ctx.worker.live_streamer.url.to_string();
+    let remark = ctx.worker.live_streamer.remark.to_string();
     tokio::task::spawn_blocking(move || {
         Python::attach(
             |py| -> PyResult<Option<(StreamInfoExt, Option<Py<PyAny>>)>> {
@@ -160,7 +161,7 @@ async fn call_via_threads(
                 let asyncio = PyModule::import(py, "asyncio")?;
 
                 // 生成协程 self.acheck_stream()
-                let instance = obj.bind(py).call1(("fname", url))?;
+                let instance = obj.bind(py).call1((remark, url))?;
                 let coro = instance.call_method0("acheck_stream")?;
 
                 // 调度到指定 loop
@@ -238,7 +239,6 @@ pub fn stream_info_from_py(
     } else {
         None
     };
-
     // date 直接使用传入的 start_time（保留为 Python 对象）
     // let date = OffsetDateTime::now_utc();
 
@@ -300,7 +300,17 @@ impl ConfigState {
             {
                 return Ok(d);
             }
-            return Ok(bound);
+            // 尝试转换为字典并过滤
+            return match bound.downcast::<PyDict>() {
+                Ok(dict) => {
+                    let filtered = PyDict::new(py);
+                    dict.iter()
+                        .filter(|(_, v)| !v.is_none())
+                        .try_for_each(|(k, v)| filtered.set_item(k, v))?;
+                    Ok(filtered.into_any())
+                }
+                Err(_) => Ok(bound), // 不是字典，直接返回
+            };
         };
         let Some(default) = default else {
             return Err(pyo3::exceptions::PyAttributeError::new_err(format!(

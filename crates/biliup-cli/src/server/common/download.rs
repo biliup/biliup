@@ -346,7 +346,7 @@ impl DownloadTask {
 
     async fn start_danmaku(&self, client: &Arc<dyn Downloader>) -> AppResult<()> {
         // 启动弹幕下载逻辑
-        println!(
+        info!(
             "Starting danmaku client for stream: {}",
             self.ctx.stream_info.streamer_info.url
         );

@@ -49,7 +49,6 @@ impl ServiceRegister {
         // 创建默认的HTTP客户端
         let client = StatelessClient::default();
 
-        info!(config=?config);
 
         info!("utility services initialized, building feature services...");
 
@@ -102,7 +101,7 @@ impl ServiceRegister {
         let monitor = manager.ensure_monitor(self.pool.clone());
         monitor.rooms_handle.add(worker.clone()).await;
         self.workers.write().unwrap().push(worker.clone());
-        info!("add {worker:?} success");
+        info!("add {} success", worker.live_streamer.url);
         Ok(Some(()))
     }
 
