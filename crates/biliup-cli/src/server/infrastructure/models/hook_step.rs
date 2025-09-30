@@ -126,6 +126,22 @@ impl HookStep {
             fs::rename(video_path, destination)
                 .await
                 .change_context(AppError::Unknown)?;
+
+            let buf = video_path.with_extension("xml");
+            if buf.exists() {
+                let file_name = buf
+                    .file_name()
+                    .ok_or(AppError::Custom("Invalid file name".to_string()))?;
+                let destination = target_path.join(file_name);
+                fs::rename(&buf, &destination)
+                    .await
+                    .change_context(AppError::Unknown)?;
+                info!(
+                    "移动弹幕文件: Moving {} to {}",
+                    buf.display(),
+                    destination.display()
+                );
+            }
         }
         Ok(())
     }
