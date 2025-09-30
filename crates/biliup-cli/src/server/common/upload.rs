@@ -1,9 +1,8 @@
 use crate::UploadLine;
 use crate::server::common::util::Recorder;
-use crate::server::core::download_manager::UActor;
 use crate::server::core::downloader::{SegmentEvent, SegmentInfo};
 use crate::server::errors::{AppError, AppResult};
-use crate::server::infrastructure::context::{Context, Worker};
+use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
 use crate::server::infrastructure::models::InsertFileItem;
 use crate::server::infrastructure::models::hook_step::process_video;
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
@@ -358,4 +357,79 @@ pub async fn upload(
     }
 
     Ok((bilibili, videos))
+}
+
+/// 上传Actor
+/// 负责处理上传相关的消息和任务
+pub struct UActor {
+    /// 上传消息接收器
+    receiver: Receiver<UploaderMessage>,
+}
+
+impl UActor {
+    /// 创建新的上传Actor实例
+    pub fn new(receiver: Receiver<UploaderMessage>) -> Self {
+        Self { receiver }
+    }
+
+    /// 运行Actor主循环，处理接收到的消息
+    pub(crate) async fn run(&mut self) {
+        while let Ok(msg) = self.receiver.recv().await {
+            self.handle_message(msg).await;
+        }
+    }
+
+    /// 处理上传消息
+    ///
+    /// # 参数
+    /// * `msg` - 要处理的上传消息
+    async fn handle_message(&mut self, msg: UploaderMessage) {
+        match msg {
+            UploaderMessage::SegmentEvent(rx, ctx) => {
+                ctx.worker
+                    .change_status(Stage::Upload, WorkerStatus::Pending);
+                let inspect = rx.inspect(|f| {
+                    let pool = ctx.pool.clone();
+                    let streamer_info_id = ctx.stream_info.streamer_info.id;
+                    let file = f.prev_file_path.display().to_string();
+                    tokio::spawn(async move {
+                        let result = InsertFileItem {
+                            file,
+                            streamer_info_id,
+                        }
+                        .insert(&pool)
+                        .await;
+                        info!(result=?result, "Insert file");
+                    });
+                });
+                let result = match ctx.worker.get_upload_config() {
+                    Some(config) => process_with_upload(inspect, &ctx, config).await,
+                    None => {
+                        let mut paths = Vec::new();
+                        pin!(inspect);
+                        while let Some(event) = inspect.next().await {
+                            paths.push(event.prev_file_path);
+                        }
+                        // 无上传配置时，直接执行后处理
+                        execute_postprocessor(paths, &ctx).await
+                    }
+                };
+
+                if let Err(e) = &result {
+                    error!("Process segment event failed: {}", e);
+                    // 可以添加错误通知机制
+                }
+                info!(url=ctx.stream_info.streamer_info.url, result=?result, "后处理执行完毕：Finished processing segment event");
+                ctx.worker.change_status(Stage::Upload, WorkerStatus::Idle);
+            }
+        }
+    }
+}
+
+/// 上传消息枚举
+/// 定义上传Actor可以处理的消息类型
+#[derive(Debug)]
+pub enum UploaderMessage {
+    /// 分段事件消息，包含事件、接收器和工作器
+    SegmentEvent(Receiver<SegmentInfo>, Context),
 }

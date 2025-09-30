@@ -1,5 +1,5 @@
+use crate::server::common::upload::UploaderMessage;
 use crate::server::common::util::Recorder;
-use crate::server::core::download_manager::{DownloaderMessage, UploaderMessage};
 use crate::server::core::downloader::{DownloadStatus, Downloader, SegmentEvent, SegmentInfo};
 use crate::server::core::monitor::RoomsHandle;
 use crate::server::core::plugin::{DownloadPlugin, StreamInfoExt};
@@ -112,7 +112,8 @@ impl FileValidator {
 
         if size < self.min_size {
             bail!(AppError::Custom(format!(
-                "File too small: {size} bytes, minimum: {} bytes",
+                "File {} too small: {size} bytes, minimum: {} bytes",
+                path.display(),
                 self.min_size
             )));
         }
@@ -353,4 +354,58 @@ impl DownloadTask {
         client.download(Box::new(|_| {})).await?;
         Ok(())
     }
+}
+
+/// 下载Actor
+/// 负责处理下载相关的消息和任务
+pub struct DActor {
+    /// 下载消息接收器
+    receiver: Receiver<DownloaderMessage>,
+    /// 上传消息发送器
+    sender: Sender<UploaderMessage>,
+}
+
+impl DActor {
+    /// 创建新的下载Actor实例
+    pub fn new(receiver: Receiver<DownloaderMessage>, sender: Sender<UploaderMessage>) -> Self {
+        Self { receiver, sender }
+    }
+
+    /// 运行Actor主循环，处理接收到的消息
+    pub(crate) async fn run(&mut self) {
+        while let Ok(msg) = self.receiver.recv().await {
+            if let Err(e) = self.handle_message(msg).await {
+                error!("Error handling message: {}", e);
+            }
+        }
+    }
+
+    /// 处理下载消息
+    ///
+    /// # 参数
+    /// * `msg` - 要处理的下载消息
+    async fn handle_message(&mut self, msg: DownloaderMessage) -> AppResult<()> {
+        match msg {
+            DownloaderMessage::Start(plugin, ctx, rooms_handle) => {
+                // 创建下载任务
+                let task = DownloadTask::new(plugin, ctx, rooms_handle);
+
+                // 执行下载（使用 Result 链式处理）
+                task.execute(&self.sender).await?;
+
+                Ok(())
+            }
+        }
+    }
+}
+
+/// 下载消息枚举
+/// 定义下载Actor可以处理的消息类型
+pub enum DownloaderMessage {
+    /// 开始下载消息，包含插件、流信息、上下文和房间句柄
+    Start(
+        Arc<dyn DownloadPlugin + Send + Sync>,
+        Context,
+        Arc<RoomsHandle>,
+    ),
 }

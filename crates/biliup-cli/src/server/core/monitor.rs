@@ -1,4 +1,5 @@
-use crate::server::core::download_manager::{ActorHandle, DownloaderMessage};
+use crate::server::common::download::DownloaderMessage;
+use crate::server::core::download_manager::ActorHandle;
 use crate::server::core::plugin::{DownloadPlugin, StreamStatus};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
@@ -74,8 +75,8 @@ async fn start_client(
                     }
                 }
                 Ok(StreamStatus::Offline) => {}
-                Ok(StreamStatus::Unknown) => {},
-                Err(e) => error!(e=?e, ctx=ctx.worker.live_streamer.url,"检查直播间出错")
+                Ok(StreamStatus::Unknown) => {}
+                Err(e) => error!(e=?e, ctx=ctx.worker.live_streamer.url,"检查直播间出错"),
             };
         }
         // 等待下一次检查

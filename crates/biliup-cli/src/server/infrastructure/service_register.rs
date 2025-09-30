@@ -49,7 +49,6 @@ impl ServiceRegister {
         // 创建默认的HTTP客户端
         let client = StatelessClient::default();
 
-
         info!("utility services initialized, building feature services...");
 
         info!("feature services successfully initialized!");

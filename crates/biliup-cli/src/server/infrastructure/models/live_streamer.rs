@@ -32,7 +32,7 @@ pub struct LiveStreamer {
     /// 注意：数据库空与json空有区别，所以这里不能用#[ormlite(json)]
     /// 只能使用 sqlx::types::Json
     #[ormlite(json)]
-    pub preprocessor: Option<Vec<String>>,
+    pub preprocessor: Option<Vec<HookStep>>,
     /// 分段处理器列表（JSON格式）
     #[ormlite(json)]
     pub segment_processor: Option<Vec<HookStep>>,

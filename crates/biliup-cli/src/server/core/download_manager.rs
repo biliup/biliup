@@ -1,33 +1,14 @@
-use crate::server::common::download::DownloadTask;
-use crate::server::common::upload::{execute_postprocessor, process_with_upload};
-use crate::server::common::util::Recorder;
-use crate::server::core::downloader::{Downloader, SegmentEvent, SegmentInfo};
-use crate::server::core::monitor::{Monitor, RoomsHandle};
-use crate::server::core::plugin::{DownloadPlugin, StreamInfoExt};
-use crate::server::errors::{AppError, AppResult};
+use crate::server::common::download::{DActor, DownloaderMessage};
+use crate::server::common::upload::{UActor, UploaderMessage};
+use crate::server::core::downloader::Downloader;
+use crate::server::core::monitor::Monitor;
+use crate::server::core::plugin::DownloadPlugin;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
-use crate::server::infrastructure::models::InsertFileItem;
-use crate::server::infrastructure::models::hook_step::process_video;
-use async_channel::{Receiver, Sender, bounded};
-use biliup::bilibili::{BiliBili, Studio, Video};
-use biliup::client::StatelessClient;
-use biliup::credential::login_by_cookies;
-use biliup::uploader::line::{Line, Probe};
-use biliup::uploader::util::SubmitOption;
-use biliup::uploader::{VideoFile, line};
+use async_channel::{Sender, bounded};
 use core::fmt;
 use error_stack::ResultExt;
-use futures::StreamExt;
-use ormlite::Insert;
-use std::path::Path;
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
-use tokio::pin;
 use tokio::task::JoinHandle;
-use tracing::{error, info, warn};
-
 /// 下载管理器
 /// 负责管理特定平台的下载任务，包括监控器和插件
 pub struct DownloadManager {
@@ -92,115 +73,6 @@ impl fmt::Debug for DownloadManager {
     }
 }
 
-/// 下载Actor
-/// 负责处理下载相关的消息和任务
-pub struct DActor {
-    /// 下载消息接收器
-    receiver: Receiver<DownloaderMessage>,
-    /// 上传消息发送器
-    sender: Sender<UploaderMessage>,
-}
-
-impl DActor {
-    /// 创建新的下载Actor实例
-    pub fn new(receiver: Receiver<DownloaderMessage>, sender: Sender<UploaderMessage>) -> Self {
-        Self { receiver, sender }
-    }
-
-    /// 运行Actor主循环，处理接收到的消息
-    async fn run(&mut self) {
-        while let Ok(msg) = self.receiver.recv().await {
-            if let Err(e) = self.handle_message(msg).await {
-                error!("Error handling message: {}", e);
-            }
-        }
-    }
-
-    /// 处理下载消息
-    ///
-    /// # 参数
-    /// * `msg` - 要处理的下载消息
-    async fn handle_message(&mut self, msg: DownloaderMessage) -> AppResult<()> {
-        match msg {
-            DownloaderMessage::Start(plugin, ctx, rooms_handle) => {
-                // 创建下载任务
-                let task = DownloadTask::new(plugin, ctx, rooms_handle);
-
-                // 执行下载（使用 Result 链式处理）
-                task.execute(&self.sender).await?;
-
-                Ok(())
-            }
-        }
-    }
-}
-/// 上传Actor
-/// 负责处理上传相关的消息和任务
-pub struct UActor {
-    /// 上传消息接收器
-    receiver: Receiver<UploaderMessage>,
-}
-
-impl UActor {
-    /// 创建新的上传Actor实例
-    pub fn new(receiver: Receiver<UploaderMessage>) -> Self {
-        Self { receiver }
-    }
-
-    /// 运行Actor主循环，处理接收到的消息
-    async fn run(&mut self) {
-        while let Ok(msg) = self.receiver.recv().await {
-            self.handle_message(msg).await;
-        }
-    }
-
-    /// 处理上传消息
-    ///
-    /// # 参数
-    /// * `msg` - 要处理的上传消息
-    async fn handle_message(&mut self, msg: UploaderMessage) {
-        match msg {
-            UploaderMessage::SegmentEvent(rx, ctx) => {
-                ctx.worker
-                    .change_status(Stage::Upload, WorkerStatus::Pending);
-                let inspect = rx.inspect(|f| {
-                    let pool = ctx.pool.clone();
-                    let streamer_info_id = ctx.stream_info.streamer_info.id;
-                    let file = f.prev_file_path.display().to_string();
-                    tokio::spawn(async move {
-                        let result = InsertFileItem {
-                            file,
-                            streamer_info_id,
-                        }
-                        .insert(&pool)
-                        .await;
-                        info!(result=?result, "Insert file");
-                    });
-                });
-                let result = match ctx.worker.get_upload_config() {
-                    Some(config) => process_with_upload(inspect, &ctx, config).await,
-                    None => {
-                        let mut paths = Vec::new();
-                        pin!(inspect);
-                        while let Some(event) = inspect.next().await {
-                            paths.push(event.prev_file_path);
-                        }
-                        // 无上传配置时，直接执行后处理
-                        execute_postprocessor(paths, &ctx).await
-                    }
-                };
-
-                if let Err(e) = &result {
-                    error!("Process segment event failed: {}", e);
-                    // 可以添加错误通知机制
-                }
-                info!(url=ctx.stream_info.streamer_info.url, result=?result, "后处理执行完毕：Finished processing segment event");
-                ctx.worker.change_status(Stage::Upload, WorkerStatus::Idle);
-            }
-        }
-    }
-}
-
 /// Actor处理器
 /// 管理下载和上传Actor的生命周期
 pub struct ActorHandle {
@@ -252,25 +124,6 @@ impl ActorHandle {
             u_kills,
         }
     }
-}
-
-/// 上传消息枚举
-/// 定义上传Actor可以处理的消息类型
-#[derive(Debug)]
-pub enum UploaderMessage {
-    /// 分段事件消息，包含事件、接收器和工作器
-    SegmentEvent(Receiver<SegmentInfo>, Context),
-}
-
-/// 下载消息枚举
-/// 定义下载Actor可以处理的消息类型
-pub enum DownloaderMessage {
-    /// 开始下载消息，包含插件、流信息、上下文和房间句柄
-    Start(
-        Arc<dyn DownloadPlugin + Send + Sync>,
-        Context,
-        Arc<RoomsHandle>,
-    ),
 }
 
 impl Drop for ActorHandle {

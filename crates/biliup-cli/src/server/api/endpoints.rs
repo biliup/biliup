@@ -49,20 +49,23 @@ pub async fn get_streamers_endpoint(
     Ok(Json(
         live_streamers
             .into_iter()
-            .map(|x| LiveStreamerResponse {
-                status: workers
+            .map(|x| {
+                let option = workers
                     .read()
                     .unwrap()
-                    .iter()
-                    .find_map(|worker| {
-                        if worker.live_streamer.id == x.id {
-                            Some(format!("{:?}", *worker.downloader_status.read().unwrap()))
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or_default(),
-                inner: x,
+                    .clone()
+                    .into_iter()
+                    .find(|worker| worker.live_streamer.id == x.id);
+                LiveStreamerResponse {
+                    status: option
+                        .as_ref()
+                        .map(|t| format!("{:?}", *t.downloader_status.read().unwrap()))
+                        .unwrap_or_default(),
+                    inner: x,
+                    upload_status: option
+                        .map(|t| format!("{:?}", *t.uploader_status.read().unwrap()))
+                        .unwrap_or_default(),
+                }
             })
             .collect(),
     ))

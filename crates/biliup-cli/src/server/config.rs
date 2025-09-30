@@ -108,6 +108,9 @@ pub struct Config {
     /// 虎牙最大比率
     #[serde(default)]
     pub huya_max_ratio: Option<u32>,
+    /// 虎牙 Flv or Hls
+    #[serde(default)]
+    pub huya_protocol: Option<String>,
 
     // 抖音平台设置
     /// 抖音弹幕录制

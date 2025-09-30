@@ -12,4 +12,6 @@ pub struct LiveStreamerResponse {
 
     /// 当前工作状态
     pub status: String,
+    /// 上传状态
+    pub upload_status: String,
 }

@@ -7,7 +7,7 @@ import {
     Typography,
     Popconfirm,
     Notification,
-    Card, Dropdown,
+    Card, Dropdown, Badge,
 } from '@douyinfe/semi-ui'
 import {
     IconHelpCircle,
@@ -15,7 +15,7 @@ import {
     IconVideoListStroked,
     IconEdit2Stroked,
     IconDeleteStroked,
-    IconWrench, IconTreeTriangleDown, IconPause, IconPlay,
+    IconWrench, IconTreeTriangleDown, IconPause, IconPlay, IconLock, IconUpload,
 } from '@douyinfe/semi-icons'
 import { List, ButtonGroup } from '@douyinfe/semi-ui'
 import React, { useState } from 'react'
@@ -101,6 +101,7 @@ export default function Home() {
     console.log(values);
     delete values.status
     delete values.statusTag
+    delete values.upload_status
     if (values?.postprocessor) {
       values.postprocessor = values.postprocessor.map(
         ({ cmd, value }: { cmd: string; value: string }) => (cmd === 'rm' ? 'rm' : { [cmd]: value })
@@ -221,12 +222,15 @@ export default function Home() {
                   }
                 >
                   <div style={{ position: 'absolute', right: 20, top: 9 }}>{item.statusTag}</div>
+
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      {item.upload_status === "Pending" ? <Badge count={<IconUpload />}> </Badge> : null}
+
                     <h3
                       style={{
                         color: 'var(--semi-color-text-0)',
                         fontWeight: 500,
-                        maxWidth: '60%',
+                        maxWidth: '80%',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
@@ -234,10 +238,13 @@ export default function Home() {
                     >
                       {item.remark}
                     </h3>
+
                   </div>
+
                   <Text style={{ width: '101%' }} ellipsis={{ showTooltip: true }} type="tertiary">
                     {item.url}
                   </Text>
+
                   <div
                     style={{
                       margin: '0',
@@ -279,6 +286,7 @@ export default function Home() {
                     </ButtonGroup>
                   </div>
                 </Card>
+
               </List.Item>
             )}
           />

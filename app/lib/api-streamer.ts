@@ -101,6 +101,7 @@ export interface LiveStreamerEntity {
 	split_size?: number;
 	upload_id?: number;
 	status?: string;
+	upload_status?: string;
 	statusTag?: React.ReactNode;
 	format?: string;
     time_range?: string | Date[];
