@@ -1,3 +1,4 @@
+use crate::server::common::util::Recorder;
 use crate::server::config::Config;
 use crate::server::core::downloader::Downloader;
 use crate::server::core::plugin::StreamInfoExt;
@@ -24,6 +25,7 @@ pub struct Context {
     /// 扩展数据容器
     pub extension: Extensions,
     pub pool: ConnectionPool,
+    pub recorder: Recorder,
 }
 
 impl Context {
@@ -31,12 +33,13 @@ impl Context {
     ///
     /// # 参数
     /// * `worker` - 工作器实例的Arc引用
-    pub fn new(worker: Arc<Worker>, stream_info: StreamInfoExt, pool: ConnectionPool) -> Self {
+    pub fn new(worker: Arc<Worker>, pool: ConnectionPool) -> Self {
         Self {
             worker,
-            stream_info,
+            stream_info: Default::default(),
             extension: Default::default(),
             pool,
+            recorder: Default::default(),
         }
     }
 }

@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use url::Url;
 
 /// 录制器配置结构体
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Recorder {
-    /// 文件名前缀模板
+    ///  filename_prefix   文件名前缀模板
     pub filename_prefix: Option<String>,
     /// 主播名称
     pub fname: String,
@@ -14,6 +14,8 @@ pub struct Recorder {
     pub room_title: String,
     /// 录制后保存文件格式 (mp4, ts, mkv, flv)，不含点
     pub suffix: String,
+    /// 开播时间
+    date_time: DateTime<Local>,
 }
 
 impl Recorder {
@@ -22,26 +24,31 @@ impl Recorder {
         fname: &str,
         room_title: &str,
         suffix: &str,
+        date_time: DateTime<Local>,
     ) -> Self {
         Self {
             filename_prefix,
             fname: fname.to_string(),
             room_title: room_title.to_string(),
             suffix: suffix.to_string(),
+            date_time,
         }
     }
 
     /// 生成文件名模板（包含时间格式占位符），并清洗非法字符
     pub fn filename_template(&self) -> String {
         let raw = if let Some(prefix) = &self.filename_prefix {
-            prefix
-                .replace("{streamer}", &self.fname)
-                .replace("{title}", &self.room_title)
+            self.template_with(prefix)
         } else {
             format!("{}%Y-%m-%dT%H_%M_%S", self.fname)
         };
-
         sanitize_filename(&raw)
+    }
+
+    fn template_with(&self, template: &str) -> String {
+        template
+            .replace("{streamer}", &self.fname)
+            .replace("{title}", &self.room_title)
     }
 
     /// 生成“基名”（不带扩展名），时间冲突时按秒+1继续尝试，直到唯一
@@ -59,10 +66,15 @@ impl Recorder {
     }
 
     /// 生成“基名”（不带扩展名）
-    pub fn format_filename(&self, date_time: DateTime<Local>) -> String {
+    pub fn format_filename(&self) -> String {
         let template = self.filename_template();
+        self.date_time.format(&template).to_string()
+    }
 
-        date_time.format(&template).to_string()
+    pub fn format(&self, template: &str) -> String {
+        self.date_time
+            .format(&self.template_with(template))
+            .to_string()
     }
 
     /// 直接生成带扩展名的完整路径（当前目录下）

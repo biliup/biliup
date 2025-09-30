@@ -25,6 +25,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Json, debug_handler};
 use biliup::credential::Credential;
+use chrono::Local;
 use clap::ValueEnum;
 use error_stack::{Report, ResultExt, bail};
 use ormlite::{Insert, Model};
@@ -575,6 +576,7 @@ pub async fn post_uploads(
             &upload_config.template_name,
             "stream_title",
             "",
+            Local::now(),
         );
         let studio = build_studio(&upload_config, &bilibili, videos, recorder)
             .await

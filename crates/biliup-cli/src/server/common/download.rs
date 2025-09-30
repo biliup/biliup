@@ -6,6 +6,7 @@ use crate::server::core::plugin::{DownloadPlugin, StreamInfoExt};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
 use async_channel::{Receiver, Sender};
+use chrono::Local;
 use error_stack::{FutureExt, ResultExt, bail};
 use std::fs;
 use std::path::Path;
@@ -314,17 +315,7 @@ impl DownloadTask {
         let config = self.ctx.worker.get_config();
         let streamer = self.ctx.worker.get_streamer();
         let stream_info = &self.ctx.stream_info;
-        // 确定文件格式后缀
-        let suffix = streamer
-            .format
-            .unwrap_or_else(|| stream_info.suffix.clone());
-        // 创建录制器
-        let recorder = Recorder::new(
-            streamer.filename_prefix.or(config.filename_prefix.clone()),
-            &streamer.remark,
-            &stream_info.streamer_info.title,
-            &suffix,
-        );
+
         // 可选的弹幕客户端
         // 初始化弹幕客户端（如果存在）
         let danmaku_client = self
@@ -336,7 +327,7 @@ impl DownloadTask {
         // 创建下载器实例
         let downloader = self
             .plugin
-            .create_downloader(stream_info, config, recorder)
+            .create_downloader(stream_info, config, self.ctx.recorder.clone())
             .await;
 
         Ok(DownloadComponents {

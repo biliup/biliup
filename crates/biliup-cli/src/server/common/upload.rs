@@ -57,12 +57,9 @@ where
 
     // 3. 提交到B站
     if !uploaded_videos.videos.is_empty() {
-        let recorder = Recorder::new(
-            upload_context.upload_config.title.clone(),
-            &ctx.worker.live_streamer.remark,
-            &ctx.stream_info.streamer_info.title,
-            "",
-        );
+        let mut recorder = ctx.recorder.clone();
+        recorder.filename_prefix = upload_context.upload_config.title.clone();
+
         let studio = build_studio(
             &upload_context.upload_config,
             &upload_context.bilibili,
@@ -238,7 +235,7 @@ pub(crate) async fn build_studio(
 ) -> AppResult<Studio> {
     // 使用 Builder 模式简化构建
     let mut studio: Studio = Studio::builder()
-        .desc(upload_config.description.clone().unwrap_or_default())
+        .desc(recorder.format(&upload_config.description.clone().unwrap_or_default()))
         .maybe_dtime(upload_config.dtime)
         .maybe_copyright(upload_config.copyright)
         .cover(upload_config.cover_path.clone().unwrap_or_default())
@@ -246,7 +243,7 @@ pub(crate) async fn build_studio(
         .source(upload_config.copyright_source.clone().unwrap_or_default())
         .tag(upload_config.tags.join(","))
         .maybe_tid(upload_config.tid)
-        .title(recorder.format_filename(Local::now()))
+        .title(recorder.format_filename())
         .videos(videos)
         .dolby(upload_config.dolby.unwrap_or_default())
         // .lossless_music(upload_config.)

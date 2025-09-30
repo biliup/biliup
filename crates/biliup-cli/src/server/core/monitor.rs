@@ -1,10 +1,12 @@
 use crate::server::common::download::DownloaderMessage;
+use crate::server::common::util::Recorder;
 use crate::server::core::download_manager::ActorHandle;
 use crate::server::core::plugin::{DownloadPlugin, StreamStatus};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
 use crate::server::infrastructure::models::StreamerInfo;
 use async_channel::{Receiver, Sender, bounded};
+use chrono::Local;
 use ormlite::Model;
 use ormlite::model::ModelBuilder;
 use std::sync::Arc;
@@ -34,7 +36,7 @@ async fn start_client(
         if let Some(room) = rooms_handle.next().await {
             let url = room.get_streamer().url;
             interval = room.get_config().event_loop_interval;
-            let mut ctx = Context::new(room.clone(), Default::default(), pool.clone());
+            let mut ctx = Context::new(room.clone(), pool.clone());
             // 检查直播状态
             match plugin.check_status(&mut ctx).await {
                 Ok(StreamStatus::Live { mut stream_info }) => {
@@ -58,7 +60,25 @@ async fn start_client(
                     // 更新状态为等待中
                     room.change_status(Stage::Download, WorkerStatus::Pending);
                     stream_info.streamer_info = insert;
+
+                    let streamer = room.get_streamer();
+                    // 确定文件格式后缀
+                    let suffix = streamer
+                        .format
+                        .unwrap_or_else(|| stream_info.suffix.clone());
+                    // 创建录制器
+                    let recorder = Recorder::new(
+                        streamer
+                            .filename_prefix
+                            .or(room.get_config().filename_prefix.clone()),
+                        &streamer.remark,
+                        &stream_info.streamer_info.title,
+                        &suffix,
+                        stream_info.streamer_info.date.with_timezone(&Local),
+                    );
+                    // 修改 ctx
                     ctx.stream_info = stream_info;
+                    ctx.recorder = recorder;
                     // 发送下载开始消息
                     if actor_handle
                         .down_sender
