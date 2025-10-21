@@ -104,46 +104,73 @@ impl HookStep {
     async fn move_file(&self, video_paths: &[&Path], target_dir: &str) -> AppResult<()> {
         let target_path = Path::new(target_dir);
 
-        // 创建目标目录（如果不存在）
         if !target_path.exists() {
             fs::create_dir_all(target_path)
                 .await
                 .change_context(AppError::Unknown)?;
         }
 
-        // 移动每个视频文件到目标目录
         for video_path in video_paths {
-            let file_name = video_path
-                .file_name()
-                .ok_or(AppError::Custom("Invalid file name".to_string()))?;
-            let destination = target_path.join(file_name);
+            self.move_single_file(video_path, target_path).await?;
 
-            info!(
-                "Moving {} to {}",
-                video_path.display(),
-                destination.display()
-            );
-            fs::rename(video_path, destination)
-                .await
-                .change_context(AppError::Unknown)?;
-
-            let buf = video_path.with_extension("xml");
-            if buf.exists() {
-                let file_name = buf
-                    .file_name()
-                    .ok_or(AppError::Custom("Invalid file name".to_string()))?;
-                let destination = target_path.join(file_name);
-                fs::rename(&buf, &destination)
-                    .await
-                    .change_context(AppError::Unknown)?;
-                info!(
-                    "移动弹幕文件: Moving {} to {}",
-                    buf.display(),
-                    destination.display()
-                );
+            // 移动对应的 XML 文件
+            let xml_path = video_path.with_extension("xml");
+            if xml_path.exists() {
+                info!("移动弹幕文件: {}", xml_path.display());
+                self.move_single_file(&xml_path, target_path).await?;
             }
         }
         Ok(())
+    }
+
+    /// 移动单个文件，支持跨文件系统
+    async fn move_single_file(&self, source: &Path, target_dir: &Path) -> AppResult<()> {
+        let file_name = source
+            .file_name()
+            .ok_or(AppError::Custom("Invalid file name".to_string()))?;
+        let destination = target_dir.join(file_name);
+
+        info!("Moving {} to {}", source.display(), destination.display());
+
+        // 先尝试 rename（快速，仅同文件系统）
+        match fs::rename(source, &destination).await {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                // 检查是否是跨文件系统错误
+                if HookStep::is_cross_device_error(&e) {
+                    info!("检测到跨文件系统操作，使用复制+删除模式");
+                    // 复制文件
+                    fs::copy(source, &destination)
+                        .await
+                        .change_context(AppError::Unknown)?;
+
+                    // 删除原文件
+                    fs::remove_file(source)
+                        .await
+                        .change_context(AppError::Unknown)?;
+
+                    Ok(())
+                } else {
+                    Err(e).change_context(AppError::Unknown)?
+                }
+            }
+        }
+    }
+
+    /// 判断是否是跨设备/文件系统错误
+    fn is_cross_device_error(error: &std::io::Error) -> bool {
+        #[cfg(unix)]
+        {
+            error.raw_os_error() == Some(libc::EXDEV)
+        }
+        #[cfg(windows)]
+        {
+            error.raw_os_error() == Some(17) // ERROR_NOT_SAME_DEVICE
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            error.kind() == std::io::ErrorKind::Other
+        }
     }
 
     /// 删除指定的视频文件

@@ -52,6 +52,7 @@ const Developer: React.FC = () => {
             formApi.setValue('LOGGING.root.handlers', ['console'])
           }}
           showClear={true}
+          disabled
         >
           <Select.Option value="DEBUG">DEBUG</Select.Option>
           <Select.Option value="INFO">INFO</Select.Option>
@@ -72,6 +73,7 @@ const Developer: React.FC = () => {
             formApi.setValue('LOGGING.loggers.biliup.handlers', ['file'])
           }}
           showClear={true}
+          disabled
         >
           <Select.Option value="DEBUG">DEBUG</Select.Option>
           <Select.Option value="INFO">INFO</Select.Option>

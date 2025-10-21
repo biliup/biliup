@@ -136,7 +136,7 @@ impl ServiceRegister {
         if len == 0 {
             *manager.monitor.lock().unwrap() = None;
         }
-        let downloader = match &*removed.downloader_status.read().unwrap() {
+        let downloader = match &*removed.downloader_status.read().await {
             WorkerStatus::Working(downloader) => Some(downloader.clone()),
             _ => None,
         };

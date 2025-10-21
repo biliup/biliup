@@ -46,7 +46,7 @@ impl AuthUser for User {
 
 // 认证凭据结构，用于从表单中提取认证字段
 // 用于与后端进行请求认证
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Credentials {
     /// 用户名
     pub username: String,
@@ -54,6 +54,17 @@ pub struct Credentials {
     pub password: String,
     /// 登录后跳转的URL（可选）
     pub next: Option<String>,
+}
+
+// 手动实现Debug trait以避免意外记录密码哈希
+impl std::fmt::Debug for Credentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Credentials")
+            .field("next", &self.next)
+            .field("username", &self.username)
+            .field("password", &"[redacted]")
+            .finish()
+    }
 }
 
 /// 认证后端

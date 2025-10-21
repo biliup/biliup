@@ -384,7 +384,8 @@ impl UActor {
         match msg {
             UploaderMessage::SegmentEvent(rx, ctx) => {
                 ctx.worker
-                    .change_status(Stage::Upload, WorkerStatus::Pending);
+                    .change_status(Stage::Upload, WorkerStatus::Pending)
+                    .await;
                 let inspect = rx.inspect(|f| {
                     let pool = ctx.pool.clone();
                     let streamer_info_id = ctx.stream_info.streamer_info.id;
@@ -417,7 +418,7 @@ impl UActor {
                     // 可以添加错误通知机制
                 }
                 info!(url=ctx.stream_info.streamer_info.url, result=?result, "后处理执行完毕：Finished processing segment event");
-                ctx.worker.change_status(Stage::Upload, WorkerStatus::Idle);
+                ctx.worker.change_status(Stage::Upload, WorkerStatus::Idle).await;
             }
         }
     }

@@ -25,6 +25,25 @@ pub struct StreamerInfo {
     pub live_cover_path: String,
 }
 
+impl StreamerInfo {
+    pub fn new(
+        name: &str,
+        url: &str,
+        title: &str,
+        date: DateTime<Utc>,
+        live_cover_path: &str,
+    ) -> Self {
+        Self {
+            id: -1,
+            name: name.to_string(),
+            url: url.to_string(),
+            title: title.to_string(),
+            date,
+            live_cover_path: live_cover_path.to_string(),
+        }
+    }
+}
+
 /// 文件列表模型
 /// 存储录制文件的信息
 #[derive(Model, Debug, Clone, Serialize, Deserialize)]

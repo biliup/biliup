@@ -28,7 +28,7 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
                 .put(put_streamers_endpoint), // 更新主播
         )
         .route("/v1/streamers/{id}", delete(delete_streamers_endpoint)) // 删除主播
-        .route("/v1/streamers/{id}/pause", put(pause_streamers_endpoint)) // 删除主播
+        .route("/v1/streamers/{id}/pause", put(pause_streamers_endpoint))
         // 配置管理路由
         .route(
             "/v1/configuration",

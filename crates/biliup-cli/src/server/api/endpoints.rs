@@ -25,7 +25,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Json, debug_handler};
 use biliup::credential::Credential;
-use chrono::Local;
+use chrono::{Local, Utc};
 use clap::ValueEnum;
 use error_stack::{Report, ResultExt, bail};
 use ormlite::{Insert, Model};
@@ -47,29 +47,29 @@ pub async fn get_streamers_endpoint(
     State(workers): State<Arc<RwLock<Vec<Arc<Worker>>>>>,
 ) -> Result<Json<Vec<LiveStreamerResponse>>, Response> {
     let live_streamers = get_all_streamer(&pool).await.map_err(report_to_response)?;
-    Ok(Json(
-        live_streamers
+    let mut results = Vec::new();
+    for x in live_streamers {
+        let option = workers
+            .read()
+            .unwrap()
+            .clone()
             .into_iter()
-            .map(|x| {
-                let option = workers
-                    .read()
-                    .unwrap()
-                    .clone()
-                    .into_iter()
-                    .find(|worker| worker.live_streamer.id == x.id);
-                LiveStreamerResponse {
-                    status: option
-                        .as_ref()
-                        .map(|t| format!("{:?}", *t.downloader_status.read().unwrap()))
-                        .unwrap_or_default(),
-                    inner: x,
-                    upload_status: option
-                        .map(|t| format!("{:?}", *t.uploader_status.read().unwrap()))
-                        .unwrap_or_default(),
-                }
-            })
-            .collect(),
-    ))
+            .find(|worker| worker.live_streamer.id == x.id);
+
+        let status = match option.as_ref() {
+            Some(t) => format!("{:?}", *t.downloader_status.read().await),
+            None => String::new(),
+        };
+
+        results.push(LiveStreamerResponse {
+            status,
+            inner: x,
+            upload_status: option
+                .map(|t| format!("{:?}", *t.uploader_status.read().unwrap()))
+                .unwrap_or_default(),
+        });
+    }
+    Ok(Json(results))
 }
 
 pub async fn post_streamers_endpoint(
@@ -147,7 +147,7 @@ pub async fn delete_streamers_endpoint(
     Ok(Json(live_streamers))
 }
 
-#[axum::debug_handler(state = ServiceRegister)]
+// #[axum::debug_handler(state = ServiceRegister)]
 pub async fn pause_streamers_endpoint(
     State(service_register): State<ServiceRegister>,
     State(pool): State<ConnectionPool>,
@@ -166,33 +166,32 @@ pub async fn pause_streamers_endpoint(
             .ok_or(AppError::Unknown)
             .map_err(report_to_response)?;
         let monitor = manager.ensure_monitor(pool.clone());
-        let worker_status = w.downloader_status.read().unwrap().clone();
-        let d = match worker_status {
+        let worker_status = w.downloader_status.read().await.clone();
+        match worker_status {
             WorkerStatus::Working(d) => {
-                w.change_status(Stage::Download, WorkerStatus::Pause);
-                Some(d.clone())
-            }
-            WorkerStatus::Pending => {
-                monitor.rooms_handle.toggle(w.clone()).await;
-                w.change_status(Stage::Download, WorkerStatus::Pause);
-                None
-            }
-            WorkerStatus::Idle => {
-                monitor.rooms_handle.toggle(w.clone()).await;
-                w.change_status(Stage::Download, WorkerStatus::Pause);
-                None
+                d.stop().await.map_err(report_to_response)?;
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                monitor
+                    .rooms_handle
+                    .toggle(w.clone(), WorkerStatus::Pause)
+                    .await;
+                info!(workers=?&w.live_streamer.url, "successfully pause live streamers");
             }
             WorkerStatus::Pause => {
-                monitor.rooms_handle.toggle(w.clone()).await;
-                w.change_status(Stage::Download, WorkerStatus::Idle);
-                None
+                monitor
+                    .rooms_handle
+                    .toggle(w.clone(), WorkerStatus::Idle)
+                    .await;
+                info!(workers=?&w.live_streamer.url, "successfully start live streamers");
+            }
+            _ => {
+                monitor
+                    .rooms_handle
+                    .toggle(w.clone(), WorkerStatus::Pause)
+                    .await;
+                info!("非预期状态")
             }
         };
-
-        if let Some(d) = d {
-            d.stop().await.map_err(report_to_response)?;
-        }
-        info!(workers=?&w.live_streamer.url, "successfully pause live streamers");
     }
 
     Ok(Json(()))
@@ -513,20 +512,23 @@ pub async fn get_videos() -> Result<Json<Vec<serde_json::Value>>, Response> {
     Ok(Json(file_list))
 }
 
+// #[axum::debug_handler(state = ServiceRegister)]
 pub async fn get_status(
     State(service_register): State<ServiceRegister>,
     State(workers): State<Arc<RwLock<Vec<Arc<Worker>>>>>,
     State(config): State<Arc<RwLock<Config>>>,
     State(actor_handle): State<Arc<ActorHandle>>,
 ) -> Result<Json<serde_json::Value>, Response> {
+    let workers_clone = workers.read().unwrap().clone(); // 如果 Vec 本身可以克隆
+
     let mut sw = Vec::new();
-    for worker in workers.read().unwrap().iter() {
+    for worker in &workers_clone {
         sw.push(serde_json::json!({
-        "downloader_status": format!("{:?}", worker.downloader_status.read().unwrap()),
-        "uploader_status": format!("{:?}", worker.uploader_status.read().unwrap()),
-        "live_streamer": worker.live_streamer,
-        "upload_streamer": worker.upload_streamer,
-        }))
+            "downloader_status": format!("{:?}", worker.downloader_status.read().await),
+            "uploader_status": format!("{:?}", worker.uploader_status.read().unwrap()),
+            "live_streamer": worker.live_streamer,
+            "upload_streamer": worker.upload_streamer,
+        }));
     }
 
     Ok(Json(serde_json::json!({
@@ -573,10 +575,14 @@ pub async fn post_uploads(
     if !videos.is_empty() {
         let recorder = Recorder::new(
             upload_config.title.clone(),
-            &upload_config.template_name,
-            "stream_title",
+            StreamerInfo::new(
+                &upload_config.template_name,
+                "stream_title",
+                "",
+                Utc::now(),
+                "",
+            ),
             "",
-            Local::now(),
         );
         let studio = build_studio(&upload_config, &bilibili, videos, recorder)
             .await

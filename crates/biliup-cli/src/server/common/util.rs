@@ -1,3 +1,4 @@
+use crate::server::infrastructure::models::StreamerInfo;
 use chrono::{DateTime, Duration, Local};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -8,30 +9,18 @@ use url::Url;
 pub struct Recorder {
     ///  filename_prefix   文件名前缀模板
     pub filename_prefix: Option<String>,
-    /// 主播名称
-    pub fname: String,
-    /// 直播间标题
-    pub room_title: String,
+    /// 直播间信息
+    pub streamer_info: StreamerInfo,
     /// 录制后保存文件格式 (mp4, ts, mkv, flv)，不含点
     pub suffix: String,
-    /// 开播时间
-    date_time: DateTime<Local>,
 }
 
 impl Recorder {
-    pub fn new(
-        filename_prefix: Option<String>,
-        fname: &str,
-        room_title: &str,
-        suffix: &str,
-        date_time: DateTime<Local>,
-    ) -> Self {
+    pub fn new(filename_prefix: Option<String>, streamer_info: StreamerInfo, suffix: &str) -> Self {
         Self {
             filename_prefix,
-            fname: fname.to_string(),
-            room_title: room_title.to_string(),
+            streamer_info,
             suffix: suffix.to_string(),
-            date_time,
         }
     }
 
@@ -40,15 +29,16 @@ impl Recorder {
         let raw = if let Some(prefix) = &self.filename_prefix {
             self.template_with(prefix)
         } else {
-            format!("{}%Y-%m-%dT%H_%M_%S", self.fname)
+            format!("{}%Y-%m-%dT%H_%M_%S", self.streamer_info.name)
         };
         sanitize_filename(&raw)
     }
 
     fn template_with(&self, template: &str) -> String {
         template
-            .replace("{streamer}", &self.fname)
-            .replace("{title}", &self.room_title)
+            .replace("{streamer}", &self.streamer_info.name)
+            .replace("{title}", &self.streamer_info.title)
+            .replace("{url}", &self.streamer_info.url)
     }
 
     /// 生成“基名”（不带扩展名），时间冲突时按秒+1继续尝试，直到唯一
@@ -68,11 +58,17 @@ impl Recorder {
     /// 生成“基名”（不带扩展名）
     pub fn format_filename(&self) -> String {
         let template = self.filename_template();
-        self.date_time.format(&template).to_string()
+        self.streamer_info
+            .date
+            .with_timezone(&Local)
+            .format(&template)
+            .to_string()
     }
 
     pub fn format(&self, template: &str) -> String {
-        self.date_time
+        self.streamer_info
+            .date
+            .with_timezone(&Local)
             .format(&self.template_with(template))
             .to_string()
     }
