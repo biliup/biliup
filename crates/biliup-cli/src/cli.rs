@@ -123,8 +123,8 @@ pub enum Commands {
 
         /// Port to use
         #[arg(short, long, default_value = "19159")]
-        port: u16,        
-        
+        port: u16,
+
         /// Port to use
         #[arg(short, long, default_value = "false")]
         auth: bool,

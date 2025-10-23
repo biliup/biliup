@@ -88,9 +88,10 @@ impl HookStep {
         // 等待进程完成并检查退出状态
         let status = process.wait().await.change_context(AppError::Unknown)?;
         if !status.success() {
-            bail!(AppError::Custom(
-                format!("Command failed with status: {}", status)
-            ));
+            bail!(AppError::Custom(format!(
+                "Command failed with status: {}",
+                status
+            )));
         }
 
         Ok(())

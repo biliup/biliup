@@ -19,10 +19,10 @@ use crate::server::infrastructure::repositories::{
     del_streamer, get_all_streamer, get_upload_config,
 };
 use crate::server::infrastructure::service_register::ServiceRegister;
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use biliup::credential::Credential;
 use chrono::Utc;
 use clap::ValueEnum;
@@ -34,7 +34,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, UNIX_EPOCH};
 use tokio::fs;
-use tokio::io::{AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tracing::info;
 
 pub async fn get_streamers_endpoint(

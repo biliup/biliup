@@ -16,6 +16,7 @@ use biliup::credential::Credential;
 use biliup::downloader::extractor::CallbackFn;
 use biliup::downloader::util::{LifecycleFile, Segmentable};
 use biliup::downloader::{hls, httpflv};
+use clap::Parser;
 use pyo3::types::{PyList, PyType};
 use std::collections::HashMap;
 use std::env::args;
@@ -23,7 +24,6 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Mutex, Once};
 use std::time::Duration;
-use clap::Parser;
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
@@ -463,7 +463,6 @@ fn upload(
 
 #[pyfunction]
 pub fn main_loop(py: Python<'_>) -> PyResult<()> {
-
     // 获取 Python 的 sys.argv
     let sys = py.import("sys")?;
     let bound = sys.getattr("argv")?;
@@ -481,13 +480,17 @@ pub fn main_loop(py: Python<'_>) -> PyResult<()> {
         &[] => todo!(),
         &[_] => {
             args.push("server".to_string());
-        },
-        [_, command, ..] => if command == "start" {
-            args[1] = "server".to_string();
+        }
+        [_, command, ..] => {
+            if command == "start" {
+                args[1] = "server".to_string();
+            }
         }
     }
 
-    py.detach(|| server::_main(args.as_slice()).map_err(|e| PyRuntimeError::new_err(format!("{e:?}"))))
+    py.detach(|| {
+        server::_main(args.as_slice()).map_err(|e| PyRuntimeError::new_err(format!("{e:?}")))
+    })
 
     // for item in plugin_list.iter() {
     //     // 每个元素都是一个类（type）

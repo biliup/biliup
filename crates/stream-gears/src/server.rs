@@ -1,6 +1,9 @@
 use crate::{DanmakuClient, construct_headers, download};
 use async_trait::async_trait;
 use biliup::downloader::util::Segmentable;
+use biliup::uploader::util::SubmitOption;
+use biliup_cli::cli::{Cli, Commands};
+use biliup_cli::downloader::generate_json;
 use biliup_cli::server::app::ApplicationController;
 use biliup_cli::server::common::util::{Recorder, media_ext_from_url, parse_time};
 use biliup_cli::server::config::{Config, default_segment_time};
@@ -16,7 +19,9 @@ use biliup_cli::server::infrastructure::models::StreamerInfo;
 use biliup_cli::server::infrastructure::repositories;
 use biliup_cli::server::infrastructure::repositories::get_upload_config;
 use biliup_cli::server::infrastructure::service_register::ServiceRegister;
+use biliup_cli::uploader::{append, list, login, renew, show, upload_by_command, upload_by_config};
 use chrono::Utc;
+use clap::Parser;
 use error_stack::{Report, ResultExt};
 use fancy_regex::Regex;
 use pyo3::prelude::PyDictMethods;
@@ -31,12 +36,7 @@ use std::net::ToSocketAddrs;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, RwLock};
-use clap::Parser;
 use tracing::{debug, info};
-use biliup::uploader::util::SubmitOption;
-use biliup_cli::cli::{Cli, Commands};
-use biliup_cli::downloader::generate_json;
-use biliup_cli::uploader::{append, list, login, renew, show, upload_by_command, upload_by_config};
 
 #[derive(Debug)]
 pub struct PyPlugin {
@@ -85,7 +85,9 @@ impl DownloadPlugin for PyPlugin {
                         Arc::new(DanmakuClient::new(Arc::new(danmaku))) as Arc<dyn Downloader>;
                     ctx.extension.insert(danmaku);
                 }
-                Ok(StreamStatus::Live { stream_info: Box::new(info) })
+                Ok(StreamStatus::Live {
+                    stream_info: Box::new(info),
+                })
             }
             None => Ok(StreamStatus::Offline),
         }
@@ -353,9 +355,8 @@ fn cfg_arc() -> &'static Arc<RwLock<Config>> {
 
 #[tokio::main]
 pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
-
     let cli = Cli::try_parse_from(args).change_context(AppError::Unknown)?;
-    
+
     match cli.command {
         Commands::Login => login(cli.user_cookie, cli.proxy.as_deref()).await?,
         Commands::Renew => {
@@ -378,7 +379,7 @@ pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
                 submit.unwrap_or(SubmitOption::App),
                 cli.proxy.as_deref(),
             )
-                .await?
+            .await?
         }
         Commands::Upload {
             video_path: _,
@@ -405,7 +406,7 @@ pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
                 submit.unwrap_or(SubmitOption::App),
                 cli.proxy.as_deref(),
             )
-                .await?
+            .await?
         }
         Commands::Show { vid } => show(cli.user_cookie, vid, cli.proxy.as_deref()).await?,
         Commands::DumpFlv { file_name } => generate_json(file_name)?,
@@ -417,8 +418,8 @@ pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
         } => biliup_cli::downloader::download(&url, output, split_size, split_time).await?,
         Commands::Server { bind, port, auth } => {
             info!(
-        "environment loaded and configuration parsed, initializing Postgres connection and running migrations..."
-    );
+                "environment loaded and configuration parsed, initializing Postgres connection and running migrations..."
+            );
             let conn_pool = ConnectionManager::new_pool("data/data.sqlite3")
                 .await
                 .expect("could not initialize the database connection pool");
@@ -430,14 +431,16 @@ pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
             ));
             let vec = from_py(actor_handle.clone()).unwrap();
 
-            let service_register = ServiceRegister::new(conn_pool, CONFIG.clone(), actor_handle, vec);
+            let service_register =
+                ServiceRegister::new(conn_pool, CONFIG.clone(), actor_handle, vec);
 
             let all_streamer = repositories::get_all_streamer(&service_register.pool).await?;
 
             for streamer in all_streamer {
                 // workers.push(Arc::new(Worker::new(streamer.id, service_register.pool.clone())));
                 if let Some(manager) = service_register.get_manager(&streamer.url) {
-                    let upload_config = get_upload_config(&service_register.pool, streamer.id).await?;
+                    let upload_config =
+                        get_upload_config(&service_register.pool, streamer.id).await?;
                     let _ = service_register
                         .add_room(manager, streamer, upload_config)
                         .await?;
@@ -455,7 +458,7 @@ pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
                 .await
                 .attach("could not initialize application routes")?;
             // biliup_cli::run((&bind, port)).await?
-        },
+        }
         Commands::List {
             is_pubing,
             pubed,
@@ -472,7 +475,7 @@ pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
                 from_page,
                 max_pages,
             )
-                .await?
+            .await?
         }
     };
 

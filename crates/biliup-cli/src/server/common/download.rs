@@ -58,9 +58,10 @@ impl DownloadGuard {
         let worker = self.worker.clone();
 
         if let Some(client) = danmaku
-            && let Err(e) = client.stop().await {
-                error!("Error stopping danmaku client: {}", e);
-            }
+            && let Err(e) = client.stop().await
+        {
+            error!("Error stopping danmaku client: {}", e);
+        }
 
         // 确保状态更新和资源清理
         rooms_handle
@@ -219,9 +220,9 @@ impl SegmentEventProcessor {
                     if let Some(ref client) = danmaku
                         && let Err(e) = client
                             .rolling(&next_file_path.with_extension("xml").display().to_string())
-                        {
-                            error!("Danmaku rolling error: {}", e);
-                        }
+                    {
+                        error!("Danmaku rolling error: {}", e);
+                    }
                 }
                 SegmentEvent::Segment(event) => {
                     // 触发弹幕滚动保存
@@ -232,9 +233,10 @@ impl SegmentEventProcessor {
                                 .with_extension("xml")
                                 .display()
                                 .to_string(),
-                        ) {
-                            error!("Danmaku rolling error: {}", e);
-                        }
+                        )
+                    {
+                        error!("Danmaku rolling error: {}", e);
+                    }
                     // 异步处理事件
                     let processor = processor.clone();
                     if let Err(e) = processor.process(event) {

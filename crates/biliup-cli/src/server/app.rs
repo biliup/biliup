@@ -26,7 +26,11 @@ pub struct ApplicationController;
 
 impl ApplicationController {
     /// 启动Web服务器
-    pub async fn serve(addr: &SocketAddr, enable_login_guard: bool, service_register: ServiceRegister) -> AppResult<()> {
+    pub async fn serve(
+        addr: &SocketAddr,
+        enable_login_guard: bool,
+        service_register: ServiceRegister,
+    ) -> AppResult<()> {
         // 会话层配置
         // 使用 tower-sessions 建立会话层，将会话作为请求扩展提供
         let session_store = SqliteStore::new(service_register.pool.clone());

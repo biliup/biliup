@@ -1,3 +1,4 @@
+use crate::server::errors::{AppError, AppResult};
 use biliup::downloader::extractor::find_extractor;
 use biliup::downloader::flv_parser::{
     CodecId, SoundFormat, TagData, aac_audio_packet_header, avc_video_packet_header, header,
@@ -7,7 +8,6 @@ use biliup::downloader::flv_writer;
 use biliup::downloader::flv_writer::{FlvTag, TagDataHeader};
 use biliup::downloader::httpflv::map_parse_err;
 use biliup::downloader::util::Segmentable;
-use crate::server::errors::{AppError, AppResult};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use error_stack::ResultExt;
 use std::io::{BufReader, BufWriter, ErrorKind, Read};

@@ -1,6 +1,6 @@
-pub mod server;
 pub mod cli;
 pub mod downloader;
+pub mod server;
 pub mod uploader;
 
 // use crate::server::api::router::ApplicationController;
