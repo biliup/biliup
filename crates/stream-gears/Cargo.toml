@@ -9,8 +9,8 @@ name = "stream_gears"
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-pyo3 = { version = "0.26", features = ["abi3-py38", "anyhow"] }
-pythonize = { version = "0.26.0" }
+pyo3 = { version = "0.27.1", features = ["abi3-py38", "anyhow"] }
+pythonize = { git = "https://github.com/davidhewitt/pythonize.git", rev = "6140fe00f601f418371d969bedbcd27944a6956a" }
 bytes = { workspace = true }
 ormlite = { version = "0.24.1", features = ["sqlite", "chrono"] }
 rust-embed = "8.7.2"

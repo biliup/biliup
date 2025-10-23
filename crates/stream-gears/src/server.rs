@@ -1,4 +1,4 @@
-use crate::{DanmakuClient, construct_headers};
+use crate::{DanmakuClient, construct_headers, download};
 use async_trait::async_trait;
 use biliup::downloader::util::Segmentable;
 use biliup_cli::server::app::ApplicationController;
@@ -11,15 +11,14 @@ use biliup_cli::server::core::downloader::{DownloadConfig, Downloader, Downloade
 use biliup_cli::server::core::plugin::{DownloadPlugin, StreamInfoExt, StreamStatus};
 use biliup_cli::server::errors::{AppError, AppResult};
 use biliup_cli::server::infrastructure::connection_pool::ConnectionManager;
-use biliup_cli::server::infrastructure::context::{Context, Worker};
+use biliup_cli::server::infrastructure::context::Context;
 use biliup_cli::server::infrastructure::models::StreamerInfo;
 use biliup_cli::server::infrastructure::repositories;
 use biliup_cli::server::infrastructure::repositories::get_upload_config;
 use biliup_cli::server::infrastructure::service_register::ServiceRegister;
-use chrono::{DateTime, Local, NaiveDateTime, Utc};
+use chrono::Utc;
 use error_stack::{Report, ResultExt};
 use fancy_regex::Regex;
-use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::PyDictMethods;
 use pyo3::prelude::{PyAnyMethods, PyListMethods, PyModule};
 use pyo3::types::PyDict;
@@ -32,8 +31,12 @@ use std::net::ToSocketAddrs;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, RwLock};
-use time::OffsetDateTime;
+use clap::Parser;
 use tracing::{debug, info};
+use biliup::uploader::util::SubmitOption;
+use biliup_cli::cli::{Cli, Commands};
+use biliup_cli::downloader::generate_json;
+use biliup_cli::uploader::{append, list, login, renew, show, upload_by_command, upload_by_config};
 
 #[derive(Debug)]
 pub struct PyPlugin {
@@ -82,7 +85,7 @@ impl DownloadPlugin for PyPlugin {
                         Arc::new(DanmakuClient::new(Arc::new(danmaku))) as Arc<dyn Downloader>;
                     ctx.extension.insert(danmaku);
                 }
-                Ok(StreamStatus::Live { stream_info: info })
+                Ok(StreamStatus::Live { stream_info: Box::new(info) })
             }
             None => Ok(StreamStatus::Offline),
         }
@@ -102,7 +105,7 @@ impl DownloadPlugin for PyPlugin {
                     segment_time: config.segment_time.or_else(default_segment_time),
                     file_size: Some(config.file_size), // 2GB
                     headers: stream_info.stream_headers.clone(),
-                    recorder: recorder,
+                    recorder,
                     // output_dir: PathBuf::from("./downloads")
                     output_dir: PathBuf::from("."),
                 };
@@ -349,44 +352,129 @@ fn cfg_arc() -> &'static Arc<RwLock<Config>> {
 }
 
 #[tokio::main]
-pub(crate) async fn _main() -> AppResult<()> {
-    info!(
+pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
+
+    let cli = Cli::try_parse_from(args).change_context(AppError::Unknown)?;
+    
+    match cli.command {
+        Commands::Login => login(cli.user_cookie, cli.proxy.as_deref()).await?,
+        Commands::Renew => {
+            renew(cli.user_cookie, cli.proxy.as_deref()).await?;
+        }
+        Commands::Upload {
+            video_path,
+            config: None,
+            line,
+            limit,
+            studio,
+            submit,
+        } => {
+            upload_by_command(
+                studio,
+                cli.user_cookie,
+                video_path,
+                line,
+                limit,
+                submit.unwrap_or(SubmitOption::App),
+                cli.proxy.as_deref(),
+            )
+                .await?
+        }
+        Commands::Upload {
+            video_path: _,
+            config: Some(config),
+            submit,
+            ..
+        } => {
+            upload_by_config(config, cli.user_cookie, submit, cli.proxy.as_deref()).await?;
+        }
+        Commands::Append {
+            video_path,
+            vid,
+            line,
+            limit,
+            studio: _,
+            submit,
+        } => {
+            append(
+                cli.user_cookie,
+                vid,
+                video_path,
+                line,
+                limit,
+                submit.unwrap_or(SubmitOption::App),
+                cli.proxy.as_deref(),
+            )
+                .await?
+        }
+        Commands::Show { vid } => show(cli.user_cookie, vid, cli.proxy.as_deref()).await?,
+        Commands::DumpFlv { file_name } => generate_json(file_name)?,
+        Commands::Download {
+            url,
+            output,
+            split_size,
+            split_time,
+        } => biliup_cli::downloader::download(&url, output, split_size, split_time).await?,
+        Commands::Server { bind, port, auth } => {
+            info!(
         "environment loaded and configuration parsed, initializing Postgres connection and running migrations..."
     );
-    let conn_pool = ConnectionManager::new_pool("data/data.sqlite3")
-        .await
-        .expect("could not initialize the database connection pool");
+            let conn_pool = ConnectionManager::new_pool("data/data.sqlite3")
+                .await
+                .expect("could not initialize the database connection pool");
 
-    *CONFIG.write().unwrap() = repositories::get_config(&conn_pool).await?;
-    let actor_handle = Arc::new(ActorHandle::new(
-        CONFIG.read().unwrap().pool1_size,
-        CONFIG.read().unwrap().pool2_size,
-    ));
-    let vec = from_py(actor_handle.clone()).unwrap();
+            *CONFIG.write().unwrap() = repositories::get_config(&conn_pool).await?;
+            let actor_handle = Arc::new(ActorHandle::new(
+                CONFIG.read().unwrap().pool1_size,
+                CONFIG.read().unwrap().pool2_size,
+            ));
+            let vec = from_py(actor_handle.clone()).unwrap();
 
-    let service_register = ServiceRegister::new(conn_pool, CONFIG.clone(), actor_handle, vec);
+            let service_register = ServiceRegister::new(conn_pool, CONFIG.clone(), actor_handle, vec);
 
-    let all_streamer = repositories::get_all_streamer(&service_register.pool).await?;
+            let all_streamer = repositories::get_all_streamer(&service_register.pool).await?;
 
-    for streamer in all_streamer {
-        // workers.push(Arc::new(Worker::new(streamer.id, service_register.pool.clone())));
-        if let Some(manager) = service_register.get_manager(&streamer.url) {
-            let upload_config = get_upload_config(&service_register.pool, streamer.id).await?;
-            let _ = service_register
-                .add_room(&manager, streamer, upload_config)
-                .await?;
-        };
-    }
+            for streamer in all_streamer {
+                // workers.push(Arc::new(Worker::new(streamer.id, service_register.pool.clone())));
+                if let Some(manager) = service_register.get_manager(&streamer.url) {
+                    let upload_config = get_upload_config(&service_register.pool, streamer.id).await?;
+                    let _ = service_register
+                        .add_room(manager, streamer, upload_config)
+                        .await?;
+                };
+            }
 
-    info!("migrations successfully ran, initializing axum server...");
-    let addr = ("0.0.0.0", 19159);
-    let addr = addr
-        .to_socket_addrs()
-        .change_context(AppError::Unknown)?
-        .next()
-        .unwrap();
-    ApplicationController::serve(&addr, service_register)
-        .await
-        .attach("could not initialize application routes")?;
+            info!("migrations successfully ran, initializing axum server...");
+            let addr = (bind, port);
+            let addr = addr
+                .to_socket_addrs()
+                .change_context(AppError::Unknown)?
+                .next()
+                .unwrap();
+            ApplicationController::serve(&addr, auth, service_register)
+                .await
+                .attach("could not initialize application routes")?;
+            // biliup_cli::run((&bind, port)).await?
+        },
+        Commands::List {
+            is_pubing,
+            pubed,
+            not_pubed,
+            from_page,
+            max_pages,
+        } => {
+            list(
+                cli.user_cookie,
+                is_pubing,
+                pubed,
+                not_pubed,
+                cli.proxy.as_deref(),
+                from_page,
+                max_pages,
+            )
+                .await?
+        }
+    };
+
     Ok(())
 }

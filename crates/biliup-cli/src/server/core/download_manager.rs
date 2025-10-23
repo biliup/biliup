@@ -1,12 +1,10 @@
 use crate::server::common::download::{DActor, DownloaderMessage};
 use crate::server::common::upload::{UActor, UploaderMessage};
-use crate::server::core::downloader::Downloader;
 use crate::server::core::monitor::Monitor;
 use crate::server::core::plugin::DownloadPlugin;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use async_channel::{Sender, bounded};
 use core::fmt;
-use error_stack::ResultExt;
 use std::sync::{Arc, Mutex};
 use tokio::task::JoinHandle;
 /// 下载管理器

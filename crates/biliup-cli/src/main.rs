@@ -1,12 +1,8 @@
-mod cli;
-mod downloader;
-mod uploader;
-
 use time::macros::format_description;
 
-use crate::cli::{Cli, Commands};
-use crate::downloader::{download, generate_json};
-use crate::uploader::{append, list, login, renew, show, upload_by_command, upload_by_config};
+use biliup_cli::cli::{Cli, Commands};
+use biliup_cli::downloader::{download, generate_json};
+use biliup_cli::uploader::{append, list, login, renew, show, upload_by_command, upload_by_config};
 use biliup::uploader::util::SubmitOption;
 
 use clap::Parser;
@@ -101,7 +97,7 @@ async fn main() -> AppResult<()> {
             split_size,
             split_time,
         } => download(&url, output, split_size, split_time).await?,
-        Commands::Server { bind, port } => biliup_cli::run((&bind, port)).await?,
+        Commands::Server { bind, port, auth } => biliup_cli::run((&bind, port)).await?,
         Commands::List {
             is_pubing,
             pubed,

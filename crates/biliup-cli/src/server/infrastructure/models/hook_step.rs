@@ -89,7 +89,7 @@ impl HookStep {
         let status = process.wait().await.change_context(AppError::Unknown)?;
         if !status.success() {
             bail!(AppError::Custom(
-                format!("Command failed with status: {}", status).into()
+                format!("Command failed with status: {}", status)
             ));
         }
 

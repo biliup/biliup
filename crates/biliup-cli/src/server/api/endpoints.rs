@@ -6,7 +6,7 @@ use crate::server::core::download_manager::ActorHandle;
 use crate::server::core::downloader::Downloader;
 use crate::server::errors::{AppError, report_to_response};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::context::{Stage, Worker, WorkerStatus};
+use crate::server::infrastructure::context::{Worker, WorkerStatus};
 use crate::server::infrastructure::dto::LiveStreamerResponse;
 use crate::server::infrastructure::models::live_streamer::{InsertLiveStreamer, LiveStreamer};
 use crate::server::infrastructure::models::upload_streamer::{
@@ -19,28 +19,23 @@ use crate::server::infrastructure::repositories::{
     del_streamer, get_all_streamer, get_upload_config,
 };
 use crate::server::infrastructure::service_register::ServiceRegister;
-use axum::extract::ws::{Message, Utf8Bytes, WebSocket};
-use axum::extract::{Path, Query, State, WebSocketUpgrade};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::{Json, debug_handler};
+use axum::Json;
 use biliup::credential::Credential;
-use chrono::{Local, Utc};
+use chrono::Utc;
 use clap::ValueEnum;
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{Report, ResultExt};
 use ormlite::{Insert, Model};
 use serde::Deserialize;
 use serde_json::json;
-use std::collections::VecDeque;
-use std::io;
-use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, UNIX_EPOCH};
 use tokio::fs;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
-use tokio::time::{MissedTickBehavior, interval};
-use tracing::{debug, error, info};
+use tokio::io::{AsyncWriteExt};
+use tracing::info;
 
 pub async fn get_streamers_endpoint(
     State(pool): State<ConnectionPool>,
@@ -92,7 +87,7 @@ pub async fn post_streamers_endpoint(
         .await
         .map_err(report_to_response)?;
     service_register
-        .add_room(&manager, live_streamers.clone(), upload_config)
+        .add_room(manager, live_streamers.clone(), upload_config)
         .await
         .map_err(report_to_response)?;
 
@@ -125,7 +120,7 @@ pub async fn put_streamers_endpoint(
         .map_err(report_to_response)?;
 
     service_register
-        .add_room(&manager, streamer.clone(), upload_config)
+        .add_room(manager, streamer.clone(), upload_config)
         .await
         .map_err(report_to_response)?;
 

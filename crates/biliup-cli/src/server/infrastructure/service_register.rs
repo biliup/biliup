@@ -1,9 +1,8 @@
 use crate::server::config::Config;
 use crate::server::core::download_manager::{ActorHandle, DownloadManager};
-use crate::server::core::monitor::Monitor;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::context::{Context, Worker, WorkerStatus};
+use crate::server::infrastructure::context::{Worker, WorkerStatus};
 use crate::server::infrastructure::models::live_streamer::LiveStreamer;
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
 use axum::extract::FromRef;

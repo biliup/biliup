@@ -1,17 +1,15 @@
 use crate::server::common::util::Recorder;
 use crate::server::config::Config;
 use crate::server::core::downloader::Downloader;
-use crate::server::errors::{AppError, AppResult};
-use crate::server::infrastructure::context::{Context, Worker};
+use crate::server::errors::AppError;
+use crate::server::infrastructure::context::Context;
 use crate::server::infrastructure::models::StreamerInfo;
 use async_trait::async_trait;
-use chrono::{DateTime, Local};
 use error_stack::Report;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use time::OffsetDateTime;
 
 /// 流信息结构
 /// 包含直播流的详细信息
@@ -33,7 +31,7 @@ pub struct StreamInfoExt {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StreamStatus {
     /// 正在直播，包含流信息
-    Live { stream_info: StreamInfoExt },
+    Live { stream_info: Box<StreamInfoExt> },
     /// 离线状态
     Offline,
     /// 未知状态

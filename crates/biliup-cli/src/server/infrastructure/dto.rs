@@ -1,6 +1,5 @@
-use crate::server::infrastructure::context::WorkerStatus;
 use crate::server::infrastructure::models::live_streamer::LiveStreamer;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 /// 直播主播响应数据传输对象
 /// 包含主播信息和当前工作状态

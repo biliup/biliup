@@ -156,7 +156,7 @@ async fn send_last_lines(
     let file_size = meta.len();
 
     let file = fs::File::open(path).await?;
-    let mut reader = BufReader::new(file);
+    let reader = BufReader::new(file);
     let mut lines = reader.lines();
 
     let mut buf: VecDeque<String> = VecDeque::with_capacity(n);

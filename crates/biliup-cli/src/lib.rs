@@ -1,4 +1,7 @@
 pub mod server;
+pub mod cli;
+pub mod downloader;
+pub mod uploader;
 
 // use crate::server::api::router::ApplicationController;
 use crate::server::app::ApplicationController;
@@ -12,7 +15,7 @@ use error_stack::ResultExt;
 use std::net::ToSocketAddrs;
 use std::sync::{Arc, RwLock};
 
-pub async fn run(addr: (&str, u16)) -> AppResult<()> {
+pub async fn run(addr: (&str, u16), auth: bool) -> AppResult<()> {
     // let config = Arc::new(AppConfig::parse());
 
     tracing::info!(
@@ -37,7 +40,7 @@ pub async fn run(addr: (&str, u16)) -> AppResult<()> {
         .change_context(AppError::Unknown)?
         .next()
         .unwrap();
-    ApplicationController::serve(&addr, service_register)
+    ApplicationController::serve(&addr, auth, service_register)
         .await
         .attach("could not initialize application routes")?;
     Ok(())

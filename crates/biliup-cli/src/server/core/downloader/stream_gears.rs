@@ -11,7 +11,6 @@ use error_stack::{ResultExt, bail};
 use nom::Err;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use std::time::SystemTime;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 

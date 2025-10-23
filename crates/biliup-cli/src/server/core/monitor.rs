@@ -6,14 +6,13 @@ use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
 use crate::server::infrastructure::models::StreamerInfo;
 use async_channel::{Receiver, Sender, bounded};
-use chrono::Local;
 use ormlite::Model;
 use ormlite::model::ModelBuilder;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 /// 启动客户端监控循环
 ///
@@ -45,7 +44,7 @@ async fn start_client(
                         .url(sql_no_id.url.clone())
                         .name(room.live_streamer.remark.clone())
                         .title(sql_no_id.title.clone())
-                        .date(sql_no_id.date.clone())
+                        .date(sql_no_id.date)
                         .live_cover_path(sql_no_id.live_cover_path.clone())
                         .insert(&ctx.pool)
                         .await
@@ -76,7 +75,7 @@ async fn start_client(
                         &suffix,
                     );
                     // 修改 ctx
-                    ctx.stream_info = stream_info;
+                    ctx.stream_info = *stream_info;
                     ctx.recorder = recorder;
                     // 发送下载开始消息
                     if actor_handle

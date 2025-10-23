@@ -51,7 +51,6 @@ fn spawn_and_monitor_sidecar(app_handle: tauri::AppHandle) -> Result<(), String>
     let exe_dir = exe_path.parent().unwrap();
     println!("[tauri] Sidecar directory: {}", exe_dir.display());
     let (mut rx, child) = sidecar_command
-        .args(["-P", "19159"])
         .current_dir(exe_dir)
         // .env("PYTHONUTF8", "1")
         .spawn()

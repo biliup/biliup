@@ -1,11 +1,4 @@
-use biliup::client::StatelessClient;
-use biliup::error::Kind;
 use biliup::uploader::bilibili::{Credit, ResponseData, Studio};
-use biliup::uploader::credential::login_by_cookies;
-use biliup::uploader::line::Probe;
-use biliup::uploader::util::SubmitOption;
-use biliup::uploader::{VideoFile, line};
-use futures::StreamExt;
 use pyo3::prelude::*;
 use pyo3::pyclass;
 
@@ -16,9 +9,6 @@ use bon::Builder;
 use error_stack::ResultExt;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::str::FromStr;
-use std::time::Instant;
-use tracing::info;
 
 #[pyclass]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -40,11 +30,11 @@ pub enum UploadLine {
     Alia,
 }
 
-impl Into<biliup_cli::UploadLine> for UploadLine {
-    fn into(self) -> biliup_cli::UploadLine {
+impl From<UploadLine> for biliup_cli::UploadLine {
+    fn from(val: UploadLine) -> Self {
         use UploadLine as P;
         use biliup_cli::UploadLine as C;
-        match self {
+        match val {
             P::Bldsa => C::Bldsa,
             P::Cnbldsa => C::Cnbldsa,
             P::Andsa => C::Andsa,
@@ -190,5 +180,5 @@ pub async fn upload(
         studio.cover = url;
     }
 
-    Ok(submit_to_bilibili(&bilibili, &studio, submit).await?)
+    submit_to_bilibili(&bilibili, &studio, submit).await
 }

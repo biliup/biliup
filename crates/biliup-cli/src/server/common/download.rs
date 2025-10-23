@@ -1,12 +1,10 @@
 use crate::server::common::upload::UploaderMessage;
-use crate::server::common::util::Recorder;
 use crate::server::core::downloader::{DownloadStatus, Downloader, SegmentEvent, SegmentInfo};
 use crate::server::core::monitor::RoomsHandle;
-use crate::server::core::plugin::{DownloadPlugin, StreamInfoExt};
+use crate::server::core::plugin::DownloadPlugin;
 use crate::server::errors::{AppError, AppResult};
-use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
+use crate::server::infrastructure::context::{Context, Worker, WorkerStatus};
 use async_channel::{Receiver, Sender};
-use chrono::Local;
 use error_stack::{FutureExt, ResultExt, bail};
 use std::fs;
 use std::path::Path;
@@ -59,11 +57,10 @@ impl DownloadGuard {
         let rooms_handle = self.rooms_handle.clone();
         let worker = self.worker.clone();
 
-        if let Some(client) = danmaku {
-            if let Err(e) = client.stop().await {
+        if let Some(client) = danmaku
+            && let Err(e) = client.stop().await {
                 error!("Error stopping danmaku client: {}", e);
             }
-        }
 
         // 确保状态更新和资源清理
         rooms_handle
@@ -219,18 +216,17 @@ impl SegmentEventProcessor {
             match event {
                 SegmentEvent::Start { next_file_path } => {
                     // 触发弹幕滚动保存
-                    if let Some(ref client) = danmaku {
-                        if let Err(e) = client
+                    if let Some(ref client) = danmaku
+                        && let Err(e) = client
                             .rolling(&next_file_path.with_extension("xml").display().to_string())
                         {
                             error!("Danmaku rolling error: {}", e);
                         }
-                    }
                 }
                 SegmentEvent::Segment(event) => {
                     // 触发弹幕滚动保存
-                    if let Some(ref client) = danmaku {
-                        if let Err(e) = client.rolling(
+                    if let Some(ref client) = danmaku
+                        && let Err(e) = client.rolling(
                             &event
                                 .prev_file_path
                                 .with_extension("xml")
@@ -239,7 +235,6 @@ impl SegmentEventProcessor {
                         ) {
                             error!("Danmaku rolling error: {}", e);
                         }
-                    }
                     // 异步处理事件
                     let processor = processor.clone();
                     if let Err(e) = processor.process(event) {

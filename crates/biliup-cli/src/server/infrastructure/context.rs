@@ -2,17 +2,13 @@ use crate::server::common::util::Recorder;
 use crate::server::config::Config;
 use crate::server::core::downloader::Downloader;
 use crate::server::core::plugin::StreamInfoExt;
-use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::models::live_streamer::LiveStreamer;
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
-use crate::server::infrastructure::repositories::{get_config, get_streamer};
 use axum::http::Extensions;
 use biliup::client::StatelessClient;
 use core::fmt;
-use error_stack::ResultExt;
 use ormlite::Model;
-use serde::{Deserialize, Serialize, Serializer};
 use std::sync::{Arc, RwLock};
 use tracing::info;
 

@@ -34,6 +34,7 @@ impl ConnectionManager {
         std::fs::OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(false)
             .open(path)
             .change_context(AppError::Unknown)?;
 

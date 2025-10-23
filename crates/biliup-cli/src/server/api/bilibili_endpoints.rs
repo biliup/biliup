@@ -10,7 +10,6 @@ use bytes::Bytes;
 use error_stack::{Report, ResultExt};
 use ormlite::Model;
 use std::collections::HashMap;
-use tracing::info;
 
 /// B站投稿预处理端点
 pub async fn archive_pre_endpoint(

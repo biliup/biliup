@@ -2,7 +2,7 @@ use biliup::uploader::bilibili::{Studio, Vid};
 use biliup::uploader::util::SubmitOption;
 use clap::{Parser, Subcommand};
 
-use biliup_cli::UploadLine;
+use crate::UploadLine;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -123,7 +123,11 @@ pub enum Commands {
 
         /// Port to use
         #[arg(short, long, default_value = "19159")]
-        port: u16,
+        port: u16,        
+        
+        /// Port to use
+        #[arg(short, long, default_value = "false")]
+        auth: bool,
     },
     /// 列出所有已上传的视频
     List {

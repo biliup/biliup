@@ -3,8 +3,6 @@ use biliup_cli::server::core::downloader::{DownloadStatus, Downloader, SegmentEv
 use biliup_cli::server::errors::{AppError, AppResult};
 use error_stack::ResultExt;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// DanmakuClient provides Rust bindings to the Python DanmakuClient
