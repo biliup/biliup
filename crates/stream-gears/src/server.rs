@@ -21,7 +21,7 @@ use biliup_cli::server::infrastructure::repositories::get_upload_config;
 use biliup_cli::server::infrastructure::service_register::ServiceRegister;
 use biliup_cli::uploader::{append, list, login, renew, show, upload_by_command, upload_by_config};
 use chrono::Utc;
-use clap::Parser;
+use clap::{Error, Parser};
 use error_stack::{Report, ResultExt};
 use fancy_regex::Regex;
 use pyo3::prelude::PyDictMethods;
@@ -36,7 +36,12 @@ use std::net::ToSocketAddrs;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, RwLock};
+use time::macros::format_description;
 use tracing::{debug, info};
+use tracing_appender::rolling::Rotation;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 #[derive(Debug)]
 pub struct PyPlugin {
@@ -355,7 +360,56 @@ fn cfg_arc() -> &'static Arc<RwLock<Config>> {
 
 #[tokio::main]
 pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
-    let cli = Cli::try_parse_from(args).change_context(AppError::Unknown)?;
+    let cli = match Cli::try_parse_from(args) {
+        Ok(res) => res,
+        Err(e) => e.exit(),
+    };
+
+    let local_time = tracing_subscriber::fmt::time::LocalTime::new(format_description!(
+            "[year]-[month]-[day] [hour]:[minute]:[second]"
+        ));
+    // 按日期滚动，每天创建新文件
+    let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
+        .rotation(Rotation::DAILY) // rotate log files once every hour
+        .rotation(Rotation::NEVER) // rotate log files once every hour
+        .filename_prefix("biliup") // log file names will be prefixed with `myapp.`
+        .filename_prefix("download") // log file names will be prefixed with `myapp.`
+        .filename_suffix("log") // log file names will be suffixed with `.log`
+        // .max_log_files(3)
+        // .build("logs") // try to build an appender that stores log files in `/var/log`
+        .build("") // try to build an appender that stores log files in `/var/log`
+        .expect("initializing rolling file appender failed");
+    // 或者按小时滚动
+    // let file_appender = tracing_appender::rolling::hourly("logs", "upload.log");
+
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+
+    let subscriber = tracing_subscriber::registry()
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        // 控制台输出
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(false)
+                .with_timer(local_time.clone())
+                .with_file(true) // 打印文件名
+                .with_line_number(true)
+                .with_thread_ids(true),
+        )
+        // 文件输出
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(non_blocking)
+                .with_timer(local_time)
+                .with_target(true)
+                .with_thread_ids(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_ansi(false), // .json() // 可选：使用 JSON 格式便于解析
+        );
+
+    let _ = subscriber.init();
+
+    info!("Tracing initialized with daily rotation");
 
     match cli.command {
         Commands::Login => login(cli.user_cookie, cli.proxy.as_deref()).await?,

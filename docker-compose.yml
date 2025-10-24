@@ -8,4 +8,4 @@ services:
       - "<HOST_ADDRESS>:<HOST_PORT>:19159"
     volumes:
       - /path/to/save_folder:/opt
-    command: --password <your_password>
+    command: server --auth

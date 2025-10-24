@@ -41,54 +41,7 @@ static GUARD: Mutex<Option<tracing_appender::non_blocking::WorkerGuard>> = Mutex
 
 fn init_tracing_with_rotation() {
     INIT.call_once(|| {
-        let local_time = tracing_subscriber::fmt::time::LocalTime::new(format_description!(
-            "[year]-[month]-[day] [hour]:[minute]:[second]"
-        ));
-        // 按日期滚动，每天创建新文件
-        let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
-            .rotation(Rotation::DAILY) // rotate log files once every hour
-            .rotation(Rotation::NEVER) // rotate log files once every hour
-            .filename_prefix("biliup") // log file names will be prefixed with `myapp.`
-            .filename_prefix("download") // log file names will be prefixed with `myapp.`
-            .filename_suffix("log") // log file names will be suffixed with `.log`
-            // .max_log_files(3)
-            // .build("logs") // try to build an appender that stores log files in `/var/log`
-            .build("") // try to build an appender that stores log files in `/var/log`
-            .expect("initializing rolling file appender failed");
-        // 或者按小时滚动
-        // let file_appender = tracing_appender::rolling::hourly("logs", "upload.log");
-
-        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-
-        // 保存 guard
-        *GUARD.lock().unwrap() = Some(guard);
-
-        let subscriber = tracing_subscriber::registry()
-            .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
-            // 控制台输出
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_target(false)
-                    .with_timer(local_time.clone())
-                    .with_file(true) // 打印文件名
-                    .with_line_number(true)
-                    .with_thread_ids(true),
-            )
-            // 文件输出
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_writer(non_blocking)
-                    .with_timer(local_time)
-                    .with_target(true)
-                    .with_thread_ids(true)
-                    .with_file(true)
-                    .with_line_number(true)
-                    .with_ansi(false), // .json() // 可选：使用 JSON 格式便于解析
-            );
-
-        subscriber.init();
-
-        info!("Tracing initialized with daily rotation");
+        
     });
 }
 
