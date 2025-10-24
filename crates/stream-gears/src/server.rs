@@ -1,4 +1,4 @@
-use crate::{DanmakuClient, construct_headers, download};
+use crate::{DanmakuClient, construct_headers};
 use async_trait::async_trait;
 use biliup::downloader::util::Segmentable;
 use biliup::uploader::util::SubmitOption;
@@ -21,7 +21,7 @@ use biliup_cli::server::infrastructure::repositories::get_upload_config;
 use biliup_cli::server::infrastructure::service_register::ServiceRegister;
 use biliup_cli::uploader::{append, list, login, renew, show, upload_by_command, upload_by_config};
 use chrono::Utc;
-use clap::{Error, Parser};
+use clap::Parser;
 use error_stack::{Report, ResultExt};
 use fancy_regex::Regex;
 use pyo3::prelude::PyDictMethods;
@@ -205,12 +205,12 @@ pub fn from_py(actor_handle: Arc<ActorHandle>) -> PyResult<Vec<DownloadManager>>
 
         // 如果要获取类属性（而不是实例属性）
         let bound = plugin_class.getattr("download_plugins")?;
-        let plugin_list: &Bound<PyList> = bound.downcast()?;
+        let plugin_list: &Bound<PyList> = bound.cast()?;
 
         plugin_list
             .iter()
             .map(|x| {
-                let download = x.downcast::<PyType>()?;
+                let download = x.cast::<PyType>()?;
                 let py_plugin = PyPlugin::from_pytype(download)?;
                 Ok(DownloadManager::new(py_plugin, actor_handle.clone()))
             })
@@ -318,7 +318,7 @@ impl ConfigState {
                 return Ok(d);
             }
             // 尝试转换为字典并过滤
-            return match bound.downcast::<PyDict>() {
+            return match bound.cast::<PyDict>() {
                 Ok(dict) => {
                     let filtered = PyDict::new(py);
                     dict.iter()
@@ -382,7 +382,7 @@ pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
     // 或者按小时滚动
     // let file_appender = tracing_appender::rolling::hourly("logs", "upload.log");
 
-    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
     let subscriber = tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
@@ -407,7 +407,7 @@ pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
                 .with_ansi(false), // .json() // 可选：使用 JSON 格式便于解析
         );
 
-    let _ = subscriber.init();
+    subscriber.init();
 
     info!("Tracing initialized with daily rotation");
 

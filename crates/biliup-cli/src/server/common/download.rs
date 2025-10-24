@@ -5,7 +5,7 @@ use crate::server::core::plugin::DownloadPlugin;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Worker, WorkerStatus};
 use async_channel::{Receiver, Sender};
-use error_stack::{FutureExt, ResultExt, bail};
+use error_stack::{ResultExt, bail};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;

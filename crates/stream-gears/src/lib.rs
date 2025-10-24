@@ -16,34 +16,18 @@ use biliup::credential::Credential;
 use biliup::downloader::extractor::CallbackFn;
 use biliup::downloader::util::{LifecycleFile, Segmentable};
 use biliup::downloader::{hls, httpflv};
-use clap::Parser;
 use pyo3::types::{PyList, PyType};
 use std::collections::HashMap;
-use std::env::args;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::{Mutex, Once};
 use std::time::Duration;
 use tracing::{debug, error, info};
-use tracing_subscriber::EnvFilter;
 
 use biliup::client::StatelessClient;
 use biliup::downloader::flv_parser::header;
 use biliup::downloader::httpflv::Connection;
 use pyo3::exceptions::PyRuntimeError;
-use tracing_appender::rolling::Rotation;
 use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
-
-static INIT: Once = Once::new();
-// 全局保存 guard，防止被 drop
-static GUARD: Mutex<Option<tracing_appender::non_blocking::WorkerGuard>> = Mutex::new(None);
-
-fn init_tracing_with_rotation() {
-    INIT.call_once(|| {
-        
-    });
-}
 
 #[tokio::main]
 pub async fn download_with_hook(
@@ -419,7 +403,7 @@ pub fn main_loop(py: Python<'_>) -> PyResult<()> {
     // 获取 Python 的 sys.argv
     let sys = py.import("sys")?;
     let bound = sys.getattr("argv")?;
-    let argv: &Bound<PyList> = bound.downcast()?;
+    let argv: &Bound<PyList> = bound.cast()?;
 
     let mut args: Vec<String> = argv
         .iter()
@@ -470,7 +454,6 @@ pub fn main_loop(py: Python<'_>) -> PyResult<()> {
 /// A Python module implemented in Rust.
 #[pymodule]
 fn stream_gears(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    init_tracing_with_rotation();
     // let file_appender = tracing_appender::rolling::daily("", "upload.log");
     // let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     // tracing_subscriber::fmt()
