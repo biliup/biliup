@@ -91,7 +91,7 @@ pub trait DownloadPlugin {
                     raw_stream_url,
                     config,
                     Vec::new(),
-                    DownloaderType::FfmpegInternal,
+                    DownloaderType::FfmpegExternal,
                 ))
             }
             // Some(DownloaderType::StreamGears) => {

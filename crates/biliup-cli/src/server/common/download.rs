@@ -216,6 +216,8 @@ impl SegmentEventProcessor {
         move |event| {
             match event {
                 SegmentEvent::Start { next_file_path } => {
+                    unreachable!("应没有任何位置发出此事件");
+                    // 开始下载时，获取到的是将要下载的文件名，此时文件还未生成
                     // 触发弹幕滚动保存
                     if let Some(ref client) = danmaku
                         && let Err(e) = client
@@ -225,6 +227,7 @@ impl SegmentEventProcessor {
                     }
                 }
                 SegmentEvent::Segment(event) => {
+                    // 分段时，获取到的是已下载的文件名
                     // 触发弹幕滚动保存
                     if let Some(ref client) = danmaku
                         && let Err(e) = client.rolling(

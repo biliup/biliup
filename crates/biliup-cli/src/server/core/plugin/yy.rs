@@ -108,17 +108,15 @@ impl DownloadPlugin for YY {
         .to_string();
 
         // 构建URL
-        let url = format!(
-            "https://stream-manager.yy.com/v3/channel/streams?uid=0&cid={}&sid={}&appid=0&sequence={}&encode=json",
-            rid, rid, millis_13
-        );
-
         // 发送POST请求并处理响应
         let result = ctx
             .worker
             .client
             .client
-            .post(&url)
+            .post(&format!(
+                "https://stream-manager.yy.com/v3/channel/streams?uid=0&cid={}&sid={}&appid=0&sequence={}&encode=json",
+                rid, rid, millis_13
+            ))
             .timeout(std::time::Duration::from_secs(30))
             .headers(self.fake_headers.clone())
             .body(data)
@@ -129,7 +127,6 @@ impl DownloadPlugin for YY {
             .await
             .change_context(AppError::Custom(format!("解析json出错 rid: {rid}")))?;
 
-        println!("{:#?}", result);
         let Some(stream_url) = result
             .get("avp_info_res")
             .and_then(|info| info.get("stream_line_addr"))

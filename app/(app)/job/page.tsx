@@ -20,6 +20,7 @@ import Filter from "@/app/(app)/job/Filter";
 export default function Home() {
   const { Header, Footer, Sider, Content } = Layout
   const { data: data, error, isLoading } = useSWR<any[]>('/v1/streamer-info', fetcher)
+
   if (isLoading) {
     return <Spin size="large" />
   }
@@ -56,29 +57,7 @@ export default function Home() {
       render: (time: number) => humDate(time),
     },
   ]
-  const expandRowRender = (record: any, index: number | undefined) => {
-    return (
-      <>
-        文件列表：
-        {record.files.map(
-          (it: {
-            id: Key | null | undefined
-            file:
-              | string
-              | number
-              | boolean
-              | ReactElement<any, string | JSXElementConstructor<any>>
-              | Iterable<ReactNode>
-              | ReactPortal
-              | null
-              | undefined
-          }) => {
-            return <div key={it.id}>&nbsp;&nbsp;文件名：{it.file}</div>
-          }
-        )}
-      </>
-    )
-  }
+
   return (
     <>
       <Header style={{ backgroundColor: 'var(--semi-color-bg-1)' }}>
@@ -122,4 +101,30 @@ export default function Home() {
       </Content>
     </>
   )
+}
+
+
+// 创建一个子组件
+const FileLists = ({ recordId }: { recordId: string }) => {
+  const { data: files, isLoading } = useSWR(
+      `/v1/streamer-info/files/${recordId}`,
+      fetcher
+  )
+
+  if (isLoading) return <div>加载中...</div>
+  if (!files || files.length === 0) return <div>暂无文件</div>
+
+  return (
+      <>
+        文件列表：
+        {files.map((it: any) => (
+            <div key={it.id}>&nbsp;&nbsp;文件名：{it.file}</div>
+        ))}
+      </>
+  )
+}
+
+// 在 expandRowRender 中使用
+const expandRowRender = (record: any) => {
+  return <FileLists recordId={record.id} />
 }

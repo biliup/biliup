@@ -291,14 +291,24 @@ pub async fn get_streamer_info(
         .await
         .change_context(AppError::Unknown)
         .map_err(report_to_response)?;
+
+    Ok(Json(streamer_infos))
+}
+
+pub async fn get_streamer_info_files(
+    // Extension(streamers_service): Extension<DynUploadStreamersRepository>,
+    State(pool): State<ConnectionPool>,
+    Path(id): Path<i64>,
+) -> Result<Json<Vec<FileItem>>, Response> {
     let file_items = FileItem::select()
+        .where_("streamer_info_id = ?")
+        .bind(id)
         .fetch_all(&pool)
         .await
         .change_context(AppError::Unknown)
         .map_err(report_to_response)?;
-    println!("{:?}", file_items);
 
-    Ok(Json(streamer_infos))
+    Ok(Json(file_items))
 }
 
 pub async fn get_upload_streamers_endpoint(

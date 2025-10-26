@@ -3,6 +3,7 @@ pub mod hook_step;
 pub mod live_streamer;
 pub mod upload_streamer;
 
+use chrono::serde::ts_seconds;
 use chrono::{DateTime, Utc};
 use ormlite::{Insert, Model};
 use serde::{Deserialize, Serialize};
@@ -19,6 +20,7 @@ pub struct StreamerInfo {
     pub url: String,
     /// 直播标题
     pub title: String,
+    #[serde(with = "ts_seconds")]
     /// 直播开始时间
     pub date: DateTime<Utc>,
     /// 直播封面路径（可选）
