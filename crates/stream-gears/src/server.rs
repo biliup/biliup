@@ -1,4 +1,4 @@
-use crate::{DanmakuClient, construct_headers};
+use crate::DanmakuClient;
 use async_trait::async_trait;
 use biliup::downloader::util::Segmentable;
 use biliup::uploader::util::SubmitOption;
@@ -95,48 +95,6 @@ impl DownloadPlugin for PyPlugin {
                 })
             }
             None => Ok(StreamStatus::Offline),
-        }
-    }
-
-    async fn create_downloader(
-        &self,
-        stream_info: &StreamInfoExt,
-        // worker: &Worker,
-        config: Config,
-        recorder: Recorder,
-    ) -> Arc<dyn Downloader> {
-        let raw_stream_url = &stream_info.raw_stream_url;
-        match config.downloader {
-            Some(DownloaderType::Ffmpeg) => {
-                let config = DownloadConfig {
-                    segment_time: config.segment_time.or_else(default_segment_time),
-                    file_size: Some(config.file_size), // 2GB
-                    headers: stream_info.stream_headers.clone(),
-                    recorder,
-                    // output_dir: PathBuf::from("./downloads")
-                    output_dir: PathBuf::from("."),
-                };
-
-                Arc::new(FfmpegDownloader::new(
-                    raw_stream_url,
-                    config,
-                    Vec::new(),
-                    DownloaderType::FfmpegInternal,
-                ))
-            }
-            // Some(DownloaderType::StreamGears) => {
-            //
-            // },
-            _ => Arc::new(StreamGears::new(
-                raw_stream_url,
-                construct_headers(&stream_info.stream_headers),
-                recorder.filename_template(),
-                Segmentable::new(
-                    config.segment_time.as_deref().map(parse_time),
-                    Some(config.file_size),
-                ),
-                None,
-            )),
         }
     }
 
@@ -366,8 +324,8 @@ pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
     };
 
     let local_time = tracing_subscriber::fmt::time::LocalTime::new(format_description!(
-            "[year]-[month]-[day] [hour]:[minute]:[second]"
-        ));
+        "[year]-[month]-[day] [hour]:[minute]:[second]"
+    ));
     // 按日期滚动，每天创建新文件
     let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
         .rotation(Rotation::DAILY) // rotate log files once every hour

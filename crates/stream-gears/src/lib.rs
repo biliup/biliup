@@ -26,6 +26,7 @@ use tracing::{debug, error, info};
 use biliup::client::StatelessClient;
 use biliup::downloader::flv_parser::header;
 use biliup::downloader::httpflv::Connection;
+use biliup_cli::server::common::construct_headers;
 use pyo3::exceptions::PyRuntimeError;
 use tracing_subscriber::layer::SubscriberExt;
 
@@ -66,17 +67,6 @@ pub async fn download_with_hook(
         }
     }
     Ok(())
-}
-
-pub fn construct_headers(hash_map: &HashMap<String, String>) -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    for (key, value) in hash_map.iter() {
-        headers.insert(
-            HeaderName::from_str(key).unwrap(),
-            HeaderValue::from_str(value).unwrap(),
-        );
-    }
-    headers
 }
 
 #[derive(Debug, Clone)]

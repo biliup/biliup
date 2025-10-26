@@ -67,7 +67,7 @@ Usage: biliup server [OPTIONS]
 Options:
   -b, --bind <BIND>  Specify bind address [default: 0.0.0.0]
   -p, --port <PORT>  Port to use [default: 19159]
-  -a, --auth         Port to use
+      --auth         开启登录密码认证
   -h, --help         Print help
 ```
 

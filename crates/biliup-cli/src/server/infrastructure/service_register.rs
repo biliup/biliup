@@ -1,5 +1,6 @@
 use crate::server::config::Config;
 use crate::server::core::download_manager::{ActorHandle, DownloadManager};
+use crate::server::core::plugin::yy::YY;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Worker, WorkerStatus};
@@ -42,13 +43,15 @@ impl ServiceRegister {
         pool: ConnectionPool,
         config: Arc<RwLock<Config>>,
         actor_handle: Arc<ActorHandle>,
-        download_manager: Vec<DownloadManager>,
+        mut download_manager: Vec<DownloadManager>,
     ) -> Self {
         info!("initializing utility services...");
         // 创建默认的HTTP客户端
         let client = StatelessClient::default();
 
         info!("utility services initialized, building feature services...");
+
+        download_manager.push(DownloadManager::new(YY::new(), actor_handle.clone()));
 
         info!("feature services successfully initialized!");
 

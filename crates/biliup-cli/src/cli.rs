@@ -125,8 +125,8 @@ pub enum Commands {
         #[arg(short, long, default_value = "19159")]
         port: u16,
 
-        /// Port to use
-        #[arg(short, long, default_value = "false")]
+        /// 开启登录密码认证
+        #[arg(long, default_value = "false")]
         auth: bool,
     },
     /// 列出所有已上传的视频
