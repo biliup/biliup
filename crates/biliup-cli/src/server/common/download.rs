@@ -1,11 +1,11 @@
 use crate::server::common::upload::UploaderMessage;
 use crate::server::core::downloader::{DownloadStatus, Downloader, SegmentEvent, SegmentInfo};
 use crate::server::core::monitor::RoomsHandle;
-use crate::server::core::plugin::DownloadPlugin;
+use crate::server::core::plugin::{DownloadPlugin, StreamStatus};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Worker, WorkerStatus};
 use async_channel::{Receiver, Sender};
-use error_stack::{ResultExt, bail};
+use error_stack::{ResultExt, bail, Report};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -277,7 +277,7 @@ impl DownloadTask {
         }
     }
 
-    pub async fn execute(self, components: DownloadComponents) -> AppResult<()> {
+    pub(self) async fn execute(self, components: DownloadComponents) -> AppResult<DownloadStatus> {
         // 创建事件处理器
         let processor = SegmentEventProcessor::new(components.uploader.clone(), self.ctx.clone());
 
@@ -295,14 +295,8 @@ impl DownloadTask {
             .change_context(AppError::Custom("Failed to download segment".into()))?;
 
         // 处理结果
-        match result {
-            DownloadStatus::Downloading => {}
-            DownloadStatus::SegmentCompleted => {}
-            DownloadStatus::StreamEnded => {}
-            DownloadStatus::Error(_) => {}
-        }
         info!(result=?result, "finished downloading");
-        Ok(())
+        Ok(result)
     }
 
     async fn initialize_components(&self, uploader: Sender<UploaderMessage>) -> DownloadComponents {
@@ -371,10 +365,10 @@ impl DActor {
     /// * `msg` - 要处理的下载消息
     async fn handle_message(&mut self, msg: DownloaderMessage) {
         match msg {
-            DownloaderMessage::Start(plugin, ctx, rooms_handle) => {
+            DownloaderMessage::Start(plugin, mut ctx, rooms_handle) => {
                 let worker = ctx.worker.clone();
                 // 创建下载任务
-                let task = DownloadTask::new(plugin, ctx, rooms_handle.clone());
+                let task = DownloadTask::new(plugin.clone(), ctx.clone(), rooms_handle.clone());
 
                 // 初始化组件
                 let components = task.initialize_components(self.sender.clone()).await;
@@ -391,8 +385,18 @@ impl DActor {
                     .toggle(worker, WorkerStatus::Working(components.downloader.clone()))
                     .await;
 
-                // 执行下载（使用 Result 链式处理）
+                // 执行下载
                 let result = task.execute(components).await;
+
+                match plugin.check_status(&mut ctx).await {
+                    Ok(StreamStatus::Live {stream_info}) => {
+                        ctx.stream_info.raw_stream_url = stream_info.raw_stream_url;
+                        println!("stream_info=?stream_info");
+                    }
+                    Ok(StreamStatus::Offline) => {}
+                    Ok(StreamStatus::Unknown) => {}
+                    Err(_) => {}
+                }
 
                 guard.cleanup().await;
                 info!("Handling message: {:?} done", result);

@@ -83,7 +83,9 @@ Options:
 2. 安装：`uv tool install biliup`
 3. 启动：`biliup server --auth`
 4. 访问 WebUI：`http://your-ip:19159`
-* 后台运行 `nohup biliup server --auth &`
+* 后台运行 
+  1. `nohup biliup server --auth &`
+  2. [请查看参考](https://biliup.github.io/biliup/docs/guide/introduction/#linuxxia-pei-zhi-kai-ji-zi-qi)
 ### Termux
 - 详见[Wiki](https://github.com/biliup/biliup/wiki/Termux-%E4%B8%AD%E4%BD%BF%E7%94%A8-biliup)
 

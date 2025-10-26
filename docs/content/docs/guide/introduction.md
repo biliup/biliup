@@ -250,9 +250,7 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=[在此填入你的config所在目录]
-ExecStart=/usr/bin/biliup -v
-ExecReload=/usr/bin/biliup restart
-ExecStop=/usr/bin/biliup stop
+ExecStart=/usr/bin/biliup server --auth
 
 [Install]
 WantedBy=default.target
