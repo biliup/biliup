@@ -12,8 +12,10 @@ use std::path::PathBuf;
 
 /// 下载器配置
 /// 包含下载过程中需要的各种参数和设置
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct DownloadConfig {
+    /// 流 URL
+    pub(crate) url: String,
     /// 分段时长 (格式: "HH:MM:SS")
     pub segment_time: Option<String>,
 
@@ -42,7 +44,7 @@ impl DownloadConfig {
 
 /// 下载器类型枚举
 /// 定义支持的各种下载器类型
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DownloaderType {
     /// Ytarchive下载器
@@ -131,6 +133,7 @@ pub trait Downloader: Send + Sync {
     async fn download(
         &self,
         callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
+        download_config: DownloadConfig,
     ) -> AppResult<DownloadStatus>;
 
     /// 停止下载

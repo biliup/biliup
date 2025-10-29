@@ -1,5 +1,7 @@
 use async_trait::async_trait;
-use biliup_cli::server::core::downloader::{DownloadStatus, Downloader, SegmentEvent};
+use biliup_cli::server::core::downloader::{
+    DownloadConfig, DownloadStatus, Downloader, SegmentEvent,
+};
 use biliup_cli::server::errors::{AppError, AppResult};
 use error_stack::ResultExt;
 use pyo3::prelude::*;
@@ -24,6 +26,7 @@ impl Downloader for DanmakuClient {
     async fn download(
         &self,
         _callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
+        download_config: DownloadConfig,
     ) -> AppResult<DownloadStatus> {
         let py_client = self.py_client.clone();
         tokio::task::spawn_blocking(move || {

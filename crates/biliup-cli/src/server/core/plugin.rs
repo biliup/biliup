@@ -69,44 +69,16 @@ pub trait DownloadPlugin {
     /// 检查流状态
     async fn check_status(&self, ctx: &mut Context) -> Result<StreamStatus, Report<AppError>>;
     /// 创建下载器实例
-    async fn create_downloader(
-        &self,
-        stream_info: &StreamInfoExt,
-        config: Config,
-        recorder: Recorder,
-    ) -> Arc<dyn Downloader> {
-        let raw_stream_url = &stream_info.raw_stream_url;
-        match config.downloader {
-            Some(DownloaderType::Ffmpeg) => {
-                let config = DownloadConfig {
-                    segment_time: config.segment_time.or_else(default_segment_time),
-                    file_size: Some(config.file_size), // 2GB
-                    headers: stream_info.stream_headers.clone(),
-                    recorder,
-                    // output_dir: PathBuf::from("./downloads")
-                    output_dir: PathBuf::from("."),
-                };
-
-                Arc::new(FfmpegDownloader::new(
-                    raw_stream_url,
-                    config,
-                    Vec::new(),
-                    DownloaderType::FfmpegExternal,
-                ))
-            }
+    async fn create_downloader(&self, config: Option<DownloaderType>) -> Arc<dyn Downloader> {
+        match config {
+            Some(DownloaderType::Ffmpeg) => Arc::new(FfmpegDownloader::new(
+                Vec::new(),
+                DownloaderType::FfmpegExternal,
+            )),
             // Some(DownloaderType::StreamGears) => {
             //
             // },
-            _ => Arc::new(StreamGears::new(
-                raw_stream_url,
-                construct_headers(&stream_info.stream_headers),
-                recorder.filename_template(),
-                Segmentable::new(
-                    config.segment_time.as_deref().map(parse_time),
-                    Some(config.file_size),
-                ),
-                None,
-            )),
+            _ => Arc::new(StreamGears::new(None)),
         }
     }
 

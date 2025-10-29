@@ -1,3 +1,4 @@
+use crate::server::common::download::DownloadTask;
 use crate::server::common::util::Recorder;
 use crate::server::config::Config;
 use crate::server::core::downloader::Downloader;
@@ -149,7 +150,7 @@ pub enum Stage {
 #[derive(Default, Clone)]
 pub enum WorkerStatus {
     /// 正在工作
-    Working(Arc<dyn Downloader>),
+    Working(Arc<DownloadTask>),
     /// 等待中
     Pending,
     /// 空闲状态（默认）

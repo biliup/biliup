@@ -16,10 +16,6 @@ use tracing::info;
 /// FFmpeg下载器实现
 /// 使用FFmpeg进行直播流下载，支持内部和外部分段
 pub struct FfmpegDownloader {
-    /// 下载配置
-    config: DownloadConfig,
-    /// 流URL
-    url: String,
     /// 下载状态
     status: Arc<RwLock<DownloadStatus>>,
     /// 进程句柄
@@ -40,15 +36,8 @@ impl FfmpegDownloader {
     /// * `config` - 下载配置
     /// * `extra_args` - 额外的FFmpeg参数
     /// * `downloader_type` - 下载器类型
-    pub fn new(
-        url: &str,
-        config: DownloadConfig,
-        extra_args: Vec<String>,
-        downloader_type: DownloaderType,
-    ) -> Self {
+    pub fn new(extra_args: Vec<String>, downloader_type: DownloaderType) -> Self {
         Self {
-            config,
-            url: url.to_string(),
             status: Arc::new(RwLock::new(DownloadStatus::Downloading)),
             process_handle: Arc::new(RwLock::new(None)),
             extra_args,
@@ -58,21 +47,21 @@ impl FfmpegDownloader {
 
     /// 构建内部分段模式的FFmpeg命令参数
     /// 使用FFmpeg的segment muxer进行自动分段
-    fn build_ffmpeg_args_internal_segment(&self) -> Vec<String> {
+    fn build_ffmpeg_args_internal_segment(&self, download_config: &DownloadConfig) -> Vec<String> {
         let mut args = Vec::new();
 
         // 内部分段使用info级别日志以获取分段信息
         args.extend(["-loglevel".to_string(), "info".to_string()]);
 
         // 添加通用输入参数
-        self.append_common_input_args(&mut args);
+        self.append_common_input_args(&mut args, download_config);
 
         // 内部分段特定的输出参数
         // -f segment: 使用segment muxer进行自动分段
         args.extend(["-f".to_string(), "segment".to_string()]);
         args.extend([
             "-segment_format".to_string(),
-            self.config.recorder.suffix.to_string(),
+            download_config.recorder.suffix.to_string(),
         ]);
         // -segment_list pipe:1: 将分段文件名输出到stdout
         // 这样我们可以实时获取新生成的分段文件
@@ -91,7 +80,7 @@ impl FfmpegDownloader {
         args.extend(["-strftime".to_string(), "1".to_string()]);
 
         // -segment_time: 分段时长（秒）
-        if let Some(segment_time) = &self.config.segment_time {
+        if let Some(segment_time) = &download_config.segment_time {
             let seconds = downloader::parse_duration(segment_time);
             args.extend(["-segment_time".to_string(), seconds.to_string()]);
         }
@@ -104,43 +93,42 @@ impl FfmpegDownloader {
 
     /// 构建外部分段模式的FFmpeg命令参数
     /// 通过外部控制进行分段，每次录制固定时长或大小
-    fn build_ffmpeg_args_external_segment(&self) -> Vec<String> {
+    fn build_ffmpeg_args_external_segment(&self, download_config: &DownloadConfig) -> Vec<String> {
         let mut args = Vec::new();
 
         // 外部分段使用quiet减少日志
         args.extend(["-loglevel".to_string(), "quiet".to_string()]);
 
         // 添加通用输入参数
-        self.append_common_input_args(&mut args);
+        self.append_common_input_args(&mut args, download_config);
 
         // 外部分段特定的输出参数
         // -to: 限制录制时长
-        if let Some(segment_time) = &self.config.segment_time {
+        if let Some(segment_time) = &download_config.segment_time {
             args.extend(["-to".to_string(), segment_time.clone()]);
         }
 
         // -fs: 限制文件大小（字节）
-        if let Some(file_size) = self.config.file_size {
+        if let Some(file_size) = download_config.file_size {
             args.extend(["-fs".to_string(), file_size.to_string()]);
         }
 
         // 添加通用输出参数
-        self.append_common_output_args(&mut args, &self.config.recorder.suffix);
+        self.append_common_output_args(&mut args, &download_config.recorder.suffix);
 
         args
     }
 
     /// 添加通用的输入参数
     /// 包括覆盖文件、HTTP头、超时设置等
-    fn append_common_input_args(&self, args: &mut Vec<String>) {
+    fn append_common_input_args(&self, args: &mut Vec<String>, download_config: &DownloadConfig) {
         args.push("-y".to_string()); // 覆盖已存在文件
 
         // HTTP headers
         // -headers: 设置HTTP请求头，格式为"Key: Value\r\n"
         // 用于传递User-Agent、Cookie等信息
-        if !self.config.headers.is_empty() {
-            let headers_str = self
-                .config
+        if !download_config.headers.is_empty() {
+            let headers_str = download_config
                 .headers
                 .iter()
                 .map(|(k, v)| format!("{}: {}\r\n", k, v))
@@ -153,14 +141,14 @@ impl FfmpegDownloader {
         args.extend(["-rw_timeout".to_string(), "20000000".to_string()]);
 
         // 对于m3u8流的特殊处理
-        if self.url.contains(".m3u8") {
+        if download_config.url.contains(".m3u8") {
             // -max_reload: HLS播放列表最大重载次数
             // 对于直播流需要设置较大值以持续获取新片段
             args.extend(["-max_reload".to_string(), "1000".to_string()]);
         }
 
         // 输入URL
-        args.extend(["-i".to_string(), self.url.clone()]);
+        args.extend(["-i".to_string(), download_config.url.clone()]);
     }
 
     /// 添加通用的输出参数
@@ -204,9 +192,10 @@ impl FfmpegDownloader {
     async fn download_external(
         &self,
         callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
+        download_config: DownloadConfig,
     ) -> AppResult<DownloadStatus> {
-        let args = self.build_ffmpeg_args_external_segment();
-        let output_file = self.config.generate_output_filename();
+        let args = self.build_ffmpeg_args_external_segment(&download_config);
+        let output_file = download_config.generate_output_filename();
 
         let mut cmd = Command::new("ffmpeg");
         cmd.args(&args)
@@ -242,18 +231,14 @@ impl FfmpegDownloader {
         // 分段回调
         // 触发分段回调
 
-        callback(SegmentEvent::Segment(
-            SegmentInfo {
-                prev_file_path: output_file,
-                segment_index: 0,
-                next_file_path: None,
-            }
-        ));
+        callback(SegmentEvent::Segment(SegmentInfo {
+            prev_file_path: output_file,
+            segment_index: 0,
+            next_file_path: None,
+        }));
         // 根据退出码判断状态
         match status.code() {
-            Some(0) => {
-                Ok(DownloadStatus::SegmentCompleted)
-            }
+            Some(0) => Ok(DownloadStatus::SegmentCompleted),
             Some(255) => Ok(DownloadStatus::StreamEnded),
             err => Ok(DownloadStatus::Error(format!("FFmpeg error: {err:?}"))),
         }
@@ -264,15 +249,16 @@ impl FfmpegDownloader {
     async fn download_internal(
         &self,
         callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
+        download_config: DownloadConfig,
     ) -> AppResult<DownloadStatus> {
-        let args = self.build_ffmpeg_args_internal_segment();
+        let args = self.build_ffmpeg_args_internal_segment(&download_config);
 
         let mut cmd = Command::new("ffmpeg");
         cmd.args(&args)
             .arg(format!(
                 "{}.{}.part",
-                self.config.recorder.filename_template(),
-                self.config.recorder.suffix
+                download_config.recorder.filename_template(),
+                download_config.recorder.suffix
             ))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -383,14 +369,15 @@ impl Downloader for FfmpegDownloader {
     async fn download(
         &self,
         callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
+        download_config: DownloadConfig,
     ) -> AppResult<DownloadStatus> {
         match self.downloader_type {
             DownloaderType::FfmpegExternal => self
-                .download_external(callback)
+                .download_external(callback, download_config)
                 .await
                 .change_context(AppError::Unknown),
             DownloaderType::FfmpegInternal => self
-                .download_internal(callback)
+                .download_internal(callback, download_config)
                 .await
                 .change_context(AppError::Unknown),
             _ => bail!(AppError::Custom("Unsupported downloader type".to_string())),

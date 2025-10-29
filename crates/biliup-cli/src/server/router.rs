@@ -1,7 +1,14 @@
 use crate::server::api::bilibili_endpoints::{
     archive_pre_endpoint, get_myinfo_endpoint, get_proxy_endpoint,
 };
-use crate::server::api::endpoints::{add_upload_streamer_endpoint, add_user_endpoint, delete_streamers_endpoint, delete_template_endpoint, delete_user_endpoint, get_configuration, get_qrcode, get_status, get_streamer_info, get_streamer_info_files, get_streamers_endpoint, get_upload_streamer_endpoint, get_upload_streamers_endpoint, get_users_endpoint, get_videos, login_by_qrcode, pause_streamers_endpoint, post_streamers_endpoint, post_uploads, put_configuration, put_streamers_endpoint};
+use crate::server::api::endpoints::{
+    add_upload_streamer_endpoint, add_user_endpoint, delete_streamers_endpoint,
+    delete_template_endpoint, delete_user_endpoint, get_configuration, get_qrcode, get_status,
+    get_streamer_info, get_streamer_info_files, get_streamers_endpoint,
+    get_upload_streamer_endpoint, get_upload_streamers_endpoint, get_users_endpoint, get_videos,
+    login_by_qrcode, pause_streamers_endpoint, post_streamers_endpoint, post_uploads,
+    put_configuration, put_streamers_endpoint,
+};
 use crate::server::infrastructure::service_register::ServiceRegister;
 use axum::Router;
 use axum::body::Body;

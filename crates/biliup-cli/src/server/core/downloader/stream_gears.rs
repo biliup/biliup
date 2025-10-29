@@ -1,4 +1,8 @@
-use crate::server::core::downloader::{DownloadStatus, Downloader, SegmentEvent, SegmentInfo};
+use crate::server::common::construct_headers;
+use crate::server::common::util::parse_time;
+use crate::server::core::downloader::{
+    DownloadConfig, DownloadStatus, Downloader, SegmentEvent, SegmentInfo,
+};
 use crate::server::errors::{AppError, AppResult};
 use async_trait::async_trait;
 use axum::http::HeaderMap;
@@ -17,14 +21,6 @@ use tracing::{debug, error, info};
 /// Stream-gears下载器实现
 /// 使用stream-gears库进行直播流下载
 pub struct StreamGears {
-    /// 流URL
-    url: String,
-    /// HTTP请求头
-    header_map: HeaderMap,
-    /// 文件名
-    file_name: String,
-    /// 分段配置
-    segment: Segmentable,
     /// 代理设置（可选）
     proxy: Option<String>,
     /// 下载状态
@@ -42,18 +38,8 @@ impl StreamGears {
     /// * `file_name` - 输出文件名
     /// * `segment` - 分段配置
     /// * `proxy` - 代理设置（可选）
-    pub fn new(
-        url: &str,
-        header_map: HeaderMap,
-        file_name: String,
-        segment: Segmentable,
-        proxy: Option<String>,
-    ) -> Self {
+    pub fn new(proxy: Option<String>) -> Self {
         Self {
-            url: url.into(),
-            header_map,
-            file_name,
-            segment,
             proxy,
             status: Arc::new(RwLock::new(DownloadStatus::Downloading)),
             token: CancellationToken::new(),
@@ -63,15 +49,20 @@ impl StreamGears {
     async fn start_download(
         &self,
         callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
+        download_config: DownloadConfig,
     ) -> AppResult<DownloadStatus> {
-        let url = self.url.clone();
-        let file_name = self.file_name.clone();
-        let _headers_in = self.header_map.clone();
+        let url = download_config.url.clone();
+        let file_name = download_config.recorder.filename_template();
+        let headers_in = construct_headers(&download_config.headers);
         let proxy = self.proxy.clone();
+        let segment = Segmentable::new(
+            download_config.segment_time.as_deref().map(parse_time),
+            download_config.file_size,
+        );
         let _status = Arc::clone(&self.status);
 
         // 创建HTTP客户端
-        let client = StatelessClient::new(self.header_map.clone(), proxy.as_deref());
+        let client = StatelessClient::new(headers_in, proxy.as_deref());
         // 获取可重试的响应
         let response = client
             .retryable(&url)
@@ -111,7 +102,7 @@ impl StreamGears {
                 info!("Downloading {}...", url);
                 // FLV流下载
                 let file = LifecycleFile::with_hook(&file_name, "flv", hook);
-                httpflv::download(connection, file, self.segment.clone()).await;
+                httpflv::download(connection, file, segment.clone()).await;
             }
             Err(Err::Incomplete(needed)) => {
                 error!("needed: {needed:?}")
@@ -120,7 +111,7 @@ impl StreamGears {
                 error!("{e}");
                 // HLS流下载
                 let file = LifecycleFile::with_hook(&file_name, "ts", hook);
-                hls::download(&url, &client, file, self.segment.clone())
+                hls::download(&url, &client, file, segment.clone())
                     .await
                     .change_context(AppError::Unknown)?;
             }
@@ -138,12 +129,13 @@ impl Downloader for StreamGears {
     async fn download(
         &self,
         callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
+        download_config: DownloadConfig,
     ) -> AppResult<DownloadStatus> {
         tokio::select! {
             _ = self.token.cancelled() => {
                 bail!(AppError::Custom("StreamGears token cancelled".into()))
             }
-            res = self.start_download(callback) => {res}
+            res = self.start_download(callback, download_config) => {res}
         }
     }
 

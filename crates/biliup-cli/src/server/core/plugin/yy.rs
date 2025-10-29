@@ -6,7 +6,7 @@ use crate::server::infrastructure::context::Context;
 use crate::server::infrastructure::models::StreamerInfo;
 use async_trait::async_trait;
 use chrono::Utc;
-use error_stack::{bail, IntoReport, Report, ResultExt};
+use error_stack::{IntoReport, Report, ResultExt, bail};
 use regex::Regex;
 use reqwest::header::HeaderMap;
 use serde_json::json;
