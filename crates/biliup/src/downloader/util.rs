@@ -222,22 +222,22 @@ impl Default for Segmentable {
     }
 }
 
-pub struct LifecycleFile {
+pub struct LifecycleFile<'a> {
     pub fmt_file_name: String,
     pub file_name: String,
     pub path: PathBuf,
-    pub hook: CallbackFn,
+    pub hook: CallbackFn<'a>,
     pub extension: &'static str,
 }
 
-impl LifecycleFile {
+impl<'a> LifecycleFile<'a> {
     pub fn new(fmt_file_name: &str, extension: &'static str) -> Self {
         Self::with_hook(fmt_file_name, extension, |_| {})
     }
 
     pub fn with_hook<F>(fmt_file_name: &str, extension: &'static str, hook: F) -> Self
     where
-        F: FnMut(&str) + Send + Sync + 'static,
+        F: FnMut(&str) + Send + Sync + 'a,
     {
         Self {
             fmt_file_name: fmt_file_name.to_string(),

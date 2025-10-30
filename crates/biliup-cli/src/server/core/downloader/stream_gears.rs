@@ -46,9 +46,9 @@ impl StreamGears {
         }
     }
 
-    async fn start_download(
+    async fn start_download<'a>(
         &self,
-        callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
+        mut callback: Box<dyn FnMut(SegmentEvent) + Send + Sync + 'a>,
         download_config: DownloadConfig,
     ) -> AppResult<DownloadStatus> {
         let url = download_config.url.clone();
@@ -126,9 +126,9 @@ impl Downloader for StreamGears {
     ///
     /// # 参数
     /// * `callback` - 分段完成时的回调函数
-    async fn download(
+    async fn download<'a>(
         &self,
-        callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
+        callback: Box<dyn FnMut(SegmentEvent) + Send + Sync + 'a>,
         download_config: DownloadConfig,
     ) -> AppResult<DownloadStatus> {
         tokio::select! {

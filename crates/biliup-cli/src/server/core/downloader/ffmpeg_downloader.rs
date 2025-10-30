@@ -189,9 +189,9 @@ impl FfmpegDownloader {
 
     /// 执行外部分段下载
     /// 每次录制一个完整的分段文件
-    async fn download_external(
+    async fn download_external<'a>(
         &self,
-        callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
+        mut callback: Box<dyn FnMut(SegmentEvent) + Send + Sync + 'a>,
         download_config: DownloadConfig,
     ) -> AppResult<DownloadStatus> {
         let args = self.build_ffmpeg_args_external_segment(&download_config);
@@ -216,7 +216,7 @@ impl FfmpegDownloader {
         // 等待进程结束
         let status = {
             let mut handle = self.process_handle.write().await;
-            if let Some(mut child) = handle.take() {
+            if let Some(child) = &mut *handle {
                 child.wait().await.change_context(AppError::Unknown)?
             } else {
                 bail!(AppError::Custom("Process handle not found".to_string()));
@@ -246,9 +246,9 @@ impl FfmpegDownloader {
 
     /// 执行内部分段下载
     /// 使用FFmpeg的segment muxer自动分段
-    async fn download_internal(
+    async fn download_internal<'a>(
         &self,
-        callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
+        mut callback: Box<dyn FnMut(SegmentEvent) + Send + Sync + 'a>,
         download_config: DownloadConfig,
     ) -> AppResult<DownloadStatus> {
         let args = self.build_ffmpeg_args_internal_segment(&download_config);
@@ -366,9 +366,9 @@ impl FfmpegDownloader {
 
 #[async_trait]
 impl Downloader for FfmpegDownloader {
-    async fn download(
+    async fn download<'a>(
         &self,
-        callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
+        callback: Box<dyn FnMut(SegmentEvent) + Send + Sync + 'a>,
         download_config: DownloadConfig,
     ) -> AppResult<DownloadStatus> {
         match self.downloader_type {

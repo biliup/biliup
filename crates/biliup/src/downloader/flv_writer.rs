@@ -20,13 +20,13 @@ const FLV_HEADER: [u8; 9] = [
     0x00, 0x00, 0x00, 0x09, //flv header size
 ]; // 9
 
-pub struct FlvFile {
+pub struct FlvFile<'a> {
     pub buf_writer: BufWriter<File>,
-    pub file: LifecycleFile,
+    pub file: LifecycleFile<'a>,
 }
 
-impl FlvFile {
-    pub fn new(mut file: LifecycleFile) -> std::io::Result<Self> {
+impl<'a> FlvFile<'a> {
+    pub fn new(mut file: LifecycleFile<'a>) -> std::io::Result<Self> {
         // let file_name = util::format_filename(file_name);
         let path = file.create()?;
         Ok(Self {
@@ -90,7 +90,7 @@ impl FlvFile {
     }
 }
 
-impl Drop for FlvFile {
+impl Drop for FlvFile<'_> {
     fn drop(&mut self) {
         self.file.rename()
     }

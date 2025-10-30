@@ -13,6 +13,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
@@ -126,10 +127,8 @@ impl FileValidator {
 }
 
 /// 分段事件处理器
-#[derive(Clone)]
 pub struct SegmentEventProcessor {
-    tx: Sender<SegmentInfo>,
-    rx: Receiver<SegmentInfo>,
+    channel: Option<(Sender<SegmentInfo>, Receiver<SegmentInfo>)>,
     uploader: Sender<UploaderMessage>,
     ctx: Context,
     file_validator: FileValidator,
@@ -138,11 +137,8 @@ pub struct SegmentEventProcessor {
 impl SegmentEventProcessor {
     /// 创建处理器
     pub fn new(uploader: Sender<UploaderMessage>, ctx: Context) -> Self {
-        let (tx, rx) = async_channel::bounded(32); // Use tokio channel for async
-
         Self {
-            tx,
-            rx,
+            channel: None,
             uploader,
             file_validator: FileValidator::new(
                 ctx.worker
@@ -160,75 +156,43 @@ impl SegmentEventProcessor {
     }
 
     /// 处理分段事件
-    pub fn process(&self, event: SegmentInfo) -> AppResult<()> {
+    pub fn process(&mut self, event: SegmentInfo) -> AppResult<()> {
         // 验证文件有效性
         self.file_validator.validate(&event.prev_file_path)?;
-        if event.segment_index == 0 {
-            // 发送到上传器
-            let res = self
-                .uploader
-                .force_send(UploaderMessage::SegmentEvent(
-                    self.rx.clone(),
-                    self.ctx.clone(),
-                ))
-                .change_context(AppError::Custom("Failed to send to uploader".to_string()))?;
-            if let Some(prev) = res {
-                warn!(SegmentEvent = ?prev, "replace an existing message in the channel");
+        match &self.channel {
+            None => {
+                let (tx, rx) = async_channel::bounded(32); // Use tokio channel for async
+
+                // 发送到上传器
+                let res = self
+                    .uploader
+                    .force_send(UploaderMessage::SegmentEvent(rx.clone(), self.ctx.clone()))
+                    .change_context(AppError::Custom("Failed to send to uploader".to_string()))?;
+                if let Some(prev) = res {
+                    warn!(SegmentEvent = ?prev, "replace an existing message in the channel");
+                }
+
+                // 发送到缓冲区
+                let res = tx
+                    .force_send(event)
+                    .change_context(AppError::Custom("Failed to send to buffer".to_string()))?;
+                if let Some(prev) = res {
+                    warn!(SegmentEvent = ?prev, "replace an existing message in the channel");
+                }
+                self.channel = Some((tx, rx));
+            }
+            Some((tx, rx)) => {
+                // 发送到缓冲区
+                let res = tx
+                    .force_send(event)
+                    .change_context(AppError::Custom("Failed to send to buffer".to_string()))?;
+                if let Some(prev) = res {
+                    warn!(SegmentEvent = ?prev, "replace an existing message in the channel");
+                }
             }
         }
-        // 发送到缓冲区
-        let res = self
-            .tx
-            .force_send(event)
-            .change_context(AppError::Custom("Failed to send to buffer".to_string()))?;
-        if let Some(prev) = res {
-            warn!(SegmentEvent = ?prev, "replace an existing message in the channel");
-        }
+
         Ok(())
-    }
-
-    /// 创建事件钩子
-    pub fn create_hook(
-        &self,
-        danmaku: Option<Arc<dyn Downloader>>,
-    ) -> impl Fn(SegmentEvent) + Clone + use<> {
-        let processor = self.clone();
-
-        move |event| {
-            match event {
-                SegmentEvent::Start { next_file_path } => {
-                    unreachable!("应没有任何位置发出此事件");
-                    // 开始下载时，获取到的是将要下载的文件名，此时文件还未生成
-                    // 触发弹幕滚动保存
-                    if let Some(ref client) = danmaku
-                        && let Err(e) = client
-                            .rolling(&next_file_path.with_extension("xml").display().to_string())
-                    {
-                        error!("Danmaku rolling error: {}", e);
-                    }
-                }
-                SegmentEvent::Segment(event) => {
-                    // 分段时，获取到的是已下载的文件名
-                    // 触发弹幕滚动保存
-                    if let Some(ref client) = danmaku
-                        && let Err(e) = client.rolling(
-                            &event
-                                .prev_file_path
-                                .with_extension("xml")
-                                .display()
-                                .to_string(),
-                        )
-                    {
-                        error!("Danmaku rolling error: {}", e);
-                    }
-                    // 异步处理事件
-                    let processor = processor.clone();
-                    if let Err(e) = processor.process(event) {
-                        error!("Failed to process segment event: {}", e);
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -236,6 +200,7 @@ impl SegmentEventProcessor {
 pub struct DownloadTask {
     plugin: Arc<dyn DownloadPlugin + Send + Sync>,
     token: CancellationToken,
+    done_notify: Notify,
     downloader: Arc<dyn Downloader>,
 }
 
@@ -247,6 +212,7 @@ impl DownloadTask {
         Self {
             plugin,
             token: CancellationToken::new(),
+            done_notify: Notify::new(),
             downloader,
         }
     }
@@ -254,7 +220,7 @@ impl DownloadTask {
     pub(self) async fn execute(
         &self,
         mut ctx: Context,
-        sender: Sender<UploaderMessage>,
+        mut processor: SegmentEventProcessor,
         rooms_handle: &RoomsHandle,
     ) -> AppResult<DownloadStatus> {
         let worker = ctx.worker.clone();
@@ -265,10 +231,10 @@ impl DownloadTask {
         let max_delay = Duration::from_secs(worker.get_config().delay); // 最大延迟时间（60秒）
         let result = loop {
             // 创建守卫确保清理
+            // 创建事件处理器
             // 执行下载
-            // 初始化组件
             let components = self
-                .initialize_components(sender.clone(), ctx.clone())
+                .initialize_components(&mut processor, ctx.clone())
                 .await;
             info!("Download task completed: {:?}", components);
             ctx = ctx.clone();
@@ -331,12 +297,13 @@ impl DownloadTask {
         rooms_handle
             .toggle(worker.clone(), WorkerStatus::Idle)
             .await;
+        self.done_notify.notify_one();
         result
     }
 
     async fn initialize_components(
         &self,
-        uploader: Sender<UploaderMessage>,
+        processor: &mut SegmentEventProcessor,
         ctx: Context,
     ) -> AppResult<DownloadStatus> {
         // 获取配置和主播信息
@@ -348,8 +315,6 @@ impl DownloadTask {
         // 初始化弹幕客户端（如果存在）
         let danmaku_client = ctx.extension.get::<Arc<dyn Downloader>>().map(Arc::clone);
 
-        // 创建事件处理器
-        let processor = SegmentEventProcessor::new(uploader.clone(), ctx.clone());
         let download_config = DownloadConfig {
             /// 流URL
             url: raw_stream_url.to_string(),
@@ -373,7 +338,42 @@ impl DownloadTask {
         }
 
         // 执行下载
-        let hook = processor.create_hook(danmaku_client.clone());
+        // let hook = processor.create_hook(danmaku_client.clone());
+        let hook = |event| {
+            match event {
+                SegmentEvent::Start { next_file_path } => {
+                    unreachable!("应没有任何位置发出此事件");
+                    // 开始下载时，获取到的是将要下载的文件名，此时文件还未生成
+                    // 触发弹幕滚动保存
+                    // if let Some(ref client) = danmaku_client
+                    //     && let Err(e) = client
+                    //     .rolling(&next_file_path.with_extension("xml").display().to_string())
+                    // {
+                    //     error!("Danmaku rolling error: {}", e);
+                    // }
+                }
+                SegmentEvent::Segment(event) => {
+                    // 分段时，获取到的是已下载的文件名
+                    // 触发弹幕滚动保存
+                    if let Some(ref client) = danmaku_client
+                        && let Err(e) = client.rolling(
+                            &event
+                                .prev_file_path
+                                .with_extension("xml")
+                                .display()
+                                .to_string(),
+                        )
+                    {
+                        error!("Danmaku rolling error: {}", e);
+                    }
+                    // 异步处理事件
+                    // let processor = processor.clone();
+                    if let Err(e) = processor.process(event) {
+                        error!("Failed to process segment event: {}", e);
+                    }
+                }
+            }
+        };
         let result = self
             .downloader
             .download(Box::new(hook), download_config)
@@ -395,8 +395,8 @@ impl DownloadTask {
         // 仅发出取消信号并更新状态
         // 如果底层下载函数不支持取消，这里不能真正中断正在进行的下载
         self.token.cancel();
-        // self.token.run_until_cancelled();
         self.downloader.stop().await?;
+        self.done_notify.notified().await;
         Ok(())
     }
 }
@@ -438,13 +438,14 @@ impl DActor {
                     .await;
                 // 创建下载任务
                 let task = Arc::new(DownloadTask::new(plugin.clone(), downloader));
-
+                // 初始化组件
+                let processor = SegmentEventProcessor::new(self.sender.clone(), ctx.clone());
                 // 更新工作器状态为工作中
                 rooms_handle
                     .toggle(worker.clone(), WorkerStatus::Working(task.clone()))
                     .await;
 
-                let result = task.execute(ctx, self.sender.clone(), &rooms_handle).await;
+                let result = task.execute(ctx, processor, &rooms_handle).await;
 
                 info!(
                     "Download workflow completed {} => {:?}",

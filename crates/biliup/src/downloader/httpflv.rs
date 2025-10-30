@@ -12,7 +12,7 @@ use std::time::Duration;
 use tokio::time::timeout;
 use tracing::{info, warn};
 
-pub async fn download(connection: Connection, file: LifecycleFile, segment: Segmentable) {
+pub async fn download(connection: Connection, file: LifecycleFile<'_>, segment: Segmentable) {
     let file_name = file.file_name.clone();
     match parse_flv(connection, file, segment).await {
         Ok(_) => {
@@ -26,7 +26,7 @@ pub async fn download(connection: Connection, file: LifecycleFile, segment: Segm
 
 pub(crate) async fn parse_flv(
     mut connection: Connection,
-    file: LifecycleFile,
+    file: LifecycleFile<'_>,
     mut segment: Segmentable,
 ) -> crate::downloader::error::Result<()> {
     let mut flv_tags_cache: Vec<(TagHeader, Bytes, Bytes)> = Vec::new();

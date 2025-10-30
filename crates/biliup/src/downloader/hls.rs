@@ -13,7 +13,7 @@ use crate::client::StatelessClient;
 pub async fn download(
     url: &str,
     client: &StatelessClient,
-    file: LifecycleFile,
+    file: LifecycleFile<'_>,
     mut splitting: Segmentable,
 ) -> Result<()> {
     info!("Downloading {}...", url);
@@ -108,13 +108,13 @@ async fn download_to_file(url: Url, client: &StatelessClient, out: &mut impl Wri
     Ok(length)
 }
 
-pub struct TsFile {
+pub struct TsFile<'a> {
     pub buf_writer: BufWriter<File>,
-    pub file: LifecycleFile,
+    pub file: LifecycleFile<'a>,
 }
 
-impl TsFile {
-    pub fn new(mut file: LifecycleFile) -> std::io::Result<Self> {
+impl<'a> TsFile<'a> {
+    pub fn new(mut file: LifecycleFile<'a>) -> std::io::Result<Self> {
         let path = file.create()?;
         Ok(Self {
             buf_writer: Self::create(path)?,
@@ -145,7 +145,7 @@ impl TsFile {
     }
 }
 
-impl Drop for TsFile {
+impl Drop for TsFile<'_> {
     fn drop(&mut self) {
         self.file.rename()
     }

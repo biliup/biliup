@@ -130,9 +130,9 @@ pub trait Downloader: Send + Sync {
     ///
     /// # 返回
     /// 返回下载状态
-    async fn download(
+    async fn download<'a>(
         &self,
-        callback: Box<dyn Fn(SegmentEvent) + Send + Sync + 'static>,
+        callback: Box<dyn FnMut(SegmentEvent) + Send + Sync + 'a>,
         download_config: DownloadConfig,
     ) -> AppResult<DownloadStatus>;
 

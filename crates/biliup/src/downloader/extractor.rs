@@ -51,14 +51,14 @@ pub enum Extension {
     Ts,
 }
 
-pub type CallbackFn = Box<dyn FnMut(&str) + Send + Sync>;
+pub type CallbackFn<'a> = Box<dyn FnMut(&str) + Send + Sync + 'a>;
 
 impl Site {
     pub async fn download(
         &mut self,
         fmt_file_name: &str,
         segment: Segmentable,
-        hook: Option<CallbackFn>,
+        hook: Option<CallbackFn<'_>>,
     ) -> downloader::error::Result<()> {
         let fmt_file_name = fmt_file_name.replace("{title}", &self.title);
         self.client

@@ -164,7 +164,7 @@ pub async fn pause_streamers_endpoint(
         match worker_status {
             WorkerStatus::Working(d) => {
                 d.stop().await.map_err(report_to_response)?;
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
                 monitor
                     .rooms_handle
                     .toggle(w.clone(), WorkerStatus::Pause)
