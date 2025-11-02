@@ -6,7 +6,7 @@ use crate::server::errors::{AppError, AppResult};
 use async_trait::async_trait;
 use error_stack::{ResultExt, bail};
 use std::path::PathBuf;
-use std::process::Stdio;
+use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -207,21 +207,7 @@ impl FfmpegDownloader {
 
         let child = cmd.spawn().change_context(AppError::Unknown)?;
 
-        // 保存进程句柄
-        {
-            let mut handle = self.process_handle.write().await;
-            *handle = Some(child);
-        }
-
-        // 等待进程结束
-        let status = {
-            let mut handle = self.process_handle.write().await;
-            if let Some(child) = &mut *handle {
-                child.wait().await.change_context(AppError::Unknown)?
-            } else {
-                bail!(AppError::Custom("Process handle not found".to_string()));
-            }
-        };
+        let status = spawn_log(child, &self.process_handle).await?;
         // 退出时，重命名文件
         let part_file = format!("{}.part", output_file.display());
         tokio::fs::rename(&part_file, &output_file)
@@ -274,24 +260,6 @@ impl FfmpegDownloader {
             .take()
             .ok_or(AppError::Custom("Failed to capture stdout".to_string()))?;
 
-        let stderr = child.stderr.take().ok_or(AppError::Custom(
-            "failed to capture stderr pipe".to_string(),
-        ))?;
-
-        // 保存进程句柄
-        {
-            let mut handle = self.process_handle.write().await;
-            *handle = Some(child);
-        }
-
-        let mut stderr_lines = BufReader::new(stderr).lines();
-        // 将 stderr 打印到当前进程的 stderr
-        let stderr_task = tokio::spawn(async move {
-            while let Ok(Some(line)) = stderr_lines.next_line().await {
-                info!("[ffmpeg] {line}");
-            }
-        });
-
         // 异步读取stdout
         let mut reader = BufReader::new(stdout).lines();
         let mut segment_index = 0;
@@ -324,18 +292,8 @@ impl FfmpegDownloader {
             segment_index += 1;
             prev_file_path = Some(file_path);
         }
-        // 确保读任务结束（忽略它们的返回错误以避免因提前关闭管道导致的 join 错）
-        let _ = stderr_task.await;
+        let status = spawn_log(child, &self.process_handle).await?;
 
-        // 等待进程结束
-        let status = {
-            let mut handle = self.process_handle.write().await;
-            if let Some(mut child) = handle.take() {
-                child.wait().await.change_context(AppError::Unknown)?
-            } else {
-                bail!(AppError::Custom("Process handle not found".to_string()));
-            }
-        };
 
         if let Some(file_path) = prev_file_path {
             // 重命名文件
@@ -397,4 +355,41 @@ impl Downloader for FfmpegDownloader {
     // async fn get_status(&self) -> DownloadStatus {
     //     self.status.read().await.clone()
     // }
+}
+
+
+async fn spawn_log(mut child: tokio::process::Child, process_handle: &RwLock<Option<tokio::process::Child>>) -> AppResult<ExitStatus> {
+
+    let stderr = child.stderr.take().ok_or(AppError::Custom(
+        "failed to capture stderr pipe".to_string(),
+    ))?;
+
+    // 保存进程句柄
+    {
+        let mut handle = process_handle.write().await;
+        *handle = Some(child);
+    }
+
+    let mut stderr_lines = BufReader::new(stderr).lines();
+    // 将 stderr 打印到当前进程的 stderr
+    let stderr_task = tokio::spawn(async move {
+        while let Ok(Some(line)) = stderr_lines.next_line().await {
+            info!("[ffmpeg] {line}");
+        }
+    });
+
+
+    // 确保读任务结束（忽略它们的返回错误以避免因提前关闭管道导致的 join 错）
+    let _ = stderr_task.await;
+
+    // 等待进程结束
+    let status = {
+        let mut handle = process_handle.write().await;
+        if let Some(mut child) = handle.take() {
+            child.wait().await.change_context(AppError::Unknown)?
+        } else {
+            bail!(AppError::Custom("Process handle not found".to_string()));
+        }
+    };
+    Ok(status)
 }

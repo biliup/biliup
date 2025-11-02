@@ -18,7 +18,8 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }  # 添加特性（特性是累加的）  }
 thiserror = { workspace = true }
-
+rand = { workspace = true }
+serde_urlencoded = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
 clap = { version = "4", features = ["derive"] }
