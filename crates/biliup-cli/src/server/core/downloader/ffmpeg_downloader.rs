@@ -294,7 +294,6 @@ impl FfmpegDownloader {
         }
         let status = spawn_log(child, &self.process_handle).await?;
 
-
         if let Some(file_path) = prev_file_path {
             // 重命名文件
             let no_ext = file_path.with_extension("");
@@ -357,9 +356,10 @@ impl Downloader for FfmpegDownloader {
     // }
 }
 
-
-async fn spawn_log(mut child: tokio::process::Child, process_handle: &RwLock<Option<tokio::process::Child>>) -> AppResult<ExitStatus> {
-
+async fn spawn_log(
+    mut child: tokio::process::Child,
+    process_handle: &RwLock<Option<tokio::process::Child>>,
+) -> AppResult<ExitStatus> {
     let stderr = child.stderr.take().ok_or(AppError::Custom(
         "failed to capture stderr pipe".to_string(),
     ))?;
@@ -377,7 +377,6 @@ async fn spawn_log(mut child: tokio::process::Child, process_handle: &RwLock<Opt
             info!("[ffmpeg] {line}");
         }
     });
-
 
     // 确保读任务结束（忽略它们的返回错误以避免因提前关闭管道导致的 join 错）
     let _ = stderr_task.await;

@@ -6,7 +6,7 @@ use std::path::Path;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
-use tracing::info;
+use tracing::{error, info};
 
 /// 钩子步骤枚举：支持多种操作格式
 /// 既支持 key-value 形式（如 {run: "..."}），也支持纯字符串（如 "rm"）
@@ -51,14 +51,61 @@ impl HookStep {
         Ok(())
     }
 
+    /// 执行钩子步骤操作
+    ///
+    /// # 参数
+    /// * `video_paths` - 视频文件路径列表
+    ///
+    /// # 返回
+    /// 执行成功返回Ok(())，失败返回错误信息
+    pub async fn execute_with(&self, src: &[u8]) -> AppResult<()> {
+        match self {
+            HookStep::Run { run } => {
+                // 执行自定义命令
+                // 解析命令和参数
+                let parts: Vec<&str> = run.split_whitespace().collect();
+                if parts.is_empty() {
+                    bail!(AppError::Custom("Empty command".into()));
+                }
+
+                // 启动子进程，配置标准输入管道
+                let mut process = Command::new(parts[0])
+                    .args(&parts[1..])
+                    .stdin(std::process::Stdio::piped())
+                    .spawn()
+                    .change_context(AppError::Unknown)?;
+
+                // 将自定义输入写入标准输入
+                if let Some(mut stdin) = process.stdin.take() {
+                    stdin
+                        .write_all(src)
+                        .await
+                        .change_context(AppError::Unknown)?;
+                }
+
+                // 等待进程完成并检查退出状态
+                let status = process.wait().await.change_context(AppError::Unknown)?;
+                if !status.success() {
+                    bail!(AppError::Custom(format!(
+                        "Command failed with status: {}",
+                        status
+                    )));
+                }
+            }
+            cmd => {
+                // 未知命令，返回错误
+                bail!(AppError::Custom(format!("不支持的命令: {:?}", cmd)));
+            }
+        }
+        Ok(())
+    }
+
     /// 执行自定义命令，将视频路径作为标准输入传入
     ///
     /// # 参数
     /// * `cmd` - 要执行的命令字符串
     /// * `video_paths` - 视频文件路径列表
     async fn execute_command(&self, cmd: &str, video_paths: &[&Path]) -> AppResult<()> {
-        println!("Executing: {}", cmd);
-
         // 解析命令和参数
         let parts: Vec<&str> = cmd.split_whitespace().collect();
         if parts.is_empty() {
@@ -78,7 +125,7 @@ impl HookStep {
                 .iter()
                 .map(|p| p.to_string_lossy())
                 .reduce(|acc, e| Cow::from(acc.to_string() + "\n" + &*e))
-                .expect("At least one video path should exist");
+                .ok_or(AppError::Unknown)?;
             stdin
                 .write_all(paths_str.as_bytes())
                 .await
@@ -214,4 +261,17 @@ pub async fn process_video(video_path: &[&Path], processors: &[HookStep]) -> App
 
     info!("Video processing completed");
     Ok(())
+}
+
+pub async fn process(input: &[u8], processors: &Option<Vec<HookStep>>) {
+    if let Some(hooks) = processors {
+        // 依次执行每个处理器步骤
+        for processor in hooks {
+            info!(processor=?processor, "Starting processing...");
+            if let Err(e) = processor.execute_with(input).await {
+                error!(error=?e, "自定义处理执行出错");
+            }
+            info!(processor=?processor, "processing completed");
+        }
+    }
 }

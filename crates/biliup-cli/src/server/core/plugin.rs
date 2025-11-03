@@ -1,5 +1,5 @@
-pub mod yy;
 mod twitch;
+pub mod yy;
 
 use crate::server::common::construct_headers;
 use crate::server::common::util::{Recorder, parse_time};

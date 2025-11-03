@@ -7,6 +7,7 @@ use crate::server::core::monitor::RoomsHandle;
 use crate::server::core::plugin::{DownloadPlugin, StreamStatus};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Worker, WorkerStatus};
+use crate::server::infrastructure::models::hook_step::{process, process_video};
 use async_channel::{Receiver, Sender};
 use error_stack::{Report, ResultExt, bail};
 use std::fs;
@@ -445,7 +446,13 @@ impl DActor {
                     .toggle(worker.clone(), WorkerStatus::Working(task.clone()))
                     .await;
 
+                process(&[], &ctx.worker.get_streamer().preprocessor).await;
+
+                let option = &ctx.worker.get_streamer().downloaded_processor;
+
                 let result = task.execute(ctx, processor, &rooms_handle).await;
+
+                process(&[], option).await;
 
                 info!(
                     "Download workflow completed {} => {:?}",
