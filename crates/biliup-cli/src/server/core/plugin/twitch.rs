@@ -1,19 +1,54 @@
 use crate::server::errors::{AppError, AppResult};
-use error_stack::{IntoReport, ResultExt, bail, report};
+use error_stack::{IntoReport, ResultExt, bail, report, Report};
 use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::Arc;
+use async_trait::async_trait;
 use tokio::net::TcpListener;
 use tokio::process::{Child, Command};
 use tokio::sync::RwLock;
 use tokio::time::{Duration, sleep};
 use tracing::{error, warn};
+use crate::server::core::downloader::Downloader;
+use crate::server::core::plugin::{DownloadPlugin, StreamStatus};
+use crate::server::infrastructure::context::Context;
 
 // 常量定义
 const CLIENT_ID: &str = "kimne78kx3ncx6brgo4mv6wki5h1ko";
 
+pub struct Twitch {
+    re: Regex,
+}
+
+impl Twitch {
+    fn new() -> Twitch {
+        Twitch {
+            re: Regex::new(r"https?://(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)")
+            .unwrap(),
+        }
+    }
+}
+
+#[async_trait]
+impl DownloadPlugin for Twitch {
+    fn matches(&self, url: &str) -> bool {
+        self.re.is_match(url)
+    }
+
+    async fn check_status(&self, ctx: &mut Context) -> Result<StreamStatus, Report<AppError>> {
+        todo!()
+    }
+
+    fn danmaku_init(&self) -> Option<Box<dyn Downloader>> {
+        None
+    }
+
+    fn name(&self) -> &str {
+        "Twitch"
+    }
+}
 // GraphQL 响应结构
 #[derive(Debug, Deserialize)]
 struct GqlResponse {
@@ -50,8 +85,7 @@ struct PlaybackAccessToken {
 }
 
 // Twitch 下载器
-pub struct Twitch {
-    re: Regex,
+pub struct TwitchDownloader {
     fname: String,
     url: String,
     suffix: String,
@@ -65,7 +99,7 @@ pub struct Twitch {
     danmaku: Option<DanmakuClient>,
 }
 
-impl Twitch {
+impl TwitchDownloader {
     pub fn new(fname: String, url: String, suffix: Option<String>) -> Self {
         Self {
             fname,
@@ -79,8 +113,6 @@ impl Twitch {
             raw_stream_url: None,
             proc: None,
             danmaku: None,
-            re: Regex::new(r"https?://(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)")
-                .unwrap(),
         }
     }
 

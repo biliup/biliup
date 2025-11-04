@@ -164,7 +164,6 @@ pub async fn pause_streamers_endpoint(
         match worker_status {
             WorkerStatus::Working(d) => {
                 d.stop().await.map_err(report_to_response)?;
-
                 monitor
                     .rooms_handle
                     .toggle(w.clone(), WorkerStatus::Pause)
@@ -183,7 +182,6 @@ pub async fn pause_streamers_endpoint(
                     .rooms_handle
                     .toggle(w.clone(), WorkerStatus::Pause)
                     .await;
-                info!("非预期状态")
             }
         };
     }
