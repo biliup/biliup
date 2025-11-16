@@ -10,132 +10,27 @@ use ormlite::Model;
 use ormlite::model::ModelBuilder;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info};
-
-#[derive(Debug, Clone)]
-pub struct Monitor {
-    rooms_handle: Arc<RoomsHandle>,
-    /// 下载消息发送器
-    down_sender: Sender<DownloaderMessage>,
-    pool: ConnectionPool,
-}
-
-impl Monitor {
-    pub fn new(
-        rooms_handle: Arc<RoomsHandle>,
-        down_sender: Sender<DownloaderMessage>,
-        pool: ConnectionPool,
-    ) -> Self {
-        Self {
-            rooms_handle,
-            down_sender,
-            pool,
-        }
-    }
-    /// 启动客户端监控循环
-    ///
-    /// # 参数
-    /// * `rooms_handle` - 房间处理器
-    /// * `plugin` - 下载插件
-    /// * `actor_handle` - Actor处理器
-    /// * `interval` - 监控间隔（秒）
-    pub(crate) async fn start_monitor(
-        &self,
-        platform_name: &str,
-        plugin: Arc<dyn DownloadPlugin + Send + Sync>,
-    ) {
-        info!("start -> [{platform_name}]");
-        loop {
-            let mut interval = 30;
-            // 获取下一个要检查的房间
-            if let Some(room) = self.rooms_handle.next(platform_name).await {
-                let url = room.get_streamer().url;
-                interval = room.get_config().event_loop_interval;
-                let mut ctx = Context::new(room.clone(), self.pool.clone());
-                // 检查直播状态
-                let mut downloader = plugin.create_downloader(&mut ctx);
-                match downloader.check_stream().await {
-                    Ok(StreamStatus::Live { mut stream_info }) => {
-                        let sql_no_id = &stream_info.streamer_info;
-                        let insert = match StreamerInfo::builder()
-                            .url(sql_no_id.url.clone())
-                            .name(room.live_streamer.remark.clone())
-                            .title(sql_no_id.title.clone())
-                            .date(sql_no_id.date)
-                            .live_cover_path(sql_no_id.live_cover_path.clone())
-                            .insert(&ctx.pool)
-                            .await
-                        {
-                            Ok(insert) => insert,
-                            Err(e) => {
-                                error!(e=?e, "插入数据库失败");
-                                continue;
-                            }
-                        };
-                        info!(url = url, "room: is live -> 开播了");
-                        // 更新状态为等待中
-                        room.change_status(Stage::Download, WorkerStatus::Pending)
-                            .await;
-                        stream_info.streamer_info = insert;
-
-                        let streamer = room.get_streamer();
-                        // 确定文件格式后缀
-                        let suffix = streamer
-                            .format
-                            .unwrap_or_else(|| stream_info.suffix.clone());
-                        // 创建录制器
-                        let recorder = Recorder::new(
-                            streamer
-                                .filename_prefix
-                                .or(room.get_config().filename_prefix.clone()),
-                            stream_info.streamer_info.clone(),
-                            &suffix,
-                        );
-                        // 修改 ctx
-                        ctx.stream_info = *stream_info;
-                        ctx.recorder = recorder;
-                        // 发送下载开始消息
-                        if self
-                            .down_sender
-                            .send(DownloaderMessage::Start(downloader, ctx))
-                            .await
-                            .is_ok()
-                        {
-                            info!("成功开始录制 {}", url)
-                        }
-                    }
-                    Ok(StreamStatus::Offline) => {
-                        self.rooms_handle.wake_waker(room.id()).await;
-                        debug!(url = ctx.worker.live_streamer.url, "未开播")
-                    }
-                    Err(e) => {
-                        self.rooms_handle.wake_waker(room.id()).await;
-                        error!(e=?e, ctx=ctx.worker.live_streamer.url,"检查直播间出错")
-                    }
-                };
-            }
-            // 等待下一次检查
-            tokio::time::sleep(Duration::from_secs(interval)).await;
-        }
-        info!("exit -> [{platform_name}]")
-    }
-}
+use tracing::{debug, error, info, trace};
 
 /// 房间处理器
 /// 管理多个直播间的状态和操作
 #[derive(Debug)]
-pub struct RoomsHandle {
+pub struct Monitor {
     /// 消息发送器
     sender: tokio::sync::mpsc::Sender<ActorMessage>,
     /// Actor任务句柄
     kill: JoinHandle<()>,
+    pool: ConnectionPool,
+    /// 下载消息发送器
+    down_sender: Sender<DownloaderMessage>,
+    monitors: RwLock<HashMap<String, JoinHandle<()>>>,
 }
 
-impl Drop for RoomsHandle {
+impl Drop for Monitor {
     /// 监控器销毁时的清理逻辑
     fn drop(&mut self) {
         let sender = self.sender.clone();
@@ -150,36 +45,129 @@ impl Drop for RoomsHandle {
     }
 }
 
-impl Default for RoomsHandle {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl RoomsHandle {
+impl Monitor {
     /// 创建新的房间处理器实例
     ///
     /// # 参数
     /// * `name` - 平台名称
-    pub fn new() -> Self {
+    pub fn new(down_sender: Sender<DownloaderMessage>, pool: ConnectionPool) -> Self {
         // 创建消息通道
         let (sender, receiver) = tokio::sync::mpsc::channel(1);
         let mut actor = RoomsActor::new(receiver);
         // 启动Actor任务
         let kill = tokio::spawn(async move { actor.run().await });
 
-        Self { sender, kill }
+        Self {
+            sender,
+            kill,
+            pool,
+            down_sender,
+            monitors: Default::default(),
+        }
+    }
+
+    /// 启动客户端监控循环
+    ///
+    /// # 参数
+    /// * `rooms_handle` - 房间处理器
+    /// * `plugin` - 下载插件
+    /// * `actor_handle` - Actor处理器
+    /// * `interval` - 监控间隔（秒）
+    pub(crate) async fn start_monitor(
+        self: &Arc<Self>,
+        platform_name: &str,
+        plugin: Arc<dyn DownloadPlugin + Send + Sync>,
+    ) {
+        info!("start -> [{platform_name}]");
+        // 获取下一个要检查的房间
+        while let Some(room) = self.next(platform_name).await {
+            let url = room.get_streamer().url;
+            let interval = room.get_config().event_loop_interval;
+            let mut ctx = Context::new(room.clone(), self.pool.clone());
+            // 检查直播状态
+            let mut downloader = plugin.create_downloader(&mut ctx);
+            match downloader.check_stream().await {
+                Ok(StreamStatus::Live { mut stream_info }) => {
+                    let sql_no_id = &stream_info.streamer_info;
+                    let insert = match StreamerInfo::builder()
+                        .url(sql_no_id.url.clone())
+                        .name(room.live_streamer.remark.clone())
+                        .title(sql_no_id.title.clone())
+                        .date(sql_no_id.date)
+                        .live_cover_path(sql_no_id.live_cover_path.clone())
+                        .insert(&ctx.pool)
+                        .await
+                    {
+                        Ok(insert) => insert,
+                        Err(e) => {
+                            error!(e=?e, "插入数据库失败");
+                            continue;
+                        }
+                    };
+                    info!(url = url, "room: is live -> 开播了");
+                    // 更新状态为等待中
+                    room.change_status(Stage::Download, WorkerStatus::Pending)
+                        .await;
+                    stream_info.streamer_info = insert;
+
+                    let streamer = room.get_streamer();
+                    // 确定文件格式后缀
+                    let suffix = streamer
+                        .format
+                        .unwrap_or_else(|| stream_info.suffix.clone());
+                    // 创建录制器
+                    let recorder = Recorder::new(
+                        streamer
+                            .filename_prefix
+                            .or(room.get_config().filename_prefix.clone()),
+                        stream_info.streamer_info.clone(),
+                        &suffix,
+                    );
+                    // 修改 ctx
+                    ctx.stream_info = *stream_info;
+                    ctx.recorder = recorder;
+                    // 发送下载开始消息
+                    if self
+                        .down_sender
+                        .send(DownloaderMessage::Start(downloader, ctx))
+                        .await
+                        .is_ok()
+                    {
+                        info!("成功开始录制 {}", url)
+                    }
+                }
+                Ok(StreamStatus::Offline) => {
+                    self.wake_waker(room.id()).await;
+                    *room.downloader_status.write().unwrap() = WorkerStatus::Idle;
+                    debug!(url = ctx.worker.live_streamer.url, "未开播")
+                }
+                Err(e) => {
+                    self.wake_waker(room.id()).await;
+                    *room.downloader_status.write().unwrap() = WorkerStatus::Idle;
+                    error!(e=?e, ctx=ctx.worker.live_streamer.url,"检查直播间出错")
+                }
+            };
+            // 等待下一次检查
+            tokio::time::sleep(Duration::from_secs(interval)).await;
+        }
+        info!("exit -> [{platform_name}]")
     }
 
     /// 添加工作器到房间列表
     ///
     /// # 参数
     /// * `worker` - 要添加的工作器
-    pub async fn add(&self, worker: Arc<Worker>) -> Option<Arc<dyn DownloadPlugin + Send + Sync>> {
+    pub async fn add(
+        self: &Arc<Self>,
+        worker: Arc<Worker>,
+    ) -> Option<Arc<dyn DownloadPlugin + Send + Sync>> {
         let (send, recv) = oneshot::channel();
-        let msg = ActorMessage::Add(send, worker);
+        let msg = ActorMessage::Add(send, worker.clone());
         let _ = self.sender.send(msg).await;
-        recv.await.expect("Actor task has been killed")
+        let plugin = recv.await.expect("Actor task has been killed")?;
+
+        self.rooms_handle_pool(plugin.clone());
+        Some(plugin)
     }
 
     /// 添加工作器到房间列表
@@ -254,7 +242,7 @@ impl RoomsHandle {
     ///
     /// # 返回
     /// 返回下一个工作器，如果没有则返回None
-    async fn next(&self, platform_name: &str) -> Option<Arc<Worker>> {
+    async fn next(self: &Arc<Self>, platform_name: &str) -> Option<Arc<Worker>> {
         let (send, recv) = oneshot::channel();
         let msg = ActorMessage::NextRoom {
             respond_to: send,
@@ -267,21 +255,26 @@ impl RoomsHandle {
         recv.await.expect("Actor task has been killed")
     }
 
-    /// 切换工作器状态（在活跃和等待列表之间）
+    /// 放回工作队列
     ///
     /// # 参数
     /// * `worker` - 要切换的工作器
-    pub async fn wake_waker(&self, id: i64) {
+    pub async fn wake_waker(
+        self: &Arc<Self>,
+        id: i64,
+    ) -> Option<Arc<dyn DownloadPlugin + Send + Sync>> {
         let (send, recv) = oneshot::channel();
 
         let msg = ActorMessage::WakeWaker(send, id);
 
         // 忽略发送错误
         let _ = self.sender.send(msg).await;
-        recv.await.expect("Actor task has been killed")
+        let plugin = recv.await.expect("Actor task has been killed")?;
+        self.rooms_handle_pool(plugin.clone());
+        Some(plugin)
     }
 
-    /// 切换工作器状态（在活跃和等待列表之间）
+    /// 移出工作队列
     ///
     /// # 参数
     /// * `worker` - 要切换的工作器
@@ -293,6 +286,45 @@ impl RoomsHandle {
         // 忽略发送错误
         let _ = self.sender.send(msg).await;
         recv.await.expect("Actor task has been killed")
+    }
+
+    fn spawn_monitor_task(
+        this: Arc<Self>,
+        plugin: Arc<dyn DownloadPlugin + Send + Sync>,
+        platform_name: String,
+    ) -> JoinHandle<()> {
+        tokio::spawn(async move {
+            this.start_monitor(&platform_name, plugin).await;
+        })
+    }
+
+    fn rooms_handle_pool(self: &Arc<Self>, plugin: Arc<dyn DownloadPlugin + Send + Sync>) {
+        let platform_name = plugin.name().to_owned();
+        match self.monitors.write().unwrap().entry(platform_name.clone()) {
+            Entry::Occupied(mut entry) => {
+                // 已经有一个任务了，检查是否结束
+                if entry.get().is_finished() {
+                    // 旧任务已经结束，重新 spawn 一个
+                    let handle = Self::spawn_monitor_task(
+                        Arc::clone(self),
+                        plugin.clone(),
+                        platform_name.clone(),
+                    );
+                    entry.insert(handle); // 替换旧的 JoinHandle
+                } else {
+                    // 任务还在跑，不做任何事
+                }
+            }
+            Entry::Vacant(entry) => {
+                // 没有任务，正常 spawn
+                let handle = Self::spawn_monitor_task(
+                    Arc::clone(self),
+                    plugin.clone(),
+                    platform_name.clone(),
+                );
+                entry.insert(handle);
+            }
+        }
     }
 }
 
@@ -331,8 +363,11 @@ enum ActorMessage {
         platform_name: String,
     },
     /// 放回工作队列
-    WakeWaker(oneshot::Sender<()>, i64),
-    /// 切换工作器状态
+    WakeWaker(
+        oneshot::Sender<Option<Arc<dyn DownloadPlugin + Send + Sync>>>,
+        i64,
+    ),
+    /// 移出工作队列
     MakeWaker(oneshot::Sender<()>, i64),
     Shutdown,
 }
@@ -392,9 +427,8 @@ impl RoomsActor {
                     let _ = respond_to.send(());
                 }
                 ActorMessage::WakeWaker(sender, id) => {
-                    self.push_back(id);
                     // `let _ =` 忽略发送时的任何错误
-                    let _ = sender.send(());
+                    let _ = sender.send(self.push_back(id));
                 }
                 ActorMessage::Shutdown => {
                     return;
@@ -445,18 +479,20 @@ impl RoomsActor {
                 entry.insert(VecDeque::from([worker.clone()])); // 插入新值
             }
         }
-        info!("Added room [{}]", worker.live_streamer.url);
+        debug!("Added room [{}]", worker.live_streamer.url);
         Some(plugin)
     }
 
     fn add_plugin(&mut self, plugin: Arc<dyn DownloadPlugin + Send + Sync>) {
         self.plugins.push(plugin);
+        debug!("Added plugin size[{}]", self.plugins.len());
     }
 
     fn get_worker(&mut self, id: i64) -> Option<Arc<Worker>> {
         self.all_workers
             .iter()
-            .find(|worker| worker.id() == id).cloned()
+            .find(|worker| worker.id() == id)
+            .cloned()
     }
 
     fn get_by_platform(&mut self, platform_name: &str) -> Vec<Arc<Worker>> {
@@ -484,19 +520,18 @@ impl RoomsActor {
     }
 
     /// 放回工作队列
-    fn push_back(&mut self, id: i64) -> Option<()> {
+    fn push_back(&mut self, id: i64) -> Option<Arc<dyn DownloadPlugin + Send + Sync>> {
         // 如果内部Vec是空的，迭代结束（虽然是循环迭代器，但空集合无法产生任何值）
         let worker = self.get_worker(id)?;
         let plugin = self.matches(&worker.live_streamer.url)?;
         self.platforms
             .get_mut(plugin.name())?
             .push_back(worker.clone());
-
-        *worker.downloader_status.write().unwrap() = WorkerStatus::Idle;
-        Some(())
+        
+        Some(plugin)
     }
 
-    /// 移除工作队列
+    /// 移出工作队列
     fn pop(&mut self, id: i64) {
         for (_name, queue) in self.platforms.iter_mut() {
             if let Some(pos) = queue.iter().position(|w| w.id() == id) {
@@ -531,9 +566,15 @@ impl RoomsActor {
     /// # 返回
     /// 如果URL匹配返回true，否则返回false
     pub fn matches(&self, url: &str) -> Option<Arc<dyn DownloadPlugin + Send + Sync>> {
-        if let Some(plugin) = self.plugins.iter().next() {
-            plugin.matches(url);
-            return Some(plugin.clone());
+        for plugin in &self.plugins {
+            trace!(
+                platform_name = plugin.name(),
+                url = url,
+                "Found plugin for URL"
+            );
+            if plugin.matches(url) {
+                return Some(plugin.clone());
+            }
         }
         None
     }

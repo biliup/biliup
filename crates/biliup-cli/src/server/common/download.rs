@@ -4,7 +4,7 @@ use crate::server::core::downloader::{
     DanmakuClient, DownloadConfig, DownloadStatus, DownloaderRuntime, DownloaderType, SegmentEvent,
     SegmentInfo,
 };
-use crate::server::core::monitor::RoomsHandle;
+use crate::server::core::monitor::Monitor;
 use crate::server::core::plugin::{DownloadBase, StreamStatus};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Stage, WorkerStatus};
@@ -190,7 +190,7 @@ impl DownloadTask {
         mut ctx: Context,
         mut processor: SegmentEventProcessor,
         mut plugin: Box<dyn DownloadBase>,
-    ) -> AppResult<DownloadStatus> {
+    ) -> AppResult<()> {
         let worker = ctx.worker.clone();
         // 重试配置
         let mut retry_count = 0;
@@ -239,7 +239,7 @@ impl DownloadTask {
             }
 
             if self.token.is_cancelled() {
-                info!("用户手动停止");
+                info!("task is cancelled");
                 break components;
             }
 
@@ -268,10 +268,12 @@ impl DownloadTask {
 
         // 清理资源
         // 确保状态更新和资源清理
-        worker.change_status(Stage::Download, WorkerStatus::Idle).await;
+        worker
+            .change_status(Stage::Download, WorkerStatus::Idle)
+            .await;
         self.done_notify.notify_one();
         info!("Download task completed: {:?}", result);
-        result
+        Ok(())
     }
 
     async fn initialize_components(
@@ -381,7 +383,7 @@ pub struct DActor {
     /// 上传消息发送器
     sender: Sender<UploaderMessage>,
 
-    rooms_handle: Arc<RoomsHandle>,
+    rooms_handle: Arc<Monitor>,
 }
 
 impl DActor {
@@ -389,7 +391,7 @@ impl DActor {
     pub fn new(
         receiver: Receiver<DownloaderMessage>,
         sender: Sender<UploaderMessage>,
-        rooms_handle: Arc<RoomsHandle>,
+        rooms_handle: Arc<Monitor>,
     ) -> Self {
         Self {
             receiver,
@@ -425,14 +427,12 @@ impl DActor {
                 // 初始化组件
                 let processor = SegmentEventProcessor::new(self.sender.clone(), ctx.clone());
                 // 更新工作器状态为工作中
-                // rooms_handle
-                //     .toggle(worker.clone(), WorkerStatus::Working(task.clone()))
-                //     .await;
+                worker.change_status(Stage::Download, WorkerStatus::Working(task.clone())).await;
 
                 process(&[], &ctx.worker.get_streamer().preprocessor).await;
 
                 let option = &ctx.worker.get_streamer().downloaded_processor;
-                let result = task.execute(ctx, processor, downloader).await;
+                let _ = task.execute(ctx, processor, downloader).await;
 
                 process(&[], option).await;
 

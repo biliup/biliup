@@ -151,8 +151,8 @@ pub async fn pause_streamers_endpoint(
         let worker_status = w.downloader_status.read().unwrap().clone();
         match worker_status {
             WorkerStatus::Working(_) => {
-                managers.make_waker(id).await;
                 w.change_status(Stage::Download, WorkerStatus::Pause).await;
+                managers.make_waker(id).await;
                 info!(workers=?&w.live_streamer.url, "successfully pause live streamers");
             }
             WorkerStatus::Pause => {

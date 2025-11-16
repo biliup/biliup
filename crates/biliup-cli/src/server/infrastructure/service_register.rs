@@ -69,25 +69,14 @@ impl ServiceRegister {
             self.client.clone(),
         )
     }
+
+    pub async fn cleanup(&self) {
+        self.managers.cleanup().await;
+    }
 }
 
 // impl FromRef<ServiceRegister> for ConnectionPool {
 //     fn from_ref(app_state: &ServiceRegister) -> ConnectionPool {
 //         app_state.pool.clone()
-//     }
-// }
-
-// pub(crate) async fn add_room(&self, id: i64, pool: ConnectionPool) -> Arc<Worker> {
-//     let arc = self.ensure_monitor().rooms_handle.clone();
-//     let worker = Arc::new(Worker::new(id, pool, arc.clone()));
-//     arc.add(worker.clone()).await;
-//     worker
-// }
-//
-// pub async fn del_room(&self, id: i64) {
-//     let len = self.ensure_monitor().rooms_handle.del(id).await;
-//     info!("{id} removed, remained len {len}");
-//     if len == 0 {
-//         *self.monitor.lock().unwrap() = None;
 //     }
 // }

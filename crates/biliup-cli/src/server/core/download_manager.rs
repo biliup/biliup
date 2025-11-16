@@ -1,9 +1,9 @@
 use crate::server::common::download::{DActor, DownloaderMessage};
 use crate::server::common::upload::UActor;
-use crate::server::core::monitor::{Monitor, RoomsHandle};
+use crate::server::core::monitor::Monitor;
 use crate::server::core::plugin::DownloadPlugin;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::context::Worker;
+use crate::server::infrastructure::context::{Stage, Worker, WorkerStatus};
 use async_channel::{Sender, bounded};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -16,11 +16,7 @@ use tracing::info;
 pub struct DownloadManager {
     /// 下载插件
     // plugins: Vec<Arc<dyn DownloadPlugin + Send + Sync>>,
-    rooms_handle: Arc<RoomsHandle>,
-
-    monitor: Monitor,
-
-    monitors: RwLock<HashMap<String, JoinHandle<()>>>,
+    rooms_handle: Arc<Monitor>,
 
     /// 下载信号量数量
     download_semaphore: u32,
@@ -47,7 +43,7 @@ impl DownloadManager {
         let mut d_kills = Vec::new();
         let mut u_kills = Vec::new();
 
-        let rooms_handle = Arc::new(RoomsHandle::new());
+        let rooms_handle = Arc::new(Monitor::new(down_tx.clone(), pool.clone()));
         // 创建下载Actor
         for _ in 0..download_semaphore {
             let mut d_actor = DActor::new(down_rx.clone(), up_tx.clone(), rooms_handle.clone());
@@ -61,8 +57,6 @@ impl DownloadManager {
             u_kills.push(u_kill)
         }
 
-        let monitor = Monitor::new(rooms_handle.clone(), down_tx.clone(), pool.clone());
-
         Self {
             download_semaphore,
             update_semaphore,
@@ -70,8 +64,6 @@ impl DownloadManager {
             d_kills,
             u_kills,
             rooms_handle,
-            monitor,
-            monitors: Default::default(),
         }
     }
 
@@ -80,26 +72,13 @@ impl DownloadManager {
         tokio::spawn(async move {
             let name = plugin.name().to_string();
             rooms_handle.add_plugin(plugin).await;
-            info!("Added plugin[{}] to", name);
+            info!("Added plugin[{}]", name);
         });
     }
 
     pub async fn add_room(&self, worker: Worker) -> Option<()> {
         let arc = Arc::new(worker);
-
-        let dp = self.rooms_handle.add(arc.clone()).await?;
-
-        let platform_name = dp.name().to_owned();
-
-        match self.monitors.write().unwrap().entry(platform_name.clone()) {
-            Entry::Occupied(entry) => {}
-            Entry::Vacant(entry) => {
-                let monitor = self.monitor.clone();
-                entry.insert(tokio::spawn(async move {
-                    monitor.start_monitor(&platform_name, dp).await;
-                }));
-            }
-        }
+        self.rooms_handle.add(arc.clone()).await?;
         Some(())
     }
 
@@ -110,13 +89,14 @@ impl DownloadManager {
     pub async fn get_rooms(&self) -> Vec<Arc<Worker>> {
         self.rooms_handle.get_all().await
     }
-
+    
+    /// 移出工作队列
     pub async fn make_waker(&self, id: i64) {
         self.rooms_handle.make_waker(id).await
     }
 
     pub async fn wake_waker(&self, id: i64) {
-        self.rooms_handle.wake_waker(id).await
+        self.rooms_handle.wake_waker(id).await;
     }
 
     pub async fn get_room_by_id(&self, id: i64) -> Option<Arc<Worker>> {
@@ -124,37 +104,29 @@ impl DownloadManager {
             .get_all()
             .await
             .iter()
-            .find(|worker| worker.id() == id).cloned()
+            .find(|worker| worker.id() == id)
+            .cloned()
+    }
+    
+    pub async fn cleanup(&self) {
+        let vec = self.rooms_handle.get_all().await;
+        for worker in vec {
+            worker.change_status(Stage::Download, WorkerStatus::Idle).await;
+        }
+        info!("Cleanup complete");
     }
 }
 
-// /// Actor处理器
-// /// 管理下载和上传Actor的生命周期
-// pub struct ActorHandle {
-//
-//
-// }
-//
-// impl ActorHandle {
-//     /// 创建新的Actor处理器实例
-//     ///
-//     /// # 参数
-//     /// * `download_semaphore` - 下载Actor数量
-//     /// * `update_semaphore` - 上传Actor数量
-//     pub fn new() -> Self {
-//
-//     }
-// }
-//
-// impl Drop for ActorHandle {
-//     fn drop(&mut self) {
-//         // 发送端随 ActorHandle 一起被 drop，会关闭通道（如果没有其他 sender 克隆）。
-//         // 为避免 tokio 任务在后台“挂着”，这里直接 abort。
-//         for h in &self.d_kills {
-//             h.abort();
-//         }
-//         for h in &self.u_kills {
-//             h.abort();
-//         }
-//     }
-// }
+impl Drop for DownloadManager {
+    fn drop(&mut self) {
+        // 发送端随 ActorHandle 一起被 drop，会关闭通道（如果没有其他 sender 克隆）。
+        // 为避免 tokio 任务在后台“挂着”，这里直接 abort。
+        for h in &self.d_kills {
+            h.abort();
+        }
+        for h in &self.u_kills {
+            h.abort();
+        }
+        info!("exit download manager");
+    }
+}

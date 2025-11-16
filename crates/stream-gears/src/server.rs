@@ -33,7 +33,7 @@ use std::net::ToSocketAddrs;
 use std::ops::Deref;
 use std::sync::{Arc, LazyLock, RwLock};
 use time::macros::format_description;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use tracing_appender::rolling::Rotation;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -193,6 +193,7 @@ impl DownloadPlugin for PyPlugin {
         }
         false
     }
+
     fn create_downloader(&self, ctx: &mut Context) -> Box<dyn DownloadBase> {
         let url = ctx.worker.live_streamer.url.to_string();
         let remark = ctx.worker.live_streamer.remark.to_string();
@@ -468,13 +469,16 @@ pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
             for streamer in all_streamer {
                 // workers.push(Arc::new(Worker::new(streamer.id, service_register.pool.clone())));
                 let upload_config = get_upload_config(&conn_pool, streamer.id).await?;
+                let url = streamer.url.clone();
                 let worker = Worker::new(
                     streamer,
                     upload_config,
                     CONFIG.clone(),
                     service_register.client.clone(),
                 );
-                service_register.managers.add_room(worker).await;
+                if service_register.managers.add_room(worker).await.is_none() {
+                    warn!(url = url, "Could not add room to manager");
+                }
             }
 
             info!("migrations successfully ran, initializing axum server...");

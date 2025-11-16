@@ -1,9 +1,7 @@
 use crate::server::common::util::media_ext_from_url;
 use crate::server::core::downloader::ffmpeg_downloader::FfmpegDownloader;
 use crate::server::core::downloader::stream_gears::StreamGears;
-use crate::server::core::downloader::streamlink::{
-    Platform, Streamlink, StreamlinkDownloader,
-};
+use crate::server::core::downloader::streamlink::{Platform, Streamlink, StreamlinkDownloader};
 use crate::server::core::downloader::{DanmakuClient, DownloaderRuntime, DownloaderType};
 use crate::server::core::plugin::{DownloadBase, DownloadPlugin, StreamInfoExt, StreamStatus};
 use crate::server::errors::{AppError, AppResult};
@@ -261,10 +259,11 @@ impl TwitchDownloader {
         for (index, gql) in gql_list.iter().enumerate() {
             if let Some(data) = &gql.data
                 && let Some(user) = &data.user
-                    && let Some(stream) = &user.stream
-                        && stream.stream_type.as_deref() == Some("live") {
-                            live_urls.push(check_urls[index].clone());
-                        }
+                && let Some(stream) = &user.stream
+                && stream.stream_type.as_deref() == Some("live")
+            {
+                live_urls.push(check_urls[index].clone());
+            }
         }
 
         Ok(live_urls)
@@ -313,14 +312,15 @@ impl TwitchUtils {
 
             // 第二次重试时不使用 auth_token（因为已经失效）
             if retry == 0
-                && let Some(auth_token) = Self::get_auth_token() {
-                    headers.insert(
-                        "Authorization",
-                        format!("OAuth {}", auth_token)
-                            .parse()
-                            .change_context(AppError::Unknown)?,
-                    );
-                }
+                && let Some(auth_token) = Self::get_auth_token()
+            {
+                headers.insert(
+                    "Authorization",
+                    format!("OAuth {}", auth_token)
+                        .parse()
+                        .change_context(AppError::Unknown)?,
+                );
+            }
 
             let client = Client::new();
             let resp = client
