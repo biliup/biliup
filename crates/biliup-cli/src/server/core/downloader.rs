@@ -2,14 +2,22 @@
 pub mod ffmpeg_downloader;
 /// Stream-gears下载器实现
 pub mod stream_gears;
-mod streamlink;
+pub mod streamlink;
+mod ytdlp;
 
 use crate::server::common::util::Recorder;
-use crate::server::errors::AppResult;
+use crate::server::core::downloader::ffmpeg_downloader::FfmpegDownloader;
+use crate::server::core::downloader::stream_gears::StreamGears;
+use crate::server::core::downloader::streamlink::{StreamOutput, Streamlink, StreamlinkDownloader};
+use crate::server::core::plugin::StreamStatus;
+use crate::server::errors::{AppError, AppResult};
+use crate::server::infrastructure::context::Context;
 use async_trait::async_trait;
+use error_stack::Report;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
 
 /// 下载器配置
 /// 包含下载过程中需要的各种参数和设置
@@ -68,6 +76,49 @@ pub enum DownloaderType {
     YtDlp,
 }
 
+/// 实际的下载器枚举（包含实例）
+pub enum DownloaderRuntime {
+    Ffmpeg(FfmpegDownloader),
+    StreamGears(StreamGears),
+    StreamLink(Streamlink),
+}
+
+impl DownloaderRuntime {
+    /// 从配置创建
+    pub fn from_type(downloader_type: DownloaderType) -> Self {
+        match downloader_type {
+            DownloaderType::Ffmpeg => Self::Ffmpeg(FfmpegDownloader::new(
+                Vec::new(),
+                DownloaderType::FfmpegExternal,
+            )),
+            _ => Self::StreamGears(StreamGears::new(None)),
+            // ...
+        }
+    }
+
+    pub async fn download<'a>(
+        &self,
+        callback: Box<dyn FnMut(SegmentEvent) + Send + Sync + 'a>,
+        download_config: DownloadConfig,
+    ) -> AppResult<DownloadStatus> {
+        match self {
+            Self::Ffmpeg(d) => d.download(callback, download_config).await,
+            Self::StreamGears(d) => d.download(callback, download_config).await,
+            DownloaderRuntime::StreamLink(_) => {
+                todo!()
+            }
+        }
+    }
+
+    pub async fn stop(&self) -> AppResult<()> {
+        match self {
+            Self::Ffmpeg(d) => d.stop().await,
+            Self::StreamGears(d) => d.stop().await,
+            DownloaderRuntime::StreamLink(d) => d.stop().await,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SegmentInfo {
     /// 分段文件路径
@@ -120,26 +171,13 @@ pub enum DownloadStatus {
     Error(String),
 }
 
-/// 下载器基础trait
-/// 定义所有下载器必须实现的基本接口
 #[async_trait]
-pub trait Downloader: Send + Sync {
-    /// 开始下载
-    ///
-    /// # 参数
-    /// * `callback` - 分段完成时的回调函数
-    ///
-    /// # 返回
-    /// 返回下载状态
-    async fn download<'a>(
-        &self,
-        callback: Box<dyn FnMut(SegmentEvent) + Send + Sync + 'a>,
-        download_config: DownloadConfig,
-    ) -> AppResult<DownloadStatus>;
+// 弹幕客户端 (需要根据实际情况实现)
+pub trait DanmakuClient {
+    /// Starts danmaku recording and manages lifecycle
+    async fn download(&self) -> AppResult<()>;
 
-    /// 停止下载
     async fn stop(&self) -> AppResult<()>;
-
     /// 滚动保存（用于弹幕等）
     ///
     /// # 参数

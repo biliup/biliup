@@ -1,19 +1,28 @@
+use crate::server::common::util::media_ext_from_url;
+use crate::server::core::downloader::ffmpeg_downloader::FfmpegDownloader;
+use crate::server::core::downloader::stream_gears::StreamGears;
+use crate::server::core::downloader::streamlink::{
+    Platform, StreamOutput, Streamlink, StreamlinkDownloader,
+};
+use crate::server::core::downloader::{DanmakuClient, DownloaderRuntime, DownloaderType};
+use crate::server::core::plugin::{DownloadBase, DownloadPlugin, StreamInfoExt, StreamStatus};
 use crate::server::errors::{AppError, AppResult};
-use error_stack::{IntoReport, ResultExt, bail, report, Report};
+use crate::server::infrastructure::context::Context;
+use crate::server::infrastructure::models::StreamerInfo;
+use async_trait::async_trait;
+use chrono::Utc;
+use error_stack::{IntoReport, Report, ResultExt, bail, report};
 use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::sync::Arc;
-use async_trait::async_trait;
+use std::sync::RwLock;
 use tokio::net::TcpListener;
 use tokio::process::{Child, Command};
-use tokio::sync::RwLock;
 use tokio::time::{Duration, sleep};
 use tracing::{error, warn};
-use crate::server::core::downloader::Downloader;
-use crate::server::core::plugin::{DownloadPlugin, StreamStatus};
-use crate::server::infrastructure::context::Context;
 
 // 常量定义
 const CLIENT_ID: &str = "kimne78kx3ncx6brgo4mv6wki5h1ko";
@@ -26,23 +35,49 @@ impl Twitch {
     fn new() -> Twitch {
         Twitch {
             re: Regex::new(r"https?://(?:(?:www|go|m)\.)?twitch\.tv/(?P<id>[0-9_a-zA-Z]+)")
-            .unwrap(),
+                .unwrap(),
         }
     }
 }
 
 #[async_trait]
+impl DownloadBase for TwitchDownloader {
+    async fn check_stream(&mut self) -> Result<StreamStatus, Report<AppError>> {
+        self.acheck_stream().await
+    }
+
+    fn downloader(&self, downloader_type: DownloaderType) -> DownloaderRuntime {
+        match downloader_type {
+            DownloaderType::Ffmpeg => DownloaderRuntime::Ffmpeg(FfmpegDownloader::new(
+                Vec::new(),
+                DownloaderType::FfmpegExternal,
+            )),
+            DownloaderType::Streamlink => {
+                let result = StreamlinkDownloader::new(
+                    self.url.clone(),
+                    Platform::Twitch {
+                        disable_ads: self.twitch_disable_ads,
+                    },
+                );
+                DownloaderRuntime::StreamLink(Streamlink::new(result))
+            }
+            _ => DownloaderRuntime::StreamGears(StreamGears::new(None)),
+            // ...
+        }
+    }
+}
+
 impl DownloadPlugin for Twitch {
     fn matches(&self, url: &str) -> bool {
         self.re.is_match(url)
     }
 
-    async fn check_status(&self, ctx: &mut Context) -> Result<StreamStatus, Report<AppError>> {
-        todo!()
-    }
-
-    fn danmaku_init(&self) -> Option<Box<dyn Downloader>> {
-        None
+    fn create_downloader(&self, ctx: &mut Context) -> Box<dyn DownloadBase> {
+        Box::new(TwitchDownloader::new(
+            &ctx.worker.live_streamer.remark,
+            ctx.worker.live_streamer.url.clone(),
+            self.re.clone(),
+        ))
     }
 
     fn name(&self) -> &str {
@@ -86,37 +121,27 @@ struct PlaybackAccessToken {
 
 // Twitch 下载器
 pub struct TwitchDownloader {
-    fname: String,
     url: String,
-    suffix: String,
+    re: Regex,
     twitch_danmaku: bool,
     twitch_disable_ads: bool,
-    downloader: String,
-    pub room_title: Option<String>,
-    pub live_cover_url: Option<String>,
-    pub raw_stream_url: Option<String>,
-    proc: Option<Child>,
-    danmaku: Option<DanmakuClient>,
+    danmaku: Option<Arc<dyn DanmakuClient + Send + Sync>>,
+    name: String,
 }
 
 impl TwitchDownloader {
-    pub fn new(fname: String, url: String, suffix: Option<String>) -> Self {
+    pub fn new(name: &str, url: String, re: Regex) -> Self {
         Self {
-            fname,
             url,
-            suffix: suffix.unwrap_or_else(|| "flv".to_string()),
+            re,
             twitch_danmaku: false,
             twitch_disable_ads: true,
-            downloader: "".to_string(),
-            room_title: None,
-            live_cover_url: None,
-            raw_stream_url: None,
-            proc: None,
             danmaku: None,
+            name: name.to_string(),
         }
     }
 
-    pub async fn acheck_stream(&mut self, is_check: bool) -> AppResult<bool> {
+    pub async fn acheck_stream(&self) -> AppResult<StreamStatus> {
         let channel_name = self
             .re
             .captures(&self.url)
@@ -161,101 +186,50 @@ impl TwitchDownloader {
 
         let stream = match user.stream {
             Some(s) if s.stream_type.as_deref() == Some("live") => s,
-            _ => return Ok(false),
+            _ => return Ok(StreamStatus::Offline),
         };
 
-        self.room_title = stream.title;
-        self.live_cover_url = stream.preview_image_url;
+        let room_title = stream.title.unwrap_or_default();
+        let live_cover_url = stream.preview_image_url.unwrap_or_default();
 
-        if is_check {
-            return Ok(true);
-        }
+        let token = stream
+            .playback_access_token
+            .ok_or_else(|| AppError::Custom("No playback access token".to_string()))?;
 
-        if self.downloader == "streamlink" || self.downloader == "ffmpeg" {
-            // 获取可用端口
-            let listener = TcpListener::bind("127.0.0.1:0")
-                .await
-                .change_context(AppError::Unknown)?;
-            let port = listener
-                .local_addr()
-                .change_context(AppError::Unknown)?
-                .port()
-                .to_string();
-            drop(listener);
+        let query_params = [
+            ("player", "twitchweb".to_string()),
+            ("p", rand::random::<u32>().to_string()),
+            ("allow_source", "true".to_string()),
+            ("allow_audio_only", "true".to_string()),
+            ("allow_spectre", "false".to_string()),
+            ("fast_bread", "true".to_string()),
+            ("sig", token.signature),
+            ("token", token.value),
+        ];
 
-            let mut args = vec![
-                "--player-external-http",
-                "--player-external-http-port",
-                &port,
-                "--player-external-http-interface",
-                "localhost",
-            ];
+        let query_string =
+            serde_urlencoded::to_string(&query_params).change_context(AppError::Unknown)?;
+        let raw_stream_url = format!(
+            "https://usher.ttvnw.net/api/channel/hls/{}.m3u8?{}",
+            channel_name, query_string
+        );
 
-            let mut extra_args = Vec::new();
-
-            if self.twitch_disable_ads {
-                extra_args.push("--twitch-disable-ads".to_string());
-            }
-
-            if let Some(auth_token) = TwitchUtils::get_auth_token() {
-                extra_args.push(format!(
-                    "--twitch-api-header=Authorization=OAuth {}",
-                    auth_token
-                ));
-            }
-
-            let port_str = port.to_string();
-            let mut cmd = Command::new("streamlink");
-
-            for arg in &extra_args {
-                cmd.arg(arg);
-            }
-
-            cmd.args(&args).arg(&self.url).arg("best");
-
-            let mut child = cmd.spawn().change_context(AppError::Unknown)?;
-
-            self.raw_stream_url = Some(format!("http://localhost:{}", port));
-
-            // 等待进程启动
-            for _ in 0..5 {
-                if child
-                    .try_wait()
-                    .change_context(AppError::Unknown)?
-                    .is_some()
-                {
-                    return Ok(false);
-                }
-                sleep(Duration::from_secs(1)).await;
-            }
-
-            self.proc = Some(child);
-            Ok(true)
-        } else {
-            let token = stream
-                .playback_access_token
-                .ok_or_else(|| AppError::Custom("No playback access token".to_string()))?;
-
-            let query_params = [
-                ("player", "twitchweb".to_string()),
-                ("p", rand::random::<u32>().to_string()),
-                ("allow_source", "true".to_string()),
-                ("allow_audio_only", "true".to_string()),
-                ("allow_spectre", "false".to_string()),
-                ("fast_bread", "true".to_string()),
-                ("sig", token.signature),
-                ("token", token.value),
-            ];
-
-            let query_string =
-                serde_urlencoded::to_string(&query_params).change_context(AppError::Unknown)?;
-            self.raw_stream_url = Some(format!(
-                "https://usher.ttvnw.net/api/channel/hls/{}.m3u8?{}",
-                channel_name, query_string
-            ));
-
-            Ok(true)
-        }
+        Ok(StreamStatus::Live {
+            stream_info: Box::new(StreamInfoExt {
+                streamer_info: StreamerInfo {
+                    id: -1,
+                    name: self.name.clone(),
+                    url: self.url.clone(),
+                    title: room_title,
+                    date: Utc::now(),
+                    live_cover_path: live_cover_url,
+                },
+                suffix: media_ext_from_url(&raw_stream_url).unwrap(),
+                raw_stream_url,
+                platform: "twitch".to_string(),
+                stream_headers: HashMap::new(),
+            }),
+        })
     }
 
     pub async fn abatch_check(&self, check_urls: Vec<String>) -> AppResult<Vec<String>> {
@@ -303,29 +277,12 @@ impl TwitchDownloader {
 
     pub fn danmaku_init(&mut self) {
         if self.twitch_danmaku {
-            self.danmaku = Some(DanmakuClient::new(
-                self.url.clone(),
-                self.gen_download_filename(),
-            ));
+            todo!()
         }
-    }
-
-    pub async fn close(&mut self) -> AppResult<()> {
-        if let Some(mut proc) = self.proc.take() {
-            match tokio::time::timeout(Duration::from_secs(5), proc.kill()).await {
-                Ok(Ok(_)) => {}
-                Ok(Err(e)) => error!("terminate {} failed: {}", self.fname, e),
-                Err(_) => {
-                    warn!("Timeout expired, force killing process");
-                    let _ = proc.kill().await;
-                }
-            }
-        }
-        Ok(())
     }
 
     fn gen_download_filename(&self) -> String {
-        format!("{}.{}", self.fname, self.suffix)
+        todo!()
     }
 }
 
@@ -444,17 +401,5 @@ impl TwitchUtils {
         resp.error_for_status_ref()
             .change_context(AppError::Unknown)?;
         Ok(resp.json().await.change_context(AppError::Unknown)?)
-    }
-}
-
-// 弹幕客户端 (需要根据实际情况实现)
-struct DanmakuClient {
-    url: String,
-    filename: String,
-}
-
-impl DanmakuClient {
-    fn new(url: String, filename: String) -> Self {
-        Self { url, filename }
     }
 }

@@ -1,8 +1,6 @@
 use crate::server::common::construct_headers;
 use crate::server::common::util::parse_time;
-use crate::server::core::downloader::{
-    DownloadConfig, DownloadStatus, Downloader, SegmentEvent, SegmentInfo,
-};
+use crate::server::core::downloader::{DownloadConfig, DownloadStatus, SegmentEvent, SegmentInfo};
 use crate::server::errors::{AppError, AppResult};
 use async_trait::async_trait;
 use axum::http::HeaderMap;
@@ -23,10 +21,8 @@ use tracing::{debug, error, info};
 pub struct StreamGears {
     /// 代理设置（可选）
     proxy: Option<String>,
-    /// 下载状态
-    status: Arc<RwLock<DownloadStatus>>,
 
-    token: CancellationToken,
+    token: RwLock<CancellationToken>,
 }
 
 impl StreamGears {
@@ -41,8 +37,7 @@ impl StreamGears {
     pub fn new(proxy: Option<String>) -> Self {
         Self {
             proxy,
-            status: Arc::new(RwLock::new(DownloadStatus::Downloading)),
-            token: CancellationToken::new(),
+            token: RwLock::new(CancellationToken::new()),
         }
     }
 
@@ -59,7 +54,6 @@ impl StreamGears {
             download_config.segment_time.as_deref().map(parse_time),
             download_config.file_size,
         );
-        let _status = Arc::clone(&self.status);
 
         // 创建HTTP客户端
         let client = StatelessClient::new(headers_in, proxy.as_deref());
@@ -120,19 +114,20 @@ impl StreamGears {
     }
 }
 
-#[async_trait]
-impl Downloader for StreamGears {
+impl StreamGears {
     /// 开始下载流
     ///
     /// # 参数
     /// * `callback` - 分段完成时的回调函数
-    async fn download<'a>(
+    pub(crate) async fn download<'a>(
         &self,
         callback: Box<dyn FnMut(SegmentEvent) + Send + Sync + 'a>,
         download_config: DownloadConfig,
     ) -> AppResult<DownloadStatus> {
+        *self.token.write().unwrap() = CancellationToken::new();
+        let token = self.token.read().unwrap().clone();
         tokio::select! {
-            _ = self.token.cancelled() => {
+            _ = token.cancelled() => {
                 bail!(AppError::Custom("StreamGears token cancelled".into()))
             }
             res = self.start_download(callback, download_config) => {res}
@@ -140,10 +135,10 @@ impl Downloader for StreamGears {
     }
 
     /// 停止下载
-    async fn stop(&self) -> AppResult<()> {
+    pub(crate) async fn stop(&self) -> AppResult<()> {
         // 仅发出取消信号并更新状态
         // 如果底层下载函数不支持取消，这里不能真正中断正在进行的下载
-        self.token.cancel();
+        self.token.read().unwrap().cancel();
         Ok(())
     }
 }

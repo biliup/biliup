@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use biliup_cli::server::core::downloader::{
-    DownloadConfig, DownloadStatus, Downloader, SegmentEvent,
+    DanmakuClient, DownloadConfig, DownloadStatus, SegmentEvent,
 };
 use biliup_cli::server::errors::{AppError, AppResult};
 use error_stack::ResultExt;
@@ -9,25 +9,20 @@ use std::sync::Arc;
 
 /// DanmakuClient provides Rust bindings to the Python DanmakuClient
 /// for recording live chat (danmaku) alongside video streams.
-pub struct DanmakuClient {
+pub struct PyDanmakuClient {
     py_client: Arc<Py<PyAny>>,
 }
 
-impl DanmakuClient {
+impl PyDanmakuClient {
     /// Creates a new DanmakuClient instance
     pub fn new(py_client: Arc<Py<PyAny>>) -> Self {
         Self { py_client }
     }
 }
-
 #[async_trait]
-impl Downloader for DanmakuClient {
+impl DanmakuClient for PyDanmakuClient {
     /// Starts danmaku recording and manages lifecycle
-    async fn download<'a>(
-        &self,
-        _callback: Box<dyn FnMut(SegmentEvent) + Send + Sync + 'a>,
-        download_config: DownloadConfig,
-    ) -> AppResult<DownloadStatus> {
+    async fn download(&self) -> AppResult<()> {
         let py_client = self.py_client.clone();
         tokio::task::spawn_blocking(move || {
             Python::attach(|py| {
@@ -46,7 +41,7 @@ impl Downloader for DanmakuClient {
 
         // Return downloading status - the actual recording runs in the background
         // The Python DanmakuClient handles the recording lifecycle internally
-        Ok(DownloadStatus::Downloading)
+        Ok(())
     }
 
     /// Stops the danmaku recording

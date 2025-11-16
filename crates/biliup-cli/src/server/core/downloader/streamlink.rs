@@ -1,9 +1,13 @@
-use error_stack::{IntoReport, Result, ResultExt};
-use std::collections::HashMap;
-use std::process::{Child, Command, Stdio};
-use tokio::time::{sleep, Duration};
-use url::Url;
 use crate::server::errors::{AppError, AppResult};
+use error_stack::{IntoReport, ResultExt};
+use std::collections::HashMap;
+use std::process::Stdio;
+use std::sync::Arc;
+use tokio::process::{Child, ChildStdout, Command};
+use tokio::sync::RwLock;
+use tokio::time::{Duration, sleep};
+use tracing::{error, info};
+use url::Url;
 
 #[derive(Debug, Clone)]
 pub enum Platform {
@@ -20,12 +24,34 @@ pub enum OutputMode {
     HttpServer { port: u16 },
 }
 
+pub struct Streamlink {
+    streamlink_downloader: StreamlinkDownloader,
+    /// 进程句柄
+    process_handle: Arc<RwLock<Option<Child>>>,
+}
+
+impl Streamlink {
+    pub fn new(streamlink_downloader: StreamlinkDownloader) -> Streamlink {
+        Self {
+            streamlink_downloader,
+            process_handle: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// 停止下载
+    pub(crate) async fn stop(&self) -> AppResult<()> {
+        // 仅发出取消信号并更新状态
+        // 如果底层下载函数不支持取消，这里不能真正中断正在进行的下载
+
+        Ok(())
+    }
+}
+
 pub struct StreamlinkDownloader {
     platform: Platform,
     url: String,
     headers: HashMap<String, String>,
     output_mode: OutputMode,
-    proc: Option<Child>,
 }
 
 impl StreamlinkDownloader {
@@ -35,7 +61,6 @@ impl StreamlinkDownloader {
             url,
             headers: HashMap::new(),
             output_mode: OutputMode::Pipe, // 默认管道模式
-            proc: None,
         }
     }
 
@@ -50,13 +75,15 @@ impl StreamlinkDownloader {
     }
 
     /// 启动streamlink进程
-    pub async fn start(&mut self) -> AppResult<StreamOutput> {
+    pub fn start(&mut self) -> AppResult<StreamOutput> {
         let mut cmd = Command::new("streamlink");
 
         // 基础参数
         cmd.args([
-            "--stream-segment-threads", "3",
-            "--hls-playlist-reload-attempts", "1",
+            "--stream-segment-threads",
+            "3",
+            "--hls-playlist-reload-attempts",
+            "1",
         ]);
 
         // 添加HTTP headers
@@ -65,7 +92,7 @@ impl StreamlinkDownloader {
         }
 
         // 平台特定处理
-        let platform_args = self.build_platform_args().await?;
+        let platform_args = self.build_platform_args()?;
         for arg in platform_args {
             cmd.arg(arg);
         }
@@ -82,16 +109,15 @@ impl StreamlinkDownloader {
             OutputMode::HttpServer { port } => {
                 cmd.args([
                     "--player-external-http",
-                    "--player-external-http-port", &port.to_string(),
-                    "--player-external-http-interface", "localhost",
+                    "--player-external-http-port",
+                    &port.to_string(),
+                    "--player-external-http-interface",
+                    "localhost",
                     &self.url,
                     "best",
                 ]);
 
                 let mut child = cmd.spawn().change_context(AppError::Unknown)?;
-
-                // 等待HTTP服务器启动
-                self.wait_for_startup(&mut child).await?;
 
                 StreamOutput::Http {
                     url: format!("http://localhost:{}", port),
@@ -104,7 +130,7 @@ impl StreamlinkDownloader {
     }
 
     /// 构建平台特定参数
-    async fn build_platform_args(&self) -> AppResult<Vec<String>> {
+    fn build_platform_args(&self) -> AppResult<Vec<String>> {
         let mut args = Vec::new();
 
         match &self.platform {
@@ -137,8 +163,14 @@ impl StreamlinkDownloader {
 
         // 白名单参数
         let mut whitelist = vec![
-            "uparams", "upsig", "sigparams", "sign",
-            "flvsk", "sk", "mid", "site"
+            "uparams",
+            "upsig",
+            "sigparams",
+            "sign",
+            "flvsk",
+            "sk",
+            "mid",
+            "site",
         ];
 
         // 动态扩展白名单
@@ -162,17 +194,6 @@ impl StreamlinkDownloader {
         Ok(params)
     }
 
-    /// 等待HTTP服务器启动
-    async fn wait_for_startup(&self, child: &mut Child) -> AppResult<()> {
-        for _ in 0..5 {
-            if child.try_wait().change_context(AppError::Unknown)?.is_some() {
-                return Err(AppError::Unknown.into_report());
-            }
-            sleep(Duration::from_secs(1)).await;
-        }
-        Ok(())
-    }
-
     fn get_twitch_auth_token() -> Option<String> {
         // 从配置文件或环境变量读取
         std::env::var("TWITCH_AUTH_TOKEN").ok()
@@ -189,30 +210,53 @@ pub enum StreamOutput {
 
 impl StreamOutput {
     /// 获取可读的输入源（用于FFmpeg等）
-    pub fn get_input_uri(&self) -> String {
+    pub async fn get_input_uri(&mut self) -> String {
+        self.wait_for_startup().await;
         match self {
             StreamOutput::Pipe(_) => "pipe:0".to_string(),
             StreamOutput::Http { url, .. } => url.clone(),
         }
     }
 
+    /// 等待HTTP服务器启动
+    async fn wait_for_startup(&mut self) {
+        let process = match self {
+            StreamOutput::Pipe(process) => process,
+            StreamOutput::Http { url, process } => process,
+        };
+        match tokio::time::timeout(Duration::from_secs(5), process.wait()).await {
+            Ok(code) => {
+                info!("StreamOutput Exited with code {:?}", code);
+            }
+            Err(e) => {
+                error!(e=?e, "Timed out waiting for stream output");
+            }
+        }
+    }
+
     /// 获取stdout（仅管道模式）
-    pub fn take_stdout(&mut self) -> Option<std::process::ChildStdout> {
+    pub fn take_stdout(&mut self) -> Option<ChildStdout> {
         match self {
             StreamOutput::Pipe(child) => child.stdout.take(),
             StreamOutput::Http { .. } => None,
         }
     }
-}
 
-impl Drop for StreamOutput {
-    fn drop(&mut self) {
+    pub fn stop(&mut self) {
+        info!("准备停止stream terminated");
         let child = match self {
-            StreamOutput::Pipe(ref mut c) => c,
-            StreamOutput::Http { ref mut process, .. } => process,
+            StreamOutput::Pipe(c) => c,
+            StreamOutput::Http { process, .. } => process,
         };
 
         let _ = child.kill(); // 强制终止
         let _ = child.wait(); // 回收资源
+        info!("成功stream terminated");
+    }
+}
+
+impl Drop for StreamOutput {
+    fn drop(&mut self) {
+        self.stop()
     }
 }

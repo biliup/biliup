@@ -2,10 +2,10 @@ use crate::UploadLine;
 use crate::server::common::upload::{build_studio, submit_to_bilibili, upload};
 use crate::server::common::util::Recorder;
 use crate::server::config::Config;
-use crate::server::core::download_manager::ActorHandle;
+use crate::server::core::download_manager::DownloadManager;
 use crate::server::errors::{AppError, report_to_response};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::context::{Worker, WorkerStatus};
+use crate::server::infrastructure::context::{Stage, Worker, WorkerStatus};
 use crate::server::infrastructure::dto::LiveStreamerResponse;
 use crate::server::infrastructure::models::live_streamer::{InsertLiveStreamer, LiveStreamer};
 use crate::server::infrastructure::models::upload_streamer::{
@@ -38,20 +38,19 @@ use tracing::info;
 
 pub async fn get_streamers_endpoint(
     State(pool): State<ConnectionPool>,
-    State(workers): State<Arc<RwLock<Vec<Arc<Worker>>>>>,
+    State(managers): State<Arc<DownloadManager>>,
 ) -> Result<Json<Vec<LiveStreamerResponse>>, Response> {
     let live_streamers = get_all_streamer(&pool).await.map_err(report_to_response)?;
     let mut results = Vec::new();
+    let workers = managers.get_rooms().await;
     for x in live_streamers {
         let option = workers
-            .read()
-            .unwrap()
             .clone()
             .into_iter()
             .find(|worker| worker.live_streamer.id == x.id);
 
         let status = match option.as_ref() {
-            Some(t) => format!("{:?}", *t.downloader_status.read().await),
+            Some(t) => format!("{:?}", *t.downloader_status.read().unwrap()),
             None => String::new(),
         };
 
@@ -68,14 +67,15 @@ pub async fn get_streamers_endpoint(
 
 pub async fn post_streamers_endpoint(
     State(service_register): State<ServiceRegister>,
+    State(managers): State<Arc<DownloadManager>>,
     State(pool): State<ConnectionPool>,
     Json(payload): Json<InsertLiveStreamer>,
 ) -> Result<Json<LiveStreamer>, Response> {
-    let Some(manager) = service_register.get_manager(&payload.url) else {
-        info!("not supported url: {}", &payload.url);
-        return Err((StatusCode::BAD_REQUEST, "Not supported url").into_response());
-    };
-
+    // let Some(manager) = service_register.get_manager(&payload.url) else {
+    //     info!("not supported url: {}", &payload.url);
+    //     return Err((StatusCode::BAD_REQUEST, "Not supported url").into_response());
+    // };
+    let url = &payload.url.clone();
     // You can insert the model directly.
     let live_streamers = payload
         .insert(&pool)
@@ -85,10 +85,13 @@ pub async fn post_streamers_endpoint(
     let upload_config = get_upload_config(&pool, live_streamers.id)
         .await
         .map_err(report_to_response)?;
-    service_register
-        .add_room(manager, live_streamers.clone(), upload_config)
+    let Some(_) = managers
+        .add_room(service_register.worker(live_streamers.clone(), upload_config))
         .await
-        .map_err(report_to_response)?;
+    else {
+        info!("not supported url: {}", url);
+        return Err((StatusCode::BAD_REQUEST, "Not supported url").into_response());
+    };
 
     info!(workers=?live_streamers, "successfully inserted new live streamers");
     Ok(Json(live_streamers))
@@ -96,6 +99,7 @@ pub async fn post_streamers_endpoint(
 
 pub async fn put_streamers_endpoint(
     State(service_register): State<ServiceRegister>,
+    State(managers): State<Arc<DownloadManager>>,
     State(pool): State<ConnectionPool>,
     Json(payload): Json<LiveStreamer>,
 ) -> Result<Json<LiveStreamer>, Response> {
@@ -104,38 +108,32 @@ pub async fn put_streamers_endpoint(
         .await
         .change_context(AppError::Unknown)
         .map_err(report_to_response)?;
-    let Some(manager) = service_register.get_manager(&streamer.url) else {
-        info!("not supported url: {}", &streamer.url);
-        return Err((StatusCode::BAD_REQUEST, "Not supported url").into_response());
-    };
 
-    service_register
-        .del_room(streamer.id)
+    let id = streamer.id;
+    managers.del_room(id).await;
+
+    let upload_config = get_upload_config(&pool, id)
         .await
         .map_err(report_to_response)?;
 
-    let upload_config = get_upload_config(&pool, streamer.id)
+    managers
+        .add_room(service_register.worker(streamer.clone(), upload_config))
         .await
+        .ok_or(AppError::Unknown)
         .map_err(report_to_response)?;
 
-    service_register
-        .add_room(manager, streamer.clone(), upload_config)
-        .await
-        .map_err(report_to_response)?;
-
-    info!(workers=?streamer, "successfully update live streamers");
+    info!(id = id, "successfully update live streamers");
     Ok(Json(streamer))
 }
 
 pub async fn delete_streamers_endpoint(
     State(service_register): State<ServiceRegister>,
+    State(managers): State<Arc<DownloadManager>>,
     State(pool): State<ConnectionPool>,
     Path(id): Path<i64>,
 ) -> Result<Json<LiveStreamer>, Response> {
-    service_register
-        .del_room(id)
-        .await
-        .map_err(report_to_response)?;
+    managers.del_room(id).await;
+
     let live_streamers = del_streamer(&pool, id).await.map_err(report_to_response)?;
     info!(workers=?live_streamers, "successfully inserted new live streamers");
     Ok(Json(live_streamers))
@@ -144,44 +142,27 @@ pub async fn delete_streamers_endpoint(
 // #[axum::debug_handler(state = ServiceRegister)]
 pub async fn pause_streamers_endpoint(
     State(service_register): State<ServiceRegister>,
+    State(managers): State<Arc<DownloadManager>>,
     State(pool): State<ConnectionPool>,
-    State(workers): State<Arc<RwLock<Vec<Arc<Worker>>>>>,
     Path(id): Path<i64>,
 ) -> Result<Json<()>, Response> {
-    let option = workers
-        .read()
-        .unwrap()
-        .clone()
-        .into_iter()
-        .find(|worker| worker.live_streamer.id == id);
-    if let Some(w) = option {
-        let manager = service_register
-            .get_manager(&w.live_streamer.url)
-            .ok_or(AppError::Unknown)
-            .map_err(report_to_response)?;
-        let monitor = manager.ensure_monitor(pool.clone());
-        let worker_status = w.downloader_status.read().await.clone();
+    let worker = managers.get_room_by_id(id).await;
+    if let Some(w) = worker {
+        let worker_status = w.downloader_status.read().unwrap().clone();
         match worker_status {
-            WorkerStatus::Working(d) => {
-                d.stop().await.map_err(report_to_response)?;
-                monitor
-                    .rooms_handle
-                    .toggle(w.clone(), WorkerStatus::Pause)
-                    .await;
+            WorkerStatus::Working(_) => {
+                managers.make_waker(id).await;
+                w.change_status(Stage::Download, WorkerStatus::Pause).await;
                 info!(workers=?&w.live_streamer.url, "successfully pause live streamers");
             }
             WorkerStatus::Pause => {
-                monitor
-                    .rooms_handle
-                    .toggle(w.clone(), WorkerStatus::Idle)
-                    .await;
+                managers.wake_waker(id).await;
                 info!(workers=?&w.live_streamer.url, "successfully start live streamers");
             }
             _ => {
-                monitor
-                    .rooms_handle
-                    .toggle(w.clone(), WorkerStatus::Pause)
-                    .await;
+                managers.make_waker(id).await;
+                w.change_status(Stage::Download, WorkerStatus::Pause).await;
+                info!(workers=?&w.live_streamer.url, "successfully pause live streamers");
             }
         };
     }
@@ -517,16 +498,15 @@ pub async fn get_videos() -> Result<Json<Vec<serde_json::Value>>, Response> {
 // #[axum::debug_handler(state = ServiceRegister)]
 pub async fn get_status(
     State(service_register): State<ServiceRegister>,
-    State(workers): State<Arc<RwLock<Vec<Arc<Worker>>>>>,
+    State(managers): State<Arc<DownloadManager>>,
     State(config): State<Arc<RwLock<Config>>>,
-    State(actor_handle): State<Arc<ActorHandle>>,
 ) -> Result<Json<serde_json::Value>, Response> {
-    let workers_clone = workers.read().unwrap().clone(); // 如果 Vec 本身可以克隆
+    let workers = managers.get_rooms().await;
 
     let mut sw = Vec::new();
-    for worker in &workers_clone {
+    for worker in &workers {
         sw.push(serde_json::json!({
-            "downloader_status": format!("{:?}", worker.downloader_status.read().await),
+            "downloader_status": format!("{:?}", worker.downloader_status.read()),
             "uploader_status": format!("{:?}", worker.uploader_status.read().unwrap()),
             "live_streamer": worker.live_streamer,
             "upload_streamer": worker.upload_streamer,
@@ -536,8 +516,8 @@ pub async fn get_status(
     Ok(Json(serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
         "rooms": sw,
-        "download_semaphore": actor_handle.d_kills.len(),
-        "update_semaphore": actor_handle.u_kills.len(),
+        "download_semaphore": managers.d_kills.len(),
+        "update_semaphore": managers.u_kills.len(),
         "config": config,
     })))
 }

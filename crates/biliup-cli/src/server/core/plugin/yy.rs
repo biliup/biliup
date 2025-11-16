@@ -1,6 +1,6 @@
 use crate::server::common::util::media_ext_from_url;
-use crate::server::core::downloader::Downloader;
-use crate::server::core::plugin::{DownloadPlugin, StreamInfoExt, StreamStatus};
+use crate::server::core::downloader::DanmakuClient;
+use crate::server::core::plugin::{DownloadBase, DownloadPlugin, StreamInfoExt, StreamStatus};
 use crate::server::errors::AppError;
 use crate::server::infrastructure::context::Context;
 use crate::server::infrastructure::models::StreamerInfo;
@@ -11,37 +11,37 @@ use regex::Regex;
 use reqwest::header::HeaderMap;
 use serde_json::json;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub struct YY {
+pub struct YYDownloader {
     fake_headers: HeaderMap,
-    re: Regex,
+    client: reqwest::Client,
+    url: String,
+    name: String,
 }
 
-impl YY {
-    pub fn new() -> Self {
+impl YYDownloader {
+    fn new(client: reqwest::Client, url: &str, name: &str) -> YYDownloader {
         Self {
             fake_headers: Default::default(),
-            re: Regex::new(r"(?:https?://)?(?:www\.)?yy\.com").unwrap(),
+            client,
+            url: url.to_string(),
+            name: name.to_string(),
         }
     }
 }
 
 #[async_trait]
-impl DownloadPlugin for YY {
-    fn matches(&self, url: &str) -> bool {
-        self.re.is_match(url)
-    }
-
-    async fn check_status(&self, ctx: &mut Context) -> Result<StreamStatus, Report<AppError>> {
+impl DownloadBase for YYDownloader {
+    async fn check_stream(&mut self) -> Result<StreamStatus, Report<AppError>> {
         let mut fake_headers = self.fake_headers.clone();
         // 设置headers
         fake_headers.insert("content-type", "text/plain;charset=UTF-8".parse().unwrap());
         fake_headers.insert("referer", "https://www.yy.com/".parse().unwrap());
-        let url = ctx.worker.live_streamer.url.to_string();
-        let name = ctx.worker.live_streamer.remark.to_string();
+
         // 提取房间ID
-        let rid = match url.split("www.yy.com/").nth(1) {
+        let rid = match self.url.split("www.yy.com/").nth(1) {
             Some(part) => part.split('/').next().unwrap_or(""),
             None => {
                 bail!(AppError::Custom("直播间地址错误".to_string()))
@@ -109,9 +109,7 @@ impl DownloadPlugin for YY {
 
         // 构建URL
         // 发送POST请求并处理响应
-        let result = ctx
-            .worker
-            .client
+        let result = self
             .client
             .post(&format!(
                 "https://stream-manager.yy.com/v3/channel/streams?uid=0&cid={}&sid={}&appid=0&sequence={}&encode=json",
@@ -143,22 +141,47 @@ impl DownloadPlugin for YY {
             stream_info: Box::new(StreamInfoExt {
                 streamer_info: StreamerInfo {
                     id: -1,
-                    name,
-                    url,
+                    name: self.name.clone(),
+                    url: self.url.clone(),
                     title: "".to_string(),
                     date: Utc::now(),
                     live_cover_path: "".to_string(),
                 },
                 suffix: media_ext_from_url(&raw_stream_url).unwrap(),
                 raw_stream_url,
-                platform: self.name().to_string(),
+                platform: String::from("YY"),
                 stream_headers: HashMap::new(),
             }),
         })
     }
+}
 
-    fn danmaku_init(&self) -> Option<Box<dyn Downloader>> {
-        None
+pub struct YY {
+    re: Regex,
+}
+
+impl YY {
+    pub fn new() -> Self {
+        Self {
+            re: Regex::new(r"(?:https?://)?(?:www\.)?yy\.com").unwrap(),
+        }
+    }
+}
+
+impl DownloadPlugin for YY {
+    fn matches(&self, url: &str) -> bool {
+        self.re.is_match(url)
+    }
+
+    fn create_downloader(&self, ctx: &mut Context) -> Box<dyn DownloadBase> {
+        let url = ctx.worker.live_streamer.url.to_string();
+        let name = ctx.worker.live_streamer.remark.to_string();
+
+        Box::new(YYDownloader::new(
+            ctx.worker.client.client.clone(),
+            &url,
+            &name,
+        ))
     }
 
     fn name(&self) -> &str {

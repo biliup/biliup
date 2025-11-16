@@ -1,21 +1,14 @@
 mod twitch;
 pub mod yy;
 
-use crate::server::common::construct_headers;
-use crate::server::common::util::{Recorder, parse_time};
-use crate::server::config::{Config, default_segment_time};
-use crate::server::core::downloader::ffmpeg_downloader::FfmpegDownloader;
-use crate::server::core::downloader::stream_gears::StreamGears;
-use crate::server::core::downloader::{DownloadConfig, Downloader, DownloaderType};
-use crate::server::errors::AppError;
+use crate::server::core::downloader::{DanmakuClient, DownloaderRuntime, DownloaderType};
+use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::Context;
 use crate::server::infrastructure::models::StreamerInfo;
 use async_trait::async_trait;
-use biliup::downloader::util::Segmentable;
 use error_stack::Report;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// 流信息结构
@@ -41,50 +34,35 @@ pub enum StreamStatus {
     Live { stream_info: Box<StreamInfoExt> },
     /// 离线状态
     Offline,
-    /// 未知状态
-    Unknown,
 }
 
 /// 下载基础trait
 /// 定义下载器的基本功能接口
 #[async_trait]
 pub trait DownloadBase: Send + Sync {
-    /// 检查流是否可用
-    async fn check_stream(&self) -> Result<bool, Report<AppError>>;
     /// 获取流信息
-    async fn get_stream_info(&self) -> Result<StreamInfoExt, Report<AppError>>;
+    async fn check_stream(&mut self) -> Result<StreamStatus, Report<AppError>>;
     /// 下载到指定路径
-    async fn download(&self, output_path: impl AsRef<Path>) -> Result<(), Report<AppError>>;
-    /// 判断是否应该录制
-    fn should_record(&self, room_title: &str) -> bool;
-    /// 获取平台名称
-    fn get_platform_name(&self) -> &'static str;
+    fn downloader(&self, downloader_type: DownloaderType) -> DownloaderRuntime {
+        DownloaderRuntime::from_type(downloader_type)
+    }
+
+    /// 初始化弹幕客户端（可选）
+    fn danmaku_init(&self) -> Option<Arc<dyn DanmakuClient + Send + Sync>> {
+        None
+    }
+    // /// 获取平台名称
+    // fn get_platform_name(&self) -> &'static str;
 }
 
 /// 下载插件trait
 /// 定义下载插件必须实现的接口
-#[async_trait]
 pub trait DownloadPlugin {
     /// 检查URL是否匹配此插件
     fn matches(&self, url: &str) -> bool;
-    /// 检查流状态
-    async fn check_status(&self, ctx: &mut Context) -> Result<StreamStatus, Report<AppError>>;
-    /// 创建下载器实例
-    async fn create_downloader(&self, config: Option<DownloaderType>) -> Arc<dyn Downloader> {
-        match config {
-            Some(DownloaderType::Ffmpeg) => Arc::new(FfmpegDownloader::new(
-                Vec::new(),
-                DownloaderType::FfmpegExternal,
-            )),
-            // Some(DownloaderType::StreamGears) => {
-            //
-            // },
-            _ => Arc::new(StreamGears::new(None)),
-        }
-    }
 
-    /// 初始化弹幕客户端（可选）
-    fn danmaku_init(&self) -> Option<Box<dyn Downloader>>;
+    /// 创建下载器实例
+    fn create_downloader(&self, ctx: &mut Context) -> Box<dyn DownloadBase>;
 
     /// 获取插件名称
     fn name(&self) -> &str;

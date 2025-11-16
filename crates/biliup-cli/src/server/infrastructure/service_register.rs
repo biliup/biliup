@@ -1,5 +1,5 @@
 use crate::server::config::Config;
-use crate::server::core::download_manager::{ActorHandle, DownloadManager};
+use crate::server::core::download_manager::DownloadManager;
 use crate::server::core::plugin::yy::YY;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
@@ -18,14 +18,10 @@ use tracing::info;
 pub struct ServiceRegister {
     /// 数据库连接池
     pub pool: ConnectionPool,
-    /// 工作器列表
-    pub workers: Arc<RwLock<Vec<Arc<Worker>>>>,
     /// 下载管理器列表
-    pub managers: Arc<Vec<DownloadManager>>,
+    pub managers: Arc<DownloadManager>,
     /// 全局配置
     pub config: Arc<RwLock<Config>>,
-    /// Actor处理器
-    pub actor_handle: Arc<ActorHandle>,
     /// HTTP客户端
     pub client: StatelessClient,
 }
@@ -42,8 +38,7 @@ impl ServiceRegister {
     pub fn new(
         pool: ConnectionPool,
         config: Arc<RwLock<Config>>,
-        actor_handle: Arc<ActorHandle>,
-        mut download_manager: Vec<DownloadManager>,
+        mut download_manager: DownloadManager,
     ) -> Self {
         info!("initializing utility services...");
         // 创建默认的HTTP客户端
@@ -51,101 +46,30 @@ impl ServiceRegister {
 
         info!("utility services initialized, building feature services...");
 
-        download_manager.push(DownloadManager::new(YY::new(), actor_handle.clone()));
+        // download_manager.push(DownloadManager::new(YY::new(), actor_handle.clone()));
+        download_manager.add_plugin(Arc::new(YY::new()));
 
         info!("feature services successfully initialized!");
 
         ServiceRegister {
             pool,
-            workers: Arc::new(Default::default()),
             managers: Arc::new(download_manager),
             config: config.clone(),
-            actor_handle,
             client,
         }
     }
 
-    /// 根据URL获取匹配的下载管理器
-    ///
-    /// # 参数
-    /// * `url` - 直播流URL
-    ///
-    /// # 返回
-    /// 返回匹配的下载管理器引用，如果没有匹配的则返回None
-    pub fn get_manager(&self, url: &str) -> Option<&DownloadManager> {
-        self.managers
-            .iter()
-            .find(|&manager| manager.matches(url))
-            .map(|v| v as _)
-    }
-
-    /// 添加新的直播间到监控列表
-    ///
-    /// # 参数
-    /// * `monitor` - 监控器实例
-    /// * `live_streamer` - 直播主播信息
-    /// * `upload_streamer` - 上传配置（可选）
-    pub async fn add_room(
+    pub fn worker(
         &self,
-        manager: &DownloadManager,
         live_streamer: LiveStreamer,
         upload_streamer: Option<UploadStreamer>,
-    ) -> AppResult<Option<()>> {
-        // 创建新的工作器实例
-        let worker = Arc::new(Worker::new(
+    ) -> Worker {
+        Worker::new(
             live_streamer,
             upload_streamer,
             self.config.clone(),
             self.client.clone(),
-        ));
-        // 将工作器添加到监控器和工作器列表中
-        let monitor = manager.ensure_monitor(self.pool.clone());
-        monitor.rooms_handle.add(worker.clone()).await;
-        self.workers.write().unwrap().push(worker.clone());
-        info!("add {} success", worker.live_streamer.url);
-        Ok(Some(()))
-    }
-
-    /// 删除指定ID的直播间
-    ///
-    /// # 参数
-    /// * `id` - 要删除的直播间ID
-    pub async fn del_room(&self, id: i64) -> AppResult<()> {
-        // 在工作器列表中查找要删除的工作器
-        let Some(i) = self
-            .workers
-            .read()
-            .unwrap()
-            .iter()
-            .position(|x| x.live_streamer.id == id)
-        else {
-            return Err(error_stack::Report::new(AppError::Unknown));
-        };
-
-        // 从工作器列表中移除
-        let removed = self.workers.write().unwrap().swap_remove(i);
-        let url = &removed.live_streamer.url;
-        // 获取对应的下载管理器
-        let Some(manager) = self.get_manager(url) else {
-            info!("not found url: {url}");
-            bail!(AppError::Unknown)
-        };
-        // 从监控器中删除房间
-        let monitor = manager.ensure_monitor(self.pool.clone());
-        let len = monitor.rooms_handle.del(id).await;
-        info!("id: {id} removed, remained len {len}");
-        // 如果没有剩余房间，清理监控器
-        if len == 0 {
-            *manager.monitor.lock().unwrap() = None;
-        }
-        let downloader = match &*removed.downloader_status.read().await {
-            WorkerStatus::Working(downloader) => Some(downloader.clone()),
-            _ => None,
-        };
-        if let Some(downloader) = downloader {
-            let _ = downloader.stop().await;
-        }
-        Ok(())
+        )
     }
 }
 

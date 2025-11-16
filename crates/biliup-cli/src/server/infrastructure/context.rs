@@ -1,7 +1,6 @@
 use crate::server::common::download::DownloadTask;
 use crate::server::common::util::Recorder;
 use crate::server::config::Config;
-use crate::server::core::downloader::Downloader;
 use crate::server::core::plugin::StreamInfoExt;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::models::live_streamer::LiveStreamer;
@@ -11,7 +10,7 @@ use biliup::client::StatelessClient;
 use core::fmt;
 use ormlite::Model;
 use std::sync::{Arc, RwLock};
-use tracing::info;
+use tracing::{error, info};
 
 /// 应用程序上下文，包含工作器和扩展信息
 #[derive(Debug, Clone)]
@@ -45,7 +44,7 @@ impl Context {
 #[derive(Debug)]
 pub struct Worker {
     /// 下载器状态
-    pub downloader_status: tokio::sync::RwLock<WorkerStatus>,
+    pub downloader_status: RwLock<WorkerStatus>,
     /// 上传器状态
     pub uploader_status: RwLock<WorkerStatus>,
     /// 直播主播信息
@@ -73,13 +72,22 @@ impl Worker {
         client: StatelessClient,
     ) -> Self {
         Self {
-            downloader_status: tokio::sync::RwLock::new(Default::default()),
+            downloader_status: RwLock::new(Default::default()),
             uploader_status: Default::default(),
             live_streamer,
             upload_streamer,
             config,
             client,
         }
+    }
+
+    /// 判断是否应该录制
+    fn should_record(&self, room_title: &str) -> bool {
+        true
+    }
+
+    pub fn id(&self) -> i64 {
+        self.live_streamer.id
     }
 
     /// 获取主播信息
@@ -108,7 +116,20 @@ impl Worker {
     pub async fn change_status(&self, stage: Stage, status: WorkerStatus) {
         match stage {
             Stage::Download => {
-                *self.downloader_status.write().await = status;
+                let task = if let WorkerStatus::Working(task) =
+                    &*self.downloader_status.read().unwrap()
+                    && !matches!(status, WorkerStatus::Working(_))
+                {
+                    Some(task.clone())
+                } else {
+                    None
+                };
+                if let Some(task) = task
+                    && let Err(e) = task.stop().await
+                {
+                    error!(error = ?e, "Failed to stop downloader");
+                }
+                *self.downloader_status.write().unwrap() = status;
             }
             Stage::Upload => {
                 *self.uploader_status.write().unwrap() = status;

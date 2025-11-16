@@ -1,6 +1,6 @@
 use crate::server::core::downloader;
 use crate::server::core::downloader::{
-    DownloadConfig, DownloadStatus, Downloader, DownloaderType, SegmentEvent, SegmentInfo,
+    DownloadConfig, DownloadStatus, DownloaderType, SegmentEvent, SegmentInfo,
 };
 use crate::server::errors::{AppError, AppResult};
 use async_trait::async_trait;
@@ -321,9 +321,8 @@ impl FfmpegDownloader {
     }
 }
 
-#[async_trait]
-impl Downloader for FfmpegDownloader {
-    async fn download<'a>(
+impl FfmpegDownloader {
+    pub(crate) async fn download<'a>(
         &self,
         callback: Box<dyn FnMut(SegmentEvent) + Send + Sync + 'a>,
         download_config: DownloadConfig,
@@ -341,7 +340,7 @@ impl Downloader for FfmpegDownloader {
         }
     }
 
-    async fn stop(&self) -> AppResult<()> {
+    pub(crate) async fn stop(&self) -> AppResult<()> {
         let mut handle = self.process_handle.write().await;
         if let Some(child) = &mut *handle {
             child.kill().await.change_context(AppError::Unknown)?;

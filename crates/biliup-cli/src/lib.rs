@@ -5,7 +5,7 @@ pub mod uploader;
 
 // use crate::server::api::router::ApplicationController;
 use crate::server::app::ApplicationController;
-use crate::server::core::download_manager::ActorHandle;
+use crate::server::core::download_manager::DownloadManager;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionManager;
 use crate::server::infrastructure::repositories;
@@ -26,13 +26,12 @@ pub async fn run(addr: (&str, u16), auth: bool) -> AppResult<()> {
         .expect("could not initialize the database connection pool");
 
     let config = Arc::new(RwLock::new(repositories::get_config(&conn_pool).await?));
-    let actor_handle = Arc::new(ActorHandle::new(
+    let download_manager = DownloadManager::new(
         config.read().unwrap().pool1_size,
         config.read().unwrap().pool2_size,
-    ));
-    let vec = Vec::new();
-
-    let service_register = ServiceRegister::new(conn_pool, config.clone(), actor_handle, vec);
+        conn_pool.clone(),
+    );
+    let service_register = ServiceRegister::new(conn_pool, config.clone(), download_manager);
 
     tracing::info!("migrations successfully ran, initializing axum server...");
     let addr = addr

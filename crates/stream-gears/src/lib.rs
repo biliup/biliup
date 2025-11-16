@@ -3,9 +3,6 @@ mod login;
 mod server;
 mod uploader;
 
-// Export DanmakuClient for external use
-pub use danmaku::DanmakuClient;
-
 use pyo3::prelude::*;
 use time::macros::format_description;
 use uploader::{PyCredit, StudioPre};
