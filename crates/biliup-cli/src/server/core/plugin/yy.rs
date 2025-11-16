@@ -1,17 +1,15 @@
 use crate::server::common::util::media_ext_from_url;
-use crate::server::core::downloader::DanmakuClient;
 use crate::server::core::plugin::{DownloadBase, DownloadPlugin, StreamInfoExt, StreamStatus};
 use crate::server::errors::AppError;
 use crate::server::infrastructure::context::Context;
 use crate::server::infrastructure::models::StreamerInfo;
 use async_trait::async_trait;
 use chrono::Utc;
-use error_stack::{IntoReport, Report, ResultExt, bail};
+use error_stack::{Report, ResultExt, bail};
 use regex::Regex;
 use reqwest::header::HeaderMap;
 use serde_json::json;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct YYDownloader {
@@ -111,7 +109,7 @@ impl DownloadBase for YYDownloader {
         // 发送POST请求并处理响应
         let result = self
             .client
-            .post(&format!(
+            .post(format!(
                 "https://stream-manager.yy.com/v3/channel/streams?uid=0&cid={}&sid={}&appid=0&sequence={}&encode=json",
                 rid, rid, millis_13
             ))
@@ -158,6 +156,12 @@ impl DownloadBase for YYDownloader {
 
 pub struct YY {
     re: Regex,
+}
+
+impl Default for YY {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl YY {

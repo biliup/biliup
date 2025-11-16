@@ -149,11 +149,10 @@ impl YouTubeDownloader {
             if let Some(v) = &self.cfg.prefer_vcodec {
                 s.push_str(&format!("[vcodec~='^({})']", v));
             }
-            if !self.cfg.is_live {
-                if let Some(f) = &self.cfg.max_filesize {
+            if !self.cfg.is_live
+                && let Some(f) = &self.cfg.max_filesize {
                     s.push_str(&format!("[filesize<{}]", f));
                 }
-            }
             if let Some(h) = self.cfg.max_height {
                 s.push_str(&format!("[height<={}]", h));
             }
@@ -183,11 +182,10 @@ impl YouTubeDownloader {
         if let Some(proxy) = &self.cfg.proxy {
             cmd.arg("--proxy").arg(proxy);
         }
-        if !self.cfg.is_live {
-            if let Some(archive) = &self.cfg.download_archive {
+        if !self.cfg.is_live
+            && let Some(archive) = &self.cfg.download_archive {
                 cmd.arg("--download-archive").arg(archive);
             }
-        }
 
         // 自定义附加参数
         for a in &self.cfg.extra_ytdlp_args {
@@ -242,14 +240,13 @@ impl YouTubeDownloader {
         }
 
         // 清理临时目录
-        if self.cfg.use_temp_dir_for_ytdlp {
-            if let Err(e) = fs::remove_dir_all(&download_dir).await {
+        if self.cfg.use_temp_dir_for_ytdlp
+            && let Err(e) = fs::remove_dir_all(&download_dir).await {
                 warn!(
                     "清理残留文件失败，请手动删除: {}，原因: {e}",
                     download_dir.display()
                 );
             }
-        }
 
         Ok(())
     }

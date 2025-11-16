@@ -5,7 +5,7 @@ use crate::server::config::Config;
 use crate::server::core::download_manager::DownloadManager;
 use crate::server::errors::{AppError, report_to_response};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::context::{Stage, Worker, WorkerStatus};
+use crate::server::infrastructure::context::{Stage, WorkerStatus};
 use crate::server::infrastructure::dto::LiveStreamerResponse;
 use crate::server::infrastructure::models::live_streamer::{InsertLiveStreamer, LiveStreamer};
 use crate::server::infrastructure::models::upload_streamer::{

@@ -8,7 +8,7 @@ use time::macros::format_description;
 use uploader::{PyCredit, StudioPre};
 
 use crate::uploader::UploadLine;
-use axum::http::{HeaderMap, HeaderName, HeaderValue};
+use axum::http::HeaderMap;
 use biliup::credential::Credential;
 use biliup::downloader::extractor::CallbackFn;
 use biliup::downloader::util::{LifecycleFile, Segmentable};
@@ -16,7 +16,6 @@ use biliup::downloader::{hls, httpflv};
 use pyo3::types::{PyList, PyType};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::time::Duration;
 use tracing::{debug, error, info};
 

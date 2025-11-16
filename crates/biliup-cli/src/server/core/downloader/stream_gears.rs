@@ -2,8 +2,6 @@ use crate::server::common::construct_headers;
 use crate::server::common::util::parse_time;
 use crate::server::core::downloader::{DownloadConfig, DownloadStatus, SegmentEvent, SegmentInfo};
 use crate::server::errors::{AppError, AppResult};
-use async_trait::async_trait;
-use axum::http::HeaderMap;
 use biliup::client::StatelessClient;
 use biliup::downloader::flv_parser::header;
 use biliup::downloader::httpflv::Connection;
@@ -12,7 +10,7 @@ use biliup::downloader::{hls, httpflv};
 use error_stack::{ResultExt, bail};
 use nom::Err;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 

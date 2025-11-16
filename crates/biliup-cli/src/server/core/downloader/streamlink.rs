@@ -1,11 +1,11 @@
 use crate::server::errors::{AppError, AppResult};
-use error_stack::{IntoReport, ResultExt};
+use error_stack::ResultExt;
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::process::{Child, ChildStdout, Command};
 use tokio::sync::RwLock;
-use tokio::time::{Duration, sleep};
+use tokio::time::Duration;
 use tracing::{error, info};
 use url::Url;
 
@@ -117,7 +117,7 @@ impl StreamlinkDownloader {
                     "best",
                 ]);
 
-                let mut child = cmd.spawn().change_context(AppError::Unknown)?;
+                let child = cmd.spawn().change_context(AppError::Unknown)?;
 
                 StreamOutput::Http {
                     url: format!("http://localhost:{}", port),

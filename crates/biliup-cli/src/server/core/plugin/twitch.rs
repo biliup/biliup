@@ -2,7 +2,7 @@ use crate::server::common::util::media_ext_from_url;
 use crate::server::core::downloader::ffmpeg_downloader::FfmpegDownloader;
 use crate::server::core::downloader::stream_gears::StreamGears;
 use crate::server::core::downloader::streamlink::{
-    Platform, StreamOutput, Streamlink, StreamlinkDownloader,
+    Platform, Streamlink, StreamlinkDownloader,
 };
 use crate::server::core::downloader::{DanmakuClient, DownloaderRuntime, DownloaderType};
 use crate::server::core::plugin::{DownloadBase, DownloadPlugin, StreamInfoExt, StreamStatus};
@@ -11,7 +11,7 @@ use crate::server::infrastructure::context::Context;
 use crate::server::infrastructure::models::StreamerInfo;
 use async_trait::async_trait;
 use chrono::Utc;
-use error_stack::{IntoReport, Report, ResultExt, bail, report};
+use error_stack::{IntoReport, Report, ResultExt};
 use regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -19,9 +19,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::RwLock;
-use tokio::net::TcpListener;
-use tokio::process::{Child, Command};
-use tokio::time::{Duration, sleep};
+use tokio::time::Duration;
 use tracing::{error, warn};
 
 // 常量定义
@@ -261,15 +259,12 @@ impl TwitchDownloader {
         let mut live_urls = Vec::new();
 
         for (index, gql) in gql_list.iter().enumerate() {
-            if let Some(data) = &gql.data {
-                if let Some(user) = &data.user {
-                    if let Some(stream) = &user.stream {
-                        if stream.stream_type.as_deref() == Some("live") {
+            if let Some(data) = &gql.data
+                && let Some(user) = &data.user
+                    && let Some(stream) = &user.stream
+                        && stream.stream_type.as_deref() == Some("live") {
                             live_urls.push(check_urls[index].clone());
                         }
-                    }
-                }
-            }
         }
 
         Ok(live_urls)
@@ -317,8 +312,8 @@ impl TwitchUtils {
             );
 
             // 第二次重试时不使用 auth_token（因为已经失效）
-            if retry == 0 {
-                if let Some(auth_token) = Self::get_auth_token() {
+            if retry == 0
+                && let Some(auth_token) = Self::get_auth_token() {
                     headers.insert(
                         "Authorization",
                         format!("OAuth {}", auth_token)
@@ -326,7 +321,6 @@ impl TwitchUtils {
                             .change_context(AppError::Unknown)?,
                     );
                 }
-            }
 
             let client = Client::new();
             let resp = client
@@ -400,6 +394,6 @@ impl TwitchUtils {
 
         resp.error_for_status_ref()
             .change_context(AppError::Unknown)?;
-        Ok(resp.json().await.change_context(AppError::Unknown)?)
+        resp.json().await.change_context(AppError::Unknown)
     }
 }

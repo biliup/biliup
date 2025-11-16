@@ -1,14 +1,12 @@
 use crate::server::config::Config;
 use crate::server::core::download_manager::DownloadManager;
 use crate::server::core::plugin::yy::YY;
-use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::context::{Worker, WorkerStatus};
+use crate::server::infrastructure::context::Worker;
 use crate::server::infrastructure::models::live_streamer::LiveStreamer;
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
 use axum::extract::FromRef;
 use biliup::client::StatelessClient;
-use error_stack::bail;
 use std::sync::{Arc, RwLock};
 use tracing::info;
 
@@ -38,7 +36,7 @@ impl ServiceRegister {
     pub fn new(
         pool: ConnectionPool,
         config: Arc<RwLock<Config>>,
-        mut download_manager: DownloadManager,
+        download_manager: DownloadManager,
     ) -> Self {
         info!("initializing utility services...");
         // 创建默认的HTTP客户端

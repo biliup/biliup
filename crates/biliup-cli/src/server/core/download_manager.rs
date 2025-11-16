@@ -1,14 +1,13 @@
 use crate::server::common::download::{DActor, DownloaderMessage};
-use crate::server::common::upload::{UActor, UploaderMessage};
+use crate::server::common::upload::UActor;
 use crate::server::core::monitor::{Monitor, RoomsHandle};
 use crate::server::core::plugin::DownloadPlugin;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::Worker;
 use async_channel::{Sender, bounded};
-use core::fmt;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use tokio::task::JoinHandle;
 use tracing::info;
 
@@ -125,8 +124,7 @@ impl DownloadManager {
             .get_all()
             .await
             .iter()
-            .find(|worker| worker.id() == id)
-            .map(|t| t.clone())
+            .find(|worker| worker.id() == id).cloned()
     }
 }
 

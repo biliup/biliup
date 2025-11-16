@@ -2,7 +2,7 @@ mod twitch;
 pub mod yy;
 
 use crate::server::core::downloader::{DanmakuClient, DownloaderRuntime, DownloaderType};
-use crate::server::errors::{AppError, AppResult};
+use crate::server::errors::AppError;
 use crate::server::infrastructure::context::Context;
 use crate::server::infrastructure::models::StreamerInfo;
 use async_trait::async_trait;

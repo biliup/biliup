@@ -4,13 +4,12 @@ use crate::server::core::plugin::{DownloadPlugin, StreamStatus};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
 use crate::server::infrastructure::models::StreamerInfo;
-use async_channel::{Receiver, Sender, bounded};
+use async_channel::Sender;
 use futures::SinkExt;
 use ormlite::Model;
 use ormlite::model::ModelBuilder;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
-use std::iter::Cycle;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -148,6 +147,12 @@ impl Drop for RoomsHandle {
         // 终止监控任务
         // self.kill.abort();
         // self.rooms_handle.kill.abort();
+    }
+}
+
+impl Default for RoomsHandle {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -451,8 +456,7 @@ impl RoomsActor {
     fn get_worker(&mut self, id: i64) -> Option<Arc<Worker>> {
         self.all_workers
             .iter()
-            .find(|worker| worker.id() == id)
-            .map(|worker| worker.clone())
+            .find(|worker| worker.id() == id).cloned()
     }
 
     fn get_by_platform(&mut self, platform_name: &str) -> Vec<Arc<Worker>> {
@@ -527,7 +531,7 @@ impl RoomsActor {
     /// # 返回
     /// 如果URL匹配返回true，否则返回false
     pub fn matches(&self, url: &str) -> Option<Arc<dyn DownloadPlugin + Send + Sync>> {
-        for plugin in &self.plugins {
+        if let Some(plugin) = self.plugins.iter().next() {
             plugin.matches(url);
             return Some(plugin.clone());
         }
@@ -536,5 +540,5 @@ impl RoomsActor {
 }
 
 fn reuse_vec_arc<'a, T: 'a, U: Iterator<Item = &'a Arc<T>>>(v: &mut U) -> Vec<Arc<T>> {
-    v.into_iter().map(|x| x.clone()).collect()
+    v.into_iter().cloned().collect()
 }

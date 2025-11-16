@@ -8,16 +8,12 @@ mod ytdlp;
 use crate::server::common::util::Recorder;
 use crate::server::core::downloader::ffmpeg_downloader::FfmpegDownloader;
 use crate::server::core::downloader::stream_gears::StreamGears;
-use crate::server::core::downloader::streamlink::{StreamOutput, Streamlink, StreamlinkDownloader};
-use crate::server::core::plugin::StreamStatus;
-use crate::server::errors::{AppError, AppResult};
-use crate::server::infrastructure::context::Context;
+use crate::server::core::downloader::streamlink::Streamlink;
+use crate::server::errors::AppResult;
 use async_trait::async_trait;
-use error_stack::Report;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
 
 /// 下载器配置
 /// 包含下载过程中需要的各种参数和设置

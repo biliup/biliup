@@ -1,7 +1,5 @@
 use async_trait::async_trait;
-use biliup_cli::server::core::downloader::{
-    DanmakuClient, DownloadConfig, DownloadStatus, SegmentEvent,
-};
+use biliup_cli::server::core::downloader::DanmakuClient;
 use biliup_cli::server::errors::{AppError, AppResult};
 use error_stack::ResultExt;
 use pyo3::prelude::*;

@@ -3,7 +3,6 @@ use crate::server::core::downloader::{
     DownloadConfig, DownloadStatus, DownloaderType, SegmentEvent, SegmentInfo,
 };
 use crate::server::errors::{AppError, AppResult};
-use async_trait::async_trait;
 use error_stack::{ResultExt, bail};
 use std::path::PathBuf;
 use std::process::{ExitStatus, Stdio};

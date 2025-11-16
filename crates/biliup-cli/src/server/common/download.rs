@@ -5,15 +5,15 @@ use crate::server::core::downloader::{
     SegmentInfo,
 };
 use crate::server::core::monitor::RoomsHandle;
-use crate::server::core::plugin::{DownloadBase, DownloadPlugin, StreamStatus};
+use crate::server::core::plugin::{DownloadBase, StreamStatus};
 use crate::server::errors::{AppError, AppResult};
-use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
-use crate::server::infrastructure::models::hook_step::{process, process_video};
+use crate::server::infrastructure::context::{Context, Stage, WorkerStatus};
+use crate::server::infrastructure::models::hook_step::process;
 use async_channel::{Receiver, Sender};
-use error_stack::{Report, ResultExt, bail};
+use error_stack::{ResultExt, bail};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
@@ -181,7 +181,7 @@ impl DownloadTask {
         Self {
             token: CancellationToken::new(),
             done_notify: Notify::new(),
-            downloader: downloader,
+            downloader,
         }
     }
 
@@ -277,7 +277,7 @@ impl DownloadTask {
     async fn initialize_components(
         &self,
         processor: &mut SegmentEventProcessor,
-        mut ctx: Context,
+        ctx: Context,
         danmaku_client: Option<Arc<dyn DanmakuClient + Send + Sync>>,
         plugin: &dyn DownloadBase,
     ) -> AppResult<DownloadStatus> {
@@ -411,7 +411,7 @@ impl DActor {
     /// * `msg` - 要处理的下载消息
     async fn handle_message(&mut self, msg: DownloaderMessage) {
         match msg {
-            DownloaderMessage::Start(downloader, mut ctx) => {
+            DownloaderMessage::Start(downloader, ctx) => {
                 let worker = ctx.worker.clone();
 
                 // 创建下载任务
