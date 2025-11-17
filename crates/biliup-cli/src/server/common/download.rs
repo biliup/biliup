@@ -190,6 +190,7 @@ impl DownloadTask {
         mut ctx: Context,
         mut processor: SegmentEventProcessor,
         mut plugin: Box<dyn DownloadBase>,
+        rooms_handle: Arc<Monitor>,
     ) -> AppResult<()> {
         let worker = ctx.worker.clone();
         // 重试配置
@@ -197,31 +198,33 @@ impl DownloadTask {
         let max_retries = 3; // 最大重试次数
         let base_delay = Duration::from_secs(2); // 基础延迟时间（2秒）
         let max_delay = Duration::from_secs(worker.get_config().delay); // 最大延迟时间（60秒）
+        let url = worker.live_streamer.url.clone();
         // 可选的弹幕客户端
         // 初始化弹幕客户端（如果存在）
-        // let danmaku_client = ctx.extension.get::<Arc<dyn Downloader>>().map(Arc::clone);
         let danmaku_client = plugin.danmaku_init();
+        // 启动弹幕客户端
+        if let Some(ref client) = danmaku_client {
+            // 启动弹幕下载逻辑
+            info!("Starting danmaku client for stream: {}", url);
+            client.download().await?;
+        }
         let result = loop {
             // 创建守卫确保清理
             // 创建事件处理器
             // 执行下载
             let components = self
-                .initialize_components(
-                    &mut processor,
-                    ctx.clone(),
-                    danmaku_client.clone(),
-                    plugin.as_ref(),
-                )
+                .initialize_components(&mut processor, ctx.clone(), danmaku_client.clone())
                 .await;
-            info!("initialize_components completed: {:?}", components);
+
+            info!("initialize_components completed: {url}");
             ctx = ctx.clone();
             // 检查流状态
             match plugin.check_stream().await {
                 Ok(StreamStatus::Live { stream_info }) => {
                     ctx.stream_info.raw_stream_url = stream_info.raw_stream_url;
                     info!(
-                        "Stream is still live, preparing to retry. attempt: {}",
-                        retry_count
+                        url = url,
+                        "Stream is still live, preparing to retry. attempt: {}", retry_count
                     );
                     // 成功下载后重置计数
                     retry_count = 0;
@@ -229,26 +232,33 @@ impl DownloadTask {
                 Ok(StreamStatus::Offline) => {
                     retry_count += 1;
                     // 继续循环，重新执行下载
-                    info!("Stream went offline, stopping download");
+                    info!(url = url, "Stream went offline, stopping download");
                 }
                 Err(e) => {
                     retry_count += 1;
                     // 继续循环，重新执行下载
-                    warn!("Failed to check stream status: {:?}, stopping download", e);
+                    warn!(
+                        url = url,
+                        "Failed to check stream status: {:?}, stopping download", e
+                    );
                 }
             }
 
             if self.token.is_cancelled() {
-                info!("task is cancelled");
+                info!(url = url, "task is cancelled");
                 break components;
             }
 
             if retry_count >= max_retries {
-                warn!("Maximum retry attempts ({}) reached, stopping", max_retries);
+                warn!(
+                    url = url,
+                    "Maximum retry attempts ({}) reached, stopping", max_retries
+                );
                 break components;
             }
 
             info!(
+                url = url,
                 "preparing to retry. Attempt: {}/{}",
                 retry_count + 1,
                 max_retries
@@ -265,12 +275,15 @@ impl DownloadTask {
             info!("Retrying download in {:?}...", delay);
             tokio::time::sleep(delay).await;
         };
-
+        // 异步清理任务
+        if let Some(client) = danmaku_client.clone()
+            && let Err(e) = client.stop().await
+        {
+            error!("Error stopping danmaku client: {}", e);
+        }
         // 清理资源
         // 确保状态更新和资源清理
-        worker
-            .change_status(Stage::Download, WorkerStatus::Idle)
-            .await;
+        rooms_handle.wake_waker(worker.id()).await;
         self.done_notify.notify_one();
         info!("Download task completed: {:?}", result);
         Ok(())
@@ -281,23 +294,12 @@ impl DownloadTask {
         processor: &mut SegmentEventProcessor,
         ctx: Context,
         danmaku_client: Option<Arc<dyn DanmakuClient + Send + Sync>>,
-        plugin: &dyn DownloadBase,
     ) -> AppResult<DownloadStatus> {
         // 获取配置和主播信息
         let config = ctx.worker.get_config();
         let streamer = ctx.worker.get_streamer();
         let stream_info = &ctx.stream_info;
         let raw_stream_url = &stream_info.raw_stream_url;
-
-        // 启动弹幕客户端
-        if let Some(ref client) = danmaku_client {
-            // 启动弹幕下载逻辑
-            info!(
-                "Starting danmaku client for stream: {}",
-                ctx.stream_info.streamer_info.url
-            );
-            client.download().await?;
-        }
 
         // 执行下载
         // let hook = processor.create_hook(danmaku_client.clone());
@@ -354,14 +356,8 @@ impl DownloadTask {
             .await
             .change_context(AppError::Custom("Failed to download segment".into()))?;
 
-        // 异步清理任务
-        if let Some(client) = danmaku_client
-            && let Err(e) = client.stop().await
-        {
-            error!("Error stopping danmaku client: {}", e);
-        }
         // 处理结果
-        info!(result=?result, "finished downloading");
+        info!(url=streamer.url,result=?result, "finished downloading");
         Ok(result)
     }
 
@@ -427,16 +423,18 @@ impl DActor {
                 // 初始化组件
                 let processor = SegmentEventProcessor::new(self.sender.clone(), ctx.clone());
                 // 更新工作器状态为工作中
-                worker.change_status(Stage::Download, WorkerStatus::Working(task.clone())).await;
+                worker
+                    .change_status(Stage::Download, WorkerStatus::Working(task.clone()))
+                    .await;
 
                 process(&[], &ctx.worker.get_streamer().preprocessor).await;
 
                 let option = &ctx.worker.get_streamer().downloaded_processor;
-                let _ = task.execute(ctx, processor, downloader).await;
+                let _ = task
+                    .execute(ctx, processor, downloader, self.rooms_handle.clone())
+                    .await;
 
                 process(&[], option).await;
-
-                self.rooms_handle.wake_waker(worker.id()).await;
 
                 info!(
                     "Download workflow completed {} => {:?}",

@@ -89,7 +89,7 @@ impl DownloadManager {
     pub async fn get_rooms(&self) -> Vec<Arc<Worker>> {
         self.rooms_handle.get_all().await
     }
-    
+
     /// 移出工作队列
     pub async fn make_waker(&self, id: i64) {
         self.rooms_handle.make_waker(id).await
@@ -107,11 +107,13 @@ impl DownloadManager {
             .find(|worker| worker.id() == id)
             .cloned()
     }
-    
+
     pub async fn cleanup(&self) {
         let vec = self.rooms_handle.get_all().await;
         for worker in vec {
-            worker.change_status(Stage::Download, WorkerStatus::Idle).await;
+            worker
+                .change_status(Stage::Download, WorkerStatus::Idle)
+                .await;
         }
         info!("Cleanup complete");
     }
@@ -121,9 +123,9 @@ impl Drop for DownloadManager {
     fn drop(&mut self) {
         // 发送端随 ActorHandle 一起被 drop，会关闭通道（如果没有其他 sender 克隆）。
         // 为避免 tokio 任务在后台“挂着”，这里直接 abort。
-        for h in &self.d_kills {
-            h.abort();
-        }
+        // for h in &self.d_kills {
+        //     h.abort();
+        // }
         for h in &self.u_kills {
             h.abort();
         }

@@ -93,7 +93,10 @@ impl ApplicationController {
             .change_context(AppError::Unknown)?;
 
         axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown_signal(deletion_task.abort_handle(), service_register))
+            .with_graceful_shutdown(shutdown_signal(
+                deletion_task.abort_handle(),
+                service_register,
+            ))
             .await
             .change_context(AppError::Unknown)
             .attach("error while starting API server")?;
@@ -123,7 +126,10 @@ impl ApplicationController {
 }
 
 /// 优雅关闭信号处理
-async fn shutdown_signal(deletion_task_abort_handle: AbortHandle, service_register: ServiceRegister) {
+async fn shutdown_signal(
+    deletion_task_abort_handle: AbortHandle,
+    service_register: ServiceRegister,
+) {
     // 监听Ctrl+C信号
     let ctrl_c = async {
         signal::ctrl_c()

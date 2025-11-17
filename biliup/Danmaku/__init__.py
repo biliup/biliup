@@ -315,7 +315,7 @@ class DanmakuClient(IDanmakuClient):
 
     def stop(self):
         if self.__record_task:
-            logger.debug(f"{DanmakuClient.__name__}:{self.__url}: 弹幕stop")
+            logger.info(f"{DanmakuClient.__name__}:{self.__url}: 弹幕stop")
             self.__dm_queue.put_nowait({
                 "msg_type": "stop",
             })

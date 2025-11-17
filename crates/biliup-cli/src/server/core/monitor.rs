@@ -14,7 +14,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 
 /// 房间处理器
 /// 管理多个直播间的状态和操作
@@ -81,6 +81,9 @@ impl Monitor {
         info!("start -> [{platform_name}]");
         // 获取下一个要检查的房间
         while let Some(room) = self.next(platform_name).await {
+            // 更新状态为等待中
+            room.change_status(Stage::Download, WorkerStatus::Pending)
+                .await;
             let url = room.get_streamer().url;
             let interval = room.get_config().event_loop_interval;
             let mut ctx = Context::new(room.clone(), self.pool.clone());
@@ -105,9 +108,7 @@ impl Monitor {
                         }
                     };
                     info!(url = url, "room: is live -> 开播了");
-                    // 更新状态为等待中
-                    room.change_status(Stage::Download, WorkerStatus::Pending)
-                        .await;
+
                     stream_info.streamer_info = insert;
 
                     let streamer = room.get_streamer();
@@ -138,12 +139,10 @@ impl Monitor {
                 }
                 Ok(StreamStatus::Offline) => {
                     self.wake_waker(room.id()).await;
-                    *room.downloader_status.write().unwrap() = WorkerStatus::Idle;
                     debug!(url = ctx.worker.live_streamer.url, "未开播")
                 }
                 Err(e) => {
                     self.wake_waker(room.id()).await;
-                    *room.downloader_status.write().unwrap() = WorkerStatus::Idle;
                     error!(e=?e, ctx=ctx.worker.live_streamer.url,"检查直播间出错")
                 }
             };
@@ -521,13 +520,26 @@ impl RoomsActor {
 
     /// 放回工作队列
     fn push_back(&mut self, id: i64) -> Option<Arc<dyn DownloadPlugin + Send + Sync>> {
-        // 如果内部Vec是空的，迭代结束（虽然是循环迭代器，但空集合无法产生任何值）
+        // 在总数组中找不到，说明该房间已被移除我们也不放回
         let worker = self.get_worker(id)?;
+        if let WorkerStatus::Pause = *worker.downloader_status.write().unwrap() {
+            // 暂停状态则不放回
+            warn!("Paused room [{}]", worker.live_streamer.url);
+            return None;
+        }
+        for (name, queue) in self.platforms.iter_mut() {
+            if queue.iter().find(|w| w.id() == id).is_some() {
+                // 说明找到了已经入队的房间，则是更新的情况
+                warn!(name = name, "房间已更新无需入队");
+                return None;
+            }
+        }
+
         let plugin = self.matches(&worker.live_streamer.url)?;
         self.platforms
             .get_mut(plugin.name())?
             .push_back(worker.clone());
-        
+        *worker.downloader_status.write().unwrap() = WorkerStatus::Idle;
         Some(plugin)
     }
 
@@ -536,9 +548,10 @@ impl RoomsActor {
         for (_name, queue) in self.platforms.iter_mut() {
             if let Some(pos) = queue.iter().position(|w| w.id() == id) {
                 queue.remove(pos); // 只删掉这个队列中第一个匹配的 worker
-                break;
+                return;
             }
         }
+        warn!("移出工作队列 failed: No room found with id {}", id);
     }
 
     /// 删除指定ID的工作器

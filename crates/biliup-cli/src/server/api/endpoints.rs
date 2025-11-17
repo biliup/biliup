@@ -71,10 +71,6 @@ pub async fn post_streamers_endpoint(
     State(pool): State<ConnectionPool>,
     Json(payload): Json<InsertLiveStreamer>,
 ) -> Result<Json<LiveStreamer>, Response> {
-    // let Some(manager) = service_register.get_manager(&payload.url) else {
-    //     info!("not supported url: {}", &payload.url);
-    //     return Err((StatusCode::BAD_REQUEST, "Not supported url").into_response());
-    // };
     let url = &payload.url.clone();
     // You can insert the model directly.
     let live_streamers = payload
@@ -93,7 +89,7 @@ pub async fn post_streamers_endpoint(
         return Err((StatusCode::BAD_REQUEST, "Not supported url").into_response());
     };
 
-    info!(workers=?live_streamers, "successfully inserted new live streamers");
+    info!(url = url, "successfully inserted new live streamers");
     Ok(Json(live_streamers))
 }
 
@@ -152,17 +148,23 @@ pub async fn pause_streamers_endpoint(
         match worker_status {
             WorkerStatus::Working(_) => {
                 w.change_status(Stage::Download, WorkerStatus::Pause).await;
+                info!(url=?&w.live_streamer.url, "successfully pause live streamers");
                 managers.make_waker(id).await;
-                info!(workers=?&w.live_streamer.url, "successfully pause live streamers");
             }
             WorkerStatus::Pause => {
+                w.change_status(Stage::Download, WorkerStatus::Idle).await;
                 managers.wake_waker(id).await;
-                info!(workers=?&w.live_streamer.url, "successfully start live streamers");
+                info!(url=?&w.live_streamer.url, "successfully start live streamers");
             }
-            _ => {
-                managers.make_waker(id).await;
+            WorkerStatus::Pending => {
                 w.change_status(Stage::Download, WorkerStatus::Pause).await;
-                info!(workers=?&w.live_streamer.url, "successfully pause live streamers");
+                managers.make_waker(id).await;
+                info!(url=?&w.live_streamer.url, "successfully pause live streamers");
+            }
+            WorkerStatus::Idle => {
+                w.change_status(Stage::Download, WorkerStatus::Pause).await;
+                managers.make_waker(id).await;
+                info!(url=?&w.live_streamer.url, "successfully pause live streamers");
             }
         };
     }

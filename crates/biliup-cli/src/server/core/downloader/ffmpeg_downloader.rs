@@ -211,7 +211,7 @@ impl FfmpegDownloader {
         let part_file = format!("{}.part", output_file.display());
         tokio::fs::rename(&part_file, &output_file)
             .await
-            .change_context(AppError::Unknown)?;
+            .change_context(AppError::Custom(String::from("退出时，重命名文件")))?;
         // let (tx, rx) = bounded(16);
         // 分段回调
         // 触发分段回调

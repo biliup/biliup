@@ -2625,8 +2625,9 @@ dependencies = [
 
 [[package]]
 name = "pythonize"
-version = "0.26.0"
-source = "git+https://github.com/davidhewitt/pythonize.git?rev=6140fe00f601f418371d969bedbcd27944a6956a#6140fe00f601f418371d969bedbcd27944a6956a"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3a8f29db331e28c332c63496cfcbb822aca3d7320bc08b655d7fd0c29c50ede"
 dependencies = [
  "pyo3",
  "serde",

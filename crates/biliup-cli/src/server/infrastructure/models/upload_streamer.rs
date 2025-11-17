@@ -35,6 +35,8 @@ pub struct UploadStreamer {
     pub charging_pay: Option<u8>,
     /// 禁止转载
     pub no_reprint: Option<u8>,
+    /// 仅自己可见
+    pub is_only_self: Option<u8>,
     /// 上传者
     pub uploader: Option<String>,
     /// 用户Cookie
@@ -52,8 +54,6 @@ pub struct UploadStreamer {
     pub up_close_danmu: Option<bool>,
     /// 额外字段
     pub extra_fields: Option<String>,
-    /// 仅自己可见
-    pub is_only_self: Option<i64>,
 }
 
 /// 插入上传配置的数据结构
@@ -84,5 +84,5 @@ pub struct InsertUploadStreamer {
     pub up_close_reply: Option<u8>,
     pub up_close_danmu: Option<u8>,
     pub extra_fields: Option<String>,
-    pub is_only_self: Option<i64>,
+    pub is_only_self: Option<u8>,
 }

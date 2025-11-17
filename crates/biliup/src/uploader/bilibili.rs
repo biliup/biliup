@@ -104,6 +104,11 @@ pub struct Studio {
     #[serde(default)]
     pub no_reprint: u8,
 
+    /// 仅自己可见
+    #[cfg_attr(feature = "cli", clap(long))]
+    #[serde(default)]
+    pub is_only_self: Option<u8>,
+
     /// 是否开启充电, 0-关闭 1-开启
     #[cfg_attr(feature = "cli", clap(long, default_value = "0"))]
     #[serde(default)]

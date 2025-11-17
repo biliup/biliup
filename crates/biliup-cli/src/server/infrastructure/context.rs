@@ -124,12 +124,14 @@ impl Worker {
                 } else {
                     None
                 };
+
+                *self.downloader_status.write().unwrap() = status;
+
                 if let Some(task) = task
                     && let Err(e) = task.stop().await
                 {
                     error!(error = ?e, "Failed to stop downloader");
                 }
-                *self.downloader_status.write().unwrap() = status;
             }
             Stage::Upload => {
                 *self.uploader_status.write().unwrap() = status;
