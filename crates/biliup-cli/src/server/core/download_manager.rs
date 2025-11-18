@@ -5,9 +5,7 @@ use crate::server::core::plugin::DownloadPlugin;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Stage, Worker, WorkerStatus};
 use async_channel::{Sender, bounded};
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tracing::info;
 

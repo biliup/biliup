@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::path::Path;
 use tokio::fs;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tracing::{error, info};
 
@@ -61,17 +61,22 @@ impl HookStep {
     pub async fn execute_with(&self, src: &[u8]) -> AppResult<()> {
         match self {
             HookStep::Run { run } => {
+                // 1. 跨平台 Shell 处理 (对应 shell=True)
+                // Windows 使用 "cmd /C"，Unix/Mac 使用 "sh -c"
+                let (shell, flag) = if cfg!(target_os = "windows") {
+                    ("cmd", "/C")
+                } else {
+                    ("sh", "-c")
+                };
                 // 执行自定义命令
                 // 解析命令和参数
-                let parts: Vec<&str> = run.split_whitespace().collect();
-                if parts.is_empty() {
-                    bail!(AppError::Custom("Empty command".into()));
-                }
-
                 // 启动子进程，配置标准输入管道
-                let mut process = Command::new(parts[0])
-                    .args(&parts[1..])
+                let mut process = Command::new(shell)
+                    .arg(flag)
+                    .arg(run)
                     .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
                     .spawn()
                     .change_context(AppError::Unknown)?;
 
@@ -83,8 +88,32 @@ impl HookStep {
                         .change_context(AppError::Unknown)?;
                 }
 
+                let stdout = process.stdout.take().unwrap();
+                let stderr = process.stderr.take().unwrap();
+
+                let mut stdout_lines = BufReader::new(stdout).lines();
+                let mut stderr_lines = BufReader::new(stderr).lines();
+
+                loop {
+                    tokio::select! {
+                        line = stdout_lines.next_line() => {
+                            match line.change_context(AppError::Unknown)? {
+                                Some(l) => tracing::info!(target="user_cmd_stdout", "{}", l),
+                                None => break, // stdout EOF
+                            }
+                        }
+                        line = stderr_lines.next_line() => {
+                            match line.change_context(AppError::Unknown)? {
+                                Some(l) => tracing::warn!(target="user_cmd_stderr", "{}", l),
+                                None => break, // stderr EOF
+                            }
+                        }
+                    }
+                }
+
                 // 等待进程完成并检查退出状态
                 let status = process.wait().await.change_context(AppError::Unknown)?;
+
                 if !status.success() {
                     bail!(AppError::Custom(format!(
                         "Command failed with status: {}",

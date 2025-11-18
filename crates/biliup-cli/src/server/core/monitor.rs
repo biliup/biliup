@@ -528,7 +528,7 @@ impl RoomsActor {
             return None;
         }
         for (name, queue) in self.platforms.iter_mut() {
-            if queue.iter().find(|w| w.id() == id).is_some() {
+            if queue.iter().any(|w| w.id() == id) {
                 // 说明找到了已经入队的房间，则是更新的情况
                 warn!(name = name, "房间已更新无需入队");
                 return None;

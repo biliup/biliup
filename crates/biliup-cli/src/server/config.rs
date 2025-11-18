@@ -160,6 +160,9 @@ pub struct Config {
     /// B站画质编号
     #[serde(default)]
     pub bili_qn: Option<u32>,
+    /// B站免登录原画
+    #[serde(default)]
+    pub bili_anonymous_origin: Option<bool>,
 
     // YouTube平台设置
     /// YouTube首选视频编码
