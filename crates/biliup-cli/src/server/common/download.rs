@@ -116,9 +116,7 @@ impl SegmentEventProcessor {
             file_validator: FileValidator::new(
                 ctx.worker
                     .clone()
-                    .config
-                    .read()
-                    .unwrap()
+                    .get_config()
                     .filtering_threshold
                     * 1000
                     * 1000,
@@ -217,6 +215,11 @@ impl DownloadTask {
                 .await;
 
             info!("initialize_components completed: {url}");
+
+            if self.token.is_cancelled() {
+                info!(url = url, "task is cancelled");
+                break components;
+            }
             ctx = ctx.clone();
             // 检查流状态
             match plugin.check_stream().await {
@@ -242,11 +245,6 @@ impl DownloadTask {
                         "Failed to check stream status: {:?}, stopping download", e
                     );
                 }
-            }
-
-            if self.token.is_cancelled() {
-                info!(url = url, "task is cancelled");
-                break components;
             }
 
             if retry_count >= max_retries {
@@ -284,8 +282,8 @@ impl DownloadTask {
         // 清理资源
         // 确保状态更新和资源清理
         rooms_handle.wake_waker(worker.id()).await;
-        self.done_notify.notify_one();
         info!("Download task completed: {:?}", result);
+        self.done_notify.notify_one();
         Ok(())
     }
 

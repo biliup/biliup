@@ -197,7 +197,9 @@ impl Monitor {
         // 忽略发送错误。如果发送失败，下面的recv.await也会失败
         // 没有必要检查两次失败
         let _ = self.sender.send(msg).await;
-        recv.await.expect("Actor task has been killed")
+        if let Some(worker) = recv.await.expect("Actor task has been killed") {
+            worker.change_status(Stage::Download, WorkerStatus::Idle).await;
+        }
     }
 
     /// 删除指定ID的工作器
@@ -344,7 +346,7 @@ enum ActorMessage {
     AddPlugin(oneshot::Sender<()>, Arc<dyn DownloadPlugin + Send + Sync>),
     /// 删除工作器
     Del {
-        respond_to: oneshot::Sender<()>,
+        respond_to: oneshot::Sender<Option<Arc<Worker>>>,
         id: i64,
     },
     /// 查找
@@ -422,8 +424,8 @@ impl RoomsActor {
                 ActorMessage::Del { respond_to, id } => {
                     // `let _ =` 忽略发送时的任何错误
                     // 如果使用`select!`宏取消等待响应，可能会发生这种情况
-                    self.del(id);
-                    let _ = respond_to.send(());
+
+                    let _ = respond_to.send(self.del(id).await);
                 }
                 ActorMessage::WakeWaker(sender, id) => {
                     // `let _ =` 忽略发送时的任何错误
@@ -555,7 +557,7 @@ impl RoomsActor {
     }
 
     /// 删除指定ID的工作器
-    fn del(&mut self, id: i64) -> Option<()> {
+    async fn del(&mut self, id: i64) -> Option<Arc<Worker>> {
         let worker = self.get_worker(id)?;
         let plugin = self.matches(&worker.live_streamer.url)?;
         let platform_name = plugin.name();
@@ -568,7 +570,9 @@ impl RoomsActor {
 
         // 从 all_workers 中删除
         self.all_workers.retain(|w| w.id() != id);
-        Some(())
+
+        debug!("del worker size[{}]", self.all_workers.len());
+        Some(worker)
     }
 
     /// 检查URL是否匹配此下载管理器的插件

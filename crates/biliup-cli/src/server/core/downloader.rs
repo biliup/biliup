@@ -49,7 +49,7 @@ impl DownloadConfig {
 
 /// 下载器类型枚举
 /// 定义支持的各种下载器类型
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(PartialEq, Debug, Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DownloaderType {
     /// Ytarchive下载器

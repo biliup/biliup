@@ -178,7 +178,7 @@ pub struct Subtitle {
     lan: String,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(PartialEq, Deserialize, Serialize, Debug, Clone)]
 pub struct Credit {
     #[serde(rename(deserialize = "type_id", serialize = "type"))]
     pub type_id: i8,

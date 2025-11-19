@@ -52,7 +52,7 @@ pub struct Worker {
     /// 上传配置（可选）
     pub upload_streamer: Option<UploadStreamer>,
     /// 全局配置
-    pub config: Arc<RwLock<Config>>,
+    config: Arc<RwLock<Config>>,
     /// HTTP客户端
     pub client: StatelessClient,
 }

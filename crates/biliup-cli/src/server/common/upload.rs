@@ -66,7 +66,7 @@ where
             recorder,
         )
         .await?;
-        let submit_api = ctx.worker.config.read().unwrap().submit_api.clone();
+        let submit_api = ctx.worker.get_config().submit_api.clone();
         submit_to_bilibili(&upload_context.bilibili, &studio, submit_api.as_deref()).await?;
     }
 

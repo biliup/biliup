@@ -10,7 +10,7 @@ use tracing::{error, info};
 
 /// 钩子步骤枚举：支持多种操作格式
 /// 既支持 key-value 形式（如 {run: "..."}），也支持纯字符串（如 "rm"）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum HookStep {
     /// 执行命令格式：{run: "command"}

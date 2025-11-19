@@ -64,10 +64,7 @@ export default function Home() {
         statusTag = <Tag color="green">空闲</Tag>
         break
       case 'Pending':
-        statusTag = <Tag color="grey">等待下载</Tag>
-        break
-      case 'Inspecting':
-        statusTag = <Tag color="indigo">检测/上传中</Tag>
+        statusTag = <Tag color="indigo">检测中</Tag>
         break
       case 'OutOfSchedule':
         statusTag = <Tag color="green">非录播时间</Tag>
@@ -271,18 +268,10 @@ export default function Home() {
                       >
                         <Button theme="borderless" icon={<IconDeleteStroked />}></Button>
                       </Popconfirm>
-                        <span className="semi-button-group-line semi-button-group-line-borderless semi-button-group-line-primary"></span>
-                        <Dropdown render={
-                            <Dropdown.Menu>
-                                <Dropdown.Item>
-                                    <OverrideModal onOk={handleUpdate} entity={item}>
-                                        <Button theme="borderless" icon={<IconWrench />}></Button>
-                                    </OverrideModal>
-                                </Dropdown.Item>
-                            </Dropdown.Menu>
-                        } trigger="click" position="bottomRight">
-                            <Button theme="borderless" type="primary" icon={<IconTreeTriangleDown />}></Button>
-                        </Dropdown>
+                      <span className="semi-button-group-line semi-button-group-line-borderless semi-button-group-line-primary"></span>
+                      <OverrideModal onOk={handleUpdate} entity={item}>
+                        <Button theme="borderless" icon={<IconWrench />}></Button>
+                      </OverrideModal>
                     </ButtonGroup>
                   </div>
                 </Card>

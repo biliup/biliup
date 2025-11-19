@@ -8,6 +8,8 @@ use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
 use axum::extract::FromRef;
 use biliup::client::StatelessClient;
 use std::sync::{Arc, RwLock};
+use error_stack::fmt::ColorMode;
+use error_stack::Report;
 use tracing::info;
 
 /// 服务注册器
@@ -38,6 +40,7 @@ impl ServiceRegister {
         config: Arc<RwLock<Config>>,
         download_manager: DownloadManager,
     ) -> Self {
+        Report::set_color_mode(ColorMode::None);
         info!("initializing utility services...");
         // 创建默认的HTTP客户端
         let client = StatelessClient::default();
@@ -48,7 +51,6 @@ impl ServiceRegister {
         download_manager.add_plugin(Arc::new(YY::new()));
 
         info!("feature services successfully initialized!");
-
         ServiceRegister {
             pool,
             managers: Arc::new(download_manager),

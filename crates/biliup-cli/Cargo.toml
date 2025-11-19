@@ -59,6 +59,7 @@ async-channel = { version = "2.5.0" }
 nom = "8"
 tokio-util = "0.7.16"
 libc = "0.2.174"
+struct-patch = "0.10.4"
 [features]
 default = []
 python-bridge = []

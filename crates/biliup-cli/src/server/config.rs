@@ -5,9 +5,11 @@ use biliup::bilibili::Credit;
 use error_stack::bail;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::Path, path::PathBuf};
+use struct_patch::Patch;
 
 /// 全局配置结构体
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize)]
+#[derive(bon::Builder, Debug, PartialEq, Clone, Serialize, Deserialize, Patch)]
+#[patch(attribute(derive(Debug, Clone, Default, Deserialize, Serialize)))]
 pub struct Config {
     // ===== 全局录播与上传设置 =====
     /// 下载器类型：streamlink | ffmpeg | stream-gears | 自定义
@@ -216,7 +218,7 @@ pub struct Config {
 }
 
 /// 主播配置结构体
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct StreamerConfig {
     /// 直播间URL列表
     pub url: Vec<String>,
@@ -310,7 +312,8 @@ pub struct StreamerConfig {
 }
 
 /// 用户配置结构体
-#[derive(bon::Builder, Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(bon::Builder, PartialEq, Debug, Clone, Serialize, Deserialize, Default, Patch)]
+#[patch(attribute(derive(Debug, Default, Deserialize)))]
 pub struct UserConfig {
     // B站配置
     /// B站Cookie字符串
@@ -415,5 +418,33 @@ impl Config {
             "load_or_create: {:?}",
             path.as_ref().display()
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 情况 1: 字段存在且有字符串值
+    #[test]
+    fn test_field_with_value() {
+        let json = r#"{"maybe_name": "Alice"}"#;
+
+        let patch = r#"{"maybe_name": "Alice"}"#;
+
+        // Single Option: Some("Alice")
+        let mut single: Config = serde_json::from_str(json).unwrap();
+
+        let patch: ConfigPatch = serde_json::from_str(json).unwrap();
+
+        single.apply(patch);
+
+        assert_eq!(
+            single,
+            Config::builder()
+                .streamers(Default::default())
+                .build(),
+            "普通Option正常包裹一层"
+        );
     }
 }
