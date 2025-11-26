@@ -1,8 +1,8 @@
+use crate::server::config::{Config, ConfigPatch};
 use crate::server::infrastructure::models::hook_step::HookStep;
 use ormlite::{Insert, Model};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::server::config::{Config, ConfigPatch};
 
 /// 直播主播模型
 /// 存储直播主播的配置信息和录制参数

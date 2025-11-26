@@ -239,7 +239,12 @@ pub(crate) async fn build_studio(
         .maybe_copyright(upload_config.copyright)
         .cover(upload_config.cover_path.clone().unwrap_or_default())
         .dynamic(upload_config.dynamic.clone().unwrap_or_default())
-        .source(upload_config.copyright_source.clone().unwrap_or_default())
+        .source(
+            upload_config
+                .copyright_source
+                .clone()
+                .unwrap_or_else(|| recorder.streamer_info.url.clone()),
+        )
         .tag(upload_config.tags.join(","))
         .maybe_tid(upload_config.tid)
         .title(recorder.format_filename())

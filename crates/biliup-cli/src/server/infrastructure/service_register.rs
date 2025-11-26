@@ -1,3 +1,4 @@
+use crate::LogHandle;
 use crate::server::config::Config;
 use crate::server::core::download_manager::DownloadManager;
 use crate::server::core::plugin::yy::YY;
@@ -7,9 +8,9 @@ use crate::server::infrastructure::models::live_streamer::LiveStreamer;
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
 use axum::extract::FromRef;
 use biliup::client::StatelessClient;
-use std::sync::{Arc, RwLock};
-use error_stack::fmt::ColorMode;
 use error_stack::Report;
+use error_stack::fmt::ColorMode;
+use std::sync::{Arc, RwLock};
 use tracing::info;
 
 /// 服务注册器
@@ -24,6 +25,8 @@ pub struct ServiceRegister {
     pub config: Arc<RwLock<Config>>,
     /// HTTP客户端
     pub client: StatelessClient,
+    #[from_ref(skip)]
+    log_handle: LogHandle,
 }
 
 /// 简单的服务容器，负责管理API端点通过axum扩展获取的各种服务
@@ -39,6 +42,7 @@ impl ServiceRegister {
         pool: ConnectionPool,
         config: Arc<RwLock<Config>>,
         download_manager: DownloadManager,
+        log_handle: LogHandle,
     ) -> Self {
         Report::set_color_mode(ColorMode::None);
         info!("initializing utility services...");
@@ -56,6 +60,7 @@ impl ServiceRegister {
             managers: Arc::new(download_manager),
             config: config.clone(),
             client,
+            log_handle,
         }
     }
 

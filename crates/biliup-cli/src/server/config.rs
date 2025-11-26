@@ -441,9 +441,7 @@ mod tests {
 
         assert_eq!(
             single,
-            Config::builder()
-                .streamers(Default::default())
-                .build(),
+            Config::builder().streamers(Default::default()).build(),
             "普通Option正常包裹一层"
         );
     }

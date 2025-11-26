@@ -14,8 +14,14 @@ use clap::ValueEnum;
 use error_stack::ResultExt;
 use std::net::ToSocketAddrs;
 use std::sync::{Arc, RwLock};
+use tracing_subscriber::{EnvFilter, Registry, reload};
 
-pub async fn run(addr: (&str, u16), auth: bool) -> AppResult<()> {
+// 定义 Handle 的类型别名，简化代码
+// EnvFilter: 我们使用的过滤器类型
+// Registry: 基础的 Subscriber 类型
+type LogHandle = reload::Handle<EnvFilter, Registry>;
+
+pub async fn run(addr: (&str, u16), auth: bool, log_handle: LogHandle) -> AppResult<()> {
     // let config = Arc::new(AppConfig::parse());
 
     tracing::info!(
@@ -31,7 +37,8 @@ pub async fn run(addr: (&str, u16), auth: bool) -> AppResult<()> {
         config.read().unwrap().pool2_size,
         conn_pool.clone(),
     );
-    let service_register = ServiceRegister::new(conn_pool, config.clone(), download_manager);
+    let service_register =
+        ServiceRegister::new(conn_pool, config.clone(), download_manager, log_handle);
 
     tracing::info!("migrations successfully ran, initializing axum server...");
     let addr = addr

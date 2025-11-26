@@ -9,6 +9,7 @@ use clap::Parser;
 
 use biliup_cli::server::errors::AppResult;
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::reload;
 use tracing_subscriber::util::SubscriberInitExt;
 
 #[tokio::main]
@@ -33,8 +34,11 @@ async fn main() -> AppResult<()> {
         "[year]-[month]-[day] [hour]:[minute]:[second]"
     ));
 
+    let console_filter = tracing_subscriber::EnvFilter::new(&cli.rust_log);
+    // let (file_filter_layer, file_reload_handle) = reload::Layer::new(file_filter);
+    let (console_filter_layer, console_reload_handle) = reload::Layer::new(console_filter);
     tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::new(&cli.rust_log))
+        .with(console_filter_layer)
         .with(tracing_subscriber::fmt::layer().with_timer(timer))
         .init();
 
@@ -97,7 +101,9 @@ async fn main() -> AppResult<()> {
             split_size,
             split_time,
         } => download(&url, output, split_size, split_time).await?,
-        Commands::Server { bind, port, auth } => biliup_cli::run((&bind, port), auth).await?,
+        Commands::Server { bind, port, auth } => {
+            biliup_cli::run((&bind, port), auth, console_reload_handle).await?
+        }
         Commands::List {
             is_pubing,
             pubed,

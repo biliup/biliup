@@ -35,9 +35,9 @@ use std::sync::{Arc, LazyLock, RwLock};
 use time::macros::format_description;
 use tracing::{debug, info, warn};
 use tracing_appender::rolling::Rotation;
-use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, reload};
 
 #[derive(Debug)]
 pub struct PyPlugin {
@@ -339,6 +339,14 @@ pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
     let local_time = tracing_subscriber::fmt::time::LocalTime::new(format_description!(
         "[year]-[month]-[day] [hour]:[minute]:[second]"
     ));
+
+    let console_layer = tracing_subscriber::fmt::layer()
+        .with_target(false)
+        .with_timer(local_time.clone())
+        .with_file(true) // 打印文件名
+        .with_line_number(true)
+        .with_thread_ids(true);
+
     // 按日期滚动，每天创建新文件
     let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
         .rotation(Rotation::DAILY) // rotate log files once every hour
@@ -355,27 +363,25 @@ pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
 
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let (filter_layer, reload_handle) = reload::Layer::new(filter);
+
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(non_blocking)
+        .with_timer(local_time)
+        .with_target(true)
+        .with_thread_ids(true)
+        .with_file(true)
+        .with_line_number(true)
+        .with_ansi(false);
+
     let subscriber = tracing_subscriber::registry()
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with(filter_layer) // 这个是“总开关”，所有 layer 都会被它过滤
         // 控制台输出
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_target(false)
-                .with_timer(local_time.clone())
-                .with_file(true) // 打印文件名
-                .with_line_number(true)
-                .with_thread_ids(true),
-        )
+        .with(console_layer)
         // 文件输出
         .with(
-            tracing_subscriber::fmt::layer()
-                .with_writer(non_blocking)
-                .with_timer(local_time)
-                .with_target(true)
-                .with_thread_ids(true)
-                .with_file(true)
-                .with_line_number(true)
-                .with_ansi(false), // .json() // 可选：使用 JSON 格式便于解析
+            file_layer, // .json() // 可选：使用 JSON 格式便于解析
         );
 
     subscriber.init();
@@ -461,8 +467,12 @@ pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
                 download_manager.add_plugin(Arc::new(v));
             }
 
-            let service_register =
-                ServiceRegister::new(conn_pool.clone(), CONFIG.clone(), download_manager);
+            let service_register = ServiceRegister::new(
+                conn_pool.clone(),
+                CONFIG.clone(),
+                download_manager,
+                reload_handle,
+            );
 
             let all_streamer = repositories::get_all_streamer(&conn_pool).await?;
 

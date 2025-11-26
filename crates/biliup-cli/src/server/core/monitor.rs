@@ -198,7 +198,9 @@ impl Monitor {
         // 没有必要检查两次失败
         let _ = self.sender.send(msg).await;
         if let Some(worker) = recv.await.expect("Actor task has been killed") {
-            worker.change_status(Stage::Download, WorkerStatus::Idle).await;
+            worker
+                .change_status(Stage::Download, WorkerStatus::Idle)
+                .await;
         }
     }
 

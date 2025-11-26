@@ -114,12 +114,7 @@ impl SegmentEventProcessor {
             channel: None,
             uploader,
             file_validator: FileValidator::new(
-                ctx.worker
-                    .clone()
-                    .get_config()
-                    .filtering_threshold
-                    * 1000
-                    * 1000,
+                ctx.worker.clone().get_config().filtering_threshold * 1000 * 1000,
                 true,
             ),
             ctx,

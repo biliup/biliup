@@ -544,37 +544,37 @@ pub async fn post_uploads(
         (line, limit, submit_api)
     };
     info!("通过页面开始上传");
-    let (bilibili, videos) = upload(
-        upload_config
-            .user_cookie
-            .as_deref()
-            .unwrap_or("cookies.json"),
-        None,
-        line,
-        &json_data.files,
-        limit as usize,
-    )
-    .await
-    .map_err(report_to_response)?;
-    if !videos.is_empty() {
-        let recorder = Recorder::new(
-            upload_config.title.clone(),
-            StreamerInfo::new(
-                &upload_config.template_name,
-                "stream_title",
+    tokio::spawn(async move {
+        let (bilibili, videos) = upload(
+            upload_config
+                .user_cookie
+                .as_deref()
+                .unwrap_or("cookies.json"),
+            None,
+            line,
+            &json_data.files,
+            limit as usize,
+        )
+        .await?;
+        if !videos.is_empty() {
+            let recorder = Recorder::new(
+                upload_config.title.clone(),
+                StreamerInfo::new(
+                    &upload_config.template_name,
+                    "stream_title",
+                    "",
+                    Utc::now(),
+                    "",
+                ),
                 "",
-                Utc::now(),
-                "",
-            ),
-            "",
-        );
-        let studio = build_studio(&upload_config, &bilibili, videos, recorder)
-            .await
-            .map_err(report_to_response)?;
-        let response_data = submit_to_bilibili(&bilibili, &studio, submit_api.as_deref())
-            .await
-            .map_err(report_to_response)?;
-        info!("通过页面上传成功 {:?}", response_data);
-    }
+            );
+            let studio = build_studio(&upload_config, &bilibili, videos, recorder).await?;
+            let response_data =
+                submit_to_bilibili(&bilibili, &studio, submit_api.as_deref()).await?;
+            info!("通过页面上传成功 {:?}", response_data);
+        }
+        Ok::<_, Report<AppError>>(())
+    });
+
     Ok(Json(serde_json::json!({})))
 }
