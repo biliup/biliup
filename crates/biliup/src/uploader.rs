@@ -57,9 +57,25 @@ fn default_submit() -> SubmitOption {
 }
 
 pub fn load_config(config: &Path) -> error::Result<Config> {
-    let file = std::fs::File::open(config)?;
-    let config: Config = serde_yaml::from_reader(file)?;
-    // println!("body = {:?}", client);
+    let file = std::fs::File::open(config)
+        .map_err(|e| error::Kind::Custom(
+            format!("无法打开配置文件 '{}': {}", config.display(), e)
+        ))?;
+
+    let config: Config = serde_yaml::from_reader(file)
+        .map_err(|e| {
+            let location = e.location()
+                .map(|loc| format!(" (第 {} 行，第 {} 列)", loc.line(), loc.column()))
+                .unwrap_or_default();
+            error::Kind::Custom(
+                format!(
+                    "配置文件 '{}' 格式错误{}: {}\n\n提示：请检查 YAML 格式是否正确（缩进、冒号、引号等），参考示例: examples/config.yaml.example",
+                    config.display(),
+                    location,
+                    e
+                )
+            )
+        })?;
     Ok(config)
 }
 
