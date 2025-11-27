@@ -19,10 +19,12 @@ pub struct Studio {
     /// 是否转载, 1-自制 2-转载
     #[cfg_attr(feature = "cli", clap(long, default_value = "1"))]
     #[builder(default = 1)]
+    #[serde(default = "default_copyright")]
     pub copyright: u8,
 
     /// 转载来源
     #[cfg_attr(feature = "cli", clap(long, default_value_t))]
+    #[serde(default)]
     pub source: String,
 
     /// 投稿分区
@@ -32,6 +34,7 @@ pub struct Studio {
 
     /// 视频封面
     #[cfg_attr(feature = "cli", clap(long, default_value_t))]
+    #[serde(default)]
     pub cover: String,
 
     /// 视频标题
@@ -39,11 +42,13 @@ pub struct Studio {
     pub title: String,
 
     #[cfg_attr(feature = "cli", clap(skip))]
+    #[serde(default)]
     #[builder(default)]
     pub desc_format_id: u32,
 
     /// 视频简介
     #[cfg_attr(feature = "cli", clap(long, default_value_t))]
+    #[serde(default)]
     pub desc: String,
 
     /// 视频简介v2
@@ -53,6 +58,7 @@ pub struct Studio {
 
     /// 空间动态
     #[cfg_attr(feature = "cli", clap(long, default_value_t))]
+    #[serde(default)]
     pub dynamic: String,
 
     #[cfg_attr(feature = "cli", clap(skip))]
@@ -62,6 +68,7 @@ pub struct Studio {
 
     /// 视频标签，逗号分隔多个tag
     #[cfg_attr(feature = "cli", clap(long, default_value_t))]
+    #[serde(default)]
     pub tag: String,
 
     #[serde(default)]
@@ -141,6 +148,10 @@ pub struct Studio {
 
 fn parse_extra_fields(s: &str) -> std::result::Result<HashMap<String, Value>, String> {
     serde_json::from_str(s).map_err(|e| e.to_string())
+}
+
+fn default_copyright() -> u8 {
+    1
 }
 
 #[derive(Default, Debug, Serialize, Deserialize)]
