@@ -81,6 +81,9 @@ pub async fn upload_by_command(
     submit: SubmitOption,
     proxy: Option<&str>,
 ) -> AppResult<()> {
+    if video_path.is_empty() {
+        return Err(AppError::Custom("No video files specified. Please provide at least one video file path.".to_string()).into());
+    }
     let bili = login_by_cookies(user_cookie, proxy).await?;
     if studio.title.is_empty() {
         studio.title = video_path[0]
@@ -164,6 +167,9 @@ pub async fn append(
     submit: SubmitOption,
     proxy: Option<&str>,
 ) -> AppResult<()> {
+    if video_path.is_empty() {
+        return Err(AppError::Custom("No video files specified. Please provide at least one video file path.".to_string()).into());
+    }
     let bilibili = login_by_cookies(user_cookie, proxy).await?;
     let mut uploaded_videos = upload(&video_path, &bilibili, line, limit).await?;
     let mut studio = bilibili
