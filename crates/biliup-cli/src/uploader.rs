@@ -257,10 +257,17 @@ async fn login_by_cookies(user_cookie: PathBuf, proxy: Option<&str>) -> AppResul
 
 pub async fn cover_up(studio: &mut Studio, bili: &BiliBili) -> AppResult<()> {
     if !studio.cover.is_empty() {
+        // 扩展路径中的 ~ 为用户主目录
+        let cover_path = if let Ok(expanded) = shellexpand::tilde(&studio.cover) {
+            PathBuf::from(expanded.as_ref())
+        } else {
+            PathBuf::from(&studio.cover)
+        };
+
         let url = bili
             .cover_up(
-                &std::fs::read(Path::new(&studio.cover))
-                    .change_context_lazy(|| AppError::Custom(format!("cover: {}", studio.cover)))?,
+                &std::fs::read(&cover_path)
+                    .change_context_lazy(|| AppError::Custom(format!("cover: {}", cover_path.display())))?,
             )
             .await
             .change_context_lazy(|| AppError::Unknown)?;
