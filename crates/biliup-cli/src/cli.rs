@@ -8,9 +8,8 @@ use std::path::PathBuf;
 /// 扩展路径中的 ~ 为用户主目录
 pub fn expand_path(path: PathBuf) -> PathBuf {
     if let Some(path_str) = path.to_str() {
-        if let Ok(expanded) = shellexpand::tilde(path_str) {
-            return PathBuf::from(expanded.as_ref());
-        }
+        let expanded = shellexpand::tilde(path_str);
+        return PathBuf::from(expanded.as_ref());
     }
     path
 }
