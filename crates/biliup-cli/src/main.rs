@@ -1,7 +1,7 @@
 use time::macros::format_description;
 
 use biliup::uploader::util::SubmitOption;
-use biliup_cli::cli::{Cli, Commands};
+use biliup_cli::cli::{Cli, Commands, expand_path};
 use biliup_cli::downloader::{download, generate_json};
 use biliup_cli::uploader::{append, list, login, renew, show, upload_by_command, upload_by_config};
 
@@ -42,10 +42,12 @@ async fn main() -> AppResult<()> {
         .with(tracing_subscriber::fmt::layer().with_timer(timer))
         .init();
 
+    let user_cookie = expand_path(cli.user_cookie);
+
     match cli.command {
-        Commands::Login => login(cli.user_cookie, cli.proxy.as_deref()).await?,
+        Commands::Login => login(user_cookie, cli.proxy.as_deref()).await?,
         Commands::Renew => {
-            renew(cli.user_cookie, cli.proxy.as_deref()).await?;
+            renew(user_cookie, cli.proxy.as_deref()).await?;
         }
         Commands::Upload {
             video_path,
@@ -55,9 +57,10 @@ async fn main() -> AppResult<()> {
             studio,
             submit,
         } => {
+            let video_path: Vec<_> = video_path.into_iter().map(expand_path).collect();
             upload_by_command(
                 studio,
-                cli.user_cookie,
+                user_cookie,
                 video_path,
                 line,
                 limit,
@@ -72,7 +75,8 @@ async fn main() -> AppResult<()> {
             submit,
             ..
         } => {
-            upload_by_config(config, cli.user_cookie, submit, cli.proxy.as_deref()).await?;
+            let config = expand_path(config);
+            upload_by_config(config, user_cookie, submit, cli.proxy.as_deref()).await?;
         }
         Commands::Append {
             video_path,
@@ -82,8 +86,9 @@ async fn main() -> AppResult<()> {
             studio: _,
             submit,
         } => {
+            let video_path: Vec<_> = video_path.into_iter().map(expand_path).collect();
             append(
-                cli.user_cookie,
+                user_cookie,
                 vid,
                 video_path,
                 line,
@@ -93,8 +98,11 @@ async fn main() -> AppResult<()> {
             )
             .await?
         }
-        Commands::Show { vid } => show(cli.user_cookie, vid, cli.proxy.as_deref()).await?,
-        Commands::DumpFlv { file_name } => generate_json(file_name)?,
+        Commands::Show { vid } => show(user_cookie, vid, cli.proxy.as_deref()).await?,
+        Commands::DumpFlv { file_name } => {
+            let file_name = expand_path(file_name);
+            generate_json(file_name)?
+        }
         Commands::Download {
             url,
             output,
@@ -112,7 +120,7 @@ async fn main() -> AppResult<()> {
             max_pages,
         } => {
             list(
-                cli.user_cookie,
+                user_cookie,
                 is_pubing,
                 pubed,
                 not_pubed,
