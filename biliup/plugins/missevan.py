@@ -6,8 +6,8 @@ from ..engine.download import DownloadBase
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|fm)\.)?missevan\.com')
 class Missevan(DownloadBase):
-    def __init__(self, fname, url, suffix='flv'):
-        super().__init__(fname, url, suffix)
+    def __init__(self, fname, url, config, suffix='flv'):
+        super().__init__(fname, url, config, suffix)
 
     async def acheck_stream(self, is_check=False):
         rid = 0

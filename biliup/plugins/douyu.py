@@ -8,7 +8,6 @@ from typing import Union, Any, Optional
 
 
 from ..common.util import client
-from ..config import config
 from ..Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
@@ -23,8 +22,8 @@ DOUYU_MOBILE_DOMAIN = "m.douyu.com"
 
 @Plugin.download(regexp=r'https?://(?:(?:www|m)\.)?douyu\.com')
 class Douyu(DownloadBase):
-    def __init__(self, fname, url, suffix='flv'):
-        super().__init__(fname, url, suffix)
+    def __init__(self, fname, url, config, suffix='flv'):
+        super().__init__(fname, url, config, suffix)
         self.room_id: str = ""
         self.douyu_danmaku = config.get('douyu_danmaku', False)
         self.douyu_disable_interactive_game = config.get('douyu_disable_interactive_game', False)

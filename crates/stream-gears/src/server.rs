@@ -68,15 +68,17 @@ pub struct PyDownloader {
     url: String,
     remark: String,
     danmaku: Option<Arc<Py<PyAny>>>,
+    cfg: OnceConfig,
 }
 
 impl PyDownloader {
-    fn new(plugin: Arc<Py<PyType>>, url: String, remark: String) -> Self {
+    fn new(plugin: Arc<Py<PyType>>, url: String, remark: String, cfg: Config) -> Self {
         Self {
             plugin,
             url: url.clone(),
             remark: remark.clone(),
             danmaku: None,
+            cfg: OnceConfig { map: cfg },
         }
     }
 
@@ -84,6 +86,7 @@ impl PyDownloader {
         let url = self.url.clone();
         let remark = self.remark.clone();
         let obj = self.plugin.clone();
+        let config = self.cfg.clone();
         Ok(
             match tokio::task::spawn_blocking(move || {
                 Python::attach(
@@ -101,7 +104,7 @@ impl PyDownloader {
                         let asyncio = PyModule::import(py, "asyncio")?;
 
                         // 生成协程 self.acheck_stream()
-                        let instance = obj.bind(py).call1((remark, url))?;
+                        let instance = obj.bind(py).call1((remark, url, config))?;
                         let coro = instance.call_method0("acheck_stream")?;
 
                         // 调度到指定 loop
@@ -197,7 +200,12 @@ impl DownloadPlugin for PyPlugin {
     fn create_downloader(&self, ctx: &mut Context) -> Box<dyn DownloadBase> {
         let url = ctx.worker.live_streamer.url.to_string();
         let remark = ctx.worker.live_streamer.remark.to_string();
-        Box::new(PyDownloader::new(self.plugin.clone(), url, remark))
+        Box::new(PyDownloader::new(
+            self.plugin.clone(),
+            url,
+            remark,
+            ctx.worker.get_config(),
+        ))
     }
 
     fn name(&self) -> &str {
@@ -257,6 +265,57 @@ pub fn from_py() -> PyResult<Vec<PyPlugin>> {
     // let download_base: &Bound<PyType> = download_base.downcast()?;
 
     Ok(classes)
+}
+
+#[pyclass]
+#[derive(Debug, Clone)]
+struct OnceConfig {
+    // 用 PyObject 存，方便保持任意 Python 对象
+    map: Config,
+}
+
+#[pymethods]
+impl OnceConfig {
+    /// 获取：config.get("k", default=None)
+    /// - 若 key 存在，返回保存的对象
+    /// - 若不存在，返回 default（默认 None）
+    #[pyo3(signature = (key, default=None))]
+    fn get<'py>(
+        &self,
+        py: Python<'py>,
+        key: &str,
+        default: Option<Bound<'py, PyAny>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let guard = &self.map;
+        // serde_json::to_value(guard.deref())
+        if let Some(bound) = pythonize(py, guard)?
+            .extract::<Bound<PyDict>>()?
+            .get_item(key)?
+        {
+            if bound.is_none()
+                && let Some(d) = default
+            {
+                return Ok(d);
+            }
+            // 尝试转换为字典并过滤
+            return match bound.cast::<PyDict>() {
+                Ok(dict) => {
+                    let filtered = PyDict::new(py);
+                    dict.iter()
+                        .filter(|(_, v)| !v.is_none())
+                        .try_for_each(|(k, v)| filtered.set_item(k, v))?;
+                    Ok(filtered.into_any())
+                }
+                Err(_) => Ok(bound), // 不是字典，直接返回
+            };
+        };
+        let Some(default) = default else {
+            return Err(pyo3::exceptions::PyAttributeError::new_err(format!(
+                "object has no attribute '{key}'"
+            )));
+        };
+        Ok(default)
+    }
 }
 
 #[pyclass]

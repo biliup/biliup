@@ -444,10 +444,7 @@ mod tests {
         // 需要明确设置 segment_time 为 None 以匹配反序列化结果
         assert_eq!(
             single,
-            Config::builder()
-                .streamers(Default::default())
-                .segment_time(None)
-                .build(),
+            Config::builder().streamers(Default::default()).build(),
             "普通Option正常包裹一层"
         );
     }

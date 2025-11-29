@@ -27,7 +27,6 @@ import rsa
 import xml.etree.ElementTree as ET
 from requests.adapters import HTTPAdapter, Retry
 
-from biliup.config import config
 from ..engine import Plugin
 from ..engine.upload import UploadBase, logger
 

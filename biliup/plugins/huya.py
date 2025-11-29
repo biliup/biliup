@@ -15,7 +15,6 @@ from typing import (
 )
 
 from ..common.util import client
-from ..config import config
 from ..Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
@@ -35,8 +34,8 @@ HUYA_WEB_ROOM_DATA_REGEX = r"var TT_ROOM_DATA = (.*?);"
 
 @Plugin.download(regexp=r'https?://(?:(?:www|m)\.)?huya\.com')
 class Huya(DownloadBase):
-    def __init__(self, fname, url, suffix='flv'):
-        super().__init__(fname, url, suffix)
+    def __init__(self, fname, url, config, suffix='flv'):
+        super().__init__(fname, url, config, suffix)
         self.__room_id = url.split('huya.com/')[1].split('?')[0]
         self.huya_danmaku = config.get('huya_danmaku', False)
         self.huya_max_ratio = config.get('huya_max_ratio', 0)

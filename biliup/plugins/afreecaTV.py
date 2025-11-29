@@ -4,7 +4,6 @@ from typing import Optional, Dict
 import requests
 
 import biliup.common.util
-from biliup.config import config
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 from ..plugins import match1, logger
@@ -18,11 +17,11 @@ QUALITIES = ["original", "hd4k", "hd", "sd"]
 
 @Plugin.download(regexp=r"https?://(.*?)\.afreecatv\.com/(?P<username>\w+)(?:/\d+)?")
 class AfreecaTV(DownloadBase):
-    def __init__(self, fname, url, suffix='flv'):
-        super().__init__(fname, url, suffix)
-        if AfreecaTVUtils.get_cookie():
+    def __init__(self, fname, url, config, suffix='flv'):
+        super().__init__(fname, url, config, suffix)
+        if AfreecaTVUtils.get_cookie(config):
             self.fake_headers['cookie'] = ';'.join(
-                [f"{name}={value}" for name, value in AfreecaTVUtils.get_cookie().items()])
+                [f"{name}={value}" for name, value in AfreecaTVUtils.get_cookie(config).items()])
 
     async def acheck_stream(self, is_check=False):
         try:
@@ -85,7 +84,7 @@ class AfreecaTVUtils:
     _cookie_expires = None
 
     @staticmethod
-    def get_cookie() -> Optional[Dict[str, str]]:
+    def get_cookie(config) -> Optional[Dict[str, str]]:
             if not AfreecaTVUtils._cookie or AfreecaTVUtils._cookie_expires <= time.time():
                 username = config.get('user', {}).get('afreecatv_username', '')
                 password = config.get('user', {}).get('afreecatv_password', '')

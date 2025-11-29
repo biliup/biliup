@@ -6,8 +6,8 @@ from ..plugins import logger, match1
 
 @Plugin.download(regexp=r'(?:https?://)?www\.ttinglive\.com')
 class TTingLive(DownloadBase):
-    def __init__(self, fname, url, suffix='flv'):
-        super().__init__(fname, url, suffix)
+    def __init__(self, fname, url, config, suffix='flv'):
+        super().__init__(fname, url, config, suffix)
 
     async def acheck_stream(self, is_check=False):
         room_id = match1(self.url, r"/channels/(\d+)/live")

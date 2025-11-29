@@ -57,10 +57,9 @@ fn default_submit() -> SubmitOption {
 }
 
 pub fn load_config(config: &Path) -> error::Result<Config> {
-    let file = std::fs::File::open(config)
-        .map_err(|e| error::Kind::Custom(
-            format!("无法打开配置文件 '{}': {}", config.display(), e)
-        ))?;
+    let file = std::fs::File::open(config).map_err(|e| {
+        error::Kind::Custom(format!("无法打开配置文件 '{}': {}", config.display(), e))
+    })?;
 
     let config: Config = serde_yaml::from_reader(file)
         .map_err(|e| {

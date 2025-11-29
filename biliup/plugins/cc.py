@@ -1,5 +1,4 @@
 from biliup.common.util import client
-from biliup.config import config
 from . import logger, match1
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
@@ -7,8 +6,8 @@ from ..engine.download import DownloadBase
 
 @Plugin.download(regexp=r'https?://cc\.163\.com')
 class CC(DownloadBase):
-    def __init__(self, fname, url, suffix='flv'):
-        super().__init__(fname, url, suffix)
+    def __init__(self, fname, url, config, suffix='flv'):
+        super().__init__(fname, url, config, suffix)
         self.cc_protocol = config.get('cc_protocol', 'hls')
 
     async def acheck_stream(self, is_check=False):

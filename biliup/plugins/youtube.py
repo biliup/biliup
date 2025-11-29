@@ -1,5 +1,4 @@
 import copy
-import json
 import os
 import shutil
 import subprocess
@@ -7,12 +6,11 @@ import threading
 from typing import Optional
 
 import yt_dlp
-
 from yt_dlp import DownloadError
 from yt_dlp.utils import DateRange
-from biliup.config import config
-from ..engine.decorators import Plugin
+
 from . import logger
+from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
 
 VALID_URL_BASE = r'https?://(?:(?:www|m)\.)?youtube\.com/(?P<id>(?!.*?/live$).*?)\??(.*?)'
@@ -23,8 +21,8 @@ proxy = None
 
 @Plugin.download(regexp=VALID_URL_LIVE)
 class YoutubeLive(DownloadBase):
-    def __init__(self, fname, url, suffix='flv'):
-        super().__init__(fname, url, suffix)
+    def __init__(self, fname, url, config, suffix='flv'):
+        super().__init__(fname, url, config, suffix)
         self.youtube_cookie = config.get('user', {}).get('youtube_cookie')
         self.cache_dir = f"./cache/{self.__class__.__name__}/{self.fname}"
         self.__webpage_url = None
@@ -190,8 +188,8 @@ class YoutubeLive(DownloadBase):
 
 @Plugin.download(regexp=VALID_URL_BASE)
 class Youtube(DownloadBase):
-    def __init__(self, fname, url, suffix='flv'):
-        super().__init__(fname, url, suffix)
+    def __init__(self, fname, url, config, suffix='flv'):
+        super().__init__(fname, url, config, suffix)
         self.ytb_danmaku = config.get('ytb_danmaku', False)
         self.youtube_cookie = config.get('user', {}).get('youtube_cookie')
         self.youtube_prefer_vcodec = config.get('youtube_prefer_vcodec')

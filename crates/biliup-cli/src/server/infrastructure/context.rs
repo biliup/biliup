@@ -1,6 +1,6 @@
 use crate::server::common::download::DownloadTask;
 use crate::server::common::util::Recorder;
-use crate::server::config::Config;
+use crate::server::config::{Config, ConfigPatch};
 use crate::server::core::plugin::StreamInfoExt;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::models::live_streamer::LiveStreamer;
@@ -10,6 +10,7 @@ use biliup::client::StatelessClient;
 use core::fmt;
 use ormlite::Model;
 use std::sync::{Arc, RwLock};
+use struct_patch::Patch;
 use tracing::{error, info};
 
 /// 应用程序上下文，包含工作器和扩展信息
@@ -102,10 +103,15 @@ impl Worker {
         self.upload_streamer.clone()
     }
 
-    /// 获取全局配置
-    /// 返回当前的全局配置副本
+    /// 获取覆写配置
+    /// 返回当前的配置副本
     pub fn get_config(&self) -> Config {
-        self.config.read().unwrap().clone()
+        let mut cfg = self.config.read().unwrap().clone();
+
+        if let Some(cfg_p) = self.live_streamer.override_cfg.clone() {
+            cfg.apply(cfg_p)
+        }
+        cfg
     }
 
     /// 更改工作器状态

@@ -15,8 +15,8 @@ HLS_URL = "https://{netloc}.picarto.tv/stream/hls/{file_name}/index.m3u8"
 @Plugin.download(regexp=VALID_URL_BASE)
 class Picarto(DownloadBase, BatchCheck):
 
-    def __init__(self, fname, url, suffix="flv"):
-        super().__init__(fname, url, suffix)
+    def __init__(self, fname, url, config, suffix="flv"):
+        super().__init__(fname, url, config, suffix)
 
     async def acheck_stream(self, is_check=False):
         username = re.match(VALID_URL_BASE, self.url).group("id")

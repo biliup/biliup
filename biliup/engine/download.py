@@ -1,42 +1,37 @@
-import asyncio
+import copy
 import inspect
 import json
 import logging
 import os
 import queue
 import re
+import shutil
 import subprocess
 import threading
 import time
-import shutil
-import copy
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from typing import AsyncGenerator, List, Callable, Optional
 from urllib.parse import urlparse
-from datetime import datetime, timezone
 
 import requests
-from requests.utils import DEFAULT_ACCEPT_ENCODING, parse_header_links
-from httpx import HTTPStatusError
-
-from biliup.common.util import client, loop, check_timerange
-
-from biliup.plugins import random_user_agent
 import stream_gears
 from PIL import Image
+from httpx import HTTPStatusError
+from requests.utils import DEFAULT_ACCEPT_ENCODING
 
-from biliup.config import config
 from biliup.Danmaku import IDanmakuClient
+from biliup.common.util import client, check_timerange
+from biliup.plugins import random_user_agent
 from biliup.plugins.bili_webup_sync import BiliWebAsync
-
-
 from .sync_downloader import SyncDownloader
+
 # from biliup.app import context
 logger = logging.getLogger('biliup')
 
 
 class DownloadBase(ABC):
-    def __init__(self, fname, url, suffix=None, opt_args=None):
+    def __init__(self, fname, url, config, suffix=None, opt_args=None):
         self.room_title = None
         if opt_args is None:
             opt_args = []
@@ -86,6 +81,7 @@ class DownloadBase(ABC):
 
         self.platform = self.__class__.__name__
         self.plugin_msg = f"[{self.platform}]{self.fname} - {self.url}"
+        self.config = config
 
     @abstractmethod
     async def acheck_stream(self, is_check=False):
@@ -94,7 +90,7 @@ class DownloadBase(ABC):
 
     def should_record(self):
         # 检查房间名
-        keywords = config['streamers'].get(self.fname, {}).get('excluded_keywords')
+        keywords = self.config['streamers'].get(self.fname, {}).get('excluded_keywords')
         if self.room_title and keywords:
             if any(k.strip() in self.room_title for k in keywords):
                 return False
@@ -130,7 +126,7 @@ class DownloadBase(ABC):
                 # 同步下载上传器
                 if self.downloader == 'sync-downloader':
                     logger.info(f"{self.plugin_msg}: 使用同步下载器")
-                    stream_info = config.get('streamers', {}).get(self.fname, {})
+                    stream_info = self.config.get('streamers', {}).get(self.fname, {})
                     stream_info.update({'name': self.fname})
                     min_size = 10 * 1024 * 1024
                     if not self.file_size:

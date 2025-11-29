@@ -10,7 +10,6 @@ from urllib.parse import urlencode
 import yt_dlp
 
 from biliup.common.util import client
-from biliup.config import config
 from biliup.Danmaku import DanmakuClient
 from . import logger
 from ..engine.decorators import Plugin
@@ -23,14 +22,14 @@ _CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko'
 
 @Plugin.download(regexp=VALID_URL_VIDEOS)
 class TwitchVideos(DownloadBase):
-    def __init__(self, fname, url, suffix='flv'):
-        DownloadBase.__init__(self, fname, url, suffix=suffix)
+    def __init__(self, fname, url, config, suffix='flv'):
+        DownloadBase.__init__(self, fname, url, config, suffix=suffix)
         self.is_download = True
         self.twitch_download_entry = None
 
     async def acheck_stream(self, is_check=False):
         while True:
-            auth_token = TwitchUtils.get_auth_token()
+            auth_token = TwitchUtils.get_auth_token(self.config)
             if auth_token:
                 cookie = io.StringIO(f"""# Netscape HTTP Cookie File
 .twitch.tv	TRUE	/	FALSE	0	auth-token	{auth_token}
@@ -55,7 +54,7 @@ class TwitchVideos(DownloadBase):
                         return True
                 except Exception as e:
                     if 'Unauthorized' in str(e):
-                        TwitchUtils.invalid_auth_token()
+                        TwitchUtils.invalid_auth_token(self.config)
                         continue
                     else:
                         logger.warning(f"{self.url}：获取错误", exc_info=True)
@@ -68,8 +67,8 @@ class TwitchVideos(DownloadBase):
 
 @Plugin.download(regexp=VALID_URL_BASE)
 class Twitch(DownloadBase, BatchCheck):
-    def __init__(self, fname, url, suffix='flv'):
-        DownloadBase.__init__(self, fname, url, suffix=suffix)
+    def __init__(self, fname, url, config, suffix='flv'):
+        DownloadBase.__init__(self, fname, url, config, suffix=suffix)
         self.twitch_danmaku = config.get('twitch_danmaku', False)
         self.twitch_disable_ads = config.get('twitch_disable_ads', True)
         self.__proc = None
@@ -100,7 +99,7 @@ class Twitch(DownloadBase, BatchCheck):
                 }
             ''',
             'variables': {'channel_name': channel_name}
-        })).get('data', {}).get('user')
+        }, self.config)).get('data', {}).get('user')
         if not user:
             logger.warning(f"{Twitch.__name__}: {self.url}: 获取错误", exc_info=True)
             return False
@@ -129,7 +128,7 @@ class Twitch(DownloadBase, BatchCheck):
             if self.twitch_disable_ads:  # 去广告，去掉、跳过嵌入的广告流
                 stream_shell.insert(1, "--twitch-disable-ads")
 
-            auth_token = TwitchUtils.get_auth_token()
+            auth_token = TwitchUtils.get_auth_token(self.config)
             # 在设置且有效的情况下使用
             if auth_token:
                 stream_shell.insert(1, f"--twitch-api-header=Authorization=OAuth {auth_token}")
@@ -157,8 +156,7 @@ class Twitch(DownloadBase, BatchCheck):
             self.raw_stream_url = f'https://usher.ttvnw.net/api/channel/hls/{channel_name}.m3u8?{urlencode(query)}'
             return True
 
-    @staticmethod
-    async def abatch_check(check_urls: List[str]) -> AsyncGenerator[str, None]:
+    async def abatch_check(self, check_urls: List[str]) -> AsyncGenerator[str, None]:
         ops = []
         for url in check_urls:
             channel_name = re.match(VALID_URL_BASE, url).group('id')
@@ -175,7 +173,7 @@ class Twitch(DownloadBase, BatchCheck):
                 'variables': {'login': channel_name.lower()}
             }
             ops.append(op)
-        gql = await TwitchUtils.post_gql(ops)
+        gql = await TwitchUtils.post_gql(ops, self.config)
         for index, data in enumerate(gql):
             user = data.get('data', {}).get('user')
             if not user:
@@ -207,24 +205,24 @@ class TwitchUtils:
     _invalid_auth_token = None
 
     @staticmethod
-    def get_auth_token():
+    def get_auth_token(config):
         auth_token = config.get('user', {}).get('twitch_cookie')
         if TwitchUtils._invalid_auth_token == auth_token:
             return None
         return auth_token
 
     @staticmethod
-    def invalid_auth_token():
+    def invalid_auth_token(config):
         TwitchUtils._invalid_auth_token = config.get('user', {}).get('twitch_cookie')
         logger.warning("Twitch Cookie已失效请及时更换，后续操作将忽略Twitch Cookie")
 
     @staticmethod
-    async def post_gql(ops):
+    async def post_gql(ops, config):
         headers = {
             'Content-Type': 'text/plain;charset=UTF-8',
             'Client-ID': _CLIENT_ID,
         }
-        auth_token = TwitchUtils.get_auth_token()
+        auth_token = TwitchUtils.get_auth_token(config)
         if auth_token:
             headers['Authorization'] = f'OAuth {auth_token}'
 
@@ -233,16 +231,16 @@ class TwitchUtils:
             ops_list = [ops[i:i + limit] for i in range(0, len(ops), limit)]
             data = []
             for __ops in ops_list:
-                __data = await TwitchUtils.__post_gql(headers, __ops)
+                __data = await TwitchUtils.__post_gql(headers, __ops, config)
                 if __data: # 让检测不抛出异常
                     data.extend(__data)
             return data
 
         # 正常下载由上层方法处理
-        return await TwitchUtils.__post_gql(headers, ops)
+        return await TwitchUtils.__post_gql(headers, ops, config)
 
     @staticmethod
-    async def __post_gql(headers, ops):
+    async def __post_gql(headers, ops, config):
         try:
             _resp = await client.post(
                 'https://gql.twitch.tv/gql',
@@ -252,8 +250,8 @@ class TwitchUtils:
             _resp.raise_for_status()
             gql = _resp.json()
             if isinstance(gql, dict) and gql.get('error') == 'Unauthorized':
-                TwitchUtils.invalid_auth_token()
-                return await TwitchUtils.post_gql(ops)
+                TwitchUtils.invalid_auth_token(config)
+                return await TwitchUtils.post_gql(ops, config)
             return gql
         except:
             logger.exception(f"Twitch - post_gql: {ops}")

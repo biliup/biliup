@@ -1,7 +1,6 @@
+import json
 import random
 import string
-import json
-import requests
 
 import biliup.common.util
 from . import logger
@@ -11,8 +10,8 @@ from ..engine.download import DownloadBase
 
 @Plugin.download(regexp=r'(?:https?://)?(?:(?:www|m|live)\.)?acfun\.cn')
 class Acfun(DownloadBase):
-    def __init__(self, fname, url, suffix='flv'):
-        super().__init__(fname, url, suffix)
+    def __init__(self, fname, url, config, suffix='flv'):
+        super().__init__(fname, url, config, suffix)
 
     async def acheck_stream(self, is_check=False):
         if len(self.url.split("acfun.cn/live/")) < 2:

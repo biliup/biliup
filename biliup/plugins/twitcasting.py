@@ -1,7 +1,6 @@
 import hashlib
 
 import biliup.common.util
-from biliup.config import config
 from biliup.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
@@ -12,8 +11,8 @@ VALID_URL_BASE = r"https?://twitcasting\.tv/([^/]+)"
 
 @Plugin.download(regexp=VALID_URL_BASE)
 class Twitcasting(DownloadBase):
-    def __init__(self, fname, url, suffix='flv'):
-        super().__init__(fname, url, suffix)
+    def __init__(self, fname, url, config, suffix='flv'):
+        super().__init__(fname, url, config, suffix)
         self.twitcasting_danmaku = config.get('twitcasting_danmaku', False)
         self.twitcasting_password = config.get('user.twitcasting_password')
         self.twitcasting_quality = config.get('twitcasting_quality')

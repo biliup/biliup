@@ -4,7 +4,6 @@ import re
 import asyncio
 
 from biliup.common.util import client
-from biliup.config import config
 from . import match1, logger, wbi
 from biliup.Danmaku import DanmakuClient
 from ..engine.decorators import Plugin
@@ -17,8 +16,8 @@ WBI_WEB_LOCATION = "444.8"
 
 @Plugin.download(regexp=r'https?://(b23\.tv|live\.bilibili\.com)')
 class Bililive(DownloadBase):
-    def __init__(self, fname, url, suffix='flv'):
-        super().__init__(fname, url, suffix)
+    def __init__(self, fname, url, config, suffix='flv'):
+        super().__init__(fname, url, config, suffix)
         self.live_start_time = 0
         self.bilibili_danmaku = config.get('bilibili_danmaku', False)
         self.bilibili_danmaku_detail = config.get('bilibili_danmaku_detail', False)

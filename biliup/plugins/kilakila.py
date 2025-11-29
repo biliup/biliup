@@ -1,7 +1,6 @@
 import json
 
 from biliup.common.util import client
-from biliup.config import config
 from . import match1, logger
 from ..engine.decorators import Plugin
 from ..engine.download import DownloadBase
@@ -9,10 +8,10 @@ from ..engine.download import DownloadBase
 
 @Plugin.download(regexp=r'https?://(live\.kilakila\.cn|www\.hongdoufm\.com)')
 class Kilakila(DownloadBase):
-    def __init__(self, fname, url, suffix='flv'):
+    def __init__(self, fname, url, config, suffix='flv'):
         self._room_id: str = match1(url, r'(\d+)')
         self.kila_protocol = config.get('kila_protocol', 'hls')
-        super().__init__(fname, url, suffix)
+        super().__init__(fname, url, config, suffix)
 
     async def acheck_stream(self, is_check=False):
         for path in['/PcLive/index/detail', '/room/']:
