@@ -73,6 +73,13 @@ jobs:
         with:
           submodules: true
 
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+      - name: Build frontend
+        run: |
+          npm install
+          npm run build
       - name: Install ${{ matrix.rust }} toolchain
         uses: actions-rs/toolchain@v1
         with:

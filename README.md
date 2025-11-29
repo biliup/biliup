@@ -32,8 +32,6 @@
 > - 本项目仅供个人学习研究，不保证稳定性，不提供技术支持
 > - 使用本项目产生的一切后果由用户自行承担
 > - 禁止商业用途，请遵守版权及平台规定
-> 
-> 
 > - This project is for **personal learning and research purposes only**
 > - No stability guarantee or technical support provided
 > - Users are solely responsible for any consequences of using this project
@@ -90,7 +88,7 @@ Options:
 ## 🚀 快速开始
 
 ### Windows
-- 下载 exe: [Release](https://github.com/biliup/biliup/releases/latest)
+- 下载 Release: [bbup-app_0.1.0_x64](https://github.com/biliup/biliup/releases/latest)
 
 ### Linux 或 macOS
 1. 安装 [uv](https://docs.astral.sh/uv/getting-started/installation/) 
