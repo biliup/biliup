@@ -16,8 +16,6 @@
 
 </div>
 
-
-
 ## 🛠️ 功能
 * 开箱即用，多种安装方式，提供可视化WebUi界面
 * 多主播录制/上传，24X7无人值守运行，高自定义元信息
@@ -38,13 +36,11 @@
 > - Commercial use is strictly prohibited
 > - Please respect copyright and platform ToS
 
-
 - **[更新日志 »](https://biliup.github.io/biliup/docs/guide/changelog)**
 
-
-
-
 ## 📜 使用文档
+B 站命令行投稿工具，支持**短信登录**、**账号密码登录**、**扫码登录**、**浏览器登录**以及**网页Cookie登录**，并将登录后返回的 cookie 和 token 保存在 `cookie.json` 中，可用于其他项目。
+
 获取命令帮助 `biliup --help`
 ```shell
 Upload video to bilibili.
@@ -105,6 +101,9 @@ Options:
 ---
 
 ## 🧑‍💻开发
+
+<details>
+
 ### 架构概览
 
 Rust后端 + Python引擎 + Next.js前端的混合架构。
@@ -161,6 +160,7 @@ graph TB
     style BILI fill:#ffebee
     style STREAMS fill:#ffebee
 ```
+</details>
 
 ### frontend
 
