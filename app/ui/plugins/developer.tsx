@@ -40,7 +40,7 @@ const Developer: React.FC = () => {
         </div>
 
         <Form.Select
-          label=" 控制台日志输出等级（LOGGING.root.level）"
+          label=" ds_update.log 日志输出等级（LOGGING.root.level, LOGGING.loggers.biliup.level）"
           field="LOGGING.root.level"
           placeholder={'INFO'}
           style={{ width: '100%' }}
@@ -48,8 +48,10 @@ const Developer: React.FC = () => {
             alignSelf: 'stretch',
             padding: 0,
           }}
-          onChange={() => {
+          onChange={(value) => {
             formApi.setValue('LOGGING.root.handlers', ['console'])
+            formApi.setValue('LOGGING.loggers.biliup.handlers', ['file'])
+            formApi.setValue('LOGGING.loggers.biliup.level', value)
           }}
           showClear={true}
         >
@@ -60,8 +62,8 @@ const Developer: React.FC = () => {
           <Select.Option value="CRITICAL">CRITICAL</Select.Option>
         </Form.Select>
         <Form.Select
-          label=" 文件日志输出等级（LOGGING.loggers.biliup.level）"
-          field="LOGGING.loggers.biliup.level"
+          label=" 文件日志输出等级（download.log）"
+          field="loggers_level"
           placeholder={'INFO'}
           style={{ width: '100%' }}
           fieldStyle={{
@@ -69,7 +71,6 @@ const Developer: React.FC = () => {
             padding: 0,
           }}
           onChange={() => {
-            formApi.setValue('LOGGING.loggers.biliup.handlers', ['file'])
           }}
           showClear={true}
         >

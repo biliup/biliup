@@ -25,8 +25,8 @@ pub struct ServiceRegister {
     pub config: Arc<RwLock<Config>>,
     /// HTTP客户端
     pub client: StatelessClient,
-    #[from_ref(skip)]
-    log_handle: LogHandle,
+
+    pub log_handle: LogHandle,
 }
 
 /// 简单的服务容器，负责管理API端点通过axum扩展获取的各种服务

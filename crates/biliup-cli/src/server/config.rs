@@ -215,6 +215,8 @@ pub struct Config {
     /// 用户Cookie配置
     #[serde(default)]
     pub user: Option<UserConfig>,
+
+    pub loggers_level: Option<String>,
 }
 
 /// 主播配置结构体
