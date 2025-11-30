@@ -169,11 +169,17 @@ graph TB
 3. 启动开发服务器：`npm run dev`
 4. 访问：`http://localhost:3000`
 
-### backend
+### Python
 
 1. 安装依赖 `maturin dev`
 2. `npm run build` 
 3. 启动 Biliup：`python3 -m biliup`
+
+### Rust-cli
+
+1. `npm run build`
+2. 构建 `cargo build --release --bin biliup`
+3. 开发启动 BiliupR：`cargo run`
 
 ## 🤝Credits
 * Thanks `ykdl, youtube-dl, streamlink` provides downloader.
