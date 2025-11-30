@@ -41,7 +41,8 @@
 ## 📜 使用文档
 B 站命令行投稿工具，支持**短信登录**、**账号密码登录**、**扫码登录**、**浏览器登录**以及**网页Cookie登录**，并将登录后返回的 cookie 和 token 保存在 `cookie.json` 中，可用于其他项目。
 
-获取命令帮助 `biliup --help`
+获取命令帮助 `biliup --help` \
+**文档地址**：<https://biliup.github.io/biliup-rs>
 ```shell
 Upload video to bilibili.
 
@@ -96,7 +97,6 @@ Options:
   2. [请查看参考](https://biliup.github.io/biliup/docs/guide/introduction/#linuxxia-pei-zhi-kai-ji-zi-qi)
 ### Termux
 - 详见[Wiki](https://github.com/biliup/biliup/wiki/Termux-%E4%B8%AD%E4%BD%BF%E7%94%A8-biliup)
-
 
 ---
 
