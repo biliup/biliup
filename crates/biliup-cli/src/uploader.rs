@@ -26,6 +26,48 @@ use std::pin::Pin;
 use std::task::Poll;
 use std::time::Instant;
 use tracing::{info, warn};
+use serde::{Serialize, Deserialize};
+
+// 断点续传的数据结构
+#[derive(Serialize, Deserialize, Debug)]
+struct UploadCheckpoint {
+    videos: Vec<Video>,
+    uploaded_files: Vec<String>,
+}
+
+impl UploadCheckpoint {
+    fn new() -> Self {
+        Self {
+            videos: Vec::new(),
+            uploaded_files: Vec::new(),
+        }
+    }
+
+    fn load(path: &Path) -> Option<Self> {
+        if !path.exists() {
+            return None;
+        }
+        match std::fs::read_to_string(path) {
+            Ok(content) => serde_json::from_str(&content).ok(),
+            Err(_) => None,
+        }
+    }
+
+    fn save(&self, path: &Path) -> std::io::Result<()> {
+        let content = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, content)
+    }
+
+    fn is_uploaded(&self, file_path: &Path) -> bool {
+        let file_name = file_path.to_string_lossy().to_string();
+        self.uploaded_files.contains(&file_name)
+    }
+
+    fn add_video(&mut self, file_path: &Path, video: Video) {
+        self.videos.push(video);
+        self.uploaded_files.push(file_path.to_string_lossy().to_string());
+    }
+}
 
 pub async fn login(user_cookie: PathBuf, proxy: Option<&str>) -> AppResult<()> {
     let client = Credential::new(proxy);
@@ -286,7 +328,29 @@ pub async fn upload(
     limit: usize,
 ) -> AppResult<Vec<Video>> {
     info!("number of concurrent futures: {limit}");
-    let mut videos = Vec::new();
+
+    // 生成断点续传文件路径（基于视频列表的哈希）
+    let checkpoint_path = PathBuf::from(format!(
+        "/tmp/biliup_checkpoint_{}.json",
+        video_path.iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect::<Vec<_>>()
+            .join("_")
+            .chars()
+            .fold(0u64, |acc, c| acc.wrapping_mul(31).wrapping_add(c as u64))
+    ));
+
+    // 尝试加载已有的断点续传数据
+    let mut checkpoint = UploadCheckpoint::load(&checkpoint_path).unwrap_or_else(|| {
+        info!("No checkpoint found, starting fresh upload");
+        UploadCheckpoint::new()
+    });
+
+    if !checkpoint.uploaded_files.is_empty() {
+        info!("Found checkpoint with {} uploaded files, resuming...", checkpoint.uploaded_files.len());
+    }
+
+    let mut videos = checkpoint.videos.clone();
     let client = StatelessClient::default();
     let line = match line {
         Some(UploadLine::Bldsa) => line::bldsa(),
@@ -308,6 +372,12 @@ pub async fn upload(
     };
     // let line = line::kodo();
     for video_path in video_path {
+        // 检查文件是否已经上传
+        if checkpoint.is_uploaded(video_path) {
+            info!("Skipping already uploaded file: {}", video_path.display());
+            continue;
+        }
+
         info!("{line:?}");
         let video_file = VideoFile::new(video_path).change_context_lazy(|| {
             AppError::Custom(format!("file {}", video_path.to_string_lossy()))
@@ -345,8 +415,24 @@ pub async fn upload(
             t as f64 / 1000.,
             total_size as f64 / 1000. / t as f64
         );
+
+        // 保存断点续传信息
+        checkpoint.add_video(video_path, video.clone());
+        if let Err(e) = checkpoint.save(&checkpoint_path) {
+            warn!("Failed to save checkpoint: {}", e);
+        } else {
+            info!("Checkpoint saved: {} files uploaded", checkpoint.uploaded_files.len());
+        }
+
         videos.push(video);
     }
+
+    // 上传完成后删除断点续传文件
+    if checkpoint_path.exists() {
+        let _ = std::fs::remove_file(&checkpoint_path);
+        info!("All files uploaded successfully, checkpoint removed");
+    }
+
     Ok(videos)
 }
 

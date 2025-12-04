@@ -197,7 +197,7 @@ pub struct Credit {
     pub biz_id: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Video {
     pub title: Option<String>,
     pub filename: String,
