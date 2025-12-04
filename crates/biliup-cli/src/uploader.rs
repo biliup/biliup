@@ -330,15 +330,23 @@ pub async fn upload(
     info!("number of concurrent futures: {limit}");
 
     // 生成断点续传文件路径（基于视频列表的哈希）
-    let checkpoint_path = PathBuf::from(format!(
-        "/tmp/biliup_checkpoint_{}.json",
+    let checkpoint_filename = format!(
+        "biliup_checkpoint_{}.json",
         video_path.iter()
             .map(|p| p.to_string_lossy().to_string())
             .collect::<Vec<_>>()
             .join("_")
             .chars()
             .fold(0u64, |acc, c| acc.wrapping_mul(31).wrapping_add(c as u64))
-    ));
+    );
+
+    // 使用平台相关的本地数据目录，Windows 下是 %LOCALAPPDATA%，Linux/macOS 下是 /tmp
+    let checkpoint_path = if let Some(data_dir) = dirs::data_local_dir() {
+        data_dir.join(checkpoint_filename)
+    } else {
+        // 如果无法获取数据目录，回退到临时目录
+        std::env::temp_dir().join(checkpoint_filename)
+    };
 
     // 尝试加载已有的断点续传数据
     let mut checkpoint = UploadCheckpoint::load(&checkpoint_path).unwrap_or_else(|| {
