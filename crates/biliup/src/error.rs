@@ -35,6 +35,9 @@ pub enum Kind {
     // source and Display delegate to anyhow::Error
     #[error("need recaptcha")]
     NeedRecaptcha(String),
+
+    #[error("upload rate limit (code: {code}): {message}")]
+    RateLimit { code: i64, message: String },
 }
 
 impl From<&str> for Kind {

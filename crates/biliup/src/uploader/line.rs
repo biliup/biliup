@@ -8,7 +8,7 @@ use serde_json::json;
 use std::ffi::OsStr;
 
 use crate::client::StatelessClient;
-use crate::error::Kind::Custom;
+use crate::error::Kind::{Custom, RateLimit};
 use crate::uploader::bilibili::{BiliBili, Video};
 use crate::uploader::line::upos::Upos;
 use std::time::Instant;
@@ -154,61 +154,49 @@ impl Line {
         });
         info!("pre_upload: {}", params);
 
-        // 最多重试5次，处理限流错误（code: 601）
-        let max_retries = 5;
-        for attempt in 0..max_retries {
-            let response = bili
-                .client
-                .get(format!(
-                    "https://member.bilibili.com/preupload?{}",
-                    self.query
-                ))
-                .query(&params)
-                .send()
-                .await?;
+        let response = bili
+            .client
+            .get(format!(
+                "https://member.bilibili.com/preupload?{}",
+                self.query
+            ))
+            .query(&params)
+            .send()
+            .await?;
 
-            if !response.status().is_success() {
-                let response_text = response.text().await?;
+        if !response.status().is_success() {
+            let response_text = response.text().await?;
 
-                // 尝试解析JSON错误响应
-                if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&response_text) {
-                    if let Some(code) = error_json.get("code").and_then(|c| c.as_i64()) {
-                        // code: 601 表示上传过快
-                        if code == 601 && attempt < max_retries - 1 {
-                            // 递增等待时间：第1次等待1分钟，第2次等待2分钟，第3次等待3分钟...
-                            let wait_seconds = (attempt + 1) * 60;
-                            warn!(
-                                "Upload rate limit hit (code: 601): {}. Waiting {} seconds before retry {}/{}...",
-                                error_json.get("message").and_then(|m| m.as_str()).unwrap_or("上传过快"),
-                                wait_seconds,
-                                attempt + 1,
-                                max_retries - 1
-                            );
-                            tokio::time::sleep(tokio::time::Duration::from_secs(wait_seconds)).await;
-                            continue;
-                        }
+            // 尝试解析JSON错误响应，检测限流错误（code: 601）
+            if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&response_text) {
+                if let Some(code) = error_json.get("code").and_then(|c| c.as_i64()) {
+                    if code == 601 {
+                        let message = error_json
+                            .get("message")
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("上传过快")
+                            .to_string();
+                        // 直接返回限流错误，让调用方决定如何处理
+                        return Err(RateLimit { code, message });
                     }
                 }
-
-                return Err(Custom(format!(
-                    "Failed to pre_upload from {}",
-                    response_text
-                )));
             }
 
-            // 成功，返回结果
-            return match self.os {
-                Uploader::Upos => Ok(Parcel {
-                    line: Bucket::Upos(response.json().await?),
-                    video_file,
-                }),
-                // _ => {
-                //     panic!("unsupported")
-                // }
-            };
+            return Err(Custom(format!(
+                "Failed to pre_upload from {}",
+                response_text
+            )));
         }
 
-        Err(Custom("Failed to pre_upload after retries".to_string()))
+        match self.os {
+            Uploader::Upos => Ok(Parcel {
+                line: Bucket::Upos(response.json().await?),
+                video_file,
+            }),
+            // _ => {
+            //     panic!("unsupported")
+            // }
+        }
     }
 }
 
