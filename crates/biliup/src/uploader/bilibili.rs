@@ -212,6 +212,19 @@ impl Video {
             desc: "".into(),
         }
     }
+
+    /// 截断标题到指定的最大字符数（默认80个字符，B站限制）
+    pub fn truncate_title(title: &str, max_chars: usize) -> String {
+        // 统计字符数（不是字节数）
+        let char_count = title.chars().count();
+        if char_count <= max_chars {
+            return title.to_string();
+        }
+
+        // 截断到max_chars-3个字符，然后添加"..."
+        let truncated: String = title.chars().take(max_chars - 3).collect();
+        format!("{}...", truncated)
+    }
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
