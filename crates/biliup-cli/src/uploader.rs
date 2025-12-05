@@ -393,39 +393,25 @@ pub async fn upload(
         let total_size = video_file.total_size;
         let file_name = video_file.file_name.clone();
 
-        // 实现重试逻辑，处理限流错误（code: 601）
-        let max_retries = 5;
-        let mut attempt = 0;
-        let uploader = loop {
-            let video_file_clone = VideoFile::new(video_path).change_context_lazy(|| {
-                AppError::Custom(format!("file {}", video_path.to_string_lossy()))
-            })?;
-
-            match line.pre_upload(bili, video_file_clone).await {
-                Ok(uploader) => break uploader,
-                Err(Kind::RateLimit { code, message }) => {
-                    if attempt >= max_retries - 1 {
-                        return Err(AppError::Custom(format!(
-                            "Upload rate limit exceeded after {} retries (code: {}): {}",
-                            max_retries, code, message
-                        )).into());
-                    }
-
-                    // 递增等待时间：第1次等待1分钟，第2次等待2分钟，第3次等待3分钟...
-                    let wait_seconds = (attempt + 1) * 60;
-                    warn!(
-                        "Upload rate limit hit (code: {}): {}. Waiting {} seconds before retry {}/{}...",
-                        code, message, wait_seconds, attempt + 1, max_retries - 1
-                    );
-                    tokio::time::sleep(tokio::time::Duration::from_secs(wait_seconds as u64)).await;
-                    attempt += 1;
-                }
-                Err(e) => {
-                    return Err(error_stack::Report::from(e)
-                        .change_context(AppError::Unknown));
-                }
-            }
-        };
+        // 使用通用的 retry 函数处理限流错误（code: 601）
+        let uploader = biliup::retry_with_config(
+            || async {
+                let video_file_clone = VideoFile::new(video_path).map_err(|e| {
+                    Kind::Custom(format!("file {}: {}", video_path.to_string_lossy(), e))
+                })?;
+                line.pre_upload(bili, video_file_clone).await
+            },
+            5,
+            Some(|e: &Kind| matches!(e, Kind::RateLimit { .. })),
+        )
+        .await
+        .map_err(|e| match e {
+            Kind::RateLimit { code, message } => AppError::Custom(format!(
+                "Upload rate limit exceeded after retries (code: {}): {}",
+                code, message
+            )),
+            _ => AppError::Unknown,
+        })?;
         //Progress bar
         let pb = ProgressBar::new(total_size);
         pb.set_style(ProgressStyle::default_bar()
