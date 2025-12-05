@@ -1,5 +1,6 @@
 use crate::UploadLine;
 use crate::server::errors::{AppError, AppResult};
+use crate::upload_lock::UploadLock;
 use biliup::client::StatelessClient;
 use biliup::error::Kind;
 use biliup::uploader::bilibili::{BiliBili, Studio, Vid, Video};
@@ -23,6 +24,7 @@ use std::ffi::OsStr;
 use std::io::Seek;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 use std::task::Poll;
 use std::time::Instant;
 use tracing::{info, warn};
@@ -394,24 +396,83 @@ pub async fn upload(
         let file_name = video_file.file_name.clone();
 
         // 使用通用的 retry 函数处理限流错误（code: 601）
-        let uploader = biliup::retry_with_config(
-            || async {
-                let video_file_clone = VideoFile::new(video_path).map_err(|e| {
-                    Kind::Custom(format!("file {}: {}", video_path.to_string_lossy(), e))
-                })?;
-                line.pre_upload(bili, video_file_clone).await
-            },
-            5,
-            Some(|e: &Kind| matches!(e, Kind::RateLimit { .. })),
-        )
-        .await
-        .map_err(|e| match e {
-            Kind::RateLimit { code, message } => AppError::Custom(format!(
-                "Upload rate limit exceeded after retries (code: {}): {}",
-                code, message
-            )),
-            _ => AppError::Unknown,
-        })?;
+        // 配合账号级互斥锁防止多进程同时重试
+        let credential_id = format!("{}", bili.login_info.token_info.mid);
+        let upload_lock = Arc::new(Mutex::new(UploadLock::new(&credential_id)
+            .map_err(|e| AppError::Custom(format!("Failed to create upload lock: {}", e)))?));
+
+        // 在开始上传前检查是否有其他进程正在等待限流恢复
+        {
+            let lock = upload_lock.lock().unwrap();
+            if lock.is_locked() {
+                return Err(AppError::Custom(format!(
+                    "另一个使用该账号 ({}) 的上传进程正在等待限流恢复，请稍后重试",
+                    credential_id
+                )).into());
+            }
+        }
+
+        // 用于追踪是否已经尝试获取锁
+        let lock_acquired = Arc::new(Mutex::new(false));
+
+        // 执行上传，遇到限流错误时自动重试
+        let uploader = {
+            let upload_lock_clone = Arc::clone(&upload_lock);
+            let lock_acquired_clone = Arc::clone(&lock_acquired);
+
+            biliup::retry_with_config(
+                || async {
+                    let video_file_clone = VideoFile::new(video_path).map_err(|e| {
+                        Kind::Custom(format!("file {}: {}", video_path.to_string_lossy(), e))
+                    })?;
+                    line.pre_upload(bili, video_file_clone).await
+                },
+                5,
+                Some(move |e: &Kind| {
+                    if matches!(e, Kind::RateLimit { .. }) {
+                        let mut acquired = lock_acquired_clone.lock().unwrap();
+                        if !*acquired {
+                            // 第一次遇到限流错误，尝试获取锁
+                            let mut lock = upload_lock_clone.lock().unwrap();
+                            match lock.try_acquire() {
+                                Ok(true) => {
+                                    info!("检测到限流，成功获取上传锁，将进行重试");
+                                    *acquired = true;
+                                    true
+                                }
+                                Ok(false) => {
+                                    warn!("检测到其他进程正在处理限流，本进程退出");
+                                    false
+                                }
+                                Err(e) => {
+                                    warn!("尝试获取锁时出错: {}", e);
+                                    true // 出错时仍然尝试重试
+                                }
+                            }
+                        } else {
+                            // 已经获取锁，继续重试
+                            true
+                        }
+                    } else {
+                        false
+                    }
+                }),
+            )
+            .await
+            .map_err(|e| match e {
+                Kind::RateLimit { code, message } => AppError::Custom(format!(
+                    "Upload rate limit exceeded after retries (code: {}): {}",
+                    code, message
+                )),
+                _ => AppError::Unknown,
+            })?
+        };
+
+        // 上传成功后释放锁
+        if *lock_acquired.lock().unwrap() {
+            let mut lock = upload_lock.lock().unwrap();
+            let _ = lock.release();
+        }
         //Progress bar
         let pb = ProgressBar::new(total_size);
         pb.set_style(ProgressStyle::default_bar()
