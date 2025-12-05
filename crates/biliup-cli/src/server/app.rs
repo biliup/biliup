@@ -47,7 +47,7 @@ impl ApplicationController {
         );
 
         // 生成用于签名会话cookie的加密密钥
-        let key = Key::generate();
+        // let key = Key::generate();
 
         // 配置会话管理层
         let session_layer = SessionManagerLayer::new(session_store)
@@ -102,7 +102,7 @@ impl ApplicationController {
 
         // 等待会话清理任务完成
         match deletion_task.await {
-            Ok(Ok(val)) => { /* 正常完成 */ }
+            Ok(Ok(())) => { /* 正常完成 */ }
             Ok(Err(e)) => {
                 // 真正业务错误
                 return Err(e).change_context(AppError::Unknown);

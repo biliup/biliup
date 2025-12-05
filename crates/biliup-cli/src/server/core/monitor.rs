@@ -2,10 +2,9 @@ use crate::server::common::download::DownloaderMessage;
 use crate::server::common::util::Recorder;
 use crate::server::core::plugin::{DownloadPlugin, StreamStatus};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
+use crate::server::infrastructure::context::{Context, PluginContext, Stage, Worker, WorkerStatus};
 use crate::server::infrastructure::models::StreamerInfo;
 use async_channel::Sender;
-use futures::SinkExt;
 use ormlite::Model;
 use ormlite::model::ModelBuilder;
 use std::collections::hash_map::Entry;
@@ -23,7 +22,6 @@ pub struct Monitor {
     /// 消息发送器
     sender: tokio::sync::mpsc::Sender<ActorMessage>,
     /// Actor任务句柄
-    kill: JoinHandle<()>,
     pool: ConnectionPool,
     /// 下载消息发送器
     down_sender: Sender<DownloaderMessage>,
@@ -55,11 +53,10 @@ impl Monitor {
         let (sender, receiver) = tokio::sync::mpsc::channel(1);
         let mut actor = RoomsActor::new(receiver);
         // 启动Actor任务
-        let kill = tokio::spawn(async move { actor.run().await });
+        let _kill = tokio::spawn(async move { actor.run().await });
 
         Self {
             sender,
-            kill,
             pool,
             down_sender,
             monitors: Default::default(),
@@ -84,9 +81,9 @@ impl Monitor {
             // 更新状态为等待中
             room.change_status(Stage::Download, WorkerStatus::Pending)
                 .await;
-            let url = room.get_streamer().url;
+            let url = room.get_streamer().url.clone();
             let interval = room.get_config().event_loop_interval;
-            let mut ctx = Context::new(room.clone(), self.pool.clone());
+            let mut ctx = PluginContext::new(room.clone(), self.pool.clone());
             // 检查直播状态
             let mut downloader = plugin.create_downloader(&mut ctx);
             match downloader.check_stream().await {
@@ -98,7 +95,7 @@ impl Monitor {
                         .title(sql_no_id.title.clone())
                         .date(sql_no_id.date)
                         .live_cover_path(sql_no_id.live_cover_path.clone())
-                        .insert(&ctx.pool)
+                        .insert(ctx.pool())
                         .await
                     {
                         Ok(insert) => insert,
@@ -109,28 +106,16 @@ impl Monitor {
                     };
                     info!(url = url, "room: is live -> 开播了");
 
-                    stream_info.streamer_info = insert;
-
-                    let streamer = room.get_streamer();
-                    // 确定文件格式后缀
-                    let suffix = streamer
-                        .format
-                        .unwrap_or_else(|| stream_info.suffix.clone());
-                    // 创建录制器
-                    let recorder = Recorder::new(
-                        streamer
-                            .filename_prefix
-                            .or(room.get_config().filename_prefix.clone()),
-                        stream_info.streamer_info.clone(),
-                        &suffix,
-                    );
                     // 修改 ctx
-                    ctx.stream_info = *stream_info;
-                    ctx.recorder = recorder;
+                    // stream_info.streamer_info = insert;
+                    let context = ctx.to_context(insert.id, *stream_info);
+                    // context
+                    // *ctx.mut_stream_info_ext() = *stream_info;
+
                     // 发送下载开始消息
                     if self
                         .down_sender
-                        .send(DownloaderMessage::Start(downloader, ctx))
+                        .send(DownloaderMessage::Start(downloader, context))
                         .await
                         .is_ok()
                     {
@@ -139,11 +124,11 @@ impl Monitor {
                 }
                 Ok(StreamStatus::Offline) => {
                     self.wake_waker(room.id()).await;
-                    debug!(url = ctx.worker.live_streamer.url, "未开播")
+                    debug!(url = ctx.live_streamer().url, "未开播")
                 }
                 Err(e) => {
                     self.wake_waker(room.id()).await;
-                    error!(e=?e, ctx=ctx.worker.live_streamer.url,"检查直播间出错")
+                    error!(e=?e, ctx=ctx.live_streamer().url,"检查直播间出错")
                 }
             };
             // 等待下一次检查
@@ -407,9 +392,9 @@ impl RoomsActor {
     }
 
     /// 运行Actor主循环
+    /// 处理接收到的消息
     async fn run(&mut self) {
         while let Some(msg) = self.receiver.recv().await {
-            /// 处理接收到的消息
             match msg {
                 ActorMessage::NextRoom {
                     respond_to,

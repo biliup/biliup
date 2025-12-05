@@ -35,6 +35,8 @@ pub struct DownloadConfig {
 
     /// 输出目录路径
     pub output_dir: PathBuf,
+
+    pub suffix: String,
 }
 
 impl DownloadConfig {
@@ -42,8 +44,8 @@ impl DownloadConfig {
     ///
     /// # 返回
     /// 返回完整的输出文件路径
-    fn generate_output_filename(&self) -> PathBuf {
-        self.output_dir.join(self.recorder.generate_path())
+    fn generate_output_filename(&self, suffix: &str) -> PathBuf {
+        self.output_dir.join(self.recorder.generate_path(suffix))
     }
 }
 

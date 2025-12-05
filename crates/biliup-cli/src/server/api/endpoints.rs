@@ -124,7 +124,6 @@ pub async fn put_streamers_endpoint(
 }
 
 pub async fn delete_streamers_endpoint(
-    State(service_register): State<ServiceRegister>,
     State(managers): State<Arc<DownloadManager>>,
     State(pool): State<ConnectionPool>,
     Path(id): Path<i64>,
@@ -138,9 +137,7 @@ pub async fn delete_streamers_endpoint(
 
 // #[axum::debug_handler(state = ServiceRegister)]
 pub async fn pause_streamers_endpoint(
-    State(service_register): State<ServiceRegister>,
     State(managers): State<Arc<DownloadManager>>,
-    State(pool): State<ConnectionPool>,
     Path(id): Path<i64>,
 ) -> Result<Json<()>, Response> {
     let worker = managers.get_room_by_id(id).await;
@@ -580,9 +577,8 @@ pub async fn post_uploads(
                     Utc::now(),
                     "",
                 ),
-                "",
             );
-            let studio = build_studio(&upload_config, &bilibili, videos, recorder).await?;
+            let studio = build_studio(&upload_config, &bilibili, videos, &recorder).await?;
             let response_data =
                 submit_to_bilibili(&bilibili, &studio, submit_api.as_deref()).await?;
             info!("通过页面上传成功 {:?}", response_data);

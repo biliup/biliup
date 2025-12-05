@@ -242,21 +242,15 @@ impl StreamOutput {
         }
     }
 
-    pub fn stop(&mut self) {
+    pub async fn stop(&mut self) {
         info!("准备停止stream terminated");
         let child = match self {
             StreamOutput::Pipe(c) => c,
             StreamOutput::Http { process, .. } => process,
         };
 
-        let _ = child.kill(); // 强制终止
-        let _ = child.wait(); // 回收资源
+        let _ = child.kill().await; // 强制终止
+        let _ = child.wait().await; // 回收资源
         info!("成功stream terminated");
-    }
-}
-
-impl Drop for StreamOutput {
-    fn drop(&mut self) {
-        self.stop()
     }
 }

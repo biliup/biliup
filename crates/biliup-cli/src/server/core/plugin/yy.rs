@@ -1,7 +1,7 @@
 use crate::server::common::util::media_ext_from_url;
 use crate::server::core::plugin::{DownloadBase, DownloadPlugin, StreamInfoExt, StreamStatus};
 use crate::server::errors::AppError;
-use crate::server::infrastructure::context::Context;
+use crate::server::infrastructure::context::{Context, PluginContext};
 use crate::server::infrastructure::models::StreamerInfo;
 use async_trait::async_trait;
 use chrono::Utc;
@@ -177,15 +177,11 @@ impl DownloadPlugin for YY {
         self.re.is_match(url)
     }
 
-    fn create_downloader(&self, ctx: &mut Context) -> Box<dyn DownloadBase> {
-        let url = ctx.worker.live_streamer.url.to_string();
-        let name = ctx.worker.live_streamer.remark.to_string();
+    fn create_downloader(&self, ctx: &mut PluginContext) -> Box<dyn DownloadBase> {
+        let url = ctx.live_streamer().url.to_string();
+        let name = ctx.live_streamer().remark.to_string();
 
-        Box::new(YYDownloader::new(
-            ctx.worker.client.client.clone(),
-            &url,
-            &name,
-        ))
+        Box::new(YYDownloader::new(ctx.client(), &url, &name))
     }
 
     fn name(&self) -> &str {

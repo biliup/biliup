@@ -3,7 +3,7 @@ pub mod yy;
 
 use crate::server::core::downloader::{DanmakuClient, DownloaderRuntime, DownloaderType};
 use crate::server::errors::AppError;
-use crate::server::infrastructure::context::Context;
+use crate::server::infrastructure::context::{Context, PluginContext};
 use crate::server::infrastructure::models::StreamerInfo;
 use async_trait::async_trait;
 use error_stack::Report;
@@ -62,7 +62,7 @@ pub trait DownloadPlugin {
     fn matches(&self, url: &str) -> bool;
 
     /// 创建下载器实例
-    fn create_downloader(&self, ctx: &mut Context) -> Box<dyn DownloadBase>;
+    fn create_downloader(&self, ctx: &mut PluginContext) -> Box<dyn DownloadBase>;
 
     /// 获取插件名称
     fn name(&self) -> &str;

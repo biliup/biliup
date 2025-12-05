@@ -12,7 +12,7 @@ use crate::server::infrastructure::users::{AuthSession, Credentials};
 // to redirect after log in.
 #[derive(Debug, Deserialize)]
 pub struct NextUrl {
-    next: Option<String>,
+    _next: Option<String>,
 }
 
 pub fn router() -> Router<()> {

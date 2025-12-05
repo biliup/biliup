@@ -1,5 +1,6 @@
 use crate::UploadLine;
 use crate::server::common::util::Recorder;
+use crate::server::config::Config;
 use crate::server::core::downloader::SegmentInfo;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
@@ -27,10 +28,9 @@ use tracing::{error, info};
 // 辅助结构体
 struct UploadContext {
     bilibili: BiliBili,
-    client: StatelessClient,
     line: Line,
     threads: usize,
-    upload_config: UploadStreamer,
+    client: StatelessClient,
 }
 
 #[derive(Default)]
@@ -42,31 +42,34 @@ struct UploadedVideos {
 pub async fn process_with_upload<F>(
     rx: Inspect<Receiver<SegmentInfo>, F>,
     ctx: &Context,
-    upload_config: UploadStreamer,
+    upload_config: &UploadStreamer,
 ) -> AppResult<()>
 where
     F: FnMut(&SegmentInfo),
 {
     info!(upload_config=?upload_config, "Starting process with upload");
     // 1. 初始化上传环境
-    let upload_context = initialize_upload_context(&ctx.worker, upload_config).await?;
+    let upload_context =
+        initialize_upload_context(&ctx.config(), &ctx.stateless_client(), upload_config).await?;
 
     // 2. 流水线处理视频上传
     let uploaded_videos = pipeline_upload_videos(rx, &upload_context).await?;
 
     // 3. 提交到B站
     if !uploaded_videos.videos.is_empty() {
-        let mut recorder = ctx.recorder.clone();
-        recorder.filename_prefix = upload_context.upload_config.title.clone();
+        let mut recorder = ctx
+            .recorder(ctx.stream_info_ext().streamer_info.clone())
+            .clone();
+        recorder.filename_prefix = upload_config.title.clone();
 
         let studio = build_studio(
-            &upload_context.upload_config,
+            &upload_config,
             &upload_context.bilibili,
             uploaded_videos.videos,
-            recorder,
+            &recorder,
         )
         .await?;
-        let submit_api = ctx.worker.get_config().submit_api.clone();
+        let submit_api = ctx.config().submit_api.clone();
         submit_to_bilibili(&upload_context.bilibili, &studio, submit_api.as_deref()).await?;
     }
 
@@ -79,8 +82,9 @@ where
 }
 
 async fn initialize_upload_context(
-    worker: &Worker,
-    upload_config: UploadStreamer,
+    config: &Config,
+    client: &StatelessClient,
+    upload_config: &UploadStreamer,
 ) -> AppResult<UploadContext> {
     // 登录处理
     let cookie_file = upload_config
@@ -90,21 +94,19 @@ async fn initialize_upload_context(
     let bilibili = login_by_cookies(&cookie_file, None)
         .await
         .change_context(AppError::Unknown)?;
-    let config = worker.get_config();
 
     // 获取上传线路
-    let line = get_upload_line(&worker.client, &config.lines).await?;
+    let line = get_upload_line(&client.client, &config.lines).await?;
 
     Ok(UploadContext {
         bilibili,
-        client: worker.client.clone(),
         line,
-        threads: worker.get_config().threads as usize,
-        upload_config,
+        threads: config.threads as usize,
+        client: client.clone(),
     })
 }
 
-async fn get_upload_line(client: &StatelessClient, line: &str) -> AppResult<Line> {
+async fn get_upload_line(client: &reqwest::Client, line: &str) -> AppResult<Line> {
     let line = match line {
         "bda2" => line::bda2(),
         "bda" => line::bda(),
@@ -112,7 +114,7 @@ async fn get_upload_line(client: &StatelessClient, line: &str) -> AppResult<Line
         "txa" => line::txa(),
         "bldsa" => line::bldsa(),
         "alia" => line::alia(),
-        _ => Probe::probe(&client.client).await.unwrap_or_default(),
+        _ => Probe::probe(client).await.unwrap_or_default(),
     };
     Ok(line)
 }
@@ -147,11 +149,13 @@ where
 }
 
 async fn upload_single_file(file_path: &Path, context: &UploadContext) -> AppResult<Video> {
-    let bilibili = &context.bilibili;
-    let limit = context.threads;
-    let client = &context.client;
-    let line = &context.line;
     let video_path = file_path;
+    let UploadContext {
+        bilibili,
+        line,
+        threads: limit,
+        client,
+    } = context;
 
     info!(
         "开始上传文件：{:?}",
@@ -172,7 +176,7 @@ async fn upload_single_file(file_path: &Path, context: &UploadContext) -> AppRes
     let instant = Instant::now();
 
     let video = uploader
-        .upload(client.clone(), limit, |vs| {
+        .upload(client.clone(), *limit, |vs| {
             vs.map(|vs| {
                 let chunk = vs?;
                 let len = chunk.len();
@@ -230,7 +234,7 @@ pub(crate) async fn build_studio(
     upload_config: &UploadStreamer,
     bilibili: &BiliBili,
     videos: Vec<Video>,
-    recorder: Recorder,
+    recorder: &Recorder,
 ) -> AppResult<Studio> {
     // 使用 Builder 模式简化构建
     let mut studio: Studio = Studio::builder()
@@ -275,9 +279,9 @@ pub(crate) async fn build_studio(
 }
 
 pub async fn execute_postprocessor(video_paths: Vec<PathBuf>, ctx: &Context) -> AppResult<()> {
-    if let Some(processor) = ctx.worker.get_streamer().postprocessor {
+    if let Some(processor) = &ctx.live_streamer().postprocessor {
         let paths: Vec<&Path> = video_paths.iter().map(|p| p.as_path()).collect();
-        process_video(&paths, &processor).await?;
+        process_video(&paths, processor).await?;
     }
     Ok(())
 }
@@ -388,12 +392,11 @@ impl UActor {
     async fn handle_message(&mut self, msg: UploaderMessage) {
         match msg {
             UploaderMessage::SegmentEvent(rx, ctx) => {
-                ctx.worker
-                    .change_status(Stage::Upload, WorkerStatus::Pending)
+                ctx.change_status(Stage::Upload, WorkerStatus::Pending)
                     .await;
                 let inspect = rx.inspect(|f| {
-                    let pool = ctx.pool.clone();
-                    let streamer_info_id = ctx.stream_info.streamer_info.id;
+                    let pool = ctx.pool().clone();
+                    let streamer_info_id = ctx.id();
                     let file = f.prev_file_path.display().to_string();
                     tokio::spawn(async move {
                         let result = InsertFileItem {
@@ -405,7 +408,7 @@ impl UActor {
                         info!(result=?result, "Insert file");
                     });
                 });
-                let result = match ctx.worker.get_upload_config() {
+                let result = match ctx.upload_config() {
                     Some(config) => process_with_upload(inspect, &ctx, config).await,
                     None => {
                         let mut paths = Vec::new();
@@ -422,10 +425,8 @@ impl UActor {
                     error!("Process segment event failed: {}", e);
                     // 可以添加错误通知机制
                 }
-                info!(url=ctx.stream_info.streamer_info.url, result=?result, "后处理执行完毕：Finished processing segment event");
-                ctx.worker
-                    .change_status(Stage::Upload, WorkerStatus::Idle)
-                    .await;
+                info!(url=ctx.live_streamer().url, result=?result, "后处理执行完毕：Finished processing segment event");
+                ctx.change_status(Stage::Upload, WorkerStatus::Idle).await;
             }
         }
     }

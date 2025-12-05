@@ -15,8 +15,6 @@ use tracing::info;
 /// FFmpeg下载器实现
 /// 使用FFmpeg进行直播流下载，支持内部和外部分段
 pub struct FfmpegDownloader {
-    /// 下载状态
-    status: Arc<RwLock<DownloadStatus>>,
     /// 进程句柄
     process_handle: Arc<RwLock<Option<tokio::process::Child>>>,
 
@@ -37,7 +35,6 @@ impl FfmpegDownloader {
     /// * `downloader_type` - 下载器类型
     pub fn new(extra_args: Vec<String>, downloader_type: DownloaderType) -> Self {
         Self {
-            status: Arc::new(RwLock::new(DownloadStatus::Downloading)),
             process_handle: Arc::new(RwLock::new(None)),
             extra_args,
             downloader_type,
@@ -60,7 +57,7 @@ impl FfmpegDownloader {
         args.extend(["-f".to_string(), "segment".to_string()]);
         args.extend([
             "-segment_format".to_string(),
-            download_config.recorder.suffix.to_string(),
+            download_config.suffix.to_string(),
         ]);
         // -segment_list pipe:1: 将分段文件名输出到stdout
         // 这样我们可以实时获取新生成的分段文件
@@ -113,7 +110,7 @@ impl FfmpegDownloader {
         }
 
         // 添加通用输出参数
-        self.append_common_output_args(&mut args, &download_config.recorder.suffix);
+        self.append_common_output_args(&mut args, &download_config.suffix);
 
         args
     }
@@ -194,7 +191,7 @@ impl FfmpegDownloader {
         download_config: DownloadConfig,
     ) -> AppResult<DownloadStatus> {
         let args = self.build_ffmpeg_args_external_segment(&download_config);
-        let output_file = download_config.generate_output_filename();
+        let output_file = download_config.generate_output_filename(&download_config.suffix);
 
         let mut cmd = Command::new("ffmpeg");
         cmd.args(&args)
@@ -243,7 +240,7 @@ impl FfmpegDownloader {
             .arg(format!(
                 "{}.{}.part",
                 download_config.recorder.filename_template(),
-                download_config.recorder.suffix
+                download_config.suffix
             ))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

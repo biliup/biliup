@@ -5,7 +5,7 @@ use crate::server::core::downloader::streamlink::{Platform, Streamlink, Streamli
 use crate::server::core::downloader::{DanmakuClient, DownloaderRuntime, DownloaderType};
 use crate::server::core::plugin::{DownloadBase, DownloadPlugin, StreamInfoExt, StreamStatus};
 use crate::server::errors::{AppError, AppResult};
-use crate::server::infrastructure::context::Context;
+use crate::server::infrastructure::context::{Context, PluginContext};
 use crate::server::infrastructure::models::StreamerInfo;
 use async_trait::async_trait;
 use chrono::Utc;
@@ -68,10 +68,10 @@ impl DownloadPlugin for Twitch {
         self.re.is_match(url)
     }
 
-    fn create_downloader(&self, ctx: &mut Context) -> Box<dyn DownloadBase> {
+    fn create_downloader(&self, ctx: &mut PluginContext) -> Box<dyn DownloadBase> {
         Box::new(TwitchDownloader::new(
-            &ctx.worker.live_streamer.remark,
-            ctx.worker.live_streamer.url.clone(),
+            &ctx.live_streamer().remark,
+            ctx.live_streamer().url.clone(),
             self.re.clone(),
         ))
     }

@@ -1,4 +1,4 @@
-use crate::server::config::{Config, ConfigPatch};
+use crate::server::config::ConfigPatch;
 use crate::server::infrastructure::models::hook_step::HookStep;
 use ormlite::{Insert, Model};
 use serde::{Deserialize, Serialize};

@@ -11,16 +11,13 @@ pub struct Recorder {
     pub filename_prefix: Option<String>,
     /// 直播间信息
     pub streamer_info: StreamerInfo,
-    /// 录制后保存文件格式 (mp4, ts, mkv, flv)，不含点
-    pub suffix: String,
 }
 
 impl Recorder {
-    pub fn new(filename_prefix: Option<String>, streamer_info: StreamerInfo, suffix: &str) -> Self {
+    pub fn new(filename_prefix: Option<String>, streamer_info: StreamerInfo) -> Self {
         Self {
             filename_prefix,
             streamer_info,
-            suffix: suffix.to_string(),
         }
     }
 
@@ -42,13 +39,13 @@ impl Recorder {
     }
 
     /// 生成“基名”（不带扩展名），时间冲突时按秒+1继续尝试，直到唯一
-    pub fn generate_filename(&self) -> String {
+    pub fn generate_filename(&self, suffix: &str) -> String {
         let template = self.filename_template();
         let mut t = Local::now();
 
         loop {
             let base = t.format(&template).to_string();
-            if !self.exists_with_suffix(&base) {
+            if !self.exists_with_suffix(&base, suffix) {
                 return base;
             }
             t += Duration::seconds(1);
@@ -74,12 +71,12 @@ impl Recorder {
     }
 
     /// 直接生成带扩展名的完整路径（当前目录下）
-    pub fn generate_path(&self) -> PathBuf {
-        PathBuf::from(self.generate_filename()).with_extension(&self.suffix)
+    pub fn generate_path(&self, suffix: &str) -> PathBuf {
+        PathBuf::from(self.generate_filename(suffix)).with_extension(suffix)
     }
 
-    fn exists_with_suffix(&self, base: &str) -> bool {
-        Path::new(base).with_extension(&self.suffix).exists()
+    fn exists_with_suffix(&self, base: &str, suffix: &str) -> bool {
+        Path::new(base).with_extension(&suffix).exists()
     }
 }
 

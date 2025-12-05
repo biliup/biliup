@@ -11,7 +11,7 @@ use biliup_cli::server::core::downloader::DanmakuClient;
 use biliup_cli::server::core::plugin::{DownloadBase, DownloadPlugin, StreamInfoExt, StreamStatus};
 use biliup_cli::server::errors::{AppError, AppResult};
 use biliup_cli::server::infrastructure::connection_pool::ConnectionManager;
-use biliup_cli::server::infrastructure::context::{Context, Worker};
+use biliup_cli::server::infrastructure::context::{Context, PluginContext, Worker};
 use biliup_cli::server::infrastructure::models::StreamerInfo;
 use biliup_cli::server::infrastructure::repositories;
 use biliup_cli::server::infrastructure::repositories::get_upload_config;
@@ -19,7 +19,7 @@ use biliup_cli::server::infrastructure::service_register::ServiceRegister;
 use biliup_cli::uploader::{append, list, login, renew, show, upload_by_command, upload_by_config};
 use chrono::Utc;
 use clap::Parser;
-use error_stack::{FutureExt, Report, ResultExt};
+use error_stack::{Report, ResultExt};
 use fancy_regex::Regex;
 use pyo3::prelude::PyDictMethods;
 use pyo3::prelude::{PyAnyMethods, PyListMethods, PyModule};
@@ -135,7 +135,7 @@ impl PyDownloader {
                                 self_obj.getattr("stream_headers")?.extract()?
                             };
 
-                            let danmaku_init = self_obj.call_method0("danmaku_init")?;
+                            let _danmaku_init = self_obj.call_method0("danmaku_init")?;
                             // let platform: Option<PyAny> = self_obj.getattr("danmaku")?.extract()?;
                             // danmaku 可能在条件下没有设置（比如 bilibili_danmaku 为 False）
                             let self_danmaku = self_obj.getattr("danmaku")?;
@@ -197,14 +197,14 @@ impl DownloadPlugin for PyPlugin {
         false
     }
 
-    fn create_downloader(&self, ctx: &mut Context) -> Box<dyn DownloadBase> {
-        let url = ctx.worker.live_streamer.url.to_string();
-        let remark = ctx.worker.live_streamer.remark.to_string();
+    fn create_downloader(&self, ctx: &mut PluginContext) -> Box<dyn DownloadBase> {
+        let url = ctx.live_streamer().url.to_string();
+        let remark = ctx.live_streamer().remark.to_string();
         Box::new(PyDownloader::new(
             self.plugin.clone(),
             url,
             remark,
-            ctx.worker.get_config(),
+            ctx.config(),
         ))
     }
 
