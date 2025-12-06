@@ -95,6 +95,7 @@ class Douyu(DownloadBase):
         # 提到 self 以供 hack 功能使用
         self.__req_query = {
             'cdn': self.douyu_cdn,
+            # 'cdn': "akm-h5",
             'rate': str(self.douyu_rate),
             'ver': '219032101',
             'iar': '0', # ispreload? 1: 忽略 rate 参数，使用默认画质
@@ -297,10 +298,10 @@ class Douyu(DownloadBase):
                     i = "1"
                 return f"dyliveflv{i}"
             return app_name
-        list = url.split('?')
-        query = {k: v[0] for k, v in parse_qs(list[1]).items()}
-        stream_id = list[0].split('/')[-1].split('.')[0].split('_')[0]
-        rtmp_url = list[0].split(stream_id)[0]
+        base_url, params, *_ = url.split('?')
+        query = {k: v[0] for k, v in parse_qs(params).items()}
+        stream_id = match1(base_url, rf"\/({self.room_id}[^\._/]+)")
+        rtmp_url = url.split(stream_id)[0]
         return get_tx_app_name(rtmp_url[:-1]), stream_id, query
 
 
@@ -340,6 +341,7 @@ class Douyu(DownloadBase):
         :param is_tct: 是否为 tct 流
         return: fake_hs_host, hs_cname_url
         '''
+        logger.debug(f"build_hs_url: build from {url}")
         tx_app_name, stream_id, query = self.parse_stream_info(url)
         # 必须从 tct 转 hs
         if not is_tct:
