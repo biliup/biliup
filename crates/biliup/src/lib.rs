@@ -17,12 +17,33 @@ where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<O, E>>,
 {
-    let mut retries = 3;
+    retry_with_config(f, 3, None::<fn(&E) -> bool>).await
+}
+
+pub async fn retry_with_config<F, Fut, O, E, P>(
+    mut f: F,
+    max_retries: usize,
+    should_retry: Option<P>,
+) -> Result<O, E>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<O, E>>,
+    E: std::fmt::Display,
+    P: Fn(&E) -> bool,
+{
+    let mut retries = max_retries;
     let mut wait = 1;
     let mut jittered_wait_for;
     loop {
         match f().await {
             Err(e) if retries > 0 => {
+                // 如果提供了 should_retry 条件，检查是否应该重试
+                if let Some(ref predicate) = should_retry {
+                    if !predicate(&e) {
+                        break Err(e);
+                    }
+                }
+
                 retries -= 1;
                 let jitter_factor =
                     UniformFloat::<f64>::sample_single(0., 1., &mut rand::thread_rng());
@@ -31,7 +52,7 @@ where
                 jittered_wait_for = f64::min(jitter_factor + (wait as f64), 64.);
                 info!(
                     "Retry attempt #{}. Sleeping {:?} before the next attempt. {e}",
-                    3 - retries,
+                    max_retries - retries,
                     jittered_wait_for
                 );
                 sleep(Duration::from_secs_f64(jittered_wait_for)).await;

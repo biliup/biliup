@@ -8,11 +8,11 @@ use serde_json::json;
 use std::ffi::OsStr;
 
 use crate::client::StatelessClient;
-use crate::error::Kind::Custom;
+use crate::error::Kind::{Custom, RateLimit};
 use crate::uploader::bilibili::{BiliBili, Video};
 use crate::uploader::line::upos::Upos;
 use std::time::Instant;
-use tracing::info;
+use tracing::{info, warn};
 
 pub mod upos;
 
@@ -57,12 +57,19 @@ impl Parcel {
         };
 
         if video.title.is_none() {
-            video.title = self
+            if let Some(filename) = self
                 .video_file
                 .filepath
                 .file_stem()
                 .and_then(OsStr::to_str)
-                .map(|s| s.to_string())
+            {
+                // B站限制分P视频标题不能超过80字符，需要截断
+                video.title = Some(if filename.chars().count() >= 80 {
+                    Video::truncate_title(filename, 80)
+                } else {
+                    filename.to_string()
+                });
+            }
         };
         Ok(video)
     }
@@ -146,6 +153,7 @@ impl Line {
             "size": total_size,
         });
         info!("pre_upload: {}", params);
+
         let response = bili
             .client
             .get(format!(
@@ -155,12 +163,31 @@ impl Line {
             .query(&params)
             .send()
             .await?;
+
         if !response.status().is_success() {
+            let response_text = response.text().await?;
+
+            // 尝试解析JSON错误响应，检测限流错误（code: 601）
+            if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&response_text) {
+                if let Some(code) = error_json.get("code").and_then(|c| c.as_i64()) {
+                    if code == 601 {
+                        let message = error_json
+                            .get("message")
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("上传过快")
+                            .to_string();
+                        // 直接返回限流错误，让调用方决定如何处理
+                        return Err(RateLimit { code, message });
+                    }
+                }
+            }
+
             return Err(Custom(format!(
                 "Failed to pre_upload from {}",
-                response.text().await?
+                response_text
             )));
         }
+
         match self.os {
             Uploader::Upos => Ok(Parcel {
                 line: Bucket::Upos(response.json().await?),

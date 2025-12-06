@@ -176,14 +176,22 @@ impl Cos {
         if !res.status().is_success() {
             return Err(Kind::Custom(res.text().await?));
         }
+        let filename = Path::new(&self.bucket.bili_filename)
+            .file_stem()
+            .unwrap()
+            .to_str()
+            .unwrap();
+
+        // B站限制分P视频标题不能超过80字符，需要截断filename字段
+        let truncated_filename = if filename.chars().count() >= 80 {
+            Video::truncate_title(filename, 80)
+        } else {
+            filename.to_string()
+        };
+
         Ok(Video {
             title: None,
-            filename: Path::new(&self.bucket.bili_filename)
-                .file_stem()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .into(),
+            filename: truncated_filename,
             desc: "".into(),
         })
     }

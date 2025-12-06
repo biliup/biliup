@@ -1,5 +1,6 @@
 use crate::UploadLine;
 use crate::server::errors::{AppError, AppResult};
+use crate::upload_lock::UploadLock;
 use biliup::client::StatelessClient;
 use biliup::error::Kind;
 use biliup::uploader::bilibili::{BiliBili, Studio, Vid, Video};
@@ -23,9 +24,52 @@ use std::ffi::OsStr;
 use std::io::Seek;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 use std::task::Poll;
 use std::time::Instant;
 use tracing::{info, warn};
+use serde::{Serialize, Deserialize};
+
+// 断点续传的数据结构
+#[derive(Serialize, Deserialize, Debug)]
+struct UploadCheckpoint {
+    videos: Vec<Video>,
+    uploaded_files: Vec<String>,
+}
+
+impl UploadCheckpoint {
+    fn new() -> Self {
+        Self {
+            videos: Vec::new(),
+            uploaded_files: Vec::new(),
+        }
+    }
+
+    fn load(path: &Path) -> Option<Self> {
+        if !path.exists() {
+            return None;
+        }
+        match std::fs::read_to_string(path) {
+            Ok(content) => serde_json::from_str(&content).ok(),
+            Err(_) => None,
+        }
+    }
+
+    fn save(&self, path: &Path) -> std::io::Result<()> {
+        let content = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, content)
+    }
+
+    fn is_uploaded(&self, file_path: &Path) -> bool {
+        let file_name = file_path.to_string_lossy().to_string();
+        self.uploaded_files.contains(&file_name)
+    }
+
+    fn add_video(&mut self, file_path: &Path, video: Video) {
+        self.videos.push(video);
+        self.uploaded_files.push(file_path.to_string_lossy().to_string());
+    }
+}
 
 pub async fn login(user_cookie: PathBuf, proxy: Option<&str>) -> AppResult<()> {
     let client = Credential::new(proxy);
@@ -286,7 +330,37 @@ pub async fn upload(
     limit: usize,
 ) -> AppResult<Vec<Video>> {
     info!("number of concurrent futures: {limit}");
-    let mut videos = Vec::new();
+
+    // 生成断点续传文件路径（基于视频列表的哈希）
+    let checkpoint_filename = format!(
+        "biliup_checkpoint_{}.json",
+        video_path.iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect::<Vec<_>>()
+            .join("_")
+            .chars()
+            .fold(0u64, |acc, c| acc.wrapping_mul(31).wrapping_add(c as u64))
+    );
+
+    // 使用平台相关的本地数据目录，Windows 下是 %LOCALAPPDATA%，Linux/macOS 下是 /tmp
+    let checkpoint_path = if let Some(data_dir) = dirs::data_local_dir() {
+        data_dir.join(checkpoint_filename)
+    } else {
+        // 如果无法获取数据目录，回退到临时目录
+        std::env::temp_dir().join(checkpoint_filename)
+    };
+
+    // 尝试加载已有的断点续传数据
+    let mut checkpoint = UploadCheckpoint::load(&checkpoint_path).unwrap_or_else(|| {
+        info!("No checkpoint found, starting fresh upload");
+        UploadCheckpoint::new()
+    });
+
+    if !checkpoint.uploaded_files.is_empty() {
+        info!("Found checkpoint with {} uploaded files, resuming...", checkpoint.uploaded_files.len());
+    }
+
+    let mut videos = checkpoint.videos.clone();
     let client = StatelessClient::default();
     let line = match line {
         Some(UploadLine::Bldsa) => line::bldsa(),
@@ -308,16 +382,97 @@ pub async fn upload(
     };
     // let line = line::kodo();
     for video_path in video_path {
+        // 检查文件是否已经上传
+        if checkpoint.is_uploaded(video_path) {
+            info!("Skipping already uploaded file: {}", video_path.display());
+            continue;
+        }
+
         info!("{line:?}");
         let video_file = VideoFile::new(video_path).change_context_lazy(|| {
             AppError::Custom(format!("file {}", video_path.to_string_lossy()))
         })?;
         let total_size = video_file.total_size;
         let file_name = video_file.file_name.clone();
-        let uploader = line
-            .pre_upload(bili, video_file)
+
+        // 使用通用的 retry 函数处理限流错误（code: 601）
+        // 配合账号级互斥锁防止多进程同时重试
+        let credential_id = format!("{}", bili.login_info.token_info.mid);
+        let upload_lock = Arc::new(Mutex::new(UploadLock::new(&credential_id)
+            .map_err(|e| AppError::Custom(format!("Failed to create upload lock: {}", e)))?));
+
+        // 在开始上传前检查是否有其他进程正在等待限流恢复
+        {
+            let lock = upload_lock.lock().unwrap();
+            if lock.is_locked() {
+                return Err(AppError::Custom(format!(
+                    "另一个使用该账号 ({}) 的上传进程正在等待限流恢复，请稍后重试",
+                    credential_id
+                )).into());
+            }
+        }
+
+        // 用于追踪是否已经尝试获取锁
+        let lock_acquired = Arc::new(Mutex::new(false));
+
+        // 执行上传，遇到限流错误时自动重试
+        let uploader = {
+            let upload_lock_clone = Arc::clone(&upload_lock);
+            let lock_acquired_clone = Arc::clone(&lock_acquired);
+
+            biliup::retry_with_config(
+                || async {
+                    let video_file_clone = VideoFile::new(video_path).map_err(|e| {
+                        Kind::Custom(format!("file {}: {}", video_path.to_string_lossy(), e))
+                    })?;
+                    line.pre_upload(bili, video_file_clone).await
+                },
+                5,
+                Some(move |e: &Kind| {
+                    if matches!(e, Kind::RateLimit { .. }) {
+                        let mut acquired = lock_acquired_clone.lock().unwrap();
+                        if !*acquired {
+                            // 第一次遇到限流错误，尝试获取锁
+                            let mut lock = upload_lock_clone.lock().unwrap();
+                            match lock.try_acquire() {
+                                Ok(true) => {
+                                    info!("检测到限流，成功获取上传锁，将进行重试");
+                                    *acquired = true;
+                                    true
+                                }
+                                Ok(false) => {
+                                    warn!("检测到其他进程正在处理限流，本进程退出");
+                                    false
+                                }
+                                Err(e) => {
+                                    warn!("尝试获取锁时出错: {}", e);
+                                    true // 出错时仍然尝试重试
+                                }
+                            }
+                        } else {
+                            // 已经获取锁，继续重试
+                            true
+                        }
+                    } else {
+                        false
+                    }
+                }),
+            )
             .await
-            .change_context_lazy(|| AppError::Unknown)?;
+            .map_err(|e| match e {
+                Kind::RateLimit { code, message } => AppError::Custom(format!(
+                    "Upload rate limit exceeded after retries (code: {}): {}",
+                    code, message
+                )),
+                _ => AppError::Unknown,
+            })?
+        };
+
+        // 上传成功后释放锁
+        if *lock_acquired.lock().unwrap() {
+            let mut lock = upload_lock.lock().unwrap();
+            let _ = lock.release();
+        }
         //Progress bar
         let pb = ProgressBar::new(total_size);
         pb.set_style(ProgressStyle::default_bar()
@@ -345,8 +500,24 @@ pub async fn upload(
             t as f64 / 1000.,
             total_size as f64 / 1000. / t as f64
         );
+
+        // 保存断点续传信息
+        checkpoint.add_video(video_path, video.clone());
+        if let Err(e) = checkpoint.save(&checkpoint_path) {
+            warn!("Failed to save checkpoint: {}", e);
+        } else {
+            info!("Checkpoint saved: {} files uploaded", checkpoint.uploaded_files.len());
+        }
+
         videos.push(video);
     }
+
+    // 上传完成后删除断点续传文件
+    if checkpoint_path.exists() {
+        let _ = std::fs::remove_file(&checkpoint_path);
+        info!("All files uploaded successfully, checkpoint removed");
+    }
+
     Ok(videos)
 }
 

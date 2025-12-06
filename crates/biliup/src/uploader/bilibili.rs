@@ -197,7 +197,7 @@ pub struct Credit {
     pub biz_id: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Video {
     pub title: Option<String>,
     pub filename: String,
@@ -211,6 +211,19 @@ impl Video {
             filename: filename.into(),
             desc: "".into(),
         }
+    }
+
+    /// 截断标题到指定的最大字符数（默认80个字符，B站限制）
+    pub fn truncate_title(title: &str, max_chars: usize) -> String {
+        // 统计字符数（不是字节数）
+        let char_count = title.chars().count();
+        if char_count <= max_chars {
+            return title.to_string();
+        }
+
+        // 截断到max_chars-3个字符，然后添加"..."
+        let truncated: String = title.chars().take(max_chars - 3).collect();
+        format!("{}...", truncated)
     }
 }
 
