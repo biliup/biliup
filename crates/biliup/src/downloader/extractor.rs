@@ -58,7 +58,7 @@ impl Site {
         &mut self,
         fmt_file_name: &str,
         segment: Segmentable,
-        hook: Option<CallbackFn<'_>>,
+        _hook: Option<CallbackFn<'_>>,
     ) -> downloader::error::Result<()> {
         let fmt_file_name = fmt_file_name.replace("{title}", &self.title);
         self.client

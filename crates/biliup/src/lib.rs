@@ -12,7 +12,7 @@ pub mod uploader;
 pub use uploader::bilibili;
 pub use uploader::credential;
 
-pub async fn retry<F, Fut, O, E: std::fmt::Display>(mut f: F) -> Result<O, E>
+pub async fn retry<F, Fut, O, E: std::fmt::Display>(f: F) -> Result<O, E>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<O, E>>,
@@ -38,11 +38,10 @@ where
         match f().await {
             Err(e) if retries > 0 => {
                 // 如果提供了 should_retry 条件，检查是否应该重试
-                if let Some(ref predicate) = should_retry {
-                    if !predicate(&e) {
+                if let Some(ref predicate) = should_retry
+                    && !predicate(&e) {
                         break Err(e);
                     }
-                }
 
                 retries -= 1;
                 let jitter_factor =

@@ -12,7 +12,7 @@ use crate::error::Kind::{Custom, RateLimit};
 use crate::uploader::bilibili::{BiliBili, Video};
 use crate::uploader::line::upos::Upos;
 use std::time::Instant;
-use tracing::{info, warn};
+use tracing::info;
 
 pub mod upos;
 
@@ -56,16 +56,15 @@ impl Parcel {
             }
         };
 
-        if video.title.is_none() {
-            if let Some(filename) = self.video_file.filepath.file_stem().and_then(OsStr::to_str) {
+        if video.title.is_none()
+            && let Some(filename) = self.video_file.filepath.file_stem().and_then(OsStr::to_str) {
                 // B站限制分P视频标题不能超过80字符，需要截断
                 video.title = Some(if filename.chars().count() >= 80 {
                     Video::truncate_title(filename, 80)
                 } else {
                     filename.to_string()
                 });
-            }
-        };
+            };
         Ok(video)
     }
 }
@@ -163,9 +162,9 @@ impl Line {
             let response_text = response.text().await?;
 
             // 尝试解析JSON错误响应，检测限流错误（code: 601）
-            if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&response_text) {
-                if let Some(code) = error_json.get("code").and_then(|c| c.as_i64()) {
-                    if code == 601 {
+            if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&response_text)
+                && let Some(code) = error_json.get("code").and_then(|c| c.as_i64())
+                    && code == 601 {
                         let message = error_json
                             .get("message")
                             .and_then(|m| m.as_str())
@@ -174,8 +173,6 @@ impl Line {
                         // 直接返回限流错误，让调用方决定如何处理
                         return Err(RateLimit { code, message });
                     }
-                }
-            }
 
             return Err(Custom(format!(
                 "Failed to pre_upload from {}",
