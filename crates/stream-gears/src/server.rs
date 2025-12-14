@@ -31,6 +31,7 @@ use pythonize::pythonize;
 use std::collections::HashMap;
 use std::net::ToSocketAddrs;
 use std::ops::Deref;
+use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, RwLock};
 use time::macros::format_description;
 use tracing::{debug, info, warn};
@@ -68,6 +69,7 @@ pub struct PyDownloader {
     url: String,
     remark: String,
     danmaku: Option<Arc<Py<PyAny>>>,
+
     cfg: OnceConfig,
 }
 
@@ -123,7 +125,7 @@ impl PyDownloader {
                                 self_obj.getattr("raw_stream_url")?.extract()?;
                             let title: String = self_obj.getattr("room_title")?.extract()?;
                             let live_cover_path: Option<String> =
-                                self_obj.getattr("live_cover_path")?.extract()?;
+                                self_obj.getattr("live_cover_url")?.extract()?;
                             let _is_download: bool = self_obj.getattr("is_download")?.extract()?;
                             let platform: String = self_obj.getattr("platform")?.extract()?;
 

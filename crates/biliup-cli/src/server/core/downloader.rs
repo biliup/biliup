@@ -1,3 +1,4 @@
+pub mod cover_downloader;
 /// FFmpeg下载器实现
 pub mod ffmpeg_downloader;
 /// Stream-gears下载器实现

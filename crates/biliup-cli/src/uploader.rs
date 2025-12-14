@@ -20,6 +20,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use qrcode::QrCode;
 use qrcode::render::unicode;
 use reqwest::Body;
+use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 use std::io::Seek;
 use std::path::{Path, PathBuf};
@@ -28,7 +29,6 @@ use std::sync::{Arc, Mutex};
 use std::task::Poll;
 use std::time::Instant;
 use tracing::{info, warn};
-use serde::{Serialize, Deserialize};
 
 // 断点续传的数据结构
 #[derive(Serialize, Deserialize, Debug)]
@@ -67,7 +67,8 @@ impl UploadCheckpoint {
 
     fn add_video(&mut self, file_path: &Path, video: Video) {
         self.videos.push(video);
-        self.uploaded_files.push(file_path.to_string_lossy().to_string());
+        self.uploaded_files
+            .push(file_path.to_string_lossy().to_string());
     }
 }
 
@@ -292,13 +293,15 @@ async fn login_by_cookies(user_cookie: PathBuf, proxy: Option<&str>) -> AppResul
         })?,
         _ => {
             let bili = result.change_context_lazy(|| AppError::Unknown)?;
+            let info = bili
+                .my_info()
+                .await
+                .change_context_lazy(|| AppError::Unknown)?;
             info!(
                 "user: {}",
-                bili.my_info()
-                    .await
-                    .change_context_lazy(|| AppError::Unknown)?["data"]["name"]
+                info["data"]["name"]
                     .as_str()
-                    .unwrap_or_default()
+                    .ok_or_else(|| AppError::Custom(format!("{info}no name")))?
             );
             bili
         }
@@ -334,7 +337,8 @@ pub async fn upload(
     // 生成断点续传文件路径（基于视频列表的哈希）
     let checkpoint_filename = format!(
         "biliup_checkpoint_{}.json",
-        video_path.iter()
+        video_path
+            .iter()
             .map(|p| p.to_string_lossy().to_string())
             .collect::<Vec<_>>()
             .join("_")
@@ -357,7 +361,10 @@ pub async fn upload(
     });
 
     if !checkpoint.uploaded_files.is_empty() {
-        info!("Found checkpoint with {} uploaded files, resuming...", checkpoint.uploaded_files.len());
+        info!(
+            "Found checkpoint with {} uploaded files, resuming...",
+            checkpoint.uploaded_files.len()
+        );
     }
 
     let mut videos = checkpoint.videos.clone();
@@ -398,8 +405,10 @@ pub async fn upload(
         // 使用通用的 retry 函数处理限流错误（code: 601）
         // 配合账号级互斥锁防止多进程同时重试
         let credential_id = format!("{}", bili.login_info.token_info.mid);
-        let upload_lock = Arc::new(Mutex::new(UploadLock::new(&credential_id)
-            .map_err(|e| AppError::Custom(format!("Failed to create upload lock: {}", e)))?));
+        let upload_lock = Arc::new(Mutex::new(
+            UploadLock::new(&credential_id)
+                .map_err(|e| AppError::Custom(format!("Failed to create upload lock: {}", e)))?,
+        ));
 
         // 在开始上传前检查是否有其他进程正在等待限流恢复
         {
@@ -408,7 +417,8 @@ pub async fn upload(
                 return Err(AppError::Custom(format!(
                     "另一个使用该账号 ({}) 的上传进程正在等待限流恢复，请稍后重试",
                     credential_id
-                )).into());
+                ))
+                .into());
             }
         }
 
@@ -459,13 +469,7 @@ pub async fn upload(
                 }),
             )
             .await
-            .map_err(|e| match e {
-                Kind::RateLimit { code, message } => AppError::Custom(format!(
-                    "Upload rate limit exceeded after retries (code: {}): {}",
-                    code, message
-                )),
-                _ => AppError::Unknown,
-            })?
+            .change_context_lazy(|| AppError::Custom("after retries".to_owned()))?
         };
 
         // 上传成功后释放锁
@@ -506,7 +510,10 @@ pub async fn upload(
         if let Err(e) = checkpoint.save(&checkpoint_path) {
             warn!("Failed to save checkpoint: {}", e);
         } else {
-            info!("Checkpoint saved: {} files uploaded", checkpoint.uploaded_files.len());
+            info!(
+                "Checkpoint saved: {} files uploaded",
+                checkpoint.uploaded_files.len()
+            );
         }
 
         videos.push(video);

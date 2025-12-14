@@ -41,7 +41,7 @@ impl HookStep {
             }
             HookStep::Remove(cmd) if cmd == "rm" => {
                 // 删除文件
-                self.remove_file(video_paths).await?;
+                HookStep::remove_file(video_paths).await?;
             }
             HookStep::Remove(cmd) => {
                 // 未知命令，返回错误
@@ -254,7 +254,7 @@ impl HookStep {
     ///
     /// # 参数
     /// * `video_paths` - 要删除的视频文件路径列表
-    async fn remove_file(&self, video_paths: &[&Path]) -> AppResult<()> {
+    pub(crate) async fn remove_file(video_paths: &[&Path]) -> AppResult<()> {
         // 逐个删除视频文件
         for video_path in video_paths {
             info!("删除 - Removing: {}", video_path.display());

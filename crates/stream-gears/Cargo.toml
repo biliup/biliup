@@ -34,22 +34,8 @@ biliup-cli = { path = "../biliup-cli"}
 url = { workspace = true }
 time = { workspace = true }
 chrono = { workspace = true }
-fancy-regex = { version = "0.16.1"}
+fancy-regex = { version = "0.17.0"}
 bon = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 async-trait = { workspace = true }
 error-stack = { workspace = true }
-axum-login = "0.18.0"
-password-auth = "1.0.0"
-tower = "0.5.2"
-tower-sessions = { version = "0.14.0", default-features = false, features = [
-    "signed",
-] }
-tower-sessions-sqlx-store = { version = "0.15.0", features = ["sqlite"] }
-
-# [target.'cfg(all(target_arch="aarch64", target_os="linux"))'.dependencies]
-# downloader = { path = "../downloader", default-features = false , features = ["rustls-tls"] }
-
-
-# [target.'cfg(not(all(target_arch="aarch64", target_os="linux")))'.dependencies]
-# downloader = { path = "../downloader" }

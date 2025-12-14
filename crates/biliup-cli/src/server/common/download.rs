@@ -1,5 +1,7 @@
 use crate::server::common::upload::UploaderMessage;
+use crate::server::common::util::FileValidator;
 use crate::server::config::default_segment_time;
+use crate::server::core::downloader::cover_downloader;
 use crate::server::core::downloader::{
     DanmakuClient, DownloadConfig, DownloadStatus, DownloaderRuntime, DownloaderType, SegmentEvent,
     SegmentInfo,
@@ -11,6 +13,7 @@ use crate::server::infrastructure::context::{Context, Stage, WorkerStatus};
 use crate::server::infrastructure::models::hook_step::process;
 use async_channel::{Receiver, Sender};
 use error_stack::{ResultExt, bail};
+use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -33,68 +36,6 @@ impl RetryPolicy {
             max_attempts,
             base_delay: Duration::from_millis(100),
             max_delay: Duration::from_secs(30),
-        }
-    }
-}
-
-/// 文件验证配置
-#[derive(Clone)]
-pub struct FileValidator {
-    min_size: u64,
-    check_format: bool,
-}
-
-impl FileValidator {
-    pub fn new(min_size: u64, check_format: bool) -> Self {
-        Self {
-            min_size,
-            check_format,
-        }
-    }
-}
-
-impl Default for FileValidator {
-    fn default() -> Self {
-        Self {
-            min_size: 1024 * 1024 * 100, // 100MB minimum
-            check_format: true,
-        }
-    }
-}
-
-impl FileValidator {
-    /// 验证文件有效性
-    pub fn validate(&self, path: &Path) -> AppResult<()> {
-        let metadata = fs::metadata(path).change_context(AppError::Unknown)?;
-
-        let size = metadata.len();
-
-        if size < self.min_size {
-            bail!(AppError::Custom(format!(
-                "File {} too small: {size} bytes, minimum: {} bytes",
-                path.display(),
-                self.min_size
-            )));
-        }
-
-        // 可选：检查文件格式
-        if self.check_format {
-            self.validate_format(path)?;
-        }
-
-        Ok(())
-    }
-
-    fn validate_format(&self, path: &Path) -> AppResult<()> {
-        // 简单的格式验证 - 检查扩展名
-        if let Some(extension) = path.extension() {
-            let ext = extension.to_string_lossy().to_lowercase();
-            match ext.as_str() {
-                "mp4" | "flv" | "ts" | "m3u8" | "mkv" => Ok(()),
-                _ => bail!(AppError::Custom(format!("Unsupported format: {}", ext))),
-            }
-        } else {
-            bail!(AppError::Custom("No file extension found".to_string()))
         }
     }
 }
@@ -181,7 +122,7 @@ impl DownloadTask {
     pub(self) async fn execute(
         &self,
         ctx: &Context,
-        mut processor: SegmentEventProcessor,
+        sender: Sender<UploaderMessage>,
         mut plugin: Box<dyn DownloadBase>,
         rooms_handle: Arc<Monitor>,
     ) -> AppResult<()> {
@@ -201,12 +142,15 @@ impl DownloadTask {
             info!("Starting danmaku client for stream: {}", url);
             client.download().await?;
         }
+
+        // 初始化组件
+        let mut processor = SegmentEventProcessor::new(sender, ctx.clone());
         let result = loop {
             // 创建守卫确保清理
             // 创建事件处理器
             // 执行下载
             let components = self
-                .initialize_components(
+                .download(
                     &mut processor,
                     ctx.clone(),
                     danmaku_client.clone(),
@@ -286,7 +230,7 @@ impl DownloadTask {
         Ok(())
     }
 
-    async fn initialize_components(
+    async fn download(
         &self,
         processor: &mut SegmentEventProcessor,
         ctx: Context,
@@ -395,22 +339,47 @@ impl DActor {
         match msg {
             DownloaderMessage::Start(downloader, ctx) => {
                 // 创建下载任务
-                let runtime = downloader.downloader(
-                    ctx.config()
-                        .downloader
-                        .unwrap_or(DownloaderType::StreamGears),
-                );
-                let task = Arc::new(DownloadTask::new(runtime));
-                // 初始化组件
-                let processor = SegmentEventProcessor::new(self.sender.clone(), ctx.clone());
+                let task = Arc::new(DownloadTask::new(
+                    downloader.downloader(
+                        ctx.config()
+                            .downloader
+                            .unwrap_or(DownloaderType::StreamGears),
+                    ),
+                ));
                 // 更新工作器状态为工作中
                 ctx.change_status(Stage::Download, WorkerStatus::Working(task.clone()))
                     .await;
 
+                tokio::spawn({
+                    let streamer_info = &ctx.stream_info_ext().streamer_info;
+                    let live_cover_url = streamer_info.live_cover_path.clone();
+                    let format_filename = ctx.recorder(streamer_info.clone()).format_filename();
+                    let client = ctx.stateless_client().client.clone();
+                    let enabled = ctx
+                        .config()
+                        .use_live_cover
+                        .map(|u| u && !live_cover_url.is_empty())
+                        .unwrap_or(false);
+                    async move {
+                        cover_downloader::download_cover_with(
+                            &live_cover_url,
+                            enabled,
+                            &format_filename,
+                            client,
+                        )
+                        .await
+                    }
+                });
+
                 process(&[], &ctx.live_streamer().preprocessor).await;
 
                 let _ = task
-                    .execute(&ctx, processor, downloader, self.rooms_handle.clone())
+                    .execute(
+                        &ctx,
+                        self.sender.clone(),
+                        downloader,
+                        self.rooms_handle.clone(),
+                    )
                     .await;
 
                 process(&[], &ctx.live_streamer().downloaded_processor).await;

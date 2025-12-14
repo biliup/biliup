@@ -1,7 +1,12 @@
+use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::models::StreamerInfo;
+use crate::server::infrastructure::models::hook_step::HookStep;
 use chrono::{Duration, Local};
+use error_stack::{ResultExt, bail};
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::path::{Path, PathBuf};
+use tracing::{error, info};
 use url::Url;
 
 /// 录制器配置结构体
@@ -170,5 +175,77 @@ mod tests {
             ),
             Some("flv".to_string())
         );
+    }
+}
+
+/// 文件验证配置
+#[derive(Clone)]
+pub struct FileValidator {
+    min_size: u64,
+    check_format: bool,
+}
+
+impl FileValidator {
+    pub fn new(min_size: u64, check_format: bool) -> Self {
+        Self {
+            min_size,
+            check_format,
+        }
+    }
+}
+
+impl Default for FileValidator {
+    fn default() -> Self {
+        Self {
+            min_size: 1024 * 1024 * 100, // 100MB minimum
+            check_format: true,
+        }
+    }
+}
+
+impl FileValidator {
+    /// 验证文件有效性
+    pub fn validate(&self, path: &Path) -> AppResult<()> {
+        let metadata = fs::metadata(path).change_context(AppError::Unknown)?;
+
+        let size = metadata.len();
+
+        if size < self.min_size {
+            let display = path.display();
+            let path = path.to_owned();
+            tokio::spawn(async move {
+                let Ok(()) = HookStep::remove_file(&[&path])
+                    .await
+                    .inspect_err(|e| error!(e=?e))
+                else {
+                    return;
+                };
+                info!("过滤删除 - {}", path.display());
+            });
+            bail!(AppError::Custom(format!(
+                "File {display} too small: {size} bytes, minimum: {} bytes",
+                self.min_size
+            )));
+        }
+
+        // 可选：检查文件格式
+        if self.check_format {
+            self.validate_format(path)?;
+        }
+
+        Ok(())
+    }
+
+    fn validate_format(&self, path: &Path) -> AppResult<()> {
+        // 简单的格式验证 - 检查扩展名
+        if let Some(extension) = path.extension() {
+            let ext = extension.to_string_lossy().to_lowercase();
+            match ext.as_str() {
+                "mp4" | "flv" | "ts" | "m3u8" | "mkv" => Ok(()),
+                _ => bail!(AppError::Custom(format!("Unsupported format: {}", ext))),
+            }
+        } else {
+            bail!(AppError::Custom("No file extension found".to_string()))
+        }
     }
 }

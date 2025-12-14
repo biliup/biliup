@@ -12,7 +12,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 serde_urlencoded = { workspace = true }
-reqwest_cookie_store = "0.8.0"
+reqwest_cookie_store = "0.9.0"
 tokio = { workspace = true }
 tracing = { workspace = true }
 rsa = "0.9.8"
@@ -29,7 +29,7 @@ bytes = { workspace = true }
 futures = { workspace = true }
 bon = { workspace = true }
 reqwest-middleware = { version = "0.4", features = ["json"] }
-reqwest-retry = "0.7.0"
+reqwest-retry = "0.8.0"
 clap = { version = "4", features = ["derive"], optional = true }
 time = "0.3"
 m3u8-rs = "6"

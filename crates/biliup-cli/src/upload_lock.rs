@@ -59,7 +59,10 @@ impl UploadLock {
                             warn!("检测到过期锁文件，自动清理: {:?}", self.lock_path);
                             let _ = fs::remove_file(&self.lock_path);
                         } else {
-                            info!("检测到其他进程正在使用该账号上传（锁文件: {:?}）", self.lock_path);
+                            info!(
+                                "检测到其他进程正在使用该账号上传（锁文件: {:?}）",
+                                self.lock_path
+                            );
                             return Ok(false);
                         }
                     }
@@ -78,9 +81,7 @@ impl UploadLock {
                 self.acquired = true;
                 Ok(true)
             }
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                Ok(false)
-            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(false),
             Err(e) => Err(e),
         }
     }

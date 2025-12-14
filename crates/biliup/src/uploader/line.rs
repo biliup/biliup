@@ -57,12 +57,7 @@ impl Parcel {
         };
 
         if video.title.is_none() {
-            if let Some(filename) = self
-                .video_file
-                .filepath
-                .file_stem()
-                .and_then(OsStr::to_str)
-            {
+            if let Some(filename) = self.video_file.filepath.file_stem().and_then(OsStr::to_str) {
                 // B站限制分P视频标题不能超过80字符，需要截断
                 video.title = Some(if filename.chars().count() >= 80 {
                     Video::truncate_title(filename, 80)
