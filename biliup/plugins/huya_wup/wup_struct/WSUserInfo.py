@@ -1,7 +1,7 @@
 from biliup.common.tars import tarscore
 
 class HuyaWSUserInfo(tarscore.struct):
-    __tars_class__ = "Huya.WSUserInfo"
+    __tars_class__ = "HUYA.WSUserInfo"
 
     def __init__(self):
         self.lUid: tarscore.int64 = 0

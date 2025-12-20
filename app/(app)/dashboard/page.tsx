@@ -191,7 +191,7 @@ const Dashboard: React.FC = () => {
                         {Object.entries(plugins)
                           .filter(([key]) => key !== 'Cookie')
                           .map(([key, Plugin]) => (
-                            <Plugin entity={entity} list={list} />
+                            <Plugin key={key} entity={entity} list={list} />
                           ))}
                         <plugins.Cookie entity={entity} list={list} />
                       </Collapse>
