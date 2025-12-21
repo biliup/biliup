@@ -57,6 +57,7 @@ class Wup(TarsUniPacket):
             name = name.encode(STANDARD_CHARSET)
 
         if (name in self.__new_buffer) == False:
+            print(self.__new_buffer)
             raise Exception("UniAttribute not found key:%s" % name)
 
         t = self.__new_buffer[name]

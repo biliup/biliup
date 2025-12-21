@@ -2,11 +2,16 @@ from biliup.common.tars import tarscore
 from biliup.common.tars.__tars import BinBuffer
 
 class HuyaWebSocketCommand(tarscore.struct):
-    __tars_class__ = "Huya.WebSocketCommand"
+    __tars_class__ = "HUYA.WebSocketCommand"
 
     def __init__(self):
         self.iCmdType: tarscore.int32 = 0
         self.vData: tarscore.bytes = b''
+        self.lRequestId: tarscore.int64 = 0
+        self.traceId: tarscore.string = ""
+        self.iEncryptType: tarscore.int32 = 0
+        self.lTime: tarscore.int64 = 0
+        self.sMD5: tarscore.string = ""
 
     @staticmethod
     def writeTo(oos: tarscore.TarsOutputStream, value):

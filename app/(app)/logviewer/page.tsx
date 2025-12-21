@@ -17,14 +17,6 @@ interface LogContentProps {
 }
 
 const LogContent = ({ logs, logContainerRef, isLoading }: LogContentProps) => {
-  if (isLoading) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-        <Spin size="large" />
-      </div>
-    )
-  }
-
   // 判断滚动条是否接近底部
   const isScrolledToBottom = () => {
     const containers = document.getElementsByClassName('log-container');
@@ -52,6 +44,14 @@ const LogContent = ({ logs, logContainerRef, isLoading }: LogContentProps) => {
       scrollToBottom();
     }
   }, [logs]);
+
+  if (isLoading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+        <Spin size="large" />
+      </div>
+    )
+  }
 
   return (
     <div
@@ -151,6 +151,7 @@ export default function LogViewer() {
         wsRef.current.close()
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
 
   const handleFileChange = (value: string) => {
@@ -211,7 +212,7 @@ export default function LogViewer() {
             activeKey={activeTab}
             onChange={handleFileChange}
             tabBarExtraContent={
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center'}}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <Button
                   icon={<IconSave />}
                   onClick={() => (window.location.href = `/static/${activeTab}.log`)}

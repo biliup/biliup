@@ -12,9 +12,10 @@ interface PlayerConfig {
 
 function playFlv(video: HTMLVideoElement, url: string, art: Artplayer) {
   if (mpegts.isSupported()) {
-    if (art.flv) {
-      art.flv.destroy()
-      art.flv = null
+    const artWithFlv = art as Artplayer & { flv?: mpegts.Player | null }
+    if (artWithFlv.flv) {
+      artWithFlv.flv.destroy()
+      artWithFlv.flv = null
     }
 
     const flv = mpegts.createPlayer({
@@ -22,11 +23,11 @@ function playFlv(video: HTMLVideoElement, url: string, art: Artplayer) {
       url: url,
     })
 
-    art.flv = flv
+    artWithFlv.flv = flv
     art.on('destroy', () => {
-      if (art.flv) {
-        art.flv.destroy()
-        art.flv = null
+      if (artWithFlv.flv) {
+        artWithFlv.flv.destroy()
+        artWithFlv.flv = null
       }
     })
 
