@@ -123,11 +123,6 @@ class Huya(DownloadBase):
             room_profile['max_bitrate']
         )
 
-        print({
-            "name": self.fname,
-            "stream_headers": self.stream_headers,
-            "raw_stream_url": self.raw_stream_url,
-        })
         return True
 
 
@@ -303,6 +298,7 @@ class Huya(DownloadBase):
         wup_req.func = func
         getCdnTokenInfoExReq = HuyaGetCdnTokenExReq()
         getCdnTokenInfoExReq.sStreamName = stream_name
+        # getCdnTokenInfoExReq.iLoopTime = 15 * 60    # 防盗链过期时间
         getCdnTokenInfoExReq.tId = tid
         wup_req.put(
             vtype=HuyaGetCdnTokenExReq,
@@ -359,8 +355,8 @@ class Huya(DownloadBase):
         is_wap = int(platform_id) in {103}
         clac_start_time = time.time()
 
-        if isinstance(uid, str) and uid.isdigit():
-            uid = int(uid)
+        if isinstance(uid, str):
+            uid = int(uid) if uid.isdigit() else 0
         if uid == 0:
             uid = self.generate_random_uid()
         print(f"Using {uid} as uid for calculation")
@@ -468,32 +464,30 @@ class PLATFORM(Enum):
     def get_platform_id(cls, platform: str) -> int:
         return cls[platform.upper()].value if platform.upper() in cls.__members__ else 100
 
+    @property
+    def short_name(self) -> str:
+        """获取平台短名称"""
+        name = self.name.lower()
+        idx = name.find('_')
+        return name[idx + 1:] if idx != -1 else name
+
 
 class UAGenerator:
     # Configuration dictionary mapping PLATFORM enum to UA components
     HYAPP_CONFIGS = {
         PLATFORM.HUYA_ADR: {
-            'platform': 'adr',
             'version': '13.1.0',  # LocalVersion or "0.0.0" + hotfix_version
-            'channel': 'official'
         },
         PLATFORM.HUYA_IOS: {
-            'platform': 'ios',
             'version': '13.1.0',
-            'channel': 'official'
         },
         PLATFORM.TV_HUYA_NFTV: {
-            'platform': 'huya_nftv',
             'version': '2.6.10',
-            'channel': 'official'
         },
         PLATFORM.HUYA_PC_EXE: {
-            'platform': 'pc_exe',
             'version': '7000000',
-            'channel': 'official'
         },
-        # PLATFORM.HUYA_WEBH5: {
-        #     'platform': 'webh5',
+        # PLATFORM.HUYA_WEBH5: {       # 星秀区不可用
         #     'version': '%y%m%d%H%M', # 2410101630
         #     'channel': 'websocket'
         # }
@@ -511,15 +505,14 @@ class UAGenerator:
         if not config:
             # Fallback if platform not supported
             platform = random.choice(list(UAGenerator.HYAPP_CONFIGS.keys()))
-            # platform = PLATFORM.TV_HUYA_NFTV
             config = UAGenerator.HYAPP_CONFIGS[platform]
 
-        hyapp_platform = config['platform']
-        hyapp_version = config['version']
-        hyapp_channel = config['channel']
+        hyapp_platform = platform.short_name
+        hyapp_version = config.get("version", "0.0.0")   # TODO: 日期格式化
+        hyapp_channel = config.get("channel", "official")
 
         # Add random build number for version
-        if platform == PLATFORM.TV_HUYA_NFTV:
+        if platform in {PLATFORM.HUYA_ADR, PLATFORM.TV_HUYA_NFTV}:
             hyapp_version += f".{random.randint(3000, 5000)}"
 
         ua = f"{hyapp_platform}&{hyapp_version}&{hyapp_channel}"
