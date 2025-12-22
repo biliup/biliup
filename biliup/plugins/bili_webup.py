@@ -526,7 +526,7 @@ class BiliBili:
                 res = self.__session.post("https:" + ret["fetch_url"], headers=fetch_headers, timeout=15).json()
                 if res.get('OK') == 1:
                     logger.info(f'{filename} uploaded >> {total_size / 1000 / 1000 / cost:.2f}MB/s. {res}')
-                    return {"title": splitext(filename)[0], "filename": ret["bili_filename"], "desc": ""}
+                    return {"title": splitext(os.path.basename(filename))[0], "filename": ret["bili_filename"], "desc": ""}
                 raise IOError(res)
             except IOError:
                 ii += 1
@@ -569,7 +569,7 @@ class BiliBili:
         r = self.__session.post(f"https:{fetch_url}", headers=fetch_headers, timeout=5).json()
         if r["OK"] != 1:
             raise Exception(r)
-        return {"title": splitext(filename)[0], "filename": bili_filename, "desc": ""}
+        return {"title": splitext(os.path.basename(filename))[0], "filename": bili_filename, "desc": ""}
 
     async def upos(self, file, total_size, ret, tasks=3):
         filename = file.name
@@ -617,7 +617,7 @@ class BiliBili:
                 r = self.__session.post(url, params=p, json={"parts": parts}, headers=headers, timeout=15).json()
                 if r.get('OK') == 1:
                     logger.info(f'{filename} uploaded >> {total_size / 1000 / 1000 / cost:.2f}MB/s. {r}')
-                    return {"title": splitext(filename)[0], "filename": splitext(basename(upos_uri))[0], "desc": ""}
+                    return {"title": splitext(os.path.basename(filename))[0], "filename": splitext(basename(upos_uri))[0], "desc": ""}
                 raise IOError(r)
             except IOError:
                 attempt += 1
