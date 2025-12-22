@@ -371,6 +371,47 @@ impl BiliBili {
         }
     }
 
+    /// 通过 Web 接口投稿
+    pub async fn submit_by_web(
+        &self,
+        studio: &Studio,
+        proxy: Option<&str>,
+    ) -> Result<ResponseData> {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        let csrf = self.get_csrf()?;
+
+        let url_str = "https://member.bilibili.com/x/vu/web/add/v3";
+        let params = [("t", ts.to_string()), ("csrf", csrf.to_string())];
+        let url = reqwest::Url::parse_with_params(url_str, &params).unwrap();
+
+        let cookie = self.get_cookie()?;
+        let jar = reqwest::cookie::Jar::default();
+        jar.add_cookie_str(&cookie, &url);
+
+        let ret: ResponseData = reqwest::Client::proxy_builder(proxy)
+            .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36")
+            .cookie_provider(std::sync::Arc::new(jar))
+            .timeout(Duration::new(60, 0))
+            .build()?
+            .post(url)
+            .json(studio)
+            .send()
+            .await?
+            .json()
+            .await?;
+        info!("{:?}", ret);
+
+        if ret.code == 0 {
+            info!("Web 接口投稿成功");
+            Ok(ret)
+        } else {
+            Err(Kind::Custom(format!("{:?}", ret)))
+        }
+    }
+
     #[deprecated(note = "no longer working, fallback to `edit_by_app`")]
     pub async fn edit(&self, studio: &Studio, proxy: Option<&str>) -> Result<serde_json::Value> {
         warn!("客户端接口已失效, 将使用app接口");
@@ -583,21 +624,7 @@ impl BiliBili {
         let params = [("status", status), ("pn", &page_num.to_string())];
         let url = reqwest::Url::parse_with_params(url_str, &params).unwrap();
 
-        let cookie = self
-            .login_info
-            .cookie_info
-            .get("cookies")
-            .and_then(|c: &Value| c.as_array())
-            .ok_or("archives cookie error")?
-            .iter()
-            .filter_map(|c| match (c["name"].as_str(), c["value"].as_str()) {
-                (Some(name), Some(value)) => Some((name, value)),
-                _ => None,
-            })
-            .map(|c| format!("{}={}", c.0, c.1))
-            .collect::<Vec<_>>()
-            .join("; ");
-
+        let cookie = self.get_cookie()?;
         let jar = reqwest::cookie::Jar::default();
         jar.add_cookie_str(&cookie, &url);
 
@@ -689,6 +716,24 @@ impl BiliBili {
             .collect::<Vec<_>>();
 
         Ok(studios)
+    }
+
+    fn get_cookie(&self) -> Result<String> {
+        let cookie = self
+            .login_info
+            .cookie_info
+            .get("cookies")
+            .and_then(|c: &Value| c.as_array())
+            .ok_or("get cookie error")?
+            .iter()
+            .filter_map(|c| match (c["name"].as_str(), c["value"].as_str()) {
+                (Some(name), Some(value)) => Some((name, value)),
+                _ => None,
+            })
+            .map(|c| format!("{}={}", c.0, c.1))
+            .collect::<Vec<_>>()
+            .join("; ");
+        Ok(cookie)
     }
 }
 
