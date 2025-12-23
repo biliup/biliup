@@ -1,0 +1,67 @@
+[package]
+name = "danmaku"
+version = "0.1.0"
+edition = "2024"
+description = "Live stream danmaku (chat) recording client"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true, features = ["sync", "time", "fs", "io-util"] }
+futures = { workspace = true }
+async-trait = { workspace = true }
+
+# WebSocket
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+
+# HTTP client (for getting WebSocket info)
+reqwest = { workspace = true, features = ["json"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# XML output
+quick-xml = { version = "0.37", features = ["serialize"] }
+
+# Binary parsing
+nom = "8"
+byteorder = "1.5"
+
+# Compression
+brotli = "7"
+flate2 = "1.0"
+
+# Error handling
+thiserror = { workspace = true }
+
+# Time
+chrono = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Regex (for Twitch IRC parsing)
+regex = { workspace = true }
+
+# URL parsing
+url = { workspace = true }
+
+# WBI signing (Bilibili)
+md5 = "0.7"
+urlencoding = "2.1"
+
+[features]
+default = ["twitch", "twitcasting", "bilibili", "douyu", "huya", "douyin"]
+twitch = []
+twitcasting = []
+bilibili = []
+douyu = []
+huya = []
+douyin = []
+all-platforms = ["twitch", "twitcasting", "bilibili", "douyu", "huya", "douyin"]
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+futures = { workspace = true }
