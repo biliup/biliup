@@ -8,7 +8,7 @@ use std::str::FromStr;
 pub enum SubmitOption {
     // Client,
     App,
-    // Web,
+    Web,
     BCutAndroid,
 }
 

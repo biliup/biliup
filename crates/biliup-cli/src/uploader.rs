@@ -148,6 +148,10 @@ pub async fn upload_by_command(
             .submit_by_bcut_android(&studio, proxy)
             .await
             .change_context_lazy(|| AppError::Unknown)?,
+        SubmitOption::Web => bili
+            .submit_by_web(&studio, proxy)
+            .await
+            .change_context_lazy(|| AppError::Unknown)?,
         _ => bili
             .submit_by_app(&studio, proxy)
             .await
