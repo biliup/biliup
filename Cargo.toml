@@ -3,6 +3,7 @@ members = [
     "crates/biliup",
     "crates/biliup-cli",
     "crates/stream-gears",
+    "crates/danmaku",
 ]
 resolver = "3"
 
