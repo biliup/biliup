@@ -202,6 +202,8 @@ pub struct Video {
     pub title: Option<String>,
     pub filename: String,
     pub desc: String,
+    #[serde(skip)]
+    pub cid: usize,
 }
 
 impl Video {
@@ -210,6 +212,7 @@ impl Video {
             title: None,
             filename: filename.into(),
             desc: "".into(),
+            cid: 0,
         }
     }
 

@@ -194,6 +194,7 @@ impl Upos {
             title: None,
             filename: truncated_filename,
             desc: "".into(),
+            cid: self.bucket.biz_id,
         })
     }
 }
