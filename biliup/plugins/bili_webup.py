@@ -745,6 +745,199 @@ class BiliBili:
               f'&groupid={groupid}&vfea={vfea}'
         return self.__session.get(url=url, timeout=5).json()
 
+    # ==================== 合集（SEASON）管理 ====================
+    #
+    # B站"新版合集"（SEASON 类型）的管理接口，支持：
+    #   - 列出用户的所有合集
+    #   - 查看合集内的视频列表
+    #   - 将视频添加到合集
+    #   - 从合集中移除视频
+    #   - 对合集内视频重新排序
+    #
+    # 核心概念：
+    #   season_id  - 合集ID，从创作中心合集管理页面的URL或 list_seasons() 获取
+    #   section_id - 合集下的"分区"ID，每个合集至少有一个默认分区，
+    #                通过 list_seasons() 返回的 sections.sections[0].id 获取
+    #   episode_id - 视频在合集中的内部ID（不是 aid），
+    #                通过 get_season_section() 返回的 episodes[i]['id'] 获取
+    #
+    # 典型流程（上传后添加到合集）：
+    #   1. seasons = bili.list_seasons()  # 获取合集列表，找到 season_id 和 section_id
+    #   2. info = bili.get_video_info(aid)  # 获取视频的 cid 和 title
+    #   3. bili.add_to_season(section_id, [{...}])  # 添加到合集
+    def list_seasons(self, pn=1, ps=30):
+        """
+        获取用户的合集列表
+
+        返回值示例::
+
+            {
+                'seasons': [{
+                    'season': {'id': 7320255, 'title': '我的合集', ...},
+                    'sections': {'sections': [{'id': 8081933, 'title': '正片', ...}]}
+                }, ...],
+                'page': {'pn': 1, 'ps': 30, 'total': 5}
+            }
+
+        获取 section_id 的方式：
+        ``data['seasons'][0]['sections']['sections'][0]['id']``
+
+        :param pn: 页码，从1开始
+        :param ps: 每页数量，默认30
+        :return: 包含 seasons 列表和分页信息的 dict
+        """
+        r = self.__session.get(
+            'https://member.bilibili.com/x2/creative/web/seasons',
+            params={'pn': pn, 'ps': ps, 'order': 'mtime', 'sort': 'desc', 'draft': 1},
+            timeout=10
+        ).json()
+        if r['code'] != 0:
+            raise Exception(r)
+        return r['data']
+
+    def get_season_section(self, section_id, sort=''):
+        """
+        获取合集分区内的视频列表
+
+        返回值中每个 episode 包含::
+
+            {'id': 176218279, 'aid': 12345, 'cid': 67890, 'title': '...', ...}
+
+        其中 ``id`` 是 episode_id（合集内部ID），用于 remove_from_season 和排序。
+
+        :param section_id: 分区ID，通过 list_seasons() 获取
+        :param sort: 排序方式，可选 'desc'（降序）
+        :return: 包含 section 信息和 episodes 列表的 dict
+        """
+        params = {'id': section_id}
+        if sort:
+            params['sort'] = sort
+        r = self.__session.get(
+            'https://member.bilibili.com/x2/creative/web/season/section',
+            params=params, timeout=10
+        ).json()
+        if r['code'] != 0:
+            raise Exception(r)
+        return r['data']
+
+    def get_video_info(self, aid):
+        """
+        获取视频信息（标题、cid 等），用于添加到合集前获取必要参数
+
+        :param aid: 视频AV号（整数）
+        :return: 视频信息 dict，包含 title, pages[0].cid 等
+        """
+        r = self.__session.get(
+            'https://api.bilibili.com/x/web-interface/view',
+            params={'aid': aid}, timeout=10
+        ).json()
+        if r['code'] != 0:
+            raise Exception(r)
+        return r['data']
+
+    def add_to_season(self, section_id, episodes):
+        """
+        将视频添加到合集（新版合集/SEASON）
+
+        添加单个视频的典型用法::
+
+            info = bili.get_video_info(aid)
+            bili.add_to_season(section_id, [{
+                'aid': aid,
+                'cid': info['pages'][0]['cid'],
+                'title': info['title'],
+                'charging_pay': 0,
+            }])
+
+        可一次添加多个视频（传入多个 episode dict）。
+
+        :param section_id: 分区ID，通过 list_seasons() 获取
+        :param episodes: 视频列表，每项须含 aid, cid, title, charging_pay
+        :return: API 返回的 JSON
+        :raises Exception: API 返回 code != 0 时抛出
+        """
+        r = self.__session.post(
+            f'https://member.bilibili.com/x2/creative/web/season/section/episodes/add'
+            f'?csrf={self.__bili_jct}',
+            json={
+                'sectionId': section_id,
+                'episodes': episodes,
+                'csrf': self.__bili_jct,
+            },
+            headers={'Content-Type': 'application/json; charset=UTF-8'},
+            timeout=10
+        ).json()
+        if r['code'] != 0:
+            raise Exception(r)
+        return r
+
+    def remove_from_season(self, episode_id):
+        """
+        从合集中移除一个视频
+
+        注意：参数是 episode_id（合集内部ID），不是 aid。
+        需要先通过 get_season_section() 获取 episodes 列表，
+        找到目标视频的 ``episode['id']`` 字段。
+
+        每次只能移除一个视频，批量移除需要循环调用。
+
+        :param episode_id: 合集内部的 episode ID（不是 aid）
+        :return: API 返回的 JSON
+        :raises Exception: API 返回 code != 0 时抛出
+        """
+        r = self.__session.post(
+            'https://member.bilibili.com/x2/creative/web/season/section/episode/del',
+            data={'id': episode_id, 'csrf': self.__bili_jct},
+            timeout=10
+        ).json()
+        if r['code'] != 0:
+            raise Exception(r)
+        return r
+
+    def sort_season_episodes(self, section_id, season_id, sorts, section_title='正片'):
+        """
+        对合集内的视频重新排序
+
+        使用示例::
+
+            section = bili.get_season_section(section_id)
+            eps = section['episodes']
+            # 反转顺序
+            sorts = [{'id': ep['id'], 'sort': i+1} for i, ep in enumerate(reversed(eps))]
+            bili.sort_season_episodes(section_id, season_id, sorts)
+
+        注意事项：
+        - sorts 必须包含合集中的**所有**视频，不能只传部分
+        - section_id、season_id、section_title 三个参数缺一不可，否则返回 -400
+        - sort 序号从1开始
+
+        :param section_id: 分区ID
+        :param season_id: 合集ID
+        :param sorts: 排序数组，每项含 id (episode_id) 和 sort (1-indexed 序号)
+        :param section_title: 分区标题，默认"正片"
+        :return: API 返回的 JSON
+        :raises Exception: API 返回 code != 0 时抛出
+        """
+        r = self.__session.post(
+            f'https://member.bilibili.com/x2/creative/web/season/section/edit'
+            f'?csrf={self.__bili_jct}',
+            json={
+                'section': {
+                    'id': section_id,
+                    'type': 1,
+                    'seasonId': season_id,
+                    'title': section_title,
+                },
+                'sorts': sorts,
+                'captcha_token': '',
+            },
+            headers={'Content-Type': 'application/json'},
+            timeout=15
+        ).json()
+        if r['code'] != 0:
+            raise Exception(r)
+        return r
+
     def __enter__(self):
         return self
 
