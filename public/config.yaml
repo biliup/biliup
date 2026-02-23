@@ -219,6 +219,7 @@ streamers:
         #charging_pay: 0 ### 是否开启充电面板, 1为开启
         #no_reprint: 0 ### 自制声明, 1为未经允许禁止转载
         #is_only_self: 0 ### 可见范围, 1为仅自己可见
+        #extra_fields: '<json 字符串>' ### 实现添加自定义提交参数，示例：extra_fields: '{"watermark": {"state": 0}}'自制稿件关闭水印，参数自抓 @https://github.com/biliup/biliup-rs/pull/171
         uploader: biliup-rs ### 覆盖全局默认上传插件，Noop为不上传，但会执行后处理
         #filename_prefix: '{streamer}%Y-%m-%d %H_%M_%S{title}'  ### 覆盖全局自定义录播文件命名规则
         user_cookie: cookies.json ### 使用指定的账号上传
