@@ -66,6 +66,19 @@ impl SegmentEventProcessor {
     pub fn process(&mut self, event: SegmentInfo) -> AppResult<()> {
         // 验证文件有效性
         self.file_validator.validate(&event.prev_file_path)?;
+
+        // 上一轮 process_with_upload 可能因上传失败提前返回，UActor 已 drop rx，
+        // 这里挂着的 tx 是死的；丢弃后下面会重建一条新的管道。
+        if let Some(tx) = &self.channel
+            && tx.is_closed()
+        {
+            warn!(
+                url = self.ctx.live_streamer().url,
+                "upload channel closed by uploader, reopening"
+            );
+            self.channel = None;
+        }
+
         match &self.channel {
             None => {
                 let (tx, rx) = async_channel::bounded(32); // Use tokio channel for async
