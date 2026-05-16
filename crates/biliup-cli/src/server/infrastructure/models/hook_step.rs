@@ -441,6 +441,24 @@ mod tests {
         // Already .mp4 → unchanged.
         assert_eq!(paths[0], p);
     }
+
+    /// 复现 pipeline_upload_videos 的 fault-tolerance 触发条件：
+    /// segment_processor 在 ffmpeg 退非 0 时返回 Err。生产事故就是这一步因磁盘满
+    /// 而失败，调用方必须能从 Err 恢复（log + continue 而不是 ? 早退）。
+    #[tokio::test]
+    async fn remux_fails_when_ffmpeg_cannot_read_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let bogus = dir.path().join("does_not_exist.ts");
+        let mut paths = vec![bogus.clone()];
+        let step = HookStep::Remux { remux: "mp4".into() };
+        let result = step.execute_paths(&mut paths).await;
+        assert!(
+            result.is_err(),
+            "ffmpeg 读不到输入应返回 Err，调用方才能在 pipeline 里做 log+continue"
+        );
+        // 失败时不要把破损的 mp4 留在磁盘上（idempotent retry 前提）
+        assert!(!bogus.with_extension("mp4").exists());
+    }
 }
 
 pub async fn process(input: &[u8], processors: &Option<Vec<HookStep>>) {
