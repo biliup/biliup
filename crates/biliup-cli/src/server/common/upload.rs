@@ -140,20 +140,37 @@ where
     pin!(rx);
     // 流式处理后续事件
     while let Some(event) = rx.next().await {
-        // segment_processor 在上传前对路径列表做就地转换（如 Remux .ts→.mp4）
+        // segment_processor 在上传前对路径列表做就地转换（如 Remux .ts→.mp4）。
+        // 单段失败（典型场景：磁盘满让 ffmpeg remux 写头失败）不应拖死整批——
+        // 否则已成功上传的段也无法到达 submit + postprocessor，本地 `rm` 不触发，
+        // 文件越堆越多，磁盘进一步紧张，形成正反馈。
         let mut paths: Vec<PathBuf> = vec![event.prev_file_path.clone()];
-        if !segment_processors.is_empty() {
-            process_video_paths(&mut paths, segment_processors).await?;
+        if !segment_processors.is_empty()
+            && let Err(e) = process_video_paths(&mut paths, segment_processors).await
+        {
+            error!(
+                file = ?event.prev_file_path,
+                "segment_processor failed, skipping segment: {:?}", e
+            );
+            continue;
         }
         let upload_path = paths
             .first()
             .cloned()
             .unwrap_or_else(|| event.prev_file_path.clone());
-        let video = upload_single_file(&upload_path, context).await?;
-        uploaded.videos.push(video);
-        // postprocessor 看到的是 segment_processor 转换后的路径
-        uploaded.paths.push(upload_path);
-        // 失败的文件不加入路径列表，避免后处理出错
+        match upload_single_file(&upload_path, context).await {
+            Ok(video) => {
+                uploaded.videos.push(video);
+                // postprocessor 看到的是 segment_processor 转换后的路径
+                uploaded.paths.push(upload_path);
+            }
+            Err(e) => {
+                error!(
+                    file = ?upload_path,
+                    "upload_single_file failed, skipping segment: {:?}", e
+                );
+            }
+        }
     }
 
     Ok(uploaded)
