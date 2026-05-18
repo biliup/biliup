@@ -54,3 +54,5 @@ cookies.json
 .serena/
 .cargo/
 logs/
+CLAUDE.md
+.claude/
