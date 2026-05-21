@@ -5,7 +5,9 @@ use crate::server::core::downloader::SegmentInfo;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
 use crate::server::infrastructure::models::InsertFileItem;
-use crate::server::infrastructure::models::hook_step::process_video;
+use crate::server::infrastructure::models::hook_step::{
+    HookStep, process_video, process_video_paths,
+};
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
 use async_channel::Receiver;
 use biliup::bilibili::{BiliBili, ResponseData, Studio, Video};
@@ -52,8 +54,15 @@ where
     let upload_context =
         initialize_upload_context(&ctx.config(), &ctx.stateless_client(), upload_config).await?;
 
-    // 2. 流水线处理视频上传
-    let uploaded_videos = pipeline_upload_videos(rx, &upload_context).await?;
+    // 2. 流水线处理视频上传（segment_processor 在每段上传前执行；用于 Remux 等
+    // 在原地改写路径的预处理）
+    let segment_processors: Vec<HookStep> = ctx
+        .live_streamer()
+        .segment_processor
+        .clone()
+        .unwrap_or_default();
+    let uploaded_videos =
+        pipeline_upload_videos(rx, &upload_context, &segment_processors).await?;
 
     // 3. 提交到B站
     if !uploaded_videos.videos.is_empty() {
@@ -122,27 +131,46 @@ async fn get_upload_line(client: &reqwest::Client, line: &str) -> AppResult<Line
 async fn pipeline_upload_videos<F>(
     rx: Inspect<Receiver<SegmentInfo>, F>,
     context: &UploadContext,
+    segment_processors: &[HookStep],
 ) -> AppResult<UploadedVideos>
 where
     F: FnMut(&SegmentInfo),
 {
-    // let mut desc_v2 = Vec::new();
-    // for credit in context.upload_config.desc_v2_credit {
-    //     desc_v2.push(Credit {
-    //         type_id: credit.type_id,
-    //         raw_text: credit.raw_text,
-    //         biz_id: credit.biz_id,
-    //     });
-    // }
-
     let mut uploaded = UploadedVideos::default();
     pin!(rx);
     // 流式处理后续事件
     while let Some(event) = rx.next().await {
-        let video = upload_single_file(&event.prev_file_path, context).await?;
-        uploaded.videos.push(video);
-        uploaded.paths.push(event.prev_file_path);
-        // 失败的文件不加入路径列表，避免后处理出错
+        // segment_processor 在上传前对路径列表做就地转换（如 Remux .ts→.mp4）。
+        // 单段失败（典型场景：磁盘满让 ffmpeg remux 写头失败）不应拖死整批——
+        // 否则已成功上传的段也无法到达 submit + postprocessor，本地 `rm` 不触发，
+        // 文件越堆越多，磁盘进一步紧张，形成正反馈。
+        let mut paths: Vec<PathBuf> = vec![event.prev_file_path.clone()];
+        if !segment_processors.is_empty()
+            && let Err(e) = process_video_paths(&mut paths, segment_processors).await
+        {
+            error!(
+                file = ?event.prev_file_path,
+                "segment_processor failed, skipping segment: {:?}", e
+            );
+            continue;
+        }
+        let upload_path = paths
+            .first()
+            .cloned()
+            .unwrap_or_else(|| event.prev_file_path.clone());
+        match upload_single_file(&upload_path, context).await {
+            Ok(video) => {
+                uploaded.videos.push(video);
+                // postprocessor 看到的是 segment_processor 转换后的路径
+                uploaded.paths.push(upload_path);
+            }
+            Err(e) => {
+                error!(
+                    file = ?upload_path,
+                    "upload_single_file failed, skipping segment: {:?}", e
+                );
+            }
+        }
     }
 
     Ok(uploaded)
