@@ -103,6 +103,38 @@ pub enum Commands {
         // #[clap()]
         vid: Vid,
     },
+    /// 查看视频评论
+    Comments {
+        /// vid为稿件 av 或 bv 号
+        vid: Vid,
+
+        /// 排序方式，0为按时间，2为按热度
+        #[arg(long, default_value = "0")]
+        sort: u8,
+
+        /// 页码
+        #[arg(long, default_value = "1")]
+        pn: u32,
+
+        /// 每页条数
+        #[arg(long, default_value = "20")]
+        ps: u32,
+    },
+    /// 回复视频评论，默认只打印将要回复的内容
+    Reply {
+        /// vid为稿件 av 或 bv 号
+        vid: Vid,
+
+        /// 评论 rpid
+        rpid: u64,
+
+        /// 回复内容
+        message: String,
+
+        /// 实际发送回复
+        #[arg(long)]
+        execute: bool,
+    },
     /// 输出flv元数据
     DumpFlv {
         #[arg()]

@@ -258,6 +258,40 @@ impl Display for Vid {
     }
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct ReplyMember {
+    pub uname: String,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct ReplyContent {
+    pub message: String,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct Reply {
+    pub rpid: u64,
+    pub mid: u64,
+    pub member: ReplyMember,
+    pub content: ReplyContent,
+    pub ctime: u64,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct ReplyPage {
+    pub count: Option<u64>,
+    pub num: Option<u64>,
+    pub size: Option<u64>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct ReplyList {
+    #[serde(default)]
+    pub page: ReplyPage,
+    #[serde(default)]
+    pub replies: Option<Vec<Reply>>,
+}
+
 #[derive(Clone, Debug)]
 pub struct BiliBili {
     pub client: reqwest::Client,
@@ -547,6 +581,101 @@ impl BiliBili {
             .await?
             .json()
             .await?)
+    }
+
+    async fn aid_from_vid(&self, vid: &Vid) -> Result<u64> {
+        match vid {
+            Vid::Aid(aid) => Ok(*aid),
+            Vid::Bvid(bvid) => {
+                let res: ResponseData = self
+                    .client
+                    .get("https://api.bilibili.com/x/web-interface/view")
+                    .query(&[("bvid", bvid)])
+                    .send()
+                    .await?
+                    .json()
+                    .await?;
+
+                match res {
+                    ResponseData {
+                        code: 0,
+                        data: Some(data),
+                        ..
+                    } => data["aid"].as_u64().ok_or("aid error".into()),
+                    res => Err(Kind::Custom(format!("{res:?}"))),
+                }
+            }
+        }
+    }
+
+    /// 获取视频评论列表
+    pub async fn comments(
+        &self,
+        vid: &Vid,
+        sort: u8,
+        pn: u32,
+        ps: u32,
+        _proxy: Option<&str>,
+    ) -> Result<ReplyList> {
+        let oid = self.aid_from_vid(vid).await?;
+        let res: ResponseData<ReplyList> = self
+            .client
+            .get("https://api.bilibili.com/x/v2/reply")
+            .query(&[
+                ("type", "1".to_string()),
+                ("oid", oid.to_string()),
+                ("sort", sort.to_string()),
+                ("pn", pn.to_string()),
+                ("ps", ps.to_string()),
+            ])
+            .send()
+            .await?
+            .json()
+            .await?;
+
+        match res {
+            ResponseData {
+                code: 0,
+                data: Some(data),
+                ..
+            } => Ok(data),
+            res => Err(Kind::Custom(format!("{res:?}"))),
+        }
+    }
+
+    /// 回复视频评论
+    pub async fn reply_comment(
+        &self,
+        vid: &Vid,
+        rpid: u64,
+        message: &str,
+        _proxy: Option<&str>,
+    ) -> Result<Value> {
+        let oid = self.aid_from_vid(vid).await?;
+        let res: ResponseData = self
+            .client
+            .post("https://api.bilibili.com/x/v2/reply/add")
+            .form(&[
+                ("type", "1".to_string()),
+                ("oid", oid.to_string()),
+                ("root", rpid.to_string()),
+                ("parent", rpid.to_string()),
+                ("message", message.to_string()),
+                ("csrf", self.get_csrf()?.to_string()),
+            ])
+            .send()
+            .await?
+            .json()
+            .await?;
+
+        match res {
+            ResponseData {
+                code: 0,
+                data: Some(data),
+                ..
+            } => Ok(data),
+            res => Err(Kind::Custom(format!("{res:?}"))),
+        }
     }
 
     pub async fn archive_pre(&self) -> Result<Value> {
