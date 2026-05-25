@@ -263,6 +263,56 @@ pub async fn show(user_cookie: PathBuf, vid: Vid, proxy: Option<&str>) -> AppRes
     Ok(())
 }
 
+pub async fn comments(
+    user_cookie: PathBuf,
+    vid: Vid,
+    sort: u8,
+    pn: u32,
+    ps: u32,
+    proxy: Option<&str>,
+) -> AppResult<()> {
+    let bilibili = login_by_cookies(user_cookie, proxy).await?;
+    let reply_list = bilibili
+        .comments(&vid, sort, pn, ps, proxy)
+        .await
+        .change_context_lazy(|| AppError::Unknown)?;
+
+    for reply in reply_list.replies.unwrap_or_default() {
+        println!("rpid={}  uname={}", reply.rpid, reply.member.uname);
+        println!("{}", reply.content.message);
+        println!();
+    }
+
+    Ok(())
+}
+
+pub async fn reply(
+    user_cookie: PathBuf,
+    vid: Vid,
+    rpid: u64,
+    message: String,
+    execute: bool,
+    proxy: Option<&str>,
+) -> AppResult<()> {
+    if !execute {
+        println!("dry-run: reply to {vid} rpid={rpid}");
+        println!("{message}");
+        println!("use --execute to send");
+        return Ok(());
+    }
+
+    let bilibili = login_by_cookies(user_cookie, proxy).await?;
+    let ret = bilibili
+        .reply_comment(&vid, rpid, &message, proxy)
+        .await
+        .change_context_lazy(|| AppError::Unknown)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&ret).change_context_lazy(|| AppError::Unknown)?
+    );
+    Ok(())
+}
+
 pub async fn list(
     user_cookie: PathBuf,
     is_pubing: bool,
