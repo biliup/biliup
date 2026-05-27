@@ -7,9 +7,9 @@ title = "直播录制和上传工具"
 lead = '<b>Biliup</b> 是一套直播录制、视频下载和上传的工具, 提供了多种方式 <a href="https://biliup.github.io/">自动化</a>的完成录制上传 .'
 url = "/docs/getting-started/introduction/"
 url_button = "Get started"
-repo_version = "GitHub v0.1.0"
+repo_version = "1.1.29"
 repo_license = "Open-source MIT License."
-repo_url = "https://github.com/ForgQi/biliup-rs"
+repo_url = "https://github.com/biliup/biliup"
 
 # Menu items
 [[extra.menu.main]]

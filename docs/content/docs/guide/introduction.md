@@ -60,9 +60,9 @@ $ biliup --config ./config.yaml start
 ```
 从 v0.2.15 版本开始，配置文件支持 toml 格式，详见 [config.toml](https://github.com/biliup/biliup/tree/master/public/config.toml) ，
 yaml配置文件完整内容可参照 [config.yaml](https://github.com/biliup/biliup/tree/master/public/config.yaml) 。
-__FFmpeg__ 作为可选依赖。如果还有问题可以 [加群讨论](https://github.com/ForgQi/biliup/discussions/58#discussioncomment-2388776) 。
+__FFmpeg__ 作为可选依赖。如果还有问题可以 [加群讨论](https://github.com/biliup/biliup/discussions/58#discussioncomment-2388776) 。
 
-> 使用上传功能需要登录B站，通过 [命令行投稿工具](https://github.com/ForgQi/biliup-rs) 获取 cookies.json，并放入启动 biliup 的路径即可
+> 使用上传功能需要登录B站，通过 [命令行投稿工具](https://github.com/biliup/biliup-rs) 获取 cookies.json，并放入启动 biliup 的路径即可
 
 > ARM平台用户，需要使用到stream-gears（默认下载器与上传器）进行下载和上传的，请参考此教程降级stream-gears版本。 https://github.com/biliup/biliup/discussions/407
 
@@ -126,7 +126,7 @@ sudo docker exec -it imageId /bin/bash
 
 ## yaml配置文件示例
 可选项见[完整配置文件](https://github.com/biliup/biliup/tree/master/public/config.yaml),
-tid投稿分区见[Wiki](https://github.com/ForgQi/biliup/wiki)
+tid投稿分区见[Wiki](https://github.com/biliup/biliup/wiki)
 ```yaml
 streamers:
     xxx直播录像:
