@@ -80,13 +80,13 @@ RUN set -eux; \
 	apt-mark manual curl wget; \
 	\
 	arch="$(dpkg --print-architecture)"; arch="${arch##*-}"; \
-	url='https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.0-latest-'; \
+	url='https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-'; \
 	case "$arch" in \
 		'amd64') \
-			url="${url}linux64-gpl-8.0.tar.xz"; \
+			url="${url}linux64-gpl-8.1.tar.xz"; \
 		;; \
 		'arm64') \
-			url="${url}linuxarm64-gpl-8.0.tar.xz"; \
+			url="${url}linuxarm64-gpl-8.1.tar.xz"; \
 		;; \
 		*) \
 			useApt=true; \
