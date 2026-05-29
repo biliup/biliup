@@ -3,23 +3,23 @@
 //! The [`DanmakuRecorder`] manages WebSocket connections, heartbeats,
 //! message processing, and XML output for recording live stream chat.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::interval;
-use tokio_tungstenite::tungstenite::http::Request;
-use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tracing::{debug, error, info, warn};
 
 use crate::error::{DanmakuError, Result};
-use crate::message::DanmakuEvent;
 use crate::output::xml::{XmlWriter, XmlWriterConfig};
 use crate::protocols::{
-    create_platform, HeartbeatData, Platform, PlatformContext, RegistrationData,
+    HeartbeatData, Platform, PlatformContext, RegistrationData, create_platform,
 };
 
 /// Configuration for the danmaku recorder.
@@ -73,8 +73,8 @@ impl RecorderConfig {
 enum RecorderCommand {
     /// Save current file and optionally rename.
     Rolling {
-        #[allow(dead_code)]
         new_file_name: Option<PathBuf>,
+        done: oneshot::Sender<Result<()>>,
     },
     /// Stop recording.
     Stop,
@@ -91,19 +91,21 @@ impl RecorderHandle {
     /// Stop the recorder.
     pub async fn stop(&self) -> Result<()> {
         let _ = self.stop_tx.send(true);
-        self.cmd_tx
-            .send(RecorderCommand::Stop)
-            .await
-            .map_err(|_| DanmakuError::ChannelSend)?;
+        let _ = self.cmd_tx.send(RecorderCommand::Stop).await;
         Ok(())
     }
 
     /// Save current recording and optionally rename the file.
     pub async fn rolling(&self, new_file_name: Option<PathBuf>) -> Result<()> {
+        let (done, rx) = oneshot::channel();
         self.cmd_tx
-            .send(RecorderCommand::Rolling { new_file_name })
+            .send(RecorderCommand::Rolling {
+                new_file_name,
+                done,
+            })
             .await
             .map_err(|_| DanmakuError::ChannelSend)?;
+        rx.await.map_err(|_| DanmakuError::ChannelSend)??;
         Ok(())
     }
 }
@@ -148,14 +150,14 @@ impl DanmakuRecorder {
     /// Run the recorder loop.
     async fn run(
         self,
-        _cmd_rx: mpsc::Receiver<RecorderCommand>,
+        mut cmd_rx: mpsc::Receiver<RecorderCommand>,
         mut stop_rx: watch::Receiver<bool>,
     ) -> Result<()> {
         let platform_name = self.platform.name();
-        info!("Starting danmaku recording for {} - {}", platform_name, self.config.url);
-
-        // Create event channel for messages
-        let (event_tx, mut event_rx) = mpsc::channel::<DanmakuEvent>(1024);
+        info!(
+            "Starting danmaku recording for {} - {}",
+            platform_name, self.config.url
+        );
 
         // Create XML writer
         let xml_config = XmlWriterConfig {
@@ -165,31 +167,51 @@ impl DanmakuRecorder {
         };
 
         let output_path = format_output_path(&self.config.output_file);
-        let mut xml_writer = XmlWriter::new(&output_path, xml_config)?;
+        let mut xml_writer = XmlWriter::new(&output_path, xml_config.clone())?;
 
         // Main loop with reconnection
-        loop {
-            // Check if stopped
-            if *stop_rx.borrow() {
-                break;
+        if is_polling_url(&self.config.url) {
+            match self
+                .poll_and_run(&mut cmd_rx, &mut stop_rx, &mut xml_writer, &xml_config)
+                .await
+            {
+                Ok(()) | Err(DanmakuError::Stopped) => {}
+                Err(e) => return Err(e),
             }
-
-            // Try to connect and run
-            match self.connect_and_run(&event_tx, &mut stop_rx).await {
-                Ok(()) => {
-                    // Normal exit (stopped)
+        } else {
+            loop {
+                if *stop_rx.borrow() {
                     break;
                 }
-                Err(DanmakuError::Stopped) => {
-                    break;
-                }
-                Err(e) => {
-                    warn!("{}: Connection error: {}. Reconnecting in 30s...", platform_name, e);
 
-                    // Wait 30 seconds before reconnecting
-                    tokio::select! {
-                        _ = tokio::time::sleep(Duration::from_secs(30)) => {}
-                        _ = stop_rx.changed() => {
+                match self
+                    .connect_and_run(&mut cmd_rx, &mut stop_rx, &mut xml_writer, &xml_config)
+                    .await
+                {
+                    Ok(()) | Err(DanmakuError::Stopped) => break,
+                    Err(e) => {
+                        warn!(
+                            "{}: Connection error: {}. Reconnecting in 30s...",
+                            platform_name, e
+                        );
+
+                        let mut reconnect_sleep =
+                            Box::pin(tokio::time::sleep(Duration::from_secs(30)));
+                        loop {
+                            tokio::select! {
+                                _ = &mut reconnect_sleep => break,
+                                _ = stop_rx.changed() => {
+                                    if *stop_rx.borrow() {
+                                        break;
+                                    }
+                                }
+                                Some(command) = cmd_rx.recv() => {
+                                    if handle_command(command, &self.config.output_file, &mut xml_writer, &xml_config)? {
+                                        break;
+                                    }
+                                }
+                            }
+
                             if *stop_rx.borrow() {
                                 break;
                             }
@@ -199,25 +221,78 @@ impl DanmakuRecorder {
             }
         }
 
-        // Process remaining events
-        while let Ok(event) = event_rx.try_recv() {
-            if let Err(e) = xml_writer.write_event(&event) {
-                warn!("Failed to write event: {}", e);
-            }
-        }
-
         // Finish XML file
+        let has_messages = xml_writer.has_messages();
         let final_path = xml_writer.finish()?;
-        info!("{}: Recording finished. Output: {:?}", platform_name, final_path);
+        if !has_messages {
+            let _ = fs::remove_file(&final_path);
+        }
+        info!(
+            "{}: Recording finished. Output: {:?}",
+            platform_name, final_path
+        );
 
         Ok(())
     }
 
     /// Connect to WebSocket and process messages.
+    async fn poll_and_run(
+        &self,
+        cmd_rx: &mut mpsc::Receiver<RecorderCommand>,
+        stop_rx: &mut watch::Receiver<bool>,
+        xml_writer: &mut XmlWriter,
+        xml_config: &XmlWriterConfig,
+    ) -> Result<()> {
+        let platform_name = self.platform.name();
+        let mut context = self.config.context.clone();
+        let conn_info = self
+            .platform
+            .get_connection_info(&self.config.url, &context)
+            .await?;
+        let continuation = conn_info
+            .ws_url
+            .strip_prefix("poll://youtube?continuation=")
+            .ok_or_else(|| DanmakuError::Decode("Invalid polling connection info".to_string()))?;
+        context
+            .extra
+            .insert("continuation".to_string(), continuation.to_string());
+
+        let mut ticker = interval(self.platform.poll_interval());
+        info!("{}: Started polling danmaku", platform_name);
+
+        loop {
+            tokio::select! {
+                _ = stop_rx.changed() => {
+                    if *stop_rx.borrow() {
+                        return Err(DanmakuError::Stopped);
+                    }
+                }
+
+                Some(command) = cmd_rx.recv() => {
+                    if handle_command(command, &self.config.output_file, xml_writer, xml_config)? {
+                        return Err(DanmakuError::Stopped);
+                    }
+                }
+
+                _ = ticker.tick() => {
+                    let events = self.platform.poll_messages(&self.config.url, &mut context).await?;
+                    for event in events {
+                        if let Err(e) = xml_writer.write_event(&event) {
+                            warn!("Failed to write event: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Connect to WebSocket and process messages.
     async fn connect_and_run(
         &self,
-        event_tx: &mpsc::Sender<DanmakuEvent>,
+        cmd_rx: &mut mpsc::Receiver<RecorderCommand>,
         stop_rx: &mut watch::Receiver<bool>,
+        xml_writer: &mut XmlWriter,
+        xml_config: &XmlWriterConfig,
     ) -> Result<()> {
         let platform_name = self.platform.name();
 
@@ -229,17 +304,17 @@ impl DanmakuRecorder {
 
         debug!("{}: Connecting to {}", platform_name, conn_info.ws_url);
 
-        // Build WebSocket request with headers
-        let mut request = Request::builder()
-            .uri(&conn_info.ws_url);
+        // Build WebSocket request from the URL first so tungstenite generates
+        // the required handshake headers such as Sec-WebSocket-Key.
+        let mut request = conn_info
+            .ws_url
+            .as_str()
+            .into_client_request()
+            .map_err(|e| DanmakuError::Decode(e.to_string()))?;
 
         for (key, value) in conn_info.headers.iter() {
-            request = request.header(key.as_str(), value.to_str().unwrap_or(""));
+            request.headers_mut().insert(key.clone(), value.clone());
         }
-
-        let request = request
-            .body(())
-            .map_err(|e| DanmakuError::Decode(e.to_string()))?;
 
         // Connect
         let (ws_stream, _) = connect_async(request).await?;
@@ -306,6 +381,13 @@ impl DanmakuRecorder {
                     }
                 }
 
+                // Handle recorder commands
+                Some(command) = cmd_rx.recv() => {
+                    if handle_command(command, &self.config.output_file, xml_writer, xml_config)? {
+                        return Err(DanmakuError::Stopped);
+                    }
+                }
+
                 // Handle WebSocket message
                 ws_msg = ws_stream.next() => {
                     match ws_msg {
@@ -327,10 +409,10 @@ impl DanmakuRecorder {
                             // Decode message
                             match self.platform.decode_message(&data) {
                                 Ok(result) => {
-                                    // Send events
+                                    // Write decoded events
                                     for event in result.events {
-                                        if event_tx.send(event).await.is_err() {
-                                            return Err(DanmakuError::ChannelSend);
+                                        if let Err(e) = xml_writer.write_event(&event) {
+                                            warn!("Failed to write event: {}", e);
                                         }
                                     }
 
@@ -355,6 +437,79 @@ impl DanmakuRecorder {
             }
         }
     }
+}
+
+fn is_polling_url(url: &str) -> bool {
+    url.contains("youtube.com") || url.contains("youtu.be")
+}
+
+fn handle_command(
+    command: RecorderCommand,
+    template: &Path,
+    xml_writer: &mut XmlWriter,
+    xml_config: &XmlWriterConfig,
+) -> Result<bool> {
+    match command {
+        RecorderCommand::Rolling {
+            new_file_name,
+            done,
+        } => {
+            let result = roll_writer(xml_writer, template, xml_config, new_file_name);
+            let _ = done.send(result);
+            Ok(false)
+        }
+        RecorderCommand::Stop => Ok(true),
+    }
+}
+
+fn roll_writer(
+    xml_writer: &mut XmlWriter,
+    template: &Path,
+    xml_config: &XmlWriterConfig,
+    new_file_name: Option<PathBuf>,
+) -> Result<()> {
+    let current_path = xml_writer.file_path().to_path_buf();
+    xml_writer.finalize()?;
+    *xml_writer = XmlWriter::new(next_output_path(template), xml_config.clone())?;
+
+    if let Some(new_path) = new_file_name {
+        if current_path != new_path {
+            if let Some(parent) = new_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            if new_path.exists() {
+                fs::remove_file(&new_path)?;
+            }
+            fs::rename(current_path, new_path)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn next_output_path(template: &Path) -> PathBuf {
+    let output_path = format_output_path(template);
+    if !output_path.exists() {
+        return output_path;
+    }
+
+    let parent = output_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
+    let stem = output_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "danmaku".to_string());
+
+    for index in 1.. {
+        let candidate = parent.join(format!("{stem}_{index}.xml"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+
+    unreachable!()
 }
 
 /// Format output path with timestamp substitution.

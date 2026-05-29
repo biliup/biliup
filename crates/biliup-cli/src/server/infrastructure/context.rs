@@ -7,7 +7,6 @@ use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::models::StreamerInfo;
 use crate::server::infrastructure::models::live_streamer::LiveStreamer;
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
-use axum::http::Extensions;
 use biliup::client::StatelessClient;
 use core::fmt;
 use std::path::PathBuf;
@@ -22,8 +21,6 @@ pub struct Context {
     /// 工作器实例
     worker: Arc<Worker>,
     stream_info: StreamInfoExt,
-    /// 扩展数据容器
-    extension: Extensions,
     pool: ConnectionPool,
 }
 
@@ -37,13 +34,11 @@ impl Context {
         worker: Arc<Worker>,
         pool: ConnectionPool,
         stream_info: StreamInfoExt,
-        extension: Extensions,
     ) -> Self {
         Self {
             id,
             worker,
             stream_info,
-            extension,
             pool,
         }
     }
@@ -163,11 +158,6 @@ impl Worker {
             config,
             client,
         }
-    }
-
-    /// 判断是否应该录制
-    fn should_record(&self, room_title: &str) -> bool {
-        true
     }
 
     pub fn id(&self) -> i64 {
@@ -291,26 +281,15 @@ pub struct PluginContext {
     /// 工作器实例
     worker: Arc<Worker>,
     pool: ConnectionPool,
-    extension: Extensions,
 }
 
 impl PluginContext {
     pub fn new(worker: Arc<Worker>, pool: ConnectionPool) -> Self {
-        Self {
-            worker,
-            pool,
-            extension: Default::default(),
-        }
+        Self { worker, pool }
     }
 
     pub fn to_context(&self, id: i64, stream_info: StreamInfoExt) -> Context {
-        Context::new(
-            id,
-            self.worker.clone(),
-            self.pool.clone(),
-            stream_info,
-            self.extension.clone(),
-        )
+        Context::new(id, self.worker.clone(), self.pool.clone(), stream_info)
     }
 
     pub fn config(&self) -> Config {

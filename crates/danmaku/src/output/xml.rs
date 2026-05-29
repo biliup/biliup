@@ -10,14 +10,14 @@
 //! </i>
 //! ```
 
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use chrono::Utc;
-use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::Writer;
+use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
 
 use crate::error::Result;
 use crate::message::{ChatMessage, DanmakuEvent, GiftMessage, GuardBuyMessage, SuperChatMessage};
@@ -55,6 +55,7 @@ pub struct XmlWriter {
     message_count: u64,
     /// Last save time.
     last_save: Instant,
+    finalized: bool,
     /// Configuration.
     config: XmlWriterConfig,
 }
@@ -93,6 +94,7 @@ impl XmlWriter {
             start_time: now,
             message_count: 0,
             last_save: now,
+            finalized: false,
             config,
         })
     }
@@ -215,10 +217,7 @@ impl XmlWriter {
         }
 
         let timestamp = msg.timestamp.timestamp();
-        let content = format!(
-            "{}上了{}个月{}",
-            msg.name, msg.num, msg.gift_name
-        );
+        let content = format!("{}上了{}个月{}", msg.name, msg.num, msg.gift_name);
 
         let mut elem = BytesStart::new("s");
         elem.push_attribute(("timestamp", timestamp.to_string().as_str()));
@@ -260,15 +259,27 @@ impl XmlWriter {
 
     /// Finish writing and close the file.
     pub fn finish(mut self) -> Result<PathBuf> {
-        // Write closing tag
-        self.writer.write_event(Event::End(BytesEnd::new("i")))?;
-        self.flush()?;
+        self.finalize()?;
         Ok(self.file_path)
+    }
+
+    /// Finish the current XML document and flush it to disk.
+    pub fn finalize(&mut self) -> Result<()> {
+        if !self.finalized {
+            self.writer.write_event(Event::End(BytesEnd::new("i")))?;
+            self.finalized = true;
+        }
+        self.flush()?;
+        Ok(())
     }
 
     /// Get the current file path.
     pub fn file_path(&self) -> &Path {
         &self.file_path
+    }
+
+    pub fn has_messages(&self) -> bool {
+        self.message_count > 0
     }
 
     /// Get the number of messages written.
@@ -280,12 +291,15 @@ impl XmlWriter {
     pub fn rename(&mut self, new_path: impl AsRef<Path>) -> Result<()> {
         let new_path = new_path.as_ref().to_path_buf();
 
-        // Finish current file
-        self.writer.write_event(Event::End(BytesEnd::new("i")))?;
-        self.flush()?;
+        self.finalize()?;
 
-        // Rename the file
-        std::fs::rename(&self.file_path, &new_path)?;
+        if let Some(parent) = new_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if new_path.exists() {
+            fs::remove_file(&new_path)?;
+        }
+        fs::rename(&self.file_path, &new_path)?;
         self.file_path = new_path;
 
         Ok(())

@@ -13,7 +13,7 @@ use tracing::debug;
 
 use crate::codec::stt;
 use crate::error::{DanmakuError, Result};
-use crate::message::{ChatMessage, DanmakuEvent, EnterMessage, GiftMessage, DEFAULT_COLOR};
+use crate::message::{ChatMessage, DEFAULT_COLOR, DanmakuEvent, EnterMessage, GiftMessage};
 use crate::protocols::{
     ConnectionInfo, DecodeResult, HeartbeatConfig, Platform, PlatformContext, RegistrationData,
 };
@@ -157,7 +157,10 @@ impl Douyu {
                 // Gift message
                 let name = msg.get_str("nn").unwrap_or("").to_string();
                 let gift_name = msg.get_str("gfn").unwrap_or("礼物").to_string();
-                let num: u32 = msg.get_str("gfcnt").and_then(|s| s.parse().ok()).unwrap_or(1);
+                let num: u32 = msg
+                    .get_str("gfcnt")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(1);
                 let uid: u64 = msg.get_str("uid").and_then(|s| s.parse().ok()).unwrap_or(0);
 
                 let content = format!("{}投喂了{}个{}", name, num, gift_name);

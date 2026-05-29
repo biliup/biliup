@@ -1,22 +1,54 @@
-mod twitch;
+pub mod acfun;
+pub mod afreecatv;
+pub mod bigo;
+pub mod bilibili;
+pub mod cc;
+pub mod douyin;
+pub mod douyu;
+pub mod general;
+pub mod huya;
+pub mod inke;
+pub mod kilakila;
+pub mod kuaishou;
+pub mod missevan;
+pub mod niconico;
+pub mod picarto;
+pub mod ttinglive;
+pub mod twitcasting;
+pub mod twitch;
+pub mod youtube;
 pub mod yy;
 
-use crate::server::core::downloader::{
-    DanmakuClient, DownloaderRuntime, DownloaderType, cover_downloader,
-};
+use self::acfun::Acfun;
+use self::afreecatv::AfreecaTV;
+use self::bigo::Bigo;
+use self::bilibili::Bilibili;
+use self::cc::CC;
+use self::douyin::Douyin;
+use self::douyu::Douyu;
+use self::general::General;
+use self::huya::Huya;
+use self::inke::Inke;
+use self::kilakila::Kilakila;
+use self::kuaishou::Kuaishou;
+use self::missevan::Missevan;
+use self::niconico::Niconico;
+use self::picarto::Picarto;
+use self::ttinglive::TTingLive;
+use self::twitcasting::Twitcasting;
+use self::twitch::{Twitch, TwitchVideos};
+use self::youtube::Youtube;
+use self::yy::YY;
+
+use crate::server::core::downloader::{DanmakuClient, DownloaderRuntime, DownloaderType};
 use crate::server::errors::AppError;
-use crate::server::infrastructure::context::{Context, PluginContext};
+use crate::server::infrastructure::context::PluginContext;
 use crate::server::infrastructure::models::StreamerInfo;
 use async_trait::async_trait;
-use axum::http::header::USER_AGENT;
-use axum::http::{HeaderMap, HeaderValue};
 use error_stack::Report;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs;
-use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{error, info};
 
 /// 流信息结构
 /// 包含直播流的详细信息
@@ -73,4 +105,30 @@ pub trait DownloadPlugin {
 
     /// 获取插件名称
     fn name(&self) -> &str;
+}
+
+pub fn builtin_plugins() -> Vec<Arc<dyn DownloadPlugin + Send + Sync>> {
+    vec![
+        Arc::new(YY::new()),
+        Arc::new(TwitchVideos::new()),
+        Arc::new(Twitch::new()),
+        Arc::new(Douyu::new()),
+        Arc::new(Huya::new()),
+        Arc::new(Kuaishou::new()),
+        Arc::new(Missevan::new()),
+        Arc::new(Inke::new()),
+        Arc::new(CC::new()),
+        Arc::new(Picarto::new()),
+        Arc::new(Kilakila::new()),
+        Arc::new(Bigo::new()),
+        Arc::new(TTingLive::new()),
+        Arc::new(Acfun::new()),
+        Arc::new(AfreecaTV::new()),
+        Arc::new(Niconico::new()),
+        Arc::new(Youtube::new()),
+        Arc::new(Bilibili::new()),
+        Arc::new(Douyin::new()),
+        Arc::new(Twitcasting::new()),
+        Arc::new(General::new()),
+    ]
 }

@@ -9,14 +9,14 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_ENCODING, CACHE_CONTROL, REFERER, USER_AGENT};
+use reqwest::header::{
+    ACCEPT, ACCEPT_ENCODING, CACHE_CONTROL, HeaderMap, HeaderValue, REFERER, USER_AGENT,
+};
 use serde::Deserialize;
 
 use crate::error::{DanmakuError, Result};
 use crate::message::{ChatMessage, DanmakuEvent};
-use crate::protocols::{
-    ConnectionInfo, DecodeResult, HeartbeatConfig, Platform, PlatformContext,
-};
+use crate::protocols::{ConnectionInfo, DecodeResult, HeartbeatConfig, Platform, PlatformContext};
 
 /// User agent for Twitcasting requests.
 const USER_AGENT_STRING: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -62,7 +62,10 @@ impl Twitcasting {
     fn default_headers() -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
-        headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, deflate, br"));
+        headers.insert(
+            ACCEPT_ENCODING,
+            HeaderValue::from_static("gzip, deflate, br"),
+        );
         headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
         headers.insert(REFERER, HeaderValue::from_static("https://twitcasting.tv/"));
         headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_STRING));
@@ -87,10 +90,9 @@ impl Platform for Twitcasting {
         _url: &str,
         context: &PlatformContext,
     ) -> Result<ConnectionInfo> {
-        let movie_id = context
-            .movie_id
-            .as_ref()
-            .ok_or_else(|| DanmakuError::Decode("movie_id is required for Twitcasting".to_string()))?;
+        let movie_id = context.movie_id.as_ref().ok_or_else(|| {
+            DanmakuError::Decode("movie_id is required for Twitcasting".to_string())
+        })?;
 
         let password = context.password.as_deref().unwrap_or("");
 
@@ -115,8 +117,7 @@ impl Platform for Twitcasting {
     }
 
     fn decode_message(&self, msg: &[u8]) -> Result<DecodeResult> {
-        let text = std::str::from_utf8(msg)
-            .map_err(|e| DanmakuError::Decode(e.to_string()))?;
+        let text = std::str::from_utf8(msg).map_err(|e| DanmakuError::Decode(e.to_string()))?;
 
         let mut events = Vec::new();
 

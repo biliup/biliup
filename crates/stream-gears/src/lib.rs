@@ -110,7 +110,7 @@ fn download_with_callback(
     proxy: Option<String>,
 ) -> PyResult<()> {
     py.detach(|| {
-        let map = construct_headers(&header_map);
+        let map = construct_headers(&header_map).map_err(PyRuntimeError::new_err)?;
         // 输出到控制台中
         // use of deprecated function `time::util::local_offset::set_soundness`: no longer needed; TZ is refreshed manually
         // unsafe {
@@ -400,7 +400,10 @@ pub fn main_loop(py: Python<'_>) -> PyResult<()> {
     //     args.push("server".to_string());
     // }
     match args.as_slice() {
-        &[] => todo!(),
+        &[] => {
+            args.push("biliup".to_string());
+            args.push("server".to_string());
+        }
         &[_] => {
             args.push("server".to_string());
         }

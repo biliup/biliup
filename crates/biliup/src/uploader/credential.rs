@@ -568,8 +568,9 @@ impl Credential {
             .form(&[("oauthKey", oauth_key)])
             .send()
             .await?.error_for_status()?;
-        self.login_by_web_cookies(&self.get_cookie("SESSDATA"), &self.get_cookie("bili_jct"))
-            .await
+        let sess_data = self.get_cookie("SESSDATA")?;
+        let bili_jct = self.get_cookie("bili_jct")?;
+        self.login_by_web_cookies(&sess_data, &bili_jct).await
     }
 
     pub async fn login_by_web_cookies(&self, sess_data: &str, bili_jct: &str) -> Result<LoginInfo> {
@@ -639,14 +640,14 @@ impl Credential {
         }
     }
 
-    fn get_cookie(&self, name: &str) -> String {
+    fn get_cookie(&self, name: &str) -> Result<String> {
         let store = self.0.cookie_store.lock().unwrap();
         for item in store.iter_any() {
             if item.name() == name {
-                return item.value().to_string();
+                return Ok(item.value().to_string());
             }
         }
-        panic!("{name} not exist");
+        Err(Kind::Custom(format!("{name} not exist")))
     }
 }
 

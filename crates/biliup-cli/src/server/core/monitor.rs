@@ -1,8 +1,7 @@
 use crate::server::common::download::DownloaderMessage;
-use crate::server::common::util::Recorder;
 use crate::server::core::plugin::{DownloadPlugin, StreamStatus};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::context::{Context, PluginContext, Stage, Worker, WorkerStatus};
+use crate::server::infrastructure::context::{PluginContext, Stage, Worker, WorkerStatus};
 use crate::server::infrastructure::models::StreamerInfo;
 use async_channel::Sender;
 use ormlite::Model;
@@ -87,7 +86,7 @@ impl Monitor {
             // 检查直播状态
             let mut downloader = plugin.create_downloader(&mut ctx);
             match downloader.check_stream().await {
-                Ok(StreamStatus::Live { mut stream_info }) => {
+                Ok(StreamStatus::Live { stream_info }) => {
                     let sql_no_id = &stream_info.streamer_info;
                     let insert = match StreamerInfo::builder()
                         .url(sql_no_id.url.clone())
@@ -345,11 +344,6 @@ enum ActorMessage {
     GetAll {
         respond_to: oneshot::Sender<Vec<Arc<Worker>>>,
     },
-    /// 查找平台
-    GetPlatform {
-        respond_to: oneshot::Sender<Vec<Arc<Worker>>>,
-        platform_name: String,
-    },
     /// 放回工作队列
     WakeWaker(
         oneshot::Sender<Option<Arc<dyn DownloadPlugin + Send + Sync>>>,
@@ -430,14 +424,6 @@ impl RoomsActor {
                     // `let _ =` 忽略发送时的任何错误
                     let _ = respond_to.send(self.get_all());
                 }
-
-                ActorMessage::GetPlatform {
-                    respond_to,
-                    platform_name,
-                } => {
-                    // `let _ =` 忽略发送时的任何错误
-                    let _ = respond_to.send(self.get_by_platform(&platform_name));
-                }
                 ActorMessage::MakeWaker(respond_to, id) => {
                     self.pop(id);
                     // `let _ =` 忽略发送时的任何错误
@@ -481,16 +467,6 @@ impl RoomsActor {
             .iter()
             .find(|worker| worker.id() == id)
             .cloned()
-    }
-
-    fn get_by_platform(&mut self, platform_name: &str) -> Vec<Arc<Worker>> {
-        reuse_vec_arc(
-            &mut self
-                .platforms
-                .get(platform_name)
-                .unwrap_or(&VecDeque::new())
-                .iter(),
-        )
     }
 
     fn get_all(&mut self) -> Vec<Arc<Worker>> {

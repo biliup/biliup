@@ -101,6 +101,14 @@ fn sanitize_filename(name: &str) -> String {
     if out.is_empty() { "_".to_string() } else { out }
 }
 
+/// 生成弹幕文件名模板（包含时间格式占位符），并清洗非法字符
+pub fn danmaku_filename_template(filename_prefix: Option<&str>, name: &str) -> String {
+    let template = filename_prefix
+        .map(|prefix| prefix.replace("{streamer}", name))
+        .unwrap_or_else(|| format!("{}%Y-%m-%dT%H_%M_%S", name));
+    sanitize_filename(&template)
+}
+
 /// 从 URL 中提取媒体扩展名（小写），例如 "flv", "mp4" 等。
 /// 先尝试解析 URL 的 path 的扩展名；如果没有，再查 query 中常见的参数（format/type/ext）。
 /// 返回 None 表示无法判断。

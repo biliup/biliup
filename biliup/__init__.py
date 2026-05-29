@@ -1,5 +1,4 @@
 import logging
-import platform
 import sys
 from importlib.metadata import version
 
@@ -27,7 +26,7 @@ LOG_CONF = {
         },
         'file': {
             'level': logging.DEBUG,
-            'class': 'biliup.common.log.SafeRotatingFileHandler',
+            'class': 'logging.handlers.TimedRotatingFileHandler',
             'when': 'W0',
             'interval': 1,
             'backupCount': 1,
@@ -47,14 +46,6 @@ LOG_CONF = {
         },
     }
 }
-
-if (3, 10, 6) > sys.version_info >= (3, 8) and platform.system() == 'Windows':
-    # fix 'Event loop is closed' RuntimeError in Windows
-    from asyncio import proactor_events
-    from biliup.common.tools import silence_event_loop_closed
-
-    proactor_events._ProactorBasePipeTransport.__del__ = silence_event_loop_closed(
-        proactor_events._ProactorBasePipeTransport.__del__)
 
 IS_FROZEN = False
 if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):

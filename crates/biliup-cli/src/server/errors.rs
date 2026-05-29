@@ -5,7 +5,6 @@ use error_stack::Report;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
-use tracing::log::error;
 
 /// 应用程序错误类型枚举
 #[derive(Error, Debug)]

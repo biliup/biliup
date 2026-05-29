@@ -210,7 +210,9 @@ impl<'a> ProtoReader<'a> {
                         self.read_bytes().map(|b| {
                             // Try to interpret as string if valid UTF-8
                             if let Ok(s) = String::from_utf8(b.clone()) {
-                                if s.chars().all(|c| !c.is_control() || c == '\n' || c == '\r' || c == '\t') {
+                                if s.chars()
+                                    .all(|c| !c.is_control() || c == '\n' || c == '\r' || c == '\t')
+                                {
                                     return ProtoValue::String(s);
                                 }
                             }

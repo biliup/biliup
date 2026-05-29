@@ -2,7 +2,6 @@ use axum::extract::ws::{Message, Utf8Bytes, WebSocket};
 use axum::extract::{Query, WebSocketUpgrade};
 use serde::Deserialize;
 use std::collections::VecDeque;
-use std::io;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -213,43 +212,4 @@ async fn send_new_lines_from_offset(
             })?;
     }
     Ok(())
-}
-
-async fn resolve_latest_log_path(
-    dir: &std::path::Path,
-    prefix: &str,
-    suffix: &str,
-) -> io::Result<PathBuf> {
-    // 1) 活跃文件 prefix.log
-    let active = dir.join(format!("{}.{}", prefix, suffix));
-    if fs::metadata(&active).await.is_ok() {
-        return Ok(active);
-    }
-
-    // 2) 回退到归档文件 prefix.*.log 中最新的一个
-    let mut rd = fs::read_dir(dir).await?;
-    let pre = format!("{}.", prefix);
-    let suf = format!(".{}", suffix);
-
-    let mut candidates: Vec<(String, PathBuf)> = Vec::new();
-    while let Some(ent) = rd.next_entry().await? {
-        let path = ent.path();
-        if !path.is_file() {
-            continue;
-        }
-        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        if name.starts_with(&pre) && name.ends_with(&suf) {
-            candidates.push((name.to_string(), path));
-        }
-    }
-
-    if candidates.is_empty() {
-        return Err(io::Error::new(ErrorKind::NotFound, "no log file found"));
-    }
-
-    // tracing-appender 的归档名使用 YYYY-MM-DD，中间按字符串排序即时间顺序
-    candidates.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(candidates.last().unwrap().1.clone())
 }

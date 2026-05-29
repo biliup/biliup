@@ -6,8 +6,7 @@ use error_stack::ResultExt;
 use reqwest::header::HeaderMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
-use tracing::{error, info, instrument, warn};
+use tracing::{error, info, instrument};
 use url::Url;
 
 /// 支持的图片格式

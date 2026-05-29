@@ -1,18 +1,23 @@
+use crate::server::core::downloader::{DownloadConfig, DownloadStatus, SegmentEvent, SegmentInfo};
 use crate::server::errors::{AppError, AppResult};
 use error_stack::ResultExt;
 use std::collections::HashMap;
-use std::process::Stdio;
+use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStdout, Command};
 use tokio::sync::RwLock;
 use tokio::time::Duration;
-use tracing::{error, info};
+use tracing::info;
 use url::Url;
 
 #[derive(Debug, Clone)]
 pub enum Platform {
     Bilibili,
-    Twitch { disable_ads: bool },
+    Twitch {
+        disable_ads: bool,
+        auth_token: Option<String>,
+    },
     Generic,
 }
 
@@ -38,11 +43,55 @@ impl Streamlink {
         }
     }
 
+    pub(crate) async fn download<'a>(
+        &self,
+        mut callback: Box<dyn FnMut(SegmentEvent) + Send + Sync + 'a>,
+        download_config: DownloadConfig,
+    ) -> AppResult<DownloadStatus> {
+        let output_file = download_config.generate_output_filename(&download_config.suffix);
+        let part_file = format!("{}.part", output_file.display());
+        let args = self
+            .streamlink_downloader
+            .build_file_args(&download_config, &part_file)?;
+
+        let mut cmd = Command::new("streamlink");
+        cmd.args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+
+        info!(cmd = ?cmd, "Starting streamlink download");
+        let child = cmd.spawn().change_context(AppError::Unknown)?;
+        let status = spawn_log(child, &self.process_handle).await?;
+
+        if tokio::fs::try_exists(&part_file)
+            .await
+            .change_context(AppError::Unknown)?
+        {
+            tokio::fs::rename(&part_file, &output_file)
+                .await
+                .change_context(AppError::Custom(String::from("退出时，重命名文件")))?;
+            callback(SegmentEvent::Segment(SegmentInfo::new(
+                output_file,
+                None,
+                0,
+            )));
+        }
+
+        match status.code() {
+            Some(0) => Ok(DownloadStatus::SegmentCompleted),
+            Some(130) | Some(143) | Some(255) => Ok(DownloadStatus::StreamEnded),
+            err => Ok(DownloadStatus::Error(format!("Streamlink error: {err:?}"))),
+        }
+    }
+
     /// 停止下载
     pub(crate) async fn stop(&self) -> AppResult<()> {
-        // 仅发出取消信号并更新状态
-        // 如果底层下载函数不支持取消，这里不能真正中断正在进行的下载
-
+        let mut handle = self.process_handle.write().await;
+        if let Some(child) = &mut *handle {
+            child.kill().await.change_context(AppError::Unknown)?;
+        }
         Ok(())
     }
 }
@@ -74,28 +123,50 @@ impl StreamlinkDownloader {
         self
     }
 
+    fn build_base_args(&self) -> AppResult<Vec<String>> {
+        let mut args = vec![
+            "--stream-segment-threads".to_string(),
+            "3".to_string(),
+            "--hls-playlist-reload-attempts".to_string(),
+            "1".to_string(),
+        ];
+
+        for (key, value) in &self.headers {
+            args.push("--http-header".to_string());
+            args.push(format!("{}={}", key, value));
+        }
+
+        args.extend(self.build_platform_args()?);
+        Ok(args)
+    }
+
+    fn build_file_args(
+        &self,
+        download_config: &DownloadConfig,
+        output_file: &str,
+    ) -> AppResult<Vec<String>> {
+        let mut args = self.build_base_args()?;
+        for (key, value) in &download_config.headers {
+            args.push("--http-header".to_string());
+            args.push(format!("{}={}", key, value));
+        }
+        if let Some(segment_time) = &download_config.segment_time {
+            args.push("--hls-duration".to_string());
+            args.push(segment_time.clone());
+        }
+        args.push("--force".to_string());
+        args.push("--output".to_string());
+        args.push(output_file.to_string());
+        args.push(download_config.url.clone());
+        args.push("best".to_string());
+        Ok(args)
+    }
+
     /// 启动streamlink进程
     pub fn start(&mut self) -> AppResult<StreamOutput> {
         let mut cmd = Command::new("streamlink");
 
-        // 基础参数
-        cmd.args([
-            "--stream-segment-threads",
-            "3",
-            "--hls-playlist-reload-attempts",
-            "1",
-        ]);
-
-        // 添加HTTP headers
-        for (key, value) in &self.headers {
-            cmd.args(["--http-header", &format!("{}={}", key, value)]);
-        }
-
-        // 平台特定处理
-        let platform_args = self.build_platform_args()?;
-        for arg in platform_args {
-            cmd.arg(arg);
-        }
+        cmd.args(self.build_base_args()?);
 
         // 配置输出模式
         let output = match &self.output_mode {
@@ -138,13 +209,16 @@ impl StreamlinkDownloader {
                 // Bilibili需要保留特定URL参数，否则segment请求会404
                 args.extend(self.parse_bilibili_params()?);
             }
-            Platform::Twitch { disable_ads } => {
+            Platform::Twitch {
+                disable_ads,
+                auth_token,
+            } => {
                 if *disable_ads {
                     args.push("--twitch-disable-ads".to_string());
                 }
 
-                // 添加认证token（如果存在）
-                if let Some(token) = Self::get_twitch_auth_token() {
+                let token = auth_token.clone().or_else(Self::get_twitch_auth_token);
+                if let Some(token) = token {
                     args.push(format!("--twitch-api-header=Authorization=OAuth {}", token));
                 }
             }
@@ -159,8 +233,6 @@ impl StreamlinkDownloader {
         let mut params = Vec::new();
 
         let url = Url::parse(&self.url).change_context(AppError::Unknown)?;
-        let query = url.query().unwrap_or("");
-
         // 白名单参数
         let mut whitelist = vec![
             "uparams",
@@ -211,26 +283,9 @@ pub enum StreamOutput {
 impl StreamOutput {
     /// 获取可读的输入源（用于FFmpeg等）
     pub async fn get_input_uri(&mut self) -> String {
-        self.wait_for_startup().await;
         match self {
             StreamOutput::Pipe(_) => "pipe:0".to_string(),
             StreamOutput::Http { url, .. } => url.clone(),
-        }
-    }
-
-    /// 等待HTTP服务器启动
-    async fn wait_for_startup(&mut self) {
-        let process = match self {
-            StreamOutput::Pipe(process) => process,
-            StreamOutput::Http { url, process } => process,
-        };
-        match tokio::time::timeout(Duration::from_secs(5), process.wait()).await {
-            Ok(code) => {
-                info!("StreamOutput Exited with code {:?}", code);
-            }
-            Err(e) => {
-                error!(e=?e, "Timed out waiting for stream output");
-            }
         }
     }
 
@@ -253,4 +308,56 @@ impl StreamOutput {
         let _ = child.wait().await; // 回收资源
         info!("成功stream terminated");
     }
+}
+
+async fn spawn_log(
+    mut child: Child,
+    process_handle: &RwLock<Option<Child>>,
+) -> AppResult<ExitStatus> {
+    let mut stderr_task = child.stderr.take().map(|stderr| {
+        let mut stderr_lines = BufReader::new(stderr).lines();
+        tokio::spawn(async move {
+            while let Ok(Some(line)) = stderr_lines.next_line().await {
+                info!("[streamlink] {line}");
+            }
+        })
+    });
+
+    let mut stdout_task = child.stdout.take().map(|stdout| {
+        let mut stdout_lines = BufReader::new(stdout).lines();
+        tokio::spawn(async move {
+            while let Ok(Some(line)) = stdout_lines.next_line().await {
+                info!("[streamlink] {line}");
+            }
+        })
+    });
+
+    {
+        let mut handle = process_handle.write().await;
+        *handle = Some(child);
+    }
+
+    let status = loop {
+        {
+            let mut handle = process_handle.write().await;
+            let Some(child) = handle.as_mut() else {
+                return Err(AppError::Custom("Process handle not found".to_string()).into());
+            };
+            if let Some(status) = child.try_wait().change_context(AppError::Unknown)? {
+                *handle = None;
+                break status;
+            }
+        }
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    };
+
+    if let Some(task) = stderr_task.take() {
+        let _ = task.await;
+    }
+    if let Some(task) = stdout_task.take() {
+        let _ = task.await;
+    }
+
+    Ok(status)
 }

@@ -49,5 +49,5 @@ pub use error::{DanmakuError, Result};
 pub use message::{ChatMessage, DanmakuEvent, GiftMessage, GuardBuyMessage, SuperChatMessage};
 pub use output::XmlWriter;
 pub use protocols::{
-    create_platform, ConnectionInfo, DecodeResult, HeartbeatConfig, Platform, PlatformContext,
+    ConnectionInfo, DecodeResult, HeartbeatConfig, Platform, PlatformContext, create_platform,
 };

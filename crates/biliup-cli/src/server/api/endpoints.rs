@@ -510,7 +510,7 @@ pub async fn get_videos() -> Result<Json<Vec<serde_json::Value>>, Response> {
 
 // #[axum::debug_handler(state = ServiceRegister)]
 pub async fn get_status(
-    State(service_register): State<ServiceRegister>,
+    State(_service_register): State<ServiceRegister>,
     State(managers): State<Arc<DownloadManager>>,
     State(config): State<Arc<RwLock<Config>>>,
 ) -> Result<Json<serde_json::Value>, Response> {

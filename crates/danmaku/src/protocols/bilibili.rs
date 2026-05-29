@@ -15,17 +15,22 @@ use async_trait::async_trait;
 use byteorder::{BigEndian, ByteOrder};
 use flate2::read::ZlibDecoder;
 use regex::Regex;
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, COOKIE, ORIGIN, REFERER, USER_AGENT};
+use reqwest::header::{
+    ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, COOKIE, HeaderMap, HeaderValue, ORIGIN, REFERER,
+    USER_AGENT,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::debug;
 
 use crate::error::{DanmakuError, Result};
-use crate::message::{ChatMessage, DanmakuEvent, GiftMessage, GuardBuyMessage, SuperChatMessage, DEFAULT_COLOR};
+use crate::message::{
+    ChatMessage, DEFAULT_COLOR, DanmakuEvent, GiftMessage, GuardBuyMessage, SuperChatMessage,
+};
+use crate::protocols::wbi::WbiSigner;
 use crate::protocols::{
     ConnectionInfo, DecodeResult, HeartbeatConfig, Platform, PlatformContext, RegistrationData,
 };
-use crate::protocols::wbi::WbiSigner;
 
 /// User agent for Bilibili requests.
 const USER_AGENT_STRING: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -38,13 +43,12 @@ const DEFAULT_WS_URL: &str = "wss://broadcastlv.chat.bilibili.com/sub";
 /// Body: "[object Object] "
 const HEARTBEAT: &[u8] = &[
     0x00, 0x00, 0x00, 0x1f, // packet length = 31
-    0x00, 0x10,             // header length = 16
-    0x00, 0x01,             // version = 1
+    0x00, 0x10, // header length = 16
+    0x00, 0x01, // version = 1
     0x00, 0x00, 0x00, 0x02, // operation = 2 (heartbeat)
     0x00, 0x00, 0x00, 0x01, // sequence = 1
     // "[object Object] "
-    0x5b, 0x6f, 0x62, 0x6a, 0x65, 0x63, 0x74, 0x20,
-    0x4f, 0x62, 0x6a, 0x65, 0x63, 0x74, 0x5d, 0x20,
+    0x5b, 0x6f, 0x62, 0x6a, 0x65, 0x63, 0x74, 0x20, 0x4f, 0x62, 0x6a, 0x65, 0x63, 0x74, 0x5d, 0x20,
 ];
 
 /// Operation codes.
@@ -110,10 +114,19 @@ impl Bilibili {
         let mut headers = HeaderMap::new();
         headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
         headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, deflate"));
-        headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3"));
+        headers.insert(
+            ACCEPT_LANGUAGE,
+            HeaderValue::from_static("zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3"),
+        );
         headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_STRING));
-        headers.insert(ORIGIN, HeaderValue::from_static("https://live.bilibili.com"));
-        headers.insert(REFERER, HeaderValue::from_static("https://live.bilibili.com"));
+        headers.insert(
+            ORIGIN,
+            HeaderValue::from_static("https://live.bilibili.com"),
+        );
+        headers.insert(
+            REFERER,
+            HeaderValue::from_static("https://live.bilibili.com"),
+        );
 
         // Generate fake buvid3
         let buvid3 = generate_fake_buvid3();
@@ -203,22 +216,30 @@ impl Bilibili {
         // Check if API returned an error
         let code = json.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
         if code != 0 {
-            let msg = json.get("message").and_then(|v| v.as_str()).unwrap_or("unknown");
-            debug!("getDanmuInfo returned error code {}: {}, using default WebSocket URL", code, msg);
+            let msg = json
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            debug!(
+                "getDanmuInfo returned error code {}: {}, using default WebSocket URL",
+                code, msg
+            );
             return Ok((DEFAULT_WS_URL.to_string(), String::new()));
         }
 
         // Parse successful response
-        let data = json.get("data").ok_or_else(|| {
-            DanmakuError::Decode("Missing data field in response".to_string())
-        })?;
+        let data = json
+            .get("data")
+            .ok_or_else(|| DanmakuError::Decode("Missing data field in response".to_string()))?;
 
-        let token = data.get("token")
+        let token = data
+            .get("token")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
 
-        let ws_url = data.get("host_list")
+        let ws_url = data
+            .get("host_list")
             .and_then(|v| v.as_array())
             .and_then(|list| list.first())
             .and_then(|host| {
@@ -328,7 +349,8 @@ impl Bilibili {
 
         // info[0][3] = color
         let meta = info.get(0)?.as_array()?;
-        let color = meta.get(3)
+        let color = meta
+            .get(3)
             .and_then(|v| v.as_u64())
             .map(|c| c as u32)
             .unwrap_or(DEFAULT_COLOR);
@@ -433,7 +455,10 @@ impl Bilibili {
     fn parse_interactive_danmaku(json: &Value) -> Option<DanmakuEvent> {
         let data = json.get("data")?;
 
-        let name = data.get("uname").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let name = data
+            .get("uname")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
         let content = data.get("msg")?.as_str()?.to_string();
 
         let mut chat = ChatMessage::new(content).with_color(DEFAULT_COLOR);
@@ -531,10 +556,10 @@ fn build_packet(body: &[u8], operation: u32) -> Vec<u8> {
 
     // Header
     packet.extend_from_slice(&(packet_len as u32).to_be_bytes()); // packet length
-    packet.extend_from_slice(&16u16.to_be_bytes());               // header length
-    packet.extend_from_slice(&1u16.to_be_bytes());                // version
-    packet.extend_from_slice(&operation.to_be_bytes());           // operation
-    packet.extend_from_slice(&1u32.to_be_bytes());                // sequence
+    packet.extend_from_slice(&16u16.to_be_bytes()); // header length
+    packet.extend_from_slice(&1u16.to_be_bytes()); // version
+    packet.extend_from_slice(&operation.to_be_bytes()); // operation
+    packet.extend_from_slice(&1u32.to_be_bytes()); // sequence
 
     // Body
     packet.extend_from_slice(body);
@@ -546,7 +571,8 @@ fn build_packet(body: &[u8], operation: u32) -> Vec<u8> {
 fn decompress_zlib(data: &[u8]) -> Result<Vec<u8>> {
     let mut decoder = ZlibDecoder::new(data);
     let mut decompressed = Vec::new();
-    decoder.read_to_end(&mut decompressed)
+    decoder
+        .read_to_end(&mut decompressed)
         .map_err(|e| DanmakuError::Compression(format!("zlib: {}", e)))?;
     Ok(decompressed)
 }

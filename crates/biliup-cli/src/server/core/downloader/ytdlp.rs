@@ -1,7 +1,14 @@
+use crate::server::core::downloader::{
+    DownloadConfig as RuntimeDownloadConfig, DownloadStatus, SegmentEvent, SegmentInfo,
+};
 use crate::server::errors::{AppError, AppResult};
 use error_stack::{ResultExt, bail};
 use std::{
     path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 use tokio::{fs, process::Command, time::timeout};
@@ -95,14 +102,48 @@ impl Default for DownloadConfig {
 
 pub struct YouTubeDownloader {
     cfg: DownloadConfig,
+    stopped: Arc<AtomicBool>,
 }
 
 impl YouTubeDownloader {
     pub fn new(cfg: DownloadConfig) -> Self {
-        Self { cfg }
+        Self {
+            cfg,
+            stopped: Arc::new(AtomicBool::new(false)),
+        }
     }
 
-    pub async fn download(&self) -> AppResult<()> {
+    pub async fn download<'a>(
+        &self,
+        mut callback: Box<dyn FnMut(SegmentEvent) + Send + Sync + 'a>,
+        runtime_cfg: RuntimeDownloadConfig,
+    ) -> AppResult<DownloadStatus> {
+        self.stopped.store(false, Ordering::Relaxed);
+        let mut cfg = self.cfg.clone();
+        cfg.suffix = runtime_cfg.suffix;
+        cfg.filename = runtime_cfg.recorder.generate_filename(&cfg.suffix);
+        cfg.working_dir = runtime_cfg.output_dir;
+
+        let downloader = Self {
+            cfg,
+            stopped: self.stopped.clone(),
+        };
+        downloader.run().await?;
+
+        if downloader.stopped.load(Ordering::Relaxed) {
+            return Ok(DownloadStatus::StreamEnded);
+        }
+
+        let output_path = downloader.output_path().await?;
+        callback(SegmentEvent::Segment(SegmentInfo::new(
+            output_path,
+            None,
+            0,
+        )));
+        Ok(DownloadStatus::StreamEnded)
+    }
+
+    async fn run(&self) -> AppResult<()> {
         // 1) 可选并发封面
         let cover_handle = if self.cfg.use_live_cover {
             self.spawn_cover_download()
@@ -126,6 +167,11 @@ impl YouTubeDownloader {
             }
         }
 
+        Ok(())
+    }
+
+    pub async fn stop(&self) -> AppResult<()> {
+        self.stopped.store(true, Ordering::Relaxed);
         Ok(())
     }
 
@@ -202,6 +248,10 @@ impl YouTubeDownloader {
         cmd.arg(url);
 
         cmd.kill_on_drop(true);
+
+        if self.stopped.load(Ordering::Relaxed) {
+            return Ok(());
+        }
 
         info!("运行: {:?}", cmd);
         let output = cmd.output().await.change_context(AppError::Custom(format!(
@@ -292,6 +342,9 @@ impl YouTubeDownloader {
         }
 
         cmd.kill_on_drop(true);
+        if self.stopped.load(Ordering::Relaxed) {
+            return Ok(());
+        }
         info!("运行: (cwd: {}) {:?}", cache_dir.display(), cmd);
 
         let output = cmd.output().await.change_context(AppError::Custom(format!(
@@ -335,6 +388,39 @@ impl YouTubeDownloader {
         }
 
         Ok(())
+    }
+
+    async fn output_path(&self) -> AppResult<PathBuf> {
+        let expected = self
+            .cfg
+            .working_dir
+            .join(format!("{}.{}", self.cfg.filename, self.cfg.suffix));
+        if fs::metadata(&expected).await.is_ok() {
+            return Ok(expected);
+        }
+
+        let mut entries =
+            fs::read_dir(&self.cfg.working_dir)
+                .await
+                .change_context(AppError::Custom(format!(
+                    "读取 YouTube 下载目录失败: {}",
+                    self.cfg.working_dir.display()
+                )))?;
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .change_context(AppError::Unknown)?
+        {
+            let path = entry.path();
+            let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            if stem == self.cfg.filename {
+                return Ok(path);
+            }
+        }
+
+        Ok(expected)
     }
 
     async fn move_dir_contents(&self, from: &Path, to: &Path) -> AppResult<()> {

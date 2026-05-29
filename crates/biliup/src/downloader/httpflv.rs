@@ -218,12 +218,12 @@ pub fn map_parse_err<'a, T>(
             msg.to_string(),
             needed,
         )),
-        Err(Err::Error(e)) => {
-            panic!("parse {msg} err: {e:?}")
-        }
-        Err(Err::Failure(f)) => {
-            panic!("{msg} Failure: {f:?}")
-        }
+        Err(Err::Error(e)) => Err(crate::downloader::error::Error::Custom(format!(
+            "parse {msg} err: {e:?}"
+        ))),
+        Err(Err::Failure(f)) => Err(crate::downloader::error::Error::Custom(format!(
+            "{msg} Failure: {f:?}"
+        ))),
     }
 }
 

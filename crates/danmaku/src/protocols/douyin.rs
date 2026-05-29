@@ -4,10 +4,6 @@
 //! - PushFrame wrapper with gzip-compressed payload
 //! - Response containing message list
 //! - ChatMessage for danmaku content
-//!
-//! NOTE: This implementation requires a valid signature to connect.
-//! The signature calculation requires JavaScript execution (webmssdk.js).
-//! Without proper signature, connections will likely be rejected.
 
 use std::io::Read;
 use std::time::Duration;
@@ -15,17 +11,35 @@ use std::time::Duration;
 use async_trait::async_trait;
 use flate2::read::GzDecoder;
 use regex::Regex;
+use reqwest::header::{COOKIE, HeaderMap, HeaderValue, ORIGIN, REFERER, USER_AGENT};
 use tracing::debug;
 
 use crate::codec::protobuf::{ProtoReader, ProtoWriter};
 use crate::error::{DanmakuError, Result};
-use crate::message::{ChatMessage, DanmakuEvent, DEFAULT_COLOR};
-use crate::protocols::{
-    ConnectionInfo, DecodeResult, HeartbeatConfig, Platform, PlatformContext,
-};
+use crate::message::{ChatMessage, DEFAULT_COLOR, DanmakuEvent};
+use crate::protocols::{ConnectionInfo, DecodeResult, HeartbeatConfig, Platform, PlatformContext};
 
 /// Heartbeat packet.
 const HEARTBEAT: &[u8] = b":\x02hb";
+const USER_AGENT_STRING: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const DOUYIN_WS_URL: &str = "wss://webcast100-ws-web-lf.douyin.com/webcast/im/push/v2/";
+const XBOGUS_ALPHABET: &[u8; 64] =
+    b"Dkdpgh4ZKsQB80/Mfvw36XI1R25+WUAlEi7NLboqYTOPuzmFjJnryx9HVGcaStCe";
+const STANDARD_ALPHABET: &[u8; 64] =
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const EMPTY_MD5_BYTES: [u8; 2] = [0x45, 0x3f];
+
+const fn build_lookup() -> [u8; 128] {
+    let mut table = [0u8; 128];
+    let mut i = 0;
+    while i < 64 {
+        table[STANDARD_ALPHABET[i] as usize] = XBOGUS_ALPHABET[i];
+        i += 1;
+    }
+    table
+}
+
+const ALPHABET_LOOKUP: [u8; 128] = build_lookup();
 
 /// Douyin live danmaku protocol.
 pub struct Douyin;
@@ -59,33 +73,23 @@ impl Douyin {
     }
 
     /// Generate X-MS-Stub (MD5 of params).
-    fn get_x_ms_stub(params: &[(&str, &str)]) -> String {
+    fn get_x_ms_stub(params: &[(&str, &str)]) -> [u8; 32] {
         let sig_params: String = params
             .iter()
             .map(|(k, v)| format!("{}={}", k, v))
             .collect::<Vec<_>>()
             .join(",");
 
-        let digest = md5::compute(sig_params.as_bytes());
-        format!("{:x}", digest)
-    }
-
-    /// Generate a placeholder signature.
-    /// NOTE: Real signature requires JavaScript execution.
-    /// This returns a placeholder that will likely not work.
-    fn get_signature(_x_ms_stub: &str) -> String {
-        // Without JS execution, we cannot generate a valid signature.
-        // Return a placeholder - connection will likely fail.
-        "00000000".to_string()
+        hex_md5(sig_params.as_bytes())
     }
 
     /// Build WebSocket URL with parameters.
     fn build_ws_url(room_id: &str) -> String {
         let user_unique_id = Self::generate_user_unique_id();
         let version_code = "180800";
-        let webcast_sdk_version = "1.0.14-beta.0";
+        let webcast_sdk_version = "1.0.15";
+        let update_version_code = "1.0.15";
 
-        // Parameters for signature
         let sig_params = [
             ("live_id", "1"),
             ("aid", "6383"),
@@ -101,21 +105,33 @@ impl Douyin {
             ("ac", ""),
             ("identity", "audience"),
         ];
-
         let x_ms_stub = Self::get_x_ms_stub(&sig_params);
-        let signature = Self::get_signature(&x_ms_stub);
+        let signature = generate_xbogus(&x_ms_stub, 1);
+        let signature = String::from_utf8_lossy(&signature);
 
-        // WebSocket URL parameters
         let ws_params = [
-            ("room_id", room_id.to_string()),
+            ("app_name", "douyin_web".to_string()),
             ("compress", "gzip".to_string()),
+            ("device_platform", "web".to_string()),
+            ("browser_language", "zh-CN".to_string()),
+            ("browser_platform", "Win32".to_string()),
+            ("browser_name", "Mozilla".to_string()),
+            ("browser_version", "120.0.0.0".to_string()),
+            ("aid", "6383".to_string()),
+            ("live_id", "1".to_string()),
+            ("enter_from", "web_live".to_string()),
             ("version_code", version_code.to_string()),
             ("webcast_sdk_version", webcast_sdk_version.to_string()),
-            ("live_id", "1".to_string()),
+            ("update_version_code", update_version_code.to_string()),
+            ("host", "https://live.douyin.com".to_string()),
             ("did_rule", "3".to_string()),
-            ("user_unique_id", user_unique_id),
             ("identity", "audience".to_string()),
-            ("signature", signature),
+            ("endpoint", "live_pc".to_string()),
+            ("need_persist_msg_count", "15".to_string()),
+            ("heartbeatDuration", "0".to_string()),
+            ("room_id", room_id.to_string()),
+            ("user_unique_id", user_unique_id),
+            ("signature", signature.to_string()),
         ];
 
         let query: String = ws_params
@@ -124,10 +140,46 @@ impl Douyin {
             .collect::<Vec<_>>()
             .join("&");
 
-        format!(
-            "wss://webcast5-ws-web-lf.douyin.com/webcast/im/push/v2/?{}",
-            query
-        )
+        format!("{}?{}", DOUYIN_WS_URL, query)
+    }
+
+    fn default_headers(context: &PlatformContext) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+
+        let user_agent = context
+            .extra
+            .get("user-agent")
+            .map(String::as_str)
+            .unwrap_or(USER_AGENT_STRING);
+        if let Ok(value) = HeaderValue::from_str(user_agent) {
+            headers.insert(USER_AGENT, value);
+        } else {
+            headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_STRING));
+        }
+
+        headers.insert(ORIGIN, HeaderValue::from_static("https://live.douyin.com"));
+
+        let referer = context
+            .extra
+            .get("referer")
+            .map(String::as_str)
+            .unwrap_or("https://live.douyin.com/");
+        if let Ok(value) = HeaderValue::from_str(referer) {
+            headers.insert(REFERER, value);
+        } else {
+            headers.insert(
+                REFERER,
+                HeaderValue::from_static("https://live.douyin.com/"),
+            );
+        }
+
+        if let Some(cookie) = context.cookie.as_deref().filter(|value| !value.is_empty()) {
+            if let Ok(value) = HeaderValue::from_str(cookie) {
+                headers.insert(COOKIE, value);
+            }
+        }
+
+        headers
     }
 
     /// Decompress gzip data.
@@ -250,6 +302,101 @@ impl Douyin {
     }
 }
 
+fn hex_md5(input: &[u8]) -> [u8; 32] {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let digest = md5::compute(input);
+    let mut output = [0u8; 32];
+    for (i, byte) in digest.0.iter().enumerate() {
+        output[i * 2] = HEX[(byte >> 4) as usize];
+        output[i * 2 + 1] = HEX[(byte & 0x0f) as usize];
+    }
+    output
+}
+
+fn hex_byte(h: u8, l: u8) -> u8 {
+    let hi = if h >= b'a' { h - b'a' + 10 } else { h - b'0' };
+    let lo = if l >= b'a' { l - b'a' + 10 } else { l - b'0' };
+    (hi << 4) | lo
+}
+
+fn md5_last2(hex_str: &[u8; 32]) -> [u8; 2] {
+    let mut bytes = [0u8; 16];
+    for i in 0..16 {
+        bytes[i] = hex_byte(hex_str[i * 2], hex_str[i * 2 + 1]);
+    }
+    let hash = md5::compute(bytes);
+    [hash.0[14], hash.0[15]]
+}
+
+fn rc4_encrypt(key: u8, data: &mut [u8]) {
+    let mut s: [u8; 256] = core::array::from_fn(|i| i as u8);
+    let mut j: usize = 0;
+
+    for i in 0..256 {
+        j = (j + s[i] as usize + key as usize) % 256;
+        s.swap(i, j);
+    }
+
+    let mut i: usize = 0;
+    j = 0;
+    for byte in data.iter_mut() {
+        i = (i + 1) % 256;
+        j = (j + s[i] as usize) % 256;
+        s.swap(i, j);
+        *byte ^= s[(s[i] as usize + s[j] as usize) % 256];
+    }
+}
+
+fn encode_base64(data: &[u8; 12], out: &mut [u8; 16]) {
+    const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    let mut input = 0;
+    let mut output = 0;
+    while input < 12 {
+        let b0 = data[input] as usize;
+        let b1 = data[input + 1] as usize;
+        let b2 = data[input + 2] as usize;
+
+        out[output] = ALPHABET_LOOKUP[B64[(b0 >> 2) & 0x3f] as usize];
+        out[output + 1] = ALPHABET_LOOKUP[B64[((b0 << 4) | (b1 >> 4)) & 0x3f] as usize];
+        out[output + 2] = ALPHABET_LOOKUP[B64[((b1 << 2) | (b2 >> 6)) & 0x3f] as usize];
+        out[output + 3] = ALPHABET_LOOKUP[B64[b2 & 0x3f] as usize];
+
+        input += 3;
+        output += 4;
+    }
+}
+
+fn generate_xbogus(ms_stub: &[u8; 32], counter: u8) -> [u8; 16] {
+    let random1 = rand::random::<u8>();
+    let random2 = (rand::random::<u8>() as u16 * 255 / 256) as u8;
+    let header = 0x40 | (random1 & 0x1f);
+    let md5_bytes = md5_last2(ms_stub);
+    let mut payload: [u8; 10] = [
+        counter & 0x3f,
+        0,
+        1,
+        0x0e,
+        EMPTY_MD5_BYTES[0],
+        EMPTY_MD5_BYTES[1],
+        md5_bytes[0],
+        md5_bytes[1],
+        random2,
+        0,
+    ];
+    payload[9] = payload[..9].iter().fold(0, |acc, &item| acc ^ item);
+    rc4_encrypt(random2, &mut payload);
+
+    let mut final_data = [0u8; 12];
+    final_data[0] = header;
+    final_data[1] = random2;
+    final_data[2..].copy_from_slice(&payload);
+
+    let mut result = [0u8; 16];
+    encode_base64(&final_data, &mut result);
+    result
+}
+
 impl Default for Douyin {
     fn default() -> Self {
         Self::new()
@@ -275,11 +422,17 @@ impl Platform for Douyin {
                 .ok_or_else(|| DanmakuError::Decode("Invalid Douyin URL".to_string()))?
         };
 
+        if let Some(ws_url) = context.extra.get("ws_url") {
+            debug!("Douyin WebSocket URL: {}", ws_url);
+            return Ok(
+                ConnectionInfo::new(ws_url.clone()).with_headers(Self::default_headers(context))
+            );
+        }
+
         let ws_url = Self::build_ws_url(&room_id);
         debug!("Douyin WebSocket URL: {}", ws_url);
 
-        // Note: Without proper signature, connection will likely fail
-        Ok(ConnectionInfo::new(ws_url))
+        Ok(ConnectionInfo::new(ws_url).with_headers(Self::default_headers(context)))
     }
 
     fn heartbeat_config(&self) -> HeartbeatConfig {
@@ -352,5 +505,35 @@ mod tests {
         let params = [("room_id", "123"), ("live_id", "1")];
         let stub = Douyin::get_x_ms_stub(&params);
         assert_eq!(stub.len(), 32); // MD5 hex length
+    }
+
+    #[test]
+    fn test_build_ack_matches_python_behavior() {
+        let ack = Douyin::build_ack(12345, "internal_src:dim|seq:1");
+        let mut reader = ProtoReader::new(&ack);
+        let fields = reader.parse_all();
+
+        assert_eq!(fields[&2][0].as_u64(), Some(12345));
+        assert_eq!(fields[&7][0].as_str(), Some("internal_src:dim|seq:1"));
+        assert!(!fields.contains_key(&8));
+    }
+
+    #[test]
+    fn test_default_headers_use_context_values() {
+        let context = PlatformContext::new().with_cookie("ttwid=test;");
+        let mut context = context;
+        context
+            .extra
+            .insert("user-agent".to_string(), "TestAgent/1.0".to_string());
+        context.extra.insert(
+            "referer".to_string(),
+            "https://live.douyin.com/123".to_string(),
+        );
+
+        let headers = Douyin::default_headers(&context);
+        assert_eq!(headers[USER_AGENT], "TestAgent/1.0");
+        assert_eq!(headers[REFERER], "https://live.douyin.com/123");
+        assert_eq!(headers[COOKIE], "ttwid=test;");
+        assert_eq!(headers[ORIGIN], "https://live.douyin.com");
     }
 }

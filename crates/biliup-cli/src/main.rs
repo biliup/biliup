@@ -130,9 +130,12 @@ async fn main() -> AppResult<()> {
             split_size,
             split_time,
         } => download(&url, output, split_size, split_time).await?,
-        Commands::Server { bind, port, auth } => {
-            biliup_cli::run((&bind, port), auth, console_reload_handle).await?
-        }
+        Commands::Server {
+            bind,
+            port,
+            auth,
+            config,
+        } => biliup_cli::run((&bind, port), auth, console_reload_handle, config).await?,
         Commands::List {
             is_pubing,
             pubed,

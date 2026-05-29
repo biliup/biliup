@@ -5,7 +5,7 @@
 //! 2. Get the movie_id from the page (inspect network requests or HTML)
 //! 3. Pass it via PlatformContext
 
-use danmaku::protocols::{twitcasting::Twitcasting, Platform, PlatformContext};
+use danmaku::protocols::{Platform, PlatformContext, twitcasting::Twitcasting};
 use futures::{SinkExt, StreamExt};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -20,13 +20,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let room_url = "https://twitcasting.tv/example_user";
 
     // You must set the movie_id manually
-    let movie_id = std::env::var("TWITCASTING_MOVIE_ID")
-        .unwrap_or_else(|_| "".to_string());
+    let movie_id = std::env::var("TWITCASTING_MOVIE_ID").unwrap_or_else(|_| "".to_string());
 
     if movie_id.is_empty() {
         println!("Twitcasting requires a movie_id to connect.");
         println!("\nUsage:");
-        println!("  TWITCASTING_MOVIE_ID=123456789 cargo run -p danmaku --example test_twitcasting");
+        println!(
+            "  TWITCASTING_MOVIE_ID=123456789 cargo run -p danmaku --example test_twitcasting"
+        );
         println!("\nHow to get movie_id:");
         println!("  1. Go to a live Twitcasting stream");
         println!("  2. Open browser DevTools > Network tab");
@@ -38,8 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Movie ID: {}\n", movie_id);
 
     let platform = Twitcasting::new();
-    let ctx = PlatformContext::new()
-        .with_room_id(movie_id.clone());
+    let ctx = PlatformContext::new().with_room_id(movie_id.clone());
 
     // Create context with movie_id
     let ctx = PlatformContext {
@@ -57,7 +57,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   Connected!");
 
     let heartbeat_config = platform.heartbeat_config();
-    println!("\n3. Heartbeat config: {:?}", heartbeat_config.data.is_some());
+    println!(
+        "\n3. Heartbeat config: {:?}",
+        heartbeat_config.data.is_some()
+    );
 
     println!("\n4. Listening for messages (Ctrl+C to stop)...\n");
 

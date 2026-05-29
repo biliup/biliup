@@ -1,17 +1,18 @@
 #!/usr/bin/python3
 # coding:utf8
-import argparse
 import asyncio
+import logging
 import logging.config
 import shutil
 
 import stream_gears
 
-import biliup.common.reload
-# from biliup.config import config
-from biliup import __version__, IS_FROZEN, LOG_CONF
-from biliup.common.Daemon import Daemon
-from biliup.common.log import DebugLevelFilter
+from biliup import LOG_CONF
+
+
+class DebugLevelFilter(logging.Filter):
+    def filter(self, record):
+        return logging.getLogger().isEnabledFor(logging.DEBUG)
 
 
 def arg_parser():
@@ -22,20 +23,10 @@ def arg_parser():
 
 
 async def main():
-    # from biliup.app import event_manager
-
-    # event_manager.start()
-
     # 启动时删除临时文件夹
     shutil.rmtree('./cache/temp', ignore_errors=True)
-    from biliup.common.util import loop
-
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, stream_gears.main_loop)
-
-
-
-class GracefulExit(SystemExit):
-    code = 1
 
 
 if __name__ == '__main__':

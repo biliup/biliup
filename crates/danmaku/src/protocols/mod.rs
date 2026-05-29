@@ -6,9 +6,10 @@ pub mod bilibili;
 pub mod douyin;
 pub mod douyu;
 pub mod huya;
-pub mod twitch;
 pub mod twitcasting;
+pub mod twitch;
 pub mod wbi;
+pub mod youtube;
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -204,6 +205,20 @@ pub trait Platform: Send + Sync {
     fn is_text_protocol(&self) -> bool {
         false
     }
+
+    /// Poll messages for HTTP-polling based platforms.
+    async fn poll_messages(
+        &self,
+        _url: &str,
+        _context: &mut PlatformContext,
+    ) -> Result<Vec<DanmakuEvent>> {
+        Ok(Vec::new())
+    }
+
+    /// Interval between polling requests.
+    fn poll_interval(&self) -> Duration {
+        Duration::from_secs(1)
+    }
 }
 
 /// Create a platform instance based on URL.
@@ -231,6 +246,10 @@ pub fn create_platform(url: &str) -> Result<Box<dyn Platform>> {
 
     if url.contains("live.douyin.com") {
         return Ok(Box::new(douyin::Douyin::new()));
+    }
+
+    if url.contains("youtube.com") || url.contains("youtu.be") {
+        return Ok(Box::new(youtube::YouTube::new()));
     }
 
     Err(DanmakuError::UnsupportedPlatform(url.to_string()))

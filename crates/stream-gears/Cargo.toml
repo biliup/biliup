@@ -31,6 +31,7 @@ futures = { workspace = true }
 async-channel = { version = "2.5.0" }
 biliup = { path = "../biliup"}
 biliup-cli = { path = "../biliup-cli"}
+danmaku-client = { package = "danmaku", path = "../danmaku"}
 url = { workspace = true }
 time = { workspace = true }
 chrono = { workspace = true }

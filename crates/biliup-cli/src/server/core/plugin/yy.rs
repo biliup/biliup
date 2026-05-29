@@ -1,7 +1,7 @@
 use crate::server::common::util::media_ext_from_url;
 use crate::server::core::plugin::{DownloadBase, DownloadPlugin, StreamInfoExt, StreamStatus};
 use crate::server::errors::AppError;
-use crate::server::infrastructure::context::{Context, PluginContext};
+use crate::server::infrastructure::context::PluginContext;
 use crate::server::infrastructure::models::StreamerInfo;
 use async_trait::async_trait;
 use chrono::Utc;
@@ -114,7 +114,7 @@ impl DownloadBase for YYDownloader {
                 rid, rid, millis_13
             ))
             .timeout(std::time::Duration::from_secs(30))
-            .headers(self.fake_headers.clone())
+            .headers(fake_headers)
             .body(data)
             .send()
             .await
@@ -145,7 +145,7 @@ impl DownloadBase for YYDownloader {
                     date: Utc::now(),
                     live_cover_path: "".to_string(),
                 },
-                suffix: media_ext_from_url(&raw_stream_url).unwrap(),
+                suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "flv".to_string()),
                 raw_stream_url,
                 platform: String::from("YY"),
                 stream_headers: HashMap::new(),

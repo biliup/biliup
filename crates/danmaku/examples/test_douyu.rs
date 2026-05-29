@@ -1,6 +1,6 @@
 //! Test Douyu danmaku connection with actual WebSocket
 
-use danmaku::protocols::{douyu::Douyu, Platform, PlatformContext, RegistrationData};
+use danmaku::protocols::{Platform, PlatformContext, RegistrationData, douyu::Douyu};
 use futures::{SinkExt, StreamExt};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 

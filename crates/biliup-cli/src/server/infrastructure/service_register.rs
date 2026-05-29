@@ -1,7 +1,7 @@
 use crate::LogHandle;
 use crate::server::config::Config;
 use crate::server::core::download_manager::DownloadManager;
-use crate::server::core::plugin::yy::YY;
+use crate::server::core::plugin::builtin_plugins;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::Worker;
 use crate::server::infrastructure::models::live_streamer::LiveStreamer;
@@ -38,7 +38,7 @@ impl ServiceRegister {
     /// * `config` - 全局配置
     /// * `actor_handle` - Actor处理器
     /// * `download_manager` - 下载管理器列表
-    pub fn new(
+    pub async fn new(
         pool: ConnectionPool,
         config: Arc<RwLock<Config>>,
         download_manager: DownloadManager,
@@ -52,7 +52,9 @@ impl ServiceRegister {
         info!("utility services initialized, building feature services...");
 
         // download_manager.push(DownloadManager::new(YY::new(), actor_handle.clone()));
-        download_manager.add_plugin(Arc::new(YY::new()));
+        for plugin in builtin_plugins() {
+            download_manager.add_plugin(plugin).await;
+        }
 
         info!("feature services successfully initialized!");
         ServiceRegister {

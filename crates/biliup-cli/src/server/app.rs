@@ -16,7 +16,6 @@ use time::Duration;
 use tokio::signal;
 use tokio::task::AbortHandle;
 use tower_http::cors::{AllowMethods, CorsLayer};
-use tower_sessions::cookie::Key;
 use tower_sessions::{ExpiredDeletion, Expiry, SessionManagerLayer};
 use tower_sessions_sqlx_store::SqliteStore;
 use tracing::{error, info};

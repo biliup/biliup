@@ -3,7 +3,7 @@ use crate::server::common::util::Recorder;
 use crate::server::config::Config;
 use crate::server::core::downloader::SegmentInfo;
 use crate::server::errors::{AppError, AppResult};
-use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
+use crate::server::infrastructure::context::{Context, Stage, WorkerStatus};
 use crate::server::infrastructure::models::InsertFileItem;
 use crate::server::infrastructure::models::hook_step::{
     HookStep, process_video, process_video_paths,
@@ -61,8 +61,7 @@ where
         .segment_processor
         .clone()
         .unwrap_or_default();
-    let uploaded_videos =
-        pipeline_upload_videos(rx, &upload_context, &segment_processors).await?;
+    let uploaded_videos = pipeline_upload_videos(rx, &upload_context, &segment_processors).await?;
 
     // 3. 提交到B站
     if !uploaded_videos.videos.is_empty() {

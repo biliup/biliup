@@ -169,6 +169,10 @@ pub enum Commands {
         /// 开启登录密码认证
         #[arg(long, default_value = "false")]
         auth: bool,
+
+        /// 使用 biliup 1.0.7 风格配置文件启动录制
+        #[arg(short, long, value_name = "FILE")]
+        config: Option<PathBuf>,
     },
     /// 列出所有已上传的视频
     List {

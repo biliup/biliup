@@ -20,6 +20,7 @@ reqwest = { workspace = true, features = ["json"] }
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
+base64 = "0.22"
 
 # XML output
 quick-xml = { version = "0.37", features = ["serialize"] }
@@ -49,17 +50,19 @@ url = { workspace = true }
 
 # WBI signing (Bilibili)
 md5 = "0.7"
+rand = { workspace = true }
 urlencoding = "2.1"
 
 [features]
-default = ["twitch", "twitcasting", "bilibili", "douyu", "huya", "douyin"]
+default = ["twitch", "twitcasting", "bilibili", "douyu", "huya", "douyin", "youtube"]
 twitch = []
 twitcasting = []
 bilibili = []
 douyu = []
 huya = []
 douyin = []
-all-platforms = ["twitch", "twitcasting", "bilibili", "douyu", "huya", "douyin"]
+youtube = []
+all-platforms = ["twitch", "twitcasting", "bilibili", "douyu", "huya", "douyin", "youtube"]
 
 [dev-dependencies]
 tracing-subscriber = { workspace = true }

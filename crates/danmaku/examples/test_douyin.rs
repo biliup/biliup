@@ -1,12 +1,11 @@
 //! Test Douyin danmaku connection with actual WebSocket
 //!
-//! NOTE: Douyin requires a valid signature to connect, which normally
-//! requires JavaScript execution (webmssdk.js). Without proper signature,
-//! connections will likely be rejected.
+//! NOTE: Douyin connections require a generated X-Bogus signature and browser-like
+//! WebSocket headers. The Rust protocol implementation builds both from room context.
 
-use danmaku::protocols::{douyin::Douyin, Platform, PlatformContext};
+use danmaku::protocols::{Platform, PlatformContext, douyin::Douyin};
 use futures::{SinkExt, StreamExt};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::{connect_async, tungstenite::Message, tungstenite::http::Request};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -27,7 +26,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   WebSocket URL: {}", info.ws_url);
 
     println!("\n2. Connecting to WebSocket...");
-    let result = connect_async(&info.ws_url).await;
+    let mut request = Request::builder().uri(&info.ws_url);
+    for (key, value) in info.headers.iter() {
+        request = request.header(key.as_str(), value.to_str()?);
+    }
+    let request = request.body(())?;
+    let result = connect_async(request).await;
 
     match result {
         Ok((ws_stream, response)) => {
@@ -112,8 +116,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(e) => {
             println!("   Failed to connect: {}", e);
-            println!("\nThis is expected - Douyin requires valid signature.");
-            println!("To fix: implement proper signature calculation using webmssdk.js");
+            println!(
+                "\nDouyin connection failed; check room id, cookie, and signature parameters."
+            );
         }
     }
 

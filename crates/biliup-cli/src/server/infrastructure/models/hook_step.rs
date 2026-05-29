@@ -7,7 +7,7 @@ use std::time::Duration;
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 /// 钩子步骤枚举：支持多种操作格式
 /// 既支持 key-value 形式（如 {run: "..."}），也支持纯字符串（如 "rm"）
@@ -93,9 +93,11 @@ impl HookStep {
                         continue;
                     }
                     let mp4 = p.with_extension("mp4");
-                    if mp4.exists() && tokio::fs::metadata(&mp4).await
-                        .map(|m| m.len() > 0)
-                        .unwrap_or(false)
+                    if mp4.exists()
+                        && tokio::fs::metadata(&mp4)
+                            .await
+                            .map(|m| m.len() > 0)
+                            .unwrap_or(false)
                     {
                         info!("remux: reusing existing {}", mp4.display());
                         *p = mp4;
@@ -235,19 +237,19 @@ impl HookStep {
 
         loop {
             tokio::select! {
-                        line = stdout_lines.next_line() => {
-                            match line.change_context(AppError::Unknown)? {
-                                Some(l) => tracing::info!(target="user_cmd_stdout", "{}", l),
-                                None => break, // stdout EOF
-                            }
-                        }
-                        line = stderr_lines.next_line() => {
-                            match line.change_context(AppError::Unknown)? {
-                                Some(l) => tracing::warn!(target="user_cmd_stderr", "{}", l),
-                                None => break, // stderr EOF
-                            }
-                        }
+                line = stdout_lines.next_line() => {
+                    match line.change_context(AppError::Unknown)? {
+                        Some(l) => tracing::info!(target="user_cmd_stdout", "{}", l),
+                        None => break, // stdout EOF
                     }
+                }
+                line = stderr_lines.next_line() => {
+                    match line.change_context(AppError::Unknown)? {
+                        Some(l) => tracing::warn!(target="user_cmd_stderr", "{}", l),
+                        None => break, // stderr EOF
+                    }
+                }
+            }
         }
 
         // 等待进程完成并检查退出状态
@@ -255,9 +257,9 @@ impl HookStep {
 
         if !status.success() {
             bail!(AppError::Custom(format!(
-                        "Command failed with status: {}",
-                        status
-                    )));
+                "Command failed with status: {}",
+                status
+            )));
         }
 
         Ok(())
@@ -436,7 +438,9 @@ mod tests {
         let p = dir.path().join("foo.mp4");
         std::fs::write(&p, b"not a real mp4 but we shouldn't touch it").unwrap();
         let mut paths = vec![p.clone()];
-        let step = HookStep::Remux { remux: "mp4".into() };
+        let step = HookStep::Remux {
+            remux: "mp4".into(),
+        };
         step.execute_paths(&mut paths).await.unwrap();
         // Already .mp4 → unchanged.
         assert_eq!(paths[0], p);
@@ -450,7 +454,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bogus = dir.path().join("does_not_exist.ts");
         let mut paths = vec![bogus.clone()];
-        let step = HookStep::Remux { remux: "mp4".into() };
+        let step = HookStep::Remux {
+            remux: "mp4".into(),
+        };
         let result = step.execute_paths(&mut paths).await;
         assert!(
             result.is_err(),

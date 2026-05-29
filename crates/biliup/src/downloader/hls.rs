@@ -1,4 +1,4 @@
-use crate::downloader::error::Result;
+use crate::downloader::error::{Error, Result};
 use crate::downloader::util::{LifecycleFile, Segmentable};
 use m3u8_rs::Playlist;
 
@@ -34,10 +34,12 @@ pub async fn download(
             // println!("{:?}", bs);
             match m3u8_rs::parse_media_playlist(&bs) {
                 Ok((_, pl)) => pl,
-                _ => {
+                Err(e) => {
                     let mut file = File::create("test.fmp4")?;
                     file.write_all(&bs)?;
-                    panic!("Unable to parse the content.")
+                    return Err(Error::Custom(format!(
+                        "Unable to parse media playlist content: {e}"
+                    )));
                 }
             }
         }
@@ -46,7 +48,7 @@ pub async fn download(
             info!("index {}", pl.media_sequence);
             pl
         }
-        Err(e) => panic!("Parsing error: \n{}", e),
+        Err(e) => return Err(Error::Custom(format!("Parsing playlist error: {e}"))),
     };
     let mut previous_last_segment = 0;
     loop {

@@ -16,10 +16,6 @@ pub struct DownloadManager {
     // plugins: Vec<Arc<dyn DownloadPlugin + Send + Sync>>,
     rooms_handle: Arc<Monitor>,
 
-    /// 下载信号量数量
-    download_semaphore: u32,
-    /// 上传信号量数量
-    update_semaphore: u32,
     /// 下载消息发送器
     pub down_sender: Sender<DownloaderMessage>,
     /// 下载Actor任务句柄列表
@@ -56,8 +52,6 @@ impl DownloadManager {
         }
 
         Self {
-            download_semaphore,
-            update_semaphore,
             down_sender: down_tx,
             d_kills,
             u_kills,
@@ -65,13 +59,10 @@ impl DownloadManager {
         }
     }
 
-    pub fn add_plugin(&self, plugin: Arc<dyn DownloadPlugin + Send + Sync>) {
-        let rooms_handle = self.rooms_handle.clone();
-        tokio::spawn(async move {
-            let name = plugin.name().to_string();
-            rooms_handle.add_plugin(plugin).await;
-            info!("Added plugin[{}]", name);
-        });
+    pub async fn add_plugin(&self, plugin: Arc<dyn DownloadPlugin + Send + Sync>) {
+        let name = plugin.name().to_string();
+        self.rooms_handle.add_plugin(plugin).await;
+        info!("Added plugin[{}]", name);
     }
 
     pub async fn add_room(&self, worker: Worker) -> Option<()> {

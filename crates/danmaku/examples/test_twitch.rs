@@ -1,6 +1,6 @@
 //! Test Twitch danmaku connection with actual WebSocket
 
-use danmaku::protocols::{twitch::Twitch, Platform, PlatformContext, RegistrationData};
+use danmaku::protocols::{Platform, PlatformContext, RegistrationData, twitch::Twitch};
 use futures::{SinkExt, StreamExt};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 

@@ -14,7 +14,7 @@ use tracing::debug;
 
 use crate::codec::tars::{TarsInputStream, TarsOutputStream};
 use crate::error::{DanmakuError, Result};
-use crate::message::{ChatMessage, DanmakuEvent, DEFAULT_COLOR};
+use crate::message::{ChatMessage, DEFAULT_COLOR, DanmakuEvent};
 use crate::protocols::{
     ConnectionInfo, DecodeResult, HeartbeatConfig, Platform, PlatformContext, RegistrationData,
 };
@@ -249,11 +249,9 @@ impl Platform for Huya {
         let user_info = Self::build_ws_user_info(uid);
         let reg_packet = Self::build_ws_command(cmd_type::REGISTER_REQ, &user_info);
 
-        Ok(
-            ConnectionInfo::new(WSS_URL)
-                .with_registration(vec![RegistrationData::Binary(reg_packet)])
-                .with_headers(Self::default_headers()),
-        )
+        Ok(ConnectionInfo::new(WSS_URL)
+            .with_registration(vec![RegistrationData::Binary(reg_packet)])
+            .with_headers(Self::default_headers()))
     }
 
     fn heartbeat_config(&self) -> HeartbeatConfig {

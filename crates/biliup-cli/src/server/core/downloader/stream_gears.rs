@@ -46,7 +46,7 @@ impl StreamGears {
     ) -> AppResult<DownloadStatus> {
         let url = download_config.url.clone();
         let file_name = download_config.recorder.filename_template();
-        let headers_in = construct_headers(&download_config.headers);
+        let headers_in = construct_headers(&download_config.headers).map_err(AppError::Custom)?;
         let proxy = self.proxy.clone();
         let segment = Segmentable::new(
             download_config.segment_time.as_deref().map(parse_time),
@@ -72,19 +72,17 @@ impl StreamGears {
         // 创建分段回调钩子
         let hook = {
             let mut i = 0;
-            let mut prev_file_path = None::<PathBuf>;
             move |s: &str| {
                 let file_path = PathBuf::from(s);
 
                 let event = SegmentInfo {
-                    prev_file_path: file_path.clone(),
+                    prev_file_path: file_path,
                     next_file_path: None,
                     segment_index: i,
                 };
                 callback(SegmentEvent::Segment(event));
 
                 i += 1;
-                prev_file_path = Some(file_path);
             }
         };
         // 解析流头部，判断流类型
