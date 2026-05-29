@@ -29,7 +29,7 @@ COPY . /biliup
 RUN set -eux; \
 	\
 	apt-get update; \
-	apt-get install -y --no-install-recommends python3-pip g++; \
+	apt-get install -y --no-install-recommends python3-pip g++ patchelf; \
 	pip3 install maturin --break-system-packages; \
 	if [ ! -f /biliup/biliup.spec ]; then \
 	rm -rf /biliup; \
