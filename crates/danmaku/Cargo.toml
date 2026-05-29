@@ -12,7 +12,7 @@ futures = { workspace = true }
 async-trait = { workspace = true }
 
 # WebSocket
-tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
 
 # HTTP client (for getting WebSocket info)
 reqwest = { workspace = true, features = ["json"] }
