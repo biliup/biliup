@@ -1,0 +1,2286 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="x-ua-compatible" content="ie=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+  <link rel="preload" as="font" href="/biliup/fonts/vendor/jost/jost-v4-latin-regular.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="/biliup/fonts/vendor/jost/jost-v4-latin-700.woff2"  type="font/woff2" crossorigin>
+
+
+<link rel="stylesheet" href="/biliup/main.css">
+
+
+
+  
+  
+    
+  
+
+  
+  
+    
+    
+  
+  
+  
+    
+  
+  
+  
+  
+    
+  
+  
+  
+
+
+  <meta name="robots" content="index, follow">
+  <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
+
+	
+
+
+	
+
+<title>更新日志 | Biliup</title>
+<meta name="description" content="CHANGELOG">
+<link rel="canonical" href="/biliup/docs/guide/changelog/">
+
+
+  <meta name="twitter:card" content="summary_large_image">
+  
+    <meta name="twitter:image" content="/biliup/doks.png">
+  
+  <meta name="twitter:title" content="更新日志">
+  <meta name="twitter:description" content="CHANGELOG">
+  <meta name="twitter:site" content="@aaranxu">
+  <meta name="twitter:creator" content="@aaranxu">
+  
+  <meta property="og:title" content="更新日志">
+  <meta property="og:description" content="CHANGELOG">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="/biliup/docs/guide/changelog/">
+
+  
+    <meta property="og:image" content="/biliup/doks.png">
+  
+
+  <meta property="og:updated_time" content="2021-05-01T08:20:00+00:00">
+  <meta property="og:site_name" content="更新日志">
+
+  
+
+  
+
+  
+  <meta property="article:publisher" content="https://www.facebook.com/ichunyun">
+  <meta property="article:author" content="https://www.facebook.com/ichunyun">
+  <meta property="og:locale" content="en_US">
+
+
+
+
+
+  
+
+
+
+
+
+<script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "BreadcrumbList",
+    
+      
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          {
+            "@type": "ListItem",
+            "position":  1 ,
+            "name": "Home",
+            "item": "/biliup:///biliup/"
+          },
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  2 ,
+            "name": "Docs",
+            "item": "/biliup:///biliup/docs/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  3 ,
+            "name": "Guide",
+            "item": "/biliup:///biliup/docs/guide/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  4 ,
+            "name": "Changelog",
+            "item": "/biliup:///biliup/docs/guide/changelog/"
+          },
+        
+      
+    
+  }
+</script>
+
+
+
+
+
+
+  <meta name="theme-color" content="#fff">
+  <link rel="apple-touch-icon" sizes="180x180" href="/biliup/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/biliup/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/biliup/favicon-16x16.png">
+  
+    <link rel="manifest" href="/biliup/site.webmanifest" crossorigin>
+  
+
+
+  
+
+</head>
+
+  
+
+<body class="docs single">
+  
+  
+  
+  
+<div class="header-bar fixed-top"></div>
+<header class="navbar fixed-top navbar-expand-md navbar-light">
+	<div class="container">
+		<input class="menu-btn order-0" type="checkbox" id="menu-btn">
+		<label class="menu-icon d-md-none" for="menu-btn"><span class="navicon"></span></label>
+		<a class="navbar-brand order-1 order-md-0 me-auto" href="/biliup">Biliup</a>
+		<button id="mode" class="btn btn-link order-2 order-md-4" type="button" aria-label="Toggle mode">
+			<span class="toggle-dark"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-moon"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg></span>
+			<span class="toggle-light"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-sun"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg></span>
+		</button>
+		<ul class="navbar-nav fork-me order-3 order-md-5">
+			
+				
+					<li class="nav-item">
+						<a class="nav-link" href="https://biliup.github.io/"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-twitter"><path d="M23 3a10.9 10.9 0 0 1-3.14 1.53 4.48 4.48 0 0 0-7.86 3v1A10.66 10.66 0 0 1 3 4s-4 9 5 13a11.64 11.64 0 0 1-7 2c9 5 20 0 20-11.5a4.5 4.5 0 0 0-.08-.83A7.72 7.72 0 0 0 23 3z"></path></svg><span class="ms-2 visually-hidden">Twitter</span></a>
+					</li>
+				
+					<li class="nav-item">
+						<a class="nav-link" href="https://github.com/biliup/biliup"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-github"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg><span class="ms-2 visually-hidden">GitHub</span></a>
+					</li>
+				
+			
+		</ul>
+		<div class="collapse navbar-collapse order-4 order-md-1">
+			<ul class="navbar-nav main-nav me-auto order-5 order-md-2">
+				
+					
+				
+				
+				
+					
+						<li class="nav-item docs active">
+							<a class="nav-link" href="/biliup/docs/getting-started/introduction/">Docs</a>
+						</li>
+					
+						<li class="nav-item">
+							<a class="nav-link" href="/biliup/blog/">Blog</a>
+						</li>
+					
+				
+			</ul>
+			<div class="break order-6 d-md-none"></div>
+			
+				<form class="navbar-form flex-grow-1 order-7 order-md-3">
+					<input id="userinput" class="form-control is-search" type="search" placeholder="Search docs..."
+						aria-label="Search docs..." autocomplete="off">
+					<div id="suggestions" class="shadow bg-white rounded"></div>
+				</form>
+			
+		</div>
+	</div>
+</header>
+
+
+
+  
+<div class="wrap container" role="document">
+  <div class="content">
+    <div class="row flex-xl-nowrap">
+	  
+<div class="col-lg-5 col-xl-4 docs-sidebar">
+	<nav class="docs-links" aria-label="Main navigation">
+			
+			
+			
+			
+					
+					
+					
+							<h3>使用指南</h3>
+							<ul class="list-unstyled">
+							                           
+									<li><a class="docs-link" href="/biliup/docs/getting-started/introduction/">说明</a></li>
+							                           
+									<li><a class="docs-link" href="/biliup/docs/getting-started/quick-start/">Quick Start</a></li>
+							
+					</ul>
+					
+					
+					
+					
+							<h3>Getting Started</h3>
+							<ul class="list-unstyled">
+							                           
+									<li><a class="docs-link" href="/biliup/docs/guide/introduction/">Introduction</a></li>
+							                           
+									<li><a class="docs-link active" href="/biliup/docs/guide/changelog/">更新日志</a></li>
+							
+					</ul>
+					
+					
+					
+					
+							<h3>Contributing</h3>
+							<ul class="list-unstyled">
+							                           
+									<li><a class="docs-link" href="/biliup/docs/contributing/how-to-contribute/">How to Contribute</a></li>
+							                           
+									<li><a class="docs-link" href="/biliup/docs/contributing/code-of-conduct/">Code of Conduct</a></li>
+							
+					</ul>
+					
+					
+					
+					
+							<h3>Help</h3>
+							<ul class="list-unstyled">
+							                           
+									<li><a class="docs-link" href="/biliup/docs/help/faq/">FAQ</a></li>
+							
+					</ul>
+					
+					
+			
+	</nav>
+</div>
+
+	  
+  
+  <nav class="docs-toc d-none d-xl-block col-xl-3" aria-label="Secondary navigation">
+  	<div class="page-links">
+  			<h3>On this page</h3>
+  			<nav id="TableOfContents">
+  					<ul>
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#biao-qian-han-yi">标签含义</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-29">1.1.29</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed">What&#x27;s Changed</a></li>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-28">1.1.28</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-1">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-27">1.1.27</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-26">1.1.26</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-2">What&#x27;s Changed</a></li>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors-1">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-25">1.1.25</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-24">1.1.24</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-23">1.1.23</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-22">1.1.22</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-21">1.1.21</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-20">1.1.20</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-19">1.1.19</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-18">1.1.18</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-17">1.1.17</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-16">1.1.16</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-15">1.1.15</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-14">1.1.14</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-13">1.1.13</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-12">1.1.12</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-11">1.1.11</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-10">1.1.10</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-9">1.1.9</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-8">1.1.8</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-3">What&#x27;s Changed</a></li>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors-2">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-7">1.1.7</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-6">1.1.6</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-4">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-5">1.1.5</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-5">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-4">1.1.4</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-3">1.1.3</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-6">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-2">1.1.2</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-7">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-1">1.1.1</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-1-0">1.1.0</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-8">What&#x27;s Changed</a></li>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors-3">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-0-7">1.0.7</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-9">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-0-6">1.0.6</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-10">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-0-5">1.0.5</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-0-4">1.0.4</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-11">What&#x27;s Changed</a></li>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors-4">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-0-3">1.0.3</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-12">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-0-2">1.0.2</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-13">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-0-1">1.0.1</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-14">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#1-0-0">1.0.0</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-15">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-102">0.4.102</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-16">What&#x27;s Changed</a></li>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors-5">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-101">0.4.101</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-17">What&#x27;s Changed</a></li>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors-6">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-100">0.4.100</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-18">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-99">0.4.99</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-19">What&#x27;s Changed</a></li>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors-7">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-98">0.4.98</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-20">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-97">0.4.97</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-21">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-96">0.4.96</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-22">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-95">0.4.95</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-23">What&#x27;s Changed</a></li>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors-8">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-94">0.4.94</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-24">What&#x27;s Changed</a></li>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors-9">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-93">0.4.93</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-25">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-92">0.4.92</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-26">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-91">0.4.91</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-27">What&#x27;s Changed</a></li>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors-10">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-90">0.4.90</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-28">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-89">0.4.89</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-29">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-88">0.4.88</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-30">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-87">0.4.87</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-31">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-86">0.4.86</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-32">What&#x27;s Changed</a></li>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors-11">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-85">0.4.85</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-33">What&#x27;s Changed</a></li>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors-12">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-84">0.4.84</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-34">What&#x27;s Changed</a></li>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors-13">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-83">0.4.83</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-35">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-82">0.4.82</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-36">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-81">0.4.81</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-37">What&#x27;s Changed</a></li>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors-14">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-80">0.4.80</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-38">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-79">0.4.79</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-39">What&#x27;s Changed</a></li>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors-15">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-78">0.4.78</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-40">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-77">0.4.77</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-41">What&#x27;s Changed</a></li>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors-16">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-76">0.4.76</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-42">What&#x27;s Changed</a></li>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors-17">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-75">0.4.75</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-43">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-74">0.4.74</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-44">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-73">0.4.73</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-45">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-71-0-4-72">0.4.71-0.4.72</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-46">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-69-0-4-70">0.4.69-0.4.70</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-47">What&#x27;s Changed</a></li>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors-18">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-69-0-4-70-1">0.4.69-0.4.70</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-48">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-68-0-4-69">0.4.68-0.4.69</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-49">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-60-0-4-68">0.4.60-0.4.68</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-50">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-59-0-4-60">0.4.59-0.4.60</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-51">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-58-0-4-59">0.4.58-0.4.59</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-52">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-57-0-4-58">0.4.57-0.4.58</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-53">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-56-0-4-57">0.4.56-0.4.57</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-54">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-55-0-4-56">0.4.55-0.4.56</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-55">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-54-0-4-55">0.4.54-0.4.55</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-56">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-52-0-4-54">0.4.52-0.4.54</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-chang">What&#x27;s Chang</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-52">0.4.52</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-chang-1">What&#x27;s Chang</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-51">0.4.51</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-chang-2">What&#x27;s Chang</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-50">0.4.50</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-57">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-47-0-4-49">0.4.47-0.4.49</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#what-s-changed-58">What&#x27;s Changed</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-40-0-4-46">0.4.40-0.4.46</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-39">0.4.39</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-38">0.4.38</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-37">0.4.37</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-36">0.4.36</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/guide/changelog/#new-contributors-19">New Contributors</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-35">0.4.35</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-34">0.4.34</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-32-0-4-33">0.4.32-0.4.33</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-31">0.4.31</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-30-warning-warning-you-zhong-da-wen-ti-qing-wu-shi-yong-gai-ban-ben">0.4.30 ⚠️⚠️有重大问题，请勿使用该版本。</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-29">0.4.29</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-28">0.4.28</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-27">0.4.27</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-26">0.4.26</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-25">0.4.25</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-24">0.4.24</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-23">0.4.23</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-22">0.4.22</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-21">0.4.21</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-20">0.4.20</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-19">0.4.19</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-18">0.4.18</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-17">0.4.17</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-16-warning-warning-you-zhong-da-wen-ti-qing-wu-shi-yong-gai-ban-ben">0.4.16 ⚠️⚠️有重大问题，请勿使用该版本。</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-15">0.4.15</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-14">0.4.14</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-13-warning-warning-you-zhong-da-wen-ti-qing-wu-shi-yong-gai-ban-ben">0.4.13 ⚠️⚠️有重大问题，请勿使用该版本。</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-12">0.4.12</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-11">0.4.11</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-10-warning-warning-you-zhong-da-wen-ti-qing-wu-shi-yong-gai-ban-ben">0.4.10 ⚠️⚠️有重大问题，请勿使用该版本。</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-9-warning-warning-you-zhong-da-wen-ti-qing-wu-shi-yong-gai-ban-ben">0.4.9 ⚠️⚠️有重大问题，请勿使用该版本。</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-8">0.4.8</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-7">0.4.7</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-5-warning-warning-you-zhong-da-wen-ti-qing-wu-shi-yong-gai-ban-ben">0.4.5 ⚠️⚠️有重大问题，请勿使用该版本。</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-4-warning-warning-ben-ci-xiu-gai-liao-confignei-bu-fen-can-shu-de-ming-cheng-qing-xu-yao-shi-yong-de-yong-hu-can-kao-zui-xin-de-configshi-li-xiu-gai">0.4.4 ⚠️⚠️本次修改了config内部分参数的名称，请需要使用的用户参考最新的config示例修改</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-3">0.4.3</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-2-warning-warning-ci-ban-ben-cun-zai-zhong-da-bug-dao-zhi-hen-duo-qing-kuang-xia-wu-fa-lu-zhi-bzhan-zhi-bo-qing-wu-shi-yong">0.4.2 ⚠️⚠️此版本存在重大BUG，导致很多情况下无法录制B站直播，请勿使用。</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-1">0.4.1</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-4-0">0.4.0</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-3-12">0.3.12</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-3-11">0.3.11</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-3-10-warning-warning-ci-ban-ben-cun-zai-stream-gearslu-zhi-wen-jian-ming-zhong-fu-dao-zhi-fu-gai-shang-yi-duan-fen-duan-de-wen-ti-qing-wu-shi-yong">0.3.10 ⚠️⚠️此版本存在stream-gears录制文件名重复导致覆盖上一段分段的问题，请勿使用</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/guide/changelog/#0-3-9">0.3.9</a></li>
+  							
+  							
+  					</ul>
+  			</nav>
+  	</div>
+  </nav>
+  
+
+      <main class="docs-content col-lg-11 col-xl-9">
+        <h1>更新日志</h1>
+        <p class="lead">CHANGELOG.</p>
+        <h2 id="biao-qian-han-yi">标签含义</h2>
+<ul>
+<li>💡新添加的功能</li>
+<li>🔧已修复的问题</li>
+<li>⚠️需要手动操作的更新信息</li>
+</ul>
+<h2 id="1-1-29">1.1.29</h2>
+<h3 id="what-s-changed">What's Changed</h3>
+<ul>
+<li>Fix(Huya): refactor anticode generation using getCdnTokenInfoEx API by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1575">#1575</a></li>
+<li>fix: filename extraction using os.path.basename by @lovegaoshi in <a href="https://github.com/biliup/biliup/pull/1579">#1579</a></li>
+<li>feat: 命令行支持通过 Web 接口投稿 by @zhangaoyun in <a href="https://github.com/biliup/biliup/pull/1580">#1580</a></li>
+<li>feat: 添加合集（SEASON）管理功能 by @112292454 in <a href="https://github.com/biliup/biliup/pull/1598">#1598</a></li>
+<li>New Configuration File Parameters by @Sora3QwQ in <a href="https://github.com/biliup/biliup/pull/1600">#1600</a></li>
+</ul>
+<h3 id="new-contributors">New Contributors</h3>
+<ul>
+<li>@lovegaoshi made their first contribution in <a href="https://github.com/biliup/biliup/pull/1579">#1579</a></li>
+<li>@zhangaoyun made their first contribution in <a href="https://github.com/biliup/biliup/pull/1580">#1580</a></li>
+<li>@112292454 made their first contribution in <a href="https://github.com/biliup/biliup/pull/1598">#1598</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.28...v1.1.29">v1.1.28...v1.1.29</a></p>
+<h2 id="1-1-28">1.1.28</h2>
+<h3 id="what-s-changed-1">What's Changed</h3>
+<ul>
+<li>fix(Douyu): extract stream_id from HLS stream by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1560">#1560</a></li>
+<li>feat: 断点续传、标题自动截断及限流重试优化 by @DzmingLi in <a href="https://github.com/biliup/biliup/pull/1558">#1558</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.27...v1.1.28">v1.1.27...v1.1.28</a></p>
+<h2 id="1-1-27">1.1.27</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.26...v1.1.27">v1.1.26...v1.1.27</a></p>
+<h2 id="1-1-26">1.1.26</h2>
+<h3 id="what-s-changed-2">What's Changed</h3>
+<ul>
+<li>feat: 添加 biliup-cli的Nix flake 支持和路径处理改进等 by @DzmingLi in <a href="https://github.com/biliup/biliup/pull/1550">#1550</a></li>
+<li>fix: 修复 shellexpand::tilde 类型错误并优化 Nix 构建 by @DzmingLi in <a href="https://github.com/biliup/biliup/pull/1552">#1552</a></li>
+<li>fix(douyu): force use of constructed URLs for hs-h5 by @Sora3QwQ in <a href="https://github.com/biliup/biliup/pull/1549">#1549</a></li>
+</ul>
+<h3 id="new-contributors-1">New Contributors</h3>
+<ul>
+<li>@DzmingLi made their first contribution in <a href="https://github.com/biliup/biliup/pull/1550">#1550</a></li>
+<li>@Sora3QwQ made their first contribution in <a href="https://github.com/biliup/biliup/pull/1549">#1549</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.25...v1.1.26">v1.1.25...v1.1.26</a></p>
+<h2 id="1-1-25">1.1.25</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.24...v1.1.25">v1.1.24...v1.1.25</a></p>
+<h2 id="1-1-24">1.1.24</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.23...v1.1.24">v1.1.23...v1.1.24</a></p>
+<h2 id="1-1-23">1.1.23</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.22...v1.1.23">v1.1.22...v1.1.23</a></p>
+<h2 id="1-1-22">1.1.22</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.21...v1.1.22">v1.1.21...v1.1.22</a></p>
+<h2 id="1-1-21">1.1.21</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.20...v1.1.21">v1.1.20...v1.1.21</a></p>
+<h2 id="1-1-20">1.1.20</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.19...v1.1.20">v1.1.19...v1.1.20</a></p>
+<h2 id="1-1-19">1.1.19</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.18...v1.1.19">v1.1.18...v1.1.19</a></p>
+<h2 id="1-1-18">1.1.18</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.17...v1.1.18">v1.1.17...v1.1.18</a></p>
+<h2 id="1-1-17">1.1.17</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.16...v1.1.17">v1.1.16...v1.1.17</a></p>
+<h2 id="1-1-16">1.1.16</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.15...v1.1.16">v1.1.15...v1.1.16</a></p>
+<h2 id="1-1-15">1.1.15</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.14...v1.1.15">v1.1.14...v1.1.15</a></p>
+<h2 id="1-1-14">1.1.14</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.13...v1.1.14">v1.1.13...v1.1.14</a></p>
+<h2 id="1-1-13">1.1.13</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.12...v1.1.13">v1.1.12...v1.1.13</a></p>
+<h2 id="1-1-12">1.1.12</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.11...v1.1.12">v1.1.11...v1.1.12</a></p>
+<h2 id="1-1-11">1.1.11</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.10...v1.1.11">v1.1.10...v1.1.11</a></p>
+<h2 id="1-1-10">1.1.10</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.9...v1.1.10">v1.1.9...v1.1.10</a></p>
+<h2 id="1-1-9">1.1.9</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.8...v1.1.9">v1.1.8...v1.1.9</a></p>
+<h2 id="1-1-8">1.1.8</h2>
+<h3 id="what-s-changed-3">What's Changed</h3>
+<ul>
+<li>Fix null/&quot;null&quot; values in JSON fields for livestreamers tables by @tdh62 in <a href="https://github.com/biliup/biliup/pull/1485">#1485</a></li>
+</ul>
+<h3 id="new-contributors-2">New Contributors</h3>
+<ul>
+<li>@tdh62 made their first contribution in <a href="https://github.com/biliup/biliup/pull/1485">#1485</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.7...v1.1.8">v1.1.7...v1.1.8</a></p>
+<h2 id="1-1-7">1.1.7</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.6...v1.1.7">v1.1.6...v1.1.7</a></p>
+<h2 id="1-1-6">1.1.6</h2>
+<h3 id="what-s-changed-4">What's Changed</h3>
+<ul>
+<li>Update Termux-publish.yml by @Heporis in <a href="https://github.com/biliup/biliup/pull/1474">#1474</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.5...v1.1.6">v1.1.5...v1.1.6</a></p>
+<h2 id="1-1-5">1.1.5</h2>
+<h3 id="what-s-changed-5">What's Changed</h3>
+<ul>
+<li>chore: Docker Build CI 改用 native arm64 runner by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1470">#1470</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.4...v1.1.5">v1.1.4...v1.1.5</a></p>
+<h2 id="1-1-4">1.1.4</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.3...v1.1.4">v1.1.3...v1.1.4</a></p>
+<h2 id="1-1-3">1.1.3</h2>
+<h3 id="what-s-changed-6">What's Changed</h3>
+<ul>
+<li>Fix(Docker): Run with wheel instead by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1468">#1468</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.2...v1.1.3">v1.1.2...v1.1.3</a></p>
+<h2 id="1-1-2">1.1.2</h2>
+<h3 id="what-s-changed-7">What's Changed</h3>
+<ul>
+<li>chore: 同步更新 UploadLines by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1466">#1466</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.1...v1.1.2">v1.1.1...v1.1.2</a></p>
+<h2 id="1-1-1">1.1.1</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.1.0...v1.1.1">v1.1.0...v1.1.1</a></p>
+<h2 id="1-1-0">1.1.0</h2>
+<h3 id="what-s-changed-8">What's Changed</h3>
+<ul>
+<li>Flextv由原地址 https://www.flextv.co.k 更改为 https://www.ttinglive.com by @897601689 in <a href="https://github.com/biliup/biliup/pull/1430">#1430</a></li>
+<li>Fix(bilibili-rs): Usu https instead of http by @HsuJv in <a href="https://github.com/biliup/biliup/pull/1429">#1429</a></li>
+<li>refactor(Douyu): 去除对 JSEngine 的强依赖 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1448">#1448</a></li>
+<li>fix(Douyin): add abogus by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1451">#1451</a></li>
+<li>feat: plugins.Picarto by @cykac04 in <a href="https://github.com/biliup/biliup/pull/1452">#1452</a></li>
+<li>Fix: Enhance filename handling for percent signs by @Ninzore in <a href="https://github.com/biliup/biliup/pull/1458">#1458</a></li>
+<li>fix(upload): fix glitches in max_upload_limit by @DetectiveLemon in <a href="https://github.com/biliup/biliup/pull/1459">#1459</a></li>
+<li>Fix api missing NSFW streams by @cykac04 in <a href="https://github.com/biliup/biliup/pull/1454">#1454</a></li>
+</ul>
+<h3 id="new-contributors-3">New Contributors</h3>
+<ul>
+<li>@HsuJv made their first contribution in <a href="https://github.com/biliup/biliup/pull/1429">#1429</a></li>
+<li>@cykac04 made their first contribution in <a href="https://github.com/biliup/biliup/pull/1452">#1452</a></li>
+<li>@Ninzore made their first contribution in <a href="https://github.com/biliup/biliup/pull/1458">#1458</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.102...v1.1.0">v0.4.102...v1.1.0</a></p>
+<h2 id="1-0-7">1.0.7</h2>
+<h3 id="what-s-changed-9">What's Changed</h3>
+<ul>
+<li>修复扫码接口鉴权失败的问题 by @XiaoMiku01 in <a href="https://github.com/biliup/biliup/pull/1417">#1417</a></li>
+<li>Update Termux-publish.yml by @Heporis in <a href="https://github.com/biliup/biliup/pull/1419">#1419</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.0.6...v1.0.7">v1.0.6...v1.0.7</a></p>
+<h2 id="1-0-6">1.0.6</h2>
+<h3 id="what-s-changed-10">What's Changed</h3>
+<ul>
+<li>修改充电参数open_elec为charging_pay by @897601689 in <a href="https://github.com/biliup/biliup/pull/1410">#1410</a></li>
+<li>fix(huya): change huya presenter_uid type from i32 to i64 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1412">#1412</a></li>
+<li>feat(bbrs): upload_by_config 支持 submit 选择 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1413">#1413</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.0.5...v1.0.6">v1.0.5...v1.0.6</a></p>
+<h2 id="1-0-5">1.0.5</h2>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.0.4...v1.0.5">v1.0.4...v1.0.5</a></p>
+<h2 id="1-0-4">1.0.4</h2>
+<h3 id="what-s-changed-11">What's Changed</h3>
+<ul>
+<li>增加app接口 修改稿件 by @897601689 in <a href="https://github.com/biliup/biliup/pull/1399">#1399</a></li>
+<li>feat(stream-gears): 支持直播流下载的多条件分割 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1400">#1400</a></li>
+<li>feat(biliup-rs): 新增 BCut Android 投稿接口 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1402">#1402</a></li>
+<li>fix(blive): parse error by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1405">#1405</a></li>
+</ul>
+<h3 id="new-contributors-4">New Contributors</h3>
+<ul>
+<li>@897601689 made their first contribution in <a href="https://github.com/biliup/biliup/pull/1399">#1399</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.0.3...v1.0.4">v1.0.3...v1.0.4</a></p>
+<h2 id="1-0-3">1.0.3</h2>
+<h3 id="what-s-changed-12">What's Changed</h3>
+<ul>
+<li>更改Termux的wheel发布至Release by @Heporis in <a href="https://github.com/biliup/biliup/pull/1371">#1371</a></li>
+<li>Fix: Prioritize defined title format for sync-downloader by @ransxd in <a href="https://github.com/biliup/biliup/pull/1315">#1315</a></li>
+<li>添加登录页面 by @XiaoMiku01 in <a href="https://github.com/biliup/biliup/pull/1375">#1375</a></li>
+<li>fix(douyin): 修复抖音直播流获取问题 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1378">#1378</a></li>
+<li>优化登录功能 by @XiaoMiku01 in <a href="https://github.com/biliup/biliup/pull/1386">#1386</a></li>
+<li>feat(Huya): 支持 Huya Wup 协议以获取正确直播流 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1385">#1385</a></li>
+<li>remove: blive hack feature by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1394">#1394</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.0.2...v1.0.3">v1.0.2...v1.0.3</a></p>
+<h2 id="1-0-2">1.0.2</h2>
+<h3 id="what-s-changed-13">What's Changed</h3>
+<ul>
+<li>为aarch64架构termux平台自动构建 by @Heporis in <a href="https://github.com/biliup/biliup/pull/1369">#1369</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.102...v1.0.2">v0.4.102...v1.0.2</a></p>
+<h2 id="1-0-1">1.0.1</h2>
+<h3 id="what-s-changed-14">What's Changed</h3>
+<ul>
+<li>feat: 新增上传重试次数限制和上传结果webhook通知 by @unknown-o in <a href="https://github.com/biliup/biliup/pull/1355">#1355</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v1.0.0...v1.0.1">v1.0.0...v1.0.1</a></p>
+<h2 id="1-0-0">1.0.0</h2>
+<h3 id="what-s-changed-15">What's Changed</h3>
+<ul>
+<li>Fix pyinstaller copy metadata by @ForgQi in <a href="https://github.com/biliup/biliup/pull/1357">#1357</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.102...v1.0.0">v0.4.102...v1.0.0</a></p>
+<h2 id="0-4-102">0.4.102</h2>
+<h3 id="what-s-changed-16">What's Changed</h3>
+<ul>
+<li>fix: 回滚文件名编解码返回逻辑以修复直接出现 unicode 的问题 by @ZXGU183 in <a href="https://github.com/biliup/biliup/pull/1325">#1325</a></li>
+<li>fix(Docker): 声明字符编码以解决乱码问题 by @ZXGU183 in <a href="https://github.com/biliup/biliup/pull/1338">#1338</a></li>
+<li>fix(Upload): bili_web 上传插件适配 biliup-rs 生成的 cookie file，stream-gears 上传接口默认修改为 app by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1347">#1347</a></li>
+<li>修复B站弹幕问题 by @unknown-o in <a href="https://github.com/biliup/biliup/pull/1342">#1342</a></li>
+</ul>
+<h3 id="new-contributors-5">New Contributors</h3>
+<ul>
+<li>@ZXGU183 made their first contribution in <a href="https://github.com/biliup/biliup/pull/1325">#1325</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.100...v0.4.102">v0.4.100...v0.4.102</a></p>
+<h2 id="0-4-101">0.4.101</h2>
+<h3 id="what-s-changed-17">What's Changed</h3>
+<ul>
+<li>fix: 回滚文件名编解码返回逻辑以修复直接出现 unicode 的问题 by @ZXGU183 in <a href="https://github.com/biliup/biliup/pull/1325">#1325</a></li>
+<li>fix(Docker): 声明字符编码以解决乱码问题 by @ZXGU183 in <a href="https://github.com/biliup/biliup/pull/1338">#1338</a></li>
+<li>fix(Upload): bili_web 上传插件适配 biliup-rs 生成的 cookie file，stream-gears 上传接口默认修改为 app by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1347">#1347</a></li>
+<li>修复B站弹幕问题 by @unknown-o in <a href="https://github.com/biliup/biliup/pull/1342">#1342</a></li>
+</ul>
+<h3 id="new-contributors-6">New Contributors</h3>
+<ul>
+<li>@ZXGU183 made their first contribution in <a href="https://github.com/biliup/biliup/pull/1325">#1325</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.100...v0.4.101">v0.4.100...v0.4.101</a></p>
+<h2 id="0-4-100">0.4.100</h2>
+<h3 id="what-s-changed-18">What's Changed</h3>
+<ul>
+<li>Feat(Youtube): 拆分 YoutubeLive，添加 ytarchive 支持 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1307">#1307</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.99...v0.4.100">v0.4.99...v0.4.100</a></p>
+<h2 id="0-4-99">0.4.99</h2>
+<h3 id="what-s-changed-19">What's Changed</h3>
+<ul>
+<li>可能修复了边录边传稿件标题为直播间标题和简介未格式化的情况 by @ransxd in <a href="https://github.com/biliup/biliup/pull/1297">#1297</a></li>
+<li>fix(Plugins.Huya): 修复当标题存在转义字符时正则匹配失败的问题 by @Kataick in <a href="https://github.com/biliup/biliup/pull/1301">#1301</a></li>
+<li>fix(Danmaku.bilibili): 修复B站弹幕连接异常 by @DetectiveLemon in <a href="https://github.com/biliup/biliup/pull/1311">#1311</a></li>
+</ul>
+<h3 id="new-contributors-7">New Contributors</h3>
+<ul>
+<li>@ransxd made their first contribution in <a href="https://github.com/biliup/biliup/pull/1297">#1297</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.98...v0.4.99">v0.4.98...v0.4.99</a></p>
+<h2 id="0-4-98">0.4.98</h2>
+<h3 id="what-s-changed-20">What's Changed</h3>
+<ul>
+<li>fix(Plugins.Huya): Update HuYaUA by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1291">#1291</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.97...v0.4.98">v0.4.97...v0.4.98</a></p>
+<h2 id="0-4-97">0.4.97</h2>
+<h3 id="what-s-changed-21">What's Changed</h3>
+<ul>
+<li>fix: 修复播完自动上传时，仅自己可见状态失效 by @gweesin in <a href="https://github.com/biliup/biliup/pull/1276">#1276</a></li>
+<li>feat: 适配TwitCasting,TwitCasting添加Cookie,TwitCasting添加画质选择 by @CoolZxp in <a href="https://github.com/biliup/biliup/pull/1282">#1282</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.96...v0.4.97">v0.4.96...v0.4.97</a></p>
+<h2 id="0-4-96">0.4.96</h2>
+<h3 id="what-s-changed-22">What's Changed</h3>
+<ul>
+<li>feat: 移动端响应式增强 by @gweesin in <a href="https://github.com/biliup/biliup/pull/1266">#1266</a></li>
+<li>fix(huya): update ua ts calculation and mobile api key error by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1271">#1271</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.95...v0.4.96">v0.4.95...v0.4.96</a></p>
+<h2 id="0-4-95">0.4.95</h2>
+<h3 id="what-s-changed-23">What's Changed</h3>
+<ul>
+<li>docs: 修复开发环境缺失的步骤 by @gweesin in <a href="https://github.com/biliup/biliup/pull/1262">#1262</a></li>
+<li>chore(Dockerfile): 更新Dockerfile配置 by @SimonGino in <a href="https://github.com/biliup/biliup/pull/1260">#1260</a></li>
+<li>feat: 支持仅自己可见开关 by @gweesin in <a href="https://github.com/biliup/biliup/pull/1261">#1261</a></li>
+<li>fix: ncp and sass should not production dependencies by @gweesin in <a href="https://github.com/biliup/biliup/pull/1265">#1265</a></li>
+<li>feat: 抖音真原画 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1267">#1267</a></li>
+</ul>
+<h3 id="new-contributors-8">New Contributors</h3>
+<ul>
+<li>@gweesin made their first contribution in <a href="https://github.com/biliup/biliup/pull/1262">#1262</a></li>
+<li>@SimonGino made their first contribution in <a href="https://github.com/biliup/biliup/pull/1260">#1260</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.94...v0.4.95">v0.4.94...v0.4.95</a></p>
+<h2 id="0-4-94">0.4.94</h2>
+<h3 id="what-s-changed-24">What's Changed</h3>
+<ul>
+<li>增加+ by @TajangSec in <a href="https://github.com/biliup/biliup/pull/1249">#1249</a></li>
+<li>feat(douyu): 构建斗鱼直播 tct &amp; hs 流链接 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1256">#1256</a></li>
+</ul>
+<h3 id="new-contributors-9">New Contributors</h3>
+<ul>
+<li>@TajangSec made their first contribution in <a href="https://github.com/biliup/biliup/pull/1249">#1249</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.93...v0.4.94">v0.4.93...v0.4.94</a></p>
+<h2 id="0-4-93">0.4.93</h2>
+<h3 id="what-s-changed-25">What's Changed</h3>
+<ul>
+<li>refactor: plugins.Huya by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1238">#1238</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.92...v0.4.93">v0.4.92...v0.4.93</a></p>
+<h2 id="0-4-92">0.4.92</h2>
+<h3 id="what-s-changed-26">What's Changed</h3>
+<ul>
+<li>fix 修复一些边录边传下载器的bug by @XiaoMiku01 in <a href="https://github.com/biliup/biliup/pull/1220">#1220</a></li>
+<li>mod: 修改原始弹幕录制逻辑 by @unknown-o in <a href="https://github.com/biliup/biliup/pull/1217">#1217</a></li>
+<li>feat: Implement WBI signing mechanism for Bilibili API requests by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1223">#1223</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.91...v0.4.92">v0.4.91...v0.4.92</a></p>
+<h2 id="0-4-91">0.4.91</h2>
+<h3 id="what-s-changed-27">What's Changed</h3>
+<ul>
+<li>webui: 录制时间范围改用TimePicker，选择时间 by @ruinmi in <a href="https://github.com/biliup/biliup/pull/1211">#1211</a></li>
+<li>fix: stream-gears上传投稿参数错误 by @hxzll in <a href="https://github.com/biliup/biliup/pull/1221">#1221</a></li>
+<li>fix: 修复streamlink下载器header参数 by @dreammu in <a href="https://github.com/biliup/biliup/pull/1218">#1218</a></li>
+</ul>
+<h3 id="new-contributors-10">New Contributors</h3>
+<ul>
+<li>@hxzll made their first contribution in <a href="https://github.com/biliup/biliup/pull/1221">#1221</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.90...v0.4.91">v0.4.90...v0.4.91</a></p>
+<h2 id="0-4-90">0.4.90</h2>
+<h3 id="what-s-changed-28">What's Changed</h3>
+<ul>
+<li>Add 添加实时日志展示 by @XiaoMiku01 in <a href="https://github.com/biliup/biliup/pull/1210">#1210</a></li>
+<li>Bump version to 0.4.90 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1215">#1215</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.89...v0.4.90">v0.4.89...v0.4.90</a></p>
+<h2 id="0-4-89">0.4.89</h2>
+<h3 id="what-s-changed-29">What's Changed</h3>
+<ul>
+<li>fix: 移除streamlink的弃用参数 by @dreammu in <a href="https://github.com/biliup/biliup/pull/1201">#1201</a></li>
+<li>Fix 修复一些问题 by @XiaoMiku01 in <a href="https://github.com/biliup/biliup/pull/1207">#1207</a></li>
+<li>Update README.md by @viondw in <a href="https://github.com/biliup/biliup/pull/1205">#1205</a></li>
+<li>feat: 支持B站完整弹幕录制 by @unknown-o in <a href="https://github.com/biliup/biliup/pull/1186">#1186</a></li>
+<li>feature: 关键词不录播 by @ruinmi in <a href="https://github.com/biliup/biliup/pull/1200">#1200</a></li>
+<li>fix: 回归下载器选择streamlink时的正常行为 by @dreammu in <a href="https://github.com/biliup/biliup/pull/1202">#1202</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.88...v0.4.89">v0.4.88...v0.4.89</a></p>
+<h2 id="0-4-88">0.4.88</h2>
+<h3 id="what-s-changed-30">What's Changed</h3>
+<ul>
+<li>fix(Huya): 星秀区下载错误 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1197">#1197</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.87...v0.4.88">v0.4.87...v0.4.88</a></p>
+<h2 id="0-4-87">0.4.87</h2>
+<h3 id="what-s-changed-31">What's Changed</h3>
+<ul>
+<li>Update dependencies and Python version requirements by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1185">#1185</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.86...v0.4.87">v0.4.86...v0.4.87</a></p>
+<h2 id="0-4-86">0.4.86</h2>
+<h3 id="what-s-changed-32">What's Changed</h3>
+<ul>
+<li>Update pyproject.toml by @ZRdRy in <a href="https://github.com/biliup/biliup/pull/1183">#1183</a></li>
+</ul>
+<h3 id="new-contributors-11">New Contributors</h3>
+<ul>
+<li>@ZRdRy made their first contribution in <a href="https://github.com/biliup/biliup/pull/1183">#1183</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.85...v0.4.86">v0.4.85...v0.4.86</a></p>
+<h2 id="0-4-85">0.4.85</h2>
+<h3 id="what-s-changed-33">What's Changed</h3>
+<ul>
+<li>Fix: 解决边录边传中默认值错误导致的异常 by @XiaoMiku01 in <a href="https://github.com/biliup/biliup/pull/1159">#1159</a></li>
+<li>B站弹幕部分的参数兼容DanmakuFactory可识别用户名 by @rslywhj in <a href="https://github.com/biliup/biliup/pull/1172">#1172</a></li>
+<li>fix非详细弹幕content丢失 by @rslywhj in <a href="https://github.com/biliup/biliup/pull/1175">#1175</a></li>
+<li>feat: Use system certificate store by default by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1176">#1176</a></li>
+<li>Dev 修复边录边传的一些bug by @XiaoMiku01 in <a href="https://github.com/biliup/biliup/pull/1167">#1167</a></li>
+<li>logo readme up by @viondw in <a href="https://github.com/biliup/biliup/pull/1164">#1164</a></li>
+</ul>
+<h3 id="new-contributors-12">New Contributors</h3>
+<ul>
+<li>@rslywhj made their first contribution in <a href="https://github.com/biliup/biliup/pull/1172">#1172</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.84...v0.4.85">v0.4.84...v0.4.85</a></p>
+<h2 id="0-4-84">0.4.84</h2>
+<h3 id="what-s-changed-34">What's Changed</h3>
+<ul>
+<li>Update layout.tsx by @q8018414 in <a href="https://github.com/biliup/biliup/pull/1156">#1156</a></li>
+<li>相似备注检查跳过自身；格式化用户模板提交之数据 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1157">#1157</a></li>
+<li>Bumping version by @ForgQi in <a href="https://github.com/biliup/biliup/pull/1158">#1158</a></li>
+</ul>
+<h3 id="new-contributors-13">New Contributors</h3>
+<ul>
+<li>@q8018414 made their first contribution in <a href="https://github.com/biliup/biliup/pull/1156">#1156</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.83...v0.4.84">v0.4.83...v0.4.84</a></p>
+<h2 id="0-4-83">0.4.83</h2>
+<h3 id="what-s-changed-35">What's Changed</h3>
+<ul>
+<li>README changelog Update by @viondw in <a href="https://github.com/biliup/biliup/pull/1153">#1153</a></li>
+<li>feat: Add override configuration support for streamers by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1151">#1151</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.82...v0.4.83">v0.4.82...v0.4.83</a></p>
+<h2 id="0-4-82">0.4.82</h2>
+<h3 id="what-s-changed-36">What's Changed</h3>
+<ul>
+<li>perf: 优化B站弹幕录制 by @unknown-o in <a href="https://github.com/biliup/biliup/pull/1126">#1126</a></li>
+<li>Style(webui): 执行前端代码格式化 by @alpzmj9 in <a href="https://github.com/biliup/biliup/pull/1141">#1141</a></li>
+<li>💡Dev 适配 <a href="https://github.com/biliup/biliup-rs/pull/186">biliup/biliup-rs#186</a> 测试边录边上传功能 by @XiaoMiku01 in <a href="https://github.com/biliup/biliup/pull/1140">#1140</a></li>
+<li>feat: Add Kilakila streaming platform support by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1148">#1148</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.81...v0.4.82">v0.4.81...v0.4.82</a></p>
+<h2 id="0-4-81">0.4.81</h2>
+<h3 id="what-s-changed-37">What's Changed</h3>
+<ul>
+<li>feat: B站弹幕录制优化 by @unknown-o in <a href="https://github.com/biliup/biliup/pull/1120">#1120</a></li>
+</ul>
+<h3 id="new-contributors-14">New Contributors</h3>
+<ul>
+<li>@unknown-o made their first contribution in <a href="https://github.com/biliup/biliup/pull/1120">#1120</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.80...v0.4.81">v0.4.80...v0.4.81</a></p>
+<h2 id="0-4-80">0.4.80</h2>
+<h3 id="what-s-changed-38">What's Changed</h3>
+<ul>
+<li>fix: dtime by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1121">#1121</a></li>
+<li>修复延迟发布（来自赞助者的要求）。 resolves <a href="https://github.com/biliup/biliup/pull/1106">#1106</a></li>
+<li>更换播放器以支持 mp4 封装和 HEVC on FLV。 fixes <a href="https://github.com/biliup/biliup/pull/1117">#1117</a></li>
+<li>fixes <a href="https://github.com/biliup/biliup/pull/1116">#1116</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.79...v0.4.80">v0.4.79...v0.4.80</a></p>
+<h2 id="0-4-79">0.4.79</h2>
+<h3 id="what-s-changed-39">What's Changed</h3>
+<ul>
+<li>web ui 功能更改；增加录制时间范围功能 by @ruinmi in <a href="https://github.com/biliup/biliup/pull/1017">#1017</a></li>
+<li>style: refactor mobile client header style by @see-more in <a href="https://github.com/biliup/biliup/pull/1064">#1064</a></li>
+<li>Update README.md Docker by @viondw in <a href="https://github.com/biliup/biliup/pull/1080">#1080</a></li>
+<li>fix(huya): skip query param generation for &quot;xingxiu&quot; streamers by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1099">#1099</a></li>
+<li>Feat(webui): 深色模式添加自动跟随系统，添加格式化配置文件。 by @alpzmj9 in <a href="https://github.com/biliup/biliup/pull/1109">#1109</a></li>
+<li>feat: enhance dashboard and plugin by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1114">#1114</a></li>
+</ul>
+<h3 id="new-contributors-15">New Contributors</h3>
+<ul>
+<li>@ruinmi made their first contribution in <a href="https://github.com/biliup/biliup/pull/1017">#1017</a></li>
+<li>@see-more made their first contribution in <a href="https://github.com/biliup/biliup/pull/1064">#1064</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.78...v0.4.79">v0.4.78...v0.4.79</a></p>
+<h2 id="0-4-78">0.4.78</h2>
+<h3 id="what-s-changed-40">What's Changed</h3>
+<ul>
+<li>Fix(Douyin): 修复 PCWeb 直播页电台类型直播录制 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1044">#1044</a></li>
+<li>Fix(Upload): 重传时未能从数据库获取直播信息 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1045">#1045</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.77...v0.4.78">v0.4.77...v0.4.78</a></p>
+<h2 id="0-4-77">0.4.77</h2>
+<h3 id="what-s-changed-41">What's Changed</h3>
+<ul>
+<li>fix[build]: 修复直接提交 commit时，ci 构建失败的问题 by @XiaoMiku01 in <a href="https://github.com/biliup/biliup/pull/1037">#1037</a></li>
+<li>fix: 虎牙弹幕丢失 (<a href="https://github.com/biliup/biliup/pull/949">#949</a>) by @CoolZxp in <a href="https://github.com/biliup/biliup/pull/1035">#1035</a></li>
+<li>fix(Huya): platform_id error by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1039">#1039</a></li>
+</ul>
+<h3 id="new-contributors-16">New Contributors</h3>
+<ul>
+<li>@XiaoMiku01 made their first contribution in <a href="https://github.com/biliup/biliup/pull/1037">#1037</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.76...v0.4.77">v0.4.76...v0.4.77</a></p>
+<h2 id="0-4-76">0.4.76</h2>
+<h3 id="what-s-changed-42">What's Changed</h3>
+<ul>
+<li>修复v0.4.75抖音默认开启录制弹幕的问题 by @hfdem in <a href="https://github.com/biliup/biliup/pull/1022">#1022</a></li>
+<li>fix(webui): 修复直播历史与历史记录排序问题 by @Kataick in <a href="https://github.com/biliup/biliup/pull/1025">#1025</a></li>
+<li>flx(build): 修复<a href="https://github.com/biliup/biliup/pull/1025">#1025</a> npm会编译失败的问题 by @Kataick in <a href="https://github.com/biliup/biliup/pull/1031">#1031</a></li>
+</ul>
+<h3 id="new-contributors-17">New Contributors</h3>
+<ul>
+<li>@hfdem made their first contribution in <a href="https://github.com/biliup/biliup/pull/1022">#1022</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.75...v0.4.76">v0.4.75...v0.4.76</a></p>
+<h2 id="0-4-75">0.4.75</h2>
+<h3 id="what-s-changed-43">What's Changed</h3>
+<ul>
+<li>支持抖音短链录制弹幕 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1015">#1015</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.74...v0.4.75">v0.4.74...v0.4.75</a></p>
+<h2 id="0-4-74">0.4.74</h2>
+<h3 id="what-s-changed-44">What's Changed</h3>
+<ul>
+<li>修复变量未定义 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1012">#1012</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.73...v0.4.74">v0.4.73...v0.4.74</a></p>
+<h2 id="0-4-73">0.4.73</h2>
+<h3 id="what-s-changed-45">What's Changed</h3>
+<ul>
+<li>适配抖音短链、电台、多屏直播 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/1010">#1010</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.72...v0.4.73">v0.4.72...v0.4.73</a></p>
+<h2 id="0-4-71-0-4-72">0.4.71-0.4.72</h2>
+<h3 id="what-s-changed-46">What's Changed</h3>
+<ul>
+<li>update Readme by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/992">#992</a></li>
+<li>fix: 在没有配置最大码率时跳过码率选择 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/993">#993</a></li>
+<li>feat: Add cache during runtime by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/995">#995</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.71...v0.4.72">v0.4.71...v0.4.72</a></p>
+<h2 id="0-4-69-0-4-70">0.4.69-0.4.70</h2>
+<h3 id="what-s-changed-47">What's Changed</h3>
+<ul>
+<li>Add by @viondw in <a href="https://github.com/biliup/biliup/pull/976">#976</a></li>
+<li>feat: danmaku xml 兼容b站格式 by @BugKun in <a href="https://github.com/biliup/biliup/pull/985">#985</a></li>
+<li>减少douyu通过发送请求获取房间号次数 by @Kataick in <a href="https://github.com/biliup/biliup/pull/950">#950</a></li>
+<li>feat(Huya): use the api to get live streams by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/986">#986</a></li>
+</ul>
+<h3 id="new-contributors-18">New Contributors</h3>
+<ul>
+<li>@BugKun made their first contribution in <a href="https://github.com/biliup/biliup/pull/985">#985</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.70...v0.4.71">v0.4.70...v0.4.71</a></p>
+<h2 id="0-4-69-0-4-70-1">0.4.69-0.4.70</h2>
+<h3 id="what-s-changed-48">What's Changed</h3>
+<ul>
+<li>fix: first run error by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/968">#968</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.69...v0.4.70">v0.4.69...v0.4.70</a></p>
+<h2 id="0-4-68-0-4-69">0.4.68-0.4.69</h2>
+<h3 id="what-s-changed-49">What's Changed</h3>
+<ul>
+<li>🔧feat(download): Support hls for huya, douyin by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/958">#958</a></li>
+<li>fix: val name err by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/962">#962</a></li>
+<li>Minimal import by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/963">#963</a></li>
+<li>🔧fix(douyin-danmaku): include signature parameter by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/967">#967</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.68...v0.4.69">v0.4.68...v0.4.69</a></p>
+<h2 id="0-4-60-0-4-68">0.4.60-0.4.68</h2>
+<h3 id="what-s-changed-50">What's Changed</h3>
+<ul>
+<li>🔧修正不存在配置时出现的错误引用 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/933">#933</a></li>
+<li>Update CHANGELOG.md by @viondw in <a href="https://github.com/biliup/biliup/pull/932">#932</a></li>
+<li>🔧更新 CC 平台 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/936">#936</a></li>
+<li>限制 Twitch 同时查询数量 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/941">#941</a></li>
+<li>feat(Douyu): 拒绝互动游戏 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/943">#943</a></li>
+<li>Fix(Blive): 原画优先 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/946">#946</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.60...v0.4.68">v0.4.60...v0.4.68</a></p>
+<h2 id="0-4-59-0-4-60">0.4.59-0.4.60</h2>
+<h3 id="what-s-changed-51">What's Changed</h3>
+<ul>
+<li>Update README.md by @viondw in <a href="https://github.com/biliup/biliup/pull/930">#930</a></li>
+<li>行为调整 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/925">#25</a></li>
+<li>适配白色背景 by @viondw in <a href="https://github.com/biliup/biliup/pull/931">#931</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.59...v0.4.60">v0.4.59...v0.4.60</a></p>
+<h2 id="0-4-58-0-4-59">0.4.58-0.4.59</h2>
+<p>⚠️⚠️⚠️⚠️⚠️此版本twitch无法正常下载，建议降级v0.4.57,待修复。</p>
+<h3 id="what-s-changed-52">What's Changed</h3>
+<ul>
+<li>Update README.md by @ikun1993 in <a href="https://github.com/biliup/biliup/pull/926">#926</a></li>
+<li>下载流程调整 by @CoolZxp in <a href="https://github.com/biliup/biliup/pull/927">#927</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.58...v0.4.59">v0.4.58...v0.4.59</a></p>
+<h2 id="0-4-57-0-4-58">0.4.57-0.4.58</h2>
+<p>⚠️⚠️⚠️⚠️⚠️此版本twitch无法正常下载，建议降级v0.4.57,待修复。</p>
+<h3 id="what-s-changed-53">What's Changed</h3>
+<ul>
+<li>🔧使上传转载来源生效 by @CoolZxp in <a href="https://github.com/biliup/biliup/pull/910">#910</a></li>
+<li><a href="https://github.com/biliup/biliup/pull/909">#909</a>补充 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/916">#916</a></li>
+<li>下载流程优化 by @CoolZxp in <a href="https://github.com/biliup/biliup/pull/917">#917</a></li>
+<li>避免streamlink进程残留 by @CoolZxp in <a href="https://github.com/biliup/biliup/pull/918">#918</a></li>
+<li>精简 Docker 镜像 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/921">#921</a></li>
+</ul>
+<p><strong>Full Changelog</strong>:<a href="https://github.com/biliup/biliup/compare/v0.4.57...v0.4.58">v0.4.57...v0.4.58</a></p>
+<h2 id="0-4-56-0-4-57">0.4.56-0.4.57</h2>
+<h3 id="what-s-changed-54">What's Changed</h3>
+<ul>
+<li>下载流程调整 by @CoolZxp in <a href="https://github.com/biliup/biliup/pull/906">#906</a></li>
+</ul>
+<p><strong>Full Changelog</strong>: <a href="https://github.com/biliup/biliup/compare/v0.4.56...v0.4.57">#v0.4.56...v0.4.57</a></p>
+<h2 id="0-4-55-0-4-56">0.4.55-0.4.56</h2>
+<h3 id="what-s-changed-55">What's Changed</h3>
+<ul>
+<li>🔧修复按大小分段 by @CoolZxp in <a href="https://github.com/biliup/biliup/pull/904">#904</a></li>
+</ul>
+<p><strong>Full Changelog</strong>: <a href="https://github.com/biliup/biliup/compare/v0.4.55...v0.4.56">v0.4.55...v0.4.6</a></p>
+<h2 id="0-4-54-0-4-55">0.4.54-0.4.55</h2>
+<h3 id="what-s-changed-56">What's Changed</h3>
+<ul>
+<li>Update README.md by @viondw in <a href="https://github.com/biliup/biliup/pull/899">#899</a></li>
+<li>Update CHANGELOG.md by @viondw in <a href="https://github.com/biliup/biliup/pull/900">#900</a></li>
+<li>🔧防止分段后处理超出预期的执行次数 by @Kataick in <a href="https://github.com/biliup/biliup/pull/895">#902</a></li>
+<li>下载功能调整 by @CoolZxp in <a href="https://github.com/biliup/biliup/pull/902">#902</a></li>
+<li>Webui 优化 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/903">#903</a></li>
+</ul>
+<p><strong>Full Changelog</strong>: <a href="https://github.com/biliup/biliup/compare/v0.4.54...v0.4.55">v0.4.54...v0.4.55</a></p>
+<h2 id="0-4-52-0-4-54">0.4.52-0.4.54</h2>
+<h3 id="what-s-chang">What's Chang</h3>
+<ul>
+<li>💡任务平台</li>
+<li>💡QRcode扫码登陆</li>
+</ul>
+<p><strong>Full Changelog</strong>：<a href="https://github.com/biliup/biliup/compare/v0.4.52...v0.4.54">v0.4.52-v0.4.54</a></p>
+<h2 id="0-4-52">0.4.52</h2>
+<h3 id="what-s-chang-1">What's Chang</h3>
+<ul>
+<li>Update CHANGELOG.md by @viondw in <a href="https://github.com/biliup/biliup/pull/880">#880</a></li>
+<li>🔧缓解 HTTP 漏洞 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/877">#877</a></li>
+<li>Update CHANGELOG.md by @viondw in <a href="https://github.com/biliup/biliup/pull/882">#882</a></li>
+<li>Update bug-report.yaml by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/885">#885</a></li>
+<li>remove some shields by @Kataick in <a href="https://github.com/biliup/biliup/pull/886">#886</a></li>
+<li>小小美化一下 by @viondw in <a href="https://github.com/biliup/biliup/pull/888">#888</a></li>
+<li>Update cookie.tsx by @ikun1993 in <a href="https://github.com/biliup/biliup/pull/889">#889</a></li>
+<li>优化显示 by @viondw in <a href="https://github.com/biliup/biliup/pull/890">#890</a></li>
+<li>优化排版/链接 by @viondw in <a href="https://github.com/biliup/biliup/pull/891">#891</a></li>
+</ul>
+<p><strong>Full Changelog</strong>：<a href="https://github.com/biliup/biliup/compare/v0.4.51...v0.4.52">v0.4.51...v0.4.52</a></p>
+<h2 id="0-4-51">0.4.51</h2>
+<h3 id="what-s-chang-2">What's Chang</h3>
+<ul>
+<li>💡新增分段后处理功能(返回当前分段的视频文件 只支持run指令) by @Kataick in <a href="https://github.com/biliup/biliup/pull/868">#868</a></li>
+<li>🔧修复WebUI 405 Method Not Allowed by @CoolZxp in <a href="https://github.com/biliup/biliup/pull/878">#878</a></li>
+</ul>
+<p><strong>Full Changelog</strong>: <a href="https://github.com/biliup/biliup/compare/v0.4.50...v0.4.51">v0.4.50...v0.4.51</a></p>
+<h2 id="0-4-50">0.4.50</h2>
+<h3 id="what-s-changed-57">What's Changed</h3>
+<ul>
+<li>🔧修复排序错误 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/865">#865</a></li>
+<li>🔧修复Youtube在下载完成前的意外错误 by @CoolZxp in <a href="https://github.com/biliup/biliup/pull/869">#869</a></li>
+<li>💡适配FlexTv by @CoolZxp in <a href="https://github.com/biliup/biliup/pull/870">#870</a></li>
+<li>🔧避免虎牙在选取码率时发生错误后依旧继续执行 by @CoolZxp in <a href="https://github.com/biliup/biliup/pull/871">#871</a></li>
+<li>💡适配 Twitcasting.TV by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/874">#874</a></li>
+</ul>
+<p><strong>Full Changelog</strong>: <a href="https://github.com/biliup/biliup/compare/v0.4.49...v0.4.50">v0.4.49...v0.4.50</a></p>
+<h2 id="0-4-47-0-4-49">0.4.47-0.4.49</h2>
+<h3 id="what-s-changed-58">What's Changed</h3>
+<ul>
+<li>修复录播管理页卡片重叠问题 by @alpzmj9 in <a href="https://github.com/biliup/biliup/pull/851">#851</a></li>
+<li>录播管理页面卡片样式优化 by @alpzmj9 in <a href="https://github.com/biliup/biliup/pull/861">#861</a></li>
+<li>调整功能 by @xxxxuanran in <a href="https://github.com/biliup/biliup/pull/860">#860</a></li>
+<li>Fix：日志格式以及丢失问题 by @alpzmj9 in <a href="https://github.com/biliup/biliup/pull/864">#864</a></li>
+</ul>
+<p><strong>Full Changelog</strong>: <a href="https://github.com/biliup/biliup/compare/v0.4.48...v0.4.49">v0.4.28...v0.4.49</a></p>
+<h2 id="0-4-40-0-4-46">0.4.40-0.4.46</h2>
+<ul>
+<li>添加日志下载按钮</li>
+<li>修复一些bug</li>
+</ul>
+<h2 id="0-4-39">0.4.39</h2>
+<ul>
+<li>🔧修复少量bug by @boxie123 in <a href="https://github.com/biliup/biliup/pull/832">#832</a></li>
+</ul>
+<p><strong>Full Changelog</strong>: <a href="https://github.com/biliup/biliup/compare/v0.4.38...v0.4.39">v0.4.38...v0.4.39</a></p>
+<h2 id="0-4-38">0.4.38</h2>
+<ul>
+<li>WebUI交互优化 by @alpzmj9 in <a href="https://github.com/biliup/biliup/pull/826">#826</a></li>
+<li>Fix: datetime被过滤、新建空间配置无法保存 by @boxie123 in <a href="https://github.com/biliup/biliup/pull/827">#827</a></li>
+</ul>
+<p><strong>Full Changelog</strong>: <a href="https://github.com/biliup/biliup/compare/v0.4.37...v0.4.38">v0.4.37...v0.4.38</a></p>
+<h2 id="0-4-37">0.4.37</h2>
+<ul>
+<li>🔧紧急修复<code>URL build</code>报错 by @boxie123 in <a href="https://github.com/biliup/biliup/pull/823">#823</a></li>
+<li>UI代码组件化，修复部分选项BUG，文字表述优化，新增日志配置项。 by @alpzmj9 in <a href="https://github.com/biliup/biliup/pull/822">#822</a></li>
+<li>Refactoring database using sqlalchemy by @boxie123 in <a href="https://github.com/biliup/biliup/pull/818">#818</a></li>
+</ul>
+<p><strong>Full Changelog</strong>: <a href="https://github.com/biliup/biliup/compare/v0.4.36...v0.4.37">v0.4.36...v0.4.37</a></p>
+<h2 id="0-4-36">0.4.36</h2>
+<ul>
+<li>修复码率类型错误、部分选项默认开启、投稿标签添加限制 by @boxie123 in <a href="https://github.com/biliup/biliup/pull/815">#815</a></li>
+<li>保证生成的视频文件后缀为小写 by @Kataick in <a href="https://github.com/biliup/biliup/pull/813">#813</a></li>
+<li>增加找不到 cookies 时文件时未知提示 by @buyfakett in <a href="https://github.com/biliup/biliup/pull/816">#816</a></li>
+<li>Fix: refined the webui. by @alpzmj9 in <a href="https://github.com/biliup/biliup/pull/817">#817</a></li>
+<li>添加--no-access-log参数、修改webui启动提示 by @boxie123 in <a href="https://github.com/biliup/biliup/pull/821">#821</a></li>
+</ul>
+<h3 id="new-contributors-19">New Contributors</h3>
+<ul>
+<li>@buyfakett made their first contribution in <a href="https://github.com/biliup/biliup/pull/816">#816</a></li>
+<li>@alpzmj9 made their first contribution in <a href="https://github.com/biliup/biliup/pull/817">#817</a></li>
+</ul>
+<p><strong>Full Changelog</strong>: <a href="https://github.com/biliup/biliup/compare/v0.4.35...v0.4.36">v0.4.35...v0.4.36</a></p>
+<h2 id="0-4-35">0.4.35</h2>
+<ul>
+<li>添加 webui 缺失的配置项，修复账号信息显示问题 by @boxie123 in <a href="https://github.com/biliup/biliup/pull/792">#792</a></li>
+<li>🔧Fix: 上传插件和简介艾特无法取消选择、分段大小单位错误 by @boxie123 in <a href="https://github.com/biliup/biliup/pull/796">#796</a></li>
+<li>🔧Fix: Twitch录制报错 by @boxie123 in <a href="https://github.com/biliup/biliup/pull/800">#800</a></li>
+<li>🔧修复webui的某些输入框类型问题 by @Kataick in <a href="https://github.com/biliup/biliup/pull/814">#814</a></li>
+</ul>
+<p><strong>Full Changelog</strong>: <a href="https://github.com/biliup/biliup/compare/v0.4.34...v0.4.35">v0.4.34...v0.4.35</a></p>
+<h2 id="0-4-34">0.4.34</h2>
+<ul>
+<li>更新时间：2024.01.27</li>
+<li>新增随机UA功能以及统一使用来解决部分平台请求API/弹幕录制风控问题<a href="https://github.com/Kataick">@Kataick</a></li>
+<li>优化webui处理时间的函数<a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧解决文件上传乱序的问题 <a href="https://github.com/storyxc">@storyxc</a></li>
+<li>🔧解决从旧版Config中读取postprocessor指令并写入数据库的格式错误，导致postprocessor无法执行的问题 <a href="https://github.com/boxie123">@boxie123</a></li>
+</ul>
+<h2 id="0-4-32-0-4-33">0.4.32-0.4.33</h2>
+<p>⚠️⚠️⚠️⚠️⚠️⚠️超大版本更新，在升级到此版本之前请认真阅读说明。</p>
+<ul>
+<li>🔧自动修正stream_gears设置不支持的format <a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧修复分段下载时streamlink不会退出的问题  <a href="https://github.com/dreammu">@dreammu</a></li>
+<li>💡AfreecaTV添加账号密码登陆,直播间标题 <a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧修复快手直播录制,因风控严格暂时移除快手cdn及流类型选择 <a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧优化 BiliLive 部分运行逻辑 （添加登录验证，原画链接复用 使用移动端房间信息，获取正确 emoji 标题）<a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>💡数据库存档 （代理原本的config文件，在此版本之后，老版本的config将会在第一次启动被读取并写入新的数据库中，之后将不在使用config文件）<a href="https://github.com/boxie123">@boxie123</a></li>
+<li>🔧修复在py3.7版本运行问题 <a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>💡添加bigo支持 <a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧兼容 stream-gears 在无 Cookie 时的下载 <a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>🔧标题为空时下载报错 <a href="https://github.com/boxie123">@boxie123</a></li>
+<li>🔧修复弹幕重新连接时覆盖原有弹幕问题 <a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧修复斗鱼下播后可能会录制回放问题 <a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧修复使用biliup-rs上传后内存不会清空的问题<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧猫耳FM提供格式默认值<a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>💡新增WEBUI支持，可在WEBUI进行所有的设置与管理。 <a href="https://github.com/boxie123">@boxie123</a></li>
+</ul>
+<h2 id="0-4-31">0.4.31</h2>
+<ul>
+<li>更新时间：2023.09.12</li>
+<li>🔧修复抖音弹幕问题<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+</ul>
+<h2 id="0-4-30-warning-warning-you-zhong-da-wen-ti-qing-wu-shi-yong-gai-ban-ben">0.4.30 ⚠️⚠️有重大问题，请勿使用该版本。</h2>
+<ul>
+<li>更新时间：2023.09.12</li>
+<li>🔧youtube配置说明修改<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧避免Windows可能的弹幕录制任务关闭失败<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧为部分检测添加超时时间避免检测时间过长<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧调整弹幕录制日志<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧斗鱼录制及弹幕对URL支持同步<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧修复斗鱼弹幕缺失<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧修复Bilibili弹幕缺失<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧抖音录制及弹幕对URL支持同步<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧抖音弹幕也会使用配置内的Cookie<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧适配新版抖音录制及弹幕<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧优化Bilibili提示报错<a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧补全yaml配置文件抖音画质符号<a href="https://github.com/Kataick">@Kataick</a></li>
+<li>💡youtube添加缓存<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>💡youtube跳过检测after_date日期后的视频及直播<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>⚠️修改preprocessor(下载直播),downloaded_processor(上传直播)时返回的开播及下播时间为时间戳<a href="https://github.com/Kataick">@Kataick</a></li>
+</ul>
+<h2 id="0-4-29">0.4.29</h2>
+<ul>
+<li>更新时间：2023.08.04</li>
+<li>🔧youtube配置说明修改<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧将上传录像时可以开始新的录制调整为默认功能<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧下载上传逻辑调整<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧上传后正确的删除弹幕<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧downloaded_processor的时间被正确格式化以及明确时间默认值<a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧downloaded_processor的参数被正确格式化<a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧bili_web强制选择UpOS模式下的线路<a href="https://github.com/1toldyou">@1toldyou</a></li>
+<li>🔧正确的检测进程空闲状态<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧正确的重启进程<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>💡youtube添加单独下载直播和回放选项<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>💡youtube添加streams playlists shorts类型链接支持<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>💡youtube添加筛选无效时提示<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>💡youtube不会在运行目录产生多余文件了<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>💡封面下载支持webp<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>💡启动时删除临时缓存文件<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+</ul>
+<h2 id="0-4-28">0.4.28</h2>
+<ul>
+<li>更新时间：2023.07.30</li>
+<li>🔧在读取youtube缓存失败时增加提示<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧调整twitch日志输出<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧调整twitch youtube封面下载逻辑<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧修复youtube视频录制异常中断时多余文件不删除<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧兼容低版本python<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧斗鱼请求优化<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧斗鱼适配移动端url<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧斗鱼避免下播时可能的异常<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧避免上传时由于操作文件权限不足导致后处理失败<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧补充downloaded_processor toml配置<a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧删除多余日志输出<a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧让检测后能更快的开始下载<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧修复快手录制问题<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>💡上传后封面自动删除<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>💡downloaded_processor增加返回参数(下播时间和视频列表)<a href="https://github.com/Kataick">@Kataick</a></li>
+<li>💡stream-gears升级至0.1.19</li>
+</ul>
+<h2 id="0-4-27">0.4.27</h2>
+<ul>
+<li>更新时间：2023.07.29</li>
+<li>🔧修复虎牙拉流403分段问题<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧统一download.py的输出格式<a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧修复抖音弹幕分段与录制stop的问题<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧调整直播流获取失败及下播延迟检测功能<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧优化下载流程与下载日志逻辑以及下播检测延迟阈值<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧虎牙画质修复<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧调整封面下载逻辑<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧调整批量检测功能<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>🔧优化youtube与twitch下载策略<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+<li>💡添加斗鱼,虎牙,哔哩哔哩,抖音自选画质<a href="https://github.com/CoolZxp">@CoolZxp</a></li>
+</ul>
+<h2 id="0-4-26">0.4.26</h2>
+<ul>
+<li>更新时间：2023.07.27</li>
+<li>🔧修复虎牙直播流下载的问题。 <a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+</ul>
+<h2 id="0-4-25">0.4.25</h2>
+<ul>
+<li>更新时间：2023.07.27</li>
+<li>💡新增NOW直播<a href="https://github.com/Kataick">@Kataick</a></li>
+<li>💡新增映客直播<a href="https://github.com/Kataick">@Kataick</a></li>
+<li>💡增加downloaded_processor功能，支持结束录制时执行指定Shell指令<a href="https://github.com/Kataick">@Kataick</a></li>
+</ul>
+<h2 id="0-4-24">0.4.24</h2>
+<ul>
+<li>🔧修复哔哩哔哩flv流403的问题。 <a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+</ul>
+<h2 id="0-4-23">0.4.23</h2>
+<ul>
+<li>更新时间：2023.07.17</li>
+<li>🔧preprocessor增加开播时返回主播名字和开播地址 <a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧修复当获取流失败后会触发获取流频繁的问题 <a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧优化设置大delay会出现漏录的问题 <a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧优化在config中读取值的代码写法 <a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧增加对yt-dlp的lazy_playlist功能支持 <a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧修复format为mp4时无法时间分段的问题 <a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧修复bilibili导致进程卡死问题(get_play_info) <a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧修复afreecaTV导致进程卡死问题 <a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧修复快手导致进程卡死问题 <a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧去除 quickjs 依赖。相对应的修改了 Readme 和 Douyu <a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>🔧Bililive 兼容 `APEX分区。<a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>🔧Kuaishou 新增 协议切换 和 CDN 优选。<a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>🔧修正快手 HLS 流原画 <a href="https://github.com/xxxxuanran">@xxxxuanran</a> </li>
+<li>🔧修复biliup-rs的参数绑定<a href="https://github.com/hguandl">@hguandl</a></li>
+<li>💡增加由于地区限制导致无法下载指定区域直播间的提示。<a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>💡增加对biliup-rs的支持(杜比音效、Hi-Res、转载、充电) <a href="https://github.com/Kataick">@Kataick</a></li>
+<li>💡bili_web上传插件新增简介@功能 <a href="https://github.com/zzc10086">@zzc10086</a></li>
+<li>💡增加抖音弹幕录制支持 <a href="https://github.com/KNaiFen">@KNaiFen</a></li>
+</ul>
+<h2 id="0-4-22">0.4.22</h2>
+<ul>
+<li>更新时间：2023.06.29</li>
+<li>🔧优化虎牙错误提示和抖音代码与错误提示。<a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧优化获取直播流失败时增加等待重试。<a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧修复ffmpeg时长分段时弹幕文件不会跟着分段的问题、修复防止重复请求流的功能工作异常的问题。<a href="https://github.com/KNaiFen">@KNaiFen</a></li>
+<li>🔧修正CHANGELOG更新日志、修正README.MD。<a href="https://github.com/KNaiFen">@KNaiFen</a></li>
+<li>🔧弹幕报错记录增加文件名部分，方便排查BUG。<a href="https://github.com/KNaiFen">@KNaiFen</a></li>
+<li>🔧yaml、toml配置文件注释修正，格式修正。<a href="https://github.com/KNaiFen">@KNaiFen</a></li>
+<li>💡「BETA」增加未上传完录像时同一主播重新开播是否立刻开始录制功能。<a href="https://github.com/Kataick">@Kataick</a></li>
+<li>💡「BETA」增加cn01的fmp4流获取真原画流功能。<a href="https://github.com/haha114514">@haha114514</a></li>
+</ul>
+<h2 id="0-4-21">0.4.21</h2>
+<ul>
+<li>更新时间：2023.06.11</li>
+<li>🔧抖音增加获取错误时的提示并优化纯数字房间号的代码。<a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧修复虎牙与抖音关闭连接导致进程终止问题。<a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧同步yaml配置文件的更新到toml中。<a href="https://github.com/Kataick">@Kataick</a></li>
+<li>🔧NICO标题获取从BS4改为正则，开播后仍然重复请求的BUG的修复。<a href="https://github.com/KNaiFen">@KNaiFen</a></li>
+<li>🔧添加quickjs依赖。<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>💡新增NICO录播。<a href="https://github.com/KNaiFen">@KNaiFen</a></li>
+<li>💡增加NICO用户配置文件模板。<a href="https://github.com/KNaiFen">@KNaiFen</a></li>
+<li>💡增加Twitch的去广告开关（解决广告分段问题）<a href="https://github.com/KNaiFen">@KNaiFen</a></li>
+<li>💡增加Twitch弹幕录播、修复斗鱼、虎牙的弹幕录制BUG并增加报错提示，修改了XML文件的删除部分，修改了部分代码的协程的调用，优化断流时频繁重复请求。<a href="https://github.com/KNaiFen">@KNaiFen</a></li>
+</ul>
+<h2 id="0-4-20">0.4.20</h2>
+<ul>
+<li>更新时间：2023.05.25</li>
+<li>🔧修复抖音可能导致进程卡死问题。<a href="https://github.com/KkakaMann">@KkakaMann</a></li>
+<li>🔧改正部分下载器的日志等级，避免刷屏。<a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>🔧尝试修复斗鱼下载失败的问题，同时禁用主线路。<a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>🔧修正快手日志提示，尝试规避风控。<a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>🔧修正Windows下自动过滤删除文件由于占用权限问题，导致整体卡住的问题。<a href="https://github.com/haha114514">@haha114514</a></li>
+</ul>
+<h2 id="0-4-19">0.4.19</h2>
+<ul>
+<li>更新时间：2023.05.11</li>
+<li>🔧修复新版本urllib3.connectionpool下xrange报错的问题。<a href="https://github.com/zclkkk">@zclkkk</a></li>
+<li>🔧修复新版本urllib3 2下method_whitelist报错的问题。<a href="https://github.com/Weidows">@Weidows</a></li>
+</ul>
+<h2 id="0-4-18">0.4.18</h2>
+<ul>
+<li>更新时间：2023.04.21</li>
+<li>🔧修复录制B站直播，自动上传标题里面的title为下播前的最后一个标题的bug（正确的应该是开播之后的第一个标题）。<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>🔧streamlink下载稳定与内存占用优化。<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>🔧修复多余弹幕文件自动过滤失效的问题。<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>🔧增加B站fmp4流的等待时间，因为有些主播开播到推流时间较慢。<a href="https://github.com/zclkkk">@zclkkk</a></li>
+<li>💡B站直播优选CDN支持同时添加多个节点。<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>💡新增B站自定义fmp4流获取不到时，重新获取一遍flv直播流的API。<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>💡新增对快手平台的支持。<a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+</ul>
+<h2 id="0-4-17">0.4.17</h2>
+<ul>
+<li>更新时间：2023.03.24</li>
+<li>🔧修复不填B站自定义API就无法开始录制的问题。<a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+</ul>
+<h2 id="0-4-16-warning-warning-you-zhong-da-wen-ti-qing-wu-shi-yong-gai-ban-ben">0.4.16 ⚠️⚠️有重大问题，请勿使用该版本。</h2>
+<ul>
+<li>更新时间：2023.03.23</li>
+<li>🔧修复B站自定义API不生效的问题。<a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>🔧修复部分config示例的错误。<a href="https://github.com/haha114514">@haha114514</a></li>
+</ul>
+<h2 id="0-4-15">0.4.15</h2>
+<ul>
+<li>更新时间：2023.03.21</li>
+<li>🔧修复上一版本关于b站下载部分的优化相关的问题。<a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>🔧优化YouTube下载相关参数。<a href="https://github.com/haha114514">@haha114514</a></li>
+</ul>
+<h2 id="0-4-14">0.4.14</h2>
+<ul>
+<li>更新时间：2023.03.19</li>
+<li>🔧回滚@xxxxuanran关于b站下载部分的优化。<a href="https://github.com/haha114514">@haha114514</a></li>
+</ul>
+<h2 id="0-4-13-warning-warning-you-zhong-da-wen-ti-qing-wu-shi-yong-gai-ban-ben">0.4.13 ⚠️⚠️有重大问题，请勿使用该版本。</h2>
+<ul>
+<li>更新时间：2023.03.19</li>
+<li>🔧优化部分下载逻辑，并将封面下载功能移动到download.py中，方便以后适配更多平台的直播间封面下载。<a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>🔧修复配置文件错误。<a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>🔧优化streamlink下载参数。<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>💡新增跳过斗鱼scdn，并增加了斗鱼与虎牙最新的CDN的支持。<a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>💡新增指定YouTube视频下载时间范围区间的功能。<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>⚠️上一条由于为Config新增了一些设置，如需使用相关功能请参考最新的config示例添加缺失的部分。</li>
+</ul>
+<h2 id="0-4-12">0.4.12</h2>
+<ul>
+<li>更新时间：2023.03.17</li>
+<li>🔧修复优选CDN与直播流不生效的问题。<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>🔧优化streamlink下载参数。<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>🔧完善依赖列表,将最低的yt-dlp版本要求升级到2023.3.3，解决2022年版本已无法解析YouTube视频的问题。并且将streamlink最低要求版本升级到5.3.0，提升hls流录制稳定性。<a href="https://github.com/haha114514">@haha114514</a></li>
+</ul>
+<h2 id="0-4-11">0.4.11</h2>
+<ul>
+<li>更新时间：2023.03.07</li>
+<li>🔧修复上一版本的封面上传问题。<a href="https://github.com/haha114514">@haha114514</a></li>
+</ul>
+<h2 id="0-4-10-warning-warning-you-zhong-da-wen-ti-qing-wu-shi-yong-gai-ban-ben">0.4.10 ⚠️⚠️有重大问题，请勿使用该版本。</h2>
+<ul>
+<li>更新时间：2023.03.07</li>
+<li>🔧修复上一版本的封面上传问题。<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>🔧优化上传过滤文件规则。<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>💡修改判断逻辑，支持cn-gotcha01 flv流的自选域名。<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>💡增加YouTube转载视频自动获取视频封面并用作投稿封面的功能。<a href="https://github.com/haha114514">@haha114514</a></li>
+</ul>
+<h2 id="0-4-9-warning-warning-you-zhong-da-wen-ti-qing-wu-shi-yong-gai-ban-ben">0.4.9 ⚠️⚠️有重大问题，请勿使用该版本。</h2>
+<ul>
+<li>更新时间：2023.03.06</li>
+<li>🔧biliup-rs上传器自动过滤xml文件，避免上传xml弹幕文件导致整个投稿转码失败的问题。<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>🔧修复自动获取封面不生效的问题<a href="https://github.com/haha114514">@haha114514</a></li>
+</ul>
+<h2 id="0-4-8">0.4.8</h2>
+<ul>
+<li>更新时间：2023.03.04</li>
+<li>🔧在最后处理文件的时候，自动删除多余的xml弹幕文件，只保留有同样文件名视频的弹幕xml文件<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>🔧优化ffmpeg录制hls流的参数<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>💡新增streamlink+ffmpeg混合下载器选项<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>💡新增B站直播hls_fmp4流的获取（目前只有streamlink+ffmpeg混合模式才能稳定下载）<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>⚠️上两条由于为Config新增了一些设置，如需使用相关功能请参考最新的config示例添加缺失的部分。</li>
+</ul>
+<h2 id="0-4-7">0.4.7</h2>
+<ul>
+<li>更新时间：2023.02.28</li>
+<li>🔧修复0.4.5的BUG并添加缺失的依赖<a href="https://github.com/haha114514">@haha114514</a></li>
+</ul>
+<h2 id="0-4-5-warning-warning-you-zhong-da-wen-ti-qing-wu-shi-yong-gai-ban-ben">0.4.5 ⚠️⚠️有重大问题，请勿使用该版本。</h2>
+<ul>
+<li>更新时间：2023.02.28</li>
+<li>💡新增斗鱼，虎牙，B站的弹幕录制功能，默认关闭，需要在config文件中开启，只支持FFMPEG（目前）<a href="https://github.com/KNaiFen">@KNaiFen</a> （感谢：<a href="https://github.com/THMonster/danmaku">THMonster/danmaku</a> ）</li>
+<li>🔧修复了BILIBILI录制中OV05节点的BUG<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>⚠️由于为Config新增了弹幕录制的设置，如需使用相关功能请参考最新的config示例添加缺失的部分。</li>
+<li>🔧优化代码<a href="https://github.com/ForgQi">@ForgQi</a></li>
+</ul>
+<h2 id="0-4-4-warning-warning-ben-ci-xiu-gai-liao-confignei-bu-fen-can-shu-de-ming-cheng-qing-xu-yao-shi-yong-de-yong-hu-can-kao-zui-xin-de-configshi-li-xiu-gai">0.4.4 ⚠️⚠️本次修改了config内部分参数的名称，请需要使用的用户参考最新的config示例修改</h2>
+<ul>
+<li>更新时间：2023.02.20</li>
+<li>💡统一了Config中关键词替换的关键词。 <a href="https://github.com/haha114514">@haha114514</a></li>
+<li>⚠️⚠️请注意修改file_name与title和Description中关键词替换的部分。目前全部统一为streamer，title和url了。</li>
+<li>💡新增cn-gotcha01和ov-gotcha05自选ip/节点的设置。 <a href="https://github.com/haha114514">@haha114514</a></li>
+<li>⚠️上一条由于为Config新增了一些设置，如需使用相关功能请参考最新的config示例添加缺失的部分。</li>
+<li>🔧修复上一版本由于新增的哔哩哔哩直播自定义下载CDN导致报错的问题。 <a href="https://github.com/haha114514">@haha114514</a></li>
+<li>🔧修复过多请求开播API导致IP被限制访问的问题。<a href="https://github.com/ForgQi">@ForgQi</a></li>
+</ul>
+<h2 id="0-4-3">0.4.3</h2>
+<ul>
+<li>更新时间：2023.02.15</li>
+<li>💡为YouTube视频下载增加指定音视频编码的设置。 <a href="https://github.com/haha114514">@haha114514</a></li>
+<li>⚠️上一条由于为Config新增了一些设置，如需使用相关功能请参考最新的config示例添加缺失的部分。</li>
+<li>🔧修复上一版本由于新增的哔哩哔哩直播自定义下载CDN导致报错的问题。 <a href="https://github.com/haha114514">@haha114514</a></li>
+</ul>
+<h2 id="0-4-2-warning-warning-ci-ban-ben-cun-zai-zhong-da-bug-dao-zhi-hen-duo-qing-kuang-xia-wu-fa-lu-zhi-bzhan-zhi-bo-qing-wu-shi-yong">0.4.2 ⚠️⚠️此版本存在重大BUG，导致很多情况下无法录制B站直播，请勿使用。</h2>
+<ul>
+<li>更新时间：2023.02.15</li>
+<li>💡为YouTube视频下载增加指定封装格式，最大纵向分辨率，最大单视频大小的设置。 <a href="https://github.com/haha114514">@haha114514</a></li>
+<li>⚠️上一条由于为Config新增了一些设置，如需使用相关功能请参考最新的config示例添加缺失的部分。</li>
+<li>🔧修复上一版本由于新增的哔哩哔哩登录Cookie导致报错的问题。 <a href="https://github.com/haha114514">@haha114514</a></li>
+<li>🔧修复Twitch的Clips无法下载的问题。 <a href="https://github.com/haha114514">@haha114514</a></li>
+<li>🔧为上一版本的B站Fallback机制启用开关。<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>⚠️上一条由于为Config新增了一些设置，如需使用相关功能请参考最新的config示例添加缺失的部分。</li>
+</ul>
+<h2 id="0-4-1">0.4.1</h2>
+<ul>
+<li>更新时间：2023.02.13</li>
+<li>💡增加Preprocessor功能，支持开始录制时执行指定Shell指令 <a href="https://github.com/haha114514">@haha114514</a></li>
+<li>💡为上传标题与简介增加streamers变量 <a href="https://github.com/haha114514">@haha114514</a></li>
+<li>⚠️上两条由于为Config新增了一些设置，如需使用相关功能请参考最新的config示例添加缺失的部分。</li>
+<li>🔧修复访问acfun过于频繁导致ip被拉黑之后报错卡住的问题 <a href="https://github.com/haha114514">@haha114514</a></li>
+<li>🔧修复嵌入示例中延后发布时间的错误 <a href="https://github.com/setvenlele">@stevenlele</a></li>
+<li>🔧修复twitch_cookie配置不生效问题 <a href="https://github.com/v2wy">@v2wy</a></li>
+<li>🔧尝试为B站直播录制启用Fallback机制，当指定CDN反复无法下载之后，自动尝试另外的CDN <a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>🔧增加Cookie登录B站功能，可用于下载付费直播与大航海专属直播 <a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>⚠️上一条由于为Config新增了一些设置，如需使用相关功能请参考最新的config示例添加缺失的部分。</li>
+</ul>
+<h2 id="0-4-0">0.4.0</h2>
+<ul>
+<li>更新时间：2023.02.10</li>
+<li>⚠️修改cookie在配置文件中的位置 <a href="https://github.com/haha114514">@haha114514</a></li>
+<li>🔧修复斗鱼直播间被关闭一直报错的问题 <a href="https://github.com/v2wy">@v2wy</a></li>
+<li>🔧修改probe_version参数，增加两个常用的网页上传地址 <a href="https://github.com/FairyWorld">@FairyWorld</a></li>
+</ul>
+<h2 id="0-3-12">0.3.12</h2>
+<ul>
+<li>更新时间：2023.02.05</li>
+<li>🔧为readme文档添加关于主要支持录制的直播平台的介绍以及删掉关于上传CDN描述中已经失效的节点 <a href="https://github.com/haha114514">@haha114514</a></li>
+<li>🔧修复ffmpeg录制参数缺失.part后缀，导致录制出来的文件都没有.part后缀的问题 <a href="https://github.com/haha114514">@haha114514</a></li>
+<li>🔧修复了ffmpeg录制情况下，按大小分段录制时，分段之后上一段的.part后缀不会被去掉的问题 <a href="https://github.com/haha114514">@haha114514</a></li>
+<li>🔧完善config示例，增加postprocessor可参考用法的描述 <a href="https://github.com/haha114514">@haha114514</a></li>
+<li>⚠️上一条由于为Config新增了一些设置，如需使用相关功能请参考最新的config示例添加缺失的部分。</li>
+</ul>
+<h2 id="0-3-11">0.3.11</h2>
+<ul>
+<li>更新时间：2023.02.02</li>
+<li>🔧修复config.yaml示例中filename_prefix配置格式 <a href="https://github.com/FairyWorld">@FairyWorld</a></li>
+<li>🔧添加config.toml示例中缺失的关于downloader的设置 <a href="https://github.com/haha114514">@haha114514</a></li>
+<li>🔧修改postprocessor，避免出现指令有问题导致反复从头开始执行任务的问题 <a href="https://github.com/haha114514">@haha114514</a></li>
+<li>🔧去掉自动替换文件名中空格为_字符的功能，避免和录播完毕自动改名冲突 <a href="https://github.com/haha114514">@haha114514</a></li>
+<li>🔧修复由于上一版的修改导致stream-gears录制文件名重复出现分段覆盖的问题<a href="https://github.com/haha114514">@haha114514</a></li>
+</ul>
+<h2 id="0-3-10-warning-warning-ci-ban-ben-cun-zai-stream-gearslu-zhi-wen-jian-ming-zhong-fu-dao-zhi-fu-gai-shang-yi-duan-fen-duan-de-wen-ti-qing-wu-shi-yong">0.3.10 ⚠️⚠️此版本存在stream-gears录制文件名重复导致覆盖上一段分段的问题，请勿使用</h2>
+<ul>
+<li>更新时间：2023.02.01</li>
+<li>💡添加全局与单个主播自定义录播文件命名设置 <a href="https://github.com/haha114514">@haha114514</a></li>
+<li>⚠️新增与主播自定义录播文件命名设置的两个参数，如需使用此功能，请老版本用户参考config的示例添加。<a href="https://github.com/haha114514">@haha114514</a></li>
+<li>💡启用了文件名过滤特殊字符的功能，避免文件名中出现特殊字符，导致ffmpeg无法录制的问题。<a href="https://github.com/haha114514">@haha114514</a></li>
+</ul>
+<h2 id="0-3-9">0.3.9</h2>
+<ul>
+<li>更新时间：2023.01.31</li>
+<li>💡添加一个虎牙的CDN线路 <a href="https://github.com/ForgQi">@ForgQi</a></li>
+<li>🔧虎牙无法正确获取房间标题的问题 <a href="https://github.com/luckycat0426">@luckycat0426</a></li>
+<li>💡哔哩哔哩直播流协议.可选 stream（Flv）、hls <a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>💡哔哩哔哩直播优选CDN <a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>💡哔哩哔哩直播强制原画（仅限HLS流的 cn-gotcha01 CDN） <a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>💡自定义哔哩哔哩直播API <a href="https://github.com/xxxxuanran">@xxxxuanran</a></li>
+<li>💡Twitch自定义用户Cookie，作用是可以不让广告嵌入到视频流中 <a href="https://github.com/KNaiFen">@KNaiFen</a></li>
+</ul>
+
+        
+        
+<div class="docs-navigation d-flex justify-content-between">
+  
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+          
+        
+      
+        
+        
+          
+        
+      
+        
+        
+          
+        
+      
+        
+        
+          
+            
+              
+              <a href="&#x2F;biliup&#x2F;docs&#x2F;getting-started&#x2F;quick-start&#x2F;">
+                <div class="card my-1">
+                  <div class="card-body py-2">
+                    &larr; Quick Start
+                  </div>
+                </div>
+              </a>
+            
+            
+            
+          
+        
+      
+    
+  
+
+  
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+      
+      
+        
+      
+    
+      
+      
+        
+          
+          
+          <a class="ms-auto" href="&#x2F;biliup&#x2F;docs&#x2F;contributing&#x2F;how-to-contribute&#x2F;">
+            <div class="card my-1">
+              <div class="card-body py-2">
+                How to Contribute &rarr;
+              </div>
+            </div>
+          </a>
+          
+          
+          
+        
+      
+    
+      
+      
+        
+      
+    
+  
+</div>
+
+      </main>
+    </div>
+  </div>
+</div>
+
+
+  
+    
+<footer class="footer text-muted">
+	<div class="container">
+		<div class="row">
+			<div class="col-lg-8 order-last order-lg-first">
+				<ul class="list-inline">
+					
+						<li class="list-inline-item">Powered by <a href="https://www.netlify.com/">Netlify</a>, <a href="https://www.getzola.org/">Zola</a>, and <a href="https://github.com/aaranxu/adidoks">AdiDoks</a></li>
+					
+				</ul>
+			</div>
+			<div class="col-lg-8 order-first order-lg-last text-lg-end">
+				<ul class="list-inline">
+					
+						
+							<li class="list-inline-item"><a href="/biliup/privacy-policy/">Privacy</a></li>
+						
+							<li class="list-inline-item"><a href="/biliup/docs/contributing/code-of-conduct/">Code of Conduct</a></li>
+						
+					
+				</ul>
+			</div>
+		</div>
+	</div>
+</footer>
+
+  
+
+  
+<script type="text/javascript" src="/biliup/js/main.js" defer></script>
+
+  <script type="text/javascript" src="/biliup/plugins/elasticlunr.min.js" defer></script>
+  <script type="text/javascript" src="/biliup/search_index.en.js" defer></script>
+  <script type="text/javascript" src="/biliup/js/search.js" defer></script>
+
+  
+</body>
+</html>
