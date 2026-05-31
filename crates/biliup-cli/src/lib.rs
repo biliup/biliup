@@ -45,7 +45,6 @@ pub async fn run(
 
     let loaded_config = if let Some(path) = config_path.as_deref() {
         let config = Config::load(path)?;
-        repositories::upsert_config(&conn_pool, &config).await?;
         tracing::info!(config = %path.display(), "loaded server config file");
         config
     } else {
@@ -68,6 +67,8 @@ pub async fn run(
 
     if let Some(path) = config_path.as_deref() {
         import_config_streamers(path, &service_register).await?;
+    } else {
+        import_database_streamers(&service_register).await?;
     }
 
     tracing::info!("migrations successfully ran, initializing axum server...");
@@ -134,6 +135,29 @@ async fn import_config_streamers(path: &Path, service_register: &ServiceRegister
         imported += 1;
     }
     tracing::info!(config = %path.display(), imported, "imported config streamers");
+    Ok(())
+}
+
+async fn import_database_streamers(service_register: &ServiceRegister) -> AppResult<()> {
+    let streamers = repositories::get_all_streamer(&service_register.pool).await?;
+    let mut imported = 0usize;
+    for live_streamer in streamers {
+        let upload_config =
+            repositories::get_upload_config(&service_register.pool, live_streamer.id).await?;
+
+        service_register
+            .managers
+            .add_room(service_register.worker(live_streamer.clone(), upload_config))
+            .await
+            .ok_or_else(|| {
+                Report::new(AppError::Custom(format!(
+                    "not supported url in database: {}",
+                    live_streamer.url
+                )))
+            })?;
+        imported += 1;
+    }
+    tracing::info!(imported, "imported database streamers");
     Ok(())
 }
 
