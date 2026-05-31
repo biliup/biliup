@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::{error, info};
 
-use super::extractor::CallbackFn;
+pub type CallbackFn<'a> = Box<dyn FnMut(&str) + Send + Sync + 'a>;
 
 #[derive(Debug)]
 pub enum Segment {

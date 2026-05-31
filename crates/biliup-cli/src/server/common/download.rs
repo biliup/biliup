@@ -2,14 +2,15 @@ use crate::server::common::upload::UploaderMessage;
 use crate::server::common::util::FileValidator;
 use crate::server::core::downloader::cover_downloader;
 use crate::server::core::downloader::{
-    DanmakuClient, DownloadStatus, DownloaderRuntime, DownloaderType, SegmentEvent, SegmentInfo,
+    DanmakuClient, DownloadStatus, DownloaderRuntime, SegmentEvent, SegmentInfo,
 };
+use crate::server::core::live::{danmaku_client, downloader_runtime, live_request};
 use crate::server::core::monitor::Monitor;
-use crate::server::core::plugin::{DownloadBase, StreamInfoExt, StreamStatus};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Stage, WorkerStatus};
 use crate::server::infrastructure::models::hook_step::process;
-use async_channel::{Receiver, Sender};
+use async_channel::Sender;
+use biliup::downloader::live::{LivePlugin, LiveStatus, LiveStream};
 use error_stack::ResultExt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -131,7 +132,7 @@ impl DownloadTask {
         &self,
         ctx: &Context,
         sender: Sender<UploaderMessage>,
-        mut plugin: Box<dyn DownloadBase>,
+        plugin: Arc<dyn LivePlugin + Send + Sync>,
         rooms_handle: Arc<Monitor>,
     ) -> AppResult<()> {
         // 重试配置
@@ -140,10 +141,17 @@ impl DownloadTask {
         let base_delay = Duration::from_secs(2); // 基础延迟时间（2秒）
         let max_delay = Duration::from_secs(ctx.config().delay); // 最大延迟时间（60秒）
         let url = ctx.live_streamer().url.clone();
-        let mut stream_info_ext = ctx.stream_info_ext().clone();
-        // 可选的弹幕客户端
-        // 初始化弹幕客户端（如果存在）
-        let danmaku_client = plugin.danmaku_init();
+        let mut stream = ctx.live_stream().clone();
+        let filename_prefix = ctx
+            .live_streamer()
+            .filename_prefix
+            .clone()
+            .or_else(|| ctx.config().filename_prefix.clone());
+        let danmaku_client = danmaku_client(
+            stream.danmaku.as_ref(),
+            filename_prefix.as_deref(),
+            &stream.name,
+        );
         // 启动弹幕客户端
         if let Some(ref client) = danmaku_client {
             // 启动弹幕下载逻辑
@@ -158,12 +166,7 @@ impl DownloadTask {
             // 创建事件处理器
             // 执行下载
             let components = self
-                .download(
-                    &mut processor,
-                    ctx.clone(),
-                    danmaku_client.clone(),
-                    &stream_info_ext,
-                )
+                .download(&mut processor, ctx.clone(), danmaku_client.clone(), &stream)
                 .await;
 
             info!("initialize_components completed: {url}");
@@ -173,9 +176,11 @@ impl DownloadTask {
                 break components;
             }
             // 检查流状态
-            match plugin.check_stream().await {
-                Ok(StreamStatus::Live { stream_info }) => {
-                    stream_info_ext = *stream_info;
+            match plugin.check_stream(live_request(ctx.worker())).await {
+                Ok(LiveStatus::Live {
+                    stream: next_stream,
+                }) => {
+                    stream = *next_stream;
                     info!(
                         url = url,
                         "Stream is still live, preparing to retry. attempt: {}", retry_count
@@ -183,7 +188,7 @@ impl DownloadTask {
                     // 成功下载后重置计数
                     retry_count = 0;
                 }
-                Ok(StreamStatus::Offline) => {
+                Ok(LiveStatus::Offline) => {
                     retry_count += 1;
                     // 继续循环，重新执行下载
                     info!(url = url, "Stream went offline, stopping download");
@@ -243,7 +248,7 @@ impl DownloadTask {
         processor: &mut SegmentEventProcessor,
         ctx: Context,
         danmaku_client: Option<Arc<dyn DanmakuClient + Send + Sync>>,
-        ext: &StreamInfoExt,
+        stream: &LiveStream,
     ) -> AppResult<DownloadStatus> {
         // 获取配置和主播信息
         let streamer = ctx.live_streamer();
@@ -280,7 +285,7 @@ impl DownloadTask {
 
         let result = self
             .downloader
-            .download(Box::new(hook), ctx.download_config(ext))
+            .download(Box::new(hook), ctx.download_config(stream))
             .await
             .change_context(AppError::Custom("Failed to download segment".into()))?;
 
@@ -299,104 +304,53 @@ impl DownloadTask {
     }
 }
 
-/// 下载Actor
-/// 负责处理下载相关的消息和任务
-pub struct DActor {
-    /// 下载消息接收器
-    receiver: Receiver<DownloaderMessage>,
-    /// 上传消息发送器
+/// 启动完整下载流程。
+///
+/// 只能由 `Monitor` 在取得下载池许可后调用；调用方必须把许可移动到同一个任务中，
+/// 并持有到本函数返回，保证 `pool1_size` 是下载并发的唯一限制。
+pub async fn start_download_workflow(
+    downloader: Arc<dyn LivePlugin + Send + Sync>,
+    ctx: Context,
     sender: Sender<UploaderMessage>,
-
     rooms_handle: Arc<Monitor>,
-}
+) {
+    let task = Arc::new(DownloadTask::new(downloader_runtime(
+        ctx.config().downloader,
+        ctx.live_stream(),
+    )));
+    ctx.change_status(Stage::Download, WorkerStatus::Working(task.clone()))
+        .await;
 
-impl DActor {
-    /// 创建新的下载Actor实例
-    pub fn new(
-        receiver: Receiver<DownloaderMessage>,
-        sender: Sender<UploaderMessage>,
-        rooms_handle: Arc<Monitor>,
-    ) -> Self {
-        Self {
-            receiver,
-            sender,
-            rooms_handle,
+    tokio::spawn({
+        let streamer_info = ctx.streamer_info();
+        let live_cover_url = streamer_info.live_cover_path.clone();
+        let format_filename = ctx.recorder(streamer_info.clone()).format_filename();
+        let client = ctx.stateless_client().client.clone();
+        let enabled = ctx
+            .config()
+            .use_live_cover
+            .map(|u| u && !live_cover_url.is_empty())
+            .unwrap_or(false);
+        async move {
+            cover_downloader::download_cover_with(
+                &live_cover_url,
+                enabled,
+                &format_filename,
+                client,
+            )
+            .await
         }
-    }
+    });
 
-    /// 运行Actor主循环，处理接收到的消息
-    pub(crate) async fn run(&mut self) {
-        while let Ok(msg) = self.receiver.recv().await {
-            self.handle_message(msg).await
-        }
-    }
+    process(&[], &ctx.live_streamer().preprocessor).await;
 
-    /// 处理下载消息
-    ///
-    /// # 参数
-    /// * `msg` - 要处理的下载消息
-    async fn handle_message(&mut self, msg: DownloaderMessage) {
-        match msg {
-            DownloaderMessage::Start(downloader, ctx) => {
-                // 创建下载任务
-                let task = Arc::new(DownloadTask::new(
-                    downloader.downloader(
-                        ctx.config()
-                            .downloader
-                            .unwrap_or(DownloaderType::StreamGears),
-                    ),
-                ));
-                // 更新工作器状态为工作中
-                ctx.change_status(Stage::Download, WorkerStatus::Working(task.clone()))
-                    .await;
+    let _ = task.execute(&ctx, sender, downloader, rooms_handle).await;
 
-                tokio::spawn({
-                    let streamer_info = &ctx.stream_info_ext().streamer_info;
-                    let live_cover_url = streamer_info.live_cover_path.clone();
-                    let format_filename = ctx.recorder(streamer_info.clone()).format_filename();
-                    let client = ctx.stateless_client().client.clone();
-                    let enabled = ctx
-                        .config()
-                        .use_live_cover
-                        .map(|u| u && !live_cover_url.is_empty())
-                        .unwrap_or(false);
-                    async move {
-                        cover_downloader::download_cover_with(
-                            &live_cover_url,
-                            enabled,
-                            &format_filename,
-                            client,
-                        )
-                        .await
-                    }
-                });
+    process(&[], &ctx.live_streamer().downloaded_processor).await;
 
-                process(&[], &ctx.live_streamer().preprocessor).await;
-
-                let _ = task
-                    .execute(
-                        &ctx,
-                        self.sender.clone(),
-                        downloader,
-                        self.rooms_handle.clone(),
-                    )
-                    .await;
-
-                process(&[], &ctx.live_streamer().downloaded_processor).await;
-
-                info!(
-                    "Download workflow completed {} => {:?}",
-                    ctx.live_streamer().url,
-                    ctx.status(Stage::Download)
-                );
-            }
-        }
-    }
-}
-
-/// 下载消息枚举
-/// 定义下载Actor可以处理的消息类型
-pub enum DownloaderMessage {
-    /// 开始下载消息，包含插件、流信息、上下文和房间句柄
-    Start(Box<dyn DownloadBase>, Context),
+    info!(
+        "Download workflow completed {} => {:?}",
+        ctx.live_streamer().url,
+        ctx.status(Stage::Download)
+    );
 }

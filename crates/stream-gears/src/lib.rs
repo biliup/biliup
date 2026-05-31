@@ -10,8 +10,7 @@ use uploader::{PyCredit, StudioPre};
 use crate::uploader::UploadLine;
 use axum::http::HeaderMap;
 use biliup::credential::Credential;
-use biliup::downloader::extractor::CallbackFn;
-use biliup::downloader::util::{LifecycleFile, Segmentable};
+use biliup::downloader::util::{CallbackFn, LifecycleFile, Segmentable};
 use biliup::downloader::{hls, httpflv};
 use pyo3::types::{PyList, PyType};
 use std::collections::HashMap;
@@ -417,27 +416,6 @@ pub fn main_loop(py: Python<'_>) -> PyResult<()> {
     py.detach(|| {
         server::_main(args.as_slice()).map_err(|e| PyRuntimeError::new_err(format!("{e:?}")))
     })
-
-    // for item in plugin_list.iter() {
-    //     // 每个元素都是一个类（type）
-    //     let ty: &Bound<PyType> = item.downcast()?;
-    //
-    //     // 确认是否是 DownloadBase 的子类
-    //     if ty.is_subclass(download_base)? {
-    //         let name: String = ty.getattr("__name__")?.extract()?;
-    //         println!("发现插件类: {name}");
-    //
-    //         // 如果要实例化（若不是抽象类且构造器无参）
-    //         // let obj = ty.call0()?;
-    //         // 或者需要参数：ty.call1((arg1, arg2,))?;
-    //
-    //         // 如果要调用方法（示例）
-    //         // if let Ok(method) = obj.getattr("download") {
-    //         //     let result = method.call0()?;
-    //         //     println!("download() 返回: {}", result.repr()?.extract::<String>()?);
-    //         // }
-    //     }
-    // }
 }
 
 /// A Python module implemented in Rust.

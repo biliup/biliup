@@ -1,13 +1,9 @@
-use crate::server::common::util::{danmaku_filename_template, media_ext_from_url};
-use crate::server::core::downloader::{DanmakuClient, RustDanmakuClient};
-use crate::server::core::plugin::{DownloadBase, DownloadPlugin, StreamInfoExt, StreamStatus};
-use crate::server::errors::AppError;
-use crate::server::infrastructure::context::PluginContext;
-use crate::server::infrastructure::models::StreamerInfo;
+use super::{
+    DanmakuSource, DownloaderHint, LiveError, LivePlugin, LiveRequest, LiveResult, LiveStatus,
+    LiveStream, media_ext_from_url,
+};
 use async_trait::async_trait;
 use chrono::Utc;
-use danmaku_client::{PlatformContext, RecorderConfig};
-use error_stack::{Report, ResultExt};
 use libsm::sm3::hash::Sm3Hash;
 use rand::Rng;
 use rand::seq::SliceRandom;
@@ -16,8 +12,6 @@ use reqwest::Client;
 use reqwest::header::{COOKIE, HeaderMap, HeaderValue, REFERER, USER_AGENT};
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const DOUYIN_LIVE_URL: &str = "https://live.douyin.com/";
@@ -46,39 +40,22 @@ impl Douyin {
     }
 }
 
-impl DownloadPlugin for Douyin {
+#[async_trait]
+impl LivePlugin for Douyin {
+    fn name(&self) -> &'static str {
+        "Douyin"
+    }
+
     fn matches(&self, url: &str) -> bool {
         self.re.is_match(url)
     }
 
-    fn create_downloader(&self, ctx: &mut PluginContext) -> Box<dyn DownloadBase> {
-        let config = ctx.config();
-        let user = config.user.clone().unwrap_or_default();
-        Box::new(DouyinDownloader::new(
-            ctx.client(),
-            ctx.live_streamer().url.clone(),
-            ctx.live_streamer().remark.clone(),
-            config
-                .douyin_quality
-                .unwrap_or_else(|| "origin".to_string()),
-            config.douyin_protocol.unwrap_or_else(|| "flv".to_string()),
-            config.douyin_double_screen.unwrap_or(false),
-            config.douyin_true_origin.unwrap_or(false),
-            user.douyin_cookie,
-            config.douyin_danmaku.unwrap_or(false),
-            ctx.live_streamer()
-                .filename_prefix
-                .clone()
-                .or(config.filename_prefix.clone()),
-        ))
-    }
-
-    fn name(&self) -> &str {
-        "Douyin"
+    async fn check_stream(&self, request: LiveRequest) -> LiveResult<LiveStatus> {
+        DouyinLive::new(request).check_stream().await
     }
 }
 
-struct DouyinDownloader {
+struct DouyinLive {
     client: Client,
     url: String,
     name: String,
@@ -88,40 +65,66 @@ struct DouyinDownloader {
     douyin_true_origin: bool,
     cookie: String,
     douyin_danmaku: bool,
-    filename_prefix: Option<String>,
     web_rid: Option<String>,
     room_id: Option<String>,
     sec_uid: Option<String>,
 }
 
-impl DouyinDownloader {
-    fn new(
-        client: Client,
-        url: String,
-        name: String,
-        douyin_quality: String,
-        douyin_protocol: String,
-        douyin_double_screen: bool,
-        douyin_true_origin: bool,
-        douyin_cookie: Option<String>,
-        douyin_danmaku: bool,
-        filename_prefix: Option<String>,
-    ) -> Self {
+impl DouyinLive {
+    fn new(request: LiveRequest) -> Self {
+        let options = request.options.douyin;
         Self {
-            client,
-            url,
-            name,
-            douyin_quality,
-            douyin_protocol,
-            douyin_double_screen,
-            douyin_true_origin,
-            cookie: douyin_cookie.unwrap_or_default(),
-            douyin_danmaku,
-            filename_prefix,
+            client: request.client,
+            url: request.url,
+            name: request.name,
+            douyin_quality: options.quality,
+            douyin_protocol: options.protocol,
+            douyin_double_screen: options.double_screen,
+            douyin_true_origin: options.true_origin,
+            cookie: request.credentials.douyin_cookie.unwrap_or_default(),
+            douyin_danmaku: options.danmaku,
             web_rid: None,
             room_id: None,
             sec_uid: None,
         }
+    }
+
+    async fn check_stream(&mut self) -> LiveResult<LiveStatus> {
+        self.ensure_cookie().await;
+        self.resolve_room_keys().await?;
+        let Some(room_info) = self.get_room_info().await? else {
+            return Ok(LiveStatus::Offline);
+        };
+        let raw_stream_url = self.select_stream_url(&room_info)?;
+        let title = room_info
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let cover = room_info
+            .pointer("/cover/url_list")
+            .and_then(Value::as_array)
+            .and_then(|url_list| url_list.first())
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+
+        Ok(LiveStatus::Live {
+            stream: Box::new(LiveStream {
+                name: self.name.clone(),
+                url: self.url.clone(),
+                title,
+                date: Utc::now(),
+                live_cover_url: cover,
+                suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "flv".to_string()),
+                raw_stream_url,
+                platform: "douyin".to_string(),
+                stream_headers: self.stream_headers(),
+                danmaku: self.danmaku_source(),
+                downloader_hint: DownloaderHint::StreamGears,
+                runtime_options: None,
+            }),
+        })
     }
 
     async fn ensure_cookie(&mut self) {
@@ -154,7 +157,7 @@ impl DouyinDownloader {
         headers
     }
 
-    async fn resolve_room_keys(&mut self) -> Result<(), Report<AppError>> {
+    async fn resolve_room_keys(&mut self) -> LiveResult<()> {
         if self.url.contains("v.douyin") {
             let resp = self
                 .client
@@ -162,7 +165,7 @@ impl DouyinDownloader {
                 .headers(self.headers())
                 .send()
                 .await
-                .change_context(AppError::Custom("解析抖音短链接失败".to_string()))?;
+                .map_err(|err| LiveError::custom(format!("解析抖音短链接失败: {err}")))?;
             let url = resp.url().to_string();
             if url.contains("webcast.amemv") {
                 self.sec_uid = capture(&url, r"[?&]sec_user_id=([^&]+)");
@@ -195,17 +198,17 @@ impl DouyinDownloader {
                 .headers(self.headers())
                 .send()
                 .await
-                .change_context(AppError::Custom("获取抖音用户页失败".to_string()))?
+                .map_err(|err| LiveError::custom(format!("获取抖音用户页失败: {err}")))?
                 .text()
                 .await
-                .change_context(AppError::Custom("读取抖音用户页失败".to_string()))?;
+                .map_err(|err| LiveError::custom(format!("读取抖音用户页失败: {err}")))?;
             let render_data = text
                 .split(r#"<script id="RENDER_DATA" type="application/json">"#)
                 .nth(1)
                 .and_then(|part| part.split("</script>").next())
                 .and_then(|part| urlencoding::decode(part).ok())
                 .map(|cow| cow.to_string())
-                .ok_or_else(|| Report::new(AppError::Custom("抖音房间号获取失败".to_string())))?;
+                .ok_or_else(|| LiveError::custom("抖音房间号获取失败"))?;
             self.web_rid = capture(&render_data, r#""web_rid":"([^"]+)""#);
             return Ok(());
         }
@@ -218,12 +221,12 @@ impl DouyinDownloader {
             .and_then(|part| part.split('?').next())
             .map(|part| part.trim_start_matches('+').to_string())
             .filter(|part| !part.is_empty())
-            .ok_or_else(|| Report::new(AppError::Custom("抖音直播间地址错误".to_string())))?;
+            .ok_or_else(|| LiveError::custom("抖音直播间地址错误"))?;
         self.web_rid = Some(web_rid);
         Ok(())
     }
 
-    async fn get_web_room_info(&self, web_rid: &str) -> Result<Value, Report<AppError>> {
+    async fn get_web_room_info(&self, web_rid: &str) -> LiveResult<Value> {
         let mut params = common_params();
         params.push(("web_rid".to_string(), web_rid.to_string()));
         params.push(("is_need_double_stream".to_string(), "false".to_string()));
@@ -234,17 +237,17 @@ impl DouyinDownloader {
             .headers(self.headers())
             .send()
             .await
-            .change_context(AppError::Custom("获取抖音直播间信息失败".to_string()))?
+            .map_err(|err| LiveError::custom(format!("获取抖音直播间信息失败: {err}")))?
             .json()
             .await
-            .change_context(AppError::Custom("解析抖音直播间信息失败".to_string()))
+            .map_err(|err| LiveError::custom(format!("解析抖音直播间信息失败: {err}")))
     }
 
-    async fn get_h5_room_info(&self) -> Result<Value, Report<AppError>> {
+    async fn get_h5_room_info(&self) -> LiveResult<Value> {
         let sec_uid = self
             .sec_uid
             .as_deref()
-            .ok_or_else(|| Report::new(AppError::Custom("抖音 sec_user_id 为空".to_string())))?;
+            .ok_or_else(|| LiveError::custom("抖音 sec_user_id 为空"))?;
         let verify_fp = gen_verify_fp();
         let params = vec![
             (
@@ -266,13 +269,13 @@ impl DouyinDownloader {
             .headers(self.headers())
             .send()
             .await
-            .change_context(AppError::Custom("获取抖音 H5 直播间信息失败".to_string()))?
+            .map_err(|err| LiveError::custom(format!("获取抖音 H5 直播间信息失败: {err}")))?
             .json()
             .await
-            .change_context(AppError::Custom("解析抖音 H5 直播间信息失败".to_string()))
+            .map_err(|err| LiveError::custom(format!("解析抖音 H5 直播间信息失败: {err}")))
     }
 
-    async fn get_room_info(&mut self) -> Result<Option<Value>, Report<AppError>> {
+    async fn get_room_info(&mut self) -> LiveResult<Option<Value>> {
         let mut response = Value::Null;
         if let Some(web_rid) = &self.web_rid {
             response = self.get_web_room_info(web_rid).await?;
@@ -321,7 +324,7 @@ impl DouyinDownloader {
         Ok(Some(room_info))
     }
 
-    fn select_stream_url(&self, room_info: &Value) -> Result<String, Report<AppError>> {
+    fn select_stream_url(&self, room_info: &Value) -> LiveResult<String> {
         let mut pull_data = room_info.pointer("/stream_url/live_core_sdk_data/pull_data");
         if self.douyin_double_screen
             && let Some(double_screen) = room_info
@@ -334,13 +337,13 @@ impl DouyinDownloader {
         let stream_data_text = pull_data
             .and_then(|pull_data| pull_data.get("stream_data"))
             .and_then(Value::as_str)
-            .ok_or_else(|| Report::new(AppError::Custom("抖音直播流数据为空".to_string())))?;
+            .ok_or_else(|| LiveError::custom("抖音直播流数据为空"))?;
         let stream_data: Value = serde_json::from_str(stream_data_text)
-            .change_context(AppError::Custom("解析抖音直播流数据失败".to_string()))?;
+            .map_err(|err| LiveError::custom(format!("解析抖音直播流数据失败: {err}")))?;
         let stream_data = stream_data
             .get("data")
             .and_then(Value::as_object)
-            .ok_or_else(|| Report::new(AppError::Custom("抖音直播流清晰度为空".to_string())))?;
+            .ok_or_else(|| LiveError::custom("抖音直播流清晰度为空"))?;
 
         if self.douyin_true_origin
             && self.douyin_quality == "origin"
@@ -380,7 +383,7 @@ impl DouyinDownloader {
                         .copied()
                         .find(|item| stream_data.contains_key(*item))
                 })
-                .ok_or_else(|| Report::new(AppError::Custom("抖音没有可用清晰度".to_string())))?
+                .ok_or_else(|| LiveError::custom("抖音没有可用清晰度"))?
         };
 
         let protocol = if self.douyin_protocol == "hls" {
@@ -395,80 +398,35 @@ impl DouyinDownloader {
             .and_then(Value::as_str)
             .filter(|url| !url.is_empty())
             .map(|url| url.replace("http://", "https://"))
-            .ok_or_else(|| Report::new(AppError::Custom("抖音可用直播流为空".to_string())))
-    }
-}
-
-#[async_trait]
-impl DownloadBase for DouyinDownloader {
-    async fn check_stream(&mut self) -> Result<StreamStatus, Report<AppError>> {
-        self.ensure_cookie().await;
-        self.resolve_room_keys().await?;
-        let Some(room_info) = self.get_room_info().await? else {
-            return Ok(StreamStatus::Offline);
-        };
-        let raw_stream_url = self.select_stream_url(&room_info)?;
-        let title = room_info
-            .get("title")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        let cover = room_info
-            .pointer("/cover/url_list")
-            .and_then(Value::as_array)
-            .and_then(|url_list| url_list.first())
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-
-        Ok(StreamStatus::Live {
-            stream_info: Box::new(StreamInfoExt {
-                streamer_info: StreamerInfo {
-                    id: -1,
-                    name: self.name.clone(),
-                    url: self.url.clone(),
-                    title,
-                    date: Utc::now(),
-                    live_cover_path: cover,
-                },
-                suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "flv".to_string()),
-                raw_stream_url,
-                platform: "douyin".to_string(),
-                stream_headers: HashMap::from([
-                    ("referer".to_string(), DOUYIN_LIVE_URL.to_string()),
-                    ("user-agent".to_string(), DOUYIN_USER_AGENT.to_string()),
-                    ("cookie".to_string(), self.cookie.clone()),
-                ]),
-            }),
-        })
+            .ok_or_else(|| LiveError::custom("抖音可用直播流为空"))
     }
 
-    fn danmaku_init(&self) -> Option<Arc<dyn DanmakuClient + Send + Sync>> {
+    fn stream_headers(&self) -> HashMap<String, String> {
+        HashMap::from([
+            ("referer".to_string(), DOUYIN_LIVE_URL.to_string()),
+            ("user-agent".to_string(), DOUYIN_USER_AGENT.to_string()),
+            ("cookie".to_string(), self.cookie.clone()),
+        ])
+    }
+
+    fn danmaku_source(&self) -> Option<DanmakuSource> {
         if !self.douyin_danmaku {
             return None;
         }
-
-        let mut context = PlatformContext::new().with_room_id(self.room_id.clone()?);
-        if !self.cookie.is_empty() {
-            context = context.with_cookie(self.cookie.clone());
-        }
-        context
-            .extra
-            .insert("referer".to_string(), DOUYIN_LIVE_URL.to_string());
-        context
-            .extra
-            .insert("user-agent".to_string(), DOUYIN_USER_AGENT.to_string());
-
-        let config = RecorderConfig::new(
-            self.url.clone(),
-            PathBuf::from(danmaku_filename_template(
-                self.filename_prefix.as_deref(),
-                &self.name,
-            )),
-        )
-        .with_context(context);
-
-        Some(Arc::new(RustDanmakuClient::new(config)) as Arc<dyn DanmakuClient + Send + Sync>)
+        Some(DanmakuSource {
+            platform: "douyin".to_string(),
+            url: self.url.clone(),
+            room_id: self.room_id.clone(),
+            cookie: (!self.cookie.is_empty()).then_some(self.cookie.clone()),
+            raw: false,
+            detail: false,
+            extra: HashMap::from([
+                ("referer".to_string(), DOUYIN_LIVE_URL.to_string()),
+                ("user-agent".to_string(), DOUYIN_USER_AGENT.to_string()),
+            ]),
+            movie_id: None,
+            password: None,
+        })
     }
 }
 
@@ -495,9 +453,9 @@ fn common_params() -> Vec<(String, String)> {
     ]
 }
 
-fn sign_query(params: &[(String, String)]) -> Result<String, Report<AppError>> {
+fn sign_query(params: &[(String, String)]) -> LiveResult<String> {
     let query = serde_urlencoded::to_string(params)
-        .change_context(AppError::Custom("编码抖音请求参数失败".to_string()))?;
+        .map_err(|err| LiveError::custom(format!("编码抖音请求参数失败: {err}")))?;
     let mut abogus = ABogus::new(Some(DOUYIN_USER_AGENT));
     Ok(abogus.generate_abogus(&query, ""))
 }
@@ -529,7 +487,7 @@ async fn fetch_ttwid(client: &Client) -> String {
     resp.headers()
         .get_all("set-cookie")
         .iter()
-        .filter_map(|value| {
+        .find_map(|value| {
             let cookie = value.to_str().ok()?;
             cookie
                 .split(';')
@@ -537,7 +495,6 @@ async fn fetch_ttwid(client: &Client) -> String {
                 .strip_prefix("ttwid=")
                 .map(ToString::to_string)
         })
-        .next()
         .unwrap_or_else(|| DEFAULT_TTWID.to_string())
 }
 

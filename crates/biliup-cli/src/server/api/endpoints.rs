@@ -529,7 +529,7 @@ pub async fn get_status(
     Ok(Json(serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
         "rooms": sw,
-        "download_semaphore": managers.d_kills.len(),
+        "download_semaphore": managers.download_semaphore,
         "update_semaphore": managers.u_kills.len(),
         "config": config,
     })))

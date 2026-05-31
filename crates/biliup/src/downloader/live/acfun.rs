@@ -1,14 +1,11 @@
-use crate::server::common::util::media_ext_from_url;
-use crate::server::core::plugin::{DownloadBase, DownloadPlugin, StreamInfoExt, StreamStatus};
-use crate::server::errors::AppError;
-use crate::server::infrastructure::context::PluginContext;
-use crate::server::infrastructure::models::StreamerInfo;
+use super::{
+    DownloaderHint, LiveError, LivePlugin, LiveRequest, LiveResult, LiveStatus, LiveStream,
+    media_ext_from_url,
+};
 use async_trait::async_trait;
 use chrono::Utc;
-use error_stack::{Report, ResultExt, bail};
 use rand::Rng;
 use regex::Regex;
-use reqwest::Client;
 use reqwest::header::{COOKIE, REFERER, USER_AGENT};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -36,44 +33,75 @@ impl Acfun {
     }
 }
 
-impl DownloadPlugin for Acfun {
+#[async_trait]
+impl LivePlugin for Acfun {
+    fn name(&self) -> &'static str {
+        "Acfun"
+    }
+
     fn matches(&self, url: &str) -> bool {
         self.re.is_match(url)
     }
 
-    fn create_downloader(&self, ctx: &mut PluginContext) -> Box<dyn DownloadBase> {
-        Box::new(AcfunDownloader::new(
-            ctx.client(),
-            ctx.live_streamer().url.clone(),
-            ctx.live_streamer().remark.clone(),
-        ))
-    }
-
-    fn name(&self) -> &str {
-        "Acfun"
+    async fn check_stream(&self, request: LiveRequest) -> LiveResult<LiveStatus> {
+        AcfunLive::new(request).check_stream().await
     }
 }
 
-struct AcfunDownloader {
-    client: Client,
+struct AcfunLive {
+    client: reqwest::Client,
     url: String,
     name: String,
 }
 
-impl AcfunDownloader {
-    fn new(client: Client, url: String, name: String) -> Self {
-        Self { client, url, name }
+impl AcfunLive {
+    fn new(request: LiveRequest) -> Self {
+        Self {
+            client: request.client,
+            url: request.url,
+            name: request.name,
+        }
     }
 
-    fn room_id(&self) -> Result<String, Report<AppError>> {
+    async fn check_stream(&self) -> LiveResult<LiveStatus> {
+        let room_id = self.room_id()?;
+        let did = format!("web_{}", random_name(16));
+        let visitor = self.visitor_login(&did).await?;
+        let Some(data) = self.start_play(&room_id, &did, visitor).await? else {
+            return Ok(LiveStatus::Offline);
+        };
+        let raw_stream_url = self.select_stream_url(&data)?;
+
+        Ok(LiveStatus::Live {
+            stream: Box::new(LiveStream {
+                name: self.name.clone(),
+                url: self.url.clone(),
+                title: data.caption,
+                date: Utc::now(),
+                live_cover_url: String::new(),
+                suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "flv".to_string()),
+                raw_stream_url,
+                platform: "acfun".to_string(),
+                stream_headers: HashMap::from([
+                    ("referer".to_string(), ACFUN_REFERER.to_string()),
+                    ("user-agent".to_string(), ACFUN_USER_AGENT.to_string()),
+                ]),
+                danmaku: None,
+                downloader_hint: DownloaderHint::StreamGears,
+                runtime_options: None,
+            }),
+        })
+    }
+
+    fn room_id(&self) -> LiveResult<String> {
         Regex::new(r"(?:https?://)?(?:(?:www|m|live)\.)?acfun\.cn/live/(\d+)")
             .unwrap()
             .captures(&self.url)
             .map(|captures| captures[1].to_string())
-            .ok_or_else(|| Report::new(AppError::Custom("Acfun 直播间地址错误".to_string())))
+            .ok_or_else(|| LiveError::custom("Acfun 直播间地址错误"))
     }
 
-    async fn visitor_login(&self, did: &str) -> Result<VisitorLoginResponse, Report<AppError>> {
+    async fn visitor_login(&self, did: &str) -> LiveResult<VisitorLoginResponse> {
         let response: VisitorLoginResponse = self
             .client
             .post(ACFUN_VISITOR_LOGIN_URL)
@@ -82,16 +110,16 @@ impl AcfunDownloader {
             .form(&[("sid", "acfun.api.visitor")])
             .send()
             .await
-            .change_context(AppError::Custom("Acfun 游客登录失败".to_string()))?
+            .map_err(|err| LiveError::custom(format!("Acfun 游客登录失败: {err}")))?
             .json()
             .await
-            .change_context(AppError::Custom("解析 Acfun 游客登录响应失败".to_string()))?;
+            .map_err(|err| LiveError::custom(format!("解析 Acfun 游客登录响应失败: {err}")))?;
 
         if response.result != 0 {
-            bail!(AppError::Custom(format!(
+            return Err(LiveError::custom(format!(
                 "Acfun 游客登录返回错误: {}",
                 response.result
-            )))
+            )));
         }
 
         Ok(response)
@@ -102,7 +130,7 @@ impl AcfunDownloader {
         room_id: &str,
         did: &str,
         visitor: VisitorLoginResponse,
-    ) -> Result<Option<StartPlayData>, Report<AppError>> {
+    ) -> LiveResult<Option<StartPlayData>> {
         let params = [
             ("subBiz", "mainApp".to_string()),
             ("kpn", "ACFUN_APP".to_string()),
@@ -123,10 +151,10 @@ impl AcfunDownloader {
             ])
             .send()
             .await
-            .change_context(AppError::Custom("获取 Acfun 直播流信息失败".to_string()))?
+            .map_err(|err| LiveError::custom(format!("获取 Acfun 直播流信息失败: {err}")))?
             .json()
             .await
-            .change_context(AppError::Custom("解析 Acfun 直播流信息失败".to_string()))?;
+            .map_err(|err| LiveError::custom(format!("解析 Acfun 直播流信息失败: {err}")))?;
 
         if response.result != 1 {
             return Ok(None);
@@ -135,12 +163,12 @@ impl AcfunDownloader {
         response
             .data
             .map(Some)
-            .ok_or_else(|| Report::new(AppError::Custom("Acfun 直播流数据为空".to_string())))
+            .ok_or_else(|| LiveError::custom("Acfun 直播流数据为空"))
     }
 
-    fn select_stream_url(&self, data: &StartPlayData) -> Result<String, Report<AppError>> {
+    fn select_stream_url(&self, data: &StartPlayData) -> LiveResult<String> {
         let video_play_res: VideoPlayRes = serde_json::from_str(&data.video_play_res)
-            .change_context(AppError::Custom("解析 Acfun 播放地址失败".to_string()))?;
+            .map_err(|err| LiveError::custom(format!("解析 Acfun 播放地址失败: {err}")))?;
 
         video_play_res
             .live_adaptive_manifest
@@ -148,40 +176,7 @@ impl AcfunDownloader {
             .and_then(|manifest| manifest.adaptation_set.representation.last())
             .map(|representation| representation.url.clone())
             .filter(|url| !url.is_empty())
-            .ok_or_else(|| Report::new(AppError::Custom("Acfun 可用直播流为空".to_string())))
-    }
-}
-
-#[async_trait]
-impl DownloadBase for AcfunDownloader {
-    async fn check_stream(&mut self) -> Result<StreamStatus, Report<AppError>> {
-        let room_id = self.room_id()?;
-        let did = format!("web_{}", random_name(16));
-        let visitor = self.visitor_login(&did).await?;
-        let Some(data) = self.start_play(&room_id, &did, visitor).await? else {
-            return Ok(StreamStatus::Offline);
-        };
-        let raw_stream_url = self.select_stream_url(&data)?;
-
-        Ok(StreamStatus::Live {
-            stream_info: Box::new(StreamInfoExt {
-                streamer_info: StreamerInfo {
-                    id: -1,
-                    name: self.name.clone(),
-                    url: self.url.clone(),
-                    title: data.caption,
-                    date: Utc::now(),
-                    live_cover_path: String::new(),
-                },
-                suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "flv".to_string()),
-                raw_stream_url,
-                platform: "acfun".to_string(),
-                stream_headers: HashMap::from([
-                    ("referer".to_string(), ACFUN_REFERER.to_string()),
-                    ("user-agent".to_string(), ACFUN_USER_AGENT.to_string()),
-                ]),
-            }),
-        })
+            .ok_or_else(|| LiveError::custom("Acfun 可用直播流为空"))
     }
 }
 
@@ -237,4 +232,29 @@ fn random_name(len: usize) -> String {
         .map(|_| charset[rng.gen_range(0..charset.len())] as char)
         .collect::<String>();
     format!("{first}{rest}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matches_acfun_urls() {
+        let plugin = Acfun::new();
+
+        assert!(plugin.matches("https://live.acfun.cn/live/12345"));
+        assert!(plugin.matches("https://www.acfun.cn/live/12345"));
+        assert!(!plugin.matches("https://example.com/live/12345"));
+    }
+
+    #[test]
+    fn parses_room_id() {
+        let live = AcfunLive {
+            client: reqwest::Client::new(),
+            url: "https://live.acfun.cn/live/12345".to_string(),
+            name: String::new(),
+        };
+
+        assert_eq!(live.room_id().unwrap(), "12345");
+    }
 }

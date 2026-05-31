@@ -1,15 +1,21 @@
+use crate::server::common::construct_headers;
 use crate::server::errors::{AppError, AppResult};
-use biliup::downloader::extractor::find_extractor;
+use biliup::client::StatelessClient;
 use biliup::downloader::flv_parser::{
     CodecId, SoundFormat, TagData, aac_audio_packet_header, avc_video_packet_header, header,
     script_data, tag_data, tag_header,
 };
 use biliup::downloader::flv_writer;
 use biliup::downloader::flv_writer::{FlvTag, TagDataHeader};
-use biliup::downloader::httpflv::map_parse_err;
-use biliup::downloader::util::Segmentable;
+use biliup::downloader::httpflv::{self, Connection, map_parse_err};
+use biliup::downloader::live::{
+    DownloaderHint, LiveCredentials, LiveOptions, LiveRequest, LiveStatus, builtin_plugins,
+};
+use biliup::downloader::util::{LifecycleFile, Segmentable};
+use biliup::downloader::{hls, live};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use error_stack::ResultExt;
+use error_stack::{Report, ResultExt};
+use reqwest::header::{ACCEPT_ENCODING, HeaderValue};
 use std::io::{BufReader, BufWriter, ErrorKind, Read};
 use std::path::PathBuf;
 use tracing::{error, info, warn};
@@ -21,19 +27,89 @@ pub async fn download(
     split_time: Option<humantime::Duration>,
 ) -> AppResult<()> {
     let segmentable = Segmentable::new(split_time.map(|t| t.into()), split_size);
-    let client = Default::default();
-    if let Some(extractor) = find_extractor(url) {
-        let mut site = extractor
-            .get_site(url, client)
+    let client = reqwest::Client::new();
+    let request = LiveRequest {
+        client,
+        url: url.to_string(),
+        name: url.to_string(),
+        options: LiveOptions::default(),
+        credentials: LiveCredentials::default(),
+    };
+
+    let Some(plugin) = builtin_plugins()
+        .into_iter()
+        .find(|plugin| plugin.matches(url))
+    else {
+        warn!("not find extractor for {url}");
+        return Ok(());
+    };
+
+    let status = plugin
+        .check_stream(request)
+        .await
+        .map_err(|err| Report::new(AppError::Custom(err.to_string())))?;
+    let LiveStatus::Live { stream } = status else {
+        warn!("stream is offline: {url}");
+        return Ok(());
+    };
+
+    match stream.downloader_hint {
+        DownloaderHint::StreamGears | DownloaderHint::Ffmpeg => {
+            download_stream(
+                &stream.raw_stream_url,
+                &stream.stream_headers,
+                &stream.title,
+                &output,
+                segmentable,
+            )
             .await
-            .change_context_lazy(|| AppError::Unknown)?;
-        site.download(&output, segmentable, None)
-            .await
-            .change_context_lazy(|| AppError::Unknown)?;
-    } else {
-        warn!("not find extractor for {url}")
+        }
+        DownloaderHint::Streamlink | DownloaderHint::YtDlp => {
+            Err(Report::new(AppError::Custom(format!(
+                "biliup download 不支持 {} 的 {:?} 运行时下载，请使用服务端录制链路",
+                stream.platform, stream.downloader_hint
+            ))))
+        }
     }
-    Ok(())
+}
+
+async fn download_stream(
+    url: &str,
+    headers: &std::collections::HashMap<String, String>,
+    title: &str,
+    output: &str,
+    segmentable: Segmentable,
+) -> AppResult<()> {
+    let output = output.replace("{title}", title);
+    let headers = construct_headers(headers).map_err(|err| Report::new(AppError::Custom(err)))?;
+    let mut client = StatelessClient::new(headers.clone(), None);
+    client.headers = headers;
+
+    match live::media_ext_from_url(url).as_deref() {
+        Some("m3u8" | "ts") => {
+            let file = LifecycleFile::new(&output, "ts");
+            hls::download(url, &client, file, segmentable)
+                .await
+                .change_context_lazy(|| AppError::Unknown)
+        }
+        _ => {
+            client
+                .headers
+                .append(ACCEPT_ENCODING, HeaderValue::from_static("gzip, deflate"));
+            let response = client
+                .retryable(url)
+                .await
+                .change_context_lazy(|| AppError::Unknown)?;
+            let mut connection = Connection::new(response);
+            connection
+                .read_frame(9)
+                .await
+                .change_context_lazy(|| AppError::Unknown)?;
+            let file = LifecycleFile::new(&output, "flv");
+            httpflv::download(connection, file, segmentable).await;
+            Ok(())
+        }
+    }
 }
 
 pub fn generate_json(mut file_name: PathBuf) -> AppResult<()> {

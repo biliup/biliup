@@ -1,13 +1,10 @@
-use crate::server::common::util::media_ext_from_url;
-use crate::server::core::plugin::{DownloadBase, DownloadPlugin, StreamInfoExt, StreamStatus};
-use crate::server::errors::AppError;
-use crate::server::infrastructure::context::PluginContext;
-use crate::server::infrastructure::models::StreamerInfo;
+use super::{
+    DownloaderHint, LiveError, LivePlugin, LiveRequest, LiveResult, LiveStatus, LiveStream,
+    media_ext_from_url,
+};
 use async_trait::async_trait;
 use chrono::Utc;
-use error_stack::{Report, ResultExt, bail};
 use regex::Regex;
-use reqwest::Client;
 use reqwest::header::{COOKIE, HeaderMap, HeaderValue, REFERER, USER_AGENT};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -36,59 +33,75 @@ impl AfreecaTV {
     }
 }
 
-impl DownloadPlugin for AfreecaTV {
+#[async_trait]
+impl LivePlugin for AfreecaTV {
+    fn name(&self) -> &'static str {
+        "AfreecaTV"
+    }
+
     fn matches(&self, url: &str) -> bool {
         self.re.is_match(url)
     }
 
-    fn create_downloader(&self, ctx: &mut PluginContext) -> Box<dyn DownloadBase> {
-        let user = ctx.config().user.clone().unwrap_or_default();
-        Box::new(AfreecaTVDownloader::new(
-            ctx.client(),
-            ctx.live_streamer().url.clone(),
-            ctx.live_streamer().remark.clone(),
-            user.afreecatv_username,
-            user.afreecatv_password,
-        ))
-    }
-
-    fn name(&self) -> &str {
-        "AfreecaTV"
+    async fn check_stream(&self, request: LiveRequest) -> LiveResult<LiveStatus> {
+        AfreecaTVLive::new(request).check_stream().await
     }
 }
 
-struct AfreecaTVDownloader {
-    client: Client,
+struct AfreecaTVLive {
+    client: reqwest::Client,
     url: String,
     name: String,
     username: Option<String>,
     password: Option<String>,
-    cookie: Option<String>,
 }
 
-impl AfreecaTVDownloader {
-    fn new(
-        client: Client,
-        url: String,
-        name: String,
-        username: Option<String>,
-        password: Option<String>,
-    ) -> Self {
+impl AfreecaTVLive {
+    fn new(request: LiveRequest) -> Self {
         Self {
-            client,
-            url,
-            name,
-            username,
-            password,
-            cookie: None,
+            client: request.client,
+            url: request.url,
+            name: request.name,
+            username: request.credentials.afreecatv_username,
+            password: request.credentials.afreecatv_password,
         }
     }
 
-    fn headers(&self) -> HeaderMap {
+    async fn check_stream(&self) -> LiveResult<LiveStatus> {
+        let cookie = self.login().await?;
+        let username = self.room_username()?;
+        let Some(channel) = self.channel_info(&username, cookie.as_deref()).await? else {
+            return Ok(LiveStatus::Offline);
+        };
+        let aid = self.aid(&username, &channel.bno, cookie.as_deref()).await?;
+        let raw_stream_url = self.stream_url(&channel, &aid, cookie.as_deref()).await?;
+
+        Ok(LiveStatus::Live {
+            stream: Box::new(LiveStream {
+                name: self.name.clone(),
+                url: self.url.clone(),
+                title: channel.title,
+                date: Utc::now(),
+                live_cover_url: String::new(),
+                suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "m3u8".to_string()),
+                raw_stream_url,
+                platform: "afreecatv".to_string(),
+                stream_headers: HashMap::from([
+                    ("referer".to_string(), AFREECATV_REFERER.to_string()),
+                    ("user-agent".to_string(), AFREECATV_USER_AGENT.to_string()),
+                ]),
+                danmaku: None,
+                downloader_hint: DownloaderHint::StreamGears,
+                runtime_options: None,
+            }),
+        })
+    }
+
+    fn headers(&self, cookie: Option<&str>) -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static(AFREECATV_USER_AGENT));
         headers.insert(REFERER, HeaderValue::from_static(AFREECATV_REFERER));
-        if let Some(cookie) = &self.cookie
+        if let Some(cookie) = cookie
             && let Ok(cookie) = HeaderValue::from_str(cookie)
         {
             headers.insert(COOKIE, cookie);
@@ -96,20 +109,20 @@ impl AfreecaTVDownloader {
         headers
     }
 
-    fn room_username(&self) -> Result<String, Report<AppError>> {
+    fn room_username(&self) -> LiveResult<String> {
         Regex::new(r"https?://play\.afreecatv\.com/(\w+)(?:/\d+)?")
             .unwrap()
             .captures(&self.url)
             .map(|captures| captures[1].to_string())
-            .ok_or_else(|| Report::new(AppError::Custom("AfreecaTV 直播间地址错误".to_string())))
+            .ok_or_else(|| LiveError::custom("AfreecaTV 直播间地址错误"))
     }
 
-    async fn login(&mut self) -> Result<(), Report<AppError>> {
+    async fn login(&self) -> LiveResult<Option<String>> {
         let (Some(username), Some(password)) = (&self.username, &self.password) else {
-            return Ok(());
+            return Ok(None);
         };
         if username.is_empty() || password.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
 
         let response = self
@@ -128,7 +141,7 @@ impl AfreecaTVDownloader {
             ])
             .send()
             .await
-            .change_context(AppError::Custom("AfreecaTV 登录失败".to_string()))?;
+            .map_err(|err| LiveError::custom(format!("AfreecaTV 登录失败: {err}")))?;
 
         let cookie = response
             .headers()
@@ -146,19 +159,20 @@ impl AfreecaTVDownloader {
         let body: LoginResponse = response
             .json()
             .await
-            .change_context(AppError::Custom("解析 AfreecaTV 登录响应失败".to_string()))?;
+            .map_err(|err| LiveError::custom(format!("解析 AfreecaTV 登录响应失败: {err}")))?;
 
-        if body.result == 1 && !cookie.is_empty() {
-            self.cookie = Some(cookie);
-        }
-        Ok(())
+        Ok((body.result == 1 && !cookie.is_empty()).then_some(cookie))
     }
 
-    async fn channel_info(&self, username: &str) -> Result<Option<Channel>, Report<AppError>> {
+    async fn channel_info(
+        &self,
+        username: &str,
+        cookie: Option<&str>,
+    ) -> LiveResult<Option<Channel>> {
         let response: ChannelResponse = self
             .client
             .post(AFREECATV_CHANNEL_API_URL)
-            .headers(self.headers())
+            .headers(self.headers(cookie))
             .form(&[
                 ("bid", username),
                 ("bno", ""),
@@ -172,14 +186,10 @@ impl AfreecaTVDownloader {
             ])
             .send()
             .await
-            .change_context(AppError::Custom(
-                "获取 AfreecaTV 直播间信息失败".to_string(),
-            ))?
+            .map_err(|err| LiveError::custom(format!("获取 AfreecaTV 直播间信息失败: {err}")))?
             .json()
             .await
-            .change_context(AppError::Custom(
-                "解析 AfreecaTV 直播间信息失败".to_string(),
-            ))?;
+            .map_err(|err| LiveError::custom(format!("解析 AfreecaTV 直播间信息失败: {err}")))?;
 
         match response.channel.result {
             1 => Ok(Some(response.channel)),
@@ -188,11 +198,11 @@ impl AfreecaTVDownloader {
         }
     }
 
-    async fn aid(&self, username: &str, bno: &str) -> Result<String, Report<AppError>> {
+    async fn aid(&self, username: &str, bno: &str, cookie: Option<&str>) -> LiveResult<String> {
         let response: ChannelResponse = self
             .client
             .post(AFREECATV_CHANNEL_API_URL)
-            .headers(self.headers())
+            .headers(self.headers(cookie))
             .form(&[
                 ("bid", username),
                 ("bno", bno),
@@ -206,23 +216,28 @@ impl AfreecaTVDownloader {
             ])
             .send()
             .await
-            .change_context(AppError::Custom("获取 AfreecaTV AID 失败".to_string()))?
+            .map_err(|err| LiveError::custom(format!("获取 AfreecaTV AID 失败: {err}")))?
             .json()
             .await
-            .change_context(AppError::Custom("解析 AfreecaTV AID 失败".to_string()))?;
+            .map_err(|err| LiveError::custom(format!("解析 AfreecaTV AID 失败: {err}")))?;
 
         response
             .channel
             .aid
             .filter(|aid| !aid.is_empty())
-            .ok_or_else(|| Report::new(AppError::Custom("AfreecaTV AID 为空".to_string())))
+            .ok_or_else(|| LiveError::custom("AfreecaTV AID 为空"))
     }
 
-    async fn stream_url(&self, channel: &Channel, aid: &str) -> Result<String, Report<AppError>> {
+    async fn stream_url(
+        &self,
+        channel: &Channel,
+        aid: &str,
+        cookie: Option<&str>,
+    ) -> LiveResult<String> {
         let response: ViewResponse = self
             .client
             .get(format!("{}/broad_stream_assign.html", channel.rmd))
-            .headers(self.headers())
+            .headers(self.headers(cookie))
             .query(&[
                 ("return_type", channel.cdn.as_str()),
                 (
@@ -232,48 +247,15 @@ impl AfreecaTVDownloader {
             ])
             .send()
             .await
-            .change_context(AppError::Custom("获取 AfreecaTV 播放地址失败".to_string()))?
+            .map_err(|err| LiveError::custom(format!("获取 AfreecaTV 播放地址失败: {err}")))?
             .json()
             .await
-            .change_context(AppError::Custom("解析 AfreecaTV 播放地址失败".to_string()))?;
+            .map_err(|err| LiveError::custom(format!("解析 AfreecaTV 播放地址失败: {err}")))?;
 
         if response.view_url.is_empty() {
-            bail!(AppError::Custom("AfreecaTV 播放地址为空".to_string()))
+            return Err(LiveError::custom("AfreecaTV 播放地址为空"));
         }
         Ok(format!("{}?aid={aid}", response.view_url))
-    }
-}
-
-#[async_trait]
-impl DownloadBase for AfreecaTVDownloader {
-    async fn check_stream(&mut self) -> Result<StreamStatus, Report<AppError>> {
-        self.login().await?;
-        let username = self.room_username()?;
-        let Some(channel) = self.channel_info(&username).await? else {
-            return Ok(StreamStatus::Offline);
-        };
-        let aid = self.aid(&username, &channel.bno).await?;
-        let raw_stream_url = self.stream_url(&channel, &aid).await?;
-
-        Ok(StreamStatus::Live {
-            stream_info: Box::new(StreamInfoExt {
-                streamer_info: StreamerInfo {
-                    id: -1,
-                    name: self.name.clone(),
-                    url: self.url.clone(),
-                    title: channel.title,
-                    date: Utc::now(),
-                    live_cover_path: String::new(),
-                },
-                suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "m3u8".to_string()),
-                raw_stream_url,
-                platform: "afreecatv".to_string(),
-                stream_headers: HashMap::from([
-                    ("referer".to_string(), AFREECATV_REFERER.to_string()),
-                    ("user-agent".to_string(), AFREECATV_USER_AGENT.to_string()),
-                ]),
-            }),
-        })
     }
 }
 

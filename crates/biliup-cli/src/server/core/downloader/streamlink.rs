@@ -18,6 +18,12 @@ pub enum Platform {
         disable_ads: bool,
         auth_token: Option<String>,
     },
+    Niconico {
+        email: Option<String>,
+        password: Option<String>,
+        user_session: Option<String>,
+        purge_credentials: Option<String>,
+    },
     Generic,
 }
 
@@ -157,7 +163,7 @@ impl StreamlinkDownloader {
         args.push("--force".to_string());
         args.push("--output".to_string());
         args.push(output_file.to_string());
-        args.push(download_config.url.clone());
+        args.push(self.url.clone());
         args.push("best".to_string());
         Ok(args)
     }
@@ -220,6 +226,34 @@ impl StreamlinkDownloader {
                 let token = auth_token.clone().or_else(Self::get_twitch_auth_token);
                 if let Some(token) = token {
                     args.push(format!("--twitch-api-header=Authorization=OAuth {}", token));
+                }
+            }
+            Platform::Niconico {
+                email,
+                password,
+                user_session,
+                purge_credentials,
+            } => {
+                if let Some(email) = email.as_deref().filter(|value| !value.is_empty()) {
+                    args.push("--niconico-email".to_string());
+                    args.push(email.to_string());
+                }
+                if let Some(password) = password.as_deref().filter(|value| !value.is_empty()) {
+                    args.push("--niconico-password".to_string());
+                    args.push(password.to_string());
+                }
+                if let Some(user_session) =
+                    user_session.as_deref().filter(|value| !value.is_empty())
+                {
+                    args.push("--niconico-user-session".to_string());
+                    args.push(user_session.to_string());
+                }
+                if let Some(purge_credentials) = purge_credentials
+                    .as_deref()
+                    .filter(|value| !value.is_empty())
+                {
+                    args.push("--niconico-purge-credentials".to_string());
+                    args.push(purge_credentials.to_string());
                 }
             }
             Platform::Generic => {}

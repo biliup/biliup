@@ -1,21 +1,15 @@
-use crate::server::common::util::{danmaku_filename_template, media_ext_from_url};
-use crate::server::core::downloader::{DanmakuClient, RustDanmakuClient};
-use crate::server::core::plugin::{DownloadBase, DownloadPlugin, StreamInfoExt, StreamStatus};
-use crate::server::errors::AppError;
-use crate::server::infrastructure::context::PluginContext;
-use crate::server::infrastructure::models::StreamerInfo;
+use super::{
+    DanmakuSource, DownloaderHint, LiveError, LivePlugin, LiveRequest, LiveResult, LiveStatus,
+    LiveStream, media_ext_from_url,
+};
 use async_trait::async_trait;
 use chrono::Utc;
-use danmaku_client::{PlatformContext, RecorderConfig};
-use error_stack::{Report, ResultExt, bail};
 use md5::{Digest, Md5};
 use regex::Regex;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use url::Url;
 
@@ -42,34 +36,22 @@ impl Douyu {
     }
 }
 
-impl DownloadPlugin for Douyu {
+#[async_trait]
+impl LivePlugin for Douyu {
+    fn name(&self) -> &'static str {
+        "Douyu"
+    }
+
     fn matches(&self, url: &str) -> bool {
         self.re.is_match(url)
     }
 
-    fn create_downloader(&self, ctx: &mut PluginContext) -> Box<dyn DownloadBase> {
-        let config = ctx.config();
-        Box::new(DouyuDownloader::new(
-            ctx.client(),
-            ctx.live_streamer().url.clone(),
-            ctx.live_streamer().remark.clone(),
-            config.douyu_cdn.unwrap_or_else(|| "hw-h5".to_string()),
-            config.douyu_rate.unwrap_or(0),
-            config.douyu_disable_interactive_game.unwrap_or(false),
-            config.douyu_danmaku.unwrap_or(false),
-            ctx.live_streamer()
-                .filename_prefix
-                .clone()
-                .or(config.filename_prefix.clone()),
-        ))
-    }
-
-    fn name(&self) -> &str {
-        "Douyu"
+    async fn check_stream(&self, request: LiveRequest) -> LiveResult<LiveStatus> {
+        DouyuLive::new(request).check_stream().await
     }
 }
 
-struct DouyuDownloader {
+struct DouyuLive {
     client: Client,
     url: String,
     name: String,
@@ -77,35 +59,52 @@ struct DouyuDownloader {
     douyu_rate: u32,
     douyu_disable_interactive_game: bool,
     douyu_danmaku: bool,
-    filename_prefix: Option<String>,
     room_id: Option<String>,
 }
 
-impl DouyuDownloader {
-    fn new(
-        client: Client,
-        url: String,
-        name: String,
-        douyu_cdn: String,
-        douyu_rate: u32,
-        douyu_disable_interactive_game: bool,
-        douyu_danmaku: bool,
-        filename_prefix: Option<String>,
-    ) -> Self {
+impl DouyuLive {
+    fn new(request: LiveRequest) -> Self {
+        let options = request.options.douyu;
         Self {
-            client,
-            url,
-            name,
-            douyu_cdn,
-            douyu_rate,
-            douyu_disable_interactive_game,
-            douyu_danmaku,
-            filename_prefix,
+            client: request.client,
+            url: request.url,
+            name: request.name,
+            douyu_cdn: options.cdn,
+            douyu_rate: options.rate,
+            douyu_disable_interactive_game: options.disable_interactive_game,
+            douyu_danmaku: options.danmaku,
             room_id: None,
         }
     }
 
-    async fn resolve_room_id(&self) -> Result<String, Report<AppError>> {
+    async fn check_stream(&mut self) -> LiveResult<LiveStatus> {
+        let room_id = self.resolve_room_id().await?;
+        self.room_id = Some(room_id.clone());
+        let Some(room_info) = self.get_room_info(&room_id).await? else {
+            return Ok(LiveStatus::Offline);
+        };
+        let play_info = self.get_web_play_info(&room_id).await?;
+        let raw_stream_url = format!("{}/{}", play_info.rtmp_url, play_info.rtmp_live);
+
+        Ok(LiveStatus::Live {
+            stream: Box::new(LiveStream {
+                name: self.name.clone(),
+                url: self.url.clone(),
+                title: room_info.room_name,
+                date: Utc::now(),
+                live_cover_url: String::new(),
+                suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "flv".to_string()),
+                raw_stream_url,
+                platform: "douyu".to_string(),
+                stream_headers: HashMap::new(),
+                danmaku: self.danmaku_source(),
+                downloader_hint: DownloaderHint::StreamGears,
+                runtime_options: None,
+            }),
+        })
+    }
+
+    async fn resolve_room_id(&self) -> LiveResult<String> {
         if let Ok(parsed) = Url::parse(&self.url)
             && let Some(rid) = parsed
                 .query_pairs()
@@ -124,7 +123,7 @@ impl DouyuDownloader {
             .and_then(|part| part.split('?').next())
             .filter(|part| !part.is_empty())
         else {
-            bail!(AppError::Custom("直播间地址错误".to_string()))
+            return Err(LiveError::custom("直播间地址错误"));
         };
 
         let mobile_url = format!("https://{DOUYU_MOBILE_DOMAIN}/{short_id}");
@@ -134,10 +133,10 @@ impl DouyuDownloader {
             .header("user-agent", DOUYU_USER_AGENT)
             .send()
             .await
-            .change_context(AppError::Custom("获取斗鱼真实房间号失败".to_string()))?
+            .map_err(|err| LiveError::custom(format!("获取斗鱼真实房间号失败: {err}")))?
             .text()
             .await
-            .change_context(AppError::Custom("读取斗鱼房间页面失败".to_string()))?;
+            .map_err(|err| LiveError::custom(format!("读取斗鱼房间页面失败: {err}")))?;
 
         if let Some(caps) = Regex::new(r#"roomInfo":\{"rid":(\d+)"#)
             .unwrap()
@@ -150,24 +149,24 @@ impl DouyuDownloader {
             return Ok(short_id.to_string());
         }
 
-        bail!(AppError::Custom("获取斗鱼房间号错误".to_string()))
+        Err(LiveError::custom("获取斗鱼房间号错误"))
     }
 
-    async fn get_room_info(&self, room_id: &str) -> Result<Option<RoomInfo>, Report<AppError>> {
+    async fn get_room_info(&self, room_id: &str) -> LiveResult<Option<RoomInfo>> {
         let resp: BetardResponse = self
             .client
             .get(format!("https://{DOUYU_WEB_DOMAIN}/betard/{room_id}"))
             .header("referer", format!("https://{DOUYU_WEB_DOMAIN}"))
             .send()
             .await
-            .change_context(AppError::Custom(format!(
-                "获取斗鱼直播间信息失败 room_id: {room_id}"
-            )))?
+            .map_err(|err| {
+                LiveError::custom(format!("获取斗鱼直播间信息失败 room_id: {room_id}: {err}"))
+            })?
             .json()
             .await
-            .change_context(AppError::Custom(format!(
-                "解析斗鱼直播间信息失败 room_id: {room_id}"
-            )))?;
+            .map_err(|err| {
+                LiveError::custom(format!("解析斗鱼直播间信息失败 room_id: {room_id}: {err}"))
+            })?;
 
         let Some(room) = resp.room else {
             return Ok(None);
@@ -181,7 +180,7 @@ impl DouyuDownloader {
         Ok(Some(room))
     }
 
-    async fn has_interactive_game(&self, room_id: &str) -> Result<bool, Report<AppError>> {
+    async fn has_interactive_game(&self, room_id: &str) -> LiveResult<bool> {
         let data: Value = self
             .client
             .get(format!(
@@ -191,10 +190,10 @@ impl DouyuDownloader {
             .header("user-agent", DOUYU_USER_AGENT)
             .send()
             .await
-            .change_context(AppError::Custom("获取斗鱼互动游戏信息失败".to_string()))?
+            .map_err(|err| LiveError::custom(format!("获取斗鱼互动游戏信息失败: {err}")))?
             .json()
             .await
-            .change_context(AppError::Custom("解析斗鱼互动游戏信息失败".to_string()))?;
+            .map_err(|err| LiveError::custom(format!("解析斗鱼互动游戏信息失败: {err}")))?;
 
         Ok(data
             .get("data")
@@ -209,7 +208,7 @@ impl DouyuDownloader {
             .unwrap_or(false))
     }
 
-    async fn get_web_play_info(&self, room_id: &str) -> Result<PlayInfo, Report<AppError>> {
+    async fn get_web_play_info(&self, room_id: &str) -> LiveResult<PlayInfo> {
         let mut cdn = self.douyu_cdn.clone();
         let mut last_error = None;
 
@@ -232,21 +231,16 @@ impl DouyuDownloader {
             }
         }
 
-        Err(last_error
-            .unwrap_or_else(|| Report::new(AppError::Custom("获取斗鱼播放信息失败".to_string()))))
+        Err(last_error.unwrap_or_else(|| LiveError::custom("获取斗鱼播放信息失败")))
     }
 
-    async fn request_web_play_info(
-        &self,
-        room_id: &str,
-        cdn: &str,
-    ) -> Result<PlayInfo, Report<AppError>> {
+    async fn request_web_play_info(&self, room_id: &str, cdn: &str) -> LiveResult<PlayInfo> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .change_context(AppError::Unknown)?
+            .map_err(|err| LiveError::custom(format!("获取系统时间失败: {err}")))?
             .as_secs();
         let encrypt_key = self.update_key().await?;
-        let auth = sign_stream(&encrypt_key, room_id, now)?;
+        let auth = sign_stream(&encrypt_key, room_id, now);
 
         let form = vec![
             ("cdn", cdn.to_string()),
@@ -274,14 +268,14 @@ impl DouyuDownloader {
             .form(&form)
             .send()
             .await
-            .change_context(AppError::Custom(format!(
-                "请求斗鱼播放信息失败 room_id: {room_id}"
-            )))?
+            .map_err(|err| {
+                LiveError::custom(format!("请求斗鱼播放信息失败 room_id: {room_id}: {err}"))
+            })?
             .json()
             .await
-            .change_context(AppError::Custom(format!(
-                "解析斗鱼播放信息失败 room_id: {room_id}"
-            )))?;
+            .map_err(|err| {
+                LiveError::custom(format!("解析斗鱼播放信息失败 room_id: {room_id}: {err}"))
+            })?;
 
         if rsp.error == 0
             && let Some(data) = rsp.data
@@ -290,27 +284,27 @@ impl DouyuDownloader {
         }
 
         if rsp.error == -5 {
-            bail!(AppError::Custom("[closeRoom] 主播未开播".to_string()))
+            return Err(LiveError::custom("[closeRoom] 主播未开播"));
         }
         if rsp.error == -9 {
-            bail!(AppError::Custom(
-                "[room_bus_checksevertime] 用户本机时间戳不对".to_string()
-            ))
+            return Err(LiveError::custom(
+                "[room_bus_checksevertime] 用户本机时间戳不对",
+            ));
         }
         if rsp.error == 126 {
-            bail!(AppError::Custom(format!(
+            return Err(LiveError::custom(format!(
                 "版权原因，该地域不允许播放：{}",
                 rsp.msg.unwrap_or_default()
-            )))
+            )));
         }
-        bail!(AppError::Custom(format!(
+        Err(LiveError::custom(format!(
             "获取斗鱼播放信息错误: code={}, msg={}",
             rsp.error,
             rsp.msg.unwrap_or_default()
         )))
     }
 
-    async fn update_key(&self) -> Result<WhiteEncryptKey, Report<AppError>> {
+    async fn update_key(&self) -> LiveResult<WhiteEncryptKey> {
         let rsp: EncryptionResponse = self
             .client
             .get(format!(
@@ -320,76 +314,42 @@ impl DouyuDownloader {
             .header("user-agent", DOUYU_USER_AGENT)
             .send()
             .await
-            .change_context(AppError::Custom("获取斗鱼加密密钥失败".to_string()))?
+            .map_err(|err| LiveError::custom(format!("获取斗鱼加密密钥失败: {err}")))?
             .json()
             .await
-            .change_context(AppError::Custom("解析斗鱼加密密钥失败".to_string()))?;
+            .map_err(|err| LiveError::custom(format!("解析斗鱼加密密钥失败: {err}")))?;
 
         if rsp.error != 0 {
-            bail!(AppError::Custom(format!(
+            return Err(LiveError::custom(format!(
                 "getEncryption error: code={}, msg={}",
                 rsp.error,
                 rsp.msg.unwrap_or_default()
-            )))
+            )));
         }
 
         rsp.data
-            .ok_or_else(|| Report::new(AppError::Custom("斗鱼加密密钥为空".to_string())))
-    }
-}
-
-#[async_trait]
-impl DownloadBase for DouyuDownloader {
-    async fn check_stream(&mut self) -> Result<StreamStatus, Report<AppError>> {
-        let room_id = self.resolve_room_id().await?;
-        self.room_id = Some(room_id.clone());
-        let Some(room_info) = self.get_room_info(&room_id).await? else {
-            return Ok(StreamStatus::Offline);
-        };
-        let play_info = self.get_web_play_info(&room_id).await?;
-        let raw_stream_url = format!("{}/{}", play_info.rtmp_url, play_info.rtmp_live);
-
-        Ok(StreamStatus::Live {
-            stream_info: Box::new(StreamInfoExt {
-                streamer_info: StreamerInfo {
-                    id: -1,
-                    name: self.name.clone(),
-                    url: self.url.clone(),
-                    title: room_info.room_name,
-                    date: Utc::now(),
-                    live_cover_path: "".to_string(),
-                },
-                suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "flv".to_string()),
-                raw_stream_url,
-                platform: "douyu".to_string(),
-                stream_headers: HashMap::new(),
-            }),
-        })
+            .ok_or_else(|| LiveError::custom("斗鱼加密密钥为空"))
     }
 
-    fn danmaku_init(&self) -> Option<Arc<dyn DanmakuClient + Send + Sync>> {
+    fn danmaku_source(&self) -> Option<DanmakuSource> {
         if !self.douyu_danmaku {
             return None;
         }
-
-        let config = RecorderConfig::new(
-            self.url.clone(),
-            PathBuf::from(danmaku_filename_template(
-                self.filename_prefix.as_deref(),
-                &self.name,
-            )),
-        )
-        .with_context(PlatformContext::new().with_room_id(self.room_id.clone()?));
-
-        Some(Arc::new(RustDanmakuClient::new(config)) as Arc<dyn DanmakuClient + Send + Sync>)
+        Some(DanmakuSource {
+            platform: "douyu".to_string(),
+            url: self.url.clone(),
+            room_id: self.room_id.clone(),
+            cookie: None,
+            raw: false,
+            detail: false,
+            extra: HashMap::new(),
+            movie_id: None,
+            password: None,
+        })
     }
 }
 
-fn sign_stream(
-    encrypt_key: &WhiteEncryptKey,
-    room_id: &str,
-    ts: u64,
-) -> Result<String, Report<AppError>> {
+fn sign_stream(encrypt_key: &WhiteEncryptKey, room_id: &str, ts: u64) -> String {
     let salt = if encrypt_key.is_special == 1 {
         String::new()
     } else {
@@ -400,7 +360,7 @@ fn sign_stream(
     for _ in 0..encrypt_key.enc_time {
         secret = md5_hex(format!("{}{}", secret, encrypt_key.key));
     }
-    Ok(md5_hex(format!("{}{}{}", secret, encrypt_key.key, salt)))
+    md5_hex(format!("{}{}{}", secret, encrypt_key.key, salt))
 }
 
 fn md5_hex(input: String) -> String {

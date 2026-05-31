@@ -65,9 +65,7 @@ where
 
     // 3. 提交到B站
     if !uploaded_videos.videos.is_empty() {
-        let mut recorder = ctx
-            .recorder(ctx.stream_info_ext().streamer_info.clone())
-            .clone();
+        let mut recorder = ctx.recorder(ctx.streamer_info().clone()).clone();
         recorder.filename_prefix = upload_config.title.clone();
 
         let studio = build_studio(

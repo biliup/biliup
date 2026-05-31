@@ -1,14 +1,11 @@
-use crate::server::common::util::media_ext_from_url;
-use crate::server::core::plugin::{DownloadBase, DownloadPlugin, StreamInfoExt, StreamStatus};
-use crate::server::errors::AppError;
-use crate::server::infrastructure::context::PluginContext;
-use crate::server::infrastructure::models::StreamerInfo;
+use super::{
+    DownloaderHint, LiveError, LivePlugin, LiveRequest, LiveResult, LiveStatus, LiveStream,
+    media_ext_from_url,
+};
 use async_trait::async_trait;
 use chrono::Utc;
-use error_stack::{Report, ResultExt};
 use rand::Rng;
 use regex::Regex;
-use reqwest::Client;
 use reqwest::header::{COOKIE, HeaderMap, HeaderValue, REFERER, USER_AGENT};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -40,40 +37,73 @@ impl Kuaishou {
     }
 }
 
-impl DownloadPlugin for Kuaishou {
+#[async_trait]
+impl LivePlugin for Kuaishou {
+    fn name(&self) -> &'static str {
+        "Kuaishou"
+    }
+
     fn matches(&self, url: &str) -> bool {
         self.re.is_match(url)
     }
 
-    fn create_downloader(&self, ctx: &mut PluginContext) -> Box<dyn DownloadBase> {
-        Box::new(KuaishouDownloader::new(
-            ctx.client(),
-            ctx.live_streamer().url.clone(),
-            ctx.live_streamer().remark.clone(),
-            ctx.config().kuaishou_cookie,
-        ))
-    }
-
-    fn name(&self) -> &str {
-        "Kuaishou"
+    async fn check_stream(&self, request: LiveRequest) -> LiveResult<LiveStatus> {
+        KuaishouLive::new(request).check_stream().await
     }
 }
 
-struct KuaishouDownloader {
-    client: Client,
+struct KuaishouLive {
+    client: reqwest::Client,
     url: String,
     name: String,
     cookie: Option<String>,
 }
 
-impl KuaishouDownloader {
-    fn new(client: Client, url: String, name: String, cookie: Option<String>) -> Self {
+impl KuaishouLive {
+    fn new(request: LiveRequest) -> Self {
         Self {
-            client,
-            url,
-            name,
-            cookie,
+            client: request.client,
+            url: request.url,
+            name: request.name,
+            cookie: request.options.kuaishou.cookie,
         }
+    }
+
+    async fn check_stream(&self) -> LiveResult<LiveStatus> {
+        let room_id = self.resolve_room_id().await?;
+        self.warmup().await?;
+        if self.get_room_page(&room_id).await?.is_none() {
+            return Ok(LiveStatus::Offline);
+        }
+        let Some(live_stream) = self.get_room_info(&room_id).await? else {
+            return Ok(LiveStatus::Offline);
+        };
+        let raw_stream_url = self.select_stream_url(&live_stream)?;
+        let title = if live_stream.caption.is_empty() {
+            room_id
+        } else {
+            live_stream.caption
+        };
+
+        Ok(LiveStatus::Live {
+            stream: Box::new(LiveStream {
+                name: self.name.clone(),
+                url: self.url.clone(),
+                title,
+                date: Utc::now(),
+                live_cover_url: live_stream.cover_url.unwrap_or_default(),
+                suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "flv".to_string()),
+                raw_stream_url,
+                platform: "kuaishou".to_string(),
+                stream_headers: HashMap::from([
+                    ("referer".to_string(), KUAISHOU_HOME_URL.to_string()),
+                    ("user-agent".to_string(), KUAISHOU_USER_AGENT.to_string()),
+                ]),
+                danmaku: None,
+                downloader_hint: DownloaderHint::StreamGears,
+                runtime_options: None,
+            }),
+        })
     }
 
     fn headers(&self) -> HeaderMap {
@@ -88,7 +118,7 @@ impl KuaishouDownloader {
         headers
     }
 
-    async fn resolve_room_id(&self) -> Result<String, Report<AppError>> {
+    async fn resolve_room_id(&self) -> LiveResult<String> {
         if let Some(room_id) = extract_room_id(&self.url) {
             return Ok(room_id);
         }
@@ -99,36 +129,35 @@ impl KuaishouDownloader {
             .headers(self.headers())
             .send()
             .await
-            .change_context(AppError::Custom("解析快手跳转地址失败".to_string()))?;
+            .map_err(|err| LiveError::custom(format!("解析快手跳转地址失败: {err}")))?;
 
-        extract_room_id(resp.url().as_str())
-            .ok_or_else(|| Report::new(AppError::Custom("快手直播间地址错误".to_string())))
+        extract_room_id(resp.url().as_str()).ok_or_else(|| LiveError::custom("快手直播间地址错误"))
     }
 
-    async fn warmup(&self) -> Result<(), Report<AppError>> {
+    async fn warmup(&self) -> LiveResult<()> {
         self.client
             .get(KUAISHOU_HOME_URL)
             .headers(self.headers())
             .send()
             .await
-            .change_context(AppError::Custom("请求快手首页失败".to_string()))?;
+            .map_err(|err| LiveError::custom(format!("请求快手首页失败: {err}")))?;
 
         let delay = rand::thread_rng().gen_range(3000..4000);
         sleep(Duration::from_millis(delay)).await;
         Ok(())
     }
 
-    async fn get_room_page(&self, room_id: &str) -> Result<Option<String>, Report<AppError>> {
+    async fn get_room_page(&self, room_id: &str) -> LiveResult<Option<String>> {
         let text = self
             .client
             .get(format!("{KUAISHOU_HOME_URL}/u/{room_id}"))
             .headers(self.headers())
             .send()
             .await
-            .change_context(AppError::Custom("获取快手直播间页面失败".to_string()))?
+            .map_err(|err| LiveError::custom(format!("获取快手直播间页面失败: {err}")))?
             .text()
             .await
-            .change_context(AppError::Custom("读取快手直播间页面失败".to_string()))?;
+            .map_err(|err| LiveError::custom(format!("读取快手直播间页面失败: {err}")))?;
 
         if ["错误代码22", "主播尚未开播"]
             .iter()
@@ -140,10 +169,7 @@ impl KuaishouDownloader {
         Ok(Some(text))
     }
 
-    async fn get_room_info(
-        &self,
-        room_id: &str,
-    ) -> Result<Option<KuaishouLiveStream>, Report<AppError>> {
+    async fn get_room_info(&self, room_id: &str) -> LiveResult<Option<KuaishouLiveStream>> {
         let response: KuaishouLiveDetailResponse = self
             .client
             .get(format!(
@@ -152,73 +178,30 @@ impl KuaishouDownloader {
             .headers(self.headers())
             .send()
             .await
-            .change_context(AppError::Custom("获取快手直播间信息失败".to_string()))?
+            .map_err(|err| LiveError::custom(format!("获取快手直播间信息失败: {err}")))?
             .json()
             .await
-            .change_context(AppError::Custom("解析快手直播间信息失败".to_string()))?;
+            .map_err(|err| LiveError::custom(format!("解析快手直播间信息失败: {err}")))?;
 
         match response.data.result {
             1 => response
                 .data
                 .live_stream
                 .map(Some)
-                .ok_or_else(|| Report::new(AppError::Custom("快手直播流数据为空".to_string()))),
+                .ok_or_else(|| LiveError::custom("快手直播流数据为空")),
             22 | 671 => Ok(None),
             _ => Ok(None),
         }
     }
 
-    fn select_stream_url(
-        &self,
-        live_stream: &KuaishouLiveStream,
-    ) -> Result<String, Report<AppError>> {
+    fn select_stream_url(&self, live_stream: &KuaishouLiveStream) -> LiveResult<String> {
         live_stream
             .play_urls
             .first()
             .and_then(|play_url| play_url.adaptation_set.representation.last())
             .map(|representation| representation.url.clone())
             .filter(|url| !url.is_empty())
-            .ok_or_else(|| Report::new(AppError::Custom("快手可用直播流为空".to_string())))
-    }
-}
-
-#[async_trait]
-impl DownloadBase for KuaishouDownloader {
-    async fn check_stream(&mut self) -> Result<StreamStatus, Report<AppError>> {
-        let room_id = self.resolve_room_id().await?;
-        self.warmup().await?;
-        if self.get_room_page(&room_id).await?.is_none() {
-            return Ok(StreamStatus::Offline);
-        }
-        let Some(live_stream) = self.get_room_info(&room_id).await? else {
-            return Ok(StreamStatus::Offline);
-        };
-        let raw_stream_url = self.select_stream_url(&live_stream)?;
-        let title = if live_stream.caption.is_empty() {
-            room_id
-        } else {
-            live_stream.caption
-        };
-
-        Ok(StreamStatus::Live {
-            stream_info: Box::new(StreamInfoExt {
-                streamer_info: StreamerInfo {
-                    id: -1,
-                    name: self.name.clone(),
-                    url: self.url.clone(),
-                    title,
-                    date: Utc::now(),
-                    live_cover_path: live_stream.cover_url.unwrap_or_default(),
-                },
-                suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "flv".to_string()),
-                raw_stream_url,
-                platform: "kuaishou".to_string(),
-                stream_headers: HashMap::from([
-                    ("referer".to_string(), KUAISHOU_HOME_URL.to_string()),
-                    ("user-agent".to_string(), KUAISHOU_USER_AGENT.to_string()),
-                ]),
-            }),
-        })
+            .ok_or_else(|| LiveError::custom("快手可用直播流为空"))
     }
 }
 

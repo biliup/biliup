@@ -3,7 +3,9 @@ use biliup_cli::cli::{Cli, Commands};
 use biliup_cli::downloader::generate_json;
 use biliup_cli::server::config::Config;
 use biliup_cli::server::errors::AppResult;
-use biliup_cli::uploader::{append, comments, list, login, reply, renew, show, upload_by_command, upload_by_config};
+use biliup_cli::uploader::{
+    append, comments, list, login, renew, reply, show, upload_by_command, upload_by_config,
+};
 use clap::Parser;
 use pyo3::prelude::PyAnyMethods;
 use pyo3::prelude::PyDictMethods;

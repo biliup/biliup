@@ -1,13 +1,13 @@
 use crate::LogHandle;
 use crate::server::config::Config;
 use crate::server::core::download_manager::DownloadManager;
-use crate::server::core::plugin::builtin_plugins;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::Worker;
 use crate::server::infrastructure::models::live_streamer::LiveStreamer;
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
 use axum::extract::FromRef;
 use biliup::client::StatelessClient;
+use biliup::downloader::live::builtin_plugins;
 use error_stack::Report;
 use error_stack::fmt::ColorMode;
 use std::sync::{Arc, RwLock};

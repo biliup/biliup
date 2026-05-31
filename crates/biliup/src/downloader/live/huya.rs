@@ -1,23 +1,17 @@
-use crate::server::common::util::{danmaku_filename_template, media_ext_from_url};
-use crate::server::core::downloader::{DanmakuClient, RustDanmakuClient};
-use crate::server::core::plugin::{DownloadBase, DownloadPlugin, StreamInfoExt, StreamStatus};
-use crate::server::errors::AppError;
-use crate::server::infrastructure::context::PluginContext;
-use crate::server::infrastructure::models::StreamerInfo;
+use super::{
+    DanmakuSource, DownloaderHint, LiveError, LivePlugin, LiveRequest, LiveResult, LiveStatus,
+    LiveStream, media_ext_from_url,
+};
 use async_trait::async_trait;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use chrono::Utc;
-use danmaku_client::RecorderConfig;
-use error_stack::{Report, ResultExt, bail};
 use md5::{Digest, Md5};
 use rand::Rng;
 use regex::Regex;
 use reqwest::Client;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const HUYA_WEB_BASE_URL: &str = "https://www.huya.com";
@@ -41,36 +35,22 @@ impl Huya {
     }
 }
 
-impl DownloadPlugin for Huya {
+#[async_trait]
+impl LivePlugin for Huya {
+    fn name(&self) -> &'static str {
+        "Huya"
+    }
+
     fn matches(&self, url: &str) -> bool {
         self.re.is_match(url)
     }
 
-    fn create_downloader(&self, ctx: &mut PluginContext) -> Box<dyn DownloadBase> {
-        let config = ctx.config();
-        Box::new(HuyaDownloader::new(
-            ctx.client(),
-            ctx.live_streamer().url.clone(),
-            ctx.live_streamer().remark.clone(),
-            config.huya_cdn.unwrap_or_default().to_uppercase(),
-            config.huya_max_ratio.unwrap_or(0),
-            config.huya_protocol.unwrap_or_else(|| "Flv".to_string()),
-            config.huya_imgplus.unwrap_or(true),
-            config.huya_codec.unwrap_or_else(|| "264".to_string()),
-            config.huya_danmaku.unwrap_or(false),
-            ctx.live_streamer()
-                .filename_prefix
-                .clone()
-                .or(config.filename_prefix.clone()),
-        ))
-    }
-
-    fn name(&self) -> &str {
-        "Huya"
+    async fn check_stream(&self, request: LiveRequest) -> LiveResult<LiveStatus> {
+        HuyaLive::new(request).check_stream().await
     }
 }
 
-struct HuyaDownloader {
+struct HuyaLive {
     client: Client,
     url: String,
     name: String,
@@ -80,44 +60,68 @@ struct HuyaDownloader {
     huya_imgplus: bool,
     huya_codec: String,
     huya_danmaku: bool,
-    filename_prefix: Option<String>,
 }
 
-impl HuyaDownloader {
-    fn new(
-        client: Client,
-        url: String,
-        name: String,
-        huya_cdn: String,
-        huya_max_ratio: u32,
-        huya_protocol: String,
-        huya_imgplus: bool,
-        huya_codec: String,
-        huya_danmaku: bool,
-        filename_prefix: Option<String>,
-    ) -> Self {
+impl HuyaLive {
+    fn new(request: LiveRequest) -> Self {
+        let options = request.options.huya;
         Self {
-            client,
-            url,
-            name,
-            huya_cdn,
-            huya_max_ratio,
-            huya_protocol: HuyaProtocol::from_config(&huya_protocol),
-            huya_imgplus,
-            huya_codec,
-            huya_danmaku,
-            filename_prefix,
+            client: request.client,
+            url: request.url,
+            name: request.name,
+            huya_cdn: options.cdn.to_uppercase(),
+            huya_max_ratio: options.max_ratio,
+            huya_protocol: HuyaProtocol::from_config(&options.protocol),
+            huya_imgplus: options.imgplus,
+            huya_codec: options.codec,
+            huya_danmaku: options.danmaku,
         }
     }
 
-    async fn get_room_page(&self) -> Result<String, Report<AppError>> {
+    async fn check_stream(&self) -> LiveResult<LiveStatus> {
+        let page = self.get_room_page().await?;
+        let Some(profile) = self.extract_room_profile(&page)? else {
+            return Ok(LiveStatus::Offline);
+        };
+
+        if profile.title.starts_with("回放")
+            || profile.title.starts_with("重播")
+            || profile.title.ends_with("回放")
+            || profile.title.ends_with("重播")
+        {
+            return Ok(LiveStatus::Offline);
+        }
+
+        let stream_urls = self.build_stream_urls(&profile.stream_info)?;
+        let raw_stream_url = self.select_stream_url(&stream_urls, &profile)?;
+
+        Ok(LiveStatus::Live {
+            stream: Box::new(LiveStream {
+                name: self.name.clone(),
+                url: self.url.clone(),
+                title: profile.title,
+                date: Utc::now(),
+                live_cover_url: profile.cover,
+                suffix: media_ext_from_url(&raw_stream_url)
+                    .unwrap_or_else(|| self.huya_protocol.extension().to_string()),
+                raw_stream_url,
+                platform: "huya".to_string(),
+                stream_headers: HashMap::new(),
+                danmaku: self.danmaku_source(),
+                downloader_hint: DownloaderHint::StreamGears,
+                runtime_options: None,
+            }),
+        })
+    }
+
+    async fn get_room_page(&self) -> LiveResult<String> {
         let room_id = self
             .url
             .split("huya.com/")
             .nth(1)
             .and_then(|part| part.split('?').next())
             .filter(|part| !part.is_empty())
-            .ok_or_else(|| Report::new(AppError::Custom("虎牙直播间地址错误".to_string())))?;
+            .ok_or_else(|| LiveError::custom("虎牙直播间地址错误"))?;
 
         let text = self
             .client
@@ -126,22 +130,19 @@ impl HuyaDownloader {
             .header("user-agent", HUYA_USER_AGENT)
             .send()
             .await
-            .change_context(AppError::Custom("获取虎牙直播间页面失败".to_string()))?
+            .map_err(|err| LiveError::custom(format!("获取虎牙直播间页面失败: {err}")))?
             .text()
             .await
-            .change_context(AppError::Custom("读取虎牙直播间页面失败".to_string()))?;
+            .map_err(|err| LiveError::custom(format!("读取虎牙直播间页面失败: {err}")))?;
 
         if text.contains("找不到这个主播") || text.contains("该主播涉嫌违规，正在整改中")
         {
-            bail!(AppError::Custom("虎牙直播间不可用".to_string()))
+            return Err(LiveError::custom("虎牙直播间不可用"));
         }
         Ok(decode_html_entities(&text))
     }
 
-    fn extract_room_profile(
-        &self,
-        page: &str,
-    ) -> Result<Option<HuyaRoomProfile>, Report<AppError>> {
+    fn extract_room_profile(&self, page: &str) -> LiveResult<Option<HuyaRoomProfile>> {
         let room_data = extract_json_after(page, r"var\s+TT_ROOM_DATA\s*=\s*", ';')?;
         let room_state = room_data
             .get("state")
@@ -163,10 +164,10 @@ impl HuyaDownloader {
             .get("data")
             .and_then(|data| data.as_array())
             .and_then(|data| data.first())
-            .ok_or_else(|| Report::new(AppError::Custom("虎牙流数据为空".to_string())))?;
+            .ok_or_else(|| LiveError::custom("虎牙流数据为空"))?;
         let live_info = data
             .get("gameLiveInfo")
-            .ok_or_else(|| Report::new(AppError::Custom("虎牙直播信息为空".to_string())))?;
+            .ok_or_else(|| LiveError::custom("虎牙直播信息为空"))?;
         let stream_info = data
             .get("gameStreamInfoList")
             .and_then(|info| info.as_array())
@@ -196,10 +197,7 @@ impl HuyaDownloader {
         }))
     }
 
-    fn build_stream_urls(
-        &self,
-        streams_info: &[Value],
-    ) -> Result<Vec<(String, String)>, Report<AppError>> {
+    fn build_stream_urls(&self, streams_info: &[Value]) -> LiveResult<Vec<(String, String)>> {
         let mut streams = Vec::new();
 
         for stream in streams_info {
@@ -245,13 +243,13 @@ impl HuyaDownloader {
         &self,
         stream_urls: &[(String, String)],
         profile: &HuyaRoomProfile,
-    ) -> Result<String, Report<AppError>> {
+    ) -> LiveResult<String> {
         let selected_url = stream_urls
             .iter()
             .find(|(cdn, _)| !self.huya_cdn.is_empty() && cdn == &self.huya_cdn)
             .or_else(|| stream_urls.first())
             .map(|(_, url)| url)
-            .ok_or_else(|| Report::new(AppError::Custom("虎牙可用 CDN 为空".to_string())))?;
+            .ok_or_else(|| LiveError::custom("虎牙可用 CDN 为空"))?;
 
         Ok(self.add_ratio(selected_url, &profile.bitrate_info, profile.max_bitrate))
     }
@@ -277,60 +275,22 @@ impl HuyaDownloader {
             _ => url.to_string(),
         }
     }
-}
 
-#[async_trait]
-impl DownloadBase for HuyaDownloader {
-    async fn check_stream(&mut self) -> Result<StreamStatus, Report<AppError>> {
-        let page = self.get_room_page().await?;
-        let Some(profile) = self.extract_room_profile(&page)? else {
-            return Ok(StreamStatus::Offline);
-        };
-
-        if profile.title.starts_with("回放")
-            || profile.title.starts_with("重播")
-            || profile.title.ends_with("回放")
-            || profile.title.ends_with("重播")
-        {
-            return Ok(StreamStatus::Offline);
-        }
-
-        let stream_urls = self.build_stream_urls(&profile.stream_info)?;
-        let raw_stream_url = self.select_stream_url(&stream_urls, &profile)?;
-
-        Ok(StreamStatus::Live {
-            stream_info: Box::new(StreamInfoExt {
-                streamer_info: StreamerInfo {
-                    id: -1,
-                    name: self.name.clone(),
-                    url: self.url.clone(),
-                    title: profile.title,
-                    date: Utc::now(),
-                    live_cover_path: profile.cover,
-                },
-                suffix: media_ext_from_url(&raw_stream_url)
-                    .unwrap_or_else(|| self.huya_protocol.extension().to_string()),
-                raw_stream_url,
-                platform: "huya".to_string(),
-                stream_headers: HashMap::new(),
-            }),
-        })
-    }
-
-    fn danmaku_init(&self) -> Option<Arc<dyn DanmakuClient + Send + Sync>> {
+    fn danmaku_source(&self) -> Option<DanmakuSource> {
         if !self.huya_danmaku {
             return None;
         }
-
-        let config = RecorderConfig::new(
-            self.url.clone(),
-            PathBuf::from(danmaku_filename_template(
-                self.filename_prefix.as_deref(),
-                &self.name,
-            )),
-        );
-
-        Some(Arc::new(RustDanmakuClient::new(config)) as Arc<dyn DanmakuClient + Send + Sync>)
+        Some(DanmakuSource {
+            platform: "huya".to_string(),
+            url: self.url.clone(),
+            room_id: None,
+            cookie: None,
+            raw: false,
+            detail: false,
+            extra: HashMap::new(),
+            movie_id: None,
+            password: None,
+        })
     }
 }
 
@@ -381,34 +341,34 @@ impl HuyaProtocol {
     }
 }
 
-fn extract_json_after(page: &str, pattern: &str, end: char) -> Result<Value, Report<AppError>> {
+fn extract_json_after(page: &str, pattern: &str, end: char) -> LiveResult<Value> {
     let re = Regex::new(pattern).unwrap();
     let Some(mat) = re.find(page) else {
-        bail!(AppError::Custom("虎牙房间数据不存在".to_string()))
+        return Err(LiveError::custom("虎牙房间数据不存在"));
     };
     let start = mat.end();
     let end = page[start..]
         .find(end)
         .map(|idx| start + idx)
-        .ok_or_else(|| Report::new(AppError::Custom("虎牙房间数据不完整".to_string())))?;
+        .ok_or_else(|| LiveError::custom("虎牙房间数据不完整"))?;
     serde_json::from_str(page[start..end].trim())
-        .change_context(AppError::Custom("解析虎牙房间数据失败".to_string()))
+        .map_err(|err| LiveError::custom(format!("解析虎牙房间数据失败: {err}")))
 }
 
-fn extract_stream_json(page: &str) -> Result<Value, Report<AppError>> {
+fn extract_stream_json(page: &str) -> LiveResult<Value> {
     let Some(start) = page.find("stream: ").map(|idx| idx + "stream: ".len()) else {
-        bail!(AppError::Custom("虎牙流数据不存在".to_string()))
+        return Err(LiveError::custom("虎牙流数据不存在"));
     };
     let Some(end) = page[start..].find("};").map(|idx| start + idx + 1) else {
-        bail!(AppError::Custom("虎牙流数据不完整".to_string()))
+        return Err(LiveError::custom("虎牙流数据不完整"));
     };
     serde_json::from_str(page[start..end].trim())
-        .change_context(AppError::Custom("解析虎牙流数据失败".to_string()))
+        .map_err(|err| LiveError::custom(format!("解析虎牙流数据失败: {err}")))
 }
 
-fn build_anticode(stream_name: &str, anti_code: &str) -> Result<String, Report<AppError>> {
+fn build_anticode(stream_name: &str, anti_code: &str) -> LiveResult<String> {
     let query = serde_urlencoded::from_str::<HashMap<String, String>>(anti_code)
-        .change_context(AppError::Custom("解析虎牙防盗链参数失败".to_string()))?;
+        .map_err(|err| LiveError::custom(format!("解析虎牙防盗链参数失败: {err}")))?;
     let Some(fm) = query.get("fm") else {
         return Ok(anti_code.to_string());
     };
@@ -421,20 +381,20 @@ fn build_anticode(stream_name: &str, anti_code: &str) -> Result<String, Report<A
     let uid = generate_random_uid();
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .change_context(AppError::Unknown)?;
+        .map_err(|err| LiveError::custom(format!("获取系统时间失败: {err}")))?;
     let now_secs = now.as_secs();
     let seq_id = uid + now.as_millis() as u64;
     let secret_hash = md5_hex(format!("{seq_id}|{ctype}|{platform_id}"));
     let convert_uid = rotl64(uid);
     let fm = urlencoding::decode(fm)
-        .change_context(AppError::Custom("解码虎牙 fm 参数失败".to_string()))?
+        .map_err(|err| LiveError::custom(format!("解码虎牙 fm 参数失败: {err}")))?
         .to_string();
     let secret_prefix = String::from_utf8(
         STANDARD
             .decode(fm.as_bytes())
-            .change_context(AppError::Custom("解码虎牙 fm base64 失败".to_string()))?,
+            .map_err(|err| LiveError::custom(format!("解码虎牙 fm base64 失败: {err}")))?,
     )
-    .change_context(AppError::Custom("虎牙 fm 参数不是 UTF-8".to_string()))?
+    .map_err(|err| LiveError::custom(format!("虎牙 fm 参数不是 UTF-8: {err}")))?
     .split('_')
     .next()
     .unwrap_or_default()
@@ -443,7 +403,7 @@ fn build_anticode(stream_name: &str, anti_code: &str) -> Result<String, Report<A
     let mut ws_time = query
         .get("wsTime")
         .cloned()
-        .ok_or_else(|| Report::new(AppError::Custom("虎牙 wsTime 为空".to_string())))?;
+        .ok_or_else(|| LiveError::custom("虎牙 wsTime 为空"))?;
     if u64::from_str_radix(&ws_time, 16).unwrap_or_default() < now_secs + 20 * 60 {
         ws_time = format!("{:x}", now_secs + 24 * 60 * 60);
     }
@@ -461,11 +421,11 @@ fn build_anticode(stream_name: &str, anti_code: &str) -> Result<String, Report<A
     ))
 }
 
-fn json_str<'a>(value: &'a Value, key: &str) -> Result<&'a str, Report<AppError>> {
+fn json_str<'a>(value: &'a Value, key: &str) -> LiveResult<&'a str> {
     value
         .get(key)
         .and_then(|value| value.as_str())
-        .ok_or_else(|| Report::new(AppError::Custom(format!("虎牙字段 {key} 为空"))))
+        .ok_or_else(|| LiveError::custom(format!("虎牙字段 {key} 为空")))
 }
 
 fn md5_hex(input: String) -> String {
