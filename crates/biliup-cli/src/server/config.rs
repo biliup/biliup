@@ -17,12 +17,12 @@ pub struct Config {
     pub downloader: Option<DownloaderType>,
 
     /// 文件大小限制（字节）
-    #[builder(default = default_file_size())]
+    #[patch(attribute(serde(default, deserialize_with = "deserialize_option_patch")))]
     #[serde(default = "default_file_size")]
-    pub file_size: u64,
+    pub file_size: Option<u64>,
 
     /// 分段时间，格式如 "00:00:00"，保留为字符串以保持直观
-    #[serde(default = "default_segment_time")]
+    #[serde(default)]
     pub segment_time: Option<String>,
 
     /// 过滤阈值（MB）
@@ -424,13 +424,21 @@ pub struct UserConfig {
 }
 
 /// 默认文件大小：2.5GB
-fn default_file_size() -> u64 {
-    2_621_440_000
+fn default_file_size() -> Option<u64> {
+    Some(2_621_440_000)
 }
 
-/// 默认分段时间：2小时
+fn deserialize_option_patch<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+/// 默认分段时间：不启用时长分段
 pub fn default_segment_time() -> Option<String> {
-    Some("02:00:00".to_string())
+    None
 }
 
 /// 默认过滤阈值：20MB
@@ -473,25 +481,48 @@ fn default_pool2_size() -> u32 {
     3
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        serde_json::from_value(serde_json::json!({})).expect("default config should deserialize")
+    }
+}
+
 impl Config {
+    pub fn validate_segment_limits(&self) -> AppResult<()> {
+        Ok(())
+    }
+
+    pub fn normalize_segment_limits(&mut self) {
+        if self
+            .segment_time
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            self.segment_time = None;
+        }
+    }
+
     pub fn load<P: AsRef<Path>>(path: P) -> AppResult<Self> {
         let path = path.as_ref();
         let contents = fs::read_to_string(path)
             .change_context(AppError::Unknown)
             .attach_with(|| format!("read config {}", path.display()))?;
         let extension = path.extension().and_then(|ext| ext.to_str());
-        match extension {
+        let mut config: Config = match extension {
             Some("toml") => toml::from_str(&contents)
                 .change_context(AppError::Unknown)
-                .attach_with(|| format!("parse toml config {}", path.display())),
+                .attach_with(|| format!("parse toml config {}", path.display()))?,
             Some("yaml") | Some("yml") => serde_yaml::from_str(&contents)
                 .change_context(AppError::Unknown)
-                .attach_with(|| format!("parse yaml config {}", path.display())),
+                .attach_with(|| format!("parse yaml config {}", path.display()))?,
             _ => bail!(AppError::Custom(format!(
                 "unsupported config file extension: {}",
                 path.display()
             ))),
-        }
+        };
+        config.normalize_segment_limits();
+        config.validate_segment_limits()?;
+        Ok(config)
     }
 
     /// 从指定路径加载配置文件，如果不存在则创建默认配置
@@ -504,28 +535,75 @@ impl Config {
 mod tests {
     use super::*;
 
-    // 情况 1: 字段存在且有字符串值
     #[test]
-    fn test_field_with_value() {
-        let json = r#"{"maybe_name": "Alice"}"#;
+    fn deserialize_missing_file_size_uses_default() {
+        let config: Config = serde_json::from_str(r#"{}"#).unwrap();
 
-        // Single Option: Some("Alice")
-        let mut single: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(config.file_size, default_file_size());
+        assert_eq!(config.segment_time, None);
+        assert!(config.validate_segment_limits().is_ok());
+    }
 
-        let patch: ConfigPatch = serde_json::from_str(json).unwrap();
+    #[test]
+    fn deserialize_null_file_size_keeps_none() {
+        let config: Config =
+            serde_json::from_str(r#"{"file_size": null, "segment_time": "01:00:00"}"#).unwrap();
 
-        single.apply(patch);
+        assert_eq!(config.file_size, None);
+        assert_eq!(config.segment_time, Some("01:00:00".to_string()));
+        assert!(config.validate_segment_limits().is_ok());
+    }
 
-        // 从 JSON 反序列化时,未指定的字段使用 serde default (None)
-        // 而 builder 的 default 是 Some("02:00:00"),两者不同
-        // 需要明确设置 segment_time 为 None 以匹配反序列化结果
-        assert_eq!(
-            single,
-            Config {
-                segment_time: default_segment_time(),
-                ..Config::builder().streamers(Default::default()).build()
-            },
-            "普通Option正常包裹一层"
-        );
+    #[test]
+    fn size_or_time_segment_limit_is_valid() {
+        let mut size_only = Config {
+            file_size: Some(1024),
+            segment_time: None,
+            ..Config::default()
+        };
+        assert!(size_only.validate_segment_limits().is_ok());
+
+        let mut time_only = Config {
+            file_size: None,
+            segment_time: Some("01:00:00".to_string()),
+            ..Config::default()
+        };
+        assert!(time_only.validate_segment_limits().is_ok());
+
+        time_only.segment_time = Some("".to_string());
+        time_only.normalize_segment_limits();
+        assert_eq!(time_only.segment_time, None);
+        assert!(time_only.validate_segment_limits().is_ok());
+
+        size_only.segment_time = Some("00:30:00".to_string());
+        assert!(size_only.validate_segment_limits().is_ok());
+    }
+
+    #[test]
+    fn empty_size_and_time_disables_segmentation() {
+        let mut config = Config {
+            file_size: None,
+            segment_time: Some("".to_string()),
+            ..Config::default()
+        };
+
+        config.normalize_segment_limits();
+
+        assert_eq!(config.file_size, None);
+        assert_eq!(config.segment_time, None);
+        assert!(config.validate_segment_limits().is_ok());
+    }
+
+    #[test]
+    fn config_patch_can_clear_file_size() {
+        let mut config = Config::default();
+        let patch: ConfigPatch =
+            serde_json::from_str(r#"{"file_size": null, "segment_time": "01:00:00"}"#).unwrap();
+
+        config.apply(patch);
+
+        assert_eq!(config.file_size, None);
+        assert_eq!(config.segment_time, Some("01:00:00".to_string()));
+        assert!(config.validate_segment_limits().is_ok());
     }
 }

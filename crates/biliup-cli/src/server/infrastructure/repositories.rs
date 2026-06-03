@@ -87,12 +87,14 @@ pub async fn get_config(pool: &ConnectionPool) -> AppResult<Config> {
         .change_context(AppError::Unknown)?;
     if let Some(configuration) = configuration {
         // 从数据库中解析配置JSON
-        let json: Config =
+        let mut json: Config =
             serde_json::from_str(&configuration.value).change_context(AppError::Unknown)?;
+        json.normalize_segment_limits();
+        json.validate_segment_limits()?;
         Ok(json)
     } else {
         // 如果数据库中没有配置，返回默认配置
-        let config = Config::builder().streamers(Default::default()).build();
+        let config = Config::default();
         Ok(config)
     }
 }
@@ -103,7 +105,10 @@ pub async fn get_config(pool: &ConnectionPool) -> AppResult<Config> {
 /// * `pool` - 数据库连接池
 /// * `config` - 要保存的配置
 pub async fn upsert_config(pool: &ConnectionPool, config: &Config) -> AppResult<Configuration> {
-    let value_txt = serde_json::to_string(config).change_context(AppError::Unknown)?;
+    let mut config = config.clone();
+    config.normalize_segment_limits();
+    config.validate_segment_limits()?;
+    let value_txt = serde_json::to_string(&config).change_context(AppError::Unknown)?;
     let mut tx = pool.begin().await.change_context(AppError::Unknown)?;
 
     let ids: Vec<i64> = sqlx::query_scalar("SELECT id FROM configuration WHERE key = ?1 LIMIT 2")
@@ -229,9 +234,12 @@ pub async fn upsert_live_streamer_by_url(
 /// * `pool` - 数据库连接池
 /// * `config` - 要保存的配置
 pub async fn insert_config(pool: &ConnectionPool, config: &Config) -> AppResult<Configuration> {
+    let mut config = config.clone();
+    config.normalize_segment_limits();
+    config.validate_segment_limits()?;
     let configuration = InsertConfiguration {
         key: "config".to_string(),
-        value: serde_json::to_string(config).unwrap(),
+        value: serde_json::to_string(&config).unwrap(),
     }
     .insert(pool)
     .await

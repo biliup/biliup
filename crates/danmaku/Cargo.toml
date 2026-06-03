@@ -11,9 +11,6 @@ tokio = { workspace = true, features = ["sync", "time", "fs", "io-util"] }
 futures = { workspace = true }
 async-trait = { workspace = true }
 
-# WebSocket
-tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
-
 # HTTP client (for getting WebSocket info)
 reqwest = { workspace = true, features = ["json"] }
 
@@ -52,6 +49,11 @@ url = { workspace = true }
 md5 = "0.7"
 rand = { workspace = true }
 urlencoding = "2.1"
+
+# WebSocket
+tokio-tungstenite = { version = "0.29.0", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std"] }
+rustls-platform-verifier = "0.7"
 
 [features]
 default = ["twitch", "twitcasting", "bilibili", "douyu", "huya", "douyin", "youtube"]

@@ -183,6 +183,11 @@ pub async fn put_configuration(
     State(log_handle): State<LogHandle>,
     Json(json_data): Json<Config>,
 ) -> Result<Json<Config>, Response> {
+    let mut json_data = json_data;
+    json_data.normalize_segment_limits();
+    json_data
+        .validate_segment_limits()
+        .map_err(report_to_response)?;
     // 将 JSON 序列化为 TEXT 存库
     let value_txt = serde_json::to_string(&json_data)
         .change_context(AppError::Unknown)
@@ -255,8 +260,12 @@ pub async fn put_configuration(
         .change_context(AppError::Unknown)
         .map_err(report_to_response)?;
     // 提交后从 DB 重新加载配置
-    let saved_config: Config = serde_json::from_str(&saved.value)
+    let mut saved_config: Config = serde_json::from_str(&saved.value)
         .change_context(AppError::Unknown)
+        .map_err(report_to_response)?;
+    saved_config.normalize_segment_limits();
+    saved_config
+        .validate_segment_limits()
         .map_err(report_to_response)?;
     *config.write().unwrap() = saved_config;
     let guard = config.read().unwrap();

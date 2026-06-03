@@ -101,25 +101,52 @@ impl XmlWriter {
 
     /// Write a danmaku event.
     pub fn write_event(&mut self, event: &DanmakuEvent) -> Result<()> {
-        match event {
-            DanmakuEvent::Chat(msg) => self.write_chat(msg)?,
-            DanmakuEvent::Gift(msg) => self.write_gift(msg)?,
-            DanmakuEvent::SuperChat(msg) => self.write_superchat(msg)?,
-            DanmakuEvent::GuardBuy(msg) => self.write_guard_buy(msg)?,
-            DanmakuEvent::Enter(_) => {
-                // Enter messages are typically not written to XML
+        let written = match event {
+            DanmakuEvent::Chat(msg) => {
+                self.write_chat(msg)?;
+                true
             }
+            DanmakuEvent::Gift(msg) => {
+                if self.config.save_detail {
+                    self.write_gift(msg)?;
+                    true
+                } else {
+                    false
+                }
+            }
+            DanmakuEvent::SuperChat(msg) => {
+                if self.config.save_detail {
+                    self.write_superchat(msg)?;
+                    true
+                } else {
+                    false
+                }
+            }
+            DanmakuEvent::GuardBuy(msg) => {
+                if self.config.save_detail {
+                    self.write_guard_buy(msg)?;
+                    true
+                } else {
+                    false
+                }
+            }
+            DanmakuEvent::Enter(_) => false,
             DanmakuEvent::Other { raw_data } => {
                 if self.config.save_raw {
                     self.write_raw(raw_data)?;
+                    true
+                } else {
+                    false
                 }
             }
+        };
+
+        if written {
+            self.message_count += 1;
         }
 
-        self.message_count += 1;
-
         // Auto-save periodically
-        if self.last_save.elapsed().as_secs() >= self.config.save_interval {
+        if written && self.last_save.elapsed().as_secs() >= self.config.save_interval {
             self.flush()?;
             self.last_save = Instant::now();
         }
@@ -303,5 +330,34 @@ impl XmlWriter {
         self.file_path = new_path;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_enter_event_does_not_mark_xml_as_having_messages() {
+        let dir = std::env::temp_dir().join(format!(
+            "danmaku-enter-empty-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("danmaku.xml");
+        let mut writer = XmlWriter::new(&path, XmlWriterConfig::default()).unwrap();
+
+        writer
+            .write_event(&DanmakuEvent::Enter(crate::message::EnterMessage {
+                name: "tester".to_string(),
+                uid: Some(1),
+                timestamp: chrono::Utc::now(),
+            }))
+            .unwrap();
+
+        assert!(!writer.has_messages());
+        let _ = writer.finish().unwrap();
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

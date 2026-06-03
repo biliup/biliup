@@ -123,6 +123,7 @@ const Global: React.FC = () => {
             alignSelf: 'stretch',
             padding: 0,
           }}
+          showClear={true}
         />
         <Form.Input
           field="segment_time"
@@ -151,7 +152,7 @@ const Global: React.FC = () => {
               message: '只接受数字和英文冒号',
             },
             {
-              pattern: /^[0-9]{2,4}:[0-5][0-9]:[0-5][0-9]$/,
+              pattern: /^$|^[0-9]{2,4}:[0-5][0-9]:[0-5][0-9]$/,
               message: '分或秒不符合规范',
             },
           ]}

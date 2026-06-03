@@ -139,7 +139,14 @@ const Dashboard: React.FC = () => {
                 initValues={entity}
                 onSubmit={async values => {
                   try {
-                    await trigger(values)
+                    const payload = { ...values }
+                    if (payload.file_size === undefined || payload.file_size === '') {
+                      payload.file_size = null
+                    }
+                    if (payload.segment_time === undefined || payload.segment_time === '') {
+                      payload.segment_time = null
+                    }
+                    await trigger(payload)
                     Toast.success('保存成功')
                   } catch (e: any) {
                     // error handling

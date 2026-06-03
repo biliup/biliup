@@ -1,11 +1,10 @@
 use crate::server::errors::{AppError, AppResult};
 use error_stack::{ResultExt, bail};
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::fs;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::process::Command;
 use tracing::{error, info};
 
@@ -40,11 +39,14 @@ impl HookStep {
         match self {
             HookStep::Run { run } => {
                 // 执行自定义命令
-                let paths_str = video_paths
+                let paths: Vec<String> = video_paths
                     .iter()
-                    .map(|p| p.to_string_lossy())
-                    .reduce(|acc, e| Cow::from(acc.to_string() + "\n" + &*e))
-                    .ok_or(AppError::Unknown)?;
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect();
+                if paths.is_empty() {
+                    return Err(AppError::Unknown.into());
+                }
+                let paths_str = paths.join("\n");
                 self.execute_command(run, paths_str.as_bytes()).await?;
             }
             HookStep::Move { mv } => {
@@ -229,31 +231,31 @@ impl HookStep {
                 .change_context(AppError::Unknown)?;
         }
 
-        let stdout = process.stdout.take().unwrap();
-        let stderr = process.stderr.take().unwrap();
+        let stdout = process
+            .stdout
+            .take()
+            .ok_or(AppError::Custom("Failed to capture stdout".to_string()))?;
+        let stderr = process
+            .stderr
+            .take()
+            .ok_or(AppError::Custom("Failed to capture stderr".to_string()))?;
 
-        let mut stdout_lines = BufReader::new(stdout).lines();
-        let mut stderr_lines = BufReader::new(stderr).lines();
+        // 子命令输出可能是 GBK、UTF-8 或任意字节流。这里不能按文本解码，
+        // 而是原样转发到控制台并追加到 Web 可查看的日志文件。
+        let stdout_task = tokio::spawn(Self::tee_command_output(
+            stdout,
+            tokio::io::stdout(),
+            "download.log",
+        ));
+        let stderr_task = tokio::spawn(Self::tee_command_output(
+            stderr,
+            tokio::io::stderr(),
+            "download.log",
+        ));
 
-        loop {
-            tokio::select! {
-                line = stdout_lines.next_line() => {
-                    match line.change_context(AppError::Unknown)? {
-                        Some(l) => tracing::info!(target="user_cmd_stdout", "{}", l),
-                        None => break, // stdout EOF
-                    }
-                }
-                line = stderr_lines.next_line() => {
-                    match line.change_context(AppError::Unknown)? {
-                        Some(l) => tracing::warn!(target="user_cmd_stderr", "{}", l),
-                        None => break, // stderr EOF
-                    }
-                }
-            }
-        }
-
-        // 等待进程完成并检查退出状态
         let status = process.wait().await.change_context(AppError::Unknown)?;
+        stdout_task.await.change_context(AppError::Unknown)??;
+        stderr_task.await.change_context(AppError::Unknown)??;
 
         if !status.success() {
             bail!(AppError::Custom(format!(
@@ -262,6 +264,43 @@ impl HookStep {
             )));
         }
 
+        Ok(())
+    }
+
+    async fn tee_command_output<R, W>(
+        mut reader: R,
+        mut terminal: W,
+        log_file: &'static str,
+    ) -> AppResult<()>
+    where
+        R: AsyncRead + Unpin,
+        W: AsyncWrite + Unpin,
+    {
+        let mut log = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_file)
+            .await
+            .change_context(AppError::Unknown)?;
+        let mut buf = [0; 8192];
+        loop {
+            let n = reader
+                .read(&mut buf)
+                .await
+                .change_context(AppError::Unknown)?;
+            if n == 0 {
+                break;
+            }
+            terminal
+                .write_all(&buf[..n])
+                .await
+                .change_context(AppError::Unknown)?;
+            log.write_all(&buf[..n])
+                .await
+                .change_context(AppError::Unknown)?;
+        }
+        terminal.flush().await.change_context(AppError::Unknown)?;
+        log.flush().await.change_context(AppError::Unknown)?;
         Ok(())
     }
 
@@ -281,13 +320,6 @@ impl HookStep {
 
         for video_path in video_paths {
             self.move_single_file(video_path, target_path).await?;
-
-            // 移动对应的 XML 文件
-            let xml_path = video_path.with_extension("xml");
-            if xml_path.exists() {
-                info!("移动弹幕文件: {}", xml_path.display());
-                self.move_single_file(&xml_path, target_path).await?;
-            }
         }
         Ok(())
     }
@@ -353,13 +385,6 @@ impl HookStep {
             fs::remove_file(video_path)
                 .await
                 .change_context(AppError::Unknown)?;
-            let buf = video_path.with_extension("xml");
-            if buf.exists() {
-                fs::remove_file(&buf)
-                    .await
-                    .change_context(AppError::Unknown)?;
-                info!("删除弹幕文件 - Removing: {}", buf.display());
-            }
         }
         Ok(())
     }
@@ -444,6 +469,46 @@ mod tests {
         step.execute_paths(&mut paths).await.unwrap();
         // Already .mp4 → unchanged.
         assert_eq!(paths[0], p);
+    }
+
+    #[tokio::test]
+    async fn move_uses_explicit_paths_without_inferred_xml() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        let dst = dir.path().join("dst");
+        std::fs::create_dir(&src).unwrap();
+        std::fs::create_dir(&dst).unwrap();
+        let video = src.join("segment.mp4");
+        let danmaku = src.join("segment.xml");
+        std::fs::write(&video, b"video").unwrap();
+        std::fs::write(&danmaku, b"danmaku").unwrap();
+        let paths = vec![video.as_path(), danmaku.as_path()];
+        let step = HookStep::Move {
+            mv: dst.display().to_string(),
+        };
+
+        step.execute(&paths).await.unwrap();
+
+        assert!(!video.exists());
+        assert!(!danmaku.exists());
+        assert_eq!(std::fs::read(dst.join("segment.mp4")).unwrap(), b"video");
+        assert_eq!(std::fs::read(dst.join("segment.xml")).unwrap(), b"danmaku");
+    }
+
+    #[tokio::test]
+    async fn remove_uses_explicit_paths_without_inferred_xml() {
+        let dir = tempfile::tempdir().unwrap();
+        let video = dir.path().join("segment.mp4");
+        let danmaku = dir.path().join("segment.xml");
+        std::fs::write(&video, b"video").unwrap();
+        std::fs::write(&danmaku, b"danmaku").unwrap();
+        let paths = vec![video.as_path(), danmaku.as_path()];
+        let step = HookStep::Remove("rm".into());
+
+        step.execute(&paths).await.unwrap();
+
+        assert!(!video.exists());
+        assert!(!danmaku.exists());
     }
 
     /// 复现 pipeline_upload_videos 的 fault-tolerance 触发条件：

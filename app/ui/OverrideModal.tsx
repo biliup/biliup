@@ -126,8 +126,8 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
       Object.keys(values).forEach(key => {
         console.log(key, values[key])
         if (!entityFields.has(key)) {
-          if (values[key] != undefined && values[key] != null) {
-            overrideConfig[key] = values[key]
+          if (values[key] !== undefined) {
+            overrideConfig[key] = values[key] === '' ? null : values[key]
           }
           delete values[key]
         }
@@ -193,6 +193,7 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
           alignSelf: 'stretch',
           padding: 0,
         }}
+        showClear={true}
       />
 
       <Form.Input
@@ -215,7 +216,7 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
             message: '只接受数字和英文冒号',
           },
           {
-            pattern: /^[0-9]{2,4}:[0-5][0-9]:[0-5][0-9]$/,
+            pattern: /^$|^[0-9]{2,4}:[0-5][0-9]:[0-5][0-9]$/,
             message: '分或秒不符合规范',
           },
         ]}

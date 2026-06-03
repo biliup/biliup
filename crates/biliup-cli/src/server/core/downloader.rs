@@ -127,6 +127,7 @@ impl DownloaderRuntime {
 pub struct SegmentInfo {
     /// 分段文件路径
     pub prev_file_path: PathBuf,
+    pub danmaku_file_path: Option<PathBuf>,
     pub next_file_path: Option<PathBuf>,
     /// 分段序号
     pub segment_index: usize,
@@ -139,11 +140,13 @@ pub struct SegmentInfo {
 impl SegmentInfo {
     pub fn new(
         prev_file_path: PathBuf,
+        danmaku_file_path: Option<PathBuf>,
         next_file_path: Option<PathBuf>,
         segment_index: usize,
     ) -> Self {
         Self {
             prev_file_path,
+            danmaku_file_path,
             next_file_path,
             segment_index,
         }
@@ -186,8 +189,10 @@ pub trait DanmakuClient {
     ///
     /// # 参数
     /// * `file_name` - 文件名
-    fn rolling(&self, _file_name: &str) -> Result<(), Box<dyn std::error::Error>> {
-        Ok(())
+    ///
+    /// 返回 true 表示本次滚动保存产生了可交给后处理的弹幕文件。
+    fn rolling(&self, _file_name: &str) -> Result<bool, Box<dyn std::error::Error>> {
+        Ok(false)
     }
 }
 
@@ -230,19 +235,20 @@ impl DanmakuClient for RustDanmakuClient {
         Ok(())
     }
 
-    fn rolling(&self, file_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    fn rolling(&self, file_name: &str) -> Result<bool, Box<dyn std::error::Error>> {
         let handle = self
             .handle
             .lock()
             .map_err(|_| "danmaku handle lock poisoned")?
             .clone();
         if let Some(handle) = handle {
-            tokio::task::block_in_place(|| {
+            return tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current()
                     .block_on(handle.rolling(Some(PathBuf::from(file_name))))
-            })?;
+            })
+            .map_err(Into::into);
         }
-        Ok(())
+        Ok(false)
     }
 }
 

@@ -359,11 +359,57 @@ fn extract_stream_json(page: &str) -> LiveResult<Value> {
     let Some(start) = page.find("stream: ").map(|idx| idx + "stream: ".len()) else {
         return Err(LiveError::custom("虎牙流数据不存在"));
     };
-    let Some(end) = page[start..].find("};").map(|idx| start + idx + 1) else {
-        return Err(LiveError::custom("虎牙流数据不完整"));
-    };
+    let end =
+        find_json_value_end(page, start).ok_or_else(|| LiveError::custom("虎牙流数据不完整"))?;
     serde_json::from_str(page[start..end].trim())
         .map_err(|err| LiveError::custom(format!("解析虎牙流数据失败: {err}")))
+}
+
+fn find_json_value_end(input: &str, start: usize) -> Option<usize> {
+    let bytes = input.as_bytes();
+    let mut idx = start;
+    while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+        idx += 1;
+    }
+
+    let opening = *bytes.get(idx)?;
+    let closing = match opening {
+        b'{' => b'}',
+        b'[' => b']',
+        _ => return None,
+    };
+
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (offset, byte) in bytes[idx..].iter().copied().enumerate() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        match byte {
+            b'"' => in_string = true,
+            b'{' | b'[' => depth += 1,
+            b'}' | b']' => {
+                if depth == 0 {
+                    return None;
+                }
+                depth -= 1;
+                if depth == 0 && byte == closing {
+                    return Some(idx + offset + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn build_anticode(stream_name: &str, anti_code: &str) -> LiveResult<String> {
@@ -460,4 +506,36 @@ fn decode_html_entities(input: &str) -> String {
         .replace("&amp;", "&")
         .replace("&lt;", "<")
         .replace("&gt;", ">")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_stream_json_stops_before_player_config_closing_brace() {
+        let page = r#"
+            var hyPlayerConfig = {
+                stream: {"data":[],"vMultiStreamInfo":[]}
+            };
+        "#;
+
+        let stream = extract_stream_json(page).unwrap();
+
+        assert_eq!(stream.get("data").unwrap().as_array().unwrap().len(), 0);
+        assert!(stream.get("vMultiStreamInfo").unwrap().is_array());
+    }
+
+    #[test]
+    fn find_json_value_end_ignores_braces_in_strings() {
+        let input = r#"{"text":"}; { ]","items":[{"value":1}]}
+            };
+        "#;
+
+        let end = find_json_value_end(input, 0).unwrap();
+        let value: Value = serde_json::from_str(&input[..end]).unwrap();
+
+        assert_eq!(value["text"], "}; { ]");
+        assert_eq!(value["items"][0]["value"], 1);
+    }
 }

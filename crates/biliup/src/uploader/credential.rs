@@ -139,16 +139,22 @@ impl Credential {
     }
 
     pub async fn validate_tokens(&self, login_info: &LoginInfo) -> Result<bool> {
+        let keypair = match login_info.platform.as_deref() {
+            Some("BiliTV") => AppKeyStore::BiliTV,
+            Some("Android") | None => AppKeyStore::Android,
+            Some(_) => return Err("未知平台".into()),
+        };
+
         let payload = {
             let mut payload = json!({
                 "access_key": login_info.token_info.access_token,
                 "actionKey": "appkey",
-                "appkey": AppKeyStore::Android.app_key(),
+                "appkey": keypair.app_key(),
                 "ts": SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
             });
 
             let urlencoded = serde_urlencoded::to_string(&payload)?;
-            let sign = Self::sign(&urlencoded, AppKeyStore::Android.appsec());
+            let sign = Self::sign(&urlencoded, keypair.appsec());
             payload["sign"] = Value::from(sign);
             payload
         };

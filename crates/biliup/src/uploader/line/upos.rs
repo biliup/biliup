@@ -151,23 +151,28 @@ impl Upos {
         path: &Path,
     ) -> Result<Video> {
         // println!("{:?}", parts_cell.borrow());
-        let value = json!({
-            "name": path.file_name().and_then(OsStr::to_str),
-            "uploadId": self.upload_id,
-            "biz_id": self.bucket.biz_id,
-            "output": "json",
-            "profile": "ugcupos/bup"
-        });
-        // let res: serde_json::Value = self.client.post(url).query(&value).json(&json!({"parts": *parts_cell.borrow()}))
+        let url = reqwest::Url::parse_with_params(
+            &self.url,
+            [
+                (
+                    "name",
+                    path.file_name().and_then(OsStr::to_str).unwrap_or_default(),
+                ),
+                ("uploadId", &self.upload_id),
+                ("biz_id", &self.bucket.biz_id.to_string()),
+                ("output", "json"),
+                ("profile", "ugcupos/bup"),
+            ],
+        )
+        .map_err(|e| Kind::Custom(e.to_string()))?;
         let res: serde_json::Value = self
             .client
             .client_with_middleware
-            .post(&self.url)
+            .post(url)
             .header(
                 "X-Upos-Auth",
                 header::HeaderValue::from_str(&self.bucket.auth)?,
             )
-            .query(&value)
             .json(&json!({ "parts": parts }))
             .timeout(Duration::from_secs(60))
             .send()

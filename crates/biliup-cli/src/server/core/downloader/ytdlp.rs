@@ -138,6 +138,7 @@ impl YouTubeDownloader {
         callback(SegmentEvent::Segment(SegmentInfo::new(
             output_path,
             None,
+            None,
             0,
         )));
         Ok(DownloadStatus::StreamEnded)

@@ -47,18 +47,19 @@ impl DanmakuClient for RustDanmakuClient {
         Ok(())
     }
 
-    fn rolling(&self, file_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    fn rolling(&self, file_name: &str) -> Result<bool, Box<dyn std::error::Error>> {
         let handle = self
             .handle
             .lock()
             .map_err(|_| "danmaku handle lock poisoned")?
             .clone();
         if let Some(handle) = handle {
-            tokio::task::block_in_place(|| {
+            return tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current()
                     .block_on(handle.rolling(Some(PathBuf::from(file_name))))
-            })?;
+            })
+            .map_err(Into::into);
         }
-        Ok(())
+        Ok(false)
     }
 }

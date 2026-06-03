@@ -1,6 +1,6 @@
 use crate::server::common::download::DownloadTask;
 use crate::server::common::util::Recorder;
-use crate::server::config::{Config, default_segment_time};
+use crate::server::config::Config;
 use crate::server::core::downloader::DownloadConfig;
 use crate::server::core::live::streamer_info;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
@@ -120,8 +120,8 @@ impl Context {
         DownloadConfig {
             // 流URL
             url: stream.raw_stream_url.to_string(),
-            segment_time: config.segment_time.or_else(default_segment_time),
-            file_size: Some(config.file_size), // 2GB
+            segment_time: config.segment_time,
+            file_size: config.file_size,
             headers: stream.stream_headers.clone(),
             recorder: self.recorder(stream_info),
             // output_dir: PathBuf::from("./downloads")

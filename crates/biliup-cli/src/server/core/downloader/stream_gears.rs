@@ -77,6 +77,7 @@ impl StreamGears {
 
                 let event = SegmentInfo {
                     prev_file_path: file_path,
+                    danmaku_file_path: None,
                     next_file_path: None,
                     segment_index: i,
                 };

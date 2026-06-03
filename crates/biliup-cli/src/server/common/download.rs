@@ -260,19 +260,16 @@ impl DownloadTask {
                 SegmentEvent::Start { .. } => {
                     warn!("Ignoring unexpected segment start event");
                 }
-                SegmentEvent::Segment(event) => {
+                SegmentEvent::Segment(mut event) => {
                     // 分段时，获取到的是已下载的文件名
                     // 触发弹幕滚动保存
-                    if let Some(ref client) = danmaku_client
-                        && let Err(e) = client.rolling(
-                            &event
-                                .prev_file_path
-                                .with_extension("xml")
-                                .display()
-                                .to_string(),
-                        )
-                    {
-                        error!("Danmaku rolling error: {}", e);
+                    if let Some(ref client) = danmaku_client {
+                        let danmaku_file_path = event.prev_file_path.with_extension("xml");
+                        match client.rolling(&danmaku_file_path.display().to_string()) {
+                            Ok(true) => event.danmaku_file_path = Some(danmaku_file_path),
+                            Ok(false) => {}
+                            Err(e) => error!("Danmaku rolling error: {}", e),
+                        }
                     }
                     // 异步处理事件
                     // let processor = processor.clone();

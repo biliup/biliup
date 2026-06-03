@@ -125,6 +125,14 @@ async fn get_upload_line(client: &reqwest::Client, line: &str) -> AppResult<Line
     Ok(line)
 }
 
+pub(crate) fn segment_paths(event: &SegmentInfo) -> Vec<PathBuf> {
+    let mut paths = vec![event.prev_file_path.clone()];
+    if let Some(danmaku_file_path) = &event.danmaku_file_path {
+        paths.push(danmaku_file_path.clone());
+    }
+    paths
+}
+
 async fn pipeline_upload_videos<F>(
     rx: Inspect<Receiver<SegmentInfo>, F>,
     context: &UploadContext,
@@ -141,7 +149,7 @@ where
         // 单段失败（典型场景：磁盘满让 ffmpeg remux 写头失败）不应拖死整批——
         // 否则已成功上传的段也无法到达 submit + postprocessor，本地 `rm` 不触发，
         // 文件越堆越多，磁盘进一步紧张，形成正反馈。
-        let mut paths: Vec<PathBuf> = vec![event.prev_file_path.clone()];
+        let mut paths = segment_paths(&event);
         if !segment_processors.is_empty()
             && let Err(e) = process_video_paths(&mut paths, segment_processors).await
         {
@@ -158,8 +166,10 @@ where
         match upload_single_file(&upload_path, context).await {
             Ok(video) => {
                 uploaded.videos.push(video);
-                // postprocessor 看到的是 segment_processor 转换后的路径
-                uploaded.paths.push(upload_path);
+                // 1.0.7 的 FileInfo(video, danmaku) 语义：上传完成后的 postprocessor
+                // 继续接收本段视频路径和对应弹幕路径。segment_processor 可能已把
+                // 首个视频路径原地替换（例如 Remux .ts→.mp4），因此这里保留转换后的路径集。
+                uploaded.paths.extend(paths);
             }
             Err(e) => {
                 error!(
@@ -390,6 +400,28 @@ pub async fn upload(
     Ok((bilibili, videos))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn segment_paths_keeps_video_only_without_danmaku() {
+        let video = PathBuf::from("segment.ts");
+        let event = SegmentInfo::new(video.clone(), None, None, 0);
+
+        assert_eq!(segment_paths(&event), vec![video]);
+    }
+
+    #[test]
+    fn segment_paths_keeps_video_then_danmaku_when_present() {
+        let video = PathBuf::from("segment.ts");
+        let danmaku = PathBuf::from("segment.xml");
+        let event = SegmentInfo::new(video.clone(), Some(danmaku.clone()), None, 0);
+
+        assert_eq!(segment_paths(&event), vec![video, danmaku]);
+    }
+}
+
 /// 上传Actor
 /// 负责处理上传相关的消息和任务
 pub struct UActor {
@@ -439,7 +471,7 @@ impl UActor {
                         let mut paths = Vec::new();
                         pin!(inspect);
                         while let Some(event) = inspect.next().await {
-                            paths.push(event.prev_file_path);
+                            paths.extend(segment_paths(&event));
                         }
                         // 无上传配置时，直接执行后处理
                         execute_postprocessor(paths, &ctx).await

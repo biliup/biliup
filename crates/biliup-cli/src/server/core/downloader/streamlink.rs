@@ -81,6 +81,7 @@ impl Streamlink {
             callback(SegmentEvent::Segment(SegmentInfo::new(
                 output_file,
                 None,
+                None,
                 0,
             )));
         }

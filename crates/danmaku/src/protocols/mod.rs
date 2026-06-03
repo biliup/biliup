@@ -29,11 +29,24 @@ pub enum RegistrationData {
     Binary(Vec<u8>),
 }
 
+/// Connection transport used by a platform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionTransport {
+    /// WebSocket connection.
+    WebSocket,
+    /// Plain TCP connection.
+    Tcp,
+}
+
 /// Connection information for a platform.
 #[derive(Debug, Clone)]
 pub struct ConnectionInfo {
-    /// WebSocket URL to connect to.
+    /// Primary endpoint to connect to.
     pub ws_url: String,
+    /// Fallback endpoints to try if the primary connection fails.
+    pub fallback_ws_urls: Vec<String>,
+    /// Transport used by the configured URLs.
+    pub transport: ConnectionTransport,
     /// Registration packets to send after connecting.
     pub registration_data: Vec<RegistrationData>,
     /// HTTP headers for the WebSocket connection.
@@ -45,9 +58,23 @@ impl ConnectionInfo {
     pub fn new(ws_url: impl Into<String>) -> Self {
         Self {
             ws_url: ws_url.into(),
+            fallback_ws_urls: Vec::new(),
+            transport: ConnectionTransport::WebSocket,
             registration_data: Vec::new(),
             headers: HeaderMap::new(),
         }
+    }
+
+    /// Add fallback WebSocket URLs.
+    pub fn with_fallback_ws_urls(mut self, urls: Vec<String>) -> Self {
+        self.fallback_ws_urls = urls;
+        self
+    }
+
+    /// Use plain TCP transport for the configured endpoints.
+    pub fn with_tcp_transport(mut self) -> Self {
+        self.transport = ConnectionTransport::Tcp;
+        self
     }
 
     /// Add registration data.
