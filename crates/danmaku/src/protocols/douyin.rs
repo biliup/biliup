@@ -22,7 +22,12 @@ use crate::protocols::{ConnectionInfo, DecodeResult, HeartbeatConfig, Platform, 
 /// Heartbeat packet.
 const HEARTBEAT: &[u8] = b":\x02hb";
 const USER_AGENT_STRING: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-const DOUYIN_WS_URL: &str = "wss://webcast100-ws-web-lf.douyin.com/webcast/im/push/v2/";
+const DOUYIN_WS_HOSTS: &[&str] = &[
+    "wss://webcast100-ws-web-lq.douyin.com/webcast/im/push/v2/",
+    "wss://webcast100-ws-web-hl.douyin.com/webcast/im/push/v2/",
+    "wss://webcast100-ws-web-lf.douyin.com/webcast/im/push/v2/",
+];
+const DEFAULT_TTWID: &str = "1%7Cu7ogdHsSmHtxbt4hjDCNvcLfVJz78CTM0TTWU8Hio8w%7C1751545220%7C18aac967e501e9d6c13384335ced3523c46a0b1cc4535c7213bc2506a7f462c8";
 const XBOGUS_ALPHABET: &[u8; 64] =
     b"Dkdpgh4ZKsQB80/Mfvw36XI1R25+WUAlEi7NLboqYTOPuzmFjJnryx9HVGcaStCe";
 const STANDARD_ALPHABET: &[u8; 64] =
@@ -84,7 +89,7 @@ impl Douyin {
     }
 
     /// Build WebSocket URL with parameters.
-    fn build_ws_url(room_id: &str) -> String {
+    fn build_ws_url(room_id: &str, host: &str) -> String {
         let user_unique_id = Self::generate_user_unique_id();
         let version_code = "180800";
         let webcast_sdk_version = "1.0.15";
@@ -136,11 +141,20 @@ impl Douyin {
 
         let query: String = ws_params
             .iter()
-            .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+            .map(|(k, v)| format!("{}={}", k, v))
             .collect::<Vec<_>>()
             .join("&");
 
-        format!("{}?{}", DOUYIN_WS_URL, query)
+        format!("{}?{}", host, query)
+    }
+
+    fn build_connection_info(room_id: &str) -> ConnectionInfo {
+        let urls = DOUYIN_WS_HOSTS
+            .iter()
+            .map(|host| Self::build_ws_url(room_id, host))
+            .collect::<Vec<_>>();
+        let mut iter = urls.into_iter();
+        ConnectionInfo::new(iter.next().unwrap()).with_fallback_ws_urls(iter.collect())
     }
 
     fn default_headers(context: &PlatformContext) -> HeaderMap {
@@ -173,10 +187,22 @@ impl Douyin {
             );
         }
 
-        if let Some(cookie) = context.cookie.as_deref().filter(|value| !value.is_empty()) {
-            if let Ok(value) = HeaderValue::from_str(cookie) {
-                headers.insert(COOKIE, value);
-            }
+        let cookie = context
+            .cookie
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .map(|value| {
+                if value.contains("ttwid") {
+                    value.to_string()
+                } else if value.ends_with(';') {
+                    format!("{}ttwid={};", value, DEFAULT_TTWID)
+                } else {
+                    format!("{};ttwid={};", value, DEFAULT_TTWID)
+                }
+            })
+            .unwrap_or_else(|| format!("ttwid={};", DEFAULT_TTWID));
+        if let Ok(value) = HeaderValue::from_str(&cookie) {
+            headers.insert(COOKIE, value);
         }
 
         headers
@@ -297,7 +323,8 @@ impl Douyin {
     fn build_ack(log_id: u64, internal_ext: &str) -> Vec<u8> {
         let mut writer = ProtoWriter::new();
         writer.write_varint_field(2, log_id);
-        writer.write_string(7, internal_ext);
+        writer.write_string(7, "ack");
+        writer.write_bytes(8, internal_ext.as_bytes());
         writer.into_buffer()
     }
 }
@@ -429,10 +456,10 @@ impl Platform for Douyin {
             );
         }
 
-        let ws_url = Self::build_ws_url(&room_id);
-        debug!("Douyin WebSocket URL: {}", ws_url);
+        let ws_info = Self::build_connection_info(&room_id);
+        debug!("Douyin WebSocket URL: {}", ws_info.ws_url);
 
-        Ok(ConnectionInfo::new(ws_url).with_headers(Self::default_headers(context)))
+        Ok(ws_info.with_headers(Self::default_headers(context)))
     }
 
     fn heartbeat_config(&self) -> HeartbeatConfig {
@@ -514,8 +541,8 @@ mod tests {
         let fields = reader.parse_all();
 
         assert_eq!(fields[&2][0].as_u64(), Some(12345));
-        assert_eq!(fields[&7][0].as_str(), Some("internal_src:dim|seq:1"));
-        assert!(!fields.contains_key(&8));
+        assert_eq!(fields[&7][0].as_str(), Some("ack"));
+        assert_eq!(fields[&8][0].as_str(), Some("internal_src:dim|seq:1"));
     }
 
     #[test]

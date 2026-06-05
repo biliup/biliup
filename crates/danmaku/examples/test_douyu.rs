@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use danmaku::output::xml::{XmlWriter, XmlWriterConfig};
-use danmaku::protocols::{HeartbeatData, Platform, PlatformContext, RegistrationData, douyu::Douyu};
+use danmaku::protocols::{
+    HeartbeatData, Platform, PlatformContext, RegistrationData, douyu::Douyu,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 

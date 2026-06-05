@@ -8,8 +8,6 @@
 //! - Send "PING" heartbeat every 40 seconds
 //! - Parse PRIVMSG for chat messages
 
-use std::time::Duration;
-
 use async_trait::async_trait;
 use regex::Regex;
 
@@ -86,20 +84,17 @@ impl Platform for Twitch {
 
         // IRC registration commands
         let reg_data = vec![
-            RegistrationData::Text(
-                "CAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership".to_string(),
-            ),
-            RegistrationData::Text("PASS SCHMOOPIIE".to_string()),
+            RegistrationData::Text("CAP REQ :twitch.tv/tags twitch.tv/commands".to_string()),
+            RegistrationData::Text("PASS oauth:".to_string()),
             RegistrationData::Text(format!("NICK {}", nick)),
-            RegistrationData::Text(format!("USER {} 8 * :{}", nick, nick)),
             RegistrationData::Text(format!("JOIN #{}", room_id)),
         ];
 
-        Ok(ConnectionInfo::new("wss://irc-ws.chat.twitch.tv").with_registration(reg_data))
+        Ok(ConnectionInfo::new("wss://irc-ws.chat.twitch.tv:443").with_registration(reg_data))
     }
 
     fn heartbeat_config(&self) -> HeartbeatConfig {
-        HeartbeatConfig::text("PING", Duration::from_secs(40))
+        HeartbeatConfig::none()
     }
 
     fn decode_message(&self, msg: &[u8]) -> Result<DecodeResult> {
@@ -110,9 +105,14 @@ impl Platform for Twitch {
         let mut events = Vec::new();
 
         for line in text.lines() {
-            // Skip empty lines
+            let line = line.trim();
             if line.is_empty() {
                 continue;
+            }
+
+            if line.starts_with("PING") {
+                let pong_target = line.strip_prefix("PING ").unwrap_or(":tmi.twitch.tv");
+                return Ok(DecodeResult::empty().with_text_ack(format!("PONG {}", pong_target)));
             }
 
             // Try to parse PRIVMSG

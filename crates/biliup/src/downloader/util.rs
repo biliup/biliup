@@ -62,10 +62,14 @@ impl Segmentable {
         result
     }
 
+    fn elapsed_time(&self) -> Duration {
+        self.time.current.saturating_sub(self.time.start)
+    }
+
     /// 检查单独的时间条件
     pub fn time_needed(&self) -> bool {
         if let Some(expected_time) = self.time.expected {
-            (self.time.current - self.time.start) >= expected_time
+            self.elapsed_time() >= expected_time
         } else {
             false
         }
@@ -86,7 +90,7 @@ impl Segmentable {
             (true, true) => {
                 tracing::info!(
                     "Segmentation needed: Both time ({:?} >= {:?}) and size ({} >= {}) conditions met",
-                    self.time.current - self.time.start,
+                    self.elapsed_time(),
                     self.time.expected.unwrap(),
                     self.size.current,
                     self.size.expected.unwrap()
@@ -95,7 +99,7 @@ impl Segmentable {
             (true, false) => {
                 tracing::info!(
                     "Segmentation needed: Time condition met ({:?} >= {:?})",
-                    self.time.current - self.time.start,
+                    self.elapsed_time(),
                     self.time.expected.unwrap()
                 );
             }
@@ -188,7 +192,7 @@ impl Segmentable {
     pub fn get_status(&self) -> String {
         let time_info = Self::format_progress(
             "Time",
-            (self.time.current - self.time.start).as_secs_f64(),
+            self.elapsed_time().as_secs_f64(),
             self.time.expected.map(|d| d.as_secs_f64()),
             "s",
             |t| format!("{:.1}", t),

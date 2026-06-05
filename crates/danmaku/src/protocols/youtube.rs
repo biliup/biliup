@@ -36,10 +36,24 @@ impl YouTube {
     }
 
     fn extract_channel_id(text: &str) -> Option<String> {
-        let re = Regex::new(r#"\\?"channelId\\?":\\?"([^"\\]{24})\\?""#).ok()?;
-        re.captures(text)
-            .and_then(|c| c.get(1))
-            .map(|m| m.as_str().to_string())
+        [
+            r#""channelId":"(UC[^"\\]{22})""#,
+            r#"\\"channelId\\":\\"(UC[^"\\]{22})\\""#,
+            r#""externalChannelId":"(UC[^"\\]{22})""#,
+            r#"\\"externalChannelId\\":\\"(UC[^"\\]{22})\\""#,
+            r#""browseId":"(UC[^"\\]{22})""#,
+            r#"\\"browseId\\":\\"(UC[^"\\]{22})\\""#,
+            r#"/channel/(UC[A-Za-z0-9_-]{22})"#,
+            r#"(UC[A-Za-z0-9_-]{22})"#,
+        ]
+        .into_iter()
+        .find_map(|pattern| {
+            Regex::new(pattern)
+                .ok()?
+                .captures(text)
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str().to_string())
+        })
     }
 
     fn extract_live_video_id(text: &str) -> Option<String> {
@@ -99,7 +113,10 @@ impl YouTube {
 
     async fn initial_continuation(&self, url: &str) -> Result<String> {
         let channel_id = self.resolve_channel_id(url).await?;
-        let video_id = self.resolve_live_video_id(&channel_id).await?;
+        let video_id = match extract_video_id(url) {
+            Some(video_id) => video_id,
+            None => self.resolve_live_video_id(&channel_id).await?,
+        };
         Ok(liveparam(&video_id, &channel_id, 1, false))
     }
 

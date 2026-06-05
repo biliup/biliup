@@ -15,7 +15,7 @@ import urllib.parse
 from dataclasses import asdict, dataclass, field, InitVar
 from json import JSONDecodeError
 from os.path import splitext, basename
-from typing import Callable, Dict, Union, Any, List
+from typing import Callable, Dict, Union, Any, List, NamedTuple, Optional
 from urllib import parse
 from urllib.parse import quote
 
@@ -27,22 +27,27 @@ import rsa
 import xml.etree.ElementTree as ET
 from requests.adapters import HTTPAdapter, Retry
 
-from ..engine import Plugin
-from ..engine.upload import UploadBase, logger
 
 
 logger = logging.getLogger('biliup.engine.bili_web_sync')
 
 
-@Plugin.upload(platform="bili_web_sync")
-class BiliWebAsync(UploadBase):
+class FileInfo(NamedTuple):
+    video: str
+    danmaku: Optional[str] = None
+
+
+class BiliWebAsync:
     def __init__(
             self, principal, data, submit_api=None, copyright=2, postprocessor=None, dtime=None,
             dynamic='', lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description='',
             dolby=0, hires=0, no_reprint=0, is_only_self=0, charging_pay=0, credits=None,
             user_cookie='cookies.json', copyright_source=None, extra_fields="", video_queue=None
     ):
-        super().__init__(principal, data, persistence_path='bili.cookie', postprocessor=postprocessor)
+        self.principal = principal
+        self.data: dict = data
+        self.persistence_path = 'bili.cookie'
+        self.post_processor = postprocessor
         if credits is None:
             credits = []
         if tags is None:
@@ -74,7 +79,7 @@ class BiliWebAsync(UploadBase):
         self.user_cookie = user_cookie
         self.video_queue: queue.SimpleQueue = video_queue
 
-    def upload(self, total_size: int, stop_event: threading.Event, output_prefix: str, file_name_callback: Callable[[str], None] = None, database_row_id=0) -> List[UploadBase.FileInfo]:
+    def upload(self, total_size: int, stop_event: threading.Event, output_prefix: str, file_name_callback: Callable[[str], None] = None, database_row_id=0) -> List[FileInfo]:
         # print("开始同步上传")
         logger.info(f"开始同步上传 {database_row_id}")
         file_index = 1

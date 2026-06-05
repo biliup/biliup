@@ -22,8 +22,8 @@ use tracing::{debug, error, info, warn};
 use crate::error::{DanmakuError, Result};
 use crate::output::xml::{XmlWriter, XmlWriterConfig};
 use crate::protocols::{
-    ConnectionInfo, ConnectionTransport, HeartbeatData, Platform, PlatformContext, RegistrationData,
-    create_platform,
+    ConnectionInfo, ConnectionTransport, HeartbeatData, Platform, PlatformContext,
+    RegistrationData, create_platform,
 };
 
 /// Configuration for the danmaku recorder.
@@ -444,7 +444,13 @@ impl DanmakuRecorder {
 
                                     // Send ack if needed
                                     if let Some(ack) = result.ack {
-                                        ws_sink.send(Message::Binary(ack.into())).await?;
+                                        if result.ack_is_text {
+                                            let text = String::from_utf8(ack)
+                                                .map_err(|e| DanmakuError::Decode(e.to_string()))?;
+                                            ws_sink.send(Message::Text(text.into())).await?;
+                                        } else {
+                                            ws_sink.send(Message::Binary(ack.into())).await?;
+                                        }
                                     }
                                 }
                                 Err(e) => {

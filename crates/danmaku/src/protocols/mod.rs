@@ -141,6 +141,8 @@ pub struct DecodeResult {
     pub events: Vec<DanmakuEvent>,
     /// Optional acknowledgment packet to send back (e.g., for Douyin).
     pub ack: Option<Vec<u8>>,
+    /// Whether the acknowledgment should be sent as a text WebSocket message.
+    pub ack_is_text: bool,
 }
 
 impl DecodeResult {
@@ -151,12 +153,24 @@ impl DecodeResult {
 
     /// Create a result with events.
     pub fn with_events(events: Vec<DanmakuEvent>) -> Self {
-        Self { events, ack: None }
+        Self {
+            events,
+            ack: None,
+            ack_is_text: false,
+        }
     }
 
-    /// Add an acknowledgment packet.
+    /// Add a binary acknowledgment packet.
     pub fn with_ack(mut self, ack: Vec<u8>) -> Self {
         self.ack = Some(ack);
+        self.ack_is_text = false;
+        self
+    }
+
+    /// Add a text acknowledgment packet.
+    pub fn with_text_ack(mut self, ack: impl Into<String>) -> Self {
+        self.ack = Some(ack.into().into_bytes());
+        self.ack_is_text = true;
         self
     }
 }

@@ -21,12 +21,19 @@ import rsa
 import xml.etree.ElementTree as ET
 from requests.adapters import HTTPAdapter, Retry
 
-from ..engine import Plugin
-from ..engine.upload import UploadBase, logger
+import logging
+from typing import NamedTuple
 
 
-@Plugin.upload(platform="bili_web")
-class BiliWeb(UploadBase):
+logger = logging.getLogger('biliup')
+
+
+class FileInfo(NamedTuple):
+    video: str
+    danmaku: Optional[str] = None
+
+
+class BiliWeb:
     def __init__(
         self,
         principal,
@@ -63,7 +70,10 @@ class BiliWeb(UploadBase):
         :param description: 视频简介
         :param credits: ???
         """
-        super().__init__(principal, data, persistence_path='bili.cookie', postprocessor=postprocessor)
+        self.principal = principal
+        self.data: dict = data
+        self.persistence_path = 'bili.cookie'
+        self.post_processor = postprocessor
         if tags is None:
             tags = []
         else:
@@ -84,9 +94,9 @@ class BiliWeb(UploadBase):
 
     def upload(
         self,
-        file_list: List[UploadBase.FileInfo],
+        file_list: List[FileInfo],
         database_row_id: int = 0
-    ) -> List[UploadBase.FileInfo]:
+    ) -> List[FileInfo]:
         '''
         上传视频
         :param file_list: 视频文件名列表

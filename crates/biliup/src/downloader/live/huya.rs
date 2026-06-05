@@ -527,6 +527,21 @@ mod tests {
     }
 
     #[test]
+    fn extract_stream_json_stops_before_following_player_fields() {
+        let page = r#"
+            var hyPlayerConfig = {
+                stream: {"data":[],"vMultiStreamInfo":[]},
+                liveLineUrl: "https://example.invalid"
+            };
+        "#;
+
+        let stream = extract_stream_json(page).unwrap();
+
+        assert_eq!(stream.get("data").unwrap().as_array().unwrap().len(), 0);
+        assert!(stream.get("vMultiStreamInfo").unwrap().is_array());
+    }
+
+    #[test]
     fn find_json_value_end_ignores_braces_in_strings() {
         let input = r#"{"text":"}; { ]","items":[{"value":1}]}
             };
