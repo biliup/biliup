@@ -17,9 +17,10 @@
 </div>
 
 ## 🛠️ 功能
-* 开箱即用，多种安装方式，提供可视化WebUi界面
-* 多主播录制/上传，24X7无人值守运行，高自定义元信息
-* 边录边传不落盘急速上传，节省本地硬盘空间
+* 提供 skill，让你的 Agent 成为 up 主: `npx skills add biliup/biliup`
+* 开箱即用，多种安装方式，提供可视化 WebUi 界面
+* 多主播录制/上传，24X7 无人值守运行，高自定义元信息
+* 作为自动化流程中的命令行工具封装使用
 
 论坛：[BBS](https://bbs.biliup.rs)
 
@@ -84,24 +85,6 @@ Options:
   -c, --config <FILE>  使用 biliup 1.0.7 风格配置文件启动录制
   -h, --help           Print help
 ```
-
-### 命令行工具 / Skill
-
-`biliup` 可以作为自动化流程中的命令行工具封装使用。常用调用方式：
-
-```shell
-# 启动 Web 服务
-biliup server --bind 0.0.0.0 --port 19159 --auth
-
-# 使用 1.0.7 风格配置文件启动录制
-biliup server --config config.toml
-
-# 查看命令帮助
-biliup --help
-biliup server --help
-```
-
-通过 `npx skills add biliup/biliup` 可为 Agent 添加 `biliup` 命令行能力。添加后可直接让 Agent 执行 Web 服务启动、配置文件启动、命令帮助查看以及常用上传/下载命令。
 
 - [使用文档 »](https://docs.biliup.rs)
 
