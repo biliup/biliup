@@ -265,6 +265,17 @@ pub async fn submit_to_bilibili(
     Ok(result)
 }
 
+// 解析投稿的「转载来源」(source) 字段。
+// 前端表单留空时会把 copyright_source 提交为空字符串 `Some("")`，
+// 若直接透传则 B 站接口收到空 source，且不会回退到直播间地址。
+// 这里把 None 以及空白字符串都视作「未填写」，统一回退到直播间地址，
+fn resolve_source(copyright_source: Option<&str>, fallback_url: &str) -> String {
+    match copyright_source.map(str::trim) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => fallback_url.to_string(),
+    }
+}
+
 pub(crate) async fn build_studio(
     upload_config: &UploadStreamer,
     bilibili: &BiliBili,
@@ -278,12 +289,10 @@ pub(crate) async fn build_studio(
         .maybe_copyright(upload_config.copyright)
         .cover(upload_config.cover_path.clone().unwrap_or_default())
         .dynamic(upload_config.dynamic.clone().unwrap_or_default())
-        .source(
-            upload_config
-                .copyright_source
-                .clone()
-                .unwrap_or_else(|| recorder.streamer_info.url.clone()),
-        )
+        .source(resolve_source(
+            upload_config.copyright_source.as_deref(),
+            &recorder.streamer_info.url,
+        ))
         .tag(upload_config.tags.join(","))
         .maybe_tid(upload_config.tid)
         .title(recorder.format_filename())
@@ -419,6 +428,35 @@ mod tests {
         let event = SegmentInfo::new(video.clone(), Some(danmaku.clone()), None, 0);
 
         assert_eq!(segment_paths(&event), vec![video, danmaku]);
+    }
+
+    const LIVE_URL: &str = "https://live.douyin.com/123456";
+
+    #[test]
+    fn resolve_source_falls_back_when_none() {
+        // 配置文件未提供 copyright_source
+        assert_eq!(resolve_source(None, LIVE_URL), LIVE_URL);
+    }
+
+    #[test]
+    fn resolve_source_falls_back_when_empty_string() {
+        // 前端表单留空 -> Some("")，应回退到直播间地址（核心 bug 场景）
+        assert_eq!(resolve_source(Some(""), LIVE_URL), LIVE_URL);
+    }
+
+    #[test]
+    fn resolve_source_falls_back_when_whitespace_only() {
+        // 仅空白同样视作未填写
+        assert_eq!(resolve_source(Some("   "), LIVE_URL), LIVE_URL);
+    }
+
+    #[test]
+    fn resolve_source_keeps_user_value_and_trims() {
+        // 用户填写了真实来源则保留（并去除首尾空白）
+        assert_eq!(
+            resolve_source(Some("  https://b23.tv/abc  "), LIVE_URL),
+            "https://b23.tv/abc"
+        );
     }
 }
 
