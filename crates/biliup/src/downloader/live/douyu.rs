@@ -5,17 +5,23 @@ use super::{
 use async_trait::async_trait;
 use chrono::Utc;
 use md5::{Digest, Md5};
+use rand::seq::SliceRandom;
 use regex::Regex;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
-use url::Url;
+use tracing::warn;
+use url::{Url, form_urlencoded};
 
 const DOUYU_DEFAULT_DID: &str = "10000000000000000000000000001501";
 const DOUYU_WEB_DOMAIN: &str = "www.douyu.com";
 const DOUYU_MOBILE_DOMAIN: &str = "m.douyu.com";
+const DOUYU_HUOS_DOMAIN: &str = "openflv-huos.douyucdn2.cn";
+const DOUYU_HS_CDN: &str = "hs-h5";
+const DOUYU_P2P_DOMAIN_TCT: &str = "hdltctwk.douyucdn.cn";
+const DOUYU_P2PSDK_APIS: [&str; 2] = ["https://sdkapiv4.douyucdn.cn", "https://sdkapi.douyucdn.cn"];
 const DOUYU_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 pub struct Douyu {
@@ -56,6 +62,7 @@ struct DouyuLive {
     url: String,
     name: String,
     douyu_cdn: String,
+    douyu_force_hs: bool,
     douyu_rate: u32,
     douyu_disable_interactive_game: bool,
     douyu_danmaku: bool,
@@ -70,6 +77,7 @@ impl DouyuLive {
             url: request.url,
             name: request.name,
             douyu_cdn: options.cdn,
+            douyu_force_hs: options.force_hs,
             douyu_rate: options.rate,
             douyu_disable_interactive_game: options.disable_interactive_game,
             douyu_danmaku: options.danmaku,
@@ -85,6 +93,7 @@ impl DouyuLive {
         };
         let play_info = self.get_web_play_info(&room_id).await?;
         let raw_stream_url = format!("{}/{}", play_info.rtmp_url, play_info.rtmp_live);
+        let raw_stream_url = self.maybe_build_huos_url(raw_stream_url).await;
 
         Ok(LiveStatus::Live {
             stream: Box::new(LiveStream {
@@ -102,6 +111,24 @@ impl DouyuLive {
                 runtime_options: None,
             }),
         })
+    }
+
+    async fn maybe_build_huos_url(&self, raw_stream_url: String) -> String {
+        if self.should_build_huos_url() {
+            match self.build_huos_url(&raw_stream_url).await {
+                Ok(huos_url) => huos_url,
+                Err(err) => {
+                    warn!(
+                        error = ?err,
+                        url = raw_stream_url,
+                        "failed to build Douyu huos URL, falling back to original stream URL"
+                    );
+                    raw_stream_url
+                }
+            }
+        } else {
+            raw_stream_url
+        }
     }
 
     async fn resolve_room_id(&self) -> LiveResult<String> {
@@ -304,6 +331,70 @@ impl DouyuLive {
         )))
     }
 
+    fn should_build_huos_url(&self) -> bool {
+        self.douyu_force_hs && self.douyu_cdn.eq_ignore_ascii_case(DOUYU_HS_CDN)
+    }
+
+    async fn build_huos_url(&self, raw_stream_url: &str) -> LiveResult<String> {
+        let (stream_id, params) = parse_stream_url(raw_stream_url)?;
+        let tx_secret = self.get_txsecret(&stream_id).await?;
+        Ok(build_huos_url(&stream_id, &params, &tx_secret))
+    }
+
+    async fn get_txsecret(&self, stream_id: &str) -> LiveResult<XP2PTxSecret> {
+        let mut apis = DOUYU_P2PSDK_APIS;
+        {
+            let mut rng = rand::thread_rng();
+            apis.shuffle(&mut rng);
+        }
+
+        let mut last_error = None;
+        for api in apis {
+            match self.request_txsecret(api, stream_id).await {
+                Ok(tx_secret) => return Ok(tx_secret),
+                Err(err) => last_error = Some(err),
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            LiveError::custom(format!("获取 txSecret 失败: {stream_id}"))
+        }))
+    }
+
+    async fn request_txsecret(&self, api: &str, stream_id: &str) -> LiveResult<XP2PTxSecret> {
+        let tx_secret: XP2PTxSecret = self
+            .client
+            .get(format!("{api}/p2p/get_txsecret"))
+            .query(&[("lid", stream_id)])
+            .header("user-agent", DOUYU_USER_AGENT)
+            .send()
+            .await
+            .map_err(|err| {
+                LiveError::custom(format!(
+                    "获取 txSecret 失败 api: {api}, stream_id: {stream_id}: {err}"
+                ))
+            })?
+            .error_for_status()
+            .map_err(|err| {
+                LiveError::custom(format!(
+                    "获取 txSecret 响应异常 api: {api}, stream_id: {stream_id}: {err}"
+                ))
+            })?
+            .json()
+            .await
+            .map_err(|err| {
+                LiveError::custom(format!(
+                    "解析 txSecret 失败 api: {api}, stream_id: {stream_id}: {err}"
+                ))
+            })?;
+
+        if tx_secret.tx_secret.is_empty() || tx_secret.tx_time.is_empty() {
+            return Err(LiveError::custom(format!("txSecret 为空: {stream_id}")));
+        }
+
+        Ok(tx_secret)
+    }
+
     async fn update_key(&self) -> LiveResult<WhiteEncryptKey> {
         let rsp: EncryptionResponse = self
             .client
@@ -369,6 +460,66 @@ fn md5_hex(input: String) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+fn parse_stream_url(input: &str) -> LiveResult<(String, Vec<(String, String)>)> {
+    let parsed = Url::parse(input)
+        .map_err(|err| LiveError::custom(format!("解析斗鱼 huos 源链接失败: {err}")))?;
+    let stream_name = parsed
+        .path()
+        .rsplit('/')
+        .find(|part| !part.is_empty())
+        .ok_or_else(|| LiveError::custom("斗鱼 huos 源链接缺少 stream_id"))?;
+    let stream_id = stream_name
+        .split_once('.')
+        .map(|(stream_id, _)| stream_id)
+        .unwrap_or(stream_name);
+    if stream_id.is_empty() {
+        return Err(LiveError::custom("斗鱼 huos 源链接 stream_id 为空"));
+    }
+    let params = parsed
+        .query_pairs()
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    Ok((stream_id.to_string(), params))
+}
+
+fn build_huos_url(
+    stream_id: &str,
+    params: &[(String, String)],
+    tx_secret: &XP2PTxSecret,
+) -> String {
+    let mut next_params = Vec::with_capacity(params.len() + 3);
+    let mut has_fcdn = false;
+
+    for (key, value) in params {
+        if matches!(key.as_str(), "txSecret" | "txTime" | "domain") {
+            continue;
+        }
+        if key == "fcdn" {
+            if !has_fcdn {
+                next_params.push((key.clone(), "hs".to_string()));
+                has_fcdn = true;
+            }
+            continue;
+        }
+        next_params.push((key.clone(), value.clone()));
+    }
+
+    if !has_fcdn {
+        next_params.push(("fcdn".to_string(), "hs".to_string()));
+    }
+    next_params.push(("txSecret".to_string(), tx_secret.tx_secret.clone()));
+    next_params.push(("txTime".to_string(), tx_secret.tx_time.clone()));
+    next_params.push(("domain".to_string(), DOUYU_P2P_DOMAIN_TCT.to_string()));
+
+    let mut serializer = form_urlencoded::Serializer::new(String::new());
+    for (key, value) in next_params {
+        serializer.append_pair(&key, &value);
+    }
+    let query = serializer.finish();
+
+    format!("http://{DOUYU_HUOS_DOMAIN}/live/{stream_id}.xs?{query}")
+}
+
 #[derive(Deserialize)]
 struct BetardResponse {
     room: Option<RoomInfo>,
@@ -418,4 +569,94 @@ struct PlayInfo {
 #[derive(Deserialize)]
 struct CdnInfo {
     cdn: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct XP2PTxSecret {
+    #[serde(rename = "xp2p_txSecret")]
+    tx_secret: String,
+    #[serde(rename = "xp2p_txTime")]
+    tx_time: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_huos_url_rewrites_fcdn_and_appends_secret() {
+        let (stream_id, params) = parse_stream_url(
+            "https://hw3.douyucdn2.cn/live/6925114rIDrEEuKo.flv?wsAuth=auth&fcdn=hw&isp=",
+        )
+        .unwrap();
+        let tx_secret = XP2PTxSecret {
+            tx_secret: "secret".to_string(),
+            tx_time: "time".to_string(),
+        };
+
+        let url = build_huos_url(&stream_id, &params, &tx_secret);
+
+        assert_eq!(
+            url,
+            "http://openflv-huos.douyucdn2.cn/live/6925114rIDrEEuKo.xs?wsAuth=auth&fcdn=hs&isp=&txSecret=secret&txTime=time&domain=hdltctwk.douyucdn.cn"
+        );
+    }
+
+    #[test]
+    fn build_huos_url_removes_existing_secret_params() {
+        let (stream_id, params) = parse_stream_url(
+            "https://hw3.douyucdn2.cn/live/abc.flv?fcdn=hw&txSecret=old&txTime=old&domain=old.example",
+        )
+        .unwrap();
+        let tx_secret = XP2PTxSecret {
+            tx_secret: "new".to_string(),
+            tx_time: "next".to_string(),
+        };
+
+        let url = build_huos_url(&stream_id, &params, &tx_secret);
+
+        assert_eq!(
+            url,
+            "http://openflv-huos.douyucdn2.cn/live/abc.xs?fcdn=hs&txSecret=new&txTime=next&domain=hdltctwk.douyucdn.cn"
+        );
+    }
+
+    #[test]
+    fn build_huos_url_adds_missing_fcdn() {
+        let (stream_id, params) =
+            parse_stream_url("https://hw3.douyucdn2.cn/live/abc.flv?token=value").unwrap();
+        let tx_secret = XP2PTxSecret {
+            tx_secret: "secret".to_string(),
+            tx_time: "time".to_string(),
+        };
+
+        let url = build_huos_url(&stream_id, &params, &tx_secret);
+
+        assert_eq!(
+            url,
+            "http://openflv-huos.douyucdn2.cn/live/abc.xs?token=value&fcdn=hs&txSecret=secret&txTime=time&domain=hdltctwk.douyucdn.cn"
+        );
+    }
+
+    #[tokio::test]
+    async fn maybe_build_huos_url_falls_back_when_build_fails() {
+        let live = DouyuLive {
+            client: Client::new(),
+            url: "https://www.douyu.com/10568722".to_string(),
+            name: "test".to_string(),
+            douyu_cdn: DOUYU_HS_CDN.to_string(),
+            douyu_force_hs: true,
+            douyu_rate: 0,
+            douyu_disable_interactive_game: false,
+            douyu_danmaku: false,
+            room_id: None,
+        };
+
+        let raw_stream_url = "not a url".to_string();
+
+        assert_eq!(
+            live.maybe_build_huos_url(raw_stream_url.clone()).await,
+            raw_stream_url
+        );
+    }
 }
