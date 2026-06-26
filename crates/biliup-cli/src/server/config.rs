@@ -90,6 +90,9 @@ pub struct Config {
     /// 斗鱼CDN节点
     #[serde(default)]
     pub douyu_cdn: Option<String>,
+    /// 斗鱼强制 hs 流使用构造链接
+    #[serde(default)]
+    pub douyu_force_hs: Option<bool>,
     /// 斗鱼弹幕录制
     #[serde(default)]
     pub douyu_danmaku: Option<bool>,

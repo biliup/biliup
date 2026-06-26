@@ -169,6 +169,7 @@ impl Default for DouyinOptions {
 #[derive(Debug, Clone)]
 pub struct DouyuOptions {
     pub cdn: String,
+    pub force_hs: bool,
     pub rate: u32,
     pub disable_interactive_game: bool,
     pub danmaku: bool,
@@ -178,6 +179,7 @@ impl Default for DouyuOptions {
     fn default() -> Self {
         Self {
             cdn: "hw-h5".to_string(),
+            force_hs: false,
             rate: 0,
             disable_interactive_game: false,
             danmaku: false,

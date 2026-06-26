@@ -71,6 +71,7 @@ fn live_options(config: &Config) -> LiveOptions {
                 .douyu_cdn
                 .clone()
                 .unwrap_or_else(|| "hw-h5".to_string()),
+            force_hs: config.douyu_force_hs.unwrap_or(false),
             rate: config.douyu_rate.unwrap_or(0),
             disable_interactive_game: config.douyu_disable_interactive_game.unwrap_or(false),
             danmaku: config.douyu_danmaku.unwrap_or(false),
