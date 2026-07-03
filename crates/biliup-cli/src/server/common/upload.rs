@@ -256,6 +256,10 @@ pub async fn submit_to_bilibili(
             .submit_by_bcut_android(studio, None)
             .await
             .change_context(AppError::Unknown)?,
+        SubmitOption::Web => bilibili
+            .submit_by_web(studio, None)
+            .await
+            .change_context(AppError::Unknown)?,
         _ => bilibili
             .submit_by_app(studio, None)
             .await
