@@ -19,6 +19,30 @@ top = false
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 1.2.1
+**Full Changelog**:[v1.2.0...v1.2.1](https://github.com/biliup/biliup/compare/v1.2.0...v1.2.1)
+
+
+## 1.2.0
+### What's Changed
+- chore(Douyu): 适配新版本斗鱼 by @xxxxuanran in [#1603](https://github.com/biliup/biliup/pull/1603)
+- feat: upload_by_config 支持通过 Web 提交视频配置 by @gwy15 in [#1605](https://github.com/biliup/biliup/pull/1605)
+- fix(Huya): WEB_ROOM_DATA_REGEX 正则错误匹配 html 转义 by @xxxxuanran in [#1606](https://github.com/biliup/biliup/pull/1606)
+- fix(server): 上传失败后重建 segment 通道，避免后续段被静默丢弃 by @Micuks in [#1623](https://github.com/biliup/biliup/pull/1623)
+- refactor: Implementing the Danmaku client in Rust by @xxxxuanran in [#1570](https://github.com/biliup/biliup/pull/1570)
+- feat(hook): 启用 segment_processor 阶段，新增 remux:mp4 内建钩子 by @Micuks in [#1626](https://github.com/biliup/biliup/pull/1626)
+- feat: Add comments and reply commands by @fchange in [#1628](https://github.com/biliup/biliup/pull/1628)
+- chore(doc): update CHANGELOG.md and other docs by @XenoAmess in [#1631](https://github.com/biliup/biliup/pull/1631)
+
+### New Contributors
+- @gwy15 made their first contribution in [#1605](https://github.com/biliup/biliup/pull/1605)
+- @Micuks made their first contribution in [#1623](https://github.com/biliup/biliup/pull/1623)
+- @fchange made their first contribution in [#1628](https://github.com/biliup/biliup/pull/1628)
+- @XenoAmess made their first contribution in [#1631](https://github.com/biliup/biliup/pull/1631)
+
+**Full Changelog**:[v1.1.29...v1.2.0](https://github.com/biliup/biliup/compare/v1.1.29...v1.2.0)
+
+
 ## 1.1.29
 ### What's Changed
 - Fix(Huya): refactor anticode generation using getCdnTokenInfoEx API by @xxxxuanran in [#1575](https://github.com/biliup/biliup/pull/1575)
