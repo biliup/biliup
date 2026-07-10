@@ -21,6 +21,13 @@ permissions:
 jobs:
   linux:
     runs-on: ${{ matrix.platform.runner }}
+    env:
+      # aws-lc-sys >= 0.42.0 (via rustls) calls getauxval(AT_HWCAP2) unconditionally
+      # on Linux in cpu_ppc64le.c, but manylinux2014's glibc 2.17 headers predate
+      # AT_HWCAP2 (added in glibc 2.18). Define the stable kernel ABI value ourselves;
+      # glibc 2.17 already provides getauxval, which returns 0 for unknown entries.
+      # Only cc invocations targeting ppc64le read this variable.
+      CFLAGS_powerpc64le_unknown_linux_gnu: -DAT_HWCAP2=26
     strategy:
       matrix:
         platform:
