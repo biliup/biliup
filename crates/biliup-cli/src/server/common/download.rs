@@ -280,9 +280,18 @@ impl DownloadTask {
             }
         };
 
+        let download_config = ctx.download_config(stream);
+        info!(
+            page_url = streamer.url,
+            stream_url = download_config.url,
+            platform = stream.platform,
+            suffix = download_config.suffix,
+            "开始下载，已解析流直链"
+        );
+
         let result = self
             .downloader
-            .download(Box::new(hook), ctx.download_config(stream))
+            .download(Box::new(hook), download_config)
             .await
             .change_context(AppError::Custom("Failed to download segment".into()))?;
 

@@ -556,6 +556,14 @@ pub async fn post_uploads(
     Json(json_data): Json<PostUploads>,
 ) -> Result<Json<serde_json::Value>, Response> {
     let upload_config = json_data.params;
+    if upload_config.is_noop_uploader() {
+        info!(
+            uploader = ?upload_config.uploader,
+            "Skipping page upload because uploader is Noop"
+        );
+        return Ok(Json(json!({})));
+    }
+
     let (line, limit, submit_api) = {
         let config = config.read().unwrap();
         let line = UploadLine::from_str(&config.lines, true).ok();

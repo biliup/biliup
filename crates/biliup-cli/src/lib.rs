@@ -12,7 +12,7 @@ use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionManager;
 use crate::server::infrastructure::models::live_streamer::InsertLiveStreamer;
 use crate::server::infrastructure::models::upload_streamer::{
-    InsertUploadStreamer, UploadStreamer,
+    InsertUploadStreamer, UploadStreamer, is_noop_uploader,
 };
 use crate::server::infrastructure::repositories;
 use crate::server::infrastructure::service_register::ServiceRegister;
@@ -182,10 +182,7 @@ fn to_upload_streamer_insert(
     global_uploader: Option<String>,
 ) -> AppResult<Option<InsertUploadStreamer>> {
     let uploader = streamer.uploader.clone().or(global_uploader);
-    if uploader
-        .as_deref()
-        .is_some_and(|value| value.eq_ignore_ascii_case("noop"))
-    {
+    if is_noop_uploader(uploader.as_deref()) {
         return Ok(None);
     }
 

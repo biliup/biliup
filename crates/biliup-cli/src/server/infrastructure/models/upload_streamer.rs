@@ -86,3 +86,39 @@ pub struct InsertUploadStreamer {
     pub extra_fields: Option<String>,
     pub is_only_self: Option<u8>,
 }
+
+pub(crate) fn is_noop_uploader(uploader: Option<&str>) -> bool {
+    uploader
+        .map(str::trim)
+        .is_some_and(|value| value.eq_ignore_ascii_case("noop"))
+}
+
+impl UploadStreamer {
+    pub(crate) fn is_noop_uploader(&self) -> bool {
+        is_noop_uploader(self.uploader.as_deref())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_noop_uploader;
+
+    #[test]
+    fn noop_uploader_matches_case_insensitively() {
+        assert!(is_noop_uploader(Some("Noop")));
+        assert!(is_noop_uploader(Some("noop")));
+        assert!(is_noop_uploader(Some("NOOP")));
+    }
+
+    #[test]
+    fn noop_uploader_ignores_surrounding_whitespace() {
+        assert!(is_noop_uploader(Some("  Noop  ")));
+    }
+
+    #[test]
+    fn noop_uploader_rejects_missing_or_other_uploaders() {
+        assert!(!is_noop_uploader(None));
+        assert!(!is_noop_uploader(Some("")));
+        assert!(!is_noop_uploader(Some("biliup-rs")));
+    }
+}

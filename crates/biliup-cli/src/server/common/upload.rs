@@ -87,6 +87,21 @@ where
     Ok(())
 }
 
+async fn process_without_upload<F>(
+    rx: Inspect<Receiver<SegmentInfo>, F>,
+    ctx: &Context,
+) -> AppResult<()>
+where
+    F: FnMut(&SegmentInfo),
+{
+    let mut paths = Vec::new();
+    pin!(rx);
+    while let Some(event) = rx.next().await {
+        paths.extend(segment_paths(&event));
+    }
+    execute_postprocessor(paths, ctx).await
+}
+
 async fn initialize_upload_context(
     config: &Config,
     client: &StatelessClient,
@@ -508,6 +523,13 @@ impl UActor {
                     });
                 });
                 let result = match ctx.upload_config() {
+                    Some(config) if config.is_noop_uploader() => {
+                        info!(
+                            uploader = ?config.uploader,
+                            "Skipping upload because uploader is Noop"
+                        );
+                        process_without_upload(inspect, &ctx).await
+                    }
                     Some(config) => process_with_upload(inspect, &ctx, config).await,
                     None => {
                         let mut paths = Vec::new();
