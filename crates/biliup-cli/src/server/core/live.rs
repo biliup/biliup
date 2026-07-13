@@ -78,12 +78,14 @@ fn live_options(config: &Config) -> LiveOptions {
         },
         huya: HuyaOptions {
             cdn: config.huya_cdn.clone().unwrap_or_default(),
+            cdn_fallback: config.huya_cdn_fallback.unwrap_or(false),
             max_ratio: config.huya_max_ratio.unwrap_or(0),
             protocol: config
                 .huya_protocol
                 .clone()
                 .unwrap_or_else(|| "Flv".to_string()),
             imgplus: config.huya_imgplus.unwrap_or(true),
+            mobile_api: config.huya_mobile_api.unwrap_or(false),
             codec: config
                 .huya_codec
                 .clone()

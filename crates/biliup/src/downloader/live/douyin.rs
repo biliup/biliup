@@ -13,6 +13,8 @@ use reqwest::header::{COOKIE, HeaderMap, HeaderValue, REFERER, USER_AGENT};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::Mutex;
+use tracing::{debug, warn};
 
 const DOUYIN_LIVE_URL: &str = "https://live.douyin.com/";
 const DOUYIN_WEBCAST_ENTER_URL: &str = "https://live.douyin.com/webcast/room/web/enter/";
@@ -24,6 +26,8 @@ const DEFAULT_TTWID: &str = "1%7Cu7ogdHsSmHtxbt4hjDCNvcLfVJz78CTM0TTWU8Hio8w%7C1
 
 pub struct Douyin {
     re: Regex,
+    /// 进程级 ttwid 缓存，首次成功获取后复用（对应 Python DouyinUtils._douyin_ttwid 类级缓存）
+    ttwid: Mutex<Option<String>>,
 }
 
 impl Default for Douyin {
@@ -36,6 +40,7 @@ impl Douyin {
     pub fn new() -> Self {
         Self {
             re: Regex::new(r"https?://(?:(?:www|m|live|v)\.)?douyin\.com").unwrap(),
+            ttwid: Mutex::new(None),
         }
     }
 }
@@ -51,11 +56,11 @@ impl LivePlugin for Douyin {
     }
 
     async fn check_stream(&self, request: LiveRequest) -> LiveResult<LiveStatus> {
-        DouyinLive::new(request).check_stream().await
+        DouyinLive::new(request, &self.ttwid).check_stream().await
     }
 }
 
-struct DouyinLive {
+struct DouyinLive<'a> {
     client: Client,
     url: String,
     name: String,
@@ -68,10 +73,11 @@ struct DouyinLive {
     web_rid: Option<String>,
     room_id: Option<String>,
     sec_uid: Option<String>,
+    ttwid_cache: &'a Mutex<Option<String>>,
 }
 
-impl DouyinLive {
-    fn new(request: LiveRequest) -> Self {
+impl<'a> DouyinLive<'a> {
+    fn new(request: LiveRequest, ttwid_cache: &'a Mutex<Option<String>>) -> Self {
         let options = request.options.douyin;
         Self {
             client: request.client,
@@ -86,12 +92,15 @@ impl DouyinLive {
             web_rid: None,
             room_id: None,
             sec_uid: None,
+            ttwid_cache,
         }
     }
 
     async fn check_stream(&mut self) -> LiveResult<LiveStatus> {
         self.ensure_cookie().await;
-        self.resolve_room_keys().await?;
+        if !self.resolve_room_keys().await? {
+            return Ok(LiveStatus::Offline);
+        }
         let Some(room_info) = self.get_room_info().await? else {
             return Ok(LiveStatus::Offline);
         };
@@ -132,7 +141,7 @@ impl DouyinLive {
             self.cookie.push(';');
         }
         if !self.cookie.contains("ttwid") {
-            let ttwid = fetch_ttwid(&self.client).await;
+            let ttwid = self.cached_ttwid().await;
             self.cookie.push_str(&format!("ttwid={ttwid};"));
         }
         if !self.cookie.contains("odin_ttid=") {
@@ -142,6 +151,21 @@ impl DouyinLive {
         if !self.cookie.contains("__ac_nonce=") {
             self.cookie
                 .push_str(&format!("__ac_nonce={};", generate_nonce()));
+        }
+    }
+
+    /// 进程内首次成功获取 ttwid 后复用；获取失败回退 DEFAULT_TTWID 但不缓存失败结果
+    async fn cached_ttwid(&self) -> String {
+        let mut cached = self.ttwid_cache.lock().await;
+        if let Some(ttwid) = cached.as_deref() {
+            return ttwid.to_string();
+        }
+        match fetch_ttwid(&self.client).await {
+            Some(ttwid) => {
+                *cached = Some(ttwid.clone());
+                ttwid
+            }
+            None => DEFAULT_TTWID.to_string(),
         }
     }
 
@@ -157,7 +181,8 @@ impl DouyinLive {
         headers
     }
 
-    async fn resolve_room_keys(&mut self) -> LiveResult<()> {
+    /// 解析直播间标识；返回 false 表示已确定未开播（如用户主页无 web_rid）
+    async fn resolve_room_keys(&mut self) -> LiveResult<bool> {
         if self.url.contains("v.douyin") {
             let resp = self
                 .client
@@ -171,11 +196,11 @@ impl DouyinLive {
                 self.sec_uid = capture(&url, r"[?&]sec_user_id=([^&]+)");
                 self.room_id =
                     capture(&url, r"/reflow/(\d+)").or_else(|| capture(&url, r"room_id=(\d+)"));
-                return Ok(());
+                return Ok(true);
             }
             if url.contains("isedouyin.com/share/user") {
                 self.sec_uid = capture(&url, r"[?&]sec_uid=([^&]+)");
-                return Ok(());
+                return Ok(true);
             }
             self.url = url;
         }
@@ -189,7 +214,7 @@ impl DouyinLive {
                 .unwrap_or_default();
             if matches!(sec_uid.len(), 55 | 76) {
                 self.sec_uid = Some(sec_uid.to_string());
-                return Ok(());
+                return Ok(true);
             }
 
             let text = self
@@ -210,7 +235,11 @@ impl DouyinLive {
                 .map(|cow| cow.to_string())
                 .ok_or_else(|| LiveError::custom("抖音房间号获取失败"))?;
             self.web_rid = capture(&render_data, r#""web_rid":"([^"]+)""#);
-            return Ok(());
+            if self.web_rid.is_none() {
+                debug!(name = %self.name, url = %self.url, "未开播");
+                return Ok(false);
+            }
+            return Ok(true);
         }
 
         let web_rid = self
@@ -223,7 +252,7 @@ impl DouyinLive {
             .filter(|part| !part.is_empty())
             .ok_or_else(|| LiveError::custom("抖音直播间地址错误"))?;
         self.web_rid = Some(web_rid);
-        Ok(())
+        Ok(true)
     }
 
     async fn get_web_room_info(&self, web_rid: &str) -> LiveResult<Value> {
@@ -286,10 +315,22 @@ impl DouyinLive {
             {
                 self.sec_uid = Some(sec_uid.to_string());
             }
-            if response.pointer("/data/user").is_none()
-                && response.pointer("/data/prompts").and_then(Value::as_str) == Some("直播已结束")
-            {
-                return Ok(None);
+            if response.pointer("/data/user").is_none() {
+                let prompts = response
+                    .pointer("/data/prompts")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if prompts == "直播已结束" {
+                    return Ok(None);
+                }
+                // 对应 Python 在此直接抛异常（可能是用户被封禁）；Rust 保留 H5 回退，仅提示
+                warn!(
+                    name = %self.name,
+                    url = %self.url,
+                    prompts,
+                    response = %response,
+                    "抖音 web 端接口未返回用户信息，可能被风控或封禁，尝试 H5 接口"
+                );
             }
         }
 
@@ -467,7 +508,7 @@ fn capture(input: &str, pattern: &str) -> Option<String> {
         .map(|captures| captures[1].to_string())
 }
 
-async fn fetch_ttwid(client: &Client) -> String {
+async fn fetch_ttwid(client: &Client) -> Option<String> {
     let resp = client
         .post(DOUYIN_UNION_REGISTER_URL)
         .header(USER_AGENT, DOUYIN_USER_AGENT)
@@ -480,10 +521,8 @@ async fn fetch_ttwid(client: &Client) -> String {
             "fid": ""
         }))
         .send()
-        .await;
-    let Ok(resp) = resp else {
-        return DEFAULT_TTWID.to_string();
-    };
+        .await
+        .ok()?;
     resp.headers()
         .get_all("set-cookie")
         .iter()
@@ -495,7 +534,6 @@ async fn fetch_ttwid(client: &Client) -> String {
                 .strip_prefix("ttwid=")
                 .map(ToString::to_string)
         })
-        .unwrap_or_else(|| DEFAULT_TTWID.to_string())
 }
 
 fn generate_ms_token() -> String {

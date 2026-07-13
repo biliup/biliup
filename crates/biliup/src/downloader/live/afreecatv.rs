@@ -8,15 +8,26 @@ use regex::Regex;
 use reqwest::header::{COOKIE, HeaderMap, HeaderValue, REFERER, USER_AGENT};
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
+use tokio::sync::Mutex;
 
 const AFREECATV_CHANNEL_API_URL: &str = "https://live.afreecatv.com/afreeca/player_live_api.php";
 const AFREECATV_LOGIN_URL: &str = "https://login.afreecatv.com/app/LoginAction.php";
 const AFREECATV_REFERER: &str = "https://play.afreecatv.com/";
 const AFREECATV_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 const AFREECATV_QUALITY: &str = "original";
+const AFREECATV_LOGIN_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+struct CachedLogin {
+    cookie: String,
+    fetched_at: Instant,
+    username: String,
+    password: String,
+}
 
 pub struct AfreecaTV {
     re: Regex,
+    login_cache: Mutex<Option<CachedLogin>>,
 }
 
 impl Default for AfreecaTV {
@@ -29,7 +40,37 @@ impl AfreecaTV {
     pub fn new() -> Self {
         Self {
             re: Regex::new(r"https?://(.*?)\.afreecatv\.com/(\w+)(?:/\d+)?").unwrap(),
+            login_cache: Mutex::new(None),
         }
+    }
+
+    /// 复用 7 天内的登录 cookie，避免每次 check_stream 都请求 LoginAction.php。
+    /// 凭据与缓存不一致时视为缓存失效；登录失败不缓存。
+    async fn login_cookie(&self, live: &AfreecaTVLive) -> LiveResult<Option<String>> {
+        let (Some(username), Some(password)) = (&live.username, &live.password) else {
+            return Ok(None);
+        };
+        if username.is_empty() || password.is_empty() {
+            return Ok(None);
+        }
+
+        let mut cache = self.login_cache.lock().await;
+        if let Some(cached) = cache.as_ref()
+            && cached.fetched_at.elapsed() < AFREECATV_LOGIN_TTL
+            && cached.username == *username
+            && cached.password == *password
+        {
+            return Ok(Some(cached.cookie.clone()));
+        }
+
+        let cookie = live.login().await?;
+        *cache = cookie.as_ref().map(|cookie| CachedLogin {
+            cookie: cookie.clone(),
+            fetched_at: Instant::now(),
+            username: username.clone(),
+            password: password.clone(),
+        });
+        Ok(cookie)
     }
 }
 
@@ -44,7 +85,9 @@ impl LivePlugin for AfreecaTV {
     }
 
     async fn check_stream(&self, request: LiveRequest) -> LiveResult<LiveStatus> {
-        AfreecaTVLive::new(request).check_stream().await
+        let live = AfreecaTVLive::new(request);
+        let cookie = self.login_cookie(&live).await?;
+        live.check_stream(cookie.as_deref()).await
     }
 }
 
@@ -67,14 +110,13 @@ impl AfreecaTVLive {
         }
     }
 
-    async fn check_stream(&self) -> LiveResult<LiveStatus> {
-        let cookie = self.login().await?;
+    async fn check_stream(&self, cookie: Option<&str>) -> LiveResult<LiveStatus> {
         let username = self.room_username()?;
-        let Some(channel) = self.channel_info(&username, cookie.as_deref()).await? else {
+        let Some(channel) = self.channel_info(&username, cookie).await? else {
             return Ok(LiveStatus::Offline);
         };
-        let aid = self.aid(&username, &channel.bno, cookie.as_deref()).await?;
-        let raw_stream_url = self.stream_url(&channel, &aid, cookie.as_deref()).await?;
+        let aid = self.aid(&username, &channel.bno, cookie).await?;
+        let raw_stream_url = self.stream_url(&channel, &aid, cookie).await?;
 
         Ok(LiveStatus::Live {
             stream: Box::new(LiveStream {

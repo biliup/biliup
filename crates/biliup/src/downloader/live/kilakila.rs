@@ -153,6 +153,6 @@ struct KilakilaBody {
     #[serde(rename = "hlsPlayUrl")]
     hls_play_url: Option<String>,
     title: Option<String>,
-    #[serde(rename = "coverUrl")]
+    #[serde(rename = "coverUrl", alias = "backPic")]
     cover_url: Option<String>,
 }

@@ -10,15 +10,43 @@ use reqwest::Client;
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::RwLock;
 use tokio::fs;
 use tokio::process::Command;
 use tokio::time::Duration;
+use tracing::warn;
 
 const CLIENT_ID: &str = "kimne78kx3ncx6brgo4mv6wki5h1ko";
 const GQL_URL: &str = "https://gql.twitch.tv/gql";
+
+/// Twitch 已失效的 auth_token（Twitch 与 TwitchVideos 共享，进程内长期记忆）。
+/// 对应 Python 版 TwitchUtils._invalid_auth_token 类级属性。
+static INVALID_AUTH_TOKEN: RwLock<Option<String>> = RwLock::new(None);
+
+/// 返回可用的 auth_token：未配置、为空或已被记为失效时返回 None。
+fn effective_auth_token(auth_token: Option<&str>) -> Option<String> {
+    let auth_token = auth_token.filter(|token| !token.is_empty())?;
+    let invalid = INVALID_AUTH_TOKEN
+        .read()
+        .unwrap_or_else(|err| err.into_inner());
+    (invalid.as_deref() != Some(auth_token)).then(|| auth_token.to_string())
+}
+
+/// 将 auth_token 记为失效，后续请求跳过；仅首次记录时告警。
+fn mark_auth_token_invalid(auth_token: &str) {
+    let mut invalid = INVALID_AUTH_TOKEN
+        .write()
+        .unwrap_or_else(|err| err.into_inner());
+    if invalid.as_deref() != Some(auth_token) {
+        *invalid = Some(auth_token.to_string());
+        warn!("Twitch Cookie已失效请及时更换，后续操作将忽略Twitch Cookie");
+    }
+}
 
 pub struct TwitchVideos {
     re: Regex,
@@ -143,9 +171,7 @@ impl TwitchLive {
                         }
                     "#,
                     "variables": { "channel_name": channel_name }
-                }),
-                self.twitch_auth_token.as_deref(),
-            )
+                }))
             .await?;
 
         let user = gql
@@ -194,7 +220,7 @@ impl TwitchLive {
                     url: Some(self.url.clone()),
                     platform: StreamlinkPlatform::Twitch {
                         disable_ads: self.twitch_disable_ads,
-                        auth_token: self.twitch_auth_token.clone(),
+                        auth_token: effective_auth_token(self.twitch_auth_token.as_deref()),
                     },
                 })),
             }),
@@ -209,16 +235,13 @@ impl TwitchLive {
             .ok_or_else(|| LiveError::custom("Twitch 直播间地址错误"))
     }
 
-    async fn post_gql<T: Serialize>(
-        &self,
-        ops: T,
-        auth_token: Option<&str>,
-    ) -> LiveResult<GqlResponse> {
-        for retry in 0..2 {
+    async fn post_gql<T: Serialize>(&self, ops: T) -> LiveResult<GqlResponse> {
+        let mut auth_token = effective_auth_token(self.twitch_auth_token.as_deref());
+        loop {
             let resp = self
                 .client
                 .post(GQL_URL)
-                .headers(gql_headers((retry == 0).then_some(auth_token).flatten())?)
+                .headers(gql_headers(auth_token.as_deref())?)
                 .json(&ops)
                 .timeout(Duration::from_secs(15))
                 .send()
@@ -235,11 +258,15 @@ impl TwitchLive {
                 .await
                 .map_err(|err| LiveError::custom(format!("解析 Twitch GQL 失败: {err}")))?;
             if gql.error.as_deref() == Some("Unauthorized") {
-                continue;
+                // 带 token 被拒时记为失效并改用匿名请求重试一次
+                if let Some(token) = auth_token.take() {
+                    mark_auth_token_invalid(&token);
+                    continue;
+                }
+                return Err(LiveError::custom("请求 Twitch GQL 错误: Unauthorized"));
             }
             return Ok(gql);
         }
-        Err(LiveError::custom("Twitch Cookie 已失效"))
     }
 
     fn danmaku_source(&self) -> Option<DanmakuSource> {
@@ -310,90 +337,69 @@ impl TwitchVideosLive {
                     is_live: false,
                     use_live_cover: false,
                     cover_url: (!selection.thumbnail.is_empty()).then_some(selection.thumbnail),
-                    cookies_file: None,
+                    cookies_file: self.auth_cookie_file().await,
                     prefer_vcodec: None,
                     prefer_acodec: None,
                     max_filesize: None,
                     max_height: None,
                     download_archive: Some(PathBuf::from("archive.txt")),
-                    extra_ytdlp_args: self.auth_cookie_args(),
+                    extra_ytdlp_args: Vec::new(),
                 })),
             }),
         })
     }
 
-    async fn extract_info(&self, url: &str, process: bool) -> LiveResult<Option<Value>> {
-        let mut command = Command::new("yt-dlp");
-        command
-            .stdin(Stdio::null())
-            .arg("--dump-single-json")
-            .arg("--skip-download")
-            .arg("--ignore-errors")
-            .arg("--extractor-retries")
-            .arg("0")
-            .arg("--no-warnings");
-        if !process {
-            command.arg("--no-playlist");
-        }
-        for arg in self.auth_cookie_args() {
-            command.arg(arg);
-        }
-        command.arg(url).kill_on_drop(true);
+    /// 运行 yt-dlp 提取信息。`flat` 为 true 时用于 /videos 列表页，
+    /// 以 `--flat-playlist` 惰性枚举条目（对应 Python 版 process=False）；
+    /// 为 false 时对单个条目做完整提取。
+    async fn extract_info(&self, url: &str, flat: bool) -> LiveResult<Option<Value>> {
+        let mut auth_token = effective_auth_token(self.twitch_auth_token.as_deref());
+        loop {
+            let cookie_file = match auth_token.as_deref() {
+                Some(token) => write_cookie_file(token).await,
+                None => None,
+            };
+            let mut command = Command::new("yt-dlp");
+            command
+                .stdin(Stdio::null())
+                .arg("--dump-single-json")
+                .arg("--skip-download")
+                .arg("--ignore-errors")
+                .arg("--extractor-retries")
+                .arg("0")
+                .arg("--no-warnings");
+            if flat {
+                command.arg("--flat-playlist");
+            } else {
+                command.arg("--no-playlist");
+            }
+            if let Some(cookie_file) = &cookie_file {
+                command.arg("--cookies").arg(cookie_file);
+            }
+            command.arg(url).kill_on_drop(true);
 
-        let output = command.output().await.map_err(|err| {
-            LiveError::custom(format!("运行 yt-dlp 获取 Twitch 视频信息失败: {err}"))
-        })?;
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if !output.status.success() {
-            if stderr.contains("Unauthorized") && self.twitch_auth_token.is_some() {
-                return self.extract_info_without_auth(url, process).await;
+            let output = command.output().await.map_err(|err| {
+                LiveError::custom(format!("运行 yt-dlp 获取 Twitch 视频信息失败: {err}"))
+            })?;
+            if output.status.success() {
+                return parse_ytdlp_stdout(&output.stdout);
+            }
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("Unauthorized")
+                && let Some(token) = auth_token.take()
+            {
+                // 带 token 被拒时记为失效并改用匿名请求重试一次
+                mark_auth_token_invalid(&token);
+                continue;
             }
             return Ok(None);
         }
-
-        parse_ytdlp_stdout(&output.stdout)
     }
 
-    async fn extract_info_without_auth(
-        &self,
-        url: &str,
-        process: bool,
-    ) -> LiveResult<Option<Value>> {
-        let mut command = Command::new("yt-dlp");
-        command
-            .stdin(Stdio::null())
-            .arg("--dump-single-json")
-            .arg("--skip-download")
-            .arg("--ignore-errors")
-            .arg("--extractor-retries")
-            .arg("0")
-            .arg("--no-warnings");
-        if !process {
-            command.arg("--no-playlist");
-        }
-        command.arg(url).kill_on_drop(true);
-
-        let output = command.output().await.map_err(|err| {
-            LiveError::custom(format!("运行 yt-dlp 获取 Twitch 视频信息失败: {err}"))
-        })?;
-        if !output.status.success() {
-            return Ok(None);
-        }
-        parse_ytdlp_stdout(&output.stdout)
-    }
-
-    fn auth_cookie_args(&self) -> Vec<String> {
-        let Some(auth_token) = self
-            .twitch_auth_token
-            .as_deref()
-            .filter(|value| !value.is_empty())
-        else {
-            return Vec::new();
-        };
-        vec![
-            "--add-header".to_string(),
-            format!("Cookie: auth-token={auth_token}"),
-        ]
+    /// auth_token 可用时生成 Netscape cookie 文件，返回其路径传给 yt-dlp --cookies。
+    async fn auth_cookie_file(&self) -> Option<PathBuf> {
+        let auth_token = effective_auth_token(self.twitch_auth_token.as_deref())?;
+        write_cookie_file(&auth_token).await
     }
 
     async fn archive_ids(&self) -> HashSet<String> {
@@ -416,7 +422,7 @@ impl TwitchVideosLive {
                 entry
                     .get("id")
                     .and_then(Value::as_str)
-                    .is_none_or(|id| !archive_ids.contains(id))
+                    .is_none_or(|id| !archive_contains(archive_ids, id))
             })
         } else {
             Some(value)
@@ -534,4 +540,130 @@ fn string_field(entry: &Value, keys: &[&str]) -> Option<String> {
             .filter(|value| !value.is_empty())
             .map(str::to_string)
     })
+}
+
+/// 判断条目 id 是否已归档。yt-dlp 新版对 Twitch VOD 记录的归档 id 为 `v<数字>`
+/// （flat 条目 id 同为 `v<数字>`），旧版本归档为纯数字，两种形式都视为已归档。
+fn archive_contains(archive_ids: &HashSet<String>, id: &str) -> bool {
+    if archive_ids.contains(id) {
+        return true;
+    }
+    if let Some(stripped) = id.strip_prefix('v') {
+        !stripped.is_empty()
+            && stripped.bytes().all(|byte| byte.is_ascii_digit())
+            && archive_ids.contains(stripped)
+    } else {
+        !id.is_empty()
+            && id.bytes().all(|byte| byte.is_ascii_digit())
+            && archive_ids.contains(&format!("v{id}"))
+    }
+}
+
+/// 生成 Netscape 格式 cookie 文件内容（域 .twitch.tv，键 auth-token），
+/// 与 Python 版传给 yt-dlp cookiefile 的内容一致。
+fn netscape_cookie_file_content(auth_token: &str) -> String {
+    format!(
+        "# Netscape HTTP Cookie File\n.twitch.tv\tTRUE\t/\tFALSE\t0\tauth-token\t{auth_token}\n"
+    )
+}
+
+/// cookie 文件放系统临时目录，路径由 token 哈希决定：
+/// 同一 token 复用同一路径，token 变化自然写入新文件。
+fn cookie_file_path(auth_token: &str) -> PathBuf {
+    let mut hasher = DefaultHasher::new();
+    auth_token.hash(&mut hasher);
+    std::env::temp_dir().join(format!("biliup-twitch-cookies-{:016x}.txt", hasher.finish()))
+}
+
+/// 将 auth_token 写入 Netscape cookie 文件并返回路径；内容未变化时不重写。
+/// 写入失败仅告警并返回 None（降级为匿名请求）。
+async fn write_cookie_file(auth_token: &str) -> Option<PathBuf> {
+    let path = cookie_file_path(auth_token);
+    let content = netscape_cookie_file_content(auth_token);
+    if fs::read_to_string(&path).await.ok().as_deref() != Some(content.as_str()) {
+        if let Err(err) = fs::write(&path, &content).await {
+            warn!("写入 Twitch cookie 文件失败: {}: {err}", path.display());
+            return None;
+        }
+    }
+    Some(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn netscape_cookie_file_content_matches_python_format() {
+        assert_eq!(
+            netscape_cookie_file_content("abc123"),
+            "# Netscape HTTP Cookie File\n.twitch.tv\tTRUE\t/\tFALSE\t0\tauth-token\tabc123\n"
+        );
+    }
+
+    #[test]
+    fn cookie_file_path_is_stable_per_token() {
+        assert_eq!(cookie_file_path("token-a"), cookie_file_path("token-a"));
+        assert_ne!(cookie_file_path("token-a"), cookie_file_path("token-b"));
+        assert!(cookie_file_path("token-a").starts_with(std::env::temp_dir()));
+    }
+
+    #[test]
+    fn archive_contains_matches_both_id_forms() {
+        let archive_ids: HashSet<String> = ["v111", "222", "SomeClipSlug"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        // 完全一致
+        assert!(archive_contains(&archive_ids, "v111"));
+        assert!(archive_contains(&archive_ids, "222"));
+        assert!(archive_contains(&archive_ids, "SomeClipSlug"));
+        // v 前缀与纯数字互认
+        assert!(archive_contains(&archive_ids, "111"));
+        assert!(archive_contains(&archive_ids, "v222"));
+        // 未归档
+        assert!(!archive_contains(&archive_ids, "v333"));
+        assert!(!archive_contains(&archive_ids, "333"));
+        // 非数字 id 不做前缀换算
+        assert!(!archive_contains(&archive_ids, "omeClipSlug"));
+        assert!(!archive_contains(&archive_ids, "v"));
+        assert!(!archive_contains(&archive_ids, ""));
+    }
+
+    #[test]
+    fn write_cookie_file_writes_and_reuses_path() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let token = "unit-test-token";
+            let path = write_cookie_file(token).await.expect("写入 cookie 文件失败");
+            assert_eq!(
+                fs::read_to_string(&path).await.unwrap(),
+                netscape_cookie_file_content(token)
+            );
+            // 复用同一路径
+            assert_eq!(write_cookie_file(token).await.as_deref(), Some(&*path));
+            let _ = fs::remove_file(&path).await;
+        });
+    }
+
+    #[test]
+    fn invalid_auth_token_is_remembered_and_skipped() {
+        // 共用全局状态，串行放在同一个测试内
+        assert_eq!(effective_auth_token(None), None);
+        assert_eq!(effective_auth_token(Some("")), None);
+        assert_eq!(
+            effective_auth_token(Some("token-x")),
+            Some("token-x".to_string())
+        );
+        mark_auth_token_invalid("token-x");
+        assert_eq!(effective_auth_token(Some("token-x")), None);
+        // 更换 token 后恢复可用
+        assert_eq!(
+            effective_auth_token(Some("token-y")),
+            Some("token-y".to_string())
+        );
+    }
 }

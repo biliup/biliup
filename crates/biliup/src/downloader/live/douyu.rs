@@ -5,6 +5,7 @@ use super::{
 use async_trait::async_trait;
 use chrono::Utc;
 use md5::{Digest, Md5};
+use rand::Rng;
 use rand::seq::SliceRandom;
 use regex::Regex;
 use reqwest::Client;
@@ -12,7 +13,8 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::warn;
+use tokio::sync::{Mutex, RwLock};
+use tracing::{debug, warn};
 use url::{Url, form_urlencoded};
 
 const DOUYU_DEFAULT_DID: &str = "10000000000000000000000000001501";
@@ -26,6 +28,12 @@ const DOUYU_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleW
 
 pub struct Douyu {
     re: Regex,
+    /// 进程级加密密钥 + 配套 UA 缓存（对应 Python DouyuUtils.WhiteEncryptKey / UserAgent 类级缓存）。
+    /// Mutex 同时充当 single-flight 锁（对应 Python DouyuUtils._lock / _update_key_event）：
+    /// 并发刷新在此串行，后到者直接命中前者刷新的缓存。
+    encrypt_key: Mutex<Option<CachedEncryptKey>>,
+    /// 进程级 url -> 真实房间号缓存（对应 Python get_real_rid 的 alru_cache）
+    real_room_id: RwLock<HashMap<String, String>>,
 }
 
 impl Default for Douyu {
@@ -38,6 +46,8 @@ impl Douyu {
     pub fn new() -> Self {
         Self {
             re: Regex::new(r"https?://(?:(?:www|m)\.)?douyu\.com").unwrap(),
+            encrypt_key: Mutex::new(None),
+            real_room_id: RwLock::new(HashMap::new()),
         }
     }
 }
@@ -53,11 +63,29 @@ impl LivePlugin for Douyu {
     }
 
     async fn check_stream(&self, request: LiveRequest) -> LiveResult<LiveStatus> {
-        DouyuLive::new(request).check_stream().await
+        DouyuLive::new(request, &self.encrypt_key, &self.real_room_id)
+            .check_stream()
+            .await
     }
 }
 
-struct DouyuLive {
+/// 缓存的加密密钥与刷新时使用的随机 UA。enc_data 会校验 UA，
+/// 因此 getEncryption 与 getH5PlayV1 必须使用同一 UA，密钥与 UA 需成对缓存。
+#[derive(Clone)]
+struct CachedEncryptKey {
+    key: WhiteEncryptKey,
+    user_agent: String,
+}
+
+impl CachedEncryptKey {
+    /// 对应 Python DouyuUtils.is_key_valid：expire_at 取自 getEncryption 响应，
+    /// 缺失时默认 0（永远过期，每次都会重新请求）。
+    fn is_valid(&self, now: u64) -> bool {
+        self.key.expire_at > now
+    }
+}
+
+struct DouyuLive<'a> {
     client: Client,
     url: String,
     name: String,
@@ -67,10 +95,16 @@ struct DouyuLive {
     douyu_disable_interactive_game: bool,
     douyu_danmaku: bool,
     room_id: Option<String>,
+    encrypt_key_cache: &'a Mutex<Option<CachedEncryptKey>>,
+    real_room_id_cache: &'a RwLock<HashMap<String, String>>,
 }
 
-impl DouyuLive {
-    fn new(request: LiveRequest) -> Self {
+impl<'a> DouyuLive<'a> {
+    fn new(
+        request: LiveRequest,
+        encrypt_key_cache: &'a Mutex<Option<CachedEncryptKey>>,
+        real_room_id_cache: &'a RwLock<HashMap<String, String>>,
+    ) -> Self {
         let options = request.options.douyu;
         Self {
             client: request.client,
@@ -82,6 +116,8 @@ impl DouyuLive {
             douyu_disable_interactive_game: options.disable_interactive_game,
             douyu_danmaku: options.danmaku,
             room_id: None,
+            encrypt_key_cache,
+            real_room_id_cache,
         }
     }
 
@@ -153,6 +189,11 @@ impl DouyuLive {
             return Err(LiveError::custom("直播间地址错误"));
         };
 
+        // 对应 Python get_real_rid 的 alru_cache：同一 url 只请求一次移动端页面
+        if let Some(rid) = self.real_room_id_cache.read().await.get(&self.url) {
+            return Ok(rid.clone());
+        }
+
         let mobile_url = format!("https://{DOUYU_MOBILE_DOMAIN}/{short_id}");
         let text = self
             .client
@@ -169,7 +210,12 @@ impl DouyuLive {
             .unwrap()
             .captures(&text)
         {
-            return Ok(caps[1].to_string());
+            let rid = caps[1].to_string();
+            self.real_room_id_cache
+                .write()
+                .await
+                .insert(self.url.clone(), rid.clone());
+            return Ok(rid);
         }
 
         if short_id.chars().all(|ch| ch.is_ascii_digit()) {
@@ -180,20 +226,32 @@ impl DouyuLive {
     }
 
     async fn get_room_info(&self, room_id: &str) -> LiveResult<Option<RoomInfo>> {
-        let resp: BetardResponse = self
-            .client
-            .get(format!("https://{DOUYU_WEB_DOMAIN}/betard/{room_id}"))
-            .header("referer", format!("https://{DOUYU_WEB_DOMAIN}"))
-            .send()
-            .await
-            .map_err(|err| {
-                LiveError::custom(format!("获取斗鱼直播间信息失败 room_id: {room_id}: {err}"))
-            })?
-            .json()
-            .await
-            .map_err(|err| {
-                LiveError::custom(format!("解析斗鱼直播间信息失败 room_id: {room_id}: {err}"))
-            })?;
+        // 对应 douyu.py：网络层错误重试 3 次，缓解 #1376 海外请求失败问题；
+        // 非网络错误（如 JSON 解析失败）不重试
+        let mut body = None;
+        let mut last_error = None;
+        for _ in 0..3 {
+            match self.fetch_room_info_text(room_id).await {
+                Ok(text) => {
+                    body = Some(text);
+                    break;
+                }
+                Err(err) => {
+                    debug!(error = ?err, room_id, "请求斗鱼直播间信息失败，重试");
+                    last_error = Some(err);
+                }
+            }
+        }
+        let Some(body) = body else {
+            let err = last_error.expect("betard retry loop runs at least once");
+            return Err(LiveError::custom(format!(
+                "获取斗鱼直播间信息失败 room_id: {room_id}: {err}"
+            )));
+        };
+
+        let resp: BetardResponse = serde_json::from_str(&body).map_err(|err| {
+            LiveError::custom(format!("解析斗鱼直播间信息失败 room_id: {room_id}: {err}"))
+        })?;
 
         let Some(room) = resp.room else {
             return Ok(None);
@@ -205,6 +263,16 @@ impl DouyuLive {
             return Ok(None);
         }
         Ok(Some(room))
+    }
+
+    async fn fetch_room_info_text(&self, room_id: &str) -> Result<String, reqwest::Error> {
+        self.client
+            .get(format!("https://{DOUYU_WEB_DOMAIN}/betard/{room_id}"))
+            .header("referer", format!("https://{DOUYU_WEB_DOMAIN}"))
+            .send()
+            .await?
+            .text()
+            .await
     }
 
     async fn has_interactive_game(&self, room_id: &str) -> LiveResult<bool> {
@@ -262,11 +330,8 @@ impl DouyuLive {
     }
 
     async fn request_web_play_info(&self, room_id: &str, cdn: &str) -> LiveResult<PlayInfo> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|err| LiveError::custom(format!("获取系统时间失败: {err}")))?
-            .as_secs();
-        let encrypt_key = self.update_key().await?;
+        let now = unix_now()?;
+        let (encrypt_key, user_agent) = self.update_key().await?;
         let auth = sign_stream(&encrypt_key, room_id, now);
 
         let form = vec![
@@ -291,7 +356,7 @@ impl DouyuLive {
                 "https://{DOUYU_WEB_DOMAIN}/lapi/live/getH5PlayV1/{room_id}"
             ))
             .header("referer", format!("https://{DOUYU_WEB_DOMAIN}"))
-            .header("user-agent", DOUYU_USER_AGENT)
+            .header("user-agent", &user_agent)
             .form(&form)
             .send()
             .await
@@ -395,14 +460,28 @@ impl DouyuLive {
         Ok(tx_secret)
     }
 
-    async fn update_key(&self) -> LiveResult<WhiteEncryptKey> {
+    /// 获取加密密钥及其配套 UA。对应 Python DouyuUtils.sign 中
+    /// `is_key_valid() or update_key()` 的缓存逻辑：密钥未过期直接复用，
+    /// 过期才重新请求 getEncryption。整个过程持有 Mutex，天然 single-flight。
+    async fn update_key(&self) -> LiveResult<(WhiteEncryptKey, String)> {
+        let mut cache = self.encrypt_key_cache.lock().await;
+
+        let now = unix_now()?;
+        if let Some(cached) = cache.as_ref()
+            && cached.is_valid(now)
+        {
+            return Ok((cached.key.clone(), cached.user_agent.clone()));
+        }
+
+        // 防风控，每次刷新密钥随机 UA（对应 douyu.py DouyuUtils.update_key）
+        let user_agent = random_chrome_user_agent();
         let rsp: EncryptionResponse = self
             .client
             .get(format!(
                 "https://{DOUYU_WEB_DOMAIN}/wgapi/livenc/liveweb/websec/getEncryption"
             ))
             .query(&[("did", DOUYU_DEFAULT_DID)])
-            .header("user-agent", DOUYU_USER_AGENT)
+            .header("user-agent", &user_agent)
             .send()
             .await
             .map_err(|err| LiveError::custom(format!("获取斗鱼加密密钥失败: {err}")))?
@@ -418,8 +497,14 @@ impl DouyuLive {
             )));
         }
 
-        rsp.data
-            .ok_or_else(|| LiveError::custom("斗鱼加密密钥为空"))
+        let key = rsp
+            .data
+            .ok_or_else(|| LiveError::custom("斗鱼加密密钥为空"))?;
+        *cache = Some(CachedEncryptKey {
+            key: key.clone(),
+            user_agent: user_agent.clone(),
+        });
+        Ok((key, user_agent))
     }
 
     fn danmaku_source(&self) -> Option<DanmakuSource> {
@@ -438,6 +523,22 @@ impl DouyuLive {
             password: None,
         })
     }
+}
+
+fn unix_now() -> LiveResult<u64> {
+    Ok(SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| LiveError::custom(format!("获取系统时间失败: {err}")))?
+        .as_secs())
+}
+
+/// 生成随机 Chrome UA（对应 biliup/plugins/__init__.py 的 random_user_agent()，
+/// 桌面端格式，Chrome 大版本随机 100~120）
+fn random_chrome_user_agent() -> String {
+    let chrome_version: u32 = rand::thread_rng().gen_range(100..=120);
+    format!(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version}.0.0.0 Safari/537.36"
+    )
 }
 
 fn sign_stream(encrypt_key: &WhiteEncryptKey, room_id: &str, ts: u64) -> String {
@@ -547,6 +648,10 @@ struct WhiteEncryptKey {
     is_special: i64,
     key: String,
     enc_data: String,
+    /// getEncryption 响应携带的过期时间（10 位 Unix 时间戳）。
+    /// 对应 Python `WhiteEncryptKey.get('expire_at', 0)`，缺失时默认 0
+    #[serde(default)]
+    expire_at: u64,
 }
 
 #[derive(Deserialize)]
@@ -582,6 +687,37 @@ struct XP2PTxSecret {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn make_live<'a>(
+        url: &str,
+        encrypt_key_cache: &'a Mutex<Option<CachedEncryptKey>>,
+        real_room_id_cache: &'a RwLock<HashMap<String, String>>,
+    ) -> DouyuLive<'a> {
+        DouyuLive {
+            client: Client::new(),
+            url: url.to_string(),
+            name: "test".to_string(),
+            douyu_cdn: DOUYU_HS_CDN.to_string(),
+            douyu_force_hs: true,
+            douyu_rate: 0,
+            douyu_disable_interactive_game: false,
+            douyu_danmaku: false,
+            room_id: None,
+            encrypt_key_cache,
+            real_room_id_cache,
+        }
+    }
+
+    fn make_key(expire_at: u64) -> WhiteEncryptKey {
+        WhiteEncryptKey {
+            rand_str: "rand".to_string(),
+            enc_time: 1,
+            is_special: 0,
+            key: "key".to_string(),
+            enc_data: "enc".to_string(),
+            expire_at,
+        }
+    }
 
     #[test]
     fn build_huos_url_rewrites_fcdn_and_appends_secret() {
@@ -640,17 +776,13 @@ mod tests {
 
     #[tokio::test]
     async fn maybe_build_huos_url_falls_back_when_build_fails() {
-        let live = DouyuLive {
-            client: Client::new(),
-            url: "https://www.douyu.com/10568722".to_string(),
-            name: "test".to_string(),
-            douyu_cdn: DOUYU_HS_CDN.to_string(),
-            douyu_force_hs: true,
-            douyu_rate: 0,
-            douyu_disable_interactive_game: false,
-            douyu_danmaku: false,
-            room_id: None,
-        };
+        let encrypt_key_cache = Mutex::new(None);
+        let real_room_id_cache = RwLock::new(HashMap::new());
+        let live = make_live(
+            "https://www.douyu.com/10568722",
+            &encrypt_key_cache,
+            &real_room_id_cache,
+        );
 
         let raw_stream_url = "not a url".to_string();
 
@@ -658,5 +790,106 @@ mod tests {
             live.maybe_build_huos_url(raw_stream_url.clone()).await,
             raw_stream_url
         );
+    }
+
+    #[test]
+    fn random_chrome_user_agent_matches_python_format() {
+        // 对应 Python random_user_agent()：Chrome 大版本 100~120，桌面端固定格式
+        let re = Regex::new(
+            r"^Mozilla/5\.0 \(Windows NT 10\.0; Win64; x64\) AppleWebKit/537\.36 \(KHTML, like Gecko\) Chrome/(\d+)\.0\.0\.0 Safari/537\.36$",
+        )
+        .unwrap();
+
+        for _ in 0..50 {
+            let ua = random_chrome_user_agent();
+            let caps = re.captures(&ua).unwrap_or_else(|| panic!("UA 格式错误: {ua}"));
+            let version: u32 = caps[1].parse().unwrap();
+            assert!(
+                (100..=120).contains(&version),
+                "Chrome 版本超出范围: {version}"
+            );
+        }
+    }
+
+    #[test]
+    fn cached_encrypt_key_expiry_follows_expire_at() {
+        let cached = CachedEncryptKey {
+            key: make_key(1000),
+            user_agent: random_chrome_user_agent(),
+        };
+
+        assert!(cached.is_valid(999));
+        // 对应 Python is_key_valid 的 `expire_at > int(time.time())`：等于当前时间视为过期
+        assert!(!cached.is_valid(1000));
+        assert!(!cached.is_valid(1001));
+
+        let no_expiry = CachedEncryptKey {
+            key: make_key(0),
+            user_agent: random_chrome_user_agent(),
+        };
+        assert!(!no_expiry.is_valid(0));
+    }
+
+    #[test]
+    fn white_encrypt_key_missing_expire_at_defaults_to_zero() {
+        let key: WhiteEncryptKey = serde_json::from_str(
+            r#"{"rand_str":"r","enc_time":2,"is_special":0,"key":"k","enc_data":"e"}"#,
+        )
+        .unwrap();
+        assert_eq!(key.expire_at, 0);
+
+        let key: WhiteEncryptKey = serde_json::from_str(
+            r#"{"rand_str":"r","enc_time":2,"is_special":0,"key":"k","enc_data":"e","expire_at":1234567890}"#,
+        )
+        .unwrap();
+        assert_eq!(key.expire_at, 1234567890);
+    }
+
+    #[tokio::test]
+    async fn update_key_reuses_cached_key_and_user_agent_pair() {
+        let user_agent = random_chrome_user_agent();
+        let encrypt_key_cache = Mutex::new(Some(CachedEncryptKey {
+            key: make_key(unix_now().unwrap() + 3600),
+            user_agent: user_agent.clone(),
+        }));
+        let real_room_id_cache = RwLock::new(HashMap::new());
+        let live = make_live(
+            "https://www.douyu.com/10568722",
+            &encrypt_key_cache,
+            &real_room_id_cache,
+        );
+
+        // 缓存未过期时直接复用，不发起网络请求，且密钥与 UA 成对返回
+        let (key, ua) = live.update_key().await.unwrap();
+        assert_eq!(key.rand_str, "rand");
+        assert_eq!(key.enc_data, "enc");
+        assert_eq!(ua, user_agent);
+    }
+
+    #[tokio::test]
+    async fn resolve_room_id_uses_cached_real_room_id() {
+        let url = "https://www.douyu.com/somename";
+        let encrypt_key_cache = Mutex::new(None);
+        let real_room_id_cache = RwLock::new(HashMap::from([(
+            url.to_string(),
+            "10568722".to_string(),
+        )]));
+        let live = make_live(url, &encrypt_key_cache, &real_room_id_cache);
+
+        // 命中缓存时不请求移动端页面
+        assert_eq!(live.resolve_room_id().await.unwrap(), "10568722");
+    }
+
+    #[tokio::test]
+    async fn resolve_room_id_prefers_rid_query_param() {
+        let encrypt_key_cache = Mutex::new(None);
+        let real_room_id_cache = RwLock::new(HashMap::new());
+        let live = make_live(
+            "https://www.douyu.com/topic/xyz?rid=123456",
+            &encrypt_key_cache,
+            &real_room_id_cache,
+        );
+
+        assert_eq!(live.resolve_room_id().await.unwrap(), "123456");
     }
 }

@@ -82,7 +82,7 @@ impl NiconicoLive {
                 raw_stream_url: self.url.clone(),
                 platform: "niconico".to_string(),
                 stream_headers: HashMap::new(),
-                suffix: "flv".to_string(),
+                suffix: "ts".to_string(),
                 danmaku: None,
                 downloader_hint: DownloaderHint::Streamlink,
                 runtime_options: Some(RuntimeOptions::Streamlink(StreamlinkOptions {

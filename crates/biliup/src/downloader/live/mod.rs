@@ -15,6 +15,7 @@ mod douyin;
 mod douyu;
 mod general;
 mod huya;
+mod huya_wup;
 mod inke;
 mod kilakila;
 mod kuaishou;
@@ -190,9 +191,11 @@ impl Default for DouyuOptions {
 #[derive(Debug, Clone)]
 pub struct HuyaOptions {
     pub cdn: String,
+    pub cdn_fallback: bool,
     pub max_ratio: u32,
     pub protocol: String,
     pub imgplus: bool,
+    pub mobile_api: bool,
     pub codec: String,
     pub danmaku: bool,
 }
@@ -201,9 +204,11 @@ impl Default for HuyaOptions {
     fn default() -> Self {
         Self {
             cdn: String::new(),
+            cdn_fallback: false,
             max_ratio: 0,
             protocol: "Flv".to_string(),
             imgplus: true,
+            mobile_api: false,
             codec: "264".to_string(),
             danmaku: false,
         }

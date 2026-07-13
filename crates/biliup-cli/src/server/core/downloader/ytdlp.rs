@@ -230,9 +230,9 @@ impl YouTubeDownloader {
         if let Some(proxy) = &self.cfg.proxy {
             cmd.arg("--proxy").arg(proxy);
         }
-        if !self.cfg.is_live
-            && let Some(archive) = &self.cfg.download_archive
-        {
+        if let Some(archive) = &self.cfg.download_archive {
+            // 直播也传 --download-archive：yt-dlp 在直播下载完成后同样会写入 archive，
+            // 避免直播结束后同一视频被当作回放重复下载（对齐 youtube.py:312, 331-334）
             cmd.arg("--download-archive").arg(archive);
         }
 

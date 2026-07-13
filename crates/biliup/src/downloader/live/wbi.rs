@@ -1,3 +1,4 @@
+use reqwest::Client;
 use reqwest::header::HeaderMap;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -31,19 +32,22 @@ struct WbiImg {
     sub_url: String,
 }
 
+#[derive(Default)]
+struct WbiState {
+    key: Option<String>,
+    last_update: u64,
+}
+
+/// WBI 签名器。key 状态放在 `Arc` 内共享：插件结构体持有一份，
+/// 每次 `check_stream` 克隆句柄即可跨轮询复用，使 2 小时更新间隔真正生效。
+#[derive(Clone, Default)]
 pub struct WbiSigner {
-    client: reqwest::Client,
-    key: Arc<RwLock<Option<String>>>,
-    last_update: Arc<RwLock<u64>>,
+    state: Arc<RwLock<WbiState>>,
 }
 
 impl WbiSigner {
-    pub fn new(client: reqwest::Client) -> Self {
-        Self {
-            client,
-            key: Arc::new(RwLock::new(None)),
-            last_update: Arc::new(RwLock::new(0)),
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     fn extract_key(url: &str) -> Option<String> {
@@ -62,23 +66,29 @@ impl WbiSigner {
             .collect()
     }
 
-    async fn update_key(&self, headers: &HeaderMap) -> LiveResult<()> {
+    fn is_fresh(state: &WbiState, now: u64) -> bool {
+        state.key.is_some() && now.saturating_sub(state.last_update) < UPDATE_INTERVAL
+    }
+
+    async fn update_key(&self, client: &Client, headers: &HeaderMap) -> LiveResult<()> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_secs())
             .unwrap_or_default();
 
-        {
-            let last = *self.last_update.read().await;
-            if now.saturating_sub(last) < UPDATE_INTERVAL && self.key.read().await.is_some() {
-                return Ok(());
-            }
+        if Self::is_fresh(&*self.state.read().await, now) {
+            return Ok(());
+        }
+
+        // 写锁内复查，避免并发 check_stream 时重复请求 nav
+        let mut state = self.state.write().await;
+        if Self::is_fresh(&state, now) {
+            return Ok(());
         }
 
         debug!("Updating WBI key...");
 
-        let resp: NavResponse = self
-            .client
+        let resp: NavResponse = client
             .get("https://api.bilibili.com/x/web-interface/nav")
             .headers(headers.clone())
             .timeout(Duration::from_secs(5))
@@ -92,21 +102,25 @@ impl WbiSigner {
         let sub = Self::extract_key(&resp.data.wbi_img.sub_url)
             .ok_or_else(|| LiveError::custom("提取 B 站 WBI sub key 失败"))?;
 
-        *self.key.write().await = Some(Self::create_mixin_key(&img, &sub));
-        *self.last_update.write().await = now;
+        state.key = Some(Self::create_mixin_key(&img, &sub));
+        state.last_update = now;
         Ok(())
     }
 
     pub async fn sign(
         &self,
+        client: &Client,
         params: &mut BTreeMap<String, String>,
         headers: &HeaderMap,
     ) -> LiveResult<()> {
-        self.update_key(headers).await?;
+        self.update_key(client, headers).await?;
 
-        let key = self.key.read().await;
-        let key = key
-            .as_ref()
+        let key = self
+            .state
+            .read()
+            .await
+            .key
+            .clone()
             .ok_or_else(|| LiveError::custom("B 站 WBI key 为空"))?;
 
         let ts = SystemTime::now()

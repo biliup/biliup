@@ -119,6 +119,7 @@ struct InkeData {
     status: bool,
     #[serde(default)]
     live_addr: Vec<InkeLiveAddr>,
+    #[serde(alias = "live_name")]
     title: Option<String>,
     image: Option<String>,
 }

@@ -107,6 +107,8 @@ impl BigoLive {
             .split('/')
             .filter(|part| !part.is_empty())
             .next_back()
+            .and_then(|part| part.split(['?', '#']).next())
+            .filter(|part| !part.is_empty())
             .map(str::to_string)
             .ok_or_else(|| LiveError::custom("Bigo 直播间地址错误"))
     }
