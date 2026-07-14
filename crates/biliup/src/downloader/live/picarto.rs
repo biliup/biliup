@@ -1,6 +1,6 @@
 use super::{
-    DownloaderHint, LiveError, LivePlugin, LiveRequest, LiveResult, LiveStatus, LiveStream,
-    media_ext_from_url,
+    BatchCheckRequest, DownloaderHint, LiveError, LivePlugin, LiveRequest, LiveResult, LiveStatus,
+    LiveStream, media_ext_from_url,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -10,6 +10,8 @@ use std::collections::HashMap;
 
 const PICARTO_API_CHANNEL: &str = "https://ptvintern.picarto.tv/api/channel/detail";
 const PICARTO_HLS_URL: &str = "https://{origin}.picarto.tv/stream/hls/{stream_name}/index.m3u8";
+/// 批量检测的 explore 接口：按观看人数倒序、每页 100 条、含成人内容。
+const PICARTO_API_EXPLORE: &str = "https://ptvintern.picarto.tv/api/explore?first=100&page={page}&filter_params%5Badult%5D=true&order_by%5Bfield%5D=viewers&order_by%5Border%5D=DESC&type=stream";
 
 pub struct Picarto {
     re: Regex,
@@ -41,6 +43,63 @@ impl LivePlugin for Picarto {
 
     async fn check_stream(&self, request: LiveRequest) -> LiveResult<LiveStatus> {
         PicartoLive::new(request).check_stream().await
+    }
+
+    fn supports_batch_check(&self) -> bool {
+        true
+    }
+
+    /// 批量检测：分页拉取 explore 列表（当前正在直播的频道），
+    /// 返回其中用户名命中待检测 URL 的那些 URL（对齐 picarto.py:61-78）。
+    async fn batch_check(&self, request: BatchCheckRequest) -> LiveResult<Vec<String>> {
+        // 用户名（小写）-> 原始待检测 URL，便于用 explore 结果反查
+        let mut wanted: HashMap<String, String> = HashMap::new();
+        for url in &request.urls {
+            if let Some(name) = self.username_of(url) {
+                wanted.insert(name.to_lowercase(), url.clone());
+            }
+        }
+        if wanted.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut live_urls = Vec::new();
+        let mut page = 1u32;
+        loop {
+            let explore: PicartoExplore = request
+                .client
+                .get(PICARTO_API_EXPLORE.replace("{page}", &page.to_string()))
+                .send()
+                .await
+                .map_err(|err| LiveError::custom(format!("获取 Picarto explore 失败: {err}")))?
+                .json()
+                .await
+                .map_err(|err| {
+                    LiveError::custom(format!("解析 Picarto explore 失败: {err}"))
+                })?;
+
+            for entry in &explore.data {
+                if let Some(url) = wanted.remove(&entry.name.to_lowercase()) {
+                    live_urls.push(url);
+                }
+            }
+
+            if wanted.is_empty() || explore.next_page_url.is_none() {
+                break;
+            }
+            page += 1;
+        }
+
+        Ok(live_urls)
+    }
+}
+
+impl Picarto {
+    fn username_of(&self, url: &str) -> Option<String> {
+        self.re
+            .captures(url)
+            .and_then(|caps| caps.name("id"))
+            .map(|m| m.as_str().to_string())
     }
 }
 
@@ -160,4 +219,18 @@ struct PicartoStream {
     channel_id: i64,
     stream_name: String,
     thumbnail_image: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct PicartoExplore {
+    #[serde(default)]
+    data: Vec<PicartoExploreEntry>,
+    #[serde(default)]
+    next_page_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct PicartoExploreEntry {
+    #[serde(default)]
+    name: String,
 }

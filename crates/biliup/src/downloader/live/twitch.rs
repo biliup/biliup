@@ -1,7 +1,7 @@
 use super::{
-    DanmakuSource, DownloaderHint, LiveError, LivePlugin, LiveRequest, LiveResult, LiveStatus,
-    LiveStream, RuntimeOptions, StreamlinkOptions, StreamlinkPlatform, YtDlpOptions,
-    media_ext_from_url,
+    BatchCheckRequest, DanmakuSource, DownloaderHint, LiveError, LivePlugin, LiveRequest,
+    LiveResult, LiveStatus, LiveStream, RuntimeOptions, StreamlinkOptions, StreamlinkPlatform,
+    YtDlpOptions, media_ext_from_url,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -23,6 +23,8 @@ use tracing::warn;
 
 const CLIENT_ID: &str = "kimne78kx3ncx6brgo4mv6wki5h1ko";
 const GQL_URL: &str = "https://gql.twitch.tv/gql";
+/// 单次 GQL 批量请求的最大操作数（对齐 twitch.py TwitchUtils.post_gql limit=30）
+const GQL_BATCH_LIMIT: usize = 30;
 
 /// Twitch 已失效的 auth_token（Twitch 与 TwitchVideos 共享，进程内长期记忆）。
 /// 对应 Python 版 TwitchUtils._invalid_auth_token 类级属性。
@@ -117,6 +119,64 @@ impl LivePlugin for Twitch {
         TwitchLive::new(request, self.re.clone())
             .check_stream()
             .await
+    }
+
+    fn supports_batch_check(&self) -> bool {
+        true
+    }
+
+    /// 批量检测：一次 GQL 请求最多判定 30 个直播间（对齐 twitch.py:159-184）。
+    async fn batch_check(&self, request: BatchCheckRequest) -> LiveResult<Vec<String>> {
+        let auth_token = request.credentials.twitch_cookie.clone();
+        let mut live_urls = Vec::new();
+
+        for chunk in request.urls.chunks(GQL_BATCH_LIMIT) {
+            // 无法解析出频道名的 URL 保留占位，保证响应下标与 chunk 对齐
+            let ops: Vec<Value> = chunk
+                .iter()
+                .map(|url| match self.batch_channel_name(url) {
+                    Some(channel_name) => json!({
+                        "query": r#"
+                            query query($login:String!) {
+                                user(login: $login){
+                                    stream {
+                                      type
+                                    }
+                                }
+                            }
+                        "#,
+                        "variables": { "login": channel_name }
+                    }),
+                    None => Value::Null,
+                })
+                .collect();
+
+            let responses =
+                post_gql_batch(&request.client, auth_token.as_deref(), &ops).await?;
+
+            for (index, url) in chunk.iter().enumerate() {
+                let is_live = responses
+                    .get(index)
+                    .and_then(|resp| resp.data.as_ref())
+                    .and_then(|data| data.user.as_ref())
+                    .and_then(|user| user.stream.as_ref())
+                    .is_some_and(|stream| stream.stream_type.as_deref() == Some("live"));
+                if is_live {
+                    live_urls.push(url.clone());
+                }
+            }
+        }
+
+        Ok(live_urls)
+    }
+}
+
+impl Twitch {
+    fn batch_channel_name(&self, url: &str) -> Option<String> {
+        self.re
+            .captures(url)
+            .and_then(|caps| caps.name("id"))
+            .map(|m| m.as_str().to_lowercase())
     }
 }
 
@@ -519,6 +579,46 @@ fn gql_headers(auth_token: Option<&str>) -> LiveResult<HeaderMap> {
         );
     }
     Ok(headers)
+}
+
+/// 批量 POST GQL 操作数组。带 token 收到 Unauthorized 时记为失效并匿名重试一次
+/// （对齐 twitch.py TwitchUtils.__post_gql 的失效处理）。
+async fn post_gql_batch(
+    client: &Client,
+    auth_token: Option<&str>,
+    ops: &[Value],
+) -> LiveResult<Vec<GqlResponse>> {
+    let mut auth_token = effective_auth_token(auth_token);
+    loop {
+        let resp = client
+            .post(GQL_URL)
+            .headers(gql_headers(auth_token.as_deref())?)
+            .json(&ops)
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await
+            .map_err(|err| LiveError::custom(format!("请求 Twitch GQL 失败: {err}")))?;
+        if !resp.status().is_success() {
+            return Err(LiveError::custom(format!(
+                "请求 Twitch GQL 错误: {}",
+                resp.status()
+            )));
+        }
+        let body: Value = resp
+            .json()
+            .await
+            .map_err(|err| LiveError::custom(format!("解析 Twitch GQL 失败: {err}")))?;
+        // 鉴权失败时返回的是 {"error": "Unauthorized"} 对象而非数组
+        if body.get("error").and_then(Value::as_str) == Some("Unauthorized") {
+            if let Some(token) = auth_token.take() {
+                mark_auth_token_invalid(&token);
+                continue;
+            }
+            return Err(LiveError::custom("请求 Twitch GQL 错误: Unauthorized"));
+        }
+        return serde_json::from_value(body)
+            .map_err(|err| LiveError::custom(format!("解析 Twitch GQL 批量响应失败: {err}")));
+    }
 }
 
 fn parse_ytdlp_stdout(stdout: &[u8]) -> LiveResult<Option<Value>> {

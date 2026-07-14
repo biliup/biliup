@@ -1,6 +1,6 @@
 use crate::server::common::download::start_download_workflow;
 use crate::server::common::upload::UploaderMessage;
-use crate::server::core::live::{live_request, streamer_info};
+use crate::server::core::live::{batch_check_request, live_request, streamer_info};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
 use crate::server::infrastructure::models::StreamerInfo;
@@ -9,12 +9,34 @@ use biliup::downloader::live::{LivePlugin, LiveStatus};
 use ormlite::Model;
 use ormlite::model::ModelBuilder;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, trace, warn};
+
+/// 批量检测平台的开播缓存：一次批量请求的结果在一个检测周期内复用，
+/// 供逐间循环快速判定某房间是否开播，避免对未开播房间做逐间请求。
+#[derive(Debug)]
+struct BatchLiveCache {
+    live_urls: HashSet<String>,
+    refreshed_at: Instant,
+}
+
+/// 批量检测对单个房间的判定结果。
+enum BatchVerdict {
+    /// 批量结果显示开播，继续逐间完整检测以获取流信息
+    Live,
+    /// 批量结果显示未开播，直接放回队列
+    Offline,
+    /// 平台不支持批量检测或本轮批量请求失败，回退逐间检测
+    Fallback,
+}
+
+/// 批量结果为未开播时的快速轮换间隔：缓存命中无网络开销，
+/// 短暂停即可在一个检测周期内扫完整个队列（网络频率仍由缓存 TTL 限制）。
+const BATCH_ROTATE_SLEEP: Duration = Duration::from_secs(1);
 
 /// 房间处理器
 /// 管理多个直播间的状态和操作
@@ -31,6 +53,8 @@ pub struct Monitor {
     /// 许可由下载任务持有到录制结束，pool1_size 的唯一限流语义在这里表达。
     download_slots: Arc<Semaphore>,
     monitors: RwLock<HashMap<String, JoinHandle<()>>>,
+    /// 各批量检测平台的开播缓存（platform_name -> 最近一次批量结果）。
+    batch_live: RwLock<HashMap<String, BatchLiveCache>>,
 }
 
 impl Drop for Monitor {
@@ -70,6 +94,7 @@ impl Monitor {
             uploader,
             download_slots,
             monitors: Default::default(),
+            batch_live: Default::default(),
         }
     }
 
@@ -93,6 +118,21 @@ impl Monitor {
                 .await;
             let url = room.get_streamer().url.clone();
             let interval = room.get_config().event_loop_interval;
+            // 批量检测平台：先用一个检测周期内共享的批量结果快速判定是否开播。
+            // 未开播直接跳过（不占用下载槽位、不做逐间请求），并以较短间隔轮换到
+            // 下一个房间，使整条队列在一个检测周期内扫完；批量请求本身由缓存 TTL 限流。
+            if plugin.supports_batch_check() {
+                match self.batch_verdict(platform_name, &plugin, &room, interval).await {
+                    BatchVerdict::Offline => {
+                        self.wake_waker(room.id()).await;
+                        debug!(url = url, "批量检测未开播");
+                        tokio::time::sleep(BATCH_ROTATE_SLEEP).await;
+                        continue;
+                    }
+                    // Live / Fallback 都继续走下面的逐间完整检测
+                    BatchVerdict::Live | BatchVerdict::Fallback => {}
+                }
+            }
             let Some(download_permit) = self.try_acquire_download_slot(&room).await else {
                 self.wake_waker(room.id()).await;
                 tokio::time::sleep(Duration::from_secs(interval)).await;
@@ -161,6 +201,70 @@ impl Monitor {
                 None
             }
         }
+    }
+
+    /// 用批量检测结果判定单个房间是否开播。
+    /// 缓存超过一个检测周期即刷新：以当前房间的客户端/配置为该平台所有房间发起一次批量请求。
+    async fn batch_verdict(
+        self: &Arc<Self>,
+        platform_name: &str,
+        plugin: &Arc<dyn LivePlugin + Send + Sync>,
+        room: &Arc<Worker>,
+        interval: u64,
+    ) -> BatchVerdict {
+        let url = room.get_streamer().url.clone();
+
+        // 命中未过期缓存直接判定
+        if let Some(cache) = self.batch_live.read().unwrap().get(platform_name)
+            && cache.refreshed_at.elapsed() < Duration::from_secs(interval)
+        {
+            return if cache.live_urls.contains(&url) {
+                BatchVerdict::Live
+            } else {
+                BatchVerdict::Offline
+            };
+        }
+
+        // 缓存过期或缺失：为该平台所有房间发起一次批量检测
+        let urls = self.platform_urls(platform_name).await;
+        if urls.is_empty() {
+            return BatchVerdict::Fallback;
+        }
+        let request = batch_check_request(room, urls);
+        match plugin.batch_check(request).await {
+            Ok(live_urls) => {
+                let live_urls: HashSet<String> = live_urls.into_iter().collect();
+                let is_live = live_urls.contains(&url);
+                self.batch_live.write().unwrap().insert(
+                    platform_name.to_string(),
+                    BatchLiveCache {
+                        live_urls,
+                        refreshed_at: Instant::now(),
+                    },
+                );
+                if is_live {
+                    BatchVerdict::Live
+                } else {
+                    BatchVerdict::Offline
+                }
+            }
+            Err(e) => {
+                // 批量请求失败时回退逐间检测，避免整平台漏检
+                warn!(platform = platform_name, e = ?e, "批量检测失败，回退逐间检测");
+                BatchVerdict::Fallback
+            }
+        }
+    }
+
+    /// 获取某平台当前队列中所有房间的 URL（用于批量检测）。
+    async fn platform_urls(self: &Arc<Self>, platform_name: &str) -> Vec<String> {
+        let (send, recv) = oneshot::channel();
+        let msg = ActorMessage::PlatformUrls {
+            respond_to: send,
+            platform_name: platform_name.to_owned(),
+        };
+        let _ = self.sender.send(msg).await;
+        recv.await.unwrap_or_default()
     }
 
     /// 添加工作器到房间列表
@@ -350,6 +454,11 @@ enum ActorMessage {
         respond_to: oneshot::Sender<Option<Arc<Worker>>>,
         platform_name: String,
     },
+    /// 获取某平台所有房间的 URL（用于批量检测）
+    PlatformUrls {
+        respond_to: oneshot::Sender<Vec<String>>,
+        platform_name: String,
+    },
     /// 添加工作器
     Add(
         oneshot::Sender<Option<Arc<dyn LivePlugin + Send + Sync>>>,
@@ -424,6 +533,13 @@ impl RoomsActor {
                     // `let _ =` 忽略发送时的任何错误
                     // 如果使用`select!`宏取消等待响应，可能会发生这种情况
                     let _ = respond_to.send(self.next(&platform_name));
+                }
+                ActorMessage::PlatformUrls {
+                    respond_to,
+                    platform_name,
+                } => {
+                    // `let _ =` 忽略发送时的任何错误
+                    let _ = respond_to.send(self.platform_urls(&platform_name));
                 }
                 ActorMessage::Add(respond_to, worker) => {
                     let plugin = self.add(worker);
@@ -508,6 +624,19 @@ impl RoomsActor {
         *arc.downloader_status.write().unwrap() = WorkerStatus::Pending;
 
         Some(arc)
+    }
+
+    /// 获取某平台所有房间的 URL（含正在检测、已弹出队列的房间）。
+    /// 以 all_workers 为源按插件归属过滤，保证覆盖整平台而非仅队列内房间。
+    fn platform_urls(&self, platform_name: &str) -> Vec<String> {
+        self.all_workers
+            .iter()
+            .filter(|worker| {
+                self.matches(&worker.live_streamer.url)
+                    .is_some_and(|plugin| plugin.name() == platform_name)
+            })
+            .map(|worker| worker.live_streamer.url.clone())
+            .collect()
     }
 
     /// 放回工作队列

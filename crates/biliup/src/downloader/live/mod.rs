@@ -75,6 +75,29 @@ pub trait LivePlugin: Send + Sync {
     fn name(&self) -> &'static str;
     fn matches(&self, url: &str) -> bool;
     async fn check_stream(&self, request: LiveRequest) -> LiveResult<LiveStatus>;
+
+    /// 是否支持批量直播检测。默认 false。
+    /// 支持的平台可用一次请求判定多个直播间的开播状态（对齐 Python `BatchCheck`），
+    /// 监控侧据此先批量过滤，未开播的房间跳过逐间检测。
+    fn supports_batch_check(&self) -> bool {
+        false
+    }
+
+    /// 批量检测：给定同平台的一批 URL，返回其中正在直播的 URL 子集。
+    /// 默认返回空（不支持批量检测的平台不应被调用到）。
+    async fn batch_check(&self, request: BatchCheckRequest) -> LiveResult<Vec<String>> {
+        let _ = request;
+        Ok(Vec::new())
+    }
+}
+
+/// 批量检测请求。承载同平台待检测的 URL 列表与所需的客户端 / 凭据 / 选项。
+#[derive(Debug, Clone)]
+pub struct BatchCheckRequest {
+    pub client: Client,
+    pub urls: Vec<String>,
+    pub options: LiveOptions,
+    pub credentials: LiveCredentials,
 }
 
 #[derive(Debug, Clone)]

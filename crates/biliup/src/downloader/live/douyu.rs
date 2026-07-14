@@ -306,10 +306,14 @@ impl<'a> DouyuLive<'a> {
     async fn get_web_play_info(&self, room_id: &str) -> LiveResult<PlayInfo> {
         let mut cdn = self.douyu_cdn.clone();
         let mut last_error = None;
+        // 鉴权失败时最多刷新一次加密密钥后重试（对齐 rust-srec get_play_info_fallback）：
+        // 缓存密钥可能在本地 expire_at 之前就被服务端判为失效，此时需强制刷新。
+        let mut key_refreshed = false;
 
-        for _ in 0..2 {
+        // scdn 规避最多重试 2 次；叠加一次鉴权刷新，循环上界取 3
+        for _ in 0..3 {
             match self.request_web_play_info(room_id, &cdn).await {
-                Ok(play_info) => {
+                Ok(PlayOutcome::Ok(play_info)) => {
                     if play_info.rtmp_cdn.starts_with("scdn")
                         && let Some(next_cdn) = play_info
                             .cdns_with_name
@@ -322,6 +326,15 @@ impl<'a> DouyuLive<'a> {
                     }
                     return Ok(play_info);
                 }
+                Ok(PlayOutcome::AuthFailed) => {
+                    if !key_refreshed {
+                        self.invalidate_key().await;
+                        key_refreshed = true;
+                        continue;
+                    }
+                    last_error = Some(LiveError::custom("斗鱼播放信息鉴权失败"));
+                    break;
+                }
                 Err(err) => last_error = Some(err),
             }
         }
@@ -329,7 +342,12 @@ impl<'a> DouyuLive<'a> {
         Err(last_error.unwrap_or_else(|| LiveError::custom("获取斗鱼播放信息失败")))
     }
 
-    async fn request_web_play_info(&self, room_id: &str, cdn: &str) -> LiveResult<PlayInfo> {
+    /// 清空缓存的加密密钥，强制下次 update_key 重新向 getEncryption 请求。
+    async fn invalidate_key(&self) {
+        *self.encrypt_key_cache.lock().await = None;
+    }
+
+    async fn request_web_play_info(&self, room_id: &str, cdn: &str) -> LiveResult<PlayOutcome> {
         let now = unix_now()?;
         let (encrypt_key, user_agent) = self.update_key().await?;
         let auth = sign_stream(&encrypt_key, room_id, now);
@@ -350,7 +368,7 @@ impl<'a> DouyuLive<'a> {
             ("auth", auth),
         ];
 
-        let rsp: PlayResponse = self
+        let rsp = self
             .client
             .post(format!(
                 "https://{DOUYU_WEB_DOMAIN}/lapi/live/getH5PlayV1/{room_id}"
@@ -362,17 +380,36 @@ impl<'a> DouyuLive<'a> {
             .await
             .map_err(|err| {
                 LiveError::custom(format!("请求斗鱼播放信息失败 room_id: {room_id}: {err}"))
-            })?
-            .json()
-            .await
-            .map_err(|err| {
-                LiveError::custom(format!("解析斗鱼播放信息失败 room_id: {room_id}: {err}"))
             })?;
+
+        let status = rsp.status();
+        let body = rsp.text().await.map_err(|err| {
+            LiveError::custom(format!("读取斗鱼播放信息失败 room_id: {room_id}: {err}"))
+        })?;
+
+        // 鉴权失败：HTTP 403 或响应体含「鉴权失败」，由调用方刷新密钥后重试
+        // （对齐 rust-srec is_douyu_auth_failed）
+        if is_douyu_auth_failed(status.as_u16(), &body) {
+            return Ok(PlayOutcome::AuthFailed);
+        }
+
+        let rsp: PlayResponse = serde_json::from_str(&body).map_err(|err| {
+            LiveError::custom(format!("解析斗鱼播放信息失败 room_id: {room_id}: {err}"))
+        })?;
 
         if rsp.error == 0
             && let Some(data) = rsp.data
         {
-            return Ok(data);
+            return Ok(PlayOutcome::Ok(data));
+        }
+
+        // JSON 形式返回的鉴权失败同样触发刷新重试
+        if rsp
+            .msg
+            .as_deref()
+            .is_some_and(|msg| msg.contains("鉴权失败"))
+        {
+            return Ok(PlayOutcome::AuthFailed);
         }
 
         if rsp.error == -5 {
@@ -530,6 +567,27 @@ fn unix_now() -> LiveResult<u64> {
         .duration_since(UNIX_EPOCH)
         .map_err(|err| LiveError::custom(format!("获取系统时间失败: {err}")))?
         .as_secs())
+}
+
+/// getH5PlayV1 请求结果：正常拿到播放信息，或需刷新密钥重试的鉴权失败。
+enum PlayOutcome {
+    Ok(PlayInfo),
+    AuthFailed,
+}
+
+/// 判定 getH5PlayV1 是否鉴权失败：HTTP 403，或响应体（去空白、去引号后）含「鉴权失败」
+/// （对齐 rust-srec is_douyu_auth_failed / normalize_douyu_error_body）。
+fn is_douyu_auth_failed(status: u16, body: &str) -> bool {
+    if status == 403 {
+        return true;
+    }
+    let normalized: String = body
+        .trim()
+        .trim_matches('"')
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect();
+    normalized.contains("鉴权失败")
 }
 
 /// 生成随机 Chrome UA（对应 biliup/plugins/__init__.py 的 random_user_agent()，
@@ -831,8 +889,7 @@ mod tests {
     }
 
     #[test]
-    fn white_encrypt_key_missing_expire_at_defaults_to_zero() {
-        let key: WhiteEncryptKey = serde_json::from_str(
+    fn white_encrypt_key_missing_expire_at_defaults_to_zero() {        let key: WhiteEncryptKey = serde_json::from_str(
             r#"{"rand_str":"r","enc_time":2,"is_special":0,"key":"k","enc_data":"e"}"#,
         )
         .unwrap();
@@ -891,5 +948,17 @@ mod tests {
         );
 
         assert_eq!(live.resolve_room_id().await.unwrap(), "123456");
+    }
+
+    #[test]
+    fn is_douyu_auth_failed_detects_403_and_message() {
+        // HTTP 403 一律视为鉴权失败
+        assert!(is_douyu_auth_failed(403, ""));
+        // 响应体含「鉴权失败」（含空白/引号包裹）也算
+        assert!(is_douyu_auth_failed(200, r#"  "鉴 权 失 败"  "#));
+        assert!(is_douyu_auth_failed(200, "鉴权失败"));
+        // 正常响应不算
+        assert!(!is_douyu_auth_failed(200, r#"{"error":0,"data":{}}"#));
+        assert!(!is_douyu_auth_failed(200, ""));
     }
 }

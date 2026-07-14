@@ -70,11 +70,13 @@ impl InkeLive {
             .await
             .map_err(|err| LiveError::custom(format!("解析映客直播间信息失败: {err}")))?;
 
-        if response.error_code != 0 || !response.data.status {
+        let Some(data) = response.data.filter(|_| response.error_code == 0) else {
+            return Ok(LiveStatus::Offline);
+        };
+        if !data.status {
             return Ok(LiveStatus::Offline);
         }
-        let raw_stream_url = response
-            .data
+        let raw_stream_url = data
             .live_addr
             .first()
             .map(|addr| addr.stream_addr.clone())
@@ -85,9 +87,9 @@ impl InkeLive {
             stream: Box::new(LiveStream {
                 name: self.name.clone(),
                 url: self.url.clone(),
-                title: response.data.title.unwrap_or(uid),
+                title: data.title.unwrap_or(uid),
                 date: Utc::now(),
-                live_cover_url: response.data.image.unwrap_or_default(),
+                live_cover_url: data.image.unwrap_or_default(),
                 suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "flv".to_string()),
                 raw_stream_url,
                 platform: "inke".to_string(),
@@ -111,7 +113,8 @@ impl InkeLive {
 #[derive(Deserialize)]
 struct InkeResponse {
     error_code: i32,
-    data: InkeData,
+    #[serde(default)]
+    data: Option<InkeData>,
 }
 
 #[derive(Deserialize)]
