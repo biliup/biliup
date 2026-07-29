@@ -27,10 +27,7 @@ const Huya: React.FC<Props> = props => {
           allowCreate={true}
           filter
           field="huya_max_ratio"
-          extraText="虎牙自选录制码率
- 可以避免录制如20M的码率，每小时8G左右大小，上传及转码耗时过长。
- 20000（蓝光20M）, 10000（蓝光10M）, 8000（蓝光8M）, 2000（超清）, 500（流畅）
- 设置为10000则录制小于等于蓝光10M的画质"
+          extraText="录制码率上限，避免过高码率体积过大。0 原画 / 20000 蓝光20M / 10000 蓝光10M / 8000 蓝光8M / 2000 超清 / 500 流畅。"
           label="画质等级（huya_max_ratio）"
           style={{ width: '100%' }}
           fieldStyle={{
@@ -61,17 +58,7 @@ const Huya: React.FC<Props> = props => {
           allowCreate={true}
           filter
           field="huya_cdn"
-          extraText={
-            <div style={{ fontSize: '14px' }}>
-              如遇到虎牙录制卡顿可以尝试切换线路。可选以下线路
-              <br />
-              AL（阿里云 - 直播线路3）, TX（腾讯云 - 直播线路5）, HW（华为云 - 直播线路6）,
-              WS（网宿）, HS（火山引擎 - 直播线路14）, AL13（阿里云）, TX15（腾讯云）,
-              HW16（华为云）
-              <br />
-              HY、HYZJ(虎牙自建 - 直播线路66) 已屏蔽。如设置，将切换为首个可用线路。
-            </div>
-          }
+          extraText="遇卡顿可切换线路：AL(3)/TX(5)/HW(6)/WS/HS(14)/AL13/TX15/HW16；HY/HYZJ已屏蔽将切首个可用。"
           label="访问线路（huya_cdn）"
           style={{ width: '100%' }}
           fieldStyle={{
@@ -82,16 +69,13 @@ const Huya: React.FC<Props> = props => {
         >
           <Select.Option value="AL">直播线路3（AL）</Select.Option>
           <Select.Option value="TX">直播线路5（TX）</Select.Option>
-          {/* <Select.Option value="HW">直播线路6（HW）</Select.Option> */}
-          {/* <Select.Option value="WS">网宿（WS）</Select.Option> */}
           <Select.Option value="AL13">直播线路13（AL13）</Select.Option>
           <Select.Option value="HS">直播线路14（HS）</Select.Option>
           <Select.Option value="TX15">直播线路15（TX15）</Select.Option>
-          {/* <Select.Option value="HW16">直播线路16（HW16）</Select.Option> */}
         </Form.Select>
         <Form.Switch
           field="huya_cdn_fallback"
-          extraText="当访问线路（huya_cdn）不可用时，尝试其他线路（huya_cdn_fallback）"
+          extraText="访问线路不可用时尝试其他线路。"
           label="CDN 回退（huya_cdn_fallback）"
         />
         <Form.Select
@@ -110,7 +94,7 @@ const Huya: React.FC<Props> = props => {
         </Form.Select>
         <Form.Switch
           field="huya_imgplus"
-          extraText="是否录制二次编码的直播流。默认为启用，关闭后可能无法下载。部分直播间的分辨率超分（如2k/4k）和HDR画质依赖于二次编码，请谨慎关闭。"
+          extraText="录制二次编码流，默认开启。关闭可能无法下载；2k/4k/HDR 依赖二次编码，谨慎关。"
           label="虎牙二次编码（huya_imgplus）"
           initValue={entity?.hasOwnProperty('huya_imgplus') ? entity['huya_imgplus'] : true}
           fieldStyle={{
@@ -120,7 +104,7 @@ const Huya: React.FC<Props> = props => {
         />
         <Form.Switch
           field="huya_mobile_api"
-          extraText="移动端 API 请求直播间信息，可能解决部分直播分区 2 分钟分段问题"
+          extraText="移动端 API 请求直播间信息，可能解决部分分区 2 分钟分段问题"
           label="使用移动端 API（huya_mobile_api）"
           fieldStyle={{
             alignSelf: 'stretch',
@@ -129,7 +113,7 @@ const Huya: React.FC<Props> = props => {
         />
         <Form.Switch
           field="huya_use_wup"
-          extraText="使用 WUP 协议获取直播流，可能解决部分直播分区 2 分钟分段问题"
+          extraText="使用 WUP 协议获取直播流，可能解决部分分区 2 分钟分段问题"
           label="使用 WUP 协议（huya_use_wup）"
           initValue={entity?.hasOwnProperty('huya_use_wup') ? entity['huya_use_wup'] : true}
           fieldStyle={{

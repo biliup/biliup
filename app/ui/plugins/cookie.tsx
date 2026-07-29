@@ -15,13 +15,7 @@ const Cookie: React.FC<Props> = props => {
       <Collapse.Panel header="用户 Cookie" itemKey="user">
         <Form.Input
           field="user.kuaishou_cookie"
-          extraText={
-            <div className="semi-form-field-extra">
-              填入 Cookie 降低风控风险。 需要
-              client_key,kuaishou.live.bfb1s,kuaishou.live.web_st,kuaishou.live.web_ph,userId 的值，
-              请不要将所有 Cookie 填入。
-            </div>
-          }
+          extraText="填入 Cookie 降低风控风险。需 client_key/kuaishou.live.*/userId 的值，勿填全部 Cookie。"
           placeholder="client_key=none;kuaishou.live.bfb1s=none;kuaishou.live.web_st=none;kuaishou.live.web_ph=none;userId=none;"
           label="快手 Cookie（kuaishou_cookie）"
           style={{ width: '100%' }}
@@ -42,7 +36,6 @@ const Cookie: React.FC<Props> = props => {
         />
         <Form.Input
           field="user.niconico-password"
-          mode="password"
           extraText="您的 Niconico 账户的密码。"
           label="ニコニコ動画 密码（niconico-password）"
           style={{ width: '100%' }}

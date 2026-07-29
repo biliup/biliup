@@ -1,42 +1,57 @@
 'use client'
 import {
-    Layout,
-    Nav,
-    Button,
-    Tag,
-    Typography,
-    Popconfirm,
-    Notification,
-    Card, Dropdown, Badge,
+  Layout,
+  Button,
+  ButtonGroup,
+  Popconfirm,
+  Spin,
+  Empty,
+  Notification,
+  Typography,
 } from '@douyinfe/semi-ui'
 import {
-    IconHelpCircle,
-    IconPlusCircle,
-    IconVideoListStroked,
-    IconEdit2Stroked,
-    IconDeleteStroked,
-    IconWrench, IconTreeTriangleDown, IconPause, IconPlay, IconLock, IconUpload,
+  IconPlusCircle,
+  IconEdit2Stroked,
+  IconDeleteStroked,
+  IconWrench,
+  IconVideoListStroked,
+  IconClock,
+  IconLayers,
 } from '@douyinfe/semi-icons'
-import { List, ButtonGroup } from '@douyinfe/semi-ui'
-import React, { useState } from 'react'
 import useStreamers from '../../lib/use-streamers'
 import TemplateModal from '../../ui/TemplateModal'
 import OverrideModal from '../../ui/OverrideModal'
-import { LiveStreamerEntity, put, requestDelete, sendRequest } from '../../lib/api-streamer'
+import { LiveStreamerEntity, put, requestDelete, sendRequest, fetcher, StreamerInfo } from '../../lib/api-streamer'
 import useSWRMutation from 'swr/mutation'
-import {PauseButton} from "@/app/ui/StreamerActions/PauseButton";
+import useSWR from 'swr'
+import { PauseButton } from '@/app/ui/StreamerActions/PauseButton'
+import PageHeader from '../components/PageHeader'
+import { uploadStatusTag, platformName } from '@/app/lib/status'
+import styles from './page.module.scss'
 
-export default function Home() {
-  const { Header, Content } = Layout
-  const { Text } = Typography
+const { Text } = Typography
+
+export default function StreamersPage() {
+  const { Content } = Layout
   const { streamers, isLoading } = useStreamers()
   const { trigger: deleteStreamers } = useSWRMutation('/v1/streamers', requestDelete)
   const { trigger: updateStreamers } = useSWRMutation('/v1/streamers', put)
   const { trigger } = useSWRMutation('/v1/streamers', sendRequest)
+  const { data: infos } = useSWR<StreamerInfo[]>('/v1/streamer-info', fetcher)
+
+  // url -> 最新一次录制的直播标题（作为卡片主角「直播间标题」）
+  const titleByUrl = new Map<string, { title: string; date: number }>()
+  ;(infos ?? []).forEach((i) => {
+    if (i.url && i.title) {
+      const cur = titleByUrl.get(i.url)
+      if (!cur || i.date > cur.date) titleByUrl.set(i.url, { title: i.title, date: i.date })
+    }
+  })
 
   const onConfirm = async (id: number) => {
     await deleteStreamers(id)
   }
+
   const handleEntityPostprocessor = (values: any) => {
     if (values?.postprocessor) {
       values.postprocessor = values.postprocessor.map(
@@ -50,31 +65,9 @@ export default function Home() {
           return element
         }
       )
-      // console.log(values.postprocessor);
     }
     return values
   }
-  const data: LiveStreamerEntity[] | undefined = streamers?.map(live => {
-    let statusTag
-    switch (live.status) {
-      case 'Working':
-        statusTag = <Tag color="red">直播中</Tag>
-        break
-      case 'Idle':
-        statusTag = <Tag color="green">空闲</Tag>
-        break
-      case 'Pending':
-        statusTag = <Tag color="indigo">检测中</Tag>
-        break
-      case 'OutOfSchedule':
-        statusTag = <Tag color="green">非录播时间</Tag>
-        break
-      case 'Pause':
-        statusTag = <Tag color="pink">暂停中</Tag>
-        break
-    }
-    return { ...handleEntityPostprocessor(live), statusTag }
-  })
 
   const handleOk = async (values: any) => {
     if (values?.postprocessor) {
@@ -83,7 +76,7 @@ export default function Home() {
       )
     }
     try {
-      const res = await trigger(values)
+      await trigger(values)
     } catch (e: any) {
       Notification.error({
         title: '创建失败',
@@ -95,7 +88,6 @@ export default function Home() {
   }
 
   const handleUpdate = async (values: any) => {
-    console.log(values);
     delete values.status
     delete values.statusTag
     delete values.upload_status
@@ -105,7 +97,7 @@ export default function Home() {
       )
     }
     try {
-      const res = await updateStreamers(values)
+      await updateStreamers(values)
     } catch (e: any) {
       Notification.error({
         title: '更新失败',
@@ -116,170 +108,119 @@ export default function Home() {
     }
   }
 
+  const renderCard = (item: LiveStreamerEntity) => {
+    const isLive = item.status === 'Working'
+    const label = item.remark ? `[${item.remark}]` : '[未命名]'
+    const hero = titleByUrl.get(item.url)?.title || item.remark || item.url
+    return (
+      <div key={item.id} className={`${styles.card} ${isLive ? styles.rec : ''}`}>
+        <div className={styles.cardHead}>
+          <span className={styles.cardStatus}>
+            <span className={`${styles.recDot} ${isLive ? styles.dotRec : styles.dotIdle}`} />
+            {label}
+          </span>
+          <span className={styles.cardPlat}>{platformName(item.url)}</span>
+        </div>
+
+        <div className={styles.cardName} title={hero}>
+          {hero}
+        </div>
+
+        <a
+          className={styles.cardSub}
+          href={item.url}
+          target="_blank"
+          rel="noreferrer"
+          title={item.url}
+        >
+          {item.url}
+        </a>
+
+        <div className={styles.meta}>
+          {item.time_range ? (
+            <span className={styles.chip}>
+              <IconClock size="small" />
+              {Array.isArray(item.time_range) ? item.time_range.join(' ~ ') : String(item.time_range)}
+            </span>
+          ) : null}
+          {item.split_time ? (
+            <span className={styles.chip}>
+              <IconClock size="small" />
+              切片 {item.split_time}s
+            </span>
+          ) : null}
+          {item.split_size ? (
+            <span className={styles.chip}>
+              <IconLayers size="small" />
+              分片 {item.split_size}MB
+            </span>
+          ) : null}
+          {item.upload_status ? uploadStatusTag(item.upload_status) : null}
+        </div>
+
+        <div className={styles.cardFoot}>
+          <ButtonGroup theme="borderless" className={styles.cardActions}>
+            <TemplateModal onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
+              <Button
+                theme="borderless"
+                type="primary"
+                icon={<IconEdit2Stroked />}
+                aria-label="编辑"
+              />
+            </TemplateModal>
+            <PauseButton streamer={item} />
+            <Popconfirm
+              title="确定是否要删除？"
+              content="此操作将不可逆"
+              onConfirm={() => onConfirm(item.id)}
+            >
+              <Button
+                theme="borderless"
+                type="danger"
+                icon={<IconDeleteStroked />}
+                aria-label="删除"
+              />
+            </Popconfirm>
+            <OverrideModal onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
+              <Button
+                theme="borderless"
+                type="tertiary"
+                icon={<IconWrench />}
+                aria-label="高级"
+              />
+            </OverrideModal>
+          </ButtonGroup>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <>
-      <Header
-        style={{
-          backgroundColor: 'var(--semi-color-bg-1)',
-          position: 'sticky',
-          top: 0,
-          zIndex: 1,
-        }}
-      >
-        <nav
-          style={{
-            display: 'flex',
-            paddingLeft: '25px',
-            paddingRight: '25px',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              gap: 10,
-              justifyContent: 'center',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-            }}
-          >
-            <IconVideoListStroked
-              size="large"
-              style={{
-                backgroundColor: 'rgba(var(--semi-green-4), 1)',
-                borderRadius: 'var(--semi-border-radius-large)',
-                color: 'var(--semi-color-bg-0)',
-                padding: '6px',
-              }}
-            />
-            <h4>录播管理</h4>
+      <PageHeader
+        title="直播管理"
+        description="管理需要录制的直播间，支持新增、编辑与删除"
+        icon={<IconVideoListStroked size="large" />}
+        actions={
+          <TemplateModal onOk={handleOk}>
+            <Button icon={<IconPlusCircle />} theme="solid">
+              新建
+            </Button>
+          </TemplateModal>
+        }
+      />
+      <Content className={styles.content}>
+        {isLoading ? (
+          <div className={styles.center}>
+            <Spin size="large" />
           </div>
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 6,
-            }}
-          >
-            <Button
-              theme="borderless"
-              icon={<IconHelpCircle size="large" />}
-              style={{
-                color: 'var(--semi-color-text-2)',
-              }}
-              onClick={() => (window.location.href = '/static/ds_update.log')}
-            />
-            <TemplateModal onOk={handleOk}>
-              <Button icon={<IconPlusCircle />} theme="solid" style={{ marginRight: 10 }}>
-                新建
-              </Button>
-            </TemplateModal>
+        ) : streamers && streamers.length > 0 ? (
+          <div className={styles.grid}>{streamers.map(renderCard)}</div>
+        ) : (
+          <div className={styles.center}>
+            <Empty description="还没有监控任何直播间，点击右上角「新建」开始" />
           </div>
-        </nav>
-      </Header>
-      <Content
-        style={{
-          padding: '24px',
-          backgroundColor: 'var(--semi-color-bg-0)',
-        }}
-      >
-        <main>
-          <List
-            grid={{
-              gutter: 12,
-              xs: 24,
-              sm: 24,
-              md: 12,
-              lg: 8,
-              xl: 6,
-              xxl: 4,
-            }}
-            dataSource={data}
-            renderItem={item => (
-              <List.Item>
-                <Card
-                  shadows="hover"
-                  style={{
-                    // maxWidth: 360,
-                    margin: '9px 0px',
-                    width: '100%',
-                    // flexGrow: 1,
-                  }}
-                  bodyStyle={
-                    {
-                      // display: 'flex',
-                      // alignItems: 'center',
-                      // justifyContent: 'space-between'
-                    }
-                  }
-                >
-                  <div style={{ position: 'absolute', right: 20, top: 9 }}>{item.statusTag}</div>
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      {item.upload_status === "Pending" ? <Badge count={<IconUpload />}> </Badge> : null}
-
-                    <h3
-                      style={{
-                        color: 'var(--semi-color-text-0)',
-                        fontWeight: 500,
-                        maxWidth: '80%',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {item.remark}
-                    </h3>
-
-                  </div>
-
-                  <Text style={{ width: '101%' }} ellipsis={{ showTooltip: true }} type="tertiary">
-                    {item.url}
-                  </Text>
-
-                  <div
-                    style={{
-                      margin: '0',
-                      display: 'flex',
-                      padding: '0 0 32px 0px',
-                      justifyContent: 'flex-end',
-                    }}
-                  >
-                    <ButtonGroup
-                      theme="borderless"
-                      style={{ position: 'absolute', right: 20, bottom: 15 }}
-                    >
-                      <TemplateModal onOk={handleUpdate} entity={item}>
-                        <Button theme="borderless" icon={<IconEdit2Stroked />}></Button>
-                      </TemplateModal>
-                      <span className="semi-button-group-line semi-button-group-line-borderless semi-button-group-line-primary"></span>
-                      <PauseButton streamer={item}/>
-                      <span className="semi-button-group-line semi-button-group-line-borderless semi-button-group-line-primary"></span>
-                      <Popconfirm
-                        title="确定是否要删除？"
-                        content="此操作将不可逆"
-                        onConfirm={async () => await onConfirm(item.id)}
-                        // onCancel={onCancel}
-                      >
-                        <Button theme="borderless" icon={<IconDeleteStroked />}></Button>
-                      </Popconfirm>
-                      <span className="semi-button-group-line semi-button-group-line-borderless semi-button-group-line-primary"></span>
-                      <OverrideModal onOk={handleUpdate} entity={item}>
-                        <Button theme="borderless" icon={<IconWrench />}></Button>
-                      </OverrideModal>
-                    </ButtonGroup>
-                  </div>
-                </Card>
-
-              </List.Item>
-            )}
-          />
-        </main>
+        )}
       </Content>
     </>
   )

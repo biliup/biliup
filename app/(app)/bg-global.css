@@ -1,0 +1,43 @@
+/* 全局自定义背景：当 body 带 app-has-bg 时生效 */
+html,
+body {
+  overflow-x: hidden;
+}
+
+body.app-has-bg::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: -2;
+  background-image: var(--app-bg-image);
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: center;
+  pointer-events: none;
+}
+
+/* 同色半透明遮罩，保证所有页面文字可读（明暗主题都跟随） */
+body.app-has-bg::after {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: var(--semi-color-bg-0);
+  opacity: 0.35;
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* 让 Semi 顶层容器透出 body 背景 */
+body.app-has-bg .semi-layout,
+body.app-has-bg .semi-sider,
+body.app-has-bg .semi-nav,
+body.app-has-bg .semi-layout-content,
+body.app-has-bg .semi-layout-header {
+  background: transparent !important;
+}

@@ -1,0 +1,158 @@
+.content {
+  padding: 24px;
+  min-height: calc(100vh - 69px);
+}
+
+.center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 140px);
+}
+
+/* 响应式卡片网格：Tauri 800px → 2 列；PC 宽屏 → 自动多列 */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+/* 与主页卡片同构 */
+.card {
+  border: 1px solid var(--semi-color-fill-2);
+  border-radius: 12px;
+  background: var(--semi-color-bg-1);
+  padding: 16px;
+  transition: border-color 0.15s ease, box-shadow 0.2s ease, transform 0.15s ease;
+  box-shadow: 0 1px 2px rgba(var(--semi-grey-9), 0.04), 0 2px 6px rgba(var(--semi-grey-9), 0.03);
+}
+
+.card:hover {
+  border-color: var(--semi-color-primary);
+  box-shadow: 0 6px 16px rgba(var(--semi-grey-9), 0.08);
+  transform: translateY(-1px);
+}
+
+/* 直播中卡：视觉锚点（红边条 + 轻红底） */
+.card.rec {
+  border-left: 3px solid rgb(var(--semi-red-5));
+  background: rgba(var(--semi-red-4), 0.05);
+}
+.card.rec:hover {
+  background: rgba(var(--semi-red-4), 0.09);
+}
+
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.cardStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+}
+
+.cardPlat {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cardName {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+
+.cardSub {
+  display: block;
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-decoration: none;
+  margin-bottom: 12px;
+}
+.cardSub:hover {
+  color: var(--semi-color-primary);
+  text-decoration: underline;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: var(--semi-border-radius-small);
+  background: var(--semi-color-fill-0);
+  color: var(--semi-color-text-2);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* 底部操作栏：顶部细线 + 按钮靠右 */
+.cardFoot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--semi-color-border);
+}
+
+.cardActions {
+  gap: 4px;
+
+  :global(.semi-button) {
+    padding: 5px;
+  }
+}
+
+/* 状态点（与主页共用同一套语义色） */
+.recDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--semi-color-text-2);
+}
+.recDot.dotRec {
+  background: rgb(var(--semi-red-5));
+  animation: pulse 1.4s infinite;
+}
+.recDot.dotIdle {
+  background: rgb(var(--semi-green-5));
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(var(--semi-red-4), 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(var(--semi-red-4), 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--semi-red-4), 0);
+  }
+}

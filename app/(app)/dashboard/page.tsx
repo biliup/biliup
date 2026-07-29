@@ -5,7 +5,6 @@ import {
   Button,
   Form,
   Layout,
-  Nav,
   Collapse,
   Avatar,
   Select,
@@ -24,6 +23,8 @@ import useSWRMutation from 'swr/mutation'
 import { FormApi } from '@douyinfe/semi-ui/lib/es/form'
 import { useBiliUsers } from '../../lib/use-streamers'
 import styles from '../../styles/dashboard.module.scss'
+import PageHeader from '../components/PageHeader'
+import SectionTitle from '../components/SectionTitle'
 
 // 注册各平台组件
 import plugins from '../../ui/plugins'
@@ -63,6 +64,27 @@ const Dashboard: React.FC = () => {
 
   const { biliUsers } = useBiliUsers()
 
+  // 平台设置：左列平台名 + 右栏仅渲染选中平台（默认哔哩哔哩）
+  // key 与各平台插件 Collapse.Panel 的 itemKey 对齐，便于点击即展开
+  const [activePlatform, setActivePlatform] = useState('bilibili')
+  const PLATFORM_LIST = [
+    { key: 'bilibili', name: '哔哩哔哩', Comp: plugins.Bilibili },
+    { key: 'cc', name: 'CC', Comp: plugins.CC },
+    { key: 'douyin', name: '抖音', Comp: plugins.Douyin },
+    { key: 'douyu', name: '斗鱼', Comp: plugins.Douyu },
+    { key: 'huya', name: '虎牙', Comp: plugins.Huya },
+    { key: 'kilakila', name: '克拉克拉', Comp: plugins.Kilakila },
+    { key: 'twitcasting', name: 'TwitCasting', Comp: plugins.Twitcasting },
+    { key: 'twitch', name: 'Twitch', Comp: plugins.Twitch },
+    { key: 'youtube', name: 'YouTube', Comp: plugins.Youtube },
+  ]
+  const COOKIE_ENTRY = { key: 'user', name: '用户 Cookie', Comp: plugins.Cookie }
+  const activeEntry =
+    activePlatform === 'user'
+      ? COOKIE_ENTRY
+      : PLATFORM_LIST.find(p => p.key === activePlatform) ?? PLATFORM_LIST[0]
+  const ActiveComp = activeEntry.Comp
+
   if (isLoading) {
     return <>Loading</>
   }
@@ -96,38 +118,22 @@ const Dashboard: React.FC = () => {
           zIndex: 1,
         }}
       >
-        <Nav
-          header={
-            <>
-              <div
-                style={{
-                  backgroundColor: '#6b6c75ff',
-                  borderRadius: 'var(--semi-border-radius-large)',
-                  color: 'var(--semi-color-bg-0)',
-                  display: 'flex',
-                  // justifyContent: 'center',
-                  padding: '6px',
-                }}
-              >
-                <IconStar size="large" />
-              </div>
-              <h4 style={{ marginLeft: '12px' }}>空间配置</h4>
-            </>
-          }
-          footer={
+        <PageHeader
+          icon={<IconStar size="large" />}
+          title="空间配置"
+          description="管理全局下载、各平台与上传账号"
+          actions={
             <Button
               onClick={() => {
                 formRef.current?.submitForm()
               }}
               icon={<IconPlusCircle />}
               theme="solid"
-              style={{ marginRight: 10 }}
             >
               保存
             </Button>
           }
-          mode="horizontal"
-        ></Nav>
+        />
       </Header>
       <Content>
         <main className={styles.rootConfigPanel}>
@@ -165,43 +171,38 @@ const Dashboard: React.FC = () => {
                 <Tabs
                   type="line"
                   contentStyle={{
-                    maxWidth: 965,
-                    // marginLeft: 'auto',
-                    // marginRight: 'auto',
-                    margin: '10px auto 0 auto',
+                    margin: '10px 0 0 0',
                   }}
                 >
                   <TabPane tab="全局设置" itemKey="1">
                     {/* 全局设置 */}
                     <Global />
                   </TabPane>
-                  <TabPane tab="各平台下载" itemKey="2">
-                    {/* 各平台下载 */}
+                  <TabPane tab="平台设置" itemKey="2">
+                    {/* 平台设置：左列平台名 + 右栏选中表单 */}
                     <div className={styles.framePlatformConfig}>
-                      <div className={styles.frameInside}>
-                        <div className={styles.group}>
-                          <div className={styles.buttonOnlyIconSecond}>
-                            <div
-                              className={styles.lineStory}
-                              style={{
-                                color: 'var(--semi-color-bg-0)',
-                                display: 'flex',
-                              }}
+                      <SectionTitle icon={<IconGlobe size="small" />} title="平台设置" />
+                      <div className={styles.platformLayout}>
+                        <nav className={styles.platformNav}>
+                          {PLATFORM_LIST.concat(COOKIE_ENTRY).map(p => (
+                            <button
+                              key={p.key}
+                              type="button"
+                              className={`${styles.platformNavItem} ${
+                                activePlatform === p.key ? styles.platformNavItemActive : ''
+                              }`}
+                              onClick={() => setActivePlatform(p.key)}
                             >
-                              <IconGlobe size="small" />
-                            </div>
-                          </div>
-                        </div>
-                        <p className={styles.meegoSharedWebSettin}>各平台下载设置</p>
-                      </div>
-                      <Collapse keepDOM style={{ width: '100%' }}>
-                        {Object.entries(plugins)
-                          .filter(([key]) => key !== 'Cookie')
-                          .map(([key, Plugin]) => (
-                            <Plugin key={key} entity={entity} list={list} />
+                              {p.name}
+                            </button>
                           ))}
-                        <plugins.Cookie entity={entity} list={list} />
-                      </Collapse>
+                        </nav>
+                        <div className={styles.platformBody}>
+                          <Collapse key={activePlatform} defaultActiveKey={[activePlatform]}>
+                            <ActiveComp key={activePlatform} entity={entity} list={list} />
+                          </Collapse>
+                        </div>
+                      </div>
                     </div>
                   </TabPane>
                   <TabPane tab="开发者选项" itemKey="3">

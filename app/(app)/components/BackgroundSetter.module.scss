@@ -1,0 +1,14 @@
+.float {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 999px;
+  background: var(--semi-color-bg-1);
+  border: 1px solid var(--semi-color-border);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+}

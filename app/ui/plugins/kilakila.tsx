@@ -25,7 +25,7 @@ const Kilakila: React.FC<Props> = props => {
       <Collapse.Panel header="克拉克拉" itemKey="kilakila">
         <Form.Select
           field="kila_protocol"
-          extraText="直播流协议，默认hls"
+          extraText="直播流协议，默认 hls"
           label="直播流协议(kila_protocol)"
           placeholder="hls"
           style={{ width: '100%' }}

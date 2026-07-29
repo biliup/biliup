@@ -1,6 +1,7 @@
 'use client'
 import React, { useEffect } from 'react'
 import styles from '../../styles/dashboard.module.scss'
+import SectionTitle from '../../(app)/components/SectionTitle'
 import { Form, Select, Space, useFormApi } from '@douyinfe/semi-ui'
 import { IconUpload, IconDownload } from '@douyinfe/semi-icons'
 
@@ -11,43 +12,14 @@ const Global: React.FC = () => {
     <>
       {/* 全局下载 */}
       <div className={styles.frameDownload}>
-        <div className={styles.frameInside}>
-          <div className={styles.group}>
-            <div className={styles.buttonOnlyIconSecond} />
-            <div
-              className={styles.lineStory}
-              style={{
-                color: 'var(--semi-color-bg-0)',
-                display: 'flex',
-              }}
-            >
-              <IconDownload size="small" />
-            </div>
-          </div>
-          <p className={styles.meegoSharedWebWorkIt}>全局下载设置</p>
-        </div>
+        <SectionTitle icon={<IconDownload size="small" />} title="全局下载设置" />
         <Form.Select
           label="下载插件（downloader）"
           field="downloader"
           placeholder="stream-gears（默认）"
           // initValue="stream-gears"
           extraText={
-            <div style={{ fontSize: '14px' }}>
-              选择全局默认的下载插件, 可选:
-              <br />
-              1. streamlink（仅限 hls 流，不支持的流将回退到 ffmpeg。非 Docker 用户需自行安装 FFmpeg）
-              <br />
-              2. ffmpeg（非 Docker 用户需自行安装 FFmpeg）
-              <br />
-              3. stream-gears（默认。防 FLV 流花屏）
-              <br />
-              4. sync-downloader（流式边录边传，需先为主播设定上传模板。不受
-              pool2/threads/segment_time 控制，默认 3 线程上传，请确保上传带宽充足。非 Docker 用户需自行安装 FFmpeg）详见 Wiki <a href="https://github.com/biliup/biliup/wiki/%E8%BE%B9%E5%BD%95%E8%BE%B9%E4%BC%A0%E5%8A%9F%E8%83%BD" target="_blank" rel="noopener noreferrer" >点击查看</a>
-              <br />
-              5. ytarchive（仅适用于 Youtube Live）
-              <br />
-              {/* 6. mesio（基于 Rust 的命令行视频下载/修复器）详见 <a href="https://github.com/hua0512/rust-srec/tree/main/mesio-cli" target="_blank" rel="noopener noreferrer" >项目主页</a> */}
-            </div>
+            '全局默认下载插件：streamlink / ffmpeg 需自备 FFmpeg；stream-gears 为默认（防 FLV 花屏）；sync-downloader 边录边传（需先设上传模板）；ytarchive 仅限 YouTube Live。'
           }
           style={{ width: '100%' }}
           fieldStyle={{
@@ -86,19 +58,19 @@ const Global: React.FC = () => {
                   message: '以字母开头时，第二个字符不能是中文冒号',
                 },
                 {
-                  pattern: /^[^:]*$|^[a-zA-Z]:[\/\\][^:]*$/,
+                  pattern: /^[^:]*$|^[a-zA-Z]:[\\/\\\\][^:]*$/,
                   message: '冒号只能出现在第二个字符位置，且后面必须连接斜杠',
                 },
                 {
-                  pattern: /^(?!.*?\.{3,})(?!.*?\.{2}(?![\/\\])).*$/,
+                  pattern: /^(?!.*?\\.{3,})(?!.*?\\.{2}(?![\\/\\\\])).*$/,
                   message: '点号最多只能连续出现两次，且后面必须连接斜杠',
                 },
                 {
-                  pattern: /^(?!.*\/\\)(?!.*\\\/).*$/,
+                  pattern: /^(?!.*\\/\\\\)(?!.*\\\\\\/).*$/,
                   message: '不允许连接正反斜杠',
                 },
                 {
-                  pattern: /^(?!.*([\\]{3,}|[\/]{2,})).*$/,
+                  pattern: /^(?!.*([\\\\]{3,}|[\/]{2,})).*$/,
                   message: '反斜杠最多只能连续出现两次，正斜杠最多只能连续出现一次',
                 },
               ]}
@@ -108,13 +80,7 @@ const Global: React.FC = () => {
         ) : null}
         <Form.InputNumber
           label="视频分段大小（file_size）"
-          extraText={
-            <div style={{ fontSize: '14px' }}>
-              录像单文件大小限制，超过此大小触发文件分割。下载回放时无法使用。
-              <br />
-              单位：Byte，示例：4294967296（4GB）
-            </div>
-          }
+          extraText={'单文件大小上限，超过则分割。单位 Byte（如 4294967296 ≈ 4GB）。下载回放时无效。'}
           field="file_size"
           placeholder=""
           suffix={'Byte'}
@@ -127,13 +93,7 @@ const Global: React.FC = () => {
         />
         <Form.Input
           field="segment_time"
-          extraText={
-            <div style={{ fontSize: '14px' }}>
-              录像单文件时间限制，超过此时长触发文件分割。
-              <br />
-              格式：&apos;00:00:00&apos;（时:分:秒）
-            </div>
-          }
+          extraText={'单文件时长上限，超过则分割。格式 00:00:00（时:分:秒）。'}
           label="视频分段时长（segment_time）"
           placeholder="01:00:00"
           style={{ width: '100%' }}
@@ -160,17 +120,7 @@ const Global: React.FC = () => {
         />
         <Form.Input
           field="filename_prefix"
-          extraText={
-            <div style={{ fontSize: '14px' }}>
-              全局文件名模板。可被单个主播文件名模板覆盖。可用变量如下
-              <br />
-              {'\u007B'}streamer{'\u007D'}: 录播备注（必须保留）
-              <span style={{ margin: '0 20px' }}></span>
-              {'\u007B'}title{'\u007D'}: 直播标题
-              <br />
-              %Y-%m-%d %H_%M_%S: 开始录制时的 年-月-日 时_分_秒
-            </div>
-          }
+          extraText={'全局文件名模板，可被单主播覆盖。{streamer} 录播备注（必填）、{title} 直播标题，支持 %Y-%m-%d %H_%M_%S 时间变量。'}
           label="文件名模板（filename_prefix）"
           placeholder="{streamer}%Y-%m-%dT%H_%M_%S"
           style={{ width: '100%' }}
@@ -182,7 +132,7 @@ const Global: React.FC = () => {
         />
         <Form.Switch
           field="segment_processor_parallel"
-          extraText={<div style={{ fontSize: '14px' }}>开启后无法保证分段后处理先后执行顺序</div>}
+          extraText={'开启后分段后处理不保证先后顺序。'}
           label="视频分段后处理并行（segment_processor_parallel)"
           fieldStyle={{
             alignSelf: 'stretch',
@@ -191,13 +141,7 @@ const Global: React.FC = () => {
         />
         <Form.InputNumber
           field="filtering_threshold"
-          extraText={
-            <div style={{ fontSize: '14px' }}>
-              小于此大小的视频文件将会被过滤删除。
-              <br />
-              单位：MB
-            </div>
-          }
+          extraText={'小于此大小（MB）的碎片文件会被自动过滤删除。'}
           label="碎片过滤（filtering_threshold）"
           suffix={'MB'}
           style={{ width: '100%' }}
@@ -211,15 +155,7 @@ const Global: React.FC = () => {
         <Form.InputNumber
           field="delay"
           label="下播延迟检测（delay)"
-          extraText={
-            <div style={{ fontSize: '14px' }}>
-              当检测到主播下播后，延迟一定时间再次检测确认，避免特殊情况提早启动上传导致分稿件。
-              <br />
-              单位：秒
-              <br />
-              默认延迟时间为 0 秒
-            </div>
-          }
+          extraText={'检测到下播后延迟再确认的时间（秒），避免误判提前上传。默认 0。'}
           placeholder="0"
           suffix="s"
           style={{ width: '100%' }}
@@ -231,13 +167,7 @@ const Global: React.FC = () => {
         />
         <Form.InputNumber
           field="event_loop_interval"
-          extraText={
-            <div style={{ fontSize: '14px' }}>
-              单个主播检测间隔时间，单位：秒。比如虎牙有10个主播，每个主播会间隔10秒检测
-              <br />
-              单位：秒
-            </div>
-          }
+          extraText={'单个主播检测间隔（秒）。'}
           label="直播事件检测间隔（event_loop_interval）"
           suffix="s"
           style={{ width: '100%' }}
@@ -249,7 +179,7 @@ const Global: React.FC = () => {
         />
         <Form.InputNumber
           field="pool1_size"
-          extraText="负责下载事件的线程池大小，用于限制最大同时录制数。"
+          extraText="负责下载事件的线程池大小，限制最大同时录制数。"
           label="下载线程池大小（pool1_size）"
           placeholder={5}
           style={{ width: '100%' }}
@@ -265,22 +195,7 @@ const Global: React.FC = () => {
 
       {/* 全局上传 */}
       <div className={styles.frameUpload}>
-        <div className={styles.frameInside}>
-          <div className={styles.group}>
-            <div className={styles.buttonOnlyIconSecond} />
-            <div
-              className={styles.lineStory}
-              style={{
-                color: 'var(--semi-color-bg-0)',
-                display: 'flex',
-              }}
-            >
-              <IconUpload size="small" />
-            </div>
-          </div>
-          <p className={styles.meegoSharedWebWorkIt}>全局上传设置</p>
-        </div>
-
+        <SectionTitle icon={<IconUpload size="small" />} title="全局上传设置" />
         <Form.Select
           field="submit_api"
           label="提交接口（submit_api）"
@@ -317,7 +232,7 @@ const Global: React.FC = () => {
         <Form.Select
           field="lines"
           label="上传线路（lines）"
-          extraText="b站上传线路选择，默认为自动模式，可手动切换为alia, bda2, bldsa, tx, txa, estx, akbd"
+          extraText="B站上传线路，默认自动（AUTO）。可选 alia / bda2 / bldsa / tx / txa / estx / akbd 等。"
           placeholder="AUTO（自动，默认）"
           style={{ width: '100%' }}
           fieldStyle={{
@@ -338,7 +253,7 @@ const Global: React.FC = () => {
         <Form.InputNumber
           field="threads"
           placeholder={3}
-          extraText="单文件并发上传数,未达到带宽上限时,增大此值可提高上传速度(不要设置过大,部分线路限制为8,如速度不佳优先调整上传线路)"
+          extraText="单文件并发上传数。未达带宽上限时可调大提速（部分线路限 8）。"
           label="上传并发（threads）"
           style={{ width: '100%' }}
           fieldStyle={{
@@ -350,7 +265,7 @@ const Global: React.FC = () => {
         <Form.InputNumber
           field="max_upload_limit"
           placeholder={8}
-          extraText="录播上传次数上限，防止因意外情况如B站接口抽风、录播本身损坏导致录播反复上传浪费宽带或被B站风控（注：限制是记录在程序上下文中的，重启程序会重置上传次数限制；且为了保证尽量不改动老用户使用逻辑，默认将此值设置为一个较大的值，一般推荐设置为2-3）"
+          extraText="录播上传次数上限，防止异常时反复上传浪费带宽或被风控。重启程序会重置；默认较大，建议设 2-3。"
           label="上传重试次数限制（max_upload_limit）"
           style={{ width: '100%' }}
           fieldStyle={{
@@ -362,9 +277,7 @@ const Global: React.FC = () => {
 
         <Form.InputNumber
           field="pool2_size"
-          extraText={
-            <div style={{ fontSize: '14px' }}>负责上传事件的线程池大小。根据实际带宽设置。</div>
-          }
+          extraText="负责上传事件的线程池大小。根据实际带宽设置。"
           placeholder={3}
           label="上传线程池大小（pool2_size）"
           style={{ width: '100%' }}
@@ -375,13 +288,7 @@ const Global: React.FC = () => {
         />
         <Form.Switch
           field="use_live_cover"
-          extraText={
-            <div style={{ fontSize: '14px' }}>
-              使用直播间封面作为投稿封面。此封面优先级低于单个主播指定的自定义封面，保存于cover文件夹下，上传后自动删除。
-              <br />
-              目前支持平台：哔哩哔哩，克拉克拉，Twitch，YouTube。
-            </div>
-          }
+          extraText="用直播间封面作投稿封面（优先级低于单主播自定义封面）。支持 B站 / 克拉克拉 / Twitch / YouTube。"
           label="使用直播间封面作为投稿封面（use_live_cover)"
           fieldStyle={{
             alignSelf: 'stretch',

@@ -27,8 +27,7 @@ const Douyu: React.FC<Props> = props => {
           allowCreate={true}
           filter
           field="douyu_rate"
-          extraText="刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段(仅ffmpeg streamlink)时录制设置的画质
-0 原画,8 蓝光8M,4 蓝光4m,3 超清,2 高清"
+          extraText="画质等级，默认原画。0 原画 / 8 蓝光8M / 4 蓝光4M / 3 超清 / 2 高清；开播无选档先录原画，分段后（ffmpeg/streamlink）切换。"
           label="画质等级（douyu_rate）"
           style={{ width: '100%' }}
           fieldStyle={{
@@ -62,8 +61,7 @@ const Douyu: React.FC<Props> = props => {
           allowCreate={true}
           filter
           field="douyu_cdn"
-          extraText="如遇到斗鱼录制卡顿可以尝试切换线路。可选以下线路
-tctc-h5（线路4）, tct-h5（线路5）, ali-h5（线路6）, hw-h5（线路7）, hs-h5（线路13）"
+          extraText="遇卡顿可切换线路：tctc-h5(4)/tct-h5(5)/ali-h5(6)/hw-h5(7)/hs-h5(13)。"
           label="访问线路（douyu_cdn）"
           style={{ width: '100%' }}
           fieldStyle={{
@@ -80,7 +78,7 @@ tctc-h5（线路4）, tct-h5（线路5）, ali-h5（线路6）, hw-h5（线路7�
         </Form.Select>
         <Form.Switch
           field="douyu_force_hs"
-          extraText="强制 hs 流使用构造链接，防止部分海外机器遇到频繁断流。使用时需将 douyu_cdn 设置为 hs-h5。"
+          extraText="强制 hs 流构造链接防断流，需 douyu_cdn 设为 hs-h5。"
           label="强制 hs 流（douyu_force_hs）"
           fieldStyle={{
             alignSelf: 'stretch',
@@ -89,7 +87,7 @@ tctc-h5（线路4）, tct-h5（线路5）, ali-h5（线路6）, hw-h5（线路7�
         />
         <Form.Switch
           field="douyu_disable_interactive_game"
-          extraText="当主播运行了互动游戏，下个分段拒绝录制。小窗运行互动游戏也算入在内，请谨慎开启。"
+          extraText="主播运行互动游戏时下个分段拒绝录制（小窗也算），谨慎开启。"
           label="斗鱼拒绝互动游戏（douyu_disable_interactive_game）"
           fieldStyle={{
             alignSelf: 'stretch',
