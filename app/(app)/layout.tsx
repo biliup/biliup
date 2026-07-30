@@ -260,17 +260,33 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               onSelect={onSelect}
             >
               <Nav.Header
-                logo={<Image src="/logo.png" alt="{}" height={10} width={20}></Image>}
+                logo={
+                  <Image
+                    src="/logo.svg"
+                    alt="biliup"
+                    height={navCollapsed ? 36 : 90}
+                    width={navCollapsed ? 36 : 140}
+                    style={{
+                      width: navCollapsed ? 36 : 140,
+                      height: navCollapsed ? 36 : 90,
+                      objectFit: 'contain',
+                    }}
+                    unoptimized
+                  />
+                }
                 style={
                   navCollapsed
-                    ? { flexDirection: 'column', paddingLeft: 0, paddingRight: 0, paddingBottom: 0, gap: '8px' }
-                    : { justifyContent: 'flex-start' }
+                    ? { flexDirection: 'column', padding: '16px 0 12px', gap: '8px' }
+                    : { justifyContent: 'center', position: 'relative', padding: '8px 0' }
                 }
-                text="BILIUP"
               >
                 <div
                   style={{
-                    flexGrow: 1,
+                    position: navCollapsed ? undefined : 'absolute',
+                    right: navCollapsed ? undefined : 8,
+                    top: navCollapsed ? undefined : 16,
+                    transform: navCollapsed ? undefined : 'translateY(0)',
+                    flexGrow: navCollapsed ? 1 : undefined,
                     display: isMobile ? 'none' : 'flex',
                     flexDirection: 'row-reverse',
                     zIndex: 2,
