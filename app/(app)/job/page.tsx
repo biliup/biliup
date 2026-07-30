@@ -16,12 +16,11 @@ import {
 import { IconHistory } from '@douyinfe/semi-icons'
 import { humDate } from '@/app/lib/utils'
 import Filter from "@/app/(app)/job/Filter";
-import { useWindowSize } from 'react-use'
+import { useIsMobile } from '../../lib/useIsMobile'
 
 export default function Home() {
   const { Header, Footer, Sider, Content } = Layout
-  const { width } = useWindowSize()
-  const isMobile = width <= 640
+  const isMobile = useIsMobile()
   const { data: data, error, isLoading } = useSWR<any[]>('/v1/streamer-info', fetcher)
 
   if (isLoading) {

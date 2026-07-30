@@ -49,7 +49,7 @@ export default function Home() {
           backgroundColor: 'var(--semi-color-bg-0)',
         }}
       >
-        <main>
+        <main style={{ overflowX: 'auto' }}>
           <JSONTree data={data} />
         </main>
       </Content>

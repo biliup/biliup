@@ -69,7 +69,6 @@ export default function Home() {
   }
   const handleCancel = () => {
     setVisible(false)
-    console.log('Cancel button clicked')
   }
   return (
     <>
@@ -103,8 +102,13 @@ export default function Home() {
           backgroundColor: 'var(--semi-color-bg-0)',
         }}
       >
-        <main>
-          <Table size="small" columns={columns} dataSource={data} />
+        <main style={{ overflowX: 'auto' }}>
+          <Table
+            size="small"
+            scroll={{ x: 'max-content' }}
+            columns={columns}
+            dataSource={data}
+          />
         </main>
         <Modal
           visible={visible}

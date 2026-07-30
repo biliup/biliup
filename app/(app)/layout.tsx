@@ -26,7 +26,7 @@ import {
 import Image from 'next/image'
 import ThemeButton from '../ui/ThemeButton'
 import { useSystemTheme, useTheme } from '../lib/utils'
-import { useWindowSize } from 'react-use'
+import { useIsMobile } from '../lib/useIsMobile'
 
 /**
  * 导航项强调色 —— 统一收口到一处，避免各页面各自硬编码颜色。
@@ -72,13 +72,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [selectedKeys, setSelectedKeys] = useState<any>([pathname.slice(1)])
   useGlobalBackgroundInit()
 
-  const { width } = useWindowSize()
-  const isMobile = width <= 640
+  const isMobile = useIsMobile()
   const [isCollapsed, setIsCollapsed] = useState(isMobile)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
-  const [mode, setMode] = useState(
-    (typeof window !== 'undefined' && localStorage.getItem('mode')) || 'auto'
-  )
+  const [mode, setMode] = useState<any>('auto')
+  useEffect(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('mode') : null
+    if (saved) setMode(saved)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const systemTheme = useSystemTheme()
   useTheme(mode, systemTheme)
   const navCollapsed = isMobile ? false : isCollapsed
@@ -86,10 +88,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   // 兼容 PC 切移动端
   useEffect(() => {
-    if (width <= 640) {
+    if (isMobile) {
       setIsCollapsed(true)
     }
-  }, [width])
+  }, [isMobile])
 
   const items = useMemo(
     () =>
@@ -205,9 +207,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     setIsCollapsed(!isCollapsed)
   }, [isCollapsed])
   return (
-    <html lang="zh-Hans">
-      <body style={{ width: '100%' }}>
-        <SeLayout className="components-layout-demo semi-light-scrollbar">
+    <SeLayout className="components-layout-demo semi-light-scrollbar">
           {isMobile && (
             <Button
               type="tertiary"
@@ -290,10 +290,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               </Nav.Footer>
             </Nav>
           </Sider>
-          <SeLayout style={{ height: '100vh' }}>{children}</SeLayout>
+          <SeLayout
+            style={{
+              height: '100vh',
+              boxSizing: 'border-box',
+              ...(isMobile ? { paddingTop: 56 } : {}),
+            }}
+          >
+            {children}
+          </SeLayout>
         </SeLayout>
-      </body>
-    </html>
   )
 }
 

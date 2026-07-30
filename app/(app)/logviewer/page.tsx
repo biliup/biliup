@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useRef } from 'react'
+import { useIsMobile } from '../../lib/useIsMobile'
 import { Layout, Nav, Spin, Typography, Select, Card, Button, Toast, Tabs, TabPane } from '@douyinfe/semi-ui'
 import {
   IconCustomerSupport,
@@ -40,7 +41,6 @@ const LogContent = ({ logs, logContainerRef, isLoading }: LogContentProps) => {
   useEffect(() => {
     // 如果已经滚动到底部，那么在日志更新时自动滚动到底部
     if (logs.length > 0 && isScrolledToBottom()) {
-      console.log("自动滚动到底部")
       scrollToBottom();
     }
   }, [logs]);
@@ -89,6 +89,7 @@ export default function LogViewer() {
   const [activeTab, setActiveTab] = useState('ds_update')
   const wsRef = useRef<WebSocket | null>(null)
   const logContainerRef = useRef<HTMLDivElement>(null)
+  const isMobile = useIsMobile()
 
   const connectWebSocket = () => {
     setIsLoading(true)
@@ -126,7 +127,6 @@ export default function LogViewer() {
       // 检查是否是连接建立前WebSocket已关闭的错误
       // 这种情况通常发生在组件卸载或用户切换标签时
       if (ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
-        console.log('WebSocket在连接建立前已关闭')
       } else {
         // 其他错误仍然显示Toast提示
         Toast.error('连接错误，请重试')
@@ -137,7 +137,6 @@ export default function LogViewer() {
 
     ws.onclose = () => {
       setIsConnected(false)
-      console.log('WebSocket连接已关闭')
     }
   }
 
@@ -147,7 +146,6 @@ export default function LogViewer() {
     return () => {
       // 组件卸载时关闭WebSocket连接
       if (wsRef.current) {
-        console.log('主动关闭WebSocket连接')
         wsRef.current.close()
       }
     }
@@ -212,7 +210,15 @@ export default function LogViewer() {
             activeKey={activeTab}
             onChange={handleFileChange}
             tabBarExtraContent={
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 8,
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  justifyContent: 'flex-end',
+                }}
+              >
                 <Button
                   icon={<IconSave />}
                   onClick={() => (window.location.href = `/static/${activeTab}.log`)}
@@ -220,7 +226,7 @@ export default function LogViewer() {
                   theme="solid"
                   size="small"
                 >
-                  下载
+                  {isMobile ? null : '下载'}
                 </Button>
                 <Button
                   icon={<IconRefresh />}
@@ -228,7 +234,7 @@ export default function LogViewer() {
                   theme="light"
                   size="small"
                 >
-                  刷新
+                  {isMobile ? null : '刷新'}
                 </Button>
                 <Button
                   icon={<IconClear />}
@@ -236,7 +242,7 @@ export default function LogViewer() {
                   theme="light"
                   size="small"
                 >
-                  清空
+                  {isMobile ? null : '清空'}
                 </Button>
                 <Typography.Text
                   type={isConnected ? 'success' : 'danger'}

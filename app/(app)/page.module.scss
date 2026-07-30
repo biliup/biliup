@@ -221,10 +221,6 @@
   align-items: center;
   gap: 8px;
 }
-.metaEmpty {
-  font-size: 12px;
-  color: var(--semi-color-text-3);
-}
 .metaTime {
   font-size: 12px;
   color: var(--semi-color-text-2);
@@ -242,16 +238,9 @@
   background: rgb(var(--semi-green-5));
   animation: pulse 1.4s infinite;
 }
-.recDot.dotPause {
-  background: rgb(var(--semi-amber-5));
-}
 .recDot.dotOffline {
   background: rgb(var(--semi-red-5));
 }
-.recDot.done {
-  background: rgb(var(--semi-green-5));
-}
-
 .empty {
   display: block;
   padding: 20px 4px;
