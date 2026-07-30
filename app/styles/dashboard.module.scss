@@ -302,6 +302,14 @@
     }
 }
 
+/* 表单卡片：必须加实色背景，避免全局背景图穿透导致文字不可读 */
+.frameDownload,
+.frameUpload,
+.framePlatformConfig,
+.frameDeveloper {
+  background: var(--semi-color-bg-1);
+}
+
 /* 平台设置：左列平台名 + 右栏选中表单 */
 .platformLayout {
   display: flex;
@@ -345,7 +353,18 @@
   min-width: 0;
 }
 
+/* 移动端：卡片内边距收紧，避免左右留白/溢出 */
 @media (max-width: 680px) {
+  .rootConfigPanel {
+    padding: 0 12px !important;
+  }
+  .frameDownload,
+  .frameUpload,
+  .framePlatformConfig,
+  .frameDeveloper {
+    padding: 16px 14px 24px !important;
+    border-radius: 10px;
+  }
   .platformLayout {
     flex-direction: column;
   }

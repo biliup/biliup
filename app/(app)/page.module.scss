@@ -105,7 +105,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: rgb(var(--semi-red-5));
+  background: rgb(var(--semi-green-5));
   animation: pulse 1.4s infinite;
 }
 
@@ -158,13 +158,13 @@
   transform: translateY(-1px);
 }
 
-/* 录制中卡：视觉锚点（红边条 + 轻红底） */
+/* 直播中卡：视觉锚点（绿边条 + 轻绿底） */
 .card.rec {
-  border-left: 3px solid rgb(var(--semi-red-5));
-  background: rgba(var(--semi-red-4), 0.05);
+  border-left: 3px solid rgb(var(--semi-green-5));
+  background: rgba(var(--semi-green-4), 0.05);
 }
 .card.rec:hover {
-  background: rgba(var(--semi-red-4), 0.09);
+  background: rgba(var(--semi-green-4), 0.09);
 }
 
 .cardHead {
@@ -238,15 +238,15 @@
   flex-shrink: 0;
   background: var(--semi-color-text-2);
 }
-.recDot.dotRec {
-  background: rgb(var(--semi-red-5));
+.recDot.dotLive {
+  background: rgb(var(--semi-green-5));
   animation: pulse 1.4s infinite;
 }
 .recDot.dotPause {
   background: rgb(var(--semi-amber-5));
 }
-.recDot.dotIdle {
-  background: rgb(var(--semi-green-5));
+.recDot.dotOffline {
+  background: rgb(var(--semi-red-5));
 }
 .recDot.done {
   background: rgb(var(--semi-green-5));

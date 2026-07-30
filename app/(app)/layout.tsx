@@ -21,6 +21,7 @@ import {
   IconHistory,
   IconUserCardVideo,
   IconBook,
+  IconMenu,
 } from '@douyinfe/semi-icons'
 import Image from 'next/image'
 import ThemeButton from '../ui/ThemeButton'
@@ -72,13 +73,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   useGlobalBackgroundInit()
 
   const { width } = useWindowSize()
-  const [isCollapsed, setIsCollapsed] = useState(width <= 640)
+  const isMobile = width <= 640
+  const [isCollapsed, setIsCollapsed] = useState(isMobile)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [mode, setMode] = useState(
     (typeof window !== 'undefined' && localStorage.getItem('mode')) || 'auto'
   )
   const systemTheme = useSystemTheme()
   useTheme(mode, systemTheme)
-  let navStyle = isCollapsed ? { height: '100%', overflow: 'visible' } : { height: '100%' }
+  const navCollapsed = isMobile ? false : isCollapsed
+  let navStyle = navCollapsed ? { height: '100%', overflow: 'visible' } : { height: '100%' }
 
   // 兼容 PC 切移动端
   useEffect(() => {
@@ -192,6 +196,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   const onSelect = (data: OnSelectedData) => {
     setSelectedKeys([...data.selectedKeys])
+    if (isMobile) setMobileNavOpen(false)
   }
   const onOpenChange = (data: any) => {
     setOpenKeys([...data.openKeys])
@@ -203,12 +208,52 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     <html lang="zh-Hans">
       <body style={{ width: '100%' }}>
         <SeLayout className="components-layout-demo semi-light-scrollbar">
-          <Sider>
+          {isMobile && (
+            <Button
+              type="tertiary"
+              theme="borderless"
+              icon={<IconMenu />}
+              onClick={() => setMobileNavOpen(true)}
+              style={{
+                position: 'fixed',
+                top: 12,
+                left: 12,
+                zIndex: 1001,
+                backgroundColor: 'var(--semi-color-bg-0)',
+                boxShadow: 'var(--semi-shadow-elevated)',
+              }}
+            />
+          )}
+          {isMobile && mobileNavOpen && (
+            <div
+              onClick={() => setMobileNavOpen(false)}
+              style={{
+                position: 'fixed',
+                inset: 0,
+                backgroundColor: 'rgba(0,0,0,0.35)',
+                zIndex: 999,
+              }}
+            />
+          )}
+          <Sider
+            style={
+              isMobile
+                ? {
+                    display: mobileNavOpen ? 'flex' : 'none',
+                    position: 'fixed',
+                    left: 0,
+                    top: 0,
+                    height: '100vh',
+                    zIndex: 1000,
+                  }
+                : {}
+            }
+          >
             <Nav
               style={navStyle}
               openKeys={openKeys}
               selectedKeys={selectedKeys}
-              isCollapsed={isCollapsed}
+              isCollapsed={navCollapsed}
               renderWrapper={renderWrapper}
               items={items}
               onOpenChange={onOpenChange}
@@ -217,7 +262,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <Nav.Header
                 logo={<Image src="/logo.png" alt="{}" height={10} width={20}></Image>}
                 style={
-                  isCollapsed
+                  navCollapsed
                     ? { flexDirection: 'column', paddingLeft: 0, paddingRight: 0, paddingBottom: 0, gap: '8px' }
                     : { justifyContent: 'flex-start' }
                 }
@@ -226,7 +271,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 <div
                   style={{
                     flexGrow: 1,
-                    display: width <= 640 ? 'none' : 'flex',
+                    display: isMobile ? 'none' : 'flex',
                     flexDirection: 'row-reverse',
                     zIndex: 2,
                   }}

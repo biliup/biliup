@@ -116,7 +116,7 @@ export default function StreamersPage() {
       <div key={item.id} className={`${styles.card} ${isLive ? styles.rec : ''}`}>
         <div className={styles.cardHead}>
           <span className={styles.cardStatus}>
-            <span className={`${styles.recDot} ${isLive ? styles.dotRec : styles.dotIdle}`} />
+            <span className={`${styles.recDot} ${isLive ? styles.dotLive : styles.dotOffline}`} />
             {label}
           </span>
           <span className={styles.cardPlat}>{platformName(item.url)}</span>

@@ -16,9 +16,12 @@ import {
 import { IconHistory } from '@douyinfe/semi-icons'
 import { humDate } from '@/app/lib/utils'
 import Filter from "@/app/(app)/job/Filter";
+import { useWindowSize } from 'react-use'
 
 export default function Home() {
   const { Header, Footer, Sider, Content } = Layout
+  const { width } = useWindowSize()
+  const isMobile = width <= 640
   const { data: data, error, isLoading } = useSWR<any[]>('/v1/streamer-info', fetcher)
 
   if (isLoading) {
@@ -35,20 +38,28 @@ export default function Home() {
     {
       title: '标题',
       dataIndex: 'title',
-      render: (text: any, record: any, index: any) => {
-        return <Text strong>{text}</Text>
+      render: (text: any) => {
+        return (
+          <Text strong style={{ whiteSpace: 'nowrap' }}>
+            {text}
+          </Text>
+        )
       },
       onFilter: (value: any, record: any) => record.title.includes(value),
       renderFilterDropdown: Filter,
     },
-    {
-      title: '链接',
-      dataIndex: 'url',
-    },
-    {
-      title: '封面',
-      dataIndex: 'live_cover_path',
-    },
+    ...(isMobile
+      ? []
+      : [
+          {
+            title: '链接',
+            dataIndex: 'url',
+          },
+          {
+            title: '封面',
+            dataIndex: 'live_cover_path',
+          },
+        ]),
     {
       title: '更新日期',
       dataIndex: 'date',
@@ -84,12 +95,12 @@ export default function Home() {
       </Header>
       <Content
         style={{
-          paddingLeft: 12,
-          paddingRight: 12,
+          paddingLeft: isMobile ? 8 : 12,
+          paddingRight: isMobile ? 8 : 12,
           backgroundColor: 'var(--semi-color-bg-0)',
         }}
       >
-        <main>
+        <main style={{ overflowX: 'auto' }}>
           <Table
             size="small"
             rowKey="id"

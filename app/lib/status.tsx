@@ -2,7 +2,7 @@ import React from 'react'
 import { Tag } from '@douyinfe/semi-ui'
 
 /**
- * 2 色状态体系（全局统一）：正在直播 = 红，未开播 = 绿。
+ * 2 色状态体系（全局统一）：直播中 = 绿，未开播 = 红。
  * 按需求简化：不细分 暂停 / 检测中 / 非录播时间，均归入「未开播」。
  */
 export function isLiveStatus(status?: string): boolean {
@@ -59,9 +59,9 @@ export function platformTag(url?: string): React.ReactNode {
  */
 export function statusMeta(status?: string): { text: string; color: string; cls: string } {
   if (isLiveStatus(status)) {
-    return { text: '直播中', color: 'rgb(var(--semi-red-5))', cls: 'dotRec' }
+    return { text: '直播中', color: 'rgb(var(--semi-green-5))', cls: 'dotLive' }
   }
-  return { text: '未开播', color: 'rgb(var(--semi-green-5))', cls: 'dotIdle' }
+  return { text: '未开播', color: 'rgb(var(--semi-red-5))', cls: 'dotOffline' }
 }
 
 /**
@@ -73,7 +73,7 @@ export function streamerStatusTag(status?: string): React.ReactNode {
     <Tag
       size="small"
       style={{
-        backgroundColor: live ? 'rgba(var(--semi-red-4), 1)' : 'rgba(var(--semi-green-4), 1)',
+        backgroundColor: live ? 'rgba(var(--semi-green-4), 1)' : 'rgba(var(--semi-red-4), 1)',
         color: '#fff',
         border: 'none',
         fontWeight: 500,

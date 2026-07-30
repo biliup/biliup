@@ -46,9 +46,9 @@ const Twitch: React.FC<Props> = props => {
             <span>
               【仅 Turbo 会员】填 cookie 可大幅减少广告。Cookie 会过期（约 4 个月以上），失效时录制忽略 Cookie。获取：twitch.tv 打开 F12 执行{' '}
               <code style={{ color: 'var(--semi-color-primary)' }}>
-                document.cookie.split("; ").find(i =&gt; i.startsWith("auth-token="))?.split("=")[1]
+                document.cookie.split(&quot;; &quot;).find(i =&gt; i.startsWith(&quot;auth-token=&quot;))?.split(&quot;=&quot;)[1]
               </code>
-              。需 downloader="ffmpeg" 才生效。
+              。需 downloader=&quot;ffmpeg&quot; 才生效。
             </span>
           }
           label="Twitch Cookie（twitch_cookie）"
