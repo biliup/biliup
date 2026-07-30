@@ -19,7 +19,19 @@ const Global: React.FC = () => {
           placeholder="stream-gears（默认）"
           // initValue="stream-gears"
           extraText={
-            '全局默认下载插件：streamlink / ffmpeg 需自备 FFmpeg；stream-gears 为默认（防 FLV 花屏）；sync-downloader 边录边传（需先设上传模板）；ytarchive 仅限 YouTube Live。'
+            <span>
+              全局默认下载插件：streamlink / ffmpeg 需自备 FFmpeg；stream-gears
+              为默认（防 FLV 花屏）；sync-downloader 边录边传（需先设上传模板，
+              <a
+                href="https://github.com/biliup/biliup/wiki/%E8%BE%B9%E5%BD%95%E8%BE%B9%E4%BC%A0%E5%8A%9F%E8%83%BD"
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: 'rgb(var(--semi-color-link))' }}
+              >
+                详见文档
+              </a>
+              ）；ytarchive 仅限 YouTube Live。
+            </span>
           }
           style={{ width: '100%' }}
           fieldStyle={{
@@ -133,7 +145,7 @@ const Global: React.FC = () => {
         <Form.Switch
           field="segment_processor_parallel"
           extraText={'开启后分段后处理不保证先后顺序。'}
-          label="视频分段后处理并行（segment_processor_parallel)"
+          label="视频分段后处理并行（segment_processor_parallel）"
           fieldStyle={{
             alignSelf: 'stretch',
             padding: 0,
@@ -154,7 +166,7 @@ const Global: React.FC = () => {
 
         <Form.InputNumber
           field="delay"
-          label="下播延迟检测（delay)"
+          label="下播延迟检测（delay）"
           extraText={'检测到下播后延迟再确认的时间（秒），避免误判提前上传。默认 0。'}
           placeholder="0"
           suffix="s"
@@ -289,7 +301,7 @@ const Global: React.FC = () => {
         <Form.Switch
           field="use_live_cover"
           extraText="用直播间封面作投稿封面（优先级低于单主播自定义封面）。支持 B站 / 克拉克拉 / Twitch / YouTube。"
-          label="使用直播间封面作为投稿封面（use_live_cover)"
+          label="使用直播间封面作为投稿封面（use_live_cover）"
           fieldStyle={{
             alignSelf: 'stretch',
             padding: 0,

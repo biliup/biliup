@@ -26,7 +26,7 @@ const Kilakila: React.FC<Props> = props => {
         <Form.Select
           field="kila_protocol"
           extraText="直播流协议，默认 hls"
-          label="直播流协议(kila_protocol)"
+          label="直播流协议（kila_protocol）"
           placeholder="hls"
           style={{ width: '100%' }}
           fieldStyle={{

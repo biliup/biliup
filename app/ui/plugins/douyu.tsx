@@ -61,7 +61,7 @@ const Douyu: React.FC<Props> = props => {
           allowCreate={true}
           filter
           field="douyu_cdn"
-          extraText="遇卡顿可切换线路：tctc-h5(4)/tct-h5(5)/ali-h5(6)/hw-h5(7)/hs-h5(13)。"
+          extraText="遇卡顿可切换线路：tctc-h5（4）/tct-h5（5）/ali-h5（6）/hw-h5（7）/hs-h5（13）。"
           label="访问线路（douyu_cdn）"
           style={{ width: '100%' }}
           fieldStyle={{

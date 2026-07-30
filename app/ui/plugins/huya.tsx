@@ -58,7 +58,7 @@ const Huya: React.FC<Props> = props => {
           allowCreate={true}
           filter
           field="huya_cdn"
-          extraText="遇卡顿可切换线路：AL(3)/TX(5)/HW(6)/WS/HS(14)/AL13/TX15/HW16；HY/HYZJ已屏蔽将切首个可用。"
+          extraText="遇卡顿可切换线路：AL（3）/TX（5）/HW（6）/WS/HS（14）/AL13/TX15/HW16；HY/HYZJ 已屏蔽将切首个可用。"
           label="访问线路（huya_cdn）"
           style={{ width: '100%' }}
           fieldStyle={{
