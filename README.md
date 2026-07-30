@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://doc.biliup.rs/home.webp" alt="description" width="300" height="300"/>
+  <img src="public/logo.svg" alt="biliup logo" width="300" height="300"/>
 </div>
 
 <div align="center">
