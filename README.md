@@ -24,20 +24,6 @@
 
 论坛：[BBS](https://bbs.biliup.rs)
 
-## 📜 更新日志
-
-> [!IMPORTANT]  
-> **Disclaimer / 免责声明**
-> - 本项目仅供个人学习研究，不保证稳定性，不提供技术支持
-> - 使用本项目产生的一切后果由用户自行承担
-> - 禁止商业用途，请遵守版权及平台规定
-> - This project is for **personal learning and research purposes only**
-> - No stability guarantee or technical support provided
-> - Users are solely responsible for any consequences of using this project
-> - Commercial use is strictly prohibited
-> - Please respect copyright and platform ToS
-
-- **[更新日志 »](https://biliup.github.io/biliup/docs/guide/changelog)**
 
 ## 📜 使用文档
 B 站命令行投稿工具，支持**短信登录**、**账号密码登录**、**扫码登录**、**浏览器登录**以及**网页Cookie登录**，并将登录后返回的 cookie 和 token 保存在 `cookie.json` 中，可用于其他项目。
@@ -86,7 +72,7 @@ Options:
   -h, --help           Print help
 ```
 
-- [使用文档 »](https://docs.biliup.rs)
+- [使用文档 »](https://doc.biliup.rs)
 
 ## 🚀 快速开始
 
