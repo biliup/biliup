@@ -19,7 +19,7 @@ const ThemeButton: React.FC<ThemeButtonProps> = props => {
     {
       // 按下按钮切换主题
       if (typeof window !== 'undefined' && switchTrigger === true) {
-        const body = document.body
+        const root = document.documentElement
         const currentMode = props.mode
         let nextMode = currentMode
         switch (currentMode) {
@@ -33,10 +33,10 @@ const ThemeButton: React.FC<ThemeButtonProps> = props => {
             nextMode = 'auto'
             break
         }
-        body.removeAttribute('theme-mode')
+        root.removeAttribute('theme-mode')
         nextMode === 'auto'
-          ? body.setAttribute('theme-mode', props.systemTheme)
-          : body.setAttribute('theme-mode', nextMode)
+          ? root.setAttribute('theme-mode', props.systemTheme)
+          : root.setAttribute('theme-mode', nextMode)
         props.setMode(nextMode)
         setSwitchTrigger(false)
       }

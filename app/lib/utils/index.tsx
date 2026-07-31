@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 export const responsiveMap = {
   xs: '(max-width: 575px)',
@@ -73,17 +73,25 @@ export const useSystemTheme = () => {
 }
 
 export const useTheme = (mode: string, systemTheme: string) => {
+  const firstRun = useRef(true)
   useEffect(() => {
+    // 首屏主题已由根布局 <head> 内联脚本前置设置；这里跳过首次执行，
+    // 避免水合后用默认值（auto→system）又把已保存的主题覆盖掉一次，造成闪烁。
+    if (firstRun.current) {
+      firstRun.current = false
+      return
+    }
     localStorage.setItem('mode', mode)
+    const el = document.documentElement
     switch (mode) {
       case 'light':
-        document.body.setAttribute('theme-mode', 'light')
+        el.setAttribute('theme-mode', 'light')
         break
       case 'dark':
-        document.body.setAttribute('theme-mode', 'dark')
+        el.setAttribute('theme-mode', 'dark')
         break
       default:
-        document.body.setAttribute('theme-mode', systemTheme)
+        el.setAttribute('theme-mode', systemTheme)
         break
     }
   }, [mode, systemTheme])
