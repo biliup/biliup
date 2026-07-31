@@ -21,13 +21,22 @@ const ThemeButton: React.FC<ThemeButtonProps> = props => {
       if (typeof window !== 'undefined' && switchTrigger === true) {
         const root = document.documentElement
         const currentMode = props.mode
-        // 一键明暗反转：避免原 auto→light→dark 三态循环导致「白天点一下视觉无变化」的错觉。
-        // 当前为 dark，或当前为 auto 且系统为暗 → 切到 light；其余（auto/light）→ 切到 dark。
-        const isDarkNow =
-          currentMode === 'dark' ||
-          (currentMode === 'auto' && props.systemTheme === 'dark')
-        const nextMode = isDarkNow ? 'light' : 'dark'
-        root.setAttribute('theme-mode', nextMode)
+        let nextMode = currentMode
+        switch (currentMode) {
+          case 'auto':
+            nextMode = 'light'
+            break
+          case 'light':
+            nextMode = 'dark'
+            break
+          default:
+            nextMode = 'auto'
+            break
+        }
+        root.removeAttribute('theme-mode')
+        nextMode === 'auto'
+          ? root.setAttribute('theme-mode', props.systemTheme)
+          : root.setAttribute('theme-mode', nextMode)
         props.setMode(nextMode)
         setSwitchTrigger(false)
       }
