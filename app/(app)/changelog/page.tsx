@@ -14,6 +14,36 @@ const CHANGELOG_URL =
   'https://raw.githubusercontent.com/biliup/biliup/master/docs/content/docs/guide/CHANGELOG.md'
 const MAX_VERSIONS = 25
 
+const CHANGELOG_CACHE_KEY = 'biliup_changelog_cache'
+
+/**
+ * 拉取官方 CHANGELOG：成功则写入 localStorage 作为离线缓存；
+ * 失败（离线 / GitHub 被墙 / 接口异常）时回退到上一次缓存，
+ * 避免页面直接白屏成「无法加载」。仅在既失败又无缓存时才真正报错。
+ */
+async function fetchChangelog(url: string): Promise<{ text: string; stale: boolean }> {
+  try {
+    const r = await fetch(url)
+    if (!r.ok) throw new Error(`http ${r.status}`)
+    const text = await r.text()
+    try {
+      localStorage.setItem(CHANGELOG_CACHE_KEY, text)
+    } catch {
+      /* 隐私模式等场景忽略写入失败 */
+    }
+    return { text, stale: false }
+  } catch {
+    let cached: string | null = null
+    try {
+      cached = localStorage.getItem(CHANGELOG_CACHE_KEY)
+    } catch {
+      cached = null
+    }
+    if (cached) return { text: cached, stale: true }
+    throw new Error('changelog fetch failed and no cache')
+  }
+}
+
 export interface VersionEntry {
   version: string
   body: string
@@ -149,13 +179,9 @@ function renderBody(body: string, versionKey: string): React.ReactNode {
 }
 
 export default function Changelog() {
-  const { data, error, isLoading } = useSWR(CHANGELOG_URL, (url: string) =>
-    fetch(url).then((r) => {
-      if (!r.ok) throw new Error('fetch failed')
-      return r.text()
-    })
-  )
-  const versions = data ? parseChangelog(data) : []
+  const { data, error, isLoading } = useSWR(CHANGELOG_URL, fetchChangelog)
+  const result = data as { text: string; stale: boolean } | undefined
+  const versions = result ? parseChangelog(result.text) : []
 
   return (
     <>
@@ -188,6 +214,18 @@ export default function Changelog() {
           )}
           {!isLoading && !error && versions.length > 0 && (
             <div className={styles.feed}>
+              {result?.stale && (
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--semi-color-text-2)',
+                    textAlign: 'center',
+                    padding: '4px 0 12px',
+                  }}
+                >
+                  当前展示的是离线缓存版本，联网后将自动更新。
+                </div>
+              )}
               {versions.map((v, idx) => (
                 <Card
                   key={v.version}
