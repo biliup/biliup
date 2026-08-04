@@ -13,6 +13,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body style={{ width: '100%' }}>
+        {/*
+          同步 <head> 脚本设到 <html> 上的 theme-mode 到 <body>。
+          Semi Design 的 CSS 变量绑定在 body[theme-mode] 上，
+          而 <head> 阻塞脚本执行时 body 尚未解析，只能写 html。
+        */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=document.documentElement.getAttribute('theme-mode')||'light';document.body.setAttribute('theme-mode',t);}catch(e){}})();`,
+          }}
+        />
         {children}
       </body>
     </html>

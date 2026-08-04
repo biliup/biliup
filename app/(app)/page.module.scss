@@ -255,6 +255,16 @@
   text-align: center;
 }
 
+.warnBox {
+  margin-bottom: 20px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: rgba(var(--semi-orange-4), 0.12);
+  color: rgb(var(--semi-orange-5));
+  font-size: 13px;
+  border: 1px solid rgba(var(--semi-orange-4), 0.32);
+}
+
 /* ===== 响应式 ===== */
 @media (max-width: 880px) {
   .page {

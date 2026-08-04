@@ -72,6 +72,18 @@ export const useSystemTheme = () => {
   return theme
 }
 
+/**
+ * 同步主题属性到 <html> 与 <body>。
+ * Semi Design 的 CSS 变量绑定在 body[theme-mode] 上；
+ * 我们自己的 CSS（如 .shadow）与 no-flash 脚本使用 <html> 上的 theme-mode。
+ * 两者都写才能同时兼容 Semi 与自定义选择器。
+ */
+export const applyThemeMode = (mode: 'light' | 'dark') => {
+  if (typeof document === 'undefined') return
+  document.documentElement.setAttribute('theme-mode', mode)
+  document.body.setAttribute('theme-mode', mode)
+}
+
 export const useTheme = (mode: string, systemTheme: string) => {
   const firstRun = useRef(true)
   useEffect(() => {
@@ -82,17 +94,7 @@ export const useTheme = (mode: string, systemTheme: string) => {
       return
     }
     localStorage.setItem('mode', mode)
-    const el = document.documentElement
-    switch (mode) {
-      case 'light':
-        el.setAttribute('theme-mode', 'light')
-        break
-      case 'dark':
-        el.setAttribute('theme-mode', 'dark')
-        break
-      default:
-        el.setAttribute('theme-mode', systemTheme)
-        break
-    }
+    const actualMode = (mode === 'auto' ? systemTheme : mode) as 'light' | 'dark'
+    applyThemeMode(actualMode)
   }, [mode, systemTheme])
 }

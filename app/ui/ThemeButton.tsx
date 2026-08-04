@@ -2,6 +2,7 @@
 import { SetStateAction, useEffect, useState } from 'react'
 import { Button } from '@douyinfe/semi-ui'
 import { IconMoon, IconSun, IconContrast } from '@douyinfe/semi-icons'
+import { applyThemeMode } from '../lib/utils'
 
 interface ThemeButtonProps {
   mode: string
@@ -17,26 +18,14 @@ const ThemeButton: React.FC<ThemeButtonProps> = props => {
   const [icon, setIcon] = useState(<IconContrast size="large" />)
   useEffect(() => {
     {
-      // 按下按钮切换主题
+      // 按下按钮切换主题：一键明暗反转，避免 auto→light→dark 循环的第一下视觉无变化。
       if (typeof window !== 'undefined' && switchTrigger === true) {
-        const root = document.documentElement
         const currentMode = props.mode
-        let nextMode = currentMode
-        switch (currentMode) {
-          case 'auto':
-            nextMode = 'light'
-            break
-          case 'light':
-            nextMode = 'dark'
-            break
-          default:
-            nextMode = 'auto'
-            break
-        }
-        root.removeAttribute('theme-mode')
-        nextMode === 'auto'
-          ? root.setAttribute('theme-mode', props.systemTheme)
-          : root.setAttribute('theme-mode', nextMode)
+        const isDarkNow =
+          currentMode === 'dark' ||
+          (currentMode === 'auto' && props.systemTheme === 'dark')
+        const nextMode = isDarkNow ? 'light' : 'dark'
+        applyThemeMode(nextMode)
         props.setMode(nextMode)
         setSwitchTrigger(false)
       }
