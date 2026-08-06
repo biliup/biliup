@@ -313,7 +313,8 @@ pub enum UploadLine {
     Cntx,
     Antx,
     Attx,
-    Bda,
     Txa,
     Alia,
+    Estx,
+    Akbd,
 }

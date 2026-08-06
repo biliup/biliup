@@ -323,16 +323,6 @@ pub fn attx() -> Line {
     }
 }
 
-/// 百度云海外（Cloudflare）
-pub fn bda() -> Line {
-    Line {
-        os: Uploader::Upos,
-        query: "zone=cs&upcdn=bda&probe_version=20221109".into(),
-        probe_url: "//upos-cs-upcdnbda.bilivideo.com/OK".into(),
-        cost: 0,
-    }
-}
-
 /// 腾讯云EO海外
 pub fn txa() -> Line {
     Line {
@@ -349,6 +339,26 @@ pub fn alia() -> Line {
         os: Uploader::Upos,
         query: "zone=cs&upcdn=alia&probe_version=20221109".into(),
         probe_url: "//upos-cs-upcdnalia.bilivideo.com/OK".into(),
+        cost: 0,
+    }
+}
+
+/// B站自建
+pub fn estx() -> Line {
+    Line {
+        os: Uploader::Upos,
+        query: "probe_version=20250923&upcdn=estx&zone=cs".into(),
+        probe_url: "//e17962d5cstx.esheep.com/OK".into(),
+        cost: 0,
+    }
+}
+
+/// B站自建
+pub fn akbd() -> Line {
+    Line {
+        os: Uploader::Upos,
+        query: "probe_version=20250923&upcdn=akbd&zone=cs".into(),
+        probe_url: "//bb27c891csbd.aikobo.cn/OK".into(),
         cost: 0,
     }
 }

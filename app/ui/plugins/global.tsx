@@ -317,7 +317,7 @@ const Global: React.FC = () => {
         <Form.Select
           field="lines"
           label="上传线路（lines）"
-          extraText="b站上传线路选择，默认为自动模式，可手动切换为bda, bda2, ws, qn, bldsa, tx, txa"
+          extraText="b站上传线路选择，默认为自动模式，可手动切换为alia, bda2, bldsa, tx, txa, estx, akbd"
           placeholder="AUTO（自动，默认）"
           style={{ width: '100%' }}
           fieldStyle={{
@@ -328,12 +328,12 @@ const Global: React.FC = () => {
         >
           <Form.Select.Option value="AUTO">AUTO（自动，默认）</Form.Select.Option>
           <Form.Select.Option value="alia">alia（海外-阿里云）</Form.Select.Option>
-          {/* <Form.Select.Option value="bda">bda</Form.Select.Option> */}
           <Form.Select.Option value="bda2">bda2（大陆-百度云）</Form.Select.Option>
           <Form.Select.Option value="bldsa">bldsa（大陆-B站自建）</Form.Select.Option>
-          <Form.Select.Option value="qn">qn（全球-七牛）</Form.Select.Option>
           <Form.Select.Option value="tx">tx（大陆-腾讯云）</Form.Select.Option>
           <Form.Select.Option value="txa">txa（海外-腾讯云）</Form.Select.Option>
+          <Form.Select.Option value="estx">estx（大陆-B站自建）</Form.Select.Option>
+          <Form.Select.Option value="akbd">akbd（大陆-B站自建）</Form.Select.Option>
         </Form.Select>
         <Form.InputNumber
           field="threads"

@@ -130,11 +130,12 @@ async fn initialize_upload_context(
 async fn get_upload_line(client: &reqwest::Client, line: &str) -> AppResult<Line> {
     let line = match line {
         "bda2" => line::bda2(),
-        "bda" => line::bda(),
         "tx" => line::tx(),
         "txa" => line::txa(),
         "bldsa" => line::bldsa(),
         "alia" => line::alia(),
+        "estx" => line::estx(),
+        "akbd" => line::akbd(),
         _ => Probe::probe(client).await.unwrap_or_default(),
     };
     Ok(line)
@@ -382,9 +383,10 @@ pub async fn upload(
         Some(UploadLine::Cntx) => line::cntx(),
         Some(UploadLine::Antx) => line::antx(),
         Some(UploadLine::Attx) => line::attx(),
-        // Some(UploadLine::Bda) => line::bda(),
         Some(UploadLine::Txa) => line::txa(),
         Some(UploadLine::Alia) => line::alia(),
+        Some(UploadLine::Estx) => line::estx(),
+        Some(UploadLine::Akbd) => line::akbd(),
         _ => Probe::probe(&client.client).await.unwrap_or_default(),
     };
     for video_path in video_paths {
