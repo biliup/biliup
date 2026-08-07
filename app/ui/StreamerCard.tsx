@@ -112,11 +112,10 @@ export default function StreamerCard({
         ) : null}
       </div>
 
-      {info?.title ? (
-        <div className={styles.title} title={info.title}>
-          {info.title}
-        </div>
-      ) : null}
+      {/* 标题行:始终渲染(空字符串占位),保证所有卡片等高、标题基线对齐 */}
+      <div className={styles.title} title={info?.title || ''}>
+        {info?.title || ''}
+      </div>
       <a
         className={styles.url}
         href={streamer.url}
