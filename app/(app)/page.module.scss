@@ -1,5 +1,5 @@
 .page {
-  padding: 28px 36px 48px;
+  padding: 24px 36px 48px;
   width: 100%;
   box-sizing: border-box;
 }
@@ -9,14 +9,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 24px;
+  margin-bottom: 22px;
   gap: 16px;
-  flex-wrap: wrap;
-}
-.headTitle {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
   flex-wrap: wrap;
 }
 .docLink {
@@ -34,6 +28,11 @@
 .docLink:hover {
   background: var(--semi-color-fill-0);
   color: var(--semi-color-text-0);
+}
+.version {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  font-variant-numeric: tabular-nums;
 }
 .statusPill {
   display: inline-flex;
@@ -59,10 +58,6 @@
   background: rgba(var(--semi-red-4), 0.15);
   color: rgb(var(--semi-red-5));
 }
-.statusPill.checking {
-  background: var(--semi-color-fill-0);
-  color: var(--semi-color-text-2);
-}
 .dot.online {
   background: rgb(var(--semi-green-5));
   box-shadow: 0 0 0 4px rgba(var(--semi-green-4), 0.18);
@@ -71,18 +66,14 @@
   background: rgb(var(--semi-red-5));
   box-shadow: 0 0 0 4px rgba(var(--semi-red-4), 0.18);
 }
-.dot.checking {
-  background: var(--semi-color-text-2);
-  box-shadow: none;
-}
 
-/* ===== 紧凑概览条 ===== */
+/* ===== 概览条 ===== */
 .overview {
   display: flex;
   flex-wrap: wrap;
   gap: 22px;
   align-items: center;
-  margin-bottom: 28px;
+  margin-bottom: 26px;
   padding: 14px 20px;
   background: var(--semi-color-bg-1);
   border: 1px solid var(--semi-color-fill-2);
@@ -98,24 +89,38 @@
 }
 .ovItem b {
   color: var(--semi-color-text-0);
-  font-size: 16px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
-.ovDotRec {
+.ovDot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
+}
+.ovDot.rec {
   background: rgb(var(--semi-green-5));
   animation: pulse 1.4s infinite;
 }
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(var(--semi-green-4), 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(var(--semi-green-4), 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--semi-green-4), 0);
+  }
+}
 
-/* ===== 区块标题 ===== */
-.block {
+/* ===== 区块 ===== */
+.section {
   margin-bottom: 28px;
 }
 .secHead {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
   margin: 0 0 12px;
 }
@@ -126,135 +131,46 @@
   text-transform: uppercase;
   letter-spacing: 0.6px;
 }
-.viewAll {
+.secCount {
+  font-weight: 600;
+  margin-left: 6px;
+  color: var(--semi-color-text-1);
+}
+.secLink {
   font-size: 13px;
   font-weight: 600;
   color: rgb(var(--semi-blue-4));
   text-decoration: none;
 }
-.viewAll:hover {
+.secLink:hover {
   text-decoration: underline;
 }
+.secNote {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+}
 
-/* ===== 卡片网格 ===== */
+/* ===== 卡片网格(卡片本体样式在 ui/streamer-card.module.scss) ===== */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(262px, 1fr));
+  gap: 12px;
   align-items: start;
 }
 
-.card {
+.timelineCard {
+  background: var(--semi-color-bg-1);
   border: 1px solid var(--semi-color-fill-2);
   border-radius: 12px;
-  background: var(--semi-color-bg-1);
-  padding: 16px;
-  transition: border-color 0.15s ease, box-shadow 0.2s ease, transform 0.15s ease;
+  padding: 18px 20px;
   box-shadow: 0 1px 2px rgba(var(--semi-grey-9), 0.04), 0 2px 6px rgba(var(--semi-grey-9), 0.03);
 }
-.card:hover {
-  border-color: var(--semi-color-primary);
-  box-shadow: 0 6px 16px rgba(var(--semi-grey-9), 0.08);
-  transform: translateY(-1px);
-}
 
-/* 直播中卡：视觉锚点（绿边条 + 轻绿底） */
-.card.rec {
-  border-left: 3px solid rgb(var(--semi-green-5));
-  background: rgba(var(--semi-green-4), 0.05);
-}
-.card.rec:hover {
-  background: rgba(var(--semi-green-4), 0.09);
-}
-
-.cardHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-.cardStatus {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--semi-color-text-0);
-}
-.cardPlat {
-  font-size: 12px;
-  color: var(--semi-color-text-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cardName {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--semi-color-text-0);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-bottom: 4px;
-}
-
-.cardSub {
-  display: block;
-  font-size: 12px;
-  color: var(--semi-color-text-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-decoration: none;
-  margin-bottom: 12px;
-}
-.cardSub:hover {
-  color: var(--semi-color-primary);
-  text-decoration: underline;
-}
-
-.cardMeta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-.metaTime {
-  font-size: 12px;
-  color: var(--semi-color-text-2);
-}
-
-/* 状态点（复用 status.tsx 的语义色） */
-.recDot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: var(--semi-color-text-2);
-}
-.recDot.dotLive {
-  background: rgb(var(--semi-green-5));
-  animation: pulse 1.4s infinite;
-}
-.recDot.dotOffline {
-  background: rgb(var(--semi-red-5));
-}
-.empty {
-  display: block;
-  padding: 20px 4px;
-}
-.emptyLink {
-  color: rgb(var(--semi-blue-4));
-  text-decoration: none;
-}
-
+/* ===== 错误 / 警告 ===== */
 .errorBox {
   padding: 40px;
   text-align: center;
 }
-
 .warnBox {
   margin-bottom: 20px;
   padding: 12px 16px;
@@ -268,27 +184,18 @@
 /* ===== 响应式 ===== */
 @media (max-width: 880px) {
   .page {
-    padding: 22px 24px 36px;
-  }
-}
-@media (max-width: 768px) {
-  .head {
-    align-items: flex-start;
-  }
-  .headTitle {
-    flex-direction: column;
-    gap: 4px;
+    padding: 20px 24px 36px;
   }
 }
 @media (max-width: 520px) {
   .page {
-    padding: 18px 16px 28px;
+    padding: 16px 16px 28px;
   }
   .grid {
     grid-template-columns: 1fr;
   }
   .overview {
-    gap: 16px;
+    gap: 14px;
     padding: 12px 16px;
   }
 }

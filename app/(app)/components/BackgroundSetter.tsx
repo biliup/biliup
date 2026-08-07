@@ -1,8 +1,13 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
-import { Button, Toast, Tooltip } from '@douyinfe/semi-ui'
+import { Button, Slider, Toast, Tooltip } from '@douyinfe/semi-ui'
 import { IconImage, IconUpload, IconDelete } from '@douyinfe/semi-icons'
-import { getBg, setBg } from '@/app/lib/useGlobalBackground'
+import {
+  getBg,
+  setBg,
+  getBgOpacity,
+  setBgOpacity,
+} from '@/app/lib/useGlobalBackground'
 import styles from './BackgroundSetter.module.scss'
 
 function compressImage(file: File): Promise<string> {
@@ -41,9 +46,11 @@ export default function BackgroundSetter() {
   const fileRef = useRef<HTMLInputElement>(null)
   const [open, setOpen] = useState(false)
   const [hasBg, setHasBg] = useState(false)
+  const [opacity, setOpacity] = useState(0.35)
 
   useEffect(() => {
     setHasBg(!!getBg())
+    setOpacity(getBgOpacity())
   }, [])
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -72,36 +79,62 @@ export default function BackgroundSetter() {
     Toast.success('已恢复默认背景')
   }
 
+  const onOpacityChange = (v: number | number[] | undefined) => {
+    const raw = Array.isArray(v) ? (v[0] ?? 0) : (v ?? 0)
+    const val = Math.min(0.8, Math.max(0.05, Number(raw) / 100))
+    setOpacity(val)
+    setBgOpacity(val)
+  }
+
   return (
-    <div className={styles.float}>
+    <div className={`${styles.float} ${open ? styles.open : ''}`}>
       <input ref={fileRef} type="file" accept="image/*" hidden onChange={onFile} />
+
       {open && (
         <>
-          <Tooltip content="上传背景" position="top">
-            <Button
-              theme="borderless"
-              size="small"
-              icon={<IconUpload />}
-              onClick={() => fileRef.current?.click()}
+          <div className={styles.btnRow}>
+            <Tooltip content="上传背景" position="top">
+              <Button
+                theme="borderless"
+                size="small"
+                icon={<IconUpload />}
+                onClick={() => fileRef.current?.click()}
+              />
+            </Tooltip>
+            <Tooltip content="清除背景" position="top">
+              <Button
+                theme="borderless"
+                size="small"
+                icon={<IconDelete />}
+                disabled={!hasBg}
+                onClick={clear}
+              />
+            </Tooltip>
+          </div>
+
+          <div className={styles.opacityRow}>
+            <div className={styles.opacityLabel}>
+              <span>遮罩透明度</span>
+              <span>{Math.round(opacity * 100)}%</span>
+            </div>
+            <Slider
+              min={5}
+              max={80}
+              step={5}
+              value={Math.round(opacity * 100)}
+              onChange={onOpacityChange}
+              tipFormatter={(v) => `${v}%`}
             />
-          </Tooltip>
-          <Tooltip content="清除背景" position="top">
-            <Button
-              theme="borderless"
-              size="small"
-              icon={<IconDelete />}
-              disabled={!hasBg}
-              onClick={clear}
-            />
-          </Tooltip>
+          </div>
         </>
       )}
+
       <Tooltip content="背景设置" position="top">
         <Button
           theme={open ? 'solid' : 'borderless'}
           size="small"
           icon={<IconImage />}
-          onClick={() => setOpen(v => !v)}
+          onClick={() => setOpen((v) => !v)}
         />
       </Tooltip>
     </div>

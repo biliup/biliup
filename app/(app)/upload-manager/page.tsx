@@ -2,44 +2,49 @@
 import {
   Button,
   ButtonGroup,
-  Layout,
   List,
-  Nav,
   Popconfirm,
   Notification,
   Typography,
   Modal,
   Transfer,
+  Card,
 } from '@douyinfe/semi-ui'
-import { IconCloudStroked, IconPlusCircle, IconUserListStroked } from '@douyinfe/semi-icons'
-import { SetStateAction, useState } from 'react'
+import {
+  IconCloudStroked,
+  IconPlusCircle,
+  IconUserListStroked,
+  IconEdit2Stroked,
+  IconSendStroked,
+  IconDeleteStroked,
+} from '@douyinfe/semi-icons'
+import { useState } from 'react'
 import Link from 'next/link'
-import { Card } from '@douyinfe/semi-ui'
-import { IconEdit2Stroked, IconSendStroked, IconDeleteStroked } from '@douyinfe/semi-icons'
 import { fetcher, FileList, requestDelete, sendRequest, StudioEntity } from '../../lib/api-streamer'
 import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
 import UserList from '../../ui/UserList'
 import useSWRMutation from 'swr/mutation'
 import { useBiliUsers } from '../../lib/use-streamers'
+import PageHeader from '../components/PageHeader'
+import dc from '@/app/ui/data-card.module.scss'
 
-export default function Union() {
+export default function UploadManager() {
   const { Meta } = Card
-  const { Paragraph, Title, Text } = Typography
-  const { Header, Content } = Layout
+  const { Text } = Typography
   const [visible, setVisible] = useState(false)
   const router = useRouter()
   const { trigger: deleteUpload } = useSWRMutation('/v1/upload/streamers', requestDelete)
-  const {
-    data: templates,
-    error,
-    isLoading,
-  } = useSWR<StudioEntity[]>('/v1/upload/streamers', fetcher)
+  const { data: templates, error, isLoading } = useSWR<StudioEntity[]>(
+    '/v1/upload/streamers',
+    fetcher
+  )
   const { biliUsers } = useBiliUsers()
+
   const handleAddLinkClick = (event: React.MouseEvent) => {
     if (biliUsers.length === 0) {
-      event.preventDefault() // 阻止Link的默认跳转事件
-      change() // 运行change函数
+      event.preventDefault()
+      change()
       Notification.info({
         title: '用户列表为空',
         position: 'top',
@@ -49,9 +54,7 @@ export default function Union() {
     }
   }
 
-  const change = () => {
-    setVisible(!visible)
-  }
+  const change = () => setVisible(!visible)
   const onConfirm = async (id: number) => {
     await deleteUpload(id)
   }
@@ -72,22 +75,14 @@ export default function Union() {
     })
     setVisibleModal(false)
   }
-  const handleCancel = () => {
-    setVisibleModal(false)
-    console.log('Cancel button clicked')
-  }
-  const handleAfterClose = () => {
-    console.log('After Close callback executed')
-  }
+
   const { data: fileList } = useSWR<FileList[]>('/v1/videos', fetcher)
-  const data = fileList?.map(v => {
-    return {
-      label: v.name,
-      value: v.name,
-      disabled: false,
-      key: v.key,
-    }
-  })
+  const data = fileList?.map((v) => ({
+    label: v.name,
+    value: v.name,
+    disabled: false,
+    key: v.key,
+  }))
   const [transferData, setTransferData] = useState<(string | number)[]>([])
 
   const handleTransferChange = (values: (string | number)[], items: any[]) => {
@@ -95,9 +90,26 @@ export default function Union() {
     setTransferData(values)
   }
 
+  const actions = (
+    <>
+      <Button
+        onClick={change}
+        type="tertiary"
+        icon={<IconUserListStroked />}
+        aria-label="用户管理"
+        title="用户管理"
+      />
+      <Link href="/upload-manager/add" onClick={handleAddLinkClick}>
+        <Button icon={<IconPlusCircle />} theme="solid">
+          新建
+        </Button>
+      </Link>
+    </>
+  )
+
   return (
     <>
-      <UserList visible={visible} onCancel={change}></UserList>
+      <UserList visible={visible} onCancel={change} />
       <Modal
         size="medium"
         title="文件选择"
@@ -105,11 +117,8 @@ export default function Union() {
         style={{ width: 'min(600px, 90vw)' }}
         visible={visibleModal}
         onOk={handleOk}
-        afterClose={handleAfterClose}
-        onCancel={handleCancel}
-        bodyStyle={{
-            overflow: 'auto',
-        }}
+        onCancel={() => setVisibleModal(false)}
+        bodyStyle={{ overflow: 'auto' }}
         closeOnEsc={true}
       >
         <Transfer
@@ -120,72 +129,14 @@ export default function Union() {
           onChange={handleTransferChange}
         />
       </Modal>
-      <Header style={{ backgroundColor: 'var(--semi-color-bg-1)' }}>
-        <nav
-          style={{
-            display: 'flex',
-            paddingLeft: '25px',
-            paddingRight: '25px',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              gap: 10,
-              justifyContent: 'center',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-            }}
-          >
-            <IconCloudStroked
-              style={{
-                backgroundColor: 'rgba(var(--semi-violet-4), 1)',
-                borderRadius: 'var(--semi-border-radius-large)',
-                color: 'var(--semi-color-bg-0)',
-                padding: '6px',
-              }}
-              size="large"
-            />
-            <h4>投稿管理</h4>
-          </div>
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 6,
-            }}
-          >
-            <Button
-              onClick={change}
-              // theme="borderless"
-              type="tertiary"
-              icon={<IconUserListStroked />}
-              style={{
-                // color: 'var(--semi-color-text-2)',
-                borderRadius: 'var(--semi-border-radius-circle)',
-                marginRight: '12px',
-              }}
-            />
-            <Link href="/upload-manager/add" onClick={handleAddLinkClick}>
-              <Button icon={<IconPlusCircle />} theme="solid" style={{ marginRight: 10 }}>
-                新建
-              </Button>
-            </Link>
-          </div>
-        </nav>
-      </Header>
-      <Content
-        style={{
-          padding: '24px',
-          backgroundColor: 'var(--semi-color-bg-0)',
-        }}
-      >
+
+      <PageHeader
+        icon={<IconCloudStroked size="large" />}
+        title="投稿管理"
+        description="管理上传模板,选择录制文件一键投稿"
+        actions={actions}
+      />
+      <div className={dc.content}>
         <List
           grid={{
             gutter: 12,
@@ -197,7 +148,8 @@ export default function Union() {
             xxl: 4,
           }}
           dataSource={templates}
-          renderItem={item => (
+          loading={isLoading}
+          renderItem={(item: StudioEntity) => (
             <List.Item>
               <Card
                 shadows="hover"
@@ -205,20 +157,19 @@ export default function Union() {
                   maxWidth: 360,
                   margin: '8px 2px',
                   flexGrow: 1,
+                  borderRadius: 12,
                 }}
                 bodyStyle={{
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
+                  padding: '16px 18px',
                 }}
               >
                 <Meta
                   title={
                     <Text
-                      ellipsis={{
-                        showTooltip: true,
-                        pos: 'middle',
-                      }}
+                      ellipsis={{ showTooltip: true, pos: 'middle' }}
                       style={{ maxWidth: 150 }}
                     >
                       {item.template_name}
@@ -226,28 +177,25 @@ export default function Union() {
                   }
                 />
                 <ButtonGroup style={{ minWidth: 100 }} theme="borderless">
-                  <Button icon={<IconSendStroked />} onClick={() => showDialog(item)}></Button>
+                  <Button icon={<IconSendStroked />} onClick={() => showDialog(item)} />
                   <Button
                     icon={<IconEdit2Stroked />}
-                    onClick={() => {
-                      router.push(`/upload-manager/edit?id=${item.id}`)
-                    }}
-                  ></Button>
+                    onClick={() => router.push(`/upload-manager/edit?id=${item.id}`)}
+                  />
                   <Popconfirm
                     title="确定是否要删除？"
                     content="此操作将不可逆"
                     margin={50}
                     onConfirm={async () => await onConfirm(item.id)}
-                    // onCancel={onCancel}
                   >
-                    <Button theme="borderless" icon={<IconDeleteStroked />}></Button>
+                    <Button theme="borderless" icon={<IconDeleteStroked />} />
                   </Popconfirm>
                 </ButtonGroup>
               </Card>
             </List.Item>
           )}
         />
-      </Content>
+      </div>
     </>
   )
 }

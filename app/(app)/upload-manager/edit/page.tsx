@@ -17,6 +17,8 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { FormApi } from '@douyinfe/semi-ui/lib/es/form'
 import useSWR from 'swr'
 import { useTypeTree } from '@/app/lib/use-streamers'
+import PageHeader from '../../components/PageHeader'
+import dc from '@/app/ui/data-card.module.scss'
 
 const Edit = () => {
   const { Paragraph } = Typography
@@ -45,11 +47,12 @@ const Edit = () => {
   if (error || isError) return <div>{error?.message}</div>
   if (isLoading) return <div>Loading...</div>
   if (!data || !typeTree) return null
+
   let uploadStreamers = {
     ...data,
     tid: [
       typeTree.find((tt: BiliType) => {
-        return tt.children.some(ct => ct.id === data?.tid)
+        return tt.children.some((ct) => ct.id === data?.tid)
       })?.value,
       data.tid,
     ],
@@ -62,72 +65,74 @@ const Edit = () => {
     is_only_self: data.is_only_self === 1,
     isDtime: data.dtime ? true : false,
   }
+
+  const handleSave = async () => {
+    const values = await api.current?.validate()
+    try {
+      const studioEntity: StudioEntity = {
+        template_name: values?.template_name,
+        user_cookie: values?.user_cookie,
+        copyright: values?.copyright,
+        id: values?.id,
+        copyright_source: values?.copyright_source ?? '',
+        tid: values?.tid[1],
+        cover_path: values?.cover_path ?? '',
+        title: values?.title ?? '',
+        description: values?.description ?? '',
+        dynamic: values?.dynamic ?? '',
+        tags: values?.tags ?? [],
+        dolby: values?.sound.includes('dolby') ? 1 : 0,
+        hires: values?.sound.includes('hires') ? 1 : 0,
+        up_selection_reply: values?.interaction.includes('up_selection_reply') ? 1 : 0,
+        up_close_reply: values?.interaction.includes('up_close_reply') ? 1 : 0,
+        up_close_danmu: values?.interaction.includes('up_close_danmu') ? 1 : 0,
+        charging_pay: values?.charging_pay ? 1 : 0,
+        no_reprint: values?.no_reprint ? 1 : 0,
+        is_only_self: values?.is_only_self ? 1 : 0,
+        mission_id: values?.mission_id,
+        dtime: values?.isDtime ? values?.dtime : null,
+        credits: values?.credits ?? null,
+        uploader: values?.uploader ?? null,
+        extra_fields: values?.extra_fields ?? '',
+      }
+      const result = await trigger(studioEntity)
+      await mutate(result)
+      Toast.success('更新成功')
+      router.push('/upload-manager')
+    } catch (e: any) {
+      Notification.error({
+        title: '保存失败',
+        content: <Paragraph style={{ maxWidth: 450 }}>{e.message}</Paragraph>,
+        style: { width: 'min-content' },
+      })
+    }
+  }
+
   return (
     <>
-      <div style={{ display: 'flex', flexDirection: 'row-reverse', paddingRight: 12 }}>
-        <Button
-          onClick={async () => {
-            let values = await api.current?.validate()
-            try {
-              const studioEntity = {
-                template_name: values?.template_name,
-                user_cookie: values?.user_cookie,
-                copyright: values?.copyright,
-                id: values?.id,
-                copyright_source: values?.copyright_source ?? '',
-                tid: values?.tid[1],
-                cover_path: values?.cover_path ?? '',
-                title: values?.title ?? '',
-                description: values?.description ?? '',
-                dynamic: values?.dynamic ?? '',
-                tags: values?.tags ?? [],
-                // interactive: values?.interactive ?? 0,
-                dolby: values?.sound.includes('dolby') ? 1 : 0,
-                hires: values?.sound.includes('hires') ? 1 : 0,
-                up_selection_reply: values?.interaction.includes('up_selection_reply') ? 1 : 0,
-                up_close_reply: values?.interaction.includes('up_close_reply') ? 1 : 0,
-                up_close_danmu: values?.interaction.includes('up_close_danmu') ? 1 : 0,
-                charging_pay: values?.charging_pay ? 1 : 0,
-                no_reprint: values?.no_reprint ? 1 : 0,
-                is_only_self: values?.is_only_self ? 1 : 0,
-                mission_id: values?.mission_id,
-                dtime: values?.isDtime ? values?.dtime : null,
-                credits: values?.credits ?? null,
-                uploader: values?.uploader ?? null,
-                extra_fields: values?.extra_fields ?? '',
-              }
-              const result = await trigger(studioEntity)
-              await mutate(result)
-              Toast.success('更新成功')
-              router.push('/upload-manager')
-            } catch (e: any) {
-              // error handling
-              Notification.error({
-                title: '创建失败',
-                content: <Paragraph style={{ maxWidth: 450 }}>{e.message}</Paragraph>,
-                // theme: 'light',
-                // duration: 0,
-                style: { width: 'min-content' },
-              })
-            }
-          }}
-          type="primary"
-          icon={<IconPlusCircle size="large" />}
-          theme="solid"
-          style={{ marginTop: 12, marginRight: 4 }}
-        >
-          保存模板
-        </Button>
-      </div>
-      <Form
-        initValues={uploadStreamers}
-        style={{ paddingLeft: 30, paddingBottom: 40 }}
-        getFormApi={formApi => (api.current = formApi)}
-        autoScrollToError
-        component={TemplateFields}
-        labelWidth="180px"
-        labelPosition={labelPosition}
+      <PageHeader
+        icon={<IconPlusCircle size="large" />}
+        title="编辑投稿模板"
+        description="修改模板信息并保存"
+        actions={
+          <Button onClick={handleSave} type="primary" icon={<IconPlusCircle />} theme="solid">
+            保存模板
+          </Button>
+        }
       />
+      <div className={dc.content}>
+        <div className={dc.card} style={{ padding: '28px 32px 40px' }}>
+          <Form
+            initValues={uploadStreamers}
+            autoScrollToError
+            onSubmit={handleSave}
+            component={TemplateFields}
+            getFormApi={(formApi) => (api.current = formApi)}
+            labelWidth="180px"
+            labelPosition={labelPosition}
+          />
+        </div>
+      </div>
     </>
   )
 }
@@ -135,7 +140,7 @@ const Edit = () => {
 const EditTemplate: React.FC = () => {
   return (
     <Suspense>
-      <Edit></Edit>
+      <Edit />
     </Suspense>
   )
 }

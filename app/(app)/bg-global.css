@@ -19,7 +19,7 @@ body.app-has-bg::before {
   pointer-events: none;
 }
 
-/* 同色半透明遮罩，保证所有页面文字可读（明暗主题都跟随） */
+/* 同色半透明遮罩，保证所有页面文字可读（明暗主题都跟随，透明度可调） */
 body.app-has-bg::after {
   content: '';
   position: fixed;
@@ -28,12 +28,12 @@ body.app-has-bg::after {
   width: 100vw;
   height: 100vh;
   background: var(--semi-color-bg-0);
-  opacity: 0.35;
+  opacity: var(--app-bg-mask-opacity, 0.35);
   z-index: -1;
   pointer-events: none;
 }
 
-/* 让 Semi 顶层容器透出 body 背景 */
+/* 让 Semi 顶层容器透出 body 背景(兼容旧布局) */
 body.app-has-bg .semi-layout,
 body.app-has-bg .semi-sider,
 body.app-has-bg .semi-nav,

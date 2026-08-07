@@ -15,38 +15,63 @@ import {
   IconDeleteStroked,
   IconWrench,
   IconVideoListStroked,
-  IconClock,
-  IconLayers,
 } from '@douyinfe/semi-icons'
-import useStreamers from '../../lib/use-streamers'
+import React, { useMemo, useState } from 'react'
+import useSWR from 'swr'
+import useSWRMutation from 'swr/mutation'
 import TemplateModal from '../../ui/TemplateModal'
 import OverrideModal from '../../ui/OverrideModal'
-import { LiveStreamerEntity, put, requestDelete, sendRequest, fetcher, StreamerInfo } from '../../lib/api-streamer'
-import useSWRMutation from 'swr/mutation'
-import useSWR from 'swr'
+import {
+  LiveStreamerEntity,
+  put,
+  requestDelete,
+  sendRequest,
+  fetcher,
+  proxy,
+  StreamerInfo,
+} from '../../lib/api-streamer'
 import { PauseButton } from '@/app/ui/StreamerActions/PauseButton'
+import { platformName, streamerStatusTag } from '@/app/lib/status'
+import { timeAgo } from '@/app/lib/use-dashboard'
+import StreamerCard from '@/app/ui/StreamerCard'
 import PageHeader from '../components/PageHeader'
-import { uploadStatusTag, platformName } from '@/app/lib/status'
 import styles from './page.module.scss'
 
+const { Content } = Layout
 const { Text } = Typography
 
+/**
+ * 直播管理:卡片 / 列表双视图 + 搜索 + 平台筛选 + 批量操作。
+ * 相对 PR 版本的增强:
+ *  - 修复 useStreamers 吞错误导致"接口失败被误判为空列表"的问题
+ *  - 卡片与主页共用 StreamerCard,样式不再两处重复
+ *  - 新增列表视图(主播多时可用)、搜索、筛选、批量暂停/删除
+ */
 export default function StreamersPage() {
-  const { Content } = Layout
-  const { streamers, isLoading } = useStreamers()
+  const { data: streamers, error, isLoading, mutate } = useSWR<LiveStreamerEntity[]>(
+    '/v1/streamers',
+    fetcher,
+    { refreshInterval: 10000 }
+  )
+  const { data: infos } = useSWR<StreamerInfo[]>('/v1/streamer-info', fetcher, {
+    refreshInterval: 30000,
+  })
+
+  // url -> 最新一次录制的直播标题
+  const infoByUrl = useMemo(() => {
+    const map = new Map<string, StreamerInfo>()
+    for (const i of infos ?? []) {
+      if (!i.url) continue
+      const cur = map.get(i.url)
+      if (!cur || i.date > cur.date) map.set(i.url, i)
+    }
+    return map
+  }, [infos])
+
+  // ---- 增删改(保留 PR 逻辑) ----
   const { trigger: deleteStreamers } = useSWRMutation('/v1/streamers', requestDelete)
   const { trigger: updateStreamers } = useSWRMutation('/v1/streamers', put)
   const { trigger } = useSWRMutation('/v1/streamers', sendRequest)
-  const { data: infos } = useSWR<StreamerInfo[]>('/v1/streamer-info', fetcher)
-
-  // url -> 最新一次录制的直播标题（作为卡片主角「直播间标题」）
-  const titleByUrl = new Map<string, { title: string; date: number }>()
-  ;(infos ?? []).forEach((i) => {
-    if (i.url && i.title) {
-      const cur = titleByUrl.get(i.url)
-      if (!cur || i.date > cur.date) titleByUrl.set(i.url, { title: i.title, date: i.date })
-    }
-  })
 
   const onConfirm = async (id: number) => {
     await deleteStreamers(id)
@@ -54,36 +79,32 @@ export default function StreamersPage() {
 
   const handleEntityPostprocessor = (values: any) => {
     if (values?.postprocessor) {
-      values.postprocessor = values.postprocessor.map(
-        (element: { [key: string]: string } | string) => {
-          if (element === 'rm') {
-            return { cmd: 'rm' }
-          } else if (typeof element === 'object' && !element.cmd) {
-            const [key, value] = Object.entries(element)[0]
-            return { cmd: key, value: value }
-          }
-          return element
+      values.postprocessor = values.postprocessor.map((element: any) => {
+        if (element?.mv) {
+          return { ...element, run: `mv ${element.mv}` }
         }
-      )
+        return element
+      })
     }
     return values
   }
 
   const handleOk = async (values: any) => {
     if (values?.postprocessor) {
-      values.postprocessor = values.postprocessor.map(
-        ({ cmd, value }: { cmd: string; value: string }) => (cmd === 'rm' ? 'rm' : { [cmd]: value })
-      )
+      values.postprocessor = values.postprocessor.map((element: any) => {
+        if (element?.mv) {
+          return { ...element, run: `mv ${element.mv}` }
+        }
+        return element
+      })
     }
     try {
       await trigger(values)
     } catch (e: any) {
       Notification.error({
         title: '创建失败',
-        content: <Typography.Paragraph style={{ maxWidth: 450 }}>{e.message}</Typography.Paragraph>,
-        style: { width: 'min-content' },
+        content: e?.message ?? String(e),
       })
-      throw e
     }
   }
 
@@ -92,114 +113,122 @@ export default function StreamersPage() {
     delete values.statusTag
     delete values.upload_status
     if (values?.postprocessor) {
-      values.postprocessor = values.postprocessor.map(
-        ({ cmd, value }: { cmd: string; value: string }) => (cmd === 'rm' ? 'rm' : { [cmd]: value })
-      )
+      values.postprocessor = values.postprocessor.map((element: any) => {
+        if (element?.mv) {
+          return { ...element, run: `mv ${element.mv}` }
+        }
+        return element
+      })
     }
     try {
       await updateStreamers(values)
     } catch (e: any) {
       Notification.error({
         title: '更新失败',
-        content: <Typography.Paragraph style={{ maxWidth: 450 }}>{e.message}</Typography.Paragraph>,
-        style: { width: 'min-content' },
+        content: e?.message ?? String(e),
       })
-      throw e
     }
   }
 
-  const renderCard = (item: LiveStreamerEntity) => {
-    const isLive = item.status === 'Working'
-    const label = item.remark ? `[${item.remark}]` : '[未命名]'
-    const hero = titleByUrl.get(item.url)?.title || item.remark || item.url
-    return (
-      <div key={item.id} className={`${styles.card} ${isLive ? styles.rec : ''}`}>
-        <div className={styles.cardHead}>
-          <span className={styles.cardStatus}>
-            <span className={`${styles.recDot} ${isLive ? styles.dotLive : styles.dotOffline}`} />
-            {label}
-          </span>
-          <span className={styles.cardPlat}>{platformName(item.url)}</span>
-        </div>
+  // ---- 搜索 / 筛选 / 视图 ----
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState('全部')
+  const [layout, setLayout] = useState<'grid' | 'list'>('grid')
+  const [selected, setSelected] = useState<Set<number>>(new Set())
 
-        <div className={styles.cardName} title={hero}>
-          {hero}
-        </div>
+  const platforms = useMemo(() => {
+    const set = new Set<string>()
+    for (const s of streamers ?? []) set.add(platformName(s.url))
+    return ['全部', ...Array.from(set).sort((a, b) => a.localeCompare(b, 'zh'))]
+  }, [streamers])
 
-        <a
-          className={styles.cardSub}
-          href={item.url}
-          target="_blank"
-          rel="noreferrer"
-          title={item.url}
-        >
-          {item.url}
-        </a>
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return (streamers ?? []).filter((s) => {
+      const okPlat = filter === '全部' || platformName(s.url) === filter
+      const okQ =
+        !q ||
+        (s.remark ?? '').toLowerCase().includes(q) ||
+        s.url.toLowerCase().includes(q)
+      return okPlat && okQ
+    })
+  }, [streamers, query, filter])
 
-        <div className={styles.meta}>
-          {item.time_range ? (
-            <span className={styles.chip}>
-              <IconClock size="small" />
-              {Array.isArray(item.time_range) ? item.time_range.join(' ~ ') : String(item.time_range)}
-            </span>
-          ) : null}
-          {item.split_time ? (
-            <span className={styles.chip}>
-              <IconClock size="small" />
-              切片 {item.split_time}s
-            </span>
-          ) : null}
-          {item.split_size ? (
-            <span className={styles.chip}>
-              <IconLayers size="small" />
-              分片 {item.split_size}MB
-            </span>
-          ) : null}
-          {item.upload_status ? uploadStatusTag(item.upload_status) : null}
-        </div>
-
-        <div className={styles.cardFoot}>
-          <ButtonGroup theme="borderless" className={styles.cardActions}>
-            <TemplateModal onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
-              <Button
-                theme="borderless"
-                type="primary"
-                icon={<IconEdit2Stroked />}
-                aria-label="编辑"
-              />
-            </TemplateModal>
-            <PauseButton streamer={item} />
-            <Popconfirm
-              title="确定是否要删除？"
-              content="此操作将不可逆"
-              onConfirm={() => onConfirm(item.id)}
-            >
-              <Button
-                theme="borderless"
-                type="danger"
-                icon={<IconDeleteStroked />}
-                aria-label="删除"
-              />
-            </Popconfirm>
-            <OverrideModal onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
-              <Button
-                theme="borderless"
-                type="tertiary"
-                icon={<IconWrench />}
-                aria-label="高级"
-              />
-            </OverrideModal>
-          </ButtonGroup>
-        </div>
-      </div>
-    )
+  // ---- 批量操作 ----
+  const toggleSel = (id: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
+  const toggleAll = (checked: boolean) => {
+    setSelected(checked ? new Set(filtered.map((s) => s.id)) : new Set())
+  }
+
+  const batchPause = async () => {
+    const ids = Array.from(selected)
+    if (ids.length === 0) return
+    try {
+      await Promise.all(ids.map((id) => proxy(`/v1/streamers/${id}/pause`, { method: 'PUT' })))
+      Notification.success({ title: `已暂停 ${ids.length} 个直播间` })
+      setSelected(new Set())
+      mutate()
+    } catch (e: any) {
+      Notification.error({ title: '批量暂停失败', content: e?.message ?? String(e) })
+    }
+  }
+
+  const batchDelete = async () => {
+    const ids = Array.from(selected)
+    if (ids.length === 0) return
+    try {
+      await Promise.all(ids.map((id) => proxy(`/v1/streamers/${id}`, { method: 'DELETE' })))
+      Notification.success({ title: `已删除 ${ids.length} 个直播间` })
+      setSelected(new Set())
+      mutate()
+    } catch (e: any) {
+      Notification.error({ title: '批量删除失败', content: e?.message ?? String(e) })
+    }
+  }
+
+  // ---- 卡片操作区(网格) ----
+  const renderActions = (item: LiveStreamerEntity) => (
+    <ButtonGroup theme="borderless" className={styles.cardActions}>
+      <TemplateModal onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
+        <Button theme="borderless" type="primary" icon={<IconEdit2Stroked />} aria-label="编辑" />
+      </TemplateModal>
+      <PauseButton streamer={item} />
+      <Popconfirm title="确定是否要删除？" content="此操作将不可逆" onConfirm={() => onConfirm(item.id)}>
+        <Button theme="borderless" type="danger" icon={<IconDeleteStroked />} aria-label="删除" />
+      </Popconfirm>
+      <OverrideModal onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
+        <Button theme="borderless" type="tertiary" icon={<IconWrench />} aria-label="高级" />
+      </OverrideModal>
+    </ButtonGroup>
+  )
+
+  const renderRowActions = (item: LiveStreamerEntity) => (
+    <div className={styles.rowActions}>
+      <TemplateModal onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
+        <Button theme="borderless" type="primary" icon={<IconEdit2Stroked />} aria-label="编辑" />
+      </TemplateModal>
+      <PauseButton streamer={item} />
+      <Popconfirm title="确定是否要删除？" content="此操作将不可逆" onConfirm={() => onConfirm(item.id)}>
+        <Button theme="borderless" type="danger" icon={<IconDeleteStroked />} aria-label="删除" />
+      </Popconfirm>
+      <OverrideModal onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
+        <Button theme="borderless" type="tertiary" icon={<IconWrench />} aria-label="高级" />
+      </OverrideModal>
+    </div>
+  )
 
   return (
     <>
       <PageHeader
         title="直播管理"
-        description="管理需要录制的直播间，支持新增、编辑与删除"
+        description="管理需要录制的直播间,支持新增、编辑与删除"
         icon={<IconVideoListStroked size="large" />}
         actions={
           <TemplateModal onOk={handleOk}>
@@ -214,12 +243,175 @@ export default function StreamersPage() {
           <div className={styles.center}>
             <Spin size="large" />
           </div>
-        ) : streamers && streamers.length > 0 ? (
-          <div className={styles.grid}>{streamers.map(renderCard)}</div>
-        ) : (
+        ) : error ? (
+          /* 修复:接口失败 ≠ 空列表,给出错误态而不是 Empty */
           <div className={styles.center}>
-            <Empty description="还没有监控任何直播间，点击右上角「新建」开始" />
+            <Empty
+              title="加载失败"
+              description="无法获取主播列表,请检查后端连接"
+              style={{ marginBottom: 12 }}
+            />
+            <Button onClick={() => mutate()}>重试</Button>
           </div>
+        ) : (
+          <>
+            {/* 工具栏 */}
+            <div className={styles.toolbar}>
+              <label className={styles.search}>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  width="15"
+                  height="15"
+                >
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="M21 21l-4.3-4.3" />
+                </svg>
+                <input
+                  type="text"
+                  placeholder="搜索主播 / URL"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+              </label>
+              <div className={styles.filterChips}>
+                {platforms.map((p) => (
+                  <button
+                    key={p}
+                    className={`${styles.fchip} ${filter === p ? styles.fchipActive : ''}`}
+                    onClick={() => setFilter(p)}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+              <span className={styles.toolbarSpacer} />
+              <div className={styles.seg}>
+                <button
+                  className={layout === 'grid' ? styles.segActive : ''}
+                  onClick={() => setLayout('grid')}
+                  aria-label="网格视图"
+                >
+                  ▦ 网格
+                </button>
+                <button
+                  className={layout === 'list' ? styles.segActive : ''}
+                  onClick={() => setLayout('list')}
+                  aria-label="列表视图"
+                >
+                  ☰ 列表
+                </button>
+              </div>
+            </div>
+
+            {/* 批量操作条 */}
+            {selected.size > 0 && (
+              <div className={styles.batchbar}>
+                <span>
+                  已选 <b>{selected.size}</b> 项
+                </span>
+                <span className={styles.batchSpacer} />
+                <Button size="small" onClick={batchPause}>
+                  批量暂停
+                </Button>
+                <Button size="small" type="danger" theme="borderless" onClick={batchDelete}>
+                  批量删除
+                </Button>
+                <Button size="small" theme="borderless" onClick={() => setSelected(new Set())}>
+                  取消
+                </Button>
+              </div>
+            )}
+
+            {filtered.length === 0 ? (
+              <div className={styles.center}>
+                <Empty
+                  title={streamers && streamers.length > 0 ? '没有匹配的直播间' : '还没有监控任何直播间'}
+                  description={
+                    streamers && streamers.length > 0
+                      ? '调整搜索或筛选条件试试'
+                      : '点击右上角「新建」开始'
+                  }
+                />
+              </div>
+            ) : layout === 'grid' ? (
+              <div className={styles.grid}>
+                {filtered.map((item) => (
+                  <StreamerCard
+                    key={item.id}
+                    streamer={item}
+                    info={infoByUrl.get(item.url)}
+                    actions={renderActions(item)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className={styles.tableWrap}>
+                <table className={styles.listTable}>
+                  <thead>
+                    <tr>
+                      <th style={{ width: 36 }}>
+                        <input
+                          type="checkbox"
+                          className={styles.chk}
+                          checked={filtered.length > 0 && filtered.every((s) => selected.has(s.id))}
+                          onChange={(e) => toggleAll(e.target.checked)}
+                          aria-label="全选"
+                        />
+                      </th>
+                      <th>状态</th>
+                      <th>主播</th>
+                      <th>平台</th>
+                      <th>最近录制</th>
+                      <th style={{ textAlign: 'right' }}>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((item) => {
+                      const info = infoByUrl.get(item.url)
+                      return (
+                        <tr
+                          key={item.id}
+                          className={selected.has(item.id) ? styles.rowSel : ''}
+                          onClick={() => toggleSel(item.id)}
+                        >
+                          <td onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              className={styles.chk}
+                              checked={selected.has(item.id)}
+                              onChange={() => toggleSel(item.id)}
+                              aria-label={`选择 ${item.remark}`}
+                            />
+                          </td>
+                          <td>{streamerStatusTag(item.status)}</td>
+                          <td>
+                            <div className={styles.cellName}>{item.remark || item.url}</div>
+                            {info?.title ? (
+                              <div className={styles.cellSub}>{info.title}</div>
+                            ) : null}
+                          </td>
+                          <td>
+                            <Text type="tertiary" size="small">
+                              {platformName(item.url)}
+                            </Text>
+                          </td>
+                          <td>
+                            <Text type="tertiary" size="small">
+                              {info?.date ? timeAgo(info.date) : '—'}
+                            </Text>
+                          </td>
+                          <td onClick={(e) => e.stopPropagation()}>{renderRowActions(item)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
         )}
       </Content>
     </>

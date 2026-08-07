@@ -1,0 +1,77 @@
+/* 最近事件时间线 */
+
+.timeline {
+  position: relative;
+  padding-left: 22px;
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--semi-color-fill-1);
+  border-radius: 2px;
+}
+
+.item {
+  position: relative;
+  padding: 5px 0 12px;
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.item::before {
+  content: '';
+  position: absolute;
+  left: -20px;
+  top: 9px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--semi-color-bg-1);
+  border: 2px solid var(--semi-color-text-2);
+}
+
+.item.start::before {
+  border-color: rgb(var(--semi-green-5));
+}
+
+.item.file::before {
+  border-color: rgb(var(--semi-blue-4));
+}
+
+.time {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  width: 46px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.text {
+  font-size: 13px;
+  color: var(--semi-color-text-1);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--semi-color-text-2);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.empty {
+  padding: 28px 20px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--semi-color-text-2);
+}

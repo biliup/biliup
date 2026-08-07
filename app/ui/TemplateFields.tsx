@@ -116,7 +116,7 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
               添加行
             </Button>
             {arrayFields.map(({ field, key, remove }, i) => (
-              <div key={key} style={{ width: 1000, display: 'flex' }}>
+              <div key={key} style={{ width: '100%', display: 'flex' }}>
                 <InputGroup>
                   <Input field={`${field}.username`} label="需要@的用户名" placeholder="username" />
                   <Input field={`${field}.uid`} label="需要@的uid" placeholder="uid" />
@@ -258,7 +258,6 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
           addOnBlur={true}
           separator=","
           placeholder="可用英文逗号分隔以批量输入标签，失焦/Enter 以保存"
-          onChange={v => console.log(v)}
           style={{ width: 560 }}
           rules={[{ required: true, message: 'Tag不能为空' }]}
           onExceed={v => {
@@ -346,7 +345,6 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
                     duration: 3,
                     position: 'top',
                   })
-                  console.log(delaySeconds)
                 }}
               >
                 确认

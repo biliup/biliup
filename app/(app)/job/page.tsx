@@ -1,32 +1,35 @@
 'use client'
-
-import { AutoComplete, Layout, Nav, Spin, Table, Typography } from '@douyinfe/semi-ui'
+import { Spin, Table, Typography } from '@douyinfe/semi-ui'
 import { SortOrder } from '@douyinfe/semi-ui/lib/es/table'
 import useSWR from 'swr'
-import { fetcher, FileList } from '@/app/lib/api-streamer'
-import {
-  JSXElementConstructor,
-  Key,
-  ReactElement,
-  ReactNode,
-  ReactPortal,
-  useRef,
-  useState,
-} from 'react'
+import { fetcher } from '@/app/lib/api-streamer'
 import { IconHistory } from '@douyinfe/semi-icons'
 import { humDate } from '@/app/lib/utils'
-import Filter from "@/app/(app)/job/Filter";
+import Filter from '@/app/(app)/job/Filter'
 import { useIsMobile } from '../../lib/useIsMobile'
+import PageHeader from '../components/PageHeader'
+import dc from '@/app/ui/data-card.module.scss'
 
-export default function Home() {
-  const { Header, Footer, Sider, Content } = Layout
+export default function Job() {
   const isMobile = useIsMobile()
+  const { Text } = Typography
   const { data: data, error, isLoading } = useSWR<any[]>('/v1/streamer-info', fetcher)
 
   if (isLoading) {
-    return <Spin size="large" />
+    return (
+      <>
+        <PageHeader
+          icon={<IconHistory size="large" />}
+          title="直播历史"
+          description="按主播查看历史直播记录"
+        />
+        <div style={{ padding: '80px 0', textAlign: 'center' }}>
+          <Spin size="large" />
+        </div>
+      </>
+    )
   }
-  const { Text } = Typography
+
   const columns = [
     {
       title: '名称',
@@ -37,13 +40,11 @@ export default function Home() {
     {
       title: '标题',
       dataIndex: 'title',
-      render: (text: any) => {
-        return (
-          <Text strong style={{ whiteSpace: 'nowrap' }}>
-            {text}
-          </Text>
-        )
-      },
+      render: (text: any) => (
+        <Text strong style={{ whiteSpace: 'nowrap' }}>
+          {text}
+        </Text>
+      ),
       onFilter: (value: any, record: any) => record.title.includes(value),
       renderFilterDropdown: Filter,
     },
@@ -70,71 +71,46 @@ export default function Home() {
 
   return (
     <>
-      <Header style={{ backgroundColor: 'var(--semi-color-bg-1)' }}>
-        <Nav
-          style={{ border: 'none' }}
-          header={
-            <>
-              <div
-                style={{
-                  backgroundColor: 'rgb(250 102 76)',
-                  borderRadius: 'var(--semi-border-radius-large)',
-                  color: 'var(--semi-color-bg-0)',
-                  display: 'flex',
-                  padding: '6px',
-                }}
-              >
-                <IconHistory size="large" />
-              </div>
-              <h4 style={{ marginLeft: '12px' }}>直播历史</h4>
-            </>
-          }
-          mode="horizontal"
-        ></Nav>
-      </Header>
-      <Content
-        style={{
-          paddingLeft: isMobile ? 8 : 12,
-          paddingRight: isMobile ? 8 : 12,
-          backgroundColor: 'var(--semi-color-bg-0)',
-        }}
-      >
-        <main style={{ overflowX: 'auto' }}>
+      <PageHeader
+        icon={<IconHistory size="large" />}
+        title="直播历史"
+        description="按主播查看历史直播记录"
+      />
+      <div className={dc.content}>
+        <div className={dc.card}>
           <Table
             size="small"
             rowKey="id"
+            scroll={{ x: 'max-content' }}
             columns={columns}
             dataSource={data}
             expandedRowRender={expandRowRender}
           />
-        </main>
-      </Content>
+        </div>
+      </div>
     </>
   )
 }
 
-
-// 创建一个子组件
+// 展开子行:该次直播的录制文件列表
 const FileLists = ({ recordId }: { recordId: string }) => {
-  const { data: files, isLoading } = useSWR(
-      `/v1/streamer-info/files/${recordId}`,
-      fetcher
-  )
+  const { data: files, isLoading } = useSWR(`/v1/streamer-info/files/${recordId}`, fetcher)
 
   if (isLoading) return <div>加载中...</div>
   if (!files || files.length === 0) return <div>暂无文件</div>
 
   return (
-      <>
-        文件列表：
-        {files.map((it: any) => (
-            <div key={it.id}>&nbsp;&nbsp;文件名：{it.file}</div>
-        ))}
-      </>
+    <div style={{ padding: '4px 8px', fontSize: 13, color: 'var(--semi-color-text-1)' }}>
+      文件列表:
+      {files.map((it: any) => (
+        <div key={it.id} style={{ padding: '2px 0 2px 24px', fontVariantNumeric: 'tabular-nums' }}>
+          {it.file}
+        </div>
+      ))}
+    </div>
   )
 }
 
-// 在 expandRowRender 中使用
 const expandRowRender = (record: any) => {
   return <FileLists recordId={record.id} />
 }

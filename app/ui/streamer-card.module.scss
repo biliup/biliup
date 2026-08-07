@@ -1,0 +1,219 @@
+/* 全局统一直播间卡片 —— 主页 / 直播管理共用 */
+
+.card {
+  border: 1px solid var(--semi-color-fill-2);
+  border-radius: 12px;
+  background: var(--semi-color-bg-1);
+  padding: 14px 16px 15px;
+  box-shadow: 0 1px 2px rgba(var(--semi-grey-9), 0.04), 0 2px 6px rgba(var(--semi-grey-9), 0.03);
+  transition: border-color 0.15s ease, box-shadow 0.2s ease, transform 0.15s ease;
+}
+
+.card:hover {
+  border-color: var(--semi-color-primary);
+  box-shadow: 0 6px 16px rgba(var(--semi-grey-9), 0.08);
+  transform: translateY(-1px);
+}
+
+/* 直播中:轻绿底 */
+.card.rec {
+  background: rgba(var(--semi-green-4), 0.05);
+}
+.card.rec:hover {
+  background: rgba(var(--semi-green-4), 0.09);
+}
+
+.card.paused {
+  opacity: 0.78;
+}
+
+/* ===== 头部行 ===== */
+.topRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+
+.left {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.chk {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--semi-color-primary);
+  cursor: pointer;
+  flex-shrink: 0;
+  margin: 0;
+}
+
+/* 状态徽章(淡色版,与页面状态语言一致) */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.bdot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.badgeLive {
+  background: rgba(var(--semi-green-4), 0.13);
+  color: rgb(var(--semi-green-5));
+}
+.badgeLive .bdot {
+  background: rgb(var(--semi-green-5));
+  animation: pulseLive 1.5s infinite;
+}
+@keyframes pulseLive {
+  0% {
+    box-shadow: 0 0 0 0 rgba(var(--semi-green-4), 0.45);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(var(--semi-green-4), 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--semi-green-4), 0);
+  }
+}
+
+.badgePause {
+  background: rgba(var(--semi-orange-4), 0.14);
+  color: rgb(var(--semi-orange-5));
+}
+.badgePause .bdot {
+  background: rgb(var(--semi-orange-5));
+}
+
+.badgeIdle {
+  background: var(--semi-color-fill-1);
+  color: var(--semi-color-text-1);
+}
+.badgeIdle .bdot {
+  background: var(--semi-color-text-2);
+}
+
+/* 平台 chip:品牌色点缀(颜色由组件内联注入) */
+.platChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.platDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ===== 名称 + 时长 ===== */
+.nameRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 3px;
+}
+
+.name {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--semi-color-text-0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* 直播中:实时时长(绿色) */
+.liveInfo {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgb(var(--semi-green-5));
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 未开播:最近录制时间 */
+.recInfo {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ===== 标题 / URL ===== */
+.title {
+  font-size: 12.5px;
+  color: var(--semi-color-text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 3px;
+}
+
+.url {
+  display: block;
+  font-size: 11.5px;
+  color: var(--semi-color-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-decoration: none;
+  margin-bottom: 10px;
+}
+.url:hover {
+  color: var(--semi-color-primary);
+  text-decoration: underline;
+}
+
+/* ===== 底部 ===== */
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+}
+
+/* 底部操作栏(仅直播管理页使用) */
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid var(--semi-color-border);
+}
+.actions :global(.semi-button) {
+  padding: 5px;
+}
+
+/* 减少动态偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .badgeLive .bdot {
+    animation: none;
+  }
+}

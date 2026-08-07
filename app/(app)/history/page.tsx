@@ -1,36 +1,36 @@
 'use client'
-import { Layout, Modal, Nav, Typography } from '@douyinfe/semi-ui'
-import { IconUserCardVideo, IconVideoListStroked } from '@douyinfe/semi-icons'
-import { Table } from '@douyinfe/semi-ui'
+import { Modal, Table, Typography } from '@douyinfe/semi-ui'
+import { IconVideoListStroked } from '@douyinfe/semi-icons'
 import { SortOrder } from '@douyinfe/semi-ui/lib/es/table'
 import useSWR from 'swr'
 import { fetcher, FileList } from '@/app/lib/api-streamer'
 import { useState } from 'react'
 import dynamic from 'next/dynamic'
 import { humDate } from '@/app/lib/utils'
+import { formatSize } from '@/app/lib/use-dashboard'
+import PageHeader from '../components/PageHeader'
+import dc from '@/app/ui/data-card.module.scss'
 
 const Players = dynamic(() => import('@/app/ui/Player'), {
   ssr: false,
 })
 
-export default function Home() {
-  const { Header, Footer, Sider, Content } = Layout
-  const { data: data, error, isLoading } = useSWR<FileList[]>('/v1/videos', fetcher)
+export default function History() {
   const { Text } = Typography
+  const { data: data, error, isLoading } = useSWR<FileList[]>('/v1/videos', fetcher)
   const [fileName, setFileName] = useState<string>()
+  const [visible, setVisible] = useState(false)
+
   const columns = [
     {
       title: '标题',
       dataIndex: 'name',
-      render: (text: any, record: any, index: any) => {
-        return <Text strong>{text}</Text>
-      },
-      // onFilter: (value, record) => record.name.includes(value)
+      render: (text: any) => <Text strong>{text}</Text>,
     },
     {
       title: '大小',
       dataIndex: 'size',
-      render: (size: number) => `${(size / 1024 / 1024).toFixed(2)} MB`,
+      render: (size: number) => formatSize(size || 0),
     },
     {
       title: '更新日期',
@@ -42,89 +42,49 @@ export default function Home() {
     {
       title: '',
       dataIndex: 'operate',
-      render: (text: any, record: any, index: number) => {
-        return (
-          <IconUserCardVideo
-            style={{ cursor: 'pointer' }}
-            onClick={() => showDialog(record.name)}
-          />
-        )
-      },
+      render: (text: any, record: any) => (
+        <Text link style={{ cursor: 'pointer' }} onClick={() => showDialog(record.name)}>
+          播放
+        </Text>
+      ),
     },
   ]
-  const [visible, setVisible] = useState(false)
+
   const showDialog = (name: string) => {
     setVisible(true)
     setFileName(name)
-    // setTimeout(()=>{
-    //     let player = new Player({
-    //           id: 'mse',
-    //           url: (process.env.NEXT_PUBLIC_API_SERVER ?? '') + '/static/' + name,
-    //           height: '100%',
-    //           // plugins: [FlvPlugin],
-    //           plugins: [FlvJsPlugin],
-    //           width: '100%',
-    //         });
-    // }, 500)
   }
-  const handleCancel = () => {
-    setVisible(false)
-  }
+
   return (
     <>
-      <Header style={{ backgroundColor: 'var(--semi-color-bg-1)' }}>
-        <Nav
-          style={{ border: 'none' }}
-          header={
-            <>
-              <div
-                style={{
-                  backgroundColor: 'rgba(var(--semi-green-4), 1)',
-                  borderRadius: 'var(--semi-border-radius-large)',
-                  color: 'var(--semi-color-bg-0)',
-                  display: 'flex',
-                  // justifyContent: 'center',
-                  padding: '6px',
-                }}
-              >
-                <IconVideoListStroked size="large" />
-              </div>
-              <h4 style={{ marginLeft: '12px' }}>历史记录</h4>
-            </>
-          }
-          mode="horizontal"
-        ></Nav>
-      </Header>
-      <Content
-        style={{
-          paddingLeft: 12,
-          paddingRight: 12,
-          backgroundColor: 'var(--semi-color-bg-0)',
-        }}
-      >
-        <main style={{ overflowX: 'auto' }}>
+      <PageHeader
+        icon={<IconVideoListStroked size="large" />}
+        title="历史记录"
+        description="已录制的视频文件,可在线回放"
+      />
+      <div className={dc.content}>
+        <div className={dc.card}>
           <Table
             size="small"
             scroll={{ x: 'max-content' }}
             columns={columns}
             dataSource={data}
+            loading={isLoading}
           />
-        </main>
+        </div>
         <Modal
           visible={visible}
-          onCancel={handleCancel}
+          onCancel={() => setVisible(false)}
           closeOnEsc={true}
           style={{ width: 'min(600px, 90vw)' }}
           size="large"
           bodyStyle={{ height: 500 }}
           footer={null}
         >
-          <Players
-            url={(process.env.NEXT_PUBLIC_API_SERVER ?? '') + '/static/' + fileName}
-          ></Players>
-          <div id="mse"></div>
+          <Players url={(process.env.NEXT_PUBLIC_API_SERVER ?? '') + '/static/' + fileName} />
+          <div id="mse" />
         </Modal>
-      </Content>
+      </div>
     </>
   )
 }

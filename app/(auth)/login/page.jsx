@@ -184,12 +184,12 @@ const Component = () => {
                             {isRegisterMode ? '注册' : '登录'}
                         </Button>
                         {isRegisterMode && (
-                            <div style={{ marginTop: '16px', textAlign: 'center', color: '#666' }}>
+                            <div style={{ marginTop: '16px', textAlign: 'center', color: 'var(--semi-color-text-2)' }}>
                                 <span style={{ fontSize: '14px' }}>
                                     注册即表示同意
-                                    <a href="/terms" style={{ color: '#1890ff' }}>用户协议</a>
+                                    <a href="/terms" style={{ color: 'var(--semi-color-primary)' }}>用户协议</a>
                                     和
-                                    <a href="/privacy" style={{ color: '#1890ff' }}>隐私政策</a>
+                                    <a href="/privacy" style={{ color: 'var(--semi-color-primary)' }}>隐私政策</a>
                                 </span>
                             </div>
                         )}

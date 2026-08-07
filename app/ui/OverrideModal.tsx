@@ -124,7 +124,6 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
 
       const overrideConfig = { ...(values.override || {}) }
       Object.keys(values).forEach(key => {
-        console.log(key, values[key])
         if (!entityFields.has(key)) {
           if (values[key] !== undefined) {
             overrideConfig[key] = values[key] === '' ? null : values[key]

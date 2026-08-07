@@ -1,10 +1,8 @@
 'use client'
-import React, { useEffect, useRef, useState } from 'react'
-import EditTemplate from '@/app/(app)/upload-manager/edit/page'
+import React, { useRef, useState } from 'react'
 import {
   Button,
   Form,
-  Layout,
   Collapse,
   Avatar,
   Select,
@@ -15,7 +13,6 @@ import {
   Tabs,
   TabPane,
 } from '@douyinfe/semi-ui'
-import { registerMediaQuery, responsiveMap } from '@/app/lib/utils'
 import { IconPlusCircle, IconStar, IconGlobe } from '@douyinfe/semi-icons'
 import useSWR from 'swr'
 import { fetcher, put } from '@/app/lib/api-streamer'
@@ -25,6 +22,7 @@ import { useBiliUsers } from '../../lib/use-streamers'
 import styles from '../../styles/dashboard.module.scss'
 import PageHeader from '../components/PageHeader'
 import SectionTitle from '../components/SectionTitle'
+import dc from '@/app/ui/data-card.module.scss'
 
 // 注册各平台组件
 import plugins from '../../ui/plugins'
@@ -33,8 +31,7 @@ import Developer from '../../ui/plugins/developer'
 
 
 const Dashboard: React.FC = () => {
-  const { Header, Content } = Layout
-  const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
+const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
   const { trigger } = useSWRMutation('/v1/configuration', put)
   const formRef = useRef<FormApi>()
   // const [formKey, setFormKey] = useState(0); // 初始化一个key
@@ -110,32 +107,23 @@ const Dashboard: React.FC = () => {
 
   return (
     <>
-      <Header
-        style={{
-          backgroundColor: 'var(--semi-color-bg-1)',
-          position: 'sticky',
-          top: 0,
-          zIndex: 1,
-        }}
-      >
-        <PageHeader
-          icon={<IconStar size="large" />}
-          title="空间配置"
-          description="管理全局下载、各平台与上传账号"
-          actions={
-            <Button
-              onClick={() => {
-                formRef.current?.submitForm()
-              }}
-              icon={<IconPlusCircle />}
-              theme="solid"
-            >
-              保存
-            </Button>
-          }
-        />
-      </Header>
-      <Content>
+      <PageHeader
+        icon={<IconStar size="large" />}
+        title="空间配置"
+        description="管理全局下载、各平台与上传账号"
+        actions={
+          <Button
+            onClick={() => {
+              formRef.current?.submitForm()
+            }}
+            icon={<IconPlusCircle />}
+            theme="solid"
+          >
+            保存
+          </Button>
+        }
+      />
+      <div className={dc.content}>
         <main className={styles.rootConfigPanel}>
           <div className={styles.main}>
             <div className={styles.content}>
@@ -216,7 +204,7 @@ const Dashboard: React.FC = () => {
             </div>
           </div>
         </main>
-      </Content>
+      </div>
     </>
   )
 }
