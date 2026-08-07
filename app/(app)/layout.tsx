@@ -139,6 +139,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   })
   const online = status !== undefined
   const version = (status as { version?: string } | undefined)?.version
+  // 后端 version 字段可能带 'v' 前缀(如 'v1.2.2'),这里统一去重,避免显示成 vv1.2.2
+  const versionText = typeof version === 'string' ? version.replace(/^v/i, '') : undefined
 
   const navCollapsed = !isMobile && collapsed
 
@@ -194,7 +196,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 biliup
               </Link>
               <Link href="/changelog" className={styles.brandVer} title="更新日志">
-                v{version ?? '—'}
+                v{versionText ?? '—'}
               </Link>
             </span>
           )}
