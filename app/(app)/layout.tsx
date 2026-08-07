@@ -147,8 +147,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className={styles.app}>
-      {/* 移动端:汉堡按钮 + 遮罩 */}
-      {isMobile && (
+      {/* 移动端:汉堡按钮 + 遮罩(抽屉打开时隐藏汉堡,点击其位置即点遮罩关闭) */}
+      {isMobile && !mobileNavOpen && (
         <button
           className={styles.burger}
           onClick={() => setMobileNavOpen(true)}
