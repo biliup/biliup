@@ -396,22 +396,10 @@ class BiliBili:
         """
         preferred_upos_cdn = None
         if not self._auto_os:
-            if lines == 'bda':
-                self._auto_os = {"os": "upos", "query": "upcdn=bda&probe_version=20221109",
-                                 "probe_url": "//upos-cs-upcdnbda.bilivideo.com/OK"}
-                preferred_upos_cdn = 'bda'
-            elif lines in {'bda2', 'cs-bda2'}:
+            if lines in {'bda2', 'cs-bda2'}:
                 self._auto_os = {"os": "upos", "query": "upcdn=bda2&probe_version=20221109",
                                  "probe_url": "//upos-cs-upcdnbda2.bilivideo.com/OK"}
                 preferred_upos_cdn = 'bda2'
-            elif lines == 'ws':
-                self._auto_os = {"os": "upos", "query": "upcdn=ws&probe_version=20221109",
-                                 "probe_url": "//upos-cs-upcdnws.bilivideo.com/OK"}
-                preferred_upos_cdn = 'ws'
-            elif lines in {'qn', 'cs-qn'}:
-                self._auto_os = {"os": "upos", "query": "upcdn=qn&probe_version=20221109",
-                                 "probe_url": "//upos-cs-upcdnqn.bilivideo.com/OK"}
-                preferred_upos_cdn = 'qn'
             elif lines == 'bldsa':
                 self._auto_os = {"os": "upos", "query": "upcdn=bldsa&probe_version=20221109",
                                  "probe_url": "//upos-cs-upcdnbldsa.bilivideo.com/OK"}
@@ -424,6 +412,18 @@ class BiliBili:
                 self._auto_os = {"os": "upos", "query": "upcdn=txa&probe_version=20221109",
                                  "probe_url": "//upos-cs-upcdntxa.bilivideo.com/OK"}
                 preferred_upos_cdn = 'txa'
+            elif lines == 'alia':
+                self._auto_os = {"os": "upos", "query": "upcdn=alia&probe_version=20221109",
+                                 "probe_url": "//upos-cs-upcdnalia.bilivideo.com/OK"}
+                preferred_upos_cdn = 'alia'
+            elif lines == 'estx':
+                self._auto_os = {"os": "upos",
+                                 "query": "probe_version=20250923&upcdn=estx&zone=cs",
+                                 "probe_url": "//e17962d5cstx.esheep.com/OK"}
+            elif lines == 'akbd':
+                self._auto_os = {"os": "upos",
+                                 "query": "probe_version=20250923&upcdn=akbd&zone=cs",
+                                 "probe_url": "//bb27c891csbd.aikobo.cn/OK"}
             else:
                 self._auto_os = self.probe()
             logger.info(f"线路选择 => {self._auto_os['os']}: {self._auto_os['query']}. time: {self._auto_os.get('cost')}")
@@ -457,10 +457,10 @@ class BiliBili:
             logger.debug(f"preupload: {ret}")
             if preferred_upos_cdn:
                 original_endpoint: str = ret['endpoint']
-                if re.match(r'//upos-(sz|cs)-upcdn(bda2|ws|qn)\.bilivideo\.com', original_endpoint):
-                    if re.match(r'bda2|qn|ws', preferred_upos_cdn):
+                if re.match(r'//upos-(sz|cs)-upcdnbda2\.bilivideo\.com', original_endpoint):
+                    if re.match(r'bda2', preferred_upos_cdn):
                         logger.debug(f"Preferred UpOS CDN: {preferred_upos_cdn}")
-                        new_endpoint = re.sub(r'upcdn(bda2|qn|ws)', f'upcdn{preferred_upos_cdn}', original_endpoint)
+                        new_endpoint = re.sub(r'upcdnbda2', f'upcdn{preferred_upos_cdn}', original_endpoint)
                         logger.debug(f"{original_endpoint} => {new_endpoint}")
                         ret['endpoint'] = new_endpoint
                     else:

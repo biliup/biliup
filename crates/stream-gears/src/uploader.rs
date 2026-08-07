@@ -25,9 +25,10 @@ pub enum UploadLine {
     Cntx,
     Antx,
     Attx,
-    Bda,
     Txa,
     Alia,
+    Estx,
+    Akbd,
 }
 
 impl From<UploadLine> for biliup_cli::UploadLine {
@@ -47,9 +48,10 @@ impl From<UploadLine> for biliup_cli::UploadLine {
             P::Cntx => C::Cntx,
             P::Antx => C::Antx,
             P::Attx => C::Attx,
-            P::Bda => C::Bda,
             P::Txa => C::Txa,
             P::Alia => C::Alia,
+            P::Estx => C::Estx,
+            P::Akbd => C::Akbd,
         }
     }
 }

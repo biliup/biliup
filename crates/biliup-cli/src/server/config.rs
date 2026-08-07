@@ -46,7 +46,7 @@ pub struct Config {
     #[serde(default)]
     pub submit_api: Option<String>,
 
-    /// 上传线路：AUTO | alia | bda2 | bldsa | qn | tx | txa
+    /// 上传线路：AUTO | alia | bda2 | bldsa | tx | txa | estx | akbd
     #[builder(default = default_lines())]
     #[serde(default = "default_lines")]
     pub lines: String,

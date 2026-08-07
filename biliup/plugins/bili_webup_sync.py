@@ -374,11 +374,25 @@ class BiliBili:
         logger.info(f"{file_name} 开始上传")
         if self.save_dir:
             self.save_path = os.path.join(self.save_dir, file_name)
-        cs_upcdn = ['alia', 'bda', 'bda2', 'bldsa', 'qn', 'tx', 'txa']
+        cs_upcdn = ['alia', 'bda2', 'bldsa', 'tx', 'txa']
         jd_upcdn = ['jd-alia', 'jd-bd', 'jd-bldsa', 'jd-tx', 'jd-txa']
+        special_upcdn = {
+            'estx': {
+                "os": "upos",
+                "query": "probe_version=20250923&upcdn=estx&zone=cs",
+                "probe_url": "//e17962d5cstx.esheep.com/OK",
+            },
+            'akbd': {
+                "os": "upos",
+                "query": "probe_version=20250923&upcdn=akbd&zone=cs",
+                "probe_url": "//bb27c891csbd.aikobo.cn/OK",
+            },
+        }
         preferred_upos_cdn = None
         if not self._auto_os:
-            if lines in cs_upcdn:
+            if lines in special_upcdn:
+                self._auto_os = special_upcdn[lines]
+            elif lines in cs_upcdn:
                 self._auto_os = {"os": "upos", "query": f"upcdn={lines}&probe_version=20221109",
                                  "probe_url": f"//upos-cs-upcdn{lines}.bilivideo.com/OK"}
                 preferred_upos_cdn = lines

@@ -116,12 +116,6 @@ class UploadLine(Enum):
     Bda2 = 1
     """百度云"""
 
-    Qn = 2
-    """七牛"""
-
-    Bda = 3
-    """百度云海外"""
-
     Tx = 4
     """腾讯云EO"""
 
@@ -133,6 +127,13 @@ class UploadLine(Enum):
 
     Alia = 7
     """阿里云海外"""
+
+    Estx = 8
+    """B站自建"""
+
+    Akbd = 9
+    """B站自建"""
+
 
 
 def upload(video_path: List[str],
