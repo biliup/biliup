@@ -30,7 +30,6 @@ import PageHeader from '../components/PageHeader'
 import dc from '@/app/ui/data-card.module.scss'
 
 export default function UploadManager() {
-  const { Meta } = Card
   const { Text } = Typography
   const [visible, setVisible] = useState(false)
   const router = useRouter()
@@ -154,29 +153,29 @@ export default function UploadManager() {
               <Card
                 shadows="hover"
                 style={{
-                  maxWidth: 360,
                   margin: '8px 2px',
                   flexGrow: 1,
+                  height: '100%',
                   borderRadius: 12,
+                  border: '1px solid var(--semi-color-border)',
                 }}
                 bodyStyle={{
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
+                  gap: 12,
                   padding: '16px 18px',
                 }}
               >
-                <Meta
-                  title={
-                    <Text
-                      ellipsis={{ showTooltip: true, pos: 'middle' }}
-                      style={{ maxWidth: 150 }}
-                    >
-                      {item.template_name}
-                    </Text>
-                  }
-                />
-                <ButtonGroup style={{ minWidth: 100 }} theme="borderless">
+                {/* 模板名称:优先完整展示,占满剩余宽度,超出才尾部省略 */}
+                <Text
+                  ellipsis={{ showTooltip: true }}
+                  title={item.template_name}
+                  style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600 }}
+                >
+                  {item.template_name}
+                </Text>
+                <ButtonGroup style={{ flexShrink: 0 }} theme="borderless">
                   <Button icon={<IconSendStroked />} onClick={() => showDialog(item)} />
                   <Button
                     icon={<IconEdit2Stroked />}
