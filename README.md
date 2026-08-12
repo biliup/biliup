@@ -199,4 +199,4 @@ graph TB
 [爱发电 »](https://afdian.com/a/biliup)
 
 ## ⭐Stars
-[![Star History Chart](https://api.star-history.com/svg?repos=biliup/biliup&type=Date)](https://star-history.com/#biliup/biliup&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=biliup/biliup&type=Date)](https://star-history.dera.page/#biliup/biliup&Date)
