@@ -15,9 +15,11 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::RwLock;
+use std::sync::{OnceLock, RwLock};
 use tokio::fs;
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
+use tokio::sync::Mutex;
 use tokio::time::Duration;
 use tracing::warn;
 
@@ -29,6 +31,8 @@ const GQL_BATCH_LIMIT: usize = 30;
 /// Twitch 已失效的 auth_token（Twitch 与 TwitchVideos 共享，进程内长期记忆）。
 /// 对应 Python 版 TwitchUtils._invalid_auth_token 类级属性。
 static INVALID_AUTH_TOKEN: RwLock<Option<String>> = RwLock::new(None);
+static TWITCH_COOKIE_NONCE: OnceLock<u64> = OnceLock::new();
+static TWITCH_COOKIE_FILE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 /// 返回可用的 auth_token：未配置、为空或已被记为失效时返回 None。
 fn effective_auth_token(auth_token: Option<&str>) -> Option<String> {
@@ -151,8 +155,7 @@ impl LivePlugin for Twitch {
                 })
                 .collect();
 
-            let responses =
-                post_gql_batch(&request.client, auth_token.as_deref(), &ops).await?;
+            let responses = post_gql_batch(&request.client, auth_token.as_deref(), &ops).await?;
 
             for (index, url) in chunk.iter().enumerate() {
                 let is_live = responses
@@ -207,9 +210,8 @@ impl TwitchLive {
     async fn check_stream(&self) -> LiveResult<LiveStatus> {
         let channel_name = self.channel_name(&self.url)?;
         let gql: GqlResponse = self
-            .post_gql(
-                json!({
-                    "query": r#"
+            .post_gql(json!({
+                "query": r#"
                         query query($channel_name:String!) {
                             user(login: $channel_name){
                                 stream {
@@ -230,8 +232,8 @@ impl TwitchLive {
                             }
                         }
                     "#,
-                    "variables": { "channel_name": channel_name }
-                }))
+                "variables": { "channel_name": channel_name }
+            }))
             .await?;
 
         let user = gql
@@ -672,19 +674,72 @@ fn netscape_cookie_file_content(auth_token: &str) -> String {
 fn cookie_file_path(auth_token: &str) -> PathBuf {
     let mut hasher = DefaultHasher::new();
     auth_token.hash(&mut hasher);
-    std::env::temp_dir().join(format!("biliup-twitch-cookies-{:016x}.txt", hasher.finish()))
+    let nonce = TWITCH_COOKIE_NONCE.get_or_init(rand::random::<u64>);
+    std::env::temp_dir().join(format!(
+        "biliup-twitch-cookies-{}-{nonce:016x}-{:016x}.txt",
+        std::process::id(),
+        hasher.finish()
+    ))
 }
 
 /// 将 auth_token 写入 Netscape cookie 文件并返回路径；内容未变化时不重写。
 /// 写入失败仅告警并返回 None（降级为匿名请求）。
 async fn write_cookie_file(auth_token: &str) -> Option<PathBuf> {
+    let _guard = TWITCH_COOKIE_FILE_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .await;
     let path = cookie_file_path(auth_token);
     let content = netscape_cookie_file_content(auth_token);
-    if fs::read_to_string(&path).await.ok().as_deref() != Some(content.as_str()) {
-        if let Err(err) = fs::write(&path, &content).await {
-            warn!("写入 Twitch cookie 文件失败: {}: {err}", path.display());
+
+    match fs::symlink_metadata(&path).await {
+        Ok(metadata) => {
+            if !metadata.file_type().is_file() {
+                warn!("Twitch cookie 临时路径不是普通文件，拒绝使用");
+                return None;
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if metadata.permissions().mode() & 0o077 != 0 {
+                    warn!("Twitch cookie 临时文件权限过宽，拒绝使用");
+                    return None;
+                }
+            }
+            if fs::read_to_string(&path).await.ok().as_deref() == Some(content.as_str()) {
+                return Some(path);
+            }
+            warn!("Twitch cookie 临时路径已存在但内容不匹配，拒绝覆盖");
             return None;
         }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            warn!("无法检查 Twitch cookie 临时文件: {error}");
+            return None;
+        }
+    }
+
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        options.mode(0o600);
+    }
+    let mut file = match options.open(&path).await {
+        Ok(file) => file,
+        Err(error) => {
+            warn!("无法安全创建 Twitch cookie 临时文件: {error}");
+            return None;
+        }
+    };
+    let result = match file.write_all(content.as_bytes()).await {
+        Ok(()) => file.sync_all().await,
+        Err(error) => Err(error),
+    };
+    if let Err(error) = result {
+        let _ = fs::remove_file(&path).await;
+        warn!("写入 Twitch cookie 临时文件失败: {error}");
+        return None;
     }
     Some(path)
 }
@@ -738,13 +793,23 @@ mod tests {
             .unwrap();
         runtime.block_on(async {
             let token = "unit-test-token";
-            let path = write_cookie_file(token).await.expect("写入 cookie 文件失败");
+            let path = write_cookie_file(token)
+                .await
+                .expect("写入 cookie 文件失败");
             assert_eq!(
                 fs::read_to_string(&path).await.unwrap(),
                 netscape_cookie_file_content(token)
             );
             // 复用同一路径
             assert_eq!(write_cookie_file(token).await.as_deref(), Some(&*path));
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                assert_eq!(
+                    fs::metadata(&path).await.unwrap().permissions().mode() & 0o777,
+                    0o600
+                );
+            }
             let _ = fs::remove_file(&path).await;
         });
     }

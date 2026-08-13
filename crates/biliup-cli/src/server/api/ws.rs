@@ -1,16 +1,22 @@
 use axum::extract::ws::{Message, Utf8Bytes, WebSocket};
 use axum::extract::{Query, WebSocketUpgrade};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use std::collections::VecDeque;
 use std::io::ErrorKind;
 use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::{MissedTickBehavior, interval};
 use tracing::{debug, error, info};
 
 static ALLOWED_FILES: &[&str] = &["ds_update.log", "download.log", "upload.log"];
+const MAX_LOG_CONNECTIONS: usize = 8;
+static LOG_CONNECTIONS: OnceLock<Arc<Semaphore>> = OnceLock::new();
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct LogsQuery {
@@ -20,8 +26,59 @@ pub struct LogsQuery {
 pub async fn ws_logs(
     ws: WebSocketUpgrade,
     Query(query): Query<LogsQuery>,
-) -> axum::response::Response {
-    ws.on_upgrade(move |socket| websocket_logs(socket, query))
+    headers: HeaderMap,
+) -> Response {
+    if !websocket_origin_allowed(&headers) {
+        return (StatusCode::FORBIDDEN, "WebSocket Origin 不受信任").into_response();
+    }
+    let limiter = LOG_CONNECTIONS
+        .get_or_init(|| Arc::new(Semaphore::new(MAX_LOG_CONNECTIONS)))
+        .clone();
+    let Some(permit) = acquire_log_permit(limiter) else {
+        return (StatusCode::TOO_MANY_REQUESTS, "日志连接数已达上限").into_response();
+    };
+
+    ws.on_upgrade(move |socket| async move {
+        let _permit = permit;
+        websocket_logs(socket, query).await;
+    })
+}
+
+fn acquire_log_permit(limiter: Arc<Semaphore>) -> Option<OwnedSemaphorePermit> {
+    limiter.try_acquire_owned().ok()
+}
+
+fn websocket_origin_allowed(headers: &HeaderMap) -> bool {
+    let Some(origin) = headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return false;
+    };
+    let Ok(origin) = url::Url::parse(origin) else {
+        return false;
+    };
+    if !matches!(origin.scheme(), "http" | "https") {
+        return false;
+    }
+    if origin.username() != ""
+        || origin.password().is_some()
+        || origin.path() != "/"
+        || origin.query().is_some()
+        || origin.fragment().is_some()
+    {
+        return false;
+    }
+    let origin_authority = &origin[url::Position::BeforeHost..url::Position::AfterPort];
+    let host_matches = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|host| host.eq_ignore_ascii_case(origin_authority));
+    let trusted_dev_origin = matches!(
+        origin.as_str().trim_end_matches('/'),
+        "http://localhost:3000" | "http://127.0.0.1:3000" | "http://[::1]:3000"
+    );
+    host_matches || trusted_dev_origin
 }
 
 async fn websocket_logs(mut ws: WebSocket, query: LogsQuery) {
@@ -212,4 +269,57 @@ async fn send_new_lines_from_offset(
             })?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_LOG_CONNECTIONS, acquire_log_permit, websocket_origin_allowed};
+    use axum::http::{HeaderMap, HeaderValue, header};
+    use std::sync::Arc;
+    use tokio::sync::Semaphore;
+
+    fn headers(host: &str, origin: Option<&str>) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_str(host).unwrap());
+        if let Some(origin) = origin {
+            headers.insert(header::ORIGIN, HeaderValue::from_str(origin).unwrap());
+        }
+        headers
+    }
+
+    #[test]
+    fn websocket_origin_must_match_host_or_trusted_dev_frontend() {
+        assert!(websocket_origin_allowed(&headers(
+            "example.test",
+            Some("https://example.test")
+        )));
+        assert!(websocket_origin_allowed(&headers(
+            "127.0.0.1:19159",
+            Some("http://localhost:3000")
+        )));
+        assert!(!websocket_origin_allowed(&headers(
+            "127.0.0.1:19159",
+            Some("https://attacker.example")
+        )));
+        assert!(!websocket_origin_allowed(&headers(
+            "example.test",
+            Some("https://example.test/not-an-origin")
+        )));
+        assert!(!websocket_origin_allowed(&headers(
+            "example.test",
+            Some("https://user@example.test")
+        )));
+        assert!(!websocket_origin_allowed(&headers("127.0.0.1:19159", None)));
+    }
+
+    #[test]
+    fn websocket_log_connections_are_bounded() {
+        let limiter = Arc::new(Semaphore::new(MAX_LOG_CONNECTIONS));
+        let permits: Vec<_> = (0..MAX_LOG_CONNECTIONS)
+            .map(|_| acquire_log_permit(limiter.clone()).unwrap())
+            .collect();
+        assert!(acquire_log_permit(limiter.clone()).is_none());
+        drop(permits);
+        assert!(acquire_log_permit(limiter).is_some());
+    }
 }

@@ -110,8 +110,7 @@ impl<'a> HuyaLive<'a> {
         // 因此 cdn_fallback 无论是否回退，最后都要重新取一次流地址
         if self.huya_cdn_fallback {
             if !self.check_url_healthy(&raw_stream_url).await {
-                let cdn_list: Vec<&str> =
-                    stream_urls.iter().map(|(cdn, _)| cdn.as_str()).collect();
+                let cdn_list: Vec<&str> = stream_urls.iter().map(|(cdn, _)| cdn.as_str()).collect();
                 info!(name = %self.name, "cdn_fallback 顺序尝试 {cdn_list:?}");
                 let mut fallback = None;
                 for (cdn, url) in &stream_urls {
@@ -427,7 +426,8 @@ impl<'a> HuyaLive<'a> {
             .into_iter()
             .filter(|(cdn, _, _)| !matches!(cdn.as_str(), "HY" | "HUYA" | "HYZJ"))
             .map(|(cdn, _, url)| (cdn, url))
-            .collect())    }
+            .collect())
+    }
 
     async fn get_cdn_token_info_ex(&self, stream_name: &str) -> LiveResult<String> {
         let ua = huya_wup::random_hyapp_ua();
@@ -687,11 +687,7 @@ fn find_json_value_end(input: &str, start: usize) -> Option<usize> {
     None
 }
 
-fn build_anticode(
-    stream_name: &str,
-    anti_code: &str,
-    presenter_uid: u64,
-) -> LiveResult<String> {
+fn build_anticode(stream_name: &str, anti_code: &str, presenter_uid: u64) -> LiveResult<String> {
     let query = serde_urlencoded::from_str::<HashMap<String, String>>(anti_code)
         .map_err(|err| LiveError::custom(format!("解析虎牙防盗链参数失败: {err}")))?;
     let Some(fm) = query.get("fm") else {

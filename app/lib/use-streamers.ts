@@ -3,7 +3,7 @@ import useSWR from "swr";
 import {
   BiliType,
   fetcher,
-  LiveStreamerEntity, proxy,
+  LiveStreamerEntity,
   User
 } from "./api-streamer";
 import {useEffect, useState} from "react";
@@ -28,23 +28,18 @@ export function useBiliUsers() {
     }
     const updateList = async (item: User) => {
       try {
-        const res = await fetcher(`/bili/space/myinfo?user=${item.value}`, undefined);
-        const pRes = await proxy(`/bili/proxy?url=${res.data?.face}`);
-        const myBlob = await pRes.blob();
-
+        const res = await fetcher(`/v1/users/${item.id}`, undefined);
         return {
           ...item,
           name: res.data.name,
-          face: URL.createObjectURL(myBlob),
+          face: res.data?.face || "/noface.jpg",
         };
       } catch (error) {
         console.error(error);
-        const pRes = await proxy("/bili/proxy?url=https://i0.hdslb.com/bfs/face/member/noface.jpg");
-        const myBlob = await pRes.blob();
         return {
           ...item,
           name: "Cookie已失效",
-          face: URL.createObjectURL(myBlob),
+          face: "/noface.jpg",
         };
       }
     };

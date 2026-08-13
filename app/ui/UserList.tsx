@@ -1,15 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useRef, useState } from 'react'
 import {
-  fetcher,
-  LiveStreamerEntity,
-  proxy,
   requestDelete,
   sendRequest,
-  StudioEntity,
-  User,
 } from '../lib/api-streamer'
-import useSWR from 'swr'
-import { useRouter } from 'next/router'
 import {
   Button,
   Form,
@@ -50,16 +43,7 @@ const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
   const addUser = async (value: any) => {
     setConfirmLoading(true)
     try {
-      const ret = await fetcher(`/bili/space/myinfo?user=${value}`, undefined)
-      if (ret.code) {
-        throw new Error(ret.message)
-      }
       await trigger({
-        // id: 0,
-        // name: value,
-        // value: value,
-        // platform: 'bilibili-cookies',
-        key: 'bilibili-cookies',
         value: value
       })
       setVisible(false)

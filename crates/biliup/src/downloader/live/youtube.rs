@@ -255,7 +255,10 @@ impl YoutubeLive {
 
         // flat 条目缺少 upload_date 时单条完整提取后再判定（对齐 youtube.py:259-272）
         let mut candidate = value.clone();
-        if candidate.get("upload_date").and_then(Value::as_str).is_none()
+        if candidate
+            .get("upload_date")
+            .and_then(Value::as_str)
+            .is_none()
             && let Some(url) = string_field(&candidate, &["webpage_url", "url"])
             && let Some(resolved) = self.extract_info(&url, true).await?
         {
@@ -524,9 +527,15 @@ mod tests {
             EntryDecision::Select(json!({}))
         );
         // 早于 after_date：列表按时间倒序，停止扫描
-        assert_eq!(live.date_decision(json!({}), "20231231"), EntryDecision::Stop);
+        assert_eq!(
+            live.date_decision(json!({}), "20231231"),
+            EntryDecision::Stop
+        );
         // 晚于 before_date：跳过当前条目继续扫描
-        assert_eq!(live.date_decision(json!({}), "20250101"), EntryDecision::Skip);
+        assert_eq!(
+            live.date_decision(json!({}), "20250101"),
+            EntryDecision::Skip
+        );
     }
 
     #[tokio::test]

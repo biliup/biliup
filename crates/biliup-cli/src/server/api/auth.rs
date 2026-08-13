@@ -1,19 +1,10 @@
+use crate::server::infrastructure::users::{AuthSession, CreateUserError, Credentials};
 use axum::{
     Router,
     http::StatusCode,
     response::{IntoResponse, Redirect},
     routing::{get, post},
 };
-use serde::Deserialize;
-
-use crate::server::infrastructure::users::{AuthSession, Credentials};
-
-// This allows us to extract the "next" field from the query string. We use this
-// to redirect after log in.
-#[derive(Debug, Deserialize)]
-pub struct NextUrl {
-    _next: Option<String>,
-}
 
 pub fn router() -> Router<()> {
     Router::new()
@@ -44,7 +35,28 @@ mod post {
 
         let user = match auth_session.backend.create_user(creds).await {
             Ok(user) => user,
-            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+            Err(CreateUserError::InvalidCredentials) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({ "message": "用户名必须为 biliup，且密码必须为 1 至 1024 字节" })),
+                )
+                    .into_response();
+            }
+            Err(CreateUserError::AlreadyExists) => {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(serde_json::json!({ "message": "管理员已初始化，不能重复注册" })),
+                )
+                    .into_response();
+            }
+            Err(CreateUserError::Database(error)) => {
+                tracing::error!(error = ?error, "failed to initialize Web administrator");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+            Err(CreateUserError::HashingTask(error)) => {
+                tracing::error!(error = ?error, "Web administrator password hashing task failed");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
         };
 
         // Log the newly-created user in.
@@ -59,18 +71,16 @@ mod post {
         mut auth_session: AuthSession,
         Json(creds): Json<Credentials>,
     ) -> impl IntoResponse {
-        info!("Login with credentials {:?}", creds);
+        info!("Web login attempt");
         let user = match auth_session.authenticate(creds.clone()).await {
             Ok(Some(user)) => user,
             Ok(None) => {
                 info!("Invalid credentials");
-
-                let mut login_url = "/login".to_string();
-                if let Some(next) = creds.next {
-                    login_url = format!("{login_url}?next={next}");
-                };
-
-                return Redirect::to(&login_url).into_response();
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    Json(serde_json::json!({ "message": "用户名或密码错误" })),
+                )
+                    .into_response();
             }
             Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         };
@@ -87,6 +97,51 @@ mod post {
         //     Redirect::to("/")
         // }
         //     .into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::router;
+    use crate::server::infrastructure::connection_pool::ConnectionManager;
+    use crate::server::infrastructure::users::Backend;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode, header};
+    use axum_login::AuthManagerLayerBuilder;
+    use tower::ServiceExt;
+    use tower_sessions::SessionManagerLayer;
+    use tower_sessions_sqlx_store::SqliteStore;
+
+    #[tokio::test]
+    async fn invalid_login_is_an_explicit_error_not_a_followed_redirect() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let session_store = SqliteStore::new(pool.clone());
+        session_store.migrate().await.unwrap();
+        let auth_layer = AuthManagerLayerBuilder::new(
+            Backend::new(pool),
+            SessionManagerLayer::new(session_store).with_secure(false),
+        )
+        .build();
+        let app = router().layer(auth_layer);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/users/login")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(r#"{"username":"biliup","password":"wrong"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(response.headers().get(header::LOCATION).is_none());
     }
 }
 

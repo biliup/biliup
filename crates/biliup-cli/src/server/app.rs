@@ -50,7 +50,10 @@ impl ApplicationController {
 
         // 配置会话管理层
         let session_layer = SessionManagerLayer::new(session_store)
-            .with_secure(false)
+            // Loopback development uses plain HTTP.  A non-loopback bind is
+            // expected to sit behind TLS, so never send its session cookie over
+            // an insecure browser connection.
+            .with_secure(!addr.ip().is_loopback())
             .with_name("biliup.sid")
             .with_expiry(Expiry::OnInactivity(Duration::days(7)));
         // .with_signed(key);
@@ -62,12 +65,9 @@ impl ApplicationController {
 
         // 构建应用程序路由
         // 是否启用登录保护
-        let mut app = server::router::router(service_register.clone());
-        if enable_login_guard {
-            app = app
-                .route_layer(login_required!(Backend)) // 添加登录验证中间件
-                .merge(auth::router()); // 合并认证路由
-        }
+        let protected_routes =
+            server::router::router(service_register.clone()).route("/v1/ws/logs", get(ws_logs));
+        let mut app = with_optional_auth(protected_routes, enable_login_guard);
         app = app
             .layer(auth_layer) // 添加认证层
             .layer(
@@ -81,7 +81,6 @@ impl ApplicationController {
                     .allow_origin("http://localhost:3000".parse::<HeaderValue>().unwrap())
                     .allow_methods(AllowMethods::any()),
             )
-            .route("/v1/ws/logs", get(ws_logs)) // 获取视频列表
             .fallback(static_handler); // 静态文件处理回退
 
         // 启动HTTP服务器
@@ -123,6 +122,15 @@ impl ApplicationController {
     }
 }
 
+fn with_optional_auth(app: axum::Router<()>, enable_login_guard: bool) -> axum::Router<()> {
+    if enable_login_guard {
+        app.route_layer(login_required!(Backend))
+            .merge(auth::router())
+    } else {
+        app
+    }
+}
+
 /// 优雅关闭信号处理
 async fn shutdown_signal(
     deletion_task_abort_handle: AbortHandle,
@@ -154,4 +162,52 @@ async fn shutdown_signal(
         _ = terminate => { deletion_task_abort_handle.abort() },
     }
     service_register.cleanup().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::with_optional_auth;
+    use crate::server::infrastructure::connection_pool::ConnectionManager;
+    use crate::server::infrastructure::users::Backend;
+    use axum::Router;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use axum::routing::get;
+    use axum_login::AuthManagerLayerBuilder;
+    use tower::ServiceExt;
+    use tower_sessions::SessionManagerLayer;
+    use tower_sessions_sqlx_store::SqliteStore;
+
+    async fn request_log_route(enable_login_guard: bool) -> StatusCode {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let session_store = SqliteStore::new(pool.clone());
+        session_store.migrate().await.unwrap();
+        let auth_layer = AuthManagerLayerBuilder::new(
+            Backend::new(pool),
+            SessionManagerLayer::new(session_store).with_secure(false),
+        )
+        .build();
+        let protected = Router::new().route("/v1/ws/logs", get(|| async { StatusCode::OK }));
+        let app = with_optional_auth(protected, enable_login_guard).layer(auth_layer);
+
+        app.oneshot(
+            Request::builder()
+                .uri("/v1/ws/logs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+    }
+
+    #[tokio::test]
+    async fn log_websocket_route_is_protected_when_auth_is_enabled() {
+        assert_eq!(request_log_route(true).await, StatusCode::UNAUTHORIZED);
+        assert_eq!(request_log_route(false).await, StatusCode::OK);
+    }
 }

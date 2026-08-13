@@ -171,6 +171,133 @@ pub struct Archive {
     pub ctime: u64,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ArchivePage {
+    pub from_page: u32,
+    pub page_size: u32,
+    pub total: u64,
+    pub total_pages: u32,
+    pub fetched_pages: u32,
+    pub archives: Vec<Archive>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+struct RawArchivePageMetadata {
+    ps: u64,
+    count: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawArchiveAudit {
+    #[serde(rename = "Archive")]
+    archive: Archive,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawArchivePage {
+    page: RawArchivePageMetadata,
+    #[serde(default)]
+    arc_audits: Option<Vec<RawArchiveAudit>>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct PaginationPlan {
+    page_size: u32,
+    total: u64,
+    total_pages: u32,
+    fetched_pages: u32,
+    to_page: u32,
+}
+
+fn pagination_plan(
+    page_size: u64,
+    total: u64,
+    from_page: u32,
+    max_pages: Option<u32>,
+) -> Result<PaginationPlan> {
+    if from_page == 0 {
+        return Err(Kind::Custom("from_page must be at least 1".into()));
+    }
+    if max_pages == Some(0) {
+        return Err(Kind::Custom("max_pages must be at least 1".into()));
+    }
+    if page_size == 0 {
+        return Err(Kind::Custom("archive API returned a zero page size".into()));
+    }
+    let page_size = u32::try_from(page_size)
+        .map_err(|_| Kind::Custom("archive API page size is too large".into()))?;
+    let total_pages_u64 = total.div_ceil(u64::from(page_size));
+    let total_pages = u32::try_from(total_pages_u64)
+        .map_err(|_| Kind::Custom("archive API page count is too large".into()))?;
+
+    if total_pages == 0 {
+        if from_page != 1 {
+            return Err(Kind::Custom(
+                "from_page exceeds the empty archive result".into(),
+            ));
+        }
+        return Ok(PaginationPlan {
+            page_size,
+            total,
+            total_pages,
+            fetched_pages: 1,
+            to_page: 1,
+        });
+    }
+    if from_page > total_pages {
+        return Err(Kind::Custom(format!(
+            "from_page {from_page} exceeds total_pages {total_pages}"
+        )));
+    }
+
+    let remaining_pages = total_pages - from_page + 1;
+    let fetched_pages = max_pages
+        .map(|maximum| remaining_pages.min(maximum))
+        .unwrap_or(remaining_pages);
+    let to_page = from_page
+        .checked_add(fetched_pages - 1)
+        .ok_or_else(|| Kind::Custom("archive page range is too large".into()))?;
+    Ok(PaginationPlan {
+        page_size,
+        total,
+        total_pages,
+        fetched_pages,
+        to_page,
+    })
+}
+
+fn parse_archive_page(value: Value) -> Result<(RawArchivePageMetadata, Vec<Archive>)> {
+    let raw: RawArchivePage = serde_json::from_value(value)?;
+    let audits = match raw.arc_audits {
+        Some(audits) => audits,
+        None if raw.page.count == 0 => Vec::new(),
+        None => {
+            return Err(Kind::Custom(
+                "archive API omitted entries for a non-empty result".into(),
+            ));
+        }
+    };
+    Ok((
+        raw.page,
+        audits.into_iter().map(|audit| audit.archive).collect(),
+    ))
+}
+
+fn validate_archive_page_metadata(
+    expected: &RawArchivePageMetadata,
+    actual: &RawArchivePageMetadata,
+) -> Result<()> {
+    if actual.ps == 0 {
+        return Err(Kind::Custom("archive API returned a zero page size".into()));
+    }
+    if actual != expected {
+        return Err(Kind::Custom(
+            "archive API pagination metadata changed between pages".into(),
+        ));
+    }
+    Ok(())
+}
+
 impl Archive {
     pub fn to_string_pretty(&self) -> String {
         let status_string = match self.state {
@@ -770,54 +897,54 @@ impl BiliBili {
 
         match res {
             ResponseData {
-                code: _,
-                data: None,
-                ..
-            } => Err(Kind::Custom(format!("{:?}", res))),
-            ResponseData {
-                code: _,
+                code: 0,
                 data: Some(v),
                 ..
             } => Ok(v),
+            ResponseData { code, .. } => Err(Kind::Custom(format!(
+                "archive API returned Bilibili code {code}"
+            ))),
         }
     }
 
-    async fn recent_archives_data(
+    /// Fetch a bounded page range while preserving pagination metadata.
+    pub async fn recent_archives_page(
         &self,
         status: &str,
         from_page: u32,
         max_pages: Option<u32>,
-    ) -> Result<Vec<Value>> {
-        let mut first_page = self.archives(status, from_page).await?;
-
-        let (page_size, count) = {
-            let page = first_page["page"].take();
-            let page_size = page["ps"].as_u64().ok_or("all_studios ps error")?;
-            let count = page["count"].as_u64().ok_or("all_studios count error")?;
-            (page_size as u32, count as u32)
-        };
-
-        let total_pages = {
-            let mut pages = count / page_size;
-            if pages * page_size < count {
-                pages += 1;
-            }
-            pages
-        };
-
-        let fetch_pages = match max_pages {
-            Some(mp) => std::cmp::min(total_pages - from_page + 1, mp),
-            None => total_pages - from_page + 1,
-        };
-        let to_page = from_page - 1 + fetch_pages;
-
-        let mut all_pages = vec![first_page];
-        for page_num in from_page + 1..=to_page {
-            let page = self.archives(status, page_num).await?;
-            all_pages.push(page);
+    ) -> Result<ArchivePage> {
+        // Validate request-only bounds before issuing a network request.
+        if from_page == 0 {
+            return Err(Kind::Custom("from_page must be at least 1".into()));
+        }
+        if max_pages == Some(0) {
+            return Err(Kind::Custom("max_pages must be at least 1".into()));
         }
 
-        Ok(all_pages)
+        let first_page = self.archives(status, from_page).await?;
+        let (metadata, mut archives) = parse_archive_page(first_page)?;
+        let plan = pagination_plan(metadata.ps, metadata.count, from_page, max_pages)?;
+
+        let mut page_num = from_page;
+        while page_num < plan.to_page {
+            page_num = page_num
+                .checked_add(1)
+                .ok_or_else(|| Kind::Custom("archive page range is too large".into()))?;
+            let page = self.archives(status, page_num).await?;
+            let (page_metadata, mut page_archives) = parse_archive_page(page)?;
+            validate_archive_page_metadata(&metadata, &page_metadata)?;
+            archives.append(&mut page_archives);
+        }
+
+        Ok(ArchivePage {
+            from_page,
+            page_size: plan.page_size,
+            total: plan.total,
+            total_pages: plan.total_pages,
+            fetched_pages: plan.fetched_pages,
+            archives,
+        })
     }
 
     /// 获取所有稿件
@@ -833,18 +960,10 @@ impl BiliBili {
         from_page: u32,
         max_pages: Option<u32>,
     ) -> Result<Vec<Archive>> {
-        let studios = self
-            .recent_archives_data(status, from_page, max_pages)
+        Ok(self
+            .recent_archives_page(status, from_page, max_pages)
             .await?
-            .iter_mut()
-            .map(|page| page["arc_audits"].take())
-            .filter_map(|audits| serde_json::from_value::<Vec<Value>>(audits).ok())
-            .flat_map(|archives| archives.into_iter())
-            .map(|mut arc| arc["Archive"].take())
-            .filter_map(|studio| serde_json::from_value::<_>(studio).ok())
-            .collect::<Vec<_>>();
-
-        Ok(studios)
+            .archives)
     }
 
     fn get_cookie(&self) -> Result<String> {
@@ -881,5 +1000,121 @@ impl<T: Serialize> Display for ResponseData<T> {
             "{}",
             serde_json::to_string(self).map_err(std::fmt::Error::custom)?
         )
+    }
+}
+
+#[cfg(test)]
+mod archive_tests {
+    use super::{
+        RawArchivePageMetadata, pagination_plan, parse_archive_page, validate_archive_page_metadata,
+    };
+    use serde_json::json;
+
+    fn archive() -> serde_json::Value {
+        json!({
+            "aid": 1,
+            "bvid": "BV1test",
+            "title": "fixture",
+            "cover": "https://i0.hdslb.com/fixture.jpg",
+            "reject_reason": "",
+            "reject_reason_url": "",
+            "duration": 10,
+            "desc": "description",
+            "state": 0,
+            "state_desc": "已通过",
+            "dtime": 0,
+            "ptime": 1,
+            "ctime": 1
+        })
+    }
+
+    #[test]
+    fn pagination_rejects_zero_and_out_of_range_values() {
+        assert!(pagination_plan(10, 20, 0, Some(1)).is_err());
+        assert!(pagination_plan(10, 20, 1, Some(0)).is_err());
+        assert!(pagination_plan(0, 20, 1, Some(1)).is_err());
+        assert!(pagination_plan(10, 20, 3, Some(1)).is_err());
+        assert!(pagination_plan(10, 0, 2, Some(1)).is_err());
+    }
+
+    #[test]
+    fn pagination_is_bounded_without_unsigned_underflow() {
+        let plan = pagination_plan(10, 25, 2, Some(20)).unwrap();
+        assert_eq!(plan.page_size, 10);
+        assert_eq!(plan.total_pages, 3);
+        assert_eq!(plan.fetched_pages, 2);
+        assert_eq!(plan.to_page, 3);
+
+        let empty = pagination_plan(10, 0, 1, Some(1)).unwrap();
+        assert_eq!(empty.total_pages, 0);
+        assert_eq!(empty.fetched_pages, 1);
+        assert_eq!(empty.to_page, 1);
+
+        let maximum = pagination_plan(1, u64::from(u32::MAX), u32::MAX, Some(1)).unwrap();
+        assert_eq!(maximum.fetched_pages, 1);
+        assert_eq!(maximum.to_page, u32::MAX);
+    }
+
+    #[test]
+    fn archive_fixture_preserves_metadata_and_entries() {
+        let (metadata, archives) = parse_archive_page(json!({
+            "page": {"ps": 10, "count": 21},
+            "arc_audits": [{"Archive": archive()}]
+        }))
+        .unwrap();
+
+        assert_eq!(metadata.ps, 10);
+        assert_eq!(metadata.count, 21);
+        assert_eq!(archives.len(), 1);
+        assert_eq!(archives[0].bvid, "BV1test");
+    }
+
+    #[test]
+    fn malformed_archive_entries_are_reported_instead_of_silently_dropped() {
+        assert!(
+            parse_archive_page(json!({
+                "page": {"ps": 10, "count": 1},
+                "arc_audits": [{"unexpected": archive()}]
+            }))
+            .is_err()
+        );
+        assert!(
+            parse_archive_page(json!({
+                "page": {"ps": 10, "count": 1}
+            }))
+            .is_err()
+        );
+        assert!(
+            parse_archive_page(json!({
+                "page": {"ps": 10, "count": 0}
+            }))
+            .unwrap()
+            .1
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn followup_pages_must_keep_nonzero_consistent_metadata() {
+        let expected = RawArchivePageMetadata { ps: 10, count: 21 };
+        assert!(validate_archive_page_metadata(&expected, &expected).is_ok());
+        assert!(
+            validate_archive_page_metadata(&expected, &RawArchivePageMetadata { ps: 0, count: 21 })
+                .is_err()
+        );
+        assert!(
+            validate_archive_page_metadata(
+                &expected,
+                &RawArchivePageMetadata { ps: 20, count: 21 }
+            )
+            .is_err()
+        );
+        assert!(
+            validate_archive_page_metadata(
+                &expected,
+                &RawArchivePageMetadata { ps: 10, count: 22 }
+            )
+            .is_err()
+        );
     }
 }

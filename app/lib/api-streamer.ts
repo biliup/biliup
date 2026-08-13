@@ -128,6 +128,31 @@ export interface User {
 	platform: string;
 }
 
+export interface BiliArchive {
+	aid: number;
+	bvid: string;
+	title: string;
+	cover: string;
+	reject_reason: string;
+	reject_reason_url: string;
+	duration: number;
+	desc: string;
+	state: number;
+	state_desc: string;
+	dtime: number;
+	ptime: number;
+	ctime: number;
+}
+
+export interface BiliArchivePage {
+	from_page: number;
+	page_size: number;
+	total: number;
+	total_pages: number;
+	fetched_pages: number;
+	archives: BiliArchive[];
+}
+
 export interface FileList {
 	key: number;
 	name: string;

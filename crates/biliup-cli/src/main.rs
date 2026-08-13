@@ -14,6 +14,10 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::reload;
 use tracing_subscriber::util::SubscriberInitExt;
 
+fn writes_web_log(command: &Commands) -> bool {
+    matches!(command, Commands::Server { .. })
+}
+
 #[tokio::main]
 async fn main() -> AppResult<()> {
     // a builder for `FmtSubscriber`.
@@ -39,9 +43,25 @@ async fn main() -> AppResult<()> {
     let console_filter = tracing_subscriber::EnvFilter::new(&cli.rust_log);
     // let (file_filter_layer, file_reload_handle) = reload::Layer::new(file_filter);
     let (console_filter_layer, console_reload_handle) = reload::Layer::new(console_filter);
+
+    // Only the Web server owns `ds_update.log`. Short-lived credential
+    // commands still log to the console, but do not persist their output.
+    let (file_layer, file_guard) = if writes_web_log(&cli.command) {
+        let file_appender = tracing_appender::rolling::never(".", "ds_update.log");
+        let (file_writer, file_guard) = tracing_appender::non_blocking(file_appender);
+        let file_layer = tracing_subscriber::fmt::layer()
+            .with_timer(timer.clone())
+            .with_writer(file_writer)
+            .with_ansi(false);
+        (Some(file_layer), Some(file_guard))
+    } else {
+        (None, None)
+    };
+
     tracing_subscriber::registry()
         .with(console_filter_layer)
         .with(tracing_subscriber::fmt::layer().with_timer(timer))
+        .with(file_layer)
         .init();
 
     let user_cookie = expand_path(cli.user_cookie);
@@ -135,7 +155,16 @@ async fn main() -> AppResult<()> {
             port,
             auth,
             config,
-        } => biliup_cli::run((&bind, port), auth, console_reload_handle, config).await?,
+        } => {
+            biliup_cli::run_with_cookie(
+                (&bind, port),
+                auth,
+                console_reload_handle,
+                config,
+                user_cookie,
+            )
+            .await?
+        }
         Commands::List {
             is_pubing,
             pubed,
@@ -155,5 +184,25 @@ async fn main() -> AppResult<()> {
             .await?
         }
     };
+    // Keep the optional server writer alive until queued records are flushed.
+    drop(file_guard);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::writes_web_log;
+    use biliup_cli::cli::Cli;
+    use clap::Parser;
+
+    #[test]
+    fn persistent_log_is_enabled_only_for_the_server_command() {
+        let server = Cli::try_parse_from(["biliup", "server"]).unwrap();
+        let renew = Cli::try_parse_from(["biliup", "renew"]).unwrap();
+        let list = Cli::try_parse_from(["biliup", "list"]).unwrap();
+
+        assert!(writes_web_log(&server.command));
+        assert!(!writes_web_log(&renew.command));
+        assert!(!writes_web_log(&list.command));
+    }
 }

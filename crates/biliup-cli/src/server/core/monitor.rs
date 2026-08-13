@@ -122,7 +122,10 @@ impl Monitor {
             // 未开播直接跳过（不占用下载槽位、不做逐间请求），并以较短间隔轮换到
             // 下一个房间，使整条队列在一个检测周期内扫完；批量请求本身由缓存 TTL 限流。
             if plugin.supports_batch_check() {
-                match self.batch_verdict(platform_name, &plugin, &room, interval).await {
+                match self
+                    .batch_verdict(platform_name, &plugin, &room, interval)
+                    .await
+                {
                     BatchVerdict::Offline => {
                         self.wake_waker(room.id()).await;
                         debug!(url = url, "批量检测未开播");
