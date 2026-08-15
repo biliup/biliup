@@ -6,7 +6,7 @@
 
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use tracing::{info, warn};
 
@@ -100,6 +100,11 @@ impl UploadLock {
     pub fn is_locked(&self) -> bool {
         self.lock_path.exists()
     }
+
+    /// 获取锁文件路径（用于提示用户手动清理残留锁文件）
+    pub fn path(&self) -> &Path {
+        &self.lock_path
+    }
 }
 
 impl Drop for UploadLock {
@@ -130,5 +135,13 @@ mod tests {
         assert!(lock2.try_acquire().unwrap());
 
         lock2.release().unwrap();
+    }
+
+    #[test]
+    fn test_lock_path() {
+        let lock = UploadLock::new("test_account").unwrap();
+
+        let path_str = lock.path().to_string_lossy().to_string();
+        assert!(path_str.ends_with("biliup_upload_test_account.lock"));
     }
 }
