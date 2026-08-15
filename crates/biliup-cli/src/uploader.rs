@@ -474,8 +474,11 @@ pub async fn upload(
             let lock = upload_lock.lock().unwrap();
             if lock.is_locked() {
                 return Err(AppError::Custom(format!(
-                    "另一个使用该账号 ({}) 的上传进程正在等待限流恢复，请稍后重试",
-                    credential_id
+                    "另一个使用该账号 ({}) 的上传进程正在等待限流恢复，请稍后重试。\n\
+                     如果确认当前没有其他上传进程在运行，可能是上次异常退出残留的锁文件，\n\
+                     可手动删除以下文件后重试：\n  {}",
+                    credential_id,
+                    lock.path().display()
                 ))
                 .into());
             }
