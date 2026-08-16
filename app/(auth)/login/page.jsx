@@ -55,14 +55,25 @@ const Component = () => {
 
             if (response.ok) {
                 Toast.success(isRegisterMode ? '注册成功' : '登录成功');
-                // 获取当前 URL 的查询参数
                 const urlParams = new URLSearchParams(window.location.search);
-                // 获取 next 参数的值
                 const nextPath = urlParams.get('next');
                 if (nextPath) {
-                    window.location.href = decodeURIComponent(nextPath); // 解码 %2F 等转义字符
+                    try {
+                        // URLSearchParams has already decoded the value. Only
+                        // allow a same-origin destination so a crafted login URL
+                        // cannot become an open redirect after authentication.
+                        const destination = new URL(nextPath, window.location.origin);
+                        if (destination.origin === window.location.origin) {
+                            window.location.assign(
+                                `${destination.pathname}${destination.search}${destination.hash}`
+                            );
+                            return;
+                        }
+                    } catch {
+                        // Fall through to the safe default route.
+                    }
                 }
-                // router.push('/');
+                window.location.assign('/');
             } else {
                 const result = await response.json();
                 Toast.error(result.message || (isRegisterMode ? '注册失败' : '登录失败'));

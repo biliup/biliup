@@ -59,3 +59,53 @@ impl ConnectionManager {
         Ok(pool)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ConnectionManager;
+
+    #[tokio::test]
+    async fn identity_migration_fails_closed_on_multiple_existing_administrators() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        sqlx::query("DROP INDEX uq_configuration_biliup_identity")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 3")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO configuration (key, value) VALUES ('biliup', 'first'), ('biliup', 'second')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+
+        assert!(
+            ConnectionManager::new_pool(db.to_str().unwrap())
+                .await
+                .is_err()
+        );
+
+        let options = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&format!("sqlite://{}", db.display()))
+            .await
+            .unwrap();
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM configuration WHERE key = 'biliup'")
+                .fetch_one(&options)
+                .await
+                .unwrap();
+        assert_eq!(
+            count, 2,
+            "migration must not pick an administrator implicitly"
+        );
+    }
+}

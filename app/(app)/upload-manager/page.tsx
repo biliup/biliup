@@ -66,8 +66,8 @@ export default function Union() {
   const handleOk = async () => {
     await sendRequest('/v1/uploads', {
       arg: {
-        files: selectFiles,
-        params: selectEntity,
+        files: selectFiles.map(String),
+        template_id: selectEntity?.id,
       },
     })
     setVisibleModal(false)

@@ -458,9 +458,8 @@ impl<'a> DouyuLive<'a> {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| {
-            LiveError::custom(format!("获取 txSecret 失败: {stream_id}"))
-        }))
+        Err(last_error
+            .unwrap_or_else(|| LiveError::custom(format!("获取 txSecret 失败: {stream_id}"))))
     }
 
     async fn request_txsecret(&self, api: &str, stream_id: &str) -> LiveResult<XP2PTxSecret> {
@@ -860,7 +859,9 @@ mod tests {
 
         for _ in 0..50 {
             let ua = random_chrome_user_agent();
-            let caps = re.captures(&ua).unwrap_or_else(|| panic!("UA 格式错误: {ua}"));
+            let caps = re
+                .captures(&ua)
+                .unwrap_or_else(|| panic!("UA 格式错误: {ua}"));
             let version: u32 = caps[1].parse().unwrap();
             assert!(
                 (100..=120).contains(&version),
@@ -889,7 +890,8 @@ mod tests {
     }
 
     #[test]
-    fn white_encrypt_key_missing_expire_at_defaults_to_zero() {        let key: WhiteEncryptKey = serde_json::from_str(
+    fn white_encrypt_key_missing_expire_at_defaults_to_zero() {
+        let key: WhiteEncryptKey = serde_json::from_str(
             r#"{"rand_str":"r","enc_time":2,"is_special":0,"key":"k","enc_data":"e"}"#,
         )
         .unwrap();
@@ -927,10 +929,8 @@ mod tests {
     async fn resolve_room_id_uses_cached_real_room_id() {
         let url = "https://www.douyu.com/somename";
         let encrypt_key_cache = Mutex::new(None);
-        let real_room_id_cache = RwLock::new(HashMap::from([(
-            url.to_string(),
-            "10568722".to_string(),
-        )]));
+        let real_room_id_cache =
+            RwLock::new(HashMap::from([(url.to_string(), "10568722".to_string())]));
         let live = make_live(url, &encrypt_key_cache, &real_room_id_cache);
 
         // 命中缓存时不请求移动端页面

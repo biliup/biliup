@@ -596,7 +596,12 @@ impl BilibiliLive {
         let selected = self
             .cdn
             .iter()
-            .find_map(|cdn| group.iter().copied().find(|candidate| &candidate.cdn == cdn))
+            .find_map(|cdn| {
+                group
+                    .iter()
+                    .copied()
+                    .find(|candidate| &candidate.cdn == cdn)
+            })
             .unwrap_or(group[0]);
 
         if !self.cdn_fallback {

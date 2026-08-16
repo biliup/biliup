@@ -74,9 +74,7 @@ impl LivePlugin for Picarto {
                 .map_err(|err| LiveError::custom(format!("获取 Picarto explore 失败: {err}")))?
                 .json()
                 .await
-                .map_err(|err| {
-                    LiveError::custom(format!("解析 Picarto explore 失败: {err}"))
-                })?;
+                .map_err(|err| LiveError::custom(format!("解析 Picarto explore 失败: {err}")))?;
 
             for entry in &explore.data {
                 if let Some(url) = wanted.remove(&entry.name.to_lowercase()) {

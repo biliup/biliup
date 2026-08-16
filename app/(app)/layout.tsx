@@ -16,6 +16,7 @@ import {
     IconHome,
     IconSetting,
     IconHistory,
+    IconUserCardVideo,
 } from '@douyinfe/semi-icons'
 import Image from 'next/image'
 import ThemeButton from '../ui/ThemeButton'
@@ -106,6 +107,23 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                             }}
                         >
                             <IconCloudStroked size="small" />
+                        </div>
+                    ),
+                },
+                {
+                    itemKey: 'archives',
+                    text: 'B站稿件',
+                    icon: (
+                        <div
+                            style={{
+                                backgroundColor: '#00a1d6',
+                                borderRadius: 'var(--semi-border-radius-medium)',
+                                color: 'var(--semi-color-bg-0)',
+                                display: 'flex',
+                                padding: '4px',
+                            }}
+                        >
+                            <IconUserCardVideo size="small" />
                         </div>
                     ),
                 },
@@ -207,6 +225,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             dashboard: '/dashboard',
             streamers: '/streamers',
             'upload-manager': '/upload-manager',
+            archives: '/archives',
             job: '/job',
             status: '/status',
             logViewer: '/logviewer',

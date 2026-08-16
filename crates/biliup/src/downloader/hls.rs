@@ -37,7 +37,12 @@ pub async fn download(
                 .iter()
                 .filter(|v| !v.is_i_frame && v.resolution.is_some())
                 .max_by_key(|v| v.bandwidth)
-                .or_else(|| pl.variants.iter().filter(|v| !v.is_i_frame).max_by_key(|v| v.bandwidth))
+                .or_else(|| {
+                    pl.variants
+                        .iter()
+                        .filter(|v| !v.is_i_frame)
+                        .max_by_key(|v| v.bandwidth)
+                })
                 .unwrap_or(&pl.variants[0]);
             info!(
                 "Selected variant: bandwidth={}, resolution={:?}, video={:?}",

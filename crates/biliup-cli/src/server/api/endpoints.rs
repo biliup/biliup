@@ -10,11 +10,10 @@ use crate::server::infrastructure::models::live_streamer::{InsertLiveStreamer, L
 use crate::server::infrastructure::models::upload_streamer::{
     InsertUploadStreamer, UploadStreamer,
 };
-use crate::server::infrastructure::models::{
-    Configuration, FileItem, InsertConfiguration, StreamerInfo,
-};
+use crate::server::infrastructure::models::{Configuration, FileItem, StreamerInfo};
 use crate::server::infrastructure::repositories::{
-    del_streamer, get_all_streamer, get_upload_config,
+    del_streamer, delete_bilibili_cookie, get_all_streamer, get_upload_config,
+    register_bilibili_cookie,
 };
 use crate::server::infrastructure::service_register::ServiceRegister;
 use crate::{LogHandle, UploadLine};
@@ -22,7 +21,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use biliup::credential::Credential;
+use biliup::credential::{Credential, save_login_info};
 use chrono::Utc;
 use clap::ValueEnum;
 use error_stack::{Report, ResultExt};
@@ -33,7 +32,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, UNIX_EPOCH};
 use tokio::fs;
-use tokio::io::AsyncWriteExt;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -411,28 +409,85 @@ pub async fn get_users_endpoint(
 
 pub async fn add_user_endpoint(
     State(pool): State<ConnectionPool>,
-    Json(user): Json<InsertConfiguration>,
+    Json(user): Json<AddBilibiliUser>,
 ) -> Result<Json<Configuration>, Response> {
-    let res = user
-        .insert(&pool)
+    let res = register_bilibili_cookie(&pool, &user.value)
         .await
-        .change_context(AppError::Unknown)
-        .map_err(report_to_response)?;
+        .map_err(report_to_response)?
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                "凭据文件不存在、不是普通文件或无法访问",
+            )
+                .into_response()
+        })?;
     Ok(Json(res))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AddBilibiliUser {
+    value: PathBuf,
+}
+
+#[cfg(test)]
+mod user_payload_tests {
+    use super::{AddBilibiliUser, PostUploads};
+    use std::path::Path;
+
+    #[test]
+    fn add_user_payload_rejects_a_client_supplied_configuration_key() {
+        assert!(
+            serde_json::from_value::<AddBilibiliUser>(serde_json::json!({
+                "key": "config",
+                "value": "cookies.json"
+            }))
+            .is_err()
+        );
+        let payload: AddBilibiliUser = serde_json::from_value(serde_json::json!({
+            "value": "cookies.json"
+        }))
+        .unwrap();
+        assert_eq!(payload.value, Path::new("cookies.json"));
+    }
+
+    #[test]
+    fn page_upload_requires_a_server_side_template_id() {
+        assert!(
+            serde_json::from_value::<PostUploads>(serde_json::json!({
+                "files": ["video.mp4"],
+                "params": {
+                    "id": 99,
+                    "user_cookie": "/tmp/client-controlled.json"
+                }
+            }))
+            .is_err()
+        );
+
+        let payload: PostUploads = serde_json::from_value(serde_json::json!({
+            "files": ["video.mp4"],
+            "template_id": 7
+        }))
+        .unwrap();
+        assert_eq!(payload.template_id, 7);
+        assert_eq!(payload.files, ["video.mp4"]);
+    }
 }
 
 pub async fn delete_user_endpoint(
     Path(id): Path<i64>,
     State(pool): State<ConnectionPool>,
-) -> Result<Json<()>, Response> {
-    let x = sqlx::query("DELETE FROM configuration WHERE id = ?")
-        .bind(id)
-        .execute(&pool)
+) -> Result<Json<crate::server::infrastructure::repositories::DeletedBilibiliCookie>, Response> {
+    let deleted = delete_bilibili_cookie(&pool, id)
         .await
-        .change_context(AppError::Unknown)
         .map_err(report_to_response)?;
-    info!("{:?}", x);
-    Ok(Json(()))
+    info!(
+        user_id = deleted.id,
+        file_deleted = deleted.file_deleted,
+        references_remaining = deleted.references_remaining,
+        "deleted Bilibili user registration"
+    );
+    Ok(Json(deleted))
 }
 
 pub async fn get_qrcode() -> Result<Json<serde_json::Value>, Response> {
@@ -462,11 +517,7 @@ pub async fn login_by_qrcode(
     let mid = info.token_info.mid;
     let filename = format!("data/{}.json", mid);
 
-    let mut file = fs::File::create(&filename)
-        .await
-        .change_context(AppError::Unknown)
-        .map_err(report_to_response)?;
-    file.write_all(&serde_json::to_vec_pretty(&info).unwrap())
+    save_login_info(&filename, &info)
         .await
         .change_context(AppError::Unknown)
         .map_err(report_to_response)?;
@@ -545,17 +596,26 @@ pub async fn get_status(
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PostUploads {
-    files: Vec<PathBuf>,
-    params: UploadStreamer,
+    files: Vec<String>,
+    template_id: i64,
 }
 
 // #[debug_handler]
 pub async fn post_uploads(
     State(config): State<Arc<RwLock<Config>>>,
+    State(pool): State<ConnectionPool>,
     Json(json_data): Json<PostUploads>,
 ) -> Result<Json<serde_json::Value>, Response> {
-    let upload_config = json_data.params;
+    let upload_config = UploadStreamer::select()
+        .where_("id = ?")
+        .bind(json_data.template_id)
+        .fetch_optional(&pool)
+        .await
+        .change_context(AppError::Unknown)
+        .map_err(report_to_response)?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "上传模板不存在").into_response())?;
     if upload_config.is_noop_uploader() {
         info!(
             uploader = ?upload_config.uploader,
@@ -571,36 +631,63 @@ pub async fn post_uploads(
         let submit_api = config.submit_api.clone();
         (line, limit, submit_api)
     };
+    let root = std::env::current_dir()
+        .change_context(AppError::Unknown)
+        .map_err(report_to_response)?;
+    let files = json_data
+        .files
+        .iter()
+        .map(|file| {
+            crate::server::router::resolve_media_path(&root, file).map_err(|_| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    format!("无效或越界的媒体文件名: {file}"),
+                )
+                    .into_response()
+            })
+        })
+        .collect::<Result<Vec<_>, Response>>()?;
+    if files.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "至少选择一个媒体文件").into_response());
+    }
     info!("通过页面开始上传");
     tokio::spawn(async move {
-        let (bilibili, videos) = upload(
-            upload_config
-                .user_cookie
-                .as_deref()
-                .unwrap_or("cookies.json"),
-            None,
-            line,
-            &json_data.files,
-            limit as usize,
-        )
-        .await?;
-        if !videos.is_empty() {
-            let recorder = Recorder::new(
-                upload_config.title.clone(),
-                StreamerInfo::new(
-                    &upload_config.template_name,
-                    "stream_title",
-                    "",
-                    Utc::now(),
-                    "",
-                ),
-            );
-            let studio = build_studio(&upload_config, &bilibili, videos, &recorder).await?;
-            let response_data =
+        let result = async {
+            let (bilibili, videos) = upload(
+                upload_config
+                    .user_cookie
+                    .as_deref()
+                    .unwrap_or("cookies.json"),
+                None,
+                line,
+                &files,
+                limit as usize,
+            )
+            .await?;
+            if !videos.is_empty() {
+                let recorder = Recorder::new(
+                    upload_config.title.clone(),
+                    StreamerInfo::new(
+                        &upload_config.template_name,
+                        "stream_title",
+                        "",
+                        Utc::now(),
+                        "",
+                    ),
+                );
+                let studio = build_studio(&upload_config, &bilibili, videos, &recorder).await?;
                 submit_to_bilibili(&bilibili, &studio, submit_api.as_deref()).await?;
-            info!("通过页面上传成功 {:?}", response_data);
+                info!(template_id = upload_config.id, "通过页面上传成功");
+            }
+            Ok::<_, Report<AppError>>(())
         }
-        Ok::<_, Report<AppError>>(())
+        .await;
+        if result.is_err() {
+            // Upload failures can wrap upstream response bodies containing
+            // short-lived upload authorization. Keep persistent Web logs free
+            // of those response bodies.
+            tracing::error!(template_id = upload_config.id, "页面上传失败");
+        }
     });
 
     Ok(Json(serde_json::json!({})))

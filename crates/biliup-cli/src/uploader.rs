@@ -4,7 +4,7 @@ use crate::upload_lock::UploadLock;
 use biliup::client::StatelessClient;
 use biliup::error::Kind;
 use biliup::uploader::bilibili::{BiliBili, Studio, Vid, Video};
-use biliup::uploader::credential::{Credential, LoginInfo};
+use biliup::uploader::credential::{Credential, LoginInfo, save_login_info};
 use biliup::uploader::line::Probe;
 use biliup::uploader::util::SubmitOption;
 use biliup::uploader::{VideoFile, credential, line, load_config};
@@ -22,7 +22,6 @@ use qrcode::render::unicode;
 use reqwest::Body;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
-use std::io::Seek;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -94,26 +93,18 @@ pub async fn login(user_cookie: PathBuf, proxy: Option<&str>) -> AppResult<()> {
         5 => login_by_webqr_cookies(client).await?,
         _ => panic!(),
     };
-    let file = std::fs::File::create(user_cookie).change_context_lazy(|| AppError::Unknown)?;
-    serde_json::to_writer_pretty(&file, &info).change_context_lazy(|| AppError::Unknown)?;
-    info!("登录成功，数据保存在{:?}", file);
+    save_login_info(&user_cookie, &info)
+        .await
+        .change_context_lazy(|| AppError::Unknown)?;
+    info!("登录成功，凭据已保存到 {}", user_cookie.display());
     Ok(())
 }
 
 pub async fn renew(user_cookie: PathBuf, proxy: Option<&str>) -> AppResult<()> {
-    let client = Credential::new(proxy);
-    let mut file = fopen_rw(user_cookie)?;
-    let login_info: LoginInfo =
-        serde_json::from_reader(&file).change_context_lazy(|| AppError::Unknown)?;
-    let new_info = client
-        .renew_tokens(login_info)
+    credential::renew_login_info_file(&user_cookie, proxy)
         .await
         .change_context_lazy(|| AppError::Unknown)?;
-    file.rewind().change_context_lazy(|| AppError::Unknown)?;
-    file.set_len(0).change_context_lazy(|| AppError::Unknown)?;
-    serde_json::to_writer_pretty(std::io::BufWriter::new(&file), &new_info)
-        .change_context_lazy(|| AppError::Unknown)?;
-    info!("{new_info:?}");
+    info!("登录凭据刷新成功");
     Ok(())
 }
 

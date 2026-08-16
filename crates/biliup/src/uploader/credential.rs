@@ -1,8 +1,11 @@
 use crate::client::StatefulClient;
 use futures::Future;
 use reqwest::header;
-use std::io::Seek;
-use std::path::Path;
+use std::collections::HashMap;
+use std::io::Write;
+use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 
 use crate::error::{Kind, Result};
 use crate::uploader::bilibili::{BiliBili, ResponseData};
@@ -60,6 +63,164 @@ pub fn bilibili_from_cookies(file: impl AsRef<Path>, proxy: Option<&str>) -> Res
     bilibili_from_info(login_info, proxy)
 }
 
+static CREDENTIAL_FILE_LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<AsyncMutex<()>>>>> =
+    OnceLock::new();
+
+fn replace_credential_file(temporary_path: &Path, destination: &Path) -> std::io::Result<()> {
+    #[cfg(not(windows))]
+    {
+        std::fs::rename(temporary_path, destination)
+    }
+    #[cfg(windows)]
+    {
+        if !destination.exists() {
+            return std::fs::rename(temporary_path, destination);
+        }
+        let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+        let backup = parent.join(format!(
+            ".biliup-replace-{}-{:016x}",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        std::fs::rename(destination, &backup)?;
+        if let Err(error) = std::fs::rename(temporary_path, destination) {
+            let _ = std::fs::rename(&backup, destination);
+            return Err(error);
+        }
+        std::fs::remove_file(backup)
+    }
+}
+
+/// Resolve a credential path to a stable, absolute lock key.
+///
+/// Existing paths (including symlinks) are canonicalized. For a file that has
+/// not been created yet, the nearest existing parent is canonicalized and the
+/// remaining normal components are appended.
+pub fn normalize_credential_path(path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
+    let path = path.as_ref();
+    if path.exists() {
+        return path.canonicalize();
+    }
+
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let mut existing = absolute.as_path();
+    let mut suffix = Vec::new();
+    while !existing.exists() {
+        let Some(name) = existing.file_name() else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "credential path has no existing parent",
+            ));
+        };
+        suffix.push(name.to_os_string());
+        existing = existing.parent().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "credential path has no existing parent",
+            )
+        })?;
+    }
+
+    let mut normalized = existing.canonicalize()?;
+    for component in suffix.into_iter().rev() {
+        let component_path = Path::new(&component);
+        if !matches!(
+            component_path.components().next(),
+            Some(Component::Normal(_))
+        ) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "credential path contains an invalid component",
+            ));
+        }
+        normalized.push(component);
+    }
+    Ok(normalized)
+}
+
+/// Serialize credential reads, refreshes, writes, registration and deletion
+/// inside the current process using the normalized physical path.
+pub async fn lock_credential_file(path: impl AsRef<Path>) -> std::io::Result<OwnedMutexGuard<()>> {
+    let key = normalize_credential_path(path)?;
+    let lock = {
+        let locks = CREDENTIAL_FILE_LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut locks = locks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        locks
+            .entry(key)
+            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+            .clone()
+    };
+    Ok(lock.lock_owned().await)
+}
+
+fn write_login_info_unlocked(path: &Path, login_info: &LoginInfo) -> Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("credentials");
+    let mut temporary_path;
+    let mut temporary_file;
+    loop {
+        temporary_path = parent.join(format!(
+            ".{file_name}.biliup-write-{}-{:016x}",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(&temporary_path) {
+            Ok(file) => {
+                temporary_file = file;
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    let write_result = (|| -> Result<()> {
+        serde_json::to_writer_pretty(&mut temporary_file, login_info)?;
+        temporary_file.write_all(b"\n")?;
+        temporary_file.sync_all()?;
+        replace_credential_file(&temporary_path, path)?;
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = std::fs::remove_file(&temporary_path);
+    }
+    write_result
+}
+
+/// Atomically write a credential file with owner-only permissions on Unix.
+pub async fn save_login_info(path: impl AsRef<Path>, login_info: &LoginInfo) -> Result<()> {
+    let path = normalize_credential_path(path)?;
+    let _guard = lock_credential_file(&path).await?;
+    write_login_info_unlocked(&path, login_info)
+}
+
+/// Refresh one credential file while holding the same lock used by readers and
+/// atomic writers.
+pub async fn renew_login_info_file(path: impl AsRef<Path>, proxy: Option<&str>) -> Result<()> {
+    let path = normalize_credential_path(path)?;
+    let _guard = lock_credential_file(&path).await?;
+    let file = std::fs::File::options().read(true).open(&path)?;
+    let login_info: LoginInfo = serde_json::from_reader(std::io::BufReader::new(file))?;
+    let new_info = Credential::new(proxy).renew_tokens(login_info).await?;
+    write_login_info_unlocked(&path, &new_info)
+}
+
 pub fn bilibili_from_info(login_info: LoginInfo, proxy: Option<&str>) -> Result<BiliBili> {
     let client = Credential::new(proxy);
     client.set_cookie(&login_info.cookie_info);
@@ -71,8 +232,9 @@ pub fn bilibili_from_info(login_info: LoginInfo, proxy: Option<&str>) -> Result<
 }
 
 pub async fn login_by_cookies(file: impl AsRef<Path>, proxy: Option<&str>) -> Result<BiliBili> {
-    // let path = file.as_ref();
-    let mut file = std::fs::File::options().read(true).write(true).open(file)?;
+    let path = normalize_credential_path(file)?;
+    let _guard = lock_credential_file(&path).await?;
+    let file = std::fs::File::options().read(true).open(&path)?;
     let login_info: LoginInfo = serde_json::from_reader(std::io::BufReader::new(&file))?;
 
     let client: Credential = Credential::new(proxy);
@@ -80,9 +242,8 @@ pub async fn login_by_cookies(file: impl AsRef<Path>, proxy: Option<&str>) -> Re
 
     if need_refresh {
         let new_info = client.renew_tokens(login_info).await?;
-        file.rewind()?;
-        file.set_len(0)?;
-        serde_json::to_writer_pretty(std::io::BufWriter::new(&file), &new_info)?;
+        drop(file);
+        write_login_info_unlocked(&path, &new_info)?;
         bilibili_from_info(new_info, proxy)
     } else {
         debug!("无需更新cookie");
@@ -90,7 +251,7 @@ pub async fn login_by_cookies(file: impl AsRef<Path>, proxy: Option<&str>) -> Re
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 #[serde(untagged)]
 pub enum ResponseValue {
     Login(LoginInfo),
@@ -98,7 +259,7 @@ pub enum ResponseValue {
     Value(serde_json::Value),
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct LoginInfo {
     pub cookie_info: serde_json::Value,
     // message: String,
@@ -109,7 +270,7 @@ pub struct LoginInfo {
     pub platform: Option<String>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct TokenInfo {
     pub access_token: String,
     expires_in: u32,
@@ -117,12 +278,164 @@ pub struct TokenInfo {
     refresh_token: String,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct OAuthInfo {
     pub mid: u64,
     pub access_token: String,
     pub expires_in: u32,
     pub refresh: bool,
+}
+
+impl std::fmt::Debug for ResponseValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Login(info) => f.debug_tuple("Login").field(info).finish(),
+            Self::OAuth(info) => f.debug_tuple("OAuth").field(info).finish(),
+            Self::Value(_) => f.debug_tuple("Value").field(&"[redacted]").finish(),
+        }
+    }
+}
+
+impl std::fmt::Debug for LoginInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoginInfo")
+            .field("cookie_info", &"[redacted]")
+            .field("sso", &"[redacted]")
+            .field("token_info", &self.token_info)
+            .field("platform", &self.platform)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for TokenInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TokenInfo")
+            .field("access_token", &"[redacted]")
+            .field("expires_in", &self.expires_in)
+            .field("mid", &self.mid)
+            .field("refresh_token", &"[redacted]")
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for OAuthInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OAuthInfo")
+            .field("mid", &self.mid)
+            .field("access_token", &"[redacted]")
+            .field("expires_in", &self.expires_in)
+            .field("refresh", &self.refresh)
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod redaction_tests {
+    use super::{LoginInfo, OAuthInfo, ResponseValue, TokenInfo, save_login_info};
+    use serde_json::json;
+
+    fn login_info(token: &str) -> LoginInfo {
+        LoginInfo {
+            cookie_info: json!({"cookies": [{"name": "SESSDATA", "value": token}]}),
+            sso: vec!["example.com".into()],
+            token_info: TokenInfo {
+                access_token: token.into(),
+                expires_in: 3600,
+                mid: 42,
+                refresh_token: token.into(),
+            },
+            platform: Some("Android".into()),
+        }
+    }
+
+    #[test]
+    fn credential_debug_output_redacts_all_secret_material() {
+        let mut login = login_info("cookie-secret");
+        login.token_info.access_token = "access-secret".into();
+        login.token_info.refresh_token = "refresh-secret".into();
+        let login_debug = format!("{login:?}");
+        for secret in ["cookie-secret", "access-secret", "refresh-secret"] {
+            assert!(!login_debug.contains(secret));
+        }
+        assert!(login_debug.contains("[redacted]"));
+        assert!(login_debug.contains("42"));
+
+        let oauth = OAuthInfo {
+            mid: 42,
+            access_token: "oauth-secret".into(),
+            expires_in: 3600,
+            refresh: true,
+        };
+        assert!(!format!("{oauth:?}").contains("oauth-secret"));
+        assert!(
+            !format!("{:?}", ResponseValue::Value(json!({"token": "raw-secret"})))
+                .contains("raw-secret")
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_credential_writes_remain_atomic_and_parseable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cookies.json");
+        let mut tasks = Vec::new();
+        for index in 0..12 {
+            let path = path.clone();
+            tasks.push(tokio::spawn(async move {
+                save_login_info(path, &login_info(&format!("token-{index}")))
+                    .await
+                    .unwrap();
+            }));
+        }
+        for task in tasks {
+            task.await.unwrap();
+        }
+
+        let saved: LoginInfo =
+            serde_json::from_reader(std::fs::File::open(&path).unwrap()).unwrap();
+        assert!(saved.token_info.access_token.starts_with("token-"));
+        assert_eq!(
+            std::fs::read_dir(dir.path())
+                .unwrap()
+                .filter_map(|entry| entry.ok())
+                .count(),
+            1
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn atomic_save_updates_a_symlink_target_without_replacing_the_link() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.json");
+        let link = dir.path().join("cookies.json");
+        save_login_info(&target, &login_info("before"))
+            .await
+            .unwrap();
+        symlink(&target, &link).unwrap();
+
+        save_login_info(&link, &login_info("after")).await.unwrap();
+
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        let saved: LoginInfo =
+            serde_json::from_reader(std::fs::File::open(target).unwrap()).unwrap();
+        assert_eq!(saved.token_info.access_token, "after");
+    }
 }
 
 #[derive(Debug)]
@@ -159,7 +472,7 @@ impl Credential {
             payload
         };
 
-        let response = self
+        let response: ResponseData<ResponseValue> = self
             .0
             .client
             .get("https://passport.bilibili.com/x/passport-login/oauth2/info")
@@ -172,12 +485,17 @@ impl Credential {
         //     return Err(CustomError::Custom(response.to_string()));
         // }
 
+        let response_code = response.code;
         let refresh = match response {
             ResponseData {
                 data: Some(ResponseValue::OAuth(OAuthInfo { refresh, .. })),
                 ..
             } => refresh,
-            _ => return Err(Kind::Custom(response.to_string())),
+            _ => {
+                return Err(Kind::Custom(format!(
+                    "credential validation failed with Bilibili code {response_code}"
+                )));
+            }
         };
 
         debug!("验证cookie");
@@ -215,6 +533,7 @@ impl Credential {
             .json()
             .await?;
         info!("更新cookie");
+        let response_code = response.code;
         match response.data {
             Some(ResponseValue::Login(info)) if !info.cookie_info.is_null() => {
                 self.set_cookie(&info.cookie_info);
@@ -223,7 +542,9 @@ impl Credential {
                     ..info
                 })
             }
-            _ => Err(Kind::Custom(response.to_string())),
+            _ => Err(Kind::Custom(format!(
+                "credential refresh failed with Bilibili code {response_code}"
+            ))),
         }
     }
 
@@ -267,6 +588,7 @@ impl Credential {
             .json()
             .await?;
         info!("通过密码登录");
+        let response_code = response.code;
         match response.data {
             Some(ResponseValue::Login(info)) if !info.cookie_info.is_null() => {
                 self.set_cookie(&info.cookie_info);
@@ -275,7 +597,9 @@ impl Credential {
                     ..info
                 })
             }
-            _ => Err(Kind::Custom(response.to_string())),
+            _ => Err(Kind::Custom(format!(
+                "password login failed with Bilibili code {response_code}"
+            ))),
         }
     }
 
@@ -297,6 +621,7 @@ impl Credential {
             .await?
             .json()
             .await?;
+        let response_code = res.code;
         match res.data {
             Some(ResponseValue::Login(info)) => {
                 self.set_cookie(&info.cookie_info);
@@ -305,7 +630,9 @@ impl Credential {
                     ..info
                 })
             }
-            _ => Err(Kind::Custom(res.to_string())),
+            _ => Err(Kind::Custom(format!(
+                "SMS login failed with Bilibili code {response_code}"
+            ))),
         }
     }
 
@@ -405,6 +732,7 @@ impl Credential {
             .json()
             .await?;
         // println!("{}", res);
+        let response_code = res.code;
         match res.data {
             Some(ResponseValue::Value(mut data))
                 if !data["captcha_key"]
@@ -421,7 +749,9 @@ impl Credential {
                 let url = data["recaptcha_url"].as_str().unwrap().to_string();
                 Err(Kind::NeedRecaptcha(url))
             }
-            _ => Err(Kind::Custom(res.to_string())),
+            _ => Err(Kind::Custom(format!(
+                "SMS request failed with Bilibili code {response_code}"
+            ))),
         }
     }
 
@@ -449,8 +779,8 @@ impl Credential {
 
             let res: ResponseData<ResponseValue> = serde_json::from_slice(&full).map_err(|_| {
                 Kind::Custom(format!(
-                    "error decoding response body, content: {:#?}",
-                    String::from_utf8_lossy(&full)
+                    "error decoding credential API response body ({} bytes)",
+                    full.len()
                 ))
             })?;
             match res {
@@ -612,11 +942,17 @@ impl Credential {
             .send()
             .await?;
         if !response.status().is_success() {
-            return Err(Kind::Custom(response.text().await?));
+            return Err(Kind::Custom(format!(
+                "Web QR confirmation failed with HTTP {}",
+                response.status()
+            )));
         }
         let res: ResponseData = response.json().await?;
         if res.code != 0 {
-            return Err(Kind::Custom(format!("{res:#?}")));
+            return Err(Kind::Custom(format!(
+                "Web QR confirmation failed with Bilibili code {}",
+                res.code
+            )));
         }
         Ok(())
     }

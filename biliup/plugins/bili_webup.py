@@ -28,6 +28,13 @@ from typing import NamedTuple
 logger = logging.getLogger('biliup')
 
 
+def _safe_response_status(response):
+    """Return only fixed, non-credential status fields for logging."""
+    if not isinstance(response, dict):
+        return {"type": type(response).__name__}
+    return {key: response[key] for key in ("code", "OK") if key in response}
+
+
 class FileInfo(NamedTuple):
     video: str
     danmaku: Optional[str] = None
@@ -135,7 +142,7 @@ class BiliWeb:
             if self.cover_path:
                 video.cover = bili.cover_up(self.cover_path).replace('http:', '')
             ret = bili.submit(self.submit_api)  # 提交视频
-        logger.info(f"上传成功: {ret}")
+        logger.info("上传成功: %s", _safe_response_status(ret))
         return file_list
 
     def creditsToDesc_v2(self):
@@ -325,7 +332,7 @@ class BiliBili:
                                        data={**payload, 'sign': self.sign(parse.urlencode(payload))})
         r = response.json()
         if r['code'] != 0 or r.get('data') is None or r['data'].get('cookie_info') is None:
-            raise RuntimeError(r)
+            raise RuntimeError(f"password login failed: {_safe_response_status(r)}")
         try:
             for cookie in r['data']['cookie_info']['cookies']:
                 self.__session.cookies.set(cookie['name'], cookie['value'])
@@ -334,8 +341,10 @@ class BiliBili:
             self.cookies = self.__session.cookies.get_dict()
             self.access_token = r['data']['token_info']['access_token']
             self.refresh_token = r['data']['token_info']['refresh_token']
-        except:
-            raise RuntimeError(r)
+        except Exception as error:
+            raise RuntimeError(
+                f"password login response was incomplete: {_safe_response_status(r)}"
+            ) from error
         return r
 
     def login_by_cookies(self, cookie):
@@ -346,7 +355,7 @@ class BiliBili:
             self.__bili_jct = cookies_dict['bili_jct']
         data = self.__session.get("https://api.bilibili.com/x/web-interface/nav", timeout=5).json()
         if data["code"] != 0:
-            raise Exception(data)
+            raise RuntimeError(f"cookie login failed: {_safe_response_status(data)}")
         print('使用cookies上传')
 
     def sign(self, param):
@@ -454,7 +463,11 @@ class BiliBili:
                 f"https://member.bilibili.com/preupload?{self._auto_os['query']}", params=query,
                 timeout=5)
             ret = resp.json()
-            logger.debug(f"preupload: {ret}")
+            logger.debug(
+                "preupload response accepted: storage=%s chunk_size=%s",
+                self._auto_os['os'],
+                ret.get('chunk_size'),
+            )
             if preferred_upos_cdn:
                 original_endpoint: str = ret['endpoint']
                 if re.match(r'//upos-(sz|cs)-upcdnbda2\.bilivideo\.com', original_endpoint):
@@ -525,7 +538,7 @@ class BiliBili:
                                           timeout=15)
                 if res.status_code == 200:
                     break
-                raise IOError(res.text)
+                raise IOError(f"merge request failed with HTTP {res.status_code}")
             except IOError:
                 ii += 1
                 logger.info("请求合并分片出现问题，尝试重连，次数：" + str(ii))
@@ -535,9 +548,9 @@ class BiliBili:
             try:
                 res = self.__session.post("https:" + ret["fetch_url"], headers=fetch_headers, timeout=15).json()
                 if res.get('OK') == 1:
-                    logger.info(f'{filename} uploaded >> {total_size / 1000 / 1000 / cost:.2f}MB/s. {res}')
+                    logger.info(f'{filename} uploaded >> {total_size / 1000 / 1000 / cost:.2f}MB/s')
                     return {"title": splitext(os.path.basename(filename))[0], "filename": ret["bili_filename"], "desc": ""}
-                raise IOError(res)
+                raise IOError(f"fetch failed: {_safe_response_status(res)}")
             except IOError:
                 ii += 1
                 logger.info("上传出现问题，尝试重连，次数：" + str(ii))
@@ -578,7 +591,7 @@ class BiliBili:
                             data=','.join(map(lambda x: x['ctx'], parts)), headers=headers, timeout=10)
         r = self.__session.post(f"https:{fetch_url}", headers=fetch_headers, timeout=5).json()
         if r["OK"] != 1:
-            raise Exception(r)
+            raise RuntimeError(f"Kodo fetch failed: {_safe_response_status(r)}")
         return {"title": splitext(os.path.basename(filename))[0], "filename": bili_filename, "desc": ""}
 
     async def upos(self, file, total_size, ret, tasks=3):
@@ -626,9 +639,9 @@ class BiliBili:
             try:
                 r = self.__session.post(url, params=p, json={"parts": parts}, headers=headers, timeout=15).json()
                 if r.get('OK') == 1:
-                    logger.info(f'{filename} uploaded >> {total_size / 1000 / 1000 / cost:.2f}MB/s. {r}')
+                    logger.info(f'{filename} uploaded >> {total_size / 1000 / 1000 / cost:.2f}MB/s')
                     return {"title": splitext(os.path.basename(filename))[0], "filename": splitext(basename(upos_uri))[0], "desc": ""}
-                raise IOError(r)
+                raise IOError(f"UPOS merge failed: {_safe_response_status(r)}")
             except IOError:
                 attempt += 1
                 logger.info(f"请求合并分片时出现问题，尝试重连，次数：" + str(attempt))
@@ -653,8 +666,13 @@ class BiliBili:
                     try:
                         await afunc(session, chunks_data, clone)
                         break
-                    except (asyncio.TimeoutError, aiohttp.ClientError) as e:
-                        logger.error(f"retry chunk{clone['chunk']} >> {i + 1}. {e}")
+                    except (asyncio.TimeoutError, aiohttp.ClientError) as error:
+                        logger.error(
+                            "retry chunk%s >> %s (%s)",
+                            clone['chunk'],
+                            i + 1,
+                            type(error).__name__,
+                        )
 
         async with aiohttp.ClientSession() as session:
             await asyncio.gather(*[upload_chunk() for _ in range(tasks)])
@@ -667,7 +685,7 @@ class BiliBili:
         if submit_api is None:
             total_info = self.__session.get('http://api.bilibili.com/x/space/myinfo', timeout=15).json()
             if total_info.get('data') is None:
-                logger.error(total_info)
+                logger.error("用户信息接口未返回 data: %s", _safe_response_status(total_info))
             total_info = total_info.get('data')
             if total_info['level'] > 3 and total_info['follower'] > 1000:
                 user_weight = 2
@@ -679,8 +697,8 @@ class BiliBili:
         if submit_api == 'web':
             ret = self.submit_web()
             if ret["code"] != 0:
-                logger.error(f'网页端接口提交失败: {ret}')
-                raise Exception(ret)
+                logger.error("网页端接口提交失败: %s", _safe_response_status(ret))
+                raise RuntimeError(f"网页端接口提交失败: {_safe_response_status(ret)}")
         if not ret:
             raise Exception(f'不存在的选项：{submit_api}')
         return ret
@@ -701,7 +719,7 @@ class BiliBili:
             ret = self.__session.post(f'http://member.bilibili.com/x/vu/client/add?access_key={self.access_token}',
                                       timeout=5, json=asdict(self.video)).json()
             if ret['code'] == -101:
-                logger.info(f'刷新token{ret}')
+                logger.info("客户端登录状态失效，正在刷新凭据: %s", _safe_response_status(ret))
                 self.login_by_password(**config['user']['account'])
                 self.store()
                 continue
@@ -736,7 +754,7 @@ class BiliBili:
         buffered.close()
         res = r.json()
         if res.get('data') is None:
-            raise Exception(res)
+            raise RuntimeError(f"cover upload failed: {_safe_response_status(res)}")
         return res['data']['url']
 
     def get_tags(self, upvideo, typeid="", desc="", cover="", groupid=1, vfea=""):
@@ -802,7 +820,7 @@ class BiliBili:
             timeout=10
         ).json()
         if r['code'] != 0:
-            raise Exception(r)
+            raise RuntimeError(f"list seasons failed: {_safe_response_status(r)}")
         return r['data']
 
     def get_season_section(self, section_id, sort=''):
@@ -827,7 +845,7 @@ class BiliBili:
             params=params, timeout=10
         ).json()
         if r['code'] != 0:
-            raise Exception(r)
+            raise RuntimeError(f"get season section failed: {_safe_response_status(r)}")
         return r['data']
 
     def get_video_info(self, aid):
@@ -842,7 +860,7 @@ class BiliBili:
             params={'aid': aid}, timeout=10
         ).json()
         if r['code'] != 0:
-            raise Exception(r)
+            raise RuntimeError(f"get video info failed: {_safe_response_status(r)}")
         return r['data']
 
     def add_to_season(self, section_id, episodes):
@@ -878,7 +896,7 @@ class BiliBili:
             timeout=10
         ).json()
         if r['code'] != 0:
-            raise Exception(r)
+            raise RuntimeError(f"add to season failed: {_safe_response_status(r)}")
         return r
 
     def remove_from_season(self, episode_id):
@@ -901,7 +919,7 @@ class BiliBili:
             timeout=10
         ).json()
         if r['code'] != 0:
-            raise Exception(r)
+            raise RuntimeError(f"remove from season failed: {_safe_response_status(r)}")
         return r
 
     def sort_season_episodes(self, section_id, season_id, sorts, section_title='正片'):
@@ -945,7 +963,7 @@ class BiliBili:
             timeout=15
         ).json()
         if r['code'] != 0:
-            raise Exception(r)
+            raise RuntimeError(f"sort season episodes failed: {_safe_response_status(r)}")
         return r
 
     def __enter__(self):

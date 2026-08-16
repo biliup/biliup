@@ -13,10 +13,10 @@ pub enum Kind {
     IO(#[from] std::io::Error),
 
     #[error(transparent)]
-    Reqwest(#[from] reqwest::Error),
+    Reqwest(reqwest::Error),
 
     #[error(transparent)]
-    ReqwestMiddleware(#[from] reqwest_middleware::Error),
+    ReqwestMiddleware(reqwest_middleware::Error),
 
     #[error(transparent)]
     InvalidHeaderValue(#[from] InvalidHeaderValue),
@@ -49,5 +49,47 @@ impl From<&str> for Kind {
 impl From<String> for Kind {
     fn from(s: String) -> Self {
         Self::Custom(s)
+    }
+}
+
+impl From<reqwest::Error> for Kind {
+    fn from(error: reqwest::Error) -> Self {
+        // Request URLs can contain access keys, CSRF values, upload IDs and
+        // signed query strings. Keep the error category/status, but never let
+        // the URL reach CLI output or persistent Web logs.
+        Self::Reqwest(error.without_url())
+    }
+}
+
+impl From<reqwest_middleware::Error> for Kind {
+    fn from(error: reqwest_middleware::Error) -> Self {
+        Self::ReqwestMiddleware(error.without_url())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Kind;
+
+    fn request_error_with_secret_url() -> reqwest::Error {
+        reqwest::Client::new()
+            .get("://invalid")
+            .build()
+            .unwrap_err()
+            .with_url(
+                reqwest::Url::parse("https://example.invalid/?access_key=url-secret-marker")
+                    .unwrap(),
+            )
+    }
+
+    #[test]
+    fn uploader_http_errors_strip_sensitive_request_urls() {
+        let direct = Kind::from(request_error_with_secret_url());
+        assert!(!format!("{direct:?}").contains("url-secret-marker"));
+
+        let middleware = Kind::from(reqwest_middleware::Error::from(
+            request_error_with_secret_url(),
+        ));
+        assert!(!format!("{middleware:?}").contains("url-secret-marker"));
     }
 }

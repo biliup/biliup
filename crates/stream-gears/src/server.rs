@@ -286,7 +286,14 @@ pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
             auth,
             config,
         } => {
-            biliup_cli::run((&bind, port), auth, reload_handle, config).await?;
+            biliup_cli::run_with_cookie(
+                (&bind, port),
+                auth,
+                reload_handle,
+                config,
+                cli.user_cookie,
+            )
+            .await?;
         }
         Commands::List {
             is_pubing,

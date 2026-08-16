@@ -32,6 +32,13 @@ from requests.adapters import HTTPAdapter, Retry
 logger = logging.getLogger('biliup.engine.bili_web_sync')
 
 
+def _safe_response_status(response):
+    """Return only fixed, non-credential status fields for logging."""
+    if not isinstance(response, dict):
+        return {"type": type(response).__name__}
+    return {key: response[key] for key in ("code", "OK") if key in response}
+
+
 class FileInfo(NamedTuple):
     video: str
     danmaku: Optional[str] = None
@@ -298,7 +305,7 @@ class BiliBili:
                                        data={**payload, 'sign': self.sign(parse.urlencode(payload))})
         r = response.json()
         if r['code'] != 0 or r.get('data') is None or r['data'].get('cookie_info') is None:
-            raise RuntimeError(r)
+            raise RuntimeError(f"password login failed: {_safe_response_status(r)}")
         try:
             for cookie in r['data']['cookie_info']['cookies']:
                 self.__session.cookies.set(cookie['name'], cookie['value'])
@@ -307,8 +314,10 @@ class BiliBili:
             self.cookies = self.__session.cookies.get_dict()
             self.access_token = r['data']['token_info']['access_token']
             self.refresh_token = r['data']['token_info']['refresh_token']
-        except:
-            raise RuntimeError(r)
+        except Exception as error:
+            raise RuntimeError(
+                f"password login response was incomplete: {_safe_response_status(r)}"
+            ) from error
         return r
 
     def login_by_cookies(self, cookie):
@@ -318,7 +327,7 @@ class BiliBili:
             self.__bili_jct = cookies_dict['bili_jct']
         data = self.__session.get("https://api.bilibili.com/x/web-interface/nav", timeout=5).json()
         if data["code"] != 0:
-            raise Exception(data)
+            raise RuntimeError(f"cookie login failed: {_safe_response_status(data)}")
         print('使用cookies上传')
 
     def sign(self, param):
@@ -426,7 +435,11 @@ class BiliBili:
         if "chunk_size" not in ret:
             stop_event.set()
             return
-        logger.debug(f"preupload: {ret}")
+        logger.debug(
+            "preupload response accepted: storage=%s chunk_size=%s",
+            self._auto_os['os'],
+            ret.get('chunk_size'),
+        )
         if preferred_upos_cdn:
             # 如果返回的endpoint不在probe_url中，则尝试在endpoints中校验probe_url是否可用
             if ret['endpoint'] not in self._auto_os['probe_url']:
@@ -454,9 +467,9 @@ class BiliBili:
         ret = self.submit(submit_api=submit_api, edit=edit, videos=videos)
         # logger.info(f"上传成功: {ret}")
         if edit:
-            logger.info(f"编辑添加成功: {ret}")
+            logger.info("编辑添加成功: %s", _safe_response_status(ret))
         else:
-            logger.info(f"上传成功: {ret}")
+            logger.info("上传成功: %s", _safe_response_status(ret))
         aid = ret['data']['aid']
         videos.aid = aid
         context['sync_downloader_map'][str(self.database_row_id)] = videos.__dict__
@@ -549,9 +562,9 @@ class BiliBili:
             try:
                 r = self.__session.post(url, params=p, json={"parts": parts}, headers=headers, timeout=15).json()
                 if r.get('OK') == 1:
-                    logger.info(f'{file_name} uploaded >> {total_size / 1000 / 1000 / cost:.2f}MB/s. {r}')
+                    logger.info(f'{file_name} uploaded >> {total_size / 1000 / 1000 / cost:.2f}MB/s')
                     return {"title": splitext(file_name)[0], "filename": splitext(basename(upos_uri))[0], "desc": ""}
-                raise IOError(r)
+                raise IOError(f"UPOS merge failed: {_safe_response_status(r)}")
             except IOError:
                 logger.info(f"请求合并分片 {file_name} 时出现问题，尝试重连，次数：" + str(attempt))
                 attempt += 1
@@ -587,9 +600,14 @@ class BiliBili:
                     backoff_time = backoff_factor ** retries
                     time.sleep(backoff_time)
 
-            except Exception as e:
+            except Exception as error:
                 retries += 1
-                logger.error(f"upload_chunk_thread err {str(e)}. Retrying {retries}/{max_retries}")
+                logger.error(
+                    "upload_chunk_thread error (%s). Retrying %s/%s",
+                    type(error).__name__,
+                    retries,
+                    max_retries,
+                )
 
                 # 计算退避时间，逐步增加重试间隔
                 backoff_time = backoff_factor ** retries
@@ -677,7 +695,7 @@ class BiliBili:
         if submit_api is None:
             total_info = self.myinfo()
             if total_info.get('data') is None:
-                logger.error(total_info)
+                logger.error("用户信息接口未返回 data: %s", _safe_response_status(total_info))
             total_info = total_info.get('data')
             if total_info['level'] > 3 and total_info['follower'] > 1000:
                 user_weight = 2
@@ -692,7 +710,7 @@ class BiliBili:
             ret = self.submit_web(post_data, edit=edit)
             if ret["code"] == 21138:
                 time.sleep(5)
-                logger.info(f'改用客户端接口提交{ret}')
+                logger.info("网页端提交要求客户端回退: %s", _safe_response_status(ret))
                 submit_api = 'client'
         if submit_api == 'client':
             ret = self.submit_client(post_data, edit=edit)
@@ -701,7 +719,7 @@ class BiliBili:
         if ret["code"] == 0:
             return ret
         else:
-            raise Exception(ret)
+            raise RuntimeError(f"submit failed: {_safe_response_status(ret)}")
 
     def submit_web(self, post_data, edit=False):
         logger.info('使用网页端api提交')
@@ -723,11 +741,11 @@ class BiliBili:
         api = 'http://member.bilibili.com/x/vu/client/add?access_key=' + self.access_token
         if edit:
             api = 'http://member.bilibili.com/x/vu/client/edit?access_key=' + self.access_token
-        logger.debug(f"client api submit: {post_data}")
+        logger.debug("client api submit prepared with %d fields", len(post_data))
         while True:
             ret = self.__session.post(api, timeout=5, json=post_data).json()
             if ret['code'] == -101:
-                logger.info(f'刷新token{ret}')
+                logger.info("客户端登录状态失效，正在刷新凭据: %s", _safe_response_status(ret))
                 self.login_by_password(**config['user']['account'])
                 self.store()
                 continue
@@ -762,7 +780,7 @@ class BiliBili:
         buffered.close()
         res = r.json()
         if res.get('data') is None:
-            raise Exception(res)
+            raise RuntimeError(f"cover upload failed: {_safe_response_status(res)}")
         return res['data']['url']
 
     def get_tags(self, upvideo, typeid="", desc="", cover="", groupid=1, vfea=""):

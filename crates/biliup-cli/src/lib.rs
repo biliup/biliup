@@ -16,9 +16,10 @@ use crate::server::infrastructure::models::upload_streamer::{
 };
 use crate::server::infrastructure::repositories;
 use crate::server::infrastructure::service_register::ServiceRegister;
+use crate::server::infrastructure::users::Backend;
 use clap::ValueEnum;
-use error_stack::{Report, ResultExt};
-use std::net::ToSocketAddrs;
+use error_stack::{Report, ResultExt, bail};
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use tracing_subscriber::{EnvFilter, Registry, reload};
@@ -34,6 +35,34 @@ pub async fn run(
     log_handle: LogHandle,
     config_path: Option<PathBuf>,
 ) -> AppResult<()> {
+    run_with_cookie(
+        addr,
+        auth,
+        log_handle,
+        config_path,
+        PathBuf::from("cookies.json"),
+    )
+    .await
+}
+
+pub async fn run_with_cookie(
+    addr: (&str, u16),
+    auth: bool,
+    log_handle: LogHandle,
+    config_path: Option<PathBuf>,
+    user_cookie: PathBuf,
+) -> AppResult<()> {
+    let addr = addr
+        .to_socket_addrs()
+        .change_context(AppError::Unknown)?
+        .next()
+        .ok_or_else(|| {
+            Report::new(AppError::Custom(
+                "bind address resolved to no sockets".into(),
+            ))
+        })?;
+    validate_server_exposure(addr, auth)?;
+
     // let config = Arc::new(AppConfig::parse());
 
     tracing::info!(
@@ -41,7 +70,17 @@ pub async fn run(
     );
     let conn_pool = ConnectionManager::new_pool("data/data.sqlite3")
         .await
-        .expect("could not initialize the database connection pool");
+        .attach("could not initialize the database connection pool")?;
+    validate_remote_auth_bootstrap(addr, auth, Backend::new(conn_pool.clone()).exists().await?)?;
+
+    if let Some(configuration) =
+        repositories::register_bilibili_cookie(&conn_pool, &user_cookie).await?
+    {
+        tracing::info!(
+            cookie_file = %configuration.value,
+            "registered CLI Bilibili cookie file for Web UI"
+        );
+    }
 
     let loaded_config = if let Some(path) = config_path.as_deref() {
         let config = Config::load(path)?;
@@ -72,14 +111,32 @@ pub async fn run(
     }
 
     tracing::info!("migrations successfully ran, initializing axum server...");
-    let addr = addr
-        .to_socket_addrs()
-        .change_context(AppError::Unknown)?
-        .next()
-        .unwrap();
     ApplicationController::serve(&addr, auth, service_register)
         .await
         .attach("could not initialize application routes")?;
+    Ok(())
+}
+
+fn validate_server_exposure(addr: SocketAddr, auth: bool) -> AppResult<()> {
+    if !addr.ip().is_loopback() && !auth {
+        bail!(AppError::Custom(format!(
+            "refusing to expose the unauthenticated Web API on {addr}; use a loopback bind address or enable --auth"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_remote_auth_bootstrap(
+    addr: SocketAddr,
+    auth: bool,
+    administrator_exists: bool,
+) -> AppResult<()> {
+    if auth && !addr.ip().is_loopback() && !administrator_exists {
+        bail!(AppError::Custom(
+            "refusing remote first-user bootstrap; initialize the Web administrator on a loopback bind before exposing the authenticated server"
+                .into(),
+        ));
+    }
     Ok(())
 }
 
@@ -317,4 +374,43 @@ pub enum UploadLine {
     Alia,
     Estx,
     Akbd,
+}
+
+#[cfg(test)]
+mod server_exposure_tests {
+    use super::{validate_remote_auth_bootstrap, validate_server_exposure};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+
+    #[test]
+    fn unauthenticated_server_is_limited_to_loopback() {
+        for ip in [
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+        ] {
+            assert!(validate_server_exposure(SocketAddr::new(ip, 19159), false).is_ok());
+        }
+        assert!(
+            validate_server_exposure(
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 19159),
+                false,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn authenticated_server_can_bind_non_loopback_after_local_bootstrap() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 19159);
+        assert!(validate_server_exposure(addr, true).is_ok());
+        assert!(validate_remote_auth_bootstrap(addr, true, false).is_err());
+        assert!(validate_remote_auth_bootstrap(addr, true, true).is_ok());
+        assert!(
+            validate_remote_auth_bootstrap(
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 19159),
+                true,
+                false,
+            )
+            .is_ok()
+        );
+    }
 }

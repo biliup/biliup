@@ -1,5 +1,5 @@
 use biliup::uploader::bilibili::BiliBili;
-use biliup::uploader::credential::Credential;
+use biliup::uploader::credential::{Credential, save_login_info};
 use biliup_cli::server::errors::{AppError, AppResult};
 use error_stack::ResultExt;
 
@@ -31,8 +31,9 @@ pub async fn login_by_sms(
         .login_by_sms(code, res)
         .await
         .change_context_lazy(|| AppError::Unknown)?;
-    let file = std::fs::File::create("cookies.json").change_context_lazy(|| AppError::Unknown)?;
-    serde_json::to_writer_pretty(&file, &info).change_context_lazy(|| AppError::Unknown)?;
+    save_login_info("cookies.json", &info)
+        .await
+        .change_context_lazy(|| AppError::Unknown)?;
     Ok(true)
 }
 
@@ -53,8 +54,9 @@ pub async fn login_by_web_cookies(
         .login_by_web_cookies(sess_data, bili_jct)
         .await
         .change_context_lazy(|| AppError::Unknown)?;
-    let file = std::fs::File::create("cookies.json").change_context_lazy(|| AppError::Unknown)?;
-    serde_json::to_writer_pretty(&file, &info).change_context_lazy(|| AppError::Unknown)?;
+    save_login_info("cookies.json", &info)
+        .await
+        .change_context_lazy(|| AppError::Unknown)?;
     Ok(true)
 }
 
@@ -67,7 +69,8 @@ pub async fn login_by_web_qrcode(
         .login_by_web_qrcode(sess_data, dede_user_id)
         .await
         .change_context_lazy(|| AppError::Unknown)?;
-    let file = std::fs::File::create("cookies.json").change_context_lazy(|| AppError::Unknown)?;
-    serde_json::to_writer_pretty(&file, &info).change_context_lazy(|| AppError::Unknown)?;
+    save_login_info("cookies.json", &info)
+        .await
+        .change_context_lazy(|| AppError::Unknown)?;
     Ok(true)
 }

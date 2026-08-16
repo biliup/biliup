@@ -21,8 +21,8 @@ const AvatarCard: React.FC<ICardProps> = ({ abbr, label, value, onRemove, url })
       <div className={styles.email}>{value}</div>
     </div>
     <Popconfirm
-      title="确定是否要删除？"
-      content="此操作将不可逆"
+      title="删除这个 B 站账号？"
+      content="若没有上传模板或其他账号记录引用同一凭据，服务器还会物理删除本地凭据文件。此操作不可逆。"
       onConfirm={onRemove}
       // onCancel={onCancel}
     >
