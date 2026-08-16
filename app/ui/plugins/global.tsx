@@ -70,19 +70,19 @@ const Global: React.FC = () => {
                   message: '以字母开头时，第二个字符不能是中文冒号',
                 },
                 {
-                  pattern: /^[^:]*$|^[a-zA-Z]:[\\/\\\\][^:]*$/,
+                  pattern: /^[^:]*$|^[a-zA-Z]:[\/\\][^:]*$/,
                   message: '冒号只能出现在第二个字符位置，且后面必须连接斜杠',
                 },
                 {
-                  pattern: /^(?!.*?\\.{3,})(?!.*?\\.{2}(?![\\/\\\\])).*$/,
+                  pattern: /^(?!.*?\.{3,})(?!.*?\.{2}(?![\/\\])).*$/,
                   message: '点号最多只能连续出现两次，且后面必须连接斜杠',
                 },
                 {
-                  pattern: /^(?!.*\\/\\\\)(?!.*\\\\\\/).*$/,
+                  pattern: /^(?!.*\/\\)(?!.*\\\/).*$/,
                   message: '不允许连接正反斜杠',
                 },
                 {
-                  pattern: /^(?!.*([\\\\]{3,}|[\/]{2,})).*$/,
+                  pattern: /^(?!.*([\\]{3,}|[\/]{2,})).*$/,
                   message: '反斜杠最多只能连续出现两次，正斜杠最多只能连续出现一次',
                 },
               ]}
@@ -92,7 +92,13 @@ const Global: React.FC = () => {
         ) : null}
         <Form.InputNumber
           label="视频分段大小（file_size）"
-          extraText={'单文件大小上限，超过则分割。单位 Byte（如 4294967296 ≈ 4GB）。下载回放时无效。'}
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              录像单文件大小限制，超过此大小触发文件分割。下载回放时无法使用。
+              <br />
+              单位：Byte，示例：4294967296（4GB）
+            </div>
+          }
           field="file_size"
           placeholder=""
           suffix={'Byte'}
@@ -105,7 +111,13 @@ const Global: React.FC = () => {
         />
         <Form.Input
           field="segment_time"
-          extraText={'单文件时长上限，超过则分割。格式 00:00:00（时:分:秒）。'}
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              录像单文件时间限制，超过此时长触发文件分割。
+              <br />
+              格式：&apos;00:00:00&apos;（时:分:秒）
+            </div>
+          }
           label="视频分段时长（segment_time）"
           placeholder="01:00:00"
           style={{ width: '100%' }}
@@ -132,7 +144,17 @@ const Global: React.FC = () => {
         />
         <Form.Input
           field="filename_prefix"
-          extraText={'全局文件名模板，可被单主播覆盖。{streamer} 录播备注（必填）、{title} 直播标题，支持 %Y-%m-%d %H_%M_%S 时间变量。'}
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              全局文件名模板。可被单个主播文件名模板覆盖。可用变量如下
+              <br />
+              {'\u007B'}streamer{'\u007D'}: 录播备注（必须保留）
+              <span style={{ margin: '0 20px' }}></span>
+              {'\u007B'}title{'\u007D'}: 直播标题
+              <br />
+              %Y-%m-%d %H_%M_%S: 开始录制时的 年-月-日 时_分_秒
+            </div>
+          }
           label="文件名模板（filename_prefix）"
           placeholder="{streamer}%Y-%m-%dT%H_%M_%S"
           style={{ width: '100%' }}
@@ -144,8 +166,8 @@ const Global: React.FC = () => {
         />
         <Form.Switch
           field="segment_processor_parallel"
-          extraText={'开启后分段后处理不保证先后顺序。'}
-          label="视频分段后处理并行（segment_processor_parallel）"
+          extraText={<div style={{ fontSize: '14px' }}>开启后无法保证分段后处理先后执行顺序</div>}
+          label="视频分段后处理并行（segment_processor_parallel)"
           fieldStyle={{
             alignSelf: 'stretch',
             padding: 0,
@@ -153,7 +175,13 @@ const Global: React.FC = () => {
         />
         <Form.InputNumber
           field="filtering_threshold"
-          extraText={'小于此大小（MB）的碎片文件会被自动过滤删除。'}
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              小于此大小的视频文件将会被过滤删除。
+              <br />
+              单位：MB
+            </div>
+          }
           label="碎片过滤（filtering_threshold）"
           suffix={'MB'}
           style={{ width: '100%' }}
@@ -166,8 +194,16 @@ const Global: React.FC = () => {
 
         <Form.InputNumber
           field="delay"
-          label="下播延迟检测（delay）"
-          extraText={'检测到下播后延迟再确认的时间（秒），避免误判提前上传。默认 0。'}
+          label="下播延迟检测（delay)"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              当检测到主播下播后，延迟一定时间再次检测确认，避免特殊情况提早启动上传导致分稿件。
+              <br />
+              单位：秒
+              <br />
+              默认延迟时间为 0 秒
+            </div>
+          }
           placeholder="0"
           suffix="s"
           style={{ width: '100%' }}
@@ -179,7 +215,13 @@ const Global: React.FC = () => {
         />
         <Form.InputNumber
           field="event_loop_interval"
-          extraText={'单个主播检测间隔（秒）。'}
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              单个主播检测间隔时间，单位：秒。比如虎牙有10个主播，每个主播会间隔10秒检测
+              <br />
+              单位：秒
+            </div>
+          }
           label="直播事件检测间隔（event_loop_interval）"
           suffix="s"
           style={{ width: '100%' }}
@@ -191,7 +233,7 @@ const Global: React.FC = () => {
         />
         <Form.InputNumber
           field="pool1_size"
-          extraText="负责下载事件的线程池大小，限制最大同时录制数。"
+          extraText="负责下载事件的线程池大小，用于限制最大同时录制数。"
           label="下载线程池大小（pool1_size）"
           placeholder={5}
           style={{ width: '100%' }}
@@ -208,6 +250,7 @@ const Global: React.FC = () => {
       {/* 全局上传 */}
       <div className={styles.frameUpload}>
         <SectionTitle icon={<IconUpload size="small" />} title="全局上传设置" />
+
         <Form.Select
           field="submit_api"
           label="提交接口（submit_api）"
@@ -244,7 +287,7 @@ const Global: React.FC = () => {
         <Form.Select
           field="lines"
           label="上传线路（lines）"
-          extraText="B站上传线路，默认自动（AUTO）。可选 alia / bda2 / bldsa / tx / txa / estx / akbd 等。"
+          extraText="b站上传线路选择，默认为自动模式，可手动切换为alia, bda2, bldsa, tx, txa, estx, akbd"
           placeholder="AUTO（自动，默认）"
           style={{ width: '100%' }}
           fieldStyle={{
@@ -265,7 +308,7 @@ const Global: React.FC = () => {
         <Form.InputNumber
           field="threads"
           placeholder={3}
-          extraText="单文件并发上传数。未达带宽上限时可调大提速（部分线路限 8）。"
+          extraText="单文件并发上传数,未达到带宽上限时,增大此值可提高上传速度(不要设置过大,部分线路限制为8,如速度不佳优先调整上传线路)"
           label="上传并发（threads）"
           style={{ width: '100%' }}
           fieldStyle={{
@@ -277,7 +320,7 @@ const Global: React.FC = () => {
         <Form.InputNumber
           field="max_upload_limit"
           placeholder={8}
-          extraText="录播上传次数上限，防止异常时反复上传浪费带宽或被风控。重启程序会重置；默认较大，建议设 2-3。"
+          extraText="录播上传次数上限，防止因意外情况如B站接口抽风、录播本身损坏导致录播反复上传浪费宽带或被B站风控（注：限制是记录在程序上下文中的，重启程序会重置上传次数限制；且为了保证尽量不改动老用户使用逻辑，默认将此值设置为一个较大的值，一般推荐设置为2-3）"
           label="上传重试次数限制（max_upload_limit）"
           style={{ width: '100%' }}
           fieldStyle={{
@@ -289,7 +332,9 @@ const Global: React.FC = () => {
 
         <Form.InputNumber
           field="pool2_size"
-          extraText="负责上传事件的线程池大小。根据实际带宽设置。"
+          extraText={
+            <div style={{ fontSize: '14px' }}>负责上传事件的线程池大小。根据实际带宽设置。</div>
+          }
           placeholder={3}
           label="上传线程池大小（pool2_size）"
           style={{ width: '100%' }}
@@ -300,8 +345,14 @@ const Global: React.FC = () => {
         />
         <Form.Switch
           field="use_live_cover"
-          extraText="用直播间封面作投稿封面（优先级低于单主播自定义封面）。支持 B站 / 克拉克拉 / Twitch / YouTube。"
-          label="使用直播间封面作为投稿封面（use_live_cover）"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              使用直播间封面作为投稿封面。此封面优先级低于单个主播指定的自定义封面，保存于cover文件夹下，上传后自动删除。
+              <br />
+              目前支持平台：哔哩哔哩，克拉克拉，Twitch，YouTube。
+            </div>
+          }
+          label="使用直播间封面作为投稿封面（use_live_cover)"
           fieldStyle={{
             alignSelf: 'stretch',
             padding: 0,
