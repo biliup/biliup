@@ -183,13 +183,27 @@ export default function StreamersPage() {
   const batchDelete = async () => {
     const ids = Array.from(selected)
     if (ids.length === 0) return
-    try {
-      await Promise.all(ids.map((id) => proxy(`/v1/streamers/${id}`, { method: 'DELETE' })))
-      Notification.success({ title: `已删除 ${ids.length} 个直播间` })
-      setSelected(new Set())
-      mutate()
-    } catch (e: any) {
-      Notification.error({ title: '批量删除失败', content: e?.message ?? String(e) })
+    const results = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          await proxy(`/v1/streamers/${id}`, { method: 'DELETE' })
+          return { id, ok: true }
+        } catch {
+          return { id, ok: false }
+        }
+      })
+    )
+    const failedIds = results.filter((result) => !result.ok).map((result) => result.id)
+    const successCount = results.length - failedIds.length
+    setSelected(new Set(failedIds))
+    await mutate().catch(() => undefined)
+    if (failedIds.length === 0) {
+      Notification.success({ title: `已删除 ${successCount} 个直播间` })
+    } else {
+      Notification.error({
+        title: `成功删除 ${successCount} 项,${failedIds.length} 项失败`,
+        content: '失败项已保留选中,请检查后端状态后重试。',
+      })
     }
   }
 
@@ -316,9 +330,15 @@ export default function StreamersPage() {
                 <Button size="small" onClick={batchPause}>
                   批量暂停
                 </Button>
-                <Button size="small" type="danger" theme="borderless" onClick={batchDelete}>
-                  批量删除
-                </Button>
+                <Popconfirm
+                  title={`确定删除选中的 ${selected.size} 个直播间？`}
+                  content="此操作不可逆,删除结果将逐项反馈"
+                  onConfirm={batchDelete}
+                >
+                  <Button size="small" type="danger" theme="borderless">
+                    批量删除
+                  </Button>
+                </Popconfirm>
                 <Button size="small" theme="borderless" onClick={() => setSelected(new Set())}>
                   取消
                 </Button>

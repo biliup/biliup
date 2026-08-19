@@ -10,6 +10,11 @@ import { Tag } from '@douyinfe/semi-ui'
 export const LIVE_STATUS = 'Working'
 export const PAUSE_STATUS = 'Pause'
 
+/** 统一后端版本号展示，避免版本字段自带 v 时渲染成 vv1.2.2。 */
+export function formatVersion(version?: string): string | undefined {
+  return typeof version === 'string' ? version.replace(/^v/i, '') : undefined
+}
+
 export function isLiveStatus(status?: string): boolean {
   return status === LIVE_STATUS
 }

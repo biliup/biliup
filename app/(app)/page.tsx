@@ -6,6 +6,7 @@ import {
   useDashboard,
   formatSize,
 } from '@/app/lib/use-dashboard'
+import { formatVersion } from '@/app/lib/status'
 import StreamerCard from '../ui/StreamerCard'
 import EventTimeline from '../ui/EventTimeline'
 import BackgroundSetter from './components/BackgroundSetter'
@@ -23,6 +24,7 @@ export default function Home() {
   const streamers = d.streamers ?? []
   const live = streamers.filter((s) => s.status === 'Working')
   const offline = streamers.filter((s) => s.status !== 'Working')
+  const versionText = formatVersion(d.version)
 
   return (
     <div className={styles.page}>
@@ -37,7 +39,7 @@ export default function Home() {
           >
             <IconExternalOpen size="small" /> 文档
           </a>
-          {d.version ? <span className={styles.version}>v{d.version}</span> : null}
+          {versionText ? <span className={styles.version}>v{versionText}</span> : null}
           <span
             className={`${styles.statusPill} ${
               d.connectError ? styles.offline : styles.online
@@ -65,10 +67,7 @@ export default function Home() {
         </div>
       ) : d.connectError ? (
         <div className={styles.errorBox}>
-          <Text>
-            无法连接后端,请确认 biliup 服务已在{' '}
-            <Text strong>http://localhost:19159</Text> 运行,且已登录。
-          </Text>
+          <Text>无法连接 biliup 后端,请确认服务正在运行且当前会话已登录。</Text>
         </div>
       ) : (
         <>

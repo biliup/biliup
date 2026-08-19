@@ -10,6 +10,7 @@ import useSWR from 'swr'
 import { fetcher } from '../lib/api-streamer'
 import ThemeButton from '../ui/ThemeButton'
 import { useSystemTheme, useTheme } from '../lib/utils'
+import { formatVersion } from '../lib/status'
 import { useIsMobile } from '../lib/useIsMobile'
 import styles from './layout.module.scss'
 
@@ -133,14 +134,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   useTheme(mode, systemTheme)
 
   // 服务状态指示(离线时变红,不影响页面)
-  const { data: status } = useSWR('/v1/status', fetcher, {
+  const { data: status, error: statusError } = useSWR('/v1/status', fetcher, {
     refreshInterval: 30000,
     revalidateOnFocus: false,
   })
-  const online = status !== undefined
+  const online = status !== undefined && !statusError
   const version = (status as { version?: string } | undefined)?.version
-  // 后端 version 字段可能带 'v' 前缀(如 'v1.2.2'),这里统一去重,避免显示成 vv1.2.2
-  const versionText = typeof version === 'string' ? version.replace(/^v/i, '') : undefined
+  const versionText = formatVersion(version)
 
   const navCollapsed = !isMobile && collapsed
 

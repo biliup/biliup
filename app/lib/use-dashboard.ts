@@ -110,10 +110,7 @@ export function useDashboard() {
   // 2) 文件生成:/v1/videos 里 24h 内生成的录制文件
   const events: DashboardEvent[] = []
   const now = Math.floor(Date.now() / 1000)
-  const seenUrl = new Set<string>()
-  for (const i of infos ?? []) {
-    if (!i.url || seenUrl.has(i.url)) continue
-    seenUrl.add(i.url)
+  for (const i of Array.from(infoByUrl.values())) {
     if (i.date && now - i.date <= EVENT_WINDOW) {
       events.push({
         ts: i.date,
@@ -136,14 +133,15 @@ export function useDashboard() {
   }
   events.sort((a, b) => b.ts - a.ts)
 
-  // ---- 错误与可达性(与 PR 首页逻辑一致:空数组 ≠ 不可达) ----
+  // ---- 错误与可达性:保留旧 data 时也必须反映最新轮询失败 ----
   const hasAnyResponse =
     streamers !== undefined || infos !== undefined || videos !== undefined || status !== undefined
-  const loading = !hasAnyResponse && !e1 && !e2 && !e3 && !e4
-  const connectError = !hasAnyResponse && (!!e1 || !!e2 || !!e3 || !!e4)
-  const streamersFailed = !!e1 && streamers === undefined
-  const infosFailed = !!e2 && infos === undefined
-  const videosFailed = !!e3 && videos === undefined
+  const hasAnyError = !!e1 || !!e2 || !!e3 || !!e4
+  const loading = !hasAnyResponse && !hasAnyError
+  const connectError = !!e4 || (!hasAnyResponse && hasAnyError)
+  const streamersFailed = !!e1
+  const infosFailed = !!e2
+  const videosFailed = !!e3
 
   return {
     streamers,

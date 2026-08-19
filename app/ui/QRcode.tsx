@@ -48,7 +48,6 @@ const Qrcode: React.FC<QrcodeProps> = ({ onSuccess }) => {
       // e.name 检查不可靠,用 signal.aborted 判断(与错误对象形态无关)。
       if (controller.signal.aborted) return
       const detail = e?.message || String(e) || '未知错误'
-      console.log(e)
       setError(`二维码获取失败:${detail}`)
       Notification.error({
         title: 'QRcode',
