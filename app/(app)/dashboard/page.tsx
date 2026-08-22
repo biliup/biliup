@@ -76,11 +76,6 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
     { key: 'youtube', name: 'YouTube', Comp: plugins.Youtube },
   ]
   const COOKIE_ENTRY = { key: 'user', name: '用户 Cookie', Comp: plugins.Cookie }
-  const activeEntry =
-    activePlatform === 'user'
-      ? COOKIE_ENTRY
-      : PLATFORM_LIST.find(p => p.key === activePlatform) ?? PLATFORM_LIST[0]
-  const ActiveComp = activeEntry.Comp
 
   if (isLoading) {
     return <>Loading</>
@@ -186,8 +181,13 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
                           ))}
                         </nav>
                         <div className={styles.platformBody}>
-                          <Collapse key={activePlatform} defaultActiveKey={[activePlatform]}>
-                            <ActiveComp key={activePlatform} entity={entity} list={list} />
+                          {/* 所有平台组件保持挂载(keepDOM),仅展开当前平台面板。
+                              卸载会注销 Semi Form 字段状态,提交时仅剩挂载字段;后端 PUT /configuration
+                              整表覆盖保存,会清空其他平台的参数与凭据 */}
+                          <Collapse keepDOM activeKey={[activePlatform]}>
+                            {PLATFORM_LIST.concat(COOKIE_ENTRY).map(p => (
+                              <p.Comp key={p.key} entity={entity} list={list} />
+                            ))}
                           </Collapse>
                         </div>
                       </div>

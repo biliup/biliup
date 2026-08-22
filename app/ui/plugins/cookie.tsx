@@ -36,6 +36,7 @@ const Cookie: React.FC<Props> = props => {
         />
         <Form.Input
           field="user.niconico-password"
+          mode="password"
           extraText="您的 Niconico 账户的密码。"
           label="ニコニコ動画 密码（niconico-password）"
           style={{ width: '100%' }}

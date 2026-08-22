@@ -4,11 +4,15 @@ import { Tag } from '@douyinfe/semi-ui'
 /**
  * 状态视觉体系(全局唯一事实来源)。
  * 后端 status / upload_status 均为 WorkerStatus 枚举的 Debug 字符串,
- * 已验证取值只有 Working / Pending / Idle / Pause / ""(空)。
+ * 常见取值:Working / Pending / Idle / Pause / OutOfSchedule / TitleExcluded / ""(空)。
  */
 
 export const LIVE_STATUS = 'Working'
 export const PAUSE_STATUS = 'Pause'
+/** 录制策略排期外:基线就有的状态,不可吞成“未开播” */
+export const OUT_OF_SCHEDULE = 'OutOfSchedule'
+/** 标题匹配排除规则命中:master 新增状态,不可吞成“未开播” */
+export const TITLE_EXCLUDED = 'TitleExcluded'
 
 /** 统一后端版本号展示，避免版本字段自带 v 时渲染成 vv1.2.2。 */
 export function formatVersion(version?: string): string | undefined {
@@ -32,6 +36,8 @@ export interface StatusVisual {
 
 export function streamerStatusMeta(status?: string): StatusVisual {
   if (isLiveStatus(status)) return { label: '直播中', cls: 'badgeLive' }
+  if (status === OUT_OF_SCHEDULE) return { label: '非录播时间', cls: 'badgeLive' }
+  if (status === TITLE_EXCLUDED) return { label: '标题已排除', cls: 'badgePause' }
   if (isPaused(status)) return { label: '已暂停', cls: 'badgePause' }
   return { label: '未开播', cls: 'badgeIdle' }
 }

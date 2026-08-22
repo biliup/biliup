@@ -32,6 +32,7 @@ import {
 } from '../../lib/api-streamer'
 import { PauseButton } from '@/app/ui/StreamerActions/PauseButton'
 import { platformName, streamerStatusTag } from '@/app/lib/status'
+import { hookStepListToForm, formListToHookStep } from '@/app/lib/postprocessor'
 import { timeAgo } from '@/app/lib/use-dashboard'
 import StreamerCard from '@/app/ui/StreamerCard'
 import PageHeader from '../components/PageHeader'
@@ -78,25 +79,17 @@ export default function StreamersPage() {
   }
 
   const handleEntityPostprocessor = (values: any) => {
+    // 回显:后端 HookStep → 表单 {cmd, value}
     if (values?.postprocessor) {
-      values.postprocessor = values.postprocessor.map((element: any) => {
-        if (element?.mv) {
-          return { ...element, run: `mv ${element.mv}` }
-        }
-        return element
-      })
+      values.postprocessor = hookStepListToForm(values.postprocessor)
     }
     return values
   }
 
   const handleOk = async (values: any) => {
+    // 提交:表单 {cmd, value} → 后端 HookStep
     if (values?.postprocessor) {
-      values.postprocessor = values.postprocessor.map((element: any) => {
-        if (element?.mv) {
-          return { ...element, run: `mv ${element.mv}` }
-        }
-        return element
-      })
+      values.postprocessor = formListToHookStep(values.postprocessor)
     }
     try {
       await trigger(values)
@@ -105,6 +98,8 @@ export default function StreamersPage() {
         title: '创建失败',
         content: e?.message ?? String(e),
       })
+      // 重新抛出,Modal onOk 保持打开,不丢失已填输入
+      throw e
     }
   }
 
@@ -113,12 +108,7 @@ export default function StreamersPage() {
     delete values.statusTag
     delete values.upload_status
     if (values?.postprocessor) {
-      values.postprocessor = values.postprocessor.map((element: any) => {
-        if (element?.mv) {
-          return { ...element, run: `mv ${element.mv}` }
-        }
-        return element
-      })
+      values.postprocessor = formListToHookStep(values.postprocessor)
     }
     try {
       await updateStreamers(values)
@@ -127,6 +117,8 @@ export default function StreamersPage() {
         title: '更新失败',
         content: e?.message ?? String(e),
       })
+      // 重新抛出,Modal onOk 保持打开,不丢失已填输入
+      throw e
     }
   }
 
@@ -170,13 +162,32 @@ export default function StreamersPage() {
   const batchPause = async () => {
     const ids = Array.from(selected)
     if (ids.length === 0) return
-    try {
-      await Promise.all(ids.map((id) => proxy(`/v1/streamers/${id}/pause`, { method: 'PUT' })))
-      Notification.success({ title: `已暂停 ${ids.length} 个直播间` })
-      setSelected(new Set())
-      mutate()
-    } catch (e: any) {
-      Notification.error({ title: '批量暂停失败', content: e?.message ?? String(e) })
+    // 后端 PUT /pause 是 toggle:已暂停(Pause)的会被恢复为 Idle,必须过滤
+    const targets = (streamers ?? []).filter((s) => selected.has(s.id) && s.status !== 'Pause')
+    const skipped = ids.length - targets.length
+    if (targets.length === 0) {
+      Notification.warning({ title: '所选直播间均已暂停,无需操作' })
+      return
+    }
+    const results = await Promise.allSettled(
+      targets.map((s) => proxy(`/v1/streamers/${s.id}/pause`, { method: 'PUT' }))
+    )
+    const failedIds: number[] = []
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') failedIds.push(targets[i].id)
+    })
+    const ok = targets.length - failedIds.length
+    setSelected(new Set(failedIds))
+    await mutate().catch(() => undefined)
+    if (failedIds.length === 0) {
+      Notification.success({
+        title: '已暂停 ' + ok + ' 个直播间' + (skipped > 0 ? ',' + skipped + ' 个已暂停已跳过' : ''),
+      })
+    } else {
+      Notification.error({
+        title: '成功暂停 ' + ok + ' 项,' + failedIds.length + ' 项失败',
+        content: '失败项已保留选中,请检查后端状态后重试。',
+      })
     }
   }
 

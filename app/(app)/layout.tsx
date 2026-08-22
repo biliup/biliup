@@ -64,6 +64,11 @@ const NAV_GROUPS: { title: string; items: { href: string; label: string; icon: R
         label: '投稿管理',
         icon: <Ic d="M12 16V4m0 0L8 8m4-4l4 4" extra="M4 17v2a1 1 0 001 1h14a1 1 0 001-1v-2" />,
       },
+      {
+        href: '/archives',
+        label: 'B站稿件',
+        icon: <Ic d="M4 5h16v14H4z" extra="M8 15c0-2 1.5-3 4-3s4 1 4 3M12 8a2 2 0 100 4 2 2 0 000-4z" />,
+      },
     ],
   },
   {
