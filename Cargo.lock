@@ -398,6 +398,7 @@ dependencies = [
  "clap",
  "cookie",
  "futures",
+ "http",
  "libsm",
  "m3u8-rs",
  "md-5",
