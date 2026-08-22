@@ -387,7 +387,7 @@ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
 name = "biliup"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "async-trait",
  "base64",
@@ -398,6 +398,7 @@ dependencies = [
  "clap",
  "cookie",
  "futures",
+ "http",
  "libsm",
  "m3u8-rs",
  "md-5",
@@ -425,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "biliup-cli"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -1014,7 +1015,7 @@ dependencies = [
 
 [[package]]
 name = "danmaku"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "async-trait",
  "base64",
@@ -4108,7 +4109,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "stream-gears"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "async-channel",
  "async-trait",

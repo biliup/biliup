@@ -358,6 +358,13 @@ impl<'a> DouyinLive<'a> {
         if room_info.get("status").and_then(Value::as_i64) != Some(2) {
             return Ok(None);
         }
+        // 下播后抖音会在回放房间写入 finish_time（结束时间戳），且 reflow 回放流
+        // 的 URL 携带 rtm_expr_tag=reflow_room_info 标记，二者均表明直播已结束。
+        // 此时接口仍可能返回 status=2 与可拉取的回放流，需在此判定为未开播，
+        // 避免 monitor 循环误判"直播中"并反复录制垫片流。
+        if room_info.get("finish_time").and_then(Value::as_i64).unwrap_or(0) > 0 {
+            return Ok(None);
+        }
         self.room_id = room_info
             .get("id_str")
             .and_then(Value::as_str)
@@ -439,6 +446,8 @@ impl<'a> DouyinLive<'a> {
             .and_then(Value::as_str)
             .filter(|url| !url.is_empty())
             .map(|url| url.replace("http://", "https://"))
+            // 回放流 URL 携带 reflow 标记，直播已结束，拒绝作为直播流返回
+            .filter(|url| !url.contains("rtm_expr_tag=reflow_room_info"))
             .ok_or_else(|| LiveError::custom("抖音可用直播流为空"))
     }
 

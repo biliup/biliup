@@ -45,6 +45,7 @@ libsm = "0.6.0"
 [dev-dependencies]
 tracing-subscriber = { workspace = true, features = ["env-filter"] }  # 添加特性（特性是累加的）  }
 tempfile = "3.14"
+http = "1"
 
 [features]
 cli = ["clap"]

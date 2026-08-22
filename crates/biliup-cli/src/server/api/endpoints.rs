@@ -1,10 +1,11 @@
+use crate::server::common::recording_policy::{self, Rejection};
 use crate::server::common::upload::{build_studio, submit_to_bilibili, upload};
 use crate::server::common::util::Recorder;
 use crate::server::config::Config;
 use crate::server::core::download_manager::DownloadManager;
 use crate::server::errors::{AppError, report_to_response};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::context::{Stage, WorkerStatus};
+use crate::server::infrastructure::context::{Stage, Worker, WorkerStatus};
 use crate::server::infrastructure::dto::LiveStreamerResponse;
 use crate::server::infrastructure::models::live_streamer::{InsertLiveStreamer, LiveStreamer};
 use crate::server::infrastructure::models::upload_streamer::{
@@ -35,6 +36,20 @@ use tokio::fs;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
+/// 主播当前被录制策略挡下的原因，供 `/v1/streamers` 覆盖状态字段。
+///
+/// 探测前就能判定的条件（录制时间范围）按当前时钟实时计算，不受监控循环节奏影响；
+/// 需要房间标题才能判定的条件取最近一次探测的结论。
+fn rejection_status(streamer: &LiveStreamer, worker: Option<&Worker>) -> Option<&'static str> {
+    if let Some(rejection) = recording_policy::reject_before_probe(streamer) {
+        return Some(rejection.status());
+    }
+    worker
+        .and_then(Worker::rejection)
+        .as_ref()
+        .map(Rejection::status)
+}
+
 pub async fn get_streamers_endpoint(
     State(pool): State<ConnectionPool>,
     State(managers): State<Arc<DownloadManager>>,
@@ -51,6 +66,14 @@ pub async fn get_streamers_endpoint(
         let status = match option.as_ref() {
             Some(t) => format!("{:?}", *t.downloader_status.read().unwrap()),
             None => String::new(),
+        };
+        // 被录制策略挡下时报告具体原因，否则「不在时间范围内」和「单纯没开播」
+        // 在界面上都是「空闲」，用户无从判断配置有没有生效。
+        // 时间类条件按当前时钟实时算，不依赖监控循环轮到这个房间，因此不会过期；
+        // 依赖房间标题的结论来自最近一次探测。正在录制时不覆盖。
+        let status = match rejection_status(&x, option.as_deref()) {
+            Some(reason) if status != "Working" => reason.to_string(),
+            _ => status,
         };
 
         results.push(LiveStreamerResponse {
@@ -691,4 +714,180 @@ pub async fn post_uploads(
     });
 
     Ok(Json(serde_json::json!({})))
+}
+
+#[cfg(test)]
+mod recording_policy_status_tests {
+    use super::*;
+    use crate::server::infrastructure::connection_pool::ConnectionManager;
+    use chrono::{Duration as ChronoDuration, SecondsFormat};
+    use serde_json::Value;
+
+    /// 以当前时刻为基准造窗口，形态与前端 `Date.toISOString()` 写出的一致
+    fn window(starts_in: i64, ends_in: i64) -> String {
+        let now = Utc::now();
+        let iso = |offset: i64| {
+            (now + ChronoDuration::seconds(offset)).to_rfc3339_opts(SecondsFormat::Millis, true)
+        };
+        format!(r#"["{}","{}"]"#, iso(starts_in), iso(ends_in))
+    }
+
+    fn insert(url: &str, time_range: Option<String>) -> InsertLiveStreamer {
+        InsertLiveStreamer {
+            url: url.to_string(),
+            remark: url.to_string(),
+            filename_prefix: None,
+            time_range,
+            upload_streamers_id: None,
+            format: None,
+            override_cfg: None,
+            preprocessor: None,
+            segment_processor: None,
+            downloaded_processor: None,
+            postprocessor: None,
+            opt_args: None,
+            excluded_keywords: None,
+        }
+    }
+
+    fn worker_for(streamer: LiveStreamer) -> Worker {
+        Worker::new(
+            streamer,
+            None,
+            Arc::new(RwLock::new(Config::default())),
+            Default::default(),
+        )
+    }
+
+    /// 走完整的 数据库 -> /v1/streamers 处理函数 -> JSON 这条路
+    #[tokio::test]
+    async fn the_streamers_endpoint_reports_why_a_streamer_is_not_recording() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+
+        // 窗口尚未开始 -> 应报告 OutOfSchedule
+        insert("https://live.example.com/closed", Some(window(3600, 7200)))
+            .insert(&pool)
+            .await
+            .unwrap();
+        // 窗口正开着 -> 不该被覆盖
+        insert("https://live.example.com/open", Some(window(-60, 3600)))
+            .insert(&pool)
+            .await
+            .unwrap();
+        // 没配时间范围 -> 不该被覆盖
+        insert("https://live.example.com/always", None)
+            .insert(&pool)
+            .await
+            .unwrap();
+
+        let managers = Arc::new(DownloadManager::new(1, 0, pool.clone()));
+        let Json(responses) = get_streamers_endpoint(State(pool), State(managers))
+            .await
+            .expect("接口应返回成功");
+
+        let status_of = |url: &str| {
+            responses
+                .iter()
+                .find(|r| r.inner.url == url)
+                .unwrap_or_else(|| panic!("响应里应有 {url}"))
+                .status
+                .clone()
+        };
+
+        assert_eq!(
+            status_of("https://live.example.com/closed"),
+            "OutOfSchedule"
+        );
+        assert_eq!(status_of("https://live.example.com/open"), "");
+        assert_eq!(status_of("https://live.example.com/always"), "");
+    }
+
+    #[tokio::test]
+    async fn the_endpoint_response_serialises_the_status_frontend_switches_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        insert("https://live.example.com/closed", Some(window(3600, 7200)))
+            .insert(&pool)
+            .await
+            .unwrap();
+
+        let managers = Arc::new(DownloadManager::new(1, 0, pool.clone()));
+        let Json(responses) = get_streamers_endpoint(State(pool), State(managers))
+            .await
+            .unwrap();
+
+        // 前端 app/(app)/streamers/page.tsx 就是对这个字符串做 switch
+        let json: Value = serde_json::to_value(&responses[0]).unwrap();
+        assert_eq!(json["status"], "OutOfSchedule");
+    }
+
+    #[test]
+    fn a_title_excluded_worker_reports_title_excluded() {
+        let streamer = LiveStreamer {
+            id: 1,
+            url: "https://live.example.com/x".to_string(),
+            remark: "x".to_string(),
+            filename_prefix: None,
+            time_range: None,
+            upload_streamers_id: None,
+            format: None,
+            override_cfg: None,
+            preprocessor: None,
+            segment_processor: None,
+            downloaded_processor: None,
+            postprocessor: None,
+            opt_args: None,
+            excluded_keywords: None,
+        };
+        let worker = worker_for(streamer.clone());
+
+        // 没有任何拦截时不覆盖状态
+        assert_eq!(rejection_status(&streamer, Some(&worker)), None);
+
+        // 探测后记录下的标题拦截会被报告出来
+        worker.set_rejection(Some(Rejection::ExcludedKeyword("录像".to_string())));
+        assert_eq!(
+            rejection_status(&streamer, Some(&worker)),
+            Some("TitleExcluded")
+        );
+
+        // 探测结果推翻后清空
+        worker.set_rejection(None);
+        assert_eq!(rejection_status(&streamer, Some(&worker)), None);
+    }
+
+    #[test]
+    fn the_time_window_outranks_a_stale_title_rejection() {
+        let streamer = LiveStreamer {
+            id: 1,
+            url: "https://live.example.com/x".to_string(),
+            remark: "x".to_string(),
+            filename_prefix: None,
+            time_range: Some(window(3600, 7200)),
+            upload_streamers_id: None,
+            format: None,
+            override_cfg: None,
+            preprocessor: None,
+            segment_processor: None,
+            downloaded_processor: None,
+            postprocessor: None,
+            opt_args: None,
+            excluded_keywords: None,
+        };
+        let worker = worker_for(streamer.clone());
+        worker.set_rejection(Some(Rejection::ExcludedKeyword("录像".to_string())));
+
+        // 时间范围按当前时钟实时算、不会过期，优先于上一次探测留下的结论
+        assert_eq!(
+            rejection_status(&streamer, Some(&worker)),
+            Some("OutOfSchedule")
+        );
+    }
 }
