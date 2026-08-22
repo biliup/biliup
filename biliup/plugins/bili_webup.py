@@ -989,6 +989,7 @@ class Data:
     title: str = ''
     desc_format_id: int = 0
     desc: str = ''
+    desc_v2: list = field(default_factory=list)
     dynamic: str = ''
     subtitle: dict = field(init=False)
     tag: Union[list, str] = ''
