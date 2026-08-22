@@ -49,7 +49,11 @@ impl StreamGears {
         let headers_in = construct_headers(&download_config.headers).map_err(AppError::Custom)?;
         let proxy = self.proxy.clone();
         let segment = Segmentable::new(
-            download_config.segment_time.as_deref().map(parse_time),
+            // 快到录制时间范围结束时会被裁短，使录制停在窗口边界
+            download_config
+                .segment_duration()
+                .as_deref()
+                .map(parse_time),
             download_config.file_size,
         );
 

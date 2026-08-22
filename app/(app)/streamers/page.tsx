@@ -69,6 +69,9 @@ export default function Home() {
       case 'OutOfSchedule':
         statusTag = <Tag color="green">非录播时间</Tag>
         break
+      case 'TitleExcluded':
+        statusTag = <Tag color="orange">标题已排除</Tag>
+        break
       case 'Pause':
         statusTag = <Tag color="pink">暂停中</Tag>
         break

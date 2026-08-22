@@ -157,9 +157,10 @@ impl StreamlinkDownloader {
             args.push("--http-header".to_string());
             args.push(format!("{}={}", key, value));
         }
-        if let Some(segment_time) = &download_config.segment_time {
+        // 快到录制时间范围结束时会被裁短，使录制停在窗口边界
+        if let Some(segment_time) = download_config.segment_duration() {
             args.push("--hls-duration".to_string());
-            args.push(segment_time.clone());
+            args.push(segment_time);
         }
         args.push("--force".to_string());
         args.push("--output".to_string());

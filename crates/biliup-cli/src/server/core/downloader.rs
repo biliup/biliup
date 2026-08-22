@@ -6,6 +6,7 @@ pub mod stream_gears;
 pub mod streamlink;
 pub mod ytdlp;
 
+use crate::server::common::timerange;
 use crate::server::common::util::Recorder;
 use crate::server::core::downloader::ffmpeg_downloader::FfmpegDownloader;
 use crate::server::core::downloader::stream_gears::StreamGears;
@@ -29,6 +30,10 @@ pub struct DownloadConfig {
     /// 分段时长 (格式: "HH:MM:SS")
     pub segment_time: Option<String>,
 
+    /// 录制时间范围，两个 ISO 8601 时刻的 JSON 数组字符串。
+    /// 见 [`crate::server::common::timerange`]。
+    pub time_range: Option<String>,
+
     /// 分段文件大小限制 (字节)
     pub file_size: Option<u64>,
 
@@ -51,6 +56,20 @@ impl DownloadConfig {
     /// 返回完整的输出文件路径
     fn generate_output_filename(&self, suffix: &str) -> PathBuf {
         self.output_dir.join(self.recorder.generate_path(suffix))
+    }
+
+    /// 本次录制块允许的最长时长（`"HH:MM:SS"`）。
+    ///
+    /// 即 `segment_time` 按录制时间范围的结束时刻裁剪后的结果：快到窗口结束时缩短本段，
+    /// 让录制停在窗口边界。各下载器都以「本段录多久」的语义使用它，
+    /// 因此必须用这个方法而不是直接读 [`Self::segment_time`]。
+    pub fn segment_duration(&self) -> Option<String> {
+        timerange::clamp_segment_time(self.segment_time.as_deref(), self.time_range.as_deref())
+    }
+
+    /// 距录制时间范围结束还剩多久（`"HH:MM:SS"`）；未配置录制时间范围时为 `None`。
+    pub fn time_range_remaining(&self) -> Option<String> {
+        timerange::remaining_until_end(self.time_range.as_deref())
     }
 }
 

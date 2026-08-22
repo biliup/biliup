@@ -1,4 +1,5 @@
 use crate::server::common::download::start_download_workflow;
+use crate::server::common::recording_policy;
 use crate::server::common::upload::UploaderMessage;
 use crate::server::core::live::{batch_check_request, live_request, streamer_info};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
@@ -34,9 +35,10 @@ enum BatchVerdict {
     Fallback,
 }
 
-/// 批量结果为未开播时的快速轮换间隔：缓存命中无网络开销，
-/// 短暂停即可在一个检测周期内扫完整个队列（网络频率仍由缓存 TTL 限制）。
-const BATCH_ROTATE_SLEEP: Duration = Duration::from_secs(1);
+/// 无网络开销的跳过路径（批量结果判定未开播、不在录制时间范围内）使用的快速轮换间隔：
+/// 这些判定不发请求，短暂停即可在一个检测周期内扫完整个队列，
+/// 也让窗口一开就能立刻开录（网络频率仍由批量缓存 TTL 限制）。
+const QUICK_ROTATE_SLEEP: Duration = Duration::from_secs(1);
 
 /// 房间处理器
 /// 管理多个直播间的状态和操作
@@ -118,6 +120,15 @@ impl Monitor {
                 .await;
             let url = room.get_streamer().url.clone();
             let interval = room.get_config().event_loop_interval;
+            // 探测前的录制策略：不满足就直接放回队列，既不占用下载槽位也不发任何请求。
+            // 这类条件只看配置和时钟、判定无开销，所以用快速轮换而不是整个检测周期，
+            // 条件一满足即可开录。
+            if let Some(rejection) = recording_policy::reject_before_probe(room.get_streamer()) {
+                self.wake_waker(room.id()).await;
+                debug!(url = url, reason = %rejection, "跳过检测");
+                tokio::time::sleep(QUICK_ROTATE_SLEEP).await;
+                continue;
+            }
             // 批量检测平台：先用一个检测周期内共享的批量结果快速判定是否开播。
             // 未开播直接跳过（不占用下载槽位、不做逐间请求），并以较短间隔轮换到
             // 下一个房间，使整条队列在一个检测周期内扫完；批量请求本身由缓存 TTL 限流。
@@ -129,7 +140,7 @@ impl Monitor {
                     BatchVerdict::Offline => {
                         self.wake_waker(room.id()).await;
                         debug!(url = url, "批量检测未开播");
-                        tokio::time::sleep(BATCH_ROTATE_SLEEP).await;
+                        tokio::time::sleep(QUICK_ROTATE_SLEEP).await;
                         continue;
                     }
                     // Live / Fallback 都继续走下面的逐间完整检测
@@ -145,6 +156,18 @@ impl Monitor {
             // 检查直播状态
             match plugin.check_stream(request).await {
                 Ok(LiveStatus::Live { stream }) => {
+                    // 依赖房间标题的策略要拿到流信息才能判定。命中就按「本轮不录」处理：
+                    // 不建 StreamerInfo 记录、不启动下载，等下个检测周期再看。
+                    if let Some(rejection) =
+                        recording_policy::reject_before_record(room.get_streamer(), &stream.title)
+                    {
+                        room.set_rejection(Some(rejection.clone()));
+                        self.wake_waker(room.id()).await;
+                        info!(url = url, title = stream.title, reason = %rejection, "开播但不录制");
+                        tokio::time::sleep(Duration::from_secs(interval)).await;
+                        continue;
+                    }
+                    room.set_rejection(None);
                     let sql_no_id = streamer_info(&stream);
                     let insert = match StreamerInfo::builder()
                         .url(sql_no_id.url.clone())
@@ -179,10 +202,13 @@ impl Monitor {
                     info!("成功开始录制 {}", url);
                 }
                 Ok(LiveStatus::Offline) => {
+                    // 探测结果推翻了上一轮的策略判定，清掉以免界面停在旧原因上
+                    room.set_rejection(None);
                     self.wake_waker(room.id()).await;
                     debug!(url = room.get_streamer().url, "未开播")
                 }
                 Err(e) => {
+                    room.set_rejection(None);
                     self.wake_waker(room.id()).await;
                     error!(e=?e, ctx=room.get_streamer().url,"检查直播间出错")
                 }

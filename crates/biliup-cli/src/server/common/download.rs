@@ -1,3 +1,4 @@
+use crate::server::common::recording_policy;
 use crate::server::common::upload::UploaderMessage;
 use crate::server::common::util::FileValidator;
 use crate::server::core::downloader::cover_downloader;
@@ -201,6 +202,19 @@ impl DownloadTask {
                         "Failed to check stream status: {:?}, stopping download", e
                     );
                 }
+            }
+
+            // 录制策略：条件已不成立就不再续录，把房间交回监控循环。
+            // 少了这一步，下载器按边界收尾后循环会立刻重开一段，等于策略形同虚设。
+            // 每轮都重新判定，对齐 Python 版每轮 `run()` 前重新调用 `should_record()`。
+            //
+            // 放在 check_stream 之后有两个原因：用得到刚刷新的房间标题；且能同时覆盖
+            // 探测失败的分支——那条路径只加重试计数，否则会带着已失效的策略绕回去重录。
+            if let Some(rejection) =
+                recording_policy::reject_before_record(ctx.live_streamer(), &stream.title)
+            {
+                info!(url = url, reason = %rejection, "停止录制");
+                break components;
             }
 
             if retry_count >= max_retries {
