@@ -28,6 +28,7 @@ impl ApplicationController {
     pub async fn serve(
         addr: &SocketAddr,
         enable_login_guard: bool,
+        secure_session_cookie: bool,
         service_register: ServiceRegister,
     ) -> AppResult<()> {
         // 会话层配置
@@ -50,10 +51,13 @@ impl ApplicationController {
 
         // 配置会话管理层
         let session_layer = SessionManagerLayer::new(session_store)
-            // Loopback development uses plain HTTP.  A non-loopback bind is
-            // expected to sit behind TLS, so never send its session cookie over
-            // an insecure browser connection.
-            .with_secure(!addr.ip().is_loopback())
+            // The server itself only speaks plain HTTP, and browsers refuse to
+            // store `Secure` cookies delivered over insecure remote origins, so
+            // a forced `Secure` attribute on non-loopback binds silently broke
+            // every direct-HTTP login. Default to a non-`Secure` cookie and let
+            // deployments behind an HTTPS reverse proxy opt in explicitly via
+            // `--secure-session-cookie`.
+            .with_secure(secure_session_cookie)
             .with_name("biliup.sid")
             .with_expiry(Expiry::OnInactivity(Duration::days(7)));
         // .with_signed(key);
@@ -167,11 +171,12 @@ async fn shutdown_signal(
 #[cfg(test)]
 mod tests {
     use super::with_optional_auth;
+    use crate::server::api::auth;
     use crate::server::infrastructure::connection_pool::ConnectionManager;
     use crate::server::infrastructure::users::Backend;
     use axum::Router;
     use axum::body::Body;
-    use axum::http::{Request, StatusCode};
+    use axum::http::{Request, StatusCode, header};
     use axum::routing::get;
     use axum_login::AuthManagerLayerBuilder;
     use tower::ServiceExt;
@@ -209,5 +214,61 @@ mod tests {
     async fn log_websocket_route_is_protected_when_auth_is_enabled() {
         assert_eq!(request_log_route(true).await, StatusCode::UNAUTHORIZED);
         assert_eq!(request_log_route(false).await, StatusCode::OK);
+    }
+
+    /// Issues a real login-session `Set-Cookie` through the register endpoint
+    /// and returns the raw header value.
+    async fn session_set_cookie_header(secure_session_cookie: bool) -> String {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let session_store = SqliteStore::new(pool.clone());
+        session_store.migrate().await.unwrap();
+        let auth_layer = AuthManagerLayerBuilder::new(
+            Backend::new(pool),
+            SessionManagerLayer::new(session_store).with_secure(secure_session_cookie),
+        )
+        .build();
+        let app = auth::router().layer(auth_layer);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/users/register")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        r#"{"username":"biliup","password":"test-password"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        response
+            .headers()
+            .get(header::SET_COOKIE)
+            .expect("login must establish a session cookie")
+            .to_str()
+            .unwrap()
+            .to_string()
+    }
+
+    /// Direct HTTP access (the default deployment) must not mark the session
+    /// cookie `Secure`, otherwise browsers on remote non-HTTPS origins drop it
+    /// and every login silently bounces back to the login page.
+    #[tokio::test]
+    async fn session_cookie_secure_attribute_follows_configuration() {
+        assert!(
+            !session_set_cookie_header(false).await.contains("Secure"),
+            "default session cookie must work over plain HTTP"
+        );
+        assert!(
+            session_set_cookie_header(true).await.contains("Secure"),
+            "--secure-session-cookie must mark the cookie Secure"
+        );
     }
 }
