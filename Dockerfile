@@ -129,3 +129,6 @@ RUN set -eux; \
 WORKDIR /opt
 
 ENTRYPOINT ["biliup"]
+# 容器内必须监听 0.0.0.0，否则宿主机的端口映射无法转发进容器。
+# CLI 默认的 127.0.0.1 只适用于直接在本机运行的场景。
+CMD ["server", "--bind", "0.0.0.0", "--auth"]

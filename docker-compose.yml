@@ -8,4 +8,5 @@ services:
       - "<HOST_ADDRESS>:<HOST_PORT>:19159"
     volumes:
       - /path/to/save_folder:/opt
-    command: server --auth
+    # 容器内必须监听 0.0.0.0，否则上面的端口映射无法转发进容器
+    command: server --bind 0.0.0.0 --auth

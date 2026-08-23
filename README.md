@@ -79,12 +79,17 @@ Options:
 Usage: biliup server [OPTIONS]
 
 Options:
-  -b, --bind <BIND>    Specify bind address [default: 0.0.0.0]
-  -p, --port <PORT>    Port to use [default: 19159]
-      --auth           开启登录密码认证
-  -c, --config <FILE>  使用 biliup 1.0.7 风格配置文件启动录制
-  -h, --help           Print help
+  -b, --bind <BIND>            Specify bind address [default: 127.0.0.1]
+  -p, --port <PORT>            Port to use [default: 19159]
+      --auth                   开启登录密码认证
+      --secure-session-cookie  为会话 Cookie 附加 Secure 属性。仅当通过 HTTPS 反向代理访问 Web UI 时开启； 直接通过 HTTP 远程访问时开启会导致浏览器丢弃登录态
+  -c, --config <FILE>          使用 biliup 1.0.7 风格配置文件启动录制
+  -h, --help                   Print help
 ```
+
+> [!IMPORTANT]
+> 自 [#1660](https://github.com/biliup/biliup/pull/1660) 起，`--bind` 的默认值由 `0.0.0.0` 改为 `127.0.0.1`，即**默认只监听本机**，局域网/公网无法直接访问。
+> 如需从其他设备访问，请加上 `--bind 0.0.0.0 --auth`，详见下方「🔓 远程访问」一节。Docker 镜像已内置该参数，不受影响。
 
 - [使用文档 »](https://docs.biliup.rs)
 
@@ -97,12 +102,46 @@ Options:
 1. 安装 [uv](https://docs.astral.sh/uv/getting-started/installation/) 
 2. 安装：`uv tool install biliup`
 3. 启动：`biliup server --auth`
-4. 访问 WebUI：`http://your-ip:19159`
+4. 访问 WebUI：`http://127.0.0.1:19159`（默认只监听本机，远程访问见下方说明）
 * 后台运行 
   1. `nohup biliup server --auth &`
   2. [请查看参考](https://biliup.github.io/biliup/docs/guide/introduction/#linuxxia-pei-zhi-kai-ji-zi-qi)
 ### Termux
 - 详见[Wiki](https://github.com/biliup/biliup/wiki/Termux-%E4%B8%AD%E4%BD%BF%E7%94%A8-biliup)
+
+### 🔓 远程访问（监听 0.0.0.0）
+
+默认的 `127.0.0.1` 只允许本机访问。需要从其他设备访问时，显式指定 `--bind 0.0.0.0` 并开启 `--auth`：
+
+```shell
+biliup server --bind 0.0.0.0 --auth
+```
+
+首次打开 `http://your-ip:19159` 会引导设置管理员密码（用户名固定为 `biliup`），之后即可正常登录使用。
+
+> [!NOTE]
+> 绑定非回环地址时必须同时开启 `--auth`，否则会拒绝启动，避免无认证的 Web API 被暴露：
+>
+> ```
+> refusing to expose the unauthenticated Web API on 0.0.0.0:19159; use a loopback bind address or enable --auth
+> ```
+
+> [!WARNING]
+> 将 Web UI 暴露到公网存在风险，建议仅在可信局域网内使用，或置于反向代理之后。
+> 若通过 **HTTPS** 反向代理访问，请加上 `--secure-session-cookie`；直接以 HTTP 远程访问时**不要**加，否则浏览器会丢弃登录态（见 [#1669](https://github.com/biliup/biliup/pull/1669)）。
+
+#### Docker
+
+镜像已内置 `--bind 0.0.0.0 --auth`，开箱即用，无需额外配置：
+
+```shell
+docker compose up -d
+```
+
+打开 `http://your-ip:19159` 设置管理员密码即可。
+
+> [!IMPORTANT]
+> 若要自定义 `command`，必须带上 `--bind 0.0.0.0`。容器内若监听 `127.0.0.1`，宿主机的端口映射无法转发进容器，Web UI 将完全无法访问。
 
 ---
 
