@@ -38,6 +38,7 @@ pub async fn run(
     run_with_cookie(
         addr,
         auth,
+        false,
         log_handle,
         config_path,
         PathBuf::from("cookies.json"),
@@ -48,6 +49,7 @@ pub async fn run(
 pub async fn run_with_cookie(
     addr: (&str, u16),
     auth: bool,
+    secure_session_cookie: bool,
     log_handle: LogHandle,
     config_path: Option<PathBuf>,
     user_cookie: PathBuf,
@@ -111,7 +113,7 @@ pub async fn run_with_cookie(
     }
 
     tracing::info!("migrations successfully ran, initializing axum server...");
-    ApplicationController::serve(&addr, auth, service_register)
+    ApplicationController::serve(&addr, auth, secure_session_cookie, service_register)
         .await
         .attach("could not initialize application routes")?;
     Ok(())
