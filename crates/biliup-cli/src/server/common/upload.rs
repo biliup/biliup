@@ -315,7 +315,7 @@ pub(crate) async fn build_studio(
         ))
         .tag(upload_config.tags.join(","))
         .maybe_tid(upload_config.tid)
-        .title(recorder.format_filename())
+        .title(recorder.format_title())
         .videos(videos)
         .dolby(upload_config.dolby.unwrap_or_default())
         // .lossless_music(upload_config.)

@@ -26,14 +26,18 @@ impl Recorder {
         }
     }
 
-    /// 生成文件名模板（包含时间格式占位符），并清洗非法字符
-    pub fn filename_template(&self) -> String {
-        let raw = if let Some(prefix) = &self.filename_prefix {
+    /// 生成原始模板（包含时间格式占位符），不清洗非法字符
+    fn raw_template(&self) -> String {
+        if let Some(prefix) = &self.filename_prefix {
             self.template_with(prefix)
         } else {
             format!("{}%Y-%m-%dT%H_%M_%S", self.streamer_info.name)
-        };
-        sanitize_filename(&raw)
+        }
+    }
+
+    /// 生成文件名模板（包含时间格式占位符），并清洗非法字符
+    pub fn filename_template(&self) -> String {
+        sanitize_filename(&self.raw_template())
     }
 
     fn template_with(&self, template: &str) -> String {
@@ -64,6 +68,15 @@ impl Recorder {
             .date
             .with_timezone(&Local)
             .format(&template)
+            .to_string()
+    }
+
+    /// 生成投稿标题，不清洗文件名非法字符
+    pub fn format_title(&self) -> String {
+        self.streamer_info
+            .date
+            .with_timezone(&Local)
+            .format(&self.raw_template())
             .to_string()
     }
 
@@ -173,7 +186,20 @@ pub fn parse_time(segment_time: &str) -> std::time::Duration {
 
 #[cfg(test)]
 mod tests {
-    use crate::server::common::util::media_ext_from_url;
+    use crate::server::common::util::{Recorder, media_ext_from_url};
+    use crate::server::infrastructure::models::StreamerInfo;
+    use chrono::Utc;
+
+    #[test]
+    fn format_title_preserves_filename_invalid_characters() {
+        let recorder = Recorder::new(
+            Some("{streamer}/{title}:archive".to_string()),
+            StreamerInfo::new("streamer", "https://example.com", "live", Utc::now(), ""),
+        );
+
+        assert_eq!(recorder.format_title(), "streamer/live:archive");
+        assert_eq!(recorder.format_filename(), "streamer_live_archive");
+    }
 
     #[test]
     fn it_works() {
