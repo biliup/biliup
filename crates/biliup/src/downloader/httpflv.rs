@@ -12,6 +12,16 @@ use std::time::Duration;
 use tokio::time::timeout;
 use tracing::{info, warn};
 
+/// Small timestamp reorderings can occur when audio/video tags are interleaved,
+/// but a large backwards jump indicates a reconnect/discontinuity.  Waiting
+/// for the next keyframe before creating a file keeps each FLV independently
+/// decodable and avoids carrying the discontinuity into the previous segment.
+const TIMESTAMP_DISCONTINUITY_THRESHOLD_MS: u32 = 1_000;
+
+fn is_timestamp_discontinuity(previous: u32, current: u32) -> bool {
+    previous.saturating_sub(current) > TIMESTAMP_DISCONTINUITY_THRESHOLD_MS
+}
+
 pub async fn download(connection: Connection, file: LifecycleFile<'_>, segment: Segmentable) {
     let file_name = file.file_name.clone();
     match parse_flv(connection, file, segment).await {
@@ -38,9 +48,11 @@ pub(crate) async fn parse_flv(
     // let mut downloaded_size = 9 + 4;
     let mut on_meta_data = None;
     let mut aac_sequence_header = None;
-    let mut h264_sequence_header: Option<(TagHeader, Bytes, Bytes)> = None;
+    let mut video_sequence_header: Option<(TagHeader, Bytes, Bytes)> = None;
     let mut prev_timestamp = 0;
+    let mut last_tag_timestamp = None;
     let mut create_new = false;
+    let mut discard_until_keyframe = false;
     loop {
         let tag_header_bytes = connection.read_frame(11).await?;
         if tag_header_bytes.is_empty() {
@@ -50,6 +62,24 @@ pub(crate) async fn parse_flv(
         }
 
         let (_, tag_header) = map_parse_err(tag_header(&tag_header_bytes), "tag header")?;
+        if let Some(previous) = last_tag_timestamp
+            && previous > tag_header.timestamp
+        {
+            warn!(
+                previous,
+                current = tag_header.timestamp,
+                "FLV timestamp moved backwards"
+            );
+            if is_timestamp_discontinuity(previous, tag_header.timestamp) {
+                create_new = true;
+                discard_until_keyframe = true;
+                // Do not write tags from after the discontinuity into the
+                // previous file. They belong to the next keyframe-aligned
+                // segment.
+                flv_tags_cache.clear();
+            }
+        }
+        last_tag_timestamp = Some(tag_header.timestamp);
         // write_tag_header(&mut out, &tag_header)?;
 
         let bytes = connection.read_frame(tag_header.data_size as usize).await?;
@@ -90,27 +120,34 @@ pub(crate) async fn parse_flv(
                 }
             }
             TagData::Video(video_data) => {
-                let (packet_type, composition_time) = if CodecId::H264 == video_data.codec_id {
-                    let (_, avc_video_header) = avc_video_packet_header(video_data.video_data)
-                        .expect("Error in parsing avc video packet header.");
-                    if avc_video_header.packet_type == AVCPacketType::SequenceHeader {
-                        if let Some((_, binary_data, _)) = &h264_sequence_header {
-                            warn!("Unexpected h264 sequence header tag. {tag_header:?}");
-                            if bytes != binary_data {
-                                create_new = true;
-                                warn!("Different h264 sequence header tag. {tag_header:?}");
+                let (packet_type, composition_time) =
+                    if matches!(video_data.codec_id, CodecId::H264 | CodecId::H265) {
+                        let (_, avc_video_header) = avc_video_packet_header(video_data.video_data)
+                            .expect("Error in parsing AVC/HEVC video packet header.");
+                        if avc_video_header.packet_type == AVCPacketType::SequenceHeader {
+                            if let Some((_, binary_data, _)) = &video_sequence_header {
+                                warn!(
+                                    codec = ?video_data.codec_id,
+                                    "Unexpected video sequence header tag. {tag_header:?}"
+                                );
+                                if bytes != binary_data {
+                                    create_new = true;
+                                    warn!(
+                                        codec = ?video_data.codec_id,
+                                        "Different video sequence header tag. {tag_header:?}"
+                                    );
+                                }
                             }
+                            video_sequence_header =
+                                Some((tag_header, bytes.clone(), previous_tag_size.clone()))
                         }
-                        h264_sequence_header =
-                            Some((tag_header, bytes.clone(), previous_tag_size.clone()))
-                    }
-                    (
-                        Some(avc_video_header.packet_type),
-                        Some(avc_video_header.composition_time),
-                    )
-                } else {
-                    (None, None)
-                };
+                        (
+                            Some(avc_video_header.packet_type),
+                            Some(avc_video_header.composition_time),
+                        )
+                    } else {
+                        (None, None)
+                    };
 
                 FlvTag {
                     header: tag_header,
@@ -193,27 +230,33 @@ pub(crate) async fn parse_flv(
                             aac_prev_tag_size.clone(),
                         ));
                     }
-                    if !create_new {
-                        // H264SequenceHeader
-                        if let Some(h264_header) = h264_sequence_header.as_ref() {
-                            flv_tags_cache.push(h264_header.clone());
-                        } else {
-                            warn!(
-                                "h264_sequence_header not found before segmenting; new segment may be unplayable."
-                            );
-                        }
+                    // AVC/HEVC sequence header. Always inject the latest
+                    // header, including when a changed header itself caused
+                    // this split; otherwise the first keyframe of the new
+                    // file would be missing codec configuration.
+                    if let Some(video_header) = video_sequence_header.as_ref() {
+                        flv_tags_cache.push(video_header.clone());
+                    } else {
+                        warn!(
+                            "video sequence header not found before segmenting; new segment may be unplayable."
+                        );
                     }
                     info!("{} splitting.{segment:?}", out.file.file_name);
                     out.create_new()?;
                     create_new = false;
+                    discard_until_keyframe = false;
+                    prev_timestamp = timestamp as u32;
                 }
                 flv_tags_cache.push((tag_header, bytes.clone(), previous_tag_size.clone()));
             }
             _ => {
-                flv_tags_cache.push((tag_header, bytes.clone(), previous_tag_size.clone()));
+                if !discard_until_keyframe {
+                    flv_tags_cache.push((tag_header, bytes.clone(), previous_tag_size.clone()));
+                }
             }
         }
     }
+    out.finish();
     Ok(())
 }
 
@@ -331,6 +374,12 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn large_timestamp_regressions_are_treated_as_discontinuities() {
+        assert!(!super::is_timestamp_discontinuity(10_000, 9_500));
+        assert!(super::is_timestamp_discontinuity(10_000, 8_000));
+    }
+
     /// 回归测试：纯视频流（没有任何音频标签）在首次分段时不应 panic。
     ///
     /// 该流只包含一个 onMetaData 脚本标签和一个 H264 序列头关键帧，`aac_sequence_header`
@@ -380,6 +429,53 @@ mod tests {
 
         // 修复前：此调用会 panic（aac_sequence_header does not exist）。
         super::parse_flv(connection, file, segment).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn timestamp_reset_starts_a_new_keyframe_aligned_segment()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::downloader::util::{LifecycleFile, Segmentable};
+        use std::sync::{Arc, Mutex};
+
+        fn video_tag(timestamp: u32, body: [u8; 5]) -> Vec<u8> {
+            let mut tag = vec![
+                0x09,
+                0,
+                0,
+                5,
+                ((timestamp >> 16) & 0xff) as u8,
+                ((timestamp >> 8) & 0xff) as u8,
+                (timestamp & 0xff) as u8,
+                (timestamp >> 24) as u8,
+                0,
+                0,
+                0,
+            ];
+            tag.extend_from_slice(&body);
+            tag.extend_from_slice(&[0, 0, 0, 0]);
+            tag
+        }
+
+        let mut data = vec![0, 0, 0, 0];
+        data.extend(video_tag(10_000, [0x17, 0, 0, 0, 0]));
+        data.extend(video_tag(12_000, [0x27, 1, 0, 0, 0]));
+        data.extend(video_tag(0, [0x27, 1, 0, 0, 0]));
+        data.extend(video_tag(100, [0x17, 1, 0, 0, 0]));
+
+        let response = http::Response::builder().status(200).body(data)?;
+        let connection = super::Connection::new(reqwest::Response::from(response));
+        let dir = tempfile::tempdir()?;
+        let completed = Arc::new(Mutex::new(Vec::new()));
+        let completed_hook = Arc::clone(&completed);
+        let file = LifecycleFile::with_hook(
+            dir.path().join("timestamp_reset").to_str().unwrap(),
+            "flv",
+            move |name| completed_hook.lock().unwrap().push(name.to_string()),
+        );
+
+        super::parse_flv(connection, file, Segmentable::default()).await?;
+        assert_eq!(completed.lock().unwrap().len(), 2);
         Ok(())
     }
 }

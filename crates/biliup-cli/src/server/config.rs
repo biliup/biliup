@@ -2,6 +2,7 @@ use crate::server::core::downloader::DownloaderType;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::models::hook_step::HookStep;
 use biliup::bilibili::Credit;
+use biliup::downloader::live::DouyuCodec;
 use error_stack::{ResultExt, bail};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::Path, path::PathBuf};
@@ -99,6 +100,9 @@ pub struct Config {
     /// 斗鱼码率
     #[serde(default)]
     pub douyu_rate: Option<u32>,
+    /// 斗鱼视频编码：h264 | h265
+    #[serde(default)]
+    pub douyu_codec: Option<DouyuCodec>,
     /// 斗鱼互动游戏运行时跳过录制
     #[serde(default)]
     pub douyu_disable_interactive_game: Option<bool>,
@@ -277,6 +281,10 @@ pub struct StreamerConfig {
     /// 分区ID
     #[serde(default)]
     pub tid: Option<u32>,
+
+    /// 新版分区ID
+    #[serde(default)]
+    pub tid_v2: Option<u32>,
 
     /// 版权类型
     #[serde(default)]
@@ -611,5 +619,16 @@ mod tests {
         assert_eq!(config.file_size, None);
         assert_eq!(config.segment_time, Some("01:00:00".to_string()));
         assert!(config.validate_segment_limits().is_ok());
+    }
+
+    #[test]
+    fn douyu_codec_accepts_supported_values_and_rejects_typos() {
+        let h264: Config = serde_json::from_str(r#"{"douyu_codec":"h264"}"#).unwrap();
+        assert_eq!(h264.douyu_codec, Some(DouyuCodec::H264));
+
+        let h265: Config = serde_json::from_str(r#"{"douyu_codec":"h265"}"#).unwrap();
+        assert_eq!(h265.douyu_codec, Some(DouyuCodec::H265));
+
+        assert!(serde_json::from_str::<Config>(r#"{"douyu_codec":"hevc"}"#).is_err());
     }
 }

@@ -2,11 +2,13 @@ use biliup::uploader::util::SubmitOption;
 use biliup_cli::cli::{Cli, Commands};
 use biliup_cli::downloader::generate_json;
 use biliup_cli::server::config::Config;
-use biliup_cli::server::errors::AppResult;
+use biliup_cli::server::errors::{AppError, AppResult};
 use biliup_cli::uploader::{
-    append, comments, list, login, renew, reply, show, upload_by_command, upload_by_config,
+    append, comments, list, login, renew, reply, retry_pending_upload, show, upload_by_command,
+    upload_by_config,
 };
 use clap::Parser;
+use error_stack::ResultExt;
 use pyo3::prelude::PyAnyMethods;
 use pyo3::prelude::PyDictMethods;
 use pyo3::types::PyDict;
@@ -14,6 +16,7 @@ use pyo3::{Bound, PyAny, PyResult, Python};
 use pyo3::{pyclass, pyfunction, pymethods};
 use pythonize::pythonize;
 use std::ops::Deref;
+use std::process::{Command, Stdio};
 use std::sync::{Arc, LazyLock, RwLock};
 use time::macros::format_description;
 use tracing::info;
@@ -150,6 +153,43 @@ pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
         Err(e) => e.exit(),
     };
 
+    if matches!(
+        cli.command,
+        Commands::Server {
+            background: true,
+            ..
+        }
+    ) {
+        let executable = args
+            .first()
+            .ok_or_else(|| AppError::Custom("missing executable path".into()))?;
+        let mut command = Command::new(executable);
+        command
+            .args(
+                args.iter()
+                    .skip(1)
+                    .filter(|arg| arg.as_str() != "--background"),
+            )
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            unsafe {
+                command.pre_exec(|| {
+                    if libc::setsid() == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+        }
+        let child = command.spawn().change_context(AppError::Unknown)?;
+        println!("biliup server started in background (pid {})", child.id());
+        return Ok(());
+    }
+
     let local_time = tracing_subscriber::fmt::time::LocalTime::new(format_description!(
         "[year]-[month]-[day] [hour]:[minute]:[second]"
     ));
@@ -206,6 +246,9 @@ pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
         Commands::Login => login(cli.user_cookie, cli.proxy.as_deref()).await?,
         Commands::Renew => {
             renew(cli.user_cookie, cli.proxy.as_deref()).await?;
+        }
+        Commands::RetryUpload { manifest } => {
+            retry_pending_upload(manifest, cli.user_cookie, cli.proxy.as_deref()).await?;
         }
         Commands::Upload {
             video_path,
@@ -284,6 +327,7 @@ pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
             bind,
             port,
             auth,
+            background: _,
             secure_session_cookie,
             config,
         } => {

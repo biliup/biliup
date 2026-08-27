@@ -11,6 +11,7 @@ use error_stack::{Report, ResultExt};
 use ormlite::Model;
 use serde::Deserialize;
 use std::collections::HashMap;
+use tracing::warn;
 
 /// B站投稿预处理端点
 pub async fn archive_pre_endpoint(
@@ -28,12 +29,23 @@ pub async fn archive_pre_endpoint(
     // 尝试使用每个Cookie进行登录
     for cookies in configurations {
         if let Ok(bili) = login_by_cookies(cookies.value, None).await {
-            return Ok(Json(
-                bili.archive_pre()
-                    .await
-                    .change_context(AppError::Unknown)
-                    .map_err(report_to_response)?,
-            ));
+            let mut archive_pre = bili
+                .archive_pre()
+                .await
+                .change_context(AppError::Unknown)
+                .map_err(report_to_response)?;
+
+            match bili.human_type2_list().await {
+                Ok(type2) if type2.get("code").and_then(serde_json::Value::as_i64) == Some(0) => {
+                    if let Some(list) = type2.pointer("/data/type_list") {
+                        archive_pre["data"]["type_list_v2"] = list.clone();
+                    }
+                }
+                Ok(type2) => warn!(response = %type2, "获取 B 站新版分区列表返回异常"),
+                Err(error) => warn!(%error, "获取 B 站新版分区列表失败"),
+            }
+
+            return Ok(Json(archive_pre));
         }
     }
 

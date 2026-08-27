@@ -12,9 +12,9 @@ use async_trait::async_trait;
 use flate2::read::GzDecoder;
 use regex::Regex;
 use reqwest::header::{COOKIE, HeaderMap, HeaderValue, ORIGIN, REFERER, USER_AGENT};
-use tracing::debug;
+use tracing::{debug, warn};
 
-use crate::codec::protobuf::{ProtoReader, ProtoWriter};
+use crate::codec::protobuf::{ProtoReader, ProtoValue, ProtoWriter};
 use crate::error::{DanmakuError, Result};
 use crate::message::{ChatMessage, DEFAULT_COLOR, DanmakuEvent};
 use crate::protocols::{ConnectionInfo, DecodeResult, HeartbeatConfig, Platform, PlatformContext};
@@ -222,16 +222,14 @@ impl Douyin {
     /// Fields: 1=seqId, 2=logId, 7=payloadType, 8=payload
     fn parse_push_frame(data: &[u8]) -> Option<(u64, Vec<u8>, String)> {
         let mut reader = ProtoReader::new(data);
-        let fields = reader.parse_all();
+        let fields = reader.parse_all_strict()?;
 
         let log_id = fields.get(&2)?.first()?.as_u64()?;
-        let payload_type = fields
-            .get(&7)
-            .and_then(|v| v.first())
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let payload = fields.get(&8)?.first()?.as_bytes()?.to_vec();
+        let payload_type = match fields.get(&7).and_then(|v| v.first()) {
+            Some(value) => value.as_str()?.to_string(),
+            None => String::new(),
+        };
+        let payload = value_bytes(fields.get(&8)?.first()?)?;
 
         Some((log_id, payload, payload_type))
     }
@@ -240,50 +238,36 @@ impl Douyin {
     /// Fields: 1=messagesList, 5=internalExt, 9=needAck
     fn parse_response(data: &[u8]) -> Option<(Vec<(String, Vec<u8>)>, bool, String)> {
         let mut reader = ProtoReader::new(data);
-        let fields = reader.parse_all();
+        let fields = reader.parse_all_strict()?;
 
         let mut messages = Vec::new();
 
         // Parse messages list (field 1, repeated)
         if let Some(msg_list) = fields.get(&1) {
             for msg_value in msg_list {
-                if let Some(msg_bytes) = msg_value.as_bytes() {
-                    // Parse individual message
-                    // Fields: 1=method, 2=payload
-                    let mut msg_reader = ProtoReader::new(msg_bytes);
-                    let msg_fields = msg_reader.parse_all();
+                let msg_bytes = value_bytes(msg_value)?;
+                // Parse individual message (fields: 1=method, 2=payload).
+                let mut msg_reader = ProtoReader::new(&msg_bytes);
+                let msg_fields = msg_reader.parse_all_strict()?;
+                let method = msg_fields.get(&1)?.first()?.as_str()?.to_string();
+                let payload = match msg_fields.get(&2).and_then(|values| values.first()) {
+                    Some(value) => value_bytes(value)?,
+                    None => Vec::new(),
+                };
 
-                    let method = msg_fields
-                        .get(&1)
-                        .and_then(|v| v.first())
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    let payload = msg_fields
-                        .get(&2)
-                        .and_then(|v| v.first())
-                        .and_then(|v| v.as_bytes())
-                        .unwrap_or(&[])
-                        .to_vec();
-
-                    messages.push((method, payload));
-                }
+                messages.push((method, payload));
             }
         }
 
-        let need_ack = fields
-            .get(&9)
-            .and_then(|v| v.first())
-            .and_then(|v| v.as_u64())
-            .map(|v| v != 0)
-            .unwrap_or(false);
+        let need_ack = match fields.get(&9).and_then(|v| v.first()) {
+            Some(value) => value.as_u64()? != 0,
+            None => false,
+        };
 
-        let internal_ext = fields
-            .get(&5)
-            .and_then(|v| v.first())
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+        let internal_ext = match fields.get(&5).and_then(|v| v.first()) {
+            Some(value) => value.as_str()?.to_string(),
+            None => String::new(),
+        };
 
         Some((messages, need_ack, internal_ext))
     }
@@ -292,7 +276,7 @@ impl Douyin {
     /// Fields: 2=user(3=nickName), 3=content
     fn parse_chat_message(data: &[u8]) -> Option<(String, String)> {
         let mut reader = ProtoReader::new(data);
-        let fields = reader.parse_all();
+        let fields = reader.parse_all_strict()?;
 
         let content = fields
             .get(&3)
@@ -304,10 +288,10 @@ impl Douyin {
         let name = fields
             .get(&2)
             .and_then(|v| v.first())
-            .and_then(|v| v.as_bytes())
+            .and_then(value_bytes)
             .and_then(|user_bytes| {
-                let mut user_reader = ProtoReader::new(user_bytes);
-                let user_fields = user_reader.parse_all();
+                let mut user_reader = ProtoReader::new(&user_bytes);
+                let user_fields = user_reader.parse_all_strict()?;
                 user_fields
                     .get(&3) // nickName
                     .and_then(|v| v.first())
@@ -326,6 +310,17 @@ impl Douyin {
         writer.write_string(7, "ack");
         writer.write_bytes(8, internal_ext.as_bytes());
         writer.into_buffer()
+    }
+}
+
+/// `ProtoReader` keeps printable length-delimited values as strings. For
+/// protobuf fields whose type is bytes, accept either representation while
+/// retaining strict structural validation of the surrounding message.
+fn value_bytes(value: &ProtoValue) -> Option<Vec<u8>> {
+    match value {
+        ProtoValue::Bytes(bytes) => Some(bytes.clone()),
+        ProtoValue::String(string) => Some(string.as_bytes().to_vec()),
+        _ => None,
     }
 }
 
@@ -470,31 +465,29 @@ impl Platform for Douyin {
         let mut events = Vec::new();
         let mut ack_data = None;
 
-        // Parse PushFrame
-        if let Some((log_id, payload, _payload_type)) = Self::parse_push_frame(msg) {
-            // Decompress payload
-            if let Ok(decompressed) = Self::decompress_gzip(&payload) {
-                // Parse Response
-                if let Some((messages, need_ack, internal_ext)) =
-                    Self::parse_response(&decompressed)
-                {
-                    // Build ACK if needed
-                    if need_ack {
-                        ack_data = Some(Self::build_ack(log_id, &internal_ext));
-                    }
+        let (log_id, payload, _payload_type) = Self::parse_push_frame(msg)
+            .ok_or_else(|| DanmakuError::Decode("invalid Douyin PushFrame".to_string()))?;
+        let decompressed = Self::decompress_gzip(&payload)?;
+        let (messages, need_ack, internal_ext) = Self::parse_response(&decompressed)
+            .ok_or_else(|| DanmakuError::Decode("invalid Douyin Response".to_string()))?;
 
-                    // Process messages
-                    for (method, msg_payload) in messages {
-                        if method == "WebcastChatMessage" {
-                            if let Some((name, content)) = Self::parse_chat_message(&msg_payload) {
-                                let mut chat = ChatMessage::new(content).with_color(DEFAULT_COLOR);
-                                if !name.is_empty() {
-                                    chat = chat.with_name(name);
-                                }
-                                events.push(DanmakuEvent::Chat(chat));
-                            }
-                        }
+        if need_ack {
+            ack_data = Some(Self::build_ack(log_id, &internal_ext));
+        }
+
+        for (method, msg_payload) in messages {
+            if method == "WebcastChatMessage" {
+                if let Some((name, content)) = Self::parse_chat_message(&msg_payload) {
+                    let mut chat = ChatMessage::new(content).with_color(DEFAULT_COLOR);
+                    if !name.is_empty() {
+                        chat = chat.with_name(name);
                     }
+                    events.push(DanmakuEvent::Chat(chat));
+                } else {
+                    warn!(
+                        payload_len = msg_payload.len(),
+                        "failed to decode Douyin WebcastChatMessage"
+                    );
                 }
             }
         }
@@ -510,6 +503,40 @@ impl Platform for Douyin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+    use std::io::Write;
+
+    fn push_frame(method: &str, payload: &[u8], need_ack: bool) -> Vec<u8> {
+        let mut message = ProtoWriter::new();
+        message.write_string(1, method);
+        message.write_bytes(2, payload);
+
+        let mut response = ProtoWriter::new();
+        response.write_bytes(1, &message.into_buffer());
+        response.write_string(5, "internal_ext");
+        response.write_varint_field(9, u64::from(need_ack));
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&response.into_buffer()).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let mut push = ProtoWriter::new();
+        push.write_varint_field(2, 42);
+        push.write_string(7, "msg");
+        push.write_bytes(8, &compressed);
+        push.into_buffer()
+    }
+
+    fn chat_payload(name: &str, content: &str) -> Vec<u8> {
+        let mut user = ProtoWriter::new();
+        user.write_string(3, name);
+
+        let mut chat = ProtoWriter::new();
+        chat.write_bytes(2, &user.into_buffer());
+        chat.write_string(3, content);
+        chat.into_buffer()
+    }
 
     #[test]
     fn test_extract_room_id() {
@@ -562,5 +589,46 @@ mod tests {
         assert_eq!(headers[REFERER], "https://live.douyin.com/123");
         assert_eq!(headers[COOKIE], "ttwid=test;");
         assert_eq!(headers[ORIGIN], "https://live.douyin.com");
+    }
+
+    #[test]
+    fn decode_chat_message_and_ack() {
+        let result = Douyin::new()
+            .decode_message(&push_frame(
+                "WebcastChatMessage",
+                &chat_payload("测试用户", "测试弹幕"),
+                true,
+            ))
+            .unwrap();
+
+        assert_eq!(result.events.len(), 1);
+        assert!(result.ack.is_some());
+        match &result.events[0] {
+            DanmakuEvent::Chat(chat) => {
+                assert_eq!(chat.content, "测试弹幕");
+                assert_eq!(chat.name.as_deref(), Some("测试用户"));
+            }
+            event => panic!("expected chat event, got {event:?}"),
+        }
+    }
+
+    #[test]
+    fn non_chat_message_is_a_valid_empty_result() {
+        let result = Douyin::new()
+            .decode_message(&push_frame("WebcastLikeMessage", b"ignored", false))
+            .unwrap();
+        assert!(result.events.is_empty());
+        assert!(result.ack.is_none());
+    }
+
+    #[test]
+    fn malformed_push_frame_and_gzip_are_errors() {
+        assert!(Douyin::new().decode_message(b"not protobuf").is_err());
+
+        let mut push = ProtoWriter::new();
+        push.write_varint_field(2, 42);
+        push.write_string(7, "msg");
+        push.write_bytes(8, b"not gzip");
+        assert!(Douyin::new().decode_message(&push.into_buffer()).is_err());
     }
 }

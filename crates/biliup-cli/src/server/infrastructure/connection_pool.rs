@@ -108,4 +108,41 @@ mod tests {
             "migration must not pick an administrator implicitly"
         );
     }
+
+    #[tokio::test]
+    async fn tid_v2_migration_preserves_existing_upload_templates() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "INSERT INTO uploadstreamers (template_name, title, tid, tags) VALUES ('legacy', 'keep me', 171, '[]')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("ALTER TABLE uploadstreamers DROP COLUMN tid_v2")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 4")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+
+        let upgraded = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let row: (String, i64, Option<i64>) = sqlx::query_as(
+            "SELECT title, tid, tid_v2 FROM uploadstreamers WHERE template_name = 'legacy'",
+        )
+        .fetch_one(&upgraded)
+        .await
+        .unwrap();
+
+        assert_eq!(row, ("keep me".to_string(), 171, None));
+    }
 }

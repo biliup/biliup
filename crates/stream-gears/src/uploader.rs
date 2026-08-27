@@ -74,6 +74,7 @@ pub struct StudioPre {
     limit: usize,
     title: String,
     tid: u16,
+    tid_v2: Option<u32>,
     tag: String,
     copyright: u8,
     source: String,
@@ -111,6 +112,7 @@ pub async fn upload(
         limit,
         title,
         tid,
+        tid_v2,
         tag,
         copyright,
         source,
@@ -156,6 +158,7 @@ pub async fn upload(
         .source(source)
         .tag(tag)
         .tid(tid)
+        .maybe_tid_v2(tid_v2)
         .title(title)
         .videos(videos)
         .dolby(dolby)

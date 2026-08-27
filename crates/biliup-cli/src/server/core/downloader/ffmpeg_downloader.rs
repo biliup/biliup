@@ -25,6 +25,10 @@ pub struct FfmpegDownloader {
     pub downloader_type: DownloaderType,
 }
 
+fn is_complete_ffmpeg_exit(status_code: Option<i32>) -> bool {
+    matches!(status_code, Some(0) | Some(255))
+}
+
 impl FfmpegDownloader {
     /// 创建新的FFmpeg下载器实例
     ///
@@ -210,8 +214,19 @@ impl FfmpegDownloader {
         let child = cmd.spawn().change_context(AppError::Unknown)?;
 
         let status = spawn_log(child, &self.process_handle).await?;
-        // 退出时，重命名文件
         let part_file = format!("{}.part", output_file.display());
+        let status_code = status.code();
+        if !is_complete_ffmpeg_exit(status_code) {
+            // A cancellation/kill can leave a partial MP4/FLV without a
+            // trailer. Never publish it as a completed segment or enqueue it
+            // for upload; the next retry will start a fresh file.
+            let _ = tokio::fs::remove_file(&part_file).await;
+            return Ok(DownloadStatus::Error(format!(
+                "FFmpeg error: {status_code:?}"
+            )));
+        }
+
+        // 退出时，重命名完整文件
         tokio::fs::rename(&part_file, &output_file)
             .await
             .change_context(AppError::Custom(String::from("退出时，重命名文件")))?;
@@ -226,7 +241,7 @@ impl FfmpegDownloader {
             next_file_path: None,
         }));
         // 根据退出码判断状态
-        match status.code() {
+        match status_code {
             Some(0) => Ok(DownloadStatus::SegmentCompleted),
             Some(255) => Ok(DownloadStatus::StreamEnded),
             err => Ok(DownloadStatus::Error(format!("FFmpeg error: {err:?}"))),
@@ -441,6 +456,14 @@ mod tests {
 
     fn internal() -> FfmpegDownloader {
         FfmpegDownloader::new(Vec::new(), DownloaderType::FfmpegInternal)
+    }
+
+    #[test]
+    fn only_successful_or_stream_end_exits_publish_a_segment() {
+        assert!(is_complete_ffmpeg_exit(Some(0)));
+        assert!(is_complete_ffmpeg_exit(Some(255)));
+        assert!(!is_complete_ffmpeg_exit(None));
+        assert!(!is_complete_ffmpeg_exit(Some(1)));
     }
 
     #[test]

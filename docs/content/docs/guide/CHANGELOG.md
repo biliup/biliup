@@ -19,6 +19,21 @@ top = false
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## Unreleased（当前 master）
+### 投稿与录制
+- 💡 feat(#1662): 投稿模板、旧版配置导入、Web UI、CLI 和 Python/stream-gears 上传入口支持可选新版分区 `tid_v2`，投稿时序列化为 B 站要求的 `human_type2`。稿件详情中的 `human_type2: {id, ...}` 也可以被正确读取；未配置时不会发送该字段。
+- 💡 feat(#1650): 斗鱼增加 `douyu_codec: h264|h265`。H.265 模式优先使用 `player_1` 直链，不可用时回退 H.264；原生 FLV 下载器支持斗鱼 HEVC codec id 12，并在分段时重新注入元数据、AAC 和视频序列头。
+- 🔧 fix(#1652): 抖音 PushFrame、gzip、Response 解码失败改为显式错误；损坏的聊天消息会跳过并告警，重复解码错误采用限频告警，避免空弹幕文件掩盖协议变化。
+- 🔧 fix(#1617): 命令行上传在最终投稿前保留断点元数据；边录边传失败时保存 `data/pending_uploads/` 清单。账号恢复后可使用相同参数或 `retry-upload` 重试投稿，成功后自动清理断点。
+- 🔧 fix(#1622): 请求 MP4 输出时自动切换到 FFmpeg 有效 remux，避免仅修改扩展名造成“没有可用视频流”；原生 stream-gears 仍保留源容器输出。
+- 🔧 fix(#1620, #1651): HLS 清单出现媒体序号跳号时自动切段；原生 FLV 检测到明显时间戳回退时丢弃跨断流缓存，并在下一个关键帧切换新文件，避免生成内部时间戳跳变的稿件。
+- 🔧 fix(#1647): B 站播放信息解析不再假设第一个 stream/format/codec 一定可用，会遍历接口返回的候选项并选择有效流。
+- 🔧 fix(#1655, #1657, #1651): FFmpeg 被取消或异常退出时不再把未完成的 `.part` 文件发布为可上传分段，避免虎牙/抖音短片段和损坏容器进入后续流程。
+- 💡 feat(#1619): `biliup server --background` 在后台启动并脱离终端；也可继续使用 nohup 或 systemd。启用 Web 认证后，管理员密码在首次访问时设置。
+- 💡 feat(#1618): Web UI 用户管理新增“修改 Web 密码”，修改后当前会话失效，需要使用新密码重新登录。
+
+详细配置示例见 [`public/config.yaml`](https://github.com/biliup/biliup/blob/master/public/config.yaml) 和 [`public/config.toml`](https://github.com/biliup/biliup/blob/master/public/config.toml)。
+
 ## 1.2.1
 **Full Changelog**:[v1.2.0...v1.2.1](https://github.com/biliup/biliup/compare/v1.2.0...v1.2.1)
 

@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react'
 import {
+  proxy,
   requestDelete,
   sendRequest,
 } from '../lib/api-streamer'
@@ -35,6 +36,8 @@ const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
   const { biliUsers: list } = useBiliUsers()
   const [modalVisible, setVisible] = useState(false)
   const [confirmLoading, setConfirmLoading] = useState(false)
+  const [passwordVisible, setPasswordVisible] = useState(false)
+  const [passwordLoading, setPasswordLoading] = useState(false)
   const { width } = useWindowSize()
   const showDialog = () => {
     setVisible(true)
@@ -71,6 +74,37 @@ const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
   const handleOk = async () => {
     let values = await api.current?.validate()
     await addUser(values?.value)
+  }
+  const passwordApi = useRef<FormApi>()
+  const handlePasswordOk = async () => {
+    const values = await passwordApi.current?.validate()
+    if (!values) return
+    setPasswordLoading(true)
+    try {
+      await proxy('/v1/users/password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
+      })
+      Toast.success('密码修改成功，请重新登录')
+      setPasswordVisible(false)
+      window.location.assign('/login')
+    } catch (e: any) {
+      let message = e.message
+      try {
+        const body = JSON.parse(message)
+        message = body.message || body.error || message
+      } catch {
+        // Keep the plain response text.
+      }
+      Notification.error({
+        title: '密码修改失败',
+        content: <Typography.Paragraph style={{ maxWidth: 450 }}>{message}</Typography.Paragraph>,
+        style: { width: 'min-content' },
+      })
+    } finally {
+      setPasswordLoading(false)
+    }
   }
   const handleCancel = () => {
     setVisible(false)
@@ -121,7 +155,10 @@ const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
       visible={visible}
       width={Math.min(448, width ?? Number.MIN_VALUE)}
       footer={
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <Button onClick={() => setPasswordVisible(true)} theme="light">
+            修改 Web 密码
+          </Button>
           <Button
             onClick={showDialog}
             icon={<IconPlusCircle size="large" />}
@@ -182,6 +219,36 @@ const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
           </RadioGroup>
         </Row>
         <Row>{panel}</Row>
+      </Modal>
+
+      <Modal
+        title="修改 Web 密码"
+        visible={passwordVisible}
+        onOk={handlePasswordOk}
+        onCancel={() => setPasswordVisible(false)}
+        confirmLoading={passwordLoading}
+        closeOnEsc={true}
+      >
+        <Form getFormApi={formApi => (passwordApi.current = formApi)}>
+          <Form.Input
+            field="current_password"
+            label="当前密码"
+            type="password"
+            rules={[{ required: true, message: '请输入当前密码' }]}
+          />
+          <Form.Input
+            field="new_password"
+            label="新密码"
+            type="password"
+            rules={[{ required: true, message: '请输入新密码' }]}
+          />
+          <Form.Input
+            field="confirm_password"
+            label="确认新密码"
+            type="password"
+            rules={[{ required: true, message: '请再次输入新密码' }]}
+          />
+        </Form>
       </Modal>
     </SideSheet>
   )

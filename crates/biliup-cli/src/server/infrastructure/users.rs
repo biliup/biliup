@@ -10,6 +10,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task;
 
 const MAX_CONCURRENT_PASSWORD_TASKS: usize = 4;
+pub const MAX_PASSWORD_BYTES: usize = 1024;
 static PASSWORD_TASKS: OnceLock<Arc<Semaphore>> = OnceLock::new();
 
 async fn acquire_password_task_permit() -> OwnedSemaphorePermit {
@@ -119,7 +120,6 @@ impl Backend {
     pub async fn create_user(&self, creds: Credentials) -> Result<User, CreateUserError> {
         // 创建新用户账户
         // 验证输入
-        const MAX_PASSWORD_BYTES: usize = 1024;
         if creds.username != "biliup"
             || creds.password.is_empty()
             || creds.password.len() > MAX_PASSWORD_BYTES
@@ -179,6 +179,46 @@ impl Backend {
 
         Ok(user)
     }
+
+    /// Verify the current administrator password and atomically replace its
+    /// Argon2 hash.  The expensive verification and hashing work is bounded
+    /// and runs off the async executor, just like login/bootstrap.
+    pub async fn change_password(
+        &self,
+        user_id: i64,
+        current_password: String,
+        new_password: String,
+    ) -> Result<bool, Error> {
+        let user: Option<User> =
+            sqlx::query_as("select * from configuration where id = ? and key = 'biliup'")
+                .bind(user_id)
+                .fetch_optional(&self.db)
+                .await?;
+        let Some(user) = user else {
+            return Ok(false);
+        };
+
+        let permit = acquire_password_task_permit().await;
+        let valid = task::spawn_blocking(move || {
+            let _permit = permit;
+            verify_password(&current_password, &user.value).is_ok()
+        })
+        .await?;
+        if !valid {
+            return Ok(false);
+        }
+
+        let permit = acquire_password_task_permit().await;
+        let (password_hash, _permit) =
+            task::spawn_blocking(move || (generate_hash(new_password), permit)).await?;
+        let result =
+            sqlx::query("UPDATE configuration SET value = ? WHERE id = ? AND key = 'biliup'")
+                .bind(password_hash)
+                .bind(user_id)
+                .execute(&self.db)
+                .await?;
+        Ok(result.rows_affected() == 1)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -221,7 +261,10 @@ impl AuthnBackend for Backend {
         &self,
         creds: Self::Credentials,
     ) -> Result<Option<Self::User>, Self::Error> {
-        if creds.username != "biliup" || creds.password.is_empty() || creds.password.len() > 1024 {
+        if creds.username != "biliup"
+            || creds.password.is_empty()
+            || creds.password.len() > MAX_PASSWORD_BYTES
+        {
             return Ok(None);
         }
         let user: Option<Self::User> = sqlx::query_as("select * from configuration where key = ? ")
@@ -316,6 +359,55 @@ mod tests {
                 .await
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn administrator_password_can_be_changed_only_with_the_current_password() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let backend = Backend::new(pool);
+        let user = backend
+            .create_user(credentials("old password"))
+            .await
+            .unwrap();
+
+        assert!(
+            !backend
+                .change_password(user.id, "wrong password".into(), "new password".into())
+                .await
+                .unwrap()
+        );
+        assert!(
+            backend
+                .authenticate(credentials("old password"))
+                .await
+                .unwrap()
+                .is_some()
+        );
+
+        assert!(
+            backend
+                .change_password(user.id, "old password".into(), "new password".into())
+                .await
+                .unwrap()
+        );
+        assert!(
+            backend
+                .authenticate(credentials("old password"))
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            backend
+                .authenticate(credentials("new password"))
+                .await
+                .unwrap()
+                .is_some()
         );
     }
 

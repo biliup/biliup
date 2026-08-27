@@ -1,4 +1,5 @@
 use crate::UploadLine;
+use crate::server::common::upload::PendingSubmission;
 use crate::server::errors::{AppError, AppResult};
 use crate::upload_lock::UploadLock;
 use biliup::client::StatelessClient;
@@ -108,6 +109,57 @@ pub async fn renew(user_cookie: PathBuf, proxy: Option<&str>) -> AppResult<()> {
     Ok(())
 }
 
+/// Retry a server-side pending submission after refreshing the Bilibili
+/// account credentials.  The manifest contains only the already-uploaded
+/// video metadata and can therefore submit without reading the original video
+/// bytes again.
+pub async fn retry_pending_upload(
+    manifest: PathBuf,
+    user_cookie: PathBuf,
+    proxy: Option<&str>,
+) -> AppResult<()> {
+    let text = std::fs::read_to_string(&manifest).change_context_lazy(|| {
+        AppError::Custom(format!("open pending upload: {}", manifest.display()))
+    })?;
+    let pending: PendingSubmission = serde_json::from_str(&text).change_context_lazy(|| {
+        AppError::Custom(format!("parse pending upload: {}", manifest.display()))
+    })?;
+
+    // When the global CLI option is left at its default, prefer the template's
+    // original cookie reference.  An explicit --user-cookie always wins.
+    let cookie_file = if user_cookie == PathBuf::from("cookies.json") {
+        PathBuf::from(&pending.cookie_file)
+    } else {
+        user_cookie
+    };
+    let bili = login_by_cookies(cookie_file, proxy).await?;
+    match pending.submit_api.as_deref() {
+        Some(api) if api.eq_ignore_ascii_case("web") => bili
+            .submit_by_web(&pending.studio, proxy)
+            .await
+            .change_context_lazy(|| AppError::Unknown)?,
+        Some(api)
+            if api.eq_ignore_ascii_case("b-cut-android")
+                || api.eq_ignore_ascii_case("bcutandroid")
+                || api.eq_ignore_ascii_case("bcut_android") =>
+        {
+            bili.submit_by_bcut_android(&pending.studio, proxy)
+                .await
+                .change_context_lazy(|| AppError::Unknown)?
+        }
+        _ => bili
+            .submit_by_app(&pending.studio, proxy)
+            .await
+            .change_context_lazy(|| AppError::Unknown)?,
+    };
+
+    std::fs::remove_file(&manifest).change_context_lazy(|| {
+        AppError::Custom(format!("remove pending upload: {}", manifest.display()))
+    })?;
+    info!(manifest = %manifest.display(), "Pending Bilibili submission completed");
+    Ok(())
+}
+
 pub async fn upload_by_command(
     mut studio: Studio,
     user_cookie: PathBuf,
@@ -148,6 +200,7 @@ pub async fn upload_by_command(
             .await
             .change_context_lazy(|| AppError::Unknown)?,
     };
+    clear_upload_checkpoint(&video_path);
 
     Ok(())
 }
@@ -201,6 +254,7 @@ pub async fn upload_by_config(
                 .await
                 .change_context_lazy(|| AppError::Unknown)?,
         };
+        clear_upload_checkpoint(&paths);
     }
     Ok(())
 }
@@ -237,6 +291,7 @@ pub async fn append(
             .await
             .change_context_lazy(|| AppError::Unknown)?,
     };
+    clear_upload_checkpoint(&video_path);
     // studio.edit(&login_info).await?;
     Ok(())
 }
@@ -383,25 +438,7 @@ pub async fn upload(
 ) -> AppResult<Vec<Video>> {
     info!("number of concurrent futures: {limit}");
 
-    // 生成断点续传文件路径（基于视频列表的哈希）
-    let checkpoint_filename = format!(
-        "biliup_checkpoint_{}.json",
-        video_path
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect::<Vec<_>>()
-            .join("_")
-            .chars()
-            .fold(0u64, |acc, c| acc.wrapping_mul(31).wrapping_add(c as u64))
-    );
-
-    // 使用平台相关的本地数据目录，Windows 下是 %LOCALAPPDATA%，Linux/macOS 下是 /tmp
-    let checkpoint_path = if let Some(data_dir) = dirs::data_local_dir() {
-        data_dir.join(checkpoint_filename)
-    } else {
-        // 如果无法获取数据目录，回退到临时目录
-        std::env::temp_dir().join(checkpoint_filename)
-    };
+    let checkpoint_path = upload_checkpoint_path(video_path);
 
     // 尝试加载已有的断点续传数据
     let mut checkpoint = UploadCheckpoint::load(&checkpoint_path).unwrap_or_else(|| {
@@ -572,13 +609,68 @@ pub async fn upload(
         videos.push(video);
     }
 
-    // 上传完成后删除断点续传文件
-    if checkpoint_path.exists() {
-        let _ = std::fs::remove_file(&checkpoint_path);
-        info!("All files uploaded successfully, checkpoint removed");
-    }
+    // Keep the checkpoint until the final submission/edit succeeds.  If the
+    // account expires after Bilibili accepts the file bytes, rerunning the
+    // same command can reuse the remote `Video` metadata instead of uploading
+    // the large files again.
+    info!(
+        checkpoint = %checkpoint_path.display(),
+        "All files uploaded; checkpoint retained until submission succeeds"
+    );
 
     Ok(videos)
+}
+
+fn upload_checkpoint_path(video_path: &[PathBuf]) -> PathBuf {
+    // Generate a stable path from the ordered input list.  This is shared by
+    // upload and the post-submit cleanup so a failed submit remains recoverable.
+    let checkpoint_filename = format!(
+        "biliup_checkpoint_{}.json",
+        video_path
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect::<Vec<_>>()
+            .join("_")
+            .chars()
+            .fold(0u64, |acc, c| acc.wrapping_mul(31).wrapping_add(c as u64))
+    );
+
+    dirs::data_local_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join(checkpoint_filename)
+}
+
+fn clear_upload_checkpoint(video_path: &[PathBuf]) {
+    let checkpoint_path = upload_checkpoint_path(video_path);
+    if checkpoint_path.exists() {
+        match std::fs::remove_file(&checkpoint_path) {
+            Ok(()) => {
+                info!(checkpoint = %checkpoint_path.display(), "Upload checkpoint removed after submission")
+            }
+            Err(error) => {
+                warn!(checkpoint = %checkpoint_path.display(), %error, "Failed to remove upload checkpoint")
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod checkpoint_tests {
+    use super::*;
+
+    #[test]
+    fn upload_checkpoint_round_trips_remote_video_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("checkpoint.json");
+        let source = PathBuf::from("recording.flv");
+        let mut checkpoint = UploadCheckpoint::new();
+        checkpoint.add_video(&source, Video::new("remote-file"));
+        checkpoint.save(&path).unwrap();
+
+        let loaded = UploadCheckpoint::load(&path).unwrap();
+        assert!(loaded.is_uploaded(&source));
+        assert_eq!(loaded.videos[0].filename, "remote-file");
+    }
 }
 
 pub async fn login_by_password(credential: Credential) -> AppResult<LoginInfo> {

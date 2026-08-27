@@ -40,3 +40,4 @@ bon = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 async-trait = { workspace = true }
 error-stack = { workspace = true }
+libc = "0.2.174"

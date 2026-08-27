@@ -21,11 +21,12 @@ use error_stack::ResultExt;
 use futures::StreamExt;
 use futures::stream::Inspect;
 use ormlite::Insert;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Instant;
 use tokio::pin;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 // 辅助结构体
 struct UploadContext {
@@ -33,6 +34,55 @@ struct UploadContext {
     line: Line,
     threads: usize,
     client: StatelessClient,
+}
+
+/// Metadata required to retry a submission after file bytes were accepted but
+/// the account expired before the final add/edit request.  This deliberately
+/// contains no credentials, only the cookie-file reference supplied by the
+/// template and the already-uploaded Bilibili video metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingSubmission {
+    pub cookie_file: String,
+    pub submit_api: Option<String>,
+    pub studio: Studio,
+}
+
+fn pending_submission_path(ctx: &Context) -> PathBuf {
+    PathBuf::from("data/pending_uploads").join(format!("{}.json", ctx.id()))
+}
+
+fn save_pending_submission(ctx: &Context, upload_config: &UploadStreamer, studio: &Studio) {
+    let path = pending_submission_path(ctx);
+    let result = (|| -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let pending = PendingSubmission {
+            cookie_file: upload_config
+                .user_cookie
+                .clone()
+                .unwrap_or_else(|| "cookies.json".to_string()),
+            submit_api: ctx.config().submit_api.clone(),
+            studio: studio.clone(),
+        };
+        let data = serde_json::to_vec_pretty(&pending)
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        std::fs::write(&path, data)
+    })();
+    if let Err(error) = result {
+        warn!(path = %path.display(), %error, "failed to save pending Bilibili submission");
+    } else {
+        info!(path = %path.display(), "pending Bilibili submission saved for retry");
+    }
+}
+
+fn clear_pending_submission(ctx: &Context) {
+    let path = pending_submission_path(ctx);
+    if let Err(error) = std::fs::remove_file(&path)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        warn!(path = %path.display(), %error, "failed to remove pending Bilibili submission");
+    }
 }
 
 #[derive(Default)]
@@ -76,7 +126,11 @@ where
         )
         .await?;
         let submit_api = ctx.config().submit_api.clone();
-        submit_to_bilibili(&upload_context.bilibili, &studio, submit_api.as_deref()).await?;
+        save_pending_submission(ctx, upload_config, &studio);
+        match submit_to_bilibili(&upload_context.bilibili, &studio, submit_api.as_deref()).await {
+            Ok(_) => clear_pending_submission(ctx),
+            Err(error) => return Err(error),
+        }
     }
 
     // 4. 执行后处理
@@ -315,6 +369,7 @@ pub(crate) async fn build_studio(
         ))
         .tag(upload_config.tags.join(","))
         .maybe_tid(upload_config.tid)
+        .maybe_tid_v2(upload_config.tid_v2)
         .title(recorder.format_title())
         .videos(videos)
         .dolby(upload_config.dolby.unwrap_or_default())
@@ -449,6 +504,25 @@ mod tests {
         let event = SegmentInfo::new(video.clone(), Some(danmaku.clone()), None, 0);
 
         assert_eq!(segment_paths(&event), vec![video, danmaku]);
+    }
+
+    #[test]
+    fn pending_submission_manifest_contains_no_cookie_secret() {
+        let studio: Studio = serde_json::from_value(serde_json::json!({
+            "title": "fixture",
+            "tid": 171,
+            "videos": [{"filename": "remote-file", "title": "fixture", "desc": ""}]
+        }))
+        .unwrap();
+        let pending = PendingSubmission {
+            cookie_file: "data/account.json".into(),
+            submit_api: Some("web".into()),
+            studio,
+        };
+        let json = serde_json::to_string(&pending).unwrap();
+        assert!(json.contains("remote-file"));
+        assert!(json.contains("data/account.json"));
+        assert!(!json.contains("SESSDATA"));
     }
 
     const LIVE_URL: &str = "https://live.douyin.com/123456";

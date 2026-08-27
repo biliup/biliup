@@ -24,6 +24,18 @@ const Douyu: React.FC<Props> = props => {
     <>
       <Collapse.Panel header="斗鱼" itemKey="douyu">
         <Form.Select
+          field="douyu_codec"
+          label="视频编码（douyu_codec）"
+          placeholder="h264（默认）"
+          extraText="可选 H.265；直播间不提供时自动回退到 H.264。"
+          style={{ width: '100%' }}
+          fieldStyle={{ alignSelf: 'stretch', padding: 0 }}
+          showClear
+        >
+          <Select.Option value="h264">H.264（默认）</Select.Option>
+          <Select.Option value="h265">H.265</Select.Option>
+        </Form.Select>
+        <Form.Select
           allowCreate={true}
           filter
           field="douyu_rate"

@@ -195,8 +195,17 @@ pub struct DouyuOptions {
     pub cdn: String,
     pub force_hs: bool,
     pub rate: u32,
+    pub codec: DouyuCodec,
     pub disable_interactive_game: bool,
     pub danmaku: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DouyuCodec {
+    #[default]
+    H264,
+    H265,
 }
 
 impl Default for DouyuOptions {
@@ -205,6 +214,7 @@ impl Default for DouyuOptions {
             cdn: "hw-h5".to_string(),
             force_hs: false,
             rate: 0,
+            codec: DouyuCodec::H264,
             disable_interactive_game: false,
             danmaku: false,
         }

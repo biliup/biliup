@@ -84,6 +84,7 @@ fn live_options(config: &Config) -> LiveOptions {
                 .unwrap_or_else(|| "hw-h5".to_string()),
             force_hs: config.douyu_force_hs.unwrap_or(false),
             rate: config.douyu_rate.unwrap_or(0),
+            codec: config.douyu_codec.unwrap_or_default(),
             disable_interactive_game: config.douyu_disable_interactive_game.unwrap_or(false),
             danmaku: config.douyu_danmaku.unwrap_or(false),
         },
@@ -171,13 +172,27 @@ pub fn streamer_info(stream: &LiveStream) -> StreamerInfo {
 pub fn downloader_runtime(
     config_type: Option<DownloaderType>,
     stream: &LiveStream,
+    output_format: Option<&str>,
 ) -> DownloaderRuntime {
-    let downloader_type = config_type.unwrap_or_else(|| match stream.downloader_hint {
+    let mut downloader_type = config_type.unwrap_or_else(|| match stream.downloader_hint {
         DownloaderHint::StreamGears => DownloaderType::StreamGears,
         DownloaderHint::Ffmpeg => DownloaderType::Ffmpeg,
         DownloaderHint::Streamlink => DownloaderType::Streamlink,
         DownloaderHint::YtDlp => DownloaderType::YtDlp,
     });
+
+    // The native stream-gears writer preserves the source container (FLV/TS)
+    // and cannot produce a valid MP4 merely by changing the filename.  Select
+    // FFmpeg automatically when an MP4 output was requested so the container
+    // is actually remuxed and the resulting file has a video stream.
+    if output_format.is_some_and(|format| format.eq_ignore_ascii_case("mp4"))
+        && matches!(
+            downloader_type,
+            DownloaderType::StreamGears | DownloaderType::SyncDownloader
+        )
+    {
+        downloader_type = DownloaderType::Ffmpeg;
+    }
 
     match downloader_type {
         DownloaderType::Streamlink => streamlink_runtime(stream),
@@ -312,4 +327,50 @@ pub fn danmaku_client(
     .with_detail(source.detail);
 
     Some(Arc::new(RustDanmakuClient::new(config)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::downloader_runtime;
+    use crate::server::core::downloader::{DownloaderRuntime, DownloaderType};
+    use biliup::downloader::live::{DownloaderHint, LiveStream};
+    use chrono::Utc;
+    use std::collections::HashMap;
+
+    fn stream() -> LiveStream {
+        LiveStream {
+            name: "fixture".into(),
+            url: "https://example.com/live".into(),
+            title: "fixture".into(),
+            date: Utc::now(),
+            live_cover_url: String::new(),
+            raw_stream_url: "https://example.com/live.flv".into(),
+            platform: "fixture".into(),
+            stream_headers: HashMap::new(),
+            suffix: "flv".into(),
+            danmaku: None,
+            downloader_hint: DownloaderHint::StreamGears,
+            runtime_options: None,
+        }
+    }
+
+    #[test]
+    fn mp4_output_promotes_native_stream_gears_to_ffmpeg() {
+        assert!(matches!(
+            downloader_runtime(None, &stream(), Some("mp4")),
+            DownloaderRuntime::Ffmpeg(_)
+        ));
+        assert!(matches!(
+            downloader_runtime(Some(DownloaderType::StreamGears), &stream(), Some("mp4")),
+            DownloaderRuntime::Ffmpeg(_)
+        ));
+        assert!(matches!(
+            downloader_runtime(None, &stream(), Some("flv")),
+            DownloaderRuntime::StreamGears(_)
+        ));
+        assert!(matches!(
+            downloader_runtime(Some(DownloaderType::FfmpegInternal), &stream(), Some("flv")),
+            DownloaderRuntime::Ffmpeg(_)
+        ));
+    }
 }

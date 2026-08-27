@@ -62,6 +62,8 @@ check_sourcecode: 15
 ### 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段(仅ffmpeg streamlink)时录制设置的画质
 ### 0 原画,4 蓝光4m,3 超清,2 高清
 #douyu_rate:  0
+### 斗鱼视频编码，可选 h264（默认）或 h265；没有 H.265 流时自动回退
+#douyu_codec: h264
 
 #------虎牙------#
 ### 如遇到虎牙录制卡顿可以尝试切换线路。可选以下线路
@@ -195,6 +197,7 @@ streamers:
             - https://www.panda.tv/1160340 #填写多个url时只能同时下载一个，如需多个同时下载请单独配置
         title: "{title}第一视角%Y-%m-%d{streamer}{url}" ### 自定义标题的时间格式, {title}代表当场直播间标题 {streamer}代表在本config里面设置的主播名称 {url}代表设置的该主播的第一条直播间链接
         tid: 171 ### 投稿分区码,171为电子竞技分区
+        #tid_v2: 1003 ### 可选新版投稿分区 ID（投稿字段 human_type2）
         copyright: 2 ### 1为自制
         #cover_path: /cover/up.jpg ###封面
         description: |- ### 支持strftime, {title}, {streamer}, {url}占位符。注：此处请注意缩进，确保所有文字的缩进都与"视频简介"相同或者更多。
@@ -247,7 +250,7 @@ streamers:
         #    - run: python3 path/to/mail.py ### 执行一个 Python 脚本，可以用来发送邮件等。自动发信通知脚本示例 https://biliup.github.io/biliup/Guide.html#%E4%B8%8A%E4%BC%A0%E5%AE%8C%E6%88%90%E5%90%8E%E5%8F%91%E9%80%81%E9%82%AE%E4%BB%B6%E9%80%9A%E7%9F%A5
         #    - run: sh ./run.sh ### 执行一个shell脚本，用途多样，主要调用系统内的cli工具。自动上传网盘脚本示例 https://gist.github.com/UVJkiNTQ/ae4282e8f9fe4e45b3144b57605b4178
             #- rm ### 删除文件，为默认操作
-        #format: mp4 ### 视频保存格式。如需使用mp4格式，必须切换downloader为ffmpeg或者streamlink，youtube不支持。
+        #format: mp4 ### 视频保存格式。设置 mp4 时会自动使用 FFmpeg 进行有效封装（YouTube 不支持）。
         #opt_args: ### ffmpeg参数
         #    - '-ss'
         #    - '00:00:16' # 跳过开始的16秒

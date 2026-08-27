@@ -26,6 +26,10 @@ fn playlist_should_refresh(playlist: &MediaPlaylist) -> bool {
     !playlist.end_list
 }
 
+fn has_sequence_gap(previous_last_segment: u64, current_segment: u64) -> bool {
+    previous_last_segment > 0 && current_segment > previous_last_segment.saturating_add(1)
+}
+
 pub async fn download(
     url: &str,
     client: &StatelessClient,
@@ -86,14 +90,26 @@ pub async fn download(
         let mut seq = pl.media_sequence;
         for segment in &pl.segments {
             if seq > previous_last_segment {
-                if (previous_last_segment > 0) && (seq > (previous_last_segment + 1)) {
-                    warn!("SEGMENT INFO SKIPPED");
+                let mut split_before_segment = false;
+                if has_sequence_gap(previous_last_segment, seq) {
+                    warn!(
+                        previous = previous_last_segment,
+                        current = seq,
+                        "HLS segment sequence gap detected; starting a new file"
+                    );
+                    // A missing media sequence means the bytes already written
+                    // cannot be made continuous with the next segment.  Split
+                    // here so timestamps and danmaku remain aligned per file.
+                    ts_file.create_new()?;
+                    splitting.reset();
+                    split_before_segment = true;
                 }
                 debug!("Yield segment");
                 if segment.discontinuity {
                     warn!("#EXT-X-DISCONTINUITY");
-                    ts_file.create_new()?;
-                    // splitting = Segment::from_seg(splitting);
+                    if !split_before_segment {
+                        ts_file.create_new()?;
+                    }
                     splitting.reset();
                 }
                 let length = download_to_file(
@@ -131,6 +147,7 @@ pub async fn download(
         last_playlist_load = Instant::now();
     }
     info!("Done...");
+    ts_file.finish();
     Ok(())
 }
 
@@ -152,6 +169,7 @@ async fn download_to_file(url: Url, client: &StatelessClient, out: &mut impl Wri
 pub struct TsFile<'a> {
     pub buf_writer: BufWriter<File>,
     pub file: LifecycleFile<'a>,
+    completed: bool,
 }
 
 impl<'a> TsFile<'a> {
@@ -160,14 +178,21 @@ impl<'a> TsFile<'a> {
         Ok(Self {
             buf_writer: Self::create(path)?,
             file,
+            completed: false,
         })
     }
 
     pub fn create_new(&mut self) -> std::io::Result<()> {
+        self.completed = true;
         self.file.rename();
         let path = self.file.create()?;
         self.buf_writer = Self::create(path)?;
+        self.completed = false;
         Ok(())
+    }
+
+    pub fn finish(&mut self) {
+        self.completed = true;
     }
 
     fn create<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<BufWriter<File>> {
@@ -188,13 +213,25 @@ impl<'a> TsFile<'a> {
 
 impl Drop for TsFile<'_> {
     fn drop(&mut self) {
-        self.file.rename()
+        if self.completed {
+            self.file.rename();
+        } else if !self.file.path.as_os_str().is_empty() {
+            if let Err(error) = std::fs::remove_file(&self.file.path)
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                warn!(path = %self.file.path.display(), %error, "failed to remove incomplete TS segment");
+            } else {
+                warn!(path = %self.file.path.display(), "discarded incomplete TS segment");
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_media_playlist, playlist_poll_interval, playlist_should_refresh};
+    use super::{
+        has_sequence_gap, parse_media_playlist, playlist_poll_interval, playlist_should_refresh,
+    };
     use m3u8_rs::MediaPlaylist;
     use reqwest::Url;
     use std::time::Duration;
@@ -232,6 +269,14 @@ mod tests {
             playlist_poll_interval(&MediaPlaylist::default()),
             Duration::from_secs(1)
         );
+    }
+
+    #[test]
+    fn sequence_gap_is_detected_without_treating_initial_sequence_as_a_gap() {
+        assert!(!has_sequence_gap(0, 100));
+        assert!(!has_sequence_gap(100, 101));
+        assert!(has_sequence_gap(100, 102));
+        assert!(!has_sequence_gap(u64::MAX, u64::MAX));
     }
 
     #[test]

@@ -47,7 +47,7 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
     TextArea,
   } = Form
   const { Text } = Typography
-  const { typeTree, isError, isLoading } = useTypeTree()
+  const { typeTree, typeTreeV2, isError, isLoading } = useTypeTree()
   const treeData = typeTree?.map((type: BiliType) => {
     return {
       ...type,
@@ -248,6 +248,15 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
           placeholder="投稿分区"
           dropdownStyle={{ maxWidth: 670 }}
           rules={[{ required: true }]}
+        />
+        <Select
+          field="tid_v2"
+          label="新版分区"
+          style={{ width: 272 }}
+          placeholder="可选新版分区"
+          optionList={typeTreeV2.map(type => ({ label: type.name, value: type.id }))}
+          filter
+          showClear
         />
         <TagInput
           max={12}

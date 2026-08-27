@@ -13,7 +13,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use tracing::{info, warn};
 
-#[derive(Serialize, Deserialize, Debug, Builder)]
+#[derive(Serialize, Deserialize, Debug, Clone, Builder)]
 #[cfg_attr(feature = "cli", derive(clap::Args))]
 pub struct Studio {
     /// 是否转载, 1-自制 2-转载
@@ -31,6 +31,16 @@ pub struct Studio {
     #[cfg_attr(feature = "cli", clap(long, default_value = "171"))]
     #[builder(default = 171)]
     pub tid: u16,
+
+    /// 新版投稿分区。B 站投稿接口字段名为 `human_type2`。
+    #[cfg_attr(feature = "cli", clap(long))]
+    #[serde(
+        default,
+        rename = "human_type2",
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_human_type2"
+    )]
+    pub tid_v2: Option<u32>,
 
     /// 视频封面
     #[cfg_attr(feature = "cli", clap(long, default_value_t))]
@@ -146,8 +156,38 @@ pub struct Studio {
     pub extra_fields: Option<HashMap<String, Value>>,
 }
 
+#[cfg(feature = "cli")]
 fn parse_extra_fields(s: &str) -> std::result::Result<HashMap<String, Value>, String> {
     serde_json::from_str(s).map_err(|e| e.to_string())
+}
+
+fn deserialize_human_type2<'de, D>(deserializer: D) -> std::result::Result<Option<u32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    let value = match value {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::Number(number)) => number.as_u64().ok_or_else(|| {
+            serde::de::Error::custom("human_type2 must be a non-negative integer")
+        })?,
+        Some(Value::Object(object)) => {
+            object.get("id").and_then(Value::as_u64).ok_or_else(|| {
+                serde::de::Error::custom(
+                    "human_type2 object must contain a non-negative integer id",
+                )
+            })?
+        }
+        Some(other) => {
+            return Err(serde::de::Error::custom(format!(
+                "human_type2 must be an integer or an object containing id, got {other}"
+            )));
+        }
+    };
+
+    u32::try_from(value)
+        .map(Some)
+        .map_err(|_| serde::de::Error::custom("human_type2 exceeds u32 range"))
 }
 
 fn default_copyright() -> u8 {
@@ -310,7 +350,7 @@ impl Archive {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct Subtitle {
     open: i8,
     lan: String,
@@ -815,6 +855,18 @@ impl BiliBili {
             .await?)
     }
 
+    /// 获取新版投稿分区列表。
+    pub async fn human_type2_list(&self) -> Result<Value> {
+        Ok(self
+            .client
+            .get("https://member.bilibili.com/x/vupre/web/archive/human/type2/list")
+            .query(&[("t", chrono::Utc::now().timestamp_millis().to_string())])
+            .send()
+            .await?
+            .json()
+            .await?)
+    }
+
     pub async fn recommend_tag(&self, subtype_id: u16, title: &str, key: &str) -> Result<Value> {
         let result: ResponseData = self
             .client
@@ -1006,7 +1058,8 @@ impl<T: Serialize> Display for ResponseData<T> {
 #[cfg(test)]
 mod archive_tests {
     use super::{
-        RawArchivePageMetadata, pagination_plan, parse_archive_page, validate_archive_page_metadata,
+        RawArchivePageMetadata, Studio, pagination_plan, parse_archive_page,
+        validate_archive_page_metadata,
     };
     use serde_json::json;
 
@@ -1026,6 +1079,55 @@ mod archive_tests {
             "ptime": 1,
             "ctime": 1
         })
+    }
+
+    #[test]
+    fn studio_serializes_tid_v2_as_human_type2() {
+        let studio: Studio = serde_json::from_value(json!({
+            "tid": 171,
+            "title": "fixture",
+            "human_type2": 1003
+        }))
+        .unwrap();
+
+        assert_eq!(studio.tid_v2, Some(1003));
+        let serialized = serde_json::to_value(studio).unwrap();
+        assert_eq!(serialized["human_type2"], 1003);
+        assert!(serialized.get("tid_v2").is_none());
+    }
+
+    #[test]
+    fn studio_omits_human_type2_when_not_configured() {
+        let studio: Studio =
+            serde_json::from_value(json!({"tid": 171, "title": "fixture"})).unwrap();
+        let serialized = serde_json::to_value(studio).unwrap();
+        assert!(serialized.get("human_type2").is_none());
+    }
+
+    #[test]
+    fn studio_reads_human_type2_object_from_archive_details() {
+        let studio: Studio = serde_json::from_value(json!({
+            "tid": 171,
+            "title": "fixture",
+            "human_type2": {"id": 2004, "name": "新版分区"}
+        }))
+        .unwrap();
+
+        assert_eq!(studio.tid_v2, Some(2004));
+        assert_eq!(serde_json::to_value(studio).unwrap()["human_type2"], 2004);
+    }
+
+    #[test]
+    fn studio_rejects_malformed_human_type2_values() {
+        for value in [json!(-1), json!(1.5), json!({"name": "missing id"})] {
+            assert!(
+                serde_json::from_value::<Studio>(json!({
+                    "tid": 171,
+                    "human_type2": value,
+                }))
+                .is_err()
+            );
+        }
     }
 
     #[test]

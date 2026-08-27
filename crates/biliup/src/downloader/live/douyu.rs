@@ -1,6 +1,6 @@
 use super::{
-    DanmakuSource, DownloaderHint, LiveError, LivePlugin, LiveRequest, LiveResult, LiveStatus,
-    LiveStream, media_ext_from_url,
+    DanmakuSource, DouyuCodec, DownloaderHint, LiveError, LivePlugin, LiveRequest, LiveResult,
+    LiveStatus, LiveStream, media_ext_from_url,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use url::{Url, form_urlencoded};
 
 const DOUYU_DEFAULT_DID: &str = "10000000000000000000000000001501";
@@ -92,6 +92,7 @@ struct DouyuLive<'a> {
     douyu_cdn: String,
     douyu_force_hs: bool,
     douyu_rate: u32,
+    douyu_codec: DouyuCodec,
     douyu_disable_interactive_game: bool,
     douyu_danmaku: bool,
     room_id: Option<String>,
@@ -113,6 +114,7 @@ impl<'a> DouyuLive<'a> {
             douyu_cdn: options.cdn,
             douyu_force_hs: options.force_hs,
             douyu_rate: options.rate,
+            douyu_codec: options.codec,
             douyu_disable_interactive_game: options.disable_interactive_game,
             douyu_danmaku: options.danmaku,
             room_id: None,
@@ -128,8 +130,17 @@ impl<'a> DouyuLive<'a> {
             return Ok(LiveStatus::Offline);
         };
         let play_info = self.get_web_play_info(&room_id).await?;
-        let raw_stream_url = format!("{}/{}", play_info.rtmp_url, play_info.rtmp_live);
-        let raw_stream_url = self.maybe_build_huos_url(raw_stream_url).await;
+        let (raw_stream_url, is_h265) = self.select_stream_url(&play_info);
+        let raw_stream_url = if is_h265 {
+            raw_stream_url
+        } else {
+            self.maybe_build_huos_url(raw_stream_url).await
+        };
+        info!(
+            name = %self.name,
+            codec = if is_h265 { "h265" } else { "h264" },
+            "selected Douyu stream codec"
+        );
 
         Ok(LiveStatus::Live {
             stream: Box::new(LiveStream {
@@ -147,6 +158,20 @@ impl<'a> DouyuLive<'a> {
                 runtime_options: None,
             }),
         })
+    }
+
+    fn select_stream_url(&self, play_info: &PlayInfo) -> (String, bool) {
+        if self.douyu_codec == DouyuCodec::H265 {
+            if let Some(url) = play_info.player_1.as_deref().filter(|url| !url.is_empty()) {
+                return (url.to_string(), true);
+            }
+            warn!(name = %self.name, "Douyu H.265 stream is unavailable, falling back to H.264");
+        }
+
+        (
+            format!("{}/{}", play_info.rtmp_url, play_info.rtmp_live),
+            false,
+        )
     }
 
     async fn maybe_build_huos_url(&self, raw_stream_url: String) -> String {
@@ -359,7 +384,15 @@ impl<'a> DouyuLive<'a> {
             ("iar", "0".to_string()),
             ("ive", "0".to_string()),
             ("rid", room_id.to_string()),
-            ("hevc", "0".to_string()),
+            (
+                "hevc",
+                if self.douyu_codec == DouyuCodec::H265 {
+                    "1"
+                } else {
+                    "0"
+                }
+                .to_string(),
+            ),
             ("fa", "0".to_string()),
             ("sov", "0".to_string()),
             ("enc_data", encrypt_key.enc_data),
@@ -723,6 +756,8 @@ struct PlayInfo {
     rtmp_url: String,
     rtmp_live: String,
     #[serde(default)]
+    player_1: Option<String>,
+    #[serde(default)]
     rtmp_cdn: String,
     #[serde(default, rename = "cdnsWithName")]
     cdns_with_name: Vec<CdnInfo>,
@@ -757,6 +792,7 @@ mod tests {
             douyu_cdn: DOUYU_HS_CDN.to_string(),
             douyu_force_hs: true,
             douyu_rate: 0,
+            douyu_codec: DouyuCodec::H264,
             douyu_disable_interactive_game: false,
             douyu_danmaku: false,
             room_id: None,
@@ -774,6 +810,49 @@ mod tests {
             enc_data: "enc".to_string(),
             expire_at,
         }
+    }
+
+    fn play_info(player_1: Option<&str>) -> PlayInfo {
+        PlayInfo {
+            rtmp_url: "https://example.com/live".to_string(),
+            rtmp_live: "stream.flv?token=h264".to_string(),
+            player_1: player_1.map(str::to_string),
+            rtmp_cdn: "hw-h5".to_string(),
+            cdns_with_name: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn select_stream_url_prefers_player_1_for_h265() {
+        let encrypt_key_cache = Mutex::new(None);
+        let real_room_id_cache = RwLock::new(HashMap::new());
+        let mut live = make_live(
+            "https://www.douyu.com/1",
+            &encrypt_key_cache,
+            &real_room_id_cache,
+        );
+        live.douyu_codec = DouyuCodec::H265;
+
+        let (url, is_h265) =
+            live.select_stream_url(&play_info(Some("https://example.com/hevc.flv")));
+        assert_eq!(url, "https://example.com/hevc.flv");
+        assert!(is_h265);
+    }
+
+    #[test]
+    fn select_stream_url_falls_back_when_player_1_is_missing() {
+        let encrypt_key_cache = Mutex::new(None);
+        let real_room_id_cache = RwLock::new(HashMap::new());
+        let mut live = make_live(
+            "https://www.douyu.com/1",
+            &encrypt_key_cache,
+            &real_room_id_cache,
+        );
+        live.douyu_codec = DouyuCodec::H265;
+
+        let (url, is_h265) = live.select_stream_url(&play_info(None));
+        assert_eq!(url, "https://example.com/live/stream.flv?token=h264");
+        assert!(!is_h265);
     }
 
     #[test]

@@ -247,6 +247,7 @@ fn to_upload_streamer_insert(
                 })
             })
             .transpose()?,
+        tid_v2: streamer.tid_v2.filter(|value| *value > 0),
         copyright: streamer.copyright,
         copyright_source: streamer.copyright_source.clone(),
         cover_path: streamer
@@ -289,6 +290,7 @@ fn to_upload_streamer_insert(
 fn has_upload_config(streamer: &StreamerConfig) -> bool {
     streamer.title.is_some()
         || streamer.tid.is_some()
+        || streamer.tid_v2.is_some()
         || streamer.copyright.is_some()
         || streamer.copyright_source.is_some()
         || streamer.cover_path.is_some()
@@ -397,5 +399,30 @@ mod server_exposure_tests {
             )
             .is_ok()
         );
+    }
+}
+
+#[cfg(test)]
+mod config_import_tests {
+    use super::to_upload_streamer_insert;
+    use crate::server::config::StreamerConfig;
+
+    #[test]
+    fn config_import_preserves_tid_v2_and_ignores_zero() {
+        let mut streamer = StreamerConfig::default();
+        streamer.tid = Some(171);
+        streamer.tid_v2 = Some(1003);
+        streamer.uploader = Some("biliup-rs".to_string());
+
+        let inserted = to_upload_streamer_insert("demo", &streamer, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(inserted.tid_v2, Some(1003));
+
+        streamer.tid_v2 = Some(0);
+        let inserted = to_upload_streamer_insert("demo", &streamer, None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(inserted.tid_v2, None);
     }
 }

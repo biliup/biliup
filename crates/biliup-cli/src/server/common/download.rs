@@ -337,6 +337,7 @@ pub async fn start_download_workflow(
     let task = Arc::new(DownloadTask::new(downloader_runtime(
         ctx.config().downloader,
         ctx.live_stream(),
+        ctx.live_streamer().format.as_deref(),
     )));
     ctx.change_status(Stage::Download, WorkerStatus::Working(task.clone()))
         .await;

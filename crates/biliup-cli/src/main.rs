@@ -4,12 +4,15 @@ use biliup::uploader::util::SubmitOption;
 use biliup_cli::cli::{Cli, Commands, expand_path};
 use biliup_cli::downloader::{download, generate_json};
 use biliup_cli::uploader::{
-    append, comments, list, login, renew, reply, show, upload_by_command, upload_by_config,
+    append, comments, list, login, renew, reply, retry_pending_upload, show, upload_by_command,
+    upload_by_config,
 };
 
 use clap::Parser;
+use error_stack::ResultExt;
+use std::process::{Command, Stdio};
 
-use biliup_cli::server::errors::AppResult;
+use biliup_cli::server::errors::{AppError, AppResult};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::reload;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -30,6 +33,46 @@ async fn main() -> AppResult<()> {
 
     // tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
     let cli = Cli::parse();
+
+    if matches!(
+        cli.command,
+        Commands::Server {
+            background: true,
+            ..
+        }
+    ) {
+        let args = std::env::args_os()
+            .skip(1)
+            .filter(|arg| arg != "--background")
+            .collect::<Vec<_>>();
+        let executable = std::env::current_exe().change_context(AppError::Unknown)?;
+        let mut command = Command::new(executable);
+        command
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        // Detach from the controlling terminal on Unix so an SSH logout does
+        // not send SIGHUP to the server. Windows keeps spawned processes alive
+        // after the parent exits when standard handles are detached.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            unsafe {
+                command.pre_exec(|| {
+                    if libc::setsid() == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+        }
+
+        let child = command.spawn().change_context(AppError::Unknown)?;
+        println!("biliup server started in background (pid {})", child.id());
+        return Ok(());
+    }
 
     // use of deprecated function `time::util::local_offset::set_soundness`: no longer needed; TZ is refreshed manually
     // unsafe {
@@ -70,6 +113,9 @@ async fn main() -> AppResult<()> {
         Commands::Login => login(user_cookie, cli.proxy.as_deref()).await?,
         Commands::Renew => {
             renew(user_cookie, cli.proxy.as_deref()).await?;
+        }
+        Commands::RetryUpload { manifest } => {
+            retry_pending_upload(expand_path(manifest), user_cookie, cli.proxy.as_deref()).await?;
         }
         Commands::Upload {
             video_path,
@@ -154,6 +200,7 @@ async fn main() -> AppResult<()> {
             bind,
             port,
             auth,
+            background: _,
             secure_session_cookie,
             config,
         } => {

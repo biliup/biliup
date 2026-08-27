@@ -231,6 +231,42 @@ impl<'a> ProtoReader<'a> {
 
         fields
     }
+
+    /// Parse all fields and fail if the message contains a truncated or
+    /// otherwise invalid field.  `parse_all` is intentionally lenient for a
+    /// few legacy callers, but protocol decoders should use this variant so a
+    /// damaged frame is not mistaken for an empty/partial message.
+    pub fn parse_all_strict(&mut self) -> Option<HashMap<u32, Vec<ProtoValue>>> {
+        let mut fields: HashMap<u32, Vec<ProtoValue>> = HashMap::new();
+
+        while !self.is_empty() {
+            let (field_num, wire_type) = self.read_tag()?;
+            if field_num == 0 {
+                return None;
+            }
+
+            let value = match wire_type {
+                WireType::Varint => ProtoValue::Varint(self.read_varint()?),
+                WireType::Fixed64 => ProtoValue::Fixed64(self.read_fixed64()?),
+                WireType::Fixed32 => ProtoValue::Fixed32(self.read_fixed32()?),
+                WireType::LengthDelimited => {
+                    let bytes = self.read_bytes()?;
+                    if let Ok(s) = String::from_utf8(bytes.clone())
+                        && s.chars()
+                            .all(|c| !c.is_control() || c == '\n' || c == '\r' || c == '\t')
+                    {
+                        ProtoValue::String(s)
+                    } else {
+                        ProtoValue::Bytes(bytes)
+                    }
+                }
+            };
+
+            fields.entry(field_num).or_default().push(value);
+        }
+
+        Some(fields)
+    }
 }
 
 /// Protobuf writer for building messages.
@@ -322,5 +358,11 @@ mod tests {
 
         assert!(fields.contains_key(&1));
         assert_eq!(fields[&1][0].as_str(), Some("hello"));
+    }
+
+    #[test]
+    fn strict_parser_rejects_truncated_length_delimited_field() {
+        let mut reader = ProtoReader::new(&[0x0a, 0x02, b'x']);
+        assert!(reader.parse_all_strict().is_none());
     }
 }

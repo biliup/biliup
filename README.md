@@ -93,6 +93,8 @@ Options:
 
 - [使用文档 »](https://docs.biliup.rs)
 
+当前 master 还支持 B 站新版投稿分区 `tid_v2`（投稿字段 `human_type2`）和斗鱼 H.265：在主播配置中设置 `tid_v2: 1003`，或在全局配置中设置 `douyu_codec: h265`。新版分区和编码选项的完整说明见[使用文档](https://biliup.github.io/biliup/docs/guide/introduction/)。
+
 ## 🚀 快速开始
 
 ### Windows
@@ -104,8 +106,9 @@ Options:
 3. 启动：`biliup server --auth`
 4. 访问 WebUI：`http://127.0.0.1:19159`（默认只监听本机，远程访问见下方说明）
 * 后台运行 
-  1. `nohup biliup server --auth &`
-  2. [请查看参考](https://biliup.github.io/biliup/docs/guide/introduction/#linuxxia-pei-zhi-kai-ji-zi-qi)
+  1. `biliup server --auth --background`（内置后台模式）
+  2. 或使用 `nohup biliup server --auth &`
+  3. [请查看参考](https://biliup.github.io/biliup/docs/guide/introduction/#linuxxia-pei-zhi-kai-ji-zi)
 ### Termux
 - 详见[Wiki](https://github.com/biliup/biliup/wiki/Termux-%E4%B8%AD%E4%BD%BF%E7%94%A8-biliup)
 

@@ -110,9 +110,12 @@ impl DownloaderRuntime {
     /// 从配置创建
     pub fn from_type(downloader_type: DownloaderType) -> Self {
         match downloader_type {
-            DownloaderType::Ffmpeg => Self::Ffmpeg(FfmpegDownloader::new(
+            DownloaderType::Ffmpeg | DownloaderType::FfmpegExternal => Self::Ffmpeg(
+                FfmpegDownloader::new(Vec::new(), DownloaderType::FfmpegExternal),
+            ),
+            DownloaderType::FfmpegInternal => Self::Ffmpeg(FfmpegDownloader::new(
                 Vec::new(),
-                DownloaderType::FfmpegExternal,
+                DownloaderType::FfmpegInternal,
             )),
             _ => Self::StreamGears(StreamGears::new(None)),
             // ...

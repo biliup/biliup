@@ -9,7 +9,7 @@ use serde::Serialize;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
-use tracing::info;
+use tracing::{info, warn};
 
 const FLV_HEADER: [u8; 9] = [
     0x46, // 'F'
@@ -23,6 +23,7 @@ const FLV_HEADER: [u8; 9] = [
 pub struct FlvFile<'a> {
     pub buf_writer: BufWriter<File>,
     pub file: LifecycleFile<'a>,
+    completed: bool,
 }
 
 impl<'a> FlvFile<'a> {
@@ -32,14 +33,21 @@ impl<'a> FlvFile<'a> {
         Ok(Self {
             buf_writer: Self::create(path)?,
             file,
+            completed: false,
         })
     }
 
     pub fn create_new(&mut self) -> std::io::Result<()> {
+        self.completed = true;
         self.file.rename();
         let path = self.file.create()?;
         self.buf_writer = Self::create(path)?;
+        self.completed = false;
         Ok(())
+    }
+
+    pub fn finish(&mut self) {
+        self.completed = true;
     }
 
     fn create<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<BufWriter<File>> {
@@ -92,7 +100,17 @@ impl<'a> FlvFile<'a> {
 
 impl Drop for FlvFile<'_> {
     fn drop(&mut self) {
-        self.file.rename()
+        if self.completed {
+            self.file.rename();
+        } else if !self.file.path.as_os_str().is_empty() {
+            if let Err(error) = std::fs::remove_file(&self.file.path)
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                warn!(path = %self.file.path.display(), %error, "failed to remove incomplete FLV segment");
+            } else {
+                warn!(path = %self.file.path.display(), "discarded incomplete FLV segment");
+            }
+        }
     }
 }
 

@@ -156,7 +156,8 @@ def upload(video_path: List[str],
            line: Optional[UploadLine],
            extra_fields: Optional[str],
            submit: Optional[str],
-           proxy: Optional[str]) -> None:
+           proxy: Optional[str],
+           tid_v2: Optional[int] = None) -> None:
 
     """
     上传视频稿件
@@ -182,4 +183,5 @@ def upload(video_path: List[str],
     :param Optional[ExtraFields] line: 上传额外参数
     :param Optional[str] submit: 提交接口, 可选值: BCutAndroid, App（默认）
     :param Optional[str] proxy: 代理
+    :param Optional[int] tid_v2: 可选新版投稿分区 ID，投稿时发送为 human_type2
     """

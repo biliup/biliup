@@ -66,5 +66,6 @@ export function useTypeTree() {
     isLoading,
     isError: error,
     typeTree: treeData,
+    typeTreeV2: (archivePre?.data?.type_list_v2 ?? []) as BiliType[],
   };
 }

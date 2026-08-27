@@ -385,6 +385,8 @@ impl DanmakuRecorder {
             None
         };
 
+        let mut consecutive_decode_errors = 0u64;
+
         // Main message loop
         loop {
             tokio::select! {
@@ -435,6 +437,7 @@ impl DanmakuRecorder {
                             // Decode message
                             match self.platform.decode_message(&data) {
                                 Ok(result) => {
+                                    consecutive_decode_errors = 0;
                                     // Write decoded events
                                     for event in result.events {
                                         if let Err(e) = xml_writer.write_event(&event) {
@@ -454,7 +457,19 @@ impl DanmakuRecorder {
                                     }
                                 }
                                 Err(e) => {
-                                    debug!("{}: Decode error: {}", platform_name, e);
+                                    consecutive_decode_errors += 1;
+                                    if consecutive_decode_errors == 1
+                                        || consecutive_decode_errors.is_multiple_of(100)
+                                    {
+                                        warn!(
+                                            platform = platform_name,
+                                            consecutive_decode_errors,
+                                            error = %e,
+                                            "Danmaku decode error"
+                                        );
+                                    } else {
+                                        debug!("{}: Decode error: {}", platform_name, e);
+                                    }
                                 }
                             }
                         }
@@ -518,6 +533,7 @@ impl DanmakuRecorder {
 
         let (mut tcp_reader, mut tcp_writer) = tcp_stream.into_split();
 
+        let mut consecutive_decode_errors = 0u64;
         loop {
             tokio::select! {
                 _ = stop_rx.changed() => {
@@ -547,6 +563,7 @@ impl DanmakuRecorder {
                     let frame = frame?;
                     match self.platform.decode_message(&frame) {
                         Ok(result) => {
+                            consecutive_decode_errors = 0;
                             for event in result.events {
                                 if let Err(e) = xml_writer.write_event(&event) {
                                     warn!("Failed to write event: {}", e);
@@ -558,7 +575,19 @@ impl DanmakuRecorder {
                             }
                         }
                         Err(e) => {
-                            debug!("{}: Decode error: {}", platform_name, e);
+                            consecutive_decode_errors += 1;
+                            if consecutive_decode_errors == 1
+                                || consecutive_decode_errors.is_multiple_of(100)
+                            {
+                                warn!(
+                                    platform = platform_name,
+                                    consecutive_decode_errors,
+                                    error = %e,
+                                    "Danmaku decode error"
+                                );
+                            } else {
+                                debug!("{}: Decode error: {}", platform_name, e);
+                            }
                         }
                     }
                 }

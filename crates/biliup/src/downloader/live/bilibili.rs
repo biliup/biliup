@@ -400,15 +400,17 @@ impl BilibiliLive {
 
             let candidates = streams
                 .iter()
-                .flat_map(|stream| stream.get("format").and_then(|formats| formats.as_array()))
+                .flat_map(|stream| stream.get("format").and_then(Value::as_array))
                 .flatten()
-                .find(|format| {
-                    format.get("format_name").and_then(|name| name.as_str()) == Some("fmp4")
-                })
-                .and_then(|format| format.get("codec"))
-                .and_then(Value::as_array)
-                .and_then(|codecs| codecs.first())
-                .and_then(parse_codec_urls)?;
+                .filter(|format| format.get("format_name").and_then(Value::as_str) == Some("fmp4"))
+                .flat_map(|format| format.get("codec").and_then(Value::as_array))
+                .flatten()
+                .filter_map(parse_codec_urls)
+                .flatten()
+                .collect::<Vec<_>>();
+            if candidates.is_empty() {
+                return None;
+            }
             // fmp4 可能没有原画
             if matches!(self.qn, 10000 | 25000)
                 && !candidates.iter().any(|candidate| candidate.qn == self.qn)
@@ -418,15 +420,18 @@ impl BilibiliLive {
             return Some(candidates);
         }
 
+        // The API occasionally puts an empty/unsupported format first (some
+        // rooms expose this while a game-specific encoder is starting).  Walk
+        // every stream/format/codec and keep the first valid candidate set
+        // instead of treating the first entry as authoritative.
         streams
-            .first()
-            .and_then(|stream| stream.get("format"))
-            .and_then(Value::as_array)
-            .and_then(|formats| formats.first())
-            .and_then(|format| format.get("codec"))
-            .and_then(Value::as_array)
-            .and_then(|codecs| codecs.first())
-            .and_then(parse_codec_urls)
+            .iter()
+            .flat_map(|stream| stream.get("format").and_then(Value::as_array))
+            .flatten()
+            .filter(|format| format.get("format_name").and_then(Value::as_str) != Some("fmp4"))
+            .filter_map(|format| format.get("codec").and_then(Value::as_array))
+            .flatten()
+            .find_map(parse_codec_urls)
     }
 
     async fn master_m3u8_candidates(
@@ -852,5 +857,61 @@ mod tests {
         let candidates = parse_master_m3u8(text).unwrap();
         assert_eq!(candidates.len(), 1);
         assert!(candidates[0].url.starts_with("https://a.example.com/"));
+    }
+
+    #[tokio::test]
+    async fn parse_play_info_skips_empty_first_format() {
+        let live = BilibiliLive {
+            client: Client::new(),
+            url: "https://live.bilibili.com/1".to_string(),
+            name: "fixture".to_string(),
+            qn: 400,
+            protocol: "stream".to_string(),
+            cdn: Vec::new(),
+            cdn_fallback: false,
+            hls_transcode_timeout: 60,
+            anonymous_origin: false,
+            api_list: Vec::new(),
+            cookie: None,
+            cookie_file: None,
+            danmaku: false,
+            danmaku_raw: false,
+            danmaku_detail: false,
+            room_id: None,
+            wbi_signer: WbiSigner::new(),
+        };
+        let play_info = serde_json::json!({
+            "data": {"playurl_info": {"playurl": {"stream": [{
+                "format": [
+                    {"format_name": "flv", "codec": []},
+                    {"format_name": "flv", "codec": [{
+                        "current_qn": 400,
+                        "base_url": "/live.flv",
+                        "url_info": [{"host": "https://cdn.example", "extra": "?cdn=test"}]
+                    }]}
+                ]
+            }]}}}
+        });
+
+        let profile = BiliRoomProfile {
+            room_id: 1,
+            uid: 2,
+            live_start_time: 0,
+            special_type: 0,
+            title: "fixture".to_string(),
+            cover: String::new(),
+        };
+        let candidates = live
+            .parse_play_info(
+                "https://api.example",
+                &profile,
+                &play_info,
+                &HeaderMap::new(),
+                "stream",
+            )
+            .await
+            .unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].url, "https://cdn.example/live.flv?cdn=test");
     }
 }
