@@ -6,11 +6,12 @@ use reqwest::{Body, RequestBuilder};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::ffi::OsStr;
+use std::path::Path;
 
 use crate::client::StatelessClient;
 use crate::error::Kind::{Custom, RateLimit};
 use crate::uploader::bilibili::{BiliBili, Video};
-use crate::uploader::line::upos::Upos;
+use crate::uploader::line::upos::{Upos, UposPart};
 use std::time::Instant;
 use tracing::info;
 
@@ -117,6 +118,7 @@ impl Probe {
     }
 }
 
+#[derive(Clone)]
 enum Bucket {
     Upos(upos::Bucket),
 }
@@ -130,15 +132,130 @@ pub struct Line {
     cost: u128,
 }
 
+pub struct StreamParcel {
+    line: Bucket,
+    file_name: String,
+    total_size: u64,
+}
+
+pub struct UploadedStream {
+    upos: Upos,
+    file_name: String,
+    declared_size: u64,
+    parts: Vec<UposPart>,
+    uploaded_size: u64,
+}
+
+impl UploadedStream {
+    pub fn declared_size(&self) -> u64 {
+        self.declared_size
+    }
+
+    pub fn uploaded_size(&self) -> u64 {
+        self.uploaded_size
+    }
+
+    pub fn parts_len(&self) -> usize {
+        self.parts.len()
+    }
+
+    pub async fn complete(self) -> Result<Video> {
+        let video = self
+            .upos
+            .get_ret_video_info(&self.parts, Path::new(&self.file_name))
+            .await?;
+        Ok(with_stream_video_title(video, &self.file_name))
+    }
+}
+
+impl StreamParcel {
+    pub fn chunk_size(&self) -> usize {
+        match &self.line {
+            Bucket::Upos(bucket) => bucket.chunk_size,
+        }
+    }
+
+    pub fn total_size(&self) -> u64 {
+        self.total_size
+    }
+
+    pub fn file_name(&self) -> &str {
+        &self.file_name
+    }
+
+    pub async fn upload_stream<S, B>(
+        self,
+        client: StatelessClient,
+        limit: usize,
+        stream: S,
+    ) -> Result<Video>
+    where
+        S: Stream<Item = Result<(B, usize)>>,
+        B: Into<Body> + Clone,
+    {
+        self.upload_parts(client, limit, stream)
+            .await?
+            .complete()
+            .await
+    }
+
+    pub async fn upload_parts<S, B>(
+        self,
+        client: StatelessClient,
+        limit: usize,
+        stream: S,
+    ) -> Result<UploadedStream>
+    where
+        S: Stream<Item = Result<(B, usize)>>,
+        B: Into<Body> + Clone,
+    {
+        match self.line {
+            Bucket::Upos(bucket) => {
+                let upos = Upos::from(client, bucket).await?;
+                let mut parts = Vec::new();
+                let mut uploaded_size = 0u64;
+                {
+                    let uploaded = upos.upload_stream(stream, self.total_size, limit).await?;
+                    tokio::pin!(uploaded);
+                    while let Some((part, size)) = uploaded.try_next().await? {
+                        parts.push(part);
+                        uploaded_size += size as u64;
+                    }
+                }
+                Ok(UploadedStream {
+                    upos,
+                    file_name: self.file_name,
+                    declared_size: self.total_size,
+                    parts,
+                    uploaded_size,
+                })
+            }
+        }
+    }
+}
+
+fn with_stream_video_title(mut video: Video, file_name: &str) -> Video {
+    if video.title.is_none()
+        && let Some(stem) = Path::new(file_name).file_stem().and_then(OsStr::to_str)
+    {
+        video.title = Some(if stem.chars().count() >= 80 {
+            Video::truncate_title(stem, 80)
+        } else {
+            stem.to_string()
+        });
+    }
+    video
+}
+
 impl Line {
-    pub async fn pre_upload(&self, bili: &BiliBili, video_file: VideoFile) -> Result<Parcel> {
-        let total_size = video_file.total_size;
-        let file_name = video_file.file_name.clone();
+    async fn request_bucket(
+        &self,
+        bili: &BiliBili,
+        file_name: &str,
+        total_size: u64,
+    ) -> Result<Bucket> {
         let profile = "ugcupos/bup"; // ugcfx/bup 需上传视频metadata和frame.zip
         let params = json!({
-            // "probe_version": "20221109",
-            // "upcdn": "",
-            // "zone": "",
             "name": file_name,
             "r": self.os, // upos
             "profile": profile,
@@ -172,7 +289,6 @@ impl Line {
                     .and_then(|m| m.as_str())
                     .unwrap_or("上传过快")
                     .to_string();
-                // 直接返回限流错误，让调用方决定如何处理
                 return Err(RateLimit { code, message });
             }
 
@@ -183,14 +299,34 @@ impl Line {
         }
 
         match self.os {
-            Uploader::Upos => Ok(Parcel {
-                line: Bucket::Upos(response.json().await?),
-                video_file,
-            }),
-            // _ => {
-            //     panic!("unsupported")
-            // }
+            Uploader::Upos => Ok(Bucket::Upos(response.json().await?)),
         }
+    }
+
+    pub async fn pre_upload(&self, bili: &BiliBili, video_file: VideoFile) -> Result<Parcel> {
+        let bucket = self
+            .request_bucket(bili, &video_file.file_name, video_file.total_size)
+            .await?;
+        Ok(Parcel {
+            line: bucket,
+            video_file,
+        })
+    }
+
+    /// 边录边传：在还没有完整文件时，按预声明大小申请 UPOS 上传。
+    pub async fn pre_upload_stream(
+        &self,
+        bili: &BiliBili,
+        file_name: impl Into<String>,
+        total_size: u64,
+    ) -> Result<StreamParcel> {
+        let file_name = file_name.into();
+        let bucket = self.request_bucket(bili, &file_name, total_size).await?;
+        Ok(StreamParcel {
+            line: bucket,
+            file_name,
+            total_size,
+        })
     }
 }
 

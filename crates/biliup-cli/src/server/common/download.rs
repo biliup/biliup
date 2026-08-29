@@ -1,4 +1,5 @@
 use crate::server::common::recording_policy;
+use crate::server::common::sync::SyncSession;
 use crate::server::common::upload::UploaderMessage;
 use crate::server::common::util::FileValidator;
 use crate::server::core::downloader::cover_downloader;
@@ -15,7 +16,7 @@ use biliup::downloader::live::{LivePlugin, LiveStatus, LiveStream};
 use error_stack::ResultExt;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Notify;
+use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
@@ -118,14 +119,18 @@ pub struct DownloadTask {
     token: CancellationToken,
     done_notify: Notify,
     downloader: DownloaderRuntime,
+    sync_session: Option<Arc<Mutex<SyncSession>>>,
 }
 
 impl DownloadTask {
     pub fn new(downloader: DownloaderRuntime) -> Self {
+        let sync_session = matches!(&downloader, DownloaderRuntime::Sync(_))
+            .then(|| Arc::new(Mutex::new(SyncSession::default())));
         Self {
             token: CancellationToken::new(),
             done_notify: Notify::new(),
             downloader,
+            sync_session,
         }
     }
 
@@ -162,6 +167,12 @@ impl DownloadTask {
 
         // 初始化组件
         let mut processor = SegmentEventProcessor::new(sender, ctx.clone());
+        // 边录边传：记录已确认分 P 数，只有真正推进投稿才算“有进展”。
+        // 否则持续性错误（如 cookie 失效、preupload 被拒）会在直播中零延迟热循环。
+        let mut last_committed = match &self.sync_session {
+            Some(session) => session.lock().await.committed_parts(),
+            None => 0,
+        };
         let result = loop {
             // 创建守卫确保清理
             // 创建事件处理器
@@ -186,8 +197,24 @@ impl DownloadTask {
                         url = url,
                         "Stream is still live, preparing to retry. attempt: {}", retry_count
                     );
-                    // 成功下载后重置计数
-                    retry_count = 0;
+                    // 边录边传只有分 P 有实际推进才重置退避。管线的多数失败路径
+                    // （空流、分段过小）返回 Ok(StreamEnded)，不能以 Ok/Err 判断；
+                    // 否则拉流持续失败会零延迟重跑登录、preupload。
+                    // 非边录边传保持原行为（仍在直播即重置）。
+                    let progressed = match &self.sync_session {
+                        Some(session) => {
+                            let committed = session.lock().await.committed_parts();
+                            let progressed = committed > last_committed;
+                            last_committed = committed;
+                            progressed
+                        }
+                        None => true,
+                    };
+                    if progressed {
+                        retry_count = 0;
+                    } else {
+                        retry_count += 1;
+                    }
                 }
                 Ok(LiveStatus::Offline) => {
                     retry_count += 1;
@@ -266,6 +293,25 @@ impl DownloadTask {
     ) -> AppResult<DownloadStatus> {
         // 获取配置和主播信息
         let streamer = ctx.live_streamer();
+        let download_config = ctx.download_config(stream);
+        if let crate::server::core::downloader::DownloaderRuntime::Sync(sync) = &self.downloader {
+            info!(
+                page_url = streamer.url,
+                stream_url = download_config.url,
+                platform = stream.platform,
+                "开始边录边传，已解析流直链"
+            );
+            return crate::server::common::sync::run_sync_pipeline(
+                sync,
+                self.token.clone(),
+                &ctx,
+                download_config,
+                self.sync_session
+                    .clone()
+                    .expect("sync downloader must have a sync session"),
+            )
+            .await;
+        }
 
         // 执行下载
         // let hook = processor.create_hook(danmaku_client.clone());
@@ -294,7 +340,6 @@ impl DownloadTask {
             }
         };
 
-        let download_config = ctx.download_config(stream);
         info!(
             page_url = streamer.url,
             stream_url = download_config.url,
@@ -319,7 +364,14 @@ impl DownloadTask {
         // 如果底层下载函数不支持取消，这里不能真正中断正在进行的下载
         self.token.cancel();
         self.downloader.stop().await?;
-        self.done_notify.notified().await;
+        // 清理设总时限：取消已传导到录制/上传/投稿各阶段，正常应立即退出；
+        // 万一后台请求卡住，也不能让 stop 无限挂起拖住整个 worker。
+        if tokio::time::timeout(Duration::from_secs(30), self.done_notify.notified())
+            .await
+            .is_err()
+        {
+            warn!("等待下载任务退出超时（30 秒），继续关闭流程");
+        }
         Ok(())
     }
 }

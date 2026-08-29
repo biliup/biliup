@@ -5,6 +5,8 @@ use std::str::FromStr;
 pub mod download;
 /// 录制准入策略
 pub mod recording_policy;
+/// 边录边传（ffmpeg stdout → 流式投稿）
+pub mod sync;
 /// 录制时间范围判定
 pub mod timerange;
 pub mod upload;

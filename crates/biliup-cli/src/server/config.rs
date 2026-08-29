@@ -12,9 +12,13 @@ use struct_patch::Patch;
 #[patch(attribute(derive(Debug, Clone, Default, Deserialize, Serialize)))]
 pub struct Config {
     // ===== 全局录播与上传设置 =====
-    /// 下载器类型：streamlink | ffmpeg | stream-gears | 自定义
+    /// 下载器类型：streamlink | ffmpeg | stream-gears | sync-downloader | 自定义
     #[serde(default)]
     pub downloader: Option<DownloaderType>,
+
+    /// 边录边传额外保存本地目录（仅 sync-downloader）
+    #[serde(default)]
+    pub sync_save_dir: Option<String>,
 
     /// 文件大小限制（字节）
     #[patch(attribute(serde(default, deserialize_with = "deserialize_option_patch")))]
@@ -611,5 +615,17 @@ mod tests {
         assert_eq!(config.file_size, None);
         assert_eq!(config.segment_time, Some("01:00:00".to_string()));
         assert!(config.validate_segment_limits().is_ok());
+    }
+
+    #[test]
+    fn deserialize_sync_save_dir() {
+        let config: Config =
+            serde_json::from_str(r#"{"sync_save_dir":"/tmp/sync","downloader":"sync-downloader"}"#)
+                .unwrap();
+        assert_eq!(config.sync_save_dir.as_deref(), Some("/tmp/sync"));
+        assert_eq!(config.downloader, Some(DownloaderType::SyncDownloader));
+
+        let empty: Config = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(empty.sync_save_dir, None);
     }
 }
