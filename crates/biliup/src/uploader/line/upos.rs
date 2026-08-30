@@ -12,8 +12,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::client::StatelessClient;
-use crate::retry;
 use crate::uploader::bilibili::Video;
+use crate::{retry, retry_with_config};
 
 pub struct Upos {
     client: StatelessClient,
@@ -22,7 +22,7 @@ pub struct Upos {
     upload_id: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Bucket {
     pub chunk_size: usize,
     auth: String,
@@ -42,6 +42,13 @@ pub struct Protocol<'a> {
     part_number: usize,
     start: u64,
     end: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UposPart {
+    pub(crate) part_number: usize,
+    e_tag: String,
 }
 
 impl Upos {
@@ -80,13 +87,13 @@ impl Upos {
         })
     }
 
-    pub async fn upload_stream<'a, F, B>(
+    pub(crate) async fn upload_stream<'a, F, B>(
         &'a self,
         // file: std::fs::File,
         stream: F,
         total_size: u64,
         limit: usize,
-    ) -> Result<impl Stream<Item = Result<(serde_json::Value, usize)>> + 'a>
+    ) -> Result<impl Stream<Item = Result<(UposPart, usize)>> + 'a>
     where
         F: Stream<Item = Result<(B, usize)>> + 'a,
         B: Into<Body> + Clone,
@@ -98,7 +105,7 @@ impl Upos {
         // let parts_cell = &RefCell::new(parts);
         let chunk_size = self.bucket.chunk_size;
         // 获取分块数量
-        let chunks_num = (total_size as f64 / chunk_size as f64).ceil() as usize;
+        let chunks_num = total_size.div_ceil(chunk_size as u64) as usize;
         // let file = tokio::io::BufReader::with_capacity(chunk_size, file);
         let client = &self.client.client;
         let url = &self.url;
@@ -138,7 +145,13 @@ impl Upos {
                 })
                 .await?;
 
-                Ok::<_, Kind>((json!({"partNumber": params.chunk + 1, "eTag": "etag"}), len))
+                Ok::<_, Kind>((
+                    UposPart {
+                        part_number: params.chunk + 1,
+                        e_tag: "etag".to_string(),
+                    },
+                    len,
+                ))
             })
             .buffer_unordered(limit);
         Ok(stream)
@@ -147,9 +160,11 @@ impl Upos {
     /// 通知视频上传完成并获取视频信息
     pub(crate) async fn get_ret_video_info(
         &self,
-        parts: &[serde_json::Value],
+        parts: &[UposPart],
         path: &Path,
     ) -> Result<Video> {
+        let parts = sorted_parts(parts)?;
+
         // println!("{:?}", parts_cell.borrow());
         let url = reqwest::Url::parse_with_params(
             &self.url,
@@ -165,23 +180,32 @@ impl Upos {
             ],
         )
         .map_err(|e| Kind::Custom(e.to_string()))?;
-        let res: serde_json::Value = self
-            .client
-            .client_with_middleware
-            .post(url)
-            .header(
-                "X-Upos-Auth",
-                header::HeaderValue::from_str(&self.bucket.auth)?,
-            )
-            .json(&json!({ "parts": parts }))
-            .timeout(Duration::from_secs(60))
-            .send()
-            .await?
-            .json()
-            .await?;
-        if res["OK"] != 1 {
-            return Err(Kind::Custom(res.to_string()));
-        }
+        let res = retry_with_config(
+            || async {
+                let response = self
+                    .client
+                    .client_with_middleware
+                    .post(url.clone())
+                    .header(
+                        "X-Upos-Auth",
+                        header::HeaderValue::from_str(&self.bucket.auth)?,
+                    )
+                    .json(&json!({ "parts": parts }))
+                    .timeout(Duration::from_secs(60))
+                    .send()
+                    .await?
+                    .error_for_status()?;
+                let value: serde_json::Value = response.json().await?;
+                if value["OK"] != 1 {
+                    return Err(Kind::Custom(value.to_string()));
+                }
+                Ok(value)
+            },
+            2,
+            None::<fn(&Kind) -> bool>,
+        )
+        .await?;
+        debug_assert_eq!(res["OK"], 1);
         let filename = Path::new(&self.bucket.upos_uri)
             .file_stem()
             .unwrap()
@@ -200,5 +224,50 @@ impl Upos {
             filename: truncated_filename,
             desc: "".into(),
         })
+    }
+}
+
+fn sorted_parts(parts: &[UposPart]) -> Result<Vec<UposPart>> {
+    let mut parts = parts.to_vec();
+    parts.sort_by_key(|part| part.part_number);
+    for (index, part) in parts.iter().enumerate() {
+        if part.part_number != index + 1 {
+            return Err(Kind::Custom(format!(
+                "UPOS parts 不连续：期望 partNumber={}，实际={}",
+                index + 1,
+                part.part_number
+            )));
+        }
+    }
+    Ok(parts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{UposPart, sorted_parts};
+
+    fn part(part_number: usize) -> UposPart {
+        UposPart {
+            part_number,
+            e_tag: "etag".to_string(),
+        }
+    }
+
+    #[test]
+    fn complete_parts_are_sorted_by_part_number() {
+        let parts = sorted_parts(&[part(3), part(1), part(2)]).unwrap();
+        assert_eq!(
+            parts
+                .into_iter()
+                .map(|part| part.part_number)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn complete_parts_must_be_contiguous() {
+        assert!(sorted_parts(&[part(1), part(3)]).is_err());
+        assert!(sorted_parts(&[part(1), part(1)]).is_err());
     }
 }
