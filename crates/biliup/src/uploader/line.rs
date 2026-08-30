@@ -12,7 +12,7 @@ use crate::error::Kind::{Custom, RateLimit};
 use crate::uploader::bilibili::{BiliBili, Video};
 use crate::uploader::line::upos::Upos;
 use std::time::Instant;
-use tracing::info;
+use tracing::{info, warn};
 
 pub mod upos;
 
@@ -86,22 +86,44 @@ impl Probe {
             .await?
             .json()
             .await?;
-        // let client = res.ping(client);
+        Self::select_line(client, &res.probe, res.lines).await
+    }
+
+    /// 逐条线路测速并选出耗时最短者。
+    /// 单条线路网络错误或异常状态码只跳过该线路，全部失败才返回错误。
+    async fn select_line(
+        client: &reqwest::Client,
+        probe: &serde_json::Value,
+        lines: Vec<Line>,
+    ) -> Result<Line> {
         let mut choice_line: Line = Default::default();
-        for mut line in res.lines {
+        for mut line in lines {
             let instant = Instant::now();
-            if Probe::ping(&res.probe, &format!("https:{}", line.probe_url), client)
+            match Probe::ping(probe, &format!("https:{}", line.probe_url), client)
                 .send()
-                .await?
-                .status()
-                .is_success()
+                .await
             {
-                line.cost = instant.elapsed().as_millis();
-                info!("{}: {}", line.query, line.cost);
-                if choice_line.cost > line.cost {
-                    choice_line = line
+                Ok(response) if response.status().is_success() => {
+                    line.cost = instant.elapsed().as_millis();
+                    info!("{}: {}", line.query, line.cost);
+                    if choice_line.cost > line.cost {
+                        choice_line = line
+                    }
                 }
-            };
+                Ok(response) => {
+                    warn!(
+                        "{} 测速返回异常状态码 {}，跳过该线路",
+                        line.query,
+                        response.status()
+                    );
+                }
+                Err(e) => {
+                    warn!("{} 测速失败，跳过该线路: {e}", line.query);
+                }
+            }
+        }
+        if choice_line.cost == u128::MAX {
+            return Err(Custom("所有上传线路测速均失败".to_string()));
         }
         Ok(choice_line)
     }
@@ -360,5 +382,55 @@ pub fn akbd() -> Line {
         query: "probe_version=20250923&upcdn=akbd&zone=cs".into(),
         probe_url: "//bb27c891csbd.aikobo.cn/OK".into(),
         cost: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn broken_line(query: &str) -> Line {
+        Line {
+            os: Uploader::Upos,
+            // "https:" 拼接后不是合法 URL，send() 直接报错且不产生网络请求
+            probe_url: String::new(),
+            query: query.into(),
+            cost: 0,
+        }
+    }
+
+    /// 单条线路 send 失败不应中断测速，全部失败时返回统一错误而不是首条线路的网络错误。
+    #[tokio::test]
+    async fn select_line_skips_failed_lines_and_reports_all_failed() {
+        let client = reqwest::Client::new();
+        let result = Probe::select_line(
+            &client,
+            &serde_json::json!({"get": {}}),
+            vec![broken_line("a"), broken_line("b")],
+        )
+        .await;
+        match result {
+            Err(Custom(message)) => assert_eq!(message, "所有上传线路测速均失败"),
+            other => panic!("期望所有线路失败的统一错误，实际为 {other:?}"),
+        }
+    }
+
+    /// 无候选线路时同样返回错误，而不是把未测速的默认线路当作结果。
+    #[tokio::test]
+    async fn select_line_rejects_empty_lines() {
+        let client = reqwest::Client::new();
+        let result = Probe::select_line(&client, &serde_json::json!({"get": {}}), Vec::new()).await;
+        assert!(result.is_err());
+    }
+
+    /// 真实网络测速仍能选出可用线路。默认忽略，本地验证：
+    /// `cargo test -p biliup probe_selects_line_over_network -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "requires network access to member.bilibili.com"]
+    async fn probe_selects_line_over_network() {
+        let client = reqwest::Client::new();
+        let line = Probe::probe(&client).await.expect("测速应选出可用线路");
+        assert_ne!(line.cost, u128::MAX);
+        println!("selected line: {} cost={}ms", line.query, line.cost);
     }
 }
