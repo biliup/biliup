@@ -1,6 +1,6 @@
 'use client'
 
-import React, {useState} from 'react';
+import React, {useState, useRef} from 'react';
 import {Nav, Avatar, Form, Checkbox, Button, Toast} from '@douyinfe/semi-ui';
 import { IconSemiLogo, IconFeishuLogo, IconHelpCircle, IconBell } from '@douyinfe/semi-icons';
 import styles from './index.module.scss';
@@ -19,6 +19,7 @@ const Component = () => {
     const [password, setPassword] = useState('');
     const [remember, setRemember] = useState(false);
     const [loading, setLoading] = useState(false);
+    const formApi = useRef(null);
 
     // 使用 SWR 检查用户是否存在
     const { data, error, isLoading } = useSWR('/v1/users/biliup', fetcher, {
@@ -34,6 +35,14 @@ const Component = () => {
     const handleSubmit = async () => {
         if (!username || !password) {
             Toast.error('请填写用户名和密码');
+            return;
+        }
+
+        // 提交前执行表单规则校验（注册模式下包含确认密码一致性），
+        // 校验失败时 Semi 会在对应字段下方展示错误信息
+        try {
+            await formApi.current?.validate();
+        } catch {
             return;
         }
 
@@ -125,7 +134,7 @@ const Component = () => {
                         </div>
                     </div>
                     <div className={styles.form}>
-                        <Form className={styles.inputs}>
+                        <Form className={styles.inputs} getFormApi={(api) => (formApi.current = api)}>
                             <Form.Input
                                 label={{ text: "用户名" }}
                                 field="username"
@@ -157,6 +166,7 @@ const Component = () => {
                                     style={{ width: 440 }}
                                     className={styles.formField}
                                     rules={[
+                                        { required: true, message: '请再次输入密码' },
                                         {
                                             validator: (rule, value) => value === password,
                                             message: '两次密码输入不一致'
