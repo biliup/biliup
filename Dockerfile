@@ -80,13 +80,17 @@ RUN set -eux; \
 	apt-mark manual curl wget; \
 	\
 	arch="$(dpkg --print-architecture)"; arch="${arch##*-}"; \
-	url='https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-'; \
+	# 固定 FFmpeg 到确定版本并校验 SHA-256：
+	# latest 是滚动 tag，资产每日重建，既不可复现也无法防篡改
+	url='https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-29-13-12/ffmpeg-n8.1.2-50-g1a748fe2cd-'; \
 	case "$arch" in \
 		'amd64') \
 			url="${url}linux64-gpl-8.1.tar.xz"; \
+			sha256='be243f2520d6e7e92c82b015ed72a3f5b57c7970801c0d51f031457122653c76'; \
 		;; \
 		'arm64') \
 			url="${url}linuxarm64-gpl-8.1.tar.xz"; \
+			sha256='0df9277976f71f36b31a4de9f6657a1fbbf32ce2273594c18f19b92fbbbde1ce'; \
 		;; \
 		*) \
 			useApt=true; \
@@ -99,6 +103,7 @@ RUN set -eux; \
 		; \
 	else \
 		wget -O ffmpeg.tar.xz "$url" --progress=dot:giga; \
+		echo "$sha256  ffmpeg.tar.xz" | sha256sum -c -; \
 		tar -xJf ffmpeg.tar.xz -C /usr/local --strip-components=1; \
 		rm -rf \
 			/usr/local/doc \

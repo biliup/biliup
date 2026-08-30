@@ -3,11 +3,16 @@ name: Zola on GitHub Pages
 on:
   push:
     branches:
-      - master 
+      - master
     paths:
       - docs/**
   pull_request:
-  
+    paths:
+      - docs/**
+
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,6 +32,9 @@ jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/master'
+    permissions:
+      # 推送 gh-pages 分支需要写权限
+      contents: write
     steps:
       - name: Checkout main
         uses: actions/checkout@v4
