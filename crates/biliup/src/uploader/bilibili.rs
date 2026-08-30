@@ -876,20 +876,13 @@ impl BiliBili {
 
     /// 稿件管理
     async fn archives(&self, status: &str, page_num: u32) -> Result<Value> {
-        let url_str = "https://member.bilibili.com/x/web/archives";
-        let params = [("status", status), ("pn", &page_num.to_string())];
-        let url = reqwest::Url::parse_with_params(url_str, &params).unwrap();
-
-        let cookie = self.get_cookie()?;
-        let jar = reqwest::cookie::Jar::default();
-        jar.add_cookie_str(&cookie, &url);
-
-        let res: ResponseData = reqwest::Client::builder()
-            .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/63.0.3239.108")
-            .cookie_provider(std::sync::Arc::new(jar))
+        // 复用登录时构建的客户端：cookie store 已含全部登录 Cookie，
+        // 且保留代理等配置，避免分页循环中每页新建 Client 和 cookie jar。
+        let res: ResponseData = self
+            .client
+            .get("https://member.bilibili.com/x/web/archives")
+            .query(&[("status", status), ("pn", &page_num.to_string())])
             .timeout(Duration::new(60, 0))
-            .build()?
-            .get(url)
             .send()
             .await?
             .json()
