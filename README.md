@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://docs.biliup.rs/home.png" alt="description" width="300" height="300"/>
+  <img src="https://raw.githubusercontent.com/biliup/biliup/master/public/logo.png" alt="biliup" width="300" height="300"/>
 </div>
 
 <div align="center">
@@ -128,7 +128,7 @@ biliup download <URL> -o "./video/%Y-%m-%dT%H_%M_%S{title}" --split-time 1h
 
 `--split-size` 与 `--split-time` 可按体积或时长自动分段，`-o` 支持 `{title}` 占位符与 strftime 时间格式。
 
-- [使用文档 »](https://docs.biliup.rs)
+- [使用文档 »](https://biliup.github.io/biliup/docs/guide/introduction/)
 
 ## 🚀 快速开始
 
