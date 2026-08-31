@@ -170,6 +170,11 @@ pub enum Commands {
         #[arg(long, default_value = "false")]
         auth: bool,
 
+        /// 为会话 Cookie 附加 Secure 属性。仅当通过 HTTPS 反向代理访问 Web UI 时开启；
+        /// 直接通过 HTTP 远程访问时开启会导致浏览器丢弃登录态
+        #[arg(long, default_value = "false")]
+        secure_session_cookie: bool,
+
         /// 使用 biliup 1.0.7 风格配置文件启动录制
         #[arg(short, long, value_name = "FILE")]
         config: Option<PathBuf>,
@@ -228,7 +233,12 @@ mod tests {
         assert_eq!(cli.user_cookie, Path::new("cookies.json"));
         assert!(matches!(
             cli.command,
-            Commands::Server { ref bind, auth: false, .. } if bind == "127.0.0.1"
+            Commands::Server {
+                ref bind,
+                auth: false,
+                secure_session_cookie: false,
+                ..
+            } if bind == "127.0.0.1"
         ));
     }
 

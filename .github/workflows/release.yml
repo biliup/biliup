@@ -14,6 +14,9 @@ env:
 #  REPO_NAME: spectralops/rust-ci-release-template
 #  BREW_TAP: jondot/homebrew-tap
 
+permissions:
+  contents: read
+
 jobs:
   dist:
     name: Dist
@@ -69,39 +72,37 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           submodules: true
 
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
       - name: Build frontend
         run: |
           npm install
           npm run build
-      - name: Install ${{ matrix.rust }} toolchain
-        uses: actions-rs/toolchain@v1
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
-          target: ${{ matrix.target }}
-          override: true
+          targets: ${{ matrix.target }}
+
+      # actions-rs/cargo 已归档多年，改用 cross 官方安装方式
+      - name: Install cross
+        if: matrix.cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
 
       - name: Run cargo test
         if: matrix.build != 'aarch64-macos'
-        uses: actions-rs/cargo@v1
-        with:
-          use-cross: ${{ matrix.cross }}
-          command: test
-          args: --release --locked --target ${{ matrix.target }} -p biliup
+        shell: bash
+        run: ${{ matrix.cross && 'cross' || 'cargo' }} test --release --locked --target ${{ matrix.target }} -p biliup
 
       - name: Build release binary
-        uses: actions-rs/cargo@v1
-        with:
-          use-cross: ${{ matrix.cross }}
-          command: build
-          args: --release --locked --target ${{ matrix.target }} --bin biliup
+        shell: bash
+        run: ${{ matrix.cross && 'cross' || 'cargo' }} build --release --locked --target ${{ matrix.target }} --bin biliup
 
       - name: Strip release binary (linux and macos)
         if: matrix.build == 'x86_64-linux' || matrix.build == 'x86_64-macos'
@@ -120,7 +121,8 @@ jobs:
         shell: bash
         run: |
           mkdir dist
-          if [ "${{ matrix.os }}" = "windows-2019" ]; then
+          # 按运行器操作系统判断，matrix.os 的取值（windows-latest）永远不等于 windows-2019
+          if [ "${{ runner.os }}" = "Windows" ]; then
             cp "target/${{ matrix.target }}/release/$BIN_NAME.exe" "dist/"
           else
             cp "target/${{ matrix.target }}/release/$BIN_NAME" "dist/"
@@ -135,9 +137,12 @@ jobs:
     name: Publish
     needs: [dist]
     runs-on: ubuntu-latest
+    permissions:
+      # 向 Release 上传产物需要写权限
+      contents: write
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           submodules: false
 
@@ -153,7 +158,7 @@ jobs:
           if [[ $GITHUB_REF == refs/tags/v* ]]; then
             name=${GITHUB_REF:10}
           fi
-          echo ::set-output name=val::$name
+          echo "val=$name" >> "$GITHUB_OUTPUT"
           echo TAG=$name >> $GITHUB_ENV
         id: tagname
 
@@ -168,6 +173,8 @@ jobs:
 
           for dir in bins-* ; do
               platform=${dir#"bins-"}
+              # 每次迭代重置，否则 exe 会从 windows 平台泄漏到后续平台
+              exe=""
               if [[ $platform =~ "windows" ]]; then
                   exe=".exe"
               fi
@@ -196,4 +203,4 @@ jobs:
       - name: Extract version
         id: extract-version
         run: |
-          printf "::set-output name=%s::%s\n" tag-name "${GITHUB_REF#refs/tags/}"
+          echo "tag-name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"

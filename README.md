@@ -1,61 +1,33 @@
 <div align="center">
+  <img src="https://docs.biliup.rs/home.png" alt="description" width="300" height="300"/>
+</div>
 
-<img src="public/logo.svg" alt="biliup logo" width="220"/>
+<div align="center">
 
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](http://www.python.org/download)
 [![PyPI](https://img.shields.io/pypi/v/biliup)](https://pypi.org/project/biliup)
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/biliup)](https://pypi.org/project/biliup)
-[![License](https://img.shields.io/github/license/Aluneu/biliup)](https://github.com/Aluneu/biliup/blob/master/LICENSE)
-[![GitHub Stars](https://img.shields.io/github/stars/Aluneu/biliup)](https://github.com/Aluneu/biliup/stargazers)
-[![GitHub Issues](https://img.shields.io/github/issues/Aluneu/biliup)](https://github.com/Aluneu/biliup/issues)
+[![License](https://img.shields.io/github/license/biliup/biliup)](https://github.com/biliup/biliup/blob/master/LICENSE)
+[![Telegram](https://img.shields.io/badge/Telegram-Group-blue.svg?logo=telegram)](https://t.me/+IkpIABHqy6U0ZTQ5)
+
+[![GitHub Issues](https://img.shields.io/github/issues/biliup/biliup?label=Issues)](https://github.com/biliup/biliup/issues)
+[![GitHub Stars](https://img.shields.io/github/stars/biliup/biliup)](https://github.com/biliup/biliup/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/biliup/biliup)](https://github.com/biliup/biliup/network)
 
 </div>
 
-## ✨ 功能
+## 🛠️ 功能
+* 提供 skill，让你的 Agent 成为 up 主: `npx skills add biliup/biliup`
+* 开箱即用，多种安装方式，提供可视化 WebUi 界面
+* 多主播录制/上传，24X7 无人值守运行，高自定义元信息
+* 作为自动化流程中的命令行工具封装使用
 
-- 🖥️ **可视化 WebUI**，开箱即用，无需记忆命令
-- 🔄 多平台直播**录制 / 自动上传**，7×24 无人值守
-- 🏷️ 高自定义元信息、多账号管理
-- 🤖 提供 Agent skill，让 AI 帮你投稿：`npx skills add biliup/biliup`
-- 🧩 也可作为 CLI 工具封装进自动化流程
+论坛：[BBS](https://bbs.biliup.rs)
 
-> 论坛：[BBS](https://bbs.biliup.rs)
+## 📜 更新日志
 
-## 🚀 快速开始
-
-### Windows
-下载最新 Release（含桌面端）：[biliup-app](https://github.com/Aluneu/biliup/releases/latest)
-
-### Linux / macOS
-1. 安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)
-2. 安装：`uv tool install biliup`
-3. 启动：`biliup server --auth`
-4. 打开 WebUI：`http://你的IP:19159`
-
-   后台运行：
-   ```shell
-   nohup biliup server --auth &
-   ```
-   > 开机自启等进阶配置见 [Linux 参考](https://biliup.github.io/biliup/docs/guide/introduction/#linuxxia-pei-zhi-kai-ji-zi-qi)
-
-### Termux
-详见 [Wiki](https://github.com/Aluneu/biliup/wiki/Termux-%E4%B8%AD%E4%BD%BF%E7%94%A8-biliup)
-
-## 📖 使用文档
-
-完整文档请访问 👉 **[doc.biliup.rs](https://doc.biliup.rs/)**
-
-常用命令：
-```shell
-biliup login    # 登录 B 站并保存登录信息
-biliup upload   # 上传视频
-biliup server   # 启动 Web 服务（默认端口 19159）
-```
-更多子命令与参数，执行 `biliup --help` 查看。
-
-## ⚠️ 免责声明
-
-> [!IMPORTANT]
+> [!IMPORTANT]  
+> **Disclaimer / 免责声明**
 > - 本项目仅供个人学习研究，不保证稳定性，不提供技术支持
 > - 使用本项目产生的一切后果由用户自行承担
 > - 禁止商业用途，请遵守版权及平台规定
@@ -65,17 +37,121 @@ biliup server   # 启动 Web 服务（默认端口 19159）
 > - Commercial use is strictly prohibited
 > - Please respect copyright and platform ToS
 
-## 📜 更新日志
-
 - **[更新日志 »](https://biliup.github.io/biliup/docs/guide/changelog)**
 
-## 🧑‍💻 开发
+## 📜 使用文档
+B 站命令行投稿工具，支持**短信登录**、**账号密码登录**、**扫码登录**、**浏览器登录**以及**网页Cookie登录**，并将登录后返回的 cookie 和 token 保存在 `cookie.json` 中，可用于其他项目。
+
+- 下载 Release: [biliupR](https://github.com/biliup/biliup/releases/latest)
+- 获取命令帮助 `biliup --help` 
+
+**文档地址**：<https://biliup.github.io/biliup-rs>
+```shell
+Upload video to bilibili.
+
+Usage: biliup [OPTIONS] <COMMAND>
+
+Commands:
+  login     登录B站并保存登录信息
+  renew     手动验证并刷新登录信息
+  upload    上传视频
+  append    是否要对某稿件追加视频
+  show      打印视频详情
+  comments  查看视频评论
+  reply     回复视频评论，默认只打印将要回复的内容
+  dump-flv  输出flv元数据
+  download  下载视频
+  server    启动web服务，默认端口19159
+  list      列出所有已上传的视频
+  help      Print this message or the help of the given subcommand(s)
+
+Options:
+  -p, --proxy <PROXY>              配置代理
+  -u, --user-cookie <USER_COOKIE>  登录信息文件 [default: cookies.json]
+      --rust-log <RUST_LOG>        [default: tower_http=debug,info]
+  -h, --help                       Print help
+  -V, --version                    Print version
+```
+启动录制服务
+```shell
+启动web服务，默认端口19159
+
+Usage: biliup server [OPTIONS]
+
+Options:
+  -b, --bind <BIND>            Specify bind address [default: 127.0.0.1]
+  -p, --port <PORT>            Port to use [default: 19159]
+      --auth                   开启登录密码认证
+      --secure-session-cookie  为会话 Cookie 附加 Secure 属性。仅当通过 HTTPS 反向代理访问 Web UI 时开启； 直接通过 HTTP 远程访问时开启会导致浏览器丢弃登录态
+  -c, --config <FILE>          使用 biliup 1.0.7 风格配置文件启动录制
+  -h, --help                   Print help
+```
+
+> [!IMPORTANT]
+> 自 [#1660](https://github.com/biliup/biliup/pull/1660) 起，`--bind` 的默认值由 `0.0.0.0` 改为 `127.0.0.1`，即**默认只监听本机**，局域网/公网无法直接访问。
+> 如需从其他设备访问，请加上 `--bind 0.0.0.0 --auth`，详见下方「🔓 远程访问」一节。Docker 镜像已内置该参数，不受影响。
+
+- [使用文档 »](https://docs.biliup.rs)
+
+## 🚀 快速开始
+
+### Windows
+- 下载 Release: [bbup-app_0.1.0_x64](https://github.com/biliup/biliup/releases/latest)
+
+### Linux 或 macOS
+1. 安装 [uv](https://docs.astral.sh/uv/getting-started/installation/) 
+2. 安装：`uv tool install biliup`
+3. 启动：`biliup server --auth`
+4. 访问 WebUI：`http://127.0.0.1:19159`（默认只监听本机，远程访问见下方说明）
+* 后台运行 
+  1. `nohup biliup server --auth &`
+  2. [请查看参考](https://biliup.github.io/biliup/docs/guide/introduction/#linuxxia-pei-zhi-kai-ji-zi-qi)
+### Termux
+- 详见[Wiki](https://github.com/biliup/biliup/wiki/Termux-%E4%B8%AD%E4%BD%BF%E7%94%A8-biliup)
+
+### 🔓 远程访问（监听 0.0.0.0）
+
+默认的 `127.0.0.1` 只允许本机访问。需要从其他设备访问时，显式指定 `--bind 0.0.0.0` 并开启 `--auth`：
+
+```shell
+biliup server --bind 0.0.0.0 --auth
+```
+
+首次打开 `http://your-ip:19159` 会引导设置管理员密码（用户名固定为 `biliup`），之后即可正常登录使用。
+
+> [!NOTE]
+> 绑定非回环地址时必须同时开启 `--auth`，否则会拒绝启动，避免无认证的 Web API 被暴露：
+>
+> ```
+> refusing to expose the unauthenticated Web API on 0.0.0.0:19159; use a loopback bind address or enable --auth
+> ```
+
+> [!WARNING]
+> 将 Web UI 暴露到公网存在风险，建议仅在可信局域网内使用，或置于反向代理之后。
+> 若通过 **HTTPS** 反向代理访问，请加上 `--secure-session-cookie`；直接以 HTTP 远程访问时**不要**加，否则浏览器会丢弃登录态（见 [#1669](https://github.com/biliup/biliup/pull/1669)）。
+
+#### Docker
+
+镜像已内置 `--bind 0.0.0.0 --auth`，开箱即用，无需额外配置：
+
+```shell
+docker compose up -d
+```
+
+打开 `http://your-ip:19159` 设置管理员密码即可。
+
+> [!IMPORTANT]
+> 若要自定义 `command`，必须带上 `--bind 0.0.0.0`。容器内若监听 `127.0.0.1`，宿主机的端口映射无法转发进容器，Web UI 将完全无法访问。
+
+---
+
+## 🧑‍💻开发
 
 <details>
 
 ### 架构概览
 
-Rust 后端 + 精简 Python 包 + Next.js 前端的混合架构。
+Rust后端 + 精简 Python 包 + Next.js前端的混合架构。
 
 ```mermaid
 graph TB
@@ -130,36 +206,36 @@ graph TB
     style BILI fill:#ffebee
     style STREAMS fill:#ffebee
 ```
+</details>
 
-### 前端
+### frontend
+
 1. 确保 Node.js 版本 ≥ 18
 2. 安装依赖：`npm i`
 3. 启动开发服务器：`npm run dev`
 4. 访问：`http://localhost:3000`
 
 ### Python
-1. 安装依赖 `maturin develop`
-2. `npm run build`
+
+1. 安装依赖 `maturin dev`
+2. `npm run build` 
 3. 启动 Biliup：`python3 -m biliup`
 
-### Rust CLI
+### Rust-cli
+
 1. `npm run build`
 2. 构建 `cargo build --release --bin biliup`
 3. 开发启动 BiliupR：`cargo run`
 
-</details>
+## 🤝Credits
+* Thanks `ykdl, youtube-dl, streamlink` provides downloader.
+* Thanks `THMonster/danmaku`.
 
-## 🤝 鸣谢
 
-- `ykdl`、`youtube-dl`、`streamlink` 提供下载能力
-- `THMonster/danmaku` 提供弹幕支持
-
-## 💴 捐赠
-
+## 💴捐赠
 <img src=".github/resource/Image.jpg" width="200" />
 
 [爱发电 »](https://afdian.com/a/biliup)
 
-## ⭐ Star History
-
-[![Star History Chart](https://star-history.dera.page/svg?repos=Aluneu/biliup&type=Date)](https://star-history.dera.page/#Aluneu/biliup&Date)
+## ⭐Stars
+[![Star History Chart](https://star-history.dera.page/svg?repos=biliup/biliup&type=Date)](https://star-history.dera.page/#biliup/biliup&Date)

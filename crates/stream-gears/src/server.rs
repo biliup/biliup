@@ -284,11 +284,13 @@ pub(crate) async fn _main(args: &[String]) -> AppResult<()> {
             bind,
             port,
             auth,
+            secure_session_cookie,
             config,
         } => {
             biliup_cli::run_with_cookie(
                 (&bind, port),
                 auth,
+                secure_session_cookie,
                 reload_handle,
                 config,
                 cli.user_cookie,

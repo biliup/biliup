@@ -22,9 +22,28 @@ use tracing::{debug, error, info, warn};
 use crate::error::{DanmakuError, Result};
 use crate::output::xml::{XmlWriter, XmlWriterConfig};
 use crate::protocols::{
-    ConnectionInfo, ConnectionTransport, HeartbeatData, Platform, PlatformContext,
+    ConnectionInfo, ConnectionTransport, DecodeResult, HeartbeatData, Platform, PlatformContext,
     RegistrationData, create_platform,
 };
+
+/// 捕获平台解码器的 panic，降级为解码错误：
+/// 录制任务在 tokio::spawn 中运行，panic 会直接杀死任务且没有任何
+/// 重启机制，一条畸形消息就会让弹幕录制静默永久停止。
+fn decode_message_guarded(
+    platform: &dyn Platform,
+    data: &[u8],
+    platform_name: &str,
+) -> Result<DecodeResult> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| platform.decode_message(data)))
+        .unwrap_or_else(|_| {
+            error!(
+                "{}: decoder panicked on a {}-byte message, skipping it",
+                platform_name,
+                data.len()
+            );
+            Err(DanmakuError::Decode("decoder panicked".to_string()))
+        })
+}
 
 /// Configuration for the danmaku recorder.
 #[derive(Debug, Clone)]
@@ -433,7 +452,7 @@ impl DanmakuRecorder {
                             };
 
                             // Decode message
-                            match self.platform.decode_message(&data) {
+                            match decode_message_guarded(self.platform.as_ref(), &data, platform_name) {
                                 Ok(result) => {
                                     // Write decoded events
                                     for event in result.events {
@@ -545,7 +564,7 @@ impl DanmakuRecorder {
 
                 frame = read_tcp_frame(&mut tcp_reader) => {
                     let frame = frame?;
-                    match self.platform.decode_message(&frame) {
+                    match decode_message_guarded(self.platform.as_ref(), &frame, platform_name) {
                         Ok(result) => {
                             for event in result.events {
                                 if let Err(e) = xml_writer.write_event(&event) {

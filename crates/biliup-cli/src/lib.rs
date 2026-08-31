@@ -16,7 +16,6 @@ use crate::server::infrastructure::models::upload_streamer::{
 };
 use crate::server::infrastructure::repositories;
 use crate::server::infrastructure::service_register::ServiceRegister;
-use crate::server::infrastructure::users::Backend;
 use clap::ValueEnum;
 use error_stack::{Report, ResultExt, bail};
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -38,6 +37,7 @@ pub async fn run(
     run_with_cookie(
         addr,
         auth,
+        false,
         log_handle,
         config_path,
         PathBuf::from("cookies.json"),
@@ -48,6 +48,7 @@ pub async fn run(
 pub async fn run_with_cookie(
     addr: (&str, u16),
     auth: bool,
+    secure_session_cookie: bool,
     log_handle: LogHandle,
     config_path: Option<PathBuf>,
     user_cookie: PathBuf,
@@ -71,7 +72,6 @@ pub async fn run_with_cookie(
     let conn_pool = ConnectionManager::new_pool("data/data.sqlite3")
         .await
         .attach("could not initialize the database connection pool")?;
-    validate_remote_auth_bootstrap(addr, auth, Backend::new(conn_pool.clone()).exists().await?)?;
 
     if let Some(configuration) =
         repositories::register_bilibili_cookie(&conn_pool, &user_cookie).await?
@@ -111,7 +111,7 @@ pub async fn run_with_cookie(
     }
 
     tracing::info!("migrations successfully ran, initializing axum server...");
-    ApplicationController::serve(&addr, auth, service_register)
+    ApplicationController::serve(&addr, auth, secure_session_cookie, service_register)
         .await
         .attach("could not initialize application routes")?;
     Ok(())
@@ -122,20 +122,6 @@ fn validate_server_exposure(addr: SocketAddr, auth: bool) -> AppResult<()> {
         bail!(AppError::Custom(format!(
             "refusing to expose the unauthenticated Web API on {addr}; use a loopback bind address or enable --auth"
         )));
-    }
-    Ok(())
-}
-
-fn validate_remote_auth_bootstrap(
-    addr: SocketAddr,
-    auth: bool,
-    administrator_exists: bool,
-) -> AppResult<()> {
-    if auth && !addr.ip().is_loopback() && !administrator_exists {
-        bail!(AppError::Custom(
-            "refusing remote first-user bootstrap; initialize the Web administrator on a loopback bind before exposing the authenticated server"
-                .into(),
-        ));
     }
     Ok(())
 }
@@ -378,7 +364,7 @@ pub enum UploadLine {
 
 #[cfg(test)]
 mod server_exposure_tests {
-    use super::{validate_remote_auth_bootstrap, validate_server_exposure};
+    use super::validate_server_exposure;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
     #[test]
@@ -398,17 +384,16 @@ mod server_exposure_tests {
         );
     }
 
+    /// The Web administrator is bootstrapped over the network on first visit, so
+    /// an authenticated server must start on a non-loopback bind even when no
+    /// administrator exists yet — a container or headless host has no way to
+    /// reach a loopback-only bind to initialize one.
     #[test]
-    fn authenticated_server_can_bind_non_loopback_after_local_bootstrap() {
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 19159);
-        assert!(validate_server_exposure(addr, true).is_ok());
-        assert!(validate_remote_auth_bootstrap(addr, true, false).is_err());
-        assert!(validate_remote_auth_bootstrap(addr, true, true).is_ok());
+    fn authenticated_server_can_bind_non_loopback_before_bootstrap() {
         assert!(
-            validate_remote_auth_bootstrap(
-                SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 19159),
+            validate_server_exposure(
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 19159),
                 true,
-                false,
             )
             .is_ok()
         );

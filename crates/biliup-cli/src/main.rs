@@ -154,11 +154,13 @@ async fn main() -> AppResult<()> {
             bind,
             port,
             auth,
+            secure_session_cookie,
             config,
         } => {
             biliup_cli::run_with_cookie(
                 (&bind, port),
                 auth,
+                secure_session_cookie,
                 console_reload_handle,
                 config,
                 user_cookie,
