@@ -90,20 +90,6 @@ try {
 
 If the target directory is not on `PATH`, tell the user to run `biliup` by its full path or add the target directory to `PATH`.
 
-### Windows winget
-
-Use this path when the user is on Windows and wants to install from the command line:
-
-```bash
-winget install biliup
-```
-
-Then verify:
-
-```bash
-biliup --help
-```
-
 ### Linux or macOS uv
 
 Use this path when the user is on Linux or macOS and has `uv` available:
