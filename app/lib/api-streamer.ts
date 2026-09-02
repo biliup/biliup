@@ -159,3 +159,19 @@ export interface FileList {
 	updateTime: number;
 	size: number;
 }
+
+export interface StreamerInfo {
+	id: number;
+	name: string;
+	url: string;
+	title: string;
+	/** Unix 时间戳（秒），由后端 ts_seconds 序列化 */
+	date: number;
+	live_cover_path: string;
+}
+
+export interface BiliupStatus {
+	downloader_status?: Record<string, string>;
+	uploader_status?: Record<string, string>;
+	config?: Record<string, any>;
+}

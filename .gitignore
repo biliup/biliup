@@ -38,6 +38,7 @@ biliup/**/public
 !package-lock.json
 qrcode.png
 *.log
+*.tsbuildinfo
 /*.ts
 /biliup/stream-gears/
 data/
