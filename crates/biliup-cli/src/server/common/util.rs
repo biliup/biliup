@@ -8,6 +8,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::{error, info};
 use url::Url;
+use regex::Regex;
+use std::sync::OnceLock;
 
 /// 录制器配置结构体
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -112,6 +114,44 @@ fn sanitize_filename(name: &str) -> String {
     }
     let out = out.trim_end_matches([' ', '.']).to_string();
     if out.is_empty() { "_".to_string() } else { out }
+}
+
+/// 从 `Command` 的 Debug 输出里抠掉 Cookie / OAuth / 密码，避免写进 ds_update.log。
+pub fn redact_process_debug(cmd: &impl std::fmt::Debug) -> String {
+    redact_secrets(&format!("{cmd:?}"))
+}
+
+/// 脱敏命令行或日志文本中的登录态。
+pub fn redact_secrets(text: &str) -> String {
+    let assign = assign_secret_re();
+    let header = header_secret_re();
+    let oauth = oauth_secret_re();
+    let out = assign.replace_all(text, "$1=[redacted]");
+    let out = header.replace_all(&out, "$1=[redacted]");
+    oauth.replace_all(&out, "$1 [redacted]").into_owned()
+}
+
+fn assign_secret_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r#"(?i)(SESSDATA|bili_jct|DedeUserID(?:__ckMd5)?|sid|sessionid|auth-token|ttwid|__ac_nonce|oauth|password)\s*=\s*[^;\s,"]+"#,
+        )
+        .expect("assign secret regex")
+    })
+}
+
+fn header_secret_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?i)(cookie|authorization)\s*[:=]\s*(?:"[^"]*"|[^\s"]+)"#)
+            .expect("header secret regex")
+    })
+}
+
+fn oauth_secret_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)(oauth)\s+\S+").expect("oauth secret regex"))
 }
 
 /// 生成弹幕文件名模板（包含时间格式占位符），并清洗非法字符
@@ -281,5 +321,28 @@ impl FileValidator {
         } else {
             bail!(AppError::Custom("No file extension found".to_string()))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redact_secrets_strips_sessdata_and_cookie_header() {
+        let raw = r#"ffmpeg -headers "Cookie: SESSDATA=abc; bili_jct=def" Authorization=OAuth leaked-token"#;
+        let redacted = redact_secrets(raw);
+        assert!(!redacted.contains("abc"), "{redacted}");
+        assert!(!redacted.contains("def"), "{redacted}");
+        assert!(!redacted.contains("leaked-token"), "{redacted}");
+        assert!(redacted.contains("SESSDATA=[redacted]"), "{redacted}");
+        assert!(redacted.contains("bili_jct=[redacted]"), "{redacted}");
+        assert!(redacted.contains("OAuth [redacted]"), "{redacted}");
+    }
+
+    #[test]
+    fn redact_secrets_keeps_unrelated_args() {
+        let raw = "streamlink --hls-duration 01:00:00 https://example.com/live best";
+        assert_eq!(redact_secrets(raw), raw);
     }
 }
