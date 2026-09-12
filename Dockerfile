@@ -81,16 +81,18 @@ RUN set -eux; \
 	\
 	arch="$(dpkg --print-architecture)"; arch="${arch##*-}"; \
 	# 固定 FFmpeg 到确定版本并校验 SHA-256：
-	# latest 是滚动 tag，资产每日重建，既不可复现也无法防篡改
-	url='https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-29-13-12/ffmpeg-n8.1.2-50-g1a748fe2cd-'; \
+	# latest 是滚动 tag，资产每日重建，既不可复现也无法防篡改。
+	# 只能固定到「每月最后一天」的 autobuild：BtbN 长期保留月末构建，
+	# 其余每日构建约两周后删除，固定到它们会让镜像构建 404。
+	url='https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-31-13-27/ffmpeg-n8.1.2-50-g1a748fe2cd-'; \
 	case "$arch" in \
 		'amd64') \
 			url="${url}linux64-gpl-8.1.tar.xz"; \
-			sha256='be243f2520d6e7e92c82b015ed72a3f5b57c7970801c0d51f031457122653c76'; \
+			sha256='c733b4b2951e5957e15505f788b2c65a7a41b6da4b289e295852cc38079b4d2b'; \
 		;; \
 		'arm64') \
 			url="${url}linuxarm64-gpl-8.1.tar.xz"; \
-			sha256='0df9277976f71f36b31a4de9f6657a1fbbf32ce2273594c18f19b92fbbbde1ce'; \
+			sha256='ae5da4f51b9052390f414005f8ab26c1eed1268f327cce7cb79aa076b29bd66e'; \
 		;; \
 		*) \
 			useApt=true; \
