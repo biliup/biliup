@@ -197,9 +197,29 @@ pub fn parse_time(segment_time: &str) -> std::time::Duration {
 
 #[cfg(test)]
 mod tests {
-    use crate::server::common::util::{Recorder, media_ext_from_url};
+    use crate::server::common::util::{Recorder, media_ext_from_url, path_with_suffix};
     use crate::server::infrastructure::models::StreamerInfo;
     use chrono::Utc;
+    use std::path::PathBuf;
+
+    #[test]
+    fn path_with_suffix_keeps_dots_in_basename() {
+        assert_eq!(
+            path_with_suffix("Mr.Beast", "flv"),
+            PathBuf::from("Mr.Beast.flv")
+        );
+        assert_eq!(
+            path_with_suffix("show.1.5x", ".mp4"),
+            PathBuf::from("show.1.5x.mp4")
+        );
+    }
+
+    #[test]
+    fn path_with_suffix_does_not_use_with_extension_truncation() {
+        let truncated = PathBuf::from("Mr.Beast").with_extension("flv");
+        assert_eq!(truncated, PathBuf::from("Mr.flv"));
+        assert_ne!(path_with_suffix("Mr.Beast", "flv"), truncated);
+    }
 
     #[test]
     fn format_title_preserves_filename_invalid_characters() {
@@ -292,29 +312,5 @@ impl FileValidator {
         } else {
             bail!(AppError::Custom("No file extension found".to_string()))
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn path_with_suffix_keeps_dots_in_basename() {
-        assert_eq!(
-            path_with_suffix("Mr.Beast", "flv"),
-            PathBuf::from("Mr.Beast.flv")
-        );
-        assert_eq!(
-            path_with_suffix("show.1.5x", ".mp4"),
-            PathBuf::from("show.1.5x.mp4")
-        );
-    }
-
-    #[test]
-    fn path_with_suffix_does_not_use_with_extension_truncation() {
-        let truncated = PathBuf::from("Mr.Beast").with_extension("flv");
-        assert_eq!(truncated, PathBuf::from("Mr.flv"));
-        assert_ne!(path_with_suffix("Mr.Beast", "flv"), truncated);
     }
 }
