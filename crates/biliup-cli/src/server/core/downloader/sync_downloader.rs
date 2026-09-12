@@ -218,9 +218,7 @@ pub async fn pump_chunks<R: tokio::io::AsyncRead + Unpin>(
         }
         if incoming.is_empty() {
             let read = tokio::select! {
-                _ = token.cancelled() => {
-                    return Err(AppError::Custom("边录边传录制已取消".into()).into());
-                }
+                _ = token.cancelled() => break,
                 read = stdout.read(&mut tmp) => read,
             };
             match read {
@@ -233,9 +231,7 @@ pub async fn pump_chunks<R: tokio::io::AsyncRead + Unpin>(
         }
         let take = remaining.min(incoming.len() as u64) as usize;
         tokio::select! {
-            _ = token.cancelled() => {
-                return Err(AppError::Custom("边录边传录制已取消".into()).into());
-            }
+            _ = token.cancelled() => break,
             result = save.write_all(&incoming[..take]) => {
                 result.change_context(AppError::Unknown)?;
             }
@@ -264,9 +260,7 @@ pub async fn pump_chunks<R: tokio::io::AsyncRead + Unpin>(
     {
         let len = chunk.len() as u64;
         let sent = tokio::select! {
-            _ = token.cancelled() => {
-                return Err(AppError::Custom("边录边传录制已取消".into()).into());
-            }
+            _ = token.cancelled() => false,
             result = tx.send(chunk) => result.is_ok(),
         };
         if sent {
@@ -587,7 +581,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pump_cancellation_aborts_recording() {
+    async fn pump_cancellation_keeps_partial_file() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("cancel.bin");
         // simplex 读端在写端不写入时保持 pending，确保 select 只能命中取消分支
@@ -595,8 +589,11 @@ mod tests {
         let (tx, _rx) = async_channel::bounded::<Bytes>(6);
         let token = CancellationToken::new();
         token.cancel();
-        let result = pump_chunks(reader, Vec::new(), 4, 16, path, tx, token).await;
-        assert!(result.is_err(), "取消后 pump 必须返回错误而不是伪装成功");
+        let result = pump_chunks(reader, Vec::new(), 4, 16, path.clone(), tx, token).await;
+        let pump = result.expect("取消应结束当前段并保留已写入字节，而不是整段报错删除");
+        assert_eq!(pump.actual_size, 0);
+        assert!(!pump.stream_complete);
+        assert!(path.exists());
     }
 
     #[tokio::test]

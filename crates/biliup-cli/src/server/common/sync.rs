@@ -145,7 +145,7 @@ async fn run_inner(
     let _ = downloader.stop().await;
     cleanup_pending(&mut pending, &mut ready).await;
 
-    if result.is_ok() && !token.is_cancelled() {
+    if result.is_ok() {
         let paths = {
             let mut state = session.lock().await;
             std::mem::take(&mut state.postprocess_paths)
@@ -178,10 +178,10 @@ async fn run_loop(
 
     loop {
         if token.is_cancelled() {
-            return Ok(DownloadStatus::StreamEnded);
+            break;
         }
 
-        collect_finished(pending, ready, upload_ctx, token).await?;
+        collect_finished(pending, ready, upload_ctx).await?;
         commit_ready(
             ready,
             session,
@@ -196,7 +196,7 @@ async fn run_loop(
             let work = pending
                 .pop_front()
                 .ok_or_else(|| AppError::Custom("边录边传待提交队列状态错误".into()))?;
-            let segment = finish_pending(work, upload_ctx, token).await?;
+            let segment = finish_pending(work, upload_ctx).await?;
             ready.insert(segment.seq, segment);
             commit_ready(
                 ready,
@@ -242,7 +242,7 @@ async fn run_loop(
                 break;
             }
             tokio::select! {
-                _ = token.cancelled() => return Ok(DownloadStatus::StreamEnded),
+                _ = token.cancelled() => break,
                 _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
             }
             continue;
@@ -307,7 +307,7 @@ async fn run_loop(
     }
 
     while let Some(work) = pending.pop_front() {
-        let segment = finish_pending(work, upload_ctx, token).await?;
+        let segment = finish_pending(work, upload_ctx).await?;
         ready.insert(segment.seq, segment);
         commit_ready(
             ready,
@@ -326,13 +326,12 @@ async fn collect_finished(
     pending: &mut VecDeque<PendingSegment>,
     ready: &mut BTreeMap<u64, ReadySegment>,
     upload_ctx: &UploadContext,
-    token: &CancellationToken,
 ) -> AppResult<()> {
     let mut index = 0;
     while index < pending.len() {
         if pending[index].upload.is_finished() {
             let work = pending.remove(index).expect("pending index must exist");
-            let segment = finish_pending(work, upload_ctx, token).await?;
+            let segment = finish_pending(work, upload_ctx).await?;
             ready.insert(segment.seq, segment);
         } else {
             index += 1;
@@ -342,18 +341,10 @@ async fn collect_finished(
 }
 
 async fn finish_pending(
-    mut work: PendingSegment,
+    work: PendingSegment,
     upload_ctx: &UploadContext,
-    token: &CancellationToken,
 ) -> AppResult<ReadySegment> {
-    let uploaded = tokio::select! {
-        _ = token.cancelled() => {
-            work.upload.abort();
-            let _ = work.upload.await;
-            return Err(AppError::Custom("边录边传上传已取消".into()).into());
-        }
-        result = &mut work.upload => result,
-    };
+    let uploaded = work.upload.await;
 
     let video = if work.pump.stream_complete {
         match uploaded {
@@ -361,12 +352,7 @@ async fn finish_pending(
                 if uploaded.uploaded_size() == uploaded.declared_size()
                     && uploaded.uploaded_size() == work.pump.actual_size =>
             {
-                match tokio::select! {
-                    _ = token.cancelled() => {
-                        return Err(AppError::Custom("边录边传 complete 已取消".into()).into());
-                    }
-                    result = complete_byte_stream(uploaded) => result,
-                } {
+                match complete_byte_stream(uploaded).await {
                     Ok(video) => Some(video),
                     Err(error) => {
                         warn!(seq = work.seq, ?error, "UPOS complete 失败，按临时文件重传");
@@ -401,14 +387,7 @@ async fn finish_pending(
 
     let video = match video {
         Some(video) => video,
-        None => {
-            tokio::select! {
-                _ = token.cancelled() => {
-                    return Err(AppError::Custom("边录边传文件回退上传已取消".into()).into());
-                }
-                result = upload_single_file(&work.file.path, upload_ctx) => result?,
-            }
-        }
+        None => upload_single_file(&work.file.path, upload_ctx).await?,
     };
     Ok(ReadySegment {
         seq: work.seq,
