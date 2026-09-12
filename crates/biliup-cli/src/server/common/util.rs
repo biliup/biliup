@@ -122,36 +122,49 @@ pub fn redact_process_debug(cmd: &impl std::fmt::Debug) -> String {
 }
 
 /// 脱敏命令行或日志文本中的登录态。
+///
+/// `Command` 的 Debug 输出把每个 argv 用双引号包起来，所以头部值一律吃到下一个引号：
+/// `"Cookie: SESSDATA=..; bili_jct=..\r\n"`、`"Authorization=OAuth <token>"` 整段变成 `[redacted]`。
 pub fn redact_secrets(text: &str) -> String {
-    let assign = assign_secret_re();
-    let header = header_secret_re();
-    let oauth = oauth_secret_re();
-    let out = assign.replace_all(text, "$1=[redacted]");
-    let out = header.replace_all(&out, "$1=[redacted]");
-    oauth.replace_all(&out, "$1 [redacted]").into_owned()
+    let out = header_secret_re().replace_all(text, "$1=[redacted]");
+    let out = flag_secret_re().replace_all(&out, "$1\" \"[redacted]\"");
+    let out = assign_secret_re().replace_all(&out, "$1=[redacted]");
+    oauth_secret_re()
+        .replace_all(&out, "$1 [redacted]")
+        .into_owned()
 }
 
+/// `Cookie: ...` / `Authorization=...` 头部，值吃到引号或行尾。
+fn header_secret_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?i)\b(cookie|authorization)\s*[:=]\s*[^"\n]*"#).expect("header secret regex")
+    })
+}
+
+/// `"--niconico-password" "hunter2"` 这类把密钥放在下一个 argv 的开关。
+fn flag_secret_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?i)(--?[\w-]*(?:password|passwd|token)[\w-]*)"\s+"[^"]*""#)
+            .expect("flag secret regex")
+    })
+}
+
+/// 裸露在文本里的 `key=value` 登录态。不含 `sid`：斗鱼直链的 `&sid=` 不是密钥。
 fn assign_secret_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(
-            r#"(?i)(SESSDATA|bili_jct|DedeUserID(?:__ckMd5)?|sid|sessionid|auth-token|ttwid|__ac_nonce|oauth|password)\s*=\s*[^;\s,"]+"#,
+            r#"(?i)\b(SESSDATA|bili_jct|DedeUserID(?:__ckMd5)?|sessionid|auth-token|ttwid|__ac_nonce|passwd|password)\s*=\s*[^;\s,"]+"#,
         )
         .expect("assign secret regex")
     })
 }
 
-fn header_secret_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r#"(?i)(cookie|authorization)\s*[:=]\s*(?:"[^"]*"|[^\s"]+)"#)
-            .expect("header secret regex")
-    })
-}
-
 fn oauth_secret_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"(?i)(oauth)\s+\S+").expect("oauth secret regex"))
+    RE.get_or_init(|| Regex::new(r#"(?i)\b(oauth)\s+[^\s"]+"#).expect("oauth secret regex"))
 }
 
 /// 生成弹幕文件名模板（包含时间格式占位符），并清洗非法字符
@@ -226,9 +239,44 @@ pub fn parse_time(segment_time: &str) -> std::time::Duration {
 
 #[cfg(test)]
 mod tests {
-    use crate::server::common::util::{Recorder, media_ext_from_url};
+    use crate::server::common::util::{Recorder, media_ext_from_url, redact_secrets};
     use crate::server::infrastructure::models::StreamerInfo;
     use chrono::Utc;
+
+    #[test]
+    fn redact_secrets_strips_ffmpeg_cookie_header() {
+        // tokio Command 的 Debug 形态：每个 argv 一对双引号
+        let raw = r#""ffmpeg" "-headers" "Cookie: SESSDATA=abc123; bili_jct=def456\r\n" "-i" "https://cdn.example.com/live.flv?sid=1""#;
+        let redacted = redact_secrets(raw);
+        assert!(!redacted.contains("abc123"), "{redacted}");
+        assert!(!redacted.contains("def456"), "{redacted}");
+        assert!(redacted.contains(r#""Cookie=[redacted]""#), "{redacted}");
+        // 直链和非密钥参数原样保留，便于排障
+        assert!(
+            redacted.contains(r#""https://cdn.example.com/live.flv?sid=1""#),
+            "{redacted}"
+        );
+    }
+
+    #[test]
+    fn redact_secrets_strips_streamlink_oauth_and_password_flags() {
+        let raw = r#""streamlink" "--twitch-api-header" "Authorization=OAuth tok3n" "--niconico-password" "hunter2" "https://twitch.tv/x" "best""#;
+        let redacted = redact_secrets(raw);
+        assert!(!redacted.contains("tok3n"), "{redacted}");
+        assert!(!redacted.contains("hunter2"), "{redacted}");
+        assert!(redacted.contains(r#""Authorization=[redacted]""#), "{redacted}");
+        assert!(
+            redacted.contains(r#""--niconico-password" "[redacted]""#),
+            "{redacted}"
+        );
+        assert!(redacted.contains(r#""https://twitch.tv/x""#), "{redacted}");
+    }
+
+    #[test]
+    fn redact_secrets_keeps_unrelated_args() {
+        let raw = r#""streamlink" "--hls-duration" "01:00:00" "https://example.com/live?sid=42" "best""#;
+        assert_eq!(redact_secrets(raw), raw);
+    }
 
     #[test]
     fn format_title_preserves_filename_invalid_characters() {
@@ -321,28 +369,5 @@ impl FileValidator {
         } else {
             bail!(AppError::Custom("No file extension found".to_string()))
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn redact_secrets_strips_sessdata_and_cookie_header() {
-        let raw = r#"ffmpeg -headers "Cookie: SESSDATA=abc; bili_jct=def" Authorization=OAuth leaked-token"#;
-        let redacted = redact_secrets(raw);
-        assert!(!redacted.contains("abc"), "{redacted}");
-        assert!(!redacted.contains("def"), "{redacted}");
-        assert!(!redacted.contains("leaked-token"), "{redacted}");
-        assert!(redacted.contains("SESSDATA=[redacted]"), "{redacted}");
-        assert!(redacted.contains("bili_jct=[redacted]"), "{redacted}");
-        assert!(redacted.contains("OAuth [redacted]"), "{redacted}");
-    }
-
-    #[test]
-    fn redact_secrets_keeps_unrelated_args() {
-        let raw = "streamlink --hls-duration 01:00:00 https://example.com/live best";
-        assert_eq!(redact_secrets(raw), raw);
     }
 }
