@@ -51,14 +51,23 @@ impl Recorder {
     pub fn generate_filename(&self, suffix: &str) -> String {
         let template = self.filename_template();
         let mut t = Local::now();
-
-        loop {
-            let base = t.format(&template).to_string();
-            if !self.exists_with_suffix(&base, suffix) {
-                return base;
+        let mut last = String::new();
+        // Path::with_extension 会截掉最后一个点之后的部分：`Mr.Beast` + flv → `Mr.flv`。
+        // 冲突检测一旦永远命中已有文件，旧实现的 `loop` 会占死 tokio 线程且无法 stop。
+        for attempt in 0..10_000u32 {
+            let formatted = t.format(&template).to_string();
+            let candidate = if attempt == 0 || formatted != last {
+                formatted.clone()
+            } else {
+                format!("{formatted}_{attempt}")
+            };
+            if !path_with_suffix(&candidate, suffix).exists() {
+                return candidate;
             }
+            last = formatted;
             t += Duration::seconds(1);
         }
+        format!("{}_{}", t.format(&template), std::process::id())
     }
 
     /// 生成“基名”（不带扩展名）
@@ -90,12 +99,14 @@ impl Recorder {
 
     /// 直接生成带扩展名的完整路径（当前目录下）
     pub fn generate_path(&self, suffix: &str) -> PathBuf {
-        PathBuf::from(self.generate_filename(suffix)).with_extension(suffix)
+        path_with_suffix(&self.generate_filename(suffix), suffix)
     }
+}
 
-    fn exists_with_suffix(&self, base: &str, suffix: &str) -> bool {
-        Path::new(base).with_extension(&suffix).exists()
-    }
+/// 拼接基名与后缀。不能用 `Path::with_extension`：基名含 `.` 时会截断。
+pub(crate) fn path_with_suffix(base: &str, suffix: &str) -> PathBuf {
+    let suffix = suffix.trim_start_matches('.');
+    PathBuf::from(format!("{base}.{suffix}"))
 }
 
 /// 非法字符清洗（最小可用实现）
@@ -281,5 +292,29 @@ impl FileValidator {
         } else {
             bail!(AppError::Custom("No file extension found".to_string()))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn path_with_suffix_keeps_dots_in_basename() {
+        assert_eq!(
+            path_with_suffix("Mr.Beast", "flv"),
+            PathBuf::from("Mr.Beast.flv")
+        );
+        assert_eq!(
+            path_with_suffix("show.1.5x", ".mp4"),
+            PathBuf::from("show.1.5x.mp4")
+        );
+    }
+
+    #[test]
+    fn path_with_suffix_does_not_use_with_extension_truncation() {
+        let truncated = PathBuf::from("Mr.Beast").with_extension("flv");
+        assert_eq!(truncated, PathBuf::from("Mr.flv"));
+        assert_ne!(path_with_suffix("Mr.Beast", "flv"), truncated);
     }
 }
