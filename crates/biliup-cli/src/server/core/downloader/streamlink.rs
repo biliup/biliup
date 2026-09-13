@@ -1,4 +1,5 @@
 use crate::server::core::downloader::{DownloadConfig, DownloadStatus, SegmentEvent, SegmentInfo};
+use crate::server::common::util::redact_process_debug;
 use crate::server::errors::{AppError, AppResult};
 use error_stack::ResultExt;
 use std::collections::HashMap;
@@ -67,7 +68,7 @@ impl Streamlink {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
-        info!(cmd = ?cmd, "Starting streamlink download");
+        info!(cmd = %redact_process_debug(&cmd), "Starting streamlink download");
         let child = cmd.spawn().change_context(AppError::Unknown)?;
         let status = spawn_log(child, &self.process_handle).await?;
 

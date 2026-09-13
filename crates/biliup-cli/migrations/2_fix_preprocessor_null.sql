@@ -30,7 +30,9 @@ UPDATE livestreamers
 SET opt_args = null
 WHERE opt_args = '' OR opt_args = 'null';
 
--- 修复 uploadstreamers 表的 JSON 字段
-UPDATE uploadstreamers 
-SET tags = null
+-- 修复 uploadstreamers 表的 JSON 字段。
+-- tags 列为 JSON NOT NULL，不能写成 SQL NULL，否则升级到此迁移会直接失败。
+-- 空字符串 / 错误的 "null" 文本统一归一成空数组。
+UPDATE uploadstreamers
+SET tags = '[]'
 WHERE tags = '' OR tags = 'null';

@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Instant;
 use tokio::pin;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 // 辅助结构体
 #[derive(Clone)]
@@ -115,9 +115,15 @@ pub(crate) async fn initialize_upload_context(
         .user_cookie
         .clone()
         .unwrap_or("cookies.json".to_string());
-    let bilibili = login_by_cookies(&cookie_file, None)
-        .await
-        .change_context(AppError::Unknown)?;
+    let bilibili = login_by_cookies(&cookie_file, None).await;
+    let bilibili = match bilibili {
+        Err(Kind::IO(_)) => bilibili.change_context_lazy(|| {
+            AppError::Custom(format!("open cookies file: {cookie_file}"))
+        })?,
+        _ => bilibili.change_context_lazy(|| {
+            AppError::Custom(format!("login by cookies file failed: {cookie_file}"))
+        })?,
+    };
 
     // 获取上传线路
     let line = get_upload_line(&client.client, &config.lines).await?;
@@ -139,7 +145,14 @@ async fn get_upload_line(client: &reqwest::Client, line: &str) -> AppResult<Line
         "alia" => line::alia(),
         "estx" => line::estx(),
         "akbd" => line::akbd(),
-        _ => Probe::probe(client).await.unwrap_or_default(),
+        _ => match Probe::probe(client).await {
+            Ok(line) => line,
+            Err(e) => {
+                let fallback = Line::default();
+                warn!(error = %e, ?fallback, "AUTO 线路测速失败，回退到默认线路");
+                fallback
+            }
+        },
     };
     Ok(line)
 }
@@ -365,6 +378,28 @@ fn resolve_source(copyright_source: Option<&str>, fallback_url: &str) -> String 
     }
 }
 
+/// 把配置里的 `dtime` 转成 B 站要求的 10 位 Unix 时间戳。
+///
+/// Web UI / Python 版存的是**延迟秒数**（提交后再等这么久公开），B 站接口要的是绝对时间。
+/// 已经是 Unix 时间戳（≥ 1_000_000_000）的值原样透传，避免 CLI `--dtime` 被加两次。
+pub(crate) fn scheduled_publish_ts(dtime: Option<u32>, now_unix: u64) -> Option<u32> {
+    let value = dtime?;
+    const UNIX_TS_FLOOR: u32 = 1_000_000_000; // 2001-09-09
+    let ts = if value >= UNIX_TS_FLOOR {
+        value as u64
+    } else {
+        now_unix.saturating_add(value as u64)
+    };
+    u32::try_from(ts).ok()
+}
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 pub(crate) async fn build_studio(
     upload_config: &UploadStreamer,
     bilibili: &BiliBili,
@@ -374,7 +409,7 @@ pub(crate) async fn build_studio(
     // 使用 Builder 模式简化构建
     let mut studio: Studio = Studio::builder()
         .desc(recorder.format(&upload_config.description.clone().unwrap_or_default()))
-        .maybe_dtime(upload_config.dtime)
+        .maybe_dtime(scheduled_publish_ts(upload_config.dtime, now_unix()))
         .maybe_copyright(upload_config.copyright)
         .cover(upload_config.cover_path.clone().unwrap_or_default())
         .dynamic(upload_config.dynamic.clone().unwrap_or_default())
@@ -456,7 +491,14 @@ pub async fn upload(
         Some(UploadLine::Alia) => line::alia(),
         Some(UploadLine::Estx) => line::estx(),
         Some(UploadLine::Akbd) => line::akbd(),
-        _ => Probe::probe(&client.client).await.unwrap_or_default(),
+        _ => match Probe::probe(&client.client).await {
+            Ok(line) => line,
+            Err(e) => {
+                let fallback = Line::default();
+                warn!(error = %e, ?fallback, "AUTO 线路测速失败，回退到默认线路");
+                fallback
+            }
+        },
     };
     for video_path in video_paths {
         println!(
@@ -547,6 +589,28 @@ mod tests {
             resolve_source(Some("  https://b23.tv/abc  "), LIVE_URL),
             "https://b23.tv/abc"
         );
+    }
+
+    #[test]
+    fn scheduled_publish_ts_adds_delay_seconds() {
+        // UI 选 4 小时后公开：存 14400，投稿时应写成 now+14400
+        assert_eq!(
+            scheduled_publish_ts(Some(4 * 3600), 1_700_000_000),
+            Some(1_700_000_000 + 4 * 3600)
+        );
+    }
+
+    #[test]
+    fn scheduled_publish_ts_passes_through_unix_timestamp() {
+        assert_eq!(
+            scheduled_publish_ts(Some(1_700_014_400), 1_700_000_000),
+            Some(1_700_014_400)
+        );
+    }
+
+    #[test]
+    fn scheduled_publish_ts_none_stays_none() {
+        assert_eq!(scheduled_publish_ts(None, 1_700_000_000), None);
     }
 
     #[test]

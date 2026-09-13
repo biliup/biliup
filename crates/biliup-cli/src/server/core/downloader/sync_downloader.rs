@@ -1,4 +1,5 @@
 use crate::server::core::downloader::DownloadConfig;
+use crate::server::common::util::redact_process_debug;
 use crate::server::errors::{AppError, AppResult};
 use bytes::Bytes;
 use error_stack::ResultExt;
@@ -129,7 +130,7 @@ impl SyncDownloader {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        info!(cmd = ?cmd, "Starting sync-downloader ffmpeg");
+        info!(cmd = %redact_process_debug(&cmd), "Starting sync-downloader ffmpeg");
         cmd.spawn().change_context(AppError::Custom(
             "未安装 FFmpeg 或不在 PATH 中，边录边传无法启动".into(),
         ))
@@ -148,7 +149,7 @@ impl SyncDownloader {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        info!(cmd = ?sl_cmd, "Starting sync-downloader streamlink");
+        info!(cmd = %redact_process_debug(&sl_cmd), "Starting sync-downloader streamlink");
         let mut streamlink = sl_cmd
             .spawn()
             .change_context(AppError::Custom("启动 streamlink 失败".into()))?;
@@ -186,6 +187,9 @@ pub struct PumpResult {
 /// 把 ffmpeg stdout 同时写入临时文件并按 UPOS chunk 切给上传通道。
 ///
 /// 通道跟不上时停止预传但继续完整落盘，调用方随后可按实际长度回退为文件上传。
+///
+/// 取消（停止/暂停/退出）只是结束本段：已写入的字节保留在文件里并按实际长度返回，
+/// 由调用方回退为文件上传并投稿，而不是把录好的内容当作错误丢弃。
 pub async fn pump_chunks<R: tokio::io::AsyncRead + Unpin>(
     mut stdout: R,
     peeked: Vec<u8>,
@@ -218,9 +222,7 @@ pub async fn pump_chunks<R: tokio::io::AsyncRead + Unpin>(
         }
         if incoming.is_empty() {
             let read = tokio::select! {
-                _ = token.cancelled() => {
-                    return Err(AppError::Custom("边录边传录制已取消".into()).into());
-                }
+                _ = token.cancelled() => break,
                 read = stdout.read(&mut tmp) => read,
             };
             match read {
@@ -232,14 +234,10 @@ pub async fn pump_chunks<R: tokio::io::AsyncRead + Unpin>(
             }
         }
         let take = remaining.min(incoming.len() as u64) as usize;
-        tokio::select! {
-            _ = token.cancelled() => {
-                return Err(AppError::Custom("边录边传录制已取消".into()).into());
-            }
-            result = save.write_all(&incoming[..take]) => {
-                result.change_context(AppError::Unknown)?;
-            }
-        }
+        // 本地写盘不受网络影响，不参与取消竞争，保证 `written` 与文件内容一致
+        save.write_all(&incoming[..take])
+            .await
+            .change_context(AppError::Unknown)?;
         written += take as u64;
         let chunks = take_full_chunks(&mut buffer, &incoming[..take], chunk_size, &mut remaining);
         if let Some(tx) = sender.as_ref() {
@@ -264,9 +262,7 @@ pub async fn pump_chunks<R: tokio::io::AsyncRead + Unpin>(
     {
         let len = chunk.len() as u64;
         let sent = tokio::select! {
-            _ = token.cancelled() => {
-                return Err(AppError::Custom("边录边传录制已取消".into()).into());
-            }
+            _ = token.cancelled() => false,
             result = tx.send(chunk) => result.is_ok(),
         };
         if sent {
@@ -587,16 +583,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pump_cancellation_aborts_recording() {
+    async fn pump_cancellation_ends_segment_and_keeps_written_bytes() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("cancel.bin");
         // simplex 读端在写端不写入时保持 pending，确保 select 只能命中取消分支
         let (reader, _writer) = tokio::io::simplex(8);
-        let (tx, _rx) = async_channel::bounded::<Bytes>(6);
+        let (tx, rx) = async_channel::bounded::<Bytes>(6);
         let token = CancellationToken::new();
         token.cancel();
-        let result = pump_chunks(reader, Vec::new(), 4, 16, path, tx, token).await;
-        assert!(result.is_err(), "取消后 pump 必须返回错误而不是伪装成功");
+        // 取消前已经读到的数据必须落盘并计入实际长度，供文件回退上传使用
+        let peeked = b"abcdef".to_vec();
+        let pump = pump_chunks(reader, peeked.clone(), 4, 16, path.clone(), tx, token)
+            .await
+            .expect("取消只应结束本段，不应报错丢弃已录内容");
+        assert_eq!(pump.actual_size, 6);
+        assert_eq!(pump.streamed_size, 4, "已成块的数据照常预传");
+        assert!(!pump.stream_complete);
+        assert_eq!(std::fs::read(&path).unwrap(), peeked);
+        assert!(rx.try_recv().is_ok());
+        assert!(rx.is_closed(), "取消后必须关闭上传通道让预传任务收尾");
     }
 
     #[tokio::test]
