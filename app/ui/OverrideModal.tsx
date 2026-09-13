@@ -92,9 +92,11 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
       'url',
       'remark',
       'filename',
+      'filename_prefix',
       'split_time',
       'split_size',
       'upload_id',
+      'upload_streamers_id',
       'status',
       'format',
       'time_range',
@@ -124,7 +126,6 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
 
       const overrideConfig = { ...(values.override || {}) }
       Object.keys(values).forEach(key => {
-        console.log(key, values[key])
         if (!entityFields.has(key)) {
           if (values[key] !== undefined) {
             overrideConfig[key] = values[key] === '' ? null : values[key]
@@ -134,8 +135,18 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
       })
       values.override = overrideConfig
 
+      // PUT /v1/streamers 会按整行覆盖。漏掉 upload_streamers_id 会被写成 NULL，
+      // 之后录像走默认 rm 且不再投稿。以当前行打底，再叠表单字段。
+      const payload = {
+        ...entity,
+        ...values,
+        override: overrideConfig,
+        upload_streamers_id:
+          values.upload_streamers_id ?? entity?.upload_streamers_id ?? null,
+      }
+
       // 处理循环引用
-      const cleanValues = removeCircularReferences(values)
+      const cleanValues = removeCircularReferences(payload)
       await onOk(cleanValues)
       setVisible(false)
       return
