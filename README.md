@@ -184,6 +184,34 @@ docker compose up -d
 > [!IMPORTANT]
 > 若要自定义 `command`，必须带上 `--bind 0.0.0.0`。容器内若监听 `127.0.0.1`，宿主机的端口映射无法转发进容器，Web UI 将完全无法访问。
 
+### 📤 边录边传（sync-downloader）
+
+把 `downloader` 设为 `sync-downloader` 后，ffmpeg 会把直播流 remux 成 Matroska 写到 stdout，按 UPOS 分片一边录一边上传，每录满 `file_size`（默认 2.5 GB，向上对齐到 10 MiB）就作为一 P 追加到同一稿件。前提：
+
+- 本机 `PATH` 中有 `ffmpeg`；HLS 流（B 站 `bili_protocol = "hls_fmp4"`）若装有 `streamlink` 会用它拉流再交给 ffmpeg，没有则由 ffmpeg 直拉。
+- 主播必须绑定上传模板，且模板对应的 cookies 文件可用；`uploader = "Noop"` 或没有模板时不会录制，日志会给出 `边录边传需要先为主播设定上传模板`。
+- 上传并发固定 3 线程，不受 `threads`、`segment_time` 控制。
+
+```toml
+downloader = "sync-downloader"
+uploader = "bili_web"
+file_size = 2621440000          # 每 P 大小，可按上传带宽调小
+# sync_save_dir = "/data/sync"  # 可选：额外保留每 P 的本地副本
+
+[streamers."某主播"]
+url = ["https://live.bilibili.com/1234"]
+title = "{streamer}%Y-%m-%d 直播录像"
+tid = 171
+user_cookie = "cookies.json"
+```
+
+行为说明：
+
+- 录制期间每 P 会同时写入系统临时目录（`$TMPDIR/biliup-sync/worker-<id>/`）作为兜底；预传完整且校验一致时直接 complete，否则（直播提前结束、上传落后）按实际长度从临时文件重传。投稿确认后临时文件删除，设置了 `sync_save_dir` 的副本保留并交给 `postprocessor`。
+- 停止/暂停/编辑主播只会结束当前分段，已录内容仍会上传并投稿；上传或投稿失败时保留有内容的分段文件并在日志中打印路径，可手动补传。
+- B 站直链约 1 小时过期。分段结束后拉不到数据时会立刻交回监控循环重新解析直链，并在同一稿件上继续追加分 P。
+- 排查问题时留意 `ERROR ... 下载流程出错` 日志：会带上具体原因（cookies 文件路径、preupload 拒绝等），而不是静默退回落盘录制。
+
 ---
 
 ## 🧑‍💻开发

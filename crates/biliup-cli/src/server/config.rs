@@ -21,7 +21,16 @@ pub struct Config {
     pub sync_save_dir: Option<String>,
 
     /// 文件大小限制（字节）
-    #[patch(attribute(serde(default, deserialize_with = "deserialize_option_patch")))]
+    ///
+    /// 主播覆写里这个字段的 `null` 是“显式清除、按主播关闭大小分段”，与其它字段不同。
+    /// 因此补丁序列化时必须略过未设置（`None`）：整份补丁会随主播落库、经接口回传，
+    /// 若把未设置也写成 `null`，下一次读取就会被当成显式清除，把全局 `file_size`
+    /// 清掉（边录边传因此退回 2 GiB 默认分段，stream-gears 则不再按大小分段）。
+    #[patch(attribute(serde(
+        default,
+        deserialize_with = "deserialize_option_patch",
+        skip_serializing_if = "Option::is_none"
+    )))]
     #[serde(default = "default_file_size")]
     pub file_size: Option<u64>,
 
@@ -615,6 +624,47 @@ mod tests {
         assert_eq!(config.file_size, None);
         assert_eq!(config.segment_time, Some("01:00:00".to_string()));
         assert!(config.validate_segment_limits().is_ok());
+    }
+
+    /// 主播覆写只写了 downloader 时，补丁经落库/接口回传一轮（序列化再反序列化）
+    /// 也不能凭空长出 `file_size: null` 把全局值清掉。
+    #[test]
+    fn override_round_trip_without_file_size_keeps_global_value() {
+        let global_size = 104_857_600;
+        let mut config = Config {
+            file_size: Some(global_size),
+            ..Config::default()
+        };
+        let patch: ConfigPatch =
+            serde_json::from_str(r#"{"downloader":"sync-downloader"}"#).unwrap();
+
+        let stored = serde_json::to_string(&patch).unwrap();
+        assert!(
+            !stored.contains("file_size"),
+            "未设置的 file_size 不应被序列化成占位 null: {stored}"
+        );
+
+        let reloaded: ConfigPatch = serde_json::from_str(&stored).unwrap();
+        config.apply(reloaded);
+        assert_eq!(config.downloader, Some(DownloaderType::SyncDownloader));
+        assert_eq!(config.file_size, Some(global_size));
+    }
+
+    /// 用户显式清空（前端发 null）依旧表示按主播关闭大小分段，且能在落库后保留。
+    #[test]
+    fn override_explicit_null_file_size_survives_round_trip() {
+        let mut config = Config {
+            file_size: Some(104_857_600),
+            ..Config::default()
+        };
+        let patch: ConfigPatch = serde_json::from_str(r#"{"file_size":null}"#).unwrap();
+
+        let stored = serde_json::to_string(&patch).unwrap();
+        assert!(stored.contains(r#""file_size":null"#), "{stored}");
+
+        let reloaded: ConfigPatch = serde_json::from_str(&stored).unwrap();
+        config.apply(reloaded);
+        assert_eq!(config.file_size, None);
     }
 
     #[test]

@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Instant;
 use tokio::pin;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 // 辅助结构体
 #[derive(Clone)]
@@ -115,9 +115,15 @@ pub(crate) async fn initialize_upload_context(
         .user_cookie
         .clone()
         .unwrap_or("cookies.json".to_string());
-    let bilibili = login_by_cookies(&cookie_file, None)
-        .await
-        .change_context(AppError::Unknown)?;
+    let bilibili = login_by_cookies(&cookie_file, None).await;
+    let bilibili = match bilibili {
+        Err(Kind::IO(_)) => bilibili.change_context_lazy(|| {
+            AppError::Custom(format!("open cookies file: {cookie_file}"))
+        })?,
+        _ => bilibili.change_context_lazy(|| {
+            AppError::Custom(format!("login by cookies file failed: {cookie_file}"))
+        })?,
+    };
 
     // 获取上传线路
     let line = get_upload_line(&client.client, &config.lines).await?;
@@ -139,7 +145,14 @@ async fn get_upload_line(client: &reqwest::Client, line: &str) -> AppResult<Line
         "alia" => line::alia(),
         "estx" => line::estx(),
         "akbd" => line::akbd(),
-        _ => Probe::probe(client).await.unwrap_or_default(),
+        _ => match Probe::probe(client).await {
+            Ok(line) => line,
+            Err(e) => {
+                let fallback = Line::default();
+                warn!(error = %e, ?fallback, "AUTO 线路测速失败，回退到默认线路");
+                fallback
+            }
+        },
     };
     Ok(line)
 }
@@ -456,7 +469,14 @@ pub async fn upload(
         Some(UploadLine::Alia) => line::alia(),
         Some(UploadLine::Estx) => line::estx(),
         Some(UploadLine::Akbd) => line::akbd(),
-        _ => Probe::probe(&client.client).await.unwrap_or_default(),
+        _ => match Probe::probe(&client.client).await {
+            Ok(line) => line,
+            Err(e) => {
+                let fallback = Line::default();
+                warn!(error = %e, ?fallback, "AUTO 线路测速失败，回退到默认线路");
+                fallback
+            }
+        },
     };
     for video_path in video_paths {
         println!(
