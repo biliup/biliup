@@ -1,6 +1,7 @@
 use crate::server::core::downloader::{
     DownloadConfig as RuntimeDownloadConfig, DownloadStatus, SegmentEvent, SegmentInfo,
 };
+use crate::server::common::util::redact_process_debug;
 use crate::server::errors::{AppError, AppResult};
 use error_stack::{ResultExt, bail};
 use std::{
@@ -254,7 +255,7 @@ impl YouTubeDownloader {
             return Ok(());
         }
 
-        info!("运行: {:?}", cmd);
+        info!("运行: {}", redact_process_debug(&cmd));
         let output = cmd.output().await.change_context(AppError::Custom(format!(
             "运行 {} 失败，请确认已安装并在 PATH 中",
             &self.cfg.ytdlp_bin
@@ -346,7 +347,11 @@ impl YouTubeDownloader {
         if self.stopped.load(Ordering::Relaxed) {
             return Ok(());
         }
-        info!("运行: (cwd: {}) {:?}", cache_dir.display(), cmd);
+        info!(
+            "运行: (cwd: {}) {}",
+            cache_dir.display(),
+            redact_process_debug(&cmd)
+        );
 
         let output = cmd.output().await.change_context(AppError::Custom(format!(
             "运行 {} 失败，请确认已安装并在 PATH 中",

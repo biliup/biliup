@@ -3,6 +3,7 @@ use crate::server::core::downloader::{
     DownloadConfig, DownloadStatus, DownloaderType, SegmentEvent, SegmentInfo,
 };
 use crate::server::errors::{AppError, AppResult};
+use crate::server::common::util::redact_process_debug;
 use error_stack::{ResultExt, bail};
 use std::path::PathBuf;
 use std::process::{ExitStatus, Stdio};
@@ -254,7 +255,7 @@ impl FfmpegDownloader {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
-        info!("FFmpeg cmd: {:?}", cmd);
+        info!("FFmpeg cmd: {}", redact_process_debug(&cmd));
         let mut child = cmd.spawn().change_context(AppError::Unknown)?;
 
         // 获取stdout用于读取分段文件名

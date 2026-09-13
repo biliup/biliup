@@ -1,4 +1,5 @@
 use crate::server::core::downloader::DownloadConfig;
+use crate::server::common::util::redact_process_debug;
 use crate::server::errors::{AppError, AppResult};
 use bytes::Bytes;
 use error_stack::ResultExt;
@@ -129,7 +130,7 @@ impl SyncDownloader {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        info!(cmd = ?cmd, "Starting sync-downloader ffmpeg");
+        info!(cmd = %redact_process_debug(&cmd), "Starting sync-downloader ffmpeg");
         cmd.spawn().change_context(AppError::Custom(
             "未安装 FFmpeg 或不在 PATH 中，边录边传无法启动".into(),
         ))
@@ -148,7 +149,7 @@ impl SyncDownloader {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        info!(cmd = ?sl_cmd, "Starting sync-downloader streamlink");
+        info!(cmd = %redact_process_debug(&sl_cmd), "Starting sync-downloader streamlink");
         let mut streamlink = sl_cmd
             .spawn()
             .change_context(AppError::Custom("启动 streamlink 失败".into()))?;
