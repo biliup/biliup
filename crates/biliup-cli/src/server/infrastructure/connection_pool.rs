@@ -64,6 +64,57 @@ impl ConnectionManager {
 mod tests {
     use super::ConnectionManager;
 
+    /// 旧版本落库的覆写里 `file_size: null` 只是占位，迁移后必须消失（跟随全局），
+    /// 其它显式设置的字段与真正的数值原样保留。
+    #[tokio::test]
+    async fn migration_strips_placeholder_null_file_size_from_overrides() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 4")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO livestreamers (url, remark, override) VALUES \
+             ('https://live.bilibili.com/1', 'placeholder', '{\"downloader\":\"sync-downloader\",\"file_size\":null,\"bili_qn\":null}'), \
+             ('https://live.bilibili.com/2', 'explicit-size', '{\"file_size\":52428800}'), \
+             ('https://live.bilibili.com/3', 'no-override', NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let rows: Vec<(String, Option<String>)> =
+            sqlx::query_as("SELECT remark, override FROM livestreamers ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+
+        let placeholder: serde_json::Value =
+            serde_json::from_str(rows[0].1.as_deref().unwrap()).unwrap();
+        assert!(
+            placeholder.get("file_size").is_none(),
+            "占位 null 必须被移除: {placeholder}"
+        );
+        assert_eq!(placeholder["downloader"], "sync-downloader");
+        assert!(
+            placeholder["bili_qn"].is_null(),
+            "其它字段的 null 无害，保持原样"
+        );
+
+        let explicit: serde_json::Value =
+            serde_json::from_str(rows[1].1.as_deref().unwrap()).unwrap();
+        assert_eq!(explicit["file_size"], 52_428_800);
+        assert!(rows[2].1.is_none());
+    }
+
     #[tokio::test]
     async fn identity_migration_fails_closed_on_multiple_existing_administrators() {
         let dir = tempfile::tempdir().unwrap();

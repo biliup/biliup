@@ -181,6 +181,11 @@ impl DownloadTask {
                 .download(&mut processor, ctx.clone(), danmaku_client.clone(), &stream)
                 .await;
 
+            // 失败原因只藏在结束时的 Debug 输出里会让用户以为下载器“什么都没做”
+            // （典型：边录边传缺少上传模板、cookie 失效）。
+            if let Err(e) = &components {
+                error!(url = url, error = ?e, "下载流程出错");
+            }
             info!("initialize_components completed: {url}");
 
             if self.token.is_cancelled() {
@@ -364,13 +369,14 @@ impl DownloadTask {
         // 如果底层下载函数不支持取消，这里不能真正中断正在进行的下载
         self.token.cancel();
         self.downloader.stop().await?;
-        // 清理设总时限：取消已传导到录制/上传/投稿各阶段，正常应立即退出；
-        // 万一后台请求卡住，也不能让 stop 无限挂起拖住整个 worker。
+        // 清理设总时限：取消已传导到录制阶段，正常应很快退出；
+        // 边录边传会继续把已录分段传完并投稿，可能远超 30 秒，让它在后台收尾即可，
+        // 不能让 stop 无限挂起拖住整个 worker。
         if tokio::time::timeout(Duration::from_secs(30), self.done_notify.notified())
             .await
             .is_err()
         {
-            warn!("等待下载任务退出超时（30 秒），继续关闭流程");
+            warn!("等待下载任务退出超时（30 秒），任务将在后台完成收尾，继续关闭流程");
         }
         Ok(())
     }

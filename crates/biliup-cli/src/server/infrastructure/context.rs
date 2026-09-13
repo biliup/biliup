@@ -304,3 +304,62 @@ impl fmt::Debug for WorkerStatus {
         f.write_str(name)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::config::ConfigPatch;
+    use crate::server::core::downloader::DownloaderType;
+    use crate::server::core::downloader::sync_downloader::align_file_size;
+
+    fn streamer_with_override(override_cfg: Option<ConfigPatch>) -> LiveStreamer {
+        LiveStreamer {
+            id: 1,
+            url: "https://live.bilibili.com/1".into(),
+            remark: "test".into(),
+            filename_prefix: None,
+            time_range: None,
+            upload_streamers_id: None,
+            format: None,
+            override_cfg,
+            preprocessor: None,
+            segment_processor: None,
+            downloaded_processor: None,
+            postprocessor: None,
+            opt_args: None,
+            excluded_keywords: None,
+        }
+    }
+
+    /// 复现：全局 file_size=100MB，主播覆写只选了 sync-downloader，
+    /// 覆写经落库回传后 worker 取到的配置必须仍是 100MB，边录边传按 100MiB 切段。
+    #[test]
+    fn worker_config_keeps_global_file_size_when_override_never_set_it() {
+        let global_size = 104_857_600u64;
+        let config = Arc::new(RwLock::new(Config {
+            file_size: Some(global_size),
+            ..Config::default()
+        }));
+        // 与 WebUI 保存后的路径一致：反序列化 -> 落库序列化 -> 再反序列化
+        let submitted: ConfigPatch =
+            serde_json::from_str(r#"{"downloader":"sync-downloader"}"#).unwrap();
+        let stored = serde_json::to_string(&submitted).unwrap();
+        let loaded: ConfigPatch = serde_json::from_str(&stored).unwrap();
+
+        let worker = Worker::new(
+            streamer_with_override(Some(loaded)),
+            None,
+            config,
+            StatelessClient::default(),
+        );
+        let effective = worker.get_config();
+
+        assert_eq!(effective.downloader, Some(DownloaderType::SyncDownloader));
+        assert_eq!(effective.file_size, Some(global_size));
+        assert_eq!(
+            align_file_size(effective.file_size),
+            100 * 1024 * 1024,
+            "边录边传应按全局 100MB（10MiB 对齐后 100MiB）切段，而不是 2GiB 默认值"
+        );
+    }
+}
