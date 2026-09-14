@@ -166,7 +166,7 @@ impl StreamlinkDownloader {
         args.push("--force".to_string());
         args.push("--output".to_string());
         args.push(output_file.to_string());
-        args.push(self.url.clone());
+        args.push(streamlink_cli_url(&self.url));
         args.push("best".to_string());
         Ok(args)
     }
@@ -180,20 +180,22 @@ impl StreamlinkDownloader {
         // 配置输出模式
         let output = match &self.output_mode {
             OutputMode::Pipe => {
-                cmd.args([&self.url, "best", "-O"]);
+                let cli_url = streamlink_cli_url(&self.url);
+                cmd.args([&cli_url, "best", "-O"]);
                 cmd.stdout(Stdio::piped());
 
                 let child = cmd.spawn().change_context(AppError::Unknown)?;
                 StreamOutput::Pipe(child)
             }
             OutputMode::HttpServer { port } => {
+                let cli_url = streamlink_cli_url(&self.url);
                 cmd.args([
                     "--player-external-http",
                     "--player-external-http-port",
                     &port.to_string(),
                     "--player-external-http-interface",
                     "localhost",
-                    &self.url,
+                    &cli_url,
                     "best",
                 ]);
 
@@ -347,6 +349,95 @@ impl StreamOutput {
     }
 }
 
+
+/// Rewrite already-resolved progressive HTTP(S) media URLs so Streamlink's
+/// built-in `http` plugin matches them.
+///
+/// Streamlink treats a bare positional URL as a *plugin* URL. HLS (`.m3u8`) and
+/// DASH (`.mpd`) are auto-detected without a prefix, but progressive HTTP/HTTPS
+/// streams (e.g. Huya/Douyu `.flv` CDN links) need an explicit `httpstream://`
+/// scheme — otherwise Streamlink exits with `No plugin can handle URL`.
+///
+/// Webpage URLs that Streamlink plugins already handle (Twitch, YouTube, …) and
+/// URLs that already carry a protocol prefix are left unchanged. Detection is
+/// based on the media extension, not on platform names.
+pub(crate) fn streamlink_cli_url(url: &str) -> String {
+    if has_streamlink_protocol_prefix(url) {
+        return url.to_string();
+    }
+
+    let Ok(parsed) = Url::parse(url) else {
+        return url.to_string();
+    };
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return url.to_string();
+    }
+
+    match media_extension(url).as_deref() {
+        // Streamlink auto-detects these without an explicit protocol prefix.
+        Some("m3u8") | Some("mpd") => url.to_string(),
+        Some(ext) if is_progressive_http_ext(ext) => format!("httpstream://{url}"),
+        _ => url.to_string(),
+    }
+}
+
+fn has_streamlink_protocol_prefix(url: &str) -> bool {
+    // Streamlink accepts `protocol://URL` (see cli/protocols.html). Match the
+    // known built-in schemes plus any `foo://http(s)://...` form so we never
+    // double-prefix.
+    const KNOWN: &[&str] = &["httpstream://", "hls://", "dash://"];
+    let lower = url.to_ascii_lowercase();
+    if KNOWN.iter().any(|p| lower.starts_with(p)) {
+        return true;
+    }
+    if let Some(rest) = lower.split_once("://").map(|(_, r)| r) {
+        rest.starts_with("http://") || rest.starts_with("https://")
+    } else {
+        false
+    }
+}
+
+fn media_extension(url: &str) -> Option<String> {
+    let Ok(parsed) = Url::parse(url) else {
+        let before_q = url.split(['?', '#']).next().unwrap_or(url);
+        return before_q
+            .rsplit_once('.')
+            .map(|(_, ext)| ext.to_ascii_lowercase())
+            .filter(|ext| !ext.is_empty() && ext.chars().all(|c| c.is_ascii_alphanumeric()));
+    };
+    let seg = parsed.path_segments()?.next_back()?;
+    let (_, ext) = seg.rsplit_once('.')?;
+    let ext = ext.to_ascii_lowercase();
+    if ext.is_empty() || !ext.chars().all(|c| c.is_ascii_alphanumeric()) {
+        None
+    } else {
+        Some(ext)
+    }
+}
+
+fn is_progressive_http_ext(ext: &str) -> bool {
+    // Formats Streamlink's http plugin is meant to consume as a progressive
+    // HTTP body. Keep this list of *container/segment* extensions — not page
+    // URLs, and not HLS/DASH manifests (handled separately above).
+    matches!(
+        ext,
+        "flv"
+            | "ts"
+            | "mp4"
+            | "m4v"
+            | "m4a"
+            | "f4v"
+            | "f4a"
+            | "aac"
+            | "mp3"
+            | "mkv"
+            | "webm"
+            | "ogg"
+            | "ogv"
+            | "opus"
+    )
+}
+
 async fn spawn_log(
     mut child: Child,
     process_handle: &RwLock<Option<Child>>,
@@ -397,4 +488,84 @@ async fn spawn_log(
     }
 
     Ok(status)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn progressive_flv_gets_httpstream_prefix() {
+        let url = "https://cdn.example/live/abc.flv?wsSecret=sig&wsTime=1";
+        assert_eq!(
+            streamlink_cli_url(url),
+            format!("httpstream://{url}")
+        );
+    }
+
+    #[test]
+    fn progressive_mp4_and_ts_get_httpstream_prefix() {
+        assert_eq!(
+            streamlink_cli_url("http://cdn.example/a.mp4"),
+            "httpstream://http://cdn.example/a.mp4"
+        );
+        assert_eq!(
+            streamlink_cli_url("https://cdn.example/a.ts?token=1"),
+            "httpstream://https://cdn.example/a.ts?token=1"
+        );
+    }
+
+    #[test]
+    fn hls_and_dash_manifests_are_left_unchanged() {
+        assert_eq!(
+            streamlink_cli_url("https://cdn.example/live.m3u8?token=1"),
+            "https://cdn.example/live.m3u8?token=1"
+        );
+        assert_eq!(
+            streamlink_cli_url("https://cdn.example/manifest.mpd"),
+            "https://cdn.example/manifest.mpd"
+        );
+    }
+
+    #[test]
+    fn existing_protocol_prefix_is_not_doubled() {
+        let url = "httpstream://https://cdn.example/live.flv";
+        assert_eq!(streamlink_cli_url(url), url);
+        let hls = "hls://https://cdn.example/live.m3u8";
+        assert_eq!(streamlink_cli_url(hls), hls);
+    }
+
+    #[test]
+    fn webpage_urls_without_media_extension_are_left_unchanged() {
+        assert_eq!(
+            streamlink_cli_url("https://www.twitch.tv/example"),
+            "https://www.twitch.tv/example"
+        );
+        assert_eq!(
+            streamlink_cli_url("https://www.youtube.com/watch?v=abc"),
+            "https://www.youtube.com/watch?v=abc"
+        );
+    }
+
+    #[test]
+    fn build_file_args_uses_httpstream_for_flv() {
+        let downloader = StreamlinkDownloader::new(
+            "https://cdn.example/live.flv?sig=1".to_string(),
+            Platform::Generic,
+        );
+        let args = downloader
+            .build_file_args(
+                &DownloadConfig {
+                    suffix: "flv".to_string(),
+                    ..Default::default()
+                },
+                "/tmp/out.flv.part",
+            )
+            .expect("args");
+        assert!(
+            args.iter().any(|a| a == "httpstream://https://cdn.example/live.flv?sig=1"),
+            "expected httpstream URL in args: {args:?}"
+        );
+        assert!(args.iter().any(|a| a == "best"));
+    }
 }
