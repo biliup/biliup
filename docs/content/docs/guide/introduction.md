@@ -126,7 +126,7 @@ sudo docker exec -it imageId /bin/bash
 
 ## yaml配置文件示例
 可选项见[完整配置文件](https://github.com/biliup/biliup/tree/master/public/config.yaml),
-tid投稿分区见[Wiki](https://github.com/biliup/biliup/wiki)
+tid投稿分区见[Wiki](https://github.com/biliup/biliup/wiki)；可选 `tid_v2` 指定新版分区 ID（与旧版 `tid` 可同时设置）
 ```yaml
 streamers:
     xxx直播录像:
@@ -148,6 +148,7 @@ video.desc = '视频简介'
 video.source = '添加转载地址说明'
 # 设置视频分区,默认为122 野生技能协会
 video.tid = 171
+# video.tid_v2 = 2102  # 可选：新版分区 ID
 video.set_tag(['星际争霸2', '电子竞技'])
 video.dynamic = '动态内容'
 lines = 'AUTO'

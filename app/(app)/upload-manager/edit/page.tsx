@@ -76,6 +76,7 @@ const Edit = () => {
                 id: values?.id,
                 copyright_source: values?.copyright_source ?? '',
                 tid: values?.tid[1],
+                tid_v2: values?.tid_v2 ?? null,
                 cover_path: values?.cover_path ?? '',
                 title: values?.title ?? '',
                 description: values?.description ?? '',

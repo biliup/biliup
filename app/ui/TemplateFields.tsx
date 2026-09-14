@@ -249,6 +249,13 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
           dropdownStyle={{ maxWidth: 670 }}
           rules={[{ required: true }]}
         />
+        <InputNumber
+          field="tid_v2"
+          label="分区 tid_v2"
+          style={{ width: 272 }}
+          placeholder="可选，新版分区 ID"
+          extraText="对应 B 站 tid_v2；不填则仅使用上方分区"
+        />
         <TagInput
           max={12}
           maxLength={20}

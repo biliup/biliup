@@ -419,6 +419,7 @@ pub(crate) async fn build_studio(
         ))
         .tag(upload_config.tags.join(","))
         .maybe_tid(upload_config.tid)
+        .maybe_tid_v2(upload_config.tid_v2)
         .title(recorder.format_title())
         .videos(videos)
         .dolby(upload_config.dolby.unwrap_or_default())
@@ -611,6 +612,40 @@ mod tests {
     #[test]
     fn scheduled_publish_ts_none_stays_none() {
         assert_eq!(scheduled_publish_ts(None, 1_700_000_000), None);
+    }
+
+    #[test]
+    fn studio_submit_payload_includes_tid_v2_when_set() {
+        // submit_by_app / submit_by_web both POST `.json(studio)`; verify body shape.
+        let studio: Studio = serde_json::from_value(serde_json::json!({
+            "tid": 95,
+            "tid_v2": 2102,
+            "title": "payload",
+            "copyright": 1,
+            "up_selection_reply": false,
+            "up_close_reply": false,
+            "up_close_danmu": false
+        }))
+        .unwrap();
+        let body = serde_json::to_value(&studio).unwrap();
+        assert_eq!(body["tid"], 95);
+        assert_eq!(body["tid_v2"], 2102);
+    }
+
+    #[test]
+    fn studio_submit_payload_omits_tid_v2_for_tid_only() {
+        let studio: Studio = serde_json::from_value(serde_json::json!({
+            "tid": 171,
+            "title": "payload",
+            "copyright": 1,
+            "up_selection_reply": false,
+            "up_close_reply": false,
+            "up_close_danmu": false
+        }))
+        .unwrap();
+        let body = serde_json::to_value(&studio).unwrap();
+        assert_eq!(body["tid"], 171);
+        assert!(body.get("tid_v2").is_none());
     }
 
     #[test]
