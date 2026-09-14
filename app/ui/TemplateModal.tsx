@@ -219,7 +219,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                     {collapsed}
                   </Collapsible>
                   <a onClick={toggle} style={{ ...linkStyle }}>
-                    + Show {isOpen ? 'Less' : 'More'}
+                    {isOpen ? '收起' : '展开更多'}
                   </a>
                 </div>
               </>
@@ -250,7 +250,6 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                   text: '录制时间范围',
                   optional: true,
                   style: {
-                    fontSize: '18px',
                     marginBottom: '4px',
                     paddingBottom: '8px',
                     borderBottom: '1px solid var(--semi-color-border)',
@@ -270,7 +269,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                       添加关键词
                     </Button>
                     {arrayFields.map(({ field, key, remove }, i) => (
-                      <div key={key} style={{ width: 1000, display: 'flex' }}>
+                      <div key={key} style={{ width: '100%', display: 'flex' }}>
                         <Form.Input
                           field={field}
                           label={`关键词${i + 1}`}
@@ -300,13 +299,13 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                       添加行
                     </Button>
                     {arrayFields.map(({ field, key, remove }, i) => (
-                      <div key={key} style={{ width: 1000, display: 'flex' }}>
+                      <div key={key} style={{ width: '100%', display: 'flex' }}>
                         <Form.Input
                           field={`${field}[run]`}
                           label={`run = `}
                           labelPosition="inset"
                           rules={[{ required: true, message }]}
-                          style={{ width: 400, marginRight: 16 }}
+                          style={{ flex: 1, minWidth: 0, marginRight: 16 }}
                         ></Form.Input>
                         <Button
                           type="danger"
@@ -331,13 +330,13 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                       添加行
                     </Button>
                     {arrayFields.map(({ field, key, remove }, i) => (
-                      <div key={key} style={{ width: 1000, display: 'flex' }}>
+                      <div key={key} style={{ width: '100%', display: 'flex' }}>
                         <Form.Input
                           field={`${field}[run]`}
                           label={`run = `}
                           labelPosition="inset"
                           rules={[{ required: true, message }]}
-                          style={{ width: 400, marginRight: 16 }}
+                          style={{ flex: 1, minWidth: 0, marginRight: 16 }}
                         ></Form.Input>
                         <Button
                           type="danger"
@@ -362,13 +361,13 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                       添加行
                     </Button>
                     {arrayFields.map(({ field, key, remove }, i) => (
-                      <div key={key} style={{ width: 1000, display: 'flex' }}>
+                      <div key={key} style={{ width: '100%', display: 'flex' }}>
                         <Form.Input
                           field={`${field}[run]`}
                           label={`run = `}
                           labelPosition="inset"
                           rules={[{ required: true, message }]}
-                          style={{ width: 400, marginRight: 16 }}
+                          style={{ flex: 1, minWidth: 0, marginRight: 16 }}
                         ></Form.Input>
                         <Button
                           type="danger"
@@ -393,7 +392,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                       添加行
                     </Button>
                     {arrayFields.map(({ field, key, remove }, i) => (
-                      <div key={key} style={{ width: 1000, display: 'flex' }}>
+                      <div key={key} style={{ width: '100%', display: 'flex' }}>
                         <Form.Input
                           field={field}
                           label={`参数${i + 1}`}

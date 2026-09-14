@@ -1,0 +1,104 @@
+.content {
+  padding: 24px;
+  min-height: calc(100vh - 69px);
+}
+
+.feed,
+.center {
+  position: relative;
+  z-index: 1;
+}
+
+.center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+}
+
+/* 版本卡片流：居中、限制最大阅读宽度 */
+.feed {
+  max-width: 820px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.card {
+  border: 1px solid var(--semi-color-fill-2);
+  border-radius: 12px;
+  background: var(--semi-color-bg-1);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 16px 24px 0;
+}
+
+.versionBlock {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.versionTitle {
+  margin: 0 !important;
+  color: var(--semi-color-text-0);
+  font-family: var(--semi-font-regular);
+}
+
+.ul {
+  padding-left: 18px;
+  margin: 8px 0 14px;
+}
+
+.li {
+  margin: 4px 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--semi-color-text-1);
+}
+
+.subhead {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 14px 0 4px;
+  color: var(--semi-color-text-0);
+}
+
+.subheadMuted {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 16px 0 4px;
+  color: var(--semi-color-text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.subheadMuted + .ul .li {
+  color: var(--semi-color-text-2);
+}
+
+.para {
+  font-size: 13px;
+  margin: 6px 0;
+  color: var(--semi-color-text-1);
+}
+
+.link {
+  color: rgb(var(--semi-blue-4));
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+/* 第一个（最新）版本卡片轻微强调 */
+.feed > .card:first-child {
+  border-color: var(--semi-color-primary);
+}

@@ -1,6 +1,7 @@
 'use client'
 import React, { useEffect } from 'react'
 import styles from '../../styles/dashboard.module.scss'
+import SectionTitle from '../../(app)/components/SectionTitle'
 import { Form, Select, Space, useFormApi } from '@douyinfe/semi-ui'
 import { IconUpload, IconDownload } from '@douyinfe/semi-icons'
 
@@ -11,43 +12,26 @@ const Global: React.FC = () => {
     <>
       {/* 全局下载 */}
       <div className={styles.frameDownload}>
-        <div className={styles.frameInside}>
-          <div className={styles.group}>
-            <div className={styles.buttonOnlyIconSecond} />
-            <div
-              className={styles.lineStory}
-              style={{
-                color: 'var(--semi-color-bg-0)',
-                display: 'flex',
-              }}
-            >
-              <IconDownload size="small" />
-            </div>
-          </div>
-          <p className={styles.meegoSharedWebWorkIt}>全局下载设置</p>
-        </div>
+        <SectionTitle icon={<IconDownload size="small" />} title="全局下载设置" />
         <Form.Select
           label="下载插件（downloader）"
           field="downloader"
           placeholder="stream-gears（默认）"
           // initValue="stream-gears"
           extraText={
-            <div style={{ fontSize: '14px' }}>
-              选择全局默认的下载插件, 可选:
-              <br />
-              1. streamlink（仅限 hls 流，不支持的流将回退到 ffmpeg。非 Docker 用户需自行安装 FFmpeg）
-              <br />
-              2. ffmpeg（非 Docker 用户需自行安装 FFmpeg）
-              <br />
-              3. stream-gears（默认。防 FLV 流花屏）
-              <br />
-              4. sync-downloader（流式边录边传，需先为主播设定上传模板。不受
-              pool2/threads/segment_time 控制，默认 3 线程上传，请确保上传带宽充足。非 Docker 用户需自行安装 FFmpeg）详见 Wiki <a href="https://github.com/biliup/biliup/wiki/%E8%BE%B9%E5%BD%95%E8%BE%B9%E4%BC%A0%E5%8A%9F%E8%83%BD" target="_blank" rel="noopener noreferrer" >点击查看</a>
-              <br />
-              5. ytarchive（仅适用于 Youtube Live）
-              <br />
-              {/* 6. mesio（基于 Rust 的命令行视频下载/修复器）详见 <a href="https://github.com/hua0512/rust-srec/tree/main/mesio-cli" target="_blank" rel="noopener noreferrer" >项目主页</a> */}
-            </div>
+            <span>
+              全局默认下载插件：streamlink / ffmpeg 需自备 FFmpeg；stream-gears
+              为默认（防 FLV 花屏）；sync-downloader 边录边传（需先设上传模板，
+              <a
+                href="https://github.com/biliup/biliup/wiki/%E8%BE%B9%E5%BD%95%E8%BE%B9%E4%BC%A0%E5%8A%9F%E8%83%BD"
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: 'rgb(var(--semi-color-link))' }}
+              >
+                详见文档
+              </a>
+              ）；ytarchive 仅限 YouTube Live。
+            </span>
           }
           style={{ width: '100%' }}
           fieldStyle={{
@@ -265,21 +249,7 @@ const Global: React.FC = () => {
 
       {/* 全局上传 */}
       <div className={styles.frameUpload}>
-        <div className={styles.frameInside}>
-          <div className={styles.group}>
-            <div className={styles.buttonOnlyIconSecond} />
-            <div
-              className={styles.lineStory}
-              style={{
-                color: 'var(--semi-color-bg-0)',
-                display: 'flex',
-              }}
-            >
-              <IconUpload size="small" />
-            </div>
-          </div>
-          <p className={styles.meegoSharedWebWorkIt}>全局上传设置</p>
-        </div>
+        <SectionTitle icon={<IconUpload size="small" />} title="全局上传设置" />
 
         <Form.Select
           field="submit_api"
