@@ -291,6 +291,10 @@ pub struct StreamerConfig {
     #[serde(default)]
     pub tid: Option<u32>,
 
+    /// 新版分区ID (tid_v2)
+    #[serde(default)]
+    pub tid_v2: Option<u32>,
+
     /// 版权类型
     #[serde(default)]
     pub copyright: Option<u8>,
@@ -665,6 +669,25 @@ mod tests {
         let reloaded: ConfigPatch = serde_json::from_str(&stored).unwrap();
         config.apply(reloaded);
         assert_eq!(config.file_size, None);
+    }
+
+    #[test]
+    fn streamer_config_tid_v2_round_trip() {
+        let raw = r#"{"url":["https://example.com"],"tid":95,"tid_v2":2102,"tags":["a"]}"#;
+        let cfg: StreamerConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(cfg.tid, Some(95));
+        assert_eq!(cfg.tid_v2, Some(2102));
+        let back = serde_json::to_value(&cfg).unwrap();
+        assert_eq!(back["tid"], 95);
+        assert_eq!(back["tid_v2"], 2102);
+    }
+
+    #[test]
+    fn streamer_config_tid_only_leaves_tid_v2_unset() {
+        let cfg: StreamerConfig =
+            serde_json::from_str(r#"{"url":["https://example.com"],"tid":171}"#).unwrap();
+        assert_eq!(cfg.tid, Some(171));
+        assert!(cfg.tid_v2.is_none());
     }
 
     #[test]

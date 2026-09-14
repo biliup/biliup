@@ -55,6 +55,7 @@ class BiliWeb:
         lines: Optional[str] = 'AUTO',
         threads: int = 3,
         tid: int = 122,
+        tid_v2: Optional[int] = None,
         tags: Optional[List[str]] = None,
         cover_path=None,
         description='',
@@ -72,6 +73,7 @@ class BiliWeb:
         :param lines: 上传线路
         :param threads: 上传线程数
         :param tid: 稿件分区
+        :param tid_v2: 新版稿件分区（可选）
         :param tags: 稿件标签
         :param cover_path: 稿件封面路径
         :param description: 视频简介
@@ -91,6 +93,7 @@ class BiliWeb:
         self.submit_api = submit_api or 'web'
         self.threads = threads
         self.tid = tid
+        self.tid_v2 = tid_v2
         self.tags = tags
         self.cover_path = cover_path
         self.desc = description
@@ -136,6 +139,8 @@ class BiliWeb:
                 video.source = self.data["url"]  # 添加转载地址说明
             # 设置视频分区,默认为174 生活，其他分区
             video.tid = self.tid
+            if self.tid_v2 is not None:
+                video.tid_v2 = self.tid_v2
             video.set_tag(self.tags)
             if self.dtime:
                 video.delay_time(int(time.time()) + self.dtime)
@@ -705,8 +710,11 @@ class BiliBili:
 
     def submit_web(self):
         logger.info('使用网页端api提交')
+        post_data = asdict(self.video)
+        if post_data.get('tid_v2') is None:
+            post_data.pop('tid_v2', None)
         return self.__session.post(f'https://member.bilibili.com/x/vu/web/add?csrf={self.__bili_jct}', timeout=5,
-                                   json=asdict(self.video)).json()
+                                   json=post_data).json()
 
     def submit_client(self):
         logger.info('使用客户端api端提交')
@@ -716,8 +724,11 @@ class BiliBili:
             self.login_by_password(**self.account)
             self.store()
         while True:
+            post_data = asdict(self.video)
+            if post_data.get('tid_v2') is None:
+                post_data.pop('tid_v2', None)
             ret = self.__session.post(f'http://member.bilibili.com/x/vu/client/add?access_key={self.access_token}',
-                                      timeout=5, json=asdict(self.video)).json()
+                                      timeout=5, json=post_data).json()
             if ret['code'] == -101:
                 logger.info("客户端登录状态失效，正在刷新凭据: %s", _safe_response_status(ret))
                 self.login_by_password(**config['user']['account'])
@@ -985,6 +996,7 @@ class Data:
     copyright: int = 2
     source: str = ''
     tid: int = 21
+    tid_v2: Optional[int] = None
     cover: str = ''
     title: str = ''
     desc_format_id: int = 0

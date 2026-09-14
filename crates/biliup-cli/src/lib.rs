@@ -247,6 +247,7 @@ fn to_upload_streamer_insert(
                 })
             })
             .transpose()?,
+        tid_v2: streamer.tid_v2,
         copyright: streamer.copyright,
         copyright_source: streamer.copyright_source.clone(),
         cover_path: streamer
@@ -289,6 +290,7 @@ fn to_upload_streamer_insert(
 fn has_upload_config(streamer: &StreamerConfig) -> bool {
     streamer.title.is_some()
         || streamer.tid.is_some()
+        || streamer.tid_v2.is_some()
         || streamer.copyright.is_some()
         || streamer.copyright_source.is_some()
         || streamer.cover_path.is_some()
@@ -397,5 +399,41 @@ mod server_exposure_tests {
             )
             .is_ok()
         );
+    }
+}
+
+
+#[cfg(test)]
+mod tid_v2_config_tests {
+    use super::{has_upload_config, to_upload_streamer_insert};
+    use crate::server::config::StreamerConfig;
+
+    #[test]
+    fn upload_insert_propagates_tid_v2() {
+        let streamer = StreamerConfig {
+            tid: Some(95),
+            tid_v2: Some(2102),
+            tags: Some(vec!["tag".into()]),
+            ..Default::default()
+        };
+        assert!(has_upload_config(&streamer));
+        let insert = to_upload_streamer_insert("demo", &streamer, None)
+            .unwrap()
+            .expect("should create insert");
+        assert_eq!(insert.tid, Some(95));
+        assert_eq!(insert.tid_v2, Some(2102));
+    }
+
+    #[test]
+    fn upload_insert_tid_only_keeps_tid_v2_none() {
+        let streamer = StreamerConfig {
+            tid: Some(171),
+            ..Default::default()
+        };
+        let insert = to_upload_streamer_insert("demo", &streamer, None)
+            .unwrap()
+            .expect("should create insert");
+        assert_eq!(insert.tid, Some(171));
+        assert!(insert.tid_v2.is_none());
     }
 }

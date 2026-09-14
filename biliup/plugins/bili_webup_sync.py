@@ -47,7 +47,7 @@ class FileInfo(NamedTuple):
 class BiliWebAsync:
     def __init__(
             self, principal, data, submit_api=None, copyright=2, postprocessor=None, dtime=None,
-            dynamic='', lines='AUTO', threads=3, tid=122, tags=None, cover_path=None, description='',
+            dynamic='', lines='AUTO', threads=3, tid=122, tid_v2=None, tags=None, cover_path=None, description='',
             dolby=0, hires=0, no_reprint=0, is_only_self=0, charging_pay=0, credits=None,
             user_cookie='cookies.json', copyright_source=None, extra_fields="", video_queue=None
     ):
@@ -63,6 +63,7 @@ class BiliWebAsync:
         self.submit_api = submit_api
         self.threads = threads
         self.tid = tid
+        self.tid_v2 = tid_v2
         self.tags = tags
         self.dtime = dtime
         if cover_path:
@@ -110,6 +111,8 @@ class BiliWebAsync:
             videos.source = self.data["url"]  # 添加转载地址说明
         # 设置视频分区,默认为174 生活，其他分区
         videos.tid = self.tid
+        if self.tid_v2 is not None:
+            videos.tid_v2 = self.tid_v2
         videos.set_tag(self.tags)
         if self.dtime:
             videos.delay_time(int(time.time()) + self.dtime)
@@ -686,6 +689,8 @@ class BiliBili:
 
         # 不能提交 extra_fields 字段，提前处理
         post_data = asdict(videos)
+        if post_data.get('tid_v2') is None:
+            post_data.pop('tid_v2', None)
         if post_data.get('extra_fields'):
             for key, value in json.loads(post_data.pop('extra_fields')).items():
                 post_data.setdefault(key, value)
@@ -818,6 +823,7 @@ class Data:
     copyright: int = 2
     source: str = ''
     tid: int = 21
+    tid_v2: Optional[int] = None
     cover: str = ''
     title: str = ''
     desc_format_id: int = 0

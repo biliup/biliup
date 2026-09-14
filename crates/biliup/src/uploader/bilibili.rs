@@ -32,6 +32,11 @@ pub struct Studio {
     #[builder(default = 171)]
     pub tid: u16,
 
+    /// 新版投稿分区 tid_v2（可选；不设置时不提交该字段）
+    #[cfg_attr(feature = "cli", clap(long))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tid_v2: Option<u32>,
+
     /// 视频封面
     #[cfg_attr(feature = "cli", clap(long, default_value_t))]
     #[serde(default)]
@@ -1108,6 +1113,93 @@ mod archive_tests {
                 &RawArchivePageMetadata { ps: 10, count: 22 }
             )
             .is_err()
+        );
+    }
+}
+
+#[cfg(test)]
+mod studio_tid_v2_tests {
+    use super::Studio;
+
+    fn base_studio_json() -> serde_json::Value {
+        serde_json::json!({
+            "copyright": 1,
+            "source": "",
+            "tid": 95,
+            "cover": "",
+            "title": "t",
+            "desc": "",
+            "dynamic": "",
+            "tag": "",
+            "dolby": 0,
+            "lossless_music": 0,
+            "no_reprint": 0,
+            "charging_pay": 0,
+            "up_selection_reply": false,
+            "up_close_reply": false,
+            "up_close_danmu": false
+        })
+    }
+
+    #[test]
+    fn studio_json_omits_tid_v2_when_unset() {
+        let studio: Studio = serde_json::from_value(base_studio_json()).unwrap();
+        assert!(studio.tid_v2.is_none());
+        let value = serde_json::to_value(&studio).unwrap();
+        assert_eq!(value["tid"], 95);
+        assert!(
+            value.get("tid_v2").is_none(),
+            "unset tid_v2 must not appear in JSON: {value}"
+        );
+    }
+
+    #[test]
+    fn studio_json_includes_tid_v2_when_set() {
+        let mut raw = base_studio_json();
+        raw["tid_v2"] = serde_json::json!(2102);
+        let studio: Studio = serde_json::from_value(raw).unwrap();
+        assert_eq!(studio.tid_v2, Some(2102));
+        let value = serde_json::to_value(&studio).unwrap();
+        assert_eq!(value["tid"], 95);
+        assert_eq!(value["tid_v2"], 2102);
+    }
+
+    #[test]
+    fn studio_tid_v2_does_not_conflict_with_extra_fields() {
+        let mut raw = base_studio_json();
+        raw["tid_v2"] = serde_json::json!(2102);
+        raw["watermark"] = serde_json::json!({"state": 0});
+        let studio: Studio = serde_json::from_value(raw).unwrap();
+        assert_eq!(studio.tid_v2, Some(2102));
+        let value = serde_json::to_value(&studio).unwrap();
+        assert_eq!(value["tid_v2"], 2102);
+        assert_eq!(value["watermark"]["state"], 0);
+        assert_eq!(
+            studio
+                .extra_fields
+                .as_ref()
+                .unwrap()
+                .get("watermark")
+                .unwrap()["state"],
+            0
+        );
+
+        // Prefer first-class field when present; unrelated flatten keys still work.
+        let via_extra: Studio = serde_json::from_value(serde_json::json!({
+            "tid": 95,
+            "title": "t",
+            "watermark": {"state": 0}
+        }))
+        .unwrap();
+        assert!(via_extra.tid_v2.is_none());
+        assert_eq!(
+            via_extra
+                .extra_fields
+                .as_ref()
+                .unwrap()
+                .get("watermark")
+                .unwrap()["state"],
+            0
         );
     }
 }
