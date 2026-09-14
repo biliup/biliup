@@ -3,12 +3,13 @@ use super::{
     LiveStream, media_ext_from_url,
 };
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use md5::{Digest, Md5};
 use rand::Rng;
 use rand::seq::SliceRandom;
 use regex::Regex;
 use reqwest::Client;
+use serde::de::Deserializer;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -71,10 +72,14 @@ impl LivePlugin for Douyu {
 
 /// 缓存的加密密钥与刷新时使用的随机 UA。enc_data 会校验 UA，
 /// 因此 getEncryption 与 getH5PlayV1 必须使用同一 UA，密钥与 UA 需成对缓存。
+///
+/// `server_time_offset_secs` 为 getEncryption 响应 `Date` 相对本机时钟的偏移
+/// （server - local），用于生成 getH5PlayV1 的 `tt`，避免时钟偏差触发 error -9。
 #[derive(Clone)]
 struct CachedEncryptKey {
     key: WhiteEncryptKey,
     user_agent: String,
+    server_time_offset_secs: i64,
 }
 
 impl CachedEncryptKey {
@@ -82,6 +87,11 @@ impl CachedEncryptKey {
     /// 缺失时默认 0（永远过期，每次都会重新请求）。
     fn is_valid(&self, now: u64) -> bool {
         self.key.expire_at > now
+    }
+
+    /// 用缓存的服务器时间偏移校正本机时间，作为 getH5PlayV1 的 `tt`。
+    fn server_aligned_now(&self, local_now: u64) -> u64 {
+        apply_server_time_offset(local_now, self.server_time_offset_secs)
     }
 }
 
@@ -348,8 +358,8 @@ impl<'a> DouyuLive<'a> {
     }
 
     async fn request_web_play_info(&self, room_id: &str, cdn: &str) -> LiveResult<PlayOutcome> {
-        let now = unix_now()?;
-        let (encrypt_key, user_agent) = self.update_key().await?;
+        // tt / auth 使用 getEncryption 响应 Date 对齐的服务器时间，避免本机时钟偏差触发 -9
+        let (encrypt_key, user_agent, now) = self.update_key().await?;
         let auth = sign_stream(&encrypt_key, room_id, now);
 
         let form = vec![
@@ -496,22 +506,30 @@ impl<'a> DouyuLive<'a> {
         Ok(tx_secret)
     }
 
-    /// 获取加密密钥及其配套 UA。对应 Python DouyuUtils.sign 中
-    /// `is_key_valid() or update_key()` 的缓存逻辑：密钥未过期直接复用，
-    /// 过期才重新请求 getEncryption。整个过程持有 Mutex，天然 single-flight。
-    async fn update_key(&self) -> LiveResult<(WhiteEncryptKey, String)> {
+    /// 获取加密密钥及其配套 UA，以及用于 getH5PlayV1 `tt` 的服务器对齐时间。
+    /// 对应 Python DouyuUtils.sign 中 `is_key_valid() or update_key()` 的缓存逻辑：
+    /// 密钥未过期直接复用，过期才重新请求 getEncryption。整个过程持有 Mutex，天然 single-flight。
+    ///
+    /// 返回的时间戳优先取自 getEncryption 响应头 `Date`（#1680：斗鱼校验 tt 相对服务器时间，
+    /// 本机时钟偏差会返回 error -9）。缓存命中时用上次记录的偏移校正本机时间。
+    async fn update_key(&self) -> LiveResult<(WhiteEncryptKey, String, u64)> {
         let mut cache = self.encrypt_key_cache.lock().await;
 
-        let now = unix_now()?;
-        if let Some(cached) = cache.as_ref()
-            && cached.is_valid(now)
-        {
-            return Ok((cached.key.clone(), cached.user_agent.clone()));
+        let local_now = unix_now()?;
+        if let Some(cached) = cache.as_ref() {
+            let server_now = cached.server_aligned_now(local_now);
+            if cached.is_valid(server_now) {
+                return Ok((
+                    cached.key.clone(),
+                    cached.user_agent.clone(),
+                    server_now,
+                ));
+            }
         }
 
         // 防风控，每次刷新密钥随机 UA（对应 douyu.py DouyuUtils.update_key）
         let user_agent = random_chrome_user_agent();
-        let rsp: EncryptionResponse = self
+        let http_rsp = self
             .client
             .get(format!(
                 "https://{DOUYU_WEB_DOMAIN}/wgapi/livenc/liveweb/websec/getEncryption"
@@ -520,7 +538,19 @@ impl<'a> DouyuLive<'a> {
             .header("user-agent", &user_agent)
             .send()
             .await
-            .map_err(|err| LiveError::custom(format!("获取斗鱼加密密钥失败: {err}")))?
+            .map_err(|err| LiveError::custom(format!("获取斗鱼加密密钥失败: {err}")))?;
+
+        // 刷新时再取一次本机时间，使 Date 偏移更贴近本次响应
+        let local_now = unix_now()?;
+        let server_now = http_rsp
+            .headers()
+            .get(reqwest::header::DATE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(parse_http_date_secs)
+            .unwrap_or(local_now);
+        let server_time_offset_secs = server_time_offset_secs(server_now, local_now);
+
+        let rsp: EncryptionResponse = http_rsp
             .json()
             .await
             .map_err(|err| LiveError::custom(format!("解析斗鱼加密密钥失败: {err}")))?;
@@ -539,8 +569,9 @@ impl<'a> DouyuLive<'a> {
         *cache = Some(CachedEncryptKey {
             key: key.clone(),
             user_agent: user_agent.clone(),
+            server_time_offset_secs,
         });
-        Ok((key, user_agent))
+        Ok((key, user_agent, server_now))
     }
 
     fn danmaku_source(&self) -> Option<DanmakuSource> {
@@ -566,6 +597,45 @@ fn unix_now() -> LiveResult<u64> {
         .duration_since(UNIX_EPOCH)
         .map_err(|err| LiveError::custom(format!("获取系统时间失败: {err}")))?
         .as_secs())
+}
+
+/// 解析 HTTP `Date` 响应头（IMF-fixdate / RFC 2822）为 Unix 秒。
+fn parse_http_date_secs(value: &str) -> Option<u64> {
+    DateTime::parse_from_rfc2822(value.trim())
+        .ok()
+        .map(|dt| dt.timestamp())
+        .and_then(|ts| u64::try_from(ts).ok())
+}
+
+/// server_now - local_now，供缓存命中时校正本机时钟。
+fn server_time_offset_secs(server_now: u64, local_now: u64) -> i64 {
+    server_now as i64 - local_now as i64
+}
+
+fn apply_server_time_offset(local_now: u64, offset_secs: i64) -> u64 {
+    if offset_secs >= 0 {
+        local_now.saturating_add(offset_secs as u64)
+    } else {
+        local_now.saturating_sub((-offset_secs) as u64)
+    }
+}
+
+/// 斗鱼错误响应里 `data` 常为 `""` 而非 `null`/`object`（#1680），
+/// 需容忍字符串/空值，否则 serde 在走到 error==-9/-5 分支前就失败。
+fn deserialize_optional_play_info<'de, D>(deserializer: D) -> Result<Option<PlayInfo>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) if s.is_empty() => Ok(None),
+        Some(Value::String(_)) => Ok(None),
+        Some(obj @ Value::Object(_)) => serde_json::from_value(obj)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+        Some(_) => Ok(None),
+    }
 }
 
 /// getH5PlayV1 请求结果：正常拿到播放信息，或需刷新密钥重试的鉴权失败。
@@ -715,6 +785,7 @@ struct WhiteEncryptKey {
 struct PlayResponse {
     error: i64,
     msg: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_play_info")]
     data: Option<PlayInfo>,
 }
 
@@ -875,6 +946,7 @@ mod tests {
         let cached = CachedEncryptKey {
             key: make_key(1000),
             user_agent: random_chrome_user_agent(),
+            server_time_offset_secs: 0,
         };
 
         assert!(cached.is_valid(999));
@@ -885,6 +957,7 @@ mod tests {
         let no_expiry = CachedEncryptKey {
             key: make_key(0),
             user_agent: random_chrome_user_agent(),
+            server_time_offset_secs: 0,
         };
         assert!(!no_expiry.is_valid(0));
     }
@@ -910,6 +983,7 @@ mod tests {
         let encrypt_key_cache = Mutex::new(Some(CachedEncryptKey {
             key: make_key(unix_now().unwrap() + 3600),
             user_agent: user_agent.clone(),
+            server_time_offset_secs: 0,
         }));
         let real_room_id_cache = RwLock::new(HashMap::new());
         let live = make_live(
@@ -919,10 +993,13 @@ mod tests {
         );
 
         // 缓存未过期时直接复用，不发起网络请求，且密钥与 UA 成对返回
-        let (key, ua) = live.update_key().await.unwrap();
+        let (key, ua, tt) = live.update_key().await.unwrap();
         assert_eq!(key.rand_str, "rand");
         assert_eq!(key.enc_data, "enc");
         assert_eq!(ua, user_agent);
+        // offset=0 时 tt 应接近本机时间
+        let local = unix_now().unwrap();
+        assert!((tt as i64 - local as i64).abs() <= 2);
     }
 
     #[tokio::test]
@@ -960,5 +1037,62 @@ mod tests {
         // 正常响应不算
         assert!(!is_douyu_auth_failed(200, r#"{"error":0,"data":{}}"#));
         assert!(!is_douyu_auth_failed(200, ""));
+    }
+
+    #[test]
+    fn play_response_tolerates_empty_string_data() {
+        // #1680：错误响应 data:"" 必须能反序列化，才能走到 error==-9 分支
+        let rsp: PlayResponse =
+            serde_json::from_str(r#"{"error":-9,"msg":"时间戳错误","data":""}"#).unwrap();
+        assert_eq!(rsp.error, -9);
+        assert_eq!(rsp.msg.as_deref(), Some("时间戳错误"));
+        assert!(rsp.data.is_none());
+    }
+
+    #[test]
+    fn play_response_tolerates_null_data() {
+        let rsp: PlayResponse =
+            serde_json::from_str(r#"{"error":-5,"msg":"房间未开播","data":null}"#).unwrap();
+        assert_eq!(rsp.error, -5);
+        assert!(rsp.data.is_none());
+    }
+
+    #[test]
+    fn play_response_deserializes_valid_play_info() {
+        let rsp: PlayResponse = serde_json::from_str(
+            r#"{"error":0,"msg":"","data":{"rtmp_url":"https://example.com","rtmp_live":"live/abc.flv","rtmp_cdn":"hs-h5","cdnsWithName":[{"cdn":"hs-h5"}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(rsp.error, 0);
+        let data = rsp.data.expect("play info");
+        assert_eq!(data.rtmp_url, "https://example.com");
+        assert_eq!(data.rtmp_live, "live/abc.flv");
+        assert_eq!(data.rtmp_cdn, "hs-h5");
+        assert_eq!(data.cdns_with_name[0].cdn.as_deref(), Some("hs-h5"));
+    }
+
+    #[test]
+    fn parse_http_date_secs_from_date_header() {
+        let secs = parse_http_date_secs("Mon, 14 Sep 2026 13:43:00 GMT").unwrap();
+        assert_eq!(secs, 1_789_393_380);
+        assert!(parse_http_date_secs("not-a-date").is_none());
+    }
+
+    #[test]
+    fn server_time_offset_corrects_skewed_local_clock() {
+        // 本机快约 815 秒时，用 Date 对齐后的 tt 应回到服务器时间
+        let server_now = 1_700_000_000_u64;
+        let local_now = server_now + 815;
+        let offset = server_time_offset_secs(server_now, local_now);
+        assert_eq!(offset, -815);
+        assert_eq!(apply_server_time_offset(local_now, offset), server_now);
+
+        let cached = CachedEncryptKey {
+            key: make_key(server_now + 3600),
+            user_agent: "ua".to_string(),
+            server_time_offset_secs: offset,
+        };
+        assert_eq!(cached.server_aligned_now(local_now + 10), server_now + 10);
+        assert!(cached.is_valid(cached.server_aligned_now(local_now)));
     }
 }
