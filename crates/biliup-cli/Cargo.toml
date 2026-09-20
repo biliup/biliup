@@ -13,6 +13,13 @@ path = "src/main.rs"
 biliup = { path = "../biliup", features = ["cli"] }
 danmaku-client = { package = "danmaku", path = "../danmaku" }
 
+# mesio（rust-srec）：进程内 FLV/HLS 下载 + 修复管线，见 server/core/downloader/mesio.rs
+mesio-engine = { git = "https://github.com/hua0512/rust-srec", rev = "dcdb80ee607ff6a991e5ddd86a0084a01bd945ac" }
+flv-fix = { git = "https://github.com/hua0512/rust-srec", rev = "dcdb80ee607ff6a991e5ddd86a0084a01bd945ac", default-features = false }
+hls-fix = { git = "https://github.com/hua0512/rust-srec", rev = "dcdb80ee607ff6a991e5ddd86a0084a01bd945ac", default-features = false }
+hls = { git = "https://github.com/hua0512/rust-srec", rev = "dcdb80ee607ff6a991e5ddd86a0084a01bd945ac" }
+pipeline-common = { git = "https://github.com/hua0512/rust-srec", rev = "dcdb80ee607ff6a991e5ddd86a0084a01bd945ac" }
+
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
@@ -73,3 +80,5 @@ dirs = "6.0"
 default = []
 python-bridge = []
 
+[dev-dependencies]
+m3u8-rs = "6"

@@ -46,7 +46,7 @@ const Global: React.FC = () => {
               <br />
               5. ytarchive（仅适用于 Youtube Live）
               <br />
-              {/* 6. mesio（基于 Rust 的命令行视频下载/修复器）详见 <a href="https://github.com/hua0512/rust-srec/tree/main/mesio-cli" target="_blank" rel="noopener noreferrer" >项目主页</a> */}
+              6. mesio（内置 rust-srec 引擎，进程内下载 FLV/HLS 并修复时间戳、注入关键帧索引，支持按大小/时长分段，无需额外安装）详见 <a href="https://github.com/hua0512/rust-srec" target="_blank" rel="noopener noreferrer" >项目主页</a>
             </div>
           }
           style={{ width: '100%' }}
@@ -61,7 +61,7 @@ const Global: React.FC = () => {
           <Select.Option value="stream-gears">stream-gears（默认）</Select.Option>
           <Select.Option value="sync-downloader">sync-downloader（边录边传）</Select.Option>
           <Select.Option value="ytarchive">ytarchive（仅适用于 Youtube Live）</Select.Option>
-          {/* <Select.Option value="mesio">mesio</Select.Option> */}
+          <Select.Option value="mesio">mesio（内置流修复下载器）</Select.Option>
         </Form.Select>
         {formApi.getValue('downloader') === 'sync-downloader' ? (
           <>

@@ -5,6 +5,7 @@
 ### 使用该模式下载flv流时，将会仅使用ffmpeg。请手动安装streamlink以及ffmpeg。
 ### 2.ffmpeg（纯ffmpeg下载），请手动安装ffmpeg。
 ### 3.stream-gears
+### 4.mesio（内置 rust-srec 引擎，进程内下载 FLV/HLS 并修复时间戳、注入关键帧索引，支持按大小/时长分段，无需额外安装）
 #downloader: ffmpeg
 ### 录像单文件大小限制，单位Byte，超过此大小分段下载，下载回放时无法使用
 file_size: 2621440000

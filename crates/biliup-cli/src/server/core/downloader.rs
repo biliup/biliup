@@ -1,6 +1,8 @@
 pub mod cover_downloader;
 /// FFmpeg下载器实现
 pub mod ffmpeg_downloader;
+/// mesio（rust-srec）进程内下载 + 修复管线
+pub mod mesio;
 /// Stream-gears下载器实现
 pub mod stream_gears;
 pub mod streamlink;
@@ -11,6 +13,7 @@ pub mod ytdlp;
 use crate::server::common::timerange;
 use crate::server::common::util::Recorder;
 use crate::server::core::downloader::ffmpeg_downloader::FfmpegDownloader;
+use crate::server::core::downloader::mesio::Mesio;
 use crate::server::core::downloader::stream_gears::StreamGears;
 use crate::server::core::downloader::streamlink::Streamlink;
 use crate::server::core::downloader::sync_downloader::SyncDownloader;
@@ -99,6 +102,8 @@ pub enum DownloaderType {
     Streamlink,
     /// yt-dlp下载器
     YtDlp,
+    /// mesio（rust-srec）：进程内 FLV/HLS 下载与修复管线
+    Mesio,
 }
 
 /// 实际的下载器枚举（包含实例）
@@ -108,6 +113,7 @@ pub enum DownloaderRuntime {
     StreamLink(Streamlink),
     YtDlp(YouTubeDownloader),
     Sync(SyncDownloader),
+    Mesio(Mesio),
 }
 
 impl DownloaderRuntime {
@@ -119,6 +125,7 @@ impl DownloaderRuntime {
                 DownloaderType::FfmpegExternal,
             )),
             DownloaderType::SyncDownloader => Self::Sync(SyncDownloader::new()),
+            DownloaderType::Mesio => Self::Mesio(Mesio::new()),
             _ => Self::StreamGears(StreamGears::new(None)),
         }
     }
@@ -133,6 +140,7 @@ impl DownloaderRuntime {
             Self::StreamGears(d) => d.download(callback, download_config).await,
             DownloaderRuntime::StreamLink(d) => d.download(callback, download_config).await,
             Self::YtDlp(d) => d.download(callback, download_config).await,
+            Self::Mesio(d) => d.download(callback, download_config).await,
             Self::Sync(_) => Err(AppError::Custom(
                 "sync-downloader 应走边录边传专用流程，而不是落盘分段回调".into(),
             )
@@ -147,6 +155,7 @@ impl DownloaderRuntime {
             DownloaderRuntime::StreamLink(d) => d.stop().await,
             Self::YtDlp(d) => d.stop().await,
             Self::Sync(d) => d.stop().await,
+            Self::Mesio(d) => d.stop().await,
         }
     }
 }
@@ -348,5 +357,19 @@ mod tests {
         );
         let gears = DownloaderRuntime::from_type(DownloaderType::StreamGears);
         assert!(matches!(gears, DownloaderRuntime::StreamGears(_)));
+    }
+
+    #[test]
+    fn mesio_maps_to_its_own_runtime_and_kebab_case_name() {
+        let runtime = DownloaderRuntime::from_type(DownloaderType::Mesio);
+        assert!(matches!(runtime, DownloaderRuntime::Mesio(_)));
+        assert_eq!(
+            serde_json::to_string(&DownloaderType::Mesio).unwrap(),
+            "\"mesio\""
+        );
+        assert_eq!(
+            serde_json::from_str::<DownloaderType>("\"mesio\"").unwrap(),
+            DownloaderType::Mesio
+        );
     }
 }

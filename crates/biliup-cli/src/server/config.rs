@@ -12,7 +12,7 @@ use struct_patch::Patch;
 #[patch(attribute(derive(Debug, Clone, Default, Deserialize, Serialize)))]
 pub struct Config {
     // ===== 全局录播与上传设置 =====
-    /// 下载器类型：streamlink | ffmpeg | stream-gears | sync-downloader | 自定义
+    /// 下载器类型：streamlink | ffmpeg | stream-gears | sync-downloader | mesio | 自定义
     #[serde(default)]
     pub downloader: Option<DownloaderType>,
 
