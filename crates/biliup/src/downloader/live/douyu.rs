@@ -266,7 +266,7 @@ impl<'a> DouyuLive<'a> {
         let Some(room) = resp.room else {
             return Ok(None);
         };
-        if room.show_status != 1 || room.video_loop != 0 {
+        if room.show_status != 1 {
             return Ok(None);
         }
         if self.douyu_disable_interactive_game && self.has_interactive_game(room_id).await? {
