@@ -4,6 +4,6 @@
     /*margin-left: 11px;*/
 }
 
-body[theme-mode=dark] .shadow {
+:root[theme-mode=dark] .shadow {
     box-shadow: var(--semi-shadow-elevated) !important;
 }

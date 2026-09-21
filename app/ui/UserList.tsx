@@ -22,7 +22,7 @@ import { FormApi } from '@douyinfe/semi-ui/lib/es/form'
 import useSWRMutation from 'swr/mutation'
 import { useBiliUsers } from '../lib/use-streamers'
 import QRcode from '@/app/ui/QRcode'
-import { useWindowSize } from 'react-use';
+import { useWindowWidth } from '../lib/useIsMobile';
 
 type UserListProps = {
   onCancel?: (e: React.MouseEvent<Element, MouseEvent> | React.KeyboardEvent<Element>) => void
@@ -35,7 +35,7 @@ const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
   const { biliUsers: list } = useBiliUsers()
   const [modalVisible, setVisible] = useState(false)
   const [confirmLoading, setConfirmLoading] = useState(false)
-  const { width } = useWindowSize()
+  const width = useWindowWidth()
   const showDialog = () => {
     setVisible(true)
   }
@@ -74,10 +74,9 @@ const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
   }
   const handleCancel = () => {
     setVisible(false)
-    console.log('Cancel button clicked')
   }
   const handleAfterClose = () => {
-    console.log('After Close callback executed')
+    // noop
   }
   const updateList = async (id: number) => {
     try {
@@ -125,7 +124,7 @@ const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
           <Button
             onClick={showDialog}
             icon={<IconPlusCircle size="large" />}
-            style={{ marginRight: 4, backgroundColor: 'rgba(var(--semi-indigo-0), 1)' }}
+            style={{ marginRight: 4 }}
           >
             新增
           </Button>
