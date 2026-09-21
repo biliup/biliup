@@ -172,9 +172,3 @@ export interface StreamerInfo {
 	date: number;
 	live_cover_path: string;
 }
-
-export interface BiliupStatus {
-	downloader_status?: Record<string, string>;
-	uploader_status?: Record<string, string>;
-	config?: Record<string, any>;
-}

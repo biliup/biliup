@@ -6,17 +6,9 @@ export const BG_OPACITY_KEY = 'biliup_ui_bg_opacity'
 /** 默认遮罩透明度(0~1),保证文字可读 */
 export const DEFAULT_BG_OPACITY = 0.35
 
-// 仅允许本地 data URL（base64/blob）作为背景，禁止一切远程 http/https 外链背景，
-// 避免外链失效 / CDN 慢 / 图片追踪 / 混合内容等问题。
-function isRemoteUrl(url: string): boolean {
-  // 匹配 http://、https://、以及协议相对地址 //xxx
-  return /^(https?:)?\/\//i.test(url)
-}
-
+/** 背景只接受本地 data URL；历史版本曾支持 http(s) 外链，启动时会把这类旧值清掉 */
 function isAllowedBg(url: string): boolean {
-  // 空串表示清除；非空必须是以 data: 开头的本地资源
-  if (!url) return true
-  return url.startsWith('data:') && !isRemoteUrl(url)
+  return !url || url.startsWith('data:')
 }
 
 export function getBg(): string {
@@ -24,18 +16,18 @@ export function getBg(): string {
   return localStorage.getItem(BG_KEY) || ''
 }
 
-/** 读取遮罩透明度(0.05~0.9,默认 0.35) */
+/** 读取遮罩透明度(0.05~0.8,与滑块范围一致,默认 0.35) */
 export function getBgOpacity(): number {
   if (typeof window === 'undefined') return DEFAULT_BG_OPACITY
   const raw = parseFloat(localStorage.getItem(BG_OPACITY_KEY) ?? '')
   if (Number.isNaN(raw)) return DEFAULT_BG_OPACITY
-  return Math.min(0.9, Math.max(0.05, raw))
+  return Math.min(0.8, Math.max(0.05, raw))
 }
 
 /** 设置遮罩透明度并立即生效 */
 export function setBgOpacity(v: number) {
   if (typeof window === 'undefined') return
-  const clamped = Math.min(0.9, Math.max(0.05, v))
+  const clamped = Math.min(0.8, Math.max(0.05, v))
   try {
     localStorage.setItem(BG_OPACITY_KEY, String(clamped))
   } catch {
@@ -84,15 +76,6 @@ export function setBg(url: string) {
   applyBg(url)
 }
 
-export function validateBg(url: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (!url) return resolve(false)
-    // 仅接受本地 data URL，不加载任何远程资源（不再发起网络请求）
-    if (url.startsWith('data:')) return resolve(true)
-    return resolve(false)
-  })
-}
-
 export function useGlobalBackgroundInit() {
   useEffect(() => {
     const url = getBg()
@@ -104,9 +87,6 @@ export function useGlobalBackgroundInit() {
       setBg('')
       return
     }
-    validateBg(url).then((ok) => {
-      if (ok) applyBg(url)
-      else setBg('')
-    })
+    applyBg(url)
   }, [])
 }

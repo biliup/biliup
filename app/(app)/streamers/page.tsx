@@ -43,10 +43,7 @@ const { Text } = Typography
 
 /**
  * 直播管理:卡片 / 列表双视图 + 搜索 + 平台筛选 + 批量操作。
- * 相对 PR 版本的增强:
- *  - 修复 useStreamers 吞错误导致"接口失败被误判为空列表"的问题
- *  - 卡片与主页共用 StreamerCard,样式不再两处重复
- *  - 新增列表视图(主播多时可用)、搜索、筛选、批量暂停/删除
+ * 卡片与首页共用 StreamerCard;接口失败与空列表分开处理。
  */
 export default function StreamersPage() {
   const { data: streamers, error, isLoading, mutate } = useSWR<LiveStreamerEntity[]>(
@@ -69,7 +66,7 @@ export default function StreamersPage() {
     return map
   }, [infos])
 
-  // ---- 增删改(保留 PR 逻辑) ----
+  // ---- 增删改 ----
   const { trigger: deleteStreamers } = useSWRMutation('/v1/streamers', requestDelete)
   const { trigger: updateStreamers } = useSWRMutation('/v1/streamers', put)
   const { trigger } = useSWRMutation('/v1/streamers', sendRequest)
@@ -218,35 +215,28 @@ export default function StreamersPage() {
     }
   }
 
-  // ---- 卡片操作区(网格) ----
+  // 编辑 / 暂停 / 删除 / 高级四个操作，网格卡片与列表行共用，只是外层容器不同
+  const actionButtons = (item: LiveStreamerEntity) => (
+    <>
+      <TemplateModal onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
+        <Button theme="borderless" type="primary" icon={<IconEdit2Stroked />} aria-label="编辑" />
+      </TemplateModal>
+      <PauseButton streamer={item} />
+      <Popconfirm title="确定是否要删除？" content="此操作将不可逆" onConfirm={() => onConfirm(item.id)}>
+        <Button theme="borderless" type="danger" icon={<IconDeleteStroked />} aria-label="删除" />
+      </Popconfirm>
+      <OverrideModal onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
+        <Button theme="borderless" type="tertiary" icon={<IconWrench />} aria-label="高级" />
+      </OverrideModal>
+    </>
+  )
   const renderActions = (item: LiveStreamerEntity) => (
     <ButtonGroup theme="borderless" className={styles.cardActions}>
-      <TemplateModal onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
-        <Button theme="borderless" type="primary" icon={<IconEdit2Stroked />} aria-label="编辑" />
-      </TemplateModal>
-      <PauseButton streamer={item} />
-      <Popconfirm title="确定是否要删除？" content="此操作将不可逆" onConfirm={() => onConfirm(item.id)}>
-        <Button theme="borderless" type="danger" icon={<IconDeleteStroked />} aria-label="删除" />
-      </Popconfirm>
-      <OverrideModal onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
-        <Button theme="borderless" type="tertiary" icon={<IconWrench />} aria-label="高级" />
-      </OverrideModal>
+      {actionButtons(item)}
     </ButtonGroup>
   )
-
   const renderRowActions = (item: LiveStreamerEntity) => (
-    <div className={styles.rowActions}>
-      <TemplateModal onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
-        <Button theme="borderless" type="primary" icon={<IconEdit2Stroked />} aria-label="编辑" />
-      </TemplateModal>
-      <PauseButton streamer={item} />
-      <Popconfirm title="确定是否要删除？" content="此操作将不可逆" onConfirm={() => onConfirm(item.id)}>
-        <Button theme="borderless" type="danger" icon={<IconDeleteStroked />} aria-label="删除" />
-      </Popconfirm>
-      <OverrideModal onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
-        <Button theme="borderless" type="tertiary" icon={<IconWrench />} aria-label="高级" />
-      </OverrideModal>
-    </div>
+    <div className={styles.rowActions}>{actionButtons(item)}</div>
   )
 
   return (
