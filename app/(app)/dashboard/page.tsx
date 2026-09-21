@@ -1,5 +1,5 @@
 'use client'
-import React, { useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   Button,
   Form,
@@ -28,6 +28,22 @@ import { PlatformPanels } from '../../ui/plugins'
 import Global from '../../ui/plugins/global'
 import Developer from '../../ui/plugins/developer'
 
+const TAB_GLOBAL = '1'
+const TAB_PLATFORM = '2'
+const TAB_DEVELOPER = '3'
+
+/** Semi 把校验错误按字段路径存成嵌套对象（{ user: { bili_cookie: '…' } }），拍平成 x-field-id 形式 */
+function errorFieldPaths(errors: unknown, prefix = ''): string[] {
+  if (!errors || typeof errors !== 'object' || Array.isArray(errors) || '$$typeof' in errors) {
+    return prefix ? [prefix] : []
+  }
+  return Object.entries(errors as Record<string, unknown>).flatMap(([k, v]) =>
+    errorFieldPaths(v, prefix ? `${prefix}.${k}` : k),
+  )
+}
+
+const fieldElement = (path: string) =>
+  document.querySelector<HTMLElement>(`.semi-form-field[x-field-id="${path}"]`)
 
 const Dashboard: React.FC = () => {
 const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
@@ -62,6 +78,32 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
 
   // 平台设置：左列平台名是唯一的导航，右栏只显示选中平台的字段。列表来自插件注册表 PlatformPanels
   const [activePlatform, setActivePlatform] = useState(PlatformPanels[0].key)
+  const [activeTab, setActiveTab] = useState(TAB_GLOBAL)
+
+  // 校验失败时出错字段可能藏在未选中的 Tab / 平台面板里（字段全部挂载、只切 hidden），
+  // 用户看不到红字也不知道为什么保存没反应。这里切到第一个出错字段所在的面板并滚过去。
+  const [pendingField, setPendingField] = useState<string | null>(null)
+  const handleSubmitFail = (errors: Record<string, unknown>) => {
+    const fields = errorFieldPaths(errors)
+      .map(path => ({ path, el: fieldElement(path) }))
+      .filter((f): f is { path: string; el: HTMLElement } => !!f.el)
+      .sort((a, b) => (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1))
+    const first = fields[0]
+    if (!first) return
+    const tab = first.el.closest<HTMLElement>('[data-tab]')?.dataset.tab
+    const platform = first.el.closest<HTMLElement>('[data-platform]')?.dataset.platform
+    if (tab) setActiveTab(tab)
+    if (platform) setActivePlatform(platform)
+    setPendingField(first.path)
+    Toast.warning(`有 ${fields.length} 项未通过校验，已定位到第一项`)
+  }
+  useEffect(() => {
+    if (!pendingField) return
+    const el = fieldElement(pendingField)
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    el?.querySelector<HTMLElement>('input, textarea')?.focus({ preventScroll: true })
+    setPendingField(null)
+  }, [pendingField])
 
   if (isLoading) {
     return <>Loading</>
@@ -135,10 +177,13 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
                     throw e
                   }
                 }}
+                onSubmitFail={handleSubmitFail}
                 getFormApi={formApi => (formRef.current = formApi)}
               >
                 <Tabs
                   type="line"
+                  activeKey={activeTab}
+                  onChange={setActiveTab}
                   // 关闭切换动画：Semi 的动画依赖 .semi-tabs-pane 的 overflow: hidden，
                   // 而平台列表列要在 pane 内 sticky，两者冲突（见 dashboard.module.scss）
                   tabPaneMotion={false}
@@ -146,13 +191,15 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
                     margin: '10px 0 0 0',
                   }}
                 >
-                  <TabPane tab="全局设置" itemKey="1">
+                  <TabPane tab="全局设置" itemKey={TAB_GLOBAL}>
                     {/* 全局设置 */}
-                    <Global />
+                    <div data-tab={TAB_GLOBAL}>
+                      <Global />
+                    </div>
                   </TabPane>
-                  <TabPane tab="平台设置" itemKey="2">
+                  <TabPane tab="平台设置" itemKey={TAB_PLATFORM}>
                     {/* 平台设置：左列平台名 + 右栏选中平台的字段 */}
-                    <div className={styles.framePlatformConfig}>
+                    <div className={styles.framePlatformConfig} data-tab={TAB_PLATFORM}>
                       <SectionTitle icon={<IconGlobe size="small" />} title="平台设置" />
                       <div className={styles.platformLayout}>
                         <nav className={styles.platformNav} aria-label="平台列表">
@@ -180,6 +227,7 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
                               className={styles.platformPanel}
                               hidden={activePlatform !== p.key}
                               aria-label={p.name}
+                              data-platform={p.key}
                             >
                               <p.Component entity={entity} list={list} bare />
                             </section>
@@ -188,9 +236,11 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
                       </div>
                     </div>
                   </TabPane>
-                  <TabPane tab="开发者选项" itemKey="3">
+                  <TabPane tab="开发者选项" itemKey={TAB_DEVELOPER}>
                     {/* 开发者选项 */}
-                    <Developer />
+                    <div data-tab={TAB_DEVELOPER}>
+                      <Developer />
+                    </div>
                   </TabPane>
                 </Tabs>
                 <Space />
