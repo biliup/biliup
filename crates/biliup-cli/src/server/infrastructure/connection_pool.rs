@@ -1,12 +1,44 @@
 use crate::server::errors::{AppError, AppResult};
 use error_stack::ResultExt;
+use sqlx::migrate::Migrator;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{Pool, Sqlite};
+use std::fmt::Write as _;
 use std::path::Path;
-use tracing::info;
+use tracing::{info, warn};
 
 /// SQLite连接池类型别名
 pub type ConnectionPool = Pool<Sqlite>;
+
+/// 一条曾经被就地改写过的迁移。
+///
+/// `legacy_checksum` 是历史版本里该文件内容的 SHA-384（sqlx 记在 `_sqlx_migrations`
+/// 里的那一列），`repair` 是把旧内容的执行效果补成新内容所需的语句。
+struct SupersededMigration {
+    version: i64,
+    legacy_checksum: &'static str,
+    /// 必须幂等：老库可能已经处于新内容期望的状态，也可能重复启动多次。
+    repair: &'static [&'static str],
+}
+
+/// 迁移文件是只读历史：sqlx 会用文件内容的 SHA-384 校验每条已应用的迁移，一旦
+/// 就地改写，所有老库都会在启动时以
+/// `migration N was previously applied but has been modified` 整体失败 —— 服务起不来，
+/// 容器无限重启（#1701 / #1702）。修 SQL 的正确做法始终是新增一个迁移文件。
+///
+/// 这张表只给**已经发生过**的改写兜底，不是继续改写的许可。登记一条的前提是：
+/// 对已经跑过旧内容的库来说，新旧内容的差异能用下面这组幂等语句补齐。
+const SUPERSEDED_MIGRATIONS: &[SupersededMigration] = &[
+    // 迁移 2 原本写 `UPDATE uploadstreamers SET tags = null`，而该列是 JSON NOT NULL，
+    // 从 Python 版升级且 tags 为空串的实例会卡死在这一步；v1.2.5 把它改成了
+    // `SET tags = '[]'`（#1684）。改动本身是对的，但让 v1.2.4 及更早版本建立的库
+    // 全部校验失配。两版内容的唯一差异就是这一条 UPDATE。
+    SupersededMigration {
+        version: 2,
+        legacy_checksum: "fcc6436a889297e5c28f2a0f12196e5eee5975ba352032c8201dfa61fb1b9c3fd01ddc41ddfa71bd7423999521b895eb",
+        repair: &["UPDATE uploadstreamers SET tags = '[]' WHERE tags = '' OR tags = 'null'"],
+    },
+];
 
 /// 连接管理器
 /// 负责管理SQLite数据库连接池的创建和配置
@@ -48,21 +80,227 @@ impl ConnectionManager {
             ))?;
 
         // 运行数据库迁移，确保数据库结构是最新的
+        let migrator = sqlx::migrate!();
+        Self::reconcile_superseded_migrations(&pool, &migrator).await?;
+
         info!("migrations enabled, running...");
-        sqlx::migrate!()
-            .run(&pool)
-            .await
-            .change_context(AppError::Custom(
-                "error while running database migrations".to_string(),
-            ))?;
+        migrator.run(&pool).await.change_context(AppError::Custom(
+            "error while running database migrations".to_string(),
+        ))?;
 
         Ok(pool)
     }
+
+    /// 把历史上被改写过的迁移记录对齐到当前文件内容，让老库还能继续升级。
+    ///
+    /// 只在记录里的校验和**恰好等于**登记过的历史摘要时才动手；其余任何失配都原样
+    /// 留给 sqlx 报错，免得把用户自己改过的迁移悄悄放行。补丁语句与校验和改写在同一
+    /// 个事务里，中途崩溃不会留下「补丁没跑但校验和已对齐」的中间态。
+    async fn reconcile_superseded_migrations(
+        pool: &ConnectionPool,
+        migrator: &Migrator,
+    ) -> AppResult<()> {
+        let bookkeeping_exists: Option<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'",
+        )
+        .fetch_optional(pool)
+        .await
+        .change_context(AppError::Custom(
+            "error while inspecting database migration state".to_string(),
+        ))?;
+        // 全新安装：连记账表都还没有，没有任何历史需要对齐。
+        if bookkeeping_exists.is_none() {
+            return Ok(());
+        }
+
+        for entry in SUPERSEDED_MIGRATIONS {
+            let Some(current) = migrator.iter().find(|m| m.version == entry.version) else {
+                continue;
+            };
+            let applied: Option<(Vec<u8>, bool)> =
+                sqlx::query_as("SELECT checksum, success FROM _sqlx_migrations WHERE version = ?")
+                    .bind(entry.version)
+                    .fetch_optional(pool)
+                    .await
+                    .change_context(AppError::Custom(
+                        "error while inspecting database migration state".to_string(),
+                    ))?;
+            // 没跑过（含跑失败留下的记录）的迁移由 sqlx 正常应用，不需要对齐。
+            let Some((checksum, true)) = applied else {
+                continue;
+            };
+            if checksum == current.checksum.as_ref() {
+                continue;
+            }
+            if hex_lower(&checksum) != entry.legacy_checksum {
+                warn!(
+                    version = entry.version,
+                    "已应用的迁移既不是当前内容也不是已知的历史内容，不做自动对齐"
+                );
+                continue;
+            }
+
+            let mut tx = pool.begin().await.change_context(AppError::Custom(
+                "error while reconciling database migration state".to_string(),
+            ))?;
+            for statement in entry.repair {
+                sqlx::query(statement)
+                    .execute(&mut *tx)
+                    .await
+                    .change_context(AppError::Custom(
+                        "error while reconciling database migration state".to_string(),
+                    ))?;
+            }
+            sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ?")
+                .bind(current.checksum.to_vec())
+                .bind(entry.version)
+                .execute(&mut *tx)
+                .await
+                .change_context(AppError::Custom(
+                    "error while reconciling database migration state".to_string(),
+                ))?;
+            tx.commit().await.change_context(AppError::Custom(
+                "error while reconciling database migration state".to_string(),
+            ))?;
+
+            info!(
+                version = entry.version,
+                "该迁移在新版本中被修正，已补跑差异并对齐校验和"
+            );
+        }
+
+        Ok(())
+    }
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut out, byte| {
+            let _ = write!(out, "{byte:02x}");
+            out
+        })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ConnectionManager;
+    use super::{ConnectionManager, ConnectionPool, SUPERSEDED_MIGRATIONS, hex_lower};
+
+    fn decode_hex(hex: &str) -> Vec<u8> {
+        (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+            .collect()
+    }
+
+    /// 把一个全新库回退成 v1.2.4 那一代的样子：迁移 4/5 尚未应用，迁移 2 记的是
+    /// 改写前的校验和。
+    async fn rewind_to_v1_2_4(pool: &ConnectionPool, migration_2_checksum: &[u8]) {
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (4, 5)")
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query("ALTER TABLE uploadstreamers DROP COLUMN tid_v2")
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = 2")
+            .bind(migration_2_checksum.to_vec())
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    /// #1701：v1.2.5 就地改写了迁移 2，所有 v1.2.4 及更早版本建立的库都会以
+    /// `migration 2 was previously applied but has been modified` 启动失败。
+    /// 升级必须照常完成：待应用的迁移要跑完，既有数据不能丢。
+    #[tokio::test]
+    async fn upgrade_from_pre_1_2_5_database_reconciles_rewritten_migration() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        rewind_to_v1_2_4(&pool, &decode_hex(SUPERSEDED_MIGRATIONS[0].legacy_checksum)).await;
+        sqlx::query(
+            "INSERT INTO uploadstreamers (id, template_name, tags) VALUES \
+             (1, 'from-python', ''), (2, 'normal', '[\"直播录像\"]')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO livestreamers (url, remark, override) VALUES \
+             ('https://live.bilibili.com/1', 'placeholder', '{\"file_size\":null}')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .expect("v1.2.4 建立的库必须能升级上来");
+
+        let migrations: Vec<(i64, Vec<u8>)> =
+            sqlx::query_as("SELECT version, checksum FROM _sqlx_migrations ORDER BY version")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            migrations.iter().map(|m| m.0).collect::<Vec<_>>(),
+            vec![1, 2, 3, 4, 5],
+            "待应用的迁移必须补齐"
+        );
+        let embedded = sqlx::migrate!();
+        let expected = embedded.iter().find(|m| m.version == 2).unwrap();
+        assert_eq!(
+            hex_lower(&migrations[1].1),
+            hex_lower(&expected.checksum),
+            "迁移 2 的校验和必须对齐到当前文件内容"
+        );
+
+        let tags: Vec<(i64, String)> =
+            sqlx::query_as("SELECT id, tags FROM uploadstreamers ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(tags[0].1, "[]", "空 tags 必须被补成空数组，而不是 NULL");
+        assert_eq!(tags[1].1, "[\"直播录像\"]", "正常数据原样保留");
+
+        // 迁移 4/5 确实跑过：占位 null 被清掉，tid_v2 列已存在。
+        let override_json: String = sqlx::query_scalar("SELECT override FROM livestreamers")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(!override_json.contains("file_size"), "{override_json}");
+        sqlx::query("SELECT tid_v2 FROM uploadstreamers")
+            .fetch_all(&pool)
+            .await
+            .expect("迁移 5 必须已应用");
+    }
+
+    /// 自愈只针对登记在册的历史内容。用户自己改过的迁移仍然要报错，不能被悄悄放行。
+    #[tokio::test]
+    async fn unknown_migration_checksum_is_not_silently_reconciled() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = 2")
+            .bind(vec![0u8; 48])
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+
+        assert!(
+            ConnectionManager::new_pool(db.to_str().unwrap())
+                .await
+                .is_err()
+        );
+    }
 
     /// 旧版本落库的覆写里 `file_size: null` 只是占位，迁移后必须消失（跟随全局），
     /// 其它显式设置的字段与真正的数值原样保留。
