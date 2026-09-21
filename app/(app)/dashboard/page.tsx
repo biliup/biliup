@@ -25,7 +25,7 @@ import SectionTitle from '../components/SectionTitle'
 import dc from '@/app/ui/data-card.module.scss'
 
 // 注册各平台组件
-import plugins from '../../ui/plugins'
+import { PlatformPanels } from '../../ui/plugins'
 import Global from '../../ui/plugins/global'
 import Developer from '../../ui/plugins/developer'
 
@@ -61,21 +61,8 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
 
   const { biliUsers } = useBiliUsers()
 
-  // 平台设置：左列平台名 + 右栏仅渲染选中平台（默认哔哩哔哩）
-  // key 与各平台插件 Collapse.Panel 的 itemKey 对齐，便于点击即展开
-  const [activePlatform, setActivePlatform] = useState('bilibili')
-  const PLATFORM_LIST = [
-    { key: 'bilibili', name: '哔哩哔哩', Comp: plugins.Bilibili },
-    { key: 'cc', name: 'CC', Comp: plugins.CC },
-    { key: 'douyin', name: '抖音', Comp: plugins.Douyin },
-    { key: 'douyu', name: '斗鱼', Comp: plugins.Douyu },
-    { key: 'huya', name: '虎牙', Comp: plugins.Huya },
-    { key: 'kilakila', name: '克拉克拉', Comp: plugins.Kilakila },
-    { key: 'twitcasting', name: 'TwitCasting', Comp: plugins.Twitcasting },
-    { key: 'twitch', name: 'Twitch', Comp: plugins.Twitch },
-    { key: 'youtube', name: 'YouTube', Comp: plugins.Youtube },
-  ]
-  const COOKIE_ENTRY = { key: 'user', name: '用户 Cookie', Comp: plugins.Cookie }
+  // 平台设置：左列平台名 + 右栏仅展开选中平台。列表来自插件注册表 PlatformPanels
+  const [activePlatform, setActivePlatform] = useState(PlatformPanels[0].key)
 
   if (isLoading) {
     return <>Loading</>
@@ -167,7 +154,7 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
                       <SectionTitle icon={<IconGlobe size="small" />} title="平台设置" />
                       <div className={styles.platformLayout}>
                         <nav className={styles.platformNav}>
-                          {PLATFORM_LIST.concat(COOKIE_ENTRY).map(p => (
+                          {PlatformPanels.map(p => (
                             <button
                               key={p.key}
                               type="button"
@@ -185,8 +172,8 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
                               卸载会注销 Semi Form 字段状态,提交时仅剩挂载字段;后端 PUT /configuration
                               整表覆盖保存,会清空其他平台的参数与凭据 */}
                           <Collapse keepDOM activeKey={[activePlatform]}>
-                            {PLATFORM_LIST.concat(COOKIE_ENTRY).map(p => (
-                              <p.Comp key={p.key} entity={entity} list={list} />
+                            {PlatformPanels.map(p => (
+                              <p.Component key={p.key} entity={entity} list={list} />
                             ))}
                           </Collapse>
                         </div>

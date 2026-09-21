@@ -1,3 +1,4 @@
+import type React from 'react'
 import Bilibili from './bilibili'
 import CC from './cc'
 import Cookie from './cookie'
@@ -36,6 +37,23 @@ const plugins = {
   Twitch,
   Youtube,
 }
+
+/**
+ * 空间配置「平台设置」左栏的展示顺序与文案。
+ * key 必须与各插件 Collapse.Panel 的 itemKey 一致；新增插件时在这里登记一行即可出现在 UI 里。
+ */
+export const PlatformPanels: { key: string; name: string; Component: React.FC<any> }[] = [
+  { key: 'bilibili', name: '哔哩哔哩', Component: Bilibili },
+  { key: 'cc', name: 'CC', Component: CC },
+  { key: 'douyin', name: '抖音', Component: Douyin },
+  { key: 'douyu', name: '斗鱼', Component: Douyu },
+  { key: 'huya', name: '虎牙', Component: Huya },
+  { key: 'kilakila', name: '克拉克拉', Component: Kilakila },
+  { key: 'twitcasting', name: 'TwitCasting', Component: Twitcasting },
+  { key: 'twitch', name: 'Twitch', Component: Twitch },
+  { key: 'youtube', name: 'YouTube', Component: Youtube },
+  { key: 'user', name: '用户 Cookie', Component: Cookie },
+]
 
 const SupportedPlatforms = {
   'https?:\/\/(b23\.tv|live\.bilibili\.com)': Bilibili,
