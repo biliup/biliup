@@ -326,6 +326,18 @@
   padding: 4px;
   background: var(--semi-color-fill-0);
   border-radius: 8px;
+  /* 贴在页头下方吸顶：右栏面板很长时（哔哩哔哩 14 个字段）平台列表不随内容滚走。
+     --page-header-height 由 PageHeader 写入，兜底 80px */
+  position: sticky;
+  top: calc(var(--page-header-height, 80px) + 16px);
+  z-index: 1;
+  max-height: calc(100vh - var(--page-header-height, 80px) - 32px);
+  overflow-y: auto;
+}
+/* Semi 给 .semi-tabs-pane 设了 overflow: hidden 供切换动画裁切，这会让 pane 成为
+   sticky 的滚动容器而使吸顶失效；Tabs 已关闭 tabPaneMotion，放开即可 */
+.form :global(.semi-tabs-pane) {
+  overflow: visible;
 }
 .platformNavItem {
   appearance: none;
@@ -352,6 +364,10 @@
   flex: 1;
   min-width: 0;
 }
+/* 右栏：只显示选中平台的字段；不设 display，以免覆盖 hidden 属性 */
+.platformPanel {
+  padding: 4px 16px 8px;
+}
 
 /* 移动端：卡片内边距收紧，避免左右留白/溢出 */
 @media (max-width: 680px) {
@@ -373,6 +389,10 @@
     flex-direction: row;
     overflow-x: auto;
     flex-shrink: 0;
+    /* 移动端是横排 chip 行，吸顶会盖住下方字段，改回随内容滚动 */
+    position: static;
+    max-height: none;
+    overflow-y: hidden;
   }
   .platformNavItem {
     white-space: nowrap;

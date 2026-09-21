@@ -1,10 +1,12 @@
 'use client'
 import React from 'react'
-import { Form, Select, Collapse } from '@douyinfe/semi-ui'
+import { Form, Select } from '@douyinfe/semi-ui'
+import PlatformPanel from './PlatformPanel'
 
 type Props = {
   entity: any
   list: any
+  bare?: boolean
 }
 
 const Cookie: React.FC<Props> = props => {
@@ -12,7 +14,7 @@ const Cookie: React.FC<Props> = props => {
   const list = props.list
   return (
     <>
-      <Collapse.Panel header="用户 Cookie" itemKey="user">
+      <PlatformPanel header="用户 Cookie" itemKey="user" bare={props.bare}>
         <Form.Input
           field="user.kuaishou_cookie"
           extraText={
@@ -94,7 +96,7 @@ const Cookie: React.FC<Props> = props => {
             padding: 0,
           }}
         />
-      </Collapse.Panel>
+      </PlatformPanel>
     </>
   )
 }

@@ -1,15 +1,17 @@
 'use client'
 import React, { useEffect } from 'react'
-import { Form, Select, Collapse, useFormApi } from '@douyinfe/semi-ui'
+import { Form, Select, useFormApi } from '@douyinfe/semi-ui'
+import PlatformPanel from './PlatformPanel'
 
 type Props = {
   entity: any
   list: any
   initValues?: Record<string, any>
+  bare?: boolean
 }
 
 const TwitCasting: React.FC<Props> = props => {
-  const { entity, list, initValues } = props
+  const { entity, list, initValues, bare } = props
   const formApi = useFormApi()
 
   useEffect(() => {
@@ -22,7 +24,7 @@ const TwitCasting: React.FC<Props> = props => {
 
   return (
     <>
-      <Collapse.Panel header="TwitCasting" itemKey="twitcasting">
+      <PlatformPanel header="TwitCasting" itemKey="twitcasting" bare={bare}>
         <Form.Select
           field="twitcasting_quality"
           extraText="录制画质，默认取最高可用画质。所选画质不存在时自动降到更低一档；更低的也没有时取最高可用画质。"
@@ -72,7 +74,7 @@ const TwitCasting: React.FC<Props> = props => {
             padding: 0,
           }}
         />
-      </Collapse.Panel>
+      </PlatformPanel>
     </>
   )
 }

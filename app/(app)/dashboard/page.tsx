@@ -3,7 +3,6 @@ import React, { useRef, useState } from 'react'
 import {
   Button,
   Form,
-  Collapse,
   Avatar,
   Select,
   Space,
@@ -61,7 +60,7 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
 
   const { biliUsers } = useBiliUsers()
 
-  // 平台设置：左列平台名 + 右栏仅展开选中平台。列表来自插件注册表 PlatformPanels
+  // 平台设置：左列平台名是唯一的导航，右栏只显示选中平台的字段。列表来自插件注册表 PlatformPanels
   const [activePlatform, setActivePlatform] = useState(PlatformPanels[0].key)
 
   if (isLoading) {
@@ -140,6 +139,9 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
               >
                 <Tabs
                   type="line"
+                  // 关闭切换动画：Semi 的动画依赖 .semi-tabs-pane 的 overflow: hidden，
+                  // 而平台列表列要在 pane 内 sticky，两者冲突（见 dashboard.module.scss）
+                  tabPaneMotion={false}
                   contentStyle={{
                     margin: '10px 0 0 0',
                   }}
@@ -149,11 +151,11 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
                     <Global />
                   </TabPane>
                   <TabPane tab="平台设置" itemKey="2">
-                    {/* 平台设置：左列平台名 + 右栏选中表单 */}
+                    {/* 平台设置：左列平台名 + 右栏选中平台的字段 */}
                     <div className={styles.framePlatformConfig}>
                       <SectionTitle icon={<IconGlobe size="small" />} title="平台设置" />
                       <div className={styles.platformLayout}>
-                        <nav className={styles.platformNav}>
+                        <nav className={styles.platformNav} aria-label="平台列表">
                           {PlatformPanels.map(p => (
                             <button
                               key={p.key}
@@ -161,6 +163,7 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
                               className={`${styles.platformNavItem} ${
                                 activePlatform === p.key ? styles.platformNavItemActive : ''
                               }`}
+                              aria-pressed={activePlatform === p.key}
                               onClick={() => setActivePlatform(p.key)}
                             >
                               {p.name}
@@ -168,14 +171,19 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
                           ))}
                         </nav>
                         <div className={styles.platformBody}>
-                          {/* 所有平台组件保持挂载(keepDOM),仅展开当前平台面板。
-                              卸载会注销 Semi Form 字段状态,提交时仅剩挂载字段;后端 PUT /configuration
-                              整表覆盖保存,会清空其他平台的参数与凭据 */}
-                          <Collapse keepDOM activeKey={[activePlatform]}>
-                            {PlatformPanels.map(p => (
-                              <p.Component key={p.key} entity={entity} list={list} />
-                            ))}
-                          </Collapse>
+                          {/* 所有平台的字段始终保持挂载，只用 hidden 切换显示。
+                              卸载会注销 Semi Form 字段状态，提交时仅剩挂载字段；后端 PUT /configuration
+                              整表覆盖保存，会清空其他平台的参数与凭据 */}
+                          {PlatformPanels.map(p => (
+                            <section
+                              key={p.key}
+                              className={styles.platformPanel}
+                              hidden={activePlatform !== p.key}
+                              aria-label={p.name}
+                            >
+                              <p.Component entity={entity} list={list} bare />
+                            </section>
+                          ))}
                         </div>
                       </div>
                     </div>

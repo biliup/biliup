@@ -1,15 +1,17 @@
 'use client'
 import React, { useEffect } from 'react'
-import { Form, Select, Collapse, useFormApi } from '@douyinfe/semi-ui'
+import { Form, Select, useFormApi } from '@douyinfe/semi-ui'
+import PlatformPanel from './PlatformPanel'
 
 type Props = {
   entity: any
   list: any
   initValues?: Record<string, any>
+  bare?: boolean
 }
 
 const Bilibili: React.FC<Props> = props => {
-  const { entity, list, initValues } = props
+  const { entity, list, initValues, bare } = props
   const formApi = useFormApi()
 
   useEffect(() => {
@@ -22,7 +24,7 @@ const Bilibili: React.FC<Props> = props => {
 
   return (
     <>
-      <Collapse.Panel header="哔哩哔哩" itemKey="bilibili">
+      <PlatformPanel header="哔哩哔哩" itemKey="bilibili" bare={bare}>
         <Form.Select
           allowCreate={true}
           filter
@@ -273,7 +275,7 @@ const Bilibili: React.FC<Props> = props => {
           }}
           showClear={true}
         />
-      </Collapse.Panel>
+      </PlatformPanel>
     </>
   )
 }

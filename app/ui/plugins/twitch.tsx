@@ -1,15 +1,17 @@
 'use client'
 import React, { useEffect } from 'react'
-import { Form, Select, Collapse, useFormApi } from '@douyinfe/semi-ui'
+import { Form, Select, useFormApi } from '@douyinfe/semi-ui'
+import PlatformPanel from './PlatformPanel'
 
 type Props = {
   entity: any
   list: any
   initValues?: Record<string, any>
+  bare?: boolean
 }
 
 const Twitch: React.FC<Props> = props => {
-  const { entity, list, initValues } = props
+  const { entity, list, initValues, bare } = props
   const formApi = useFormApi()
 
   useEffect(() => {
@@ -22,7 +24,7 @@ const Twitch: React.FC<Props> = props => {
 
   return (
     <>
-      <Collapse.Panel header="Twitch" itemKey="twitch">
+      <PlatformPanel header="Twitch" itemKey="twitch" bare={bare}>
         <Form.Switch
           field="twitch_danmaku"
           extraText="录制 Twitch 弹幕，默认关闭"
@@ -75,7 +77,7 @@ const Twitch: React.FC<Props> = props => {
             padding: 0,
           }}
         />
-      </Collapse.Panel>
+      </PlatformPanel>
     </>
   )
 }
