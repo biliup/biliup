@@ -1,12 +1,14 @@
 'use client'
-import React, { useEffect } from 'react'
+import React from 'react'
 import styles from '../../styles/dashboard.module.scss'
 import SectionTitle from '../../(app)/components/SectionTitle'
-import { Form, Select, Space, useFormApi } from '@douyinfe/semi-ui'
+import { Form, Select, Space, useFormState } from '@douyinfe/semi-ui'
 import { IconUpload, IconDownload } from '@douyinfe/semi-icons'
 
 const Global: React.FC = () => {
-  const formApi = useFormApi()
+  // useFormApi 不订阅表单值变化，切换下拉框后条件渲染不会刷新；useFormState 会
+  const { values } = useFormState()
+  const isSyncDownloader = values?.downloader === 'sync-downloader'
 
   return (
     <>
@@ -47,7 +49,7 @@ const Global: React.FC = () => {
           <Select.Option value="ytarchive">ytarchive（仅适用于 Youtube Live）</Select.Option>
           <Select.Option value="mesio">mesio（内置流修复下载器）</Select.Option>
         </Form.Select>
-        {formApi.getValue('downloader') === 'sync-downloader' ? (
+        {isSyncDownloader ? (
           <>
             <Form.Input
               field="sync_save_dir"
@@ -59,7 +61,6 @@ const Global: React.FC = () => {
                 padding: 0,
               }}
               showClear={true}
-              disabled={formApi.getValue('downloader') === 'sync-downloader' ? false : true}
               rules={[
                 {
                   pattern: /^[^*|?"<>]*$/,
