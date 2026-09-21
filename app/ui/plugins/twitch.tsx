@@ -25,7 +25,7 @@ const Twitch: React.FC<Props> = props => {
       <Collapse.Panel header="Twitch" itemKey="twitch">
         <Form.Switch
           field="twitch_danmaku"
-          extraText="录制Twitch弹幕，默认关闭"
+          extraText="录制 Twitch 弹幕，默认关闭"
           label="录制弹幕（twitch_danmaku）"
         />
         <Form.Switch
@@ -33,9 +33,17 @@ const Twitch: React.FC<Props> = props => {
             entity?.hasOwnProperty('twitch_disable_ads') ? entity['twitch_disable_ads'] : true
           }
           field="twitch_disable_ads"
-          extraText="去除Twitch广告功能，默认开启
-这个功能会导致Twitch录播分段，因为遇到广告就自动断开了，这就是去广告。若需要录播完整一整段可以关闭这个，但是关了之后就会有紫色屏幕的CommercialTime
-还有一个办法是去花钱开一个Turbo会员，然后下面的user里把twitch的cookie填上，也能去除广告"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              默认开启。去广告的原理是遇到广告就断开重连，因此<strong>录像会在每次广告处分段</strong>。
+              <br />
+              关闭后录像不再因广告分段，但广告时段会录成紫色的「Commercial Time」画面。
+              <br />
+              更好的办法是开通 Twitch Turbo 会员并在下方填入 Twitch Cookie，可直接免广告。
+              <br />
+              <strong>仅下载插件为 streamlink 或 ffmpeg 时生效</strong>；默认的 stream-gears 直接拉流，此开关不起作用。
+            </div>
+          }
           label="去除广告（twitch_disable_ads）"
           fieldStyle={{
             alignSelf: 'stretch',
@@ -45,21 +53,19 @@ const Twitch: React.FC<Props> = props => {
         <Form.Input
           field="user.twitch_cookie"
           extraText={
-            <div className="semi-form-field-extra">
-              【仅限Turbo会员】如录制Twitch时遇见视频流中广告过多的情况，可尝试在此填入cookie，可以大幅减少视频流中的twitch广告
+            <div style={{ fontSize: '14px' }}>
+              <strong>仅限 Twitch Turbo 会员</strong>：填入后可大幅减少录像中的广告。
               <br />
-              该 Cookie 存在过期风险，Cookie过期后会在日志输出警告，请注意及时更换。
+              此处填的是 auth-token 的值，不是整段 Cookie。获取方式：浏览器打开 twitch.tv，按 F12
+              打开控制台，执行：
               <br />
-              当 Cookie 失效，录制时将忽略 Cookie。（经作者个人测试，可保持未过期状态四个月以上）
+              <code style={{ color: 'var(--semi-color-primary)' }}>
+                {`document.cookie.split("; ").find(item => item.startsWith("auth-token="))?.split("=")[1]`}
+              </code>
               <br />
-              twitch_cookie 获取方式：在浏览器中打开 twitch.tv ， F12
-              调出控制台，在控制台中执行如下代码：
+              该值会过期（作者实测可用四个月以上）；失效后日志会输出警告并忽略它继续录制，请及时更换。
               <br />
-              <code
-                style={{ color: 'blue' }}
-              >{`document.cookie.split("; ").find(item => item.startsWith("auth-token="))?.split("=")[1]`}</code>
-              <br />
-              twitch_cookie&nbsp;需要在&nbsp;downloader= &quot;ffmpeg&quot;&nbsp;时候才会生效。
+              <strong>仅下载插件为 streamlink 或 ffmpeg 时生效</strong>。
             </div>
           }
           label="Twitch Cookie（twitch_cookie）"

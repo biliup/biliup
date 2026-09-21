@@ -1,31 +1,20 @@
 'use client'
-import React, { useEffect } from 'react'
+import React from 'react'
 import styles from '../../styles/dashboard.module.scss'
-import { Form, Select, Space, useFormApi } from '@douyinfe/semi-ui'
+import SectionTitle from '../../(app)/components/SectionTitle'
+import { Form, Select, Space, useFormState } from '@douyinfe/semi-ui'
 import { IconUpload, IconDownload } from '@douyinfe/semi-icons'
 
 const Global: React.FC = () => {
-  const formApi = useFormApi()
+  // useFormApi 不订阅表单值变化，切换下拉框后条件渲染不会刷新；useFormState 会
+  const { values } = useFormState()
+  const isSyncDownloader = values?.downloader === 'sync-downloader'
 
   return (
     <>
       {/* 全局下载 */}
       <div className={styles.frameDownload}>
-        <div className={styles.frameInside}>
-          <div className={styles.group}>
-            <div className={styles.buttonOnlyIconSecond} />
-            <div
-              className={styles.lineStory}
-              style={{
-                color: 'var(--semi-color-bg-0)',
-                display: 'flex',
-              }}
-            >
-              <IconDownload size="small" />
-            </div>
-          </div>
-          <p className={styles.meegoSharedWebWorkIt}>全局下载设置</p>
-        </div>
+        <SectionTitle icon={<IconDownload size="small" />} title="全局下载设置" />
         <Form.Select
           label="下载插件（downloader）"
           field="downloader"
@@ -33,20 +22,41 @@ const Global: React.FC = () => {
           // initValue="stream-gears"
           extraText={
             <div style={{ fontSize: '14px' }}>
-              选择全局默认的下载插件, 可选:
+              全局默认的下载插件，可在单个主播的覆写设置里另选。可选：
               <br />
-              1. streamlink（仅限 hls 流，不支持的流将回退到 ffmpeg。非 Docker 用户需自行安装 FFmpeg）
+              1. <strong>stream-gears</strong>（默认）：内置，无需额外安装，可防 FLV 流花屏；不支持 HEVC 编码和
+              hls_fmp4 流。
               <br />
-              2. ffmpeg（非 Docker 用户需自行安装 FFmpeg）
+              2. ffmpeg：非 Docker 用户需自行安装 FFmpeg。
               <br />
-              3. stream-gears（默认。防 FLV 流花屏）
+              3. streamlink：多线程下载 HLS 分片，也可下载 FLV 直链；需系统中有 streamlink 命令。
               <br />
-              4. sync-downloader（流式边录边传，需先为主播设定上传模板。不受
-              pool2/threads/segment_time 控制，默认 3 线程上传，请确保上传带宽充足。非 Docker 用户需自行安装 FFmpeg）详见 Wiki <a href="https://github.com/biliup/biliup/wiki/%E8%BE%B9%E5%BD%95%E8%BE%B9%E4%BC%A0%E5%8A%9F%E8%83%BD" target="_blank" rel="noopener noreferrer" >点击查看</a>
+              4. sync-downloader（边录边传）：录制的同时流式上传，<strong>需先为主播设置上传模板</strong>；不受
+              pool2 / threads / segment_time 控制，固定 3 线程上传，请确保上传带宽充足；非 Docker 用户需自行安装
+              FFmpeg。详见 Wiki{' '}
+              <a
+                href="https://github.com/biliup/biliup/wiki/%E8%BE%B9%E5%BD%95%E8%BE%B9%E4%BC%A0%E5%8A%9F%E8%83%BD"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'var(--semi-color-link)' }}
+              >
+                边录边传功能
+              </a>
+              。
               <br />
-              5. ytarchive（仅适用于 Youtube Live）
+              5. ytarchive：仅适用于 YouTube 直播。
               <br />
-              6. mesio（内置 rust-srec 引擎，进程内下载 FLV/HLS 并修复时间戳、注入关键帧索引，支持按大小/时长分段，无需额外安装）详见 <a href="https://github.com/hua0512/rust-srec" target="_blank" rel="noopener noreferrer" >项目主页</a>
+              6. mesio：内置 rust-srec 引擎，进程内下载 FLV / HLS 并修复时间戳、注入关键帧索引，支持按大小 /
+              时长分段，无需额外安装。详见{' '}
+              <a
+                href="https://github.com/hua0512/rust-srec"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'var(--semi-color-link)' }}
+              >
+                项目主页
+              </a>
+              。
             </div>
           }
           style={{ width: '100%' }}
@@ -63,7 +73,7 @@ const Global: React.FC = () => {
           <Select.Option value="ytarchive">ytarchive（仅适用于 Youtube Live）</Select.Option>
           <Select.Option value="mesio">mesio（内置流修复下载器）</Select.Option>
         </Form.Select>
-        {formApi.getValue('downloader') === 'sync-downloader' ? (
+        {isSyncDownloader ? (
           <>
             <Form.Input
               field="sync_save_dir"
@@ -75,7 +85,6 @@ const Global: React.FC = () => {
                 padding: 0,
               }}
               showClear={true}
-              disabled={formApi.getValue('downloader') === 'sync-downloader' ? false : true}
               rules={[
                 {
                   pattern: /^[^*|?"<>]*$/,
@@ -265,21 +274,7 @@ const Global: React.FC = () => {
 
       {/* 全局上传 */}
       <div className={styles.frameUpload}>
-        <div className={styles.frameInside}>
-          <div className={styles.group}>
-            <div className={styles.buttonOnlyIconSecond} />
-            <div
-              className={styles.lineStory}
-              style={{
-                color: 'var(--semi-color-bg-0)',
-                display: 'flex',
-              }}
-            >
-              <IconUpload size="small" />
-            </div>
-          </div>
-          <p className={styles.meegoSharedWebWorkIt}>全局上传设置</p>
-        </div>
+        <SectionTitle icon={<IconUpload size="small" />} title="全局上传设置" />
 
         <Form.Select
           field="submit_api"

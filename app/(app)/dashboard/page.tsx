@@ -1,11 +1,8 @@
 'use client'
-import React, { useEffect, useRef, useState } from 'react'
-import EditTemplate from '@/app/(app)/upload-manager/edit/page'
+import React, { useRef, useState } from 'react'
 import {
   Button,
   Form,
-  Layout,
-  Nav,
   Collapse,
   Avatar,
   Select,
@@ -16,7 +13,6 @@ import {
   Tabs,
   TabPane,
 } from '@douyinfe/semi-ui'
-import { registerMediaQuery, responsiveMap } from '@/app/lib/utils'
 import { IconPlusCircle, IconStar, IconGlobe } from '@douyinfe/semi-icons'
 import useSWR from 'swr'
 import { fetcher, put } from '@/app/lib/api-streamer'
@@ -24,16 +20,18 @@ import useSWRMutation from 'swr/mutation'
 import { FormApi } from '@douyinfe/semi-ui/lib/es/form'
 import { useBiliUsers } from '../../lib/use-streamers'
 import styles from '../../styles/dashboard.module.scss'
+import PageHeader from '../components/PageHeader'
+import SectionTitle from '../components/SectionTitle'
+import dc from '@/app/ui/data-card.module.scss'
 
 // 注册各平台组件
-import plugins from '../../ui/plugins'
+import { PlatformPanels } from '../../ui/plugins'
 import Global from '../../ui/plugins/global'
 import Developer from '../../ui/plugins/developer'
 
 
 const Dashboard: React.FC = () => {
-  const { Header, Content } = Layout
-  const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
+const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
   const { trigger } = useSWRMutation('/v1/configuration', put)
   const formRef = useRef<FormApi>()
   // const [formKey, setFormKey] = useState(0); // 初始化一个key
@@ -63,6 +61,9 @@ const Dashboard: React.FC = () => {
 
   const { biliUsers } = useBiliUsers()
 
+  // 平台设置：左列平台名 + 右栏仅展开选中平台。列表来自插件注册表 PlatformPanels
+  const [activePlatform, setActivePlatform] = useState(PlatformPanels[0].key)
+
   if (isLoading) {
     return <>Loading</>
   }
@@ -88,48 +89,23 @@ const Dashboard: React.FC = () => {
 
   return (
     <>
-      <Header
-        style={{
-          backgroundColor: 'var(--semi-color-bg-1)',
-          position: 'sticky',
-          top: 0,
-          zIndex: 1,
-        }}
-      >
-        <Nav
-          header={
-            <>
-              <div
-                style={{
-                  backgroundColor: '#6b6c75ff',
-                  borderRadius: 'var(--semi-border-radius-large)',
-                  color: 'var(--semi-color-bg-0)',
-                  display: 'flex',
-                  // justifyContent: 'center',
-                  padding: '6px',
-                }}
-              >
-                <IconStar size="large" />
-              </div>
-              <h4 style={{ marginLeft: '12px' }}>空间配置</h4>
-            </>
-          }
-          footer={
-            <Button
-              onClick={() => {
-                formRef.current?.submitForm()
-              }}
-              icon={<IconPlusCircle />}
-              theme="solid"
-              style={{ marginRight: 10 }}
-            >
-              保存
-            </Button>
-          }
-          mode="horizontal"
-        ></Nav>
-      </Header>
-      <Content>
+      <PageHeader
+        icon={<IconStar size="large" />}
+        title="空间配置"
+        description="全局下载 / 上传参数、各平台录制参数与开发者选项。修改后需点击右上角「保存」才会生效"
+        actions={
+          <Button
+            onClick={() => {
+              formRef.current?.submitForm()
+            }}
+            icon={<IconPlusCircle />}
+            theme="solid"
+          >
+            保存
+          </Button>
+        }
+      />
+      <div className={dc.content}>
         <main className={styles.rootConfigPanel}>
           <div className={styles.main}>
             <div className={styles.content}>
@@ -165,43 +141,43 @@ const Dashboard: React.FC = () => {
                 <Tabs
                   type="line"
                   contentStyle={{
-                    maxWidth: 965,
-                    // marginLeft: 'auto',
-                    // marginRight: 'auto',
-                    margin: '10px auto 0 auto',
+                    margin: '10px 0 0 0',
                   }}
                 >
                   <TabPane tab="全局设置" itemKey="1">
                     {/* 全局设置 */}
                     <Global />
                   </TabPane>
-                  <TabPane tab="各平台下载" itemKey="2">
-                    {/* 各平台下载 */}
+                  <TabPane tab="平台设置" itemKey="2">
+                    {/* 平台设置：左列平台名 + 右栏选中表单 */}
                     <div className={styles.framePlatformConfig}>
-                      <div className={styles.frameInside}>
-                        <div className={styles.group}>
-                          <div className={styles.buttonOnlyIconSecond}>
-                            <div
-                              className={styles.lineStory}
-                              style={{
-                                color: 'var(--semi-color-bg-0)',
-                                display: 'flex',
-                              }}
+                      <SectionTitle icon={<IconGlobe size="small" />} title="平台设置" />
+                      <div className={styles.platformLayout}>
+                        <nav className={styles.platformNav}>
+                          {PlatformPanels.map(p => (
+                            <button
+                              key={p.key}
+                              type="button"
+                              className={`${styles.platformNavItem} ${
+                                activePlatform === p.key ? styles.platformNavItemActive : ''
+                              }`}
+                              onClick={() => setActivePlatform(p.key)}
                             >
-                              <IconGlobe size="small" />
-                            </div>
-                          </div>
-                        </div>
-                        <p className={styles.meegoSharedWebSettin}>各平台下载设置</p>
-                      </div>
-                      <Collapse keepDOM style={{ width: '100%' }}>
-                        {Object.entries(plugins)
-                          .filter(([key]) => key !== 'Cookie')
-                          .map(([key, Plugin]) => (
-                            <Plugin key={key} entity={entity} list={list} />
+                              {p.name}
+                            </button>
                           ))}
-                        <plugins.Cookie entity={entity} list={list} />
-                      </Collapse>
+                        </nav>
+                        <div className={styles.platformBody}>
+                          {/* 所有平台组件保持挂载(keepDOM),仅展开当前平台面板。
+                              卸载会注销 Semi Form 字段状态,提交时仅剩挂载字段;后端 PUT /configuration
+                              整表覆盖保存,会清空其他平台的参数与凭据 */}
+                          <Collapse keepDOM activeKey={[activePlatform]}>
+                            {PlatformPanels.map(p => (
+                              <p.Component key={p.key} entity={entity} list={list} />
+                            ))}
+                          </Collapse>
+                        </div>
+                      </div>
                     </div>
                   </TabPane>
                   <TabPane tab="开发者选项" itemKey="3">
@@ -215,7 +191,7 @@ const Dashboard: React.FC = () => {
             </div>
           </div>
         </main>
-      </Content>
+      </div>
     </>
   )
 }
