@@ -211,6 +211,46 @@ mod tests {
             .unwrap();
     }
 
+    /// 已发布迁移的内容摘要，逐条钉死。
+    ///
+    /// 这个断言挂掉说明有人改动了一条**已经发布过**的迁移 —— 所有老库都会在升级时
+    /// 以校验和失配启动失败（#1701 就是这么来的）。正确做法是把改动挪进一个新的迁移
+    /// 文件；确实只能就地改的话，把旧摘要连同幂等补丁登记进 `SUPERSEDED_MIGRATIONS`，
+    /// 再更新这里。
+    #[test]
+    fn shipped_migration_checksums_are_frozen() {
+        const FROZEN: &[(i64, &str)] = &[
+            (
+                1,
+                "f0dbce08e61eb0722d99ea5415742b6786a00904aa87bf1d9c21eceabced7484e340c4b51185546cb0578106bbb0c865",
+            ),
+            (
+                2,
+                "aef99c14523e93ceed5602d79b6c40c61891c794ea7f5fe8583ec1858315f57afeebfcaf9167a108ba7589745d7e34bf",
+            ),
+            (
+                3,
+                "bda5d2a2757539c071a1887ffba044a2660dd03200680d9f8537546680556c987047422c074bd438ecb7ef25a73be51b",
+            ),
+            (
+                4,
+                "8c93f71ec95e78418443f93395375eaeb9e0f16cf666fec555aa3165e73faa75e9a336794e292556d8d717a979085aaa",
+            ),
+            (
+                5,
+                "f6f913ecbbdf1f4d437bf2ce4778b8d0317353056c4b240795fc9347b4eeac7f71e719d4c799ac2df72b06802ee064c7",
+            ),
+        ];
+        let embedded = sqlx::migrate!();
+        let actual: Vec<(i64, String)> = embedded
+            .iter()
+            .map(|m| (m.version, hex_lower(&m.checksum)))
+            .collect();
+        let expected: Vec<(i64, String)> =
+            FROZEN.iter().map(|(v, c)| (*v, (*c).to_string())).collect();
+        assert_eq!(actual, expected);
+    }
+
     /// #1701：v1.2.5 就地改写了迁移 2，所有 v1.2.4 及更早版本建立的库都会以
     /// `migration 2 was previously applied but has been modified` 启动失败。
     /// 升级必须照常完成：待应用的迁移要跑完，既有数据不能丢。
