@@ -4,6 +4,9 @@ import { Layout, Card, Button, Spin, Empty, Tag, Typography, Tooltip } from '@do
 import useSWR from 'swr'
 import { IconBook, IconExport } from '@douyinfe/semi-icons'
 import PageHeader from '../components/PageHeader'
+import { fetcher } from '@/app/lib/api-streamer'
+import { formatVersion } from '@/app/lib/status'
+import { SLOW_REFRESH_MS } from '@/app/lib/use-dashboard'
 import styles from './changelog.module.scss'
 
 const { Header, Content } = Layout
@@ -178,10 +181,32 @@ function renderBody(body: string, versionKey: string): React.ReactNode {
   return <>{blocks}</>
 }
 
+/** 比较 "1.2.5" 与 "1.2.1" 这类点分版本号，返回 a - b 的符号 */
+function compareVersion(a: string, b: string): number {
+  const pa = a.split(/[.-]/).map(Number)
+  const pb = b.split(/[.-]/).map(Number)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (d !== 0) return d
+  }
+  return 0
+}
+
 export default function Changelog() {
   const { data, error, isLoading } = useSWR(CHANGELOG_URL, fetchChangelog)
   const result = data as { text: string; stale: boolean } | undefined
   const versions = result ? parseChangelog(result.text) : []
+
+  // 与侧栏共用 /v1/status 的缓存，只为拿到正在运行的版本号
+  const { data: status } = useSWR('/v1/status', fetcher, {
+    refreshInterval: SLOW_REFRESH_MS,
+    revalidateOnFocus: false,
+  })
+  const running = formatVersion((status as { version?: string } | undefined)?.version)
+  const top = versions[0]?.version
+  // CHANGELOG.md 未必随每次发版更新；运行版本比日志里最新一条还新时如实标出，
+  // 不把旧条目标成「最新」
+  const runningIsNewer = !!running && !!top && compareVersion(running, top) > 0
 
   return (
     <>
@@ -226,6 +251,18 @@ export default function Changelog() {
                   当前展示的是离线缓存版本，联网后将自动更新。
                 </div>
               )}
+              {runningIsNewer && (
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--semi-color-text-2)',
+                    textAlign: 'center',
+                    padding: '4px 0 12px',
+                  }}
+                >
+                  当前运行的 v{running} 尚未收录到更新日志，以下为已发布的历史版本。
+                </div>
+              )}
               {versions.map((v, idx) => (
                 <Card
                   key={v.version}
@@ -238,9 +275,14 @@ export default function Changelog() {
                         <Title heading={5} className={styles.versionTitle}>
                           {v.version}
                         </Title>
-                        {idx === 0 && (
+                        {idx === 0 && !runningIsNewer && (
                           <Tag color="green" type="light" size="small">
                             最新
+                          </Tag>
+                        )}
+                        {running && v.version === running && (
+                          <Tag color="blue" type="light" size="small">
+                            当前运行
                           </Tag>
                         )}
                       </div>
