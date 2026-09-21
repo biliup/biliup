@@ -33,7 +33,7 @@ export default function Home() {
         <Space>
           <a
             className={styles.docLink}
-            href="https://doc.biliup.rs/"
+            href="https://biliup.github.io/biliup/docs/guide/introduction/"
             target="_blank"
             rel="noreferrer"
           >
@@ -81,6 +81,16 @@ export default function Home() {
           {d.infosFailed && (
             <div className={styles.warnBox}>
               <Text>直播信息(标题 / 录制时长)加载失败,相关字段可能缺失。</Text>
+            </div>
+          )}
+          {d.videosFailed && (
+            <div className={styles.warnBox}>
+              <Text>录制文件列表加载失败,文件总量与文件事件暂不可用。</Text>
+            </div>
+          )}
+          {d.statusFailed && (
+            <div className={styles.warnBox}>
+              <Text>服务状态接口加载失败,版本号暂不可用。</Text>
             </div>
           )}
 

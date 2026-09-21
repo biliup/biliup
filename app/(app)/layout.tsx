@@ -11,6 +11,7 @@ import { fetcher } from '../lib/api-streamer'
 import ThemeButton from '../ui/ThemeButton'
 import { useSystemTheme, useTheme } from '../lib/utils'
 import { formatVersion } from '../lib/status'
+import { SLOW_REFRESH_MS } from '../lib/use-dashboard'
 import { useIsMobile } from '../lib/useIsMobile'
 import styles from './layout.module.scss'
 
@@ -140,7 +141,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   // 服务状态指示(离线时变红,不影响页面)
   const { data: status, error: statusError } = useSWR('/v1/status', fetcher, {
-    refreshInterval: 30000,
+    refreshInterval: SLOW_REFRESH_MS,
     revalidateOnFocus: false,
   })
   const online = status !== undefined && !statusError

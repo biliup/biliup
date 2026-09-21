@@ -33,7 +33,7 @@ import {
 import { PauseButton } from '@/app/ui/StreamerActions/PauseButton'
 import { platformName, streamerStatusTag } from '@/app/lib/status'
 import { hookStepListToForm, formListToHookStep } from '@/app/lib/postprocessor'
-import { timeAgo } from '@/app/lib/use-dashboard'
+import { timeAgo, STREAMERS_REFRESH_MS, SLOW_REFRESH_MS } from '@/app/lib/use-dashboard'
 import StreamerCard from '@/app/ui/StreamerCard'
 import PageHeader from '../components/PageHeader'
 import styles from './page.module.scss'
@@ -52,10 +52,10 @@ export default function StreamersPage() {
   const { data: streamers, error, isLoading, mutate } = useSWR<LiveStreamerEntity[]>(
     '/v1/streamers',
     fetcher,
-    { refreshInterval: 10000 }
+    { refreshInterval: STREAMERS_REFRESH_MS }
   )
   const { data: infos } = useSWR<StreamerInfo[]>('/v1/streamer-info', fetcher, {
-    refreshInterval: 30000,
+    refreshInterval: SLOW_REFRESH_MS,
   })
 
   // url -> 最新一次录制的直播标题
