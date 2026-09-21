@@ -9,9 +9,10 @@ import { Tag } from '@douyinfe/semi-ui'
 
 export const LIVE_STATUS = 'Working'
 export const PAUSE_STATUS = 'Pause'
-/** 录制策略排期外:基线就有的状态,不可吞成“未开播” */
+export const PENDING_STATUS = 'Pending'
+/** 录制策略排期外(recording_policy.rs::Rejection::OutOfTimeRange) */
 export const OUT_OF_SCHEDULE = 'OutOfSchedule'
-/** 标题匹配排除规则命中:master 新增状态,不可吞成“未开播” */
+/** 标题命中排除关键词(recording_policy.rs::Rejection::ExcludedKeyword) */
 export const TITLE_EXCLUDED = 'TitleExcluded'
 
 /** 统一后端版本号展示，避免版本字段自带 v 时渲染成 vv1.2.2。 */
@@ -27,29 +28,25 @@ export function isPaused(status?: string): boolean {
   return status === PAUSE_STATUS
 }
 
-/** 直播状态 → 徽章视觉配置(2 色 + 暂停态) */
+/** 直播状态 → 徽章视觉配置 */
 export interface StatusVisual {
   label: string
-  /** 挂到样式类:badge-live / badge-idle / badge-pause */
-  cls: string
+  /** 样式类:badgeLive(绿,录制中)/ badgePause(橙,人为或规则暂停)/ badgeIdle(灰,其余) */
+  cls: 'badgeLive' | 'badgePause' | 'badgeIdle'
 }
 
+/**
+ * 与 master 上原 streamers 页的 switch 保持同一组文案:
+ * Working 直播中 / Pending 检测中 / Idle 空闲(未开播) / OutOfSchedule 非录播时间 /
+ * TitleExcluded 标题已排除 / Pause 暂停中。绿色只给真正在录的 Working。
+ */
 export function streamerStatusMeta(status?: string): StatusVisual {
   if (isLiveStatus(status)) return { label: '直播中', cls: 'badgeLive' }
-  if (status === OUT_OF_SCHEDULE) return { label: '非录播时间', cls: 'badgeLive' }
+  if (status === PENDING_STATUS) return { label: '检测中', cls: 'badgeIdle' }
+  if (status === OUT_OF_SCHEDULE) return { label: '非录播时间', cls: 'badgeIdle' }
   if (status === TITLE_EXCLUDED) return { label: '标题已排除', cls: 'badgePause' }
   if (isPaused(status)) return { label: '已暂停', cls: 'badgePause' }
   return { label: '未开播', cls: 'badgeIdle' }
-}
-
-/** 兼容旧调用方:返回纯色元数据(主页任务行 / 卡片共用) */
-export function statusMeta(status?: string): { text: string; color: string; cls: string } {
-  const m = streamerStatusMeta(status)
-  return {
-    text: m.label,
-    color: m.cls === 'badgeLive' ? 'rgb(var(--semi-green-5))' : m.cls === 'badgePause' ? 'rgb(var(--semi-orange-5))' : 'rgb(var(--semi-red-5))',
-    cls: m.cls === 'badgeLive' ? 'dotLive' : m.cls === 'badgePause' ? 'dotPause' : 'dotOffline',
-  }
 }
 
 /**
@@ -79,44 +76,19 @@ export function uploadStatusTag(uploadStatus?: string): React.ReactNode {
   )
 }
 
-/**
- * 平台标签:低饱和中性色,不要抢状态标签的戏。
- */
-export function platformTag(url?: string): React.ReactNode {
-  return (
-    <Tag
-      size="small"
-      style={{
-        backgroundColor: 'var(--semi-color-fill-1)',
-        color: 'var(--semi-color-text-2)',
-        border: '1px solid var(--semi-color-border)',
-      }}
-    >
-      {platformName(url)}
-    </Tag>
-  )
-}
-
-/**
- * 直播状态 → Tag(2 色版,备用)。
- */
+/** 直播状态 → Tag(直播管理页列表视图用),颜色与卡片徽章同一套 */
 export function streamerStatusTag(status?: string): React.ReactNode {
   const m = streamerStatusMeta(status)
-  const live = m.cls === 'badgeLive'
-  const pause = m.cls === 'badgePause'
+  const palette: Record<StatusVisual['cls'], { bg: string; color: string }> = {
+    badgeLive: { bg: 'rgba(var(--semi-green-4), 0.13)', color: 'rgb(var(--semi-green-5))' },
+    badgePause: { bg: 'rgba(var(--semi-orange-4), 0.14)', color: 'rgb(var(--semi-orange-5))' },
+    badgeIdle: { bg: 'var(--semi-color-fill-1)', color: 'var(--semi-color-text-1)' },
+  }
+  const c = palette[m.cls]
   return (
     <Tag
       size="small"
-      style={{
-        backgroundColor: live
-          ? 'rgba(var(--semi-green-4), 1)'
-          : pause
-            ? 'rgba(var(--semi-orange-4), 1)'
-            : 'rgba(var(--semi-red-4), 1)',
-        color: '#fff',
-        border: 'none',
-        fontWeight: 500,
-      }}
+      style={{ backgroundColor: c.bg, color: c.color, border: 'none', fontWeight: 600 }}
     >
       {m.label}
     </Tag>
