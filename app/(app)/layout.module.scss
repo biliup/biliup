@@ -17,6 +17,8 @@
 }
 
 /* ===== 侧边栏 ===== */
+/* 相对视口吸顶：主内容随文档滚动，侧栏保持在视口内。
+   前提是 html / body / .app 都不能有非 visible 的 overflow（见 bg-global.css） */
 .sider {
   width: 220px;
   flex-shrink: 0;
