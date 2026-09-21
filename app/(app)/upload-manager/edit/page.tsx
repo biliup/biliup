@@ -44,7 +44,39 @@ const Edit = () => {
     return () => unRegister()
   }, [])
 
-  if (error || isError) return <div>{error?.message}</div>
+  // 分区树来自 /bili/archive/pre，需要一个可用的 B 站 cookie；没有账号时后端返回 500，
+  // 这里必须给出可读的原因而不是空白页。
+  const serverMessage = (e: any): string | undefined => {
+    const raw = e?.message
+    if (typeof raw !== 'string' || !raw) return undefined
+    try {
+      const parsed = JSON.parse(raw)
+      return typeof parsed?.message === 'string' ? parsed.message : raw
+    } catch {
+      return raw
+    }
+  }
+  const loadError: string | undefined = error
+    ? `模板加载失败：${serverMessage(error) ?? '未知错误'}`
+    : isError
+      ? `分区列表加载失败：${serverMessage(isError) ?? '未知错误'}（需要至少一个可用的 B 站账号）`
+      : undefined
+  if (loadError) {
+    return (
+      <>
+        <PageHeader
+          icon={<IconPlusCircle size="large" />}
+          title="编辑投稿模板"
+          description="修改模板信息并保存"
+        />
+        <div className={dc.content}>
+          <div className={dc.card} style={{ padding: '28px 32px' }}>
+            <Typography.Text type="danger">{loadError}</Typography.Text>
+          </div>
+        </div>
+      </>
+    )
+  }
   if (isLoading) return <div>Loading...</div>
   if (!data || !typeTree) return null
 
