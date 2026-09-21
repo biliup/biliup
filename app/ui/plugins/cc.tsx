@@ -25,7 +25,7 @@ const CC: React.FC<Props> = props => {
       <Collapse.Panel header="CC" itemKey="cc">
         <Form.Select
           field="cc_protocol"
-          extraText="直播流协议；录制经常分段时可尝试切换。"
+          extraText="CC 直播流协议，默认 hls。录制经常异常断开、分段过多时可尝试切换为 flv。"
           label="直播流协议（cc_protocol）"
           placeholder="hls（默认）"
           style={{ width: '100%' }}

@@ -25,7 +25,7 @@ const TwitCasting: React.FC<Props> = props => {
       <Collapse.Panel header="TwitCasting" itemKey="twitcasting">
         <Form.Select
           field="twitcasting_quality"
-          extraText="自选画质，未选则自动选更低清晰度，再无则选最清晰。"
+          extraText="录制画质，默认取最高可用画质。所选画质不存在时自动降到更低一档；更低的也没有时取最高可用画质。"
           label="画质等级（twitcasting_quality）"
           style={{ width: '100%' }}
           fieldStyle={{
@@ -49,7 +49,12 @@ const TwitCasting: React.FC<Props> = props => {
         />
         <Form.Input
           field="user.twitcasting_cookie"
-          extraText="Cookie 格式：tc_id=xxxxxxx; tc_ss=xxxxxxx;"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              TwitCasting 登录 Cookie，可选。格式：
+              <code style={{ color: 'var(--semi-color-primary)' }}>tc_id=xxxxxxx; tc_ss=xxxxxxx;</code>
+            </div>
+          }
           label="TwitCasting Cookie（twitcasting_cookie）"
           style={{ width: '100%' }}
           fieldStyle={{
@@ -59,7 +64,7 @@ const TwitCasting: React.FC<Props> = props => {
         />
         <Form.Input
           field="twitcasting_password"
-          extraText="直播间密码（如有设置）。"
+          extraText="直播间设有观看密码时填写，未设密码留空。"
           label="TwitCasting直播间密码（twitcasting_password）"
           style={{ width: '100%' }}
           fieldStyle={{

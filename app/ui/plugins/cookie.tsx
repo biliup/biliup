@@ -15,7 +15,14 @@ const Cookie: React.FC<Props> = props => {
       <Collapse.Panel header="用户 Cookie" itemKey="user">
         <Form.Input
           field="user.kuaishou_cookie"
-          extraText="填入 Cookie 降低风控风险。需 client_key/kuaishou.live.*/userId 的值，勿填全部 Cookie。"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              填入快手 Cookie 可降低被风控的概率。
+              <br />
+              只需 client_key、kuaishou.live.bfb1s、kuaishou.live.web_st、kuaishou.live.web_ph、userId
+              五项的值，<strong>不要把全部 Cookie 粘进来</strong>。
+            </div>
+          }
           placeholder="client_key=none;kuaishou.live.bfb1s=none;kuaishou.live.web_st=none;kuaishou.live.web_ph=none;userId=none;"
           label="快手 Cookie（kuaishou_cookie）"
           style={{ width: '100%' }}

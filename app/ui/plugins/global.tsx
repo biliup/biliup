@@ -21,19 +21,43 @@ const Global: React.FC = () => {
           placeholder="stream-gears（默认）"
           // initValue="stream-gears"
           extraText={
-            <span>
-              全局默认下载插件：streamlink / ffmpeg 需自备 FFmpeg；stream-gears
-              为默认（防 FLV 花屏）；sync-downloader 边录边传（需先设上传模板，
+            <div style={{ fontSize: '14px' }}>
+              全局默认的下载插件，可在单个主播的覆写设置里另选。可选：
+              <br />
+              1. <strong>stream-gears</strong>（默认）：内置，无需额外安装，可防 FLV 流花屏；不支持 HEVC 编码和
+              hls_fmp4 流。
+              <br />
+              2. ffmpeg：非 Docker 用户需自行安装 FFmpeg。
+              <br />
+              3. streamlink：多线程下载 HLS 分片，也可下载 FLV 直链；需系统中有 streamlink 命令。
+              <br />
+              4. sync-downloader（边录边传）：录制的同时流式上传，<strong>需先为主播设置上传模板</strong>；不受
+              pool2 / threads / segment_time 控制，固定 3 线程上传，请确保上传带宽充足；非 Docker 用户需自行安装
+              FFmpeg。详见 Wiki{' '}
               <a
                 href="https://github.com/biliup/biliup/wiki/%E8%BE%B9%E5%BD%95%E8%BE%B9%E4%BC%A0%E5%8A%9F%E8%83%BD"
                 target="_blank"
-                rel="noreferrer"
-                style={{ color: 'rgb(var(--semi-color-link))' }}
+                rel="noopener noreferrer"
+                style={{ color: 'var(--semi-color-link)' }}
               >
-                详见文档
+                边录边传功能
               </a>
-              ）；ytarchive 仅限 YouTube Live；mesio 内置 rust-srec 引擎，进程内下载并修复 FLV/HLS，无需额外安装。
-            </span>
+              。
+              <br />
+              5. ytarchive：仅适用于 YouTube 直播。
+              <br />
+              6. mesio：内置 rust-srec 引擎，进程内下载 FLV / HLS 并修复时间戳、注入关键帧索引，支持按大小 /
+              时长分段，无需额外安装。详见{' '}
+              <a
+                href="https://github.com/hua0512/rust-srec"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'var(--semi-color-link)' }}
+              >
+                项目主页
+              </a>
+              。
+            </div>
           }
           style={{ width: '100%' }}
           fieldStyle={{

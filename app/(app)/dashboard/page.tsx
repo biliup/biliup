@@ -92,7 +92,7 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
       <PageHeader
         icon={<IconStar size="large" />}
         title="空间配置"
-        description="管理全局下载、各平台与上传账号"
+        description="全局下载 / 上传参数、各平台录制参数与开发者选项。修改后需点击右上角「保存」才会生效"
         actions={
           <Button
             onClick={() => {

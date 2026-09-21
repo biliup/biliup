@@ -33,7 +33,17 @@ const Twitch: React.FC<Props> = props => {
             entity?.hasOwnProperty('twitch_disable_ads') ? entity['twitch_disable_ads'] : true
           }
           field="twitch_disable_ads"
-          extraText="去广告，默认开启。去广告会导致分段（遇广告即断）；需完整一整段可关闭（但有紫色广告屏）。或开 Turbo 会员并填下方 cookie。"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              默认开启。去广告的原理是遇到广告就断开重连，因此<strong>录像会在每次广告处分段</strong>。
+              <br />
+              关闭后录像不再因广告分段，但广告时段会录成紫色的「Commercial Time」画面。
+              <br />
+              更好的办法是开通 Twitch Turbo 会员并在下方填入 Twitch Cookie，可直接免广告。
+              <br />
+              <strong>仅下载插件为 streamlink 或 ffmpeg 时生效</strong>；默认的 stream-gears 直接拉流，此开关不起作用。
+            </div>
+          }
           label="去除广告（twitch_disable_ads）"
           fieldStyle={{
             alignSelf: 'stretch',
@@ -43,13 +53,20 @@ const Twitch: React.FC<Props> = props => {
         <Form.Input
           field="user.twitch_cookie"
           extraText={
-            <span>
-              【仅 Turbo 会员】填 cookie 可大幅减少广告。Cookie 会过期（约 4 个月以上），失效时录制忽略 Cookie。获取：twitch.tv 打开 F12 执行{' '}
+            <div style={{ fontSize: '14px' }}>
+              <strong>仅限 Twitch Turbo 会员</strong>：填入后可大幅减少录像中的广告。
+              <br />
+              此处填的是 auth-token 的值，不是整段 Cookie。获取方式：浏览器打开 twitch.tv，按 F12
+              打开控制台，执行：
+              <br />
               <code style={{ color: 'var(--semi-color-primary)' }}>
-                document.cookie.split(&quot;; &quot;).find(i =&gt; i.startsWith(&quot;auth-token=&quot;))?.split(&quot;=&quot;)[1]
+                {`document.cookie.split("; ").find(item => item.startsWith("auth-token="))?.split("=")[1]`}
               </code>
-              。需 downloader=&quot;ffmpeg&quot; 才生效。
-            </span>
+              <br />
+              该值会过期（作者实测可用四个月以上）；失效后日志会输出警告并忽略它继续录制，请及时更换。
+              <br />
+              <strong>仅下载插件为 streamlink 或 ffmpeg 时生效</strong>。
+            </div>
           }
           label="Twitch Cookie（twitch_cookie）"
           style={{ width: '100%' }}

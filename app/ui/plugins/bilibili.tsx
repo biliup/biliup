@@ -27,9 +27,18 @@ const Bilibili: React.FC<Props> = props => {
           allowCreate={true}
           filter
           field="bili_qn"
-          extraText="自选画质，默认原画。刚开播无此画质会先录原画，分段时（非 stream-gears）切换；未提供则取最接近档。"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              录制画质，默认原画。
+              <br />
+              刚开播时通常只有原画，会先录原画；下载插件为 ffmpeg / streamlink
+              时之后每次分段会重新取流并切到所选画质，stream-gears / mesio 整场沿用首次取到的流。
+              <br />
+              所选画质不存在时录 B 站返回的最接近的次档画质；开启「免登录原画」时录最高画质。
+            </div>
+          }
           label="画质等级（bili_qn）"
-          placeholder="10000（原画）"
+          placeholder="25000（原画）"
           style={{ width: '100%' }}
           fieldStyle={{
             alignSelf: 'stretch',
@@ -55,7 +64,7 @@ const Bilibili: React.FC<Props> = props => {
         </Form.Select>
         <Form.Switch
           field="bilibili_danmaku"
-          extraText="录制弹幕，默认关闭。仅非 stream-gears 时生效；按时长分段时弹幕文件不自动分段。"
+          extraText="录制哔哩哔哩弹幕，默认关闭。弹幕保存为与录像同名的 XML 文件，并随录像分段一起分段。"
           label="录制弹幕（bilibili_danmaku）"
           fieldStyle={{
             alignSelf: 'stretch',
@@ -64,7 +73,13 @@ const Bilibili: React.FC<Props> = props => {
         />
         <Form.Switch
           field="bilibili_danmaku_detail"
-          extraText="弹幕含昵称/UID/醒目留言/上舰/礼物，默认关闭。需开启弹幕，可能与弹幕转ass工具不兼容。"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              弹幕文件中额外记录发送者昵称、UID，并保存醒目留言、上舰、礼物记录。默认关闭。
+              <br />
+              需先开启「录制弹幕」。<strong>实验性功能</strong>：可能与弹幕转 ASS 工具不兼容。
+            </div>
+          }
           label="录制详细弹幕（bilibili_danmaku_detail）"
           fieldStyle={{
             alignSelf: 'stretch',
@@ -73,7 +88,14 @@ const Bilibili: React.FC<Props> = props => {
         />
         <Form.Switch
           field="bilibili_danmaku_raw"
-          extraText="录制原始弹幕数据，默认关闭。需开启弹幕；每5分钟写入，文件可能极大。"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              额外保存 B 站服务器返回的原始弹幕数据，供有技术能力的用户做统计分析。默认关闭。
+              <br />
+              需先开启「录制弹幕」。<strong>实验性功能</strong>：开启后弹幕文件每 5
+              分钟才写入一次，且体积可能非常大。
+            </div>
+          }
           label="录制完整弹幕（bilibili_danmaku_raw）"
           fieldStyle={{
             alignSelf: 'stretch',
@@ -83,17 +105,19 @@ const Bilibili: React.FC<Props> = props => {
         <Form.Input
           field="user.bili_cookie"
           extraText={
-            <span>
-              按格式填入 Cookie，推荐用{' '}
+            <div style={{ fontSize: '14px' }}>
+              按占位符格式填入 B 站登录 Cookie，推荐使用「
               <a
                 href="https://github.com/biliup/biliup-rs"
-                title="biliup-rs Github"
+                title="「biliup-rs」 Github 项目主页"
                 target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'var(--semi-color-link)' }}
               >
                 biliup-rs
-              </a>{' '}
-              获取。
-            </span>
+              </a>
+              」获取。未登录时部分直播间只能录到较低画质。
+            </div>
           }
           placeholder="SESSDATA=none;bili_jct=none;DedeUserID__ckMd5=none;DedeUserID=none;"
           label="哔哩哔哩 Cookie 文本（bili_cookie）"
@@ -112,12 +136,21 @@ const Bilibili: React.FC<Props> = props => {
             padding: 0,
           }}
           optionList={list}
-          extraText="仅支持 biliup-rs 生成的文件；与文本同时存在时优先用文件。"
+          extraText="从已登录的 B 站账号中选择，只支持「biliup-rs」生成的 Cookie 文件。与上方「Cookie 文本」同时填写时，以 Cookie 文本为准。"
           showClear={true}
         />
         <Form.Select
           field="bili_protocol"
-          extraText="直播流协议。遵循 hls_fmp4 转码等待时间；stream-gears 不支持 hls_fmp4，需改用 ffmpeg/streamlink。"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              直播流协议，默认 stream（FLV）。
+              <br />
+              选 hls_fmp4 时，开播后会先等待下方「hls_fmp4 转码等待时间」，仍拿不到 fmp4 流则本场回退为
+              FLV。
+              <br />
+              <strong>stream-gears 不支持 hls_fmp4</strong>，需把下载插件改为 ffmpeg 或 streamlink。
+            </div>
+          }
           label="直播流协议（bili_protocol）"
           placeholder="stream（flv，默认）"
           style={{ width: '100%' }}
@@ -132,7 +165,7 @@ const Bilibili: React.FC<Props> = props => {
         </Form.Select>
         <Form.Input
           field="bili_liveapi"
-          extraText="自定义主 API，用于获取指定区域直播流，默认官方。"
+          extraText="获取直播流地址时优先使用的 API，默认官方 API。填入反代地址可获取指定区域（大陆或海外）的直播流。"
           label="哔哩哔哩直播主要API（bili_liveapi）"
           style={{ width: '100%' }}
           placeholder="https://api.live.bilibili.com"
@@ -151,7 +184,15 @@ const Bilibili: React.FC<Props> = props => {
         />
         <Form.Input
           field="bili_fallback_api"
-          extraText="主 API 不可用或受区域限制时的回退，默认官方。海外机可配 fmp4+streamlink 稳定录制大主播。"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              上方主要 API 不可用、受区域限制或没有所选协议的流时，改用此 API 重新获取。默认官方 API。
+              <br />
+              <strong>海外机器玩法</strong>：主要 API 填能取到大陆直播流的反代，回退 API 保持官方；直播流协议选
+              hls_fmp4，下载插件选 streamlink，直播 CDN 填 cn-gotcha204,ov-gotcha05。大主播即可走 cn204 的
+              fmp4 流稳定录制，没有 fmp4 流的小主播自动回退到 ov05 的 FLV 流。
+            </div>
+          }
           label="哔哩哔哩直播回退API（bili_fallback_api）"
           style={{ width: '100%' }}
           placeholder="https://api.live.bilibili.com"
@@ -170,7 +211,7 @@ const Bilibili: React.FC<Props> = props => {
         />
         <Form.TagInput
           field="bili_cdn"
-          extraText="直播 CDN，默认无。"
+          extraText="优先使用的 CDN 节点，默认不指定（使用 B 站返回的第一个节点）。可填多个，按先后顺序匹配；都匹配不上时仍用第一个节点。"
           label="直播CDN（bili_cdn）"
           placeholder="例: cn-gotcha204,ov-gotcha05。用英文逗号分隔以批量输入，失焦/Enter保存"
           style={{ width: '100%' }}
@@ -191,7 +232,14 @@ const Bilibili: React.FC<Props> = props => {
         />
         <Form.Switch
           field="bili_cdn_fallback"
-          extraText="CDN 回退，默认关闭。同协议下首选流不可用时自动切其他节点。"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              默认关闭。开启后会先探测选中的流地址能否下载，不可用时自动改用同一协议、同一画质下的其他 CDN
+              节点。
+              <br />
+              例：海外机器优选 ov-gotcha05，但该节点一直拉不到流，会自动回退到 ov-gotcha07。
+            </div>
+          }
           label="CDN 回退（bili_cdn_fallback）"
           fieldStyle={{
             alignSelf: 'stretch',
@@ -200,7 +248,13 @@ const Bilibili: React.FC<Props> = props => {
         />
         <Form.Switch
           field="bili_anonymous_origin"
-          extraText="用自定义 API 取 hls_fmp4 原画，无法录特殊直播，默认关闭。"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              默认关闭。开启后改从 master playlist 接口获取 hls_fmp4 原画流，<strong>不登录也能录到原画</strong>。
+              <br />
+              仅在直播流协议为 hls_fmp4 时生效；特殊类型直播间（如付费直播）未填 Cookie 时不走此通道，按普通方式取流。
+            </div>
+          }
           label="免登录原画（bili_anonymous_origin）"
           fieldStyle={{
             alignSelf: 'stretch',
@@ -209,7 +263,7 @@ const Bilibili: React.FC<Props> = props => {
         />
         <Form.InputNumber
           field="bili_hls_transcode_timeout"
-          extraText="hls_fmp4 转码等待，超时回退 flv，默认 60 秒。"
+          extraText="直播流协议为 hls_fmp4 时，从 B 站记录的开播时间起最多等待这么多秒让 fmp4 流生成；超时仍没有则本场回退为 FLV 流。单位：秒，默认 60。"
           label="hls_fmp4 转码等待时间（bili_hls_transcode_timeout）"
           style={{ width: '100%' }}
           placeholder="60"
