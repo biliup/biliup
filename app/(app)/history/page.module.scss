@@ -1,0 +1,9 @@
+/* 历史记录页：Tab 面板不裁剪内容（Semi Tabs 面板默认 overflow hidden 会吃掉小窗阴影与浮层） */
+.tabs :global(.semi-tabs-content),
+.tabs :global(.semi-tabs-pane) {
+  overflow: visible;
+}
+
+.tabs :global(.semi-tabs-bar) {
+  margin-bottom: 16px;
+}
