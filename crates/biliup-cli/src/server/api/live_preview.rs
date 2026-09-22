@@ -11,7 +11,7 @@
 use crate::server::core::download_manager::DownloadManager;
 use crate::server::infrastructure::context::WorkerStatus;
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
@@ -98,6 +98,8 @@ fn danmaku_connection_limit() -> &'static Arc<Semaphore> {
 /// SSE 里的一条弹幕事件，字段面向播放器弹幕层。
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 pub struct DanmakuFrame {
+    /// 直播间 id：一条 SSE 可以复用给多个直播间（监视器），前端按它分发
+    pub id: i64,
     /// `danmaku` / `gift` / `super_chat` / `guard_buy`
     pub kind: &'static str,
     /// 显示文本（礼物 / 上舰会拼成一句话）
@@ -111,9 +113,10 @@ pub struct DanmakuFrame {
 
 impl DanmakuFrame {
     /// 进场消息与无法识别的原始数据不进预览。
-    pub fn from_event(event: &DanmakuEvent) -> Option<Self> {
+    pub fn from_event(id: i64, event: &DanmakuEvent) -> Option<Self> {
         Some(match event {
             DanmakuEvent::Chat(m) => Self {
+                id,
                 kind: "danmaku",
                 text: m.content.clone(),
                 name: m.name.clone(),
@@ -121,6 +124,7 @@ impl DanmakuFrame {
                 ts: m.timestamp.timestamp_millis(),
             },
             DanmakuEvent::Gift(m) => Self {
+                id,
                 kind: "gift",
                 text: if m.content.is_empty() {
                     format!("{} 送出 {} ×{}", m.name, m.gift_name, m.num)
@@ -132,6 +136,7 @@ impl DanmakuFrame {
                 ts: m.timestamp.timestamp_millis(),
             },
             DanmakuEvent::SuperChat(m) => Self {
+                id,
                 kind: "super_chat",
                 text: m.content.clone(),
                 name: Some(m.name.clone()),
@@ -139,6 +144,7 @@ impl DanmakuFrame {
                 ts: m.timestamp.timestamp_millis(),
             },
             DanmakuEvent::GuardBuy(m) => Self {
+                id,
                 kind: "guard_buy",
                 text: format!("{} 开通了 {} ×{}", m.name, m.gift_name, m.num),
                 name: Some(m.name.clone()),
@@ -175,55 +181,127 @@ pub async fn get_live_danmaku(
         _ => return (StatusCode::NOT_FOUND, "直播间未在录制").into_response(),
     };
     let Ok(permit) = danmaku_connection_limit().clone().try_acquire_owned() else {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            format!("实时弹幕连接数已达上限（进程内最多 {MAX_DANMAKU_CONNECTIONS} 路）"),
-        )
-            .into_response();
+        return danmaku_limit_reached();
     };
     info!(id, "开始实时弹幕");
-    danmaku_response(rx, permit)
+    danmaku_response(vec![(id, rx)], permit)
 }
 
-struct DanmakuBody {
+/// 一条 SSE 里最多复用多少个直播间的弹幕。
+pub const MAX_DANMAKU_ROOMS_PER_CONNECTION: usize = 16;
+
+#[derive(Debug, serde::Deserialize)]
+pub struct DanmakuQuery {
+    /// 逗号分隔的直播间 id
+    pub ids: String,
+}
+
+/// `GET /v1/danmaku?ids=1,3,9`：多个直播间的实时弹幕复用一条 SSE，事件里带 `id`。
+///
+/// 监视器同屏 N 路时用它：浏览器对同一主机的 HTTP/1.1 并发连接只有 6 个，N 路视频已经占了
+/// N 个，弹幕不能再每路一条。没有弹幕客户端 / 未在录制的 id 静默跳过；一个都没有时 404。
+pub async fn get_live_danmaku_multi(
+    State(managers): State<Arc<DownloadManager>>,
+    Query(query): Query<DanmakuQuery>,
+) -> Response {
+    let ids: Vec<i64> = query
+        .ids
+        .split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .take(MAX_DANMAKU_ROOMS_PER_CONNECTION)
+        .collect();
+    let mut receivers = Vec::new();
+    for id in ids {
+        let Some(worker) = managers.get_room_by_id(id).await else {
+            continue;
+        };
+        if let WorkerStatus::Working(task) = &*worker.downloader_status.read().unwrap()
+            && let Some(rx) = task.subscribe_danmaku()
+        {
+            receivers.push((id, rx));
+        }
+    }
+    if receivers.is_empty() {
+        return (StatusCode::NOT_FOUND, "这些直播间都没有可用的实时弹幕").into_response();
+    }
+    let Ok(permit) = danmaku_connection_limit().clone().try_acquire_owned() else {
+        return danmaku_limit_reached();
+    };
+    info!(
+        ids = ?receivers.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        "开始实时弹幕（复用）"
+    );
+    danmaku_response(receivers, permit)
+}
+
+fn danmaku_limit_reached() -> Response {
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        format!("实时弹幕连接数已达上限（进程内最多 {MAX_DANMAKU_CONNECTIONS} 路）"),
+    )
+        .into_response()
+}
+
+/// 把一路弹幕广播编成 SSE 事件流；掉队跳过，发送端 drop 后结束。
+fn danmaku_events(
+    id: i64,
     rx: tokio::sync::broadcast::Receiver<DanmakuEvent>,
-    _permit: OwnedSemaphorePermit,
+) -> impl futures::Stream<Item = Result<Event, std::convert::Infallible>> {
+    futures::stream::unfold(rx, move |mut rx| async move {
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    let Some(frame) = DanmakuFrame::from_event(id, &event) else {
+                        continue;
+                    };
+                    let Ok(json) = serde_json::to_string(&frame) else {
+                        continue;
+                    };
+                    return Some((Ok(Event::default().event(frame.kind).data(json)), rx));
+                }
+                Err(RecvError::Lagged(skipped)) => {
+                    debug!(id, skipped, "实时弹幕订阅者掉队，跳过");
+                }
+                Err(RecvError::Closed) => return None,
+            }
+        }
+    })
 }
 
-/// 把弹幕广播编成 SSE。许可随响应体活，客户端断开即释放。
+/// 把若干路弹幕广播合成一条 SSE。许可随响应体活，客户端断开即释放；
+/// 所有路的录制都结束后流结束。
 pub fn danmaku_response(
-    rx: tokio::sync::broadcast::Receiver<DanmakuEvent>,
+    receivers: Vec<(i64, tokio::sync::broadcast::Receiver<DanmakuEvent>)>,
     permit: OwnedSemaphorePermit,
 ) -> Response {
-    let stream = futures::stream::unfold(
-        DanmakuBody {
-            rx,
-            _permit: permit,
-        },
-        |mut state| async move {
-            loop {
-                match state.rx.recv().await {
-                    Ok(event) => {
-                        let Some(frame) = DanmakuFrame::from_event(&event) else {
-                            continue;
-                        };
-                        let Ok(json) = serde_json::to_string(&frame) else {
-                            continue;
-                        };
-                        let event = Event::default().event(frame.kind).data(json);
-                        return Some((Ok::<Event, std::convert::Infallible>(event), state));
-                    }
-                    Err(RecvError::Lagged(skipped)) => {
-                        debug!(skipped, "实时弹幕订阅者掉队，跳过");
-                    }
-                    Err(RecvError::Closed) => return None,
-                }
-            }
-        },
+    let merged = futures::stream::select_all(
+        receivers
+            .into_iter()
+            .map(|(id, rx)| Box::pin(danmaku_events(id, rx))),
     );
+    let stream = HoldPermit {
+        inner: merged,
+        _permit: permit,
+    };
     Sse::new(stream)
         .keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
         .into_response()
+}
+
+/// 让连接许可随 SSE 流一起活。
+struct HoldPermit<S> {
+    inner: S,
+    _permit: OwnedSemaphorePermit,
+}
+
+impl<S: futures::Stream + Unpin> futures::Stream for HoldPermit<S> {
+    type Item = S::Item;
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        std::pin::Pin::new(&mut self.inner).poll_next(cx)
+    }
 }
 
 struct LiveBody {
@@ -362,7 +440,7 @@ mod tests {
             .clone()
             .try_acquire_owned()
             .unwrap();
-        let response = danmaku_response(rx, permit);
+        let response = danmaku_response(vec![(7, rx)], permit);
         assert_eq!(
             response.headers().get(header::CONTENT_TYPE).unwrap(),
             "text/event-stream"
@@ -394,12 +472,58 @@ mod tests {
             .await
             .unwrap();
         let text = String::from_utf8(body.to_vec()).unwrap();
-        assert!(text.contains("event: danmaku\ndata: {\"kind\":\"danmaku\",\"text\":\"你好\",\"name\":\"观众A\",\"color\":16711680"), "{text}");
         assert!(
-            text.contains("event: gift\ndata: {\"kind\":\"gift\",\"text\":\"土豪 送出 小心心 ×3\""),
+            text.contains(
+                "event: danmaku\ndata: {\"id\":7,\"kind\":\"danmaku\",\"text\":\"你好\",\"name\":\"观众A\",\"color\":16711680"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "event: gift\ndata: {\"id\":7,\"kind\":\"gift\",\"text\":\"土豪 送出 小心心 ×3\""
+            ),
             "{text}"
         );
         assert!(!text.contains("路人"), "{text}");
+        assert_eq!(
+            danmaku_connection_limit().available_permits(),
+            MAX_DANMAKU_CONNECTIONS
+        );
+    }
+
+    /// 复用：两路广播合成一条 SSE，每条事件带各自的 id；两路发送端都 drop 后流才结束。
+    #[tokio::test]
+    async fn multiplexed_danmaku_tags_each_event_with_its_room_id() {
+        use danmaku_client::ChatMessage;
+        let (tx_a, rx_a) = tokio::sync::broadcast::channel(8);
+        let (tx_b, rx_b) = tokio::sync::broadcast::channel(8);
+        let permit = danmaku_connection_limit()
+            .clone()
+            .try_acquire_owned()
+            .unwrap();
+        let response = danmaku_response(vec![(1, rx_a), (3, rx_b)], permit);
+        tx_a.send(DanmakuEvent::Chat(ChatMessage::new("来自1".into())))
+            .unwrap();
+        tx_b.send(DanmakuEvent::Chat(ChatMessage::new("来自3".into())))
+            .unwrap();
+        drop(tx_a);
+        // a 结束了 b 还在：流不能结束
+        tx_b.send(DanmakuEvent::Chat(ChatMessage::new("b还在".into())))
+            .unwrap();
+        drop(tx_b);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            text.contains("{\"id\":1,\"kind\":\"danmaku\",\"text\":\"来自1\""),
+            "{text}"
+        );
+        assert!(
+            text.contains("{\"id\":3,\"kind\":\"danmaku\",\"text\":\"来自3\""),
+            "{text}"
+        );
+        assert!(text.contains("b还在"), "{text}");
         assert_eq!(
             danmaku_connection_limit().available_permits(),
             MAX_DANMAKU_CONNECTIONS
@@ -410,17 +534,23 @@ mod tests {
     fn danmaku_frame_skips_enter_and_other() {
         use danmaku_client::message::EnterMessage;
         assert!(
-            DanmakuFrame::from_event(&DanmakuEvent::Other {
-                raw_data: "x".into()
-            })
+            DanmakuFrame::from_event(
+                1,
+                &DanmakuEvent::Other {
+                    raw_data: "x".into()
+                }
+            )
             .is_none()
         );
         assert!(
-            DanmakuFrame::from_event(&DanmakuEvent::Enter(EnterMessage {
-                name: "a".into(),
-                uid: Some(1),
-                timestamp: chrono::Utc::now(),
-            }))
+            DanmakuFrame::from_event(
+                1,
+                &DanmakuEvent::Enter(EnterMessage {
+                    name: "a".into(),
+                    uid: Some(1),
+                    timestamp: chrono::Utc::now(),
+                })
+            )
             .is_none()
         );
     }

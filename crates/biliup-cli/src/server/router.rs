@@ -10,7 +10,7 @@ use crate::server::api::endpoints::{
     put_configuration, put_streamers_endpoint,
 };
 use crate::server::api::live_media::{get_live_avatar, get_live_cover};
-use crate::server::api::live_preview::{get_live_danmaku, get_live_stream};
+use crate::server::api::live_preview::{get_live_danmaku, get_live_danmaku_multi, get_live_stream};
 use crate::server::infrastructure::service_register::ServiceRegister;
 use axum::Router;
 use axum::body::Body;
@@ -40,8 +40,9 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         .route("/v1/streamers/{id}/avatar", get(get_live_avatar))
         // 直播预览：复用正在录制的那一路流（chunked FLV / MPEG-TS），同样在登录校验之内
         .route("/v1/streamers/{id}/live", get(get_live_stream))
-        // 预览播放器的实时弹幕（SSE），同样在登录校验之内
+        // 预览播放器的实时弹幕（SSE），同样在登录校验之内；监视器多路复用一条
         .route("/v1/streamers/{id}/danmaku", get(get_live_danmaku))
+        .route("/v1/danmaku", get(get_live_danmaku_multi))
         // 配置管理路由
         .route(
             "/v1/configuration",
