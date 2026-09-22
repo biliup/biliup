@@ -41,6 +41,32 @@ impl LiveImage {
             LiveImage::Avatar => "头像",
         }
     }
+
+    /// B 站图片 CDN 的缩放后缀（`@宽w_高h_1c` = 等比裁切填满）。
+    /// 卡片上的封面按 16:9 缩略图显示，头像只有 22px，用不到原图。
+    fn bfs_size_suffix(self) -> &'static str {
+        match self {
+            LiveImage::Cover => "@640w_360h_1c.jpg",
+            LiveImage::Avatar => "@128w_128h_1c.jpg",
+        }
+    }
+}
+
+/// 向上游请求时实际使用的地址。
+///
+/// B 站的 `*.hdslb.com` 原图可能有上千万像素、几 MB（实测 11520×8640、4 MB），
+/// 直接转发给页面既慢又占缓存，借 CDN 的缩放后缀取一张缩略图；已经带后缀的地址不再处理。
+/// 其它平台原样使用。
+fn upstream_url(url: &str, kind: LiveImage) -> String {
+    let is_bfs = url::Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(|host| host.ends_with(".hdslb.com")))
+        .unwrap_or(false);
+    if is_bfs && !url.contains('@') && !url.contains('?') {
+        format!("{url}{}", kind.bfs_size_suffix())
+    } else {
+        url.to_string()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -98,13 +124,19 @@ impl ImageProxy {
     }
 
     /// 取图：命中缓存直接返回，否则带 Referer 去上游拉一次并缓存。
-    async fn fetch(&self, url: &str, referer: &str) -> Result<CachedImage, String> {
+    async fn fetch(
+        &self,
+        url: &str,
+        referer: &str,
+        kind: LiveImage,
+    ) -> Result<CachedImage, String> {
+        let url = upstream_url(url, kind);
         let now = Instant::now();
-        if let Some(image) = self.cached(url, now) {
+        if let Some(image) = self.cached(&url, now) {
             return Ok(image);
         }
-        let image = fetch_image(&self.client, url, referer).await?;
-        self.store(url.to_string(), image.clone(), Instant::now());
+        let image = fetch_image(&self.client, &url, referer).await?;
+        self.store(url, image.clone(), Instant::now());
         Ok(image)
     }
 }
@@ -132,7 +164,7 @@ async fn serve(worker: Option<Arc<Worker>>, proxy: &ImageProxy, kind: LiveImage)
         Ok(target) => target,
         Err(rejection) => return rejection.into_response(),
     };
-    match proxy.fetch(&url, &referer).await {
+    match proxy.fetch(&url, &referer, kind).await {
         Ok(image) => image_response(&image),
         Err(reason) => {
             warn!(url, referer, reason, "拉取直播间{}失败", kind.label());
@@ -390,10 +422,10 @@ mod tests {
         let proxy = ImageProxy::new();
         let url = format!("http://{addr}/cover.jpg");
         let referer = "https://live.bilibili.com/1";
-        let first = proxy.fetch(&url, referer).await.unwrap();
+        let first = proxy.fetch(&url, referer, LiveImage::Cover).await.unwrap();
         assert_eq!(first.content_type, "image/jpeg");
         assert_eq!(first.body.len(), 6);
-        let second = proxy.fetch(&url, referer).await.unwrap();
+        let second = proxy.fetch(&url, referer, LiveImage::Cover).await.unwrap();
         assert_eq!(second.body, first.body);
         assert_eq!(
             *seen.lock().unwrap(),
@@ -434,6 +466,7 @@ mod tests {
             .fetch(
                 &format!("http://{addr}/html"),
                 "https://live.bilibili.com/1",
+                LiveImage::Cover,
             )
             .await
             .unwrap_err();
@@ -442,6 +475,7 @@ mod tests {
             .fetch(
                 &format!("http://{addr}/missing"),
                 "https://live.bilibili.com/1",
+                LiveImage::Avatar,
             )
             .await
             .unwrap_err();
@@ -471,6 +505,37 @@ mod tests {
         assert!(cache.len() <= MAX_CACHE_ENTRIES);
         assert!(!cache.contains_key("u0"), "最旧的条目被淘汰");
         assert!(cache.contains_key("newest"));
+    }
+
+    #[test]
+    fn bilibili_bfs_urls_get_a_thumbnail_suffix_and_others_pass_through() {
+        assert_eq!(
+            upstream_url(
+                "https://i0.hdslb.com/bfs/live/user_cover/abc.jpg",
+                LiveImage::Cover
+            ),
+            "https://i0.hdslb.com/bfs/live/user_cover/abc.jpg@640w_360h_1c.jpg"
+        );
+        assert_eq!(
+            upstream_url("https://i1.hdslb.com/bfs/face/def.jpg", LiveImage::Avatar),
+            "https://i1.hdslb.com/bfs/face/def.jpg@128w_128h_1c.jpg"
+        );
+        // 已带缩放参数的不重复追加
+        assert_eq!(
+            upstream_url(
+                "https://i0.hdslb.com/bfs/live/abc.jpg@100w_100h.jpg",
+                LiveImage::Cover
+            ),
+            "https://i0.hdslb.com/bfs/live/abc.jpg@100w_100h.jpg"
+        );
+        // 其它平台（含签名 query 的抖音、虎牙截图）原样使用
+        for url in [
+            "https://p3-webcast.douyinpic.com/img/x~tplv-obj.image",
+            "https://tx-live-cover.msstatic.com/huyalive/a/20260922.jpg?sign=abc",
+            "https://rpic.douyucdn.cn/asrpic/260922/1_src.avif/dy4",
+        ] {
+            assert_eq!(upstream_url(url, LiveImage::Cover), url);
+        }
     }
 
     #[test]
