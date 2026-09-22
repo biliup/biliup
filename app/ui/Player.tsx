@@ -46,6 +46,38 @@ function rgbInt(color: number): string {
   return `#${(color & 0xffffff).toString(16).padStart(6, '0')}`
 }
 
+/**
+ * 销毁 mpegts.js 实例，保证网络连接一定被断开。
+ *
+ * 解码出错后 `<video>.error` 非空，mpegts.js `destroy()` 里清 SourceBuffer 的 `remove()` 会抛
+ * InvalidStateError，后面关闭拉流的 `transmuxer.close()` 就跑不到——连接留在服务端占着该路的
+ * 预览许可，直到页面刷新（真实 Twitch TS 房间连开 4 次就 429）。先把 MediaSource 从元素上摘下
+ * （`load()` 让它进入 closed，mpegts.js 对 closed 的 MediaSource 会跳过清理），再销毁；
+ * 仍然抛的话直接关内部的 transmuxer 兜底。
+ */
+function destroyMpegts(player: mpegts.Player, video: HTMLVideoElement) {
+  if (video.error) {
+    try {
+      video.removeAttribute('src')
+      video.load()
+    } catch {
+      /* 元素已被移出文档时忽略 */
+    }
+  }
+  try {
+    player.destroy()
+  } catch (e) {
+    console.warn('[Player] mpegts.destroy 失败，直接关闭拉流', e)
+    const engine = (player as unknown as { _player_engine?: { _transmuxer?: { close(): void } | null } })
+      ._player_engine
+    try {
+      engine?._transmuxer?.close()
+    } catch {
+      /* 已经关了 */
+    }
+  }
+}
+
 /** 一条弹幕送进弹幕层：普通弹幕滚动，礼物 / 醒目留言 / 上舰置顶并描边。 */
 function emitFrame(plugin: DanmukuPlugin, frame: DanmakuFrame) {
   plugin.emit({
@@ -304,7 +336,7 @@ function playWithMpegts(
   }
   const artWithMpegts = art as Artplayer & { mpegts?: mpegts.Player | null }
   if (artWithMpegts.mpegts) {
-    artWithMpegts.mpegts.destroy()
+    destroyMpegts(artWithMpegts.mpegts, video)
     artWithMpegts.mpegts = null
   }
 
@@ -326,7 +358,7 @@ function playWithMpegts(
   artWithMpegts.mpegts = player
   art.on('destroy', () => {
     if (artWithMpegts.mpegts) {
-      artWithMpegts.mpegts.destroy()
+      destroyMpegts(artWithMpegts.mpegts, video)
       artWithMpegts.mpegts = null
     }
   })
