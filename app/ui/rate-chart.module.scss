@@ -6,11 +6,10 @@
   min-width: 0;
 }
 
-/* uPlot 挂载点：宽随容器、高由组件内联指定 */
+/* uPlot 挂载点：宽随容器、高由组件内联指定。不裁剪，读数条要能浮在 sparkline 上方 */
 .plotHost {
   position: relative;
   width: 100%;
-  overflow: hidden;
 }
 .plotHost :global(.uplot) {
   font-family: inherit;
@@ -39,7 +38,7 @@
   pointer-events: none;
 }
 .plotHost[data-variant='sparkline'] .readout {
-  top: -18px;
+  top: -20px;
 }
 
 /* 无采样：只显示「—」 */
