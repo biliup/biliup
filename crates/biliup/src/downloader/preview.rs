@@ -10,7 +10,7 @@
 //!
 //! 写入端热路径上只做三件事：把分块的引用追加进当前 GOP 缓冲、`try_recv` 待处理的订阅请求、
 //! `broadcast::send`。没有 `.await`、没有锁等待、没有可失败的返回值；订阅者的快慢只影响
-//! 它自己（掉队即断开重连），不会传导回录制。
+//! 它自己（掉队即从最近的关键帧重新对齐），不会传导回录制。
 //!
 //! 内存上限：单个 GOP 最多 [`MAX_GOP_BYTES`]，超过就丢掉这一 GOP、等下一个关键帧；整份快照
 //! （已完成 GOP + 当前 GOP）最多 [`MAX_SNAPSHOT_BYTES`]，超过就先丢最旧的 GOP；
@@ -139,6 +139,8 @@ struct SnapshotRequest {
 struct SnapshotReply {
     format: PreviewFormat,
     snapshot: Vec<Bytes>,
+    /// `snapshot` 开头有几个分块是文件头（0 或 1）
+    header_len: usize,
     rx: broadcast::Receiver<Bytes>,
 }
 
@@ -201,12 +203,21 @@ impl std::error::Error for SubscribeError {}
 
 /// 一个预览订阅：先发 `snapshot` 里的分块，再从 `rx` 取实时分块。
 ///
-/// 持有该路的一个连接许可，drop 即释放。
+/// 持有该路的一个连接许可，drop 即释放；掉队后可用 [`PreviewHub::resubscribe`] 原地重新对齐。
 pub struct Subscription {
     pub format: PreviewFormat,
     pub snapshot: Vec<Bytes>,
     pub rx: broadcast::Receiver<Bytes>,
+    header_len: usize,
     _permit: OwnedSemaphorePermit,
+}
+
+impl Subscription {
+    /// 快照去掉开头的文件头：掉队后在同一条响应里续播时用——FLV 的解码器不能中途再收到
+    /// 文件头；序列头与 GOP 照常给（序列头可能在掉队期间换过）。
+    pub fn snapshot_after_header(&self) -> &[Bytes] {
+        &self.snapshot[self.header_len.min(self.snapshot.len())..]
+    }
 }
 
 impl PreviewHub {
@@ -311,6 +322,26 @@ impl PreviewHub {
             .clone()
             .try_acquire_owned()
             .map_err(|_| SubscribeError::TooManySubscribers(self.0.max_subscribers))?;
+        self.subscribe_holding(permit, timeout).await
+    }
+
+    /// 掉队（`Lagged`）后原地重新对齐：复用 `previous` 的连接许可，向写入端再要一份从最近
+    /// 关键帧起的快照与新的接收端。丢掉的那段补不回来，但连接不断、播放器不必重连；
+    /// 调用方发快照时应去掉文件头（[`Subscription::snapshot_after_header`]）。
+    pub async fn resubscribe(
+        &self,
+        previous: Subscription,
+        timeout: Duration,
+    ) -> Result<Subscription, SubscribeError> {
+        let Subscription { _permit, .. } = previous;
+        self.subscribe_holding(_permit, timeout).await
+    }
+
+    async fn subscribe_holding(
+        &self,
+        permit: OwnedSemaphorePermit,
+        timeout: Duration,
+    ) -> Result<Subscription, SubscribeError> {
         let request_tx = match &*self.0.requests.read().unwrap() {
             Some((_, tx)) => tx.clone(),
             None => return Err(SubscribeError::NotAttached),
@@ -324,6 +355,7 @@ impl PreviewHub {
                 format: reply.format,
                 snapshot: reply.snapshot,
                 rx: reply.rx,
+                header_len: reply.header_len,
                 _permit: permit,
             }),
             // 写入端在回应前被 drop（拉流结束 / 重试），请求随之作废
@@ -579,6 +611,7 @@ impl PreviewSink {
             let _ = request.reply.send(SnapshotReply {
                 format: self.format,
                 snapshot,
+                header_len: usize::from(self.header.is_some()),
                 rx,
             });
         }
@@ -1923,6 +1956,63 @@ mod tests {
         }
         assert_eq!(received, big);
         assert!(sub.rx.try_recv().is_err());
+    }
+
+    /// 掉队后 `resubscribe`：复用同一个许可（不占第二个名额），拿到从最近关键帧起的新快照
+    /// 与新接收端；`snapshot_after_header` 去掉文件头供同一条响应续播。
+    #[tokio::test]
+    async fn resubscribe_reuses_the_permit_and_realigns_at_a_keyframe() {
+        let hub = PreviewHub::new(1);
+        let mut sink = hub
+            .attach(PreviewFormat::Flv)
+            .with_snapshot_window(Duration::ZERO);
+        sink.push(ChunkKind::Header, Bytes::from_static(&flv::FILE_HEADER));
+        sink.push(ChunkKind::SequenceHeader(9), Bytes::from_static(b"avc"));
+        sink.push(ChunkKind::Keyframe, key(1));
+        let pending = tokio::spawn({
+            let hub = hub.clone();
+            async move { hub.subscribe(Duration::from_secs(5)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sink.push(ChunkKind::Media, inter(2));
+        let mut sub = pending.await.unwrap().unwrap();
+        assert_eq!(hub.0.subscribers.available_permits(), 0);
+        // 名额已满，第二个订阅被拒
+        assert_eq!(
+            hub.subscribe(Duration::from_secs(1)).await.err(),
+            Some(SubscribeError::TooManySubscribers(1))
+        );
+        // 订阅者不读，写入端推满整个缓冲再多一些 → 掉队
+        for i in 0..(BROADCAST_CAPACITY_FLV + 300) {
+            sink.push(ChunkKind::Media, inter((i % 200) as u8));
+        }
+        assert!(matches!(sub.rx.recv().await, Err(RecvError::Lagged(_))));
+
+        let pending = tokio::spawn({
+            let hub = hub.clone();
+            async move { hub.resubscribe(sub, Duration::from_secs(5)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sink.push(ChunkKind::Keyframe, key(9));
+        let mut again = pending.await.unwrap().unwrap();
+        assert_eq!(hub.0.subscribers.available_permits(), 0, "same permit");
+        assert_eq!(sink.receiver_count(), 1, "old receiver is gone");
+        assert_eq!(
+            again.snapshot,
+            vec![
+                Bytes::from_static(&flv::FILE_HEADER),
+                Bytes::from_static(b"avc"),
+                key(9)
+            ]
+        );
+        assert_eq!(
+            again.snapshot_after_header(),
+            &[Bytes::from_static(b"avc"), key(9)]
+        );
+        sink.push(ChunkKind::Media, inter(10));
+        assert_eq!(again.rx.recv().await.unwrap(), inter(10));
+        drop(again);
+        assert_eq!(hub.0.subscribers.available_permits(), 1);
     }
 
     /// 订阅者上限：超出的订阅立刻被拒，释放一个后又能进。

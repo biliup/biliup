@@ -1,8 +1,9 @@
 //! `GET /v1/streamers/{id}/live`：把正在录制的那一路流旁路给页面内的播放器。
 //!
-//! 响应是 chunked 的 `video/x-flv` 或 `video/mp2t` 字节流：先发「文件头 + 序列头 + 当前 GOP」
-//! 的快照，再持续转发与写盘同步的实时分块。慢客户端落后到广播缓冲被覆盖（`Lagged`）时
-//! 直接结束响应，由播放器重连拿新快照；写入端换代（断流重试 / 换直链）时同样结束响应。
+//! 响应是 chunked 的 `video/x-flv` / `video/mp2t` / `video/mp4` 字节流：先发「文件头 + 序列头 +
+//! 最近几秒的 GOP」的快照，再持续转发与写盘同步的实时分块。慢客户端落后到广播缓冲被覆盖
+//! （`Lagged`）时不断开，而是在同一条响应里从最近的关键帧重新对齐（再要一份不含文件头的快照）；
+//! 写入端换代（断流重试 / 换直链）时结束响应，由播放器重连。
 //!
 //! 连接数：每路 [`crate::server::common::download::PREVIEW_MAX_SUBSCRIBERS_PER_ROOM`]、
 //! 进程 [`MAX_PREVIEW_CONNECTIONS`]，超出返回 429。
@@ -18,7 +19,7 @@ use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use biliup::downloader::live::LiveStatus;
-use biliup::downloader::preview::{PreviewHub, SubscribeError, Subscription};
+use biliup::downloader::preview::{PreviewFormat, PreviewHub, SubscribeError, Subscription};
 use bytes::Bytes;
 use danmaku_client::DanmakuEvent;
 use std::collections::VecDeque;
@@ -60,8 +61,14 @@ pub async fn get_live_stream(
     };
     match hub.subscribe(SUBSCRIBE_TIMEOUT).await {
         Ok(subscription) => {
-            info!(id, format = subscription.format.as_str(), "开始直播预览");
-            live_response(subscription, global)
+            info!(
+                id,
+                format = subscription.format.as_str(),
+                snapshot_chunks = subscription.snapshot.len(),
+                snapshot_bytes = subscription.snapshot.iter().map(Bytes::len).sum::<usize>(),
+                "开始直播预览"
+            );
+            live_response(id, hub, subscription, global)
         }
         Err(error) => subscribe_error_response(id, error),
     }
@@ -451,43 +458,88 @@ impl<S: futures::Stream + Unpin> futures::Stream for HoldPermit<S> {
     }
 }
 
+/// 一次响应里最多容忍多少次掉队重对齐；再多说明客户端带宽长期跟不上，结束响应交给播放器
+/// （它会显示原因并按自己的策略重连）。
+pub const MAX_RESYNCS_PER_RESPONSE: u32 = 20;
+
 struct LiveBody {
+    id: i64,
+    hub: PreviewHub,
     snapshot: VecDeque<Bytes>,
-    /// 持有该路的连接许可；`rx` 是实时接收端
-    subscription: Subscription,
+    /// 持有该路的连接许可；`rx` 是实时接收端。掉队重对齐时被 take 走再换新的
+    subscription: Option<Subscription>,
+    resyncs: u32,
     _global: OwnedSemaphorePermit,
 }
 
 impl Drop for LiveBody {
     /// 客户端断开、掉队或写入端换代都走到这里：两个许可随之释放
     fn drop(&mut self) {
-        debug!("直播预览连接结束，释放许可");
+        debug!(id = self.id, resyncs = self.resyncs, "直播预览连接结束，释放许可");
     }
 }
 
-/// 把订阅编成 chunked 响应：快照分块先发，之后逐个转发实时分块。
+/// 把订阅编成 chunked 响应：快照分块先发，之后逐个转发实时分块；掉队时原地重对齐。
 ///
 /// 两个许可（该路、进程）都随响应体一起活，客户端断开或响应结束即释放。
-pub fn live_response(mut subscription: Subscription, global: OwnedSemaphorePermit) -> Response {
+pub fn live_response(
+    id: i64,
+    hub: PreviewHub,
+    mut subscription: Subscription,
+    global: OwnedSemaphorePermit,
+) -> Response {
     let format = subscription.format;
     let state = LiveBody {
+        id,
+        hub,
         snapshot: VecDeque::from(std::mem::take(&mut subscription.snapshot)),
-        subscription,
+        subscription: Some(subscription),
+        resyncs: 0,
         _global: global,
     };
-    let stream = futures::stream::unfold(state, |mut state| async move {
-        if let Some(chunk) = state.snapshot.pop_front() {
-            return Some((Ok::<Bytes, std::io::Error>(chunk), state));
-        }
-        match state.subscription.rx.recv().await {
-            Ok(chunk) => Some((Ok(chunk), state)),
-            Err(RecvError::Lagged(skipped)) => {
-                // 慢客户端：丢掉的数据没法补，结束响应让播放器重连拿新快照
-                warn!(skipped, "预览客户端落后于录制进度，断开以便其重连");
-                None
+    let stream = futures::stream::unfold(state, move |mut state| async move {
+        loop {
+            if let Some(chunk) = state.snapshot.pop_front() {
+                return Some((Ok::<Bytes, std::io::Error>(chunk), state));
             }
-            // 写入端换代（拉流结束 / 断流重试）：新连接会拿到新的序列头
-            Err(RecvError::Closed) => None,
+            let rx = &mut state.subscription.as_mut()?.rx;
+            match rx.recv().await {
+                Ok(chunk) => return Some((Ok(chunk), state)),
+                Err(RecvError::Lagged(skipped)) => {
+                    // 慢客户端：丢掉的数据没法补，但不必断开——从最近的关键帧重新对齐，
+                    // 快照里不再带文件头（fMP4 的 init segment 除外，MSE 接受中途再来一份）
+                    state.resyncs += 1;
+                    if state.resyncs > MAX_RESYNCS_PER_RESPONSE {
+                        warn!(
+                            id = state.id,
+                            skipped,
+                            resyncs = state.resyncs,
+                            "预览客户端持续落后于录制进度，结束响应"
+                        );
+                        return None;
+                    }
+                    warn!(
+                        id = state.id,
+                        skipped,
+                        resyncs = state.resyncs,
+                        "预览客户端落后于录制进度，从最近的关键帧重新对齐"
+                    );
+                    let previous = state.subscription.take()?;
+                    let again = state
+                        .hub
+                        .resubscribe(previous, SUBSCRIBE_TIMEOUT)
+                        .await
+                        .ok()?;
+                    state.snapshot = if format == PreviewFormat::Fmp4 {
+                        again.snapshot.iter().cloned().collect()
+                    } else {
+                        again.snapshot_after_header().iter().cloned().collect()
+                    };
+                    state.subscription = Some(again);
+                }
+                // 写入端换代（拉流结束 / 断流重试）：新连接会拿到新的序列头
+                Err(RecvError::Closed) => return None,
+            }
         }
     });
     let mut response = Body::from_stream(stream).into_response();
@@ -524,7 +576,7 @@ mod tests {
         sink.push(ChunkKind::Media, Bytes::from_static(b"p2"));
         let subscription = pending.await.unwrap().unwrap();
         let global = connection_limit().clone().try_acquire_owned().unwrap();
-        let response = live_response(subscription, global);
+        let response = live_response(1, hub.clone(), subscription, global);
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
@@ -552,6 +604,51 @@ mod tests {
         expected.extend_from_slice(b"p3");
         expected.extend_from_slice(b"K4");
         assert_eq!(&body[..], &expected[..]);
+    }
+
+    /// 掉队时不结束响应：从最近的关键帧重新对齐，续上的快照不再带 FLV 文件头，
+    /// 但带序列头（掉队期间可能换过）；响应体里文件头只出现一次。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn lagged_client_is_realigned_in_place_instead_of_disconnected() {
+        use biliup::downloader::preview::BROADCAST_CAPACITY_FLV;
+        let hub = PreviewHub::new(4);
+        let mut sink = hub
+            .attach(PreviewFormat::Flv)
+            .with_snapshot_window(Duration::ZERO);
+        sink.push(ChunkKind::Header, Bytes::from_static(&flv::FILE_HEADER));
+        sink.push(ChunkKind::SequenceHeader(9), Bytes::from_static(b"avc"));
+        sink.push(ChunkKind::Keyframe, Bytes::from_static(b"K1"));
+        let pending = tokio::spawn({
+            let hub = hub.clone();
+            async move { hub.subscribe(Duration::from_secs(5)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sink.push(ChunkKind::Media, Bytes::from_static(b"p2"));
+        let subscription = pending.await.unwrap().unwrap();
+        let global = connection_limit().clone().try_acquire_owned().unwrap();
+        let response = live_response(1, hub.clone(), subscription, global);
+
+        // 响应体还没被读，写入端推满缓冲再多一些：接收端必然掉队
+        for _ in 0..(BROADCAST_CAPACITY_FLV + 100) {
+            sink.push(ChunkKind::Media, Bytes::from_static(b"x"));
+        }
+        // 读取任务：先拿到快照，撞上掉队 → 向写入端要新快照（要等下一个关键帧）
+        let reader = tokio::spawn(async move {
+            axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        sink.push(ChunkKind::Keyframe, Bytes::from_static(b"K9"));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sink.push(ChunkKind::Media, Bytes::from_static(b"p10"));
+        drop(sink);
+        let body = reader.await.unwrap();
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.starts_with("FLV"), "{text}");
+        assert!(text.ends_with("avcK9p10"), "resync = seq header + new GOP, got {text}");
+        assert_eq!(text.matches("FLV").count(), 1, "file header only once");
+        assert!(!text.contains("xx"), "no stale chunks after the lag: {text}");
     }
 
     #[test]
@@ -774,7 +871,7 @@ mod tests {
         let subscription = pending.await.unwrap().unwrap();
         let before = limit.available_permits();
         let global = limit.clone().try_acquire_owned().unwrap();
-        let response = live_response(subscription, global);
+        let response = live_response(1, hub.clone(), subscription, global);
         assert_eq!(
             response.headers().get(header::CONTENT_TYPE).unwrap(),
             "video/mp2t"
