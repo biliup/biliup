@@ -248,6 +248,10 @@ function describeMpegtsError(errorType: string, detail: string, info?: { code?: 
   }
   if (errorType === mpegts.ErrorTypes.MEDIA_ERROR) {
     if (detail === mpegts.ErrorDetails.MEDIA_CODEC_UNSUPPORTED) return '浏览器不支持该编码（可能为 HEVC）'
+    if (detail === mpegts.ErrorDetails.MEDIA_MSE_ERROR) {
+      // 典型来源：TS 的 PES 没有按访问单元对齐（如 Twitch），mpegts.js 拆出的帧不完整，浏览器拒绝解码
+      return '浏览器解码失败：该直播源的封装方式 mpegts.js 无法处理，录制不受影响'
+    }
     return `解码错误: ${info?.msg ?? detail}`
   }
   return `播放错误: ${info?.msg ?? detail}`
