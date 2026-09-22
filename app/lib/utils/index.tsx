@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 
 export const responsiveMap = {
   xs: '(max-width: 575px)',
@@ -58,18 +58,71 @@ export const humDate = (time: number): string =>
     })
     .replaceAll('/', '-')
 
-export const useSystemTheme = () => {
-  const [theme, setTheme] = useState<string>('light')
-  useEffect(() => {
-    const getSystemTheme = () =>
-      window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-    setTheme(getSystemTheme)
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-    const handleChange = () => setTheme(getSystemTheme)
-    mediaQuery.addEventListener('change', handleChange)
-    return () => mediaQuery.removeEventListener('change', handleChange)
-  }, [])
-  return theme
+const DARK_SCHEME_QUERY = '(prefers-color-scheme: dark)'
+const subscribeSystemTheme = (onChange: () => void) => {
+  const mediaQuery = window.matchMedia(DARK_SCHEME_QUERY)
+  mediaQuery.addEventListener('change', onChange)
+  return () => mediaQuery.removeEventListener('change', onChange)
+}
+const getSystemTheme = () => (window.matchMedia(DARK_SCHEME_QUERY).matches ? 'dark' : 'light')
+const getServerSystemTheme = () => 'light'
+
+/**
+ * 系统配色(light / dark)。matchMedia 是浏览器侧的外部状态,用 useSyncExternalStore 订阅:
+ * 服务端与水合期固定为 light(与 SSR 输出一致),水合后 React 自行切到真实值,不需要在 effect 里 setState。
+ */
+export const useSystemTheme = () =>
+  useSyncExternalStore(subscribeSystemTheme, getSystemTheme, getServerSystemTheme)
+
+/* ---------- localStorage 偏好(侧栏折叠、主题模式)的订阅式读写 ---------- */
+
+const storageListeners = new Map<string, Set<() => void>>()
+/** localStorage 写入失败(配额满、被禁用)时的内存兜底,保证本页内仍能切换,只是刷新后不保留 */
+const storageFallback = new Map<string, string | null>()
+
+const readStorage = (key: string): string | null => {
+  if (storageFallback.has(key)) return storageFallback.get(key) ?? null
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+const writeStorage = (key: string, value: string | null) => {
+  try {
+    if (value === null) localStorage.removeItem(key)
+    else localStorage.setItem(key, value)
+    storageFallback.delete(key)
+  } catch {
+    storageFallback.set(key, value)
+  }
+  storageListeners.get(key)?.forEach(listener => listener())
+}
+const subscribeStorage = (key: string, onChange: () => void) => {
+  let listeners = storageListeners.get(key)
+  if (!listeners) {
+    listeners = new Set()
+    storageListeners.set(key, listeners)
+  }
+  listeners.add(onChange)
+  return () => {
+    listeners.delete(onChange)
+  }
+}
+const getServerStorage = () => null
+
+/**
+ * 读写 localStorage 里的一个键,并订阅它在本页内的变化。
+ * 替代「useState + 挂载 effect 里 setState」的写法:服务端与水合期快照固定为 null(与 SSR 输出一致),
+ * 水合完成后 React 自己用真实值重渲染一次,既没有水合不一致也没有级联渲染。
+ * 只有通过返回的 setter 写入才会通知订阅者;其它地方直接写同一键(如 useTheme 回写 mode)必须写相同的值。
+ */
+export const useLocalStorageValue = (key: string) => {
+  const subscribe = useCallback((onChange: () => void) => subscribeStorage(key, onChange), [key])
+  const getSnapshot = useCallback(() => readStorage(key), [key])
+  const value = useSyncExternalStore(subscribe, getSnapshot, getServerStorage)
+  const setValue = useCallback((next: string | null) => writeStorage(key, next), [key])
+  return [value, setValue] as const
 }
 
 /**
