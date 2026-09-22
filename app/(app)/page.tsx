@@ -123,7 +123,7 @@ export default function Home() {
               <span className={styles.secLabel}>
                 进行中<span className={styles.secCount}>{live.length}</span>
               </span>
-              <Link href="/streamers" className={styles.secLink}>
+              <Link href="/streamers" prefetch={false} className={styles.secLink}>
                 直播管理 →
               </Link>
             </div>

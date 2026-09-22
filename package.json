@@ -6,28 +6,27 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint ."
   },
   "dependencies": {
-    "@douyinfe/semi-ui": "^2.88.2",
-    "artplayer": "^5.2.1",
-    "mpegts.js": "^1.8.0",
-    "next": "^14.2.26",
-    "qrcode.react": "^3.1.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-json-tree": "^0.19.0",
-    "swr": "^2.3.0"
+    "@douyinfe/semi-ui": "^2.103.0",
+    "artplayer": "^5.4.0",
+    "mpegts.js": "^1.8.2",
+    "next": "^16.3.5",
+    "qrcode.react": "^4.2.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-json-tree": "^0.20.0",
+    "swr": "^2.5.1"
   },
   "devDependencies": {
-    "@types/node": "^20.13.0",
-    "@types/react": "^18.3.3",
-    "@types/react-dom": "^18.3.0",
-    "eslint": "^8.57.0",
-    "eslint-config-next": "^14.2.26",
-    "eslint-config-prettier": "^9.1.0",
-    "ncp": "^2.0.0",
-    "sass": "^1.87.0",
-    "typescript": "^5.7.2"
+    "@types/node": "^26.6.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.5",
+    "eslint-config-prettier": "^10.1.8",
+    "sass": "^1.104.1",
+    "typescript": "^6.0.3"
   }
 }

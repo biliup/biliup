@@ -112,7 +112,7 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
               <br />
               其中的&quot;@credits&quot;会依次替换为下面输入的@
             </div>
-            <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+            <Button icon={<IconPlusCircle />} onClick={() => add()} theme="light">
               添加行
             </Button>
             {arrayFields.map(({ field, key, remove }, i) => (

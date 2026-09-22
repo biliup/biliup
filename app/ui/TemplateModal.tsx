@@ -70,7 +70,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
     fontWeight: 700,
     cursor: 'pointer',
   }
-  const api = useRef<FormApi>()
+  const api = useRef<FormApi>(undefined)
   const {
     data: templates,
     error,
@@ -98,7 +98,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
   }
 
   const childrenWithProps = React.Children.map(children, child => {
-    if (React.isValidElement<any>(child)) {
+    if (React.isValidElement<{ onClick?: () => void }>(child)) {
       return React.cloneElement(child, {
         onClick: () => {
           showDialog()
@@ -176,7 +176,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
             {({ add, arrayFields }) => (
               <>
                 <Form.Slot label={{ text: '后处理' }} labelPosition="left">
-                  <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+                  <Button icon={<IconPlusCircle />} onClick={() => add()} theme="light">
                     添加行
                   </Button>
                 </Form.Slot>
@@ -265,7 +265,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                       如果房间名包含关键词，则停止或不录制该场直播，每个关键词需单独一行<br />
                       暂不支持<strong>cc直播</strong>、<strong>yy直播</strong>、<strong>twitch直播</strong>
                     </div>
-                    <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+                    <Button icon={<IconPlusCircle />} onClick={() => add()} theme="light">
                       添加关键词
                     </Button>
                     {arrayFields.map(({ field, key, remove }, i) => (
@@ -295,7 +295,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                     <div className="semi-form-field-extra">
                       下载直播前触发，将按自定义顺序执行自定义操作，仅支持shell指令
                     </div>
-                    <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+                    <Button icon={<IconPlusCircle />} onClick={() => add()} theme="light">
                       添加行
                     </Button>
                     {arrayFields.map(({ field, key, remove }, i) => (
@@ -326,7 +326,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                     <div className="semi-form-field-extra">
                       分段时触发，将按自定义顺序执行自定义操作，仅支持shell指令
                     </div>
-                    <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+                    <Button icon={<IconPlusCircle />} onClick={() => add()} theme="light">
                       添加行
                     </Button>
                     {arrayFields.map(({ field, key, remove }, i) => (
@@ -357,7 +357,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                     <div className="semi-form-field-extra">
                       准备上传直播时触发，将按自定义顺序执行自定义操作，仅支持shell指令，如果对上传的视频进行修改，需要保证和filename_prefix命名规则一致，会自动检测上传
                     </div>
-                    <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+                    <Button icon={<IconPlusCircle />} onClick={() => add()} theme="light">
                       添加行
                     </Button>
                     {arrayFields.map(({ field, key, remove }, i) => (
@@ -388,7 +388,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                     <div className="semi-form-field-extra">
                       如：&quot;-ss&quot;、&quot;00:00:16&quot;，每个参数需单独一行
                     </div>
-                    <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+                    <Button icon={<IconPlusCircle />} onClick={() => add()} theme="light">
                       添加行
                     </Button>
                     {arrayFields.map(({ field, key, remove }, i) => (

@@ -30,7 +30,7 @@ const Edit = () => {
   )
   const router = useRouter()
   const { typeTree, isError } = useTypeTree()
-  const api = useRef<FormApi>()
+  const api = useRef<FormApi>(undefined)
   const [labelPosition, setLabelPosition] = useState<'top' | 'left' | 'inset'>('inset')
   useEffect(() => {
     const unRegister = registerMediaQuery(responsiveMap.lg, {
