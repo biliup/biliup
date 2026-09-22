@@ -7,9 +7,12 @@ use serde::Serialize;
 pub struct LivePreviewResponse {
     /// 当前下载器能否提供预览。为 `true` 时 `format` 仍可能是 `null`（刚开始拉流、容器未定）
     pub available: bool,
-    /// `flv` / `mpegts`，即 `GET /v1/streamers/{id}/live` 的容器，与其 `Content-Type` 一致
+    /// `flv` / `mpegts` / `fmp4`，即 `GET /v1/streamers/{id}/live` 的容器，与其 `Content-Type` 一致
     pub format: Option<&'static str>,
-    /// 不可预览的原因（ffmpeg / streamlink 子进程落盘、fMP4、HEVC 等）
+    /// `fmp4` 时从 init segment 解出的 RFC 6381 编码串（如 `avc1.64001f,mp4a.40.2`），
+    /// 供前端 `MediaSource.isTypeSupported()` 校验后 `addSourceBuffer`；其它容器为 `null`
+    pub codecs: Option<String>,
+    /// 不可预览的原因（ffmpeg / streamlink 子进程落盘、HEVC FLV 等）
     pub reason: Option<String>,
 }
 
@@ -18,6 +21,7 @@ impl From<PreviewStatus> for LivePreviewResponse {
         Self {
             available: status.available,
             format: status.format.map(|f| f.as_str()),
+            codecs: status.codecs,
             reason: status.reason,
         }
     }

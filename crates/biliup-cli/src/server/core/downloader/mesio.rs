@@ -195,18 +195,16 @@ impl Mesio {
                 };
                 let extension = hls_extension(&first);
                 warn_on_suffix_mismatch(&download_config.suffix, extension);
-                // 只有 TS 分片能直接喂给浏览器里的 mpegts.js；fMP4 分片流明确标为不可预览
-                let preview = if first.is_ts() {
-                    Some((
-                        download_config.preview.attach(PreviewFormat::MpegTs),
-                        tee_hls as fn(&mut PreviewSink, &HlsData),
-                    ))
+                // TS 分片给浏览器里的 mpegts.js；fMP4 分片直接交给 MediaSource
+                let format = if first.is_ts() {
+                    PreviewFormat::MpegTs
                 } else {
-                    download_config
-                        .preview
-                        .mark_unavailable("fMP4 分片流暂无法在浏览器内预览，录制不受影响");
-                    None
+                    PreviewFormat::Fmp4
                 };
+                let preview = Some((
+                    download_config.preview.attach(format),
+                    tee_hls as fn(&mut PreviewSink, &HlsData),
+                ));
                 let mut writer = HlsWriter::new(HlsWriterConfig {
                     output_dir,
                     base_name,
@@ -473,14 +471,19 @@ fn tee_flv(sink: &mut PreviewSink, item: &FlvData) {
     }
 }
 
-/// 把一个 mesio HLS 分片旁路给直播预览：每个 TS 分片都是自含的（带 PAT/PMT、从关键帧开始），
-/// 整片作为一个关键帧分块推送，新订阅者从最近一个完整分片起播。
+/// 把一个 mesio HLS 分片旁路给直播预览。
+///
+/// TS：每个分片自含（带 PAT/PMT、从关键帧开始），整片作为一个关键帧分块推送。
+/// fMP4：init segment（ftyp + moov）作为文件头进快照，每个 moof + mdat 分片作为一个关键帧分块。
+/// 两者新订阅者都从「最近一个完整分片」起播。
 fn tee_hls(sink: &mut PreviewSink, item: &HlsData) {
-    if item.is_ts()
-        && let Some(data) = item.data()
-    {
-        sink.push(ChunkKind::Keyframe, data.clone());
-    }
+    let Some(data) = item.data() else { return };
+    let kind = if item.is_mp4_init() {
+        ChunkKind::Header
+    } else {
+        ChunkKind::Keyframe
+    };
+    sink.push(kind, data.clone());
 }
 
 /// 把引擎事件写进日志。进度事件只在 debug 级别记录，避免刷屏。
@@ -760,7 +763,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tee_hls_forwards_ts_segments_as_keyframe_chunks_and_ignores_fmp4() {
+    async fn tee_hls_forwards_ts_segments_as_keyframe_chunks() {
         use biliup::downloader::preview::{PreviewFormat, PreviewHub};
 
         let hub = PreviewHub::new(4);
@@ -772,10 +775,6 @@ mod tests {
         let ts = HlsData::ts(
             segment(),
             bytes::Bytes::from_static(&[0x47, 0x40, 0x00, 0x10]),
-        );
-        tee_hls(
-            &mut sink,
-            &HlsData::mp4_init(segment(), bytes::Bytes::from_static(b"ftyp")),
         );
         tee_hls(&mut sink, &ts);
         tee_hls(&mut sink, &HlsData::end_marker());
@@ -789,6 +788,61 @@ mod tests {
         // 快照只含最近一个完整分片，且以 TS 同步字节开头
         assert_eq!(sub.snapshot.len(), 1);
         assert_eq!(sub.snapshot[0][0], 0x47);
+    }
+
+    /// fMP4：init segment 进快照并解出编码串，moof/mdat 分片按关键帧分块；
+    /// 新订阅者拿到 init + 最近一个完整分片。
+    #[tokio::test]
+    async fn tee_hls_keeps_the_fmp4_init_segment_for_new_subscribers() {
+        use biliup::downloader::preview::{PreviewFormat, PreviewHub};
+
+        fn bx(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+            let mut out = ((8 + body.len()) as u32).to_be_bytes().to_vec();
+            out.extend_from_slice(kind);
+            out.extend_from_slice(body);
+            out
+        }
+        let hub = PreviewHub::new(4);
+        let mut sink = hub.attach(PreviewFormat::Fmp4);
+        let segment = |uri: &str| m3u8_rs::MediaSegment {
+            uri: uri.to_string(),
+            ..Default::default()
+        };
+        // 一个只含 avc1/avcC 的最小 init：ftyp + moov/trak/mdia/minf/stbl/stsd
+        let mut entry = vec![0u8; 78];
+        entry.extend_from_slice(&bx(b"avcC", &[1, 0x64, 0x00, 0x28]));
+        let mut stsd = vec![0, 0, 0, 0, 0, 0, 0, 1];
+        stsd.extend_from_slice(&bx(b"avc1", &entry));
+        let trak = bx(
+            b"trak",
+            &bx(b"mdia", &bx(b"minf", &bx(b"stbl", &bx(b"stsd", &stsd)))),
+        );
+        let mut init = bx(b"ftyp", b"iso5");
+        init.extend_from_slice(&bx(b"moov", &trak));
+        let init = bytes::Bytes::from(init);
+
+        tee_hls(
+            &mut sink,
+            &HlsData::mp4_init(segment("init.mp4"), init.clone()),
+        );
+        let status = hub.status();
+        assert_eq!(status.format, Some(PreviewFormat::Fmp4));
+        assert_eq!(status.codecs.as_deref(), Some("avc1.640028"));
+
+        let seg1 = bytes::Bytes::from_static(b"moof1mdat1");
+        let seg2 = bytes::Bytes::from_static(b"moof2mdat2");
+        tee_hls(&mut sink, &HlsData::mp4_segment(segment("1.m4s"), seg1));
+        let pending = tokio::spawn({
+            let hub = hub.clone();
+            async move { hub.subscribe(Duration::from_secs(5)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        tee_hls(
+            &mut sink,
+            &HlsData::mp4_segment(segment("2.m4s"), seg2.clone()),
+        );
+        let sub = pending.await.unwrap().unwrap();
+        assert_eq!(sub.snapshot, vec![init, seg2]);
     }
 
     #[test]

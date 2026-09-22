@@ -159,6 +159,13 @@ async fn download_to_file(
         out.write_all(&chunk)?;
         bytes_written.add(chunk.len() as u64);
         if let Some(sink) = preview.as_deref_mut() {
+            if segment_start && chunk.first() != Some(&0x47) {
+                // 不是 TS 同步字节：多半是 fMP4（m4s）分片。这条路径没有下载 #EXT-X-MAP 的
+                // 初始化分片（录制文件同样如此），没有 init segment 就播不了，明确标为不可预览
+                sink.mark_unavailable(
+                    "HLS 分片不是 MPEG-TS（可能是 fMP4），stream-gears 暂不支持预览此格式，可改用 mesio",
+                );
+            }
             let kind = if segment_start {
                 ChunkKind::Keyframe
             } else {

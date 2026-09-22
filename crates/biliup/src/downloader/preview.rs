@@ -37,10 +37,12 @@ pub const MAX_GOP_BYTES: usize = 8 * 1024 * 1024;
 /// 旁路出来的容器格式，决定 HTTP 响应的 `Content-Type` 与前端播放器的模式。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreviewFormat {
-    /// FLV：`video/x-flv`，httpflv 与 mesio 的 FLV 会话
+    /// FLV：`video/x-flv`，httpflv 与 mesio 的 FLV 会话，前端 mpegts.js
     Flv,
-    /// 连续的 MPEG-TS 字节流（不是 m3u8）：`video/mp2t`，HLS 分片拼接
+    /// 连续的 MPEG-TS 字节流（不是 m3u8）：`video/mp2t`，HLS 分片拼接，前端 mpegts.js
     MpegTs,
+    /// 分片 MP4（init segment + moof/mdat 分片）：`video/mp4`，前端直接 MediaSource 追加
+    Fmp4,
 }
 
 impl PreviewFormat {
@@ -48,14 +50,16 @@ impl PreviewFormat {
         match self {
             PreviewFormat::Flv => "video/x-flv",
             PreviewFormat::MpegTs => "video/mp2t",
+            PreviewFormat::Fmp4 => "video/mp4",
         }
     }
 
-    /// 接口里用的短名：`flv` / `mpegts`（与 mpegts.js 的 `type` 一致）
+    /// 接口里用的短名：`flv` / `mpegts`（与 mpegts.js 的 `type` 一致）/ `fmp4`
     pub fn as_str(self) -> &'static str {
         match self {
             PreviewFormat::Flv => "flv",
             PreviewFormat::MpegTs => "mpegts",
+            PreviewFormat::Fmp4 => "fmp4",
         }
     }
 }
@@ -63,7 +67,9 @@ impl PreviewFormat {
 /// 写入端推送的分块类型，决定它在快照里的位置。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChunkKind {
-    /// 文件头（FLV 的 9 字节头 + PreviousTagSize0）。只进快照，不广播给已有订阅者。
+    /// 文件头：FLV 的 9 字节头 + PreviousTagSize0，或 fMP4 的 init segment（ftyp + moov）。
+    /// 进快照；FLV 的不广播给已有订阅者（解码器不能中途收到文件头），fMP4 的会广播
+    /// （MSE 允许中途追加新的 init segment，对应上游换了初始化分片）。
     Header,
     /// 解码所需的序列头（onMetaData / AAC / AVC 序列头），按槽位替换保存，同时广播。
     /// 槽位由调用方定义（FLV 用 tag 类型），同一槽位后来的覆盖先前的。
@@ -80,6 +86,9 @@ pub struct PreviewStatus {
     /// 当前下载器能否提供预览（`true` 时 `format` 可能仍为 `None`：刚开始拉流、尚未确定容器）
     pub available: bool,
     pub format: Option<PreviewFormat>,
+    /// fMP4 时从 init segment 的 `moov` 解出的 RFC 6381 编码串（如 `avc1.64001f,mp4a.40.2`），
+    /// 供前端 `MediaSource.isTypeSupported()` 校验并 `addSourceBuffer`；其它容器为 `None`
+    pub codecs: Option<String>,
     /// 不可预览的原因，面向用户的中文说明
     pub reason: Option<String>,
 }
@@ -88,7 +97,10 @@ pub struct PreviewStatus {
 enum HubState {
     /// 下载器能 tee，但还没开始拉流 / 尚未确定容器
     Pending,
-    Available(PreviewFormat),
+    Available {
+        format: PreviewFormat,
+        codecs: Option<String>,
+    },
     Unavailable(String),
 }
 
@@ -203,16 +215,19 @@ impl PreviewHub {
             HubState::Pending => PreviewStatus {
                 available: true,
                 format: None,
+                codecs: None,
                 reason: None,
             },
-            HubState::Available(format) => PreviewStatus {
+            HubState::Available { format, codecs } => PreviewStatus {
                 available: true,
                 format: Some(*format),
+                codecs: codecs.clone(),
                 reason: None,
             },
             HubState::Unavailable(reason) => PreviewStatus {
                 available: false,
                 format: None,
+                codecs: None,
                 reason: Some(reason.clone()),
             },
         }
@@ -226,7 +241,10 @@ impl PreviewHub {
         let (request_tx, request_rx) = std_mpsc::channel();
         let generation = self.0.generation.fetch_add(1, Ordering::Relaxed) + 1;
         *self.0.requests.write().unwrap() = Some((generation, request_tx));
-        *self.0.state.write().unwrap() = HubState::Available(format);
+        *self.0.state.write().unwrap() = HubState::Available {
+            format,
+            codecs: None,
+        };
         PreviewSink {
             hub: self.0.clone(),
             generation,
@@ -318,7 +336,20 @@ impl PreviewSink {
     pub fn push(&mut self, kind: ChunkKind, chunk: Bytes) {
         match kind {
             ChunkKind::Header => {
-                self.header = Some(chunk);
+                if self.format == PreviewFormat::Fmp4 {
+                    // init segment：每次 attach 只出现一次（上游换初始化分片时才会再来），
+                    // 解出编码串供前端 addSourceBuffer；MSE 允许中途追加新 init，照常广播
+                    let codecs = mp4::codecs_from_init(&chunk);
+                    if let HubState::Available { codecs: slot, .. } =
+                        &mut *self.hub.state.write().unwrap()
+                    {
+                        *slot = codecs;
+                    }
+                    self.header = Some(chunk.clone());
+                    self.broadcast(chunk);
+                } else {
+                    self.header = Some(chunk);
+                }
                 return;
             }
             ChunkKind::SequenceHeader(slot) => {
@@ -502,10 +533,353 @@ pub mod flv {
     }
 }
 
+/// 从 fMP4 init segment（`ftyp` + `moov`）里解出 RFC 6381 编码串，供浏览器
+/// `MediaSource.isTypeSupported('video/mp4; codecs="…"')` 与 `addSourceBuffer`。
+///
+/// 只读 `moov/trak/mdia/minf/stbl/stsd` 下的 sample entry，不解析别的；
+/// 解不出的轨道跳过，全都解不出返回 `None`（前端据此提示而不是转圈）。
+pub mod mp4 {
+    /// 一个 box 的类型与载荷（不含 8 / 16 字节头）
+    struct Box<'a> {
+        kind: [u8; 4],
+        body: &'a [u8],
+    }
+
+    /// 顺序遍历 `data` 里的顶层 box；损坏 / 截断时提前结束而不是 panic。
+    fn boxes(mut data: &[u8]) -> impl Iterator<Item = Box<'_>> {
+        std::iter::from_fn(move || {
+            if data.len() < 8 {
+                return None;
+            }
+            let size32 = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
+            let kind = [data[4], data[5], data[6], data[7]];
+            let (header, size) = match size32 {
+                0 => (8, data.len()),
+                1 => {
+                    if data.len() < 16 {
+                        return None;
+                    }
+                    let large = u64::from_be_bytes([
+                        data[8], data[9], data[10], data[11], data[12], data[13], data[14],
+                        data[15],
+                    ]);
+                    (16, usize::try_from(large).ok()?)
+                }
+                n => (8, n),
+            };
+            if size < header || size > data.len() {
+                return None;
+            }
+            let body = &data[header..size];
+            data = &data[size..];
+            Some(Box { kind, body })
+        })
+    }
+
+    fn child<'a>(data: &'a [u8], kind: &[u8; 4]) -> Option<&'a [u8]> {
+        boxes(data).find(|b| &b.kind == kind).map(|b| b.body)
+    }
+
+    /// `stsd` 是 full box：version/flags(4) + entry_count(4)，其后是 sample entry 列表
+    fn sample_entries(stsd: &[u8]) -> impl Iterator<Item = Box<'_>> {
+        boxes(stsd.get(8..).unwrap_or(&[]))
+    }
+
+    /// 解出全部轨道的编码串并用 `,` 连接；一个都解不出时返回 `None`。
+    pub fn codecs_from_init(init: &[u8]) -> Option<String> {
+        let moov = child(init, b"moov")?;
+        let mut codecs = Vec::new();
+        for trak in boxes(moov).filter(|b| &b.kind == b"trak") {
+            let stsd = child(trak.body, b"mdia")
+                .and_then(|mdia| child(mdia, b"minf"))
+                .and_then(|minf| child(minf, b"stbl"))
+                .and_then(|stbl| child(stbl, b"stsd"));
+            let Some(stsd) = stsd else { continue };
+            for entry in sample_entries(stsd) {
+                if let Some(codec) = sample_entry_codec(&entry.kind, entry.body) {
+                    codecs.push(codec);
+                }
+            }
+        }
+        (!codecs.is_empty()).then(|| codecs.join(","))
+    }
+
+    /// VisualSampleEntry 固定字段 78 字节，AudioSampleEntry 28 字节（QuickTime v1 为 44），
+    /// 其后是 `avcC` / `hvcC` / `esds` 等子 box。
+    fn sample_entry_codec(kind: &[u8; 4], body: &[u8]) -> Option<String> {
+        let fourcc = String::from_utf8_lossy(kind).to_string();
+        match kind {
+            b"avc1" | b"avc3" => {
+                let avcc = child(body.get(78..)?, b"avcC")?;
+                // configurationVersion, AVCProfileIndication, profile_compatibility, AVCLevelIndication
+                let (profile, compat, level) = (*avcc.get(1)?, *avcc.get(2)?, *avcc.get(3)?);
+                Some(format!("{fourcc}.{profile:02x}{compat:02x}{level:02x}"))
+            }
+            b"hvc1" | b"hev1" => {
+                let hvcc = child(body.get(78..)?, b"hvcC")?;
+                Some(hevc_codec(&fourcc, hvcc)?)
+            }
+            b"av01" => {
+                let av1c = child(body.get(78..)?, b"av1C")?;
+                let b1 = *av1c.get(1)?;
+                let b2 = *av1c.get(2)?;
+                let profile = b1 >> 5;
+                let level = b1 & 0x1f;
+                let tier = if b2 & 0x80 != 0 { 'H' } else { 'M' };
+                let depth = match (b2 & 0x40 != 0, b2 & 0x20 != 0) {
+                    (true, true) => 12,
+                    (true, false) => 10,
+                    _ => 8,
+                };
+                Some(format!("av01.{profile}.{level:02}{tier}.{depth:02}"))
+            }
+            b"vp09" => {
+                let vpcc = child(body.get(78..)?, b"vpcC")?;
+                // full box：version/flags(4) profile(1) level(1) bitDepth(4b)|chroma(3b)|range(1b)
+                let profile = *vpcc.get(4)?;
+                let level = *vpcc.get(5)?;
+                let depth = *vpcc.get(6)? >> 4;
+                Some(format!("vp09.{profile:02}.{level:02}.{depth:02}"))
+            }
+            b"mp4a" => {
+                let esds = [28usize, 44]
+                    .into_iter()
+                    .filter_map(|offset| body.get(offset..))
+                    .find_map(|rest| child(rest, b"esds"))?;
+                Some(aac_codec(esds.get(4..)?)?)
+            }
+            b"ac-3" => Some("ac-3".to_string()),
+            b"ec-3" => Some("ec-3".to_string()),
+            b"Opus" => Some("opus".to_string()),
+            b"fLaC" => Some("flac".to_string()),
+            _ => None,
+        }
+    }
+
+    /// ISO 14496-15 Annex E：`hvc1.<profile_space><profile_idc>.<compat flags 位序反转的十六进制>.<L|H><level_idc>.<constraint bytes 去尾零，点分>`
+    fn hevc_codec(fourcc: &str, hvcc: &[u8]) -> Option<String> {
+        let b1 = *hvcc.get(1)?;
+        let profile_space = match b1 >> 6 {
+            0 => "",
+            1 => "A",
+            2 => "B",
+            _ => "C",
+        };
+        let tier = if b1 & 0x20 != 0 { 'H' } else { 'L' };
+        let profile_idc = b1 & 0x1f;
+        let compat =
+            u32::from_be_bytes([*hvcc.get(2)?, *hvcc.get(3)?, *hvcc.get(4)?, *hvcc.get(5)?])
+                .reverse_bits();
+        let constraints = hvcc.get(6..12)?;
+        let level_idc = *hvcc.get(12)?;
+        let mut out = format!("{fourcc}.{profile_space}{profile_idc}.{compat:X}.{tier}{level_idc}");
+        let trimmed = constraints
+            .iter()
+            .rposition(|b| *b != 0)
+            .map(|last| &constraints[..=last])
+            .unwrap_or(&[]);
+        for byte in trimmed {
+            out.push_str(&format!(".{byte:X}"));
+        }
+        Some(out)
+    }
+
+    /// 读 MPEG-4 描述符的可变长度（每字节 7 位，高位为续标志，最多 4 字节）
+    fn descriptor_len(data: &[u8]) -> Option<(usize, usize)> {
+        let mut len = 0usize;
+        for (i, byte) in data.iter().take(4).enumerate() {
+            len = (len << 7) | (*byte & 0x7f) as usize;
+            if byte & 0x80 == 0 {
+                return Some((len, i + 1));
+            }
+        }
+        None
+    }
+
+    fn descriptor(data: &[u8], tag: u8) -> Option<&[u8]> {
+        let mut rest = data;
+        while let Some((&t, after)) = rest.split_first() {
+            let (len, consumed) = descriptor_len(after)?;
+            let body = after.get(consumed..consumed + len)?;
+            if t == tag {
+                return Some(body);
+            }
+            rest = &after[consumed + len..];
+        }
+        None
+    }
+
+    /// `esds` → ES_Descriptor(0x03) → DecoderConfigDescriptor(0x04) → objectTypeIndication；
+    /// 0x40（MPEG-4 Audio）再读 DecoderSpecificInfo(0x05) 的 audioObjectType → `mp4a.40.<aot>`
+    fn aac_codec(esds_body: &[u8]) -> Option<String> {
+        let es = descriptor(esds_body, 0x03)?;
+        // ES_ID(2) + flags(1)，可选字段按 flags 出现；HLS 里几乎总是 0
+        let flags = *es.get(2)?;
+        let mut offset = 3;
+        if flags & 0x80 != 0 {
+            offset += 2;
+        }
+        if flags & 0x40 != 0 {
+            offset += 1 + *es.get(offset)? as usize;
+        }
+        if flags & 0x20 != 0 {
+            offset += 2;
+        }
+        let dcd = descriptor(es.get(offset..)?, 0x04)?;
+        let oti = *dcd.first()?;
+        if oti != 0x40 {
+            return Some(format!("mp4a.{oti:02x}"));
+        }
+        // objectTypeIndication(1) streamType(1) bufferSizeDB(3) maxBitrate(4) avgBitrate(4) = 13
+        let dsi = descriptor(dcd.get(13..)?, 0x05)?;
+        let first = *dsi.first()?;
+        let mut aot = (first >> 3) as u32;
+        if aot == 31 {
+            let second = *dsi.get(1)?;
+            aot = 32 + (((first & 0x07) as u32) << 3 | (second >> 5) as u32);
+        }
+        Some(format!("mp4a.40.{aot}"))
+    }
+
+    #[cfg(test)]
+    pub(super) mod build {
+        //! 测试用的 box 组装
+        pub fn bx(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+            let mut out = ((8 + body.len()) as u32).to_be_bytes().to_vec();
+            out.extend_from_slice(kind);
+            out.extend_from_slice(body);
+            out
+        }
+
+        pub fn full(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+            let mut b = vec![0, 0, 0, 0];
+            b.extend_from_slice(body);
+            bx(kind, &b)
+        }
+
+        pub fn visual_entry(kind: &[u8; 4], children: &[u8]) -> Vec<u8> {
+            let mut body = vec![0u8; 78];
+            body[7] = 1; // data_reference_index
+            body.extend_from_slice(children);
+            bx(kind, &body)
+        }
+
+        pub fn audio_entry(kind: &[u8; 4], children: &[u8]) -> Vec<u8> {
+            let mut body = vec![0u8; 28];
+            body[7] = 1;
+            body.extend_from_slice(children);
+            bx(kind, &body)
+        }
+
+        pub fn stsd(entries: &[Vec<u8>]) -> Vec<u8> {
+            let mut body = (entries.len() as u32).to_be_bytes().to_vec();
+            for e in entries {
+                body.extend_from_slice(e);
+            }
+            full(b"stsd", &body)
+        }
+
+        pub fn trak(stsd: &[u8]) -> Vec<u8> {
+            bx(b"trak", &bx(b"mdia", &bx(b"minf", &bx(b"stbl", stsd))))
+        }
+
+        pub fn init(traks: &[Vec<u8>]) -> Vec<u8> {
+            let mut moov = bx(b"mvhd", &[0u8; 100]);
+            for t in traks {
+                moov.extend_from_slice(t);
+            }
+            let mut out = bx(b"ftyp", b"iso5\0\0\0\x01iso5avc1");
+            out.extend_from_slice(&bx(b"moov", &moov));
+            out
+        }
+
+        pub fn esds_aac(aot: u8) -> Vec<u8> {
+            // DecoderSpecificInfo: audioObjectType(5) samplingFrequencyIndex(4) channelConfiguration(4)
+            let asc = [aot << 3, 0x10];
+            let mut dsi = vec![0x05, asc.len() as u8];
+            dsi.extend_from_slice(&asc);
+            let mut dcd_body = vec![0x40, 0x15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+            dcd_body.extend_from_slice(&dsi);
+            let mut dcd = vec![0x04, dcd_body.len() as u8];
+            dcd.extend_from_slice(&dcd_body);
+            let mut es_body = vec![0, 1, 0];
+            es_body.extend_from_slice(&dcd);
+            let mut es = vec![0x03, es_body.len() as u8];
+            es.extend_from_slice(&es_body);
+            full(b"esds", &es)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tokio::sync::broadcast::error::RecvError;
+
+    #[test]
+    fn codecs_are_read_from_the_init_segment() {
+        use mp4::build::*;
+        let avcc = bx(b"avcC", &[1, 0x64, 0x00, 0x1f, 0xff, 0xe1]);
+        let video = trak(&stsd(&[visual_entry(b"avc1", &avcc)]));
+        let audio = trak(&stsd(&[audio_entry(b"mp4a", &esds_aac(2))]));
+        let avc_aac = init(&[video, audio]);
+        assert_eq!(
+            mp4::codecs_from_init(&avc_aac).as_deref(),
+            Some("avc1.64001f,mp4a.40.2")
+        );
+
+        // HEVC Main：profile_space 0 / tier L / profile_idc 1，compat 0x60000000 → 6，level 93，约束 B0
+        let mut hvcc = vec![1, 0x01, 0x60, 0, 0, 0, 0xb0, 0, 0, 0, 0, 0, 93];
+        hvcc.extend_from_slice(&[0xf0, 0x00, 0xfc, 0xfd]);
+        let hevc = trak(&stsd(&[visual_entry(b"hvc1", &bx(b"hvcC", &hvcc))]));
+        let he_aac = trak(&stsd(&[audio_entry(b"mp4a", &esds_aac(5))]));
+        assert_eq!(
+            mp4::codecs_from_init(&init(&[hevc, he_aac])).as_deref(),
+            Some("hvc1.1.6.L93.B0,mp4a.40.5")
+        );
+
+        // 不认识的 sample entry 跳过；没有 moov 或全都解不出时为 None
+        let odd = trak(&stsd(&[visual_entry(b"xxxx", &[])]));
+        assert_eq!(mp4::codecs_from_init(&init(&[odd])), None);
+        assert_eq!(mp4::codecs_from_init(b"\x00\x00\x00\x08ftyp"), None);
+        assert_eq!(mp4::codecs_from_init(&[0, 0, 0]), None);
+        // 截断的 moov 不 panic
+        let full_init = init(&[trak(&stsd(&[visual_entry(b"avc1", &avcc)]))]);
+        assert_eq!(
+            mp4::codecs_from_init(&full_init[..full_init.len() - 10]),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn fmp4_header_sets_codecs_and_is_broadcast_to_live_subscribers() {
+        use mp4::build::*;
+        let avcc = bx(b"avcC", &[1, 0x4d, 0x40, 0x28]);
+        let init = Bytes::from(init(&[trak(&stsd(&[visual_entry(b"avc1", &avcc)]))]));
+        let hub = PreviewHub::new(4);
+        let mut sink = hub.attach(PreviewFormat::Fmp4);
+        assert_eq!(hub.status().codecs, None);
+        sink.push(ChunkKind::Header, init.clone());
+        let status = hub.status();
+        assert_eq!(status.format, Some(PreviewFormat::Fmp4));
+        assert_eq!(status.codecs.as_deref(), Some("avc1.4d4028"));
+
+        let segment = Bytes::from_static(b"moof+mdat #1");
+        sink.push(ChunkKind::Keyframe, segment.clone());
+        let pending = tokio::spawn({
+            let hub = hub.clone();
+            async move { hub.subscribe(Duration::from_secs(5)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let segment2 = Bytes::from_static(b"moof+mdat #2");
+        sink.push(ChunkKind::Keyframe, segment2.clone());
+        let mut sub = pending.await.unwrap().unwrap();
+        // 快照 = init + 最近一个完整分片
+        assert_eq!(sub.snapshot, vec![init.clone(), segment2]);
+        // 上游换 init 时，已有订阅者也会收到新的 init（MSE 允许中途追加）
+        sink.push(ChunkKind::Header, init.clone());
+        assert_eq!(sub.rx.recv().await.unwrap(), init);
+    }
 
     fn key(n: u8) -> Bytes {
         Bytes::from(vec![0x17, 1, n, n, n])
@@ -585,6 +959,7 @@ mod tests {
             PreviewStatus {
                 available: true,
                 format: None,
+                codecs: None,
                 reason: None
             }
         );
@@ -593,6 +968,7 @@ mod tests {
             let sink = hub.attach(PreviewFormat::MpegTs);
             assert!(hub.is_attached());
             assert_eq!(hub.status().format, Some(PreviewFormat::MpegTs));
+            assert_eq!(hub.status().codecs, None);
             assert_eq!(sink.format(), PreviewFormat::MpegTs);
         }
         // 写入端 drop 后没有入口，但格式仍保留（重试期间界面不闪烁）
@@ -891,5 +1267,30 @@ mod tests {
         }
         assert_eq!(sink.receiver_count(), 0);
         assert_eq!(sink.tx.len(), 0);
+    }
+}
+
+#[cfg(test)]
+mod real_init_segments {
+    //! 手工校验：读 ffmpeg 生成的 init segment（本地有文件时才跑）。
+    //! `cargo test -p biliup -- --ignored real_init` 前先用 ffmpeg 的 hls fmp4 输出准备样本。
+    use super::mp4::codecs_from_init;
+
+    #[test]
+    #[ignore]
+    fn ffmpeg_generated_init_segments_parse() {
+        for (path, expected) in [
+            ("/tmp/lp2-fmp4/init.mp4", "avc1.64001f,mp4a.40.2"),
+            ("/tmp/lp2-fmp4/init_hevc.mp4", "hvc1.1.6.L60.90"),
+        ] {
+            let Ok(bytes) = std::fs::read(path) else {
+                continue;
+            };
+            assert_eq!(
+                codecs_from_init(&bytes).as_deref(),
+                Some(expected),
+                "{path}"
+            );
+        }
     }
 }
