@@ -7,6 +7,17 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::Path, path::PathBuf};
 use struct_patch::Patch;
 
+/// 直播预览的取流方式，见 [`Config::preview_transport`]。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PreviewTransport {
+    /// 经 biliup 中转：复用正在写盘的那一路，不多拉 CDN
+    #[default]
+    Relay,
+    /// 浏览器直连 CDN：每个观众自己拉一路，省服务器出口带宽
+    Direct,
+}
+
 /// 全局配置结构体
 #[derive(bon::Builder, Debug, PartialEq, Clone, Serialize, Deserialize, Patch)]
 #[patch(attribute(derive(Debug, Clone, Default, Deserialize, Serialize)))]
@@ -93,6 +104,12 @@ pub struct Config {
     #[builder(default = default_pool2_size())]
     #[serde(default = "default_pool2_size")]
     pub pool2_size: u32,
+
+    /// 直播预览的取流方式：`relay`（默认，复用正在录制的那一路、经 biliup 中转，不多拉 CDN）
+    /// 或 `direct`（浏览器直接向 CDN 拉一路，省服务器带宽；平台不支持时自动回落中转）。
+    /// `None` 视同 `relay`。
+    #[serde(default)]
+    pub preview_transport: Option<PreviewTransport>,
 
     // ===== 各平台录播设置 =====
     /// 是否使用直播封面

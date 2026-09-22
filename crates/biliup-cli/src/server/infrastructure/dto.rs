@@ -16,16 +16,27 @@ pub struct LivePreviewResponse {
     pub reason: Option<String>,
     /// 这一路有没有实时弹幕（平台实现了弹幕客户端），有则 `GET /v1/streamers/{id}/danmaku` 可用
     pub danmaku: bool,
+    /// 浏览器能否直连 CDN 拉这一路（`preview_transport = direct` 时前端据此选直连或回落中转）
+    pub direct: DirectCapability,
+}
+
+/// 浏览器直连 CDN 的能力判定（按平台 CDN 的跨域放行与并发策略实测得出）。
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+pub struct DirectCapability {
+    pub capable: bool,
+    /// 不能直连的原因；`capable = true` 时为 `null`
+    pub reason: Option<String>,
 }
 
 impl LivePreviewResponse {
-    pub fn new(status: PreviewStatus, danmaku: bool) -> Self {
+    pub fn new(status: PreviewStatus, danmaku: bool, direct: DirectCapability) -> Self {
         Self {
             available: status.available,
             format: status.format.map(|f| f.as_str()),
             codecs: status.codecs,
             reason: status.reason,
             danmaku,
+            direct,
         }
     }
 }

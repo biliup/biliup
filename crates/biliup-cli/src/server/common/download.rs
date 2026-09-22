@@ -127,6 +127,23 @@ pub struct LiveMedia {
     pub avatar_url: Option<String>,
 }
 
+/// 正在录制的那一路流的来源：平台名与 CDN 直链。供浏览器直连模式（`preview_transport = direct`）
+/// 判定能力、下发直链；随每次 `check_stream` 刷新（换直链 / 重试后是新的）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveSource {
+    pub platform: String,
+    pub url: String,
+}
+
+impl LiveSource {
+    pub fn from_stream(stream: &LiveStream) -> Self {
+        Self {
+            platform: stream.platform.clone(),
+            url: stream.raw_stream_url.clone(),
+        }
+    }
+}
+
 impl LiveMedia {
     pub fn from_stream(stream: &LiveStream) -> Self {
         let non_empty = |s: &str| (!s.trim().is_empty()).then(|| s.to_string());
@@ -151,6 +168,8 @@ pub struct DownloadTask {
     /// 写盘速率表；各下载器拿它的计数器句柄累加，采样任务随 `execute` 启停。
     meter: Arc<RateMeter>,
     media: std::sync::RwLock<LiveMedia>,
+    /// 当前拉的那条直链与平台名，随 `check_stream` 刷新
+    source: std::sync::RwLock<LiveSource>,
     /// 直播预览 hub，寿命与本任务相同：跨分段、跨断流重试都是同一个。
     preview: PreviewHub,
     /// 实时弹幕广播：弹幕客户端每解出一条就 `send` 一份给预览播放器；
@@ -177,9 +196,15 @@ impl DownloadTask {
             sync_session,
             meter: Arc::new(RateMeter::new()),
             media: std::sync::RwLock::new(LiveMedia::from_stream(stream)),
+            source: std::sync::RwLock::new(LiveSource::from_stream(stream)),
             preview,
             danmaku_tx,
         }
+    }
+
+    /// 当前正在录制的那条流的平台名与 CDN 直链。
+    pub fn live_source(&self) -> LiveSource {
+        self.source.read().unwrap().clone()
     }
 
     /// 本任务的直播预览 hub。
@@ -213,6 +238,7 @@ impl DownloadTask {
     }
 
     fn refresh_media(&self, ctx: &Context, stream: &LiveStream) {
+        *self.source.write().unwrap() = LiveSource::from_stream(stream);
         let media = LiveMedia::from_stream(stream);
         let changed = self.media.read().unwrap().avatar_url != media.avatar_url;
         if changed {
@@ -585,8 +611,12 @@ mod tests {
 
     #[test]
     fn segment_completed_and_stream_ended_count_as_progress() {
-        assert!(download_attempt_progressed(&Ok(DownloadStatus::SegmentCompleted)));
-        assert!(download_attempt_progressed(&Ok(DownloadStatus::StreamEnded)));
+        assert!(download_attempt_progressed(&Ok(
+            DownloadStatus::SegmentCompleted
+        )));
+        assert!(download_attempt_progressed(&Ok(
+            DownloadStatus::StreamEnded
+        )));
     }
 
     #[test]
@@ -594,9 +624,10 @@ mod tests {
         assert!(!download_attempt_progressed(&Ok(DownloadStatus::Error(
             "Streamlink error: Some(1)".into()
         ))));
-        assert!(!download_attempt_progressed(&Ok(DownloadStatus::Downloading)));
-        let err: AppResult<DownloadStatus> =
-            Err(Report::new(AppError::Custom("boom".into())));
+        assert!(!download_attempt_progressed(&Ok(
+            DownloadStatus::Downloading
+        )));
+        let err: AppResult<DownloadStatus> = Err(Report::new(AppError::Custom("boom".into())));
         assert!(!download_attempt_progressed(&err));
     }
 

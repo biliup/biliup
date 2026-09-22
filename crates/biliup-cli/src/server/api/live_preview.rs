@@ -10,12 +10,13 @@
 
 use crate::server::core::download_manager::DownloadManager;
 use crate::server::infrastructure::context::WorkerStatus;
+use crate::server::infrastructure::dto::DirectCapability;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use biliup::downloader::preview::{PreviewHub, SubscribeError, Subscription};
+use biliup::downloader::preview::{PreviewFormat, PreviewHub, SubscribeError, Subscription};
 use bytes::Bytes;
 use danmaku_client::DanmakuEvent;
 use std::collections::VecDeque;
@@ -84,6 +85,111 @@ fn subscribe_error_response(id: i64, error: SubscribeError) -> Response {
             .headers_mut()
             .insert(header::RETRY_AFTER, HeaderValue::from_static("3"));
     }
+    response
+}
+
+/// 浏览器能否直连 CDN 拉这一路——按各平台 CDN 的跨域放行与并发策略实测（PR #1712 review 1）：
+///
+/// | 平台 | ACAO | 同一直链第二连接 | 判定 |
+/// | --- | --- | --- | --- |
+/// | B 站 FLV | `*` | 正常 | 能 |
+/// | 抖音 FLV | `*` | 正常 | 能 |
+/// | 虎牙 FLV | `*` | 正常（边缘节点间歇 403，前端重试 / 回落） | 能 |
+/// | 斗鱼 FLV | `*` | **收完 GOP 缓存即 EOF——一 token 一连接**，直连会挤掉录制 | 不能 |
+/// | Twitch | 200 响应无 ACAO | — | 不能 |
+/// | HLS（TS / fMP4） | — | — | 本版本不能：mpegts.js 放不了 m3u8，直连需 hls.js |
+///
+/// 其它平台没实测，按不能处理，回落中转。
+pub fn direct_capability(
+    platform: &str,
+    stream_url: &str,
+    format: Option<PreviewFormat>,
+) -> DirectCapability {
+    let no = |reason: &str| DirectCapability {
+        capable: false,
+        reason: Some(reason.to_string()),
+    };
+    let is_hls = matches!(format, Some(PreviewFormat::MpegTs | PreviewFormat::Fmp4))
+        || stream_url
+            .split('?')
+            .next()
+            .is_some_and(|path| path.ends_with(".m3u8"));
+    if is_hls {
+        return no("HLS 直连需 hls.js，本版本回落中转");
+    }
+    match platform {
+        "bilibili" | "douyin" | "huya" => DirectCapability {
+            capable: true,
+            reason: None,
+        },
+        "douyu" => no("斗鱼 CDN 一个 token 只允许一条连接，直连会挤掉正在录制的那一路"),
+        "twitch" => no("Twitch CDN 未放行跨域（响应无 Access-Control-Allow-Origin）"),
+        _ => no("该平台的 CDN 跨域放行未验证"),
+    }
+}
+
+/// 从直链的查询参数里估计过期时间（Unix 秒）。B 站 `expires=`、抖音 `expire=` 是十进制 Unix 秒；
+/// 虎牙 `wsTime=`、腾讯云 `txTime=` 是十六进制。斗鱼 `expire=300` 这类相对秒数不算。
+pub fn estimate_expiry(stream_url: &str) -> Option<i64> {
+    let query = stream_url.split_once('?')?.1;
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        let parsed = match key {
+            "expires" | "expire" | "exp" => value.parse::<i64>().ok(),
+            "wsTime" | "txTime" => i64::from_str_radix(value, 16).ok(),
+            _ => None,
+        };
+        // 小于 2001 年的数当作相对秒数或别的东西，不算
+        if let Some(ts) = parsed
+            && ts > 1_000_000_000
+        {
+            return Some(ts);
+        }
+    }
+    None
+}
+
+/// `GET /v1/streamers/{id}/live-url` 的响应：当前录制中那条流的 CDN 直链。
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct LiveUrlResponse {
+    /// 直链，含 CDN 参数；与录制用的是同一条
+    pub url: String,
+    /// `flv` / `mpegts` / `fmp4`；容器未定时按后缀猜（`.flv` → `flv`），猜不出为 `null`
+    pub format: Option<&'static str>,
+    pub platform: String,
+    /// 过期时间估计（Unix 秒）；直链里没有可识别的过期参数时为 `null`
+    pub expires_at: Option<i64>,
+    pub direct: DirectCapability,
+}
+
+/// `GET /v1/streamers/{id}/live-url`：浏览器直连模式用，返回正在录制的那条流的直链。
+/// 只在录制中可用（404 否则）；`direct.capable = false` 时仍返回直链与原因，由前端决定回落。
+pub async fn get_live_url(
+    State(managers): State<Arc<DownloadManager>>,
+    Path(id): Path<i64>,
+) -> Response {
+    let Some(worker) = managers.get_room_by_id(id).await else {
+        return (StatusCode::NOT_FOUND, "直播间不存在").into_response();
+    };
+    let (source, format) = match &*worker.downloader_status.read().unwrap() {
+        WorkerStatus::Working(task) => (task.live_source(), task.preview().status().format),
+        _ => return (StatusCode::NOT_FOUND, "直播间未在录制").into_response(),
+    };
+    let format = format.map(|f| f.as_str()).or_else(|| {
+        let path = source.url.split('?').next().unwrap_or("");
+        path.ends_with(".flv").then_some("flv")
+    });
+    let response = LiveUrlResponse {
+        direct: direct_capability(&source.platform, &source.url, None),
+        expires_at: estimate_expiry(&source.url),
+        format,
+        platform: source.platform,
+        url: source.url,
+    };
+    let mut response = axum::Json(response).into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
 }
 
@@ -427,6 +533,75 @@ mod tests {
             subscribe_error_response(1, SubscribeError::Timeout).status(),
             StatusCode::SERVICE_UNAVAILABLE
         );
+    }
+
+    #[test]
+    fn direct_capability_follows_the_measured_platform_table() {
+        let flv = "https://d1--ov-gotcha07.bilivideo.com/live-bvc/1/live_x_2500.flv?expires=1790073449&oi=1";
+        assert!(direct_capability("bilibili", flv, Some(PreviewFormat::Flv)).capable);
+        assert!(
+            direct_capability(
+                "douyin",
+                "https://pull-flv-q11.douyincdn.com/x.flv?expire=1790678986&sign=a",
+                None
+            )
+            .capable
+        );
+        assert!(
+            direct_capability(
+                "huya",
+                "https://tx.flv.huya.com/src/x.flv?wsSecret=a&wsTime=6ab3aa97",
+                Some(PreviewFormat::Flv)
+            )
+            .capable
+        );
+        let douyu = direct_capability(
+            "douyu",
+            "https://ws1a.douyucdn.cn/live/x.flv?wsAuth=a&token=b",
+            Some(PreviewFormat::Flv),
+        );
+        assert!(!douyu.capable);
+        assert!(douyu.reason.unwrap().contains("一条连接"));
+        let twitch = direct_capability(
+            "twitch",
+            "https://usher.ttvnw.net/api/channel/hls/x.m3u8?sig=a",
+            Some(PreviewFormat::MpegTs),
+        );
+        assert!(!twitch.capable);
+        // HLS 的判定优先于平台：B 站 hls_fmp4 也回落
+        let bili_hls = direct_capability(
+            "bilibili",
+            "https://x.bilivideo.com/live-bvc/1/index.m3u8?expires=1",
+            None,
+        );
+        assert!(!bili_hls.capable);
+        assert!(bili_hls.reason.unwrap().contains("hls.js"));
+        assert!(!direct_capability("bilibili", flv, Some(PreviewFormat::Fmp4)).capable);
+        assert!(!direct_capability("youtube", "https://x/y.flv", None).capable);
+    }
+
+    #[test]
+    fn expiry_is_read_from_known_query_parameters() {
+        assert_eq!(
+            estimate_expiry("https://x.bilivideo.com/a.flv?a=1&expires=1790073449&len=0"),
+            Some(1790073449)
+        );
+        assert_eq!(
+            estimate_expiry("https://pull-flv-q11.douyincdn.com/a.flv?expire=1790678986&sign=x"),
+            Some(1790678986)
+        );
+        // 虎牙 wsTime 是十六进制
+        assert_eq!(
+            estimate_expiry("https://tx.flv.huya.com/a.flv?wsSecret=x&wsTime=6ab3aa97"),
+            Some(0x6ab3aa97)
+        );
+        // 斗鱼 expire=300 是相对秒数，不算
+        assert_eq!(
+            estimate_expiry("https://ws1a.douyucdn.cn/a.flv?wsAuth=x&expire=300&token=y"),
+            None
+        );
+        assert_eq!(estimate_expiry("https://x/a.flv"), None);
+        assert_eq!(estimate_expiry("https://x/a.flv?"), None);
     }
 
     /// 弹幕 SSE：Chat / Gift / SuperChat / GuardBuy 各成一条 `event:` + JSON `data:`，

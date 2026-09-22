@@ -1,3 +1,4 @@
+use crate::server::api::live_preview::direct_capability;
 use crate::server::common::recording_policy::{self, Rejection};
 use crate::server::common::upload::{build_studio, submit_to_bilibili, upload};
 use crate::server::common::util::Recorder;
@@ -67,11 +68,15 @@ pub async fn get_streamers_endpoint(
             Some(t) => {
                 let downloader_status = t.downloader_status.read().unwrap();
                 let live = match &*downloader_status {
-                    WorkerStatus::Working(task) => Some((
-                        task.bytes_per_sec(),
-                        task.live_media(),
-                        LivePreviewResponse::new(task.preview().status(), task.danmaku_available()),
-                    )),
+                    WorkerStatus::Working(task) => {
+                        Some((task.bytes_per_sec(), task.live_media(), {
+                            let status = task.preview().status();
+                            let source = task.live_source();
+                            let direct =
+                                direct_capability(&source.platform, &source.url, status.format);
+                            LivePreviewResponse::new(status, task.danmaku_available(), direct)
+                        }))
+                    }
                     _ => None,
                 };
                 (format!("{:?}", *downloader_status), live)
