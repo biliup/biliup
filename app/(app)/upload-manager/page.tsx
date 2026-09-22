@@ -98,7 +98,7 @@ export default function UploadManager() {
         aria-label="用户管理"
         title="用户管理"
       />
-      <Link href="/upload-manager/add" onClick={handleAddLinkClick}>
+      <Link href="/upload-manager/add" prefetch={false} onClick={handleAddLinkClick}>
         <Button icon={<IconPlusCircle />} theme="solid">
           新建
         </Button>

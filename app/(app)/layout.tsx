@@ -179,6 +179,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <div className={styles.brand}>
           <Link
             href="/"
+            prefetch={false}
             onClick={() => isMobile && setMobileNavOpen(false)}
             aria-label="回到控制台"
           >
@@ -195,12 +196,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <span className={styles.brandText}>
               <Link
                 href="/"
+                prefetch={false}
                 className={styles.brandName}
                 onClick={() => isMobile && setMobileNavOpen(false)}
               >
                 biliup
               </Link>
-              <Link href="/changelog" className={styles.brandVer} title="更新日志">
+              <Link href="/changelog" prefetch={false} className={styles.brandVer} title="更新日志">
                 v{versionText ?? '—'}
               </Link>
             </span>
@@ -218,6 +220,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   <Link
                     key={item.href}
                     href={item.href}
+                    prefetch={false}
                     className={`${styles.item} ${active ? styles.itemActive : ''}`}
                     title={navCollapsed ? item.label : undefined}
                     onClick={() => isMobile && setMobileNavOpen(false)}
