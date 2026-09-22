@@ -72,8 +72,7 @@ pub async fn get_streamers_endpoint(
                         Some((task.bytes_per_sec(), task.live_media(), {
                             let status = task.preview().status();
                             let source = task.live_source();
-                            let direct =
-                                direct_capability(&source.platform, &source.url, status.format);
+                            let direct = direct_capability(&source.platform);
                             LivePreviewResponse::new(status, task.danmaku_available(), direct)
                         }))
                     }

@@ -8,8 +8,11 @@ type VideoPlayer = Artplayer | null
 
 /** mpegts.js 能直接解封装的两种容器；其它扩展名交给浏览器原生 <video> */
 export type MpegtsType = 'flv' | 'mpegts'
-/** 直播预览支持的容器：flv / mpegts 走 mpegts.js，fmp4 直接 MediaSource 追加 */
-export type LiveType = MpegtsType | 'fmp4'
+/**
+ * 直播预览支持的容器：flv / mpegts 走 mpegts.js，fmp4 直接 MediaSource 追加，
+ * hls（m3u8，浏览器直连 CDN 时的 HLS 直链）走 hls.js（按需加载，只在用到时下载那 ~120 KB）
+ */
+export type LiveType = MpegtsType | 'fmp4' | 'hls'
 
 interface PlayerConfig {
   url: string
@@ -204,6 +207,84 @@ interface Fmp4Options {
   autoplay: boolean
   onEnded?: () => void
   onError?: (message: string) => void
+}
+
+interface HlsOptions {
+  autoplay: boolean
+  onEnded?: () => void
+  onError?: (message: string) => void
+}
+
+type HlsInstance = import('hls.js').default
+
+/**
+ * Artplayer customType：HLS 直链（浏览器直连 CDN 的 TS / fMP4 分片流）交给 hls.js。
+ * 只在直连模式下会走到这里，所以 hls.js 用动态 import，不进首屏包。
+ * 直播参数：跟到最后 3 个分片、后向缓冲 30 s；分片请求不带凭据（CDN 的 ACAO 是 *）。
+ * 致命错误（清单 / 分片 404、CORS、解码）报给上层，由 LivePreviewPlayer 重取直链或回落中转。
+ */
+async function playWithHls(video: HTMLVideoElement, url: string, art: Artplayer, { autoplay, onEnded, onError }: HlsOptions) {
+  if (art.isDestroy) return
+  const artWithHls = art as Artplayer & { hls?: HlsInstance | null }
+  artWithHls.hls?.destroy()
+  artWithHls.hls = null
+  const { default: Hls } = await import('hls.js')
+  if (art.isDestroy) return
+  if (!Hls.isSupported()) {
+    // Safari 等原生支持 HLS 的浏览器直接交给 <video>
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = url
+      if (autoplay) video.play().catch(() => {})
+      return
+    }
+    onError?.('当前浏览器不支持 MSE，无法播放 HLS')
+    return
+  }
+  const hls = new Hls({
+    liveSyncDurationCount: 3,
+    liveMaxLatencyDurationCount: 6,
+    backBufferLength: 30,
+    maxBufferLength: 30,
+    enableWorker: true,
+    xhrSetup: (xhr) => {
+      xhr.withCredentials = false
+    },
+  })
+  artWithHls.hls = hls
+  art.on('destroy', () => {
+    if (artWithHls.hls) {
+      artWithHls.hls.destroy()
+      artWithHls.hls = null
+    }
+  })
+  hls.on(Hls.Events.ERROR, (_event, data) => {
+    if (!data.fatal) return
+    const status = data.response?.code
+    const detail =
+      data.type === Hls.ErrorTypes.NETWORK_ERROR
+        ? status
+          ? `连接失败（HTTP ${status}）`
+          : `网络错误：${data.details}`
+        : data.type === Hls.ErrorTypes.MEDIA_ERROR
+          ? `浏览器解码失败：${data.details}`
+          : `播放失败：${data.details}`
+    onError?.(detail)
+  })
+  // 直播清单不再更新（主播下播 / 直链失效但清单还在）→ 当作断开让上层处理
+  hls.on(Hls.Events.LEVEL_UPDATED, (_event, data) => {
+    if (data.details.live === false) onEnded?.()
+  })
+  hls.on(Hls.Events.MANIFEST_PARSED, () => {
+    if (autoplay) {
+      video.play().catch(() => {
+        if (art.isDestroy || artWithHls.hls !== hls) return
+        video.muted = true
+        video.play().catch(() => {})
+      })
+    }
+  })
+  hls.loadSource(url)
+  hls.attachMedia(video)
 }
 
 /**
@@ -525,7 +606,20 @@ const Players: React.FC<PlayerConfig> = ({
       const onEndedCb = () => callbacksRef.current.onEnded?.()
       const onErrorCb = (message: string) => callbacksRef.current.onError?.(message)
       try {
-        if (mediaType === 'fmp4') {
+        if (mediaType === 'hls') {
+          const options: HlsOptions = { autoplay, onEnded: onEndedCb, onError: onErrorCb }
+          playerRef.current = new Artplayer({
+            ...base,
+            type: 'hls',
+            customType: {
+              hls: (video: HTMLVideoElement, src: string, art: Artplayer) => {
+                playWithHls(video, src, art, options).catch((e: unknown) =>
+                  onErrorCb(`加载 hls.js 失败：${e instanceof Error ? e.message : String(e)}`)
+                )
+              },
+            },
+          })
+        } else if (mediaType === 'fmp4') {
           const options: Fmp4Options = { codecs, autoplay, onEnded: onEndedCb, onError: onErrorCb }
           playerRef.current = new Artplayer({
             ...base,

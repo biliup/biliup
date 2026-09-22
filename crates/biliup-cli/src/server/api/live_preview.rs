@@ -18,7 +18,7 @@ use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use biliup::downloader::live::LiveStatus;
-use biliup::downloader::preview::{PreviewFormat, PreviewHub, SubscribeError, Subscription};
+use biliup::downloader::preview::{PreviewHub, SubscribeError, Subscription};
 use bytes::Bytes;
 use danmaku_client::DanmakuEvent;
 use std::collections::VecDeque;
@@ -94,32 +94,20 @@ fn subscribe_error_response(id: i64, error: SubscribeError) -> Response {
 ///
 /// 直连**不复用录制那条直链**而是向平台另取一条（新 token），所以「同一直链两条连接」的限制
 /// （斗鱼一 token 一连接、部分虎牙节点对第二条连接只给 GOP 缓存即断）不再是问题——实测新 token
-/// 的斗鱼 / 虎牙直链各读 25 s 稳定，录制那条不受影响。
+/// 的斗鱼 / 虎牙直链各读 25 s 稳定，录制那条不受影响。容器不影响判定：FLV 走 mpegts.js，
+/// HLS（TS / fMP4 分片，`.m3u8`）走 hls.js，B 站 `.m4s` 分片的 CDN 同样 `ACAO: *`。
 ///
 /// | 平台 | ACAO | 判定 |
 /// | --- | --- | --- |
-/// | B 站 / 抖音 / 虎牙 / 斗鱼 FLV | `*` | 能 |
+/// | B 站 / 抖音 / 虎牙 / 斗鱼 | `*` | 能 |
 /// | Twitch | 200 响应无 ACAO | 不能 |
-/// | HLS（TS / fMP4） | — | 本版本不能：mpegts.js 放不了 m3u8，直连需 hls.js |
 ///
 /// 其它平台没实测，按不能处理，回落中转。
-pub fn direct_capability(
-    platform: &str,
-    stream_url: &str,
-    format: Option<PreviewFormat>,
-) -> DirectCapability {
+pub fn direct_capability(platform: &str) -> DirectCapability {
     let no = |reason: &str| DirectCapability {
         capable: false,
         reason: Some(reason.to_string()),
     };
-    let is_hls = matches!(format, Some(PreviewFormat::MpegTs | PreviewFormat::Fmp4))
-        || stream_url
-            .split('?')
-            .next()
-            .is_some_and(|path| path.ends_with(".m3u8"));
-    if is_hls {
-        return no("HLS 直连需 hls.js，本版本回落中转");
-    }
     match platform {
         "bilibili" | "douyin" | "huya" | "douyu" => DirectCapability {
             capable: true,
@@ -127,6 +115,18 @@ pub fn direct_capability(
         },
         "twitch" => no("Twitch CDN 未放行跨域（响应无 Access-Control-Allow-Origin）"),
         _ => no("该平台的 CDN 跨域放行未验证"),
+    }
+}
+
+/// 直链在浏览器里该用哪个播放器：`.flv` → mpegts.js，`.m3u8` → hls.js，其它猜不出。
+pub fn direct_format(stream_url: &str) -> Option<&'static str> {
+    let path = stream_url.split('?').next().unwrap_or("");
+    if path.ends_with(".flv") {
+        Some("flv")
+    } else if path.ends_with(".m3u8") {
+        Some("hls")
+    } else {
+        None
     }
 }
 
@@ -156,7 +156,7 @@ pub fn estimate_expiry(stream_url: &str) -> Option<i64> {
 pub struct LiveUrlResponse {
     /// 直链，含 CDN 参数；与录制用的是同一条
     pub url: String,
-    /// `flv` / `mpegts` / `fmp4`；容器未定时按后缀猜（`.flv` → `flv`），猜不出为 `null`
+    /// 浏览器该用哪个播放器：`flv`（mpegts.js）/ `hls`（hls.js，TS 或 fMP4 分片都行）；后缀猜不出为 `null`
     pub format: Option<&'static str>,
     pub platform: String,
     /// 过期时间估计（Unix 秒）；直链里没有可识别的过期参数时为 `null`
@@ -177,17 +177,17 @@ pub async fn get_live_url(
     let Some(worker) = managers.get_room_by_id(id).await else {
         return (StatusCode::NOT_FOUND, "直播间不存在").into_response();
     };
-    let (source, format) = match &*worker.downloader_status.read().unwrap() {
-        WorkerStatus::Working(task) => (task.live_source(), task.preview().status().format),
+    let source = match &*worker.downloader_status.read().unwrap() {
+        WorkerStatus::Working(task) => task.live_source(),
         _ => return (StatusCode::NOT_FOUND, "直播间未在录制").into_response(),
     };
-    let capability = direct_capability(&source.platform, &source.url, None);
+    let capability = direct_capability(&source.platform);
     if !capability.capable {
         // 不能直连就不去平台多要一条，直接把原因给前端回落
         let response = LiveUrlResponse {
             direct: capability,
             expires_at: None,
-            format: format.map(|f| f.as_str()),
+            format: direct_format(&source.url),
             platform: source.platform,
             url: String::new(),
         };
@@ -216,15 +216,10 @@ pub async fn get_live_url(
         }
     };
     let url = fresh.raw_stream_url;
-    let format = format.map(|f| f.as_str()).or_else(|| {
-        let path = url.split('?').next().unwrap_or("");
-        path.ends_with(".flv").then_some("flv")
-    });
     let response = LiveUrlResponse {
-        // 新直链的容器可能与录制那条不同（如配置改了协议），按新直链再判一次
-        direct: direct_capability(&fresh.platform, &url, None),
+        direct: direct_capability(&fresh.platform),
         expires_at: estimate_expiry(&url),
-        format,
+        format: direct_format(&url),
         platform: fresh.platform,
         url,
     };
@@ -583,49 +578,34 @@ mod tests {
 
     #[test]
     fn direct_capability_follows_the_measured_platform_table() {
-        let flv = "https://d1--ov-gotcha07.bilivideo.com/live-bvc/1/live_x_2500.flv?expires=1790073449&oi=1";
-        assert!(direct_capability("bilibili", flv, Some(PreviewFormat::Flv)).capable);
-        assert!(
-            direct_capability(
-                "douyin",
-                "https://pull-flv-q11.douyincdn.com/x.flv?expire=1790678986&sign=a",
-                None
-            )
-            .capable
-        );
-        assert!(
-            direct_capability(
-                "huya",
-                "https://tx.flv.huya.com/src/x.flv?wsSecret=a&wsTime=6ab3aa97",
-                Some(PreviewFormat::Flv)
-            )
-            .capable
-        );
-        // 斗鱼：直连拿的是新 token，不再受「一 token 一连接」限制
-        assert!(
-            direct_capability(
-                "douyu",
-                "https://ws1a.douyucdn.cn/live/x.flv?wsAuth=a&token=b",
-                Some(PreviewFormat::Flv),
-            )
-            .capable
-        );
-        let twitch = direct_capability(
-            "twitch",
-            "https://usher.ttvnw.net/api/channel/hls/x.m3u8?sig=a",
-            Some(PreviewFormat::MpegTs),
-        );
+        for platform in ["bilibili", "douyin", "huya", "douyu"] {
+            let cap = direct_capability(platform);
+            assert!(cap.capable, "{platform}");
+            assert!(cap.reason.is_none());
+        }
+        let twitch = direct_capability("twitch");
         assert!(!twitch.capable);
-        // HLS 的判定优先于平台：B 站 hls_fmp4 也回落
-        let bili_hls = direct_capability(
-            "bilibili",
-            "https://x.bilivideo.com/live-bvc/1/index.m3u8?expires=1",
-            None,
+        assert!(
+            twitch
+                .reason
+                .unwrap()
+                .contains("Access-Control-Allow-Origin")
         );
-        assert!(!bili_hls.capable);
-        assert!(bili_hls.reason.unwrap().contains("hls.js"));
-        assert!(!direct_capability("bilibili", flv, Some(PreviewFormat::Fmp4)).capable);
-        assert!(!direct_capability("youtube", "https://x/y.flv", None).capable);
+        assert!(!direct_capability("youtube").capable);
+        // 容器由直链后缀决定播放器：flv → mpegts.js，m3u8 → hls.js
+        assert_eq!(
+            direct_format("https://x.bilivideo.com/a_2500.flv?expires=1"),
+            Some("flv")
+        );
+        assert_eq!(
+            direct_format("https://x.bilivideo.com/live-bvc/1/index.m3u8?expires=1"),
+            Some("hls")
+        );
+        assert_eq!(
+            direct_format("https://usher.ttvnw.net/api/channel/hls/x.m3u8?sig=a"),
+            Some("hls")
+        );
+        assert_eq!(direct_format("https://x/y.mp4"), None);
     }
 
     #[test]

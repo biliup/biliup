@@ -38,7 +38,7 @@ type Source =
   | {
       kind: 'direct'
       url: string
-      format: 'flv' | 'mpegts' | 'fmp4' | null
+      format: 'flv' | 'hls' | null
       /** 这条直链是不是失败后重取来的（立刻又失败就不再试直连） */
       refetched: boolean
       /** 开始用这条直链的时刻：播够一阵再断多半是直链到期（斗鱼 5 min、B 站 1 h），可以再取 */

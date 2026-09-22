@@ -118,7 +118,8 @@ export interface DirectCapability {
 /** GET /v1/streamers/{id}/live-url：正在录制的那条流的 CDN 直链 */
 export interface LiveUrlInfo {
 	url: string;
-	format: 'flv' | 'mpegts' | 'fmp4' | null;
+	/** 浏览器该用哪个播放器：flv → mpegts.js，hls → hls.js（TS / fMP4 分片都行） */
+	format: 'flv' | 'hls' | null;
 	platform: string;
 	/** 过期时间估计（Unix 秒），直链里没有可识别的过期参数时为 null */
 	expires_at: number | null;
