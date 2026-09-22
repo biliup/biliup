@@ -307,6 +307,7 @@ export function LivePreviewModal({
   const [danmakuPref, setDanmakuPref] = useBoolPref(MODAL_DANMAKU_KEY, true)
   const danmakuOn = visible && danmakuAvailable && danmakuPref
   const danmakuFeed = useDanmakuFeed([streamer.id], danmakuOn)
+  const transport = usePreviewTransport()
   const notifiedRef = useRef(false)
   useEffect(() => {
     if (!visible) notifiedRef.current = false
@@ -374,7 +375,9 @@ export function LivePreviewModal({
       ) : null}
       <div className={styles.modalFoot}>
         <Text type="tertiary" size="small">
-          画面来自正在写盘的同一路流，不另外向直播平台拉流；关闭弹窗即断开。
+          {transport === 'direct'
+            ? '直连模式：能直连的平台由浏览器直接向 CDN 拉流，不经 biliup；不能的自动回落到录制流中转（角标标出原因）。关闭弹窗即断开。'
+            : '画面来自正在写盘的同一路流，不另外向直播平台拉流；关闭弹窗即断开。'}
         </Text>
       </div>
     </Modal>
