@@ -117,9 +117,13 @@ export function livePreviewUrl(id: number): string {
   return `${API_BASE}/v1/streamers/${id}/live`
 }
 
-/** 浏览器直连模式：向后端要当前录制中那条流的 CDN 直链。 */
-export function fetchLiveUrl(id: number): Promise<LiveUrlInfo> {
-  return fetcher(`/v1/streamers/${id}/live-url`, { cache: 'no-store' })
+/**
+ * 浏览器直连模式：让后端向平台新取一条 CDN 直链（不复用录制那条）。
+ * 后端对同一房间 5 s 内的重复请求复用上一次结果；播放失败后的重取传 `fresh`，一定拿新 token。
+ */
+export function fetchLiveUrl(id: number, opts: { fresh?: boolean } = {}): Promise<LiveUrlInfo> {
+  const query = opts.fresh ? '?fresh=1' : ''
+  return fetcher(`/v1/streamers/${id}/live-url${query}`, { cache: 'no-store' })
 }
 
 /**
