@@ -124,6 +124,8 @@ export interface LiveUrlInfo {
 	/** 过期时间估计（Unix 秒），直链里没有可识别的过期参数时为 null */
 	expires_at: number | null;
 	direct: DirectCapability;
+	/** 是后端 5 s 去抖窗口内复用的上一次结果，不是新取的 */
+	cached: boolean;
 }
 
 /** 直播预览的取流方式（全局配置 preview_transport），空值视同 relay */

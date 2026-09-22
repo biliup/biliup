@@ -173,7 +173,7 @@ export function LivePreviewPlayer({
       }
       setPhase('reconnecting')
       setMessage('直连中断，重新获取直链…')
-      fetchLiveUrl(streamer.id).then(
+      fetchLiveUrl(streamer.id, { fresh: true }).then(
         (info) => {
           if (info.direct.capable && info.url) {
             setOverride({
