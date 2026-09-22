@@ -258,9 +258,23 @@
   align-self: center;
 }
 
-/* 直播中:最近 60 秒写盘速率 sparkline(无坐标轴,hover 显示数值) */
+/* 直播中:最近 60 秒写盘速率 sparkline(无坐标轴,hover 显示数值);没有封面可叠时放名称行下 */
 .spark {
   margin: 2px 0 6px;
+}
+
+/* 叠在封面底部的 sparkline:深色渐变垫底让绿线在任何封面上都可读;点击仍冒泡到封面打开预览 */
+.coverOverlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 10px 6px 2px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.35) 60%, rgba(0, 0, 0, 0));
+  pointer-events: none;
+}
+.coverOverlay > * {
+  pointer-events: auto;
 }
 
 /* 未开播:最近录制时间 */

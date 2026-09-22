@@ -6,6 +6,13 @@
   min-width: 0;
 }
 
+.switchRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
 .summary {
   display: inline-flex;
   align-items: baseline;

@@ -32,6 +32,8 @@ interface Props {
   className?: string
   /** 可访问名称前缀 */
   label?: string
+  /** 叠在封面 / 画面上：读数条放图区内部，占位「—」不画虚线框 */
+  overlay?: boolean
 }
 
 const FONT = '11px system-ui, -apple-system, "Segoe UI", sans-serif'
@@ -149,12 +151,14 @@ function Plot({
   variant,
   height,
   series,
+  overlay,
 }: {
   id: number
   windowMs: number
   variant: RateChartVariant
   height: number
   series: RateSeries
+  overlay: boolean
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const readoutRef = useRef<HTMLSpanElement>(null)
@@ -211,13 +215,13 @@ function Plot({
   }, [series])
 
   return (
-    <div className={styles.plotHost} ref={hostRef} data-variant={variant} style={{ height }}>
+    <div className={styles.plotHost} ref={hostRef} data-variant={variant} data-overlay={overlay || undefined} style={{ height }}>
       <span className={styles.readout} ref={readoutRef} hidden aria-hidden="true" />
     </div>
   )
 }
 
-export default function RateChart({ id, windowMs, variant = 'full', height, className, label }: Props) {
+export default function RateChart({ id, windowMs, variant = 'full', height, className, label, overlay = false }: Props) {
   const snap = useLiveRates()
   // 环形缓冲只随快照版本变化，快照引用就是重新读序列的触发键；`receivedAt` 让渲染期的读取保持纯粹
   const series = useMemo(() => readRateSeries(id, windowMs, snap.receivedAt), [id, windowMs, snap])
@@ -232,6 +236,7 @@ export default function RateChart({ id, windowMs, variant = 'full', height, clas
       <div
         className={wrapCls}
         data-variant={variant}
+        data-overlay={overlay || undefined}
         data-state={snap.error ? 'error' : 'empty'}
         style={{ height: h }}
         role="img"
@@ -248,11 +253,12 @@ export default function RateChart({ id, windowMs, variant = 'full', height, clas
     <div
       className={wrapCls}
       data-variant={variant}
+      data-overlay={overlay || undefined}
       data-state="ready"
       role="img"
       aria-label={label ? `${label}：当前 ${current}` : `写盘速率 ${current}`}
     >
-      <Plot id={id} windowMs={windowMs} variant={variant} height={h} series={series} />
+      <Plot id={id} windowMs={windowMs} variant={variant} height={h} series={series} overlay={overlay} />
     </div>
   )
 }

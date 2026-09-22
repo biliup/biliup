@@ -40,6 +40,10 @@
 .plotHost[data-variant='sparkline'] .readout {
   top: -20px;
 }
+/* 叠在封面上时读数条放图区内部（封面容器会裁掉外面的部分） */
+.plotHost[data-overlay] .readout {
+  top: 2px;
+}
 
 /* 无采样：只显示「—」 */
 .chart[data-state='empty'],
@@ -59,6 +63,11 @@
 .chart[data-variant='sparkline'][data-state='empty'],
 .chart[data-variant='sparkline'][data-state='error'] {
   font-size: 12px;
+}
+/* 叠在封面上的占位：白字、不加边框 */
+.chart[data-overlay][data-state='empty'],
+.chart[data-overlay][data-state='error'] {
+  color: rgba(255, 255, 255, 0.75);
 }
 .placeholder {
   user-select: none;
