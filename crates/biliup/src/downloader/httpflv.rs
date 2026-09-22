@@ -75,6 +75,22 @@ pub(crate) async fn parse_flv(
             tag_data(tag_header.tag_type, tag_header.data_size as usize)(&bytes),
             "tag data",
         )?;
+        // 直播预览旁路：在解析点、进 GOP 缓存之前就推给 hub，让预览端按 tag 实时收到。
+        // 写盘循环要等到下一个关键帧才把整个 GOP 一起落盘，若在那里旁路，预览端会每个
+        // GOP 间隔收到一次整 GOP 的突发、其余时间颗粒不进，播放器缓冲刚好在下一个突发到达时
+        // 耗尽，链路上稍有 RTT / 抖动就 waiting（#1713 ForgQi 异地实测「非常卡」的根因）。
+        // 与写盘同一份字节，只是 push：不 await、不返回错误，预览端的状况不改变这里的控制流。
+        if let Some(sink) = preview.as_mut() {
+            let tag_type = tag_header.tag_type as u8;
+            sink.push(
+                preview::flv::classify(tag_type, &bytes),
+                preview::flv::tag_chunk_from_parts(
+                    &preview::flv::tag_header(tag_type, tag_header.data_size, tag_header.timestamp),
+                    &bytes,
+                    &previous_tag_size,
+                ),
+            );
+        }
         let flv_tag = match flv_tag_data {
             TagData::Audio(audio_data) => {
                 let packet_type = if audio_data.sound_format == SoundFormat::AAC {
@@ -173,23 +189,6 @@ pub(crate) async fn parse_flv(
                         );
                     }
                     out.write_tag(tag_header, flv_tag_data, previous_tag_size_bytes)?;
-                    // 直播预览旁路：与写盘同一个 tag、同一份字节。只是 push，不 await、
-                    // 不返回错误——预览端的任何状况都不改变这里的控制流。
-                    if let Some(sink) = preview.as_mut() {
-                        let tag_type = tag_header.tag_type as u8;
-                        sink.push(
-                            preview::flv::classify(tag_type, flv_tag_data),
-                            preview::flv::tag_chunk_from_parts(
-                                &preview::flv::tag_header(
-                                    tag_type,
-                                    tag_header.data_size,
-                                    tag_header.timestamp,
-                                ),
-                                flv_tag_data,
-                                previous_tag_size_bytes,
-                            ),
-                        );
-                    }
                     segment.increase_size((11 + tag_header.data_size + 4) as u64);
                     // downloaded_size += (11 + tag_header.data_size + 4) as u64;
                     prev_timestamp = tag_header.timestamp
@@ -463,10 +462,12 @@ mod tests {
         chunks.iter().flat_map(|b| b.iter().copied()).collect()
     }
 
-    /// 预览快照 + 实时分块拼起来，恰好等于「文件头 + 落盘的 tag 序列」的一段；
-    /// 跨多个分段文件（rolling）时连接不断、不重发 FLV 文件头。
+    /// 预览快照 + 实时分块拼起来，恰好等于源流「文件头 + 从第一个关键帧起的全部 tag」，
+    /// 即预览在解析点按 tag 实时旁路，不等写盘循环在下一个关键帧才整 GOP 落盘（那会让
+    /// 预览端每个 GOP 间隔收到一次突发，缓冲刚好在下一个突发到达时耗尽）；
+    /// 跨多个分段文件（rolling）时连接不断、不重发 FLV 文件头，分段本身照常切。
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn preview_follows_the_written_tags_across_rolling_segments()
+    async fn preview_follows_the_parsed_tags_across_rolling_segments()
     -> Result<(), Box<dyn std::error::Error>> {
         use crate::downloader::preview::{PreviewFormat, PreviewHub};
         use crate::downloader::util::{LifecycleFile, Segmentable};
@@ -554,7 +555,15 @@ mod tests {
             "existing subscribers must never get the FLV file header again"
         );
 
-        // 落盘：多个分段，每个都以 FLV 头开始；预览收到的 tag 序列是落盘序列的后缀
+        // 预览 = 文件头 + 序列头 + 从第一个关键帧起的全部 tag = 源流逐字节（源流体不含 9 字节
+        // 文件头、含 PreviousTagSize0；也含写盘循环还留在缓存里、尚未落盘的最后一个 GOP——预览不等它）
+        assert_eq!(
+            &received[13..],
+            &body[4..],
+            "preview must reproduce the source tags byte for byte"
+        );
+
+        // 落盘不受影响：多个分段，每个都以 FLV 头开始，tag 序列是源流的子序列（分段处补了序列头）
         let segments = segments.lock().unwrap();
         assert!(
             segments.len() > 5,
@@ -567,10 +576,10 @@ mod tests {
             assert_eq!(&data[..13], &crate::downloader::preview::flv::FILE_HEADER);
             written_tags.extend_from_slice(&data[13..]);
         }
-        // 预览 = 快照里的序列头 + 从第一个关键帧起的全部 tag，与落盘的 tag 序列完全一致
-        let preview_tags = &received[13..];
-        assert_eq!(preview_tags.len(), written_tags.len());
-        assert!(written_tags.ends_with(preview_tags));
+        // 关键帧 NALU 的标记：写盘只有前 119 个（最后一个 GOP 留在缓存里没落盘），预览是全部 120 个
+        let keyframes = |data: &[u8]| data.windows(5).filter(|w| *w == [0x17, 0x01, 0, 0, 0]).count();
+        assert_eq!(keyframes(&written_tags), 119);
+        assert_eq!(keyframes(&received), 120);
         Ok(())
     }
 
