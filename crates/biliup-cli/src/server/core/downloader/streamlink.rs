@@ -450,21 +450,34 @@ fn is_progressive_http_ext(ext: &str) -> bool {
 
 /// 等待 streamlink 结束，期间把 stdout / stderr 转成日志；`--progress=force` 的进度行
 /// 只解析不打印，把累计写出字节的增量累加到 `bytes_written`（写盘速率的来源）。
+/// `--output` 到文件时 streamlink 把控制台输出（含进度）打在 stdout，两条流都解析。
 async fn spawn_log(
     mut child: Child,
     process_handle: &RwLock<Option<Child>>,
     bytes_written: ByteCounter,
 ) -> AppResult<ExitStatus> {
+    let progress = Arc::new(std::sync::Mutex::new(SubprocessProgress::default()));
+    let log_or_track = {
+        let progress = progress.clone();
+        move |line: String| {
+            if progress
+                .lock()
+                .unwrap()
+                .observe_streamlink(&line, &bytes_written)
+            {
+                debug!("[streamlink] {line}");
+            } else {
+                info!("[streamlink] {line}");
+            }
+        }
+    };
+
     let mut stderr_task = child.stderr.take().map(|stderr| {
         let mut stderr_lines = BufReader::new(stderr).lines();
+        let log_or_track = log_or_track.clone();
         tokio::spawn(async move {
-            let mut progress = SubprocessProgress::default();
             while let Ok(Some(line)) = stderr_lines.next_line().await {
-                if progress.observe_streamlink(&line, &bytes_written) {
-                    debug!("[streamlink] {line}");
-                    continue;
-                }
-                info!("[streamlink] {line}");
+                log_or_track(line);
             }
         })
     });
@@ -473,7 +486,7 @@ async fn spawn_log(
         let mut stdout_lines = BufReader::new(stdout).lines();
         tokio::spawn(async move {
             while let Ok(Some(line)) = stdout_lines.next_line().await {
-                info!("[streamlink] {line}");
+                log_or_track(line);
             }
         })
     });
