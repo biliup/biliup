@@ -110,13 +110,9 @@ impl<'a> DouyinLive<'a> {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
-        let cover = room_info
-            .pointer("/cover/url_list")
-            .and_then(Value::as_array)
-            .and_then(|url_list| url_list.first())
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
+        let cover = first_url(room_info.pointer("/cover/url_list")).unwrap_or_default();
+        // web 与 H5 两个接口的房间对象里都带 owner.avatar_thumb
+        let avatar_url = first_url(room_info.pointer("/owner/avatar_thumb/url_list"));
 
         Ok(LiveStatus::Live {
             stream: Box::new(LiveStream {
@@ -125,6 +121,7 @@ impl<'a> DouyinLive<'a> {
                 title,
                 date: Utc::now(),
                 live_cover_url: cover,
+                avatar_url,
                 suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "flv".to_string()),
                 raw_stream_url,
                 platform: "douyin".to_string(),
@@ -476,6 +473,16 @@ impl<'a> DouyinLive<'a> {
             password: None,
         })
     }
+}
+
+/// 抖音图片字段形如 `{"url_list": ["https://...", ...]}`，取第一个非空地址
+fn first_url(url_list: Option<&Value>) -> Option<String> {
+    url_list?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .find(|url| !url.is_empty())
+        .map(ToString::to_string)
 }
 
 fn common_params() -> Vec<(String, String)> {
@@ -992,6 +999,27 @@ mod tests {
             web_rid_from_live_url("https://www.douyin.com/+68621666216"),
             Some("68621666216".into())
         );
+    }
+
+    #[test]
+    fn first_url_picks_the_first_non_empty_entry_and_tolerates_missing_fields() {
+        let room = serde_json::json!({
+            "cover": { "url_list": ["", "https://p3.douyinpic.com/cover.jpg"] },
+            "owner": { "avatar_thumb": { "url_list": ["https://p3.douyinpic.com/face.jpeg"] } }
+        });
+        assert_eq!(
+            first_url(room.pointer("/cover/url_list")).as_deref(),
+            Some("https://p3.douyinpic.com/cover.jpg")
+        );
+        assert_eq!(
+            first_url(room.pointer("/owner/avatar_thumb/url_list")).as_deref(),
+            Some("https://p3.douyinpic.com/face.jpeg")
+        );
+        assert_eq!(
+            first_url(room.pointer("/owner/avatar_large/url_list")),
+            None
+        );
+        assert_eq!(first_url(Some(&serde_json::json!([]))), None);
     }
 
     #[tokio::test]

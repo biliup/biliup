@@ -105,6 +105,12 @@ export interface LiveStreamerEntity {
 	upload_streamers_id?: number | null;
 	status?: string;
 	upload_status?: string;
+	/** 录制中最近一个滑动窗口的写盘速率（字节/秒）；未录制 / 尚无采样 / 下载器不支持时为 null */
+	live_bytes_per_sec?: number | null;
+	/** 录制中的直播间封面地址；图片请走 /v1/streamers/{id}/cover 代理 */
+	live_cover_url?: string | null;
+	/** 录制中的主播头像地址；图片请走 /v1/streamers/{id}/avatar 代理 */
+	live_avatar_url?: string | null;
 	statusTag?: React.ReactNode;
 	format?: string;
     time_range?: string | Date[];

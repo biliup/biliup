@@ -1,5 +1,5 @@
 use crate::downloader::error::{Error, Result};
-use crate::downloader::util::{LifecycleFile, Segmentable};
+use crate::downloader::util::{ByteCounter, LifecycleFile, Segmentable};
 use m3u8_rs::{MediaPlaylist, Playlist};
 
 use std::fs::File;
@@ -100,6 +100,7 @@ pub async fn download(
                     media_url.join(&segment.uri)?,
                     client,
                     &mut ts_file.buf_writer,
+                    &ts_file.file.bytes_written,
                 )
                 .await?;
                 splitting.increase_size(length);
@@ -134,13 +135,19 @@ pub async fn download(
     Ok(())
 }
 
-async fn download_to_file(url: Url, client: &StatelessClient, out: &mut impl Write) -> Result<u64> {
+async fn download_to_file(
+    url: Url,
+    client: &StatelessClient,
+    out: &mut impl Write,
+    bytes_written: &ByteCounter,
+) -> Result<u64> {
     debug!("url: {url}");
     let mut response = client.retryable(url.as_str()).await?;
     let mut length: u64 = 0;
     while let Some(chunk) = response.chunk().await? {
         length += chunk.len() as u64;
         out.write_all(&chunk)?;
+        bytes_written.add(chunk.len() as u64);
     }
     // let mut out = File::options()
     //     .append(true)

@@ -129,13 +129,48 @@
   flex-shrink: 0;
 }
 
+/* ===== 录制中:直播间封面(16:9) ===== */
+.cover {
+  position: relative;
+  margin: 0 0 10px;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--semi-color-fill-1);
+}
+.cover img {
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.cover[data-state='ok'] img {
+  opacity: 1;
+}
+
 /* ===== 名称 + 时长 ===== */
 .nameRow {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
   margin-bottom: 3px;
+}
+
+.nameWrap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+/* 录制中:主播头像小圆图 */
+.avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--semi-color-fill-1);
 }
 
 .name {
@@ -148,6 +183,14 @@
   min-width: 0;
 }
 
+/* 直播中:右侧时长 + 写盘速率 */
+.liveStats {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 /* 直播中:实时时长(绿色) */
 .liveInfo {
   font-size: 12.5px;
@@ -156,6 +199,21 @@
   white-space: nowrap;
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
+}
+
+/* 直播中:写盘速率(最近 10 秒平均);无采样时为「—」 */
+.rate {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--semi-color-text-2);
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--semi-color-fill-0);
+  min-width: 2.6em;
+  text-align: center;
 }
 
 /* 未开播:最近录制时间 */

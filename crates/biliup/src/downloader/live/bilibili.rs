@@ -142,6 +142,7 @@ impl BilibiliLive {
                 title: profile.title,
                 date: Utc::now(),
                 live_cover_url: profile.cover,
+                avatar_url: (!profile.avatar.is_empty()).then_some(profile.avatar),
                 suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| {
                     if raw_stream_url.contains(".m3u8") {
                         "m3u8".to_string()
@@ -252,53 +253,7 @@ impl BilibiliLive {
             .await
             .map_err(|err| LiveError::custom(format!("解析 B 站直播间信息失败: {err}")))?;
 
-        if room_info.get("code").and_then(|code| code.as_i64()) != Some(0) {
-            return Err(LiveError::custom(format!(
-                "获取 B 站直播间信息错误: {}",
-                room_info
-                    .get("message")
-                    .or_else(|| room_info.get("msg"))
-                    .and_then(|msg| msg.as_str())
-                    .unwrap_or_default()
-            )));
-        }
-
-        let room = room_info
-            .get("data")
-            .and_then(|data| data.get("room_info"))
-            .ok_or_else(|| LiveError::custom("B 站直播间信息为空"))?;
-        if room.get("live_status").and_then(|status| status.as_i64()) != Some(1) {
-            return Ok(None);
-        }
-
-        Ok(Some(BiliRoomProfile {
-            room_id: room
-                .get("room_id")
-                .and_then(|room_id| room_id.as_u64())
-                .ok_or_else(|| LiveError::custom("B 站真实房间号为空"))?,
-            uid: room
-                .get("uid")
-                .and_then(|uid| uid.as_u64())
-                .unwrap_or_default(),
-            live_start_time: room
-                .get("live_start_time")
-                .and_then(|time| time.as_u64())
-                .unwrap_or_default(),
-            special_type: room
-                .get("special_type")
-                .and_then(|special_type| special_type.as_u64())
-                .unwrap_or_default(),
-            title: room
-                .get("title")
-                .and_then(|title| title.as_str())
-                .unwrap_or_default()
-                .to_string(),
-            cover: room
-                .get("cover")
-                .and_then(|cover| cover.as_str())
-                .unwrap_or_default()
-                .to_string(),
-        }))
+        parse_room_profile(&room_info)
     }
 
     async fn get_stream_candidates(
@@ -654,6 +609,64 @@ struct BiliRoomProfile {
     special_type: u64,
     title: String,
     cover: String,
+    /// 主播头像（`anchor_info.base_info.face`），与房间信息来自同一次响应
+    avatar: String,
+}
+
+/// 解析 `getInfoByRoom` 的响应；未开播返回 `Ok(None)`。
+fn parse_room_profile(room_info: &Value) -> LiveResult<Option<BiliRoomProfile>> {
+    if room_info.get("code").and_then(|code| code.as_i64()) != Some(0) {
+        return Err(LiveError::custom(format!(
+            "获取 B 站直播间信息错误: {}",
+            room_info
+                .get("message")
+                .or_else(|| room_info.get("msg"))
+                .and_then(|msg| msg.as_str())
+                .unwrap_or_default()
+        )));
+    }
+
+    let room = room_info
+        .get("data")
+        .and_then(|data| data.get("room_info"))
+        .ok_or_else(|| LiveError::custom("B 站直播间信息为空"))?;
+    if room.get("live_status").and_then(|status| status.as_i64()) != Some(1) {
+        return Ok(None);
+    }
+
+    Ok(Some(BiliRoomProfile {
+        room_id: room
+            .get("room_id")
+            .and_then(|room_id| room_id.as_u64())
+            .ok_or_else(|| LiveError::custom("B 站真实房间号为空"))?,
+        uid: room
+            .get("uid")
+            .and_then(|uid| uid.as_u64())
+            .unwrap_or_default(),
+        live_start_time: room
+            .get("live_start_time")
+            .and_then(|time| time.as_u64())
+            .unwrap_or_default(),
+        special_type: room
+            .get("special_type")
+            .and_then(|special_type| special_type.as_u64())
+            .unwrap_or_default(),
+        title: room
+            .get("title")
+            .and_then(|title| title.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        cover: room
+            .get("cover")
+            .and_then(|cover| cover.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        avatar: room_info
+            .pointer("/data/anchor_info/base_info/face")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+    }))
 }
 
 struct BiliStreamCandidate {
@@ -852,5 +865,39 @@ mod tests {
         let candidates = parse_master_m3u8(text).unwrap();
         assert_eq!(candidates.len(), 1);
         assert!(candidates[0].url.starts_with("https://a.example.com/"));
+    }
+
+    /// 头像与房间信息来自同一次 getInfoByRoom 响应，字段缺失时留空而不是报错
+    #[test]
+    fn room_profile_takes_cover_and_anchor_face_from_one_response() {
+        let response = serde_json::json!({
+            "code": 0,
+            "data": {
+                "room_info": {
+                    "room_id": 1, "uid": 2, "live_status": 1, "live_start_time": 3,
+                    "special_type": 0, "title": "t",
+                    "cover": "https://i0.hdslb.com/bfs/live/cover.jpg"
+                },
+                "anchor_info": {
+                    "base_info": { "face": "https://i1.hdslb.com/bfs/face/face.jpg" }
+                }
+            }
+        });
+        let profile = parse_room_profile(&response).unwrap().unwrap();
+        assert_eq!(profile.cover, "https://i0.hdslb.com/bfs/live/cover.jpg");
+        assert_eq!(profile.avatar, "https://i1.hdslb.com/bfs/face/face.jpg");
+
+        let without_anchor = serde_json::json!({
+            "code": 0,
+            "data": { "room_info": { "room_id": 1, "live_status": 1, "title": "t" } }
+        });
+        let profile = parse_room_profile(&without_anchor).unwrap().unwrap();
+        assert_eq!(profile.avatar, "");
+
+        let offline = serde_json::json!({
+            "code": 0,
+            "data": { "room_info": { "room_id": 1, "live_status": 0 } }
+        });
+        assert!(parse_room_profile(&offline).unwrap().is_none());
     }
 }

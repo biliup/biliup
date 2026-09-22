@@ -1,8 +1,9 @@
 'use client'
-import React from 'react'
+import React, { useState } from 'react'
+import Image from 'next/image'
 import { LiveStreamerEntity, StreamerInfo } from '@/app/lib/api-streamer'
 import { streamerStatusMeta, uploadStatusTag, platformName } from '@/app/lib/status'
-import { timeAgo, formatDuration } from '@/app/lib/use-dashboard'
+import { timeAgo, formatDuration, formatRate, liveImageUrl } from '@/app/lib/use-dashboard'
 import styles from './streamer-card.module.scss'
 
 export interface StreamerCardProps {
@@ -36,8 +37,49 @@ function platTint(color: string): string {
 }
 
 /**
+ * 录制中的直播间封面缩略图(16:9,懒加载)。
+ * 加载失败就整块消失,卡片回到没有封面时的样式;加载中显示占位底色。
+ * 调用方用 key={src} 挂载,封面地址变化时状态自然重置。
+ */
+export function LiveCover({ src, alt }: { src: string; alt: string }) {
+  const [state, setState] = useState<'loading' | 'ok' | 'error'>('loading')
+  if (state === 'error') return null
+  return (
+    <figure className={styles.cover} data-state={state}>
+      <Image
+        src={src}
+        alt={alt}
+        fill
+        sizes="(max-width: 600px) 100vw, 400px"
+        loading="lazy"
+        onLoad={() => setState('ok')}
+        onError={() => setState('error')}
+      />
+    </figure>
+  )
+}
+
+/** 录制中的主播头像小圆图;加载失败则不占位。 */
+export function LiveAvatar({ src }: { src: string }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) return null
+  return (
+    <Image
+      className={styles.avatar}
+      src={src}
+      alt=""
+      aria-hidden="true"
+      width={22}
+      height={22}
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  )
+}
+
+/**
  * 全局统一的直播间卡片:
- * 状态徽章 + 平台色 chip + 名称 + 实时时长(直播中)/ 最近录制(未开播)
+ * 状态徽章 + 平台色 chip + [录制中:封面 / 头像 / 写盘速率] + 名称 + 实时时长(直播中)/ 最近录制(未开播)
  * + 标题 + URL + 上传状态。主页与直播管理页共用。
  */
 export default function StreamerCard({
@@ -59,6 +101,11 @@ export default function StreamerCard({
     duration = formatDuration(Date.now() / 1000 - info.date)
   }
   const lastRec = info?.date && !live ? timeAgo(info.date) : null
+
+  // 录制中才有封面 / 头像 / 速率;图片走同源代理,避开图片 CDN 的 Referer 校验
+  const coverSrc = live ? liveImageUrl(streamer.id, 'cover', streamer.live_cover_url) : null
+  const avatarSrc = live ? liveImageUrl(streamer.id, 'avatar', streamer.live_avatar_url) : null
+  const rate = live ? formatRate(streamer.live_bytes_per_sec) : null
 
   const plat = platformName(streamer.url)
   const platColor = PLAT_COLORS[plat] ?? DEFAULT_PLAT_COLOR
@@ -100,13 +147,28 @@ export default function StreamerCard({
         </span>
       </div>
 
-      {/* 名称 + 实时时长 / 最近录制 */}
+      {/* 录制中:直播间封面 */}
+      {coverSrc ? <LiveCover key={coverSrc} src={coverSrc} alt={`${name} 的直播间封面`} /> : null}
+
+      {/* 名称(录制中带头像)+ 实时时长与写盘速率 / 最近录制 */}
       <div className={styles.nameRow}>
-        <div className={styles.name} title={name}>
-          {name}
+        <div className={styles.nameWrap}>
+          {avatarSrc ? <LiveAvatar key={avatarSrc} src={avatarSrc} /> : null}
+          <div className={styles.name} title={name}>
+            {name}
+          </div>
         </div>
-        {duration ? (
-          <span className={styles.liveInfo}>{duration}</span>
+        {live ? (
+          <span className={styles.liveStats}>
+            {duration ? <span className={styles.liveInfo}>{duration}</span> : null}
+            <span
+              className={styles.rate}
+              title={rate ? '写盘速率(最近 10 秒平均)' : '写盘速率:尚无采样'}
+              aria-label={rate ? `写盘速率 ${rate}` : '写盘速率尚无采样'}
+            >
+              {rate ?? '—'}
+            </span>
+          </span>
         ) : lastRec ? (
           <span className={styles.recInfo}>{lastRec}</span>
         ) : null}

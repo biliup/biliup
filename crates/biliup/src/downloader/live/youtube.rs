@@ -138,6 +138,7 @@ impl YoutubeLive {
                 title: selection.title.clone(),
                 date: Utc::now(),
                 live_cover_url: selection.thumbnail.clone(),
+                avatar_url: None,
                 raw_stream_url,
                 platform: "youtube".to_string(),
                 stream_headers: HashMap::new(),

@@ -33,8 +33,14 @@ import {
 import { PauseButton } from '@/app/ui/StreamerActions/PauseButton'
 import { platformName, streamerStatusTag } from '@/app/lib/status'
 import { hookStepListToForm, formListToHookStep } from '@/app/lib/postprocessor'
-import { timeAgo, STREAMERS_REFRESH_MS, SLOW_REFRESH_MS } from '@/app/lib/use-dashboard'
-import StreamerCard from '@/app/ui/StreamerCard'
+import {
+  timeAgo,
+  formatRate,
+  liveImageUrl,
+  STREAMERS_REFRESH_MS,
+  SLOW_REFRESH_MS,
+} from '@/app/lib/use-dashboard'
+import StreamerCard, { LiveAvatar } from '@/app/ui/StreamerCard'
 import PageHeader from '../components/PageHeader'
 import styles from './page.module.scss'
 
@@ -385,6 +391,7 @@ export default function StreamersPage() {
                       <th>状态</th>
                       <th>主播</th>
                       <th>平台</th>
+                      <th>码率</th>
                       <th>最近录制</th>
                       <th style={{ textAlign: 'right' }}>操作</th>
                     </tr>
@@ -392,6 +399,11 @@ export default function StreamersPage() {
                   <tbody>
                     {filtered.map((item) => {
                       const info = infoByUrl.get(item.url)
+                      const live = item.status === 'Working'
+                      const avatarSrc = live
+                        ? liveImageUrl(item.id, 'avatar', item.live_avatar_url)
+                        : null
+                      const rate = live ? formatRate(item.live_bytes_per_sec) : null
                       return (
                         <tr
                           key={item.id}
@@ -409,7 +421,10 @@ export default function StreamersPage() {
                           </td>
                           <td>{streamerStatusTag(item.status)}</td>
                           <td>
-                            <div className={styles.cellName}>{item.remark || item.url}</div>
+                            <div className={styles.cellNameRow}>
+                              {avatarSrc ? <LiveAvatar key={avatarSrc} src={avatarSrc} /> : null}
+                              <div className={styles.cellName}>{item.remark || item.url}</div>
+                            </div>
                             {info?.title ? (
                               <div className={styles.cellSub}>{info.title}</div>
                             ) : null}
@@ -417,6 +432,22 @@ export default function StreamersPage() {
                           <td>
                             <Text type="tertiary" size="small">
                               {platformName(item.url)}
+                            </Text>
+                          </td>
+                          <td>
+                            <Text
+                              type={rate ? 'secondary' : 'tertiary'}
+                              size="small"
+                              className={styles.cellRate}
+                              title={
+                                live
+                                  ? rate
+                                    ? '写盘速率(最近 10 秒平均)'
+                                    : '写盘速率:尚无采样'
+                                  : undefined
+                              }
+                            >
+                              {live ? (rate ?? '—') : '—'}
                             </Text>
                           </td>
                           <td>

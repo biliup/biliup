@@ -336,6 +336,9 @@ pub struct LiveStream {
     pub title: String,
     pub date: DateTime<Utc>,
     pub live_cover_url: String,
+    /// 主播头像地址；平台响应里没有或尚未解析的平台为 `None`。
+    #[serde(default)]
+    pub avatar_url: Option<String>,
     pub raw_stream_url: String,
     pub platform: String,
     pub stream_headers: HashMap<String, String>,

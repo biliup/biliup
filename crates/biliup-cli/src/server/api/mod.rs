@@ -4,6 +4,8 @@ pub mod auth;
 pub mod bilibili_endpoints;
 /// 通用API端点
 pub mod endpoints;
+/// 录制中直播间的封面 / 头像图片代理
+pub mod live_media;
 /// 单页应用静态文件处理
 pub mod spa;
 pub mod ws;

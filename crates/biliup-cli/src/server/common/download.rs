@@ -1,5 +1,7 @@
+use crate::server::common::live_image::spawn_avatar_download;
 use crate::server::common::recording_policy;
 use crate::server::common::sync::SyncSession;
+use crate::server::common::throughput::{RateMeter, Sampler};
 use crate::server::common::upload::UploaderMessage;
 use crate::server::common::util::FileValidator;
 use crate::server::core::downloader::cover_downloader;
@@ -114,16 +116,38 @@ impl SegmentEventProcessor {
     }
 }
 
+/// 正在录制的直播间的封面与头像地址，供界面透出。
+///
+/// 只放在内存里，随下载任务消亡；每次 `check_stream` 拿到新的流信息就刷新一遍。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LiveMedia {
+    pub cover_url: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+impl LiveMedia {
+    pub fn from_stream(stream: &LiveStream) -> Self {
+        let non_empty = |s: &str| (!s.trim().is_empty()).then(|| s.to_string());
+        Self {
+            cover_url: non_empty(&stream.live_cover_url),
+            avatar_url: stream.avatar_url.as_deref().and_then(non_empty),
+        }
+    }
+}
+
 /// 下载任务
 pub struct DownloadTask {
     token: CancellationToken,
     done_notify: Notify,
     downloader: DownloaderRuntime,
     sync_session: Option<Arc<Mutex<SyncSession>>>,
+    /// 写盘速率表；各下载器拿它的计数器句柄累加，采样任务随 `execute` 启停。
+    meter: Arc<RateMeter>,
+    media: std::sync::RwLock<LiveMedia>,
 }
 
 impl DownloadTask {
-    pub fn new(downloader: DownloaderRuntime) -> Self {
+    pub fn new(downloader: DownloaderRuntime, stream: &LiveStream) -> Self {
         let sync_session = matches!(&downloader, DownloaderRuntime::Sync(_))
             .then(|| Arc::new(Mutex::new(SyncSession::default())));
         Self {
@@ -131,7 +155,37 @@ impl DownloadTask {
             done_notify: Notify::new(),
             downloader,
             sync_session,
+            meter: Arc::new(RateMeter::new()),
+            media: std::sync::RwLock::new(LiveMedia::from_stream(stream)),
         }
+    }
+
+    /// 最近一个滑动窗口内的写盘速率（字节/秒）。
+    ///
+    /// 边录边传与 yt-dlp 的字节不经过计数器，报告 `None` 而不是一个恒为 0 的假数。
+    pub fn bytes_per_sec(&self) -> Option<u64> {
+        match &self.downloader {
+            DownloaderRuntime::Sync(_) | DownloaderRuntime::YtDlp(_) => None,
+            _ => self.meter.bytes_per_sec(),
+        }
+    }
+
+    /// 当前直播间的封面与头像地址。
+    pub fn live_media(&self) -> LiveMedia {
+        self.media.read().unwrap().clone()
+    }
+
+    fn refresh_media(&self, ctx: &Context, stream: &LiveStream) {
+        let media = LiveMedia::from_stream(stream);
+        let changed = self.media.read().unwrap().avatar_url != media.avatar_url;
+        if changed {
+            spawn_avatar_download(
+                ctx.live_streamer().id,
+                media.avatar_url.clone(),
+                ctx.live_streamer().url.clone(),
+            );
+        }
+        *self.media.write().unwrap() = media;
     }
 
     pub(self) async fn execute(
@@ -141,6 +195,8 @@ impl DownloadTask {
         plugin: Arc<dyn LivePlugin + Send + Sync>,
         rooms_handle: Arc<Monitor>,
     ) -> AppResult<()> {
+        // 速率采样任务与本次录制同寿命，句柄 drop 时随之停止
+        let _sampler = Sampler::spawn(self.meter.clone());
         // 重试配置
         let mut retry_count = 0;
         let max_retries = 3; // 最大重试次数
@@ -198,6 +254,7 @@ impl DownloadTask {
                     stream: next_stream,
                 }) => {
                     stream = *next_stream;
+                    self.refresh_media(ctx, &stream);
                     info!(
                         url = url,
                         "Stream is still live, preparing to retry. attempt: {}", retry_count
@@ -294,7 +351,8 @@ impl DownloadTask {
     ) -> AppResult<DownloadStatus> {
         // 获取配置和主播信息
         let streamer = ctx.live_streamer();
-        let download_config = ctx.download_config(stream);
+        let mut download_config = ctx.download_config(stream);
+        download_config.bytes_written = self.meter.counter();
         if let crate::server::core::downloader::DownloaderRuntime::Sync(sync) = &self.downloader {
             info!(
                 page_url = streamer.url,
@@ -413,12 +471,19 @@ pub async fn start_download_workflow(
     sender: Sender<UploaderMessage>,
     rooms_handle: Arc<Monitor>,
 ) {
-    let task = Arc::new(DownloadTask::new(downloader_runtime(
-        ctx.config().downloader,
+    let task = Arc::new(DownloadTask::new(
+        downloader_runtime(ctx.config().downloader, ctx.live_stream()),
         ctx.live_stream(),
-    )));
+    ));
     ctx.change_status(Stage::Download, WorkerStatus::Working(task.clone()))
         .await;
+
+    // 主播头像几乎不变：开播时下载一次存到 data/avatar/，地址没变就不再下载
+    spawn_avatar_download(
+        ctx.live_streamer().id,
+        task.live_media().avatar_url,
+        ctx.live_streamer().url.clone(),
+    );
 
     tokio::spawn({
         let streamer_info = ctx.streamer_info();

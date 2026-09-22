@@ -9,6 +9,7 @@ use crate::server::api::endpoints::{
     login_by_qrcode, pause_streamers_endpoint, post_streamers_endpoint, post_uploads,
     put_configuration, put_streamers_endpoint,
 };
+use crate::server::api::live_media::{get_live_avatar, get_live_cover};
 use crate::server::infrastructure::service_register::ServiceRegister;
 use axum::Router;
 use axum::body::Body;
@@ -33,6 +34,9 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         )
         .route("/v1/streamers/{id}", delete(delete_streamers_endpoint)) // 删除主播
         .route("/v1/streamers/{id}/pause", put(pause_streamers_endpoint))
+        // 正在录制的直播间封面 / 主播头像（服务端带 Referer 转发，避开图片 CDN 防盗链）
+        .route("/v1/streamers/{id}/cover", get(get_live_cover))
+        .route("/v1/streamers/{id}/avatar", get(get_live_avatar))
         // 配置管理路由
         .route(
             "/v1/configuration",

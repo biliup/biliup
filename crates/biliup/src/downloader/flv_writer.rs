@@ -70,6 +70,9 @@ impl<'a> FlvFile<'a> {
         self.buf_writer.write_all(body)?;
         // write 允许部分写入，短写会静默丢字节并破坏 FLV 结构，必须用 write_all
         self.buf_writer.write_all(previous_tag_size)?;
+        self.file
+            .bytes_written
+            .add((11 + body.len() + previous_tag_size.len()) as u64);
         Ok(previous_tag_size.len())
     }
 

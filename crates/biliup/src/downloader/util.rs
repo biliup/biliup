@@ -1,11 +1,35 @@
 use chrono::{DateTime, Local};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use std::time::Duration;
 use tracing::{error, info};
 
 pub type CallbackFn<'a> = Box<dyn FnMut(&str) + Send + Sync + 'a>;
+
+/// 已写盘字节的原子累计，供录制线程之外（如 Web 接口）读取实时速率。
+///
+/// 写盘路径上只做一次 `fetch_add`：不加锁、不 await、不会失败，
+/// 因此不改变录制的任何控制流。`Clone` 得到的是同一计数器的另一个句柄。
+#[derive(Debug, Clone, Default)]
+pub struct ByteCounter(Arc<AtomicU64>);
+
+impl ByteCounter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[inline]
+    pub fn add(&self, bytes: u64) {
+        self.0.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn total(&self) -> u64 {
+        self.0.load(Ordering::Relaxed)
+    }
+}
 
 #[derive(Debug)]
 pub enum Segment {
@@ -232,6 +256,8 @@ pub struct LifecycleFile<'a> {
     pub path: PathBuf,
     pub hook: CallbackFn<'a>,
     pub extension: &'static str,
+    /// 写入这一系列分段文件的字节累计（跨分段，不随 `create_new` 归零）。
+    pub bytes_written: ByteCounter,
 }
 
 impl<'a> LifecycleFile<'a> {
@@ -249,7 +275,14 @@ impl<'a> LifecycleFile<'a> {
             path: Default::default(),
             hook: Box::new(hook),
             extension,
+            bytes_written: ByteCounter::new(),
         }
+    }
+
+    /// 让写盘字节累计到调用方持有的计数器上（例如按录制任务汇总速率）。
+    pub fn with_counter(mut self, counter: ByteCounter) -> Self {
+        self.bytes_written = counter;
+        self
     }
 
     pub fn create(&mut self) -> Result<&Path, std::io::Error> {
@@ -308,6 +341,20 @@ mod tests {
         assert_eq!(Path::new("/feel/the"), p.as_path());
 
         Ok(())
+    }
+
+    #[test]
+    fn byte_counter_clones_share_one_total() {
+        let counter = ByteCounter::new();
+        let handle = counter.clone();
+        counter.add(10);
+        handle.add(5);
+        assert_eq!(counter.total(), 15);
+        assert_eq!(handle.total(), 15);
+
+        let file = LifecycleFile::new("x", "flv").with_counter(counter.clone());
+        file.bytes_written.add(1);
+        assert_eq!(counter.total(), 16);
     }
 
     #[test]

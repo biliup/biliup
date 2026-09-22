@@ -129,6 +129,7 @@ impl Context {
             // output_dir: PathBuf::from("./downloads")
             output_dir: PathBuf::from("."),
             suffix,
+            bytes_written: Default::default(),
         }
     }
 }

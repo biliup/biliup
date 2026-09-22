@@ -182,9 +182,19 @@
   accent-color: var(--semi-color-primary);
   cursor: pointer;
 }
+.cellNameRow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
 .cellName {
   font-weight: 600;
   color: var(--semi-color-text-0);
+}
+/* 列表视图的写盘速率:等宽数字,无采样时为「—」 */
+.cellRate {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .cellSub {
   font-size: 12px;

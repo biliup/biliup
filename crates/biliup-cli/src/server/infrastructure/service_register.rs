@@ -1,4 +1,5 @@
 use crate::LogHandle;
+use crate::server::api::live_media::ImageProxy;
 use crate::server::config::Config;
 use crate::server::core::download_manager::DownloadManager;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
@@ -27,6 +28,9 @@ pub struct ServiceRegister {
     pub client: StatelessClient,
 
     pub log_handle: LogHandle,
+
+    /// 录制中直播间封面 / 头像的图片代理（抓取客户端 + 内存缓存）
+    pub image_proxy: Arc<ImageProxy>,
 }
 
 /// 简单的服务容器，负责管理API端点通过axum扩展获取的各种服务
@@ -63,6 +67,7 @@ impl ServiceRegister {
             config: config.clone(),
             client,
             log_handle,
+            image_proxy: Arc::new(ImageProxy::new()),
         }
     }
 

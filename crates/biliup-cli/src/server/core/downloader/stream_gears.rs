@@ -96,7 +96,8 @@ impl StreamGears {
                 debug!("header: {header:#?}");
                 info!("Downloading {}...", url);
                 // FLV流下载
-                let file = LifecycleFile::with_hook(&file_name, "flv", hook);
+                let file = LifecycleFile::with_hook(&file_name, "flv", hook)
+                    .with_counter(download_config.bytes_written.clone());
                 httpflv::download(connection, file, segment.clone()).await;
             }
             Err(Err::Incomplete(needed)) => {
@@ -105,7 +106,8 @@ impl StreamGears {
             Err(e) => {
                 error!("{e}");
                 // HLS流下载
-                let file = LifecycleFile::with_hook(&file_name, "ts", hook);
+                let file = LifecycleFile::with_hook(&file_name, "ts", hook)
+                    .with_counter(download_config.bytes_written.clone());
                 hls::download(&url, &client, file, segment.clone())
                     .await
                     .change_context(AppError::Unknown)?;

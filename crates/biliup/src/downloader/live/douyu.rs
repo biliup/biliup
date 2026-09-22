@@ -141,13 +141,15 @@ impl<'a> DouyuLive<'a> {
         let raw_stream_url = format!("{}/{}", play_info.rtmp_url, play_info.rtmp_live);
         let raw_stream_url = self.maybe_build_huos_url(raw_stream_url).await;
 
+        let avatar_url = room_info.avatar_url();
         Ok(LiveStatus::Live {
             stream: Box::new(LiveStream {
                 name: self.name.clone(),
                 url: self.url.clone(),
                 title: room_info.room_name,
                 date: Utc::now(),
-                live_cover_url: String::new(),
+                live_cover_url: room_info.room_pic.unwrap_or_default(),
+                avatar_url,
                 suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "flv".to_string()),
                 raw_stream_url,
                 platform: "douyu".to_string(),
@@ -759,6 +761,33 @@ struct RoomInfo {
     show_status: i64,
     #[serde(rename = "videoLoop")]
     video_loop: i64,
+    /// 直播间封面（betard 里的 `room_pic`，通常是 avif），缺失时为空
+    #[serde(default)]
+    room_pic: Option<String>,
+    /// 主播头像直链
+    #[serde(default)]
+    owner_avatar: Option<String>,
+    /// 头像的多尺寸版本，形如 `{"big": ..., "middle": ..., "small": ...}`；
+    /// 个别房间只给这一份，作为 `owner_avatar` 缺失时的后备
+    #[serde(default)]
+    avatar: Option<Value>,
+}
+
+impl RoomInfo {
+    fn avatar_url(&self) -> Option<String> {
+        let non_empty = |url: &str| (!url.is_empty()).then(|| url.to_string());
+        self.owner_avatar
+            .as_deref()
+            .and_then(non_empty)
+            .or_else(|| {
+                let avatar = self.avatar.as_ref()?;
+                ["middle", "big", "small"]
+                    .iter()
+                    .filter_map(|size| avatar.get(size).and_then(Value::as_str))
+                    .find_map(non_empty)
+                    .or_else(|| avatar.as_str().and_then(non_empty))
+            })
+    }
 }
 
 #[derive(Deserialize)]
@@ -1094,5 +1123,44 @@ mod tests {
         };
         assert_eq!(cached.server_aligned_now(local_now + 10), server_now + 10);
         assert!(cached.is_valid(cached.server_aligned_now(local_now)));
+    }
+
+    /// betard 的 room 对象里 `room_pic` 是封面、`owner_avatar` / `avatar.{big,middle,small}` 是头像；
+    /// 老样本没有这些键时仍要能反序列化
+    #[test]
+    fn betard_room_exposes_cover_and_avatar_with_fallbacks() {
+        let full: BetardResponse = serde_json::from_str(
+            r#"{"room":{"room_name":"n","show_status":1,"videoLoop":0,
+                "room_pic":"https://rpic.douyucdn.cn/asrpic/260922/1_src.avif/dy4",
+                "owner_avatar":"https://apic.douyucdn.cn/face_big.jpg",
+                "avatar":{"big":"https://apic.douyucdn.cn/face_big.jpg","middle":"https://apic.douyucdn.cn/face_middle.jpg","small":""}}}"#,
+        )
+        .unwrap();
+        let room = full.room.unwrap();
+        assert_eq!(
+            room.room_pic.as_deref(),
+            Some("https://rpic.douyucdn.cn/asrpic/260922/1_src.avif/dy4")
+        );
+        assert_eq!(
+            room.avatar_url().as_deref(),
+            Some("https://apic.douyucdn.cn/face_big.jpg")
+        );
+
+        let only_sizes: BetardResponse = serde_json::from_str(
+            r#"{"room":{"room_name":"n","show_status":1,"videoLoop":0,
+                "avatar":{"big":"","middle":"https://apic.douyucdn.cn/face_middle.jpg"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            only_sizes.room.unwrap().avatar_url().as_deref(),
+            Some("https://apic.douyucdn.cn/face_middle.jpg")
+        );
+
+        let legacy: BetardResponse =
+            serde_json::from_str(r#"{"room":{"room_name":"n","show_status":1,"videoLoop":0}}"#)
+                .unwrap();
+        let room = legacy.room.unwrap();
+        assert_eq!(room.room_pic, None);
+        assert_eq!(room.avatar_url(), None);
     }
 }
