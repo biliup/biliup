@@ -35,7 +35,15 @@ type Phase = 'connecting' | 'playing' | 'reconnecting' | 'ended' | 'error'
 type Source =
   | { kind: 'relay'; fallbackReason: null }
   | { kind: 'relay'; fallbackReason: string }
-  | { kind: 'direct'; url: string; format: 'flv' | 'mpegts' | 'fmp4' | null; refetched: boolean }
+  | {
+      kind: 'direct'
+      url: string
+      format: 'flv' | 'mpegts' | 'fmp4' | null
+      /** 这条直链是不是失败后重取来的（立刻又失败就不再试直连） */
+      refetched: boolean
+      /** 开始用这条直链的时刻：播够一阵再断多半是直链到期（斗鱼 5 min、B 站 1 h），可以再取 */
+      startedAt: number
+    }
 
 /**
  * 直播预览播放区：复用正在录制的那一路流（`/v1/streamers/{id}/live`）。
@@ -83,7 +91,7 @@ export function LivePreviewPlayer({
         if (cancelled) return
         const source: Source =
           info.direct.capable && info.url
-            ? { kind: 'direct', url: directPlayableUrl(info.url), format: info.format, refetched: false }
+            ? { kind: 'direct', url: directPlayableUrl(info.url), format: info.format, refetched: false, startedAt: Date.now() }
             : { kind: 'relay', fallbackReason: info.direct.reason ?? '该平台不支持直连' }
         setFetched({ key: sourceKey, source })
       },
@@ -156,7 +164,10 @@ export function LivePreviewPlayer({
         setMessage(null)
         setNonce((n) => n + 1)
       }
-      if (source?.kind !== 'direct' || source.refetched) {
+      // 播够 60 s 再断多半是直链到期（斗鱼 token 5 min、B 站 1 h），照常再取一条；
+      // 刚起播就失败才算「直连不行」——重取一次后仍失败就回落中转
+      const playedAWhile = source?.kind === 'direct' && Date.now() - source.startedAt > 60_000
+      if (source?.kind !== 'direct' || (source.refetched && !playedAWhile)) {
         fallback(`直连失败：${why}`)
         return
       }
@@ -167,7 +178,13 @@ export function LivePreviewPlayer({
           if (info.direct.capable && info.url) {
             setOverride({
               key: sourceKey,
-              source: { kind: 'direct', url: directPlayableUrl(info.url), format: info.format, refetched: true },
+              source: {
+                kind: 'direct',
+                url: directPlayableUrl(info.url),
+                format: info.format,
+                refetched: true,
+                startedAt: Date.now(),
+              },
             })
             setPhase('connecting')
             setMessage(null)
