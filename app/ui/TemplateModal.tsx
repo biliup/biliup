@@ -70,7 +70,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
     fontWeight: 700,
     cursor: 'pointer',
   }
-  const api = useRef<FormApi>()
+  const api = useRef<FormApi>(undefined)
   const {
     data: templates,
     error,
@@ -98,7 +98,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
   }
 
   const childrenWithProps = React.Children.map(children, child => {
-    if (React.isValidElement<any>(child)) {
+    if (React.isValidElement<{ onClick?: () => void }>(child)) {
       return React.cloneElement(child, {
         onClick: () => {
           showDialog()

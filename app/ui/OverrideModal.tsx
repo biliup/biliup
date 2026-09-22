@@ -65,7 +65,7 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
     return null
   }
 
-  const api = useRef<FormApi>()
+  const api = useRef<FormApi>(undefined)
 
   const { biliUsers } = useBiliUsers()
   const list = biliUsers?.map(item => {
@@ -158,7 +158,7 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
   }
 
   const childrenWithProps = React.Children.map(children, child => {
-    if (React.isValidElement<any>(child)) {
+    if (React.isValidElement<{ onClick?: () => void }>(child)) {
       return React.cloneElement(child, {
         onClick: () => {
           showDialog()

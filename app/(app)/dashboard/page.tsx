@@ -44,7 +44,7 @@ const fieldElement = (path: string) =>
 const Dashboard: React.FC = () => {
 const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
   const { trigger } = useSWRMutation('/v1/configuration', put)
-  const formRef = useRef<FormApi>()
+  const formRef = useRef<FormApi>(undefined)
   // const [formKey, setFormKey] = useState(0); // 初始化一个key
   // 触发表单重新挂载
   // const remountForm = () => {

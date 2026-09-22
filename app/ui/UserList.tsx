@@ -92,7 +92,7 @@ const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
       })
     }
   }
-  const api = useRef<FormApi>()
+  const api = useRef<FormApi>(undefined)
   const [value, setValue] = useState()
   const [panel, setPanel] = useState(<></>)
   const onChange = (e: any) => {

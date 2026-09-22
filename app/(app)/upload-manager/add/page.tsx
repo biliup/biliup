@@ -15,7 +15,7 @@ export default function Add() {
   const { Paragraph } = Typography
   const { trigger } = useSWRMutation('/v1/upload/streamers', sendRequest)
   const router = useRouter()
-  const api = useRef<FormApi>()
+  const api = useRef<FormApi>(undefined)
   const [labelPosition, setLabelPosition] = useState<'top' | 'left' | 'inset'>('inset')
   useEffect(() => {
     const unRegister = registerMediaQuery(responsiveMap.lg, {

@@ -134,7 +134,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('mode') : null
     if (saved) setMode(saved)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const systemTheme = useSystemTheme()
   useTheme(mode, systemTheme)
