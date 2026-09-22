@@ -243,7 +243,13 @@ export function LivePreviewPlayer({
         />
       ) : null}
       {badge ? (
-        <Tooltip content={badge.tone === 'direct' ? '浏览器直接向 CDN 拉流，不经 biliup 中转（全局配置 preview_transport = direct）' : badge.text}>
+        <Tooltip
+          content={
+            badge.tone === 'direct'
+              ? '浏览器用另取的直链直接向 CDN 拉流，不经 biliup 中转、不影响录制（全局配置 preview_transport = direct）'
+              : badge.text
+          }
+        >
           <span className={styles.badge} data-tone={badge.tone} data-compact={compact || undefined}>
             {badge.text}
           </span>

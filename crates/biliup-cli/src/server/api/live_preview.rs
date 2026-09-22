@@ -9,6 +9,7 @@
 //! 路由注册在 `router()` 里，`--auth` 时与 `/v1/streamers` 同一道登录校验。
 
 use crate::server::core::download_manager::DownloadManager;
+use crate::server::core::live::live_request;
 use crate::server::infrastructure::context::WorkerStatus;
 use crate::server::infrastructure::dto::DirectCapability;
 use axum::body::Body;
@@ -16,6 +17,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
+use biliup::downloader::live::LiveStatus;
 use biliup::downloader::preview::{PreviewFormat, PreviewHub, SubscribeError, Subscription};
 use bytes::Bytes;
 use danmaku_client::DanmakuEvent;
@@ -88,16 +90,17 @@ fn subscribe_error_response(id: i64, error: SubscribeError) -> Response {
     response
 }
 
-/// 浏览器能否直连 CDN 拉这一路——按各平台 CDN 的跨域放行与并发策略实测（PR #1712 review 1）：
+/// 浏览器能否直连 CDN 拉这一路——按各平台 CDN 的跨域放行实测（PR #1712 review 1 / 2）。
 ///
-/// | 平台 | ACAO | 同一直链第二连接 | 判定 |
-/// | --- | --- | --- | --- |
-/// | B 站 FLV | `*` | 正常 | 能 |
-/// | 抖音 FLV | `*` | 正常 | 能 |
-/// | 虎牙 FLV | `*` | 正常（边缘节点间歇 403，前端重试 / 回落） | 能 |
-/// | 斗鱼 FLV | `*` | **收完 GOP 缓存即 EOF——一 token 一连接**，直连会挤掉录制 | 不能 |
-/// | Twitch | 200 响应无 ACAO | — | 不能 |
-/// | HLS（TS / fMP4） | — | — | 本版本不能：mpegts.js 放不了 m3u8，直连需 hls.js |
+/// 直连**不复用录制那条直链**而是向平台另取一条（新 token），所以「同一直链两条连接」的限制
+/// （斗鱼一 token 一连接、部分虎牙节点对第二条连接只给 GOP 缓存即断）不再是问题——实测新 token
+/// 的斗鱼 / 虎牙直链各读 25 s 稳定，录制那条不受影响。
+///
+/// | 平台 | ACAO | 判定 |
+/// | --- | --- | --- |
+/// | B 站 / 抖音 / 虎牙 / 斗鱼 FLV | `*` | 能 |
+/// | Twitch | 200 响应无 ACAO | 不能 |
+/// | HLS（TS / fMP4） | — | 本版本不能：mpegts.js 放不了 m3u8，直连需 hls.js |
 ///
 /// 其它平台没实测，按不能处理，回落中转。
 pub fn direct_capability(
@@ -118,11 +121,10 @@ pub fn direct_capability(
         return no("HLS 直连需 hls.js，本版本回落中转");
     }
     match platform {
-        "bilibili" | "douyin" | "huya" => DirectCapability {
+        "bilibili" | "douyin" | "huya" | "douyu" => DirectCapability {
             capable: true,
             reason: None,
         },
-        "douyu" => no("斗鱼 CDN 一个 token 只允许一条连接，直连会挤掉正在录制的那一路"),
         "twitch" => no("Twitch CDN 未放行跨域（响应无 Access-Control-Allow-Origin）"),
         _ => no("该平台的 CDN 跨域放行未验证"),
     }
@@ -162,8 +164,12 @@ pub struct LiveUrlResponse {
     pub direct: DirectCapability,
 }
 
-/// `GET /v1/streamers/{id}/live-url`：浏览器直连模式用，返回正在录制的那条流的直链。
-/// 只在录制中可用（404 否则）；`direct.capable = false` 时仍返回直链与原因，由前端决定回落。
+/// `GET /v1/streamers/{id}/live-url`：浏览器直连模式用。
+///
+/// **不复用录制那条直链**，而是向平台重新取一条（ForgQi，#1712）：斗鱼 CDN 一个 token 只允许一条连接、
+/// 部分虎牙节点对同一直链的第二条连接只给 GOP 缓存即断——都是「同一直链两条连接」的问题，
+/// 浏览器拿自己的 token 就绕开了，也不会挤掉录制。只在录制中可用（404 否则）；向平台取新直链
+/// 失败时 503，由前端回落中转。
 pub async fn get_live_url(
     State(managers): State<Arc<DownloadManager>>,
     Path(id): Path<i64>,
@@ -175,18 +181,58 @@ pub async fn get_live_url(
         WorkerStatus::Working(task) => (task.live_source(), task.preview().status().format),
         _ => return (StatusCode::NOT_FOUND, "直播间未在录制").into_response(),
     };
+    let capability = direct_capability(&source.platform, &source.url, None);
+    if !capability.capable {
+        // 不能直连就不去平台多要一条，直接把原因给前端回落
+        let response = LiveUrlResponse {
+            direct: capability,
+            expires_at: None,
+            format: format.map(|f| f.as_str()),
+            platform: source.platform,
+            url: String::new(),
+        };
+        return no_store(axum::Json(response).into_response());
+    }
+    let room_url = worker.get_streamer().url.clone();
+    let Some(plugin) = managers.plugin_for(&room_url).await else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "找不到该直播间的平台插件").into_response();
+    };
+    let fresh = match plugin.check_stream(live_request(&worker)).await {
+        Ok(LiveStatus::Live { stream }) => stream,
+        Ok(LiveStatus::Offline) => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "平台返回未开播，取不到新直链",
+            )
+                .into_response();
+        }
+        Err(e) => {
+            warn!(id, error = ?e, "向平台取预览直链失败");
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("向平台取新直链失败：{e}"),
+            )
+                .into_response();
+        }
+    };
+    let url = fresh.raw_stream_url;
     let format = format.map(|f| f.as_str()).or_else(|| {
-        let path = source.url.split('?').next().unwrap_or("");
+        let path = url.split('?').next().unwrap_or("");
         path.ends_with(".flv").then_some("flv")
     });
     let response = LiveUrlResponse {
-        direct: direct_capability(&source.platform, &source.url, None),
-        expires_at: estimate_expiry(&source.url),
+        // 新直链的容器可能与录制那条不同（如配置改了协议），按新直链再判一次
+        direct: direct_capability(&fresh.platform, &url, None),
+        expires_at: estimate_expiry(&url),
         format,
-        platform: source.platform,
-        url: source.url,
+        platform: fresh.platform,
+        url,
     };
-    let mut response = axum::Json(response).into_response();
+    info!(id, "已向平台取到预览直链");
+    no_store(axum::Json(response).into_response())
+}
+
+fn no_store(mut response: Response) -> Response {
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -555,13 +601,15 @@ mod tests {
             )
             .capable
         );
-        let douyu = direct_capability(
-            "douyu",
-            "https://ws1a.douyucdn.cn/live/x.flv?wsAuth=a&token=b",
-            Some(PreviewFormat::Flv),
+        // 斗鱼：直连拿的是新 token，不再受「一 token 一连接」限制
+        assert!(
+            direct_capability(
+                "douyu",
+                "https://ws1a.douyucdn.cn/live/x.flv?wsAuth=a&token=b",
+                Some(PreviewFormat::Flv),
+            )
+            .capable
         );
-        assert!(!douyu.capable);
-        assert!(douyu.reason.unwrap().contains("一条连接"));
         let twitch = direct_capability(
             "twitch",
             "https://usher.ttvnw.net/api/channel/hls/x.m3u8?sig=a",

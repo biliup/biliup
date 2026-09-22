@@ -90,6 +90,11 @@ impl DownloadManager {
             .cloned()
     }
 
+    /// 按房间 URL 找到对应的平台插件。
+    pub async fn plugin_for(&self, url: &str) -> Option<Arc<dyn LivePlugin + Send + Sync>> {
+        self.rooms_handle.plugin_for(url).await
+    }
+
     pub async fn cleanup(&self) {
         let vec = self.rooms_handle.get_all().await;
         for worker in vec {

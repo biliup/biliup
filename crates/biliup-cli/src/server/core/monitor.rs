@@ -285,6 +285,20 @@ impl Monitor {
         }
     }
 
+    /// 按房间 URL 找到对应的平台插件。
+    pub async fn plugin_for(
+        self: &Arc<Self>,
+        url: &str,
+    ) -> Option<Arc<dyn LivePlugin + Send + Sync>> {
+        let (send, recv) = oneshot::channel();
+        let msg = ActorMessage::PluginFor {
+            respond_to: send,
+            url: url.to_owned(),
+        };
+        let _ = self.sender.send(msg).await;
+        recv.await.ok().flatten()
+    }
+
     /// 获取某平台当前队列中所有房间的 URL（用于批量检测）。
     async fn platform_urls(self: &Arc<Self>, platform_name: &str) -> Vec<String> {
         let (send, recv) = oneshot::channel();
@@ -488,6 +502,11 @@ enum ActorMessage {
         respond_to: oneshot::Sender<Vec<String>>,
         platform_name: String,
     },
+    /// 按房间 URL 找到对应平台插件（预览直连模式向平台要一条新直链时用）
+    PluginFor {
+        respond_to: oneshot::Sender<Option<Arc<dyn LivePlugin + Send + Sync>>>,
+        url: String,
+    },
     /// 添加工作器
     Add(
         oneshot::Sender<Option<Arc<dyn LivePlugin + Send + Sync>>>,
@@ -562,6 +581,9 @@ impl RoomsActor {
                     // `let _ =` 忽略发送时的任何错误
                     // 如果使用`select!`宏取消等待响应，可能会发生这种情况
                     let _ = respond_to.send(self.next(&platform_name));
+                }
+                ActorMessage::PluginFor { respond_to, url } => {
+                    let _ = respond_to.send(self.matches(&url));
                 }
                 ActorMessage::PlatformUrls {
                     respond_to,
