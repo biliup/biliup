@@ -20,6 +20,7 @@ use crate::server::core::downloader::sync_downloader::SyncDownloader;
 use crate::server::core::downloader::ytdlp::YouTubeDownloader;
 use crate::server::errors::{AppError, AppResult};
 use async_trait::async_trait;
+use biliup::downloader::util::ByteCounter;
 use danmaku_client::{DanmakuRecorder, RecorderConfig, RecorderHandle};
 use error_stack::Report;
 use serde::{Deserialize, Serialize};
@@ -53,6 +54,11 @@ pub struct DownloadConfig {
     pub output_dir: PathBuf,
 
     pub suffix: String,
+
+    /// 本次录制任务的写盘字节累计，由各下载器在写出点累加，供界面显示实时速率。
+    /// 只是一个原子计数器的句柄：不参与序列化，也不影响任何下载控制流。
+    #[serde(skip)]
+    pub bytes_written: ByteCounter,
 }
 
 impl DownloadConfig {

@@ -1,9 +1,10 @@
+use crate::server::common::throughput::FileSizeProbe;
+use crate::server::common::util::redact_process_debug;
 use crate::server::core::downloader;
 use crate::server::core::downloader::{
     DownloadConfig, DownloadStatus, DownloaderType, SegmentEvent, SegmentInfo,
 };
 use crate::server::errors::{AppError, AppResult};
-use crate::server::common::util::redact_process_debug;
 use error_stack::{ResultExt, bail};
 use std::path::PathBuf;
 use std::process::{ExitStatus, Stdio};
@@ -200,9 +201,10 @@ impl FfmpegDownloader {
         let args = self.build_ffmpeg_args_external_segment(&download_config);
         let output_file = download_config.generate_output_filename(&download_config.suffix);
 
+        let part_file = format!("{}.part", output_file.display());
         let mut cmd = Command::new("ffmpeg");
         cmd.args(&args)
-            .arg(format!("{}.part", output_file.display()))
+            .arg(&part_file)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -210,9 +212,10 @@ impl FfmpegDownloader {
 
         let child = cmd.spawn().change_context(AppError::Unknown)?;
 
+        // ffmpeg 自己落盘，本进程看不到媒体字节；旁路观察 .part 长度得到写盘速率
+        let _probe = FileSizeProbe::spawn(&*part_file, download_config.bytes_written.clone());
         let status = spawn_log(child, &self.process_handle).await?;
         // 退出时，重命名文件
-        let part_file = format!("{}.part", output_file.display());
         tokio::fs::rename(&part_file, &output_file)
             .await
             .change_context(AppError::Custom(String::from("退出时，重命名文件")))?;

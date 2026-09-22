@@ -1,5 +1,6 @@
-use crate::server::core::downloader::{DownloadConfig, DownloadStatus, SegmentEvent, SegmentInfo};
+use crate::server::common::throughput::FileSizeProbe;
 use crate::server::common::util::redact_process_debug;
+use crate::server::core::downloader::{DownloadConfig, DownloadStatus, SegmentEvent, SegmentInfo};
 use crate::server::errors::{AppError, AppResult};
 use error_stack::ResultExt;
 use std::collections::HashMap;
@@ -70,6 +71,8 @@ impl Streamlink {
 
         info!(cmd = %redact_process_debug(&cmd), "Starting streamlink download");
         let child = cmd.spawn().change_context(AppError::Unknown)?;
+        // streamlink 自己落盘，本进程看不到媒体字节；旁路观察 .part 长度得到写盘速率
+        let _probe = FileSizeProbe::spawn(&*part_file, download_config.bytes_written.clone());
         let status = spawn_log(child, &self.process_handle).await?;
 
         if tokio::fs::try_exists(&part_file)

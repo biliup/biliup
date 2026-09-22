@@ -11,6 +11,7 @@ use crate::server::core::downloader::{
     self, DownloadConfig, DownloadStatus, SegmentEvent, SegmentInfo,
 };
 use crate::server::errors::{AppError, AppResult};
+use biliup::downloader::util::ByteCounter;
 use error_stack::Report;
 use flv_fix::{
     ContinuityMode, FlvPipeline, FlvPipelineConfig, FlvWriter, FlvWriterConfig, ScriptFillerConfig,
@@ -154,6 +155,7 @@ impl Mesio {
                     seg_rx,
                     token.clone(),
                     callback.as_mut(),
+                    (download_config.bytes_written.clone(), |item| item.size()),
                 )
                 .await;
                 handle.cancel();
@@ -206,6 +208,7 @@ impl Mesio {
                     seg_rx,
                     token.clone(),
                     callback.as_mut(),
+                    (download_config.bytes_written.clone(), |item| item.size()),
                 )
                 .await;
                 handle.cancel();
@@ -335,6 +338,10 @@ fn segment_complete_hook(
 ///
 /// 结束条件：拉流结束或被取消后 `input_tx` 关闭 → 管线排空 → writer 关闭最后一个
 /// 文件并退出 → writer 被 drop 使 `seg_rx` 断开，回调排空后收尾。
+///
+/// `byte_meter`：写盘速率计数器与「一个管线条目占多少字节」的取值函数。
+/// 修复管线的 writer 来自外部 crate，拿不到逐条写出量，因此在条目进入管线前计数；
+/// 修复只增删极少量 tag，与实际落盘量相差可忽略。
 #[allow(clippy::too_many_arguments)]
 async fn run_pipeline<'a, P, W>(
     common: &PipelineConfig,
@@ -345,6 +352,7 @@ async fn run_pipeline<'a, P, W>(
     mut seg_rx: UnboundedReceiver<SegmentClosed>,
     token: CancellationToken,
     callback: &mut (dyn FnMut(SegmentEvent) + Send + Sync + 'a),
+    byte_meter: (ByteCounter, fn(&P::Item) -> usize),
 ) -> Result<WriterStats, String>
 where
     P: PipelineProvider,
@@ -361,8 +369,12 @@ where
     let writer_task = tokio::task::spawn_blocking(move || writer.run(output_rx));
 
     let forward = tokio::spawn(async move {
+        let (bytes_written, item_size) = byte_meter;
         let mut items = items;
         while let Some(item) = items.next().await {
+            if let Ok(item) = &item {
+                bytes_written.add(item_size(item) as u64);
+            }
             if input_tx.send(item).await.is_err() {
                 debug!("mesio 管线已关闭，停止转发");
                 break;
@@ -490,6 +502,7 @@ mod tests {
             payload.extend_from_slice(&data);
             payload.extend_from_slice(&((11 + data.len()) as u32).to_be_bytes());
         }
+        let payload_len = payload.len();
         let body = bytes::Bytes::from(payload);
 
         let app = Router::new().route(
@@ -517,7 +530,9 @@ mod tests {
             recorder,
             output_dir: dir.path().to_path_buf(),
             suffix: "flv".to_string(),
+            bytes_written: ByteCounter::new(),
         };
+        let bytes_written = config.bytes_written.clone();
 
         let seen: Arc<Mutex<Vec<SegmentInfo>>> = Arc::default();
         let sink = seen.clone();
@@ -534,6 +549,11 @@ mod tests {
             .expect("download");
 
         assert_eq!(status, DownloadStatus::StreamEnded);
+        assert_eq!(
+            bytes_written.total(),
+            payload_len as u64,
+            "进入管线的字节应等于源 FLV 的长度（文件头 + 全部 tag）"
+        );
         let seen = seen.lock().unwrap();
         assert!(
             seen.len() >= 2,

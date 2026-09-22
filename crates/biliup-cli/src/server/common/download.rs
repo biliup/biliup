@@ -1,5 +1,6 @@
 use crate::server::common::recording_policy;
 use crate::server::common::sync::SyncSession;
+use crate::server::common::throughput::{RateMeter, Sampler};
 use crate::server::common::upload::UploaderMessage;
 use crate::server::common::util::FileValidator;
 use crate::server::core::downloader::cover_downloader;
@@ -120,6 +121,8 @@ pub struct DownloadTask {
     done_notify: Notify,
     downloader: DownloaderRuntime,
     sync_session: Option<Arc<Mutex<SyncSession>>>,
+    /// 写盘速率表；各下载器拿它的计数器句柄累加，采样任务随 `execute` 启停。
+    meter: Arc<RateMeter>,
 }
 
 impl DownloadTask {
@@ -131,6 +134,17 @@ impl DownloadTask {
             done_notify: Notify::new(),
             downloader,
             sync_session,
+            meter: Arc::new(RateMeter::new()),
+        }
+    }
+
+    /// 最近一个滑动窗口内的写盘速率（字节/秒）。
+    ///
+    /// 边录边传与 yt-dlp 的字节不经过计数器，报告 `None` 而不是一个恒为 0 的假数。
+    pub fn bytes_per_sec(&self) -> Option<u64> {
+        match &self.downloader {
+            DownloaderRuntime::Sync(_) | DownloaderRuntime::YtDlp(_) => None,
+            _ => self.meter.bytes_per_sec(),
         }
     }
 
@@ -141,6 +155,8 @@ impl DownloadTask {
         plugin: Arc<dyn LivePlugin + Send + Sync>,
         rooms_handle: Arc<Monitor>,
     ) -> AppResult<()> {
+        // 速率采样任务与本次录制同寿命，句柄 drop 时随之停止
+        let _sampler = Sampler::spawn(self.meter.clone());
         // 重试配置
         let mut retry_count = 0;
         let max_retries = 3; // 最大重试次数
@@ -294,7 +310,8 @@ impl DownloadTask {
     ) -> AppResult<DownloadStatus> {
         // 获取配置和主播信息
         let streamer = ctx.live_streamer();
-        let download_config = ctx.download_config(stream);
+        let mut download_config = ctx.download_config(stream);
+        download_config.bytes_written = self.meter.counter();
         if let crate::server::core::downloader::DownloaderRuntime::Sync(sync) = &self.downloader {
             info!(
                 page_url = streamer.url,

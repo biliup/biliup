@@ -13,4 +13,8 @@ pub struct LiveStreamerResponse {
     pub status: String,
     /// 上传状态
     pub upload_status: String,
+
+    /// 正在录制时最近一个滑动窗口内的写盘速率（字节/秒）。
+    /// 未录制、尚无采样、或下载器不经过本进程写盘（边录边传、yt-dlp）时为 `null`。
+    pub live_bytes_per_sec: Option<u64>,
 }

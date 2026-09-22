@@ -331,15 +331,9 @@ mod tests {
         Ok(())
     }
 
-    /// 回归测试：纯视频流（没有任何音频标签）在首次分段时不应 panic。
-    ///
-    /// 该流只包含一个 onMetaData 脚本标签和一个 H264 序列头关键帧，`aac_sequence_header`
-    /// 全程为 `None`。修复前，分段重建逻辑会对 `aac_sequence_header` 执行
-    /// `expect("aac_sequence_header does not exist")` 而 panic，导致纯视频直播录制中断。
-    #[tokio::test]
-    async fn pure_video_stream_segments_without_panic() -> Result<(), Box<dyn std::error::Error>> {
-        use crate::downloader::util::{LifecycleFile, Segmentable};
-
+    /// 一段最小的纯视频 FLV 流体（不含 9 字节文件头）：
+    /// onMetaData 脚本标签 + 一个 H264 序列头关键帧，没有任何音频标签。
+    fn pure_video_flv_body() -> Vec<u8> {
         let mut data: Vec<u8> = Vec::new();
         // parse_flv 起始会先读取 4 字节（上一个 tag 的大小），这里给占位。
         data.extend_from_slice(&[0, 0, 0, 0]);
@@ -366,8 +360,21 @@ mod tests {
         ]);
         data.extend_from_slice(&video_body);
         data.extend_from_slice(&[0, 0, 0, 0]); // previous_tag_size
+        data
+    }
 
-        let http_resp = http::Response::builder().status(200).body(data)?;
+    /// 回归测试：纯视频流（没有任何音频标签）在首次分段时不应 panic。
+    ///
+    /// 该流只包含一个 onMetaData 脚本标签和一个 H264 序列头关键帧，`aac_sequence_header`
+    /// 全程为 `None`。修复前，分段重建逻辑会对 `aac_sequence_header` 执行
+    /// `expect("aac_sequence_header does not exist")` 而 panic，导致纯视频直播录制中断。
+    #[tokio::test]
+    async fn pure_video_stream_segments_without_panic() -> Result<(), Box<dyn std::error::Error>> {
+        use crate::downloader::util::{LifecycleFile, Segmentable};
+
+        let http_resp = http::Response::builder()
+            .status(200)
+            .body(pure_video_flv_body())?;
         let resp = reqwest::Response::from(http_resp);
         let connection = super::Connection::new(resp);
 
@@ -380,6 +387,31 @@ mod tests {
 
         // 修复前：此调用会 panic（aac_sequence_header does not exist）。
         super::parse_flv(connection, file, segment).await?;
+        Ok(())
+    }
+
+    /// 写盘字节计数：只统计真正经 `write_tag` 落盘的 tag（11 字节头 + 数据 + 4 字节 previous tag size）。
+    ///
+    /// 这段流里只有 onMetaData 脚本标签会在遇到关键帧时被写出（14 字节数据 → 29 字节），
+    /// 关键帧本身留在缓存里等待下一个关键帧，流结束时并未落盘，因此不计入。
+    #[tokio::test]
+    async fn written_bytes_are_counted_on_the_shared_counter()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::downloader::util::{ByteCounter, LifecycleFile, Segmentable};
+
+        let http_resp = http::Response::builder()
+            .status(200)
+            .body(pure_video_flv_body())?;
+        let connection = super::Connection::new(reqwest::Response::from(http_resp));
+
+        let dir = tempfile::tempdir()?;
+        let file_stem = dir.path().join("counted");
+        let counter = ByteCounter::new();
+        let file =
+            LifecycleFile::new(file_stem.to_str().unwrap(), "flv").with_counter(counter.clone());
+
+        super::parse_flv(connection, file, Segmentable::new(None, None)).await?;
+        assert_eq!(counter.total(), 11 + 14 + 4);
         Ok(())
     }
 }

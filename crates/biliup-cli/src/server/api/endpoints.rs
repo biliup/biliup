@@ -63,9 +63,16 @@ pub async fn get_streamers_endpoint(
             .into_iter()
             .find(|worker| worker.live_streamer.id == x.id);
 
-        let status = match option.as_ref() {
-            Some(t) => format!("{:?}", *t.downloader_status.read().unwrap()),
-            None => String::new(),
+        let (status, live_bytes_per_sec) = match option.as_ref() {
+            Some(t) => {
+                let downloader_status = t.downloader_status.read().unwrap();
+                let live_bytes_per_sec = match &*downloader_status {
+                    WorkerStatus::Working(task) => task.bytes_per_sec(),
+                    _ => None,
+                };
+                (format!("{:?}", *downloader_status), live_bytes_per_sec)
+            }
+            None => (String::new(), None),
         };
         // 被录制策略挡下时报告具体原因，否则「不在时间范围内」和「单纯没开播」
         // 在界面上都是「空闲」，用户无从判断配置有没有生效。
@@ -82,6 +89,7 @@ pub async fn get_streamers_endpoint(
             upload_status: option
                 .map(|t| format!("{:?}", *t.uploader_status.read().unwrap()))
                 .unwrap_or_default(),
+            live_bytes_per_sec,
         });
     }
     Ok(Json(results))

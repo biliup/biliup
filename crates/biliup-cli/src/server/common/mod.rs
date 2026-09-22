@@ -7,6 +7,8 @@ pub mod download;
 pub mod recording_policy;
 /// 边录边传（ffmpeg stdout → 流式投稿）
 pub mod sync;
+/// 录制写盘速率采样
+pub mod throughput;
 /// 录制时间范围判定
 pub mod timerange;
 pub mod upload;
