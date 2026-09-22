@@ -233,6 +233,13 @@ struct LiveBody {
     _global: OwnedSemaphorePermit,
 }
 
+impl Drop for LiveBody {
+    /// 客户端断开、掉队或写入端换代都走到这里：两个许可随之释放
+    fn drop(&mut self) {
+        debug!("直播预览连接结束，释放许可");
+    }
+}
+
 /// 把订阅编成 chunked 响应：快照分块先发，之后逐个转发实时分块。
 ///
 /// 两个许可（该路、进程）都随响应体一起活，客户端断开或响应结束即释放。

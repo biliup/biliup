@@ -578,14 +578,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn stalled_preview_subscriber_does_not_change_what_is_written()
     -> Result<(), Box<dyn std::error::Error>> {
-        use crate::downloader::preview::{
-            BROADCAST_CAPACITY, PreviewFormat, PreviewHub, PreviewSink,
-        };
+        use crate::downloader::preview::{PreviewFormat, PreviewHub, PreviewSink};
         use crate::downloader::util::{LifecycleFile, Segmentable};
         use std::time::Duration;
 
         // 足够多的 tag，让掉队的订阅者远超广播缓冲容量
-        let body = gop_flv_body(BROADCAST_CAPACITY as u32 * 2);
+        let body = gop_flv_body(PreviewFormat::Flv.broadcast_capacity() as u32 * 2);
         let run = |body: Vec<u8>, dir: &std::path::Path, sink: Option<PreviewSink>| {
             let dir = dir.to_path_buf();
             async move {

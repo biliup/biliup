@@ -13,7 +13,8 @@
 //! 它自己（掉队即断开重连），不会传导回录制。
 //!
 //! 内存上限：GOP 快照最多 [`MAX_GOP_BYTES`]，超过就丢掉这一 GOP、等下一个关键帧；
-//! 广播缓冲固定 [`BROADCAST_CAPACITY`] 个槽位，每槽最多 [`MAX_CHUNK_BYTES`]（更大的分块会被切开），
+//! 广播缓冲按格式固定槽位数（[`BROADCAST_CAPACITY_FLV`] / [`BROADCAST_CAPACITY_SEGMENTED`]），
+//! 每槽最多 [`MAX_CHUNK_BYTES`]（更大的分块会被切开），
 //! 且只在有订阅者时才占用。订阅者数量由信号量限制（[`PreviewHub::new`] 的参数）。
 
 use bytes::Bytes;
@@ -26,10 +27,17 @@ use tracing::debug;
 
 /// 每路直播默认允许同时观看的预览连接数。
 pub const DEFAULT_MAX_SUBSCRIBERS: usize = 4;
-/// 广播缓冲槽位数。慢订阅者落后超过这么多分块就会收到 `Lagged`。
-pub const BROADCAST_CAPACITY: usize = 256;
+/// FLV 的广播缓冲槽位数：一个分块就是一个 tag（音频几百字节、视频几 KB 到几十 KB），
+/// 而 CDN 常常整 GOP 突发送达（实测斗鱼一次 ~320 个 tag / 2 MB 在 1 ms 内解析完），
+/// 缓冲必须装得下一整个突发，否则刚建立的订阅者还没来得及读就 `Lagged`。
+/// 1024 槽 × 实测均值 ~10 KB ≈ 10 MB；理论上限 `1024 * MAX_CHUNK_BYTES` = 64 MB 只在每个 tag
+/// 都 ≥ 64 KB 时才会到（那相当于 5 MB/s 以上的码率）。
+pub const BROADCAST_CAPACITY_FLV: usize = 1024;
+/// TS / fMP4 的广播缓冲槽位数：分块是网络读块（16–64 KB）或整个 moof+mdat 分片，
+/// 数量少、体积大，256 槽 × `MAX_CHUNK_BYTES` = 16 MB 上限。
+pub const BROADCAST_CAPACITY_SEGMENTED: usize = 256;
 /// 单个广播分块的上限；更大的分块（如一个 400 KB 的关键帧 tag）切成多块发送，
-/// 因此广播缓冲最多占用 `BROADCAST_CAPACITY * MAX_CHUNK_BYTES` = 16 MB。
+/// 广播缓冲最多占用「槽位数 × MAX_CHUNK_BYTES」。
 pub const MAX_CHUNK_BYTES: usize = 64 * 1024;
 /// GOP 快照的字节上限；超过则丢弃本 GOP 的快照数据，新订阅者等下一个关键帧。
 pub const MAX_GOP_BYTES: usize = 8 * 1024 * 1024;
@@ -60,6 +68,14 @@ impl PreviewFormat {
             PreviewFormat::Flv => "flv",
             PreviewFormat::MpegTs => "mpegts",
             PreviewFormat::Fmp4 => "fmp4",
+        }
+    }
+
+    /// 该格式的广播缓冲槽位数，见 [`BROADCAST_CAPACITY_FLV`] / [`BROADCAST_CAPACITY_SEGMENTED`]。
+    pub fn broadcast_capacity(self) -> usize {
+        match self {
+            PreviewFormat::Flv => BROADCAST_CAPACITY_FLV,
+            PreviewFormat::MpegTs | PreviewFormat::Fmp4 => BROADCAST_CAPACITY_SEGMENTED,
         }
     }
 }
@@ -237,7 +253,7 @@ impl PreviewHub {
     /// 上一个写入端 drop 时其订阅者会收到 `Closed`，由播放器重连拿新快照
     /// （换直链后序列头与时间戳可能都变了，不试图让旧连接无缝跨过去）。
     pub fn attach(&self, format: PreviewFormat) -> PreviewSink {
-        let (tx, _rx) = broadcast::channel(BROADCAST_CAPACITY);
+        let (tx, _rx) = broadcast::channel(format.broadcast_capacity());
         let (request_tx, request_rx) = std_mpsc::channel();
         let generation = self.0.generation.fetch_add(1, Ordering::Relaxed) + 1;
         *self.0.requests.write().unwrap() = Some((generation, request_tx));
@@ -1159,6 +1175,46 @@ mod tests {
         bx(b"moof", &[bx(b"mfhd", &[0u8; 8]), traf].concat())
     }
 
+    /// CDN 整 GOP 突发：请求在关键帧被回应后，同一突发里紧跟几百个 tag 在订阅者读之前就全部
+    /// 推完。FLV 缓冲要装得下这种突发，订阅者随后逐个读到而不是 `Lagged`。
+    #[tokio::test]
+    async fn a_whole_gop_burst_does_not_lag_a_fresh_flv_subscriber() {
+        let hub = PreviewHub::new(4);
+        let mut sink = hub.attach(PreviewFormat::Flv);
+        sink.push(ChunkKind::Header, Bytes::from_static(b"FLV"));
+        sink.push(ChunkKind::Keyframe, Bytes::from_static(b"K0"));
+        let pending = tokio::spawn({
+            let hub = hub.clone();
+            async move { hub.subscribe(Duration::from_secs(5)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        // 关键帧回应请求，然后同一突发里再来 600 个 tag（斗鱼实测一个 GOP ~320 个）
+        sink.push(ChunkKind::Keyframe, Bytes::from_static(b"K1"));
+        for i in 0..600u32 {
+            sink.push(ChunkKind::Media, Bytes::from(i.to_be_bytes().to_vec()));
+        }
+        let mut sub = pending.await.unwrap().unwrap();
+        assert_eq!(
+            sub.snapshot,
+            vec![Bytes::from_static(b"FLV"), Bytes::from_static(b"K1")]
+        );
+        for i in 0..600u32 {
+            assert_eq!(
+                sub.rx.recv().await.unwrap(),
+                Bytes::from(i.to_be_bytes().to_vec())
+            );
+        }
+        // TS / fMP4 的分块大而少，沿用 256 槽
+        assert_eq!(
+            PreviewFormat::MpegTs.broadcast_capacity(),
+            BROADCAST_CAPACITY_SEGMENTED
+        );
+        assert_eq!(
+            PreviewFormat::Fmp4.broadcast_capacity(),
+            BROADCAST_CAPACITY_SEGMENTED
+        );
+    }
+
     #[test]
     fn fmp4_segments_are_split_into_fragments_with_keyframe_detection() {
         use mp4::build::*;
@@ -1649,7 +1705,7 @@ mod tests {
         let mut slow = slow.await.unwrap().unwrap();
         let mut fast = fast.await.unwrap().unwrap();
 
-        let total = BROADCAST_CAPACITY * 20;
+        let total = PreviewFormat::Flv.broadcast_capacity() * 20;
         let reader = tokio::spawn(async move {
             let mut got = 0usize;
             let mut skipped = 0usize;
