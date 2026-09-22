@@ -1,4 +1,7 @@
 'use client'
+// React 19 移除了 react-dom 上的 render/createRoot,Semi 的 Toast / Notification / Spin 等
+// 命令式渲染需要先注入 react-dom/client 的 createRoot,必须在任何 Semi 组件之前导入
+import '@douyinfe/semi-ui/react19-adapter'
 import './globals.css'
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
