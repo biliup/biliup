@@ -6,27 +6,39 @@
 //! - 下载器每次开始拉流时用 [`PreviewHub::attach`] 拿到一个 [`PreviewSink`]（写入端），
 //!   在写盘点旁边调用 [`PreviewSink::push`]；拉流结束时 `PreviewSink` 随之 drop。
 //! - HTTP 端点用 [`PreviewHub::subscribe`] 拿到 [`Subscription`]：先是一份「文件头 + 序列头 +
-//!   当前 GOP」的快照，之后是与写盘同步的实时分块。
+//!   最近 [`SNAPSHOT_WINDOW`] 内的完整 GOP + 当前 GOP」的快照，之后是与写盘同步的实时分块。
 //!
 //! 写入端热路径上只做三件事：把分块的引用追加进当前 GOP 缓冲、`try_recv` 待处理的订阅请求、
 //! `broadcast::send`。没有 `.await`、没有锁等待、没有可失败的返回值；订阅者的快慢只影响
 //! 它自己（掉队即断开重连），不会传导回录制。
 //!
-//! 内存上限：GOP 快照最多 [`MAX_GOP_BYTES`]，超过就丢掉这一 GOP、等下一个关键帧；
+//! 内存上限：单个 GOP 最多 [`MAX_GOP_BYTES`]，超过就丢掉这一 GOP、等下一个关键帧；整份快照
+//! （已完成 GOP + 当前 GOP）最多 [`MAX_SNAPSHOT_BYTES`]，超过就先丢最旧的 GOP；
 //! 广播缓冲按格式固定槽位数（[`BROADCAST_CAPACITY_FLV`] / [`BROADCAST_CAPACITY_SEGMENTED`]），
 //! 每槽最多 [`MAX_CHUNK_BYTES`]（更大的分块会被切开），
 //! 且只在有订阅者时才占用。订阅者数量由信号量限制（[`PreviewHub::new`] 的参数）。
 
 use bytes::Bytes;
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, broadcast, oneshot};
 use tracing::debug;
 
 /// 每路直播默认允许同时观看的预览连接数。
 pub const DEFAULT_MAX_SUBSCRIBERS: usize = 4;
+/// 快照里保留最近多少时间内（按到达时刻计）的已完成 GOP。
+///
+/// 新订阅者拿到的快照就是它起播时的全部缓冲：只给当前 GOP 时，播放器从零到一个 GOP 之间的
+/// 缓冲起步，之后到达 = 消耗，缓冲永远这么薄，链路上几十到几百毫秒的抖动就 `waiting`
+/// （浏览器直连 CDN 时 CDN 会先给几秒的 GOP 缓存，中转也得给同样的深度）。
+/// 6 s 对应前端中转模式维持的缓冲深度；实际快照在 6 s 到 6 s + 一个 GOP 之间。
+pub const SNAPSHOT_WINDOW: Duration = Duration::from_secs(6);
+/// 整份快照（已完成 GOP + 当前 GOP）的字节上限，超过先丢最旧的 GOP。
+/// 6 s × 20 Mbps = 15 MB，够到 4K 直播；1080p 常见的 3–6 Mbps 只用 2–5 MB。
+pub const MAX_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
 /// FLV 的广播缓冲槽位数：一个分块就是一个 tag（音频几百字节、视频几 KB 到几十 KB），
 /// 而 CDN 常常整 GOP 突发送达（实测斗鱼一次 ~320 个 tag / 2 MB 在 1 ms 内解析完），
 /// 缓冲必须装得下一整个突发，否则刚建立的订阅者还没来得及读就 `Lagged`。
@@ -272,6 +284,10 @@ impl PreviewHub {
             gop: Vec::new(),
             gop_bytes: 0,
             gop_ready: false,
+            gop_started: Instant::now(),
+            history: VecDeque::new(),
+            history_bytes: 0,
+            snapshot_window: SNAPSHOT_WINDOW,
             fmp4_init: mp4::InitInfo::default(),
             ring_used: false,
         }
@@ -332,15 +348,40 @@ pub struct PreviewSink {
     gop_bytes: usize,
     /// 当前 GOP 缓冲是否从关键帧起且未超上限；为 `false` 时订阅请求留到下一个关键帧再回应
     gop_ready: bool,
+    /// 当前 GOP 的关键帧到达时刻
+    gop_started: Instant,
+    /// 已完成的 GOP，旧的在前；与当前 GOP 连续（中间没有被丢弃的 GOP、没有换过序列头）
+    history: VecDeque<Gop>,
+    history_bytes: usize,
+    /// 已完成 GOP 的保留时长，见 [`SNAPSHOT_WINDOW`]；零表示快照只含当前 GOP
+    snapshot_window: Duration,
     /// fMP4：从 init segment 读出的视频轨信息，用于判定分片首帧是否关键帧
     fmp4_init: mp4::InitInfo,
     /// 广播缓冲里有没有数据；有且订阅者归零时换新通道释放
     ring_used: bool,
 }
 
+/// 快照里一个已完成的 GOP。
+struct Gop {
+    chunks: Vec<Bytes>,
+    bytes: usize,
+    started: Instant,
+}
+
 impl PreviewSink {
     pub fn format(&self) -> PreviewFormat {
         self.format
+    }
+
+    /// 改快照里已完成 GOP 的保留时长（默认 [`SNAPSHOT_WINDOW`]）；`Duration::ZERO` 只保留当前 GOP。
+    pub fn with_snapshot_window(mut self, window: Duration) -> Self {
+        self.snapshot_window = window;
+        self
+    }
+
+    /// 快照当前的字节数（已完成 GOP + 当前 GOP，不含文件头与序列头）。
+    pub fn snapshot_bytes(&self) -> usize {
+        self.history_bytes + self.gop_bytes
     }
 
     /// 当前有多少实时订阅者在收。
@@ -389,7 +430,11 @@ impl PreviewSink {
                 if self.format == PreviewFormat::Fmp4 {
                     // init segment：每次 attach 只出现一次（上游换初始化分片时才会再来），
                     // 解出编码串供前端 addSourceBuffer，记下视频轨用于分片的关键帧判定；
-                    // MSE 允许中途追加新 init，照常广播
+                    // MSE 允许中途追加新 init，照常广播。换了 init 的分片参数可能变了，
+                    // 旧 GOP 不能再和新 init 一起给新订阅者
+                    if self.header.as_ref().is_some_and(|old| *old != chunk) {
+                        self.drop_history();
+                    }
                     self.fmp4_init = mp4::init_info(&chunk);
                     let codecs = mp4::codecs_from_init(&chunk);
                     if let HubState::Available { codecs: slot, .. } =
@@ -406,15 +451,23 @@ impl PreviewSink {
             }
             ChunkKind::SequenceHeader(slot) => {
                 match self.sequence_headers.iter_mut().find(|(s, _)| *s == slot) {
-                    Some(entry) => entry.1 = chunk.clone(),
+                    Some(entry) => {
+                        // 序列头内容变了（换分辨率 / 编码参数）：之前的 GOP 与新序列头不配，
+                        // 不能再放进快照；当前 GOP 沿用既有行为，与新序列头一起给出
+                        if entry.1 != chunk {
+                            entry.1 = chunk.clone();
+                            self.drop_history();
+                        }
+                    }
                     None => self.sequence_headers.push((slot, chunk.clone())),
                 }
                 self.broadcast(chunk);
             }
             ChunkKind::Keyframe => {
-                self.gop.clear();
-                self.gop_bytes = 0;
+                let now = Instant::now();
+                self.archive_gop(now);
                 self.gop_ready = true;
+                self.gop_started = now;
                 self.retain(chunk.clone());
                 self.broadcast(chunk);
             }
@@ -430,6 +483,45 @@ impl PreviewSink {
         }
     }
 
+    /// 关键帧到来：把当前 GOP 收进历史，再按时长与字节上限修剪历史。
+    fn archive_gop(&mut self, now: Instant) {
+        if self.gop_ready && !self.gop.is_empty() && !self.snapshot_window.is_zero() {
+            self.history_bytes += self.gop_bytes;
+            self.history.push_back(Gop {
+                chunks: std::mem::take(&mut self.gop),
+                bytes: self.gop_bytes,
+                started: self.gop_started,
+            });
+        } else {
+            self.gop.clear();
+        }
+        self.gop_bytes = 0;
+        while let Some(oldest) = self.history.front()
+            && now.duration_since(oldest.started) > self.snapshot_window
+        {
+            self.pop_oldest_gop();
+        }
+        self.trim_history_bytes();
+    }
+
+    fn pop_oldest_gop(&mut self) {
+        if let Some(gop) = self.history.pop_front() {
+            self.history_bytes -= gop.bytes;
+        }
+    }
+
+    /// 整份快照超过字节上限时先丢最旧的 GOP；当前 GOP 自己的上限由 `retain` 管。
+    fn trim_history_bytes(&mut self) {
+        while !self.history.is_empty() && self.history_bytes + self.gop_bytes > MAX_SNAPSHOT_BYTES {
+            self.pop_oldest_gop();
+        }
+    }
+
+    fn drop_history(&mut self) {
+        self.history.clear();
+        self.history_bytes = 0;
+    }
+
     fn retain(&mut self, chunk: Bytes) {
         self.gop_bytes += chunk.len();
         if self.gop_bytes > MAX_GOP_BYTES {
@@ -437,11 +529,14 @@ impl PreviewSink {
                 bytes = self.gop_bytes,
                 "preview GOP exceeds the snapshot limit, waiting for the next keyframe"
             );
+            // 当前 GOP 作废，历史与之不再连续，一并放掉
             self.gop.clear();
             self.gop_bytes = 0;
             self.gop_ready = false;
+            self.drop_history();
         } else {
             self.gop.push(chunk);
+            self.trim_history_bytes();
         }
     }
 
@@ -473,9 +568,13 @@ impl PreviewSink {
     fn serve_requests(&mut self) {
         while let Ok(request) = self.requests.try_recv() {
             let rx = self.tx.subscribe();
-            let mut snapshot = Vec::with_capacity(1 + self.sequence_headers.len() + self.gop.len());
+            let history_chunks: usize = self.history.iter().map(|g| g.chunks.len()).sum();
+            let mut snapshot = Vec::with_capacity(
+                1 + self.sequence_headers.len() + history_chunks + self.gop.len(),
+            );
             snapshot.extend(self.header.iter().cloned());
             snapshot.extend(self.sequence_headers.iter().map(|(_, b)| b.clone()));
+            snapshot.extend(self.history.iter().flat_map(|g| g.chunks.iter().cloned()));
             snapshot.extend(self.gop.iter().cloned());
             let _ = request.reply.send(SnapshotReply {
                 format: self.format,
@@ -1194,7 +1293,10 @@ mod tests {
     #[tokio::test]
     async fn broadcast_ring_is_released_when_the_last_subscriber_leaves() {
         let hub = PreviewHub::new(4);
-        let mut sink = hub.attach(PreviewFormat::Flv);
+        // 只看当前 GOP，快照历史另有测试
+        let mut sink = hub
+            .attach(PreviewFormat::Flv)
+            .with_snapshot_window(Duration::ZERO);
         sink.push(ChunkKind::Header, Bytes::from_static(b"FLV"));
         sink.push(ChunkKind::Keyframe, Bytes::from_static(b"K0"));
         let pending = tokio::spawn({
@@ -1233,7 +1335,9 @@ mod tests {
     #[tokio::test]
     async fn a_whole_gop_burst_does_not_lag_a_fresh_flv_subscriber() {
         let hub = PreviewHub::new(4);
-        let mut sink = hub.attach(PreviewFormat::Flv);
+        let mut sink = hub
+            .attach(PreviewFormat::Flv)
+            .with_snapshot_window(Duration::ZERO);
         sink.push(ChunkKind::Header, Bytes::from_static(b"FLV"));
         sink.push(ChunkKind::Keyframe, Bytes::from_static(b"K0"));
         let pending = tokio::spawn({
@@ -1465,8 +1569,8 @@ mod tests {
         let segment2 = Bytes::from_static(b"moof+mdat #2");
         sink.push(ChunkKind::Keyframe, segment2.clone());
         let mut sub = pending.await.unwrap().unwrap();
-        // 快照 = init + 最近一个完整分片
-        assert_eq!(sub.snapshot, vec![init.clone(), segment2]);
+        // 快照 = init + 窗口内的关键帧分片（两个都刚到，都在）
+        assert_eq!(sub.snapshot, vec![init.clone(), segment, segment2]);
         // 上游换 init 时，已有订阅者也会收到新的 init（MSE 允许中途追加）
         sink.push(ChunkKind::Header, init.clone());
         assert_eq!(sub.rx.recv().await.unwrap(), init);
@@ -1676,6 +1780,120 @@ mod tests {
         sink.push(ChunkKind::Keyframe, key(2));
         assert!(sink.gop_ready);
         assert_eq!(sink.gop, vec![key(2)]);
+    }
+
+    /// 快照 = 文件头 + 序列头 + 窗口内的已完成 GOP + 当前 GOP，随后与实时分块严格衔接。
+    /// 新订阅者由此从起播就有几秒缓冲，而不是从零到一个 GOP 之间起步。
+    #[tokio::test]
+    async fn snapshot_keeps_recent_gops_within_the_window() {
+        let hub = PreviewHub::new(4);
+        let mut sink = hub.attach(PreviewFormat::Flv);
+        sink.push(ChunkKind::Header, Bytes::from_static(&flv::FILE_HEADER));
+        sink.push(ChunkKind::SequenceHeader(9), Bytes::from_static(b"avc"));
+        sink.push(ChunkKind::Media, inter(0)); // 关键帧之前的不算
+        sink.push(ChunkKind::Keyframe, key(1));
+        sink.push(ChunkKind::Media, inter(2));
+        sink.push(ChunkKind::Keyframe, key(3));
+        sink.push(ChunkKind::Media, inter(4));
+        sink.push(ChunkKind::Keyframe, key(5));
+        assert_eq!(sink.history.len(), 2);
+        assert_eq!(
+            sink.snapshot_bytes(),
+            3 * key(0).len() + 2 * inter(0).len()
+        );
+        let pending = tokio::spawn({
+            let hub = hub.clone();
+            async move { hub.subscribe(Duration::from_secs(5)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sink.push(ChunkKind::Media, inter(6));
+        let mut sub = pending.await.unwrap().unwrap();
+        assert_eq!(
+            sub.snapshot,
+            vec![
+                Bytes::from_static(&flv::FILE_HEADER),
+                Bytes::from_static(b"avc"),
+                key(1),
+                inter(2),
+                key(3),
+                inter(4),
+                key(5),
+                inter(6),
+            ]
+        );
+        sink.push(ChunkKind::Keyframe, key(7));
+        assert_eq!(sub.rx.recv().await.unwrap(), key(7));
+    }
+
+    /// 超出窗口时长的 GOP 在下一个关键帧到来时被丢掉（按关键帧到达时刻算）。
+    #[test]
+    fn gops_older_than_the_window_are_dropped_at_the_next_keyframe() {
+        let hub = PreviewHub::new(4);
+        let mut sink = hub
+            .attach(PreviewFormat::Flv)
+            .with_snapshot_window(Duration::from_millis(30));
+        sink.push(ChunkKind::Keyframe, key(1));
+        sink.push(ChunkKind::Media, inter(2));
+        std::thread::sleep(Duration::from_millis(80));
+        sink.push(ChunkKind::Keyframe, key(3));
+        // K1 的 GOP 已经 80 ms 前开始，超出 30 ms 的窗口
+        assert!(sink.history.is_empty());
+        assert_eq!(sink.snapshot_bytes(), key(3).len());
+        sink.push(ChunkKind::Keyframe, key(4));
+        // K3 刚开始不久，留下
+        assert_eq!(sink.history.len(), 1);
+        assert_eq!(sink.history[0].chunks, vec![key(3)]);
+    }
+
+    /// 整份快照超过字节上限时先丢最旧的 GOP，当前 GOP 保留。
+    #[test]
+    fn snapshot_history_is_bounded_by_bytes() {
+        let hub = PreviewHub::new(4);
+        let mut sink = hub.attach(PreviewFormat::Flv);
+        let big = Bytes::from(vec![0u8; MAX_SNAPSHOT_BYTES / 4 + 1]);
+        for i in 0..6u8 {
+            sink.push(ChunkKind::Keyframe, key(i));
+            sink.push(ChunkKind::Media, big.clone());
+        }
+        // 每个 GOP 略大于 1/4 上限：最多 3 个能同时在快照里
+        assert!(sink.snapshot_bytes() <= MAX_SNAPSHOT_BYTES);
+        assert_eq!(sink.history.len(), 2);
+        assert_eq!(sink.history[0].chunks[0], key(3));
+        assert_eq!(sink.gop[0], key(5));
+    }
+
+    /// 序列头内容变了（换分辨率）：之前的 GOP 与新序列头不配，从快照里去掉；
+    /// 内容相同的重发（stream-gears 分段时重放 onMetaData / 序列头）不影响历史。
+    #[test]
+    fn changed_sequence_header_drops_older_gops_but_a_repeat_does_not() {
+        let hub = PreviewHub::new(4);
+        let mut sink = hub.attach(PreviewFormat::Flv);
+        sink.push(ChunkKind::SequenceHeader(9), Bytes::from_static(b"avc"));
+        sink.push(ChunkKind::Keyframe, key(1));
+        sink.push(ChunkKind::Keyframe, key(2));
+        sink.push(ChunkKind::SequenceHeader(9), Bytes::from_static(b"avc"));
+        assert_eq!(sink.history.len(), 1, "identical re-send keeps history");
+        sink.push(ChunkKind::SequenceHeader(9), Bytes::from_static(b"avc-1080p"));
+        assert!(sink.history.is_empty(), "changed header drops history");
+        assert_eq!(sink.gop, vec![key(2)], "current GOP is kept as before");
+    }
+
+    /// 当前 GOP 超限作废时历史与之不再连续，一并放掉，等下一个关键帧从头攒。
+    #[test]
+    fn oversized_gop_also_drops_the_history() {
+        let hub = PreviewHub::new(4);
+        let mut sink = hub.attach(PreviewFormat::Flv);
+        sink.push(ChunkKind::Keyframe, key(1));
+        sink.push(ChunkKind::Keyframe, key(2));
+        assert_eq!(sink.history.len(), 1);
+        sink.push(ChunkKind::Media, Bytes::from(vec![0u8; MAX_GOP_BYTES + 1]));
+        assert!(!sink.gop_ready);
+        assert!(sink.history.is_empty());
+        assert_eq!(sink.snapshot_bytes(), 0);
+        sink.push(ChunkKind::Keyframe, key(3));
+        assert!(sink.gop_ready);
+        assert!(sink.history.is_empty());
+        assert_eq!(sink.gop, vec![key(3)]);
     }
 
     #[tokio::test]
