@@ -216,20 +216,20 @@ export default function StreamersPage() {
   }
 
   // 编辑 / 暂停 / 删除 / 高级四个操作，网格卡片与列表行共用，只是外层容器不同
-  const actionButtons = (item: LiveStreamerEntity) => (
-    <>
-      <TemplateModal onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
-        <Button theme="borderless" type="primary" icon={<IconEdit2Stroked />} aria-label="编辑" />
-      </TemplateModal>
-      <PauseButton streamer={item} />
-      <Popconfirm title="确定是否要删除？" content="此操作将不可逆" onConfirm={() => onConfirm(item.id)}>
-        <Button theme="borderless" type="danger" icon={<IconDeleteStroked />} aria-label="删除" />
-      </Popconfirm>
-      <OverrideModal onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
-        <Button theme="borderless" type="tertiary" icon={<IconWrench />} aria-label="高级" />
-      </OverrideModal>
-    </>
-  )
+  // 返回数组而不是 Fragment:ButtonGroup 会对每个直接子元素 cloneElement 注入 disabled 等 props,
+  // React 19 起会对带这些 props 的 Fragment 报 "Invalid prop supplied to React.Fragment"
+  const actionButtons = (item: LiveStreamerEntity) => [
+    <TemplateModal key="edit" onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
+      <Button theme="borderless" type="primary" icon={<IconEdit2Stroked />} aria-label="编辑" />
+    </TemplateModal>,
+    <PauseButton key="pause" streamer={item} />,
+    <Popconfirm key="delete" title="确定是否要删除？" content="此操作将不可逆" onConfirm={() => onConfirm(item.id)}>
+      <Button theme="borderless" type="danger" icon={<IconDeleteStroked />} aria-label="删除" />
+    </Popconfirm>,
+    <OverrideModal key="override" onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
+      <Button theme="borderless" type="tertiary" icon={<IconWrench />} aria-label="高级" />
+    </OverrideModal>,
+  ]
   const renderActions = (item: LiveStreamerEntity) => (
     <ButtonGroup theme="borderless" className={styles.cardActions}>
       {actionButtons(item)}
