@@ -577,7 +577,11 @@ mod tests {
             written_tags.extend_from_slice(&data[13..]);
         }
         // 关键帧 NALU 的标记：写盘只有前 119 个（最后一个 GOP 留在缓存里没落盘），预览是全部 120 个
-        let keyframes = |data: &[u8]| data.windows(5).filter(|w| *w == [0x17, 0x01, 0, 0, 0]).count();
+        let keyframes = |data: &[u8]| {
+            data.windows(5)
+                .filter(|w| *w == [0x17, 0x01, 0, 0, 0])
+                .count()
+        };
         assert_eq!(keyframes(&written_tags), 119);
         assert_eq!(keyframes(&received), 120);
         Ok(())

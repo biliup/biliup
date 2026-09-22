@@ -504,7 +504,11 @@ fn coalesce(rx: &mut broadcast::Receiver<Bytes>, first: Bytes) -> (Bytes, Option
 impl Drop for LiveBody {
     /// 客户端断开、掉队或写入端换代都走到这里：两个许可随之释放
     fn drop(&mut self) {
-        debug!(id = self.id, resyncs = self.resyncs, "直播预览连接结束，释放许可");
+        debug!(
+            id = self.id,
+            resyncs = self.resyncs,
+            "直播预览连接结束，释放许可"
+        );
     }
 }
 
@@ -684,9 +688,15 @@ mod tests {
         let body = reader.await.unwrap();
         let text = String::from_utf8_lossy(&body);
         assert!(text.starts_with("FLV"), "{text}");
-        assert!(text.ends_with("avcK9p10"), "resync = seq header + new GOP, got {text}");
+        assert!(
+            text.ends_with("avcK9p10"),
+            "resync = seq header + new GOP, got {text}"
+        );
         assert_eq!(text.matches("FLV").count(), 1, "file header only once");
-        assert!(!text.contains("xx"), "no stale chunks after the lag: {text}");
+        assert!(
+            !text.contains("xx"),
+            "no stale chunks after the lag: {text}"
+        );
     }
 
     /// 合并：缓冲里攒着的分块合成一个响应块（不超过上限）；缓冲空时原样返回；
@@ -729,7 +739,7 @@ mod tests {
             tx.send(Bytes::from_static(b"g")).unwrap();
         }
         let (out, lag) = coalesce(&mut rx, first);
-        assert!(out.len() >= 1);
+        assert!(!out.is_empty());
         assert!(lag.is_some(), "lag during coalescing must be reported");
     }
 

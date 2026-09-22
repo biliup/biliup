@@ -1830,10 +1830,7 @@ mod tests {
         sink.push(ChunkKind::Media, inter(4));
         sink.push(ChunkKind::Keyframe, key(5));
         assert_eq!(sink.history.len(), 2);
-        assert_eq!(
-            sink.snapshot_bytes(),
-            3 * key(0).len() + 2 * inter(0).len()
-        );
+        assert_eq!(sink.snapshot_bytes(), 3 * key(0).len() + 2 * inter(0).len());
         let pending = tokio::spawn({
             let hub = hub.clone();
             async move { hub.subscribe(Duration::from_secs(5)).await }
@@ -1906,7 +1903,10 @@ mod tests {
         sink.push(ChunkKind::Keyframe, key(2));
         sink.push(ChunkKind::SequenceHeader(9), Bytes::from_static(b"avc"));
         assert_eq!(sink.history.len(), 1, "identical re-send keeps history");
-        sink.push(ChunkKind::SequenceHeader(9), Bytes::from_static(b"avc-1080p"));
+        sink.push(
+            ChunkKind::SequenceHeader(9),
+            Bytes::from_static(b"avc-1080p"),
+        );
         assert!(sink.history.is_empty(), "changed header drops history");
         assert_eq!(sink.gop, vec![key(2)], "current GOP is kept as before");
     }
