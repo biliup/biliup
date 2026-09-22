@@ -115,7 +115,7 @@ const getServerStorage = () => null
  * 读写 localStorage 里的一个键,并订阅它在本页内的变化。
  * 替代「useState + 挂载 effect 里 setState」的写法:服务端与水合期快照固定为 null(与 SSR 输出一致),
  * 水合完成后 React 自己用真实值重渲染一次,既没有水合不一致也没有级联渲染。
- * 只有通过返回的 setter 写入才会通知订阅者;其它地方直接写同一键(如 useTheme 回写 mode)必须写相同的值。
+ * 同一个键的写入都要走返回的 setter,订阅者才会收到通知;不要在别处直接改 localStorage 里的这个键。
  */
 export const useLocalStorageValue = (key: string) => {
   const subscribe = useCallback((onChange: () => void) => subscribeStorage(key, onChange), [key])
@@ -137,6 +137,11 @@ export const applyThemeMode = (mode: 'light' | 'dark') => {
   document.body.setAttribute('theme-mode', mode)
 }
 
+/**
+ * mode / systemTheme 变化时把实际主题写到 DOM 上。
+ * mode 的持久化由 useLocalStorageValue('mode') 的 setter 负责，这里不再回写 localStorage：
+ * 两处都写会在 StrictMode 的双次 effect 下用水合期的默认值 auto 把刚读到的已保存主题覆盖掉。
+ */
 export const useTheme = (mode: string, systemTheme: string) => {
   const firstRun = useRef(true)
   useEffect(() => {
@@ -146,7 +151,6 @@ export const useTheme = (mode: string, systemTheme: string) => {
       firstRun.current = false
       return
     }
-    localStorage.setItem('mode', mode)
     const actualMode = (mode === 'auto' ? systemTheme : mode) as 'light' | 'dark'
     applyThemeMode(actualMode)
   }, [mode, systemTheme])
