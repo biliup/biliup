@@ -28,6 +28,11 @@ interface PlayerConfig {
   codecs?: string | null
   /** 直播：隐藏进度条、开启追帧，播放器随分块到达持续解码 */
   isLive?: boolean
+  /**
+   * 直播的取流方式，决定缓冲深度：`relay`（经 biliup 中转，维持约 5 s 缓冲抵消链路抖动）
+   * 或 `direct`（浏览器直连 CDN，沿用低延迟追帧）。不传按中转处理。
+   */
+  transport?: LiveTransport
   muted?: boolean
   autoplay?: boolean
   /** 直播流结束 / 被服务端断开（如客户端掉队、录制换直链）时回调，调用方决定是否重连 */
@@ -196,9 +201,23 @@ export function canPlayFmp4(codecs: string | null | undefined): boolean {
   }
 }
 
-/** 直播追帧：缓冲末尾落后超过这么多秒就跳到末尾附近 */
-const FMP4_MAX_LATENCY_S = 3
-const FMP4_TARGET_REMAIN_S = 0.5
+/** 直播预览的取流方式：决定播放器维持多深的缓冲 */
+export type LiveTransport = 'relay' | 'direct'
+
+/**
+ * 中转流的缓冲策略。服务端快照给最近 ~6 s（`SNAPSHOT_WINDOW`），播放器就把这几秒留着当缓冲：
+ * 后端与浏览器不在一台机器上时，链路上几十到几百毫秒的到达抖动、偶发的丢包重传都在这几秒里
+ * 消化掉，不会 waiting。落后到 RELAY_MAX_LATENCY_S 以上用 1.1 倍速慢慢追回到目标，超过
+ * RELAY_HARD_LATENCY_S（长时间暂停后）才直接跳。
+ * 直连 CDN 的流沿用原来的参数（CDN 自带 GOP 缓存，ForgQi 实测异地直连不卡）。
+ */
+const RELAY_TARGET_LATENCY_S = 5
+const RELAY_MAX_LATENCY_S = 9
+const RELAY_HARD_LATENCY_S = 20
+const RELAY_CATCHUP_RATE = 1.1
+/** 直连：落后超过这么多秒就跳到末尾附近 */
+const DIRECT_MAX_LATENCY_S = 3
+const DIRECT_TARGET_REMAIN_S = 0.5
 /** 早于当前播放位置这么多秒的缓冲定期清掉，长时间观看不涨内存 */
 const FMP4_KEEP_BACKWARD_S = 30
 
@@ -359,21 +378,39 @@ function playWithMediaSource(
     const cut = video.currentTime - FMP4_KEEP_BACKWARD_S
     if (cut - start > 5) sourceBuffer.remove(start, cut)
   }
+  // fMP4 只在中转路径上出现（直连的 HLS 走 hls.js），缓冲策略按中转流来
   const chase = () => {
     if (disposed || !video.buffered.length) return
     const end = video.buffered.end(video.buffered.length - 1)
     if (!aligned) {
-      // 直播分片的时间戳从一个很大的值起步，播放位置得先跳进缓冲区
+      // 直播分片的时间戳从一个很大的值起步，播放位置得先跳进缓冲区；
+      // 快照给了几秒，就从「末尾往前 RELAY_TARGET_LATENCY_S」起播，把这几秒留作缓冲
       aligned = true
-      video.currentTime = Math.max(video.buffered.start(0), end - FMP4_TARGET_REMAIN_S)
+      video.currentTime = Math.max(video.buffered.start(0), end - RELAY_TARGET_LATENCY_S)
       if (autoplay) video.play().catch(() => {
         video.muted = true
         video.play().catch(() => {})
       })
       return
     }
-    if (end - video.currentTime > FMP4_MAX_LATENCY_S && !video.paused) {
-      video.currentTime = end - FMP4_TARGET_REMAIN_S
+    if (video.paused) return
+    const latency = end - video.currentTime
+    // 掉队重对齐后分片时间戳前跳，缓冲区出现空洞：停在空洞前沿就跳到下一段的起点
+    for (let i = 0; i + 1 < video.buffered.length; i++) {
+      const gapStart = video.buffered.end(i)
+      const gapEnd = video.buffered.start(i + 1)
+      if (video.currentTime >= gapStart - 0.3 && video.currentTime < gapEnd && video.readyState < 3) {
+        video.currentTime = gapEnd + 0.05
+        return
+      }
+    }
+    if (latency > RELAY_HARD_LATENCY_S) {
+      video.currentTime = end - RELAY_TARGET_LATENCY_S
+      video.playbackRate = 1
+    } else if (latency > RELAY_MAX_LATENCY_S) {
+      if (video.playbackRate !== RELAY_CATCHUP_RATE) video.playbackRate = RELAY_CATCHUP_RATE
+    } else if (latency <= RELAY_TARGET_LATENCY_S && video.playbackRate !== 1) {
+      video.playbackRate = 1
     }
   }
 
@@ -463,9 +500,43 @@ function describeMpegtsError(errorType: string, detail: string, info?: { code?: 
 interface MpegtsOptions {
   type: MpegtsType
   isLive: boolean
+  transport: LiveTransport
   autoplay: boolean
   onEnded?: () => void
   onError?: (message: string) => void
+}
+
+/**
+ * mpegts.js 的直播缓冲参数。
+ * 中转：liveSync 用倍速把落后收敛到目标附近而不是跳（跳一次就把缓冲清成 0.5 s，链路一抖又 waiting），
+ * 只在落后到 RELAY_HARD_LATENCY_S 以上才跳；直连：沿用原来的追帧参数。
+ */
+export function mpegtsLiveConfig(transport: LiveTransport): mpegts.Config {
+  const common = {
+    enableStashBuffer: false,
+    customLoader: AbortableFetchLoader,
+    autoCleanupSourceBuffer: true,
+    autoCleanupMaxBackwardDuration: 30,
+    autoCleanupMinBackwardDuration: 10,
+  }
+  if (transport === 'relay') {
+    return {
+      ...common,
+      liveBufferLatencyChasing: true,
+      liveBufferLatencyMaxLatency: RELAY_HARD_LATENCY_S,
+      liveBufferLatencyMinRemain: RELAY_TARGET_LATENCY_S,
+      liveSync: true,
+      liveSyncMaxLatency: RELAY_MAX_LATENCY_S,
+      liveSyncTargetLatency: RELAY_TARGET_LATENCY_S,
+      liveSyncPlaybackRate: RELAY_CATCHUP_RATE,
+    }
+  }
+  return {
+    ...common,
+    liveBufferLatencyChasing: true,
+    liveBufferLatencyMaxLatency: DIRECT_MAX_LATENCY_S,
+    liveBufferLatencyMinRemain: DIRECT_TARGET_REMAIN_S,
+  }
 }
 
 /** Artplayer customType：用 mpegts.js 解封装 FLV / MPEG-TS 后喂给 MSE。 */
@@ -473,7 +544,7 @@ function playWithMpegts(
   video: HTMLVideoElement,
   url: string,
   art: Artplayer,
-  { type, isLive, autoplay, onEnded, onError }: MpegtsOptions
+  { type, isLive, transport, autoplay, onEnded, onError }: MpegtsOptions
 ) {
   if (!mpegts.isSupported()) {
     art.notice.show = `当前浏览器不支持 MSE，无法播放 ${type}`
@@ -494,19 +565,8 @@ function playWithMpegts(
     // 直连 CDN 时是跨域请求：cors 模式、不带 cookie（这些 CDN 的 ACAO 是 *，带凭据反而会被拒）；
     // 同源的 /live 走 same-origin 凭据，登录 cookie 照常带上（见 AbortableFetchLoader）
     { type, url, isLive, cors: true, withCredentials: false },
-    isLive
-      ? {
-          // 直播：不攒缓冲、落后就追，源缓冲区用完即清理，长时间观看不涨内存
-          enableStashBuffer: false,
-          customLoader: AbortableFetchLoader,
-          liveBufferLatencyChasing: true,
-          liveBufferLatencyMaxLatency: 3,
-          liveBufferLatencyMinRemain: 0.5,
-          autoCleanupSourceBuffer: true,
-          autoCleanupMaxBackwardDuration: 30,
-          autoCleanupMinBackwardDuration: 10,
-        }
-      : {}
+    // 直播：不攒 IO 缓冲、源缓冲区用完即清理（长时间观看不涨内存），缓冲深度按取流方式定
+    isLive ? mpegtsLiveConfig(transport) : {}
   )
   artWithMpegts.mpegts = player
   art.on('destroy', () => {
@@ -548,6 +608,7 @@ const Players: React.FC<PlayerConfig> = ({
   type,
   codecs,
   isLive = false,
+  transport = 'relay',
   muted = false,
   autoplay = isLive,
   onEnded,
@@ -633,6 +694,7 @@ const Players: React.FC<PlayerConfig> = ({
           const options: MpegtsOptions = {
             type: mediaType,
             isLive,
+            transport,
             autoplay,
             onEnded: onEndedCb,
             onError: onErrorCb,
@@ -671,7 +733,7 @@ const Players: React.FC<PlayerConfig> = ({
         playerRef.current = null
       }
     }
-  }, [url, height, width, type, codecs, isLive, muted, autoplay, danmakuCapable, danmakuFontSize])
+  }, [url, height, width, type, codecs, isLive, transport, muted, autoplay, danmakuCapable, danmakuFontSize])
 
   // 弹幕开关：有 feed → 订阅本路、显示弹幕层；没有 → 退订、隐藏。不重建播放器。
   // 播放器可能还在探测 Content-Type（异步创建），所以轮询等到实例出现再挂。

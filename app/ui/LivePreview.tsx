@@ -252,6 +252,7 @@ export function LivePreviewPlayer({
           type={format}
           codecs={codecs}
           isLive
+          transport={source?.kind ?? 'relay'}
           muted={muted}
           autoplay
           onEnded={handleEnded}
