@@ -1,0 +1,94 @@
+/* 直播预览：卡片弹层播放区 + 监视器小窗共用 */
+
+.player {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  overflow: hidden;
+}
+
+.player > div {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* 连接中 / 重连中 / 出错时盖在画面上的说明层 */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.88);
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+.overlay :global(.semi-button) {
+  pointer-events: auto;
+}
+.player[data-phase='connecting'] .overlay,
+.player[data-phase='reconnecting'] .overlay {
+  background: rgba(0, 0, 0, 0.35);
+}
+
+/* 出错 / 断开时垫在说明后面的封面 */
+.overlayCover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.35;
+  z-index: -1;
+}
+.overlay {
+  isolation: isolate;
+}
+
+.overlayText {
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 90%;
+  word-break: break-word;
+}
+
+/* ===== 弹层 ===== */
+.modal :global(.semi-modal-header) {
+  margin-bottom: 0;
+  padding-bottom: 12px;
+}
+
+.modalTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  /* 右侧留出关闭按钮的位置 */
+  padding-right: 28px;
+}
+
+.modalName {
+  font-size: 15px;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.modalFoot {
+  padding: 10px 24px 14px;
+}
+
+/* disabled 的按钮不响应鼠标，包一层让 Tooltip 仍能弹出 */
+.disabledWrap {
+  display: inline-flex;
+}
+.disabledWrap :global(.semi-button) {
+  pointer-events: none;
+}

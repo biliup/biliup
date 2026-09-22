@@ -112,6 +112,44 @@ export function liveImageUrl(
   return `${API_BASE}/v1/streamers/${id}/${kind}?v=${(h >>> 0).toString(36)}`
 }
 
+/** 正在录制的那一路流的同源地址（chunked FLV / MPEG-TS），供页面内播放器直接拉取。 */
+export function livePreviewUrl(id: number): string {
+  return `${API_BASE}/v1/streamers/${id}/live`
+}
+
+/**
+ * 卡片 / 监视器能否起播：正在录制、下载器能旁路、容器已确定。
+ * 容器未定（刚开始拉流的前几秒）时按钮先禁用，下一次轮询拿到 format 再放开。
+ */
+export function canPreview(streamer: LiveStreamerEntity): streamer is LiveStreamerEntity & {
+  preview: { available: true; format: 'flv' | 'mpegts' | 'fmp4' }
+} {
+  const format = streamer.preview?.format
+  return (
+    streamer.status === LIVE_STATUS &&
+    !!streamer.preview?.available &&
+    (format === 'flv' || format === 'mpegts' || format === 'fmp4')
+  )
+}
+
+/** 容器短名 → 界面标签 */
+export function previewFormatLabel(format: 'flv' | 'mpegts' | 'fmp4' | null | undefined): string | null {
+  if (format === 'flv') return 'FLV'
+  if (format === 'mpegts') return 'TS'
+  if (format === 'fmp4') return 'fMP4'
+  return null
+}
+
+/** 预览按钮禁用时的提示文案；能预览时返回 null。 */
+export function previewDisabledReason(streamer: LiveStreamerEntity): string | null {
+  if (streamer.status !== LIVE_STATUS) return '未在录制'
+  const preview = streamer.preview
+  if (!preview) return '预览信息尚未就绪'
+  if (!preview.available) return preview.reason || '当前下载器不支持预览'
+  if (!preview.format) return '正在建立预览，请稍候'
+  return null
+}
+
 const DAY = 86400
 const EVENT_WINDOW = DAY // 事件流只展示最近 24h
 

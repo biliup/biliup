@@ -147,6 +147,40 @@
   opacity: 1;
 }
 
+/* 可预览时封面可点:中央播放标记,悬停加深 */
+.coverClickable {
+  cursor: pointer;
+}
+.coverClickable:focus-visible {
+  outline: 2px solid var(--semi-color-primary);
+  outline-offset: 2px;
+}
+.coverPlay {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  opacity: 0.85;
+  transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+.coverPlay svg {
+  margin-left: 2px;
+}
+.coverClickable:hover .coverPlay {
+  opacity: 1;
+  transform: scale(1.06);
+  background: rgba(0, 0, 0, 0.6);
+}
+
 /* ===== 名称 + 时长 ===== */
 .nameRow {
   display: flex;
@@ -214,6 +248,14 @@
   background: var(--semi-color-fill-0);
   min-width: 2.6em;
   text-align: center;
+}
+
+/* 直播中:预览按钮(图标) */
+.previewBtn {
+  height: 22px;
+  min-width: 22px;
+  padding: 0 6px !important;
+  align-self: center;
 }
 
 /* 未开播:最近录制时间 */

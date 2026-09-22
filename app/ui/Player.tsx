@@ -4,89 +4,426 @@ import mpegts from 'mpegts.js'
 
 type VideoPlayer = Artplayer | null
 
+/** mpegts.js 能直接解封装的两种容器；其它扩展名交给浏览器原生 <video> */
+export type MpegtsType = 'flv' | 'mpegts'
+/** 直播预览支持的容器：flv / mpegts 走 mpegts.js，fmp4 直接 MediaSource 追加 */
+export type LiveType = MpegtsType | 'fmp4'
+
 interface PlayerConfig {
   url: string
   height?: string
   width?: string
+  /**
+   * 容器类型。不传时按 url 扩展名判断（`.flv` → flv，其余原生）。
+   * 直播预览的地址没有扩展名，由调用方按后端给的 `preview.format`（与响应 Content-Type 一致）传入；
+   * 直播且未传时，先用一次 GET 探测响应的 Content-Type 再起播。
+   */
+  type?: LiveType
+  /** fmp4 的 RFC 6381 编码串（后端从 init segment 解出，如 `avc1.64001f,mp4a.40.2`） */
+  codecs?: string | null
+  /** 直播：隐藏进度条、开启追帧，播放器随分块到达持续解码 */
+  isLive?: boolean
+  muted?: boolean
+  autoplay?: boolean
+  /** 直播流结束 / 被服务端断开（如客户端掉队、录制换直链）时回调，调用方决定是否重连 */
+  onEnded?: () => void
+  /** mpegts.js 或探测阶段报错（网络 / 解码），附一句可展示的说明 */
+  onError?: (message: string) => void
 }
 
-function playFlv(video: HTMLVideoElement, url: string, art: Artplayer) {
-  if (mpegts.isSupported()) {
-    const artWithFlv = art as Artplayer & { flv?: mpegts.Player | null }
-    if (artWithFlv.flv) {
-      artWithFlv.flv.destroy()
-      artWithFlv.flv = null
+/** 按响应头判断直播流容器：`video/x-flv` → flv，`video/mp2t` → mpegts，`video/mp4` → fmp4。 */
+export function liveTypeFromContentType(contentType: string | null | undefined): LiveType | null {
+  const ct = (contentType ?? '').toLowerCase()
+  if (ct.includes('flv')) return 'flv'
+  if (ct.includes('mp2t') || ct.includes('mpegts') || ct.includes('mpeg2-ts')) return 'mpegts'
+  if (ct.includes('mp4')) return 'fmp4'
+  return null
+}
+
+/**
+ * 用一次 GET 读到响应头就中止，只为拿 Content-Type。
+ * 非 2xx 时把服务端的说明（415 / 429 / 503 的正文）原样抛出。
+ */
+async function probeLiveType(url: string): Promise<LiveType> {
+  const controller = new AbortController()
+  try {
+    const res = await fetch(url, { signal: controller.signal, cache: 'no-store' })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(text || `HTTP ${res.status}`)
     }
-
-    const flv = mpegts.createPlayer({
-      type: 'flv',
-      url: url,
-    })
-
-    artWithFlv.flv = flv
-    art.on('destroy', () => {
-      if (artWithFlv.flv) {
-        artWithFlv.flv.destroy()
-        artWithFlv.flv = null
-      }
-    })
-
-    flv.attachMediaElement(video)
-    flv.load()
-  } else {
-    art.notice.show = 'Unsupported playback format: flv'
+    const type = liveTypeFromContentType(res.headers.get('content-type'))
+    if (!type) throw new Error(`无法识别的流类型: ${res.headers.get('content-type') ?? '未知'}`)
+    return type
+  } finally {
+    controller.abort()
   }
 }
 
-const Players: React.FC<PlayerConfig> = ({ url, height = '100%', width = '100%' }) => {
+/** fmp4 预览要求的 MIME；`codecs` 为空时返回 null（Chrome 的 addSourceBuffer 必须带 codecs） */
+export function fmp4MimeType(codecs: string | null | undefined): string | null {
+  const c = (codecs ?? '').trim()
+  return c ? `video/mp4; codecs="${c}"` : null
+}
+
+/** 当前浏览器能否用 MSE 播这组 fmp4 编码；SSR / 无 MediaSource 环境返回 false */
+export function canPlayFmp4(codecs: string | null | undefined): boolean {
+  const mime = fmp4MimeType(codecs)
+  if (!mime || typeof window === 'undefined' || typeof MediaSource === 'undefined') return false
+  try {
+    return MediaSource.isTypeSupported(mime)
+  } catch {
+    return false
+  }
+}
+
+/** 直播追帧：缓冲末尾落后超过这么多秒就跳到末尾附近 */
+const FMP4_MAX_LATENCY_S = 3
+const FMP4_TARGET_REMAIN_S = 0.5
+/** 早于当前播放位置这么多秒的缓冲定期清掉，长时间观看不涨内存 */
+const FMP4_KEEP_BACKWARD_S = 30
+
+interface Fmp4Options {
+  codecs: string | null | undefined
+  autoplay: boolean
+  onEnded?: () => void
+  onError?: (message: string) => void
+}
+
+/**
+ * Artplayer customType：fMP4 直接交给 MediaSource。
+ * 服务端先发 init segment（ftyp + moov）再按 moof + mdat 分片广播，正是 MSE 的原生输入，不需要转封装：
+ * fetch 的 ReadableStream 按到达顺序进 appendBuffer 队列（`updateend` 串行），
+ * 首个缓冲区出现时把播放位置对齐到缓冲起点，之后落后超过阈值就追到末尾，并定期 remove 旧缓冲。
+ */
+function playWithMediaSource(
+  video: HTMLVideoElement,
+  url: string,
+  art: Artplayer,
+  { codecs, autoplay, onEnded, onError }: Fmp4Options
+) {
+  const mime = fmp4MimeType(codecs)
+  if (!mime) {
+    onError?.('后端未能解析出 fMP4 的编码参数，无法起播')
+    return
+  }
+  if (typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported(mime)) {
+    onError?.(`浏览器不支持该编码（${codecs}），无法在页面内播放`)
+    return
+  }
+
+  const controller = new AbortController()
+  const mediaSource = new MediaSource()
+  const objectUrl = URL.createObjectURL(mediaSource)
+  const queue: Uint8Array[] = []
+  let sourceBuffer: SourceBuffer | null = null
+  let streamEnded = false
+  let disposed = false
+  let aligned = false
+  let chaser: ReturnType<typeof setInterval> | null = null
+
+  const fail = (message: string) => {
+    if (disposed) return
+    onError?.(message)
+  }
+  const pump = () => {
+    if (disposed || !sourceBuffer || sourceBuffer.updating || mediaSource.readyState !== 'open') return
+    const next = queue.shift()
+    if (next) {
+      try {
+        sourceBuffer.appendBuffer(next as BufferSource)
+      } catch (error) {
+        // 配额满：先清掉早于当前位置的缓冲再重试这一块
+        if ((error as DOMException)?.name === 'QuotaExceededError' && video.buffered.length) {
+          queue.unshift(next)
+          const cut = Math.max(video.buffered.start(0), video.currentTime - 5)
+          if (cut > video.buffered.start(0)) sourceBuffer.remove(video.buffered.start(0), cut)
+          else fail('播放缓冲已满')
+        } else {
+          fail(`MSE 追加失败: ${(error as Error)?.message ?? error}`)
+        }
+      }
+    } else if (streamEnded) {
+      try {
+        mediaSource.endOfStream()
+      } catch {
+        /* 已经结束 */
+      }
+    }
+  }
+  const trim = () => {
+    if (!sourceBuffer || sourceBuffer.updating || !video.buffered.length) return
+    const start = video.buffered.start(0)
+    const cut = video.currentTime - FMP4_KEEP_BACKWARD_S
+    if (cut - start > 5) sourceBuffer.remove(start, cut)
+  }
+  const chase = () => {
+    if (disposed || !video.buffered.length) return
+    const end = video.buffered.end(video.buffered.length - 1)
+    if (!aligned) {
+      // 直播分片的时间戳从一个很大的值起步，播放位置得先跳进缓冲区
+      aligned = true
+      video.currentTime = Math.max(video.buffered.start(0), end - FMP4_TARGET_REMAIN_S)
+      if (autoplay) video.play().catch(() => {
+        video.muted = true
+        video.play().catch(() => {})
+      })
+      return
+    }
+    if (end - video.currentTime > FMP4_MAX_LATENCY_S && !video.paused) {
+      video.currentTime = end - FMP4_TARGET_REMAIN_S
+    }
+  }
+
+  const dispose = () => {
+    if (disposed) return
+    disposed = true
+    controller.abort()
+    if (chaser) clearInterval(chaser)
+    try {
+      if (mediaSource.readyState === 'open') mediaSource.endOfStream()
+    } catch {
+      /* ignore */
+    }
+    URL.revokeObjectURL(objectUrl)
+  }
+  art.on('destroy', dispose)
+
+  mediaSource.addEventListener('sourceopen', () => {
+    if (disposed) return
+    try {
+      sourceBuffer = mediaSource.addSourceBuffer(mime)
+    } catch (error) {
+      fail(`浏览器拒绝该编码（${codecs}）: ${(error as Error)?.message ?? error}`)
+      return
+    }
+    sourceBuffer.mode = 'segments'
+    sourceBuffer.addEventListener('updateend', () => {
+      trim()
+      pump()
+    })
+    sourceBuffer.addEventListener('error', () => fail('MSE 解码失败'))
+    chaser = setInterval(chase, 500)
+
+    fetch(url, { signal: controller.signal, cache: 'no-store' })
+      .then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text().catch(() => '')
+          throw new Error(text || `连接失败（HTTP ${res.status}）`)
+        }
+        if (!res.body) throw new Error('浏览器不支持流式读取响应')
+        const reader = res.body.getReader()
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (disposed) return
+          if (done) break
+          if (value) {
+            queue.push(value)
+            pump()
+          }
+        }
+        streamEnded = true
+        pump()
+        // 服务端结束了响应（掉队断开 / 换直链 / 录制结束）
+        onEnded?.()
+      })
+      .catch((error: unknown) => {
+        if (disposed || (error as Error)?.name === 'AbortError') return
+        fail(error instanceof Error ? error.message : String(error))
+      })
+  })
+  video.src = objectUrl
+}
+
+function describeMpegtsError(errorType: string, detail: string, info?: { code?: number; msg?: string }): string {
+  if (errorType === mpegts.ErrorTypes.NETWORK_ERROR) {
+    if (detail === mpegts.ErrorDetails.NETWORK_STATUS_CODE_INVALID) {
+      const code = info?.code
+      if (code === 415) return '当前下载器 / 容器不支持预览'
+      if (code === 429) return '预览连接数已达上限，请稍后再试'
+      if (code === 503) return '录制尚未开始拉流或正在重连'
+      return `连接失败（HTTP ${code ?? '?'}）`
+    }
+    return `网络错误: ${info?.msg ?? detail}`
+  }
+  if (errorType === mpegts.ErrorTypes.MEDIA_ERROR) {
+    if (detail === mpegts.ErrorDetails.MEDIA_CODEC_UNSUPPORTED) return '浏览器不支持该编码（可能为 HEVC）'
+    return `解码错误: ${info?.msg ?? detail}`
+  }
+  return `播放错误: ${info?.msg ?? detail}`
+}
+
+interface MpegtsOptions {
+  type: MpegtsType
+  isLive: boolean
+  autoplay: boolean
+  onEnded?: () => void
+  onError?: (message: string) => void
+}
+
+/** Artplayer customType：用 mpegts.js 解封装 FLV / MPEG-TS 后喂给 MSE。 */
+function playWithMpegts(
+  video: HTMLVideoElement,
+  url: string,
+  art: Artplayer,
+  { type, isLive, autoplay, onEnded, onError }: MpegtsOptions
+) {
+  if (!mpegts.isSupported()) {
+    art.notice.show = `当前浏览器不支持 MSE，无法播放 ${type}`
+    onError?.('当前浏览器不支持 MSE')
+    return
+  }
+  const artWithMpegts = art as Artplayer & { mpegts?: mpegts.Player | null }
+  if (artWithMpegts.mpegts) {
+    artWithMpegts.mpegts.destroy()
+    artWithMpegts.mpegts = null
+  }
+
+  const player = mpegts.createPlayer(
+    { type, url, isLive },
+    isLive
+      ? {
+          // 直播：不攒缓冲、落后就追，源缓冲区用完即清理，长时间观看不涨内存
+          enableStashBuffer: false,
+          liveBufferLatencyChasing: true,
+          liveBufferLatencyMaxLatency: 3,
+          liveBufferLatencyMinRemain: 0.5,
+          autoCleanupSourceBuffer: true,
+          autoCleanupMaxBackwardDuration: 30,
+          autoCleanupMinBackwardDuration: 10,
+        }
+      : {}
+  )
+  artWithMpegts.mpegts = player
+  art.on('destroy', () => {
+    if (artWithMpegts.mpegts) {
+      artWithMpegts.mpegts.destroy()
+      artWithMpegts.mpegts = null
+    }
+  })
+  player.on(mpegts.Events.ERROR, (errorType: string, detail: string, info?: { code?: number; msg?: string }) => {
+    const message = describeMpegtsError(errorType, detail, info)
+    art.notice.show = message
+    onError?.(message)
+  })
+  if (isLive) {
+    // 服务端结束响应（掉队断开 / 换直链）时 mpegts.js 会把 MSE 收尾成 ended
+    video.addEventListener('ended', () => onEnded?.(), { once: true })
+  }
+
+  player.attachMediaElement(video)
+  player.load()
+  if (autoplay) {
+    const playing = player.play()
+    if (playing && typeof (playing as Promise<void>).catch === 'function') {
+      ;(playing as Promise<void>).catch(() => {
+        // 自动播放被浏览器拦下时静音重试，直播预览宁可无声也不要卡住
+        video.muted = true
+        player.play()
+      })
+    }
+  }
+}
+
+const Players: React.FC<PlayerConfig> = ({
+  url,
+  height = '100%',
+  width = '100%',
+  type,
+  codecs,
+  isLive = false,
+  muted = false,
+  autoplay = isLive,
+  onEnded,
+  onError,
+}) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<VideoPlayer>(null)
+  // 回调放进 ref：父组件每次渲染传入的新函数不应重建播放器
+  const callbacksRef = useRef({ onEnded, onError })
+  useEffect(() => {
+    callbacksRef.current = { onEnded, onError }
+  })
 
   useEffect(() => {
     if (!containerRef.current) return
+    const container = containerRef.current
+    let cancelled = false
 
-    try {
+    const create = (mediaType: LiveType | null) => {
+      if (cancelled || !container.isConnected) return
       if (playerRef.current) {
         playerRef.current.destroy()
         playerRef.current = null
       }
-
-      if (url.endsWith('.flv')) {
-        playerRef.current = new Artplayer({
-          container: containerRef.current,
-          url,
-          type: 'flv',
-          customType: {
-            flv: playFlv,
-          },
-          autoSize: true,
-          fullscreen: true,
-          fullscreenWeb: true,
-          autoOrientation: true,
-          plugins: [],
-        })
-      } else {
-        playerRef.current = new Artplayer({
-          container: containerRef.current,
-          url,
-          autoSize: true,
-          fullscreen: true,
-          fullscreenWeb: true,
-          autoOrientation: true,
-          plugins: [],
-        })
+      const base = {
+        container,
+        url,
+        autoSize: !isLive,
+        fullscreen: true,
+        fullscreenWeb: true,
+        autoOrientation: true,
+        isLive,
+        muted,
+        autoplay,
+        plugins: [],
       }
-    } catch (error) {
-      console.error('播放器初始化失败:', error)
+      const onEndedCb = () => callbacksRef.current.onEnded?.()
+      const onErrorCb = (message: string) => callbacksRef.current.onError?.(message)
+      try {
+        if (mediaType === 'fmp4') {
+          const options: Fmp4Options = { codecs, autoplay, onEnded: onEndedCb, onError: onErrorCb }
+          playerRef.current = new Artplayer({
+            ...base,
+            type: 'fmp4',
+            customType: {
+              fmp4: (video: HTMLVideoElement, src: string, art: Artplayer) =>
+                playWithMediaSource(video, src, art, options),
+            },
+          })
+        } else if (mediaType) {
+          const options: MpegtsOptions = {
+            type: mediaType,
+            isLive,
+            autoplay,
+            onEnded: onEndedCb,
+            onError: onErrorCb,
+          }
+          playerRef.current = new Artplayer({
+            ...base,
+            type: mediaType,
+            customType: {
+              [mediaType]: (video: HTMLVideoElement, src: string, art: Artplayer) =>
+                playWithMpegts(video, src, art, options),
+            },
+          })
+        } else {
+          playerRef.current = new Artplayer(base)
+        }
+      } catch (error) {
+        console.error('播放器初始化失败:', error)
+        callbacksRef.current.onError?.('播放器初始化失败')
+      }
+    }
+
+    const declared: LiveType | null = type ?? (url.endsWith('.flv') ? 'flv' : null)
+    if (declared || !isLive) {
+      create(declared)
+    } else {
+      probeLiveType(url).then(create, (error: unknown) => {
+        if (cancelled) return
+        callbacksRef.current.onError?.(error instanceof Error ? error.message : String(error))
+      })
     }
 
     return () => {
+      cancelled = true
       if (playerRef.current) {
         playerRef.current.destroy()
         playerRef.current = null
       }
     }
-  }, [url, height, width])
+  }, [url, height, width, type, codecs, isLive, muted, autoplay])
 
   return <div ref={containerRef} style={{ width, height }} />
 }
