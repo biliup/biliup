@@ -95,12 +95,14 @@ fn subscribe_error_response(id: i64, error: SubscribeError) -> Response {
 /// 直连**不复用录制那条直链**而是向平台另取一条（新 token），所以「同一直链两条连接」的限制
 /// （斗鱼一 token 一连接、部分虎牙节点对第二条连接只给 GOP 缓存即断）不再是问题——实测新 token
 /// 的斗鱼 / 虎牙直链各读 25 s 稳定，录制那条不受影响。容器不影响判定：FLV 走 mpegts.js，
-/// HLS（TS / fMP4 分片，`.m3u8`）走 hls.js，B 站 `.m4s` 分片的 CDN 同样 `ACAO: *`。
+/// HLS（TS / fMP4 分片，`.m3u8`）走 hls.js。HLS 实测：B 站 fMP4 的 m3u8 / init / `.m4s` 同域同 `ACAO: *`；
+/// 抖音 TS 的主清单（`pull-hls-*.douyinliving.com`）与媒体清单 + 分片（`*.100ycdn.com`）不同域，都 `*`；
+/// 虎牙 TS 的 m3u8 与分片同域，回显 Origin（清单轮询有边缘节点间歇 403，靠重取 / 回落）。
 ///
-/// | 平台 | ACAO | 判定 |
+/// | 平台 | 跨域 | 判定 |
 /// | --- | --- | --- |
-/// | B 站 / 抖音 / 虎牙 / 斗鱼 | `*` | 能 |
-/// | Twitch | 200 响应无 ACAO | 不能 |
+/// | B 站 / 抖音 / 虎牙 / 斗鱼 | FLV 与 HLS 的清单、分片都放行 | 能 |
+/// | Twitch | usher 主清单无 ACAO；媒体清单 / 分片虽带 `ACAO: *`，但清单服务器按 Origin 白名单放行（只有 twitch.tv 与 localhost），其它站点 403 | 不能 |
 ///
 /// 其它平台没实测，按不能处理，回落中转。
 pub fn direct_capability(platform: &str) -> DirectCapability {
@@ -113,7 +115,9 @@ pub fn direct_capability(platform: &str) -> DirectCapability {
             capable: true,
             reason: None,
         },
-        "twitch" => no("Twitch CDN 未放行跨域（响应无 Access-Control-Allow-Origin）"),
+        "twitch" => no(
+            "Twitch 的清单服务器按 Origin 白名单放行（只有 twitch.tv 与 localhost），其它站点跨域请求 403",
+        ),
         _ => no("该平台的 CDN 跨域放行未验证"),
     }
 }
@@ -585,12 +589,7 @@ mod tests {
         }
         let twitch = direct_capability("twitch");
         assert!(!twitch.capable);
-        assert!(
-            twitch
-                .reason
-                .unwrap()
-                .contains("Access-Control-Allow-Origin")
-        );
+        assert!(twitch.reason.unwrap().contains("Origin"));
         assert!(!direct_capability("youtube").capable);
         // 容器由直链后缀决定播放器：flv → mpegts.js，m3u8 → hls.js
         assert_eq!(
@@ -639,10 +638,9 @@ mod tests {
         use danmaku_client::message::EnterMessage;
         use danmaku_client::{ChatMessage, GiftMessage};
         let (tx, rx) = tokio::sync::broadcast::channel(8);
-        let permit = danmaku_connection_limit()
-            .clone()
-            .try_acquire_owned()
-            .unwrap();
+        // 各测试用自己的信号量，别和并行跑的其它测试抢全局那把
+        let limit = Arc::new(Semaphore::new(1));
+        let permit = limit.clone().try_acquire_owned().unwrap();
         let response = danmaku_response(vec![(7, rx)], permit);
         assert_eq!(
             response.headers().get(header::CONTENT_TYPE).unwrap(),
@@ -688,10 +686,8 @@ mod tests {
             "{text}"
         );
         assert!(!text.contains("路人"), "{text}");
-        assert_eq!(
-            danmaku_connection_limit().available_permits(),
-            MAX_DANMAKU_CONNECTIONS
-        );
+        // 响应体读完即 drop，许可随之释放
+        assert_eq!(limit.available_permits(), 1);
     }
 
     /// 复用：两路广播合成一条 SSE，每条事件带各自的 id；两路发送端都 drop 后流才结束。
@@ -700,10 +696,9 @@ mod tests {
         use danmaku_client::ChatMessage;
         let (tx_a, rx_a) = tokio::sync::broadcast::channel(8);
         let (tx_b, rx_b) = tokio::sync::broadcast::channel(8);
-        let permit = danmaku_connection_limit()
-            .clone()
-            .try_acquire_owned()
-            .unwrap();
+        // 各测试用自己的信号量，别和并行跑的其它测试抢全局那把
+        let limit = Arc::new(Semaphore::new(1));
+        let permit = limit.clone().try_acquire_owned().unwrap();
         let response = danmaku_response(vec![(1, rx_a), (3, rx_b)], permit);
         tx_a.send(DanmakuEvent::Chat(ChatMessage::new("来自1".into())))
             .unwrap();
@@ -727,10 +722,8 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("b还在"), "{text}");
-        assert_eq!(
-            danmaku_connection_limit().available_permits(),
-            MAX_DANMAKU_CONNECTIONS
-        );
+        // 响应体读完即 drop，许可随之释放
+        assert_eq!(limit.available_permits(), 1);
     }
 
     #[test]
