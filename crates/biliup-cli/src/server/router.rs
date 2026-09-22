@@ -10,6 +10,7 @@ use crate::server::api::endpoints::{
     put_configuration, put_streamers_endpoint,
 };
 use crate::server::api::live_media::{get_live_avatar, get_live_cover};
+use crate::server::api::live_preview::get_live_stream;
 use crate::server::infrastructure::service_register::ServiceRegister;
 use axum::Router;
 use axum::body::Body;
@@ -37,6 +38,8 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         // 正在录制的直播间封面 / 主播头像（服务端带 Referer 转发，避开图片 CDN 防盗链）
         .route("/v1/streamers/{id}/cover", get(get_live_cover))
         .route("/v1/streamers/{id}/avatar", get(get_live_avatar))
+        // 直播预览：复用正在录制的那一路流（chunked FLV / MPEG-TS），同样在登录校验之内
+        .route("/v1/streamers/{id}/live", get(get_live_stream))
         // 配置管理路由
         .route(
             "/v1/configuration",
