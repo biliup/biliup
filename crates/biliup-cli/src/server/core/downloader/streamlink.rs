@@ -1,7 +1,8 @@
-use crate::server::common::throughput::FileSizeProbe;
+use crate::server::common::throughput::SubprocessProgress;
 use crate::server::common::util::redact_process_debug;
 use crate::server::core::downloader::{DownloadConfig, DownloadStatus, SegmentEvent, SegmentInfo};
 use crate::server::errors::{AppError, AppResult};
+use biliup::downloader::util::ByteCounter;
 use error_stack::ResultExt;
 use std::collections::HashMap;
 use std::process::{ExitStatus, Stdio};
@@ -10,7 +11,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStdout, Command};
 use tokio::sync::RwLock;
 use tokio::time::Duration;
-use tracing::info;
+use tracing::{debug, info};
 use url::Url;
 
 #[derive(Debug, Clone)]
@@ -71,9 +72,12 @@ impl Streamlink {
 
         info!(cmd = %redact_process_debug(&cmd), "Starting streamlink download");
         let child = cmd.spawn().change_context(AppError::Unknown)?;
-        // streamlink 自己落盘，本进程看不到媒体字节；旁路观察 .part 长度得到写盘速率
-        let _probe = FileSizeProbe::spawn(&*part_file, download_config.bytes_written.clone());
-        let status = spawn_log(child, &self.process_handle).await?;
+        let status = spawn_log(
+            child,
+            &self.process_handle,
+            download_config.bytes_written.clone(),
+        )
+        .await?;
 
         if tokio::fs::try_exists(&part_file)
             .await
@@ -167,6 +171,9 @@ impl StreamlinkDownloader {
             args.push(segment_time);
         }
         args.push("--force".to_string());
+        // stderr 不是终端时也按周期打「[download] Written …」进度行，spawn_log 据此算写盘速率
+        args.push("--progress".to_string());
+        args.push("force".to_string());
         args.push("--output".to_string());
         args.push(output_file.to_string());
         args.push(streamlink_cli_url(&self.url));
@@ -441,14 +448,22 @@ fn is_progressive_http_ext(ext: &str) -> bool {
     )
 }
 
+/// 等待 streamlink 结束，期间把 stdout / stderr 转成日志；`--progress=force` 的进度行
+/// 只解析不打印，把累计写出字节的增量累加到 `bytes_written`（写盘速率的来源）。
 async fn spawn_log(
     mut child: Child,
     process_handle: &RwLock<Option<Child>>,
+    bytes_written: ByteCounter,
 ) -> AppResult<ExitStatus> {
     let mut stderr_task = child.stderr.take().map(|stderr| {
         let mut stderr_lines = BufReader::new(stderr).lines();
         tokio::spawn(async move {
+            let mut progress = SubprocessProgress::default();
             while let Ok(Some(line)) = stderr_lines.next_line().await {
+                if progress.observe_streamlink(&line, &bytes_written) {
+                    debug!("[streamlink] {line}");
+                    continue;
+                }
                 info!("[streamlink] {line}");
             }
         })
@@ -570,5 +585,11 @@ mod tests {
             "expected httpstream URL in args: {args:?}"
         );
         assert!(args.iter().any(|a| a == "best"));
+        // 写盘速率靠解析进度行，stderr 不是终端时也要让 streamlink 打出来
+        assert!(
+            args.windows(2)
+                .any(|w| w[0] == "--progress" && w[1] == "force"),
+            "expected --progress force in args: {args:?}"
+        );
     }
 }

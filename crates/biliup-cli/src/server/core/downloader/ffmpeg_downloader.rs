@@ -1,10 +1,11 @@
-use crate::server::common::throughput::FileSizeProbe;
+use crate::server::common::throughput::SubprocessProgress;
 use crate::server::common::util::redact_process_debug;
 use crate::server::core::downloader;
 use crate::server::core::downloader::{
     DownloadConfig, DownloadStatus, DownloaderType, SegmentEvent, SegmentInfo,
 };
 use crate::server::errors::{AppError, AppResult};
+use biliup::downloader::util::ByteCounter;
 use error_stack::{ResultExt, bail};
 use std::path::PathBuf;
 use std::process::{ExitStatus, Stdio};
@@ -12,7 +13,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{debug, info};
 
 /// FFmpeg下载器实现
 /// 使用FFmpeg进行直播流下载，支持内部和外部分段
@@ -128,6 +129,12 @@ impl FfmpegDownloader {
     fn append_common_input_args(&self, args: &mut Vec<String>, download_config: &DownloadConfig) {
         args.push("-y".to_string()); // 覆盖已存在文件
 
+        // -progress pipe:2: 把 key=value 形式的进度（含累计写出字节 total_size）打到 stderr，
+        // 由 spawn_log 解析出写盘速率；不受 -loglevel 影响。
+        // -nostats: 关掉同样写 stderr、以 \r 刷新的单行统计，避免与进度行混在一起
+        args.extend(["-progress".to_string(), "pipe:2".to_string()]);
+        args.push("-nostats".to_string());
+
         // HTTP headers
         // -headers: 设置HTTP请求头，格式为"Key: Value\r\n"
         // 用于传递User-Agent、Cookie等信息
@@ -212,9 +219,12 @@ impl FfmpegDownloader {
 
         let child = cmd.spawn().change_context(AppError::Unknown)?;
 
-        // ffmpeg 自己落盘，本进程看不到媒体字节；旁路观察 .part 长度得到写盘速率
-        let _probe = FileSizeProbe::spawn(&*part_file, download_config.bytes_written.clone());
-        let status = spawn_log(child, &self.process_handle).await?;
+        let status = spawn_log(
+            child,
+            &self.process_handle,
+            download_config.bytes_written.clone(),
+        )
+        .await?;
         // 退出时，重命名文件
         tokio::fs::rename(&part_file, &output_file)
             .await
@@ -300,7 +310,12 @@ impl FfmpegDownloader {
             segment_index += 1;
             prev_file_path = Some(file_path);
         }
-        let status = spawn_log(child, &self.process_handle).await?;
+        let status = spawn_log(
+            child,
+            &self.process_handle,
+            download_config.bytes_written.clone(),
+        )
+        .await?;
 
         if let Some(file_path) = prev_file_path {
             // 重命名文件
@@ -364,9 +379,12 @@ impl FfmpegDownloader {
     // }
 }
 
+/// 等待 ffmpeg 结束，期间把 stderr 转成日志；`-progress` 的进度行不打日志，
+/// 只把 `total_size` 的增量累加到 `bytes_written`（写盘速率的来源）。
 async fn spawn_log(
     mut child: tokio::process::Child,
     process_handle: &RwLock<Option<tokio::process::Child>>,
+    bytes_written: ByteCounter,
 ) -> AppResult<ExitStatus> {
     let stderr = child.stderr.take().ok_or(AppError::Custom(
         "failed to capture stderr pipe".to_string(),
@@ -379,9 +397,14 @@ async fn spawn_log(
     }
 
     let mut stderr_lines = BufReader::new(stderr).lines();
-    // 将 stderr 打印到当前进程的 stderr
+    // 将 stderr 打印到当前进程的 stderr；进度行只解析不打印
     let stderr_task = tokio::spawn(async move {
+        let mut progress = SubprocessProgress::default();
         while let Ok(Some(line)) = stderr_lines.next_line().await {
+            if progress.observe_ffmpeg(&line, &bytes_written) {
+                debug!("[ffmpeg] {line}");
+                continue;
+            }
             info!("[ffmpeg] {line}");
         }
     });
@@ -445,6 +468,21 @@ mod tests {
 
     fn internal() -> FfmpegDownloader {
         FfmpegDownloader::new(Vec::new(), DownloaderType::FfmpegInternal)
+    }
+
+    #[test]
+    fn both_modes_ask_ffmpeg_for_machine_readable_progress_on_stderr() {
+        for args in [
+            external().build_ffmpeg_args_external_segment(&config(None, None)),
+            internal().build_ffmpeg_args_internal_segment(&config(None, None)),
+        ] {
+            assert_eq!(value_of(&args, "-progress"), Some("pipe:2".to_string()));
+            assert!(args.contains(&"-nostats".to_string()));
+            // 全局选项必须在 -i 之前
+            let progress_at = args.iter().position(|a| a == "-progress").unwrap();
+            let input_at = args.iter().position(|a| a == "-i").unwrap();
+            assert!(progress_at < input_at);
+        }
     }
 
     #[test]

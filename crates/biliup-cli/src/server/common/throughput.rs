@@ -1,11 +1,12 @@
-//! 录制写盘速率：各下载器在写出点往 [`ByteCounter`] 里累加，这里按固定间隔采样，
-//! 用滑动窗口内首尾两次采样的差值算出 bytes/s，供 `/v1/streamers` 透出。
+//! 录制写盘速率：进程内写盘的下载器在写出点往 [`ByteCounter`] 里累加，子进程落盘的
+//! 下载器（ffmpeg / streamlink）由 [`SubprocessProgress`] 解析其 stderr 进度行累加；
+//! [`RateMeter`] 按固定间隔采样，用滑动窗口内首尾两次采样的差值算出 bytes/s，
+//! 供 `/v1/streamers` 透出。
 //!
 //! 采样与计算都在录制热路径之外进行；写盘路径上只有一次原子加法。
 
 use biliup::downloader::util::ByteCounter;
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;
@@ -103,46 +104,87 @@ impl Drop for Sampler {
     }
 }
 
-/// 子进程落盘的下载器（ffmpeg / streamlink）不经过本进程写盘，
-/// 改为旁路观察输出文件长度：每秒读一次 `.part` 的大小，把增量累加到计数器。
-/// 只读元数据，不碰子进程也不碰文件内容；文件尚未创建时静默等待。
-/// 返回的句柄 drop 时停止观察。
-pub struct FileSizeProbe(JoinHandle<()>);
-
-impl FileSizeProbe {
-    pub fn spawn(path: impl Into<PathBuf>, counter: ByteCounter) -> Self {
-        let path = path.into();
-        Self(tokio::spawn(async move {
-            let mut ticker = tokio::time::interval(SAMPLE_INTERVAL);
-            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            let mut last_len = 0u64;
-            loop {
-                ticker.tick().await;
-                last_len = probe_once(&path, last_len, &counter).await;
-            }
-        }))
-    }
+/// 子进程落盘的下载器（ffmpeg / streamlink）不经过本进程写盘，改为解析它们打到 stderr 的
+/// 进度行：两者都会周期性报告「本次进程累计写出多少字节」，这里把增量累加到计数器。
+/// 不读盘、不新开任务，就在既有的 stderr 读取协程里顺带解析；解析不出来只是没有速率，
+/// 不影响录制。
+#[derive(Debug, Default)]
+pub struct SubprocessProgress {
+    /// 当前子进程最近一次报告的累计字节数
+    last_total: u64,
 }
 
-impl Drop for FileSizeProbe {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
+/// ffmpeg `-progress` 输出的字段名（`stream_N_M_q` 另行按前后缀匹配）
+const FFMPEG_PROGRESS_KEYS: &[&str] = &[
+    "frame",
+    "fps",
+    "bitrate",
+    "total_size",
+    "out_time_us",
+    "out_time_ms",
+    "out_time",
+    "dup_frames",
+    "drop_frames",
+    "speed",
+    "progress",
+];
 
-/// 读一次文件长度，把相对上次的增量累加到计数器，返回本次长度供下次差分。
-/// 文件不存在或长度回退（重建）时不累加，只把基准归零。
-async fn probe_once(path: &Path, last_len: u64, counter: &ByteCounter) -> u64 {
-    match tokio::fs::metadata(path).await {
-        Ok(meta) => {
-            let len = meta.len();
-            if len > last_len {
-                counter.add(len - last_len);
-            }
-            len
+impl SubprocessProgress {
+    /// 记录一次累计值：只加增量；回退（换了输出文件）时只重置基准，不倒扣。
+    pub fn advance_to(&mut self, total: u64, counter: &ByteCounter) {
+        if total > self.last_total {
+            counter.add(total - self.last_total);
         }
-        Err(_) => 0,
+        self.last_total = total;
     }
+
+    /// ffmpeg `-progress pipe:2` 的 `key=value` 行，其中 `total_size=N` 是累计写出字节。
+    /// 返回 true 表示这一行是进度行（调用方不必再当普通日志打印）。
+    pub fn observe_ffmpeg(&mut self, line: &str, counter: &ByteCounter) -> bool {
+        let Some((key, value)) = line.split_once('=') else {
+            return false;
+        };
+        let key = key.trim();
+        let is_progress_key = FFMPEG_PROGRESS_KEYS.contains(&key)
+            || (key.starts_with("stream_") && key.ends_with("_q"));
+        if !is_progress_key {
+            return false;
+        }
+        if key == "total_size"
+            && let Ok(total) = value.trim().parse::<u64>()
+        {
+            self.advance_to(total, counter);
+        }
+        true
+    }
+
+    /// streamlink `--progress=force` 的 `[download] Written 12.34 MiB to <file> (5s @ 2.50 MiB/s)`。
+    /// 返回 true 表示这一行是进度行。
+    pub fn observe_streamlink(&mut self, line: &str, counter: &ByteCounter) -> bool {
+        let Some(total) = streamlink_written_bytes(line) else {
+            return false;
+        };
+        self.advance_to(total, counter);
+        true
+    }
+}
+
+/// 从 streamlink 进度行里取出累计写出字节数（`Written 12.34 MiB`，单位为 bytes / KiB / MiB / GiB / TiB）
+pub fn streamlink_written_bytes(line: &str) -> Option<u64> {
+    let rest = line.split_once("[download]")?.1.trim_start();
+    let rest = rest.strip_prefix("Written")?.trim_start();
+    let mut parts = rest.splitn(3, ' ');
+    let amount: f64 = parts.next()?.parse().ok()?;
+    let unit = parts.next()?;
+    let scale: f64 = match unit {
+        "bytes" | "B" => 1.0,
+        "KiB" | "KB" => 1024.0,
+        "MiB" | "MB" => 1024.0 * 1024.0,
+        "GiB" | "GB" => 1024.0 * 1024.0 * 1024.0,
+        "TiB" | "TB" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
+        _ => return None,
+    };
+    Some((amount * scale).round() as u64)
 }
 
 #[cfg(test)]
@@ -211,27 +253,97 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn file_probe_accumulates_growth_and_tolerates_missing_or_rewritten_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("out.flv.part");
+    #[test]
+    fn ffmpeg_progress_lines_feed_total_size_and_are_recognised() {
         let counter = ByteCounter::new();
+        let mut progress = SubprocessProgress::default();
+        // 实测 ffmpeg 6.1 `-progress pipe:2` 的一个进度块
+        let block = [
+            "frame=0",
+            "fps=0.00",
+            "stream_0_0_q=0.0",
+            "bitrate=N/A",
+            "total_size=N/A",
+            "out_time_us=N/A",
+            "out_time_ms=N/A",
+            "out_time=N/A",
+            "dup_frames=0",
+            "drop_frames=0",
+            "speed=N/A",
+            "progress=continue",
+        ];
+        for line in block {
+            assert!(
+                progress.observe_ffmpeg(line, &counter),
+                "{line} 应被识别为进度行"
+            );
+        }
+        assert_eq!(counter.total(), 0, "N/A 不计");
 
-        // 文件还不存在：不累加，基准为 0
-        assert_eq!(probe_once(&path, 0, &counter).await, 0);
-        assert_eq!(counter.total(), 0);
+        assert!(progress.observe_ffmpeg("total_size=63269", &counter));
+        assert!(progress.observe_ffmpeg("total_size=100000", &counter));
+        assert_eq!(counter.total(), 100_000);
+        // 新进程从 0 重新计：不倒扣，只重置基准
+        assert!(progress.observe_ffmpeg("total_size=5000", &counter));
+        assert_eq!(counter.total(), 100_000);
+        assert!(progress.observe_ffmpeg("total_size=7000", &counter));
+        assert_eq!(counter.total(), 102_000);
 
-        std::fs::write(&path, vec![0u8; 100]).unwrap();
-        let len = probe_once(&path, 0, &counter).await;
-        assert_eq!((len, counter.total()), (100, 100));
+        // 普通日志行不是进度行
+        for line in [
+            "ffmpeg version 6.1.1 Copyright (c) 2000-2023",
+            "[flv @ 0x55] Failed to update header with correct duration.",
+            "Input #0, flv, from 'https://x/y.flv?a=b':",
+            "",
+        ] {
+            assert!(!progress.observe_ffmpeg(line, &counter), "{line:?}");
+        }
+    }
 
-        std::fs::write(&path, vec![0u8; 250]).unwrap();
-        let len = probe_once(&path, len, &counter).await;
-        assert_eq!((len, counter.total()), (250, 250));
+    #[test]
+    fn streamlink_progress_lines_are_parsed_in_binary_units() {
+        assert_eq!(
+            streamlink_written_bytes("[download] Written 61.78 KiB to /tmp/x.flv.part (0s)"),
+            Some(63_263)
+        );
+        assert_eq!(
+            streamlink_written_bytes(
+                "[download] Written 488.00 KiB to /tmp/x.flv.part (4s @ 243.92 KiB/s)"
+            ),
+            Some(499_712)
+        );
+        assert_eq!(
+            streamlink_written_bytes("[download] Written 1.50 MiB to a b c.ts (9s @ 1.2 MiB/s)"),
+            Some(1_572_864)
+        );
+        assert_eq!(
+            streamlink_written_bytes("[download] Written 2.00 GiB to x (1h)"),
+            Some(2 * 1024 * 1024 * 1024)
+        );
+        assert_eq!(
+            streamlink_written_bytes("[download] Written 512 bytes to x (0s)"),
+            Some(512)
+        );
+        for line in [
+            "[cli][info] Found matching plugin http for URL httpstream://...",
+            "[cli][info] Writing output to",
+            "[download] Written weird MiB to x",
+            "",
+        ] {
+            assert_eq!(streamlink_written_bytes(line), None, "{line:?}");
+        }
 
-        // 文件被重建变短：不倒扣，只重置基准
-        std::fs::write(&path, vec![0u8; 30]).unwrap();
-        let len = probe_once(&path, len, &counter).await;
-        assert_eq!((len, counter.total()), (30, 250));
+        let counter = ByteCounter::new();
+        let mut progress = SubprocessProgress::default();
+        assert!(progress.observe_streamlink(
+            "[download] Written 240.00 KiB to /tmp/x.flv.part (2s)",
+            &counter
+        ));
+        assert!(progress.observe_streamlink(
+            "[download] Written 488.00 KiB to /tmp/x.flv.part (4s @ 243.92 KiB/s)",
+            &counter
+        ));
+        assert_eq!(counter.total(), 499_712);
+        assert!(!progress.observe_streamlink("[cli][info] Stream ended", &counter));
     }
 }
