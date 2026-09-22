@@ -48,7 +48,8 @@ fn acquire_log_permit(limiter: Arc<Semaphore>) -> Option<OwnedSemaphorePermit> {
     limiter.try_acquire_owned().ok()
 }
 
-fn websocket_origin_allowed(headers: &HeaderMap) -> bool {
+/// WebSocket 握手的 Origin 校验：与 Host 同源，或是本地开发前端。日志与码率两个 WS 共用。
+pub(crate) fn websocket_origin_allowed(headers: &HeaderMap) -> bool {
     let Some(origin) = headers
         .get(header::ORIGIN)
         .and_then(|value| value.to_str().ok())

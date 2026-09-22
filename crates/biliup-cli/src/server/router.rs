@@ -13,7 +13,7 @@ use crate::server::api::live_media::{get_live_avatar, get_live_cover};
 use crate::server::api::live_preview::{
     get_live_danmaku, get_live_danmaku_multi, get_live_stream, get_live_url,
 };
-use crate::server::api::live_rates::get_live_rates;
+use crate::server::api::live_rates::{get_live_rates, ws_live_rates};
 use crate::server::infrastructure::service_register::ServiceRegister;
 use axum::Router;
 use axum::body::Body;
@@ -48,7 +48,9 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         // 预览播放器的实时弹幕（SSE），同样在登录校验之内；监视器多路复用一条
         .route("/v1/streamers/{id}/danmaku", get(get_live_danmaku))
         .route("/v1/danmaku", get(get_live_danmaku_multi))
-        // 录制中各房间的写盘速率（只读内存，每秒轮询画码率曲线；不要为此调快 /v1/streamers）
+        // 录制中各房间的写盘速率（只读内存）：WebSocket 每秒推一帧画码率曲线，HTTP 版供回退 / curl；
+        // 不要为此调快 /v1/streamers
+        .route("/v1/ws/live-rates", get(ws_live_rates))
         .route("/v1/live-rates", get(get_live_rates))
         // 配置管理路由
         .route(
