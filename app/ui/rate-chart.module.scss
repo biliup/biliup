@@ -1,0 +1,66 @@
+/* 写盘速率折线（uPlot）：弹层折线 + 卡片 / 监视器 sparkline 共用。不加过渡动画。 */
+
+.chart {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+/* uPlot 挂载点：宽随容器、高由组件内联指定 */
+.plotHost {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+}
+.plotHost :global(.uplot) {
+  font-family: inherit;
+}
+/* 光标线与点用主题色 */
+.plotHost :global(.u-cursor-x) {
+  border-right: 1px dashed var(--semi-color-text-3);
+}
+
+/* hover 读数：贴在图区顶部，随光标横向移动 */
+.readout {
+  position: absolute;
+  top: 2px;
+  left: 0;
+  z-index: 2;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--semi-color-text-0);
+  background: var(--semi-color-bg-3);
+  border: 1px solid var(--semi-color-border);
+  box-shadow: 0 1px 4px rgba(var(--semi-grey-9), 0.12);
+  pointer-events: none;
+}
+.plotHost[data-variant='sparkline'] .readout {
+  top: -18px;
+}
+
+/* 无采样：只显示「—」 */
+.chart[data-state='empty'],
+.chart[data-state='error'] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--semi-color-text-3);
+  font-variant-numeric: tabular-nums;
+}
+.chart[data-variant='full'][data-state='empty'],
+.chart[data-variant='full'][data-state='error'] {
+  border: 1px dashed var(--semi-color-border);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.chart[data-variant='sparkline'][data-state='empty'],
+.chart[data-variant='sparkline'][data-state='error'] {
+  font-size: 12px;
+}
+.placeholder {
+  user-select: none;
+}
