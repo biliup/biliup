@@ -1,8 +1,12 @@
 /* ===== 应用骨架:自绘侧边栏 ===== */
 
+/* 应用壳：整体占满视口且自身不滚动；侧栏是固定宽度的普通子元素，
+   主内容区（.main）独立滚动。页面本身不滚，长内容不会把侧栏顶出视口（#1705） */
 .app {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   background: var(--semi-color-bg-0);
 }
 
@@ -17,16 +21,13 @@
 }
 
 /* ===== 侧边栏 ===== */
-/* 相对视口吸顶：主内容随文档滚动，侧栏保持在视口内。
-   前提是 html / body / .app 都不能有非 visible 的 overflow（见 bg-global.css） */
+/* 撑满应用壳高度；导航项多于一屏时只有 .nav 内部滚动 */
 .sider {
   width: 220px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  position: sticky;
-  top: 0;
-  height: 100vh;
+  height: 100%;
   background: var(--semi-color-bg-1);
   border-right: 1px solid var(--semi-color-border);
   transition: width 0.18s ease, transform 0.2s ease;
@@ -267,12 +268,14 @@
   height: 16px;
 }
 
-/* ===== 主内容区 ===== */
+/* ===== 主内容区：唯一的滚动容器，页头（PageHeader）的 position: sticky 相对它吸顶 ===== */
 .main {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: auto;
 }
 
 /* ===== 移动端抽屉 ===== */

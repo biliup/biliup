@@ -184,9 +184,6 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
                   type="line"
                   activeKey={activeTab}
                   onChange={setActiveTab}
-                  // 关闭切换动画：Semi 的动画依赖 .semi-tabs-pane 的 overflow: hidden，
-                  // 而平台列表列要在 pane 内 sticky，两者冲突（见 dashboard.module.scss）
-                  tabPaneMotion={false}
                   contentStyle={{
                     margin: '10px 0 0 0',
                   }}

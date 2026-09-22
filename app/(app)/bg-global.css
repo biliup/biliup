@@ -1,11 +1,7 @@
 /* 全局自定义背景：当 body 带 app-has-bg 时生效 */
 
-/*
- * 注意：不要给 html / body 设置 overflow（含 overflow-x: hidden）。
- * 任何非 visible 的 overflow 都会让 body 变成滚动容器，侧栏与页头的
- * position: sticky 就会相对 body 而不是视口定位，随内容一起滚走（#1705）。
- * 下面两个背景层用 position: fixed + inset: 0 铺满视口，不会撑出横向滚动条。
- */
+/* 两个背景层用 position: fixed + inset: 0 铺满视口。页面滚动由应用壳的主内容区承担
+   （layout.module.scss .app / .main），文档本身不滚，这里不需要再给 html / body 设 overflow */
 body.app-has-bg::before {
   content: '';
   position: fixed;
