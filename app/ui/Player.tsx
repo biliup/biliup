@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react'
 import Artplayer from 'artplayer'
 import artplayerPluginDanmuku from 'artplayer-plugin-danmuku'
 import mpegts from 'mpegts.js'
+import type { DanmakuFeed, DanmakuFrame } from '@/app/lib/danmaku-feed'
 
 type VideoPlayer = Artplayer | null
 
@@ -31,19 +32,11 @@ interface PlayerConfig {
   /** mpegts.js 或探测阶段报错（网络 / 解码），附一句可展示的说明 */
   onError?: (message: string) => void
   /**
-   * 实时弹幕：`url` 是 SSE 端点（`/v1/streamers/{id}/danmaku`），`enabled` 控制弹幕层显示与连接。
-   * 传了就装 artplayer-plugin-danmuku；关闭时断开 SSE、隐藏弹幕层，不重建播放器。
+   * 实时弹幕：`feed` 是页面持有的共享连接（见 `DanmakuFeed`），`id` 是本路直播间；
+   * `feed` 为 null 时弹幕层隐藏。传了这个 prop 就装 artplayer-plugin-danmuku，开关切换只
+   * 订阅 / 退订与显示 / 隐藏，不重建播放器。
    */
-  danmaku?: { url: string; enabled: boolean }
-}
-
-/** SSE 里一条弹幕的形状，与后端 `DanmakuFrame` 一致 */
-interface DanmakuFrame {
-  kind: 'danmaku' | 'gift' | 'super_chat' | 'guard_buy'
-  text: string
-  name: string | null
-  color: number
-  ts: number
+  danmaku?: { id: number; feed: DanmakuFeed | null; fontSize?: number }
 }
 
 type DanmukuPlugin = ReturnType<ReturnType<typeof artplayerPluginDanmuku>>
@@ -53,31 +46,14 @@ function rgbInt(color: number): string {
   return `#${(color & 0xffffff).toString(16).padStart(6, '0')}`
 }
 
-/**
- * 订阅实时弹幕 SSE 并逐条送进弹幕层。返回断开函数。
- * 礼物 / 醒目留言 / 上舰置顶显示并描边，普通弹幕滚动。
- */
-function connectDanmaku(url: string, plugin: DanmukuPlugin): () => void {
-  const source = new EventSource(url)
-  const handle = (e: MessageEvent<string>) => {
-    let frame: DanmakuFrame
-    try {
-      frame = JSON.parse(e.data)
-    } catch {
-      return
-    }
-    if (!frame.text) return
-    plugin.emit({
-      text: frame.kind === 'danmaku' ? frame.text : `${frame.text}`,
-      color: rgbInt(frame.color),
-      mode: frame.kind === 'danmaku' ? 0 : 1,
-      border: frame.kind !== 'danmaku',
-    })
-  }
-  for (const kind of ['danmaku', 'gift', 'super_chat', 'guard_buy']) {
-    source.addEventListener(kind, handle as EventListener)
-  }
-  return () => source.close()
+/** 一条弹幕送进弹幕层：普通弹幕滚动，礼物 / 醒目留言 / 上舰置顶并描边。 */
+function emitFrame(plugin: DanmukuPlugin, frame: DanmakuFrame) {
+  plugin.emit({
+    text: frame.text,
+    color: rgbInt(frame.color),
+    mode: frame.kind === 'danmaku' ? 0 : 1,
+    border: frame.kind !== 'danmaku',
+  })
 }
 
 /** 按响应头判断直播流容器：`video/x-flv` → flv，`video/mp2t` → mpegts，`video/mp4` → fmp4。 */
@@ -393,8 +369,10 @@ const Players: React.FC<PlayerConfig> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<VideoPlayer>(null)
-  const danmakuUrl = danmaku?.url
-  const danmakuEnabled = !!danmaku?.enabled
+  const danmakuCapable = !!danmaku
+  const danmakuId = danmaku?.id
+  const danmakuFeed = danmaku?.feed ?? null
+  const danmakuFontSize = danmaku?.fontSize ?? 22
   // 回调放进 ref：父组件每次渲染传入的新函数不应重建播放器
   const callbacksRef = useRef({ onEnded, onError })
   useEffect(() => {
@@ -422,12 +400,12 @@ const Players: React.FC<PlayerConfig> = ({
         isLive,
         muted,
         autoplay,
-        plugins: danmakuUrl
+        plugins: danmakuCapable
           ? [
               artplayerPluginDanmuku({
                 danmuku: [],
                 speed: 7,
-                fontSize: 22,
+                fontSize: danmakuFontSize,
                 opacity: 0.9,
                 antiOverlap: true,
                 synchronousPlayback: false,
@@ -493,24 +471,24 @@ const Players: React.FC<PlayerConfig> = ({
         playerRef.current = null
       }
     }
-  }, [url, height, width, type, codecs, isLive, muted, autoplay, danmakuUrl])
+  }, [url, height, width, type, codecs, isLive, muted, autoplay, danmakuCapable, danmakuFontSize])
 
-  // 弹幕开关：开 → 连 SSE、显示弹幕层；关 → 断开、隐藏。不重建播放器。
+  // 弹幕开关：有 feed → 订阅本路、显示弹幕层；没有 → 退订、隐藏。不重建播放器。
   // 播放器可能还在探测 Content-Type（异步创建），所以轮询等到实例出现再挂。
   useEffect(() => {
-    if (!danmakuUrl || !danmakuEnabled) {
+    if (danmakuId === undefined || !danmakuFeed) {
       const plugin = playerRef.current?.plugins?.artplayerPluginDanmuku as DanmukuPlugin | undefined
       plugin?.hide()
       return
     }
-    let disconnect: (() => void) | null = null
+    let unsubscribe: (() => void) | null = null
     let cancelled = false
     const attach = () => {
       if (cancelled) return true
       const plugin = playerRef.current?.plugins?.artplayerPluginDanmuku as DanmukuPlugin | undefined
       if (!plugin) return false
       plugin.show()
-      disconnect = connectDanmaku(danmakuUrl, plugin)
+      unsubscribe = danmakuFeed.subscribe(danmakuId, (frame) => emitFrame(plugin, frame))
       return true
     }
     if (!attach()) {
@@ -520,14 +498,14 @@ const Players: React.FC<PlayerConfig> = ({
       return () => {
         cancelled = true
         clearInterval(timer)
-        disconnect?.()
+        unsubscribe?.()
       }
     }
     return () => {
       cancelled = true
-      disconnect?.()
+      unsubscribe?.()
     }
-  }, [danmakuUrl, danmakuEnabled, url, type, codecs])
+  }, [danmakuId, danmakuFeed, url, type, codecs])
 
   return <div ref={containerRef} style={{ width, height }} />
 }

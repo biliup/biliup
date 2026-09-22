@@ -9,13 +9,13 @@ import { platformName } from '@/app/lib/status'
 import {
   canPreview,
   formatRate,
-  liveDanmakuUrl,
   liveImageUrl,
   livePreviewUrl,
   previewDisabledReason,
   previewFormatLabel,
 } from '@/app/lib/use-dashboard'
 import { useBoolPref } from '@/app/lib/use-local-pref'
+import { type DanmakuFeed, useDanmakuFeed } from '@/app/lib/danmaku-feed'
 import styles from './live-preview.module.scss'
 
 const Players = dynamic(() => import('@/app/ui/Player'), { ssr: false })
@@ -39,15 +39,15 @@ export function LivePreviewPlayer({
   streamer,
   muted = false,
   compact = false,
-  danmaku = false,
+  danmakuFeed = null,
   onFatal,
 }: {
   streamer: LiveStreamerEntity
   muted?: boolean
   /** 监视器小窗：状态文字更简短 */
   compact?: boolean
-  /** 是否显示实时弹幕（仅平台有弹幕客户端时生效） */
-  danmaku?: boolean
+  /** 页面持有的实时弹幕连接；null 表示弹幕关。仅平台有弹幕客户端时装弹幕层 */
+  danmakuFeed?: DanmakuFeed | null
   /** 自动重连耗尽或不可恢复错误（415 / 429 / 解码失败）时通知父组件 */
   onFatal?: (message: string) => void
 }) {
@@ -59,9 +59,9 @@ export function LivePreviewPlayer({
   const format = streamer.preview?.format ?? undefined
   const codecs = streamer.preview?.codecs ?? null
   const url = livePreviewUrl(streamer.id)
-  // 平台有弹幕客户端才装弹幕层；开关只控制显示与 SSE 连接
+  // 平台有弹幕客户端才装弹幕层；开关只控制订阅与显示
   const danmakuLayer = streamer.preview?.danmaku
-    ? { url: liveDanmakuUrl(streamer.id), enabled: danmaku }
+    ? { id: streamer.id, feed: danmakuFeed, fontSize: compact ? 15 : 22 }
     : undefined
   // 出错 / 断开时把封面垫在说明文字后面，而不是一块黑
   const cover = liveImageUrl(streamer.id, 'cover', streamer.live_cover_url)
@@ -189,6 +189,8 @@ export function LivePreviewModal({
   const format = streamer.preview?.format
   const danmakuAvailable = !!streamer.preview?.danmaku
   const [danmakuPref, setDanmakuPref] = useBoolPref(MODAL_DANMAKU_KEY, true)
+  const danmakuOn = visible && danmakuAvailable && danmakuPref
+  const danmakuFeed = useDanmakuFeed([streamer.id], danmakuOn)
   const notifiedRef = useRef(false)
   useEffect(() => {
     if (!visible) notifiedRef.current = false
@@ -252,11 +254,7 @@ export function LivePreviewModal({
     >
       {/* 弹层关闭即卸载：不留后台连接 */}
       {visible ? (
-        <LivePreviewPlayer
-          streamer={streamer}
-          danmaku={danmakuAvailable && danmakuPref}
-          onFatal={handleFatal}
-        />
+        <LivePreviewPlayer streamer={streamer} danmakuFeed={danmakuOn ? danmakuFeed : null} onFatal={handleFatal} />
       ) : null}
       <div className={styles.modalFoot}>
         <Text type="tertiary" size="small">

@@ -15,6 +15,7 @@ import {
   STREAMERS_REFRESH_MS,
 } from '@/app/lib/use-dashboard'
 import { useBoolPref, useChoicePref } from '@/app/lib/use-local-pref'
+import { useDanmakuFeed } from '@/app/lib/danmaku-feed'
 import { LivePreviewPlayer } from './LivePreview'
 import styles from './live-monitor.module.scss'
 
@@ -23,7 +24,20 @@ import styles from './live-monitor.module.scss'
  * （服务端每间上限见 `PREVIEW_MAX_SUBSCRIBERS_PER_ROOM`，进程上限 16），改这里即可换默认值。
  */
 export const DEFAULT_MONITOR_TILES = 4
-export const MONITOR_TILE_OPTIONS = [1, 2, 4, 6, 9]
+/**
+ * 浏览器对同一主机的 HTTP/1.1 并发连接只有 6 个：每路小窗占 1 个长连接，弹幕复用 1 个，
+ * 列表轮询还要留 1 个，所以 HTTP/1.1 下最多 4 路；页面走 HTTP/2、HTTP/3（TLS 反代）时不受此限，
+ * 放开 6 / 9 路。
+ */
+export const MONITOR_TILE_OPTIONS_H1 = [1, 2, 4]
+export const MONITOR_TILE_OPTIONS_H2 = [1, 2, 4, 6, 9]
+
+function tileOptions(): number[] {
+  if (typeof window === 'undefined') return MONITOR_TILE_OPTIONS_H1
+  const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
+  const proto = nav?.nextHopProtocol ?? ''
+  return proto === 'h2' || proto === 'h3' ? MONITOR_TILE_OPTIONS_H2 : MONITOR_TILE_OPTIONS_H1
+}
 const TILES_KEY = 'biliup.monitor.maxTiles'
 /** 多路同屏默认不开弹幕（每路一条 SSE、多路叠加太吵），开关记在本地 */
 const DANMAKU_KEY = 'biliup.monitor.danmaku'
@@ -71,7 +85,8 @@ export default function LiveMonitor() {
   const { data: infos } = useSWR<StreamerInfo[]>('/v1/streamer-info', fetcher, {
     refreshInterval: SLOW_REFRESH_MS,
   })
-  const [maxTiles, setMaxTiles] = useChoicePref(TILES_KEY, MONITOR_TILE_OPTIONS, DEFAULT_MONITOR_TILES)
+  const options = tileOptions()
+  const [maxTiles, setMaxTiles] = useChoicePref(TILES_KEY, options, DEFAULT_MONITOR_TILES)
   const [danmaku, setDanmaku] = useBoolPref(DANMAKU_KEY, false)
   const [selection, setSelection] = useState<Selection>({ order: [], stopped: [] })
 
@@ -80,6 +95,9 @@ export default function LiveMonitor() {
   const previewableIds = previewable.map((s) => s.id)
   const active = resolveActive(selection, previewableIds, maxTiles)
   const activeSet = new Set(active)
+  // 正在播且平台有弹幕客户端的那几路共用一条弹幕连接
+  const danmakuIds = previewable.filter((s) => activeSet.has(s.id) && s.preview?.danmaku).map((s) => s.id)
+  const danmakuFeed = useDanmakuFeed(danmakuIds, danmaku)
 
   const infoByUrl = new Map<string, StreamerInfo>()
   for (const i of infos ?? []) {
@@ -151,7 +169,7 @@ export default function LiveMonitor() {
             size="small"
             value={maxTiles}
             onChange={(v) => setMaxTiles(Number(v))}
-            optionList={MONITOR_TILE_OPTIONS.map((n) => ({ value: n, label: `${n} 路` }))}
+            optionList={options.map((n) => ({ value: n, label: `${n} 路` }))}
             style={{ width: 88 }}
             aria-label="同屏路数"
           />
@@ -204,7 +222,7 @@ export default function LiveMonitor() {
                 ) : null}
               </header>
               {playing ? (
-                <LivePreviewPlayer streamer={s} muted compact danmaku={danmaku && !!s.preview?.danmaku} />
+                <LivePreviewPlayer streamer={s} muted compact danmakuFeed={danmaku ? danmakuFeed : null} />
               ) : (
                 <button
                   type="button"

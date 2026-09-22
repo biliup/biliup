@@ -117,11 +117,6 @@ export function livePreviewUrl(id: number): string {
   return `${API_BASE}/v1/streamers/${id}/live`
 }
 
-/** 该直播间实时弹幕的 SSE 地址。 */
-export function liveDanmakuUrl(id: number): string {
-  return `${API_BASE}/v1/streamers/${id}/danmaku`
-}
-
 /**
  * 卡片 / 监视器能否起播：正在录制、下载器能旁路、容器已确定。
  * 容器未定（刚开始拉流的前几秒）时按钮先禁用，下一次轮询拿到 format 再放开。
