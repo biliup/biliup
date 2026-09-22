@@ -63,14 +63,14 @@ pub async fn get_streamers_endpoint(
             .into_iter()
             .find(|worker| worker.live_streamer.id == x.id);
 
-        let (status, live_bytes_per_sec) = match option.as_ref() {
+        let (status, live) = match option.as_ref() {
             Some(t) => {
                 let downloader_status = t.downloader_status.read().unwrap();
-                let live_bytes_per_sec = match &*downloader_status {
-                    WorkerStatus::Working(task) => task.bytes_per_sec(),
+                let live = match &*downloader_status {
+                    WorkerStatus::Working(task) => Some((task.bytes_per_sec(), task.live_media())),
                     _ => None,
                 };
-                (format!("{:?}", *downloader_status), live_bytes_per_sec)
+                (format!("{:?}", *downloader_status), live)
             }
             None => (String::new(), None),
         };
@@ -82,6 +82,8 @@ pub async fn get_streamers_endpoint(
             Some(reason) if status != "Working" => reason.to_string(),
             _ => status,
         };
+        let (live_bytes_per_sec, live_media) = live.unzip();
+        let live_media = live_media.unwrap_or_default();
 
         results.push(LiveStreamerResponse {
             status,
@@ -89,7 +91,9 @@ pub async fn get_streamers_endpoint(
             upload_status: option
                 .map(|t| format!("{:?}", *t.uploader_status.read().unwrap()))
                 .unwrap_or_default(),
-            live_bytes_per_sec,
+            live_bytes_per_sec: live_bytes_per_sec.flatten(),
+            live_cover_url: live_media.cover_url,
+            live_avatar_url: live_media.avatar_url,
         });
     }
     Ok(Json(results))

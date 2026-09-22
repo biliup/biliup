@@ -115,6 +115,25 @@ impl SegmentEventProcessor {
     }
 }
 
+/// 正在录制的直播间的封面与头像地址，供界面透出。
+///
+/// 只放在内存里，随下载任务消亡；每次 `check_stream` 拿到新的流信息就刷新一遍。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LiveMedia {
+    pub cover_url: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+impl LiveMedia {
+    pub fn from_stream(stream: &LiveStream) -> Self {
+        let non_empty = |s: &str| (!s.trim().is_empty()).then(|| s.to_string());
+        Self {
+            cover_url: non_empty(&stream.live_cover_url),
+            avatar_url: stream.avatar_url.as_deref().and_then(non_empty),
+        }
+    }
+}
+
 /// 下载任务
 pub struct DownloadTask {
     token: CancellationToken,
@@ -123,10 +142,11 @@ pub struct DownloadTask {
     sync_session: Option<Arc<Mutex<SyncSession>>>,
     /// 写盘速率表；各下载器拿它的计数器句柄累加，采样任务随 `execute` 启停。
     meter: Arc<RateMeter>,
+    media: std::sync::RwLock<LiveMedia>,
 }
 
 impl DownloadTask {
-    pub fn new(downloader: DownloaderRuntime) -> Self {
+    pub fn new(downloader: DownloaderRuntime, stream: &LiveStream) -> Self {
         let sync_session = matches!(&downloader, DownloaderRuntime::Sync(_))
             .then(|| Arc::new(Mutex::new(SyncSession::default())));
         Self {
@@ -135,6 +155,7 @@ impl DownloadTask {
             downloader,
             sync_session,
             meter: Arc::new(RateMeter::new()),
+            media: std::sync::RwLock::new(LiveMedia::from_stream(stream)),
         }
     }
 
@@ -146,6 +167,15 @@ impl DownloadTask {
             DownloaderRuntime::Sync(_) | DownloaderRuntime::YtDlp(_) => None,
             _ => self.meter.bytes_per_sec(),
         }
+    }
+
+    /// 当前直播间的封面与头像地址。
+    pub fn live_media(&self) -> LiveMedia {
+        self.media.read().unwrap().clone()
+    }
+
+    fn refresh_media(&self, stream: &LiveStream) {
+        *self.media.write().unwrap() = LiveMedia::from_stream(stream);
     }
 
     pub(self) async fn execute(
@@ -214,6 +244,7 @@ impl DownloadTask {
                     stream: next_stream,
                 }) => {
                     stream = *next_stream;
+                    self.refresh_media(&stream);
                     info!(
                         url = url,
                         "Stream is still live, preparing to retry. attempt: {}", retry_count
@@ -430,10 +461,10 @@ pub async fn start_download_workflow(
     sender: Sender<UploaderMessage>,
     rooms_handle: Arc<Monitor>,
 ) {
-    let task = Arc::new(DownloadTask::new(downloader_runtime(
-        ctx.config().downloader,
+    let task = Arc::new(DownloadTask::new(
+        downloader_runtime(ctx.config().downloader, ctx.live_stream()),
         ctx.live_stream(),
-    )));
+    ));
     ctx.change_status(Stage::Download, WorkerStatus::Working(task.clone()))
         .await;
 

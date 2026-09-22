@@ -79,6 +79,7 @@ impl NiconicoLive {
                 title,
                 date: Utc::now(),
                 live_cover_url: String::new(),
+                avatar_url: None,
                 raw_stream_url: self.url.clone(),
                 platform: "niconico".to_string(),
                 stream_headers: HashMap::new(),

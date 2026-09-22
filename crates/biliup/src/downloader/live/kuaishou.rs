@@ -92,6 +92,7 @@ impl KuaishouLive {
                 title,
                 date: Utc::now(),
                 live_cover_url: live_stream.cover_url.unwrap_or_default(),
+                avatar_url: None,
                 suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "flv".to_string()),
                 raw_stream_url,
                 platform: "kuaishou".to_string(),

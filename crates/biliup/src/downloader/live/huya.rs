@@ -152,6 +152,7 @@ impl<'a> HuyaLive<'a> {
                 title: profile.title,
                 date: Utc::now(),
                 live_cover_url: profile.cover,
+                avatar_url: (!profile.avatar.is_empty()).then_some(profile.avatar),
                 suffix: media_ext_from_url(&raw_stream_url)
                     .unwrap_or_else(|| self.huya_protocol.extension().to_string()),
                 raw_stream_url,
@@ -280,6 +281,7 @@ impl<'a> HuyaLive<'a> {
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .replace("http://", "https://"),
+            avatar: huya_image_url(live_data.get("avatar180")),
             max_bitrate: live_data
                 .get("bitRate")
                 .and_then(Value::as_u64)
@@ -355,6 +357,7 @@ impl<'a> HuyaLive<'a> {
                 .and_then(|cover| cover.as_str())
                 .unwrap_or_default()
                 .replace("http://", "https://"),
+            avatar: huya_image_url(live_info.get("avatar180")),
             max_bitrate: live_info
                 .get("bitRate")
                 .and_then(|bitrate| bitrate.as_u64())
@@ -561,9 +564,19 @@ impl<'a> HuyaLive<'a> {
 struct HuyaRoomProfile {
     title: String,
     cover: String,
+    /// 主播头像（`avatar180`），网页 `gameLiveInfo` 与小程序 `liveData` 里都有
+    avatar: String,
     max_bitrate: u32,
     bitrate_info: Vec<Value>,
     stream_info: Vec<Value>,
+}
+
+/// 虎牙图片地址常带 `http://`，与 `screenshot` 一样统一成 https；缺失时为空串
+fn huya_image_url(value: Option<&Value>) -> String {
+    value
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .replace("http://", "https://")
 }
 
 enum HuyaProtocol {
@@ -888,5 +901,17 @@ mod tests {
 
         assert_eq!(value["text"], "}; { ]");
         assert_eq!(value["items"][0]["value"], 1);
+    }
+
+    #[test]
+    fn huya_image_url_upgrades_to_https_and_tolerates_missing_field() {
+        let info = serde_json::json!({
+            "avatar180": "http://huyaimg.msstatic.com/avatar/1099/f6/face_180_135.jpg?1"
+        });
+        assert_eq!(
+            huya_image_url(info.get("avatar180")),
+            "https://huyaimg.msstatic.com/avatar/1099/f6/face_180_135.jpg?1"
+        );
+        assert_eq!(huya_image_url(info.get("screenshot")), "");
     }
 }
