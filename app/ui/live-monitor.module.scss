@@ -33,6 +33,13 @@
   gap: 8px;
 }
 
+.switchRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 8px;
+}
+
 .hint {
   line-height: 1.5;
 }

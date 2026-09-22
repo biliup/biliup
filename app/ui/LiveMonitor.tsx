@@ -1,7 +1,7 @@
 'use client'
-import React, { useState, useSyncExternalStore } from 'react'
+import React, { useState } from 'react'
 import useSWR from 'swr'
-import { Button, Empty, Select, Tag, Tooltip, Typography } from '@douyinfe/semi-ui'
+import { Button, Empty, Select, Switch, Tag, Tooltip, Typography } from '@douyinfe/semi-ui'
 import { IconPlay, IconStop } from '@douyinfe/semi-icons'
 import { fetcher, LiveStreamerEntity, StreamerInfo } from '@/app/lib/api-streamer'
 import { LIVE_STATUS, platformName } from '@/app/lib/status'
@@ -14,6 +14,7 @@ import {
   SLOW_REFRESH_MS,
   STREAMERS_REFRESH_MS,
 } from '@/app/lib/use-dashboard'
+import { useBoolPref, useChoicePref } from '@/app/lib/use-local-pref'
 import { LivePreviewPlayer } from './LivePreview'
 import styles from './live-monitor.module.scss'
 
@@ -23,32 +24,9 @@ import styles from './live-monitor.module.scss'
  */
 export const DEFAULT_MONITOR_TILES = 4
 export const MONITOR_TILE_OPTIONS = [1, 2, 4, 6, 9]
-const STORAGE_KEY = 'biliup.monitor.maxTiles'
-
-/* ---- 同屏路数持久化：localStorage 作为外部 store，服务端与首屏统一给默认值，避免水合不一致 ---- */
-const listeners = new Set<() => void>()
-function readMaxTiles(): number {
-  if (typeof window === 'undefined') return DEFAULT_MONITOR_TILES
-  const raw = window.localStorage.getItem(STORAGE_KEY)
-  const n = raw ? Number(raw) : NaN
-  return MONITOR_TILE_OPTIONS.includes(n) ? n : DEFAULT_MONITOR_TILES
-}
-function writeMaxTiles(n: number) {
-  window.localStorage.setItem(STORAGE_KEY, String(n))
-  listeners.forEach((l) => l())
-}
-function subscribeMaxTiles(listener: () => void) {
-  listeners.add(listener)
-  window.addEventListener('storage', listener)
-  return () => {
-    listeners.delete(listener)
-    window.removeEventListener('storage', listener)
-  }
-}
-function useMaxTiles(): [number, (n: number) => void] {
-  const value = useSyncExternalStore(subscribeMaxTiles, readMaxTiles, () => DEFAULT_MONITOR_TILES)
-  return [value, writeMaxTiles]
-}
+const TILES_KEY = 'biliup.monitor.maxTiles'
+/** 多路同屏默认不开弹幕（每路一条 SSE、多路叠加太吵），开关记在本地 */
+const DANMAKU_KEY = 'biliup.monitor.danmaku'
 
 /** 用户的选择：手动激活的顺序（先进先出）与手动停掉的房间；其余由数据推导。 */
 interface Selection {
@@ -93,7 +71,8 @@ export default function LiveMonitor() {
   const { data: infos } = useSWR<StreamerInfo[]>('/v1/streamer-info', fetcher, {
     refreshInterval: SLOW_REFRESH_MS,
   })
-  const [maxTiles, setMaxTiles] = useMaxTiles()
+  const [maxTiles, setMaxTiles] = useChoicePref(TILES_KEY, MONITOR_TILE_OPTIONS, DEFAULT_MONITOR_TILES)
+  const [danmaku, setDanmaku] = useBoolPref(DANMAKU_KEY, false)
   const [selection, setSelection] = useState<Selection>({ order: [], stopped: [] })
 
   const live = (streamers ?? []).filter((s) => s.status === LIVE_STATUS)
@@ -157,6 +136,14 @@ export default function LiveMonitor() {
           </Text>
         </div>
         <div className={styles.controls}>
+          <Tooltip content="所有小窗一起开关；只有平台实现了弹幕客户端的房间会显示">
+            <span className={styles.switchRow}>
+              <Text type="tertiary" size="small">
+                弹幕
+              </Text>
+              <Switch size="small" checked={danmaku} onChange={(v) => setDanmaku(!!v)} aria-label="弹幕" />
+            </span>
+          </Tooltip>
           <Text type="tertiary" size="small">
             同屏路数
           </Text>
@@ -217,7 +204,7 @@ export default function LiveMonitor() {
                 ) : null}
               </header>
               {playing ? (
-                <LivePreviewPlayer streamer={s} muted compact />
+                <LivePreviewPlayer streamer={s} muted compact danmaku={danmaku && !!s.preview?.danmaku} />
               ) : (
                 <button
                   type="button"

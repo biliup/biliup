@@ -70,10 +70,7 @@ pub async fn get_streamers_endpoint(
                     WorkerStatus::Working(task) => Some((
                         task.bytes_per_sec(),
                         task.live_media(),
-                        LivePreviewResponse::new(
-                            task.preview().status(),
-                            task.danmaku_available(),
-                        ),
+                        LivePreviewResponse::new(task.preview().status(), task.danmaku_available()),
                     )),
                     _ => None,
                 };

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react'
 import Artplayer from 'artplayer'
+import artplayerPluginDanmuku from 'artplayer-plugin-danmuku'
 import mpegts from 'mpegts.js'
 
 type VideoPlayer = Artplayer | null
@@ -29,6 +30,54 @@ interface PlayerConfig {
   onEnded?: () => void
   /** mpegts.js 或探测阶段报错（网络 / 解码），附一句可展示的说明 */
   onError?: (message: string) => void
+  /**
+   * 实时弹幕：`url` 是 SSE 端点（`/v1/streamers/{id}/danmaku`），`enabled` 控制弹幕层显示与连接。
+   * 传了就装 artplayer-plugin-danmuku；关闭时断开 SSE、隐藏弹幕层，不重建播放器。
+   */
+  danmaku?: { url: string; enabled: boolean }
+}
+
+/** SSE 里一条弹幕的形状，与后端 `DanmakuFrame` 一致 */
+interface DanmakuFrame {
+  kind: 'danmaku' | 'gift' | 'super_chat' | 'guard_buy'
+  text: string
+  name: string | null
+  color: number
+  ts: number
+}
+
+type DanmukuPlugin = ReturnType<ReturnType<typeof artplayerPluginDanmuku>>
+
+/** 把后端的 RGB 整数转成 CSS 颜色 */
+function rgbInt(color: number): string {
+  return `#${(color & 0xffffff).toString(16).padStart(6, '0')}`
+}
+
+/**
+ * 订阅实时弹幕 SSE 并逐条送进弹幕层。返回断开函数。
+ * 礼物 / 醒目留言 / 上舰置顶显示并描边，普通弹幕滚动。
+ */
+function connectDanmaku(url: string, plugin: DanmukuPlugin): () => void {
+  const source = new EventSource(url)
+  const handle = (e: MessageEvent<string>) => {
+    let frame: DanmakuFrame
+    try {
+      frame = JSON.parse(e.data)
+    } catch {
+      return
+    }
+    if (!frame.text) return
+    plugin.emit({
+      text: frame.kind === 'danmaku' ? frame.text : `${frame.text}`,
+      color: rgbInt(frame.color),
+      mode: frame.kind === 'danmaku' ? 0 : 1,
+      border: frame.kind !== 'danmaku',
+    })
+  }
+  for (const kind of ['danmaku', 'gift', 'super_chat', 'guard_buy']) {
+    source.addEventListener(kind, handle as EventListener)
+  }
+  return () => source.close()
 }
 
 /** 按响应头判断直播流容器：`video/x-flv` → flv，`video/mp2t` → mpegts，`video/mp4` → fmp4。 */
@@ -340,9 +389,12 @@ const Players: React.FC<PlayerConfig> = ({
   autoplay = isLive,
   onEnded,
   onError,
+  danmaku,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<VideoPlayer>(null)
+  const danmakuUrl = danmaku?.url
+  const danmakuEnabled = !!danmaku?.enabled
   // 回调放进 ref：父组件每次渲染传入的新函数不应重建播放器
   const callbacksRef = useRef({ onEnded, onError })
   useEffect(() => {
@@ -370,7 +422,21 @@ const Players: React.FC<PlayerConfig> = ({
         isLive,
         muted,
         autoplay,
-        plugins: [],
+        plugins: danmakuUrl
+          ? [
+              artplayerPluginDanmuku({
+                danmuku: [],
+                speed: 7,
+                fontSize: 22,
+                opacity: 0.9,
+                antiOverlap: true,
+                synchronousPlayback: false,
+                emitter: false,
+                visible: true,
+                margin: [10, '25%'],
+              }),
+            ]
+          : [],
       }
       const onEndedCb = () => callbacksRef.current.onEnded?.()
       const onErrorCb = (message: string) => callbacksRef.current.onError?.(message)
@@ -427,7 +493,41 @@ const Players: React.FC<PlayerConfig> = ({
         playerRef.current = null
       }
     }
-  }, [url, height, width, type, codecs, isLive, muted, autoplay])
+  }, [url, height, width, type, codecs, isLive, muted, autoplay, danmakuUrl])
+
+  // 弹幕开关：开 → 连 SSE、显示弹幕层；关 → 断开、隐藏。不重建播放器。
+  // 播放器可能还在探测 Content-Type（异步创建），所以轮询等到实例出现再挂。
+  useEffect(() => {
+    if (!danmakuUrl || !danmakuEnabled) {
+      const plugin = playerRef.current?.plugins?.artplayerPluginDanmuku as DanmukuPlugin | undefined
+      plugin?.hide()
+      return
+    }
+    let disconnect: (() => void) | null = null
+    let cancelled = false
+    const attach = () => {
+      if (cancelled) return true
+      const plugin = playerRef.current?.plugins?.artplayerPluginDanmuku as DanmukuPlugin | undefined
+      if (!plugin) return false
+      plugin.show()
+      disconnect = connectDanmaku(danmakuUrl, plugin)
+      return true
+    }
+    if (!attach()) {
+      const timer = setInterval(() => {
+        if (attach()) clearInterval(timer)
+      }, 300)
+      return () => {
+        cancelled = true
+        clearInterval(timer)
+        disconnect?.()
+      }
+    }
+    return () => {
+      cancelled = true
+      disconnect?.()
+    }
+  }, [danmakuUrl, danmakuEnabled, url, type, codecs])
 
   return <div ref={containerRef} style={{ width, height }} />
 }

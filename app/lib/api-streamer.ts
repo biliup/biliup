@@ -103,6 +103,8 @@ export interface LivePreviewInfo {
 	codecs: string | null;
 	/** 不可预览的原因（ffmpeg / streamlink 子进程落盘、HEVC FLV 等） */
 	reason: string | null;
+	/** 这一路有没有实时弹幕（平台实现了弹幕客户端），有则 /v1/streamers/{id}/danmaku（SSE）可用 */
+	danmaku: boolean;
 }
 
 export interface LiveStreamerEntity {

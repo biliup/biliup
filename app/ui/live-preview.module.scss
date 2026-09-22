@@ -81,6 +81,14 @@
   min-width: 0;
 }
 
+.danmakuSwitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 .modalFoot {
   padding: 10px 24px 14px;
 }

@@ -1,7 +1,7 @@
 'use client'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
-import { Button, Modal, Tag, Toast, Tooltip, Typography } from '@douyinfe/semi-ui'
+import { Button, Modal, Switch, Tag, Toast, Tooltip, Typography } from '@douyinfe/semi-ui'
 import { IconPlay, IconRefresh } from '@douyinfe/semi-icons'
 import type { ButtonProps } from '@douyinfe/semi-ui/lib/es/button'
 import { LiveStreamerEntity } from '@/app/lib/api-streamer'
@@ -9,11 +9,13 @@ import { platformName } from '@/app/lib/status'
 import {
   canPreview,
   formatRate,
+  liveDanmakuUrl,
   liveImageUrl,
   livePreviewUrl,
   previewDisabledReason,
   previewFormatLabel,
 } from '@/app/lib/use-dashboard'
+import { useBoolPref } from '@/app/lib/use-local-pref'
 import styles from './live-preview.module.scss'
 
 const Players = dynamic(() => import('@/app/ui/Player'), { ssr: false })
@@ -21,6 +23,8 @@ const Players = dynamic(() => import('@/app/ui/Player'), { ssr: false })
 /** 服务端断开（掉队 / 换直链）后自动重连的次数上限；超过后交给用户手动重试 */
 const MAX_AUTO_RECONNECT = 3
 const RECONNECT_DELAY_MS = 2000
+/** 弹层弹幕开关记在本地，默认开；监视器另有自己的开关（默认关） */
+const MODAL_DANMAKU_KEY = 'biliup.preview.danmaku'
 
 type Phase = 'connecting' | 'playing' | 'reconnecting' | 'ended' | 'error'
 
@@ -35,12 +39,15 @@ export function LivePreviewPlayer({
   streamer,
   muted = false,
   compact = false,
+  danmaku = false,
   onFatal,
 }: {
   streamer: LiveStreamerEntity
   muted?: boolean
   /** 监视器小窗：状态文字更简短 */
   compact?: boolean
+  /** 是否显示实时弹幕（仅平台有弹幕客户端时生效） */
+  danmaku?: boolean
   /** 自动重连耗尽或不可恢复错误（415 / 429 / 解码失败）时通知父组件 */
   onFatal?: (message: string) => void
 }) {
@@ -52,6 +59,10 @@ export function LivePreviewPlayer({
   const format = streamer.preview?.format ?? undefined
   const codecs = streamer.preview?.codecs ?? null
   const url = livePreviewUrl(streamer.id)
+  // 平台有弹幕客户端才装弹幕层；开关只控制显示与 SSE 连接
+  const danmakuLayer = streamer.preview?.danmaku
+    ? { url: liveDanmakuUrl(streamer.id), enabled: danmaku }
+    : undefined
   // 出错 / 断开时把封面垫在说明文字后面，而不是一块黑
   const cover = liveImageUrl(streamer.id, 'cover', streamer.live_cover_url)
 
@@ -125,6 +136,7 @@ export function LivePreviewPlayer({
           autoplay
           onEnded={handleEnded}
           onError={handleError}
+          danmaku={danmakuLayer}
         />
       ) : null}
       {phase !== 'playing' ? (
@@ -175,6 +187,8 @@ export function LivePreviewModal({
   const name = streamer.remark || streamer.url
   const rate = formatRate(streamer.live_bytes_per_sec)
   const format = streamer.preview?.format
+  const danmakuAvailable = !!streamer.preview?.danmaku
+  const [danmakuPref, setDanmakuPref] = useBoolPref(MODAL_DANMAKU_KEY, true)
   const notifiedRef = useRef(false)
   useEffect(() => {
     if (!visible) notifiedRef.current = false
@@ -213,11 +227,37 @@ export function LivePreviewModal({
           <Text type="tertiary" size="small">
             {rate ? `写盘 ${rate}` : '写盘速率 —'}
           </Text>
+          <Tooltip
+            content={
+              danmakuAvailable
+                ? '显示录制中的实时弹幕（来自本进程的弹幕客户端）'
+                : '该平台没有弹幕客户端（目前支持 B 站 / 抖音 / 斗鱼 / 虎牙）'
+            }
+          >
+            <span className={styles.danmakuSwitch}>
+              <Text type="tertiary" size="small">
+                弹幕
+              </Text>
+              <Switch
+                size="small"
+                checked={danmakuAvailable && danmakuPref}
+                disabled={!danmakuAvailable}
+                onChange={(v) => setDanmakuPref(!!v)}
+                aria-label="弹幕"
+              />
+            </span>
+          </Tooltip>
         </div>
       }
     >
       {/* 弹层关闭即卸载：不留后台连接 */}
-      {visible ? <LivePreviewPlayer streamer={streamer} onFatal={handleFatal} /> : null}
+      {visible ? (
+        <LivePreviewPlayer
+          streamer={streamer}
+          danmaku={danmakuAvailable && danmakuPref}
+          onFatal={handleFatal}
+        />
+      ) : null}
       <div className={styles.modalFoot}>
         <Text type="tertiary" size="small">
           画面来自正在写盘的同一路流，不另外向直播平台拉流；关闭弹窗即断开。

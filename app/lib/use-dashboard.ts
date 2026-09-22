@@ -112,9 +112,14 @@ export function liveImageUrl(
   return `${API_BASE}/v1/streamers/${id}/${kind}?v=${(h >>> 0).toString(36)}`
 }
 
-/** 正在录制的那一路流的同源地址（chunked FLV / MPEG-TS），供页面内播放器直接拉取。 */
+/** 正在录制的那一路流的同源地址（chunked FLV / MPEG-TS / fMP4），供页面内播放器直接拉取。 */
 export function livePreviewUrl(id: number): string {
   return `${API_BASE}/v1/streamers/${id}/live`
+}
+
+/** 该直播间实时弹幕的 SSE 地址。 */
+export function liveDanmakuUrl(id: number): string {
+  return `${API_BASE}/v1/streamers/${id}/danmaku`
 }
 
 /**
