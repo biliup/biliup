@@ -1,12 +1,16 @@
-//! 正在录制的直播间封面 / 主播头像的同源图片代理。
+//! 正在录制的直播间封面 / 主播头像接口。
 //!
-//! 页面直接 `<img src="https://i0.hdslb.com/...">` 会带上 biliup 自己的 Referer，
-//! B 站等图片 CDN 对站外 Referer 返回 403。这里由服务端以直播间页面地址作 Referer 去取，
-//! 再把字节转发给页面，并按图片 URL 做一份短暂的内存缓存。
+//! - 封面每场直播都可能换：服务端以直播间页面地址作 Referer 去取（页面直连图片 CDN 会被
+//!   B 站等按站外 Referer 拒绝），按图片 URL 做一份短暂的内存缓存后转发。
+//! - 头像几乎不变：开播时下载一次存到 `data/avatar/`，这里直接读本地文件；
+//!   本地还没有（或地址变了）时现场下载一次再返回。
 //!
 //! 只按主播 id 取 worker 里已经拿到的地址，不接受任意 URL，避免变成开放代理。
 //! 路由注册在 `router()` 里，`--auth` 时与 `/v1/streamers` 同一道登录校验。
 
+use crate::server::common::live_image::{
+    AvatarStore, FetchedImage, LiveImage, avatar_store, fetch_image, image_client, upstream_url,
+};
 use crate::server::core::download_manager::DownloadManager;
 use crate::server::infrastructure::context::{Worker, WorkerStatus};
 use axum::extract::{Path, State};
@@ -19,55 +23,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tracing::warn;
 
-/// 图片在内存里的缓存时间。封面每场直播才变一次，头像更少变
+/// 封面在内存里的缓存时间
 const CACHE_TTL: Duration = Duration::from_secs(300);
-/// 缓存条目上限（按图片 URL）。默认 pool1_size = 5，两张图一路，远用不到这个数
+/// 缓存条目上限（按图片 URL）。默认 pool1_size = 5，远用不到这个数
 const MAX_CACHE_ENTRIES: usize = 64;
-/// 单张图片上限；封面 / 头像通常几十到几百 KB，超出的不缓存也不转发
-const MAX_IMAGE_BYTES: usize = 4 * 1024 * 1024;
-const FETCH_TIMEOUT: Duration = Duration::from_secs(15);
-const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LiveImage {
-    Cover,
-    Avatar,
-}
-
-impl LiveImage {
-    fn label(self) -> &'static str {
-        match self {
-            LiveImage::Cover => "封面",
-            LiveImage::Avatar => "头像",
-        }
-    }
-
-    /// B 站图片 CDN 的缩放后缀（`@宽w_高h_1c` = 等比裁切填满）。
-    /// 卡片上的封面按 16:9 缩略图显示，头像只有 22px，用不到原图。
-    fn bfs_size_suffix(self) -> &'static str {
-        match self {
-            LiveImage::Cover => "@640w_360h_1c.jpg",
-            LiveImage::Avatar => "@128w_128h_1c.jpg",
-        }
-    }
-}
-
-/// 向上游请求时实际使用的地址。
-///
-/// B 站的 `*.hdslb.com` 原图可能有上千万像素、几 MB（实测 11520×8640、4 MB），
-/// 直接转发给页面既慢又占缓存，借 CDN 的缩放后缀取一张缩略图；已经带后缀的地址不再处理。
-/// 其它平台原样使用。
-fn upstream_url(url: &str, kind: LiveImage) -> String {
-    let is_bfs = url::Url::parse(url)
-        .ok()
-        .and_then(|parsed| parsed.host_str().map(|host| host.ends_with(".hdslb.com")))
-        .unwrap_or(false);
-    if is_bfs && !url.contains('@') && !url.contains('?') {
-        format!("{url}{}", kind.bfs_size_suffix())
-    } else {
-        url.to_string()
-    }
-}
 
 #[derive(Debug, Clone)]
 struct CachedImage {
@@ -76,7 +35,7 @@ struct CachedImage {
     body: Bytes,
 }
 
-/// 封面 / 头像的抓取客户端与内存缓存，进程内唯一，放在 `ServiceRegister` 里。
+/// 封面的抓取客户端与内存缓存，进程内唯一，放在 `ServiceRegister` 里。
 pub struct ImageProxy {
     client: Client,
     cache: Mutex<HashMap<String, CachedImage>>,
@@ -90,13 +49,8 @@ impl Default for ImageProxy {
 
 impl ImageProxy {
     pub fn new() -> Self {
-        let client = Client::builder()
-            .user_agent(USER_AGENT)
-            .timeout(FETCH_TIMEOUT)
-            .build()
-            .expect("reqwest client for image proxy");
         Self {
-            client,
+            client: image_client(),
             cache: Mutex::new(HashMap::new()),
         }
     }
@@ -135,44 +89,75 @@ impl ImageProxy {
         if let Some(image) = self.cached(&url, now) {
             return Ok(image);
         }
-        let image = fetch_image(&self.client, &url, referer).await?;
-        self.store(url, image.clone(), Instant::now());
+        let FetchedImage { content_type, body } = fetch_image(&self.client, &url, referer).await?;
+        let image = CachedImage {
+            fetched_at: Instant::now(),
+            content_type,
+            body,
+        };
+        self.store(url, image.clone(), image.fetched_at);
         Ok(image)
     }
 }
 
-/// `GET /v1/streamers/{id}/cover`
+/// `GET /v1/streamers/{id}/cover`：正在录制的直播间封面，服务端转发并短暂缓存。
 pub async fn get_live_cover(
     State(managers): State<Arc<DownloadManager>>,
     State(proxy): State<Arc<ImageProxy>>,
     Path(id): Path<i64>,
 ) -> Response {
-    serve(managers.get_room_by_id(id).await, &proxy, LiveImage::Cover).await
-}
-
-/// `GET /v1/streamers/{id}/avatar`
-pub async fn get_live_avatar(
-    State(managers): State<Arc<DownloadManager>>,
-    State(proxy): State<Arc<ImageProxy>>,
-    Path(id): Path<i64>,
-) -> Response {
-    serve(managers.get_room_by_id(id).await, &proxy, LiveImage::Avatar).await
-}
-
-async fn serve(worker: Option<Arc<Worker>>, proxy: &ImageProxy, kind: LiveImage) -> Response {
-    let (url, referer) = match resolve_target(worker.as_deref(), kind) {
+    let worker = managers.get_room_by_id(id).await;
+    let (url, referer) = match resolve_target(worker.as_deref(), LiveImage::Cover) {
         Ok(target) => target,
         Err(rejection) => return rejection.into_response(),
     };
-    match proxy.fetch(&url, &referer, kind).await {
-        Ok(image) => image_response(&image),
+    match proxy.fetch(&url, &referer, LiveImage::Cover).await {
+        Ok(image) => image_response(&image.content_type, image.body, "private, max-age=300"),
         Err(reason) => {
-            warn!(url, referer, reason, "拉取直播间{}失败", kind.label());
-            (
-                StatusCode::BAD_GATEWAY,
-                format!("拉取{}失败: {reason}", kind.label()),
-            )
-                .into_response()
+            warn!(url, referer, reason, "拉取直播间封面失败");
+            (StatusCode::BAD_GATEWAY, format!("拉取封面失败: {reason}")).into_response()
+        }
+    }
+}
+
+/// `GET /v1/streamers/{id}/avatar`：主播头像，读 `data/avatar/` 里的本地文件。
+///
+/// 正在录制且本地还没有这个地址的头像时，现场下载一次落盘；下载失败退回旧文件。
+/// 不在录制时只读本地，没有就 404。
+pub async fn get_live_avatar(
+    State(managers): State<Arc<DownloadManager>>,
+    Path(id): Path<i64>,
+) -> Response {
+    let Some(worker) = managers.get_room_by_id(id).await else {
+        return (StatusCode::NOT_FOUND, "直播间不存在").into_response();
+    };
+    serve_avatar(&worker, avatar_store()).await
+}
+
+async fn serve_avatar(worker: &Worker, store: &AvatarStore) -> Response {
+    let id = worker.live_streamer.id;
+    let stored = match resolve_target(Some(worker), LiveImage::Avatar) {
+        Ok((url, referer)) => match store.ensure(id, &url, &referer).await {
+            Ok(stored) => Some(stored),
+            Err(reason) => {
+                warn!(id, url, reason, "下载主播头像失败，尝试用本地旧文件");
+                store.load(id).await
+            }
+        },
+        Err(_) => store.load(id).await,
+    };
+    let Some(stored) = stored else {
+        return (StatusCode::NOT_FOUND, "该直播间没有可用的头像").into_response();
+    };
+    match tokio::fs::read(store.image_path(&stored)).await {
+        Ok(bytes) => image_response(
+            &stored.content_type,
+            Bytes::from(bytes),
+            "private, max-age=3600",
+        ),
+        Err(e) => {
+            warn!(id, error = %e, "读取本地头像失败");
+            (StatusCode::INTERNAL_SERVER_ERROR, "读取本地头像失败").into_response()
         }
     }
 }
@@ -203,76 +188,15 @@ fn resolve_target(
     Ok((url, worker.live_streamer.url.clone()))
 }
 
-async fn fetch_image(client: &Client, url: &str, referer: &str) -> Result<CachedImage, String> {
-    let mut request = client.get(url);
-    if let Ok(referer) = HeaderValue::from_str(referer) {
-        request = request.header(header::REFERER, referer);
-    }
-    let response = request.send().await.map_err(|e| e.to_string())?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(format!("上游返回 {status}"));
-    }
-    if response
-        .content_length()
-        .is_some_and(|len| len > MAX_IMAGE_BYTES as u64)
-    {
-        return Err(format!("图片超过 {MAX_IMAGE_BYTES} 字节"));
-    }
-    let upstream_type = response
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(|value| value.to_string());
-    let body = response.bytes().await.map_err(|e| e.to_string())?;
-    if body.len() > MAX_IMAGE_BYTES {
-        return Err(format!("图片超过 {MAX_IMAGE_BYTES} 字节"));
-    }
-    let content_type = image_content_type(upstream_type.as_deref(), &body)
-        .ok_or_else(|| "上游返回的不是图片".to_string())?;
-    Ok(CachedImage {
-        fetched_at: Instant::now(),
-        content_type,
-        body,
-    })
-}
-
-/// 上游标了 `image/*` 就用上游的；否则按文件头识别常见格式，都认不出就拒绝转发。
-fn image_content_type(upstream: Option<&str>, body: &[u8]) -> Option<String> {
-    if let Some(upstream) = upstream {
-        let essence = upstream.split(';').next().unwrap_or_default().trim();
-        if essence.starts_with("image/") {
-            return Some(essence.to_string());
-        }
-    }
-    sniff_image_type(body).map(str::to_string)
-}
-
-fn sniff_image_type(body: &[u8]) -> Option<&'static str> {
-    if body.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        Some("image/jpeg")
-    } else if body.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
-        Some("image/png")
-    } else if body.starts_with(b"GIF87a") || body.starts_with(b"GIF89a") {
-        Some("image/gif")
-    } else if body.len() >= 12 && &body[0..4] == b"RIFF" && &body[8..12] == b"WEBP" {
-        Some("image/webp")
-    } else if body.len() >= 12 && &body[4..8] == b"ftyp" && &body[8..12] == b"avif" {
-        Some("image/avif")
-    } else {
-        None
-    }
-}
-
-fn image_response(image: &CachedImage) -> Response {
-    let mut response = image.body.clone().into_response();
+fn image_response(content_type: &str, body: Bytes, cache_control: &'static str) -> Response {
+    let mut response = body.into_response();
     let headers = response.headers_mut();
-    if let Ok(value) = HeaderValue::from_str(&image.content_type) {
+    if let Ok(value) = HeaderValue::from_str(content_type) {
         headers.insert(header::CONTENT_TYPE, value);
     }
     headers.insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("private, max-age=300"),
+        HeaderValue::from_static(cache_control),
     );
     response
 }
@@ -328,13 +252,17 @@ mod tests {
         }
     }
 
-    async fn working_worker(cover: &str, avatar: Option<&str>) -> Worker {
-        let worker = Worker::new(
+    fn idle_worker() -> Worker {
+        Worker::new(
             streamer("https://live.bilibili.com/1"),
             None,
             Arc::new(RwLock::new(Config::default())),
             Default::default(),
-        );
+        )
+    }
+
+    async fn working_worker(cover: &str, avatar: Option<&str>) -> Worker {
+        let worker = idle_worker();
         let stream = live_stream(cover, avatar);
         let task = DownloadTask::new(
             DownloaderRuntime::from_type(DownloaderType::StreamGears),
@@ -354,15 +282,8 @@ mod tests {
                 .map(|(status, _)| status),
             Some(StatusCode::NOT_FOUND)
         );
-
-        let idle = Worker::new(
-            streamer("https://live.bilibili.com/1"),
-            None,
-            Arc::new(RwLock::new(Config::default())),
-            Default::default(),
-        );
         assert_eq!(
-            resolve_target(Some(&idle), LiveImage::Cover)
+            resolve_target(Some(&idle_worker()), LiveImage::Cover)
                 .err()
                 .map(|(status, _)| status),
             Some(StatusCode::NOT_FOUND)
@@ -394,7 +315,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn proxy_fetches_with_the_room_page_as_referer_and_caches_by_url() {
+    async fn cover_proxy_fetches_with_the_room_page_as_referer_and_caches_by_url() {
         let seen: Arc<Mutex<Vec<Option<String>>>> = Arc::default();
         let app = Router::new().route(
             "/cover.jpg",
@@ -433,7 +354,11 @@ mod tests {
             "第二次应命中缓存，上游只被请求一次，且带直播间页面作 Referer"
         );
 
-        let response = image_response(&first);
+        let response = image_response(
+            &first.content_type,
+            first.body.clone(),
+            "private, max-age=300",
+        );
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
             response.headers().get(header::CONTENT_TYPE).unwrap(),
@@ -475,7 +400,7 @@ mod tests {
             .fetch(
                 &format!("http://{addr}/missing"),
                 "https://live.bilibili.com/1",
-                LiveImage::Avatar,
+                LiveImage::Cover,
             )
             .await
             .unwrap_err();
@@ -507,58 +432,63 @@ mod tests {
         assert!(cache.contains_key("newest"));
     }
 
-    #[test]
-    fn bilibili_bfs_urls_get_a_thumbnail_suffix_and_others_pass_through() {
-        assert_eq!(
-            upstream_url(
-                "https://i0.hdslb.com/bfs/live/user_cover/abc.jpg",
-                LiveImage::Cover
-            ),
-            "https://i0.hdslb.com/bfs/live/user_cover/abc.jpg@640w_360h_1c.jpg"
+    /// 头像接口：录制中首次请求会现场下载落盘；之后（包括不在录制时）直接读本地文件
+    #[tokio::test]
+    async fn avatar_endpoint_downloads_once_then_serves_the_local_file() {
+        let hits = Arc::new(Mutex::new(0usize));
+        let app = Router::new().route(
+            "/face.png",
+            get({
+                let hits = hits.clone();
+                move || {
+                    let hits = hits.clone();
+                    async move {
+                        *hits.lock().unwrap() += 1;
+                        (
+                            [("content-type", "image/png")],
+                            Bytes::from_static(&[
+                                0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 1,
+                            ]),
+                        )
+                    }
+                }
+            }),
         );
-        assert_eq!(
-            upstream_url("https://i1.hdslb.com/bfs/face/def.jpg", LiveImage::Avatar),
-            "https://i1.hdslb.com/bfs/face/def.jpg@128w_128h_1c.jpg"
-        );
-        // 已带缩放参数的不重复追加
-        assert_eq!(
-            upstream_url(
-                "https://i0.hdslb.com/bfs/live/abc.jpg@100w_100h.jpg",
-                LiveImage::Cover
-            ),
-            "https://i0.hdslb.com/bfs/live/abc.jpg@100w_100h.jpg"
-        );
-        // 其它平台（含签名 query 的抖音、虎牙截图）原样使用
-        for url in [
-            "https://p3-webcast.douyinpic.com/img/x~tplv-obj.image",
-            "https://tx-live-cover.msstatic.com/huyalive/a/20260922.jpg?sign=abc",
-            "https://rpic.douyucdn.cn/asrpic/260922/1_src.avif/dy4",
-        ] {
-            assert_eq!(upstream_url(url, LiveImage::Cover), url);
-        }
-    }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-    #[test]
-    fn content_type_prefers_upstream_image_type_then_sniffs() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = AvatarStore::new(dir.path());
+        let url = format!("http://{addr}/face.png");
+        let working = working_worker("", Some(&url)).await;
+
+        let response = serve_avatar(&working, &store).await;
+        assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
-            image_content_type(Some("image/webp; charset=binary"), b"junk").as_deref(),
-            Some("image/webp")
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "image/png"
         );
         assert_eq!(
-            image_content_type(
-                Some("application/octet-stream"),
-                &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]
-            )
-            .as_deref(),
-            Some("image/png")
+            to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .len(),
+            9
         );
-        let avif = [
-            0u8, 0, 0, 0x1c, b'f', b't', b'y', b'p', b'a', b'v', b'i', b'f',
-        ];
+        assert_eq!(*hits.lock().unwrap(), 1);
+
+        // 第二次：命中本地文件，上游不再被请求；即使房间已不在录制也能读到
+        let again = serve_avatar(&working, &store).await;
+        let offline = serve_avatar(&idle_worker(), &store).await;
+        assert_eq!(again.status(), StatusCode::OK);
         assert_eq!(
-            image_content_type(None, &avif).as_deref(),
-            Some("image/avif")
+            offline.status(),
+            StatusCode::OK,
+            "本地已有文件时不在录制也能读到"
         );
-        assert_eq!(image_content_type(Some("text/html"), b"<html>"), None);
+        assert_eq!(*hits.lock().unwrap(), 1, "第二次不该再请求上游");
+        assert!(dir.path().join("7.png").is_file());
+        assert!(dir.path().join("7.json").is_file());
     }
 }

@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 pub mod download;
+/// 直播间封面 / 主播头像的抓取与落盘
+pub mod live_image;
 /// 录制准入策略
 pub mod recording_policy;
 /// 边录边传（ffmpeg stdout → 流式投稿）

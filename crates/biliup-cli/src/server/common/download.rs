@@ -1,3 +1,4 @@
+use crate::server::common::live_image::spawn_avatar_download;
 use crate::server::common::recording_policy;
 use crate::server::common::sync::SyncSession;
 use crate::server::common::throughput::{RateMeter, Sampler};
@@ -174,8 +175,17 @@ impl DownloadTask {
         self.media.read().unwrap().clone()
     }
 
-    fn refresh_media(&self, stream: &LiveStream) {
-        *self.media.write().unwrap() = LiveMedia::from_stream(stream);
+    fn refresh_media(&self, ctx: &Context, stream: &LiveStream) {
+        let media = LiveMedia::from_stream(stream);
+        let changed = self.media.read().unwrap().avatar_url != media.avatar_url;
+        if changed {
+            spawn_avatar_download(
+                ctx.live_streamer().id,
+                media.avatar_url.clone(),
+                ctx.live_streamer().url.clone(),
+            );
+        }
+        *self.media.write().unwrap() = media;
     }
 
     pub(self) async fn execute(
@@ -244,7 +254,7 @@ impl DownloadTask {
                     stream: next_stream,
                 }) => {
                     stream = *next_stream;
-                    self.refresh_media(&stream);
+                    self.refresh_media(ctx, &stream);
                     info!(
                         url = url,
                         "Stream is still live, preparing to retry. attempt: {}", retry_count
@@ -467,6 +477,13 @@ pub async fn start_download_workflow(
     ));
     ctx.change_status(Stage::Download, WorkerStatus::Working(task.clone()))
         .await;
+
+    // 主播头像几乎不变：开播时下载一次存到 data/avatar/，地址没变就不再下载
+    spawn_avatar_download(
+        ctx.live_streamer().id,
+        task.live_media().avatar_url,
+        ctx.live_streamer().url.clone(),
+    );
 
     tokio::spawn({
         let streamer_info = ctx.streamer_info();
