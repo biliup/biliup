@@ -9,15 +9,15 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@douyinfe/semi-ui": "^2.88.2",
-    "artplayer": "^5.2.1",
-    "mpegts.js": "^1.8.0",
+    "@douyinfe/semi-ui": "^2.103.0",
+    "artplayer": "^5.4.0",
+    "mpegts.js": "^1.8.2",
     "next": "^16.3.5",
     "qrcode.react": "^4.2.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-json-tree": "^0.20.0",
-    "swr": "^2.3.0"
+    "swr": "^2.5.1"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
