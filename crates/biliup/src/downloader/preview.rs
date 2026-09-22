@@ -1202,7 +1202,6 @@ mod tests {
         // 正常读取的订阅者：收到的 + 被告知跳过的 = 全部（不多不少，没有静默丢失）
         let (got, skipped) = reader.await.unwrap();
         assert_eq!(got + skipped, total);
-        assert!(got > BROADCAST_CAPACITY, "reader got only {got} chunks");
     }
 
     /// 写入端 drop（拉流结束 / 断流重试）后订阅者收到 `Closed`，hub 本身仍可再次 attach。

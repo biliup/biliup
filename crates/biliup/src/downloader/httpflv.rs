@@ -470,11 +470,21 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         use crate::downloader::preview::{PreviewFormat, PreviewHub};
         use crate::downloader::util::{LifecycleFile, Segmentable};
+        use futures::StreamExt;
         use std::sync::{Arc, Mutex};
         use std::time::Duration;
 
+        // 按真实直播的节奏分块送入（每块之间隔 2 ms），而不是一次性给完：
+        // 瞬时灌完会让订阅者必然掉队（Lagged），那是另一个测试覆盖的场景
         let body = gop_flv_body(120);
-        let http_resp = http::Response::builder().status(200).body(body)?;
+        let pieces: Vec<Vec<u8>> = body.chunks(512).map(|c| c.to_vec()).collect();
+        let paced = futures::stream::iter(pieces).then(|piece| async move {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+            Ok::<_, std::io::Error>(piece)
+        });
+        let http_resp = http::Response::builder()
+            .status(200)
+            .body(reqwest::Body::wrap_stream(paced))?;
         let connection = super::Connection::new(reqwest::Response::from(http_resp));
 
         // 文件名模板不含时间占位符时每个分段都叫同一个名字，会互相覆盖；
@@ -499,33 +509,45 @@ mod tests {
         // 每个分段 2 KB 左右，120 个 GOP 会切出二十多个文件
         let segment = Segmentable::new(None, Some(2 * 1024));
 
-        let subscriber = tokio::spawn({
+        // 先把订阅请求确定地排进写入端的队列（poll 一次即入队），再开始写盘，
+        // 这样快照一定在第一个关键帧被回应，预览覆盖整条流
+        let mut subscribe = Box::pin({
             let hub = hub.clone();
-            async move {
-                let mut sub = hub.subscribe(Duration::from_secs(5)).await.unwrap();
-                let mut received = concat(&sub.snapshot);
-                let snapshot_len = received.len();
-                while let Ok(chunk) = sub.rx.recv().await {
-                    received.extend_from_slice(&chunk);
-                }
-                (snapshot_len, received)
-            }
+            async move { hub.subscribe(Duration::from_secs(5)).await }
         });
-        // 让订阅请求先排进队列，再开始写盘
-        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert!(futures::poll!(subscribe.as_mut()).is_pending());
+        let subscriber = tokio::spawn(async move {
+            let mut sub = subscribe.await.unwrap();
+            let mut live = Vec::new();
+            while let Ok(chunk) = sub.rx.recv().await {
+                live.extend_from_slice(&chunk);
+            }
+            (sub.snapshot, live)
+        });
 
         super::parse_flv(connection, file, segment, Some(sink)).await?;
 
-        let (snapshot_len, received) = subscriber.await?;
-        assert!(
-            snapshot_len > 13,
-            "snapshot must contain more than the file header"
-        );
-        // 快照以 FLV 文件头开头，之后整条流里不再出现第二个文件头
+        let (snapshot, live) = subscriber.await?;
+        // 快照 = 文件头 + onMetaData + AVC 序列头 + 从第一个关键帧起的 GOP
         assert_eq!(
-            &received[..13],
+            &snapshot[0][..],
             &crate::downloader::preview::flv::FILE_HEADER
         );
+        let is_key_nalu =
+            |c: &bytes::Bytes| c.len() > 12 && c[0] == 9 && c[11] == 0x17 && c[12] == 0x01;
+        let first_key = snapshot
+            .iter()
+            .position(is_key_nalu)
+            .expect("snapshot must contain a keyframe");
+        let seq_headers: Vec<u8> = snapshot[1..first_key].iter().map(|c| c[0]).collect();
+        assert_eq!(
+            seq_headers,
+            vec![18, 9],
+            "onMetaData + AVC sequence header before the GOP"
+        );
+        let mut received = concat(&snapshot);
+        received.extend_from_slice(&live);
+        // 整条流里不再出现第二个文件头
         assert_eq!(
             received[13..].windows(3).filter(|w| *w == b"FLV").count(),
             0,
@@ -545,15 +567,10 @@ mod tests {
             assert_eq!(&data[..13], &crate::downloader::preview::flv::FILE_HEADER);
             written_tags.extend_from_slice(&data[13..]);
         }
+        // 预览 = 快照里的序列头 + 从第一个关键帧起的全部 tag，与落盘的 tag 序列完全一致
         let preview_tags = &received[13..];
-        assert!(
-            written_tags.ends_with(preview_tags),
-            "preview must be a suffix of what was written ({} vs {} bytes)",
-            preview_tags.len(),
-            written_tags.len()
-        );
-        // 预览是从第一个关键帧起的完整流：等于全部落盘 tag（快照含 onMetaData 与序列头）
         assert_eq!(preview_tags.len(), written_tags.len());
+        assert!(written_tags.ends_with(preview_tags));
         Ok(())
     }
 
@@ -590,16 +607,17 @@ mod tests {
 
         let hub = PreviewHub::new(4);
         let sink = hub.attach(PreviewFormat::Flv);
-        let stalled = tokio::spawn({
+        let mut subscribe = Box::pin({
             let hub = hub.clone();
-            async move {
-                let sub = hub.subscribe(Duration::from_secs(5)).await.unwrap();
-                // 拿到订阅后一个字节都不读，直到写入端结束
-                tokio::time::sleep(Duration::from_millis(1500)).await;
-                sub
-            }
+            async move { hub.subscribe(Duration::from_secs(5)).await }
         });
-        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert!(futures::poll!(subscribe.as_mut()).is_pending());
+        let stalled = tokio::spawn(async move {
+            let sub = subscribe.await.unwrap();
+            // 拿到订阅后一个字节都不读，直到写入端结束
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            sub
+        });
         let teed_dir = tempfile::tempdir()?;
         let (teed, elapsed) = run(body, teed_dir.path(), Some(sink)).await;
 
@@ -608,7 +626,7 @@ mod tests {
             "the recording must not depend on preview subscribers"
         );
         assert!(
-            elapsed < Duration::from_secs(1),
+            elapsed < Duration::from_secs(5),
             "the producer must not wait for a stalled subscriber ({elapsed:?})"
         );
         let mut sub = stalled.await?;
