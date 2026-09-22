@@ -124,7 +124,10 @@ mod tests {
         ))
     }
 
-    async fn working_worker(id: i64, downloader: DownloaderType) -> (Arc<Worker>, Arc<DownloadTask>) {
+    async fn working_worker(
+        id: i64,
+        downloader: DownloaderType,
+    ) -> (Arc<Worker>, Arc<DownloadTask>) {
         let worker = idle_worker(id);
         let task = Arc::new(DownloadTask::new(
             DownloaderRuntime::from_type(downloader),
