@@ -130,6 +130,7 @@ impl Context {
             output_dir: PathBuf::from("."),
             suffix,
             bytes_written: Default::default(),
+            preview: Default::default(),
         }
     }
 }

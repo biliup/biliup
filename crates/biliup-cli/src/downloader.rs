@@ -88,7 +88,7 @@ async fn download_stream(
     match live::media_ext_from_url(url).as_deref() {
         Some("m3u8" | "ts") => {
             let file = LifecycleFile::new(&output, "ts");
-            hls::download(url, &client, file, segmentable)
+            hls::download(url, &client, file, segmentable, None)
                 .await
                 .change_context_lazy(|| AppError::Unknown)
         }
@@ -106,7 +106,7 @@ async fn download_stream(
                 .await
                 .change_context_lazy(|| AppError::Unknown)?;
             let file = LifecycleFile::new(&output, "flv");
-            httpflv::download(connection, file, segmentable).await;
+            httpflv::download(connection, file, segmentable, None).await;
             Ok(())
         }
     }

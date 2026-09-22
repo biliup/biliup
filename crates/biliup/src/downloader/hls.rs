@@ -1,4 +1,5 @@
 use crate::downloader::error::{Error, Result};
+use crate::downloader::preview::{ChunkKind, PreviewSink};
 use crate::downloader::util::{ByteCounter, LifecycleFile, Segmentable};
 use m3u8_rs::{MediaPlaylist, Playlist};
 
@@ -26,11 +27,15 @@ fn playlist_should_refresh(playlist: &MediaPlaylist) -> bool {
     !playlist.end_list
 }
 
+/// 轮询 m3u8 并把分片追加进同一个 `.ts` 文件。
+///
+/// `preview` 为直播预览的写入端：每个分片的字节在落盘的同时旁路一份给它，`None` 则不旁路。
 pub async fn download(
     url: &str,
     client: &StatelessClient,
     file: LifecycleFile<'_>,
     mut splitting: Segmentable,
+    mut preview: Option<PreviewSink>,
 ) -> Result<()> {
     info!("Downloading {}...", url);
     let resp = client.retryable(url).await?;
@@ -101,6 +106,7 @@ pub async fn download(
                     client,
                     &mut ts_file.buf_writer,
                     &ts_file.file.bytes_written,
+                    preview.as_mut(),
                 )
                 .await?;
                 splitting.increase_size(length);
@@ -140,14 +146,27 @@ async fn download_to_file(
     client: &StatelessClient,
     out: &mut impl Write,
     bytes_written: &ByteCounter,
+    mut preview: Option<&mut PreviewSink>,
 ) -> Result<u64> {
     debug!("url: {url}");
     let mut response = client.retryable(url.as_str()).await?;
     let mut length: u64 = 0;
+    // 分片起点即预览的关键帧边界（HLS 分片自带 PAT/PMT、从关键帧开始），
+    // 新订阅者从最近一个分片的开头起播
+    let mut segment_start = true;
     while let Some(chunk) = response.chunk().await? {
         length += chunk.len() as u64;
         out.write_all(&chunk)?;
         bytes_written.add(chunk.len() as u64);
+        if let Some(sink) = preview.as_deref_mut() {
+            let kind = if segment_start {
+                ChunkKind::Keyframe
+            } else {
+                ChunkKind::Media
+            };
+            sink.push(kind, chunk);
+        }
+        segment_start = false;
     }
     // let mut out = File::options()
     //     .append(true)

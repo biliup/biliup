@@ -5,6 +5,7 @@ use crate::server::errors::{AppError, AppResult};
 use biliup::client::StatelessClient;
 use biliup::downloader::flv_parser::header;
 use biliup::downloader::httpflv::Connection;
+use biliup::downloader::preview::PreviewFormat;
 use biliup::downloader::util::{LifecycleFile, Segmentable};
 use biliup::downloader::{hls, httpflv};
 use error_stack::{ResultExt, bail};
@@ -98,7 +99,9 @@ impl StreamGears {
                 // FLV流下载
                 let file = LifecycleFile::with_hook(&file_name, "flv", hook)
                     .with_counter(download_config.bytes_written.clone());
-                httpflv::download(connection, file, segment.clone()).await;
+                // 直播预览：写入端与这一次拉流同寿命，拉流结束即 drop
+                let preview = download_config.preview.attach(PreviewFormat::Flv);
+                httpflv::download(connection, file, segment.clone(), Some(preview)).await;
             }
             Err(Err::Incomplete(needed)) => {
                 error!("needed: {needed:?}")
@@ -108,7 +111,8 @@ impl StreamGears {
                 // HLS流下载
                 let file = LifecycleFile::with_hook(&file_name, "ts", hook)
                     .with_counter(download_config.bytes_written.clone());
-                hls::download(&url, &client, file, segment.clone())
+                let preview = download_config.preview.attach(PreviewFormat::MpegTs);
+                hls::download(&url, &client, file, segment.clone(), Some(preview))
                     .await
                     .change_context(AppError::Unknown)?;
             }

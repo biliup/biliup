@@ -15,6 +15,7 @@ use crate::server::infrastructure::context::{Context, Stage, WorkerStatus};
 use crate::server::infrastructure::models::hook_step::process;
 use async_channel::Sender;
 use biliup::downloader::live::{LivePlugin, LiveStatus, LiveStream};
+use biliup::downloader::preview::PreviewHub;
 use error_stack::ResultExt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -135,6 +136,11 @@ impl LiveMedia {
     }
 }
 
+/// 每路直播同时允许的预览连接数（信号量上限，超出返回 429）。
+///
+/// 与前端监视器的默认同屏路数无关：监视器每路占其对应直播间的一个连接。
+pub const PREVIEW_MAX_SUBSCRIBERS_PER_ROOM: usize = 4;
+
 /// 下载任务
 pub struct DownloadTask {
     token: CancellationToken,
@@ -144,12 +150,15 @@ pub struct DownloadTask {
     /// 写盘速率表；各下载器拿它的计数器句柄累加，采样任务随 `execute` 启停。
     meter: Arc<RateMeter>,
     media: std::sync::RwLock<LiveMedia>,
+    /// 直播预览 hub，寿命与本任务相同：跨分段、跨断流重试都是同一个。
+    preview: PreviewHub,
 }
 
 impl DownloadTask {
     pub fn new(downloader: DownloaderRuntime, stream: &LiveStream) -> Self {
         let sync_session = matches!(&downloader, DownloaderRuntime::Sync(_))
             .then(|| Arc::new(Mutex::new(SyncSession::default())));
+        let preview = preview_hub_for(&downloader);
         Self {
             token: CancellationToken::new(),
             done_notify: Notify::new(),
@@ -157,7 +166,13 @@ impl DownloadTask {
             sync_session,
             meter: Arc::new(RateMeter::new()),
             media: std::sync::RwLock::new(LiveMedia::from_stream(stream)),
+            preview,
         }
+    }
+
+    /// 本任务的直播预览 hub。
+    pub fn preview(&self) -> &PreviewHub {
+        &self.preview
     }
 
     /// 最近一个滑动窗口内的写盘速率（字节/秒）。
@@ -353,6 +368,7 @@ impl DownloadTask {
         let streamer = ctx.live_streamer();
         let mut download_config = ctx.download_config(stream);
         download_config.bytes_written = self.meter.counter();
+        download_config.preview = self.preview.clone();
         if let crate::server::core::downloader::DownloaderRuntime::Sync(sync) = &self.downloader {
             info!(
                 page_url = streamer.url,
@@ -436,6 +452,25 @@ impl DownloadTask {
     }
 }
 
+/// 按下载器类型建预览 hub：媒体字节经过本进程写盘的（stream-gears / mesio）能旁路；
+/// 子进程直接落盘的，以及边录边传，明确标为不可预览并给出原因，界面据此禁用按钮。
+fn preview_hub_for(downloader: &DownloaderRuntime) -> PreviewHub {
+    match downloader {
+        DownloaderRuntime::StreamGears(_) | DownloaderRuntime::Mesio(_) => {
+            PreviewHub::new(PREVIEW_MAX_SUBSCRIBERS_PER_ROOM)
+        }
+        DownloaderRuntime::Ffmpeg(_) => {
+            PreviewHub::unavailable("ffmpeg 子进程直接写盘，媒体数据不经过 biliup，无法预览")
+        }
+        DownloaderRuntime::StreamLink(_) => {
+            PreviewHub::unavailable("streamlink 子进程直接写盘，媒体数据不经过 biliup，无法预览")
+        }
+        DownloaderRuntime::YtDlp(_) => PreviewHub::unavailable(
+            "yt-dlp / ytarchive 子进程直接写盘，媒体数据不经过 biliup，无法预览",
+        ),
+        DownloaderRuntime::Sync(_) => PreviewHub::unavailable("边录边传走投稿管线，不提供预览"),
+    }
+}
 
 /// Whether a finished download attempt counts as progress for live-retry backoff.
 ///

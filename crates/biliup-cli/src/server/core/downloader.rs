@@ -20,6 +20,7 @@ use crate::server::core::downloader::sync_downloader::SyncDownloader;
 use crate::server::core::downloader::ytdlp::YouTubeDownloader;
 use crate::server::errors::{AppError, AppResult};
 use async_trait::async_trait;
+use biliup::downloader::preview::PreviewHub;
 use biliup::downloader::util::ByteCounter;
 use danmaku_client::{DanmakuRecorder, RecorderConfig, RecorderHandle};
 use error_stack::Report;
@@ -59,6 +60,12 @@ pub struct DownloadConfig {
     /// 只是一个原子计数器的句柄：不参与序列化，也不影响任何下载控制流。
     #[serde(skip)]
     pub bytes_written: ByteCounter,
+
+    /// 本次录制任务的直播预览 hub。进程内写盘的下载器（stream-gears / mesio）开始拉流时
+    /// 从它 `attach` 一个写入端，在写盘点旁边旁路媒体字节；其它下载器不碰它。
+    /// 与 `bytes_written` 一样只是句柄，不参与序列化，不影响任何下载控制流。
+    #[serde(skip)]
+    pub preview: PreviewHub,
 }
 
 impl DownloadConfig {

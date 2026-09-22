@@ -484,6 +484,7 @@ dependencies = [
  "dialoguer",
  "dirs",
  "error-stack",
+ "flv",
  "flv-fix",
  "futures",
  "glob",

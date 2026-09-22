@@ -50,7 +50,7 @@ pub async fn download_with_hook(
             debug!("header: {header:#?}");
             info!("Downloading {}...", url);
             let file = LifecycleFile::with_hook(file_name, "flv", file_name_hook);
-            httpflv::download(connection, file, segment).await;
+            httpflv::download(connection, file, segment, None).await;
         }
         Err(nom::Err::Incomplete(needed)) => {
             error!("needed: {needed:?}")
@@ -58,7 +58,9 @@ pub async fn download_with_hook(
         Err(e) => {
             error!("{e}");
             let file = LifecycleFile::with_hook(file_name, "ts", file_name_hook);
-            hls::download(url, &client, file, segment).await.unwrap();
+            hls::download(url, &client, file, segment, None)
+                .await
+                .unwrap();
         }
     }
     Ok(())

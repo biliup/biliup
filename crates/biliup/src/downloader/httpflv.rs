@@ -3,6 +3,7 @@ use crate::downloader::flv_parser::{
     aac_audio_packet_header, avc_video_packet_header, script_data, tag_data, tag_header,
 };
 use crate::downloader::flv_writer::{FlvFile, FlvTag, TagDataHeader};
+use crate::downloader::preview::{self, ChunkKind, PreviewSink};
 use crate::downloader::util::{LifecycleFile, Segmentable};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use nom::{Err, IResult};
@@ -12,9 +13,17 @@ use std::time::Duration;
 use tokio::time::timeout;
 use tracing::{info, warn};
 
-pub async fn download(connection: Connection, file: LifecycleFile<'_>, segment: Segmentable) {
+/// 下载 FLV 流并按关键帧分段落盘。
+///
+/// `preview` 为直播预览的写入端：每个写盘的 tag 顺带旁路一份给它，`None` 则不旁路。
+pub async fn download(
+    connection: Connection,
+    file: LifecycleFile<'_>,
+    segment: Segmentable,
+    preview: Option<PreviewSink>,
+) {
     let file_name = file.file_name.clone();
-    match parse_flv(connection, file, segment).await {
+    match parse_flv(connection, file, segment, preview).await {
         Ok(_) => {
             info!("Done... {}", file_name);
         }
@@ -28,6 +37,7 @@ pub(crate) async fn parse_flv(
     mut connection: Connection,
     file: LifecycleFile<'_>,
     mut segment: Segmentable,
+    mut preview: Option<PreviewSink>,
 ) -> crate::downloader::error::Result<()> {
     let mut flv_tags_cache: Vec<(TagHeader, Bytes, Bytes)> = Vec::new();
     // println!("parse_flv Segment: {:?}", segment);
@@ -35,6 +45,12 @@ pub(crate) async fn parse_flv(
 
     let mut out = FlvFile::new(file)?;
     segment.set_size_position(9 + 4);
+    if let Some(sink) = preview.as_mut() {
+        sink.push(
+            ChunkKind::Header,
+            Bytes::from_static(&preview::flv::FILE_HEADER),
+        );
+    }
     // let mut downloaded_size = 9 + 4;
     let mut on_meta_data = None;
     let mut aac_sequence_header = None;
@@ -157,6 +173,23 @@ pub(crate) async fn parse_flv(
                         );
                     }
                     out.write_tag(tag_header, flv_tag_data, previous_tag_size_bytes)?;
+                    // 直播预览旁路：与写盘同一个 tag、同一份字节。只是 push，不 await、
+                    // 不返回错误——预览端的任何状况都不改变这里的控制流。
+                    if let Some(sink) = preview.as_mut() {
+                        let tag_type = tag_header.tag_type as u8;
+                        sink.push(
+                            preview::flv::classify(tag_type, flv_tag_data),
+                            preview::flv::tag_chunk_from_parts(
+                                &preview::flv::tag_header(
+                                    tag_type,
+                                    tag_header.data_size,
+                                    tag_header.timestamp,
+                                ),
+                                flv_tag_data,
+                                previous_tag_size_bytes,
+                            ),
+                        );
+                    }
                     segment.increase_size((11 + tag_header.data_size + 4) as u64);
                     // downloaded_size += (11 + tag_header.data_size + 4) as u64;
                     prev_timestamp = tag_header.timestamp
@@ -386,7 +419,204 @@ mod tests {
         let segment = Segmentable::new(None, Some(1));
 
         // 修复前：此调用会 panic（aac_sequence_header does not exist）。
-        super::parse_flv(connection, file, segment).await?;
+        super::parse_flv(connection, file, segment, None).await?;
+        Ok(())
+    }
+
+    /// 一段带 onMetaData、AVC 序列头与 `keyframes` 个 GOP（每 GOP 一个关键帧 + 两个普通帧）
+    /// 的 FLV 流体（不含 9 字节文件头，含起始的 PreviousTagSize0）。
+    fn gop_flv_body(keyframes: u32) -> Vec<u8> {
+        fn tag(data: &mut Vec<u8>, tag_type: u8, ts: u32, body: &[u8]) {
+            data.push(tag_type);
+            data.extend_from_slice(&(body.len() as u32).to_be_bytes()[1..]);
+            data.extend_from_slice(&(ts & 0xff_ffff).to_be_bytes()[1..]);
+            data.push((ts >> 24) as u8);
+            data.extend_from_slice(&[0, 0, 0]);
+            data.extend_from_slice(body);
+            data.extend_from_slice(&((11 + body.len()) as u32).to_be_bytes());
+        }
+        let mut data = vec![0, 0, 0, 0];
+        tag(
+            &mut data,
+            18,
+            0,
+            &[
+                0x02, 0x00, 0x0A, b'o', b'n', b'M', b'e', b't', b'a', b'D', b'a', b't', b'a', 0x05,
+            ],
+        );
+        // AVC 序列头（packet_type 0）
+        tag(&mut data, 9, 0, &[0x17, 0x00, 0x00, 0x00, 0x00, 0x01, 0x64]);
+        for i in 0..keyframes {
+            let base = i * 3000;
+            // 关键帧 NALU（packet_type 1）+ 两个普通帧，载荷里带序号便于比对
+            let mut key = vec![0x17, 0x01, 0, 0, 0];
+            key.extend_from_slice(&i.to_be_bytes());
+            key.resize(300, 0xaa);
+            tag(&mut data, 9, base, &key);
+            tag(&mut data, 9, base + 1000, &[0x27, 0x01, 0, 0, 0, 0x11]);
+            tag(&mut data, 9, base + 2000, &[0x27, 0x01, 0, 0, 0, 0x22]);
+        }
+        data
+    }
+
+    fn concat(chunks: &[bytes::Bytes]) -> Vec<u8> {
+        chunks.iter().flat_map(|b| b.iter().copied()).collect()
+    }
+
+    /// 预览快照 + 实时分块拼起来，恰好等于「文件头 + 落盘的 tag 序列」的一段；
+    /// 跨多个分段文件（rolling）时连接不断、不重发 FLV 文件头。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn preview_follows_the_written_tags_across_rolling_segments()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::downloader::preview::{PreviewFormat, PreviewHub};
+        use crate::downloader::util::{LifecycleFile, Segmentable};
+        use std::sync::{Arc, Mutex};
+        use std::time::Duration;
+
+        let body = gop_flv_body(120);
+        let http_resp = http::Response::builder().status(200).body(body)?;
+        let connection = super::Connection::new(reqwest::Response::from(http_resp));
+
+        // 文件名模板不含时间占位符时每个分段都叫同一个名字，会互相覆盖；
+        // 在 rename 钩子里把每个分段改成带序号的名字留下来（钩子触发时 BufWriter
+        // 可能还没 flush，所以只改名、等全部结束后再读）
+        let dir = tempfile::tempdir()?;
+        let file_stem = dir.path().join("rolling");
+        let segments: Arc<Mutex<Vec<std::path::PathBuf>>> = Arc::default();
+        let file = LifecycleFile::with_hook(file_stem.to_str().unwrap(), "flv", {
+            let segments = segments.clone();
+            let dir = dir.path().to_path_buf();
+            move |name: &str| {
+                let mut segments = segments.lock().unwrap();
+                let kept = dir.join(format!("seg-{:04}.flv", segments.len()));
+                std::fs::rename(name, &kept).unwrap();
+                segments.push(kept);
+            }
+        });
+
+        let hub = PreviewHub::new(4);
+        let sink = hub.attach(PreviewFormat::Flv);
+        // 每个分段 2 KB 左右，120 个 GOP 会切出二十多个文件
+        let segment = Segmentable::new(None, Some(2 * 1024));
+
+        let subscriber = tokio::spawn({
+            let hub = hub.clone();
+            async move {
+                let mut sub = hub.subscribe(Duration::from_secs(5)).await.unwrap();
+                let mut received = concat(&sub.snapshot);
+                let snapshot_len = received.len();
+                while let Ok(chunk) = sub.rx.recv().await {
+                    received.extend_from_slice(&chunk);
+                }
+                (snapshot_len, received)
+            }
+        });
+        // 让订阅请求先排进队列，再开始写盘
+        tokio::time::sleep(Duration::from_millis(30)).await;
+
+        super::parse_flv(connection, file, segment, Some(sink)).await?;
+
+        let (snapshot_len, received) = subscriber.await?;
+        assert!(
+            snapshot_len > 13,
+            "snapshot must contain more than the file header"
+        );
+        // 快照以 FLV 文件头开头，之后整条流里不再出现第二个文件头
+        assert_eq!(
+            &received[..13],
+            &crate::downloader::preview::flv::FILE_HEADER
+        );
+        assert_eq!(
+            received[13..].windows(3).filter(|w| *w == b"FLV").count(),
+            0,
+            "existing subscribers must never get the FLV file header again"
+        );
+
+        // 落盘：多个分段，每个都以 FLV 头开始；预览收到的 tag 序列是落盘序列的后缀
+        let segments = segments.lock().unwrap();
+        assert!(
+            segments.len() > 5,
+            "expected rolling into many segments, got {}",
+            segments.len()
+        );
+        let mut written_tags = Vec::new();
+        for path in segments.iter() {
+            let data = std::fs::read(path)?;
+            assert_eq!(&data[..13], &crate::downloader::preview::flv::FILE_HEADER);
+            written_tags.extend_from_slice(&data[13..]);
+        }
+        let preview_tags = &received[13..];
+        assert!(
+            written_tags.ends_with(preview_tags),
+            "preview must be a suffix of what was written ({} vs {} bytes)",
+            preview_tags.len(),
+            written_tags.len()
+        );
+        // 预览是从第一个关键帧起的完整流：等于全部落盘 tag（快照含 onMetaData 与序列头）
+        assert_eq!(preview_tags.len(), written_tags.len());
+        Ok(())
+    }
+
+    /// 一个从不读取的订阅者在场时，录制照常结束、落盘内容与无订阅者时完全一致。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn stalled_preview_subscriber_does_not_change_what_is_written()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::downloader::preview::{
+            BROADCAST_CAPACITY, PreviewFormat, PreviewHub, PreviewSink,
+        };
+        use crate::downloader::util::{LifecycleFile, Segmentable};
+        use std::time::Duration;
+
+        // 足够多的 tag，让掉队的订阅者远超广播缓冲容量
+        let body = gop_flv_body(BROADCAST_CAPACITY as u32 * 2);
+        let run = |body: Vec<u8>, dir: &std::path::Path, sink: Option<PreviewSink>| {
+            let dir = dir.to_path_buf();
+            async move {
+                let http_resp = http::Response::builder().status(200).body(body).unwrap();
+                let connection = super::Connection::new(reqwest::Response::from(http_resp));
+                let file_stem = dir.join("rec");
+                let file = LifecycleFile::new(file_stem.to_str().unwrap(), "flv");
+                let started = std::time::Instant::now();
+                super::parse_flv(connection, file, Segmentable::new(None, None), sink)
+                    .await
+                    .unwrap();
+                let data = std::fs::read(dir.join("rec.flv")).unwrap();
+                (data, started.elapsed())
+            }
+        };
+
+        let plain_dir = tempfile::tempdir()?;
+        let (plain, _) = run(body.clone(), plain_dir.path(), None).await;
+
+        let hub = PreviewHub::new(4);
+        let sink = hub.attach(PreviewFormat::Flv);
+        let stalled = tokio::spawn({
+            let hub = hub.clone();
+            async move {
+                let sub = hub.subscribe(Duration::from_secs(5)).await.unwrap();
+                // 拿到订阅后一个字节都不读，直到写入端结束
+                tokio::time::sleep(Duration::from_millis(1500)).await;
+                sub
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        let teed_dir = tempfile::tempdir()?;
+        let (teed, elapsed) = run(body, teed_dir.path(), Some(sink)).await;
+
+        assert_eq!(
+            teed, plain,
+            "the recording must not depend on preview subscribers"
+        );
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "the producer must not wait for a stalled subscriber ({elapsed:?})"
+        );
+        let mut sub = stalled.await?;
+        assert!(matches!(
+            sub.rx.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_))
+                | Err(tokio::sync::broadcast::error::TryRecvError::Closed)
+        ));
         Ok(())
     }
 
@@ -410,7 +640,7 @@ mod tests {
         let file =
             LifecycleFile::new(file_stem.to_str().unwrap(), "flv").with_counter(counter.clone());
 
-        super::parse_flv(connection, file, Segmentable::new(None, None)).await?;
+        super::parse_flv(connection, file, Segmentable::new(None, None), None).await?;
         assert_eq!(counter.total(), 11 + 14 + 4);
         Ok(())
     }

@@ -11,8 +11,10 @@ use crate::server::core::downloader::{
     self, DownloadConfig, DownloadStatus, SegmentEvent, SegmentInfo,
 };
 use crate::server::errors::{AppError, AppResult};
+use biliup::downloader::preview::{self, ChunkKind, PreviewFormat, PreviewSink};
 use biliup::downloader::util::ByteCounter;
 use error_stack::Report;
+use flv::{CodecKind, FlvData};
 use flv_fix::{
     ContinuityMode, FlvPipeline, FlvPipelineConfig, FlvWriter, FlvWriterConfig, ScriptFillerConfig,
 };
@@ -42,6 +44,9 @@ const CHANNEL_SIZE: usize = 64;
 
 /// 分段回调载荷：已关闭的分段文件路径与 0 起始的序号。
 type SegmentClosed = (PathBuf, u32);
+
+/// 直播预览旁路：写入端与「把一个管线条目旁路给它」的函数。
+type PreviewTee<I> = (PreviewSink, fn(&mut PreviewSink, &I));
 
 /// mesio 下载器实例。可跨多次 `download` 复用，每次调用使用新的取消令牌。
 pub struct Mesio {
@@ -146,6 +151,7 @@ impl Mesio {
                 } = session;
                 let event_task = tokio::spawn(log_events(events));
                 let items = items.map(|r| r.map_err(|e| PipelineError::Strategy(Box::new(e))));
+                let preview = download_config.preview.attach(PreviewFormat::Flv);
                 let outcome = run_pipeline::<FlvPipeline, _>(
                     &pipeline_config,
                     flv_pipeline_config,
@@ -156,6 +162,7 @@ impl Mesio {
                     token.clone(),
                     callback.as_mut(),
                     (download_config.bytes_written.clone(), |item| item.size()),
+                    Some((preview, tee_flv)),
                 )
                 .await;
                 handle.cancel();
@@ -188,6 +195,18 @@ impl Mesio {
                 };
                 let extension = hls_extension(&first);
                 warn_on_suffix_mismatch(&download_config.suffix, extension);
+                // 只有 TS 分片能直接喂给浏览器里的 mpegts.js；fMP4 分片流明确标为不可预览
+                let preview = if first.is_ts() {
+                    Some((
+                        download_config.preview.attach(PreviewFormat::MpegTs),
+                        tee_hls as fn(&mut PreviewSink, &HlsData),
+                    ))
+                } else {
+                    download_config
+                        .preview
+                        .mark_unavailable("fMP4 分片流暂无法在浏览器内预览，录制不受影响");
+                    None
+                };
                 let mut writer = HlsWriter::new(HlsWriterConfig {
                     output_dir,
                     base_name,
@@ -209,6 +228,7 @@ impl Mesio {
                     token.clone(),
                     callback.as_mut(),
                     (download_config.bytes_written.clone(), |item| item.size()),
+                    preview,
                 )
                 .await;
                 handle.cancel();
@@ -342,6 +362,9 @@ fn segment_complete_hook(
 /// `byte_meter`：写盘速率计数器与「一个管线条目占多少字节」的取值函数。
 /// 修复管线的 writer 来自外部 crate，拿不到逐条写出量，因此在条目进入管线前计数；
 /// 修复只增删极少量 tag，与实际落盘量相差可忽略。
+///
+/// `preview`：直播预览的写入端与「把一个条目旁路给它」的函数，同样在条目进入管线前
+/// 调用（预览拿到的是拉到的原始流，不含修复管线的改动）。只是 push，不会失败、不 await。
 #[allow(clippy::too_many_arguments)]
 async fn run_pipeline<'a, P, W>(
     common: &PipelineConfig,
@@ -353,6 +376,7 @@ async fn run_pipeline<'a, P, W>(
     token: CancellationToken,
     callback: &mut (dyn FnMut(SegmentEvent) + Send + Sync + 'a),
     byte_meter: (ByteCounter, fn(&P::Item) -> usize),
+    preview: Option<PreviewTee<P::Item>>,
 ) -> Result<WriterStats, String>
 where
     P: PipelineProvider,
@@ -370,10 +394,14 @@ where
 
     let forward = tokio::spawn(async move {
         let (bytes_written, item_size) = byte_meter;
+        let mut preview = preview;
         let mut items = items;
         while let Some(item) = items.next().await {
             if let Ok(item) = &item {
                 bytes_written.add(item_size(item) as u64);
+                if let Some((sink, tee)) = preview.as_mut() {
+                    tee(sink, item);
+                }
             }
             if input_tx.send(item).await.is_err() {
                 debug!("mesio 管线已关闭，停止转发");
@@ -402,6 +430,56 @@ where
         Ok(stats) => Ok(stats),
         Err(RunCompletionError::Writer(e)) => Err(format!("writer: {e}")),
         Err(RunCompletionError::Pipeline(e)) => Err(format!("pipeline: {e}")),
+    }
+}
+
+/// 把一个 mesio FLV 条目旁路给直播预览，重新编成与 FLV 文件一致的字节排列。
+///
+/// 类型判定沿用 `flv` crate 对 tag 的分类；修复管线的控制项（`Split` / `EndOfSequence`）
+/// 不是媒体字节，跳过。视频序列头是 HEVC 时把 hub 标为不可预览（Chrome 的 MSE 放不了），
+/// 录制本身不受影响。
+fn tee_flv(sink: &mut PreviewSink, item: &FlvData) {
+    match item {
+        FlvData::Header(header) => {
+            if let Ok(bytes) = flv::encode::encode_header_bytes(header) {
+                sink.push(ChunkKind::Header, bytes::Bytes::copy_from_slice(&bytes));
+            }
+        }
+        FlvData::Tag(tag) => {
+            let class = tag.classification();
+            let kind = if tag.is_script_tag() {
+                ChunkKind::SequenceHeader(preview::flv::TAG_SCRIPT)
+            } else if tag.is_audio_sequence_header() {
+                ChunkKind::SequenceHeader(preview::flv::TAG_AUDIO)
+            } else if tag.is_video_sequence_header() {
+                if class.codec == Some(CodecKind::Hevc) {
+                    sink.mark_unavailable(
+                        "视频为 HEVC 编码，浏览器内的播放器无法解码，录制不受影响",
+                    );
+                }
+                ChunkKind::SequenceHeader(preview::flv::TAG_VIDEO)
+            } else if tag.is_video_tag() && class.keyframe_media {
+                ChunkKind::Keyframe
+            } else {
+                ChunkKind::Media
+            };
+            let tag_type = u8::from(tag.tag_type()) | if tag.is_filtered() { 0x20 } else { 0 };
+            sink.push(
+                kind,
+                preview::flv::tag_chunk(tag_type, tag.timestamp_ms, tag.data()),
+            );
+        }
+        FlvData::Split(_) | FlvData::EndOfSequence(_) => {}
+    }
+}
+
+/// 把一个 mesio HLS 分片旁路给直播预览：每个 TS 分片都是自含的（带 PAT/PMT、从关键帧开始），
+/// 整片作为一个关键帧分块推送，新订阅者从最近一个完整分片起播。
+fn tee_hls(sink: &mut PreviewSink, item: &HlsData) {
+    if item.is_ts()
+        && let Some(data) = item.data()
+    {
+        sink.push(ChunkKind::Keyframe, data.clone());
     }
 }
 
@@ -531,8 +609,10 @@ mod tests {
             output_dir: dir.path().to_path_buf(),
             suffix: "flv".to_string(),
             bytes_written: ByteCounter::new(),
+            preview: Default::default(),
         };
         let bytes_written = config.bytes_written.clone();
+        let preview = config.preview.clone();
 
         let seen: Arc<Mutex<Vec<SegmentInfo>>> = Arc::default();
         let sink = seen.clone();
@@ -554,6 +634,14 @@ mod tests {
             payload_len as u64,
             "进入管线的字节应等于源 FLV 的长度（文件头 + 全部 tag）"
         );
+        // 预览 hub 在 FLV 会话开始时被 attach 为 FLV，会话结束后写入端已 drop 但格式保留
+        let preview_status = preview.status();
+        assert!(preview_status.available);
+        assert_eq!(
+            preview_status.format,
+            Some(biliup::downloader::preview::PreviewFormat::Flv)
+        );
+        assert!(!preview.is_attached());
         let seen = seen.lock().unwrap();
         assert!(
             seen.len() >= 2,
@@ -567,6 +655,140 @@ mod tests {
             let size = std::fs::metadata(&info.prev_file_path).unwrap().len();
             assert!(size > 13, "segment {name} is empty");
         }
+    }
+
+    /// mesio FLV 条目旁路：文件头 / script / 序列头 / 关键帧 / 普通帧各归其位，
+    /// 新订阅者拿到「文件头 + onMetaData + 序列头 + 从关键帧起的 GOP」，字节排列与 FLV 文件一致。
+    #[tokio::test]
+    async fn tee_flv_rebuilds_a_playable_flv_prefix_for_new_subscribers() {
+        use biliup::downloader::preview::{PreviewFormat, PreviewHub};
+        use flv::{FlvHeader, FlvTag, FlvTagType};
+
+        let tag = |tag_type: FlvTagType, ts: u32, data: &[u8]| {
+            FlvData::Tag(FlvTag::new(
+                ts,
+                0,
+                tag_type,
+                false,
+                bytes::Bytes::copy_from_slice(data),
+            ))
+        };
+        let hub = PreviewHub::new(4);
+        let mut sink = hub.attach(PreviewFormat::Flv);
+        tee_flv(&mut sink, &FlvData::Header(FlvHeader::new(true, true)));
+        tee_flv(
+            &mut sink,
+            &tag(FlvTagType::ScriptData, 0, b"\x02\x00\x0aonMetaData\x05"),
+        );
+        tee_flv(
+            &mut sink,
+            &tag(FlvTagType::Audio, 0, &[0xaf, 0x00, 0x12, 0x10]),
+        );
+        tee_flv(
+            &mut sink,
+            &tag(FlvTagType::Video, 0, &[0x17, 0x00, 0, 0, 0, 0x01, 0x64]),
+        );
+        // 第一个 GOP 会被第二个关键帧替掉
+        tee_flv(
+            &mut sink,
+            &tag(FlvTagType::Video, 0, &[0x17, 0x01, 0, 0, 0, 0xa1]),
+        );
+        tee_flv(
+            &mut sink,
+            &tag(FlvTagType::Video, 40, &[0x27, 0x01, 0, 0, 0, 0xb1]),
+        );
+        tee_flv(
+            &mut sink,
+            &tag(FlvTagType::Video, 80, &[0x17, 0x01, 0, 0, 0, 0xa2]),
+        );
+        tee_flv(&mut sink, &tag(FlvTagType::Audio, 90, &[0xaf, 0x01, 0x21]));
+        tee_flv(&mut sink, &FlvData::Split(flv::SplitReason::SizeLimit));
+
+        let pending = tokio::spawn({
+            let hub = hub.clone();
+            async move { hub.subscribe(Duration::from_secs(5)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        tee_flv(
+            &mut sink,
+            &tag(FlvTagType::Video, 120, &[0x27, 0x01, 0, 0, 0, 0xb2]),
+        );
+        let sub = pending.await.unwrap().unwrap();
+
+        let chunks = sub.snapshot;
+        assert_eq!(
+            chunks.len(),
+            1 + 3 + 3,
+            "header + 3 sequence headers + GOP of 3"
+        );
+        assert_eq!(
+            &chunks[0][..],
+            &[0x46, 0x4C, 0x56, 1, 5, 0, 0, 0, 9, 0, 0, 0, 0]
+        );
+        // 每个 tag 分块：11 字节头 + 载荷 + 4 字节 PreviousTagSize
+        let script = &chunks[1];
+        assert_eq!(script[0], 18);
+        assert_eq!(&script[script.len() - 4..], &(11u32 + 14).to_be_bytes());
+        assert_eq!(chunks[2][0], 8);
+        assert_eq!(&chunks[3][11..13], &[0x17, 0x00]);
+        assert_eq!(&chunks[4][11..17], &[0x17, 0x01, 0, 0, 0, 0xa2]);
+        assert_eq!(&chunks[4][4..8], &[0, 0, 80, 0], "timestamp 80 ms");
+        assert_eq!(&chunks[5][11..14], &[0xaf, 0x01, 0x21]);
+        assert_eq!(&chunks[6][11..17], &[0x27, 0x01, 0, 0, 0, 0xb2]);
+        assert!(hub.status().available);
+    }
+
+    #[test]
+    fn tee_flv_marks_hevc_streams_as_not_previewable() {
+        use biliup::downloader::preview::{PreviewFormat, PreviewHub};
+        use flv::{FlvTag, FlvTagType};
+
+        let hub = PreviewHub::new(4);
+        let mut sink = hub.attach(PreviewFormat::Flv);
+        // E-RTMP 序列头：0x90 = ExHeader | KeyFrame | SequenceStart，fourcc hvc1
+        let hevc = FlvData::Tag(FlvTag::new(
+            0,
+            0,
+            FlvTagType::Video,
+            false,
+            bytes::Bytes::from_static(&[0x90, b'h', b'v', b'c', b'1', 1, 2, 3]),
+        ));
+        tee_flv(&mut sink, &hevc);
+        let status = hub.status();
+        assert!(!status.available);
+        assert!(status.reason.unwrap().contains("HEVC"));
+    }
+
+    #[tokio::test]
+    async fn tee_hls_forwards_ts_segments_as_keyframe_chunks_and_ignores_fmp4() {
+        use biliup::downloader::preview::{PreviewFormat, PreviewHub};
+
+        let hub = PreviewHub::new(4);
+        let mut sink = hub.attach(PreviewFormat::MpegTs);
+        let segment = || m3u8_rs::MediaSegment {
+            uri: "1.ts".to_string(),
+            ..Default::default()
+        };
+        let ts = HlsData::ts(
+            segment(),
+            bytes::Bytes::from_static(&[0x47, 0x40, 0x00, 0x10]),
+        );
+        tee_hls(
+            &mut sink,
+            &HlsData::mp4_init(segment(), bytes::Bytes::from_static(b"ftyp")),
+        );
+        tee_hls(&mut sink, &ts);
+        tee_hls(&mut sink, &HlsData::end_marker());
+        let pending = tokio::spawn({
+            let hub = hub.clone();
+            async move { hub.subscribe(Duration::from_secs(5)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        tee_hls(&mut sink, &ts);
+        let sub = pending.await.unwrap().unwrap();
+        // 快照只含最近一个完整分片，且以 TS 同步字节开头
+        assert_eq!(sub.snapshot.len(), 1);
+        assert_eq!(sub.snapshot[0][0], 0x47);
     }
 
     #[test]
