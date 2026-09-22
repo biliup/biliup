@@ -448,7 +448,9 @@ function playWithMpegts(
     const playing = player.play()
     if (playing && typeof (playing as Promise<void>).catch === 'function') {
       ;(playing as Promise<void>).catch(() => {
-        // 自动播放被浏览器拦下时静音重试，直播预览宁可无声也不要卡住
+        // 自动播放被浏览器拦下时静音重试，直播预览宁可无声也不要卡住；
+        // play() 被打断也可能是实例已被销毁（弹层关闭），那就不要再碰它
+        if (art.isDestroy || artWithMpegts.mpegts !== player) return
         video.muted = true
         player.play()
       })
