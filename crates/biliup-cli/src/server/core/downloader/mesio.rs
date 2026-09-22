@@ -473,17 +473,19 @@ fn tee_flv(sink: &mut PreviewSink, item: &FlvData) {
 
 /// 把一个 mesio HLS 分片旁路给直播预览。
 ///
-/// TS：每个分片自含（带 PAT/PMT、从关键帧开始），整片作为一个关键帧分块推送。
-/// fMP4：init segment（ftyp + moov）作为文件头进快照，每个 moof + mdat 分片作为一个关键帧分块。
-/// 两者新订阅者都从「最近一个完整分片」起播。
+/// TS：每个分片自含（带 PAT/PMT），整片作为一个分块推送，起点是否关键帧由写入端嗅探决定。
+/// fMP4：init segment（ftyp + moov）作为文件头进快照；分段按 moof + mdat 切成分片，
+/// 视频首帧是关键帧的分片作为 GOP 起点（B 站的 fmp4 分段边界不对齐关键帧，不能按分段起播）。
 fn tee_hls(sink: &mut PreviewSink, item: &HlsData) {
     let Some(data) = item.data() else { return };
-    let kind = if item.is_mp4_init() {
-        ChunkKind::Header
+    if item.is_mp4_init() {
+        sink.push(ChunkKind::Header, data.clone());
+    } else if item.is_mp4() {
+        // 分段里可能有多个 moof/mdat 对，且分段边界未必是关键帧：按分片切开、关键帧分片起 GOP
+        sink.push_fmp4_segment(data.clone());
     } else {
-        ChunkKind::Keyframe
-    };
-    sink.push(kind, data.clone());
+        sink.push_ts_segment_start(data.clone());
+    }
 }
 
 /// 把引擎事件写进日志。进度事件只在 debug 级别记录，避免刷屏。

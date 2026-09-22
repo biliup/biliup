@@ -256,6 +256,7 @@ impl PreviewHub {
             gop: Vec::new(),
             gop_bytes: 0,
             gop_ready: false,
+            fmp4_init: mp4::InitInfo::default(),
         }
     }
 
@@ -314,6 +315,8 @@ pub struct PreviewSink {
     gop_bytes: usize,
     /// 当前 GOP 缓冲是否从关键帧起且未超上限；为 `false` 时订阅请求留到下一个关键帧再回应
     gop_ready: bool,
+    /// fMP4：从 init segment 读出的视频轨信息，用于判定分片首帧是否关键帧
+    fmp4_init: mp4::InitInfo,
 }
 
 impl PreviewSink {
@@ -332,13 +335,43 @@ impl PreviewSink {
         *self.hub.state.write().unwrap() = HubState::Unavailable(reason.into());
     }
 
+    /// 推送一个 fMP4 分段（可能含多个 moof/mdat 对）：按分片切开，视频首帧是关键帧的分片
+    /// 作为 GOP 起点，其余追加——新订阅者由此从关键帧起播，而不是从分段边界起。
+    /// 读不出 flags 的分片按关键帧处理（宁可多给也不能让预览永远起不来）。
+    pub fn push_fmp4_segment(&mut self, segment: Bytes) {
+        let frags = mp4::fragments(&segment, &self.fmp4_init);
+        if frags.is_empty() {
+            self.push(ChunkKind::Keyframe, segment);
+            return;
+        }
+        for frag in frags {
+            let kind = match frag.video_sync {
+                Some(false) => ChunkKind::Media,
+                _ => ChunkKind::Keyframe,
+            };
+            self.push(kind, segment.slice(frag.start..frag.end));
+        }
+    }
+
+    /// 推送一个 MPEG-TS 分片的起始块：嗅探第一个视频 PES 是否从 IDR 起，是（或说不准）
+    /// 就作为 GOP 起点，否则追加到前一个 GOP。
+    pub fn push_ts_segment_start(&mut self, chunk: Bytes) {
+        let kind = match ts::segment_starts_with_idr(&chunk) {
+            Some(false) => ChunkKind::Media,
+            _ => ChunkKind::Keyframe,
+        };
+        self.push(kind, chunk);
+    }
+
     /// 推送一个分块。热路径：不 await、不加锁等待、不返回错误。
     pub fn push(&mut self, kind: ChunkKind, chunk: Bytes) {
         match kind {
             ChunkKind::Header => {
                 if self.format == PreviewFormat::Fmp4 {
                     // init segment：每次 attach 只出现一次（上游换初始化分片时才会再来），
-                    // 解出编码串供前端 addSourceBuffer；MSE 允许中途追加新 init，照常广播
+                    // 解出编码串供前端 addSourceBuffer，记下视频轨用于分片的关键帧判定；
+                    // MSE 允许中途追加新 init，照常广播
+                    self.fmp4_init = mp4::init_info(&chunk);
                     let codecs = mp4::codecs_from_init(&chunk);
                     if let HubState::Available { codecs: slot, .. } =
                         &mut *self.hub.state.write().unwrap()
@@ -428,6 +461,83 @@ impl Drop for PreviewSink {
         if matches!(&*requests, Some((generation, _)) if *generation == self.generation) {
             *requests = None;
         }
+    }
+}
+
+/// MPEG-TS 分片起点的关键帧嗅探。
+///
+/// HLS 分片按惯例从关键帧开始，但不是所有打包器都保证。这里只看分片开头这一块字节里第一个
+/// 视频 PES（stream_id 0xE0–0xEF）的前几个 NAL：有 IDR（5）或 SPS（7）→ 关键帧起点；
+/// 只看到普通片（1）→ 不是；找不到视频 PES 或 NAL 不可辨 → 说不准。
+pub mod ts {
+    const PACKET: usize = 188;
+
+    /// `Some(true)` 从关键帧起，`Some(false)` 不是，`None` 说不准（调用方按关键帧处理）。
+    pub fn segment_starts_with_idr(chunk: &[u8]) -> Option<bool> {
+        let mut es: Vec<u8> = Vec::new();
+        let mut video_pid: Option<u16> = None;
+        let mut offset = 0;
+        while offset + PACKET <= chunk.len() {
+            let pkt = &chunk[offset..offset + PACKET];
+            offset += PACKET;
+            if pkt[0] != 0x47 {
+                return None;
+            }
+            let pusi = pkt[1] & 0x40 != 0;
+            let pid = (u16::from(pkt[1] & 0x1f) << 8) | u16::from(pkt[2]);
+            let afc = (pkt[3] >> 4) & 0x3;
+            let mut payload = 4;
+            if afc & 0x2 != 0 {
+                payload += 1 + usize::from(pkt[4]);
+            }
+            if afc & 0x1 == 0 || payload > PACKET {
+                continue;
+            }
+            let data = &pkt[payload..];
+            match video_pid {
+                None => {
+                    // 还没锁定视频 PID：找 PES 起始且 stream_id 是视频的包
+                    if pusi
+                        && data.len() > 9
+                        && data[0] == 0
+                        && data[1] == 0
+                        && data[2] == 1
+                        && (0xe0..=0xef).contains(&data[3])
+                    {
+                        let header_len = usize::from(data[8]);
+                        video_pid = Some(pid);
+                        es.extend_from_slice(data.get(9 + header_len..).unwrap_or(&[]));
+                    }
+                }
+                Some(v) if v == pid => {
+                    if pusi {
+                        break; // 第一个视频 PES 到此为止
+                    }
+                    es.extend_from_slice(data);
+                }
+                _ => {}
+            }
+            if es.len() > 64 * 1024 {
+                break;
+            }
+        }
+        video_pid?;
+        let mut verdict = None;
+        let mut i = 0;
+        while i + 4 <= es.len() {
+            if es[i] == 0 && es[i + 1] == 0 && es[i + 2] == 1 {
+                let nal_type = es[i + 3] & 0x1f;
+                match nal_type {
+                    5 | 7 => return Some(true),
+                    1 => verdict = Some(false),
+                    _ => {}
+                }
+                i += 3;
+            } else {
+                i += 1;
+            }
+        }
+        verdict
     }
 }
 
@@ -539,10 +649,11 @@ pub mod flv {
 /// 只读 `moov/trak/mdia/minf/stbl/stsd` 下的 sample entry，不解析别的；
 /// 解不出的轨道跳过，全都解不出返回 `None`（前端据此提示而不是转圈）。
 pub mod mp4 {
-    /// 一个 box 的类型与载荷（不含 8 / 16 字节头）
+    /// 一个 box 的类型与载荷（不含 8 / 16 字节头），以及含头的总长度
     struct Box<'a> {
         kind: [u8; 4],
         body: &'a [u8],
+        size: usize,
     }
 
     /// 顺序遍历 `data` 里的顶层 box；损坏 / 截断时提前结束而不是 panic。
@@ -572,7 +683,7 @@ pub mod mp4 {
             }
             let body = &data[header..size];
             data = &data[size..];
-            Some(Box { kind, body })
+            Some(Box { kind, body, size })
         })
     }
 
@@ -583,6 +694,174 @@ pub mod mp4 {
     /// `stsd` 是 full box：version/flags(4) + entry_count(4)，其后是 sample entry 列表
     fn sample_entries(stsd: &[u8]) -> impl Iterator<Item = Box<'_>> {
         boxes(stsd.get(8..).unwrap_or(&[]))
+    }
+
+    /// init segment 里与分片切分相关的信息：视频轨 ID 与 `trex` 里的默认 sample flags。
+    #[derive(Debug, Clone, Default, PartialEq, Eq)]
+    pub struct InitInfo {
+        /// `hdlr.handler_type == "vide"` 的轨道 ID；纯音频流为 `None`
+        pub video_track: Option<u32>,
+        /// `mvex/trex` 给该视频轨的 default_sample_flags（分片自身没写 flags 时用）
+        pub video_default_flags: Option<u32>,
+    }
+
+    /// 从 init segment 读视频轨 ID 与默认 sample flags。
+    pub fn init_info(init: &[u8]) -> InitInfo {
+        let Some(moov) = child(init, b"moov") else {
+            return InitInfo::default();
+        };
+        let mut info = InitInfo::default();
+        for trak in boxes(moov).filter(|b| &b.kind == b"trak") {
+            let is_video = child(trak.body, b"mdia")
+                .and_then(|mdia| child(mdia, b"hdlr"))
+                .and_then(|hdlr| hdlr.get(8..12))
+                .is_some_and(|handler| handler == b"vide");
+            if !is_video {
+                continue;
+            }
+            // tkhd 是 full box：version 0 时 track_ID 在偏移 12，version 1 在 20
+            let track_id = child(trak.body, b"tkhd").and_then(|tkhd| {
+                let offset = if tkhd.first() == Some(&1) { 20 } else { 12 };
+                tkhd.get(offset..offset + 4)
+                    .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+            });
+            info.video_track = track_id;
+            break;
+        }
+        if let (Some(video_track), Some(mvex)) = (info.video_track, child(moov, b"mvex")) {
+            for trex in boxes(mvex).filter(|b| &b.kind == b"trex") {
+                // full box：version/flags(4) track_ID(4) default_sample_description_index(4)
+                // default_sample_duration(4) default_sample_size(4) default_sample_flags(4)
+                let id = trex.body.get(4..8).map(be_u32);
+                if id == Some(video_track) {
+                    info.video_default_flags = trex.body.get(20..24).map(be_u32);
+                }
+            }
+        }
+        info
+    }
+
+    fn be_u32(b: &[u8]) -> u32 {
+        u32::from_be_bytes([b[0], b[1], b[2], b[3]])
+    }
+
+    /// 一个 moof + mdat 分片在分段字节里的位置，以及它的视频首帧是否为同步样本（关键帧）。
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct Fragment {
+        pub start: usize,
+        pub end: usize,
+        /// `Some(true)` 首帧是关键帧；`Some(false)` 不是；`None` 分片里没有视频轨或读不出 flags
+        pub video_sync: Option<bool>,
+    }
+
+    /// 把一个 HLS 分段（可能含多个 moof/mdat 对）切成分片。`styp` / `sidx` / `prft` / `emsg`
+    /// 之类的前导 box 归入紧随其后的分片；`moof` 之后到下一个 `moof`（或下一个前导 box）之前的
+    /// 全部 box 都算这个分片。
+    pub fn fragments(segment: &[u8], info: &InitInfo) -> Vec<Fragment> {
+        let mut out: Vec<Fragment> = Vec::new();
+        let mut pending_start: Option<usize> = None;
+        let mut current: Option<Fragment> = None;
+        let mut offset = 0usize;
+        for b in boxes(segment) {
+            let size = b.size;
+            match &b.kind {
+                b"moof" => {
+                    if let Some(frag) = current.take() {
+                        out.push(frag);
+                    }
+                    let start = pending_start.take().unwrap_or(offset);
+                    current = Some(Fragment {
+                        start,
+                        end: offset + size,
+                        video_sync: moof_video_sync(b.body, info),
+                    });
+                }
+                b"styp" | b"sidx" | b"prft" | b"emsg" => {
+                    if let Some(frag) = current.take() {
+                        out.push(frag);
+                    }
+                    pending_start.get_or_insert(offset);
+                }
+                _ => match current.as_mut() {
+                    Some(frag) => frag.end = offset + size,
+                    None => {
+                        pending_start.get_or_insert(offset);
+                    }
+                },
+            }
+            offset += size;
+        }
+        if let Some(frag) = current.take() {
+            out.push(frag);
+        }
+        // 尾部只有前导 box 没有 moof（分段被截断）：并入最后一个分片
+        if pending_start.is_some()
+            && let Some(last) = out.last_mut()
+        {
+            last.end = offset;
+        }
+        out
+    }
+
+    /// 从 moof 里视频轨的 traf 读首个样本的 flags，判定是否关键帧。
+    fn moof_video_sync(moof: &[u8], info: &InitInfo) -> Option<bool> {
+        for traf in boxes(moof).filter(|b| &b.kind == b"traf") {
+            let tfhd = child(traf.body, b"tfhd")?;
+            let tfhd_flags = be_u32(tfhd.get(0..4)?) & 0x00ff_ffff;
+            let track_id = be_u32(tfhd.get(4..8)?);
+            if info.video_track.is_some_and(|v| v != track_id) {
+                continue;
+            }
+            // tfhd 可选字段顺序：base_data_offset(8) sample_description_index(4)
+            // default_sample_duration(4) default_sample_size(4) default_sample_flags(4)
+            let mut pos = 8;
+            if tfhd_flags & 0x1 != 0 {
+                pos += 8;
+            }
+            if tfhd_flags & 0x2 != 0 {
+                pos += 4;
+            }
+            if tfhd_flags & 0x8 != 0 {
+                pos += 4;
+            }
+            if tfhd_flags & 0x10 != 0 {
+                pos += 4;
+            }
+            let default_flags = if tfhd_flags & 0x20 != 0 {
+                tfhd.get(pos..pos + 4).map(be_u32)
+            } else {
+                info.video_default_flags
+            };
+
+            let first_flags = child(traf.body, b"trun").and_then(|trun| {
+                let trun_flags = be_u32(trun.get(0..4)?) & 0x00ff_ffff;
+                let mut pos = 8; // version/flags + sample_count
+                if trun_flags & 0x1 != 0 {
+                    pos += 4; // data_offset
+                }
+                if trun_flags & 0x4 != 0 {
+                    return trun.get(pos..pos + 4).map(be_u32); // first_sample_flags
+                }
+                if trun_flags & 0x400 != 0 {
+                    // 第一个样本条目：duration(0x100) size(0x200) flags(0x400) cto(0x800)
+                    if trun_flags & 0x100 != 0 {
+                        pos += 4;
+                    }
+                    if trun_flags & 0x200 != 0 {
+                        pos += 4;
+                    }
+                    return trun.get(pos..pos + 4).map(be_u32);
+                }
+                None
+            });
+            // sample_is_non_sync_sample 是 bit 16；sample_depends_on == 2 也表示 I 帧
+            return first_flags.or(default_flags).map(|flags| {
+                let non_sync = (flags >> 16) & 1 == 1;
+                let depends_on = (flags >> 24) & 0x3;
+                !non_sync || depends_on == 2
+            });
+        }
+        None
     }
 
     /// 解出全部轨道的编码串并用 `,` 连接；一个都解不出时返回 `None`。
@@ -849,6 +1128,209 @@ mod tests {
             mp4::codecs_from_init(&full_init[..full_init.len() - 10]),
             None
         );
+    }
+
+    /// 造一个 moof：一个视频 traf（tfhd 带 default_sample_flags，trun 带 first_sample_flags）
+    fn moof(track: u32, first_sample_flags: Option<u32>, default_flags: Option<u32>) -> Vec<u8> {
+        use mp4::build::*;
+        let mut tfhd = vec![0u8; 4];
+        let mut tfhd_flags = 0u32;
+        let mut tail = Vec::new();
+        if let Some(d) = default_flags {
+            tfhd_flags |= 0x20;
+            tail.extend_from_slice(&d.to_be_bytes());
+        }
+        tfhd[1..4].copy_from_slice(&tfhd_flags.to_be_bytes()[1..]);
+        tfhd.extend_from_slice(&track.to_be_bytes());
+        tfhd.extend_from_slice(&tail);
+        let mut trun = vec![0u8; 4];
+        let mut trun_flags = 0x1u32 | 0x200; // data_offset + sample_size
+        if first_sample_flags.is_some() {
+            trun_flags |= 0x4;
+        }
+        trun[1..4].copy_from_slice(&trun_flags.to_be_bytes()[1..]);
+        trun.extend_from_slice(&2u32.to_be_bytes()); // sample_count
+        trun.extend_from_slice(&0u32.to_be_bytes()); // data_offset
+        if let Some(f) = first_sample_flags {
+            trun.extend_from_slice(&f.to_be_bytes());
+        }
+        trun.extend_from_slice(&[0, 0, 0, 10, 0, 0, 0, 20]);
+        let traf = bx(b"traf", &[bx(b"tfhd", &tfhd), bx(b"trun", &trun)].concat());
+        bx(b"moof", &[bx(b"mfhd", &[0u8; 8]), traf].concat())
+    }
+
+    #[test]
+    fn fmp4_segments_are_split_into_fragments_with_keyframe_detection() {
+        use mp4::build::*;
+        // init：视频轨 1（vide）、音频轨 2（soun），trex 给视频默认 non-sync
+        let hdlr = |kind: &[u8; 4]| {
+            // full box：version/flags 由 full() 加，这里从 pre_defined(4) 开始
+            let mut b = vec![0u8; 4];
+            b.extend_from_slice(kind);
+            b.extend_from_slice(&[0u8; 13]);
+            full(b"hdlr", &b)
+        };
+        let tkhd = |id: u32| {
+            let mut b = vec![0u8; 8];
+            b.extend_from_slice(&id.to_be_bytes());
+            b.extend_from_slice(&[0u8; 64]);
+            full(b"tkhd", &b)
+        };
+        let trak =
+            |id: u32, kind: &[u8; 4]| bx(b"trak", &[tkhd(id), bx(b"mdia", &hdlr(kind))].concat());
+        let trex = |id: u32, flags: u32| {
+            let mut b = vec![0u8; 4];
+            b.extend_from_slice(&id.to_be_bytes());
+            b.extend_from_slice(&[0u8; 12]);
+            b.extend_from_slice(&flags.to_be_bytes());
+            bx(b"trex", &b)
+        };
+        let moov = bx(
+            b"moov",
+            &[
+                trak(1, b"vide"),
+                trak(2, b"soun"),
+                bx(
+                    b"mvex",
+                    &[trex(1, 0x0101_0000), trex(2, 0x0200_0000)].concat(),
+                ),
+            ]
+            .concat(),
+        );
+        let init = [bx(b"ftyp", b"iso5"), moov].concat();
+        let info = mp4::init_info(&init);
+        assert_eq!(
+            info,
+            mp4::InitInfo {
+                video_track: Some(1),
+                video_default_flags: Some(0x0101_0000)
+            }
+        );
+
+        // 分段：styp + [非同步分片] + [同步分片（depends_on=2）] + [没写 flags 的分片→用 trex 默认]
+        // + 一个只有音频轨的分片（视频轨缺席 → None）
+        let mdat = bx(b"mdat", &[0xaa; 16]);
+        let non_sync = [moof(1, Some(0x0101_0000), None), mdat.clone()].concat();
+        let sync = [moof(1, Some(0x0200_0000), None), mdat.clone()].concat();
+        let by_default = [moof(1, None, None), mdat.clone()].concat();
+        let audio_only = [moof(2, Some(0x0200_0000), None), mdat.clone()].concat();
+        let styp = bx(b"styp", b"msdh");
+        let segment = [
+            styp.clone(),
+            non_sync.clone(),
+            sync.clone(),
+            by_default.clone(),
+            audio_only.clone(),
+        ]
+        .concat();
+        let frags = mp4::fragments(&segment, &info);
+        assert_eq!(frags.len(), 4);
+        // 前导 styp 归入第一个分片
+        assert_eq!(
+            (frags[0].start, frags[0].end),
+            (0, styp.len() + non_sync.len())
+        );
+        assert_eq!(frags[0].video_sync, Some(false));
+        assert_eq!(frags[1].video_sync, Some(true));
+        assert_eq!(frags[2].video_sync, Some(false), "trex 默认 non-sync");
+        assert_eq!(frags[3].video_sync, None, "没有视频轨的分片说不准");
+        assert_eq!(frags[3].end, segment.len());
+        // 不知道视频轨时用第一个有 flags 的 traf
+        let frags = mp4::fragments(&sync, &mp4::InitInfo::default());
+        assert_eq!(frags[0].video_sync, Some(true));
+        // 损坏 / 空数据不 panic
+        assert!(mp4::fragments(&[0, 0, 0], &info).is_empty());
+        assert!(mp4::fragments(b"", &info).is_empty());
+    }
+
+    /// 写入端按分片切分：新订阅者从最近的关键帧分片起，而不是从分段边界起。
+    #[tokio::test]
+    async fn fmp4_snapshot_starts_at_the_last_keyframe_fragment() {
+        use mp4::build::*;
+        let hub = PreviewHub::new(4);
+        let mut sink = hub.attach(PreviewFormat::Fmp4);
+        let avcc = bx(b"avcC", &[1, 0x64, 0x00, 0x1f]);
+        let init = Bytes::from(init(&[trak(&stsd(&[visual_entry(b"avc1", &avcc)]))]));
+        sink.push(ChunkKind::Header, init.clone());
+        let mdat = |n: u8| bx(b"mdat", &[n; 8]);
+        let key = |n: u8| Bytes::from([moof(1, Some(0x0200_0000), None), mdat(n)].concat());
+        let inter = |n: u8| Bytes::from([moof(1, Some(0x0101_0000), None), mdat(n)].concat());
+        // 分段 A = [P1][P2][K3][P4]，分段 B = [P5][P6]
+        let seg_a = Bytes::from([inter(1), inter(2), key(3), inter(4)].concat());
+        let seg_b = Bytes::from([inter(5), inter(6)].concat());
+        sink.push_fmp4_segment(seg_a);
+        let pending = tokio::spawn({
+            let hub = hub.clone();
+            async move { hub.subscribe(Duration::from_secs(5)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sink.push_fmp4_segment(seg_b);
+        let mut sub = pending.await.unwrap().unwrap();
+        // 请求在分段 B 的第一个分片 P5 推送时被回应：快照 = init + K3 P4 P5——从关键帧分片起、
+        // 跨过分段 A/B 的边界；P6 走实时接收端
+        assert_eq!(sub.snapshot, vec![init, key(3), inter(4), inter(5)]);
+        assert_eq!(sub.rx.recv().await.unwrap(), inter(6));
+    }
+
+    #[test]
+    fn ts_segment_start_sniffs_the_first_video_pes() {
+        // 造 TS 包：PAT 无关；视频 PID 0x100，PUSI 包里放 PES 头 + NAL
+        fn packet(pid: u16, pusi: bool, cc: u8, payload: &[u8]) -> Vec<u8> {
+            let mut p = vec![
+                0x47,
+                ((pid >> 8) as u8 & 0x1f) | if pusi { 0x40 } else { 0 },
+                pid as u8,
+                0x10 | (cc & 0xf),
+            ];
+            p.extend_from_slice(payload);
+            p.resize(188, 0xff);
+            p
+        }
+        fn pes(nals: &[&[u8]]) -> Vec<u8> {
+            let mut es = Vec::new();
+            for n in nals {
+                es.extend_from_slice(&[0, 0, 0, 1]);
+                es.extend_from_slice(n);
+            }
+            let mut p = vec![0, 0, 1, 0xe0, 0, 0, 0x80, 0x80, 5, 0x21, 0, 1, 0, 1];
+            p.extend_from_slice(&es);
+            p
+        }
+        // 音频 PES 先出现，再是视频 PES：SPS + PPS + IDR → 关键帧起点
+        let audio = packet(
+            0x101,
+            true,
+            0,
+            &[
+                0, 0, 1, 0xc0, 0, 10, 0x80, 0x80, 5, 0, 0, 0, 0, 0, 0xff, 0xf1,
+            ],
+        );
+        let idr = packet(
+            0x100,
+            true,
+            0,
+            &pes(&[&[0x67, 1, 2], &[0x68, 3], &[0x65, 0x88]]),
+        );
+        let chunk = [audio.clone(), idr].concat();
+        assert_eq!(ts::segment_starts_with_idr(&chunk), Some(true));
+        // 只有普通片
+        let p_frame = packet(0x100, true, 0, &pes(&[&[0x41, 0x9a]]));
+        assert_eq!(
+            ts::segment_starts_with_idr(&[audio.clone(), p_frame].concat()),
+            Some(false)
+        );
+        // 普通片跨包，下一个 PUSI 之前继续读；再后面的 IDR 属于第二个 PES，不算
+        let p1 = packet(0x100, true, 0, &pes(&[&[0x41, 0x9a]]));
+        let p2 = packet(0x100, false, 1, &[0x9a; 100]);
+        let k = packet(0x100, true, 2, &pes(&[&[0x65, 1]]));
+        assert_eq!(
+            ts::segment_starts_with_idr(&[p1, p2, k].concat()),
+            Some(false)
+        );
+        // 没有视频 PES / 不是 TS → 说不准
+        assert_eq!(ts::segment_starts_with_idr(&audio), None);
+        assert_eq!(ts::segment_starts_with_idr(b"FLV\x01"), None);
+        assert_eq!(ts::segment_starts_with_idr(&[]), None);
     }
 
     #[tokio::test]
@@ -1274,6 +1756,31 @@ mod real_init_segments {
     //! 手工校验：读 ffmpeg 生成的 init segment（本地有文件时才跑）。
     //! `cargo test -p biliup -- --ignored real_init` 前先用 ffmpeg 的 hls fmp4 输出准备样本。
     use super::mp4::codecs_from_init;
+
+    /// 真实 B 站 hls_fmp4 抓样：分段里多个 moof/mdat，只有约每 2 秒一个分片首帧是关键帧。
+    /// 样本来自 `GET /v1/streamers/{id}/live` 抓的前 5 秒（本地有文件时才跑）。
+    #[test]
+    #[ignore]
+    fn bilibili_fmp4_capture_has_keyframe_fragments() {
+        let Ok(bytes) = std::fs::read("/tmp/lp-live3/cold/cold-3-1.bin") else {
+            return;
+        };
+        // init = ftyp + moov：手工走两个顶层 box 拿到 moov 的结束位置
+        let mut init_end = 0usize;
+        for _ in 0..2 {
+            let size =
+                u32::from_be_bytes(bytes[init_end..init_end + 4].try_into().unwrap()) as usize;
+            init_end += size;
+        }
+        let info = super::mp4::init_info(&bytes[..init_end]);
+        assert_eq!(info.video_track, Some(1));
+        let frags = super::mp4::fragments(&bytes[init_end..], &info);
+        let syncs: Vec<_> = frags.iter().map(|f| f.video_sync).collect();
+        assert!(frags.len() > 5, "{syncs:?}");
+        assert!(syncs.contains(&Some(true)), "{syncs:?}");
+        assert!(syncs.contains(&Some(false)), "{syncs:?}");
+        assert!(syncs.iter().all(|s| s.is_some()), "{syncs:?}");
+    }
 
     #[test]
     #[ignore]

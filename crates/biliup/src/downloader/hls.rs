@@ -166,12 +166,12 @@ async fn download_to_file(
                     "HLS 分片不是 MPEG-TS（可能是 fMP4），stream-gears 暂不支持预览此格式，可改用 mesio",
                 );
             }
-            let kind = if segment_start {
-                ChunkKind::Keyframe
+            if segment_start {
+                // 分片起点：嗅探首个视频 PES 是否从 IDR 起，决定要不要作为新 GOP 的起点
+                sink.push_ts_segment_start(chunk);
             } else {
-                ChunkKind::Media
-            };
-            sink.push(kind, chunk);
+                sink.push(ChunkKind::Media, chunk);
+            }
         }
         segment_start = false;
     }
