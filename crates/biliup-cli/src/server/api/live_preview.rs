@@ -20,13 +20,13 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use biliup::downloader::live::LiveStatus;
 use biliup::downloader::preview::{PreviewFormat, PreviewHub, SubscribeError, Subscription};
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use danmaku_client::DanmakuEvent;
 use std::collections::VecDeque;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::sync::broadcast::error::RecvError;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, broadcast};
 use tracing::{debug, info, warn};
 
 /// 进程内同时允许的预览连接总数（所有直播间合计）。
@@ -461,6 +461,9 @@ impl<S: futures::Stream + Unpin> futures::Stream for HoldPermit<S> {
 /// 一次响应里最多容忍多少次掉队重对齐；再多说明客户端带宽长期跟不上，结束响应交给播放器
 /// （它会显示原因并按自己的策略重连）。
 pub const MAX_RESYNCS_PER_RESPONSE: u32 = 20;
+/// 实时转发时把已经攒在广播缓冲里的多个分块合并成一个响应块的上限：客户端追赶积压时
+/// 少写几次 socket / 少几个 chunked 帧；没有积压时一个分块就是一个响应块，不加任何延迟。
+pub const COALESCE_BYTES: usize = 64 * 1024;
 
 struct LiveBody {
     id: i64,
@@ -468,8 +471,34 @@ struct LiveBody {
     snapshot: VecDeque<Bytes>,
     /// 持有该路的连接许可；`rx` 是实时接收端。掉队重对齐时被 take 走再换新的
     subscription: Option<Subscription>,
+    /// 合并分块时 `try_recv` 撞上的掉队，留到下一轮按掉队处理
+    pending_lag: Option<u64>,
     resyncs: u32,
     _global: OwnedSemaphorePermit,
+}
+
+/// 实时分块到手后，把广播缓冲里已经攒着的后续分块（客户端在追赶积压时才会有）
+/// 一起合并成一个响应块，最多 [`COALESCE_BYTES`]；缓冲空着就原样返回、不复制。
+/// 途中 `try_recv` 报告掉队时停止合并，把掉队数交回调用方处理。
+fn coalesce(rx: &mut broadcast::Receiver<Bytes>, first: Bytes) -> (Bytes, Option<u64>) {
+    use tokio::sync::broadcast::error::TryRecvError;
+    if first.len() >= COALESCE_BYTES || rx.is_empty() {
+        return (first, None);
+    }
+    let mut out = BytesMut::with_capacity(COALESCE_BYTES);
+    out.extend_from_slice(&first);
+    loop {
+        match rx.try_recv() {
+            Ok(chunk) => {
+                out.extend_from_slice(&chunk);
+                if out.len() >= COALESCE_BYTES {
+                    return (out.freeze(), None);
+                }
+            }
+            Err(TryRecvError::Lagged(skipped)) => return (out.freeze(), Some(skipped)),
+            Err(TryRecvError::Empty | TryRecvError::Closed) => return (out.freeze(), None),
+        }
+    }
 }
 
 impl Drop for LiveBody {
@@ -494,6 +523,7 @@ pub fn live_response(
         hub,
         snapshot: VecDeque::from(std::mem::take(&mut subscription.snapshot)),
         subscription: Some(subscription),
+        pending_lag: None,
         resyncs: 0,
         _global: global,
     };
@@ -503,8 +533,16 @@ pub fn live_response(
                 return Some((Ok::<Bytes, std::io::Error>(chunk), state));
             }
             let rx = &mut state.subscription.as_mut()?.rx;
-            match rx.recv().await {
-                Ok(chunk) => return Some((Ok(chunk), state)),
+            let received = match state.pending_lag.take() {
+                Some(skipped) => Err(RecvError::Lagged(skipped)),
+                None => rx.recv().await,
+            };
+            match received {
+                Ok(chunk) => {
+                    let (chunk, lagged) = coalesce(rx, chunk);
+                    state.pending_lag = lagged;
+                    return Some((Ok(chunk), state));
+                }
                 Err(RecvError::Lagged(skipped)) => {
                     // 慢客户端：丢掉的数据没法补，但不必断开——从最近的关键帧重新对齐，
                     // 快照里不再带文件头（fMP4 的 init segment 除外，MSE 接受中途再来一份）
@@ -649,6 +687,50 @@ mod tests {
         assert!(text.ends_with("avcK9p10"), "resync = seq header + new GOP, got {text}");
         assert_eq!(text.matches("FLV").count(), 1, "file header only once");
         assert!(!text.contains("xx"), "no stale chunks after the lag: {text}");
+    }
+
+    /// 合并：缓冲里攒着的分块合成一个响应块（不超过上限）；缓冲空时原样返回；
+    /// 途中掉队交回调用方。
+    #[tokio::test]
+    async fn coalesce_merges_backlog_and_reports_lag() {
+        let (tx, mut rx) = broadcast::channel::<Bytes>(4);
+        tx.send(Bytes::from_static(b"a")).unwrap();
+        let first = rx.recv().await.unwrap();
+        let (out, lag) = coalesce(&mut rx, first);
+        assert_eq!(&out[..], b"a");
+        assert!(lag.is_none());
+
+        tx.send(Bytes::from_static(b"b")).unwrap();
+        tx.send(Bytes::from_static(b"c")).unwrap();
+        tx.send(Bytes::from_static(b"d")).unwrap();
+        let first = rx.recv().await.unwrap();
+        let (out, lag) = coalesce(&mut rx, first);
+        assert_eq!(&out[..], b"bcd");
+        assert!(lag.is_none());
+        assert!(rx.is_empty());
+
+        // 上限：单个大分块不合并
+        let big = Bytes::from(vec![0u8; COALESCE_BYTES]);
+        tx.send(big.clone()).unwrap();
+        tx.send(Bytes::from_static(b"e")).unwrap();
+        let first = rx.recv().await.unwrap();
+        let (out, _) = coalesce(&mut rx, first);
+        assert_eq!(out.len(), COALESCE_BYTES);
+        assert_eq!(rx.recv().await.unwrap(), Bytes::from_static(b"e"));
+
+        // 掉队：合并到掉队处为止，把跳过数交回
+        for i in 0..8u8 {
+            tx.send(Bytes::from(vec![i])).unwrap();
+        }
+        assert!(matches!(rx.recv().await, Err(RecvError::Lagged(_))));
+        let first = rx.recv().await.unwrap();
+        tx.send(Bytes::from_static(b"f")).unwrap();
+        for _ in 0..6 {
+            tx.send(Bytes::from_static(b"g")).unwrap();
+        }
+        let (out, lag) = coalesce(&mut rx, first);
+        assert!(out.len() >= 1);
+        assert!(lag.is_some(), "lag during coalescing must be reported");
     }
 
     #[test]
