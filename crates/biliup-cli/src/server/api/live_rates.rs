@@ -40,8 +40,8 @@ fn rate_connection_limit() -> &'static Arc<Semaphore> {
     LIMIT.get_or_init(|| Arc::new(Semaphore::new(MAX_RATE_CONNECTIONS)))
 }
 
-fn acquire_rate_permit() -> Option<OwnedSemaphorePermit> {
-    rate_connection_limit().clone().try_acquire_owned().ok()
+fn acquire_rate_permit(limiter: Arc<Semaphore>) -> Option<OwnedSemaphorePermit> {
+    limiter.try_acquire_owned().ok()
 }
 
 /// 一个正在录制的直播间在某一秒的写盘速率。
@@ -101,7 +101,7 @@ pub async fn ws_live_rates(
     if !websocket_origin_allowed(&headers) {
         return (StatusCode::FORBIDDEN, "WebSocket Origin 不受信任").into_response();
     }
-    let Some(permit) = acquire_rate_permit() else {
+    let Some(permit) = acquire_rate_permit(rate_connection_limit().clone()) else {
         return (
             StatusCode::TOO_MANY_REQUESTS,
             format!("码率推送连接数已达上限（进程内最多 {MAX_RATE_CONNECTIONS} 条）"),
@@ -391,14 +391,16 @@ mod tests {
     }
 
     /// 码率 WebSocket 连接数有上限，断开后释放。
+    /// 用独立的信号量而不是进程级那个：同一测试二进制里的 WebSocket 测试会并发占着一个许可。
     #[test]
     fn websocket_rate_connections_are_bounded() {
+        let limiter = Arc::new(Semaphore::new(MAX_RATE_CONNECTIONS));
         let permits: Vec<_> = (0..MAX_RATE_CONNECTIONS)
-            .map(|_| acquire_rate_permit().unwrap())
+            .map(|_| acquire_rate_permit(limiter.clone()).unwrap())
             .collect();
-        assert!(acquire_rate_permit().is_none());
+        assert!(acquire_rate_permit(limiter.clone()).is_none());
         drop(permits);
-        assert!(acquire_rate_permit().is_some());
+        assert!(acquire_rate_permit(limiter).is_some());
     }
 
     /// 处理函数：空列表也是合法响应（`[]`），且禁止缓存——每秒都要拿到新读数。
