@@ -47,34 +47,93 @@ function rgbInt(color: number): string {
 }
 
 /**
- * 销毁 mpegts.js 实例，保证网络连接一定被断开。
+ * mpegts.js 的直播拉流 loader：只做一件事——`abort()` 时**一定**中止 fetch。
  *
- * 解码出错后 `<video>.error` 非空，mpegts.js `destroy()` 里清 SourceBuffer 的 `remove()` 会抛
- * InvalidStateError，后面关闭拉流的 `transmuxer.close()` 就跑不到——连接留在服务端占着该路的
- * 预览许可，直到页面刷新（真实 Twitch TS 房间连开 4 次就 429）。先把 MediaSource 从元素上摘下
- * （`load()` 让它进入 closed，mpegts.js 对 closed 的 MediaSource 会跳过清理），再销毁；
- * 仍然抛的话直接关内部的 transmuxer 兜底。
+ * 自带的 FetchStreamLoader 在 Chrome 上处于 buffering 状态时不调 `AbortController.abort()`，
+ * 而是等下一个 `read()` 回来再 `reader.cancel()`；解码出错后读取链已经断了，那一次永远等不到，
+ * 拉流连接就留在服务端占着该路的预览许可直到刷新页面（真实 Twitch TS 房间连开 4 次就 429）。
+ * 这里每次 `open()` 建一个 AbortController，`abort()` 直接调它，其余行为与原 loader 一致
+ * （直播不需要 Range，`needStash` 同样为 true）。
  */
-function destroyMpegts(player: mpegts.Player, video: HTMLVideoElement) {
-  if (video.error) {
-    try {
-      video.removeAttribute('src')
-      video.load()
-    } catch {
-      /* 元素已被移出文档时忽略 */
-    }
+class AbortableFetchLoader extends mpegts.BaseLoader {
+  private controller: AbortController | null = null
+  private received = 0
+  _needStash = true
+
+  constructor(_seekHandler: unknown, _config: unknown) {
+    super('abortable-fetch-loader')
   }
+
+  static isSupported() {
+    return typeof self.fetch === 'function' && typeof self.ReadableStream === 'function'
+  }
+
+  destroy() {
+    if (this.isWorking()) this.abort()
+    super.destroy()
+  }
+
+  open(dataSource: { url: string; withCredentials?: boolean }, range: { from: number; to: number }) {
+    const controller = new AbortController()
+    this.controller = controller
+    this.received = 0
+    this._status = mpegts.LoaderStatus.kConnecting
+    fetch(dataSource.url, {
+      method: 'GET',
+      mode: 'cors',
+      cache: 'no-store',
+      credentials: dataSource.withCredentials ? 'include' : 'same-origin',
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok || !res.body) {
+          this._status = mpegts.LoaderStatus.kError
+          // 类型声明里 onError 的第一个参数是 LoaderErrors 接口本身，实际是其中的字符串值
+          this.onError?.(mpegts.LoaderErrors.HTTP_STATUS_CODE_INVALID as unknown as mpegts.LoaderErrors, {
+            code: res.status,
+            msg: res.statusText,
+          })
+          return
+        }
+        const reader = res.body.getReader()
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (controller.signal.aborted) return
+          if (done) {
+            this._status = mpegts.LoaderStatus.kComplete
+            this.onComplete?.(range.from, range.from + this.received - 1)
+            return
+          }
+          this._status = mpegts.LoaderStatus.kBuffering
+          const chunk = value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer
+          const byteStart = range.from + this.received
+          this.received += chunk.byteLength
+          this.onDataArrival?.(chunk, byteStart, this.received)
+        }
+      })
+      .catch((e: Error & { code?: number }) => {
+        if (controller.signal.aborted) return
+        this._status = mpegts.LoaderStatus.kError
+        // 服务端结束响应（掉队断开 / 换直链）走 EARLY_EOF，mpegts.js 会把 MSE 收尾成 ended
+        const earlyEof = e.name === 'TypeError' || e.code === 19
+        const kind = earlyEof ? mpegts.LoaderErrors.EARLY_EOF : mpegts.LoaderErrors.EXCEPTION
+        this.onError?.(kind as unknown as mpegts.LoaderErrors, { code: e.code ?? -1, msg: e.message })
+      })
+  }
+
+  abort() {
+    this._status = mpegts.LoaderStatus.kComplete
+    this.controller?.abort()
+    this.controller = null
+  }
+}
+
+/** 销毁 mpegts.js 实例；`destroy()` 内部清 SourceBuffer 在元素出错后可能抛，拉流已由 loader 的 abort 保证断开。 */
+function destroyMpegts(player: mpegts.Player) {
   try {
     player.destroy()
   } catch (e) {
-    console.warn('[Player] mpegts.destroy 失败，直接关闭拉流', e)
-    const engine = (player as unknown as { _player_engine?: { _transmuxer?: { close(): void } | null } })
-      ._player_engine
-    try {
-      engine?._transmuxer?.close()
-    } catch {
-      /* 已经关了 */
-    }
+    console.warn('[Player] mpegts.destroy 抛出异常（拉流已断开）', e)
   }
 }
 
@@ -336,7 +395,7 @@ function playWithMpegts(
   }
   const artWithMpegts = art as Artplayer & { mpegts?: mpegts.Player | null }
   if (artWithMpegts.mpegts) {
-    destroyMpegts(artWithMpegts.mpegts, video)
+    destroyMpegts(artWithMpegts.mpegts)
     artWithMpegts.mpegts = null
   }
 
@@ -346,6 +405,7 @@ function playWithMpegts(
       ? {
           // 直播：不攒缓冲、落后就追，源缓冲区用完即清理，长时间观看不涨内存
           enableStashBuffer: false,
+          customLoader: AbortableFetchLoader,
           liveBufferLatencyChasing: true,
           liveBufferLatencyMaxLatency: 3,
           liveBufferLatencyMinRemain: 0.5,
@@ -358,7 +418,7 @@ function playWithMpegts(
   artWithMpegts.mpegts = player
   art.on('destroy', () => {
     if (artWithMpegts.mpegts) {
-      destroyMpegts(artWithMpegts.mpegts, video)
+      destroyMpegts(artWithMpegts.mpegts)
       artWithMpegts.mpegts = null
     }
   })
