@@ -231,7 +231,7 @@ export function LivePreviewModal({
             content={
               danmakuAvailable
                 ? '显示录制中的实时弹幕（来自本进程的弹幕客户端）'
-                : '该平台没有弹幕客户端（目前支持 B 站 / 抖音 / 斗鱼 / 虎牙）'
+                : '这一路没有弹幕客户端：平台不支持，或未开启对应的 *_danmaku 配置（B 站 / 抖音 / 斗鱼 / 虎牙可开）'
             }
           >
             <span className={styles.danmakuSwitch}>
