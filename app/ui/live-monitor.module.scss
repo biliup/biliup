@@ -1,0 +1,165 @@
+/* 实时监视：多路小窗网格（历史记录页 Tab，组件可整体挪动） */
+
+.monitor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.center {
+  display: flex;
+  justify-content: center;
+  padding: 48px 0;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+
+.summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.switchRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 8px;
+}
+
+.hint {
+  line-height: 1.5;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+  gap: 14px;
+}
+
+/* ===== 小窗 ===== */
+.tile {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--semi-color-fill-2);
+  border-radius: 12px;
+  background: var(--semi-color-bg-1);
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(var(--semi-grey-9), 0.04), 0 2px 6px rgba(var(--semi-grey-9), 0.03);
+  transition: border-color 0.15s ease;
+}
+.tilePlaying {
+  border-color: rgba(var(--semi-green-4), 0.6);
+}
+
+.tileHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 8px 12px;
+  min-height: 40px;
+}
+
+.tileName {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--semi-color-text-0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.tileRate {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--semi-color-text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--semi-color-fill-0);
+}
+
+/* 未播放：封面 + 说明，整块可点 */
+.idle {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: var(--semi-color-fill-1);
+  color: #fff;
+  cursor: pointer;
+  overflow: hidden;
+  text-align: center;
+}
+.idle:disabled {
+  cursor: not-allowed;
+}
+.idle:focus-visible {
+  outline: 2px solid var(--semi-color-primary);
+  outline-offset: -2px;
+}
+
+.idleCover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+.idle:not(:disabled):hover .idleCover {
+  opacity: 0.4;
+}
+.idle:disabled .idleCover {
+  filter: grayscale(0.6);
+  opacity: 0.35;
+}
+
+.idleText {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  max-width: 90%;
+  line-height: 1.4;
+}
+.idle:disabled .idleText {
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.tileFoot {
+  padding: 7px 12px 9px;
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

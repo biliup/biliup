@@ -286,10 +286,13 @@ fn ytdlp_backend(
     }
 }
 
+/// 构造弹幕客户端。`live_tx` 为直播预览的实时弹幕广播：客户端每解出一条就 `send` 一份
+/// （不等待、无订阅者时丢弃），XML 录制不受影响。
 pub fn danmaku_client(
     source: Option<&DanmakuSource>,
     filename_prefix: Option<&str>,
     name: &str,
+    live_tx: Option<tokio::sync::broadcast::Sender<danmaku_client::DanmakuEvent>>,
 ) -> Option<Arc<dyn crate::server::core::downloader::DanmakuClient + Send + Sync>> {
     let source = source?;
     let mut context = PlatformContext::new();
@@ -303,13 +306,16 @@ pub fn danmaku_client(
     context.movie_id = source.movie_id.clone();
     context.password = source.password.clone();
 
-    let config = RecorderConfig::new(
+    let mut config = RecorderConfig::new(
         source.url.clone(),
         PathBuf::from(danmaku_filename_template(filename_prefix, name)),
     )
     .with_context(context)
     .with_raw(source.raw)
     .with_detail(source.detail);
+    if let Some(tx) = live_tx {
+        config = config.with_live_tx(tx);
+    }
 
     Some(Arc::new(RustDanmakuClient::new(config)))
 }

@@ -1,7 +1,7 @@
 'use client'
 import { useSyncExternalStore } from 'react'
 import useSWR from 'swr'
-import { API_BASE, fetcher, LiveStreamerEntity, StreamerInfo, FileList } from './api-streamer'
+import { API_BASE, fetcher, LiveStreamerEntity, StreamerInfo, FileList, LiveUrlInfo, PreviewTransport } from './api-streamer'
 import { platformName } from './status'
 
 /**
@@ -110,6 +110,71 @@ export function liveImageUrl(
   let h = 5381
   for (let i = 0; i < sourceUrl.length; i++) h = ((h << 5) + h + sourceUrl.charCodeAt(i)) | 0
   return `${API_BASE}/v1/streamers/${id}/${kind}?v=${(h >>> 0).toString(36)}`
+}
+
+/** 正在录制的那一路流的同源地址（chunked FLV / MPEG-TS / fMP4），供页面内播放器直接拉取。 */
+export function livePreviewUrl(id: number): string {
+  return `${API_BASE}/v1/streamers/${id}/live`
+}
+
+/** 浏览器直连模式：向后端要当前录制中那条流的 CDN 直链。 */
+export function fetchLiveUrl(id: number): Promise<LiveUrlInfo> {
+  return fetcher(`/v1/streamers/${id}/live-url`, { cache: 'no-store' })
+}
+
+/**
+ * CDN 直链在页面里能不能直接用：https 页面拉 http 直链会被当作混合内容拦掉（抖音的直链就是 http），
+ * 实测这些 CDN 都支持 https，直接换协议。
+ */
+export function directPlayableUrl(url: string): string {
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:' && url.startsWith('http://')) {
+    return 'https://' + url.slice('http://'.length)
+  }
+  return url
+}
+
+/**
+ * 全局配置里的预览取流方式。与空间配置页共用同一个 SWR key，改完保存这里立刻拿到；
+ * 配置还没加载到时按 relay 处理（默认值）。
+ */
+export function usePreviewTransport(): PreviewTransport {
+  const { data } = useSWR<{ preview_transport?: PreviewTransport | null }>('/v1/configuration', fetcher, {
+    refreshInterval: SLOW_REFRESH_MS,
+  })
+  return data?.preview_transport === 'direct' ? 'direct' : 'relay'
+}
+
+/**
+ * 卡片 / 监视器能否起播：正在录制、下载器能旁路、容器已确定。
+ * 容器未定（刚开始拉流的前几秒）时按钮先禁用，下一次轮询拿到 format 再放开。
+ */
+export function canPreview(streamer: LiveStreamerEntity): streamer is LiveStreamerEntity & {
+  preview: { available: true; format: 'flv' | 'mpegts' | 'fmp4' }
+} {
+  const format = streamer.preview?.format
+  return (
+    streamer.status === LIVE_STATUS &&
+    !!streamer.preview?.available &&
+    (format === 'flv' || format === 'mpegts' || format === 'fmp4')
+  )
+}
+
+/** 容器短名 → 界面标签 */
+export function previewFormatLabel(format: 'flv' | 'mpegts' | 'fmp4' | null | undefined): string | null {
+  if (format === 'flv') return 'FLV'
+  if (format === 'mpegts') return 'TS'
+  if (format === 'fmp4') return 'fMP4'
+  return null
+}
+
+/** 预览按钮禁用时的提示文案；能预览时返回 null。 */
+export function previewDisabledReason(streamer: LiveStreamerEntity): string | null {
+  if (streamer.status !== LIVE_STATUS) return '未在录制'
+  const preview = streamer.preview
+  if (!preview) return '预览信息尚未就绪'
+  if (!preview.available) return preview.reason || '当前下载器不支持预览'
+  if (!preview.format) return '正在建立预览，请稍候'
+  return null
 }
 
 const DAY = 86400

@@ -6,6 +6,8 @@ pub mod bilibili_endpoints;
 pub mod endpoints;
 /// 录制中直播间的封面 / 头像图片代理
 pub mod live_media;
+/// 直播预览：把正在录制的流旁路给页面内播放器
+pub mod live_preview;
 /// 单页应用静态文件处理
 pub mod spa;
 pub mod ws;

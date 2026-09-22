@@ -15,10 +15,12 @@ use crate::server::infrastructure::context::{Context, Stage, WorkerStatus};
 use crate::server::infrastructure::models::hook_step::process;
 use async_channel::Sender;
 use biliup::downloader::live::{LivePlugin, LiveStatus, LiveStream};
+use biliup::downloader::preview::PreviewHub;
+use danmaku_client::DanmakuEvent;
 use error_stack::ResultExt;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::{Mutex, Notify, broadcast};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
@@ -125,6 +127,23 @@ pub struct LiveMedia {
     pub avatar_url: Option<String>,
 }
 
+/// 正在录制的那一路流的来源：平台名与 CDN 直链。供浏览器直连模式（`preview_transport = direct`）
+/// 判定能力、下发直链；随每次 `check_stream` 刷新（换直链 / 重试后是新的）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveSource {
+    pub platform: String,
+    pub url: String,
+}
+
+impl LiveSource {
+    pub fn from_stream(stream: &LiveStream) -> Self {
+        Self {
+            platform: stream.platform.clone(),
+            url: stream.raw_stream_url.clone(),
+        }
+    }
+}
+
 impl LiveMedia {
     pub fn from_stream(stream: &LiveStream) -> Self {
         let non_empty = |s: &str| (!s.trim().is_empty()).then(|| s.to_string());
@@ -135,6 +154,11 @@ impl LiveMedia {
     }
 }
 
+/// 每路直播同时允许的预览连接数（信号量上限，超出返回 429）。
+///
+/// 与前端监视器的默认同屏路数无关：监视器每路占其对应直播间的一个连接。
+pub const PREVIEW_MAX_SUBSCRIBERS_PER_ROOM: usize = 4;
+
 /// 下载任务
 pub struct DownloadTask {
     token: CancellationToken,
@@ -144,12 +168,27 @@ pub struct DownloadTask {
     /// 写盘速率表；各下载器拿它的计数器句柄累加，采样任务随 `execute` 启停。
     meter: Arc<RateMeter>,
     media: std::sync::RwLock<LiveMedia>,
+    /// 当前拉的那条直链与平台名，随 `check_stream` 刷新
+    source: std::sync::RwLock<LiveSource>,
+    /// 直播预览 hub，寿命与本任务相同：跨分段、跨断流重试都是同一个。
+    preview: PreviewHub,
+    /// 实时弹幕广播：弹幕客户端每解出一条就 `send` 一份给预览播放器；
+    /// 平台没有弹幕实现（`stream.danmaku` 为 None）时为 `None`。
+    danmaku_tx: Option<broadcast::Sender<DanmakuEvent>>,
 }
+
+/// 每路实时弹幕广播的槽位数；掉队的订阅者跳过丢掉的那几条继续收，不断开。
+pub const DANMAKU_BROADCAST_CAPACITY: usize = 256;
 
 impl DownloadTask {
     pub fn new(downloader: DownloaderRuntime, stream: &LiveStream) -> Self {
         let sync_session = matches!(&downloader, DownloaderRuntime::Sync(_))
             .then(|| Arc::new(Mutex::new(SyncSession::default())));
+        let preview = preview_hub_for(&downloader);
+        let danmaku_tx = stream
+            .danmaku
+            .as_ref()
+            .map(|_| broadcast::channel(DANMAKU_BROADCAST_CAPACITY).0);
         Self {
             token: CancellationToken::new(),
             done_notify: Notify::new(),
@@ -157,7 +196,30 @@ impl DownloadTask {
             sync_session,
             meter: Arc::new(RateMeter::new()),
             media: std::sync::RwLock::new(LiveMedia::from_stream(stream)),
+            source: std::sync::RwLock::new(LiveSource::from_stream(stream)),
+            preview,
+            danmaku_tx,
         }
+    }
+
+    /// 当前正在录制的那条流的平台名与 CDN 直链。
+    pub fn live_source(&self) -> LiveSource {
+        self.source.read().unwrap().clone()
+    }
+
+    /// 本任务的直播预览 hub。
+    pub fn preview(&self) -> &PreviewHub {
+        &self.preview
+    }
+
+    /// 这一路有没有弹幕客户端（平台实现了弹幕且该流带弹幕源）。
+    pub fn danmaku_available(&self) -> bool {
+        self.danmaku_tx.is_some()
+    }
+
+    /// 订阅实时弹幕；没有弹幕客户端的平台返回 `None`。
+    pub fn subscribe_danmaku(&self) -> Option<broadcast::Receiver<DanmakuEvent>> {
+        self.danmaku_tx.as_ref().map(|tx| tx.subscribe())
     }
 
     /// 最近一个滑动窗口内的写盘速率（字节/秒）。
@@ -176,6 +238,7 @@ impl DownloadTask {
     }
 
     fn refresh_media(&self, ctx: &Context, stream: &LiveStream) {
+        *self.source.write().unwrap() = LiveSource::from_stream(stream);
         let media = LiveMedia::from_stream(stream);
         let changed = self.media.read().unwrap().avatar_url != media.avatar_url;
         if changed {
@@ -213,6 +276,7 @@ impl DownloadTask {
             stream.danmaku.as_ref(),
             filename_prefix.as_deref(),
             &stream.name,
+            self.danmaku_tx.clone(),
         );
         // 启动弹幕客户端
         if let Some(ref client) = danmaku_client {
@@ -353,6 +417,7 @@ impl DownloadTask {
         let streamer = ctx.live_streamer();
         let mut download_config = ctx.download_config(stream);
         download_config.bytes_written = self.meter.counter();
+        download_config.preview = self.preview.clone();
         if let crate::server::core::downloader::DownloaderRuntime::Sync(sync) = &self.downloader {
             info!(
                 page_url = streamer.url,
@@ -436,6 +501,25 @@ impl DownloadTask {
     }
 }
 
+/// 按下载器类型建预览 hub：媒体字节经过本进程写盘的（stream-gears / mesio）能旁路；
+/// 子进程直接落盘的，以及边录边传，明确标为不可预览并给出原因，界面据此禁用按钮。
+fn preview_hub_for(downloader: &DownloaderRuntime) -> PreviewHub {
+    match downloader {
+        DownloaderRuntime::StreamGears(_) | DownloaderRuntime::Mesio(_) => {
+            PreviewHub::new(PREVIEW_MAX_SUBSCRIBERS_PER_ROOM)
+        }
+        DownloaderRuntime::Ffmpeg(_) => {
+            PreviewHub::unavailable("ffmpeg 子进程直接写盘，媒体数据不经过 biliup，无法预览")
+        }
+        DownloaderRuntime::StreamLink(_) => {
+            PreviewHub::unavailable("streamlink 子进程直接写盘，媒体数据不经过 biliup，无法预览")
+        }
+        DownloaderRuntime::YtDlp(_) => PreviewHub::unavailable(
+            "yt-dlp / ytarchive 子进程直接写盘，媒体数据不经过 biliup，无法预览",
+        ),
+        DownloaderRuntime::Sync(_) => PreviewHub::unavailable("边录边传走投稿管线，不提供预览"),
+    }
+}
 
 /// Whether a finished download attempt counts as progress for live-retry backoff.
 ///
@@ -527,8 +611,12 @@ mod tests {
 
     #[test]
     fn segment_completed_and_stream_ended_count_as_progress() {
-        assert!(download_attempt_progressed(&Ok(DownloadStatus::SegmentCompleted)));
-        assert!(download_attempt_progressed(&Ok(DownloadStatus::StreamEnded)));
+        assert!(download_attempt_progressed(&Ok(
+            DownloadStatus::SegmentCompleted
+        )));
+        assert!(download_attempt_progressed(&Ok(
+            DownloadStatus::StreamEnded
+        )));
     }
 
     #[test]
@@ -536,9 +624,10 @@ mod tests {
         assert!(!download_attempt_progressed(&Ok(DownloadStatus::Error(
             "Streamlink error: Some(1)".into()
         ))));
-        assert!(!download_attempt_progressed(&Ok(DownloadStatus::Downloading)));
-        let err: AppResult<DownloadStatus> =
-            Err(Report::new(AppError::Custom("boom".into())));
+        assert!(!download_attempt_progressed(&Ok(
+            DownloadStatus::Downloading
+        )));
+        let err: AppResult<DownloadStatus> = Err(Report::new(AppError::Custom("boom".into())));
         assert!(!download_attempt_progressed(&err));
     }
 

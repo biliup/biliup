@@ -1,3 +1,4 @@
+use crate::server::api::live_preview::direct_capability;
 use crate::server::common::recording_policy::{self, Rejection};
 use crate::server::common::upload::{build_studio, submit_to_bilibili, upload};
 use crate::server::common::util::Recorder;
@@ -6,7 +7,7 @@ use crate::server::core::download_manager::DownloadManager;
 use crate::server::errors::{AppError, report_to_response};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Stage, Worker, WorkerStatus};
-use crate::server::infrastructure::dto::LiveStreamerResponse;
+use crate::server::infrastructure::dto::{LivePreviewResponse, LiveStreamerResponse};
 use crate::server::infrastructure::models::live_streamer::{InsertLiveStreamer, LiveStreamer};
 use crate::server::infrastructure::models::upload_streamer::{
     InsertUploadStreamer, UploadStreamer,
@@ -67,7 +68,14 @@ pub async fn get_streamers_endpoint(
             Some(t) => {
                 let downloader_status = t.downloader_status.read().unwrap();
                 let live = match &*downloader_status {
-                    WorkerStatus::Working(task) => Some((task.bytes_per_sec(), task.live_media())),
+                    WorkerStatus::Working(task) => {
+                        Some((task.bytes_per_sec(), task.live_media(), {
+                            let status = task.preview().status();
+                            let source = task.live_source();
+                            let direct = direct_capability(&source.platform);
+                            LivePreviewResponse::new(status, task.danmaku_available(), direct)
+                        }))
+                    }
                     _ => None,
                 };
                 (format!("{:?}", *downloader_status), live)
@@ -82,8 +90,10 @@ pub async fn get_streamers_endpoint(
             Some(reason) if status != "Working" => reason.to_string(),
             _ => status,
         };
-        let (live_bytes_per_sec, live_media) = live.unzip();
-        let live_media = live_media.unwrap_or_default();
+        let (live_bytes_per_sec, live_media, preview) = match live {
+            Some((rate, media, preview)) => (rate, media, Some(preview)),
+            None => (None, Default::default(), None),
+        };
 
         results.push(LiveStreamerResponse {
             status,
@@ -91,9 +101,10 @@ pub async fn get_streamers_endpoint(
             upload_status: option
                 .map(|t| format!("{:?}", *t.uploader_status.read().unwrap()))
                 .unwrap_or_default(),
-            live_bytes_per_sec: live_bytes_per_sec.flatten(),
+            live_bytes_per_sec,
             live_cover_url: live_media.cover_url,
             live_avatar_url: live_media.avatar_url,
+            preview,
         });
     }
     Ok(Json(results))

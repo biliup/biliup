@@ -3,7 +3,15 @@ import React, { useState } from 'react'
 import Image from 'next/image'
 import { LiveStreamerEntity, StreamerInfo } from '@/app/lib/api-streamer'
 import { streamerStatusMeta, uploadStatusTag, platformName } from '@/app/lib/status'
-import { timeAgo, formatDuration, formatRate, liveImageUrl, useNowSec } from '@/app/lib/use-dashboard'
+import {
+  timeAgo,
+  formatDuration,
+  formatRate,
+  liveImageUrl,
+  useNowSec,
+  canPreview,
+} from '@/app/lib/use-dashboard'
+import { LivePreviewButton, LivePreviewModal } from './LivePreview'
 import styles from './streamer-card.module.scss'
 
 export interface StreamerCardProps {
@@ -40,12 +48,39 @@ function platTint(color: string): string {
  * 录制中的直播间封面缩略图(16:9,懒加载)。
  * 加载失败就整块消失,卡片回到没有封面时的样式;加载中显示占位底色。
  * 调用方用 key={src} 挂载,封面地址变化时状态自然重置。
+ * 传入 onPreview 时封面可点击,中央显示播放标记,点击打开直播预览。
  */
-export function LiveCover({ src, alt }: { src: string; alt: string }) {
+export function LiveCover({
+  src,
+  alt,
+  onPreview,
+}: {
+  src: string
+  alt: string
+  onPreview?: () => void
+}) {
   const [state, setState] = useState<'loading' | 'ok' | 'error'>('loading')
   if (state === 'error') return null
+  const clickable = !!onPreview && state === 'ok'
   return (
-    <figure className={styles.cover} data-state={state}>
+    <figure
+      className={`${styles.cover} ${clickable ? styles.coverClickable : ''}`}
+      data-state={state}
+      onClick={clickable ? onPreview : undefined}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      aria-label={clickable ? '预览直播' : undefined}
+      onKeyDown={
+        clickable
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                onPreview?.()
+              }
+            }
+          : undefined
+      }
+    >
       <Image
         src={src}
         alt={alt}
@@ -55,6 +90,13 @@ export function LiveCover({ src, alt }: { src: string; alt: string }) {
         onLoad={() => setState('ok')}
         onError={() => setState('error')}
       />
+      {clickable ? (
+        <span className={styles.coverPlay} aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+            <path d="M8 5.5v13l11-6.5z" />
+          </svg>
+        </span>
+      ) : null}
     </figure>
   )
 }
@@ -103,6 +145,9 @@ export default function StreamerCard({
   const live = streamer.status === 'Working'
   const paused = streamer.status === 'Pause'
   const name = streamer.remark || streamer.url
+  // 封面点击打开的预览弹层;按钮自带一套,两处入口共用同一个弹层状态
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const previewable = canPreview(streamer)
 
   const lastRec = info?.date && !live ? timeAgo(info.date) : null
 
@@ -151,8 +196,15 @@ export default function StreamerCard({
         </span>
       </div>
 
-      {/* 录制中:直播间封面 */}
-      {coverSrc ? <LiveCover key={coverSrc} src={coverSrc} alt={`${name} 的直播间封面`} /> : null}
+      {/* 录制中:直播间封面(可预览时点击即打开播放器) */}
+      {coverSrc ? (
+        <LiveCover
+          key={coverSrc}
+          src={coverSrc}
+          alt={`${name} 的直播间封面`}
+          onPreview={previewable ? () => setPreviewOpen(true) : undefined}
+        />
+      ) : null}
 
       {/* 名称(录制中带头像)+ 实时时长与写盘速率 / 最近录制 */}
       <div className={styles.nameRow}>
@@ -172,6 +224,7 @@ export default function StreamerCard({
             >
               {rate ?? '—'}
             </span>
+            <LivePreviewButton streamer={streamer} size="small" iconOnly className={styles.previewBtn} />
           </span>
         ) : lastRec ? (
           <span className={styles.recInfo}>{lastRec}</span>
@@ -193,6 +246,13 @@ export default function StreamerCard({
       </a>
       <div className={styles.meta}>{uploadStatusTag(streamer.upload_status)}</div>
       {actions ? <div className={styles.actions}>{actions}</div> : null}
+      {previewOpen ? (
+        <LivePreviewModal
+          streamer={streamer}
+          visible={previewOpen}
+          onClose={() => setPreviewOpen(false)}
+        />
+      ) : null}
     </article>
   )
 }

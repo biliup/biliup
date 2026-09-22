@@ -11,6 +11,8 @@
   "dependencies": {
     "@douyinfe/semi-ui": "^2.103.0",
     "artplayer": "^5.4.0",
+    "artplayer-plugin-danmuku": "^5.3.0",
+    "hls.js": "^1.7.3",
     "mpegts.js": "^1.8.2",
     "next": "^16.3.5",
     "qrcode.react": "^4.2.0",

@@ -93,6 +93,42 @@ export interface StudioEntity {
 	extra_fields?: string;
 }
 
+/** 正在录制的直播间能否在页面内预览（复用正在录制的那一路流，见 GET /v1/streamers/{id}/live） */
+export interface LivePreviewInfo {
+	/** 当前下载器能否提供预览；为 true 时 format 仍可能是 null（刚开始拉流、容器未定） */
+	available: boolean;
+	/** 视频流的容器，与 /live 响应的 Content-Type 一致：flv / mpegts 走 mpegts.js，fmp4 直接 MediaSource */
+	format: 'flv' | 'mpegts' | 'fmp4' | null;
+	/** fmp4 时从 init segment 解出的 RFC 6381 编码串（如 avc1.64001f,mp4a.40.2），其它容器为 null */
+	codecs: string | null;
+	/** 不可预览的原因（ffmpeg / streamlink 子进程落盘、HEVC FLV 等） */
+	reason: string | null;
+	/** 这一路有没有实时弹幕（平台实现了弹幕客户端），有则 /v1/streamers/{id}/danmaku（SSE）可用 */
+	danmaku: boolean;
+	/** 浏览器能否直连 CDN 拉这一路（全局配置 preview_transport = direct 时用；不能则回落中转并显示原因） */
+	direct: DirectCapability;
+}
+
+export interface DirectCapability {
+	capable: boolean;
+	/** 不能直连的原因；capable 为 true 时为 null */
+	reason: string | null;
+}
+
+/** GET /v1/streamers/{id}/live-url：正在录制的那条流的 CDN 直链 */
+export interface LiveUrlInfo {
+	url: string;
+	/** 浏览器该用哪个播放器：flv → mpegts.js，hls → hls.js（TS / fMP4 分片都行） */
+	format: 'flv' | 'hls' | null;
+	platform: string;
+	/** 过期时间估计（Unix 秒），直链里没有可识别的过期参数时为 null */
+	expires_at: number | null;
+	direct: DirectCapability;
+}
+
+/** 直播预览的取流方式（全局配置 preview_transport），空值视同 relay */
+export type PreviewTransport = 'relay' | 'direct';
+
 export interface LiveStreamerEntity {
 	id: number;
 	url: string;
@@ -111,6 +147,8 @@ export interface LiveStreamerEntity {
 	live_cover_url?: string | null;
 	/** 录制中的主播头像地址；图片请走 /v1/streamers/{id}/avatar 代理 */
 	live_avatar_url?: string | null;
+	/** 录制中的预览能力；未录制为 null */
+	preview?: LivePreviewInfo | null;
 	statusTag?: React.ReactNode;
 	format?: string;
     time_range?: string | Date[];
