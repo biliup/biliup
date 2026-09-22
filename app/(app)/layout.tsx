@@ -1,7 +1,7 @@
 'use client'
 import './bg-global.css'
 import { useGlobalBackgroundInit } from '../lib/useGlobalBackground'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -9,7 +9,7 @@ import Image from 'next/image'
 import useSWR from 'swr'
 import { fetcher } from '../lib/api-streamer'
 import ThemeButton from '../ui/ThemeButton'
-import { useSystemTheme, useTheme } from '../lib/utils'
+import { useLocalStorageValue, useSystemTheme, useTheme } from '../lib/utils'
 import { formatVersion } from '../lib/status'
 import { SLOW_REFRESH_MS } from '../lib/use-dashboard'
 import { useIsMobile } from '../lib/useIsMobile'
@@ -105,36 +105,18 @@ const SIDER_KEY = 'biliup_sider_collapsed'
 export default function Layout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const isMobile = useIsMobile()
-  const [collapsed, setCollapsed] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
-  const [mode, setMode] = useState<any>('auto')
 
   useGlobalBackgroundInit()
 
-  // 折叠偏好持久化
-  useEffect(() => {
-    try {
-      setCollapsed(localStorage.getItem(SIDER_KEY) === '1')
-    } catch {
-      /* ignore */
-    }
-  }, [])
-  const toggleCollapsed = () => {
-    setCollapsed((c) => {
-      try {
-        localStorage.setItem(SIDER_KEY, c ? '0' : '1')
-      } catch {
-        /* ignore */
-      }
-      return !c
-    })
-  }
+  // 折叠偏好持久化:localStorage 是数据源,首屏(SSR / 水合)按未折叠渲染,水合后自动切到已保存的值
+  const [siderPref, setSiderPref] = useLocalStorageValue(SIDER_KEY)
+  const collapsed = siderPref === '1'
+  const toggleCollapsed = () => setSiderPref(collapsed ? '0' : '1')
 
-  // 主题
-  useEffect(() => {
-    const saved = typeof window !== 'undefined' ? localStorage.getItem('mode') : null
-    if (saved) setMode(saved)
-  }, [])
+  // 主题:同上,未保存过时为 auto
+  const [savedMode, setMode] = useLocalStorageValue('mode')
+  const mode = savedMode ?? 'auto'
   const systemTheme = useSystemTheme()
   useTheme(mode, systemTheme)
 

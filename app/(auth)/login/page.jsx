@@ -139,7 +139,6 @@ const Component = () => {
                                 label={{ text: "用户名" }}
                                 field="username"
                                 fieldStyle={{ padding: 0 }}
-                                style={{ width: 440 }}
                                 className={styles.formField}
                                 value={username}
                                 initValue='biliup'
@@ -151,7 +150,6 @@ const Component = () => {
                                 type="password"
                                 placeholder={isRegisterMode ? "设置密码" : "输入密码"}
                                 fieldStyle={{ padding: 0 }}
-                                style={{ width: 440 }}
                                 className={styles.formField}
                                 value={password}
                                 onChange={setPassword}
@@ -163,8 +161,7 @@ const Component = () => {
                                     type="password"
                                     placeholder="再次输入密码"
                                     fieldStyle={{ padding: 0 }}
-                                    style={{ width: 440 }}
-                                    className={styles.formField}
+                                        className={styles.formField}
                                     rules={[
                                         { required: true, message: '请再次输入密码' },
                                         {

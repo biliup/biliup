@@ -18,14 +18,13 @@ export default function useStreamers() {
   };
 }
 
+const NO_USERS: any[] = [];
+
 export function useBiliUsers() {
   const {data, error, isLoading} = useSWR<User[]>("/v1/users", fetcher);
-  const [list, setList] = useState<any[]>([]);
+  const [list, setList] = useState<any[]>(NO_USERS);
   useEffect(() => {
-    if (!data || data.length === 0) {
-      setList([])
-      return;
-    }
+    if (!data) return;
     const updateList = async (item: User) => {
       try {
         const res = await fetcher(`/v1/users/${item.id}`, undefined);
@@ -43,13 +42,16 @@ export function useBiliUsers() {
         };
       }
     };
+    // data 为空数组时这里解析为 [],顺带把上一批账号的补全结果清掉,
+    // 之后再有账号时不会先闪一下旧数据
     Promise.all(data.map(updateList)).then(setList);
   }, [data])
 
   return {
     isLoading,
     isError: error,
-    biliUsers: list,
+    // 没有账号时直接派生为空列表,不必等 effect 里再 setState 一轮
+    biliUsers: !data || data.length === 0 ? NO_USERS : list,
   };
 }
 

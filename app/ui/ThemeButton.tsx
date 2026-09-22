@@ -1,52 +1,33 @@
 'use client'
-import { SetStateAction, useEffect, useState } from 'react'
 import { Button } from '@douyinfe/semi-ui'
 import { IconMoon, IconSun, IconContrast } from '@douyinfe/semi-icons'
 import { applyThemeMode } from '../lib/utils'
 
 interface ThemeButtonProps {
   mode: string
-  setMode: {
-    (value: SetStateAction<string>): void
-    (arg0: string): void
-  }
+  setMode: (mode: string) => void
   systemTheme: string
 }
 
-const ThemeButton: React.FC<ThemeButtonProps> = props => {
-  const [switchTrigger, setSwitchTrigger] = useState(false)
-  const [icon, setIcon] = useState(<IconContrast size="large" />)
-  useEffect(() => {
-    {
-      // 按下按钮切换主题：一键明暗反转，避免 auto→light→dark 循环的第一下视觉无变化。
-      if (typeof window !== 'undefined' && switchTrigger === true) {
-        const currentMode = props.mode
-        const isDarkNow =
-          currentMode === 'dark' ||
-          (currentMode === 'auto' && props.systemTheme === 'dark')
-        const nextMode = isDarkNow ? 'light' : 'dark'
-        applyThemeMode(nextMode)
-        props.setMode(nextMode)
-        setSwitchTrigger(false)
-      }
-      // 更新图标
-      switch (props.mode) {
-        case 'light':
-          setIcon(<IconSun size="large" />)
-          break
-        case 'dark':
-          setIcon(<IconMoon size="large" />)
-          break
-        default:
-          setIcon(<IconContrast size="large" />)
-          break
-      }
-    }
-  }, [props, switchTrigger])
-
+const ThemeButton: React.FC<ThemeButtonProps> = ({ mode, setMode, systemTheme }) => {
+  // 按下按钮切换主题:一键明暗反转,避免 auto→light→dark 循环的第一下视觉无变化。
+  // 直接在事件里完成,不再经由「置标志位 → effect 里读标志位再 setState」绕一圈。
   const switchMode = () => {
-    setSwitchTrigger(true)
+    const isDarkNow = mode === 'dark' || (mode === 'auto' && systemTheme === 'dark')
+    const nextMode = isDarkNow ? 'light' : 'dark'
+    applyThemeMode(nextMode)
+    setMode(nextMode)
   }
+
+  // 图标由 mode 直接派生,不需要单独的 state
+  const icon =
+    mode === 'light' ? (
+      <IconSun size="large" />
+    ) : mode === 'dark' ? (
+      <IconMoon size="large" />
+    ) : (
+      <IconContrast size="large" />
+    )
 
   return (
     <Button

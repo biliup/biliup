@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Button, Slider, Toast, Tooltip } from '@douyinfe/semi-ui'
 import { IconImage, IconUpload, IconDelete } from '@douyinfe/semi-icons'
 import {
@@ -64,13 +64,10 @@ function compressImage(file: File): Promise<string> {
 export default function BackgroundSetter() {
   const fileRef = useRef<HTMLInputElement>(null)
   const [open, setOpen] = useState(false)
-  const [hasBg, setHasBg] = useState(false)
-  const [opacity, setOpacity] = useState(0.35)
-
-  useEffect(() => {
-    setHasBg(!!getBg())
-    setOpacity(getBgOpacity())
-  }, [])
+  // 初始值直接从 localStorage 读(服务端返回默认值)。这两个状态只在面板展开后才渲染,
+  // 首屏 SSR 输出不受影响,不需要挂载后在 effect 里 setState
+  const [hasBg, setHasBg] = useState(() => !!getBg())
+  const [opacity, setOpacity] = useState(getBgOpacity)
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]

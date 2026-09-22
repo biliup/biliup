@@ -11,7 +11,7 @@ import {
 } from '@douyinfe/semi-ui'
 import { IconPlusCircle, IconMinusCircle } from '@douyinfe/semi-icons'
 import { FormApi } from '@douyinfe/semi-ui/lib/es/form'
-import React, { CSSProperties, useRef } from 'react'
+import React, { CSSProperties, useMemo, useRef } from 'react'
 import { useState } from 'react'
 import { fetcher, LiveStreamerEntity, sendRequest, StudioEntity } from '../lib/api-streamer'
 import useSWR from 'swr'
@@ -115,14 +115,19 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
     }
   })
 
-  try {
-    if (entity && entity.time_range && typeof entity.time_range === "string") {
-      const tr: string[] = JSON.parse(entity.time_range)
-      entity.time_range = tr.map(t => new Date(t))
+  // 后端把 time_range 存成 JSON 字串,TimePicker 需要 Date[]。entity 是上层传下来的 props,
+  // 渲染期不能就地改写,转换结果放进一份本地副本作为表单初始值;解析失败时保持原样(与之前一致)
+  const initValues = useMemo(() => {
+    if (entity && entity.time_range && typeof entity.time_range === 'string') {
+      try {
+        const tr: string[] = JSON.parse(entity.time_range)
+        return { ...entity, time_range: tr.map(t => new Date(t)) }
+      } catch (e) {
+        console.error(e)
+      }
     }
-  } catch (e) {
-    console.error(e)
-  }
+    return entity
+  }, [entity])
 
   return (
     <>
@@ -140,7 +145,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
           paddingRight: 10,
         }}
       >
-        <Form initValues={entity} getFormApi={formApi => (api.current = formApi)}>
+        <Form initValues={initValues} getFormApi={formApi => (api.current = formApi)}>
           <Form.Input
             field="remark"
             label="录播备注"
