@@ -83,18 +83,20 @@ export default function LogViewer() {
   const [isConnected, setIsConnected] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('ds_update')
-  const wsRef = useRef<WebSocket | null>(null)
+  // 每加一就重建一次 WebSocket(「刷新」按钮);切换 Tab 也会重建
+  const [connectSeq, setConnectSeq] = useState(0)
   const logContainerRef = useRef<HTMLDivElement>(null)
   const isMobile = useIsMobile()
 
-  const connectWebSocket = () => {
+  // 清空旧日志并进入加载态,在触发重连的事件里同步完成,不放在 effect 里
+  const resetLogs = () => {
     setIsLoading(true)
     setLogs([])
+  }
 
-    if (wsRef.current) {
-      wsRef.current.close()
-    }
-
+  // effect 只负责订阅外部系统:建立连接、把消息写进 state、清理时关闭。
+  // 上一条连接由 cleanup 关闭,不再需要用 ref 手动跟踪。
+  useEffect(() => {
     const isDev = process.env.NODE_ENV === 'development'
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const server = isDev
@@ -103,7 +105,6 @@ export default function LogViewer() {
     const wsUrl = `${server}/v1/ws/logs?file=${activeTab}.log`
 
     const ws = new WebSocket(wsUrl)
-    wsRef.current = ws
 
     ws.onopen = () => {
       setIsConnected(true)
@@ -127,19 +128,20 @@ export default function LogViewer() {
     ws.onclose = () => {
       setIsConnected(false)
     }
-  }
 
-  useEffect(() => {
-    connectWebSocket()
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close()
-      }
+      ws.close()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab])
+  }, [activeTab, connectSeq])
 
-  const handleRefresh = () => connectWebSocket()
+  const handleTabChange = (key: string) => {
+    resetLogs()
+    setActiveTab(key)
+  }
+  const handleRefresh = () => {
+    resetLogs()
+    setConnectSeq((n) => n + 1)
+  }
   const handleClear = () => setLogs([])
 
   const actions = (
@@ -169,7 +171,7 @@ export default function LogViewer() {
       />
       <div className={dc.content}>
         <div className={dc.card} style={{ padding: 16 }}>
-          <Tabs type="line" activeKey={activeTab} onChange={setActiveTab}>
+          <Tabs type="line" activeKey={activeTab} onChange={handleTabChange}>
             <TabPane tab="主程序运行日志" itemKey="ds_update">
               <LogContent logs={logs} logContainerRef={logContainerRef} isLoading={isLoading} />
             </TabPane>

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react'
+import React, { useState, useMemo, useCallback } from 'react'
 import { FormFCChild } from '@douyinfe/semi-ui/lib/es/form'
 import {
   IconChevronDown,
@@ -24,6 +24,18 @@ import {
 import useSWR from 'swr'
 import { BiliType, fetcher, StudioEntity } from '../lib/api-streamer'
 import { useBiliUsers, useTypeTree } from '../lib/use-streamers'
+
+/** 把已保存的定时发布延迟 dtime(秒)换算成滚轮的「小时 / 分钟」;没有或不在可选范围内时用默认的 4 小时 0 分 */
+function delayFromDtime(dtime: any): { hours: number; minutes: number } {
+  if (dtime) {
+    const hours = Math.floor(dtime / 3600)
+    const minutes = Math.floor((dtime % 3600) / 60)
+    if (hours >= 4 && hours < 24 * 15) {
+      return { hours, minutes: Math.floor(minutes / 5) * 5 }
+    }
+  }
+  return { hours: 4, minutes: 0 }
+}
 
 const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>> = ({
   formState,
@@ -171,20 +183,10 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
       text: `${i * 5}分钟`,
     }
   })
-  const [selectedHours, setSelectedHours] = useState(4)
-  const [selectedMinutes, setSelectedMinutes] = useState(0)
-
-  useEffect(() => {
-    const dtime = formApi.getValue('dtime')
-    if (dtime) {
-      const hours = Math.floor(dtime / 3600)
-      const minutes = Math.floor((dtime % 3600) / 60)
-      if (hours >= 4 && hours < 24 * 15) {
-        setSelectedHours(hours)
-        setSelectedMinutes(Math.floor(minutes / 5) * 5)
-      }
-    }
-  }, [formApi])
+  // 滚轮的初始选中值取自表单里已有的 dtime(编辑模板时)。Semi Form 在构造时就把 initValues 放进
+  // store,首次渲染即可读到,直接作为 useState 初始值,不必挂载后在 effect 里再 setState 一轮
+  const [selectedHours, setSelectedHours] = useState(() => delayFromDtime(formApi.getValue('dtime')).hours)
+  const [selectedMinutes, setSelectedMinutes] = useState(() => delayFromDtime(formApi.getValue('dtime')).minutes)
 
   return (
     <>

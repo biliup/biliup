@@ -1,5 +1,6 @@
 'use client'
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import {
   Button,
   Form,
@@ -78,7 +79,8 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
 
   // 校验失败时出错字段可能藏在未选中的 Tab / 平台面板里（字段全部挂载、只切 hidden），
   // 用户看不到红字也不知道为什么保存没反应。这里切到第一个出错字段所在的面板并滚过去。
-  const [pendingField, setPendingField] = useState<string | null>(null)
+  // 切面板的 state 更新用 flushSync 同步提交，之后字段已可见，直接滚动、聚焦即可，
+  // 不再需要「记一个待定位字段 → effect 里滚动再清掉」的中间 state。
   const handleSubmitFail = (errors: Record<string, unknown>) => {
     const fields = errorFieldPaths(errors)
       .map(path => ({ path, el: fieldElement(path) }))
@@ -88,18 +90,14 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
     if (!first) return
     const tab = first.el.closest<HTMLElement>('[data-tab]')?.dataset.tab
     const platform = first.el.closest<HTMLElement>('[data-platform]')?.dataset.platform
-    if (tab) setActiveTab(tab)
-    if (platform) setActivePlatform(platform)
-    setPendingField(first.path)
+    flushSync(() => {
+      if (tab) setActiveTab(tab)
+      if (platform) setActivePlatform(platform)
+    })
+    first.el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    first.el.querySelector<HTMLElement>('input, textarea')?.focus({ preventScroll: true })
     Toast.warning(`有 ${fields.length} 项未通过校验，已定位到第一项`)
   }
-  useEffect(() => {
-    if (!pendingField) return
-    const el = fieldElement(pendingField)
-    el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-    el?.querySelector<HTMLElement>('input, textarea')?.focus({ preventScroll: true })
-    setPendingField(null)
-  }, [pendingField])
 
   if (isLoading) {
     return <>Loading</>
