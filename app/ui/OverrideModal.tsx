@@ -47,6 +47,12 @@ const removeCircularReferences = (obj: any, seen = new WeakSet()): any => {
   return result
 }
 
+type PlatformPattern = keyof typeof SupportedPlatforms
+
+/** 按直播间地址找到对应平台插件在 SupportedPlatforms 里的键;没匹配到返回 undefined */
+const matchPlatformPattern = (url?: string): PlatformPattern | undefined =>
+  (Object.keys(SupportedPlatforms) as PlatformPattern[]).find(pattern => url?.match(new RegExp(pattern)))
+
 const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk }) => {
   const [isOpen, setOpen] = useState(false)
 
@@ -54,16 +60,11 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
     setOpen(!isOpen)
   }
 
-  const platformSetting = () => {
-    for (const [pattern, Plugin] of Object.entries(SupportedPlatforms)) {
-      if (entity?.url.match(new RegExp(pattern))) {
-        // console.log('匹配到平台:', pattern)
-        return Plugin as React.ComponentType<PluginProps>
-      }
-    }
-    // console.log('未匹配到平台')
-    return null
-  }
+  // 平台插件组件从模块级常量表里按键取出,渲染间始终是同一个引用,不会因为重渲染而重置内部状态
+  const platformPattern = matchPlatformPattern(entity?.url)
+  const PlatformPlugin = platformPattern
+    ? (SupportedPlatforms[platformPattern] as React.ComponentType<PluginProps>)
+    : null
 
   const api = useRef<FormApi>(undefined)
 
@@ -291,12 +292,9 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
           <Form.Section>
             <Collapse defaultActiveKey={['plugin']}>
               {downloadSettings}
-              {(() => {
-                const Plugin = platformSetting()
-                return Plugin ? (
-                  <Plugin entity={entity} list={list} initValues={entity?.override} />
-                ) : null
-              })()}
+              {PlatformPlugin ? (
+                <PlatformPlugin entity={entity} list={list} initValues={entity?.override} />
+              ) : null}
             </Collapse>
           </Form.Section>
         </Form>

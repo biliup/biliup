@@ -3,7 +3,7 @@ import React, { useState } from 'react'
 import Image from 'next/image'
 import { LiveStreamerEntity, StreamerInfo } from '@/app/lib/api-streamer'
 import { streamerStatusMeta, uploadStatusTag, platformName } from '@/app/lib/status'
-import { timeAgo, formatDuration, formatRate, liveImageUrl } from '@/app/lib/use-dashboard'
+import { timeAgo, formatDuration, formatRate, liveImageUrl, useNowSec } from '@/app/lib/use-dashboard'
 import styles from './streamer-card.module.scss'
 
 export interface StreamerCardProps {
@@ -78,6 +78,15 @@ export function LiveAvatar({ src }: { src: string }) {
 }
 
 /**
+ * 直播中的实时时长:由"直播开始时间"和共享时钟算出。
+ * 只有录制中的卡片挂载它,所以只有这些卡片会随时钟每秒重渲染这一小块,其余卡片不受影响。
+ */
+function LiveDuration({ since }: { since: number }) {
+  const now = useNowSec()
+  return <span className={styles.liveInfo}>{formatDuration(now - since)}</span>
+}
+
+/**
  * 全局统一的直播间卡片:
  * 状态徽章 + 平台色 chip + [录制中:封面 / 头像 / 写盘速率] + 名称 + 实时时长(直播中)/ 最近录制(未开播)
  * + 标题 + URL + 上传状态。主页与直播管理页共用。
@@ -95,11 +104,6 @@ export default function StreamerCard({
   const paused = streamer.status === 'Pause'
   const name = streamer.remark || streamer.url
 
-  // 实时时长:直播中时由"直播开始时间"计算
-  let duration: string | null = null
-  if (live && info?.date) {
-    duration = formatDuration(Date.now() / 1000 - info.date)
-  }
   const lastRec = info?.date && !live ? timeAgo(info.date) : null
 
   // 录制中才有封面 / 头像 / 速率;图片走同源代理,避开图片 CDN 的 Referer 校验
@@ -160,7 +164,7 @@ export default function StreamerCard({
         </div>
         {live ? (
           <span className={styles.liveStats}>
-            {duration ? <span className={styles.liveInfo}>{duration}</span> : null}
+            {info?.date ? <LiveDuration since={info.date} /> : null}
             <span
               className={styles.rate}
               title={rate ? '写盘速率(最近 10 秒平均)' : '写盘速率:尚无采样'}

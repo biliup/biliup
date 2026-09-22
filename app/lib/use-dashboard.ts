@@ -1,4 +1,5 @@
 'use client'
+import { useSyncExternalStore } from 'react'
 import useSWR from 'swr'
 import { API_BASE, fetcher, LiveStreamerEntity, StreamerInfo, FileList } from './api-streamer'
 import { platformName } from './status'
@@ -50,6 +51,38 @@ export function formatDuration(sec: number): string {
   if (sec < 60) return `${Math.max(0, Math.floor(sec))}s`
   if (sec < 3600) return `${Math.floor(sec / 60)}min`
   return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}min`
+}
+
+/**
+ * 「当前时间」(Unix 秒)的共享时钟,供渲染期算「已直播多久」这类相对时长。
+ * 渲染函数里直接调 Date.now() 不是纯函数(同一份 props 每次渲染结果都不同,React Compiler 拒绝);
+ * 这里把时间放进一个模块级 store,有订阅者时由定时器每秒推进一次,组件用 useSyncExternalStore 读取。
+ * 首个订阅者接入时先校准一次,避免长时间无人订阅后拿到过期的值。
+ */
+const NOW_TICK_MS = 1000
+let nowSec = Math.floor(Date.now() / 1000)
+let nowTimer: ReturnType<typeof setInterval> | null = null
+const nowListeners = new Set<() => void>()
+const readNowSec = () => nowSec
+const subscribeNow = (onTick: () => void) => {
+  if (nowListeners.size === 0) {
+    nowSec = Math.floor(Date.now() / 1000)
+    nowTimer = setInterval(() => {
+      nowSec = Math.floor(Date.now() / 1000)
+      nowListeners.forEach((listener) => listener())
+    }, NOW_TICK_MS)
+  }
+  nowListeners.add(onTick)
+  return () => {
+    nowListeners.delete(onTick)
+    if (nowListeners.size === 0 && nowTimer !== null) {
+      clearInterval(nowTimer)
+      nowTimer = null
+    }
+  }
+}
+export function useNowSec(): number {
+  return useSyncExternalStore(subscribeNow, readNowSec, readNowSec)
 }
 
 /**
