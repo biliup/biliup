@@ -1,6 +1,6 @@
 'use client'
 import useSWR from 'swr'
-import { fetcher, LiveStreamerEntity, StreamerInfo, FileList } from './api-streamer'
+import { API_BASE, fetcher, LiveStreamerEntity, StreamerInfo, FileList } from './api-streamer'
 import { platformName } from './status'
 
 /**
@@ -50,6 +50,33 @@ export function formatDuration(sec: number): string {
   if (sec < 60) return `${Math.max(0, Math.floor(sec))}s`
   if (sec < 3600) return `${Math.floor(sec / 60)}min`
   return `${Math.floor(sec / 3600)}h ${Math.floor((sec % 3600) / 60)}min`
+}
+
+/**
+ * 写盘速率(字节/秒) → "1.2 MB/s" / "680 KB/s"。
+ * 后端没有采样(null / undefined)时返回 null,由调用方显示「—」。
+ */
+export function formatRate(bytesPerSec: number | null | undefined): string | null {
+  if (bytesPerSec === null || bytesPerSec === undefined || !Number.isFinite(bytesPerSec)) return null
+  const b = Math.max(0, bytesPerSec)
+  if (b >= 1 << 20) return `${(b / (1 << 20)).toFixed(b >= 10 << 20 ? 0 : 1)} MB/s`
+  if (b >= 1 << 10) return `${(b / (1 << 10)).toFixed(0)} KB/s`
+  return `${Math.round(b)} B/s`
+}
+
+/**
+ * 录制中直播间的封面 / 头像同源代理地址。
+ * 带上原始地址的短哈希作查询参数:封面换了(新一场直播)浏览器就不会沿用旧缓存。
+ */
+export function liveImageUrl(
+  id: number,
+  kind: 'cover' | 'avatar',
+  sourceUrl: string | null | undefined
+): string | null {
+  if (!sourceUrl) return null
+  let h = 5381
+  for (let i = 0; i < sourceUrl.length; i++) h = ((h << 5) + h + sourceUrl.charCodeAt(i)) | 0
+  return `${API_BASE}/v1/streamers/${id}/${kind}?v=${(h >>> 0).toString(36)}`
 }
 
 const DAY = 86400
