@@ -218,6 +218,11 @@ function playWithMediaSource(
   art: Artplayer,
   { codecs, autoplay, onEnded, onError }: Fmp4Options
 ) {
+  // 同 playWithMpegts：Artplayer 出错后的自动重连会在实例销毁后仍重设 url，忽略
+  if (art.isDestroy) return
+  const artWithMse = art as Artplayer & { fmp4Dispose?: (() => void) | null }
+  artWithMse.fmp4Dispose?.()
+  artWithMse.fmp4Dispose = null
   const mime = fmp4MimeType(codecs)
   if (!mime) {
     onError?.('后端未能解析出 fMP4 的编码参数，无法起播')
@@ -303,6 +308,7 @@ function playWithMediaSource(
     }
     URL.revokeObjectURL(objectUrl)
   }
+  artWithMse.fmp4Dispose = dispose
   art.on('destroy', dispose)
 
   mediaSource.addEventListener('sourceopen', () => {
@@ -393,6 +399,10 @@ function playWithMpegts(
     onError?.('当前浏览器不支持 MSE')
     return
   }
+  // Artplayer 在 video:error 后会隔 1 s 重设 art.url 最多 5 次（RECONNECT_TIME_MAX），
+  // 而且不看自己是否已被 destroy——那会在弹层关闭后凭空再拉一路流、占着服务端许可。
+  // 重连由 LivePreviewPlayer 自己管，这里对已销毁的实例直接不理。
+  if (art.isDestroy) return
   const artWithMpegts = art as Artplayer & { mpegts?: mpegts.Player | null }
   if (artWithMpegts.mpegts) {
     destroyMpegts(artWithMpegts.mpegts)
