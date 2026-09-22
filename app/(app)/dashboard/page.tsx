@@ -4,15 +4,13 @@ import {
   Button,
   Form,
   Avatar,
-  Select,
-  Space,
   Toast,
   Notification,
   Typography,
   Tabs,
   TabPane,
 } from '@douyinfe/semi-ui'
-import { IconPlusCircle, IconStar, IconGlobe } from '@douyinfe/semi-icons'
+import { IconPlusCircle, IconStar } from '@douyinfe/semi-icons'
 import useSWR from 'swr'
 import { fetcher, put } from '@/app/lib/api-streamer'
 import useSWRMutation from 'swr/mutation'
@@ -20,8 +18,6 @@ import { FormApi } from '@douyinfe/semi-ui/lib/es/form'
 import { useBiliUsers } from '../../lib/use-streamers'
 import styles from '../../styles/dashboard.module.scss'
 import PageHeader from '../components/PageHeader'
-import SectionTitle from '../components/SectionTitle'
-import dc from '@/app/ui/data-card.module.scss'
 
 // 注册各平台组件
 import { PlatformPanels } from '../../ui/plugins'
@@ -146,106 +142,86 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
           </Button>
         }
       />
-      <div className={dc.content}>
-        <main className={styles.rootConfigPanel}>
-          <div className={styles.main}>
-            <div className={styles.content}>
-              <Form
-                className={styles.form}
-                // key={formKey}
-                initValues={entity}
-                onSubmit={async values => {
-                  try {
-                    const payload = { ...values }
-                    if (payload.file_size === undefined || payload.file_size === '') {
-                      payload.file_size = null
-                    }
-                    if (payload.segment_time === undefined || payload.segment_time === '') {
-                      payload.segment_time = null
-                    }
-                    await trigger(payload)
-                    Toast.success('保存成功')
-                  } catch (e: any) {
-                    // error handling
-                    Notification.error({
-                      title: '保存失败',
-                      content: <Typography style={{ maxWidth: 450 }}>{e.message}</Typography>,
-                      // theme: 'light',
-                      // duration: 0,
-                      style: { width: 'min-content' },
-                    })
-                    throw e
-                  }
-                }}
-                onSubmitFail={handleSubmitFail}
-                getFormApi={formApi => (formRef.current = formApi)}
-              >
-                <Tabs
-                  type="line"
-                  activeKey={activeTab}
-                  onChange={setActiveTab}
-                  contentStyle={{
-                    margin: '10px 0 0 0',
-                  }}
-                >
-                  <TabPane tab="全局设置" itemKey={TAB_GLOBAL}>
-                    {/* 全局设置 */}
-                    <div data-tab={TAB_GLOBAL}>
-                      <Global />
-                    </div>
-                  </TabPane>
-                  <TabPane tab="平台设置" itemKey={TAB_PLATFORM}>
-                    {/* 平台设置：左列平台名 + 右栏选中平台的字段 */}
-                    <div className={styles.framePlatformConfig} data-tab={TAB_PLATFORM}>
-                      <SectionTitle icon={<IconGlobe size="small" />} title="平台设置" />
-                      <div className={styles.platformLayout}>
-                        <nav className={styles.platformNav} aria-label="平台列表">
-                          {PlatformPanels.map(p => (
-                            <button
-                              key={p.key}
-                              type="button"
-                              className={`${styles.platformNavItem} ${
-                                activePlatform === p.key ? styles.platformNavItemActive : ''
-                              }`}
-                              aria-pressed={activePlatform === p.key}
-                              onClick={() => setActivePlatform(p.key)}
-                            >
-                              {p.name}
-                            </button>
-                          ))}
-                        </nav>
-                        <div className={styles.platformBody}>
-                          {/* 所有平台的字段始终保持挂载，只用 hidden 切换显示。
-                              卸载会注销 Semi Form 字段状态，提交时仅剩挂载字段；后端 PUT /configuration
-                              整表覆盖保存，会清空其他平台的参数与凭据 */}
-                          {PlatformPanels.map(p => (
-                            <section
-                              key={p.key}
-                              className={styles.platformPanel}
-                              hidden={activePlatform !== p.key}
-                              aria-label={p.name}
-                              data-platform={p.key}
-                            >
-                              <p.Component entity={entity} list={list} bare />
-                            </section>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </TabPane>
-                  <TabPane tab="开发者选项" itemKey={TAB_DEVELOPER}>
-                    {/* 开发者选项 */}
-                    <div data-tab={TAB_DEVELOPER}>
-                      <Developer />
-                    </div>
-                  </TabPane>
-                </Tabs>
-                <Space />
-                <Space style={{ height: '160px' }} />
-              </Form>
-            </div>
-          </div>
-        </main>
+      {/* 页头下方占满剩余高度；每个 Tab 面板在内部滚动，页面本身不滚，「保存」始终可见 */}
+      <div className={styles.page}>
+        <Form
+          className={styles.form}
+          initValues={entity}
+          onSubmit={async values => {
+            try {
+              const payload = { ...values }
+              if (payload.file_size === undefined || payload.file_size === '') {
+                payload.file_size = null
+              }
+              if (payload.segment_time === undefined || payload.segment_time === '') {
+                payload.segment_time = null
+              }
+              await trigger(payload)
+              Toast.success('保存成功')
+            } catch (e: any) {
+              // error handling
+              Notification.error({
+                title: '保存失败',
+                content: <Typography style={{ maxWidth: 450 }}>{e.message}</Typography>,
+                // theme: 'light',
+                // duration: 0,
+                style: { width: 'min-content' },
+              })
+              throw e
+            }
+          }}
+          onSubmitFail={handleSubmitFail}
+          getFormApi={formApi => (formRef.current = formApi)}
+        >
+          <Tabs type="line" className={styles.tabs} activeKey={activeTab} onChange={setActiveTab}>
+            <TabPane tab="全局设置" itemKey={TAB_GLOBAL}>
+              <div className={styles.pane} data-tab={TAB_GLOBAL}>
+                <Global />
+              </div>
+            </TabPane>
+            <TabPane tab="平台设置" itemKey={TAB_PLATFORM}>
+              {/* 左列平台列表 + 右栏选中平台的字段，两栏并排、各自独立滚动 */}
+              <div className={styles.platformLayout} data-tab={TAB_PLATFORM}>
+                <nav className={styles.platformNav} aria-label="平台列表">
+                  {PlatformPanels.map(p => (
+                    <button
+                      key={p.key}
+                      type="button"
+                      className={`${styles.platformNavItem} ${
+                        activePlatform === p.key ? styles.platformNavItemActive : ''
+                      }`}
+                      aria-pressed={activePlatform === p.key}
+                      onClick={() => setActivePlatform(p.key)}
+                    >
+                      {p.name}
+                    </button>
+                  ))}
+                </nav>
+                <div className={styles.platformBody}>
+                  {/* 所有平台的字段始终保持挂载，只用 hidden 切换显示。
+                      卸载会注销 Semi Form 字段状态，提交时仅剩挂载字段；后端 PUT /configuration
+                      整表覆盖保存，会清空其他平台的参数与凭据 */}
+                  {PlatformPanels.map(p => (
+                    <section
+                      key={p.key}
+                      className={styles.platformPanel}
+                      hidden={activePlatform !== p.key}
+                      aria-label={p.name}
+                      data-platform={p.key}
+                    >
+                      <p.Component entity={entity} list={list} bare />
+                    </section>
+                  ))}
+                </div>
+              </div>
+            </TabPane>
+            <TabPane tab="开发者选项" itemKey={TAB_DEVELOPER}>
+              <div className={styles.pane} data-tab={TAB_DEVELOPER}>
+                <Developer />
+              </div>
+            </TabPane>
+          </Tabs>
+        </Form>
       </div>
     </>
   )
