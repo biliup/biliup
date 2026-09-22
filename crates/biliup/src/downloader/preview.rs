@@ -273,6 +273,7 @@ impl PreviewHub {
             gop_bytes: 0,
             gop_ready: false,
             fmp4_init: mp4::InitInfo::default(),
+            ring_used: false,
         }
     }
 
@@ -333,6 +334,8 @@ pub struct PreviewSink {
     gop_ready: bool,
     /// fMP4：从 init segment 读出的视频轨信息，用于判定分片首帧是否关键帧
     fmp4_init: mp4::InitInfo,
+    /// 广播缓冲里有没有数据；有且订阅者归零时换新通道释放
+    ring_used: bool,
 }
 
 impl PreviewSink {
@@ -443,7 +446,19 @@ impl PreviewSink {
     }
 
     /// 没有订阅者时 `send` 直接返回 `Err`、不存任何东西；有订阅者时满了覆盖最旧的分块。
-    fn broadcast(&self, chunk: Bytes) {
+    ///
+    /// 缓冲里的分块在最后一个订阅者走后不会自动释放（tokio broadcast 只在被覆盖时丢），
+    /// FLV 1024 槽就是 ~10 MB 一直挂着。所以订阅者归零时换一条新通道，把旧缓冲整个放掉；
+    /// 之后的 `subscribe()` 拿的是新通道，对订阅者透明。
+    fn broadcast(&mut self, chunk: Bytes) {
+        if self.tx.receiver_count() == 0 {
+            if self.ring_used {
+                self.tx = broadcast::channel(self.format.broadcast_capacity()).0;
+                self.ring_used = false;
+            }
+            return;
+        }
+        self.ring_used = true;
         let mut rest = chunk;
         while rest.len() > MAX_CHUNK_BYTES {
             let piece = rest.split_to(MAX_CHUNK_BYTES);
@@ -1173,6 +1188,44 @@ mod tests {
         trun.extend_from_slice(&[0, 0, 0, 10, 0, 0, 0, 20]);
         let traf = bx(b"traf", &[bx(b"tfhd", &tfhd), bx(b"trun", &trun)].concat());
         bx(b"moof", &[bx(b"mfhd", &[0u8; 8]), traf].concat())
+    }
+
+    /// 最后一个订阅者走后，广播缓冲里的分块要被放掉（换新通道），之后的订阅者照常工作。
+    #[tokio::test]
+    async fn broadcast_ring_is_released_when_the_last_subscriber_leaves() {
+        let hub = PreviewHub::new(4);
+        let mut sink = hub.attach(PreviewFormat::Flv);
+        sink.push(ChunkKind::Header, Bytes::from_static(b"FLV"));
+        sink.push(ChunkKind::Keyframe, Bytes::from_static(b"K0"));
+        let pending = tokio::spawn({
+            let hub = hub.clone();
+            async move { hub.subscribe(Duration::from_secs(5)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let big = Bytes::from(vec![7u8; 1024 * 1024]);
+        sink.push(ChunkKind::Keyframe, Bytes::from_static(b"K1"));
+        sink.push(ChunkKind::Media, big.clone());
+        let sub = pending.await.unwrap().unwrap();
+        assert!(sink.ring_used);
+        // 订阅者走了：下一次 push 发现没人收，换新通道；旧通道（及其 1 MB）随之释放
+        drop(sub);
+        sink.push(ChunkKind::Media, Bytes::from_static(b"m"));
+        assert!(!sink.ring_used);
+        assert_eq!(sink.tx.receiver_count(), 0);
+        // 再来一个订阅者，走新通道照常收
+        let pending = tokio::spawn({
+            let hub = hub.clone();
+            async move { hub.subscribe(Duration::from_secs(5)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sink.push(ChunkKind::Keyframe, Bytes::from_static(b"K2"));
+        sink.push(ChunkKind::Media, Bytes::from_static(b"m2"));
+        let mut sub = pending.await.unwrap().unwrap();
+        assert_eq!(
+            sub.snapshot,
+            vec![Bytes::from_static(b"FLV"), Bytes::from_static(b"K2")]
+        );
+        assert_eq!(sub.rx.recv().await.unwrap(), Bytes::from_static(b"m2"));
     }
 
     /// CDN 整 GOP 突发：请求在关键帧被回应后，同一突发里紧跟几百个 tag 在订阅者读之前就全部
