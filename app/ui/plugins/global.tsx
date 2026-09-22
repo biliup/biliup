@@ -268,6 +268,34 @@ const Global: React.FC = () => {
           }}
           showClear={true}
         />
+        <Form.Select
+          field="preview_transport"
+          label="直播预览取流方式（preview_transport）"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              <div>
+                <strong>经 biliup 中转</strong>（默认）：页面里的预览复用正在录制的那一路流，不向直播平台多拉一路。
+                浏览器与 biliup 在同一台机器或同一内网时选这个，不多占 CDN 带宽。
+              </div>
+              <div>
+                <strong>浏览器直连 CDN</strong>：浏览器自己向直播平台的 CDN 拉一路，媒体流量不经过 biliup，
+                适合 biliup 部署在异地服务器、浏览器远程访问的情况，省服务器出口带宽。
+                只有 CDN 放行跨域的平台能直连（B 站 / 抖音 / 虎牙的 FLV）；斗鱼一个 token 只允许一条连接、
+                Twitch 未放行跨域、HLS（TS / fMP4）需要 hls.js，这些在直连模式下自动回落中转并在播放器角标标出原因。
+              </div>
+            </div>
+          }
+          placeholder="经 biliup 中转（relay）"
+          style={{ width: '100%' }}
+          fieldStyle={{
+            alignSelf: 'stretch',
+            padding: 0,
+          }}
+          showClear={true}
+        >
+          <Form.Select.Option value="relay">经 biliup 中转（relay）</Form.Select.Option>
+          <Form.Select.Option value="direct">浏览器直连 CDN（direct）</Form.Select.Option>
+        </Form.Select>
       </div>
 
       <Space />

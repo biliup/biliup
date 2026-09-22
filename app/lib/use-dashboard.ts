@@ -1,7 +1,7 @@
 'use client'
 import { useSyncExternalStore } from 'react'
 import useSWR from 'swr'
-import { API_BASE, fetcher, LiveStreamerEntity, StreamerInfo, FileList } from './api-streamer'
+import { API_BASE, fetcher, LiveStreamerEntity, StreamerInfo, FileList, LiveUrlInfo, PreviewTransport } from './api-streamer'
 import { platformName } from './status'
 
 /**
@@ -115,6 +115,33 @@ export function liveImageUrl(
 /** 正在录制的那一路流的同源地址（chunked FLV / MPEG-TS / fMP4），供页面内播放器直接拉取。 */
 export function livePreviewUrl(id: number): string {
   return `${API_BASE}/v1/streamers/${id}/live`
+}
+
+/** 浏览器直连模式：向后端要当前录制中那条流的 CDN 直链。 */
+export function fetchLiveUrl(id: number): Promise<LiveUrlInfo> {
+  return fetcher(`/v1/streamers/${id}/live-url`, { cache: 'no-store' })
+}
+
+/**
+ * CDN 直链在页面里能不能直接用：https 页面拉 http 直链会被当作混合内容拦掉（抖音的直链就是 http），
+ * 实测这些 CDN 都支持 https，直接换协议。
+ */
+export function directPlayableUrl(url: string): string {
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:' && url.startsWith('http://')) {
+    return 'https://' + url.slice('http://'.length)
+  }
+  return url
+}
+
+/**
+ * 全局配置里的预览取流方式。与空间配置页共用同一个 SWR key，改完保存这里立刻拿到；
+ * 配置还没加载到时按 relay 处理（默认值）。
+ */
+export function usePreviewTransport(): PreviewTransport {
+  const { data } = useSWR<{ preview_transport?: PreviewTransport | null }>('/v1/configuration', fetcher, {
+    refreshInterval: SLOW_REFRESH_MS,
+  })
+  return data?.preview_transport === 'direct' ? 'direct' : 'relay'
 }
 
 /**

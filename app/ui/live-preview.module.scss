@@ -81,6 +81,39 @@
   min-width: 0;
 }
 
+/* 取流方式角标：左上角，不挡播放器控制栏 */
+.badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  /* Artplayer 内部各层 z-index 到 90+，角标要压在它们之上 */
+  z-index: 120;
+  max-width: calc(100% - 16px);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 18px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: auto;
+}
+.badge[data-tone='direct'] {
+  background: rgba(22, 163, 74, 0.75);
+}
+.badge[data-tone='fallback'] {
+  background: rgba(217, 119, 6, 0.8);
+}
+.badge[data-compact] {
+  top: 4px;
+  left: 4px;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 1px 6px;
+}
+
 .danmakuSwitch {
   display: inline-flex;
   align-items: center;

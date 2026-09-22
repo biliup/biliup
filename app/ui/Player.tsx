@@ -410,7 +410,9 @@ function playWithMpegts(
   }
 
   const player = mpegts.createPlayer(
-    { type, url, isLive },
+    // 直连 CDN 时是跨域请求：cors 模式、不带 cookie（这些 CDN 的 ACAO 是 *，带凭据反而会被拒）；
+    // 同源的 /live 走 same-origin 凭据，登录 cookie 照常带上（见 AbortableFetchLoader）
+    { type, url, isLive, cors: true, withCredentials: false },
     isLive
       ? {
           // 直播：不攒缓冲、落后就追，源缓冲区用完即清理，长时间观看不涨内存

@@ -105,7 +105,28 @@ export interface LivePreviewInfo {
 	reason: string | null;
 	/** 这一路有没有实时弹幕（平台实现了弹幕客户端），有则 /v1/streamers/{id}/danmaku（SSE）可用 */
 	danmaku: boolean;
+	/** 浏览器能否直连 CDN 拉这一路（全局配置 preview_transport = direct 时用；不能则回落中转并显示原因） */
+	direct: DirectCapability;
 }
+
+export interface DirectCapability {
+	capable: boolean;
+	/** 不能直连的原因；capable 为 true 时为 null */
+	reason: string | null;
+}
+
+/** GET /v1/streamers/{id}/live-url：正在录制的那条流的 CDN 直链 */
+export interface LiveUrlInfo {
+	url: string;
+	format: 'flv' | 'mpegts' | 'fmp4' | null;
+	platform: string;
+	/** 过期时间估计（Unix 秒），直链里没有可识别的过期参数时为 null */
+	expires_at: number | null;
+	direct: DirectCapability;
+}
+
+/** 直播预览的取流方式（全局配置 preview_transport），空值视同 relay */
+export type PreviewTransport = 'relay' | 'direct';
 
 export interface LiveStreamerEntity {
 	id: number;
