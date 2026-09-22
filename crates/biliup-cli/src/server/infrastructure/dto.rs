@@ -14,15 +14,18 @@ pub struct LivePreviewResponse {
     pub codecs: Option<String>,
     /// 不可预览的原因（ffmpeg / streamlink 子进程落盘、HEVC FLV 等）
     pub reason: Option<String>,
+    /// 这一路有没有实时弹幕（平台实现了弹幕客户端），有则 `GET /v1/streamers/{id}/danmaku` 可用
+    pub danmaku: bool,
 }
 
-impl From<PreviewStatus> for LivePreviewResponse {
-    fn from(status: PreviewStatus) -> Self {
+impl LivePreviewResponse {
+    pub fn new(status: PreviewStatus, danmaku: bool) -> Self {
         Self {
             available: status.available,
             format: status.format.map(|f| f.as_str()),
             codecs: status.codecs,
             reason: status.reason,
+            danmaku,
         }
     }
 }

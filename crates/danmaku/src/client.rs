@@ -12,7 +12,7 @@ use futures::{SinkExt, StreamExt};
 use rustls_platform_verifier::BuilderVerifierExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::time::interval;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -20,6 +20,7 @@ use tokio_tungstenite::{Connector, connect_async_tls_with_config};
 use tracing::{debug, error, info, warn};
 
 use crate::error::{DanmakuError, Result};
+use crate::message::DanmakuEvent;
 use crate::output::xml::{XmlWriter, XmlWriterConfig};
 use crate::protocols::{
     ConnectionInfo, ConnectionTransport, DecodeResult, HeartbeatData, Platform, PlatformContext,
@@ -58,6 +59,10 @@ pub struct RecorderConfig {
     pub save_raw: bool,
     /// Whether to save detailed info.
     pub save_detail: bool,
+    /// Optional live tee: every decoded event is also `send` to this broadcast channel
+    /// (best effort — no subscribers or a full ring just drops the copy). Used by the
+    /// web UI's live preview to overlay danmaku; never affects the XML recording.
+    pub live_tx: Option<broadcast::Sender<DanmakuEvent>>,
 }
 
 impl RecorderConfig {
@@ -69,7 +74,14 @@ impl RecorderConfig {
             context: PlatformContext::new(),
             save_raw: false,
             save_detail: false,
+            live_tx: None,
         }
+    }
+
+    /// Also broadcast every decoded event to `tx` (see [`RecorderConfig::live_tx`]).
+    pub fn with_live_tx(mut self, tx: broadcast::Sender<DanmakuEvent>) -> Self {
+        self.live_tx = Some(tx);
+        self
     }
 
     /// Set the platform context.
@@ -146,6 +158,14 @@ impl DanmakuRecorder {
             config,
             platform: Arc::from(platform),
         })
+    }
+
+    /// Tee one decoded event to the live broadcast, if configured. `send` never waits:
+    /// with no receivers the copy is dropped, with a full ring the oldest is overwritten.
+    fn emit_live(&self, event: &DanmakuEvent) {
+        if let Some(tx) = &self.config.live_tx {
+            let _ = tx.send(event.clone());
+        }
     }
 
     /// Start recording in a background task.
@@ -299,6 +319,7 @@ impl DanmakuRecorder {
                 _ = ticker.tick() => {
                     let events = self.platform.poll_messages(&self.config.url, &mut context).await?;
                     for event in events {
+                        self.emit_live(&event);
                         if let Err(e) = xml_writer.write_event(&event) {
                             warn!("Failed to write event: {}", e);
                         }
@@ -456,6 +477,7 @@ impl DanmakuRecorder {
                                 Ok(result) => {
                                     // Write decoded events
                                     for event in result.events {
+                                        self.emit_live(&event);
                                         if let Err(e) = xml_writer.write_event(&event) {
                                             warn!("Failed to write event: {}", e);
                                         }
@@ -567,6 +589,7 @@ impl DanmakuRecorder {
                     match decode_message_guarded(self.platform.as_ref(), &frame, platform_name) {
                         Ok(result) => {
                             for event in result.events {
+                                self.emit_live(&event);
                                 if let Err(e) = xml_writer.write_event(&event) {
                                     warn!("Failed to write event: {}", e);
                                 }

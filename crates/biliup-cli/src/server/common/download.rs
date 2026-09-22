@@ -16,10 +16,11 @@ use crate::server::infrastructure::models::hook_step::process;
 use async_channel::Sender;
 use biliup::downloader::live::{LivePlugin, LiveStatus, LiveStream};
 use biliup::downloader::preview::PreviewHub;
+use danmaku_client::DanmakuEvent;
 use error_stack::ResultExt;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::{Mutex, Notify, broadcast};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
@@ -152,13 +153,23 @@ pub struct DownloadTask {
     media: std::sync::RwLock<LiveMedia>,
     /// 直播预览 hub，寿命与本任务相同：跨分段、跨断流重试都是同一个。
     preview: PreviewHub,
+    /// 实时弹幕广播：弹幕客户端每解出一条就 `send` 一份给预览播放器；
+    /// 平台没有弹幕实现（`stream.danmaku` 为 None）时为 `None`。
+    danmaku_tx: Option<broadcast::Sender<DanmakuEvent>>,
 }
+
+/// 每路实时弹幕广播的槽位数；掉队的订阅者跳过丢掉的那几条继续收，不断开。
+pub const DANMAKU_BROADCAST_CAPACITY: usize = 256;
 
 impl DownloadTask {
     pub fn new(downloader: DownloaderRuntime, stream: &LiveStream) -> Self {
         let sync_session = matches!(&downloader, DownloaderRuntime::Sync(_))
             .then(|| Arc::new(Mutex::new(SyncSession::default())));
         let preview = preview_hub_for(&downloader);
+        let danmaku_tx = stream
+            .danmaku
+            .as_ref()
+            .map(|_| broadcast::channel(DANMAKU_BROADCAST_CAPACITY).0);
         Self {
             token: CancellationToken::new(),
             done_notify: Notify::new(),
@@ -167,12 +178,23 @@ impl DownloadTask {
             meter: Arc::new(RateMeter::new()),
             media: std::sync::RwLock::new(LiveMedia::from_stream(stream)),
             preview,
+            danmaku_tx,
         }
     }
 
     /// 本任务的直播预览 hub。
     pub fn preview(&self) -> &PreviewHub {
         &self.preview
+    }
+
+    /// 这一路有没有弹幕客户端（平台实现了弹幕且该流带弹幕源）。
+    pub fn danmaku_available(&self) -> bool {
+        self.danmaku_tx.is_some()
+    }
+
+    /// 订阅实时弹幕；没有弹幕客户端的平台返回 `None`。
+    pub fn subscribe_danmaku(&self) -> Option<broadcast::Receiver<DanmakuEvent>> {
+        self.danmaku_tx.as_ref().map(|tx| tx.subscribe())
     }
 
     /// 最近一个滑动窗口内的写盘速率（字节/秒）。
@@ -228,6 +250,7 @@ impl DownloadTask {
             stream.danmaku.as_ref(),
             filename_prefix.as_deref(),
             &stream.name,
+            self.danmaku_tx.clone(),
         );
         // 启动弹幕客户端
         if let Some(ref client) = danmaku_client {
