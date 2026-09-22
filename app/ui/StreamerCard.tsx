@@ -12,6 +12,7 @@ import {
   canPreview,
 } from '@/app/lib/use-dashboard'
 import { LivePreviewButton, LivePreviewModal } from './LivePreview'
+import { LiveRateChart, SPARK_RATE_WINDOW_MS } from './LiveRateChart'
 import styles from './streamer-card.module.scss'
 
 export interface StreamerCardProps {
@@ -230,6 +231,18 @@ export default function StreamerCard({
           <span className={styles.recInfo}>{lastRec}</span>
         ) : null}
       </div>
+
+      {/* 录制中:最近 60 秒写盘速率 sparkline(每秒轮询瘦端点,页面内共用一份采样);无采样显示「—」 */}
+      {live ? (
+        <LiveRateChart
+          id={streamer.id}
+          windowMs={SPARK_RATE_WINDOW_MS}
+          variant="sparkline"
+          height={28}
+          label={`${name} 写盘速率`}
+          className={styles.spark}
+        />
+      ) : null}
 
       {/* 标题行:始终渲染(空字符串占位),保证所有卡片等高、标题基线对齐 */}
       <div className={styles.title} title={info?.title || ''}>

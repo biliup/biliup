@@ -258,6 +258,11 @@
   align-self: center;
 }
 
+/* 直播中:最近 60 秒写盘速率 sparkline(无坐标轴,hover 显示数值) */
+.spark {
+  margin: 2px 0 6px;
+}
+
 /* 未开播:最近录制时间 */
 .recInfo {
   font-size: 12px;
