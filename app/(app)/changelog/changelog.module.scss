@@ -3,12 +3,6 @@
   min-height: calc(100vh - 69px);
 }
 
-.feed,
-.center {
-  position: relative;
-  z-index: 1;
-}
-
 .center {
   display: flex;
   align-items: center;

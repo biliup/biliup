@@ -9,7 +9,7 @@ import { formatVersion } from '@/app/lib/status'
 import { SLOW_REFRESH_MS } from '@/app/lib/use-dashboard'
 import styles from './changelog.module.scss'
 
-const { Header, Content } = Layout
+const { Content } = Layout
 const { Title, Text } = Typography
 
 // 数据源：biliup 官方 CHANGELOG（随版本自动更新，零后端改动）
@@ -210,20 +210,13 @@ export default function Changelog() {
 
   return (
     <>
-      <Header
-        style={{
-          backgroundColor: 'var(--semi-color-bg-1)',
-          position: 'sticky',
-          top: 0,
-          zIndex: 1,
-        }}
-      >
-        <PageHeader
-          icon={<IconBook size="large" />}
-          title="更新日志"
-          description="biliup 版本更新记录"
-        />
-      </Header>
+      {/* PageHeader 自带 sticky 与 z-index，不要再包一层带 position / z-index 的容器，
+          否则会形成更低层级的 stacking context，滚动时被下方内容盖住 */}
+      <PageHeader
+        icon={<IconBook size="large" />}
+        title="更新日志"
+        description="biliup 版本更新记录"
+      />
       <Content>
         <main className={styles.content}>
           {isLoading && (

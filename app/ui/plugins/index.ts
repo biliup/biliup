@@ -40,7 +40,8 @@ const plugins = {
 
 /**
  * 空间配置「平台设置」左栏的展示顺序与文案。
- * key 必须与各插件 Collapse.Panel 的 itemKey 一致；新增插件时在这里登记一行即可出现在 UI 里。
+ * 各插件组件接受 `bare` 属性：为 true 时只渲染字段（空间配置页），否则渲染成 Collapse.Panel（配置覆写弹窗）。
+ * 新增插件时在这里登记一行即可出现在 UI 里。
  */
 export const PlatformPanels: { key: string; name: string; Component: React.FC<any> }[] = [
   { key: 'bilibili', name: '哔哩哔哩', Component: Bilibili },

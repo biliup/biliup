@@ -1,15 +1,17 @@
 'use client'
 import React, { useEffect } from 'react'
-import { Form, Select, Collapse, useFormApi } from '@douyinfe/semi-ui'
+import { Form, Select, useFormApi } from '@douyinfe/semi-ui'
+import PlatformPanel from './PlatformPanel'
 
 type Props = {
   entity: any
   list: any
   initValues?: Record<string, any>
+  bare?: boolean
 }
 
 const Kilakila: React.FC<Props> = props => {
-  const { entity, list, initValues } = props
+  const { entity, list, initValues, bare } = props
   const formApi = useFormApi()
 
   useEffect(() => {
@@ -22,7 +24,7 @@ const Kilakila: React.FC<Props> = props => {
 
   return (
     <>
-      <Collapse.Panel header="克拉克拉" itemKey="kilakila">
+      <PlatformPanel header="克拉克拉" itemKey="kilakila" bare={bare}>
         <Form.Select
           field="kila_protocol"
           extraText="直播流协议，默认 hls"
@@ -38,7 +40,7 @@ const Kilakila: React.FC<Props> = props => {
           <Select.Option value="hls">hls</Select.Option>
           <Select.Option value="flv">flv</Select.Option>
         </Form.Select>
-      </Collapse.Panel>
+      </PlatformPanel>
     </>
   )
 }

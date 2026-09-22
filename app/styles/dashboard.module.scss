@@ -1,325 +1,76 @@
-@media screen and (min-width: 640px) {
-    .rootConfigPanel {
-        padding: 0px 50px 0px 30px;
-        //align-items: center;
-        //background: var(--semi-color-bg-0);
-        //flex-direction: column;
-        //height: auto;
-        //overflow: auto;
-        //row-gap: 0;
-        //min-width: auto;
-        //max-width: auto;
-        //display: flex;
-        //color: var(--semi-color-text-0);
-        //font-family: Inter;
-        //font-size: 20px;
-        //font-weight: 600;
-        //letter-spacing: 0.4px;
-        //line-height: 28px;
-        //text-align: left;
-
-        .main {
-            //align-items: center;
-            display: flex;
-            flex-basis: 0;
-            flex-direction: column;
-            flex-grow: 1;
-            //padding: 40px 0px 0px;
-            row-gap: 32px;
-            align-self: stretch;
-
-            .content {
-                //align-items: flex-start;
-                //align-items: center;
-                display: inline-flex;
-                flex-direction: column;
-                row-gap: 32px;
-                flex-shrink: 0;
-
-                .item {
-                    min-width: 175px;
-                    vertical-align: middle;
-                    flex-shrink: 0;
-                }
-
-                .form {
-                    //align-items: flex-start;
-                    //align-items: center;
-                    //display: flex;
-                    //flex-direction: column;
-                    //row-gap: 16px;
-                    //min-width: 50px;
-                    //max-width: 965px;
-                    flex-shrink: 0;
-                    //color: var(--semi-color-text-0);
-                    //font-family: "PingFang SC";
-                    //font-size: 16px;
-                    //font-weight: 500;
-                    //letter-spacing: 0.32px;
-                    //line-height: 22px;
-                    //text-align: left;
-
-                    .frameDownload {
-                        //align-items: flex-start;
-                        border-color: rgb(var(--semi-grey-2));
-                        border-radius: 6px;
-                        border-style: solid;
-                        border-width: 1px;
-                        display: flex;
-                        flex-direction: column;
-                        flex-shrink: 0;
-                        padding: 25px 50px 50px;
-                        row-gap: 10px;
-                        align-self: stretch;
-                        min-width: 12px;
-                        max-width: auto;
-
-                        .frameInside {
-                            align-items: center;
-                            column-gap: 4px;
-                            display: inline-flex;
-                            flex-shrink: 0;
-
-                            .group {
-                                height: 20px;
-                                position: relative;
-                                width: 20px;
-                                flex-shrink: 0;
-
-                                .buttonOnlyIconSecond {
-                                    background: rgb(16, 192, 25);
-                                    border-radius: 8px;
-                                    height: 20px;
-                                    left: 0;
-                                    overflow: hidden;
-                                    top: 0;
-                                    width: 20px;
-                                    position: absolute;
-                                }
-
-                                .lineStory {
-                                    height: 10px;
-                                    left: 4.5px;
-                                    overflow: hidden;
-                                    top: 4.5px;
-                                    width: 12px;
-                                    position: absolute;
-                                }
-                            }
-
-                            .meegoSharedWebWorkIt {
-                                min-width: 68px;
-                                vertical-align: bottom;
-                                flex-shrink: 0;
-                            }
-                        }
-                    }
-                    .frameUpload {
-                        align-items: flex-start;
-                        border-color: rgb(var(--semi-grey-2));
-                        border-radius: 6px;
-                        border-style: solid;
-                        border-width: 1px;
-                        display: flex;
-                        flex-direction: column;
-                        flex-shrink: 0;
-                        padding: 25px 50px 50px;
-                        row-gap: 10px;
-                        align-self: stretch;
-
-                        .frameInside {
-                            align-items: center;
-                            column-gap: 4px;
-                            display: inline-flex;
-                            flex-shrink: 0;
-
-                            .group {
-                                height: 20px;
-                                position: relative;
-                                width: 20px;
-                                flex-shrink: 0;
-
-                                .buttonOnlyIconSecond {
-                                    background: rgb(236, 23, 66);
-                                    border-radius: 8px;
-                                    height: 20px;
-                                    left: 0;
-                                    overflow: hidden;
-                                    top: 0;
-                                    width: 20px;
-                                    position: absolute;
-                                }
-
-                                .lineStory {
-                                    height: 10px;
-                                    left: 4.5px;
-                                    overflow: hidden;
-                                    top: 4.5px;
-                                    width: 12px;
-                                    position: absolute;
-                                }
-                            }
-
-                            .meegoSharedWebWorkIt {
-                                min-width: 68px;
-                                vertical-align: bottom;
-                                flex-shrink: 0;
-                            }
-                        }
-                    }
-
-                    .framePlatformConfig {
-                        align-items: flex-start;
-                        border-color: rgb(var(--semi-grey-2));
-                        border-radius: 6px;
-                        border-style: solid;
-                        border-width: 1px;
-                        display: flex;
-                        flex-direction: column;
-                        flex-shrink: 0;
-                        padding: 25px 50px 50px;
-                        row-gap: 10px;
-                        align-self: stretch;
-
-                        .frameInside {
-                            align-items: center;
-                            column-gap: 4px;
-                            display: inline-flex;
-                            flex-shrink: 0;
-
-                            .group {
-                                height: 20px;
-                                position: relative;
-                                width: 20px;
-                                flex-shrink: 0;
-
-                                .outlinedVersion {
-                                    height: 10px;
-                                    left: 5px;
-                                    overflow: hidden;
-                                    top: 5px;
-                                    width: 10px;
-                                    position: absolute;
-                                }
-
-                                .buttonOnlyIconSecond {
-                                    background: rgb(47, 76, 206);
-                                    border-radius: 8px;
-                                    height: 20px;
-                                    left: 0;
-                                    overflow: hidden;
-                                    top: 0;
-                                    width: 20px;
-                                    position: absolute;
-                                }
-                                .lineStory {
-                                    height: 15px;
-                                    left: 4.5px;
-                                    overflow: hidden;
-                                    top: 4.1px;
-                                    width: 12px;
-                                    position: absolute;
-                                }
-                            }
-
-                            .meegoSharedWebSettin {
-                                min-width: 68px;
-                                vertical-align: bottom;
-                                flex-shrink: 0;
-                            }
-                        }
-                    }
-
-                    .frameDeveloper {
-                        align-items: flex-start;
-                        border-color: rgb(var(--semi-grey-2));
-                        border-radius: 6px;
-                        border-style: solid;
-                        border-width: 1px;
-                        display: flex;
-                        flex-direction: column;
-                        flex-shrink: 0;
-                        padding: 25px 50px 50px;
-                        row-gap: 10px;
-                        align-self: stretch;
-
-                        .frameInside {
-                            align-items: center;
-                            column-gap: 4px;
-                            display: inline-flex;
-                            flex-shrink: 0;
-
-                            .group {
-                                height: 20px;
-                                position: relative;
-                                width: 20px;
-                                flex-shrink: 0;
-
-                                .outlinedVersion {
-                                    height: 10px;
-                                    left: 5px;
-                                    overflow: hidden;
-                                    top: 5px;
-                                    width: 10px;
-                                    position: absolute;
-                                }
-
-                                .buttonOnlyIconSecond {
-                                    background: rgb(200, 109, 5);
-                                    border-radius: 8px;
-                                    height: 20px;
-                                    left: 0;
-                                    overflow: hidden;
-                                    top: 0;
-                                    width: 20px;
-                                    position: absolute;
-                                }
-                                .lineStory {
-                                    height: 15px;
-                                    left: 4.5px;
-                                    overflow: hidden;
-                                    top: 4.1px;
-                                    width: 12px;
-                                    position: absolute;
-                                }
-                            }
-
-                            .meegoSharedWebSettin {
-                                min-width: 68px;
-                                vertical-align: bottom;
-                                flex-shrink: 0;
-                            }
-                        }
-                    }
-                    .line {
-                        flex-shrink: 0;
-                        height: 0;
-                        align-self: stretch;
-                    }
-                }
-            }
-        }
-    }
+/* 空间配置页
+   页头下方是 Tabs，每个 Tab 面板占满剩余高度并在自己内部滚动；
+   页面本身（应用壳的 .main）不滚动，页头的「保存」始终可见。 */
+.page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  padding: 12px 28px 20px;
 }
 
-/* 表单卡片：必须加实色背景，避免全局背景图穿透导致文字不可读 */
+/* Semi 的 Form / Tabs 默认按内容撑开，这里让它们把剩余高度让给当前面板
+   （semi-tabs-pane-motion-overlay 是开启切换动画时 Semi 多包的一层） */
+.form,
+.tabs,
+.tabs :global(.semi-tabs-content),
+.tabs :global(.semi-tabs-pane),
+.tabs :global(.semi-tabs-pane-motion-overlay) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.tabs :global(.semi-tabs-content) {
+  padding: 0;
+}
+/* 上面的 display: flex 特异性高于 Semi 自己的 .semi-tabs-pane-inactive，未选中的面板要补回隐藏 */
+.tabs :global(.semi-tabs-pane-inactive) {
+  display: none;
+}
+
+/* 全局设置 / 开发者选项：面板自身滚动 */
+.pane {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 4px 32px;
+}
+
+/* 表单分区：不再套卡片，只用分区标题 + 分隔线区分 */
 .frameDownload,
 .frameUpload,
-.framePlatformConfig,
 .frameDeveloper {
-  background: var(--semi-color-bg-1);
+  display: flex;
+  flex-direction: column;
+  row-gap: 10px;
+}
+.frameUpload {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--semi-color-border);
 }
 
-/* 平台设置：左列平台名 + 右栏选中表单 */
+/* 平台设置：左列平台列表 + 右栏选中平台的字段。两栏并排、各自独立滚动，
+   右栏再长，列表也不会跟着滚走 */
 .platformLayout {
+  flex: 1;
+  min-height: 0;
   display: flex;
   gap: 16px;
-  align-items: flex-start;
-  margin-top: 16px;
+  padding-top: 16px;
 }
 .platformNav {
   width: 160px;
   flex-shrink: 0;
+  align-self: flex-start;
+  max-height: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -351,30 +102,44 @@
 .platformBody {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 32px;
+}
+/* 右栏：只显示选中平台的字段；不设 display，以免覆盖 hidden 属性 */
+.platformPanel {
+  padding: 4px 16px 8px 8px;
 }
 
-/* 移动端：卡片内边距收紧，避免左右留白/溢出 */
+/* 自定义背景开启时表单直接铺在背景图上，给滚动面板垫一层半透明底色保证可读 */
+:global(body.app-has-bg) .pane,
+:global(body.app-has-bg) .platformBody {
+  background: color-mix(in srgb, var(--semi-color-bg-1) 75%, transparent);
+  border-radius: 12px;
+}
+
+/* 移动端：两栏改为上下堆叠，平台列表变成横向滑动的标签行，仍不随内容滚走 */
 @media (max-width: 680px) {
-  .rootConfigPanel {
-    padding: 0 12px !important;
-  }
-  .frameDownload,
-  .frameUpload,
-  .framePlatformConfig,
-  .frameDeveloper {
-    padding: 16px 14px 24px !important;
-    border-radius: 10px;
+  .page {
+    padding: 8px 12px 12px;
   }
   .platformLayout {
     flex-direction: column;
+    gap: 10px;
+    padding-top: 10px;
   }
   .platformNav {
     width: 100%;
+    max-height: none;
+    align-self: stretch;
     flex-direction: row;
     overflow-x: auto;
-    flex-shrink: 0;
+    overflow-y: hidden;
   }
   .platformNavItem {
     white-space: nowrap;
+  }
+  .platformPanel {
+    padding: 4px 4px 8px;
   }
 }

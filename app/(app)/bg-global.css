@@ -1,16 +1,11 @@
 /* 全局自定义背景：当 body 带 app-has-bg 时生效 */
-html,
-body {
-  overflow-x: hidden;
-}
 
+/* 两个背景层用 position: fixed + inset: 0 铺满视口。页面滚动由应用壳的主内容区承担
+   （layout.module.scss .app / .main），文档本身不滚，这里不需要再给 html / body 设 overflow */
 body.app-has-bg::before {
   content: '';
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
+  inset: 0;
   z-index: -2;
   background-image: var(--app-bg-image);
   background-repeat: no-repeat;
@@ -23,10 +18,7 @@ body.app-has-bg::before {
 body.app-has-bg::after {
   content: '';
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
+  inset: 0;
   background: var(--semi-color-bg-0);
   opacity: var(--app-bg-mask-opacity, 0.35);
   z-index: -1;

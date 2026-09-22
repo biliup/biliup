@@ -1,15 +1,17 @@
 'use client'
 import React, { useEffect } from 'react'
-import { Form, Select, Collapse, useFormApi } from '@douyinfe/semi-ui'
+import { Form, Select, useFormApi } from '@douyinfe/semi-ui'
+import PlatformPanel from './PlatformPanel'
 
 type Props = {
   entity: any
   list: any
   initValues?: Record<string, any>
+  bare?: boolean
 }
 
 const YouTube: React.FC<Props> = props => {
-  const { entity, list, initValues } = props
+  const { entity, list, initValues, bare } = props
   const formApi = useFormApi()
 
   useEffect(() => {
@@ -22,7 +24,7 @@ const YouTube: React.FC<Props> = props => {
 
   return (
     <>
-      <Collapse.Panel header="YouTube" itemKey="youtube">
+      <PlatformPanel header="YouTube" itemKey="youtube" bare={bare}>
         <Form.Input
           field="user.youtube_cookie"
           extraText={
@@ -166,7 +168,7 @@ const YouTube: React.FC<Props> = props => {
             padding: 0,
           }}
         />
-      </Collapse.Panel>
+      </PlatformPanel>
     </>
   )
 }
