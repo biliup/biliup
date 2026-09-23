@@ -232,6 +232,12 @@ impl DownloadTask {
         }
     }
 
+    /// 本任务的写盘速率表（测试里用来喂采样）。
+    #[cfg(test)]
+    pub(crate) fn rate_meter(&self) -> &RateMeter {
+        &self.meter
+    }
+
     /// 当前直播间的封面与头像地址。
     pub fn live_media(&self) -> LiveMedia {
         self.media.read().unwrap().clone()

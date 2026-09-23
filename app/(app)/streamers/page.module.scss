@@ -68,6 +68,11 @@
   color: var(--semi-color-primary);
   font-weight: 600;
 }
+/* 工具栏「码率图」开关（网格视图） */
+.rateSwitch {
+  margin-right: 4px;
+}
+
 .toolbarSpacer {
   flex: 1;
 }

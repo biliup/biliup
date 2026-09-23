@@ -46,7 +46,7 @@ impl RateMeter {
         self.sample_at(Instant::now());
     }
 
-    fn sample_at(&self, now: Instant) {
+    pub(crate) fn sample_at(&self, now: Instant) {
         let total = self.counter.total();
         let mut samples = self.samples.lock().unwrap();
         samples.push_back((now, total));

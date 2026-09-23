@@ -41,6 +41,7 @@ import {
   SLOW_REFRESH_MS,
 } from '@/app/lib/use-dashboard'
 import StreamerCard, { LiveAvatar } from '@/app/ui/StreamerCard'
+import { CardRateSwitch } from '@/app/ui/LiveRateChart'
 import PageHeader from '../components/PageHeader'
 import styles from './page.module.scss'
 
@@ -309,6 +310,7 @@ export default function StreamersPage() {
                 ))}
               </div>
               <span className={styles.toolbarSpacer} />
+              {layout === 'grid' ? <CardRateSwitch className={styles.rateSwitch} /> : null}
               <div className={styles.seg}>
                 <button
                   className={layout === 'grid' ? styles.segActive : ''}

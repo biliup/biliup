@@ -12,6 +12,7 @@ import {
   canPreview,
 } from '@/app/lib/use-dashboard'
 import { LivePreviewButton, LivePreviewModal } from './LivePreview'
+import { LiveRateChart, SPARK_RATE_WINDOW_MS, useCardRateChart } from './LiveRateChart'
 import styles from './streamer-card.module.scss'
 
 export interface StreamerCardProps {
@@ -54,10 +55,16 @@ export function LiveCover({
   src,
   alt,
   onPreview,
+  overlay,
+  onStateChange,
 }: {
   src: string
   alt: string
   onPreview?: () => void
+  /** 叠在封面底部的一层（码率 sparkline）；点击会冒泡到封面本身的 onClick */
+  overlay?: React.ReactNode
+  /** 加载结果回调：父组件据此决定 overlay 放不放得下（加载失败整块消失） */
+  onStateChange?: (state: 'ok' | 'error') => void
 }) {
   const [state, setState] = useState<'loading' | 'ok' | 'error'>('loading')
   if (state === 'error') return null
@@ -87,8 +94,14 @@ export function LiveCover({
         fill
         sizes="(max-width: 600px) 100vw, 400px"
         loading="lazy"
-        onLoad={() => setState('ok')}
-        onError={() => setState('error')}
+        onLoad={() => {
+          setState('ok')
+          onStateChange?.('ok')
+        }}
+        onError={() => {
+          setState('error')
+          onStateChange?.('error')
+        }}
       />
       {clickable ? (
         <span className={styles.coverPlay} aria-hidden="true">
@@ -97,6 +110,7 @@ export function LiveCover({
           </svg>
         </span>
       ) : null}
+      {overlay ? <div className={styles.coverOverlay}>{overlay}</div> : null}
     </figure>
   )
 }
@@ -156,6 +170,23 @@ export default function StreamerCard({
   const avatarSrc = live ? liveImageUrl(streamer.id, 'avatar', streamer.live_avatar_url) : null
   const rate = live ? formatRate(streamer.live_bytes_per_sec) : null
 
+  // 码率 sparkline(页面工具栏「码率图」开关,默认关):有封面就叠在封面底部,封面没有 / 加载失败就放名称行下
+  const [rateChartOn] = useCardRateChart()
+  const [coverFailed, setCoverFailed] = useState(false)
+  const coverShown = !!coverSrc && !coverFailed
+  const sparkline =
+    live && rateChartOn ? (
+      <LiveRateChart
+        id={streamer.id}
+        windowMs={SPARK_RATE_WINDOW_MS}
+        variant="sparkline"
+        height={coverShown ? 34 : 28}
+        label={`${name} 写盘速率`}
+        className={coverShown ? undefined : styles.spark}
+        overlay={coverShown}
+      />
+    ) : null
+
   const plat = platformName(streamer.url)
   const platColor = PLAT_COLORS[plat] ?? DEFAULT_PLAT_COLOR
 
@@ -203,6 +234,8 @@ export default function StreamerCard({
           src={coverSrc}
           alt={`${name} 的直播间封面`}
           onPreview={previewable ? () => setPreviewOpen(true) : undefined}
+          overlay={coverShown ? sparkline : null}
+          onStateChange={(s) => setCoverFailed(s === 'error')}
         />
       ) : null}
 
@@ -230,6 +263,9 @@ export default function StreamerCard({
           <span className={styles.recInfo}>{lastRec}</span>
         ) : null}
       </div>
+
+      {/* 开了码率图但没有封面可叠:sparkline 放这一行 */}
+      {sparkline && !coverShown ? sparkline : null}
 
       {/* 标题行:始终渲染(空字符串占位),保证所有卡片等高、标题基线对齐 */}
       <div className={styles.title} title={info?.title || ''}>

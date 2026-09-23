@@ -19,6 +19,7 @@ import { useBoolPref, useChoicePref } from '@/app/lib/use-local-pref'
 import { useDanmakuFeed } from '@/app/lib/danmaku-feed'
 import { LivePreviewPlayer, useLatencyProfile } from './LivePreview'
 import { type LatencyProfile, RELAY_PROFILES, RELAY_PROFILES_SEGMENTED } from '@/app/lib/live-buffer'
+import { LiveRateChart, SPARK_RATE_WINDOW_MS } from './LiveRateChart'
 import styles from './live-monitor.module.scss'
 
 /**
@@ -43,6 +44,8 @@ function tileOptions(): number[] {
 const TILES_KEY = 'biliup.monitor.maxTiles'
 /** 多路同屏默认不开弹幕（每路一条 SSE、多路叠加太吵），开关记在本地 */
 const DANMAKU_KEY = 'biliup.monitor.danmaku'
+/** 每路小窗下的 60 s 码率 sparkline，默认关（多路同时画 + 每秒轮询），开关记在本地 */
+const RATE_CHART_KEY = 'biliup.monitor.rateChart'
 
 /** 用户的选择：手动激活的顺序（先进先出）与手动停掉的房间；其余由数据推导。 */
 interface Selection {
@@ -92,6 +95,7 @@ export default function LiveMonitor() {
   const [danmaku, setDanmaku] = useBoolPref(DANMAKU_KEY, false)
   const [latency, setLatency] = useLatencyProfile()
   const transport = usePreviewTransport()
+  const [rateChart, setRateChart] = useBoolPref(RATE_CHART_KEY, false)
   const [selection, setSelection] = useState<Selection>({ order: [], stopped: [] })
 
   const live = (streamers ?? []).filter((s) => s.status === LIVE_STATUS)
@@ -188,6 +192,14 @@ export default function LiveMonitor() {
               />
             </>
           ) : null}
+          <Tooltip content="每路小窗下方显示最近 60 秒的写盘速率折线（每秒向后端拉一次速率，所有小窗共用一次请求）">
+            <span className={styles.switchRow}>
+              <Text type="tertiary" size="small">
+                码率图
+              </Text>
+              <Switch size="small" checked={rateChart} onChange={(v) => setRateChart(!!v)} aria-label="码率图" />
+            </span>
+          </Tooltip>
           <Text type="tertiary" size="small">
             同屏路数
           </Text>
@@ -284,6 +296,16 @@ export default function LiveMonitor() {
                   </span>
                 </button>
               )}
+              {rateChart ? (
+                <LiveRateChart
+                  id={s.id}
+                  windowMs={SPARK_RATE_WINDOW_MS}
+                  variant="sparkline"
+                  height={32}
+                  label={`${name} 写盘速率`}
+                  className={styles.tileSpark}
+                />
+              ) : null}
               <footer className={styles.tileFoot} title={info?.title || ''}>
                 {info?.title || '\u00a0'}
               </footer>

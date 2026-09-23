@@ -8,6 +8,7 @@ import {
 } from '@/app/lib/use-dashboard'
 import { formatVersion } from '@/app/lib/status'
 import StreamerCard from '../ui/StreamerCard'
+import { CardRateSwitch } from '../ui/LiveRateChart'
 import EventTimeline from '../ui/EventTimeline'
 import BackgroundSetter from './components/BackgroundSetter'
 import styles from './page.module.scss'
@@ -123,9 +124,12 @@ export default function Home() {
               <span className={styles.secLabel}>
                 进行中<span className={styles.secCount}>{live.length}</span>
               </span>
-              <Link href="/streamers" prefetch={false} className={styles.secLink}>
-                直播管理 →
-              </Link>
+              <span className={styles.secTools}>
+                {live.length > 0 ? <CardRateSwitch /> : null}
+                <Link href="/streamers" prefetch={false} className={styles.secLink}>
+                  直播管理 →
+                </Link>
+              </span>
             </div>
             {d.streamersFailed ? (
               <Text type="tertiary">主播列表加载失败,无法显示卡片。</Text>
