@@ -7,6 +7,7 @@ import {
   User
 } from "./api-streamer";
 import {useEffect, useState} from "react";
+import {useMe} from "./use-me";
 
 
 export default function useStreamers() {
@@ -21,7 +22,9 @@ export default function useStreamers() {
 const NO_USERS: any[] = [];
 
 export function useBiliUsers() {
-  const {data, error, isLoading} = useSWR<User[]>("/v1/users", fetcher);
+  // 账号列表归「编辑投稿模板」权限；没有这项权限的角色（只读观察者）不去请求，免得满屏 403
+  const {can} = useMe();
+  const {data, error, isLoading} = useSWR<User[]>(can("template.edit") ? "/v1/users" : null, fetcher);
   const [list, setList] = useState<any[]>(NO_USERS);
   useEffect(() => {
     if (!data) return;
@@ -56,7 +59,8 @@ export function useBiliUsers() {
 }
 
 export function useTypeTree() {
-  const { data: archivePre, error, isLoading } = useSWR("/bili/archive/pre", fetcher);
+  const {can} = useMe();
+  const { data: archivePre, error, isLoading } = useSWR(can("upload.submit") ? "/bili/archive/pre" : null, fetcher);
   const treeData = archivePre?.data?.typelist.map((type: BiliType)=> {
     return {
       label: type.name,

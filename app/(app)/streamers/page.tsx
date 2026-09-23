@@ -43,6 +43,7 @@ import {
 import StreamerCard, { LiveAvatar } from '@/app/ui/StreamerCard'
 import { CardRateSwitch } from '@/app/ui/LiveRateChart'
 import PageHeader from '../components/PageHeader'
+import { useMe } from '@/app/lib/use-me'
 import styles from './page.module.scss'
 
 const { Content } = Layout
@@ -72,6 +73,13 @@ export default function StreamersPage() {
     }
     return map
   }, [infos])
+
+  const { can } = useMe()
+  const canEdit = can('streamer.edit')
+  const canControl = can('recording.control')
+  const canHooks = can('streamer.hooks')
+  // 批量操作至少要能暂停或删除其一，否则连勾选框都不显示
+  const canBatch = canEdit || canControl
 
   // ---- 增删改 ----
   const { trigger: deleteStreamers } = useSWRMutation('/v1/streamers', requestDelete)
@@ -225,23 +233,33 @@ export default function StreamersPage() {
   // 编辑 / 暂停 / 删除 / 高级四个操作，网格卡片与列表行共用，只是外层容器不同
   // 返回数组而不是 Fragment:ButtonGroup 会对每个直接子元素 cloneElement 注入 disabled 等 props,
   // React 19 起会对带这些 props 的 Fragment 报 "Invalid prop supplied to React.Fragment"
-  const actionButtons = (item: LiveStreamerEntity) => [
-    <TemplateModal key="edit" onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
-      <Button theme="borderless" type="primary" icon={<IconEdit2Stroked />} aria-label="编辑" />
-    </TemplateModal>,
-    <PauseButton key="pause" streamer={item} />,
-    <Popconfirm key="delete" title="确定是否要删除？" content="此操作将不可逆" onConfirm={() => onConfirm(item.id)}>
-      <Button theme="borderless" type="danger" icon={<IconDeleteStroked />} aria-label="删除" />
-    </Popconfirm>,
-    <OverrideModal key="override" onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
-      <Button theme="borderless" type="tertiary" icon={<IconWrench />} aria-label="高级" />
-    </OverrideModal>,
-  ]
-  const renderActions = (item: LiveStreamerEntity) => (
-    <ButtonGroup theme="borderless" className={styles.cardActions}>
-      {actionButtons(item)}
-    </ButtonGroup>
-  )
+  // 按角色只渲染有权限的按钮（只读观察者一个都没有）
+  const actionButtons = (item: LiveStreamerEntity) =>
+    [
+      canEdit && (
+        <TemplateModal key="edit" onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
+          <Button theme="borderless" type="primary" icon={<IconEdit2Stroked />} aria-label="编辑" />
+        </TemplateModal>
+      ),
+      canControl && <PauseButton key="pause" streamer={item} />,
+      canEdit && (
+        <Popconfirm key="delete" title="确定是否要删除？" content="此操作将不可逆" onConfirm={() => onConfirm(item.id)}>
+          <Button theme="borderless" type="danger" icon={<IconDeleteStroked />} aria-label="删除" />
+        </Popconfirm>
+      ),
+      canHooks && (
+        <OverrideModal key="override" onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
+          <Button theme="borderless" type="tertiary" icon={<IconWrench />} aria-label="高级" />
+        </OverrideModal>
+      ),
+    ].filter(Boolean)
+  const hasActions = canEdit || canControl || canHooks
+  const renderActions = (item: LiveStreamerEntity) =>
+    hasActions ? (
+      <ButtonGroup theme="borderless" className={styles.cardActions}>
+        {actionButtons(item)}
+      </ButtonGroup>
+    ) : null
   const renderRowActions = (item: LiveStreamerEntity) => (
     <div className={styles.rowActions}>{actionButtons(item)}</div>
   )
@@ -250,14 +268,18 @@ export default function StreamersPage() {
     <>
       <PageHeader
         title="直播管理"
-        description="管理需要录制的直播间,支持新增、编辑与删除"
+        description={
+          canEdit ? '管理需要录制的直播间,支持新增、编辑与删除' : '查看正在监控的直播间与录制状态'
+        }
         icon={<IconVideoListStroked size="large" />}
         actions={
-          <TemplateModal onOk={handleOk}>
-            <Button icon={<IconPlusCircle />} theme="solid">
-              新建
-            </Button>
-          </TemplateModal>
+          canEdit && (
+            <TemplateModal onOk={handleOk}>
+              <Button icon={<IconPlusCircle />} theme="solid">
+                新建
+              </Button>
+            </TemplateModal>
+          )
         }
       />
       <Content className={styles.content}>
@@ -330,15 +352,18 @@ export default function StreamersPage() {
             </div>
 
             {/* 批量操作条 */}
-            {selected.size > 0 && (
+            {canBatch && selected.size > 0 && (
               <div className={styles.batchbar}>
                 <span>
                   已选 <b>{selected.size}</b> 项
                 </span>
                 <span className={styles.batchSpacer} />
-                <Button size="small" onClick={batchPause}>
-                  批量暂停
-                </Button>
+                {canControl && (
+                  <Button size="small" onClick={batchPause}>
+                    批量暂停
+                  </Button>
+                )}
+                {canEdit && (
                 <Popconfirm
                   title={`确定删除选中的 ${selected.size} 个直播间？`}
                   content="此操作不可逆,删除结果将逐项反馈"
@@ -348,6 +373,7 @@ export default function StreamersPage() {
                     批量删除
                   </Button>
                 </Popconfirm>
+                )}
                 <Button size="small" theme="borderless" onClick={() => setSelected(new Set())}>
                   取消
                 </Button>
@@ -361,7 +387,9 @@ export default function StreamersPage() {
                   description={
                     streamers && streamers.length > 0
                       ? '调整搜索或筛选条件试试'
-                      : '点击右上角「新建」开始'
+                      : canEdit
+                        ? '点击右上角「新建」开始'
+                        : '管理员添加直播间后会显示在这里'
                   }
                 />
               </div>
@@ -381,21 +409,23 @@ export default function StreamersPage() {
                 <table className={styles.listTable}>
                   <thead>
                     <tr>
-                      <th style={{ width: 36 }}>
-                        <input
-                          type="checkbox"
-                          className={styles.chk}
-                          checked={filtered.length > 0 && filtered.every((s) => selected.has(s.id))}
-                          onChange={(e) => toggleAll(e.target.checked)}
-                          aria-label="全选"
-                        />
-                      </th>
+                      {canBatch && (
+                        <th style={{ width: 36 }}>
+                          <input
+                            type="checkbox"
+                            className={styles.chk}
+                            checked={filtered.length > 0 && filtered.every((s) => selected.has(s.id))}
+                            onChange={(e) => toggleAll(e.target.checked)}
+                            aria-label="全选"
+                          />
+                        </th>
+                      )}
                       <th>状态</th>
                       <th>主播</th>
                       <th>平台</th>
                       <th>码率</th>
                       <th>最近录制</th>
-                      <th style={{ textAlign: 'right' }}>操作</th>
+                      {hasActions && <th style={{ textAlign: 'right' }}>操作</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -410,17 +440,20 @@ export default function StreamersPage() {
                         <tr
                           key={item.id}
                           className={selected.has(item.id) ? styles.rowSel : ''}
-                          onClick={() => toggleSel(item.id)}
+                          onClick={canBatch ? () => toggleSel(item.id) : undefined}
+                          style={canBatch ? undefined : { cursor: 'default' }}
                         >
-                          <td onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              className={styles.chk}
-                              checked={selected.has(item.id)}
-                              onChange={() => toggleSel(item.id)}
-                              aria-label={`选择 ${item.remark}`}
-                            />
-                          </td>
+                          {canBatch && (
+                            <td onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                className={styles.chk}
+                                checked={selected.has(item.id)}
+                                onChange={() => toggleSel(item.id)}
+                                aria-label={`选择 ${item.remark}`}
+                              />
+                            </td>
+                          )}
                           <td>{streamerStatusTag(item.status)}</td>
                           <td>
                             <div className={styles.cellNameRow}>
@@ -457,7 +490,9 @@ export default function StreamersPage() {
                               {info?.date ? timeAgo(info.date) : '—'}
                             </Text>
                           </td>
-                          <td onClick={(e) => e.stopPropagation()}>{renderRowActions(item)}</td>
+                          {hasActions && (
+                            <td onClick={(e) => e.stopPropagation()}>{renderRowActions(item)}</td>
+                          )}
                         </tr>
                       )
                     })}

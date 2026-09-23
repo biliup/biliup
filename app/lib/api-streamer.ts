@@ -1,4 +1,6 @@
 // Fetcher implementation. // The extra argument will be passed via the `arg` property of the 2nd parameter.// In the example below, `arg` will be `'my_token'`
+import { Toast } from '@douyinfe/semi-ui';
+
 export const API_BASE = process.env.NEXT_PUBLIC_API_SERVER ?? '';
 export async function sendRequest<T>(url: string, { arg }: { arg: T }) {
 	const res = await fetch(API_BASE + url, {
@@ -49,6 +51,20 @@ async function handleResponse(res: Response) {
 		window.location.href = `/login?next=${returnTo}`;
 		// 抛错让 SWR 知道失败（别返回 json）
 		throw new Error('Unauthorized');
+	}
+
+	// 已登录但角色没有这项权限：留在当前页，提示一次即可（同 id 的 Toast 不会叠加）
+	if (res.status === 403) {
+		const text = await res.text().catch(() => '');
+		let message = text.trim();
+		try {
+			message = JSON.parse(text)?.message ?? message;
+		} catch {
+			// 纯文本错误信息，原样展示
+		}
+		message ||= '没有权限执行此操作';
+		Toast.warning({ id: 'forbidden', content: message });
+		throw new Error(message);
 	}
 
 	if (!res.ok) {

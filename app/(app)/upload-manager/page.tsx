@@ -27,6 +27,7 @@ import UserList from '../../ui/UserList'
 import useSWRMutation from 'swr/mutation'
 import { useBiliUsers } from '../../lib/use-streamers'
 import PageHeader from '../components/PageHeader'
+import { useMe } from '../../lib/use-me'
 import dc from '@/app/ui/data-card.module.scss'
 
 export default function UploadManager() {
@@ -39,15 +40,21 @@ export default function UploadManager() {
     fetcher
   )
   const { biliUsers } = useBiliUsers()
+  const { can } = useMe()
+  const canManageAccounts = can('account.manage')
+  const canEditTemplates = can('template.edit')
+  const canSubmit = can('upload.submit')
 
   const handleAddLinkClick = (event: React.MouseEvent) => {
     if (biliUsers.length === 0) {
       event.preventDefault()
-      change()
+      if (canManageAccounts) change()
       Notification.info({
-        title: '用户列表为空',
+        title: 'B 站账号列表为空',
         position: 'top',
-        content: '请先在右侧点击新增用户',
+        content: canManageAccounts
+          ? '请先在右侧点击新增账号'
+          : '请联系超级管理员先登记 B 站账号',
         duration: 3,
       })
     }
@@ -91,24 +98,28 @@ export default function UploadManager() {
 
   const actions = (
     <>
-      <Button
-        onClick={change}
-        type="tertiary"
-        icon={<IconUserListStroked />}
-        aria-label="用户管理"
-        title="用户管理"
-      />
-      <Link href="/upload-manager/add" prefetch={false} onClick={handleAddLinkClick}>
-        <Button icon={<IconPlusCircle />} theme="solid">
-          新建
-        </Button>
-      </Link>
+      {canManageAccounts && (
+        <Button
+          onClick={change}
+          type="tertiary"
+          icon={<IconUserListStroked />}
+          aria-label="B 站账号"
+          title="B 站账号"
+        />
+      )}
+      {canEditTemplates && (
+        <Link href="/upload-manager/add" prefetch={false} onClick={handleAddLinkClick}>
+          <Button icon={<IconPlusCircle />} theme="solid">
+            新建
+          </Button>
+        </Link>
+      )}
     </>
   )
 
   return (
     <>
-      <UserList visible={visible} onCancel={change} />
+      {canManageAccounts && <UserList visible={visible} onCancel={change} />}
       <Modal
         size="medium"
         title="文件选择"
@@ -132,8 +143,10 @@ export default function UploadManager() {
       <PageHeader
         icon={<IconCloudStroked size="large" />}
         title="投稿管理"
-        description="管理上传模板,选择录制文件一键投稿"
-        actions={actions}
+        description={
+          canEditTemplates ? '管理上传模板,选择录制文件一键投稿' : '查看已配置的上传模板'
+        }
+        actions={canEditTemplates || canManageAccounts ? actions : undefined}
       />
       <div className={dc.content}>
         <List
@@ -175,21 +188,39 @@ export default function UploadManager() {
                 >
                   {item.template_name}
                 </Text>
-                <ButtonGroup style={{ flexShrink: 0 }} theme="borderless">
-                  <Button icon={<IconSendStroked />} onClick={() => showDialog(item)} />
-                  <Button
-                    icon={<IconEdit2Stroked />}
-                    onClick={() => router.push(`/upload-manager/edit?id=${item.id}`)}
-                  />
-                  <Popconfirm
-                    title="确定是否要删除？"
-                    content="此操作将不可逆"
-                    margin={50}
-                    onConfirm={async () => await onConfirm(item.id)}
-                  >
-                    <Button theme="borderless" icon={<IconDeleteStroked />} />
-                  </Popconfirm>
-                </ButtonGroup>
+                {(canSubmit || canEditTemplates) && (
+                  <ButtonGroup style={{ flexShrink: 0 }} theme="borderless">
+                    {[
+                      canSubmit && (
+                        <Button
+                          key="send"
+                          icon={<IconSendStroked />}
+                          aria-label="投稿"
+                          onClick={() => showDialog(item)}
+                        />
+                      ),
+                      canEditTemplates && (
+                        <Button
+                          key="edit"
+                          icon={<IconEdit2Stroked />}
+                          aria-label="编辑"
+                          onClick={() => router.push(`/upload-manager/edit?id=${item.id}`)}
+                        />
+                      ),
+                      canEditTemplates && (
+                        <Popconfirm
+                          key="delete"
+                          title="确定是否要删除？"
+                          content="此操作将不可逆"
+                          margin={50}
+                          onConfirm={async () => await onConfirm(item.id)}
+                        >
+                          <Button theme="borderless" icon={<IconDeleteStroked />} aria-label="删除" />
+                        </Popconfirm>
+                      ),
+                    ].filter(Boolean)}
+                  </ButtonGroup>
+                )}
               </Card>
             </List.Item>
           )}

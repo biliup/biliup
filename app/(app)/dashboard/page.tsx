@@ -17,6 +17,7 @@ import { fetcher, put } from '@/app/lib/api-streamer'
 import useSWRMutation from 'swr/mutation'
 import { FormApi } from '@douyinfe/semi-ui/lib/es/form'
 import { useBiliUsers } from '../../lib/use-streamers'
+import { useMe } from '../../lib/use-me'
 import styles from '../../styles/dashboard.module.scss'
 import PageHeader from '../components/PageHeader'
 
@@ -72,6 +73,9 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
   // }, [entity]);
 
   const { biliUsers } = useBiliUsers()
+  const { can } = useMe()
+  // 非超管拿到的是脱敏后的配置（凭据、账号 Cookie 等为空），只读展示，不能保存
+  const editable = can('config.edit')
 
   // 平台设置：左列平台名是唯一的导航，右栏只显示选中平台的字段。列表来自插件注册表 PlatformPanels
   const [activePlatform, setActivePlatform] = useState(PlatformPanels[0].key)
@@ -127,9 +131,13 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
       <PageHeader
         icon={<IconStar size="large" />}
         title="空间配置"
-        description="全局下载 / 上传参数、各平台录制参数与开发者选项。修改后需点击右上角「保存」才会生效"
+        description={
+          editable
+            ? '全局下载 / 上传参数、各平台录制参数与开发者选项。修改后需点击右上角「保存」才会生效'
+            : '只读：当前角色可以查看配置，敏感字段已隐藏；修改需要超级管理员'
+        }
         actions={
-          <Button
+          editable && <Button
             onClick={() => {
               formRef.current?.submitForm()
             }}
@@ -145,6 +153,7 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
         <Form
           className={styles.form}
           initValues={entity}
+          disabled={!editable}
           onSubmit={async values => {
             try {
               const payload = { ...values }

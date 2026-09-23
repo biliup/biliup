@@ -1,4 +1,6 @@
+use crate::server::api::access::Caller;
 use crate::server::api::live_preview::direct_capability;
+use crate::server::api::redact;
 use crate::server::common::recording_policy::{self, Rejection};
 use crate::server::common::upload::{build_studio, submit_to_bilibili, upload};
 use crate::server::common::util::Recorder;
@@ -13,6 +15,7 @@ use crate::server::infrastructure::models::upload_streamer::{
     InsertUploadStreamer, UploadStreamer,
 };
 use crate::server::infrastructure::models::{Configuration, FileItem, StreamerInfo};
+use crate::server::infrastructure::permissions::Permission;
 use crate::server::infrastructure::repositories::{
     del_streamer, delete_bilibili_cookie, get_all_streamer, get_upload_config,
     register_bilibili_cookie,
@@ -52,13 +55,15 @@ fn rejection_status(streamer: &LiveStreamer, worker: Option<&Worker>) -> Option<
 }
 
 pub async fn get_streamers_endpoint(
+    caller: Caller,
     State(pool): State<ConnectionPool>,
     State(managers): State<Arc<DownloadManager>>,
 ) -> Result<Json<Vec<LiveStreamerResponse>>, Response> {
     let live_streamers = get_all_streamer(&pool).await.map_err(report_to_response)?;
     let mut results = Vec::new();
     let workers = managers.get_rooms().await;
-    for x in live_streamers {
+    let show_hooks = caller.can(Permission::StreamerHooks);
+    for mut x in live_streamers {
         let option = workers
             .clone()
             .into_iter()
@@ -95,6 +100,9 @@ pub async fn get_streamers_endpoint(
             None => (None, Default::default(), None),
         };
 
+        if !show_hooks {
+            strip_hooks(&mut x);
+        }
         results.push(LiveStreamerResponse {
             status,
             inner: x,
@@ -110,12 +118,29 @@ pub async fn get_streamers_endpoint(
     Ok(Json(results))
 }
 
+/// 钩子走 `sh -c`、`override` 能覆盖任意全局配置，两者合起来等于服务器 shell，只给有 `streamer.hooks` 的人看。
+fn strip_hooks(streamer: &mut LiveStreamer) {
+    streamer.override_cfg = None;
+    streamer.preprocessor = None;
+    streamer.segment_processor = None;
+    streamer.downloaded_processor = None;
+    streamer.postprocessor = None;
+}
+
 pub async fn post_streamers_endpoint(
+    caller: Caller,
     State(service_register): State<ServiceRegister>,
     State(managers): State<Arc<DownloadManager>>,
     State(pool): State<ConnectionPool>,
-    Json(payload): Json<InsertLiveStreamer>,
+    Json(mut payload): Json<InsertLiveStreamer>,
 ) -> Result<Json<LiveStreamer>, Response> {
+    if !caller.can(Permission::StreamerHooks) {
+        payload.override_cfg = None;
+        payload.preprocessor = None;
+        payload.segment_processor = None;
+        payload.downloaded_processor = None;
+        payload.postprocessor = None;
+    }
     let url = &payload.url.clone();
     // You can insert the model directly.
     let live_streamers = payload
@@ -139,11 +164,28 @@ pub async fn post_streamers_endpoint(
 }
 
 pub async fn put_streamers_endpoint(
+    caller: Caller,
     State(service_register): State<ServiceRegister>,
     State(managers): State<Arc<DownloadManager>>,
     State(pool): State<ConnectionPool>,
-    Json(payload): Json<LiveStreamer>,
+    Json(mut payload): Json<LiveStreamer>,
 ) -> Result<Json<LiveStreamer>, Response> {
+    if !caller.can(Permission::StreamerHooks) {
+        // 表单是整体覆盖保存；没有钩子权限的人看不到这几项，这里以库里原值为准，不看请求体。
+        let current = LiveStreamer::select()
+            .where_("id = ?")
+            .bind(payload.id)
+            .fetch_optional(&pool)
+            .await
+            .change_context(AppError::Unknown)
+            .map_err(report_to_response)?
+            .ok_or_else(|| (StatusCode::NOT_FOUND, "主播不存在").into_response())?;
+        payload.override_cfg = current.override_cfg;
+        payload.preprocessor = current.preprocessor;
+        payload.segment_processor = current.segment_processor;
+        payload.downloaded_processor = current.downloaded_processor;
+        payload.postprocessor = current.postprocessor;
+    }
     let streamer = payload
         .update_all_fields(&pool)
         .await
@@ -164,6 +206,10 @@ pub async fn put_streamers_endpoint(
         .map_err(report_to_response)?;
 
     info!(id = id, "successfully update live streamers");
+    let mut streamer = streamer;
+    if !caller.can(Permission::StreamerHooks) {
+        strip_hooks(&mut streamer);
+    }
     Ok(Json(streamer))
 }
 
@@ -215,9 +261,17 @@ pub async fn pause_streamers_endpoint(
 }
 
 pub async fn get_configuration(
+    caller: Caller,
     State(config): State<Arc<RwLock<Config>>>,
-) -> Result<Json<Config>, Response> {
-    Ok(Json(config.read().unwrap().clone()))
+) -> Result<Json<serde_json::Value>, Response> {
+    let config = config.read().unwrap().clone();
+    if caller.can(Permission::ConfigEdit) {
+        return serde_json::to_value(config)
+            .map(Json)
+            .change_context(AppError::Unknown)
+            .map_err(report_to_response);
+    }
+    Ok(Json(redact::config(&config)))
 }
 
 // #[axum_macros::debug_handler(state = ServiceRegister)]
@@ -368,11 +422,60 @@ pub async fn get_upload_streamers_endpoint(
     Ok(Json(uploader_streamers))
 }
 
+/// 非超管保存投稿模板时的两处限制：投稿账号只能从已登记的 B 站账号里选（新增账号归账号管理）；
+/// 封面路径界面上不提供编辑，而它会被原样读出来上传，所以只保留原值。
+async fn restrict_template_for_non_admin(
+    pool: &ConnectionPool,
+    upload_streamer: &mut InsertUploadStreamer,
+) -> Result<(), Response> {
+    let current = match upload_streamer.id {
+        Some(id) => UploadStreamer::select()
+            .where_("id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .change_context(AppError::Unknown)
+            .map_err(report_to_response)?,
+        None => None,
+    };
+    upload_streamer.cover_path = current
+        .as_ref()
+        .and_then(|template| template.cover_path.clone());
+    let Some(cookie) = upload_streamer
+        .user_cookie
+        .as_deref()
+        .filter(|c| !c.is_empty())
+    else {
+        return Ok(());
+    };
+    if current
+        .as_ref()
+        .is_some_and(|template| template.user_cookie.as_deref() == Some(cookie))
+    {
+        return Ok(());
+    }
+    let registered: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM configuration WHERE key = 'bilibili-cookies' AND value = ?)",
+    )
+    .bind(cookie)
+    .fetch_one(pool)
+    .await
+    .change_context(AppError::Unknown)
+    .map_err(report_to_response)?;
+    if registered == 0 {
+        return Err((StatusCode::FORBIDDEN, "只能选择已登记的 B 站账号").into_response());
+    }
+    Ok(())
+}
+
 pub async fn add_upload_streamer_endpoint(
-    // Extension(streamers_service): Extension<DynUploadStreamersRepository>,
+    caller: Caller,
     State(pool): State<ConnectionPool>,
-    Json(upload_streamer): Json<InsertUploadStreamer>,
+    Json(mut upload_streamer): Json<InsertUploadStreamer>,
 ) -> Result<Json<serde_json::Value>, Response> {
+    if !caller.can(Permission::AccountManage) {
+        restrict_template_for_non_admin(&pool, &mut upload_streamer).await?;
+    }
     if upload_streamer.id.is_none() {
         Ok(Json(
             serde_json::to_value(
@@ -616,21 +719,33 @@ pub async fn get_videos() -> Result<Json<Vec<serde_json::Value>>, Response> {
 
 // #[axum::debug_handler(state = ServiceRegister)]
 pub async fn get_status(
+    caller: Caller,
     State(_service_register): State<ServiceRegister>,
     State(managers): State<Arc<DownloadManager>>,
     State(config): State<Arc<RwLock<Config>>>,
 ) -> Result<Json<serde_json::Value>, Response> {
     let workers = managers.get_rooms().await;
 
+    let full = caller.can(Permission::ConfigEdit);
     let mut sw = Vec::new();
     for worker in &workers {
-        sw.push(serde_json::json!({
+        let mut room = serde_json::json!({
             "downloader_status": format!("{:?}", worker.downloader_status.read()),
             "uploader_status": format!("{:?}", worker.uploader_status.read().unwrap()),
             "live_streamer": worker.live_streamer,
             "upload_streamer": worker.upload_streamer,
-        }));
+        });
+        if !full {
+            redact::streamer_hooks(&mut room["live_streamer"]);
+            redact::upload_template(&mut room["upload_streamer"]);
+        }
+        sw.push(room);
     }
+    let config = if full {
+        serde_json::to_value(&*config.read().unwrap()).unwrap_or_default()
+    } else {
+        redact::config(&*config.read().unwrap())
+    };
 
     Ok(Json(serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
@@ -808,9 +923,10 @@ mod recording_policy_status_tests {
             .unwrap();
 
         let managers = Arc::new(DownloadManager::new(1, 0, pool.clone()));
-        let Json(responses) = get_streamers_endpoint(State(pool), State(managers))
-            .await
-            .expect("接口应返回成功");
+        let Json(responses) =
+            get_streamers_endpoint(Caller::unrestricted(), State(pool), State(managers))
+                .await
+                .expect("接口应返回成功");
 
         let status_of = |url: &str| {
             responses
@@ -842,9 +958,10 @@ mod recording_policy_status_tests {
             .unwrap();
 
         let managers = Arc::new(DownloadManager::new(1, 0, pool.clone()));
-        let Json(responses) = get_streamers_endpoint(State(pool), State(managers))
-            .await
-            .unwrap();
+        let Json(responses) =
+            get_streamers_endpoint(Caller::unrestricted(), State(pool), State(managers))
+                .await
+                .unwrap();
 
         // 前端 app/(app)/streamers/page.tsx 就是对这个字符串做 switch
         let json: Value = serde_json::to_value(&responses[0]).unwrap();

@@ -179,6 +179,11 @@ pub enum Commands {
         #[arg(short, long, value_name = "FILE")]
         config: Option<PathBuf>,
     },
+    /// 管理 Web 界面的登录用户（在 biliup 服务的工作目录下执行，直接读写 data/data.sqlite3）
+    User {
+        #[command(subcommand)]
+        action: UserAction,
+    },
     /// 列出所有已上传的视频
     List {
         /// 只包含进行中的视频
@@ -200,6 +205,17 @@ pub enum Commands {
         /// 最大获取页数
         #[arg(short, long)]
         max_pages: Option<u32>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum UserAction {
+    /// 列出所有 Web 用户
+    List,
+    /// 重置某个 Web 用户的密码并让其所有会话失效；新密码从终端提示输入，或从标准输入读一行
+    ResetPassword {
+        /// 用户名（大小写不敏感）
+        username: String,
     },
 }
 
@@ -239,6 +255,24 @@ mod tests {
                 secure_session_cookie: false,
                 ..
             } if bind == "127.0.0.1"
+        ));
+    }
+
+    #[test]
+    fn user_subcommands_parse() {
+        let cli = Cli::try_parse_from(["biliup", "user", "reset-password", "biliup"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::User {
+                action: super::UserAction::ResetPassword { ref username }
+            } if username == "biliup"
+        ));
+        let cli = Cli::try_parse_from(["biliup", "user", "list"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::User {
+                action: super::UserAction::List
+            }
         ));
     }
 

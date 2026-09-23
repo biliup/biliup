@@ -342,3 +342,69 @@
     animation: none;
   }
 }
+
+/* ===== 当前用户(仅开启 --auth 时显示) ===== */
+.userBtn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--semi-color-text-0);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease;
+}
+
+.userBtn:hover {
+  background: var(--semi-color-fill-0);
+}
+
+.userBtn:focus-visible {
+  outline: 2px solid var(--semi-color-primary);
+  outline-offset: 2px;
+}
+
+.userBtnCollapsed {
+  justify-content: center;
+  padding: 4px 0;
+}
+
+.userAvatar {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--semi-color-primary);
+  background: rgba(var(--semi-primary-5), 0.14);
+}
+
+.userText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.userName {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.userRole {
+  font-size: 11px;
+  color: var(--semi-color-text-2);
+  white-space: nowrap;
+}
