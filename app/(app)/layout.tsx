@@ -8,7 +8,7 @@ import { usePathname } from 'next/navigation'
 import Image from 'next/image'
 import useSWR from 'swr'
 import { API_BASE, fetcher } from '../lib/api-streamer'
-import { Dropdown, Empty } from '@douyinfe/semi-ui'
+import { Dropdown, Empty, Spin } from '@douyinfe/semi-ui'
 import { ROLE_LABELS, useMe } from '../lib/use-me'
 import type { Permission } from '../lib/use-me'
 import ChangePasswordModal from '../ui/ChangePasswordModal'
@@ -131,6 +131,9 @@ const EXTRA_PAGE_PERMS: { prefix: string; perm: Permission }[] = [
   { prefix: '/upload-manager/edit', perm: 'template.edit' },
 ]
 
+/** 每个角色都有的权限点：这些页面不必等 /v1/me 返回就能先渲染 */
+const UNIVERSAL_PERMS: Permission[] = ['streamer.view', 'preview.view', 'config.view', 'log.view', 'file.view']
+
 const matches = (pathname: string, href: string) =>
   href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(href + '/')
 
@@ -145,7 +148,13 @@ function pagePermission(pathname: string): Permission | undefined {
   return undefined
 }
 
-function NoAccess() {
+function NoAccess({
+  title = '没有权限访问此页面',
+  description = '当前账号的角色不包含这项功能，如需使用请联系超级管理员。',
+}: {
+  title?: string
+  description?: string
+}) {
   return (
     <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <Empty
@@ -155,8 +164,8 @@ function NoAccess() {
             <path d="M8 11V7a4 4 0 118 0v4M12 15v2" />
           </svg>
         }
-        title="没有权限访问此页面"
-        description="当前账号的角色不包含这项功能，如需使用请联系超级管理员。"
+        title={title}
+        description={description}
       />
     </div>
   )
@@ -202,7 +211,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   // 权限未加载完时整组菜单先不过滤（全部都是公开的静态页面，数据接口本身有后端拦截），
   // 避免每次进页面侧栏闪一下
-  const { me, can } = useMe()
+  const { me, error: meError, can: canRaw } = useMe()
+  // 未开启 --auth 时没有登录用户，也就没有用户可管
+  const can = (perm: Permission) => (perm === 'user.manage' ? !!me?.auth_enabled && canRaw(perm) : canRaw(perm))
   const visibleGroups = me
     ? NAV_GROUPS.map((group) => ({ ...group, items: group.items.filter((item) => can(item.perm)) })).filter(
         (group) => group.items.length > 0,
@@ -210,6 +221,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     : NAV_GROUPS.map((group) => ({ ...group, items: group.items.filter((item) => item.perm !== 'user.manage') }))
   const requiredPerm = pagePermission(pathname)
   const denied = !!me && !!requiredPerm && !can(requiredPerm)
+  // 需要特定权限的页面等权限加载完再渲染，免得没有权限的角色先发出一串注定 403 的请求
+  const pending = !me && !meError && !!requiredPerm && !UNIVERSAL_PERMS.includes(requiredPerm)
 
   const [passwordOpen, setPasswordOpen] = useState(false)
   const logout = async () => {
@@ -366,7 +379,24 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      <main className={styles.main}>{denied ? <NoAccess /> : children}</main>
+      <main className={styles.main}>
+        {pending ? (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Spin size="large" />
+          </div>
+        ) : denied ? (
+          requiredPerm === 'user.manage' && me && !me.auth_enabled ? (
+            <NoAccess
+              title="未开启登录认证"
+              description="当前以零鉴权模式运行，没有登录用户可管理。使用 biliup server --auth 启动后即可在这里添加用户、分配角色。"
+            />
+          ) : (
+            <NoAccess />
+          )
+        ) : (
+          children
+        )}
+      </main>
       {showUser && <ChangePasswordModal visible={passwordOpen} onClose={() => setPasswordOpen(false)} />}
     </div>
   )

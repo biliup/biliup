@@ -55,8 +55,14 @@ async function handleResponse(res: Response) {
 
 	// 已登录但角色没有这项权限：留在当前页，提示一次即可（同 id 的 Toast 不会叠加）
 	if (res.status === 403) {
-		const body = await res.json().catch(() => null);
-		const message = body?.message || '没有权限执行此操作';
+		const text = await res.text().catch(() => '');
+		let message = text.trim();
+		try {
+			message = JSON.parse(text)?.message ?? message;
+		} catch {
+			// 纯文本错误信息，原样展示
+		}
+		message ||= '没有权限执行此操作';
 		Toast.warning({ id: 'forbidden', content: message });
 		throw new Error(message);
 	}
