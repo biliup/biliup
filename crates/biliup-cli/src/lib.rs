@@ -3,6 +3,7 @@ pub mod downloader;
 pub mod server;
 pub mod upload_lock;
 pub mod uploader;
+pub mod web_user_cli;
 
 // use crate::server::api::router::ApplicationController;
 use crate::server::app::ApplicationController;
@@ -401,7 +402,6 @@ mod server_exposure_tests {
         );
     }
 }
-
 
 #[cfg(test)]
 mod tid_v2_config_tests {

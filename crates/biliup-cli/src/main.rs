@@ -167,6 +167,7 @@ async fn main() -> AppResult<()> {
             )
             .await?
         }
+        Commands::User { action } => biliup_cli::web_user_cli::run(action).await?,
         Commands::List {
             is_pubing,
             pubed,
