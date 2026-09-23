@@ -52,6 +52,19 @@ export function useBoolPref(key: string, fallback: boolean): [boolean, (v: boole
   return [value, (v: boolean) => writePref(key, v ? '1' : '0')]
 }
 
+/** 只接受给定候选值的字符串偏好（档位一类的枚举）。 */
+export function useEnumPref<T extends string>(key: string, options: readonly T[], fallback: T): [T, (v: T) => void] {
+  const value = useSyncExternalStore(
+    subscribe,
+    () => {
+      const raw = readPref(key)
+      return options.includes(raw as T) ? (raw as T) : fallback
+    },
+    () => fallback
+  )
+  return [value, (v: T) => writePref(key, v)]
+}
+
 /** 只接受给定候选值的数字偏好。 */
 export function useChoicePref(key: string, options: number[], fallback: number): [number, (v: number) => void] {
   const value = useSyncExternalStore(

@@ -3,6 +3,7 @@ import Artplayer from 'artplayer'
 import artplayerPluginDanmuku from 'artplayer-plugin-danmuku'
 import mpegts from 'mpegts.js'
 import type { DanmakuFeed, DanmakuFrame } from '@/app/lib/danmaku-feed'
+import { attachLiveBufferControl, type LiveBufferPolicy, RELAY_PROFILES, type StallInfo } from '@/app/lib/live-buffer'
 
 type VideoPlayer = Artplayer | null
 
@@ -28,12 +29,21 @@ interface PlayerConfig {
   codecs?: string | null
   /** 直播：隐藏进度条、开启追帧，播放器随分块到达持续解码 */
   isLive?: boolean
+  /**
+   * 直播的取流方式：`relay`（经 biliup 中转，缓冲深度由 `buffer` 决定，见 `live-buffer.ts`）
+   * 或 `direct`（浏览器直连 CDN，沿用 mpegts.js 的低延迟追帧）。不传按中转处理。
+   */
+  transport?: LiveTransport
+  /** 中转流的缓冲策略；不传用「流畅」档。播放中途换档不重建播放器，下一次 tick 生效 */
+  buffer?: LiveBufferPolicy
   muted?: boolean
   autoplay?: boolean
   /** 直播流结束 / 被服务端断开（如客户端掉队、录制换直链）时回调，调用方决定是否重连 */
   onEnded?: () => void
   /** mpegts.js 或探测阶段报错（网络 / 解码），附一句可展示的说明 */
   onError?: (message: string) => void
+  /** 中转流稳态期间缓冲耗尽一次（waiting → playing），调用方据此决定要不要换更深的档 */
+  onStall?: (info: StallInfo) => void
   /**
    * 实时弹幕：`feed` 是页面持有的共享连接（见 `DanmakuFeed`），`id` 是本路直播间；
    * `feed` 为 null 时弹幕层隐藏。传了这个 prop 就装 artplayer-plugin-danmuku，开关切换只
@@ -196,17 +206,25 @@ export function canPlayFmp4(codecs: string | null | undefined): boolean {
   }
 }
 
-/** 直播追帧：缓冲末尾落后超过这么多秒就跳到末尾附近 */
-const FMP4_MAX_LATENCY_S = 3
-const FMP4_TARGET_REMAIN_S = 0.5
+/** 直播预览的取流方式：决定播放器维持多深的缓冲 */
+export type LiveTransport = 'relay' | 'direct'
+
+/**
+ * 直连 CDN 的流沿用 mpegts.js 自己的追帧参数：落后超过 3 s 就跳到末尾前 0.5 s
+ * （CDN 自带 GOP 缓存，ForgQi 实测异地直连不卡）。中转流的缓冲策略在 `live-buffer.ts`。
+ */
+const DIRECT_MAX_LATENCY_S = 3
+const DIRECT_TARGET_REMAIN_S = 0.5
 /** 早于当前播放位置这么多秒的缓冲定期清掉，长时间观看不涨内存 */
 const FMP4_KEEP_BACKWARD_S = 30
 
 interface Fmp4Options {
   codecs: string | null | undefined
   autoplay: boolean
+  buffer: () => LiveBufferPolicy
   onEnded?: () => void
   onError?: (message: string) => void
+  onStall?: (info: StallInfo) => void
 }
 
 interface HlsOptions {
@@ -291,13 +309,13 @@ async function playWithHls(video: HTMLVideoElement, url: string, art: Artplayer,
  * Artplayer customType：fMP4 直接交给 MediaSource。
  * 服务端先发 init segment（ftyp + moov）再按 moof + mdat 分片广播，正是 MSE 的原生输入，不需要转封装：
  * fetch 的 ReadableStream 按到达顺序进 appendBuffer 队列（`updateend` 串行），
- * 首个缓冲区出现时把播放位置对齐到缓冲起点，之后落后超过阈值就追到末尾，并定期 remove 旧缓冲。
+ * 播放位置的对齐与追帧交给 `attachLiveBufferControl`（与 FLV 中转流同一套），并定期 remove 旧缓冲。
  */
 function playWithMediaSource(
   video: HTMLVideoElement,
   url: string,
   art: Artplayer,
-  { codecs, autoplay, onEnded, onError }: Fmp4Options
+  { codecs, autoplay, buffer, onEnded, onError, onStall }: Fmp4Options
 ) {
   // 同 playWithMpegts：Artplayer 出错后的自动重连会在实例销毁后仍重设 url，忽略
   if (art.isDestroy) return
@@ -321,8 +339,7 @@ function playWithMediaSource(
   let sourceBuffer: SourceBuffer | null = null
   let streamEnded = false
   let disposed = false
-  let aligned = false
-  let chaser: ReturnType<typeof setInterval> | null = null
+  let detachBufferControl: (() => void) | null = null
 
   const fail = (message: string) => {
     if (disposed) return
@@ -359,29 +376,13 @@ function playWithMediaSource(
     const cut = video.currentTime - FMP4_KEEP_BACKWARD_S
     if (cut - start > 5) sourceBuffer.remove(start, cut)
   }
-  const chase = () => {
-    if (disposed || !video.buffered.length) return
-    const end = video.buffered.end(video.buffered.length - 1)
-    if (!aligned) {
-      // 直播分片的时间戳从一个很大的值起步，播放位置得先跳进缓冲区
-      aligned = true
-      video.currentTime = Math.max(video.buffered.start(0), end - FMP4_TARGET_REMAIN_S)
-      if (autoplay) video.play().catch(() => {
-        video.muted = true
-        video.play().catch(() => {})
-      })
-      return
-    }
-    if (end - video.currentTime > FMP4_MAX_LATENCY_S && !video.paused) {
-      video.currentTime = end - FMP4_TARGET_REMAIN_S
-    }
-  }
 
   const dispose = () => {
     if (disposed) return
     disposed = true
     controller.abort()
-    if (chaser) clearInterval(chaser)
+    detachBufferControl?.()
+    detachBufferControl = null
     try {
       if (mediaSource.readyState === 'open') mediaSource.endOfStream()
     } catch {
@@ -406,7 +407,16 @@ function playWithMediaSource(
       pump()
     })
     sourceBuffer.addEventListener('error', () => fail('MSE 解码失败'))
-    chaser = setInterval(chase, 500)
+    // fMP4 只在中转路径上出现（直连的 HLS 走 hls.js），缓冲策略按中转流来；
+    // 直播分片的时间戳从一个很大的值起步，控制器的首次对齐会把播放位置跳进缓冲区，之后才真正播起来
+    detachBufferControl = attachLiveBufferControl(video, buffer, { onStall })
+    if (autoplay) {
+      video.play().catch(() => {
+        if (disposed) return
+        video.muted = true
+        video.play().catch(() => {})
+      })
+    }
 
     fetch(url, { signal: controller.signal, cache: 'no-store' })
       .then(async (res) => {
@@ -463,9 +473,36 @@ function describeMpegtsError(errorType: string, detail: string, info?: { code?: 
 interface MpegtsOptions {
   type: MpegtsType
   isLive: boolean
+  transport: LiveTransport
+  buffer: () => LiveBufferPolicy
   autoplay: boolean
   onEnded?: () => void
   onError?: (message: string) => void
+  onStall?: (info: StallInfo) => void
+}
+
+/**
+ * mpegts.js 的直播缓冲参数。
+ * 中转：mpegts.js 自己的追帧 / liveSync 关掉，缓冲深度由 `attachLiveBufferControl` 按档位维持
+ * （跟 fMP4 中转流同一套，档位能在播放中途改）；直连：沿用原来的追帧参数。
+ */
+export function mpegtsLiveConfig(transport: LiveTransport): mpegts.Config {
+  const common = {
+    enableStashBuffer: false,
+    customLoader: AbortableFetchLoader,
+    autoCleanupSourceBuffer: true,
+    autoCleanupMaxBackwardDuration: 30,
+    autoCleanupMinBackwardDuration: 10,
+  }
+  if (transport === 'relay') {
+    return { ...common, liveBufferLatencyChasing: false, liveSync: false }
+  }
+  return {
+    ...common,
+    liveBufferLatencyChasing: true,
+    liveBufferLatencyMaxLatency: DIRECT_MAX_LATENCY_S,
+    liveBufferLatencyMinRemain: DIRECT_TARGET_REMAIN_S,
+  }
 }
 
 /** Artplayer customType：用 mpegts.js 解封装 FLV / MPEG-TS 后喂给 MSE。 */
@@ -473,7 +510,7 @@ function playWithMpegts(
   video: HTMLVideoElement,
   url: string,
   art: Artplayer,
-  { type, isLive, autoplay, onEnded, onError }: MpegtsOptions
+  { type, isLive, transport, buffer, autoplay, onEnded, onError, onStall }: MpegtsOptions
 ) {
   if (!mpegts.isSupported()) {
     art.notice.show = `当前浏览器不支持 MSE，无法播放 ${type}`
@@ -484,32 +521,28 @@ function playWithMpegts(
   // 而且不看自己是否已被 destroy——那会在弹层关闭后凭空再拉一路流、占着服务端许可。
   // 重连由 LivePreviewPlayer 自己管，这里对已销毁的实例直接不理。
   if (art.isDestroy) return
-  const artWithMpegts = art as Artplayer & { mpegts?: mpegts.Player | null }
+  const artWithMpegts = art as Artplayer & { mpegts?: mpegts.Player | null; detachBuffer?: (() => void) | null }
   if (artWithMpegts.mpegts) {
     destroyMpegts(artWithMpegts.mpegts)
     artWithMpegts.mpegts = null
   }
+  artWithMpegts.detachBuffer?.()
+  artWithMpegts.detachBuffer = null
 
   const player = mpegts.createPlayer(
     // 直连 CDN 时是跨域请求：cors 模式、不带 cookie（这些 CDN 的 ACAO 是 *，带凭据反而会被拒）；
     // 同源的 /live 走 same-origin 凭据，登录 cookie 照常带上（见 AbortableFetchLoader）
     { type, url, isLive, cors: true, withCredentials: false },
-    isLive
-      ? {
-          // 直播：不攒缓冲、落后就追，源缓冲区用完即清理，长时间观看不涨内存
-          enableStashBuffer: false,
-          customLoader: AbortableFetchLoader,
-          liveBufferLatencyChasing: true,
-          liveBufferLatencyMaxLatency: 3,
-          liveBufferLatencyMinRemain: 0.5,
-          autoCleanupSourceBuffer: true,
-          autoCleanupMaxBackwardDuration: 30,
-          autoCleanupMinBackwardDuration: 10,
-        }
-      : {}
+    // 直播：不攒 IO 缓冲、源缓冲区用完即清理（长时间观看不涨内存），缓冲深度按取流方式定
+    isLive ? mpegtsLiveConfig(transport) : {}
   )
   artWithMpegts.mpegts = player
+  if (isLive && transport === 'relay') {
+    artWithMpegts.detachBuffer = attachLiveBufferControl(video, buffer, { onStall })
+  }
   art.on('destroy', () => {
+    artWithMpegts.detachBuffer?.()
+    artWithMpegts.detachBuffer = null
     if (artWithMpegts.mpegts) {
       destroyMpegts(artWithMpegts.mpegts)
       artWithMpegts.mpegts = null
@@ -548,10 +581,13 @@ const Players: React.FC<PlayerConfig> = ({
   type,
   codecs,
   isLive = false,
+  transport = 'relay',
+  buffer,
   muted = false,
   autoplay = isLive,
   onEnded,
   onError,
+  onStall,
   danmaku,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -560,10 +596,12 @@ const Players: React.FC<PlayerConfig> = ({
   const danmakuId = danmaku?.id
   const danmakuFeed = danmaku?.feed ?? null
   const danmakuFontSize = danmaku?.fontSize ?? 22
-  // 回调放进 ref：父组件每次渲染传入的新函数不应重建播放器
-  const callbacksRef = useRef({ onEnded, onError })
+  // 回调与缓冲策略放进 ref：父组件每次渲染传入的新函数 / 中途换档都不应重建播放器
+  const callbacksRef = useRef({ onEnded, onError, onStall })
+  const bufferRef = useRef<LiveBufferPolicy>(buffer ?? RELAY_PROFILES.smooth)
   useEffect(() => {
-    callbacksRef.current = { onEnded, onError }
+    callbacksRef.current = { onEnded, onError, onStall }
+    bufferRef.current = buffer ?? RELAY_PROFILES.smooth
   })
 
   useEffect(() => {
@@ -605,6 +643,8 @@ const Players: React.FC<PlayerConfig> = ({
       }
       const onEndedCb = () => callbacksRef.current.onEnded?.()
       const onErrorCb = (message: string) => callbacksRef.current.onError?.(message)
+      const onStallCb = (info: StallInfo) => callbacksRef.current.onStall?.(info)
+      const bufferPolicy = () => bufferRef.current
       try {
         if (mediaType === 'hls') {
           const options: HlsOptions = { autoplay, onEnded: onEndedCb, onError: onErrorCb }
@@ -620,7 +660,14 @@ const Players: React.FC<PlayerConfig> = ({
             },
           })
         } else if (mediaType === 'fmp4') {
-          const options: Fmp4Options = { codecs, autoplay, onEnded: onEndedCb, onError: onErrorCb }
+          const options: Fmp4Options = {
+            codecs,
+            autoplay,
+            buffer: bufferPolicy,
+            onEnded: onEndedCb,
+            onError: onErrorCb,
+            onStall: onStallCb,
+          }
           playerRef.current = new Artplayer({
             ...base,
             type: 'fmp4',
@@ -633,9 +680,12 @@ const Players: React.FC<PlayerConfig> = ({
           const options: MpegtsOptions = {
             type: mediaType,
             isLive,
+            transport,
+            buffer: bufferPolicy,
             autoplay,
             onEnded: onEndedCb,
             onError: onErrorCb,
+            onStall: onStallCb,
           }
           playerRef.current = new Artplayer({
             ...base,
@@ -671,7 +721,7 @@ const Players: React.FC<PlayerConfig> = ({
         playerRef.current = null
       }
     }
-  }, [url, height, width, type, codecs, isLive, muted, autoplay, danmakuCapable, danmakuFontSize])
+  }, [url, height, width, type, codecs, isLive, transport, muted, autoplay, danmakuCapable, danmakuFontSize])
 
   // 弹幕开关：有 feed → 订阅本路、显示弹幕层；没有 → 退订、隐藏。不重建播放器。
   // 播放器可能还在探测 Content-Type（异步创建），所以轮询等到实例出现再挂。

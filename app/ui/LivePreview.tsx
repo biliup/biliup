@@ -1,7 +1,7 @@
 'use client'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
-import { Button, Modal, Switch, Tag, Toast, Tooltip, Typography } from '@douyinfe/semi-ui'
+import { Button, Modal, Radio, RadioGroup, Switch, Tag, Toast, Tooltip, Typography } from '@douyinfe/semi-ui'
 import { IconChevronDown, IconPlay, IconRefresh } from '@douyinfe/semi-icons'
 import type { ButtonProps } from '@douyinfe/semi-ui/lib/es/button'
 import { LiveStreamerEntity } from '@/app/lib/api-streamer'
@@ -17,8 +17,17 @@ import {
   previewFormatLabel,
   usePreviewTransport,
 } from '@/app/lib/use-dashboard'
-import { useBoolPref } from '@/app/lib/use-local-pref'
+import { useBoolPref, useEnumPref } from '@/app/lib/use-local-pref'
 import { type DanmakuFeed, useDanmakuFeed } from '@/app/lib/danmaku-feed'
+import {
+  type LatencyProfile,
+  type LiveBufferPolicy,
+  RELAY_PROFILES,
+  RELAY_PROFILES_SEGMENTED,
+  relayPolicy,
+  snapshotMsFor,
+  type StallInfo,
+} from '@/app/lib/live-buffer'
 import { LiveRateChart, LiveRateSummary, MODAL_RATE_WINDOW_MS } from './LiveRateChart'
 import styles from './live-preview.module.scss'
 
@@ -29,6 +38,17 @@ const MAX_AUTO_RECONNECT = 3
 const RECONNECT_DELAY_MS = 2000
 /** 弹层弹幕开关记在本地，默认开；监视器另有自己的开关（默认关） */
 const MODAL_DANMAKU_KEY = 'biliup.preview.danmaku'
+/** 中转延迟档位（弹层与监视器共用），默认低延迟；卡顿后本次播放自动升到流畅 */
+const LATENCY_PROFILE_KEY = 'biliup.preview.latency'
+const LATENCY_PROFILES: readonly LatencyProfile[] = ['low', 'smooth']
+/** 低延迟档下，稳态里一次卡住这么久、或 60 s 内卡两次，就升到流畅档重连 */
+const ESCALATE_STALL_S = 1
+const ESCALATE_WINDOW_MS = 60_000
+
+/** 中转延迟档位偏好 */
+export function useLatencyProfile(): [LatencyProfile, (v: LatencyProfile) => void] {
+  return useEnumPref(LATENCY_PROFILE_KEY, LATENCY_PROFILES, 'low')
+}
 /** 弹层底部的码率折线默认展开，折叠状态记在本地 */
 const MODAL_RATE_CHART_KEY = 'biliup.preview.rateChart'
 
@@ -118,9 +138,32 @@ export function LivePreviewPlayer({
     return fetched?.key === sourceKey ? fetched.source : null
   }, [override, fetched, sourceKey, wantDirect, transport, directReason])
 
+  // 中转延迟档位：用户偏好起步；低延迟档在稳态里卡了，本次播放（同房间、同偏好）升到流畅档重连，
+  // 用更深的快照起播。升档记 key，房间或偏好一变自然作废，不需要 effect 里重置
   const relayFormat = streamer.preview?.format ?? undefined
+  const [profilePref] = useLatencyProfile()
+  const levelKey = `${streamer.id}:${profilePref}`
+  const [escalated, setEscalated] = useState<string | null>(null)
+  const level: LatencyProfile = escalated === levelKey ? 'smooth' : profilePref
+  const policy: LiveBufferPolicy = relayPolicy(level, relayFormat)
+  const stallsRef = useRef<number[]>([])
+  const handleStall = useCallback(
+    (info: StallInfo) => {
+      if (level !== 'low') return
+      const now = Date.now()
+      stallsRef.current = [...stallsRef.current.filter((t) => now - t < ESCALATE_WINDOW_MS), now]
+      if (info.seconds < ESCALATE_STALL_S && stallsRef.current.length < 2) return
+      stallsRef.current = []
+      setEscalated(levelKey)
+      setPhase('connecting')
+      setMessage(null)
+      setNonce((n) => n + 1)
+    },
+    [level, levelKey]
+  )
+
   const codecs = streamer.preview?.codecs ?? null
-  const relayUrl = livePreviewUrl(streamer.id)
+  const relayUrl = livePreviewUrl(streamer.id, snapshotMsFor(policy))
   const url = source?.kind === 'direct' ? source.url : relayUrl
   const format = source?.kind === 'direct' ? (source.format ?? 'flv') : relayFormat
   // 平台有弹幕客户端才装弹幕层；开关只控制订阅与显示
@@ -245,9 +288,16 @@ export function LivePreviewPlayer({
       ? { text: '直连 CDN', tone: 'direct' as const }
       : source?.kind === 'relay' && source.fallbackReason
         ? { text: `已回落中转：${source.fallbackReason}`, tone: 'fallback' as const }
-        : null
+        : source?.kind === 'relay' && escalated === levelKey
+          ? { text: '卡顿，已切到流畅档', tone: 'fallback' as const }
+          : null
   return (
-    <div className={styles.player} data-phase={phase} data-source={source?.kind ?? 'pending'}>
+    <div
+      className={styles.player}
+      data-phase={phase}
+      data-source={source?.kind ?? 'pending'}
+      data-latency={source?.kind === 'relay' ? level : undefined}
+    >
       {showPlayer ? (
         <Players
           key={`${source?.kind}-${url}-${nonce}`}
@@ -255,10 +305,13 @@ export function LivePreviewPlayer({
           type={format}
           codecs={codecs}
           isLive
+          transport={source?.kind ?? 'relay'}
+          buffer={policy}
           muted={muted}
           autoplay
           onEnded={handleEnded}
           onError={handleError}
+          onStall={handleStall}
           danmaku={danmakuLayer}
         />
       ) : null}
@@ -267,7 +320,9 @@ export function LivePreviewPlayer({
           content={
             badge.tone === 'direct'
               ? '浏览器用另取的直链直接向 CDN 拉流，不经 biliup 中转、不影响录制（全局配置 preview_transport = direct）'
-              : badge.text
+              : escalated === levelKey && source?.kind === 'relay' && !source.fallbackReason
+                ? `低延迟档缓冲耗尽过，本次播放改用约 ${RELAY_PROFILES.smooth.target} s 缓冲；重新打开恢复低延迟`
+                : badge.text
           }
         >
           <span className={styles.badge} data-tone={badge.tone} data-compact={compact || undefined}>
@@ -335,6 +390,7 @@ export function LivePreviewModal({
   const danmakuFeed = useDanmakuFeed([streamer.id], danmakuOn)
   const [chartOpen, setChartOpen] = useBoolPref(MODAL_RATE_CHART_KEY, true)
   const transport = usePreviewTransport()
+  const [latency, setLatency] = useLatencyProfile()
   const notifiedRef = useRef(false)
   useEffect(() => {
     if (!visible) notifiedRef.current = false
@@ -393,6 +449,24 @@ export function LivePreviewModal({
               />
             </span>
           </Tooltip>
+          {transport === 'relay' ? (
+            <Tooltip
+              content={`中转缓冲深度，也就是画面延迟。低延迟：FLV 约 ${RELAY_PROFILES.low.target} s、HLS 分片流（fMP4 / TS）约 ${RELAY_PROFILES_SEGMENTED.low.target} s，链路抖动大时可能偶发缓冲，卡了会自动切到流畅；流畅：约 ${RELAY_PROFILES.smooth.target} s。直连 CDN 时不适用`}
+            >
+              <span className={styles.danmakuSwitch}>
+                <RadioGroup
+                  type="button"
+                  buttonSize="small"
+                  value={latency}
+                  onChange={(e) => setLatency(e.target.value as LatencyProfile)}
+                  aria-label="中转延迟"
+                >
+                  <Radio value="low">低延迟</Radio>
+                  <Radio value="smooth">流畅</Radio>
+                </RadioGroup>
+              </span>
+            </Tooltip>
+          ) : null}
         </div>
       }
     >

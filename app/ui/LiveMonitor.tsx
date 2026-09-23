@@ -13,10 +13,12 @@ import {
   previewFormatLabel,
   SLOW_REFRESH_MS,
   STREAMERS_REFRESH_MS,
+  usePreviewTransport,
 } from '@/app/lib/use-dashboard'
 import { useBoolPref, useChoicePref } from '@/app/lib/use-local-pref'
 import { useDanmakuFeed } from '@/app/lib/danmaku-feed'
-import { LivePreviewPlayer } from './LivePreview'
+import { LivePreviewPlayer, useLatencyProfile } from './LivePreview'
+import { type LatencyProfile, RELAY_PROFILES, RELAY_PROFILES_SEGMENTED } from '@/app/lib/live-buffer'
 import { LiveRateChart, SPARK_RATE_WINDOW_MS } from './LiveRateChart'
 import styles from './live-monitor.module.scss'
 
@@ -91,6 +93,8 @@ export default function LiveMonitor() {
   const options = tileOptions()
   const [maxTiles, setMaxTiles] = useChoicePref(TILES_KEY, options, DEFAULT_MONITOR_TILES)
   const [danmaku, setDanmaku] = useBoolPref(DANMAKU_KEY, false)
+  const [latency, setLatency] = useLatencyProfile()
+  const transport = usePreviewTransport()
   const [rateChart, setRateChart] = useBoolPref(RATE_CHART_KEY, false)
   const [selection, setSelection] = useState<Selection>({ order: [], stopped: [] })
 
@@ -166,6 +170,28 @@ export default function LiveMonitor() {
               <Switch size="small" checked={danmaku} onChange={(v) => setDanmaku(!!v)} aria-label="弹幕" />
             </span>
           </Tooltip>
+          {transport === 'relay' ? (
+            <>
+              <Tooltip
+                content={`中转缓冲深度，也就是画面延迟。低延迟：FLV 约 ${RELAY_PROFILES.low.target} s、HLS 分片流约 ${RELAY_PROFILES_SEGMENTED.low.target} s，卡了的小窗自动切到流畅；流畅：约 ${RELAY_PROFILES.smooth.target} s`}
+              >
+                <Text type="tertiary" size="small">
+                  延迟
+                </Text>
+              </Tooltip>
+              <Select
+                size="small"
+                value={latency}
+                onChange={(v) => setLatency(v as LatencyProfile)}
+                optionList={[
+                  { value: 'low', label: '低延迟' },
+                  { value: 'smooth', label: '流畅' },
+                ]}
+                style={{ width: 96 }}
+                aria-label="中转延迟"
+              />
+            </>
+          ) : null}
           <Tooltip content="每路小窗下方显示最近 60 秒的写盘速率折线（每秒向后端拉一次速率，所有小窗共用一次请求）">
             <span className={styles.switchRow}>
               <Text type="tertiary" size="small">
