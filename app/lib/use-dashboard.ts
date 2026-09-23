@@ -112,9 +112,13 @@ export function liveImageUrl(
   return `${API_BASE}/v1/streamers/${id}/${kind}?v=${(h >>> 0).toString(36)}`
 }
 
-/** 正在录制的那一路流的同源地址（chunked FLV / MPEG-TS / fMP4），供页面内播放器直接拉取。 */
-export function livePreviewUrl(id: number): string {
-  return `${API_BASE}/v1/streamers/${id}/live`
+/**
+ * 正在录制的那一路流的同源地址（chunked FLV / MPEG-TS / fMP4），供页面内播放器直接拉取。
+ * `snapshotMs`：起播快照回溯多少毫秒的已完成 GOP（播放器要维持多深的缓冲就要多深）；不传给服务端的整个保留窗口。
+ */
+export function livePreviewUrl(id: number, snapshotMs?: number): string {
+  const base = `${API_BASE}/v1/streamers/${id}/live`
+  return snapshotMs === undefined ? base : `${base}?snapshot_ms=${Math.max(0, Math.round(snapshotMs))}`
 }
 
 /**

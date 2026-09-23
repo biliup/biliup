@@ -136,6 +136,12 @@
   margin-left: 6px;
   color: var(--semi-color-text-1);
 }
+/* 区块头右侧：码率图开关 + 「直播管理 →」 */
+.secTools {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
 .secLink {
   font-size: 13px;
   font-weight: 600;

@@ -679,7 +679,10 @@ mod tests {
             ))
         };
         let hub = PreviewHub::new(4);
-        let mut sink = hub.attach(PreviewFormat::Flv);
+        // 这里只看 tee 的分块判定，快照只留当前 GOP（多 GOP 快照在 preview.rs 里测）
+        let mut sink = hub
+            .attach(PreviewFormat::Flv)
+            .with_snapshot_window(Duration::ZERO);
         tee_flv(&mut sink, &FlvData::Header(FlvHeader::new(true, true)));
         tee_flv(
             &mut sink,
@@ -769,7 +772,9 @@ mod tests {
         use biliup::downloader::preview::{PreviewFormat, PreviewHub};
 
         let hub = PreviewHub::new(4);
-        let mut sink = hub.attach(PreviewFormat::MpegTs);
+        let mut sink = hub
+            .attach(PreviewFormat::MpegTs)
+            .with_snapshot_window(Duration::ZERO);
         let segment = || m3u8_rs::MediaSegment {
             uri: "1.ts".to_string(),
             ..Default::default()
@@ -805,7 +810,9 @@ mod tests {
             out
         }
         let hub = PreviewHub::new(4);
-        let mut sink = hub.attach(PreviewFormat::Fmp4);
+        let mut sink = hub
+            .attach(PreviewFormat::Fmp4)
+            .with_snapshot_window(Duration::ZERO);
         let segment = |uri: &str| m3u8_rs::MediaSegment {
             uri: uri.to_string(),
             ..Default::default()

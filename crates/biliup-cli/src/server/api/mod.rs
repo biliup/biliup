@@ -8,6 +8,8 @@ pub mod endpoints;
 pub mod live_media;
 /// 直播预览：把正在录制的流旁路给页面内播放器
 pub mod live_preview;
+/// 录制中直播间的写盘速率（每秒轮询的瘦端点，供码率曲线）
+pub mod live_rates;
 /// 单页应用静态文件处理
 pub mod spa;
 pub mod ws;

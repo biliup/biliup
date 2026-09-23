@@ -280,8 +280,8 @@ const Global: React.FC = () => {
               <div>
                 <strong>浏览器直连 CDN</strong>：biliup 向平台另取一条直链（新 token，不影响录制那条），浏览器自己去
                 CDN 拉，媒体流量不经过 biliup，适合 biliup 部署在异地服务器、浏览器远程访问的情况，省服务器出口带宽。
-                只有 CDN 放行跨域的平台能直连（B 站 / 抖音 / 斗鱼 / 虎牙，FLV 与 HLS 都行）；Twitch 等未放行跨域的
-                平台在直连模式下自动回落中转并在播放器角标标出原因。
+                只有 CDN 放行跨域的平台能直连（B 站 / 抖音 / 斗鱼 / 虎牙，FLV 与 HLS 都行）；Twitch 等按 Origin 白名单放行
+                的平台在直连模式下自动回落中转并在播放器角标标出原因。
               </div>
             </div>
           }
