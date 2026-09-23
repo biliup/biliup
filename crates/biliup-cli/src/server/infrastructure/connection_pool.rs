@@ -196,7 +196,11 @@ mod tests {
     /// 把一个全新库回退成 v1.2.4 那一代的样子：迁移 4/5 尚未应用，迁移 2 记的是
     /// 改写前的校验和。
     async fn rewind_to_v1_2_4(pool: &ConnectionPool, migration_2_checksum: &[u8]) {
-        sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (4, 5)")
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version IN (4, 5, 6)")
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query("DROP TABLE web_users")
             .execute(pool)
             .await
             .unwrap();
@@ -239,6 +243,10 @@ mod tests {
             (
                 5,
                 "f6f913ecbbdf1f4d437bf2ce4778b8d0317353056c4b240795fc9347b4eeac7f71e719d4c799ac2df72b06802ee064c7",
+            ),
+            (
+                6,
+                "11d73df52e3a459d5256d4f5d624cbc5e891d14c358d1ef4a63debae235c2fd24ce2fe8745a85ac95312ad4773475ca2",
             ),
         ];
         let embedded = sqlx::migrate!();
@@ -289,7 +297,7 @@ mod tests {
                 .unwrap();
         assert_eq!(
             migrations.iter().map(|m| m.0).collect::<Vec<_>>(),
-            vec![1, 2, 3, 4, 5],
+            vec![1, 2, 3, 4, 5, 6],
             "待应用的迁移必须补齐"
         );
         let embedded = sqlx::migrate!();

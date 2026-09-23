@@ -11,8 +11,8 @@ pub fn router() -> Router<()> {
         .route("/v1/users/login", post(post::login))
         .route("/v1/users/register", post(post::signup))
         .route("/v1/users/biliup", get(get::get_user))
-        // .route("/login", get(self::get::login))
-        .route("/v1/logout", get(get::logout))
+        // GET 保留一个版本给旧前端；新前端用 POST，免得被跨站 <img> 之类触发
+        .route("/v1/logout", get(get::logout).post(post::logout))
 }
 
 mod post {
@@ -33,12 +33,12 @@ mod post {
             return StatusCode::BAD_REQUEST.into_response();
         }
 
-        let user = match auth_session.backend.create_user(creds).await {
+        let user = match auth_session.backend.bootstrap_admin(creds).await {
             Ok(user) => user,
-            Err(CreateUserError::InvalidCredentials) => {
+            Err(CreateUserError::Invalid(reason)) => {
                 return (
                     StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({ "message": "用户名必须为 biliup，且密码必须为 1 至 1024 字节" })),
+                    Json(serde_json::json!({ "message": reason })),
                 )
                     .into_response();
             }
@@ -89,7 +89,7 @@ mod post {
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
 
-        info!("Successfully logged in as {}", user.key);
+        info!("Successfully logged in as {}", user.username);
         StatusCode::OK.into_response()
         // if let Some(ref next) = creds.next {
         //     Redirect::to(next)
@@ -97,6 +97,13 @@ mod post {
         //     Redirect::to("/")
         // }
         //     .into_response()
+    }
+
+    pub async fn logout(mut auth_session: AuthSession) -> impl IntoResponse {
+        match auth_session.logout().await {
+            Ok(_) => StatusCode::NO_CONTENT.into_response(),
+            Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        }
     }
 }
 
@@ -172,7 +179,7 @@ mod get {
             Ok(true) => StatusCode::OK.into_response(),
             Ok(false) => StatusCode::NOT_FOUND.into_response(),
             Err(e) => {
-                error!(error = ?e, "Error checking existing user");
+                error!(error = ?e, "Error checking existing Web users");
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
             }
         }

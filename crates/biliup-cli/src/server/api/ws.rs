@@ -24,6 +24,7 @@ pub struct LogsQuery {
 }
 
 pub async fn ws_logs(
+    caller: crate::server::api::access::Caller,
     ws: WebSocketUpgrade,
     Query(query): Query<LogsQuery>,
     headers: HeaderMap,
@@ -40,7 +41,10 @@ pub async fn ws_logs(
 
     ws.on_upgrade(move |socket| async move {
         let _permit = permit;
-        websocket_logs(socket, query).await;
+        tokio::select! {
+            _ = websocket_logs(socket, query) => {}
+            _ = caller.revoked() => debug!("会话失效，关闭日志推送"),
+        }
     })
 }
 

@@ -25,7 +25,7 @@ use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
 const ALLOWED_MEDIA_EXTENSIONS: &[&str] = &["mp4", "flv", "3gp", "webm", "mkv", "ts"];
-const ALLOWED_LOG_FILES: &[&str] = &["ds_update.log", "download.log", "upload.log"];
+pub(crate) const ALLOWED_LOG_FILES: &[&str] = &["ds_update.log", "download.log", "upload.log"];
 /// 创建应用程序路由
 pub fn router(service_register: ServiceRegister) -> Router<()> {
     Router::new()

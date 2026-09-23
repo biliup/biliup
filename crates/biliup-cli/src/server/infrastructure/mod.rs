@@ -6,6 +6,8 @@ pub mod context;
 pub mod dto;
 /// 数据模型定义
 pub mod models;
+/// Web 用户的角色与权限点
+pub mod permissions;
 /// 数据仓库层
 pub mod repositories;
 /// 服务注册器

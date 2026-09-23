@@ -1,15 +1,16 @@
 use axum::http;
 
 use crate::server;
-use crate::server::api::auth;
 use crate::server::api::spa::static_handler;
 use crate::server::api::ws::ws_logs;
+use crate::server::api::{access, auth, web_users};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::service_register::ServiceRegister;
 use crate::server::infrastructure::users::Backend;
 use axum::http::HeaderValue;
+use axum::middleware::from_fn;
 use axum::routing::get;
-use axum_login::{AuthManagerLayerBuilder, login_required};
+use axum_login::AuthManagerLayerBuilder;
 use error_stack::ResultExt;
 use std::net::SocketAddr;
 use time::Duration;
@@ -126,12 +127,17 @@ impl ApplicationController {
     }
 }
 
+/// 业务路由统一挂访问控制层：`--auth` 开启时校验登录与权限点（默认拒绝），
+/// 关闭时视为超管。登录相关接口与 `/v1/me*` 在这层之外。
 fn with_optional_auth(app: axum::Router<()>, enable_login_guard: bool) -> axum::Router<()> {
     if enable_login_guard {
-        app.route_layer(login_required!(Backend))
+        app.merge(web_users::admin_router())
+            .route_layer(from_fn(access::require_permission))
+            .merge(web_users::me_router())
             .merge(auth::router())
     } else {
-        app
+        app.route_layer(from_fn(access::unrestricted))
+            .merge(web_users::unrestricted_me_router())
     }
 }
 

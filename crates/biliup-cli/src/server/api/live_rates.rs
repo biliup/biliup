@@ -94,6 +94,7 @@ pub async fn get_live_rates(State(managers): State<Arc<DownloadManager>>) -> Res
 /// JSON 数组）。客户端不需要发任何东西；Ping 回 Pong，Close 即结束。Origin 校验与连接数上限
 /// 与 `/v1/ws/logs` 同款。
 pub async fn ws_live_rates(
+    caller: crate::server::api::access::Caller,
     ws: WebSocketUpgrade,
     State(managers): State<Arc<DownloadManager>>,
     headers: HeaderMap,
@@ -110,7 +111,10 @@ pub async fn ws_live_rates(
     };
     ws.on_upgrade(move |socket| async move {
         let _permit = permit;
-        push_live_rates(socket, managers).await;
+        tokio::select! {
+            _ = push_live_rates(socket, managers) => {}
+            _ = caller.revoked() => debug!("会话失效，关闭码率推送"),
+        }
     })
 }
 
@@ -351,6 +355,9 @@ mod tests {
         let app = Router::new()
             .route("/v1/ws/live-rates", get(ws_live_rates))
             .route("/v1/live-rates", get(get_live_rates))
+            .route_layer(axum::middleware::from_fn(
+                crate::server::api::access::unrestricted,
+            ))
             .with_state(managers);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap().to_string();
