@@ -116,6 +116,9 @@ pub struct StreamlinkDownloader {
     url: String,
     headers: HashMap<String, String>,
     output_mode: OutputMode,
+    /// `url` 就是插件解析出的流直链时，每次拉流改用 `DownloadConfig::url`：
+    /// 重试会重新解析出新直链（斗鱼网宿的 token 连过一次就作废），且经过了 expire=0 探测
+    follow_stream_url: bool,
 }
 
 impl StreamlinkDownloader {
@@ -125,7 +128,13 @@ impl StreamlinkDownloader {
             url,
             headers: HashMap::new(),
             output_mode: OutputMode::Pipe, // 默认管道模式
+            follow_stream_url: false,
         }
+    }
+
+    pub fn following_stream_url(mut self) -> Self {
+        self.follow_stream_url = true;
+        self
     }
 
     pub fn with_headers(mut self, headers: HashMap<String, String>) -> Self {
@@ -176,7 +185,12 @@ impl StreamlinkDownloader {
         args.push("force".to_string());
         args.push("--output".to_string());
         args.push(output_file.to_string());
-        args.push(streamlink_cli_url(&self.url));
+        let url = if self.follow_stream_url {
+            &download_config.url
+        } else {
+            &self.url
+        };
+        args.push(streamlink_cli_url(url));
         args.push("best".to_string());
         Ok(args)
     }
@@ -524,6 +538,49 @@ async fn spawn_log(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::common::util::Recorder;
+    use crate::server::infrastructure::models::StreamerInfo;
+
+    fn download_config(url: &str) -> DownloadConfig {
+        DownloadConfig {
+            url: url.to_string(),
+            segment_time: None,
+            time_range: None,
+            file_size: None,
+            headers: HashMap::new(),
+            recorder: Recorder::new(
+                None,
+                StreamerInfo::new("t", "u", "title", chrono::Utc::now(), ""),
+            ),
+            output_dir: ".".into(),
+            suffix: "flv".to_string(),
+            bytes_written: ByteCounter::new(),
+            preview: Default::default(),
+        }
+    }
+
+    #[test]
+    fn stream_url_runtime_follows_each_attempts_url() {
+        let first = "https://ws1a.douyucdn.cn/live/a.flv?token=first&expire=300&fcdn=ws&expire=0";
+        let fresh = "https://ws1a.douyucdn.cn/live/a.flv?token=fresh&expire=300&fcdn=ws";
+        let args = |downloader: StreamlinkDownloader| {
+            downloader
+                .build_file_args(&download_config(fresh), "out.flv.part")
+                .unwrap()
+        };
+
+        let following = args(
+            StreamlinkDownloader::new(first.to_string(), Platform::Generic).following_stream_url(),
+        );
+        assert!(following.contains(&streamlink_cli_url(fresh)));
+        assert!(!following.iter().any(|arg| arg.contains("token=first")));
+
+        let pinned = args(StreamlinkDownloader::new(
+            first.to_string(),
+            Platform::Generic,
+        ));
+        assert!(pinned.contains(&streamlink_cli_url(first)));
+    }
 
     #[test]
     fn progressive_flv_gets_httpstream_prefix() {
