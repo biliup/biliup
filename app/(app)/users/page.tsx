@@ -202,6 +202,8 @@ function UserDialog({
 export default function UsersPage() {
   const { me } = useMe()
   const isMobile = useIsMobile()
+  // 六列表格放在侧栏旁边至少要 960 左右的视口；更窄时改成卡片，操作按钮不会被裁掉
+  const compact = useIsMobile(960)
   const { data: users, error, isLoading, mutate } = useSWR<WebUser[]>(USERS_KEY, fetcher)
   const [dialog, setDialog] = useState<Dialog>(null)
 
@@ -337,7 +339,7 @@ export default function UsersPage() {
         <Empty title="还没有用户" description="点击右上角「新建用户」添加第一个账号" />
       </div>
     )
-  } else if (isMobile) {
+  } else if (compact) {
     body = (
       <div className={styles.cards}>
         {users.map((user) => (
@@ -358,7 +360,7 @@ export default function UsersPage() {
   } else {
     body = (
       <div className={dc.card}>
-        <Table columns={columns} dataSource={users} rowKey="id" pagination={false} size="middle" />
+        <Table columns={columns} dataSource={users} rowKey="id" pagination={false} size="middle" scroll={{ x: 1060 }} />
       </div>
     )
   }
