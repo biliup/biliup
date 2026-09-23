@@ -5,6 +5,7 @@ use crate::server::common::throughput::{RateMeter, Sampler};
 use crate::server::common::upload::UploaderMessage;
 use crate::server::common::util::FileValidator;
 use crate::server::core::downloader::cover_downloader;
+use crate::server::core::downloader::ws_expire::resolve_ws_expire_override;
 use crate::server::core::downloader::{
     DanmakuClient, DownloadStatus, DownloaderRuntime, SegmentEvent, SegmentInfo,
 };
@@ -19,6 +20,7 @@ use biliup::downloader::preview::PreviewHub;
 use danmaku_client::DanmakuEvent;
 use error_stack::ResultExt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::{Mutex, Notify, broadcast};
 use tokio_util::sync::CancellationToken;
@@ -175,6 +177,9 @@ pub struct DownloadTask {
     /// 实时弹幕广播：弹幕客户端每解出一条就 `send` 一份给预览播放器；
     /// 平台没有弹幕实现（`stream.danmaku` 为 None）时为 `None`。
     danmaku_tx: Option<broadcast::Sender<DanmakuEvent>>,
+    /// 追加 `expire=0` 的网宿直链探测通过、下载器却一个字节没拿到就失败过：
+    /// 本任务余下的拉流不再追加，直接用原直链（stream-gears 有自己的首连兜底，不受影响）。
+    ws_expire_rejected: AtomicBool,
 }
 
 /// 每路实时弹幕广播的槽位数；掉队的订阅者跳过丢掉的那几条继续收，不断开。
@@ -199,6 +204,7 @@ impl DownloadTask {
             source: std::sync::RwLock::new(LiveSource::from_stream(stream)),
             preview,
             danmaku_tx,
+            ws_expire_rejected: AtomicBool::new(false),
         }
     }
 
@@ -303,9 +309,23 @@ impl DownloadTask {
             // 创建守卫确保清理
             // 创建事件处理器
             // 执行下载
+            let bytes_before = self.meter.counter().total();
             let components = self
                 .download(&mut processor, ctx.clone(), danmaku_client.clone(), &stream)
                 .await;
+            if !matches!(self.downloader, DownloaderRuntime::StreamGears(_))
+                && ws_expire_override_failed(
+                    &stream.raw_stream_url,
+                    &components,
+                    self.meter.counter().total() > bytes_before,
+                )
+                && !self.ws_expire_rejected.swap(true, Ordering::Relaxed)
+            {
+                warn!(
+                    url = url,
+                    "追加 expire=0 的直链没拉到数据，本次录制余下的拉流改用原直链"
+                );
+            }
 
             // 失败原因只藏在结束时的 Debug 输出里会让用户以为下载器“什么都没做”
             // （典型：边录边传缺少上传模板、cookie 失效）。
@@ -422,11 +442,16 @@ impl DownloadTask {
         // 获取配置和主播信息
         let streamer = ctx.live_streamer();
         let mut download_config = ctx.download_config(stream);
-        // 只有 stream-gears 会在网宿 403 时退回原直链，其它下载器仍用原直链
-        if !matches!(self.downloader, DownloaderRuntime::StreamGears(_))
-            && let Some(original) = strip_ws_expire_override(&download_config.url)
-        {
-            download_config.url = original.to_string();
+        // stream-gears 在自己的首连里处理网宿 403，其它下载器拉流前先探一次
+        if !matches!(self.downloader, DownloaderRuntime::StreamGears(_)) {
+            download_config.url = match strip_ws_expire_override(&download_config.url) {
+                Some(original) if self.ws_expire_rejected.load(Ordering::Relaxed) => {
+                    original.to_string()
+                }
+                _ => {
+                    resolve_ws_expire_override(download_config.url, &download_config.headers).await
+                }
+            };
         }
         download_config.bytes_written = self.meter.counter();
         download_config.preview = self.preview.clone();
@@ -545,6 +570,18 @@ fn download_attempt_progressed(result: &AppResult<DownloadStatus>) -> bool {
     )
 }
 
+/// 用追加 `expire=0` 的网宿直链拉流（探测已通过）却没写出任何字节就失败：
+/// 说明网宿对下载器的请求与对 HEAD 探测的判断不一致，不能再信探测结果。
+fn ws_expire_override_failed(
+    stream_url: &str,
+    result: &AppResult<DownloadStatus>,
+    wrote_bytes: bool,
+) -> bool {
+    strip_ws_expire_override(stream_url).is_some()
+        && !wrote_bytes
+        && !download_attempt_progressed(result)
+}
+
 /// Exponential backoff delay for the current `retry_count`.
 ///
 /// `retry_count == 0` means "immediate next segment" (Duration::ZERO). Non-zero
@@ -620,6 +657,24 @@ mod tests {
     use super::*;
     use crate::server::errors::AppError;
     use error_stack::Report;
+
+    #[test]
+    fn ws_expire_override_counts_as_failed_only_without_data() {
+        let overridden = "https://ws1a.douyucdn.cn/live/a.flv?wsAuth=a&expire=300&fcdn=ws&expire=0";
+        let original = "https://ws1a.douyucdn.cn/live/a.flv?wsAuth=a&expire=300&fcdn=ws";
+        let failed = Ok(DownloadStatus::Error("FFmpeg error: Some(8)".into()));
+        let err: AppResult<DownloadStatus> = Err(Report::new(AppError::Unknown));
+
+        assert!(ws_expire_override_failed(overridden, &failed, false));
+        assert!(ws_expire_override_failed(overridden, &err, false));
+        assert!(!ws_expire_override_failed(overridden, &failed, true));
+        assert!(!ws_expire_override_failed(
+            overridden,
+            &Ok(DownloadStatus::StreamEnded),
+            false
+        ));
+        assert!(!ws_expire_override_failed(original, &failed, false));
+    }
 
     #[test]
     fn segment_completed_and_stream_ended_count_as_progress() {

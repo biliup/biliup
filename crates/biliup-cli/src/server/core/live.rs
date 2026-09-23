@@ -201,20 +201,24 @@ pub fn downloader_runtime(
 }
 
 fn streamlink_runtime(stream: &LiveStream) -> DownloaderRuntime {
-    let (url, platform) = match stream.runtime_options.as_ref() {
+    let (url, platform, from_stream_url) = match stream.runtime_options.as_ref() {
         Some(RuntimeOptions::Streamlink(StreamlinkOptions { url, platform })) => (
             url.clone().unwrap_or_else(|| stream.raw_stream_url.clone()),
             streamlink_platform(platform),
+            false,
         ),
         // yt-dlp 型来源（如 YouTube）交给 streamlink 时，传入网页地址让其自行提取，
         // 而非已解析的 manifest 直链（对齐 youtube.py:96-101）
         Some(RuntimeOptions::YtDlp(options)) if !options.webpage_url.is_empty() => {
-            (options.webpage_url.clone(), Platform::Generic)
+            (options.webpage_url.clone(), Platform::Generic, false)
         }
-        _ => (stream.raw_stream_url.clone(), Platform::Generic),
+        _ => (stream.raw_stream_url.clone(), Platform::Generic, true),
     };
-    let downloader =
+    let mut downloader =
         StreamlinkDownloader::new(url, platform).with_headers(stream.stream_headers.clone());
+    if from_stream_url {
+        downloader = downloader.following_stream_url();
+    }
     DownloaderRuntime::StreamLink(Streamlink::new(downloader))
 }
 
