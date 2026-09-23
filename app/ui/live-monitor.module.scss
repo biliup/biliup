@@ -155,6 +155,12 @@
   color: rgba(255, 255, 255, 0.85);
 }
 
+/* 小窗下的 60 s 码率 sparkline（工具栏「码率图」开关，默认关） */
+.tileSpark {
+  padding: 6px 12px 0;
+  box-sizing: content-box;
+}
+
 .tileFoot {
   padding: 7px 12px 9px;
   font-size: 12px;

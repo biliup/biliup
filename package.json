@@ -19,7 +19,8 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-json-tree": "^0.20.0",
-    "swr": "^2.5.1"
+    "swr": "^2.5.1",
+    "uplot": "^1.6.32"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",

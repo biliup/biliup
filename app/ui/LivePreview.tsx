@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import { Button, Modal, Switch, Tag, Toast, Tooltip, Typography } from '@douyinfe/semi-ui'
-import { IconPlay, IconRefresh } from '@douyinfe/semi-icons'
+import { IconChevronDown, IconPlay, IconRefresh } from '@douyinfe/semi-icons'
 import type { ButtonProps } from '@douyinfe/semi-ui/lib/es/button'
 import { LiveStreamerEntity } from '@/app/lib/api-streamer'
 import { platformName } from '@/app/lib/status'
@@ -19,6 +19,7 @@ import {
 } from '@/app/lib/use-dashboard'
 import { useBoolPref } from '@/app/lib/use-local-pref'
 import { type DanmakuFeed, useDanmakuFeed } from '@/app/lib/danmaku-feed'
+import { LiveRateChart, LiveRateSummary, MODAL_RATE_WINDOW_MS } from './LiveRateChart'
 import styles from './live-preview.module.scss'
 
 const Players = dynamic(() => import('@/app/ui/Player'), { ssr: false })
@@ -28,6 +29,8 @@ const MAX_AUTO_RECONNECT = 3
 const RECONNECT_DELAY_MS = 2000
 /** 弹层弹幕开关记在本地，默认开；监视器另有自己的开关（默认关） */
 const MODAL_DANMAKU_KEY = 'biliup.preview.danmaku'
+/** 弹层底部的码率折线默认展开，折叠状态记在本地 */
+const MODAL_RATE_CHART_KEY = 'biliup.preview.rateChart'
 
 type Phase = 'connecting' | 'playing' | 'reconnecting' | 'ended' | 'error'
 
@@ -330,6 +333,7 @@ export function LivePreviewModal({
   const [danmakuPref, setDanmakuPref] = useBoolPref(MODAL_DANMAKU_KEY, true)
   const danmakuOn = visible && danmakuAvailable && danmakuPref
   const danmakuFeed = useDanmakuFeed([streamer.id], danmakuOn)
+  const [chartOpen, setChartOpen] = useBoolPref(MODAL_RATE_CHART_KEY, true)
   const transport = usePreviewTransport()
   const notifiedRef = useRef(false)
   useEffect(() => {
@@ -396,6 +400,25 @@ export function LivePreviewModal({
       {visible ? (
         <LivePreviewPlayer streamer={streamer} danmakuFeed={danmakuOn ? danmakuFeed : null} onFatal={handleFatal} />
       ) : null}
+      {/* 写盘速率折线：每秒轮询瘦端点 /v1/live-rates，最近 3 分钟；折叠时不轮询、不加载 uPlot */}
+      <section className={styles.rateSection} data-open={chartOpen ? 'true' : 'false'}>
+        <button
+          type="button"
+          className={styles.rateHead}
+          onClick={() => setChartOpen(!chartOpen)}
+          aria-expanded={chartOpen}
+          aria-controls={`live-rate-chart-${streamer.id}`}
+        >
+          <IconChevronDown className={styles.rateChevron} aria-hidden="true" />
+          <span className={styles.rateTitle}>写盘速率 · 最近 3 分钟</span>
+          {visible && chartOpen ? <LiveRateSummary id={streamer.id} windowMs={MODAL_RATE_WINDOW_MS} /> : null}
+        </button>
+        {visible && chartOpen ? (
+          <div id={`live-rate-chart-${streamer.id}`} className={styles.rateBody}>
+            <LiveRateChart id={streamer.id} windowMs={MODAL_RATE_WINDOW_MS} variant="full" height={150} label={name} />
+          </div>
+        ) : null}
+      </section>
       <div className={styles.modalFoot}>
         <Text type="tertiary" size="small">
           {transport === 'direct'
