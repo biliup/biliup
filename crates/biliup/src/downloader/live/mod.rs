@@ -35,7 +35,7 @@ pub use bigo::Bigo;
 pub use bilibili::Bilibili;
 pub use cc::CC;
 pub use douyin::Douyin;
-pub use douyu::Douyu;
+pub use douyu::{Douyu, strip_ws_expire_override};
 pub use general::General;
 pub use huya::Huya;
 pub use inke::Inke;

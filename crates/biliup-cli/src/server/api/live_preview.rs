@@ -18,7 +18,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use biliup::downloader::live::LiveStatus;
+use biliup::downloader::live::{LiveStatus, strip_ws_expire_override};
 use biliup::downloader::preview::{PreviewFormat, PreviewHub, SubscribeError, Subscription};
 use bytes::{Bytes, BytesMut};
 use danmaku_client::DanmakuEvent;
@@ -291,7 +291,10 @@ pub async fn get_live_url(
                 .into_response();
         }
     };
-    let url = fresh.raw_stream_url;
+    // 浏览器那边没有 403 兜底，直连照旧给原直链
+    let url = strip_ws_expire_override(&fresh.raw_stream_url)
+        .map(str::to_owned)
+        .unwrap_or(fresh.raw_stream_url);
     let response = LiveUrlResponse {
         direct: direct_capability(&fresh.platform),
         expires_at: estimate_expiry(&url),
