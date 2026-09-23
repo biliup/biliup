@@ -14,7 +14,7 @@ use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Stage, WorkerStatus};
 use crate::server::infrastructure::models::hook_step::process;
 use async_channel::Sender;
-use biliup::downloader::live::{LivePlugin, LiveStatus, LiveStream};
+use biliup::downloader::live::{LivePlugin, LiveStatus, LiveStream, strip_ws_expire_override};
 use biliup::downloader::preview::PreviewHub;
 use danmaku_client::DanmakuEvent;
 use error_stack::ResultExt;
@@ -422,6 +422,12 @@ impl DownloadTask {
         // 获取配置和主播信息
         let streamer = ctx.live_streamer();
         let mut download_config = ctx.download_config(stream);
+        // 只有 stream-gears 会在网宿 403 时退回原直链，其它下载器仍用原直链
+        if !matches!(self.downloader, DownloaderRuntime::StreamGears(_))
+            && let Some(original) = strip_ws_expire_override(&download_config.url)
+        {
+            download_config.url = original.to_string();
+        }
         download_config.bytes_written = self.meter.counter();
         download_config.preview = self.preview.clone();
         if let crate::server::core::downloader::DownloaderRuntime::Sync(sync) = &self.downloader {

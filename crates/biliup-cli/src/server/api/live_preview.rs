@@ -18,13 +18,13 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use biliup::downloader::live::LiveStatus;
+use biliup::downloader::live::{LiveStatus, strip_ws_expire_override};
 use biliup::downloader::preview::{PreviewFormat, PreviewHub, SubscribeError, Subscription};
 use bytes::{Bytes, BytesMut};
 use danmaku_client::DanmakuEvent;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, broadcast};
 use tracing::{debug, info, warn};
@@ -175,7 +175,7 @@ pub fn estimate_expiry(stream_url: &str) -> Option<i64> {
 /// `GET /v1/streamers/{id}/live-url` 的响应：当前录制中那条流的 CDN 直链。
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 pub struct LiveUrlResponse {
-    /// 直链，含 CDN 参数；与录制用的是同一条
+    /// 向平台新取的直链，含 CDN 参数；与录制那条不是同一个 token
     pub url: String,
     /// 浏览器该用哪个播放器：`flv`（mpegts.js）/ `hls`（hls.js，TS 或 fMP4 分片都行）；后缀猜不出为 `null`
     pub format: Option<&'static str>,
@@ -183,6 +183,52 @@ pub struct LiveUrlResponse {
     /// 过期时间估计（Unix 秒）；直链里没有可识别的过期参数时为 `null`
     pub expires_at: Option<i64>,
     pub direct: DirectCapability,
+    /// 这条是 [`LIVE_URL_DEBOUNCE`] 内复用的上一次结果（同一房间短时间内重复打开），不是新取的
+    pub cached: bool,
+}
+
+/// 同一房间两次 `live-url` 之间少于这个间隔就复用上一次的直链，不再打平台 API
+/// （StrictMode 双调用、连点、同一房间几个小窗同时打开）。播放失败后的重取带 `?fresh=1` 绕过它。
+pub const LIVE_URL_DEBOUNCE: Duration = Duration::from_secs(5);
+
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct LiveUrlQuery {
+    /// 为 `1` / `true` 时忽略去抖缓存，一定向平台新取（前端播放失败后的重取用）
+    #[serde(default)]
+    pub fresh: Option<String>,
+}
+
+impl LiveUrlQuery {
+    fn wants_fresh(&self) -> bool {
+        matches!(self.fresh.as_deref(), Some("1") | Some("true"))
+    }
+}
+
+/// 每个房间最近一次成功取到的直链与时刻。条目只在 [`LIVE_URL_DEBOUNCE`] 内有意义，插入时顺手
+/// 清掉一分钟前的，表不会长。
+fn live_url_cache() -> &'static std::sync::Mutex<HashMap<i64, (Instant, LiveUrlResponse)>> {
+    static CACHE: OnceLock<std::sync::Mutex<HashMap<i64, (Instant, LiveUrlResponse)>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// 去抖窗口内有没有可复用的直链。
+pub fn recent_live_url(id: i64, now: Instant) -> Option<LiveUrlResponse> {
+    let cache = live_url_cache().lock().unwrap();
+    cache
+        .get(&id)
+        .filter(|(at, _)| now.duration_since(*at) < LIVE_URL_DEBOUNCE)
+        .map(|(_, response)| LiveUrlResponse {
+            cached: true,
+            ..response.clone()
+        })
+}
+
+/// 记下这次取到的直链；顺手清掉过期很久的条目。
+pub fn remember_live_url(id: i64, now: Instant, response: &LiveUrlResponse) {
+    let mut cache = live_url_cache().lock().unwrap();
+    cache.retain(|_, (at, _)| now.duration_since(*at) < Duration::from_secs(60));
+    cache.insert(id, (now, response.clone()));
 }
 
 /// `GET /v1/streamers/{id}/live-url`：浏览器直连模式用。
@@ -194,6 +240,7 @@ pub struct LiveUrlResponse {
 pub async fn get_live_url(
     State(managers): State<Arc<DownloadManager>>,
     Path(id): Path<i64>,
+    Query(query): Query<LiveUrlQuery>,
 ) -> Response {
     let Some(worker) = managers.get_room_by_id(id).await else {
         return (StatusCode::NOT_FOUND, "直播间不存在").into_response();
@@ -211,8 +258,16 @@ pub async fn get_live_url(
             format: direct_format(&source.url),
             platform: source.platform,
             url: String::new(),
+            cached: false,
         };
         return no_store(axum::Json(response).into_response());
+    }
+    let now = Instant::now();
+    if !query.wants_fresh()
+        && let Some(recent) = recent_live_url(id, now)
+    {
+        debug!(id, "预览直链在去抖窗口内，复用上一次的");
+        return no_store(axum::Json(recent).into_response());
     }
     let room_url = worker.get_streamer().url.clone();
     let Some(plugin) = managers.plugin_for(&room_url).await else {
@@ -236,15 +291,20 @@ pub async fn get_live_url(
                 .into_response();
         }
     };
-    let url = fresh.raw_stream_url;
+    // 浏览器那边没有 403 兜底，直连照旧给原直链
+    let url = strip_ws_expire_override(&fresh.raw_stream_url)
+        .map(str::to_owned)
+        .unwrap_or(fresh.raw_stream_url);
     let response = LiveUrlResponse {
         direct: direct_capability(&fresh.platform),
         expires_at: estimate_expiry(&url),
         format: direct_format(&url),
         platform: fresh.platform,
         url,
+        cached: false,
     };
-    info!(id, "已向平台取到预览直链");
+    remember_live_url(id, now, &response);
+    info!(id, fresh = query.wants_fresh(), "已向平台取到预览直链");
     no_store(axum::Json(response).into_response())
 }
 
@@ -804,6 +864,61 @@ mod tests {
             Some("hls")
         );
         assert_eq!(direct_format("https://x/y.mp4"), None);
+    }
+
+    /// 去抖：5 s 内同一房间复用上一次的直链（标 `cached`），不同房间互不影响，过了窗口就不复用。
+    #[test]
+    fn live_url_is_debounced_per_room() {
+        let sample = |url: &str| LiveUrlResponse {
+            url: url.into(),
+            format: Some("flv"),
+            platform: "douyu".into(),
+            expires_at: None,
+            direct: DirectCapability {
+                capable: true,
+                reason: None,
+            },
+            cached: false,
+        };
+        let t0 = Instant::now();
+        assert!(recent_live_url(9001, t0).is_none());
+        remember_live_url(9001, t0, &sample("https://cdn/a.flv?token=1"));
+        let hit = recent_live_url(9001, t0 + Duration::from_secs(4)).unwrap();
+        assert!(hit.cached);
+        assert_eq!(hit.url, "https://cdn/a.flv?token=1");
+        assert!(recent_live_url(9002, t0 + Duration::from_secs(1)).is_none());
+        assert!(recent_live_url(9001, t0 + LIVE_URL_DEBOUNCE).is_none());
+        // 新取的覆盖旧的
+        remember_live_url(
+            9001,
+            t0 + Duration::from_secs(10),
+            &sample("https://cdn/a.flv?token=2"),
+        );
+        assert_eq!(
+            recent_live_url(9001, t0 + Duration::from_secs(11))
+                .unwrap()
+                .url,
+            "https://cdn/a.flv?token=2"
+        );
+        assert!(
+            LiveUrlQuery {
+                fresh: Some("1".into())
+            }
+            .wants_fresh()
+        );
+        assert!(
+            LiveUrlQuery {
+                fresh: Some("true".into())
+            }
+            .wants_fresh()
+        );
+        assert!(
+            !LiveUrlQuery {
+                fresh: Some("0".into())
+            }
+            .wants_fresh()
+        );
+        assert!(!LiveUrlQuery::default().wants_fresh());
     }
 
     #[test]

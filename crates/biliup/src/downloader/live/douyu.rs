@@ -26,6 +26,11 @@ const DOUYU_HS_CDN: &str = "hs-h5";
 const DOUYU_P2P_DOMAIN_TCT: &str = "hdltctwk.douyucdn.cn";
 const DOUYU_P2PSDK_APIS: [&str; 2] = ["https://sdkapiv4.douyucdn.cn", "https://sdkapi.douyucdn.cn"];
 const DOUYU_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+/// 网宿按直链里**最后一个** `expire` 限制单条连接寿命（`expire=300` 即 300 s 断一次），
+/// `wsAuth` 却只校验**第一个**：保留原值、末尾再追加 `expire=0` 能过校验且不再按时断开，
+/// 删掉或改写原值则 403。这是 CDN 未文档化的行为，被 403 时拉流端用
+/// [`strip_ws_expire_override`] 退回原直链。
+const WS_EXPIRE_OVERRIDE: &str = "&expire=0";
 
 pub struct Douyu {
     re: Regex,
@@ -140,6 +145,7 @@ impl<'a> DouyuLive<'a> {
         let play_info = self.get_web_play_info(&room_id).await?;
         let raw_stream_url = format!("{}/{}", play_info.rtmp_url, play_info.rtmp_live);
         let raw_stream_url = self.maybe_build_huos_url(raw_stream_url).await;
+        let raw_stream_url = with_ws_expire_override(raw_stream_url);
 
         let avatar_url = room_info.avatar_url();
         Ok(LiveStatus::Live {
@@ -690,6 +696,45 @@ fn md5_hex(input: String) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// 网宿直链：host 为 `ws*.douyucdn.cn`，或带 `fcdn=ws`。
+/// 不看 `rtmp_cdn`：`douyu_force_hs` 构造火山直链后它仍是 `ws-h5`。
+fn is_wangsu_stream(url: &Url) -> bool {
+    let ws_host = url.host_str().is_some_and(|host| {
+        host.starts_with("ws")
+            && (host.ends_with(".douyucdn.cn") || host.ends_with(".douyucdn2.cn"))
+    });
+    ws_host
+        || url
+            .query_pairs()
+            .any(|(key, value)| key == "fcdn" && value == "ws")
+}
+
+/// 网宿直链里只有一个 `expire` 且不为 0 时才需要追加。
+fn ws_expire_needs_override(url: &str) -> bool {
+    let Ok(parsed) = Url::parse(url) else {
+        return false;
+    };
+    if !is_wangsu_stream(&parsed) {
+        return false;
+    }
+    let mut expires = parsed.query_pairs().filter(|(key, _)| key == "expire");
+    matches!((expires.next(), expires.next()), (Some((_, value)), None) if value != "0")
+}
+
+fn with_ws_expire_override(url: String) -> String {
+    if ws_expire_needs_override(&url) {
+        url + WS_EXPIRE_OVERRIDE
+    } else {
+        url
+    }
+}
+
+/// 若是追加过 `expire=0` 的网宿直链，返回追加前的原直链；否则 `None`。
+pub fn strip_ws_expire_override(url: &str) -> Option<&str> {
+    url.strip_suffix(WS_EXPIRE_OVERRIDE)
+        .filter(|original| ws_expire_needs_override(original))
+}
+
 fn parse_stream_url(input: &str) -> LiveResult<(String, Vec<(String, String)>)> {
     let parsed = Url::parse(input)
         .map_err(|err| LiveError::custom(format!("解析斗鱼 huos 源链接失败: {err}")))?;
@@ -929,6 +974,50 @@ mod tests {
             url,
             "http://openflv-huos.douyucdn2.cn/live/abc.xs?token=value&fcdn=hs&txSecret=secret&txTime=time&domain=hdltctwk.douyucdn.cn"
         );
+    }
+
+    const WS_URL: &str = "https://ws1a.douyucdn.cn/live/24422abc_4000.flv?wsAuth=a1&token=t1&logo=0&expire=300&did=d&origin=dy&fcdn=ws&fo=0&mix=0&isp=";
+
+    #[test]
+    fn ws_expire_override_appends_after_original_expire() {
+        let overridden = with_ws_expire_override(WS_URL.to_string());
+        assert_eq!(overridden, format!("{WS_URL}&expire=0"));
+        assert_eq!(strip_ws_expire_override(&overridden), Some(WS_URL));
+        // 已追加过的不再追加
+        assert_eq!(with_ws_expire_override(overridden.clone()), overridden);
+        // 只靠 fcdn=ws 也能认出网宿
+        let by_fcdn = "https://cdn.example/live/a.flv?wsAuth=a&expire=300&fcdn=ws";
+        assert_eq!(
+            with_ws_expire_override(by_fcdn.to_string()),
+            format!("{by_fcdn}&expire=0")
+        );
+    }
+
+    #[test]
+    fn ws_expire_override_skips_expire_zero() {
+        let url = WS_URL.replace("expire=300", "expire=0");
+        assert_eq!(with_ws_expire_override(url.clone()), url);
+        assert_eq!(strip_ws_expire_override(&url), None);
+    }
+
+    #[test]
+    fn ws_expire_override_skips_non_wangsu() {
+        for url in [
+            "https://hw3.douyucdn2.cn/live/abc_4000.flv?wsAuth=a&token=t&expire=300&fcdn=hw",
+            "http://openflv-huos.douyucdn2.cn/live/abc_4000.xs?wsAuth=a&expire=300&fcdn=hs&txSecret=s&txTime=t&domain=hdltctwk.douyucdn.cn",
+            "https://tc-tct.douyucdn2.cn/dyliveflv1/abc_4000.flv?wsAuth=a&expire=300&fcdn=tct",
+        ] {
+            assert_eq!(with_ws_expire_override(url.to_string()), url);
+            let appended = format!("{url}&expire=0");
+            assert_eq!(strip_ws_expire_override(&appended), None);
+        }
+    }
+
+    #[test]
+    fn ws_expire_override_skips_url_without_expire() {
+        let url = "https://ws1a.douyucdn.cn/live/abc_4000.flv?wsAuth=a&token=t&fcdn=ws";
+        assert_eq!(with_ws_expire_override(url.to_string()), url);
+        assert_eq!(strip_ws_expire_override(&format!("{url}&expire=0")), None);
     }
 
     #[tokio::test]
