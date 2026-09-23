@@ -116,7 +116,7 @@ const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
   }
   return (
     <SideSheet
-      title={<Typography.Title heading={4}>用户管理</Typography.Title>}
+      title={<Typography.Title heading={4}>B 站账号</Typography.Title>}
       visible={visible}
       width={Math.min(448, width ?? Number.MIN_VALUE)}
       footer={
