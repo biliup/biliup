@@ -33,7 +33,7 @@ const Component = () => {
 
     // 处理表单提交
     const handleSubmit = async () => {
-        if (!username || !password) {
+        if (!username.trim() || !password) {
             Toast.error('请填写用户名和密码');
             return;
         }
@@ -56,7 +56,7 @@ const Component = () => {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    username,
+                    username: username.trim(),
                     password,
                     ...(remember && { remember })
                 }),
@@ -140,15 +140,17 @@ const Component = () => {
                                 field="username"
                                 fieldStyle={{ padding: 0 }}
                                 className={styles.formField}
-                                value={username}
                                 initValue='biliup'
-                                disabled
+                                autoComplete="username"
+                                placeholder={isRegisterMode ? "设置管理员用户名" : "输入用户名"}
+                                onChange={setUsername}
                             />
                             <Form.Input
                                 label={{ text: "密码" }}
                                 field="password"
                                 type="password"
-                                placeholder={isRegisterMode ? "设置密码" : "输入密码"}
+                                placeholder={isRegisterMode ? "设置密码（至少 8 个字符）" : "输入密码"}
+                                autoComplete={isRegisterMode ? "new-password" : "current-password"}
                                 fieldStyle={{ padding: 0 }}
                                 className={styles.formField}
                                 value={password}
@@ -190,6 +192,12 @@ const Component = () => {
                         >
                             {isRegisterMode ? '注册' : '登录'}
                         </Button>
+                        {!isRegisterMode && (
+                            <div style={{ marginTop: '16px', textAlign: 'center', color: 'var(--semi-color-text-2)', fontSize: '13px' }}>
+                                忘记密码？请超级管理员在「用户管理」中重置，或在服务器上运行
+                                <code style={{ margin: '0 4px' }}>biliup user reset-password 用户名</code>
+                            </div>
+                        )}
                         {isRegisterMode && (
                             <div style={{ marginTop: '16px', textAlign: 'center', color: 'var(--semi-color-text-2)' }}>
                                 <span style={{ fontSize: '14px' }}>
