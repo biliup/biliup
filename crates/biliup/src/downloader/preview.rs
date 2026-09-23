@@ -5,8 +5,9 @@
 //! - 每路录制任务一个 [`PreviewHub`]，寿命与整场录制（`execute()`）相同，跨分段、跨断流重试。
 //! - 下载器每次开始拉流时用 [`PreviewHub::attach`] 拿到一个 [`PreviewSink`]（写入端），
 //!   在写盘点旁边调用 [`PreviewSink::push`]；拉流结束时 `PreviewSink` 随之 drop。
-//! - HTTP 端点用 [`PreviewHub::subscribe`] 拿到 [`Subscription`]：先是一份「文件头 + 序列头 +
-//!   最近 [`SNAPSHOT_WINDOW`] 内的完整 GOP + 当前 GOP」的快照，之后是与写盘同步的实时分块。
+//! - HTTP 端点用 [`PreviewHub::subscribe`] / [`PreviewHub::subscribe_with_depth`] 拿到 [`Subscription`]：
+//!   先是一份「文件头 + 序列头 + 最近一段时间内的完整 GOP + 当前 GOP」的快照（回溯多久由播放器按
+//!   自己要维持的缓冲深度指定，最多 [`SNAPSHOT_WINDOW`]），之后是与写盘同步的实时分块。
 //!
 //! 写入端热路径上只做三件事：把分块的引用追加进当前 GOP 缓冲、`try_recv` 待处理的订阅请求、
 //! `broadcast::send`。没有 `.await`、没有锁等待、没有可失败的返回值；订阅者的快慢只影响
@@ -34,7 +35,8 @@ pub const DEFAULT_MAX_SUBSCRIBERS: usize = 4;
 /// 新订阅者拿到的快照就是它起播时的全部缓冲：只给当前 GOP 时，播放器从零到一个 GOP 之间的
 /// 缓冲起步，之后到达 = 消耗，缓冲永远这么薄，链路上几十到几百毫秒的抖动就 `waiting`
 /// （浏览器直连 CDN 时 CDN 会先给几秒的 GOP 缓存，中转也得给同样的深度）。
-/// 6 s 对应前端中转模式维持的缓冲深度；实际快照在 6 s 到 6 s + 一个 GOP 之间。
+/// 6 s 盖住前端最深的档位（「流畅」5 s 缓冲 + 起播对齐的余量）；更浅的档位（「低延迟」2 s）
+/// 由播放器用 `snapshot_ms` 只要自己那一份，见 [`PreviewHub::subscribe_with_depth`]。
 pub const SNAPSHOT_WINDOW: Duration = Duration::from_secs(6);
 /// 整份快照（已完成 GOP + 当前 GOP）的字节上限，超过先丢最旧的 GOP。
 /// 6 s × 20 Mbps = 15 MB，够到 4K 直播；1080p 常见的 3–6 Mbps 只用 2–5 MB。
@@ -134,6 +136,8 @@ enum HubState {
 
 struct SnapshotRequest {
     reply: oneshot::Sender<SnapshotReply>,
+    /// 快照里已完成 GOP 最多回溯多久（见 [`PreviewHub::subscribe_with_depth`]）；`None` 给整个保留窗口
+    depth: Option<Duration>,
 }
 
 struct SnapshotReply {
@@ -209,6 +213,8 @@ pub struct Subscription {
     pub snapshot: Vec<Bytes>,
     pub rx: broadcast::Receiver<Bytes>,
     header_len: usize,
+    /// 订阅时要的快照深度，掉队重新对齐时沿用
+    depth: Option<Duration>,
     _permit: OwnedSemaphorePermit,
 }
 
@@ -313,6 +319,18 @@ impl PreviewHub {
     /// 严格衔接（不重复、不缺帧）；写入端会等到有完整关键帧起点时才回应，`timeout`
     /// 需要长于一个 GOP / 一个 HLS 分片。
     pub async fn subscribe(&self, timeout: Duration) -> Result<Subscription, SubscribeError> {
+        self.subscribe_with_depth(None, timeout).await
+    }
+
+    /// 同 [`subscribe`](Self::subscribe)，但快照里的已完成 GOP 只回溯 `depth`：
+    /// 从当前 GOP 往前，取到第一个关键帧到达时刻早于「现在 − depth」的 GOP 为止（含），
+    /// 所以起播缓冲在 `depth` 到 `depth + 一个 GOP` 之间；`Some(ZERO)` 只给当前 GOP，
+    /// `None` 给整个 [`SNAPSHOT_WINDOW`]。播放器要多深的缓冲就要多深的快照，多要的只会被追帧丢掉。
+    pub async fn subscribe_with_depth(
+        &self,
+        depth: Option<Duration>,
+        timeout: Duration,
+    ) -> Result<Subscription, SubscribeError> {
         if let HubState::Unavailable(reason) = &*self.0.state.read().unwrap() {
             return Err(SubscribeError::Unavailable(reason.clone()));
         }
@@ -322,10 +340,10 @@ impl PreviewHub {
             .clone()
             .try_acquire_owned()
             .map_err(|_| SubscribeError::TooManySubscribers(self.0.max_subscribers))?;
-        self.subscribe_holding(permit, timeout).await
+        self.subscribe_holding(permit, depth, timeout).await
     }
 
-    /// 掉队（`Lagged`）后原地重新对齐：复用 `previous` 的连接许可，向写入端再要一份从最近
+    /// 掉队（`Lagged`）后原地重新对齐：复用 `previous` 的连接许可与快照深度，向写入端再要一份从最近
     /// 关键帧起的快照与新的接收端。丢掉的那段补不回来，但连接不断、播放器不必重连；
     /// 调用方发快照时应去掉文件头（[`Subscription::snapshot_after_header`]）。
     pub async fn resubscribe(
@@ -333,13 +351,14 @@ impl PreviewHub {
         previous: Subscription,
         timeout: Duration,
     ) -> Result<Subscription, SubscribeError> {
-        let Subscription { _permit, .. } = previous;
-        self.subscribe_holding(_permit, timeout).await
+        let Subscription { _permit, depth, .. } = previous;
+        self.subscribe_holding(_permit, depth, timeout).await
     }
 
     async fn subscribe_holding(
         &self,
         permit: OwnedSemaphorePermit,
+        depth: Option<Duration>,
         timeout: Duration,
     ) -> Result<Subscription, SubscribeError> {
         let request_tx = match &*self.0.requests.read().unwrap() {
@@ -348,7 +367,10 @@ impl PreviewHub {
         };
         let (reply_tx, reply_rx) = oneshot::channel();
         request_tx
-            .send(SnapshotRequest { reply: reply_tx })
+            .send(SnapshotRequest {
+                reply: reply_tx,
+                depth,
+            })
             .map_err(|_| SubscribeError::NotAttached)?;
         match tokio::time::timeout(timeout, reply_rx).await {
             Ok(Ok(reply)) => Ok(Subscription {
@@ -356,6 +378,7 @@ impl PreviewHub {
                 snapshot: reply.snapshot,
                 rx: reply.rx,
                 header_len: reply.header_len,
+                depth,
                 _permit: permit,
             }),
             // 写入端在回应前被 drop（拉流结束 / 重试），请求随之作废
@@ -598,15 +621,23 @@ impl PreviewSink {
 
     /// 先广播再处理请求：新接收端只会收到本分块之后的数据，而本分块已在快照里。
     fn serve_requests(&mut self) {
+        let mut contiguous = false;
         while let Ok(request) = self.requests.try_recv() {
+            if !contiguous {
+                // 历史只有几个 GOP，整理成连续切片的代价可以忽略；没有请求时不做
+                self.history.make_contiguous();
+                contiguous = true;
+            }
             let rx = self.tx.subscribe();
-            let history_chunks: usize = self.history.iter().map(|g| g.chunks.len()).sum();
+            let history =
+                history_for_depth(self.history.as_slices().0, request.depth, Instant::now());
+            let history_chunks: usize = history.iter().map(|g| g.chunks.len()).sum();
             let mut snapshot = Vec::with_capacity(
                 1 + self.sequence_headers.len() + history_chunks + self.gop.len(),
             );
             snapshot.extend(self.header.iter().cloned());
             snapshot.extend(self.sequence_headers.iter().map(|(_, b)| b.clone()));
-            snapshot.extend(self.history.iter().flat_map(|g| g.chunks.iter().cloned()));
+            snapshot.extend(history.iter().flat_map(|g| g.chunks.iter().cloned()));
             snapshot.extend(self.gop.iter().cloned());
             let _ = request.reply.send(SnapshotReply {
                 format: self.format,
@@ -616,6 +647,20 @@ impl PreviewSink {
             });
         }
     }
+}
+
+/// 按要求的深度从（连续的）历史里取已完成的 GOP：`None` 全给；`Some(d)` 从最新往前取，
+/// 取到第一个关键帧到达时刻早于 `now - d` 的 GOP 为止（含它，起播缓冲才不少于 `d`）。
+fn history_for_depth(history: &[Gop], depth: Option<Duration>, now: Instant) -> &[Gop] {
+    let Some(depth) = depth else { return history };
+    if depth.is_zero() {
+        return &[];
+    }
+    let start = history
+        .iter()
+        .rposition(|g| now.duration_since(g.started) >= depth)
+        .unwrap_or(0);
+    &history[start..]
 }
 
 impl Drop for PreviewSink {
@@ -1853,6 +1898,113 @@ mod tests {
         );
         sink.push(ChunkKind::Keyframe, key(7));
         assert_eq!(sub.rx.recv().await.unwrap(), key(7));
+    }
+
+    /// 按深度取历史：从最新往前，取到第一个早于「现在 − 深度」的 GOP 为止（含）；
+    /// 零深度只给当前 GOP；`None` 给全部；深度大于全部历史时也给全部。
+    #[test]
+    fn history_is_cut_by_requested_depth() {
+        let now = Instant::now();
+        let gop = |age_ms: u64, k: u8| Gop {
+            chunks: vec![key(k)],
+            bytes: key(k).len(),
+            started: now - Duration::from_millis(age_ms),
+        };
+        // 关键帧分别在 5.0 / 3.0 / 1.0 s 前到达（当前 GOP 不在历史里）
+        let history = vec![gop(5000, 1), gop(3000, 3), gop(1000, 5)];
+        let picked = |depth: Option<Duration>| -> Vec<Bytes> {
+            history_for_depth(&history, depth, now)
+                .iter()
+                .map(|g| g.chunks[0].clone())
+                .collect()
+        };
+        assert_eq!(picked(None), vec![key(1), key(3), key(5)]);
+        assert_eq!(picked(Some(Duration::ZERO)), Vec::<Bytes>::new());
+        // 要 2 s：K5 只有 1 s，再往前 K3（3 s 前）跨过了 2 s 的线，取到它为止
+        assert_eq!(picked(Some(Duration::from_secs(2))), vec![key(3), key(5)]);
+        // 要 3 s：K3 正好 3 s 前到达（>=），取到它
+        assert_eq!(picked(Some(Duration::from_secs(3))), vec![key(3), key(5)]);
+        assert_eq!(
+            picked(Some(Duration::from_millis(3500))),
+            vec![key(1), key(3), key(5)]
+        );
+        assert_eq!(
+            picked(Some(Duration::from_secs(30))),
+            vec![key(1), key(3), key(5)]
+        );
+        assert_eq!(picked(Some(Duration::from_millis(500))), vec![key(5)]);
+        assert!(history_for_depth(&[], Some(Duration::from_secs(2)), now).is_empty());
+    }
+
+    /// 端到端：带深度订阅拿到的快照只含回溯范围内的 GOP，掉队重对齐时沿用同一深度。
+    #[tokio::test]
+    async fn subscribe_with_depth_trims_the_snapshot() {
+        let hub = PreviewHub::new(4);
+        let mut sink = hub.attach(PreviewFormat::Flv);
+        sink.push(ChunkKind::Header, Bytes::from_static(&flv::FILE_HEADER));
+        sink.push(ChunkKind::Keyframe, key(1));
+        sink.push(ChunkKind::Media, inter(2));
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        sink.push(ChunkKind::Keyframe, key(3));
+        sink.push(ChunkKind::Media, inter(4));
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        sink.push(ChunkKind::Keyframe, key(5));
+        assert_eq!(sink.history.len(), 2);
+        // 要 30 ms：K3 的 GOP（60 ms 前开始）是第一个跨过线的，K1 不给
+        let pending = tokio::spawn({
+            let hub = hub.clone();
+            async move {
+                hub.subscribe_with_depth(Some(Duration::from_millis(30)), Duration::from_secs(5))
+                    .await
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sink.push(ChunkKind::Media, inter(6));
+        let sub = pending.await.unwrap().unwrap();
+        assert_eq!(
+            sub.snapshot,
+            vec![
+                Bytes::from_static(&flv::FILE_HEADER),
+                key(3),
+                inter(4),
+                key(5),
+                inter(6)
+            ]
+        );
+        assert_eq!(sub.depth, Some(Duration::from_millis(30)));
+        // 零深度：只有当前 GOP
+        let pending = tokio::spawn({
+            let hub = hub.clone();
+            async move {
+                hub.subscribe_with_depth(Some(Duration::ZERO), Duration::from_secs(5))
+                    .await
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sink.push(ChunkKind::Media, inter(7));
+        let sub0 = pending.await.unwrap().unwrap();
+        assert_eq!(
+            sub0.snapshot,
+            vec![
+                Bytes::from_static(&flv::FILE_HEADER),
+                key(5),
+                inter(6),
+                inter(7)
+            ]
+        );
+        // 重对齐沿用深度
+        let pending = tokio::spawn({
+            let hub = hub.clone();
+            async move { hub.resubscribe(sub0, Duration::from_secs(5)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sink.push(ChunkKind::Media, inter(8));
+        let again = pending.await.unwrap().unwrap();
+        assert_eq!(again.depth, Some(Duration::ZERO));
+        assert_eq!(
+            again.snapshot_after_header(),
+            &[key(5), inter(6), inter(7), inter(8)]
+        );
     }
 
     /// 超出窗口时长的 GOP 在下一个关键帧到来时被丢掉（按关键帧到达时刻算）。

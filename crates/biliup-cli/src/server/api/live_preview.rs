@@ -39,11 +39,20 @@ fn connection_limit() -> &'static Arc<Semaphore> {
     LIMIT.get_or_init(|| Arc::new(Semaphore::new(MAX_PREVIEW_CONNECTIONS)))
 }
 
-/// `GET /v1/streamers/{id}/live`
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct LiveQuery {
+    /// 起播快照回溯多少毫秒的已完成 GOP（见 `PreviewHub::subscribe_with_depth`）：
+    /// 播放器按自己要维持的缓冲深度来要；不带则给整个保留窗口（`SNAPSHOT_WINDOW`）
+    pub snapshot_ms: Option<u64>,
+}
+
+/// `GET /v1/streamers/{id}/live?snapshot_ms=2000`
 pub async fn get_live_stream(
     State(managers): State<Arc<DownloadManager>>,
     Path(id): Path<i64>,
+    Query(query): Query<LiveQuery>,
 ) -> Response {
+    let depth = query.snapshot_ms.map(Duration::from_millis);
     let Some(worker) = managers.get_room_by_id(id).await else {
         return (StatusCode::NOT_FOUND, "直播间不存在").into_response();
     };
@@ -59,11 +68,12 @@ pub async fn get_live_stream(
         )
             .into_response();
     };
-    match hub.subscribe(SUBSCRIBE_TIMEOUT).await {
+    match hub.subscribe_with_depth(depth, SUBSCRIBE_TIMEOUT).await {
         Ok(subscription) => {
             info!(
                 id,
                 format = subscription.format.as_str(),
+                snapshot_ms = depth.map(|d| d.as_millis() as u64),
                 snapshot_chunks = subscription.snapshot.len(),
                 snapshot_bytes = subscription.snapshot.iter().map(Bytes::len).sum::<usize>(),
                 "开始直播预览"
