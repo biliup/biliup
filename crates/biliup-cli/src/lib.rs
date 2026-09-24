@@ -1,5 +1,6 @@
 pub mod cli;
 pub mod downloader;
+pub mod entry;
 pub mod server;
 pub mod upload_lock;
 pub mod uploader;
@@ -27,7 +28,7 @@ use tracing_subscriber::{EnvFilter, Registry, reload};
 // 定义 Handle 的类型别名，简化代码
 // EnvFilter: 我们使用的过滤器类型
 // Registry: 基础的 Subscriber 类型
-type LogHandle = reload::Handle<EnvFilter, Registry>;
+pub type LogHandle = reload::Handle<EnvFilter, Registry>;
 
 pub async fn run(
     addr: (&str, u16),
