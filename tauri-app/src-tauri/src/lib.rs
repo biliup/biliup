@@ -1,6 +1,8 @@
 //! Desktop shell: runs the biliup Web server inside this process and shows
 //! its Web UI in a WebView.
 
+mod data_dir;
+
 use std::fmt::Write as _;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -40,13 +42,27 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let window = WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::default())
                 .title("biliup")
                 .inner_size(1280.0, 800.0)
                 .build()?;
-            let data_dir = app.path().app_data_dir()?;
-            start(app.handle(), &window, &data_dir);
+            let app = app.handle().clone();
+            // The data directory dialog blocks, which must not happen on the
+            // main thread.
+            std::thread::spawn(move || {
+                let Some(install_dir) = install_dir() else {
+                    show_error(&window, "无法确定程序所在目录");
+                    return;
+                };
+                let legacy_roots = data_dir::legacy_roots(&install_dir);
+                match data_dir::resolve(&app, &window, &install_dir, &legacy_roots) {
+                    Ok(Some(data_dir)) => start(&app, &window, &data_dir, &legacy_roots),
+                    Ok(None) => app.exit(0),
+                    Err(message) => show_error(&window, &message),
+                }
+            });
             Ok(())
         })
         .build(tauri::generate_context!());
@@ -66,7 +82,7 @@ pub fn run() {
 
 /// Moves into the data directory, migrates legacy data and starts the server.
 /// Failures are shown in the window instead of aborting the app.
-fn start(app: &AppHandle, window: &WebviewWindow, data_dir: &Path) {
+fn start(app: &AppHandle, window: &WebviewWindow, data_dir: &Path, legacy_roots: &[PathBuf]) {
     // The server keeps data/, ds_update.log and recordings relative to the
     // working directory, and the log file is opened relative to it as well.
     if let Err(err) =
@@ -85,12 +101,12 @@ fn start(app: &AppHandle, window: &WebviewWindow, data_dir: &Path) {
     );
     tracing::info!(data_dir = %data_dir.display(), "biliup desktop starting");
 
-    if let Some(legacy_dir) = legacy_dir() {
-        match migrate_legacy_data(&legacy_dir, data_dir) {
+    if let Some(legacy_dir) = data_dir::find_legacy_root(legacy_roots) {
+        match data_dir::migrate_legacy_data(legacy_dir, data_dir) {
             Ok(true) => tracing::info!(
                 from = %legacy_dir.join("data").display(),
                 to = %data_dir.join("data").display(),
-                "copied data/ from the previous install directory; the original is kept"
+                "copied data/ left by a previous version; the original is kept"
             ),
             Ok(false) => {}
             Err(err) => {
@@ -268,54 +284,13 @@ async fn web_ui_ready(port: u16) -> bool {
     )
 }
 
-/// The old PyInstaller sidecar ran with the install directory (where this
-/// executable lives) as its working directory, so its data/ is there.
-fn legacy_dir() -> Option<PathBuf> {
+/// Where this executable lives. The old PyInstaller sidecar used it as its
+/// working directory, so an older install may have left data/ there.
+fn install_dir() -> Option<PathBuf> {
     std::env::current_exe()
         .ok()?
         .parent()
         .map(Path::to_path_buf)
-}
-
-/// Copies `legacy_root/data` to `data_root/data` once, when the former exists
-/// and the latter does not. The original is left in place. Returns whether a
-/// copy was made.
-fn migrate_legacy_data(legacy_root: &Path, data_root: &Path) -> io::Result<bool> {
-    let from = legacy_root.join("data");
-    let to = data_root.join("data");
-    if !from.is_dir() || to.exists() || same_dir(&from, &to) {
-        return Ok(false);
-    }
-    // Copy to a temporary name first so an interrupted copy is retried on the
-    // next start instead of being mistaken for migrated data.
-    let partial = data_root.join("data.migrating");
-    if partial.exists() {
-        fs::remove_dir_all(&partial)?;
-    }
-    copy_dir(&from, &partial)
-        .and_then(|()| fs::rename(&partial, &to))
-        .inspect_err(|_| {
-            let _ = fs::remove_dir_all(&partial);
-        })?;
-    Ok(true)
-}
-
-fn same_dir(a: &Path, b: &Path) -> bool {
-    matches!((a.canonicalize(), b.canonicalize()), (Ok(a), Ok(b)) if a == b)
-}
-
-fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
-    fs::create_dir_all(to)?;
-    for entry in fs::read_dir(from)? {
-        let entry = entry?;
-        let target = to.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            copy_dir(&entry.path(), &target)?;
-        } else {
-            fs::copy(entry.path(), &target)?;
-        }
-    }
-    Ok(())
 }
 
 /// Shows `message` on the bundled startup page via `#error=…`.
@@ -350,42 +325,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn migrates_legacy_data_once_and_keeps_the_original() {
-        let legacy = tempfile_dir("legacy");
-        let data = tempfile_dir("appdata");
-        fs::create_dir_all(legacy.join("data/nested")).unwrap();
-        fs::write(legacy.join("data/data.sqlite3"), b"db").unwrap();
-        fs::write(legacy.join("data/nested/42.json"), b"{}").unwrap();
-
-        assert!(migrate_legacy_data(&legacy, &data).unwrap());
-        assert_eq!(fs::read(data.join("data/data.sqlite3")).unwrap(), b"db");
-        assert_eq!(fs::read(data.join("data/nested/42.json")).unwrap(), b"{}");
-        assert!(legacy.join("data/data.sqlite3").exists());
-        assert!(!data.join("data.migrating").exists());
-
-        fs::write(legacy.join("data/data.sqlite3"), b"newer").unwrap();
-        assert!(!migrate_legacy_data(&legacy, &data).unwrap());
-        assert_eq!(fs::read(data.join("data/data.sqlite3")).unwrap(), b"db");
-    }
-
-    #[test]
-    fn skips_migration_without_legacy_data() {
-        let legacy = tempfile_dir("empty-legacy");
-        let data = tempfile_dir("empty-appdata");
-        assert!(!migrate_legacy_data(&legacy, &data).unwrap());
-        assert!(!data.join("data").exists());
-    }
-
-    #[test]
     fn percent_encoding_round_trips_through_decode_uri_component() {
         assert_eq!(percent_encode("a b/ç%"), "a%20b%2F%C3%A7%25");
-    }
-
-    fn tempfile_dir(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("biliup-desktop-test-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
-        dir
     }
 }

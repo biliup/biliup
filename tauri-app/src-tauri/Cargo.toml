@@ -20,9 +20,15 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-single-instance = "2"
+tauri-plugin-dialog = "2"
 biliup-cli = { path = "../../crates/biliup-cli" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 tokio = { version = "1", features = ["io-util", "net", "sync", "time"] }
 tracing = "0.1"
+
+[target.'cfg(windows)'.dependencies]
+windows-registry = "0.6"
 
 [workspace]
 # 这个空的 workspace 表告诉 Cargo，此 crate 是一个独立的 workspace，不要再向上查找了
