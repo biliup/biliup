@@ -22,6 +22,7 @@ use bytes::Bytes;
 use std::fs::{self, File};
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::debug;
 
 /// 索引缓存文件的扩展名，拼在分段文件名之后：`a.flv` → `a.flv.idx`。
@@ -314,18 +315,28 @@ pub fn load(segment: &Path) -> Option<KeyframeIndex> {
 }
 
 fn save(segment: &Path, index: &KeyframeIndex) -> io::Result<()> {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
     let path = index_path(segment);
+    // 同一分段可能同时被录制收尾和 DVR 请求续扫：各写各的临时文件，rename 后到者覆盖，
+    // 两份都是完整的索引
     let tmp = {
         let mut name = path.as_os_str().to_os_string();
-        name.push(".tmp");
+        name.push(format!(
+            ".{}-{}.tmp",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
         PathBuf::from(name)
     };
-    {
-        let mut file = File::create(&tmp)?;
+    let written = File::create(&tmp).and_then(|mut file| {
         file.write_all(&index.encode())?;
-        file.flush()?;
+        file.flush()
+    });
+    if let Err(e) = written.and_then(|()| fs::rename(&tmp, &path)) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
     }
-    fs::rename(&tmp, &path)
+    Ok(())
 }
 
 /// 取分段的关键帧索引：有可用缓存就续扫，没有就从头建，扫完写回缓存。
