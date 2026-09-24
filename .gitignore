@@ -57,3 +57,5 @@ cookies.json
 logs/
 CLAUDE.md
 .claude/
+/stream_gears/*.so
+/stream_gears/*.pyd

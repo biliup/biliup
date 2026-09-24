@@ -14,7 +14,9 @@ import pytest
 import stream_gears
 
 EXPORTS = {
+    "Credit",
     "PySegment",
+    "Segment",
     "StreamGearsError",
     "UploadLine",
     "config_bindings",

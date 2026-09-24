@@ -9,6 +9,9 @@ features = ["pyo3/extension-module"]
 #include = [ "biliup/web/public/**/*" ]
 #data = "biliup/web/public"
 python-packages = ["biliup"]
+# Mixed layout: the root `stream_gears/` package (`__init__.py`, stubs, `py.typed`)
+# ships alongside the native module, which becomes `stream_gears.stream_gears`.
+module-name = "stream_gears.stream_gears"
 manifest-path = "crates/stream-gears/Cargo.toml"
 
 [project]
