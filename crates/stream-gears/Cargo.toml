@@ -26,10 +26,8 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 tracing-appender = { workspace = true }
 biliup = { path = "../biliup"}
 biliup-cli = { path = "../biliup-cli"}
-danmaku-client = { package = "danmaku", path = "../danmaku"}
 time = { workspace = true }
 bon = { workspace = true }
-async-trait = { workspace = true }
 error-stack = { workspace = true }
 
 [build-dependencies]
