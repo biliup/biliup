@@ -1,4 +1,3 @@
-mod danmaku;
 mod login;
 mod server;
 mod uploader;
