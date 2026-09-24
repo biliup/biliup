@@ -7,16 +7,37 @@
 //! 不一定已经落盘；读取方读不到新内容就接着等下一次唤醒，最后一点缓冲在关段时由分段表变更唤醒。
 //! 边录边传、yt-dlp 没有写盘计数，场次照样登记（`/v1/streamers` 要用场次 id），但读取方拿不到
 //! 字节通知，只回看到最后一个写完的分段。
+//!
+//! 打标记时也靠这里把墙钟换算成场次时间。场次时间轴段内按容器时间走、段与段之间按墙钟接续
+//! （见 [`super::recorder`]），和墙钟之间没有固定的换算。场次记录器每次开段、关段都记下一对
+//! 「场次时间 ↔ 墙钟」（[`Anchor`]），换算时从最近的一对按墙钟外推。误差来自两处：从锚点到现在
+//! 容器时间与墙钟的偏差（同一段里一般在 1 s 以内）；开段锚点本身——刚连上时 CDN 先发的几秒 GOP
+//! 缓存让段首内容早于开段墙钟，这段偏差到关段时由关段锚点消掉。
 
 use biliup::downloader::util::{ByteCounter, ByteWatch};
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use tokio::sync::watch;
 
+/// 场次时间轴上的 `session_ms` 对应墙钟 `wall_ms`（Unix 毫秒）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Anchor {
+    pub session_ms: i64,
+    pub wall_ms: i64,
+}
+
+impl Anchor {
+    /// 墙钟 `wall_ms` 对应的场次时间（不早于 0）。
+    pub fn session_ms_at(&self, wall_ms: i64) -> i64 {
+        (self.session_ms + (wall_ms - self.wall_ms)).max(0)
+    }
+}
+
 struct Entry {
     streamer_id: i64,
     bytes: Option<ByteCounter>,
     changes: watch::Sender<u64>,
+    anchor: Option<Anchor>,
     /// 同一场被合并进来的新任务会重新登记；旧任务的 guard 晚 drop 时不能把新登记删掉。
     generation: u64,
 }
@@ -38,6 +59,19 @@ impl LiveGuard {
             && entry.generation == self.generation
         {
             entry.changes.send_modify(|v| *v += 1);
+        }
+    }
+
+    /// 记下场次时间 `session_ms` 对应的墙钟（开段、关段时）。
+    pub fn anchor(&self, session_ms: i64, wall_ms: i64) {
+        let mut live = LIVE.lock().unwrap();
+        if let Some(entry) = live.1.get_mut(&self.session_id)
+            && entry.generation == self.generation
+        {
+            entry.anchor = Some(Anchor {
+                session_ms,
+                wall_ms,
+            });
         }
     }
 }
@@ -72,6 +106,7 @@ pub fn register(session_id: i64, streamer_id: i64, bytes: Option<ByteCounter>) -
             streamer_id,
             bytes,
             changes,
+            anchor: None,
             generation,
         },
     );
@@ -93,6 +128,11 @@ pub fn session_of_streamer(streamer_id: i64) -> Option<i64> {
 
 pub fn is_recording(session_id: i64) -> bool {
     LIVE.lock().unwrap().1.contains_key(&session_id)
+}
+
+/// 正在录的场次最近的开段 / 关段锚点；没在录，或这次录制还没开出分段时为 `None`。
+pub fn anchor(session_id: i64) -> Option<Anchor> {
+    LIVE.lock().unwrap().1.get(&session_id)?.anchor
 }
 
 /// 读取方的订阅。
@@ -153,5 +193,33 @@ mod tests {
         drop(new);
         assert!(!is_recording(9_000_001));
         assert!(watch.changes.changed().await.is_err());
+    }
+
+    #[test]
+    fn merged_task_keeps_its_own_anchor() {
+        let old = register(9_100_001, 7, None);
+        old.anchor(1_000, 50_000);
+        let new = register(9_100_001, 7, None);
+        assert_eq!(anchor(9_100_001), None, "新登记从没有锚点开始");
+        old.anchor(2_000, 60_000);
+        assert_eq!(anchor(9_100_001), None, "旧任务不能改新登记的锚点");
+        drop(old);
+        new.anchor(3_000, 70_000);
+        assert_eq!(
+            anchor(9_100_001).map(|a| a.session_ms_at(71_500)),
+            Some(4_500)
+        );
+        drop(new);
+        assert_eq!(anchor(9_100_001), None);
+    }
+
+    #[test]
+    fn session_time_never_goes_negative() {
+        let a = Anchor {
+            session_ms: 500,
+            wall_ms: 10_000,
+        };
+        assert_eq!(a.session_ms_at(9_000), 0);
+        assert_eq!(a.session_ms_at(10_200), 700);
     }
 }

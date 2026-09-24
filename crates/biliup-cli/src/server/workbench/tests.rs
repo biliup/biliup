@@ -721,3 +721,76 @@ async fn streamed_index_follows_the_rename_at_close() {
     assert_eq!(cached.keyframes.len(), 4);
     assert_eq!(cached.source_len, flv.bytes.len() as u64);
 }
+
+/// 场次记录器写完库后异步更新登记表，等它跟上。
+async fn wait_for_anchor(session_id: i64, expected: Option<live::Anchor>) {
+    for _ in 0..200 {
+        if live::anchor(session_id) == expected {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("锚点应为 {expected:?}，实际 {:?}", live::anchor(session_id));
+}
+
+#[tokio::test]
+async fn recording_sessions_are_registered_with_a_timeline_anchor() {
+    let (dir, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let opened = go_live(&pool, t0, 10).await;
+    let id = live::unique_session_id(&pool, opened.id).await;
+    // 主播 id 也换一个别的测试不会用到的
+    let recorder = SessionRecorder::spawn(
+        pool.clone(),
+        SessionTarget {
+            session_id: id,
+            streamer_id: 3_001,
+            bytes: None,
+        },
+        None,
+    );
+    let handle = recorder.handle();
+    handle.run_started_at(t0);
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(!live::is_recording(id), "第一个分段放上时间轴之前不登记");
+    assert_eq!(live::session_of_streamer(3_001), None);
+
+    let a = write_flv(dir.path(), "a.flv");
+    handle.opened_at(&a, t0 + 500);
+    wait_for_anchor(
+        id,
+        Some(live::Anchor {
+            session_ms: 0,
+            wall_ms: t0 + 500,
+        }),
+    )
+    .await;
+    assert_eq!(live::session_of_streamer(3_001), Some(id));
+
+    // 关段：锚点换成内容末尾对应的墙钟，开段时 CDN 先发的缓存造成的偏差到这里消掉
+    handle.closed_at(&a, t0 + 4_300, ClosedSegment::default());
+    wait_for_anchor(
+        id,
+        Some(live::Anchor {
+            session_ms: FLV_DURATION_MS,
+            wall_ms: t0 + 4_300,
+        }),
+    )
+    .await;
+
+    // 断流 10 s 后重连：新段接在断流之后
+    let b = write_flv(dir.path(), "b.flv");
+    handle.opened_at(&b, t0 + 14_300);
+    wait_for_anchor(
+        id,
+        Some(live::Anchor {
+            session_ms: FLV_DURATION_MS + 10_000,
+            wall_ms: t0 + 14_300,
+        }),
+    )
+    .await;
+
+    recorder.finish().await;
+    assert!(!live::is_recording(id), "录制结束即注销");
+    assert_eq!(live::session_of_streamer(3_001), None);
+}
