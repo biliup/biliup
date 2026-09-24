@@ -116,7 +116,7 @@ def test_config_bindings():
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
-    reason="OPS-19: PyO3 >= 0.24 no longer defaults trailing Option args to None",
+    reason="PyO3 >= 0.24 no longer defaults trailing Option args to None; login functions need proxy=None",
 )
 def test_login_proxy_is_optional(name):
     params = inspect.signature(getattr(stream_gears, name)).parameters
