@@ -320,6 +320,8 @@ impl HookStep {
 
         for video_path in video_paths {
             self.move_single_file(video_path, target_path).await?;
+            // 关键帧索引缓存按原路径存，不跟着搬到目标目录，也不留在原目录
+            let _ = fs::remove_file(crate::server::workbench::index::index_path(video_path)).await;
         }
         Ok(())
     }
