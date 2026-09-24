@@ -32,6 +32,9 @@ jobs:
         python -m pip install --upgrade pip
         pip install target/wheels/*.whl
         pip install Pillow pyinstaller
+        # PyInstaller searches the repo root first; the source stream_gears/ has
+        # no native module and would shadow the installed package.
+        rm -rf stream_gears
         pyinstaller biliup.spec
     - name: Rename and move sidecar
       run: |
