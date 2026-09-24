@@ -12,7 +12,7 @@ use error_stack::{ResultExt, bail};
 use nom::Err;
 use reqwest::{Response, StatusCode};
 use std::path::PathBuf;
-use std::sync::RwLock;
+use std::sync::{Arc, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
@@ -43,9 +43,11 @@ impl StreamGears {
 
     async fn start_download<'a>(
         &self,
-        mut callback: Box<dyn FnMut(SegmentEvent) + Send + Sync + 'a>,
+        callback: Box<dyn FnMut(SegmentEvent) + Send + Sync + 'a>,
         download_config: DownloadConfig,
     ) -> AppResult<DownloadStatus> {
+        // 开段与关段两个钩子共用同一个回调
+        let callback = Arc::new(Mutex::new(callback));
         let file_name = download_config.recorder.filename_template();
         let headers_in = construct_headers(&download_config.headers).map_err(AppError::Custom)?;
         let proxy = self.proxy.clone();
@@ -71,6 +73,14 @@ impl StreamGears {
         // let mut i = 0;
         // let mut prev_file_path = None;
         // 创建分段回调钩子
+        let start_hook = {
+            let callback = callback.clone();
+            move |s: &str| {
+                (callback.lock().unwrap())(SegmentEvent::Start {
+                    next_file_path: PathBuf::from(s),
+                });
+            }
+        };
         let hook = {
             let mut i = 0;
             move |s: &str| {
@@ -84,7 +94,7 @@ impl StreamGears {
                     duration_secs: None,
                     size_bytes: None,
                 };
-                callback(SegmentEvent::Segment(event));
+                (callback.lock().unwrap())(SegmentEvent::Segment(event));
 
                 i += 1;
             }
@@ -96,6 +106,7 @@ impl StreamGears {
                 info!("Downloading {}...", url);
                 // FLV流下载
                 let file = LifecycleFile::with_hook(&file_name, "flv", hook)
+                    .with_start_hook(start_hook)
                     .with_counter(download_config.bytes_written.clone());
                 // 直播预览：写入端与这一次拉流同寿命，拉流结束即 drop
                 let preview = download_config.preview.attach(PreviewFormat::Flv);
@@ -108,6 +119,7 @@ impl StreamGears {
                 error!("{e}");
                 // HLS流下载
                 let file = LifecycleFile::with_hook(&file_name, "ts", hook)
+                    .with_start_hook(start_hook)
                     .with_counter(download_config.bytes_written.clone());
                 let preview = download_config.preview.attach(PreviewFormat::MpegTs);
                 hls::download(&url, &client, file, segment.clone(), Some(preview))

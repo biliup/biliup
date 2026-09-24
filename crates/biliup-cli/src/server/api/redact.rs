@@ -23,6 +23,7 @@ const VISIBLE_CONFIG_KEYS: &[&str] = &[
     "checker_sleep",
     "pool1_size",
     "pool2_size",
+    "clip_session_merge_minutes",
     "preview_transport",
     "use_live_cover",
     "douyu_cdn",

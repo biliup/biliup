@@ -112,6 +112,10 @@ pub async fn serve_on(
     let conn_pool = ConnectionManager::new_pool("data/data.sqlite3")
         .await
         .attach("could not initialize the database connection pool")?;
+    // 先收尾上次异常退出留下的分段与场次，再开始监控录制
+    if let Err(e) = server::workbench::recover(&conn_pool).await {
+        tracing::warn!(error = %e, "切片工作台启动收尾失败，不影响录制与上传");
+    }
 
     if let Some(configuration) =
         repositories::register_bilibili_cookie(&conn_pool, &user_cookie).await?

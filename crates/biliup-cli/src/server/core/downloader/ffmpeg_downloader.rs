@@ -218,6 +218,9 @@ impl FfmpegDownloader {
             .kill_on_drop(true);
 
         let child = cmd.spawn().change_context(AppError::Unknown)?;
+        callback(SegmentEvent::Start {
+            next_file_path: PathBuf::from(&part_file),
+        });
 
         let status = spawn_log(
             child,

@@ -105,6 +105,12 @@ pub struct Config {
     #[serde(default = "default_pool2_size")]
     pub pool2_size: u32,
 
+    /// 切片工作台：同一主播下播后多少分钟内再开播，算作同一场（断流合并）；0 = 不合并。
+    /// 只影响工作台的场次划分，不改变 streamerinfo / 投稿。
+    #[builder(default = default_clip_session_merge_minutes())]
+    #[serde(default = "default_clip_session_merge_minutes")]
+    pub clip_session_merge_minutes: u64,
+
     /// 直播预览的取流方式：`relay`（默认，复用正在录制的那一路、经 biliup 中转，不多拉 CDN）
     /// 或 `direct`（浏览器直接向 CDN 拉一路，省服务器带宽；平台不支持时自动回落中转）。
     /// `None` 视同 `relay`。
@@ -519,6 +525,11 @@ fn default_pool1_size() -> u32 {
 /// 默认连接池2大小：3
 fn default_pool2_size() -> u32 {
     3
+}
+
+/// 默认断流合并窗口：10 分钟
+fn default_clip_session_merge_minutes() -> u64 {
+    10
 }
 
 impl Default for Config {

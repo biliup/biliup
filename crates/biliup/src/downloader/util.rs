@@ -256,6 +256,8 @@ pub struct LifecycleFile<'a> {
     pub file_name: String,
     pub path: PathBuf,
     pub hook: CallbackFn<'a>,
+    /// 每个分段文件 [`Self::create`] 时调用，参数是带 `.part` 的临时路径。
+    pub start_hook: Option<CallbackFn<'a>>,
     pub extension: &'static str,
     /// 写入这一系列分段文件的字节累计（跨分段，不随 `create_new` 归零）。
     pub bytes_written: ByteCounter,
@@ -275,9 +277,19 @@ impl<'a> LifecycleFile<'a> {
             file_name: "".to_string(),
             path: Default::default(),
             hook: Box::new(hook),
+            start_hook: None,
             extension,
             bytes_written: ByteCounter::new(),
         }
+    }
+
+    /// 开始写每个分段文件时回调（参数为 `.part` 临时路径）。
+    pub fn with_start_hook<F>(mut self, hook: F) -> Self
+    where
+        F: FnMut(&str) + Send + Sync + 'a,
+    {
+        self.start_hook = Some(Box::new(hook));
+        self
     }
 
     /// 让写盘字节累计到调用方持有的计数器上（例如按录制任务汇总速率）。
@@ -304,6 +316,9 @@ impl<'a> LifecycleFile<'a> {
         }
 
         info!("Save to {}", self.path.display());
+        if let Some(hook) = self.start_hook.as_mut() {
+            hook(&self.path.to_string_lossy());
+        }
         Ok(self.path.as_path())
     }
 

@@ -5,6 +5,7 @@ use crate::server::errors::{AppError, AppResult};
 use biliup::downloader::util::ByteCounter;
 use error_stack::ResultExt;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -72,6 +73,9 @@ impl Streamlink {
 
         info!(cmd = %redact_process_debug(&cmd), "Starting streamlink download");
         let child = cmd.spawn().change_context(AppError::Unknown)?;
+        callback(SegmentEvent::Start {
+            next_file_path: PathBuf::from(&part_file),
+        });
         let status = spawn_log(
             child,
             &self.process_handle,

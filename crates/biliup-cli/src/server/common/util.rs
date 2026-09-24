@@ -412,6 +412,11 @@ impl Default for FileValidator {
 }
 
 impl FileValidator {
+    /// [`Self::validate`] 会不会因为文件太小把它过滤删除。
+    pub fn will_delete(&self, path: &Path) -> bool {
+        fs::metadata(path).is_ok_and(|m| m.len() < self.min_size)
+    }
+
     /// 验证文件有效性
     pub fn validate(&self, path: &Path) -> AppResult<()> {
         let metadata = fs::metadata(path).change_context(AppError::Unknown)?;

@@ -3,7 +3,8 @@
 //! 不依赖外部 `mesio` 二进制。
 //!
 //! 生命周期与其它下载器一致：`download` 阻塞到直播流结束 / 被 `stop` 取消 /
-//! 录制时间范围到期，期间每关闭一个分段文件就触发一次 [`SegmentEvent::Segment`]。
+//! 录制时间范围到期，期间每打开一个分段文件触发一次 [`SegmentEvent::Start`]，
+//! 每关闭一个触发一次 [`SegmentEvent::Segment`]。
 
 use crate::server::common::construct_headers;
 use crate::server::common::util::media_ext_from_url;
@@ -42,8 +43,13 @@ use tracing::{debug, info, warn};
 /// 管线内部通道容量（条目数），与 mesio-cli 默认值一致。
 const CHANNEL_SIZE: usize = 64;
 
-/// 分段回调载荷：已关闭的分段文件路径、0 起始的序号、时长（秒）与字节数。
-type SegmentClosed = (PathBuf, u32, f64, u64);
+/// writer 线程回传的分段事件。开段与关段走同一条通道，回调看到的顺序与落盘顺序一致。
+#[derive(Debug)]
+enum WriterEvent {
+    Opened(PathBuf),
+    /// 已关闭的分段文件路径、0 起始的序号、时长（秒）与字节数。
+    Closed(PathBuf, u32, f64, u64),
+}
 
 /// 直播预览旁路：写入端与「把一个管线条目旁路给它」的函数。
 type PreviewTee<I> = (PreviewSink, fn(&mut PreviewSink, &I));
@@ -109,7 +115,7 @@ impl Mesio {
         let pipeline_config = pipeline_config(&download_config);
         let output_dir = download_config.output_dir.clone();
         let base_name = download_config.recorder.filename_template();
-        let (seg_tx, seg_rx) = unbounded_channel::<SegmentClosed>();
+        let (seg_tx, seg_rx) = unbounded_channel::<WriterEvent>();
 
         // 录制时间范围：管线只负责按时长切片而不会自行退出，到点后主动取消，
         // 与 ffmpeg 内部分段用 `-t` 截停的语义一致。
@@ -130,6 +136,7 @@ impl Mesio {
                     output_dir,
                     base_name,
                 });
+                writer.set_on_segment_start_callback(segment_start_hook(seg_tx.clone()));
                 writer.set_on_segment_complete_callback(segment_complete_hook(seg_tx));
                 let keyframe_duration_ms = pipeline_config
                     .max_duration
@@ -212,6 +219,7 @@ impl Mesio {
                     max_file_size: (pipeline_config.max_file_size > 0)
                         .then_some(pipeline_config.max_file_size),
                 });
+                writer.set_on_segment_start_callback(segment_start_hook(seg_tx.clone()));
                 writer.set_on_segment_complete_callback(segment_complete_hook(seg_tx));
                 let items = stream::once(async { Ok(first) })
                     .chain(items)
@@ -330,8 +338,16 @@ fn warn_on_suffix_mismatch(configured: &str, actual: &str) {
     }
 }
 
+fn segment_start_hook(
+    seg_tx: UnboundedSender<WriterEvent>,
+) -> impl Fn(&std::path::Path, u32) + Send + Sync + 'static {
+    move |path, _index| {
+        let _ = seg_tx.send(WriterEvent::Opened(path.to_path_buf()));
+    }
+}
+
 fn segment_complete_hook(
-    seg_tx: UnboundedSender<SegmentClosed>,
+    seg_tx: UnboundedSender<WriterEvent>,
 ) -> impl Fn(&std::path::Path, u32, f64, u64, Option<&pipeline_common::SplitReason>)
 + Send
 + Sync
@@ -345,7 +361,12 @@ fn segment_complete_hook(
             reason = ?reason,
             "mesio 分段完成"
         );
-        let _ = seg_tx.send((path.to_path_buf(), index, duration_secs, size_bytes));
+        let _ = seg_tx.send(WriterEvent::Closed(
+            path.to_path_buf(),
+            index,
+            duration_secs,
+            size_bytes,
+        ));
     }
 }
 
@@ -367,7 +388,7 @@ async fn run_pipeline<'a, P, W>(
     items: Pin<Box<dyn Stream<Item = Result<P::Item, PipelineError>> + Send>>,
     spec: ChannelSpec<P::Item>,
     mut writer: W,
-    mut seg_rx: UnboundedReceiver<SegmentClosed>,
+    mut seg_rx: UnboundedReceiver<WriterEvent>,
     token: CancellationToken,
     callback: &mut (dyn FnMut(SegmentEvent) + Send + Sync + 'a),
     byte_meter: (ByteCounter, fn(&P::Item) -> usize),
@@ -405,11 +426,16 @@ where
         }
     });
 
-    while let Some((path, index, duration_secs, size_bytes)) = seg_rx.recv().await {
-        callback(SegmentEvent::Segment(
-            SegmentInfo::new(path, None, None, index as usize)
-                .with_stats(duration_secs, size_bytes),
-        ));
+    while let Some(event) = seg_rx.recv().await {
+        callback(match event {
+            WriterEvent::Opened(path) => SegmentEvent::Start {
+                next_file_path: path,
+            },
+            WriterEvent::Closed(path, index, duration_secs, size_bytes) => SegmentEvent::Segment(
+                SegmentInfo::new(path, None, None, index as usize)
+                    .with_stats(duration_secs, size_bytes),
+            ),
+        });
     }
 
     if let Err(e) = forward.await {

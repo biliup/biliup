@@ -14,11 +14,15 @@ use crate::server::core::monitor::Monitor;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Stage, WorkerStatus};
 use crate::server::infrastructure::models::hook_step::process;
+use crate::server::workbench::recorder::{
+    ClosedSegment, RecorderHandle, SessionRecorder, SessionTarget,
+};
 use async_channel::Sender;
 use biliup::downloader::live::{LivePlugin, LiveStatus, LiveStream, strip_ws_expire_override};
 use biliup::downloader::preview::PreviewHub;
 use danmaku_client::DanmakuEvent;
 use error_stack::ResultExt;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -64,6 +68,11 @@ impl SegmentEventProcessor {
             ),
             ctx,
         }
+    }
+
+    /// 这个分段交给 [`Self::process`] 后会不会被过滤删除。
+    pub fn will_discard(&self, path: &Path) -> bool {
+        self.file_validator.will_delete(path)
     }
 
     /// 处理分段事件
@@ -297,6 +306,21 @@ impl DownloadTask {
             client.download().await?;
         }
 
+        // 切片工作台的场次 / 分段记录，与本次下载任务同寿命
+        let workbench = SessionRecorder::spawn(
+            ctx.pool().clone(),
+            SessionTarget {
+                streamer_id: ctx.live_streamer().id,
+                streamerinfo_id: ctx.id(),
+                title: ctx.streamer_info().title.clone(),
+                merge_window_ms: ctx
+                    .config()
+                    .clip_session_merge_minutes
+                    .saturating_mul(60_000)
+                    .min(i64::MAX as u64) as i64,
+            },
+        );
+
         // 初始化组件
         let mut processor = SegmentEventProcessor::new(sender, ctx.clone());
         // 边录边传：记录已确认分 P 数，只有真正推进投稿才算“有进展”。
@@ -311,7 +335,13 @@ impl DownloadTask {
             // 执行下载
             let bytes_before = self.meter.counter().total();
             let components = self
-                .download(&mut processor, ctx.clone(), danmaku_client.clone(), &stream)
+                .download(
+                    &mut processor,
+                    ctx.clone(),
+                    danmaku_client.clone(),
+                    &stream,
+                    workbench.handle(),
+                )
                 .await;
             if !matches!(self.downloader, DownloaderRuntime::StreamGears(_))
                 && ws_expire_override_failed(
@@ -424,6 +454,13 @@ impl DownloadTask {
         {
             error!("Error stopping danmaku client: {}", e);
         }
+        // 场次的 ended_at 要在房间交回监控循环之前写好，很快再开播时才能接上这一场
+        if tokio::time::timeout(Duration::from_secs(30), workbench.finish())
+            .await
+            .is_err()
+        {
+            warn!(url = url, "切片工作台场次收尾超时，转入后台完成");
+        }
         // 清理资源
         // 确保状态更新和资源清理
         rooms_handle.wake_waker(ctx.worker_id()).await;
@@ -438,7 +475,9 @@ impl DownloadTask {
         ctx: Context,
         danmaku_client: Option<Arc<dyn DanmakuClient + Send + Sync>>,
         stream: &LiveStream,
+        workbench: RecorderHandle,
     ) -> AppResult<DownloadStatus> {
+        workbench.run_started();
         // 获取配置和主播信息
         let streamer = ctx.live_streamer();
         let mut download_config = ctx.download_config(stream);
@@ -478,8 +517,8 @@ impl DownloadTask {
         // let hook = processor.create_hook(danmaku_client.clone());
         let hook = |event| {
             match event {
-                SegmentEvent::Start { .. } => {
-                    warn!("Ignoring unexpected segment start event");
+                SegmentEvent::Start { next_file_path } => {
+                    workbench.opened(&next_file_path);
                 }
                 SegmentEvent::Segment(mut event) => {
                     // 分段时，获取到的是已下载的文件名
@@ -492,6 +531,18 @@ impl DownloadTask {
                             Err(e) => error!("Danmaku rolling error: {}", e),
                         }
                     }
+                    workbench.closed(
+                        &event.prev_file_path,
+                        ClosedSegment {
+                            duration_ms: event
+                                .duration_secs
+                                .filter(|d| d.is_finite() && *d > 0.0)
+                                .map(|d| (d * 1000.0).round() as u64),
+                            bytes: event.size_bytes,
+                            danmaku_path: event.danmaku_file_path.clone(),
+                            discard: processor.will_discard(&event.prev_file_path),
+                        },
+                    );
                     // 异步处理事件
                     // let processor = processor.clone();
                     if let Err(e) = processor.process(event) {
