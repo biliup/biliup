@@ -3,7 +3,7 @@ name: Desktop (Windows)
 on:
   release:
     types: [created]
-  # 手动触发只构建，安装包作为 artifact 上传，不碰 Release
+  # 手动触发只构建并跑安装冒烟测试，产物作为 artifact 上传，不碰 Release
   workflow_dispatch:
 
 permissions:
@@ -52,3 +52,41 @@ jobs:
         path: |
           tauri-app/src-tauri/target/release/bundle/nsis/*.exe
           tauri-app/src-tauri/target/release/bundle/msi/*.msi
+    - name: Smoke test the installer
+      if: github.event_name != 'release'
+      shell: pwsh
+      run: |
+        $setup = Get-ChildItem tauri-app/src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+        $installDir = Join-Path $env:LOCALAPPDATA 'bbup-app'
+        $dataDir = Join-Path $env:APPDATA 'com.tauri-app.app'
+        # 模拟旧版在安装目录留下的 data/
+        New-Item -ItemType Directory -Force -Path (Join-Path $installDir 'data') | Out-Null
+        Set-Content (Join-Path $installDir 'data/legacy-marker.txt') 'from the old install directory'
+
+        Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait
+        $exe = Get-ChildItem $installDir -Filter *.exe | Where-Object { $_.Name -notlike 'uninstall*' } | Select-Object -First 1
+        Write-Host "installed: $($exe.FullName)"
+        $app = Start-Process -FilePath $exe.FullName -PassThru
+
+        $status = 0
+        for ($i = 0; $i -lt 60 -and $status -ne 200; $i++) {
+          Start-Sleep -Seconds 2
+          try { $status = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 http://127.0.0.1:19159/).StatusCode } catch {}
+        }
+        Write-Host "GET / -> $status"
+
+        # 关窗口，确认进程自己退出并停掉服务
+        if ($app.CloseMainWindow()) { $exited = $app.WaitForExit(30000) } else { $exited = $false }
+        if (-not $exited) { Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue }
+        Write-Host "exited after closing the window: $exited"
+
+        Get-ChildItem -Recurse $dataDir | Select-Object -ExpandProperty FullName
+        $log = Get-Content (Join-Path $dataDir 'ds_update.log') -Raw
+        $log -split "`n" | Select-Object -Last 40
+
+        if ($status -ne 200) { throw 'GET http://127.0.0.1:19159/ did not return 200' }
+        if (-not (Test-Path (Join-Path $dataDir 'data/data.sqlite3'))) { throw 'no database in the app data directory' }
+        if (-not (Test-Path (Join-Path $dataDir 'data/legacy-marker.txt'))) { throw 'legacy data/ was not copied' }
+        if (-not (Test-Path (Join-Path $installDir 'data/legacy-marker.txt'))) { throw 'legacy data/ was not kept' }
+        if ($log -notmatch 'Web UI ready') { throw 'the shell never saw the Web UI ready' }
+        if ($exited -and $log -notmatch 'biliup server stopped') { throw 'the server was not stopped on exit' }
