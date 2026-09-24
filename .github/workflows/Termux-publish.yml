@@ -39,7 +39,7 @@ jobs:
           dpkg-deb -x $FNAME python
           cp -a python/data/data/com.termux/files/usr/lib/libpython* $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/24
           sed -i 's/"abi3-py[0-9]*",\? *//g' crates/stream-gears/Cargo.toml
-          sed -i 's/aiohttp\[speedups\] >= 3\.9\.5/aiohttp[speedups] <= 3.9.5/' pyproject.toml
+          sed -i 's/aiohttp\[speedups\] >= 3\.9\.5/aiohttp[speedups] <= 3.9.5/' crates/stream-gears/pyproject.toml
       - name: Build wheel for aarch64 (Termux)
         run: |
           export NDK_BIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
@@ -48,6 +48,7 @@ jobs:
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$NDK_BIN/aarch64-linux-android24-clang
           export PYO3_CROSS_LIB_DIR=python/data/data/com.termux/files/usr/lib/
           maturin build \
+            -m crates/stream-gears/Cargo.toml \
             --release \
             --strip \
             --manylinux off \

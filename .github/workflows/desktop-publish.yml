@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # BtbN win64 GPL 静态构建 zip 的 SHA-256。tag 与版本号取自 Dockerfile（与 Docker 镜像同一构建），
+  # 见 .github/scripts/ffmpeg-version.sh；Dockerfile 升级 FFmpeg 时同步更新这里。
+  FFMPEG_WIN64_SHA256: 273abb45f3f9f76c303e35ff39f5bb6c23c163ae65f6244a32b7d4a7f6cf0616
+
 jobs:
   build:
     permissions:
@@ -24,6 +29,62 @@ jobs:
       run: |
         npm install
         npm run build
+    # 只取 ffmpeg.exe 和许可文本，由 tauri.ffmpeg.conf.json 作为资源打进安装包（安装目录下的 ffmpeg\）。
+    # GPL 对应源码不由我们托管：README.txt 和 Release 说明链接到上游固定 commit 的 FFmpeg 源码
+    # 与 BtbN 构建脚本（scripts.d/ 固定了各依赖的版本与源码地址）。
+    - name: Download FFmpeg
+      shell: bash
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        eval "$(bash .github/scripts/ffmpeg-version.sh)"
+        # tag 可以被移动，链接用完整 commit
+        ffmpeg_sha=$(gh api "repos/FFmpeg/FFmpeg/commits/${FFMPEG_COMMIT}" --jq .sha)
+        btbn_sha=$(gh api "repos/BtbN/FFmpeg-Builds/commits/${FFMPEG_TAG}" --jq .sha)
+        [[ $ffmpeg_sha == "${FFMPEG_COMMIT}"* && ${#btbn_sha} == 40 ]] || {
+          echo "cannot resolve FFmpeg ${FFMPEG_COMMIT} / BtbN ${FFMPEG_TAG}: '${ffmpeg_sha}' '${btbn_sha}'" >&2
+          exit 1
+        }
+        {
+          echo "FFMPEG_TAG=${FFMPEG_TAG}"
+          echo "FFMPEG_VERSION=${FFMPEG_VERSION}"
+          echo "FFMPEG_SOURCE_URL=https://github.com/FFmpeg/FFmpeg/tree/${ffmpeg_sha}"
+          echo "FFMPEG_BUILD_SCRIPTS_URL=https://github.com/BtbN/FFmpeg-Builds/tree/${btbn_sha}"
+        } >> "$GITHUB_ENV"
+        asset="ffmpeg-${FFMPEG_VERSION}-win64-gpl-${FFMPEG_BRANCH}"
+        curl -fsSL --retry 3 -o ffmpeg.zip \
+          "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_TAG}/${asset}.zip"
+        echo "${FFMPEG_WIN64_SHA256}  ffmpeg.zip" | sha256sum -c -
+        dest=tauri-app/src-tauri/ffmpeg
+        mkdir -p "$dest"
+        unzip -j -o ffmpeg.zip "${asset}/bin/ffmpeg.exe" "${asset}/LICENSE.txt" -d "$dest"
+        cat > "$dest/README.txt" <<EOF
+        FFmpeg ${FFMPEG_VERSION} (win64, GPL, static), built by BtbN/FFmpeg-Builds ${FFMPEG_TAG}.
+        The biliup Docker image uses the linux64 / linuxarm64 builds of the same tag.
+
+        FFmpeg is licensed under the GNU General Public License version 3 or later
+        (see LICENSE.txt in this folder). biliup runs it as a separate program.
+
+        Corresponding source code, hosted upstream:
+          FFmpeg source at commit ${ffmpeg_sha}:
+            https://github.com/FFmpeg/FFmpeg/tree/${ffmpeg_sha}
+          Build scripts and patches, BtbN/FFmpeg-Builds ${FFMPEG_TAG} (commit ${btbn_sha}):
+            https://github.com/BtbN/FFmpeg-Builds/tree/${btbn_sha}
+            scripts.d/ pins the version and source URL of every library FFmpeg is
+            built with; download.sh in the same tree fetches all of them.
+        EOF
+        ls -l "$dest"
+        rm ffmpeg.zip
+    - name: Render download notes
+      shell: bash
+      run: |
+        sed -e "s|{{FFMPEG_VERSION}}|${FFMPEG_VERSION}|g" \
+          -e "s|{{FFMPEG_TAG}}|${FFMPEG_TAG}|g" \
+          -e "s|{{FFMPEG_SOURCE_URL}}|${FFMPEG_SOURCE_URL}|g" \
+          -e "s|{{FFMPEG_BUILD_SCRIPTS_URL}}|${FFMPEG_BUILD_SCRIPTS_URL}|g" \
+          .github/desktop-release-notes.md > desktop-notes.md
+        if grep -n '{{' desktop-notes.md; then exit 1; fi
+        cat desktop-notes.md
     - name: install Rust stable
       uses: dtolnay/rust-toolchain@stable
     - uses: Swatinem/rust-cache@v2
@@ -41,11 +102,25 @@ jobs:
         # 用 releaseId 而不是 tagName：v1 找到已发布的 Release 时会用 releaseName/releaseBody 覆盖它的标题和正文
         releaseId: ${{ github.event.release.id }}
         projectPath: tauri-app
+        args: --config src-tauri/tauri.ffmpeg.conf.json
+    - name: Add download notes to the release
+      if: github.event_name == 'release'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TAG: ${{ github.event.release.tag_name }}
+      run: |
+        body=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+        if ! grep -q 'biliup-desktop-notes' <<<"$body"; then
+          printf '%s\n\n%s\n' "$body" "$(cat desktop-notes.md)" > notes.md
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+        fi
     - name: Build
       if: github.event_name != 'release'
       uses: tauri-apps/tauri-action@v1
       with:
         projectPath: tauri-app
+        args: --config src-tauri/tauri.ffmpeg.conf.json
     - uses: actions/upload-artifact@v7
       if: github.event_name != 'release'
       with:

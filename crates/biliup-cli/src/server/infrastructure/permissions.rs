@@ -1,8 +1,7 @@
 //! Web 用户的固定三角色与权限点（#1717）。
 //!
 //! 角色只是权限点的集合；路由按权限点声明所需权限（见 [`required_permission`]），
-//! 没有声明的路由只允许超管访问。以后要开放自定义勾选，只需让用户自带一组权限点，
-//! 不用再动路由表。
+//! 没有声明的路由只允许超管访问。「能不能」的判断统一在 [`super::policy`]，这里只是数据。
 
 use axum::http::Method;
 use serde::{Deserialize, Serialize};
@@ -161,6 +160,8 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         "/v1/uploads" if method == Method::POST => UploadSubmit,
         "/v1/videos" if get => FileView,
         "/v1/status" if get => StreamerView,
+        // 三个角色都有 StreamerView，等于登录即可
+        "/v1/tools" if get => StreamerView,
         "/v1/ws/logs" if get => LogView,
         "/static/{path}" if get => {
             let name = raw_path.rsplit('/').next().unwrap_or_default();
@@ -170,18 +171,13 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
                 FileView
             }
         }
-        "/v1/web-users" | "/v1/web-users/{id}" | "/v1/web-users/{id}/logout-all" => UserManage,
+        "/v1/web-users"
+        | "/v1/web-users/roles"
+        | "/v1/web-users/{id}"
+        | "/v1/web-users/{id}/logout-all" => UserManage,
         _ => return None,
     };
     Some(permission)
-}
-
-/// 该角色能否访问这条路由。超管不受路由表限制。
-pub fn route_allowed(role: Role, method: &Method, route: &str, raw_path: &str) -> bool {
-    if role == Role::Admin {
-        return true;
-    }
-    required_permission(method, route, raw_path).is_some_and(|permission| role.has(permission))
 }
 
 #[cfg(test)]
@@ -263,36 +259,6 @@ mod tests {
     }
 
     #[test]
-    fn unknown_routes_and_methods_are_admin_only() {
-        for role in [Role::Operator, Role::Viewer] {
-            assert!(!route_allowed(
-                role,
-                &Method::GET,
-                "/v1/new-feature",
-                "/v1/new-feature"
-            ));
-            assert!(!route_allowed(
-                role,
-                &Method::PATCH,
-                "/v1/streamers",
-                "/v1/streamers"
-            ));
-            assert!(!route_allowed(
-                role,
-                &Method::DELETE,
-                "/v1/status",
-                "/v1/status"
-            ));
-        }
-        assert!(route_allowed(
-            Role::Admin,
-            &Method::GET,
-            "/v1/new-feature",
-            "/v1/new-feature"
-        ));
-    }
-
-    #[test]
     fn static_route_distinguishes_logs_from_recordings() {
         assert_eq!(
             required_permission(&Method::GET, "/static/{path}", "/static/ds_update.log"),
@@ -304,12 +270,59 @@ mod tests {
         );
     }
 
+    /// `export type <name> = 'a' | 'b'` 里的字符串字面量；单行或每行一个 `| 'x'` 都行。
+    fn ts_union(source: &str, name: &str) -> Vec<String> {
+        let head = format!("export type {name} =");
+        let start = source.find(&head).expect("前端类型定义不见了") + head.len();
+        let mut lines = source[start..].lines();
+        let mut union = lines.next().unwrap_or_default().to_string();
+        for line in lines {
+            if !line.trim_start().starts_with('|') {
+                break;
+            }
+            union.push_str(line);
+        }
+        union
+            .split('|')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(|item| {
+                item.strip_prefix('\'')
+                    .and_then(|rest| rest.strip_suffix('\''))
+                    .unwrap_or_else(|| panic!("{name} 里有非字符串字面量：{item}"))
+                    .to_string()
+            })
+            .collect()
+    }
+
+    fn serde_names<T: Serialize>(items: impl IntoIterator<Item = T>) -> Vec<String> {
+        items
+            .into_iter()
+            .map(|item| {
+                serde_json::to_value(item)
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    /// 前端 `app/lib/use-me.ts` 手写了权限点与角色的字符串联合类型，两边必须一一对应：
+    /// 少了前端就判断不到新权限点，多了就是前端在判断一个后端从不下发的权限。
     #[test]
-    fn permission_names_match_the_frontend_contract() {
-        assert_eq!(
-            serde_json::to_value(Permission::StreamerHooks).unwrap(),
-            "streamer.hooks"
-        );
-        assert_eq!(serde_json::to_value(Role::Operator).unwrap(), "operator");
+    fn names_match_the_frontend_contract() {
+        let source = include_str!("../../../../../app/lib/use-me.ts");
+        let mut frontend = ts_union(source, "Permission");
+        let mut backend = serde_names(Permission::ALL.iter().copied());
+        frontend.sort();
+        backend.sort();
+        assert_eq!(frontend, backend, "use-me.ts 的 Permission 与后端不一致");
+
+        let mut frontend = ts_union(source, "Role");
+        let mut backend = serde_names(Role::ALL);
+        frontend.sort();
+        backend.sort();
+        assert_eq!(frontend, backend, "use-me.ts 的 Role 与后端不一致");
     }
 }

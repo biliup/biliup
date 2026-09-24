@@ -15,7 +15,7 @@ use crate::server::infrastructure::models::upload_streamer::{
     InsertUploadStreamer, UploadStreamer,
 };
 use crate::server::infrastructure::models::{Configuration, FileItem, StreamerInfo};
-use crate::server::infrastructure::permissions::Permission;
+use crate::server::infrastructure::policy::{Field, Subject};
 use crate::server::infrastructure::repositories::{
     del_streamer, delete_bilibili_cookie, get_all_streamer, get_upload_config,
     register_bilibili_cookie,
@@ -62,7 +62,7 @@ pub async fn get_streamers_endpoint(
     let live_streamers = get_all_streamer(&pool).await.map_err(report_to_response)?;
     let mut results = Vec::new();
     let workers = managers.get_rooms().await;
-    let show_hooks = caller.can(Permission::StreamerHooks);
+    let show_hooks = caller.can_access(Field::StreamerHooks);
     for mut x in live_streamers {
         let option = workers
             .clone()
@@ -118,7 +118,7 @@ pub async fn get_streamers_endpoint(
     Ok(Json(results))
 }
 
-/// 钩子走 `sh -c`、`override` 能覆盖任意全局配置，两者合起来等于服务器 shell，只给有 `streamer.hooks` 的人看。
+/// 钩子走 `sh -c`、`override` 能覆盖任意全局配置，两者合起来等于服务器 shell，见 [`Field::StreamerHooks`]。
 fn strip_hooks(streamer: &mut LiveStreamer) {
     streamer.override_cfg = None;
     streamer.preprocessor = None;
@@ -134,7 +134,7 @@ pub async fn post_streamers_endpoint(
     State(pool): State<ConnectionPool>,
     Json(mut payload): Json<InsertLiveStreamer>,
 ) -> Result<Json<LiveStreamer>, Response> {
-    if !caller.can(Permission::StreamerHooks) {
+    if !caller.can_access(Field::StreamerHooks) {
         payload.override_cfg = None;
         payload.preprocessor = None;
         payload.segment_processor = None;
@@ -170,7 +170,7 @@ pub async fn put_streamers_endpoint(
     State(pool): State<ConnectionPool>,
     Json(mut payload): Json<LiveStreamer>,
 ) -> Result<Json<LiveStreamer>, Response> {
-    if !caller.can(Permission::StreamerHooks) {
+    if !caller.can_access(Field::StreamerHooks) {
         // 表单是整体覆盖保存；没有钩子权限的人看不到这几项，这里以库里原值为准，不看请求体。
         let current = LiveStreamer::select()
             .where_("id = ?")
@@ -207,7 +207,7 @@ pub async fn put_streamers_endpoint(
 
     info!(id = id, "successfully update live streamers");
     let mut streamer = streamer;
-    if !caller.can(Permission::StreamerHooks) {
+    if !caller.can_access(Field::StreamerHooks) {
         strip_hooks(&mut streamer);
     }
     Ok(Json(streamer))
@@ -265,7 +265,7 @@ pub async fn get_configuration(
     State(config): State<Arc<RwLock<Config>>>,
 ) -> Result<Json<serde_json::Value>, Response> {
     let config = config.read().unwrap().clone();
-    if caller.can(Permission::ConfigEdit) {
+    if caller.can_access(Field::ConfigSecrets) {
         return serde_json::to_value(config)
             .map(Json)
             .change_context(AppError::Unknown)
@@ -365,6 +365,7 @@ pub async fn put_configuration(
     saved_config
         .validate_segment_limits()
         .map_err(report_to_response)?;
+    crate::tools::set_configured_ffmpeg(saved_config.ffmpeg_path.as_deref());
     *config.write().unwrap() = saved_config;
     let guard = config.read().unwrap();
     if let Some(loggers_level) = &guard.loggers_level {
@@ -422,12 +423,18 @@ pub async fn get_upload_streamers_endpoint(
     Ok(Json(uploader_streamers))
 }
 
-/// 非超管保存投稿模板时的两处限制：投稿账号只能从已登记的 B 站账号里选（新增账号归账号管理）；
-/// 封面路径界面上不提供编辑，而它会被原样读出来上传，所以只保留原值。
-async fn restrict_template_for_non_admin(
+/// 保存投稿模板时的两个受保护字段：没有 [`Field::TemplateAccount`] 的人只能从已登记的
+/// B 站账号里选（新增账号归账号管理）；没有 [`Field::TemplateCoverPath`] 的人封面路径只保留原值。
+async fn protect_template_fields(
+    subject: &Subject,
     pool: &ConnectionPool,
     upload_streamer: &mut InsertUploadStreamer,
 ) -> Result<(), Response> {
+    let keep_cover = !subject.can_access(Field::TemplateCoverPath);
+    let check_account = !subject.can_access(Field::TemplateAccount);
+    if !keep_cover && !check_account {
+        return Ok(());
+    }
     let current = match upload_streamer.id {
         Some(id) => UploadStreamer::select()
             .where_("id = ?")
@@ -438,9 +445,14 @@ async fn restrict_template_for_non_admin(
             .map_err(report_to_response)?,
         None => None,
     };
-    upload_streamer.cover_path = current
-        .as_ref()
-        .and_then(|template| template.cover_path.clone());
+    if keep_cover {
+        upload_streamer.cover_path = current
+            .as_ref()
+            .and_then(|template| template.cover_path.clone());
+    }
+    if !check_account {
+        return Ok(());
+    }
     let Some(cookie) = upload_streamer
         .user_cookie
         .as_deref()
@@ -473,9 +485,7 @@ pub async fn add_upload_streamer_endpoint(
     State(pool): State<ConnectionPool>,
     Json(mut upload_streamer): Json<InsertUploadStreamer>,
 ) -> Result<Json<serde_json::Value>, Response> {
-    if !caller.can(Permission::AccountManage) {
-        restrict_template_for_non_admin(&pool, &mut upload_streamer).await?;
-    }
+    protect_template_fields(&caller.subject, &pool, &mut upload_streamer).await?;
     if upload_streamer.id.is_none() {
         Ok(Json(
             serde_json::to_value(
@@ -623,6 +633,80 @@ mod user_payload_tests {
     }
 }
 
+#[cfg(test)]
+mod template_field_tests {
+    use super::protect_template_fields;
+    use crate::server::infrastructure::connection_pool::ConnectionManager;
+    use crate::server::infrastructure::models::upload_streamer::InsertUploadStreamer;
+    use crate::server::infrastructure::permissions::Role;
+    use crate::server::infrastructure::policy::Subject;
+    use axum::http::StatusCode;
+    use ormlite::Model;
+
+    fn template(id: Option<i64>, cookie: &str, cover: &str) -> InsertUploadStreamer {
+        serde_json::from_value(serde_json::json!({
+            "id": id,
+            "template_name": "t",
+            "user_cookie": cookie,
+            "cover_path": cover,
+            "tags": [],
+        }))
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn only_account_managers_bind_any_account_and_set_the_cover_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO configuration (key, value) VALUES ('bilibili-cookies', 'a.json')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let saved = template(None, "old.json", "/srv/cover.jpg")
+            .insert(&pool)
+            .await
+            .unwrap();
+
+        let operator = Subject::user(2, Role::Operator);
+        // 已登记的账号可以选，封面路径回到库里原值
+        let mut edit = template(saved.id, "a.json", "/etc/passwd");
+        protect_template_fields(&operator, &pool, &mut edit)
+            .await
+            .unwrap();
+        assert_eq!(edit.cover_path.as_deref(), Some("/srv/cover.jpg"));
+        assert_eq!(edit.user_cookie.as_deref(), Some("a.json"));
+        // 模板原来绑的账号即使没登记也可以保留
+        let mut keep = template(saved.id, "old.json", "");
+        protect_template_fields(&operator, &pool, &mut keep)
+            .await
+            .unwrap();
+        // 没登记的账号不行
+        let mut other = template(saved.id, "/tmp/evil.json", "");
+        let rejected = protect_template_fields(&operator, &pool, &mut other)
+            .await
+            .unwrap_err();
+        assert_eq!(rejected.status(), StatusCode::FORBIDDEN);
+        // 新建模板没有原值，封面路径清空
+        let mut created = template(None, "a.json", "/etc/passwd");
+        protect_template_fields(&operator, &pool, &mut created)
+            .await
+            .unwrap();
+        assert_eq!(created.cover_path, None);
+
+        for admin in [Subject::user(1, Role::Admin), Subject::unrestricted()] {
+            let mut edit = template(saved.id, "/tmp/any.json", "/srv/new.jpg");
+            protect_template_fields(&admin, &pool, &mut edit)
+                .await
+                .unwrap();
+            assert_eq!(edit.cover_path.as_deref(), Some("/srv/new.jpg"));
+            assert_eq!(edit.user_cookie.as_deref(), Some("/tmp/any.json"));
+        }
+    }
+}
+
 pub async fn delete_user_endpoint(
     Path(id): Path<i64>,
     State(pool): State<ConnectionPool>,
@@ -717,6 +801,11 @@ pub async fn get_videos() -> Result<Json<Vec<serde_json::Value>>, Response> {
     Ok(Json(file_list))
 }
 
+/// 外部工具是否可用（目前只有 ffmpeg），前端据此决定依赖 ffmpeg 的功能能否使用。
+pub async fn get_tools() -> Json<serde_json::Value> {
+    Json(json!({ "ffmpeg": crate::tools::ffmpeg_status().await }))
+}
+
 // #[axum::debug_handler(state = ServiceRegister)]
 pub async fn get_status(
     caller: Caller,
@@ -726,7 +815,8 @@ pub async fn get_status(
 ) -> Result<Json<serde_json::Value>, Response> {
     let workers = managers.get_rooms().await;
 
-    let full = caller.can(Permission::ConfigEdit);
+    let show_hooks = caller.can_access(Field::StreamerHooks);
+    let show_account = caller.can_access(Field::TemplateAccount);
     let mut sw = Vec::new();
     for worker in &workers {
         let mut room = serde_json::json!({
@@ -735,13 +825,15 @@ pub async fn get_status(
             "live_streamer": worker.live_streamer,
             "upload_streamer": worker.upload_streamer,
         });
-        if !full {
+        if !show_hooks {
             redact::streamer_hooks(&mut room["live_streamer"]);
+        }
+        if !show_account {
             redact::upload_template(&mut room["upload_streamer"]);
         }
         sw.push(room);
     }
-    let config = if full {
+    let config = if caller.can_access(Field::ConfigSecrets) {
         serde_json::to_value(&*config.read().unwrap()).unwrap_or_default()
     } else {
         redact::config(&*config.read().unwrap())

@@ -17,9 +17,9 @@ import { IconPlusCircle, IconUserGroup } from '@douyinfe/semi-icons'
 import type { FormApi } from '@douyinfe/semi-ui/lib/es/form'
 import PageHeader from '../components/PageHeader'
 import dc from '@/app/ui/data-card.module.scss'
-import { API_BASE, fetcher } from '@/app/lib/api-streamer'
-import { ROLE_DESCRIPTIONS, ROLE_LABELS, useMe } from '@/app/lib/use-me'
-import type { Role } from '@/app/lib/use-me'
+import { API_BASE, fetcher, revalidateMe } from '@/app/lib/api-streamer'
+import { PERMISSION_LABELS, ROLE_LABELS, useMe } from '@/app/lib/use-me'
+import type { Permission, Role } from '@/app/lib/use-me'
 import { MIN_PASSWORD_LENGTH } from '@/app/ui/ChangePasswordModal'
 import { humDate } from '@/app/lib/utils'
 import { timeAgo } from '@/app/lib/use-dashboard'
@@ -37,8 +37,15 @@ interface WebUser {
   last_login_at: number | null
 }
 
+/** 角色目录：每个角色实际拥有的权限点，由后端授权决策点给出 */
+interface RoleInfo {
+  role: Role
+  permissions: Permission[]
+}
+
 const USERS_KEY = '/v1/web-users'
-const ROLES: Role[] = ['admin', 'operator', 'viewer']
+const ROLES_KEY = '/v1/web-users/roles'
+const ALL_PERMISSIONS = Object.keys(PERMISSION_LABELS) as Permission[]
 const ROLE_COLORS: Record<Role, 'red' | 'blue' | 'grey'> = {
   admin: 'red',
   operator: 'blue',
@@ -56,6 +63,8 @@ async function call(method: string, url: string, body?: unknown) {
     window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname)}`)
     throw new Error('登录已失效')
   }
+  // 自己的用户管理权限被收回了：刷新权限点，页面随之换成无权限提示
+  if (res.status === 403) revalidateMe()
   if (!res.ok) {
     const data = await res.json().catch(() => null)
     throw new Error(data?.message || `操作失败（HTTP ${res.status}）`)
@@ -72,13 +81,19 @@ const passwordRules = [
   },
 ]
 
-function RoleOptions() {
+/** 按后端给的权限点描述角色，前端不再手写「哪个角色能做什么」 */
+function describe(permissions: Permission[]) {
+  if (ALL_PERMISSIONS.every((p) => permissions.includes(p))) return '全部权限'
+  return permissions.map((p) => PERMISSION_LABELS[p] ?? p).join('、')
+}
+
+function RoleOptions({ roles }: { roles: RoleInfo[] }) {
   return (
     <>
-      {ROLES.map((role) => (
+      {roles.map(({ role, permissions }) => (
         <Form.Radio key={role} value={role} className={styles.roleOption}>
           <span className={styles.roleName}>{ROLE_LABELS[role]}</span>
-          <span className={styles.roleDesc}>{ROLE_DESCRIPTIONS[role]}</span>
+          <span className={styles.roleDesc}>{describe(permissions)}</span>
         </Form.Radio>
       ))}
     </>
@@ -95,10 +110,12 @@ type DialogValues = { username?: string; password?: string; role?: Role }
 
 function UserDialog({
   dialog,
+  roles,
   onClose,
   onDone,
 }: {
   dialog: Exclude<Dialog, null>
+  roles: RoleInfo[]
   onClose: () => void
   onDone: () => void
 }) {
@@ -191,7 +208,7 @@ function UserDialog({
         )}
         {dialog.kind !== 'password' && (
           <Form.RadioGroup field="role" label="角色" direction="vertical" rules={[{ required: true }]}>
-            <RoleOptions />
+            <RoleOptions roles={roles} />
           </Form.RadioGroup>
         )}
       </Form>
@@ -205,10 +222,16 @@ export default function UsersPage() {
   // 六列表格放在侧栏旁边至少要 960 左右的视口；更窄时改成卡片，操作按钮不会被裁掉
   const compact = useIsMobile(960)
   const { data: users, error, isLoading, mutate } = useSWR<WebUser[]>(USERS_KEY, fetcher)
+  const { data: roles, error: rolesError, isLoading: rolesLoading, mutate: mutateRoles } = useSWR<RoleInfo[]>(
+    ROLES_KEY,
+    fetcher,
+    { revalidateOnFocus: false },
+  )
   const [dialog, setDialog] = useState<Dialog>(null)
 
   const refresh = () => {
     mutate().catch(() => undefined)
+    if (rolesError) mutateRoles().catch(() => undefined)
   }
 
   const run = async (action: () => Promise<unknown>, success: string) => {
@@ -318,16 +341,19 @@ export default function UsersPage() {
   ]
 
   let body
-  if (isLoading) {
+  if (isLoading || rolesLoading) {
     body = (
       <div className={styles.center}>
         <Spin size="large" />
       </div>
     )
-  } else if (error) {
+  } else if (error || rolesError || !roles) {
     body = (
       <div className={styles.center}>
-        <Empty title="加载失败" description={(error as Error).message || '无法获取用户列表'} />
+        <Empty
+          title="加载失败"
+          description={((error || rolesError) as Error | undefined)?.message || '无法获取用户列表'}
+        />
         <Button onClick={refresh} style={{ marginTop: 12 }}>
           重试
         </Button>
@@ -375,7 +401,12 @@ export default function UsersPage() {
         title="用户管理"
         description="为其他人开设账号并分配角色。改动即时生效，至少保留一个启用中的超级管理员"
         actions={
-          <Button icon={<IconPlusCircle />} theme="solid" onClick={() => setDialog({ kind: 'create' })}>
+          <Button
+            icon={<IconPlusCircle />}
+            theme="solid"
+            disabled={!roles}
+            onClick={() => setDialog({ kind: 'create' })}
+          >
             {isMobile ? '新建' : '新建用户'}
           </Button>
         }
@@ -393,17 +424,19 @@ export default function UsersPage() {
         )}
         {body}
         <div className={styles.legend}>
-          {ROLES.map((role) => (
+          {roles?.map(({ role, permissions }) => (
             <div key={role} className={styles.legendItem}>
               {roleCell({ role } as WebUser)}
               <Text type="tertiary" size="small">
-                {ROLE_DESCRIPTIONS[role]}
+                {describe(permissions)}
               </Text>
             </div>
           ))}
         </div>
       </div>
-      {dialog && <UserDialog dialog={dialog} onClose={() => setDialog(null)} onDone={refresh} />}
+      {dialog && roles && (
+        <UserDialog dialog={dialog} roles={roles} onClose={() => setDialog(null)} onDone={refresh} />
+      )}
     </>
   )
 }

@@ -4,7 +4,7 @@ import dynamic from 'next/dynamic'
 import { Button, Modal, Radio, RadioGroup, Switch, Tag, Toast, Tooltip, Typography } from '@douyinfe/semi-ui'
 import { IconChevronDown, IconPlay, IconRefresh } from '@douyinfe/semi-icons'
 import type { ButtonProps } from '@douyinfe/semi-ui/lib/es/button'
-import { LiveStreamerEntity } from '@/app/lib/api-streamer'
+import { LiveStreamerEntity, revalidateMe } from '@/app/lib/api-streamer'
 import { platformName } from '@/app/lib/status'
 import {
   canPreview,
@@ -182,6 +182,8 @@ export function LivePreviewPlayer({
 
   const scheduleReconnect = useCallback(
     (why: string) => {
+      // 会话被收回时后端会截断预览流，表现为一次断流：刷新权限点，失效就跳登录页，降级就收起页面
+      revalidateMe()
       if (attemptsRef.current >= MAX_AUTO_RECONNECT) {
         setPhase('ended')
         setMessage(`${why}，已重连 ${MAX_AUTO_RECONNECT} 次`)

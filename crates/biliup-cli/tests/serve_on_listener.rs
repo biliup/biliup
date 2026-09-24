@@ -42,6 +42,7 @@ async fn serves_on_prebound_listener_until_host_shutdown() {
         shutdown: Some(Box::pin(async move {
             let _ = stopped.await;
         })),
+        ffmpeg: None,
     }));
 
     let mut status = None;

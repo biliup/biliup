@@ -3,6 +3,7 @@ use crate::server::core::downloader::{
 };
 use crate::server::common::util::redact_process_debug;
 use crate::server::errors::{AppError, AppResult};
+use crate::tools;
 use error_stack::{ResultExt, bail};
 use std::{
     path::{Path, PathBuf},
@@ -12,7 +13,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::{fs, process::Command, time::timeout};
+use tokio::{fs, time::timeout};
 use tracing::{debug, info, warn};
 
 #[derive(Clone, Debug)]
@@ -214,7 +215,7 @@ impl YouTubeDownloader {
             "best".to_string()
         };
 
-        let mut cmd = Command::new(&self.cfg.ytdlp_bin);
+        let mut cmd = tools::command(&self.cfg.ytdlp_bin);
         cmd.arg("--outtmpl")
             .arg(format!(
                 "{}/{}.%(ext)s",
@@ -321,7 +322,7 @@ impl YouTubeDownloader {
             )))?;
 
         // 在缓存目录中执行 ytarchive
-        let mut cmd = Command::new(&self.cfg.ytarchive_bin);
+        let mut cmd = tools::command(&self.cfg.ytarchive_bin);
         cmd.current_dir(&cache_dir)
             .arg(&self.cfg.webpage_url)
             .arg("best")

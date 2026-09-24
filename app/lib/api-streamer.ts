@@ -1,7 +1,19 @@
 // Fetcher implementation. // The extra argument will be passed via the `arg` property of the 2nd parameter.// In the example below, `arg` will be `'my_token'`
 import { Toast } from '@douyinfe/semi-ui';
+import { mutate } from 'swr';
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_SERVER ?? '';
+
+/** 当前用户与权限点（见 use-me.ts）。放在这里是为了让统一的响应处理能刷新它，又不形成循环引用。 */
+export const ME_KEY = '/v1/me';
+
+/**
+ * 重新拉取当前用户与权限点。收到 403、长连接意外断开时调用：
+ * 会话已失效时 /v1/me 返回 401 → 跳登录页；角色被降级时页面按新的权限点收起。
+ */
+export function revalidateMe() {
+	mutate(ME_KEY).catch(() => undefined);
+}
 export async function sendRequest<T>(url: string, { arg }: { arg: T }) {
 	const res = await fetch(API_BASE + url, {
 		method: 'POST',
@@ -40,7 +52,8 @@ export async function put<T>(url: string, { arg }: { arg: T }) {
 	return res;
 }
 
-async function handleResponse(res: Response) {
+/** 统一的响应处理：401 跳登录页，403 提示并刷新权限点，其它失败抛出服务端信息。 */
+export async function handleResponse(res: Response) {
 	// 如果未登录，统一跳转
 	if (res.status === 401) {
 		// 可选：清理本地状态/缓存
@@ -53,8 +66,10 @@ async function handleResponse(res: Response) {
 		throw new Error('Unauthorized');
 	}
 
-	// 已登录但角色没有这项权限：留在当前页，提示一次即可（同 id 的 Toast 不会叠加）
+	// 已登录但没有这项权限：留在当前页，提示一次即可（同 id 的 Toast 不会叠加）。
+	// 多半是权限点在别处被改了，顺手刷新，让界面按新的权限收起
 	if (res.status === 403) {
+		revalidateMe();
 		const text = await res.text().catch(() => '');
 		let message = text.trim();
 		try {

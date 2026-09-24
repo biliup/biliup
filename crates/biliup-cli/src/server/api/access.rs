@@ -1,9 +1,8 @@
 //! 业务路由的访问控制：登录校验 + 按路由表的权限校验（默认拒绝），
 //! 以及长连接在握手之后的定期复查。
 
-use crate::server::infrastructure::permissions::{
-    Permission, Role, required_permission, route_allowed,
-};
+use crate::server::infrastructure::permissions::Permission;
+use crate::server::infrastructure::policy::{Field, RouteRequirement, Subject};
 use crate::server::infrastructure::users::{AuthSession, Backend};
 use axum::Json;
 use axum::body::Body;
@@ -23,11 +22,11 @@ pub const RECHECK_INTERVAL: Duration = Duration::from_secs(30);
 #[cfg(test)]
 pub const RECHECK_INTERVAL: Duration = Duration::from_millis(100);
 
-/// 当前请求的调用者。由访问控制中间件放进请求扩展，处理函数据此决定脱敏与字段保护。
+/// 当前请求的调用者。由访问控制中间件放进请求扩展，处理函数据此决定脱敏与字段保护；
+/// 判断本身都在 [`crate::server::infrastructure::policy`]。
 #[derive(Clone)]
 pub struct Caller {
-    pub user_id: Option<i64>,
-    pub role: Role,
+    pub subject: Subject,
     watch: Option<SessionWatch>,
 }
 
@@ -35,14 +34,17 @@ impl Caller {
     /// `--auth` 关闭时：零鉴权，视为超管。
     pub fn unrestricted() -> Self {
         Caller {
-            user_id: None,
-            role: Role::Admin,
+            subject: Subject::unrestricted(),
             watch: None,
         }
     }
 
     pub fn can(&self, permission: Permission) -> bool {
-        self.role.has(permission)
+        self.subject.can(permission)
+    }
+
+    pub fn can_access(&self, field: Field) -> bool {
+        self.subject.can_access(field)
     }
 
     /// 会话失效（禁用、删除、改密、强制下线）或失去这条路由的权限时完成；`--auth` 关闭时永不完成。
@@ -72,7 +74,7 @@ struct SessionWatch {
     backend: Backend,
     user_id: i64,
     auth_hash: Vec<u8>,
-    permission: Option<Permission>,
+    requirement: RouteRequirement,
 }
 
 impl SessionWatch {
@@ -80,10 +82,7 @@ impl SessionWatch {
         let user = self.backend.get_user(&self.user_id).await?;
         Ok(user.is_some_and(|user| {
             user.session_auth_hash() == self.auth_hash.as_slice()
-                && (user.role == Role::Admin
-                    || self
-                        .permission
-                        .is_some_and(|permission| user.role.has(permission)))
+                && Subject::user(user.id, user.role).satisfies(self.requirement)
         }))
     }
 
@@ -124,20 +123,19 @@ pub async fn require_permission(
         .get::<MatchedPath>()
         .map(|path| path.as_str().to_owned())
         .unwrap_or_else(|| request.uri().path().to_owned());
-    let method = request.method().clone();
-    let raw_path = request.uri().path().to_owned();
-    if !route_allowed(user.role, &method, &route, &raw_path) {
+    let requirement = RouteRequirement::of(request.method(), &route, request.uri().path());
+    let subject = Subject::user(user.id, user.role);
+    if !subject.satisfies(requirement) {
         return forbidden();
     }
     let watch = SessionWatch {
         backend: auth_session.backend.clone(),
         user_id: user.id,
         auth_hash: user.session_auth_hash().to_vec(),
-        permission: required_permission(&method, &route, &raw_path),
+        requirement,
     };
     let caller = Caller {
-        user_id: Some(user.id),
-        role: user.role,
+        subject,
         watch: Some(watch),
     };
     request.extensions_mut().insert(caller.clone());
@@ -165,6 +163,7 @@ fn cut_off_when_revoked(response: Response, caller: &Caller) -> Response {
 mod tests {
     use super::*;
     use crate::server::infrastructure::connection_pool::ConnectionManager;
+    use crate::server::infrastructure::permissions::Role;
     use crate::server::infrastructure::users::{Credentials, UserChanges};
     use axum::Router;
     use axum::http::Method;
@@ -208,11 +207,13 @@ mod tests {
         ("POST", "/v1/login_by_qrcode"),
         ("GET", "/v1/videos"),
         ("GET", "/v1/status"),
+        ("GET", "/v1/tools"),
         ("POST", "/v1/uploads"),
         ("GET", "/static/ds_update.log"),
         ("GET", "/static/a.flv"),
         ("GET", "/v1/ws/logs"),
         ("GET", "/v1/web-users"),
+        ("GET", "/v1/web-users/roles"),
         ("POST", "/v1/web-users"),
         ("PUT", "/v1/web-users/1"),
         ("DELETE", "/v1/web-users/1"),
@@ -241,6 +242,7 @@ mod tests {
             | ("GET", "/v1/upload/streamers/1")
             | ("GET", "/v1/videos")
             | ("GET", "/v1/status")
+            | ("GET", "/v1/tools")
             | ("GET", "/static/ds_update.log")
             | ("GET", "/static/a.flv")
             | ("GET", "/v1/ws/logs") => view,
@@ -294,10 +296,12 @@ mod tests {
             .route("/v1/login_by_qrcode", post(|| async { StatusCode::OK }))
             .route("/v1/videos", ok())
             .route("/v1/status", ok())
+            .route("/v1/tools", ok())
             .route("/v1/uploads", post(|| async { StatusCode::OK }))
             .route("/static/{path}", ok())
             .route("/v1/ws/logs", ok())
             .route("/v1/web-users", any())
+            .route("/v1/web-users/roles", ok())
             .route("/v1/web-users/{id}", any())
             .route(
                 "/v1/web-users/{id}/logout-all",
@@ -485,7 +489,7 @@ mod tests {
             backend: backend.clone(),
             user_id: op.id,
             auth_hash: op.session_auth_hash().to_vec(),
-            permission: Some(Permission::PreviewView),
+            requirement: RouteRequirement::Permission(Permission::PreviewView),
         };
         assert!(watch.still_valid().await.unwrap());
 
@@ -497,7 +501,7 @@ mod tests {
         assert!(watch.still_valid().await.unwrap(), "只读也能看预览");
 
         let log_watch = SessionWatch {
-            permission: Some(Permission::RecordingControl),
+            requirement: RouteRequirement::Permission(Permission::RecordingControl),
             ..watch.clone()
         };
         assert!(!log_watch.still_valid().await.unwrap(), "失去该路由的权限");
@@ -512,13 +516,12 @@ mod tests {
         seed(&backend).await;
         let op = backend.find_by_username("op").await.unwrap().unwrap();
         let caller = Caller {
-            user_id: Some(op.id),
-            role: op.role,
+            subject: Subject::user(op.id, op.role),
             watch: Some(SessionWatch {
                 backend: backend.clone(),
                 user_id: op.id,
                 auth_hash: op.session_auth_hash().to_vec(),
-                permission: Some(Permission::PreviewView),
+                requirement: RouteRequirement::Permission(Permission::PreviewView),
             }),
         };
         let endless = futures::stream::unfold((), |()| async {

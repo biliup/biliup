@@ -9,6 +9,7 @@ use serde_json::Value;
 const VISIBLE_CONFIG_KEYS: &[&str] = &[
     "downloader",
     "sync_save_dir",
+    "ffmpeg_path",
     "file_size",
     "segment_time",
     "filtering_threshold",

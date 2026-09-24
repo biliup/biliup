@@ -7,7 +7,7 @@ COPY . /biliup
 
 RUN set -eux; \
 	\
-	if [ ! -f /biliup/pyproject.toml ]; then \
+	if [ ! -f /biliup/crates/stream-gears/pyproject.toml ]; then \
 	rm -rf /biliup; \
 	git clone --depth 1 --branch "$branch_name" "$repo_url" /biliup; \
 	fi;
@@ -31,7 +31,7 @@ RUN set -eux; \
 	apt-get update; \
 	apt-get install -y --no-install-recommends python3-pip g++ patchelf; \
 	pip3 install maturin --break-system-packages; \
-	if [ ! -f /biliup/pyproject.toml ]; then \
+	if [ ! -f /biliup/crates/stream-gears/pyproject.toml ]; then \
 	rm -rf /biliup; \
 	git clone --depth 1 --branch "$branch_name" "$repo_url" /biliup; \
 	fi;
@@ -41,7 +41,7 @@ COPY --from=webui-builder /biliup/out /biliup/out
 WORKDIR /biliup
 
 RUN set -eux; \
-	maturin build --release;
+	maturin build --release -m crates/stream-gears/Cargo.toml;
 
 
 # Deploy Biliup
@@ -82,6 +82,8 @@ RUN set -eux; \
 	# latest 是滚动 tag，资产每日重建，既不可复现也无法防篡改。
 	# 只能固定到「每月最后一天」的 autobuild：BtbN 长期保留月末构建，
 	# 其余每日构建约两周后删除，固定到它们会让镜像构建 404。
+	# Windows 桌面版打包同一构建的 win64 版：.github/scripts/ffmpeg-version.sh 从下面这行读取
+	# tag 与版本号；改版本时同步更新 desktop-publish.yml 里的 FFMPEG_WIN64_SHA256。
 	url='https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-31-13-27/ffmpeg-n8.1.2-50-g1a748fe2cd-'; \
 	case "$arch" in \
 		'amd64') \

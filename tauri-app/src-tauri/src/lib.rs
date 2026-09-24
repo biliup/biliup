@@ -26,6 +26,12 @@ const WINDOW_LABEL: &str = "main";
 const STARTUP_PAGE: &str = "http://tauri.localhost/";
 #[cfg(not(windows))]
 const STARTUP_PAGE: &str = "tauri://localhost/";
+/// Where the installer puts ffmpeg under the resource directory; the release
+/// workflow adds it through `tauri.ffmpeg.conf.json`.
+#[cfg(windows)]
+const BUNDLED_FFMPEG: [&str; 2] = ["ffmpeg", "ffmpeg.exe"];
+#[cfg(not(windows))]
+const BUNDLED_FFMPEG: [&str; 2] = ["ffmpeg", "ffmpeg"];
 
 struct Server {
     stop: Mutex<Option<oneshot::Sender<()>>>,
@@ -58,7 +64,10 @@ pub fn run() {
                 };
                 let legacy_roots = data_dir::legacy_roots(&install_dir);
                 match data_dir::resolve(&app, &window, &install_dir, &legacy_roots) {
-                    Ok(Some(data_dir)) => start(&app, &window, &data_dir, &legacy_roots),
+                    Ok(Some(data_dir)) => {
+                        let ffmpeg = bundled_ffmpeg(app.path().resource_dir().ok());
+                        start(&app, &window, &data_dir, &legacy_roots, ffmpeg)
+                    }
                     Ok(None) => app.exit(0),
                     Err(message) => show_error(&window, &message),
                 }
@@ -82,7 +91,13 @@ pub fn run() {
 
 /// Moves into the data directory, migrates legacy data and starts the server.
 /// Failures are shown in the window instead of aborting the app.
-fn start(app: &AppHandle, window: &WebviewWindow, data_dir: &Path, legacy_roots: &[PathBuf]) {
+fn start(
+    app: &AppHandle,
+    window: &WebviewWindow,
+    data_dir: &Path,
+    legacy_roots: &[PathBuf],
+    ffmpeg: Option<PathBuf>,
+) {
     // The server keeps data/, ds_update.log and recordings relative to the
     // working directory, and the log file is opened relative to it as well.
     if let Err(err) =
@@ -100,6 +115,10 @@ fn start(app: &AppHandle, window: &WebviewWindow, data_dir: &Path, legacy_roots:
         true,
     );
     tracing::info!(data_dir = %data_dir.display(), "biliup desktop starting");
+    match &ffmpeg {
+        Some(path) => tracing::info!(path = %path.display(), "bundled ffmpeg found"),
+        None => tracing::info!("no bundled ffmpeg; using the ffmpeg_path setting or PATH"),
+    }
 
     if let Some(legacy_dir) = data_dir::find_legacy_root(legacy_roots) {
         match data_dir::migrate_legacy_data(legacy_dir, data_dir) {
@@ -156,6 +175,7 @@ fn start(app: &AppHandle, window: &WebviewWindow, data_dir: &Path, legacy_roots:
         user_cookie: PathBuf::from("cookies.json"),
         work_dir: None,
         log_handle: logging.handle(),
+        ffmpeg,
         listener: Some(listener),
         shutdown: Some(Box::pin(async move {
             let _ = stopped.await;
@@ -284,6 +304,13 @@ async fn web_ui_ready(port: u16) -> bool {
     )
 }
 
+fn bundled_ffmpeg(resource_dir: Option<PathBuf>) -> Option<PathBuf> {
+    // On Windows resource_dir() is a `\\?\` path; this one ends up in logs and GET /v1/tools.
+    let mut path = dunce::simplified(&resource_dir?).to_path_buf();
+    path.extend(BUNDLED_FFMPEG);
+    Some(path).filter(|path| path.is_file())
+}
+
 /// Where this executable lives. The old PyInstaller sidecar used it as its
 /// working directory, so an older install may have left data/ there.
 fn install_dir() -> Option<PathBuf> {
@@ -327,5 +354,22 @@ mod tests {
     #[test]
     fn percent_encoding_round_trips_through_decode_uri_component() {
         assert_eq!(percent_encode("a b/ç%"), "a%20b%2F%C3%A7%25");
+    }
+
+    #[test]
+    fn bundled_ffmpeg_is_used_only_when_installed() {
+        let resources = std::env::temp_dir().join(format!(
+            "biliup-desktop-test-resources-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&resources);
+        fs::create_dir_all(&resources).unwrap();
+        assert_eq!(bundled_ffmpeg(Some(resources.clone())), None);
+        assert_eq!(bundled_ffmpeg(None), None);
+        let ffmpeg = resources.join("ffmpeg").join(BUNDLED_FFMPEG[1]);
+        fs::create_dir_all(ffmpeg.parent().unwrap()).unwrap();
+        fs::write(&ffmpeg, b"").unwrap();
+        assert_eq!(bundled_ffmpeg(Some(resources.clone())), Some(ffmpeg));
+        fs::remove_dir_all(&resources).unwrap();
     }
 }

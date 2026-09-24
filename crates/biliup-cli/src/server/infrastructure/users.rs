@@ -1,10 +1,10 @@
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::infrastructure::permissions::{Permission, Role};
-use axum_login::{AuthUser, AuthnBackend, AuthzBackend, UserId};
+use crate::server::infrastructure::permissions::Role;
+use axum_login::{AuthUser, AuthnBackend, UserId};
 use password_auth::{generate_hash, verify_password};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -601,17 +601,6 @@ impl AuthnBackend for Backend {
             .find_by_id(*user_id)
             .await?
             .filter(|user| !user.disabled))
-    }
-}
-
-impl AuthzBackend for Backend {
-    type Permission = Permission;
-
-    async fn get_user_permissions(
-        &self,
-        user: &Self::User,
-    ) -> Result<HashSet<Self::Permission>, Self::Error> {
-        Ok(user.role.permissions().iter().copied().collect())
     }
 }
 

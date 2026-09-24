@@ -3,6 +3,7 @@ pub mod downloader;
 pub mod entry;
 pub mod season_cli;
 pub mod server;
+pub mod tools;
 pub mod upload_lock;
 pub mod uploader;
 pub mod web_user_cli;
@@ -133,6 +134,13 @@ pub async fn serve_on(
     } else {
         repositories::get_config(&conn_pool).await?
     };
+    tools::set_configured_ffmpeg(loaded_config.ffmpeg_path.as_deref());
+    if cfg!(windows) {
+        tracing::info!(
+            create_no_window = biliup::tools::hides_console_windows(),
+            "child processes get CREATE_NO_WINDOW only when this process has no console"
+        );
+    }
 
     let config = Arc::new(RwLock::new(loaded_config));
     let download_manager = DownloadManager::new(
