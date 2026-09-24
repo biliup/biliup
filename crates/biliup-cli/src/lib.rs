@@ -131,6 +131,12 @@ pub async fn serve_on(
         repositories::get_config(&conn_pool).await?
     };
     tools::set_configured_ffmpeg(loaded_config.ffmpeg_path.as_deref());
+    if cfg!(windows) {
+        tracing::info!(
+            create_no_window = biliup::tools::hides_console_windows(),
+            "child processes get CREATE_NO_WINDOW only when this process has no console"
+        );
+    }
 
     let config = Arc::new(RwLock::new(loaded_config));
     let download_manager = DownloadManager::new(
