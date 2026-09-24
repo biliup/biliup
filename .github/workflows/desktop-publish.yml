@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # BtbN win64 GPL 静态构建 zip 的 SHA-256。tag 与版本号取自 Dockerfile（与 Docker 镜像同一构建），
+  # 见 .github/scripts/ffmpeg-version.sh；Dockerfile 升级 FFmpeg 时同步更新这里。
+  FFMPEG_WIN64_SHA256: 273abb45f3f9f76c303e35ff39f5bb6c23c163ae65f6244a32b7d4a7f6cf0616
+
 jobs:
   build:
     permissions:
@@ -24,6 +29,30 @@ jobs:
       run: |
         npm install
         npm run build
+    # 只取 ffmpeg.exe 和许可文本，由 tauri.ffmpeg.conf.json 作为资源打进安装包（安装目录下的 ffmpeg\）
+    - name: Download FFmpeg
+      shell: bash
+      run: |
+        eval "$(bash .github/scripts/ffmpeg-version.sh)"
+        asset="ffmpeg-${FFMPEG_VERSION}-win64-gpl-${FFMPEG_BRANCH}"
+        curl -fsSL --retry 3 -o ffmpeg.zip \
+          "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_TAG}/${asset}.zip"
+        echo "${FFMPEG_WIN64_SHA256}  ffmpeg.zip" | sha256sum -c -
+        dest=tauri-app/src-tauri/ffmpeg
+        mkdir -p "$dest"
+        unzip -j -o ffmpeg.zip "${asset}/bin/ffmpeg.exe" "${asset}/LICENSE.txt" -d "$dest"
+        cat > "$dest/README.txt" <<EOF
+        FFmpeg ${FFMPEG_VERSION} (win64, GPL, static), built by BtbN/FFmpeg-Builds ${FFMPEG_TAG}.
+
+        FFmpeg is licensed under the GNU General Public License version 3 or later
+        (see LICENSE.txt in this folder). biliup runs it as a separate program.
+
+        Corresponding source code:
+          FFmpeg:        https://github.com/FFmpeg/FFmpeg/commit/${FFMPEG_COMMIT}
+          Build scripts: https://github.com/BtbN/FFmpeg-Builds/tree/${FFMPEG_TAG}
+        EOF
+        ls -l "$dest"
+        rm ffmpeg.zip
     - name: install Rust stable
       uses: dtolnay/rust-toolchain@stable
     - uses: Swatinem/rust-cache@v2
@@ -41,11 +70,13 @@ jobs:
         # 用 releaseId 而不是 tagName：v1 找到已发布的 Release 时会用 releaseName/releaseBody 覆盖它的标题和正文
         releaseId: ${{ github.event.release.id }}
         projectPath: tauri-app
+        args: --config src-tauri/tauri.ffmpeg.conf.json
     - name: Build
       if: github.event_name != 'release'
       uses: tauri-apps/tauri-action@v1
       with:
         projectPath: tauri-app
+        args: --config src-tauri/tauri.ffmpeg.conf.json
     - uses: actions/upload-artifact@v7
       if: github.event_name != 'release'
       with:

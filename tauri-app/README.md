@@ -8,6 +8,7 @@ Tauri 壳：在本进程内启动 biliup 服务（`biliup_cli::entry::serve`）�
   - 其他平台：`app_data_dir()`，不询问（`desktop.json` 里写了 `data_dir` 则用它）。
   - 所选目录还没有 `data/` 时，会把旧版留下的 `data/` 复制过去，原处保留。旧版的位置依次找：安装目录、Windows 上旧 `bbup-app` 安装程序记录的安装目录（注册表）和 `%LOCALAPPDATA%\bbup-app`。
 - `static/index.html` 只是启动页，显示「正在启动」或启动失败的原因。
+- ffmpeg：发布 workflow 下载与 Dockerfile 同一构建的 BtbN win64 GPL 静态版，把 `ffmpeg.exe`、`LICENSE.txt` 和说明放进 `src-tauri/ffmpeg/`，构建时用 `--config src-tauri/tauri.ffmpeg.conf.json` 作为资源打进安装包。程序启动时若安装目录下有 `ffmpeg/ffmpeg.exe` 就交给服务使用（配置里填了 `ffmpeg_path` 时以配置为准），否则到 PATH 里找。本地构建不加这个参数即可，不需要下载 ffmpeg。
 
 构建（需要先在仓库根目录 `npm run build` 生成 `out/`，WebUI 会被编进程序）：
 
