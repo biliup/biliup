@@ -19,6 +19,9 @@ top = false
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 未发布
+- 🔧stream-gears：断流、读超时、下播时不再丢掉最后一个 GOP（通常 1–10 秒）；分段钩子在文件写完（flush）之后才触发，盘满等写入错误不再被静默吞掉。
+
 ## 1.2.1
 **Full Changelog**:[v1.2.0...v1.2.1](https://github.com/biliup/biliup/compare/v1.2.0...v1.2.1)
 
