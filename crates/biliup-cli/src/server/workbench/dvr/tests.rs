@@ -219,6 +219,61 @@ async fn follows_the_segment_being_written_without_polling() {
     assert!(end.is_ok(), "录制结束后响应应当结束");
 }
 
+#[test]
+fn empty_wakes_back_off_to_a_cap() {
+    let steps: Vec<u64> = (0..8).map(empty_wake_step).collect();
+    let k = 1024;
+    assert_eq!(
+        steps,
+        [
+            0,
+            16 * k,
+            32 * k,
+            64 * k,
+            128 * k,
+            256 * k,
+            256 * k,
+            256 * k
+        ]
+    );
+    assert_eq!(empty_wake_step(u32::MAX), 256 * k);
+}
+
+#[tokio::test]
+async fn counter_growth_that_is_not_on_disk_yet_backs_off() {
+    let (dir, pool, session) = setup().await;
+    let flv = build_flv(0, 100, 25, None);
+    let cut = flv.keyframes[2].1 as usize;
+    let path = write(&dir, "live.flv", &flv.bytes[..cut]);
+    add_segment(&pool, session, &path, 0, 0, None).await;
+    let counter = ByteCounter::new();
+    let _guard = live::register(session, 1, Some(counter.clone()));
+    let mut stream = Box::pin(open(&pool, session, 0).await.unwrap().into_stream());
+    while let Ok(Some(chunk)) = next_within(&mut stream, 300).await {
+        chunk.unwrap();
+    }
+
+    // 计数器涨了但数据还在写入端的缓冲里：读取方醒一次、读空
+    counter.add(100);
+    assert!(next_within(&mut stream, 200).await.is_err());
+    // 数据落盘了，但计数器只再涨一点：还没到落空后的门槛，不会再去读
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap();
+    file.write_all(&flv.bytes[cut..]).unwrap();
+    counter.add(1000);
+    assert!(next_within(&mut stream, 300).await.is_err());
+    // 过了门槛：读到新内容
+    counter.add(16 * 1024);
+    let chunk = next_within(&mut stream, 1000)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(!chunk.is_empty());
+}
+
 #[tokio::test]
 async fn ts_rewrites_pts_to_session_time() {
     let (dir, pool, session) = setup().await;

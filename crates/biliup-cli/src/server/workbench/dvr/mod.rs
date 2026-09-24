@@ -39,6 +39,17 @@ const DEFAULT_FRAME_MS: i64 = 33;
 /// 等下一段出现第一个关键帧时，写盘计数器每增长这么多才重新看一次索引。
 const NEXT_SEGMENT_PROBE_BYTES: u64 = 256 * 1024;
 const TS_PARAM_SNIFF: usize = 256 * 1024;
+/// 写盘计数器在数据进入写盘缓冲之前就累加（mesio 在修复管线之前逐 tag 计数，落盘却是成块的）。
+/// 被唤醒却没读到新内容时，下一次等计数器多涨这么多再看；连续落空就翻倍到上限，读到数据后复位。
+const EMPTY_WAKE_STEP_MIN: u64 = 16 * 1024;
+const EMPTY_WAKE_STEP_MAX: u64 = 256 * 1024;
+
+fn empty_wake_step(streak: u32) -> u64 {
+    match streak {
+        0 => 0,
+        n => (EMPTY_WAKE_STEP_MIN << (n - 1).min(8)).min(EMPTY_WAKE_STEP_MAX),
+    }
+}
 
 /// 容器原始时间戳 → 输出时间戳。
 #[derive(Debug, Clone, Copy)]
@@ -188,6 +199,8 @@ pub struct Dvr {
     started: Instant,
     /// 被唤醒之后还没读到新数据。
     woke: bool,
+    /// 连续几次被唤醒都没读到新数据。
+    empty_streak: u32,
     stats: Stats,
     end_reason: &'static str,
 }
@@ -297,6 +310,7 @@ pub async fn open(pool: &ConnectionPool, session_id: i64, from_ms: i64) -> Resul
         shift_ms: 0,
         started: Instant::now(),
         woke: false,
+        empty_streak: 0,
         stats: Stats {
             segments: 1,
             ..Default::default()
@@ -363,6 +377,7 @@ impl Dvr {
                 .await?;
             if n > 0 {
                 self.woke = false;
+                self.empty_streak = 0;
                 continue;
             }
             match self.at_end_of_file().await? {
@@ -400,8 +415,9 @@ impl Dvr {
             return false;
         };
         self.woke = true;
+        let threshold = self.seen + empty_wake_step(self.empty_streak);
         tokio::select! {
-            total = bytes.grown_since(self.seen) => {
+            total = bytes.grown_since(threshold) => {
                 self.seen = total;
                 self.stats.byte_wakes += 1;
             }
@@ -437,6 +453,7 @@ impl Dvr {
                 if self.woke {
                     // 计数器在数据进入写盘缓冲前就加了，新数据还没落盘
                     self.stats.empty_wakes += 1;
+                    self.empty_streak += 1;
                 }
                 if self.wait_for_writes().await {
                     Ok(Step::Continue)
