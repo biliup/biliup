@@ -31,9 +31,9 @@ pub struct Cli {
     #[arg(short, long, default_value = "cookies.json")]
     pub user_cookie: PathBuf,
 
-    // #[arg(long, default_value = "sqlx=debug,tower_http=debug,info")]
-    #[arg(long, default_value = "tower_http=debug,info")]
-    pub rust_log: String,
+    /// 日志过滤规则，如 debug；不指定时读取环境变量 RUST_LOG，都没有则为 tower_http=debug,info
+    #[arg(long)]
+    pub rust_log: Option<String>,
 }
 
 #[derive(Subcommand)]

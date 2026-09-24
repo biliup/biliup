@@ -29,7 +29,6 @@ biliup-cli = { path = "../biliup-cli"}
 danmaku-client = { package = "danmaku", path = "../danmaku"}
 time = { workspace = true }
 bon = { workspace = true }
-clap = { version = "4", features = ["derive"] }
 async-trait = { workspace = true }
 error-stack = { workspace = true }
 
