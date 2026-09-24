@@ -117,10 +117,28 @@ pub async fn get_streamers_endpoint(
             live_cover_url: live_media.cover_url,
             live_avatar_url: live_media.avatar_url,
             session_id,
+            marker_count: None,
             preview,
         });
     }
+    fill_marker_counts(&pool, &mut results).await;
     Ok(Json(results))
+}
+
+/// 给录制中的房间填上本场的标记数；查询失败只记日志，这一轮不带标记数。
+async fn fill_marker_counts(pool: &ConnectionPool, results: &mut [LiveStreamerResponse]) {
+    let sessions: Vec<i64> = results.iter().filter_map(|r| r.session_id).collect();
+    if sessions.is_empty() {
+        return;
+    }
+    match crate::server::workbench::markers::counts(pool, &sessions).await {
+        Ok(counts) => {
+            for r in results.iter_mut() {
+                r.marker_count = r.session_id.map(|id| counts.get(&id).copied().unwrap_or(0));
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "读取标记数失败"),
+    }
 }
 
 /// 钩子走 `sh -c`、`override` 能覆盖任意全局配置，两者合起来等于服务器 shell，见 [`Field::StreamerHooks`]。
