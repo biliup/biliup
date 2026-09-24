@@ -42,7 +42,7 @@ pub struct SessionTarget {
 /// 关段时下载器能给的信息。
 #[derive(Debug, Clone, Default)]
 pub struct ClosedSegment {
-    /// 下载器报告的段长（目前只有 mesio）。
+    /// 下载器报告的段长（目前只有 mesio）。建不出索引时才用它。
     pub duration_ms: Option<u64>,
     /// 下载器报告的字节数（目前只有 mesio）。
     pub bytes: Option<u64>,
@@ -254,10 +254,10 @@ impl Writer {
                 } else {
                     scan_index(&path).await
                 };
-                let duration = info
-                    .duration_ms
-                    .map(|d| d as i64)
-                    .or(probe.map(|p| p as i64))
+                let duration = probe
+                    .filter(|d| *d > 0)
+                    .map(i64::from)
+                    .or(info.duration_ms.map(|d| d as i64))
                     .unwrap_or(0);
                 let opened_at = (at - duration).max(estimate).min(at);
                 let (id, start_ms) = self.insert_segment(&path, container, opened_at).await?;
@@ -280,11 +280,12 @@ impl Writer {
                 None => (None, None),
             }
         };
-        let duration = info
-            .duration_ms
+        // 段长以索引扫出的内容时长为准，这样 locate 给出的关键帧一定落在 [start_ms, end_ms) 内；
+        // mesio 的 HLS 统计按 EXTINF 累加，遇到 EXTINF 偏小的源会比真实内容短很多。
+        let duration = index_duration
             .filter(|d| *d > 0)
-            .map(|d| d as i64)
-            .or(index_duration.filter(|d| *d > 0).map(i64::from))
+            .map(i64::from)
+            .or(info.duration_ms.filter(|d| *d > 0).map(|d| d as i64))
             .unwrap_or((at - open.opened_at).max(0));
         let bytes = info
             .bytes

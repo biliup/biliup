@@ -75,7 +75,7 @@ async fn segments_are_laid_out_on_one_session_timeline() {
     let recorder = SessionRecorder::spawn(pool.clone(), target(1, 10));
     let handle = recorder.handle();
 
-    // mesio：开段 / 关段都有，关段带时长与字节数
+    // mesio：开段 / 关段都有，关段带时长与字节数；报告的时长和内容对不上时以索引为准
     handle.run_started_at(t0);
     let a = write_flv(dir.path(), "a.flv");
     handle.opened_at(&a, t0 + 500);
@@ -138,12 +138,12 @@ async fn segments_are_laid_out_on_one_session_timeline() {
     assert_eq!(
         summary,
         vec![
-            (s(&a), SegmentState::Finished, 0, Some(4000), 0),
+            (s(&a), SegmentState::Finished, 0, Some(FLV_DURATION_MS), 0),
             (
                 s(&b),
                 SegmentState::Finished,
-                4000,
-                Some(4000 + FLV_DURATION_MS),
+                FLV_DURATION_MS,
+                Some(2 * FLV_DURATION_MS),
                 0
             ),
             (
@@ -151,7 +151,7 @@ async fn segments_are_laid_out_on_one_session_timeline() {
                 SegmentState::Finished,
                 c_start,
                 Some(c_start + FLV_DURATION_MS),
-                c_start - 4000 - FLV_DURATION_MS
+                c_start - 2 * FLV_DURATION_MS
             ),
             (
                 s(&d),
@@ -254,6 +254,33 @@ async fn completion_only_downloaders_get_a_start_from_the_content() {
             (FLV_DURATION_MS, Some(2 * FLV_DURATION_MS), 0)
         ]
     );
+}
+
+#[tokio::test]
+async fn reported_duration_is_used_when_no_index_can_be_built() {
+    let (dir, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(1, 10));
+    let handle = recorder.handle();
+    handle.run_started_at(t0);
+    let a = dir.path().join("a.mkv");
+    std::fs::write(&a, b"not indexable").unwrap();
+    handle.opened_at(&a, t0);
+    handle.closed_at(
+        &a,
+        t0 + 9_000,
+        ClosedSegment {
+            duration_ms: Some(7_500),
+            ..Default::default()
+        },
+    );
+    recorder.finish().await;
+
+    let (session_id, _, _) = sessions(&pool).await[0];
+    let rows = segments(&pool, session_id).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!((rows[0].start_ms, rows[0].end_ms), (0, Some(7_500)));
+    assert_eq!(rows[0].index_path, None);
 }
 
 #[tokio::test]
