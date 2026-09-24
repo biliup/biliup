@@ -1,0 +1,54 @@
+name: Desktop (Windows)
+
+on:
+  release:
+    types: [created]
+  # 手动触发只构建，安装包作为 artifact 上传，不碰 Release
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    runs-on: 'windows-latest'
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: lts/*
+    # biliup-cli 通过 rust-embed 把 out/ 编进桌面程序
+    - name: Build frontend
+      run: |
+        npm install
+        npm run build
+    - name: install Rust stable
+      uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: tauri-app/src-tauri -> target
+    - name: install Tauri CLI
+      working-directory: tauri-app
+      run: npm ci
+    - name: Build and upload to the release
+      if: github.event_name == 'release'
+      uses: tauri-apps/tauri-action@v0
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tagName: ${{ github.ref }} # the action automatically replaces \_\_VERSION\_\_ with the app version.
+        projectPath: tauri-app
+    - name: Build
+      if: github.event_name != 'release'
+      uses: tauri-apps/tauri-action@v0
+      with:
+        projectPath: tauri-app
+    - uses: actions/upload-artifact@v4
+      if: github.event_name != 'release'
+      with:
+        name: bbup-app-windows
+        path: |
+          tauri-app/src-tauri/target/release/bundle/nsis/*.exe
+          tauri-app/src-tauri/target/release/bundle/msi/*.msi
