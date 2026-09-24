@@ -41,6 +41,7 @@ impl Role {
                 ConfigView,
                 LogView,
                 FileView,
+                ClipEdit,
             ],
             Role::Viewer => &[StreamerView, PreviewView, ConfigView, LogView, FileView],
         }
@@ -100,6 +101,9 @@ pub enum Permission {
     FileView,
     #[serde(rename = "user.manage")]
     UserManage,
+    /// 切片工作台：打标记、改切片草稿
+    #[serde(rename = "clip.edit")]
+    ClipEdit,
 }
 
 impl Permission {
@@ -117,6 +121,7 @@ impl Permission {
         Permission::LogView,
         Permission::FileView,
         Permission::UserManage,
+        Permission::ClipEdit,
     ];
 }
 
@@ -257,7 +262,13 @@ mod tests {
             assert!(!Role::Operator.has(permission), "{permission:?}");
             assert!(!Role::Viewer.has(permission), "{permission:?}");
         }
-        for permission in [RecordingControl, StreamerEdit, UploadSubmit, TemplateEdit] {
+        for permission in [
+            RecordingControl,
+            StreamerEdit,
+            UploadSubmit,
+            TemplateEdit,
+            ClipEdit,
+        ] {
             assert!(Role::Operator.has(permission), "{permission:?}");
             assert!(!Role::Viewer.has(permission), "{permission:?}");
         }

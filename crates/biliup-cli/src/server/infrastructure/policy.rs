@@ -165,6 +165,14 @@ mod tests {
     }
 
     #[test]
+    fn clip_editing_is_for_operators_and_admins() {
+        assert!(Subject::user(1, Role::Admin).can(Permission::ClipEdit));
+        assert!(Subject::unrestricted().can(Permission::ClipEdit));
+        assert!(Subject::user(1, Role::Operator).can(Permission::ClipEdit));
+        assert!(!Subject::user(1, Role::Viewer).can(Permission::ClipEdit));
+    }
+
+    #[test]
     fn protected_fields_follow_the_approved_matrix() {
         for field in FIELDS {
             assert!(Subject::user(1, Role::Admin).can_access(field), "{field:?}");

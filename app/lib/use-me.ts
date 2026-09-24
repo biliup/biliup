@@ -21,6 +21,7 @@ export type Permission =
   | 'log.view'
   | 'file.view'
   | 'user.manage'
+  | 'clip.edit'
 
 /** 同上，与后端 `Role` 对应 */
 export type Role = 'admin' | 'operator' | 'viewer'
@@ -46,6 +47,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'log.view': '查看日志',
   'file.view': '查看录播文件',
   'user.manage': '管理用户',
+  'clip.edit': '打标记',
 }
 
 export interface Me {
