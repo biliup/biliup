@@ -1,21 +1,20 @@
+"""下载一路直播流，按时长/大小分段。
+
+用法：python download.py <直播流 URL>
+"""
 import stream_gears
 import sys
 import multiprocessing
 import time
 
 
-class Segment:
-    pass
-
-
-def download_worker():
+def download_worker(url):
     """在子进程中执行下载任务"""
     try:
-        segment = Segment()
+        segment = stream_gears.PySegment()
         segment.time = 60 * 1 # secs(1 min)
         # segment.size = 6000 * 1024 * 1024
         segment.size = 1000 * 1000 * 10 # bytes(10MB)
-        url = ""
 
         stream_gears.download(
             url = url,
@@ -33,12 +32,12 @@ def download_worker():
         return False
 
 
-def download_with_signal_handling():
+def download_with_signal_handling(url):
     """使用多进程包装下载函数，支持 Ctrl+C 中断"""
     print("开始下载，按 Ctrl+C 可以退出...")
 
     # 创建下载进程
-    download_process = multiprocessing.Process(target=download_worker)
+    download_process = multiprocessing.Process(target=download_worker, args=(url,))
     download_process.start()
 
     try:
@@ -70,4 +69,6 @@ def download_with_signal_handling():
 if __name__ == '__main__':
     # Windows 上需要这个来支持 multiprocessing
     multiprocessing.freeze_support()
-    download_with_signal_handling()
+    if len(sys.argv) != 2:
+        sys.exit(__doc__)
+    download_with_signal_handling(sys.argv[1])
