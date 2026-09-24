@@ -6,6 +6,7 @@
 //! - [`locate`] / [`session_keyframes`]：按场次时间找到可以落刀 / 起播的分段与字节偏移；
 //! - [`recover`]：启动时收尾上次异常退出留下的 `recording` 分段与没结束的场次。
 
+pub mod dvr;
 pub mod index;
 pub mod live;
 pub mod recorder;

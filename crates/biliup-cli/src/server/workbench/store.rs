@@ -354,6 +354,17 @@ pub async fn clear_started_at_if_empty(pool: &ConnectionPool, id: i64) -> sqlx::
     Ok(done.rows_affected() > 0)
 }
 
+pub async fn segment(pool: &ConnectionPool, id: i64) -> sqlx::Result<Option<SegmentRow>> {
+    let sql = format!("SELECT {SEGMENT_COLUMNS} FROM segments WHERE id = ?");
+    sqlx::query(&sql)
+        .bind(id)
+        .fetch_optional(pool)
+        .await?
+        .as_ref()
+        .map(SegmentRow::from_row)
+        .transpose()
+}
+
 /// 场次的全部分段，按时间轴排序。
 pub async fn session_segments(
     pool: &ConnectionPool,

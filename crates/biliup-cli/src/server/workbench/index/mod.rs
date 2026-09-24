@@ -454,4 +454,4 @@ fn read_at(reader: &mut impl Source, offset: u64, buf: &mut [u8]) -> io::Result<
 }
 
 #[cfg(test)]
-pub(super) mod tests;
+pub(crate) mod tests;
