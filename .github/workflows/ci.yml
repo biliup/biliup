@@ -69,8 +69,6 @@ jobs:
           /tmp/smoke-venv/bin/pytest crates/stream-gears/tests -v
       - name: Check type stubs against the wheel
         if: matrix.platform.target == 'x86_64'
-        # Outside the checkout, so the source stream_gears/ can't shadow the installed package.
-        working-directory: ${{ runner.temp }}
         run: /tmp/smoke-venv/bin/python -m mypy.stubtest stream_gears
       - name: Build free-threaded wheels
         uses: PyO3/maturin-action@v1
