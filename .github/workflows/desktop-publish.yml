@@ -50,6 +50,9 @@ jobs:
         Corresponding source code:
           FFmpeg:        https://github.com/FFmpeg/FFmpeg/commit/${FFMPEG_COMMIT}
           Build scripts: https://github.com/BtbN/FFmpeg-Builds/tree/${FFMPEG_TAG}
+        The biliup release this installer belongs to also carries these, together
+        with the source of the libraries FFmpeg is built with, as ffmpeg-source-* assets:
+          https://github.com/${GITHUB_REPOSITORY}/releases
         EOF
         ls -l "$dest"
         rm ffmpeg.zip
@@ -71,6 +74,18 @@ jobs:
         releaseId: ${{ github.event.release.id }}
         projectPath: tauri-app
         args: --config src-tauri/tauri.ffmpeg.conf.json
+    - name: Add download notes to the release
+      if: github.event_name == 'release'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TAG: ${{ github.event.release.tag_name }}
+      run: |
+        body=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+        if ! grep -q 'biliup-desktop-notes' <<<"$body"; then
+          printf '%s\n\n%s\n' "$body" "$(cat .github/desktop-release-notes.md)" > notes.md
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+        fi
     - name: Build
       if: github.event_name != 'release'
       uses: tauri-apps/tauri-action@v1
@@ -84,3 +99,64 @@ jobs:
         path: |
           tauri-app/src-tauri/target/release/bundle/nsis/*.exe
           tauri-app/src-tauri/target/release/bundle/msi/*.msi
+
+  # GPL：Release 附上内置 FFmpeg 的对应源码（FFmpeg 源码、BtbN 构建脚本、构建脚本拉取的全部依赖源码）。
+  # 手动触发时只打包并列出大小，不上传。
+  ffmpeg-source:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: Collect the FFmpeg corresponding source
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        eval "$(bash .github/scripts/ffmpeg-version.sh)"
+        mkdir dist
+        full_commit=$(gh api "repos/FFmpeg/FFmpeg/commits/${FFMPEG_COMMIT}" --jq .sha)
+        curl -fsSL --retry 3 -o "dist/ffmpeg-source-${FFMPEG_VERSION}.tar.gz" \
+          "https://github.com/FFmpeg/FFmpeg/archive/${full_commit}.tar.gz"
+
+        git clone -q --depth 1 --branch "$FFMPEG_TAG" https://github.com/BtbN/FFmpeg-Builds.git btbn
+        git -C btbn archive --prefix="FFmpeg-Builds-${FFMPEG_TAG}/" \
+          -o "../dist/ffmpeg-source-build-scripts-${FFMPEG_TAG}.tar.gz" HEAD
+        # BtbN 自己的 download.sh 按 scripts.d 里固定的提交拉取每个依赖的源码，一个依赖一个 tar.xz。
+        # 它按 GITHUB_REPOSITORY 拼容器镜像名，这里要指回 BtbN 的镜像，否则会去拉本仓库名下不存在的镜像。
+        # 依赖分布在上百个上游服务器上，偶尔有连不上的；已下载的阶段有缓存，重试只补缺的。
+        for attempt in 1 2 3; do
+          (cd btbn && GITHUB_REPOSITORY=BtbN/FFmpeg-Builds ./download.sh > ../download.log 2>&1) && break
+          tail -n 50 download.log
+          if [ "$attempt" = 3 ]; then exit 1; fi
+          sleep 300
+        done
+        (cd btbn/.cache/downloads && find . -maxdepth 1 -type l -name '*.tar.xz' -printf '%P\n' | sort > ../../../deps.txt)
+        tar -chf "dist/ffmpeg-source-dependencies-${FFMPEG_TAG}.tar" -C btbn/.cache/downloads -T deps.txt
+        cd dist
+        # GitHub Release 单个附件上限 2 GiB
+        for f in *; do
+          if [ "$(stat -c %s "$f")" -gt 2000000000 ]; then split -b 1900M -d "$f" "$f.part"; rm "$f"; fi
+        done
+        cat > ffmpeg-source-README.txt <<EOF
+        Corresponding source for the FFmpeg bundled with the Windows desktop installer
+        (and used by the Docker image): FFmpeg ${FFMPEG_VERSION}, built by
+        BtbN/FFmpeg-Builds ${FFMPEG_TAG} (win64 / linux64 / linuxarm64, GPL, static).
+
+        ffmpeg-source-${FFMPEG_VERSION}.tar.gz
+            FFmpeg at commit ${full_commit}
+        ffmpeg-source-build-scripts-${FFMPEG_TAG}.tar.gz
+            the build scripts and patches (https://github.com/BtbN/FFmpeg-Builds/tree/${FFMPEG_TAG})
+        ffmpeg-source-dependencies-${FFMPEG_TAG}.tar
+            the source of every library the scripts build, one tar.xz per build stage,
+            as fetched by the scripts' download.sh at the commits pinned in scripts.d/.
+            Files ending in .partNN are pieces of one tar: cat them together in order.
+        EOF
+        sha256sum * > ffmpeg-source-SHA256SUMS.txt
+        ls -l
+        echo "dependency stages: $(wc -l < ../deps.txt)"
+    - name: Upload to the release
+      if: github.event_name == 'release'
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TAG: ${{ github.event.release.tag_name }}
+      run: gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
