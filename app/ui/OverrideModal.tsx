@@ -12,6 +12,7 @@ import { useState } from 'react'
 import { LiveStreamerEntity } from '../lib/api-streamer'
 import { SupportedPlatforms } from '@/app/ui/plugins'
 import { useBiliUsers } from '../lib/use-streamers'
+import { FileSizeField } from './FileSizeInput'
 
 type PluginProps = {
   entity?: LiveStreamerEntity
@@ -181,7 +182,7 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
       <Form.Select
         label="下载插件（downloader）"
         field="downloader"
-        placeholder="stream-gears（默认）"
+        placeholder="mesio（默认）"
         style={{ width: '100%' }}
         fieldStyle={{
           alignSelf: 'stretch',
@@ -191,22 +192,19 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
       >
         <Select.Option value="streamlink">streamlink（hls多线程下载）</Select.Option>
         <Select.Option value="ffmpeg">ffmpeg</Select.Option>
-        <Select.Option value="stream-gears">stream-gears（默认）</Select.Option>
+        <Select.Option value="stream-gears">stream-gears</Select.Option>
         <Select.Option value="sync-downloader">sync-downloader（边录边传）</Select.Option>
-        <Select.Option value="mesio">mesio（内置流修复下载器）</Select.Option>
+        <Select.Option value="mesio">mesio（默认）</Select.Option>
       </Form.Select>
 
-      <Form.InputNumber
+      <FileSizeField
         label="视频分段大小（file_size）"
         field="file_size"
-        placeholder=""
-        suffix={'Byte'}
-        style={{ width: '100%' }}
+        extraText="按 1024 进制：1 GB = 1024 MB。没填过的留空即跟随全局设置；把已有的值清空，则这个主播不按大小分段（边录边传仍约 2 GB 一段）。"
         fieldStyle={{
           alignSelf: 'stretch',
           padding: 0,
         }}
-        showClear={true}
       />
 
       <Form.Input

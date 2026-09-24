@@ -43,7 +43,7 @@ const Twitch: React.FC<Props> = props => {
               <br />
               更好的办法是开通 Twitch Turbo 会员并在下方填入 Twitch Cookie，可直接免广告。
               <br />
-              <strong>仅下载插件为 streamlink 或 ffmpeg 时生效</strong>；默认的 stream-gears 直接拉流，此开关不起作用。
+              <strong>仅下载插件为 streamlink 或 ffmpeg 时生效</strong>；默认的 mesio 和 stream-gears 直接拉流，此开关不起作用。
             </div>
           }
           label="去除广告（twitch_disable_ads）"

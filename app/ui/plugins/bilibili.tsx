@@ -150,7 +150,8 @@ const Bilibili: React.FC<Props> = props => {
               选 hls_fmp4 时，开播后会先等待下方「hls_fmp4 转码等待时间」，仍拿不到 fmp4 流则本场回退为
               FLV。
               <br />
-              <strong>stream-gears 不支持 hls_fmp4</strong>，需把下载插件改为 ffmpeg 或 streamlink。
+              默认的下载插件 mesio 支持 hls_fmp4（保存为 .mp4）；<strong>stream-gears 不支持 hls_fmp4</strong>，选了
+              stream-gears 的需改为 mesio、ffmpeg 或 streamlink。
             </div>
           }
           label="直播流协议（bili_protocol）"

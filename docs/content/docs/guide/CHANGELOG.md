@@ -19,6 +19,17 @@ top = false
 - 🔧已修复的问题
 - ⚠️需要手动操作的更新信息
 
+## 未发布
+- ⚠️没有配置下载插件（`downloader`）的主播，默认下载插件从 stream-gears 改为 mesio。显式配置了 `downloader` 的不受影响；想保持原样，把 `downloader` 设为 `stream-gears` 即可。mesio 写出的 FLV 带关键帧索引（`onMetaData.keyframes`）、每段时间戳从 0 开始，播放器可以拖动进度条；能录 HEVC / Enhanced-FLV 和 B 站 `hls_fmp4`。行为上的变化：
+  - 不转封装，容器跟随源站：FLV 流存 `.flv`，HLS TS 存 `.ts`，HLS fMP4（如 B 站 `hls_fmp4`）存 `.mp4`；配置的 `format` 与实际容器不一致时只在日志里提示。
+  - 录制中直接写最终文件名，不再先写 `.part` 再改名。
+  - 斗鱼网宿 CDN 断开重连时，相邻两段之间会有 2.6–5.8 秒的重复画面（stream-gears 会丢掉这段回灌）。
+- 🔧stream-gears：断流、读超时、下播时不再丢掉最后一个 GOP（通常 1–10 秒）；分段钩子在文件写完（flush）之后才触发，盘满等写入错误不再被静默吞掉。
+- 🔧`ffmpeg-external` / `ffmpeg-internal` 不再被静默换成 stream-gears，改为按 ffmpeg 录制。
+- 🔧`segment_time` 在 stream-gears、mesio、ffmpeg 下按同一种写法解析：`HH:MM:SS`、`MM:SS` 或秒数（如 `3600`），和 ffmpeg 一致。以前 stream-gears 遇到 `3600`、`01:00` 这类写法下载任务会 panic 中断，mesio 会静默当成不分段；现在都能正确分段，确实写错的值会在日志里提示并按不分段录制。
+- 💡WebUI 的「视频分段大小（file_size）」改成数值 + 单位（MB / GB）输入，按 1024 进制换算（1 GB = 1024 MB，与 Windows 资源管理器一致），配置文件里存的仍是字节数，旧配置原样可读。
+- 🔧主播「配置覆写」里把已有的 `file_size` 清空后保存，现在会真正写成「不按大小分段」；以前清空后保存，原来的值原样留着。
+
 ## 1.2.1
 **Full Changelog**:[v1.2.0...v1.2.1](https://github.com/biliup/biliup/compare/v1.2.0...v1.2.1)
 

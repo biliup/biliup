@@ -10,6 +10,7 @@
 //! 比较的行为一致。若改用本地时间判定，UTC+8 用户配置的 16:00–20:00 会被当成
 //! 08:00–12:00，整整错开 8 小时。
 
+use crate::server::common::util::parse_segment_time;
 use chrono::{DateTime, NaiveDateTime, Timelike, Utc};
 use tracing::debug;
 
@@ -135,24 +136,15 @@ fn clamp_segment_time_at(
     let remaining = range.seconds_until_end(now);
 
     match segment_time {
-        // 分段时长无法解析时原样下发，交给下游工具自己报错
-        Some(configured) => match parse_hms(configured) {
-            Some(seconds) if seconds > remaining => Some(format_hms(remaining)),
+        // 分段时长无法解析时原样下发，由下载器自己报错或提示
+        Some(configured) => match parse_segment_time(configured) {
+            Some(limit) if limit.as_secs_f64() > f64::from(remaining) => {
+                Some(format_hms(remaining))
+            }
             Some(_) | None => Some(configured.to_owned()),
         },
         None => Some(format_hms(remaining)),
     }
-}
-
-/// 解析 `"HH:MM:SS"` 为秒数。
-fn parse_hms(raw: &str) -> Option<u32> {
-    let [hours, minutes, seconds] =
-        <[&str; 3]>::try_from(raw.split(':').collect::<Vec<_>>()).ok()?;
-    Some(
-        hours.parse::<u32>().ok()? * 3600
-            + minutes.parse::<u32>().ok()? * 60
-            + seconds.parse::<u32>().ok()?,
-    )
 }
 
 fn format_hms(total: u32) -> String {
@@ -170,7 +162,9 @@ mod tests {
 
     /// 把 "HH:MM:SS" 写成当日秒数，让用例读起来贴近配置里的时刻
     fn at(hms: &str) -> u32 {
-        parse_hms(hms).expect("测试时刻格式应合法")
+        parse_segment_time(hms)
+            .expect("测试时刻格式应合法")
+            .as_secs() as u32
     }
 
     /// 前端 `Date.toISOString()` 写出的形态
@@ -300,6 +294,19 @@ mod tests {
             assert_eq!(
                 clamp_segment_time_at(Some(configured), Some(&tr), at("19:40:00")),
                 Some(configured.to_string()),
+                "configured={configured}"
+            );
+        }
+    }
+
+    /// ffmpeg 也接受的 `MM:SS` 与纯秒数写法同样按窗口裁短
+    #[test]
+    fn seconds_and_minutes_forms_are_shortened_too() {
+        let tr = range("16:00:00", "20:00:00");
+        for configured in ["3600", "59:00"] {
+            assert_eq!(
+                clamp_segment_time_at(Some(configured), Some(&tr), at("19:40:00")),
+                Some("00:20:00".to_string()),
                 "configured={configured}"
             );
         }

@@ -1,5 +1,6 @@
 use chrono::{DateTime, Local};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -315,6 +316,19 @@ impl<'a> LifecycleFile<'a> {
             }
         }
     }
+
+    /// 结束当前分段：先把 `writer` 缓冲的数据写进文件并检查错误，再去掉 `.part` 后缀、触发钩子，
+    /// 钩子（上传、`FileValidator`）看到的文件大小即最终大小。
+    ///
+    /// flush 失败（如盘满）时，已经写进文件的部分照常改名交给钩子，不留下没人处理的 `.part`；
+    /// 错误返回给调用方。
+    pub fn finish(&mut self, writer: &mut impl Write) -> std::io::Result<()> {
+        let flushed = writer.flush().map_err(|e| {
+            std::io::Error::new(e.kind(), format!("flush {}: {e}", self.path.display()))
+        });
+        self.rename();
+        flushed
+    }
 }
 
 pub fn format_filename(file_name: &str) -> String {
@@ -355,6 +369,36 @@ mod tests {
         let file = LifecycleFile::new("x", "flv").with_counter(counter.clone());
         file.bytes_written.add(1);
         assert_eq!(counter.total(), 16);
+    }
+
+    /// flush 失败时不再静默：错误返回给调用方，已写入的部分照常改名交给钩子。
+    #[test]
+    fn finish_reports_a_failed_flush_and_still_hands_the_file_over() {
+        struct FullDisk;
+        impl std::io::Write for FullDisk {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::ErrorKind::StorageFull.into())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Err(std::io::ErrorKind::StorageFull.into())
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let hooked: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+        let mut file = LifecycleFile::with_hook(dir.path().join("rec").to_str().unwrap(), "flv", {
+            let hooked = hooked.clone();
+            move |name: &str| hooked.lock().unwrap().push(name.to_string())
+        });
+        let part = file.create().unwrap().to_path_buf();
+        fs::write(&part, b"FLV").unwrap();
+
+        let err = file.finish(&mut FullDisk).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::StorageFull);
+        assert!(err.to_string().contains("rec.flv.part"), "{err}");
+        assert!(!part.exists());
+        assert_eq!(*hooked.lock().unwrap(), vec![file.file_name.clone()]);
+        assert_eq!(fs::read(&file.file_name).unwrap(), b"FLV");
     }
 
     #[test]

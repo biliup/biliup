@@ -47,6 +47,7 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }  # 添加�
 tempfile = "3.14"
 http = "1"
 axum = "0.8"
+tokio = { workspace = true, features = ["test-util"] }
 
 [features]
 cli = ["clap"]

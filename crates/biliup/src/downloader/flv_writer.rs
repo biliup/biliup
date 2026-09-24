@@ -9,7 +9,7 @@ use serde::Serialize;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
-use tracing::info;
+use tracing::{error, info};
 
 const FLV_HEADER: [u8; 9] = [
     0x46, // 'F'
@@ -23,6 +23,8 @@ const FLV_HEADER: [u8; 9] = [
 pub struct FlvFile<'a> {
     pub buf_writer: BufWriter<File>,
     pub file: LifecycleFile<'a>,
+    /// 当前分段已交给 [`LifecycleFile::finish`]，`Drop` 不再重复改名、触发钩子。
+    finished: bool,
 }
 
 impl<'a> FlvFile<'a> {
@@ -32,14 +34,23 @@ impl<'a> FlvFile<'a> {
         Ok(Self {
             buf_writer: Self::create(path)?,
             file,
+            finished: false,
         })
     }
 
+    /// 结束当前分段并开始下一个。当前分段 flush 失败时返回错误，不再开新文件。
     pub fn create_new(&mut self) -> std::io::Result<()> {
-        self.file.rename();
+        self.finish()?;
         let path = self.file.create()?;
         self.buf_writer = Self::create(path)?;
+        self.finished = false;
         Ok(())
+    }
+
+    /// flush 并检查错误 → 去掉 `.part` → 触发钩子，见 [`LifecycleFile::finish`]。
+    fn finish(&mut self) -> std::io::Result<()> {
+        self.finished = true;
+        self.file.finish(&mut self.buf_writer)
     }
 
     fn create<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<BufWriter<File>> {
@@ -99,7 +110,11 @@ impl<'a> FlvFile<'a> {
 
 impl Drop for FlvFile<'_> {
     fn drop(&mut self) {
-        self.file.rename()
+        if !self.finished
+            && let Err(e) = self.finish()
+        {
+            error!("{e}");
+        }
     }
 }
 

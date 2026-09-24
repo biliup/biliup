@@ -246,7 +246,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
             label="视频格式"
             placeholder="flv"
             style={{ width: 176 }}
-            helpText="视频保存格式。不支持stream-gears下载器和Youtube平台。"
+            helpText="视频保存格式（转封装）。mesio、stream-gears 下载器不转封装，按源站容器保存；YouTube 平台也不支持。"
           />
 
           <Collapse keepDOM>

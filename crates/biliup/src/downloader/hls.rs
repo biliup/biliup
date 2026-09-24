@@ -6,7 +6,7 @@ use m3u8_rs::{MediaPlaylist, Playlist};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::time::{Duration, Instant};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 use url::Url;
 
 use crate::client::StatelessClient;
@@ -185,6 +185,8 @@ async fn download_to_file(
 pub struct TsFile<'a> {
     pub buf_writer: BufWriter<File>,
     pub file: LifecycleFile<'a>,
+    /// 当前分段已交给 [`LifecycleFile::finish`]，`Drop` 不再重复改名、触发钩子。
+    finished: bool,
 }
 
 impl<'a> TsFile<'a> {
@@ -193,14 +195,23 @@ impl<'a> TsFile<'a> {
         Ok(Self {
             buf_writer: Self::create(path)?,
             file,
+            finished: false,
         })
     }
 
+    /// 结束当前分段并开始下一个。当前分段 flush 失败时返回错误，不再开新文件。
     pub fn create_new(&mut self) -> std::io::Result<()> {
-        self.file.rename();
+        self.finish()?;
         let path = self.file.create()?;
         self.buf_writer = Self::create(path)?;
+        self.finished = false;
         Ok(())
+    }
+
+    /// flush 并检查错误 → 去掉 `.part` → 触发钩子，见 [`LifecycleFile::finish`]。
+    fn finish(&mut self) -> std::io::Result<()> {
+        self.finished = true;
+        self.file.finish(&mut self.buf_writer)
     }
 
     fn create<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<BufWriter<File>> {
@@ -221,7 +232,11 @@ impl<'a> TsFile<'a> {
 
 impl Drop for TsFile<'_> {
     fn drop(&mut self) {
-        self.file.rename()
+        if !self.finished
+            && let Err(e) = self.finish()
+        {
+            error!("{e}");
+        }
     }
 }
 
@@ -282,6 +297,36 @@ mod tests {
         assert!(playlist.end_list);
         assert!(!playlist_should_refresh(&playlist));
         assert_eq!(playlist.segments.len(), 1);
+    }
+
+    /// 分段钩子触发时 `BufWriter` 里的数据已经写进文件：钩子看到的大小就是最终大小。
+    #[test]
+    fn the_segment_hook_sees_the_flushed_file() -> Result<(), Box<dyn std::error::Error>> {
+        use super::TsFile;
+        use crate::downloader::util::LifecycleFile;
+        use std::io::Write;
+        use std::sync::{Arc, Mutex};
+
+        let dir = tempfile::tempdir()?;
+        let seen: Arc<Mutex<Vec<u64>>> = Arc::default();
+        let file = LifecycleFile::with_hook(dir.path().join("rec").to_str().unwrap(), "ts", {
+            let seen = seen.clone();
+            let dir = dir.path().to_path_buf();
+            move |name: &str| {
+                let mut seen = seen.lock().unwrap();
+                seen.push(std::fs::metadata(name).unwrap().len());
+                std::fs::rename(name, dir.join(format!("seg-{}.ts", seen.len()))).unwrap();
+            }
+        });
+        let mut ts = TsFile::new(file)?;
+        ts.buf_writer.write_all(&[0x47; 188 * 3])?;
+        ts.create_new()?;
+        ts.buf_writer.write_all(&[0x47; 188])?;
+        drop(ts);
+
+        assert_eq!(*seen.lock().unwrap(), vec![188 * 3, 188]);
+        assert_eq!(std::fs::metadata(dir.path().join("seg-2.ts"))?.len(), 188);
+        Ok(())
     }
 
     #[test]

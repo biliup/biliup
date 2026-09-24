@@ -238,6 +238,8 @@ impl FfmpegDownloader {
             danmaku_file_path: None,
             segment_index: 0,
             next_file_path: None,
+            duration_secs: None,
+            size_bytes: None,
         }));
         // 根据退出码判断状态
         match status.code() {
@@ -303,6 +305,8 @@ impl FfmpegDownloader {
                 danmaku_file_path: None,
                 next_file_path: None,
                 segment_index,
+                duration_secs: None,
+                size_bytes: None,
                 // start_time: std::time::SystemTime::now(),
                 // end_time: std::time::SystemTime::now(),
             }));
@@ -328,6 +332,8 @@ impl FfmpegDownloader {
                 danmaku_file_path: None,
                 next_file_path: None,
                 segment_index,
+                duration_secs: None,
+                size_bytes: None,
                 // start_time: std::time::SystemTime::now(),
                 // end_time: std::time::SystemTime::now(),
             }));

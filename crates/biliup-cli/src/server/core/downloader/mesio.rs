@@ -42,8 +42,8 @@ use tracing::{debug, info, warn};
 /// 管线内部通道容量（条目数），与 mesio-cli 默认值一致。
 const CHANNEL_SIZE: usize = 64;
 
-/// 分段回调载荷：已关闭的分段文件路径与 0 起始的序号。
-type SegmentClosed = (PathBuf, u32);
+/// 分段回调载荷：已关闭的分段文件路径、0 起始的序号、时长（秒）与字节数。
+type SegmentClosed = (PathBuf, u32, f64, u64);
 
 /// 直播预览旁路：写入端与「把一个管线条目旁路给它」的函数。
 type PreviewTee<I> = (PreviewSink, fn(&mut PreviewSink, &I));
@@ -280,11 +280,8 @@ fn pipeline_config(download_config: &DownloadConfig) -> PipelineConfig {
     let mut builder = PipelineConfig::builder()
         .max_file_size(download_config.file_size.unwrap_or(0))
         .channel_size(CHANNEL_SIZE);
-    if let Some(segment) = download_config.segment_duration() {
-        let secs = downloader::parse_duration(&segment);
-        if secs > 0 {
-            builder = builder.max_duration(Duration::from_secs(secs));
-        }
+    if let Some(limit) = download_config.segment_time_limit() {
+        builder = builder.max_duration(limit);
     }
     builder.build()
 }
@@ -348,7 +345,7 @@ fn segment_complete_hook(
             reason = ?reason,
             "mesio 分段完成"
         );
-        let _ = seg_tx.send((path.to_path_buf(), index));
+        let _ = seg_tx.send((path.to_path_buf(), index, duration_secs, size_bytes));
     }
 }
 
@@ -408,13 +405,11 @@ where
         }
     });
 
-    while let Some((path, index)) = seg_rx.recv().await {
-        callback(SegmentEvent::Segment(SegmentInfo::new(
-            path,
-            None,
-            None,
-            index as usize,
-        )));
+    while let Some((path, index, duration_secs, size_bytes)) = seg_rx.recv().await {
+        callback(SegmentEvent::Segment(
+            SegmentInfo::new(path, None, None, index as usize)
+                .with_stats(duration_secs, size_bytes),
+        ));
     }
 
     if let Err(e) = forward.await {
@@ -560,6 +555,13 @@ mod tests {
         let unlimited = pipeline_config(&DownloadConfig::default());
         assert_eq!(unlimited.max_file_size, 0);
         assert_eq!(unlimited.max_duration, None);
+
+        // 与 stream-gears 同一套解析：纯秒数不再被静默当成不分段
+        let seconds = pipeline_config(&DownloadConfig {
+            segment_time: Some("3600".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(seconds.max_duration, Some(Duration::from_secs(3600)));
     }
 
     /// 端到端：本地 HTTP 服务吐一段真实 FLV 录像，走完整的引擎拉流 → 修复管线 → 落盘，
@@ -659,6 +661,12 @@ mod tests {
             assert!(name.ends_with(".flv"), "{name}");
             let size = std::fs::metadata(&info.prev_file_path).unwrap().len();
             assert!(size > 13, "segment {name} is empty");
+            assert_eq!(info.size_bytes, Some(size), "reported size of {name}");
+            assert!(
+                info.duration_secs.is_some_and(|d| d >= 0.0),
+                "reported duration of {name}: {:?}",
+                info.duration_secs
+            );
         }
     }
 

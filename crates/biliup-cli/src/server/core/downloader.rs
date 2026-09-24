@@ -12,7 +12,7 @@ pub mod ws_expire;
 pub mod ytdlp;
 
 use crate::server::common::timerange;
-use crate::server::common::util::Recorder;
+use crate::server::common::util::{Recorder, parse_segment_time};
 use crate::server::core::downloader::ffmpeg_downloader::FfmpegDownloader;
 use crate::server::core::downloader::mesio::Mesio;
 use crate::server::core::downloader::stream_gears::StreamGears;
@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use tracing::warn;
 
 /// 下载器配置
 /// 包含下载过程中需要的各种参数和设置
@@ -87,6 +88,23 @@ impl DownloadConfig {
         timerange::clamp_segment_time(self.segment_time.as_deref(), self.time_range.as_deref())
     }
 
+    /// 进程内下载器（stream-gears、mesio）按时长分段的上限，已按录制时间范围裁短。
+    /// 未配置或为 0 时不按时长分段；无法解析时同样不分段，但打 warn 说明原因。
+    pub fn segment_time_limit(&self) -> Option<std::time::Duration> {
+        let raw = self.segment_duration()?;
+        match parse_segment_time(&raw) {
+            Some(limit) if !limit.is_zero() => Some(limit),
+            Some(_) => None,
+            None => {
+                warn!(
+                    segment_time = raw,
+                    "segment_time 无法解析（支持 HH:MM:SS、MM:SS 或秒数），本次录制不按时长分段"
+                );
+                None
+            }
+        }
+    }
+
     /// 距录制时间范围结束还剩多久（`"HH:MM:SS"`）；未配置录制时间范围时为 `None`。
     pub fn time_range_remaining(&self) -> Option<String> {
         timerange::remaining_until_end(self.time_range.as_deref())
@@ -134,13 +152,25 @@ impl DownloaderRuntime {
     /// 从配置创建
     pub fn from_type(downloader_type: DownloaderType) -> Self {
         match downloader_type {
-            DownloaderType::Ffmpeg => Self::Ffmpeg(FfmpegDownloader::new(
+            // `ffmpeg-internal` 的 segment muxer 实现从未接通过，与 `ffmpeg` / `ffmpeg-external`
+            // 一样按外部分段跑，至少不再静默换成 stream-gears
+            DownloaderType::Ffmpeg
+            | DownloaderType::FfmpegExternal
+            | DownloaderType::FfmpegInternal => Self::Ffmpeg(FfmpegDownloader::new(
                 Vec::new(),
                 DownloaderType::FfmpegExternal,
             )),
             DownloaderType::SyncDownloader => Self::Sync(SyncDownloader::new()),
             DownloaderType::Mesio => Self::Mesio(Mesio::new()),
-            _ => Self::StreamGears(StreamGears::new(None)),
+            DownloaderType::StreamGears => Self::StreamGears(StreamGears::new(None)),
+            // 这三种要用到直播流里的参数，由 `core::live::downloader_runtime` 构造，走不到这里
+            DownloaderType::Streamlink | DownloaderType::YtDlp | DownloaderType::Ytarchive => {
+                warn!(
+                    ?downloader_type,
+                    "this downloader needs the live stream to be built, using stream-gears"
+                );
+                Self::StreamGears(StreamGears::new(None))
+            }
         }
     }
 
@@ -182,6 +212,10 @@ pub struct SegmentInfo {
     pub next_file_path: Option<PathBuf>,
     /// 分段序号
     pub segment_index: usize,
+    /// 分段时长（秒）。下载器报告了才有，目前只有 mesio
+    pub duration_secs: Option<f64>,
+    /// 分段文件的字节数。下载器报告了才有，目前只有 mesio
+    pub size_bytes: Option<u64>,
     // /// 分段开始时间戳
     // start_time: std::time::SystemTime,
     // /// 分段结束时间戳
@@ -200,7 +234,16 @@ impl SegmentInfo {
             danmaku_file_path,
             next_file_path,
             segment_index,
+            duration_secs: None,
+            size_bytes: None,
         }
+    }
+
+    /// 附上下载器报告的分段时长与字节数。
+    pub fn with_stats(mut self, duration_secs: f64, size_bytes: u64) -> Self {
+        self.duration_secs = Some(duration_secs);
+        self.size_bytes = Some(size_bytes);
+        self
     }
 }
 
@@ -371,6 +414,37 @@ mod tests {
         );
         let gears = DownloaderRuntime::from_type(DownloaderType::StreamGears);
         assert!(matches!(gears, DownloaderRuntime::StreamGears(_)));
+    }
+
+    #[test]
+    fn segment_time_limit_is_shared_by_the_in_process_downloaders() {
+        let limit = |segment_time: &str| {
+            DownloadConfig {
+                segment_time: Some(segment_time.to_string()),
+                ..Default::default()
+            }
+            .segment_time_limit()
+        };
+        let secs = |s| Some(std::time::Duration::from_secs(s));
+        assert_eq!(limit("01:00:00"), secs(3600));
+        assert_eq!(limit("30:00"), secs(1800));
+        assert_eq!(limit("3600"), secs(3600));
+        assert_eq!(limit("00:00:00"), None);
+        assert_eq!(limit("abc"), None);
+        assert_eq!(DownloadConfig::default().segment_time_limit(), None);
+    }
+
+    #[test]
+    fn ffmpeg_variants_are_not_silently_mapped_to_stream_gears() {
+        for configured in ["\"ffmpeg\"", "\"ffmpeg-external\"", "\"ffmpeg-internal\""] {
+            let downloader_type: DownloaderType = serde_json::from_str(configured).unwrap();
+            match DownloaderRuntime::from_type(downloader_type) {
+                DownloaderRuntime::Ffmpeg(ffmpeg) => {
+                    assert_eq!(ffmpeg.downloader_type, DownloaderType::FfmpegExternal)
+                }
+                _ => panic!("{configured} must run ffmpeg"),
+            }
+        }
     }
 
     #[test]
