@@ -13,12 +13,14 @@
 //! 轴上的哪里」：
 //!
 //! - 场次记录器每次开段、关段记下一对「场次时间 ↔ 墙钟」（[`LiveGuard::anchor`]）；
-//! - 录制期间每秒看一眼正在写的分段（[`LiveGuard::sample_segment`]）：已写内容的时长对应最后一次写盘的墙钟。
+//! - 录制期间每秒看一眼正在写的分段（[`LiveGuard::sample_segment`]）：边写边建索引的分段取索引任务扫到的
+//!   时长和扫到那里的墙钟（[`index::live::written`]），其余扫盘，已写内容的时长对应最后一次写盘的墙钟。
 //!
 //! 每个观测都是下界——内容总是先收到、后写盘。差多少看下载器：刚连上时 CDN 先补发一个 GOP 的缓存，
-//! 第一个分段的场次 0 早于开写的墙钟；mesio 的 FLV 修复管线攒满一个 GOP 才往下写，写盘又经过 1 MiB
-//! 的缓冲，而中转预览在管线之前就拿到了数据。所以换算取最近一段时间里最靠前的观测
-//! （[`written_anchor`]）；最近一直没有观测（断流、卡住）时才从最后的开段 / 关段锚点外推（[`anchor`]）。
+//! 第一个分段的场次 0 早于开写的墙钟；mesio 的 FLV 修复管线攒满一个 GOP 才往下写，写盘又经过
+//! 1 MiB 的缓冲（低码率的流十来秒才落一次盘），而中转预览在管线之前就拿到了数据。所以换算取最近
+//! 一段时间里最靠前的观测（[`written_anchor`]）；最近一直没有观测（断流、卡住）时才从最后的开段 /
+//! 关段锚点外推（[`anchor`]）。
 
 use super::index::{self, KeyframeIndex};
 use biliup::downloader::util::{ByteCounter, ByteWatch};
@@ -123,23 +125,34 @@ impl LiveGuard {
             let mut ticks = tokio::time::interval(WATCH_EVERY);
             ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             let mut seen_len = None;
+            let mut seen_tapped = None;
             let mut index = None;
             loop {
                 ticks.tick().await;
-                let Ok(len) = tokio::fs::metadata(&path).await.map(|m| m.len()) else {
-                    continue;
+                let written = if index::live::is_live(&path) {
+                    let tapped = index::live::written(&path);
+                    if tapped.is_none() || tapped == seen_tapped {
+                        continue;
+                    }
+                    seen_tapped = tapped;
+                    tapped
+                } else {
+                    let Ok(len) = tokio::fs::metadata(&path).await.map(|m| m.len()) else {
+                        continue;
+                    };
+                    if seen_len == Some(len) {
+                        continue;
+                    }
+                    seen_len = Some(len);
+                    let file = path.clone();
+                    let Ok((scanned, written)) =
+                        tokio::task::spawn_blocking(move || written_upto(&file, index)).await
+                    else {
+                        return;
+                    };
+                    index = scanned;
+                    written
                 };
-                if seen_len == Some(len) {
-                    continue;
-                }
-                seen_len = Some(len);
-                let file = path.clone();
-                let Ok((scanned, written)) =
-                    tokio::task::spawn_blocking(move || written_upto(&file, index)).await
-                else {
-                    return;
-                };
-                index = scanned;
                 if let Some((written_ms, wall_ms)) = written {
                     with_entry(session_id, generation, |entry| {
                         entry.observe(wall_ms, start_ms + i64::from(written_ms));

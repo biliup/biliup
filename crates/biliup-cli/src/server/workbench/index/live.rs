@@ -2,7 +2,7 @@
 //!
 //! 进程内写盘的下载器（stream-gears、mesio）经 [`IndexTap`] 把每个分段写了什么、从哪个偏移开始
 //! 交过来，`<分段>.idx` 每 [`SAVE_INTERVAL`] 最多落一次盘。录制中的分段查索引直接读这个缓存
-//!（[`is_live`]），不扫盘。
+//!（[`is_live`]），不扫盘；写到哪里、什么时候写到的见 [`written`]（打标记换算场次时间用）。
 //!
 //! FLV 收到的是写盘处用扫盘同一套判定（[`super::classify_flv_tag`]）就地得出的结论，直接记进索引；
 //! TS / fMP4 收到写入端持有的原样字节（引用计数，不复制），按偏移拼成一个稀疏的内存窗口，用与扫盘
@@ -34,8 +34,12 @@ const SCAN_STEP: u64 = 64 * 1024;
 /// 两个写入端写的 FLV 文件头都是 9 字节头 + PreviousTagSize0，第一个 tag 从这里开始。
 const FLV_FIRST_TAG: u64 = 13;
 
-static LIVE: LazyLock<Mutex<HashSet<PathBuf>>> = LazyLock::new(Mutex::default);
+/// 正在边写边建索引的分段，以及扫到的时长与扫到那里时的墙钟（见 [`written`]）。
+static LIVE: LazyLock<Mutex<HashMap<PathBuf, Option<Written>>>> = LazyLock::new(Mutex::default);
 static UPDATES: LazyLock<watch::Sender<u64>> = LazyLock::new(|| watch::channel(0).0);
+
+/// 写入端交过来的内容在段内的时长（毫秒），和索引任务扫到那里时的墙钟（Unix 毫秒）。
+pub type Written = (u32, i64);
 
 /// 流式索引的进展：任一分段的 `.idx` 缓存落了一次盘，或某个分段不再边写边建（之后查询改走
 /// 扫盘）时变一次。录制中的读取方等一个分段出现新关键帧时订阅它，醒来再读缓存，不扫盘。
@@ -50,11 +54,32 @@ fn updated() {
 
 /// `path` 正由某个索引任务边写边建索引，它的 `.idx` 缓存就是最新的，不用扫盘。
 pub fn is_live(path: &Path) -> bool {
-    LIVE.lock().unwrap().contains(path)
+    LIVE.lock().unwrap().contains_key(path)
+}
+
+/// 边写边建索引的分段目前写到哪里：时长只在变长时更新，墙钟是第一次扫到这个时长的时刻，
+/// 所以它不晚于写入端真正交出这些内容的时刻太多（一批事件的处理时间）。
+/// 不在边写边建、或还没见到关键帧时为 `None`。
+pub fn written(path: &Path) -> Option<Written> {
+    *LIVE.lock().unwrap().get(path)?
 }
 
 fn register(path: &Path) {
-    LIVE.lock().unwrap().insert(path.to_path_buf());
+    LIVE.lock().unwrap().insert(path.to_path_buf(), None);
+}
+
+fn advance(path: &Path, index: &KeyframeIndex) {
+    if index.base_ts.is_none() {
+        return;
+    }
+    if let Some(written) = LIVE.lock().unwrap().get_mut(path)
+        && written.is_none_or(|(ms, _)| ms < index.duration_ms)
+    {
+        *written = Some((
+            index.duration_ms,
+            crate::server::workbench::recorder::now_ms(),
+        ));
+    }
 }
 
 fn unregister(path: &Path) {
@@ -342,9 +367,12 @@ impl Indexer {
                 self.dirty.insert(key);
                 continue;
             }
-            if let Err(e) = live.scan() {
-                debug!(path = %live.path().display(), error = %e, "流式关键帧索引扫描出错");
-                self.abandon(key, "扫描出错");
+            match live.scan() {
+                Ok(()) => advance(live.path(), &live.index),
+                Err(e) => {
+                    debug!(path = %live.path().display(), error = %e, "流式关键帧索引扫描出错");
+                    self.abandon(key, "扫描出错");
+                }
             }
         }
         for live in self.files.values_mut() {
