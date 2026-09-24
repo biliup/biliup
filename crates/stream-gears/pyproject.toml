@@ -8,19 +8,15 @@ features = ["pyo3/extension-module"]
 # Include additional files
 #include = [ "biliup/web/public/**/*" ]
 #data = "biliup/web/public"
-# Mixed layout: `crates/stream-gears/stream_gears/` (`__init__.py`, stubs, `py.typed`)
-# ships alongside the native module, which becomes `stream_gears.stream_gears`.
-python-source = "crates/stream-gears"
+# Mixed layout: `stream_gears/` (`__init__.py`, stubs, `py.typed`) ships
+# alongside the native module, which becomes `stream_gears.stream_gears`.
 module-name = "stream_gears.stream_gears"
-# `python-packages` is resolved under `python-source`, so the root `biliup/`
-# package goes in through `include` instead. Editable installs skip `include`;
-# `crates/stream-gears/biliup/` loads the root package for them.
-include = [{ path = "biliup/**/*.py", format = ["sdist", "wheel"] }]
-manifest-path = "crates/stream-gears/Cargo.toml"
+python-packages = ["biliup"]
 
 [project]
 name = "biliup"
-readme = "README.md"
+readme = "../../README.md"
+license = { file = "../../LICENSE" }
 authors = [{ name = "ForgQi" }]
 description = "stream download and upload"
 keywords = ["bilibili douyu huya"]

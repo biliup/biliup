@@ -66,8 +66,8 @@ def test_wheel_ships_stubs():
 
 
 def test_biliup_resolves_from_python_source(tmp_path):
-    """Editable installs put only `python-source` on sys.path; `biliup` must
-    still resolve to the repository's root package."""
+    """Editable installs put only `python-source` on sys.path, so `biliup` has
+    to live there next to `stream_gears`."""
     code = (
         "import importlib.util, biliup\n"
         "print(biliup.__file__)\n"
@@ -82,7 +82,7 @@ def test_biliup_resolves_from_python_source(tmp_path):
         timeout=60,
     )
     assert result.returncode == 0, result.stderr
-    package = PYTHON_SOURCE.parents[1] / "biliup"
+    package = PYTHON_SOURCE / "biliup"
     assert result.stdout.splitlines() == [
         str(package / "__init__.py"),
         str(package / "__main__.py"),
