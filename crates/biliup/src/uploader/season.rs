@@ -5,7 +5,7 @@
 //! `extra`，B 站新增字段不会导致解析失败。
 
 use crate::error::{Kind, Result};
-use crate::uploader::bilibili::BiliBili;
+use crate::uploader::bilibili::{BiliBili, Vid};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value, json};
 use std::time::Duration;
@@ -156,19 +156,25 @@ pub struct EpisodeSort {
     pub sort: u32,
 }
 
-struct SeasonApi<'a> {
+/// 合集接口的调用入口，`BiliBili` 上的同名方法都转到这里。
+pub struct SeasonApi<'a> {
     bili: &'a BiliBili,
     member: &'a str,
     api: &'a str,
 }
 
+impl<'a> SeasonApi<'a> {
+    /// 指向其它主机，供测试接本地假服务；`member` 对应 `member.bilibili.com`，
+    /// `api` 对应 `api.bilibili.com`。
+    #[doc(hidden)]
+    pub fn with_hosts(bili: &'a BiliBili, member: &'a str, api: &'a str) -> Self {
+        Self { bili, member, api }
+    }
+}
+
 impl BiliBili {
-    fn season_api(&self) -> SeasonApi<'_> {
-        SeasonApi {
-            bili: self,
-            member: MEMBER_HOST,
-            api: API_HOST,
-        }
+    pub fn season_api(&self) -> SeasonApi<'_> {
+        SeasonApi::with_hosts(self, MEMBER_HOST, API_HOST)
     }
 
     /// 列出自己的合集，`pn` 从 1 开始。
@@ -188,6 +194,11 @@ impl BiliBili {
     /// 查询公开稿件信息（标题、cid 等），不要求是自己的稿件。
     pub async fn archive_view(&self, aid: u64) -> Result<ArchiveView> {
         self.season_api().archive_view(aid).await
+    }
+
+    /// 同 [`BiliBili::archive_view`]，但也接受 BV 号。
+    pub async fn archive_view_by_vid(&self, vid: &Vid) -> Result<ArchiveView> {
+        self.season_api().archive_view_by_vid(vid).await
     }
 
     /// 把稿件加入小节，可一次加入多条。
@@ -216,7 +227,7 @@ impl BiliBili {
 }
 
 impl SeasonApi<'_> {
-    async fn seasons(&self, pn: u32, ps: u32) -> Result<SeasonPage> {
+    pub async fn seasons(&self, pn: u32, ps: u32) -> Result<SeasonPage> {
         let request = self
             .bili
             .client
@@ -232,7 +243,11 @@ impl SeasonApi<'_> {
         Ok(serde_json::from_value(data)?)
     }
 
-    async fn season_section(&self, section_id: u64, sort: Option<&str>) -> Result<SectionDetail> {
+    pub async fn season_section(
+        &self,
+        section_id: u64,
+        sort: Option<&str>,
+    ) -> Result<SectionDetail> {
         let mut query = vec![("id", section_id.to_string())];
         if let Some(sort) = sort.filter(|sort| !sort.is_empty()) {
             query.push(("sort", sort.to_string()));
@@ -246,17 +261,25 @@ impl SeasonApi<'_> {
         Ok(serde_json::from_value(data)?)
     }
 
-    async fn archive_view(&self, aid: u64) -> Result<ArchiveView> {
+    pub async fn archive_view(&self, aid: u64) -> Result<ArchiveView> {
+        self.archive_view_by_vid(&Vid::Aid(aid)).await
+    }
+
+    pub async fn archive_view_by_vid(&self, vid: &Vid) -> Result<ArchiveView> {
+        let query = match vid {
+            Vid::Aid(aid) => ("aid", aid.to_string()),
+            Vid::Bvid(bvid) => ("bvid", bvid.clone()),
+        };
         let request = self
             .bili
             .client
             .get(format!("{}/x/web-interface/view", self.api))
-            .query(&[("aid", aid)]);
+            .query(&[query]);
         let data = call(request, TIMEOUT, "get archive view").await?;
         Ok(serde_json::from_value(data)?)
     }
 
-    async fn add_to_season(&self, section_id: u64, episodes: &[EpisodeAdd]) -> Result<()> {
+    pub async fn add_to_season(&self, section_id: u64, episodes: &[EpisodeAdd]) -> Result<()> {
         let csrf = self.bili.get_csrf()?;
         let request = self
             .bili
@@ -275,7 +298,7 @@ impl SeasonApi<'_> {
         Ok(())
     }
 
-    async fn remove_from_season(&self, episode_id: u64) -> Result<()> {
+    pub async fn remove_from_season(&self, episode_id: u64) -> Result<()> {
         let csrf = self.bili.get_csrf()?;
         let request = self
             .bili
@@ -289,7 +312,7 @@ impl SeasonApi<'_> {
         Ok(())
     }
 
-    async fn sort_season_episodes(
+    pub async fn sort_season_episodes(
         &self,
         section_id: u64,
         season_id: u64,
@@ -628,6 +651,30 @@ mod tests {
                 charging_pay: 0,
             }
         );
+    }
+
+    #[tokio::test]
+    async fn archive_view_by_bvid_queries_bvid() {
+        let server = FakeServer::start(ok(json!({
+            "aid": 12345,
+            "bvid": "BV1xx411c7mD",
+            "title": "测试稿件",
+            "pages": [{"cid": 67890}]
+        })))
+        .await;
+        let bili = bili();
+
+        let view = api(&bili, &server)
+            .archive_view_by_vid(&Vid::Bvid("BV1xx411c7mD".into()))
+            .await
+            .unwrap();
+
+        let req = server.only_request();
+        assert_eq!(req.path, "/x/web-interface/view");
+        assert_eq!(req.query.len(), 1);
+        assert_eq!(req.query["bvid"], "BV1xx411c7mD");
+        assert_eq!(view.aid, 12345);
+        assert_eq!(view.first_cid(), 67890);
     }
 
     #[tokio::test]

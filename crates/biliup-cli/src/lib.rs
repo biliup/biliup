@@ -1,6 +1,7 @@
 pub mod cli;
 pub mod downloader;
 pub mod entry;
+pub mod season_cli;
 pub mod server;
 pub mod upload_lock;
 pub mod uploader;

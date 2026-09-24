@@ -334,7 +334,10 @@ pub async fn list(
     Ok(())
 }
 
-async fn login_by_cookies(user_cookie: PathBuf, proxy: Option<&str>) -> AppResult<BiliBili> {
+pub(crate) async fn login_by_cookies(
+    user_cookie: PathBuf,
+    proxy: Option<&str>,
+) -> AppResult<BiliBili> {
     let result = credential::login_by_cookies(&user_cookie, proxy).await;
     Ok(match result {
         Err(Kind::IO(_)) => result.change_context_lazy(|| {
