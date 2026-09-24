@@ -4,19 +4,29 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use std::time::Duration;
+use tokio::sync::Notify;
 use tracing::{error, info};
 
 pub type CallbackFn<'a> = Box<dyn FnMut(&str) + Send + Sync + 'a>;
 
 /// 已写盘字节的原子累计，供录制线程之外（如 Web 接口）读取实时速率。
 ///
-/// 写盘路径上只做一次 `fetch_add`：不加锁、不 await、不会失败，
-/// 因此不改变录制的任何控制流。`Clone` 得到的是同一计数器的另一个句柄。
+/// 写盘路径上只做一次 `fetch_add` 和一次原子读：不 await、不会失败，
+/// 因此不改变录制的任何控制流。有人通过 [`ByteCounter::watch`] 等新数据时才顺带
+/// 唤醒它们（这时才会碰 [`Notify`] 内部的锁），没人等时不加锁。
+/// `Clone` 得到的是同一计数器的另一个句柄。
 #[derive(Debug, Clone, Default)]
-pub struct ByteCounter(Arc<AtomicU64>);
+pub struct ByteCounter(Arc<CounterInner>);
+
+#[derive(Debug, Default)]
+struct CounterInner {
+    total: AtomicU64,
+    watchers: AtomicUsize,
+    grown: Notify,
+}
 
 impl ByteCounter {
     pub fn new() -> Self {
@@ -25,11 +35,52 @@ impl ByteCounter {
 
     #[inline]
     pub fn add(&self, bytes: u64) {
-        self.0.fetch_add(bytes, Ordering::Relaxed);
+        // 与 `ByteWatch::grown_since` 的「先登记再读总数」配对，两边都用 SeqCst，
+        // 保证等待方要么读到新总数、要么被这里唤醒
+        self.0.total.fetch_add(bytes, Ordering::SeqCst);
+        if self.0.watchers.load(Ordering::SeqCst) > 0 {
+            self.0.grown.notify_waiters();
+        }
     }
 
     pub fn total(&self) -> u64 {
-        self.0.load(Ordering::Relaxed)
+        self.0.total.load(Ordering::Relaxed)
+    }
+
+    /// 订阅「又写了新数据」的通知（DVR 回看跟随正在写的分段时用）。
+    pub fn watch(&self) -> ByteWatch {
+        self.0.watchers.fetch_add(1, Ordering::SeqCst);
+        ByteWatch(self.0.clone())
+    }
+}
+
+/// [`ByteCounter::watch`] 的句柄，drop 时退订。
+#[derive(Debug)]
+pub struct ByteWatch(Arc<CounterInner>);
+
+impl ByteWatch {
+    /// 等到累计字节数不再是 `seen`，返回新的累计值；已经不同就立即返回。
+    pub async fn grown_since(&self, seen: u64) -> u64 {
+        loop {
+            let notified = self.0.grown.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let total = self.0.total.load(Ordering::SeqCst);
+            if total != seen {
+                return total;
+            }
+            notified.await;
+        }
+    }
+
+    pub fn total(&self) -> u64 {
+        self.0.total.load(Ordering::Relaxed)
+    }
+}
+
+impl Drop for ByteWatch {
+    fn drop(&mut self) {
+        self.0.watchers.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -394,6 +445,26 @@ mod tests {
         let file = LifecycleFile::new("x", "flv").with_counter(counter.clone());
         file.bytes_written.add(1);
         assert_eq!(counter.total(), 16);
+    }
+
+    #[tokio::test]
+    async fn byte_watch_wakes_on_growth_and_unsubscribes_on_drop() {
+        let counter = ByteCounter::new();
+        counter.add(3);
+        let watch = counter.watch();
+        assert_eq!(watch.grown_since(0).await, 3);
+
+        let writer = counter.clone();
+        let waiter = tokio::spawn(async move { watch.grown_since(3).await });
+        tokio::task::yield_now().await;
+        assert!(!waiter.is_finished());
+        writer.add(4);
+        let total = tokio::time::timeout(Duration::from_secs(1), waiter)
+            .await
+            .expect("add 之后应当被唤醒")
+            .unwrap();
+        assert_eq!(total, 7);
+        assert_eq!(counter.0.watchers.load(Ordering::SeqCst), 0);
     }
 
     /// flush 失败时不再静默：错误返回给调用方，已写入的部分照常改名交给钩子。
