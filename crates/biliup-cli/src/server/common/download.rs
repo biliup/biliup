@@ -320,6 +320,9 @@ impl DownloadTask {
                     .min(i64::MAX as u64) as i64,
             },
         );
+        if let Some(session) = &self.sync_session {
+            session.lock().await.set_recorder(workbench.handle());
+        }
 
         // 初始化组件
         let mut processor = SegmentEventProcessor::new(sender, ctx.clone());
