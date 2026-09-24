@@ -141,9 +141,10 @@ async fn segments_are_laid_out_on_one_session_timeline() {
     std::fs::rename(&c_part, &c).unwrap();
     handle.closed_at(&c, t0 + 34_000, ClosedSegment::default());
 
-    // 小于过滤阈值、会被删掉的分段
+    // 小于过滤阈值、关段时已被删掉的分段
     let d = write_flv(dir.path(), "d.flv");
     handle.opened_at(&d, t0 + 34_000);
+    std::fs::remove_file(&d).unwrap();
     handle.closed_at(
         &d,
         t0 + 34_100,

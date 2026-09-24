@@ -2,6 +2,7 @@ use super::*;
 use crate::server::infrastructure::connection_pool::ConnectionManager;
 use crate::server::infrastructure::models::StreamerInfo;
 use crate::server::infrastructure::models::hook_step::{HookStep, process_video};
+use crate::server::workbench::recorder::{ClosedSegment, SessionRecorder, SessionTarget};
 use crate::server::workbench::store::{self, FinishedSegment, SegmentState};
 use chrono::{DateTime, Utc};
 use tempfile::TempDir;
@@ -348,6 +349,54 @@ async fn late_close_event_keeps_the_deletion_decision() {
     );
     finish(&pool, b, &b_path, 6000, SegmentState::Missing).await;
     assert_eq!(state(&pool, b).await, "deleted");
+}
+
+/// 反过来：关段事件（带 `discard`）先落库、删除点后到，保留中的场次仍然推迟删除。
+#[tokio::test]
+async fn filtered_segment_closed_first_still_honours_retain_until() {
+    let (dir, pool) = setup().await;
+    let t0 = now_ms();
+    let s = session(&pool, t0).await;
+    set_session_retention(&pool, s, Some(t0 + HOUR))
+        .await
+        .unwrap();
+    let recorder = SessionRecorder::spawn(
+        pool.clone(),
+        SessionTarget {
+            session_id: s,
+            streamer_id: 1,
+        },
+        None,
+    );
+    let handle = recorder.handle();
+    let path = dir.path().join("tiny.flv");
+    std::fs::write(&path, vec![0u8; 10]).unwrap();
+    handle.run_started_at(t0);
+    handle.opened_at(&path, t0);
+    handle.closed_at(
+        &path,
+        t0 + 100,
+        ClosedSegment {
+            discard: true,
+            ..Default::default()
+        },
+    );
+    recorder.finish().await;
+
+    let id: i64 = sqlx::query_scalar("SELECT id FROM segments WHERE session_id = ?")
+        .bind(s)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(state(&pool, id).await, "finished");
+    assert_eq!(
+        remove(&Retention::without_delay(pool.clone()), &[&path])
+            .await
+            .unwrap(),
+        vec![Disposal::Deferred]
+    );
+    assert!(path.exists());
+    assert_eq!(state(&pool, id).await, "pending_delete");
 }
 
 #[tokio::test]

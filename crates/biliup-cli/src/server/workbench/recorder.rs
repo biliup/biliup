@@ -311,10 +311,12 @@ impl Writer {
             .bytes
             .or_else(|| std::fs::metadata(&path).ok().map(|m| m.len()))
             .map(|b| b as i64);
-        let state = if info.discard {
-            SegmentState::Deleted
-        } else if exists {
+        // 过滤删除的分段由删除点定状态（被引用时推迟删除），这里只按盘上还有没有文件记，
+        // 免得先落库的 `deleted` 让删除点认不出这个分段而直接删掉。
+        let state = if exists {
             SegmentState::Finished
+        } else if info.discard {
+            SegmentState::Deleted
         } else {
             SegmentState::Missing
         };
