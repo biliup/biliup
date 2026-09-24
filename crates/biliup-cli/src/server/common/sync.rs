@@ -405,6 +405,9 @@ async fn record_segments(
             upload.abort();
             let _ = upload.await;
             if !keep {
+                if let Some(workbench) = &workbench {
+                    workbench.settled().await;
+                }
                 let retention = Retention::without_delay(ctx.pool().clone());
                 let _ = retention::remove(&retention, &[&path]).await;
             }

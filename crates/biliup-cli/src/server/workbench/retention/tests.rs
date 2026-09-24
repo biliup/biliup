@@ -1,4 +1,5 @@
 use super::*;
+use crate::server::common::util::FileValidator;
 use crate::server::infrastructure::connection_pool::ConnectionManager;
 use crate::server::infrastructure::models::StreamerInfo;
 use crate::server::infrastructure::models::hook_step::{HookStep, process_video};
@@ -399,6 +400,71 @@ async fn filtered_segment_closed_first_still_honours_retain_until() {
     );
     assert!(path.exists());
     assert_eq!(state(&pool, id).await, "pending_delete");
+}
+
+/// 过滤删除在关段时立即触发，这时分段行可能还是 `.part` 路径（stream-gears 关段后才改名）。
+/// 删除点等录制器处理完关段再查，保留中的场次仍然推迟，行与盘上一致。
+#[tokio::test]
+async fn filter_deletion_waits_for_the_recorder_to_rename_the_part_file() {
+    let (dir, pool) = setup().await;
+    let t0 = now_ms();
+    let s = session(&pool, t0).await;
+    set_session_retention(&pool, s, Some(t0 + HOUR))
+        .await
+        .unwrap();
+    let recorder = SessionRecorder::spawn(
+        pool.clone(),
+        SessionTarget {
+            session_id: s,
+            streamer_id: 1,
+        },
+        None,
+    );
+    let handle = recorder.handle();
+    let part = dir.path().join("tiny.flv.part");
+    let path = dir.path().join("tiny.flv");
+    std::fs::write(&part, vec![0u8; 10]).unwrap();
+    handle.run_started_at(t0);
+    handle.opened_at(&part, t0);
+    std::fs::rename(&part, &path).unwrap();
+    handle.closed_at(
+        &path,
+        t0 + 100,
+        ClosedSegment {
+            discard: true,
+            ..Default::default()
+        },
+    );
+    let validator =
+        FileValidator::new(1000, true).with_retention(Retention::without_delay(pool.clone()));
+    assert!(validator.validate(&path, handle.settled()).is_err());
+
+    let deferred = "SELECT id FROM segments WHERE session_id = ? AND state = 'pending_delete'";
+    for _ in 0..200 {
+        let found: Option<i64> = sqlx::query_scalar(deferred)
+            .bind(s)
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+        if found.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    recorder.finish().await;
+    let id: i64 = sqlx::query_scalar("SELECT id FROM segments WHERE session_id = ?")
+        .bind(s)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(state(&pool, id).await, "pending_delete");
+    assert!(path.exists());
+    let stored: String = sqlx::query_scalar("SELECT path FROM segments WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(Path::new(&stored), path);
 }
 
 /// 录制中边写边建索引的分段被过滤删除：删除点不碰索引任务手上的 `.idx`，索引任务关段时存的

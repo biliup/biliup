@@ -427,8 +427,13 @@ impl FileValidator {
         fs::metadata(path).is_ok_and(|m| m.len() < self.min_size)
     }
 
-    /// 验证文件有效性
-    pub fn validate(&self, path: &Path) -> AppResult<()> {
+    /// 验证文件有效性。太小的文件在后台删掉，删之前先等 `settled` 完成（见
+    /// [`RecorderHandle::settled`](crate::server::workbench::recorder::RecorderHandle::settled)）。
+    pub fn validate(
+        &self,
+        path: &Path,
+        settled: impl Future<Output = ()> + Send + 'static,
+    ) -> AppResult<()> {
         let metadata = fs::metadata(path).change_context(AppError::Unknown)?;
 
         let size = metadata.len();
@@ -438,6 +443,7 @@ impl FileValidator {
             let path = path.to_owned();
             let retention = self.retention.clone();
             tokio::spawn(async move {
+                settled.await;
                 let removed = match &retention {
                     Some(retention) => retention::remove(retention, &[&path])
                         .await

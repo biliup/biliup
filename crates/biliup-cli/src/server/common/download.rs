@@ -78,10 +78,15 @@ impl SegmentEventProcessor {
         self.file_validator.will_delete(path)
     }
 
-    /// 处理分段事件
-    pub fn process(&mut self, event: SegmentInfo) -> AppResult<()> {
+    /// 处理分段事件。`settled`：录制器处理完这次关段（过滤删除要等它）。
+    pub fn process(
+        &mut self,
+        event: SegmentInfo,
+        settled: impl Future<Output = ()> + Send + 'static,
+    ) -> AppResult<()> {
         // 验证文件有效性
-        self.file_validator.validate(&event.prev_file_path)?;
+        self.file_validator
+            .validate(&event.prev_file_path, settled)?;
 
         // 上一轮 process_with_upload 可能因上传失败提前返回，UActor 已 drop rx，
         // 这里挂着的 tx 是死的；丢弃后下面会重建一条新的管道。
@@ -555,7 +560,7 @@ impl DownloadTask {
                     );
                     // 异步处理事件
                     // let processor = processor.clone();
-                    if let Err(e) = processor.process(event) {
+                    if let Err(e) = processor.process(event, workbench.settled()) {
                         error!("Failed to process segment event: {}", e);
                     }
                 }
