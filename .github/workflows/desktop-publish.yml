@@ -57,37 +57,134 @@ jobs:
       if: github.event_name != 'release'
       shell: pwsh
       run: |
-        $setup = Get-ChildItem tauri-app/src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
-        $installDir = Join-Path $env:LOCALAPPDATA 'bbup-app'
-        $dataDir = Join-Path $env:APPDATA 'com.tauri-app.app'
-        # 模拟旧版在安装目录留下的 data/
-        New-Item -ItemType Directory -Force -Path (Join-Path $installDir 'data') | Out-Null
-        Set-Content (Join-Path $installDir 'data/legacy-marker.txt') 'from the old install directory'
-
-        Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait
-        $exe = Get-ChildItem $installDir -Filter *.exe | Where-Object { $_.Name -notlike 'uninstall*' } | Select-Object -First 1
-        Write-Host "installed: $($exe.FullName)"
-        $app = Start-Process -FilePath $exe.FullName -PassThru
-
-        $status = 0
-        for ($i = 0; $i -lt 60 -and $status -ne 200; $i++) {
-          Start-Sleep -Seconds 2
-          try { $status = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 http://127.0.0.1:19159/).StatusCode } catch {}
+        $failures = @()
+        function Check($ok, $what) {
+          if ($ok) { Write-Host "ok: $what" } else { Write-Host "FAILED: $what"; $script:failures += $what }
         }
-        Write-Host "GET / -> $status"
-
+        function Get-Status {
+          try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 http://127.0.0.1:19159/).StatusCode } catch { 0 }
+        }
+        function Wait-Ready {
+          for ($i = 0; $i -lt 60; $i++) { if ((Get-Status) -eq 200) { return 200 }; Start-Sleep -Seconds 2 }
+          return 0
+        }
         # 关窗口，确认进程自己退出并停掉服务
-        if ($app.CloseMainWindow()) { $exited = $app.WaitForExit(30000) } else { $exited = $false }
-        if (-not $exited) { Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue }
-        Write-Host "exited after closing the window: $exited"
+        function Stop-App($app) {
+          if ($app.CloseMainWindow()) { $exited = $app.WaitForExit(30000) } else { $exited = $false }
+          if (-not $exited) { Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2 }
+          return $exited
+        }
+        function Show-Log($dir) {
+          $log = Get-Content (Join-Path $dir 'ds_update.log') -Raw -ErrorAction SilentlyContinue
+          if ($log) { $log -split "`n" | Select-Object -Last 25 | ForEach-Object { Write-Host $_ } }
+          return "$log"
+        }
+        function Install($setup, $dir) {
+          $argList = @('/S'); if ($dir) { $argList += "/D=$dir" }
+          Start-Process -FilePath $setup -ArgumentList $argList -Wait
+        }
+        function Find-Button($name) {
+          $cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $name)
+          for ($i = 0; $i -lt 30; $i++) {
+            $button = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
+            if ($button) { return $button }
+            Start-Sleep -Seconds 2
+          }
+        }
+        Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms, System.Drawing
+        $setup = (Get-ChildItem tauri-app/src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1).FullName
+        $appData = Join-Path $env:APPDATA 'com.biliup.desktop'
+        $settings = Join-Path $appData 'desktop.json'
+        $uninstallKeys = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall'
+        New-Item -ItemType Directory -Force -Path smoke | Out-Null
 
-        Get-ChildItem -Recurse $dataDir | Select-Object -ExpandProperty FullName
-        $log = Get-Content (Join-Path $dataDir 'ds_update.log') -Raw
-        $log -split "`n" | Select-Object -Last 40
+        Write-Host '== 旧版 bbup-app（v1.2.8）装在别处，并在它的安装目录里留下 data/'
+        $oldDir = 'C:\old-bbup-app'
+        Invoke-WebRequest -UseBasicParsing -OutFile old-setup.exe https://github.com/biliup/biliup/releases/download/v1.2.8/bbup-app_0.1.0_x64-setup.exe
+        Install (Resolve-Path old-setup.exe).Path $oldDir
+        New-Item -ItemType Directory -Force -Path "$oldDir\data" | Out-Null
+        Set-Content "$oldDir\data\old-marker.txt" 'from bbup-app'
+        Check ((Get-ItemProperty 'HKCU:\Software\tauri-app\bbup-app' -ErrorAction SilentlyContinue).'(default)' -eq $oldDir) 'old installer recorded its directory in the registry'
 
-        if ($status -ne 200) { throw 'GET http://127.0.0.1:19159/ did not return 200' }
-        if (-not (Test-Path (Join-Path $dataDir 'data/data.sqlite3'))) { throw 'no database in the app data directory' }
-        if (-not (Test-Path (Join-Path $dataDir 'data/legacy-marker.txt'))) { throw 'legacy data/ was not copied' }
-        if (-not (Test-Path (Join-Path $installDir 'data/legacy-marker.txt'))) { throw 'legacy data/ was not kept' }
-        if ($log -notmatch 'Web UI ready') { throw 'the shell never saw the Web UI ready' }
-        if ($exited -and $log -notmatch 'biliup server stopped') { throw 'the server was not stopped on exit' }
+        Write-Host '== 装到系统盘（默认目录 %LOCALAPPDATA%\biliup），安装目录里也有旧 data/'
+        $cDir = Join-Path $env:LOCALAPPDATA 'biliup'
+        New-Item -ItemType Directory -Force -Path "$cDir\data" | Out-Null
+        Set-Content "$cDir\data\legacy-marker.txt" 'from the install directory'
+        Install $setup $null
+        $exe = Join-Path $cDir 'biliup-desktop.exe'
+        Check (Test-Path $exe) "installed $exe"
+        Check ((Test-Path "$uninstallKeys\biliup") -and (Test-Path "$uninstallKeys\bbup-app")) 'biliup and bbup-app are installed side by side'
+
+        Write-Host '-- 首次启动：应弹出数据目录选择框，服务不启动；用 UI Automation 点「使用默认目录」'
+        $app = Start-Process -FilePath $exe -PassThru
+        $button = Find-Button '使用默认目录'
+        Check ($null -ne $button) 'the data directory dialog is shown'
+        Check ((Get-Status) -ne 200) 'the server waits for the choice'
+        Check (-not (Test-Path $settings)) 'nothing is saved before the choice'
+        if ($button) {
+          try {
+            $dialog = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($button)
+            $dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) |
+              ForEach-Object { $_.Current.Name } | Where-Object { $_ } | Select-Object -Unique | ForEach-Object { Write-Host "  dialog: $_" }
+            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+            [System.Drawing.Graphics]::FromImage($bitmap).CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            $bitmap.Save("$PWD\smoke\data-dir-dialog.png")
+          } catch { Write-Host "could not capture the dialog: $_" }
+          $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        }
+        Check ((Wait-Ready) -eq 200) 'GET / -> 200 after choosing the default directory'
+        Check (Stop-App $app) 'exited after closing the window'
+        $log = Show-Log $appData
+        Check (Test-Path "$appData\data\data.sqlite3") 'database in %APPDATA%\com.biliup.desktop'
+        Check (Test-Path "$appData\data\legacy-marker.txt") 'install directory data/ copied to the chosen directory'
+        Check (Test-Path "$cDir\data\legacy-marker.txt") 'install directory data/ kept in place'
+        Check ((Get-Content $settings -Raw -ErrorAction SilentlyContinue) -match 'com\.biliup\.desktop') 'choice saved in desktop.json'
+        Check ($log -match 'Web UI ready' -and $log -match 'biliup server stopped') 'log shows ready and stopped'
+
+        Write-Host '-- 再次启动：不再询问'
+        $app = Start-Process -FilePath $exe -PassThru
+        Check ((Wait-Ready) -eq 200) 'GET / -> 200 without asking again'
+        Stop-App $app | Out-Null
+
+        Write-Host '-- 预置 desktop.json 指向另一个目录（模拟选了「其他目录」）'
+        $picked = 'C:\biliup-picked'
+        Set-Content $settings (@{ data_dir = $picked } | ConvertTo-Json)
+        $app = Start-Process -FilePath $exe -PassThru
+        Check ((Wait-Ready) -eq 200) 'GET / -> 200 with a saved directory'
+        Check (Stop-App $app) 'exited after closing the window'
+        Show-Log $picked | Out-Null
+        Check (Test-Path "$picked\data\data.sqlite3") 'database in the saved directory'
+        Check (Test-Path "$picked\data\legacy-marker.txt") 'install directory data/ copied to the saved directory'
+
+        Write-Host '== 装到非系统盘：数据留在安装目录'
+        Start-Process -FilePath "$cDir\uninstall.exe" -ArgumentList '/S', "_?=$cDir" -Wait
+        if (Test-Path 'D:\') { $drive = 'D:' } else { subst X: $env:RUNNER_TEMP; $drive = 'X:' }
+        Write-Host "using drive $drive (SystemDrive is $env:SystemDrive)"
+        $dDir = "$drive\biliup"
+        Install $setup $dDir
+        $exe = Join-Path $dDir 'biliup-desktop.exe'
+        Check (Test-Path $exe) "installed $exe"
+        $settingsBefore = Get-Content $settings -Raw -ErrorAction SilentlyContinue
+        $app = Start-Process -FilePath $exe -PassThru
+        Check ((Wait-Ready) -eq 200) 'GET / -> 200 without a dialog'
+        Check (Stop-App $app) 'exited after closing the window'
+        $log = Show-Log $dDir
+        Check (Test-Path "$dDir\data\data.sqlite3") 'database in the install directory'
+        Check (Test-Path "$dDir\ds_update.log") 'log in the install directory'
+        Check (Test-Path "$dDir\data\old-marker.txt") 'data/ of the old bbup-app install copied'
+        Check ((Get-Content $settings -Raw -ErrorAction SilentlyContinue) -eq $settingsBefore) 'desktop.json not touched'
+        Check ($log -match 'biliup server stopped') 'log shows stopped'
+
+        Write-Host '== 卸载旧版 bbup-app 不会删掉它目录里的 data/'
+        Start-Process -FilePath "$oldDir\uninstall.exe" -ArgumentList '/S', "_?=$oldDir" -Wait
+        Check (-not (Test-Path "$uninstallKeys\bbup-app")) 'bbup-app uninstalled'
+        Check (Test-Path "$oldDir\data\old-marker.txt") 'bbup-app data/ kept after uninstalling it'
+
+        if ($failures.Count -gt 0) { throw "smoke test failed: $($failures -join '; ')" }
+    - uses: actions/upload-artifact@v7
+      if: always() && github.event_name != 'release'
+      with:
+        name: smoke-screenshots
+        path: smoke/
+        if-no-files-found: ignore
