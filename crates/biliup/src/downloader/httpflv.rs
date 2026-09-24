@@ -33,7 +33,8 @@ pub async fn download(
     }
 }
 
-pub(crate) async fn parse_flv(
+/// 同 [`download`]，但把错误返回给调用方，而不是只打一条 `warn` 日志。
+pub async fn parse_flv(
     mut connection: Connection,
     file: LifecycleFile<'_>,
     mut segment: Segmentable,
