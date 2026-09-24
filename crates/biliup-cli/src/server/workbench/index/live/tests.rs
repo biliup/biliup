@@ -82,7 +82,7 @@ fn flv_tags_build_the_same_index_as_a_disk_scan() {
     let path = dir.path().join("a.flv.part");
     std::fs::write(&path, &flv.bytes).unwrap();
 
-    let (tap, mut rx) = IndexTap::channel(1 << 16);
+    let (tap, mut rx) = IndexTap::channel(1 << 16, super::super::classify_flv_tag);
     let mut indexer = Indexer::default();
     let file = tap.open(&path);
     feed_flv_tags(&file, &flv.bytes);
@@ -106,7 +106,7 @@ fn ts_chunks_build_the_same_index_as_a_disk_scan() {
     let path = dir.path().join("a.ts");
     std::fs::write(&path, &ts.bytes).unwrap();
 
-    let (tap, mut rx) = IndexTap::channel(1 << 16);
+    let (tap, mut rx) = IndexTap::channel(1 << 16, super::super::classify_flv_tag);
     let mut indexer = Indexer::default();
     let file = tap.open(&path);
     feed_chunks(&file, &ts.bytes, 7);
@@ -123,7 +123,7 @@ fn fmp4_chunks_build_the_same_index_as_a_disk_scan() {
     let path = dir.path().join("a.mp4");
     std::fs::write(&path, &bytes).unwrap();
 
-    let (tap, mut rx) = IndexTap::channel(1 << 16);
+    let (tap, mut rx) = IndexTap::channel(1 << 16, super::super::classify_flv_tag);
     let mut indexer = Indexer::default();
     let file = tap.open(&path);
     feed_chunks(&file, &bytes, 11);
@@ -131,6 +131,63 @@ fn fmp4_chunks_build_the_same_index_as_a_disk_scan() {
     drain(&mut indexer, &mut rx);
     assert_eq!(load(&path).unwrap().keyframes.len(), frames.len());
     assert_same_as_disk_scan(&path, &bytes);
+}
+
+/// 写盘处就地判定与扫盘逐 tag 一致：序列头、标了关键帧但不是 IDR 的 I 帧、NALU 长度越界 / body
+/// 过短、H.265（传统与增强 FLV）、被过滤的 tag、音频、脚本 tag。
+#[test]
+fn flv_verdicts_at_the_write_point_match_the_disk_scan() {
+    use super::super::tests::{avcc_nalu, flv_tag};
+    fn video(head: &[u8], nalus: &[(u8, usize)]) -> Vec<u8> {
+        let mut body = head.to_vec();
+        for &(header, len) in nalus {
+            avcc_nalu(&mut body, header, len);
+        }
+        body
+    }
+    let avc_key = [0x17, 0x01, 0, 0, 0];
+    let hevc_key = [0x1C, 0x01, 0, 0, 0];
+    let ex_hevc_key = [0x91, b'h', b'v', b'c', b'1', 0, 0, 0];
+    let ex_hevc_key_no_ct = [0x93, b'h', b'v', b'c', b'1'];
+    let mut truncated = video(&avc_key, &[(0x65, 40)]);
+    truncated.truncate(30);
+    let cases: Vec<(u8, Vec<u8>, bool)> = vec![
+        (18, vec![0x02, 0, 10], false),
+        (9, vec![0x17, 0x00, 0, 0, 0, 1, 2, 3], false),
+        (8, vec![0xAF, 0x00, 0x12, 0x10], false),
+        (9, video(&avc_key, &[(0x06, 8), (0x65, 180)]), true),
+        (9, video(&avc_key, &[(0x06, 8), (0x41, 100)]), false),
+        (9, video(&[0x27, 0x01, 0, 0, 0], &[(0x41, 60)]), false),
+        (9, truncated, true),
+        (9, avc_key.to_vec(), false),
+        (9, video(&hevc_key, &[(19 << 1, 90)]), true),
+        (9, video(&hevc_key, &[(1 << 1, 90)]), false),
+        (9, video(&ex_hevc_key, &[(20 << 1, 90)]), true),
+        (9, video(&ex_hevc_key_no_ct, &[(21 << 1, 90)]), true),
+        (9, video(&ex_hevc_key_no_ct, &[(1 << 1, 90)]), false),
+        (9 | 0x20, video(&avc_key, &[(0x65, 80)]), false),
+        (8, vec![0xAF, 0x01, 1, 2, 3, 4], false),
+    ];
+    let mut out = b"FLV\x01\x05\x00\x00\x00\x09".to_vec();
+    out.extend_from_slice(&[0, 0, 0, 0]);
+    for (i, (tag_type, body, keyframe)) in cases.iter().enumerate() {
+        let kind = super::super::classify_flv_tag(*tag_type, &Bytes::copy_from_slice(body));
+        assert_eq!(kind.keyframe, *keyframe, "case {i}");
+        flv_tag(&mut out, *tag_type, 40 * i as u32, body);
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("edge.flv");
+    std::fs::write(&path, &out).unwrap();
+    let (tap, mut rx) = IndexTap::channel(1 << 10, super::super::classify_flv_tag);
+    let mut indexer = Indexer::default();
+    let file = tap.open(&path);
+    feed_flv_tags(&file, &out);
+    drain(&mut indexer, &mut rx);
+    assert_eq!(load(&path).unwrap().keyframes.len(), 5);
+    file.closed(out.len() as u64);
+    drain(&mut indexer, &mut rx);
+    assert_same_as_disk_scan(&path, &out);
 }
 
 /// 队列满时写入端丢事件并标记；索引任务保存已建好的部分，关段时扫盘从那里补齐。
@@ -141,7 +198,7 @@ fn a_full_queue_hands_the_rest_over_to_the_close_time_scan() {
     let path = dir.path().join("a.flv");
     std::fs::write(&path, &flv.bytes).unwrap();
 
-    let (tap, mut rx) = IndexTap::channel(200);
+    let (tap, mut rx) = IndexTap::channel(200, super::super::classify_flv_tag);
     let mut indexer = Indexer::default();
     let file = tap.open(&path);
     feed_flv_tags(&file, &flv.bytes);
@@ -170,7 +227,7 @@ fn a_gap_in_the_offsets_stops_streaming_for_that_file() {
     let dir = tempfile::tempdir().unwrap();
     let ts = build_ts(0, 60, false, false);
     let path = dir.path().join("a.ts");
-    let (tap, mut rx) = IndexTap::channel(64);
+    let (tap, mut rx) = IndexTap::channel(64, super::super::classify_flv_tag);
     let mut indexer = Indexer::default();
     let file = tap.open(&path);
     file.bytes(0, &Bytes::copy_from_slice(&ts.bytes[..188 * 10]));
@@ -186,7 +243,7 @@ fn a_length_mismatch_at_close_is_left_to_the_disk_scan() {
     let dir = tempfile::tempdir().unwrap();
     let (bytes, _, _) = build_fmp4(6);
     let path = dir.path().join("a.mp4");
-    let (tap, mut rx) = IndexTap::channel(64);
+    let (tap, mut rx) = IndexTap::channel(64, super::super::classify_flv_tag);
     let mut indexer = Indexer::default();
     let file = tap.open(&path);
     file.bytes(0, &Bytes::copy_from_slice(&bytes));

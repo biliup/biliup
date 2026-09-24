@@ -1,15 +1,21 @@
 //! mesio 的关键帧索引旁路。
 //!
 //! 修复管线会重排 tag、改时间戳、补头，writer 还会把 onMetaData 换成定长版本，所以条目的落盘
-//! 偏移只能在管线之后、按 writer 自己的字节计数来算：管线输出先经 [`forward`] 复制一份条目
-//! 进队列再交给 writer；writer 每写完一个条目回调一次进度（阈值为 0），用 `bytes_written_total`
-//! 的增量从队列里取出刚写的那个条目，按当前文件已写字节得到它的偏移，交给 [`FileTap`]。
+//! 偏移只能在管线之后、按 writer 自己的字节计数来算：管线输出先经 [`forward`]，把每个条目要进
+//! 索引的部分记进队列再交给 writer；writer 每写完一个条目回调一次进度（阈值为 0），用
+//! `bytes_written_total` 的增量从队列里取出刚写的那个条目，按当前文件已写字节得到它的偏移，
+//! 交给 [`FileTap`]。
+//!
+//! 队列里不放媒体数据：FLV tag 在 [`forward`] 里就地判定，只留时间戳、长度和判定结果；HLS 分片
+//! 放条目自己的 [`Bytes`]（引用计数，不复制）。writer 的回调只给字节计数、不给条目，所以条目要在
+//! 进 writer 之前记下来。
 //!
 //! 回调在 writer 线程上运行，只做非阻塞的 `try_recv` / `try_send`。增量与条目长度对不上时标记
 //! 这个文件，交给关段时的扫盘，不影响写盘。
 
 use super::WriterEvent;
-use biliup::downloader::index_tap::{FileTap, IndexTap};
+use crate::server::workbench::index::classify_flv_tag;
+use biliup::downloader::index_tap::{FileTap, FlvTagKind, IndexTap};
 use bytes::Bytes;
 use flv::FlvData;
 use flv_fix::FlvWriter;
@@ -31,9 +37,9 @@ const FLV_TAG_OVERHEAD: u64 = 15;
 /// 一个会写出字节的管线条目；`Split` / `EndMarker` 这类控制项不进队列。
 pub(super) enum Entry {
     Tag {
-        tag_type: u8,
         timestamp: u32,
-        data: Bytes,
+        data_size: u32,
+        kind: FlvTagKind,
         script: bool,
     },
     Bytes(Bytes),
@@ -48,10 +54,11 @@ impl Indexable for FlvData {
         let FlvData::Tag(tag) = self else {
             return None;
         };
+        let tag_type = u8::from(tag.tag_type()) | if tag.is_filtered() { 0x20 } else { 0 };
         Some(Entry::Tag {
-            tag_type: u8::from(tag.tag_type()) | if tag.is_filtered() { 0x20 } else { 0 },
             timestamp: tag.timestamp_ms,
-            data: tag.data().clone(),
+            data_size: tag.data().len() as u32,
+            kind: classify_flv_tag(tag_type, tag.data()),
             script: tag.is_script_tag(),
         })
     }
@@ -176,9 +183,9 @@ pub(super) fn install<W: WriterHooks>(
 fn report(file: &FileTap, pos: u64, delta: u64, entry: Option<Entry>) {
     match entry {
         Some(Entry::Tag {
-            tag_type,
             timestamp,
-            data,
+            data_size,
+            kind,
             script,
         }) => {
             let head = if pos == 0 { FLV_FILE_HEAD } else { 0 };
@@ -186,13 +193,11 @@ fn report(file: &FileTap, pos: u64, delta: u64, entry: Option<Entry>) {
             if script {
                 // onMetaData 可能被换成了定长版本，长度以实际写出的为准
                 match delta.checked_sub(head + FLV_TAG_OVERHEAD) {
-                    Some(size) => {
-                        file.flv_tag_sized(offset, tag_type, timestamp, size as u32, &data)
-                    }
+                    Some(size) => file.flv_tag_kind(offset, timestamp, size as u32, kind),
                     None => file.mark_lost(),
                 }
-            } else if delta == head + FLV_TAG_OVERHEAD + data.len() as u64 {
-                file.flv_tag(offset, tag_type, timestamp, &data);
+            } else if delta == head + FLV_TAG_OVERHEAD + data_size as u64 {
+                file.flv_tag_kind(offset, timestamp, data_size, kind);
             } else {
                 file.mark_lost();
             }
@@ -202,7 +207,7 @@ fn report(file: &FileTap, pos: u64, delta: u64, entry: Option<Entry>) {
     }
 }
 
-/// 在管线输出与 writer 之间插一站：每个条目先复制一份进 `queue`，再原样交给 writer。
+/// 在管线输出与 writer 之间插一站：每个条目先把要进索引的部分记进 `queue`，再原样交给 writer。
 pub(super) fn forward<T: Indexable + Send + 'static>(
     mut upstream: PipelineReceiver<T>,
     queue: Sender<Entry>,

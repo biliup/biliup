@@ -93,56 +93,25 @@ impl<'a> FlvFile<'a> {
     pub fn write_tag(
         &mut self,
         tag_header: &TagHeader,
-        body: &[u8],
-        previous_tag_size: &[u8],
-    ) -> std::io::Result<usize> {
-        let offset = self.write_tag_bytes(tag_header, body, previous_tag_size)?;
-        if let Some(index) = &self.index {
-            index.flv_tag(
-                offset,
-                tag_header.tag_type as u8,
-                tag_header.timestamp,
-                &Bytes::copy_from_slice(body),
-            );
-        }
-        Ok(previous_tag_size.len())
-    }
-
-    /// 同 [`Self::write_tag`]，body 已是 [`Bytes`] 时索引旁路不用复制。
-    pub fn write_shared_tag(
-        &mut self,
-        tag_header: &TagHeader,
         body: &Bytes,
         previous_tag_size: &[u8],
     ) -> std::io::Result<usize> {
-        let offset = self.write_tag_bytes(tag_header, body, previous_tag_size)?;
-        if let Some(index) = &self.index {
-            index.flv_tag(
-                offset,
-                tag_header.tag_type as u8,
-                tag_header.timestamp,
-                body,
-            );
-        }
-        Ok(previous_tag_size.len())
-    }
-
-    /// 写一个 tag，返回它在文件里的起始偏移。
-    fn write_tag_bytes(
-        &mut self,
-        tag_header: &TagHeader,
-        body: &[u8],
-        previous_tag_size: &[u8],
-    ) -> std::io::Result<u64> {
         self.write_tag_header(tag_header)?;
         self.buf_writer.write_all(body)?;
         // write 允许部分写入，短写会静默丢字节并破坏 FLV 结构，必须用 write_all
         self.buf_writer.write_all(previous_tag_size)?;
         let len = (11 + body.len() + previous_tag_size.len()) as u64;
         self.file.bytes_written.add(len);
-        let offset = self.pos;
+        if let Some(index) = &self.index {
+            index.flv_tag(
+                self.pos,
+                tag_header.tag_type as u8,
+                tag_header.timestamp,
+                body,
+            );
+        }
         self.pos += len;
-        Ok(offset)
+        Ok(previous_tag_size.len())
     }
 
     pub fn write_tag_header(&mut self, tag_header: &TagHeader) -> std::io::Result<()> {

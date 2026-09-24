@@ -16,7 +16,7 @@ pub(crate) struct Flv {
     pub(crate) last_ts: u32,
 }
 
-fn flv_tag(out: &mut Vec<u8>, tag_type: u8, ts: u32, body: &[u8]) -> u64 {
+pub(crate) fn flv_tag(out: &mut Vec<u8>, tag_type: u8, ts: u32, body: &[u8]) -> u64 {
     let offset = out.len() as u64;
     let len = body.len() as u32;
     out.push(tag_type);
@@ -66,7 +66,7 @@ fn on_metadata(keyframes: Option<(&[f64], &[f64])>) -> Vec<u8> {
 }
 
 /// 4 字节长度 + NALU 头 + 填充，共 `len` 字节 NALU。
-fn avcc_nalu(out: &mut Vec<u8>, header: u8, len: usize) {
+pub(crate) fn avcc_nalu(out: &mut Vec<u8>, header: u8, len: usize) {
     out.extend_from_slice(&(len as u32).to_be_bytes());
     out.push(header);
     out.extend(std::iter::repeat_n(0xAB, len - 1));

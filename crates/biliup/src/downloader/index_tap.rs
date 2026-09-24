@@ -4,6 +4,9 @@
 //! 挂点必须是写盘处，不能是预览的解析点：预览拿到的 tag 还没进 GOP 缓存（stream-gears），
 //! 或还没经过修复管线（mesio 会重排 tag、改时间戳、补头），与落盘的字节和偏移对不上。
 //!
+//! 不复制媒体数据：FLV tag 在写盘处就地判定（[`FlvClassifier`]），只发偏移、时间戳、长度和判定结果；
+//! TS / fMP4 要跨写入拼 PES、读 `moof`，交出去的是写入端本来就持有的 [`Bytes`]（引用计数，不拷贝）。
+//!
 //! 热路径只调 [`FileTap`] 的方法，它们只做一次 `try_send`：不 await、不返回错误。
 //! 通道满或索引任务已退出时丢掉这个事件，并把该文件标记为 [`TapFile::lost`]，此后不再为它发事件；
 //! 索引任务保留已处理的部分，分段关闭时由扫盘从那里补齐。录制本身不受任何影响。
@@ -14,8 +17,19 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{mpsc, oneshot};
 
-/// 不是关键帧候选的 FLV tag 只带 body 开头这么多字节（够判断音视频序列头 / Enhanced-FLV 头）。
-pub const FLV_TAG_HEAD_BYTES: usize = 32;
+/// 索引对一个 FLV tag 的判定。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FlvTagKind {
+    /// 音频或视频 tag。
+    pub media: bool,
+    /// 音视频序列头。
+    pub sequence_header: bool,
+    /// 能从这里开始解码的视频关键帧。
+    pub keyframe: bool,
+}
+
+/// 按 tag 头第一个字节和完整的 body 判定一个 FLV tag。
+pub type FlvClassifier = fn(tag_type: u8, body: &Bytes) -> FlvTagKind;
 
 /// 正在写的一个分段文件。
 #[derive(Debug)]
@@ -39,14 +53,12 @@ impl TapFile {
 pub enum IndexEvent {
     Opened(Arc<TapFile>),
     /// 一个 FLV tag 从 `offset`（tag 头起点）开始写进了文件，占 `11 + data_size + 4` 字节。
-    /// `data` 是关键帧候选（视频、帧类型为关键帧）的完整 body，其余 tag 只有 body 开头。
     FlvTag {
         file: Arc<TapFile>,
         offset: u64,
-        tag_type: u8,
         timestamp: u32,
         data_size: u32,
-        data: Bytes,
+        kind: FlvTagKind,
     },
     /// 一段字节从 `offset` 开始原样写进了文件（TS 分片、fMP4 的 init / 分片）。
     Bytes {
@@ -67,18 +79,21 @@ pub enum IndexEvent {
 #[derive(Debug, Clone)]
 pub struct IndexTap {
     tx: mpsc::Sender<IndexEvent>,
+    classify: FlvClassifier,
 }
 
 impl IndexTap {
-    pub fn channel(capacity: usize) -> (Self, mpsc::Receiver<IndexEvent>) {
+    /// `classify` 在写入端就地判定每个 FLV tag，须与索引任务扫盘时的判定一致。
+    pub fn channel(capacity: usize, classify: FlvClassifier) -> (Self, mpsc::Receiver<IndexEvent>) {
         let (tx, rx) = mpsc::channel(capacity);
-        (Self { tx }, rx)
+        (Self { tx, classify }, rx)
     }
 
     /// 开始写 `path`。
     pub fn open(&self, path: &Path) -> FileTap {
         let tap = FileTap {
             tx: self.tx.clone(),
+            classify: self.classify,
             file: Arc::new(TapFile {
                 path: path.to_path_buf(),
                 lost: AtomicBool::new(false),
@@ -101,6 +116,7 @@ impl IndexTap {
 #[derive(Debug)]
 pub struct FileTap {
     tx: mpsc::Sender<IndexEvent>,
+    classify: FlvClassifier,
     file: Arc<TapFile>,
 }
 
@@ -114,46 +130,23 @@ impl FileTap {
         self.file.lost()
     }
 
-    /// 一个 FLV tag 即将从 `offset` 开始写进文件。`tag_type` 为 tag 头第一个字节。
-    pub fn flv_tag(&self, offset: u64, tag_type: u8, timestamp: u32, data: &Bytes) {
+    /// 一个 FLV tag 从 `offset` 开始写进了文件。`tag_type` 为 tag 头第一个字节。
+    pub fn flv_tag(&self, offset: u64, tag_type: u8, timestamp: u32, body: &Bytes) {
         if self.file.lost() {
             return;
         }
-        let keyframe_candidate =
-            tag_type & 0x1F == 9 && data.first().is_some_and(|b| (b >> 4) & 0x07 == 1);
-        let data_size = data.len() as u32;
-        let data = if keyframe_candidate {
-            data.clone()
-        } else {
-            Bytes::copy_from_slice(&data[..data.len().min(FLV_TAG_HEAD_BYTES)])
-        };
-        self.send(IndexEvent::FlvTag {
-            file: self.file.clone(),
-            offset,
-            tag_type,
-            timestamp,
-            data_size,
-            data,
-        });
+        let kind = (self.classify)(tag_type, body);
+        self.flv_tag_kind(offset, timestamp, body.len() as u32, kind);
     }
 
-    /// 同 [`Self::flv_tag`]，但 body 的真实长度另给（写进文件的 body 与 `data` 不同长时用不上，
-    /// 只给 mesio 的 onMetaData 这类被 writer 换成定长版本的脚本 tag 用）。
-    pub fn flv_tag_sized(
-        &self,
-        offset: u64,
-        tag_type: u8,
-        timestamp: u32,
-        data_size: u32,
-        head: &[u8],
-    ) {
+    /// 同 [`Self::flv_tag`]，判定已由调用方做过（或 body 写进文件时换了长度，如 mesio 的 onMetaData）。
+    pub fn flv_tag_kind(&self, offset: u64, timestamp: u32, data_size: u32, kind: FlvTagKind) {
         self.send(IndexEvent::FlvTag {
             file: self.file.clone(),
             offset,
-            tag_type,
             timestamp,
             data_size,
-            data: Bytes::copy_from_slice(&head[..head.len().min(FLV_TAG_HEAD_BYTES)]),
+            kind,
         });
     }
 

@@ -386,7 +386,8 @@ fn segment_complete_hook(
 /// `preview`：直播预览的写入端与「把一个条目旁路给它」的函数，同样在条目进入管线前
 /// 调用（预览拿到的是拉到的原始流，不含修复管线的改动）。只是 push，不会失败、不 await。
 ///
-/// `index_queue`：关键帧索引旁路的条目队列（见 [`index_tap`]），在管线之后、writer 之前复制条目。
+/// `index_queue`：关键帧索引旁路的条目队列（见 [`index_tap`]），在管线之后、writer 之前记下每个条目
+/// 要进索引的部分（FLV 是就地判定的结果，HLS 是分片 `Bytes` 的引用计数）。
 #[allow(clippy::too_many_arguments)]
 async fn run_pipeline<'a, P, W>(
     common: &PipelineConfig,

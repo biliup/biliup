@@ -37,10 +37,8 @@ pub(super) fn scan(
     }
     reader.seek(SeekFrom::Start(offset))?;
     let mut pending: Option<PendingPes> = None;
-    let mut buf = [0u8; PACKET as usize];
     while offset + PACKET <= file_len {
-        reader.read_exact(&mut buf)?;
-        let packet = match TsPacketRef::parse(Bytes::copy_from_slice(&buf)) {
+        let packet = match TsPacketRef::parse(reader.read_bytes(PACKET as usize)?) {
             Ok(packet) => packet,
             Err(e) => {
                 return Err(io::Error::new(

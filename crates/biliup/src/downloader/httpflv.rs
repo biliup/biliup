@@ -98,7 +98,7 @@ impl GopCache {
                     tag_header.timestamp
                 );
             }
-            out.write_shared_tag(&tag_header, &flv_tag_data, &previous_tag_size_bytes)?;
+            out.write_tag(&tag_header, &flv_tag_data, &previous_tag_size_bytes)?;
             segment.increase_size((11 + tag_header.data_size + 4) as u64);
             *prev_timestamp = tag_header.timestamp
         }
@@ -785,14 +785,22 @@ mod tests {
         Ok(())
     }
 
-    /// 关键帧索引旁路报告的每个 tag（偏移、类型、时间戳、长度）与落盘文件逐一对应，
+    /// 关键帧索引旁路报告的每个 tag（偏移、时间戳、长度、判定）与落盘文件逐一对应，
     /// 跨分段时每个文件从头计偏移，关段报告的长度就是文件长度。
     #[tokio::test]
     async fn index_tap_reports_the_on_disk_offset_of_every_tag()
     -> Result<(), Box<dyn std::error::Error>> {
-        use crate::downloader::index_tap::{IndexEvent, IndexTap};
+        use crate::downloader::index_tap::{FlvTagKind, IndexEvent, IndexTap};
         use crate::downloader::util::{LifecycleFile, Segmentable};
         use std::sync::{Arc, Mutex};
+
+        fn classify(tag_type: u8, body: &[u8]) -> FlvTagKind {
+            FlvTagKind {
+                media: matches!(tag_type, 8 | 9),
+                sequence_header: tag_type == 9 && body.get(1) == Some(&0),
+                keyframe: tag_type == 9 && body[0] >> 4 == 1,
+            }
+        }
 
         let http_resp = http::Response::builder()
             .status(200)
@@ -811,11 +819,11 @@ mod tests {
                 kept.push(path);
             }
         });
-        let (tap, mut rx) = IndexTap::channel(1 << 16);
+        let (tap, mut rx) = IndexTap::channel(1 << 16, |tag_type, body| classify(tag_type, body));
         let file = file.with_index_tap(Some(tap));
         super::parse_flv(connection, file, Segmentable::new(None, Some(2048)), None).await?;
 
-        type Tags = Vec<(u64, u8, u32, u32)>;
+        type Tags = Vec<(u64, u32, u32, FlvTagKind)>;
         let mut reported: Vec<(Tags, Option<u64>)> = Vec::new();
         while let Ok(event) = rx.try_recv() {
             match event {
@@ -825,20 +833,15 @@ mod tests {
                 }
                 IndexEvent::FlvTag {
                     offset,
-                    tag_type,
                     timestamp,
                     data_size,
-                    data,
+                    kind,
                     ..
-                } => {
-                    let key = tag_type == 9 && data[0] >> 4 == 1;
-                    assert_eq!(data.len() == data_size as usize, key || data_size <= 32);
-                    reported
-                        .last_mut()
-                        .unwrap()
-                        .0
-                        .push((offset, tag_type, timestamp, data_size));
-                }
+                } => reported
+                    .last_mut()
+                    .unwrap()
+                    .0
+                    .push((offset, timestamp, data_size, kind)),
                 IndexEvent::Closed { len, .. } => reported.last_mut().unwrap().1 = Some(len),
                 other => panic!("unexpected {other:?}"),
             }
@@ -860,7 +863,8 @@ mod tests {
                 let h = &bytes[offset..offset + 11];
                 let size = u32::from_be_bytes([0, h[1], h[2], h[3]]);
                 let ts = u32::from_be_bytes([h[7], h[4], h[5], h[6]]);
-                on_disk.push((offset as u64, h[0], ts, size));
+                let body = &bytes[offset + 11..offset + 11 + size as usize];
+                on_disk.push((offset as u64, ts, size, classify(h[0], body)));
                 offset += 15 + size as usize;
             }
             assert_eq!(*tags, on_disk, "{}", path.display());

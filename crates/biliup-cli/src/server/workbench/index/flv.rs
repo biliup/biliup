@@ -1,10 +1,13 @@
 //! FLV：逐 tag 读 11 字节 tag 头和 body 开头几个字节判定关键帧，body 其余部分跳过
 //!（标了关键帧的 H.264 / H.265 tag 再看一眼各 NALU 的类型）。
+//!
+//! 边录边建时同一套判定（[`classify`]）在写盘处对内存里的 body 就地做，索引任务只收结论。
 
 use super::{KeyframeIndex, Source, read_at};
 use ::flv::framing::{PREV_TAG_SIZE_FIELD_SIZE, TAG_HEADER_SIZE, parse_tag_header_bytes};
 use ::flv::tag::FlvTagType;
 use ::flv::{CodecKind, FlvTag, TagClass};
+use biliup::downloader::index_tap::FlvTagKind;
 use bytes::Bytes;
 use std::io::{self, SeekFrom};
 
@@ -15,23 +18,49 @@ const CLASSIFY_BYTES: usize = 32;
 const MAX_NALUS_PER_TAG: usize = 64;
 
 struct Tag {
-    tag_type: FlvTagType,
     timestamp_ms: u32,
     data_size: u32,
-    class: TagClass,
+    kind: FlvTagKind,
 }
 
-impl Tag {
-    fn is_media(&self) -> bool {
-        matches!(self.tag_type, FlvTagType::Audio | FlvTagType::Video)
-    }
+/// 从 `offset` 起、body 长 `data_size` 的 tag 之后的偏移。
+pub(super) fn tag_end(offset: u64, data_size: u32) -> u64 {
+    offset + (TAG_HEADER_SIZE + PREV_TAG_SIZE_FIELD_SIZE) as u64 + data_size as u64
+}
 
-    fn is_keyframe(&self) -> bool {
-        self.tag_type == FlvTagType::Video && self.class.keyframe_media
-    }
+/// 写盘处就地判定一个 tag（`tag_type` 为 tag 头第一个字节，`body` 完整）。
+/// 与扫盘时 [`read_tag`] 看同样的字节、得出同样的结论；`body` 只做引用计数切片，不复制。
+pub fn classify(tag_type: u8, body: &Bytes) -> FlvTagKind {
+    let filtered = tag_type & 0x20 != 0;
+    let tag_type = FlvTagType::from(tag_type & 0x1F);
+    let peek = body.slice(..body.len().min(CLASSIFY_BYTES));
+    let class = FlvTag::new(0, 0, tag_type, filtered, peek).classification();
+    let keyframe = match nalu_data_start(tag_type, &class, body) {
+        Some(start) => random_access_nalu(start, body.len(), class.codec, |pos| {
+            Ok(body[pos..pos + 5].try_into().unwrap())
+        })
+        .unwrap_or(false),
+        None => tag_type == FlvTagType::Video && class.keyframe_media,
+    };
+    kind(tag_type, &class, keyframe)
+}
 
-    fn end(&self, offset: u64) -> u64 {
-        offset + (TAG_HEADER_SIZE + PREV_TAG_SIZE_FIELD_SIZE) as u64 + self.data_size as u64
+fn kind(tag_type: FlvTagType, class: &TagClass, keyframe: bool) -> FlvTagKind {
+    FlvTagKind {
+        media: matches!(tag_type, FlvTagType::Audio | FlvTagType::Video),
+        sequence_header: class.sequence_header,
+        keyframe,
+    }
+}
+
+/// 把 `offset` 处的一个 tag 记进索引（扫盘与边录边建共用）。
+pub(super) fn record(index: &mut KeyframeIndex, offset: u64, timestamp_ms: u32, kind: FlvTagKind) {
+    if kind.media && !kind.sequence_header {
+        index.finalize_header(offset);
+        if kind.keyframe {
+            index.push_keyframe(timestamp_ms as i64, offset);
+        }
+        index.observe_media(timestamp_ms as i64);
     }
 }
 
@@ -49,19 +78,13 @@ fn read_tag(reader: &mut impl Source, offset: u64, file_len: u64) -> io::Result<
             format!("FLV tag type {:?} at offset {offset}", header.tag_type),
         ));
     }
-    let tag = Tag {
-        tag_type: header.tag_type,
-        timestamp_ms: header.timestamp_ms,
-        data_size: header.data_size,
-        class: Default::default(),
-    };
-    if tag.end(offset) > file_len {
+    if tag_end(offset, header.data_size) > file_len {
         return Ok(None);
     }
     let peek = (header.data_size as usize).min(CLASSIFY_BYTES);
     let mut body = [0u8; CLASSIFY_BYTES];
     reader.read_exact(&mut body[..peek])?;
-    let mut class = FlvTag::new(
+    let class = FlvTag::new(
         header.timestamp_ms,
         header.stream_id,
         header.tag_type,
@@ -70,27 +93,32 @@ fn read_tag(reader: &mut impl Source, offset: u64, file_len: u64) -> io::Result<
     )
     .classification();
     let mut consumed = peek;
-    if tag.tag_type == FlvTagType::Video
-        && class.keyframe_media
-        && let Some(start) = nalu_data_start(&class, &body[..peek])
-    {
-        class.keyframe_media = has_random_access_nalu(
-            reader,
-            &mut consumed,
-            start,
-            header.data_size as usize,
-            class.codec,
-        )?;
-    }
+    let keyframe = match nalu_data_start(header.tag_type, &class, &body[..peek]) {
+        Some(start) => random_access_nalu(start, header.data_size as usize, class.codec, |pos| {
+            reader.skip(pos as i64 - consumed as i64)?;
+            let mut head = [0u8; 5];
+            reader.read_exact(&mut head)?;
+            consumed = pos + 5;
+            Ok(head)
+        })?,
+        None => header.tag_type == FlvTagType::Video && class.keyframe_media,
+    };
     reader
         .seek_relative((header.data_size as usize - consumed + PREV_TAG_SIZE_FIELD_SIZE) as i64)?;
-    Ok(Some(Tag { class, ..tag }))
+    Ok(Some(Tag {
+        timestamp_ms: header.timestamp_ms,
+        data_size: header.data_size,
+        kind: kind(header.tag_type, &class, keyframe),
+    }))
 }
 
-/// H.264 / H.265 视频 tag 里第一个 NALU 长度字段在 body 中的位置；不是这两种编码，或是
-/// ModEx / Multitrack 这类不展开的封装时返回 `None`（沿用 tag 头的关键帧标记）。
-fn nalu_data_start(class: &TagClass, body: &[u8]) -> Option<usize> {
-    if !matches!(class.codec, Some(CodecKind::Avc | CodecKind::Hevc)) {
+/// 标了关键帧的 H.264 / H.265 视频 tag 里第一个 NALU 长度字段在 body 中的位置；其他 tag，
+/// 或是 ModEx / Multitrack 这类不展开的封装时返回 `None`（沿用 tag 头的关键帧标记）。
+fn nalu_data_start(tag_type: FlvTagType, class: &TagClass, body: &[u8]) -> Option<usize> {
+    if tag_type != FlvTagType::Video
+        || !class.keyframe_media
+        || !matches!(class.codec, Some(CodecKind::Avc | CodecKind::Hevc))
+    {
         return None;
     }
     let first = *body.first()?;
@@ -108,22 +136,19 @@ fn nalu_data_start(class: &TagClass, body: &[u8]) -> Option<usize> {
 /// 可以参考它之前的画面，ffmpeg / ffprobe 也不把它当关键帧，从那里起流拷贝切出来的开头不保证干净。
 /// 逐个看 NALU 类型：H.264 要有 IDR（5），H.265 要有 IRAP（16–23）。
 /// 按 4 字节 NALU 长度走；长度对不上（不是 4 字节长度的流）时沿用 tag 头的标记。
-fn has_random_access_nalu(
-    reader: &mut impl Source,
-    consumed: &mut usize,
+/// `head_at(pos)` 取 body 里 `pos` 起的 5 个字节（NALU 长度 + NALU 头）。
+fn random_access_nalu(
     start: usize,
     data_size: usize,
     codec: Option<CodecKind>,
+    mut head_at: impl FnMut(usize) -> io::Result<[u8; 5]>,
 ) -> io::Result<bool> {
     let mut pos = start;
     for _ in 0..MAX_NALUS_PER_TAG {
         if pos + 5 > data_size {
             return Ok(false);
         }
-        reader.skip(pos as i64 - *consumed as i64)?;
-        let mut head = [0u8; 5];
-        reader.read_exact(&mut head)?;
-        *consumed = pos + 5;
+        let head = head_at(pos)?;
         let len = u32::from_be_bytes(head[..4].try_into().unwrap()) as usize;
         if len == 0 || pos + 4 + len > data_size {
             return Ok(true);
@@ -173,14 +198,8 @@ pub(super) fn scan(
     }
     reader.seek(SeekFrom::Start(offset))?;
     while let Some(tag) = read_tag(reader, offset, file_len)? {
-        if tag.is_media() && !tag.class.sequence_header {
-            index.finalize_header(offset);
-            if tag.is_keyframe() {
-                index.push_keyframe(tag.timestamp_ms as i64, offset);
-            }
-            index.observe_media(tag.timestamp_ms as i64);
-        }
-        offset = tag.end(offset);
+        record(index, offset, tag.timestamp_ms, tag.kind);
+        offset = tag_end(offset, tag.data_size);
         index.scanned_upto = offset;
     }
     Ok(())
@@ -191,5 +210,5 @@ pub(super) fn is_keyframe_at(reader: &mut impl Source, offset: u64, file_len: u6
     if reader.seek(SeekFrom::Start(offset)).is_err() {
         return false;
     }
-    matches!(read_tag(reader, offset, file_len), Ok(Some(tag)) if tag.is_keyframe())
+    matches!(read_tag(reader, offset, file_len), Ok(Some(tag)) if tag.kind.keyframe)
 }

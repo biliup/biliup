@@ -16,6 +16,9 @@ mod fmp4;
 pub mod live;
 mod ts;
 
+pub use flv::classify as classify_flv_tag;
+
+use bytes::Bytes;
 use std::fs::{self, File};
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -36,6 +39,13 @@ const READ_BUFFER: usize = 256 * 1024;
 trait Source: Read + Seek {
     /// 从当前位置前后跳 `n` 字节。
     fn skip(&mut self, n: i64) -> io::Result<()>;
+
+    /// 读 `n` 个字节；来源本来就持有这段 [`Bytes`] 时切片返回，不复制。
+    fn read_bytes(&mut self, n: usize) -> io::Result<Bytes> {
+        let mut buf = vec![0u8; n];
+        self.read_exact(&mut buf)?;
+        Ok(buf.into())
+    }
 }
 
 impl Source for BufReader<File> {

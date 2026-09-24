@@ -1,17 +1,17 @@
 //! 录制时边写边建关键帧索引。
 //!
 //! 进程内写盘的下载器（stream-gears、mesio）经 [`IndexTap`] 把每个分段写了什么、从哪个偏移开始
-//! 交过来；这里按偏移把它们拼成一个稀疏的内存窗口，用与扫盘同一套扫描器（[`super::scan`]）续扫，
-//! 扫过的字节随即丢掉，`<分段>.idx` 每 [`SAVE_INTERVAL`] 最多落一次盘。录制中的分段查索引直接读
-//! 这个缓存（[`is_live`]），不扫盘。
+//! 交过来，`<分段>.idx` 每 [`SAVE_INTERVAL`] 最多落一次盘。录制中的分段查索引直接读这个缓存
+//!（[`is_live`]），不扫盘。
 //!
-//! FLV 只收到 tag 头和 body 开头（关键帧候选才有完整 body），扫描器也只读这些；TS / fMP4 收到
-//! 原样字节。
+//! FLV 收到的是写盘处用扫盘同一套判定（[`super::classify_flv_tag`]）就地得出的结论，直接记进索引；
+//! TS / fMP4 收到写入端持有的原样字节（引用计数，不复制），按偏移拼成一个稀疏的内存窗口，用与扫盘
+//! 同一套扫描器（[`super::scan`]）续扫，扫过的字节随即释放。
 //!
 //! 写入端丢了事件（[`TapFile::lost`]）、偏移对不上或扫描出错时，保存已建好的部分、不再跟踪这个
 //! 文件，分段关闭时由 [`super::refresh`] 从那里扫盘补齐。外部进程下载器没有旁路，同样在关段时扫。
 
-use super::{Container, KeyframeIndex, Source, save};
+use super::{Container, KeyframeIndex, Source, flv, save};
 use biliup::downloader::index_tap::{IndexEvent, IndexTap, TapFile};
 use bytes::Bytes;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -31,8 +31,8 @@ const SWEEP_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_BATCH: usize = 512;
 /// TS / fMP4 攒够这么多未扫字节再扫（没扫完的 PES 每轮会从头再看一遍）。
 const SCAN_STEP: u64 = 64 * 1024;
-/// 两个写入端写的 FLV 文件头都是 9 字节头 + PreviousTagSize0，扫描器只看 `FLV` 和数据偏移。
-const FLV_FILE_HEAD: [u8; 13] = [b'F', b'L', b'V', 1, 5, 0, 0, 0, 9, 0, 0, 0, 0];
+/// 两个写入端写的 FLV 文件头都是 9 字节头 + PreviousTagSize0，第一个 tag 从这里开始。
+const FLV_FIRST_TAG: u64 = 13;
 
 static LIVE: LazyLock<Mutex<HashSet<PathBuf>>> = LazyLock::new(Mutex::default);
 
@@ -52,13 +52,13 @@ fn unregister(path: &Path) {
 /// 起一个索引任务（阻塞线程池里的一个线程），返回写入端用的句柄。
 /// 所有句柄都释放后任务保存手上的索引并退出。
 pub fn spawn() -> IndexTap {
-    let (tap, rx) = IndexTap::channel(CHANNEL_CAPACITY);
+    let (tap, rx) = IndexTap::channel(CHANNEL_CAPACITY, super::classify_flv_tag);
     let runtime = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || Indexer::default().run(&runtime, rx));
     tap
 }
 
-/// 已写字节里扫描器会读到的部分，按文件偏移排列。
+/// 已写字节里扫描器会读到的部分，按文件偏移排列（FLV 不存字节，只记写到哪里）。
 #[derive(Default)]
 struct Window {
     chunks: VecDeque<(u64, Bytes)>,
@@ -68,7 +68,7 @@ struct Window {
 }
 
 impl Window {
-    /// 追加从 `offset` 开始的 `data`，这段写入到 `extent` 为止（FLV tag 只带了开头）。
+    /// 追加从 `offset` 开始、到 `extent` 为止的一次写入，`data` 为其中要扫描的字节。
     fn push(&mut self, offset: u64, data: Bytes, extent: u64) -> bool {
         if offset != self.end || extent < offset + data.len() as u64 {
             return false;
@@ -93,6 +93,25 @@ impl Window {
     fn unscanned(&self, scanned_upto: u64) -> u64 {
         self.end.saturating_sub(scanned_upto)
     }
+
+    /// 当前位置所在的块，及当前位置在块内的下标。
+    fn at_pos(&self) -> io::Result<(&Bytes, usize)> {
+        let i = self
+            .chunks
+            .partition_point(|(offset, _)| *offset <= self.pos);
+        i.checked_sub(1)
+            .map(|i| &self.chunks[i])
+            .and_then(|(offset, data)| {
+                let at = (self.pos - offset) as usize;
+                (at < data.len()).then_some((data, at))
+            })
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("没有收到偏移 {} 处的字节", self.pos),
+                )
+            })
+    }
 }
 
 impl Read for Window {
@@ -100,24 +119,9 @@ impl Read for Window {
         if buf.is_empty() || self.pos >= self.end {
             return Ok(0);
         }
-        let i = self
-            .chunks
-            .partition_point(|(offset, _)| *offset <= self.pos);
-        let hit = i
-            .checked_sub(1)
-            .map(|i| &self.chunks[i])
-            .and_then(|(offset, data)| {
-                let at = (self.pos - offset) as usize;
-                (at < data.len()).then(|| &data[at..])
-            });
-        let Some(data) = hit else {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("没有收到偏移 {} 处的字节", self.pos),
-            ));
-        };
-        let n = buf.len().min(data.len());
-        buf[..n].copy_from_slice(&data[..n]);
+        let (data, at) = self.at_pos()?;
+        let n = buf.len().min(data.len() - at);
+        buf[..n].copy_from_slice(&data[at..at + n]);
         self.pos += n as u64;
         Ok(n)
     }
@@ -139,6 +143,21 @@ impl Source for Window {
     fn skip(&mut self, n: i64) -> io::Result<()> {
         self.seek(SeekFrom::Current(n)).map(|_| ())
     }
+
+    /// 整段落在一个块里时（跨块的只有块边界处那一个单元）切片返回，不复制。
+    fn read_bytes(&mut self, n: usize) -> io::Result<Bytes> {
+        if self.pos + n as u64 <= self.end {
+            let (data, at) = self.at_pos()?;
+            if at + n <= data.len() {
+                let slice = data.slice(at..at + n);
+                self.pos += n as u64;
+                return Ok(slice);
+            }
+        }
+        let mut buf = vec![0u8; n];
+        self.read_exact(&mut buf)?;
+        Ok(buf.into())
+    }
 }
 
 struct LiveFile {
@@ -152,16 +171,14 @@ struct LiveFile {
 impl LiveFile {
     fn new(file: Arc<TapFile>, container: Container) -> Self {
         let mut window = Window::default();
+        let mut index = KeyframeIndex::new(container);
         if container == Container::Flv {
-            window.push(
-                0,
-                Bytes::from_static(&FLV_FILE_HEAD),
-                FLV_FILE_HEAD.len() as u64,
-            );
+            window.push(0, Bytes::new(), FLV_FIRST_TAG);
+            index.scanned_upto = FLV_FIRST_TAG;
         }
         Self {
             file,
-            index: KeyframeIndex::new(container),
+            index,
             window,
             last_save: None,
             saved_upto: 0,
@@ -173,6 +190,9 @@ impl LiveFile {
     }
 
     fn scan(&mut self) -> io::Result<()> {
+        if self.index.container == Container::Flv {
+            return Ok(());
+        }
         let end = self.window.end;
         super::scan(&mut self.window, end, &mut self.index)?;
         self.window.trim(self.index.scanned_upto);
@@ -254,20 +274,16 @@ impl Indexer {
             IndexEvent::FlvTag {
                 file,
                 offset,
-                tag_type,
                 timestamp,
                 data_size,
-                data,
+                kind,
             } => {
-                let mut chunk = Vec::with_capacity(11 + data.len());
-                chunk.push(tag_type);
-                chunk.extend_from_slice(&data_size.to_be_bytes()[1..]);
-                chunk.extend_from_slice(&(timestamp & 0x00FF_FFFF).to_be_bytes()[1..]);
-                chunk.push((timestamp >> 24) as u8);
-                chunk.extend_from_slice(&[0, 0, 0]);
-                chunk.extend_from_slice(&data);
-                let extent = offset + 15 + data_size as u64;
-                self.push(&file, offset, Bytes::from(chunk), extent);
+                if let Some(live) =
+                    self.push(&file, offset, Bytes::new(), flv::tag_end(offset, data_size))
+                {
+                    flv::record(&mut live.index, offset, timestamp, kind);
+                    live.index.scanned_upto = live.window.end;
+                }
             }
             IndexEvent::Bytes { file, offset, data } => {
                 let extent = offset + data.len() as u64;
@@ -281,18 +297,24 @@ impl Indexer {
         }
     }
 
-    fn push(&mut self, file: &Arc<TapFile>, offset: u64, data: Bytes, extent: u64) {
+    /// 记下一次写入；偏移不连续时放弃这个文件，返回 `None`。
+    fn push(
+        &mut self,
+        file: &Arc<TapFile>,
+        offset: u64,
+        data: Bytes,
+        extent: u64,
+    ) -> Option<&mut LiveFile> {
         let key = key(file);
-        let Some(live) = self.files.get_mut(&key) else {
-            return;
-        };
+        let live = self.files.get_mut(&key)?;
         if !live.window.push(offset, data, extent) {
             let expected = live.window.end;
             debug!(path = %live.path().display(), offset, expected, "流式关键帧索引偏移不连续");
             self.abandon(key, "偏移不连续");
-            return;
+            return None;
         }
         self.dirty.insert(key);
+        self.files.get_mut(&key)
     }
 
     fn scan_dirty(&mut self) {

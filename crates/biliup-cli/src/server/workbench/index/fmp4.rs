@@ -6,6 +6,7 @@
 //! `moof` / `tfdt` / `trun`，所以这里自己写了最小的 box 解析。
 
 use super::{KeyframeIndex, Source, read_at};
+use bytes::Bytes;
 use std::io::{self, SeekFrom};
 
 /// `moov` / `moof` 超过这个大小就当文件损坏。
@@ -286,7 +287,7 @@ fn parse_moof(moof: &[u8], track: &VideoTrack) -> Option<Fragment> {
     None
 }
 
-fn read_body(reader: &mut impl Source, header: &BoxHeader) -> io::Result<Vec<u8>> {
+fn read_body(reader: &mut impl Source, header: &BoxHeader) -> io::Result<Bytes> {
     let len = header.size - header.header;
     if len > MAX_META_BOX {
         return Err(io::Error::new(
@@ -294,9 +295,7 @@ fn read_body(reader: &mut impl Source, header: &BoxHeader) -> io::Result<Vec<u8>
             format!("MP4 box {:?} too large: {len}", header.kind),
         ));
     }
-    let mut body = vec![0u8; len as usize];
-    reader.read_exact(&mut body)?;
-    Ok(body)
+    reader.read_bytes(len as usize)
 }
 
 /// 从 `index.scanned_upto` 扫到文件末尾最后一个完整的顶层 box。
