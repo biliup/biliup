@@ -155,14 +155,22 @@ pub struct SessionDetail {
 /// 录制中的分段在盘上已经能回看到哪里（段内毫秒）。
 ///
 /// 边写边建的索引缓存可能跑在盘上前面（写入端缓冲里的内容还没落盘）。详情按这里给出的范围说「能播」，
-/// 回看流只从盘上的关键帧起播，两边必须一致：盘上没有关键帧就是 0；缓存覆盖的字节还没全部落盘时，
-/// 只算到盘上最后一个关键帧。`index` 是 [`segment_index`] 的结果，里面的关键帧已经只剩落了盘的。
+/// 回看流只从盘上的关键帧起播（`from` 超过它就退到盘上最后一个关键帧），两边必须一致：
+/// 盘上没有关键帧就是 0（还不能播）；有就一定大于 0。缓存覆盖的字节还没全部落盘时，盘上最后一个关键帧
+/// 之后那一截按字节在它和缓存末尾之间线性估计，只用来画可播范围，起播位置仍然落在盘上的关键帧。
+/// `index` 是 [`segment_index`] 的结果，里面的关键帧已经只剩落了盘的。
 fn readable_ms(index: &crate::server::workbench::index::KeyframeIndex, on_disk: u64) -> i64 {
-    match index.keyframes.last() {
-        None => 0,
-        Some(last) if index.source_len > on_disk => i64::from(last.t_ms),
-        Some(_) => i64::from(index.duration_ms),
+    let Some(last) = index.keyframes.last() else {
+        return 0;
+    };
+    if index.source_len <= on_disk {
+        return i64::from(index.duration_ms);
     }
+    let t = u128::from(last.t_ms);
+    let span_ms = u128::from(index.duration_ms).saturating_sub(t);
+    let done = u128::from(on_disk.saturating_sub(last.offset));
+    let span = u128::from(index.source_len - last.offset);
+    (t + (span_ms * done).div_ceil(span)) as i64
 }
 
 async fn segment_view(row: SegmentRow) -> SegmentView {
@@ -580,11 +588,20 @@ mod tests {
         assert_eq!(full.source_len, len);
         assert_eq!(readable_ms(&full, len), 3965, "缓存覆盖的都已落盘");
 
+        // 缓存跑在盘上前面：盘上最后一个关键帧之后按字节估计，不越过缓存末尾
         let mut ahead = full.clone();
         ahead.keyframes.truncate(2);
-        assert_eq!(readable_ms(&ahead, len - 1), 1000, "缓存跑在盘上前面");
+        let on_disk = flv.keyframes[2].1;
+        let t = readable_ms(&ahead, on_disk);
+        assert!((1001..=2000).contains(&t), "{t}");
+        assert!((2001..=3965).contains(&readable_ms(&ahead, len - 1)));
+
+        // 盘上只有 0 处一个关键帧也已经能播，范围不能是空的
+        ahead.keyframes.truncate(1);
+        assert!(readable_ms(&ahead, flv.keyframes[0].1 + 1) > 0);
+
         ahead.keyframes.clear();
-        assert_eq!(readable_ms(&ahead, len), 0, "盘上还没有关键帧");
+        assert_eq!(readable_ms(&ahead, len - 1), 0, "盘上还没有关键帧");
     }
 
     /// 边写边建的索引缓存跑在盘上前面时，详情说能播的范围与回看流能起播的位置一致。
@@ -630,29 +647,39 @@ mod tests {
         assert!(index::live::is_live(&path));
 
         let detail_uri = format!("/v1/sessions/{session}");
-        let media_uri = format!("/v1/sessions/{session}/media?from=5000");
-        let end_ms = |detail: &serde_json::Value| detail["segments"][0]["end_ms"].clone();
+        let media_uri = |from: i64| format!("/v1/sessions/{session}/media?from={from}");
+        let end_ms = |detail: &serde_json::Value| detail["segments"][0]["end_ms"].as_i64().unwrap();
         let detail = json(get_as(&f.app, Some(&viewer), &detail_uri).await).await;
         assert_eq!(end_ms(&detail), 0, "盘上没有关键帧：还不能播");
         assert_eq!(detail["duration_ms"], 0);
-        let response = get_as(&f.app, Some(&viewer), &media_uri).await;
+        let response = get_as(&f.app, Some(&viewer), &media_uri(0)).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-        // 前两个关键帧落盘
+        // 依次让第一个、前两个关键帧落盘：详情说能播到的地方，回看流都从盘上的关键帧起播
         let mut file = std::fs::OpenOptions::new()
             .append(true)
             .open(&path)
             .unwrap();
-        let cut = flv.keyframes[2].1 as usize;
-        file.write_all(&flv.bytes[head..cut]).unwrap();
-        let detail = json(get_as(&f.app, Some(&viewer), &detail_uri).await).await;
-        assert_eq!(end_ms(&detail), 1000, "只算到盘上最后一个关键帧");
-        let response = get_as(&f.app, Some(&viewer), &media_uri).await;
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(response.headers()["X-Dvr-Start-Ms"], "1000");
-        drop(response);
+        let mut written = head;
+        for (n, on_disk_keyframe) in [(1, 0), (2, 1000)] {
+            let cut = flv.keyframes[n].1 as usize;
+            file.write_all(&flv.bytes[written..cut]).unwrap();
+            written = cut;
+            let detail = json(get_as(&f.app, Some(&viewer), &detail_uri).await).await;
+            let end = end_ms(&detail);
+            let next_keyframe = i64::from(flv.keyframes[n].0);
+            assert!(end > on_disk_keyframe && end <= next_keyframe, "{end}");
+            for from in [end, 5000] {
+                let response = get_as(&f.app, Some(&viewer), &media_uri(from)).await;
+                assert_eq!(response.status(), StatusCode::OK);
+                assert_eq!(
+                    response.headers()["X-Dvr-Start-Ms"],
+                    on_disk_keyframe.to_string().as_str()
+                );
+            }
+        }
 
-        file.write_all(&flv.bytes[cut..]).unwrap();
+        file.write_all(&flv.bytes[written..]).unwrap();
         let detail = json(get_as(&f.app, Some(&viewer), &detail_uri).await).await;
         assert_eq!(end_ms(&detail), 3965, "缓存覆盖的都落盘了：按内容时长");
         drop((file_tap, tap));
