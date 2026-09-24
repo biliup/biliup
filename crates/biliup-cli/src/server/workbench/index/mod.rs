@@ -1,9 +1,10 @@
 //! 分段文件的关键帧索引：把「段内时间」对应到「文件字节偏移」。
 //!
-//! 索引不碰录制热路径，也不进 SQLite：录完（或需要时）只读地扫描分段文件的 tag 头 /
-//! TS 包头 / fMP4 box 头，结果缓存在分段旁边的 `<分段>.idx`。正在写的分段从上次扫到的
-//! 偏移增量续扫。mesio 写在 FLV 文件头的 `onMetaData.keyframes` 会跳过间隔不到 1.9 s 的
-//! 关键帧，所以不用它，一律逐 tag 扫。
+//! 索引不进 SQLite，缓存在分段旁边的 `<分段>.idx`。进程内写盘的下载器（stream-gears、mesio）
+//! 录制时由 [`live`] 边写边建，录制热路径上只有一次非阻塞发送；外部进程下载器、旧文件、
+//! 异常退出后不完整的缓存，在关段 / 启动收尾时只读地扫描分段文件的 tag 头 / TS 包头 /
+//! fMP4 box 头，从缓存扫到的偏移续扫。两条路径用同一套扫描器。mesio 写在 FLV 文件头的
+//! `onMetaData.keyframes` 会跳过间隔不到 1.9 s 的关键帧，所以不用它，一律逐 tag 扫。
 //!
 //! 段内时间 `t_ms` 以段内第一个关键帧为 0（[`KeyframeIndex::base_ts`] 记着它的容器原始时间戳），
 //! 所以 stream-gears 的绝对 FLV 时间戳、B 站 `hls_fmp4` 保留的源站 `tfdt`、TS 的 PTS 都不用
@@ -12,11 +13,13 @@
 
 mod flv;
 mod fmp4;
+pub mod live;
 mod ts;
 
 use std::fs::{self, File};
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use tracing::debug;
 
 /// 索引缓存文件的扩展名，拼在分段文件名之后：`a.flv` → `a.flv.idx`。
 pub const INDEX_EXTENSION: &str = "idx";
@@ -28,6 +31,18 @@ const FIXED_HEADER_SIZE: usize = 80;
 const ENTRY_SIZE: usize = 12;
 /// 扫描时读缓冲的大小。
 const READ_BUFFER: usize = 256 * 1024;
+
+/// 扫描器读的来源：盘上的分段文件，或 [`live`] 里录制时收到的已写字节。
+trait Source: Read + Seek {
+    /// 从当前位置前后跳 `n` 字节。
+    fn skip(&mut self, n: i64) -> io::Result<()>;
+}
+
+impl Source for BufReader<File> {
+    fn skip(&mut self, n: i64) -> io::Result<()> {
+        self.seek_relative(n)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Container {
@@ -330,15 +345,29 @@ pub fn refresh(segment: &Path, finished: bool) -> io::Result<KeyframeIndex> {
     }
 
     let mut index = cached.unwrap_or_else(|| KeyframeIndex::new(container));
-    match container {
-        Container::Flv => flv::scan(&mut reader, file_len, &mut index)?,
-        Container::Ts => ts::scan(&mut reader, file_len, &mut index)?,
-        Container::Fmp4 => fmp4::scan(&mut reader, file_len, &mut index)?,
+    let from = index.scanned_upto;
+    scan(&mut reader, file_len, &mut index)?;
+    if file_len > from {
+        debug!(
+            path = %segment.display(),
+            from,
+            to = file_len,
+            "关键帧索引扫盘"
+        );
     }
     index.complete = finished;
     index.source_len = file_len;
     save(segment, &index)?;
     Ok(index)
+}
+
+/// 从 `index.scanned_upto` 扫到 `len` 为止最后一个完整的单元。
+fn scan(reader: &mut impl Source, len: u64, index: &mut KeyframeIndex) -> io::Result<()> {
+    match index.container {
+        Container::Flv => flv::scan(reader, len, index),
+        Container::Ts => ts::scan(reader, len, index),
+        Container::Fmp4 => fmp4::scan(reader, len, index),
+    }
 }
 
 /// 段内 `[from_ms, to_ms]` 之间的关键帧（先按需续扫）。
@@ -398,7 +427,7 @@ fn rewind_to_last_keyframe(index: &mut KeyframeIndex) {
     }
 }
 
-fn read_at(reader: &mut BufReader<File>, offset: u64, buf: &mut [u8]) -> io::Result<()> {
+fn read_at(reader: &mut impl Source, offset: u64, buf: &mut [u8]) -> io::Result<()> {
     reader.seek(SeekFrom::Start(offset))?;
     reader.read_exact(buf)
 }

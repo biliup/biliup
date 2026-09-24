@@ -4,6 +4,9 @@
 //! 写入任务按顺序落库、关段后建关键帧索引，录制热路径不会被 SQLite 或扫盘拖住；
 //! 数据库出错只记日志，不影响录制与上传。
 //!
+//! 进程内写盘的下载器另有一个索引任务（[`index::live`]）边写边建关键帧索引；写入任务在改名、
+//! 续扫、删除索引之前先等它处理完已发出的事件（[`IndexTap::sync`]），关段时的续扫只剩兜底。
+//!
 //! 场次时间轴：场次第一个分段开写（第一个关键帧到达）的墙钟为 t = 0；段内按容器时间戳走
 //! （段长取索引扫出的内容时长，建不出索引才用下载器报告的时长，再没有才用墙钟差）。段与段之间
 //! 看墙钟：新段开写比上一段关段（断流合并接上的一场，是上一次录制停下的时刻）晚出
@@ -13,6 +16,7 @@
 use super::index;
 use super::store::{self, FinishedSegment, SegmentState};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
+use biliup::downloader::index_tap::IndexTap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -73,9 +77,17 @@ enum Event {
 #[derive(Debug, Clone)]
 pub struct RecorderHandle {
     tx: UnboundedSender<Event>,
+    index: Option<IndexTap>,
 }
 
 impl RecorderHandle {
+    /// 交给下载器的关键帧索引旁路（见 [`DownloadConfig::index_tap`]）。
+    ///
+    /// [`DownloadConfig::index_tap`]: crate::server::core::downloader::DownloadConfig::index_tap
+    pub fn index_tap(&self) -> Option<IndexTap> {
+        self.index.clone()
+    }
+
     /// 下载器新一轮拉流开始（断流重连后）。
     pub fn run_started(&self) {
         self.run_started_at(now_ms());
@@ -125,11 +137,12 @@ pub struct SessionRecorder {
 }
 
 impl SessionRecorder {
-    pub fn spawn(pool: ConnectionPool, target: SessionTarget) -> Self {
+    /// `index`：边写边建关键帧索引的任务（进程内写盘的下载器才有），见 [`index::live::spawn`]。
+    pub fn spawn(pool: ConnectionPool, target: SessionTarget, index: Option<IndexTap>) -> Self {
         let (tx, rx) = unbounded_channel();
-        let task = tokio::spawn(Writer::new(pool, target).run(rx));
+        let task = tokio::spawn(Writer::new(pool, target, index.clone()).run(rx));
         Self {
-            handle: RecorderHandle { tx },
+            handle: RecorderHandle { tx, index },
             task,
         }
     }
@@ -159,6 +172,7 @@ struct OpenSegment {
 struct Writer {
     pool: ConnectionPool,
     target: SessionTarget,
+    index: Option<IndexTap>,
     /// 时间轴 0 点；这一场还没有分段时为 `None`。
     started_at: Option<i64>,
     last_end_ms: i64,
@@ -172,10 +186,11 @@ struct Writer {
 }
 
 impl Writer {
-    fn new(pool: ConnectionPool, target: SessionTarget) -> Self {
+    fn new(pool: ConnectionPool, target: SessionTarget, index: Option<IndexTap>) -> Self {
         Self {
             pool,
             target,
+            index,
             started_at: None,
             last_end_ms: 0,
             open: None,
@@ -252,6 +267,7 @@ impl Writer {
         let Some(container) = store::container_of(&path) else {
             return Ok(());
         };
+        self.sync_index().await;
         let open = match self.open.take() {
             Some(open) => {
                 move_index(&open.path, &path);
@@ -332,6 +348,7 @@ impl Writer {
     }
 
     async fn on_deleted(&mut self, path: &Path) -> sqlx::Result<()> {
+        self.sync_index().await;
         index::remove(path);
         sqlx::query("UPDATE segments SET state = 'deleted' WHERE session_id = ? AND path = ?")
             .bind(self.target.session_id)
@@ -350,6 +367,13 @@ impl Writer {
             self.last_close_at.unwrap_or(now),
         )
         .await
+    }
+
+    /// 等索引任务处理完已发出的事件：关段事件之前的写入都已进 `.idx`，接下来可以改名、续扫。
+    async fn sync_index(&self) {
+        if let Some(index) = &self.index {
+            index.sync().await;
+        }
     }
 
     fn segment_done(&mut self, end_ms: i64, at: i64) {
@@ -397,6 +421,7 @@ impl Writer {
         let Some(open) = self.open.take() else {
             return Ok(());
         };
+        self.sync_index().await;
         let Some((path, len)) = [open.path.clone(), strip_part(&open.path)]
             .into_iter()
             .find_map(|p| {

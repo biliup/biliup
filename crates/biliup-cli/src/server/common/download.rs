@@ -14,6 +14,7 @@ use crate::server::core::monitor::Monitor;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Stage, WorkerStatus};
 use crate::server::infrastructure::models::hook_step::process;
+use crate::server::workbench::index;
 use crate::server::workbench::recorder::{
     ClosedSegment, RecorderHandle, SessionRecorder, SessionTarget,
 };
@@ -293,13 +294,20 @@ impl DownloadTask {
             .filename_prefix
             .clone()
             .or_else(|| ctx.config().filename_prefix.clone());
-        // 切片工作台的场次 / 分段记录，与本次下载任务同寿命；下面提前返回时 drop 也会收尾
+        // 切片工作台的场次 / 分段记录，与本次下载任务同寿命；下面提前返回时 drop 也会收尾。
+        // 媒体字节经过本进程写盘的下载器边写边建关键帧索引，其余的关段后扫盘
+        let live_index = matches!(
+            self.downloader,
+            DownloaderRuntime::StreamGears(_) | DownloaderRuntime::Mesio(_)
+        )
+        .then(index::live::spawn);
         let workbench = SessionRecorder::spawn(
             ctx.pool().clone(),
             SessionTarget {
                 session_id: ctx.id(),
                 streamer_id: ctx.live_streamer().id,
             },
+            live_index,
         );
         let danmaku_client = danmaku_client(
             stream.danmaku.as_ref(),
@@ -491,6 +499,7 @@ impl DownloadTask {
         }
         download_config.bytes_written = self.meter.counter();
         download_config.preview = self.preview.clone();
+        download_config.index_tap = workbench.index_tap();
         if let crate::server::core::downloader::DownloaderRuntime::Sync(sync) = &self.downloader {
             info!(
                 page_url = streamer.url,

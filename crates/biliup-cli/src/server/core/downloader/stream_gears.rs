@@ -107,7 +107,8 @@ impl StreamGears {
                 // FLV流下载
                 let file = LifecycleFile::with_hook(&file_name, "flv", hook)
                     .with_start_hook(start_hook)
-                    .with_counter(download_config.bytes_written.clone());
+                    .with_counter(download_config.bytes_written.clone())
+                    .with_index_tap(download_config.index_tap.clone());
                 // 直播预览：写入端与这一次拉流同寿命，拉流结束即 drop
                 let preview = download_config.preview.attach(PreviewFormat::Flv);
                 httpflv::download(connection, file, segment.clone(), Some(preview)).await;
@@ -120,7 +121,8 @@ impl StreamGears {
                 // HLS流下载
                 let file = LifecycleFile::with_hook(&file_name, "ts", hook)
                     .with_start_hook(start_hook)
-                    .with_counter(download_config.bytes_written.clone());
+                    .with_counter(download_config.bytes_written.clone())
+                    .with_index_tap(download_config.index_tap.clone());
                 let preview = download_config.preview.attach(PreviewFormat::MpegTs);
                 hls::download(&url, &client, file, segment.clone(), Some(preview))
                     .await

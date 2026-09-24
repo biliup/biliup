@@ -560,6 +560,7 @@ mod tests {
             suffix: "flv".to_string(),
             bytes_written: ByteCounter::new(),
             preview: Default::default(),
+            index_tap: None,
         }
     }
 

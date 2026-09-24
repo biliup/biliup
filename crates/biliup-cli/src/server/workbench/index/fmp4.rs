@@ -5,9 +5,8 @@
 //! rust-srec 的 `mp4` crate 只做 init 段的编解码识别，box 遍历是 crate 私有的，读不到
 //! `moof` / `tfdt` / `trun`，所以这里自己写了最小的 box 解析。
 
-use super::{KeyframeIndex, read_at};
-use std::fs::File;
-use std::io::{self, BufReader, Read, Seek, SeekFrom};
+use super::{KeyframeIndex, Source, read_at};
+use std::io::{self, SeekFrom};
 
 /// `moov` / `moof` 超过这个大小就当文件损坏。
 const MAX_META_BOX: u64 = 64 * 1024 * 1024;
@@ -20,7 +19,7 @@ struct BoxHeader {
 }
 
 fn read_box_header(
-    reader: &mut BufReader<File>,
+    reader: &mut impl Source,
     offset: u64,
     file_len: u64,
 ) -> io::Result<Option<BoxHeader>> {
@@ -287,7 +286,7 @@ fn parse_moof(moof: &[u8], track: &VideoTrack) -> Option<Fragment> {
     None
 }
 
-fn read_body(reader: &mut BufReader<File>, header: &BoxHeader) -> io::Result<Vec<u8>> {
+fn read_body(reader: &mut impl Source, header: &BoxHeader) -> io::Result<Vec<u8>> {
     let len = header.size - header.header;
     if len > MAX_META_BOX {
         return Err(io::Error::new(
@@ -302,7 +301,7 @@ fn read_body(reader: &mut BufReader<File>, header: &BoxHeader) -> io::Result<Vec
 
 /// 从 `index.scanned_upto` 扫到文件末尾最后一个完整的顶层 box。
 pub(super) fn scan(
-    reader: &mut BufReader<File>,
+    reader: &mut impl Source,
     file_len: u64,
     index: &mut KeyframeIndex,
 ) -> io::Result<()> {
@@ -346,7 +345,7 @@ pub(super) fn scan(
             _ => {}
         }
         if !consumed {
-            reader.seek_relative((header.size - header.header) as i64)?;
+            reader.skip((header.size - header.header) as i64)?;
         }
         offset += header.size;
         index.scanned_upto = offset;
@@ -355,7 +354,7 @@ pub(super) fn scan(
 }
 
 /// `offset` 处是不是一个完整的 `moof`。
-pub(super) fn is_moof_at(reader: &mut BufReader<File>, offset: u64, file_len: u64) -> bool {
+pub(super) fn is_moof_at(reader: &mut impl Source, offset: u64, file_len: u64) -> bool {
     let mut head = [0u8; 8];
     if offset + 8 > file_len || read_at(reader, offset, &mut head).is_err() {
         return false;

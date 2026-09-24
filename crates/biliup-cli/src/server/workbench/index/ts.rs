@@ -1,11 +1,10 @@
 //! MPEG-TS：逐个 188 字节包读包头，找 PAT → PMT → 视频 PID；视频 PES 起始包带随机访问标志，
 //! 或 PES 里第一个图像 NAL 是 IDR（H.264 类型 5 / H.265 类型 16–21），就是一个关键帧。
 
-use super::{KeyframeIndex, read_at};
+use super::{KeyframeIndex, Source, read_at};
 use ::ts::{PatRef, PesHeaderRef, PmtRef, StreamType, TsPacketRef};
 use bytes::Bytes;
-use std::fs::File;
-use std::io::{self, BufReader, Read, Seek, SeekFrom};
+use std::io::{self, SeekFrom};
 
 const PACKET: u64 = 188;
 const PID_PAT: u16 = 0x0000;
@@ -25,7 +24,7 @@ struct PendingPes {
 
 /// 从 `index.scanned_upto` 扫到文件末尾最后一个完整的包。
 pub(super) fn scan(
-    reader: &mut BufReader<File>,
+    reader: &mut impl Source,
     file_len: u64,
     index: &mut KeyframeIndex,
 ) -> io::Result<()> {
@@ -160,7 +159,7 @@ fn is_idr(pes: &PendingPes, codec: u8) -> Option<bool> {
 }
 
 /// 第一个同步字节的位置：`0x47` 且 188 字节后还是 `0x47`（或已到文件末尾）。
-fn find_sync(reader: &mut BufReader<File>, file_len: u64) -> io::Result<Option<u64>> {
+fn find_sync(reader: &mut impl Source, file_len: u64) -> io::Result<Option<u64>> {
     let window = file_len.min(PACKET * 8) as usize;
     let mut buf = vec![0u8; window];
     read_at(reader, 0, &mut buf)?;
@@ -174,7 +173,7 @@ fn find_sync(reader: &mut BufReader<File>, file_len: u64) -> io::Result<Option<u
 
 /// `offset` 处是不是视频 PID 上的一个 PES 起始包。
 pub(super) fn is_unit_start_at(
-    reader: &mut BufReader<File>,
+    reader: &mut impl Source,
     offset: u64,
     file_len: u64,
     video_pid: u32,

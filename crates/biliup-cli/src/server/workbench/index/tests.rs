@@ -491,14 +491,14 @@ fn pes_header(stream_id: u8, pts: u64) -> Vec<u8> {
     h
 }
 
-struct Ts {
-    bytes: Vec<u8>,
-    keyframes: Vec<(i64, u64)>,
-    header_len: u64,
+pub(crate) struct Ts {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) keyframes: Vec<(i64, u64)>,
+    pub(crate) header_len: u64,
 }
 
 /// 30 帧一个 IDR，帧间隔 3000（90 kHz 下 33.3 ms）；`use_rai` 时关键帧另带随机访问标志。
-fn build_ts(first_pts: u64, frames: u64, hevc: bool, use_rai: bool) -> Ts {
+pub(crate) fn build_ts(first_pts: u64, frames: u64, hevc: bool, use_rai: bool) -> Ts {
     let mut out = pat();
     out.extend(pmt(if hevc { 0x24 } else { 0x1B }));
     let mut keyframes = Vec::new();
@@ -703,7 +703,7 @@ fn fragment(seq: u32, decode_time: u64, sync: bool) -> Vec<u8> {
 }
 
 /// B 站 `hls_fmp4` 保留源站的绝对 `tfdt`（这里取 65913 s）。
-fn build_fmp4(fragments: u32) -> (Vec<u8>, Vec<(i64, u64)>, u64) {
+pub(crate) fn build_fmp4(fragments: u32) -> (Vec<u8>, Vec<(i64, u64)>, u64) {
     let base: u64 = 65_913_000;
     let mut out = init_segment(true);
     out.extend(mp4_box(b"styp", b"msdh\0\0\0\0msdhmsix"));

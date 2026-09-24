@@ -60,12 +60,29 @@ fn readable(segment: &SegmentRow) -> bool {
     ) && Container::from_path(Path::new(&segment.path)).is_some()
 }
 
+/// 录制中、正由索引任务边写边建的分段直接读它落盘的缓存（最多落后几秒），不扫盘；
+/// 其余的按需续扫。
 async fn segment_index(segment: &SegmentRow) -> io::Result<index::KeyframeIndex> {
     let path = PathBuf::from(&segment.path);
     let finished = segment.state == SegmentState::Finished;
-    tokio::task::spawn_blocking(move || index::refresh(&path, finished))
-        .await
-        .map_err(io::Error::other)?
+    tokio::task::spawn_blocking(move || {
+        if !finished
+            && index::live::is_live(&path)
+            && let Some(cached) = index::load(&path)
+        {
+            return Ok(on_disk(cached, &path));
+        }
+        index::refresh(&path, finished)
+    })
+    .await
+    .map_err(io::Error::other)?
+}
+
+/// 缓存里偏移已写出、但可能还在写入端缓冲里没到盘上的关键帧先不给出去。
+fn on_disk(mut cached: index::KeyframeIndex, path: &Path) -> index::KeyframeIndex {
+    let len = std::fs::metadata(path).map_or(0, |m| m.len());
+    cached.keyframes.retain(|k| k.offset < len);
+    cached
 }
 
 /// 场次时间 `t_ms` 处（不晚于它的最近一个关键帧）对应的分段与字节偏移。

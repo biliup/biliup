@@ -6,6 +6,8 @@
 //! 录制时间范围到期，期间每打开一个分段文件触发一次 [`SegmentEvent::Start`]，
 //! 每关闭一个触发一次 [`SegmentEvent::Segment`]。
 
+mod index_tap;
+
 use crate::server::common::construct_headers;
 use crate::server::common::util::media_ext_from_url;
 use crate::server::core::downloader::{
@@ -136,8 +138,8 @@ impl Mesio {
                     output_dir,
                     base_name,
                 });
-                writer.set_on_segment_start_callback(segment_start_hook(seg_tx.clone()));
-                writer.set_on_segment_complete_callback(segment_complete_hook(seg_tx));
+                let index_queue =
+                    index_tap::install(&mut writer, seg_tx, download_config.index_tap.clone());
                 let keyframe_duration_ms = pipeline_config
                     .max_duration
                     .map(|d| u32::try_from(d.as_millis()).unwrap_or(u32::MAX));
@@ -170,6 +172,7 @@ impl Mesio {
                     callback.as_mut(),
                     (download_config.bytes_written.clone(), |item| item.size()),
                     Some((preview, tee_flv)),
+                    index_queue,
                 )
                 .await;
                 handle.cancel();
@@ -219,8 +222,8 @@ impl Mesio {
                     max_file_size: (pipeline_config.max_file_size > 0)
                         .then_some(pipeline_config.max_file_size),
                 });
-                writer.set_on_segment_start_callback(segment_start_hook(seg_tx.clone()));
-                writer.set_on_segment_complete_callback(segment_complete_hook(seg_tx));
+                let index_queue =
+                    index_tap::install(&mut writer, seg_tx, download_config.index_tap.clone());
                 let items = stream::once(async { Ok(first) })
                     .chain(items)
                     .map(|r| r.map_err(|e| PipelineError::Strategy(Box::new(e))));
@@ -235,6 +238,7 @@ impl Mesio {
                     callback.as_mut(),
                     (download_config.bytes_written.clone(), |item| item.size()),
                     preview,
+                    index_queue,
                 )
                 .await;
                 handle.cancel();
@@ -381,6 +385,8 @@ fn segment_complete_hook(
 ///
 /// `preview`：直播预览的写入端与「把一个条目旁路给它」的函数，同样在条目进入管线前
 /// 调用（预览拿到的是拉到的原始流，不含修复管线的改动）。只是 push，不会失败、不 await。
+///
+/// `index_queue`：关键帧索引旁路的条目队列（见 [`index_tap`]），在管线之后、writer 之前复制条目。
 #[allow(clippy::too_many_arguments)]
 async fn run_pipeline<'a, P, W>(
     common: &PipelineConfig,
@@ -393,9 +399,11 @@ async fn run_pipeline<'a, P, W>(
     callback: &mut (dyn FnMut(SegmentEvent) + Send + Sync + 'a),
     byte_meter: (ByteCounter, fn(&P::Item) -> usize),
     preview: Option<PreviewTee<P::Item>>,
+    index_queue: Option<std::sync::mpsc::Sender<index_tap::Entry>>,
 ) -> Result<WriterStats, String>
 where
     P: PipelineProvider,
+    P::Item: index_tap::Indexable + Send + 'static,
     W: ProtocolWriter<Item = P::Item>,
 {
     let context = Arc::new(StreamerContext::new(token));
@@ -405,6 +413,10 @@ where
         output_rx,
         tasks,
     } = spawn_pipeline(provider.build_pipeline(), spec);
+    let output_rx = match index_queue {
+        Some(queue) => index_tap::forward(output_rx, queue, CHANNEL_SIZE),
+        None => output_rx,
+    };
 
     let writer_task = tokio::task::spawn_blocking(move || writer.run(output_rx));
 
@@ -591,7 +603,8 @@ mod tests {
     }
 
     /// 端到端：本地 HTTP 服务吐一段真实 FLV 录像，走完整的引擎拉流 → 修复管线 → 落盘，
-    /// 校验分段回调触发、按大小切片、文件名沿用 biliup 的模板。
+    /// 校验分段回调触发、按大小切片、文件名沿用 biliup 的模板；
+    /// 关键帧索引旁路边写边建的 `.idx` 与对落盘文件扫盘的结果一致。
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn downloads_a_local_flv_through_the_engine_and_reports_segments() {
         use crate::server::common::util::Recorder;
@@ -602,7 +615,8 @@ mod tests {
         // 造一段合法 FLV：头 + 一个视频关键帧标签，重复多次以触发按大小分段
         let mut payload = Vec::new();
         payload.extend_from_slice(&[0x46, 0x4C, 0x56, 0x01, 0x01, 0, 0, 0, 9, 0, 0, 0, 0]);
-        let data = vec![0x17u8, 0x01, 0, 0, 0, 0xAA, 0xBB, 0xCC, 0xDD];
+        // AVC 关键帧：一个 1 字节的 IDR NALU（类型 5）
+        let data = vec![0x17u8, 0x01, 0, 0, 0, 0, 0, 0, 1, 0x65];
         for i in 0..400u32 {
             let ts = i * 40;
             payload.push(9);
@@ -643,7 +657,9 @@ mod tests {
             suffix: "flv".to_string(),
             bytes_written: ByteCounter::new(),
             preview: Default::default(),
+            index_tap: Some(crate::server::workbench::index::live::spawn()),
         };
+        let index_tap = config.index_tap.clone().unwrap();
         let bytes_written = config.bytes_written.clone();
         let preview = config.preview.clone();
 
@@ -662,6 +678,7 @@ mod tests {
             .expect("download");
 
         assert_eq!(status, DownloadStatus::StreamEnded);
+        index_tap.sync().await;
         assert_eq!(
             bytes_written.total(),
             payload_len as u64,
@@ -693,6 +710,24 @@ mod tests {
                 "reported duration of {name}: {:?}",
                 info.duration_secs
             );
+        }
+
+        use crate::server::workbench::index;
+        let scratch = tempfile::tempdir().unwrap();
+        for info in seen.iter() {
+            let path = &info.prev_file_path;
+            let streamed = index::load(path).expect("streamed index");
+            assert_eq!(streamed.source_len, std::fs::metadata(path).unwrap().len());
+            assert!(!index::live::is_live(path));
+            let copy = scratch.path().join(path.file_name().unwrap());
+            std::fs::copy(path, &copy).unwrap();
+            let scanned = index::refresh(&copy, true).unwrap();
+            assert!(!scanned.keyframes.is_empty());
+            assert_eq!(streamed.keyframes, scanned.keyframes, "{}", path.display());
+            assert_eq!(streamed.header_len, scanned.header_len);
+            assert_eq!(streamed.base_ts, scanned.base_ts);
+            assert_eq!(streamed.duration_ms, scanned.duration_ms);
+            assert_eq!(streamed.scanned_upto, scanned.scanned_upto);
         }
     }
 

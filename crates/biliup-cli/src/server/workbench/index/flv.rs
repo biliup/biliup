@@ -1,13 +1,12 @@
 //! FLV：逐 tag 读 11 字节 tag 头和 body 开头几个字节判定关键帧，body 其余部分跳过
 //!（标了关键帧的 H.264 / H.265 tag 再看一眼各 NALU 的类型）。
 
-use super::{KeyframeIndex, read_at};
+use super::{KeyframeIndex, Source, read_at};
 use ::flv::framing::{PREV_TAG_SIZE_FIELD_SIZE, TAG_HEADER_SIZE, parse_tag_header_bytes};
 use ::flv::tag::FlvTagType;
 use ::flv::{CodecKind, FlvTag, TagClass};
 use bytes::Bytes;
-use std::fs::File;
-use std::io::{self, BufReader, Read, Seek, SeekFrom};
+use std::io::{self, SeekFrom};
 
 const FILE_HEADER_SIZE: u64 = 9;
 /// 判定关键帧 / 序列头要看的 body 字节数（Enhanced-FLV 的 ModEx 头也够用）。
@@ -37,7 +36,7 @@ impl Tag {
 }
 
 /// 读 `offset` 处的 tag 头和 body 开头；tag 不完整（还在写 / 被截断）返回 `None`。
-fn read_tag(reader: &mut BufReader<File>, offset: u64, file_len: u64) -> io::Result<Option<Tag>> {
+fn read_tag(reader: &mut impl Source, offset: u64, file_len: u64) -> io::Result<Option<Tag>> {
     if offset + (TAG_HEADER_SIZE + PREV_TAG_SIZE_FIELD_SIZE) as u64 > file_len {
         return Ok(None);
     }
@@ -110,7 +109,7 @@ fn nalu_data_start(class: &TagClass, body: &[u8]) -> Option<usize> {
 /// 逐个看 NALU 类型：H.264 要有 IDR（5），H.265 要有 IRAP（16–23）。
 /// 按 4 字节 NALU 长度走；长度对不上（不是 4 字节长度的流）时沿用 tag 头的标记。
 fn has_random_access_nalu(
-    reader: &mut BufReader<File>,
+    reader: &mut impl Source,
     consumed: &mut usize,
     start: usize,
     data_size: usize,
@@ -121,7 +120,7 @@ fn has_random_access_nalu(
         if pos + 5 > data_size {
             return Ok(false);
         }
-        reader.seek_relative(pos as i64 - *consumed as i64)?;
+        reader.skip(pos as i64 - *consumed as i64)?;
         let mut head = [0u8; 5];
         reader.read_exact(&mut head)?;
         *consumed = pos + 5;
@@ -142,7 +141,7 @@ fn has_random_access_nalu(
 }
 
 /// 第一个 tag 的偏移（文件头 + PreviousTagSize0）。
-fn first_tag_offset(reader: &mut BufReader<File>, file_len: u64) -> io::Result<Option<u64>> {
+fn first_tag_offset(reader: &mut impl Source, file_len: u64) -> io::Result<Option<u64>> {
     if file_len < FILE_HEADER_SIZE + PREV_TAG_SIZE_FIELD_SIZE as u64 {
         return Ok(None);
     }
@@ -160,7 +159,7 @@ fn first_tag_offset(reader: &mut BufReader<File>, file_len: u64) -> io::Result<O
 
 /// 从 `index.scanned_upto` 扫到文件末尾最后一个完整的 tag。
 pub(super) fn scan(
-    reader: &mut BufReader<File>,
+    reader: &mut impl Source,
     file_len: u64,
     index: &mut KeyframeIndex,
 ) -> io::Result<()> {
@@ -188,7 +187,7 @@ pub(super) fn scan(
 }
 
 /// `offset` 处是不是一个完整的视频关键帧 tag。
-pub(super) fn is_keyframe_at(reader: &mut BufReader<File>, offset: u64, file_len: u64) -> bool {
+pub(super) fn is_keyframe_at(reader: &mut impl Source, offset: u64, file_len: u64) -> bool {
     if reader.seek(SeekFrom::Start(offset)).is_err() {
         return false;
     }

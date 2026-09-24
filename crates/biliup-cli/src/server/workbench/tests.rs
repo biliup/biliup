@@ -83,7 +83,7 @@ async fn wall_clock_drift_between_segments_is_not_a_gap() {
     let (dir, pool) = setup().await;
     let t0 = 1_700_000_000_000;
     let session = go_live(&pool, t0, 10).await;
-    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id));
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
     let handle = recorder.handle();
     handle.run_started_at(t0);
     let mut at = t0;
@@ -111,7 +111,7 @@ async fn segments_are_laid_out_on_one_session_timeline() {
     let t0 = 1_700_000_000_000;
     let session = go_live(&pool, t0, 10).await;
     assert!(!session.resumed);
-    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id));
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
     let handle = recorder.handle();
 
     // mesio：开段 / 关段都有，关段带时长与字节数；报告的时长和内容对不上时以索引为准
@@ -234,7 +234,7 @@ async fn reopening_within_the_merge_window_resumes_the_session() {
             let session = store::open_session(&pool, 1, &info(title, at), at, merge * 60_000)
                 .await
                 .unwrap();
-            let recorder = SessionRecorder::spawn(pool, target(session.id));
+            let recorder = SessionRecorder::spawn(pool, target(session.id), None);
             let handle = recorder.handle();
             handle.run_started_at(at);
             handle.opened_at(&path, at);
@@ -314,7 +314,7 @@ async fn completion_only_downloaders_get_a_start_from_the_content() {
     let (dir, pool) = setup().await;
     let t0 = 1_700_000_000_000;
     let session = go_live(&pool, t0, 10).await;
-    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id));
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
     let handle = recorder.handle();
     handle.run_started_at(t0);
     let a = write_flv(dir.path(), "a.flv");
@@ -342,7 +342,7 @@ async fn reported_duration_is_used_when_no_index_can_be_built() {
     let (dir, pool) = setup().await;
     let t0 = 1_700_000_000_000;
     let session = go_live(&pool, t0, 10).await;
-    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id));
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
     let handle = recorder.handle();
     handle.run_started_at(t0);
     let a = dir.path().join("a.mkv");
@@ -369,7 +369,7 @@ async fn reported_duration_is_used_when_no_index_can_be_built() {
 async fn segments_that_never_reached_the_disk_leave_no_rows() {
     let (dir, pool) = setup().await;
     let session = go_live(&pool, recorder::now_ms(), 10).await;
-    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id));
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
     let handle = recorder.handle();
     handle.run_started();
     handle.opened(&dir.path().join("never.flv.part"));
@@ -395,7 +395,7 @@ async fn open_segment_is_finalized_from_disk_when_the_run_ends() {
     let (dir, pool) = setup().await;
     let t0 = 1_700_000_000_000;
     let session = go_live(&pool, t0, 10).await;
-    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id));
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
     let handle = recorder.handle();
     handle.run_started_at(t0);
     // 下载器出错退出，没等到关段事件
@@ -417,7 +417,7 @@ async fn locate_fixture() -> (TempDir, ConnectionPool, i64, Vec<SegmentRow>) {
     let (dir, pool) = setup().await;
     let t0 = 1_700_000_000_000;
     let session = go_live(&pool, t0, 10).await;
-    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id));
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
     let handle = recorder.handle();
     for (name, at) in [("a.flv", t0), ("b.flv", t0 + 3965), ("c.flv", t0 + 30_000)] {
         let path = write_flv(dir.path(), name);
@@ -649,4 +649,48 @@ async fn startup_recovery_finalizes_leftover_recording_segments() {
     assert_eq!(start.last_end_ms, 10_000 + FLV_DURATION_MS);
     assert_eq!(start.resumed_after, Some(ended_at));
     assert_eq!(sessions(&pool).await[0].2, None, "开始录就清空 ended_at");
+}
+
+/// stream-gears 边写 `.part` 边建索引：改名后录制器先等索引任务处理完已发出的事件，
+/// 再让 `.idx` 跟着改名；段长取流式建好的索引，关段续扫只做兜底。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn streamed_index_follows_the_rename_at_close() {
+    let (dir, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let session = go_live(&pool, t0, 10).await;
+    let tap = index::live::spawn();
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), Some(tap));
+    let handle = recorder.handle();
+    let tap = handle.index_tap().expect("index tap");
+    handle.run_started_at(t0);
+
+    let part = dir.path().join("a.flv.part");
+    let flv = build_flv(0, 100, 25, None);
+    std::fs::write(&part, &flv.bytes).unwrap();
+    handle.opened_at(&part, t0);
+    let file = tap.open(&part);
+    let mut offset = 13;
+    while offset < flv.bytes.len() {
+        let h = &flv.bytes[offset..offset + 11];
+        let size = u32::from_be_bytes([0, h[1], h[2], h[3]]) as usize;
+        let ts = u32::from_be_bytes([h[7], h[4], h[5], h[6]]);
+        let body = bytes::Bytes::copy_from_slice(&flv.bytes[offset + 11..offset + 11 + size]);
+        file.flv_tag(offset as u64, h[0], ts, &body);
+        offset += 15 + size;
+    }
+    file.closed(flv.bytes.len() as u64);
+    let done = dir.path().join("a.flv");
+    std::fs::rename(&part, &done).unwrap();
+    handle.closed_at(&done, t0 + 4200, ClosedSegment::default());
+    recorder.finish().await;
+
+    let rows = segments(&pool, session.id).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].end_ms, Some(FLV_DURATION_MS));
+    assert_eq!(rows[0].index_path, Some(s(&index::index_path(&done))));
+    assert!(!index::index_path(&part).exists());
+    let cached = index::load(&done).unwrap();
+    assert!(cached.complete);
+    assert_eq!(cached.keyframes.len(), 4);
+    assert_eq!(cached.source_len, flv.bytes.len() as u64);
 }

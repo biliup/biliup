@@ -21,6 +21,7 @@ use crate::server::core::downloader::sync_downloader::SyncDownloader;
 use crate::server::core::downloader::ytdlp::YouTubeDownloader;
 use crate::server::errors::{AppError, AppResult};
 use async_trait::async_trait;
+use biliup::downloader::index_tap::IndexTap;
 use biliup::downloader::preview::PreviewHub;
 use biliup::downloader::util::ByteCounter;
 use danmaku_client::{DanmakuRecorder, RecorderConfig, RecorderHandle};
@@ -68,6 +69,11 @@ pub struct DownloadConfig {
     /// 与 `bytes_written` 一样只是句柄，不参与序列化，不影响任何下载控制流。
     #[serde(skip)]
     pub preview: PreviewHub,
+
+    /// 关键帧索引旁路：进程内写盘的下载器（stream-gears / mesio）在写盘处把每个分段写了什么
+    /// 交给录制任务的索引任务，边录边建 `.idx`；为 `None` 或外部进程下载器时关段后扫盘建索引。
+    #[serde(skip)]
+    pub index_tap: Option<IndexTap>,
 }
 
 impl DownloadConfig {
