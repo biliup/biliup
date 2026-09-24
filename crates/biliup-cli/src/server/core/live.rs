@@ -173,7 +173,9 @@ pub fn downloader_runtime(
     stream: &LiveStream,
 ) -> DownloaderRuntime {
     let downloader_type = config_type.unwrap_or_else(|| match stream.downloader_hint {
-        DownloaderHint::StreamGears => DownloaderType::StreamGears,
+        // 未配置下载器时用 mesio：写出的 FLV 带 onMetaData.keyframes、每段时间戳从 0 开始，
+        // 能录 HEVC / Enhanced-FLV 与 HLS fMP4。显式配置 stream-gears 的不受影响
+        DownloaderHint::StreamGears => DownloaderType::Mesio,
         DownloaderHint::Ffmpeg => DownloaderType::Ffmpeg,
         DownloaderHint::Streamlink => DownloaderType::Streamlink,
         DownloaderHint::YtDlp => DownloaderType::YtDlp,
@@ -322,4 +324,51 @@ pub fn danmaku_client(
     }
 
     Some(Arc::new(RustDanmakuClient::new(config)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn stream(hint: DownloaderHint) -> LiveStream {
+        LiveStream {
+            name: "room".into(),
+            url: "https://live.bilibili.com/1".into(),
+            title: "t".into(),
+            date: chrono::Utc::now(),
+            live_cover_url: String::new(),
+            avatar_url: None,
+            raw_stream_url: "https://cdn.example/live.flv".into(),
+            platform: "bilibili".into(),
+            stream_headers: HashMap::new(),
+            suffix: "flv".into(),
+            danmaku: None,
+            downloader_hint: hint,
+            runtime_options: None,
+        }
+    }
+
+    #[test]
+    fn unconfigured_rooms_default_to_mesio() {
+        let runtime = downloader_runtime(None, &stream(DownloaderHint::StreamGears));
+        assert!(matches!(runtime, DownloaderRuntime::Mesio(_)));
+    }
+
+    #[test]
+    fn an_explicit_stream_gears_choice_is_kept() {
+        let runtime = downloader_runtime(
+            Some(DownloaderType::StreamGears),
+            &stream(DownloaderHint::StreamGears),
+        );
+        assert!(matches!(runtime, DownloaderRuntime::StreamGears(_)));
+    }
+
+    #[test]
+    fn plugin_hints_for_external_tools_are_unchanged() {
+        let runtime = downloader_runtime(None, &stream(DownloaderHint::Streamlink));
+        assert!(matches!(runtime, DownloaderRuntime::StreamLink(_)));
+        let runtime = downloader_runtime(None, &stream(DownloaderHint::Ffmpeg));
+        assert!(matches!(runtime, DownloaderRuntime::Ffmpeg(_)));
+    }
 }

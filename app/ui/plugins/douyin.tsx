@@ -114,8 +114,8 @@ const Douyin: React.FC<Props> = props => {
             <div style={{ fontSize: '14px' }}>
               默认关闭。开启后录制抖音的真原画流，<strong>仅在画质为原画、直播流协议为 flv 时生效</strong>。
               <br />
-              真原画可能是 HEVC 编码，默认下载插件 stream-gears 不支持 HEVC 会导致录制失败，请先把下载插件换成
-              ffmpeg 或 streamlink。
+              真原画可能是 HEVC 编码。默认的下载插件 mesio 能录 HEVC；stream-gears 不支持 HEVC，会导致录制失败，选了
+              stream-gears 的请换成 mesio、ffmpeg 或 streamlink。浏览器里的直播预览放不了 HEVC，录制不受影响。
             </div>
           }
           label="抖音真原画（douyin_true_origin）"

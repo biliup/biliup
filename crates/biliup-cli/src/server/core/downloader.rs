@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use tracing::warn;
 
 /// 下载器配置
 /// 包含下载过程中需要的各种参数和设置
@@ -134,13 +135,25 @@ impl DownloaderRuntime {
     /// 从配置创建
     pub fn from_type(downloader_type: DownloaderType) -> Self {
         match downloader_type {
-            DownloaderType::Ffmpeg => Self::Ffmpeg(FfmpegDownloader::new(
+            // `ffmpeg-internal` 的 segment muxer 实现从未接通过，与 `ffmpeg` / `ffmpeg-external`
+            // 一样按外部分段跑，至少不再静默换成 stream-gears
+            DownloaderType::Ffmpeg
+            | DownloaderType::FfmpegExternal
+            | DownloaderType::FfmpegInternal => Self::Ffmpeg(FfmpegDownloader::new(
                 Vec::new(),
                 DownloaderType::FfmpegExternal,
             )),
             DownloaderType::SyncDownloader => Self::Sync(SyncDownloader::new()),
             DownloaderType::Mesio => Self::Mesio(Mesio::new()),
-            _ => Self::StreamGears(StreamGears::new(None)),
+            DownloaderType::StreamGears => Self::StreamGears(StreamGears::new(None)),
+            // 这三种要用到直播流里的参数，由 `core::live::downloader_runtime` 构造，走不到这里
+            DownloaderType::Streamlink | DownloaderType::YtDlp | DownloaderType::Ytarchive => {
+                warn!(
+                    ?downloader_type,
+                    "this downloader needs the live stream to be built, using stream-gears"
+                );
+                Self::StreamGears(StreamGears::new(None))
+            }
         }
     }
 
@@ -371,6 +384,19 @@ mod tests {
         );
         let gears = DownloaderRuntime::from_type(DownloaderType::StreamGears);
         assert!(matches!(gears, DownloaderRuntime::StreamGears(_)));
+    }
+
+    #[test]
+    fn ffmpeg_variants_are_not_silently_mapped_to_stream_gears() {
+        for configured in ["\"ffmpeg\"", "\"ffmpeg-external\"", "\"ffmpeg-internal\""] {
+            let downloader_type: DownloaderType = serde_json::from_str(configured).unwrap();
+            match DownloaderRuntime::from_type(downloader_type) {
+                DownloaderRuntime::Ffmpeg(ffmpeg) => {
+                    assert_eq!(ffmpeg.downloader_type, DownloaderType::FfmpegExternal)
+                }
+                _ => panic!("{configured} must run ffmpeg"),
+            }
+        }
     }
 
     #[test]

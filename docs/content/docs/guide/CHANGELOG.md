@@ -20,7 +20,12 @@ top = false
 - ⚠️需要手动操作的更新信息
 
 ## 未发布
+- ⚠️没有配置下载插件（`downloader`）的主播，默认下载插件从 stream-gears 改为 mesio。显式配置了 `downloader` 的不受影响；想保持原样，把 `downloader` 设为 `stream-gears` 即可。mesio 写出的 FLV 带关键帧索引（`onMetaData.keyframes`）、每段时间戳从 0 开始，播放器可以拖动进度条；能录 HEVC / Enhanced-FLV 和 B 站 `hls_fmp4`。行为上的变化：
+  - 不转封装，容器跟随源站：FLV 流存 `.flv`，HLS TS 存 `.ts`，HLS fMP4（如 B 站 `hls_fmp4`）存 `.mp4`；配置的 `format` 与实际容器不一致时只在日志里提示。
+  - 录制中直接写最终文件名，不再先写 `.part` 再改名。
+  - 斗鱼网宿 CDN 断开重连时，相邻两段之间会有 2.6–5.8 秒的重复画面（stream-gears 会丢掉这段回灌）。
 - 🔧stream-gears：断流、读超时、下播时不再丢掉最后一个 GOP（通常 1–10 秒）；分段钩子在文件写完（flush）之后才触发，盘满等写入错误不再被静默吞掉。
+- 🔧`ffmpeg-external` / `ffmpeg-internal` 不再被静默换成 stream-gears，改为按 ffmpeg 录制。
 
 ## 1.2.1
 **Full Changelog**:[v1.2.0...v1.2.1](https://github.com/biliup/biliup/compare/v1.2.0...v1.2.1)

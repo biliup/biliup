@@ -181,7 +181,7 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
       <Form.Select
         label="下载插件（downloader）"
         field="downloader"
-        placeholder="stream-gears（默认）"
+        placeholder="mesio（默认）"
         style={{ width: '100%' }}
         fieldStyle={{
           alignSelf: 'stretch',
@@ -191,9 +191,9 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
       >
         <Select.Option value="streamlink">streamlink（hls多线程下载）</Select.Option>
         <Select.Option value="ffmpeg">ffmpeg</Select.Option>
-        <Select.Option value="stream-gears">stream-gears（默认）</Select.Option>
+        <Select.Option value="stream-gears">stream-gears</Select.Option>
         <Select.Option value="sync-downloader">sync-downloader（边录边传）</Select.Option>
-        <Select.Option value="mesio">mesio（内置流修复下载器）</Select.Option>
+        <Select.Option value="mesio">mesio（默认）</Select.Option>
       </Form.Select>
 
       <Form.InputNumber

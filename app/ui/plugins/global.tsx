@@ -18,14 +18,23 @@ const Global: React.FC = () => {
         <Form.Select
           label="下载插件（downloader）"
           field="downloader"
-          placeholder="stream-gears（默认）"
-          // initValue="stream-gears"
+          placeholder="mesio（默认）"
           extraText={
             <div style={{ fontSize: '14px' }}>
               全局默认的下载插件，可在单个主播的覆写设置里另选。可选：
               <br />
-              1. <strong>stream-gears</strong>（默认）：内置，无需额外安装，可防 FLV 流花屏；不支持 HEVC 编码和
-              hls_fmp4 流。
+              1. <strong>mesio</strong>（默认）：内置 rust-srec 引擎，无需额外安装。进程内下载 FLV / HLS，修复时间戳（每段从
+              0 开始）、写入关键帧索引（onMetaData.keyframes），支持 HEVC 和 hls_fmp4；不转封装，按源站的容器保存（FLV /
+              TS，hls_fmp4 存为 .mp4）。详见{' '}
+              <a
+                href="https://github.com/hua0512/rust-srec"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'var(--semi-color-link)' }}
+              >
+                项目主页
+              </a>
+              。
               <br />
               2. ffmpeg：非 Docker 用户需自行安装 FFmpeg。
               <br />
@@ -46,17 +55,8 @@ const Global: React.FC = () => {
               <br />
               5. ytarchive：仅适用于 YouTube 直播。
               <br />
-              6. mesio：内置 rust-srec 引擎，进程内下载 FLV / HLS 并修复时间戳、注入关键帧索引，支持按大小 /
-              时长分段，无需额外安装。详见{' '}
-              <a
-                href="https://github.com/hua0512/rust-srec"
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: 'var(--semi-color-link)' }}
-              >
-                项目主页
-              </a>
-              。
+              6. stream-gears：内置，无需额外安装，可防 FLV 流花屏；不支持 HEVC 编码和 hls_fmp4 流，FLV
+              时间戳沿用源站的原值（不从 0 开始）。
             </div>
           }
           style={{ width: '100%' }}
@@ -68,10 +68,10 @@ const Global: React.FC = () => {
         >
           <Select.Option value="streamlink">streamlink（hls多线程下载）</Select.Option>
           <Select.Option value="ffmpeg">ffmpeg</Select.Option>
-          <Select.Option value="stream-gears">stream-gears（默认）</Select.Option>
+          <Select.Option value="stream-gears">stream-gears</Select.Option>
           <Select.Option value="sync-downloader">sync-downloader（边录边传）</Select.Option>
           <Select.Option value="ytarchive">ytarchive（仅适用于 Youtube Live）</Select.Option>
-          <Select.Option value="mesio">mesio（内置流修复下载器）</Select.Option>
+          <Select.Option value="mesio">mesio（默认）</Select.Option>
         </Form.Select>
         {isSyncDownloader ? (
           <>
