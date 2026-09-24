@@ -166,6 +166,55 @@ async fn flv_response_ends_at_a_gap_or_a_codec_change() {
     assert_eq!(tags[2], (9, 8_965 + 1000, 0x17));
 }
 
+/// 中间一段读不了（被清理、缺失、文件没了、整行被移除）：响应在第一段末尾结束，不跳过去。
+#[tokio::test]
+async fn response_ends_before_an_unreadable_segment() {
+    for case in ["deleted", "missing", "file gone", "row removed"] {
+        let (dir, pool, session) = setup().await;
+        let flv = build_flv(0, 100, 25, None);
+        let mut ids = Vec::new();
+        for (i, name) in ["a.flv", "b.flv", "c.flv"].into_iter().enumerate() {
+            let path = write(&dir, name, &flv.bytes);
+            let start = i as i64 * 3965;
+            ids.push(add_segment(&pool, session, &path, start, 0, Some(start + 3965)).await);
+        }
+        let b = dir.path().join("b.flv");
+        match case {
+            "deleted" | "missing" => {
+                std::fs::remove_file(&b).unwrap();
+                store::finish_segment(
+                    &pool,
+                    ids[1],
+                    &FinishedSegment {
+                        path: b.to_string_lossy().into_owned(),
+                        state: if case == "deleted" {
+                            SegmentState::Deleted
+                        } else {
+                            SegmentState::Missing
+                        },
+                        end_ms: 2 * 3965,
+                        bytes: None,
+                        index_path: None,
+                        danmaku_path: None,
+                    },
+                )
+                .await
+                .unwrap();
+            }
+            "file gone" => std::fs::remove_file(&b).unwrap(),
+            _ => store::delete_segment(&pool, ids[1]).await.unwrap(),
+        }
+        let dvr = open(&pool, session, 0).await.unwrap();
+        let tags = flv_tags(&collect(dvr).await);
+        let video = tags[2..].iter().filter(|t| t.0 == 9).count();
+        assert_eq!(video, 100, "{case}：只回放第一段");
+
+        // 从读不了的那段里起播：前进到下一段的起点
+        let dvr = open(&pool, session, 5000).await.unwrap();
+        assert_eq!(dvr.start_ms, 2 * 3965, "{case}");
+    }
+}
+
 async fn next_within<S: futures::Stream + Unpin>(
     stream: &mut S,
     ms: u64,

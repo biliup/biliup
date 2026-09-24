@@ -3,8 +3,9 @@
 //! 1. [`super::locate`] 找到不晚于 `from` 的最近关键帧所在的分段与字节偏移；
 //! 2. 先发头区里决定解码器配置的部分（FLV 文件头 + 序列头 / TS 的 PAT、PMT），再从关键帧偏移
 //!    起按 tag / 包转发，改写时间戳：输出时间戳 = 场次时间 + [`TIMESTAMP_ORIGIN_MS`]；
-//! 3. 读到分段末尾接下一段：解码器配置（FLV 序列头 / TS 的 PMT 与参数集）不变、中间没有断流
-//!    缺口就接上；接不上就结束响应，播放器从下一段的起点重开；
+//! 3. 读到分段末尾接下一段：紧接着的那一段可读、解码器配置（FLV 序列头 / TS 的 PMT 与参数集）
+//!    不变、中间没有断流缺口就接上；接不上（含下一段已被清理 / 缺失）就结束响应，播放器从下一个
+//!    可读位置重开；
 //! 4. 读到还在写的分段就等通知（写盘计数器增长、分段表变更，见 [`super::live`]），不轮询；
 //!    下一段刚开、还没有关键帧时，边写边建索引的分段等索引缓存更新（[`index::live::updates`]），
 //!    其余的等写盘计数器涨一截再按需扫盘；
@@ -41,6 +42,7 @@ const DEFAULT_FRAME_MS: i64 = 33;
 /// 等没有边写边建索引的下一段出现第一个关键帧时，写盘计数器每增长这么多才重新扫一次盘。
 const NEXT_SEGMENT_PROBE_BYTES: u64 = 256 * 1024;
 const TS_PARAM_SNIFF: usize = 256 * 1024;
+const NEXT_UNREADABLE: &str = "下一段不可读（已清理或缺失）";
 /// 写盘计数器在数据进入写盘缓冲之前就累加（mesio 在修复管线之前逐 tag 计数，落盘却是成块的）。
 /// 被唤醒却没读到新内容时，下一次等计数器多涨这么多再看；连续落空就翻倍到上限，读到数据后复位。
 const EMPTY_WAKE_STEP_MIN: u64 = 16 * 1024;
@@ -508,7 +510,7 @@ impl Dvr {
             .iter()
             .position(|s| s.id == self.cursor.row.id)
             .map_or(segments.len(), |i| i + 1);
-        let Some(next) = segments[after..].iter().find(|s| readable(s)).cloned() else {
+        let Some(next) = segments.get(after).cloned() else {
             // 场次还在录：等新分段开出来
             if self.live.is_none() {
                 self.live = live::watch(self.session_id);
@@ -522,14 +524,31 @@ impl Dvr {
             }
             return Ok(Step::Continue);
         };
+        // 跳过去时间戳会跳变，mpegts.js 会把它抹平，播放器位置就和场次时间对不上了：
+        // 和断流缺口一样结束响应，由播放器从下一个可读位置重开
+        if !readable(&next) {
+            return Ok(Step::End(NEXT_UNREADABLE));
+        }
         if next.gap_before_ms > 0 {
             return Ok(Step::End("遇到断流缺口"));
+        }
+        if self
+            .cursor
+            .row
+            .end_ms
+            .is_some_and(|end| next.start_ms > end)
+        {
+            return Ok(Step::End("时间轴不连续（中间的分段已被移除）"));
         }
         if Container::from_path(Path::new(&next.path)) != Some(self.container) {
             return Ok(Step::End("下一段容器不同"));
         }
         let mut index_updates = index::live::updates();
-        let index = super::segment_index(&next).await?;
+        let index = match super::segment_index(&next).await {
+            Ok(index) => index,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Step::End(NEXT_UNREADABLE)),
+            Err(e) => return Err(e),
+        };
         let (Some(base), Some(first)) = (index.base_ts, index.keyframes.first().copied()) else {
             // 下一段刚开，还没写到第一个关键帧
             if next.state != SegmentState::Recording {
@@ -552,7 +571,11 @@ impl Dvr {
                 }
             }
         };
-        let mut file = File::open(&next.path).await?;
+        let mut file = match File::open(&next.path).await {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Step::End(NEXT_UNREADABLE)),
+            Err(e) => return Err(e),
+        };
         let region = read_at(&mut file, 0, index.header_len as usize).await?;
         let fingerprint = match &self.remux {
             Remux::Flv => flv::Header::parse(&region)?.fingerprint(),
