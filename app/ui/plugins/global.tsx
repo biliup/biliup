@@ -35,9 +35,9 @@ const Global: React.FC<Props> = ({ disabled }) => {
             <div style={{ fontSize: '14px' }}>
               全局默认的下载插件，可在单个主播的覆写设置里另选。可选：
               <br />
-              1. <strong>mesio</strong>（默认）：内置 rust-srec 引擎，无需额外安装。进程内下载 FLV /
-              HLS，修复时间戳（每段从 0 开始）、写入关键帧索引（onMetaData.keyframes），支持 HEVC 和
-              hls_fmp4；不转封装，按源站的容器保存（FLV / TS，hls_fmp4 存为 .mp4）。详见{' '}
+              1. <strong>mesio</strong>（默认）：内置 rust-srec 引擎，无需额外安装。进程内下载 FLV / HLS，修复时间戳（每段从
+              0 开始）、写入关键帧索引（onMetaData.keyframes），支持 HEVC 和 hls_fmp4；不转封装，按源站的容器保存（FLV /
+              TS，hls_fmp4 存为 .mp4）。详见{' '}
               <a
                 href="https://github.com/hua0512/rust-srec"
                 target="_blank"
@@ -52,9 +52,9 @@ const Global: React.FC<Props> = ({ disabled }) => {
               <br />
               3. streamlink：多线程下载 HLS 分片，也可下载 FLV 直链；需系统中有 streamlink 命令。
               <br />
-              4. sync-downloader（边录边传）：录制的同时流式上传，
-              <strong>需先为主播设置上传模板</strong>；不受 pool2 / threads / segment_time
-              控制，固定 3 线程上传，请确保上传带宽充足；非 Docker 用户需自行安装 FFmpeg。详见 Wiki{' '}
+              4. sync-downloader（边录边传）：录制的同时流式上传，<strong>需先为主播设置上传模板</strong>；不受
+              pool2 / threads / segment_time 控制，固定 3 线程上传，请确保上传带宽充足；非 Docker 用户需自行安装
+              FFmpeg。详见 Wiki{' '}
               <a
                 href="https://github.com/biliup/biliup/wiki/%E8%BE%B9%E5%BD%95%E8%BE%B9%E4%BC%A0%E5%8A%9F%E8%83%BD"
                 target="_blank"
@@ -67,8 +67,8 @@ const Global: React.FC<Props> = ({ disabled }) => {
               <br />
               5. ytarchive：仅适用于 YouTube 直播。
               <br />
-              6. stream-gears：内置，无需额外安装，可防 FLV 流花屏；不支持 HEVC 编码和 hls_fmp4
-              流，FLV 时间戳沿用源站的原值（不从 0 开始）。
+              6. stream-gears：内置，无需额外安装，可防 FLV 流花屏；不支持 HEVC 编码和 hls_fmp4 流，FLV
+              时间戳沿用源站的原值（不从 0 开始）。
             </div>
           }
           style={{ width: '100%' }}
@@ -132,8 +132,8 @@ const Global: React.FC<Props> = ({ disabled }) => {
           extraText={
             <div style={{ fontSize: '14px' }}>
               录像单文件大小上限，超过后开始写下一个文件。下载回放时无法使用。留空表示不按大小分段。
-              <br />按 1024 进制换算：1 GB = 1024 MB = 1073741824 字节，与 Windows
-              资源管理器显示的大小一致。配置文件里存的仍是字节数。
+              <br />
+              按 1024 进制换算：1 GB = 1024 MB = 1073741824 字节，与 Windows 资源管理器显示的大小一致。配置文件里存的仍是字节数。
             </div>
           }
           field="file_size"
@@ -240,9 +240,8 @@ const Global: React.FC<Props> = ({ disabled }) => {
           noLabel={true}
           extraText={
             <div style={{ fontSize: '14px' }}>
-              后处理
-              rm、边录边传投稿后删除临时文件时，录像先保留这么多小时，到期后由每分钟一次的清理任务删除（连同弹幕
-              XML 和 .idx 关键帧索引）。关闭或填 0 表示立即删除，与以前一样。
+              后处理 rm、边录边传投稿后删除临时文件时，录像先保留这么多小时，到期后由每分钟一次的清理任务删除（连同弹幕 XML
+              和 .idx 关键帧索引）。关闭或填 0 表示立即删除，与以前一样。
               <br />
               切片工作台里被标记、切片引用的片段，以及点了「保留这场」的场次，不论这里怎么设都会等引用释放后再删。
             </div>
@@ -263,12 +262,10 @@ const Global: React.FC<Props> = ({ disabled }) => {
           placeholder="不启用"
           extraText={
             <div style={{ fontSize: '14px' }}>
-              录像所在磁盘的可用空间低于这个值时，每分钟检查一次，按「没被切片工作台引用的最旧录像 →
-              被引用的最旧录像」逐个删除，直到回到这个值以上。
-              正在录的分段不删；只删切片工作台记录过的录像（本版本之后录制的），其它文件不碰。
+              录像所在磁盘的可用空间低于这个值时，每分钟检查一次，按「没被切片工作台引用的最旧录像 → 被引用的最旧录像」
+              逐个删除，直到回到这个值以上。正在录的分段不删；只删切片工作台记录过的录像（本版本之后录制的），其它文件不碰。
               <br />
-              <strong>会删掉还没投稿的录像</strong>
-              ，只作磁盘写满前的兜底。留空表示不启用（默认）。按 1024 进制换算。
+              <strong>会删掉还没投稿的录像</strong>，只作磁盘写满前的兜底。留空表示不启用（默认）。按 1024 进制换算。
             </div>
           }
           fieldStyle={{
@@ -334,16 +331,14 @@ const Global: React.FC<Props> = ({ disabled }) => {
           extraText={
             <div style={{ fontSize: '14px' }}>
               <div>
-                <strong>经 biliup 中转</strong>
-                （默认）：页面里的预览复用正在录制的那一路流，不向直播平台多拉一路。 浏览器与 biliup
-                在同一台机器或同一内网时选这个，不多占 CDN 带宽。
+                <strong>经 biliup 中转</strong>（默认）：页面里的预览复用正在录制的那一路流，不向直播平台多拉一路。
+                浏览器与 biliup 在同一台机器或同一内网时选这个，不多占 CDN 带宽。
               </div>
               <div>
-                <strong>浏览器直连 CDN</strong>：biliup 向平台另取一条直链（新
-                token，不影响录制那条），浏览器自己去 CDN 拉，媒体流量不经过 biliup，适合 biliup
-                部署在异地服务器、浏览器远程访问的情况，省服务器出口带宽。 只有 CDN
-                放行跨域的平台能直连（B 站 / 抖音 / 斗鱼 / 虎牙，FLV 与 HLS 都行）；Twitch 等按
-                Origin 白名单放行 的平台在直连模式下自动回落中转并在播放器角标标出原因。
+                <strong>浏览器直连 CDN</strong>：biliup 向平台另取一条直链（新 token，不影响录制那条），浏览器自己去
+                CDN 拉，媒体流量不经过 biliup，适合 biliup 部署在异地服务器、浏览器远程访问的情况，省服务器出口带宽。
+                只有 CDN 放行跨域的平台能直连（B 站 / 抖音 / 斗鱼 / 虎牙，FLV 与 HLS 都行）；Twitch 等按 Origin 白名单放行
+                的平台在直连模式下自动回落中转并在播放器角标标出原因。
               </div>
             </div>
           }
@@ -378,9 +373,7 @@ const Global: React.FC<Props> = ({ disabled }) => {
           showClear={true}
         >
           <Form.Select.Option value="app">安卓APP（app）</Form.Select.Option>
-          <Form.Select.Option value="b-cut-android">
-            BCut安卓APP（b-cut-android）
-          </Form.Select.Option>
+          <Form.Select.Option value="b-cut-android">BCut安卓APP（b-cut-android）</Form.Select.Option>
           <Form.Select.Option value="web">网页（web）</Form.Select.Option>
         </Form.Select>
         <Form.Select
