@@ -19,7 +19,40 @@ struct PendingPes {
     offset: u64,
     pts: Option<i64>,
     random_access: bool,
-    es: Vec<u8>,
+    nal: NalSniff,
+}
+
+/// 在 PES 的 ES 数据里就地找第一个图像 NAL：逐包喂入，只记起始码跨包的半截状态，不攒数据。
+#[derive(Default)]
+struct NalSniff {
+    zeros: u8,
+    at_header: bool,
+    seen: usize,
+    verdict: Option<bool>,
+}
+
+impl NalSniff {
+    fn feed(&mut self, data: &[u8], codec: u8) {
+        if self.verdict.is_some() || self.seen >= MAX_SNIFF {
+            return;
+        }
+        for &b in data {
+            if self.at_header {
+                self.at_header = false;
+                if let Some(key) = picture_nal(b, codec) {
+                    self.verdict = Some(key);
+                    return;
+                }
+            }
+            if b == 0 {
+                self.zeros = self.zeros.saturating_add(1);
+            } else {
+                self.at_header = b == 1 && self.zeros >= 2;
+                self.zeros = 0;
+            }
+        }
+        self.seen += data.len();
+    }
 }
 
 /// 从 `index.scanned_upto` 扫到文件末尾最后一个完整的包。
@@ -79,19 +112,22 @@ pub(super) fn scan(
                 }
                 index.finalize_header(offset);
                 let pes = packet.payload().and_then(|p| PesHeaderRef::parse(p).ok());
+                let mut nal = NalSniff::default();
+                if let Some(h) = &pes {
+                    nal.feed(&h.payload(), index.track.codec);
+                }
                 pending = Some(PendingPes {
                     offset,
                     pts: pes.as_ref().and_then(|h| h.pts.or(h.dts)).map(|v| v as i64),
                     random_access: packet.has_random_access_indicator(),
-                    es: pes.map(|h| h.payload().to_vec()).unwrap_or_default(),
+                    nal,
                 });
             } else if let Some(p) = pending.as_mut()
-                && p.es.len() < MAX_SNIFF
                 && let Some(payload) = packet.payload()
             {
-                p.es.extend_from_slice(&payload);
+                p.nal.feed(&payload, index.track.codec);
             }
-            if let Some(key) = pending.as_ref().and_then(|p| is_idr(p, index.track.codec))
+            if let Some(key) = pending.as_ref().and_then(is_idr)
                 && let Some(done) = pending.take()
             {
                 resolve(index, done, key);
@@ -126,34 +162,30 @@ fn unwrap_pts(base: Option<i64>, raw: i64) -> i64 {
 }
 
 /// 看 PES 里第一个图像 NAL：IDR → `Some(true)`，非 IDR → `Some(false)`，还没看到 → `None`。
-fn is_idr(pes: &PendingPes, codec: u8) -> Option<bool> {
+fn is_idr(pes: &PendingPes) -> Option<bool> {
     if pes.random_access {
         return Some(true);
     }
-    let es = &pes.es;
-    let mut i = 0;
-    while i + 3 < es.len() {
-        if es[i] == 0 && es[i + 1] == 0 && es[i + 2] == 1 {
-            let header = es[i + 3];
-            if codec == CODEC_H265 {
-                match (header >> 1) & 0x3F {
-                    16..=21 => return Some(true),
-                    0..=9 => return Some(false),
-                    _ => {}
-                }
-            } else {
-                match header & 0x1F {
-                    5 => return Some(true),
-                    1 => return Some(false),
-                    _ => {}
-                }
-            }
-            i += 3;
-        } else {
-            i += 1;
+    pes.nal
+        .verdict
+        .or((pes.nal.seen >= MAX_SNIFF).then_some(false))
+}
+
+/// 起始码后的 NAL 头字节：图像 NAL 给出是不是 IDR，其它（SPS/PPS/SEI/AUD…）返回 `None`。
+fn picture_nal(header: u8, codec: u8) -> Option<bool> {
+    if codec == CODEC_H265 {
+        match (header >> 1) & 0x3F {
+            16..=21 => Some(true),
+            0..=9 => Some(false),
+            _ => None,
+        }
+    } else {
+        match header & 0x1F {
+            5 => Some(true),
+            1 => Some(false),
+            _ => None,
         }
     }
-    (es.len() >= MAX_SNIFF).then_some(false)
 }
 
 /// 第一个同步字节的位置：`0x47` 且 188 字节后还是 `0x47`（或已到文件末尾）。
@@ -185,4 +217,75 @@ pub(super) fn is_unit_start_at(
     }
     matches!(TsPacketRef::parse(Bytes::copy_from_slice(&buf)),
         Ok(p) if p.payload_unit_start_indicator && p.pid as u32 == video_pid)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 整段 ES 攒齐后一次性找第一个图像 NAL（逐包就地判定必须与它一致）。
+    fn whole(es: &[u8], codec: u8) -> Option<bool> {
+        let mut i = 0;
+        while i + 3 < es.len() {
+            if es[i] == 0 && es[i + 1] == 0 && es[i + 2] == 1 {
+                if let Some(key) = picture_nal(es[i + 3], codec) {
+                    return Some(key);
+                }
+                i += 3;
+            } else {
+                i += 1;
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn nal_sniff_across_packet_splits_matches_the_whole_buffer() {
+        let cases: [(&[u8], u8); 9] = [
+            (&[0, 0, 0, 1, 0x09, 0xF0, 0, 0, 1, 0x65, 0x88], CODEC_H264),
+            (
+                &[0, 0, 1, 0x67, 0x42, 0, 0, 1, 0x68, 0, 0, 1, 0x41],
+                CODEC_H264,
+            ),
+            (&[0, 0, 1, 0x06, 0, 0, 0, 0, 1, 0x25], CODEC_H264),
+            (&[0, 0, 1, 0, 0, 1, 0x65], CODEC_H264),
+            (&[0xAB, 0, 0, 2, 0, 1, 0x65, 0, 0, 1], CODEC_H264),
+            (&[0, 0, 1, 0x06, 0, 0], CODEC_H264),
+            (
+                &[0, 0, 0, 1, 35 << 1, 1, 0x50, 0, 0, 1, 19 << 1, 1],
+                CODEC_H265,
+            ),
+            (&[0, 0, 1, 32 << 1, 1, 0, 0, 1, 1 << 1, 1], CODEC_H265),
+            (&[0, 0, 1, 39 << 1, 1, 0, 0, 1, 21 << 1], CODEC_H265),
+        ];
+        for (es, codec) in cases {
+            let want = whole(es, codec);
+            for a in 0..=es.len() {
+                for b in a..=es.len() {
+                    let mut nal = NalSniff::default();
+                    for part in [&es[..a], &es[a..b], &es[b..]] {
+                        nal.feed(part, codec);
+                    }
+                    assert_eq!(nal.verdict, want, "{es:02x?} split at {a}/{b}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn nal_sniff_gives_up_after_max_sniff_bytes() {
+        let mut nal = NalSniff::default();
+        let filler = [0xAB; 184];
+        while nal.seen < MAX_SNIFF {
+            nal.feed(&filler, CODEC_H264);
+        }
+        nal.feed(&[0, 0, 1, 0x65], CODEC_H264);
+        let pes = PendingPes {
+            offset: 0,
+            pts: None,
+            random_access: false,
+            nal,
+        };
+        assert_eq!(is_idr(&pes), Some(false));
+    }
 }
