@@ -113,13 +113,13 @@ sudo docker exec -it imageId /bin/bash
 
 ## 从源码运行biliup
 * 下载源码: `git clone https://github.com/ForgQi/bilibiliupload.git`
-* 安装: `pip3 install -e .`
+* 安装: `pip3 install -e ./crates/stream-gears`
 * 启动: `python3 -m biliup`
 * 构建:
   ```shell
   $ npm install
   $ npm run build
-  $ python3 -m build
+  $ python3 -m build crates/stream-gears
   ```
 * 调试 webUI: `python3 -m biliup --static-dir public`
 
