@@ -248,6 +248,10 @@ mod tests {
                 6,
                 "11d73df52e3a459d5256d4f5d624cbc5e891d14c358d1ef4a63debae235c2fd24ce2fe8745a85ac95312ad4773475ca2",
             ),
+            (
+                7,
+                "a00b879e705c360a7e6382ac864aef98ecb60cb6a400495ef2fd5557ad8c43a1c656118ee2c4b0a5f5414f1acc76d79a",
+            ),
         ];
         let embedded = sqlx::migrate!();
         let actual: Vec<(i64, String)> = embedded
@@ -297,7 +301,7 @@ mod tests {
                 .unwrap();
         assert_eq!(
             migrations.iter().map(|m| m.0).collect::<Vec<_>>(),
-            vec![1, 2, 3, 4, 5, 6],
+            vec![1, 2, 3, 4, 5, 6, 7],
             "待应用的迁移必须补齐"
         );
         let embedded = sqlx::migrate!();
