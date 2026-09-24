@@ -27,4 +27,4 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
-        run: cargo test --locked -p biliup -p biliup-cli -p danmaku
+        run: cargo test --locked --workspace
