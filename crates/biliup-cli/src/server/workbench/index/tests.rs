@@ -201,6 +201,31 @@ fn flv_growing_file_is_scanned_incrementally() {
 }
 
 #[test]
+fn rescan_continues_in_memory_without_touching_the_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let flv = build_flv(0, 100, 25, None);
+    let cut = flv.keyframes[2].1 as usize + 100;
+    let path = write(dir.path(), "a.flv.part", &flv.bytes[..cut]);
+
+    let partial = rescan(&path, None).unwrap();
+    assert_eq!(partial.keyframes, flv_expected(&flv)[..2].to_vec());
+    assert_eq!(partial.source_len, cut as u64);
+
+    let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+    file.write_all(&flv.bytes[cut..]).unwrap();
+    drop(file);
+    let full = rescan(&path, Some(partial)).unwrap();
+    assert_eq!(full.keyframes, flv_expected(&flv));
+    assert_eq!(full.duration_ms, 3965);
+    assert!(!index_path(&path).exists(), "不写缓存");
+    assert_eq!(
+        full,
+        refresh(&path, false).unwrap(),
+        "与读写缓存的续扫结果一致"
+    );
+}
+
+#[test]
 fn flv_truncated_file_truncates_the_cache() {
     let dir = tempfile::tempdir().unwrap();
     let flv = build_flv(0, 100, 25, None);

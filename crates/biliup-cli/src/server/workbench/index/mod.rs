@@ -345,12 +345,7 @@ fn save(segment: &Path, index: &KeyframeIndex) -> io::Result<()> {
 /// 缓存与文件对不上（文件被截断、被同名覆盖）时按文件长度截断缓存或整个重建。
 /// 读 `t_ms` 所在位置用 [`KeyframeIndex::at_or_before`]。
 pub fn refresh(segment: &Path, finished: bool) -> io::Result<KeyframeIndex> {
-    let container = Container::from_path(segment).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::Unsupported,
-            format!("{} 不是可建索引的容器", segment.display()),
-        )
-    })?;
+    let container = indexable(segment)?;
     let file = File::open(segment)?;
     let file_len = file.metadata()?.len();
     let mut reader = BufReader::with_capacity(READ_BUFFER, file);
@@ -380,6 +375,31 @@ pub fn refresh(segment: &Path, finished: bool) -> io::Result<KeyframeIndex> {
     index.source_len = file_len;
     save(segment, &index)?;
     Ok(index)
+}
+
+/// 和 [`refresh`] 一样续扫到文件末尾，但从调用方手里的索引续扫、不读写缓存文件：录制中旁路观测
+/// 正在写的分段用，免得和场次记录器关段时对缓存的处理（改名、删除、标记完整）打架。
+pub fn rescan(segment: &Path, previous: Option<KeyframeIndex>) -> io::Result<KeyframeIndex> {
+    let container = indexable(segment)?;
+    let file = File::open(segment)?;
+    let file_len = file.metadata()?.len();
+    let mut reader = BufReader::with_capacity(READ_BUFFER, file);
+    let mut index = previous
+        .filter(|c| c.container == container)
+        .and_then(|c| validate_cache(c, &mut reader, file_len))
+        .unwrap_or_else(|| KeyframeIndex::new(container));
+    scan(&mut reader, file_len, &mut index)?;
+    index.source_len = file_len;
+    Ok(index)
+}
+
+fn indexable(segment: &Path) -> io::Result<Container> {
+    Container::from_path(segment).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::Unsupported,
+            format!("{} 不是可建索引的容器", segment.display()),
+        )
+    })
 }
 
 /// 从 `index.scanned_upto` 扫到 `len` 为止最后一个完整的单元。

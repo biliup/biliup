@@ -393,8 +393,9 @@ impl Writer {
         self.last_end_ms = self.last_end_ms.max(end_ms);
         self.run_has_segment = true;
         self.last_close_at = Some(at);
-        if let Some(live) = &self.live {
+        if let Some(live) = &mut self.live {
             live.anchor(end_ms, at);
+            live.stop_sampling();
         }
     }
 
@@ -429,8 +430,9 @@ impl Writer {
         )
         .await?;
         self.register_live();
-        if let Some(live) = &self.live {
+        if let Some(live) = &mut self.live {
             live.anchor(start_ms, opened_at);
+            live.sample_segment(path.to_path_buf(), start_ms);
         }
         Ok((id, start_ms))
     }

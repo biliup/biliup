@@ -153,7 +153,7 @@ pub async fn create_marker(
                 pressed_at: body.pressed_at,
                 latency_ms: body.latency_ms,
             };
-            match markers::watched_at_ms(&pool, id, now, timing).await {
+            match markers::watched_at_ms(id, now, timing) {
                 Some(at_ms) => {
                     debug!(session = id, at_ms, ?timing, "按当前画面换算标记时间");
                     at_ms
