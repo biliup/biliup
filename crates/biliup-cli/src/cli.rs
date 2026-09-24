@@ -3,6 +3,7 @@ use biliup::uploader::util::SubmitOption;
 use clap::{Parser, Subcommand};
 
 use crate::UploadLine;
+use crate::season_cli::SeasonArgs;
 use std::path::PathBuf;
 
 /// 扩展路径中的 ~ 为用户主目录
@@ -179,6 +180,8 @@ pub enum Commands {
         #[arg(short, long, value_name = "FILE")]
         config: Option<PathBuf>,
     },
+    /// 管理自己的合集：列合集、查小节、加入 / 移出稿件、排序
+    Season(SeasonArgs),
     /// 管理 Web 界面的登录用户（在 biliup 服务的工作目录下执行，直接读写 data/data.sqlite3）
     User {
         #[command(subcommand)]
