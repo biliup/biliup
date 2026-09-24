@@ -61,7 +61,6 @@ RUN set -eux; \
 	\
 	whl=$(ls /tmp/biliup*.whl); \
 	pip3 install --no-cache-dir "$whl"; \
-	# pip3 install --no-cache-dir "$whl[quickjs]"; \
 	pip3 cache purge; \
 	rm -rf /tmp/*;
 
@@ -74,7 +73,6 @@ RUN set -eux; \
 		wget \
 		curl \
 		xz-utils \
-		g++ \
 	; \
 	apt-mark auto '.*' > /dev/null; \
 	apt-mark manual curl wget; \
@@ -117,9 +115,6 @@ RUN set -eux; \
 			ffmpeg*; \
 		chmod a+x /usr/local/* ; \
 	fi; \
-	\
-	# 安装 quickjs 需要 g++
-	pip3 install --no-cache-dir quickjs; \
 	\
 	# Clean up \
 	[ -z "$savedAptMark" ] || apt-mark manual $savedAptMark; \
