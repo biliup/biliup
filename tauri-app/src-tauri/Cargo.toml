@@ -1,7 +1,7 @@
 [package]
 name = "tauri-app"
 version = "0.1.0"
-description = "A Tauri App"
+description = "biliup desktop app"
 authors = ["you"]
 edition = "2021"
 
@@ -19,10 +19,16 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tauri-plugin-shell = "2"
+tauri-plugin-single-instance = "2"
+biliup-cli = { path = "../../crates/biliup-cli" }
+tokio = { version = "1", features = ["io-util", "net", "sync", "time"] }
+tracing = "0.1"
 
 [workspace]
 # 这个空的 workspace 表告诉 Cargo，此 crate 是一个独立的 workspace，不要再向上查找了
+
+# 与根 workspace 的 release 配置一致（独立 workspace 不继承根 profile）
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

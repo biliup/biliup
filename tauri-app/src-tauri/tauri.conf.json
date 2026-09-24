@@ -4,19 +4,10 @@
   "version": "0.1.0",
   "identifier": "com.tauri-app.app",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
-    "frontendDist": "../dist"
+    "frontendDist": "../static"
   },
   "app": {
-    "windows": [
-      {
-        "title": "bbup-app",
-        "width": 800,
-        "height": 600
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }
@@ -30,9 +21,6 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "resources": [
-      "binaries/"
     ]
   }
 }
