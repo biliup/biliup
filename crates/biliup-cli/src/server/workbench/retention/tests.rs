@@ -2,8 +2,10 @@ use super::*;
 use crate::server::infrastructure::connection_pool::ConnectionManager;
 use crate::server::infrastructure::models::StreamerInfo;
 use crate::server::infrastructure::models::hook_step::{HookStep, process_video};
+use crate::server::workbench::index::tests::build_ts;
 use crate::server::workbench::recorder::{ClosedSegment, SessionRecorder, SessionTarget};
 use crate::server::workbench::store::{self, FinishedSegment, SegmentState};
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use tempfile::TempDir;
 
@@ -397,6 +399,103 @@ async fn filtered_segment_closed_first_still_honours_retain_until() {
     );
     assert!(path.exists());
     assert_eq!(state(&pool, id).await, "pending_delete");
+}
+
+/// 录制中边写边建索引的分段被过滤删除：删除点不碰索引任务手上的 `.idx`，索引任务关段时存的
+/// 那一份由录制器在 `sync` 之后删掉，不留孤儿文件。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn deleting_a_segment_being_indexed_leaves_no_orphan_index() {
+    let (dir, pool) = setup().await;
+    let t0 = now_ms();
+    let s = session(&pool, t0).await;
+    let tap = index::live::spawn();
+    let recorder = SessionRecorder::spawn(
+        pool.clone(),
+        SessionTarget {
+            session_id: s,
+            streamer_id: 1,
+        },
+        Some(tap.clone()),
+    );
+    let handle = recorder.handle();
+    let ts = build_ts(0, 300, false, false);
+    let path = dir.path().join("tiny.ts");
+    std::fs::write(&path, &ts.bytes).unwrap();
+    handle.run_started_at(t0);
+    handle.opened_at(&path, t0);
+    let file = tap.open(&path);
+    let half = ts.bytes.len() / 2;
+    file.bytes(0, &Bytes::copy_from_slice(&ts.bytes[..half]));
+    tap.sync().await;
+    assert!(index::live::is_live(&path));
+    while sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM segments WHERE session_id = ?")
+        .bind(s)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        == 0
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    assert_eq!(
+        remove(&Retention::without_delay(pool.clone()), &[&path])
+            .await
+            .unwrap(),
+        vec![Disposal::Deleted]
+    );
+    file.bytes(half as u64, &Bytes::copy_from_slice(&ts.bytes[half..]));
+    file.closed(ts.bytes.len() as u64);
+    handle.closed_at(
+        &path,
+        t0 + 10_000,
+        ClosedSegment {
+            discard: true,
+            ..Default::default()
+        },
+    );
+    recorder.finish().await;
+
+    assert!(!index::live::is_live(&path));
+    assert!(!path.exists());
+    assert!(!index::index_path(&path).exists(), "孤儿 .idx");
+    let row: String = sqlx::query_scalar("SELECT state FROM segments WHERE session_id = ?")
+        .bind(s)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(row, "deleted");
+}
+
+/// 清理任务和水位兜底跳过索引任务还没处理完的分段，下一轮再删。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn sweeper_waits_for_the_index_task() {
+    let (dir, pool) = setup().await;
+    let s = session(&pool, 1_000_000).await;
+    let (a, a_path) = segment(&pool, dir.path(), s, "a.ts", 0, Some(1000), 10).await;
+    let mut conn = pool.acquire().await.unwrap();
+    pin(&mut conn, "marker:1", s, 0, 10).await.unwrap();
+    remove(&retention(&pool, 0), &[&a_path]).await.unwrap();
+    assert_eq!(state(&pool, a).await, "pending_delete");
+    unpin(&mut conn, "marker:1").await.unwrap();
+
+    let tap = index::live::spawn();
+    let file = tap.open(&a_path);
+    tap.sync().await;
+    assert_eq!(sweep_pending(&pool, now_ms()).await.unwrap(), 0);
+    assert_eq!(
+        enforce_free_space(&pool, u64::MAX, now_ms(), |_| Ok(0))
+            .await
+            .unwrap(),
+        0
+    );
+    assert!(a_path.exists());
+
+    file.closed(0);
+    tap.sync().await;
+    assert!(!index::live::is_live(&a_path));
+    assert_eq!(sweep_pending(&pool, now_ms()).await.unwrap(), 1);
+    assert!(gone(&a_path));
 }
 
 #[tokio::test]

@@ -208,8 +208,16 @@ async fn set_state(pool: &ConnectionPool, id: i64, state: &str) -> sqlx::Result<
 async fn delete_video(path: &Path) -> io::Result<()> {
     info!("删除 - Removing: {}", path.display());
     tokio::fs::remove_file(path).await?;
-    let _ = tokio::fs::remove_file(index::index_path(path)).await;
+    remove_index(path);
     Ok(())
+}
+
+/// 删 `video` 的关键帧索引缓存。索引任务还在边写边建时不删：它关段时还会再存一次，删了会留下
+/// 孤儿 `.idx`；这种分段由录制器在索引任务处理完之后删（过滤删除的分段关段时带 `discard`）。
+fn remove_index(video: &Path) {
+    if !index::live::is_live(video) {
+        let _ = std::fs::remove_file(index::index_path(video));
+    }
 }
 
 /// 后处理 `mv` 把 `from` 搬到了 `to`：关键帧索引跟着搬（搬不过去就删掉，用到时重建）；
@@ -217,7 +225,10 @@ async fn delete_video(path: &Path) -> io::Result<()> {
 pub async fn moved(pool: Option<&ConnectionPool>, from: &Path, to: &Path) {
     let from_index = index::index_path(from);
     let to_index = index::index_path(to);
+    // 后处理只在录制任务结束后执行，这时不该还有索引任务在写；万一有，不去抢它的 `.idx`
+    let live = index::live::is_live(from);
     let index_moved = match tokio::fs::metadata(&from_index).await {
+        Ok(_) if live => false,
         Ok(_) => match move_file(&from_index, &to_index).await {
             Ok(()) => true,
             Err(e) => {
@@ -374,8 +385,10 @@ fn delete_segment_files(segment: &Doomed) -> io::Result<()> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
         Err(e) => return Err(e),
     }
-    let _ = std::fs::remove_file(index::index_path(video));
-    if let Some(index_path) = &segment.index_path {
+    remove_index(video);
+    if let Some(index_path) = &segment.index_path
+        && Path::new(index_path) != index::index_path(video)
+    {
         let _ = std::fs::remove_file(index_path);
     }
     if let Some(danmaku) = &segment.danmaku_path {
@@ -400,6 +413,9 @@ pub async fn sweep_pending(pool: &ConnectionPool, now: i64) -> sqlx::Result<usiz
     .await?;
     let mut deleted = 0;
     for segment in &due {
+        if index::live::is_live(Path::new(&segment.path)) {
+            continue;
+        }
         match delete_segment_files(segment) {
             Ok(()) => {
                 set_deleted(pool, segment.id).await?;
@@ -422,8 +438,8 @@ struct Candidate {
 }
 
 /// 磁盘水位兜底：分段所在磁盘的可用空间低于 `min_free` 字节时，按「没被引用的最旧 → 被引用的
-/// 最旧」删已录完（`finished` / `pending_delete`）的分段，直到可用空间回到阈值以上。正在录的分段
-/// 不删；不同磁盘各自判断。`available` 返回某个目录所在磁盘的可用字节数。返回删了几个。
+/// 最旧」删已录完（`finished` / `pending_delete`）的分段，直到可用空间回到阈值以上。正在录的分段、
+/// 索引任务还没处理完的分段不删；不同磁盘各自判断。`available` 返回某个目录所在磁盘的可用字节数。返回删了几个。
 pub async fn enforce_free_space<F>(
     pool: &ConnectionPool,
     min_free: u64,
@@ -448,6 +464,9 @@ where
     let mut deleted = 0;
     for candidate in &candidates {
         let video = Path::new(&candidate.path);
+        if index::live::is_live(video) {
+            continue;
+        }
         let dir = match video.parent() {
             Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
             _ => PathBuf::from("."),
