@@ -261,7 +261,9 @@ impl KeyframeIndex {
             return Err(bad("keyframe index entry count mismatch"));
         }
         let keyframes = entries
-            .chunks_exact(ENTRY_SIZE)
+            .as_chunks::<ENTRY_SIZE>()
+            .0
+            .iter()
             .map(|e| Keyframe {
                 t_ms: u32::from_le_bytes(e[..4].try_into().unwrap()),
                 offset: u64::from_le_bytes(e[4..].try_into().unwrap()),
