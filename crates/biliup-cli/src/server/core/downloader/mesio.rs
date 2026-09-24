@@ -337,6 +337,9 @@ fn segment_complete_hook(
 + Sync
 + 'static {
     move |path, index, duration_secs, size_bytes, reason| {
+        // 输出目录是 `.` 时 writer 给出 `./x.flv`；去掉前缀，与 stream-gears 给出的路径同一形式，
+        // 弹幕 XML、文件列表都按这个路径命名和记录
+        let path = path.strip_prefix(".").unwrap_or(path);
         info!(
             path = %path.display(),
             index,
@@ -538,6 +541,24 @@ mod tests {
             bytes::Bytes::new(),
         );
         assert_eq!(hls_extension(&m4s), "mp4");
+    }
+
+    #[test]
+    fn segment_paths_under_the_current_dir_drop_the_dot_prefix() {
+        let (tx, mut rx) = unbounded_channel();
+        let hook = segment_complete_hook(tx);
+        hook(std::path::Path::new("./x.flv"), 0, 1.0, 10, None);
+        hook(std::path::Path::new("./sub/y.flv"), 1, 1.0, 10, None);
+        hook(std::path::Path::new("/data/z.flv"), 2, 1.0, 10, None);
+        hook(std::path::Path::new("w.flv"), 3, 1.0, 10, None);
+
+        let paths: Vec<PathBuf> = std::iter::from_fn(|| rx.try_recv().ok())
+            .map(|(path, ..)| path)
+            .collect();
+        assert_eq!(
+            paths,
+            ["x.flv", "sub/y.flv", "/data/z.flv", "w.flv"].map(PathBuf::from)
+        );
     }
 
     #[test]
