@@ -103,8 +103,6 @@ stream_gears.upload(["a.mp4"], "cookies.json", "t", desc_v2=[{"raw_text": "x"}])
 def run_mypy(source, tmp_path):
     pytest.importorskip("mypy")
     (tmp_path / "example.py").write_text(textwrap.dedent(source))
-    # cwd outside the repo, so the source stream_gears/ can't stand in for the
-    # installed package.
     return subprocess.run(
         [sys.executable, "-m", "mypy", "--strict", "--no-incremental", "example.py"],
         cwd=tmp_path,
