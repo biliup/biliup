@@ -51,9 +51,9 @@ UPLOAD_LINES = [
     "Akbd",
 ]
 
-# The CLI exits the process (clap's `--help` / `--version`), so it must run in
-# a subprocess. cwd is a temp dir so the repo's `biliup/` source package can't
-# shadow the installed one.
+# The CLI tests go through the installed console script / `python -m biliup`,
+# so they run in a subprocess. cwd is a temp dir so the repo's `biliup/` source
+# package can't shadow the installed one.
 TIMEOUT = 60
 
 

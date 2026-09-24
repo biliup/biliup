@@ -25,8 +25,7 @@ use biliup::client::StatelessClient;
 use biliup::downloader::flv_parser::header;
 use biliup::downloader::httpflv::Connection;
 use biliup_cli::server::common::construct_headers;
-use pyo3::exceptions::PyRuntimeError;
-use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::exceptions::{PyRuntimeError, PySystemExit, PyTypeError, PyValueError};
 use tracing_subscriber::layer::SubscriberExt;
 
 pyo3::create_exception!(
@@ -539,32 +538,28 @@ pub fn main_loop(py: Python<'_>) -> PyResult<()> {
     let bound = sys.getattr("argv")?;
     let argv: &Bound<PyList> = bound.cast()?;
 
-    let mut args: Vec<String> = argv
+    let args: Vec<String> = argv
         .iter()
         .map(|x| x.extract::<String>())
         .collect::<PyResult<Vec<_>>>()?;
 
-    // if args.len() == 1 {
-    //     args.push("server".to_string());
-    // }
-    match args.as_slice() {
-        &[] => {
-            args.push("biliup".to_string());
-            args.push("server".to_string());
+    let cli = match biliup_cli::entry::parse(args) {
+        Ok(cli) => cli,
+        Err(e) => {
+            // `--help` / `--version` exit with 0; the console script turns
+            // SystemExit into the process exit code.
+            let code = e.exit_code();
+            e.print()
+                .map_err(|err| PyRuntimeError::new_err(err.to_string()))?;
+            return if code == 0 {
+                Ok(())
+            } else {
+                Err(PySystemExit::new_err(code))
+            };
         }
-        &[_] => {
-            args.push("server".to_string());
-        }
-        [_, command, ..] => {
-            if command == "start" {
-                args[1] = "server".to_string();
-            }
-        }
-    }
+    };
 
-    py.detach(|| {
-        server::_main(args.as_slice()).map_err(|e| PyRuntimeError::new_err(format!("{e:?}")))
-    })
+    py.detach(|| server::run(cli).map_err(|e| PyRuntimeError::new_err(format!("{e:?}"))))
 }
 
 /// A Python module implemented in Rust.

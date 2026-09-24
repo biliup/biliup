@@ -432,6 +432,7 @@ name = "biliup"
 version = "1.2.8"
 dependencies = [
  "async-trait",
+ "axum",
  "base64",
  "bon",
  "byteorder",
@@ -4416,7 +4417,6 @@ dependencies = [
  "biliup",
  "biliup-cli",
  "bon",
- "clap",
  "danmaku",
  "error-stack",
  "nom 8.0.0",

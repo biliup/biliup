@@ -55,8 +55,24 @@ jobs:
             docker build \
               --build-arg repo_url=$REPO_URL \
               --build-arg branch_name=$BRANCH_NAME \
+              --tag biliup-test \
               . --file Dockerfile
           fi
+
+      - name: Smoke test container
+        if: hashFiles('docker-compose.test.yml') == ''
+        run: |
+          docker run -d --name biliup-test -p 19159:19159 biliup-test
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:19159/; then
+              docker exec biliup-test test -s /opt/ds_update.log
+              docker rm -f biliup-test
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs biliup-test
+          exit 1
 
 
   build:
