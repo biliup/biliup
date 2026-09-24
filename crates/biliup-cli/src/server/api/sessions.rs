@@ -127,7 +127,7 @@ pub struct SegmentView {
     /// 只有 `recording`、`finished` 能回看和剪。
     pub state: &'static str,
     pub start_ms: i64,
-    /// 正在写的分段按已写入的内容时长算。
+    /// 正在写的分段只算到盘上已经能读到的内容：还没有落盘的关键帧时等于 `start_ms`（还不能回看）。
     pub end_ms: Option<i64>,
     pub bytes: Option<i64>,
     /// 与上一段之间断流的时长（毫秒）。
@@ -152,17 +152,29 @@ pub struct SessionDetail {
     pub gaps: Vec<Gap>,
 }
 
+/// 录制中的分段在盘上已经能回看到哪里（段内毫秒）。
+///
+/// 边写边建的索引缓存可能跑在盘上前面（写入端缓冲里的内容还没落盘）。详情按这里给出的范围说「能播」，
+/// 回看流只从盘上的关键帧起播，两边必须一致：盘上没有关键帧就是 0；缓存覆盖的字节还没全部落盘时，
+/// 只算到盘上最后一个关键帧。`index` 是 [`segment_index`] 的结果，里面的关键帧已经只剩落了盘的。
+fn readable_ms(index: &crate::server::workbench::index::KeyframeIndex, on_disk: u64) -> i64 {
+    match index.keyframes.last() {
+        None => 0,
+        Some(last) if index.source_len > on_disk => i64::from(last.t_ms),
+        Some(_) => i64::from(index.duration_ms),
+    }
+}
+
 async fn segment_view(row: SegmentRow) -> SegmentView {
     let path = std::path::PathBuf::from(&row.path);
     let (mut end_ms, mut bytes) = (row.end_ms, row.bytes);
     if row.state == SegmentState::Recording {
-        if let Ok(index) = segment_index(&row).await {
-            end_ms = Some(row.start_ms + index.duration_ms as i64);
+        let index = segment_index(&row).await;
+        let on_disk = tokio::fs::metadata(&path).await.ok().map(|m| m.len());
+        if let (Ok(index), Some(len)) = (index, on_disk) {
+            end_ms = Some(row.start_ms + readable_ms(&index, len));
         }
-        bytes = tokio::fs::metadata(&path)
-            .await
-            .ok()
-            .map(|m| m.len() as i64);
+        bytes = on_disk.map(|len| len as i64);
     }
     SegmentView {
         id: row.id,
@@ -361,7 +373,8 @@ mod tests {
     use tower_sessions_sqlx_store::SqliteStore;
 
     struct Fixture {
-        _dir: tempfile::TempDir,
+        dir: tempfile::TempDir,
+        pool: ConnectionPool,
         backend: Backend,
         app: Router,
         session: i64,
@@ -433,12 +446,13 @@ mod tests {
             .route("/v1/sessions/{id}", get(get_session))
             .route("/v1/sessions/{id}/keyframes", get(get_session_keyframes))
             .route("/v1/sessions/{id}/media", get(get_session_media))
-            .with_state(pool)
+            .with_state(pool.clone())
             .route_layer(from_fn(require_permission))
             .merge(crate::server::api::auth::router())
             .layer(auth_layer);
         Fixture {
-            _dir: dir,
+            dir,
+            pool,
             backend,
             app,
             session,
@@ -553,6 +567,95 @@ mod tests {
             let response = get_as(&f.app, Some(&viewer), &uri).await;
             assert_eq!(response.status(), StatusCode::NOT_FOUND, "{uri}");
         }
+    }
+
+    #[test]
+    fn readable_range_stops_at_what_is_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.flv");
+        let flv = build_flv(0, 100, 25, None);
+        std::fs::write(&path, &flv.bytes).unwrap();
+        let full = crate::server::workbench::index::refresh(&path, true).unwrap();
+        let len = flv.bytes.len() as u64;
+        assert_eq!(full.source_len, len);
+        assert_eq!(readable_ms(&full, len), 3965, "缓存覆盖的都已落盘");
+
+        let mut ahead = full.clone();
+        ahead.keyframes.truncate(2);
+        assert_eq!(readable_ms(&ahead, len - 1), 1000, "缓存跑在盘上前面");
+        ahead.keyframes.clear();
+        assert_eq!(readable_ms(&ahead, len), 0, "盘上还没有关键帧");
+    }
+
+    /// 边写边建的索引缓存跑在盘上前面时，详情说能播的范围与回看流能起播的位置一致。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn detail_and_media_agree_while_the_index_is_ahead_of_the_disk() {
+        use crate::server::workbench::index;
+        use std::io::Write;
+        let f = fixture().await;
+        let viewer = login(&f.app, "ro", "viewer-password").await;
+        let at = 1_700_000_100_000;
+        let info = StreamerInfo::new(
+            "主播a",
+            "https://a",
+            "刚开录",
+            DateTime::<Utc>::from_timestamp_millis(at).unwrap(),
+            "",
+        );
+        let session = store::open_session(&f.pool, 1, &info, at, 0)
+            .await
+            .unwrap()
+            .id;
+        let session = live::unique_session_id(&f.pool, session).await;
+        store::set_started_at(&f.pool, session, at).await.unwrap();
+        let flv = build_flv(0, 100, 25, None);
+        let head = flv.keyframes[0].1 as usize;
+        let path = f.dir.path().join("early.flv");
+        std::fs::write(&path, &flv.bytes[..head]).unwrap();
+        store::insert_segment(&f.pool, session, &path.to_string_lossy(), "flv", 0, 0)
+            .await
+            .unwrap();
+
+        // 写入端已把整段报给索引任务，盘上只有文件头
+        let tap = index::live::spawn();
+        let file_tap = tap.open(&path);
+        index::live::tests::feed_flv_tags(&file_tap, &flv.bytes);
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while index::load(&path).is_none_or(|i| i.keyframes.len() < 4) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("索引缓存应已落盘");
+        assert!(index::live::is_live(&path));
+
+        let detail_uri = format!("/v1/sessions/{session}");
+        let media_uri = format!("/v1/sessions/{session}/media?from=5000");
+        let end_ms = |detail: &serde_json::Value| detail["segments"][0]["end_ms"].clone();
+        let detail = json(get_as(&f.app, Some(&viewer), &detail_uri).await).await;
+        assert_eq!(end_ms(&detail), 0, "盘上没有关键帧：还不能播");
+        assert_eq!(detail["duration_ms"], 0);
+        let response = get_as(&f.app, Some(&viewer), &media_uri).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        // 前两个关键帧落盘
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        let cut = flv.keyframes[2].1 as usize;
+        file.write_all(&flv.bytes[head..cut]).unwrap();
+        let detail = json(get_as(&f.app, Some(&viewer), &detail_uri).await).await;
+        assert_eq!(end_ms(&detail), 1000, "只算到盘上最后一个关键帧");
+        let response = get_as(&f.app, Some(&viewer), &media_uri).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["X-Dvr-Start-Ms"], "1000");
+        drop(response);
+
+        file.write_all(&flv.bytes[cut..]).unwrap();
+        let detail = json(get_as(&f.app, Some(&viewer), &detail_uri).await).await;
+        assert_eq!(end_ms(&detail), 3965, "缓存覆盖的都落盘了：按内容时长");
+        drop((file_tap, tap));
     }
 
     /// 四条场次路由的要求都由策略层按路由表给出：只读接口要 `file.view`、回看流要 `preview.view`，
