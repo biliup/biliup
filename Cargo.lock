@@ -534,21 +534,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bit-set"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08807e080ed7f9d5433fa9b275196cfc35414f66a0c79d864dc51a0d825231a3"
-dependencies = [
- "bit-vec",
-]
-
-[[package]]
-name = "bit-vec"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
-
-[[package]]
 name = "bit_field"
 version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1407,17 +1392,6 @@ dependencies = [
  "rayon-core",
  "smallvec",
  "zune-inflate",
-]
-
-[[package]]
-name = "fancy-regex"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72cf461f865c862bb7dc573f643dd6a2b6842f7c30b07882b56bd148cc2761b8"
-dependencies = [
- "bit-set",
- "regex-automata",
- "regex-syntax",
 ]
 
 [[package]]
@@ -4437,37 +4411,24 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 name = "stream-gears"
 version = "1.2.8"
 dependencies = [
- "async-channel",
  "async-trait",
  "axum",
  "biliup",
  "biliup-cli",
  "bon",
- "bytes",
- "chrono",
  "clap",
  "danmaku",
  "error-stack",
- "fancy-regex",
- "futures",
- "mime_guess",
  "nom 8.0.0",
- "ormlite",
  "pyo3",
  "pyo3-build-config",
  "pythonize",
- "rust-embed",
- "serde",
  "serde_json",
- "sqlx",
- "thiserror 2.0.18",
  "time",
  "tokio",
- "tower-http",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "url",
 ]
 
 [[package]]

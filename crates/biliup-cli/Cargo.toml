@@ -78,9 +78,5 @@ struct-patch = "0.10.4"
 shellexpand = "3.1"
 dirs = "6.0"
 
-[features]
-default = []
-python-bridge = []
-
 [dev-dependencies]
 m3u8-rs = "6"
