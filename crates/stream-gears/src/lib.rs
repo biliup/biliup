@@ -11,6 +11,7 @@ use axum::http::HeaderMap;
 use biliup::credential::Credential;
 use biliup::downloader::util::{CallbackFn, LifecycleFile, Segmentable};
 use biliup::downloader::{hls, httpflv};
+use biliup::uploader::credential::save_login_info;
 use pyo3::types::{PyList, PyMapping};
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -330,15 +331,22 @@ fn send_sms(
     })
 }
 
-/// 成功时返回 `True`，并把登录信息写入当前目录的 `cookies.json`。
+/// 成功时返回 `True`，并把登录信息写入 `file`（默认当前目录的 `cookies.json`）。
 /// 登录失败抛 `StreamGearsError`（消息里带原因），`ret` 不是合法 JSON 时抛 `ValueError`。
 #[pyfunction]
-#[pyo3(signature = (code, ret, proxy=None))]
-fn login_by_sms(py: Python<'_>, code: u32, ret: String, proxy: Option<String>) -> PyResult<bool> {
+#[pyo3(signature = (code, ret, proxy=None, file=PathBuf::from("cookies.json")))]
+#[pyo3(text_signature = "(code, ret, proxy=None, file='cookies.json')")]
+fn login_by_sms(
+    py: Python<'_>,
+    code: u32,
+    ret: String,
+    proxy: Option<String>,
+    file: PathBuf,
+) -> PyResult<bool> {
     let ret = parse_json_arg("ret", &ret)?;
     py.detach(|| {
         new_runtime()?
-            .block_on(login::login_by_sms(code, ret, proxy.as_deref()))
+            .block_on(login::login_by_sms(code, ret, proxy.as_deref(), &file))
             .map_err(stream_gears_err)
     })
 }
@@ -354,25 +362,38 @@ fn get_qrcode(py: Python<'_>, proxy: Option<String>) -> PyResult<String> {
     })
 }
 
+/// 返回登录信息的 JSON 字符串；给了 `file` 时同时写入该文件。
 #[pyfunction]
-#[pyo3(signature = (ret, proxy=None))]
-fn login_by_qrcode(py: Python<'_>, ret: String, proxy: Option<String>) -> PyResult<String> {
+#[pyo3(signature = (ret, proxy=None, file=None))]
+fn login_by_qrcode(
+    py: Python<'_>,
+    ret: String,
+    proxy: Option<String>,
+    file: Option<PathBuf>,
+) -> PyResult<String> {
     let ret = parse_json_arg("ret", &ret)?;
     py.detach(|| {
-        let info = new_runtime()?
+        let rt = new_runtime()?;
+        let info = rt
             .block_on(Credential::new(proxy.as_deref()).login_by_qrcode(ret))
             .map_err(stream_gears_err)?;
+        if let Some(file) = &file {
+            rt.block_on(save_login_info(file, &info))
+                .map_err(stream_gears_err)?;
+        }
         serde_json::to_string_pretty(&info).map_err(stream_gears_err)
     })
 }
 
 #[pyfunction]
-#[pyo3(signature = (sess_data, bili_jct, proxy=None))]
+#[pyo3(signature = (sess_data, bili_jct, proxy=None, file=PathBuf::from("cookies.json")))]
+#[pyo3(text_signature = "(sess_data, bili_jct, proxy=None, file='cookies.json')")]
 fn login_by_web_cookies(
     py: Python<'_>,
     sess_data: String,
     bili_jct: String,
     proxy: Option<String>,
+    file: PathBuf,
 ) -> PyResult<bool> {
     py.detach(|| {
         new_runtime()?
@@ -380,18 +401,21 @@ fn login_by_web_cookies(
                 &sess_data,
                 &bili_jct,
                 proxy.as_deref(),
+                &file,
             ))
             .map_err(stream_gears_err)
     })
 }
 
 #[pyfunction]
-#[pyo3(signature = (sess_data, dede_user_id, proxy=None))]
+#[pyo3(signature = (sess_data, dede_user_id, proxy=None, file=PathBuf::from("cookies.json")))]
+#[pyo3(text_signature = "(sess_data, dede_user_id, proxy=None, file='cookies.json')")]
 fn login_by_web_qrcode(
     py: Python<'_>,
     sess_data: String,
     dede_user_id: String,
     proxy: Option<String>,
+    file: PathBuf,
 ) -> PyResult<bool> {
     py.detach(|| {
         new_runtime()?
@@ -399,6 +423,7 @@ fn login_by_web_qrcode(
                 &sess_data,
                 &dede_user_id,
                 proxy.as_deref(),
+                &file,
             ))
             .map_err(stream_gears_err)
     })

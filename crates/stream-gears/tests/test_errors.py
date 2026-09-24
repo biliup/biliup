@@ -266,3 +266,28 @@ def test_login_by_cookies_missing_file(tmp_path):
         lambda: stream_gears.login_by_cookies(str(tmp_path / "no-such-cookies.json"))
     )
     assert "no-such-cookies.json" in str(e) or "No such file" in str(e)
+
+
+@pytest.mark.parametrize("name", ["login_by_sms", "login_by_web_cookies", "login_by_web_qrcode"])
+def test_login_file_defaults_to_cookies_json(name):
+    params = inspect.signature(getattr(stream_gears, name)).parameters
+    assert params["file"].default == "cookies.json"
+
+
+def test_login_by_qrcode_file_is_optional():
+    params = inspect.signature(stream_gears.login_by_qrcode).parameters
+    assert params["file"].default is None
+
+
+def test_login_by_sms_failure_does_not_write_file(tmp_path, closed_port):
+    target = tmp_path / "sub" / "my-cookies.json"
+    assert_stream_gears_error(
+        lambda: stream_gears.login_by_sms(
+            123456,
+            '{"captcha_key": "x", "tel": "13800000000", "cid": 86}',
+            proxy=f"http://127.0.0.1:{closed_port}",
+            file=target,
+        )
+    )
+    assert not target.exists()
+    assert not (tmp_path / "cookies.json").exists()
