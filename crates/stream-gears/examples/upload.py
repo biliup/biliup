@@ -1,12 +1,15 @@
 """
-stream_gears 上传功能测试
+stream_gears 上传示例
 
-这个测试文件展示了如何使用 stream_gears.upload() 函数的各种功能：
+这个示例展示了如何使用 stream_gears.upload() 函数的各种功能：
 1. 基础上传 - 使用关键字参数让代码更清晰
 2. 多文件上传 - 上传多P视频
 3. 定时发布 - 设置未来时间发布
 4. 高级功能 - 使用富文本简介和额外字段
 5. 最小参数 - 只使用必需参数，其他使用默认值
+
+用法：python upload.py 视频1 [视频2 ...]
+cookie 文件默认 cookies.json，可用环境变量 BILIUP_COOKIE_FILE 指定。
 
 注意：运行前请确保：
 - 存在有效的 cookies.json 文件
@@ -14,14 +17,20 @@ stream_gears 上传功能测试
 - 网络连接正常
 """
 
+import os
+import sys
+
 import stream_gears
 from typing import List, Dict, Any
 
-video_path = ["E:\\Projects\\biliup\\target\\x86_64-pc-windows-msvc\\debug\\test.flv"]
-cookie_file = "E:\\Projects\\biliup\\target\\x86_64-pc-windows-msvc\\debug\\cookies.json"
+video_path = sys.argv[1:]
+cookie_file = os.environ.get("BILIUP_COOKIE_FILE", "cookies.json")
 # submit_api = "BCutAndroid"
 
 if __name__ == '__main__':
+    if not video_path:
+        sys.exit(__doc__)
+
     # full kwargs 上传测试
     # stream_gears.upload(
     #     video_path=["examples/test.mp4"],
@@ -70,7 +79,7 @@ if __name__ == '__main__':
                 desc = desc.replace(
                     "@credit", "@" + credit["username"] + "  ", 1)
                 desc_v2_tmp = desc_v2_tmp[num + 7:]
-            except IndexError:
+            except ValueError:
                 print('简介中的@credit占位符少于credits的数量,替换失败')
         desc_v2.append({
             "raw_text": str(desc_v2_tmp),

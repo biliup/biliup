@@ -60,6 +60,12 @@ jobs:
           args: --release --out dist
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
           manylinux: ${{ matrix.platform.target == 'aarch64' && '2_28' || 'auto' }}
+      - name: Smoke test wheel
+        if: matrix.platform.target == 'x86_64'
+        run: |
+          python -m venv /tmp/smoke-venv
+          /tmp/smoke-venv/bin/pip install dist/biliup-*-abi3-*.whl pytest
+          /tmp/smoke-venv/bin/pytest crates/stream-gears/tests -v
       - name: Build free-threaded wheels
         uses: PyO3/maturin-action@v1
         with:
