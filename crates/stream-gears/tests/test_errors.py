@@ -32,6 +32,11 @@ ROUTES = {
     "/header-only.flv": FLV_HEADER,
     # A tag header needs 11 bytes; the stream ends after 5.
     "/truncated.flv": FLV_HEADER + b"\x09\x00\x00\x10\x00",
+    # A complete script tag whose 3-byte body is not valid AMF data.
+    "/bad-script.flv": FLV_HEADER
+    + b"\x12\x00\x00\x03\x00\x00\x00\x00\x00\x00\x00"
+    + b"\x02\x00\x00"
+    + b"\x00\x00\x00\x0e",
     "/not-a-stream": b"<html><body>hello</body></html>",
 }
 
@@ -133,6 +138,11 @@ def test_download_empty_response(server, tmp_path):
 
 def test_download_truncated_flv(server, tmp_path):
     assert_stream_gears_error(lambda: download(f"{server}/truncated.flv", tmp_path))
+
+
+def test_download_malformed_flv_tag(server, tmp_path):
+    e = assert_stream_gears_error(lambda: download(f"{server}/bad-script.flv", tmp_path))
+    assert "script tag" in str(e)
 
 
 def test_download_hls_error(server, tmp_path):

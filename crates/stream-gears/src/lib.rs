@@ -14,6 +14,7 @@ use biliup::downloader::{hls, httpflv};
 use pyo3::types::{PyList, PyMapping};
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::panic::{self, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -260,14 +261,29 @@ fn download_with_callback(
 
         let collector = formatting_layer.with(file_layer);
         tracing::subscriber::with_default(collector, || -> PyResult<()> {
-            new_runtime()?.block_on(download_with_hook(
-                url,
-                map,
-                file_name,
-                segmentable,
-                file_name_hook.unwrap_or(Box::new(|_| {})),
-                proxy.as_deref(),
-            ))
+            let rt = new_runtime()?;
+            // `httpflv::parse_flv` 遇到畸形的 tag 数据仍会 `expect` panic；不在这里拦下，
+            // Python 侧收到的是 `except Exception` 接不住的 PanicException。
+            panic::catch_unwind(AssertUnwindSafe(|| {
+                rt.block_on(download_with_hook(
+                    url,
+                    map,
+                    file_name,
+                    segmentable,
+                    file_name_hook.unwrap_or(Box::new(|_| {})),
+                    proxy.as_deref(),
+                ))
+            }))
+            .unwrap_or_else(|payload| {
+                let reason = payload
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("unknown panic");
+                Err(StreamGearsError::new_err(format!(
+                    "download from {url} failed: {reason}"
+                )))
+            })
         })
     });
 
