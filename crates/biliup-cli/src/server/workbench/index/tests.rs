@@ -291,7 +291,7 @@ fn flv_keyframe_flag_on_a_non_idr_slice_is_not_indexed() {
     let dir = tempfile::tempdir().unwrap();
     let mut flv = build_flv(0, 100, 25, None);
     let tags = video_tag_offsets(&flv);
-    // 虎牙：非 IDR 的 slice（NALU 类型 1）也被标成关键帧
+    // 虎牙：非 IDR 的 I 帧（NALU 类型 1）也被标成关键帧
     relabel_video_tag(&mut flv, tags[10], 0x17, 0x41);
     let path = write(dir.path(), "a.flv", &flv.bytes);
     let index = refresh(&path, true).unwrap();
@@ -322,10 +322,12 @@ fn flv_hevc_keyframes_need_an_irap_nalu() {
 /// 每个非序列头视频 tag 的偏移，按帧序。
 fn video_tag_offsets(flv: &Flv) -> Vec<u64> {
     let mut offsets = Vec::new();
-    let mut offset = 13 + 11 + u32::from_be_bytes([0, flv.bytes[14], flv.bytes[15], flv.bytes[16]]) as u64 + 4;
+    let mut offset =
+        13 + 11 + u32::from_be_bytes([0, flv.bytes[14], flv.bytes[15], flv.bytes[16]]) as u64 + 4;
     while (offset as usize) < flv.bytes.len() {
         let at = offset as usize;
-        let size = u32::from_be_bytes([0, flv.bytes[at + 1], flv.bytes[at + 2], flv.bytes[at + 3]]) as u64;
+        let size =
+            u32::from_be_bytes([0, flv.bytes[at + 1], flv.bytes[at + 2], flv.bytes[at + 3]]) as u64;
         if flv.bytes[at] == TAG_VIDEO && flv.bytes[at + 12] == 0x01 {
             offsets.push(offset);
         }

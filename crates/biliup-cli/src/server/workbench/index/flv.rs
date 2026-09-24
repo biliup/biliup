@@ -105,7 +105,8 @@ fn nalu_data_start(class: &TagClass, body: &[u8]) -> Option<usize> {
     }
 }
 
-/// tag 头标了关键帧，但有的源（虎牙）把非 IDR 的 slice 也标成关键帧，从那里起切解不出画面。
+/// tag 头标了关键帧，但有的源（虎牙）把非 IDR 的 I 帧也标成关键帧。它不是随机访问点：之后的帧
+/// 可以参考它之前的画面，ffmpeg / ffprobe 也不把它当关键帧，从那里起流拷贝切出来的开头不保证干净。
 /// 逐个看 NALU 类型：H.264 要有 IDR（5），H.265 要有 IRAP（16–23）。
 /// 按 4 字节 NALU 长度走；长度对不上（不是 4 字节长度的流）时沿用 tag 头的标记。
 fn has_random_access_nalu(
