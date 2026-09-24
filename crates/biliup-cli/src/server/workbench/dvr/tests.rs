@@ -219,6 +219,52 @@ async fn follows_the_segment_being_written_without_polling() {
     assert!(end.is_ok(), "录制结束后响应应当结束");
 }
 
+/// 下一段由索引任务边写边建：还没有关键帧时等索引缓存落盘的通知，不靠写盘计数器、不扫盘。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn joins_a_new_segment_when_its_streaming_index_is_saved() {
+    let (dir, pool, session) = setup().await;
+    let a = build_flv(0, 100, 25, None);
+    let a_path = write(&dir, "a.flv", &a.bytes);
+    add_segment(&pool, session, &a_path, 0, 0, Some(3965)).await;
+    let b = build_flv(17_000, 100, 25, None);
+    let head = b.keyframes[0].1 as usize;
+    let b_path = write(&dir, "b.flv", &b.bytes[..head]);
+    add_segment(&pool, session, &b_path, 3965, 0, None).await;
+    let _guard = live::register(session, 1, Some(ByteCounter::new()));
+    let tap = index::live::spawn();
+    let b_tap = tap.open(&b_path);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !index::live::is_live(&b_path) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    let mut stream = Box::pin(open(&pool, session, 0).await.unwrap().into_stream());
+    let mut received = Vec::new();
+    while let Ok(Some(chunk)) = next_within(&mut stream, 300).await {
+        received.extend_from_slice(&chunk.unwrap());
+    }
+    let video = flv_tags(&received).iter().filter(|t| t.0 == 9).count();
+    assert_eq!(video, 1 + 100, "第二段还没有关键帧，停在第一段末尾");
+
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&b_path)
+        .unwrap();
+    file.write_all(&b.bytes[head..]).unwrap();
+    index::live::tests::feed_flv_tags(&b_tap, &b.bytes);
+    while let Ok(Some(chunk)) = next_within(&mut stream, 1000).await {
+        received.extend_from_slice(&chunk.unwrap());
+    }
+    let tags = flv_tags(&received);
+    let video: Vec<u32> = tags.iter().filter(|t| t.0 == 9).map(|t| t.1).collect();
+    assert_eq!(video.len(), 1 + 200, "索引落盘后接上第二段");
+    assert!(video[1..].windows(2).all(|w| w[1] > w[0]));
+    drop((b_tap, tap));
+}
+
 #[test]
 fn empty_wakes_back_off_to_a_cap() {
     let steps: Vec<u64> = (0..8).map(empty_wake_step).collect();

@@ -6,6 +6,8 @@
 //! 3. 读到分段末尾接下一段：解码器配置（FLV 序列头 / TS 的 PMT 与参数集）不变、中间没有断流
 //!    缺口就接上；接不上就结束响应，播放器从下一段的起点重开；
 //! 4. 读到还在写的分段就等通知（写盘计数器增长、分段表变更，见 [`super::live`]），不轮询；
+//!    下一段刚开、还没有关键帧时，边写边建索引的分段等索引缓存更新（[`index::live::updates`]），
+//!    其余的等写盘计数器涨一截再按需扫盘；
 //! 5. 回看已经写完的内容时不一口气全推给浏览器：最多领先实际时间 [`READ_AHEAD_MS`]，之后按 1 倍速发。
 //!
 //! 只接受场次 id 和场次时间，文件路径全部来自 `segments` 表。
@@ -13,7 +15,7 @@
 mod flv;
 mod ts;
 
-use super::index::Container;
+use super::index::{self, Container};
 use super::live::{self, LiveWatch};
 use super::store::{self, SegmentRow, SegmentState};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
@@ -36,7 +38,7 @@ const READ_CHUNK: usize = 256 * 1024;
 /// 相邻两个单元的时间差超过这么多时按这么多记（源时间戳跳变不能让发送节奏停下来）。
 const MAX_CLOCK_STEP_MS: i64 = 1000;
 const DEFAULT_FRAME_MS: i64 = 33;
-/// 等下一段出现第一个关键帧时，写盘计数器每增长这么多才重新看一次索引。
+/// 等没有边写边建索引的下一段出现第一个关键帧时，写盘计数器每增长这么多才重新扫一次盘。
 const NEXT_SEGMENT_PROBE_BYTES: u64 = 256 * 1024;
 const TS_PARAM_SNIFF: usize = 256 * 1024;
 /// 写盘计数器在数据进入写盘缓冲之前就累加（mesio 在修复管线之前逐 tag 计数，落盘却是成块的）。
@@ -175,6 +177,7 @@ struct Stats {
     byte_wakes: u64,
     empty_wakes: u64,
     change_wakes: u64,
+    index_wakes: u64,
     paced: u64,
 }
 
@@ -432,6 +435,27 @@ impl Dvr {
         true
     }
 
+    /// 等流式索引更新一次（或分段表变更）。索引任务在录制结束、放弃跟踪时也会通知，不会一直等。
+    async fn wait_for_index(&mut self, updates: &mut tokio::sync::watch::Receiver<u64>) {
+        if self.live.is_none() {
+            self.live = live::watch(self.session_id);
+        }
+        self.stats.index_wakes += 1;
+        match self.live.as_mut() {
+            Some(live) => tokio::select! {
+                _ = updates.changed() => {}
+                changed = live.changes.changed() => {
+                    if changed.is_err() {
+                        self.live = None;
+                    }
+                }
+            },
+            None => {
+                let _ = updates.changed().await;
+            }
+        }
+    }
+
     async fn at_end_of_file(&mut self) -> io::Result<Step> {
         if self.cursor.row_stale {
             self.cursor.row_stale = false;
@@ -504,11 +528,16 @@ impl Dvr {
         if Container::from_path(Path::new(&next.path)) != Some(self.container) {
             return Ok(Step::End("下一段容器不同"));
         }
+        let mut index_updates = index::live::updates();
         let index = super::segment_index(&next).await?;
         let (Some(base), Some(first)) = (index.base_ts, index.keyframes.first().copied()) else {
             // 下一段刚开，还没写到第一个关键帧
             if next.state != SegmentState::Recording {
                 return Ok(Step::End("下一段没有关键帧"));
+            }
+            if index::live::is_live(Path::new(&next.path)) {
+                self.wait_for_index(&mut index_updates).await;
+                return Ok(Step::Continue);
             }
             let start = self.seen;
             loop {
@@ -584,6 +613,7 @@ impl Drop for Dvr {
             byte_wakes = self.stats.byte_wakes,
             empty_wakes = self.stats.empty_wakes,
             change_wakes = self.stats.change_wakes,
+            index_wakes = self.stats.index_wakes,
             paced = self.stats.paced,
             secs = self.started.elapsed().as_secs(),
             "DVR 回看连接结束"

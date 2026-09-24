@@ -19,7 +19,7 @@ use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tracing::{debug, info};
 
 /// 写入端到索引任务的事件队列长度。FLV 每个 tag 一个事件，一路 8 Mbps 的流每秒约百来个。
@@ -35,6 +35,18 @@ const SCAN_STEP: u64 = 64 * 1024;
 const FLV_FIRST_TAG: u64 = 13;
 
 static LIVE: LazyLock<Mutex<HashSet<PathBuf>>> = LazyLock::new(Mutex::default);
+static UPDATES: LazyLock<watch::Sender<u64>> = LazyLock::new(|| watch::channel(0).0);
+
+/// 流式索引的进展：任一分段的 `.idx` 缓存落了一次盘，或某个分段不再边写边建（之后查询改走
+/// 扫盘）时变一次。录制中的读取方等一个分段出现新关键帧时订阅它，醒来再读缓存，不扫盘。
+/// 所有分段共用一个，醒来的读取方自己看它关心的那个分段。
+pub fn updates() -> watch::Receiver<u64> {
+    UPDATES.subscribe()
+}
+
+fn updated() {
+    UPDATES.send_modify(|n| *n = n.wrapping_add(1));
+}
 
 /// `path` 正由某个索引任务边写边建索引，它的 `.idx` 缓存就是最新的，不用扫盘。
 pub fn is_live(path: &Path) -> bool {
@@ -47,6 +59,7 @@ fn register(path: &Path) {
 
 fn unregister(path: &Path) {
     LIVE.lock().unwrap().remove(path);
+    updated();
 }
 
 /// 起一个索引任务（阻塞线程池里的一个线程），返回写入端用的句柄。
@@ -207,6 +220,7 @@ impl LiveFile {
         }
         self.last_save = Some(Instant::now());
         self.saved_upto = self.index.scanned_upto;
+        updated();
     }
 
     /// 录制中定时落盘：第一个关键帧出现后立即存一次，之后每 [`SAVE_INTERVAL`] 最多一次。
@@ -398,4 +412,4 @@ impl Indexer {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
