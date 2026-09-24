@@ -280,11 +280,8 @@ fn pipeline_config(download_config: &DownloadConfig) -> PipelineConfig {
     let mut builder = PipelineConfig::builder()
         .max_file_size(download_config.file_size.unwrap_or(0))
         .channel_size(CHANNEL_SIZE);
-    if let Some(segment) = download_config.segment_duration() {
-        let secs = downloader::parse_duration(&segment);
-        if secs > 0 {
-            builder = builder.max_duration(Duration::from_secs(secs));
-        }
+    if let Some(limit) = download_config.segment_time_limit() {
+        builder = builder.max_duration(limit);
     }
     builder.build()
 }
@@ -558,6 +555,13 @@ mod tests {
         let unlimited = pipeline_config(&DownloadConfig::default());
         assert_eq!(unlimited.max_file_size, 0);
         assert_eq!(unlimited.max_duration, None);
+
+        // 与 stream-gears 同一套解析：纯秒数不再被静默当成不分段
+        let seconds = pipeline_config(&DownloadConfig {
+            segment_time: Some("3600".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(seconds.max_duration, Some(Duration::from_secs(3600)));
     }
 
     /// 端到端：本地 HTTP 服务吐一段真实 FLV 录像，走完整的引擎拉流 → 修复管线 → 落盘，

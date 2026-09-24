@@ -1,5 +1,4 @@
 use crate::server::common::construct_headers;
-use crate::server::common::util::parse_time;
 use crate::server::core::downloader::{DownloadConfig, DownloadStatus, SegmentEvent, SegmentInfo};
 use crate::server::errors::{AppError, AppResult};
 use biliup::client::StatelessClient;
@@ -52,10 +51,7 @@ impl StreamGears {
         let proxy = self.proxy.clone();
         let segment = Segmentable::new(
             // 快到录制时间范围结束时会被裁短，使录制停在窗口边界
-            download_config
-                .segment_duration()
-                .as_deref()
-                .map(parse_time),
+            download_config.segment_time_limit(),
             download_config.file_size,
         );
 

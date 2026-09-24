@@ -12,7 +12,7 @@ pub mod ws_expire;
 pub mod ytdlp;
 
 use crate::server::common::timerange;
-use crate::server::common::util::Recorder;
+use crate::server::common::util::{Recorder, parse_segment_time};
 use crate::server::core::downloader::ffmpeg_downloader::FfmpegDownloader;
 use crate::server::core::downloader::mesio::Mesio;
 use crate::server::core::downloader::stream_gears::StreamGears;
@@ -86,6 +86,23 @@ impl DownloadConfig {
     /// 因此必须用这个方法而不是直接读 [`Self::segment_time`]。
     pub fn segment_duration(&self) -> Option<String> {
         timerange::clamp_segment_time(self.segment_time.as_deref(), self.time_range.as_deref())
+    }
+
+    /// 进程内下载器（stream-gears、mesio）按时长分段的上限，已按录制时间范围裁短。
+    /// 未配置或为 0 时不按时长分段；无法解析时同样不分段，但打 warn 说明原因。
+    pub fn segment_time_limit(&self) -> Option<std::time::Duration> {
+        let raw = self.segment_duration()?;
+        match parse_segment_time(&raw) {
+            Some(limit) if !limit.is_zero() => Some(limit),
+            Some(_) => None,
+            None => {
+                warn!(
+                    segment_time = raw,
+                    "segment_time 无法解析（支持 HH:MM:SS、MM:SS 或秒数），本次录制不按时长分段"
+                );
+                None
+            }
+        }
     }
 
     /// 距录制时间范围结束还剩多久（`"HH:MM:SS"`）；未配置录制时间范围时为 `None`。
@@ -397,6 +414,24 @@ mod tests {
         );
         let gears = DownloaderRuntime::from_type(DownloaderType::StreamGears);
         assert!(matches!(gears, DownloaderRuntime::StreamGears(_)));
+    }
+
+    #[test]
+    fn segment_time_limit_is_shared_by_the_in_process_downloaders() {
+        let limit = |segment_time: &str| {
+            DownloadConfig {
+                segment_time: Some(segment_time.to_string()),
+                ..Default::default()
+            }
+            .segment_time_limit()
+        };
+        let secs = |s| Some(std::time::Duration::from_secs(s));
+        assert_eq!(limit("01:00:00"), secs(3600));
+        assert_eq!(limit("30:00"), secs(1800));
+        assert_eq!(limit("3600"), secs(3600));
+        assert_eq!(limit("00:00:00"), None);
+        assert_eq!(limit("abc"), None);
+        assert_eq!(DownloadConfig::default().segment_time_limit(), None);
     }
 
     #[test]

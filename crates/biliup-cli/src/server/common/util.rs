@@ -240,22 +240,75 @@ pub fn media_ext_from_url(input: &str) -> Option<String> {
     None
 }
 
-pub fn parse_time(segment_time: &str) -> std::time::Duration {
-    let parts: Vec<&str> = segment_time.split(':').collect();
-    let h = parts[0].parse::<i32>().unwrap_or(1);
-    let m = parts[1].parse::<i32>().unwrap_or(0);
-    let s = parts[2].parse::<i32>().unwrap_or(0);
-    std::time::Duration::from_secs((h * 3600 + m * 60 + s) as u64)
+/// 解析 `segment_time`，语法与 ffmpeg 的时长参数一致（ffmpeg 下载器把原字符串直接交给 `-to`）：
+/// `[HH:]MM:SS[.小数]` 或纯秒数 `S[.小数]`，例如 `"01:00:00"`、`"30:00"`（30 分钟）、`"3600"`。
+/// 带冒号时分、秒必须小于 60。无法解析时返回 `None`。
+pub fn parse_segment_time(raw: &str) -> Option<std::time::Duration> {
+    let parts: Vec<&str> = raw.trim().split(':').collect();
+    let (hours, minutes, seconds) = match parts.as_slice() {
+        [seconds] => ("0", "0", *seconds),
+        [minutes, seconds] => ("0", *minutes, *seconds),
+        [hours, minutes, seconds] => (*hours, *minutes, *seconds),
+        _ => return None,
+    };
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let seconds_ok = seconds
+        .split_once('.')
+        .map_or(digits(seconds), |(whole, frac)| {
+            digits(whole) && (frac.is_empty() || digits(frac))
+        });
+    if !digits(hours) || !digits(minutes) || !seconds_ok {
+        return None;
+    }
+    let hours: u64 = hours.parse().ok()?;
+    let minutes: u64 = minutes.parse().ok()?;
+    let seconds: f64 = seconds.parse().ok()?;
+    if parts.len() > 1 && (minutes >= 60 || seconds >= 60.0) {
+        return None;
+    }
+    let whole = hours.checked_mul(3600)?.checked_add(minutes * 60)?;
+    std::time::Duration::try_from_secs_f64(whole as f64 + seconds).ok()
 }
 
 #[cfg(test)]
 mod tests {
     use crate::server::common::util::{
-        Recorder, media_ext_from_url, path_with_suffix, redact_secrets,
+        Recorder, media_ext_from_url, parse_segment_time, path_with_suffix, redact_secrets,
     };
     use crate::server::infrastructure::models::StreamerInfo;
     use chrono::Utc;
     use std::path::PathBuf;
+
+    /// 与 ffmpeg `-to` 接受的时长写法一致（ffmpeg 下载器把原字符串直接交给它）
+    #[test]
+    fn segment_time_accepts_what_ffmpeg_accepts() {
+        use std::time::Duration;
+        let secs = |s: u64| Some(Duration::from_secs(s));
+        assert_eq!(parse_segment_time("01:00:00"), secs(3600));
+        assert_eq!(parse_segment_time("1:2:3"), secs(3723));
+        assert_eq!(parse_segment_time("100:00:00"), secs(360_000));
+        assert_eq!(parse_segment_time("30:00"), secs(1800));
+        assert_eq!(parse_segment_time("3600"), secs(3600));
+        assert_eq!(parse_segment_time(" 01:00:00 "), secs(3600));
+        assert_eq!(parse_segment_time("1.5"), Some(Duration::from_millis(1500)));
+        assert_eq!(parse_segment_time("00:00:00"), secs(0));
+        for invalid in [
+            "",
+            "abc",
+            "90:00",
+            "1:70:00",
+            "01:00:60",
+            "01:00:00:00",
+            "-1:00:00",
+            "1h",
+            "inf",
+            "NaN",
+            "+5",
+            "1e3",
+        ] {
+            assert_eq!(parse_segment_time(invalid), None, "{invalid:?}");
+        }
+    }
 
     #[test]
     fn path_with_suffix_keeps_dots_in_basename() {
