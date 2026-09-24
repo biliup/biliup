@@ -20,6 +20,7 @@ import { useDanmakuFeed } from '@/app/lib/danmaku-feed'
 import { LivePreviewPlayer, useLatencyProfile } from './LivePreview'
 import { type LatencyProfile, RELAY_PROFILES, RELAY_PROFILES_SEGMENTED } from '@/app/lib/live-buffer'
 import { LiveRateChart, SPARK_RATE_WINDOW_MS } from './LiveRateChart'
+import { MarkerCount } from './MarkerControls'
 import styles from './live-monitor.module.scss'
 
 /**
@@ -245,6 +246,7 @@ export default function LiveMonitor() {
                     {previewFormatLabel(s.preview?.format)}
                   </Tag>
                 ) : null}
+                <MarkerCount count={s.marker_count} compact />
                 <span className={styles.tileRate}>{rate ?? '—'}</span>
                 {playing ? (
                   <Tooltip content="停止这一路">

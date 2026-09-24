@@ -29,6 +29,7 @@ import {
   type StallInfo,
 } from '@/app/lib/live-buffer'
 import { LiveRateChart, LiveRateSummary, MODAL_RATE_WINDOW_MS } from './LiveRateChart'
+import { LiveMarkBar } from './MarkerControls'
 import styles from './live-preview.module.scss'
 
 const Players = dynamic(() => import('@/app/ui/Player'), { ssr: false })
@@ -394,6 +395,7 @@ export function LivePreviewModal({
   const transport = usePreviewTransport()
   const [latency, setLatency] = useLatencyProfile()
   const notifiedRef = useRef(false)
+  const playerRootRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!visible) notifiedRef.current = false
   }, [visible])
@@ -473,9 +475,12 @@ export function LivePreviewModal({
       }
     >
       {/* 弹层关闭即卸载：不留后台连接 */}
-      {visible ? (
-        <LivePreviewPlayer streamer={streamer} danmakuFeed={danmakuOn ? danmakuFeed : null} onFatal={handleFatal} />
-      ) : null}
+      <div ref={playerRootRef}>
+        {visible ? (
+          <LivePreviewPlayer streamer={streamer} danmakuFeed={danmakuOn ? danmakuFeed : null} onFatal={handleFatal} />
+        ) : null}
+      </div>
+      <LiveMarkBar streamer={streamer} playerRoot={playerRootRef} active={visible} />
       {/* 写盘速率折线：每秒轮询瘦端点 /v1/live-rates，最近 3 分钟；折叠时不轮询、不加载 uPlot */}
       <section className={styles.rateSection} data-open={chartOpen ? 'true' : 'false'}>
         <button

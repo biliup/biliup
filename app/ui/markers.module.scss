@@ -1,0 +1,124 @@
+/* 切片工作台的标记：预览弹层的标记条、标记后的 Toast、卡片 / 监视器上的本场标记数 */
+
+/* ===== 弹层播放器下方的标记条 ===== */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--semi-color-border);
+}
+
+.markBtn {
+  flex-shrink: 0;
+}
+
+.kbd {
+  margin-left: 8px;
+  padding: 0 5px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  opacity: 0.9;
+}
+
+.hint {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.barCount {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: 12.5px;
+  color: var(--semi-color-warning);
+  white-space: nowrap;
+}
+
+/* disabled 的按钮不响应鼠标，包一层让 Tooltip 仍能弹出 */
+.disabledWrap {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.disabledWrap :global(.semi-button) {
+  pointer-events: none;
+}
+
+/* 手机：一整行的大按钮，好按；没有键盘，不显示快捷键 */
+@media (max-width: 600px) {
+  .bar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .disabledWrap,
+  .markBtn {
+    width: 100%;
+  }
+  .markBtn:global(.semi-button) {
+    height: 48px;
+    font-size: 16px;
+  }
+  .kbd {
+    display: none;
+  }
+  .hint {
+    flex-basis: 100%;
+  }
+}
+
+/* ===== 标记后的 Toast ===== */
+.toast {
+  min-width: 0;
+  max-width: min(460px, 86vw);
+}
+.toastRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.toastText {
+  line-height: 24px;
+}
+.toastLabel {
+  color: var(--semi-color-text-1);
+  word-break: break-all;
+}
+.toastActions {
+  display: inline-flex;
+  margin-left: auto;
+}
+.toastInput {
+  width: min(240px, 60vw);
+}
+.toastNote {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--semi-color-danger);
+}
+
+/* ===== 卡片 / 监视器小窗上的本场标记数 ===== */
+.count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--semi-color-warning);
+  background: var(--semi-color-warning-light-default);
+  white-space: nowrap;
+}
+.count[data-compact] {
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 5px;
+}
