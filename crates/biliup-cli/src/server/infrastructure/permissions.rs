@@ -161,6 +161,8 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         "/v1/uploads" if method == Method::POST => UploadSubmit,
         "/v1/videos" if get => FileView,
         "/v1/status" if get => StreamerView,
+        // 三个角色都有 StreamerView，等于登录即可
+        "/v1/tools" if get => StreamerView,
         "/v1/ws/logs" if get => LogView,
         "/static/{path}" if get => {
             let name = raw_path.rsplit('/').next().unwrap_or_default();

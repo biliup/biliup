@@ -4,7 +4,7 @@ use crate::server::api::bilibili_endpoints::{
 use crate::server::api::endpoints::{
     add_upload_streamer_endpoint, add_user_endpoint, delete_streamers_endpoint,
     delete_template_endpoint, delete_user_endpoint, get_configuration, get_qrcode, get_status,
-    get_streamer_info, get_streamer_info_files, get_streamers_endpoint,
+    get_streamer_info, get_streamer_info_files, get_streamers_endpoint, get_tools,
     get_upload_streamer_endpoint, get_upload_streamers_endpoint, get_users_endpoint, get_videos,
     login_by_qrcode, pause_streamers_endpoint, post_streamers_endpoint, post_uploads,
     put_configuration, put_streamers_endpoint,
@@ -83,6 +83,7 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         // 视频文件管理路由
         .route("/v1/videos", get(get_videos)) // 获取视频列表
         .route("/v1/status", get(get_status))
+        .route("/v1/tools", get(get_tools)) // ffmpeg 是否可用、版本与许可
         .route("/v1/uploads", post(post_uploads))
         .route("/static/{path}", get(using_serve_file_from_a_route))
         .with_state(service_register) // 注入服务注册器状态

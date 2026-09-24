@@ -208,6 +208,7 @@ mod tests {
         ("POST", "/v1/login_by_qrcode"),
         ("GET", "/v1/videos"),
         ("GET", "/v1/status"),
+        ("GET", "/v1/tools"),
         ("POST", "/v1/uploads"),
         ("GET", "/static/ds_update.log"),
         ("GET", "/static/a.flv"),
@@ -241,6 +242,7 @@ mod tests {
             | ("GET", "/v1/upload/streamers/1")
             | ("GET", "/v1/videos")
             | ("GET", "/v1/status")
+            | ("GET", "/v1/tools")
             | ("GET", "/static/ds_update.log")
             | ("GET", "/static/a.flv")
             | ("GET", "/v1/ws/logs") => view,
@@ -294,6 +296,7 @@ mod tests {
             .route("/v1/login_by_qrcode", post(|| async { StatusCode::OK }))
             .route("/v1/videos", ok())
             .route("/v1/status", ok())
+            .route("/v1/tools", ok())
             .route("/v1/uploads", post(|| async { StatusCode::OK }))
             .route("/static/{path}", ok())
             .route("/v1/ws/logs", ok())

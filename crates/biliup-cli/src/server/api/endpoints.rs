@@ -718,6 +718,11 @@ pub async fn get_videos() -> Result<Json<Vec<serde_json::Value>>, Response> {
     Ok(Json(file_list))
 }
 
+/// 外部工具是否可用（目前只有 ffmpeg），前端据此决定依赖 ffmpeg 的功能能否使用。
+pub async fn get_tools() -> Json<serde_json::Value> {
+    Json(json!({ "ffmpeg": crate::tools::ffmpeg_status().await }))
+}
+
 // #[axum::debug_handler(state = ServiceRegister)]
 pub async fn get_status(
     caller: Caller,
