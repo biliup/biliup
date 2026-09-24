@@ -160,7 +160,8 @@ pub async fn session_keyframes(
 ///
 /// - `recording` 分段：文件还在就按文件长度记为 `finished`，按索引扫出的时长（扫不出时用
 ///   文件修改时间）回填 `end_ms`，同时核对 / 截断 / 续扫索引缓存；文件没生成或是空的就删行；
-/// - 没有 `ended_at` 的场次：记为最后一个分段的结束时刻，没有分段的记为开播时间。
+/// - 没有 `ended_at` 的场次：记为最后一个分段文件的修改时间；文件不在了按时间轴上最后一个
+///   分段的结束位置算，没有分段的记为开播时间。
 pub async fn recover(pool: &ConnectionPool) -> Result<()> {
     let leftovers = store::segments_in_state(pool, SegmentState::Recording).await?;
     let mut started: HashMap<i64, i64> = HashMap::new();
@@ -181,7 +182,16 @@ pub async fn recover(pool: &ConnectionPool) -> Result<()> {
     for session_id in started.keys() {
         store::clear_started_at_if_empty(pool, *session_id).await?;
     }
-    let sessions = store::close_unended_sessions(pool).await?;
+    // 结束时间优先取最后一个分段文件的修改时间（最后一次写盘的墙钟）：时间轴按容器时长累加，
+    // 和墙钟能差出几秒到几分钟，用它算下一次接上时的断流会失真
+    let unended = store::unended_sessions(pool).await?;
+    let sessions = unended.len();
+    for (id, last_path) in unended {
+        if let Some(mtime) = last_path.as_deref().and_then(|p| modified_ms(Path::new(p))) {
+            store::close_session(pool, id, mtime).await?;
+        }
+    }
+    store::close_unended_sessions(pool).await?;
     if !leftovers.is_empty() || sessions > 0 {
         info!(
             segments = leftovers.len(),
@@ -232,11 +242,7 @@ async fn recover_segment(
             None
         }
     };
-    let mtime_ms = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as i64);
+    let mtime_ms = modified_ms(&path);
     let duration = match &scan {
         Ok(index) if index.duration_ms > 0 => index.duration_ms as i64,
         _ => mtime_ms.map_or(0, |m| m - started_at - segment.start_ms),
@@ -268,6 +274,14 @@ async fn recover_segment(
     )
     .await?;
     Ok(())
+}
+
+fn modified_ms(path: &Path) -> Option<i64> {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
 }
 
 #[cfg(test)]

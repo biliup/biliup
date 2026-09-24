@@ -521,8 +521,15 @@ async fn startup_recovery_finalizes_leftover_recording_segments() {
     let killed_id = store::insert_segment(&pool, opened.id, &s(&killed), "flv", 0, 0)
         .await
         .unwrap();
-    // 2. 录制中的 `.part` 已经被改名
+    // 2. 录制中的 `.part` 已经被改名；最后一次写盘在 started_at + 20 s
     let renamed = write_flv(dir.path(), "renamed.flv");
+    let last_write = started_at + 20_000;
+    std::fs::File::options()
+        .write(true)
+        .open(&renamed)
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_millis(last_write as u64))
+        .unwrap();
     let renamed_id = store::insert_segment(
         &pool,
         opened.id,
@@ -544,7 +551,35 @@ async fn startup_recovery_finalizes_leftover_recording_segments() {
     )
     .await
     .unwrap();
-    // 另一场（别的主播）一个分段都没有
+    // 另一场的分段文件已经被搬走：按时间轴算
+    let moved_id: i64 = sqlx::query_scalar(
+        "INSERT INTO stream_sessions (name, url, title, date, live_cover_path)
+         VALUES ('c', 'https://c', 't', '2026-09-24T08:00:00Z', '') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    store::set_started_at(&pool, moved_id, started_at)
+        .await
+        .unwrap();
+    let moved_seg = store::insert_segment(&pool, moved_id, "moved-away.flv", "flv", 0, 0)
+        .await
+        .unwrap();
+    store::finish_segment(
+        &pool,
+        moved_seg,
+        &store::FinishedSegment {
+            path: "moved-away.flv".into(),
+            state: SegmentState::Finished,
+            end_ms: 7000,
+            bytes: Some(1),
+            index_path: None,
+            danmaku_path: None,
+        },
+    )
+    .await
+    .unwrap();
+    // 再一场（别的主播）一个分段都没有
     let empty_date = "2026-09-24T08:00:00.123456789+00:00";
     let empty_id: i64 = sqlx::query_scalar(
         "INSERT INTO stream_sessions (name, url, title, date, live_cover_path)
@@ -584,11 +619,15 @@ async fn startup_recovery_finalizes_leftover_recording_segments() {
     );
 
     let all = sessions(&pool).await;
-    assert_eq!(all.len(), 2, "没有分段的场次也保留（直播历史里有它）");
-    let ended_at = started_at + 10_000 + FLV_DURATION_MS;
-    assert_eq!(all[0].2, Some(ended_at));
+    assert_eq!(all.len(), 3, "没有分段的场次也保留（直播历史里有它）");
+    let ended_at = last_write;
+    assert_eq!(all[0].2, Some(ended_at), "取最后一个分段文件的修改时间");
     assert_eq!(
         all[1],
+        (moved_id, Some(started_at), Some(started_at + 7000))
+    );
+    assert_eq!(
+        all[2],
         (
             empty_id,
             None,

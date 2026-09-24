@@ -239,8 +239,21 @@ pub async fn session(pool: &ConnectionPool, id: i64) -> sqlx::Result<Option<Sess
     })
 }
 
-/// 给还没有 `ended_at` 的场次（进程异常退出没来得及收尾）补上：有分段的记为最后一个分段
-/// 的结束时刻，没有的记为开播时间。返回补了几行。
+/// 还没有 `ended_at` 的场次（正在录，或进程异常退出没来得及收尾），带上时间轴上最后一个
+/// 分段的路径（没有分段为 `None`）。
+pub async fn unended_sessions(pool: &ConnectionPool) -> sqlx::Result<Vec<(i64, Option<String>)>> {
+    sqlx::query_as(
+        "SELECT s.id, (SELECT g.path FROM segments g
+                       WHERE g.session_id = s.id AND g.state IN ('recording', 'finished')
+                       ORDER BY g.start_ms DESC, g.id DESC LIMIT 1)
+         FROM stream_sessions s WHERE s.ended_at IS NULL",
+    )
+    .fetch_all(pool)
+    .await
+}
+
+/// 给还没有 `ended_at` 的场次补上：有分段的记为时间轴上最后一个分段的结束位置，没有的记为
+/// 开播时间。返回补了几行。
 pub async fn close_unended_sessions(pool: &ConnectionPool) -> sqlx::Result<u64> {
     let sql = format!(
         "UPDATE stream_sessions SET ended_at = COALESCE(
