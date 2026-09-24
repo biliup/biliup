@@ -4412,12 +4412,10 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 name = "stream-gears"
 version = "1.2.8"
 dependencies = [
- "async-trait",
  "axum",
  "biliup",
  "biliup-cli",
  "bon",
- "danmaku",
  "error-stack",
  "nom 8.0.0",
  "pyo3",
