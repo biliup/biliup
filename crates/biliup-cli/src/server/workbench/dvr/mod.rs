@@ -473,7 +473,7 @@ impl Dvr {
                 self.live = live::watch(self.session_id);
             }
             let Some(live) = self.live.as_mut() else {
-                return Ok(Step::End("场次已结束"));
+                return Ok(Step::End("没在录了，已回放到最新"));
             };
             self.stats.change_wakes += 1;
             if live.changes.changed().await.is_err() {
