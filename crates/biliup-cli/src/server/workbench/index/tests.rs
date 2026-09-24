@@ -65,7 +65,15 @@ fn on_metadata(keyframes: Option<(&[f64], &[f64])>) -> Vec<u8> {
     out
 }
 
+/// 4 字节长度 + NALU 头 + 填充，共 `len` 字节 NALU。
+fn avcc_nalu(out: &mut Vec<u8>, header: u8, len: usize) {
+    out.extend_from_slice(&(len as u32).to_be_bytes());
+    out.push(header);
+    out.extend(std::iter::repeat_n(0xAB, len - 1));
+}
+
 /// `frames` 个视频帧（每 `gop` 帧一个关键帧、间隔 40 ms，从 `base_ts` 开始），中间夹音频。
+/// 关键帧是 SEI + IDR slice，其余是非 IDR slice。
 pub(crate) fn build_flv(
     base_ts: u32,
     frames: u32,
@@ -84,7 +92,12 @@ pub(crate) fn build_flv(
         let ts = base_ts + i * 40;
         let key = i % gop == 0;
         let mut body = vec![if key { 0x17 } else { 0x27 }, 0x01, 0, 0, 0];
-        body.extend(std::iter::repeat_n(0xAB, 200));
+        if key {
+            avcc_nalu(&mut body, 0x06, 8);
+            avcc_nalu(&mut body, 0x65, 180);
+        } else {
+            avcc_nalu(&mut body, 0x41, 190);
+        }
         let offset = flv_tag(&mut out, TAG_VIDEO, ts, &body);
         if i == 0 {
             header_len = offset;
@@ -264,6 +277,61 @@ fn flv_bogus_metadata_positions_fall_back_to_a_scan() {
 
     let index = refresh(&path, true).unwrap();
     assert_eq!(index.keyframes, flv_expected(&flv));
+}
+
+/// 在 `(时间戳, 偏移)` 处的视频 tag 里，把帧类型改成关键帧、NALU 头改成 `nalu_header`。
+fn relabel_video_tag(flv: &mut Flv, offset: u64, first_byte: u8, nalu_header: u8) {
+    let at = offset as usize + 11;
+    flv.bytes[at] = first_byte;
+    flv.bytes[at + 5 + 4] = nalu_header;
+}
+
+#[test]
+fn flv_keyframe_flag_on_a_non_idr_slice_is_not_indexed() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut flv = build_flv(0, 100, 25, None);
+    let tags = video_tag_offsets(&flv);
+    // 虎牙：非 IDR 的 slice（NALU 类型 1）也被标成关键帧
+    relabel_video_tag(&mut flv, tags[10], 0x17, 0x41);
+    let path = write(dir.path(), "a.flv", &flv.bytes);
+    let index = refresh(&path, true).unwrap();
+    assert_eq!(index.keyframes, flv_expected(&flv));
+}
+
+#[test]
+fn flv_hevc_keyframes_need_an_irap_nalu() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut flv = build_flv(0, 100, 25, None);
+    let tags = video_tag_offsets(&flv);
+    // 国内扩展的 codec id 12（H.265）：IDR_W_RADL（19）算，TRAIL_R（1）不算
+    for (i, &offset) in tags.iter().enumerate() {
+        if i % 25 == 0 {
+            // SEI（39）+ IDR_W_RADL（19）
+            relabel_video_tag(&mut flv, offset, 0x1C, 39 << 1);
+            flv.bytes[offset as usize + 11 + 5 + 4 + 8 + 4] = 19 << 1;
+        } else {
+            relabel_video_tag(&mut flv, offset, 0x2C, 1 << 1);
+        }
+    }
+    relabel_video_tag(&mut flv, tags[10], 0x1C, 1 << 1);
+    let path = write(dir.path(), "a.flv", &flv.bytes);
+    let index = refresh(&path, true).unwrap();
+    assert_eq!(index.keyframes, flv_expected(&flv));
+}
+
+/// 每个非序列头视频 tag 的偏移，按帧序。
+fn video_tag_offsets(flv: &Flv) -> Vec<u64> {
+    let mut offsets = Vec::new();
+    let mut offset = 13 + 11 + u32::from_be_bytes([0, flv.bytes[14], flv.bytes[15], flv.bytes[16]]) as u64 + 4;
+    while (offset as usize) < flv.bytes.len() {
+        let at = offset as usize;
+        let size = u32::from_be_bytes([0, flv.bytes[at + 1], flv.bytes[at + 2], flv.bytes[at + 3]]) as u64;
+        if flv.bytes[at] == TAG_VIDEO && flv.bytes[at + 12] == 0x01 {
+            offsets.push(offset);
+        }
+        offset += 11 + size + 4;
+    }
+    offsets
 }
 
 #[test]
