@@ -44,6 +44,7 @@ fn target(session_id: i64) -> SessionTarget {
     SessionTarget {
         session_id,
         streamer_id: 1,
+        bytes: None,
     }
 }
 
@@ -103,6 +104,31 @@ async fn wall_clock_drift_between_segments_is_not_a_gap() {
         assert_eq!(row.gap_before_ms, 0, "第 {i} 段");
         assert_eq!(row.start_ms, i as i64 * FLV_DURATION_MS);
     }
+}
+
+/// 场次有了第一个分段才登记为正在录（之前对外给出的场次 id 查不到详情），任务结束即注销。
+#[tokio::test]
+async fn a_session_is_registered_as_recording_once_it_has_a_segment() {
+    let (dir, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let session = go_live(&pool, t0, 10).await;
+    let id = live::unique_session_id(&pool, session.id).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(id), None);
+    let handle = recorder.handle();
+    handle.run_started_at(t0);
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert!(!live::is_recording(id));
+
+    handle.opened_at(&write_flv(dir.path(), "a.flv"), t0 + 500);
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while !live::is_recording(id) {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("开段后应登记为正在录");
+    recorder.finish().await;
+    assert!(!live::is_recording(id));
 }
 
 #[tokio::test]

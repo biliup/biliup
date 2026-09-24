@@ -7,6 +7,7 @@
 //! - [`recover`]：启动时收尾上次异常退出留下的 `recording` 分段与没结束的场次。
 
 pub mod index;
+pub mod live;
 pub mod recorder;
 pub mod store;
 

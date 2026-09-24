@@ -306,6 +306,10 @@ impl DownloadTask {
             SessionTarget {
                 session_id: ctx.id(),
                 streamer_id: ctx.live_streamer().id,
+                bytes: match &self.downloader {
+                    DownloaderRuntime::Sync(_) | DownloaderRuntime::YtDlp(_) => None,
+                    _ => Some(self.meter.counter()),
+                },
             },
             live_index,
         );
