@@ -93,6 +93,8 @@ Commands:
   dump-flv  输出flv元数据
   download  下载视频
   server    启动web服务，默认端口19159
+  season    管理自己的合集：列合集、查小节、加入 / 移出稿件、排序
+  user      管理 Web 界面的登录用户（在 biliup 服务的工作目录下执行，直接读写 data/data.sqlite3）
   list      列出所有已上传的视频
   help      Print this message or the help of the given subcommand(s)
 
@@ -126,6 +128,16 @@ Options:
 
 ```shell
 biliup download <URL> -o "./video/%Y-%m-%dT%H_%M_%S{title}" --split-time 1h
+```
+
+管理自己的合集（需要先 `biliup login`，所有子命令都支持 `--json`）：
+
+```shell
+biliup season list                                # 列出合集和小节 ID
+biliup season sections <合集ID>                   # 查看各小节里的稿件及其 episode ID
+biliup season add <小节ID> --vid BV1xx411c7mD     # 加入稿件，cid 和标题自动获取；--vid 可重复
+biliup season remove <episode ID>                 # 移出稿件
+biliup season sort <小节ID> <episode ID>...       # 列出的稿件按顺序排到最前，其余保持原顺序；或用 --reverse 整体倒序
 ```
 
 `--split-size` 与 `--split-time` 可按体积或时长自动分段，`-o` 支持 `{title}` 占位符与 strftime 时间格式。

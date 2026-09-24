@@ -7,7 +7,7 @@ description: Use the biliup command-line tool to start the WebUI server, run rec
 
 Use this skill when the user wants to install or operate the `biliup` command-line tool.
 
-`biliup` can start the WebUI server, run recording tasks from config files, log in, upload videos, append videos, inspect video information, download videos, and list uploaded videos.
+`biliup` can start the WebUI server, run recording tasks from config files, log in, upload videos, append videos, inspect video information, download videos, list uploaded videos, and manage the user's collections (合集).
 
 ## Install flow
 
@@ -132,6 +132,18 @@ When the user wants to run the server in the background on Linux or macOS, use:
 nohup biliup server --auth &
 ```
 
+When the user asks to manage their collections (合集), use the `season` subcommands. They read the login from the cookie file (`-u/--user-cookie`, default `cookies.json`), so run `biliup login` first if it does not exist. Add `--json` for machine-readable output.
+
+```bash
+biliup season list
+biliup season sections <season_id>
+biliup season add <section_id> --vid <BV or av>
+biliup season remove <episode_id>
+biliup season sort <section_id> <episode_id>...
+```
+
+`list` shows season and section IDs; `sections` shows each episode's `episode_id` (not the aid), which `remove` and `sort` take. `add` looks up the cid and title automatically and accepts `--vid` more than once. `sort` moves the listed episodes to the front in the given order and keeps the rest in their current order; `--reverse` reverses the whole section instead.
+
 ## Help flow
 
 When the user asks what commands are available, show:
@@ -169,6 +181,8 @@ reply
 dump-flv
 download
 server
+season
+user
 list
 ```
 
