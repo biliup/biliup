@@ -366,15 +366,16 @@ mod tests {
             ..Default::default()
         };
         let now = written_at + 2_500;
+        let from_open = Some(120_000 + (now - 2_000 - opened_at));
         assert_eq!(
             watched_at_ms(id, now, timing),
-            Some(120_000 + (now - 2_000 - opened_at)),
+            from_open,
             "还没有盘上观测时用开段锚点"
         );
 
         guard.sample_segment(path, 120_000);
         for _ in 0..200 {
-            if live::written_anchor(id, now).is_some() {
+            if watched_at_ms(id, now, timing) != from_open {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -385,7 +386,7 @@ mod tests {
         assert_eq!(
             watched_at_ms(id, later, timing),
             Some(120_000 + (later - 2_000 - opened_at)),
-            "太久没写盘就退回开段锚点"
+            "盘上观测过了窗口，只剩开段锚点"
         );
         drop(guard);
         assert_eq!(watched_at_ms(id, now, timing), None);

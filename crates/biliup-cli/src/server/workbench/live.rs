@@ -18,7 +18,7 @@
 //! 每个观测都是下界——内容总是先收到、后写盘。差多少看下载器：刚连上时 CDN 先补发一个 GOP 的缓存，
 //! 第一个分段的场次 0 早于开写的墙钟；mesio 的 FLV 修复管线攒满一个 GOP 才往下写，写盘又经过 1 MiB
 //! 的缓冲，而中转预览在管线之前就拿到了数据。所以换算取最近一段时间里最靠前的观测
-//! （[`written_anchor`]），只有还没有盘上观测时才用开段 / 关段锚点（[`anchor`]）。
+//! （[`written_anchor`]）；最近一直没有观测（断流、卡住）时才从最后的开段 / 关段锚点外推（[`anchor`]）。
 
 use super::index::{self, KeyframeIndex};
 use biliup::downloader::util::{ByteCounter, ByteWatch};
@@ -54,7 +54,7 @@ struct Entry {
     bytes: Option<ByteCounter>,
     changes: watch::Sender<u64>,
     anchor: Option<Anchor>,
-    /// 盘上观测 `(写盘墙钟, 场次时间 − 写盘墙钟)`，按墙钟先后。
+    /// 最近的观测 `(墙钟, 场次时间 − 墙钟)`：盘上观测和开段 / 关段锚点。
     written: VecDeque<(i64, i64)>,
     /// 同一场被合并进来的新任务会重新登记；旧任务的 guard 晚 drop 时不能把新登记删掉。
     generation: u64,
@@ -62,17 +62,15 @@ struct Entry {
 
 impl Entry {
     fn observe(&mut self, wall_ms: i64, session_ms: i64) {
-        if self.written.back().is_some_and(|&(w, _)| w > wall_ms) {
-            return;
-        }
         self.written.push_back((wall_ms, session_ms - wall_ms));
-        while self
+        let newest = self
             .written
-            .front()
-            .is_some_and(|&(w, _)| wall_ms - w > WRITTEN_WINDOW_MS)
-        {
-            self.written.pop_front();
-        }
+            .iter()
+            .map(|&(w, _)| w)
+            .max()
+            .unwrap_or(wall_ms);
+        self.written
+            .retain(|&(w, _)| newest - w <= WRITTEN_WINDOW_MS);
     }
 }
 
@@ -113,6 +111,7 @@ impl LiveGuard {
                 session_ms,
                 wall_ms,
             });
+            entry.observe(wall_ms, session_ms);
         });
     }
 
@@ -256,7 +255,7 @@ pub fn anchor(session_id: i64) -> Option<Anchor> {
     LIVE.lock().unwrap().1.get(&session_id)?.anchor
 }
 
-/// 最近 [`WRITTEN_WINDOW_MS`] 里最靠前的盘上观测，换成墙钟 `now_ms` 处的锚点；没有这样的观测时为 `None`。
+/// 最近 [`WRITTEN_WINDOW_MS`] 里最靠前的观测，换成墙钟 `now_ms` 处的锚点；没有这样的观测时为 `None`。
 pub fn written_anchor(session_id: i64, now_ms: i64) -> Option<Anchor> {
     let live = LIVE.lock().unwrap();
     let lead = live
@@ -360,16 +359,21 @@ mod tests {
             e.observe(100_000, 58_500);
             e.observe(102_000, 62_000);
             e.observe(104_000, 62_900);
-            e.observe(103_000, 70_000);
         });
         assert_eq!(
             written_anchor(9_100_002, 105_000).map(|a| a.session_ms_at(105_000)),
             Some(65_000),
-            "取最靠前的观测；墙钟倒退的观测不收"
+            "取最靠前的观测"
+        );
+        // 关段时写缓冲整个落盘，关段锚点往往是最靠前的一个
+        guard.anchor(66_000, 105_000);
+        assert_eq!(
+            written_anchor(9_100_002, 105_000).map(|a| a.session_ms_at(105_000)),
+            Some(66_000)
         );
         assert_eq!(
-            written_anchor(9_100_002, 132_500).map(|a| a.session_ms_at(132_500)),
-            Some(132_500 - 41_100),
+            written_anchor(9_100_002, 134_500).map(|a| a.session_ms_at(134_500)),
+            Some(134_500 - 39_000),
             "窗口外的观测不算"
         );
         assert_eq!(written_anchor(9_100_002, 140_000), None, "太久没写盘");
