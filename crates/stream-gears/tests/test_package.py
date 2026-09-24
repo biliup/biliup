@@ -6,6 +6,8 @@ Run against an installed wheel: ``pytest crates/stream-gears/tests``.
 import importlib.machinery
 import importlib.metadata
 import inspect
+import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -20,6 +22,7 @@ PACKAGE_FILES = {
     "stream_gears/py.typed",
     "stream_gears/stream_gears.pyi",
 }
+PYTHON_SOURCE = Path(__file__).resolve().parents[1]
 
 
 def test_top_level_names():
@@ -45,12 +48,45 @@ def test_all_matches_native_module():
     }
 
 
+def is_editable_install():
+    direct_url = importlib.metadata.distribution("biliup").read_text("direct_url.json")
+    return bool(direct_url) and json.loads(direct_url).get("dir_info", {}).get(
+        "editable", False
+    )
+
+
 def test_wheel_ships_stubs():
-    files = {str(f).replace("\\", "/") for f in importlib.metadata.files("biliup")}
-    assert PACKAGE_FILES <= files
     package_dir = Path(stream_gears.__file__).parent
     assert (package_dir / "py.typed").is_file()
     assert (package_dir / "stream_gears.pyi").is_file()
+    # An editable install's RECORD lists the .pth, not the package files.
+    if not is_editable_install():
+        files = {str(f).replace("\\", "/") for f in importlib.metadata.files("biliup")}
+        assert PACKAGE_FILES <= files
+
+
+def test_biliup_resolves_from_python_source(tmp_path):
+    """Editable installs put only `python-source` on sys.path, so `biliup` has
+    to live there next to `stream_gears`."""
+    code = (
+        "import importlib.util, biliup\n"
+        "print(biliup.__file__)\n"
+        "print(importlib.util.find_spec('biliup.__main__').origin)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(PYTHON_SOURCE)},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    package = PYTHON_SOURCE / "biliup"
+    assert result.stdout.splitlines() == [
+        str(package / "__init__.py"),
+        str(package / "__main__.py"),
+    ]
 
 
 def test_upload_text_signature_is_accepted():

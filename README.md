@@ -299,7 +299,7 @@ graph TB
 | `crates/danmaku` | 弹幕客户端：多平台协议解析与 XML 输出 |
 | `crates/stream-gears` | PyO3 绑定，暴露给 `python -m biliup` |
 | `app`、`public` | Next.js WebUI 源码；`npm run build` 产物输出到 `out/` 并由后端内嵌 |
-| `biliup` | 精简 Python 包：最小入口与可供外部调用的投稿库 |
+| `crates/stream-gears/biliup` | 精简 Python 包：最小入口与可供外部调用的投稿库 |
 | `tauri-app` | 桌面端外壳（实验性） |
 
 </details>
@@ -313,7 +313,7 @@ graph TB
 
 ### Python
 
-1. 安装依赖 `maturin dev`
+1. 安装依赖 `maturin develop -m crates/stream-gears/Cargo.toml`
 2. `npm run build` 
 3. 启动 Biliup：`python3 -m biliup`
 
