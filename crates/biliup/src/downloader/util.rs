@@ -59,14 +59,14 @@ impl ByteCounter {
 pub struct ByteWatch(Arc<CounterInner>);
 
 impl ByteWatch {
-    /// 等到累计字节数不再是 `seen`，返回新的累计值；已经不同就立即返回。
+    /// 等到累计字节数超过 `seen`，返回新的累计值；已经超过就立即返回。
     pub async fn grown_since(&self, seen: u64) -> u64 {
         loop {
             let notified = self.0.grown.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
             let total = self.0.total.load(Ordering::SeqCst);
-            if total != seen {
+            if total > seen {
                 return total;
             }
             notified.await;
@@ -465,6 +465,18 @@ mod tests {
             .unwrap();
         assert_eq!(total, 7);
         assert_eq!(counter.0.watchers.load(Ordering::SeqCst), 0);
+
+        let watch = counter.watch();
+        let waiter = tokio::spawn(async move { watch.grown_since(10).await });
+        writer.add(2);
+        tokio::task::yield_now().await;
+        assert!(!waiter.is_finished(), "还没超过给定的门槛");
+        writer.add(2);
+        let total = tokio::time::timeout(Duration::from_secs(1), waiter)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(total, 11);
     }
 
     /// flush 失败时不再静默：错误返回给调用方，已写入的部分照常改名交给钩子。
