@@ -85,6 +85,8 @@ impl StreamGears {
                     danmaku_file_path: None,
                     next_file_path: None,
                     segment_index: i,
+                    duration_secs: None,
+                    size_bytes: None,
                 };
                 callback(SegmentEvent::Segment(event));
 

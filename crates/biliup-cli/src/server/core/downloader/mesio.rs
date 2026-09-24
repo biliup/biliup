@@ -42,8 +42,8 @@ use tracing::{debug, info, warn};
 /// 管线内部通道容量（条目数），与 mesio-cli 默认值一致。
 const CHANNEL_SIZE: usize = 64;
 
-/// 分段回调载荷：已关闭的分段文件路径与 0 起始的序号。
-type SegmentClosed = (PathBuf, u32);
+/// 分段回调载荷：已关闭的分段文件路径、0 起始的序号、时长（秒）与字节数。
+type SegmentClosed = (PathBuf, u32, f64, u64);
 
 /// 直播预览旁路：写入端与「把一个管线条目旁路给它」的函数。
 type PreviewTee<I> = (PreviewSink, fn(&mut PreviewSink, &I));
@@ -348,7 +348,7 @@ fn segment_complete_hook(
             reason = ?reason,
             "mesio 分段完成"
         );
-        let _ = seg_tx.send((path.to_path_buf(), index));
+        let _ = seg_tx.send((path.to_path_buf(), index, duration_secs, size_bytes));
     }
 }
 
@@ -408,13 +408,11 @@ where
         }
     });
 
-    while let Some((path, index)) = seg_rx.recv().await {
-        callback(SegmentEvent::Segment(SegmentInfo::new(
-            path,
-            None,
-            None,
-            index as usize,
-        )));
+    while let Some((path, index, duration_secs, size_bytes)) = seg_rx.recv().await {
+        callback(SegmentEvent::Segment(
+            SegmentInfo::new(path, None, None, index as usize)
+                .with_stats(duration_secs, size_bytes),
+        ));
     }
 
     if let Err(e) = forward.await {
@@ -659,6 +657,12 @@ mod tests {
             assert!(name.ends_with(".flv"), "{name}");
             let size = std::fs::metadata(&info.prev_file_path).unwrap().len();
             assert!(size > 13, "segment {name} is empty");
+            assert_eq!(info.size_bytes, Some(size), "reported size of {name}");
+            assert!(
+                info.duration_secs.is_some_and(|d| d >= 0.0),
+                "reported duration of {name}: {:?}",
+                info.duration_secs
+            );
         }
     }
 

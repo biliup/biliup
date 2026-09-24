@@ -195,6 +195,10 @@ pub struct SegmentInfo {
     pub next_file_path: Option<PathBuf>,
     /// 分段序号
     pub segment_index: usize,
+    /// 分段时长（秒）。下载器报告了才有，目前只有 mesio
+    pub duration_secs: Option<f64>,
+    /// 分段文件的字节数。下载器报告了才有，目前只有 mesio
+    pub size_bytes: Option<u64>,
     // /// 分段开始时间戳
     // start_time: std::time::SystemTime,
     // /// 分段结束时间戳
@@ -213,7 +217,16 @@ impl SegmentInfo {
             danmaku_file_path,
             next_file_path,
             segment_index,
+            duration_secs: None,
+            size_bytes: None,
         }
+    }
+
+    /// 附上下载器报告的分段时长与字节数。
+    pub fn with_stats(mut self, duration_secs: f64, size_bytes: u64) -> Self {
+        self.duration_secs = Some(duration_secs);
+        self.size_bytes = Some(size_bytes);
+        self
     }
 }
 
