@@ -5,9 +5,10 @@
 //! 数据库出错只记日志，不影响录制与上传。
 //!
 //! 场次时间轴：场次第一个分段开写（第一个关键帧到达）的墙钟为 t = 0；段内按容器时间戳走
-//! （段长取索引扫出的内容时长，建不出索引才用下载器报告的时长，再没有才用墙钟差）；段与段之间用
-//! 开段时的墙钟接上，比上一段末尾晚出 [`GAP_TOLERANCE_MS`] 以上才算断流，记进
-//! `gap_before_ms`，否则紧接上一段（吸收容器时长与墙钟的小偏差，不让它累积）。
+//! （段长取索引扫出的内容时长，建不出索引才用下载器报告的时长，再没有才用墙钟差）。段与段之间
+//! 看墙钟：新段开写比上一段关段（断流合并接上的一场，是上一次录制停下的时刻）晚出
+//! [`GAP_TOLERANCE_MS`] 以上才算断流，时间轴跳过这段空白并记进 `gap_before_ms`；否则紧接上一段。
+//! 只比相邻两段的墙钟，容器时长与墙钟的偏差不会跨段累积成假断流。
 
 use super::index;
 use super::store::{self, FinishedSegment, SegmentState};
@@ -152,8 +153,9 @@ impl SessionRecorder {
 
 struct Session {
     id: i64,
-    started_at: i64,
     last_end_ms: i64,
+    /// 断流合并接上的一场：上一次录制停下的墙钟，给本次第一段算断流用。
+    resumed_after: Option<i64>,
 }
 
 struct OpenSegment {
@@ -355,10 +357,16 @@ impl Writer {
         container: &str,
         opened_at: i64,
     ) -> sqlx::Result<(i64, i64)> {
+        let last_close_at = self.last_close_at;
         let session = self.ensure_session(opened_at).await?;
         let (session_id, (start_ms, gap)) = (
             session.id,
-            place(session.last_end_ms, opened_at - session.started_at),
+            place(
+                session.last_end_ms,
+                last_close_at
+                    .or(session.resumed_after)
+                    .map(|closed| opened_at - closed),
+            ),
         );
         let id = store::insert_segment(
             &self.pool,
@@ -392,8 +400,8 @@ impl Writer {
             }
             self.session = Some(Session {
                 id: opened.id,
-                started_at: opened.started_at,
                 last_end_ms: opened.last_end_ms,
+                resumed_after: opened.resumed_after,
             });
         }
         Ok(self.session.as_ref().unwrap())
@@ -440,13 +448,12 @@ impl Writer {
     }
 }
 
-/// 新分段在时间轴上的位置：`wall_pos` 为开段墙钟相对场次 0 点的毫秒数。
+/// 新分段在时间轴上的位置：`since_close` 为开段墙钟距上一段关段的毫秒数（不知道时为 `None`）。
 /// 返回 `(start_ms, gap_before_ms)`。
-pub(crate) fn place(last_end_ms: i64, wall_pos: i64) -> (i64, i64) {
-    if wall_pos - last_end_ms > GAP_TOLERANCE_MS {
-        (wall_pos, wall_pos - last_end_ms)
-    } else {
-        (last_end_ms, 0)
+pub(crate) fn place(last_end_ms: i64, since_close: Option<i64>) -> (i64, i64) {
+    match since_close {
+        Some(gap) if gap > GAP_TOLERANCE_MS => (last_end_ms + gap, gap),
+        _ => (last_end_ms, 0),
     }
 }
 

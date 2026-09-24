@@ -62,10 +62,39 @@ fn s(path: &Path) -> String {
 
 #[test]
 fn small_gaps_are_absorbed_and_real_ones_recorded() {
-    assert_eq!(place(0, 0), (0, 0));
-    assert_eq!(place(4000, 3800), (4000, 0));
-    assert_eq!(place(4000, 4000 + GAP_TOLERANCE_MS), (4000, 0));
-    assert_eq!(place(4000, 30_000), (30_000, 26_000));
+    assert_eq!(place(0, None), (0, 0));
+    assert_eq!(place(4000, Some(-50)), (4000, 0));
+    assert_eq!(place(4000, Some(200)), (4000, 0));
+    assert_eq!(place(4000, Some(GAP_TOLERANCE_MS)), (4000, 0));
+    assert_eq!(place(4000, Some(26_000)), (30_000, 26_000));
+}
+
+/// 同一连接按时间切段：每段墙钟比内容长一点（开段晚、关段晚），差值不能跨段累积成断流。
+#[tokio::test]
+async fn wall_clock_drift_between_segments_is_not_a_gap() {
+    let (dir, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(1, 10));
+    let handle = recorder.handle();
+    handle.run_started_at(t0);
+    let mut at = t0;
+    for i in 0..10 {
+        let path = write_flv(dir.path(), &format!("{i}.flv"));
+        handle.opened_at(&path, at);
+        // 内容 3965 ms，墙钟 4600 ms，下一段 150 ms 后才开写：每段偏出 785 ms
+        at += 4600;
+        handle.closed_at(&path, at, ClosedSegment::default());
+        at += 150;
+    }
+    recorder.finish().await;
+
+    let session_id = sessions(&pool).await[0].0;
+    let rows = segments(&pool, session_id).await;
+    assert_eq!(rows.len(), 10);
+    for (i, row) in rows.iter().enumerate() {
+        assert_eq!(row.gap_before_ms, 0, "第 {i} 段");
+        assert_eq!(row.start_ms, i as i64 * FLV_DURATION_MS);
+    }
 }
 
 #[tokio::test]
@@ -134,7 +163,9 @@ async fn segments_are_laid_out_on_one_session_timeline() {
             )
         })
         .collect();
-    let c_start = 30_000 - 500;
+    // 断流从上一段关段（t0 + 8600）算到这一段开写（t0 + 30000）
+    let c_gap = 30_000 - 8600;
+    let c_start = 2 * FLV_DURATION_MS + c_gap;
     assert_eq!(
         summary,
         vec![
@@ -151,7 +182,7 @@ async fn segments_are_laid_out_on_one_session_timeline() {
                 SegmentState::Finished,
                 c_start,
                 Some(c_start + FLV_DURATION_MS),
-                c_start - 2 * FLV_DURATION_MS
+                c_gap
             ),
             (
                 s(&d),
@@ -203,14 +234,14 @@ async fn reopening_within_the_merge_window_resumes_the_session() {
     };
 
     record(1, 10, "a.flv", t0).await;
-    // 下播 5 分钟后又开播：同一场，中间记为断流
+    // 下播 5 分钟后又开播：同一场，断流从上次停下（t0 + 4000）算起
     record(2, 10, "b.flv", t0 + 4000 + 5 * 60_000).await;
     let all = sessions(&pool).await;
     assert_eq!(all.len(), 1);
     let rows = segments(&pool, all[0].0).await;
     assert_eq!(rows.len(), 2);
-    assert_eq!(rows[1].start_ms, 4000 + 5 * 60_000);
-    assert_eq!(rows[1].gap_before_ms, 4000 + 5 * 60_000 - FLV_DURATION_MS);
+    assert_eq!(rows[1].gap_before_ms, 5 * 60_000);
+    assert_eq!(rows[1].start_ms, FLV_DURATION_MS + 5 * 60_000);
     assert_eq!(all[0].2, Some(t0 + 8000 + 5 * 60_000));
     let links: Vec<i64> =
         sqlx::query_scalar("SELECT streamerinfo_id FROM session_streamerinfo ORDER BY 1")
@@ -333,7 +364,7 @@ async fn locate_fixture() -> (TempDir, ConnectionPool, i64, Vec<SegmentRow>) {
     for (name, at) in [("a.flv", t0), ("b.flv", t0 + 3965), ("c.flv", t0 + 30_000)] {
         let path = write_flv(dir.path(), name);
         handle.opened_at(&path, at);
-        handle.closed_at(&path, at + 4000, ClosedSegment::default());
+        handle.closed_at(&path, at + FLV_DURATION_MS, ClosedSegment::default());
     }
     recorder.finish().await;
     let session_id = sessions(&pool).await[0].0;

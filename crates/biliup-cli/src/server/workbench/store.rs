@@ -108,6 +108,8 @@ pub struct OpenedSession {
     pub resumed: bool,
     /// 已有分段在时间轴上的最远位置，新分段从这之后接上。
     pub last_end_ms: i64,
+    /// 复用时上一场的 `ended_at`（上一次录制停下的墙钟）。
+    pub resumed_after: Option<i64>,
 }
 
 /// 取（或新建）这次录制所属的场次，并把 `streamerinfo_id` 挂上去。
@@ -134,10 +136,11 @@ pub async fn open_session(
 
     let reusable = previous.and_then(|(id, started_at, ended_at)| {
         let ended_at = ended_at?;
-        (merge_window_ms > 0 && now_ms - ended_at <= merge_window_ms).then_some((id, started_at))
+        (merge_window_ms > 0 && now_ms - ended_at <= merge_window_ms)
+            .then_some((id, started_at, ended_at))
     });
     let opened = match reusable {
-        Some((id, started_at)) => {
+        Some((id, started_at, ended_at)) => {
             sqlx::query("UPDATE stream_sessions SET ended_at = NULL WHERE id = ?")
                 .bind(id)
                 .execute(&mut *tx)
@@ -154,6 +157,7 @@ pub async fn open_session(
                 started_at,
                 resumed: true,
                 last_end_ms,
+                resumed_after: Some(ended_at),
             }
         }
         None => {
@@ -172,6 +176,7 @@ pub async fn open_session(
                 started_at: now_ms,
                 resumed: false,
                 last_end_ms: 0,
+                resumed_after: None,
             }
         }
     };
