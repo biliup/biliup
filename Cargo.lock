@@ -4454,6 +4454,7 @@ dependencies = [
  "nom 8.0.0",
  "ormlite",
  "pyo3",
+ "pyo3-build-config",
  "pythonize",
  "rust-embed",
  "serde",

@@ -8,6 +8,12 @@ edition = "2024"
 name = "stream_gears"
 crate-type = ["cdylib", "lib"]
 
+[features]
+default = ["extension-module"]
+# Skips linking libpython so plain `cargo build` / `cargo test` work without Python dev files;
+# `--no-default-features` is only needed for Rust tests that embed an interpreter.
+extension-module = ["pyo3/extension-module"]
+
 [dependencies]
 pyo3 = { version = "0.27.1", features = ["abi3-py38", "anyhow"] }
 pythonize = { version = "0.27.0" }
@@ -40,3 +46,6 @@ bon = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 async-trait = { workspace = true }
 error-stack = { workspace = true }
+
+[build-dependencies]
+pyo3-build-config = "0.27.1"
