@@ -530,6 +530,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "ts",
  "url",
  "urlencoding",
 ]

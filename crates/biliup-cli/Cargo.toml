@@ -21,6 +21,8 @@ hls = { git = "https://github.com/hua0512/rust-srec", rev = "dcdb80ee607ff6a991e
 # 直播预览要把 mesio 管线里的 FlvData 重新编成字节，需要直接引用 flv 的类型（同一 rev，已在 lock 中）
 flv = { git = "https://github.com/hua0512/rust-srec", rev = "dcdb80ee607ff6a991e5ddd86a0084a01bd945ac" }
 pipeline-common = { git = "https://github.com/hua0512/rust-srec", rev = "dcdb80ee607ff6a991e5ddd86a0084a01bd945ac" }
+# 切片工作台给 TS 分段建关键帧索引，按包解析 PAT/PMT/PES（同一 rev，已在 lock 中）
+ts = { git = "https://github.com/hua0512/rust-srec", rev = "dcdb80ee607ff6a991e5ddd86a0084a01bd945ac" }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
