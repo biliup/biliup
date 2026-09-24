@@ -4416,7 +4416,6 @@ dependencies = [
  "biliup",
  "biliup-cli",
  "bon",
- "clap",
  "danmaku",
  "error-stack",
  "nom 8.0.0",
