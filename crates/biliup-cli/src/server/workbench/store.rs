@@ -354,6 +354,69 @@ pub async fn clear_started_at_if_empty(pool: &ConnectionPool, id: i64) -> sqlx::
     Ok(done.rows_affected() > 0)
 }
 
+/// 场次列表里的一行（分段按可读的 `recording` / `finished` 汇总）。
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct SessionListRow {
+    pub id: i64,
+    pub streamer_id: Option<i64>,
+    pub streamer_name: String,
+    pub title: String,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+    pub retain_until: Option<i64>,
+    pub segment_count: i64,
+    pub bytes: i64,
+    /// 可读分段在时间轴上的最远位置（正在写的分段按开段位置算）。
+    pub end_ms: i64,
+}
+
+const SESSION_LIST_SELECT: &str = "SELECT s.id, s.streamer_id, s.name AS streamer_name, s.title,
+        s.started_at, s.ended_at, s.retain_until,
+        COUNT(g.id) AS segment_count,
+        COALESCE(SUM(g.bytes), 0) AS bytes,
+        COALESCE(MAX(COALESCE(g.end_ms, g.start_ms)), 0) AS end_ms
+     FROM stream_sessions s
+     LEFT JOIN segments g ON g.session_id = s.id AND g.state IN ('recording', 'finished')";
+
+/// 只列有时间轴的场次：老版本留下的行、开播后还没写出分段的行都没有分段，不是切片工作台的场次。
+const HAS_TIMELINE: &str = "s.started_at IS NOT NULL
+     AND EXISTS (SELECT 1 FROM segments x WHERE x.session_id = s.id)";
+
+/// 场次列表，新的在前；`streamer_id` 为 `None` 时不过滤。返回 `(这一页, 总数)`。
+pub async fn list_sessions(
+    pool: &ConnectionPool,
+    streamer_id: Option<i64>,
+    limit: i64,
+    offset: i64,
+) -> sqlx::Result<(Vec<SessionListRow>, i64)> {
+    let total: i64 = sqlx::query_scalar(&format!(
+        "SELECT COUNT(*) FROM stream_sessions s
+         WHERE (?1 IS NULL OR s.streamer_id = ?1) AND {HAS_TIMELINE}"
+    ))
+    .bind(streamer_id)
+    .fetch_one(pool)
+    .await?;
+    let sql = format!(
+        "{SESSION_LIST_SELECT} WHERE (?1 IS NULL OR s.streamer_id = ?1) AND {HAS_TIMELINE}
+         GROUP BY s.id ORDER BY s.id DESC LIMIT ?2 OFFSET ?3"
+    );
+    let rows = sqlx::query_as(&sql)
+        .bind(streamer_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
+        .await?;
+    Ok((rows, total))
+}
+
+pub async fn session_summary(
+    pool: &ConnectionPool,
+    id: i64,
+) -> sqlx::Result<Option<SessionListRow>> {
+    let sql = format!("{SESSION_LIST_SELECT} WHERE s.id = ?1 AND {HAS_TIMELINE} GROUP BY s.id");
+    sqlx::query_as(&sql).bind(id).fetch_optional(pool).await
+}
+
 pub async fn segment(pool: &ConnectionPool, id: i64) -> sqlx::Result<Option<SegmentRow>> {
     let sql = format!("SELECT {SEGMENT_COLUMNS} FROM segments WHERE id = ?");
     sqlx::query(&sql)

@@ -189,6 +189,10 @@ mod tests {
         ("GET", "/v1/danmaku"),
         ("GET", "/v1/ws/live-rates"),
         ("GET", "/v1/live-rates"),
+        ("GET", "/v1/sessions"),
+        ("GET", "/v1/sessions/1"),
+        ("GET", "/v1/sessions/1/keyframes"),
+        ("GET", "/v1/sessions/1/media"),
         ("GET", "/v1/configuration"),
         ("PUT", "/v1/configuration"),
         ("GET", "/v1/streamer-info"),
@@ -235,6 +239,10 @@ mod tests {
             | ("GET", "/v1/danmaku")
             | ("GET", "/v1/ws/live-rates")
             | ("GET", "/v1/live-rates")
+            | ("GET", "/v1/sessions")
+            | ("GET", "/v1/sessions/1")
+            | ("GET", "/v1/sessions/1/keyframes")
+            | ("GET", "/v1/sessions/1/media")
             | ("GET", "/v1/configuration")
             | ("GET", "/v1/streamer-info")
             | ("GET", "/v1/streamer-info/files/1")
@@ -283,6 +291,10 @@ mod tests {
             .route("/v1/danmaku", ok())
             .route("/v1/ws/live-rates", ok())
             .route("/v1/live-rates", ok())
+            .route("/v1/sessions", ok())
+            .route("/v1/sessions/{id}", ok())
+            .route("/v1/sessions/{id}/keyframes", ok())
+            .route("/v1/sessions/{id}/media", ok())
             .route("/v1/configuration", any())
             .route("/v1/streamer-info", ok())
             .route("/v1/streamer-info/files/{id}", ok())

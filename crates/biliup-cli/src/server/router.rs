@@ -14,6 +14,9 @@ use crate::server::api::live_preview::{
     get_live_danmaku, get_live_danmaku_multi, get_live_stream, get_live_url,
 };
 use crate::server::api::live_rates::{get_live_rates, ws_live_rates};
+use crate::server::api::sessions::{
+    get_session, get_session_keyframes, get_session_media, list_sessions,
+};
 use crate::server::infrastructure::service_register::ServiceRegister;
 use axum::Router;
 use axum::body::Body;
@@ -52,6 +55,11 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         // 不要为此调快 /v1/streamers
         .route("/v1/ws/live-rates", get(ws_live_rates))
         .route("/v1/live-rates", get(get_live_rates))
+        // 切片工作台：场次、可落刀位置、DVR 回看（只按场次 id 寻址，不接受路径）
+        .route("/v1/sessions", get(list_sessions))
+        .route("/v1/sessions/{id}", get(get_session))
+        .route("/v1/sessions/{id}/keyframes", get(get_session_keyframes))
+        .route("/v1/sessions/{id}/media", get(get_session_media))
         // 配置管理路由
         .route(
             "/v1/configuration",

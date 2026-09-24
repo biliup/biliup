@@ -64,7 +64,7 @@ fn readable(segment: &SegmentRow) -> bool {
 
 /// 录制中、正由索引任务边写边建的分段直接读它落盘的缓存（最多落后几秒），不扫盘；
 /// 其余的按需续扫。
-async fn segment_index(segment: &SegmentRow) -> io::Result<index::KeyframeIndex> {
+pub(crate) async fn segment_index(segment: &SegmentRow) -> io::Result<index::KeyframeIndex> {
     let path = PathBuf::from(&segment.path);
     let finished = segment.state == SegmentState::Finished;
     tokio::task::spawn_blocking(move || {
