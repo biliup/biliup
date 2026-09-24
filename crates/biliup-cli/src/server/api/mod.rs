@@ -12,6 +12,8 @@ pub mod live_media;
 pub mod live_preview;
 /// 录制中直播间的写盘速率（每秒轮询的瘦端点，供码率曲线）
 pub mod live_rates;
+/// 切片工作台的标记
+pub mod markers;
 /// 非超管的配置与主播数据脱敏
 pub mod redact;
 /// 「保留这场」：改场次的保留期

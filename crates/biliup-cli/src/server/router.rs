@@ -14,6 +14,7 @@ use crate::server::api::live_preview::{
     get_live_danmaku, get_live_danmaku_multi, get_live_stream, get_live_url,
 };
 use crate::server::api::live_rates::{get_live_rates, ws_live_rates};
+use crate::server::api::markers::{create_marker, delete_marker, list_markers, update_marker};
 use crate::server::api::session_retention::patch_session;
 use crate::server::api::sessions::{
     get_session, get_session_keyframes, get_session_media, list_sessions,
@@ -24,7 +25,7 @@ use axum::body::Body;
 use axum::http::Request;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post, put};
+use axum::routing::{delete, get, patch, post, put};
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
@@ -62,6 +63,15 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         .route("/v1/sessions/{id}", get(get_session).patch(patch_session))
         .route("/v1/sessions/{id}/keyframes", get(get_session_keyframes))
         .route("/v1/sessions/{id}/media", get(get_session_media))
+        // 切片工作台：看直播时打的标记（只按场次 id、标记 id 寻址）
+        .route(
+            "/v1/sessions/{id}/markers",
+            get(list_markers).post(create_marker),
+        )
+        .route(
+            "/v1/sessions/{id}/markers/{mid}",
+            patch(update_marker).delete(delete_marker),
+        )
         // 配置管理路由
         .route(
             "/v1/configuration",
