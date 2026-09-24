@@ -666,6 +666,7 @@ name = "biliup-desktop"
 version = "0.1.0"
 dependencies = [
  "biliup-cli",
+ "dunce",
  "serde",
  "serde_json",
  "tauri",

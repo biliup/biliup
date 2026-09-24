@@ -1,11 +1,11 @@
 use crate::server::errors::{AppError, AppResult};
+use crate::tools;
 use error_stack::{ResultExt, bail};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::fs;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::process::Command;
 use tracing::{error, info};
 
 /// 钩子步骤枚举：支持多种操作格式
@@ -121,7 +121,7 @@ impl HookStep {
     async fn ffmpeg_remux_to_mp4(src: &Path, dst: &Path) -> AppResult<()> {
         info!("remux ts→mp4: {} → {}", src.display(), dst.display());
         let started = std::time::Instant::now();
-        let status = Command::new("ffmpeg")
+        let status = tools::ffmpeg_command()
             .args([
                 "-hide_banner",
                 "-loglevel",
@@ -214,7 +214,7 @@ impl HookStep {
         // 执行自定义命令
         // 解析命令和参数
         // 启动子进程，配置标准输入管道
-        let mut process = Command::new(shell)
+        let mut process = tools::command(shell)
             .arg(flag)
             .arg(cmd)
             .stdin(std::process::Stdio::piped())

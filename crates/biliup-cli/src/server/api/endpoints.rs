@@ -365,6 +365,7 @@ pub async fn put_configuration(
     saved_config
         .validate_segment_limits()
         .map_err(report_to_response)?;
+    crate::tools::set_configured_ffmpeg(saved_config.ffmpeg_path.as_deref());
     *config.write().unwrap() = saved_config;
     let guard = config.read().unwrap();
     if let Some(loggers_level) = &guard.loggers_level {
@@ -715,6 +716,11 @@ pub async fn get_videos() -> Result<Json<Vec<serde_json::Value>>, Response> {
         }
     }
     Ok(Json(file_list))
+}
+
+/// 外部工具是否可用（目前只有 ffmpeg），前端据此决定依赖 ffmpeg 的功能能否使用。
+pub async fn get_tools() -> Json<serde_json::Value> {
+    Json(json!({ "ffmpeg": crate::tools::ffmpeg_status().await }))
 }
 
 // #[axum::debug_handler(state = ServiceRegister)]
