@@ -143,6 +143,7 @@ pub async fn serve_on(
     }
 
     let config = Arc::new(RwLock::new(loaded_config));
+    let _sweeper = server::workbench::retention::spawn_sweeper(conn_pool.clone(), config.clone());
     let download_manager = DownloadManager::new(
         config.read().unwrap().pool1_size,
         config.read().unwrap().pool2_size,

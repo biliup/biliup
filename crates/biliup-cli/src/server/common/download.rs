@@ -18,6 +18,7 @@ use crate::server::workbench::index;
 use crate::server::workbench::recorder::{
     ClosedSegment, RecorderHandle, SessionRecorder, SessionTarget,
 };
+use crate::server::workbench::retention::Retention;
 use async_channel::Sender;
 use biliup::downloader::live::{LivePlugin, LiveStatus, LiveStream, strip_ws_expire_override};
 use biliup::downloader::preview::PreviewHub;
@@ -66,7 +67,8 @@ impl SegmentEventProcessor {
             file_validator: FileValidator::new(
                 ctx.config().filtering_threshold * 1000 * 1000,
                 true,
-            ),
+            )
+            .with_retention(Retention::without_delay(ctx.pool().clone())),
             ctx,
         }
     }
@@ -323,7 +325,9 @@ impl DownloadTask {
         }
 
         if let Some(session) = &self.sync_session {
-            session.lock().await.set_recorder(workbench.handle());
+            let mut session = session.lock().await;
+            session.set_recorder(workbench.handle());
+            session.set_retention(Retention::after_upload(ctx.pool().clone(), &ctx.config()));
         }
 
         // 初始化组件

@@ -67,9 +67,6 @@ enum Event {
         at: i64,
         info: ClosedSegment,
     },
-    Deleted {
-        path: PathBuf,
-    },
     Finish,
 }
 
@@ -101,13 +98,6 @@ impl RecorderHandle {
     /// 一个分段写完（`path` 为最终文件名）。
     pub fn closed(&self, path: &Path, info: ClosedSegment) {
         self.closed_at(path, now_ms(), info);
-    }
-
-    /// 已记录的分段文件被删掉了（边录边传投稿后清理临时文件等）。
-    pub fn deleted(&self, path: &Path) {
-        let _ = self.tx.send(Event::Deleted {
-            path: path.to_path_buf(),
-        });
     }
 
     pub(crate) fn run_started_at(&self, at: i64) {
@@ -223,7 +213,6 @@ impl Writer {
                 Event::RunStarted { at } => self.on_run_started(at).await,
                 Event::Opened { path, at } => self.on_opened(path, at).await,
                 Event::Closed { path, at, info } => self.on_closed(path, at, info).await,
-                Event::Deleted { path } => self.on_deleted(&path).await,
                 Event::Finish => break,
             };
             if let Err(e) = result {
@@ -344,17 +333,6 @@ impl Writer {
         )
         .await?;
         self.segment_done(end_ms, at);
-        Ok(())
-    }
-
-    async fn on_deleted(&mut self, path: &Path) -> sqlx::Result<()> {
-        self.sync_index().await;
-        index::remove(path);
-        sqlx::query("UPDATE segments SET state = 'deleted' WHERE session_id = ? AND path = ?")
-            .bind(self.target.session_id)
-            .bind(path_string(path))
-            .execute(&self.pool)
-            .await?;
         Ok(())
     }
 
