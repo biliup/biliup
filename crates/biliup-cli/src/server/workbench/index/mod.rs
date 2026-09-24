@@ -2,11 +2,13 @@
 //!
 //! 索引不碰录制热路径，也不进 SQLite：录完（或需要时）只读地扫描分段文件的 tag 头 /
 //! TS 包头 / fMP4 box 头，结果缓存在分段旁边的 `<分段>.idx`。正在写的分段从上次扫到的
-//! 偏移增量续扫；已完成的 mesio FLV 优先读文件头 `onMetaData.keyframes`，只补扫尾部。
+//! 偏移增量续扫。mesio 写在 FLV 文件头的 `onMetaData.keyframes` 会跳过间隔不到 1.9 s 的
+//! 关键帧，所以不用它，一律逐 tag 扫。
 //!
 //! 段内时间 `t_ms` 以段内第一个关键帧为 0（[`KeyframeIndex::base_ts`] 记着它的容器原始时间戳），
 //! 所以 stream-gears 的绝对 FLV 时间戳、B 站 `hls_fmp4` 保留的源站 `tfdt`、TS 的 PTS 都不用
-//! 改写文件：读取方按 `原始时间戳 - base_ts` 换算即可。
+//! 改写文件：读取方按 `原始时间戳 - base_ts` 换算即可。FLV 的原始时间戳是 tag 时间戳（DTS），
+//! TS 是 PES 的 PTS，fMP4 是 `tfdt` 起算的解码时间。
 
 mod flv;
 mod fmp4;
@@ -21,7 +23,7 @@ pub const INDEX_EXTENSION: &str = "idx";
 
 const MAGIC: &[u8; 8] = b"BLUPKIDX";
 /// 缓存格式版本。读到别的版本一律当作没有缓存、重新扫描。
-pub const FORMAT_VERSION: u16 = 1;
+pub const FORMAT_VERSION: u16 = 2;
 const FIXED_HEADER_SIZE: usize = 80;
 const ENTRY_SIZE: usize = 12;
 /// 扫描时读缓冲的大小。
@@ -75,14 +77,6 @@ pub struct Keyframe {
     pub offset: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Source {
-    /// 来自 mesio 写在文件头的 `onMetaData.keyframes`（尾部另行补扫）。
-    Metadata,
-    /// 逐 tag / 包 / box 扫描所得。
-    Scan,
-}
-
 /// 增量续扫需要记住的容器状态。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Track {
@@ -99,7 +93,6 @@ pub struct Track {
 #[derive(Debug, Clone, PartialEq)]
 pub struct KeyframeIndex {
     pub container: Container,
-    pub source: Source,
     /// 分段已经写完并且已经扫到文件末尾，索引不会再变。
     pub complete: bool,
     /// 文件开头的头区长度：FLV 头 + onMetaData + 序列头 / 第一个 PES 之前的 PAT、PMT /
@@ -124,7 +117,6 @@ impl KeyframeIndex {
     fn new(container: Container) -> Self {
         Self {
             container,
-            source: Source::Scan,
             complete: false,
             header_len: 0,
             header_final: false,
@@ -204,10 +196,7 @@ impl KeyframeIndex {
         out.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
         out.extend_from_slice(&(FIXED_HEADER_SIZE as u16).to_le_bytes());
         out.push(self.container.code());
-        out.push(match self.source {
-            Source::Metadata => 1,
-            Source::Scan => 2,
-        });
+        out.push(0);
         let flags = u8::from(self.complete)
             | (u8::from(self.base_ts.is_some()) << 1)
             | (u8::from(self.header_final) << 2);
@@ -249,11 +238,6 @@ impl KeyframeIndex {
             return Err(bad("bad keyframe index header size"));
         }
         let container = Container::from_code(bytes[12]).ok_or_else(|| bad("bad container"))?;
-        let source = match bytes[13] {
-            1 => Source::Metadata,
-            2 => Source::Scan,
-            _ => return Err(bad("bad source")),
-        };
         let flags = bytes[14];
         let count = u32_at(76) as usize;
         let entries = &bytes[header_size..];
@@ -271,7 +255,6 @@ impl KeyframeIndex {
             .collect();
         Ok(Self {
             container,
-            source,
             complete: flags & 1 != 0,
             base_ts: (flags & 2 != 0).then(|| u64_at(32) as i64),
             header_final: flags & 4 != 0,
@@ -322,7 +305,7 @@ fn save(segment: &Path, index: &KeyframeIndex) -> io::Result<()> {
 
 /// 取分段的关键帧索引：有可用缓存就续扫，没有就从头建，扫完写回缓存。
 ///
-/// `finished` = 分段已经写完（关段之后）。已完成的 mesio FLV 先读 `onMetaData.keyframes`；
+/// `finished` = 分段已经写完（关段之后）。
 /// 缓存与文件对不上（文件被截断、被同名覆盖）时按文件长度截断缓存或整个重建。
 /// 读 `t_ms` 所在位置用 [`KeyframeIndex::at_or_before`]。
 pub fn refresh(segment: &Path, finished: bool) -> io::Result<KeyframeIndex> {
@@ -346,16 +329,7 @@ pub fn refresh(segment: &Path, finished: bool) -> io::Result<KeyframeIndex> {
         return Ok(cached.clone());
     }
 
-    let mut index = match cached {
-        Some(index) => index,
-        None => {
-            let mut index = KeyframeIndex::new(container);
-            if finished && container == Container::Flv {
-                flv::seed_from_metadata(&mut reader, file_len, &mut index)?;
-            }
-            index
-        }
-    };
+    let mut index = cached.unwrap_or_else(|| KeyframeIndex::new(container));
     match container {
         Container::Flv => flv::scan(&mut reader, file_len, &mut index)?,
         Container::Ts => ts::scan(&mut reader, file_len, &mut index)?,

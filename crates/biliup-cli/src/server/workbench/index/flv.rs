@@ -1,6 +1,6 @@
 //! FLV：逐 tag 读 11 字节 tag 头和 body 开头几个字节判定关键帧，body 其余部分跳过。
 
-use super::{KeyframeIndex, Source, read_at};
+use super::{KeyframeIndex, read_at};
 use ::flv::FlvTag;
 use ::flv::framing::{PREV_TAG_SIZE_FIELD_SIZE, TAG_HEADER_SIZE, parse_tag_header_bytes};
 use ::flv::tag::FlvTagType;
@@ -11,8 +11,6 @@ use std::io::{self, BufReader, Read, Seek, SeekFrom};
 const FILE_HEADER_SIZE: u64 = 9;
 /// 判定关键帧 / 序列头要看的 body 字节数（Enhanced-FLV 的 ModEx 头也够用）。
 const CLASSIFY_BYTES: usize = 32;
-/// onMetaData 超过这个大小就不读（mesio 按 3.5 h 预留的也远小于它）。
-const MAX_SCRIPT_TAG: u32 = 16 * 1024 * 1024;
 
 struct Tag {
     tag_type: FlvTagType,
@@ -116,90 +114,6 @@ pub(super) fn scan(
         offset = tag.end(offset);
         index.scanned_upto = offset;
     }
-    Ok(())
-}
-
-/// 已完成的 mesio FLV：用文件头 `onMetaData.keyframes` 预填索引，续扫只需从最后一个
-/// 关键帧扫到文件末尾（顺带补上索引被截断时漏掉的尾部）。没有可用的元数据时什么都不做。
-///
-/// mesio 的索引对间隔不到 1.9 s 的关键帧只记第一个，这些关键帧不会出现在结果里。
-pub(super) fn seed_from_metadata(
-    reader: &mut BufReader<File>,
-    file_len: u64,
-    index: &mut KeyframeIndex,
-) -> io::Result<()> {
-    let Some(first) = first_tag_offset(reader, file_len)? else {
-        return Ok(());
-    };
-    let mut head = [0u8; TAG_HEADER_SIZE];
-    if first + TAG_HEADER_SIZE as u64 > file_len {
-        return Ok(());
-    }
-    read_at(reader, first, &mut head)?;
-    let header = parse_tag_header_bytes(head)?;
-    if header.tag_type != FlvTagType::ScriptData
-        || header.data_size > MAX_SCRIPT_TAG
-        || first + TAG_HEADER_SIZE as u64 + header.data_size as u64 > file_len
-    {
-        return Ok(());
-    }
-    let mut body = vec![0u8; header.data_size as usize];
-    reader.read_exact(&mut body)?;
-    let script = FlvTag::new(0, 0, FlvTagType::ScriptData, false, Bytes::from(body));
-    let Ok(script) = script.decode_script() else {
-        return Ok(());
-    };
-    if script.name != "onMetaData" {
-        return Ok(());
-    }
-    let Some(properties) = script.data.first().and_then(|v| v.as_object_properties()) else {
-        return Ok(());
-    };
-    let Some(keyframes) = properties
-        .iter()
-        .find(|(k, _)| k == "keyframes")
-        .and_then(|(_, v)| v.as_object_properties())
-    else {
-        return Ok(());
-    };
-    let numbers = |name: &str| -> Vec<f64> {
-        keyframes
-            .iter()
-            .find(|(k, _)| k == name)
-            .and_then(|(_, v)| v.as_array())
-            .map(|a| a.iter().filter_map(|v| v.as_number()).collect())
-            .unwrap_or_default()
-    };
-    let times = numbers("times");
-    let positions = numbers("filepositions");
-    let pairs: Vec<(i64, u64)> = times
-        .iter()
-        .zip(&positions)
-        .map(|(t, p)| ((t * 1000.0).round() as i64, *p as u64))
-        .take_while(|(_, p)| *p > first && *p < file_len)
-        .collect();
-    let Some(&(_, first_keyframe)) = pairs.first() else {
-        return Ok(());
-    };
-    if !is_keyframe_at(reader, first_keyframe, file_len) {
-        return Ok(());
-    }
-
-    // 头区：从第一个 tag 扫到第一个媒体 tag
-    let mut offset = first;
-    reader.seek(SeekFrom::Start(offset))?;
-    while let Some(tag) = read_tag(reader, offset, file_len)? {
-        if tag.is_media() && !tag.class.sequence_header {
-            break;
-        }
-        offset = tag.end(offset);
-    }
-    index.finalize_header(offset);
-    index.source = Source::Metadata;
-    for (raw, position) in pairs {
-        index.push_keyframe(raw, position);
-    }
-    super::rewind_to_last_keyframe(index);
     Ok(())
 }
 

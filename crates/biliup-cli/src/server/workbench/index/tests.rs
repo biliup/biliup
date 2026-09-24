@@ -133,7 +133,6 @@ fn flv_scan_indexes_keyframes_relative_to_the_first_one() {
 
     let index = refresh(&path, true).unwrap();
     assert_eq!(index.container, Container::Flv);
-    assert_eq!(index.source, Source::Scan);
     assert!(index.complete);
     assert_eq!(index.base_ts, Some(3_600_000));
     assert_eq!(index.header_len, flv.header_len);
@@ -227,12 +226,12 @@ fn flv_cache_is_rebuilt_when_the_file_is_replaced() {
 }
 
 #[test]
-fn flv_metadata_seeds_the_index_and_the_tail_is_scanned() {
+fn flv_sparse_metadata_keyframes_do_not_thin_out_the_index() {
     let dir = tempfile::tempdir().unwrap();
     // 先用占位数值排出字节布局，再填真值（AMF 数值定长，布局不变）
     let zeros = [0f64; 2];
     let layout = build_flv(0, 100, 25, Some((&zeros, &zeros)));
-    // mesio 的元数据只记到第二个关键帧（尾部被截断 / 间隔过密被跳过的情形）
+    // mesio 的元数据只记了前两个关键帧（间隔过密被跳过的情形）
     let times: Vec<f64> = layout.keyframes[..2]
         .iter()
         .map(|(t, _)| *t as f64 / 1000.0)
@@ -246,7 +245,6 @@ fn flv_metadata_seeds_the_index_and_the_tail_is_scanned() {
     let path = write(dir.path(), "a.flv", &flv.bytes);
 
     let index = refresh(&path, true).unwrap();
-    assert_eq!(index.source, Source::Metadata);
     assert_eq!(index.header_len, flv.header_len);
     assert_eq!(index.keyframes, flv_expected(&flv));
 }
@@ -265,7 +263,6 @@ fn flv_bogus_metadata_positions_fall_back_to_a_scan() {
     let path = write(dir.path(), "a.flv", &flv.bytes);
 
     let index = refresh(&path, true).unwrap();
-    assert_eq!(index.source, Source::Scan);
     assert_eq!(index.keyframes, flv_expected(&flv));
 }
 
