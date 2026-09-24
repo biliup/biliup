@@ -94,7 +94,7 @@ const FileSizeInput: React.FC<Props> = ({
           if (next === '') commit('', unit)
           else if (typeof next === 'number' && Number.isFinite(next)) commit(next, unit)
         }}
-        style={{ flex: '1 1 160px', minWidth: 0 }}
+        style={{ flex: '1 1 120px', minWidth: 0 }}
       />
       <Select
         aria-label="单位"
