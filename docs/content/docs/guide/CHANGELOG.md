@@ -27,6 +27,8 @@ top = false
 - 🔧stream-gears：断流、读超时、下播时不再丢掉最后一个 GOP（通常 1–10 秒）；分段钩子在文件写完（flush）之后才触发，盘满等写入错误不再被静默吞掉。
 - 🔧`ffmpeg-external` / `ffmpeg-internal` 不再被静默换成 stream-gears，改为按 ffmpeg 录制。
 - 🔧`segment_time` 在 stream-gears、mesio、ffmpeg 下按同一种写法解析：`HH:MM:SS`、`MM:SS` 或秒数（如 `3600`），和 ffmpeg 一致。以前 stream-gears 遇到 `3600`、`01:00` 这类写法下载任务会 panic 中断，mesio 会静默当成不分段；现在都能正确分段，确实写错的值会在日志里提示并按不分段录制。
+- 💡WebUI 的「视频分段大小（file_size）」改成数值 + 单位（MB / GB）输入，按 1024 进制换算（1 GB = 1024 MB，与 Windows 资源管理器一致），配置文件里存的仍是字节数，旧配置原样可读。
+- 🔧主播「配置覆写」里把已有的 `file_size` 清空后保存，现在会真正写成「不按大小分段」；以前清空后保存，原来的值原样留着。
 
 ## 1.2.1
 **Full Changelog**:[v1.2.0...v1.2.1](https://github.com/biliup/biliup/compare/v1.2.0...v1.2.1)

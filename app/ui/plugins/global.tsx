@@ -4,6 +4,7 @@ import styles from '../../styles/dashboard.module.scss'
 import SectionTitle from '../../(app)/components/SectionTitle'
 import { Form, Select, Space, useFormState } from '@douyinfe/semi-ui'
 import { IconUpload, IconDownload } from '@douyinfe/semi-icons'
+import { FileSizeField } from '../FileSizeInput'
 
 const Global: React.FC = () => {
   // useFormApi 不订阅表单值变化，切换下拉框后条件渲染不会刷新；useFormState 会
@@ -115,24 +116,20 @@ const Global: React.FC = () => {
             />
           </>
         ) : null}
-        <Form.InputNumber
+        <FileSizeField
           label="视频分段大小（file_size）"
           extraText={
             <div style={{ fontSize: '14px' }}>
-              录像单文件大小限制，超过此大小触发文件分割。下载回放时无法使用。
+              录像单文件大小上限，超过后开始写下一个文件。下载回放时无法使用。留空表示不按大小分段。
               <br />
-              单位：Byte，示例：4294967296（4GB）
+              按 1024 进制换算：1 GB = 1024 MB = 1073741824 字节，与 Windows 资源管理器显示的大小一致。配置文件里存的仍是字节数。
             </div>
           }
           field="file_size"
-          placeholder=""
-          suffix={'Byte'}
-          style={{ width: '100%' }}
           fieldStyle={{
             alignSelf: 'stretch',
             padding: 0,
           }}
-          showClear={true}
         />
         <Form.Input
           field="segment_time"

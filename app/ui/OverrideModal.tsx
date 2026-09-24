@@ -12,6 +12,7 @@ import { useState } from 'react'
 import { LiveStreamerEntity } from '../lib/api-streamer'
 import { SupportedPlatforms } from '@/app/ui/plugins'
 import { useBiliUsers } from '../lib/use-streamers'
+import { FileSizeField } from './FileSizeInput'
 
 type PluginProps = {
   entity?: LiveStreamerEntity
@@ -196,17 +197,14 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
         <Select.Option value="mesio">mesio（默认）</Select.Option>
       </Form.Select>
 
-      <Form.InputNumber
+      <FileSizeField
         label="视频分段大小（file_size）"
         field="file_size"
-        placeholder=""
-        suffix={'Byte'}
-        style={{ width: '100%' }}
+        extraText="按 1024 进制：1 GB = 1024 MB。没填过的留空即跟随全局设置；把已有的值清空，则这个主播不按大小分段（边录边传仍约 2 GB 一段）。"
         fieldStyle={{
           alignSelf: 'stretch',
           padding: 0,
         }}
-        showClear={true}
       />
 
       <Form.Input
