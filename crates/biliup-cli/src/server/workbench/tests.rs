@@ -1,8 +1,11 @@
 use super::index::tests::build_flv;
 use super::recorder::{ClosedSegment, GAP_TOLERANCE_MS, SessionRecorder, SessionTarget, place};
-use super::store::{self, SegmentRow, SegmentState};
+use super::store::{self, OpenedSession, SegmentRow, SegmentState};
 use super::*;
 use crate::server::infrastructure::connection_pool::ConnectionManager;
+use crate::server::infrastructure::models::StreamerInfo;
+use chrono::{DateTime, Utc};
+use ormlite::Model;
 use tempfile::TempDir;
 
 /// 100 帧、每 25 帧一个关键帧的 FLV：关键帧在 0 / 1000 / 2000 / 3000 ms，时长 3965 ms。
@@ -17,25 +20,30 @@ async fn setup() -> (TempDir, ConnectionPool) {
         .execute(&pool)
         .await
         .unwrap();
-    for id in 1..=4 {
-        sqlx::query(
-            "INSERT INTO streamerinfo (id, name, url, title, date, live_cover_path)
-             VALUES (?, 'a', 'https://a', '标题', '2026-09-24 00:00:00', '')",
-        )
-        .bind(id)
-        .execute(&pool)
-        .await
-        .unwrap();
-    }
     (dir, pool)
 }
 
-fn target(streamerinfo_id: i64, merge_minutes: i64) -> SessionTarget {
+fn info(title: &str, at_ms: i64) -> StreamerInfo {
+    StreamerInfo::new(
+        "a",
+        "https://a",
+        title,
+        DateTime::<Utc>::from_timestamp_millis(at_ms).unwrap(),
+        "",
+    )
+}
+
+/// 监控循环检测到开播：插入或复用场次行。
+async fn go_live(pool: &ConnectionPool, at: i64, merge_minutes: i64) -> OpenedSession {
+    store::open_session(pool, 1, &info("标题", at), at, merge_minutes * 60_000)
+        .await
+        .unwrap()
+}
+
+fn target(session_id: i64) -> SessionTarget {
     SessionTarget {
+        session_id,
         streamer_id: 1,
-        streamerinfo_id,
-        title: "标题".into(),
-        merge_window_ms: merge_minutes * 60_000,
     }
 }
 
@@ -45,7 +53,7 @@ fn write_flv(dir: &Path, name: &str) -> PathBuf {
     path
 }
 
-async fn sessions(pool: &ConnectionPool) -> Vec<(i64, i64, Option<i64>)> {
+async fn sessions(pool: &ConnectionPool) -> Vec<(i64, Option<i64>, Option<i64>)> {
     sqlx::query_as("SELECT id, started_at, ended_at FROM stream_sessions ORDER BY id")
         .fetch_all(pool)
         .await
@@ -74,7 +82,8 @@ fn small_gaps_are_absorbed_and_real_ones_recorded() {
 async fn wall_clock_drift_between_segments_is_not_a_gap() {
     let (dir, pool) = setup().await;
     let t0 = 1_700_000_000_000;
-    let recorder = SessionRecorder::spawn(pool.clone(), target(1, 10));
+    let session = go_live(&pool, t0, 10).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id));
     let handle = recorder.handle();
     handle.run_started_at(t0);
     let mut at = t0;
@@ -88,8 +97,7 @@ async fn wall_clock_drift_between_segments_is_not_a_gap() {
     }
     recorder.finish().await;
 
-    let session_id = sessions(&pool).await[0].0;
-    let rows = segments(&pool, session_id).await;
+    let rows = segments(&pool, session.id).await;
     assert_eq!(rows.len(), 10);
     for (i, row) in rows.iter().enumerate() {
         assert_eq!(row.gap_before_ms, 0, "第 {i} 段");
@@ -101,7 +109,9 @@ async fn wall_clock_drift_between_segments_is_not_a_gap() {
 async fn segments_are_laid_out_on_one_session_timeline() {
     let (dir, pool) = setup().await;
     let t0 = 1_700_000_000_000;
-    let recorder = SessionRecorder::spawn(pool.clone(), target(1, 10));
+    let session = go_live(&pool, t0, 10).await;
+    assert!(!session.resumed);
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id));
     let handle = recorder.handle();
 
     // mesio：开段 / 关段都有，关段带时长与字节数；报告的时长和内容对不上时以索引为准
@@ -147,7 +157,11 @@ async fn segments_are_laid_out_on_one_session_timeline() {
     let all = sessions(&pool).await;
     assert_eq!(all.len(), 1);
     let (session_id, started_at, ended_at) = all[0];
-    assert_eq!(started_at, t0 + 500, "场次 0 点是第一个分段开写的墙钟");
+    assert_eq!(
+        started_at,
+        Some(t0 + 500),
+        "场次 0 点是第一个分段开写的墙钟"
+    );
     assert_eq!(ended_at, Some(t0 + 34_100));
 
     let rows = segments(&pool, session_id).await;
@@ -207,64 +221,100 @@ async fn segments_are_laid_out_on_one_session_timeline() {
     assert_eq!(rows[3].index_path, None);
     assert!(!index::index_path(&d).exists());
     assert!(!index::index_path(&c_part).exists());
-
-    let links: Vec<(i64, i64)> =
-        sqlx::query_as("SELECT session_id, streamerinfo_id FROM session_streamerinfo")
-            .fetch_all(&pool)
-            .await
-            .unwrap();
-    assert_eq!(links, vec![(session_id, 1)]);
 }
 
 #[tokio::test]
 async fn reopening_within_the_merge_window_resumes_the_session() {
     let (dir, pool) = setup().await;
     let t0 = 1_700_000_000_000;
-    let record = |streamerinfo_id: i64, merge: i64, name: &str, at: i64| {
+    let record = |merge: i64, title: &'static str, name: &str, at: i64| {
         let pool = pool.clone();
         let path = write_flv(dir.path(), name);
         async move {
-            let recorder = SessionRecorder::spawn(pool, target(streamerinfo_id, merge));
+            let session = store::open_session(&pool, 1, &info(title, at), at, merge * 60_000)
+                .await
+                .unwrap();
+            let recorder = SessionRecorder::spawn(pool, target(session.id));
             let handle = recorder.handle();
             handle.run_started_at(at);
             handle.opened_at(&path, at);
             handle.closed_at(&path, at + 4000, ClosedSegment::default());
             recorder.finish().await;
+            session
         }
     };
 
-    record(1, 10, "a.flv", t0).await;
-    // 下播 5 分钟后又开播：同一场，断流从上次停下（t0 + 4000）算起
-    record(2, 10, "b.flv", t0 + 4000 + 5 * 60_000).await;
+    let first = record(10, "第一次", "a.flv", t0).await;
+    // 下播 5 分钟后又开播：复用同一行，断流从上次停下（t0 + 4000）算起
+    let second = record(10, "第二次", "b.flv", t0 + 4000 + 5 * 60_000).await;
+    assert!(second.resumed);
+    assert_eq!(second.id, first.id);
     let all = sessions(&pool).await;
     assert_eq!(all.len(), 1);
-    let rows = segments(&pool, all[0].0).await;
+    let rows = segments(&pool, first.id).await;
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[1].gap_before_ms, 5 * 60_000);
     assert_eq!(rows[1].start_ms, FLV_DURATION_MS + 5 * 60_000);
+    assert_eq!(all[0].1, Some(t0), "时间轴 0 点不变");
     assert_eq!(all[0].2, Some(t0 + 8000 + 5 * 60_000));
-    let links: Vec<i64> =
-        sqlx::query_scalar("SELECT streamerinfo_id FROM session_streamerinfo ORDER BY 1")
+    // 直播历史里还是一条，标题和开播时间取第一次
+    let history = StreamerInfo::select().fetch_all(&pool).await.unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].title, "第一次");
+    assert_eq!(history[0].date.timestamp_millis(), t0);
+
+    // 超出窗口：新的一场
+    let third = record(10, "第三次", "c.flv", t0 + 8000 + 16 * 60_000).await;
+    assert!(!third.resumed);
+    assert_eq!(sessions(&pool).await.len(), 2);
+    // 窗口为 0：从不合并
+    let fourth = record(0, "第四次", "d.flv", t0 + 12_000 + 16 * 60_000 + 1000).await;
+    assert!(!fourth.resumed);
+    let all = sessions(&pool).await;
+    assert_eq!(all.len(), 3);
+    assert_eq!(segments(&pool, fourth.id).await[0].start_ms, 0);
+    let history = StreamerInfo::select().fetch_all(&pool).await.unwrap();
+    assert_eq!(
+        history.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(),
+        vec!["第一次", "第三次", "第四次"]
+    );
+}
+
+/// 上一场还在录（或崩溃后还没收尾）时不去接它；别的主播的场次也不会被接上。
+#[tokio::test]
+async fn unfinished_or_foreign_sessions_are_not_resumed() {
+    let (_dir, pool) = setup().await;
+    sqlx::query("INSERT INTO livestreamers (id, url, remark) VALUES (2, 'https://b', 'b')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let t0 = 1_700_000_000_000;
+    let first = go_live(&pool, t0, 10).await;
+    // 刚插入的行 ended_at 为空（正在录）
+    let again = go_live(&pool, t0 + 1000, 10).await;
+    assert_ne!(again.id, first.id);
+    store::close_session(&pool, again.id, t0 + 2000)
+        .await
+        .unwrap();
+    let other = store::open_session(&pool, 2, &info("b", t0 + 3000), t0 + 3000, 600_000)
+        .await
+        .unwrap();
+    assert!(!other.resumed);
+    assert_ne!(other.id, again.id);
+    let streamer_ids: Vec<Option<i64>> =
+        sqlx::query_scalar("SELECT streamer_id FROM stream_sessions ORDER BY id")
             .fetch_all(&pool)
             .await
             .unwrap();
-    assert_eq!(links, vec![1, 2]);
-
-    // 超出窗口：新的一场
-    record(3, 10, "c.flv", t0 + 8000 + 16 * 60_000).await;
-    assert_eq!(sessions(&pool).await.len(), 2);
-    // 窗口为 0：从不合并
-    record(4, 0, "d.flv", t0 + 12_000 + 16 * 60_000 + 1000).await;
-    let all = sessions(&pool).await;
-    assert_eq!(all.len(), 3);
-    assert_eq!(segments(&pool, all[2].0).await[0].start_ms, 0);
+    assert_eq!(streamer_ids, vec![Some(1), Some(1), Some(2)]);
 }
 
 #[tokio::test]
 async fn completion_only_downloaders_get_a_start_from_the_content() {
     let (dir, pool) = setup().await;
     let t0 = 1_700_000_000_000;
-    let recorder = SessionRecorder::spawn(pool.clone(), target(1, 10));
+    let session = go_live(&pool, t0, 10).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id));
     let handle = recorder.handle();
     handle.run_started_at(t0);
     let a = write_flv(dir.path(), "a.flv");
@@ -274,7 +324,7 @@ async fn completion_only_downloaders_get_a_start_from_the_content() {
     recorder.finish().await;
 
     let (session_id, started_at, _) = sessions(&pool).await[0];
-    assert_eq!(started_at, t0 + 10_000 - FLV_DURATION_MS);
+    assert_eq!(started_at, Some(t0 + 10_000 - FLV_DURATION_MS));
     let rows = segments(&pool, session_id).await;
     assert_eq!(
         rows.iter()
@@ -291,7 +341,8 @@ async fn completion_only_downloaders_get_a_start_from_the_content() {
 async fn reported_duration_is_used_when_no_index_can_be_built() {
     let (dir, pool) = setup().await;
     let t0 = 1_700_000_000_000;
-    let recorder = SessionRecorder::spawn(pool.clone(), target(1, 10));
+    let session = go_live(&pool, t0, 10).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id));
     let handle = recorder.handle();
     handle.run_started_at(t0);
     let a = dir.path().join("a.mkv");
@@ -317,7 +368,8 @@ async fn reported_duration_is_used_when_no_index_can_be_built() {
 #[tokio::test]
 async fn segments_that_never_reached_the_disk_leave_no_rows() {
     let (dir, pool) = setup().await;
-    let recorder = SessionRecorder::spawn(pool.clone(), target(1, 10));
+    let session = go_live(&pool, recorder::now_ms(), 10).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id));
     let handle = recorder.handle();
     handle.run_started();
     handle.opened(&dir.path().join("never.flv.part"));
@@ -326,7 +378,11 @@ async fn segments_that_never_reached_the_disk_leave_no_rows() {
     std::fs::write(&empty, b"").unwrap();
     handle.opened(&empty);
     recorder.finish().await;
-    assert!(sessions(&pool).await.is_empty());
+    // 场次行照样留着（直播历史里有这一场），只是没有时间轴
+    let all = sessions(&pool).await;
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].1, None);
+    assert!(all[0].2.is_some());
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM segments")
         .fetch_one(&pool)
         .await
@@ -338,7 +394,8 @@ async fn segments_that_never_reached_the_disk_leave_no_rows() {
 async fn open_segment_is_finalized_from_disk_when_the_run_ends() {
     let (dir, pool) = setup().await;
     let t0 = 1_700_000_000_000;
-    let recorder = SessionRecorder::spawn(pool.clone(), target(1, 10));
+    let session = go_live(&pool, t0, 10).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id));
     let handle = recorder.handle();
     handle.run_started_at(t0);
     // 下载器出错退出，没等到关段事件
@@ -359,7 +416,8 @@ async fn open_segment_is_finalized_from_disk_when_the_run_ends() {
 async fn locate_fixture() -> (TempDir, ConnectionPool, i64, Vec<SegmentRow>) {
     let (dir, pool) = setup().await;
     let t0 = 1_700_000_000_000;
-    let recorder = SessionRecorder::spawn(pool.clone(), target(1, 10));
+    let session = go_live(&pool, t0, 10).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id));
     let handle = recorder.handle();
     for (name, at) in [("a.flv", t0), ("b.flv", t0 + 3965), ("c.flv", t0 + 30_000)] {
         let path = write_flv(dir.path(), name);
@@ -442,7 +500,9 @@ async fn session_keyframes_span_segments_in_order() {
 async fn startup_recovery_finalizes_leftover_recording_segments() {
     let (dir, pool) = setup().await;
     let started_at = 1_700_000_000_000;
-    let opened = store::open_session(&pool, 1, Some(1), "标题", started_at, 600_000)
+    let opened = go_live(&pool, started_at, 10).await;
+    store::begin_recording(&pool, opened.id).await.unwrap();
+    store::set_started_at(&pool, opened.id, started_at)
         .await
         .unwrap();
 
@@ -484,12 +544,14 @@ async fn startup_recovery_finalizes_leftover_recording_segments() {
     )
     .await
     .unwrap();
-    // 另一场一个分段都没有
-    sqlx::query(
-        "INSERT INTO stream_sessions (streamer_id, title, started_at, created_at)
-         VALUES (1, 't', 1, 1)",
+    // 另一场（别的主播）一个分段都没有
+    let empty_date = "2026-09-24T08:00:00.123456789+00:00";
+    let empty_id: i64 = sqlx::query_scalar(
+        "INSERT INTO stream_sessions (name, url, title, date, live_cover_path)
+         VALUES ('b', 'https://b', 't', ?, '') RETURNING id",
     )
-    .execute(&pool)
+    .bind(empty_date)
+    .fetch_one(&pool)
     .await
     .unwrap();
 
@@ -522,21 +584,30 @@ async fn startup_recovery_finalizes_leftover_recording_segments() {
     );
 
     let all = sessions(&pool).await;
-    assert_eq!(all.len(), 1, "空场次被删掉");
-    assert_eq!(all[0].2, Some(started_at + 10_000 + FLV_DURATION_MS));
+    assert_eq!(all.len(), 2, "没有分段的场次也保留（直播历史里有它）");
+    let ended_at = started_at + 10_000 + FLV_DURATION_MS;
+    assert_eq!(all[0].2, Some(ended_at));
+    assert_eq!(
+        all[1],
+        (
+            empty_id,
+            None,
+            Some(
+                DateTime::parse_from_rfc3339(empty_date)
+                    .unwrap()
+                    .timestamp_millis()
+            )
+        ),
+        "没有分段的记为开播时间"
+    );
 
     // 收尾过的场次可以被很快开播的下一次录制接上
-    let resumed = store::open_session(
-        &pool,
-        1,
-        Some(2),
-        "标题",
-        started_at + 10_000 + FLV_DURATION_MS + 60_000,
-        600_000,
-    )
-    .await
-    .unwrap();
+    let resumed = go_live(&pool, ended_at + 60_000, 10).await;
     assert!(resumed.resumed);
     assert_eq!(resumed.id, opened.id);
-    assert_eq!(resumed.last_end_ms, 10_000 + FLV_DURATION_MS);
+    let start = store::begin_recording(&pool, resumed.id).await.unwrap();
+    assert_eq!(start.started_at, Some(started_at));
+    assert_eq!(start.last_end_ms, 10_000 + FLV_DURATION_MS);
+    assert_eq!(start.resumed_after, Some(ended_at));
+    assert_eq!(sessions(&pool).await[0].2, None, "开始录就清空 ended_at");
 }

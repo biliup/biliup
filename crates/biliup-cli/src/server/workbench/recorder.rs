@@ -28,16 +28,13 @@ pub fn now_ms() -> i64 {
         .map_or(0, |d| d.as_millis() as i64)
 }
 
-/// 这次录制归到哪个主播、挂哪行 streamerinfo。
+/// 这次录制记在哪一场。
 #[derive(Debug, Clone)]
 pub struct SessionTarget {
+    /// 开播时监控循环插入或复用的 `stream_sessions.id`
+    pub session_id: i64,
     /// `livestreamers.id`
     pub streamer_id: i64,
-    /// 本次下载任务的 `streamerinfo.id`
-    pub streamerinfo_id: i64,
-    pub title: String,
-    /// 下播后多久内再开播算同一场；0 = 从不合并。
-    pub merge_window_ms: i64,
 }
 
 /// 关段时下载器能给的信息。
@@ -143,19 +140,13 @@ impl SessionRecorder {
 
     /// 处理完已发出的事件，收尾没关上的分段，写入场次 `ended_at`。
     /// 之后仍在别处（如边录边传会话）留着的句柄再发事件会被丢弃。
+    /// 不调用就 drop 时，写入任务在所有句柄都释放后照样收尾。
     pub async fn finish(self) {
         let _ = self.handle.tx.send(Event::Finish);
         if let Err(e) = self.task.await {
             warn!(error = %e, "切片工作台场次记录任务异常退出");
         }
     }
-}
-
-struct Session {
-    id: i64,
-    last_end_ms: i64,
-    /// 断流合并接上的一场：上一次录制停下的墙钟，给本次第一段算断流用。
-    resumed_after: Option<i64>,
 }
 
 struct OpenSegment {
@@ -168,11 +159,16 @@ struct OpenSegment {
 struct Writer {
     pool: ConnectionPool,
     target: SessionTarget,
-    session: Option<Session>,
+    /// 时间轴 0 点；这一场还没有分段时为 `None`。
+    started_at: Option<i64>,
+    last_end_ms: i64,
     open: Option<OpenSegment>,
     run_started_at: i64,
     run_has_segment: bool,
+    /// 本次任务里上一段关段的墙钟。
     last_close_at: Option<i64>,
+    /// 断流合并接上的一场：上一次录制停下的墙钟，给本次第一段算断流用。
+    resumed_after: Option<i64>,
 }
 
 impl Writer {
@@ -180,15 +176,32 @@ impl Writer {
         Self {
             pool,
             target,
-            session: None,
+            started_at: None,
+            last_end_ms: 0,
             open: None,
             run_started_at: now_ms(),
             run_has_segment: false,
             last_close_at: None,
+            resumed_after: None,
         }
     }
 
     async fn run(mut self, mut rx: UnboundedReceiver<Event>) {
+        match store::begin_recording(&self.pool, self.target.session_id).await {
+            Ok(start) => {
+                if start.resumed_after.is_some() {
+                    tracing::info!(
+                        session = self.target.session_id,
+                        last_end_ms = start.last_end_ms,
+                        "切片工作台：下播后很快又开播，接着记在上一场"
+                    );
+                }
+                self.started_at = start.started_at;
+                self.last_end_ms = start.last_end_ms;
+                self.resumed_after = start.resumed_after;
+            }
+            Err(e) => warn!(error = %e, "切片工作台读取场次失败，不影响录制"),
+        }
         while let Some(event) = rx.recv().await {
             debug!(?event, "切片工作台分段事件");
             let result = match event {
@@ -320,11 +333,8 @@ impl Writer {
 
     async fn on_deleted(&mut self, path: &Path) -> sqlx::Result<()> {
         index::remove(path);
-        let Some(session) = &self.session else {
-            return Ok(());
-        };
         sqlx::query("UPDATE segments SET state = 'deleted' WHERE session_id = ? AND path = ?")
-            .bind(session.id)
+            .bind(self.target.session_id)
             .bind(path_string(path))
             .execute(&self.pool)
             .await?;
@@ -334,18 +344,16 @@ impl Writer {
     async fn on_finish(&mut self) -> sqlx::Result<()> {
         let now = now_ms();
         self.finalize_open(now).await?;
-        if let Some(session) = &self.session
-            && !store::delete_session_if_empty(&self.pool, session.id).await?
-        {
-            store::close_session(&self.pool, session.id, self.last_close_at.unwrap_or(now)).await?;
-        }
-        Ok(())
+        store::close_session(
+            &self.pool,
+            self.target.session_id,
+            self.last_close_at.unwrap_or(now),
+        )
+        .await
     }
 
     fn segment_done(&mut self, end_ms: i64, at: i64) {
-        if let Some(session) = self.session.as_mut() {
-            session.last_end_ms = session.last_end_ms.max(end_ms);
-        }
+        self.last_end_ms = self.last_end_ms.max(end_ms);
         self.run_has_segment = true;
         self.last_close_at = Some(at);
     }
@@ -357,20 +365,23 @@ impl Writer {
         container: &str,
         opened_at: i64,
     ) -> sqlx::Result<(i64, i64)> {
-        let last_close_at = self.last_close_at;
-        let session = self.ensure_session(opened_at).await?;
-        let (session_id, (start_ms, gap)) = (
-            session.id,
-            place(
-                session.last_end_ms,
-                last_close_at
-                    .or(session.resumed_after)
+        let (start_ms, gap) = match self.started_at {
+            None => {
+                self.started_at = Some(
+                    store::set_started_at(&self.pool, self.target.session_id, opened_at).await?,
+                );
+                (0, 0)
+            }
+            Some(_) => place(
+                self.last_end_ms,
+                self.last_close_at
+                    .or(self.resumed_after)
                     .map(|closed| opened_at - closed),
             ),
-        );
+        };
         let id = store::insert_segment(
             &self.pool,
-            session_id,
+            self.target.session_id,
             &path_string(path),
             container,
             start_ms,
@@ -378,33 +389,6 @@ impl Writer {
         )
         .await?;
         Ok((id, start_ms))
-    }
-
-    async fn ensure_session(&mut self, at: i64) -> sqlx::Result<&Session> {
-        if self.session.is_none() {
-            let opened = store::open_session(
-                &self.pool,
-                self.target.streamer_id,
-                Some(self.target.streamerinfo_id),
-                &self.target.title,
-                at,
-                self.target.merge_window_ms,
-            )
-            .await?;
-            if opened.resumed {
-                tracing::info!(
-                    session = opened.id,
-                    last_end_ms = opened.last_end_ms,
-                    "切片工作台：下播后很快又开播，接着记在上一场"
-                );
-            }
-            self.session = Some(Session {
-                id: opened.id,
-                last_end_ms: opened.last_end_ms,
-                resumed_after: opened.resumed_after,
-            });
-        }
-        Ok(self.session.as_ref().unwrap())
     }
 
     /// 收尾没等到关段事件的分段（下载器出错退出、进程被停止）：按盘上的文件补齐；
@@ -421,7 +405,11 @@ impl Writer {
             })
         else {
             index::remove(&open.path);
-            return store::delete_segment(&self.pool, open.id).await;
+            store::delete_segment(&self.pool, open.id).await?;
+            if store::clear_started_at_if_empty(&self.pool, self.target.session_id).await? {
+                self.started_at = None;
+            }
+            return Ok(());
         };
         move_index(&open.path, &path);
         let index_duration = refresh_index(&path).await;

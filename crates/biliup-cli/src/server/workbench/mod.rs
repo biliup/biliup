@@ -1,6 +1,7 @@
 //! 切片工作台的录制侧底座：场次（`stream_sessions`）、分段（`segments`）与关键帧索引。
 //!
-//! - [`recorder`]：下载器开段 / 关段时写库，维护场次时间轴与断流合并；
+//! - [`store`]：开播时插入或复用场次行（断流合并），以及分段的读写；
+//! - [`recorder`]：下载器开段 / 关段时写库，维护场次时间轴；
 //! - [`index`]：分段文件旁的 `<分段>.idx` 关键帧索引（不进 SQLite）；
 //! - [`locate`] / [`session_keyframes`]：按场次时间找到可以落刀 / 起播的分段与字节偏移；
 //! - [`recover`]：启动时收尾上次异常退出留下的 `recording` 分段与没结束的场次。
@@ -159,7 +160,7 @@ pub async fn session_keyframes(
 ///
 /// - `recording` 分段：文件还在就按文件长度记为 `finished`，按索引扫出的时长（扫不出时用
 ///   文件修改时间）回填 `end_ms`，同时核对 / 截断 / 续扫索引缓存；文件没生成或是空的就删行；
-/// - 没有 `ended_at` 的场次：记为最后一个分段的结束时刻。
+/// - 没有 `ended_at` 的场次：记为最后一个分段的结束时刻，没有分段的记为开播时间。
 pub async fn recover(pool: &ConnectionPool) -> Result<()> {
     let leftovers = store::segments_in_state(pool, SegmentState::Recording).await?;
     let mut started: HashMap<i64, i64> = HashMap::new();
@@ -169,31 +170,22 @@ pub async fn recover(pool: &ConnectionPool) -> Result<()> {
             None => {
                 let v = store::session(pool, segment.session_id)
                     .await?
-                    .map_or(0, |s| s.started_at);
+                    .and_then(|s| s.started_at)
+                    .unwrap_or(0);
                 started.insert(segment.session_id, v);
                 v
             }
         };
         recover_segment(pool, segment, started_at).await?;
     }
-    let sessions = store::unended_sessions(pool).await?;
-    for (id, started_at) in &sessions {
-        if store::delete_session_if_empty(pool, *id).await? {
-            continue;
-        }
-        let last_end: Option<i64> = sqlx::query_scalar(
-            "SELECT MAX(COALESCE(end_ms, start_ms)) FROM segments WHERE session_id = ?",
-        )
-        .bind(id)
-        .fetch_one(pool)
-        .await?;
-        store::close_session(pool, *id, started_at + last_end.unwrap_or(0)).await?;
+    for session_id in started.keys() {
+        store::clear_started_at_if_empty(pool, *session_id).await?;
     }
-    if !leftovers.is_empty() || !sessions.is_empty() {
+    let sessions = store::close_unended_sessions(pool).await?;
+    if !leftovers.is_empty() || sessions > 0 {
         info!(
             segments = leftovers.len(),
-            sessions = sessions.len(),
-            "切片工作台：已收尾上次异常退出留下的分段与场次"
+            sessions, "切片工作台：已收尾上次异常退出留下的分段与场次"
         );
     }
     Ok(())

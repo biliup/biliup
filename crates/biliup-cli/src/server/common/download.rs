@@ -293,6 +293,14 @@ impl DownloadTask {
             .filename_prefix
             .clone()
             .or_else(|| ctx.config().filename_prefix.clone());
+        // 切片工作台的场次 / 分段记录，与本次下载任务同寿命；下面提前返回时 drop 也会收尾
+        let workbench = SessionRecorder::spawn(
+            ctx.pool().clone(),
+            SessionTarget {
+                session_id: ctx.id(),
+                streamer_id: ctx.live_streamer().id,
+            },
+        );
         let danmaku_client = danmaku_client(
             stream.danmaku.as_ref(),
             filename_prefix.as_deref(),
@@ -306,20 +314,6 @@ impl DownloadTask {
             client.download().await?;
         }
 
-        // 切片工作台的场次 / 分段记录，与本次下载任务同寿命
-        let workbench = SessionRecorder::spawn(
-            ctx.pool().clone(),
-            SessionTarget {
-                streamer_id: ctx.live_streamer().id,
-                streamerinfo_id: ctx.id(),
-                title: ctx.streamer_info().title.clone(),
-                merge_window_ms: ctx
-                    .config()
-                    .clip_session_merge_minutes
-                    .saturating_mul(60_000)
-                    .min(i64::MAX as u64) as i64,
-            },
-        );
         if let Some(session) = &self.sync_session {
             session.lock().await.set_recorder(workbench.handle());
         }

@@ -1,29 +1,30 @@
--- 切片工作台：场次与分段。
+-- 场次与分段。
 --
--- 一场直播 = 一个场次；同一主播下播后 `clip_session_merge_minutes` 分钟内再开播，
--- 复用上一场（中间的断流记在下一段的 gap_before_ms）。streamerinfo / filelist 与投稿
--- 语义不变，断流合并时一场挂多行 streamerinfo。
+-- streamerinfo 本来就是「一场直播」（开播时插一行，filelist 与投稿都挂在它下面），改名为
+-- stream_sessions 并加上切片工作台需要的列；不另建第二张场次表。ALTER TABLE ... RENAME
+-- 会把 filelist 外键里对旧表名 / 旧列名的引用一并改掉，不重建表、不搬数据。
 --
--- 时间一律是毫秒：*_at 是 Unix 毫秒时间戳；start_ms / end_ms 是场次时间轴上的位置，
--- 0 = 场次第一个分段开写（第一个关键帧到达）的墙钟时刻。关键帧索引不进库，
+-- 新列的时间一律是 Unix 毫秒；segments 的 start_ms / end_ms 是场次时间轴上的位置，
+-- 0 = started_at（场次第一个分段开写、第一个关键帧到达的墙钟时刻）。关键帧索引不进库，
 -- 缓存在分段文件旁边的 `<分段>.idx`。
-CREATE TABLE stream_sessions (
-    id           INTEGER PRIMARY KEY,
-    streamer_id  INTEGER REFERENCES livestreamers (id) ON DELETE SET NULL,
-    title        TEXT    NOT NULL,
-    started_at   INTEGER NOT NULL,
-    ended_at     INTEGER,
-    retain_until INTEGER,
-    created_at   INTEGER NOT NULL
-);
+ALTER TABLE streamerinfo RENAME TO stream_sessions;
+
+ALTER TABLE stream_sessions ADD COLUMN streamer_id INTEGER REFERENCES livestreamers (id) ON DELETE SET NULL;
+-- NULL = 还没有分段（没有时间轴）
+ALTER TABLE stream_sessions ADD COLUMN started_at INTEGER;
+-- NULL = 正在录，或进程异常退出还没收尾（启动时补上）
+ALTER TABLE stream_sessions ADD COLUMN ended_at INTEGER;
+ALTER TABLE stream_sessions ADD COLUMN retain_until INTEGER;
+
+-- 老数据：按 url 找回主播（找不到就是 NULL，永远不会被断流合并接上）；没有结束时间，
+-- 记为开播时间，保证老行都算「已结束」；date 解析不了时记 0。
+UPDATE stream_sessions
+SET streamer_id = (SELECT l.id FROM livestreamers l WHERE l.url = stream_sessions.url),
+    ended_at    = COALESCE(CAST(ROUND((julianday(date) - 2440587.5) * 86400000) AS INTEGER), 0);
 
 CREATE INDEX idx_stream_sessions_streamer ON stream_sessions (streamer_id, id);
 
-CREATE TABLE session_streamerinfo (
-    session_id      INTEGER NOT NULL REFERENCES stream_sessions (id) ON DELETE CASCADE,
-    streamerinfo_id INTEGER NOT NULL REFERENCES streamerinfo (id) ON DELETE CASCADE,
-    PRIMARY KEY (session_id, streamerinfo_id)
-);
+ALTER TABLE filelist RENAME COLUMN streamer_info_id TO session_id;
 
 CREATE TABLE segments (
     id            INTEGER PRIMARY KEY,
