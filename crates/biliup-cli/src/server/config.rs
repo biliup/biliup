@@ -31,6 +31,12 @@ pub struct Config {
     #[serde(default)]
     pub sync_save_dir: Option<String>,
 
+    /// ffmpeg 可执行文件路径。不填时先用桌面版安装包自带的，再到 PATH 里找 `ffmpeg`。
+    /// 全局生效，主播覆写里不能改。
+    #[patch(skip)]
+    #[serde(default)]
+    pub ffmpeg_path: Option<String>,
+
     /// 文件大小限制（字节）
     ///
     /// 主播覆写里这个字段的 `null` 是“显式清除、按主播关闭大小分段”，与其它字段不同。

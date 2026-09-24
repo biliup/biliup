@@ -2,13 +2,14 @@ use crate::server::common::throughput::SubprocessProgress;
 use crate::server::common::util::redact_process_debug;
 use crate::server::core::downloader::{DownloadConfig, DownloadStatus, SegmentEvent, SegmentInfo};
 use crate::server::errors::{AppError, AppResult};
+use crate::tools;
 use biliup::downloader::util::ByteCounter;
 use error_stack::ResultExt;
 use std::collections::HashMap;
 use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, ChildStdout, Command};
+use tokio::process::{Child, ChildStdout};
 use tokio::sync::RwLock;
 use tokio::time::Duration;
 use tracing::{debug, info};
@@ -63,7 +64,7 @@ impl Streamlink {
             .streamlink_downloader
             .build_file_args(&download_config, &part_file)?;
 
-        let mut cmd = Command::new("streamlink");
+        let mut cmd = tools::command("streamlink");
         cmd.args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -197,7 +198,7 @@ impl StreamlinkDownloader {
 
     /// 启动streamlink进程
     pub fn start(&mut self) -> AppResult<StreamOutput> {
-        let mut cmd = Command::new("streamlink");
+        let mut cmd = tools::command("streamlink");
 
         cmd.args(self.build_base_args()?);
 

@@ -1,6 +1,7 @@
 use crate::server::core::downloader::DownloadConfig;
 use crate::server::common::util::redact_process_debug;
 use crate::server::errors::{AppError, AppResult};
+use crate::tools;
 use bytes::Bytes;
 use error_stack::ResultExt;
 use std::collections::HashMap;
@@ -9,7 +10,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdout, Command};
+use tokio::process::{Child, ChildStdout};
 use tokio::sync::RwLock;
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
@@ -120,7 +121,7 @@ impl SyncDownloader {
         pipe_input: bool,
     ) -> AppResult<Child> {
         let args = build_ffmpeg_args(download_config, max_file_size, pipe_input);
-        let mut cmd = Command::new("ffmpeg");
+        let mut cmd = tools::ffmpeg_command();
         cmd.args(&args)
             .stdin(if pipe_input {
                 Stdio::piped()
@@ -132,7 +133,8 @@ impl SyncDownloader {
             .kill_on_drop(true);
         info!(cmd = %redact_process_debug(&cmd), "Starting sync-downloader ffmpeg");
         cmd.spawn().change_context(AppError::Custom(
-            "未安装 FFmpeg 或不在 PATH 中，边录边传无法启动".into(),
+            "找不到 FFmpeg，边录边传无法启动：请安装 FFmpeg 并加入 PATH，或在配置里填写 ffmpeg_path"
+                .into(),
         ))
     }
 
@@ -142,7 +144,7 @@ impl SyncDownloader {
         max_file_size: u64,
     ) -> AppResult<Child> {
         let sl_args = build_streamlink_args(download_config);
-        let mut sl_cmd = Command::new("streamlink");
+        let mut sl_cmd = tools::command("streamlink");
         sl_cmd
             .args(&sl_args)
             .stdin(Stdio::null())
@@ -397,7 +399,7 @@ fn format_ffmpeg_headers(headers: &HashMap<String, String>) -> String {
 }
 
 fn command_exists(name: &str, arg: &str) -> bool {
-    std::process::Command::new(name)
+    tools::std_command(name)
         .arg(arg)
         .stdout(Stdio::null())
         .stderr(Stdio::null())

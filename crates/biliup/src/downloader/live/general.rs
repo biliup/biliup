@@ -2,13 +2,13 @@ use super::{
     DownloaderHint, LiveError, LivePlugin, LiveRequest, LiveResult, LiveStatus, LiveStream,
     RuntimeOptions, YtDlpBackend, YtDlpOptions, media_ext_from_url,
 };
+use crate::tools;
 use async_trait::async_trait;
 use chrono::Utc;
 use regex::Regex;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::process::Stdio;
-use tokio::process::Command;
 
 pub struct General {
     re: Regex,
@@ -128,7 +128,7 @@ impl GeneralLive {
     }
 
     async fn extract_info(&self, url: &str) -> LiveResult<Option<Value>> {
-        let output = Command::new("yt-dlp")
+        let output = tools::command("yt-dlp")
             .stdin(Stdio::null())
             .arg("--dump-single-json")
             .arg("--skip-download")
@@ -151,7 +151,7 @@ impl GeneralLive {
     }
 
     async fn streamlink_url(&self) -> Option<String> {
-        let output = Command::new("streamlink")
+        let output = tools::command("streamlink")
             .stdin(Stdio::null())
             .arg("--stream-url")
             .arg(&self.url)

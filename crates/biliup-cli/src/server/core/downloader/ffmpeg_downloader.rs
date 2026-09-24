@@ -5,13 +5,13 @@ use crate::server::core::downloader::{
     DownloadConfig, DownloadStatus, DownloaderType, SegmentEvent, SegmentInfo,
 };
 use crate::server::errors::{AppError, AppResult};
+use crate::tools;
 use biliup::downloader::util::ByteCounter;
 use error_stack::{ResultExt, bail};
 use std::path::PathBuf;
 use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
@@ -209,7 +209,7 @@ impl FfmpegDownloader {
         let output_file = download_config.generate_output_filename(&download_config.suffix);
 
         let part_file = format!("{}.part", output_file.display());
-        let mut cmd = Command::new("ffmpeg");
+        let mut cmd = tools::ffmpeg_command();
         cmd.args(&args)
             .arg(&part_file)
             .stdin(Stdio::null())
@@ -258,7 +258,7 @@ impl FfmpegDownloader {
     ) -> AppResult<DownloadStatus> {
         let args = self.build_ffmpeg_args_internal_segment(&download_config);
 
-        let mut cmd = Command::new("ffmpeg");
+        let mut cmd = tools::ffmpeg_command();
         cmd.args(&args)
             .arg(format!(
                 "{}.{}.part",

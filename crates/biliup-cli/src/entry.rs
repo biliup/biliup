@@ -227,6 +227,7 @@ pub async fn dispatch(cli: Cli, log_handle: LogHandle) -> AppResult<()> {
                 log_handle,
                 listener: None,
                 shutdown: None,
+                ffmpeg: None,
             })
             .await?
         }
@@ -273,6 +274,9 @@ pub struct ServeOptions {
     /// Stop the server when this future completes. When set, the server does
     /// not install its own Ctrl+C / SIGTERM handlers; the host owns signals.
     pub shutdown: Option<BoxFuture<'static, ()>>,
+    /// An ffmpeg shipped with the host (the desktop app passes the one in its
+    /// installer). Used when the `ffmpeg_path` setting is empty, before `PATH`.
+    pub ffmpeg: Option<PathBuf>,
 }
 
 /// Runs the Web server until shutdown. It only needs a tokio runtime, so an
@@ -285,6 +289,7 @@ pub async fn serve(opts: ServeOptions) -> AppResult<()> {
             .change_context(AppError::Unknown)
             .attach_with(|| format!("could not switch to work dir {}", dir.display()))?;
     }
+    crate::tools::set_bundled_ffmpeg(opts.ffmpeg);
     let listener = match opts.listener {
         Some(listener) => listener
             .set_nonblocking(true)

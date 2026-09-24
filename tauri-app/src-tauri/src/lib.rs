@@ -156,6 +156,7 @@ fn start(app: &AppHandle, window: &WebviewWindow, data_dir: &Path, legacy_roots:
         user_cookie: PathBuf::from("cookies.json"),
         work_dir: None,
         log_handle: logging.handle(),
+        ffmpeg: None,
         listener: Some(listener),
         shutdown: Some(Box::pin(async move {
             let _ = stopped.await;

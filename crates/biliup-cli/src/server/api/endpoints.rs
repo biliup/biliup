@@ -365,6 +365,7 @@ pub async fn put_configuration(
     saved_config
         .validate_segment_limits()
         .map_err(report_to_response)?;
+    crate::tools::set_configured_ffmpeg(saved_config.ffmpeg_path.as_deref());
     *config.write().unwrap() = saved_config;
     let guard = config.read().unwrap();
     if let Some(loggers_level) = &guard.loggers_level {
