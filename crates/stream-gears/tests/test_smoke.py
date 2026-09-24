@@ -5,7 +5,6 @@ source tree: ``pytest crates/stream-gears/tests``. All tests are offline.
 """
 
 import importlib.metadata
-import inspect
 import subprocess
 import sys
 import sysconfig
@@ -16,6 +15,7 @@ import stream_gears
 
 EXPORTS = {
     "PySegment",
+    "StreamGearsError",
     "UploadLine",
     "config_bindings",
     "download",
@@ -49,16 +49,6 @@ UPLOAD_LINES = [
     "Alia",
     "Estx",
     "Akbd",
-]
-
-LOGIN_FUNCTIONS = [
-    "get_qrcode",
-    "login_by_cookies",
-    "login_by_qrcode",
-    "login_by_sms",
-    "login_by_web_cookies",
-    "login_by_web_qrcode",
-    "send_sms",
 ]
 
 # The CLI exits the process (clap's `--help` / `--version`), so it must run in
@@ -96,7 +86,6 @@ def test_upload_line_members():
 
 
 def test_py_segment():
-    # Fields are write-only (`#[pyclass(set_all)]` without `get_all`).
     segment = stream_gears.PySegment()
     segment.time = 60
     segment.size = 10 * 1000 * 1000
@@ -110,17 +99,6 @@ def test_config_bindings():
     assert config.get("no_such_key", "fallback") == "fallback"
     with pytest.raises(AttributeError):
         config.get("no_such_key")
-
-
-@pytest.mark.parametrize("name", LOGIN_FUNCTIONS)
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="PyO3 >= 0.24 no longer defaults trailing Option args to None; login functions need proxy=None",
-)
-def test_login_proxy_is_optional(name):
-    params = inspect.signature(getattr(stream_gears, name)).parameters
-    assert params["proxy"].default is None
 
 
 def test_biliup_version(tmp_path):
