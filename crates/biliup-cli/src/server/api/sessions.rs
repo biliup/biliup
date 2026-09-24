@@ -53,9 +53,11 @@ pub struct SessionSummary {
     pub retain_until: Option<i64>,
     /// 本进程正在录这一场。
     pub recording: bool,
-    /// 时间轴长度（毫秒）：可读分段的最远位置。
+    /// 时间轴长度（毫秒）：可读分段的最远位置。列表里正在写的分段还没有末尾，只算到上一个
+    /// 写完的分段；详情接口按已写入的内容算到最新。
     pub duration_ms: i64,
     pub segment_count: i64,
+    /// 只算写完的分段。
     pub bytes: i64,
 }
 
