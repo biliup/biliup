@@ -3,8 +3,10 @@ use crate::downloader::flv_parser::{
     SoundSize, SoundType, TagHeader,
 };
 
+use crate::downloader::index_tap::FileTap;
 use crate::downloader::util::LifecycleFile;
 use byteorder::{BigEndian, WriteBytesExt};
+use bytes::Bytes;
 use serde::Serialize;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -25,16 +27,23 @@ pub struct FlvFile<'a> {
     pub file: LifecycleFile<'a>,
     /// 当前分段已交给 [`LifecycleFile::finish`]，`Drop` 不再重复改名、触发钩子。
     finished: bool,
+    /// 当前分段已写的字节数（含文件头），即下一个 tag 的偏移。
+    pos: u64,
+    index: Option<FileTap>,
 }
 
 impl<'a> FlvFile<'a> {
     pub fn new(mut file: LifecycleFile<'a>) -> std::io::Result<Self> {
         // let file_name = util::format_filename(file_name);
         let path = file.create()?;
+        let buf_writer = Self::create(path)?;
+        let index = file.index.as_ref().map(|tap| tap.open(&file.path));
         Ok(Self {
-            buf_writer: Self::create(path)?,
+            buf_writer,
             file,
             finished: false,
+            pos: (FLV_HEADER.len() + 4) as u64,
+            index,
         })
     }
 
@@ -44,12 +53,22 @@ impl<'a> FlvFile<'a> {
         let path = self.file.create()?;
         self.buf_writer = Self::create(path)?;
         self.finished = false;
+        self.pos = (FLV_HEADER.len() + 4) as u64;
+        self.index = self
+            .file
+            .index
+            .as_ref()
+            .map(|tap| tap.open(&self.file.path));
         Ok(())
     }
 
     /// flush 并检查错误 → 去掉 `.part` → 触发钩子，见 [`LifecycleFile::finish`]。
     fn finish(&mut self) -> std::io::Result<()> {
         self.finished = true;
+        // 先于改名钩子发出：录制器收到分段关闭时，索引任务队列里已有这个文件的全部事件
+        if let Some(index) = self.index.take() {
+            index.closed(self.pos);
+        }
         self.file.finish(&mut self.buf_writer)
     }
 
@@ -77,14 +96,53 @@ impl<'a> FlvFile<'a> {
         body: &[u8],
         previous_tag_size: &[u8],
     ) -> std::io::Result<usize> {
+        let offset = self.write_tag_bytes(tag_header, body, previous_tag_size)?;
+        if let Some(index) = &self.index {
+            index.flv_tag(
+                offset,
+                tag_header.tag_type as u8,
+                tag_header.timestamp,
+                &Bytes::copy_from_slice(body),
+            );
+        }
+        Ok(previous_tag_size.len())
+    }
+
+    /// 同 [`Self::write_tag`]，body 已是 [`Bytes`] 时索引旁路不用复制。
+    pub fn write_shared_tag(
+        &mut self,
+        tag_header: &TagHeader,
+        body: &Bytes,
+        previous_tag_size: &[u8],
+    ) -> std::io::Result<usize> {
+        let offset = self.write_tag_bytes(tag_header, body, previous_tag_size)?;
+        if let Some(index) = &self.index {
+            index.flv_tag(
+                offset,
+                tag_header.tag_type as u8,
+                tag_header.timestamp,
+                body,
+            );
+        }
+        Ok(previous_tag_size.len())
+    }
+
+    /// 写一个 tag，返回它在文件里的起始偏移。
+    fn write_tag_bytes(
+        &mut self,
+        tag_header: &TagHeader,
+        body: &[u8],
+        previous_tag_size: &[u8],
+    ) -> std::io::Result<u64> {
         self.write_tag_header(tag_header)?;
         self.buf_writer.write_all(body)?;
         // write 允许部分写入，短写会静默丢字节并破坏 FLV 结构，必须用 write_all
         self.buf_writer.write_all(previous_tag_size)?;
-        self.file
-            .bytes_written
-            .add((11 + body.len() + previous_tag_size.len()) as u64);
-        Ok(previous_tag_size.len())
+        let len = (11 + body.len() + previous_tag_size.len()) as u64;
+        self.file.bytes_written.add(len);
+        let offset = self.pos;
+        self.pos += len;
+        Ok(offset)
     }
 
     pub fn write_tag_header(&mut self, tag_header: &TagHeader) -> std::io::Result<()> {

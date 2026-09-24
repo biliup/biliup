@@ -98,7 +98,7 @@ impl GopCache {
                     tag_header.timestamp
                 );
             }
-            out.write_tag(&tag_header, &flv_tag_data, &previous_tag_size_bytes)?;
+            out.write_shared_tag(&tag_header, &flv_tag_data, &previous_tag_size_bytes)?;
             segment.increase_size((11 + tag_header.data_size + 4) as u64);
             *prev_timestamp = tag_header.timestamp
         }
@@ -782,6 +782,89 @@ mod tests {
 
         super::parse_flv(connection, file, Segmentable::new(None, None), None).await?;
         assert_eq!(counter.total(), (11 + 14 + 4) + (11 + 5 + 4));
+        Ok(())
+    }
+
+    /// 关键帧索引旁路报告的每个 tag（偏移、类型、时间戳、长度）与落盘文件逐一对应，
+    /// 跨分段时每个文件从头计偏移，关段报告的长度就是文件长度。
+    #[tokio::test]
+    async fn index_tap_reports_the_on_disk_offset_of_every_tag()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::downloader::index_tap::{IndexEvent, IndexTap};
+        use crate::downloader::util::{LifecycleFile, Segmentable};
+        use std::sync::{Arc, Mutex};
+
+        let http_resp = http::Response::builder()
+            .status(200)
+            .body(gop_flv_body(40))?;
+        let connection = super::Connection::new(reqwest::Response::from(http_resp));
+
+        let dir = tempfile::tempdir()?;
+        let kept: Arc<Mutex<Vec<std::path::PathBuf>>> = Arc::default();
+        let file = LifecycleFile::with_hook(dir.path().join("tap").to_str().unwrap(), "flv", {
+            let kept = kept.clone();
+            let dir = dir.path().to_path_buf();
+            move |name: &str| {
+                let mut kept = kept.lock().unwrap();
+                let path = dir.join(format!("seg-{:04}.flv", kept.len()));
+                std::fs::rename(name, &path).unwrap();
+                kept.push(path);
+            }
+        });
+        let (tap, mut rx) = IndexTap::channel(1 << 16);
+        let file = file.with_index_tap(Some(tap));
+        super::parse_flv(connection, file, Segmentable::new(None, Some(2048)), None).await?;
+
+        type Tags = Vec<(u64, u8, u32, u32)>;
+        let mut reported: Vec<(Tags, Option<u64>)> = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                IndexEvent::Opened(file) => {
+                    assert!(file.path().to_string_lossy().ends_with("tap.flv.part"));
+                    reported.push((Vec::new(), None));
+                }
+                IndexEvent::FlvTag {
+                    offset,
+                    tag_type,
+                    timestamp,
+                    data_size,
+                    data,
+                    ..
+                } => {
+                    let key = tag_type == 9 && data[0] >> 4 == 1;
+                    assert_eq!(data.len() == data_size as usize, key || data_size <= 32);
+                    reported
+                        .last_mut()
+                        .unwrap()
+                        .0
+                        .push((offset, tag_type, timestamp, data_size));
+                }
+                IndexEvent::Closed { len, .. } => reported.last_mut().unwrap().1 = Some(len),
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+
+        let kept = kept.lock().unwrap();
+        assert!(
+            kept.len() > 3,
+            "expected several segments, got {}",
+            kept.len()
+        );
+        assert_eq!(reported.len(), kept.len());
+        for ((tags, closed), path) in reported.iter().zip(kept.iter()) {
+            let bytes = std::fs::read(path)?;
+            assert_eq!(*closed, Some(bytes.len() as u64));
+            let mut on_disk = Vec::new();
+            let mut offset = 13;
+            while offset < bytes.len() {
+                let h = &bytes[offset..offset + 11];
+                let size = u32::from_be_bytes([0, h[1], h[2], h[3]]);
+                let ts = u32::from_be_bytes([h[7], h[4], h[5], h[6]]);
+                on_disk.push((offset as u64, h[0], ts, size));
+                offset += 15 + size as usize;
+            }
+            assert_eq!(*tags, on_disk, "{}", path.display());
+        }
         Ok(())
     }
 }
