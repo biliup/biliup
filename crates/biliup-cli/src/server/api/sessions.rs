@@ -308,22 +308,23 @@ pub struct MediaQuery {
 /// FLV 分段返回 `video/x-flv`，TS 分段返回 `video/mp2t`（都给 mpegts.js）；分片 MP4 暂不支持（415）。
 /// 响应头 `X-Dvr-Start-Ms` 是起播关键帧的场次时间；媒体时间戳 = 场次时间 + 1000 ms。
 /// 遇到断流缺口、编码参数变化、场次结束时响应结束，播放器按 `GET /v1/sessions/{id}` 从下一段重开。
+/// 场次不存在、这个位置没有能回看的画面时先返回 404 / 415，只有真要开流时才占连接数（超出 429）。
 pub async fn get_session_media(
     State(pool): State<ConnectionPool>,
     Path(id): Path<i64>,
     Query(query): Query<MediaQuery>,
 ) -> Response {
-    let Ok(permit) = dvr_limit().clone().try_acquire_owned() else {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            format!(
-                "回看连接数已达上限（进程内最多 {MAX_DVR_CONNECTIONS} 路），请关掉其它回看窗口"
-            ),
-        )
-            .into_response();
-    };
+    media_response(&pool, id, query, dvr_limit()).await
+}
+
+async fn media_response(
+    pool: &ConnectionPool,
+    id: i64,
+    query: MediaQuery,
+    limit: &Arc<Semaphore>,
+) -> Response {
     let from = query.from.unwrap_or(0).max(0);
-    let dvr = match dvr::open(&pool, id, from).await {
+    let dvr = match dvr::open(pool, id, from).await {
         Ok(dvr) => dvr,
         Err(OpenError::NotFound) => return not_found(),
         Err(e @ OpenError::NoMedia) => {
@@ -333,6 +334,15 @@ pub async fn get_session_media(
             return (StatusCode::UNSUPPORTED_MEDIA_TYPE, reason).into_response();
         }
         Err(e) => return internal(e),
+    };
+    let Ok(permit) = limit.clone().try_acquire_owned() else {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            format!(
+                "回看连接数已达上限（进程内最多 {MAX_DVR_CONNECTIONS} 路），请关掉其它回看窗口"
+            ),
+        )
+            .into_response();
     };
     info!(
         session = id,
@@ -387,6 +397,8 @@ mod tests {
         app: Router,
         session: i64,
         legacy: i64,
+        /// 每个夹具自己的回看连接上限：测试并行跑时不共用进程级的那一份。
+        dvr_limit: Arc<Semaphore>,
         _live: live::LiveGuard,
     }
 
@@ -449,11 +461,20 @@ mod tests {
             SessionManagerLayer::new(session_store).with_secure(false),
         )
         .build();
+        let dvr_limit = Arc::new(Semaphore::new(MAX_DVR_CONNECTIONS));
+        let media = {
+            let limit = dvr_limit.clone();
+            move |State(pool): State<ConnectionPool>,
+                  Path(id): Path<i64>,
+                  Query(query): Query<MediaQuery>| async move {
+                media_response(&pool, id, query, &limit).await
+            }
+        };
         let app = Router::new()
             .route("/v1/sessions", get(list_sessions))
             .route("/v1/sessions/{id}", get(get_session))
             .route("/v1/sessions/{id}/keyframes", get(get_session_keyframes))
-            .route("/v1/sessions/{id}/media", get(get_session_media))
+            .route("/v1/sessions/{id}/media", get(media))
             .with_state(pool.clone())
             .route_layer(from_fn(require_permission))
             .merge(crate::server::api::auth::router())
@@ -465,6 +486,7 @@ mod tests {
             app,
             session,
             legacy,
+            dvr_limit,
             _live: live,
         }
     }
@@ -728,7 +750,6 @@ mod tests {
         }
     }
 
-    /// 连接上限与会话失效截断共用进程级的许可，放在同一个用例里顺序跑。
     #[tokio::test]
     async fn media_streams_are_limited_and_end_when_the_session_is_revoked() {
         let f = fixture().await;
@@ -753,6 +774,15 @@ mod tests {
         }
         let response = get_as(&f.app, Some(&admin), &uri).await;
         assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        // 占满时，不存在的场次、没有画面的场次仍按 404 回，不报 429
+        for missing in [
+            "/v1/sessions/999999/media".to_string(),
+            format!("/v1/sessions/{}/media", f.legacy),
+        ] {
+            let response = get_as(&f.app, Some(&admin), &missing).await;
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{missing}");
+        }
+        assert_eq!(f.dvr_limit.available_permits(), 0);
         others.pop();
         let response = get_as(&f.app, Some(&admin), &uri).await;
         assert_eq!(response.status(), StatusCode::OK, "断开一路就能再开");
@@ -770,6 +800,6 @@ mod tests {
         assert!(drained.is_ok(), "会话失效后回看流应在一两个复查周期内结束");
         drop(viewer_stream);
         drop(others);
-        assert_eq!(dvr_limit().available_permits(), MAX_DVR_CONNECTIONS);
+        assert_eq!(f.dvr_limit.available_permits(), MAX_DVR_CONNECTIONS);
     }
 }
