@@ -4,7 +4,7 @@
 //! message processing, and XML output for recording live stream chat.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -770,19 +770,37 @@ fn roll_writer(
         return Ok(false);
     }
 
-    if let Some(new_path) = new_file_name {
-        if current_path != new_path {
-            if let Some(parent) = new_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            if new_path.exists() {
-                fs::remove_file(&new_path)?;
-            }
-            fs::rename(current_path, new_path)?;
+    if let Some(new_path) = new_file_name
+        && !is_same_file(&current_path, &new_path)
+    {
+        if let Some(parent) = new_path.parent() {
+            fs::create_dir_all(parent)?;
         }
+        if new_path.exists() {
+            fs::remove_file(&new_path)?;
+        }
+        fs::rename(current_path, new_path)?;
     }
 
     Ok(true)
+}
+
+/// `Path` 的相等比较保留开头的 `.`，`./x.xml` 和 `x.xml` 会被当成两个文件；
+/// 这时 `roll_writer` 会把目标（其实就是当前文件）删掉，再改名就失败了。
+fn is_same_file(a: &Path, b: &Path) -> bool {
+    fn lexical(path: &Path) -> PathBuf {
+        path.components()
+            .filter(|component| !matches!(component, Component::CurDir))
+            .collect()
+    }
+
+    if lexical(a) == lexical(b) {
+        return true;
+    }
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
 }
 
 fn next_output_path(template: &Path) -> PathBuf {
@@ -866,6 +884,97 @@ mod tests {
         assert!(roll_writer(&mut writer, &template, &config, Some(new_path.clone())).is_ok());
 
         assert!(!new_path.exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn dot_prefixed_path_is_the_same_file() {
+        assert!(is_same_file(Path::new("./x.xml"), Path::new("x.xml")));
+        assert!(is_same_file(Path::new("x.xml"), Path::new("./x.xml")));
+        assert!(is_same_file(Path::new("./a/x.xml"), Path::new("a/x.xml")));
+        assert!(!is_same_file(Path::new("./x.xml"), Path::new("y.xml")));
+        assert!(!is_same_file(Path::new("a/x.xml"), Path::new("b/x.xml")));
+    }
+
+    fn write_one_chat(writer: &mut XmlWriter) {
+        let chat = crate::message::ChatMessage::new("hello".to_string()).with_name("user");
+        writer.write_event(&DanmakuEvent::Chat(chat)).unwrap();
+    }
+
+    /// 视频分段路径带 `./`、当前 XML 路径不带时，分段不能把当前 XML 删掉。
+    #[test]
+    fn rolling_onto_dot_prefixed_current_path_keeps_the_xml() {
+        // 相对路径才能复现：绝对路径中间的 `.` 在 `Path` 比较时本来就会被忽略
+        let dir = PathBuf::from(format!(
+            "danmaku-roll-dot-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let template = dir.join("danmaku");
+        let config = XmlWriterConfig::default();
+        let mut writer = XmlWriter::new(format_output_path(&template), config.clone()).unwrap();
+        write_one_chat(&mut writer);
+        let current_path = writer.file_path().to_path_buf();
+        let dotted = Path::new(".").join(&current_path);
+        assert_ne!(current_path, dotted);
+
+        let rolled = roll_writer(&mut writer, &template, &config, Some(dotted.clone()));
+
+        let content = std::fs::read_to_string(&current_path);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(rolled.unwrap());
+        let content = content.unwrap();
+        assert!(content.contains("hello"));
+        assert!(content.trim_end().ends_with("</i>"));
+    }
+
+    #[test]
+    fn rolling_onto_another_spelling_of_the_current_path_keeps_the_xml() {
+        let dir = std::env::temp_dir().join(format!(
+            "danmaku-roll-alias-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        let template = dir.join("danmaku");
+        let config = XmlWriterConfig::default();
+        let mut writer = XmlWriter::new(format_output_path(&template), config.clone()).unwrap();
+        write_one_chat(&mut writer);
+        let current_path = writer.file_path().to_path_buf();
+        let alias = dir
+            .join("sub")
+            .join("..")
+            .join(current_path.file_name().unwrap());
+
+        assert!(roll_writer(&mut writer, &template, &config, Some(alias)).unwrap());
+
+        let content = std::fs::read_to_string(&current_path).unwrap();
+        assert!(content.contains("hello"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn rolling_replaces_a_different_existing_target() {
+        let dir = std::env::temp_dir().join(format!(
+            "danmaku-roll-replace-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let template = dir.join("danmaku");
+        let new_path = dir.join("segment.xml");
+        std::fs::write(&new_path, "stale").unwrap();
+        let config = XmlWriterConfig::default();
+        let mut writer = XmlWriter::new(format_output_path(&template), config.clone()).unwrap();
+        write_one_chat(&mut writer);
+        let current_path = writer.file_path().to_path_buf();
+
+        assert!(roll_writer(&mut writer, &template, &config, Some(new_path.clone())).unwrap());
+
+        assert!(!current_path.exists());
+        let content = std::fs::read_to_string(&new_path).unwrap();
+        assert!(content.contains("hello"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
