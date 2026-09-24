@@ -12,8 +12,9 @@ use axum::middleware::from_fn;
 use axum::routing::get;
 use axum_login::AuthManagerLayerBuilder;
 use error_stack::ResultExt;
-use std::net::SocketAddr;
+use futures::future::BoxFuture;
 use time::Duration;
+use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::task::AbortHandle;
 use tower_http::cors::{AllowMethods, CorsLayer};
@@ -27,10 +28,11 @@ pub struct ApplicationController;
 impl ApplicationController {
     /// 启动Web服务器
     pub async fn serve(
-        addr: &SocketAddr,
+        listener: TcpListener,
         enable_login_guard: bool,
         secure_session_cookie: bool,
         service_register: ServiceRegister,
+        shutdown: Option<BoxFuture<'static, ()>>,
     ) -> AppResult<()> {
         // 会话层配置
         // 使用 tower-sessions 建立会话层，将会话作为请求扩展提供
@@ -89,15 +91,14 @@ impl ApplicationController {
             .fallback(static_handler); // 静态文件处理回退
 
         // 启动HTTP服务器
+        let addr = listener.local_addr().change_context(AppError::Unknown)?;
         info!("routes initialized, listening on {}", addr);
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .change_context(AppError::Unknown)?;
 
         axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal(
                 deletion_task.abort_handle(),
                 service_register,
+                shutdown,
             ))
             .await
             .change_context(AppError::Unknown)
@@ -145,7 +146,17 @@ fn with_optional_auth(app: axum::Router<()>, enable_login_guard: bool) -> axum::
 async fn shutdown_signal(
     deletion_task_abort_handle: AbortHandle,
     service_register: ServiceRegister,
+    shutdown: Option<BoxFuture<'static, ()>>,
 ) {
+    match shutdown {
+        Some(shutdown) => shutdown.await,
+        None => os_shutdown_signal().await,
+    }
+    deletion_task_abort_handle.abort();
+    service_register.cleanup().await;
+}
+
+async fn os_shutdown_signal() {
     // 监听Ctrl+C信号
     let ctrl_c = async {
         signal::ctrl_c()
@@ -166,12 +177,11 @@ async fn shutdown_signal(
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
 
-    // 等待任一信号触发，然后中止清理任务
+    // 等待任一信号触发
     tokio::select! {
-        _ = ctrl_c => { deletion_task_abort_handle.abort() },
-        _ = terminate => { deletion_task_abort_handle.abort() },
+        _ = ctrl_c => {},
+        _ = terminate => {},
     }
-    service_register.cleanup().await;
 }
 
 #[cfg(test)]

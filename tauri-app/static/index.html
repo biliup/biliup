@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>biliup</title>
+    <style>
+      :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; }
+      main { max-width: 42rem; padding: 2rem; text-align: center; }
+      pre { text-align: left; white-space: pre-wrap; word-break: break-all; font-size: 0.85rem; }
+      .error h1 { color: #d9363e; }
+    </style>
+  </head>
+  <body>
+    <main id="main">
+      <h1 id="title">biliup 正在启动…</h1>
+      <pre id="detail"></pre>
+    </main>
+    <script>
+      // The desktop shell reports startup failures as `#error=<message>`.
+      function render() {
+        var prefix = "#error=";
+        if (location.hash.indexOf(prefix) !== 0) return;
+        document.getElementById("main").className = "error";
+        document.getElementById("title").textContent = "biliup 启动失败";
+        document.getElementById("detail").textContent = decodeURIComponent(
+          location.hash.slice(prefix.length),
+        );
+      }
+      window.addEventListener("hashchange", render);
+      render();
+    </script>
+  </body>
+</html>

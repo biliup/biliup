@@ -1,8 +1,7 @@
 [package]
-name = "tauri-app"
+name = "biliup-desktop"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "biliup desktop app"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -11,7 +10,7 @@ edition = "2021"
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "tauri_app_lib"
+name = "biliup_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -19,10 +18,22 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-dialog = "2"
+biliup-cli = { path = "../../crates/biliup-cli" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri-plugin-shell = "2"
+tokio = { version = "1", features = ["io-util", "net", "sync", "time"] }
+tracing = "0.1"
+
+[target.'cfg(windows)'.dependencies]
+windows-registry = "0.6"
 
 [workspace]
 # 这个空的 workspace 表告诉 Cargo，此 crate 是一个独立的 workspace，不要再向上查找了
+
+# 与根 workspace 的 release 配置一致（独立 workspace 不继承根 profile）
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

@@ -147,7 +147,7 @@ biliup season sort <小节ID> <episode ID>...       # 列出的稿件按顺序�
 ## 🚀 快速开始
 
 ### Windows
-- 下载 Release: [bbup-app](https://github.com/biliup/biliup/releases/latest)
+- 下载 Release 中的桌面版安装包 [biliup_*_x64-setup.exe](https://github.com/biliup/biliup/releases/latest)
 
 ### Linux 或 macOS
 1. 安装 [uv](https://docs.astral.sh/uv/getting-started/installation/) 
