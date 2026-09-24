@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useMemo } from 'react'
-import { API_BASE } from './api-streamer'
+import { API_BASE, revalidateMe } from './api-streamer'
 
 /** SSE 里一条弹幕的形状，与后端 `DanmakuFrame` 一致 */
 export interface DanmakuFrame {
@@ -74,6 +74,11 @@ export class DanmakuFeed {
       this.listeners.get(frame.id)?.forEach((l) => l(frame))
     }
     for (const kind of KINDS) source.addEventListener(kind, handle as EventListener)
+    // 断线后浏览器会自动重连；重连被拒（401 / 403，会话失效或失去预览权限）时不再重连、状态变为 CLOSED，
+    // 刷新一次权限点：失效就跳登录页，降级就收起页面
+    source.onerror = () => {
+      if (source.readyState === EventSource.CLOSED) revalidateMe()
+    }
     this.source = source
   }
 }

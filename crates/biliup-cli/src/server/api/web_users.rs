@@ -2,6 +2,7 @@
 
 use crate::server::api::access::Caller;
 use crate::server::infrastructure::permissions::Role;
+use crate::server::infrastructure::policy::Subject;
 use crate::server::infrastructure::users::{
     AuthSession, CreateUserError, UpdateUserError, UserChanges, UserSummary,
 };
@@ -17,6 +18,7 @@ use serde_json::json;
 pub fn admin_router() -> Router<()> {
     Router::new()
         .route("/v1/web-users", get(list_users).post(create_user))
+        .route("/v1/web-users/roles", get(list_roles))
         .route("/v1/web-users/{id}", put(update_user).delete(delete_user))
         .route("/v1/web-users/{id}/logout-all", post(logout_all))
 }
@@ -42,26 +44,27 @@ fn internal(error: impl std::fmt::Debug) -> Response {
     StatusCode::INTERNAL_SERVER_ERROR.into_response()
 }
 
-fn me_body(username: Option<&str>, id: Option<i64>, role: Role, auth_enabled: bool) -> Response {
+/// 权限点由授权决策点算出（含环境属性），前端只按它显隐，不再自己推导。
+fn me_body(username: Option<&str>, subject: Subject) -> Response {
     Json(json!({
-        "id": id,
+        "id": subject.user_id,
         "username": username,
-        "role": role,
-        "permissions": role.permissions(),
-        "auth_enabled": auth_enabled,
+        "role": subject.role,
+        "permissions": subject.permissions(),
+        "auth_enabled": subject.auth_enabled,
     }))
     .into_response()
 }
 
 async fn me(auth_session: AuthSession) -> Response {
     match auth_session.user {
-        Some(user) => me_body(Some(&user.username), Some(user.id), user.role, true),
+        Some(user) => me_body(Some(&user.username), Subject::user(user.id, user.role)),
         None => StatusCode::UNAUTHORIZED.into_response(),
     }
 }
 
 async fn unrestricted_me() -> Response {
-    me_body(None, None, Role::Admin, false)
+    me_body(None, Subject::unrestricted())
 }
 
 #[derive(Deserialize)]
@@ -93,6 +96,23 @@ async fn change_password(
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
     StatusCode::NO_CONTENT.into_response()
+}
+
+/// 各角色实际拥有的权限点，用户管理页据此说明角色，前端不再手写角色与权限的对应。
+async fn list_roles() -> Response {
+    let roles: Vec<_> = Role::ALL
+        .into_iter()
+        .map(|role| {
+            // 这个接口只在 `--auth` 开启时存在，按开启时的环境算
+            let subject = Subject {
+                user_id: None,
+                role,
+                auth_enabled: true,
+            };
+            json!({ "role": role, "permissions": subject.permissions() })
+        })
+        .collect();
+    Json(roles).into_response()
 }
 
 async fn list_users(auth_session: AuthSession) -> Response {
@@ -140,7 +160,9 @@ async fn update_user(
     Path(id): Path<i64>,
     Json(changes): Json<UserChanges>,
 ) -> Response {
-    if caller.user_id == Some(id) && (changes.role.is_some() || changes.disabled == Some(true)) {
+    if caller.subject.user_id == Some(id)
+        && (changes.role.is_some() || changes.disabled == Some(true))
+    {
         return message(StatusCode::BAD_REQUEST, "不能修改自己的角色或禁用自己");
     }
     match auth_session.backend.update_user(id, changes).await {
@@ -150,7 +172,7 @@ async fn update_user(
 }
 
 async fn delete_user(caller: Caller, auth_session: AuthSession, Path(id): Path<i64>) -> Response {
-    if caller.user_id == Some(id) {
+    if caller.subject.user_id == Some(id) {
         return message(StatusCode::BAD_REQUEST, "不能删除自己");
     }
     match auth_session.backend.delete_user(id).await {
@@ -170,6 +192,7 @@ async fn logout_all(auth_session: AuthSession, Path(id): Path<i64>) -> Response 
 mod tests {
     use crate::server::api::{access, auth};
     use crate::server::infrastructure::connection_pool::ConnectionManager;
+    use crate::server::infrastructure::permissions::Role;
     use crate::server::infrastructure::users::Backend;
     use axum::Router;
     use axum::body::Body;
@@ -353,6 +376,54 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn role_catalog_comes_from_the_policy() {
+        let (_dir, app) = app().await;
+        let (_, admin, _) = call(
+            &app,
+            None,
+            "POST",
+            "/v1/users/register",
+            Some(json!({ "username": "biliup", "password": "admin-password" })),
+        )
+        .await;
+        let admin = admin.unwrap();
+        let (status, _, roles) = call(&app, Some(&admin), "GET", "/v1/web-users/roles", None).await;
+        assert_eq!(status, StatusCode::OK);
+        let roles = roles.as_array().unwrap();
+        assert_eq!(roles.len(), Role::ALL.len());
+        for (entry, role) in roles.iter().zip(Role::ALL) {
+            assert_eq!(entry["role"], json!(role));
+            assert_eq!(entry["permissions"], json!(role.permissions()));
+        }
+
+        let (status, _, _) = call(
+            &app,
+            Some(&admin),
+            "POST",
+            "/v1/web-users",
+            Some(json!({ "username": "ro", "password": "viewer-password", "role": "viewer" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let viewer = login(&app, "ro", "viewer-password").await;
+        let (status, _, _) = call(&app, Some(&viewer), "GET", "/v1/web-users/roles", None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn without_auth_there_are_no_users_to_manage() {
+        let app = super::unrestricted_me_router();
+        let (status, _, me) = call(&app, None, "GET", "/v1/me", None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(me["auth_enabled"], false);
+        assert_eq!(me["role"], "admin");
+        let permissions = me["permissions"].as_array().unwrap();
+        assert!(!permissions.contains(&json!("user.manage")));
+        assert!(permissions.contains(&json!("streamer.hooks")));
+        assert!(permissions.contains(&json!("config.edit")));
     }
 
     #[tokio::test]

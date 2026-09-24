@@ -131,9 +131,6 @@ const EXTRA_PAGE_PERMS: { prefix: string; perm: Permission }[] = [
   { prefix: '/upload-manager/edit', perm: 'template.edit' },
 ]
 
-/** 每个角色都有的权限点：这些页面不必等 /v1/me 返回就能先渲染 */
-const UNIVERSAL_PERMS: Permission[] = ['streamer.view', 'preview.view', 'config.view', 'log.view', 'file.view']
-
 const matches = (pathname: string, href: string) =>
   href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(href + '/')
 
@@ -142,7 +139,7 @@ function pagePermission(pathname: string): Permission | undefined {
   if (extra) return extra.perm
   for (const group of NAV_GROUPS) {
     for (const item of group.items) {
-      if (item.href !== '/' && matches(pathname, item.href)) return item.perm
+      if (matches(pathname, item.href)) return item.perm
     }
   }
   return undefined
@@ -211,9 +208,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   // 权限未加载完时整组菜单先不过滤（全部都是公开的静态页面，数据接口本身有后端拦截），
   // 避免每次进页面侧栏闪一下
-  const { me, error: meError, can: canRaw } = useMe()
-  // 未开启 --auth 时没有登录用户，也就没有用户可管
-  const can = (perm: Permission) => (perm === 'user.manage' ? !!me?.auth_enabled && canRaw(perm) : canRaw(perm))
+  const { me, error: meError, can } = useMe()
   const visibleGroups = me
     ? NAV_GROUPS.map((group) => ({ ...group, items: group.items.filter((item) => can(item.perm)) })).filter(
         (group) => group.items.length > 0,
@@ -221,8 +216,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     : NAV_GROUPS.map((group) => ({ ...group, items: group.items.filter((item) => item.perm !== 'user.manage') }))
   const requiredPerm = pagePermission(pathname)
   const denied = !!me && !!requiredPerm && !can(requiredPerm)
-  // 需要特定权限的页面等权限加载完再渲染，免得没有权限的角色先发出一串注定 403 的请求
-  const pending = !me && !meError && !!requiredPerm && !UNIVERSAL_PERMS.includes(requiredPerm)
+  // 需要权限的页面一律等权限加载完再渲染：前端不假设哪个权限点人人都有，
+  // 免得没有权限的人先发出一串注定 403 的请求。/v1/me 有缓存，只有首次进入会等
+  const pending = !me && !meError && !!requiredPerm
 
   const [passwordOpen, setPasswordOpen] = useState(false)
   const logout = async () => {

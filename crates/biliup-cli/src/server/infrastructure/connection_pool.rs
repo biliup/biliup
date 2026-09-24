@@ -1,8 +1,9 @@
 use crate::server::errors::{AppError, AppResult};
 use error_stack::ResultExt;
-use sqlx::migrate::Migrator;
+use sqlx::migrate::{Migration, Migrator};
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{Pool, Sqlite};
+use std::borrow::Cow;
 use std::fmt::Write as _;
 use std::path::Path;
 use tracing::{info, warn};
@@ -12,11 +13,14 @@ pub type ConnectionPool = Pool<Sqlite>;
 
 /// 一条曾经被就地改写过的迁移。
 ///
-/// `legacy_checksum` 是历史版本里该文件内容的 SHA-384（sqlx 记在 `_sqlx_migrations`
+/// `legacy_checksums` 是历史版本里该文件内容的 SHA-384（sqlx 记在 `_sqlx_migrations`
 /// 里的那一列），`repair` 是把旧内容的执行效果补成新内容所需的语句。
 struct SupersededMigration {
     version: i64,
-    legacy_checksum: &'static str,
+    /// 旧内容在 LF 与 CRLF 检出下的摘要都要登记：`.gitattributes` 把迁移统一成 LF 之前，
+    /// Windows 发布包（`windows-latest` 上以 `core.autocrlf=true` 检出）和 Windows 本地
+    /// 构建记进库里的都是 CRLF 摘要。
+    legacy_checksums: &'static [&'static str],
     /// 必须幂等：老库可能已经处于新内容期望的状态，也可能重复启动多次。
     repair: &'static [&'static str],
 }
@@ -35,7 +39,12 @@ const SUPERSEDED_MIGRATIONS: &[SupersededMigration] = &[
     // 全部校验失配。两版内容的唯一差异就是这一条 UPDATE。
     SupersededMigration {
         version: 2,
-        legacy_checksum: "fcc6436a889297e5c28f2a0f12196e5eee5975ba352032c8201dfa61fb1b9c3fd01ddc41ddfa71bd7423999521b895eb",
+        legacy_checksums: &[
+            // LF 检出：Linux / macOS / Docker 构建
+            "fcc6436a889297e5c28f2a0f12196e5eee5975ba352032c8201dfa61fb1b9c3fd01ddc41ddfa71bd7423999521b895eb",
+            // CRLF 检出：v1.1.8 ~ v1.2.4 的 Windows 发布包内嵌的就是这个，Windows 本地构建同理
+            "f636cd5b7b62ae53f422ee22daa1c957ddb9d932a9b1c8061fda58adb921032fae46f7896f55ea561158ff963b8ea038",
+        ],
         repair: &["UPDATE uploadstreamers SET tags = '[]' WHERE tags = '' OR tags = 'null'"],
     },
 ];
@@ -81,7 +90,7 @@ impl ConnectionManager {
 
         // 运行数据库迁移，确保数据库结构是最新的
         let migrator = sqlx::migrate!();
-        Self::reconcile_superseded_migrations(&pool, &migrator).await?;
+        Self::reconcile_applied_migrations(&pool, &migrator).await?;
 
         info!("migrations enabled, running...");
         migrator.run(&pool).await.change_context(AppError::Custom(
@@ -91,12 +100,16 @@ impl ConnectionManager {
         Ok(pool)
     }
 
-    /// 把历史上被改写过的迁移记录对齐到当前文件内容，让老库还能继续升级。
+    /// 在 sqlx 校验之前，把两类可以放行的校验和失配对齐到当前二进制内嵌的摘要，让老库
+    /// 还能继续升级：
     ///
-    /// 只在记录里的校验和**恰好等于**登记过的历史摘要时才动手；其余任何失配都原样
-    /// 留给 sqlx 报错，免得把用户自己改过的迁移悄悄放行。补丁语句与校验和改写在同一
-    /// 个事务里，中途崩溃不会留下「补丁没跑但校验和已对齐」的中间态。
-    async fn reconcile_superseded_migrations(
+    /// - 内容没变、只是换行不同：`.gitattributes` 把迁移统一成 LF 之前，Windows 发布包和
+    ///   Windows 本地构建记进库里的都是 CRLF 检出的摘要。只改写校验和，不补跑任何语句。
+    /// - 记录**恰好等于** `SUPERSEDED_MIGRATIONS` 里登记过的历史摘要：补丁语句与校验和
+    ///   改写在同一个事务里，中途崩溃不会留下「补丁没跑但校验和已对齐」的中间态。
+    ///
+    /// 其余任何失配都原样留给 sqlx 报错，免得把用户自己改过的迁移悄悄放行。
+    async fn reconcile_applied_migrations(
         pool: &ConnectionPool,
         migrator: &Migrator,
     ) -> AppResult<()> {
@@ -113,32 +126,54 @@ impl ConnectionManager {
             return Ok(());
         }
 
-        for entry in SUPERSEDED_MIGRATIONS {
-            let Some(current) = migrator.iter().find(|m| m.version == entry.version) else {
-                continue;
-            };
-            let applied: Option<(Vec<u8>, bool)> =
-                sqlx::query_as("SELECT checksum, success FROM _sqlx_migrations WHERE version = ?")
-                    .bind(entry.version)
-                    .fetch_optional(pool)
-                    .await
-                    .change_context(AppError::Custom(
-                        "error while inspecting database migration state".to_string(),
-                    ))?;
-            // 没跑过（含跑失败留下的记录）的迁移由 sqlx 正常应用，不需要对齐。
-            let Some((checksum, true)) = applied else {
+        // 没跑过（含跑失败留下的记录）的迁移由 sqlx 正常应用，不需要对齐。
+        let applied: Vec<(i64, Vec<u8>)> = sqlx::query_as(
+            "SELECT version, checksum FROM _sqlx_migrations WHERE success = TRUE ORDER BY version",
+        )
+        .fetch_all(pool)
+        .await
+        .change_context(AppError::Custom(
+            "error while inspecting database migration state".to_string(),
+        ))?;
+
+        for (version, checksum) in applied {
+            let Some(current) = migrator
+                .iter()
+                .find(|m| m.version == version && !m.migration_type.is_down_migration())
+            else {
                 continue;
             };
             if checksum == current.checksum.as_ref() {
                 continue;
             }
-            if hex_lower(&checksum) != entry.legacy_checksum {
-                warn!(
-                    version = entry.version,
-                    "已应用的迁移既不是当前内容也不是已知的历史内容，不做自动对齐"
+
+            if checksum == crlf_checksum(current) {
+                sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ?")
+                    .bind(current.checksum.to_vec())
+                    .bind(version)
+                    .execute(pool)
+                    .await
+                    .change_context(AppError::Custom(
+                        "error while reconciling database migration state".to_string(),
+                    ))?;
+                info!(
+                    version,
+                    "该迁移记录的是 CRLF 检出下的摘要，内容与当前一致，已对齐校验和"
                 );
                 continue;
             }
+
+            let applied_checksum = hex_lower(&checksum);
+            let Some(entry) = SUPERSEDED_MIGRATIONS.iter().find(|entry| {
+                entry.version == version
+                    && entry.legacy_checksums.contains(&applied_checksum.as_str())
+            }) else {
+                warn!(
+                    version,
+                    "已应用的迁移既不是当前内容也不是已知的历史内容，不做自动对齐"
+                );
+                continue;
+            };
 
             let mut tx = pool.begin().await.change_context(AppError::Custom(
                 "error while reconciling database migration state".to_string(),
@@ -153,7 +188,7 @@ impl ConnectionManager {
             }
             sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ?")
                 .bind(current.checksum.to_vec())
-                .bind(entry.version)
+                .bind(version)
                 .execute(&mut *tx)
                 .await
                 .change_context(AppError::Custom(
@@ -163,14 +198,28 @@ impl ConnectionManager {
                 "error while reconciling database migration state".to_string(),
             ))?;
 
-            info!(
-                version = entry.version,
-                "该迁移在新版本中被修正，已补跑差异并对齐校验和"
-            );
+            info!(version, "该迁移在新版本中被修正，已补跑差异并对齐校验和");
         }
 
         Ok(())
     }
+}
+
+/// 同一份迁移内容以 CRLF 检出时 sqlx 会记下的校验和。
+///
+/// 内嵌的 SQL 一定是 LF（`build.rs` 在编译期把关），把每个 `\n` 换成 `\r\n` 就是
+/// `core.autocrlf=true` 检出的字节；摘要交给 sqlx 自己的 `Migration::new` 算，与它记账的
+/// 算法保持一致。
+fn crlf_checksum(migration: &Migration) -> Vec<u8> {
+    Migration::new(
+        migration.version,
+        migration.description.clone(),
+        migration.migration_type,
+        Cow::Owned(migration.sql.replace('\n', "\r\n")),
+        migration.no_tx,
+    )
+    .checksum
+    .into_owned()
 }
 
 fn hex_lower(bytes: &[u8]) -> String {
@@ -184,13 +233,27 @@ fn hex_lower(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ConnectionManager, ConnectionPool, SUPERSEDED_MIGRATIONS, hex_lower};
+    use super::{ConnectionManager, ConnectionPool, crlf_checksum, hex_lower};
+
+    /// v1.1.8 ~ v1.2.4 发布包给迁移 2（改写前的内容）记下的摘要：Linux / macOS / Docker
+    /// 包是 LF 检出，Windows 包是在 `windows-latest` 上以 CRLF 检出后编的。
+    const V1_2_4_MIGRATION_2_LF: &str = "fcc6436a889297e5c28f2a0f12196e5eee5975ba352032c8201dfa61fb1b9c3fd01ddc41ddfa71bd7423999521b895eb";
+    const V1_2_4_MIGRATION_2_CRLF: &str = "f636cd5b7b62ae53f422ee22daa1c957ddb9d932a9b1c8061fda58adb921032fae46f7896f55ea561158ff963b8ea038";
 
     fn decode_hex(hex: &str) -> Vec<u8> {
         (0..hex.len())
             .step_by(2)
             .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
             .collect()
+    }
+
+    async fn set_checksum(pool: &ConnectionPool, version: i64, checksum: &[u8]) {
+        sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ?")
+            .bind(checksum.to_vec())
+            .bind(version)
+            .execute(pool)
+            .await
+            .unwrap();
     }
 
     /// 把一个全新库回退成 v1.2.4 那一代的样子：迁移 4/5 尚未应用，迁移 2 记的是
@@ -219,8 +282,8 @@ mod tests {
     ///
     /// 这个断言挂掉说明有人改动了一条**已经发布过**的迁移 —— 所有老库都会在升级时
     /// 以校验和失配启动失败（#1701 就是这么来的）。正确做法是把改动挪进一个新的迁移
-    /// 文件；确实只能就地改的话，把旧摘要连同幂等补丁登记进 `SUPERSEDED_MIGRATIONS`，
-    /// 再更新这里。
+    /// 文件；确实只能就地改的话，把旧内容在 LF / CRLF 两种检出下的摘要连同幂等补丁
+    /// 登记进 `SUPERSEDED_MIGRATIONS`，再更新这里。
     #[test]
     fn shipped_migration_checksums_are_frozen() {
         const FROZEN: &[(i64, &str)] = &[
@@ -264,12 +327,29 @@ mod tests {
     /// 升级必须照常完成：待应用的迁移要跑完，既有数据不能丢。
     #[tokio::test]
     async fn upgrade_from_pre_1_2_5_database_reconciles_rewritten_migration() {
+        assert_upgrades_from_v1_2_4(V1_2_4_MIGRATION_2_LF, false).await;
+    }
+
+    /// 同一代的库，但由 Windows 发布包建立：迁移 1/3 内容没变、记的是 CRLF 摘要，迁移 2
+    /// 记的是改写前内容的 CRLF 摘要。两种失配都得在同一次启动里对齐。
+    #[tokio::test]
+    async fn upgrade_from_pre_1_2_5_windows_release_database() {
+        assert_upgrades_from_v1_2_4(V1_2_4_MIGRATION_2_CRLF, true).await;
+    }
+
+    async fn assert_upgrades_from_v1_2_4(migration_2_checksum: &str, crlf_checkout: bool) {
         let dir = tempfile::tempdir().unwrap();
         let db = dir.path().join("data.sqlite3");
         let pool = ConnectionManager::new_pool(db.to_str().unwrap())
             .await
             .unwrap();
-        rewind_to_v1_2_4(&pool, &decode_hex(SUPERSEDED_MIGRATIONS[0].legacy_checksum)).await;
+        rewind_to_v1_2_4(&pool, &decode_hex(migration_2_checksum)).await;
+        if crlf_checkout {
+            let embedded = sqlx::migrate!();
+            for migration in embedded.iter().filter(|m| m.version == 1 || m.version == 3) {
+                set_checksum(&pool, migration.version, &crlf_checksum(migration)).await;
+            }
+        }
         sqlx::query(
             "INSERT INTO uploadstreamers (id, template_name, tags) VALUES \
              (1, 'from-python', ''), (2, 'normal', '[\"直播录像\"]')",
@@ -301,12 +381,14 @@ mod tests {
             "待应用的迁移必须补齐"
         );
         let embedded = sqlx::migrate!();
-        let expected = embedded.iter().find(|m| m.version == 2).unwrap();
-        assert_eq!(
-            hex_lower(&migrations[1].1),
-            hex_lower(&expected.checksum),
-            "迁移 2 的校验和必须对齐到当前文件内容"
-        );
+        for (version, checksum) in &migrations {
+            let expected = embedded.iter().find(|m| m.version == *version).unwrap();
+            assert_eq!(
+                hex_lower(checksum),
+                hex_lower(&expected.checksum),
+                "迁移 {version} 的校验和必须对齐到当前内嵌的摘要"
+            );
+        }
 
         let tags: Vec<(i64, String)> =
             sqlx::query_as("SELECT id, tags FROM uploadstreamers ORDER BY id")
@@ -326,6 +408,74 @@ mod tests {
             .fetch_all(&pool)
             .await
             .expect("迁移 5 必须已应用");
+    }
+
+    /// v1.2.5 起的 Windows 发布包（以及 Windows 本地构建）建立的库：内容与当前完全一致，
+    /// 只是每条记录都是 CRLF 摘要。只改写校验和，不能借机补跑任何语句。
+    #[tokio::test]
+    async fn database_recorded_from_crlf_checkout_is_realigned_without_replaying() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let embedded = sqlx::migrate!();
+        for migration in embedded.iter() {
+            set_checksum(&pool, migration.version, &crlf_checksum(migration)).await;
+        }
+        // 迁移 2 的补丁会把空串 tags 改成 '[]'，只是换行不同时不该碰到它。
+        sqlx::query(
+            "INSERT INTO uploadstreamers (id, template_name, tags) VALUES (1, 'untouched', '')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .expect("CRLF 检出下建立的库必须能直接启动");
+
+        let recorded: Vec<(i64, Vec<u8>)> =
+            sqlx::query_as("SELECT version, checksum FROM _sqlx_migrations ORDER BY version")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            recorded
+                .iter()
+                .map(|(version, checksum)| (*version, hex_lower(checksum)))
+                .collect::<Vec<_>>(),
+            embedded
+                .iter()
+                .map(|m| (m.version, hex_lower(&m.checksum)))
+                .collect::<Vec<_>>(),
+        );
+        let tags: String = sqlx::query_scalar("SELECT tags FROM uploadstreamers WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(tags, "", "只是换行不同，不能补跑迁移 2 的补丁");
+    }
+
+    /// `crlf_checksum` 必须复现 Windows 发布包真实记下的摘要。两个值取自官方 v1.2.7
+    /// Windows 包（`biliupR-v1.2.7-x86_64-windows.zip`）内嵌的迁移表。
+    #[test]
+    fn crlf_checksum_matches_windows_release_builds() {
+        let embedded = sqlx::migrate!();
+        let crlf = |version| {
+            hex_lower(&crlf_checksum(
+                embedded.iter().find(|m| m.version == version).unwrap(),
+            ))
+        };
+        assert_eq!(
+            crlf(1),
+            "582585a2cecf6e9b4d1ae9edb1a2fac80b080106a9384b2e4d9be4c158dedd32f6c3c0c5c396634e7f5679d4221c3878"
+        );
+        assert_eq!(
+            crlf(2),
+            "10f4a226e937d35e0e49aa2995f3637150135dda5bfee0a4d9caeb7df4f4c1674cb18416901dfd87a4fadb6dc6577414"
+        );
     }
 
     /// 自愈只针对登记在册的历史内容。用户自己改过的迁移仍然要报错，不能被悄悄放行。

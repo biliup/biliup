@@ -1,0 +1,4 @@
+# sqlx 对迁移文件的原始字节求 SHA-384 并记进 _sqlx_migrations。同一份 SQL 在
+# core.autocrlf=true 的 Windows（含 GitHub windows-latest 上的发布构建）会被检出成 CRLF，
+# 编出来的二进制就内嵌另一套摘要。一律检出成 LF，各平台的构建才记同一套校验和。
+*.sql text eol=lf

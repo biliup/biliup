@@ -5,6 +5,7 @@ import { Button, Spin, Typography, Tabs, TabPane, Toast } from '@douyinfe/semi-u
 import { IconCustomerSupport, IconRefresh, IconClear, IconSave } from '@douyinfe/semi-icons'
 import PageHeader from '../components/PageHeader'
 import dc from '@/app/ui/data-card.module.scss'
+import { revalidateMe } from '@/app/lib/api-streamer'
 
 // 日志内容组件
 interface LogContentProps {
@@ -125,11 +126,15 @@ export default function LogViewer() {
       setIsLoading(false)
     }
 
+    // 切换标签、刷新、离开页面时是我们自己关的；其余的断开（含会话被收回后后端主动断开）要刷新权限点
+    let closedByUs = false
     ws.onclose = () => {
       setIsConnected(false)
+      if (!closedByUs) revalidateMe()
     }
 
     return () => {
+      closedByUs = true
       ws.close()
     }
   }, [activeTab, connectSeq])

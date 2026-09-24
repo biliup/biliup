@@ -1,6 +1,5 @@
 .idea
 .vscode
-.gitattributes
 *.pyc
 *.flv
 *.mp4

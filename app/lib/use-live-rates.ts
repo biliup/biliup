@@ -1,6 +1,6 @@
 'use client'
 import { useSyncExternalStore } from 'react'
-import { API_BASE } from './api-streamer'
+import { API_BASE, handleResponse, revalidateMe } from './api-streamer'
 
 /**
  * 录制中各房间的写盘速率采样：页面内唯一的一份数据源，供弹层折线图、卡片与监视器的 sparkline 共用。
@@ -211,7 +211,9 @@ function connectSocket() {
       schedule(0)
       return
     }
-    // 中途断开（服务重启 / 网络抖动）：退避重连，期间没有新帧，曲线出现断口
+    // 中途断开（服务重启 / 网络抖动 / 会话被收回）：退避重连，期间没有新帧，曲线出现断口。
+    // 会话失效时后端也会主动断开，刷新一次权限点：失效就跳登录页，降级就收起页面
+    revalidateMe()
     wsFailures += 1
     timer = setTimeout(connectSocket, Math.min(RETRY_MS * wsFailures, 10_000))
   }
@@ -228,7 +230,8 @@ async function pollOnce() {
   let ok = false
   try {
     const res = await fetch(`${API_BASE}/v1/live-rates`, { cache: 'no-store', signal: controller.signal })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    // 与其它接口同一套处理：会话失效（401）跳登录页，失去权限（403）刷新权限点、页面随之收起
+    await handleResponse(res)
     const frames = (await res.json()) as LiveRateFrame[]
     if (controller.signal.aborted) return
     if (snapshot.transport !== 'poll') setTransport('poll')
