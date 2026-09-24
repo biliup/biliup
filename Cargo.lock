@@ -432,6 +432,7 @@ name = "biliup"
 version = "1.2.8"
 dependencies = [
  "async-trait",
+ "axum",
  "base64",
  "bon",
  "byteorder",

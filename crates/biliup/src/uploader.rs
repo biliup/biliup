@@ -14,6 +14,7 @@ use std::task::{Context, Poll};
 pub mod bilibili;
 pub mod credential;
 pub mod line;
+pub mod season;
 pub mod util;
 
 #[derive(Deserialize, Serialize, Debug, Clone)]

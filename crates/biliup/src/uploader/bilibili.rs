@@ -834,7 +834,7 @@ impl BiliBili {
         Err(Kind::Custom(result.message))
     }
 
-    fn get_csrf(&self) -> Result<&str> {
+    pub(crate) fn get_csrf(&self) -> Result<&str> {
         let csrf = self
             .login_info
             .cookie_info
