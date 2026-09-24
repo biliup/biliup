@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 use biliup::uploader::util::SubmitOption;
 use clap::Parser;
 use error_stack::ResultExt;
+use futures::future::BoxFuture;
 use time::macros::format_description;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
@@ -224,6 +225,8 @@ pub async fn dispatch(cli: Cli, log_handle: LogHandle) -> AppResult<()> {
                 user_cookie,
                 work_dir: None,
                 log_handle,
+                listener: None,
+                shutdown: None,
             })
             .await?
         }
@@ -263,6 +266,12 @@ pub struct ServeOptions {
     /// process switches to it before the server starts.
     pub work_dir: Option<PathBuf>,
     pub log_handle: LogHandle,
+    /// Serve on this already-bound socket instead of binding `bind`:`port`, so
+    /// the host knows the actual port (e.g. after falling back to port 0).
+    pub listener: Option<std::net::TcpListener>,
+    /// Stop the server when this future completes. When set, the server does
+    /// not install its own Ctrl+C / SIGTERM handlers; the host owns signals.
+    pub shutdown: Option<BoxFuture<'static, ()>>,
 }
 
 /// Runs the Web server until shutdown. It only needs a tokio runtime, so an
@@ -275,13 +284,21 @@ pub async fn serve(opts: ServeOptions) -> AppResult<()> {
             .change_context(AppError::Unknown)
             .attach_with(|| format!("could not switch to work dir {}", dir.display()))?;
     }
-    crate::run_with_cookie(
-        (&opts.bind, opts.port),
+    let listener = match opts.listener {
+        Some(listener) => listener
+            .set_nonblocking(true)
+            .and_then(|()| tokio::net::TcpListener::from_std(listener))
+            .change_context(AppError::Unknown)?,
+        None => crate::bind((&opts.bind, opts.port), opts.auth).await?,
+    };
+    crate::serve_on(
+        listener,
         opts.auth,
         opts.secure_session_cookie,
         opts.log_handle,
         opts.config,
         opts.user_cookie,
+        opts.shutdown,
     )
     .await
 }

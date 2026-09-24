@@ -20,6 +20,7 @@ use crate::server::infrastructure::repositories;
 use crate::server::infrastructure::service_register::ServiceRegister;
 use clap::ValueEnum;
 use error_stack::{Report, ResultExt, bail};
+use futures::future::BoxFuture;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -55,6 +56,22 @@ pub async fn run_with_cookie(
     config_path: Option<PathBuf>,
     user_cookie: PathBuf,
 ) -> AppResult<()> {
+    let listener = bind(addr, auth).await?;
+    serve_on(
+        listener,
+        auth,
+        secure_session_cookie,
+        log_handle,
+        config_path,
+        user_cookie,
+        None,
+    )
+    .await
+}
+
+/// Resolves and binds the Web server address, refusing an unauthenticated
+/// non-loopback bind.
+pub async fn bind(addr: (&str, u16), auth: bool) -> AppResult<tokio::net::TcpListener> {
     let addr = addr
         .to_socket_addrs()
         .change_context(AppError::Unknown)?
@@ -64,6 +81,26 @@ pub async fn run_with_cookie(
                 "bind address resolved to no sockets".into(),
             ))
         })?;
+    validate_server_exposure(addr, auth)?;
+    tokio::net::TcpListener::bind(addr)
+        .await
+        .change_context(AppError::Unknown)
+        .attach_with(|| format!("could not listen on {addr}"))
+}
+
+/// Runs the Web server on an already-bound `listener`. With `shutdown`, the
+/// server stops when that future completes and does not install its own
+/// Ctrl+C / SIGTERM handlers, leaving signals to the embedding host.
+pub async fn serve_on(
+    listener: tokio::net::TcpListener,
+    auth: bool,
+    secure_session_cookie: bool,
+    log_handle: LogHandle,
+    config_path: Option<PathBuf>,
+    user_cookie: PathBuf,
+    shutdown: Option<BoxFuture<'static, ()>>,
+) -> AppResult<()> {
+    let addr = listener.local_addr().change_context(AppError::Unknown)?;
     validate_server_exposure(addr, auth)?;
 
     // let config = Arc::new(AppConfig::parse());
@@ -113,9 +150,15 @@ pub async fn run_with_cookie(
     }
 
     tracing::info!("migrations successfully ran, initializing axum server...");
-    ApplicationController::serve(&addr, auth, secure_session_cookie, service_register)
-        .await
-        .attach("could not initialize application routes")?;
+    ApplicationController::serve(
+        listener,
+        auth,
+        secure_session_cookie,
+        service_register,
+        shutdown,
+    )
+    .await
+    .attach("could not initialize application routes")?;
     Ok(())
 }
 
