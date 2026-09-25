@@ -243,7 +243,7 @@ impl<'a> DouyuLive<'a> {
         let Some(room) = resp.room else {
             return Ok(None);
         };
-        if room.show_status != 1 {
+        if !room.is_live() {
             return Ok(None);
         }
         if self.douyu_disable_interactive_game && self.has_interactive_game(room_id).await? {
@@ -630,6 +630,8 @@ struct BetardResponse {
 struct RoomInfo {
     room_name: String,
     show_status: i64,
+    #[serde(rename = "videoLoop")]
+    video_loop: i64,
     /// 直播间封面（betard 里的 `room_pic`，通常是 avif），缺失时为空
     #[serde(default)]
     room_pic: Option<String>,
@@ -643,6 +645,10 @@ struct RoomInfo {
 }
 
 impl RoomInfo {
+    fn is_live(&self) -> bool {
+        self.show_status == 1 && self.video_loop == 0
+    }
+
     fn avatar_url(&self) -> Option<String> {
         let non_empty = |url: &str| (!url.is_empty()).then(|| url.to_string());
         self.owner_avatar
@@ -1008,5 +1014,16 @@ mod tests {
         let room = legacy.room.unwrap();
         assert_eq!(room.room_pic, None);
         assert_eq!(room.avatar_url(), None);
+    }
+
+    #[test]
+    fn betard_video_loop_is_not_live() {
+        for (show_status, video_loop, expected) in [(1, 0, true), (1, 1, false), (0, 0, false)] {
+            let body = format!(
+                r#"{{"room":{{"room_name":"room","show_status":{show_status},"videoLoop":{video_loop}}}}}"#
+            );
+            let response: BetardResponse = serde_json::from_str(&body).unwrap();
+            assert_eq!(response.room.unwrap().is_live(), expected);
+        }
     }
 }
