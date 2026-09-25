@@ -195,6 +195,8 @@ pub struct DouyuOptions {
     pub cdn: String,
     pub force_hs: bool,
     pub rate: u32,
+    pub device_id: String,
+    pub codec: String,
     pub disable_interactive_game: bool,
     pub danmaku: bool,
 }
@@ -205,6 +207,8 @@ impl Default for DouyuOptions {
             cdn: "hw-h5".to_string(),
             force_hs: false,
             rate: 0,
+            device_id: String::new(),
+            codec: String::new(),
             disable_interactive_game: false,
             danmaku: false,
         }

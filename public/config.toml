@@ -64,6 +64,10 @@ check_sourcecode = 15
 #douyu_cdn = "tct-h5"
 ### 强制hs流使用构造链接，防止部分海外机器遇到频繁断流。使用时需修改douyu_cdn为hs-h5
 #douyu_force_hs = true
+### 斗鱼设备 ID：在浏览器 Cookie 中找到 acf_did，只填它的值；留空使用默认设备 ID
+#douyu_deviceId = ""
+### 斗鱼视频编码：留空、"AVC" 或 "HEVC"；HEVC 使用 player_1 流地址
+#douyu_codec = ""
 ### 录制斗鱼弹幕，默认关闭
 #douyu_danmaku = false
 ### 斗鱼自选画质
