@@ -562,6 +562,17 @@ impl Config {
         Ok(())
     }
 
+    /// 下载池 / 上传池至少为 1：保存即生效，0 会让新录制 / 上传静默地再也不开始
+    pub fn validate_pool_sizes(&self) -> Result<(), String> {
+        if self.pool1_size == 0 {
+            return Err("下载线程池大小（pool1_size）至少为 1".to_string());
+        }
+        if self.pool2_size == 0 {
+            return Err("上传线程池大小（pool2_size）至少为 1".to_string());
+        }
+        Ok(())
+    }
+
     pub fn normalize_segment_limits(&mut self) {
         if self
             .segment_time

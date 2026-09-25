@@ -6,7 +6,7 @@ use crate::server::common::upload::{build_studio, submit_to_bilibili, upload};
 use crate::server::common::util::Recorder;
 use crate::server::config::Config;
 use crate::server::core::download_manager::DownloadManager;
-use crate::server::errors::{AppError, report_to_response};
+use crate::server::errors::{ApiError, AppError, report_to_response};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Stage, Worker, WorkerStatus};
 use crate::server::infrastructure::dto::{LivePreviewResponse, LiveStreamerResponse};
@@ -292,6 +292,9 @@ pub async fn put_configuration(
     json_data
         .validate_segment_limits()
         .map_err(report_to_response)?;
+    json_data.validate_pool_sizes().map_err(|message| {
+        (StatusCode::BAD_REQUEST, Json(ApiError::new(message))).into_response()
+    })?;
     // 将 JSON 序列化为 TEXT 存库
     let value_txt = serde_json::to_string(&json_data)
         .change_context(AppError::Unknown)
@@ -1173,5 +1176,51 @@ mod configuration_tests {
         assert_eq!(config.read().unwrap().pool2_size, 1);
         assert_eq!(managers.download_pool_size(), 8);
         assert_eq!(managers.upload_pool_size(), 1);
+    }
+
+    /// 池大小填 0 保存会被拒（400），配置与池容量都不变
+    #[tokio::test]
+    async fn a_zero_pool_size_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let config = Arc::new(RwLock::new(Config::default()));
+        let managers = Arc::new(DownloadManager::new(
+            config.read().unwrap().pool1_size,
+            config.read().unwrap().pool2_size,
+            pool.clone(),
+        ));
+        let (_layer, log_handle) = reload::Layer::new(EnvFilter::new("info"));
+        let before = (managers.download_pool_size(), managers.upload_pool_size());
+
+        for edited in [
+            Config {
+                pool1_size: 0,
+                ..Config::default()
+            },
+            Config {
+                pool2_size: 0,
+                ..Config::default()
+            },
+        ] {
+            let response = put_configuration(
+                State(config.clone()),
+                State(pool.clone()),
+                State(managers.clone()),
+                State(log_handle.clone()),
+                Json(edited),
+            )
+            .await
+            .expect_err("池大小为 0 应被拒");
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        }
+        assert_eq!(
+            (managers.download_pool_size(), managers.upload_pool_size()),
+            before
+        );
+        let saved = config.read().unwrap();
+        assert!(saved.pool1_size > 0 && saved.pool2_size > 0);
     }
 }
