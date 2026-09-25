@@ -329,13 +329,6 @@ enum Step {
     End(&'static str),
 }
 
-fn readable(segment: &SegmentRow) -> bool {
-    matches!(
-        segment.state,
-        SegmentState::Recording | SegmentState::Finished
-    ) && Container::from_path(Path::new(&segment.path)).is_some()
-}
-
 impl Dvr {
     pub fn into_stream(self) -> impl futures::Stream<Item = io::Result<Bytes>> + Send + 'static {
         futures::stream::unfold(self, |mut dvr| async move {
@@ -493,11 +486,11 @@ impl Dvr {
                     Ok(Step::End("这一路不能跟随正在写的分段"))
                 }
             }
-            SegmentState::Finished if !self.cursor.drained => {
+            SegmentState::Finished | SegmentState::PendingDelete if !self.cursor.drained => {
                 self.cursor.drained = true;
                 Ok(Step::Continue)
             }
-            SegmentState::Finished => self.next_segment().await,
+            SegmentState::Finished | SegmentState::PendingDelete => self.next_segment().await,
             _ => Ok(Step::End("分段已不可读")),
         }
     }
@@ -526,7 +519,7 @@ impl Dvr {
         };
         // 跳过去时间戳会跳变，mpegts.js 会把它抹平，播放器位置就和场次时间对不上了：
         // 和断流缺口一样结束响应，由播放器从下一个可读位置重开
-        if !readable(&next) {
+        if !super::readable(&next) {
             return Ok(Step::End(NEXT_UNREADABLE));
         }
         if next.gap_before_ms > 0 {

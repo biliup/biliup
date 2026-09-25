@@ -215,6 +215,29 @@ async fn response_ends_before_an_unreadable_segment() {
     }
 }
 
+/// 等着被删的分段文件还在，照样能回看，也照样接到下一段。
+#[tokio::test]
+async fn segments_waiting_for_deletion_still_play() {
+    let (dir, pool, session) = setup().await;
+    let flv = build_flv(0, 100, 25, None);
+    let mut ids = Vec::new();
+    for (i, name) in ["a.flv", "b.flv"].into_iter().enumerate() {
+        let path = write(&dir, name, &flv.bytes);
+        let start = i as i64 * 3965;
+        ids.push(add_segment(&pool, session, &path, start, 0, Some(start + 3965)).await);
+    }
+    sqlx::query("UPDATE segments SET state = 'pending_delete'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let dvr = open(&pool, session, 0).await.unwrap();
+    assert_eq!(dvr.start_ms, 0);
+    let tags = flv_tags(&collect(dvr).await);
+    let video = tags[2..].iter().filter(|t| t.0 == 9).count();
+    assert_eq!(video, 200, "两段都回放");
+}
+
 async fn next_within<S: futures::Stream + Unpin>(
     stream: &mut S,
     ms: u64,
