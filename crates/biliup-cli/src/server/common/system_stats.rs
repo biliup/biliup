@@ -182,10 +182,7 @@ impl SystemMonitor {
     pub(crate) fn record(&self, ts: i64, reading: Reading, disk: Option<DiskUsage>) {
         let mut state = self.state.lock().unwrap();
         // 系统时钟往回调时也保持递增，否则前端按 `since` 增量拉取会漏掉采样
-        let ts = state
-            .samples
-            .back()
-            .map_or(ts, |last| ts.max(last.ts + 1));
+        let ts = state.samples.back().map_or(ts, |last| ts.max(last.ts + 1));
         if state.samples.len() >= self.capacity {
             state.samples.pop_front();
         }
@@ -328,11 +325,7 @@ fn per_second(bytes: u64, elapsed: Duration) -> u64 {
 }
 
 /// 容器设了内存上限（小于整机内存）时报 cgroup 口径，否则报整机口径。
-fn memory_usage(
-    total: u64,
-    available: u64,
-    cgroup: Option<CGroupLimits>,
-) -> Option<MemoryUsage> {
+fn memory_usage(total: u64, available: u64, cgroup: Option<CGroupLimits>) -> Option<MemoryUsage> {
     if let Some(limits) = cgroup
         && limits.total_memory > 0
         && limits.total_memory < total
@@ -404,10 +397,7 @@ fn sysfs_is_virtual(_name: &str) -> bool {
 }
 
 /// `/sys/class/net/<name>` 链接目标形如 `../../devices/virtual/net/docker0`
-#[cfg_attr(
-    not(any(target_os = "linux", target_os = "android")),
-    allow(dead_code)
-)]
+#[cfg_attr(not(any(target_os = "linux", target_os = "android")), allow(dead_code))]
 fn link_target_is_virtual(target: &Path) -> bool {
     let parts: Vec<_> = target.components().map(|part| part.as_os_str()).collect();
     parts
@@ -706,7 +696,10 @@ mod tests {
             total: 16 * gib,
             limited: false,
         };
-        assert_eq!(memory_usage(16 * gib, 10 * gib, Some(unlimited)), Some(host));
+        assert_eq!(
+            memory_usage(16 * gib, 10 * gib, Some(unlimited)),
+            Some(host)
+        );
         assert_eq!(memory_usage(16 * gib, 10 * gib, None), Some(host));
         assert_eq!(memory_usage(0, 0, None), None);
     }
@@ -782,7 +775,12 @@ mod tests {
         monitor.record(5_000, reading(1.0), None);
         monitor.record(4_000, reading(2.0), None);
         monitor.record(4_000, reading(3.0), None);
-        let ts: Vec<_> = monitor.snapshot(None).samples.iter().map(|s| s.ts).collect();
+        let ts: Vec<_> = monitor
+            .snapshot(None)
+            .samples
+            .iter()
+            .map(|s| s.ts)
+            .collect();
         assert_eq!(ts, [5_000, 5_001, 5_002]);
     }
 
