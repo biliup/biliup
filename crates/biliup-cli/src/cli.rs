@@ -203,6 +203,11 @@ pub enum Commands {
         #[command(subcommand)]
         action: UserAction,
     },
+    /// 把这台机器加入 Fleet 控制面或退出（在 biliup 服务的工作目录下执行，读写 data/node.json）
+    Node {
+        #[command(subcommand)]
+        action: NodeAction,
+    },
     /// 列出所有已上传的视频
     List {
         /// 只包含进行中的视频
@@ -236,6 +241,22 @@ pub enum UserAction {
         /// 用户名（大小写不敏感）
         username: String,
     },
+}
+
+#[derive(Subcommand)]
+pub enum NodeAction {
+    /// 用控制面「添加节点」给出的票据加入；成功后重启 biliup server 生效
+    Join {
+        /// 以 bfleet 开头的加入票据
+        ticket: String,
+        /// 允许控制面下发的房间使用钩子（各 *processor，等于允许在本机执行命令）
+        #[arg(long)]
+        allow_hooks: bool,
+    },
+    /// 通知控制面移除本节点，并删除本地凭据 data/node.json
+    Leave,
+    /// 查看本机的节点凭据（不连控制面）
+    Status,
 }
 
 fn human_size(s: &str) -> Result<u64, String> {
@@ -312,6 +333,25 @@ mod tests {
             } if relay_url.len() == 2
         ));
         assert!(Cli::try_parse_from(["biliup", "server", "--relay-listen", "nope"]).is_err());
+    }
+
+    #[test]
+    fn node_subcommands_parse() {
+        let cli =
+            Cli::try_parse_from(["biliup", "node", "join", "bfleetabc", "--allow-hooks"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Node {
+                action: super::NodeAction::Join { ref ticket, allow_hooks: true }
+            } if ticket == "bfleetabc"
+        ));
+        for (name, leave) in [("leave", true), ("status", false)] {
+            let cli = Cli::try_parse_from(["biliup", "node", name]).unwrap();
+            let Commands::Node { action } = cli.command else {
+                panic!("not a node command")
+            };
+            assert_eq!(matches!(action, super::NodeAction::Leave), leave);
+        }
     }
 
     #[test]

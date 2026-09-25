@@ -1,6 +1,7 @@
 pub mod cli;
 pub mod downloader;
 pub mod entry;
+pub mod node_cli;
 pub mod season_cli;
 pub mod server;
 pub mod tools;
@@ -176,7 +177,7 @@ pub async fn serve_on(
         import_database_streamers(&service_register).await?;
     }
 
-    let fleet = server::fleet::start(&fleet).await?;
+    let fleet = server::fleet::start(&fleet, &service_register).await?;
 
     tracing::info!("migrations successfully ran, initializing axum server...");
     ApplicationController::serve(

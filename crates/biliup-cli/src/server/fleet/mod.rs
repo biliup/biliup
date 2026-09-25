@@ -7,7 +7,10 @@
 //! 这一阶段只做加入、心跳与在线状态：不分派房间、不下发配置。
 
 pub mod controller;
+#[cfg(test)]
+mod e2e_tests;
 pub mod net;
+pub mod node;
 pub mod protocol;
 pub mod relay;
 pub mod store;
@@ -15,6 +18,7 @@ pub mod ticket;
 
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionManager;
+use crate::server::infrastructure::service_register::ServiceRegister;
 use controller::{Controller, RelaySetup};
 use error_stack::{ResultExt, bail};
 use iroh::endpoint::{Connection, PortmapperConfig, QuicTransportConfig, VarInt, presets};
@@ -23,17 +27,24 @@ use protocol::CloseCode;
 use relay::{EmbeddedRelay, FleetAccess};
 use sqlx::migrate::Migrator;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::Path;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tracing::warn;
+use tracing::{error, info, warn};
 use url::Url;
 
 /// 控制面独立库的迁移，与主库 `migrations/` 各自编号
 pub static FLEET_MIGRATOR: Migrator = sqlx::migrate!("./fleet_migrations");
 
 pub const FLEET_DB: &str = "data/fleet.sqlite3";
+pub const NODE_FILE: &str = "data/node.json";
 pub const DEFAULT_RELAY_PORT: u16 = 19160;
+/// 容器首次启动时自动 join 用的票据
+pub const JOIN_TICKET_ENV: &str = "BILIUP_JOIN_TICKET";
+/// 配合 [`JOIN_TICKET_ENV`]：为 `1` / `true` 时等同 `biliup node join --allow-hooks`
+pub const JOIN_ALLOW_HOOKS_ENV: &str = "BILIUP_JOIN_ALLOW_HOOKS";
+
 const KEEP_ALIVE: Duration = Duration::from_secs(5);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -96,6 +107,7 @@ pub enum Fleet {
     #[default]
     Standalone,
     Controller(Arc<Controller>),
+    Node(Arc<Mutex<Option<node::NodeAgent>>>),
 }
 
 impl Fleet {
@@ -111,7 +123,7 @@ impl Fleet {
             Fleet::Controller(controller) => {
                 Some(crate::server::api::fleet::router(controller.clone()))
             }
-            Fleet::Standalone => None,
+            _ => None,
         }
     }
 
@@ -119,19 +131,55 @@ impl Fleet {
         match self {
             Fleet::Standalone => {}
             Fleet::Controller(controller) => controller.shutdown().await,
+            Fleet::Node(agent) => {
+                let agent = agent.lock().unwrap().take();
+                if let Some(agent) = agent {
+                    agent.shutdown().await;
+                }
+            }
         }
     }
 }
 
-/// 按参数决定本进程的角色。单机模式什么都不做。
-pub async fn start(options: &FleetOptions) -> AppResult<Fleet> {
+/// 按参数与工作目录决定本进程的角色。单机模式只检查 `data/node.json` 是否存在，不做别的事。
+pub async fn start(options: &FleetOptions, services: &ServiceRegister) -> AppResult<Fleet> {
+    let node_file = Path::new(NODE_FILE);
     if options.controller {
+        if node_file.exists() {
+            bail!(AppError::Custom(format!(
+                "--controller 与 {NODE_FILE} 不能同时使用：这台机器已经作为节点加入了别的控制面，先执行 `biliup node leave`"
+            )));
+        }
         return start_controller(options).await.map(Fleet::Controller);
     }
     if options.relay_listen.is_some() || !options.relay_urls.is_empty() {
         warn!("--relay-listen / --relay-url 只在 --controller 时生效，已忽略");
     }
-    Ok(Fleet::Standalone)
+    if !node_file.exists() {
+        let Some(ticket) = std::env::var(JOIN_TICKET_ENV)
+            .ok()
+            .filter(|ticket| !ticket.trim().is_empty())
+        else {
+            return Ok(Fleet::Standalone);
+        };
+        let allow_hooks = std::env::var(JOIN_ALLOW_HOOKS_ENV)
+            .is_ok_and(|value| matches!(value.trim(), "1" | "true" | "yes"));
+        info!("{JOIN_TICKET_ENV} is set and {NODE_FILE} is missing, joining the fleet controller");
+        match node::join(&ticket, allow_hooks, node_file).await {
+            Ok(file) => info!(node = file.node_id, "joined the fleet controller"),
+            Err(e) => {
+                error!(error = ?e, "自动加入控制面失败，本次以单机模式运行");
+                return Ok(Fleet::Standalone);
+            }
+        }
+    }
+    match node::NodeAgent::start(node_file.to_path_buf(), services.clone()).await {
+        Ok(agent) => Ok(Fleet::Node(Arc::new(Mutex::new(Some(agent))))),
+        Err(e) => {
+            error!(error = ?e, "节点代理没能启动，本次以单机模式运行");
+            Ok(Fleet::Standalone)
+        }
+    }
 }
 
 async fn start_controller(options: &FleetOptions) -> AppResult<Arc<Controller>> {

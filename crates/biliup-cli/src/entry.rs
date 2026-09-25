@@ -241,6 +241,7 @@ pub async fn dispatch(cli: Cli, log_handle: LogHandle) -> AppResult<()> {
             .await?
         }
         Commands::User { action } => crate::web_user_cli::run(action).await?,
+        Commands::Node { action } => crate::node_cli::run(action).await?,
         Commands::Season(args) => crate::season_cli::run(args, user_cookie, proxy).await?,
         Commands::List {
             is_pubing,
