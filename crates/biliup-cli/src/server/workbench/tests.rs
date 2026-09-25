@@ -4,6 +4,7 @@ use super::store::{self, OpenedSession, SegmentRow, SegmentState};
 use super::*;
 use crate::server::infrastructure::connection_pool::ConnectionManager;
 use crate::server::infrastructure::models::StreamerInfo;
+use biliup::downloader::index_tap::FileTap;
 use chrono::{DateTime, Utc};
 use ormlite::Model;
 use tempfile::TempDir;
@@ -796,6 +797,32 @@ async fn startup_recovery_finalizes_leftover_recording_segments() {
     assert_eq!(sessions(&pool).await[0].2, None, "开始录就清空 ended_at");
 }
 
+/// 像写入端那样把 `bytes` 里时间戳早于 `before_ts` 的 FLV tag 交给索引旁路。
+fn tap_flv_tags(file: &FileTap, bytes: &[u8], before_ts: u32) -> Option<u32> {
+    tap_flv_tags_from(file, bytes, 0, before_ts)
+}
+
+/// 同 [`tap_flv_tags`]，只交时间戳在 `[from_ts, before_ts)` 里的；返回交出的最后一个时间戳。
+fn tap_flv_tags_from(file: &FileTap, bytes: &[u8], from_ts: u32, before_ts: u32) -> Option<u32> {
+    let mut offset = 13;
+    let mut last = None;
+    while offset < bytes.len() {
+        let h = &bytes[offset..offset + 11];
+        let size = u32::from_be_bytes([0, h[1], h[2], h[3]]) as usize;
+        let ts = u32::from_be_bytes([h[7], h[4], h[5], h[6]]);
+        if ts >= before_ts {
+            break;
+        }
+        if ts >= from_ts {
+            let body = bytes::Bytes::copy_from_slice(&bytes[offset + 11..offset + 11 + size]);
+            file.flv_tag(offset as u64, h[0], ts, &body);
+            last = Some(ts);
+        }
+        offset += 15 + size;
+    }
+    last
+}
+
 /// stream-gears 边写 `.part` 边建索引：改名后录制器先等索引任务处理完已发出的事件，
 /// 再让 `.idx` 跟着改名；段长取流式建好的索引，关段续扫只做兜底。
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -814,15 +841,7 @@ async fn streamed_index_follows_the_rename_at_close() {
     std::fs::write(&part, &flv.bytes).unwrap();
     handle.opened_at(&part, t0);
     let file = tap.open(&part);
-    let mut offset = 13;
-    while offset < flv.bytes.len() {
-        let h = &flv.bytes[offset..offset + 11];
-        let size = u32::from_be_bytes([0, h[1], h[2], h[3]]) as usize;
-        let ts = u32::from_be_bytes([h[7], h[4], h[5], h[6]]);
-        let body = bytes::Bytes::copy_from_slice(&flv.bytes[offset + 11..offset + 11 + size]);
-        file.flv_tag(offset as u64, h[0], ts, &body);
-        offset += 15 + size;
-    }
+    tap_flv_tags(&file, &flv.bytes, u32::MAX);
     file.closed(flv.bytes.len() as u64);
     let done = dir.path().join("a.flv");
     std::fs::rename(&part, &done).unwrap();
@@ -838,4 +857,127 @@ async fn streamed_index_follows_the_rename_at_close() {
     assert!(cached.complete);
     assert_eq!(cached.keyframes.len(), 4);
     assert_eq!(cached.source_len, flv.bytes.len() as u64);
+}
+
+/// 场次记录器写完库后异步更新登记表，等它跟上。
+async fn wait_for_anchor(session_id: i64, expected: Option<live::Anchor>) {
+    for _ in 0..200 {
+        if live::anchor(session_id) == expected {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("锚点应为 {expected:?}，实际 {:?}", live::anchor(session_id));
+}
+
+#[tokio::test]
+async fn recording_sessions_are_registered_with_a_timeline_anchor() {
+    let (dir, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let opened = go_live(&pool, t0, 10).await;
+    let id = live::unique_session_id(&pool, opened.id).await;
+    // 主播 id 也换一个别的测试不会用到的
+    let recorder = SessionRecorder::spawn(
+        pool.clone(),
+        SessionTarget {
+            session_id: id,
+            streamer_id: 3_001,
+            bytes: None,
+        },
+        None,
+    );
+    let handle = recorder.handle();
+    handle.run_started_at(t0);
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(!live::is_recording(id), "第一个分段放上时间轴之前不登记");
+    assert_eq!(live::session_of_streamer(3_001), None);
+
+    let a = write_flv(dir.path(), "a.flv");
+    handle.opened_at(&a, t0 + 500);
+    wait_for_anchor(
+        id,
+        Some(live::Anchor {
+            session_ms: 0,
+            wall_ms: t0 + 500,
+        }),
+    )
+    .await;
+    assert_eq!(live::session_of_streamer(3_001), Some(id));
+
+    // 关段：锚点换成内容末尾对应的墙钟，开段时 CDN 先发的缓存造成的偏差到这里消掉
+    handle.closed_at(&a, t0 + 4_300, ClosedSegment::default());
+    wait_for_anchor(
+        id,
+        Some(live::Anchor {
+            session_ms: FLV_DURATION_MS,
+            wall_ms: t0 + 4_300,
+        }),
+    )
+    .await;
+
+    // 断流 10 s 后重连：新段接在断流之后
+    let b = write_flv(dir.path(), "b.flv");
+    handle.opened_at(&b, t0 + 14_300);
+    wait_for_anchor(
+        id,
+        Some(live::Anchor {
+            session_ms: FLV_DURATION_MS + 10_000,
+            wall_ms: t0 + 14_300,
+        }),
+    )
+    .await;
+
+    recorder.finish().await;
+    assert!(!live::is_recording(id), "录制结束即注销");
+    assert_eq!(live::session_of_streamer(3_001), None);
+}
+
+/// 边写边建索引的分段，录制中的观测取索引任务扫到的时长和扫到那里的墙钟，不扫盘。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn open_tapped_segments_are_observed_from_the_index_task() {
+    let dir = tempfile::tempdir().unwrap();
+    let part = dir.path().join("a.flv.part");
+    let flv = build_flv(0, 100, 25, None);
+    // 盘上已是整段，写入端只交出前两个 GOP：观测到的时长短于整段，说明没扫盘
+    std::fs::write(&part, &flv.bytes).unwrap();
+    let tap = index::live::spawn();
+    let file = tap.open(&part);
+    let last_ts = tap_flv_tags(&file, &flv.bytes, 2_000).unwrap();
+    let mut written = None;
+    for _ in 0..200 {
+        written = index::live::written(&part);
+        if written.is_some_and(|(ms, _)| ms == last_ts) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let (written_ms, written_at) = written.expect("索引任务扫到了关键帧");
+    assert_eq!(written_ms, last_ts);
+
+    let id = 9_200_003;
+    let mut guard = live::register(id, 1, None);
+    guard.sample_segment(part.clone(), 50_000);
+    let expected = Some(live::Anchor {
+        session_ms: 50_000 + i64::from(written_ms),
+        wall_ms: written_at,
+    });
+    for _ in 0..200 {
+        if live::written_anchor(id, written_at) == expected {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(live::written_anchor(id, written_at), expected);
+
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert_eq!(
+        index::live::written(&part),
+        Some((written_ms, written_at)),
+        "时长没变长，墙钟不往后挪"
+    );
+    tap_flv_tags_from(&file, &flv.bytes, 2_000, u32::MAX);
+    file.closed(flv.bytes.len() as u64);
+    tap.sync().await;
+    assert_eq!(index::live::written(&part), None, "关段后不再跟踪");
+    drop(guard);
 }

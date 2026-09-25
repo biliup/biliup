@@ -182,6 +182,10 @@ export interface LiveStreamerEntity {
 	live_avatar_url?: string | null;
 	/** 录制中的预览能力；未录制为 null */
 	preview?: LivePreviewInfo | null;
+	/** 正在录的场次（切片工作台）；未录制或第一个分段还没开写时为 null */
+	session_id?: number | null;
+	/** 正在录的这一场已经打了几个标记；session_id 为 null 时也为 null */
+	marker_count?: number | null;
 	statusTag?: React.ReactNode;
 	format?: string;
     time_range?: string | Date[];

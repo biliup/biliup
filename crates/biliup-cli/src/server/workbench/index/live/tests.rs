@@ -269,3 +269,19 @@ async fn sync_returns_after_earlier_events_are_indexed() {
     assert!(!is_live(&path));
     assert_same_as_disk_scan(&path, &flv.bytes);
 }
+
+/// 输出目录为 `.` 时写入端报 `./x.flv`，写入任务和库里记的是 `x.flv`：两种写法是同一个分段。
+#[test]
+fn live_segments_are_keyed_by_the_recorded_path() {
+    let reported = Path::new("./live-key.flv");
+    let recorded = Path::new("live-key.flv");
+    register(reported);
+    assert!(is_live(recorded));
+    let mut index = KeyframeIndex::new(Container::Flv);
+    index.base_ts = Some(0);
+    index.duration_ms = 4_000;
+    advance(reported, &index);
+    assert_eq!(written(recorded).map(|(ms, _)| ms), Some(4_000));
+    unregister(recorded);
+    assert!(!is_live(reported));
+}

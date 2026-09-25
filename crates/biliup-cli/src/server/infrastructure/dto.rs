@@ -65,4 +65,6 @@ pub struct LiveStreamerResponse {
     pub preview: Option<LivePreviewResponse>,
     /// 正在录的场次（切片工作台）；未录制或第一个分段还没开写时为 `null`。
     pub session_id: Option<i64>,
+    /// 正在录的这一场已经打了几个标记；`session_id` 为 `null` 时也为 `null`。
+    pub marker_count: Option<i64>,
 }

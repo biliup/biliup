@@ -12,6 +12,7 @@ import {
   canPreview,
 } from '@/app/lib/use-dashboard'
 import { LivePreviewButton, LivePreviewModal } from './LivePreview'
+import { MarkerCount } from './MarkerControls'
 import { LiveRateChart, SPARK_RATE_WINDOW_MS, useCardRateChart } from './LiveRateChart'
 import styles from './streamer-card.module.scss'
 
@@ -216,6 +217,7 @@ export default function StreamerCard({
             <span className={styles.bdot} />
             {meta.label}
           </span>
+          {live ? <MarkerCount count={streamer.marker_count} /> : null}
         </span>
         <span
           className={styles.platChip}

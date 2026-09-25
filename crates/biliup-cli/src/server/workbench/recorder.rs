@@ -185,7 +185,8 @@ struct Writer {
     /// 时间轴 0 点；这一场还没有分段时为 `None`。
     started_at: Option<i64>,
     last_end_ms: i64,
-    /// 场次登记为「正在录」，DVR 读取方据此等通知；随写入任务结束一起注销。
+    /// 场次登记为「正在录」，DVR 读取方据此等通知，打标记据此换算场次时间（每次开段 / 关段
+    /// 更新锚点）；随写入任务结束一起注销。
     live: Option<LiveGuard>,
     open: Option<OpenSegment>,
     run_started_at: i64,
@@ -393,6 +394,10 @@ impl Writer {
         self.last_end_ms = self.last_end_ms.max(end_ms);
         self.run_has_segment = true;
         self.last_close_at = Some(at);
+        if let Some(live) = &mut self.live {
+            live.anchor(end_ms, at);
+            live.stop_sampling();
+        }
     }
 
     /// 在场次时间轴上放一个新分段并插行，返回 `(id, start_ms)`。
@@ -426,6 +431,10 @@ impl Writer {
         )
         .await?;
         self.register_live();
+        if let Some(live) = &mut self.live {
+            live.anchor(start_ms, opened_at);
+            live.sample_segment(path.to_path_buf(), start_ms);
+        }
         Ok((id, start_ms))
     }
 
@@ -459,6 +468,7 @@ impl Writer {
             store::delete_segment(&self.pool, open.id).await?;
             if store::clear_started_at_if_empty(&self.pool, self.target.session_id).await? {
                 self.started_at = None;
+                self.live = None;
             }
             return Ok(());
         };

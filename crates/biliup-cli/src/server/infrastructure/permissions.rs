@@ -41,6 +41,7 @@ impl Role {
                 ConfigView,
                 LogView,
                 FileView,
+                ClipEdit,
             ],
             Role::Viewer => &[StreamerView, PreviewView, ConfigView, LogView, FileView],
         }
@@ -100,6 +101,9 @@ pub enum Permission {
     FileView,
     #[serde(rename = "user.manage")]
     UserManage,
+    /// 切片工作台：打标记、保留场次、改切片草稿
+    #[serde(rename = "clip.edit")]
+    ClipEdit,
 }
 
 impl Permission {
@@ -117,6 +121,7 @@ impl Permission {
         Permission::LogView,
         Permission::FileView,
         Permission::UserManage,
+        Permission::ClipEdit,
     ];
 }
 
@@ -144,12 +149,19 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         "/v1/ws/live-rates" | "/v1/live-rates" if get => StreamerView,
         "/v1/sessions" | "/v1/sessions/{id}" | "/v1/sessions/{id}/keyframes" if get => FileView,
         "/v1/sessions/{id}/media" if get => PreviewView,
+        "/v1/sessions/{id}/markers" if get => FileView,
+        "/v1/sessions/{id}/markers" if method == Method::POST => ClipEdit,
+        "/v1/sessions/{id}/markers/{mid}"
+            if method == Method::PATCH || method == Method::DELETE =>
+        {
+            ClipEdit
+        }
         // 与 /v1/status 同级：三个角色都能看首页的系统状态
         "/v1/system-stats" if get => StreamerView,
         "/v1/configuration" if get => ConfigView,
         "/v1/configuration" if method == Method::PUT => ConfigEdit,
         "/v1/streamer-info" | "/v1/streamer-info/files/{id}" if get => StreamerView,
-        "/v1/sessions/{id}" if method == Method::PATCH => RecordingControl,
+        "/v1/sessions/{id}" if method == Method::PATCH => ClipEdit,
         "/v1/upload/streamers" | "/v1/upload/streamers/{id}" if get => StreamerView,
         "/v1/upload/streamers" if method == Method::POST => TemplateEdit,
         "/v1/upload/streamers/{id}" if method == Method::DELETE => TemplateEdit,
@@ -259,7 +271,13 @@ mod tests {
             assert!(!Role::Operator.has(permission), "{permission:?}");
             assert!(!Role::Viewer.has(permission), "{permission:?}");
         }
-        for permission in [RecordingControl, StreamerEdit, UploadSubmit, TemplateEdit] {
+        for permission in [
+            RecordingControl,
+            StreamerEdit,
+            UploadSubmit,
+            TemplateEdit,
+            ClipEdit,
+        ] {
             assert!(Role::Operator.has(permission), "{permission:?}");
             assert!(!Role::Viewer.has(permission), "{permission:?}");
         }

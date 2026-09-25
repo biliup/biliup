@@ -193,6 +193,10 @@ mod tests {
         ("GET", "/v1/sessions/1"),
         ("GET", "/v1/sessions/1/keyframes"),
         ("GET", "/v1/sessions/1/media"),
+        ("GET", "/v1/sessions/1/markers"),
+        ("POST", "/v1/sessions/1/markers"),
+        ("PATCH", "/v1/sessions/1/markers/1"),
+        ("DELETE", "/v1/sessions/1/markers/1"),
         ("GET", "/v1/system-stats"),
         ("GET", "/v1/configuration"),
         ("PUT", "/v1/configuration"),
@@ -245,6 +249,7 @@ mod tests {
             | ("GET", "/v1/sessions/1")
             | ("GET", "/v1/sessions/1/keyframes")
             | ("GET", "/v1/sessions/1/media")
+            | ("GET", "/v1/sessions/1/markers")
             | ("GET", "/v1/system-stats")
             | ("GET", "/v1/configuration")
             | ("GET", "/v1/streamer-info")
@@ -267,7 +272,10 @@ mod tests {
             | ("GET", "/v1/users")
             | ("GET", "/v1/users/1")
             | ("GET", "/bili/archive/pre")
-            | ("POST", "/v1/uploads") => operate,
+            | ("POST", "/v1/uploads")
+            | ("POST", "/v1/sessions/1/markers")
+            | ("PATCH", "/v1/sessions/1/markers/1")
+            | ("DELETE", "/v1/sessions/1/markers/1") => operate,
             _ => admin,
         }
     }
@@ -299,6 +307,14 @@ mod tests {
             .route("/v1/sessions/{id}", ok())
             .route("/v1/sessions/{id}/keyframes", ok())
             .route("/v1/sessions/{id}/media", ok())
+            .route(
+                "/v1/sessions/{id}/markers",
+                get(|| async { StatusCode::OK }).post(|| async { StatusCode::OK }),
+            )
+            .route(
+                "/v1/sessions/{id}/markers/{mid}",
+                patch(|| async { StatusCode::OK }).delete(|| async { StatusCode::OK }),
+            )
             .route("/v1/system-stats", ok())
             .route("/v1/configuration", any())
             .route("/v1/streamer-info", ok())
