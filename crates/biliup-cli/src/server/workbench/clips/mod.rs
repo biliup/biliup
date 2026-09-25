@@ -1,9 +1,11 @@
 //! 切片（`clips`）：在场次时间轴上选出的一段，导出成文件。
 //!
 //! - 这里是表的读写；
-//! - [`plan`]：把场次时间上的入点、出点换算成「从哪些分段的哪个字节读到哪个字节」。
+//! - [`plan`]：把场次时间上的入点、出点换算成「从哪些分段的哪个字节读到哪个字节」；
+//! - [`remux`]：快速剪，进程内按关键帧切、不转码，重写时间戳后接成一个文件。
 
 pub mod plan;
+pub mod remux;
 
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use serde::{Deserialize, Serialize};
