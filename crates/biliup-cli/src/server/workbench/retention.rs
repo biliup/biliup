@@ -11,8 +11,8 @@
 //! 不在 `segments` 里的文件（工作台不支持的容器、升级前录的旧文件）一律按原来的方式立即删，
 //! 清理任务和水位兜底也只处理有 `segments` 记录的文件。
 
-use super::index;
 use super::recorder::now_ms;
+use super::{index, segment_path};
 use crate::server::config::Config;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use sqlx::{Executor, Sqlite, SqliteConnection};
@@ -164,7 +164,11 @@ fn danmaku_in_batch(video: &Path, recorded: Option<&str>, paths: &[&Path]) -> Op
     let sibling = video.with_extension("xml");
     paths
         .iter()
-        .find(|p| **p != video && (recorded.is_some_and(|r| Path::new(r) == **p) || **p == sibling))
+        .find(|p| {
+            **p != video
+                && (recorded.is_some_and(|r| segment_path(Path::new(r)) == segment_path(p))
+                    || **p == sibling)
+        })
         .map(|p| p.to_path_buf())
 }
 
@@ -600,7 +604,7 @@ impl Drop for SweeperGuard {
 }
 
 fn path_string(path: &Path) -> String {
-    path.to_string_lossy().into_owned()
+    segment_path(path).to_string_lossy().into_owned()
 }
 
 #[cfg(test)]

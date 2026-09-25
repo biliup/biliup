@@ -18,9 +18,17 @@ use crate::server::infrastructure::connection_pool::ConnectionPool;
 use index::Container;
 use std::collections::HashMap;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use store::{SegmentRow, SegmentState};
 use tracing::{info, warn};
+
+/// 分段路径在库里的写法：去掉所有 `.` 组件。同一个文件，下载器在开段、关段和删除点可能分别报成
+/// `./x.flv` 与 `x.flv`（输出目录为 `.` 时），记录和查找都按这个写法才能对上同一行。
+pub(crate) fn segment_path(path: &Path) -> PathBuf {
+    path.components()
+        .filter(|component| !matches!(component, Component::CurDir))
+        .collect()
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

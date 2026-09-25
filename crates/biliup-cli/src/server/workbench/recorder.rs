@@ -13,9 +13,9 @@
 //! [`GAP_TOLERANCE_MS`] 以上才算断流，时间轴跳过这段空白并记进 `gap_before_ms`；否则紧接上一段。
 //! 只比相邻两段的墙钟，容器时长与墙钟的偏差不会跨段累积成假断流。
 
-use super::index;
 use super::live::{self, LiveGuard};
 use super::store::{self, FinishedSegment, SegmentState};
+use super::{index, segment_path};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use biliup::downloader::index_tap::IndexTap;
 use biliup::downloader::util::ByteCounter;
@@ -124,14 +124,15 @@ impl RecorderHandle {
 
     pub(crate) fn opened_at(&self, path: &Path, at: i64) {
         let _ = self.tx.send(Event::Opened {
-            path: path.to_path_buf(),
+            path: segment_path(path),
             at,
         });
     }
 
-    pub(crate) fn closed_at(&self, path: &Path, at: i64, info: ClosedSegment) {
+    pub(crate) fn closed_at(&self, path: &Path, at: i64, mut info: ClosedSegment) {
+        info.danmaku_path = info.danmaku_path.as_deref().map(segment_path);
         let _ = self.tx.send(Event::Closed {
-            path: path.to_path_buf(),
+            path: segment_path(path),
             at,
             info,
         });
