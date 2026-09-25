@@ -21,6 +21,7 @@ use crate::server::infrastructure::repositories::{
     register_bilibili_cookie,
 };
 use crate::server::infrastructure::service_register::ServiceRegister;
+use crate::server::services::configuration::{ApplyConfigError, apply_config};
 use crate::{LogHandle, UploadLine};
 use axum::Json;
 use axum::extract::{Path, State};
@@ -38,7 +39,6 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, UNIX_EPOCH};
 use tokio::fs;
 use tracing::info;
-use tracing_subscriber::EnvFilter;
 
 /// 主播当前被录制策略挡下的原因，供 `/v1/streamers` 覆盖状态字段。
 ///
@@ -305,110 +305,15 @@ pub async fn put_configuration(
     State(log_handle): State<LogHandle>,
     Json(json_data): Json<Config>,
 ) -> Result<Json<Config>, Response> {
-    let mut json_data = json_data;
-    json_data.normalize_segment_limits();
-    json_data
-        .validate_segment_limits()
-        .map_err(report_to_response)?;
-    json_data.validate_pool_sizes().map_err(|message| {
-        (StatusCode::BAD_REQUEST, Json(ApiError::new(message))).into_response()
-    })?;
-    // 将 JSON 序列化为 TEXT 存库
-    let value_txt = serde_json::to_string(&json_data)
-        .change_context(AppError::Unknown)
-        .map_err(report_to_response)?;
-
-    let mut tx = pool
-        .begin()
+    apply_config(&config, &pool, &managers, &log_handle, json_data)
         .await
-        .change_context(AppError::Unknown)
-        .map_err(report_to_response)?;
-
-    // 最多取 2 条判断是否多行
-    let ids: Vec<i64> =
-        sqlx::query_scalar::<_, i64>("SELECT id FROM configuration WHERE key = ?1 LIMIT 2")
-            .bind("config")
-            .fetch_all(&mut *tx)
-            .await
-            .change_context(AppError::Unknown)
-            .map_err(report_to_response)?;
-
-    let saved: Configuration = if ids.is_empty() {
-        // 插入
-        sqlx::query("INSERT INTO configuration (key, value) VALUES (?1, ?2)")
-            .bind("config")
-            .bind(&value_txt)
-            .execute(&mut *tx)
-            .await
-            .change_context(AppError::Unknown)
-            .map_err(report_to_response)?;
-
-        // 取 last_insert_rowid 并读回整行
-        let id: i64 = sqlx::query_scalar::<_, i64>("SELECT last_insert_rowid()")
-            .fetch_one(&mut *tx)
-            .await
-            .change_context(AppError::Unknown)
-            .map_err(report_to_response)?;
-
-        sqlx::query_as::<_, Configuration>("SELECT id, key, value FROM configuration WHERE id = ?1")
-            .bind(id)
-            .fetch_one(&mut *tx)
-            .await
-            .change_context(AppError::Unknown)
-            .map_err(report_to_response)?
-    } else if ids.len() == 1 {
-        // 更新
-        let id = ids[0];
-        sqlx::query("UPDATE configuration SET value = ?1 WHERE id = ?2")
-            .bind(&value_txt)
-            .bind(id)
-            .execute(&mut *tx)
-            .await
-            .change_context(AppError::Unknown)
-            .map_err(report_to_response)?;
-
-        sqlx::query_as::<_, Configuration>("SELECT id, key, value FROM configuration WHERE id = ?1")
-            .bind(id)
-            .fetch_one(&mut *tx)
-            .await
-            .change_context(AppError::Unknown)
-            .map_err(report_to_response)?
-    } else {
-        // 多行报错
-        return Err(report_to_response(Report::new(AppError::Custom(
-            format!("有多个空间配置同时存在 (key='config'): {} 行", ids.len()).to_string(),
-        ))));
-    };
-
-    tx.commit()
-        .await
-        .change_context(AppError::Unknown)
-        .map_err(report_to_response)?;
-    // 提交后从 DB 重新加载配置
-    let mut saved_config: Config = serde_json::from_str(&saved.value)
-        .change_context(AppError::Unknown)
-        .map_err(report_to_response)?;
-    saved_config.normalize_segment_limits();
-    saved_config
-        .validate_segment_limits()
-        .map_err(report_to_response)?;
-    crate::tools::set_configured_ffmpeg(saved_config.ffmpeg_path.as_deref());
-    // 下载池 / 上传池的容量不是每次从配置里读的，要在这里同步过去才能不重启就生效
-    managers.resize_pools(saved_config.pool1_size, saved_config.pool2_size);
-    *config.write().unwrap() = saved_config;
-    let guard = config.read().unwrap();
-    if let Some(loggers_level) = &guard.loggers_level {
-        let new_filter = EnvFilter::try_new(loggers_level)
-            .change_context(AppError::Custom(String::from("Invalid log level format")))
-            .map_err(report_to_response)?;
-
-        log_handle
-            .modify(|filter| *filter = new_filter)
-            .change_context(AppError::Unknown)
-            .map_err(report_to_response)?;
-    }
-
-    Ok(Json(guard.clone()))
+        .map(Json)
+        .map_err(|e| match e {
+            ApplyConfigError::Invalid(message) => {
+                (StatusCode::BAD_REQUEST, Json(ApiError::new(message))).into_response()
+            }
+            ApplyConfigError::Internal(report) => report_to_response(report),
+        })
 }
 
 pub async fn get_streamer_info(
@@ -1157,7 +1062,7 @@ mod recording_policy_status_tests {
 mod configuration_tests {
     use super::*;
     use crate::server::infrastructure::connection_pool::ConnectionManager;
-    use tracing_subscriber::reload;
+    use tracing_subscriber::{EnvFilter, reload};
 
     /// Web 界面保存配置后，下载池 / 上传池容量立即换成新值，不需要重启
     #[tokio::test]
