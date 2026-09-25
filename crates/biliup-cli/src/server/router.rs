@@ -1,6 +1,9 @@
 use crate::server::api::bilibili_endpoints::{
     archive_pre_endpoint, get_user_archives_endpoint, get_user_profile_endpoint,
 };
+use crate::server::api::clips::{
+    create_clip, delete_clip, download_clip, export_clip, get_clip, list_clips, update_clip,
+};
 use crate::server::api::endpoints::{
     add_upload_streamer_endpoint, add_user_endpoint, delete_streamers_endpoint,
     delete_template_endpoint, delete_user_endpoint, get_configuration, get_qrcode, get_status,
@@ -75,6 +78,15 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         )
         // 控制台首页的系统状态（CPU / 内存 / 录制目录磁盘 / 网速）；`?since=` 只取增量
         .route("/v1/system-stats", get(get_system_stats))
+        // 切片工作台：切片与导出（只按场次 id、切片 id 寻址）
+        .route("/v1/sessions/{id}/clips", get(list_clips).post(create_clip))
+        .route(
+            "/v1/sessions/{id}/clips/{cid}",
+            patch(update_clip).delete(delete_clip),
+        )
+        .route("/v1/clips/{cid}", get(get_clip))
+        .route("/v1/clips/{cid}/export", post(export_clip))
+        .route("/v1/clips/{cid}/download", get(download_clip))
         // 配置管理路由
         .route(
             "/v1/configuration",

@@ -7,6 +7,7 @@ use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::Worker;
 use crate::server::infrastructure::models::live_streamer::LiveStreamer;
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
+use crate::server::workbench::clips::export::ClipExports;
 use axum::extract::FromRef;
 use biliup::client::StatelessClient;
 use biliup::downloader::live::builtin_plugins;
@@ -14,6 +15,9 @@ use error_stack::Report;
 use error_stack::fmt::ColorMode;
 use std::sync::{Arc, RwLock};
 use tracing::info;
+
+/// 切片产物的目录（相对工作目录）。
+pub const CLIPS_DIR: &str = "clips";
 
 /// 服务注册器
 /// 负责管理应用程序中的各种服务实例，包括数据库连接池、工作器、下载管理器等
@@ -35,6 +39,8 @@ pub struct ServiceRegister {
 
     /// 控制台首页的系统状态采样（CPU / 内存 / 磁盘 / 网速），随服务启停
     pub system: Arc<SystemMonitor>,
+    /// 切片导出任务（产物在工作目录下的 `clips/`）
+    pub clips: Arc<ClipExports>,
 }
 
 /// 简单的服务容器，负责管理API端点通过axum扩展获取的各种服务
@@ -66,6 +72,7 @@ impl ServiceRegister {
 
         info!("feature services successfully initialized!");
         ServiceRegister {
+            clips: Arc::new(ClipExports::new(pool.clone(), CLIPS_DIR)),
             pool,
             managers: Arc::new(download_manager),
             config: config.clone(),
