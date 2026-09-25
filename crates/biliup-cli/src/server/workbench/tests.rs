@@ -107,13 +107,13 @@ async fn wall_clock_drift_between_segments_is_not_a_gap() {
 
 /// 输出目录是 `.` 时下载器给出 `./x.flv` 这种相对路径；要在测试里原样复现，文件得放在当前目录下。
 /// 返回的路径以 `./` 开头。
-fn dot_prefixed_dir() -> (TempDir, PathBuf) {
+pub(super) fn dot_prefixed_dir() -> (TempDir, PathBuf) {
     let dir = tempfile::tempdir_in(".").unwrap();
     let rel = Path::new(".").join(dir.path().file_name().unwrap());
     (dir, rel)
 }
 
-fn without_dot(path: &Path) -> PathBuf {
+pub(super) fn without_dot(path: &Path) -> PathBuf {
     path.strip_prefix(".").unwrap().to_path_buf()
 }
 

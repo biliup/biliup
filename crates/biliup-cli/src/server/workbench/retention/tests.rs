@@ -608,6 +608,60 @@ async fn mv_moves_the_index_and_updates_segment_paths() {
     assert_eq!(state(&pool, a).await, "deleted");
 }
 
+/// 外部 ffmpeg / streamlink 的分段路径带 `./`，库里存的是规范化后的写法；后处理按 `./` 路径
+/// 删除或搬移时仍要认出这个分段。
+#[tokio::test]
+async fn dot_prefixed_paths_from_post_processing_find_the_segment() {
+    let (_guard, dir) = crate::server::workbench::tests::dot_prefixed_dir();
+    let (_db, pool) = setup().await;
+    let t0 = 1_000_000;
+    let s = session(&pool, t0).await;
+    let recorder = SessionRecorder::spawn(
+        pool.clone(),
+        SessionTarget {
+            session_id: s,
+            streamer_id: 1,
+        },
+        None,
+    );
+    let handle = recorder.handle();
+    let part = dir.join("x.flv.part");
+    std::fs::write(&part, b"video").unwrap();
+    handle.opened_at(&part, t0);
+    let video = dir.join("x.flv");
+    std::fs::rename(&part, &video).unwrap();
+    let xml = dir.join("x.xml");
+    std::fs::write(&xml, b"<i></i>").unwrap();
+    handle.closed_at(
+        &video,
+        t0 + 1000,
+        ClosedSegment {
+            danmaku_path: Some(xml.clone()),
+            ..Default::default()
+        },
+    );
+    recorder.finish().await;
+    let rows = store::session_segments(&pool, s).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(!rows[0].path.starts_with("./"), "{}", rows[0].path);
+
+    let outcome = remove(&retention(&pool, HOUR), &[&video, &xml])
+        .await
+        .unwrap();
+    assert_eq!(outcome, vec![Disposal::Deferred, Disposal::Deferred]);
+    assert!(video.exists() && xml.exists());
+    assert_eq!(state(&pool, rows[0].id).await, "pending_delete");
+
+    let archive = dir.join("archive");
+    std::fs::create_dir(&archive).unwrap();
+    let moved_video = archive.join("x.flv");
+    std::fs::rename(&video, &moved_video).unwrap();
+    moved(Some(&pool), &video, &moved_video).await;
+    let row = &store::session_segments(&pool, s).await.unwrap()[0];
+    assert_eq!(row.path, path_string(&moved_video));
+    assert!(!row.path.starts_with("./"), "{}", row.path);
+}
+
 /// 可用空间 = 容量 - 目录里还在的文件大小。
 fn fake_disk(capacity: u64) -> impl FnMut(&Path) -> io::Result<u64> {
     move |dir: &Path| {
