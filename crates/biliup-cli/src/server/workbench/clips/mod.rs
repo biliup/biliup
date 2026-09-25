@@ -5,12 +5,13 @@
 //! - [`plan`]：把场次时间上的入点、出点换算成「从哪些分段的哪个字节读到哪个字节」；
 //! - [`remux`]：快速剪，进程内按关键帧切、不转码，重写时间戳后接成一个文件；
 //! - [`export`]：后台导出任务（快速剪 / 精确剪）、进度、失败原因，以及下载用的 MP4 转封装；
-//! - [`publish`]：按上传模板拼稿件（发布设置、标题变量、强制转载）。
+//! - [`publish`]：按上传模板投稿（单并发队列，遇 601 暂停）；[`thumb`]：取帧做封面。
 
 pub mod export;
 pub mod plan;
 pub mod publish;
 pub mod remux;
+pub mod thumb;
 
 use super::retention;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
