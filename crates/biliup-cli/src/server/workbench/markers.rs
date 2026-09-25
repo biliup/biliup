@@ -17,7 +17,7 @@ use crate::server::infrastructure::connection_pool::ConnectionPool;
 use serde::Serialize;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use tracing::debug;
 
 /// 标记默认覆盖它之前多长（毫秒）。
@@ -243,6 +243,25 @@ pub async fn delete(pool: &ConnectionPool, session_id: i64, id: i64) -> sqlx::Re
     Ok(deleted)
 }
 
+/// 给还没有登记引用的标记补登，返回补了几个。启动时调用，补上引用接入之前打的标记。
+pub async fn pin_unpinned(pool: &ConnectionPool) -> sqlx::Result<usize> {
+    let mut tx = pool.begin().await?;
+    let sessions: Vec<i64> = sqlx::query_scalar(
+        "INSERT INTO segment_pins (owner, session_id, from_ms, to_ms)
+         SELECT 'marker:' || m.id, m.session_id, MAX(m.at_ms - m.lookback_ms, 0), m.at_ms + m.lookahead_ms
+         FROM markers m
+         WHERE NOT EXISTS (SELECT 1 FROM segment_pins p WHERE p.owner = 'marker:' || m.id)
+         RETURNING session_id",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    for session_id in sessions.iter().collect::<BTreeSet<_>>() {
+        retention::refresh_pin_counts(&mut *tx, *session_id).await?;
+    }
+    tx.commit().await?;
+    Ok(sessions.len())
+}
+
 /// 几场各有多少个标记；没有标记的场次不在结果里。
 pub async fn counts(pool: &ConnectionPool, session_ids: &[i64]) -> sqlx::Result<HashMap<i64, i64>> {
     if session_ids.is_empty() {
@@ -403,6 +422,34 @@ mod tests {
         assert!(delete(&pool, s, m.id).await.unwrap());
         assert!(pinned(&pool).await.is_empty());
         assert_eq!(pin_count(&pool, segment).await, 0);
+    }
+
+    #[tokio::test]
+    async fn markers_made_before_pinning_get_pinned_on_startup() {
+        let (_dir, pool, s) = setup().await;
+        let segment = store::insert_segment(&pool, s, "a.flv", "flv", 0, 0)
+            .await
+            .unwrap();
+        let m = insert(&pool, s, &new_marker(5_000)).await.unwrap();
+        let old: i64 = sqlx::query_scalar(
+            "INSERT INTO markers (session_id, at_ms, created_at, lookback_ms, lookahead_ms)
+             VALUES (?, 90000, 1, 60000, 1000) RETURNING id",
+        )
+        .bind(s)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(pin_unpinned(&pool).await.unwrap(), 1);
+        assert_eq!(
+            pinned(&pool).await,
+            [
+                (format!("marker:{}", m.id), 0, 5_000),
+                (format!("marker:{old}"), 30_000, 91_000)
+            ]
+        );
+        assert_eq!(pin_count(&pool, segment).await, 2);
+        assert_eq!(pin_unpinned(&pool).await.unwrap(), 0, "只补一次");
     }
 
     #[test]
