@@ -346,6 +346,8 @@ fn segment_start_hook(
     seg_tx: UnboundedSender<WriterEvent>,
 ) -> impl Fn(&std::path::Path, u32) + Send + Sync + 'static {
     move |path, _index| {
+        // 与关段回调给出同一形式的路径，录制器按路径把开段和关段对上
+        let path = path.strip_prefix(".").unwrap_or(path);
         let _ = seg_tx.send(WriterEvent::Opened(path.to_path_buf()));
     }
 }
@@ -585,22 +587,27 @@ mod tests {
     #[test]
     fn segment_paths_under_the_current_dir_drop_the_dot_prefix() {
         let (tx, mut rx) = unbounded_channel();
-        let hook = segment_complete_hook(tx);
-        hook(std::path::Path::new("./x.flv"), 0, 1.0, 10, None);
-        hook(std::path::Path::new("./sub/y.flv"), 1, 1.0, 10, None);
-        hook(std::path::Path::new("/data/z.flv"), 2, 1.0, 10, None);
-        hook(std::path::Path::new("w.flv"), 3, 1.0, 10, None);
+        let start = segment_start_hook(tx.clone());
+        let complete = segment_complete_hook(tx);
+        for (i, path) in ["./x.flv", "./sub/y.flv", "/data/z.flv", "w.flv"]
+            .into_iter()
+            .enumerate()
+        {
+            start(std::path::Path::new(path), i as u32);
+            complete(std::path::Path::new(path), i as u32, 1.0, 10, None);
+        }
 
-        let paths: Vec<PathBuf> = std::iter::from_fn(|| rx.try_recv().ok())
-            .filter_map(|event| match event {
-                WriterEvent::Closed(path, ..) => Some(path),
-                WriterEvent::Opened(_) => None,
+        let events: Vec<(bool, PathBuf)> = std::iter::from_fn(|| rx.try_recv().ok())
+            .map(|event| match event {
+                WriterEvent::Opened(path) => (true, path),
+                WriterEvent::Closed(path, ..) => (false, path),
             })
             .collect();
-        assert_eq!(
-            paths,
-            ["x.flv", "sub/y.flv", "/data/z.flv", "w.flv"].map(PathBuf::from)
-        );
+        let expected: Vec<(bool, PathBuf)> = ["x.flv", "sub/y.flv", "/data/z.flv", "w.flv"]
+            .into_iter()
+            .flat_map(|p| [(true, PathBuf::from(p)), (false, PathBuf::from(p))])
+            .collect();
+        assert_eq!(events, expected);
     }
 
     #[test]
