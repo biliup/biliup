@@ -165,6 +165,18 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         "/v1/sessions/{id}/clips/{cid}" if method == Method::PATCH || method == Method::DELETE => {
             ClipEdit
         }
+        "/v1/clips/{cid}/cover" | "/v1/sessions/{id}/thumb" | "/v1/publish-jobs" if get => FileView,
+        "/v1/clips/{cid}/cover" if method == Method::PUT || method == Method::DELETE => ClipEdit,
+        "/v1/clips/{cid}/publish"
+        | "/v1/publish-jobs"
+        | "/v1/publish-jobs/preview"
+        | "/v1/publish-jobs/resume"
+        | "/v1/publish-jobs/{jid}/retry"
+            if method == Method::POST =>
+        {
+            UploadSubmit
+        }
+        "/v1/publish-jobs/{jid}" if method == Method::DELETE => UploadSubmit,
         "/v1/configuration" if get => ConfigView,
         "/v1/configuration" if method == Method::PUT => ConfigEdit,
         "/v1/streamer-info" | "/v1/streamer-info/files/{id}" if get => StreamerView,

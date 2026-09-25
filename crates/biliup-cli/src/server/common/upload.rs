@@ -223,6 +223,15 @@ pub(crate) async fn upload_single_file(
     file_path: &Path,
     context: &UploadContext,
 ) -> AppResult<Video> {
+    upload_single_file_with_progress(file_path, context, |_| {}).await
+}
+
+/// 同 [`upload_single_file`]，每读出一块交给上传时用这块的字节数回调 `progress`。
+pub(crate) async fn upload_single_file_with_progress(
+    file_path: &Path,
+    context: &UploadContext,
+    progress: impl Fn(usize) + Send + Sync,
+) -> AppResult<Video> {
     let video_path = file_path;
     let UploadContext {
         bilibili,
@@ -254,6 +263,7 @@ pub(crate) async fn upload_single_file(
             vs.map(|vs| {
                 let chunk = vs?;
                 let len = chunk.len();
+                progress(len);
                 Ok((chunk, len))
             })
         })
@@ -375,7 +385,7 @@ pub(crate) async fn complete_byte_stream(uploaded: UploadedStream) -> AppResult<
 // 前端表单留空时会把 copyright_source 提交为空字符串 `Some("")`，
 // 若直接透传则 B 站接口收到空 source，且不会回退到直播间地址。
 // 这里把 None 以及空白字符串都视作「未填写」，统一回退到直播间地址，
-fn resolve_source(copyright_source: Option<&str>, fallback_url: &str) -> String {
+pub(crate) fn resolve_source(copyright_source: Option<&str>, fallback_url: &str) -> String {
     match copyright_source.map(str::trim) {
         Some(s) if !s.is_empty() => s.to_string(),
         _ => fallback_url.to_string(),
@@ -498,20 +508,47 @@ fn credits_to_desc_v2(desc: &str, credits: &[TemplateCredit]) -> Option<(String,
     Some((plain, nodes))
 }
 
+/// 按模板的 credits 展开简介里的 `@credit`，返回提交用的简介和 `desc_v2`
+/// （没有可用的 credits 或占位符时为 `None`，简介原样返回）。
+pub(crate) fn desc_with_credits(
+    desc: String,
+    credits: Option<&serde_json::Value>,
+) -> (String, Option<Vec<Credit>>) {
+    match credits_to_desc_v2(&desc, &template_credits(credits)) {
+        Some((plain, nodes)) => (plain, Some(nodes)),
+        None => (desc, None),
+    }
+}
+
 pub(crate) async fn build_studio(
     upload_config: &UploadStreamer,
     bilibili: &BiliBili,
     videos: Vec<Video>,
     recorder: &Recorder,
 ) -> AppResult<Studio> {
-    let desc = recorder.format(&upload_config.description.clone().unwrap_or_default());
-    let credits = template_credits(upload_config.credits.as_ref());
-    let (desc, desc_v2) = match credits_to_desc_v2(&desc, &credits) {
-        Some((plain, nodes)) => (plain, Some(nodes)),
-        None => (desc, None),
+    let mut studio = studio_from_template(upload_config, videos, recorder);
+    // 处理封面上传
+    if !studio.cover.is_empty()
+        && let Ok(c) = &std::fs::read(&studio.cover).inspect_err(|e| error!(e=?e))
+        && let Ok(url) = bilibili.cover_up(c).await.inspect_err(|e| error!(e=?e))
+    {
+        studio.cover = url;
     };
-    // 使用 Builder 模式简化构建
-    let mut studio: Studio = Studio::builder()
+
+    Ok(studio)
+}
+
+/// 按上传模板拼出稿件；`cover` 还是本地路径，由调用方上传。
+pub(crate) fn studio_from_template(
+    upload_config: &UploadStreamer,
+    videos: Vec<Video>,
+    recorder: &Recorder,
+) -> Studio {
+    let (desc, desc_v2) = desc_with_credits(
+        recorder.format(&upload_config.description.clone().unwrap_or_default()),
+        upload_config.credits.as_ref(),
+    );
+    Studio::builder()
         .desc(desc)
         .maybe_dtime(scheduled_publish_ts(upload_config.dtime, now_unix()))
         .maybe_copyright(upload_config.copyright)
@@ -539,16 +576,7 @@ pub(crate) async fn build_studio(
             serde_json::from_str(&upload_config.extra_fields.clone().unwrap_or_default())
                 .unwrap_or_default(), // 处理额外字段
         )
-        .build();
-    // 处理封面上传
-    if !studio.cover.is_empty()
-        && let Ok(c) = &std::fs::read(&studio.cover).inspect_err(|e| error!(e=?e))
-        && let Ok(url) = bilibili.cover_up(c).await.inspect_err(|e| error!(e=?e))
-    {
-        studio.cover = url;
-    };
-
-    Ok(studio)
+        .build()
 }
 
 pub async fn execute_postprocessor(video_paths: Vec<PathBuf>, ctx: &Context) -> AppResult<()> {

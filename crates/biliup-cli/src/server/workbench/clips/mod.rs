@@ -4,11 +4,14 @@
 //!   （[`retention::pin`]），改范围时跟着改，删掉切片（或 P9 发布之后，[`release`]）时撤销；
 //! - [`plan`]：把场次时间上的入点、出点换算成「从哪些分段的哪个字节读到哪个字节」；
 //! - [`remux`]：快速剪，进程内按关键帧切、不转码，重写时间戳后接成一个文件；
-//! - [`export`]：后台导出任务（快速剪 / 精确剪）、进度、失败原因，以及下载用的 MP4 转封装。
+//! - [`export`]：后台导出任务（快速剪 / 精确剪）、进度、失败原因，以及下载用的 MP4 转封装；
+//! - [`publish`]：按上传模板投稿（单并发队列，遇 601 暂停）；[`thumb`]：取帧做封面。
 
 pub mod export;
 pub mod plan;
+pub mod publish;
 pub mod remux;
+pub mod thumb;
 
 use super::retention;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
@@ -103,6 +106,12 @@ pub struct Clip {
     pub output_bytes: Option<i64>,
     pub duration_ms: Option<i64>,
     pub error: Option<String>,
+    /// 发布用的上传模板；`None` = 用主播绑定的模板。
+    pub template_id: Option<i64>,
+    /// 发布设置里覆盖模板的部分（JSON，见 [`publish::StudioOverride`]）。
+    pub studio_override: Option<String>,
+    pub archive_bvid: Option<String>,
+    pub published_at: Option<i64>,
     pub created_by: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -127,6 +136,10 @@ impl Clip {
             output_bytes: row.try_get("output_bytes")?,
             duration_ms: row.try_get("duration_ms")?,
             error: row.try_get("error")?,
+            template_id: row.try_get("template_id")?,
+            studio_override: row.try_get("studio_override")?,
+            archive_bvid: row.try_get("archive_bvid")?,
+            published_at: row.try_get("published_at")?,
             created_by: row.try_get("created_by")?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
@@ -142,7 +155,8 @@ impl Clip {
 }
 
 const COLUMNS: &str = "id, session_id, marker_id, in_ms, out_ms, cut_in_ms, cut_out_ms, mode, \
-     title, state, output_path, output_bytes, duration_ms, error, created_by, created_at, updated_at";
+     title, state, output_path, output_bytes, duration_ms, error, template_id, studio_override, \
+     archive_bvid, published_at, created_by, created_at, updated_at";
 
 /// 引用分段时用的名义。
 pub fn pin_owner(id: i64) -> String {
@@ -322,6 +336,56 @@ pub async fn delete(pool: &ConnectionPool, session_id: i64, id: i64) -> sqlx::Re
 pub async fn release(pool: &ConnectionPool, id: i64) -> sqlx::Result<bool> {
     let mut conn = pool.acquire().await?;
     retention::unpin(&mut conn, &pin_owner(id)).await
+}
+
+/// 存发布设置：`template_id` 为 `None` 时用主播绑定的模板，`studio_override` 是
+/// [`publish::StudioOverride`] 的 JSON。切片不存在时返回 `None`。
+pub async fn set_publish_settings(
+    pool: &ConnectionPool,
+    id: i64,
+    template_id: Option<i64>,
+    studio_override: Option<&str>,
+    now: i64,
+) -> sqlx::Result<Option<Clip>> {
+    let sql = format!(
+        "UPDATE clips SET template_id = ?, studio_override = ?, updated_at = ?
+         WHERE id = ? RETURNING {COLUMNS}"
+    );
+    sqlx::query(&sql)
+        .bind(template_id)
+        .bind(studio_override)
+        .bind(now)
+        .bind(id)
+        .fetch_optional(pool)
+        .await?
+        .as_ref()
+        .map(Clip::from_row)
+        .transpose()
+}
+
+/// 投稿成功：记下稿件号和时间，撤销这些切片对源录像的引用（同一个事务）。
+pub async fn mark_published(
+    pool: &ConnectionPool,
+    ids: &[i64],
+    bvid: &str,
+    now: i64,
+) -> sqlx::Result<()> {
+    let mut tx = pool.begin().await?;
+    for &id in ids {
+        sqlx::query(
+            "UPDATE clips SET state = 'published', archive_bvid = ?, published_at = ?, error = NULL,
+                 updated_at = ?
+             WHERE id = ?",
+        )
+        .bind(bvid)
+        .bind(now)
+        .bind(now)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        retention::unpin(&mut tx, &pin_owner(id)).await?;
+    }
+    tx.commit().await
 }
 
 /// 把切片标成导出中；已经在导出、不存在或已发布 / 放弃时返回 `None`。之前的结果清掉。

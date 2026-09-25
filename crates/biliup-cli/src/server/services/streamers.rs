@@ -124,7 +124,10 @@ mod tests {
     use crate::server::common::system_stats::SystemMonitor;
     use crate::server::config::Config;
     use crate::server::infrastructure::connection_pool::ConnectionManager;
+    use crate::server::workbench::clips::export::ClipExports;
+    use crate::server::workbench::clips::publish::queue::{BiliBackend, ClipPublisher};
     use async_trait::async_trait;
+    use biliup::client::StatelessClient;
     use biliup::downloader::live::{LivePlugin, LiveRequest, LiveResult, LiveStatus};
     use std::sync::{Arc, RwLock};
     use std::time::Duration;
@@ -174,11 +177,21 @@ mod tests {
             .add_plugin(Arc::new(StuckPlatform { probed: probed_tx }))
             .await;
         let (_layer, log_handle) = reload::Layer::new(EnvFilter::new("info"));
+        let config = Arc::new(RwLock::new(config));
+        let client = StatelessClient::default();
+        let clips = Arc::new(ClipExports::new(pool.clone(), dir.path().join("clips")));
+        let publisher = Arc::new(ClipPublisher::new(
+            pool.clone(),
+            clips.clone(),
+            Arc::new(BiliBackend::new(config.clone(), client.clone())),
+        ));
         let services = ServiceRegister {
+            clips,
+            publisher,
             pool,
             managers: Arc::new(managers),
-            config: Arc::new(RwLock::new(config)),
-            client: Default::default(),
+            config,
+            client,
             log_handle,
             image_proxy: Arc::new(ImageProxy::new()),
             system: SystemMonitor::spawn(),
