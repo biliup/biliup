@@ -203,6 +203,8 @@ mod tests {
         ("PATCH", "/v1/sessions/1/clips/1"),
         ("DELETE", "/v1/sessions/1/clips/1"),
         ("GET", "/v1/clips/1"),
+        ("POST", "/v1/clips/1/export"),
+        ("GET", "/v1/clips/1/download"),
         ("GET", "/v1/configuration"),
         ("PUT", "/v1/configuration"),
         ("GET", "/v1/streamer-info"),
@@ -258,6 +260,7 @@ mod tests {
             | ("GET", "/v1/system-stats")
             | ("GET", "/v1/sessions/1/clips")
             | ("GET", "/v1/clips/1")
+            | ("GET", "/v1/clips/1/download")
             | ("GET", "/v1/configuration")
             | ("GET", "/v1/streamer-info")
             | ("GET", "/v1/streamer-info/files/1")
@@ -285,7 +288,8 @@ mod tests {
             | ("DELETE", "/v1/sessions/1/markers/1")
             | ("POST", "/v1/sessions/1/clips")
             | ("PATCH", "/v1/sessions/1/clips/1")
-            | ("DELETE", "/v1/sessions/1/clips/1") => operate,
+            | ("DELETE", "/v1/sessions/1/clips/1")
+            | ("POST", "/v1/clips/1/export") => operate,
             _ => admin,
         }
     }
@@ -335,6 +339,8 @@ mod tests {
                 patch(|| async { StatusCode::OK }).delete(|| async { StatusCode::OK }),
             )
             .route("/v1/clips/{cid}", ok())
+            .route("/v1/clips/{cid}/export", post(|| async { StatusCode::OK }))
+            .route("/v1/clips/{cid}/download", ok())
             .route("/v1/configuration", any())
             .route("/v1/streamer-info", ok())
             .route("/v1/streamer-info/files/{id}", ok())

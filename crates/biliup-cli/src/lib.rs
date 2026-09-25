@@ -117,6 +117,12 @@ pub async fn serve_on(
     if let Err(e) = server::workbench::recover(&conn_pool).await {
         tracing::warn!(error = %e, "切片工作台启动收尾失败，不影响录制与上传");
     }
+    match server::workbench::clips::recover(&conn_pool, server::workbench::recorder::now_ms()).await
+    {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(clips = n, "上次没导出完的切片已记为失败，可以重试"),
+        Err(e) => tracing::warn!(error = %e, "收尾没导出完的切片失败"),
+    }
 
     if let Some(configuration) =
         repositories::register_bilibili_cookie(&conn_pool, &user_cookie).await?

@@ -1,12 +1,16 @@
 //! 切片（`clips`）：在场次时间轴上选出的一段，导出成文件。
 //!
-//! - 这里是表的读写；
+//! - 这里是表的读写与引用：建切片时以 `clip:<id>` 的名义按 `[in_ms, out_ms]` 引用分段
+//!   （[`retention::pin`]），改范围时跟着改，删掉切片（或 P9 发布之后，[`release`]）时撤销；
 //! - [`plan`]：把场次时间上的入点、出点换算成「从哪些分段的哪个字节读到哪个字节」；
-//! - [`remux`]：快速剪，进程内按关键帧切、不转码，重写时间戳后接成一个文件。
+//! - [`remux`]：快速剪，进程内按关键帧切、不转码，重写时间戳后接成一个文件；
+//! - [`export`]：后台导出任务、进度、失败原因。
 
+pub mod export;
 pub mod plan;
 pub mod remux;
 
+use super::retention;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
@@ -134,6 +138,11 @@ impl Clip {
 const COLUMNS: &str = "id, session_id, marker_id, in_ms, out_ms, cut_in_ms, cut_out_ms, mode, \
      title, state, output_path, output_bytes, duration_ms, error, created_by, created_at, updated_at";
 
+/// 引用分段时用的名义。
+pub fn pin_owner(id: i64) -> String {
+    format!("clip:{id}")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewClip {
     pub marker_id: Option<i64>,
@@ -144,7 +153,9 @@ pub struct NewClip {
     pub created_at: i64,
 }
 
+/// 插入切片并引用它覆盖的分段（同一个事务）。
 pub async fn insert(pool: &ConnectionPool, session_id: i64, clip: &NewClip) -> sqlx::Result<Clip> {
+    let mut tx = pool.begin().await?;
     let sql = format!(
         "INSERT INTO clips (session_id, marker_id, in_ms, out_ms, title, created_by, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING {COLUMNS}"
@@ -158,9 +169,19 @@ pub async fn insert(pool: &ConnectionPool, session_id: i64, clip: &NewClip) -> s
         .bind(clip.created_by)
         .bind(clip.created_at)
         .bind(clip.created_at)
-        .fetch_one(pool)
+        .fetch_one(&mut *tx)
         .await?;
-    Clip::from_row(&row)
+    let clip = Clip::from_row(&row)?;
+    retention::pin(
+        &mut tx,
+        &pin_owner(clip.id),
+        session_id,
+        clip.in_ms,
+        clip.out_ms,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(clip)
 }
 
 pub async fn get(pool: &ConnectionPool, id: i64) -> sqlx::Result<Option<Clip>> {
@@ -211,7 +232,7 @@ pub enum UpdateOutcome {
     BadRange,
 }
 
-/// 改切片。范围变了的话，之前导出的结果作废（行回到 `draft`，产物由调用方删）。
+/// 改切片。范围变了的话，之前导出的结果作废（行回到 `draft`，产物由调用方删），引用跟着改。
 pub async fn update(
     pool: &ConnectionPool,
     session_id: i64,
@@ -264,21 +285,140 @@ pub async fn update(
         .fetch_one(&mut *tx)
         .await?;
     let clip = Clip::from_row(&row)?;
+    if range_changed && clip.state != State::Published && clip.state != State::Discarded {
+        retention::pin(&mut tx, &pin_owner(id), session_id, in_ms, out_ms).await?;
+    }
     tx.commit().await?;
     Ok(UpdateOutcome::Updated(Box::new(clip)))
 }
 
-/// 删切片，返回被删的行。
+/// 删切片并撤销引用，返回被删的行。
 pub async fn delete(pool: &ConnectionPool, session_id: i64, id: i64) -> sqlx::Result<Option<Clip>> {
+    let mut tx = pool.begin().await?;
     let sql = format!("DELETE FROM clips WHERE id = ? AND session_id = ? RETURNING {COLUMNS}");
-    sqlx::query(&sql)
+    let Some(clip) = sqlx::query(&sql)
         .bind(id)
         .bind(session_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .as_ref()
+        .map(Clip::from_row)
+        .transpose()?
+    else {
+        return Ok(None);
+    };
+    retention::unpin(&mut tx, &pin_owner(id)).await?;
+    tx.commit().await?;
+    Ok(Some(clip))
+}
+
+/// 切片不再需要源录像（发布完成、放弃）时撤销引用，行保留。返回之前是否有引用。
+pub async fn release(pool: &ConnectionPool, id: i64) -> sqlx::Result<bool> {
+    let mut conn = pool.acquire().await?;
+    retention::unpin(&mut conn, &pin_owner(id)).await
+}
+
+/// 把切片标成导出中；已经在导出、不存在或已发布 / 放弃时返回 `None`。之前的结果清掉。
+pub async fn begin_export(
+    pool: &ConnectionPool,
+    id: i64,
+    mode: Mode,
+    now: i64,
+) -> sqlx::Result<Option<Clip>> {
+    let sql = format!(
+        "UPDATE clips SET state = 'exporting', mode = ?, error = NULL, cut_in_ms = NULL,
+             cut_out_ms = NULL, output_path = NULL, output_bytes = NULL, duration_ms = NULL,
+             updated_at = ?
+         WHERE id = ? AND state IN ('draft', 'ready', 'failed') RETURNING {COLUMNS}"
+    );
+    sqlx::query(&sql)
+        .bind(mode.as_str())
+        .bind(now)
+        .bind(id)
         .fetch_optional(pool)
         .await?
         .as_ref()
         .map(Clip::from_row)
         .transpose()
+}
+
+/// 导出成功。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Exported {
+    pub cut_in_ms: i64,
+    pub cut_out_ms: i64,
+    pub output_path: String,
+    pub output_bytes: i64,
+    pub duration_ms: i64,
+}
+
+pub async fn finish_export(
+    pool: &ConnectionPool,
+    id: i64,
+    done: &Exported,
+    now: i64,
+) -> sqlx::Result<bool> {
+    let mut tx = pool.begin().await?;
+    let session: Option<(i64, i64, i64)> = sqlx::query_as(
+        "UPDATE clips SET state = 'ready', cut_in_ms = ?, cut_out_ms = ?, output_path = ?,
+             output_bytes = ?, duration_ms = ?, error = NULL, updated_at = ?
+         WHERE id = ? AND state = 'exporting' RETURNING session_id, in_ms, out_ms",
+    )
+    .bind(done.cut_in_ms)
+    .bind(done.cut_out_ms)
+    .bind(&done.output_path)
+    .bind(done.output_bytes)
+    .bind(done.duration_ms)
+    .bind(now)
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((session_id, in_ms, out_ms)) = session else {
+        return Ok(false);
+    };
+    // 快速剪的入点在关键帧上，可能早于用户选的入点、落在更早的分段里
+    retention::pin(
+        &mut tx,
+        &pin_owner(id),
+        session_id,
+        in_ms.min(done.cut_in_ms),
+        out_ms.max(done.cut_out_ms),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(true)
+}
+
+pub async fn fail_export(
+    pool: &ConnectionPool,
+    id: i64,
+    error: &str,
+    now: i64,
+) -> sqlx::Result<bool> {
+    let done = sqlx::query(
+        "UPDATE clips SET state = 'failed', error = ?, updated_at = ?
+         WHERE id = ? AND state = 'exporting'",
+    )
+    .bind(error)
+    .bind(now)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() > 0)
+}
+
+pub const INTERRUPTED: &str = "导出被服务重启打断，请重试";
+
+/// 启动时把上次没导出完的切片记为失败（后台任务随进程没了）。
+pub async fn recover(pool: &ConnectionPool, now: i64) -> sqlx::Result<u64> {
+    let done = sqlx::query(
+        "UPDATE clips SET state = 'failed', error = ?, updated_at = ? WHERE state = 'exporting'",
+    )
+    .bind(INTERRUPTED)
+    .bind(now)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected())
 }
 
 #[cfg(test)]

@@ -1,21 +1,31 @@
-//! 切片接口：`/v1/sessions/{id}/clips[/{cid}]` 增删改查，`/v1/clips/{cid}` 查一个。
+//! 切片接口：`/v1/sessions/{id}/clips[/{cid}]` 增删改查，`/v1/clips/{cid}` 查一个、
+//! `/v1/clips/{cid}/export` 导出、`/v1/clips/{cid}/download` 下载。
 //!
-//! 看列表要 `file.view`，增删改要 `clip.edit`，都由策略层按路由表判断。
+//! 看列表、下载要 `file.view`，增删改、导出要 `clip.edit`，都由策略层按路由表判断。
 //! 只按场次 id、切片 id 寻址，产物路径不出现在请求和响应里（响应只带文件名）。
 
 use crate::server::api::access::Caller;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
+use crate::server::workbench::clips::export::{ClipExports, DownloadError, Progress};
 use crate::server::workbench::clips::{
     self, Clip, ClipChanges, MAX_CLIP_MS, MAX_CLIPS_PER_SESSION, MAX_TITLE_CHARS, Mode, NewClip,
     State as ClipState, UpdateOutcome,
 };
-use crate::server::workbench::{recorder, store};
+use crate::server::workbench::markers::{self, Timing};
+use crate::server::workbench::{live, recorder, store};
 use axum::Json;
-use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::body::Body;
+use axum::extract::{Path, Query, Request, State};
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
-use tracing::warn;
+use std::sync::Arc;
+use tower::ServiceExt;
+use tower_http::services::ServeFile;
+use tracing::{debug, warn};
+
+/// 「剪下刚才 N 秒」最长多少（毫秒）。
+pub const MAX_LAST_MS: i64 = 600_000;
 
 fn internal(error: impl std::fmt::Display) -> Response {
     warn!(%error, "切片接口出错");
@@ -61,11 +71,17 @@ pub struct ClipView {
     pub created_by: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// 正在导出时的进度。
+    pub progress: Option<Progress>,
 }
 
-fn view(clip: Clip) -> ClipView {
+fn view(clip: Clip, exports: &ClipExports) -> ClipView {
+    let progress = (clip.state == ClipState::Exporting)
+        .then(|| exports.progress(clip.id))
+        .flatten();
     ClipView {
         file_name: clip.file_name().map(str::to_string),
+        progress,
         id: clip.id,
         session_id: clip.session_id,
         marker_id: clip.marker_id,
@@ -91,7 +107,11 @@ pub struct ClipList {
 }
 
 /// `GET /v1/sessions/{id}/clips`
-pub async fn list_clips(State(pool): State<ConnectionPool>, Path(id): Path<i64>) -> Response {
+pub async fn list_clips(
+    State(pool): State<ConnectionPool>,
+    State(exports): State<Arc<ClipExports>>,
+    Path(id): Path<i64>,
+) -> Response {
     match store::session(&pool, id).await {
         Ok(Some(_)) => {}
         Ok(None) => return session_not_found(),
@@ -99,7 +119,7 @@ pub async fn list_clips(State(pool): State<ConnectionPool>, Path(id): Path<i64>)
     }
     match clips::list(&pool, id).await {
         Ok(list) => Json(ClipList {
-            clips: list.into_iter().map(view).collect(),
+            clips: list.into_iter().map(|c| view(c, &exports)).collect(),
         })
         .into_response(),
         Err(e) => internal(e),
@@ -107,9 +127,13 @@ pub async fn list_clips(State(pool): State<ConnectionPool>, Path(id): Path<i64>)
 }
 
 /// `GET /v1/clips/{cid}`
-pub async fn get_clip(State(pool): State<ConnectionPool>, Path(cid): Path<i64>) -> Response {
+pub async fn get_clip(
+    State(pool): State<ConnectionPool>,
+    State(exports): State<Arc<ClipExports>>,
+    Path(cid): Path<i64>,
+) -> Response {
     match clips::get(&pool, cid).await {
-        Ok(Some(clip)) => Json(view(clip)).into_response(),
+        Ok(Some(clip)) => Json(view(clip, &exports)).into_response(),
         Ok(None) => clip_not_found(),
         Err(e) => internal(e),
     }
@@ -142,21 +166,31 @@ fn check_range(in_ms: i64, out_ms: i64) -> Result<(), String> {
     Ok(())
 }
 
-/// `POST /v1/sessions/{id}/clips` 的请求体：`in_ms` / `out_ms` 是场次时间。
+/// `POST /v1/sessions/{id}/clips` 的请求体。
+///
+/// 按时间选段给 `in_ms` / `out_ms`（场次时间）；看直播时「剪下刚才 N 秒」给 `last_ms`，出点按
+/// 「现在屏幕上的画面」换算（`client_now` / `pressed_at` / `latency_ms` 与打标记相同），要求这一场
+/// 正在录。`export` 给了就建好之后立即导出。
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreateClip {
     pub in_ms: Option<i64>,
     pub out_ms: Option<i64>,
+    pub last_ms: Option<i64>,
+    pub client_now: Option<i64>,
+    pub pressed_at: Option<i64>,
+    pub latency_ms: Option<i64>,
     #[serde(default)]
     pub title: String,
     pub marker_id: Option<i64>,
+    pub export: Option<Mode>,
 }
 
 /// `POST /v1/sessions/{id}/clips`
 pub async fn create_clip(
     caller: Caller,
     State(pool): State<ConnectionPool>,
+    State(exports): State<Arc<ClipExports>>,
     Path(id): Path<i64>,
     Json(body): Json<CreateClip>,
 ) -> Response {
@@ -164,14 +198,45 @@ pub async fn create_clip(
         Ok(title) => title,
         Err(message) => return bad_request(message),
     };
-    match store::session(&pool, id).await {
-        Ok(Some(_)) => {}
+    let session = match store::session(&pool, id).await {
+        Ok(Some(session)) => session,
         Ok(None) => return session_not_found(),
         Err(e) => return internal(e),
-    }
+    };
     let now = recorder::now_ms();
-    let (Some(in_ms), Some(out_ms)) = (body.in_ms, body.out_ms) else {
-        return bad_request("要给 in_ms 和 out_ms");
+    let (in_ms, out_ms) = match (body.in_ms, body.out_ms, body.last_ms) {
+        (Some(in_ms), Some(out_ms), None) => (in_ms, out_ms),
+        (None, None, Some(last_ms)) => {
+            if !(1_000..=MAX_LAST_MS).contains(&last_ms) {
+                return bad_request(format!(
+                    "last_ms 要在 1000 到 {MAX_LAST_MS} 毫秒（10 分钟）之间"
+                ));
+            }
+            let timing = Timing {
+                client_now: body.client_now,
+                pressed_at: body.pressed_at,
+                latency_ms: body.latency_ms,
+            };
+            match markers::watched_at_ms(id, now, timing) {
+                Some(out_ms) => {
+                    debug!(
+                        session = id,
+                        out_ms,
+                        last_ms,
+                        ?timing,
+                        "按当前画面换算切片出点"
+                    );
+                    ((out_ms - last_ms).max(0), out_ms.max(1))
+                }
+                None if live::is_recording(id) || session.ended_at.is_none() => {
+                    return conflict("这次录制还没开出分段，等画面开始写盘后再剪");
+                }
+                None => {
+                    return conflict("这一场没有在录，不能按当前画面剪；请在剪辑台里选段");
+                }
+            }
+        }
+        _ => return bad_request("要么给 in_ms 和 out_ms，要么只给 last_ms"),
     };
     if let Err(message) = check_range(in_ms, out_ms) {
         return bad_request(message);
@@ -204,10 +269,21 @@ pub async fn create_clip(
         created_by: caller.subject.user_id,
         created_at: now,
     };
-    match clips::insert(&pool, id, &new).await {
-        Ok(clip) => (StatusCode::CREATED, Json(view(clip))).into_response(),
-        Err(e) => internal(e),
+    let mut clip = match clips::insert(&pool, id, &new).await {
+        Ok(clip) => clip,
+        Err(e) => return internal(e),
+    };
+    if let Some(mode) = body.export {
+        match clips::begin_export(&pool, clip.id, mode, now).await {
+            Ok(Some(exporting)) => {
+                exports.start(exporting.clone());
+                clip = exporting;
+            }
+            Ok(None) => {}
+            Err(e) => return internal(e),
+        }
     }
+    (StatusCode::CREATED, Json(view(clip, &exports))).into_response()
 }
 
 /// `PATCH /v1/sessions/{id}/clips/{cid}` 的请求体：只改给出的字段。
@@ -223,6 +299,7 @@ pub struct UpdateClip {
 /// `PATCH /v1/sessions/{id}/clips/{cid}`
 pub async fn update_clip(
     State(pool): State<ConnectionPool>,
+    State(exports): State<Arc<ClipExports>>,
     Path((id, cid)): Path<(i64, i64)>,
     Json(body): Json<UpdateClip>,
 ) -> Response {
@@ -238,8 +315,18 @@ pub async fn update_clip(
         out_ms: body.out_ms,
         title,
     };
+    let before = match clips::get(&pool, cid).await {
+        Ok(Some(clip)) if clip.session_id == id => clip,
+        Ok(_) => return clip_not_found(),
+        Err(e) => return internal(e),
+    };
     match clips::update(&pool, id, cid, &changes, recorder::now_ms()).await {
-        Ok(UpdateOutcome::Updated(clip)) => Json(view(*clip)).into_response(),
+        Ok(UpdateOutcome::Updated(clip)) => {
+            if before.output_path.is_some() && clip.output_path.is_none() {
+                exports.remove_outputs(id, cid).await;
+            }
+            Json(view(*clip, &exports)).into_response()
+        }
         Ok(UpdateOutcome::NotFound) => clip_not_found(),
         Ok(UpdateOutcome::Busy) => conflict("正在导出，等导出结束后再改范围"),
         Ok(UpdateOutcome::BadRange) => bad_request(format!(
@@ -250,16 +337,131 @@ pub async fn update_clip(
     }
 }
 
-/// `DELETE /v1/sessions/{id}/clips/{cid}`
+/// `DELETE /v1/sessions/{id}/clips/{cid}`：正在导出的先停掉，文件一起删，撤销对录像的引用。
 pub async fn delete_clip(
     State(pool): State<ConnectionPool>,
+    State(exports): State<Arc<ClipExports>>,
     Path((id, cid)): Path<(i64, i64)>,
 ) -> Response {
     match clips::delete(&pool, id, cid).await {
-        Ok(Some(_)) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Some(_)) => {
+            exports.cancel(cid);
+            exports.remove_outputs(id, cid).await;
+            StatusCode::NO_CONTENT.into_response()
+        }
         Ok(None) => clip_not_found(),
         Err(e) => internal(e),
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExportClip {
+    pub mode: Mode,
+}
+
+/// `POST /v1/clips/{cid}/export`：开始导出（失败后重试也是它），返回 202 和导出中的切片。
+pub async fn export_clip(
+    State(pool): State<ConnectionPool>,
+    State(exports): State<Arc<ClipExports>>,
+    Path(cid): Path<i64>,
+    Json(body): Json<ExportClip>,
+) -> Response {
+    match clips::begin_export(&pool, cid, body.mode, recorder::now_ms()).await {
+        Ok(Some(clip)) => {
+            exports.start(clip.clone());
+            (StatusCode::ACCEPTED, Json(view(clip, &exports))).into_response()
+        }
+        Ok(None) => match clips::get(&pool, cid).await {
+            Ok(None) => clip_not_found(),
+            Ok(Some(clip)) if clip.state == ClipState::Exporting => {
+                conflict("这个切片正在导出，等它结束")
+            }
+            Ok(Some(_)) => conflict("已发布或已放弃的切片不能再导出"),
+            Err(e) => internal(e),
+        },
+        Err(e) => internal(e),
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DownloadFormat {
+    /// 产物本身（快速剪是源容器）。
+    #[default]
+    Source,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct DownloadQuery {
+    #[serde(default)]
+    pub format: DownloadFormat,
+}
+
+/// 下载时的文件名：标题（去掉文件名里不能用的字符）或 `切片-<id>`，加扩展名。
+fn download_name(clip: &Clip, extension: &str) -> String {
+    let title: String = clip
+        .title
+        .chars()
+        .map(|c| {
+            if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let title = title.trim().trim_matches('.');
+    if title.is_empty() {
+        format!("切片-{}.{extension}", clip.id)
+    } else {
+        format!("{title}.{extension}")
+    }
+}
+
+/// `GET /v1/clips/{cid}/download?format=source`
+pub async fn download_clip(
+    State(pool): State<ConnectionPool>,
+    Path(cid): Path<i64>,
+    Query(query): Query<DownloadQuery>,
+    request: Request<Body>,
+) -> Response {
+    let clip = match clips::get(&pool, cid).await {
+        Ok(Some(clip)) => clip,
+        Ok(None) => return clip_not_found(),
+        Err(e) => return internal(e),
+    };
+    let path = match query.format {
+        DownloadFormat::Source => match clip.output_path.as_deref() {
+            Some(path) if matches!(clip.state, ClipState::Ready | ClipState::Published) => {
+                std::path::PathBuf::from(path)
+            }
+            _ => return conflict(DownloadError::NotReady.to_string()),
+        },
+    };
+    if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
+        return conflict(DownloadError::Missing.to_string());
+    }
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("bin")
+        .to_ascii_lowercase();
+    let name = download_name(&clip, &extension);
+    let disposition = format!(
+        "attachment; filename=\"clip-{cid}.{extension}\"; filename*=UTF-8''{}",
+        urlencoding::encode(&name)
+    );
+    let mut response = match ServeFile::new(&path).oneshot(request).await {
+        Ok(response) => response.map(Body::new),
+        Err(e) => return internal(e),
+    };
+    if let Ok(value) = HeaderValue::from_str(&disposition) {
+        response
+            .headers_mut()
+            .insert(header::CONTENT_DISPOSITION, value);
+    }
+    response
 }
 
 #[cfg(test)]

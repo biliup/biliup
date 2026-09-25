@@ -1,9 +1,11 @@
+use super::export::ClipExports;
 use super::plan::{self, Attempt, PlanError};
 use super::*;
 use crate::server::infrastructure::connection_pool::ConnectionManager;
 use crate::server::workbench::index::tests::{build_flv, build_fmp4, build_ts};
 use crate::server::workbench::index::{self, Container};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -218,6 +220,244 @@ async fn the_growing_tail_is_waited_for_until_a_keyframe_follows_the_out_point()
         plan::compute(&pool, session, 3100, 3900).await.unwrap(),
         Attempt::Wait
     ));
+}
+
+#[tokio::test]
+async fn pins_follow_the_clip_range_and_are_released() {
+    let (_dir, pool, session, ids) = flv_session().await;
+    let pins = |pool: ConnectionPool| async move {
+        sqlx::query_scalar::<_, i64>("SELECT pin_count FROM segments ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+    };
+    let clip = insert(
+        &pool,
+        session,
+        &NewClip {
+            marker_id: None,
+            in_ms: 1000,
+            out_ms: 2000,
+            title: "t".into(),
+            created_by: None,
+            created_at: 5,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(clip.state, State::Draft);
+    assert_eq!(pins(pool.clone()).await, vec![1, 0, 0]);
+
+    let changes = ClipChanges {
+        out_ms: Some(31_000),
+        ..Default::default()
+    };
+    let UpdateOutcome::Updated(clip) = update(&pool, session, clip.id, &changes, 6).await.unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(clip.out_ms, 31_000);
+    assert_eq!(pins(pool.clone()).await, vec![1, 1, 1]);
+
+    // 导出中不能改范围，改标题可以
+    begin_export(&pool, clip.id, Mode::Quick, 7)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        begin_export(&pool, clip.id, Mode::Quick, 7)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        update(
+            &pool,
+            session,
+            clip.id,
+            &ClipChanges {
+                in_ms: Some(0),
+                ..Default::default()
+            },
+            8
+        )
+        .await
+        .unwrap(),
+        UpdateOutcome::Busy
+    );
+    assert!(matches!(
+        update(
+            &pool,
+            session,
+            clip.id,
+            &ClipChanges {
+                title: Some("x".into()),
+                ..Default::default()
+            },
+            8
+        )
+        .await
+        .unwrap(),
+        UpdateOutcome::Updated(_)
+    ));
+    assert_eq!(
+        update(
+            &pool,
+            session,
+            clip.id,
+            &ClipChanges {
+                out_ms: Some(0),
+                ..Default::default()
+            },
+            8
+        )
+        .await
+        .unwrap(),
+        UpdateOutcome::BadRange
+    );
+
+    // 快速剪的入点早于所选入点、落在前一段里：引用跟着扩大
+    let done = Exported {
+        cut_in_ms: 0,
+        cut_out_ms: 32_000,
+        output_path: "clips/1/1.flv".into(),
+        output_bytes: 1,
+        duration_ms: 1,
+    };
+    assert!(finish_export(&pool, clip.id, &done, 9).await.unwrap());
+    let from: i64 = sqlx::query_scalar("SELECT from_ms FROM segment_pins WHERE owner = ?")
+        .bind(pin_owner(clip.id))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(from, 0);
+
+    // 改范围：之前的结果作废
+    let UpdateOutcome::Updated(changed) = update(
+        &pool,
+        session,
+        clip.id,
+        &ClipChanges {
+            in_ms: Some(30_500),
+            ..Default::default()
+        },
+        10,
+    )
+    .await
+    .unwrap() else {
+        panic!()
+    };
+    assert_eq!(changed.state, State::Draft);
+    assert_eq!(changed.output_path, None);
+    assert_eq!(pins(pool.clone()).await, vec![0, 0, 1]);
+
+    assert!(release(&pool, clip.id).await.unwrap());
+    assert_eq!(pins(pool.clone()).await, vec![0, 0, 0]);
+    assert!(delete(&pool, session, clip.id).await.unwrap().is_some());
+    assert!(get(&pool, clip.id).await.unwrap().is_none());
+    let _ = ids;
+}
+
+#[tokio::test]
+async fn interrupted_exports_become_retryable_failures_at_startup() {
+    let (_dir, pool, session, _) = flv_session().await;
+    let new = NewClip {
+        marker_id: None,
+        in_ms: 0,
+        out_ms: 1000,
+        title: String::new(),
+        created_by: None,
+        created_at: 1,
+    };
+    let clip = insert(&pool, session, &new).await.unwrap();
+    begin_export(&pool, clip.id, Mode::Quick, 2).await.unwrap();
+    assert_eq!(recover(&pool, 3).await.unwrap(), 1);
+    let clip = get(&pool, clip.id).await.unwrap().unwrap();
+    assert_eq!(clip.state, State::Failed);
+    assert_eq!(clip.error.as_deref(), Some(INTERRUPTED));
+    assert_eq!(clip.mode, Some(Mode::Quick));
+    assert!(
+        begin_export(&pool, clip.id, Mode::Quick, 4)
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
+async fn wait_done(pool: &ConnectionPool, id: i64) -> Clip {
+    for _ in 0..500 {
+        let clip = get(pool, id).await.unwrap().unwrap();
+        if clip.state != State::Exporting {
+            return clip;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("导出没有结束");
+}
+
+#[tokio::test]
+async fn quick_export_runs_in_the_background_and_failures_are_retryable() {
+    let (dir, pool, session, ids) = flv_session().await;
+    let exports = Arc::new(ClipExports::new(pool.clone(), dir.path().join("clips")));
+    let new = NewClip {
+        marker_id: None,
+        in_ms: 3500,
+        out_ms: 31_000,
+        title: String::new(),
+        created_by: None,
+        created_at: 1,
+    };
+    let clip = insert(&pool, session, &new).await.unwrap();
+
+    sqlx::query("UPDATE segments SET state = 'missing' WHERE id = ?")
+        .bind(ids[1])
+        .execute(&pool)
+        .await
+        .unwrap();
+    let exporting = begin_export(&pool, clip.id, Mode::Quick, 2)
+        .await
+        .unwrap()
+        .unwrap();
+    exports.start(exporting);
+    let failed = wait_done(&pool, clip.id).await;
+    assert_eq!(failed.state, State::Failed);
+    assert!(
+        failed.error.as_deref().unwrap().contains("文件丢失"),
+        "{failed:?}"
+    );
+    assert!(exports.progress(clip.id).is_none());
+
+    sqlx::query("UPDATE segments SET state = 'finished' WHERE id = ?")
+        .bind(ids[1])
+        .execute(&pool)
+        .await
+        .unwrap();
+    let exporting = begin_export(&pool, clip.id, Mode::Quick, 3)
+        .await
+        .unwrap()
+        .unwrap();
+    exports.start(exporting);
+    let done = wait_done(&pool, clip.id).await;
+    assert_eq!(done.state, State::Ready, "{done:?}");
+    assert_eq!(
+        (done.cut_in_ms, done.cut_out_ms),
+        (Some(3000), Some(31_000))
+    );
+    assert_eq!(done.error, None);
+    let path = PathBuf::from(done.output_path.as_deref().unwrap());
+    assert_eq!(path, exports.dir(session).join(format!("{}.flv", clip.id)));
+    assert_eq!(done.file_name(), Some(format!("{}.flv", clip.id).as_str()));
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().len() as i64,
+        done.output_bytes.unwrap()
+    );
+    // 索引的段长算到最后一个 tag 的时间戳（音频，比最后一帧视频晚 5 ms），视频要再多一帧：
+    // 每个接缝处后一段往后让 35 ms，保证视频时间戳严格递增
+    assert_eq!(done.duration_ms, Some(965 + FLV_MS + 1000 + 2 * 35));
+    assert!(!path.with_extension("flv.part").exists());
+
+    exports.remove_outputs(session, clip.id).await;
+    assert!(!path.exists());
 }
 
 #[tokio::test]
