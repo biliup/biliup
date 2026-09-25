@@ -224,6 +224,38 @@ async fn ts_cut_rewrites_pts_from_zero_and_keeps_counters_continuous() {
     assert!((done.duration_ms - (video[69] + 3000) / 90).abs() <= 1);
 }
 
+#[tokio::test]
+async fn ts_cut_rebases_pes_of_a_pid_missing_from_the_pmt() {
+    let (dir, pool, session) = setup().await;
+    let mut bytes = build_ts(900_000, 100, false, false).bytes;
+    // PMT 里音频那一项改登记成一个不存在的 PID，0x101 的音频照样在发
+    let pmt = &mut bytes[188..376];
+    let at = pmt
+        .windows(5)
+        .position(|w| w == [0x0F, 0xE1, 0x01, 0xF0, 0x00])
+        .unwrap();
+    pmt[at + 1..at + 3].copy_from_slice(&[0xFF, 0xF0]);
+    let path = dir.path().join("a.ts");
+    std::fs::write(&path, &bytes).unwrap();
+    add_segment(&pool, session, &path, "finished", 0, Some(3300)).await;
+
+    let plan = plan_of(&pool, session, 1000, 2500).await;
+    let (bytes, _) = cut(&plan, dir.path(), "out.ts").await;
+    let all = packets(&bytes);
+    assert!(
+        all[..2].iter().all(|p| p.pid < 0x100 || p.pid == 0x1000),
+        "文件头只有 PAT / PMT"
+    );
+    let audio: Vec<i64> = all
+        .iter()
+        .filter(|p| p.pid == 0x101)
+        .filter_map(|p| p.pts)
+        .collect();
+    assert_eq!(audio.first(), Some(&0), "{audio:?}");
+    assert!(audio.windows(2).all(|w| w[0] < w[1]), "{audio:?}");
+    assert!(*audio.last().unwrap() < 2 * 90_000, "{audio:?}");
+}
+
 fn boxes(data: &[u8]) -> Vec<([u8; 4], usize, usize)> {
     let mut out = Vec::new();
     let mut at = 0;

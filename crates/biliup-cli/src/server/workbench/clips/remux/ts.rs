@@ -12,6 +12,8 @@ use std::io;
 
 const NULL_PID: u16 = 0x1FFF;
 const UNITS_PER_MS: i64 = 90;
+/// 0x0000–0x001F 留给 PAT / CAT / SDT 等表。
+const FIRST_ES_PID: u16 = 0x20;
 
 #[derive(Debug, Default)]
 pub(super) struct TsCut {
@@ -26,9 +28,19 @@ pub(super) struct TsCut {
     raw_origin: Option<i64>,
     video: VideoClock,
     last_pts: HashMap<u16, i64>,
+    /// 头区 PMT 里没登记、但确实在发 PES 的 PID（虎牙 HLS 第一段的 PMT 只写了视频，音频照样在发）。
+    undeclared: HashSet<u16>,
 }
 
 impl TsCut {
+    fn carries_pes(&self, p: &[u8]) -> bool {
+        let pid = pid_of(p);
+        pid >= FIRST_ES_PID
+            && pid != self.program.pmt_pid
+            && pusi(p)
+            && payload_start(p).is_some_and(|s| p.get(s..s + 3) == Some(&[0, 0, 1][..]))
+    }
+
     fn out_units(&self, raw: i64) -> i64 {
         delta(raw, self.raw_origin.unwrap_or(raw)) + self.origin_ms * UNITS_PER_MS
     }
@@ -112,7 +124,8 @@ impl Cut for TsCut {
             ));
         }
         for p in region.as_chunks::<PACKET>().0 {
-            if p[0] != SYNC || pid_of(p) == NULL_PID || self.program.is_pes(pid_of(p)) {
+            let pid = pid_of(p);
+            if p[0] != SYNC || (pid >= FIRST_ES_PID && pid != self.program.pmt_pid) {
                 continue;
             }
             let mut packet = *p;
@@ -145,7 +158,13 @@ impl Cut for TsCut {
             if pid == NULL_PID {
                 continue;
             }
-            if self.program.is_pes(pid) {
+            if !self.program.is_pes(pid)
+                && !self.undeclared.contains(&pid)
+                && self.carries_pes(&packet)
+            {
+                self.undeclared.insert(pid);
+            }
+            if self.program.is_pes(pid) || self.undeclared.contains(&pid) {
                 if pusi(&packet) {
                     self.started.insert(pid);
                     if self.rewrite_pes_start(&mut packet, pid) {
