@@ -406,7 +406,13 @@ async fn pins_follow_the_clip_range_and_are_released() {
 
 #[tokio::test]
 async fn interrupted_exports_become_retryable_failures_at_startup() {
-    let (_dir, pool, session, _) = flv_session().await;
+    let (dir, pool, session, _) = flv_session().await;
+    let root = dir.path().join("clips");
+    std::fs::create_dir_all(root.join(session.to_string())).unwrap();
+    let half = root.join(session.to_string()).join("1.mp4.part");
+    let done = root.join(session.to_string()).join("2.flv");
+    std::fs::write(&half, b"half").unwrap();
+    std::fs::write(&done, b"done").unwrap();
     let new = NewClip {
         marker_id: None,
         in_ms: 0,
@@ -419,7 +425,9 @@ async fn interrupted_exports_become_retryable_failures_at_startup() {
     begin_export(&pool, clip.id, Mode::Precise, 2)
         .await
         .unwrap();
-    assert_eq!(recover(&pool, 3).await.unwrap(), 1);
+    assert_eq!(recover(&pool, &root, 3).await.unwrap(), 1);
+    assert!(!half.exists(), "写了一半的产物删掉");
+    assert!(done.exists());
     let clip = get(&pool, clip.id).await.unwrap().unwrap();
     assert_eq!(clip.state, State::Failed);
     assert_eq!(clip.error.as_deref(), Some(INTERRUPTED));

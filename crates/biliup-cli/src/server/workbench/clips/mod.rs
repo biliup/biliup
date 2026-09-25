@@ -15,6 +15,8 @@ use crate::server::infrastructure::connection_pool::ConnectionPool;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
+use std::path::Path;
+use tracing::warn;
 
 /// 一个切片最长多久（毫秒）。
 pub const MAX_CLIP_MS: i64 = 6 * 3_600_000;
@@ -413,8 +415,23 @@ pub async fn fail_export(
 
 pub const INTERRUPTED: &str = "导出被服务重启打断，请重试";
 
-/// 启动时把上次没导出完的切片记为失败（后台任务随进程没了）。
-pub async fn recover(pool: &ConnectionPool, now: i64) -> sqlx::Result<u64> {
+/// 启动时把上次没导出完的切片记为失败（后台任务随进程没了），`root` 下各场次目录里写了一半的
+/// `.part` 删掉。
+pub async fn recover(pool: &ConnectionPool, root: &Path, now: i64) -> sqlx::Result<u64> {
+    let leftovers = std::fs::read_dir(root)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|session| std::fs::read_dir(session.path()).ok())
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "part"));
+    for path in leftovers {
+        if let Err(e) = std::fs::remove_file(&path) {
+            warn!(path = %path.display(), error = %e, "删除没写完的切片文件失败");
+        }
+    }
     let done = sqlx::query(
         "UPDATE clips SET state = 'failed', error = ?, updated_at = ? WHERE state = 'exporting'",
     )
