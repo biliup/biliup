@@ -315,7 +315,8 @@ const Global: React.FC<Props> = ({ disabled }) => {
         />
         <Form.InputNumber
           field="pool1_size"
-          extraText="负责下载事件的线程池大小，用于限制最大同时录制数。保存后立即生效，调小不会中断正在进行的录制。"
+          extraText="负责下载事件的线程池大小，用于限制最大同时录制数。保存后立即生效（等待中的直播间在下一轮检测时开始录制），调小不会中断正在进行的录制。"
+          min={1}
           label="下载线程池大小（pool1_size）"
           placeholder={5}
           style={{ width: '100%' }}
@@ -442,6 +443,7 @@ const Global: React.FC<Props> = ({ disabled }) => {
 
         <Form.InputNumber
           field="pool2_size"
+          min={1}
           extraText={
             <div style={{ fontSize: '14px' }}>
               负责上传事件的线程池大小。根据实际带宽设置。保存后立即生效，调小不会中断正在进行的上传。
