@@ -1,7 +1,10 @@
 use super::super::plan::{self, Attempt};
-use super::super::tests::flv_session;
+use super::super::tests::{add_segment, flv_session, setup};
 use super::*;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
+use crate::server::workbench::dvr::ts::{payload_start, pid_of, pusi, read_ts};
+use crate::server::workbench::index::tests::build_ts;
+use std::collections::HashMap;
 
 async fn plan_of(pool: &ConnectionPool, session: i64, in_ms: i64, out_ms: i64) -> Plan {
     match plan::compute(pool, session, in_ms, out_ms).await.unwrap() {
@@ -132,4 +135,79 @@ async fn flv_cut_starts_on_a_keyframe_at_zero_and_splices_across_gaps() {
     assert_eq!(amf_number(&bytes, "duration"), 6.0);
     assert_eq!(amf_number(&bytes, "videocodecid"), 7.0);
     assert_eq!(amf_number(&bytes, "audiocodecid"), 10.0);
+}
+
+struct Packet {
+    pid: u16,
+    cc: u8,
+    pts: Option<i64>,
+}
+
+fn packets(bytes: &[u8]) -> Vec<Packet> {
+    assert_eq!(bytes.len() % 188, 0);
+    bytes
+        .chunks(188)
+        .map(|p| {
+            assert_eq!(p[0], 0x47);
+            let pts = (pusi(p) && pid_of(p) >= 0x100)
+                .then(|| payload_start(p))
+                .flatten()
+                .map(|s| read_ts(&p[s + 9..s + 14]));
+            Packet {
+                pid: pid_of(p),
+                cc: p[3] & 0x0F,
+                pts,
+            }
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn ts_cut_rewrites_pts_from_zero_and_keeps_counters_continuous() {
+    let (dir, pool, session) = setup().await;
+    // 第二段的 PTS 跨过 33 位回绕点
+    for (name, first_pts, start) in [("a.ts", 900_000u64, 0), ("b.ts", (1 << 33) - 90_000, 3300)] {
+        let path = dir.path().join(name);
+        std::fs::write(&path, build_ts(first_pts, 100, false, false).bytes).unwrap();
+        add_segment(&pool, session, &path, "finished", start, Some(start + 3300)).await;
+    }
+    let plan = plan_of(&pool, session, 2500, 4200).await;
+    assert_eq!(plan.pieces.len(), 2);
+    let (bytes, done) = cut(&plan, dir.path(), "out.ts").await;
+    let all = packets(&bytes);
+    assert_eq!((all[0].pid, all[1].pid), (0, 0x1000), "PAT、PMT 在最前面");
+    assert_eq!(
+        (all[2].pid, all[2].pts),
+        (0x100, Some(0)),
+        "第一个包是关键帧 PES"
+    );
+
+    let mut next: HashMap<u16, u8> = HashMap::new();
+    for p in &all {
+        if let Some(n) = next.get(&p.pid) {
+            assert_eq!(p.cc, *n, "PID {:#x} 的连续计数器断了", p.pid);
+        }
+        next.insert(p.pid, (p.cc + 1) & 0x0F);
+    }
+    let video: Vec<i64> = all
+        .iter()
+        .filter(|p| p.pid == 0x100)
+        .filter_map(|p| p.pts)
+        .collect();
+    assert!(video.windows(2).all(|w| w[0] < w[1]), "{video:?}");
+    // 第一段 2000 起到末尾（40 帧），第二段 0..1000（30 帧）
+    assert_eq!(video.len(), 40 + 30);
+    assert_eq!(video[39], 39 * 3000);
+    // 接缝处紧接上一帧（按毫秒对齐，差不到 1 ms）
+    assert!(
+        (2910..=3090).contains(&(video[40] - video[39])),
+        "{video:?}"
+    );
+    let audio: Vec<i64> = all
+        .iter()
+        .filter(|p| p.pid == 0x101)
+        .filter_map(|p| p.pts)
+        .collect();
+    assert!(audio.iter().all(|pts| *pts >= 0));
+    assert!((done.duration_ms - (video[69] + 3000) / 90).abs() <= 1);
 }
