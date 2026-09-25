@@ -8,6 +8,9 @@
 //! - `GET /v1/sessions/{id}/thumb?t=`：取一帧 JPEG；`PUT / GET / DELETE /v1/clips/{cid}/cover`：切片封面
 //!   （取帧、直播间封面或上传的图片）。
 //!
+//! 上次投稿结果未知（`submit_state` 为 `unknown`，投稿中服务退出）的切片，要带 `confirm_unknown: true`
+//! 才能再发布，否则 409 并提示先到 B 站稿件管理确认。
+//!
 //! 发布、重试、继续要 `upload.submit`，看队列、取帧、看封面要 `file.view`，改封面要 `clip.edit`，
 //! 都由策略层按路由表判断。
 
@@ -107,6 +110,9 @@ pub struct PublishClip {
     /// 还没导出时怎么导出；默认快速剪。
     #[serde(default)]
     pub mode: Option<Mode>,
+    /// 切片上次投稿的结果未知时，用户已到 B 站确认过没有这个稿件。
+    #[serde(default)]
+    pub confirm_unknown: bool,
 }
 
 impl PublishClip {
@@ -132,6 +138,9 @@ pub struct PublishBatch {
     pub studio_override: Option<StudioOverride>,
     #[serde(default)]
     pub mode: Option<Mode>,
+    /// 同 [`PublishClip::confirm_unknown`]，对这一批的切片都算。
+    #[serde(default)]
+    pub confirm_unknown: bool,
 }
 
 impl PublishBatch {
@@ -318,20 +327,14 @@ async fn enqueue(
             };
             return conflict(format!("{which}{problem}"));
         }
-        match publisher.check(group) {
+        match publisher.check(group, body.confirm_unknown) {
             Ok(()) => {}
             Err(EnqueueError::Invalid(m)) => return bad_request(m),
             Err(EnqueueError::Conflict(m)) => return conflict(m),
         }
     }
     let mode = body.mode.unwrap_or(Mode::Quick);
-    let (jobs, skipped) = enqueue_groups(
-        publisher,
-        &groups,
-        body,
-        mode,
-        caller.subject.user_id,
-    );
+    let (jobs, skipped) = enqueue_groups(publisher, &groups, body, mode, caller.subject.user_id);
     accepted(jobs, skipped)
 }
 
@@ -348,7 +351,14 @@ fn enqueue_groups(
     let mut skipped = Vec::new();
     for group in groups {
         let settings = body.settings().for_clip(&group[0]);
-        match publisher.enqueue(group[0].session_id, group, settings, mode, created_by) {
+        match publisher.enqueue(
+            group[0].session_id,
+            group,
+            settings,
+            mode,
+            created_by,
+            body.confirm_unknown,
+        ) {
             Ok(job) => jobs.push(job),
             Err(EnqueueError::Invalid(reason) | EnqueueError::Conflict(reason)) => {
                 warn!(%reason, "集中发布时有切片没排进队列");
@@ -407,6 +417,7 @@ pub async fn publish_clip(
     let batch = PublishBatch {
         clip_ids: vec![cid],
         mode: body.mode,
+        confirm_unknown: body.confirm_unknown,
         ..PublishBatch::default()
     };
     enqueue(&caller, &pool, &exports, &publisher, &batch, vec![clip]).await

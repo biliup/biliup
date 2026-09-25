@@ -766,7 +766,11 @@ async fn batches_are_all_or_nothing_and_late_conflicts_are_reported() {
     assert!(message.contains(&format!("切片 #{b} ")), "{message}");
     assert!(message.contains("重试"), "{message}");
     let jobs = f.jobs(&op).await;
-    assert_eq!(jobs["jobs"].as_array().unwrap().len(), 1, "a、c 都没排：{jobs}");
+    assert_eq!(
+        jobs["jobs"].as_array().unwrap().len(),
+        1,
+        "a、c 都没排：{jobs}"
+    );
 
     // 模拟检查之后、排队之前 b 被另一个请求排上
     let mut groups = Vec::new();
@@ -794,6 +798,70 @@ async fn batches_are_all_or_nothing_and_late_conflicts_are_reported() {
     assert!(jobs.is_empty());
     let message = text_of(accepted(jobs, skipped), StatusCode::CONFLICT).await;
     assert!(message.contains(&format!("切片 #{b} ")), "{message}");
+}
+
+/// 投稿结果未知的切片（上次投稿中服务退出）：接口里看得到，再次发布要带 `confirm_unknown: true`。
+#[tokio::test]
+async fn clips_with_an_unknown_submit_result_need_confirmation() {
+    let f = fixture().await;
+    let op = login(&f.app, "op", "operator-password").await;
+    let id = f.clip(&op, 1000, 2000, "a").await;
+    sqlx::query(
+        "UPDATE clips SET submit_state = 'unknown', submit_job = 3, submit_started_at = 1790000000000
+         WHERE id = ?",
+    )
+    .bind(id)
+    .execute(&f.pool)
+    .await
+    .unwrap();
+    let clip = json_of(
+        send(&f.app, Some(&op), "GET", &format!("/v1/clips/{id}"), None).await,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(clip["submit_state"], "unknown");
+    assert_eq!(clip["submit_started_at"], 1790000000000i64);
+    assert_eq!(clip["state"], "draft");
+
+    let publish = format!("/v1/clips/{id}/publish");
+    let response = send(&f.app, Some(&op), "POST", &publish, Some(json!({}))).await;
+    let message = text_of(response, StatusCode::CONFLICT).await;
+    assert!(message.contains(queue::UNKNOWN_HINT), "{message}");
+    assert!(message.contains("confirm_unknown"), "{message}");
+    let response = send(
+        &f.app,
+        Some(&op),
+        "POST",
+        "/v1/publish-jobs",
+        Some(json!({ "clip_ids": [id] })),
+    )
+    .await;
+    let message = text_of(response, StatusCode::CONFLICT).await;
+    assert!(message.contains(queue::UNKNOWN_HINT), "{message}");
+    assert_eq!(f.jobs(&op).await["jobs"], json!([]));
+    assert!(f.fake.submitted.lock().unwrap().is_empty());
+
+    let job = json_of(
+        send(
+            &f.app,
+            Some(&op),
+            "POST",
+            &publish,
+            Some(json!({ "confirm_unknown": true })),
+        )
+        .await,
+        StatusCode::ACCEPTED,
+    )
+    .await;
+    let jid = job["jobs"][0]["id"].as_u64().unwrap();
+    f.wait_job(&op, jid, "done").await;
+    let clip = json_of(
+        send(&f.app, Some(&op), "GET", &format!("/v1/clips/{id}"), None).await,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(clip["state"], "published");
+    assert_eq!(clip["submit_state"], Value::Null);
 }
 
 fn png() -> Vec<u8> {

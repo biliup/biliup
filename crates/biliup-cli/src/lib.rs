@@ -126,6 +126,19 @@ pub async fn serve_on(
         Ok(n) => tracing::info!(clips = n, "上次没导出完的切片已记为失败，可以重试"),
         Err(e) => tracing::warn!(error = %e, "收尾没导出完的切片失败"),
     }
+    match server::workbench::clips::recover_submits(
+        &conn_pool,
+        server::workbench::recorder::now_ms(),
+    )
+    .await
+    {
+        Ok(0) => {}
+        Ok(n) => tracing::warn!(
+            clips = n,
+            "上次投稿到一半服务退出了，这些切片的投稿结果未知：再次发布前请先到 B 站稿件管理确认是否已投稿"
+        ),
+        Err(e) => tracing::warn!(error = %e, "标记投稿结果未知的切片失败"),
+    }
 
     if let Some(configuration) =
         repositories::register_bilibili_cookie(&conn_pool, &user_cookie).await?
