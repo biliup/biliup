@@ -5,7 +5,10 @@
 //! - 标题、简介支持模板原有的 `{streamer}` `{title}` `{url}` 和 strftime（按开播时间），另加
 //!   `{clip_title}`（切片标题）、`{clip_time}`（切片入点的墙钟时间）；
 //! - 版权一律按转载提交，来源用模板里填的，没填就是直播间地址：切片是别人直播的片段，模板选了
-//!   「自制」也不跟随（[`enforce_reprint`]）。
+//!   「自制」也不跟随（[`enforce_reprint`]）；
+//! - 上传与投稿在 [`queue`] 里排队，一次只做一个。
+
+pub mod queue;
 
 use crate::server::common::upload::{desc_with_credits, resolve_source, studio_from_template};
 use crate::server::common::util::Recorder;
