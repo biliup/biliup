@@ -166,6 +166,9 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
               if (payload.min_free_space === undefined || payload.min_free_space === '') {
                 payload.min_free_space = null
               }
+              if (payload.preview_max_minutes === undefined || payload.preview_max_minutes === '') {
+                payload.preview_max_minutes = null
+              }
               // 后端是非负整数，不接受空值；清空即关闭
               if (
                 payload.retention_hours === undefined ||

@@ -100,11 +100,14 @@ class AbortableFetchLoader extends mpegts.BaseLoader {
     })
       .then(async (res) => {
         if (!res.ok || !res.body) {
+          // 服务端的说明（如 429 是该直播间满了还是进程内满了）在正文里，带给上层原样显示
+          const body = res.ok ? '' : await res.text().catch(() => '')
+          if (controller.signal.aborted) return
           this._status = mpegts.LoaderStatus.kError
           // 类型声明里 onError 的第一个参数是 LoaderErrors 接口本身，实际是其中的字符串值
           this.onError?.(mpegts.LoaderErrors.HTTP_STATUS_CODE_INVALID as unknown as mpegts.LoaderErrors, {
             code: res.status,
-            msg: res.statusText,
+            msg: body.trim() || res.statusText,
           })
           return
         }
@@ -170,6 +173,15 @@ export function liveTypeFromContentType(contentType: string | null | undefined):
 }
 
 /**
+ * 中转预览 429 的提示：服务端正文写明是「该直播间」还是「进程内」的路数满了，原样显示。
+ * 只有自动重连会拿到 429（手动打开 / 重试会接替最早的一路），所以提示用户点重试。
+ */
+export function tooManyPreviewsMessage(body: string | null | undefined): string {
+  const text = (body ?? '').trim()
+  return `${/上限/.test(text) ? text : '预览连接数已达上限'}，点「重试」会接替最早打开的一路`
+}
+
+/**
  * 用一次 GET 读到响应头就中止，只为拿 Content-Type。
  * 非 2xx 时把服务端的说明（415 / 429 / 503 的正文）原样抛出。
  */
@@ -179,6 +191,7 @@ async function probeLiveType(url: string): Promise<LiveType> {
     const res = await fetch(url, { signal: controller.signal, cache: 'no-store' })
     if (!res.ok) {
       const text = await res.text().catch(() => '')
+      if (res.status === 429) throw new Error(tooManyPreviewsMessage(text))
       throw new Error(text || `HTTP ${res.status}`)
     }
     const type = liveTypeFromContentType(res.headers.get('content-type'))
@@ -422,6 +435,7 @@ function playWithMediaSource(
       .then(async (res) => {
         if (!res.ok) {
           const text = await res.text().catch(() => '')
+          if (res.status === 429) throw new Error(tooManyPreviewsMessage(text))
           throw new Error(text || `连接失败（HTTP ${res.status}）`)
         }
         if (!res.body) throw new Error('浏览器不支持流式读取响应')
@@ -453,7 +467,7 @@ function describeMpegtsError(errorType: string, detail: string, info?: { code?: 
     if (detail === mpegts.ErrorDetails.NETWORK_STATUS_CODE_INVALID) {
       const code = info?.code
       if (code === 415) return '当前下载器 / 容器不支持预览'
-      if (code === 429) return '预览连接数已达上限，请稍后再试'
+      if (code === 429) return tooManyPreviewsMessage(info?.msg)
       if (code === 503) return '录制尚未开始拉流或正在重连'
       return `连接失败（HTTP ${code ?? '?'}）`
     }
