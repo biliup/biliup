@@ -6,7 +6,11 @@
 //! 写入端换代（断流重试 / 换直链）时结束响应，由播放器重连。
 //!
 //! 连接数：每路 [`crate::server::common::download::PREVIEW_MAX_SUBSCRIBERS_PER_ROOM`]、
-//! 进程 [`MAX_PREVIEW_CONNECTIONS`]，超出返回 429。
+//! 进程 [`MAX_PREVIEW_CONNECTIONS`]，都是固定槽位。满了时新打开的预览挤掉（该直播间 / 全进程）
+//! 最早的那条，被挤掉的响应随即结束；只有播放器自动重连（`?reconnect=1`）才在满员时得到 429，
+//! 免得几个真在看的页面互相挤来挤去。每条连接另有最长寿命（配置 `preview_max_minutes`），
+//! 到点结束响应：服务端看不出客户端是否还在看——经过会替客户端读完上游的代理 / 隧道时，
+//! 关掉播放器 TCP 也不断，许可只靠响应体 drop 释放就会一直占着。
 //! 路由注册在 `router()` 里，`--auth` 时与 `/v1/streamers` 同一道登录校验。
 
 use crate::server::core::download_manager::DownloadManager;
@@ -19,14 +23,19 @@ use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use biliup::downloader::live::{LiveStatus, strip_ws_expire_override};
-use biliup::downloader::preview::{PreviewFormat, PreviewHub, SubscribeError, Subscription};
+use biliup::downloader::preview::{
+    Evicted, PreviewFormat, PreviewHub, PreviewSlot, PreviewSlots, PreviewTicket, SlotScope,
+    SubscribeError, Subscription,
+};
 use bytes::{Bytes, BytesMut};
 use danmaku_client::DanmakuEvent;
 use std::collections::{HashMap, VecDeque};
+use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, broadcast};
+use tokio::time::Sleep;
 use tracing::{debug, info, warn};
 
 /// 进程内同时允许的预览连接总数（所有直播间合计）。
@@ -34,9 +43,9 @@ pub const MAX_PREVIEW_CONNECTIONS: usize = 16;
 /// 等待写入端给出关键帧对齐快照的最长时间，需长于一个 GOP / 一个 HLS 分片。
 pub const SUBSCRIBE_TIMEOUT: Duration = Duration::from_secs(20);
 
-fn connection_limit() -> &'static Arc<Semaphore> {
-    static LIMIT: OnceLock<Arc<Semaphore>> = OnceLock::new();
-    LIMIT.get_or_init(|| Arc::new(Semaphore::new(MAX_PREVIEW_CONNECTIONS)))
+fn connection_slots() -> &'static PreviewSlots {
+    static SLOTS: OnceLock<PreviewSlots> = OnceLock::new();
+    SLOTS.get_or_init(|| PreviewSlots::new(SlotScope::Process, MAX_PREVIEW_CONNECTIONS))
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -44,15 +53,46 @@ pub struct LiveQuery {
     /// 起播快照回溯多少毫秒的已完成 GOP（见 `PreviewHub::subscribe_with_depth`）：
     /// 播放器按自己要维持的缓冲深度来要；不带则给整个保留窗口（`SNAPSHOT_WINDOW`）
     pub snapshot_ms: Option<u64>,
+    /// `1`：播放器断开后的自动重连。满员时返回 429 而不挤掉别人——被挤掉的页面若也去挤，
+    /// 几个真在看的页面就会轮流把对方挤掉；用户手动打开 / 重试不带它，总能挤进来。
+    pub reconnect: Option<String>,
 }
 
-/// `GET /v1/streamers/{id}/live?snapshot_ms=2000`
+impl LiveQuery {
+    fn may_evict(&self) -> bool {
+        !matches!(self.reconnect.as_deref(), Some("1" | "true"))
+    }
+}
+
+/// 满员被拒时的 429；正文由前端原样显示，所以写清是哪一级满了。
+fn too_many_response(scope: SlotScope, capacity: usize) -> Response {
+    let message = match scope {
+        SlotScope::Room => SubscribeError::TooManySubscribers(capacity).to_string(),
+        SlotScope::Process => format!("预览连接数已达上限（进程内最多 {capacity} 路）"),
+    };
+    (StatusCode::TOO_MANY_REQUESTS, message).into_response()
+}
+
+fn log_eviction(id: i64, conn: u64, scope: SlotScope, capacity: usize, evicted: Evicted) {
+    info!(
+        id,
+        conn,
+        evicted_conn = evicted.id,
+        evicted_age_secs = evicted.age.as_secs(),
+        capacity,
+        "{}预览连接已满，挤掉最早的一条",
+        scope.as_str()
+    );
+}
+
+/// `GET /v1/streamers/{id}/live?snapshot_ms=2000[&reconnect=1]`
 pub async fn get_live_stream(
     State(managers): State<Arc<DownloadManager>>,
     Path(id): Path<i64>,
     Query(query): Query<LiveQuery>,
 ) -> Response {
     let depth = query.snapshot_ms.map(Duration::from_millis);
+    let evict = query.may_evict();
     let Some(worker) = managers.get_room_by_id(id).await else {
         return (StatusCode::NOT_FOUND, "直播间不存在").into_response();
     };
@@ -61,24 +101,81 @@ pub async fn get_live_stream(
         WorkerStatus::Working(task) => task.preview().clone(),
         _ => return (StatusCode::NOT_FOUND, "直播间未在录制").into_response(),
     };
-    let Ok(global) = connection_limit().clone().try_acquire_owned() else {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            format!("预览连接数已达上限（进程内最多 {MAX_PREVIEW_CONNECTIONS} 路）"),
-        )
-            .into_response();
+    let lifetime = worker.get_config().preview_max_lifetime();
+    let ticket = PreviewTicket::new();
+    // 先占直播间一级：它挤掉的那条在进程一级随即不占名额，进程一级不会因此再多挤一条
+    let slot = match hub.reserve(&ticket, evict) {
+        Ok((slot, evicted)) => {
+            if let Some(evicted) = evicted {
+                log_eviction(
+                    id,
+                    ticket.id(),
+                    SlotScope::Room,
+                    hub.max_subscribers(),
+                    evicted,
+                );
+            }
+            slot
+        }
+        Err(SubscribeError::TooManySubscribers(capacity)) => {
+            info!(
+                id,
+                occupied = hub.subscribers(),
+                capacity,
+                "该直播间预览连接已满，拒绝自动重连（429）"
+            );
+            return too_many_response(SlotScope::Room, capacity);
+        }
+        Err(error) => return subscribe_error_response(id, error),
     };
-    match hub.subscribe_with_depth(depth, SUBSCRIBE_TIMEOUT).await {
+    let global = match connection_slots().acquire(&ticket, evict) {
+        Ok((global, evicted)) => {
+            if let Some(evicted) = evicted {
+                log_eviction(
+                    id,
+                    ticket.id(),
+                    SlotScope::Process,
+                    MAX_PREVIEW_CONNECTIONS,
+                    evicted,
+                );
+            }
+            global
+        }
+        Err(occupied) => {
+            info!(
+                id,
+                occupied,
+                capacity = MAX_PREVIEW_CONNECTIONS,
+                "进程内预览连接已满，拒绝自动重连（429）"
+            );
+            return too_many_response(SlotScope::Process, MAX_PREVIEW_CONNECTIONS);
+        }
+    };
+    match hub.subscribe_reserved(slot, depth, SUBSCRIBE_TIMEOUT).await {
         Ok(subscription) => {
             info!(
                 id,
+                conn = ticket.id(),
                 format = subscription.format.as_str(),
                 snapshot_ms = depth.map(|d| d.as_millis() as u64),
                 snapshot_chunks = subscription.snapshot.len(),
                 snapshot_bytes = subscription.snapshot.iter().map(Bytes::len).sum::<usize>(),
+                room_subscribers = hub.subscribers(),
+                process_subscribers = connection_slots().occupied(),
+                max_lifetime_secs = lifetime.map(|d| d.as_secs()),
+                reconnect = !evict,
                 "开始直播预览"
             );
-            live_response(id, hub, subscription, global)
+            live_response(
+                id,
+                hub,
+                subscription,
+                LiveGuard {
+                    ticket,
+                    _global: global,
+                },
+                lifetime,
+            )
         }
         Err(error) => subscribe_error_response(id, error),
     }
@@ -539,8 +636,43 @@ pub const MAX_RESYNCS_PER_RESPONSE: u32 = 20;
 /// 少写几次 socket / 少几个 chunked 帧；没有积压时一个分块就是一个响应块，不加任何延迟。
 pub const COALESCE_BYTES: usize = 64 * 1024;
 
+/// 一条中转预览连接在进程一级的身份与槽位，随响应体一起活。
+pub struct LiveGuard {
+    ticket: PreviewTicket,
+    _global: PreviewSlot,
+}
+
+/// 中转预览响应为什么结束，只用于日志。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EndReason {
+    /// 响应体被 drop 而流自己没结束：客户端断开（或服务退出）
+    ClientGone,
+    /// 满员时被新打开的预览挤掉
+    Evicted(SlotScope),
+    /// 到了单条连接的最长寿命
+    Expired,
+    /// 写入端换代（断流重试 / 换直链 / 录制结束）
+    SinkClosed,
+    /// 客户端长期跟不上，掉队重对齐次数超限或重对齐失败
+    Lagging,
+}
+
+impl EndReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            EndReason::ClientGone => "客户端断开",
+            EndReason::Evicted(SlotScope::Room) => "被挤掉（该直播间已满）",
+            EndReason::Evicted(SlotScope::Process) => "被挤掉（进程内已满）",
+            EndReason::Expired => "到达最长时长",
+            EndReason::SinkClosed => "录制端换代或结束",
+            EndReason::Lagging => "客户端持续掉队",
+        }
+    }
+}
+
 struct LiveBody {
     id: i64,
+    format: PreviewFormat,
     hub: PreviewHub,
     snapshot: VecDeque<Bytes>,
     /// 持有该路的连接许可；`rx` 是实时接收端。掉队重对齐时被 take 走再换新的
@@ -548,7 +680,28 @@ struct LiveBody {
     /// 合并分块时 `try_recv` 撞上的掉队，留到下一轮按掉队处理
     pending_lag: Option<u64>,
     resyncs: u32,
-    _global: OwnedSemaphorePermit,
+    /// 最长寿命的计时器；`None` 为不限
+    deadline: Option<Pin<Box<Sleep>>>,
+    opened: Instant,
+    bytes_sent: u64,
+    /// 流自己结束时记下原因；`None` 表示是被 drop 的（客户端断开）
+    end: Option<EndReason>,
+    guard: LiveGuard,
+}
+
+impl LiveBody {
+    /// 结束响应：记下原因后返回 `None`，`unfold` 随即 drop 状态、释放两个许可。
+    fn finish<T>(&mut self, reason: EndReason) -> Option<T> {
+        self.end = Some(reason);
+        None
+    }
+}
+
+async fn expiry(deadline: &mut Option<Pin<Box<Sleep>>>) {
+    match deadline {
+        Some(sleep) => sleep.as_mut().await,
+        None => std::future::pending().await,
+    }
 }
 
 /// 实时分块到手后，把广播缓冲里已经攒着的后续分块（客户端在追赶积压时才会有）
@@ -576,52 +729,88 @@ fn coalesce(rx: &mut broadcast::Receiver<Bytes>, first: Bytes) -> (Bytes, Option
 }
 
 impl Drop for LiveBody {
-    /// 客户端断开、掉队或写入端换代都走到这里：两个许可随之释放
+    /// 客户端断开、被挤掉、到期、掉队或写入端换代都走到这里：两个许可随之释放
     fn drop(&mut self) {
-        debug!(
+        info!(
             id = self.id,
+            conn = self.guard.ticket.id(),
+            format = self.format.as_str(),
+            duration_secs = self.opened.elapsed().as_secs(),
+            bytes_sent = self.bytes_sent,
             resyncs = self.resyncs,
-            "直播预览连接结束，释放许可"
+            reason = self.end.unwrap_or(EndReason::ClientGone).as_str(),
+            "直播预览结束，释放许可"
         );
     }
 }
 
+enum Next {
+    Received(Result<Bytes, RecvError>),
+    End(EndReason),
+}
+
 /// 把订阅编成 chunked 响应：快照分块先发，之后逐个转发实时分块；掉队时原地重对齐。
 ///
-/// 两个许可（该路、进程）都随响应体一起活，客户端断开或响应结束即释放。
+/// 两个许可（该路、进程）都随响应体一起活，客户端断开或响应结束即释放。响应在这些情况下
+/// 主动结束（流返回 `None`，chunked 正常收尾，连接可以继续 keep-alive）：`guard` 的票被挤掉、
+/// 到了 `lifetime`、写入端换代、客户端持续掉队。
 pub fn live_response(
     id: i64,
     hub: PreviewHub,
     mut subscription: Subscription,
-    global: OwnedSemaphorePermit,
+    guard: LiveGuard,
+    lifetime: Option<Duration>,
 ) -> Response {
     let format = subscription.format;
     let state = LiveBody {
         id,
+        format,
         hub,
         snapshot: VecDeque::from(std::mem::take(&mut subscription.snapshot)),
         subscription: Some(subscription),
         pending_lag: None,
         resyncs: 0,
-        _global: global,
+        deadline: lifetime.map(|d| Box::pin(tokio::time::sleep(d))),
+        opened: Instant::now(),
+        bytes_sent: 0,
+        end: None,
+        guard,
     };
     let stream = futures::stream::unfold(state, move |mut state| async move {
         loop {
+            if let Some(scope) = state.guard.ticket.evicted_by() {
+                return state.finish(EndReason::Evicted(scope));
+            }
             if let Some(chunk) = state.snapshot.pop_front() {
+                state.bytes_sent += chunk.len() as u64;
                 return Some((Ok::<Bytes, std::io::Error>(chunk), state));
             }
-            let rx = &mut state.subscription.as_mut()?.rx;
-            let received = match state.pending_lag.take() {
-                Some(skipped) => Err(RecvError::Lagged(skipped)),
-                None => rx.recv().await,
+            let next = match state.pending_lag.take() {
+                Some(skipped) => Next::Received(Err(RecvError::Lagged(skipped))),
+                None => {
+                    let Some(subscription) = state.subscription.as_mut() else {
+                        return state.finish(EndReason::Lagging);
+                    };
+                    tokio::select! {
+                        biased;
+                        scope = state.guard.ticket.evicted() => Next::End(EndReason::Evicted(scope)),
+                        _ = expiry(&mut state.deadline) => Next::End(EndReason::Expired),
+                        received = subscription.rx.recv() => Next::Received(received),
+                    }
+                }
             };
-            match received {
-                Ok(chunk) => {
-                    let (chunk, lagged) = coalesce(rx, chunk);
+            match next {
+                Next::End(reason) => return state.finish(reason),
+                Next::Received(Ok(chunk)) => {
+                    let Some(subscription) = state.subscription.as_mut() else {
+                        return state.finish(EndReason::Lagging);
+                    };
+                    let (chunk, lagged) = coalesce(&mut subscription.rx, chunk);
                     state.pending_lag = lagged;
+                    state.bytes_sent += chunk.len() as u64;
                     return Some((Ok(chunk), state));
                 }
-                Err(RecvError::Lagged(skipped)) => {
+                Next::Received(Err(RecvError::Lagged(skipped))) => {
                     // 慢客户端：丢掉的数据没法补，但不必断开——从最近的关键帧重新对齐，
                     // 快照里不再带文件头（fMP4 的 init segment 除外，MSE 接受中途再来一份）
                     state.resyncs += 1;
@@ -632,7 +821,7 @@ pub fn live_response(
                             resyncs = state.resyncs,
                             "预览客户端持续落后于录制进度，结束响应"
                         );
-                        return None;
+                        return state.finish(EndReason::Lagging);
                     }
                     warn!(
                         id = state.id,
@@ -640,12 +829,20 @@ pub fn live_response(
                         resyncs = state.resyncs,
                         "预览客户端落后于录制进度，从最近的关键帧重新对齐"
                     );
-                    let previous = state.subscription.take()?;
-                    let again = state
-                        .hub
-                        .resubscribe(previous, SUBSCRIBE_TIMEOUT)
-                        .await
-                        .ok()?;
+                    let Some(previous) = state.subscription.take() else {
+                        return state.finish(EndReason::Lagging);
+                    };
+                    let again = tokio::select! {
+                        biased;
+                        scope = state.guard.ticket.evicted() => {
+                            return state.finish(EndReason::Evicted(scope));
+                        }
+                        _ = expiry(&mut state.deadline) => return state.finish(EndReason::Expired),
+                        again = state.hub.resubscribe(previous, SUBSCRIBE_TIMEOUT) => again,
+                    };
+                    let Ok(again) = again else {
+                        return state.finish(EndReason::Lagging);
+                    };
                     state.snapshot = if format == PreviewFormat::Fmp4 {
                         again.snapshot.iter().cloned().collect()
                     } else {
@@ -654,7 +851,9 @@ pub fn live_response(
                     state.subscription = Some(again);
                 }
                 // 写入端换代（拉流结束 / 断流重试）：新连接会拿到新的序列头
-                Err(RecvError::Closed) => return None,
+                Next::Received(Err(RecvError::Closed)) => {
+                    return state.finish(EndReason::SinkClosed);
+                }
             }
         }
     });
@@ -691,8 +890,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(20)).await;
         sink.push(ChunkKind::Media, Bytes::from_static(b"p2"));
         let subscription = pending.await.unwrap().unwrap();
-        let global = connection_limit().clone().try_acquire_owned().unwrap();
-        let response = live_response(1, hub.clone(), subscription, global);
+        let response = live_response(1, hub.clone(), subscription, test_guard(), None);
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
@@ -741,8 +939,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(20)).await;
         sink.push(ChunkKind::Media, Bytes::from_static(b"p2"));
         let subscription = pending.await.unwrap().unwrap();
-        let global = connection_limit().clone().try_acquire_owned().unwrap();
-        let response = live_response(1, hub.clone(), subscription, global);
+        let response = live_response(1, hub.clone(), subscription, test_guard(), None);
 
         // 响应体还没被读，写入端推满缓冲再多一些：接收端必然掉队
         for _ in 0..(BROADCAST_CAPACITY_FLV + 100) {
@@ -1065,31 +1262,246 @@ mod tests {
         );
     }
 
-    /// 进程级连接许可与该路的接收端都随响应体存在，响应体 drop 后立刻释放。
+    /// 测试用的进程一级身份：各测试用自己的池，别和并行跑的其它测试抢全局那个
+    fn test_guard() -> LiveGuard {
+        guard_in(
+            &PreviewSlots::new(SlotScope::Process, MAX_PREVIEW_CONNECTIONS),
+            &PreviewTicket::new(),
+        )
+    }
+
+    fn guard_in(process: &PreviewSlots, ticket: &PreviewTicket) -> LiveGuard {
+        let (global, _) = process.acquire(ticket, true).unwrap();
+        LiveGuard {
+            ticket: ticket.clone(),
+            _global: global,
+        }
+    }
+
+    /// 以 `ticket` 订阅；写入端要在请求发出后再推一块才会回应，所以放进任务里
+    fn open(
+        hub: &PreviewHub,
+        ticket: &PreviewTicket,
+    ) -> tokio::task::JoinHandle<Result<Subscription, SubscribeError>> {
+        let (hub, ticket) = (hub.clone(), ticket.clone());
+        tokio::spawn(async move {
+            let (slot, _) = hub.reserve(&ticket, true)?;
+            hub.subscribe_reserved(slot, None, Duration::from_secs(5))
+                .await
+        })
+    }
+
+    /// 进程级槽位与该路的接收端都随响应体存在，响应体 drop 后立刻释放。
     #[tokio::test]
-    async fn global_connection_limit_is_released_with_the_response_body() {
-        let limit = connection_limit();
+    async fn global_slot_is_released_with_the_response_body() {
+        let process = PreviewSlots::new(SlotScope::Process, MAX_PREVIEW_CONNECTIONS);
         let hub = PreviewHub::new(4);
         let mut sink = hub.attach(PreviewFormat::MpegTs);
         sink.push(ChunkKind::Keyframe, Bytes::from_static(&[0x47, 0, 0, 0]));
-        let pending = tokio::spawn({
-            let hub = hub.clone();
-            async move { hub.subscribe(Duration::from_secs(5)).await }
-        });
+        let ticket = PreviewTicket::new();
+        let pending = open(&hub, &ticket);
         tokio::time::sleep(Duration::from_millis(20)).await;
         sink.push(ChunkKind::Media, Bytes::from_static(&[0x47, 1, 1, 1]));
         let subscription = pending.await.unwrap().unwrap();
-        let before = limit.available_permits();
-        let global = limit.clone().try_acquire_owned().unwrap();
-        let response = live_response(1, hub.clone(), subscription, global);
+        let response = live_response(
+            1,
+            hub.clone(),
+            subscription,
+            guard_in(&process, &ticket),
+            None,
+        );
         assert_eq!(
             response.headers().get(header::CONTENT_TYPE).unwrap(),
             "video/mp2t"
         );
-        assert_eq!(limit.available_permits(), before - 1);
+        assert_eq!(process.occupied(), 1);
+        assert_eq!(hub.subscribers(), 1);
         assert_eq!(sink.receiver_count(), 1);
         drop(response);
-        assert_eq!(limit.available_permits(), before);
+        assert_eq!(process.occupied(), 0);
+        assert_eq!(hub.subscribers(), 0);
         assert_eq!(sink.receiver_count(), 0);
+    }
+
+    /// 同一直播间满员时新打开的预览挤掉最早的那条：旧响应自己正常结束（不是被掐断），
+    /// 两级槽位与接收端随之释放，槽位里只剩新来的。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn evicted_response_ends_and_releases_both_slots() {
+        let process = PreviewSlots::new(SlotScope::Process, MAX_PREVIEW_CONNECTIONS);
+        let hub = PreviewHub::new(1);
+        let mut sink = hub.attach(PreviewFormat::Flv);
+        sink.push(ChunkKind::Header, Bytes::from_static(&flv::FILE_HEADER));
+        sink.push(ChunkKind::Keyframe, Bytes::from_static(b"K1"));
+        let old = PreviewTicket::new();
+        let pending = open(&hub, &old);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sink.push(ChunkKind::Media, Bytes::from_static(b"p2"));
+        let subscription = pending.await.unwrap().unwrap();
+        let response = live_response(1, hub.clone(), subscription, guard_in(&process, &old), None);
+        let reader =
+            tokio::spawn(
+                async move { axum::body::to_bytes(response.into_body(), usize::MAX).await },
+            );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(process.occupied(), 1);
+
+        let newcomer = PreviewTicket::new();
+        let (_slot, evicted) = hub.reserve(&newcomer, true).unwrap();
+        assert_eq!(evicted.map(|e| e.id), Some(old.id()));
+        let body = tokio::time::timeout(Duration::from_secs(2), reader)
+            .await
+            .expect("the evicted response must end on its own")
+            .unwrap()
+            .expect("a clean end of stream, not an error");
+        assert!(body.starts_with(&flv::FILE_HEADER));
+        assert_eq!(process.occupied(), 0);
+        assert_eq!(
+            hub.subscribers(),
+            1,
+            "only the newcomer holds the room slot"
+        );
+        assert_eq!(sink.receiver_count(), 0, "the evicted receiver is gone");
+    }
+
+    /// 到了最长寿命就结束响应，哪怕写入端还在、客户端还在读；两级槽位随之释放。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn response_ends_when_its_lifetime_runs_out() {
+        let process = PreviewSlots::new(SlotScope::Process, MAX_PREVIEW_CONNECTIONS);
+        let hub = PreviewHub::new(4);
+        let mut sink = hub.attach(PreviewFormat::Flv);
+        sink.push(ChunkKind::Header, Bytes::from_static(&flv::FILE_HEADER));
+        sink.push(ChunkKind::Keyframe, Bytes::from_static(b"K1"));
+        let ticket = PreviewTicket::new();
+        let pending = open(&hub, &ticket);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sink.push(ChunkKind::Media, Bytes::from_static(b"p2"));
+        let subscription = pending.await.unwrap().unwrap();
+        let started = Instant::now();
+        let response = live_response(
+            1,
+            hub.clone(),
+            subscription,
+            guard_in(&process, &ticket),
+            Some(Duration::from_millis(300)),
+        );
+        let body = tokio::time::timeout(
+            Duration::from_secs(3),
+            axum::body::to_bytes(response.into_body(), usize::MAX),
+        )
+        .await
+        .expect("the response must end at its lifetime")
+        .unwrap();
+        assert!(started.elapsed() >= Duration::from_millis(300));
+        let mut expected = flv::FILE_HEADER.to_vec();
+        expected.extend_from_slice(b"K1p2");
+        assert_eq!(&body[..], &expected[..]);
+        assert_eq!(ticket.evicted_by(), None);
+        assert!(hub.is_attached(), "the sink is still there");
+        assert_eq!(process.occupied(), 0);
+        assert_eq!(hub.subscribers(), 0);
+        drop(sink);
+    }
+
+    /// 429 的正文写清是哪一级满了（前端原样显示）；只有自动重连才不挤别人。
+    #[tokio::test]
+    async fn too_many_bodies_name_the_full_scope() {
+        let room = too_many_response(SlotScope::Room, 4);
+        assert_eq!(room.status(), StatusCode::TOO_MANY_REQUESTS);
+        let room = axum::body::to_bytes(room.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&room),
+            "该直播间的预览连接数已达上限（每个直播间最多 4 路）"
+        );
+        let process = too_many_response(SlotScope::Process, MAX_PREVIEW_CONNECTIONS);
+        assert_eq!(process.status(), StatusCode::TOO_MANY_REQUESTS);
+        let process = axum::body::to_bytes(process.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&process),
+            "预览连接数已达上限（进程内最多 16 路）"
+        );
+
+        assert!(LiveQuery::default().may_evict());
+        let query = |v: &str| LiveQuery {
+            snapshot_ms: None,
+            reconnect: Some(v.into()),
+        };
+        assert!(!query("1").may_evict());
+        assert!(!query("true").may_evict());
+        assert!(query("0").may_evict());
+    }
+
+    /// 被挤掉的响应以 chunked 终止块正常收尾，同一条 keep-alive 连接接着能发下一个请求
+    /// （不会因为流返回 `None` 卡住连接）。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn keep_alive_connection_is_reusable_after_an_evicted_response() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        async fn read_until(socket: &mut tokio::net::TcpStream, buf: &mut Vec<u8>, needle: &[u8]) {
+            let found = |buf: &[u8]| buf.windows(needle.len()).any(|w| w == needle);
+            tokio::time::timeout(Duration::from_secs(3), async {
+                let mut chunk = [0u8; 4096];
+                while !found(buf) {
+                    let n = socket.read(&mut chunk).await.unwrap();
+                    assert!(n > 0, "connection closed: {}", String::from_utf8_lossy(buf));
+                    buf.extend_from_slice(&chunk[..n]);
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("timed out waiting for {needle:?}"));
+        }
+
+        let process = PreviewSlots::new(SlotScope::Process, MAX_PREVIEW_CONNECTIONS);
+        let hub = PreviewHub::new(1);
+        let mut sink = hub.attach(PreviewFormat::Flv);
+        sink.push(ChunkKind::Header, Bytes::from_static(&flv::FILE_HEADER));
+        sink.push(ChunkKind::Keyframe, Bytes::from_static(b"K1"));
+        let live = {
+            let (hub, process) = (hub.clone(), process.clone());
+            move || async move {
+                let ticket = PreviewTicket::new();
+                let (slot, _) = hub.reserve(&ticket, true).unwrap();
+                let subscription = hub
+                    .subscribe_reserved(slot, None, Duration::from_secs(5))
+                    .await
+                    .unwrap();
+                live_response(1, hub, subscription, guard_in(&process, &ticket), None)
+            }
+        };
+        let app = axum::Router::new()
+            .route("/live", axum::routing::get(live))
+            .route("/ping", axum::routing::get(|| async { "pong" }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let mut socket = tokio::net::TcpStream::connect(addr).await.unwrap();
+        socket
+            .write_all(b"GET /live HTTP/1.1\r\nHost: test\r\n\r\n")
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        sink.push(ChunkKind::Media, Bytes::from_static(b"p2"));
+        let mut buf = Vec::new();
+        read_until(&mut socket, &mut buf, b"p2").await;
+        let head = String::from_utf8_lossy(&buf).to_ascii_lowercase();
+        assert!(head.starts_with("http/1.1 200"), "{head}");
+        assert!(head.contains("transfer-encoding: chunked"), "{head}");
+
+        let (_slot, evicted) = hub.reserve(&PreviewTicket::new(), true).unwrap();
+        assert!(evicted.is_some());
+        read_until(&mut socket, &mut buf, b"\r\n0\r\n\r\n").await;
+        assert_eq!(process.occupied(), 0);
+
+        socket
+            .write_all(b"GET /ping HTTP/1.1\r\nHost: test\r\n\r\n")
+            .await
+            .unwrap();
+        let mut next = Vec::new();
+        read_until(&mut socket, &mut next, b"pong").await;
+        assert!(String::from_utf8_lossy(&next).starts_with("HTTP/1.1 200"));
     }
 }
