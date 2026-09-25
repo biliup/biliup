@@ -2,6 +2,7 @@ use crate::UploadLine;
 use crate::server::common::util::Recorder;
 use crate::server::config::Config;
 use crate::server::core::downloader::SegmentInfo;
+use crate::server::core::slots::Slots;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Stage, WorkerStatus};
 use crate::server::infrastructure::models::InsertFileItem;
@@ -26,8 +27,10 @@ use futures::stream::Inspect;
 use ormlite::Insert;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::pin;
+use tokio::task::{JoinError, JoinSet};
 use tracing::{error, info, warn};
 
 // 辅助结构体
@@ -680,66 +683,101 @@ mod tests {
 pub struct UActor {
     /// 上传消息接收器
     receiver: Receiver<UploaderMessage>,
+    /// 上传池槽位（pool2_size）：每条消息的上传流程占用一个，处理完归还
+    slots: Arc<Slots>,
 }
 
 impl UActor {
     /// 创建新的上传Actor实例
-    pub fn new(receiver: Receiver<UploaderMessage>) -> Self {
-        Self { receiver }
+    pub fn new(receiver: Receiver<UploaderMessage>, slots: Arc<Slots>) -> Self {
+        Self { receiver, slots }
     }
 
     /// 运行Actor主循环，处理接收到的消息
-    pub(crate) async fn run(&mut self) {
-        while let Ok(msg) = self.receiver.recv().await {
-            self.handle_message(msg).await;
-        }
-    }
-
-    /// 处理上传消息
     ///
-    /// # 参数
-    /// * `msg` - 要处理的上传消息
-    async fn handle_message(&mut self, msg: UploaderMessage) {
-        match msg {
-            UploaderMessage::SegmentEvent(rx, ctx) => {
-                ctx.change_status(Stage::Upload, WorkerStatus::Pending)
-                    .await;
-                let inspect = rx.inspect(|f| {
-                    let pool = ctx.pool().clone();
-                    let session_id = ctx.id();
-                    let file = f.prev_file_path.display().to_string();
-                    tokio::spawn(async move {
-                        let result = InsertFileItem { file, session_id }.insert(&pool).await;
-                        info!(result=?result, "Insert file");
-                    });
-                });
-                let result = match ctx.upload_config() {
-                    Some(config) if config.is_noop_uploader() => {
-                        info!(
-                            uploader = ?config.uploader,
-                            "Skipping upload because uploader is Noop"
-                        );
-                        process_without_upload(inspect, &ctx).await
-                    }
-                    Some(config) => process_with_upload(inspect, &ctx, config).await,
-                    None => {
-                        let mut paths = Vec::new();
-                        pin!(inspect);
-                        while let Some(event) = inspect.next().await {
-                            paths.extend(segment_paths(&event));
-                        }
-                        // 无上传配置时，直接执行后处理
-                        execute_postprocessor(paths, &ctx).await
-                    }
-                };
+    /// 同时处理的消息数不超过上传池容量，容量调整后立即生效。
+    pub(crate) async fn run(self) {
+        run_in_slots(self.receiver, self.slots, handle_message).await
+    }
+}
 
-                if let Err(e) = &result {
-                    error!("Process segment event failed: {}", e);
-                    // 可以添加错误通知机制
+/// 按到达顺序取出消息，占到一个槽位后交给 `handle` 在独立任务里处理，处理完归还槽位。
+///
+/// 先取消息再占槽位：只有真有消息要处理时才占用，调小容量后不会有闲置却占着的槽位。
+/// 处理任务都在本函数的 `JoinSet` 里，本函数所在任务被 abort 时一并取消。
+async fn run_in_slots<M, F, Fut>(receiver: Receiver<M>, slots: Arc<Slots>, handle: F)
+where
+    F: Fn(M) -> Fut,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    let mut tasks = JoinSet::new();
+    while let Ok(msg) = receiver.recv().await {
+        let slot = slots.acquire().await;
+        // 回收已经结束的任务
+        while let Some(result) = tasks.try_join_next() {
+            report_task_exit(result);
+        }
+        let task = handle(msg);
+        tasks.spawn(async move {
+            let _slot = slot;
+            task.await
+        });
+    }
+    while let Some(result) = tasks.join_next().await {
+        report_task_exit(result);
+    }
+}
+
+fn report_task_exit(result: Result<(), JoinError>) {
+    if let Err(e) = result {
+        error!(error = %e, "上传任务异常退出");
+    }
+}
+
+/// 处理上传消息
+///
+/// # 参数
+/// * `msg` - 要处理的上传消息
+async fn handle_message(msg: UploaderMessage) {
+    match msg {
+        UploaderMessage::SegmentEvent(rx, ctx) => {
+            ctx.change_status(Stage::Upload, WorkerStatus::Pending)
+                .await;
+            let inspect = rx.inspect(|f| {
+                let pool = ctx.pool().clone();
+                let session_id = ctx.id();
+                let file = f.prev_file_path.display().to_string();
+                tokio::spawn(async move {
+                    let result = InsertFileItem { file, session_id }.insert(&pool).await;
+                    info!(result=?result, "Insert file");
+                });
+            });
+            let result = match ctx.upload_config() {
+                Some(config) if config.is_noop_uploader() => {
+                    info!(
+                        uploader = ?config.uploader,
+                        "Skipping upload because uploader is Noop"
+                    );
+                    process_without_upload(inspect, &ctx).await
                 }
-                info!(url=ctx.live_streamer().url, result=?result, "后处理执行完毕：Finished processing segment event");
-                ctx.change_status(Stage::Upload, WorkerStatus::Idle).await;
+                Some(config) => process_with_upload(inspect, &ctx, config).await,
+                None => {
+                    let mut paths = Vec::new();
+                    pin!(inspect);
+                    while let Some(event) = inspect.next().await {
+                        paths.extend(segment_paths(&event));
+                    }
+                    // 无上传配置时，直接执行后处理
+                    execute_postprocessor(paths, &ctx).await
+                }
+            };
+
+            if let Err(e) = &result {
+                error!("Process segment event failed: {}", e);
+                // 可以添加错误通知机制
             }
+            info!(url=ctx.live_streamer().url, result=?result, "后处理执行完毕：Finished processing segment event");
+            ctx.change_status(Stage::Upload, WorkerStatus::Idle).await;
         }
     }
 }
@@ -750,4 +788,133 @@ impl UActor {
 pub enum UploaderMessage {
     /// 分段事件消息，包含事件、接收器和工作器
     SegmentEvent(Receiver<SegmentInfo>, Context),
+}
+
+#[cfg(test)]
+mod upload_pool_tests {
+    use super::run_in_slots;
+    use crate::server::core::slots::Slots;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::{mpsc, oneshot};
+
+    /// 等下一个开始处理的消息；超时说明本该开始的没有开始
+    async fn next_start<T>(started: &mut mpsc::UnboundedReceiver<T>) -> T {
+        tokio::time::timeout(Duration::from_secs(5), started.recv())
+            .await
+            .expect("应有上传任务开始")
+            .unwrap()
+    }
+
+    async fn assert_nothing_starts<T: std::fmt::Debug>(started: &mut mpsc::UnboundedReceiver<T>) {
+        let next = tokio::time::timeout(Duration::from_millis(100), started.recv()).await;
+        assert!(next.is_err(), "不应有新的上传任务开始：{next:?}");
+    }
+
+    /// 同时处理的消息数不超过上传池容量；扩容 / 缩容都立即生效，缩容不打断在跑的任务
+    #[tokio::test]
+    async fn uploads_stay_within_the_pool_and_resizing_applies_immediately() {
+        let (tx, rx) = async_channel::bounded(16);
+        let slots = Arc::new(Slots::new(1));
+        let (started_tx, mut started) = mpsc::unbounded_channel();
+        let dispatcher = tokio::spawn(run_in_slots(
+            rx,
+            slots.clone(),
+            move |(id, release): (usize, oneshot::Receiver<()>)| {
+                let started_tx = started_tx.clone();
+                async move {
+                    started_tx.send(id).unwrap();
+                    let _ = release.await;
+                }
+            },
+        ));
+
+        let mut releases = Vec::new();
+        for id in 0..3 {
+            let (release, wait) = oneshot::channel();
+            tx.send((id, wait)).await.unwrap();
+            releases.push(release);
+        }
+        let mut releases = releases.into_iter();
+
+        // 容量 1：只有第一条在处理
+        assert_eq!(next_start(&mut started).await, 0);
+        assert_nothing_starts(&mut started).await;
+
+        // 扩容后下一条立即开始，不必等在跑的结束
+        slots.resize(2);
+        assert_eq!(next_start(&mut started).await, 1);
+        assert_nothing_starts(&mut started).await;
+
+        // 缩回 1：在跑的两条照常跑完；结束一条后还占着 1 个，第三条要等占用数低于新容量
+        slots.resize(1);
+        releases.next().unwrap().send(()).unwrap();
+        assert_nothing_starts(&mut started).await;
+        releases.next().unwrap().send(()).unwrap();
+        assert_eq!(next_start(&mut started).await, 2);
+
+        releases.next().unwrap().send(()).unwrap();
+        drop(tx);
+        dispatcher.await.unwrap();
+    }
+
+    /// 某条消息的处理 panic 只结束它自己，槽位照常归还，后面的消息继续处理
+    #[tokio::test]
+    async fn a_panicking_upload_returns_its_slot() {
+        let (tx, rx) = async_channel::bounded(16);
+        let (started_tx, mut started) = mpsc::unbounded_channel();
+        let dispatcher = tokio::spawn(run_in_slots(
+            rx,
+            Arc::new(Slots::new(1)),
+            move |id: usize| {
+                let started_tx = started_tx.clone();
+                async move {
+                    started_tx.send(id).unwrap();
+                    assert_ne!(id, 0, "第一条消息的处理故意 panic");
+                }
+            },
+        ));
+
+        tx.send(0).await.unwrap();
+        tx.send(1).await.unwrap();
+        assert_eq!(next_start(&mut started).await, 0);
+        assert_eq!(next_start(&mut started).await, 1);
+
+        drop(tx);
+        dispatcher.await.unwrap();
+    }
+
+    /// DownloadManager 销毁时 abort 上传Actor，在跑的上传任务要一起取消并归还槽位
+    #[tokio::test]
+    async fn aborting_the_actor_cancels_running_uploads() {
+        let (tx, rx) = async_channel::bounded(16);
+        let slots = Arc::new(Slots::new(1));
+        let (started_tx, mut started) = mpsc::unbounded_channel();
+        let dispatcher = tokio::spawn(run_in_slots(
+            rx,
+            slots.clone(),
+            move |alive: oneshot::Sender<()>| {
+                let started_tx = started_tx.clone();
+                async move {
+                    let _alive = alive;
+                    started_tx.send(()).unwrap();
+                    std::future::pending::<()>().await;
+                }
+            },
+        ));
+
+        let (alive, cancelled) = oneshot::channel();
+        tx.send(alive).await.unwrap();
+        next_start(&mut started).await;
+        assert!(slots.try_acquire().is_none());
+
+        dispatcher.abort();
+        tokio::time::timeout(Duration::from_secs(5), cancelled)
+            .await
+            .expect("在跑的上传任务应随上传Actor一起取消")
+            .unwrap_err();
+        tokio::time::timeout(Duration::from_secs(5), slots.acquire())
+            .await
+            .expect("取消的上传任务应归还槽位");
+    }
 }

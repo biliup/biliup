@@ -1,5 +1,6 @@
 use crate::LogHandle;
 use crate::server::api::live_media::ImageProxy;
+use crate::server::common::system_stats::SystemMonitor;
 use crate::server::config::Config;
 use crate::server::core::download_manager::DownloadManager;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
@@ -31,6 +32,9 @@ pub struct ServiceRegister {
 
     /// 录制中直播间封面 / 头像的图片代理（抓取客户端 + 内存缓存）
     pub image_proxy: Arc<ImageProxy>,
+
+    /// 控制台首页的系统状态采样（CPU / 内存 / 磁盘 / 网速），随服务启停
+    pub system: Arc<SystemMonitor>,
 }
 
 /// 简单的服务容器，负责管理API端点通过axum扩展获取的各种服务
@@ -68,6 +72,7 @@ impl ServiceRegister {
             client,
             log_handle,
             image_proxy: Arc::new(ImageProxy::new()),
+            system: SystemMonitor::spawn(),
         }
     }
 

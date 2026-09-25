@@ -10,6 +10,7 @@ import { formatVersion } from '@/app/lib/status'
 import StreamerCard from '../ui/StreamerCard'
 import { CardRateSwitch } from '../ui/LiveRateChart'
 import EventTimeline from '../ui/EventTimeline'
+import SystemStatsPanel from '../ui/SystemStatsPanel'
 import BackgroundSetter from './components/BackgroundSetter'
 import styles from './page.module.scss'
 
@@ -17,7 +18,7 @@ const { Text } = Typography
 
 /**
  * 控制台主页 —— Monitor 表面:2 秒内回答"几个在录、有没有问题"。
- * 数据全部来自现有后端接口(见 use-dashboard),零后端改动。
+ * 主播与文件数据见 use-dashboard,系统状态(CPU / 内存 / 磁盘 / 网速)见 use-system-stats。
  */
 export default function Home() {
   const d = useDashboard()
@@ -117,6 +118,8 @@ export default function Home() {
               今日新增 <b>{formatSize(d.todaySize)}</b>
             </span>
           </div>
+
+          <SystemStatsPanel />
 
           {/* 进行中 */}
           <section className={styles.section}>

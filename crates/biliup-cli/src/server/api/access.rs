@@ -197,6 +197,7 @@ mod tests {
         ("POST", "/v1/sessions/1/markers"),
         ("PATCH", "/v1/sessions/1/markers/1"),
         ("DELETE", "/v1/sessions/1/markers/1"),
+        ("GET", "/v1/system-stats"),
         ("GET", "/v1/configuration"),
         ("PUT", "/v1/configuration"),
         ("GET", "/v1/streamer-info"),
@@ -249,6 +250,7 @@ mod tests {
             | ("GET", "/v1/sessions/1/keyframes")
             | ("GET", "/v1/sessions/1/media")
             | ("GET", "/v1/sessions/1/markers")
+            | ("GET", "/v1/system-stats")
             | ("GET", "/v1/configuration")
             | ("GET", "/v1/streamer-info")
             | ("GET", "/v1/streamer-info/files/1")
@@ -313,6 +315,7 @@ mod tests {
                 "/v1/sessions/{id}/markers/{mid}",
                 patch(|| async { StatusCode::OK }).delete(|| async { StatusCode::OK }),
             )
+            .route("/v1/system-stats", ok())
             .route("/v1/configuration", any())
             .route("/v1/streamer-info", ok())
             .route("/v1/streamer-info/files/{id}", ok())

@@ -1,0 +1,32 @@
+/* 控制台系统状态卡片里的小折线。不加过渡动画。 */
+
+.host {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+.host :global(.uplot) {
+  font-family: inherit;
+}
+.host :global(.u-cursor-x) {
+  border-right: 1px dashed var(--semi-color-text-3);
+}
+
+/* hover 读数：贴在图区顶部，随光标横向移动 */
+.readout {
+  position: absolute;
+  top: -20px;
+  left: 0;
+  z-index: 2;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--semi-color-text-0);
+  background: var(--semi-color-bg-3);
+  border: 1px solid var(--semi-color-border);
+  box-shadow: 0 1px 4px rgba(var(--semi-grey-9), 0.12);
+  pointer-events: none;
+}
