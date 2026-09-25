@@ -2,14 +2,25 @@
 import React from 'react'
 import styles from '../../styles/dashboard.module.scss'
 import SectionTitle from '../../(app)/components/SectionTitle'
-import { Form, Select, Space, useFormState } from '@douyinfe/semi-ui'
+import { Form, Select, Space, Switch, useFormApi, useFormState } from '@douyinfe/semi-ui'
 import { IconUpload, IconDownload } from '@douyinfe/semi-icons'
 import { FileSizeField } from '../FileSizeInput'
 
-const Global: React.FC = () => {
+/** 打开「投稿后保留录像」时默认保留的小时数 */
+const DEFAULT_RETENTION_HOURS = 24
+
+type Props = {
+  /** 只读角色：表单整体禁用，不是表单字段的开关也要跟着禁用 */
+  disabled?: boolean
+}
+
+const Global: React.FC<Props> = ({ disabled }) => {
   // useFormApi 不订阅表单值变化，切换下拉框后条件渲染不会刷新；useFormState 会
   const { values } = useFormState()
+  const formApi = useFormApi()
   const isSyncDownloader = values?.downloader === 'sync-downloader'
+  // 开关不是表单字段（整体覆盖保存时不能多出键），状态由小时数推出来：大于 0 即开
+  const retentionOn = Number(values?.retention_hours) > 0
 
   return (
     <>
@@ -212,6 +223,55 @@ const Global: React.FC = () => {
             padding: 0,
           }}
           showClear={true}
+        />
+        <Form.Slot
+          label="投稿后保留录像（retention_hours）"
+          style={{ alignSelf: 'stretch', padding: 0 }}
+        >
+          <Switch
+            aria-label="投稿后保留录像"
+            checked={retentionOn}
+            disabled={disabled}
+            onChange={on => formApi.setValue('retention_hours', on ? DEFAULT_RETENTION_HOURS : 0)}
+          />
+        </Form.Slot>
+        <Form.InputNumber
+          field="retention_hours"
+          noLabel={true}
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              后处理 rm、边录边传投稿后删除临时文件时，录像先保留这么多小时，到期后由每分钟一次的清理任务删除（连同弹幕 XML
+              和 .idx 关键帧索引）。关闭或填 0 表示立即删除，与以前一样。
+              <br />
+              切片工作台里被标记、切片引用的片段，以及点了「保留这场」的场次，不论这里怎么设都会等引用释放后再删。
+            </div>
+          }
+          min={0}
+          precision={0}
+          suffix="小时"
+          placeholder="0"
+          style={{ width: '100%' }}
+          fieldStyle={{
+            alignSelf: 'stretch',
+            padding: 0,
+          }}
+        />
+        <FileSizeField
+          field="min_free_space"
+          label="磁盘最低可用空间（min_free_space）"
+          placeholder="不启用"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              录像所在磁盘的可用空间低于这个值时，每分钟检查一次，按「没被切片工作台引用的最旧录像 → 被引用的最旧录像」
+              逐个删除，直到回到这个值以上。正在录的分段不删；只删切片工作台记录过的录像（本版本之后录制的），其它文件不碰。
+              <br />
+              <strong>会删掉还没投稿的录像</strong>，只作磁盘写满前的兜底。留空表示不启用（默认）。按 1024 进制换算。
+            </div>
+          }
+          fieldStyle={{
+            alignSelf: 'stretch',
+            padding: 0,
+          }}
         />
 
         <Form.InputNumber

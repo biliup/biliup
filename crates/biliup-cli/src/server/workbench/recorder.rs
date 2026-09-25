@@ -20,6 +20,7 @@ use biliup::downloader::index_tap::IndexTap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
@@ -67,9 +68,7 @@ enum Event {
         at: i64,
         info: ClosedSegment,
     },
-    Deleted {
-        path: PathBuf,
-    },
+    Settle(oneshot::Sender<()>),
     Finish,
 }
 
@@ -103,11 +102,16 @@ impl RecorderHandle {
         self.closed_at(path, now_ms(), info);
     }
 
-    /// 已记录的分段文件被删掉了（边录边传投稿后清理临时文件等）。
-    pub fn deleted(&self, path: &Path) {
-        let _ = self.tx.send(Event::Deleted {
-            path: path.to_path_buf(),
-        });
+    /// 等写入任务处理完此前发出的所有事件（任务已结束时立即完成）。
+    ///
+    /// 关段时的删除点要先等它：否则分段行可能还没写进去、或还是 `.part` 路径，删除点认不出是
+    /// 工作台的分段，就不管引用和保留直接删了。
+    pub fn settled(&self) -> impl Future<Output = ()> + Send + 'static {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.tx.send(Event::Settle(tx));
+        async move {
+            let _ = rx.await;
+        }
     }
 
     pub(crate) fn run_started_at(&self, at: i64) {
@@ -223,7 +227,10 @@ impl Writer {
                 Event::RunStarted { at } => self.on_run_started(at).await,
                 Event::Opened { path, at } => self.on_opened(path, at).await,
                 Event::Closed { path, at, info } => self.on_closed(path, at, info).await,
-                Event::Deleted { path } => self.on_deleted(&path).await,
+                Event::Settle(done) => {
+                    let _ = done.send(());
+                    Ok(())
+                }
                 Event::Finish => break,
             };
             if let Err(e) = result {
@@ -322,10 +329,12 @@ impl Writer {
             .bytes
             .or_else(|| std::fs::metadata(&path).ok().map(|m| m.len()))
             .map(|b| b as i64);
-        let state = if info.discard {
-            SegmentState::Deleted
-        } else if exists {
+        // 过滤删除的分段由删除点定状态（被引用时推迟删除），这里只按盘上还有没有文件记，
+        // 免得先落库的 `deleted` 让删除点认不出这个分段而直接删掉。
+        let state = if exists {
             SegmentState::Finished
+        } else if info.discard {
+            SegmentState::Deleted
         } else {
             SegmentState::Missing
         };
@@ -344,17 +353,6 @@ impl Writer {
         )
         .await?;
         self.segment_done(end_ms, at);
-        Ok(())
-    }
-
-    async fn on_deleted(&mut self, path: &Path) -> sqlx::Result<()> {
-        self.sync_index().await;
-        index::remove(path);
-        sqlx::query("UPDATE segments SET state = 'deleted' WHERE session_id = ? AND path = ?")
-            .bind(self.target.session_id)
-            .bind(path_string(path))
-            .execute(&self.pool)
-            .await?;
         Ok(())
     }
 

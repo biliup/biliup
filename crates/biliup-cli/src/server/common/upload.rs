@@ -9,6 +9,7 @@ use crate::server::infrastructure::models::hook_step::{
     HookStep, process_video, process_video_paths,
 };
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
+use crate::server::workbench::retention::Retention;
 use async_channel::Receiver;
 use biliup::bilibili::{BiliBili, ResponseData, Studio, Video};
 use biliup::client::StatelessClient;
@@ -450,7 +451,8 @@ pub(crate) async fn build_studio(
 pub async fn execute_postprocessor(video_paths: Vec<PathBuf>, ctx: &Context) -> AppResult<()> {
     if let Some(processor) = &ctx.live_streamer().postprocessor {
         let paths: Vec<&Path> = video_paths.iter().map(|p| p.as_path()).collect();
-        process_video(&paths, processor).await?;
+        let retention = Retention::after_upload(ctx.pool().clone(), &ctx.config());
+        process_video(&paths, processor, Some(&retention)).await?;
     }
     Ok(())
 }
