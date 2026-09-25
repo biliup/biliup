@@ -22,6 +22,7 @@ export type Permission =
   | 'file.view'
   | 'user.manage'
   | 'clip.edit'
+  | 'node.manage'
 
 /** 同上，与后端 `Role` 对应 */
 export type Role = 'admin' | 'operator' | 'viewer'
@@ -48,6 +49,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'file.view': '查看录播文件',
   'user.manage': '管理用户',
   'clip.edit': '打标记、保留场次',
+  'node.manage': '管理节点',
 }
 
 export interface Me {
@@ -59,6 +61,8 @@ export interface Me {
   permissions: Permission[]
   /** 未开启 `--auth` 时为 false：零鉴权，视为超级管理员 */
   auth_enabled: boolean
+  /** 本机以 `--controller` 运行（Fleet 控制面），「节点」菜单只在这时出现 */
+  fleet_controller: boolean
 }
 
 /**

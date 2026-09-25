@@ -75,6 +75,7 @@ async fn tools_report_follows_setting_then_host_ffmpeg() {
             let _ = stopped.await;
         })),
         ffmpeg: Some(bundled.clone()),
+        fleet: Default::default(),
     }));
 
     let client = reqwest::Client::new();

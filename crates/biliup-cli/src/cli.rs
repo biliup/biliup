@@ -4,7 +4,9 @@ use clap::{Parser, Subcommand};
 
 use crate::UploadLine;
 use crate::season_cli::SeasonArgs;
+use crate::server::fleet::RelayListen;
 use std::path::PathBuf;
+use url::Url;
 
 /// 扩展路径中的 ~ 为用户主目录
 pub fn expand_path(path: PathBuf) -> PathBuf {
@@ -179,6 +181,20 @@ pub enum Commands {
         /// 使用 biliup 1.0.7 风格配置文件启动录制
         #[arg(short, long, value_name = "FILE")]
         config: Option<PathBuf>,
+
+        /// 以 Fleet 控制面运行：接受其他 biliup 节点加入并显示它们的状态（数据在 data/fleet.sqlite3）
+        #[arg(long)]
+        controller: bool,
+
+        /// 控制面内嵌 relay 的 TCP 监听地址（默认 0.0.0.0:19160），节点必须能连到它；
+        /// off 表示不起内嵌 relay，此时必须用 --relay-url 指定外部 relay。只在 --controller 时生效
+        #[arg(long, value_name = "ADDR|off")]
+        relay_listen: Option<RelayListen>,
+
+        /// 写进加入票据的 relay 地址，可重复；不给时自动列出本机网卡地址。
+        /// 用于域名、端口转发、反向代理或外部 relay。只在 --controller 时生效
+        #[arg(long, value_name = "URL")]
+        relay_url: Vec<Url>,
     },
     /// 管理自己的合集：列合集、查小节、加入 / 移出稿件、排序
     Season(SeasonArgs),
@@ -259,6 +275,43 @@ mod tests {
                 ..
             } if bind == "127.0.0.1"
         ));
+    }
+
+    #[test]
+    fn fleet_server_flags_parse() {
+        use crate::server::fleet::RelayListen;
+        let cli = Cli::try_parse_from(["biliup", "server"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Server {
+                controller: false,
+                relay_listen: None,
+                ref relay_url,
+                ..
+            } if relay_url.is_empty()
+        ));
+        let cli = Cli::try_parse_from([
+            "biliup",
+            "server",
+            "--controller",
+            "--relay-listen",
+            "off",
+            "--relay-url",
+            "http://relay.example.com:19160",
+            "--relay-url",
+            "http://10.0.0.2:19160",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Server {
+                controller: true,
+                relay_listen: Some(RelayListen::Off),
+                ref relay_url,
+                ..
+            } if relay_url.len() == 2
+        ));
+        assert!(Cli::try_parse_from(["biliup", "server", "--relay-listen", "nope"]).is_err());
     }
 
     #[test]

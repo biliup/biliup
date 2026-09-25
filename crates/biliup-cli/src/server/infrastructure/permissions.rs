@@ -104,6 +104,9 @@ pub enum Permission {
     /// 切片工作台：打标记、保留场次、改切片草稿
     #[serde(rename = "clip.edit")]
     ClipEdit,
+    /// Fleet 控制面：生成加入票据、移除节点
+    #[serde(rename = "node.manage")]
+    NodeManage,
 }
 
 impl Permission {
@@ -122,6 +125,7 @@ impl Permission {
         Permission::FileView,
         Permission::UserManage,
         Permission::ClipEdit,
+        Permission::NodeManage,
     ];
 }
 
@@ -207,6 +211,11 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
                 FileView
             }
         }
+        // Fleet 控制面：节点列表与 /v1/status 同级，管理归 node.manage
+        "/v1/fleet/nodes" if get => StreamerView,
+        "/v1/fleet/nodes/{id}" | "/v1/fleet/join-tokens" | "/v1/fleet/join-tokens/{id}" => {
+            NodeManage
+        }
         "/v1/web-users"
         | "/v1/web-users/roles"
         | "/v1/web-users/{id}"
@@ -245,6 +254,7 @@ mod tests {
             include_str!("../router.rs"),
             include_str!("../app.rs"),
             include_str!("../api/web_users.rs"),
+            include_str!("../api/fleet.rs"),
         ];
         // 这些路由有意不挂权限层：登录相关对外公开，`/v1/me*` 只要求登录。
         let unguarded = [
@@ -286,7 +296,13 @@ mod tests {
         for permission in Permission::ALL {
             assert!(Role::Admin.has(*permission));
         }
-        for permission in [StreamerHooks, AccountManage, ConfigEdit, UserManage] {
+        for permission in [
+            StreamerHooks,
+            AccountManage,
+            ConfigEdit,
+            UserManage,
+            NodeManage,
+        ] {
             assert!(!Role::Operator.has(permission), "{permission:?}");
             assert!(!Role::Viewer.has(permission), "{permission:?}");
         }
