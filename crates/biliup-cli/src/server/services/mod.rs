@@ -2,3 +2,5 @@
 
 /// 保存并应用全局配置
 pub mod configuration;
+/// 主播的增删改与暂停
+pub mod streamers;
