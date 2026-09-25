@@ -8,27 +8,27 @@ use bytes::{BufMut, BytesMut};
 use std::io;
 
 const FILE_HEADER_SIZE: usize = 9;
-const TAG_HEADER_SIZE: usize = 11;
-const PREV_TAG_SIZE: usize = 4;
-const TAG_AUDIO: u8 = 8;
-const TAG_VIDEO: u8 = 9;
-const TAG_SCRIPT: u8 = 18;
+pub(in crate::server::workbench) const TAG_HEADER_SIZE: usize = 11;
+pub(in crate::server::workbench) const PREV_TAG_SIZE: usize = 4;
+pub(in crate::server::workbench) const TAG_AUDIO: u8 = 8;
+pub(in crate::server::workbench) const TAG_VIDEO: u8 = 9;
+pub(in crate::server::workbench) const TAG_SCRIPT: u8 = 18;
 
-struct TagRef<'a> {
-    tag_type: u8,
-    timestamp: u32,
+pub(in crate::server::workbench) struct TagRef<'a> {
+    pub tag_type: u8,
+    pub timestamp: u32,
     /// tag 头 + body + PreviousTagSize
-    raw: &'a [u8],
+    pub raw: &'a [u8],
 }
 
 impl TagRef<'_> {
-    fn body(&self) -> &[u8] {
+    pub(in crate::server::workbench) fn body(&self) -> &[u8] {
         &self.raw[TAG_HEADER_SIZE..self.raw.len() - PREV_TAG_SIZE]
     }
 }
 
 /// `data` 开头的一个完整 tag；不完整返回 `Ok(None)`。
-fn next_tag(data: &[u8]) -> io::Result<Option<TagRef<'_>>> {
+pub(in crate::server::workbench) fn next_tag(data: &[u8]) -> io::Result<Option<TagRef<'_>>> {
     if data.len() < TAG_HEADER_SIZE {
         return Ok(None);
     }
@@ -52,7 +52,7 @@ fn next_tag(data: &[u8]) -> io::Result<Option<TagRef<'_>>> {
     }))
 }
 
-fn put_tag(out: &mut BytesMut, tag: &TagRef<'_>, timestamp: u32) {
+pub(in crate::server::workbench) fn put_tag(out: &mut BytesMut, tag: &TagRef<'_>, timestamp: u32) {
     out.put_u8(tag.raw[0]);
     out.put_slice(&tag.raw[1..4]);
     out.put_slice(&timestamp.to_be_bytes()[1..4]);
@@ -61,14 +61,14 @@ fn put_tag(out: &mut BytesMut, tag: &TagRef<'_>, timestamp: u32) {
 }
 
 /// 分段文件的头区（`[0, header_len)`：文件头、`onMetaData`、序列头）里能决定解码器配置的部分。
-pub(super) struct Header<'a> {
-    flags: u8,
+pub(in crate::server::workbench) struct Header<'a> {
+    pub flags: u8,
     /// 头区里的音视频 tag，也就是序列头。
-    sequence_headers: Vec<TagRef<'a>>,
+    pub sequence_headers: Vec<TagRef<'a>>,
 }
 
 impl<'a> Header<'a> {
-    pub(super) fn parse(region: &'a [u8]) -> io::Result<Self> {
+    pub(in crate::server::workbench) fn parse(region: &'a [u8]) -> io::Result<Self> {
         if region.len() < FILE_HEADER_SIZE + PREV_TAG_SIZE || &region[..3] != b"FLV" {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -94,7 +94,7 @@ impl<'a> Header<'a> {
     }
 
     /// 两个分段能不能接成一条流：音视频有无与序列头都相同。
-    pub(super) fn fingerprint(&self) -> Vec<u8> {
+    pub(in crate::server::workbench) fn fingerprint(&self) -> Vec<u8> {
         let mut out = vec![self.flags & 0x05];
         for tag in &self.sequence_headers {
             out.push(tag.tag_type);

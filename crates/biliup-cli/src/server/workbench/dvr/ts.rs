@@ -6,25 +6,25 @@ use bytes::{BufMut, BytesMut};
 use std::collections::HashMap;
 use std::io;
 
-pub(super) const PACKET: usize = 188;
-const SYNC: u8 = 0x47;
-const PID_PAT: u16 = 0;
-const WRAP: i64 = 1 << 33;
+pub(in crate::server::workbench) const PACKET: usize = 188;
+pub(in crate::server::workbench) const SYNC: u8 = 0x47;
+pub(in crate::server::workbench) const PID_PAT: u16 = 0;
+pub(in crate::server::workbench) const WRAP: i64 = 1 << 33;
 const STREAM_H264: u8 = 0x1B;
 const STREAM_H265: u8 = 0x24;
 /// 从关键帧起最多看这么多字节找参数集。
 const PARAM_SNIFF: usize = 256 * 1024;
 
-fn pid_of(p: &[u8]) -> u16 {
+pub(in crate::server::workbench) fn pid_of(p: &[u8]) -> u16 {
     (((p[1] & 0x1F) as u16) << 8) | p[2] as u16
 }
 
-fn pusi(p: &[u8]) -> bool {
+pub(in crate::server::workbench) fn pusi(p: &[u8]) -> bool {
     p[1] & 0x40 != 0
 }
 
 /// 包里负载的起点；没有负载返回 `None`。
-fn payload_start(p: &[u8]) -> Option<usize> {
+pub(in crate::server::workbench) fn payload_start(p: &[u8]) -> Option<usize> {
     let afc = (p[3] >> 4) & 0x3;
     let start = match afc {
         1 => 4,
@@ -44,14 +44,14 @@ fn psi_section(p: &[u8]) -> Option<&[u8]> {
 
 /// 头区里的 PAT / PMT：节目的 PMT PID 与各路基本流。
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub(super) struct Program {
+pub(in crate::server::workbench) struct Program {
     pub pmt_pid: u16,
     /// `(elementary_pid, stream_type)`，按 PMT 里的顺序。
     pub streams: Vec<(u16, u8)>,
 }
 
 impl Program {
-    pub(super) fn parse(region: &[u8]) -> Self {
+    pub(in crate::server::workbench) fn parse(region: &[u8]) -> Self {
         let mut program = Program::default();
         for p in region
             .as_chunks::<PACKET>()
@@ -97,21 +97,21 @@ impl Program {
         program
     }
 
-    pub(super) fn video(&self) -> Option<(u16, u8)> {
+    pub(in crate::server::workbench) fn video(&self) -> Option<(u16, u8)> {
         self.streams
             .iter()
             .copied()
             .find(|(_, t)| matches!(*t, STREAM_H264 | STREAM_H265))
     }
 
-    fn is_pes(&self, pid: u16) -> bool {
+    pub(in crate::server::workbench) fn is_pes(&self, pid: u16) -> bool {
         self.streams.iter().any(|(p, _)| *p == pid)
     }
 }
 
 /// 关键帧那个视频 PES 里的参数集（H.264 SPS / PPS，H.265 VPS / SPS / PPS），`data` 从关键帧的 PES
 /// 起始包开始。换分辨率、换编码参数时它们会变。
-pub(super) fn parameter_sets(data: &[u8], program: &Program) -> Vec<u8> {
+pub(in crate::server::workbench) fn parameter_sets(data: &[u8], program: &Program) -> Vec<u8> {
     let Some((video_pid, stream_type)) = program.video() else {
         return Vec::new();
     };
@@ -175,7 +175,7 @@ pub(super) fn parameter_sets(data: &[u8], program: &Program) -> Vec<u8> {
     out
 }
 
-fn read_ts(b: &[u8]) -> i64 {
+pub(in crate::server::workbench) fn read_ts(b: &[u8]) -> i64 {
     (((b[0] >> 1) & 0x07) as i64) << 30
         | (b[1] as i64) << 22
         | ((b[2] >> 1) as i64) << 15
@@ -183,7 +183,7 @@ fn read_ts(b: &[u8]) -> i64 {
         | (b[4] >> 1) as i64
 }
 
-fn write_ts(b: &mut [u8], v: i64) {
+pub(in crate::server::workbench) fn write_ts(b: &mut [u8], v: i64) {
     let v = v.rem_euclid(WRAP);
     b[0] = (b[0] & 0xF1) | (((v >> 30) & 0x07) as u8) << 1;
     b[1] = (v >> 22) as u8;
@@ -193,7 +193,7 @@ fn write_ts(b: &mut [u8], v: i64) {
 }
 
 /// 33 位时间戳相对 `base` 的差，跨过回绕点也按最近的方向算。
-fn delta(raw: i64, base: i64) -> i64 {
+pub(in crate::server::workbench) fn delta(raw: i64, base: i64) -> i64 {
     let d = (raw - base).rem_euclid(WRAP);
     if d >= WRAP / 2 { d - WRAP } else { d }
 }
