@@ -9,7 +9,7 @@ use std::collections::HashMap;
 async fn plan_of(pool: &ConnectionPool, session: i64, in_ms: i64, out_ms: i64) -> Plan {
     match plan::compute(pool, session, in_ms, out_ms).await.unwrap() {
         Attempt::Ready(plan) => plan,
-        Attempt::Wait => panic!("不该等待"),
+        Attempt::Wait | Attempt::Tentative(_) => panic!("不该等待"),
     }
 }
 

@@ -89,7 +89,7 @@ pub(super) async fn flv_session() -> (TempDir, ConnectionPool, i64, Vec<i64>) {
 async fn ready(pool: &ConnectionPool, session: i64, in_ms: i64, out_ms: i64) -> plan::Plan {
     match plan::compute(pool, session, in_ms, out_ms).await.unwrap() {
         Attempt::Ready(plan) => plan,
-        Attempt::Wait => panic!("不该等待"),
+        Attempt::Wait | Attempt::Tentative(_) => panic!("不该等待"),
     }
 }
 
@@ -234,6 +234,38 @@ async fn the_growing_tail_is_waited_for_until_a_keyframe_follows_the_out_point()
         .await
         .unwrap();
     assert_eq!(done.duration_ms, 2000);
+}
+
+#[tokio::test]
+async fn an_out_point_past_the_last_segment_of_a_live_session_waits_for_the_next_one() {
+    let (dir, pool, session) = setup().await;
+    let session = crate::server::workbench::live::unique_session_id(&pool, session).await;
+    let flv = build_flv(0, 100, 25, None);
+    let a = write(dir.path(), "a.flv", &flv.bytes);
+    add_segment(&pool, session, &a, "finished", 0, Some(FLV_MS)).await;
+
+    // 没在录：到这一段末尾
+    ready(&pool, session, 1000, FLV_MS + 1500).await;
+
+    // 在录：上一段刚关、下一段还没记进分段表
+    let _guard = crate::server::workbench::live::register(session, 1, None);
+    let Attempt::Tentative(plan) = plan::compute(&pool, session, 1000, FLV_MS + 1500)
+        .await
+        .unwrap()
+    else {
+        panic!("该再等等下一段");
+    };
+    assert_eq!(plan.cut_out_ms, FLV_MS);
+    let waited = plan::resolve(&pool, session, 1000, FLV_MS + 1500, Duration::ZERO, || {})
+        .await
+        .unwrap();
+    assert_eq!(waited, plan, "等不到就按现有的剪");
+
+    let b = write(dir.path(), "b.flv.part", &flv.bytes);
+    add_segment(&pool, session, &b, "recording", FLV_MS, None).await;
+    let plan = ready(&pool, session, 1000, FLV_MS + 1500).await;
+    assert_eq!(plan.cut_out_ms, FLV_MS + 2000);
+    assert_eq!(plan.pieces.len(), 2);
 }
 
 #[tokio::test]

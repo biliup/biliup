@@ -14,7 +14,7 @@
 use super::super::dvr::{self, flv, ts};
 use super::super::index::{Container, KeyframeIndex};
 use super::super::store::{self, SegmentRow, SegmentState};
-use super::super::{readable, segment_index};
+use super::super::{live, readable, segment_index};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -103,7 +103,13 @@ pub enum Attempt {
     Ready(Plan),
     /// 出点落在还在写的分段里，后面还没有关键帧。
     Wait,
+    /// 出点晚于场次最后一段的末尾，场次还在录：上一段刚关、下一段可能正要记进分段表，
+    /// [`resolve`] 再等几秒，还没有就按现有的剪。
+    Tentative(Plan),
 }
+
+/// 录制端关段和开下一段是先后两个事件，中间分段表里暂时没有下一段。
+const NEXT_SEGMENT_GRACE: Duration = Duration::from_secs(5);
 
 fn overlaps(segment: &SegmentRow, in_ms: i64, out_ms: i64) -> bool {
     segment.start_ms <= out_ms && segment.end_ms.is_none_or(|end| end > in_ms)
@@ -165,8 +171,9 @@ pub async fn compute(
     in_ms: i64,
     out_ms: i64,
 ) -> Result<Attempt, PlanError> {
-    let segments: Vec<SegmentRow> = store::session_segments(pool, session_id)
-        .await?
+    let all = store::session_segments(pool, session_id).await?;
+    let last_segment = all.last().map(|s| s.id);
+    let segments: Vec<SegmentRow> = all
         .into_iter()
         .filter(|s| overlaps(s, in_ms, out_ms))
         // 空分段（开了就断）不占时间轴
@@ -277,13 +284,21 @@ pub async fn compute(
         ));
     };
     let cut_in_ms = first.start_ms;
+    let open_ended = cut_out_ms.is_none()
+        && pieces.last().map(|p| p.segment_id) == last_segment
+        && live::is_recording(session_id);
     let cut_out_ms = cut_out_ms.unwrap_or_else(|| pieces.last().map_or(out_ms, |p| p.end_ms));
-    Ok(Attempt::Ready(Plan {
+    let plan = Plan {
         container,
         pieces,
         cut_in_ms,
         cut_out_ms,
-    }))
+    };
+    Ok(if open_ended {
+        Attempt::Tentative(plan)
+    } else {
+        Attempt::Ready(plan)
+    })
 }
 
 /// 算出要读的区间；出点之后的关键帧还没写到盘上时等（索引更新或每秒重试），最多等 `timeout`。
@@ -297,9 +312,18 @@ pub async fn resolve(
 ) -> Result<Plan, PlanError> {
     let deadline = Instant::now() + timeout;
     let mut updates = super::super::index::live::updates();
+    let mut tentative_since: Option<Instant> = None;
     loop {
         match compute(pool, session_id, in_ms, out_ms).await? {
             Attempt::Ready(plan) => return Ok(plan),
+            Attempt::Tentative(plan) => {
+                let since = *tentative_since.get_or_insert_with(Instant::now);
+                if since.elapsed() >= NEXT_SEGMENT_GRACE || Instant::now() >= deadline {
+                    return Ok(plan);
+                }
+                on_wait();
+                let _ = tokio::time::timeout(Duration::from_secs(1), updates.changed()).await;
+            }
             Attempt::Wait => {
                 if Instant::now() >= deadline {
                     return Err(PlanError::Unavailable(format!(
