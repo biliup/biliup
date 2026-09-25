@@ -342,11 +342,17 @@ fn warn_on_suffix_mismatch(configured: &str, actual: &str) {
     }
 }
 
+/// 输出目录是 `.` 时 writer 给出 `./x.flv`；去掉前缀，与 stream-gears 给出的路径同一形式，
+/// 弹幕 XML、文件列表都按这个路径命名和记录。开段与关段必须同一形式，切片工作台按路径配对。
+fn reported_path(path: &std::path::Path) -> &std::path::Path {
+    path.strip_prefix(".").unwrap_or(path)
+}
+
 fn segment_start_hook(
     seg_tx: UnboundedSender<WriterEvent>,
 ) -> impl Fn(&std::path::Path, u32) + Send + Sync + 'static {
     move |path, _index| {
-        let _ = seg_tx.send(WriterEvent::Opened(path.to_path_buf()));
+        let _ = seg_tx.send(WriterEvent::Opened(reported_path(path).to_path_buf()));
     }
 }
 
@@ -357,9 +363,7 @@ fn segment_complete_hook(
 + Sync
 + 'static {
     move |path, index, duration_secs, size_bytes, reason| {
-        // 输出目录是 `.` 时 writer 给出 `./x.flv`；去掉前缀，与 stream-gears 给出的路径同一形式，
-        // 弹幕 XML、文件列表都按这个路径命名和记录
-        let path = path.strip_prefix(".").unwrap_or(path);
+        let path = reported_path(path);
         info!(
             path = %path.display(),
             index,
@@ -585,19 +589,25 @@ mod tests {
     #[test]
     fn segment_paths_under_the_current_dir_drop_the_dot_prefix() {
         let (tx, mut rx) = unbounded_channel();
-        let hook = segment_complete_hook(tx);
-        hook(std::path::Path::new("./x.flv"), 0, 1.0, 10, None);
-        hook(std::path::Path::new("./sub/y.flv"), 1, 1.0, 10, None);
-        hook(std::path::Path::new("/data/z.flv"), 2, 1.0, 10, None);
-        hook(std::path::Path::new("w.flv"), 3, 1.0, 10, None);
+        let opened = segment_start_hook(tx.clone());
+        let closed = segment_complete_hook(tx);
+        let inputs = ["./x.flv", "./sub/y.flv", "/data/z.flv", "w.flv"];
+        for (index, path) in inputs.iter().enumerate() {
+            opened(std::path::Path::new(path), index as u32);
+            closed(std::path::Path::new(path), index as u32, 1.0, 10, None);
+        }
 
-        let paths: Vec<PathBuf> = std::iter::from_fn(|| rx.try_recv().ok())
-            .map(|(path, ..)| path)
+        let events: Vec<(bool, PathBuf)> = std::iter::from_fn(|| rx.try_recv().ok())
+            .map(|event| match event {
+                WriterEvent::Opened(path) => (true, path),
+                WriterEvent::Closed(path, ..) => (false, path),
+            })
             .collect();
-        assert_eq!(
-            paths,
-            ["x.flv", "sub/y.flv", "/data/z.flv", "w.flv"].map(PathBuf::from)
-        );
+        let expected: Vec<(bool, PathBuf)> = ["x.flv", "sub/y.flv", "/data/z.flv", "w.flv"]
+            .into_iter()
+            .flat_map(|path| [(true, PathBuf::from(path)), (false, PathBuf::from(path))])
+            .collect();
+        assert_eq!(events, expected);
     }
 
     #[test]
