@@ -4,6 +4,8 @@ pub mod access;
 pub mod auth;
 /// B站API端点
 pub mod bilibili_endpoints;
+/// 切片工作台的切片发布（上传投稿队列、取帧、封面）
+pub mod clip_publish;
 /// 切片工作台的切片与导出
 pub mod clips;
 /// 通用API端点

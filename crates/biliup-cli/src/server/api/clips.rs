@@ -1,12 +1,14 @@
 //! 切片接口：`/v1/sessions/{id}/clips[/{cid}]` 增删改查，`/v1/clips/{cid}` 查一个、
 //! `/v1/clips/{cid}/export` 导出、`/v1/clips/{cid}/download` 下载。
 //!
-//! 看列表、下载要 `file.view`，增删改、导出要 `clip.edit`，都由策略层按路由表判断。
+//! 看列表、下载要 `file.view`，增删改（含发布设置）、导出要 `clip.edit`，都由策略层按路由表判断。
 //! 只按场次 id、切片 id 寻址，产物路径不出现在请求和响应里（响应只带文件名）。
 
 use crate::server::api::access::Caller;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::workbench::clips::export::{ClipExports, DownloadError, Progress};
+use crate::server::workbench::clips::publish::queue::{ClipPublisher, JobState};
+use crate::server::workbench::clips::publish::{StudioOverride, cover_file};
 use crate::server::workbench::clips::{
     self, Clip, ClipChanges, MAX_CLIP_MS, MAX_CLIPS_PER_SESSION, MAX_TITLE_CHARS, Mode, NewClip,
     State as ClipState, UpdateOutcome,
@@ -18,7 +20,7 @@ use axum::body::Body;
 use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::Arc;
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
@@ -68,6 +70,13 @@ pub struct ClipView {
     pub duration_ms: Option<i64>,
     /// 导出失败的原因。
     pub error: Option<String>,
+    /// 发布用的上传模板；`None` = 用主播绑定的模板。
+    pub template_id: Option<i64>,
+    /// 发布设置里覆盖模板的部分。
+    pub studio_override: StudioOverride,
+    /// 发布后的稿件号。
+    pub archive_bvid: Option<String>,
+    pub published_at: Option<i64>,
     pub created_by: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -95,6 +104,10 @@ fn view(clip: Clip, exports: &ClipExports) -> ClipView {
         output_bytes: clip.output_bytes,
         duration_ms: clip.duration_ms,
         error: clip.error,
+        studio_override: StudioOverride::parse(clip.studio_override.as_deref()),
+        template_id: clip.template_id,
+        archive_bvid: clip.archive_bvid,
+        published_at: clip.published_at,
         created_by: clip.created_by,
         created_at: clip.created_at,
         updated_at: clip.updated_at,
@@ -286,20 +299,31 @@ pub async fn create_clip(
     (StatusCode::CREATED, Json(view(clip, &exports))).into_response()
 }
 
+/// 区分「没给」和「给了 null」。
+fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> {
+    T::deserialize(d).map(Some)
+}
+
 /// `PATCH /v1/sessions/{id}/clips/{cid}` 的请求体：只改给出的字段。
-/// 改了范围的话之前导出的文件作废，要重新导出。
+/// 改了范围的话之前导出的文件作废，要重新导出。`template_id: null` = 改回主播绑定的模板，
+/// `studio_override: null` = 清掉覆盖（切片封面文件保留，`cover` 不再指向它）。
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateClip {
     pub in_ms: Option<i64>,
     pub out_ms: Option<i64>,
     pub title: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub template_id: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "present")]
+    pub studio_override: Option<Option<StudioOverride>>,
 }
 
 /// `PATCH /v1/sessions/{id}/clips/{cid}`
 pub async fn update_clip(
     State(pool): State<ConnectionPool>,
     State(exports): State<Arc<ClipExports>>,
+    State(publisher): State<Arc<ClipPublisher>>,
     Path((id, cid)): Path<(i64, i64)>,
     Json(body): Json<UpdateClip>,
 ) -> Response {
@@ -309,6 +333,11 @@ pub async fn update_clip(
     };
     if body.in_ms.is_some_and(|v| v < 0) {
         return bad_request("入点不能是负数");
+    }
+    if let Some(Some(over)) = &body.studio_override
+        && let Err(message) = over.validate()
+    {
+        return bad_request(message);
     }
     let changes = ClipChanges {
         in_ms: body.in_ms,
@@ -320,10 +349,44 @@ pub async fn update_clip(
         Ok(_) => return clip_not_found(),
         Err(e) => return internal(e),
     };
-    match clips::update(&pool, id, cid, &changes, recorder::now_ms()).await {
-        Ok(UpdateOutcome::Updated(clip)) => {
+    let range_changes = body.in_ms.is_some_and(|v| v != before.in_ms)
+        || body.out_ms.is_some_and(|v| v != before.out_ms);
+    if range_changes
+        && matches!(
+            publisher.state_of(cid),
+            Some(JobState::Queued | JobState::Running | JobState::Paused)
+        )
+    {
+        return conflict("这个切片在发布队列里，等它发完或先移出队列再改范围");
+    }
+    let now = recorder::now_ms();
+    match clips::update(&pool, id, cid, &changes, now).await {
+        Ok(UpdateOutcome::Updated(mut clip)) => {
             if before.output_path.is_some() && clip.output_path.is_none() {
                 exports.remove_outputs(id, cid).await;
+            }
+            if (clip.in_ms, clip.out_ms) != (before.in_ms, before.out_ms) {
+                publisher.forget_upload(cid);
+            }
+            if body.template_id.is_some() || body.studio_override.is_some() {
+                let template_id = body.template_id.unwrap_or(clip.template_id);
+                let over = match &body.studio_override {
+                    Some(over) => over.clone().unwrap_or_default(),
+                    None => StudioOverride::parse(clip.studio_override.as_deref()),
+                };
+                match clips::set_publish_settings(
+                    &pool,
+                    cid,
+                    template_id,
+                    over.to_json().as_deref(),
+                    now,
+                )
+                .await
+                {
+                    Ok(Some(saved)) => *clip = saved,
+                    Ok(None) => return clip_not_found(),
+                    Err(e) => return internal(e),
+                }
             }
             Json(view(*clip, &exports)).into_response()
         }
@@ -337,16 +400,22 @@ pub async fn update_clip(
     }
 }
 
-/// `DELETE /v1/sessions/{id}/clips/{cid}`：正在导出的先停掉，文件一起删，撤销对录像的引用。
+/// `DELETE /v1/sessions/{id}/clips/{cid}`：正在导出的先停掉，文件（含切片封面）一起删，撤销对录像的引用。
+/// 在发布队列里的要先移出。
 pub async fn delete_clip(
     State(pool): State<ConnectionPool>,
     State(exports): State<Arc<ClipExports>>,
+    State(publisher): State<Arc<ClipPublisher>>,
     Path((id, cid)): Path<(i64, i64)>,
 ) -> Response {
+    if publisher.state_of(cid).is_some() {
+        return conflict("这个切片在发布队列里，先把它移出队列再删");
+    }
     match clips::delete(&pool, id, cid).await {
         Ok(Some(_)) => {
             exports.cancel(cid);
             exports.remove_outputs(id, cid).await;
+            let _ = tokio::fs::remove_file(cover_file(&exports.dir(id), cid)).await;
             StatusCode::NO_CONTENT.into_response()
         }
         Ok(None) => clip_not_found(),

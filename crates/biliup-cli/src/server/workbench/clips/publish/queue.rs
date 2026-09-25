@@ -120,6 +120,18 @@ fn bilibili_message(text: &str, what: &str) -> String {
     }
 }
 
+/// 测试里不连 B 站：一连就失败。
+#[cfg(test)]
+pub(crate) struct Offline;
+
+#[cfg(test)]
+#[async_trait]
+impl Bilibili for Offline {
+    async fn connect(&self, _: &UploadStreamer) -> Result<Box<dyn Connection>, Failure> {
+        Err(Failure::Other("测试里不连 B 站".into()))
+    }
+}
+
 /// 真实的 B 站：用上传模板里的账号登录，按全局配置选线路、并发和投稿接口。
 pub struct BiliBackend {
     config: Arc<RwLock<Config>>,

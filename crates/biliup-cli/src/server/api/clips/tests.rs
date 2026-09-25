@@ -19,6 +19,7 @@ use tower_sessions_sqlx_store::SqliteStore;
 struct AppState {
     pool: ConnectionPool,
     clips: Arc<ClipExports>,
+    publisher: Arc<ClipPublisher>,
 }
 
 struct Fixture {
@@ -92,9 +93,15 @@ async fn fixture() -> Fixture {
         SessionManagerLayer::new(session_store).with_secure(false),
     )
     .build();
+    let clips = Arc::new(ClipExports::new(pool.clone(), dir.path().join("clips")));
     let state = AppState {
         pool: pool.clone(),
-        clips: Arc::new(ClipExports::new(pool.clone(), dir.path().join("clips"))),
+        publisher: Arc::new(ClipPublisher::new(
+            pool.clone(),
+            clips.clone(),
+            Arc::new(crate::server::workbench::clips::publish::queue::Offline),
+        )),
+        clips,
     };
     let app = Router::new()
         .route("/v1/sessions/{id}/clips", get(list_clips).post(create_clip))
