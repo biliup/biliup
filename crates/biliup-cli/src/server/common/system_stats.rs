@@ -14,7 +14,7 @@
 //!   同一份流量，全加起来会重复计数，所以只统计物理网卡；一块物理网卡都没有时
 //!   （bridge 网络的容器里只有 veth）退回统计全部非回环网卡。
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::io;
 use std::path::Path;
@@ -48,7 +48,7 @@ const VIRTUAL_NIC_PREFIXES: &[&str] = &[
 ];
 
 /// 一次采样
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Sample {
     /// 采样时刻，Unix 毫秒；严格递增，可直接当 `since` 用
     pub ts: i64,
@@ -61,7 +61,7 @@ pub struct Sample {
 }
 
 /// 内存用量（字节）
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryUsage {
     pub used: u64,
     pub total: u64,
@@ -70,7 +70,7 @@ pub struct MemoryUsage {
 }
 
 /// 录制目录所在文件系统的容量（字节）
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiskUsage {
     /// 录制目录
     pub path: String,
@@ -82,7 +82,7 @@ pub struct DiskUsage {
 }
 
 /// CPU 规格
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CpuInfo {
     /// 逻辑核数
     pub logical: usize,
@@ -91,7 +91,7 @@ pub struct CpuInfo {
 }
 
 /// `GET /v1/system-stats` 的响应
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemStats {
     /// 服务端当前时刻，Unix 毫秒；前端据此判断采样是否已经停了
     pub ts: i64,
@@ -812,6 +812,62 @@ mod tests {
             .await
             .expect("监视器被丢弃后采样任务应退出")
             .unwrap();
+    }
+
+    /// 其他进程拿到的 `GET /v1/system-stats` 响应能原样读回，再序列化逐字节一致
+    #[test]
+    fn stats_survive_a_json_round_trip() {
+        let full = SystemStats {
+            ts: 1_700_000_000_123,
+            interval_ms: 2_000,
+            history_ms: 300_000,
+            cpu: Some(CpuInfo {
+                logical: 8,
+                physical: None,
+            }),
+            memory: Some(MemoryUsage {
+                used: 3 << 30,
+                total: 16 << 30,
+                limited: true,
+            }),
+            disk: Some(DiskUsage {
+                path: "/srv/录播".into(),
+                total: 1 << 40,
+                used: 1 << 39,
+                available: 1 << 38,
+            }),
+            interfaces: vec!["eth0".into(), "wlan0".into()],
+            samples: vec![
+                Sample {
+                    ts: 1_700_000_000_000,
+                    cpu: 12.3,
+                    rx: 1_024,
+                    tx: 0,
+                },
+                Sample {
+                    ts: 1_700_000_002_000,
+                    cpu: 100.0,
+                    rx: u64::MAX,
+                    tx: 7,
+                },
+            ],
+        };
+        let json = serde_json::to_string(&full).unwrap();
+        assert_eq!(
+            json,
+            r#"{"ts":1700000000123,"interval_ms":2000,"history_ms":300000,"cpu":{"logical":8,"physical":null},"memory":{"used":3221225472,"total":17179869184,"limited":true},"disk":{"path":"/srv/录播","total":1099511627776,"used":549755813888,"available":274877906944},"interfaces":["eth0","wlan0"],"samples":[{"ts":1700000000000,"cpu":12.3,"rx":1024,"tx":0},{"ts":1700000002000,"cpu":100.0,"rx":18446744073709551615,"tx":7}]}"#
+        );
+
+        let empty = SystemMonitor::new(SAMPLE_INTERVAL).snapshot(None);
+        for stats in [full, empty] {
+            let json = serde_json::to_string(&stats).unwrap();
+            let parsed: SystemStats = serde_json::from_str(&json).unwrap();
+            assert_eq!(serde_json::to_string(&parsed).unwrap(), json);
+            assert_eq!(parsed.cpu, stats.cpu);
+            assert_eq!(parsed.memory, stats.memory);
+            assert_eq!(parsed.disk, stats.disk);
+            assert_eq!(parsed.samples, stats.samples);
+        }
     }
 
     static HUNG_PROBE_CALLS: AtomicUsize = AtomicUsize::new(0);
