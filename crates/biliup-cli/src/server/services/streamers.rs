@@ -124,6 +124,7 @@ mod tests {
     use crate::server::common::system_stats::SystemMonitor;
     use crate::server::config::Config;
     use crate::server::infrastructure::connection_pool::ConnectionManager;
+    use crate::server::workbench::clips::export::ClipExports;
     use async_trait::async_trait;
     use biliup::downloader::live::{LivePlugin, LiveRequest, LiveResult, LiveStatus};
     use std::sync::{Arc, RwLock};
@@ -175,6 +176,7 @@ mod tests {
             .await;
         let (_layer, log_handle) = reload::Layer::new(EnvFilter::new("info"));
         let services = ServiceRegister {
+            clips: Arc::new(ClipExports::new(pool.clone(), dir.path().join("clips"))),
             pool,
             managers: Arc::new(managers),
             config: Arc::new(RwLock::new(config)),
