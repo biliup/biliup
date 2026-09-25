@@ -33,6 +33,7 @@ const VISIBLE_CONFIG_KEYS: &[&str] = &[
     "douyu_force_hs",
     "douyu_danmaku",
     "douyu_rate",
+    "douyu_codec",
     "douyu_disable_interactive_game",
     "huya_cdn",
     "huya_cdn_fallback",

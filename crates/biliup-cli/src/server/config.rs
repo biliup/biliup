@@ -153,6 +153,12 @@ pub struct Config {
     /// 斗鱼码率
     #[serde(default)]
     pub douyu_rate: Option<u32>,
+    /// 用户 Cookie 中 acf_did 的值
+    #[serde(default, rename = "douyu_deviceId", alias = "douyu_device_id")]
+    pub douyu_device_id: Option<String>,
+    /// 斗鱼视频编码：AVC 或 HEVC
+    #[serde(default)]
+    pub douyu_codec: Option<String>,
     /// 斗鱼互动游戏运行时跳过录制
     #[serde(default)]
     pub douyu_disable_interactive_game: Option<bool>,

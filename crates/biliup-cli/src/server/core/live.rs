@@ -84,6 +84,8 @@ fn live_options(config: &Config) -> LiveOptions {
                 .unwrap_or_else(|| "hw-h5".to_string()),
             force_hs: config.douyu_force_hs.unwrap_or(false),
             rate: config.douyu_rate.unwrap_or(0),
+            device_id: config.douyu_device_id.clone().unwrap_or_default(),
+            codec: config.douyu_codec.clone().unwrap_or_default(),
             disable_interactive_game: config.douyu_disable_interactive_game.unwrap_or(false),
             danmaku: config.douyu_danmaku.unwrap_or(false),
         },
