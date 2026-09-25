@@ -1,14 +1,16 @@
 //! 快速剪：按 [`Plan`] 从各分段读出 `[from, to)`，改写时间戳后接成一个文件，不转码。
 //!
 //! - 文件开头用第一段的头区：FLV 文件头 + 新写的 `onMetaData`（时长、关键帧表）+ 序列头；TS 的
-//!   PAT / PMT；
-//! - 每段从关键帧起：产物时间 = 原始时间戳 − 起始关键帧的时间戳（FLV 为 DTS，TS 为视频 PES 的
-//!   DTS）+ 这一段在产物上的起点；第一段从 0 开始，之后各段紧接上一段（断流缺口不留空），并保证视频时间戳严格递增；
+//!   PAT / PMT；fMP4 的 `ftyp` + `moov`；
+//! - 每段从关键帧起：产物时间 = 原始时间戳 − 起始关键帧的时间戳（FLV 为 DTS，TS 为视频 PES 的 DTS，
+//!   fMP4 为视频轨 `tfdt`）+ 这一段在产物上的起点；第一段从 0 开始，之后各段紧接上一段（断流缺口
+//!   不留空），并保证视频时间戳严格递增；
 //! - 早于起始关键帧的音频丢掉，时间戳不会是负数。
 //!
 //! 写入端是同步的纯函数（输入字节 → 输出字节），读文件、写产物、报进度在 [`write`] 里。
 
 mod flv;
+mod fmp4;
 mod ts;
 
 use super::plan::{Piece, Plan};
@@ -62,17 +64,14 @@ pub(super) trait Cut {
     fn finish(&mut self, total_len: u64, duration_ms: i64) -> Option<(u64, Vec<u8>)>;
 }
 
-fn writer(plan: &Plan) -> io::Result<Box<dyn Cut + Send>> {
+fn writer(plan: &Plan) -> Box<dyn Cut + Send> {
     match plan.container {
         Container::Flv => {
             let keyframes = plan.pieces.iter().map(|p| p.keyframes.len()).sum();
-            Ok(Box::new(flv::FlvCut::new(Some(keyframes))))
+            Box::new(flv::FlvCut::new(Some(keyframes)))
         }
-        Container::Ts => Ok(Box::new(ts::TsCut::default())),
-        other => Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            format!("{other:?} 还不能快速剪"),
-        )),
+        Container::Ts => Box::new(ts::TsCut::default()),
+        Container::Fmp4 => Box::new(fmp4::Fmp4Cut::default()),
     }
 }
 
@@ -97,7 +96,7 @@ async fn write<W: AsyncWrite + Unpin>(
     out: &mut W,
     progress: &mut (dyn FnMut(u64) + Send),
 ) -> io::Result<(Remuxed, Option<(u64, Vec<u8>)>)> {
-    let mut cut = writer(plan)?;
+    let mut cut = writer(plan);
     let mut written = 0u64;
     let mut read_total = 0u64;
     let mut origin_ms = 0i64;

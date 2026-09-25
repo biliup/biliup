@@ -3,7 +3,7 @@ use super::super::tests::{add_segment, flv_session, setup};
 use super::*;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::workbench::dvr::ts::{payload_start, pid_of, pusi, read_ts};
-use crate::server::workbench::index::tests::build_ts;
+use crate::server::workbench::index::tests::{build_fmp4, build_ts};
 use std::collections::HashMap;
 
 async fn plan_of(pool: &ConnectionPool, session: i64, in_ms: i64, out_ms: i64) -> Plan {
@@ -210,4 +210,84 @@ async fn ts_cut_rewrites_pts_from_zero_and_keeps_counters_continuous() {
         .collect();
     assert!(audio.iter().all(|pts| *pts >= 0));
     assert!((done.duration_ms - (video[69] + 3000) / 90).abs() <= 1);
+}
+
+fn boxes(data: &[u8]) -> Vec<([u8; 4], usize, usize)> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at + 8 <= data.len() {
+        let size = u32::from_be_bytes(data[at..at + 4].try_into().unwrap()) as usize;
+        out.push((data[at + 4..at + 8].try_into().unwrap(), at, size));
+        at += size;
+    }
+    assert_eq!(at, data.len());
+    out
+}
+
+/// moof 里 `(mfhd 序号, [(track_id, tfdt)])`。
+fn moof_times(moof: &[u8]) -> (u32, Vec<(u32, u64)>) {
+    let mut seq = 0;
+    let mut times = Vec::new();
+    for (kind, at, size) in boxes(&moof[8..]) {
+        let body = &moof[8 + at + 8..8 + at + size];
+        match &kind {
+            b"mfhd" => seq = u32::from_be_bytes(body[4..8].try_into().unwrap()),
+            b"traf" => {
+                let mut track = 0;
+                let mut tfdt = 0;
+                for (kind, at, size) in boxes(body) {
+                    let inner = &body[at + 8..at + size];
+                    match &kind {
+                        b"tfhd" => track = u32::from_be_bytes(inner[4..8].try_into().unwrap()),
+                        b"tfdt" => {
+                            tfdt = if inner[0] == 1 {
+                                u64::from_be_bytes(inner[4..12].try_into().unwrap())
+                            } else {
+                                u32::from_be_bytes(inner[4..8].try_into().unwrap()) as u64
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                times.push((track, tfdt));
+            }
+            _ => {}
+        }
+    }
+    (seq, times)
+}
+
+#[tokio::test]
+async fn fmp4_cut_copies_init_and_rebases_tfdt_per_track() {
+    let (dir, pool, session) = setup().await;
+    let (bytes, _, _) = build_fmp4(6);
+    for (name, start) in [("a.mp4", 0), ("b.mp4", 6000)] {
+        let path = dir.path().join(name);
+        std::fs::write(&path, &bytes).unwrap();
+        add_segment(&pool, session, &path, "finished", start, Some(start + 5920)).await;
+    }
+    let plan = plan_of(&pool, session, 4500, 8500).await;
+    let (out, _) = cut(&plan, dir.path(), "out.mp4").await;
+    let top = boxes(&out);
+    let kinds: Vec<&[u8; 4]> = top.iter().map(|b| &b.0).collect();
+    assert_eq!((kinds[0], kinds[1]), (b"ftyp", b"moov"));
+    assert!(kinds.iter().all(|k| *k != b"styp"));
+    let moofs: Vec<(u32, Vec<(u32, u64)>)> = top
+        .iter()
+        .filter(|b| &b.0 == b"moof")
+        .map(|b| moof_times(&out[b.1..b.1 + b.2]))
+        .collect();
+    // 第一段 4000..5920 两个分片，第二段 0..4000 四个分片
+    assert_eq!(moofs.len(), 2 + 4);
+    assert_eq!(
+        moofs.iter().map(|m| m.0).collect::<Vec<_>>(),
+        vec![1, 2, 3, 4, 5, 6]
+    );
+    let video: Vec<u64> = moofs.iter().map(|m| m.1[1].1).collect();
+    let audio: Vec<u64> = moofs.iter().map(|m| m.1[0].1).collect();
+    assert_eq!(moofs[0].1[1].0, 2);
+    // 视频 tfdt（1000/s）：起始关键帧的解码时间为 0，第二段紧接第一段最后一帧
+    assert_eq!(video, vec![0, 1000, 2000, 3000, 4000, 5000]);
+    // 音频（48000/s）跟着视频换算，同一个时钟
+    assert_eq!(audio, vec![0, 48_000, 96_000, 144_000, 192_000, 240_000]);
 }
