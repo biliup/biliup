@@ -215,9 +215,8 @@ pub async fn update(
         .as_ref()
         .map(Marker::from_row)
         .transpose()?;
-    let range_changed = changes.at_ms.is_some()
-        || changes.lookback_ms.is_some()
-        || changes.lookahead_ms.is_some();
+    let range_changed =
+        changes.at_ms.is_some() || changes.lookback_ms.is_some() || changes.lookahead_ms.is_some();
     if let Some(marker) = &marker
         && range_changed
     {
@@ -401,7 +400,11 @@ mod tests {
             .unwrap();
         let m = insert(&pool, s, &new_marker(20_000)).await.unwrap();
         let owner = format!("marker:{}", m.id);
-        assert_eq!(pinned(&pool).await, [(owner.clone(), 0, 20_000)], "前 60 s 截到 0");
+        assert_eq!(
+            pinned(&pool).await,
+            [(owner.clone(), 0, 20_000)],
+            "前 60 s 截到 0"
+        );
         assert_eq!(pin_count(&pool, segment).await, 1);
 
         let changes = MarkerChanges {
@@ -412,7 +415,10 @@ mod tests {
         update(&pool, s, m.id, &changes).await.unwrap().unwrap();
         assert_eq!(pinned(&pool).await, [(owner.clone(), 40_000, 105_000)]);
         assert!(
-            update(&pool, s + 1, m.id, &changes).await.unwrap().is_none(),
+            update(&pool, s + 1, m.id, &changes)
+                .await
+                .unwrap()
+                .is_none(),
             "改不到别的场次的标记，引用也不动"
         );
         assert_eq!(pinned(&pool).await, [(owner, 40_000, 105_000)]);
