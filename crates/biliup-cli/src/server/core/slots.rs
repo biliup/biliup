@@ -46,6 +46,11 @@ impl Slots {
         self.state.lock().unwrap().capacity
     }
 
+    /// 当前已占用的槽位数。调小容量后可能暂时大于容量
+    pub fn occupied(&self) -> usize {
+        self.state.lock().unwrap().occupied
+    }
+
     /// 有空闲槽位就占用一个，没有则立即返回 `None`
     pub fn try_acquire(self: &Arc<Self>) -> Option<Slot> {
         let mut state = self.state.lock().unwrap();
@@ -92,19 +97,16 @@ mod tests {
     use std::sync::Arc;
     use std::task::Poll;
 
-    fn occupied(slots: &Slots) -> usize {
-        slots.state.lock().unwrap().occupied
-    }
-
     #[test]
     fn slots_are_bounded_by_capacity_and_freed_on_drop() {
         let slots = Arc::new(Slots::new(2));
         let first = slots.try_acquire().unwrap();
         let _second = slots.try_acquire().unwrap();
         assert!(slots.try_acquire().is_none());
+        assert_eq!(slots.occupied(), 2);
 
         drop(first);
-        assert_eq!(occupied(&slots), 1);
+        assert_eq!(slots.occupied(), 1);
         assert!(slots.try_acquire().is_some());
     }
 
@@ -128,7 +130,7 @@ mod tests {
         let held: Vec<_> = (0..3).map(|_| slots.try_acquire().unwrap()).collect();
 
         slots.resize(1);
-        assert_eq!(occupied(&slots), 3);
+        assert_eq!(slots.occupied(), 3);
         assert!(slots.try_acquire().is_none());
 
         let mut held = held.into_iter();
@@ -158,7 +160,7 @@ mod tests {
         let Poll::Ready(_slot) = futures::poll!(waiting.as_mut()) else {
             panic!("归还后等待者应拿到槽位");
         };
-        assert_eq!(occupied(&slots), 1);
+        assert_eq!(slots.occupied(), 1);
     }
 
     #[tokio::test]
