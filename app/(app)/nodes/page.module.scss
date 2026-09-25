@@ -1,0 +1,335 @@
+/* 节点页：卡片与控制台系统状态卡片同一套底色 / 边框 / 阴影 */
+
+.center {
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.notice {
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(var(--semi-orange-4), 0.12);
+  color: rgb(var(--semi-orange-5));
+  font-size: 13px;
+  border: 1px solid rgba(var(--semi-orange-4), 0.32);
+  overflow-wrap: anywhere;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr));
+  gap: 16px;
+}
+
+.node {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px 16px 10px;
+  background: var(--semi-color-bg-1);
+  border: 1px solid var(--semi-color-fill-2);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(var(--semi-grey-9), 0.04), 0 2px 6px rgba(var(--semi-grey-9), 0.03);
+}
+
+.offline .metrics,
+.offline .nodeStats {
+  opacity: 0.6;
+}
+
+.nodeHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--semi-color-text-3);
+}
+
+.dotOn {
+  background: var(--semi-color-success);
+  box-shadow: 0 0 0 3px rgba(var(--semi-green-5), 0.18);
+}
+
+.nodeName {
+  min-width: 0;
+  font-size: 15px;
+}
+
+.nodeVersion {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.nodeStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  font-size: 12.5px;
+  color: var(--semi-color-text-2);
+}
+
+.pool {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.pool b {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--semi-color-text-0);
+  font-variant-numeric: tabular-nums;
+}
+
+.pool b.recording {
+  color: var(--semi-color-danger);
+}
+
+.pool b.poolFull {
+  color: var(--semi-color-warning);
+}
+
+.poolOf {
+  font-variant-numeric: tabular-nums;
+}
+
+.stale {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--semi-color-fill-0);
+}
+
+.metricHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.metricTitle {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--semi-color-text-1);
+}
+
+.metricValue {
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--semi-color-text-0);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.metricBody {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.metricFoot {
+  font-size: 11.5px;
+  color: var(--semi-color-text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bar {
+  width: 100%;
+}
+
+.placeholder {
+  color: var(--semi-color-text-3);
+  user-select: none;
+}
+
+.net {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 8px;
+  white-space: nowrap;
+}
+
+.rx {
+  color: rgb(var(--semi-cyan-5));
+}
+
+.tx {
+  color: rgb(var(--semi-violet-5));
+}
+
+.nodeFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  margin: 0 -8px 0 0;
+}
+
+.nodeMeta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+}
+
+.endpoint {
+  font-family: var(--semi-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--semi-color-text-3);
+}
+
+.tokens {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tokensHead {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--semi-color-text-1);
+  margin-bottom: 2px;
+}
+
+.tokenRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+/* 等宽数字，让各行的「作废」对齐 */
+.tokenId {
+  font-family: var(--semi-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.tokenTime {
+  font-variant-numeric: tabular-nums;
+}
+
+.dialogCenter {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dialogBody {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-bottom: 8px;
+}
+
+.dialogBody code {
+  font-family: var(--semi-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.dialogFoot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.expiry {
+  font-size: 13px;
+  color: var(--semi-color-text-1);
+}
+
+.expiry b {
+  font-variant-numeric: tabular-nums;
+}
+
+.expired {
+  color: var(--semi-color-danger);
+}
+
+.copyBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.copyHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.copyLabel {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--semi-color-text-1);
+}
+
+.code {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--semi-color-fill-0);
+  border: 1px solid var(--semi-color-fill-1);
+  font-family: var(--semi-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--semi-color-text-0);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 120px;
+  overflow: auto;
+  user-select: all;
+}
+
+.relays {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+}
