@@ -18,6 +18,7 @@ use crate::server::api::session_retention::patch_session;
 use crate::server::api::sessions::{
     get_session, get_session_keyframes, get_session_media, list_sessions,
 };
+use crate::server::api::system_stats::get_system_stats;
 use crate::server::infrastructure::service_register::ServiceRegister;
 use axum::Router;
 use axum::body::Body;
@@ -62,6 +63,8 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         .route("/v1/sessions/{id}", get(get_session).patch(patch_session))
         .route("/v1/sessions/{id}/keyframes", get(get_session_keyframes))
         .route("/v1/sessions/{id}/media", get(get_session_media))
+        // 控制台首页的系统状态（CPU / 内存 / 录制目录磁盘 / 网速）；`?since=` 只取增量
+        .route("/v1/system-stats", get(get_system_stats))
         // 配置管理路由
         .route(
             "/v1/configuration",
