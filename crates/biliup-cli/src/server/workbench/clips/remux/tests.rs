@@ -137,6 +137,18 @@ async fn flv_cut_starts_on_a_keyframe_at_zero_and_splices_across_gaps() {
     assert_eq!(amf_number(&bytes, "audiocodecid"), 10.0);
 }
 
+#[tokio::test]
+async fn piped_flv_has_no_metadata_to_backfill() {
+    let (_dir, pool, session, _) = flv_session().await;
+    let plan = plan_of(&pool, session, 1000, 2000).await;
+    let mut out = Vec::new();
+    let done = to_pipe(&plan, &mut out, &mut |_| {}).await.unwrap();
+    assert_eq!(done.bytes as usize, out.len());
+    let all = tags(&out);
+    assert_eq!((all[0].tag_type, all[0].ts), (9, 0));
+    assert!(all.iter().all(|t| t.tag_type != 18));
+}
+
 struct Packet {
     pid: u16,
     cc: u8,

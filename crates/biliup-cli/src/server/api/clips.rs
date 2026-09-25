@@ -387,9 +387,11 @@ pub async fn export_clip(
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DownloadFormat {
-    /// 产物本身（快速剪是源容器）。
+    /// 产物本身（快速剪是源容器，精确剪是 MP4）。
     #[default]
     Source,
+    /// MP4：产物不是 MP4 时用 ffmpeg 转封装（不转码）。
+    Mp4,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -419,9 +421,10 @@ fn download_name(clip: &Clip, extension: &str) -> String {
     }
 }
 
-/// `GET /v1/clips/{cid}/download?format=source`
+/// `GET /v1/clips/{cid}/download?format=source|mp4`
 pub async fn download_clip(
     State(pool): State<ConnectionPool>,
+    State(exports): State<Arc<ClipExports>>,
     Path(cid): Path<i64>,
     Query(query): Query<DownloadQuery>,
     request: Request<Body>,
@@ -437,6 +440,10 @@ pub async fn download_clip(
                 std::path::PathBuf::from(path)
             }
             _ => return conflict(DownloadError::NotReady.to_string()),
+        },
+        DownloadFormat::Mp4 => match exports.mp4(&clip).await {
+            Ok(path) => path,
+            Err(e) => return conflict(e.to_string()),
         },
     };
     if !tokio::fs::try_exists(&path).await.unwrap_or(false) {

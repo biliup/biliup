@@ -64,11 +64,11 @@ pub(super) trait Cut {
     fn finish(&mut self, total_len: u64, duration_ms: i64) -> Option<(u64, Vec<u8>)>;
 }
 
-fn writer(plan: &Plan) -> Box<dyn Cut + Send> {
+fn writer(plan: &Plan, metadata: bool) -> Box<dyn Cut + Send> {
     match plan.container {
         Container::Flv => {
             let keyframes = plan.pieces.iter().map(|p| p.keyframes.len()).sum();
-            Box::new(flv::FlvCut::new(Some(keyframes)))
+            Box::new(flv::FlvCut::new(metadata.then_some(keyframes)))
         }
         Container::Ts => Box::new(ts::TsCut::default()),
         Container::Fmp4 => Box::new(fmp4::Fmp4Cut::default()),
@@ -83,6 +83,15 @@ pub fn extension(container: Container) -> &'static str {
     }
 }
 
+/// ffmpeg `-f` 的输入格式名。
+pub fn ffmpeg_format(container: Container) -> &'static str {
+    match container {
+        Container::Flv => "flv",
+        Container::Ts => "mpegts",
+        Container::Fmp4 => "mp4",
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Remuxed {
     pub bytes: u64,
@@ -91,12 +100,14 @@ pub struct Remuxed {
 }
 
 /// 按 `plan` 把各段接起来写进 `out`；`progress` 收到已读的源字节数。
+/// 写到管道（精确剪喂给 ffmpeg）时 `metadata = false`，不写要回填的 FLV `onMetaData`。
 async fn write<W: AsyncWrite + Unpin>(
     plan: &Plan,
     out: &mut W,
+    metadata: bool,
     progress: &mut (dyn FnMut(u64) + Send),
 ) -> io::Result<(Remuxed, Option<(u64, Vec<u8>)>)> {
-    let mut cut = writer(plan);
+    let mut cut = writer(plan, metadata);
     let mut written = 0u64;
     let mut read_total = 0u64;
     let mut origin_ms = 0i64;
@@ -167,13 +178,22 @@ pub async fn to_file(
     progress: &mut (dyn FnMut(u64) + Send),
 ) -> io::Result<Remuxed> {
     let mut file = File::create(path).await?;
-    let (done, patch) = write(plan, &mut file, progress).await?;
+    let (done, patch) = write(plan, &mut file, true, progress).await?;
     if let Some((offset, bytes)) = patch {
         file.seek(SeekFrom::Start(offset)).await?;
         file.write_all(&bytes).await?;
     }
     file.sync_all().await?;
     Ok(done)
+}
+
+/// 写到管道（精确剪的 ffmpeg 标准输入）。
+pub async fn to_pipe<W: AsyncWrite + Unpin>(
+    plan: &Plan,
+    out: &mut W,
+    progress: &mut (dyn FnMut(u64) + Send),
+) -> io::Result<Remuxed> {
+    Ok(write(plan, out, false, progress).await?.0)
 }
 
 #[cfg(test)]

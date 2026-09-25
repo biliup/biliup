@@ -4,7 +4,7 @@
 //!   （[`retention::pin`]），改范围时跟着改，删掉切片（或 P9 发布之后，[`release`]）时撤销；
 //! - [`plan`]：把场次时间上的入点、出点换算成「从哪些分段的哪个字节读到哪个字节」；
 //! - [`remux`]：快速剪，进程内按关键帧切、不转码，重写时间戳后接成一个文件；
-//! - [`export`]：后台导出任务、进度、失败原因。
+//! - [`export`]：后台导出任务（快速剪 / 精确剪）、进度、失败原因，以及下载用的 MP4 转封装。
 
 pub mod export;
 pub mod plan;
@@ -27,18 +27,22 @@ pub const MAX_CLIPS_PER_SESSION: i64 = 1_000;
 pub enum Mode {
     /// 按关键帧切，不转码。
     Quick,
+    /// 按入点、出点转码。
+    Precise,
 }
 
 impl Mode {
     pub fn as_str(self) -> &'static str {
         match self {
             Mode::Quick => "quick",
+            Mode::Precise => "precise",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "quick" => Some(Mode::Quick),
+            "precise" => Some(Mode::Precise),
             _ => None,
         }
     }
