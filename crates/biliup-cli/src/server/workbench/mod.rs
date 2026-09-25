@@ -6,7 +6,7 @@
 //! - [`live`]：本进程正在录的场次，以及场次时间与墙钟的换算；
 //! - [`markers`]：看直播时打的标记（`markers`）；
 //! - [`locate`] / [`session_keyframes`]：按场次时间找到可以落刀 / 起播的分段与字节偏移；
-//! - [`recover`]：启动时收尾上次异常退出留下的 `recording` 分段与没结束的场次；
+//! - [`recover`]：启动时收尾上次异常退出留下的 `recording` 分段与没结束的场次，给没登记引用的标记补登；
 //! - [`retention`]：被引用就推迟删除、每分钟一次的清理任务、磁盘水位兜底。
 
 pub mod dvr;
@@ -228,6 +228,13 @@ pub async fn recover(pool: &ConnectionPool) -> Result<()> {
         info!(
             segments = leftovers.len(),
             sessions, "切片工作台：已收尾上次异常退出留下的分段与场次"
+        );
+    }
+    let repinned = markers::pin_unpinned(pool).await?;
+    if repinned > 0 {
+        info!(
+            markers = repinned,
+            "切片工作台：已给之前打的标记补登对分段的引用"
         );
     }
     Ok(())
