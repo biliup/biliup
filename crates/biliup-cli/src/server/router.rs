@@ -24,7 +24,7 @@ use axum::body::Body;
 use axum::http::Request;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, patch, post, put};
+use axum::routing::{delete, get, post, put};
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
