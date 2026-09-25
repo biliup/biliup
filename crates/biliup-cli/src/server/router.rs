@@ -14,6 +14,7 @@ use crate::server::api::live_preview::{
     get_live_danmaku, get_live_danmaku_multi, get_live_stream, get_live_url,
 };
 use crate::server::api::live_rates::{get_live_rates, ws_live_rates};
+use crate::server::api::system_stats::get_system_stats;
 use crate::server::infrastructure::service_register::ServiceRegister;
 use axum::Router;
 use axum::body::Body;
@@ -52,6 +53,8 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         // 不要为此调快 /v1/streamers
         .route("/v1/ws/live-rates", get(ws_live_rates))
         .route("/v1/live-rates", get(get_live_rates))
+        // 控制台首页的系统状态（CPU / 内存 / 录制目录磁盘 / 网速）；`?since=` 只取增量
+        .route("/v1/system-stats", get(get_system_stats))
         // 配置管理路由
         .route(
             "/v1/configuration",

@@ -596,7 +596,7 @@ fn retry_delay(retry_count: u32, base_delay: Duration, max_delay: Duration) -> D
 
 /// 启动完整下载流程。
 ///
-/// 只能由 `Monitor` 在取得下载池许可后调用；调用方必须把许可移动到同一个任务中，
+/// 只能由 `Monitor` 在取得下载池槽位后调用；调用方必须把槽位移动到同一个任务中，
 /// 并持有到本函数返回，保证 `pool1_size` 是下载并发的唯一限制。
 pub async fn start_download_workflow(
     downloader: Arc<dyn LivePlugin + Send + Sync>,

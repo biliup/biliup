@@ -16,6 +16,8 @@ pub mod live_rates;
 pub mod redact;
 /// 单页应用静态文件处理
 pub mod spa;
+/// 控制台首页的系统状态（CPU / 内存 / 磁盘 / 网速）
+pub mod system_stats;
 /// Web 用户管理与 /v1/me
 pub mod web_users;
 pub mod ws;

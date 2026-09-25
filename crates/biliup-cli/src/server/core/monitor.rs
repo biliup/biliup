@@ -2,6 +2,7 @@ use crate::server::common::download::start_download_workflow;
 use crate::server::common::recording_policy;
 use crate::server::common::upload::UploaderMessage;
 use crate::server::core::live::{batch_check_request, live_request, streamer_info};
+use crate::server::core::slots::{Slot, Slots};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
 use crate::server::infrastructure::models::StreamerInfo;
@@ -13,7 +14,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot};
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, trace, warn};
 
@@ -50,10 +51,11 @@ pub struct Monitor {
     pool: ConnectionPool,
     /// 上传消息发送器，下载任务产生分段后会通过它交给上传流程。
     uploader: Sender<UploaderMessage>,
-    /// 下载池许可。监控循环必须先拿到许可，才允许检测开播并启动录制。
+    /// 下载池槽位。监控循环必须先拿到槽位，才允许检测开播并启动录制。
     /// 这样 “开播了/成功开始录制” 只会出现在真正拥有下载并发槽位时。
-    /// 许可由下载任务持有到录制结束，pool1_size 的唯一限流语义在这里表达。
-    download_slots: Arc<Semaphore>,
+    /// 槽位由下载任务持有到录制结束，pool1_size 的唯一限流语义在这里表达；
+    /// 容量随配置保存即时调整（`DownloadManager::resize_pools`）。
+    download_slots: Arc<Slots>,
     monitors: RwLock<HashMap<String, JoinHandle<()>>>,
     /// 各批量检测平台的开播缓存（platform_name -> 最近一次批量结果）。
     batch_live: RwLock<HashMap<String, BatchLiveCache>>,
@@ -81,7 +83,7 @@ impl Monitor {
     /// * `name` - 平台名称
     pub fn new(
         uploader: Sender<UploaderMessage>,
-        download_slots: Arc<Semaphore>,
+        download_slots: Arc<Slots>,
         pool: ConnectionPool,
     ) -> Self {
         // 创建消息通道
@@ -147,13 +149,16 @@ impl Monitor {
                     BatchVerdict::Live | BatchVerdict::Fallback => {}
                 }
             }
-            let Some(download_permit) = self.try_acquire_download_slot(&room).await else {
+            let Some(download_slot) = self.try_acquire_download_slot(&room).await else {
                 self.wake_waker(room.id()).await;
                 tokio::time::sleep(Duration::from_secs(interval)).await;
                 continue;
             };
             let request = live_request(&room);
             // 检查直播状态
+            // 没有开始录制的分支都要先归还槽位，不能带着它睡过检测间隔：各平台的监控循环
+            // 共用下载池，只剩一个空闲槽位时会被一个平台的循环一直占着，其他平台的房间
+            // 始终拿不到槽位去检测。
             match plugin.check_stream(request).await {
                 Ok(LiveStatus::Live { stream }) => {
                     // 依赖房间标题的策略要拿到流信息才能判定。命中就按「本轮不录」处理：
@@ -161,6 +166,7 @@ impl Monitor {
                     if let Some(rejection) =
                         recording_policy::reject_before_record(room.get_streamer(), &stream.title)
                     {
+                        drop(download_slot);
                         room.set_rejection(Some(rejection.clone()));
                         self.wake_waker(room.id()).await;
                         info!(url = url, title = stream.title, reason = %rejection, "开播但不录制");
@@ -192,22 +198,24 @@ impl Monitor {
                     let uploader = self.uploader.clone();
                     let rooms_handle = Arc::clone(self);
 
-                    // 只能在已经拿到下载池许可后启动录制。许可移动到任务内并持有到流程结束，
+                    // 只能在已经拿到下载池槽位后启动录制。槽位移动到任务内并持有到流程结束，
                     // 因此 pool1_size 只在这里表达，不再通过下载 Actor 池或消息队列重复限流。
                     tokio::spawn(async move {
-                        let _download_permit = download_permit;
+                        let _download_slot = download_slot;
                         start_download_workflow(downloader, context, uploader, rooms_handle).await;
                     });
 
                     info!("成功开始录制 {}", url);
                 }
                 Ok(LiveStatus::Offline) => {
+                    drop(download_slot);
                     // 探测结果推翻了上一轮的策略判定，清掉以免界面停在旧原因上
                     room.set_rejection(None);
                     self.wake_waker(room.id()).await;
                     debug!(url = room.get_streamer().url, "未开播")
                 }
                 Err(e) => {
+                    drop(download_slot);
                     room.set_rejection(None);
                     self.wake_waker(room.id()).await;
                     error!(e=?e, ctx=room.get_streamer().url,"检查直播间出错")
@@ -219,17 +227,15 @@ impl Monitor {
         info!("exit -> [{platform_name}]")
     }
 
-    async fn try_acquire_download_slot(&self, room: &Arc<Worker>) -> Option<OwnedSemaphorePermit> {
-        match self.download_slots.clone().try_acquire_owned() {
-            Ok(permit) => Some(permit),
-            Err(_) => {
-                debug!(
-                    url = room.get_streamer().url,
-                    "download pool is full, skip live check"
-                );
-                None
-            }
+    async fn try_acquire_download_slot(&self, room: &Arc<Worker>) -> Option<Slot> {
+        let slot = self.download_slots.try_acquire();
+        if slot.is_none() {
+            debug!(
+                url = room.get_streamer().url,
+                "download pool is full, skip live check"
+            );
         }
+        slot
     }
 
     /// 用批量检测结果判定单个房间是否开播。
@@ -769,4 +775,100 @@ impl RoomsActor {
 
 fn reuse_vec_arc<'a, T: 'a, U: Iterator<Item = &'a Arc<T>>>(v: &mut U) -> Vec<Arc<T>> {
     v.into_iter().cloned().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Monitor;
+    use crate::server::config::Config;
+    use crate::server::core::slots::Slots;
+    use crate::server::infrastructure::connection_pool::ConnectionManager;
+    use crate::server::infrastructure::context::Worker;
+    use crate::server::infrastructure::models::live_streamer::LiveStreamer;
+    use async_trait::async_trait;
+    use biliup::downloader::live::{LivePlugin, LiveRequest, LiveResult, LiveStatus};
+    use std::collections::HashSet;
+    use std::sync::{Arc, RwLock};
+    use std::time::Duration;
+    use tokio::sync::mpsc;
+
+    /// 始终未开播的平台，每次检测都把房间地址报给测试
+    struct OfflinePlatform {
+        name: &'static str,
+        probed: mpsc::UnboundedSender<String>,
+    }
+
+    #[async_trait]
+    impl LivePlugin for OfflinePlatform {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+
+        fn matches(&self, url: &str) -> bool {
+            url.starts_with(&format!("https://{}.example/", self.name))
+        }
+
+        async fn check_stream(&self, request: LiveRequest) -> LiveResult<LiveStatus> {
+            let _ = self.probed.send(request.url);
+            Ok(LiveStatus::Offline)
+        }
+    }
+
+    fn worker(id: i64, url: &str) -> Arc<Worker> {
+        let streamer = LiveStreamer {
+            id,
+            url: url.to_string(),
+            remark: url.to_string(),
+            filename_prefix: None,
+            time_range: None,
+            upload_streamers_id: None,
+            format: None,
+            override_cfg: None,
+            preprocessor: None,
+            segment_processor: None,
+            downloaded_processor: None,
+            postprocessor: None,
+            opt_args: None,
+            excluded_keywords: None,
+        };
+        Arc::new(Worker::new(
+            streamer,
+            None,
+            Arc::new(RwLock::new(Config::default())),
+            Default::default(),
+        ))
+    }
+
+    /// 未开播的检测结束就归还下载池槽位，不带着它睡过检测间隔（默认 30 s）：
+    /// 只剩一个空闲槽位时，每个平台的监控循环都还能轮到检测
+    #[tokio::test]
+    async fn an_offline_probe_returns_the_download_slot_before_sleeping() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let (uploader, _) = async_channel::bounded(1);
+        let monitor = Arc::new(Monitor::new(uploader, Arc::new(Slots::new(1)), pool));
+        let (probed_tx, mut probed) = mpsc::unbounded_channel();
+        for name in ["a", "b"] {
+            monitor
+                .add_plugin(Arc::new(OfflinePlatform {
+                    name,
+                    probed: probed_tx.clone(),
+                }))
+                .await;
+        }
+        monitor.add(worker(1, "https://a.example/1")).await.unwrap();
+        monitor.add(worker(2, "https://b.example/2")).await.unwrap();
+
+        let mut seen = HashSet::new();
+        while seen.len() < 2 {
+            let url = tokio::time::timeout(Duration::from_secs(5), probed.recv())
+                .await
+                .expect("两个平台都应在一个检测间隔内轮到检测")
+                .unwrap();
+            seen.insert(url);
+        }
+    }
 }

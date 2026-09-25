@@ -278,6 +278,7 @@ pub async fn get_configuration(
 pub async fn put_configuration(
     State(config): State<Arc<RwLock<Config>>>,
     State(pool): State<ConnectionPool>,
+    State(managers): State<Arc<DownloadManager>>,
     State(log_handle): State<LogHandle>,
     Json(json_data): Json<Config>,
 ) -> Result<Json<Config>, Response> {
@@ -366,6 +367,8 @@ pub async fn put_configuration(
         .validate_segment_limits()
         .map_err(report_to_response)?;
     crate::tools::set_configured_ffmpeg(saved_config.ffmpeg_path.as_deref());
+    // 下载池 / 上传池的容量不是每次从配置里读的，要在这里同步过去才能不重启就生效
+    managers.resize_pools(saved_config.pool1_size, saved_config.pool2_size);
     *config.write().unwrap() = saved_config;
     let guard = config.read().unwrap();
     if let Some(loggers_level) = &guard.loggers_level {
@@ -842,8 +845,8 @@ pub async fn get_status(
     Ok(Json(serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
         "rooms": sw,
-        "download_semaphore": managers.download_semaphore,
-        "update_semaphore": managers.u_kills.len(),
+        "download_semaphore": managers.download_pool_size(),
+        "update_semaphore": managers.upload_pool_size(),
         "config": config,
     })))
 }
@@ -1121,5 +1124,49 @@ mod recording_policy_status_tests {
             rejection_status(&streamer, Some(&worker)),
             Some("OutOfSchedule")
         );
+    }
+}
+
+#[cfg(test)]
+mod configuration_tests {
+    use super::*;
+    use crate::server::infrastructure::connection_pool::ConnectionManager;
+    use tracing_subscriber::reload;
+
+    /// Web 界面保存配置后，下载池 / 上传池容量立即换成新值，不需要重启
+    #[tokio::test]
+    async fn saving_the_configuration_resizes_the_pools_immediately() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let config = Arc::new(RwLock::new(Config::default()));
+        let managers = Arc::new(DownloadManager::new(
+            config.read().unwrap().pool1_size,
+            config.read().unwrap().pool2_size,
+            pool.clone(),
+        ));
+        let (_layer, log_handle) = reload::Layer::new(EnvFilter::new("info"));
+
+        let edited = Config {
+            pool1_size: 8,
+            pool2_size: 1,
+            ..Config::default()
+        };
+        let Json(saved) = put_configuration(
+            State(config.clone()),
+            State(pool),
+            State(managers.clone()),
+            State(log_handle),
+            Json(edited),
+        )
+        .await
+        .expect("保存配置应成功");
+
+        assert_eq!(saved.pool1_size, 8);
+        assert_eq!(config.read().unwrap().pool2_size, 1);
+        assert_eq!(managers.download_pool_size(), 8);
+        assert_eq!(managers.upload_pool_size(), 1);
     }
 }
