@@ -1,6 +1,9 @@
 //! 切片（`clips`）：在场次时间轴上选出的一段，导出成文件。
 //!
-//! 这里是表的读写。
+//! - 这里是表的读写；
+//! - [`plan`]：把场次时间上的入点、出点换算成「从哪些分段的哪个字节读到哪个字节」。
+
+pub mod plan;
 
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use serde::{Deserialize, Serialize};
@@ -275,3 +278,6 @@ pub async fn delete(pool: &ConnectionPool, session_id: i64, id: i64) -> sqlx::Re
         .map(Clip::from_row)
         .transpose()
 }
+
+#[cfg(test)]
+mod tests;
