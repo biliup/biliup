@@ -13,10 +13,12 @@
 //! [`GAP_TOLERANCE_MS`] 以上才算断流，时间轴跳过这段空白并记进 `gap_before_ms`；否则紧接上一段。
 //! 只比相邻两段的墙钟，容器时长与墙钟的偏差不会跨段累积成假断流。
 
+use super::live::{self, LiveGuard};
 use super::store::{self, FinishedSegment, SegmentState};
 use super::{index, segment_path};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use biliup::downloader::index_tap::IndexTap;
+use biliup::downloader::util::ByteCounter;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -40,6 +42,8 @@ pub struct SessionTarget {
     pub session_id: i64,
     /// `livestreamers.id`
     pub streamer_id: i64,
+    /// 下载任务的写盘计数器，DVR 回看跟随正在写的分段时靠它唤醒；没有写盘计数的下载器为 `None`。
+    pub bytes: Option<ByteCounter>,
 }
 
 /// 关段时下载器能给的信息。
@@ -181,6 +185,8 @@ struct Writer {
     /// 时间轴 0 点；这一场还没有分段时为 `None`。
     started_at: Option<i64>,
     last_end_ms: i64,
+    /// 场次登记为「正在录」，DVR 读取方据此等通知；随写入任务结束一起注销。
+    live: Option<LiveGuard>,
     open: Option<OpenSegment>,
     run_started_at: i64,
     run_has_segment: bool,
@@ -198,6 +204,7 @@ impl Writer {
             index,
             started_at: None,
             last_end_ms: 0,
+            live: None,
             open: None,
             run_started_at: now_ms(),
             run_has_segment: false,
@@ -219,6 +226,9 @@ impl Writer {
                 self.started_at = start.started_at;
                 self.last_end_ms = start.last_end_ms;
                 self.resumed_after = start.resumed_after;
+                if self.started_at.is_some() {
+                    self.register_live();
+                }
             }
             Err(e) => warn!(error = %e, "切片工作台读取场次失败，不影响录制"),
         }
@@ -237,10 +247,14 @@ impl Writer {
             if let Err(e) = result {
                 warn!(error = %e, "切片工作台写场次 / 分段失败，不影响录制");
             }
+            if let Some(live) = &self.live {
+                live.changed();
+            }
         }
         if let Err(e) = self.on_finish().await {
             warn!(error = %e, "切片工作台收尾场次失败");
         }
+        self.live = None;
     }
 
     async fn on_run_started(&mut self, at: i64) -> sqlx::Result<()> {
@@ -411,7 +425,20 @@ impl Writer {
             gap,
         )
         .await?;
+        self.register_live();
         Ok((id, start_ms))
+    }
+
+    /// 场次有了时间轴（第一个分段已入库，或断流合并接上的一场）才登记为「正在录」，
+    /// 这样对外给出的场次 id 一定能查到详情、能回看。
+    fn register_live(&mut self) {
+        if self.live.is_none() {
+            self.live = Some(live::register(
+                self.target.session_id,
+                self.target.streamer_id,
+                self.target.bytes.clone(),
+            ));
+        }
     }
 
     /// 收尾没等到关段事件的分段（下载器出错退出、进程被停止）：按盘上的文件补齐；

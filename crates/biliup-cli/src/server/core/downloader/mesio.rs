@@ -342,9 +342,10 @@ fn warn_on_suffix_mismatch(configured: &str, actual: &str) {
     }
 }
 
-/// 输出目录是 `.` 时 writer 给出 `./x.flv`；开段、关段都去掉前缀，与 stream-gears 给出的路径同一形式，
-/// 弹幕 XML、文件列表、场次分段都按这个路径命名和记录。
-fn segment_path(path: &std::path::Path) -> &std::path::Path {
+/// 输出目录是 `.` 时 writer 给出 `./x.flv`；去掉前缀，与 stream-gears 给出的路径同一形式，
+/// 弹幕 XML、文件列表都按这个路径命名和记录。开段、关段和流式关键帧索引必须同一形式，
+/// 切片工作台按路径配对分段、按路径查边写边建的索引。
+fn reported_path(path: &std::path::Path) -> &std::path::Path {
     path.strip_prefix(".").unwrap_or(path)
 }
 
@@ -352,7 +353,7 @@ fn segment_start_hook(
     seg_tx: UnboundedSender<WriterEvent>,
 ) -> impl Fn(&std::path::Path, u32) + Send + Sync + 'static {
     move |path, _index| {
-        let _ = seg_tx.send(WriterEvent::Opened(segment_path(path).to_path_buf()));
+        let _ = seg_tx.send(WriterEvent::Opened(reported_path(path).to_path_buf()));
     }
 }
 
@@ -363,7 +364,7 @@ fn segment_complete_hook(
 + Sync
 + 'static {
     move |path, index, duration_secs, size_bytes, reason| {
-        let path = segment_path(path);
+        let path = reported_path(path);
         info!(
             path = %path.display(),
             index,

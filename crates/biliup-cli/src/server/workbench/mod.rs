@@ -7,7 +7,9 @@
 //! - [`recover`]：启动时收尾上次异常退出留下的 `recording` 分段与没结束的场次；
 //! - [`retention`]：被引用就推迟删除、每分钟一次的清理任务、磁盘水位兜底。
 
+pub mod dvr;
 pub mod index;
+pub mod live;
 pub mod recorder;
 pub mod retention;
 pub mod store;
@@ -73,7 +75,7 @@ fn readable(segment: &SegmentRow) -> bool {
 
 /// 录制中、正由索引任务边写边建的分段直接读它落盘的缓存（最多落后几秒），不扫盘；
 /// 其余的按需续扫。
-async fn segment_index(segment: &SegmentRow) -> io::Result<index::KeyframeIndex> {
+pub(crate) async fn segment_index(segment: &SegmentRow) -> io::Result<index::KeyframeIndex> {
     let path = PathBuf::from(&segment.path);
     let finished = segment.state != SegmentState::Recording;
     tokio::task::spawn_blocking(move || {

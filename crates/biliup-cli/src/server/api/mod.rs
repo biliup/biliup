@@ -16,6 +16,7 @@ pub mod live_rates;
 pub mod redact;
 /// 「保留这场」：改场次的保留期
 pub mod session_retention;
+pub mod sessions;
 /// 单页应用静态文件处理
 pub mod spa;
 /// Web 用户管理与 /v1/me

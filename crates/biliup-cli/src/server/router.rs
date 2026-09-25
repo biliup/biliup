@@ -15,13 +15,16 @@ use crate::server::api::live_preview::{
 };
 use crate::server::api::live_rates::{get_live_rates, ws_live_rates};
 use crate::server::api::session_retention::patch_session;
+use crate::server::api::sessions::{
+    get_session, get_session_keyframes, get_session_media, list_sessions,
+};
 use crate::server::infrastructure::service_register::ServiceRegister;
 use axum::Router;
 use axum::body::Body;
 use axum::http::Request;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, patch, post, put};
+use axum::routing::{delete, get, post, put};
 use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
@@ -53,6 +56,12 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         // 不要为此调快 /v1/streamers
         .route("/v1/ws/live-rates", get(ws_live_rates))
         .route("/v1/live-rates", get(get_live_rates))
+        // 切片工作台：场次、可落刀位置、DVR 回看（只按场次 id 寻址，不接受路径）
+        .route("/v1/sessions", get(list_sessions))
+        // PATCH 是「保留这场」：改场次的 retain_until
+        .route("/v1/sessions/{id}", get(get_session).patch(patch_session))
+        .route("/v1/sessions/{id}/keyframes", get(get_session_keyframes))
+        .route("/v1/sessions/{id}/media", get(get_session_media))
         // 配置管理路由
         .route(
             "/v1/configuration",
@@ -61,8 +70,6 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         // 主播信息路由
         .route("/v1/streamer-info", get(get_streamer_info)) // 获取主播信息
         .route("/v1/streamer-info/files/{id}", get(get_streamer_info_files)) // 获取主播信息
-        // 「保留这场」：改场次的 retain_until
-        .route("/v1/sessions/{id}", patch(patch_session))
         // 上传模板管理路由
         .route("/v1/upload/streamers", get(get_upload_streamers_endpoint)) // 获取上传模板列表
         .route(
