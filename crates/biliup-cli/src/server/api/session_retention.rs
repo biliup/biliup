@@ -75,6 +75,26 @@ mod tests {
             .map_err(|(status, _)| status.as_u16())
     }
 
+    #[test]
+    fn patch_is_gated_by_clip_edit() {
+        use crate::server::infrastructure::permissions::{Permission, Role};
+        use crate::server::infrastructure::policy::{RouteRequirement, Subject};
+        use axum::http::Method;
+        let requirement =
+            RouteRequirement::of(&Method::PATCH, "/v1/sessions/{id}", "/v1/sessions/7");
+        assert_eq!(
+            requirement,
+            RouteRequirement::Permission(Permission::ClipEdit)
+        );
+        for role in Role::ALL {
+            assert_eq!(
+                Subject::user(1, role).satisfies(requirement),
+                role != Role::Viewer,
+                "{role:?}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn sets_and_clears_retain_until() {
         let dir = tempfile::tempdir().unwrap();

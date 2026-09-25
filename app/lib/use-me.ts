@@ -47,7 +47,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'log.view': '查看日志',
   'file.view': '查看录播文件',
   'user.manage': '管理用户',
-  'clip.edit': '打标记',
+  'clip.edit': '打标记、保留场次',
 }
 
 export interface Me {

@@ -101,7 +101,7 @@ pub enum Permission {
     FileView,
     #[serde(rename = "user.manage")]
     UserManage,
-    /// 切片工作台：打标记、改切片草稿
+    /// 切片工作台：打标记、保留场次、改切片草稿
     #[serde(rename = "clip.edit")]
     ClipEdit,
 }
@@ -159,7 +159,7 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         "/v1/configuration" if get => ConfigView,
         "/v1/configuration" if method == Method::PUT => ConfigEdit,
         "/v1/streamer-info" | "/v1/streamer-info/files/{id}" if get => StreamerView,
-        "/v1/sessions/{id}" if method == Method::PATCH => RecordingControl,
+        "/v1/sessions/{id}" if method == Method::PATCH => ClipEdit,
         "/v1/upload/streamers" | "/v1/upload/streamers/{id}" if get => StreamerView,
         "/v1/upload/streamers" if method == Method::POST => TemplateEdit,
         "/v1/upload/streamers/{id}" if method == Method::DELETE => TemplateEdit,
