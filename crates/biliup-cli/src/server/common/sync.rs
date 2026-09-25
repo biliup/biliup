@@ -11,6 +11,7 @@ use crate::server::core::downloader::{DownloadConfig, DownloadStatus};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Stage, WorkerStatus};
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
+use crate::server::workbench::recorder::{ClosedSegment, RecorderHandle};
 use biliup::bilibili::{BiliBili, Studio, Video};
 use biliup::uploader::line::UploadedStream;
 use bytes::Bytes;
@@ -44,11 +45,17 @@ pub(crate) struct SyncSession {
     cleaned_parts: usize,
     first_submit_uncertain: bool,
     postprocess_paths: Vec<PathBuf>,
+    recorder: Option<RecorderHandle>,
 }
 
 impl SyncSession {
     pub(crate) fn committed_parts(&self) -> usize {
         self.confirmed_parts
+    }
+
+    /// 把分段记进切片工作台的场次时间轴。
+    pub(crate) fn set_recorder(&mut self, recorder: RecorderHandle) {
+        self.recorder = Some(recorder);
     }
 }
 
@@ -345,6 +352,10 @@ async fn record_segments(
             });
             upload_byte_stream_parts(&segment_ctx, parcel, stream).await
         });
+        let workbench = session.lock().await.recorder.clone();
+        if let Some(workbench) = &workbench {
+            workbench.opened(&path);
+        }
         let pump = pump_chunks(
             segment.stdout,
             segment.peeked,
@@ -372,6 +383,16 @@ async fn record_segments(
             stream_complete = pump.stream_complete,
             "本段录制结束"
         );
+        if let Some(workbench) = &workbench {
+            workbench.closed(
+                &path,
+                ClosedSegment {
+                    bytes: Some(pump.actual_size),
+                    discard: pump.actual_size < MIN_MEDIA_BYTES && !keep,
+                    ..Default::default()
+                },
+            );
+        }
 
         if pump.actual_size < MIN_MEDIA_BYTES {
             upload.abort();
@@ -541,7 +562,7 @@ async fn commit_unconfirmed(
     submit_api: Option<&str>,
     recorder: &Recorder,
 ) -> AppResult<()> {
-    let (temporary_files, committed) = {
+    let (temporary_files, committed, workbench) = {
         let mut state = session.lock().await;
         if state.confirmed_parts == state.videos.len() {
             return Ok(());
@@ -595,12 +616,18 @@ async fn commit_unconfirmed(
             }
             state.cleaned_parts += 1;
         }
-        (temporary_files, state.confirmed_parts)
+        (
+            temporary_files,
+            state.confirmed_parts,
+            state.recorder.clone(),
+        )
     };
 
     for path in temporary_files {
         if let Err(error) = tokio::fs::remove_file(&path).await {
             warn!(?path, ?error, "删除边录边传临时文件失败");
+        } else if let Some(workbench) = &workbench {
+            workbench.deleted(&path);
         }
     }
     info!(committed, "边录边传分P状态已确认");

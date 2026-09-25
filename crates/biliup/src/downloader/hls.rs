@@ -1,6 +1,8 @@
 use crate::downloader::error::{Error, Result};
+use crate::downloader::index_tap::FileTap;
 use crate::downloader::preview::{ChunkKind, PreviewSink};
-use crate::downloader::util::{ByteCounter, LifecycleFile, Segmentable};
+use crate::downloader::util::{LifecycleFile, Segmentable};
+use bytes::Bytes;
 use m3u8_rs::{MediaPlaylist, Playlist};
 
 use std::fs::File;
@@ -104,8 +106,7 @@ pub async fn download(
                 let length = download_to_file(
                     media_url.join(&segment.uri)?,
                     client,
-                    &mut ts_file.buf_writer,
-                    &ts_file.file.bytes_written,
+                    &mut ts_file,
                     preview.as_mut(),
                 )
                 .await?;
@@ -144,8 +145,7 @@ pub async fn download(
 async fn download_to_file(
     url: Url,
     client: &StatelessClient,
-    out: &mut impl Write,
-    bytes_written: &ByteCounter,
+    out: &mut TsFile<'_>,
     mut preview: Option<&mut PreviewSink>,
 ) -> Result<u64> {
     debug!("url: {url}");
@@ -156,8 +156,7 @@ async fn download_to_file(
     let mut segment_start = true;
     while let Some(chunk) = response.chunk().await? {
         length += chunk.len() as u64;
-        out.write_all(&chunk)?;
-        bytes_written.add(chunk.len() as u64);
+        out.write_chunk(&chunk)?;
         if let Some(sink) = preview.as_deref_mut() {
             if segment_start && chunk.first() != Some(&0x47) {
                 // 不是 TS 同步字节：多半是 fMP4（m4s）分片。这条路径没有下载 #EXT-X-MAP 的
@@ -187,15 +186,22 @@ pub struct TsFile<'a> {
     pub file: LifecycleFile<'a>,
     /// 当前分段已交给 [`LifecycleFile::finish`]，`Drop` 不再重复改名、触发钩子。
     finished: bool,
+    /// 当前分段已写的字节数。
+    pos: u64,
+    index: Option<FileTap>,
 }
 
 impl<'a> TsFile<'a> {
     pub fn new(mut file: LifecycleFile<'a>) -> std::io::Result<Self> {
         let path = file.create()?;
+        let buf_writer = Self::create(path)?;
+        let index = file.index.as_ref().map(|tap| tap.open(&file.path));
         Ok(Self {
-            buf_writer: Self::create(path)?,
+            buf_writer,
             file,
             finished: false,
+            pos: 0,
+            index,
         })
     }
 
@@ -205,12 +211,33 @@ impl<'a> TsFile<'a> {
         let path = self.file.create()?;
         self.buf_writer = Self::create(path)?;
         self.finished = false;
+        self.pos = 0;
+        self.index = self
+            .file
+            .index
+            .as_ref()
+            .map(|tap| tap.open(&self.file.path));
+        Ok(())
+    }
+
+    /// 把一块分片字节追加进当前分段。
+    pub fn write_chunk(&mut self, chunk: &Bytes) -> std::io::Result<()> {
+        self.buf_writer.write_all(chunk)?;
+        self.file.bytes_written.add(chunk.len() as u64);
+        if let Some(index) = &self.index {
+            index.bytes(self.pos, chunk);
+        }
+        self.pos += chunk.len() as u64;
         Ok(())
     }
 
     /// flush 并检查错误 → 去掉 `.part` → 触发钩子，见 [`LifecycleFile::finish`]。
     fn finish(&mut self) -> std::io::Result<()> {
         self.finished = true;
+        // 先于改名钩子发出：录制器收到分段关闭时，索引任务队列里已有这个文件的全部事件
+        if let Some(index) = self.index.take() {
+            index.closed(self.pos);
+        }
         self.file.finish(&mut self.buf_writer)
     }
 

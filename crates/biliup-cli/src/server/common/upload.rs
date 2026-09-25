@@ -704,15 +704,10 @@ impl UActor {
                     .await;
                 let inspect = rx.inspect(|f| {
                     let pool = ctx.pool().clone();
-                    let streamer_info_id = ctx.id();
+                    let session_id = ctx.id();
                     let file = f.prev_file_path.display().to_string();
                     tokio::spawn(async move {
-                        let result = InsertFileItem {
-                            file,
-                            streamer_info_id,
-                        }
-                        .insert(&pool)
-                        .await;
+                        let result = InsertFileItem { file, session_id }.insert(&pool).await;
                         info!(result=?result, "Insert file");
                     });
                 });

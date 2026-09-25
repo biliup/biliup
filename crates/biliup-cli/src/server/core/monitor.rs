@@ -4,11 +4,9 @@ use crate::server::common::upload::UploaderMessage;
 use crate::server::core::live::{batch_check_request, live_request, streamer_info};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Context, Stage, Worker, WorkerStatus};
-use crate::server::infrastructure::models::StreamerInfo;
+use crate::server::workbench;
 use async_channel::Sender;
 use biliup::downloader::live::{LivePlugin, LiveStatus};
-use ormlite::Model;
-use ormlite::model::ModelBuilder;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, RwLock};
@@ -157,7 +155,7 @@ impl Monitor {
             match plugin.check_stream(request).await {
                 Ok(LiveStatus::Live { stream }) => {
                     // 依赖房间标题的策略要拿到流信息才能判定。命中就按「本轮不录」处理：
-                    // 不建 StreamerInfo 记录、不启动下载，等下个检测周期再看。
+                    // 不建场次记录、不启动下载，等下个检测周期再看。
                     if let Some(rejection) =
                         recording_policy::reject_before_record(room.get_streamer(), &stream.title)
                     {
@@ -168,26 +166,41 @@ impl Monitor {
                         continue;
                     }
                     room.set_rejection(None);
-                    let sql_no_id = streamer_info(&stream);
-                    let insert = match StreamerInfo::builder()
-                        .url(sql_no_id.url.clone())
-                        .name(room.live_streamer.remark.clone())
-                        .title(sql_no_id.title.clone())
-                        .date(sql_no_id.date)
-                        .live_cover_path(sql_no_id.live_cover_path.clone())
-                        .insert(&self.pool)
-                        .await
+                    let mut info = streamer_info(&stream);
+                    info.name = room.live_streamer.remark.clone();
+                    let merge_window_ms = room
+                        .get_config()
+                        .live_merge_minutes
+                        .saturating_mul(60_000)
+                        .min(i64::MAX as u64) as i64;
+                    let session = match workbench::store::open_session(
+                        &self.pool,
+                        room.live_streamer.id,
+                        &info,
+                        workbench::recorder::now_ms(),
+                        merge_window_ms,
+                    )
+                    .await
                     {
-                        Ok(insert) => insert,
+                        Ok(session) => session,
                         Err(e) => {
                             error!(e=?e, "插入数据库失败");
                             self.wake_waker(room.id()).await;
                             continue;
                         }
                     };
-                    info!(url = url, "room: is live -> 开播了");
+                    if session.resumed {
+                        info!(
+                            url = url,
+                            session = session.id,
+                            "room: is live -> 开播了（下播后很快又开播，接着记在上一场）"
+                        );
+                    } else {
+                        info!(url = url, "room: is live -> 开播了");
+                    }
 
-                    let context = Context::new(insert.id, room.clone(), self.pool.clone(), *stream);
+                    let context =
+                        Context::new(session.id, room.clone(), self.pool.clone(), *stream);
                     let downloader = plugin.clone();
                     let uploader = self.uploader.clone();
                     let rooms_handle = Arc::clone(self);

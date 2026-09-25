@@ -311,6 +311,10 @@ mod tests {
                 6,
                 "11d73df52e3a459d5256d4f5d624cbc5e891d14c358d1ef4a63debae235c2fd24ce2fe8745a85ac95312ad4773475ca2",
             ),
+            (
+                7,
+                "66fd3bd6b5d4aab82389bbe03e190ff869f274aa8fdc74ee9110f277ff1dcae237a4b6a2088c84f4d31e997c34badc03",
+            ),
         ];
         let embedded = sqlx::migrate!();
         let actual: Vec<(i64, String)> = embedded
@@ -377,7 +381,7 @@ mod tests {
                 .unwrap();
         assert_eq!(
             migrations.iter().map(|m| m.0).collect::<Vec<_>>(),
-            vec![1, 2, 3, 4, 5, 6],
+            vec![1, 2, 3, 4, 5, 6, 7],
             "待应用的迁移必须补齐"
         );
         let embedded = sqlx::migrate!();
@@ -549,6 +553,205 @@ mod tests {
             serde_json::from_str(rows[1].1.as_deref().unwrap()).unwrap();
         assert_eq!(explicit["file_size"], 52_428_800);
         assert!(rows[2].1.is_none());
+    }
+
+    /// v1.2.8（迁移 1–6）建立的库升级：`streamerinfo` 改名为 `stream_sessions`，数据、外键、
+    /// 用户自己加的索引 / 视图 / 触发器都跟着改名，`/v1/streamer-info` 读到的内容不变。
+    #[tokio::test]
+    async fn upgrade_from_v1_2_8_renames_streamerinfo_to_stream_sessions() {
+        use crate::server::infrastructure::models::{FileItem, StreamerInfo};
+        use chrono::DateTime;
+        use ormlite::Model;
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let legacy = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect(&format!("sqlite://{}?mode=rwc", db.display()))
+            .await
+            .unwrap();
+        let mut v1_2_8 = sqlx::migrate!();
+        v1_2_8.migrations = v1_2_8
+            .migrations
+            .iter()
+            .filter(|m| m.version <= 6)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into();
+        v1_2_8.run(&legacy).await.unwrap();
+        let rfc3339 = "2026-09-23T10:00:00.123456789+00:00";
+        let python = "2024-01-02 03:04:05.678000";
+        for sql in [
+            // Python 版建的库没有强制外键，可能留有孤儿 filelist 行
+            "PRAGMA foreign_keys = OFF",
+            "INSERT INTO livestreamers (id, url, remark) VALUES \
+             (1, 'https://www.douyu.com/9999', 'douyu'), (2, 'https://live.bilibili.com/6', 'bili')",
+            &format!(
+                "INSERT INTO streamerinfo (id, name, url, title, date, live_cover_path) VALUES \
+                 (1, 'douyu', 'https://www.douyu.com/9999', '第一场', '{rfc3339}', ''), \
+                 (2, 'bili', 'https://live.bilibili.com/6', '老数据', '{python}', 'cover.jpg'), \
+                 (3, 'gone', 'https://www.huya.com/gone', '主播已删', '{rfc3339}', '')"
+            ),
+            "INSERT INTO filelist (id, file, streamer_info_id) VALUES \
+             (1, 'a.flv', 1), (2, 'b.flv', 1), (3, 'c.mp4', 2), (4, 'orphan.flv', 99)",
+            "CREATE INDEX idx_user_filelist ON filelist (streamer_info_id)",
+            "CREATE VIEW v_user AS SELECT s.title, f.file FROM streamerinfo s \
+             JOIN filelist f ON f.streamer_info_id = s.id",
+            "CREATE TRIGGER trg_user AFTER UPDATE OF title ON streamerinfo BEGIN \
+             UPDATE filelist SET file = file WHERE streamer_info_id = new.id; END",
+        ] {
+            sqlx::query(sql).execute(&legacy).await.unwrap();
+        }
+        legacy.close().await;
+
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .expect("v1.2.8 建立的库必须能升级上来");
+
+        let versions: Vec<i64> =
+            sqlx::query_scalar("SELECT version FROM _sqlx_migrations ORDER BY version")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
+        let tables: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN \
+             ('streamerinfo', 'stream_sessions', 'session_streamerinfo', 'segments') ORDER BY name",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(tables, vec!["segments", "stream_sessions"]);
+
+        // 外键跟着表名、列名走，ON DELETE CASCADE 保留
+        let fk: (String, String, String) = sqlx::query_as(
+            "SELECT \"table\", \"from\", on_delete FROM pragma_foreign_key_list('filelist')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            fk,
+            (
+                "stream_sessions".into(),
+                "session_id".into(),
+                "CASCADE".into()
+            )
+        );
+        for (name, needles) in [
+            ("idx_user_filelist", &["session_id"][..]),
+            ("v_user", &["stream_sessions", "session_id"][..]),
+            ("trg_user", &["stream_sessions", "session_id"][..]),
+        ] {
+            let sql: String = sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE name = ?")
+                .bind(name)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            for needle in needles {
+                assert!(sql.contains(needle), "{name}: {sql}");
+            }
+            assert!(!sql.contains("streamer_info_id"), "{name}: {sql}");
+        }
+        let joined: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM v_user")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(joined, 3);
+        sqlx::query("UPDATE stream_sessions SET title = title WHERE id = 1")
+            .execute(&pool)
+            .await
+            .expect("触发器改名后仍可执行");
+
+        // 老数据：内容原样；按 url 找回主播，找不到为 NULL；结束时间记为开播时间
+        let history = StreamerInfo::select().fetch_all(&pool).await.unwrap();
+        assert_eq!(
+            history
+                .iter()
+                .map(|h| (h.id, h.title.as_str(), h.live_cover_path.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (1, "第一场", ""),
+                (2, "老数据", "cover.jpg"),
+                (3, "主播已删", "")
+            ]
+        );
+        let rfc3339_ms = DateTime::parse_from_rfc3339(rfc3339)
+            .unwrap()
+            .timestamp_millis();
+        let python_ms = chrono::NaiveDateTime::parse_from_str(python, "%F %T%.f")
+            .unwrap()
+            .and_utc()
+            .timestamp_millis();
+        assert_eq!(history[0].date.timestamp_millis(), rfc3339_ms);
+        type Backfill = (Option<i64>, Option<i64>, Option<i64>, Option<i64>);
+        let backfill: Vec<Backfill> = sqlx::query_as(
+            "SELECT streamer_id, started_at, ended_at, retain_until FROM stream_sessions ORDER BY id",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            backfill,
+            vec![
+                (Some(1), None, Some(rfc3339_ms), None),
+                (Some(2), None, Some(python_ms), None),
+                (None, None, Some(rfc3339_ms), None),
+            ]
+        );
+        let json = serde_json::to_value(&history[1]).unwrap();
+        let keys: Vec<&str> = json
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|k| k.as_str())
+            .collect();
+        assert_eq!(
+            keys,
+            vec!["date", "id", "live_cover_path", "name", "title", "url"],
+            "/v1/streamer-info 的字段不变"
+        );
+
+        let files = FileItem::select()
+            .where_("session_id = ?")
+            .bind(1)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            files.iter().map(|f| f.file.as_str()).collect::<Vec<_>>(),
+            vec!["a.flv", "b.flv"]
+        );
+        assert_eq!(
+            serde_json::to_value(&files[0]).unwrap(),
+            serde_json::json!({"id": 1, "file": "a.flv", "streamer_info_id": 1}),
+            "/v1/streamer-info/files 的字段不变"
+        );
+        let orphans: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM filelist WHERE id = 4")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(orphans, 1, "迁移不检查、也不删除孤儿行");
+
+        sqlx::query("DELETE FROM stream_sessions WHERE id = 2")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let left: Vec<i64> = sqlx::query_scalar("SELECT id FROM filelist ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(left, vec![1, 2, 4], "删场次级联删文件记录");
+        sqlx::query("DELETE FROM livestreamers WHERE id = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let streamer: Option<i64> =
+            sqlx::query_scalar("SELECT streamer_id FROM stream_sessions WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(streamer, None, "删主播只清空场次的主播外键");
     }
 
     #[tokio::test]

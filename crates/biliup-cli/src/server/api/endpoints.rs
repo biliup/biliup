@@ -401,7 +401,7 @@ pub async fn get_streamer_info_files(
     Path(id): Path<i64>,
 ) -> Result<Json<Vec<FileItem>>, Response> {
     let file_items = FileItem::select()
-        .where_("streamer_info_id = ?")
+        .where_("session_id = ?")
         .bind(id)
         .fetch_all(&pool)
         .await

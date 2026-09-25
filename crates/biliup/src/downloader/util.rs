@@ -1,3 +1,4 @@
+use crate::downloader::index_tap::IndexTap;
 use chrono::{DateTime, Local};
 use std::fs;
 use std::io::Write;
@@ -256,9 +257,13 @@ pub struct LifecycleFile<'a> {
     pub file_name: String,
     pub path: PathBuf,
     pub hook: CallbackFn<'a>,
+    /// 每个分段文件 [`Self::create`] 时调用，参数是带 `.part` 的临时路径。
+    pub start_hook: Option<CallbackFn<'a>>,
     pub extension: &'static str,
     /// 写入这一系列分段文件的字节累计（跨分段，不随 `create_new` 归零）。
     pub bytes_written: ByteCounter,
+    /// 关键帧索引旁路：写盘处把每个分段写了什么交给索引任务，见 [`IndexTap`]。
+    pub index: Option<IndexTap>,
 }
 
 impl<'a> LifecycleFile<'a> {
@@ -275,14 +280,31 @@ impl<'a> LifecycleFile<'a> {
             file_name: "".to_string(),
             path: Default::default(),
             hook: Box::new(hook),
+            start_hook: None,
             extension,
             bytes_written: ByteCounter::new(),
+            index: None,
         }
+    }
+
+    /// 开始写每个分段文件时回调（参数为 `.part` 临时路径）。
+    pub fn with_start_hook<F>(mut self, hook: F) -> Self
+    where
+        F: FnMut(&str) + Send + Sync + 'a,
+    {
+        self.start_hook = Some(Box::new(hook));
+        self
     }
 
     /// 让写盘字节累计到调用方持有的计数器上（例如按录制任务汇总速率）。
     pub fn with_counter(mut self, counter: ByteCounter) -> Self {
         self.bytes_written = counter;
+        self
+    }
+
+    /// 边写边建关键帧索引，见 [`IndexTap`]。
+    pub fn with_index_tap(mut self, index: Option<IndexTap>) -> Self {
+        self.index = index;
         self
     }
 
@@ -304,6 +326,9 @@ impl<'a> LifecycleFile<'a> {
         }
 
         info!("Save to {}", self.path.display());
+        if let Some(hook) = self.start_hook.as_mut() {
+            hook(&self.path.to_string_lossy());
+        }
         Ok(self.path.as_path())
     }
 

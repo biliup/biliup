@@ -131,6 +131,7 @@ impl Context {
             suffix,
             bytes_written: Default::default(),
             preview: Default::default(),
+            index_tap: None,
         }
     }
 }
