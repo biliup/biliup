@@ -351,6 +351,12 @@ impl ClipPublisher {
             .map(|j| j.view.clone())
     }
 
+    /// 这些切片现在能不能排进队列（不排）：没发布过，也不在队列里未完成的任务中。
+    pub fn check(&self, clips: &[Clip]) -> Result<(), EnqueueError> {
+        check_clips(clips)?;
+        check_queue(&lock(&self.queue), clips)
+    }
+
     /// 排进队列。`clips` 已按时间排好、都属于 `session_id`；调用方已检查过状态。
     pub fn enqueue(
         &self,
@@ -360,34 +366,9 @@ impl ClipPublisher {
         mode: Mode,
         created_by: Option<i64>,
     ) -> Result<JobView, EnqueueError> {
-        if clips.is_empty() {
-            return Err(EnqueueError::Invalid("没有选切片".into()));
-        }
-        if let Some(clip) = clips.iter().find(|c| c.state == ClipState::Published) {
-            return Err(EnqueueError::Conflict(format!(
-                "切片 #{} 已经发布过了（{}）",
-                clip.id,
-                clip.archive_bvid.as_deref().unwrap_or("稿件号未知")
-            )));
-        }
+        check_clips(clips)?;
         let mut queue = lock(&self.queue);
-        for job in &queue.jobs {
-            if job.view.state == JobState::Done {
-                continue;
-            }
-            if let Some(id) = clips
-                .iter()
-                .map(|c| c.id)
-                .find(|id| job.view.clip_ids.contains(id))
-            {
-                let why = if job.view.state == JobState::Failed {
-                    "上次发布失败的任务还在：点「重试」，或先把它移出队列"
-                } else {
-                    "已经在发布队列里"
-                };
-                return Err(EnqueueError::Conflict(format!("切片 #{id} {why}")));
-            }
-        }
+        check_queue(&queue, clips)?;
         let now = now_ms();
         let view = JobView {
             id: self.next_id.fetch_add(1, Ordering::Relaxed),
@@ -853,6 +834,41 @@ pub async fn archive(
             .collect(),
         cover,
     })
+}
+
+fn check_clips(clips: &[Clip]) -> Result<(), EnqueueError> {
+    if clips.is_empty() {
+        return Err(EnqueueError::Invalid("没有选切片".into()));
+    }
+    if let Some(clip) = clips.iter().find(|c| c.state == ClipState::Published) {
+        return Err(EnqueueError::Conflict(format!(
+            "切片 #{} 已经发布过了（{}）",
+            clip.id,
+            clip.archive_bvid.as_deref().unwrap_or("稿件号未知")
+        )));
+    }
+    Ok(())
+}
+
+fn check_queue(queue: &Queue, clips: &[Clip]) -> Result<(), EnqueueError> {
+    for job in &queue.jobs {
+        if job.view.state == JobState::Done {
+            continue;
+        }
+        if let Some(id) = clips
+            .iter()
+            .map(|c| c.id)
+            .find(|id| job.view.clip_ids.contains(id))
+        {
+            let why = if job.view.state == JobState::Failed {
+                "上次发布失败的任务还在：点「重试」，或先把它移出队列"
+            } else {
+                "已经在发布队列里"
+            };
+            return Err(EnqueueError::Conflict(format!("切片 #{id} {why}")));
+        }
+    }
+    Ok(())
 }
 
 /// 已结束的任务最多留 [`KEEP_FINISHED`] 个，先丢成功的旧任务，失败的留给用户处理。

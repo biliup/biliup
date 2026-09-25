@@ -84,6 +84,7 @@ struct Fixture {
     app: Router,
     pool: ConnectionPool,
     fake: Arc<Fake>,
+    publisher: Arc<ClipPublisher>,
     session: i64,
     template: i64,
 }
@@ -168,7 +169,7 @@ async fn fixture() -> Fixture {
     let state = AppState {
         pool: pool.clone(),
         clips,
-        publisher,
+        publisher: publisher.clone(),
         client: StatelessClient::default(),
     };
     let app = Router::new()
@@ -198,6 +199,7 @@ async fn fixture() -> Fixture {
         app,
         pool,
         fake,
+        publisher,
         session,
         template,
     }
@@ -466,6 +468,7 @@ async fn publishing_one_clip_runs_every_step_as_a_reprint() {
     .await;
     let jid = job["jobs"][0]["id"].as_u64().unwrap();
     assert_eq!(job["jobs"][0]["clip_ids"], json!([id]));
+    assert_eq!(job["skipped"], json!([]));
     let done = f.wait_job(&op, jid, "done").await;
     assert_eq!(done["bvid"], "BV1api1");
     assert_eq!(done["title"], "名场面");
@@ -720,6 +723,77 @@ async fn rate_limit_pauses_and_clips_in_the_queue_are_locked() {
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     let response = send(&f.app, Some(&op), "DELETE", "/v1/publish-jobs/99", None).await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+/// 集中发布：有切片已经在队列里（哪怕排在后面）就整批不排；检查之后才被别的请求抢先排上的，
+/// 其余照排，被跳过的列在 `skipped` 里，不再只打一条日志。
+#[tokio::test]
+async fn batches_are_all_or_nothing_and_late_conflicts_are_reported() {
+    let f = fixture().await;
+    let op = login(&f.app, "op", "operator-password").await;
+    let a = f.clip(&op, 1000, 2000, "a").await;
+    let b = f.clip(&op, 3000, 5000, "b").await;
+    let c = f.clip(&op, 5000, 6000, "c").await;
+    f.fake
+        .upload_failures
+        .lock()
+        .unwrap()
+        .push_back(Failure::Other("连接被重置".into()));
+    let job = json_of(
+        send(
+            &f.app,
+            Some(&op),
+            "POST",
+            &format!("/v1/clips/{b}/publish"),
+            Some(json!({})),
+        )
+        .await,
+        StatusCode::ACCEPTED,
+    )
+    .await;
+    let failed = job["jobs"][0]["id"].as_u64().unwrap();
+    f.wait_job(&op, failed, "failed").await;
+
+    let response = send(
+        &f.app,
+        Some(&op),
+        "POST",
+        "/v1/publish-jobs",
+        Some(json!({ "clip_ids": [a, b, c] })),
+    )
+    .await;
+    let message = text_of(response, StatusCode::CONFLICT).await;
+    assert!(message.contains(&format!("切片 #{b} ")), "{message}");
+    assert!(message.contains("重试"), "{message}");
+    let jobs = f.jobs(&op).await;
+    assert_eq!(jobs["jobs"].as_array().unwrap().len(), 1, "a、c 都没排：{jobs}");
+
+    // 模拟检查之后、排队之前 b 被另一个请求排上
+    let mut groups = Vec::new();
+    for id in [a, b, c] {
+        groups.push(vec![clips::get(&f.pool, id).await.unwrap().unwrap()]);
+    }
+    let body = PublishBatch {
+        clip_ids: vec![a, b, c],
+        ..PublishBatch::default()
+    };
+    let (jobs, skipped) = enqueue_groups(&f.publisher, &groups, &body, Mode::Quick, None);
+    assert_eq!(
+        jobs.iter().map(|j| j.clip_ids.clone()).collect::<Vec<_>>(),
+        vec![vec![a], vec![c]]
+    );
+    let response = json_of(accepted(jobs, skipped), StatusCode::ACCEPTED).await;
+    assert_eq!(response["jobs"].as_array().unwrap().len(), 2);
+    assert_eq!(response["skipped"].as_array().unwrap().len(), 1);
+    assert_eq!(response["skipped"][0]["clip_ids"], json!([b]));
+    let reason = response["skipped"][0]["reason"].as_str().unwrap();
+    assert!(reason.contains(&format!("切片 #{b} ")), "{reason}");
+
+    // 一个都没排上：409，给出原因
+    let (jobs, skipped) = enqueue_groups(&f.publisher, &groups[1..2], &body, Mode::Quick, None);
+    assert!(jobs.is_empty());
+    let message = text_of(accepted(jobs, skipped), StatusCode::CONFLICT).await;
+    assert!(message.contains(&format!("切片 #{b} ")), "{message}");
 }
 
 fn png() -> Vec<u8> {

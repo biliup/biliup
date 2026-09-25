@@ -146,6 +146,15 @@ impl PublishBatch {
 #[derive(Debug, Serialize)]
 pub struct Jobs {
     pub jobs: Vec<JobView>,
+    /// 没排进队列的切片和原因；都排上了是空数组。
+    pub skipped: Vec<Skipped>,
+}
+
+/// 集中发布时没排进队列的一组切片（检查之后、排队之前被另一个请求抢先排了）。
+#[derive(Debug, Serialize)]
+pub struct Skipped {
+    pub clip_ids: Vec<i64>,
+    pub reason: String,
 }
 
 /// 读出切片并检查：都在、属于同一场、没发布过。按时间排序。
@@ -293,7 +302,7 @@ async fn enqueue(
         ));
     }
     let groups = groups(clips, body.combine);
-    // 先全部检查一遍（模板、标签、封面），有一个不行就都不排
+    // 先全部检查一遍（模板、标签、封面、是否已在队列里），有一个不行就都不排
     for group in &groups {
         let settings = body.settings().for_clip(&group[0]);
         let problem =
@@ -309,27 +318,57 @@ async fn enqueue(
             };
             return conflict(format!("{which}{problem}"));
         }
+        match publisher.check(group) {
+            Ok(()) => {}
+            Err(EnqueueError::Invalid(m)) => return bad_request(m),
+            Err(EnqueueError::Conflict(m)) => return conflict(m),
+        }
     }
     let mode = body.mode.unwrap_or(Mode::Quick);
+    let (jobs, skipped) = enqueue_groups(
+        publisher,
+        &groups,
+        body,
+        mode,
+        caller.subject.user_id,
+    );
+    accepted(jobs, skipped)
+}
+
+/// 逐组排队。上面已经检查过，这里还排不上的只可能是同时有别的请求排了同一个切片，
+/// 记下来告诉调用方，其余照排。
+fn enqueue_groups(
+    publisher: &ClipPublisher,
+    groups: &[Vec<Clip>],
+    body: &PublishBatch,
+    mode: Mode,
+    created_by: Option<i64>,
+) -> (Vec<JobView>, Vec<Skipped>) {
     let mut jobs = Vec::new();
-    for group in &groups {
+    let mut skipped = Vec::new();
+    for group in groups {
         let settings = body.settings().for_clip(&group[0]);
-        match publisher.enqueue(
-            group[0].session_id,
-            group,
-            settings,
-            mode,
-            caller.subject.user_id,
-        ) {
+        match publisher.enqueue(group[0].session_id, group, settings, mode, created_by) {
             Ok(job) => jobs.push(job),
-            Err(EnqueueError::Invalid(m)) => return bad_request(m),
-            Err(EnqueueError::Conflict(m)) if jobs.is_empty() => return conflict(m),
-            Err(EnqueueError::Conflict(m)) => {
-                warn!(message = %m, "集中发布时有切片没排进队列");
+            Err(EnqueueError::Invalid(reason) | EnqueueError::Conflict(reason)) => {
+                warn!(%reason, "集中发布时有切片没排进队列");
+                skipped.push(Skipped {
+                    clip_ids: group.iter().map(|c| c.id).collect(),
+                    reason,
+                });
             }
         }
     }
-    (StatusCode::ACCEPTED, Json(Jobs { jobs })).into_response()
+    (jobs, skipped)
+}
+
+/// 排上了至少一个稿件就是 202，没排上的列在 `skipped` 里；一个都没排上是 409。
+fn accepted(jobs: Vec<JobView>, skipped: Vec<Skipped>) -> Response {
+    if jobs.is_empty() {
+        let reasons: Vec<&str> = skipped.iter().map(|s| s.reason.as_str()).collect();
+        return conflict(reasons.join("；"));
+    }
+    (StatusCode::ACCEPTED, Json(Jobs { jobs, skipped })).into_response()
 }
 
 /// `POST /v1/clips/{cid}/publish`：给了发布设置就先存到切片上，再排进发布队列；返回 202。
@@ -373,7 +412,8 @@ pub async fn publish_clip(
     enqueue(&caller, &pool, &exports, &publisher, &batch, vec![clip]).await
 }
 
-/// `POST /v1/publish-jobs`
+/// `POST /v1/publish-jobs`：任何一个切片发不了（模板、标签、封面，已发布，已在队列里）就都不排，
+/// 返回 409；否则 202，`{"jobs": [...], "skipped": [...]}`。
 pub async fn publish_batch(
     caller: Caller,
     State(pool): State<ConnectionPool>,
