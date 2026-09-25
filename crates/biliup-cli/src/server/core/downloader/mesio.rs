@@ -343,7 +343,8 @@ fn warn_on_suffix_mismatch(configured: &str, actual: &str) {
 }
 
 /// 输出目录是 `.` 时 writer 给出 `./x.flv`；去掉前缀，与 stream-gears 给出的路径同一形式，
-/// 弹幕 XML、文件列表都按这个路径命名和记录。开段与关段必须同一形式，切片工作台按路径配对。
+/// 弹幕 XML、文件列表都按这个路径命名和记录。开段、关段和流式关键帧索引必须同一形式，
+/// 切片工作台按路径配对分段、按路径查边写边建的索引。
 fn reported_path(path: &std::path::Path) -> &std::path::Path {
     path.strip_prefix(".").unwrap_or(path)
 }
