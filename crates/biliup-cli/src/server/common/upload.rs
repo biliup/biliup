@@ -1,6 +1,6 @@
 use crate::UploadLine;
 use crate::server::common::util::Recorder;
-use crate::server::config::Config;
+use crate::server::config::{Config, TemplateCredit};
 use crate::server::core::downloader::SegmentInfo;
 use crate::server::core::slots::Slots;
 use crate::server::errors::{AppError, AppResult};
@@ -12,7 +12,7 @@ use crate::server::infrastructure::models::hook_step::{
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
 use crate::server::workbench::retention::Retention;
 use async_channel::Receiver;
-use biliup::bilibili::{BiliBili, ResponseData, Studio, Video};
+use biliup::bilibili::{BiliBili, Credit, ResponseData, Studio, Video};
 use biliup::client::StatelessClient;
 use biliup::credential::login_by_cookies;
 use biliup::error::Kind;
@@ -404,15 +404,115 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
+const CREDIT_PLACEHOLDER: &str = "@credit";
+
+/// 读出模板里能用的 credits：用户名去掉首尾空白和误填的 `@`，uid 必须是纯数字。
+/// 不合格的项跳过并告警，不占用 `@credit` 占位符，免得一项填错让整次投稿被 B 站拒掉。
+fn template_credits(credits: Option<&serde_json::Value>) -> Vec<TemplateCredit> {
+    let Some(serde_json::Value::Array(items)) = credits else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let credit = serde_json::from_value::<TemplateCredit>(item.clone())
+                .inspect_err(|e| warn!(credit = %item, error = %e, "忽略无法解析的简介 @ 配置"))
+                .ok()?;
+            let username = credit.username.trim().trim_start_matches('@').trim();
+            let uid = credit.uid.trim();
+            if username.is_empty() || uid.is_empty() || !uid.bytes().all(|b| b.is_ascii_digit()) {
+                warn!(credit = %item, "忽略用户名为空或 uid 不是数字的简介 @ 配置");
+                return None;
+            }
+            Some(TemplateCredit {
+                username: username.to_string(),
+                uid: uid.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// 把简介里的 `@credit` 依次换成 `credits`，返回纯文本简介和 B 站的 `desc_v2`。
+///
+/// 形状与旧 Python 版 `creditsToDesc_v2` 一致（B 站已长期接受）：纯文本里写成
+/// `@用户名` 加两个空格；`desc_v2` 里被 @ 的用户是 `type: 2` 节点，其后的文本节点前补一个空格。
+/// 与旧版不同的是不产出空文本节点——`@credit` 在开头时，B 站对开头的空 `type: 1`
+/// 节点报 21010。没有 credits 或简介里没有占位符时返回 `None`，简介原样提交。
+fn credits_to_desc_v2(desc: &str, credits: &[TemplateCredit]) -> Option<(String, Vec<Credit>)> {
+    if credits.is_empty() || !desc.contains(CREDIT_PLACEHOLDER) {
+        return None;
+    }
+    fn push_text(nodes: &mut Vec<Credit>, text: &str, after_mention: bool) {
+        if text.is_empty() {
+            return;
+        }
+        let raw_text = if after_mention {
+            format!(" {text}")
+        } else {
+            text.to_string()
+        };
+        nodes.push(Credit {
+            type_id: 1,
+            raw_text,
+            biz_id: Some(String::new()),
+        });
+    }
+
+    let mut plain = String::with_capacity(desc.len());
+    let mut nodes = Vec::new();
+    let mut rest = desc;
+    let mut used = 0;
+    for credit in credits {
+        let Some(pos) = rest.find(CREDIT_PLACEHOLDER) else {
+            break;
+        };
+        let before = &rest[..pos];
+        push_text(&mut nodes, before, used > 0);
+        plain.push_str(before);
+        plain.push('@');
+        plain.push_str(&credit.username);
+        plain.push_str("  ");
+        nodes.push(Credit {
+            type_id: 2,
+            raw_text: credit.username.clone(),
+            biz_id: Some(credit.uid.clone()),
+        });
+        rest = &rest[pos + CREDIT_PLACEHOLDER.len()..];
+        used += 1;
+    }
+    push_text(&mut nodes, rest, true);
+    plain.push_str(rest);
+
+    if used < credits.len() {
+        warn!(
+            credits = credits.len(),
+            placeholders = used,
+            "简介里的 @credit 少于 credits，多出的 credits 未使用"
+        );
+    } else if rest.contains(CREDIT_PLACEHOLDER) {
+        warn!(
+            credits = credits.len(),
+            "简介里的 @credit 多于 credits，多出的占位符按原文提交"
+        );
+    }
+    Some((plain, nodes))
+}
+
 pub(crate) async fn build_studio(
     upload_config: &UploadStreamer,
     bilibili: &BiliBili,
     videos: Vec<Video>,
     recorder: &Recorder,
 ) -> AppResult<Studio> {
+    let desc = recorder.format(&upload_config.description.clone().unwrap_or_default());
+    let credits = template_credits(upload_config.credits.as_ref());
+    let (desc, desc_v2) = match credits_to_desc_v2(&desc, &credits) {
+        Some((plain, nodes)) => (plain, Some(nodes)),
+        None => (desc, None),
+    };
     // 使用 Builder 模式简化构建
     let mut studio: Studio = Studio::builder()
-        .desc(recorder.format(&upload_config.description.clone().unwrap_or_default()))
+        .desc(desc)
         .maybe_dtime(scheduled_publish_ts(upload_config.dtime, now_unix()))
         .maybe_copyright(upload_config.copyright)
         .cover(upload_config.cover_path.clone().unwrap_or_default())
@@ -434,7 +534,7 @@ pub(crate) async fn build_studio(
         .up_selection_reply(upload_config.up_selection_reply.unwrap_or_default())
         .up_close_danmu(upload_config.up_close_danmu.unwrap_or_default())
         .maybe_is_only_self(upload_config.is_only_self)
-        .maybe_desc_v2(None)
+        .maybe_desc_v2(desc_v2)
         .extra_fields(
             serde_json::from_str(&upload_config.extra_fields.clone().unwrap_or_default())
                 .unwrap_or_default(), // 处理额外字段
@@ -916,5 +1016,260 @@ mod upload_pool_tests {
         tokio::time::timeout(Duration::from_secs(5), slots.acquire())
             .await
             .expect("取消的上传任务应归还槽位");
+    }
+}
+
+#[cfg(test)]
+mod credit_tests {
+    use super::*;
+
+    fn credits(pairs: &[(&str, &str)]) -> Vec<TemplateCredit> {
+        pairs
+            .iter()
+            .map(|(username, uid)| TemplateCredit {
+                username: (*username).into(),
+                uid: (*uid).into(),
+            })
+            .collect()
+    }
+
+    fn desc_v2_json(desc: &str, pairs: &[(&str, &str)]) -> (String, serde_json::Value) {
+        let (plain, nodes) = credits_to_desc_v2(desc, &credits(pairs)).expect("应生成 desc_v2");
+        (plain, serde_json::to_value(nodes).unwrap())
+    }
+
+    fn text(raw: &str) -> serde_json::Value {
+        serde_json::json!({"type": 1, "raw_text": raw, "biz_id": ""})
+    }
+
+    fn mention(name: &str, uid: &str) -> serde_json::Value {
+        serde_json::json!({"type": 2, "raw_text": name, "biz_id": uid})
+    }
+
+    #[test]
+    fn desc_v2_leading_credit_has_no_empty_text_node() {
+        let (plain, v2) = desc_v2_json(
+            "@credit 2026年09月24日直播回放-游戏日",
+            &[("羊腿umer", "22158819")],
+        );
+        assert_eq!(plain, "@羊腿umer   2026年09月24日直播回放-游戏日");
+        assert_eq!(
+            v2,
+            serde_json::json!([
+                mention("羊腿umer", "22158819"),
+                text("  2026年09月24日直播回放-游戏日"),
+            ])
+        );
+    }
+
+    #[test]
+    fn desc_v2_leading_credit_keeps_following_lines() {
+        let desc =
+            "@credit2026年09月23日直播录屏\nhttps://live.douyin.com/1\nhttps://live.douyin.com/2";
+        let (plain, v2) = desc_v2_json(desc, &[("允崽来啦", "2063092494")]);
+        assert_eq!(
+            plain,
+            "@允崽来啦  2026年09月23日直播录屏\nhttps://live.douyin.com/1\nhttps://live.douyin.com/2"
+        );
+        assert_eq!(
+            v2,
+            serde_json::json!([
+                mention("允崽来啦", "2063092494"),
+                text(
+                    " 2026年09月23日直播录屏\nhttps://live.douyin.com/1\nhttps://live.douyin.com/2"
+                ),
+            ])
+        );
+    }
+
+    #[test]
+    fn desc_v2_credit_in_middle_of_sentence() {
+        let (plain, v2) = desc_v2_json("感谢@credit的投喂", &[("花花", "1")]);
+        assert_eq!(plain, "感谢@花花  的投喂");
+        assert_eq!(
+            v2,
+            serde_json::json!([text("感谢"), mention("花花", "1"), text(" 的投喂")])
+        );
+    }
+
+    #[test]
+    fn desc_v2_credit_at_end_has_no_trailing_node() {
+        let (plain, v2) = desc_v2_json("剪辑：@credit", &[("剪刀手", "2")]);
+        assert_eq!(plain, "剪辑：@剪刀手  ");
+        assert_eq!(
+            v2,
+            serde_json::json!([text("剪辑："), mention("剪刀手", "2")])
+        );
+    }
+
+    #[test]
+    fn desc_v2_multiple_credits_replace_in_order() {
+        let (plain, v2) = desc_v2_json(
+            "主播@credit 剪辑@credit\n【@credit】",
+            &[
+                ("羊腿umer", "22158819"),
+                ("允崽来啦", "2063092494"),
+                ("Nya Rime", "3"),
+            ],
+        );
+        assert_eq!(plain, "主播@羊腿umer   剪辑@允崽来啦  \n【@Nya Rime  】");
+        assert_eq!(
+            v2,
+            serde_json::json!([
+                text("主播"),
+                mention("羊腿umer", "22158819"),
+                text("  剪辑"),
+                mention("允崽来啦", "2063092494"),
+                text(" \n【"),
+                mention("Nya Rime", "3"),
+                text(" 】"),
+            ])
+        );
+    }
+
+    #[test]
+    fn desc_v2_adjacent_credits() {
+        let (plain, v2) = desc_v2_json("@credit@credit", &[("a", "1"), ("b", "2")]);
+        assert_eq!(plain, "@a  @b  ");
+        assert_eq!(
+            v2,
+            serde_json::json!([mention("a", "1"), mention("b", "2")])
+        );
+    }
+
+    #[test]
+    fn desc_v2_extra_credits_are_ignored() {
+        let (plain, v2) = desc_v2_json("by @credit", &[("a", "1"), ("b", "2")]);
+        assert_eq!(plain, "by @a  ");
+        assert_eq!(v2, serde_json::json!([text("by "), mention("a", "1")]));
+    }
+
+    #[test]
+    fn desc_v2_extra_placeholders_stay_literal() {
+        let (plain, v2) = desc_v2_json("@credit 和 @credit", &[("a", "1")]);
+        assert_eq!(plain, "@a   和 @credit");
+        assert_eq!(
+            v2,
+            serde_json::json!([mention("a", "1"), text("  和 @credit")])
+        );
+    }
+
+    #[test]
+    fn desc_v2_absent_without_credits_or_placeholder() {
+        assert!(credits_to_desc_v2("@credit 简介", &[]).is_none());
+        assert!(credits_to_desc_v2("没有占位符", &credits(&[("a", "1")])).is_none());
+    }
+
+    #[test]
+    fn template_credits_accepts_web_form_and_config_shapes() {
+        let value = serde_json::json!([
+            {"uid": "2063092494", "username": "允崽来啦"},
+            {"uid": 22158819, "username": " @羊腿umer "},
+            {"uid": " 3 ", "username": "Nya Rime"},
+        ]);
+        assert_eq!(
+            template_credits(Some(&value)),
+            credits(&[
+                ("允崽来啦", "2063092494"),
+                ("羊腿umer", "22158819"),
+                ("Nya Rime", "3")
+            ])
+        );
+    }
+
+    #[test]
+    fn template_credits_skips_unusable_entries() {
+        let value = serde_json::json!([
+            {"uid": "", "username": "空uid"},
+            {"uid": "abc", "username": "非数字"},
+            {"uid": "1", "username": "  "},
+            {"username": "缺uid"},
+            null,
+            {"uid": "7", "username": "ok"},
+        ]);
+        assert_eq!(template_credits(Some(&value)), credits(&[("ok", "7")]));
+        assert!(template_credits(None).is_empty());
+        assert!(template_credits(Some(&serde_json::Value::Null)).is_empty());
+    }
+
+    fn fake_bilibili() -> BiliBili {
+        BiliBili {
+            client: reqwest::Client::new(),
+            login_info: serde_json::from_value(serde_json::json!({
+                "cookie_info": {"cookies": []},
+                "sso": [],
+                "token_info": {"access_token": "", "expires_in": 0, "mid": 0, "refresh_token": ""},
+                "platform": null
+            }))
+            .unwrap(),
+        }
+    }
+
+    fn template(description: &str, credits: serde_json::Value) -> UploadStreamer {
+        serde_json::from_value(serde_json::json!({
+            "id": 3,
+            "template_name": "羊",
+            "title": "羊腿umer%Y年%m月%d日直播回放",
+            "tid": 21,
+            "copyright": 1,
+            "description": description,
+            "tags": ["直播回放"],
+            "credits": credits,
+        }))
+        .unwrap()
+    }
+
+    fn recorder() -> Recorder {
+        use crate::server::infrastructure::models::StreamerInfo;
+        let date = chrono::DateTime::parse_from_rfc3339("2026-06-15T12:00:00Z")
+            .unwrap()
+            .to_utc();
+        Recorder::new(
+            None,
+            StreamerInfo::new(
+                "羊",
+                "https://live.bilibili.com/1",
+                "游戏日！来博弈了",
+                date,
+                "",
+            ),
+        )
+    }
+
+    /// `submit_by_app` / `submit_by_web` / `edit_by_*` 都是 `.json(studio)`，
+    /// 这里断言的就是发给 B 站的请求体。
+    #[tokio::test]
+    async fn build_studio_request_body_carries_credit_mentions() {
+        let upload_config = template(
+            "@credit %Y年%m月%d日直播回放-{title}",
+            serde_json::json!([{"uid": "22158819", "username": "羊腿umer"}]),
+        );
+        let studio = build_studio(&upload_config, &fake_bilibili(), Vec::new(), &recorder())
+            .await
+            .unwrap();
+        let body = serde_json::to_value(&studio).unwrap();
+        assert_eq!(
+            body["desc"],
+            "@羊腿umer   2026年06月15日直播回放-游戏日！来博弈了"
+        );
+        assert_eq!(body["desc_format_id"], 0);
+        assert_eq!(
+            body["desc_v2"],
+            serde_json::json!([
+                mention("羊腿umer", "22158819"),
+                text("  2026年06月15日直播回放-游戏日！来博弈了"),
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn build_studio_without_credits_keeps_desc_and_null_desc_v2() {
+        let upload_config = template("%Y年%m月%d日直播回放-{title}", serde_json::Value::Null);
+        let studio = build_studio(&upload_config, &fake_bilibili(), Vec::new(), &recorder())
+            .await
+            .unwrap();
+        let body = serde_json::to_value(&studio).unwrap();
+        assert_eq!(body["desc"], "2026年06月15日直播回放-游戏日！来博弈了");
+        assert!(body["desc_v2"].is_null());
     }
 }

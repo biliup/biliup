@@ -4,6 +4,7 @@ use crate::server::infrastructure::connection_pool::ConnectionManager;
 use crate::server::infrastructure::models::StreamerInfo;
 use crate::server::infrastructure::models::hook_step::{HookStep, process_video};
 use crate::server::workbench::index::tests::build_ts;
+use crate::server::workbench::markers::{self, MarkerChanges, NewMarker};
 use crate::server::workbench::recorder::{ClosedSegment, SessionRecorder, SessionTarget};
 use crate::server::workbench::store::{self, FinishedSegment, SegmentState};
 use bytes::Bytes;
@@ -292,6 +293,97 @@ async fn pinned_segments_wait_for_the_last_reference() {
         "弹幕文件不在这次 rm 的列表里，也没有记在分段上，不删"
     );
     assert_eq!(state(&pool, a).await, "deleted");
+}
+
+fn new_marker(at_ms: i64, lookback_ms: i64, lookahead_ms: i64) -> NewMarker {
+    NewMarker {
+        at_ms,
+        label: String::new(),
+        color: None,
+        created_by: None,
+        created_at: 1,
+        lookback_ms,
+        lookahead_ms,
+    }
+}
+
+/// 标记覆盖的分段在后处理 `rm` 时推迟删除；改名不动引用，改时间 / 范围时引用跟着换分段，
+/// 删掉标记后下一轮清理删除。没被标记的分段照常立即删。
+#[tokio::test]
+async fn marked_footage_waits_for_the_marker() {
+    let (dir, pool) = setup().await;
+    let s = session(&pool, 1_000_000).await;
+    let (a, a_path) = segment(&pool, dir.path(), s, "a.flv", 0, Some(60_000), 10).await;
+    let (b, b_path) = segment(&pool, dir.path(), s, "b.flv", 60_000, Some(120_000), 10).await;
+    let (c, c_path) = segment(&pool, dir.path(), s, "c.flv", 120_000, Some(180_000), 10).await;
+    let rm = [HookStep::Remove("rm".into())];
+    let after_upload = Retention::after_upload(pool.clone(), &Config::default());
+
+    // 100 s 处的标记，默认带前 60 s：盖住 a 的尾巴和 b
+    let marker = markers::insert(&pool, s, &new_marker(100_000, 60_000, 0))
+        .await
+        .unwrap();
+    process_video(&[&a_path, &b_path, &c_path], &rm, Some(&after_upload))
+        .await
+        .unwrap();
+    assert!(a_path.exists() && b_path.exists(), "被标记的分段不能立即删");
+    assert_eq!(state(&pool, a).await, "pending_delete");
+    assert_eq!(state(&pool, b).await, "pending_delete");
+    assert!(gone(&c_path), "没被标记的分段照常立即删");
+    assert_eq!(state(&pool, c).await, "deleted");
+    assert_eq!(pins(&pool, s).await, vec![1, 1, 0]);
+
+    let renamed = MarkerChanges {
+        label: Some("团战".into()),
+        ..Default::default()
+    };
+    markers::update(&pool, s, marker.id, &renamed)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(pins(&pool, s).await, vec![1, 1, 0], "改名不动引用");
+
+    let narrower = MarkerChanges {
+        lookback_ms: Some(10_000),
+        ..Default::default()
+    };
+    markers::update(&pool, s, marker.id, &narrower)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(pins(&pool, s).await, vec![0, 1, 0]);
+    assert_eq!(sweep_pending(&pool, now_ms()).await.unwrap(), 1);
+    assert!(gone(&a_path) && b_path.exists());
+
+    // 挪到仍在录的尾部，区间伸进还没写出来的时间：之后开出来的分段同样被引用
+    let (d, d_path) = segment(&pool, dir.path(), s, "d.flv", 180_000, None, 10).await;
+    let moved = MarkerChanges {
+        at_ms: Some(200_000),
+        lookahead_ms: Some(120_000),
+        ..Default::default()
+    };
+    markers::update(&pool, s, marker.id, &moved)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(pins(&pool, s).await, vec![0, 0, 0, 1]);
+    assert_eq!(sweep_pending(&pool, now_ms()).await.unwrap(), 1);
+    assert!(gone(&b_path) && d_path.exists());
+    finish(&pool, d, &d_path, 240_000, SegmentState::Finished).await;
+    let (e, e_path) = segment(&pool, dir.path(), s, "e.flv", 240_000, None, 10).await;
+    assert_eq!(pins(&pool, s).await, vec![0, 0, 0, 1, 1]);
+    finish(&pool, e, &e_path, 300_000, SegmentState::Finished).await;
+    process_video(&[&d_path, &e_path], &rm, Some(&after_upload))
+        .await
+        .unwrap();
+    assert_eq!(state(&pool, d).await, "pending_delete");
+    assert_eq!(state(&pool, e).await, "pending_delete");
+
+    assert!(markers::delete(&pool, s, marker.id).await.unwrap());
+    assert_eq!(pins(&pool, s).await, vec![0; 5]);
+    assert_eq!(sweep_pending(&pool, now_ms()).await.unwrap(), 2);
+    assert!(gone(&d_path) && gone(&e_path));
+    assert_eq!(state(&pool, e).await, "deleted");
 }
 
 #[tokio::test]

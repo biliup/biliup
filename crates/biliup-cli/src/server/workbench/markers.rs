@@ -7,13 +7,17 @@
 //! - 播放器报告的延迟（`latency_ms`，缓冲里还没播出的时长）是画面落后于服务端收到这段内容的时间；
 //! - 两者相减得到屏幕上那一帧到达服务端的墙钟，再经 [`live`] 换算成场次时间：优先用最近写盘的
 //!   观测，没有时用开段 / 关段锚点。
+//!
+//! 每个标记以 `marker:<id>` 的名义引用它覆盖的场次时间 `[at_ms − lookback_ms, at_ms + lookahead_ms]`
+//! （[`retention::pin`]），与标记的增删改在同一个事务里：被覆盖的分段在删除点推迟删除，标记删掉后
+//! 由清理任务删。
 
-use super::live;
+use super::{live, retention};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use serde::Serialize;
-use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
-use std::collections::HashMap;
+use sqlx::{Row, SqliteConnection};
+use std::collections::{BTreeSet, HashMap};
 use tracing::debug;
 
 /// 标记默认覆盖它之前多长（毫秒）。
@@ -118,6 +122,24 @@ pub fn watched_at_ms(session_id: i64, server_now: i64, timing: Timing) -> Option
     Some(anchor.session_ms_at(wall))
 }
 
+fn pin_owner(id: i64) -> String {
+    format!("marker:{id}")
+}
+
+/// 按标记当前的时间与范围登记（或改登记）它对分段的引用。
+async fn pin(conn: &mut SqliteConnection, marker: &Marker) -> sqlx::Result<()> {
+    let from_ms = marker.at_ms.saturating_sub(marker.lookback_ms).max(0);
+    let to_ms = marker.at_ms.saturating_add(marker.lookahead_ms);
+    retention::pin(
+        conn,
+        &pin_owner(marker.id),
+        marker.session_id,
+        from_ms,
+        to_ms,
+    )
+    .await
+}
+
 pub async fn insert(
     pool: &ConnectionPool,
     session_id: i64,
@@ -127,6 +149,7 @@ pub async fn insert(
         "INSERT INTO markers (session_id, at_ms, label, color, created_by, created_at, lookback_ms, lookahead_ms)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING {COLUMNS}"
     );
+    let mut tx = pool.begin().await?;
     let row = sqlx::query(&sql)
         .bind(session_id)
         .bind(marker.at_ms)
@@ -136,9 +159,12 @@ pub async fn insert(
         .bind(marker.created_at)
         .bind(marker.lookback_ms)
         .bind(marker.lookahead_ms)
-        .fetch_one(pool)
+        .fetch_one(&mut *tx)
         .await?;
-    Marker::from_row(&row)
+    let marker = Marker::from_row(&row)?;
+    pin(&mut tx, &marker).await?;
+    tx.commit().await?;
+    Ok(marker)
 }
 
 /// 场次的全部标记，按时间轴排序。
@@ -153,7 +179,7 @@ pub async fn list(pool: &ConnectionPool, session_id: i64) -> sqlx::Result<Vec<Ma
         .collect()
 }
 
-/// 改一个标记；标记不存在或不属于这一场时返回 `None`。
+/// 改一个标记；标记不存在或不属于这一场时返回 `None`。改了时间或范围时引用跟着改。
 pub async fn update(
     pool: &ConnectionPool,
     session_id: i64,
@@ -174,7 +200,8 @@ pub async fn update(
          WHERE id = ? AND session_id = ?
          RETURNING {COLUMNS}"
     );
-    sqlx::query(&sql)
+    let mut tx = pool.begin().await?;
+    let marker = sqlx::query(&sql)
         .bind(changes.at_ms)
         .bind(&changes.label)
         .bind(color_set)
@@ -183,21 +210,55 @@ pub async fn update(
         .bind(changes.lookahead_ms)
         .bind(id)
         .bind(session_id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut *tx)
         .await?
         .as_ref()
         .map(Marker::from_row)
-        .transpose()
+        .transpose()?;
+    let range_changed =
+        changes.at_ms.is_some() || changes.lookback_ms.is_some() || changes.lookahead_ms.is_some();
+    if let Some(marker) = &marker
+        && range_changed
+    {
+        pin(&mut tx, marker).await?;
+    }
+    tx.commit().await?;
+    Ok(marker)
 }
 
-/// 删一个标记，返回是否删到了。
+/// 删一个标记，返回是否删到了。它的引用一起撤销。
 pub async fn delete(pool: &ConnectionPool, session_id: i64, id: i64) -> sqlx::Result<bool> {
+    let mut tx = pool.begin().await?;
     let done = sqlx::query("DELETE FROM markers WHERE id = ? AND session_id = ?")
         .bind(id)
         .bind(session_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
-    Ok(done.rows_affected() > 0)
+    let deleted = done.rows_affected() > 0;
+    if deleted {
+        retention::unpin(&mut tx, &pin_owner(id)).await?;
+    }
+    tx.commit().await?;
+    Ok(deleted)
+}
+
+/// 给还没有登记引用的标记补登，返回补了几个。启动时调用，补上引用接入之前打的标记。
+pub async fn pin_unpinned(pool: &ConnectionPool) -> sqlx::Result<usize> {
+    let mut tx = pool.begin().await?;
+    let sessions: Vec<i64> = sqlx::query_scalar(
+        "INSERT INTO segment_pins (owner, session_id, from_ms, to_ms)
+         SELECT 'marker:' || m.id, m.session_id, MAX(m.at_ms - m.lookback_ms, 0), m.at_ms + m.lookahead_ms
+         FROM markers m
+         WHERE NOT EXISTS (SELECT 1 FROM segment_pins p WHERE p.owner = 'marker:' || m.id)
+         RETURNING session_id",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    for session_id in sessions.iter().collect::<BTreeSet<_>>() {
+        retention::refresh_pin_counts(&mut *tx, *session_id).await?;
+    }
+    tx.commit().await?;
+    Ok(sessions.len())
 }
 
 /// 几场各有多少个标记；没有标记的场次不在结果里。
@@ -221,6 +282,7 @@ mod tests {
     use super::*;
     use crate::server::infrastructure::connection_pool::ConnectionManager;
     use crate::server::workbench::index::tests::build_flv;
+    use crate::server::workbench::store;
     use std::time::{Duration, UNIX_EPOCH};
 
     async fn setup() -> (tempfile::TempDir, ConnectionPool, i64) {
@@ -313,6 +375,87 @@ mod tests {
         assert!(list(&pool, s).await.unwrap().is_empty());
         let negative = insert(&pool, s, &new_marker(-1)).await;
         assert!(negative.is_err(), "外键 / CHECK 拦住不存在的场次与负时间");
+    }
+
+    async fn pinned(pool: &ConnectionPool) -> Vec<(String, i64, i64)> {
+        sqlx::query_as("SELECT owner, from_ms, to_ms FROM segment_pins ORDER BY owner")
+            .fetch_all(pool)
+            .await
+            .unwrap()
+    }
+
+    async fn pin_count(pool: &ConnectionPool, segment: i64) -> i64 {
+        sqlx::query_scalar("SELECT pin_count FROM segments WHERE id = ?")
+            .bind(segment)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn markers_pin_their_range_until_deleted() {
+        let (_dir, pool, s) = setup().await;
+        let segment = store::insert_segment(&pool, s, "a.flv", "flv", 0, 0)
+            .await
+            .unwrap();
+        let m = insert(&pool, s, &new_marker(20_000)).await.unwrap();
+        let owner = format!("marker:{}", m.id);
+        assert_eq!(
+            pinned(&pool).await,
+            [(owner.clone(), 0, 20_000)],
+            "前 60 s 截到 0"
+        );
+        assert_eq!(pin_count(&pool, segment).await, 1);
+
+        let changes = MarkerChanges {
+            at_ms: Some(100_000),
+            lookahead_ms: Some(5_000),
+            ..Default::default()
+        };
+        update(&pool, s, m.id, &changes).await.unwrap().unwrap();
+        assert_eq!(pinned(&pool).await, [(owner.clone(), 40_000, 105_000)]);
+        assert!(
+            update(&pool, s + 1, m.id, &changes)
+                .await
+                .unwrap()
+                .is_none(),
+            "改不到别的场次的标记，引用也不动"
+        );
+        assert_eq!(pinned(&pool).await, [(owner, 40_000, 105_000)]);
+
+        assert!(!delete(&pool, s + 1, m.id).await.unwrap());
+        assert_eq!(pin_count(&pool, segment).await, 1);
+        assert!(delete(&pool, s, m.id).await.unwrap());
+        assert!(pinned(&pool).await.is_empty());
+        assert_eq!(pin_count(&pool, segment).await, 0);
+    }
+
+    #[tokio::test]
+    async fn markers_made_before_pinning_get_pinned_on_startup() {
+        let (_dir, pool, s) = setup().await;
+        let segment = store::insert_segment(&pool, s, "a.flv", "flv", 0, 0)
+            .await
+            .unwrap();
+        let m = insert(&pool, s, &new_marker(5_000)).await.unwrap();
+        let old: i64 = sqlx::query_scalar(
+            "INSERT INTO markers (session_id, at_ms, created_at, lookback_ms, lookahead_ms)
+             VALUES (?, 90000, 1, 60000, 1000) RETURNING id",
+        )
+        .bind(s)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(pin_unpinned(&pool).await.unwrap(), 1);
+        assert_eq!(
+            pinned(&pool).await,
+            [
+                (format!("marker:{}", m.id), 0, 5_000),
+                (format!("marker:{old}"), 30_000, 91_000)
+            ]
+        );
+        assert_eq!(pin_count(&pool, segment).await, 2);
+        assert_eq!(pin_unpinned(&pool).await.unwrap(), 0, "只补一次");
     }
 
     #[test]

@@ -1,7 +1,6 @@
 use crate::server::core::downloader::DownloaderType;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::models::hook_step::HookStep;
-use biliup::bilibili::Credit;
 use error_stack::{ResultExt, bail};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::Path, path::PathBuf};
@@ -319,6 +318,33 @@ pub struct Config {
     pub loggers_level: Option<String>,
 }
 
+/// 投稿模板 `credits` 的一项：简介里的一个 `@credit` 换成 @ 这个用户。
+///
+/// 与 Web 表单存进 `uploadstreamers.credits` 的形状相同；表单存的 uid 是字符串，
+/// 配置文件里通常写成数字，两种都接受，统一存成字符串。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TemplateCredit {
+    pub username: String,
+    #[serde(deserialize_with = "uid_from_number_or_string")]
+    pub uid: String,
+}
+
+fn uid_from_number_or_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Uid {
+        Number(u64),
+        Text(String),
+    }
+    Ok(match Uid::deserialize(deserializer)? {
+        Uid::Number(n) => n.to_string(),
+        Uid::Text(s) => s,
+    })
+}
+
 /// 主播配置结构体
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct StreamerConfig {
@@ -353,8 +379,9 @@ pub struct StreamerConfig {
     #[serde(default)]
     pub description: Option<String>,
 
+    /// 简介里 `@credit` 占位符依次替换成的用户
     #[serde(default)]
-    pub credits: Option<Vec<Credit>>,
+    pub credits: Option<Vec<TemplateCredit>>,
 
     #[serde(default)]
     pub dynamic: Option<String>,
@@ -746,6 +773,66 @@ mod tests {
             serde_json::from_str(r#"{"url":["https://example.com"],"tid":171}"#).unwrap();
         assert_eq!(cfg.tid, Some(171));
         assert!(cfg.tid_v2.is_none());
+    }
+
+    fn credit(username: &str, uid: &str) -> TemplateCredit {
+        TemplateCredit {
+            username: username.into(),
+            uid: uid.into(),
+        }
+    }
+
+    #[test]
+    fn toml_streamer_credits_follow_documented_format() {
+        let config: Config = toml::from_str(
+            r#"
+[streamers."羊腿"]
+url = ["https://live.bilibili.com/1"]
+description = "@credit 直播回放"
+credits = [
+  { username = "羊腿umer", uid = 22158819 },
+  { username = "允崽来啦", uid = "2063092494" },
+]
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.streamers["羊腿"].credits,
+            Some(vec![
+                credit("羊腿umer", "22158819"),
+                credit("允崽来啦", "2063092494"),
+            ])
+        );
+    }
+
+    #[test]
+    fn yaml_streamer_credits_follow_documented_format() {
+        let config: Config = serde_yaml::from_str(
+            r#"
+streamers:
+  羊腿:
+    url: [https://live.bilibili.com/1]
+    credits:
+      - username: 羊腿umer
+        uid: 22158819
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.streamers["羊腿"].credits,
+            Some(vec![credit("羊腿umer", "22158819")])
+        );
+    }
+
+    #[test]
+    fn template_credit_round_trips_web_form_shape() {
+        let raw = r#"{"uid":"2063092494","username":"允崽来啦"}"#;
+        let parsed: TemplateCredit = serde_json::from_str(raw).unwrap();
+        assert_eq!(parsed, credit("允崽来啦", "2063092494"));
+        assert_eq!(
+            serde_json::to_value(&parsed).unwrap(),
+            serde_json::json!({"username": "允崽来啦", "uid": "2063092494"})
+        );
     }
 
     #[test]
