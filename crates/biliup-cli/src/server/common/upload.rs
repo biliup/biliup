@@ -695,49 +695,11 @@ impl UActor {
 
     /// 运行Actor主循环，处理接收到的消息
     ///
-<<<<<<< Updated upstream
-    /// # 参数
-    /// * `msg` - 要处理的上传消息
-    async fn handle_message(&mut self, msg: UploaderMessage) {
-        match msg {
-            UploaderMessage::SegmentEvent(rx, ctx) => {
-                ctx.change_status(Stage::Upload, WorkerStatus::Pending)
-                    .await;
-                let inspect = rx.inspect(|f| {
-                    let pool = ctx.pool().clone();
-                    let session_id = ctx.id();
-                    let file = f.prev_file_path.display().to_string();
-                    tokio::spawn(async move {
-                        let result = InsertFileItem { file, session_id }.insert(&pool).await;
-                        info!(result=?result, "Insert file");
-                    });
-                });
-                let result = match ctx.upload_config() {
-                    Some(config) if config.is_noop_uploader() => {
-                        info!(
-                            uploader = ?config.uploader,
-                            "Skipping upload because uploader is Noop"
-                        );
-                        process_without_upload(inspect, &ctx).await
-                    }
-                    Some(config) => process_with_upload(inspect, &ctx, config).await,
-                    None => {
-                        let mut paths = Vec::new();
-                        pin!(inspect);
-                        while let Some(event) = inspect.next().await {
-                            paths.extend(segment_paths(&event));
-                        }
-                        // 无上传配置时，直接执行后处理
-                        execute_postprocessor(paths, &ctx).await
-                    }
-                };
-=======
     /// 同时处理的消息数不超过上传池容量，容量调整后立即生效。
     pub(crate) async fn run(self) {
         run_in_slots(self.receiver, self.slots, handle_message).await
     }
 }
->>>>>>> Stashed changes
 
 /// 按到达顺序取出消息，占到一个槽位后交给 `handle` 在独立任务里处理，处理完归还槽位。
 ///
@@ -783,15 +745,10 @@ async fn handle_message(msg: UploaderMessage) {
                 .await;
             let inspect = rx.inspect(|f| {
                 let pool = ctx.pool().clone();
-                let streamer_info_id = ctx.id();
+                let session_id = ctx.id();
                 let file = f.prev_file_path.display().to_string();
                 tokio::spawn(async move {
-                    let result = InsertFileItem {
-                        file,
-                        streamer_info_id,
-                    }
-                    .insert(&pool)
-                    .await;
+                    let result = InsertFileItem { file, session_id }.insert(&pool).await;
                     info!(result=?result, "Insert file");
                 });
             });

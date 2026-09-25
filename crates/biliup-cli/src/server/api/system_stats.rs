@@ -33,10 +33,10 @@ pub async fn get_system_stats(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::Router;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use axum::routing::get;
-    use axum::Router;
     use serde_json::Value;
     use tower::ServiceExt;
 
