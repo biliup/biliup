@@ -144,6 +144,8 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         "/v1/ws/live-rates" | "/v1/live-rates" if get => StreamerView,
         "/v1/sessions" | "/v1/sessions/{id}" | "/v1/sessions/{id}/keyframes" if get => FileView,
         "/v1/sessions/{id}/media" if get => PreviewView,
+        // 与 /v1/status 同级：三个角色都能看首页的系统状态
+        "/v1/system-stats" if get => StreamerView,
         "/v1/configuration" if get => ConfigView,
         "/v1/configuration" if method == Method::PUT => ConfigEdit,
         "/v1/streamer-info" | "/v1/streamer-info/files/{id}" if get => StreamerView,

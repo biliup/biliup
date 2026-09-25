@@ -13,8 +13,8 @@ import { platformName } from './status'
  *  - /v1/videos         录制文件列表(轮询慢:30s,用于文件总量 / 今日新增 / 事件流)
  *  - /v1/status         服务版本等(轮询慢:30s,仅用于可达性)
  *
- * 设计说明:后端没有"错误/磁盘占用"等指标,因此控制台不展示虚构数据,
- * KPI 全部来自上述接口的真实聚合。
+ * 设计说明:控制台不展示虚构数据,KPI 全部来自上述接口的真实聚合;
+ * CPU / 内存 / 磁盘 / 网速由 use-system-stats 单独轮询 /v1/system-stats。
  */
 
 /** 直播中(后端 WorkerStatus Debug 字符串,已验证与 WorkerStatus 枚举一致) */
