@@ -25,6 +25,8 @@ const VISIBLE_CONFIG_KEYS: &[&str] = &[
     "pool1_size",
     "pool2_size",
     "live_merge_minutes",
+    "retention_hours",
+    "min_free_space",
     "preview_transport",
     "use_live_cover",
     "douyu_cdn",

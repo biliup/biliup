@@ -273,7 +273,7 @@ pub async fn insert_segment(
     start_ms: i64,
     gap_before_ms: i64,
 ) -> sqlx::Result<i64> {
-    sqlx::query_scalar(
+    let id = sqlx::query_scalar(
         "INSERT INTO segments (session_id, path, container, state, start_ms, gap_before_ms)
          VALUES (?, ?, ?, 'recording', ?, ?) RETURNING id",
     )
@@ -283,7 +283,9 @@ pub async fn insert_segment(
     .bind(start_ms)
     .bind(gap_before_ms)
     .fetch_one(pool)
-    .await
+    .await?;
+    super::retention::refresh_pin_counts(pool, session_id).await?;
+    Ok(id)
 }
 
 /// 分段收尾时写入的字段。
@@ -297,25 +299,31 @@ pub struct FinishedSegment {
     pub danmaku_path: Option<String>,
 }
 
+/// 关段写入。删除点可能赶在关段事件落库之前处理了这个分段（过滤删除与关段几乎同时发生），
+/// 这时它已定下的 `pending_delete` / `deleted` 不被覆盖。
 pub async fn finish_segment(
     pool: &ConnectionPool,
     id: i64,
     segment: &FinishedSegment,
 ) -> sqlx::Result<()> {
-    sqlx::query(
-        "UPDATE segments SET path = ?, state = ?, end_ms = ?, bytes = ?, index_path = ?,
+    let session_id: Option<i64> = sqlx::query_scalar(
+        "UPDATE segments SET path = ?, end_ms = ?, bytes = ?, index_path = ?,
+             state = CASE WHEN state IN ('pending_delete', 'deleted') THEN state ELSE ? END,
              danmaku_path = COALESCE(?, danmaku_path)
-         WHERE id = ?",
+         WHERE id = ? RETURNING session_id",
     )
     .bind(&segment.path)
-    .bind(segment.state.as_str())
     .bind(segment.end_ms)
     .bind(segment.bytes)
     .bind(&segment.index_path)
+    .bind(segment.state.as_str())
     .bind(&segment.danmaku_path)
     .bind(id)
-    .execute(pool)
+    .fetch_optional(pool)
     .await?;
+    if let Some(session_id) = session_id {
+        super::retention::refresh_pin_counts(pool, session_id).await?;
+    }
     Ok(())
 }
 

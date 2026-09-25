@@ -590,12 +590,14 @@ mod tests {
     #[test]
     fn segment_paths_under_the_current_dir_drop_the_dot_prefix() {
         let (tx, mut rx) = unbounded_channel();
-        let opened = segment_start_hook(tx.clone());
-        let closed = segment_complete_hook(tx);
-        let inputs = ["./x.flv", "./sub/y.flv", "/data/z.flv", "w.flv"];
-        for (index, path) in inputs.iter().enumerate() {
-            opened(std::path::Path::new(path), index as u32);
-            closed(std::path::Path::new(path), index as u32, 1.0, 10, None);
+        let start = segment_start_hook(tx.clone());
+        let complete = segment_complete_hook(tx);
+        for (i, path) in ["./x.flv", "./sub/y.flv", "/data/z.flv", "w.flv"]
+            .into_iter()
+            .enumerate()
+        {
+            start(std::path::Path::new(path), i as u32);
+            complete(std::path::Path::new(path), i as u32, 1.0, 10, None);
         }
 
         let events: Vec<(bool, PathBuf)> = std::iter::from_fn(|| rx.try_recv().ok())
@@ -606,7 +608,7 @@ mod tests {
             .collect();
         let expected: Vec<(bool, PathBuf)> = ["x.flv", "sub/y.flv", "/data/z.flv", "w.flv"]
             .into_iter()
-            .flat_map(|path| [(true, PathBuf::from(path)), (false, PathBuf::from(path))])
+            .flat_map(|p| [(true, PathBuf::from(p)), (false, PathBuf::from(p))])
             .collect();
         assert_eq!(events, expected);
     }
