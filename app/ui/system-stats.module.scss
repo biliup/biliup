@@ -1,0 +1,138 @@
+/* 控制台首页的系统状态卡片。与概览条、事件卡片同一套底色 / 边框 / 阴影。 */
+
+.panel {
+  margin-bottom: 28px;
+}
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+}
+.label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--semi-color-text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+.note {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  font-variant-numeric: tabular-nums;
+}
+.notice {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(var(--semi-orange-4), 0.12);
+  color: rgb(var(--semi-orange-5));
+  font-size: 13px;
+  border: 1px solid rgba(var(--semi-orange-4), 0.32);
+  overflow-wrap: anywhere;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 14px 16px 12px;
+  background: var(--semi-color-bg-1);
+  border: 1px solid var(--semi-color-fill-2);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(var(--semi-grey-9), 0.04), 0 2px 6px rgba(var(--semi-grey-9), 0.03);
+}
+.tileHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.tileTitle {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--semi-color-text-1);
+  flex-shrink: 0;
+}
+.tileMeta {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  justify-content: flex-end;
+}
+.path {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+.tileValue {
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 28px;
+  color: var(--semi-color-text-0);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tileBody {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.tileFoot {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bar {
+  width: 100%;
+}
+.placeholder {
+  color: var(--semi-color-text-3);
+  user-select: none;
+}
+.net {
+  display: inline-flex;
+  gap: 12px;
+  font-size: 18px;
+}
+.rx {
+  color: rgb(var(--semi-cyan-5));
+}
+.tx {
+  color: rgb(var(--semi-violet-5));
+}
+
+@media (max-width: 1100px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 520px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  .head {
+    flex-direction: column;
+    gap: 2px;
+  }
+}
