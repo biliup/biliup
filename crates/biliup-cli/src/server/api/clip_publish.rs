@@ -26,9 +26,11 @@ use crate::server::workbench::recorder::now_ms;
 use crate::server::workbench::store;
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::{Path, Query, State};
+use axum::extract::rejection::BytesRejection;
+use axum::extract::{DefaultBodyLimit, FromRef, Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use axum::routing::{MethodRouter, get};
 use biliup::client::StatelessClient;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::Arc;
@@ -561,6 +563,23 @@ async fn live_cover(
     }
 }
 
+const COVER_TOO_LARGE: &str = "封面图片最大 5 MB，压缩或裁小一点再上传";
+
+/// `/v1/clips/{cid}/cover` 的 GET / PUT / DELETE。上传的图片最大 [`thumb::MAX_JPEG_BYTES`]，
+/// 比 axum 默认的请求体上限（2 MB）大，所以只在这条路由上放宽。
+pub fn cover_route<S>() -> MethodRouter<S>
+where
+    S: Clone + Send + Sync + 'static,
+    ConnectionPool: FromRef<S>,
+    Arc<ClipExports>: FromRef<S>,
+    StatelessClient: FromRef<S>,
+{
+    get(get_clip_cover)
+        .put(put_clip_cover)
+        .delete(delete_clip_cover)
+        .layer(DefaultBodyLimit::max(thumb::MAX_JPEG_BYTES))
+}
+
 /// `PUT /v1/clips/{cid}/cover`：JSON `{"t": 毫秒}` 取帧、`{"live": true}` 用直播间封面，
 /// 或者直接上传图片（`Content-Type: image/jpeg|png|webp`，最大 5 MB）。存好后切片的发布设置改用它。
 pub async fn put_clip_cover(
@@ -569,8 +588,15 @@ pub async fn put_clip_cover(
     State(client): State<StatelessClient>,
     Path(cid): Path<i64>,
     headers: HeaderMap,
-    body: Bytes,
+    body: Result<Bytes, BytesRejection>,
 ) -> Response {
+    let body = match body {
+        Ok(body) => body,
+        Err(rejection) if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE => {
+            return (StatusCode::PAYLOAD_TOO_LARGE, COVER_TOO_LARGE).into_response();
+        }
+        Err(rejection) => return rejection.into_response(),
+    };
     let clip = match clips::get(&pool, cid).await {
         Ok(Some(clip)) => clip,
         Ok(None) => return clip_not_found(),
@@ -601,7 +627,7 @@ pub async fn put_clip_cover(
         }
     } else {
         if body.len() > thumb::MAX_JPEG_BYTES {
-            return (StatusCode::PAYLOAD_TOO_LARGE, "封面图片最大 5 MB").into_response();
+            return (StatusCode::PAYLOAD_TOO_LARGE, COVER_TOO_LARGE).into_response();
         }
         if image_type(&body).is_none() {
             return (

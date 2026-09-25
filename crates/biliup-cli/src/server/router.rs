@@ -2,8 +2,8 @@ use crate::server::api::bilibili_endpoints::{
     archive_pre_endpoint, get_user_archives_endpoint, get_user_profile_endpoint,
 };
 use crate::server::api::clip_publish::{
-    delete_clip_cover, get_clip_cover, get_session_thumb, list_publish_jobs, preview_publish,
-    publish_batch, publish_clip, put_clip_cover, remove_publish, resume_publish, retry_publish,
+    cover_route, get_session_thumb, list_publish_jobs, preview_publish, publish_batch,
+    publish_clip, remove_publish, resume_publish, retry_publish,
 };
 use crate::server::api::clips::{
     create_clip, delete_clip, download_clip, export_clip, get_clip, list_clips, update_clip,
@@ -93,12 +93,7 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         .route("/v1/clips/{cid}/download", get(download_clip))
         // 切片工作台：发布（导出 → 上传 → 投稿；一律转载，来源默认直播间地址）
         .route("/v1/clips/{cid}/publish", post(publish_clip))
-        .route(
-            "/v1/clips/{cid}/cover",
-            get(get_clip_cover)
-                .put(put_clip_cover)
-                .delete(delete_clip_cover),
-        )
+        .route("/v1/clips/{cid}/cover", cover_route())
         .route("/v1/sessions/{id}/thumb", get(get_session_thumb))
         .route(
             "/v1/publish-jobs",

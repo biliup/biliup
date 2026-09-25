@@ -179,12 +179,7 @@ async fn fixture() -> Fixture {
         )
         .route("/v1/clips/{cid}", get(get_clip))
         .route("/v1/clips/{cid}/publish", post(publish_clip))
-        .route(
-            "/v1/clips/{cid}/cover",
-            get(get_clip_cover)
-                .put(put_clip_cover)
-                .delete(delete_clip_cover),
-        )
+        .route("/v1/clips/{cid}/cover", cover_route())
         .route("/v1/sessions/{id}/thumb", get(get_session_thumb))
         .route(
             "/v1/publish-jobs",
@@ -874,6 +869,51 @@ async fn covers_and_publish_settings_are_stored_on_the_clip() {
     let response = send(&f.app, Some(&op), "DELETE", &one, None).await;
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     assert!(!file.exists());
+}
+
+/// 上传的封面按 5 MB 算，不是 axum 默认的 2 MB 请求体上限；超了给一句能照着做的话。
+#[tokio::test]
+async fn cover_uploads_up_to_five_megabytes_are_accepted() {
+    let f = fixture().await;
+    let op = login(&f.app, "op", "operator-password").await;
+    let id = f.clip(&op, 1000, 2000, "a").await;
+    let cover = format!("/v1/clips/{id}/cover");
+
+    let mut three_mb = png();
+    three_mb.resize(3 * 1024 * 1024, 0);
+    let over = json_of(
+        send_bytes(&f.app, &op, &cover, "image/png", three_mb.clone()).await,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(over["cover"], json!({ "source": "upload" }));
+    let response = send(&f.app, Some(&op), "GET", &cover, None).await;
+    assert_eq!(body_of(response, StatusCode::OK).await, three_mb);
+
+    let mut limit = png();
+    limit.resize(thumb::MAX_JPEG_BYTES, 0);
+    let response = send_bytes(&f.app, &op, &cover, "image/png", limit).await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let mut six_mb = png();
+    six_mb.resize(6 * 1024 * 1024, 0);
+    let response = send_bytes(&f.app, &op, &cover, "image/png", six_mb).await;
+    let message = text_of(response, StatusCode::PAYLOAD_TOO_LARGE).await;
+    assert!(message.contains("最大 5 MB"), "{message}");
+
+    // 不带 Content-Length（分块上传）也一样
+    let request = Request::builder()
+        .method("PUT")
+        .uri(&cover)
+        .header(header::COOKIE, &op)
+        .header(header::CONTENT_TYPE, "image/jpeg")
+        .body(Body::from_stream(futures::stream::iter(
+            (0..6).map(|_| Ok::<_, std::io::Error>(vec![0xff; 1024 * 1024])),
+        )))
+        .unwrap();
+    let response = f.app.clone().oneshot(request).await.unwrap();
+    let message = text_of(response, StatusCode::PAYLOAD_TOO_LARGE).await;
+    assert!(message.contains("最大 5 MB"), "{message}");
 }
 
 /// 用系统的 FFmpeg 编一段真的 H.264 FLV，取帧、存成封面。没有 FFmpeg 时跳过。
