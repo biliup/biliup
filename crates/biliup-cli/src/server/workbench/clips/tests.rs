@@ -220,6 +220,20 @@ async fn the_growing_tail_is_waited_for_until_a_keyframe_follows_the_out_point()
         plan::compute(&pool, session, 3100, 3900).await.unwrap(),
         Attempt::Wait
     ));
+
+    // 分段收尾改名去掉 `.part`，分段表还没更新：接着等，不报文件不见了；已经算好的计划照样能剪
+    let finished = dir.path().join("live.flv");
+    std::fs::rename(&path, &finished).unwrap();
+    index::remove(&path);
+    assert!(matches!(
+        plan::compute(&pool, session, 3100, 3900).await.unwrap(),
+        Attempt::Wait
+    ));
+    let out = dir.path().join("out.flv");
+    let done = super::remux::to_file(&plan, &out, &mut |_| {})
+        .await
+        .unwrap();
+    assert_eq!(done.duration_ms, 2000);
 }
 
 #[tokio::test]

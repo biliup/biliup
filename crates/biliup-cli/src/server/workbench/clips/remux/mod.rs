@@ -115,7 +115,7 @@ async fn write<W: AsyncWrite + Unpin>(
     let mut buf = Vec::with_capacity(READ_CHUNK);
     let mut output = Vec::with_capacity(READ_CHUNK + 64 * 1024);
     for (i, piece) in plan.pieces.iter().enumerate() {
-        let mut file = File::open(&piece.path).await?;
+        let mut file = super::plan::open_segment(&piece.path).await?;
         if i == 0 {
             let region = dvr::read_at(&mut file, 0, piece.header_len as usize).await?;
             cut.header(&region, &mut output)?;

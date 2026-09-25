@@ -17,7 +17,7 @@ use super::super::store::{self, SegmentRow, SegmentState};
 use super::super::{readable, segment_index};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tokio::fs::File;
 
@@ -121,13 +121,26 @@ fn unavailable(segment: &SegmentRow) -> PlanError {
     ))
 }
 
+/// 打开分段文件。录制中的分段收尾时会从 `x.flv.part` 改名成 `x.flv`，手上的路径可能还是改名前的。
+pub(super) async fn open_segment(path: &Path) -> io::Result<File> {
+    match File::open(path).await {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            match path.to_str().and_then(|p| p.strip_suffix(".part")) {
+                Some(renamed) => File::open(renamed).await,
+                None => Err(e),
+            }
+        }
+        opened => opened,
+    }
+}
+
 async fn fingerprint(
     container: Container,
-    path: &PathBuf,
+    path: &Path,
     header_len: u64,
     keyframe: u64,
 ) -> io::Result<Vec<u8>> {
-    let mut file = File::open(path).await?;
+    let mut file = open_segment(path).await?;
     let region = dvr::read_at(&mut file, 0, header_len as usize).await?;
     Ok(match container {
         Container::Flv => flv::Header::parse(&region)?.fingerprint(),
@@ -167,8 +180,13 @@ pub async fn compute(
     let mut first_fingerprint: Option<Vec<u8>> = None;
     let mut cut_out_ms = None;
     for segment in &segments {
+        let recording = segment.state == SegmentState::Recording;
         let index: KeyframeIndex = match segment_index(segment).await {
             Ok(index) => index,
+            // 正在收尾改名，分段表马上会记上新路径
+            Err(e) if e.kind() == io::ErrorKind::NotFound && recording => {
+                return Ok(Attempt::Wait);
+            }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 return Err(PlanError::Unavailable(format!(
                     "所选范围里 {} 起的那段录像文件不见了，剪不了；把范围挪开这一段后重试",
@@ -187,7 +205,7 @@ pub async fn compute(
             index.keyframes.first().copied()
         };
         let Some(start) = start else {
-            if segment.state == SegmentState::Recording {
+            if recording {
                 return Ok(Attempt::Wait);
             }
             continue;
@@ -223,7 +241,7 @@ pub async fn compute(
                 true,
             ),
             None => match segment.end_ms {
-                Some(end_ms) if segment.state != SegmentState::Recording => (
+                Some(end_ms) if !recording => (
                     file_len(&path).await?,
                     index.duration_ms.max(start.t_ms),
                     end_ms,
