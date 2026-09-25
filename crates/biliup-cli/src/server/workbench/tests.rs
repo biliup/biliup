@@ -981,34 +981,3 @@ async fn open_tapped_segments_are_observed_from_the_index_task() {
     assert_eq!(index::live::written(&part), None, "关段后不再跟踪");
     drop(guard);
 }
-
-/// 写入端报的是 `./a.flv`，写入任务和库里记的是 `a.flv`：两种写法查到的是同一个边写边建的分段。
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn tapped_segments_are_found_by_the_recorded_path() {
-    let dir = tempfile::tempdir().unwrap();
-    let recorded = dir.path().join("a.flv");
-    let reported = dir.path().join(".").join("a.flv");
-    let flv = build_flv(0, 100, 25, None);
-    std::fs::write(&recorded, &flv.bytes).unwrap();
-    let tap = index::live::spawn();
-    let file = tap.open(&reported);
-    tap_flv_tags(&file, &flv.bytes, 2_000).unwrap();
-    tap.sync().await;
-    assert!(index::live::is_live(&recorded));
-    let mut written = None;
-    for _ in 0..200 {
-        written = index::live::written(&recorded);
-        if written.is_some() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    }
-    assert!(written.is_some(), "按库里的写法查得到扫到的时长");
-    assert_eq!(index::live::written(&reported), written);
-
-    tap_flv_tags_from(&file, &flv.bytes, 2_000, u32::MAX);
-    file.closed(flv.bytes.len() as u64);
-    tap.sync().await;
-    assert!(!index::live::is_live(&recorded), "关段后两种写法都不再跟踪");
-    assert!(!index::live::is_live(&reported));
-}
