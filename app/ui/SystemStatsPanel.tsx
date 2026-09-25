@@ -76,6 +76,20 @@ export default function SystemStatsPanel() {
   const netYs = useMemo(() => [series.rx, series.tx], [series])
   const last = snap.samples.length > 0 ? snap.samples[snap.samples.length - 1] : null
   const hasCurve = series.xs.length >= 2
+  const summary = useMemo(() => {
+    let cpuMax = 0
+    let cpuSum = 0
+    let rxMax = 0
+    let txMax = 0
+    for (const s of snap.samples) {
+      cpuMax = Math.max(cpuMax, s.cpu)
+      cpuSum += s.cpu
+      rxMax = Math.max(rxMax, s.rx)
+      txMax = Math.max(txMax, s.tx)
+    }
+    const n = snap.samples.length
+    return { cpuMax, cpuAvg: n > 0 ? cpuSum / n : 0, rxMax, txMax }
+  }, [snap.samples])
 
   const cpu = latest?.cpu ?? null
   const memory = latest?.memory ?? null
@@ -94,6 +108,7 @@ export default function SystemStatsPanel() {
         : null
 
   const minutes = Math.round(windowMs / 60000)
+  const idleText = latest ? '正在积累采样…' : snap.error ? null : '加载中…'
 
   return (
     <section className={styles.panel} aria-label="系统状态">
@@ -122,12 +137,17 @@ export default function SystemStatsPanel() {
             ) : null
           }
           value={last ? `${last.cpu.toFixed(1)}%` : <Placeholder />}
+          foot={
+            last
+              ? `峰值 ${summary.cpuMax.toFixed(1)}% · 平均 ${summary.cpuAvg.toFixed(1)}%`
+              : null
+          }
         >
           {hasCurve ? (
             <SystemChart kind="cpu" xs={series.xs} ys={cpuYs} windowMs={windowMs} height={CHART_HEIGHT} />
           ) : (
             <Text type="tertiary" size="small">
-              {latest ? '正在积累采样…' : '加载中…'}
+              {idleText}
             </Text>
           )}
         </Tile>
@@ -206,12 +226,15 @@ export default function SystemStatsPanel() {
               <Placeholder />
             )
           }
+          foot={
+            last ? `峰值 ↓ ${formatRate(summary.rxMax)} · ↑ ${formatRate(summary.txMax)}` : null
+          }
         >
           {hasCurve ? (
             <SystemChart kind="net" xs={series.xs} ys={netYs} windowMs={windowMs} height={CHART_HEIGHT} />
           ) : (
             <Text type="tertiary" size="small">
-              {latest ? '正在积累采样…' : '加载中…'}
+              {idleText}
             </Text>
           )}
         </Tile>

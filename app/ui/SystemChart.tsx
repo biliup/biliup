@@ -9,13 +9,16 @@ import styles from './system-chart.module.scss'
  * 控制台系统状态卡片里的小折线（uPlot）。本模块整体懒加载（见 `SystemStatsPanel`），
  * 与写盘速率图共用 uPlot 的 chunk。
  *
- * - `cpu`：一条线，Y 轴固定 0–100%；
+ * - `cpu`：一条线，Y 轴上限随窗口最大值（至少 25%、至多 100%），低负载时曲线不会贴底；
  * - `net`：下行 / 上行两条线，单位按窗口最大值选 KB/s / MB/s。
  *
  * 不画坐标轴，hover 显示时刻与读数。配色每次绘制时从 Semi 的 CSS 变量读，切换深浅色不用重建实例。
  */
 
 export type SystemChartKind = 'cpu' | 'net'
+
+/** CPU 图 Y 轴上限的下限（%） */
+const CPU_MIN_TOP = 25
 
 interface Props {
   kind: SystemChartKind
@@ -46,7 +49,7 @@ function hhmmss(sec: number): string {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`
 }
 
-function netMax(u: uPlot): number {
+function seriesMax(u: uPlot): number {
   let max = 0
   for (let i = 1; i < u.data.length; i++) {
     for (const v of u.data[i] ?? []) if (v !== null && v !== undefined && v > max) max = v
@@ -85,8 +88,8 @@ function buildOptions(kind: SystemChartKind, width: number, height: number, wind
       },
       y: {
         range: (u) => {
-          if (kind === 'cpu') return [0, 100]
-          const max = netMax(u)
+          const max = seriesMax(u)
+          if (kind === 'cpu') return [0, Math.min(100, Math.max(CPU_MIN_TOP, max * 1.15))]
           return [0, max > 0 ? max * 1.15 : 1]
         },
       },
@@ -128,7 +131,7 @@ export default function SystemChart({ kind, xs, ys, windowMs, height }: Props) {
             const v = u.data[1][idx]
             text = v === null || v === undefined ? '—' : `${v.toFixed(1)}%`
           } else {
-            const unit = rateUnit(netMax(u))
+            const unit = rateUnit(seriesMax(u))
             const rx = u.data[1][idx]
             const tx = u.data[2][idx]
             const fmt = (v: number | null | undefined) => (v === null || v === undefined ? '—' : formatInUnit(v, unit))
