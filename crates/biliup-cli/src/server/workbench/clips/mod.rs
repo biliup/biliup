@@ -415,9 +415,8 @@ pub async fn fail_export(
 
 pub const INTERRUPTED: &str = "导出被服务重启打断，请重试";
 
-/// 启动时把上次没导出完的切片记为失败（后台任务随进程没了），`root` 下各场次目录里写了一半的
-/// `.part` 删掉。
-pub async fn recover(pool: &ConnectionPool, root: &Path, now: i64) -> sqlx::Result<u64> {
+/// 启动时删掉 `root` 下各场次目录里上次写了一半的 `.part`。
+pub fn remove_leftovers(root: &Path) {
     let leftovers = std::fs::read_dir(root)
         .into_iter()
         .flatten()
@@ -432,6 +431,10 @@ pub async fn recover(pool: &ConnectionPool, root: &Path, now: i64) -> sqlx::Resu
             warn!(path = %path.display(), error = %e, "删除没写完的切片文件失败");
         }
     }
+}
+
+/// 启动时把上次没导出完的切片记为失败（后台任务随进程没了）。
+pub async fn recover(pool: &ConnectionPool, now: i64) -> sqlx::Result<u64> {
     let done = sqlx::query(
         "UPDATE clips SET state = 'failed', error = ?, updated_at = ? WHERE state = 'exporting'",
     )
