@@ -12,6 +12,7 @@
 //! 文件，分段关闭时由 [`super::refresh`] 从那里扫盘补齐。外部进程下载器没有旁路，同样在关段时扫。
 
 use super::{Container, KeyframeIndex, Source, flv, save};
+use crate::server::workbench::segment_path;
 use biliup::downloader::index_tap::{IndexEvent, IndexTap, TapFile};
 use bytes::Bytes;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -35,6 +36,7 @@ const SCAN_STEP: u64 = 64 * 1024;
 const FLV_FIRST_TAG: u64 = 13;
 
 /// 正在边写边建索引的分段，以及扫到的时长与扫到那里时的墙钟（见 [`written`]）。
+/// 键按库里的分段路径写法（[`segment_path`]）：写入端可能报 `./x.flv`，查询方拿的是 `x.flv`。
 static LIVE: LazyLock<Mutex<HashMap<PathBuf, Option<Written>>>> = LazyLock::new(Mutex::default);
 static UPDATES: LazyLock<watch::Sender<u64>> = LazyLock::new(|| watch::channel(0).0);
 
@@ -54,25 +56,25 @@ fn updated() {
 
 /// `path` 正由某个索引任务边写边建索引，它的 `.idx` 缓存就是最新的，不用扫盘。
 pub fn is_live(path: &Path) -> bool {
-    LIVE.lock().unwrap().contains_key(path)
+    LIVE.lock().unwrap().contains_key(&segment_path(path))
 }
 
 /// 边写边建索引的分段目前写到哪里：时长只在变长时更新，墙钟是第一次扫到这个时长的时刻，
 /// 所以它不晚于写入端真正交出这些内容的时刻太多（一批事件的处理时间）。
 /// 不在边写边建、或还没见到关键帧时为 `None`。
 pub fn written(path: &Path) -> Option<Written> {
-    *LIVE.lock().unwrap().get(path)?
+    *LIVE.lock().unwrap().get(&segment_path(path))?
 }
 
 fn register(path: &Path) {
-    LIVE.lock().unwrap().insert(path.to_path_buf(), None);
+    LIVE.lock().unwrap().insert(segment_path(path), None);
 }
 
 fn advance(path: &Path, index: &KeyframeIndex) {
     if index.base_ts.is_none() {
         return;
     }
-    if let Some(written) = LIVE.lock().unwrap().get_mut(path)
+    if let Some(written) = LIVE.lock().unwrap().get_mut(&segment_path(path))
         && written.is_none_or(|(ms, _)| ms < index.duration_ms)
     {
         *written = Some((
@@ -83,7 +85,7 @@ fn advance(path: &Path, index: &KeyframeIndex) {
 }
 
 fn unregister(path: &Path) {
-    LIVE.lock().unwrap().remove(path);
+    LIVE.lock().unwrap().remove(&segment_path(path));
     updated();
 }
 
