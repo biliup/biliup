@@ -117,6 +117,19 @@ pub struct Config {
     #[serde(default = "default_live_merge_minutes")]
     pub live_merge_minutes: u64,
 
+    /// 投稿后保留录像的小时数：后处理 `rm`、边录边传投稿后删除临时文件时，录像先留这么久，
+    /// 到期后由每分钟一次的清理任务删除。0（默认）= 立即删除，与以前一样。
+    /// 被切片工作台引用、或所在场次设了「保留这场」的分段，不论这里怎么设都会等引用释放后再删。
+    #[builder(default)]
+    #[serde(default)]
+    pub retention_hours: u64,
+
+    /// 录像所在磁盘的最低可用空间（字节）：低于它时，每分钟一次按「没被引用的最旧 → 被引用的最旧」
+    /// 删已录完的分段，直到回到阈值以上。只删切片工作台记录过的分段，不删正在录的。
+    /// 空或 0（默认）= 不启用。
+    #[serde(default)]
+    pub min_free_space: Option<u64>,
+
     /// 直播预览的取流方式：`relay`（默认，复用正在录制的那一路、经 biliup 中转，不多拉 CDN）
     /// 或 `direct`（浏览器直接向 CDN 拉一路，省服务器带宽；平台不支持时自动回落中转）。
     /// `None` 视同 `relay`。

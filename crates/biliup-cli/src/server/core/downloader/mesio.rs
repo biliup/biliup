@@ -589,23 +589,25 @@ mod tests {
     #[test]
     fn segment_paths_under_the_current_dir_drop_the_dot_prefix() {
         let (tx, mut rx) = unbounded_channel();
-        let open = segment_start_hook(tx.clone());
-        let close = segment_complete_hook(tx);
-        let inputs = ["./x.flv", "./sub/y.flv", "/data/z.flv", "w.flv"];
-        for (i, path) in inputs.into_iter().enumerate() {
-            open(std::path::Path::new(path), i as u32);
-            close(std::path::Path::new(path), i as u32, 1.0, 10, None);
+        let start = segment_start_hook(tx.clone());
+        let complete = segment_complete_hook(tx);
+        for (i, path) in ["./x.flv", "./sub/y.flv", "/data/z.flv", "w.flv"]
+            .into_iter()
+            .enumerate()
+        {
+            start(std::path::Path::new(path), i as u32);
+            complete(std::path::Path::new(path), i as u32, 1.0, 10, None);
         }
 
-        let events: Vec<(&str, PathBuf)> = std::iter::from_fn(|| rx.try_recv().ok())
+        let events: Vec<(bool, PathBuf)> = std::iter::from_fn(|| rx.try_recv().ok())
             .map(|event| match event {
-                WriterEvent::Opened(path) => ("open", path),
-                WriterEvent::Closed(path, ..) => ("close", path),
+                WriterEvent::Opened(path) => (true, path),
+                WriterEvent::Closed(path, ..) => (false, path),
             })
             .collect();
-        let expected: Vec<(&str, PathBuf)> = ["x.flv", "sub/y.flv", "/data/z.flv", "w.flv"]
+        let expected: Vec<(bool, PathBuf)> = ["x.flv", "sub/y.flv", "/data/z.flv", "w.flv"]
             .into_iter()
-            .flat_map(|path| [("open", path.into()), ("close", path.into())])
+            .flat_map(|p| [(true, PathBuf::from(p)), (false, PathBuf::from(p))])
             .collect();
         assert_eq!(events, expected);
     }

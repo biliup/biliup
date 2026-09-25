@@ -145,6 +145,7 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         "/v1/configuration" if get => ConfigView,
         "/v1/configuration" if method == Method::PUT => ConfigEdit,
         "/v1/streamer-info" | "/v1/streamer-info/files/{id}" if get => StreamerView,
+        "/v1/sessions/{id}" if method == Method::PATCH => RecordingControl,
         "/v1/upload/streamers" | "/v1/upload/streamers/{id}" if get => StreamerView,
         "/v1/upload/streamers" if method == Method::POST => TemplateEdit,
         "/v1/upload/streamers/{id}" if method == Method::DELETE => TemplateEdit,
@@ -219,7 +220,13 @@ mod tests {
             "/v1/me",
             "/v1/me/password",
         ];
-        let methods = [Method::GET, Method::POST, Method::PUT, Method::DELETE];
+        let methods = [
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+        ];
         let mut seen = 0;
         for source in sources {
             for route in registered_routes(non_test_source(source)) {

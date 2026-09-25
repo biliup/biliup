@@ -1,6 +1,7 @@
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::models::StreamerInfo;
 use crate::server::infrastructure::models::hook_step::HookStep;
+use crate::server::workbench::retention::{self, Disposal, Retention};
 use chrono::{Duration, Local};
 use error_stack::{ResultExt, bail};
 use serde::{Deserialize, Serialize};
@@ -391,6 +392,8 @@ mod tests {
 pub struct FileValidator {
     min_size: u64,
     check_format: bool,
+    /// 给了就按切片工作台的引用与场次保留期决定过滤删除要不要推迟
+    retention: Option<Retention>,
 }
 
 impl FileValidator {
@@ -398,7 +401,13 @@ impl FileValidator {
         Self {
             min_size,
             check_format,
+            retention: None,
         }
+    }
+
+    pub fn with_retention(mut self, retention: Retention) -> Self {
+        self.retention = Some(retention);
+        self
     }
 }
 
@@ -407,6 +416,7 @@ impl Default for FileValidator {
         Self {
             min_size: 1024 * 1024 * 100, // 100MB minimum
             check_format: true,
+            retention: None,
         }
     }
 }
@@ -417,8 +427,13 @@ impl FileValidator {
         fs::metadata(path).is_ok_and(|m| m.len() < self.min_size)
     }
 
-    /// 验证文件有效性
-    pub fn validate(&self, path: &Path) -> AppResult<()> {
+    /// 验证文件有效性。太小的文件在后台删掉，删之前先等 `settled` 完成（见
+    /// [`RecorderHandle::settled`](crate::server::workbench::recorder::RecorderHandle::settled)）。
+    pub fn validate(
+        &self,
+        path: &Path,
+        settled: impl Future<Output = ()> + Send + 'static,
+    ) -> AppResult<()> {
         let metadata = fs::metadata(path).change_context(AppError::Unknown)?;
 
         let size = metadata.len();
@@ -426,14 +441,24 @@ impl FileValidator {
         if size < self.min_size {
             let display = path.display();
             let path = path.to_owned();
+            let retention = self.retention.clone();
             tokio::spawn(async move {
-                let Ok(()) = HookStep::remove_file(&[&path])
-                    .await
-                    .inspect_err(|e| error!(e=?e))
-                else {
-                    return;
+                settled.await;
+                let removed = match &retention {
+                    Some(retention) => retention::remove(retention, &[&path])
+                        .await
+                        .map(|outcome| outcome.first() != Some(&Disposal::Deferred))
+                        .inspect_err(|e| error!(e=?e))
+                        .ok(),
+                    None => HookStep::remove_file(&[&path])
+                        .await
+                        .inspect_err(|e| error!(e=?e))
+                        .ok()
+                        .map(|()| true),
                 };
-                info!("过滤删除 - {}", path.display());
+                if removed == Some(true) {
+                    info!("过滤删除 - {}", path.display());
+                }
             });
             bail!(AppError::Custom(format!(
                 "File {display} too small: {size} bytes, minimum: {} bytes",

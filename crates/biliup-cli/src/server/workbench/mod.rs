@@ -4,10 +4,12 @@
 //! - [`recorder`]：下载器开段 / 关段时写库，维护场次时间轴；
 //! - [`index`]：分段文件旁的 `<分段>.idx` 关键帧索引（不进 SQLite）；
 //! - [`locate`] / [`session_keyframes`]：按场次时间找到可以落刀 / 起播的分段与字节偏移；
-//! - [`recover`]：启动时收尾上次异常退出留下的 `recording` 分段与没结束的场次。
+//! - [`recover`]：启动时收尾上次异常退出留下的 `recording` 分段与没结束的场次；
+//! - [`retention`]：被引用就推迟删除、每分钟一次的清理任务、磁盘水位兜底。
 
 pub mod index;
 pub mod recorder;
+pub mod retention;
 pub mod store;
 
 use crate::server::infrastructure::connection_pool::ConnectionPool;
@@ -53,10 +55,11 @@ pub struct SessionKeyframe {
     pub offset: u64,
 }
 
+/// 等着被删的分段（`pending_delete`）文件还在，正是为了还能看、还能剪，照样可读。
 fn readable(segment: &SegmentRow) -> bool {
     matches!(
         segment.state,
-        SegmentState::Recording | SegmentState::Finished
+        SegmentState::Recording | SegmentState::Finished | SegmentState::PendingDelete
     ) && Container::from_path(Path::new(&segment.path)).is_some()
 }
 
@@ -64,10 +67,9 @@ fn readable(segment: &SegmentRow) -> bool {
 /// 其余的按需续扫。
 async fn segment_index(segment: &SegmentRow) -> io::Result<index::KeyframeIndex> {
     let path = PathBuf::from(&segment.path);
-    let finished = segment.state == SegmentState::Finished;
+    let finished = segment.state != SegmentState::Recording;
     tokio::task::spawn_blocking(move || {
-        if !finished
-            && index::live::is_live(&path)
+        if index::live::is_live(&path)
             && let Some(cached) = index::load(&path)
         {
             return Ok(on_disk(cached, &path));

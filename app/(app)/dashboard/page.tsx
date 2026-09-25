@@ -163,6 +163,17 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
               if (payload.segment_time === undefined || payload.segment_time === '') {
                 payload.segment_time = null
               }
+              if (payload.min_free_space === undefined || payload.min_free_space === '') {
+                payload.min_free_space = null
+              }
+              // 后端是非负整数，不接受空值；清空即关闭
+              if (
+                payload.retention_hours === undefined ||
+                payload.retention_hours === '' ||
+                payload.retention_hours === null
+              ) {
+                payload.retention_hours = 0
+              }
               await trigger(payload)
               Toast.success('保存成功')
             } catch (e: any) {
@@ -183,7 +194,7 @@ const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
           <Tabs type="line" className={styles.tabs} activeKey={activeTab} onChange={setActiveTab}>
             <TabPane tab="全局设置" itemKey={TAB_GLOBAL}>
               <div className={styles.pane} data-tab={TAB_GLOBAL}>
-                <Global />
+                <Global disabled={!editable} />
               </div>
             </TabPane>
             <TabPane tab="平台设置" itemKey={TAB_PLATFORM}>
