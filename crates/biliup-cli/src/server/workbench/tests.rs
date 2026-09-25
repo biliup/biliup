@@ -105,6 +105,124 @@ async fn wall_clock_drift_between_segments_is_not_a_gap() {
     }
 }
 
+/// 输出目录是 `.` 时下载器给出 `./x.flv` 这种相对路径；要在测试里原样复现，文件得放在当前目录下。
+/// 返回的路径以 `./` 开头。
+fn dot_prefixed_dir() -> (TempDir, PathBuf) {
+    let dir = tempfile::tempdir_in(".").unwrap();
+    let rel = Path::new(".").join(dir.path().file_name().unwrap());
+    (dir, rel)
+}
+
+fn without_dot(path: &Path) -> PathBuf {
+    path.strip_prefix(".").unwrap().to_path_buf()
+}
+
+/// 开段报 `./x.flv`、关段报 `x.flv`（同一个文件的两种写法）只记一行，库里存不带 `./` 的写法。
+#[tokio::test]
+async fn dot_prefixed_open_and_bare_close_are_one_segment() {
+    let (_guard, dir) = dot_prefixed_dir();
+    let (_db, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let session = go_live(&pool, t0, 10).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
+    let handle = recorder.handle();
+    handle.run_started_at(t0);
+    let opened = write_flv(&dir, "x.flv");
+    let closed = without_dot(&opened);
+    handle.opened_at(&opened, t0);
+    handle.closed_at(
+        &closed,
+        t0 + 4000,
+        ClosedSegment {
+            duration_ms: Some(4000),
+            danmaku_path: Some(dir.join("x.xml")),
+            ..Default::default()
+        },
+    );
+    recorder.finish().await;
+
+    let rows = segments(&pool, session.id).await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].path, s(&closed));
+    assert_eq!(rows[0].state, SegmentState::Finished);
+    assert_eq!(
+        (rows[0].start_ms, rows[0].end_ms),
+        (0, Some(FLV_DURATION_MS))
+    );
+    assert_eq!(rows[0].index_path, Some(s(&index::index_path(&closed))));
+    assert_eq!(
+        rows[0].danmaku_path,
+        Some(s(&without_dot(&dir.join("x.xml"))))
+    );
+}
+
+/// mesio 按时间切 3 段：3 行，时间轴首尾相接。
+#[tokio::test]
+async fn three_dot_prefixed_segments_are_three_rows() {
+    let (_guard, dir) = dot_prefixed_dir();
+    let (_db, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let session = go_live(&pool, t0, 10).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
+    let handle = recorder.handle();
+    handle.run_started_at(t0);
+    let mut at = t0;
+    let mut closed = Vec::new();
+    for i in 0..3 {
+        let path = write_flv(&dir, &format!("{i}.flv"));
+        handle.opened_at(&path, at);
+        at += 4000;
+        closed.push(without_dot(&path));
+        handle.closed_at(
+            closed.last().unwrap(),
+            at,
+            ClosedSegment {
+                duration_ms: Some(4000),
+                ..Default::default()
+            },
+        );
+    }
+    recorder.finish().await;
+
+    let rows = segments(&pool, session.id).await;
+    let summary: Vec<(String, i64, Option<i64>, i64)> = rows
+        .iter()
+        .map(|r| (r.path.clone(), r.start_ms, r.end_ms, r.gap_before_ms))
+        .collect();
+    let expected: Vec<_> = closed
+        .iter()
+        .enumerate()
+        .map(|(i, path)| {
+            let start = i as i64 * FLV_DURATION_MS;
+            (s(path), start, Some(start + FLV_DURATION_MS), 0)
+        })
+        .collect();
+    assert_eq!(summary, expected);
+}
+
+/// 外部 ffmpeg / streamlink：开段 `./x.flv.part`、关段 `./x.flv`，同样只记一行。
+#[tokio::test]
+async fn dot_prefixed_part_file_renamed_at_close_is_one_segment() {
+    let (_guard, dir) = dot_prefixed_dir();
+    let (_db, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let session = go_live(&pool, t0, 10).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
+    let handle = recorder.handle();
+    handle.run_started_at(t0);
+    let part = write_flv(&dir, "x.flv.part");
+    handle.opened_at(&part, t0);
+    let done = dir.join("x.flv");
+    std::fs::rename(&part, &done).unwrap();
+    handle.closed_at(&done, t0 + 4000, ClosedSegment::default());
+    recorder.finish().await;
+
+    let rows = segments(&pool, session.id).await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].path, s(&without_dot(&done)));
+    assert_eq!(rows[0].end_ms, Some(FLV_DURATION_MS));
+}
+
 #[tokio::test]
 async fn segments_are_laid_out_on_one_session_timeline() {
     let (dir, pool) = setup().await;

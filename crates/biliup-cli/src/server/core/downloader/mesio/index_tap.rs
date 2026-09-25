@@ -141,7 +141,7 @@ pub(super) fn install<W: WriterHooks>(
     writer.on_open(Box::new(move |path, index| {
         {
             let mut st = st.lock().unwrap();
-            st.file = Some(tap.open(path));
+            st.file = Some(tap.open(super::segment_path(path)));
             st.file_pos = 0;
         }
         start(path, index);

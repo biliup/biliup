@@ -17,7 +17,7 @@ use super::index;
 use super::store::{self, FinishedSegment, SegmentState};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use biliup::downloader::index_tap::IndexTap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
@@ -106,7 +106,7 @@ impl RecorderHandle {
     /// 已记录的分段文件被删掉了（边录边传投稿后清理临时文件等）。
     pub fn deleted(&self, path: &Path) {
         let _ = self.tx.send(Event::Deleted {
-            path: path.to_path_buf(),
+            path: normalize(path),
         });
     }
 
@@ -116,18 +116,27 @@ impl RecorderHandle {
 
     pub(crate) fn opened_at(&self, path: &Path, at: i64) {
         let _ = self.tx.send(Event::Opened {
-            path: path.to_path_buf(),
+            path: normalize(path),
             at,
         });
     }
 
-    pub(crate) fn closed_at(&self, path: &Path, at: i64, info: ClosedSegment) {
+    pub(crate) fn closed_at(&self, path: &Path, at: i64, mut info: ClosedSegment) {
+        info.danmaku_path = info.danmaku_path.as_deref().map(normalize);
         let _ = self.tx.send(Event::Closed {
-            path: path.to_path_buf(),
+            path: normalize(path),
             at,
             info,
         });
     }
+}
+
+/// 同一个文件，下载器在开段、关段时可能分别报成 `./x.flv` 与 `x.flv`（输出目录为 `.` 时）。
+/// 进录制器前去掉所有 `.` 组件，开段与关段才能对上同一行，库里的路径也只有一种写法。
+fn normalize(path: &Path) -> PathBuf {
+    path.components()
+        .filter(|component| !matches!(component, Component::CurDir))
+        .collect()
 }
 
 /// 一个下载任务的场次记录器。任务结束时调用 [`SessionRecorder::finish`]。
