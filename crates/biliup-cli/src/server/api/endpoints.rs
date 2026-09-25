@@ -103,6 +103,10 @@ pub async fn get_streamers_endpoint(
         if !show_hooks {
             strip_hooks(&mut x);
         }
+        let session_id = preview
+            .is_some()
+            .then(|| crate::server::workbench::live::session_of_streamer(x.id))
+            .flatten();
         results.push(LiveStreamerResponse {
             status,
             inner: x,
@@ -112,6 +116,7 @@ pub async fn get_streamers_endpoint(
             live_bytes_per_sec,
             live_cover_url: live_media.cover_url,
             live_avatar_url: live_media.avatar_url,
+            session_id,
             preview,
         });
     }

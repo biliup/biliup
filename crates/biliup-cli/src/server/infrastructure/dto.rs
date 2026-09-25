@@ -63,4 +63,6 @@ pub struct LiveStreamerResponse {
     pub live_avatar_url: Option<String>,
     /// 正在录制时的预览能力；未录制为 `null`。视频流走 `GET /v1/streamers/{id}/live`。
     pub preview: Option<LivePreviewResponse>,
+    /// 正在录的场次（切片工作台）；未录制或第一个分段还没开写时为 `null`。
+    pub session_id: Option<i64>,
 }

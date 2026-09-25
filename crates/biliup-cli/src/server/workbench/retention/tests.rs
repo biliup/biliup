@@ -368,6 +368,7 @@ async fn filtered_segment_closed_first_still_honours_retain_until() {
         SessionTarget {
             session_id: s,
             streamer_id: 1,
+            bytes: None,
         },
         None,
     );
@@ -417,6 +418,7 @@ async fn filter_deletion_waits_for_the_recorder_to_rename_the_part_file() {
         SessionTarget {
             session_id: s,
             streamer_id: 1,
+            bytes: None,
         },
         None,
     );
@@ -480,6 +482,7 @@ async fn deleting_a_segment_being_indexed_leaves_no_orphan_index() {
         SessionTarget {
             session_id: s,
             streamer_id: 1,
+            bytes: None,
         },
         Some(tap.clone()),
     );

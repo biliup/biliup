@@ -12,7 +12,7 @@ fn drain(indexer: &mut Indexer, rx: &mut mpsc::Receiver<IndexEvent>) {
 }
 
 /// 像 stream-gears 的 `FlvFile` 那样逐 tag 报告：偏移、tag 类型、时间戳、body。
-fn feed_flv_tags(tap: &FileTap, bytes: &[u8]) {
+pub(crate) fn feed_flv_tags(tap: &FileTap, bytes: &[u8]) {
     let mut offset = 13;
     while offset + 15 <= bytes.len() {
         let head = &bytes[offset..offset + 11];
