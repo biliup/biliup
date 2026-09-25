@@ -4,6 +4,7 @@ pub mod common;
 pub mod config;
 pub mod core;
 pub mod errors;
+pub mod fleet;
 pub mod infrastructure;
 mod router;
 pub mod services;
