@@ -4,6 +4,8 @@ pub mod access;
 pub mod auth;
 /// B站API端点
 pub mod bilibili_endpoints;
+/// 切片工作台的切片与导出
+pub mod clips;
 /// 通用API端点
 pub mod endpoints;
 /// 录制中直播间的封面 / 头像图片代理

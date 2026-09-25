@@ -158,6 +158,11 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         }
         // 与 /v1/status 同级：三个角色都能看首页的系统状态
         "/v1/system-stats" if get => StreamerView,
+        "/v1/sessions/{id}/clips" | "/v1/clips/{cid}" if get => FileView,
+        "/v1/sessions/{id}/clips" if method == Method::POST => ClipEdit,
+        "/v1/sessions/{id}/clips/{cid}" if method == Method::PATCH || method == Method::DELETE => {
+            ClipEdit
+        }
         "/v1/configuration" if get => ConfigView,
         "/v1/configuration" if method == Method::PUT => ConfigEdit,
         "/v1/streamer-info" | "/v1/streamer-info/files/{id}" if get => StreamerView,
