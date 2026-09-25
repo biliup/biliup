@@ -271,7 +271,7 @@ export function LiveMarkBar({
         button
       )}
       <Text type="tertiary" size="small" className={styles.hint}>
-        {reason ?? '标记正在放的画面（默认带上之前 60 秒），之后在剪辑台里从这里剪'}
+        {reason ?? '标记正在放的画面（默认带上之前 60 秒），之后在录像回看里剪'}
       </Text>
       {count > 0 ? (
         <span className={styles.barCount} aria-label={`本场 ${count} 个标记`}>
