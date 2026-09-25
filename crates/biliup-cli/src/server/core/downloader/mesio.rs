@@ -592,7 +592,10 @@ mod tests {
         hook(std::path::Path::new("w.flv"), 3, 1.0, 10, None);
 
         let paths: Vec<PathBuf> = std::iter::from_fn(|| rx.try_recv().ok())
-            .map(|(path, ..)| path)
+            .filter_map(|event| match event {
+                WriterEvent::Closed(path, ..) => Some(path),
+                WriterEvent::Opened(_) => None,
+            })
             .collect();
         assert_eq!(
             paths,
