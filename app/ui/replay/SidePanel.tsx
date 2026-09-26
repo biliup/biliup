@@ -277,7 +277,7 @@ function ExportButton({
     }
   }
   return (
-    <Tooltip content={reason ?? (mode === 'quick' ? QUICK_TIP : PRECISE_TIP)}>
+    <Tooltip content={reason ?? (mode === 'quick' ? QUICK_TIP : PRECISE_TIP)} className={styles.passTip}>
       <span className={styles.inlineWrap}>
         <Button size="small" theme={primary ? 'solid' : 'light'} loading={busy} disabled={reason !== null} onClick={run}>
           {label}
@@ -321,7 +321,7 @@ function DownloadButton({
   )
   if (reason === null && !tip) return button
   return (
-    <Tooltip content={reason ?? tip}>
+    <Tooltip content={reason ?? tip} className={styles.passTip}>
       <span className={styles.inlineWrap}>{button}</span>
     </Tooltip>
   )

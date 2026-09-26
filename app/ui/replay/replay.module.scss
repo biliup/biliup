@@ -613,6 +613,13 @@
   margin-top: 4px;
 }
 
+/* 导出 / 下载按钮的说明浮层：只是说明，不接鼠标。Semi 的浮层被悬停时不收起，
+   剪完后在原位置换出来的按钮弹出的说明会盖住上一行的「下载」，鼠标移过去点到的是浮层 */
+.passTip,
+:global(.semi-portal-inner):has(> .passTip) {
+  pointer-events: none;
+}
+
 /* 选段栏里的「导出」：快速剪 / 精确剪 */
 .exportGroup {
   display: inline-flex;

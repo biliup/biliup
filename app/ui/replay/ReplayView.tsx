@@ -1019,7 +1019,11 @@ export default function ReplayView({
                     {(['quick', 'precise'] as const).map((m) => {
                       const reason = exportReason(m)
                       return (
-                        <Tooltip key={m} content={reason ?? `${m === 'quick' ? QUICK_TIP : PRECISE_TIP}。${exportTarget}`}>
+                        <Tooltip
+                          key={m}
+                          content={reason ?? `${m === 'quick' ? QUICK_TIP : PRECISE_TIP}。${exportTarget}`}
+                          className={styles.passTip}
+                        >
                           <span className={styles.inlineWrap}>
                             <Button
                               theme={m === 'quick' ? 'solid' : 'light'}
