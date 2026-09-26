@@ -6,6 +6,7 @@
 use crate::server::api::access::Caller;
 use crate::server::api::fleet_alerts;
 use crate::server::api::fleet_config;
+use crate::server::api::fleet_local;
 use crate::server::api::fleet_rooms;
 use crate::server::errors::{ApiError, report_to_response};
 use crate::server::fleet::controller::{CONTROLLER_VERSION, Controller};
@@ -33,6 +34,7 @@ pub fn router(controller: Arc<Controller>) -> Router<()> {
     Router::new()
         .route("/v1/fleet/nodes", get(list_nodes))
         .route("/v1/fleet/nodes/{id}", delete(revoke_node))
+        .route("/v1/fleet/local-node", post(fleet_local::enable))
         .route(
             "/v1/fleet/nodes/{id}/labels",
             put(fleet_rooms::set_node_labels),
@@ -114,6 +116,7 @@ async fn list_nodes(State(controller): State<Arc<Controller>>) -> Response {
             "controller_proto": PROTOCOL_MINOR,
             "nodes": nodes,
             "removals": controller.removals(),
+            "local_node": controller.local_node_id(),
         }))
         .into_response(),
         Err(e) => report_to_response(e),
@@ -131,10 +134,14 @@ async fn revoke_node(
     Path(id): Path<i64>,
     Query(query): Query<RevokeQuery>,
 ) -> Response {
-    match query.reassign.as_deref() {
-        None => {}
-        Some("auto") => return fleet_rooms::revoke_and_reassign(&controller, id).await,
+    let reassign = match query.reassign.as_deref() {
+        None => false,
+        Some("auto") => true,
         Some(_) => return (StatusCode::BAD_REQUEST, "reassign 只能是 auto").into_response(),
+    };
+    // 「本机」节点不勾自动改派也先交出房间再吊销（见 `fleet::local`）
+    if reassign || controller.is_local(id) {
+        return fleet_rooms::remove_node(&controller, id, reassign).await;
     }
     if controller.is_removing(id) {
         return (
@@ -333,6 +340,7 @@ mod tests {
                 "/v1/fleet/nodes/{id}",
                 Permission::NodeManage,
             ),
+            (Method::POST, "/v1/fleet/local-node", Permission::NodeManage),
             (Method::GET, "/v1/fleet/join-tokens", Permission::NodeManage),
             (
                 Method::POST,

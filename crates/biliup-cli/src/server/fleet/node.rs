@@ -59,6 +59,9 @@ pub struct NodeFile {
     pub secret_key: String,
     pub allow_hooks: bool,
     pub joined_at: i64,
+    /// 控制面进程内嵌的「本机」节点（`data/local-node.json`，见 [`super::local`]）
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub local: bool,
 }
 
 impl fmt::Debug for NodeFile {
@@ -69,11 +72,31 @@ impl fmt::Debug for NodeFile {
             .field("node_id", &self.node_id)
             .field("secret_key", &"[redacted]")
             .field("allow_hooks", &self.allow_hooks)
+            .field("local", &self.local)
             .finish()
     }
 }
 
 impl NodeFile {
+    pub fn new(
+        controller: EndpointId,
+        relays: Vec<String>,
+        node_id: i64,
+        secret: &SecretKey,
+        allow_hooks: bool,
+    ) -> Self {
+        NodeFile {
+            version: NODE_FILE_VERSION,
+            controller: controller.to_string(),
+            relays,
+            node_id,
+            secret_key: hex(&secret.to_bytes()),
+            allow_hooks,
+            joined_at: now_ms(),
+            local: false,
+        }
+    }
+
     pub fn load(path: &Path) -> AppResult<Self> {
         let text = std::fs::read_to_string(path)
             .change_context(AppError::Unknown)
@@ -249,8 +272,12 @@ async fn tools() -> Tools {
     }
 }
 
-/// 本机界面上「由控制面 xxx 管理」里的 xxx：relay 地址的主机名，没有就用控制面 id 的短写
+/// 本机界面上「由控制面 xxx 管理」里的 xxx：relay 地址的主机名，没有就用控制面 id 的短写；
+/// 控制面自己的「本机」节点就是「本机」
 fn controller_label(file: &NodeFile) -> String {
+    if file.local {
+        return super::local::LOCAL_NODE_NAME.to_string();
+    }
     file.relays
         .iter()
         .find_map(|relay| {
@@ -424,15 +451,13 @@ pub async fn join(ticket: &str, allow_hooks: bool, node_file: &Path) -> AppResul
         let joined_via = &relays;
         let outcome = match reply {
             Ok((node_id, relays)) => {
-                let file = NodeFile {
-                    version: NODE_FILE_VERSION,
-                    controller: ticket.controller.to_string(),
-                    relays: saved_relays(joined_via, relays, &ticket.relays),
+                let file = NodeFile::new(
+                    ticket.controller,
+                    saved_relays(joined_via, relays, &ticket.relays),
                     node_id,
-                    secret_key: hex(&secret.to_bytes()),
+                    &secret,
                     allow_hooks,
-                    joined_at: now_ms(),
-                };
+                );
                 file.save(node_file).map(|()| file)
             }
             Err(Some(CloseCode::Unauthorized)) => Err(Report::new(AppError::Custom(
@@ -545,6 +570,7 @@ impl NodeAgent {
             &file.controller,
             controller_label(&file),
             file.allow_hooks,
+            file.local,
             services.clone(),
             managed,
         )
@@ -943,15 +969,13 @@ mod tests {
     }
 
     fn sample() -> NodeFile {
-        NodeFile {
-            version: NODE_FILE_VERSION,
-            controller: SecretKey::generate().public().to_string(),
-            relays: vec!["http://192.168.1.2:19160/".into()],
-            node_id: 3,
-            secret_key: hex(&SecretKey::generate().to_bytes()),
-            allow_hooks: false,
-            joined_at: 1,
-        }
+        NodeFile::new(
+            SecretKey::generate().public(),
+            vec!["http://192.168.1.2:19160/".into()],
+            3,
+            &SecretKey::generate(),
+            false,
+        )
     }
 
     #[test]
@@ -970,6 +994,26 @@ mod tests {
             let mode = std::fs::metadata(&path).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o600);
         }
+    }
+
+    #[test]
+    fn only_the_local_node_file_carries_the_local_flag() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("node.json");
+        let file = sample();
+        file.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("\"local\""), "{text}");
+        assert!(!NodeFile::load(&path).unwrap().local);
+        assert_eq!(controller_label(&file), "192.168.1.2");
+
+        let local = NodeFile {
+            local: true,
+            ..sample()
+        };
+        local.save(&path).unwrap();
+        assert!(NodeFile::load(&path).unwrap().local);
+        assert_eq!(controller_label(&local), "本机");
     }
 
     #[test]

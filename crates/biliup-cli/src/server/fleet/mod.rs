@@ -7,6 +7,7 @@
 //! 房间与投稿模板的真身在控制面，按期望状态整份下发给节点（F2）；配置按「Fleet 全局 ⊕ 节点覆盖」
 //! 随期望状态下发，节点叠上本机密钥后生效，Cookie、密码等白名单外的键不出节点（F3）。
 //! 被移除的节点把原受管主播转成本地并暂停，等管理员确认后恢复（[`revoked`]）。
+//! 控制面自己也可以在「节点」页启用一个「本机」节点，与远端节点一样接收分派（[`local`]，F5）。
 
 pub mod accounts;
 pub mod alerts;
@@ -19,6 +20,7 @@ pub mod events;
 pub mod guard;
 pub mod labels;
 pub mod layers;
+pub mod local;
 pub mod model;
 pub mod net;
 pub mod node;
@@ -116,7 +118,7 @@ pub struct FleetOptions {
 #[derive(Debug, Clone, Default)]
 pub struct FleetCapability {
     pub controller: bool,
-    /// 节点进程才有：此刻托管在本机的行
+    /// 节点进程与控制面进程才有：此刻托管在本机的行（控制面上是「本机」节点的）
     pub node: Option<ManagedHandle>,
     /// 被控制面移除过、还有主播等管理员确认恢复时才有（节点进程总有）
     pub revoked: Option<RevokedHandle>,
@@ -147,23 +149,24 @@ pub struct Fleet {
 enum Role {
     #[default]
     Standalone,
-    Controller(Arc<Controller>),
+    Controller(Arc<Controller>, ManagedHandle),
     Node(Arc<Mutex<Option<node::NodeAgent>>>, ManagedHandle),
 }
 
 impl Fleet {
     pub fn capability(&self) -> FleetCapability {
         FleetCapability {
-            controller: matches!(self.role, Role::Controller(_)),
+            controller: matches!(self.role, Role::Controller(..)),
             node: match &self.role {
-                Role::Node(_, managed) => Some(managed.clone()),
-                _ => None,
+                Role::Node(_, managed) | Role::Controller(_, managed) => Some(managed.clone()),
+                Role::Standalone => None,
             },
             revoked: self.revoked.clone(),
         }
     }
 
-    /// 节点进程上拒绝本机改动托管行（D7）；被移除过时跟踪本机对暂停中主播的恢复与删除
+    /// 节点进程（与启用了「本机」节点的控制面）上拒绝本机改动托管行（D7）；
+    /// 被移除过时跟踪本机对暂停中主播的恢复与删除
     pub fn guard(&self, mut router: axum::Router<()>) -> axum::Router<()> {
         if let Some(revoked) = &self.revoked {
             router = router.layer(axum::middleware::from_fn_with_state(
@@ -172,18 +175,17 @@ impl Fleet {
             ));
         }
         match &self.role {
-            Role::Node(_, managed) => router.layer(axum::middleware::from_fn_with_state(
-                managed.clone(),
-                guard::guard,
-            )),
-            _ => router,
+            Role::Node(_, managed) | Role::Controller(_, managed) => router.layer(
+                axum::middleware::from_fn_with_state(managed.clone(), guard::guard),
+            ),
+            Role::Standalone => router,
         }
     }
 
     /// 控制面的 `/v1/fleet/*` 路由；被移除过的节点的 `/v1/node/revoked*`
     pub fn router(&self) -> Option<axum::Router<()>> {
         let controller = match &self.role {
-            Role::Controller(controller) => {
+            Role::Controller(controller, _) => {
                 Some(crate::server::api::fleet::router(controller.clone()))
             }
             _ => None,
@@ -201,7 +203,12 @@ impl Fleet {
     pub async fn shutdown(&self) {
         match &self.role {
             Role::Standalone => {}
-            Role::Controller(controller) => controller.shutdown().await,
+            Role::Controller(controller, _) => {
+                if let Some(local) = controller.local() {
+                    local.shutdown().await;
+                }
+                controller.shutdown().await
+            }
             Role::Node(agent, _) => {
                 let agent = agent.lock().unwrap().take();
                 if let Some(agent) = agent {
@@ -226,12 +233,7 @@ pub async fn start(options: &FleetOptions, services: &ServiceRegister) -> AppRes
                 "--controller 与 {NODE_FILE} 不能同时使用：这台机器已经作为节点加入了别的控制面，先执行 `biliup node leave`"
             )));
         }
-        let revoked = Revoked::resume_if_present(revoked_file, services).await;
-        let controller = start_controller(options).await?;
-        return Ok(Fleet {
-            role: Role::Controller(controller),
-            revoked,
-        });
+        return start_controller_role(options, services, revoked_file).await;
     }
     if options.relay_listen.is_some() || !options.relay_urls.is_empty() {
         warn!("--relay-listen / --relay-url 只在 --controller 时生效，已忽略");
@@ -310,6 +312,39 @@ pub fn reject_config_file(config_path: Option<&Path>) -> AppResult<()> {
         )));
     }
     Ok(())
+}
+
+/// 控制面，以及启用过的「本机」节点。没启用时 [`local::LocalNode`] 只是个空壳，不读写任何文件。
+async fn start_controller_role(
+    options: &FleetOptions,
+    services: &ServiceRegister,
+    revoked_file: PathBuf,
+) -> AppResult<Fleet> {
+    let local_file = Path::new(local::LOCAL_NODE_FILE);
+    // 「本机」节点随时可能被关掉，启用着的时候清单一直挂着，与节点进程相同
+    let revoked = if local_file.exists() {
+        let revoked = Arc::new(Revoked::load(revoked_file.clone(), services.clone()));
+        revoked.apply().await;
+        Some(revoked)
+    } else {
+        Revoked::resume_if_present(revoked_file.clone(), services).await
+    };
+    let controller = start_controller(options).await?;
+    let managed = ManagedHandle::default();
+    let local = Arc::new(local::LocalNode::new(
+        local_file.to_path_buf(),
+        services.clone(),
+        managed.clone(),
+        revoked
+            .clone()
+            .unwrap_or_else(|| Arc::new(Revoked::load(revoked_file, services.clone()))),
+    ));
+    local.resume(&controller).await;
+    controller.attach_local(local);
+    Ok(Fleet {
+        role: Role::Controller(controller, managed),
+        revoked,
+    })
 }
 
 async fn start_controller(options: &FleetOptions) -> AppResult<Arc<Controller>> {

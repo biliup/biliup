@@ -1,7 +1,8 @@
 //! 节点上「托管」的本地行：控制面分派下来、落进本机 `livestreamers` / `uploadstreamers` 的那些。
 //!
 //! 它们的真身在控制面，本机改了下次对账就会被覆盖，所以本机的增删改一律拒绝（409），提示去控制面改（D7）。
-//! 本机自己加的主播与模板不受影响。单机与控制面进程不挂这一层。
+//! 本机自己加的主播与模板不受影响。单机不挂这一层；控制面进程挂着，启用「本机」节点（[`super::local`]）
+//! 之前没有托管行，请求原样放行、不读请求体。
 //!
 //! 控制面管配置时（F3），`PUT /v1/configuration` 改到白名单键同样 409；只改名单外的键
 //! （Cookie、密码等本机密钥，控制面不下发）照常保存。
@@ -27,6 +28,8 @@ const BODY_LIMIT: usize = 2 * 1024 * 1024;
 pub struct Managed {
     /// 界面上显示的控制面名字：票据里 relay 地址的主机名
     pub controller: String,
+    /// 控制面进程自己的「本机」节点：托管行由同一个进程的 Fleet 房间分派而来
+    pub local: bool,
     /// 托管主播的本地 id → 直播间地址
     pub streamers: BTreeMap<i64, String>,
     /// 托管模板的本地 id
@@ -43,6 +46,7 @@ impl Managed {
     pub fn view(&self) -> Value {
         serde_json::json!({
             "controller": self.controller,
+            "local": self.local,
             "streamers": self.streamers.keys().collect::<Vec<_>>(),
             "templates": self.templates.iter().collect::<Vec<_>>(),
             "config": self.config.is_some(),
@@ -70,6 +74,9 @@ impl Managed {
     }
 
     fn message(&self) -> String {
+        if self.local {
+            return "这是分派到本机的 Fleet 房间，请到「节点 › 房间」修改".to_string();
+        }
         format!(
             "由控制面 {} 管理，请到控制面修改；本机只能查看",
             self.controller
@@ -262,6 +269,16 @@ mod tests {
         assert_eq!((code, body.as_str()), (StatusCode::OK, r#"{"id":4}"#));
         let (code, _) = status(&app, Method::PUT, "/v1/streamers/3/pause", "").await;
         assert_eq!(code, StatusCode::CONFLICT);
+
+        // 控制面自己的「本机」节点：提示去「节点 › 房间」改
+        handle.write().unwrap().as_mut().unwrap().local = true;
+        let (code, body) = status(&app, Method::PUT, "/v1/streamers", r#"{"id":3}"#).await;
+        assert_eq!(code, StatusCode::CONFLICT);
+        assert!(body.contains("「节点 › 房间」"), "{body}");
+        assert_eq!(
+            handle.read().unwrap().as_ref().unwrap().view()["local"],
+            true
+        );
 
         // 离开 / 被移除后不再拦
         *handle.write().unwrap() = None;

@@ -211,6 +211,8 @@ pub struct Reconciler {
     services: ServiceRegister,
     allow_hooks: bool,
     label: String,
+    /// 控制面进程内嵌的「本机」节点
+    local: bool,
     managed: ManagedHandle,
     state: FleetState,
 }
@@ -223,6 +225,7 @@ impl Reconciler {
         controller: &str,
         label: String,
         allow_hooks: bool,
+        local: bool,
         services: ServiceRegister,
         managed: ManagedHandle,
     ) -> Self {
@@ -240,6 +243,7 @@ impl Reconciler {
             services,
             allow_hooks,
             label,
+            local,
             managed,
             state,
         };
@@ -310,6 +314,7 @@ impl Reconciler {
     fn publish(&self) {
         let managed = Managed {
             controller: self.label.clone(),
+            local: self.local,
             streamers: self
                 .state
                 .rooms
@@ -771,6 +776,7 @@ mod tests {
                 "controller",
                 "10.0.0.2".into(),
                 allow_hooks,
+                false,
                 self.services.clone(),
                 self.managed.clone(),
             )
@@ -1008,6 +1014,7 @@ mod tests {
             "another",
             "x".into(),
             true,
+            false,
             f.services.clone(),
             ManagedHandle::default(),
         )

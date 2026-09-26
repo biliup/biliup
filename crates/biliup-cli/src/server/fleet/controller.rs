@@ -13,6 +13,7 @@ pub use removal::{REMOVAL_WAIT, Release, Removal, RemovalState, RemovedRoom};
 use super::alerts::Alerts;
 use super::assignments;
 use super::config_store;
+use super::local::LocalNode;
 use super::model::Account;
 use super::protocol::{
     self, Ack, CONFIG_SINCE, CloseCode, ConfigAck, ControllerMessage, DESIRED_STATE_SINCE,
@@ -30,7 +31,7 @@ use iroh::{Endpoint, EndpointId, RelayConfig, RelayMap, SecretKey};
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -179,6 +180,8 @@ pub struct NodeView {
     pub config: NodeConfigState,
     /// 正在「移除并自动改派」，等它确认释放房间
     pub removing: bool,
+    /// 控制面进程内嵌的「本机」节点
+    pub local: bool,
 }
 
 pub struct Controller {
@@ -201,6 +204,8 @@ pub struct Controller {
     alerts: Mutex<Alerts>,
     started_at: i64,
     alert_task: Mutex<Option<JoinHandle<()>>>,
+    /// 「本机」节点（[`super::local`]）；测试里的控制面没有
+    local: OnceLock<Arc<LocalNode>>,
 }
 
 impl Controller {
@@ -239,6 +244,7 @@ impl Controller {
             alerts: Mutex::default(),
             started_at: now_ms(),
             alert_task: Mutex::default(),
+            local: OnceLock::new(),
         });
         let task = tokio::spawn(accept_loop(
             Arc::downgrade(&controller),
@@ -256,6 +262,28 @@ impl Controller {
 
     pub fn pool(&self) -> &ConnectionPool {
         &self.pool
+    }
+
+    pub fn attach_local(&self, local: Arc<LocalNode>) {
+        let _ = self.local.set(local);
+    }
+
+    pub fn local(&self) -> Option<&Arc<LocalNode>> {
+        self.local.get()
+    }
+
+    /// 启用中的「本机」节点 id
+    pub fn local_node_id(&self) -> Option<i64> {
+        self.local.get().and_then(|local| local.node_id())
+    }
+
+    pub fn is_local(&self, node: i64) -> bool {
+        self.local_node_id() == Some(node)
+    }
+
+    /// 「本机」节点连的 relay：控制面自己连的那些（内嵌 relay 时是回环地址）
+    pub fn local_relays(&self) -> Vec<String> {
+        self.relays.local.iter().map(Url::to_string).collect()
     }
 
     /// 写进票据、下发给节点的 relay 地址
@@ -310,6 +338,7 @@ impl Controller {
             });
         }
         let now = now_ms();
+        let local = self.local_node_id();
         let removing: Vec<i64> = rows
             .iter()
             .map(|row| row.id)
@@ -322,6 +351,10 @@ impl Controller {
                 let id = row.id;
                 let mut view = view(row, live.get(&id), now);
                 view.removing = removing.contains(&id);
+                if local == Some(id) {
+                    view.local = true;
+                    view.config = view.config.local();
+                }
                 view.assigned_rooms = counts.get(&id).copied().unwrap_or(0);
                 view.accounts = accounts.remove(&id).unwrap_or_default();
                 view.config.override_keys = overrides
@@ -340,12 +373,22 @@ impl Controller {
         let Some(endpoint_id) = store::revoke_node(&self.pool, id, now_ms()).await? else {
             return Ok(false);
         };
-        if let Some(node) = self.live.lock().unwrap().remove(&id) {
-            close_with(&node.connection, CloseCode::Revoked);
-        }
+        let connected = match self.live.lock().unwrap().remove(&id) {
+            Some(node) => {
+                close_with(&node.connection, CloseCode::Revoked);
+                true
+            }
+            None => false,
+        };
         let affected = assignments::unassign_node(&self.pool, id, now_ms()).await?;
         drop(guard);
         info!(node = id, %endpoint_id, rooms = affected.len(), "fleet node revoked");
+        // 「本机」节点就在本进程里：确认它停下、托管行转走之后再返回，调用方接着改派时不会两边同时录
+        if let Some(local) = self.local.get().filter(|local| local.node_id() == Some(id)) {
+            local
+                .retire(&self.endpoint_id().to_string(), connected)
+                .await;
+        }
         // 等它释放的房间不再等，交给各自的新节点
         self.push_all().await;
         Ok(true)
@@ -399,8 +442,8 @@ impl Controller {
                 return;
             }
         };
-        // 次版本 1 的节点照常收房间，配置不发
-        let config = if proto >= CONFIG_SINCE {
+        // 次版本 1 的节点照常收房间，配置不发；「本机」节点用控制面自己的配置，也不发
+        let config = if proto >= CONFIG_SINCE && !self.is_local(node) {
             match self.desired_config(node).await {
                 Ok(config) => Some(config),
                 Err(e) => {
@@ -888,6 +931,7 @@ fn view(row: NodeRow, live: Option<&LiveNode>, now: i64) -> NodeView {
             }),
             config,
             removing: false,
+            local: false,
         },
         None => NodeView {
             id: row.id,
@@ -911,6 +955,7 @@ fn view(row: NodeRow, live: Option<&LiveNode>, now: i64) -> NodeView {
             synced: None,
             config,
             removing: false,
+            local: false,
         },
     }
 }

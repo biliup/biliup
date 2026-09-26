@@ -15,7 +15,7 @@ pub const CONTROLLER_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct NodeConfigState {
     /// 在线节点的配置同步情况：`unsupported`（次版本 < 2，只收房间不收配置）、`pending`（已下发、
-    /// 还没确认）、`applied`、`failed`；离线为 `None`
+    /// 还没确认）、`applied`、`failed`、`local`（「本机」节点，用控制面自己的配置）；离线为 `None`
     pub sync: Option<&'static str>,
     /// `failed` 时节点报的原因；节点保持原来的配置
     pub error: Option<String>,
@@ -55,6 +55,17 @@ impl NodeConfigState {
     }
 }
 
+impl NodeConfigState {
+    /// 「本机」节点：不收 Fleet 配置
+    pub(super) fn local(self) -> Self {
+        NodeConfigState {
+            sync: self.sync.map(|_| "local"),
+            error: None,
+            ..self
+        }
+    }
+}
+
 /// 按数字比较 `主.次.修订`，`-` / `+` 之后的后缀不看；解析不了时不算旧
 pub fn version_older(version: &str, than: &str) -> bool {
     fn parts(version: &str) -> Option<Vec<u64>> {
@@ -89,7 +100,12 @@ impl Controller {
         let live = self.live.lock().unwrap();
         let live = live.get(&node);
         let version = live.map(|node| node.version.as_str()).or(version);
-        NodeConfigState::of(live, version)
+        let state = NodeConfigState::of(live, version);
+        if self.is_local(node) {
+            state.local()
+        } else {
+            state
+        }
     }
 }
 
