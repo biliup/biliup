@@ -18,6 +18,8 @@ import {
   usePreviewTransport,
 } from '@/app/lib/use-dashboard'
 import { useBoolPref, useEnumPref } from '@/app/lib/use-local-pref'
+import { relayLease } from '@/app/lib/preview-lease'
+import { holdPreviewLease } from '@/app/lib/use-live-rates'
 import { type DanmakuFeed, useDanmakuFeed } from '@/app/lib/danmaku-feed'
 import {
   type LatencyProfile,
@@ -173,6 +175,14 @@ export function LivePreviewPlayer({
     },
     [level, levelKey]
   )
+
+  // 中转流挂在本页面的租约上：码率连接是心跳（播放期间一直连着），播放器销毁时释放这条连接
+  const relay = source?.kind === 'relay'
+  useEffect(() => {
+    if (!relay) return
+    return holdPreviewLease()
+  }, [relay])
+  const lease = useMemo(() => (relay ? relayLease(streamer.id) : undefined), [relay, streamer.id])
 
   const codecs = streamer.preview?.codecs ?? null
   const relayUrl = livePreviewUrl(streamer.id, snapshotMsFor(policy), { reconnect: reconnectKey === levelKey })
@@ -336,6 +346,7 @@ export function LivePreviewPlayer({
           onError={handleError}
           onStall={handleStall}
           danmaku={danmakuLayer}
+          lease={lease}
         />
       ) : null}
       {badge ? (

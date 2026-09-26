@@ -4,6 +4,7 @@ import artplayerPluginDanmuku from 'artplayer-plugin-danmuku'
 import mpegts from 'mpegts.js'
 import type { DanmakuFeed, DanmakuFrame } from '@/app/lib/danmaku-feed'
 import { attachLiveBufferControl, type LiveBufferPolicy, RELAY_PROFILES, type StallInfo } from '@/app/lib/live-buffer'
+import type { PreviewLease } from '@/app/lib/preview-lease'
 
 type VideoPlayer = Artplayer | null
 
@@ -50,6 +51,11 @@ interface PlayerConfig {
    * 订阅 / 退订与显示 / 隐藏，不重建播放器。
    */
   danmaku?: { id: number; feed: DanmakuFeed | null; fontSize?: number }
+  /**
+   * 中转预览的租约（`preview-lease.ts`）：每建一次播放器就拿一个连接号拼进地址，销毁时立即释放，
+   * 不等服务端从 TCP 断开或租约到期里察觉
+   */
+  lease?: PreviewLease
 }
 
 type DanmukuPlugin = ReturnType<ReturnType<typeof artplayerPluginDanmuku>>
@@ -603,6 +609,7 @@ const Players: React.FC<PlayerConfig> = ({
   onError,
   onStall,
   danmaku,
+  lease,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const playerRef = useRef<VideoPlayer>(null)
@@ -622,6 +629,8 @@ const Players: React.FC<PlayerConfig> = ({
     if (!containerRef.current) return
     const container = containerRef.current
     let cancelled = false
+    const leased = isLive && lease ? lease.attach(url) : null
+    const playUrl = leased?.url ?? url
 
     const create = (mediaType: LiveType | null) => {
       if (cancelled || !container.isConnected) return
@@ -631,7 +640,7 @@ const Players: React.FC<PlayerConfig> = ({
       }
       const base = {
         container,
-        url,
+        url: playUrl,
         autoSize: !isLive,
         fullscreen: true,
         fullscreenWeb: true,
@@ -722,7 +731,7 @@ const Players: React.FC<PlayerConfig> = ({
     if (declared || !isLive) {
       create(declared)
     } else {
-      probeLiveType(url).then(create, (error: unknown) => {
+      probeLiveType(playUrl).then(create, (error: unknown) => {
         if (cancelled) return
         callbacksRef.current.onError?.(error instanceof Error ? error.message : String(error))
       })
@@ -734,8 +743,9 @@ const Players: React.FC<PlayerConfig> = ({
         playerRef.current.destroy()
         playerRef.current = null
       }
+      leased?.release()
     }
-  }, [url, height, width, type, codecs, isLive, transport, muted, autoplay, danmakuCapable, danmakuFontSize])
+  }, [url, height, width, type, codecs, isLive, transport, muted, autoplay, danmakuCapable, danmakuFontSize, lease])
 
   // 弹幕开关：有 feed → 订阅本路、显示弹幕层；没有 → 退订、隐藏。不重建播放器。
   // 播放器可能还在探测 Content-Type（异步创建），所以轮询等到实例出现再挂。

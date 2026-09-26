@@ -146,17 +146,29 @@ impl SlotScope {
     }
 }
 
-/// 一条预览连接在各级许可池里的身份。池满时被挤掉的连接由它得知，响应随之结束。
+/// 一条预览连接为什么被服务端结束（而不是客户端断开 / 写入端换代）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TicketEnd {
+    /// 满员时被新连接挤掉，附挤掉它的那一级
+    Evicted(SlotScope),
+    /// 客户端声明不再需要（播放器销毁时主动释放）
+    Released,
+    /// 客户端的租约没了（心跳超时 / 心跳连接断开）
+    LeaseLost,
+}
+
+/// 一条预览连接在各级许可池里的身份。服务端要结束这条连接（池满被挤掉、客户端释放、
+/// 租约丢失）时通过它通知，响应随之结束。
 ///
 /// `Clone` 得到的是同一张票；同一张票可以同时占多个池（直播间 + 进程）的槽位，
-/// 任何一级挤掉它，它在其它池里的槽位也不再计入占用（见 [`PreviewSlots::acquire`]）。
+/// 一旦被结束，它在所有池里的槽位都不再计入占用（见 [`PreviewSlots::acquire`]）。
 #[derive(Clone)]
 pub struct PreviewTicket(Arc<TicketInner>);
 
 struct TicketInner {
     id: u64,
     opened: Instant,
-    evicted: watch::Sender<Option<SlotScope>>,
+    ended: watch::Sender<Option<TicketEnd>>,
 }
 
 impl Default for PreviewTicket {
@@ -169,7 +181,7 @@ impl std::fmt::Debug for PreviewTicket {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PreviewTicket")
             .field("id", &self.0.id)
-            .field("evicted_by", &self.evicted_by())
+            .field("ended_by", &self.ended_by())
             .finish()
     }
 }
@@ -180,7 +192,7 @@ impl PreviewTicket {
         Self(Arc::new(TicketInner {
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             opened: Instant::now(),
-            evicted: watch::Sender::new(None),
+            ended: watch::Sender::new(None),
         }))
     }
 
@@ -194,28 +206,29 @@ impl PreviewTicket {
         self.0.opened.elapsed()
     }
 
-    /// 被哪一级许可池挤掉；还没被挤掉为 `None`
-    pub fn evicted_by(&self) -> Option<SlotScope> {
-        *self.0.evicted.borrow()
+    /// 服务端为什么结束了它；还没被结束为 `None`
+    pub fn ended_by(&self) -> Option<TicketEnd> {
+        *self.0.ended.borrow()
     }
 
-    /// 被挤掉时完成（已经被挤掉则立刻完成）。可放进 `select!`，丢弃即取消等待。
-    pub async fn evicted(&self) -> SlotScope {
-        let mut rx = self.0.evicted.subscribe();
-        let scope = rx.wait_for(Option::is_some).await.ok().and_then(|v| *v);
-        match scope {
-            Some(scope) => scope,
+    /// 被服务端结束时完成（已经结束则立刻完成）。可放进 `select!`，丢弃即取消等待。
+    pub async fn ended(&self) -> TicketEnd {
+        let mut rx = self.0.ended.subscribe();
+        let cause = rx.wait_for(Option::is_some).await.ok().and_then(|v| *v);
+        match cause {
+            Some(cause) => cause,
             // 发送端就在 `self` 里，活得比这个 future 久，走不到这里
             None => std::future::pending().await,
         }
     }
 
-    fn evict(&self, scope: SlotScope) {
-        self.0.evicted.send_if_modified(|current| {
+    /// 结束这条连接；已经结束的保留第一次的原因。只改一个 `watch` 值，不等待。
+    pub fn end(&self, cause: TicketEnd) {
+        self.0.ended.send_if_modified(|current| {
             if current.is_some() {
                 return false;
             }
-            *current = Some(scope);
+            *current = Some(cause);
             true
         });
     }
@@ -268,17 +281,17 @@ impl PreviewSlots {
         self.0.capacity
     }
 
-    /// 占着槽位的连接数；已被（任何一级）挤掉、正在收尾的连接不算
+    /// 占着槽位的连接数；已被服务端结束（挤掉 / 释放 / 租约丢失）、正在收尾的连接不算
     pub fn occupied(&self) -> usize {
         self.0
             .holders()
             .iter()
-            .filter(|t| t.evicted_by().is_none())
+            .filter(|t| t.ended_by().is_none())
             .count()
     }
 
     /// 为 `ticket` 占一个槽位。满员时：`evict` 为真就挤掉最早进来的那条，把位置让给它；
-    /// 否则返回 `Err(当前占用数)`。已被挤掉、响应还没来得及结束的连接不占名额，
+    /// 否则返回 `Err(当前占用数)`。已被结束、响应还没来得及收尾的连接不占名额，
     /// 所以直播间一级挤掉的那条不会让进程一级再多挤一条。
     pub fn acquire(
         &self,
@@ -286,7 +299,7 @@ impl PreviewSlots {
         evict: bool,
     ) -> Result<(PreviewSlot, Option<Evicted>), usize> {
         let mut holders = self.0.holders();
-        holders.retain(|t| t.evicted_by().is_none());
+        holders.retain(|t| t.ended_by().is_none());
         let mut evicted = None;
         if holders.len() >= self.0.capacity {
             if !evict {
@@ -295,7 +308,7 @@ impl PreviewSlots {
             let Some(oldest) = holders.pop_front() else {
                 return Err(0);
             };
-            oldest.evict(self.0.scope);
+            oldest.end(TicketEnd::Evicted(self.0.scope));
             evicted = Some(Evicted {
                 id: oldest.id(),
                 age: oldest.age(),
@@ -2445,19 +2458,19 @@ mod tests {
         assert_eq!(slots.occupied(), 2);
 
         assert_eq!(slots.acquire(&c, false).err(), Some(2));
-        assert_eq!(a.evicted_by(), None, "a refusal evicts nobody");
+        assert_eq!(a.ended_by(), None, "a refusal evicts nobody");
 
         let (slot_c, evicted) = slots.acquire(&c, true).unwrap();
         assert_eq!(evicted.map(|e| e.id), Some(a.id()));
-        assert_eq!(a.evicted_by(), Some(SlotScope::Room));
-        assert_eq!(b.evicted_by(), None);
-        assert_eq!(c.evicted_by(), None);
+        assert_eq!(a.ended_by(), Some(TicketEnd::Evicted(SlotScope::Room)));
+        assert_eq!(b.ended_by(), None);
+        assert_eq!(c.ended_by(), None);
         assert_eq!(slots.occupied(), 2);
         // 被挤掉的那条随时能得知（已经被挤掉，立刻完成）
-        let scope = tokio::time::timeout(Duration::from_secs(1), a.evicted())
+        let cause = tokio::time::timeout(Duration::from_secs(1), a.ended())
             .await
             .unwrap();
-        assert_eq!(scope, SlotScope::Room);
+        assert_eq!(cause, TicketEnd::Evicted(SlotScope::Room));
         // 被挤掉的连接收尾时归还槽位：空操作
         drop(slot_a);
         assert_eq!(slots.occupied(), 2);
@@ -2488,7 +2501,7 @@ mod tests {
         assert_eq!(process.occupied(), 1, "the evicted ticket no longer counts");
         let (_new_process, evicted) = process.acquire(&new, true).unwrap();
         assert!(evicted.is_none());
-        assert_eq!(other_room.evicted_by(), None);
+        assert_eq!(other_room.ended_by(), None);
         assert_eq!(process.occupied(), 2);
     }
 
@@ -2526,7 +2539,10 @@ mod tests {
         sink.push(ChunkKind::Media, inter(3));
         let (second, evicted) = second.await.unwrap().unwrap();
         assert_eq!(evicted.map(|e| e.id), Some(first_ticket.id()));
-        assert_eq!(first_ticket.evicted_by(), Some(SlotScope::Room));
+        assert_eq!(
+            first_ticket.ended_by(),
+            Some(TicketEnd::Evicted(SlotScope::Room))
+        );
         assert_eq!(hub.subscribers(), 1);
         drop(first);
         assert_eq!(hub.subscribers(), 1);

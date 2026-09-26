@@ -5,13 +5,18 @@
 //! （`Lagged`）时不断开，而是在同一条响应里从最近的关键帧重新对齐（再要一份不含文件头的快照）；
 //! 写入端换代（断流重试 / 换直链）时结束响应，由播放器重连。
 //!
-//! 连接数：每路 [`crate::server::common::download::PREVIEW_MAX_SUBSCRIBERS_PER_ROOM`]、
-//! 进程 [`MAX_PREVIEW_CONNECTIONS`]，都是固定槽位。满了时新打开的预览挤掉（该直播间 / 全进程）
-//! 最早的那条，被挤掉的响应随即结束；只有播放器自动重连（`?reconnect=1`）才在满员时得到 429，
-//! 免得几个真在看的页面互相挤来挤去。每条连接另有最长寿命（配置 `preview_max_minutes`），
-//! 到点结束响应：服务端看不出客户端是否还在看——经过会替客户端读完上游的代理 / 隧道时，
-//! 关掉播放器 TCP 也不断，许可只靠响应体 drop 释放就会一直占着。
+//! 服务端看不出客户端是否还在看——经过会替客户端读完上游的代理 / 隧道时，关掉播放器 TCP
+//! 也不断（#1750）。所以每条预览都挂在页面的租约上（[`lease`]）：页面用码率 WebSocket 心跳，
+//! 心跳断了、或 45 s 内一直没有心跳（`curl` 之类没带会话的客户端），响应就结束；播放器销毁时
+//! 还会 `DELETE /v1/streamers/{id}/live?conn=` 立即释放。
+//!
+//! 兜底：连接数每路 [`crate::server::common::download::PREVIEW_MAX_SUBSCRIBERS_PER_ROOM`]、
+//! 进程 [`MAX_PREVIEW_CONNECTIONS`]，都是固定槽位，满了时新打开的预览挤掉（该直播间 / 全进程）
+//! 最早的那条；只有播放器自动重连（`?reconnect=1`）才在满员时得到 429，免得几个真在看的页面
+//! 互相挤来挤去。每条连接另有最长寿命（配置 `preview_max_minutes`），到点结束响应。
 //! 路由注册在 `router()` 里，`--auth` 时与 `/v1/streamers` 同一道登录校验。
+
+pub mod lease;
 
 use crate::server::core::download_manager::DownloadManager;
 use crate::server::core::live::live_request;
@@ -25,10 +30,11 @@ use axum::response::{IntoResponse, Response};
 use biliup::downloader::live::{LiveStatus, strip_ws_expire_override};
 use biliup::downloader::preview::{
     Evicted, PreviewFormat, PreviewHub, PreviewSlot, PreviewSlots, PreviewTicket, SlotScope,
-    SubscribeError, Subscription,
+    SubscribeError, Subscription, TicketEnd,
 };
 use bytes::{Bytes, BytesMut};
 use danmaku_client::DanmakuEvent;
+use lease::{LeaseBinding, leases, valid_id};
 use std::collections::{HashMap, VecDeque};
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
@@ -56,12 +62,20 @@ pub struct LiveQuery {
     /// `1`：播放器断开后的自动重连。满员时返回 429 而不挤掉别人——被挤掉的页面若也去挤，
     /// 几个真在看的页面就会轮流把对方挤掉；用户手动打开 / 重试不带它，总能挤进来。
     pub reconnect: Option<String>,
+    /// 页面的会话号，与码率 WebSocket 的 `session` 相同，见 [`lease`]
+    pub session: Option<String>,
+    /// 这条预览的连接号，`DELETE …/live?conn=` 用它释放，见 [`lease`]
+    pub conn: Option<String>,
 }
 
 impl LiveQuery {
     fn may_evict(&self) -> bool {
         !matches!(self.reconnect.as_deref(), Some("1" | "true"))
     }
+}
+
+fn id_param(value: &Option<String>) -> Option<&str> {
+    value.as_deref().filter(|v| valid_id(v))
 }
 
 /// 满员被拒时的 429；正文由前端原样显示，所以写清是哪一级满了。
@@ -85,7 +99,7 @@ fn log_eviction(id: i64, conn: u64, scope: SlotScope, capacity: usize, evicted: 
     );
 }
 
-/// `GET /v1/streamers/{id}/live?snapshot_ms=2000[&reconnect=1]`
+/// `GET /v1/streamers/{id}/live?snapshot_ms=2000&session=…&conn=…[&reconnect=1]`
 pub async fn get_live_stream(
     State(managers): State<Arc<DownloadManager>>,
     Path(id): Path<i64>,
@@ -153,9 +167,12 @@ pub async fn get_live_stream(
     };
     match hub.subscribe_reserved(slot, depth, SUBSCRIBE_TIMEOUT).await {
         Ok(subscription) => {
+            let lease = leases().bind(id_param(&query.session), id_param(&query.conn), &ticket);
             info!(
                 id,
                 conn = ticket.id(),
+                client_conn = lease.conn(),
+                leased = lease.has_session(),
                 format = subscription.format.as_str(),
                 snapshot_ms = depth.map(|d| d.as_millis() as u64),
                 snapshot_chunks = subscription.snapshot.len(),
@@ -172,6 +189,7 @@ pub async fn get_live_stream(
                 subscription,
                 LiveGuard {
                     ticket,
+                    lease,
                     _global: global,
                 },
                 lifetime,
@@ -179,6 +197,26 @@ pub async fn get_live_stream(
         }
         Err(error) => subscribe_error_response(id, error),
     }
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct ReleaseQuery {
+    pub conn: Option<String>,
+}
+
+/// `DELETE /v1/streamers/{id}/live?conn=…`（页面关闭时 `sendBeacon` 发同一路径的 POST）：
+/// 播放器销毁、切档位、关弹层时立即结束这条预览、释放许可，不必等 TCP 断开或租约到期。
+/// 找不到（已经结束）也回 204，重复释放无害。
+pub async fn release_live_stream(
+    Path(id): Path<i64>,
+    Query(query): Query<ReleaseQuery>,
+) -> Response {
+    let Some(conn) = id_param(&query.conn) else {
+        return (StatusCode::BAD_REQUEST, "缺少合法的 conn").into_response();
+    };
+    let found = leases().release(conn);
+    debug!(id, conn, found, "客户端释放直播预览");
+    StatusCode::NO_CONTENT.into_response()
 }
 
 fn subscribe_error_response(id: i64, error: SubscribeError) -> Response {
@@ -639,6 +677,7 @@ pub const COALESCE_BYTES: usize = 64 * 1024;
 /// 一条中转预览连接在进程一级的身份与槽位，随响应体一起活。
 pub struct LiveGuard {
     ticket: PreviewTicket,
+    lease: LeaseBinding,
     _global: PreviewSlot,
 }
 
@@ -649,6 +688,12 @@ enum EndReason {
     ClientGone,
     /// 满员时被新打开的预览挤掉
     Evicted(SlotScope),
+    /// 客户端主动释放（播放器销毁 / 切档位 / 关弹层 / 页面关闭）
+    Released,
+    /// 页面的心跳连接断开或心跳超时
+    LeaseLost,
+    /// 一直没有心跳：没带会话的客户端，或页面的心跳连接迟迟没连上
+    LeaseExpired,
     /// 到了单条连接的最长寿命
     Expired,
     /// 写入端换代（断流重试 / 换直链 / 录制结束）
@@ -663,6 +708,9 @@ impl EndReason {
             EndReason::ClientGone => "客户端断开",
             EndReason::Evicted(SlotScope::Room) => "被挤掉（该直播间已满）",
             EndReason::Evicted(SlotScope::Process) => "被挤掉（进程内已满）",
+            EndReason::Released => "客户端释放",
+            EndReason::LeaseLost => "租约断开（心跳连接断开或超时）",
+            EndReason::LeaseExpired => "无租约（宽限期内没有心跳）",
             EndReason::Expired => "到达最长时长",
             EndReason::SinkClosed => "录制端换代或结束",
             EndReason::Lagging => "客户端持续掉队",
@@ -694,6 +742,16 @@ impl LiveBody {
     fn finish<T>(&mut self, reason: EndReason) -> Option<T> {
         self.end = Some(reason);
         None
+    }
+}
+
+impl From<TicketEnd> for EndReason {
+    fn from(cause: TicketEnd) -> Self {
+        match cause {
+            TicketEnd::Evicted(scope) => EndReason::Evicted(scope),
+            TicketEnd::Released => EndReason::Released,
+            TicketEnd::LeaseLost => EndReason::LeaseLost,
+        }
     }
 }
 
@@ -752,8 +810,8 @@ enum Next {
 /// 把订阅编成 chunked 响应：快照分块先发，之后逐个转发实时分块；掉队时原地重对齐。
 ///
 /// 两个许可（该路、进程）都随响应体一起活，客户端断开或响应结束即释放。响应在这些情况下
-/// 主动结束（流返回 `None`，chunked 正常收尾，连接可以继续 keep-alive）：`guard` 的票被挤掉、
-/// 到了 `lifetime`、写入端换代、客户端持续掉队。
+/// 主动结束（流返回 `None`，chunked 正常收尾，连接可以继续 keep-alive）：`guard` 的票被结束
+/// （挤掉 / 客户端释放 / 心跳断开）、租约到期、到了 `lifetime`、写入端换代、客户端持续掉队。
 pub fn live_response(
     id: i64,
     hub: PreviewHub,
@@ -778,8 +836,8 @@ pub fn live_response(
     };
     let stream = futures::stream::unfold(state, move |mut state| async move {
         loop {
-            if let Some(scope) = state.guard.ticket.evicted_by() {
-                return state.finish(EndReason::Evicted(scope));
+            if let Some(cause) = state.guard.ticket.ended_by() {
+                return state.finish(cause.into());
             }
             if let Some(chunk) = state.snapshot.pop_front() {
                 state.bytes_sent += chunk.len() as u64;
@@ -793,7 +851,8 @@ pub fn live_response(
                     };
                     tokio::select! {
                         biased;
-                        scope = state.guard.ticket.evicted() => Next::End(EndReason::Evicted(scope)),
+                        cause = state.guard.ticket.ended() => Next::End(cause.into()),
+                        _ = state.guard.lease.lapsed() => Next::End(EndReason::LeaseExpired),
                         _ = expiry(&mut state.deadline) => Next::End(EndReason::Expired),
                         received = subscription.rx.recv() => Next::Received(received),
                     }
@@ -834,9 +893,8 @@ pub fn live_response(
                     };
                     let again = tokio::select! {
                         biased;
-                        scope = state.guard.ticket.evicted() => {
-                            return state.finish(EndReason::Evicted(scope));
-                        }
+                        cause = state.guard.ticket.ended() => return state.finish(cause.into()),
+                        _ = state.guard.lease.lapsed() => return state.finish(EndReason::LeaseExpired),
                         _ = expiry(&mut state.deadline) => return state.finish(EndReason::Expired),
                         again = state.hub.resubscribe(previous, SUBSCRIBE_TIMEOUT) => again,
                     };
@@ -1271,9 +1329,20 @@ mod tests {
     }
 
     fn guard_in(process: &PreviewSlots, ticket: &PreviewTicket) -> LiveGuard {
+        leased_guard(process, ticket, &lease::Leases::default(), Some("test"))
+    }
+
+    fn leased_guard(
+        process: &PreviewSlots,
+        ticket: &PreviewTicket,
+        leases: &lease::Leases,
+        session: Option<&str>,
+    ) -> LiveGuard {
         let (global, _) = process.acquire(ticket, true).unwrap();
+        let conn = format!("c{}", ticket.id());
         LiveGuard {
             ticket: ticket.clone(),
+            lease: leases.bind(session, Some(&conn), ticket),
             _global: global,
         }
     }
@@ -1395,8 +1464,114 @@ mod tests {
         let mut expected = flv::FILE_HEADER.to_vec();
         expected.extend_from_slice(b"K1p2");
         assert_eq!(&body[..], &expected[..]);
-        assert_eq!(ticket.evicted_by(), None);
+        assert_eq!(ticket.ended_by(), None);
         assert!(hub.is_attached(), "the sink is still there");
+        assert_eq!(process.occupied(), 0);
+        assert_eq!(hub.subscribers(), 0);
+        drop(sink);
+    }
+
+    async fn read_to_end(response: Response) -> Bytes {
+        tokio::time::timeout(
+            Duration::from_secs(3),
+            axum::body::to_bytes(response.into_body(), usize::MAX),
+        )
+        .await
+        .expect("the response must end on its own")
+        .expect("a clean end of stream")
+    }
+
+    /// 客户端释放（`DELETE …/live?conn=`）：那条响应立刻正常收尾，两级槽位与租约登记都清掉。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn released_response_ends_and_frees_everything() {
+        let process = PreviewSlots::new(SlotScope::Process, MAX_PREVIEW_CONNECTIONS);
+        let leases = lease::Leases::default();
+        let hub = PreviewHub::new(4);
+        let mut sink = hub.attach(PreviewFormat::Flv);
+        sink.push(ChunkKind::Header, Bytes::from_static(&flv::FILE_HEADER));
+        sink.push(ChunkKind::Keyframe, Bytes::from_static(b"K1"));
+        let ticket = PreviewTicket::new();
+        let pending = open(&hub, &ticket);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sink.push(ChunkKind::Media, Bytes::from_static(b"p2"));
+        let subscription = pending.await.unwrap().unwrap();
+        let guard = leased_guard(&process, &ticket, &leases, Some("page"));
+        let response = live_response(1, hub.clone(), subscription, guard, None);
+        let reader = tokio::spawn(read_to_end(response));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(leases.counts(), (1, 1));
+
+        let started = Instant::now();
+        assert!(leases.release(&format!("c{}", ticket.id())));
+        reader.await.unwrap();
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(ticket.ended_by(), Some(TicketEnd::Released));
+        assert_eq!(process.occupied(), 0);
+        assert_eq!(hub.subscribers(), 0);
+        assert_eq!(leases.counts(), (0, 0));
+        assert!(hub.is_attached());
+        drop(sink);
+    }
+
+    /// 没有心跳（`curl` 之类）：宽限期一过响应就结束，哪怕客户端一直在读、写入端还在。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn response_without_a_heartbeat_ends_when_the_lease_lapses() {
+        let process = PreviewSlots::new(SlotScope::Process, MAX_PREVIEW_CONNECTIONS);
+        let leases = lease::Leases::with_timeout(Duration::from_millis(300));
+        let hub = PreviewHub::new(4);
+        let mut sink = hub.attach(PreviewFormat::Flv);
+        sink.push(ChunkKind::Header, Bytes::from_static(&flv::FILE_HEADER));
+        sink.push(ChunkKind::Keyframe, Bytes::from_static(b"K1"));
+        let ticket = PreviewTicket::new();
+        let pending = open(&hub, &ticket);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sink.push(ChunkKind::Media, Bytes::from_static(b"p2"));
+        let subscription = pending.await.unwrap().unwrap();
+        let started = Instant::now();
+        let guard = leased_guard(&process, &ticket, &leases, None);
+        let response = live_response(1, hub.clone(), subscription, guard, None);
+        let body = read_to_end(response).await;
+        assert!(started.elapsed() >= Duration::from_millis(300));
+        assert!(body.starts_with(&flv::FILE_HEADER));
+        assert_eq!(
+            ticket.ended_by(),
+            None,
+            "ended by the lapse, not by a ticket cause"
+        );
+        assert_eq!(process.occupied(), 0);
+        assert_eq!(hub.subscribers(), 0);
+        assert_eq!(leases.counts(), (0, 0));
+        drop(sink);
+    }
+
+    /// 页面的心跳连接断开：该页面的预览立刻结束；有心跳时即使超过宽限期也照常推流。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn losing_the_heartbeat_ends_the_response() {
+        let process = PreviewSlots::new(SlotScope::Process, MAX_PREVIEW_CONNECTIONS);
+        let leases = lease::Leases::with_timeout(Duration::from_millis(200));
+        let heartbeat = leases.heartbeat("page");
+        let hub = PreviewHub::new(4);
+        let mut sink = hub.attach(PreviewFormat::Flv);
+        sink.push(ChunkKind::Header, Bytes::from_static(&flv::FILE_HEADER));
+        sink.push(ChunkKind::Keyframe, Bytes::from_static(b"K1"));
+        let ticket = PreviewTicket::new();
+        let pending = open(&hub, &ticket);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sink.push(ChunkKind::Media, Bytes::from_static(b"p2"));
+        let subscription = pending.await.unwrap().unwrap();
+        let guard = leased_guard(&process, &ticket, &leases, Some("page"));
+        let response = live_response(1, hub.clone(), subscription, guard, None);
+        let reader = tokio::spawn(read_to_end(response));
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            !reader.is_finished(),
+            "a heartbeat keeps the preview past the grace period"
+        );
+        assert_eq!(process.occupied(), 1);
+
+        drop(heartbeat);
+        reader.await.unwrap();
+        assert_eq!(ticket.ended_by(), Some(TicketEnd::LeaseLost));
         assert_eq!(process.occupied(), 0);
         assert_eq!(hub.subscribers(), 0);
         drop(sink);
@@ -1426,8 +1601,8 @@ mod tests {
 
         assert!(LiveQuery::default().may_evict());
         let query = |v: &str| LiveQuery {
-            snapshot_ms: None,
             reconnect: Some(v.into()),
+            ..LiveQuery::default()
         };
         assert!(!query("1").may_evict());
         assert!(!query("true").may_evict());
