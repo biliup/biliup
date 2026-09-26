@@ -466,3 +466,61 @@ pub async fn segments_in_state(
         .map(SegmentRow::from_row)
         .collect()
 }
+
+/// 能按场次回看的一个分段文件（`/v1/videos` 用它把工作目录里的文件对回场次）。
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct SegmentFile {
+    pub session_id: i64,
+    pub path: String,
+    pub start_ms: i64,
+}
+
+/// 能回看的分段文件：状态可读、封装是回看流支持的 FLV / TS，场次有时间轴。
+pub async fn replayable_segment_files(pool: &ConnectionPool) -> sqlx::Result<Vec<SegmentFile>> {
+    sqlx::query_as(
+        "SELECT g.session_id, g.path, g.start_ms FROM segments g
+         JOIN stream_sessions s ON s.id = g.session_id
+         WHERE g.state IN ('recording', 'finished', 'pending_delete')
+           AND g.container IN ('flv', 'ts') AND s.started_at IS NOT NULL
+         ORDER BY g.id",
+    )
+    .fetch_all(pool)
+    .await
+}
+
+/// 按文件名索引 `dir` 下的分段文件：相对路径只认不带目录的（`a.flv`、`./a.flv`），绝对路径只认上级就是
+/// `dir` 的。同名的取最后登记的那一段。
+pub fn segment_files_in_dir(
+    files: Vec<SegmentFile>,
+    dir: Option<&Path>,
+) -> std::collections::HashMap<String, SegmentFile> {
+    let mut by_name = std::collections::HashMap::new();
+    for file in files {
+        let path = Path::new(&file.path);
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let parent = path.parent().unwrap_or(Path::new(""));
+        let here = if path.is_absolute() {
+            dir.is_some_and(|dir| parent == dir)
+        } else {
+            parent.as_os_str().is_empty() || parent == Path::new(".")
+        };
+        if here {
+            by_name.insert(name.to_string(), file);
+        }
+    }
+    by_name
+}
+
+/// 有时间轴（能在回看页打开）的场次 id。
+pub async fn sessions_with_timeline(
+    pool: &ConnectionPool,
+) -> sqlx::Result<std::collections::HashSet<i64>> {
+    let ids: Vec<i64> = sqlx::query_scalar(&format!(
+        "SELECT s.id FROM stream_sessions s WHERE {HAS_TIMELINE}"
+    ))
+    .fetch_all(pool)
+    .await?;
+    Ok(ids.into_iter().collect())
+}

@@ -24,6 +24,7 @@ use crate::server::services::configuration::{ApplyConfigError, apply_config};
 use crate::server::services::streamers::{
     AddStreamerError, add_streamer, delete_streamer, toggle_pause, update_streamer,
 };
+use crate::server::workbench;
 use crate::{LogHandle, UploadLine};
 use axum::Json;
 use axum::extract::{Path, State};
@@ -34,13 +35,13 @@ use chrono::Utc;
 use clap::ValueEnum;
 use error_stack::{Report, ResultExt};
 use ormlite::Model;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, UNIX_EPOCH};
 use tokio::fs;
-use tracing::info;
+use tracing::{info, warn};
 
 /// 主播当前被录制策略挡下的原因，供 `/v1/streamers` 覆盖状态字段。
 ///
@@ -257,17 +258,38 @@ pub async fn put_configuration(
         })
 }
 
+/// `/v1/streamer-info` 的一行：场次行本身，外加能不能在回看页打开。
+#[derive(Debug, Serialize)]
+pub struct StreamerInfoView {
+    #[serde(flatten)]
+    pub info: StreamerInfo,
+    /// 这一场有时间轴（升级后录的、写出过分段），能按场次回看。
+    pub has_timeline: bool,
+}
+
 pub async fn get_streamer_info(
     // Extension(streamers_service): Extension<DynUploadStreamersRepository>,
     State(pool): State<ConnectionPool>,
-) -> Result<Json<Vec<StreamerInfo>>, Response> {
+) -> Result<Json<Vec<StreamerInfoView>>, Response> {
     let streamer_infos = StreamerInfo::select()
         .fetch_all(&pool)
         .await
         .change_context(AppError::Unknown)
         .map_err(report_to_response)?;
+    let with_timeline = workbench::store::sessions_with_timeline(&pool)
+        .await
+        .change_context(AppError::Unknown)
+        .map_err(report_to_response)?;
 
-    Ok(Json(streamer_infos))
+    Ok(Json(
+        streamer_infos
+            .into_iter()
+            .map(|info| StreamerInfoView {
+                has_timeline: with_timeline.contains(&info.id),
+                info,
+            })
+            .collect(),
+    ))
 }
 
 pub async fn get_streamer_info_files(
@@ -633,9 +655,22 @@ pub async fn login_by_qrcode(
     Ok(Json(json!({ "filename": filename })))
 }
 
-pub async fn get_videos() -> Result<Json<Vec<serde_json::Value>>, Response> {
+/// `GET /v1/videos`：工作目录下的录像文件。属于某一场、能按场次回看的文件另带 `session_id` 和
+/// `segment_start_ms`（这一段在场次时间轴上的起点），前端据此打开回看页并定位到这一段。
+pub async fn get_videos(
+    State(pool): State<ConnectionPool>,
+) -> Result<Json<Vec<serde_json::Value>>, Response> {
     let media_extensions = [".mp4", ".flv", ".3gp", ".webm", ".mkv", ".ts"];
     let blacklist = ["next-env.d.ts"];
+    let segments = match workbench::store::replayable_segment_files(&pool).await {
+        Ok(files) => files,
+        Err(error) => {
+            warn!(%error, "读取分段失败，录像列表不带场次");
+            Vec::new()
+        }
+    };
+    let cwd = std::env::current_dir().ok();
+    let segments = workbench::store::segment_files_in_dir(segments, cwd.as_deref());
 
     let mut file_list = Vec::new();
     let mut index = 1;
@@ -663,12 +698,17 @@ pub async fn get_videos() -> Result<Json<Vec<serde_json::Value>>, Response> {
                     .map(|d| d.as_secs())
                     .unwrap_or(0);
 
-                file_list.push(serde_json::json!({
+                let mut item = serde_json::json!({
                     "key": index,
                     "name": file_name,
                     "updateTime": mtime,
                     "size": metadata.len(),
-                }));
+                });
+                if let Some(segment) = segments.get(&file_name) {
+                    item["session_id"] = segment.session_id.into();
+                    item["segment_start_ms"] = segment.start_ms.into();
+                }
+                file_list.push(item);
                 index += 1;
             }
         }
