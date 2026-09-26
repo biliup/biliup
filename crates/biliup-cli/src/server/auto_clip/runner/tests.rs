@@ -8,6 +8,7 @@ use crate::server::infrastructure::connection_pool::ConnectionManager;
 use std::sync::atomic::AtomicI64;
 
 mod analyze;
+mod footage;
 
 const KEY: &str = "sk-test-0123456789abcdef";
 

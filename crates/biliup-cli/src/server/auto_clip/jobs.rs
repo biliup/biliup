@@ -2,13 +2,16 @@
 //!
 //! 状态只经这里改，所有「结束」都带 `state = 'running'` 条件：取消与任务自己收尾同时发生时，
 //! 先落库的算数，另一方什么也不改。
+//!
+//! 任务从入队起就以 [`pin_owner`] 引用整场素材（与入队同一个事务），完成、失败、取消或被删时撤销：
+//! 排队等着的时候整场投稿后删除录像，分段也只会标成 `pending_delete`，不会在任务跑之前被删掉。
 
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::workbench::retention;
 use serde::Serialize;
 use serde_json::Value;
-use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
+use sqlx::{Row, SqliteConnection};
 
 /// 与迁移里 `auto_clip_jobs.trigger` 的 CHECK 一致。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -180,7 +183,7 @@ pub struct NewJob {
     pub created_at: i64,
 }
 
-/// 任务运行期间引用整场素材时用的名义。
+/// 任务排队与运行期间引用整场素材时用的名义。
 pub fn pin_owner(id: i64) -> String {
     format!("autoclip-job:{id}")
 }
@@ -197,23 +200,30 @@ async fn one<'q>(
         .transpose()
 }
 
-/// 插一条排队任务；这一场已经有排队或运行中的任务时不插，返回 `None`。
+/// 插一条排队任务并引用整场素材；这一场已经有排队或运行中的任务时不插，返回 `None`。
 pub async fn insert(pool: &ConnectionPool, job: &NewJob) -> sqlx::Result<Option<Job>> {
     let sql = format!(
         "INSERT INTO auto_clip_jobs (session_id, trigger, not_before, reuse_transcript, created_by, created_at)
          VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING {COLUMNS}"
     );
-    one(
-        pool,
-        sqlx::query(&sql)
-            .bind(job.session_id)
-            .bind(job.trigger.as_str())
-            .bind(job.not_before)
-            .bind(job.reuse_transcript)
-            .bind(job.created_by)
-            .bind(job.created_at),
-    )
-    .await
+    let mut tx = pool.begin().await?;
+    let inserted = sqlx::query(&sql)
+        .bind(job.session_id)
+        .bind(job.trigger.as_str())
+        .bind(job.not_before)
+        .bind(job.reuse_transcript)
+        .bind(job.created_by)
+        .bind(job.created_at)
+        .fetch_optional(&mut *tx)
+        .await?
+        .as_ref()
+        .map(Job::from_row)
+        .transpose()?;
+    if let Some(job) = &inserted {
+        pin(&mut tx, job.id, job.session_id).await?;
+    }
+    tx.commit().await?;
+    Ok(inserted)
 }
 
 /// 下播后排自动任务：这一场已经有排队中的自动任务（断流合并接上后又下播）就把它推迟到
@@ -381,6 +391,7 @@ pub async fn finish(
     now: i64,
 ) -> sqlx::Result<bool> {
     let state = if error.is_some() { "failed" } else { "done" };
+    let mut tx = pool.begin().await?;
     let updated = sqlx::query(
         "UPDATE auto_clip_jobs SET state = ?, error = ?, finished_at = ?
          WHERE id = ? AND state = 'running'",
@@ -389,9 +400,11 @@ pub async fn finish(
     .bind(error)
     .bind(now)
     .bind(id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?
     .rows_affected();
+    retention::unpin(&mut tx, &pin_owner(id)).await?;
+    tx.commit().await?;
     Ok(updated > 0)
 }
 
@@ -401,31 +414,60 @@ pub async fn cancel(pool: &ConnectionPool, session_id: i64, now: i64) -> sqlx::R
         "UPDATE auto_clip_jobs SET state = 'canceled', finished_at = ?
          WHERE session_id = ? AND state IN ('queued', 'running') RETURNING {COLUMNS}"
     );
-    one(pool, sqlx::query(&sql).bind(now).bind(session_id)).await
+    let mut tx = pool.begin().await?;
+    let canceled = sqlx::query(&sql)
+        .bind(now)
+        .bind(session_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .as_ref()
+        .map(Job::from_row)
+        .transpose()?;
+    if let Some(job) = &canceled {
+        retention::unpin(&mut tx, &pin_owner(job.id)).await?;
+    }
+    tx.commit().await?;
+    Ok(canceled)
 }
 
 pub async fn delete(pool: &ConnectionPool, id: i64) -> sqlx::Result<()> {
+    let mut tx = pool.begin().await?;
     sqlx::query("DELETE FROM auto_clip_jobs WHERE id = ?")
         .bind(id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
-    Ok(())
+    retention::unpin(&mut tx, &pin_owner(id)).await?;
+    tx.commit().await
 }
 
-/// 启动时：上次没跑完的任务回到排队，按 `stage` 与缓存续跑。返回几条。
+/// 启动时：上次没跑完的任务回到排队，按 `stage` 与缓存续跑；排队中的任务都补上素材引用
+/// （引用入队前就排着的任务没有）。返回回到排队的条数。
 pub async fn recover(pool: &ConnectionPool) -> sqlx::Result<u64> {
-    Ok(
+    let mut tx = pool.begin().await?;
+    let requeued =
         sqlx::query("UPDATE auto_clip_jobs SET state = 'queued' WHERE state = 'running'")
-            .execute(pool)
+            .execute(&mut *tx)
             .await?
-            .rows_affected(),
-    )
+            .rows_affected();
+    let queued: Vec<(i64, i64)> =
+        sqlx::query_as("SELECT id, session_id FROM auto_clip_jobs WHERE state = 'queued'")
+            .fetch_all(&mut *tx)
+            .await?;
+    for (id, session_id) in queued {
+        pin(&mut tx, id, session_id).await?;
+    }
+    tx.commit().await?;
+    Ok(requeued)
 }
 
-/// 任务运行期间引用整场，防止整场投稿后的删除在分析中途删掉素材。
+async fn pin(conn: &mut SqliteConnection, id: i64, session_id: i64) -> sqlx::Result<()> {
+    retention::pin(conn, &pin_owner(id), session_id, 0, i64::MAX).await
+}
+
+/// 开跑时再引用一次整场（入队时已经引用过，这里是兜底），防止整场投稿后的删除在分析中途删掉素材。
 pub async fn pin_session(pool: &ConnectionPool, job: &Job) -> sqlx::Result<()> {
     let mut conn = pool.acquire().await?;
-    retention::pin(&mut conn, &pin_owner(job.id), job.session_id, 0, i64::MAX).await
+    pin(&mut conn, job.id, job.session_id).await
 }
 
 pub async fn unpin_session(pool: &ConnectionPool, id: i64) -> sqlx::Result<()> {
