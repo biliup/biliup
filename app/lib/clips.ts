@@ -52,9 +52,9 @@ const listRefresh = (data?: { clips: Clip[] }) => (data?.clips.some((c) => c.sta
  * 场次的切片列表；有切片在导出时每秒刷新一次。不能把函数直接交给 SWR 的 `refreshInterval`：函数返回 0 后
  * SWR 的定时器就不再续期，之后开始的导出不会被轮询到；传数值时数值一变 SWR 会重新计时。
  */
-export function useSessionClips(sessionId: number) {
+export function useSessionClips(sessionId: number | null) {
   const [ms, setMs] = useState(0)
-  const swr = useSWR<{ clips: Clip[] }>(clipsUrl(sessionId), fetcher, { refreshInterval: ms })
+  const swr = useSWR<{ clips: Clip[] }>(sessionId === null ? null : clipsUrl(sessionId), fetcher, { refreshInterval: ms })
   const wanted = listRefresh(swr.data)
   if (wanted !== ms) setMs(wanted)
   return swr

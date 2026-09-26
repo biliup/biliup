@@ -130,7 +130,7 @@ export default function ReplayView({ sessionId, initialT }: { sessionId: number;
     data: markerData,
     error: markersError,
     isLoading: markersLoading,
-  } = useSWR<{ markers: Marker[] }>(markersUrl(sessionId), fetcher, {
+  } = useSWR<{ markers: Marker[] }>(notFound ? null : markersUrl(sessionId), fetcher, {
     refreshInterval: detail?.recording ? 10_000 : 0,
   })
   const markers = useMemo(() => markerData?.markers ?? [], [markerData])
@@ -139,7 +139,7 @@ export default function ReplayView({ sessionId, initialT }: { sessionId: number;
     fetcher,
     { refreshInterval: 10_000 }
   )
-  const { data: clipData, error: clipsError, isLoading: clipsLoading } = useSessionClips(sessionId)
+  const { data: clipData, error: clipsError, isLoading: clipsLoading } = useSessionClips(notFound ? null : sessionId)
   const clips = useMemo(() => clipData?.clips ?? [], [clipData])
 
   const segments = useMemo(() => detail?.segments ?? [], [detail])
