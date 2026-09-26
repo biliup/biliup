@@ -11,8 +11,10 @@
 use super::layers::{self, Object};
 use super::protocol::{ConfigAck, DesiredConfig};
 use crate::server::config::Config;
+use crate::server::errors::AppError;
 use crate::server::infrastructure::service_register::ServiceRegister;
 use crate::server::services::configuration::{ApplyConfigError, apply_config};
+use error_stack::{FrameKind, Report};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
@@ -44,6 +46,19 @@ impl ManagedConfig {
     }
 }
 
+/// 内部错误报给控制面的原因：错误链最底层的那一条（例如 SQLite 的 database is locked），
+/// 顶层多半只是 `AppError::Unknown`，看不出发生了什么
+fn root_cause(report: &Report<AppError>) -> String {
+    report
+        .frames()
+        .filter_map(|frame| match frame.kind() {
+            FrameKind::Context(context) => Some(context.to_string()),
+            FrameKind::Attachment(_) => None,
+        })
+        .last()
+        .unwrap_or_else(|| report.current_context().to_string())
+}
+
 fn live(services: &ServiceRegister) -> Config {
     services.config.read().unwrap().clone()
 }
@@ -70,7 +85,7 @@ async fn apply_merged(
     .await
     .map_err(|e| match e {
         ApplyConfigError::Invalid(reason) => reason,
-        ApplyConfigError::Internal(report) => format!("保存配置失败：{}", report.current_context()),
+        ApplyConfigError::Internal(report) => format!("保存配置失败：{}", root_cause(&report)),
     })
 }
 
@@ -144,6 +159,16 @@ mod tests {
         services: ServiceRegister,
         /// 句柄只持有弱引用，过滤层被丢弃后换不了日志级别
         _filter: reload::Layer<EnvFilter, Registry>,
+    }
+
+    #[test]
+    fn internal_errors_report_their_root_cause() {
+        let report = Report::new(sqlx::Error::PoolTimedOut).change_context(AppError::Unknown);
+        assert_eq!(root_cause(&report), sqlx::Error::PoolTimedOut.to_string());
+        assert_eq!(
+            root_cause(&Report::new(AppError::Unknown)),
+            AppError::Unknown.to_string()
+        );
     }
 
     async fn fixture(config: Config) -> Fixture {
