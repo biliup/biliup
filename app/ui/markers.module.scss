@@ -4,13 +4,30 @@
 .bar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
   padding: 10px 24px;
   border-bottom: 1px solid var(--semi-color-border);
 }
 
 .markBtn {
   flex-shrink: 0;
+}
+
+/* 「剪下刚才 N 秒」一组按钮 */
+.clipGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.clipLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--semi-color-text-1);
+  white-space: nowrap;
 }
 
 .kbd {
@@ -25,8 +42,8 @@
 }
 
 .hint {
-  min-width: 0;
-  flex: 1 1 auto;
+  min-width: 12em;
+  flex: 1 1 0;
 }
 
 .barCount {
@@ -68,6 +85,18 @@
   }
   .hint {
     flex-basis: 100%;
+  }
+  .clipGroup {
+    width: 100%;
+  }
+  .clipGroup > .clipBtn,
+  .clipGroup > .disabledWrap {
+    flex: 1 1 0;
+    width: auto;
+  }
+  .clipGroup .clipBtn:global(.semi-button) {
+    width: 100%;
+    height: 40px;
   }
 }
 
