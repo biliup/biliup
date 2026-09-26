@@ -455,15 +455,17 @@ function DrawerBody({
               type="warning"
               closeIcon={null}
               data-publish-skipped=""
-              title={`${result.skipped.reduce((n, s) => n + s.clip_ids.length, 0)} 个切片没排进队列`}
               description={
-                <ul className={styles.skippedList}>
-                  {result.skipped.map((s) => (
-                    <li key={s.clip_ids.join(',')}>
-                      {s.clip_ids.map((id) => names.get(id) ?? `切片 #${id}`).join('、')}：{s.reason}
-                    </li>
-                  ))}
-                </ul>
+                <span className={styles.confirm}>
+                  <strong>{result.skipped.reduce((n, s) => n + s.clip_ids.length, 0)} 个切片没排进队列，其余照常排队</strong>
+                  <ul className={styles.skippedList}>
+                    {result.skipped.map((s) => (
+                      <li key={s.clip_ids.join(',')}>
+                        {s.clip_ids.map((id) => names.get(id) ?? `切片 #${id}`).join('、')}：{s.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </span>
               }
             />
           ) : null}
@@ -512,9 +514,9 @@ function DrawerBody({
             type="danger"
             closeIcon={null}
             data-publish-unknown=""
-            title="上次投稿的结果未知，B 站那边可能已经有这个稿件"
             description={
               <span className={styles.confirm}>
+                <strong>上次投稿的结果未知，B 站那边可能已经有这个稿件</strong>
                 <span>
                   {unknownClips.length
                     ? `${unknownClips.map(clipName).join('、')}：投稿请求发出后服务退出了（或没记上结果）。`
