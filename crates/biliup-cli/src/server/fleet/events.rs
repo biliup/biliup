@@ -12,6 +12,7 @@ use super::protocol::{EVENT_RECORDING_ERROR, EVENT_UPLOAD_FAILED, Event, RoomEve
 use crate::server::core::downloader::DownloadStatus;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::Context;
+use std::borrow::Cow;
 use std::sync::OnceLock;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
@@ -92,7 +93,7 @@ pub fn upload_failed(ctx: &Context, report: &error_stack::Report<AppError>) {
     }
 }
 
-/// 去掉链接里的查询串（直链常带签名），合并空白，截到 [`MAX_ERROR_CHARS`]
+/// 去掉链接里的查询串（直链常带签名），本机的绝对路径只留文件名，合并空白，截到 [`MAX_ERROR_CHARS`]
 pub fn scrub(text: &str) -> String {
     let mut out = String::with_capacity(text.len().min(MAX_ERROR_CHARS));
     let mut rest = text;
@@ -115,13 +116,41 @@ pub fn scrub(text: &str) -> String {
         rest = &rest[end..];
     }
     out.push_str(rest);
-    let collapsed = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    let collapsed = out
+        .split_whitespace()
+        .map(shorten_path)
+        .collect::<Vec<_>>()
+        .join(" ");
     if collapsed.chars().count() <= MAX_ERROR_CHARS {
         return collapsed;
     }
     let mut cut: String = collapsed.chars().take(MAX_ERROR_CHARS - 1).collect();
     cut.push('…');
     cut
+}
+
+/// 目录结构和凭据文件的位置不出节点：投稿失败的原因里常带 Cookie 文件的完整路径，
+/// 而心跳里的房间也不带凭据路径
+fn shorten_path(word: &str) -> Cow<'_, str> {
+    let start = word.len() - word.trim_start_matches(['"', '\'', '(', '[', '<']).len();
+    let body = word[start..].trim_end_matches(['"', '\'', ')', ']', '>', ':', ',', ';', '.']);
+    let end = start + body.len();
+    let bytes = body.as_bytes();
+    let absolute = body.starts_with('/')
+        || body.starts_with("\\\\")
+        || (bytes.len() > 2
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && matches!(bytes[2], b'\\' | b'/'));
+    match body.rfind(['/', '\\']) {
+        Some(cut) if absolute && cut > 0 && cut + 1 < body.len() => Cow::Owned(format!(
+            "{}…/{}{}",
+            &word[..start],
+            &body[cut + 1..],
+            &word[end..]
+        )),
+        _ => Cow::Borrowed(word),
+    }
 }
 
 #[cfg(test)]
@@ -231,6 +260,23 @@ mod tests {
         );
         assert_eq!(scrub("no links here"), "no links here");
         assert_eq!(scrub("a://"), "a://");
+    }
+
+    #[test]
+    fn local_paths_keep_only_the_file_name() {
+        assert_eq!(
+            scrub("login by cookies file failed: /home/u/biliup/cookies/1001.json: dns error"),
+            "login by cookies file failed: …/1001.json: dns error"
+        );
+        assert_eq!(
+            scrub("open \"C:\\biliup\\cookies.json\" failed"),
+            "open \"…/cookies.json\" failed"
+        );
+        assert_eq!(scrub("(/data/rec/a.flv), / and /x"), "(…/a.flv), / and /x");
+        assert_eq!(
+            scrub("url (http://h:1/live/a.m3u8?t=1) cookies.json a/b"),
+            "url (http://h:1/live/a.m3u8?…) cookies.json a/b"
+        );
     }
 
     #[test]
