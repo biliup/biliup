@@ -129,7 +129,8 @@ const queueRefresh = (data?: PublishQueue) => (data?.jobs.some(active) ? 1000 : 
  * 让「已发布」、稿件号及时出现。`enabled` 为 false 时不请求（没有权限时）。
  */
 export function usePublishQueue(sessionId: number | null, enabled = true) {
-  const swr = usePolled<PublishQueue>(enabled ? queueUrl(sessionId) : null, queueRefresh)
+  // SWR 默认 2 秒内的定时刷新会被去重，每秒一次的进度会变成几秒才动一下
+  const swr = usePolled<PublishQueue>(enabled ? queueUrl(sessionId) : null, queueRefresh, { dedupingInterval: 500 })
   const seen = useRef<Map<number, JobState>>(new Map())
   const jobs = swr.data?.jobs
   useEffect(() => {
