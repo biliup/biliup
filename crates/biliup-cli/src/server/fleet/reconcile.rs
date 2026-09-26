@@ -438,6 +438,7 @@ impl Reconciler {
             version: desired.version,
             held: self.held(),
             failed,
+            ..Default::default()
         }
     }
 
@@ -794,6 +795,7 @@ mod tests {
             version,
             rooms,
             templates,
+            ..Default::default()
         }
     }
 

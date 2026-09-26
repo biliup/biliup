@@ -14,9 +14,12 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const ALPN: &[u8] = b"biliup/fleet/1";
 /// 协议次版本号。1：`Hello` 带账号、工具与已持有的房间，控制面下发 `DesiredState`，节点回 `Ack`。
-pub const PROTOCOL_MINOR: u32 = 1;
+/// 2：`DesiredState` 带配置（[`DesiredConfig`]），`Ack` 带配置是否生效（[`ConfigAck`]）。
+pub const PROTOCOL_MINOR: u32 = 2;
 /// 能收 `DesiredState` 的最低次版本号。更旧的节点收到不认识的帧会卡住，控制面不给它们发。
 pub const DESIRED_STATE_SINCE: u32 = 1;
+/// 能收配置的最低次版本号。次版本 1 的节点照常收房间，配置不发给它。
+pub const CONFIG_SINCE: u32 = 2;
 pub const MAX_FRAME: usize = 4 * 1024 * 1024;
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 /// 控制面超过这么久没收到节点的任何帧就判离线并关掉连接
@@ -86,12 +89,51 @@ pub enum ControllerMessage {
     DesiredState(DesiredState),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DesiredState {
     /// 控制面的期望状态版本号，单调递增；节点在 `Ack` 里原样带回
     pub version: u64,
     pub rooms: Vec<DesiredRoom>,
     pub templates: Vec<DesiredTemplate>,
+    /// 这台节点的配置（自次版本 2 起）。控制面对次版本 ≥ 2 的节点总是带上；
+    /// 没有这个字段表示控制面不管配置，节点的配置照旧在本机改。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<DesiredConfig>,
+}
+
+/// 下发给一台节点的配置：Fleet 全局 ⊕ 这台节点的覆盖，只含白名单键（D11），
+/// 节点自己再叠上本机的密钥，见 [`super::layers`]。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DesiredConfig {
+    /// 全局配置的版本号，0 表示控制面还没保存过全局配置（此时只有覆盖）
+    pub global_version: i64,
+    pub values: serde_json::Map<String, serde_json::Value>,
+}
+
+/// 节点对 [`DesiredConfig`] 的应答
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfigAck {
+    /// 本机配置已经是下发的那份（包括本来就一样、无需改动）
+    pub applied: bool,
+    /// 没能应用的原因；此时节点保持原来的配置
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl ConfigAck {
+    pub fn applied() -> Self {
+        ConfigAck {
+            applied: true,
+            error: None,
+        }
+    }
+
+    pub fn failed(reason: impl Into<String>) -> Self {
+        ConfigAck {
+            applied: false,
+            error: Some(reason.into()),
+        }
+    }
 }
 
 /// 节点持有的一个托管房间：已经落进本地 `livestreamers`、正在按它录
@@ -115,6 +157,9 @@ pub struct Ack {
     pub held: Vec<HeldRoom>,
     #[serde(default)]
     pub failed: Vec<FailedRoom>,
+    /// 期望状态带了配置时才有（自次版本 2 起）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<ConfigAck>,
 }
 
 /// 节点上外部工具的可用情况，只带是否可用与版本，不带本机路径
@@ -375,8 +420,7 @@ mod tests {
     fn new_frames_are_tagged_and_old_frames_still_decode() {
         let desired = serde_json::to_value(ControllerMessage::DesiredState(DesiredState {
             version: 5,
-            rooms: vec![],
-            templates: vec![],
+            ..Default::default()
         }))
         .unwrap();
         assert_eq!(desired["type"], "desired_state");
@@ -411,6 +455,56 @@ mod tests {
             panic!()
         };
         assert!(heartbeat.accounts.is_none());
+    }
+
+    /// 次版本 1 与 2 混跑：1 的节点不认识 `config`，解 `DesiredState` 时忽略它；
+    /// 1 的节点回的 `Ack` 没有 `config`；控制面不给 1 的节点发配置时帧里也没有这个键。
+    #[test]
+    fn config_fields_are_optional_in_both_directions() {
+        let without = serde_json::to_value(DesiredState {
+            version: 3,
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(without.get("config").is_none());
+
+        let with = serde_json::to_value(DesiredState {
+            version: 4,
+            config: Some(DesiredConfig {
+                global_version: 2,
+                values: serde_json::json!({"segment_time": "01:00:00"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(with["config"]["values"]["segment_time"], "01:00:00");
+
+        /// 次版本 1 的 `DesiredState` 只有这三个字段
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct MinorOne {
+            version: u64,
+            rooms: Vec<DesiredRoom>,
+            templates: Vec<DesiredTemplate>,
+        }
+        let old: MinorOne = serde_json::from_value(with.clone()).unwrap();
+        assert_eq!(old.version, 4);
+        let new: DesiredState = serde_json::from_value(with).unwrap();
+        assert_eq!(new.config.unwrap().global_version, 2);
+
+        let old_ack: Ack =
+            serde_json::from_value(serde_json::json!({"version": 4, "held": []})).unwrap();
+        assert!(old_ack.config.is_none());
+        let ack = Ack {
+            version: 4,
+            config: Some(ConfigAck::failed("pool1_size")),
+            ..Default::default()
+        };
+        let round: Ack = serde_json::from_value(serde_json::to_value(&ack).unwrap()).unwrap();
+        assert_eq!(round.config, ack.config);
     }
 
     #[test]

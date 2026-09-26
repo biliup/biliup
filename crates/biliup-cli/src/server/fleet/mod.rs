@@ -13,6 +13,7 @@ pub mod controller;
 #[cfg(test)]
 mod e2e_tests;
 pub mod guard;
+pub mod layers;
 pub mod model;
 pub mod net;
 pub mod node;

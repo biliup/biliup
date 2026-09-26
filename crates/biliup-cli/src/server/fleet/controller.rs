@@ -355,6 +355,7 @@ impl Controller {
             version,
             rooms,
             templates,
+            ..Default::default()
         });
         if let Some(live) = self.live.lock().unwrap().get_mut(&node)
             && live.outbox.send(message).is_ok()
