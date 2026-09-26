@@ -17,6 +17,29 @@ struct Fake {
     delay: Duration,
     /// 投稿请求到了 B 站之后不再返回（模拟这时进程退出）。
     hang_after_submit: AtomicBool,
+    /// 停在这里等测试放行：到了先通知 `reached`，再等 `release`。
+    hold: Mutex<Option<Hold>>,
+    reached: Notify,
+    release: Notify,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Hold {
+    /// 第一块传完、第二块还没开始。
+    BetweenChunks,
+    /// 最后一块已经交出去、上传还没返回。
+    AfterLastChunk,
+    /// 投稿请求已经到了 B 站、还没返回。
+    InSubmit,
+}
+
+impl Fake {
+    async fn pause(&self, at: Hold) {
+        if *lock(&self.hold) == Some(at) {
+            self.reached.notify_one();
+            self.release.notified().await;
+        }
+    }
 }
 
 struct FakeConnection(Arc<Fake>);
@@ -34,15 +57,22 @@ impl Connection for FakeConnection {
     async fn upload(
         &self,
         path: &Path,
-        progress: &(dyn Fn(usize) + Send + Sync),
+        progress: &(dyn Fn(usize) -> bool + Send + Sync),
     ) -> Result<Video, Failure> {
+        let stopped = || Err(Failure::Other("上传已取消".into()));
         let len = std::fs::metadata(path).unwrap().len() as usize;
-        progress(len / 2);
+        if !progress(len / 2) {
+            return stopped();
+        }
+        self.0.pause(Hold::BetweenChunks).await;
         tokio::time::sleep(self.0.delay).await;
         if let Some(failure) = lock(&self.0.upload_failures).pop_front() {
             return Err(failure);
         }
-        progress(len - len / 2);
+        if !progress(len - len / 2) {
+            return stopped();
+        }
+        self.0.pause(Hold::AfterLastChunk).await;
         lock(&self.0.uploads).push(path.to_path_buf());
         let n = lock(&self.0.uploads).len();
         Ok(Video::new(&format!("n{n}")))
@@ -61,6 +91,7 @@ impl Connection for FakeConnection {
         lock(&self.0.submitted)
             .push(serde_json::from_value(serde_json::to_value(studio).unwrap()).unwrap());
         let n = lock(&self.0.submitted).len();
+        self.0.pause(Hold::InSubmit).await;
         if self.0.hang_after_submit.load(Ordering::Relaxed) {
             std::future::pending::<()>().await;
         }
@@ -179,7 +210,7 @@ async fn wait_on(
             return (job, seen);
         }
         assert!(
-            !(matches!(job.state, JobState::Failed | JobState::Done) && job.state != state),
+            !(job.state.finished() || job.state == JobState::Failed) || job.state == state,
             "任务停在 {:?}：{:?}",
             job.state,
             job.error
@@ -383,30 +414,102 @@ async fn upload_errors_name_the_part_and_missing_templates_fail_early() {
     assert!(failed.error.unwrap().contains("没有绑定上传模板"));
 }
 
+impl Env {
+    /// 让上传 / 投稿停在 `at`，等它到了再返回。
+    async fn hold_at(&self, at: Hold, clip: &Clip) -> JobView {
+        *lock(&self.fake.hold) = Some(at);
+        let job = self.enqueue(std::slice::from_ref(clip));
+        self.fake.reached.notified().await;
+        job
+    }
+
+    fn release(&self) {
+        self.fake.release.notify_one();
+    }
+}
+
 #[tokio::test]
-async fn queued_jobs_can_be_removed_and_running_uploads_are_stopped() {
+async fn queued_jobs_are_removed_and_running_jobs_are_cancelled_between_chunks() {
     let env = env().await;
     let a = env.clip(1000, 2000, "a").await;
     let b = env.clip(3000, 4000, "b").await;
-    let first = env.enqueue(std::slice::from_ref(&a));
+    let first = env.hold_at(Hold::BetweenChunks, &a).await;
     let second = env.enqueue(std::slice::from_ref(&b));
     assert!(matches!(
         env.publisher
             .enqueue(env.session, std::slice::from_ref(&a), Settings::default(), Mode::Quick, None, false),
         Err(EnqueueError::Conflict(ref m)) if m.contains("已经在发布队列里")
     ));
-    env.publisher.remove(second.id).unwrap();
-    // 等第一个开始上传再移出
-    for _ in 0..3000 {
-        if env.publisher.job(first.id).unwrap().step == Some(Step::Upload) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(1)).await;
-    }
-    env.publisher.remove(first.id).unwrap();
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert!(env.publisher.view(None).jobs.is_empty());
+    assert_eq!(env.publisher.remove(second.id), Ok(false));
+    assert!(env.publisher.job(second.id).is_none());
+
+    assert_eq!(env.publisher.remove(first.id), Ok(true));
+    let cancelling = env.publisher.job(first.id).unwrap();
+    assert_eq!(cancelling.state, JobState::Running);
+    assert!(cancelling.cancelling);
+    assert_eq!(cancelling.detail, "正在取消");
+    assert!(
+        env.publisher
+            .check(std::slice::from_ref(&a), false)
+            .is_err(),
+        "停下之前仍占着切片，不能再排一次"
+    );
+    env.release();
+    let (cancelled, _) = env.wait(first.id, JobState::Cancelled).await;
+    assert_eq!(cancelled.detail, "已取消");
+    assert!(!cancelled.cancelling);
+    assert_eq!(cancelled.uploaded, 0);
+    assert!(lock(&env.fake.uploads).is_empty(), "第二块没有传");
     assert!(lock(&env.fake.submitted).is_empty());
+    let row = clips::get(&env.pool, a.id).await.unwrap().unwrap();
+    assert_ne!(row.state, ClipState::Published);
+    assert_eq!(row.submit_state, None);
+    assert_eq!(env.publisher.state_of(a.id), None);
+
+    // 取消的任务留在列表里，可以移出；切片可以重新发布
+    *lock(&env.fake.hold) = None;
+    let again = env.enqueue(std::slice::from_ref(&row));
+    env.wait(again.id, JobState::Done).await;
+    assert_eq!(lock(&env.fake.submitted).len(), 1);
+    assert_eq!(env.publisher.remove(first.id), Ok(false));
+    assert!(env.publisher.job(first.id).is_none());
+}
+
+#[tokio::test]
+async fn cancelling_after_the_upload_stops_before_submitting() {
+    let env = env().await;
+    let a = env.clip(1000, 2000, "a").await;
+    let job = env.hold_at(Hold::AfterLastChunk, &a).await;
+    assert_eq!(env.publisher.remove(job.id), Ok(true));
+    env.release();
+    env.wait(job.id, JobState::Cancelled).await;
+    assert_eq!(lock(&env.fake.uploads).len(), 1, "分块都传完了");
+    assert!(lock(&env.fake.submitted).is_empty(), "投稿前看到取消");
+    let row = clips::get(&env.pool, a.id).await.unwrap().unwrap();
+    assert_eq!(row.submit_state, None, "没有进投稿这一步");
+    assert_eq!(row.archive_bvid, None);
+}
+
+#[tokio::test]
+async fn cancelling_after_the_submit_request_went_out_keeps_the_archive() {
+    let env = env().await;
+    let a = env.clip(1000, 2000, "a").await;
+    let job = env.hold_at(Hold::InSubmit, &a).await;
+    assert_eq!(
+        env.publisher.remove(job.id),
+        Err(ActionError::Conflict(SUBMITTED.into()))
+    );
+    let running = env.publisher.job(job.id).unwrap();
+    assert_eq!(running.state, JobState::Running);
+    assert!(!running.cancelling);
+    env.release();
+    let (done, _) = env.wait(job.id, JobState::Done).await;
+    assert_eq!(done.bvid.as_deref(), Some("BV1fake1"));
+    assert_eq!(done.detail, "已发布");
+    assert_eq!(lock(&env.fake.submitted).len(), 1);
+    let row = clips::get(&env.pool, a.id).await.unwrap().unwrap();
+    assert_eq!(row.state, ClipState::Published);
+    assert_eq!(row.archive_bvid.as_deref(), Some("BV1fake1"));
 }
 
 #[test]
