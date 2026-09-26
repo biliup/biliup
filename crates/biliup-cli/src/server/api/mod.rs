@@ -8,6 +8,8 @@ pub mod auto_clip;
 pub mod bilibili_endpoints;
 /// 切片工作台的切片发布（上传投稿队列、取帧、封面）
 pub mod clip_publish;
+/// 自动切片的候选：列表、接受、丢弃
+pub mod clip_suggestions;
 /// 切片工作台的切片与导出
 pub mod clips;
 /// 弹幕密度曲线（回看页用）

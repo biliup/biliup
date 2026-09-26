@@ -585,6 +585,7 @@ pub fn spawn_sweeper(pool: ConnectionPool, config: Arc<RwLock<Config>>) -> Sweep
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
+            crate::server::auto_clip::cleanup::sweep(&pool, now_ms()).await;
             let min_free_space = config.read().unwrap().min_free_space;
             if let Err(e) = sweep_once(&pool, min_free_space).await {
                 warn!(error = %e, "分段清理任务出错，下一分钟再试");

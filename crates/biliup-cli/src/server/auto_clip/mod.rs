@@ -5,6 +5,7 @@
 
 pub mod audio;
 pub mod candidates;
+pub mod cleanup;
 pub mod danmaku;
 #[cfg(test)]
 pub(crate) mod fake;
@@ -15,4 +16,5 @@ pub mod probe;
 pub mod prompt;
 pub mod runner;
 pub mod settings;
+pub mod suggestions;
 pub mod thumbs;

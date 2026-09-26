@@ -87,7 +87,7 @@ pub struct ClipView {
     pub progress: Option<Progress>,
 }
 
-fn view(clip: Clip, exports: &ClipExports) -> ClipView {
+pub(crate) fn view(clip: Clip, exports: &ClipExports) -> ClipView {
     let progress = (clip.state == ClipState::Exporting)
         .then(|| exports.progress(clip.id))
         .flatten();
@@ -157,7 +157,7 @@ pub async fn get_clip(
     }
 }
 
-fn check_title(title: &str) -> Result<String, String> {
+pub(crate) fn check_title(title: &str) -> Result<String, String> {
     let title = title.trim();
     if title.chars().count() > MAX_TITLE_CHARS {
         return Err(format!("切片标题最多 {MAX_TITLE_CHARS} 个字"));
@@ -168,7 +168,7 @@ fn check_title(title: &str) -> Result<String, String> {
     Ok(title.to_string())
 }
 
-fn check_range(in_ms: i64, out_ms: i64) -> Result<(), String> {
+pub(crate) fn check_range(in_ms: i64, out_ms: i64) -> Result<(), String> {
     if in_ms < 0 {
         return Err("入点不能是负数".into());
     }

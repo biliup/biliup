@@ -21,6 +21,7 @@ use tracing_subscriber::{EnvFilter, reload};
 
 mod danmaku_density;
 mod session;
+mod suggestions;
 
 const KEY: &str = "sk-stored-0123456789abcdef";
 const MASK: &str = "sk-…cdef";

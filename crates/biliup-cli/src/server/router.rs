@@ -9,6 +9,9 @@ use crate::server::api::clip_publish::{
     cover_route, get_session_thumb, list_publish_jobs, preview_publish, publish_batch,
     publish_clip, remove_publish, resume_publish, retry_publish,
 };
+use crate::server::api::clip_suggestions::{
+    accept_suggestion, dismiss_suggestion, list_suggestions,
+};
 use crate::server::api::clips::{
     create_clip, delete_clip, download_clip, export_clip, get_clip, list_clips, update_clip,
 };
@@ -128,6 +131,16 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
             get(get_session_auto_clip)
                 .post(start_session_auto_clip)
                 .delete(cancel_session_auto_clip),
+        )
+        // 候选：列表、接受（建切片草稿）、丢弃
+        .route("/v1/sessions/{id}/suggestions", get(list_suggestions))
+        .route(
+            "/v1/sessions/{id}/suggestions/{sid}/accept",
+            post(accept_suggestion),
+        )
+        .route(
+            "/v1/sessions/{id}/suggestions/{sid}/dismiss",
+            post(dismiss_suggestion),
         )
         // 弹幕密度曲线：10 秒一桶、基线与高峰
         .route(
