@@ -206,13 +206,23 @@ export function QueueBanner({
 
 /** 任务状态变化时提示一次（打开页面时已经结束的不提示） */
 export function useJobToasts(jobs: PublishJob[] | undefined) {
-  const seen = useRef<Map<number, JobState>>(new Map())
+  const seen = useRef<Map<number, JobState> | null>(null)
+  const since = useRef(0)
   useEffect(() => {
     if (!jobs) return
+    if (!seen.current) {
+      seen.current = new Map(jobs.map((job) => [job.id, job.state]))
+      since.current = Date.now()
+      return
+    }
     for (const job of jobs) {
       const before = seen.current.get(job.id)
       seen.current.set(job.id, job.state)
-      if (before === undefined || before === job.state) continue
+      if (before === job.state) continue
+      // 两次轮询之间就排上又结束的任务（比如已导出的切片投稿马上失败）也要提示
+      if (before === undefined && (job.state === 'queued' || job.state === 'running' || job.updated_at < since.current)) {
+        continue
+      }
       if (job.state === 'done') {
         Toast.success({
           id: `publish-${job.id}`,
