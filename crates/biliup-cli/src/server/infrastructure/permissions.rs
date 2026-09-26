@@ -186,6 +186,9 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         "/v1/publish-jobs/{jid}" if method == Method::DELETE => UploadSubmit,
         "/v1/configuration" if get => ConfigView,
         "/v1/configuration" if method == Method::PUT => ConfigEdit,
+        // 连通性测试会用已保存的 key 调外部接口，归配置编辑；状态不含 key 和地址
+        "/v1/auto-clip/test" if method == Method::POST => ConfigEdit,
+        "/v1/auto-clip/status" if get => FileView,
         "/v1/streamer-info" | "/v1/streamer-info/files/{id}" if get => StreamerView,
         "/v1/sessions/{id}" if method == Method::PATCH => ClipEdit,
         "/v1/upload/streamers" | "/v1/upload/streamers/{id}" if get => StreamerView,
