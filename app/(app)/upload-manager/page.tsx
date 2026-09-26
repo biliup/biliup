@@ -9,6 +9,9 @@ import {
   Modal,
   Transfer,
   Card,
+  Tag,
+  Tooltip,
+  Banner,
 } from '@douyinfe/semi-ui'
 import {
   IconCloudStroked,
@@ -40,10 +43,14 @@ export default function UploadManager() {
     fetcher
   )
   const { biliUsers } = useBiliUsers()
-  const { can } = useMe()
+  const { me, can } = useMe()
   const canManageAccounts = can('account.manage')
   const canEditTemplates = can('template.edit')
   const canSubmit = can('upload.submit')
+  // 本机加入了控制面时，控制面下发的投稿模板只读（后端对它们的改删返回 409）
+  const fleet = me?.fleet_node
+  const managedIds = new Set(fleet?.templates ?? [])
+  const managedHint = fleet ? `由控制面 ${fleet.controller} 管理，请到控制面修改` : undefined
 
   const handleAddLinkClick = (event: React.MouseEvent) => {
     if (biliUsers.length === 0) {
@@ -149,6 +156,19 @@ export default function UploadManager() {
         actions={canEditTemplates || canManageAccounts ? actions : undefined}
       />
       <div className={dc.content}>
+        {fleet ? (
+          <Banner
+            type="info"
+            fullMode={false}
+            closeIcon={null}
+            style={{ marginBottom: 12 }}
+            description={
+              managedIds.size > 0
+                ? `标着「托管」的 ${managedIds.size} 个模板由控制面 ${fleet.controller} 管理，这里只能查看和用来投稿，修改请到控制面。本机自己的模板不受影响。`
+                : `本机已加入控制面 ${fleet.controller}；控制面下发的投稿模板会由控制面 ${fleet.controller} 管理，这里只能查看。`
+            }
+          />
+        ) : null}
         <List
           grid={{
             gutter: 12,
@@ -188,6 +208,13 @@ export default function UploadManager() {
                 >
                   {item.template_name}
                 </Text>
+                {managedIds.has(item.id) ? (
+                  <Tooltip content={managedHint}>
+                    <Tag size="small" color="violet" style={{ flexShrink: 0 }}>
+                      托管
+                    </Tag>
+                  </Tooltip>
+                ) : null}
                 {(canSubmit || canEditTemplates) && (
                   <ButtonGroup style={{ flexShrink: 0 }} theme="borderless">
                     {[
@@ -204,6 +231,8 @@ export default function UploadManager() {
                           key="edit"
                           icon={<IconEdit2Stroked />}
                           aria-label="编辑"
+                          disabled={managedIds.has(item.id)}
+                          title={managedIds.has(item.id) ? managedHint : undefined}
                           onClick={() => router.push(`/upload-manager/edit?id=${item.id}`)}
                         />
                       ),
@@ -213,9 +242,16 @@ export default function UploadManager() {
                           title="确定是否要删除？"
                           content="此操作将不可逆"
                           margin={50}
+                          disabled={managedIds.has(item.id)}
                           onConfirm={async () => await onConfirm(item.id)}
                         >
-                          <Button theme="borderless" icon={<IconDeleteStroked />} aria-label="删除" />
+                          <Button
+                            theme="borderless"
+                            icon={<IconDeleteStroked />}
+                            aria-label="删除"
+                            disabled={managedIds.has(item.id)}
+                            title={managedIds.has(item.id) ? managedHint : undefined}
+                          />
                         </Popconfirm>
                       ),
                     ].filter(Boolean)}

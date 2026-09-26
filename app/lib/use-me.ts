@@ -63,6 +63,17 @@ export interface Me {
   auth_enabled: boolean
   /** 本机以 `--controller` 运行（Fleet 控制面），「节点」菜单只在这时出现 */
   fleet_controller: boolean
+  /** 本机是加入了控制面的节点时才有：哪些直播间与投稿模板由控制面托管（本机只读） */
+  fleet_node?: FleetManaged
+}
+
+export interface FleetManaged {
+  /** 控制面的显示名（relay 地址的主机名或控制面 ID 前缀） */
+  controller: string
+  /** 托管的本地直播间 id */
+  streamers: number[]
+  /** 托管的本地投稿模板 id */
+  templates: number[]
 }
 
 /**
@@ -75,6 +86,8 @@ export function useMe() {
   const { data, error, isLoading } = useSWR<Me>(ME_KEY, fetcher, {
     revalidateOnFocus: true,
     dedupingInterval: 10_000,
+    // 被控制面托管的节点：托管哪些行随分派变化，定时刷新让只读标记跟上
+    refreshInterval: (latest) => (latest?.fleet_node ? 10_000 : 0),
   })
   const permissions = data?.permissions
   const can = (permission: Permission) => permissions?.includes(permission) ?? false

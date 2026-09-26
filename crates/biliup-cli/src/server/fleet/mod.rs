@@ -4,14 +4,20 @@
 //! 两端都经控制面内嵌的 relay 中转、能打洞时转直连。单机模式（不带 `--controller`、
 //! 也没有 `data/node.json`）不创建 iroh 端点、不开任何端口、不写任何 Fleet 文件。
 //!
-//! 这一阶段只做加入、心跳与在线状态：不分派房间、不下发配置。
+//! 房间与投稿模板的真身在控制面，按期望状态整份下发给节点（F2）；全局配置还不下发（F3）。
 
+pub mod accounts;
+pub mod assignments;
 pub mod controller;
 #[cfg(test)]
 mod e2e_tests;
+pub mod guard;
+pub mod model;
 pub mod net;
 pub mod node;
+pub mod placement;
 pub mod protocol;
+pub mod reconcile;
 pub mod relay;
 pub mod store;
 pub mod ticket;
@@ -21,13 +27,14 @@ use crate::server::infrastructure::connection_pool::ConnectionManager;
 use crate::server::infrastructure::service_register::ServiceRegister;
 use controller::{Controller, RelaySetup};
 use error_stack::{ResultExt, bail};
+use guard::ManagedHandle;
 use iroh::endpoint::{Connection, PortmapperConfig, QuicTransportConfig, VarInt, presets};
 use iroh::{Endpoint, RelayMap, RelayMode, SecretKey};
 use protocol::CloseCode;
 use relay::{EmbeddedRelay, FleetAccess};
 use sqlx::migrate::Migrator;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -95,10 +102,21 @@ pub struct FleetOptions {
     pub relay_urls: Vec<Url>,
 }
 
-/// `/v1/me` 里的能力标记，前端据此显示「节点」菜单
-#[derive(Debug, Clone, Copy, Default)]
+/// `/v1/me` 里的能力标记，前端据此显示「节点」菜单与「由控制面管理」的只读提示
+#[derive(Debug, Clone, Default)]
 pub struct FleetCapability {
     pub controller: bool,
+    /// 节点进程才有：此刻托管在本机的行
+    pub node: Option<ManagedHandle>,
+}
+
+impl FleetCapability {
+    /// `/v1/me` 的 `fleet_node`；没有被控制面托管时为 `None`，响应里不出现这个键
+    pub fn managed_view(&self) -> Option<serde_json::Value> {
+        let node = self.node.as_ref()?;
+        let managed = node.read().unwrap();
+        managed.as_ref().map(guard::Managed::view)
+    }
 }
 
 /// 本进程在 Fleet 里的角色
@@ -107,13 +125,28 @@ pub enum Fleet {
     #[default]
     Standalone,
     Controller(Arc<Controller>),
-    Node(Arc<Mutex<Option<node::NodeAgent>>>),
+    Node(Arc<Mutex<Option<node::NodeAgent>>>, ManagedHandle),
 }
 
 impl Fleet {
     pub fn capability(&self) -> FleetCapability {
         FleetCapability {
             controller: matches!(self, Fleet::Controller(_)),
+            node: match self {
+                Fleet::Node(_, managed) => Some(managed.clone()),
+                _ => None,
+            },
+        }
+    }
+
+    /// 节点进程上拒绝本机改动托管行（D7）；其他角色原样返回
+    pub fn guard(&self, router: axum::Router<()>) -> axum::Router<()> {
+        match self {
+            Fleet::Node(_, managed) => router.layer(axum::middleware::from_fn_with_state(
+                managed.clone(),
+                guard::guard,
+            )),
+            _ => router,
         }
     }
 
@@ -131,7 +164,7 @@ impl Fleet {
         match self {
             Fleet::Standalone => {}
             Fleet::Controller(controller) => controller.shutdown().await,
-            Fleet::Node(agent) => {
+            Fleet::Node(agent, _) => {
                 let agent = agent.lock().unwrap().take();
                 if let Some(agent) = agent {
                     agent.shutdown().await;
@@ -156,10 +189,12 @@ pub async fn start(options: &FleetOptions, services: &ServiceRegister) -> AppRes
         warn!("--relay-listen / --relay-url 只在 --controller 时生效，已忽略");
     }
     if !node_file.exists() {
-        let Some(ticket) = std::env::var(JOIN_TICKET_ENV)
-            .ok()
-            .filter(|ticket| !ticket.trim().is_empty())
-        else {
+        let Some(ticket) = join_ticket_env() else {
+            // 离开时进程没在跑、之后又手动删了 node.json：托管行留作本地行
+            let stale = reconcile::state_path(node_file);
+            if stale.exists() {
+                reconcile::forget(&stale);
+            }
             return Ok(Fleet::Standalone);
         };
         let allow_hooks = std::env::var(JOIN_ALLOW_HOOKS_ENV)
@@ -173,13 +208,43 @@ pub async fn start(options: &FleetOptions, services: &ServiceRegister) -> AppRes
             }
         }
     }
-    match node::NodeAgent::start(node_file.to_path_buf(), services.clone()).await {
-        Ok(agent) => Ok(Fleet::Node(Arc::new(Mutex::new(Some(agent))))),
+    let managed = ManagedHandle::default();
+    match node::NodeAgent::start(node_file.to_path_buf(), services.clone(), managed.clone()).await {
+        Ok(agent) => Ok(Fleet::Node(Arc::new(Mutex::new(Some(agent))), managed)),
         Err(e) => {
             error!(error = ?e, "节点代理没能启动，本次以单机模式运行");
             Ok(Fleet::Standalone)
         }
     }
+}
+
+fn join_ticket_env() -> Option<String> {
+    std::env::var(JOIN_TICKET_ENV)
+        .ok()
+        .filter(|ticket| !ticket.trim().is_empty())
+}
+
+/// 已加入（或即将按 [`JOIN_TICKET_ENV`] 加入）控制面的节点不能用 `--config` 启动：
+/// 房间与模板归控制面管，配置文件里的主播会与托管行打架（D7）。
+pub fn reject_config_file(config_path: Option<&Path>) -> AppResult<()> {
+    let Some(path) = config_path else {
+        return Ok(());
+    };
+    let node_file = PathBuf::from(NODE_FILE);
+    if node_file.exists() {
+        bail!(AppError::Custom(format!(
+            "这台机器已作为节点加入控制面（{NODE_FILE} 存在），不能再用 --config {} 启动：房间与模板由控制面管理。\
+             去掉 --config 启动；要回到单机，先执行 `biliup node leave`",
+            path.display()
+        )));
+    }
+    if join_ticket_env().is_some() {
+        bail!(AppError::Custom(format!(
+            "设置了 {JOIN_TICKET_ENV}（启动时加入控制面）就不能再用 --config {} 启动：房间与模板由控制面管理",
+            path.display()
+        )));
+    }
+    Ok(())
 }
 
 async fn start_controller(options: &FleetOptions) -> AppResult<Arc<Controller>> {
@@ -289,10 +354,16 @@ mod tests {
     /// 修 SQL 只能新增迁移文件。
     #[test]
     fn shipped_fleet_migration_checksums_are_frozen() {
-        const FROZEN: &[(i64, &str)] = &[(
-            1,
-            "ffd740cff5fdaeb33e832d290112ce69dbc46d8993f753d7d98acb6bd9b634cc929890bae23a4385280f18dafaabe8c1",
-        )];
+        const FROZEN: &[(i64, &str)] = &[
+            (
+                1,
+                "ffd740cff5fdaeb33e832d290112ce69dbc46d8993f753d7d98acb6bd9b634cc929890bae23a4385280f18dafaabe8c1",
+            ),
+            (
+                2,
+                "647b577b8a045a666dcd6bef202e002f6f5b47124fb3e34428b2183954ac3c0c9f5515abc8db85836f5fa142cfef97c9",
+            ),
+        ];
         let embedded: Vec<(i64, String)> = FLEET_MIGRATOR
             .iter()
             .map(|migration| (migration.version, store::hex(&migration.checksum)))
@@ -316,7 +387,7 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(versions, [1]);
+        assert_eq!(versions, [1, 2]);
         let tables: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'fleet_%' ORDER BY name",
         )
@@ -325,7 +396,14 @@ mod tests {
         .unwrap();
         assert_eq!(
             tables,
-            ["fleet_identity", "fleet_join_tokens", "fleet_nodes"]
+            [
+                "fleet_identity",
+                "fleet_join_tokens",
+                "fleet_node_accounts",
+                "fleet_nodes",
+                "fleet_rooms",
+                "fleet_templates"
+            ]
         );
         // 主库的表一张都不在这里
         let foreign: i64 = sqlx::query_scalar(
@@ -344,6 +422,6 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(count, 1);
+        assert_eq!(count, 2);
     }
 }

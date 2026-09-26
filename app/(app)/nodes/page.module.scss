@@ -219,6 +219,18 @@
   color: var(--semi-color-text-3);
 }
 
+.revokeBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(320px, calc(100vw - 64px));
+}
+
+.revokeWarn {
+  font-size: 12px;
+  color: var(--semi-color-warning);
+}
+
 .tokens {
   margin-top: 24px;
   display: flex;
@@ -327,9 +339,319 @@
   overflow-wrap: anywhere;
 }
 
+.candidate {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px dashed var(--semi-color-border);
+}
+
+.candidateRow {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+
+  :global(.semi-input-wrapper) {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.nodeAccounts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.nodeAccountsLabel {
+  color: var(--semi-color-text-2);
+  margin-right: 2px;
+}
+
+.tabs {
+  :global(.semi-tabs-bar) {
+    margin-bottom: 16px;
+  }
+}
+
+/* 房间 */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--semi-color-fill-2);
+  border-radius: 8px;
+  padding: 6px 12px;
+  background: var(--semi-color-bg-1);
+  width: 260px;
+  max-width: 100%;
+  color: var(--semi-color-text-2);
+  transition: border-color 0.15s ease;
+}
+
+.search:focus-within {
+  border-color: var(--semi-color-primary);
+}
+
+.search input {
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--semi-color-text-0);
+  font-size: 13px;
+  width: 100%;
+}
+
+.nodeFilter {
+  width: 220px;
+  max-width: 100%;
+}
+
+.tableWrap {
+  background: var(--semi-color-bg-1);
+  border: 1px solid var(--semi-color-fill-2);
+  border-radius: 12px;
+  overflow-x: auto;
+  box-shadow: 0 1px 2px rgba(var(--semi-grey-9), 0.04), 0 2px 6px rgba(var(--semi-grey-9), 0.03);
+}
+
+.roomTable {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.roomTable th {
+  text-align: left;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--semi-color-text-2);
+  letter-spacing: 0.5px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--semi-color-border);
+  background: var(--semi-color-bg-2);
+  white-space: nowrap;
+}
+
+.roomTable td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--semi-color-border);
+  vertical-align: middle;
+}
+
+.roomTable tr:last-child td {
+  border-bottom: none;
+}
+
+.roomTable tbody tr:hover td {
+  background: var(--semi-color-fill-0);
+}
+
+.roomName {
+  min-width: 0;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+}
+
+.roomMain {
+  width: 100%;
+  max-width: 0;
+}
+
+.roomMain .roomName {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.roomSub {
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.roomUrl {
+  overflow-wrap: anywhere;
+}
+
+.roomNode {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.roomNodeName {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.rowActions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 2px;
+}
+
+.roomCards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.roomCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px 14px 6px;
+  background: var(--semi-color-bg-1);
+  border: 1px solid var(--semi-color-fill-2);
+  border-radius: 12px;
+}
+
+.roomCardHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.roomCardMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--semi-color-text-1);
+
+  > span {
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+  }
+}
+
+.roomCardActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px;
+  border-top: 1px solid var(--semi-color-border);
+  padding-top: 4px;
+}
+
+.assignNow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.nodeOption {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.nodeOptionName {
+  font-weight: 600;
+}
+
+/* 投稿模板 */
+
+.templateGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+  gap: 12px;
+}
+
+.templateCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px 16px 6px;
+  background: var(--semi-color-bg-1);
+  border: 1px solid var(--semi-color-fill-2);
+  border-radius: 12px;
+}
+
+.templateHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.templateName {
+  min-width: 0;
+  flex: 1;
+  font-size: 14px;
+}
+
+.templateMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 12.5px;
+  color: var(--semi-color-text-2);
+
+  b {
+    color: var(--semi-color-text-0);
+    font-weight: 650;
+  }
+}
+
+.templateActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+  border-top: 1px solid var(--semi-color-border);
+  padding-top: 4px;
+}
+
+.accountOption {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+/* TemplateFields 里的输入框写死了宽度，弹层变窄时不能撑出去 */
+.templateForm :global(.semi-form-field) {
+  max-width: 100%;
+}
+
+.templateForm :global(.semi-form-field-main) > * {
+  max-width: 100%;
+}
+
 @media (max-width: 640px) {
   .grid {
     grid-template-columns: minmax(0, 1fr);
     gap: 12px;
+  }
+
+  .search,
+  .nodeFilter {
+    width: 100%;
   }
 }

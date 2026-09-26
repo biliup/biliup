@@ -1,7 +1,8 @@
 'use client'
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import useSWR, { mutate as revalidate } from 'swr'
-import { Button, Empty, Popconfirm, Spin, Tag, Toast, Typography } from '@douyinfe/semi-ui'
+import { Button, Empty, Popconfirm, Spin, TabPane, Tabs, Tag, Toast, Typography } from '@douyinfe/semi-ui'
 import { IconPlusCircle, IconServer } from '@douyinfe/semi-icons'
 import PageHeader from '../components/PageHeader'
 import dc from '@/app/ui/data-card.module.scss'
@@ -12,18 +13,34 @@ import { humDate } from '@/app/lib/utils'
 import {
   FLEET_NODES_KEY,
   FLEET_REFRESH_MS,
+  FLEET_ROOMS_KEY,
+  FLEET_TEMPLATES_KEY,
   FLEET_TOKENS_KEY,
+  revokeAndReassign,
   revokeNode,
   voidToken,
   type FleetNode,
   type FleetNodes,
+  type FleetRooms,
+  type FleetTemplate,
   type JoinTokens,
 } from '@/app/lib/use-fleet'
 import NodeCard from './NodeCard'
 import JoinDialog from './JoinDialog'
+import RoomsPanel, { CreateRoomButton } from './RoomsPanel'
+import TemplatesPanel from './TemplatesPanel'
+import FleetTemplateModal from './FleetTemplateModal'
 import styles from './page.module.scss'
 
 const { Text } = Typography
+
+type Tab = 'nodes' | 'rooms' | 'templates'
+
+const DESCRIPTIONS: Record<Tab, string> = {
+  nodes: '加入本控制面的 biliup 实例。各节点仍各自录制、各自上传，这里汇总它们的状态',
+  rooms: '把直播间分派给节点录制；迁移时上一台先停录、确认释放后才交给新节点',
+  templates: '房间录完按模板投稿；账号按 mid 在节点本机的凭据里找，凭据不出节点',
+}
 
 function NotController() {
   return (
@@ -74,45 +91,101 @@ function PendingTokens({ canManage }: { canManage: boolean }) {
   )
 }
 
-export default function NodesPage() {
+function Nodes() {
   const { me, can } = useMe()
   const isMobile = useIsMobile()
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const requested = searchParams.get('tab')
+  const tab: Tab = requested === 'rooms' || requested === 'templates' ? requested : 'nodes'
   const controller = me?.fleet_controller === true
   const canManage = can('node.manage')
   const { data, error, isLoading, mutate } = useSWR<FleetNodes>(controller ? FLEET_NODES_KEY : null, fetcher, {
     refreshInterval: FLEET_REFRESH_MS,
   })
+  const {
+    data: templates,
+    error: templatesError,
+    isLoading: templatesLoading,
+    mutate: mutateTemplates,
+  } = useSWR<FleetTemplate[]>(controller ? FLEET_TEMPLATES_KEY : null, fetcher)
+  const { data: roomList } = useSWR<FleetRooms>(controller ? FLEET_ROOMS_KEY : null, fetcher, {
+    refreshInterval: FLEET_REFRESH_MS,
+  })
   const [joining, setJoining] = useState(false)
+  /** undefined 为没打开，null 为新建 */
+  const [editingTemplate, setEditingTemplate] = useState<FleetTemplate | null | undefined>(undefined)
 
   const refresh = () => {
     mutate().catch(() => undefined)
   }
+  const refreshRooms = () => {
+    revalidate(FLEET_ROOMS_KEY).catch(() => undefined)
+    refresh()
+  }
+  const refreshTemplates = () => {
+    mutateTemplates().catch(() => undefined)
+    refreshRooms()
+  }
+  const switchTab = (key: string) => {
+    router.replace(key === 'nodes' ? pathname : `${pathname}?tab=${key}`, { scroll: false })
+  }
 
-  const revoke = async (node: FleetNode) => {
+  const revoke = async (node: FleetNode, reassign: boolean) => {
     try {
-      await revokeNode(node.id)
-      Toast.success(`已移除 ${node.name}`)
+      if (!reassign) {
+        await revokeNode(node.id)
+        Toast.success(`已移除 ${node.name}`)
+      } else {
+        const { reassigned, unplaced } = await revokeAndReassign(node.id)
+        Toast.success(`已移除 ${node.name}，${reassigned.length} 个房间已改派`)
+        if (unplaced.length > 0) {
+          Toast.warning({
+            content: `${unplaced.length} 个房间没找到合适的节点，留在未分派：${unplaced[0].reason}`,
+            duration: 8,
+          })
+        }
+      }
     } catch (e) {
       Toast.error((e as Error).message)
     }
-    refresh()
+    refreshRooms()
   }
 
   const nodes = data?.nodes ?? []
+  const rooms = roomList?.rooms ?? []
   const online = nodes.filter((n) => n.online)
   const recording = online.reduce((sum, n) => sum + (n.summary?.recording ?? 0), 0)
+  const unassigned = rooms.filter((r) => r.node_id === null && r.deleted_at === null).length
 
-  let body
-  if (me && !controller) {
-    body = <NotController />
-  } else if (!data && (isLoading || !me)) {
-    body = (
+  const createRoom = (
+    <CreateRoomButton nodes={nodes} templates={templates ?? []} onCreated={refreshRooms}>
+      <Button icon={<IconPlusCircle />} theme="solid">
+        {isMobile ? '添加' : '新建房间'}
+      </Button>
+    </CreateRoomButton>
+  )
+  const createTemplate = (
+    <Button icon={<IconPlusCircle />} theme="solid" onClick={() => setEditingTemplate(null)}>
+      {isMobile ? '添加' : '新建模板'}
+    </Button>
+  )
+  const addNode = (
+    <Button icon={<IconPlusCircle />} theme="solid" onClick={() => setJoining(true)}>
+      {isMobile ? '添加' : '添加节点'}
+    </Button>
+  )
+
+  let nodesBody
+  if (!data && (isLoading || !me)) {
+    nodesBody = (
       <div className={styles.center}>
         <Spin size="large" />
       </div>
     )
   } else if (!data) {
-    body = (
+    nodesBody = (
       <div className={styles.center}>
         <Empty title="加载失败" description={(error as Error | undefined)?.message || '无法获取节点列表'} />
         <Button onClick={refresh} style={{ marginTop: 12 }}>
@@ -121,7 +194,7 @@ export default function NodesPage() {
       </div>
     )
   } else if (nodes.length === 0) {
-    body = (
+    nodesBody = (
       <div className={styles.center}>
         <Empty
           image={<IconServer size="extra-large" style={{ color: 'var(--semi-color-text-3)' }} />}
@@ -140,7 +213,7 @@ export default function NodesPage() {
       </div>
     )
   } else {
-    body = (
+    nodesBody = (
       <div className={styles.grid}>
         {[...nodes]
           .sort((a, b) => Number(b.online) - Number(a.online) || a.id - b.id)
@@ -151,41 +224,81 @@ export default function NodesPage() {
     )
   }
 
+  const actions = !controller || !canManage ? null : tab === 'rooms' ? createRoom : tab === 'templates' ? createTemplate : addNode
+
   return (
     <>
       <PageHeader
         icon={<IconServer size="large" />}
         title="节点"
-        description="加入本控制面的 biliup 实例。各节点仍各自录制、各自上传，这里汇总它们的状态"
-        actions={
-          controller && canManage ? (
-            <Button icon={<IconPlusCircle />} theme="solid" onClick={() => setJoining(true)}>
-              {isMobile ? '添加' : '添加节点'}
-            </Button>
-          ) : null
-        }
+        description={DESCRIPTIONS[controller ? tab : 'nodes']}
+        actions={actions}
       />
       <div className={dc.content}>
-        {data && error ? (
-          <div className={styles.notice} role="status">
-            连接中断，下面是最后一次拿到的数据（{(error as Error).message}）
-          </div>
-        ) : null}
-        {controller && nodes.length > 0 ? (
-          <div className={dc.kpiStrip}>
-            <span className={dc.kpiItem}>
-              节点 <b>{nodes.length}</b>
-            </span>
-            <span className={dc.kpiItem}>
-              在线 <b>{online.length}</b>
-            </span>
-            <span className={dc.kpiItem}>
-              录制中 <b>{recording}</b>
-            </span>
-          </div>
-        ) : null}
-        {body}
-        {controller ? <PendingTokens canManage={canManage} /> : null}
+        {me && !controller ? (
+          <NotController />
+        ) : (
+          <>
+            {data && error ? (
+              <div className={styles.notice} role="status">
+                连接中断，下面是最后一次拿到的数据（{(error as Error).message}）
+              </div>
+            ) : null}
+            {nodes.length > 0 || rooms.length > 0 ? (
+              <div className={dc.kpiStrip}>
+                <span className={dc.kpiItem}>
+                  节点 <b>{nodes.length}</b>
+                </span>
+                <span className={dc.kpiItem}>
+                  在线 <b>{online.length}</b>
+                </span>
+                <span className={dc.kpiItem}>
+                  录制中 <b>{recording}</b>
+                </span>
+                <span className={dc.kpiItem}>
+                  房间 <b>{rooms.length}</b>
+                </span>
+                {unassigned > 0 ? (
+                  <span className={dc.kpiItem}>
+                    未分派 <b>{unassigned}</b>
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+            <Tabs type="line" activeKey={tab} onChange={switchTab} className={styles.tabs} lazyRender>
+              <TabPane tab="节点" itemKey="nodes">
+                {nodesBody}
+                {controller ? <PendingTokens canManage={canManage} /> : null}
+              </TabPane>
+              <TabPane tab={`房间${rooms.length ? ` ${rooms.length}` : ''}`} itemKey="rooms">
+                {controller ? (
+                  <RoomsPanel
+                    nodes={nodes}
+                    templates={templates ?? []}
+                    canManage={canManage}
+                    creating={createRoom}
+                    onChanged={refresh}
+                  />
+                ) : null}
+              </TabPane>
+              <TabPane tab={`投稿模板${templates?.length ? ` ${templates.length}` : ''}`} itemKey="templates">
+                {controller ? (
+                  <TemplatesPanel
+                    templates={templates}
+                    rooms={rooms}
+                    nodes={nodes}
+                    loading={templatesLoading}
+                    error={templatesError}
+                    canManage={canManage}
+                    creating={createTemplate}
+                    onEdit={setEditingTemplate}
+                    onChanged={refreshTemplates}
+                  />
+                ) : null}
+              </TabPane>
+            </Tabs>
+          </>
+        )}
       </div>
       {joining ? (
         <JoinDialog
@@ -196,6 +309,31 @@ export default function NodesPage() {
           }}
         />
       ) : null}
+      {editingTemplate !== undefined ? (
+        <FleetTemplateModal
+          template={editingTemplate}
+          nodes={nodes}
+          onClose={() => setEditingTemplate(undefined)}
+          onSaved={() => {
+            setEditingTemplate(undefined)
+            refreshTemplates()
+          }}
+        />
+      ) : null}
     </>
+  )
+}
+
+export default function NodesPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className={styles.center}>
+          <Spin size="large" />
+        </div>
+      }
+    >
+      <Nodes />
+    </Suspense>
   )
 }

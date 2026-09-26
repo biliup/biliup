@@ -47,16 +47,21 @@ fn internal(error: impl std::fmt::Debug) -> Response {
 
 /// 权限点由授权决策点算出（含环境属性），前端只按它显隐，不再自己推导。
 /// `fleet_controller`：本进程以 `--controller` 运行，前端据此显示「节点」菜单。
+/// `fleet_node`：只有被控制面托管的节点才有，前端据此把托管的主播与模板显示为只读。
 fn me_body(username: Option<&str>, subject: Subject, fleet: Option<FleetCapability>) -> Response {
-    Json(json!({
+    let fleet = fleet.unwrap_or_default();
+    let mut body = json!({
         "id": subject.user_id,
         "username": username,
         "role": subject.role,
         "permissions": subject.permissions(),
         "auth_enabled": subject.auth_enabled,
-        "fleet_controller": fleet.unwrap_or_default().controller,
-    }))
-    .into_response()
+        "fleet_controller": fleet.controller,
+    });
+    if let Some(node) = fleet.managed_view() {
+        body["fleet_node"] = node;
+    }
+    Json(body).into_response()
 }
 
 async fn me(auth_session: AuthSession, fleet: Option<Extension<FleetCapability>>) -> Response {

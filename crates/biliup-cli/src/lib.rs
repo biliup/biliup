@@ -109,6 +109,7 @@ pub async fn serve_on(
 ) -> AppResult<()> {
     let addr = listener.local_addr().change_context(AppError::Unknown)?;
     validate_server_exposure(addr, auth)?;
+    server::fleet::reject_config_file(config_path.as_deref())?;
 
     // let config = Arc::new(AppConfig::parse());
 

@@ -262,6 +262,14 @@ pub async fn node_by_endpoint(
         .change_context(db_error("read node"))
 }
 
+pub async fn node(pool: &ConnectionPool, id: i64) -> AppResult<Option<NodeRow>> {
+    sqlx::query_as("SELECT * FROM fleet_nodes WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .change_context(db_error("read node"))
+}
+
 /// 未被移除的节点，按加入顺序
 pub async fn list_nodes(pool: &ConnectionPool) -> AppResult<Vec<NodeRow>> {
     sqlx::query_as("SELECT * FROM fleet_nodes WHERE revoked_at IS NULL ORDER BY id")
@@ -280,6 +288,17 @@ pub async fn revoke_node(pool: &ConnectionPool, id: i64, now: i64) -> AppResult<
     .fetch_optional(pool)
     .await
     .change_context(db_error("revoke node"))
+}
+
+/// 节点连上时按它 `node.json` 里的 `allow_hooks` 更新：是否接受钩子是节点自己的意愿
+pub async fn set_allow_hooks(pool: &ConnectionPool, id: i64, allow_hooks: bool) -> AppResult<()> {
+    sqlx::query("UPDATE fleet_nodes SET allow_hooks = ? WHERE id = ?")
+        .bind(allow_hooks)
+        .bind(id)
+        .execute(pool)
+        .await
+        .change_context(db_error("update node allow_hooks"))?;
+    Ok(())
 }
 
 pub async fn record_seen(

@@ -1,9 +1,12 @@
 //! 节点端：`biliup node join / leave / status` 与 `biliup server` 里的节点代理。
 
+use super::accounts;
+use super::guard::ManagedHandle;
 use super::protocol::{
     self, CloseCode, ControllerMessage, HEARTBEAT_INTERVAL, Heartbeat, Hello, JoinProof,
-    NodeMessage, PROTOCOL_MINOR, PoolUsage, Pools,
+    NodeMessage, PROTOCOL_MINOR, PoolUsage, Pools, ToolStatus, Tools,
 };
+use super::reconcile::{self, Reconciler};
 use super::relay::{DENY_REVOKED, DENY_TOKEN_INVALID, DENY_UNKNOWN};
 use super::store::{hex, parse_hex};
 use super::ticket::JoinTicket;
@@ -37,6 +40,9 @@ const BACKOFF_MAX: Duration = Duration::from_secs(30);
 const SUPERSEDED_WAIT: Duration = Duration::from_secs(30);
 /// 探测 relay 地址 TCP 端口的超时
 const RELAY_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+const SHUTDOWN_WAIT: Duration = Duration::from_secs(5);
+/// 对账里停一个正在录的房间要等下载器收尾，多给一点时间
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(30);
 
 /// `data/node.json`（0600）
 #[derive(Clone, Serialize, Deserialize)]
@@ -169,6 +175,27 @@ async fn pick_relay(relays: &[RelayUrl]) -> Option<RelayUrl> {
         .find_map(|(url, ok)| ok.then(|| url.clone()))
 }
 
+/// 写进 node.json 的 relay：这次连通的那个排第一（票据里可能有控制面自己列不出的地址，
+/// 例如「添加节点」里填的候选地址，Welcome 里永远不会有），后面跟控制面 Welcome 给的；Welcome 没给就用票据里的。
+/// 加入时与之后每次重连收到 Welcome / Relays 都这样存，否则第一次重连后候选地址就被 Welcome 覆盖掉了。
+fn saved_relays(joined_via: &[RelayUrl], welcome: Vec<String>, ticket: &[String]) -> Vec<String> {
+    let rest = if welcome.is_empty() {
+        ticket.to_vec()
+    } else {
+        welcome
+    };
+    let mut saved: Vec<String> = joined_via.iter().map(ToString::to_string).collect();
+    for relay in rest {
+        let joined = relay
+            .parse::<RelayUrl>()
+            .is_ok_and(|url| joined_via.contains(&url));
+        if !joined && !saved.contains(&relay) {
+            saved.push(relay);
+        }
+    }
+    saved
+}
+
 /// 一次性的连接（join / leave）：探测不到就用第一个，交给 iroh 自己去试（比如本机解析不了 relay 的域名）
 async fn pick_relay_or_first(relays: &[RelayUrl]) -> Vec<RelayUrl> {
     pick_relay(relays)
@@ -197,6 +224,44 @@ fn controller_addr(controller: EndpointId, relays: &[RelayUrl]) -> EndpointAddr 
         .fold(EndpointAddr::new(controller), |addr, url| {
             addr.with_relay_url(url.clone())
         })
+}
+
+/// join / leave / 节点代理共用的 `Hello`；账号、工具与已持有的房间只有节点代理才填
+fn hello(allow_hooks: bool) -> Hello {
+    Hello {
+        proto: PROTOCOL_MINOR,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        name: host_name(),
+        allow_hooks,
+        ..Hello::default()
+    }
+}
+
+async fn tools() -> Tools {
+    let ffmpeg = crate::tools::ffmpeg_status().await;
+    Tools {
+        ffmpeg: ToolStatus {
+            available: ffmpeg.available,
+            version: ffmpeg.version,
+        },
+    }
+}
+
+/// 本机界面上「由控制面 xxx 管理」里的 xxx：relay 地址的主机名，没有就用控制面 id 的短写
+fn controller_label(file: &NodeFile) -> String {
+    file.relays
+        .iter()
+        .find_map(|relay| {
+            url::Url::parse(relay)
+                .ok()
+                .and_then(|url| url.host_str().map(str::to_string))
+        })
+        .or_else(|| {
+            file.controller_id()
+                .ok()
+                .map(|id| id.fmt_short().to_string())
+        })
+        .unwrap_or_else(|| file.controller.chars().take(10).collect())
 }
 
 fn host_name() -> String {
@@ -336,14 +401,11 @@ pub async fn join(ticket: &str, allow_hooks: bool, node_file: &Path) -> AppResul
     .await
     .attach("could not bind the fleet node endpoint")?;
     let hello = Hello {
-        proto: PROTOCOL_MINOR,
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        name: host_name(),
-        allow_hooks,
         join: Some(JoinProof {
             token: ticket.token.clone(),
             secret: hex(&ticket.secret),
         }),
+        ..hello(allow_hooks)
     };
     info!(controller = %ticket.controller.fmt_short(), relays = ?ticket.relays, "joining fleet controller");
     let result = async {
@@ -357,16 +419,13 @@ pub async fn join(ticket: &str, allow_hooks: bool, node_file: &Path) -> AppResul
                 }
             };
         let reply = read_welcome(&connection, &mut recv).await;
+        let joined_via = &relays;
         let outcome = match reply {
             Ok((node_id, relays)) => {
                 let file = NodeFile {
                     version: NODE_FILE_VERSION,
                     controller: ticket.controller.to_string(),
-                    relays: if relays.is_empty() {
-                        ticket.relays.clone()
-                    } else {
-                        relays
-                    },
+                    relays: saved_relays(joined_via, relays, &ticket.relays),
                     node_id,
                     secret_key: hex(&secret.to_bytes()),
                     allow_hooks,
@@ -401,13 +460,7 @@ pub async fn leave(node_file: &Path) -> AppResult<bool> {
     let endpoint = bind_endpoint(file.secret()?, relay_map(&relays, None), false)
         .await
         .attach("could not bind the fleet node endpoint")?;
-    let hello = Hello {
-        proto: PROTOCOL_MINOR,
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        name: host_name(),
-        allow_hooks: file.allow_hooks,
-        join: None,
-    };
+    let hello = hello(file.allow_hooks);
     let notified = match dial(
         &endpoint,
         controller_addr(file.controller_id()?, &relays),
@@ -440,6 +493,8 @@ pub async fn leave(node_file: &Path) -> AppResult<bool> {
     std::fs::remove_file(node_file)
         .change_context(AppError::Unknown)
         .attach_with(|| format!("could not remove {}", node_file.display()))?;
+    // 托管的房间与模板留在本机库里，从此是本地的
+    reconcile::forget(&reconcile::state_path(node_file));
     Ok(notified)
 }
 
@@ -466,7 +521,11 @@ pub struct NodeAgent {
 }
 
 impl NodeAgent {
-    pub async fn start(node_file: PathBuf, services: ServiceRegister) -> AppResult<Self> {
+    pub async fn start(
+        node_file: PathBuf,
+        services: ServiceRegister,
+        managed: ManagedHandle,
+    ) -> AppResult<Self> {
         let file = NodeFile::load(&node_file)?;
         // relay 在每次连接前现挑（见 `pick_relay`），启动时不等探测
         let endpoint = bind_endpoint(file.secret()?, RelayMap::empty(), false)
@@ -478,14 +537,32 @@ impl NodeAgent {
             controller = %file.controller_id()?.fmt_short(),
             "fleet node agent started"
         );
+        let reconciler = Reconciler::resume(
+            reconcile::state_path(&node_file),
+            &file.controller,
+            controller_label(&file),
+            file.allow_hooks,
+            services.clone(),
+            managed,
+        )
+        .await;
         let (stop, stopped) = watch::channel(false);
-        let task = tokio::spawn(run_agent(endpoint, node_file, file, services, stopped));
+        let task = tokio::spawn(run_agent(
+            endpoint, node_file, file, services, reconciler, stopped,
+        ));
         Ok(NodeAgent { stop, task })
     }
 
-    pub async fn shutdown(self) {
+    /// 在停录制调度之前调用（REC-23）：对账做到一半时等它做完，免得调度先停、对账还在往里加房间
+    pub async fn shutdown(mut self) {
         let _ = self.stop.send(true);
-        let _ = timeout(Duration::from_secs(5), self.task).await;
+        if timeout(SHUTDOWN_WAIT, &mut self.task).await.is_err() {
+            warn!("fleet node agent is still applying the desired state, waiting for it");
+            if timeout(SHUTDOWN_GRACE, &mut self.task).await.is_err() {
+                self.task.abort();
+                let _ = self.task.await;
+            }
+        }
     }
 
     /// 节点代理已经停了（被移除、凭据被删或收到了停止信号）
@@ -510,6 +587,7 @@ async fn run_agent(
     node_file: PathBuf,
     mut file: NodeFile,
     services: ServiceRegister,
+    mut reconciler: Reconciler,
     mut stopped: watch::Receiver<bool>,
 ) {
     let mut backoff = BACKOFF_MIN;
@@ -520,6 +598,7 @@ async fn run_agent(
         }
         if !node_file.exists() {
             info!("{} removed, fleet node agent stops", node_file.display());
+            reconciler.release();
             break;
         }
         let outcome = session(
@@ -528,6 +607,7 @@ async fn run_agent(
             &node_file,
             &mut file,
             &services,
+            &mut reconciler,
             &mut stopped,
         )
         .await;
@@ -535,8 +615,9 @@ async fn run_agent(
             Outcome::Stopped => break,
             Outcome::Rejected(message) => {
                 error!(
-                    "{message}；节点代理停止重连。重新加入请先执行 `biliup node leave`，再用新票据 join"
+                    "{message}；节点代理停止重连，控制面分派的房间转为本机房间继续录。重新加入请先执行 `biliup node leave`，再用新票据 join"
                 );
+                reconciler.release();
                 break;
             }
             Outcome::Superseded => {
@@ -569,17 +650,19 @@ async fn session(
     node_file: &Path,
     file: &mut NodeFile,
     services: &ServiceRegister,
+    reconciler: &mut Reconciler,
     stopped: &mut watch::Receiver<bool>,
 ) -> Outcome {
     let Ok(controller) = file.controller_id() else {
         return Outcome::Rejected("node.json 里的控制面 id 无效".into());
     };
+    let mut reported_accounts = accounts::public(&accounts::scan(&services.pool).await);
     let hello = Hello {
-        proto: PROTOCOL_MINOR,
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        name: host_name(),
-        allow_hooks: file.allow_hooks,
-        join: None,
+        accounts: reported_accounts.clone(),
+        tools: Some(tools().await),
+        rooms: reconciler.held(),
+        state_version: reconciler.state_version(),
+        ..hello(file.allow_hooks)
     };
     let connect = async {
         let listed = file.relay_urls();
@@ -611,10 +694,11 @@ async fn session(
             return Outcome::Failed;
         }
     };
+    let connected = relays.clone();
     match read_welcome(&connection, &mut recv).await {
         Ok((node_id, relays)) => {
             info!(node = node_id, "connected to fleet controller");
-            update_relays(node_file, file, relays);
+            update_relays(node_file, file, &connected, relays);
         }
         Err(code) => return closed_outcome(code, false),
     }
@@ -624,7 +708,12 @@ async fn session(
     loop {
         tokio::select! {
             _ = ticker.tick() => {
-                let heartbeat = heartbeat(services, &mut since).await;
+                let mut heartbeat = heartbeat(services, &mut since).await;
+                let current = accounts::public(&accounts::scan(&services.pool).await);
+                if current != reported_accounts {
+                    heartbeat.accounts = Some(current.clone());
+                    reported_accounts = current;
+                }
                 if let Err(e) = protocol::write_frame(&mut send, &NodeMessage::Heartbeat(heartbeat)).await {
                     debug!(error = %e, "fleet heartbeat failed");
                     let reason = connection.closed().await;
@@ -632,7 +721,17 @@ async fn session(
                 }
             }
             frame = protocol::read_frame::<_, ControllerMessage>(&mut recv) => match frame {
-                Ok(Some(ControllerMessage::Relays { relays })) => update_relays(node_file, file, relays),
+                Ok(Some(ControllerMessage::Relays { relays })) => {
+                    update_relays(node_file, file, &connected, relays)
+                }
+                Ok(Some(ControllerMessage::DesiredState(desired))) => {
+                    let ack = reconciler.apply(desired).await;
+                    if let Err(e) = protocol::write_frame(&mut send, &NodeMessage::Ack(ack)).await {
+                        debug!(error = %e, "fleet ack failed");
+                        let reason = connection.closed().await;
+                        return closed_outcome(close_code(&reason), true);
+                    }
+                }
                 Ok(Some(ControllerMessage::Welcome { .. })) => {}
                 Ok(None) | Err(_) => {
                     let reason = connection.closed().await;
@@ -664,8 +763,17 @@ fn closed_outcome(code: Option<CloseCode>, was_connected: bool) -> Outcome {
     }
 }
 
-fn update_relays(node_file: &Path, file: &mut NodeFile, relays: Vec<String>) {
-    if relays.is_empty() || relays == file.relays {
+fn update_relays(
+    node_file: &Path,
+    file: &mut NodeFile,
+    connected: &[RelayUrl],
+    welcome: Vec<String>,
+) {
+    if welcome.is_empty() {
+        return;
+    }
+    let relays = saved_relays(connected, welcome, &[]);
+    if relays == file.relays {
         return;
     }
     info!(?relays, "fleet controller relays changed");
@@ -724,12 +832,58 @@ async fn heartbeat(services: &ServiceRegister, since: &mut Option<i64>) -> Heart
         },
         rooms,
         recording,
+        accounts: None,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_relay_used_to_join_is_kept_first() {
+        let via: Vec<RelayUrl> = vec!["http://nas.example:19160".parse().unwrap()];
+        let welcome = vec![
+            "http://172.17.0.2:19160/".to_string(),
+            "http://nas.example:19160/".to_string(),
+        ];
+        assert_eq!(
+            saved_relays(&via, welcome, &[]),
+            ["http://nas.example:19160/", "http://172.17.0.2:19160/"]
+        );
+        let ticket = ["http://10.0.0.5:19160/".to_string()];
+        assert_eq!(
+            saved_relays(&via, Vec::new(), &ticket),
+            ["http://nas.example:19160/", "http://10.0.0.5:19160/"]
+        );
+    }
+
+    #[test]
+    fn reconnecting_through_a_candidate_address_keeps_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("node.json");
+        let mut file = NodeFile {
+            relays: vec![
+                "http://nas.example:19160/".into(),
+                "http://192.168.1.2:19160/".into(),
+            ],
+            ..sample()
+        };
+        file.save(&path).unwrap();
+        let via: Vec<RelayUrl> = vec!["http://nas.example:19160".parse().unwrap()];
+        update_relays(
+            &path,
+            &mut file,
+            &via,
+            vec!["http://192.168.1.2:19160/".into()],
+        );
+        let expected = ["http://nas.example:19160/", "http://192.168.1.2:19160/"];
+        assert_eq!(file.relays, expected);
+        assert_eq!(NodeFile::load(&path).unwrap().relays, expected);
+
+        update_relays(&path, &mut file, &via, Vec::new());
+        assert_eq!(file.relays, expected);
+    }
 
     fn sample() -> NodeFile {
         NodeFile {

@@ -1,8 +1,8 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Banner, Button, Empty, Modal, Spin, Toast, Typography } from '@douyinfe/semi-ui'
+import { Banner, Button, Empty, Input, Modal, Spin, Toast, Typography } from '@douyinfe/semi-ui'
 import { IconCopy } from '@douyinfe/semi-icons'
-import { copyText, issueTicket, type IssuedTicket } from '@/app/lib/use-fleet'
+import { copyText, errorMessage, issueTicket, voidToken, type IssuedTicket } from '@/app/lib/use-fleet'
 import styles from './page.module.scss'
 
 const { Text } = Typography
@@ -45,6 +45,69 @@ function CopyBlock({ label, hint, text }: { label: string; hint?: string; text: 
   )
 }
 
+/** 浏览器地址栏里的主机名能不能当 relay 候选地址：回环与 localhost 对节点没有意义 */
+function candidateHost(hostname: string): string | null {
+  const host = hostname.toLowerCase()
+  if (!host) return null
+  if (host === 'localhost' || host.endsWith('.localhost')) return null
+  if (host === '[::1]' || host === '::1' || host === '0.0.0.0' || host === '[::]') return null
+  if (/^127\./.test(host)) return null
+  return host
+}
+
+function sameRelay(a: string, b: string): boolean {
+  try {
+    return new URL(a).href === new URL(b).href
+  } catch {
+    return a === b
+  }
+}
+
+/**
+ * 「写进票据」的候选 relay 地址：用浏览器访问控制面的主机名 + 内嵌 relay 的端口。
+ * 能用这个主机名打开控制面的机器，多半也能用它连到 relay（Docker、NAT 后面时控制面自己列不出这个地址）。
+ */
+function CandidateRelay({
+  ticket,
+  busy,
+  onApply,
+}: {
+  ticket: IssuedTicket
+  busy: boolean
+  onApply: (relay: string) => void
+}) {
+  const host = typeof window === 'undefined' ? null : candidateHost(window.location.hostname)
+  const suggested = host && ticket.relay_port ? `http://${host}:${ticket.relay_port}` : null
+  const [value, setValue] = useState(suggested ?? '')
+  if (!suggested) return null
+  const included = ticket.relays.some((relay) => sameRelay(relay, value.trim() || suggested))
+  return (
+    <section className={styles.candidate} aria-label="候选 relay 地址">
+      <div className={styles.copyLabel}>候选地址</div>
+      <Text type="tertiary" size="small">
+        你是通过 <code>{host}</code> 打开控制面的。节点如果也能用这个地址访问到控制面的 relay 端口（
+        {ticket.relay_port}），把它写进票据，节点加入时会先试它；控制面用 <code>--relay-url</code> 指定的地址仍然排在最前。
+      </Text>
+      <div className={styles.candidateRow}>
+        <Input
+          value={value}
+          onChange={setValue}
+          aria-label="候选 relay 地址"
+          placeholder={suggested}
+          disabled={busy}
+        />
+        <Button
+          onClick={() => onApply(value.trim())}
+          disabled={busy || !value.trim() || included}
+          loading={busy}
+        >
+          {included ? '已在票据里' : '写进票据'}
+        </Button>
+      </div>
+    </section>
+  )
+}
+
 /**
  * 添加节点：打开即向控制面要一张一次性加入票据，给出命令行和 Docker 两种用法。
  * 票据只在这里出现一次，关掉就拿不回来了（没用掉的可以在票据列表里作废）。
@@ -53,17 +116,24 @@ export default function JoinDialog({ onClose }: { onClose: () => void }) {
   const [ticket, setTicket] = useState<IssuedTicket | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [extra, setExtra] = useState<string[]>([])
   const [now, setNow] = useState(() => Date.now())
   const requested = useRef(false)
 
-  const generate = useCallback(async () => {
+  const generate = useCallback(async (relays: string[], replaces?: string) => {
     setLoading(true)
     setError(null)
     try {
-      setTicket(await issueTicket())
+      const issued = await issueTicket(relays)
+      setTicket(issued)
+      setExtra(relays)
       setNow(Date.now())
+      // 换了一张带候选地址的票，上一张没用过，顺手作废，免得票据列表里多一张
+      if (replaces) voidToken(replaces).catch(() => undefined)
     } catch (e) {
-      setError((e as Error).message)
+      const message = errorMessage(e)
+      if (replaces) Toast.error({ content: message, duration: 6 })
+      else setError(message)
     } finally {
       setLoading(false)
     }
@@ -73,7 +143,7 @@ export default function JoinDialog({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     if (requested.current) return
     requested.current = true
-    generate()
+    generate([])
   }, [generate])
 
   useEffect(() => {
@@ -110,11 +180,17 @@ export default function JoinDialog({ onClose }: { onClose: () => void }) {
             description={
               <>
                 票据里的 relay 地址都是内网地址（{ticket.relays.join('、')}）。要让外网的机器加入，
-                请给控制面准备一个公网能访问的 TCP 端口，用 <code>--relay-url</code> 启动后再生成票据。
+                请给控制面准备一个公网能访问的 TCP 端口（转发到 relay 端口），把这个地址填进下面的「候选地址」写进票据，
+                或用 <code>--relay-url</code> 启动控制面。
               </>
             }
           />
         ) : null}
+        <CandidateRelay
+          ticket={ticket}
+          busy={loading}
+          onApply={(relay) => generate([relay], ticket.id)}
+        />
         <div className={`${styles.expiry} ${expired ? styles.expired : ''}`} role="timer" aria-live="off">
           {expired ? (
             '票据已过期，请重新生成'
@@ -153,7 +229,7 @@ export default function JoinDialog({ onClose }: { onClose: () => void }) {
       bodyStyle={{ maxHeight: 'calc(100dvh - 200px)', overflowY: 'auto' }}
       footer={
         <div className={styles.dialogFoot}>
-          <Button onClick={generate} loading={loading} disabled={loading}>
+          <Button onClick={() => generate(extra)} loading={loading} disabled={loading}>
             {ticket || error ? '重新生成' : '生成'}
           </Button>
           <Button theme="solid" onClick={onClose}>

@@ -23,9 +23,21 @@ type TemplateModalProps = {
   entity?: LiveStreamerEntity
   children?: React.ReactNode
   onOk: (e: any) => Promise<void>
+  title?: string
+  /** 投稿模板的候选项；不传时取本机的 `/v1/upload/streamers`（Fleet 控制面传自己的模板） */
+  templateOptions?: { value: number; label: React.ReactNode }[]
+  /** 放在投稿模板下面的额外字段（Fleet 控制面的「分派到节点」） */
+  extraFields?: React.ReactNode
 }
 
-const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk }) => {
+const TemplateModal: React.FC<TemplateModalProps> = ({
+  children,
+  entity,
+  onOk,
+  title = '录播管理',
+  templateOptions,
+  extraFields,
+}) => {
   const { Paragraph, Title, Text } = Typography
   let message = '该项为必填项'
   const [isOpen, setOpen] = useState(false)
@@ -79,7 +91,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
     data: templates,
     error,
     isLoading,
-  } = useSWR<StudioEntity[]>('/v1/upload/streamers', fetcher)
+  } = useSWR<StudioEntity[]>(templateOptions ? null : '/v1/upload/streamers', fetcher)
 
   const [visible, setVisible] = useState(false)
   const showDialog = () => {
@@ -112,12 +124,14 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
     }
   })
 
-  const list = templates?.map(template => {
-    return {
-      value: template.id,
-      label: template.template_name,
-    }
-  })
+  const list =
+    templateOptions ??
+    templates?.map(template => {
+      return {
+        value: template.id,
+        label: template.template_name,
+      }
+    })
 
   // 后端把 time_range 存成 JSON 字串,TimePicker 需要 Date[]。entity 是上层传下来的 props,
   // 渲染期不能就地改写,转换结果放进一份本地副本作为表单初始值;解析失败时保持原样(与之前一致)
@@ -137,7 +151,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
     <>
       {childrenWithProps}
       <Modal
-        title="录播管理"
+        title={title}
         visible={visible}
         onOk={handleOk}
         style={{ width: 'min(600px, 90vw)' }}
@@ -177,6 +191,8 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
             style={{ width: 176 }}
             optionList={list}
           />
+
+          {extraFields}
 
           {hooks ? (
             <ArrayField

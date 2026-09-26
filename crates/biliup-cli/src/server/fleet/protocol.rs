@@ -4,6 +4,7 @@
 //! `u32 大端长度 + JSON`，单帧上限 [`MAX_FRAME`]。主版本号放在 ALPN 里（[`ALPN`]），
 //! 次版本号在 [`Hello::proto`] 里，只增字段不改语义，所以两端都忽略不认识的字段。
 
+use super::model::{Account, DesiredRoom, DesiredTemplate};
 use crate::server::common::system_stats::{CpuInfo, DiskUsage, MemoryUsage, SystemStats};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -12,8 +13,10 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const ALPN: &[u8] = b"biliup/fleet/1";
-/// 协议次版本号
-pub const PROTOCOL_MINOR: u32 = 0;
+/// 协议次版本号。1：`Hello` 带账号、工具与已持有的房间，控制面下发 `DesiredState`，节点回 `Ack`。
+pub const PROTOCOL_MINOR: u32 = 1;
+/// 能收 `DesiredState` 的最低次版本号。更旧的节点收到不认识的帧会卡住，控制面不给它们发。
+pub const DESIRED_STATE_SINCE: u32 = 1;
 pub const MAX_FRAME: usize = 4 * 1024 * 1024;
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 /// 控制面超过这么久没收到节点的任何帧就判离线并关掉连接
@@ -66,6 +69,8 @@ pub enum NodeMessage {
     Event(Event),
     /// `biliup node leave`：请控制面把自己移出节点表
     Leave,
+    /// 对 `DesiredState` 的应答：按哪一版对的账、现在持有哪些房间
+    Ack(Ack),
 }
 
 /// 控制面 → 节点
@@ -76,9 +81,56 @@ pub enum ControllerMessage {
     Welcome { node_id: i64, relays: Vec<String> },
     /// 控制面的 relay 地址变了；节点写回 `data/node.json`，下次重连就用新地址
     Relays { relays: Vec<String> },
+    /// 这台节点应该录的全部房间与它们用到的模板（整份快照，不是增量）。
+    /// 节点只动自己按控制面建的那些本地行，本机自己加的房间与模板不受影响。
+    DesiredState(DesiredState),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DesiredState {
+    /// 控制面的期望状态版本号，单调递增；节点在 `Ack` 里原样带回
+    pub version: u64,
+    pub rooms: Vec<DesiredRoom>,
+    pub templates: Vec<DesiredTemplate>,
+}
+
+/// 节点持有的一个托管房间：已经落进本地 `livestreamers`、正在按它录
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeldRoom {
+    pub id: i64,
+    pub epoch: i64,
+}
+
+/// 期望状态里没能落地的房间
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FailedRoom {
+    pub id: i64,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Ack {
+    pub version: u64,
+    #[serde(default)]
+    pub held: Vec<HeldRoom>,
+    #[serde(default)]
+    pub failed: Vec<FailedRoom>,
+}
+
+/// 节点上外部工具的可用情况，只带是否可用与版本，不带本机路径
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Tools {
+    pub ffmpeg: ToolStatus,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolStatus {
+    pub available: bool,
+    #[serde(default)]
+    pub version: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Hello {
     /// 协议次版本号
     pub proto: u32,
@@ -90,6 +142,17 @@ pub struct Hello {
     /// 首次加入时出示的一次性秘密；之后的连接只凭节点私钥
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub join: Option<JoinProof>,
+    /// 本机登记的 B 站账号，只有 mid 与昵称（凭据不出节点）。以下字段自次版本 1 起。
+    #[serde(default)]
+    pub accounts: Vec<Account>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Tools>,
+    /// 按本地缓存（`data/fleet-state.json`）此刻持有的托管房间，控制面据此按 epoch 对账
+    #[serde(default)]
+    pub rooms: Vec<HeldRoom>,
+    /// 本地缓存对应的期望状态版本号
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_version: Option<u64>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -117,6 +180,9 @@ pub struct Heartbeat {
     pub rooms: Vec<serde_json::Value>,
     /// 正在录制的房间数
     pub recording: usize,
+    /// 本机登记的 B 站账号变了才带（自次版本 1 起）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accounts: Option<Vec<Account>>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -295,10 +361,56 @@ mod tests {
             "allow_hooks": false,
         }))
         .unwrap();
-        assert!(matches!(
-            hello,
-            NodeMessage::Hello(Hello { join: None, .. })
-        ));
+        let NodeMessage::Hello(hello) = hello else {
+            panic!()
+        };
+        assert!(hello.join.is_none());
+        assert!(hello.accounts.is_empty() && hello.rooms.is_empty());
+        assert!(hello.tools.is_none() && hello.state_version.is_none());
+    }
+
+    /// 次版本 0 的节点不认识 `desired_state` / `ack`，这两种帧只在两端都 ≥ 1 时出现；
+    /// 而 0 的节点发来的 `hello` / `heartbeat` 缺新字段也照样能解。
+    #[test]
+    fn new_frames_are_tagged_and_old_frames_still_decode() {
+        let desired = serde_json::to_value(ControllerMessage::DesiredState(DesiredState {
+            version: 5,
+            rooms: vec![],
+            templates: vec![],
+        }))
+        .unwrap();
+        assert_eq!(desired["type"], "desired_state");
+        let ack: NodeMessage = serde_json::from_value(serde_json::json!({
+            "type": "ack",
+            "version": 5,
+            "held": [{ "id": 1, "epoch": 3 }],
+        }))
+        .unwrap();
+        let NodeMessage::Ack(ack) = ack else { panic!() };
+        assert_eq!(ack.held, [HeldRoom { id: 1, epoch: 3 }]);
+        assert!(ack.failed.is_empty());
+
+        let heartbeat: NodeMessage = serde_json::from_value(serde_json::json!({
+            "type": "heartbeat",
+            "stats": {
+                "ts": 1,
+                "interval_ms": 1000,
+                "history_ms": 300000,
+                "cpu": null,
+                "memory": null,
+                "disk": null,
+                "interfaces": [],
+                "samples": [],
+            },
+            "pools": Pools::default(),
+            "rooms": [],
+            "recording": 0,
+        }))
+        .unwrap();
+        let NodeMessage::Heartbeat(heartbeat) = heartbeat else {
+            panic!()
+        };
+        assert!(heartbeat.accounts.is_none());
     }
 
     #[test]
