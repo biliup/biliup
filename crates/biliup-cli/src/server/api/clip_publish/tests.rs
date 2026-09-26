@@ -1062,7 +1062,7 @@ async fn cover_uploads_up_to_five_megabytes_are_accepted() {
 #[tokio::test]
 async fn frames_are_grabbed_from_real_recordings() {
     if !crate::tools::ffmpeg_status().await.available {
-        eprintln!("没有 FFmpeg，跳过取帧测试");
+        crate::tools::note_skipped_test("没有 FFmpeg");
         return;
     }
     let f = fixture().await;

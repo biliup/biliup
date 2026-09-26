@@ -219,7 +219,7 @@ async fn add_segment(
 /// 建好库、合成录像、起假服务；没有 ffmpeg 时返回 `None`。
 async fn env(scenario: Scenario) -> Option<Env> {
     if !ffmpeg_available() {
-        eprintln!("没有 ffmpeg，跳过");
+        crate::tools::note_skipped_test("没有 ffmpeg");
         return None;
     }
     let dir = tempfile::tempdir().unwrap();

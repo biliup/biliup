@@ -52,10 +52,10 @@ fn synthesize(path: &Path, secs: i64, speech: &[(i64, i64)]) -> bool {
         .output()
         .unwrap();
     if !output.status.success() {
-        eprintln!(
-            "合成录像失败，跳过：{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        crate::tools::note_skipped_test(&format!(
+            "合成录像失败（缺 libx264？）：{}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
     }
     output.status.success()
 }
@@ -89,7 +89,7 @@ async fn media_env(
     burst_s: Option<i64>,
 ) -> Option<Env> {
     if !ffmpeg_available() {
-        eprintln!("没有 ffmpeg，跳过");
+        crate::tools::note_skipped_test("没有 ffmpeg");
         return None;
     }
     let dir = tempfile::tempdir().unwrap();
