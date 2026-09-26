@@ -51,7 +51,8 @@ async-trait = { workspace = true }
 humantime = "2.2.0"
 axum = { version = "0.8", features = ["macros", "ws"] }
 tower-http = { version = "0.6.2", features = ["fs", "cors"] }
-reqwest = { workspace = true }
+# 自动切片调 OpenAI 兼容接口：chat 发 JSON，转写用 multipart 上传音频
+reqwest = { workspace = true, features = ["json", "multipart"] }
 sqlx = { version = "0.8", features = [ "runtime-tokio-rustls", "sqlite" ] }
 regex = { workspace = true }
 base64 = "0.22"

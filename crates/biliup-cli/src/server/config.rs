@@ -1,3 +1,4 @@
+use crate::server::auto_clip::settings::AutoClipConfig;
 use crate::server::core::downloader::DownloaderType;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::models::hook_step::HookStep;
@@ -141,6 +142,12 @@ pub struct Config {
     #[patch(skip)]
     #[serde(default)]
     pub preview_max_minutes: Option<u64>,
+
+    /// 自动切片（实验）：OpenAI 兼容的 chat / 转写接口。没配置时不序列化，与以前的配置完全一样。
+    /// 只认全局配置；接口只回显 key 的掩码，见 [`crate::server::auto_clip::settings`]。
+    #[patch(skip)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_clip: Option<AutoClipConfig>,
 
     // ===== 各平台录播设置 =====
     /// 是否使用直播封面

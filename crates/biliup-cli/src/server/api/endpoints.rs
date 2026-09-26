@@ -229,7 +229,8 @@ pub async fn get_configuration(
     caller: Caller,
     State(config): State<Arc<RwLock<Config>>>,
 ) -> Result<Json<serde_json::Value>, Response> {
-    let config = config.read().unwrap().clone();
+    let mut config = config.read().unwrap().clone();
+    redact::mask_api_keys(&mut config);
     if caller.can_access(Field::ConfigSecrets) {
         return serde_json::to_value(config)
             .map(Json)
@@ -249,7 +250,10 @@ pub async fn put_configuration(
 ) -> Result<Json<Config>, Response> {
     apply_config(&config, &pool, &managers, &log_handle, json_data)
         .await
-        .map(Json)
+        .map(|mut saved| {
+            redact::mask_api_keys(&mut saved);
+            Json(saved)
+        })
         .map_err(|e| match e {
             ApplyConfigError::Invalid(message) => {
                 (StatusCode::BAD_REQUEST, Json(ApiError::new(message))).into_response()
@@ -748,10 +752,12 @@ pub async fn get_status(
         }
         sw.push(room);
     }
+    let mut config = config.read().unwrap().clone();
+    redact::mask_api_keys(&mut config);
     let config = if caller.can_access(Field::ConfigSecrets) {
-        serde_json::to_value(&*config.read().unwrap()).unwrap_or_default()
+        serde_json::to_value(&config).unwrap_or_default()
     } else {
-        redact::config(&*config.read().unwrap())
+        redact::config(&config)
     };
 
     Ok(Json(serde_json::json!({

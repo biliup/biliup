@@ -2,6 +2,8 @@
 pub mod access;
 /// 认证相关API
 pub mod auth;
+/// 自动切片的连通性测试与状态
+pub mod auto_clip;
 /// B站API端点
 pub mod bilibili_endpoints;
 /// 切片工作台的切片发布（上传投稿队列、取帧、封面）

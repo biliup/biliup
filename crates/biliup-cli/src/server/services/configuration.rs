@@ -1,4 +1,5 @@
 use crate::LogHandle;
+use crate::server::auto_clip::settings::{AutoClipConfig, restore_masked_keys};
 use crate::server::config::Config;
 use crate::server::core::download_manager::DownloadManager;
 use crate::server::errors::{AppError, AppResult};
@@ -38,6 +39,21 @@ pub async fn apply_config(
     new_config
         .validate_pool_sizes()
         .map_err(ApplyConfigError::Invalid)?;
+    // 界面拿到的 key 是掩码，交回来时换回原值；整块都没填时去掉，不多出 `auto_clip` 这个键
+    new_config.auto_clip = match new_config
+        .auto_clip
+        .take()
+        .and_then(AutoClipConfig::normalized)
+    {
+        Some(submitted) => {
+            let stored = config.read().unwrap().auto_clip.clone();
+            Some(
+                restore_masked_keys(stored.as_ref(), submitted)
+                    .map_err(ApplyConfigError::Invalid)?,
+            )
+        }
+        None => None,
+    };
 
     let saved = save_config(pool, &new_config).await?;
     // 提交后从 DB 重新加载配置
