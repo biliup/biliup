@@ -35,6 +35,11 @@ export const LIVE_RATES_HISTORY_MS = 3 * 60 * 1000
 const RING_CAPACITY = 240
 /** 拉取失败 / WebSocket 断开后的退避基数 */
 const RETRY_MS = 3000
+/**
+ * 连上后这么久还没收到第一帧，就当 WebSocket 不可用（被别的服务接走了，比如反代把 upgrade 转错了地方）
+ * 改用轮询：否则既没有码率，也没有中转预览的租约心跳
+ */
+const FIRST_FRAME_TIMEOUT_MS = 5000
 
 /** 一段用于画图的序列：x 为 Unix 秒（uPlot 时间轴单位），y 为字节/秒，null 是断口 */
 export interface RateSeries {
@@ -207,6 +212,9 @@ function connectSocket() {
     if (socket === ws) sendOpenPreviews()
   }
   let gotFrame = false
+  const firstFrameTimer = setTimeout(() => {
+    if (!gotFrame && socket === ws) ws.close()
+  }, FIRST_FRAME_TIMEOUT_MS)
   ws.onmessage = (event: MessageEvent<string>) => {
     let frames: LiveRateFrame[]
     try {
@@ -216,11 +224,13 @@ function connectSocket() {
     }
     if (!Array.isArray(frames)) return
     gotFrame = true
+    clearTimeout(firstFrameTimer)
     wsFailures = 0
     if (snapshot.transport !== 'ws') setTransport('ws')
     ingestFrames(frames)
   }
   ws.onclose = () => {
+    clearTimeout(firstFrameTimer)
     if (socket !== ws) return
     socket = null
     if (!active()) return
