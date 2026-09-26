@@ -872,6 +872,7 @@ async fn alerts_follow_node_events_and_connectivity() {
     use super::events;
     use super::protocol::{EVENT_RECORDING_ERROR, EVENT_UPLOAD_FAILED, Event, RoomEvent};
 
+    let _guard = events::test_guard().await;
     let dir = tempfile::tempdir().unwrap();
     let (controller, url, pool) = start_controller(dir.path()).await;
     controller.stop_alert_loop();

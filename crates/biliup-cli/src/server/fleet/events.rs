@@ -29,6 +29,14 @@ pub fn subscribe() -> broadcast::Receiver<Event> {
         .subscribe()
 }
 
+/// 通道是整个测试进程共用的，正在跑的节点代理会把别的测试发的事件也转给自己的控制面。
+/// 往通道里发事件的测试与数告警条数的测试都先拿这把锁，互不串扰
+#[cfg(test)]
+pub(crate) async fn test_guard() -> tokio::sync::MutexGuard<'static, ()> {
+    static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    LOCK.lock().await
+}
+
 /// 测试里绕过录制与投稿流程直接发一条
 #[cfg(test)]
 pub(crate) fn inject(event: Event) {
@@ -167,6 +175,7 @@ mod tests {
 
     #[tokio::test]
     async fn hooks_report_errors_but_not_cancellations_or_postprocessing() {
+        let _guard = test_guard().await;
         let mut events = subscribe();
         let url = "https://events.example/hooks";
         let token = CancellationToken::new();
