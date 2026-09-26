@@ -72,7 +72,7 @@ type Source =
  *
  * 播放器（Artplayer + mpegts.js）挂在 `key={nonce}` 上，重连即换 key 重建；
  * 组件卸载时播放器销毁、fetch 中止，服务端随之释放该连接的槽位。
- * 既用于直播预览页，也用于历史记录页的监视器小窗。
+ * 既用于直播预览页，也用于剪辑台页的监视器小窗。
  */
 export function LivePreviewPlayer({
   streamer,

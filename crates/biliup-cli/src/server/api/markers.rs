@@ -168,7 +168,7 @@ pub async fn create_marker(
                 None => {
                     return (
                         StatusCode::CONFLICT,
-                        "这一场没有在录，不能按当前画面标记；请在工作台里按时间标记",
+                        "这一场没有在录，不能按当前画面标记；请到剪辑台按场次回看，在回看里按时间标记",
                     )
                         .into_response();
                 }

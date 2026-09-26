@@ -5,31 +5,23 @@ import Link from 'next/link'
 import useSWR from 'swr'
 import { fetcher, type StreamerInfo } from '@/app/lib/api-streamer'
 import { isReadable, replayHref, type SessionDetail, sessionUrl } from '@/app/lib/sessions'
-import { IconHistory } from '@douyinfe/semi-icons'
 import { humDate } from '@/app/lib/utils'
-import Filter from '@/app/(app)/job/Filter'
+import Filter from './Filter'
 import { useIsMobile } from '../../lib/useIsMobile'
-import PageHeader from '../components/PageHeader'
 import dc from '@/app/ui/data-card.module.scss'
-import styles from './page.module.scss'
+import styles from './sessions.module.scss'
 
-export default function Job() {
+/** 「直播场次」：每场一行，能按场次回看的点「回看」进回看页 */
+export default function SessionsTab() {
   const isMobile = useIsMobile()
   const { Text } = Typography
   const { data: data, error, isLoading } = useSWR<any[]>('/v1/streamer-info', fetcher)
 
   if (isLoading) {
     return (
-      <>
-        <PageHeader
-          icon={<IconHistory size="large" />}
-          title="直播历史"
-          description="按主播查看历史直播记录"
-        />
-        <div style={{ padding: '80px 0', textAlign: 'center' }}>
-          <Spin size="large" />
-        </div>
-      </>
+      <div style={{ padding: '80px 0', textAlign: 'center' }}>
+        <Spin size="large" />
+      </div>
     )
   }
 
@@ -81,7 +73,7 @@ export default function Job() {
             回看
           </Link>
         ) : (
-          <Tooltip content="这一场在升级前录制，没有时间轴，不能按场次回看；请在「历史记录」里按文件播放">
+          <Tooltip content="这一场在升级前录制，没有时间轴，不能按场次回看；请在「录制文件」里按文件播放">
             <Text type="tertiary" className={styles.replayOff}>
               回看
             </Text>
@@ -91,25 +83,17 @@ export default function Job() {
   ]
 
   return (
-    <>
-      <PageHeader
-        icon={<IconHistory size="large" />}
-        title="直播历史"
-        description="按主播查看历史直播记录"
+    <div className={dc.card}>
+      <Table
+        size="small"
+        rowKey="id"
+        scroll={{ x: 'max-content' }}
+        columns={columns}
+        dataSource={data}
+        expandedRowRender={expandRowRender}
+        empty={error ? '加载失败，请检查后端连接' : '暂无数据'}
       />
-      <div className={dc.content}>
-        <div className={dc.card}>
-          <Table
-            size="small"
-            rowKey="id"
-            scroll={{ x: 'max-content' }}
-            columns={columns}
-            dataSource={data}
-            expandedRowRender={expandRowRender}
-          />
-        </div>
-      </div>
-    </>
+    </div>
   )
 }
 

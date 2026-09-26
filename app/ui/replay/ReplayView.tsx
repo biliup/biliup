@@ -19,6 +19,7 @@ import {
 } from '@douyinfe/semi-icons'
 import PageHeader from '@/app/(app)/components/PageHeader'
 import { fetcher, type LiveStreamerEntity } from '@/app/lib/api-streamer'
+import { workbenchHref } from '@/app/lib/workbench'
 import { useMe } from '@/app/lib/use-me'
 import { canPreview, formatSize, previewDisabledReason } from '@/app/lib/use-dashboard'
 import { useWindowWidth } from '@/app/lib/useIsMobile'
@@ -634,7 +635,7 @@ export default function ReplayView({
   // ---------- 渲染 ----------
   const back = () => {
     if (window.history.length > 1) router.back()
-    else router.push('/job')
+    else router.push(workbenchHref('sessions'))
   }
   const header = (
     <PageHeader
@@ -682,9 +683,9 @@ export default function ReplayView({
           ) : notFound ? (
             <Empty
               title={`找不到场次 #${sessionId}`}
-              description="这一场可能在升级前录制（没有时间轴），还没写出第一个分段，或者已经被删除。升级前的录像请在「历史记录」里按文件播放"
+              description="这一场可能在升级前录制（没有时间轴），还没写出第一个分段，或者已经被删除。升级前的录像请在「剪辑台」的「录制文件」里按文件播放"
             >
-              <Button onClick={() => router.push('/history')}>去历史记录</Button>
+              <Button onClick={() => router.push(workbenchHref('files'))}>去录制文件</Button>
             </Empty>
           ) : (
             <Empty title="加载失败" description={detailError ? errorText(detailError) : '请检查后端连接'}>

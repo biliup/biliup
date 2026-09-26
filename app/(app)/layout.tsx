@@ -19,7 +19,7 @@ import { SLOW_REFRESH_MS } from '../lib/use-dashboard'
 import { useIsMobile } from '../lib/useIsMobile'
 import styles from './layout.module.scss'
 
-/* ============ 导航信息架构:5 组 11 项,按当前角色的权限点过滤 ============ */
+/* ============ 导航信息架构:5 组 10 项,按当前角色的权限点过滤 ============ */
 
 function Ic({ d, extra }: { d: string; extra?: string }) {
   return (
@@ -30,8 +30,18 @@ function Ic({ d, extra }: { d: string; extra?: string }) {
   )
 }
 
-/** `controllerOnly`：只在本机以 `--controller` 运行时出现 */
-type NavItem = { href: string; label: string; icon: ReactNode; perm: Permission; controllerOnly?: boolean }
+/**
+ * `controllerOnly`：只在本机以 `--controller` 运行时出现；
+ * `activeOn`：从这一项进去的子页面（不在侧栏里），停在这些页面时这一项也高亮
+ */
+type NavItem = {
+  href: string
+  label: string
+  icon: ReactNode
+  perm: Permission
+  controllerOnly?: boolean
+  activeOn?: string[]
+}
 
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   {
@@ -55,16 +65,11 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
         icon: <Ic d="M3 6h13v12H3zM16 9.5l5-2.5v10l-5-2.5" />,
       },
       {
-        href: '/history',
+        href: '/workbench',
         perm: 'file.view',
-        label: '历史记录',
-        icon: <Ic d="M4 6h16M4 12h16M4 18h10" extra="M18 15v4m0 0l-2-2m2 2l2-2" />,
-      },
-      {
-        href: '/job',
-        perm: 'streamer.view',
-        label: '直播历史',
-        icon: <Ic d="M12 7v5l3 2" extra="M12 21a9 9 0 110-18 9 9 0 010 18z" />,
+        label: '剪辑台',
+        activeOn: ['/replay'],
+        icon: <Ic d="M6 9a3 3 0 100-6 3 3 0 000 6zM6 21a3 3 0 100-6 3 3 0 000 6z" extra="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12" />,
       },
     ],
   },
@@ -214,7 +219,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   const navCollapsed = !isMobile && collapsed
 
-  const isActive = (href: string) => matches(pathname, href)
+  const isActive = (item: NavItem) =>
+    matches(pathname, item.href) || !!item.activeOn?.some((href) => matches(pathname, href))
 
   // 权限未加载完时整组菜单先不过滤（全部都是公开的静态页面，数据接口本身有后端拦截），
   // 避免每次进页面侧栏闪一下
@@ -309,7 +315,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <div key={group.title} className={styles.group}>
               {!navCollapsed && <div className={styles.groupTitle}>{group.title}</div>}
               {group.items.map((item) => {
-                const active = isActive(item.href)
+                const active = isActive(item)
                 return (
                   <Link
                     key={item.href}

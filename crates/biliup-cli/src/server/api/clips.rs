@@ -250,7 +250,9 @@ pub async fn create_clip(
                     return conflict("这次录制还没开出分段，等画面开始写盘后再剪");
                 }
                 None => {
-                    return conflict("这一场没有在录，不能按当前画面剪；请在剪辑台里选段");
+                    return conflict(
+                        "这一场没有在录，不能按当前画面剪；请到剪辑台按场次回看后再剪",
+                    );
                 }
             }
         }
