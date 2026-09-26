@@ -8,7 +8,7 @@ import { historyHref } from '@/app/lib/history'
 import ReplayView from '@/app/ui/replay/ReplayView'
 import styles from '@/app/ui/replay/replay.module.scss'
 
-/** 静态导出不支持动态路由，场次和起始位置走查询串：`/replay?session=<id>&t=<场次毫秒>` */
+/** 静态导出不支持动态路由，场次、起始位置和要选中的切片走查询串：`/replay?session=<id>&t=<场次毫秒>&clip=<切片 id>` */
 export default function ReplayPage() {
   return (
     <Suspense
@@ -30,6 +30,8 @@ function ReplayRoute() {
   const id = raw && /^\d+$/.test(raw) ? Number(raw) : null
   const t = params.get('t')
   const initialT = t && /^\d+$/.test(t) ? Number(t) : null
+  const c = params.get('clip')
+  const initialClip = c && /^\d+$/.test(c) ? Number(c) : null
   if (id === null) {
     return (
       <>
@@ -47,5 +49,12 @@ function ReplayRoute() {
       </>
     )
   }
-  return <ReplayView key={`${id}-${initialT ?? ''}`} sessionId={id} initialT={initialT} />
+  return (
+    <ReplayView
+      key={`${id}-${initialT ?? ''}-${initialClip ?? ''}`}
+      sessionId={id}
+      initialT={initialT}
+      initialClip={initialClip}
+    />
+  )
 }

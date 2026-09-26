@@ -1,9 +1,21 @@
 'use client'
 import React, { useState } from 'react'
 import { Button, Empty, Input, Popconfirm, Progress, TabPane, Tabs, Toast, Tooltip, Typography } from '@douyinfe/semi-ui'
-import { IconDelete, IconEdit, IconFlag, IconScissors } from '@douyinfe/semi-icons'
+import { IconDelete, IconDownload, IconEdit, IconFlag, IconScissors } from '@douyinfe/semi-icons'
 import { deleteMarker, formatSessionTime, type Marker, renameMarker, ReportedError } from '@/app/lib/markers'
-import { type Clip, clipModeText, deleteClip, extensionOf, MAX_TITLE_CHARS, updateClip } from '@/app/lib/clips'
+import {
+  type Clip,
+  type ClipMode,
+  clipModeText,
+  deleteClip,
+  downloadClip,
+  exportClip,
+  extensionOf,
+  type FfmpegState,
+  isMp4,
+  MAX_TITLE_CHARS,
+  updateClip,
+} from '@/app/lib/clips'
 import { formatSize } from '@/app/lib/use-dashboard'
 import { formatPrecise, formatSpan } from '@/app/lib/sessions'
 import styles from './replay.module.scss'
@@ -232,12 +244,189 @@ function ClipStatus({ clip }: { clip: Clip }) {
   )
 }
 
+export const QUICK_TIP = '快速剪：按关键帧切，不转码，几秒就好；入点、出点放宽到最近的关键帧，保持录像原格式'
+export const PRECISE_TIP = '精确剪：用服务器上的 ffmpeg 转码成 H.264 / AAC 的 MP4，首尾帧对准选段；较慢，占 CPU'
+
+function ExportButton({
+  mode,
+  clip,
+  ffmpeg,
+  canEdit,
+  editReason,
+  label,
+  primary,
+}: {
+  mode: ClipMode
+  clip: Clip
+  ffmpeg: FfmpegState
+  canEdit: boolean
+  editReason: string
+  label: string
+  primary?: boolean
+}) {
+  const [busy, setBusy] = useState(false)
+  const reason = !canEdit ? editReason : mode === 'precise' ? ffmpeg.reason : null
+  const run = async () => {
+    setBusy(true)
+    try {
+      await exportClip(clip, mode)
+    } catch (e) {
+      if (!(e instanceof ReportedError)) Toast.error({ content: `没能开始导出：${errorText(e)}`, duration: 4 })
+    } finally {
+      setBusy(false)
+    }
+  }
+  const tip = `${mode === 'quick' ? QUICK_TIP : PRECISE_TIP}${clip.file_name ? '。之前导出的文件会被新文件替换' : ''}`
+  return (
+    <Tooltip content={reason ?? tip} className={styles.passTip}>
+      <span className={styles.inlineWrap}>
+        <Button size="small" theme={primary ? 'solid' : 'light'} loading={busy} disabled={reason !== null} onClick={run}>
+          {label}
+        </Button>
+      </span>
+    </Tooltip>
+  )
+}
+
+function DownloadButton({
+  clip,
+  format,
+  label,
+  tip,
+  disabledReason,
+  canDownload,
+}: {
+  clip: Clip
+  format: 'source' | 'mp4'
+  label: string
+  tip?: string
+  disabledReason: string | null
+  canDownload: boolean
+}) {
+  const [busy, setBusy] = useState(false)
+  const reason = !canDownload ? '没有下载文件的权限：需要 file.view' : disabledReason
+  const run = async () => {
+    setBusy(true)
+    try {
+      await downloadClip(clip, format)
+    } catch (e) {
+      if (!(e instanceof ReportedError)) Toast.error({ content: `下载失败：${errorText(e)}`, duration: 5 })
+    } finally {
+      setBusy(false)
+    }
+  }
+  const button = (
+    <Button size="small" theme="light" icon={<IconDownload />} loading={busy} disabled={reason !== null} onClick={run}>
+      {busy && format === 'mp4' && !isMp4(clip) ? '正在转 MP4…' : label}
+    </Button>
+  )
+  if (reason === null && !tip) return button
+  return (
+    <Tooltip content={reason ?? tip} className={styles.passTip}>
+      <span className={styles.inlineWrap}>{button}</span>
+    </Tooltip>
+  )
+}
+
+/** 切片卡片上的操作：还没导出 → 快速剪 / 精确剪；失败 → 重试；剪好 → 下载源格式 / MP4、改用另一种方式重剪 */
+function ClipTools({
+  clip,
+  ffmpeg,
+  canEdit,
+  editReason,
+  canDownload,
+}: {
+  clip: Clip
+  ffmpeg: FfmpegState
+  canEdit: boolean
+  editReason: string
+  canDownload: boolean
+}) {
+  if (clip.state === 'exporting' || clip.state === 'discarded') return null
+  const ext = extensionOf(clip).slice(1).toUpperCase()
+  if (clip.state === 'ready' || clip.state === 'published') {
+    const other: ClipMode = clip.mode === 'precise' ? 'quick' : 'precise'
+    return (
+      <div className={styles.clipTools}>
+        <DownloadButton
+          clip={clip}
+          format="source"
+          label={`下载 ${ext || '文件'}`}
+          disabledReason={null}
+          canDownload={canDownload}
+        />
+        {isMp4(clip) ? null : (
+          <DownloadButton
+            clip={clip}
+            format="mp4"
+            label="MP4"
+            tip="用 ffmpeg 转封装成 MP4（不转码），第一次要等几秒"
+            disabledReason={
+              ffmpeg.reason ? `${ffmpeg.reason}。可以先下载源格式（${ext}），多数播放器和剪辑软件能直接打开` : null
+            }
+            canDownload={canDownload}
+          />
+        )}
+        {clip.state === 'ready' ? (
+          <ExportButton
+            mode={other}
+            clip={clip}
+            ffmpeg={ffmpeg}
+            canEdit={canEdit}
+            editReason={editReason}
+            label={other === 'precise' ? '改用精确剪' : '改用快速剪'}
+          />
+        ) : null}
+      </div>
+    )
+  }
+  const retry = clip.state === 'failed' ? (clip.mode ?? 'quick') : null
+  return (
+    <div className={styles.clipTools}>
+      {retry ? (
+        <ExportButton
+          mode={retry}
+          clip={clip}
+          ffmpeg={ffmpeg}
+          canEdit={canEdit}
+          editReason={editReason}
+          label={`重试${clipModeText(retry)}`}
+          primary
+        />
+      ) : null}
+      {retry !== 'quick' ? (
+        <ExportButton
+          mode="quick"
+          clip={clip}
+          ffmpeg={ffmpeg}
+          canEdit={canEdit}
+          editReason={editReason}
+          label={retry ? '改用快速剪' : '快速剪'}
+          primary={!retry}
+        />
+      ) : null}
+      {retry !== 'precise' ? (
+        <ExportButton
+          mode="precise"
+          clip={clip}
+          ffmpeg={ffmpeg}
+          canEdit={canEdit}
+          editReason={editReason}
+          label={retry ? '改用精确剪' : '精确剪'}
+        />
+      ) : null}
+    </div>
+  )
+}
+
 function ClipRow({
   clip,
   active,
   warning,
+  ffmpeg,
   canEdit,
   editReason,
+  canDownload,
   onLoad,
   compact,
 }: {
@@ -245,13 +434,15 @@ function ClipRow({
   active: boolean
   compact: boolean
   warning: string | null
+  ffmpeg: FfmpegState
   canEdit: boolean
   editReason: string
+  canDownload: boolean
   onLoad: (c: Clip) => void
 }) {
   const [renaming, setRenaming] = useState(false)
   return (
-    <li className={styles.row} data-current={active || undefined} data-clip-state={clip.state}>
+    <li id={`clip-row-${clip.id}`} className={styles.row} data-current={active || undefined} data-clip-state={clip.state}>
       <button type="button" className={styles.rowTime} onClick={() => onLoad(clip)} title={compact ? '跳到入点' : '载入到细节条，跳到入点'}>
         <IconScissors size="small" aria-hidden="true" />
         {formatSessionTime(clip.in_ms)}
@@ -260,7 +451,7 @@ function ClipRow({
         {renaming ? (
           <InlineRename
             initial={clip.title}
-            placeholder="给这个切片起个名字"
+            placeholder="给这个切片起个名字（下载时用作文件名）"
             maxLength={MAX_TITLE_CHARS}
             onCancel={() => setRenaming(false)}
             onSave={async (title) => {
@@ -282,6 +473,7 @@ function ClipRow({
             </span>
             <ClipStatus clip={clip} />
             {warning ? <span className={styles.rowWarn}>{warning}</span> : null}
+            <ClipTools clip={clip} ffmpeg={ffmpeg} canEdit={canEdit} editReason={editReason} canDownload={canDownload} />
           </>
         )}
       </div>
@@ -300,7 +492,13 @@ function ClipRow({
           {canEdit ? (
             <Popconfirm
               title="删除这个切片？"
-              content={clip.state === 'exporting' ? '正在进行的导出会停下，' : clip.file_name ? '导出的文件会一起删掉' : undefined}
+              content={
+                clip.state === 'exporting'
+                  ? '正在进行的导出会停下，写了一半的文件一起删掉'
+                  : clip.file_name
+                    ? `导出的文件（${clip.file_name}${clip.output_bytes !== null ? `，${formatSize(clip.output_bytes)}` : ''}）会一起删掉`
+                    : undefined
+              }
               okText="删除"
               okType="danger"
               onConfirm={() =>
@@ -341,6 +539,8 @@ export function SidePanel({
   currentMarker,
   canEdit,
   editReason,
+  canDownload,
+  ffmpeg,
   onSeekMarker,
   onSelectMarker,
   onLoadClip,
@@ -359,6 +559,8 @@ export function SidePanel({
   currentMarker: number | null
   canEdit: boolean
   editReason: string
+  canDownload: boolean
+  ffmpeg: FfmpegState
   onSeekMarker: (m: Marker) => void
   onSelectMarker: (m: Marker) => void
   onLoadClip: (c: Clip) => void
@@ -405,7 +607,8 @@ export function SidePanel({
         </TabPane>
         <TabPane tab={`切片 ${clips.length}`} itemKey="clips">
           <Text type="tertiary" size="small" className={styles.panelNote}>
-            切片按场次时间记下入点、出点，存在服务器上；删掉切片会一起删掉它导出的文件。
+            快速剪按关键帧切、不转码；精确剪用 ffmpeg 转码成 MP4，首尾对准选段。导出的文件存在服务器的 clips
+            目录下，删掉切片时一起删掉。
           </Text>
           {clipsError && clips.length === 0 ? (
             <Empty description="切片列表加载失败，稍后会自动重试" className={styles.empty} />
@@ -415,7 +618,7 @@ export function SidePanel({
                 clipsLoading
                   ? '正在加载切片…'
                   : compact
-                    ? '还没有切片。选段需要至少 760 px 宽的窗口'
+                    ? '还没有切片。选段需要至少 760 px 宽的窗口；看直播时也可以在直播预览里「剪下刚才」'
                     : '还没有切片。在细节条上用 I / O（或「入点」「出点」按钮）选一段，再点「存为切片」'
               }
               className={styles.empty}
@@ -428,8 +631,10 @@ export function SidePanel({
                   clip={c}
                   active={activeClip === c.id}
                   warning={clipWarning(c)}
+                  ffmpeg={ffmpeg}
                   canEdit={canEdit}
                   editReason={editReason}
+                  canDownload={canDownload}
                   onLoad={onLoadClip}
                   compact={compact}
                 />
