@@ -351,6 +351,10 @@ mod tests {
                 11,
                 "d0b03f1d85267c90184bb260970affe744114d40a5f06e020604bca39307cf13cceebc6401c8d1b8cb47d7162040846e",
             ),
+            (
+                12,
+                "53b87607fc5effda086366a3aa1023e7c273895c363229074fc77b915159838ff8ca90d24cb929536d9c87003c66f7fa",
+            ),
         ];
         let embedded = sqlx::migrate!();
         let actual: Vec<(i64, String)> = embedded

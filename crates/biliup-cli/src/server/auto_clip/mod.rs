@@ -4,6 +4,7 @@
 
 #[cfg(test)]
 pub(crate) mod fake;
+pub mod jobs;
 pub mod model;
 pub mod probe;
 pub mod settings;
