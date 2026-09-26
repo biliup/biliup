@@ -1,7 +1,9 @@
 //! 控制面的 `/v1/fleet/*` 接口，只在 `--controller` 时注册。
 //! 节点列表归 `streamer.view`，生成 / 作废票据与移除节点归 `node.manage`（见 `permissions.rs`）。
+//! 房间、投稿模板与节点账号的处理函数在 `fleet_rooms.rs`。
 
 use crate::server::api::access::Caller;
+use crate::server::api::fleet_rooms;
 use crate::server::errors::report_to_response;
 use crate::server::fleet::controller::Controller;
 use crate::server::fleet::store;
@@ -11,7 +13,7 @@ use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use iroh_tickets::Ticket;
 use serde::Deserialize;
@@ -28,6 +30,32 @@ pub fn router(controller: Arc<Controller>) -> Router<()> {
         .route("/v1/fleet/nodes/{id}", delete(revoke_node))
         .route("/v1/fleet/join-tokens", get(list_tokens).post(create_token))
         .route("/v1/fleet/join-tokens/{id}", delete(delete_token))
+        .route(
+            "/v1/fleet/rooms",
+            get(fleet_rooms::list_rooms).post(fleet_rooms::create_room),
+        )
+        .route(
+            "/v1/fleet/rooms/{id}",
+            put(fleet_rooms::update_room).delete(fleet_rooms::delete_room),
+        )
+        .route(
+            "/v1/fleet/rooms/{id}/assign",
+            post(fleet_rooms::assign_room),
+        )
+        .route(
+            "/v1/fleet/rooms/{id}/force",
+            post(fleet_rooms::force_release),
+        )
+        .route("/v1/fleet/rooms/{id}/pause", post(fleet_rooms::pause_room))
+        .route(
+            "/v1/fleet/templates",
+            get(fleet_rooms::list_templates).post(fleet_rooms::create_template),
+        )
+        .route(
+            "/v1/fleet/templates/{id}",
+            put(fleet_rooms::update_template).delete(fleet_rooms::delete_template),
+        )
+        .route("/v1/fleet/accounts", get(fleet_rooms::list_accounts))
         .with_state(controller)
 }
 
@@ -201,6 +229,42 @@ mod tests {
                 "/v1/fleet/join-tokens/{id}",
                 Permission::NodeManage,
             ),
+            (Method::GET, "/v1/fleet/rooms", Permission::StreamerView),
+            (Method::GET, "/v1/fleet/templates", Permission::StreamerView),
+            (Method::GET, "/v1/fleet/accounts", Permission::StreamerView),
+            (Method::POST, "/v1/fleet/rooms", Permission::NodeManage),
+            (Method::PUT, "/v1/fleet/rooms/{id}", Permission::NodeManage),
+            (
+                Method::DELETE,
+                "/v1/fleet/rooms/{id}",
+                Permission::NodeManage,
+            ),
+            (
+                Method::POST,
+                "/v1/fleet/rooms/{id}/assign",
+                Permission::NodeManage,
+            ),
+            (
+                Method::POST,
+                "/v1/fleet/rooms/{id}/force",
+                Permission::NodeManage,
+            ),
+            (
+                Method::POST,
+                "/v1/fleet/rooms/{id}/pause",
+                Permission::NodeManage,
+            ),
+            (Method::POST, "/v1/fleet/templates", Permission::NodeManage),
+            (
+                Method::PUT,
+                "/v1/fleet/templates/{id}",
+                Permission::NodeManage,
+            ),
+            (
+                Method::DELETE,
+                "/v1/fleet/templates/{id}",
+                Permission::NodeManage,
+            ),
         ];
         for (method, route, permission) in cases {
             assert_eq!(
@@ -215,15 +279,23 @@ mod tests {
     }
 
     async fn send(app: &Router<()>, method: Method, uri: &str) -> (StatusCode, serde_json::Value) {
+        send_json(app, method, uri, None).await
+    }
+
+    async fn send_json(
+        app: &Router<()>,
+        method: Method,
+        uri: &str,
+        body: Option<serde_json::Value>,
+    ) -> (StatusCode, serde_json::Value) {
+        let request = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("content-type", "application/json");
+        let body = body.map_or_else(Body::empty, |body| Body::from(body.to_string()));
         let response = app
             .clone()
-            .oneshot(
-                Request::builder()
-                    .method(method)
-                    .uri(uri)
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(request.body(body).unwrap())
             .await
             .unwrap();
         let status = response.status();
@@ -300,6 +372,103 @@ mod tests {
             send(&app, Method::DELETE, "/v1/fleet/nodes/1").await.0,
             StatusCode::NOT_FOUND
         );
+        controller.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn rooms_and_templates_are_managed_over_http() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = ConnectionManager::new_pool_with(
+            dir.path().join("fleet.sqlite3").to_str().unwrap(),
+            &FLEET_MIGRATOR,
+        )
+        .await
+        .unwrap();
+        let secret = store::identity(&pool, now_ms()).await.unwrap();
+        let relay: url::Url = "http://192.168.7.2:19160/".parse().unwrap();
+        let controller = Controller::start(
+            pool,
+            secret,
+            RelaySetup {
+                local: vec![relay.clone()],
+                advertised: vec![relay],
+                embedded_port: None,
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        let app = router(controller.clone()).route_layer(from_fn(access::unrestricted));
+
+        let (status, template) = send_json(
+            &app,
+            Method::POST,
+            "/v1/fleet/templates",
+            Some(json!({ "template_name": "t", "account_mid": 42, "user_cookie": "x.json" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert!(template.get("user_cookie").is_none());
+        let template_id = template["id"].as_i64().unwrap();
+
+        let room =
+            json!({ "url": "https://live.example/1", "remark": "r", "template_id": template_id });
+        let (status, created) =
+            send_json(&app, Method::POST, "/v1/fleet/rooms", Some(room.clone())).await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(created["node_id"], serde_json::Value::Null);
+        let (status, error) = send_json(&app, Method::POST, "/v1/fleet/rooms", Some(room)).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{error}");
+        let (status, error) = send_json(
+            &app,
+            Method::POST,
+            "/v1/fleet/rooms",
+            Some(json!({ "url": "https://live.example/2", "remark": "r", "node_id": 9 })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(error["message"].as_str().unwrap().contains("节点 9"));
+
+        let (status, listed) = send(&app, Method::GET, "/v1/fleet/rooms").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(listed["rooms"][0]["status"], "unassigned");
+        let id = created["id"].as_i64().unwrap();
+        let (status, paused) = send_json(
+            &app,
+            Method::POST,
+            &format!("/v1/fleet/rooms/{id}/pause"),
+            Some(json!({ "paused": true })),
+        )
+        .await;
+        assert_eq!(
+            (status, paused["paused"].clone()),
+            (StatusCode::OK, json!(true))
+        );
+        let (status, _) = send(
+            &app,
+            Method::DELETE,
+            &format!("/v1/fleet/templates/{template_id}"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(
+            send(&app, Method::DELETE, &format!("/v1/fleet/rooms/{id}"))
+                .await
+                .0,
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            send(
+                &app,
+                Method::DELETE,
+                &format!("/v1/fleet/templates/{template_id}")
+            )
+            .await
+            .0,
+            StatusCode::NO_CONTENT
+        );
+        let (status, accounts) = send(&app, Method::GET, "/v1/fleet/accounts").await;
+        assert_eq!((status, accounts), (StatusCode::OK, json!([])));
         controller.shutdown().await;
     }
 }

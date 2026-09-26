@@ -262,6 +262,14 @@ pub async fn node_by_endpoint(
         .change_context(db_error("read node"))
 }
 
+pub async fn node(pool: &ConnectionPool, id: i64) -> AppResult<Option<NodeRow>> {
+    sqlx::query_as("SELECT * FROM fleet_nodes WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .change_context(db_error("read node"))
+}
+
 /// 未被移除的节点，按加入顺序
 pub async fn list_nodes(pool: &ConnectionPool) -> AppResult<Vec<NodeRow>> {
     sqlx::query_as("SELECT * FROM fleet_nodes WHERE revoked_at IS NULL ORDER BY id")

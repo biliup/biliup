@@ -214,11 +214,22 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
                 FileView
             }
         }
-        // Fleet 控制面：节点列表与 /v1/status 同级，管理归 node.manage
-        "/v1/fleet/nodes" if get => StreamerView,
-        "/v1/fleet/nodes/{id}" | "/v1/fleet/join-tokens" | "/v1/fleet/join-tokens/{id}" => {
-            NodeManage
+        // Fleet 控制面：节点、房间、模板与账号的列表与 /v1/status 同级，管理与分派归 node.manage
+        "/v1/fleet/nodes" | "/v1/fleet/rooms" | "/v1/fleet/templates" | "/v1/fleet/accounts"
+            if get =>
+        {
+            StreamerView
         }
+        "/v1/fleet/nodes/{id}"
+        | "/v1/fleet/join-tokens"
+        | "/v1/fleet/join-tokens/{id}"
+        | "/v1/fleet/rooms"
+        | "/v1/fleet/rooms/{id}"
+        | "/v1/fleet/rooms/{id}/assign"
+        | "/v1/fleet/rooms/{id}/force"
+        | "/v1/fleet/rooms/{id}/pause"
+        | "/v1/fleet/templates"
+        | "/v1/fleet/templates/{id}" => NodeManage,
         "/v1/web-users"
         | "/v1/web-users/roles"
         | "/v1/web-users/{id}"

@@ -1,9 +1,14 @@
-//! 控制面：接受节点的 iroh 连接，维护在线状态与最近 5 分钟的曲线。
+//! 控制面：接受节点的 iroh 连接，维护在线状态与最近 5 分钟的曲线，按分派给节点下发期望状态。
+
+mod dispatch;
+
+pub use dispatch::{CreateRoom, DispatchError, RoomStatus, RoomView, UpdateRoom, strip_hooks};
 
 use super::assignments;
+use super::model::Account;
 use super::protocol::{
-    self, CloseCode, ControllerMessage, Heartbeat, Hello, NodeMessage, OFFLINE_AFTER, Summary,
-    Tools,
+    self, Ack, CloseCode, ControllerMessage, DESIRED_STATE_SINCE, DesiredState, Heartbeat, Hello,
+    NodeMessage, OFFLINE_AFTER, Summary, Tools,
 };
 use super::relay::EmbeddedRelay;
 use super::store::{self, NodeRow, Redeem};
@@ -19,6 +24,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tracing::{debug, info, warn};
@@ -56,9 +62,32 @@ struct LiveNode {
     interval_ms: u64,
     samples: VecDeque<Sample>,
     rooms: Vec<serde_json::Value>,
+    /// 发往这条连接的帧；写帧的循环在 `session` 里
+    outbox: mpsc::UnboundedSender<ControllerMessage>,
+    /// 最近一次下发的期望状态版本号
+    pushed_version: Option<u64>,
+    /// 节点最近一次 `Ack` 的版本号、持有的房间（id → epoch）与落地失败的房间
+    acked_version: Option<u64>,
+    held: HashMap<i64, i64>,
+    failed: HashMap<i64, String>,
 }
 
 impl LiveNode {
+    fn accepts_desired_state(&self) -> bool {
+        self.proto >= DESIRED_STATE_SINCE
+    }
+
+    fn apply_ack(&mut self, ack: &Ack, now: i64) {
+        self.acked_version = Some(ack.version);
+        self.held = ack.held.iter().map(|room| (room.id, room.epoch)).collect();
+        self.failed = ack
+            .failed
+            .iter()
+            .map(|room| (room.id, room.error.clone()))
+            .collect();
+        self.last_message_at = now;
+    }
+
     fn apply(&mut self, heartbeat: Heartbeat, now: i64) {
         self.summary = Some(Summary::of(&heartbeat));
         self.interval_ms = heartbeat.stats.interval_ms;
@@ -123,6 +152,12 @@ pub struct NodeView {
     pub interval_ms: Option<u64>,
     /// 最近 5 分钟的采样（节点时钟）；离线为空
     pub samples: Vec<Sample>,
+    /// 分派给它的房间数（含迁移中、还没交给它的）
+    pub assigned_rooms: i64,
+    /// 节点上报的 B 站账号（只有 mid 与昵称）
+    pub accounts: Vec<Account>,
+    /// 最近一次下发的期望状态它是否已经确认
+    pub synced: Option<bool>,
 }
 
 pub struct Controller {
@@ -133,6 +168,10 @@ pub struct Controller {
     live: Mutex<HashMap<i64, LiveNode>>,
     next_seq: AtomicU64,
     accept_task: Mutex<Option<JoinHandle<()>>>,
+    /// 期望状态版本号：毫秒时钟与「上一个 + 1」取大，重启后也不会倒退
+    version: AtomicU64,
+    /// 改分派与下发期望状态互斥：同一台节点收到的快照按版本号递增，改动之后生成的快照一定看得到改动
+    dispatch: tokio::sync::Mutex<()>,
 }
 
 impl Controller {
@@ -164,6 +203,8 @@ impl Controller {
             live: Mutex::default(),
             next_seq: AtomicU64::new(1),
             accept_task: Mutex::default(),
+            version: AtomicU64::new(0),
+            dispatch: tokio::sync::Mutex::new(()),
         });
         let task = tokio::spawn(accept_loop(
             Arc::downgrade(&controller),
@@ -201,27 +242,118 @@ impl Controller {
 
     pub async fn nodes(&self) -> AppResult<Vec<NodeView>> {
         let rows = store::list_nodes(&self.pool).await?;
+        let counts = assignments::assigned_counts(&self.pool).await?;
+        let mut accounts: HashMap<i64, Vec<Account>> = HashMap::new();
+        for account in assignments::list_accounts(&self.pool).await? {
+            accounts.entry(account.node_id).or_default().push(Account {
+                mid: account.mid,
+                uname: account.uname,
+            });
+        }
         let now = now_ms();
         let live = self.live.lock().unwrap();
         Ok(rows
             .into_iter()
             .map(|row| {
-                let node = live.get(&row.id);
-                view(row, node, now)
+                let id = row.id;
+                let mut view = view(row, live.get(&id), now);
+                view.assigned_rooms = counts.get(&id).copied().unwrap_or(0);
+                view.accounts = accounts.remove(&id).unwrap_or_default();
+                view
             })
             .collect())
     }
 
     /// 移除节点：吊销公钥，在线的连接当场以 `revoked` 关闭。
+    /// 分派给它的房间变成未分派；它自己按约定把这些房间转成本地房间继续录。
     pub async fn revoke(&self, id: i64) -> AppResult<bool> {
+        let guard = self.dispatch.lock().await;
         let Some(endpoint_id) = store::revoke_node(&self.pool, id, now_ms()).await? else {
             return Ok(false);
         };
         if let Some(node) = self.live.lock().unwrap().remove(&id) {
             close_with(&node.connection, CloseCode::Revoked);
         }
-        info!(node = id, %endpoint_id, "fleet node revoked");
+        let affected = assignments::unassign_node(&self.pool, id, now_ms()).await?;
+        drop(guard);
+        info!(node = id, %endpoint_id, rooms = affected.len(), "fleet node revoked");
+        // 等它释放的房间不再等，交给各自的新节点
+        self.push_all().await;
         Ok(true)
+    }
+
+    fn next_version(&self) -> u64 {
+        let now = u64::try_from(now_ms()).unwrap_or_default();
+        let mut current = self.version.load(Ordering::Relaxed);
+        loop {
+            let next = now.max(current + 1);
+            match self.version.compare_exchange_weak(
+                current,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return next,
+                Err(actual) => current = actual,
+            }
+        }
+    }
+
+    /// 改分派时记下的版本号：之后下发的快照版本号都比它大
+    fn current_version(&self) -> i64 {
+        i64::try_from(self.version.load(Ordering::Relaxed)).unwrap_or(i64::MAX)
+    }
+
+    /// 给一台在线节点下发它此刻完整的期望状态。离线或太旧（收不了 `DesiredState`）的节点跳过，
+    /// 它连上来时会收到。
+    pub async fn push(&self, node: i64) {
+        let _guard = self.dispatch.lock().await;
+        self.push_locked(node).await;
+    }
+
+    async fn push_locked(&self, node: i64) {
+        let online = self
+            .live
+            .lock()
+            .unwrap()
+            .get(&node)
+            .is_some_and(LiveNode::accepts_desired_state);
+        if !online {
+            return;
+        }
+        let version = self.next_version();
+        let (rooms, templates) = match assignments::desired_state(&self.pool, node).await {
+            Ok(desired) => desired,
+            Err(e) => {
+                warn!(node, error = ?e, "could not build the desired state");
+                return;
+            }
+        };
+        let message = ControllerMessage::DesiredState(DesiredState {
+            version,
+            rooms,
+            templates,
+        });
+        if let Some(live) = self.live.lock().unwrap().get_mut(&node)
+            && live.outbox.send(message).is_ok()
+        {
+            live.pushed_version = Some(version);
+        }
+    }
+
+    pub async fn push_many(&self, nodes: impl IntoIterator<Item = Option<i64>>) {
+        let mut nodes: Vec<i64> = nodes.into_iter().flatten().collect();
+        nodes.sort_unstable();
+        nodes.dedup();
+        let _guard = self.dispatch.lock().await;
+        for node in nodes {
+            self.push_locked(node).await;
+        }
+    }
+
+    pub async fn push_all(&self) {
+        let nodes: Vec<i64> = self.live.lock().unwrap().keys().copied().collect();
+        self.push_many(nodes.into_iter().map(Some)).await;
     }
 
     pub async fn shutdown(&self) {
@@ -371,6 +503,7 @@ impl Controller {
         }
         let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
         let now = now_ms();
+        let (outbox, mut frames) = mpsc::unbounded_channel();
         let previous = self.live.lock().unwrap().insert(
             id,
             LiveNode {
@@ -389,6 +522,11 @@ impl Controller {
                 interval_ms: 0,
                 samples: VecDeque::new(),
                 rooms: Vec::new(),
+                outbox,
+                pushed_version: None,
+                acked_version: None,
+                held: HashMap::new(),
+                failed: HashMap::new(),
             },
         );
         if let Some(previous) = previous {
@@ -405,8 +543,24 @@ impl Controller {
             protocol::write_frame(&mut send, &welcome)
                 .await
                 .change_context(AppError::Unknown)?;
-            self.read_loop(&connection, &mut recv, remote, id, seq)
-                .await
+            if hello.proto >= DESIRED_STATE_SINCE {
+                self.log_stale_rooms(id, &hello).await;
+                // 连上就按当前分派下发一次完整的期望状态；节点据此停掉不该再录的（epoch 对账）
+                self.push(id).await;
+            }
+            let writer = async {
+                while let Some(message) = frames.recv().await {
+                    log_outgoing(id, remote, &message);
+                    if let Err(e) = protocol::write_frame(&mut send, &message).await {
+                        debug!(node = id, error = %e, "could not write fleet frame");
+                        break;
+                    }
+                }
+            };
+            tokio::select! {
+                result = self.read_loop(&connection, &mut recv, remote, id, seq) => result,
+                () = writer => Ok(()),
+            }
         }
         .await;
 
@@ -481,14 +635,16 @@ impl Controller {
                     debug!(node = id, kind = %event.kind, "fleet node event");
                     self.touch(id, seq);
                 }
-                NodeMessage::Ack(ack) => {
-                    debug!(node = id, version = ack.version, "fleet node ack");
-                    self.touch(id, seq);
-                }
+                NodeMessage::Ack(ack) => self.ack(id, seq, ack).await,
                 NodeMessage::Leave => {
-                    store::revoke_node(&self.pool, id, now_ms()).await?;
+                    {
+                        let _guard = self.dispatch.lock().await;
+                        store::revoke_node(&self.pool, id, now_ms()).await?;
+                        assignments::unassign_node(&self.pool, id, now_ms()).await?;
+                    }
                     info!(node = id, "fleet node left");
                     close_with(connection, CloseCode::Normal);
+                    self.push_all().await;
                     return Ok(());
                 }
                 NodeMessage::Hello(_) => {
@@ -497,6 +653,70 @@ impl Controller {
                 }
             }
         }
+    }
+
+    /// 节点 `Hello` 里带来的、按本地缓存持有的房间与当前分派对不上的，记一笔；
+    /// 紧接着下发的期望状态会让节点停掉它们。
+    async fn log_stale_rooms(&self, id: i64, hello: &Hello) {
+        if hello.rooms.is_empty() {
+            return;
+        }
+        let current = match assignments::desired_state(&self.pool, id).await {
+            Ok((rooms, _)) => rooms,
+            Err(_) => return,
+        };
+        for held in &hello.rooms {
+            match current.iter().find(|room| room.id == held.id) {
+                Some(room) if room.epoch == held.epoch => {}
+                Some(room) => debug!(
+                    node = id,
+                    room = held.id,
+                    held = held.epoch,
+                    current = room.epoch,
+                    "node holds an older epoch of a room that is still assigned to it"
+                ),
+                None => info!(
+                    node = id,
+                    room = held.id,
+                    epoch = held.epoch,
+                    "node still holds a room that is no longer assigned to it, releasing"
+                ),
+            }
+        }
+    }
+
+    async fn ack(&self, id: i64, seq: u64, ack: Ack) {
+        let now = now_ms();
+        {
+            let mut live = self.live.lock().unwrap();
+            let Some(node) = live.get_mut(&id).filter(|node| node.seq == seq) else {
+                return;
+            };
+            node.apply_ack(&ack, now);
+        }
+        let held: Vec<i64> = ack.held.iter().map(|room| room.id).collect();
+        let version = i64::try_from(ack.version).unwrap_or(i64::MAX);
+        let confirmed = {
+            let _guard = self.dispatch.lock().await;
+            match assignments::confirm_releases(&self.pool, id, version, &held, now).await {
+                Ok(confirmed) => confirmed,
+                Err(e) => {
+                    warn!(node = id, error = ?e, "could not confirm fleet room releases");
+                    return;
+                }
+            }
+        };
+        if confirmed.is_empty() {
+            return;
+        }
+        info!(node = id, rooms = ?confirmed, "fleet rooms released");
+        let mut targets = Vec::new();
+        for room in confirmed {
+            if let Ok(Some(room)) = assignments::room(&self.pool, room).await {
+                targets.push(room.node_id);
+            }
+        }
+        self.push_many(targets).await;
     }
 
     fn touch(&self, id: i64, seq: u64) {
@@ -565,6 +785,11 @@ fn view(row: NodeRow, live: Option<&LiveNode>, now: i64) -> NodeView {
             summary: node.summary.clone().or(stored_summary),
             interval_ms: (node.interval_ms > 0).then_some(node.interval_ms),
             samples: node.samples.iter().copied().collect(),
+            assigned_rooms: 0,
+            accounts: Vec::new(),
+            synced: node.accepts_desired_state().then(|| {
+                node.pushed_version.is_some() && node.pushed_version == node.acked_version
+            }),
         },
         None => NodeView {
             id: row.id,
@@ -583,6 +808,9 @@ fn view(row: NodeRow, live: Option<&LiveNode>, now: i64) -> NodeView {
             summary: stored_summary,
             interval_ms: None,
             samples: Vec::new(),
+            assigned_rooms: 0,
+            accounts: Vec::new(),
+            synced: None,
         },
     }
 }
@@ -613,6 +841,23 @@ fn redacted_frame(body: &[u8]) -> String {
         }
         Err(_) => format!("<{} bytes, not json>", body.len()),
     }
+}
+
+/// 控制面发出的帧同样按 [`FRAME_LOG_TARGET`] 记下，用来核对下发的期望状态里没有凭据
+fn log_outgoing(node: i64, remote: EndpointId, message: &ControllerMessage) {
+    if !tracing::enabled!(target: FRAME_LOG_TARGET, tracing::Level::DEBUG) {
+        return;
+    }
+    let body = serde_json::to_string(message).unwrap_or_default();
+    debug!(
+        target: FRAME_LOG_TARGET,
+        node,
+        remote = %remote.fmt_short(),
+        bytes = body.len(),
+        direction = "out",
+        frame = %body,
+        "fleet frame"
+    );
 }
 
 async fn accept_loop(controller: std::sync::Weak<Controller>, endpoint: Endpoint) {
