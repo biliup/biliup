@@ -73,6 +73,8 @@ export default function Job() {
     {
       title: '',
       dataIndex: 'replay',
+      fixed: 'right' as const,
+      width: 72,
       render: (_: unknown, record: StreamerInfo) =>
         record.has_timeline ? (
           <Link href={replayHref(record.id)} className={styles.replayLink}>
