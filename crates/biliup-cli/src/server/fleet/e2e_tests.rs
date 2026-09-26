@@ -1,9 +1,13 @@
 //! 进程内跑一整套：控制面 + 内嵌 relay（127.0.0.1 随机端口）+ 真实的节点代理。
 
-use super::controller::{Controller, CreateRoom, DispatchError, NodeView, RelaySetup, RoomStatus};
+use super::controller::{
+    Controller, CreateRoom, DispatchError, NodeView, RelaySetup, Release, Removal, RemovalState,
+    RoomStatus,
+};
 use super::guard::ManagedHandle;
 use super::node::{self, NodeAgent};
 use super::relay::{EmbeddedRelay, FleetAccess};
+use super::revoked::{Revoked, RevokedHandle, revoked_path};
 use super::ticket::JoinTicket;
 use super::{FLEET_MIGRATOR, net, now_ms, store};
 use crate::server::config::Config;
@@ -167,6 +171,30 @@ async fn wait_for_node(
     }
 }
 
+/// 节点进程的被移除清单：与 `fleet::start` 一样放在 `node.json` 旁边
+fn revoked_for(node_file: &std::path::Path, services: &ServiceRegister) -> RevokedHandle {
+    Arc::new(Revoked::load(revoked_path(node_file), services.clone()))
+}
+
+/// 等「移除并自动改派」结束，返回结果
+async fn wait_removed(controller: &Controller, id: i64, within: Duration) -> Removal {
+    let deadline = tokio::time::Instant::now() + within;
+    loop {
+        let done = controller
+            .removals()
+            .into_iter()
+            .find(|removal| removal.node_id == id && removal.state == RemovalState::Done);
+        if let Some(removal) = done {
+            return removal;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "removal of node {id} did not finish within {within:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_node_joins_reports_and_is_revoked_through_the_embedded_relay() {
     let dir = tempfile::tempdir().unwrap();
@@ -219,10 +247,12 @@ async fn a_node_joins_reports_and_is_revoked_through_the_embedded_relay() {
     assert!(format!("{reused:?}").contains("已被使用"), "{reused:?}");
     assert_eq!(store::list_nodes(&pool).await.unwrap().len(), 1);
 
+    let services = node_services(&dir.path().join("node")).await;
     let agent = NodeAgent::start(
         node_file.clone(),
-        node_services(&dir.path().join("node")).await,
+        services.clone(),
         super::guard::ManagedHandle::default(),
+        revoked_for(&node_file, &services),
     )
     .await
     .unwrap();
@@ -253,7 +283,7 @@ async fn a_node_joins_reports_and_is_revoked_through_the_embedded_relay() {
     controller.shutdown().await;
 }
 
-/// 控制面 + 两台节点：分派、迁移（先释放后接手）、硬约束、移除后转本地。
+/// 控制面 + 两台节点：分派、迁移（先释放后接手）、硬约束、移除后转本地并暂停、离开后转本地接着录。
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn rooms_follow_assignments_across_two_nodes() {
     let dir = tempfile::tempdir().unwrap();
@@ -275,11 +305,17 @@ async fn rooms_follow_assignments_across_two_nodes() {
             fake_account(&services, &root, 42).await;
         }
         let managed = ManagedHandle::default();
-        let agent = NodeAgent::start(node_file.clone(), services.clone(), managed.clone())
-            .await
-            .unwrap();
+        let revoked = revoked_for(&node_file, &services);
+        let agent = NodeAgent::start(
+            node_file.clone(),
+            services.clone(),
+            managed.clone(),
+            revoked.clone(),
+        )
+        .await
+        .unwrap();
         wait_for_node(&controller, joined.node_id, true, Duration::from_secs(30)).await;
-        nodes.push((joined.node_id, services, managed, agent, node_file));
+        nodes.push((joined.node_id, services, managed, agent, node_file, revoked));
     }
     let (a, b) = (nodes[0].0, nodes[1].0);
     // A 上报了账号 42，B 没有
@@ -382,7 +418,8 @@ async fn rooms_follow_assignments_across_two_nodes() {
         (Some(b), None, 2)
     );
 
-    // 移除 A：它的房间在控制面变成未分派，在 A 本机转成本地房间接着录
+    // 移除 A：它的房间在控制面变成未分派，在 A 本机转成本地房间并暂停，记进被移除清单
+    assert!(!revoked_path(&nodes[0].4).exists());
     assert!(controller.revoke(a).await.unwrap());
     eventually("A agent stops", Duration::from_secs(10), || {
         let finished = nodes[0].3.is_finished();
@@ -392,21 +429,49 @@ async fn rooms_follow_assignments_across_two_nodes() {
     assert!(nodes[0].2.read().unwrap().is_none());
     assert!(!super::reconcile::state_path(&nodes[0].4).exists());
     assert_eq!(local_urls(&services_a).await, ["https://stuck.example/1"]);
-    assert!(
-        services_a
-            .managers
-            .get_rooms()
-            .await
-            .iter()
-            .any(|worker| worker.live_streamer.url == "https://stuck.example/1")
-    );
+    let worker = services_a
+        .managers
+        .get_rooms()
+        .await
+        .into_iter()
+        .find(|worker| worker.live_streamer.url == "https://stuck.example/1")
+        .unwrap();
+    assert!(matches!(
+        *worker.downloader_status.read().unwrap(),
+        crate::server::infrastructure::context::WorkerStatus::Pause
+    ));
+    assert_eq!(nodes[0].5.ids(), [worker.live_streamer.id]);
+    assert!(revoked_path(&nodes[0].4).exists());
     let orphan = super::assignments::room(&pool, room.id)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(orphan.node_id, None);
 
-    for (_, _, _, agent, _) in nodes {
+    // B 的 node.json 已经没了（`biliup node leave` 正在进行）时收到吊销：是主动离开，转本地接着录
+    std::fs::remove_file(&nodes[1].4).unwrap();
+    assert!(controller.revoke(b).await.unwrap());
+    eventually("B agent stops", Duration::from_secs(10), || {
+        let finished = nodes[1].3.is_finished();
+        async move { finished }
+    })
+    .await;
+    assert_eq!(local_urls(&services_b).await, ["https://stuck.example/2"]);
+    let worker = services_b
+        .managers
+        .get_rooms()
+        .await
+        .into_iter()
+        .find(|worker| worker.live_streamer.url == "https://stuck.example/2")
+        .unwrap();
+    assert!(!matches!(
+        *worker.downloader_status.read().unwrap(),
+        crate::server::infrastructure::context::WorkerStatus::Pause
+    ));
+    assert!(nodes[1].5.is_empty());
+    assert!(!revoked_path(&nodes[1].4).exists());
+
+    for (_, _, _, agent, _, _) in nodes {
         agent.shutdown().await;
     }
     controller.shutdown().await;
@@ -433,9 +498,15 @@ async fn automatic_placement_respects_accounts_and_spreads_rooms() {
         if name == "a" {
             fake_account(&services, &root, 42).await;
         }
-        let agent = NodeAgent::start(node_file, services.clone(), ManagedHandle::default())
-            .await
-            .unwrap();
+        let revoked = revoked_for(&node_file, &services);
+        let agent = NodeAgent::start(
+            node_file,
+            services.clone(),
+            ManagedHandle::default(),
+            revoked,
+        )
+        .await
+        .unwrap();
         wait_for_node(&controller, joined.node_id, true, Duration::from_secs(30)).await;
         nodes.push((joined.node_id, services, agent));
     }
@@ -494,26 +565,246 @@ async fn automatic_placement_respects_accounts_and_spreads_rooms() {
         "{rejected:?}"
     );
 
-    // 移除 B 并自动改派：它的房间去 A
-    let outcome = controller.revoke_and_reassign(b).await.unwrap().unwrap();
-    assert_eq!(outcome.unplaced.len(), 0);
+    // 移除在线的 B 并自动改派：先迁移，B 确认释放后 A 才接手，然后才吊销 B
+    let started = controller.revoke_and_reassign(b).await.unwrap().unwrap();
+    assert_eq!(started.state, RemovalState::Removing);
     assert_eq!(
-        (outcome.reassigned[0].room_id, outcome.reassigned[0].node_id),
-        (second.id, a)
+        (started.rooms[0].room_id, started.rooms[0].node_id),
+        (second.id, Some(a))
     );
+    let done = wait_removed(&controller, b, Duration::from_secs(20)).await;
+    assert_eq!(done.rooms.len(), 1);
+    assert_eq!(done.rooms[0].release, Release::Released);
+    assert!(done.finished_at.unwrap() <= started.deadline);
     let services_a = nodes[0].1.clone();
+    let services_b = nodes[1].1.clone();
     eventually("A records both rooms", Duration::from_secs(20), || {
         let services = services_a.clone();
         async move { local_urls(&services).await.len() == 2 }
     })
     .await;
-    // 再移除 A：没有节点可去，房间留在未分派
-    let outcome = controller.revoke_and_reassign(a).await.unwrap().unwrap();
-    assert_eq!(outcome.reassigned.len(), 0);
-    assert_eq!(outcome.unplaced.len(), 2);
+    // B 交出了房间，吊销后本机也没留下它
+    assert!(local_urls(&services_b).await.is_empty());
+    eventually("B agent stops", Duration::from_secs(10), || {
+        let finished = nodes[1].2.is_finished();
+        async move { finished }
+    })
+    .await;
+    assert!(controller.revoke_and_reassign(b).await.unwrap().is_none());
+
+    // A 离线时移除 A：当场吊销；没有节点可去，房间留在未分派
+    let (_, _, agent_a) = nodes.remove(0);
+    agent_a.shutdown().await;
+    wait_for_node(&controller, a, false, Duration::from_secs(10)).await;
+    let done = controller.revoke_and_reassign(a).await.unwrap().unwrap();
+    assert_eq!(done.state, RemovalState::Done);
+    assert_eq!(done.rooms.len(), 2);
+    for room in &done.rooms {
+        assert_eq!(room.node_id, None);
+        assert!(
+            room.unplaced.as_deref().unwrap().contains("没有节点"),
+            "{room:?}"
+        );
+        assert_eq!(room.release, Release::Offline);
+    }
     assert!(controller.revoke_and_reassign(a).await.unwrap().is_none());
+    assert!(controller.nodes().await.unwrap().is_empty());
 
     for (_, _, agent) in nodes {
+        agent.shutdown().await;
+    }
+    controller.shutdown().await;
+}
+
+/// 控制面 + 两台节点：全局配置两台都生效，覆盖只动一台，本机密钥不出节点、不进控制面的库。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn layered_config_reaches_nodes_without_their_secrets() {
+    use crate::server::api::access;
+    use axum::body::Body;
+    use axum::http::{Method, Request, StatusCode};
+    use tower::ServiceExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let (controller, url, pool) = start_controller(dir.path()).await;
+    let app = crate::server::api::fleet::router(controller.clone())
+        .route_layer(axum::middleware::from_fn(access::unrestricted));
+    let send = |method: Method, uri: String, body: serde_json::Value| {
+        let app = app.clone();
+        async move {
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(uri)
+                        .header("content-type", "application/json")
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = response.status();
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            (
+                status,
+                serde_json::from_slice::<serde_json::Value>(&bytes)
+                    .unwrap_or(serde_json::Value::Null),
+            )
+        }
+    };
+
+    let mut nodes = Vec::new();
+    for name in ["a", "b"] {
+        let root = dir.path().join(name);
+        let node_file = root.join("data/node.json");
+        let joined = node::join(
+            &ticket_for(&controller, &pool, &url).await,
+            false,
+            &node_file,
+        )
+        .await
+        .unwrap();
+        let services = node_services(&root).await;
+        {
+            let mut config = services.config.write().unwrap();
+            config.kuaishou_cookie = Some(format!("ks-secret-{name}"));
+            config.pool1_size = 2;
+        }
+        let managed = ManagedHandle::default();
+        let revoked = revoked_for(&node_file, &services);
+        let agent = NodeAgent::start(node_file, services.clone(), managed.clone(), revoked)
+            .await
+            .unwrap();
+        wait_for_node(&controller, joined.node_id, true, Duration::from_secs(30)).await;
+        nodes.push((joined.node_id, services, managed, agent));
+    }
+    let (a, b) = (nodes[0].0, nodes[1].0);
+    let config_of = |index: usize| nodes[index].1.config.read().unwrap().clone();
+    let sync_of = |id: i64| {
+        let controller = controller.clone();
+        async move {
+            controller
+                .nodes()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|node| node.id == id)
+                .unwrap()
+                .config
+        }
+    };
+
+    // 连上就托管配置；控制面还没存全局配置，本机配置不变
+    eventually(
+        "both nodes report config applied",
+        Duration::from_secs(20),
+        || async {
+            sync_of(a).await.sync == Some("applied") && sync_of(b).await.sync == Some("applied")
+        },
+    )
+    .await;
+    assert!(
+        nodes[0]
+            .2
+            .read()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .config
+            .is_some()
+    );
+    assert_eq!(config_of(0).pool1_size, 2);
+
+    let (status, saved) = send(
+        Method::PUT,
+        "/v1/fleet/configuration".into(),
+        serde_json::json!({
+            "segment_time": "01:00:00",
+            "filename_prefix": "{streamer}%Y-%m-%d",
+            "pool1_size": 9,
+            "kuaishou_cookie": null,
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(
+        saved["ignored"],
+        serde_json::json!(["kuaishou_cookie", "pool1_size"])
+    );
+    eventually(
+        "global config applied on both nodes",
+        Duration::from_secs(20),
+        || async {
+            [0, 1].iter().all(|index| {
+                let config = config_of(*index);
+                config.segment_time.as_deref() == Some("01:00:00")
+                    && config.filename_prefix.as_deref() == Some("{streamer}%Y-%m-%d")
+            })
+        },
+    )
+    .await;
+    // 按节点的键全局不管
+    assert_eq!(config_of(0).pool1_size, 2);
+
+    let (status, error) = send(
+        Method::PUT,
+        format!("/v1/fleet/nodes/{a}/config"),
+        serde_json::json!({ "pool1_size": 0 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(error["message"].as_str().unwrap().contains("pool1_size"));
+    let (status, _) = send(
+        Method::PUT,
+        format!("/v1/fleet/nodes/{a}/config"),
+        serde_json::json!({ "pool1_size": 1 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    eventually(
+        "override applied on node a",
+        Duration::from_secs(20),
+        || async { nodes[0].1.managers.download_pool_size() == 1 },
+    )
+    .await;
+    eventually(
+        "node a acknowledges the override",
+        Duration::from_secs(20),
+        || async { sync_of(a).await.sync == Some("applied") },
+    )
+    .await;
+    assert_eq!(nodes[1].1.managers.download_pool_size(), 2);
+    assert_eq!(sync_of(a).await.override_keys, ["pool1_size"]);
+    assert!(sync_of(b).await.override_keys.is_empty());
+
+    // 密钥留在各自节点上，控制面的库里没有
+    assert_eq!(config_of(0).kuaishou_cookie.as_deref(), Some("ks-secret-a"));
+    assert_eq!(config_of(1).kuaishou_cookie.as_deref(), Some("ks-secret-b"));
+    let (status, rejected) = send(
+        Method::PUT,
+        "/v1/fleet/configuration".into(),
+        serde_json::json!({ "kuaishou_cookie": "ks-secret-controller" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{rejected}");
+    let (_, node_view) = send(
+        Method::GET,
+        format!("/v1/fleet/nodes/{a}/config"),
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(node_view["delivered"]["pool1_size"], 1);
+    assert_eq!(node_view["delivered"]["segment_time"], "01:00:00");
+    for file in ["fleet.sqlite3", "fleet.sqlite3-wal"] {
+        let path = dir.path().join(file);
+        if let Ok(bytes) = std::fs::read(&path) {
+            let text = String::from_utf8_lossy(&bytes);
+            assert!(!text.contains("ks-secret"), "{file} contains a node secret");
+        }
+    }
+
+    for (_, _, _, agent) in nodes {
         agent.shutdown().await;
     }
     controller.shutdown().await;

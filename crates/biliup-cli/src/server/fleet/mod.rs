@@ -4,21 +4,27 @@
 //! 两端都经控制面内嵌的 relay 中转、能打洞时转直连。单机模式（不带 `--controller`、
 //! 也没有 `data/node.json`）不创建 iroh 端点、不开任何端口、不写任何 Fleet 文件。
 //!
-//! 房间与投稿模板的真身在控制面，按期望状态整份下发给节点（F2）；全局配置还不下发（F3）。
+//! 房间与投稿模板的真身在控制面，按期望状态整份下发给节点（F2）；配置按「Fleet 全局 ⊕ 节点覆盖」
+//! 随期望状态下发，节点叠上本机密钥后生效，Cookie、密码等白名单外的键不出节点（F3）。
+//! 被移除的节点把原受管主播转成本地并暂停，等管理员确认后恢复（[`revoked`]）。
 
 pub mod accounts;
 pub mod assignments;
+pub mod config_store;
 pub mod controller;
 #[cfg(test)]
 mod e2e_tests;
 pub mod guard;
+pub mod layers;
 pub mod model;
 pub mod net;
 pub mod node;
+pub mod node_config;
 pub mod placement;
 pub mod protocol;
 pub mod reconcile;
 pub mod relay;
+pub mod revoked;
 pub mod store;
 pub mod ticket;
 
@@ -32,6 +38,7 @@ use iroh::endpoint::{Connection, PortmapperConfig, QuicTransportConfig, VarInt, 
 use iroh::{Endpoint, RelayMap, RelayMode, SecretKey};
 use protocol::CloseCode;
 use relay::{EmbeddedRelay, FleetAccess};
+use revoked::{Revoked, RevokedHandle};
 use sqlx::migrate::Migrator;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -108,6 +115,8 @@ pub struct FleetCapability {
     pub controller: bool,
     /// 节点进程才有：此刻托管在本机的行
     pub node: Option<ManagedHandle>,
+    /// 被控制面移除过、还有主播等管理员确认恢复时才有（节点进程总有）
+    pub revoked: Option<RevokedHandle>,
 }
 
 impl FleetCapability {
@@ -117,11 +126,22 @@ impl FleetCapability {
         let managed = node.read().unwrap();
         managed.as_ref().map(guard::Managed::view)
     }
+
+    /// `/v1/me` 的 `fleet_revoked`；没有等确认的主播时为 `None`，响应里不出现这个键
+    pub fn revoked_view(&self) -> Option<serde_json::Value> {
+        self.revoked.as_ref()?.view()
+    }
 }
 
-/// 本进程在 Fleet 里的角色
+/// 本进程在 Fleet 里的角色，以及被移除后等确认恢复的主播
 #[derive(Clone, Default)]
-pub enum Fleet {
+pub struct Fleet {
+    role: Role,
+    revoked: Option<RevokedHandle>,
+}
+
+#[derive(Clone, Default)]
+enum Role {
     #[default]
     Standalone,
     Controller(Arc<Controller>),
@@ -131,18 +151,25 @@ pub enum Fleet {
 impl Fleet {
     pub fn capability(&self) -> FleetCapability {
         FleetCapability {
-            controller: matches!(self, Fleet::Controller(_)),
-            node: match self {
-                Fleet::Node(_, managed) => Some(managed.clone()),
+            controller: matches!(self.role, Role::Controller(_)),
+            node: match &self.role {
+                Role::Node(_, managed) => Some(managed.clone()),
                 _ => None,
             },
+            revoked: self.revoked.clone(),
         }
     }
 
-    /// 节点进程上拒绝本机改动托管行（D7）；其他角色原样返回
-    pub fn guard(&self, router: axum::Router<()>) -> axum::Router<()> {
-        match self {
-            Fleet::Node(_, managed) => router.layer(axum::middleware::from_fn_with_state(
+    /// 节点进程上拒绝本机改动托管行（D7）；被移除过时跟踪本机对暂停中主播的恢复与删除
+    pub fn guard(&self, mut router: axum::Router<()>) -> axum::Router<()> {
+        if let Some(revoked) = &self.revoked {
+            router = router.layer(axum::middleware::from_fn_with_state(
+                revoked.clone(),
+                revoked::track,
+            ));
+        }
+        match &self.role {
+            Role::Node(_, managed) => router.layer(axum::middleware::from_fn_with_state(
                 managed.clone(),
                 guard::guard,
             )),
@@ -150,21 +177,29 @@ impl Fleet {
         }
     }
 
-    /// 控制面才有的 `/v1/fleet/*` 路由
+    /// 控制面的 `/v1/fleet/*` 路由；被移除过的节点的 `/v1/node/revoked*`
     pub fn router(&self) -> Option<axum::Router<()>> {
-        match self {
-            Fleet::Controller(controller) => {
+        let controller = match &self.role {
+            Role::Controller(controller) => {
                 Some(crate::server::api::fleet::router(controller.clone()))
             }
             _ => None,
+        };
+        let revoked = self
+            .revoked
+            .clone()
+            .map(crate::server::api::fleet::revoked_router);
+        match (controller, revoked) {
+            (Some(controller), Some(revoked)) => Some(controller.merge(revoked)),
+            (controller, revoked) => controller.or(revoked),
         }
     }
 
     pub async fn shutdown(&self) {
-        match self {
-            Fleet::Standalone => {}
-            Fleet::Controller(controller) => controller.shutdown().await,
-            Fleet::Node(agent, _) => {
+        match &self.role {
+            Role::Standalone => {}
+            Role::Controller(controller) => controller.shutdown().await,
+            Role::Node(agent, _) => {
                 let agent = agent.lock().unwrap().take();
                 if let Some(agent) = agent {
                     agent.shutdown().await;
@@ -177,13 +212,23 @@ impl Fleet {
 /// 按参数与工作目录决定本进程的角色。单机模式只检查 `data/node.json` 是否存在，不做别的事。
 pub async fn start(options: &FleetOptions, services: &ServiceRegister) -> AppResult<Fleet> {
     let node_file = Path::new(NODE_FILE);
+    let revoked_file = revoked::revoked_path(node_file);
+    let standalone = |revoked: Option<RevokedHandle>| Fleet {
+        role: Role::Standalone,
+        revoked,
+    };
     if options.controller {
         if node_file.exists() {
             bail!(AppError::Custom(format!(
                 "--controller 与 {NODE_FILE} 不能同时使用：这台机器已经作为节点加入了别的控制面，先执行 `biliup node leave`"
             )));
         }
-        return start_controller(options).await.map(Fleet::Controller);
+        let revoked = Revoked::resume_if_present(revoked_file, services).await;
+        let controller = start_controller(options).await?;
+        return Ok(Fleet {
+            role: Role::Controller(controller),
+            revoked,
+        });
     }
     if options.relay_listen.is_some() || !options.relay_urls.is_empty() {
         warn!("--relay-listen / --relay-url 只在 --controller 时生效，已忽略");
@@ -195,7 +240,9 @@ pub async fn start(options: &FleetOptions, services: &ServiceRegister) -> AppRes
             if stale.exists() {
                 reconcile::forget(&stale);
             }
-            return Ok(Fleet::Standalone);
+            return Ok(standalone(
+                Revoked::resume_if_present(revoked_file, services).await,
+            ));
         };
         let allow_hooks = std::env::var(JOIN_ALLOW_HOOKS_ENV)
             .is_ok_and(|value| matches!(value.trim(), "1" | "true" | "yes"));
@@ -204,16 +251,31 @@ pub async fn start(options: &FleetOptions, services: &ServiceRegister) -> AppRes
             Ok(file) => info!(node = file.node_id, "joined the fleet controller"),
             Err(e) => {
                 error!(error = ?e, "自动加入控制面失败，本次以单机模式运行");
-                return Ok(Fleet::Standalone);
+                return Ok(standalone(
+                    Revoked::resume_if_present(revoked_file, services).await,
+                ));
             }
         }
     }
+    // 节点随时可能被移除，清单一直挂着；启动时先按清单暂停，再连控制面
+    let revoked = Arc::new(Revoked::load(revoked_file, services.clone()));
+    revoked.apply().await;
     let managed = ManagedHandle::default();
-    match node::NodeAgent::start(node_file.to_path_buf(), services.clone(), managed.clone()).await {
-        Ok(agent) => Ok(Fleet::Node(Arc::new(Mutex::new(Some(agent))), managed)),
+    match node::NodeAgent::start(
+        node_file.to_path_buf(),
+        services.clone(),
+        managed.clone(),
+        revoked.clone(),
+    )
+    .await
+    {
+        Ok(agent) => Ok(Fleet {
+            role: Role::Node(Arc::new(Mutex::new(Some(agent))), managed),
+            revoked: Some(revoked),
+        }),
         Err(e) => {
             error!(error = ?e, "节点代理没能启动，本次以单机模式运行");
-            Ok(Fleet::Standalone)
+            Ok(standalone((!revoked.is_empty()).then_some(revoked)))
         }
     }
 }
@@ -363,6 +425,10 @@ mod tests {
                 2,
                 "647b577b8a045a666dcd6bef202e002f6f5b47124fb3e34428b2183954ac3c0c9f5515abc8db85836f5fa142cfef97c9",
             ),
+            (
+                3,
+                "4e2c70a99c89784c8dd484b6194b435b44aec807acbd8050d26d79b45d11a03753fe1d79943e804b84fb3045a30a6112",
+            ),
         ];
         let embedded: Vec<(i64, String)> = FLEET_MIGRATOR
             .iter()
@@ -387,7 +453,7 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(versions, [1, 2]);
+        assert_eq!(versions, [1, 2, 3]);
         let tables: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'fleet_%' ORDER BY name",
         )
@@ -397,6 +463,7 @@ mod tests {
         assert_eq!(
             tables,
             [
+                "fleet_config",
                 "fleet_identity",
                 "fleet_join_tokens",
                 "fleet_node_accounts",
@@ -422,6 +489,6 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(count, 2);
+        assert_eq!(count, 3);
     }
 }

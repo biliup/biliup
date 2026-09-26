@@ -6,8 +6,15 @@ import { diskPercent, formatBytes, memoryPercent, toSeries } from '@/app/lib/use
 import { formatRate, timeAgo } from '@/app/lib/use-dashboard'
 import { formatVersion } from '@/app/lib/status'
 import { humDate } from '@/app/lib/utils'
-import { nodeOutdated, type FleetNode, type PoolUsage } from '@/app/lib/use-fleet'
+import {
+  REMOVAL_WAIT_SECONDS,
+  nodeOutdated,
+  outdatedReason,
+  type FleetNode,
+  type PoolUsage,
+} from '@/app/lib/use-fleet'
 import styles from './page.module.scss'
+import NodeConfigStatus from './NodeConfigStatus'
 
 const SystemChart = dynamic(() => import('@/app/ui/SystemChart'), { ssr: false, loading: () => null })
 
@@ -66,10 +73,14 @@ export default function NodeCard({
   node,
   canManage,
   onRevoke,
+  controllerVersion,
+  onEditConfig,
 }: {
   node: FleetNode
   canManage: boolean
   onRevoke: (node: FleetNode, reassign: boolean) => void
+  controllerVersion?: string
+  onEditConfig?: (node: FleetNode) => void
 }) {
   const [reassign, setReassign] = useState(false)
   const summary = node.summary
@@ -121,10 +132,17 @@ export default function NodeCard({
             </Tag>
           </Tooltip>
         ) : null}
+        {node.removing ? (
+          <Tooltip content={`正在把房间迁到其他节点，它确认释放全部房间后移除（最多等 ${REMOVAL_WAIT_SECONDS} 秒）`}>
+            <Tag size="small" color="orange">
+              移除中
+            </Tag>
+          </Tooltip>
+        ) : null}
         {nodeOutdated(node) ? (
-          <Tooltip content="这台节点的 biliup 版本太旧，收不了控制面分派的房间，请先升级">
+          <Tooltip content={`这台节点的 ${outdatedReason(node)}，收不了控制面分派的房间，请先升级 biliup`}>
             <Tag size="small" color="red">
-              版本旧
+              协议版本旧
             </Tag>
           </Tooltip>
         ) : node.synced === false ? (
@@ -187,6 +205,12 @@ export default function NodeCard({
           </Tag>
         ) : null}
       </div>
+
+      <NodeConfigStatus
+        node={node}
+        controllerVersion={controllerVersion}
+        onOpen={onEditConfig ? () => onEditConfig(node) : undefined}
+      />
 
       {!node.online && summary ? (
         <div className={styles.stale}>离线，下面是最后一次上报的数据</div>
@@ -258,7 +282,7 @@ export default function NodeCard({
             <span className={styles.endpoint}>{node.endpoint_id.slice(0, 10)}</span>
           </Tooltip>
         </span>
-        {canManage ? (
+        {canManage && !node.removing ? (
           <Popconfirm
             title={`移除节点 ${node.name}？`}
             content={
@@ -266,14 +290,16 @@ export default function NodeCard({
                 <div className={styles.revokeBody}>
                   <span>
                     立即断开，它的身份作废；分派给它的 {node.assigned_rooms}{' '}
-                    个房间变为未分派，它本机转为自己管理、继续录这些房间
+                    个房间变为未分派；它发现被移除后，这些房间在它本机转为自己管理并暂停，等它的管理员确认后手动恢复
                   </span>
                   <Checkbox checked={reassign} onChange={(e) => setReassign(Boolean(e.target.checked))}>
                     把这些房间按负载自动改派到其他节点
                   </Checkbox>
                   {reassign ? (
                     <span className={styles.revokeWarn}>
-                      {node.name} 如果还在运行，会和新节点同时录这些房间（重复录制与投稿），直到在它本机删掉
+                      {node.online
+                        ? `先迁移再移除：每个房间等 ${node.name} 停录、确认释放后才交给新节点，不会重复录制（最多等 ${REMOVAL_WAIT_SECONDS} 秒）。超时没释放的房间直接改派，${node.name} 发现被移除后会暂停它们`
+                        : `${node.name} 现在离线，会当场移除并改派：它离线期间这些房间可能两边同时录，它连回来发现被移除后会暂停它们`}
                     </span>
                   ) : null}
                 </div>

@@ -9,6 +9,7 @@ import { formListToHookStep, hookStepListToForm } from '@/app/lib/postprocessor'
 import { platformName } from '@/app/lib/status'
 import { useIsMobile } from '@/app/lib/useIsMobile'
 import {
+  DESIRED_STATE_SINCE,
   FLEET_REFRESH_MS,
   FLEET_ROOMS_KEY,
   createRoom,
@@ -34,7 +35,11 @@ const STATUS: Record<RoomStatus, { label: string; color: React.ComponentProps<ty
   releasing: { label: '迁移中', color: 'orange', hint: '等上一台节点停录并确认释放，之后交给新节点' },
   deleting: { label: '删除中', color: 'orange', hint: '已删除，等节点停录并确认释放' },
   offline: { label: '节点离线', color: 'grey', hint: '节点离线；它上线时按分派接着录，离线期间它仍按本地缓存在录' },
-  outdated: { label: '节点版本旧', color: 'red', hint: '节点的 biliup 版本太旧，收不了房间，请先升级' },
+  outdated: {
+    label: '节点协议旧',
+    color: 'red',
+    hint: `节点的 Fleet 协议版本低于 ${DESIRED_STATE_SINCE}，收不了房间，请先升级 biliup`,
+  },
   syncing: { label: '下发中', color: 'blue', hint: '已下发，节点还没确认' },
   failed: { label: '落地失败', color: 'red', hint: '节点没能按分派录这个房间' },
   monitoring: { label: '监控中', color: 'green', hint: '节点在监控，未开播' },

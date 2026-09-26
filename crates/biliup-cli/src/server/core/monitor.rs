@@ -159,6 +159,13 @@ impl Monitor {
             // 始终拿不到槽位去检测。
             match plugin.check_stream(request).await {
                 Ok(LiveStatus::Live { stream }) => {
+                    // 检测期间被暂停了（界面上点了暂停、Fleet 节点启动时恢复暂停状态）：不开录。
+                    // 暂停时已经移出队列，这里也不放回，等恢复时再入队
+                    if matches!(*room.downloader_status.read().unwrap(), WorkerStatus::Pause) {
+                        drop(download_slot);
+                        info!(url = url, "检测期间已暂停，不开录");
+                        continue;
+                    }
                     // 依赖房间标题的策略要拿到流信息才能判定。命中就按「本轮不录」处理：
                     // 不建场次记录、不启动下载，等下个检测周期再看。
                     if let Some(rejection) =
@@ -797,6 +804,7 @@ mod tests {
     use crate::server::core::slots::Slots;
     use crate::server::infrastructure::connection_pool::ConnectionManager;
     use crate::server::infrastructure::context::Worker;
+    use crate::server::infrastructure::context::{Stage, WorkerStatus};
     use crate::server::infrastructure::models::live_streamer::LiveStreamer;
     use async_trait::async_trait;
     use biliup::downloader::live::{LivePlugin, LiveRequest, LiveResult, LiveStatus};
@@ -824,6 +832,36 @@ mod tests {
         async fn check_stream(&self, request: LiveRequest) -> LiveResult<LiveStatus> {
             let _ = self.probed.send(request.url);
             Ok(LiveStatus::Offline)
+        }
+    }
+
+    /// 检测一直卡着、放行后报开播的平台
+    struct GatedPlatform {
+        probing: mpsc::UnboundedSender<()>,
+        gate: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait]
+    impl LivePlugin for GatedPlatform {
+        fn name(&self) -> &'static str {
+            "gated"
+        }
+
+        fn matches(&self, url: &str) -> bool {
+            url.starts_with("https://gated.example/")
+        }
+
+        async fn check_stream(&self, request: LiveRequest) -> LiveResult<LiveStatus> {
+            let _ = self.probing.send(());
+            self.gate.notified().await;
+            let stream = serde_json::from_value(serde_json::json!({
+                "name": "gated", "url": request.url, "title": "t", "date": "2026-01-01T00:00:00Z",
+                "live_cover_url": "", "raw_stream_url": "http://127.0.0.1:9/x.flv", "platform": "gated",
+                "stream_headers": {}, "suffix": "flv", "danmaku": null, "downloader_hint": "StreamGears",
+                "runtime_options": null,
+            }))
+            .unwrap();
+            Ok(LiveStatus::Live { stream })
         }
     }
 
@@ -883,5 +921,59 @@ mod tests {
                 .unwrap();
             seen.insert(url);
         }
+    }
+
+    /// 检测期间被暂停（界面暂停、Fleet 节点启动时恢复暂停状态）的房间，检测报开播也不开录
+    #[tokio::test]
+    async fn a_room_paused_during_its_live_check_does_not_start_recording() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let (uploader, _) = async_channel::bounded(1);
+        let monitor = Arc::new(Monitor::new(
+            uploader,
+            Arc::new(Slots::new(1)),
+            pool.clone(),
+        ));
+        let (probing, mut probed) = mpsc::unbounded_channel();
+        let gate = Arc::new(tokio::sync::Notify::new());
+        monitor
+            .add_plugin(Arc::new(GatedPlatform {
+                probing,
+                gate: gate.clone(),
+            }))
+            .await;
+        // 场次记录挂在直播间行上：没有这一行，开场次失败，看不出有没有开录
+        sqlx::query("INSERT INTO livestreamers (id, url, remark) VALUES (1, ?, 'gated')")
+            .bind("https://gated.example/1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let room = worker(1, "https://gated.example/1");
+        monitor.add(room.clone()).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), probed.recv())
+            .await
+            .expect("房间应当开始检测")
+            .unwrap();
+
+        // 与 `toggle_pause` 对检测中（Pending）房间的做法一致
+        room.change_status(Stage::Download, WorkerStatus::Pause)
+            .await;
+        monitor.make_waker(room.id()).await;
+        gate.notify_one();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        assert!(matches!(
+            *room.downloader_status.read().unwrap(),
+            WorkerStatus::Pause
+        ));
+        let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM stream_sessions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(sessions, 0, "没有开场次，也就没有开录");
+        assert!(probed.try_recv().is_err(), "暂停的房间不再被检测");
     }
 }

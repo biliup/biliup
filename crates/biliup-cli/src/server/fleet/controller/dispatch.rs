@@ -51,29 +51,8 @@ pub struct CreateRoom {
     pub auto_node: bool,
 }
 
-/// 移除节点并自动改派的结果
-#[derive(Debug, Default, Serialize)]
-pub struct Reassigned {
-    /// 改派成功的房间 → 新节点
-    pub reassigned: Vec<Placed>,
-    /// 没找到合适节点、留在未分派的房间
-    pub unplaced: Vec<Unplaced>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct Placed {
-    pub room_id: i64,
-    pub node_id: i64,
-}
-
-#[derive(Debug, Serialize)]
-pub struct Unplaced {
-    pub room_id: i64,
-    pub reason: String,
-}
-
 impl DispatchError {
-    fn message(&self) -> String {
+    pub(super) fn message(&self) -> String {
         match self {
             DispatchError::NotFound(message) => message.to_string(),
             DispatchError::Invalid(message) | DispatchError::Conflict(message) => message.clone(),
@@ -103,7 +82,7 @@ pub enum RoomStatus {
     Deleting,
     /// 节点离线；它连上来时按期望状态接着录
     Offline,
-    /// 节点版本太旧，收不了房间
+    /// 节点的 Fleet 协议版本太旧，收不了房间
     Outdated,
     /// 已下发，节点还没确认
     Syncing,
@@ -189,6 +168,14 @@ fn check_room_spec(spec: &RoomSpec) -> Result<()> {
     Ok(())
 }
 
+/// 分派给协议次版本不够的节点时的报错
+fn outdated_message(node: &str, proto: u32) -> String {
+    format!(
+        "节点「{node}」的 {}，请先升级 biliup",
+        placement::outdated_reason(proto)
+    )
+}
+
 fn url_taken(_: UrlTaken) -> DispatchError {
     DispatchError::Conflict(
         "这个直播间地址已经在房间列表里了（包括正在删除、等节点释放的房间）".into(),
@@ -196,7 +183,7 @@ fn url_taken(_: UrlTaken) -> DispatchError {
 }
 
 impl Controller {
-    async fn template_or_invalid(&self, id: Option<i64>) -> Result<Option<Template>> {
+    pub(super) async fn template_or_invalid(&self, id: Option<i64>) -> Result<Option<Template>> {
         let Some(id) = id else {
             return Ok(None);
         };
@@ -220,18 +207,21 @@ impl Controller {
         spec: &RoomSpec,
         template: Option<&Template>,
     ) -> Result<()> {
+        if self.is_removing(node.id) {
+            return Err(DispatchError::Invalid(format!(
+                "节点「{}」正在移除，不再接收房间",
+                node.name
+            )));
+        }
         let outdated = self
             .live
             .lock()
             .unwrap()
             .get(&node.id)
             .filter(|live| !live.accepts_desired_state())
-            .map(|live| live.version.clone());
-        if let Some(version) = outdated {
-            return Err(DispatchError::Invalid(format!(
-                "节点「{}」的 biliup 版本（{version}）太旧，收不了房间，请先升级",
-                node.name
-            )));
+            .map(|live| live.proto);
+        if let Some(proto) = outdated {
+            return Err(DispatchError::Invalid(outdated_message(&node.name, proto)));
         }
         if spec.has_hooks() && !node.allow_hooks {
             return Err(DispatchError::Invalid(format!(
@@ -276,7 +266,11 @@ impl Controller {
     }
 
     /// 按负载给房间选一台节点（见 `placement`）；一台都不行时说明每台的原因
-    async fn auto_node(&self, spec: &RoomSpec, template: Option<&Template>) -> Result<i64> {
+    pub(super) async fn auto_node(
+        &self,
+        spec: &RoomSpec,
+        template: Option<&Template>,
+    ) -> Result<i64> {
         let rows = store::list_nodes(&self.pool).await?;
         let counts = assignments::assigned_counts(&self.pool).await?;
         let mut accounts: HashMap<i64, Vec<u64>> = HashMap::new();
@@ -297,7 +291,10 @@ impl Controller {
                     Candidate {
                         id: row.id,
                         online: node.is_some(),
-                        outdated: node.is_some_and(|node| !node.accepts_desired_state()),
+                        removing: self.is_removing(row.id),
+                        outdated: node
+                            .filter(|node| !node.accepts_desired_state())
+                            .map(|node| node.proto),
                         allow_hooks: row.allow_hooks,
                         accounts: accounts.remove(&row.id).unwrap_or_default(),
                         download_capacity: download.map_or(0, |pool| pool.capacity),
@@ -469,47 +466,6 @@ impl Controller {
         }
     }
 
-    /// 移除节点，并把分派给它的房间按负载改派到其他节点（`DELETE /v1/fleet/nodes/{id}?reassign=auto`）。
-    /// 被移除的节点若还在运行，会按约定把这些房间转成本地房间继续录，与新节点重复录制，界面上要写明。
-    /// 返回 `None` 表示节点不存在或已被移除。
-    pub async fn revoke_and_reassign(&self, id: i64) -> Result<Option<Reassigned>> {
-        let rooms: Vec<Room> = assignments::list_rooms(&self.pool)
-            .await?
-            .into_iter()
-            .filter(|room| room.node_id == Some(id) && room.deleted_at.is_none())
-            .collect();
-        if !self.revoke(id).await? {
-            return Ok(None);
-        }
-        let mut outcome = Reassigned::default();
-        for room in rooms {
-            let placed = async {
-                let template = self.template_or_invalid(room.template_id).await?;
-                let target = self.auto_node(&room.spec, template.as_ref()).await?;
-                self.assign(room.id, Some(target), false).await?;
-                Ok::<_, DispatchError>(target)
-            }
-            .await;
-            match placed {
-                Ok(node_id) => outcome.reassigned.push(Placed {
-                    room_id: room.id,
-                    node_id,
-                }),
-                Err(error) => outcome.unplaced.push(Unplaced {
-                    room_id: room.id,
-                    reason: error.message(),
-                }),
-            }
-        }
-        tracing::info!(
-            node = id,
-            reassigned = outcome.reassigned.len(),
-            unplaced = outcome.unplaced.len(),
-            "fleet node revoked with automatic reassignment"
-        );
-        Ok(Some(outcome))
-    }
-
     pub async fn templates(&self) -> Result<Vec<Template>> {
         Ok(assignments::list_templates(&self.pool).await?)
     }
@@ -577,5 +533,18 @@ impl Controller {
 
     pub async fn accounts(&self) -> Result<Vec<NodeAccount>> {
         Ok(assignments::list_accounts(&self.pool).await?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_outdated_node_is_described_by_its_protocol_version() {
+        assert_eq!(
+            outdated_message("x", 0),
+            "节点「x」的 Fleet 协议版本是 0，需要至少 1，请先升级 biliup"
+        );
     }
 }

@@ -12,6 +12,7 @@ pub mod clips;
 pub mod endpoints;
 /// 控制面的节点与加入票据（只在 `--controller` 时注册）
 pub mod fleet;
+pub mod fleet_config;
 pub mod fleet_rooms;
 /// 录制中直播间的封面 / 头像图片代理
 pub mod live_media;

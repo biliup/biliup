@@ -6,7 +6,8 @@
 use serde_json::Value;
 
 /// 非超管可见的全局配置字段：都是录制与投稿参数，不含凭据、路径形式的凭据或钩子。
-const VISIBLE_CONFIG_KEYS: &[&str] = &[
+/// Fleet 也只下发这些字段（D11），名单外的键只留在各节点本地。
+pub const VISIBLE_CONFIG_KEYS: &[&str] = &[
     "downloader",
     "sync_save_dir",
     "ffmpeg_path",

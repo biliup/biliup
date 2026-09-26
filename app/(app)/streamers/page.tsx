@@ -47,6 +47,7 @@ import StreamerCard, { LiveAvatar } from '@/app/ui/StreamerCard'
 import { CardRateSwitch } from '@/app/ui/LiveRateChart'
 import PageHeader from '../components/PageHeader'
 import { useMe } from '@/app/lib/use-me'
+import FleetRevokedBanner, { REVOKED_HINT } from '@/app/ui/FleetRevokedBanner'
 import styles from './page.module.scss'
 
 const { Content } = Layout
@@ -87,6 +88,9 @@ export default function StreamersPage() {
   const fleet = me?.fleet_node
   const managedIds = useMemo(() => new Set(fleet?.streamers ?? []), [fleet])
   const managedHint = fleet ? `由控制面 ${fleet.controller} 管理，请到控制面修改` : undefined
+  // 被控制面移除后转为本机自管并暂停、等确认恢复的直播间；手动恢复后标记立即消失
+  const revokedIds = useMemo(() => new Set(me?.fleet_revoked?.streamers ?? []), [me?.fleet_revoked])
+  const awaitingResume = (item: LiveStreamerEntity) => revokedIds.has(item.id) && item.status === 'Pause'
 
   // ---- 增删改 ----
   const { trigger: deleteStreamers } = useSWRMutation('/v1/streamers', requestDelete)
@@ -253,6 +257,13 @@ export default function StreamersPage() {
           </Tag>
         </Tooltip>
       ),
+      awaitingResume(item) && (
+        <Tooltip key="revoked" content={REVOKED_HINT}>
+          <Tag size="small" color="orange">
+            待恢复
+          </Tag>
+        </Tooltip>
+      ),
       canEdit && (
         <TemplateModal key="edit" onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
           <Button theme="borderless" type="primary" icon={<IconEdit2Stroked />} aria-label="编辑" {...lock} />
@@ -279,8 +290,8 @@ export default function StreamersPage() {
   }
   const hasActions = canEdit || canControl || canHooks
   const renderActions = (item: LiveStreamerEntity) =>
-    !hasActions ? null : managedIds.has(item.id) ? (
-      // ButtonGroup 会给每个子元素注入按钮属性，托管行里多了一个标签，改用普通容器
+    !hasActions ? null : managedIds.has(item.id) || awaitingResume(item) ? (
+      // ButtonGroup 会给每个子元素注入按钮属性，托管 / 待恢复行里多了一个标签，改用普通容器
       <div className={styles.rowActions}>{actionButtons(item)}</div>
     ) : (
       <ButtonGroup theme="borderless" className={styles.cardActions}>
@@ -323,6 +334,7 @@ export default function StreamersPage() {
             }
           />
         ) : null}
+        <FleetRevokedBanner className={styles.fleetBanner} />
         {isLoading ? (
           <div className={styles.center}>
             <Spin size="large" />

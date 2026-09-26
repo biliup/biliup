@@ -220,6 +220,15 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         {
             StreamerView
         }
+        // Fleet 配置只含白名单字段，查看与空间配置同级；修改会下发到节点，归 node.manage
+        "/v1/fleet/configuration"
+        | "/v1/fleet/configuration/history"
+        | "/v1/fleet/nodes/{id}/config"
+            if get =>
+        {
+            ConfigView
+        }
+        "/v1/fleet/configuration" | "/v1/fleet/nodes/{id}/config" => NodeManage,
         "/v1/fleet/nodes/{id}"
         | "/v1/fleet/join-tokens"
         | "/v1/fleet/join-tokens/{id}"
@@ -230,6 +239,9 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         | "/v1/fleet/rooms/{id}/pause"
         | "/v1/fleet/templates"
         | "/v1/fleet/templates/{id}" => NodeManage,
+        // 被控制面移除过的机器：恢复暂停中的原受管主播，与暂停 / 恢复单个主播同级
+        "/v1/node/revoked/resume" if method == Method::POST => RecordingControl,
+        "/v1/node/revoked" if method == Method::DELETE => RecordingControl,
         "/v1/web-users"
         | "/v1/web-users/roles"
         | "/v1/web-users/{id}"

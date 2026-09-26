@@ -1,14 +1,19 @@
 //! 控制面：接受节点的 iroh 连接，维护在线状态与最近 5 分钟的曲线，按分派给节点下发期望状态。
 
+mod configuration;
 mod dispatch;
+mod removal;
 
+pub use configuration::{CONTROLLER_VERSION, NodeConfigState, version_older};
 pub use dispatch::{CreateRoom, DispatchError, RoomStatus, RoomView, UpdateRoom, strip_hooks};
+pub use removal::{REMOVAL_WAIT, Release, Removal, RemovalState, RemovedRoom};
 
 use super::assignments;
+use super::config_store;
 use super::model::Account;
 use super::protocol::{
-    self, Ack, CloseCode, ControllerMessage, DESIRED_STATE_SINCE, DesiredState, Heartbeat, Hello,
-    NodeMessage, OFFLINE_AFTER, Summary, Tools,
+    self, Ack, CONFIG_SINCE, CloseCode, ConfigAck, ControllerMessage, DESIRED_STATE_SINCE,
+    DesiredState, Heartbeat, Hello, NodeMessage, OFFLINE_AFTER, Summary, Tools,
 };
 use super::relay::EmbeddedRelay;
 use super::store::{self, NodeRow, Redeem};
@@ -70,6 +75,8 @@ struct LiveNode {
     acked_version: Option<u64>,
     held: HashMap<i64, i64>,
     failed: HashMap<i64, String>,
+    /// 最近一次 `Ack` 里的配置应答（次版本 ≥ 2）
+    config_ack: Option<ConfigAck>,
 }
 
 impl LiveNode {
@@ -85,6 +92,7 @@ impl LiveNode {
             .iter()
             .map(|room| (room.id, room.error.clone()))
             .collect();
+        self.config_ack = ack.config.clone();
         self.last_message_at = now;
     }
 
@@ -158,6 +166,10 @@ pub struct NodeView {
     pub accounts: Vec<Account>,
     /// 最近一次下发的期望状态它是否已经确认
     pub synced: Option<bool>,
+    /// 配置的同步情况、版本是否过旧与覆盖了哪些键
+    pub config: NodeConfigState,
+    /// 正在「移除并自动改派」，等它确认释放房间
+    pub removing: bool,
 }
 
 pub struct Controller {
@@ -172,6 +184,10 @@ pub struct Controller {
     version: AtomicU64,
     /// 改分派与下发期望状态互斥：同一台节点收到的快照按版本号递增，改动之后生成的快照一定看得到改动
     dispatch: tokio::sync::Mutex<()>,
+    /// 进行中与最近结束的「移除并自动改派」，按节点 id
+    removals: Mutex<HashMap<i64, Removal>>,
+    /// 节点确认释放了房间或掉线时通知等待中的移除
+    released: tokio::sync::Notify,
 }
 
 impl Controller {
@@ -205,6 +221,8 @@ impl Controller {
             accept_task: Mutex::default(),
             version: AtomicU64::new(0),
             dispatch: tokio::sync::Mutex::new(()),
+            removals: Mutex::default(),
+            released: tokio::sync::Notify::new(),
         });
         let task = tokio::spawn(accept_loop(
             Arc::downgrade(&controller),
@@ -265,6 +283,7 @@ impl Controller {
     pub async fn nodes(&self) -> AppResult<Vec<NodeView>> {
         let rows = store::list_nodes(&self.pool).await?;
         let counts = assignments::assigned_counts(&self.pool).await?;
+        let mut overrides = config_store::node_overrides(&self.pool).await?;
         let mut accounts: HashMap<i64, Vec<Account>> = HashMap::new();
         for account in assignments::list_accounts(&self.pool).await? {
             accounts.entry(account.node_id).or_default().push(Account {
@@ -273,21 +292,31 @@ impl Controller {
             });
         }
         let now = now_ms();
+        let removing: Vec<i64> = rows
+            .iter()
+            .map(|row| row.id)
+            .filter(|id| self.is_removing(*id))
+            .collect();
         let live = self.live.lock().unwrap();
         Ok(rows
             .into_iter()
             .map(|row| {
                 let id = row.id;
                 let mut view = view(row, live.get(&id), now);
+                view.removing = removing.contains(&id);
                 view.assigned_rooms = counts.get(&id).copied().unwrap_or(0);
                 view.accounts = accounts.remove(&id).unwrap_or_default();
+                view.config.override_keys = overrides
+                    .remove(&id)
+                    .map(|patch| patch.into_iter().map(|(key, _)| key).collect())
+                    .unwrap_or_default();
                 view
             })
             .collect())
     }
 
     /// 移除节点：吊销公钥，在线的连接当场以 `revoked` 关闭。
-    /// 分派给它的房间变成未分派；它自己按约定把这些房间转成本地房间继续录。
+    /// 分派给它的房间变成未分派；它发现被吊销后把这些房间转成本地房间并暂停，等它的管理员确认后恢复。
     pub async fn revoke(&self, id: i64) -> AppResult<bool> {
         let guard = self.dispatch.lock().await;
         let Some(endpoint_id) = store::revoke_node(&self.pool, id, now_ms()).await? else {
@@ -334,15 +363,16 @@ impl Controller {
     }
 
     async fn push_locked(&self, node: i64) {
-        let online = self
+        let proto = self
             .live
             .lock()
             .unwrap()
             .get(&node)
-            .is_some_and(LiveNode::accepts_desired_state);
-        if !online {
+            .filter(|live| live.accepts_desired_state())
+            .map(|live| live.proto);
+        let Some(proto) = proto else {
             return;
-        }
+        };
         let version = self.next_version();
         let (rooms, templates) = match assignments::desired_state(&self.pool, node).await {
             Ok(desired) => desired,
@@ -351,10 +381,23 @@ impl Controller {
                 return;
             }
         };
+        // 次版本 1 的节点照常收房间，配置不发
+        let config = if proto >= CONFIG_SINCE {
+            match self.desired_config(node).await {
+                Ok(config) => Some(config),
+                Err(e) => {
+                    warn!(node, error = ?e, "could not build the desired config");
+                    return;
+                }
+            }
+        } else {
+            None
+        };
         let message = ControllerMessage::DesiredState(DesiredState {
             version,
             rooms,
             templates,
+            config,
         });
         if let Some(live) = self.live.lock().unwrap().get_mut(&node)
             && live.outbox.send(message).is_ok()
@@ -549,6 +592,7 @@ impl Controller {
                 acked_version: None,
                 held: HashMap::new(),
                 failed: HashMap::new(),
+                config_ack: None,
             },
         );
         if let Some(previous) = previous {
@@ -608,6 +652,7 @@ impl Controller {
             )
             .await;
             info!(node = id, "fleet node offline");
+            self.wake_removals();
         }
         result
     }
@@ -732,6 +777,7 @@ impl Controller {
             return;
         }
         info!(node = id, rooms = ?confirmed, "fleet rooms released");
+        self.wake_removals();
         let mut targets = Vec::new();
         for room in confirmed {
             if let Ok(Some(room)) = assignments::room(&self.pool, room).await {
@@ -789,6 +835,11 @@ fn view(row: NodeRow, live: Option<&LiveNode>, now: i64) -> NodeView {
         .last_summary
         .as_deref()
         .and_then(|s| serde_json::from_str::<Summary>(s).ok());
+    let config = NodeConfigState::of(
+        live,
+        live.map(|node| node.version.as_str())
+            .or(row.last_version.as_deref()),
+    );
     match live {
         Some(node) => NodeView {
             id: row.id,
@@ -812,6 +863,8 @@ fn view(row: NodeRow, live: Option<&LiveNode>, now: i64) -> NodeView {
             synced: node.accepts_desired_state().then(|| {
                 node.pushed_version.is_some() && node.pushed_version == node.acked_version
             }),
+            config,
+            removing: false,
         },
         None => NodeView {
             id: row.id,
@@ -833,6 +886,8 @@ fn view(row: NodeRow, live: Option<&LiveNode>, now: i64) -> NodeView {
             assigned_rooms: 0,
             accounts: Vec::new(),
             synced: None,
+            config,
+            removing: false,
         },
     }
 }

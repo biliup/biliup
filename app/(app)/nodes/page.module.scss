@@ -226,6 +226,19 @@
   max-width: min(320px, calc(100vw - 64px));
 }
 
+.removals {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.removalList {
+  margin: 0;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+}
+
 .revokeWarn {
   font-size: 12px;
   color: var(--semi-color-warning);

@@ -8,6 +8,7 @@ use super::protocol::{
 };
 use super::reconcile::{self, Reconciler};
 use super::relay::{DENY_REVOKED, DENY_TOKEN_INVALID, DENY_UNKNOWN};
+use super::revoked::RevokedHandle;
 use super::store::{hex, parse_hex};
 use super::ticket::JoinTicket;
 use super::{bind_endpoint, close_with, now_ms};
@@ -525,6 +526,7 @@ impl NodeAgent {
         node_file: PathBuf,
         services: ServiceRegister,
         managed: ManagedHandle,
+        revoked: RevokedHandle,
     ) -> AppResult<Self> {
         let file = NodeFile::load(&node_file)?;
         // relay 在每次连接前现挑（见 `pick_relay`），启动时不等探测
@@ -548,7 +550,7 @@ impl NodeAgent {
         .await;
         let (stop, stopped) = watch::channel(false);
         let task = tokio::spawn(run_agent(
-            endpoint, node_file, file, services, reconciler, stopped,
+            endpoint, node_file, file, services, reconciler, revoked, stopped,
         ));
         Ok(NodeAgent { stop, task })
     }
@@ -577,7 +579,9 @@ enum Outcome {
     /// 没连上
     Failed,
     Superseded,
-    /// 被移除或密钥不被承认：不再重连
+    /// 被控制面移除（`revoked`）：不再重连，托管的主播转本地并暂停
+    Revoked(String),
+    /// 密钥不被承认（控制面不认识它，例如数据被重置）：不再重连，托管的主播转本地接着录
     Rejected(String),
     Stopped,
 }
@@ -588,6 +592,7 @@ async fn run_agent(
     mut file: NodeFile,
     services: ServiceRegister,
     mut reconciler: Reconciler,
+    revoked: RevokedHandle,
     mut stopped: watch::Receiver<bool>,
 ) {
     let mut backoff = BACKOFF_MIN;
@@ -613,7 +618,21 @@ async fn run_agent(
         .await;
         let wait = match outcome {
             Outcome::Stopped => break,
-            Outcome::Rejected(message) => {
+            // `biliup node leave` 先让控制面移除自己再删 node.json，这期间重连会被当成吊销：那是主动离开，照常录
+            Outcome::Revoked(message) if node_file.exists() => {
+                let paused = reconciler.release_revoked(&revoked).await;
+                if paused > 0 {
+                    error!(
+                        "{message}；节点代理停止重连。控制面分派的 {paused} 个房间已转为本机房间并暂停：控制面可能已把它们改派给别的节点，接着录会重复录制、重复投稿。确认后在本机「直播管理」手动恢复。重新加入请先执行 `biliup node leave`，再用新票据 join"
+                    );
+                } else {
+                    error!(
+                        "{message}；节点代理停止重连。重新加入请先执行 `biliup node leave`，再用新票据 join"
+                    );
+                }
+                break;
+            }
+            Outcome::Revoked(message) | Outcome::Rejected(message) => {
                 error!(
                     "{message}；节点代理停止重连，控制面分派的房间转为本机房间继续录。重新加入请先执行 `biliup node leave`，再用新票据 join"
                 );
@@ -683,7 +702,10 @@ async fn session(
         Dial::Connected(connection, send, recv) => (connection, send, recv),
         Dial::Denied(reason) => {
             let message = denial_message(&reason);
-            if reason.contains(DENY_REVOKED) || reason.contains(DENY_UNKNOWN) {
+            if reason.contains(DENY_REVOKED) {
+                return Outcome::Revoked(message);
+            }
+            if reason.contains(DENY_UNKNOWN) {
                 return Outcome::Rejected(message);
             }
             warn!("{message}");
@@ -749,7 +771,7 @@ async fn session(
 
 fn closed_outcome(code: Option<CloseCode>, was_connected: bool) -> Outcome {
     match code {
-        Some(CloseCode::Revoked) => Outcome::Rejected("这台节点已被控制面移除".into()),
+        Some(CloseCode::Revoked) => Outcome::Revoked("这台节点已被控制面移除".into()),
         Some(CloseCode::Unauthorized) => Outcome::Rejected(
             "控制面不认识这台节点的密钥（节点已被移除，或控制面的数据被重置）".into(),
         ),
@@ -932,6 +954,14 @@ mod tests {
     fn close_codes_decide_whether_to_reconnect() {
         assert!(matches!(
             closed_outcome(Some(CloseCode::Revoked), true),
+            Outcome::Revoked(_)
+        ));
+        assert!(matches!(
+            closed_outcome(Some(CloseCode::Revoked), false),
+            Outcome::Revoked(_)
+        ));
+        assert!(matches!(
+            closed_outcome(Some(CloseCode::Unauthorized), true),
             Outcome::Rejected(_)
         ));
         assert!(matches!(

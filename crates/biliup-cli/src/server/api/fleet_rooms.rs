@@ -3,7 +3,9 @@
 
 use crate::server::api::access::Caller;
 use crate::server::errors::{ApiError, report_to_response};
-use crate::server::fleet::controller::{Controller, CreateRoom, DispatchError, UpdateRoom};
+use crate::server::fleet::controller::{
+    Controller, CreateRoom, DispatchError, RemovalState, UpdateRoom,
+};
 use crate::server::fleet::model::TemplateSpec;
 use crate::server::fleet::now_ms;
 use crate::server::infrastructure::policy::Field;
@@ -66,10 +68,14 @@ pub async fn update_room(
     respond(controller.update_room(id, request, keep_hooks).await)
 }
 
-/// `DELETE /v1/fleet/nodes/{id}?reassign=auto`
-pub async fn revoke_and_reassign(controller: &Controller, id: i64) -> Response {
+/// `DELETE /v1/fleet/nodes/{id}?reassign=auto`：在线节点在后台等它释放房间，当场回 202；
+/// 离线节点当场移除，回 200。两种都带上这次移除的进度（见 `Removal`）。
+pub async fn revoke_and_reassign(controller: &Arc<Controller>, id: i64) -> Response {
     match controller.revoke_and_reassign(id).await {
-        Ok(Some(outcome)) => Json(outcome).into_response(),
+        Ok(Some(removal)) if removal.state == RemovalState::Removing => {
+            (StatusCode::ACCEPTED, Json(removal)).into_response()
+        }
+        Ok(Some(removal)) => Json(removal).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, "节点不存在或已被移除").into_response(),
         Err(error) => error_response(error),
     }

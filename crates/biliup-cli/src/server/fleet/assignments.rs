@@ -729,7 +729,7 @@ pub async fn desired_state(
 }
 
 /// 节点被移除（或主动离开）：分派给它的房间变成未分派，等它释放的房间不再等。
-/// 被移除的节点按约定把托管房间转成本地房间继续录，控制面不再管它。返回受影响的房间 id。
+/// 被移除的节点把托管房间转成本地房间并暂停，主动离开的转成本地房间继续录，控制面不再管它。返回受影响的房间 id。
 pub async fn unassign_node(pool: &ConnectionPool, node: i64, now: i64) -> AppResult<Vec<i64>> {
     let mut tx = pool
         .begin()
