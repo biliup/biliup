@@ -646,26 +646,40 @@ async fn run_agent(
             &mut events,
         )
         .await;
+        let rejoin = if file.local {
+            "要再用请到「节点」页重新启用本机节点"
+        } else {
+            "重新加入请先执行 `biliup node leave`，再用新票据 join"
+        };
         let wait = match outcome {
             Outcome::Stopped => break,
+            // 「本机」节点是在节点页上主动关闭的，房间已先交出；没交出的由 LocalNode::retire 收尾
+            Outcome::Revoked(_) if file.local && node_file.exists() => {
+                let paused = reconciler.release_revoked(&revoked).await;
+                if paused > 0 {
+                    warn!(
+                        paused,
+                        "「本机」节点已关闭，没能在关闭前交出的房间已转为本地直播间并暂停，确认后在「直播管理」手动恢复"
+                    );
+                } else {
+                    info!("「本机」节点已关闭，节点代理停止");
+                }
+                break;
+            }
             // `biliup node leave` 先让控制面移除自己再删 node.json，这期间重连会被当成吊销：那是主动离开，照常录
             Outcome::Revoked(message) if node_file.exists() => {
                 let paused = reconciler.release_revoked(&revoked).await;
                 if paused > 0 {
                     error!(
-                        "{message}；节点代理停止重连。控制面分派的 {paused} 个房间已转为本机房间并暂停：控制面可能已把它们改派给别的节点，接着录会重复录制、重复投稿。确认后在本机「直播管理」手动恢复。重新加入请先执行 `biliup node leave`，再用新票据 join"
+                        "{message}；节点代理停止重连。控制面分派的 {paused} 个房间已转为本机房间并暂停：控制面可能已把它们改派给别的节点，接着录会重复录制、重复投稿。确认后在本机「直播管理」手动恢复。{rejoin}"
                     );
                 } else {
-                    error!(
-                        "{message}；节点代理停止重连。重新加入请先执行 `biliup node leave`，再用新票据 join"
-                    );
+                    error!("{message}；节点代理停止重连。{rejoin}");
                 }
                 break;
             }
             Outcome::Revoked(message) | Outcome::Rejected(message) => {
-                error!(
-                    "{message}；节点代理停止重连，控制面分派的房间转为本机房间继续录。重新加入请先执行 `biliup node leave`，再用新票据 join"
-                );
+                error!("{message}；节点代理停止重连，控制面分派的房间转为本机房间继续录。{rejoin}");
                 reconciler.release();
                 break;
             }
