@@ -136,12 +136,22 @@ pub fn cover_file(session_dir: &Path, clip_id: i64) -> PathBuf {
 /// 一个切片填进标题模板的值。
 #[derive(Debug, Clone)]
 pub struct ClipVars {
+    pub id: i64,
     pub title: String,
     /// 入点的墙钟时间（Unix 毫秒）。
     pub at_ms: i64,
 }
 
 impl ClipVars {
+    /// 没起名的切片叫「切片 #id」，与发布界面里列出切片时的叫法一致。
+    fn title_text(&self) -> String {
+        if self.title.trim().is_empty() {
+            format!("切片 #{}", self.id)
+        } else {
+            self.title.clone()
+        }
+    }
+
     fn time_text(&self) -> String {
         Local
             .timestamp_millis_opt(self.at_ms)
@@ -162,7 +172,7 @@ pub fn render(template: &str, info: &StreamerInfo, clip: &ClipVars) -> String {
         .replace("{streamer}", &escape(&info.name))
         .replace("{title}", &escape(&info.title))
         .replace("{url}", &escape(&info.url))
-        .replace("{clip_title}", &escape(&clip.title))
+        .replace("{clip_title}", &escape(&clip.title_text()))
         .replace("{clip_time}", &escape(&clip.time_text()));
     let items: Vec<Item> = StrftimeItems::new(&text).collect();
     if items.iter().any(|item| matches!(item, Item::Error)) {
@@ -242,6 +252,7 @@ pub struct Rendered {
 impl Archive {
     fn first(&self) -> ClipVars {
         self.parts.first().cloned().unwrap_or(ClipVars {
+            id: 0,
             title: String::new(),
             at_ms: self.info.date.timestamp_millis(),
         })

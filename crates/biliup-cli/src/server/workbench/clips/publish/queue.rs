@@ -933,6 +933,7 @@ pub async fn archive(
         parts: parts
             .iter()
             .map(|c| ClipVars {
+                id: c.id,
                 title: c.title.clone(),
                 at_ms: started_at + c.in_ms,
             })
