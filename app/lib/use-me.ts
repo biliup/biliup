@@ -79,6 +79,8 @@ export interface FleetRevoked {
   revoked_at: number
   /** 转为本机自管并暂停、等确认恢复的直播间 id */
   streamers: number[]
+  /** 控制面关闭自己的「本机」节点时没交出的直播间（不是被别的控制面移除） */
+  local?: boolean
 }
 
 export interface FleetManaged {

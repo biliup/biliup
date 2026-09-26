@@ -47,7 +47,7 @@ import StreamerCard, { LiveAvatar } from '@/app/ui/StreamerCard'
 import { CardRateSwitch } from '@/app/ui/LiveRateChart'
 import PageHeader from '../components/PageHeader'
 import { useMe } from '@/app/lib/use-me'
-import FleetRevokedBanner, { REVOKED_HINT } from '@/app/ui/FleetRevokedBanner'
+import FleetRevokedBanner, { revokedHint } from '@/app/ui/FleetRevokedBanner'
 import styles from './page.module.scss'
 
 const { Content } = Layout
@@ -262,7 +262,7 @@ export default function StreamersPage() {
         </Tooltip>
       ),
       awaitingResume(item) && (
-        <Tooltip key="revoked" content={REVOKED_HINT}>
+        <Tooltip key="revoked" content={revokedHint(me?.fleet_revoked?.local)}>
           <Tag size="small" color="orange">
             待恢复
           </Tag>

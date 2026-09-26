@@ -359,7 +359,9 @@ impl Reconciler {
             }
         }
         let paused = streamers.len();
-        revoked.record(&self.label, streamers, now_ms()).await;
+        revoked
+            .record(&self.label, self.local, streamers, now_ms())
+            .await;
         self.release();
         paused
     }

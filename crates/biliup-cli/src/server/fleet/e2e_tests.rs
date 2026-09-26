@@ -1411,6 +1411,102 @@ async fn disabling_a_stalled_local_node_pauses_its_rooms_before_reassigning() {
     controller.shutdown().await;
 }
 
+/// 运行中启用、卡住后关闭的「本机」：暂停的主播不用重启就出现在 `/v1/me` 里，「全部恢复」能用；
+/// 清单空时 `/v1/node/revoked*` 与没挂一样
+#[tokio::test]
+async fn a_local_node_closed_at_runtime_offers_its_paused_rooms_without_a_restart() {
+    use axum::body::Body;
+    use axum::http::{Method, Request, StatusCode};
+    use tower::ServiceExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let (controller, _url, _pool) = start_controller(dir.path()).await;
+    let fx = LocalFixture::new(dir.path()).await;
+    let local = fx.attach(&controller).await;
+    let fleet = super::Fleet::controller(
+        controller.clone(),
+        local.clone(),
+        fx.managed.clone(),
+        fx.revoked.clone(),
+    );
+    let app = fleet.router().unwrap();
+    let send = |method: Method, uri: &'static str| {
+        let app = app.clone();
+        async move {
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(uri)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = response.status();
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            (
+                status,
+                serde_json::from_slice::<serde_json::Value>(&bytes).ok(),
+            )
+        }
+    };
+    assert_eq!(fleet.capability().revoked_view(), None);
+    let (status, _) = send(Method::POST, "/v1/node/revoked/resume").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = send(Method::DELETE, "/v1/node/revoked").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let id = local.enable(&controller, false).await.unwrap().unwrap();
+    wait_for_node(&controller, id, true, Duration::from_secs(30)).await;
+    controller
+        .create_room(
+            serde_json::from_value(serde_json::json!({
+                "url": "https://stuck.example/1", "remark": "房间", "node_id": id,
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    eventually(
+        "room lands on the controller",
+        Duration::from_secs(20),
+        || {
+            let services = fx.services.clone();
+            async move { local_urls(&services).await.len() == 1 }
+        },
+    )
+    .await;
+
+    local.shutdown().await;
+    wait_for_node(&controller, id, false, Duration::from_secs(10)).await;
+    let done = controller.remove_node(id, false).await.unwrap().unwrap();
+    assert_eq!(done.rooms[0].release, Release::Offline);
+    let worker = fx.services.managers.get_rooms().await;
+    assert!(worker_paused(&worker[0]));
+    let streamer = worker[0].live_streamer.id;
+    let view = fleet
+        .capability()
+        .revoked_view()
+        .expect("fleet_revoked right away");
+    assert_eq!(view["controller"], "本机");
+    assert_eq!(view["local"], true);
+    assert_eq!(view["streamers"], serde_json::json!([streamer]));
+
+    let (status, body) = send(Method::POST, "/v1/node/revoked/resume").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.unwrap()["resumed"], serde_json::json!([streamer]));
+    let worker = fx.services.managers.get_rooms().await;
+    assert!(!worker_paused(&worker[0]));
+    assert_eq!(fleet.capability().revoked_view(), None);
+    assert!(!revoked_path(&fx.file).exists());
+    let (status, _) = send(Method::POST, "/v1/node/revoked/resume").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    controller.shutdown().await;
+}
+
 /// `local-node.json` 与控制面对不上（控制面的数据被重置过）：不启动，托管行留作本地行
 #[tokio::test]
 async fn a_local_node_file_from_another_controller_is_dropped() {

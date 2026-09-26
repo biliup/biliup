@@ -41,6 +41,9 @@ pub struct RevokedFile {
     /// 本地主播 id → 直播间地址；启动时地址对不上（id 已换了主播）的不再暂停
     #[serde(default)]
     pub streamers: BTreeMap<i64, String>,
+    /// 控制面关闭自己的「本机」节点时没交出的主播（界面上换一套说法）；节点上不写
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub local: bool,
 }
 
 pub fn revoked_path(node_file: &Path) -> PathBuf {
@@ -114,7 +117,7 @@ impl Revoked {
         }
     }
 
-    /// 单机与控制面进程：只有清单里还有主播时才要这一层
+    /// 单机进程：只有清单里还有主播时才要这一层
     pub async fn resume_if_present(
         path: PathBuf,
         services: &ServiceRegister,
@@ -156,11 +159,15 @@ impl Revoked {
     pub fn view(&self) -> Option<Value> {
         let file = self.file.read().unwrap();
         let file = file.as_ref().filter(|file| !file.streamers.is_empty())?;
-        Some(json!({
+        let mut view = json!({
             "controller": file.controller,
             "revoked_at": file.revoked_at,
             "streamers": file.streamers.keys().collect::<Vec<_>>(),
-        }))
+        });
+        if file.local {
+            view["local"] = json!(true);
+        }
+        Some(view)
     }
 
     /// 改清单并落盘；空了删文件
@@ -194,7 +201,14 @@ impl Revoked {
     }
 
     /// 发现被吊销：把此刻托管的主播记进清单（与已有的合并）并暂停。没有主播时什么也不写。
-    pub async fn record(&self, controller: &str, streamers: BTreeMap<i64, String>, now: i64) {
+    /// `local`：是控制面的「本机」节点被关闭
+    pub async fn record(
+        &self,
+        controller: &str,
+        local: bool,
+        streamers: BTreeMap<i64, String>,
+        now: i64,
+    ) {
         if streamers.is_empty() {
             return;
         }
@@ -205,6 +219,7 @@ impl Revoked {
                 ..RevokedFile::default()
             });
             file.controller = controller.to_string();
+            file.local = local;
             file.revoked_at = now;
             file.streamers.extend(streamers);
         });
@@ -308,6 +323,21 @@ fn tracked(method: &Method, path: &str) -> Option<Tracked> {
 }
 
 /// 本机对清单里主播的操作：恢复（暂停开关拨到恢复）或删除时拿出清单；保存设置后重新暂停
+/// 控制面上 `/v1/node/revoked*` 一直挂着；清单空时按没有这些路由处理（交给静态文件回退），
+/// 没启用过「本机」的控制面响应与以前相同
+pub async fn pending_only(
+    State(revoked): State<RevokedHandle>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if revoked.is_empty() {
+        return crate::server::api::spa::static_handler(request.uri().clone())
+            .await
+            .into_response();
+    }
+    next.run(request).await
+}
+
 pub async fn track(State(revoked): State<RevokedHandle>, request: Request, next: Next) -> Response {
     let Some(action) = tracked(request.method(), request.uri().path()) else {
         return next.run(request).await;
@@ -481,6 +511,7 @@ mod tests {
         revoked
             .record(
                 "10.0.0.2",
+                false,
                 BTreeMap::from([(a.id, a.url.clone()), (b.id, b.url.clone())]),
                 1,
             )
@@ -548,7 +579,7 @@ mod tests {
         let path = dir.path().join(REVOKED_FILE_NAME);
         let revoked = Revoked::load(path.clone(), services.clone());
         revoked
-            .record("c", BTreeMap::from([(a.id, a.url.clone())]), 1)
+            .record("c", false, BTreeMap::from([(a.id, a.url.clone())]), 1)
             .await;
         revoked.dismiss();
         assert!(revoked.is_empty());

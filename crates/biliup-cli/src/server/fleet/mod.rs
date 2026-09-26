@@ -120,7 +120,7 @@ pub struct FleetCapability {
     pub controller: bool,
     /// 节点进程与控制面进程才有：此刻托管在本机的行（控制面上是「本机」节点的）
     pub node: Option<ManagedHandle>,
-    /// 被控制面移除过、还有主播等管理员确认恢复时才有（节点进程总有）
+    /// 被控制面移除过、还有主播等管理员确认恢复时才有（节点进程与控制面进程总有）
     pub revoked: Option<RevokedHandle>,
 }
 
@@ -154,6 +154,21 @@ enum Role {
 }
 
 impl Fleet {
+    /// 控制面：「本机」节点随时可能被启用、关闭，被移除清单与它共用并一直挂着，
+    /// 运行中关闭「本机」时暂停的主播马上出现在 `/v1/me` 与「全部恢复」里，不用等重启
+    fn controller(
+        controller: Arc<Controller>,
+        local: Arc<local::LocalNode>,
+        managed: ManagedHandle,
+        revoked: RevokedHandle,
+    ) -> Self {
+        controller.attach_local(local);
+        Fleet {
+            role: Role::Controller(controller, managed),
+            revoked: Some(revoked),
+        }
+    }
+
     pub fn capability(&self) -> FleetCapability {
         FleetCapability {
             controller: matches!(self.role, Role::Controller(..)),
@@ -182,7 +197,7 @@ impl Fleet {
         }
     }
 
-    /// 控制面的 `/v1/fleet/*` 路由；被移除过的节点的 `/v1/node/revoked*`
+    /// 控制面的 `/v1/fleet/*` 路由；被移除过的节点（与控制面的「本机」）的 `/v1/node/revoked*`
     pub fn router(&self) -> Option<axum::Router<()>> {
         let controller = match &self.role {
             Role::Controller(controller, _) => {
@@ -190,10 +205,16 @@ impl Fleet {
             }
             _ => None,
         };
-        let revoked = self
-            .revoked
-            .clone()
-            .map(crate::server::api::fleet::revoked_router);
+        let revoked = self.revoked.clone().map(|revoked| {
+            let router = crate::server::api::fleet::revoked_router(revoked.clone());
+            match self.role {
+                Role::Controller(..) => router.route_layer(axum::middleware::from_fn_with_state(
+                    revoked,
+                    revoked::pending_only,
+                )),
+                _ => router,
+            }
+        });
         match (controller, revoked) {
             (Some(controller), Some(revoked)) => Some(controller.merge(revoked)),
             (controller, revoked) => controller.or(revoked),
@@ -320,31 +341,19 @@ async fn start_controller_role(
     services: &ServiceRegister,
     revoked_file: PathBuf,
 ) -> AppResult<Fleet> {
-    let local_file = Path::new(local::LOCAL_NODE_FILE);
-    // 「本机」节点随时可能被关掉，启用着的时候清单一直挂着，与节点进程相同
-    let revoked = if local_file.exists() {
-        let revoked = Arc::new(Revoked::load(revoked_file.clone(), services.clone()));
-        revoked.apply().await;
-        Some(revoked)
-    } else {
-        Revoked::resume_if_present(revoked_file.clone(), services).await
-    };
+    // 没有文件时清单是空的，不写任何东西
+    let revoked = Arc::new(Revoked::load(revoked_file, services.clone()));
+    revoked.apply().await;
     let controller = start_controller(options).await?;
     let managed = ManagedHandle::default();
     let local = Arc::new(local::LocalNode::new(
-        local_file.to_path_buf(),
+        Path::new(local::LOCAL_NODE_FILE).to_path_buf(),
         services.clone(),
         managed.clone(),
-        revoked
-            .clone()
-            .unwrap_or_else(|| Arc::new(Revoked::load(revoked_file, services.clone()))),
+        revoked.clone(),
     ));
     local.resume(&controller).await;
-    controller.attach_local(local);
-    Ok(Fleet {
-        role: Role::Controller(controller, managed),
-        revoked,
-    })
+    Ok(Fleet::controller(controller, local, managed, revoked))
 }
 
 async fn start_controller(options: &FleetOptions) -> AppResult<Arc<Controller>> {

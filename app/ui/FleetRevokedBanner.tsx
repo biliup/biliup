@@ -8,6 +8,11 @@ import { useMe } from '@/app/lib/use-me'
 
 export const REVOKED_TITLE = '该节点已被移出机群，原受管主播已暂停，确认后手动恢复'
 export const REVOKED_HINT = '被移出机群时暂停，确认不会与接手的节点重复录制后再恢复'
+const LOCAL_TITLE = '「本机」节点关闭时没能交出的直播间已暂停，确认后手动恢复'
+const LOCAL_HINT = '关闭「本机」节点时暂停，确认不会与接手的节点重复录制后再恢复'
+
+/** 「待恢复」标签的说明；`local` 取自 `/v1/me` 的 `fleet_revoked.local` */
+export const revokedHint = (local?: boolean) => (local ? LOCAL_HINT : REVOKED_HINT)
 
 /**
  * 被控制面移除过的机器：原受管主播转为本机自管并暂停（`/v1/me` 的 `fleet_revoked`），
@@ -58,13 +63,17 @@ export default function FleetRevokedBanner({
       fullMode={false}
       closeIcon={null}
       className={className}
-      title={REVOKED_TITLE}
+      title={revoked.local ? LOCAL_TITLE : REVOKED_TITLE}
       description={
         <>
           <div>
-            {`${count} 个直播间原由控制面 ${revoked.controller} 管理，${new Date(revoked.revoked_at).toLocaleString()} 本机被移出机群时已暂停，避免和接手它们的节点重复录制、重复投稿。`}
+            {revoked.local
+              ? `${count} 个直播间是分派到「本机」的 Fleet 房间，${new Date(revoked.revoked_at).toLocaleString()} 关闭「本机」节点时没能及时交出，已转为本地直播间并暂停，避免和接手它们的节点重复录制、重复投稿。`
+              : `${count} 个直播间原由控制面 ${revoked.controller} 管理，${new Date(revoked.revoked_at).toLocaleString()} 本机被移出机群时已暂停，避免和接手它们的节点重复录制、重复投稿。`}
             {canControl
-              ? '确认控制面不会再让别的节点录它们后，点「全部恢复」，或在「直播管理」里标着「待恢复」的直播间上逐个恢复。'
+              ? revoked.local
+                ? '确认「节点 › 房间」里没有别的节点在录它们后，点「全部恢复」，或在「直播管理」里标着「待恢复」的直播间上逐个恢复。'
+                : '确认控制面不会再让别的节点录它们后，点「全部恢复」，或在「直播管理」里标着「待恢复」的直播间上逐个恢复。'
               : '需要有「启停录制」权限的用户确认后恢复。'}
           </div>
           {canControl || linkToStreamers ? (
