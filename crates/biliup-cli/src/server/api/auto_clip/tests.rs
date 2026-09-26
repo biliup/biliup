@@ -11,6 +11,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Method, Request, header};
 use axum::middleware::from_fn;
+use axum::response::Response;
 use axum_login::AuthManagerLayerBuilder;
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -423,7 +424,8 @@ async fn the_connectivity_test_uses_the_stored_key_behind_a_mask() {
     assert_eq!(status["thumbnails"], "auto");
     assert_eq!(status["thumbnails_active"], false);
     assert_eq!(status["asr_segments"], true);
-    assert_eq!(status["api_host"], "127.0.0.1");
+    let host = server.base_url().trim_start_matches("http://");
+    assert_eq!(status["api_host"], host.trim_end_matches("/v1"));
     assert_eq!(status["key_source"], "config");
     assert_eq!(status["last_test"]["vision"], "warning");
     assert!(!status.to_string().contains("sk-"));

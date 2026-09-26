@@ -4,7 +4,7 @@
 //! 不重试。失败时给一句能照着做的中文说明，附 HTTP 状态和响应体开头（其中出现的 key 换成掩码）；
 //! 请求头不进错误信息，日志里也不打 key。
 
-use super::settings::mask;
+use super::settings::{display_host, mask};
 use reqwest::StatusCode;
 use reqwest::header::{HeaderMap, RETRY_AFTER};
 use reqwest::multipart::{Form, Part};
@@ -263,10 +263,7 @@ impl ModelError {
         timeout: Duration,
         error: &reqwest::Error,
     ) -> Self {
-        let host = url::Url::parse(&endpoint.base_url)
-            .ok()
-            .and_then(|url| url.host_str().map(str::to_string))
-            .unwrap_or_else(|| endpoint.base_url.clone());
+        let host = display_host(&endpoint.base_url).unwrap_or_else(|| endpoint.base_url.clone());
         let (kind, message) = if error.is_timeout() {
             (
                 ErrorKind::Timeout,
@@ -684,7 +681,7 @@ fn error_chain(error: &reqwest::Error) -> String {
     let mut text = error.to_string();
     let mut source = std::error::Error::source(error);
     while let Some(inner) = source {
-        text.push_str("：");
+        text.push('：');
         text.push_str(&inner.to_string());
         source = inner.source();
     }
@@ -903,7 +900,10 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error.kind, ErrorKind::Connect, "{error}");
-        assert!(error.message.contains("连不上 127.0.0.1"), "{error}");
+        assert!(
+            error.message.contains(&format!("连不上 127.0.0.1:{port}")),
+            "{error}"
+        );
     }
 
     #[tokio::test]

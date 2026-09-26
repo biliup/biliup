@@ -6,7 +6,7 @@
 
 use crate::server::auto_clip::probe::{self, CheckStatus, ProbeReport, Targets};
 use crate::server::auto_clip::settings::{
-    self, API_KEY_ENV, AutoClipConfig, KeySource, Thumbnails,
+    self, API_KEY_ENV, AutoClipConfig, KeySource, Thumbnails, display_host,
 };
 use crate::server::config::Config;
 use crate::server::errors::ApiError;
@@ -14,7 +14,6 @@ use crate::server::infrastructure::connection_pool::ConnectionPool;
 use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 use std::sync::{Arc, RwLock};
 use tracing::{info, warn};
@@ -23,12 +22,11 @@ pub async fn test_auto_clip(
     State(config): State<Arc<RwLock<Config>>>,
     State(pool): State<ConnectionPool>,
     Json(form): Json<AutoClipConfig>,
-) -> Result<Json<ProbeReport>, Response> {
+) -> Result<Json<ProbeReport>, (StatusCode, Json<ApiError>)> {
     let stored = config.read().unwrap().auto_clip.clone();
     let form = form.normalized().unwrap_or_default();
-    let form = settings::restore_masked_keys(stored.as_ref(), form).map_err(|message| {
-        (StatusCode::BAD_REQUEST, Json(ApiError::new(message))).into_response()
-    })?;
+    let form = settings::restore_masked_keys(stored.as_ref(), form)
+        .map_err(|message| (StatusCode::BAD_REQUEST, Json(ApiError::new(message))))?;
     let targets = Targets::from_config(&form, std::env::var(API_KEY_ENV).ok());
     let report = probe::run(&probe::client_for(&form), &targets).await;
     info!(
@@ -109,9 +107,9 @@ fn status_view(
     StatusView {
         enabled: config.enabled,
         configured: config.base_url.is_some() && config.chat_model.is_some(),
-        api_host: config.base_url.as_deref().and_then(host),
+        api_host: config.base_url.as_deref().and_then(display_host),
         chat_model: config.chat_model.clone(),
-        asr_host: config.asr_base_url().and_then(host),
+        asr_host: config.asr_base_url().and_then(display_host),
         asr_model: config.asr_model.clone(),
         key_source: config.chat_key_with(env_key).map(|(_, source)| source),
         thumbnails,
@@ -132,12 +130,5 @@ fn status_view(
         }),
     }
 }
-
-fn host(url: &str) -> Option<String> {
-    url::Url::parse(url)
-        .ok()
-        .and_then(|url| url.host_str().map(str::to_string))
-}
-
 #[cfg(test)]
 mod tests;

@@ -181,10 +181,11 @@ impl AutoClipConfig {
     /// 用于回显：两把 key 换成掩码。
     pub fn masked(&self) -> Self {
         let mut masked = self.clone();
-        for key in [&mut masked.api_key, &mut masked.asr_api_key] {
-            if let Some(value) = key {
-                *value = mask(value);
-            }
+        for value in [&mut masked.api_key, &mut masked.asr_api_key]
+            .into_iter()
+            .flatten()
+        {
+            *value = mask(value);
         }
         masked
     }
@@ -278,6 +279,16 @@ pub fn normalize_url(url: &str) -> String {
     url.trim().trim_end_matches('/').to_string()
 }
 
+/// 给人看的 `host[:port]`：自建服务常在同一台机器上用不同端口区分。
+pub fn display_host(url: &str) -> Option<String> {
+    let url = url::Url::parse(url).ok()?;
+    let host = url.host_str()?;
+    Some(match url.port() {
+        Some(port) => format!("{host}:{port}"),
+        None => host.to_string(),
+    })
+}
+
 fn trim_blank(value: &mut Option<String>) {
     if let Some(text) = value {
         let trimmed = text.trim();
@@ -304,6 +315,19 @@ mod tests {
             .chat_model("chat-small".into())
             .asr_model("whisper-1".into())
             .build()
+    }
+
+    #[test]
+    fn display_host_keeps_explicit_ports() {
+        assert_eq!(
+            display_host("http://127.0.0.1:8080/v1").as_deref(),
+            Some("127.0.0.1:8080")
+        );
+        assert_eq!(
+            display_host("https://api.example.com:443/v1").as_deref(),
+            Some("api.example.com")
+        );
+        assert_eq!(display_host("not a url"), None);
     }
 
     #[test]
