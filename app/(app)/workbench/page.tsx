@@ -2,8 +2,8 @@
 import { Suspense } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { Spin, Tabs, TabPane } from '@douyinfe/semi-ui'
-import { IconHistory } from '@douyinfe/semi-icons'
-import { type HistoryTab, parseHistoryTab } from '@/app/lib/history'
+import { IconScissors } from '@douyinfe/semi-icons'
+import { type WorkbenchTab, parseWorkbenchTab } from '@/app/lib/workbench'
 import PageHeader from '../components/PageHeader'
 import LiveMonitor from '@/app/ui/LiveMonitor'
 import SessionsTab from './SessionsTab'
@@ -12,10 +12,10 @@ import dc from '@/app/ui/data-card.module.scss'
 import styles from './page.module.scss'
 
 /**
- * 历史记录：「直播场次」（每场一行，从这里进回看页）、「录制文件」（按文件回放）、
+ * 剪辑台：「直播场次」（每场一行，从这里进回看页）、「录制文件」（按文件回放）、
  * 「实时监视」（正在录制的直播间多路同屏）三个 Tab，当前 Tab 在查询串 `?tab=` 里。
  */
-export default function History() {
+export default function Workbench() {
   return (
     <Suspense
       fallback={
@@ -24,15 +24,15 @@ export default function History() {
         </div>
       }
     >
-      <HistoryTabs />
+      <WorkbenchTabs />
     </Suspense>
   )
 }
 
-function HistoryTabs() {
+function WorkbenchTabs() {
   const pathname = usePathname()
   const params = useSearchParams()
-  const tab = parseHistoryTab(params.get('tab'))
+  const tab = parseWorkbenchTab(params.get('tab'))
 
   const switchTab = (key: string) => {
     const next = new URLSearchParams(params.toString())
@@ -45,8 +45,8 @@ function HistoryTabs() {
   return (
     <>
       <PageHeader
-        icon={<IconHistory size="large" />}
-        title="历史记录"
+        icon={<IconScissors size="large" />}
+        title="剪辑台"
         description="按场次回看、打标记和剪切片，或按文件在线回放；「实时监视」同屏查看正在录制的直播间"
       />
       <div className={dc.content}>
@@ -59,13 +59,13 @@ function HistoryTabs() {
           keepDOM
           lazyRender
         >
-          <TabPane tab="直播场次" itemKey={'sessions' satisfies HistoryTab}>
+          <TabPane tab="直播场次" itemKey={'sessions' satisfies WorkbenchTab}>
             <SessionsTab />
           </TabPane>
-          <TabPane tab="录制文件" itemKey={'files' satisfies HistoryTab}>
+          <TabPane tab="录制文件" itemKey={'files' satisfies WorkbenchTab}>
             <FilesTab />
           </TabPane>
-          <TabPane tab="实时监视" itemKey={'monitor' satisfies HistoryTab}>
+          <TabPane tab="实时监视" itemKey={'monitor' satisfies WorkbenchTab}>
             {/* 切走即卸载播放器、断开全部预览连接 */}
             {tab === 'monitor' ? <LiveMonitor /> : null}
           </TabPane>
