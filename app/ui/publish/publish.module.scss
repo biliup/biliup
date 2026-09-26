@@ -1,0 +1,326 @@
+/* 切片发布：发布抽屉、分步进度、601 暂停横幅（回看页和直播预览页共用） */
+
+.inlineWrap {
+  display: inline-flex;
+}
+
+/* Tooltip 不挡住旁边的按钮（与回看页 `.passTip` 同理） */
+.passTip,
+:global(.semi-portal-inner):has(> .passTip) {
+  pointer-events: none;
+}
+
+.meta {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== 分步进度 ===== */
+.job {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--semi-color-primary);
+  word-break: break-word;
+}
+.job[data-state='paused'] {
+  color: var(--semi-color-warning);
+}
+.job[data-state='failed'] {
+  color: var(--semi-color-danger);
+}
+.job[data-state='done'] {
+  color: var(--semi-color-success);
+}
+.steps {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+}
+.step {
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--semi-color-text-2);
+  background: var(--semi-color-fill-0);
+}
+.step[data-step='done'] {
+  color: var(--semi-color-success);
+  background: var(--semi-color-success-light-default);
+}
+.step[data-step='current'] {
+  color: var(--semi-color-white);
+  background: var(--semi-color-primary);
+}
+.job[data-state='paused'] .step[data-step='current'] {
+  background: var(--semi-color-warning);
+}
+.step[data-failed] {
+  color: var(--semi-color-white);
+  background: var(--semi-color-danger);
+}
+.stepArrow {
+  font-size: 10px;
+  color: var(--semi-color-text-3);
+}
+.jobProgress {
+  max-width: 240px;
+}
+.jobTools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-top: 2px;
+}
+.published {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 8px;
+  font-size: 12px;
+  color: var(--semi-color-success);
+}
+.published > * {
+  white-space: nowrap;
+}
+.bvLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--semi-color-link);
+  text-decoration: none;
+}
+.bvLink:hover {
+  text-decoration: underline;
+}
+.unknown {
+  font-size: 12px;
+  color: var(--semi-color-warning);
+  word-break: break-word;
+}
+
+/* ===== 601 暂停横幅 ===== */
+.pageBanner {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 16px 24px 0;
+}
+@media (max-width: 760px) {
+  .pageBanner {
+    padding: 12px 12px 0;
+  }
+}
+.queueBanner {
+  border-radius: 8px;
+}
+.queueBannerBody {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+.queueBannerText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* ===== 抽屉 ===== */
+.drawer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.drawerScroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 24px 20px;
+}
+.drawerFoot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 24px;
+  border-top: 1px solid var(--semi-color-border);
+  background: var(--semi-color-bg-2);
+}
+.drawerReason {
+  flex: 1 1 200px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.fieldLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+}
+.fieldHint {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  word-break: break-word;
+}
+.coverRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-start;
+}
+.coverBox {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 192px;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  background: var(--semi-color-fill-0);
+  border: 1px dashed var(--semi-color-border);
+}
+.coverBox img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.coverSpin {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(var(--semi-grey-9), 0.25);
+}
+.coverActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.framePicker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--semi-color-fill-0);
+}
+.frameRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.frameSlider {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.reprint {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--semi-color-text-1);
+  background: var(--semi-color-fill-0);
+  word-break: break-all;
+}
+.reprintHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.previewBox {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--semi-color-border);
+}
+.previewHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.previewItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.previewItem + .previewItem {
+  padding-top: 8px;
+  border-top: 1px solid var(--semi-color-fill-1);
+}
+.previewTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+  word-break: break-word;
+}
+.partList {
+  margin: 2px 0 0;
+  padding-left: 22px;
+  font-size: 12px;
+  color: var(--semi-color-text-1);
+}
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 提交后的进度 */
+.resultList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.resultItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--semi-color-border);
+}
+.resultTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+  word-break: break-word;
+}
+.skippedList {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}

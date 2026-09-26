@@ -1,7 +1,19 @@
 'use client'
 import React, { useState } from 'react'
-import { Button, Empty, Input, Popconfirm, Progress, TabPane, Tabs, Toast, Tooltip, Typography } from '@douyinfe/semi-ui'
-import { IconDelete, IconDownload, IconEdit, IconFlag, IconScissors } from '@douyinfe/semi-icons'
+import {
+  Button,
+  Checkbox,
+  Empty,
+  Input,
+  Popconfirm,
+  Progress,
+  TabPane,
+  Tabs,
+  Toast,
+  Tooltip,
+  Typography,
+} from '@douyinfe/semi-ui'
+import { IconDelete, IconDownload, IconEdit, IconFlag, IconScissors, IconSend } from '@douyinfe/semi-icons'
 import { deleteMarker, formatSessionTime, type Marker, renameMarker, ReportedError } from '@/app/lib/markers'
 import {
   type Clip,
@@ -18,6 +30,9 @@ import {
 } from '@/app/lib/clips'
 import { formatSize } from '@/app/lib/use-dashboard'
 import { formatPrecise, formatSpan } from '@/app/lib/sessions'
+import { canPublish, MAX_BATCH, needsConfirm, type PublishJob } from '@/app/lib/publish'
+import { BvLink, JobStatus } from '@/app/ui/publish/JobStatus'
+import type { PublishTarget } from '@/app/ui/publish/PublishDrawer'
 import styles from './replay.module.scss'
 
 const MAX_LABEL_CHARS = 100
@@ -219,9 +234,25 @@ function ClipStatus({ clip }: { clip: Clip }) {
     return (
       <div className={styles.clipStatus} data-state="ready">
         <span>
-          {clip.state === 'published' ? `已发布${clip.archive_bvid ? ` ${clip.archive_bvid}` : ''}` : '已剪好'} ·{' '}
-          {facts.join(' · ')}
+          {clip.state === 'published' ? '已发布' : '已剪好'} · {facts.join(' · ')}
         </span>
+        {clip.state === 'published' && clip.archive_bvid ? (
+          <span className={styles.publishedLine}>
+            <BvLink bvid={clip.archive_bvid} />
+            {clip.published_at ? (
+              <span className={styles.rowMeta}>
+                {new Date(clip.published_at).toLocaleString('zh-CN', {
+                  month: 'numeric',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  hour12: false,
+                })}{' '}
+                投稿
+              </span>
+            ) : null}
+          </span>
+        ) : null}
         {widened ? (
           <span className={styles.rowMeta}>
             实际切在 {formatPrecise(clip.cut_in_ms!)} → {formatPrecise(clip.cut_out_ms!)}（对齐关键帧）
@@ -335,19 +366,24 @@ function ClipTools({
   canEdit,
   editReason,
   canDownload,
+  publish,
 }: {
   clip: Clip
   ffmpeg: FfmpegState
   canEdit: boolean
   editReason: string
   canDownload: boolean
+  /** 「发布」按钮；不能发布（没权限、已发布、在发布队列里）时为 null */
+  publish: React.ReactNode
 }) {
-  if (clip.state === 'exporting' || clip.state === 'discarded') return null
+  if (clip.state === 'discarded') return null
+  if (clip.state === 'exporting') return publish ? <div className={styles.clipTools}>{publish}</div> : null
   const ext = extensionOf(clip).slice(1).toUpperCase()
   if (clip.state === 'ready' || clip.state === 'published') {
     const other: ClipMode = clip.mode === 'precise' ? 'quick' : 'precise'
     return (
       <div className={styles.clipTools}>
+        {publish}
         <DownloadButton
           clip={clip}
           format="source"
@@ -383,6 +419,7 @@ function ClipTools({
   const retry = clip.state === 'failed' ? (clip.mode ?? 'quick') : null
   return (
     <div className={styles.clipTools}>
+      {publish}
       {retry ? (
         <ExportButton
           mode={retry}
@@ -429,6 +466,12 @@ function ClipRow({
   canDownload,
   onLoad,
   compact,
+  job,
+  canSubmit,
+  onPublish,
+  selecting,
+  selected,
+  onToggle,
 }: {
   clip: Clip
   active: boolean
@@ -439,10 +482,58 @@ function ClipRow({
   editReason: string
   canDownload: boolean
   onLoad: (c: Clip) => void
+  /** 这个切片最近的发布任务 */
+  job: PublishJob | undefined
+  canSubmit: boolean
+  onPublish: (c: Clip) => void
+  selecting: boolean
+  selected: boolean
+  onToggle: (c: Clip, on: boolean) => void
 }) {
   const [renaming, setRenaming] = useState(false)
+  const queued = !!job && job.state !== 'done'
+  const unknown = needsConfirm(clip) && !queued
+  const publishable = canPublish(clip, job)
+  const publish =
+    canSubmit && publishable ? (
+      <Tooltip
+        content={
+          unknown
+            ? '上次投稿的结果未知：先到 B 站稿件管理核对，确认没有这个稿件再发'
+            : '选模板、改标题和封面，然后导出（需要时）→ 上传 → 投稿'
+        }
+        className={styles.passTip}
+      >
+        <span className={styles.inlineWrap}>
+          <Button
+            size="small"
+            theme="solid"
+            type={unknown ? 'warning' : 'primary'}
+            icon={<IconSend />}
+            onClick={() => onPublish(clip)}
+          >
+            {unknown ? '核对后再发布' : '发布'}
+          </Button>
+        </span>
+      </Tooltip>
+    ) : null
   return (
-    <li id={`clip-row-${clip.id}`} className={styles.row} data-current={active || undefined} data-clip-state={clip.state}>
+    <li
+      id={`clip-row-${clip.id}`}
+      className={styles.row}
+      data-current={active || undefined}
+      data-clip-state={clip.state}
+      data-clip-id={clip.id}
+    >
+      {selecting ? (
+        <Checkbox
+          className={styles.rowCheck}
+          checked={selected}
+          disabled={!publishable}
+          onChange={(e) => onToggle(clip, !!e.target.checked)}
+          aria-label={`选中切片 ${clip.title || `#${clip.id}`}`}
+        />
+      ) : null}
       <button type="button" className={styles.rowTime} onClick={() => onLoad(clip)} title={compact ? '跳到入点' : '载入到细节条，跳到入点'}>
         <IconScissors size="small" aria-hidden="true" />
         {formatSessionTime(clip.in_ms)}
@@ -472,8 +563,21 @@ function ClipRow({
               {formatPrecise(clip.in_ms)} → {formatPrecise(clip.out_ms)} · {formatSpan(clip.out_ms - clip.in_ms)}
             </span>
             <ClipStatus clip={clip} />
+            {job && (queued || clip.state !== 'published') ? <JobStatus job={job} canSubmit={canSubmit} /> : null}
+            {unknown ? (
+              <span className={styles.rowWarn} data-submit-unknown="">
+                上次投稿的结果未知（投稿请求发出后服务退出了），B 站那边可能已经有这个稿件
+              </span>
+            ) : null}
             {warning ? <span className={styles.rowWarn}>{warning}</span> : null}
-            <ClipTools clip={clip} ffmpeg={ffmpeg} canEdit={canEdit} editReason={editReason} canDownload={canDownload} />
+            <ClipTools
+              clip={clip}
+              ffmpeg={ffmpeg}
+              canEdit={canEdit}
+              editReason={editReason}
+              canDownload={canDownload}
+              publish={publish}
+            />
           </>
         )}
       </div>
@@ -489,7 +593,11 @@ function ClipRow({
               onClick={() => setRenaming(true)}
             />
           </Tooltip>
-          {canEdit ? (
+          {canEdit && queued ? (
+            <Tooltip content="在发布队列里，先移出队列再删">
+              <Button size="small" theme="borderless" type="danger" icon={<IconDelete />} aria-label="删除" disabled />
+            </Tooltip>
+          ) : canEdit ? (
             <Popconfirm
               title="删除这个切片？"
               content={
@@ -545,6 +653,9 @@ export function SidePanel({
   onSelectMarker,
   onLoadClip,
   compact,
+  canSubmit,
+  jobs,
+  onPublish,
 }: {
   tab: PanelTab
   onTab: (tab: PanelTab) => void
@@ -566,8 +677,33 @@ export function SidePanel({
   onLoadClip: (c: Clip) => void
   /** 手机宽度：没有细节条，标记不能选段，切片只能跳到入点 */
   compact: boolean
+  canSubmit: boolean
+  /** 各切片最近的发布任务 */
+  jobs: Map<number, PublishJob>
+  onPublish: (target: PublishTarget) => void
 }) {
   const { Text } = Typography
+  const [selecting, setSelecting] = useState(false)
+  const [selected, setSelected] = useState<Set<number>>(() => new Set())
+  const picked = clips.filter((c) => selected.has(c.id) && canPublish(c, jobs.get(c.id)))
+  const pickableCount = clips.filter((c) => canPublish(c, jobs.get(c.id))).length
+  const toggle = (c: Clip, on: boolean) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (on) next.add(c.id)
+      else next.delete(c.id)
+      return next
+    })
+  const stopSelecting = () => {
+    setSelecting(false)
+    setSelected(new Set())
+  }
+  const openBatch = () => {
+    const list = [...picked].sort((a, b) => a.in_ms - b.in_ms || a.id - b.id)
+    onPublish({ clips: list, batch: true })
+    stopSelecting()
+  }
+  const running = [...new Set(jobs.values())].filter((j) => j.state === 'queued' || j.state === 'running').length
   const markerList = (
     <>
       {!canEdit ? (
@@ -609,7 +745,44 @@ export function SidePanel({
           <Text type="tertiary" size="small" className={styles.panelNote}>
             快速剪按关键帧切、不转码；精确剪用 ffmpeg 转码成 MP4，首尾对准选段。导出的文件存在服务器的 clips
             目录下，删掉切片时一起删掉。
+            {canSubmit
+              ? `发布固定按转载投稿，同一时间只传一个稿件${running ? `（发布队列里还有 ${running} 个）` : ''}。`
+              : '发布需要 upload.submit 权限，所以这里不显示「发布」。'}
           </Text>
+          {canSubmit && (selecting || pickableCount > 1) ? (
+            <div className={styles.batchBar} role="toolbar" aria-label="集中发布">
+              {selecting ? (
+                <>
+                  <span className={styles.rowMeta}>
+                    已选 {picked.length} 个{picked.length > MAX_BATCH ? `（一次最多 ${MAX_BATCH} 个）` : ''}
+                  </span>
+                  <Button
+                    size="small"
+                    theme="solid"
+                    icon={<IconSend />}
+                    disabled={picked.length === 0 || picked.length > MAX_BATCH}
+                    onClick={openBatch}
+                  >
+                    集中发布
+                  </Button>
+                  <Button
+                    size="small"
+                    theme="borderless"
+                    onClick={() => setSelected(new Set(clips.filter((c) => canPublish(c, jobs.get(c.id))).map((c) => c.id)))}
+                  >
+                    全选
+                  </Button>
+                  <Button size="small" theme="borderless" type="tertiary" onClick={stopSelecting}>
+                    取消
+                  </Button>
+                </>
+              ) : (
+                <Button size="small" theme="light" icon={<IconSend />} onClick={() => setSelecting(true)}>
+                  选择多个切片集中发布
+                </Button>
+              )}
+            </div>
+          ) : null}
           {clipsError && clips.length === 0 ? (
             <Empty description="切片列表加载失败，稍后会自动重试" className={styles.empty} />
           ) : clips.length === 0 ? (
@@ -637,6 +810,12 @@ export function SidePanel({
                   canDownload={canDownload}
                   onLoad={onLoadClip}
                   compact={compact}
+                  job={jobs.get(c.id)}
+                  canSubmit={canSubmit}
+                  onPublish={(clip) => onPublish({ clips: [clip], batch: false })}
+                  selecting={selecting}
+                  selected={selected.has(c.id)}
+                  onToggle={toggle}
                 />
               ))}
             </ul>

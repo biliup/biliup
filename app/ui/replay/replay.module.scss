@@ -672,3 +672,24 @@
     max-width: 200px;
   }
 }
+
+/* ===== 发布 ===== */
+.rowCheck {
+  margin-top: 4px;
+}
+.publishedLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 8px;
+}
+.publishedLine > * {
+  white-space: nowrap;
+}
+.batchBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 0;
+}

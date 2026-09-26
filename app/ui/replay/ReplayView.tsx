@@ -64,6 +64,9 @@ import {
 import { useBoolPref } from '@/app/lib/use-local-pref'
 import { LivePreviewPlayer } from '@/app/ui/LivePreview'
 import { isTyping, showMarkerToast } from '@/app/ui/MarkerControls'
+import { usePublishQueue } from '@/app/lib/publish'
+import { QueueBanner, useJobToasts } from '@/app/ui/publish/JobStatus'
+import { PublishDrawer, type PublishTarget } from '@/app/ui/publish/PublishDrawer'
 import DvrPlayer, { type DvrHandle, type DvrPhase } from './DvrPlayer'
 import { DetailBar, OverviewBar, type Selection } from './Timeline'
 import { type PanelTab, PRECISE_TIP, QUICK_TIP, SidePanel } from './SidePanel'
@@ -129,6 +132,7 @@ export default function ReplayView({
   const { can, isLoading: meLoading } = useMe()
   const canEdit = can('clip.edit')
   const canDownload = can('file.view')
+  const canSubmit = can('upload.submit')
   const ffmpeg = useFfmpeg()
   const editReason = meLoading
     ? '正在读取权限…'
@@ -163,6 +167,9 @@ export default function ReplayView({
   )
   const { data: clipData, error: clipsError, isLoading: clipsLoading } = useSessionClips(notFound ? null : sessionId)
   const clips = useMemo(() => clipData?.clips ?? [], [clipData])
+  const publishQueue = usePublishQueue(sessionId, !notFound && canDownload)
+  useJobToasts(publishQueue.data?.jobs)
+  const [publishTarget, setPublishTarget] = useState<PublishTarget | null>(null)
 
   const segments = useMemo(() => detail?.segments ?? [], [detail])
   const gaps = useMemo(() => detail?.gaps ?? [], [detail])
@@ -825,6 +832,7 @@ export default function ReplayView({
   return (
     <>
       {header}
+      <QueueBanner paused={publishQueue.data?.paused} canSubmit={canSubmit} page />
       <div className={styles.page} data-compact={compact || undefined}>
         <div className={styles.main}>
           <div className={styles.stage} ref={liveRootRef} data-mode={mode?.kind ?? 'none'}>
@@ -1077,9 +1085,17 @@ export default function ReplayView({
             onSelectMarker={selectFromMarker}
             onLoadClip={loadClip}
             compact={compact}
+            canSubmit={canSubmit}
+            jobs={publishQueue.byClip}
+            onPublish={setPublishTarget}
           />
         </aside>
       </div>
+      <PublishDrawer
+        target={publishTarget}
+        onClose={() => setPublishTarget(null)}
+        currentMs={mode && playable ? current : null}
+      />
     </>
   )
 }
