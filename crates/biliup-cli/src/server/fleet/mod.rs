@@ -6,9 +6,11 @@
 //!
 //! 这一阶段只做加入、心跳与在线状态：不分派房间、不下发配置。
 
+pub mod assignments;
 pub mod controller;
 #[cfg(test)]
 mod e2e_tests;
+pub mod model;
 pub mod net;
 pub mod node;
 pub mod protocol;
@@ -289,10 +291,16 @@ mod tests {
     /// 修 SQL 只能新增迁移文件。
     #[test]
     fn shipped_fleet_migration_checksums_are_frozen() {
-        const FROZEN: &[(i64, &str)] = &[(
-            1,
-            "ffd740cff5fdaeb33e832d290112ce69dbc46d8993f753d7d98acb6bd9b634cc929890bae23a4385280f18dafaabe8c1",
-        )];
+        const FROZEN: &[(i64, &str)] = &[
+            (
+                1,
+                "ffd740cff5fdaeb33e832d290112ce69dbc46d8993f753d7d98acb6bd9b634cc929890bae23a4385280f18dafaabe8c1",
+            ),
+            (
+                2,
+                "647b577b8a045a666dcd6bef202e002f6f5b47124fb3e34428b2183954ac3c0c9f5515abc8db85836f5fa142cfef97c9",
+            ),
+        ];
         let embedded: Vec<(i64, String)> = FLEET_MIGRATOR
             .iter()
             .map(|migration| (migration.version, store::hex(&migration.checksum)))
@@ -316,7 +324,7 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(versions, [1]);
+        assert_eq!(versions, [1, 2]);
         let tables: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'fleet_%' ORDER BY name",
         )
@@ -325,7 +333,14 @@ mod tests {
         .unwrap();
         assert_eq!(
             tables,
-            ["fleet_identity", "fleet_join_tokens", "fleet_nodes"]
+            [
+                "fleet_identity",
+                "fleet_join_tokens",
+                "fleet_node_accounts",
+                "fleet_nodes",
+                "fleet_rooms",
+                "fleet_templates"
+            ]
         );
         // 主库的表一张都不在这里
         let foreign: i64 = sqlx::query_scalar(
@@ -344,6 +359,6 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(count, 1);
+        assert_eq!(count, 2);
     }
 }
