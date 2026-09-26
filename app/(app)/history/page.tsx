@@ -1,6 +1,6 @@
 'use client'
 import { Suspense } from 'react'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { usePathname, useSearchParams } from 'next/navigation'
 import { Spin, Tabs, TabPane } from '@douyinfe/semi-ui'
 import { IconHistory } from '@douyinfe/semi-icons'
 import { type HistoryTab, parseHistoryTab } from '@/app/lib/history'
@@ -30,7 +30,6 @@ export default function History() {
 }
 
 function HistoryTabs() {
-  const router = useRouter()
   const pathname = usePathname()
   const params = useSearchParams()
   const tab = parseHistoryTab(params.get('tab'))
@@ -38,7 +37,9 @@ function HistoryTabs() {
   const switchTab = (key: string) => {
     const next = new URLSearchParams(params.toString())
     next.set('tab', key)
-    router.replace(`${pathname}?${next.toString()}`, { scroll: false })
+    // 不走 router.replace：那是一次异步的软导航，切走「实时监视」时播放器要等导航提交才卸载，
+    // 期间 mpegts.js 的销毁会和 MSE 回调撞上。原生 replaceState 由 Next 同步到 useSearchParams
+    window.history.replaceState(null, '', `${pathname}?${next.toString()}`)
   }
 
   return (
