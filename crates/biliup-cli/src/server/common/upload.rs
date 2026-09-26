@@ -905,7 +905,7 @@ async fn handle_message(msg: UploaderMessage) {
 
             if let Err(e) = &result {
                 error!("Process segment event failed: {}", e);
-                // 可以添加错误通知机制
+                crate::server::fleet::events::upload_failed(&ctx, e);
             }
             info!(url=ctx.live_streamer().url, result=?result, "后处理执行完毕：Finished processing segment event");
             ctx.change_status(Stage::Upload, WorkerStatus::Idle).await;

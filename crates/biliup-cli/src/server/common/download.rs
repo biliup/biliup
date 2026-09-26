@@ -380,6 +380,7 @@ impl DownloadTask {
             if let Err(e) = &components {
                 error!(url = url, error = ?e, "下载流程出错");
             }
+            crate::server::fleet::events::recording_finished(ctx, &components, &self.token);
             info!("initialize_components completed: {url}");
 
             if self.token.is_cancelled() {

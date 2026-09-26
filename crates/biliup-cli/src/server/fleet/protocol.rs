@@ -15,11 +15,19 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 pub const ALPN: &[u8] = b"biliup/fleet/1";
 /// 协议次版本号。1：`Hello` 带账号、工具与已持有的房间，控制面下发 `DesiredState`，节点回 `Ack`。
 /// 2：`DesiredState` 带配置（[`DesiredConfig`]），`Ack` 带配置是否生效（[`ConfigAck`]）。
-pub const PROTOCOL_MINOR: u32 = 2;
+/// 3：节点发 `Event`（录制出错、投稿失败，见 [`RoomEvent`]），`Heartbeat` 带 `min_free_space`。
+pub const PROTOCOL_MINOR: u32 = 3;
 /// 能收 `DesiredState` 的最低次版本号。更旧的节点收到不认识的帧会卡住，控制面不给它们发。
 pub const DESIRED_STATE_SINCE: u32 = 1;
 /// 能收配置的最低次版本号。次版本 1 的节点照常收房间，配置不发给它。
 pub const CONFIG_SINCE: u32 = 2;
+/// 会上报 `Event` 的最低次版本号。更旧的节点不发，控制面对它们只有离线、磁盘、配置与落地这几类告警。
+/// `Event` 帧自 F1 就在协议里，旧控制面收到只记一行 debug，所以新节点连旧控制面照发无妨。
+pub const EVENTS_SINCE: u32 = 3;
+/// [`Event::kind`]：一次拉流以错误结束（不含用户停止、迁移等取消）
+pub const EVENT_RECORDING_ERROR: &str = "recording_error";
+/// [`Event::kind`]：一场投稿流程失败（登录、上传、提交或之后的后处理）
+pub const EVENT_UPLOAD_FAILED: &str = "upload_failed";
 pub const MAX_FRAME: usize = 4 * 1024 * 1024;
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 /// 控制面超过这么久没收到节点的任何帧就判离线并关掉连接
@@ -228,6 +236,9 @@ pub struct Heartbeat {
     /// 本机登记的 B 站账号变了才带（自次版本 1 起）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accounts: Option<Vec<Account>>,
+    /// 此刻生效的 `min_free_space`（字节），没设或为 0 时不带（自次版本 3 起）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_free_space: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -242,14 +253,25 @@ pub struct PoolUsage {
     pub occupied: usize,
 }
 
-/// 节点上报的事件。F1 只定结构，节点还不发。
+/// 节点上报的事件（自次版本 3 起节点才发）。`kind` 见 [`EVENT_RECORDING_ERROR`]、[`EVENT_UPLOAD_FAILED`]，
+/// 不认识的 `kind` 控制面忽略。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
     pub kind: String,
-    /// Unix 毫秒
+    /// Unix 毫秒（节点时钟）
     pub at: i64,
     #[serde(default)]
     pub detail: serde_json::Value,
+}
+
+/// 录制出错与投稿失败事件的 `detail`
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RoomEvent {
+    pub url: String,
+    pub remark: String,
+    /// 已去掉链接查询串并截短（见 [`super::events::scrub`]）
+    pub error: String,
 }
 
 /// 最近一次心跳去掉采样曲线与房间明细后的摘要，控制面落进 `fleet_nodes.last_summary`，
@@ -505,6 +527,71 @@ mod tests {
         };
         let round: Ack = serde_json::from_value(serde_json::to_value(&ack).unwrap()).unwrap();
         assert_eq!(round.config, ack.config);
+    }
+
+    /// 次版本 2 与 3 混跑：2 的控制面解 3 的心跳时忽略 `min_free_space`，收到 `event` 照样能解；
+    /// 2 的节点心跳里没有 `min_free_space`，也从不发 `event`。
+    #[test]
+    fn event_frames_and_min_free_space_are_compatible_both_ways() {
+        let event = NodeMessage::Event(Event {
+            kind: EVENT_RECORDING_ERROR.into(),
+            at: 5,
+            detail: serde_json::to_value(RoomEvent {
+                url: "https://live.example/1".into(),
+                remark: "r".into(),
+                error: "mesio error: boom".into(),
+            })
+            .unwrap(),
+        });
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["type"], "event");
+        assert_eq!(json["kind"], "recording_error");
+        let NodeMessage::Event(back) = serde_json::from_value(json).unwrap() else {
+            panic!()
+        };
+        let detail: RoomEvent = serde_json::from_value(back.detail).unwrap();
+        assert_eq!(detail.error, "mesio error: boom");
+        // 不认识的 kind 与缺字段的 detail 也能解
+        let odd: NodeMessage = serde_json::from_value(
+            serde_json::json!({ "type": "event", "kind": "future", "at": 1 }),
+        )
+        .unwrap();
+        let NodeMessage::Event(odd) = odd else {
+            panic!()
+        };
+        assert_eq!(
+            serde_json::from_value::<RoomEvent>(odd.detail).unwrap_or_default(),
+            RoomEvent::default()
+        );
+
+        let heartbeat = |extra: serde_json::Value| {
+            let mut json = serde_json::json!({
+                "type": "heartbeat",
+                "stats": {
+                    "ts": 1, "interval_ms": 1000, "history_ms": 300000,
+                    "cpu": null, "memory": null, "disk": null, "interfaces": [], "samples": [],
+                },
+                "pools": Pools::default(),
+                "rooms": [],
+                "recording": 0,
+            });
+            json.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            match serde_json::from_value::<NodeMessage>(json).unwrap() {
+                NodeMessage::Heartbeat(heartbeat) => heartbeat,
+                _ => panic!(),
+            }
+        };
+        assert_eq!(heartbeat(serde_json::json!({})).min_free_space, None);
+        let new = heartbeat(serde_json::json!({ "min_free_space": 1024 }));
+        assert_eq!(new.min_free_space, Some(1024));
+        let out = serde_json::to_value(NodeMessage::Heartbeat(Heartbeat {
+            min_free_space: None,
+            ..new
+        }))
+        .unwrap();
+        assert!(out.get("min_free_space").is_none());
     }
 
     #[test]

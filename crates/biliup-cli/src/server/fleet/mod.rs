@@ -14,6 +14,7 @@ pub mod config_store;
 pub mod controller;
 #[cfg(test)]
 mod e2e_tests;
+pub mod events;
 pub mod guard;
 pub mod labels;
 pub mod layers;
