@@ -299,6 +299,19 @@ async fn suggestions_come_from_checked_and_snapped_replies() {
             .state,
         SuggestionState::Expired
     );
+
+    // 删场次：分析数据跟着删
+    assert!(files.dir().exists());
+    sqlx::query("DELETE FROM stream_sessions WHERE id = ?")
+        .bind(env.session)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        cleanup::sweep_in(&env.pool, &root, now_ms()).await.removed,
+        vec![env.session]
+    );
+    assert!(!files.dir().exists());
 }
 
 fn opening(_: &Value, _: usize) -> Result<String, (u16, String)> {
