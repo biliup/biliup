@@ -1,8 +1,8 @@
 //! 告警从哪来（F4）：每 [`EVALUATE_EVERY`] 按节点此刻的状况核对一遍状态类告警，
 //! 节点上报的事件随到随记。告警本身的规矩见 [`crate::server::fleet::alerts`]。
 
+use super::Controller;
 use super::dispatch::heartbeat_status;
-use super::{Controller, NodeConfigState};
 use crate::server::errors::AppResult;
 use crate::server::fleet::alerts::{
     self, Alert, AlertKey, AlertKind, Condition, MAX_ALERTS, disk_low, disk_threshold,
@@ -181,15 +181,15 @@ impl Controller {
                         ));
                     }
                 }
-                let config = NodeConfigState::of(Some(node), Some(&node.version));
-                if config.sync == Some("failed") {
+                // 按节点最近一次的应答：新配置刚推出去、还没应答时仍算失败，免得告警先恢复再重开
+                if let Some(ack) = node.config_ack.as_ref().filter(|ack| !ack.applied) {
                     conditions.push((
                         key(AlertKind::ConfigFailed, row.id, None),
                         Condition {
                             node_name: node_name.clone(),
                             message: format!(
                                 "下发的配置没能生效，节点保持原来的配置：{}",
-                                config.error.as_deref().unwrap_or("节点没有给出原因")
+                                ack.error.as_deref().unwrap_or("节点没有给出原因")
                             ),
                             ..Condition::default()
                         },

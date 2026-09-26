@@ -864,7 +864,7 @@ async fn layered_config_reaches_nodes_without_their_secrets() {
     controller.shutdown().await;
 }
 
-/// 告警：节点上报的事件变成告警、同一个直播间合并计数；离线告警出现、重连后恢复；「知道了」清掉。
+/// 告警：节点上报的事件变成告警、同一个直播间合并计数；房间落地失败与配置应用失败随节点的 Ack 出现和恢复；离线告警出现、重连后恢复；「知道了」清掉。
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn alerts_follow_node_events_and_connectivity() {
     use super::alerts::AlertKind;
@@ -954,12 +954,114 @@ async fn alerts_follow_node_events_and_connectivity() {
         ),
         (1, 1, 2, 2)
     );
+    let open_alert = |kind: AlertKind| {
+        let controller = controller.clone();
+        async move {
+            controller.evaluate_alerts_at(now_ms()).await;
+            controller
+                .alert_list()
+                .alerts
+                .into_iter()
+                .find(|alert| alert.kind == kind && alert.is_open())
+        }
+    };
+
+    // 房间落地失败：节点上已有同一地址的本地主播，节点拒收并在 Ack 里说明；撤回分派后恢复
+    let taken = "https://stuck.example/taken";
+    crate::server::services::streamers::add_streamer(
+        &services,
+        serde_json::from_value(serde_json::json!({ "url": taken, "remark": "本地" })).unwrap(),
+    )
+    .await
+    .unwrap();
+    let clash = controller
+        .create_room(
+            serde_json::from_value(
+                serde_json::json!({ "url": taken, "remark": "撞车", "node_id": id }),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    eventually("room failure alert", Duration::from_secs(20), || async {
+        open_alert(AlertKind::RoomFailed).await.is_some()
+    })
+    .await;
+    let failed = open_alert(AlertKind::RoomFailed).await.unwrap();
+    assert_eq!(failed.room_id, Some(clash.id));
+    assert_eq!(failed.room.as_deref(), Some("撞车"));
+    assert!(failed.message.contains("本地主播"), "{}", failed.message);
+    controller.assign(clash.id, None, false).await.unwrap();
+    eventually("room failure resolves", Duration::from_secs(20), || async {
+        open_alert(AlertKind::RoomFailed).await.is_none()
+    })
+    .await;
+
+    // 配置应用失败：节点写不进自己的库，保持原配置并在 Ack 里报原因；库恢复后再下发一次就好了
+    for event in ["INSERT", "UPDATE"] {
+        sqlx::query(&format!(
+            "CREATE TRIGGER no_config_{event} BEFORE {event} ON configuration \
+             WHEN NEW.key = 'config' BEGIN SELECT RAISE(ABORT, 'disk is full'); END"
+        ))
+        .execute(&services.pool)
+        .await
+        .unwrap();
+    }
+    let set_pool1 = |size: u32| {
+        let controller = controller.clone();
+        async move {
+            let patch = serde_json::json!({ "pool1_size": size });
+            super::config_store::set_node_override(
+                controller.pool(),
+                id,
+                patch.as_object().unwrap(),
+            )
+            .await
+            .unwrap();
+            controller.push(id).await;
+        }
+    };
+    set_pool1(3).await;
+    eventually("config failure alert", Duration::from_secs(20), || async {
+        open_alert(AlertKind::ConfigFailed).await.is_some()
+    })
+    .await;
+    let failed = open_alert(AlertKind::ConfigFailed).await.unwrap();
+    assert!(
+        failed.message.contains("disk is full"),
+        "{}",
+        failed.message
+    );
+    assert_ne!(services.config.read().unwrap().pool1_size, 3);
+    for event in ["INSERT", "UPDATE"] {
+        sqlx::query(&format!("DROP TRIGGER no_config_{event}"))
+            .execute(&services.pool)
+            .await
+            .unwrap();
+    }
+    set_pool1(4).await;
+    eventually(
+        "config failure resolves",
+        Duration::from_secs(20),
+        || async { open_alert(AlertKind::ConfigFailed).await.is_none() },
+    )
+    .await;
+    assert_eq!(services.config.read().unwrap().pool1_size, 4);
+    assert_eq!(
+        controller
+            .alert_list()
+            .alerts
+            .iter()
+            .filter(|alert| alert.resolved_at.is_some())
+            .count(),
+        2
+    );
 
     // 离线：60 s 之内不算，之后告警；重连后恢复
     agent.shutdown().await;
     wait_for_node(&controller, id, false, Duration::from_secs(10)).await;
     controller.evaluate_alerts_at(now_ms()).await;
-    assert_eq!(controller.alert_list().alerts.len(), 2);
+    assert_eq!(controller.alert_list().alerts.len(), 4);
     let later = now_ms() + OFFLINE_ALERT_AFTER_MS + 1_000;
     controller.evaluate_alerts_at(later).await;
     let offline = controller
@@ -986,7 +1088,7 @@ async fn alerts_follow_node_events_and_connectivity() {
 
     assert!(controller.acknowledge_alert(upload.id));
     assert!(!controller.acknowledge_alert(upload.id));
-    assert_eq!(controller.acknowledge_alerts(), 2);
+    assert_eq!(controller.acknowledge_alerts(), 4);
     assert!(controller.alert_list().alerts.is_empty());
 
     agent.shutdown().await;
