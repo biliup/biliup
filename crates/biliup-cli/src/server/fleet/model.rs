@@ -166,6 +166,14 @@ pub struct DesiredRoom {
     pub spec: RoomSpec,
 }
 
+/// 节点上报的一个 B 站账号：只有 mid 与昵称，凭据文件不出节点
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Account {
+    pub mid: u64,
+    #[serde(default)]
+    pub uname: String,
+}
+
 /// 下发到节点的投稿模板
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DesiredTemplate {

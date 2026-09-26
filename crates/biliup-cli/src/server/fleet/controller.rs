@@ -1,7 +1,9 @@
 //! 控制面：接受节点的 iroh 连接，维护在线状态与最近 5 分钟的曲线。
 
+use super::assignments;
 use super::protocol::{
     self, CloseCode, ControllerMessage, Heartbeat, Hello, NodeMessage, OFFLINE_AFTER, Summary,
+    Tools,
 };
 use super::relay::EmbeddedRelay;
 use super::store::{self, NodeRow, Redeem};
@@ -47,6 +49,9 @@ struct LiveNode {
     last_message_at: i64,
     last_persisted_at: i64,
     version: String,
+    /// `Hello` 里的协议次版本号
+    proto: u32,
+    tools: Option<Tools>,
     summary: Option<Summary>,
     interval_ms: u64,
     samples: VecDeque<Sample>,
@@ -105,6 +110,10 @@ pub struct NodeView {
     pub created_at: i64,
     pub last_seen_at: Option<i64>,
     pub version: Option<String>,
+    /// 在线时 `Hello` 里的协议次版本号；低于 1 的节点收不了房间
+    pub proto: Option<u32>,
+    /// 在线时节点上外部工具的可用情况
+    pub tools: Option<Tools>,
     pub online: bool,
     pub connected_at: Option<i64>,
     /// 当前走的路径：`relay` 或 `direct`；离线为 `null`
@@ -353,6 +362,13 @@ impl Controller {
             }
         };
         let id = node.id;
+        if hello.proto >= 1 {
+            // 节点自己的意愿以它此刻的 node.json 为准；账号每次连上整份替换
+            if hello.allow_hooks != node.allow_hooks {
+                store::set_allow_hooks(&self.pool, id, hello.allow_hooks).await?;
+            }
+            assignments::replace_accounts(&self.pool, id, &hello.accounts, now_ms()).await?;
+        }
         let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
         let now = now_ms();
         let previous = self.live.lock().unwrap().insert(
@@ -364,6 +380,8 @@ impl Controller {
                 last_message_at: now,
                 last_persisted_at: now,
                 version: hello.version.clone(),
+                proto: hello.proto,
+                tools: hello.tools.clone(),
                 summary: node
                     .last_summary
                     .as_deref()
@@ -463,6 +481,10 @@ impl Controller {
                     debug!(node = id, kind = %event.kind, "fleet node event");
                     self.touch(id, seq);
                 }
+                NodeMessage::Ack(ack) => {
+                    debug!(node = id, version = ack.version, "fleet node ack");
+                    self.touch(id, seq);
+                }
                 NodeMessage::Leave => {
                     store::revoke_node(&self.pool, id, now_ms()).await?;
                     info!(node = id, "fleet node left");
@@ -485,8 +507,13 @@ impl Controller {
         }
     }
 
-    async fn heartbeat(&self, id: i64, seq: u64, heartbeat: Heartbeat) {
+    async fn heartbeat(&self, id: i64, seq: u64, mut heartbeat: Heartbeat) {
         let now = now_ms();
+        if let Some(accounts) = heartbeat.accounts.take()
+            && let Err(e) = assignments::replace_accounts(&self.pool, id, &accounts, now).await
+        {
+            warn!(node = id, error = ?e, "could not record fleet node accounts");
+        }
         let persist = {
             let mut live = self.live.lock().unwrap();
             let Some(node) = live.get_mut(&id).filter(|node| node.seq == seq) else {
@@ -530,6 +557,8 @@ fn view(row: NodeRow, live: Option<&LiveNode>, now: i64) -> NodeView {
             created_at: row.created_at,
             last_seen_at: Some(node.last_message_at),
             version: Some(node.version.clone()),
+            proto: Some(node.proto),
+            tools: node.tools.clone(),
             online: node.online(now),
             connected_at: Some(node.connected_at),
             path: node.path(),
@@ -546,6 +575,8 @@ fn view(row: NodeRow, live: Option<&LiveNode>, now: i64) -> NodeView {
             created_at: row.created_at,
             last_seen_at: row.last_seen_at,
             version: row.last_version,
+            proto: None,
+            tools: None,
             online: false,
             connected_at: None,
             path: None,

@@ -1,8 +1,9 @@
 //! 节点端：`biliup node join / leave / status` 与 `biliup server` 里的节点代理。
 
+use super::accounts;
 use super::protocol::{
     self, CloseCode, ControllerMessage, HEARTBEAT_INTERVAL, Heartbeat, Hello, JoinProof,
-    NodeMessage, PROTOCOL_MINOR, PoolUsage, Pools,
+    NodeMessage, PROTOCOL_MINOR, PoolUsage, Pools, ToolStatus, Tools,
 };
 use super::relay::{DENY_REVOKED, DENY_TOKEN_INVALID, DENY_UNKNOWN};
 use super::store::{hex, parse_hex};
@@ -199,6 +200,27 @@ fn controller_addr(controller: EndpointId, relays: &[RelayUrl]) -> EndpointAddr 
         })
 }
 
+/// join / leave / 节点代理共用的 `Hello`；账号、工具与已持有的房间只有节点代理才填
+fn hello(allow_hooks: bool) -> Hello {
+    Hello {
+        proto: PROTOCOL_MINOR,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        name: host_name(),
+        allow_hooks,
+        ..Hello::default()
+    }
+}
+
+async fn tools() -> Tools {
+    let ffmpeg = crate::tools::ffmpeg_status().await;
+    Tools {
+        ffmpeg: ToolStatus {
+            available: ffmpeg.available,
+            version: ffmpeg.version,
+        },
+    }
+}
+
 fn host_name() -> String {
     sysinfo::System::host_name()
         .filter(|name| !name.trim().is_empty())
@@ -336,14 +358,11 @@ pub async fn join(ticket: &str, allow_hooks: bool, node_file: &Path) -> AppResul
     .await
     .attach("could not bind the fleet node endpoint")?;
     let hello = Hello {
-        proto: PROTOCOL_MINOR,
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        name: host_name(),
-        allow_hooks,
         join: Some(JoinProof {
             token: ticket.token.clone(),
             secret: hex(&ticket.secret),
         }),
+        ..hello(allow_hooks)
     };
     info!(controller = %ticket.controller.fmt_short(), relays = ?ticket.relays, "joining fleet controller");
     let result = async {
@@ -401,13 +420,7 @@ pub async fn leave(node_file: &Path) -> AppResult<bool> {
     let endpoint = bind_endpoint(file.secret()?, relay_map(&relays, None), false)
         .await
         .attach("could not bind the fleet node endpoint")?;
-    let hello = Hello {
-        proto: PROTOCOL_MINOR,
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        name: host_name(),
-        allow_hooks: file.allow_hooks,
-        join: None,
-    };
+    let hello = hello(file.allow_hooks);
     let notified = match dial(
         &endpoint,
         controller_addr(file.controller_id()?, &relays),
@@ -574,12 +587,11 @@ async fn session(
     let Ok(controller) = file.controller_id() else {
         return Outcome::Rejected("node.json 里的控制面 id 无效".into());
     };
+    let mut reported_accounts = accounts::public(&accounts::scan(&services.pool).await);
     let hello = Hello {
-        proto: PROTOCOL_MINOR,
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        name: host_name(),
-        allow_hooks: file.allow_hooks,
-        join: None,
+        accounts: reported_accounts.clone(),
+        tools: Some(tools().await),
+        ..hello(file.allow_hooks)
     };
     let connect = async {
         let listed = file.relay_urls();
@@ -624,7 +636,12 @@ async fn session(
     loop {
         tokio::select! {
             _ = ticker.tick() => {
-                let heartbeat = heartbeat(services, &mut since).await;
+                let mut heartbeat = heartbeat(services, &mut since).await;
+                let current = accounts::public(&accounts::scan(&services.pool).await);
+                if current != reported_accounts {
+                    heartbeat.accounts = Some(current.clone());
+                    reported_accounts = current;
+                }
                 if let Err(e) = protocol::write_frame(&mut send, &NodeMessage::Heartbeat(heartbeat)).await {
                     debug!(error = %e, "fleet heartbeat failed");
                     let reason = connection.closed().await;
@@ -633,7 +650,7 @@ async fn session(
             }
             frame = protocol::read_frame::<_, ControllerMessage>(&mut recv) => match frame {
                 Ok(Some(ControllerMessage::Relays { relays })) => update_relays(node_file, file, relays),
-                Ok(Some(ControllerMessage::Welcome { .. })) => {}
+                Ok(Some(ControllerMessage::Welcome { .. } | ControllerMessage::DesiredState(_))) => {}
                 Ok(None) | Err(_) => {
                     let reason = connection.closed().await;
                     return closed_outcome(close_code(&reason), true);
@@ -724,6 +741,7 @@ async fn heartbeat(services: &ServiceRegister, since: &mut Option<i64>) -> Heart
         },
         rooms,
         recording,
+        accounts: None,
     }
 }
 

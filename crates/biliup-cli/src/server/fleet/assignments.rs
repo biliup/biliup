@@ -6,7 +6,7 @@
 //! 确认停了（它的 Ack 里不再持有这个房间）才交给 `node_id`，同一个房间不会有两台同时录。
 //! 每次改分派 `epoch` +1，节点重连时按它对账。
 
-use super::model::{DesiredRoom, DesiredTemplate, RoomSpec, TemplateSpec};
+use super::model::{Account, DesiredRoom, DesiredTemplate, RoomSpec, TemplateSpec};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use error_stack::ResultExt;
@@ -779,14 +779,6 @@ pub async fn assigned_counts(pool: &ConnectionPool) -> AppResult<HashMap<i64, i6
     .await
     .change_context(db_error("count assigned rooms"))?;
     Ok(rows.into_iter().collect())
-}
-
-/// 节点上报的一个 B 站账号：只有 mid 与昵称
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Account {
-    pub mid: u64,
-    #[serde(default)]
-    pub uname: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

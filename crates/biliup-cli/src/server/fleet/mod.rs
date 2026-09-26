@@ -6,6 +6,7 @@
 //!
 //! 这一阶段只做加入、心跳与在线状态：不分派房间、不下发配置。
 
+pub mod accounts;
 pub mod assignments;
 pub mod controller;
 #[cfg(test)]
