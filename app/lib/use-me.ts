@@ -63,7 +63,10 @@ export interface Me {
   auth_enabled: boolean
   /** 本机以 `--controller` 运行（Fleet 控制面），「节点」菜单只在这时出现 */
   fleet_controller: boolean
-  /** 本机是加入了控制面的节点时才有：哪些直播间与投稿模板由控制面托管（本机只读） */
+  /**
+   * 本机是加入了控制面的节点（或启用了「本机」节点的控制面）时才有：
+   * 哪些直播间与投稿模板由控制面托管（本机只读）
+   */
   fleet_node?: FleetManaged
   /** 本机被控制面移除过、原受管主播还暂停着等确认时才有 */
   fleet_revoked?: FleetRevoked
@@ -79,8 +82,10 @@ export interface FleetRevoked {
 }
 
 export interface FleetManaged {
-  /** 控制面的显示名（relay 地址的主机名或控制面 ID 前缀） */
+  /** 控制面的显示名（relay 地址的主机名或控制面 ID 前缀）；「本机」节点为「本机」 */
   controller: string
+  /** 控制面自己的「本机」节点：托管行是分派到本机的 Fleet 房间，到「节点 › 房间」修改 */
+  local?: boolean
   /** 托管的本地直播间 id */
   streamers: number[]
   /** 托管的本地投稿模板 id */

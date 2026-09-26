@@ -87,7 +87,11 @@ export default function StreamersPage() {
   // 本机加入了控制面时，控制面分派下来的直播间只读（后端对它们的增删改返回 409）
   const fleet = me?.fleet_node
   const managedIds = useMemo(() => new Set(fleet?.streamers ?? []), [fleet])
-  const managedHint = fleet ? `由控制面 ${fleet.controller} 管理，请到控制面修改` : undefined
+  const managedHint = fleet
+    ? fleet.local
+      ? '这是分派到本机的 Fleet 房间，请到「节点 › 房间」修改'
+      : `由控制面 ${fleet.controller} 管理，请到控制面修改`
+    : undefined
   // 被控制面移除后转为本机自管并暂停、等确认恢复的直播间；手动恢复后标记立即消失
   const revokedIds = useMemo(() => new Set(me?.fleet_revoked?.streamers ?? []), [me?.fleet_revoked])
   const awaitingResume = (item: LiveStreamerEntity) => revokedIds.has(item.id) && item.status === 'Pause'
@@ -328,9 +332,13 @@ export default function StreamersPage() {
             closeIcon={null}
             className={styles.fleetBanner}
             description={
-              managedIds.size > 0
-                ? `本机已加入控制面：标着「托管」的 ${managedIds.size} 个直播间由控制面 ${fleet.controller} 管理，这里只能查看，编辑、暂停、删除请到控制面操作。本机自己添加的直播间不受影响。`
-                : `本机已加入控制面 ${fleet.controller}；控制面分派来的直播间会由控制面 ${fleet.controller} 管理，这里只能查看。本机自己添加的直播间不受影响。`
+              fleet.local
+                ? managedIds.size > 0
+                  ? `已启用「本机」节点：标着「托管」的 ${managedIds.size} 个直播间是分派到本机的 Fleet 房间，这里只能查看，编辑、暂停、删除请到「节点 › 房间」。这里自己添加的直播间不受影响。`
+                  : '已启用「本机」节点：分派到本机的 Fleet 房间会出现在这里并标为「托管」，请到「节点 › 房间」修改。这里自己添加的直播间不受影响。'
+                : managedIds.size > 0
+                  ? `本机已加入控制面：标着「托管」的 ${managedIds.size} 个直播间由控制面 ${fleet.controller} 管理，这里只能查看，编辑、暂停、删除请到控制面操作。本机自己添加的直播间不受影响。`
+                  : `本机已加入控制面 ${fleet.controller}；控制面分派来的直播间会由控制面 ${fleet.controller} 管理，这里只能查看。本机自己添加的直播间不受影响。`
             }
           />
         ) : null}

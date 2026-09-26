@@ -122,11 +122,18 @@ export default function NodeCard({
         <Text strong ellipsis={{ showTooltip: true }} className={styles.nodeName}>
           {node.name}
         </Text>
+        {node.local ? (
+          <Tooltip content="控制面这台机器自己：录制用这里的「空间配置」，「直播管理」里已有的直播间照常录、不受影响">
+            <Tag size="small" color="violet">
+              本机
+            </Tag>
+          </Tooltip>
+        ) : null}
         <Tag size="small" color={node.online ? 'green' : 'grey'}>
           {node.online ? '在线' : '离线'}
         </Tag>
         {badge}
-        {node.online && node.path ? (
+        {node.online && node.path && !node.local ? (
           <Tooltip
             content={
               node.path === 'relay'
@@ -140,9 +147,15 @@ export default function NodeCard({
           </Tooltip>
         ) : null}
         {node.removing ? (
-          <Tooltip content={`正在把房间迁到其他节点，它确认释放全部房间后移除（最多等 ${REMOVAL_WAIT_SECONDS} 秒）`}>
+          <Tooltip
+            content={
+              node.local
+                ? `正在交出房间，本机停录、确认释放全部房间后关闭（最多等 ${REMOVAL_WAIT_SECONDS} 秒）`
+                : `正在把房间迁到其他节点，它确认释放全部房间后移除（最多等 ${REMOVAL_WAIT_SECONDS} 秒）`
+            }
+          >
             <Tag size="small" color="orange">
-              移除中
+              {node.local ? '关闭中' : '移除中'}
             </Tag>
           </Tooltip>
         ) : null}
@@ -160,7 +173,9 @@ export default function NodeCard({
           </Tooltip>
         ) : null}
         {node.allow_hooks ? (
-          <Tooltip content="加入时带了 --allow-hooks：处理器里带 run 命令（能执行任意命令）的房间可以派到这台机器；rm、mv 等文件操作不受这个限制">
+          <Tooltip
+            content={`${node.local ? '启用时勾选了「允许钩子」' : '加入时带了 --allow-hooks'}：处理器里带 run 命令（能执行任意命令）的房间可以派到这台机器；rm、mv 等文件操作不受这个限制`}
+          >
             <Tag size="small" color="red">
               允许钩子
             </Tag>
@@ -218,7 +233,7 @@ export default function NodeCard({
       <NodeConfigStatus
         node={node}
         controllerVersion={controllerVersion}
-        onOpen={onEditConfig ? () => onEditConfig(node) : undefined}
+        onOpen={onEditConfig && !node.local ? () => onEditConfig(node) : undefined}
       />
 
       {!node.online && summary ? (
@@ -291,7 +306,42 @@ export default function NodeCard({
             <span className={styles.endpoint}>{node.endpoint_id.slice(0, 10)}</span>
           </Tooltip>
         </span>
-        {canManage && !node.removing ? (
+        {canManage && !node.removing && node.local ? (
+          <Popconfirm
+            title="关闭「本机」节点？"
+            content={
+              node.assigned_rooms > 0 ? (
+                <div className={styles.revokeBody}>
+                  <span>
+                    先把分派给本机的 {node.assigned_rooms}{' '}
+                    个房间取消分派，等本机停录、确认释放后再关闭：不会重复录制，也不留暂停的直播间。「直播管理」里本机自己的直播间不受影响
+                  </span>
+                  <Checkbox checked={reassign} onChange={(e) => setReassign(Boolean(e.target.checked))}>
+                    改为按负载自动改派到其他节点
+                  </Checkbox>
+                  {reassign ? (
+                    <span className={styles.revokeWarn}>
+                      {node.online
+                        ? `每个房间等本机停录、确认释放后才交给新节点（最多等 ${REMOVAL_WAIT_SECONDS} 秒）`
+                        : '本机节点现在离线：先把这些房间在本机转为本地并暂停，再改派，不会两边同时录'}
+                    </span>
+                  ) : null}
+                </div>
+              ) : (
+                '关闭后本机不再接收 Fleet 房间，可以随时再启用'
+              )
+            }
+            okType="danger"
+            onVisibleChange={(visible) => {
+              if (visible) setReassign(false)
+            }}
+            onConfirm={() => onRevoke(node, reassign && node.assigned_rooms > 0)}
+          >
+            <Button size="small" theme="borderless" type="danger">
+              关闭
+            </Button>
+          </Popconfirm>
+        ) : canManage && !node.removing ? (
           <Popconfirm
             title={`移除节点 ${node.name}？`}
             content={
