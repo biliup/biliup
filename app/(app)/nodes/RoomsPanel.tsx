@@ -445,6 +445,9 @@ export default function RoomsPanel({
   )
 }
 
+/** 「分派到节点」里的「自动」，由控制面按负载选 */
+const AUTO_NODE = -1
+
 /** 页头的「新建房间」：录制设置与本机共用表单，外加「分派到节点」 */
 export function CreateRoomButton({
   nodes,
@@ -458,16 +461,31 @@ export function CreateRoomButton({
   children: React.ReactElement
 }) {
   const templateOptions = templates.map((t) => ({ value: t.id, label: t.template_name }))
-  const nodeOptions = [...nodes]
-    .sort((a, b) => Number(b.online) - Number(a.online) || a.id - b.id)
-    .map((n) => ({
-      value: n.id,
-      label: `${n.name}${n.online ? '' : '（离线）'}`,
-    }))
+  const nodeOptions = [
+    ...(nodes.length > 0 ? [{ value: AUTO_NODE, label: '自动（按负载选）' }] : []),
+    ...[...nodes]
+      .sort((a, b) => Number(b.online) - Number(a.online) || a.id - b.id)
+      .map((n) => ({
+        value: n.id,
+        label: `${n.name}${n.online ? '' : '（离线）'}`,
+      })),
+  ]
   const create = async (values: Record<string, any>) => {
+    const auto = values.node_id === AUTO_NODE
     try {
-      const room = await createRoom({ ...roomFromForm(values), node_id: values.node_id ?? null })
-      Toast.success(room?.node_id != null ? '已添加，已下发到节点' : '已添加，还没分派到节点')
+      const room = await createRoom({
+        ...roomFromForm(values),
+        node_id: auto ? null : (values.node_id ?? null),
+        auto_node: auto,
+      })
+      const picked = nodes.find((n) => n.id === room?.node_id)?.name
+      Toast.success(
+        room?.node_id == null
+          ? '已添加，还没分派到节点'
+          : auto
+            ? `已添加，自动分派到 ${picked ?? '节点'}`
+            : '已添加，已下发到节点',
+      )
       onCreated()
     } catch (e) {
       Toast.error({ content: errorMessage(e), duration: 6 })
@@ -487,7 +505,7 @@ export function CreateRoomButton({
           optionList={nodeOptions}
           showClear
           placeholder="暂不分派"
-          extraText="模板要用的 B 站账号必须在节点上登记过；带钩子的房间只能派给允许钩子的节点"
+          extraText="模板要用的 B 站账号必须在节点上登记过；带钩子的房间只能派给允许钩子的节点。「自动」在满足这些条件的在线节点里挑空闲下载位多、房间少、磁盘余量大的一台，之后不会因负载变化挪走"
         />
       }
     >

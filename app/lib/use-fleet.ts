@@ -210,6 +210,18 @@ export async function revokeNode(id: number): Promise<void> {
   await handleResponse(await fetch(`${API_BASE}${FLEET_NODES_KEY}/${id}`, { method: 'DELETE' }))
 }
 
+export interface Reassigned {
+  reassigned: { room_id: number; node_id: number }[]
+  unplaced: { room_id: number; reason: string }[]
+}
+
+/** 移除节点，并把它的房间按负载改派到其他节点 */
+export async function revokeAndReassign(id: number): Promise<Reassigned> {
+  const res = await fetch(`${API_BASE}${FLEET_NODES_KEY}/${id}?reassign=auto`, { method: 'DELETE' })
+  await handleResponse(res)
+  return res.json()
+}
+
 export async function voidToken(id: string): Promise<void> {
   await handleResponse(await fetch(`${API_BASE}${FLEET_TOKENS_KEY}/${encodeURIComponent(id)}`, { method: 'DELETE' }))
 }
@@ -226,7 +238,8 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T 
 
 export type RoomInput = RoomSpec & { template_id: number | null }
 
-export function createRoom(room: RoomInput & { node_id: number | null; paused?: boolean }) {
+/** `auto_node`：由控制面按负载选节点，此时 `node_id` 必须为 null */
+export function createRoom(room: RoomInput & { node_id: number | null; paused?: boolean; auto_node?: boolean }) {
   return send<FleetRoom>('POST', FLEET_ROOMS_KEY, room)
 }
 

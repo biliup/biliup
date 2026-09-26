@@ -10,7 +10,7 @@ use crate::server::fleet::store;
 use crate::server::fleet::ticket::JoinTicket;
 use crate::server::fleet::{net, now_ms};
 use axum::body::Bytes;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
@@ -71,7 +71,22 @@ async fn list_nodes(State(controller): State<Arc<Controller>>) -> Response {
     }
 }
 
-async fn revoke_node(State(controller): State<Arc<Controller>>, Path(id): Path<i64>) -> Response {
+#[derive(Deserialize, Default)]
+struct RevokeQuery {
+    /// `auto`：把它的房间按负载改派到其他节点
+    reassign: Option<String>,
+}
+
+async fn revoke_node(
+    State(controller): State<Arc<Controller>>,
+    Path(id): Path<i64>,
+    Query(query): Query<RevokeQuery>,
+) -> Response {
+    match query.reassign.as_deref() {
+        None => {}
+        Some("auto") => return fleet_rooms::revoke_and_reassign(&controller, id).await,
+        Some(_) => return (StatusCode::BAD_REQUEST, "reassign 只能是 auto").into_response(),
+    }
     match controller.revoke(id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => (StatusCode::NOT_FOUND, "节点不存在或已被移除").into_response(),

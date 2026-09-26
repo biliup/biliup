@@ -1,7 +1,7 @@
 'use client'
-import React, { useMemo } from 'react'
+import React, { useMemo, useState } from 'react'
 import dynamic from 'next/dynamic'
-import { Button, Popconfirm, Progress, Tag, Tooltip, Typography } from '@douyinfe/semi-ui'
+import { Button, Checkbox, Popconfirm, Progress, Tag, Tooltip, Typography } from '@douyinfe/semi-ui'
 import { diskPercent, formatBytes, memoryPercent, toSeries } from '@/app/lib/use-system-stats'
 import { formatRate, timeAgo } from '@/app/lib/use-dashboard'
 import { formatVersion } from '@/app/lib/status'
@@ -69,8 +69,9 @@ export default function NodeCard({
 }: {
   node: FleetNode
   canManage: boolean
-  onRevoke: (node: FleetNode) => void
+  onRevoke: (node: FleetNode, reassign: boolean) => void
 }) {
+  const [reassign, setReassign] = useState(false)
   const summary = node.summary
   const intervalMs = node.interval_ms || DEFAULT_INTERVAL_MS
   const series = useMemo(() => toSeries(node.samples, intervalMs), [node.samples, intervalMs])
@@ -261,12 +262,30 @@ export default function NodeCard({
           <Popconfirm
             title={`移除节点 ${node.name}？`}
             content={
-              node.assigned_rooms > 0
-                ? `立即断开，它的身份作废；分派给它的 ${node.assigned_rooms} 个房间变为未分派，它本机转为自己管理、继续录这些房间`
-                : '立即断开，它的身份作废；要再加入得重新生成票据'
+              node.assigned_rooms > 0 ? (
+                <div className={styles.revokeBody}>
+                  <span>
+                    立即断开，它的身份作废；分派给它的 {node.assigned_rooms}{' '}
+                    个房间变为未分派，它本机转为自己管理、继续录这些房间
+                  </span>
+                  <Checkbox checked={reassign} onChange={(e) => setReassign(Boolean(e.target.checked))}>
+                    把这些房间按负载自动改派到其他节点
+                  </Checkbox>
+                  {reassign ? (
+                    <span className={styles.revokeWarn}>
+                      {node.name} 如果还在运行，会和新节点同时录这些房间（重复录制与投稿），直到在它本机删掉
+                    </span>
+                  ) : null}
+                </div>
+              ) : (
+                '立即断开，它的身份作废；要再加入得重新生成票据'
+              )
             }
             okType="danger"
-            onConfirm={() => onRevoke(node)}
+            onVisibleChange={(visible) => {
+              if (visible) setReassign(false)
+            }}
+            onConfirm={() => onRevoke(node, reassign && node.assigned_rooms > 0)}
           >
             <Button size="small" theme="borderless" type="danger">
               移除

@@ -15,6 +15,7 @@ pub mod guard;
 pub mod model;
 pub mod net;
 pub mod node;
+pub mod placement;
 pub mod protocol;
 pub mod reconcile;
 pub mod relay;

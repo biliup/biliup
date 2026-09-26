@@ -16,6 +16,7 @@ import {
   FLEET_ROOMS_KEY,
   FLEET_TEMPLATES_KEY,
   FLEET_TOKENS_KEY,
+  revokeAndReassign,
   revokeNode,
   voidToken,
   type FleetNode,
@@ -131,10 +132,21 @@ function Nodes() {
     router.replace(key === 'nodes' ? pathname : `${pathname}?tab=${key}`, { scroll: false })
   }
 
-  const revoke = async (node: FleetNode) => {
+  const revoke = async (node: FleetNode, reassign: boolean) => {
     try {
-      await revokeNode(node.id)
-      Toast.success(`已移除 ${node.name}`)
+      if (!reassign) {
+        await revokeNode(node.id)
+        Toast.success(`已移除 ${node.name}`)
+      } else {
+        const { reassigned, unplaced } = await revokeAndReassign(node.id)
+        Toast.success(`已移除 ${node.name}，${reassigned.length} 个房间已改派`)
+        if (unplaced.length > 0) {
+          Toast.warning({
+            content: `${unplaced.length} 个房间没找到合适的节点，留在未分派：${unplaced[0].reason}`,
+            duration: 8,
+          })
+        }
+      }
     } catch (e) {
       Toast.error((e as Error).message)
     }

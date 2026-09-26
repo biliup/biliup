@@ -410,3 +410,110 @@ async fn rooms_follow_assignments_across_two_nodes() {
     }
     controller.shutdown().await;
 }
+
+/// 按负载自动选节点：硬约束先筛，平局看分到的房间数；移除节点时自动改派。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn automatic_placement_respects_accounts_and_spreads_rooms() {
+    let dir = tempfile::tempdir().unwrap();
+    let (controller, url, pool) = start_controller(dir.path()).await;
+
+    let mut nodes = Vec::new();
+    for name in ["a", "b"] {
+        let root = dir.path().join(name);
+        let node_file = root.join("data/node.json");
+        let joined = node::join(
+            &ticket_for(&controller, &pool, &url).await,
+            false,
+            &node_file,
+        )
+        .await
+        .unwrap();
+        let services = node_services(&root).await;
+        if name == "a" {
+            fake_account(&services, &root, 42).await;
+        }
+        let agent = NodeAgent::start(node_file, services.clone(), ManagedHandle::default())
+            .await
+            .unwrap();
+        wait_for_node(&controller, joined.node_id, true, Duration::from_secs(30)).await;
+        nodes.push((joined.node_id, services, agent));
+    }
+    let (a, b) = (nodes[0].0, nodes[1].0);
+    eventually("A reports its account", Duration::from_secs(20), || {
+        let controller = controller.clone();
+        async move { controller.accounts().await.unwrap().len() == 1 }
+    })
+    .await;
+
+    let template = controller
+        .create_template(
+            serde_json::from_value(serde_json::json!({
+                "template_name": "fleet",
+                "account_mid": 42,
+                "uploader": "Noop",
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let auto = |url: &str, template: Option<i64>| -> CreateRoom {
+        serde_json::from_value(serde_json::json!({
+            "url": url,
+            "remark": "房间",
+            "template_id": template,
+            "auto_node": true,
+        }))
+        .unwrap()
+    };
+
+    let mut both = auto("https://stuck.example/x", None);
+    both.node_id = Some(a);
+    assert!(matches!(
+        controller.create_room(both).await,
+        Err(DispatchError::Invalid(_))
+    ));
+    // 只有 A 登记了模板账号
+    let first = controller
+        .create_room(auto("https://stuck.example/1", Some(template.id)))
+        .await
+        .unwrap();
+    assert_eq!(first.node_id, Some(a));
+    // 其余都一样时去分到房间少的 B
+    let second = controller
+        .create_room(auto("https://stuck.example/2", None))
+        .await
+        .unwrap();
+    assert_eq!(second.node_id, Some(b));
+    let mut hooked = auto("https://stuck.example/h", None);
+    hooked.spec.postprocessor =
+        serde_json::from_value(serde_json::json!([{ "run": "echo" }])).unwrap();
+    let rejected = controller.create_room(hooked).await.unwrap_err();
+    assert!(
+        matches!(&rejected, DispatchError::Invalid(m) if m.contains("不允许钩子")),
+        "{rejected:?}"
+    );
+
+    // 移除 B 并自动改派：它的房间去 A
+    let outcome = controller.revoke_and_reassign(b).await.unwrap().unwrap();
+    assert_eq!(outcome.unplaced.len(), 0);
+    assert_eq!(
+        (outcome.reassigned[0].room_id, outcome.reassigned[0].node_id),
+        (second.id, a)
+    );
+    let services_a = nodes[0].1.clone();
+    eventually("A records both rooms", Duration::from_secs(20), || {
+        let services = services_a.clone();
+        async move { local_urls(&services).await.len() == 2 }
+    })
+    .await;
+    // 再移除 A：没有节点可去，房间留在未分派
+    let outcome = controller.revoke_and_reassign(a).await.unwrap().unwrap();
+    assert_eq!(outcome.reassigned.len(), 0);
+    assert_eq!(outcome.unplaced.len(), 2);
+    assert!(controller.revoke_and_reassign(a).await.unwrap().is_none());
+
+    for (_, _, agent) in nodes {
+        agent.shutdown().await;
+    }
+    controller.shutdown().await;
+}

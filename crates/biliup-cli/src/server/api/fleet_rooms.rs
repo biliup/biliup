@@ -66,6 +66,15 @@ pub async fn update_room(
     respond(controller.update_room(id, request, keep_hooks).await)
 }
 
+/// `DELETE /v1/fleet/nodes/{id}?reassign=auto`
+pub async fn revoke_and_reassign(controller: &Controller, id: i64) -> Response {
+    match controller.revoke_and_reassign(id).await {
+        Ok(Some(outcome)) => Json(outcome).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "节点不存在或已被移除").into_response(),
+        Err(error) => error_response(error),
+    }
+}
+
 #[derive(Deserialize, Default)]
 pub struct DeleteQuery {
     #[serde(default)]

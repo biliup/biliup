@@ -11,9 +11,11 @@ use crate::server::fleet::assignments::{
 };
 use crate::server::fleet::model::{RoomSpec, TemplateSpec};
 use crate::server::fleet::now_ms;
+use crate::server::fleet::placement::{self, Candidate, Needs};
 use crate::server::fleet::store::{self, NodeRow};
 use error_stack::Report;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug)]
 pub enum DispatchError {
@@ -44,6 +46,40 @@ pub struct CreateRoom {
     pub node_id: Option<i64>,
     #[serde(default)]
     pub paused: bool,
+    /// 由控制面按负载选节点（与 `node_id` 二选一）
+    #[serde(default)]
+    pub auto_node: bool,
+}
+
+/// 移除节点并自动改派的结果
+#[derive(Debug, Default, Serialize)]
+pub struct Reassigned {
+    /// 改派成功的房间 → 新节点
+    pub reassigned: Vec<Placed>,
+    /// 没找到合适节点、留在未分派的房间
+    pub unplaced: Vec<Unplaced>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Placed {
+    pub room_id: i64,
+    pub node_id: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Unplaced {
+    pub room_id: i64,
+    pub reason: String,
+}
+
+impl DispatchError {
+    fn message(&self) -> String {
+        match self {
+            DispatchError::NotFound(message) => message.to_string(),
+            DispatchError::Invalid(message) | DispatchError::Conflict(message) => message.clone(),
+            DispatchError::Internal(report) => report.to_string(),
+        }
+    }
 }
 
 /// `PUT /v1/fleet/rooms/{id}`：只改录制设置与模板；改分派走 `assign`
@@ -239,11 +275,64 @@ impl Controller {
             .collect())
     }
 
+    /// 按负载给房间选一台节点（见 `placement`）；一台都不行时说明每台的原因
+    async fn auto_node(&self, spec: &RoomSpec, template: Option<&Template>) -> Result<i64> {
+        let rows = store::list_nodes(&self.pool).await?;
+        let counts = assignments::assigned_counts(&self.pool).await?;
+        let mut accounts: HashMap<i64, Vec<u64>> = HashMap::new();
+        for account in assignments::list_accounts(&self.pool).await? {
+            accounts
+                .entry(account.node_id)
+                .or_default()
+                .push(account.mid);
+        }
+        let now = now_ms();
+        let candidates: Vec<Candidate> = {
+            let live = self.live.lock().unwrap();
+            rows.into_iter()
+                .map(|row| {
+                    let node = live.get(&row.id).filter(|node| node.online(now));
+                    let summary = node.and_then(|node| node.summary.as_ref());
+                    let download = summary.map(|summary| summary.pools.download);
+                    Candidate {
+                        id: row.id,
+                        online: node.is_some(),
+                        outdated: node.is_some_and(|node| !node.accepts_desired_state()),
+                        allow_hooks: row.allow_hooks,
+                        accounts: accounts.remove(&row.id).unwrap_or_default(),
+                        download_capacity: download.map_or(0, |pool| pool.capacity),
+                        download_occupied: download.map_or(0, |pool| pool.occupied),
+                        assigned_rooms: counts.get(&row.id).copied().unwrap_or(0),
+                        disk_available: summary
+                            .and_then(|summary| summary.disk.as_ref())
+                            .map(|disk| disk.available),
+                        name: row.name,
+                    }
+                })
+                .collect()
+        };
+        let needs = Needs {
+            hooks: spec.has_hooks(),
+            account: template.and_then(|template| template.spec.account_mid),
+        };
+        placement::choose(&candidates, needs)
+            .map_err(|rejected| DispatchError::Invalid(placement::explain(&rejected)))
+    }
+
     pub async fn create_room(&self, request: CreateRoom) -> Result<Room> {
         let spec = request.spec.normalized();
         check_room_spec(&spec)?;
         let template = self.template_or_invalid(request.template_id).await?;
-        if let Some(node) = request.node_id {
+        let node_id = match (request.auto_node, request.node_id) {
+            (true, Some(_)) => {
+                return Err(DispatchError::Invalid(
+                    "「自动」与指定节点只能选一个".into(),
+                ));
+            }
+            (true, None) => Some(self.auto_node(&spec, template.as_ref()).await?),
+            (false, node_id) => node_id,
+        };
+        if let Some(node) = node_id {
             let node = self.node_or_invalid(node).await?;
             self.check_target(&node, &spec, template.as_ref()).await?;
         }
@@ -251,7 +340,7 @@ impl Controller {
             &self.pool,
             &spec,
             request.template_id,
-            request.node_id,
+            node_id,
             request.paused,
             now_ms(),
         )
@@ -378,6 +467,47 @@ impl Controller {
                 Ok(Some(room))
             }
         }
+    }
+
+    /// 移除节点，并把分派给它的房间按负载改派到其他节点（`DELETE /v1/fleet/nodes/{id}?reassign=auto`）。
+    /// 被移除的节点若还在运行，会按约定把这些房间转成本地房间继续录，与新节点重复录制，界面上要写明。
+    /// 返回 `None` 表示节点不存在或已被移除。
+    pub async fn revoke_and_reassign(&self, id: i64) -> Result<Option<Reassigned>> {
+        let rooms: Vec<Room> = assignments::list_rooms(&self.pool)
+            .await?
+            .into_iter()
+            .filter(|room| room.node_id == Some(id) && room.deleted_at.is_none())
+            .collect();
+        if !self.revoke(id).await? {
+            return Ok(None);
+        }
+        let mut outcome = Reassigned::default();
+        for room in rooms {
+            let placed = async {
+                let template = self.template_or_invalid(room.template_id).await?;
+                let target = self.auto_node(&room.spec, template.as_ref()).await?;
+                self.assign(room.id, Some(target), false).await?;
+                Ok::<_, DispatchError>(target)
+            }
+            .await;
+            match placed {
+                Ok(node_id) => outcome.reassigned.push(Placed {
+                    room_id: room.id,
+                    node_id,
+                }),
+                Err(error) => outcome.unplaced.push(Unplaced {
+                    room_id: room.id,
+                    reason: error.message(),
+                }),
+            }
+        }
+        tracing::info!(
+            node = id,
+            reassigned = outcome.reassigned.len(),
+            unplaced = outcome.unplaced.len(),
+            "fleet node revoked with automatic reassignment"
+        );
+        Ok(Some(outcome))
     }
 
     pub async fn templates(&self) -> Result<Vec<Template>> {
