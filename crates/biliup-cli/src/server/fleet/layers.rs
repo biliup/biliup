@@ -136,7 +136,15 @@ pub fn validate(config: &Config) -> Result<(), String> {
     Ok(())
 }
 
+/// 这个键能不能取 `null`（`Option` 字段能；`delay` 这类非 `Option` 的数字不能）
+fn accepts_null(key: &str) -> bool {
+    let mut probe = Object::new();
+    probe.insert(key.to_string(), Value::Null);
+    serde_json::from_value::<Config>(Value::Object(probe)).is_ok()
+}
+
 /// 整理 `PUT /v1/fleet/configuration` 的请求体：与单机保存一样是整份替换，缺的键取默认值；
+/// 不接受 `null` 的键写 `null` 也取默认值（界面清空数字框时键仍在、值为 `null`）。
 /// 按节点的键不保存，白名单外带值的键整体拒绝。返回全部共享键。
 pub fn normalize_global(body: Object) -> Result<Normalized, LayerError> {
     let (kept, mut ignored) = split_foreign(body)?;
@@ -144,7 +152,7 @@ pub fn normalize_global(body: Object) -> Result<Normalized, LayerError> {
     for (key, value) in kept {
         if is_per_node(&key) {
             ignored.push(key);
-        } else {
+        } else if !value.is_null() || accepts_null(&key) {
             shared.insert(key, value);
         }
     }
@@ -312,6 +320,20 @@ mod tests {
     }
 
     #[test]
+    fn global_nulls_on_non_optional_keys_fall_back_to_defaults() {
+        let normalized = normalize_global(object(
+            json!({"delay": null, "threads": null, "lines": null}),
+        ))
+        .unwrap();
+        let defaults = project(&Config::default());
+        for key in ["delay", "threads", "lines"] {
+            assert_eq!(normalized.config[key], defaults[key], "{key}");
+        }
+        assert!(accepts_null("segment_time") && accepts_null("file_size"));
+        assert!(!accepts_null("delay") && !accepts_null("retention_hours"));
+    }
+
+    #[test]
     fn secrets_with_values_are_rejected_by_both_layers() {
         let body = object(json!({
             "segment_time": "01:00:00",
@@ -331,10 +353,6 @@ mod tests {
             panic!()
         };
         assert!(reason.starts_with("配置格式不对"), "{reason}");
-        assert!(matches!(
-            normalize_global(object(json!({"delay": null}))),
-            Err(LayerError::Invalid(_))
-        ));
         assert!(matches!(
             normalize_override(object(json!({"pool1_size": -1}))),
             Err(LayerError::Invalid(_))
