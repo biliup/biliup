@@ -239,17 +239,19 @@ function FramePicker({
         {failed === shown ? <span>取不到这一帧</span> : null}
       </div>
       <div className={styles.frameRow}>
-        <Slider
-          className={styles.frameSlider}
-          min={clip.in_ms}
-          max={clip.out_ms}
-          step={100}
-          value={t}
-          tipFormatter={(v) => formatPrecise(Number(v))}
-          onChange={(v) => setT(Number(v))}
-          onAfterChange={(v) => setShown(Number(v))}
-          aria-label="选取封面的时间点"
-        />
+        {/* Semi 把 className 放在内层，外层 .semi-slider 才是 flex 子项；不包一层会缩成把手宽 */}
+        <div className={styles.frameSlider}>
+          <Slider
+            min={clip.in_ms}
+            max={clip.out_ms}
+            step={100}
+            value={t}
+            tipFormatter={(v) => formatPrecise(Number(v))}
+            onChange={(v) => Number.isFinite(Number(v)) && setT(Number(v))}
+            onAfterChange={(v) => Number.isFinite(Number(v)) && setShown(Number(v))}
+            aria-label="选取封面的时间点"
+          />
+        </div>
         <span className={styles.meta}>{formatPrecise(t)}</span>
       </div>
       {failed === shown ? (
