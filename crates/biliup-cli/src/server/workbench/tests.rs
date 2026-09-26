@@ -1004,8 +1004,14 @@ fn segment_files_are_matched_to_the_working_directory_by_name() {
     let mut names: Vec<_> = by_name.keys().cloned().collect();
     names.sort();
     assert_eq!(names, ["a.flv", "b.ts", "c.flv"]);
-    assert_eq!((by_name["a.flv"].session_id, by_name["a.flv"].start_ms), (4, 7_000));
-    assert_eq!((by_name["b.ts"].session_id, by_name["b.ts"].start_ms), (1, 60_000));
+    assert_eq!(
+        (by_name["a.flv"].session_id, by_name["a.flv"].start_ms),
+        (4, 7_000)
+    );
+    assert_eq!(
+        (by_name["b.ts"].session_id, by_name["b.ts"].start_ms),
+        (1, 60_000)
+    );
     assert_eq!(by_name["c.flv"].session_id, 2);
     let no_cwd = store::segment_files_in_dir(vec![file(2, "/rec/c.flv", 0)], None);
     assert!(no_cwd.is_empty());
