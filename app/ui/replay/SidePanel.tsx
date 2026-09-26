@@ -507,7 +507,7 @@ function ClipRow({
         <span className={styles.inlineWrap}>
           <Button
             size="small"
-            theme="solid"
+            theme={clip.state === 'ready' ? 'solid' : 'light'}
             type={unknown ? 'warning' : 'primary'}
             icon={<IconSend />}
             onClick={() => onPublish(clip)}
