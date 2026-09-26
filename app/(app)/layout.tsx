@@ -19,7 +19,7 @@ import { SLOW_REFRESH_MS } from '../lib/use-dashboard'
 import { useIsMobile } from '../lib/useIsMobile'
 import styles from './layout.module.scss'
 
-/* ============ 导航信息架构:5 组 11 项,按当前角色的权限点过滤 ============ */
+/* ============ 导航信息架构:5 组 10 项,按当前角色的权限点过滤 ============ */
 
 function Ic({ d, extra }: { d: string; extra?: string }) {
   return (
@@ -63,12 +63,6 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
         perm: 'streamer.view',
         label: '直播管理',
         icon: <Ic d="M3 6h13v12H3zM16 9.5l5-2.5v10l-5-2.5" />,
-      },
-      {
-        href: '/live',
-        perm: 'preview.view',
-        label: '直播预览',
-        icon: <Ic d="M3 5h18v12H3zM8 21h8M12 17v4" extra="M10 8.5v5l4-2.5z" />,
       },
       {
         href: '/history',
@@ -146,6 +140,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
 
 /** 不在侧栏里、但同样需要权限的子页面（按前缀匹配，先匹配到的生效） */
 const EXTRA_PAGE_PERMS: { prefix: string; perm: Permission }[] = [
+  { prefix: '/live', perm: 'preview.view' },
   { prefix: '/upload-manager/add', perm: 'template.edit' },
   { prefix: '/upload-manager/edit', perm: 'template.edit' },
   { prefix: '/replay', perm: 'file.view' },
