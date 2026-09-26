@@ -48,6 +48,7 @@ fn internal(error: impl std::fmt::Debug) -> Response {
 /// 权限点由授权决策点算出（含环境属性），前端只按它显隐，不再自己推导。
 /// `fleet_controller`：本进程以 `--controller` 运行，前端据此显示「节点」菜单。
 /// `fleet_node`：只有被控制面托管的节点才有，前端据此把托管的主播与模板显示为只读。
+/// `fleet_revoked`：被控制面移除过、原受管主播还暂停着等确认时才有，前端据此提示并给恢复入口。
 fn me_body(username: Option<&str>, subject: Subject, fleet: Option<FleetCapability>) -> Response {
     let fleet = fleet.unwrap_or_default();
     let mut body = json!({
@@ -60,6 +61,9 @@ fn me_body(username: Option<&str>, subject: Subject, fleet: Option<FleetCapabili
     });
     if let Some(node) = fleet.managed_view() {
         body["fleet_node"] = node;
+    }
+    if let Some(revoked) = fleet.revoked_view() {
+        body["fleet_revoked"] = revoked;
     }
     Json(body).into_response()
 }

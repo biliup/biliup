@@ -2,14 +2,17 @@
 //!
 //! 只动自己按控制面建的那些行（映射记在 `data/fleet-state.json`），本机自己加的主播与模板一概不碰。
 //! 控制面连不上时照常按本机数据库录；重启后按 `fleet-state.json` 认回托管行、恢复暂停状态。
-//! 离开或被移除时删掉 `fleet-state.json`，托管行就地变成本地行，录制不中断。
+//! 离开时删掉 `fleet-state.json`，托管行就地变成本地行，录制不中断；被移除（吊销）时同样变成本地行，
+//! 但先记进 [`super::revoked`] 的清单并暂停，等管理员确认后再恢复。
 //! 期望状态里的配置交给 [`super::node_config`]，在房间之前落地。
 
 use super::accounts;
 use super::guard::{Managed, ManagedHandle};
 use super::model::{DesiredRoom, RoomSpec, TemplateSpec};
 use super::node_config::{self, ManagedConfig};
+use super::now_ms;
 use super::protocol::{Ack, DesiredState, FailedRoom, HeldRoom};
+use super::revoked::Revoked;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::WorkerStatus;
 use crate::server::infrastructure::models::live_streamer::{InsertLiveStreamer, LiveStreamer};
@@ -189,7 +192,7 @@ async fn row_exists(services: &ServiceRegister, table: &str, id: i64) -> bool {
 }
 
 /// 让本地主播的暂停状态与期望一致。暂停只在内存里，重启后要重新套一遍。
-async fn apply_paused(services: &ServiceRegister, local_id: i64, paused: bool) {
+pub(super) async fn apply_paused(services: &ServiceRegister, local_id: i64, paused: bool) {
     let Some(worker) = services.managers.get_room_by_id(local_id).await else {
         return;
     };
@@ -328,11 +331,32 @@ impl Reconciler {
         *self.managed.write().unwrap() = Some(managed);
     }
 
-    /// 离开或被移除：托管行转成本地行，接着录
+    /// 离开（或密钥不被承认）：托管行转成本地行，接着录
     pub fn release(&mut self) {
         forget(&self.path);
         self.state = FleetState::new(&self.state.controller);
         *self.managed.write().unwrap() = None;
+    }
+
+    /// 被控制面移除：托管行转成本地行，先记进被移除清单并暂停（重启后仍暂停，等管理员恢复）。
+    /// 返回暂停了几个主播。
+    pub async fn release_revoked(&mut self, revoked: &Revoked) -> usize {
+        let mut streamers: BTreeMap<i64, String> = BTreeMap::new();
+        for room in self.state.rooms.values() {
+            if row_exists(&self.services, "livestreamers", room.local_id).await {
+                streamers.insert(room.local_id, room.url.clone());
+            }
+        }
+        // 新增到一半的：行可能已经写进库里
+        for url in self.state.adding.values() {
+            if let Some(local_id) = local_id_by_url(&self.services, url).await {
+                streamers.insert(local_id, url.clone());
+            }
+        }
+        let paused = streamers.len();
+        revoked.record(&self.label, streamers, now_ms()).await;
+        self.release();
+        paused
     }
 
     /// 落地一份期望状态，返回给控制面的 `Ack`
@@ -998,6 +1022,109 @@ mod tests {
         // 行还在、还在监控里
         assert_eq!(f.streamers().await.len(), 1);
         assert!(f.services.managers.get_room_by_id(local_id).await.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_revoked_node_turns_rows_local_and_paused_across_restarts() {
+        use crate::server::fleet::revoked::{REVOKED_FILE_NAME, Revoked};
+        let f = Fixture::new().await;
+        let local = add_streamer(
+            &f.services,
+            serde_json::from_value(
+                json!({ "url": "https://stuck.example/local", "remark": "本地" }),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        let mut reconciler = f.reconciler(true).await;
+        let rooms = vec![
+            room(1, "https://stuck.example/1", None),
+            room(2, "https://stuck.example/2", None),
+        ];
+        reconciler.apply(desired(3, rooms, vec![])).await;
+        let ids: Vec<i64> = reconciler
+            .state()
+            .rooms
+            .values()
+            .map(|room| room.local_id)
+            .collect();
+        let path = f.dir.path().join(REVOKED_FILE_NAME);
+        let revoked = Revoked::load(path.clone(), f.services.clone());
+        assert!(!path.exists());
+
+        assert_eq!(reconciler.release_revoked(&revoked).await, 2);
+        assert!(!f.path().exists());
+        assert!(f.managed.read().unwrap().is_none());
+        assert_eq!(f.streamers().await.len(), 3);
+        for id in &ids {
+            assert!(matches!(f.status(*id).await, Some(WorkerStatus::Pause)));
+        }
+        assert!(!matches!(
+            f.status(local.id).await,
+            Some(WorkerStatus::Pause)
+        ));
+        assert_eq!(revoked.ids(), ids);
+        let view = revoked.view().unwrap();
+        assert_eq!(view["controller"], "10.0.0.2");
+        assert_eq!(view["streamers"], json!(ids));
+        assert!(path.exists());
+        // 再发现一次（重启后重连又被拒）：没有托管行了，清单不变
+        assert_eq!(reconciler.release_revoked(&revoked).await, 0);
+        assert_eq!(revoked.ids(), ids);
+
+        // 模拟重启：监控按库重新载入，暂停丢了；按清单重新暂停
+        for streamer in f.streamers().await {
+            f.services.managers.del_room(streamer.id).await;
+            f.services
+                .managers
+                .add_room(f.services.worker(streamer, None))
+                .await
+                .unwrap();
+        }
+        assert!(!matches!(f.status(ids[0]).await, Some(WorkerStatus::Pause)));
+        let revoked = Revoked::load(path.clone(), f.services.clone());
+        revoked.apply().await;
+        for id in &ids {
+            assert!(matches!(f.status(*id).await, Some(WorkerStatus::Pause)));
+        }
+        assert!(!matches!(
+            f.status(local.id).await,
+            Some(WorkerStatus::Pause)
+        ));
+
+        // 本机删掉的主播启动时从清单里拿掉；全部恢复后删文件
+        delete_streamer(&f.services.pool, &f.services.managers, ids[0])
+            .await
+            .unwrap();
+        let revoked = Revoked::load(path.clone(), f.services.clone());
+        revoked.apply().await;
+        assert_eq!(revoked.ids(), ids[1..]);
+        assert_eq!(revoked.resume_all().await, ids[1..]);
+        assert!(!matches!(f.status(ids[1]).await, Some(WorkerStatus::Pause)));
+        assert!(revoked.view().is_none());
+        assert!(!path.exists());
+    }
+
+    #[tokio::test]
+    async fn leaving_keeps_rows_recording_and_writes_no_revoked_list() {
+        use crate::server::fleet::revoked::REVOKED_FILE_NAME;
+        let f = Fixture::new().await;
+        let mut reconciler = f.reconciler(true).await;
+        reconciler
+            .apply(desired(
+                1,
+                vec![room(1, "https://stuck.example/1", None)],
+                vec![],
+            ))
+            .await;
+        let local_id = reconciler.state().rooms[&1].local_id;
+        reconciler.release();
+        assert!(!matches!(
+            f.status(local_id).await,
+            Some(WorkerStatus::Pause)
+        ));
+        assert!(!f.dir.path().join(REVOKED_FILE_NAME).exists());
     }
 
     #[tokio::test]

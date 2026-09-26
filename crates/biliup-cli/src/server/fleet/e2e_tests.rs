@@ -7,6 +7,7 @@ use super::controller::{
 use super::guard::ManagedHandle;
 use super::node::{self, NodeAgent};
 use super::relay::{EmbeddedRelay, FleetAccess};
+use super::revoked::{Revoked, RevokedHandle, revoked_path};
 use super::ticket::JoinTicket;
 use super::{FLEET_MIGRATOR, net, now_ms, store};
 use crate::server::config::Config;
@@ -170,6 +171,11 @@ async fn wait_for_node(
     }
 }
 
+/// 节点进程的被移除清单：与 `fleet::start` 一样放在 `node.json` 旁边
+fn revoked_for(node_file: &std::path::Path, services: &ServiceRegister) -> RevokedHandle {
+    Arc::new(Revoked::load(revoked_path(node_file), services.clone()))
+}
+
 /// 等「移除并自动改派」结束，返回结果
 async fn wait_removed(controller: &Controller, id: i64, within: Duration) -> Removal {
     let deadline = tokio::time::Instant::now() + within;
@@ -241,10 +247,12 @@ async fn a_node_joins_reports_and_is_revoked_through_the_embedded_relay() {
     assert!(format!("{reused:?}").contains("已被使用"), "{reused:?}");
     assert_eq!(store::list_nodes(&pool).await.unwrap().len(), 1);
 
+    let services = node_services(&dir.path().join("node")).await;
     let agent = NodeAgent::start(
         node_file.clone(),
-        node_services(&dir.path().join("node")).await,
+        services.clone(),
         super::guard::ManagedHandle::default(),
+        revoked_for(&node_file, &services),
     )
     .await
     .unwrap();
@@ -275,7 +283,7 @@ async fn a_node_joins_reports_and_is_revoked_through_the_embedded_relay() {
     controller.shutdown().await;
 }
 
-/// 控制面 + 两台节点：分派、迁移（先释放后接手）、硬约束、移除后转本地。
+/// 控制面 + 两台节点：分派、迁移（先释放后接手）、硬约束、移除后转本地并暂停、离开后转本地接着录。
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn rooms_follow_assignments_across_two_nodes() {
     let dir = tempfile::tempdir().unwrap();
@@ -297,11 +305,17 @@ async fn rooms_follow_assignments_across_two_nodes() {
             fake_account(&services, &root, 42).await;
         }
         let managed = ManagedHandle::default();
-        let agent = NodeAgent::start(node_file.clone(), services.clone(), managed.clone())
-            .await
-            .unwrap();
+        let revoked = revoked_for(&node_file, &services);
+        let agent = NodeAgent::start(
+            node_file.clone(),
+            services.clone(),
+            managed.clone(),
+            revoked.clone(),
+        )
+        .await
+        .unwrap();
         wait_for_node(&controller, joined.node_id, true, Duration::from_secs(30)).await;
-        nodes.push((joined.node_id, services, managed, agent, node_file));
+        nodes.push((joined.node_id, services, managed, agent, node_file, revoked));
     }
     let (a, b) = (nodes[0].0, nodes[1].0);
     // A 上报了账号 42，B 没有
@@ -404,7 +418,8 @@ async fn rooms_follow_assignments_across_two_nodes() {
         (Some(b), None, 2)
     );
 
-    // 移除 A：它的房间在控制面变成未分派，在 A 本机转成本地房间接着录
+    // 移除 A：它的房间在控制面变成未分派，在 A 本机转成本地房间并暂停，记进被移除清单
+    assert!(!revoked_path(&nodes[0].4).exists());
     assert!(controller.revoke(a).await.unwrap());
     eventually("A agent stops", Duration::from_secs(10), || {
         let finished = nodes[0].3.is_finished();
@@ -414,21 +429,49 @@ async fn rooms_follow_assignments_across_two_nodes() {
     assert!(nodes[0].2.read().unwrap().is_none());
     assert!(!super::reconcile::state_path(&nodes[0].4).exists());
     assert_eq!(local_urls(&services_a).await, ["https://stuck.example/1"]);
-    assert!(
-        services_a
-            .managers
-            .get_rooms()
-            .await
-            .iter()
-            .any(|worker| worker.live_streamer.url == "https://stuck.example/1")
-    );
+    let worker = services_a
+        .managers
+        .get_rooms()
+        .await
+        .into_iter()
+        .find(|worker| worker.live_streamer.url == "https://stuck.example/1")
+        .unwrap();
+    assert!(matches!(
+        *worker.downloader_status.read().unwrap(),
+        crate::server::infrastructure::context::WorkerStatus::Pause
+    ));
+    assert_eq!(nodes[0].5.ids(), [worker.live_streamer.id]);
+    assert!(revoked_path(&nodes[0].4).exists());
     let orphan = super::assignments::room(&pool, room.id)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(orphan.node_id, None);
 
-    for (_, _, _, agent, _) in nodes {
+    // B 的 node.json 已经没了（`biliup node leave` 正在进行）时收到吊销：是主动离开，转本地接着录
+    std::fs::remove_file(&nodes[1].4).unwrap();
+    assert!(controller.revoke(b).await.unwrap());
+    eventually("B agent stops", Duration::from_secs(10), || {
+        let finished = nodes[1].3.is_finished();
+        async move { finished }
+    })
+    .await;
+    assert_eq!(local_urls(&services_b).await, ["https://stuck.example/2"]);
+    let worker = services_b
+        .managers
+        .get_rooms()
+        .await
+        .into_iter()
+        .find(|worker| worker.live_streamer.url == "https://stuck.example/2")
+        .unwrap();
+    assert!(!matches!(
+        *worker.downloader_status.read().unwrap(),
+        crate::server::infrastructure::context::WorkerStatus::Pause
+    ));
+    assert!(nodes[1].5.is_empty());
+    assert!(!revoked_path(&nodes[1].4).exists());
+
+    for (_, _, _, agent, _, _) in nodes {
         agent.shutdown().await;
     }
     controller.shutdown().await;
@@ -455,9 +498,15 @@ async fn automatic_placement_respects_accounts_and_spreads_rooms() {
         if name == "a" {
             fake_account(&services, &root, 42).await;
         }
-        let agent = NodeAgent::start(node_file, services.clone(), ManagedHandle::default())
-            .await
-            .unwrap();
+        let revoked = revoked_for(&node_file, &services);
+        let agent = NodeAgent::start(
+            node_file,
+            services.clone(),
+            ManagedHandle::default(),
+            revoked,
+        )
+        .await
+        .unwrap();
         wait_for_node(&controller, joined.node_id, true, Duration::from_secs(30)).await;
         nodes.push((joined.node_id, services, agent));
     }
@@ -623,7 +672,8 @@ async fn layered_config_reaches_nodes_without_their_secrets() {
             config.pool1_size = 2;
         }
         let managed = ManagedHandle::default();
-        let agent = NodeAgent::start(node_file, services.clone(), managed.clone())
+        let revoked = revoked_for(&node_file, &services);
+        let agent = NodeAgent::start(node_file, services.clone(), managed.clone(), revoked)
             .await
             .unwrap();
         wait_for_node(&controller, joined.node_id, true, Duration::from_secs(30)).await;

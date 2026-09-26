@@ -316,7 +316,7 @@ impl Controller {
     }
 
     /// 移除节点：吊销公钥，在线的连接当场以 `revoked` 关闭。
-    /// 分派给它的房间变成未分派；它自己按约定把这些房间转成本地房间继续录。
+    /// 分派给它的房间变成未分派；它发现被吊销后把这些房间转成本地房间并暂停，等它的管理员确认后恢复。
     pub async fn revoke(&self, id: i64) -> AppResult<bool> {
         let guard = self.dispatch.lock().await;
         let Some(endpoint_id) = store::revoke_node(&self.pool, id, now_ms()).await? else {

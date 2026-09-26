@@ -284,7 +284,7 @@ export default function NodeCard({
                 <div className={styles.revokeBody}>
                   <span>
                     立即断开，它的身份作废；分派给它的 {node.assigned_rooms}{' '}
-                    个房间变为未分派，它本机转为自己管理、继续录这些房间
+                    个房间变为未分派；它发现被移除后，这些房间在它本机转为自己管理并暂停，等它的管理员确认后手动恢复
                   </span>
                   <Checkbox checked={reassign} onChange={(e) => setReassign(Boolean(e.target.checked))}>
                     把这些房间按负载自动改派到其他节点

@@ -1,6 +1,7 @@
 //! 控制面的 `/v1/fleet/*` 接口，只在 `--controller` 时注册。
 //! 节点列表归 `streamer.view`，生成 / 作废票据与移除节点归 `node.manage`（见 `permissions.rs`）。
 //! 房间、投稿模板与节点账号的处理函数在 `fleet_rooms.rs`，Fleet 配置的在 `fleet_config.rs`。
+//! 被控制面移除过的机器另有 `/v1/node/revoked*`（恢复暂停中的原受管主播），归 `recording.control`。
 
 use crate::server::api::access::Caller;
 use crate::server::api::fleet_config;
@@ -8,6 +9,7 @@ use crate::server::api::fleet_rooms;
 use crate::server::errors::{ApiError, report_to_response};
 use crate::server::fleet::controller::{CONTROLLER_VERSION, Controller};
 use crate::server::fleet::protocol::PROTOCOL_MINOR;
+use crate::server::fleet::revoked::RevokedHandle;
 use crate::server::fleet::store;
 use crate::server::fleet::ticket::JoinTicket;
 use crate::server::fleet::{net, now_ms};
@@ -71,6 +73,25 @@ pub fn router(controller: Arc<Controller>) -> Router<()> {
             get(fleet_config::get_node_config).put(fleet_config::put_node_config),
         )
         .with_state(controller)
+}
+
+/// 被移除过的机器：「全部恢复」与「知道了」
+pub fn revoked_router(revoked: RevokedHandle) -> Router<()> {
+    Router::new()
+        .route("/v1/node/revoked", delete(dismiss_revoked))
+        .route("/v1/node/revoked/resume", post(resume_revoked))
+        .with_state(revoked)
+}
+
+/// 清单里的主播恢复监控，清空清单
+async fn resume_revoked(State(revoked): State<RevokedHandle>) -> Response {
+    Json(json!({ "resumed": revoked.resume_all().await })).into_response()
+}
+
+/// 只清空清单，主播保持此刻的暂停状态
+async fn dismiss_revoked(State(revoked): State<RevokedHandle>) -> Response {
+    revoked.dismiss();
+    StatusCode::NO_CONTENT.into_response()
 }
 
 async fn list_nodes(State(controller): State<Arc<Controller>>) -> Response {
@@ -372,6 +393,16 @@ mod tests {
                 Method::PUT,
                 "/v1/fleet/nodes/{id}/config",
                 Permission::NodeManage,
+            ),
+            (
+                Method::POST,
+                "/v1/node/revoked/resume",
+                Permission::RecordingControl,
+            ),
+            (
+                Method::DELETE,
+                "/v1/node/revoked",
+                Permission::RecordingControl,
             ),
         ];
         for (method, route, permission) in cases {

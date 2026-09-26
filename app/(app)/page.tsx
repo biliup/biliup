@@ -12,6 +12,7 @@ import { CardRateSwitch } from '../ui/LiveRateChart'
 import EventTimeline from '../ui/EventTimeline'
 import SystemStatsPanel from '../ui/SystemStatsPanel'
 import BackgroundSetter from './components/BackgroundSetter'
+import FleetRevokedBanner from '../ui/FleetRevokedBanner'
 import styles from './page.module.scss'
 
 const { Text } = Typography
@@ -73,6 +74,7 @@ export default function Home() {
         </div>
       ) : (
         <>
+          <FleetRevokedBanner className={styles.revokedBanner} linkToStreamers />
           {d.streamersFailed && (
             <div className={styles.warnBox}>
               <Text>

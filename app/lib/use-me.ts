@@ -65,6 +65,17 @@ export interface Me {
   fleet_controller: boolean
   /** 本机是加入了控制面的节点时才有：哪些直播间与投稿模板由控制面托管（本机只读） */
   fleet_node?: FleetManaged
+  /** 本机被控制面移除过、原受管主播还暂停着等确认时才有 */
+  fleet_revoked?: FleetRevoked
+}
+
+export interface FleetRevoked {
+  /** 移除本机的控制面显示名 */
+  controller: string
+  /** 被移除的时间（毫秒） */
+  revoked_at: number
+  /** 转为本机自管并暂停、等确认恢复的直播间 id */
+  streamers: number[]
 }
 
 export interface FleetManaged {
@@ -88,8 +99,9 @@ export function useMe() {
   const { data, error, isLoading } = useSWR<Me>(ME_KEY, fetcher, {
     revalidateOnFocus: true,
     dedupingInterval: 10_000,
-    // 被控制面托管的节点：托管哪些行随分派变化，定时刷新让只读标记跟上
-    refreshInterval: (latest) => (latest?.fleet_node ? 10_000 : 0),
+    // 被控制面托管的节点：托管哪些行随分派变化，定时刷新让只读标记跟上；
+    // 被移除后逐个恢复直播间也会缩短待恢复清单
+    refreshInterval: (latest) => (latest?.fleet_node || latest?.fleet_revoked ? 10_000 : 0),
   })
   const permissions = data?.permissions
   const can = (permission: Permission) => permissions?.includes(permission) ?? false
