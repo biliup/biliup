@@ -248,6 +248,8 @@ pub struct Room {
     pub node_id: Option<i64>,
     pub epoch: i64,
     pub paused: bool,
+    /// 分到的节点必须带齐的标签（F4）；不下发给节点，改它不会让节点重启录制
+    pub required_labels: Vec<String>,
     /// 还没确认释放的上一台；非空时迁移（或删除）还在进行
     pub releasing_node_id: Option<i64>,
     #[serde(skip)]
@@ -303,6 +305,7 @@ struct RoomRow {
     node_id: Option<i64>,
     epoch: i64,
     paused: bool,
+    required_labels: String,
     releasing_node_id: Option<i64>,
     release_after: Option<i64>,
     deleted_at: Option<i64>,
@@ -332,6 +335,7 @@ impl From<RoomRow> for Room {
             node_id: row.node_id,
             epoch: row.epoch,
             paused: row.paused,
+            required_labels: super::labels::parse(&row.required_labels),
             releasing_node_id: row.releasing_node_id,
             release_after: row.release_after,
             deleted_at: row.deleted_at,
@@ -393,14 +397,28 @@ pub async fn insert_room(
     paused: bool,
     now: i64,
 ) -> AppResult<Result<Room, UrlTaken>> {
+    insert_room_with(pool, spec, template_id, node_id, paused, &[], now).await
+}
+
+/// [`insert_room`]，同时写上房间要求的标签（调用方先 [`super::labels::normalize`]）
+pub async fn insert_room_with(
+    pool: &ConnectionPool,
+    spec: &RoomSpec,
+    template_id: Option<i64>,
+    node_id: Option<i64>,
+    paused: bool,
+    required_labels: &[String],
+    now: i64,
+) -> AppResult<Result<Room, UrlTaken>> {
     let sql = format!(
-        "INSERT INTO fleet_rooms ({ROOM_SPEC_COLUMNS}, template_id, node_id, paused, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *"
+        "INSERT INTO fleet_rooms ({ROOM_SPEC_COLUMNS}, template_id, node_id, paused, required_labels, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *"
     );
     let inserted: Result<RoomRow, sqlx::Error> = bind_room(sqlx::query_as(&sql), spec)
         .bind(template_id)
         .bind(node_id)
         .bind(paused)
+        .bind(super::labels::to_json(required_labels))
         .bind(now)
         .bind(now)
         .fetch_one(pool)
@@ -420,17 +438,31 @@ pub async fn update_room(
     template_id: Option<i64>,
     now: i64,
 ) -> AppResult<Result<Option<Room>, UrlTaken>> {
+    update_room_with(pool, id, spec, template_id, None, now).await
+}
+
+/// [`update_room`]；`required_labels` 为 `Some` 时一并改房间要求的标签，`None` 保留原值
+pub async fn update_room_with(
+    pool: &ConnectionPool,
+    id: i64,
+    spec: &RoomSpec,
+    template_id: Option<i64>,
+    required_labels: Option<&[String]>,
+    now: i64,
+) -> AppResult<Result<Option<Room>, UrlTaken>> {
     let assignments = ROOM_SPEC_COLUMNS
         .split(',')
         .map(|column| format!("{} = ?", column.trim()))
         .collect::<Vec<_>>()
         .join(", ");
     let sql = format!(
-        "UPDATE fleet_rooms SET {assignments}, template_id = ?, updated_at = ? \
+        "UPDATE fleet_rooms SET {assignments}, template_id = ?, \
+         required_labels = COALESCE(?, required_labels), updated_at = ? \
          WHERE id = ? AND deleted_at IS NULL RETURNING *"
     );
     let updated: Result<Option<RoomRow>, sqlx::Error> = bind_room(sqlx::query_as(&sql), spec)
         .bind(template_id)
+        .bind(required_labels.map(super::labels::to_json))
         .bind(now)
         .bind(id)
         .fetch_optional(pool)
@@ -891,6 +923,44 @@ mod tests {
             releasing_node_id: releasing,
             epoch,
         }
+    }
+
+    #[tokio::test]
+    async fn required_labels_survive_spec_edits_and_stay_off_the_wire() {
+        let (_dir, pool) = pool().await;
+        let plain = insert_room(&pool, &spec("https://plain"), None, None, false, 10)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(plain.required_labels.is_empty());
+        let labels = vec!["海外".to_string()];
+        let room = insert_room_with(&pool, &spec("https://a"), None, None, false, &labels, 10)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(room.required_labels, labels);
+        // 不带标签的改动保留原值
+        let room = update_room(&pool, room.id, &spec("https://b"), None, 20)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(room.required_labels, labels);
+        let wire = serde_json::to_value(room.desired()).unwrap();
+        assert!(wire.get("required_labels").is_none(), "{wire}");
+        let both = vec!["海外".to_string(), "GPU".to_string()];
+        let room = update_room_with(&pool, room.id, &spec("https://b"), None, Some(&both), 30)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(room.required_labels, both);
+        let room = update_room_with(&pool, room.id, &spec("https://b"), None, Some(&[]), 40)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(room.required_labels.is_empty());
     }
 
     #[test]

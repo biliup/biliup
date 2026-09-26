@@ -142,7 +142,7 @@ pub struct NodeView {
     pub id: i64,
     pub name: String,
     pub endpoint_id: String,
-    pub labels: serde_json::Value,
+    pub labels: Vec<String>,
     pub allow_hooks: bool,
     pub created_at: i64,
     pub last_seen_at: Option<i64>,
@@ -830,7 +830,7 @@ impl Controller {
 }
 
 fn view(row: NodeRow, live: Option<&LiveNode>, now: i64) -> NodeView {
-    let labels = serde_json::from_str(&row.labels).unwrap_or(serde_json::Value::Array(vec![]));
+    let labels = super::labels::parse(&row.labels);
     let stored_summary = row
         .last_summary
         .as_deref()

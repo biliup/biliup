@@ -9,6 +9,7 @@ use crate::server::errors::AppError;
 use crate::server::fleet::assignments::{
     self, DeleteRoom, DeleteTemplate, NodeAccount, Room, Template, UrlTaken,
 };
+use crate::server::fleet::labels;
 use crate::server::fleet::model::{RoomSpec, TemplateSpec};
 use crate::server::fleet::now_ms;
 use crate::server::fleet::placement::{self, Candidate, Needs};
@@ -49,6 +50,9 @@ pub struct CreateRoom {
     /// 由控制面按负载选节点（与 `node_id` 二选一）
     #[serde(default)]
     pub auto_node: bool,
+    /// 分到的节点必须带齐的标签
+    #[serde(default)]
+    pub required_labels: Vec<String>,
 }
 
 impl DispatchError {
@@ -68,6 +72,9 @@ pub struct UpdateRoom {
     pub spec: RoomSpec,
     #[serde(default)]
     pub template_id: Option<i64>,
+    /// 不带（旧界面）时保留原值
+    #[serde(default)]
+    pub required_labels: Option<Vec<String>>,
 }
 
 /// 房间此刻的状况，给界面看
@@ -174,6 +181,10 @@ fn outdated_message(node: &str, proto: u32) -> String {
         "节点「{node}」的 {}，请先升级 biliup",
         placement::outdated_reason(proto)
     )
+}
+
+fn normalize_labels(labels: &[String]) -> Result<Vec<String>> {
+    labels::normalize(labels).map_err(DispatchError::Invalid)
 }
 
 fn url_taken(_: UrlTaken) -> DispatchError {
@@ -319,6 +330,7 @@ impl Controller {
     pub async fn create_room(&self, request: CreateRoom) -> Result<Room> {
         let spec = request.spec.normalized();
         check_room_spec(&spec)?;
+        let required_labels = normalize_labels(&request.required_labels)?;
         let template = self.template_or_invalid(request.template_id).await?;
         let node_id = match (request.auto_node, request.node_id) {
             (true, Some(_)) => {
@@ -333,12 +345,13 @@ impl Controller {
             let node = self.node_or_invalid(node).await?;
             self.check_target(&node, &spec, template.as_ref()).await?;
         }
-        let room = assignments::insert_room(
+        let room = assignments::insert_room_with(
             &self.pool,
             &spec,
             request.template_id,
             node_id,
             request.paused,
+            &required_labels,
             now_ms(),
         )
         .await?
@@ -368,15 +381,27 @@ impl Controller {
             spec.postprocessor = current.spec.postprocessor.clone();
         }
         check_room_spec(&spec)?;
+        let required_labels = request
+            .required_labels
+            .as_deref()
+            .map(normalize_labels)
+            .transpose()?;
         let template = self.template_or_invalid(request.template_id).await?;
         if let Some(node) = current.node_id {
             let node = self.node_or_invalid(node).await?;
             self.check_target(&node, &spec, template.as_ref()).await?;
         }
-        let room = assignments::update_room(&self.pool, id, &spec, request.template_id, now_ms())
-            .await?
-            .map_err(url_taken)?
-            .ok_or(DispatchError::NotFound("房间不存在"))?;
+        let room = assignments::update_room_with(
+            &self.pool,
+            id,
+            &spec,
+            request.template_id,
+            required_labels.as_deref(),
+            now_ms(),
+        )
+        .await?
+        .map_err(url_taken)?
+        .ok_or(DispatchError::NotFound("房间不存在"))?;
         self.push_many([room.node_id]).await;
         Ok(room)
     }
@@ -529,6 +554,16 @@ impl Controller {
                 "还有 {count} 个房间在用这个模板，先改掉它们的模板"
             ))),
         }
+    }
+
+    /// 改节点标签。已分派的房间不因此迁移，房间列表里会标出标签不满足的房间。
+    pub async fn set_node_labels(&self, id: i64, labels: &[String]) -> Result<Vec<String>> {
+        let labels = normalize_labels(labels)?;
+        if !store::set_labels(&self.pool, id, &labels).await? {
+            return Err(DispatchError::NotFound("节点不存在或已被移除"));
+        }
+        tracing::info!(node = id, ?labels, "fleet node labels changed");
+        Ok(labels)
     }
 
     pub async fn accounts(&self) -> Result<Vec<NodeAccount>> {

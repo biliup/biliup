@@ -15,6 +15,7 @@ pub mod controller;
 #[cfg(test)]
 mod e2e_tests;
 pub mod guard;
+pub mod labels;
 pub mod layers;
 pub mod model;
 pub mod net;
@@ -429,6 +430,10 @@ mod tests {
                 3,
                 "4e2c70a99c89784c8dd484b6194b435b44aec807acbd8050d26d79b45d11a03753fe1d79943e804b84fb3045a30a6112",
             ),
+            (
+                4,
+                "46a662525e8dd5178e903abb31db633c26eeaf4c924be73ba3e3031a80f5dc0025341c635167ad28e18440ea13c2b29a",
+            ),
         ];
         let embedded: Vec<(i64, String)> = FLEET_MIGRATOR
             .iter()
@@ -453,7 +458,7 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(versions, [1, 2, 3]);
+        assert_eq!(versions, [1, 2, 3, 4]);
         let tables: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'fleet_%' ORDER BY name",
         )
@@ -489,6 +494,6 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(count, 3);
+        assert_eq!(count, 4);
     }
 }
