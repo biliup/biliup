@@ -44,7 +44,7 @@ export function BvLink({ bvid }: { bvid: string }) {
 
 /**
  * 一个发布任务的分步进度：导出 → 上传 → 投稿，现在在做什么、上传比例；失败时给原因和「重试发布」，
- * 排队中 / 导出上传中可以移出队列（正在投稿时不能：请求可能已经到了 B 站）。成功后显示稿件号。
+ * 排队中的直接移出队列；进行中的「取消」在投稿请求发出前生效（之后撤不回，后端拒绝并说明）。成功后显示稿件号。
  */
 export function JobStatus({ job, canSubmit }: { job: PublishJob; canSubmit: boolean }) {
   const [busy, setBusy] = useState(false)
@@ -69,7 +69,10 @@ export function JobStatus({ job, canSubmit }: { job: PublishJob; canSubmit: bool
           ? `已暂停${parts}：${RATE_LIMITED_TITLE}，点横幅上的「继续」接着传`
           : job.state === 'failed'
             ? `发布失败${parts}：${job.error ?? '原因未知'}`
-            : `已投稿${parts}，等 B 站审核`
+            : job.state === 'cancelled'
+              ? `已取消${parts}，没有投稿`
+              : `已投稿${parts}，等 B 站审核`
+  const running = job.state === 'running'
   return (
     <div
       className={styles.job}
@@ -123,9 +126,11 @@ export function JobStatus({ job, canSubmit }: { job: PublishJob; canSubmit: bool
               </span>
             </Tooltip>
           ) : null}
-          {job.step === 'submit' && job.state === 'running' ? null : (
+          {job.cancelling ? null : (
             <Tooltip
-              content={canSubmit ? (job.state === 'running' ? '停下正在进行的导出或上传' : '从发布队列里去掉') : NO_SUBMIT}
+              content={
+                canSubmit ? (running ? '投稿请求发出前都能取消；已经发出的撤不回' : '从发布队列里去掉') : NO_SUBMIT
+              }
               className={styles.passTip}
             >
               <span className={styles.inlineWrap}>
@@ -134,9 +139,9 @@ export function JobStatus({ job, canSubmit }: { job: PublishJob; canSubmit: bool
                   theme="borderless"
                   type="tertiary"
                   disabled={!canSubmit || busy}
-                  onClick={() => act(() => removeJob(job), '没能移出队列')}
+                  onClick={() => act(() => removeJob(job), running ? '没能取消' : '没能移出队列')}
                 >
-                  {job.state === 'running' ? '取消' : '移出队列'}
+                  {running ? '取消' : '移出队列'}
                 </Button>
               </span>
             </Tooltip>
@@ -235,6 +240,8 @@ export function useJobToasts(jobs: PublishJob[] | undefined) {
           content: `发布失败：${job.error ?? '原因未知'}。在切片上点「重试发布」`,
           duration: 6,
         })
+      } else if (job.state === 'cancelled') {
+        Toast.info({ id: `publish-${job.id}`, content: `已取消发布${job.title ? `：${job.title}` : ''}，没有投稿`, duration: 4 })
       } else if (job.state === 'paused') {
         Toast.warning({ id: 'publish-paused', content: `${RATE_LIMITED_TITLE}，点横幅上的「继续」接着传`, duration: 6 })
       }

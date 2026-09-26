@@ -30,7 +30,7 @@ import {
 } from '@/app/lib/clips'
 import { formatSize } from '@/app/lib/use-dashboard'
 import { formatPrecise, formatSpan } from '@/app/lib/sessions'
-import { canPublish, MAX_BATCH, needsConfirm, type PublishJob } from '@/app/lib/publish'
+import { canPublish, jobFinished, MAX_BATCH, needsConfirm, type PublishJob } from '@/app/lib/publish'
 import { BvLink, JobStatus } from '@/app/ui/publish/JobStatus'
 import type { PublishTarget } from '@/app/ui/publish/PublishDrawer'
 import styles from './replay.module.scss'
@@ -491,7 +491,7 @@ function ClipRow({
   onToggle: (c: Clip, on: boolean) => void
 }) {
   const [renaming, setRenaming] = useState(false)
-  const queued = !!job && job.state !== 'done'
+  const queued = !!job && !jobFinished(job)
   const unknown = needsConfirm(clip) && !queued
   const publishable = canPublish(clip, job)
   const publish =
