@@ -6,7 +6,13 @@ import { diskPercent, formatBytes, memoryPercent, toSeries } from '@/app/lib/use
 import { formatRate, timeAgo } from '@/app/lib/use-dashboard'
 import { formatVersion } from '@/app/lib/status'
 import { humDate } from '@/app/lib/utils'
-import { REMOVAL_WAIT_SECONDS, nodeOutdated, type FleetNode, type PoolUsage } from '@/app/lib/use-fleet'
+import {
+  REMOVAL_WAIT_SECONDS,
+  nodeOutdated,
+  outdatedReason,
+  type FleetNode,
+  type PoolUsage,
+} from '@/app/lib/use-fleet'
 import styles from './page.module.scss'
 import NodeConfigStatus from './NodeConfigStatus'
 
@@ -134,9 +140,9 @@ export default function NodeCard({
           </Tooltip>
         ) : null}
         {nodeOutdated(node) ? (
-          <Tooltip content="这台节点的 biliup 版本太旧，收不了控制面分派的房间，请先升级">
+          <Tooltip content={`这台节点的 ${outdatedReason(node)}，收不了控制面分派的房间，请先升级 biliup`}>
             <Tag size="small" color="red">
-              版本旧
+              协议版本旧
             </Tag>
           </Tooltip>
         ) : node.synced === false ? (

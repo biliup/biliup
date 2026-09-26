@@ -2,7 +2,7 @@
 import React from 'react'
 import { Button, Tag, Tooltip, Typography } from '@douyinfe/semi-ui'
 import { formatVersion } from '@/app/lib/status'
-import type { FleetNode } from '@/app/lib/use-fleet'
+import { CONFIG_SINCE, type FleetNode } from '@/app/lib/use-fleet'
 import type { NodeConfigState } from '@/app/lib/fleet-config'
 import styles from './fleet-config.module.scss'
 
@@ -13,7 +13,7 @@ export function ConfigSyncTag({ state }: { state: NodeConfigState }) {
   switch (state.sync) {
     case 'unsupported':
       return (
-        <Tooltip content="这台节点的 biliup 版本只收房间、不收配置（协议次版本低于 2），升级后才会应用 Fleet 配置">
+        <Tooltip content={`这台节点的 Fleet 协议版本低于 ${CONFIG_SINCE}，只收房间、不收配置，升级 biliup 后才会应用 Fleet 配置`}>
           <Tag size="small" color="orange">
             不收配置
           </Tag>

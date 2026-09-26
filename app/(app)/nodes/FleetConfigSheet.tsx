@@ -20,7 +20,7 @@ import { fetcher } from '@/app/lib/api-streamer'
 import { humDate } from '@/app/lib/utils'
 import { useWindowWidth } from '@/app/lib/useIsMobile'
 import FormSnapshot from '@/app/ui/FormSnapshot'
-import { errorMessage, FLEET_NODES_KEY, type FleetNode } from '@/app/lib/use-fleet'
+import { CONFIG_SINCE, errorMessage, FLEET_NODES_KEY, type FleetNode } from '@/app/lib/use-fleet'
 import {
   changedKeys,
   DELIVERABLE_KEYS,
@@ -412,7 +412,7 @@ function OverrideSheetBody({ node, canManage }: { node: FleetNode; canManage: bo
             type="warning"
             fullMode={false}
             closeIcon={null}
-            description="这台节点的版本只收房间、不收配置。覆盖照样保存，升级后自动生效。"
+            description={`这台节点的 Fleet 协议版本是 ${node.proto ?? 0}，需要至少 ${CONFIG_SINCE} 才收配置。覆盖照样保存，升级 biliup 后自动生效。`}
           />
         ) : null}
         <Banner

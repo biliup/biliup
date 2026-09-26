@@ -82,7 +82,7 @@ pub enum RoomStatus {
     Deleting,
     /// 节点离线；它连上来时按期望状态接着录
     Offline,
-    /// 节点版本太旧，收不了房间
+    /// 节点的 Fleet 协议版本太旧，收不了房间
     Outdated,
     /// 已下发，节点还没确认
     Syncing,
@@ -168,6 +168,14 @@ fn check_room_spec(spec: &RoomSpec) -> Result<()> {
     Ok(())
 }
 
+/// 分派给协议次版本不够的节点时的报错
+fn outdated_message(node: &str, proto: u32) -> String {
+    format!(
+        "节点「{node}」的 {}，请先升级 biliup",
+        placement::outdated_reason(proto)
+    )
+}
+
 fn url_taken(_: UrlTaken) -> DispatchError {
     DispatchError::Conflict(
         "这个直播间地址已经在房间列表里了（包括正在删除、等节点释放的房间）".into(),
@@ -211,12 +219,9 @@ impl Controller {
             .unwrap()
             .get(&node.id)
             .filter(|live| !live.accepts_desired_state())
-            .map(|live| live.version.clone());
-        if let Some(version) = outdated {
-            return Err(DispatchError::Invalid(format!(
-                "节点「{}」的 biliup 版本（{version}）太旧，收不了房间，请先升级",
-                node.name
-            )));
+            .map(|live| live.proto);
+        if let Some(proto) = outdated {
+            return Err(DispatchError::Invalid(outdated_message(&node.name, proto)));
         }
         if spec.has_hooks() && !node.allow_hooks {
             return Err(DispatchError::Invalid(format!(
@@ -287,7 +292,9 @@ impl Controller {
                         id: row.id,
                         online: node.is_some(),
                         removing: self.is_removing(row.id),
-                        outdated: node.is_some_and(|node| !node.accepts_desired_state()),
+                        outdated: node
+                            .filter(|node| !node.accepts_desired_state())
+                            .map(|node| node.proto),
                         allow_hooks: row.allow_hooks,
                         accounts: accounts.remove(&row.id).unwrap_or_default(),
                         download_capacity: download.map_or(0, |pool| pool.capacity),
@@ -526,5 +533,18 @@ impl Controller {
 
     pub async fn accounts(&self) -> Result<Vec<NodeAccount>> {
         Ok(assignments::list_accounts(&self.pool).await?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_outdated_node_is_described_by_its_protocol_version() {
+        assert_eq!(
+            outdated_message("x", 0),
+            "节点「x」的 Fleet 协议版本是 0，需要至少 1，请先升级 biliup"
+        );
     }
 }

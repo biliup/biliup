@@ -51,7 +51,7 @@ export interface FleetNode {
   summary: NodeSummary | null
   interval_ms: number | null
   samples: SystemSample[]
-  /** 在线时的协议次版本号；低于 1 的节点收不了房间 */
+  /** 在线时的协议次版本号；低于 `DESIRED_STATE_SINCE` 的节点收不了房间，低于 `CONFIG_SINCE` 的不收配置 */
   proto: number | null
   tools: { ffmpeg: ToolStatus } | null
   /** 分派给它的房间数（含迁移中、还没交给它的） */
@@ -247,6 +247,10 @@ export async function revokeNode(id: number): Promise<void> {
 /** 与后端 `REMOVAL_WAIT` 一致：在线节点确认释放房间最多等这么久 */
 export const REMOVAL_WAIT_SECONDS = 60
 
+/** 与后端 `protocol::DESIRED_STATE_SINCE` / `CONFIG_SINCE` 一致：收房间、收配置各要的最低协议次版本 */
+export const DESIRED_STATE_SINCE = 1
+export const CONFIG_SINCE = 2
+
 /**
  * 移除节点，并把它的房间按负载改派到其他节点。在线节点先迁移、等它确认释放再移除，
  * 返回 `state: 'removing'`，结果随后出现在节点列表的 `removals` 里；离线节点当场移除，返回 `done`
@@ -319,9 +323,14 @@ export function roomHasHooks(room: RoomSpec): boolean {
   return steps.some((list) => (list ?? []).some((step) => typeof step === 'object' && step !== null && 'run' in step))
 }
 
-/** 节点是否版本太旧、收不了房间（离线时不知道版本，不算） */
+/** 节点的协议版本是否太旧、收不了房间（离线时不知道版本，不算） */
 export function nodeOutdated(node: FleetNode): boolean {
-  return node.online && (node.proto ?? 0) < 1
+  return node.online && (node.proto ?? 0) < DESIRED_STATE_SINCE
+}
+
+/** 与后端 `placement::outdated_reason` 一致：说 Fleet 协议版本，不说 biliup 版本号（两者不同步） */
+export function outdatedReason(node: FleetNode): string {
+  return `Fleet 协议版本是 ${node.proto ?? 0}，需要至少 ${DESIRED_STATE_SINCE}`
 }
 
 /**
@@ -329,7 +338,7 @@ export function nodeOutdated(node: FleetNode): boolean {
  * 只是提前提示，最终以后端为准。
  */
 export function placementIssue(node: FleetNode, room: RoomSpec, template: FleetTemplate | undefined): string | null {
-  if (nodeOutdated(node)) return '版本太旧，收不了房间'
+  if (nodeOutdated(node)) return `${outdatedReason(node)}，请先升级 biliup`
   if (roomHasHooks(room) && !node.allow_hooks) return '没带 --allow-hooks，不能放带 run 命令的房间'
   if (template?.account_mid && !node.accounts.some((a) => a.mid === template.account_mid)) {
     return `没有登记模板要用的 B 站账号 ${template.account_mid}`
