@@ -79,6 +79,39 @@ pub fn ffmpeg_command() -> tokio::process::Command {
     command(ffmpeg())
 }
 
+/// [`ffmpeg_command`] at a lower CPU priority, for background work that must
+/// not slow down recording: `nice 10` on Unix, `BELOW_NORMAL_PRIORITY_CLASS`
+/// on Windows.
+pub fn low_priority_ffmpeg_command() -> tokio::process::Command {
+    #[cfg_attr(not(any(unix, windows)), allow(unused_mut))]
+    let mut command = std_command(ffmpeg());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        // Setting the flags replaces the ones `std_command` chose, so keep its console rule.
+        let no_window = if biliup::tools::hides_console_windows() {
+            CREATE_NO_WINDOW
+        } else {
+            0
+        };
+        command.creation_flags(BELOW_NORMAL_PRIORITY_CLASS | no_window);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: nice() is async-signal-safe and only changes the child's own priority.
+        unsafe {
+            command.pre_exec(|| {
+                libc::nice(10);
+                Ok(())
+            });
+        }
+    }
+    tokio::process::Command::from(command)
+}
+
 fn resolve(configured: Option<&Path>, bundled: Option<&Path>) -> (PathBuf, FfmpegSource) {
     if let Some(path) = configured {
         (path.to_path_buf(), FfmpegSource::Config)
