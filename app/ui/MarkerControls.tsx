@@ -1,7 +1,7 @@
 'use client'
 import React, { useCallback, useEffect, useState } from 'react'
 import { Button, Input, Toast, Tooltip, Typography } from '@douyinfe/semi-ui'
-import { IconDownload, IconFlag, IconHistory, IconScissors } from '@douyinfe/semi-icons'
+import { IconDownload, IconFlag, IconHistory, IconScissors, IconSend } from '@douyinfe/semi-icons'
 import type { LiveStreamerEntity } from '@/app/lib/api-streamer'
 import { useMe } from '@/app/lib/use-me'
 import { formatSize } from '@/app/lib/use-dashboard'
@@ -16,6 +16,7 @@ import {
   renameMarker,
   ReportedError,
 } from '@/app/lib/markers'
+import { PublishDrawer, type PublishTarget } from './publish/PublishDrawer'
 import styles from './markers.module.scss'
 
 /** 标记后的 Toast 停留多久；鼠标悬停、正在改名时不计时 */
@@ -202,18 +203,20 @@ export function showMarkerToast(marker: Marker) {
 }
 
 /**
- * 「剪下刚才 N 秒」之后的 Toast：跟着导出进度走；剪好了给下载和「在回看里打开」，失败了给原因和重试。
- * 导出中、失败时一直留着（右上角可关），剪好后停留一会儿自动关。
+ * 「剪下刚才 N 秒」之后的 Toast：跟着导出进度走；剪好了给下载、「发布」和「在回看里打开」，失败了给原因和重试。
+ * 导出中、失败时一直留着（右上角可关），剪好后停留一会儿自动关。`onPublish` 为 null 表示没有发布权限。
  */
 function ClipToast({
   initial,
   span,
   canDownload,
+  onPublish,
   onClose,
 }: {
   initial: Clip
   span: string
   canDownload: boolean
+  onPublish: ((clip: Clip) => void) | null
   onClose: () => void
 }) {
   const { data, error } = useClip(initial.id)
@@ -283,6 +286,19 @@ function ClipToast({
                 下载
               </Button>
             ) : null}
+            {onPublish && (ready || clip.state === 'exporting') ? (
+              <Button
+                size="small"
+                theme="borderless"
+                icon={<IconSend />}
+                onClick={() => {
+                  onPublish(clip)
+                  onClose()
+                }}
+              >
+                发布
+              </Button>
+            ) : null}
             {clip.state === 'failed' || clip.state === 'draft' ? (
               <Button
                 size="small"
@@ -310,14 +326,19 @@ function ClipToast({
   )
 }
 
-function showClipToast(clip: Clip, span: string, canDownload: boolean) {
+function showClipToast(
+  clip: Clip,
+  span: string,
+  canDownload: boolean,
+  onPublish: ((clip: Clip) => void) | null
+) {
   const id = `clip-${clip.id}`
   const close = () => Toast.close(id)
   Toast.info({
     id,
     duration: 0,
     icon: <IconScissors />,
-    content: <ClipToast initial={clip} span={span} canDownload={canDownload} onClose={close} />,
+    content: <ClipToast initial={clip} span={span} canDownload={canDownload} onPublish={onPublish} onClose={close} />,
   })
 }
 
@@ -327,11 +348,13 @@ function LastClipButtons({
   reason,
   canDownload,
   playerRoot,
+  onPublish,
 }: {
   sessionId: number | null
   reason: string | null
   canDownload: boolean
   playerRoot: React.RefObject<HTMLDivElement | null>
+  onPublish: ((clip: Clip) => void) | null
 }) {
   const [pending, setPending] = useState<number | null>(null)
   const cut = useCallback(
@@ -346,7 +369,7 @@ function LastClipButtons({
       createLiveClip(sessionId, { lastMs, pressedAt, latencyMs }).then(
         (clip) => {
           setPending(null)
-          showClipToast(clip, span, canDownload)
+          showClipToast(clip, span, canDownload, onPublish)
         },
         (e: unknown) => {
           setPending(null)
@@ -354,7 +377,7 @@ function LastClipButtons({
         }
       )
     },
-    [reason, sessionId, canDownload, playerRoot]
+    [reason, sessionId, canDownload, playerRoot, onPublish]
   )
   return (
     <span className={styles.clipGroup} role="group" aria-label="剪下刚才">
@@ -407,6 +430,9 @@ export function LiveMarkBar({
   const { can, isLoading } = useMe()
   const reason = markDisabledReason(streamer, can('clip.edit'), isLoading)
   const canDownload = can('file.view')
+  const canSubmit = can('upload.submit')
+  const [publishTarget, setPublishTarget] = useState<PublishTarget | null>(null)
+  const openPublish = useCallback((clip: Clip) => setPublishTarget({ clips: [clip], batch: false }), [])
   const sessionId = streamer.session_id ?? null
   const count = streamer.marker_count ?? 0
 
@@ -461,7 +487,13 @@ export function LiveMarkBar({
       ) : (
         button
       )}
-      <LastClipButtons sessionId={sessionId} reason={reason} canDownload={canDownload} playerRoot={playerRoot} />
+      <LastClipButtons
+        sessionId={sessionId}
+        reason={reason}
+        canDownload={canDownload}
+        playerRoot={playerRoot}
+        onPublish={canSubmit ? openPublish : null}
+      />
       <Text type="tertiary" size="small" className={styles.hint}>
         {reason ?? '标记正在放的画面（默认带上之前 60 秒），之后在录像回看里剪；或者直接剪下刚才的一段'}
       </Text>
@@ -471,6 +503,7 @@ export function LiveMarkBar({
           本场 {count} 个
         </span>
       ) : null}
+      <PublishDrawer target={publishTarget} onClose={() => setPublishTarget(null)} />
     </div>
   )
 }
