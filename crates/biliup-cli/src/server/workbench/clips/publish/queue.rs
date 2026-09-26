@@ -7,6 +7,8 @@
 //!
 //! B 站返回 601（上传太频繁）时整个队列暂停，等用户点「继续」，不自动重试。失败的任务留着原因，
 //! 重试时已经传好的 P 不再重传。任务只在内存里：服务重启后队列清空，已发布的切片不受影响。
+//! 只有「投稿中」落库（`clips.submit_state`）：投稿返回后、记账前服务退出的切片，重启后记为
+//! 投稿结果未知，再次发布要用户先去 B 站确认过（`confirm_unknown`）。
 
 use super::{Archive, ClipVars, StudioOverride, cover_file, session_info, template_for};
 use crate::server::common::upload::{
@@ -39,6 +41,7 @@ const KEEP_FINISHED: usize = 200;
 /// 等导出时多久看一次。
 const EXPORT_POLL: Duration = Duration::from_millis(500);
 pub const RATE_LIMITED: &str = "B 站提示上传太频繁，已暂停，稍后点继续";
+pub const UNKNOWN_HINT: &str = "请先到 B 站稿件管理确认是否已投稿";
 
 /// 上传、投稿出错。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -303,7 +306,12 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /// 任务出错后怎么收场。
 enum Outcome {
-    Done { bvid: String, title: String },
+    Done {
+        bvid: String,
+        title: String,
+        /// 投稿成功但没记上账。
+        warning: Option<String>,
+    },
     Paused(String),
     Failed(String),
 }
@@ -351,6 +359,14 @@ impl ClipPublisher {
             .map(|j| j.view.clone())
     }
 
+    /// 这些切片现在能不能排进队列（不排）：没发布过，也不在队列里未完成的任务中；投稿结果未知的
+    /// 要 `confirm_unknown`（用户确认过 B 站那边没有这个稿件）。
+    pub fn check(&self, clips: &[Clip], confirm_unknown: bool) -> Result<(), EnqueueError> {
+        check_clips(clips)?;
+        check_queue(&lock(&self.queue), clips)?;
+        check_submit(clips, confirm_unknown)
+    }
+
     /// 排进队列。`clips` 已按时间排好、都属于 `session_id`；调用方已检查过状态。
     pub fn enqueue(
         &self,
@@ -359,35 +375,12 @@ impl ClipPublisher {
         settings: Settings,
         mode: Mode,
         created_by: Option<i64>,
+        confirm_unknown: bool,
     ) -> Result<JobView, EnqueueError> {
-        if clips.is_empty() {
-            return Err(EnqueueError::Invalid("没有选切片".into()));
-        }
-        if let Some(clip) = clips.iter().find(|c| c.state == ClipState::Published) {
-            return Err(EnqueueError::Conflict(format!(
-                "切片 #{} 已经发布过了（{}）",
-                clip.id,
-                clip.archive_bvid.as_deref().unwrap_or("稿件号未知")
-            )));
-        }
+        check_clips(clips)?;
         let mut queue = lock(&self.queue);
-        for job in &queue.jobs {
-            if job.view.state == JobState::Done {
-                continue;
-            }
-            if let Some(id) = clips
-                .iter()
-                .map(|c| c.id)
-                .find(|id| job.view.clip_ids.contains(id))
-            {
-                let why = if job.view.state == JobState::Failed {
-                    "上次发布失败的任务还在：点「重试」，或先把它移出队列"
-                } else {
-                    "已经在发布队列里"
-                };
-                return Err(EnqueueError::Conflict(format!("切片 #{id} {why}")));
-            }
-        }
+        check_queue(&queue, clips)?;
+        check_submit(clips, confirm_unknown)?;
         let now = now_ms();
         let view = JobView {
             id: self.next_id.fetch_add(1, Ordering::Relaxed),
@@ -583,11 +576,20 @@ impl ClipPublisher {
         job.view.updated_at = now_ms();
         job.view.ratio = None;
         match outcome {
-            Outcome::Done { bvid, title } => {
+            Outcome::Done {
+                bvid,
+                title,
+                warning,
+            } => {
                 info!(job = id, %bvid, %title, "切片发布成功");
                 job.view.state = JobState::Done;
                 job.view.step = None;
-                job.view.detail = "已发布".into();
+                job.view.detail = if warning.is_some() {
+                    "已投稿，但没记上发布结果".into()
+                } else {
+                    "已发布".into()
+                };
+                job.view.error = warning;
                 job.view.bvid = Some(bvid);
                 job.view.title = Some(title);
                 job.videos.clear();
@@ -733,18 +735,39 @@ impl ClipPublisher {
                 }
             }
         }
+        // 先落库再投稿：投稿返回之后、记账之前服务退出的话，重启后能认出这些切片
+        let ids: Vec<i64> = parts.iter().map(|c| c.id).collect();
+        let job = i64::try_from(id).unwrap_or(i64::MAX);
+        if let Err(e) = clips::begin_submit(&self.pool, &ids, job, now_ms()).await {
+            return Outcome::Failed(format!("投稿前写数据库出错，没有投稿：{e}"));
+        }
         let submitted = match connection.submit(&studio).await {
             Ok(s) => s,
-            Err(Failure::RateLimited(m)) => return Outcome::Paused(m),
-            Err(Failure::Other(m)) => return Outcome::Failed(format!("投稿失败：{m}")),
+            Err(failure) => {
+                if let Err(e) = clips::end_submit(&self.pool, &ids, job).await {
+                    warn!(job = id, error = %e, "投稿失败后清除投稿中标记失败");
+                }
+                return match failure {
+                    Failure::RateLimited(m) => Outcome::Paused(m),
+                    Failure::Other(m) => Outcome::Failed(format!("投稿失败：{m}")),
+                };
+            }
         };
-        let ids: Vec<i64> = parts.iter().map(|c| c.id).collect();
-        if let Err(e) = clips::mark_published(&self.pool, &ids, &submitted.bvid, now_ms()).await {
-            warn!(job = id, error = %e, bvid = %submitted.bvid, "已投稿，但记录发布结果失败");
-        }
+        let warning = match clips::mark_published(&self.pool, &ids, &submitted.bvid, now_ms()).await
+        {
+            Ok(()) => None,
+            Err(e) => {
+                warn!(job = id, error = %e, bvid = %submitted.bvid, "已投稿，但记录发布结果失败");
+                Some(format!(
+                    "已投稿，但没记上发布结果（{e}），切片暂时仍显示未发布；不要再发一次，\
+                     再次发布前{UNKNOWN_HINT}"
+                ))
+            }
+        };
         Outcome::Done {
             bvid: submitted.bvid,
             title: studio.title,
+            warning,
         }
     }
 
@@ -853,6 +876,57 @@ pub async fn archive(
             .collect(),
         cover,
     })
+}
+
+fn check_clips(clips: &[Clip]) -> Result<(), EnqueueError> {
+    if clips.is_empty() {
+        return Err(EnqueueError::Invalid("没有选切片".into()));
+    }
+    if let Some(clip) = clips.iter().find(|c| c.state == ClipState::Published) {
+        return Err(EnqueueError::Conflict(format!(
+            "切片 #{} 已经发布过了（{}）",
+            clip.id,
+            clip.archive_bvid.as_deref().unwrap_or("稿件号未知")
+        )));
+    }
+    Ok(())
+}
+
+fn check_queue(queue: &Queue, clips: &[Clip]) -> Result<(), EnqueueError> {
+    for job in &queue.jobs {
+        if job.view.state == JobState::Done {
+            continue;
+        }
+        if let Some(id) = clips
+            .iter()
+            .map(|c| c.id)
+            .find(|id| job.view.clip_ids.contains(id))
+        {
+            let why = if job.view.state == JobState::Failed {
+                "上次发布失败的任务还在：点「重试」，或先把它移出队列"
+            } else {
+                "已经在发布队列里"
+            };
+            return Err(EnqueueError::Conflict(format!("切片 #{id} {why}")));
+        }
+    }
+    Ok(())
+}
+
+/// 投稿中（本进程里记账失败）或投稿结果未知（投稿中服务退出）的切片，B 站那边可能已经有稿件。
+/// 正在投稿的任务在队列里，先由 [`check_queue`] 挡下。
+fn check_submit(clips: &[Clip], confirm_unknown: bool) -> Result<(), EnqueueError> {
+    if confirm_unknown {
+        return Ok(());
+    }
+    match clips.iter().find(|c| c.submit_state.is_some()) {
+        Some(clip) => Err(EnqueueError::Conflict(format!(
+            "切片 #{} 上次投稿的结果未知（投稿请求发出后服务退出了，或没记上结果），可能已经投稿成功。\
+             {UNKNOWN_HINT}，确认没有之后再发布时带上 confirm_unknown: true",
+            clip.id
+        ))),
+        None => Ok(()),
+    }
 }
 
 /// 已结束的任务最多留 [`KEEP_FINISHED`] 个，先丢成功的旧任务，失败的留给用户处理。

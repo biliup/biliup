@@ -84,6 +84,7 @@ struct Fixture {
     app: Router,
     pool: ConnectionPool,
     fake: Arc<Fake>,
+    publisher: Arc<ClipPublisher>,
     session: i64,
     template: i64,
 }
@@ -168,7 +169,7 @@ async fn fixture() -> Fixture {
     let state = AppState {
         pool: pool.clone(),
         clips,
-        publisher,
+        publisher: publisher.clone(),
         client: StatelessClient::default(),
     };
     let app = Router::new()
@@ -179,12 +180,7 @@ async fn fixture() -> Fixture {
         )
         .route("/v1/clips/{cid}", get(get_clip))
         .route("/v1/clips/{cid}/publish", post(publish_clip))
-        .route(
-            "/v1/clips/{cid}/cover",
-            get(get_clip_cover)
-                .put(put_clip_cover)
-                .delete(delete_clip_cover),
-        )
+        .route("/v1/clips/{cid}/cover", cover_route())
         .route("/v1/sessions/{id}/thumb", get(get_session_thumb))
         .route(
             "/v1/publish-jobs",
@@ -203,6 +199,7 @@ async fn fixture() -> Fixture {
         app,
         pool,
         fake,
+        publisher,
         session,
         template,
     }
@@ -471,6 +468,7 @@ async fn publishing_one_clip_runs_every_step_as_a_reprint() {
     .await;
     let jid = job["jobs"][0]["id"].as_u64().unwrap();
     assert_eq!(job["jobs"][0]["clip_ids"], json!([id]));
+    assert_eq!(job["skipped"], json!([]));
     let done = f.wait_job(&op, jid, "done").await;
     assert_eq!(done["bvid"], "BV1api1");
     assert_eq!(done["title"], "名场面");
@@ -727,6 +725,145 @@ async fn rate_limit_pauses_and_clips_in_the_queue_are_locked() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
+/// 集中发布：有切片已经在队列里（哪怕排在后面）就整批不排；检查之后才被别的请求抢先排上的，
+/// 其余照排，被跳过的列在 `skipped` 里，不再只打一条日志。
+#[tokio::test]
+async fn batches_are_all_or_nothing_and_late_conflicts_are_reported() {
+    let f = fixture().await;
+    let op = login(&f.app, "op", "operator-password").await;
+    let a = f.clip(&op, 1000, 2000, "a").await;
+    let b = f.clip(&op, 3000, 5000, "b").await;
+    let c = f.clip(&op, 5000, 6000, "c").await;
+    f.fake
+        .upload_failures
+        .lock()
+        .unwrap()
+        .push_back(Failure::Other("连接被重置".into()));
+    let job = json_of(
+        send(
+            &f.app,
+            Some(&op),
+            "POST",
+            &format!("/v1/clips/{b}/publish"),
+            Some(json!({})),
+        )
+        .await,
+        StatusCode::ACCEPTED,
+    )
+    .await;
+    let failed = job["jobs"][0]["id"].as_u64().unwrap();
+    f.wait_job(&op, failed, "failed").await;
+
+    let response = send(
+        &f.app,
+        Some(&op),
+        "POST",
+        "/v1/publish-jobs",
+        Some(json!({ "clip_ids": [a, b, c] })),
+    )
+    .await;
+    let message = text_of(response, StatusCode::CONFLICT).await;
+    assert!(message.contains(&format!("切片 #{b} ")), "{message}");
+    assert!(message.contains("重试"), "{message}");
+    let jobs = f.jobs(&op).await;
+    assert_eq!(
+        jobs["jobs"].as_array().unwrap().len(),
+        1,
+        "a、c 都没排：{jobs}"
+    );
+
+    // 模拟检查之后、排队之前 b 被另一个请求排上
+    let mut groups = Vec::new();
+    for id in [a, b, c] {
+        groups.push(vec![clips::get(&f.pool, id).await.unwrap().unwrap()]);
+    }
+    let body = PublishBatch {
+        clip_ids: vec![a, b, c],
+        ..PublishBatch::default()
+    };
+    let (jobs, skipped) = enqueue_groups(&f.publisher, &groups, &body, Mode::Quick, None);
+    assert_eq!(
+        jobs.iter().map(|j| j.clip_ids.clone()).collect::<Vec<_>>(),
+        vec![vec![a], vec![c]]
+    );
+    let response = json_of(accepted(jobs, skipped), StatusCode::ACCEPTED).await;
+    assert_eq!(response["jobs"].as_array().unwrap().len(), 2);
+    assert_eq!(response["skipped"].as_array().unwrap().len(), 1);
+    assert_eq!(response["skipped"][0]["clip_ids"], json!([b]));
+    let reason = response["skipped"][0]["reason"].as_str().unwrap();
+    assert!(reason.contains(&format!("切片 #{b} ")), "{reason}");
+
+    // 一个都没排上：409，给出原因
+    let (jobs, skipped) = enqueue_groups(&f.publisher, &groups[1..2], &body, Mode::Quick, None);
+    assert!(jobs.is_empty());
+    let message = text_of(accepted(jobs, skipped), StatusCode::CONFLICT).await;
+    assert!(message.contains(&format!("切片 #{b} ")), "{message}");
+}
+
+/// 投稿结果未知的切片（上次投稿中服务退出）：接口里看得到，再次发布要带 `confirm_unknown: true`。
+#[tokio::test]
+async fn clips_with_an_unknown_submit_result_need_confirmation() {
+    let f = fixture().await;
+    let op = login(&f.app, "op", "operator-password").await;
+    let id = f.clip(&op, 1000, 2000, "a").await;
+    sqlx::query(
+        "UPDATE clips SET submit_state = 'unknown', submit_job = 3, submit_started_at = 1790000000000
+         WHERE id = ?",
+    )
+    .bind(id)
+    .execute(&f.pool)
+    .await
+    .unwrap();
+    let clip = json_of(
+        send(&f.app, Some(&op), "GET", &format!("/v1/clips/{id}"), None).await,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(clip["submit_state"], "unknown");
+    assert_eq!(clip["submit_started_at"], 1790000000000i64);
+    assert_eq!(clip["state"], "draft");
+
+    let publish = format!("/v1/clips/{id}/publish");
+    let response = send(&f.app, Some(&op), "POST", &publish, Some(json!({}))).await;
+    let message = text_of(response, StatusCode::CONFLICT).await;
+    assert!(message.contains(queue::UNKNOWN_HINT), "{message}");
+    assert!(message.contains("confirm_unknown"), "{message}");
+    let response = send(
+        &f.app,
+        Some(&op),
+        "POST",
+        "/v1/publish-jobs",
+        Some(json!({ "clip_ids": [id] })),
+    )
+    .await;
+    let message = text_of(response, StatusCode::CONFLICT).await;
+    assert!(message.contains(queue::UNKNOWN_HINT), "{message}");
+    assert_eq!(f.jobs(&op).await["jobs"], json!([]));
+    assert!(f.fake.submitted.lock().unwrap().is_empty());
+
+    let job = json_of(
+        send(
+            &f.app,
+            Some(&op),
+            "POST",
+            &publish,
+            Some(json!({ "confirm_unknown": true })),
+        )
+        .await,
+        StatusCode::ACCEPTED,
+    )
+    .await;
+    let jid = job["jobs"][0]["id"].as_u64().unwrap();
+    f.wait_job(&op, jid, "done").await;
+    let clip = json_of(
+        send(&f.app, Some(&op), "GET", &format!("/v1/clips/{id}"), None).await,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(clip["state"], "published");
+    assert_eq!(clip["submit_state"], Value::Null);
+}
+
 fn png() -> Vec<u8> {
     let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
     bytes.extend_from_slice(&[0; 32]);
@@ -874,6 +1011,51 @@ async fn covers_and_publish_settings_are_stored_on_the_clip() {
     let response = send(&f.app, Some(&op), "DELETE", &one, None).await;
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     assert!(!file.exists());
+}
+
+/// 上传的封面按 5 MB 算，不是 axum 默认的 2 MB 请求体上限；超了给一句能照着做的话。
+#[tokio::test]
+async fn cover_uploads_up_to_five_megabytes_are_accepted() {
+    let f = fixture().await;
+    let op = login(&f.app, "op", "operator-password").await;
+    let id = f.clip(&op, 1000, 2000, "a").await;
+    let cover = format!("/v1/clips/{id}/cover");
+
+    let mut three_mb = png();
+    three_mb.resize(3 * 1024 * 1024, 0);
+    let over = json_of(
+        send_bytes(&f.app, &op, &cover, "image/png", three_mb.clone()).await,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(over["cover"], json!({ "source": "upload" }));
+    let response = send(&f.app, Some(&op), "GET", &cover, None).await;
+    assert_eq!(body_of(response, StatusCode::OK).await, three_mb);
+
+    let mut limit = png();
+    limit.resize(thumb::MAX_JPEG_BYTES, 0);
+    let response = send_bytes(&f.app, &op, &cover, "image/png", limit).await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let mut six_mb = png();
+    six_mb.resize(6 * 1024 * 1024, 0);
+    let response = send_bytes(&f.app, &op, &cover, "image/png", six_mb).await;
+    let message = text_of(response, StatusCode::PAYLOAD_TOO_LARGE).await;
+    assert!(message.contains("最大 5 MB"), "{message}");
+
+    // 不带 Content-Length（分块上传）也一样
+    let request = Request::builder()
+        .method("PUT")
+        .uri(&cover)
+        .header(header::COOKIE, &op)
+        .header(header::CONTENT_TYPE, "image/jpeg")
+        .body(Body::from_stream(futures::stream::iter(
+            (0..6).map(|_| Ok::<_, std::io::Error>(vec![0xff; 1024 * 1024])),
+        )))
+        .unwrap();
+    let response = f.app.clone().oneshot(request).await.unwrap();
+    let message = text_of(response, StatusCode::PAYLOAD_TOO_LARGE).await;
+    assert!(message.contains("最大 5 MB"), "{message}");
 }
 
 /// 用系统的 FFmpeg 编一段真的 H.264 FLV，取帧、存成封面。没有 FFmpeg 时跳过。

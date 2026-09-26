@@ -11,7 +11,7 @@ use crate::server::workbench::clips::publish::queue::{ClipPublisher, JobState};
 use crate::server::workbench::clips::publish::{StudioOverride, cover_file};
 use crate::server::workbench::clips::{
     self, Clip, ClipChanges, MAX_CLIP_MS, MAX_CLIPS_PER_SESSION, MAX_TITLE_CHARS, Mode, NewClip,
-    State as ClipState, UpdateOutcome,
+    State as ClipState, SubmitState, UpdateOutcome,
 };
 use crate::server::workbench::markers::{self, Timing};
 use crate::server::workbench::{live, recorder, store};
@@ -77,6 +77,9 @@ pub struct ClipView {
     /// 发布后的稿件号。
     pub archive_bvid: Option<String>,
     pub published_at: Option<i64>,
+    /// `submitting`：正在投稿；`unknown`：投稿中服务退出了，B 站那边可能已经有稿件，再次发布前要确认。
+    pub submit_state: Option<SubmitState>,
+    pub submit_started_at: Option<i64>,
     pub created_by: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -108,6 +111,8 @@ fn view(clip: Clip, exports: &ClipExports) -> ClipView {
         template_id: clip.template_id,
         archive_bvid: clip.archive_bvid,
         published_at: clip.published_at,
+        submit_state: clip.submit_state,
+        submit_started_at: clip.submit_started_at,
         created_by: clip.created_by,
         created_at: clip.created_at,
         updated_at: clip.updated_at,

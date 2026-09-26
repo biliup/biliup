@@ -8,6 +8,9 @@
 //! - `GET /v1/sessions/{id}/thumb?t=`：取一帧 JPEG；`PUT / GET / DELETE /v1/clips/{cid}/cover`：切片封面
 //!   （取帧、直播间封面或上传的图片）。
 //!
+//! 上次投稿结果未知（`submit_state` 为 `unknown`，投稿中服务退出）的切片，要带 `confirm_unknown: true`
+//! 才能再发布，否则 409 并提示先到 B 站稿件管理确认。
+//!
 //! 发布、重试、继续要 `upload.submit`，看队列、取帧、看封面要 `file.view`，改封面要 `clip.edit`，
 //! 都由策略层按路由表判断。
 
@@ -26,9 +29,11 @@ use crate::server::workbench::recorder::now_ms;
 use crate::server::workbench::store;
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::{Path, Query, State};
+use axum::extract::rejection::BytesRejection;
+use axum::extract::{DefaultBodyLimit, FromRef, Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use axum::routing::{MethodRouter, get};
 use biliup::client::StatelessClient;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::Arc;
@@ -105,6 +110,9 @@ pub struct PublishClip {
     /// 还没导出时怎么导出；默认快速剪。
     #[serde(default)]
     pub mode: Option<Mode>,
+    /// 切片上次投稿的结果未知时，用户已到 B 站确认过没有这个稿件。
+    #[serde(default)]
+    pub confirm_unknown: bool,
 }
 
 impl PublishClip {
@@ -130,6 +138,9 @@ pub struct PublishBatch {
     pub studio_override: Option<StudioOverride>,
     #[serde(default)]
     pub mode: Option<Mode>,
+    /// 同 [`PublishClip::confirm_unknown`]，对这一批的切片都算。
+    #[serde(default)]
+    pub confirm_unknown: bool,
 }
 
 impl PublishBatch {
@@ -144,6 +155,15 @@ impl PublishBatch {
 #[derive(Debug, Serialize)]
 pub struct Jobs {
     pub jobs: Vec<JobView>,
+    /// 没排进队列的切片和原因；都排上了是空数组。
+    pub skipped: Vec<Skipped>,
+}
+
+/// 集中发布时没排进队列的一组切片（检查之后、排队之前被另一个请求抢先排了）。
+#[derive(Debug, Serialize)]
+pub struct Skipped {
+    pub clip_ids: Vec<i64>,
+    pub reason: String,
 }
 
 /// 读出切片并检查：都在、属于同一场、没发布过。按时间排序。
@@ -291,7 +311,7 @@ async fn enqueue(
         ));
     }
     let groups = groups(clips, body.combine);
-    // 先全部检查一遍（模板、标签、封面），有一个不行就都不排
+    // 先全部检查一遍（模板、标签、封面、是否已在队列里），有一个不行就都不排
     for group in &groups {
         let settings = body.settings().for_clip(&group[0]);
         let problem =
@@ -307,27 +327,58 @@ async fn enqueue(
             };
             return conflict(format!("{which}{problem}"));
         }
+        match publisher.check(group, body.confirm_unknown) {
+            Ok(()) => {}
+            Err(EnqueueError::Invalid(m)) => return bad_request(m),
+            Err(EnqueueError::Conflict(m)) => return conflict(m),
+        }
     }
     let mode = body.mode.unwrap_or(Mode::Quick);
+    let (jobs, skipped) = enqueue_groups(publisher, &groups, body, mode, caller.subject.user_id);
+    accepted(jobs, skipped)
+}
+
+/// 逐组排队。上面已经检查过，这里还排不上的只可能是同时有别的请求排了同一个切片，
+/// 记下来告诉调用方，其余照排。
+fn enqueue_groups(
+    publisher: &ClipPublisher,
+    groups: &[Vec<Clip>],
+    body: &PublishBatch,
+    mode: Mode,
+    created_by: Option<i64>,
+) -> (Vec<JobView>, Vec<Skipped>) {
     let mut jobs = Vec::new();
-    for group in &groups {
+    let mut skipped = Vec::new();
+    for group in groups {
         let settings = body.settings().for_clip(&group[0]);
         match publisher.enqueue(
             group[0].session_id,
             group,
             settings,
             mode,
-            caller.subject.user_id,
+            created_by,
+            body.confirm_unknown,
         ) {
             Ok(job) => jobs.push(job),
-            Err(EnqueueError::Invalid(m)) => return bad_request(m),
-            Err(EnqueueError::Conflict(m)) if jobs.is_empty() => return conflict(m),
-            Err(EnqueueError::Conflict(m)) => {
-                warn!(message = %m, "集中发布时有切片没排进队列");
+            Err(EnqueueError::Invalid(reason) | EnqueueError::Conflict(reason)) => {
+                warn!(%reason, "集中发布时有切片没排进队列");
+                skipped.push(Skipped {
+                    clip_ids: group.iter().map(|c| c.id).collect(),
+                    reason,
+                });
             }
         }
     }
-    (StatusCode::ACCEPTED, Json(Jobs { jobs })).into_response()
+    (jobs, skipped)
+}
+
+/// 排上了至少一个稿件就是 202，没排上的列在 `skipped` 里；一个都没排上是 409。
+fn accepted(jobs: Vec<JobView>, skipped: Vec<Skipped>) -> Response {
+    if jobs.is_empty() {
+        let reasons: Vec<&str> = skipped.iter().map(|s| s.reason.as_str()).collect();
+        return conflict(reasons.join("；"));
+    }
+    (StatusCode::ACCEPTED, Json(Jobs { jobs, skipped })).into_response()
 }
 
 /// `POST /v1/clips/{cid}/publish`：给了发布设置就先存到切片上，再排进发布队列；返回 202。
@@ -366,12 +417,14 @@ pub async fn publish_clip(
     let batch = PublishBatch {
         clip_ids: vec![cid],
         mode: body.mode,
+        confirm_unknown: body.confirm_unknown,
         ..PublishBatch::default()
     };
     enqueue(&caller, &pool, &exports, &publisher, &batch, vec![clip]).await
 }
 
-/// `POST /v1/publish-jobs`
+/// `POST /v1/publish-jobs`：任何一个切片发不了（模板、标签、封面，已发布，已在队列里）就都不排，
+/// 返回 409；否则 202，`{"jobs": [...], "skipped": [...]}`。
 pub async fn publish_batch(
     caller: Caller,
     State(pool): State<ConnectionPool>,
@@ -561,6 +614,23 @@ async fn live_cover(
     }
 }
 
+const COVER_TOO_LARGE: &str = "封面图片最大 5 MB，压缩或裁小一点再上传";
+
+/// `/v1/clips/{cid}/cover` 的 GET / PUT / DELETE。上传的图片最大 [`thumb::MAX_JPEG_BYTES`]，
+/// 比 axum 默认的请求体上限（2 MB）大，所以只在这条路由上放宽。
+pub fn cover_route<S>() -> MethodRouter<S>
+where
+    S: Clone + Send + Sync + 'static,
+    ConnectionPool: FromRef<S>,
+    Arc<ClipExports>: FromRef<S>,
+    StatelessClient: FromRef<S>,
+{
+    get(get_clip_cover)
+        .put(put_clip_cover)
+        .delete(delete_clip_cover)
+        .layer(DefaultBodyLimit::max(thumb::MAX_JPEG_BYTES))
+}
+
 /// `PUT /v1/clips/{cid}/cover`：JSON `{"t": 毫秒}` 取帧、`{"live": true}` 用直播间封面，
 /// 或者直接上传图片（`Content-Type: image/jpeg|png|webp`，最大 5 MB）。存好后切片的发布设置改用它。
 pub async fn put_clip_cover(
@@ -569,8 +639,15 @@ pub async fn put_clip_cover(
     State(client): State<StatelessClient>,
     Path(cid): Path<i64>,
     headers: HeaderMap,
-    body: Bytes,
+    body: Result<Bytes, BytesRejection>,
 ) -> Response {
+    let body = match body {
+        Ok(body) => body,
+        Err(rejection) if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE => {
+            return (StatusCode::PAYLOAD_TOO_LARGE, COVER_TOO_LARGE).into_response();
+        }
+        Err(rejection) => return rejection.into_response(),
+    };
     let clip = match clips::get(&pool, cid).await {
         Ok(Some(clip)) => clip,
         Ok(None) => return clip_not_found(),
@@ -601,7 +678,7 @@ pub async fn put_clip_cover(
         }
     } else {
         if body.len() > thumb::MAX_JPEG_BYTES {
-            return (StatusCode::PAYLOAD_TOO_LARGE, "封面图片最大 5 MB").into_response();
+            return (StatusCode::PAYLOAD_TOO_LARGE, COVER_TOO_LARGE).into_response();
         }
         if image_type(&body).is_none() {
             return (

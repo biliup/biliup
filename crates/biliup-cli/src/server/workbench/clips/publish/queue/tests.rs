@@ -1,7 +1,8 @@
 use super::*;
 use crate::server::workbench::clips::tests::flv_session;
-use crate::server::workbench::clips::{NewClip, insert};
+use crate::server::workbench::clips::{NewClip, SubmitState, insert};
 use std::collections::{BTreeSet, VecDeque};
+use std::sync::atomic::AtomicBool;
 use tempfile::TempDir;
 
 /// 假的 B 站：按脚本返回失败，记下上传了什么、投了什么。
@@ -14,6 +15,8 @@ struct Fake {
     upload_failures: Mutex<VecDeque<Failure>>,
     submit_failures: Mutex<VecDeque<Failure>>,
     delay: Duration,
+    /// 投稿请求到了 B 站之后不再返回（模拟这时进程退出）。
+    hang_after_submit: AtomicBool,
 }
 
 struct FakeConnection(Arc<Fake>);
@@ -58,6 +61,9 @@ impl Connection for FakeConnection {
         lock(&self.0.submitted)
             .push(serde_json::from_value(serde_json::to_value(studio).unwrap()).unwrap());
         let n = lock(&self.0.submitted).len();
+        if self.0.hang_after_submit.load(Ordering::Relaxed) {
+            std::future::pending::<()>().await;
+        }
         Ok(Submitted {
             bvid: format!("BV1fake{n}"),
         })
@@ -68,6 +74,7 @@ struct Env {
     _dir: TempDir,
     pool: ConnectionPool,
     session: i64,
+    exports: Arc<ClipExports>,
     fake: Arc<Fake>,
     publisher: Arc<ClipPublisher>,
 }
@@ -104,7 +111,7 @@ async fn env() -> Env {
     });
     let publisher = Arc::new(ClipPublisher::new(
         pool.clone(),
-        exports,
+        exports.clone(),
         Arc::new(fake.clone()),
     ));
     publisher.spawn();
@@ -112,6 +119,7 @@ async fn env() -> Env {
         _dir: dir,
         pool,
         session,
+        exports,
         fake,
         publisher,
     }
@@ -138,30 +146,13 @@ impl Env {
                 Settings::default(),
                 Mode::Quick,
                 Some(7),
+                false,
             )
             .unwrap()
     }
 
-    /// 等任务停在 `state`，顺便记下经过了哪些步骤。
     async fn wait(&self, id: u64, state: JobState) -> (JobView, BTreeSet<String>) {
-        let mut seen = BTreeSet::new();
-        for _ in 0..3000 {
-            let job = self.publisher.job(id).expect("任务不见了");
-            if let Some(step) = job.step {
-                seen.insert(format!("{step:?}"));
-            }
-            if job.state == state {
-                return (job, seen);
-            }
-            assert!(
-                !(matches!(job.state, JobState::Failed | JobState::Done) && job.state != state),
-                "任务停在 {:?}：{:?}",
-                job.state,
-                job.error
-            );
-            tokio::time::sleep(Duration::from_millis(2)).await;
-        }
-        panic!("任务没有到 {state:?}：{:?}", self.publisher.job(id));
+        wait_on(&self.publisher, id, state).await
     }
 
     async fn pins(&self) -> i64 {
@@ -170,6 +161,32 @@ impl Env {
             .await
             .unwrap()
     }
+}
+
+/// 等任务停在 `state`，顺便记下经过了哪些步骤。
+async fn wait_on(
+    publisher: &ClipPublisher,
+    id: u64,
+    state: JobState,
+) -> (JobView, BTreeSet<String>) {
+    let mut seen = BTreeSet::new();
+    for _ in 0..3000 {
+        let job = publisher.job(id).expect("任务不见了");
+        if let Some(step) = job.step {
+            seen.insert(format!("{step:?}"));
+        }
+        if job.state == state {
+            return (job, seen);
+        }
+        assert!(
+            !(matches!(job.state, JobState::Failed | JobState::Done) && job.state != state),
+            "任务停在 {:?}：{:?}",
+            job.state,
+            job.error
+        );
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    panic!("任务没有到 {state:?}：{:?}", publisher.job(id));
 }
 
 #[tokio::test]
@@ -217,8 +234,14 @@ async fn one_clip_is_exported_uploaded_and_submitted_as_a_reprint() {
 
     // 已发布的不能再排
     assert!(matches!(
-        env.publisher
-            .enqueue(env.session, &[clip], Settings::default(), Mode::Quick, None),
+        env.publisher.enqueue(
+            env.session,
+            &[clip],
+            Settings::default(),
+            Mode::Quick,
+            None,
+            false
+        ),
         Err(EnqueueError::Conflict(_))
     ));
 }
@@ -303,6 +326,7 @@ async fn failures_keep_their_reason_and_retry_skips_uploaded_parts() {
     assert_eq!(lock(&env.fake.uploads).len(), 2);
     let clip = clips::get(&env.pool, a.id).await.unwrap().unwrap();
     assert_eq!(clip.state, ClipState::Ready, "没投成的切片不算发布");
+    assert_eq!(clip.submit_state, None, "B 站明确拒绝了，不算投稿结果未知");
     assert!(env.pins().await > 0);
 
     // 失败的任务还在：同一个切片不能再排一次
@@ -314,6 +338,7 @@ async fn failures_keep_their_reason_and_retry_skips_uploaded_parts() {
             Settings::default(),
             Mode::Quick,
             None,
+            false,
         )
         .unwrap_err();
     assert!(matches!(again, EnqueueError::Conflict(ref m) if m.contains("重试")));
@@ -367,7 +392,7 @@ async fn queued_jobs_can_be_removed_and_running_uploads_are_stopped() {
     let second = env.enqueue(std::slice::from_ref(&b));
     assert!(matches!(
         env.publisher
-            .enqueue(env.session, std::slice::from_ref(&a), Settings::default(), Mode::Quick, None),
+            .enqueue(env.session, std::slice::from_ref(&a), Settings::default(), Mode::Quick, None, false),
         Err(EnqueueError::Conflict(ref m)) if m.contains("已经在发布队列里")
     ));
     env.publisher.remove(second.id).unwrap();
@@ -415,4 +440,125 @@ fn rate_limits_and_bilibili_rejections_are_told_apart() {
         ),
         "B 站拒绝了封面：封面格式不对（code 21566）"
     );
+}
+
+/// 投稿请求到了 B 站、还没记账时进程退出：重启后切片记为投稿结果未知，再次发布要显式确认。
+#[tokio::test]
+async fn a_crash_after_submitting_blocks_publishing_again_until_confirmed() {
+    let env = env().await;
+    let clip = env.clip(1000, 2000, "名场面").await;
+    env.fake.hang_after_submit.store(true, Ordering::Relaxed);
+    let job = env.enqueue(std::slice::from_ref(&clip));
+    for _ in 0..3000 {
+        if !lock(&env.fake.submitted).is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    assert_eq!(lock(&env.fake.submitted).len(), 1, "投稿请求已经发出");
+    let row = clips::get(&env.pool, clip.id).await.unwrap().unwrap();
+    assert_eq!(row.submit_state, Some(SubmitState::Submitting));
+    assert_eq!(row.submit_job, Some(job.id as i64));
+    assert!(row.submit_started_at.is_some());
+    assert_eq!(row.state, ClipState::Ready);
+    assert_eq!(row.archive_bvid, None);
+
+    // 重启：内存里的队列没了，换一个新的发布器，按启动流程收尾
+    let fake = Arc::new(Fake::default());
+    let publisher = Arc::new(ClipPublisher::new(
+        env.pool.clone(),
+        env.exports.clone(),
+        Arc::new(fake.clone()),
+    ));
+    publisher.spawn();
+    assert_eq!(
+        clips::recover_submits(&env.pool, now_ms()).await.unwrap(),
+        1
+    );
+    let row = clips::get(&env.pool, clip.id).await.unwrap().unwrap();
+    assert_eq!(row.submit_state, Some(SubmitState::Unknown));
+    assert_eq!(row.state, ClipState::Ready, "仍显示未发布");
+
+    let refused = publisher
+        .enqueue(
+            env.session,
+            std::slice::from_ref(&row),
+            Settings::default(),
+            Mode::Quick,
+            None,
+            false,
+        )
+        .unwrap_err();
+    assert!(
+        matches!(refused, EnqueueError::Conflict(ref m) if m.contains(UNKNOWN_HINT) && m.contains("confirm_unknown")),
+        "{refused:?}"
+    );
+    assert!(publisher.check(std::slice::from_ref(&row), false).is_err());
+    assert!(publisher.view(None).jobs.is_empty());
+    assert!(lock(&fake.submitted).is_empty());
+
+    publisher.check(std::slice::from_ref(&row), true).unwrap();
+    let job = publisher
+        .enqueue(
+            env.session,
+            std::slice::from_ref(&row),
+            Settings::default(),
+            Mode::Quick,
+            None,
+            true,
+        )
+        .unwrap();
+    let (done, _) = wait_on(&publisher, job.id, JobState::Done).await;
+    assert_eq!(done.error, None);
+    let row = clips::get(&env.pool, clip.id).await.unwrap().unwrap();
+    assert_eq!(row.state, ClipState::Published);
+    assert_eq!(row.archive_bvid.as_deref(), Some("BV1fake1"));
+    assert_eq!(row.submit_state, None);
+    assert_eq!(row.submit_job, None);
+    assert_eq!(
+        clips::recover_submits(&env.pool, now_ms()).await.unwrap(),
+        0
+    );
+}
+
+/// 投稿成功但记账失败：任务不再只打一条日志就算成功，切片也不能直接再发一次。
+#[tokio::test]
+async fn bookkeeping_failures_are_shown_and_block_publishing_again() {
+    let env = env().await;
+    let clip = env.clip(1000, 2000, "a").await;
+    sqlx::query(
+        "CREATE TRIGGER no_publish BEFORE UPDATE OF state ON clips WHEN NEW.state = 'published'
+         BEGIN SELECT RAISE(ABORT, 'database is locked'); END",
+    )
+    .execute(&env.pool)
+    .await
+    .unwrap();
+    let job = env.enqueue(std::slice::from_ref(&clip));
+    let (done, _) = env.wait(job.id, JobState::Done).await;
+    assert_eq!(done.bvid.as_deref(), Some("BV1fake1"));
+    assert_eq!(done.detail, "已投稿，但没记上发布结果");
+    let warning = done.error.unwrap();
+    assert!(warning.contains("不要再发一次"), "{warning}");
+    assert!(warning.contains(UNKNOWN_HINT), "{warning}");
+    let row = clips::get(&env.pool, clip.id).await.unwrap().unwrap();
+    assert_eq!(row.state, ClipState::Ready);
+    assert_eq!(row.submit_state, Some(SubmitState::Submitting));
+
+    sqlx::query("DROP TRIGGER no_publish")
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    let refused = env
+        .publisher
+        .enqueue(
+            env.session,
+            std::slice::from_ref(&row),
+            Settings::default(),
+            Mode::Quick,
+            None,
+            false,
+        )
+        .unwrap_err();
+    assert!(matches!(refused, EnqueueError::Conflict(ref m) if m.contains(UNKNOWN_HINT)));
+    assert_eq!(lock(&env.fake.submitted).len(), 1);
 }

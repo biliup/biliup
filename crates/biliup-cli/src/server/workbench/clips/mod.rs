@@ -5,7 +5,8 @@
 //! - [`plan`]：把场次时间上的入点、出点换算成「从哪些分段的哪个字节读到哪个字节」；
 //! - [`remux`]：快速剪，进程内按关键帧切、不转码，重写时间戳后接成一个文件；
 //! - [`export`]：后台导出任务（快速剪 / 精确剪）、进度、失败原因，以及下载用的 MP4 转封装；
-//! - [`publish`]：按上传模板投稿（单并发队列，遇 601 暂停）；[`thumb`]：取帧做封面。
+//! - [`publish`]：按上传模板投稿（单并发队列，遇 601 暂停；投稿前后用 `submit_state` 防重复投稿）；
+//!   [`thumb`]：取帧做封面。
 
 pub mod export;
 pub mod plan;
@@ -89,6 +90,26 @@ impl State {
     }
 }
 
+/// 投稿到一半的标记（`clips.submit_state`），防止同一个切片投出两个稿件。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SubmitState {
+    /// 投稿请求已经（或正要）发给 B 站，还没记下结果。
+    Submitting,
+    /// 投稿中服务退出了：B 站那边可能已经有这个稿件。
+    Unknown,
+}
+
+impl SubmitState {
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "submitting" => Some(SubmitState::Submitting),
+            "unknown" => Some(SubmitState::Unknown),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Clip {
     pub id: i64,
@@ -112,6 +133,10 @@ pub struct Clip {
     pub studio_override: Option<String>,
     pub archive_bvid: Option<String>,
     pub published_at: Option<i64>,
+    pub submit_state: Option<SubmitState>,
+    /// 投稿的发布任务编号（进程内的，重启后从 1 重新数）。
+    pub submit_job: Option<i64>,
+    pub submit_started_at: Option<i64>,
     pub created_by: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -140,6 +165,11 @@ impl Clip {
             studio_override: row.try_get("studio_override")?,
             archive_bvid: row.try_get("archive_bvid")?,
             published_at: row.try_get("published_at")?,
+            submit_state: row
+                .try_get::<Option<&str>, _>("submit_state")?
+                .and_then(SubmitState::parse),
+            submit_job: row.try_get("submit_job")?,
+            submit_started_at: row.try_get("submit_started_at")?,
             created_by: row.try_get("created_by")?,
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
@@ -156,7 +186,8 @@ impl Clip {
 
 const COLUMNS: &str = "id, session_id, marker_id, in_ms, out_ms, cut_in_ms, cut_out_ms, mode, \
      title, state, output_path, output_bytes, duration_ms, error, template_id, studio_override, \
-     archive_bvid, published_at, created_by, created_at, updated_at";
+     archive_bvid, published_at, submit_state, submit_job, submit_started_at, created_by, \
+     created_at, updated_at";
 
 /// 引用分段时用的名义。
 pub fn pin_owner(id: i64) -> String {
@@ -363,7 +394,59 @@ pub async fn set_publish_settings(
         .transpose()
 }
 
-/// 投稿成功：记下稿件号和时间，撤销这些切片对源录像的引用（同一个事务）。
+/// 调投稿接口之前：把这些切片记为投稿中（同一个事务）。
+pub async fn begin_submit(
+    pool: &ConnectionPool,
+    ids: &[i64],
+    job: i64,
+    now: i64,
+) -> sqlx::Result<()> {
+    let mut tx = pool.begin().await?;
+    for &id in ids {
+        sqlx::query(
+            "UPDATE clips SET submit_state = 'submitting', submit_job = ?, submit_started_at = ?,
+                 updated_at = ?
+             WHERE id = ?",
+        )
+        .bind(job)
+        .bind(now)
+        .bind(now)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await
+}
+
+/// 投稿被 B 站明确拒绝：撤掉 [`begin_submit`] 的标记。只撤这个任务记的。
+pub async fn end_submit(pool: &ConnectionPool, ids: &[i64], job: i64) -> sqlx::Result<()> {
+    let mut tx = pool.begin().await?;
+    for &id in ids {
+        sqlx::query(
+            "UPDATE clips SET submit_state = NULL, submit_job = NULL, submit_started_at = NULL
+             WHERE id = ? AND submit_state = 'submitting' AND submit_job = ?",
+        )
+        .bind(id)
+        .bind(job)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await
+}
+
+/// 启动时把还停在投稿中的切片记为投稿结果未知（上次投稿请求发出后服务退出了）。
+pub async fn recover_submits(pool: &ConnectionPool, now: i64) -> sqlx::Result<u64> {
+    let done = sqlx::query(
+        "UPDATE clips SET submit_state = 'unknown', updated_at = ?
+         WHERE submit_state = 'submitting'",
+    )
+    .bind(now)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected())
+}
+
+/// 投稿成功：记下稿件号和时间，清掉投稿中的标记，撤销这些切片对源录像的引用（同一个事务）。
 pub async fn mark_published(
     pool: &ConnectionPool,
     ids: &[i64],
@@ -374,7 +457,7 @@ pub async fn mark_published(
     for &id in ids {
         sqlx::query(
             "UPDATE clips SET state = 'published', archive_bvid = ?, published_at = ?, error = NULL,
-                 updated_at = ?
+                 submit_state = NULL, submit_job = NULL, submit_started_at = NULL, updated_at = ?
              WHERE id = ?",
         )
         .bind(bvid)
