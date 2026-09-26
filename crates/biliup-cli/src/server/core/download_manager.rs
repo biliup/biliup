@@ -68,6 +68,16 @@ impl DownloadManager {
         self.upload_slots.capacity()
     }
 
+    /// 下载池当前占用
+    pub fn download_pool_occupied(&self) -> usize {
+        self.download_slots.occupied()
+    }
+
+    /// 上传池当前占用
+    pub fn upload_pool_occupied(&self) -> usize {
+        self.upload_slots.occupied()
+    }
+
     pub async fn add_plugin(&self, plugin: Arc<dyn LivePlugin + Send + Sync>) {
         let name = plugin.name().to_string();
         self.rooms_handle.add_plugin(plugin).await;

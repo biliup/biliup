@@ -176,6 +176,7 @@ fn start(
         work_dir: None,
         log_handle: logging.handle(),
         ffmpeg,
+        fleet: Default::default(),
         listener: Some(listener),
         shutdown: Some(Box::pin(async move {
             let _ = stopped.await;

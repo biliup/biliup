@@ -1,6 +1,7 @@
 pub mod cli;
 pub mod downloader;
 pub mod entry;
+pub mod node_cli;
 pub mod season_cli;
 pub mod server;
 pub mod tools;
@@ -13,6 +14,7 @@ use crate::server::app::ApplicationController;
 use crate::server::config::{Config, StreamerConfig};
 use crate::server::core::download_manager::DownloadManager;
 use crate::server::errors::{AppError, AppResult};
+use crate::server::fleet::FleetOptions;
 use crate::server::infrastructure::connection_pool::ConnectionManager;
 use crate::server::infrastructure::models::live_streamer::InsertLiveStreamer;
 use crate::server::infrastructure::models::upload_streamer::{
@@ -66,6 +68,7 @@ pub async fn run_with_cookie(
         log_handle,
         config_path,
         user_cookie,
+        FleetOptions::default(),
         None,
     )
     .await
@@ -93,6 +96,7 @@ pub async fn bind(addr: (&str, u16), auth: bool) -> AppResult<tokio::net::TcpLis
 /// Runs the Web server on an already-bound `listener`. With `shutdown`, the
 /// server stops when that future completes and does not install its own
 /// Ctrl+C / SIGTERM handlers, leaving signals to the embedding host.
+#[allow(clippy::too_many_arguments)]
 pub async fn serve_on(
     listener: tokio::net::TcpListener,
     auth: bool,
@@ -100,6 +104,7 @@ pub async fn serve_on(
     log_handle: LogHandle,
     config_path: Option<PathBuf>,
     user_cookie: PathBuf,
+    fleet: FleetOptions,
     shutdown: Option<BoxFuture<'static, ()>>,
 ) -> AppResult<()> {
     let addr = listener.local_addr().change_context(AppError::Unknown)?;
@@ -185,12 +190,15 @@ pub async fn serve_on(
         import_database_streamers(&service_register).await?;
     }
 
+    let fleet = server::fleet::start(&fleet, &service_register).await?;
+
     tracing::info!("migrations successfully ran, initializing axum server...");
     ApplicationController::serve(
         listener,
         auth,
         secure_session_cookie,
         service_register,
+        fleet,
         shutdown,
     )
     .await

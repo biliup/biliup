@@ -62,6 +62,36 @@ impl ConnectionManager {
     /// # 返回
     /// 返回配置好的SQLite连接池
     pub async fn new_pool(path: &str) -> AppResult<ConnectionPool> {
+        let pool = Self::connect(path).await?;
+
+        // 运行数据库迁移，确保数据库结构是最新的
+        let migrator = sqlx::migrate!();
+        Self::reconcile_applied_migrations(&pool, &migrator).await?;
+
+        info!("migrations enabled, running...");
+        migrator.run(&pool).await.change_context(AppError::Custom(
+            "error while running database migrations".to_string(),
+        ))?;
+
+        Ok(pool)
+    }
+
+    /// 打开一个独立于主库、用自己那套迁移的 SQLite 库（如控制面的 `data/fleet.sqlite3`）。
+    ///
+    /// 这套迁移从一开始就是 LF、从未被就地改写过，所以不做主库那套历史校验和对齐：
+    /// 任何失配都直接交给 sqlx 报错。
+    pub async fn new_pool_with(path: &str, migrator: &Migrator) -> AppResult<ConnectionPool> {
+        let pool = Self::connect(path).await?;
+        migrator
+            .run(&pool)
+            .await
+            .change_context(AppError::Custom(format!(
+                "error while running database migrations for {path}"
+            )))?;
+        Ok(pool)
+    }
+
+    async fn connect(path: &str) -> AppResult<ConnectionPool> {
         // 创建所有父级目录（如果不存在）
         if let Some(parent) = Path::new(path).parent() {
             std::fs::create_dir_all(parent)
@@ -87,16 +117,6 @@ impl ConnectionManager {
             .change_context(AppError::Custom(
                 "error while initializing the database connection pool".to_string(),
             ))?;
-
-        // 运行数据库迁移，确保数据库结构是最新的
-        let migrator = sqlx::migrate!();
-        Self::reconcile_applied_migrations(&pool, &migrator).await?;
-
-        info!("migrations enabled, running...");
-        migrator.run(&pool).await.change_context(AppError::Custom(
-            "error while running database migrations".to_string(),
-        ))?;
-
         Ok(pool)
     }
 

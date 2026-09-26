@@ -19,7 +19,7 @@ import { SLOW_REFRESH_MS } from '../lib/use-dashboard'
 import { useIsMobile } from '../lib/useIsMobile'
 import styles from './layout.module.scss'
 
-/* ============ 导航信息架构:5 组 10 项,按当前角色的权限点过滤 ============ */
+/* ============ 导航信息架构:5 组 11 项,按当前角色的权限点过滤 ============ */
 
 function Ic({ d, extra }: { d: string; extra?: string }) {
   return (
@@ -30,7 +30,8 @@ function Ic({ d, extra }: { d: string; extra?: string }) {
   )
 }
 
-type NavItem = { href: string; label: string; icon: ReactNode; perm: Permission }
+/** `controllerOnly`：只在本机以 `--controller` 运行时出现 */
+type NavItem = { href: string; label: string; icon: ReactNode; perm: Permission; controllerOnly?: boolean }
 
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   {
@@ -109,6 +110,13 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
         perm: 'streamer.view',
         label: '任务平台',
         icon: <Ic d="M4 4h16v16H4z" extra="M4 9h16M9 4v5" />,
+      },
+      {
+        href: '/nodes',
+        perm: 'streamer.view',
+        controllerOnly: true,
+        label: '节点',
+        icon: <Ic d="M4 4h16v6H4zM4 14h16v6H4z" extra="M8 7h.01M8 17h.01" />,
       },
       {
         href: '/users',
@@ -210,10 +218,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   // 避免每次进页面侧栏闪一下
   const { me, error: meError, can } = useMe()
   const visibleGroups = me
-    ? NAV_GROUPS.map((group) => ({ ...group, items: group.items.filter((item) => can(item.perm)) })).filter(
-        (group) => group.items.length > 0,
-      )
-    : NAV_GROUPS.map((group) => ({ ...group, items: group.items.filter((item) => item.perm !== 'user.manage') }))
+    ? NAV_GROUPS.map((group) => ({
+        ...group,
+        items: group.items.filter((item) => can(item.perm) && (!item.controllerOnly || me.fleet_controller)),
+      })).filter((group) => group.items.length > 0)
+    : NAV_GROUPS.map((group) => ({
+        ...group,
+        items: group.items.filter((item) => item.perm !== 'user.manage' && !item.controllerOnly),
+      }))
   const requiredPerm = pagePermission(pathname)
   const denied = !!me && !!requiredPerm && !can(requiredPerm)
   // 需要权限的页面一律等权限加载完再渲染：前端不假设哪个权限点人人都有，

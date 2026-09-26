@@ -1,6 +1,7 @@
 //! Web 用户管理与「我」的接口。前缀避开 `/v1/users`（那是 B 站投稿账号）。
 
 use crate::server::api::access::Caller;
+use crate::server::fleet::FleetCapability;
 use crate::server::infrastructure::permissions::Role;
 use crate::server::infrastructure::policy::Subject;
 use crate::server::infrastructure::users::{
@@ -10,7 +11,7 @@ use axum::extract::Path;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
-use axum::{Json, Router};
+use axum::{Extension, Json, Router};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -45,26 +46,36 @@ fn internal(error: impl std::fmt::Debug) -> Response {
 }
 
 /// 权限点由授权决策点算出（含环境属性），前端只按它显隐，不再自己推导。
-fn me_body(username: Option<&str>, subject: Subject) -> Response {
+/// `fleet_controller`：本进程以 `--controller` 运行，前端据此显示「节点」菜单。
+fn me_body(username: Option<&str>, subject: Subject, fleet: Option<FleetCapability>) -> Response {
     Json(json!({
         "id": subject.user_id,
         "username": username,
         "role": subject.role,
         "permissions": subject.permissions(),
         "auth_enabled": subject.auth_enabled,
+        "fleet_controller": fleet.unwrap_or_default().controller,
     }))
     .into_response()
 }
 
-async fn me(auth_session: AuthSession) -> Response {
+async fn me(auth_session: AuthSession, fleet: Option<Extension<FleetCapability>>) -> Response {
     match auth_session.user {
-        Some(user) => me_body(Some(&user.username), Subject::user(user.id, user.role)),
+        Some(user) => me_body(
+            Some(&user.username),
+            Subject::user(user.id, user.role),
+            fleet.map(|Extension(fleet)| fleet),
+        ),
         None => StatusCode::UNAUTHORIZED.into_response(),
     }
 }
 
-async fn unrestricted_me() -> Response {
-    me_body(None, Subject::unrestricted())
+async fn unrestricted_me(fleet: Option<Extension<FleetCapability>>) -> Response {
+    me_body(
+        None,
+        Subject::unrestricted(),
+        fleet.map(|Extension(fleet)| fleet),
+    )
 }
 
 #[derive(Deserialize)]

@@ -5,8 +5,10 @@ use crate::server::api::spa::static_handler;
 use crate::server::api::ws::ws_logs;
 use crate::server::api::{access, auth, web_users};
 use crate::server::errors::{AppError, AppResult};
+use crate::server::fleet::Fleet;
 use crate::server::infrastructure::service_register::ServiceRegister;
 use crate::server::infrastructure::users::Backend;
+use axum::Extension;
 use axum::http::HeaderValue;
 use axum::middleware::from_fn;
 use axum::routing::get;
@@ -32,6 +34,7 @@ impl ApplicationController {
         enable_login_guard: bool,
         secure_session_cookie: bool,
         service_register: ServiceRegister,
+        fleet: Fleet,
         shutdown: Option<BoxFuture<'static, ()>>,
     ) -> AppResult<()> {
         // 会话层配置
@@ -72,10 +75,14 @@ impl ApplicationController {
 
         // 构建应用程序路由
         // 是否启用登录保护
-        let protected_routes =
+        let mut protected_routes =
             server::router::router(service_register.clone()).route("/v1/ws/logs", get(ws_logs));
+        if let Some(fleet_routes) = fleet.router() {
+            protected_routes = protected_routes.merge(fleet_routes);
+        }
         let mut app = with_optional_auth(protected_routes, enable_login_guard);
         app = app
+            .layer(Extension(fleet.capability()))
             .layer(auth_layer) // 添加认证层
             .layer(
                 // CORS配置 - 跨域资源共享
@@ -98,6 +105,7 @@ impl ApplicationController {
             .with_graceful_shutdown(shutdown_signal(
                 deletion_task.abort_handle(),
                 service_register,
+                fleet,
                 shutdown,
             ))
             .await
@@ -146,6 +154,7 @@ fn with_optional_auth(app: axum::Router<()>, enable_login_guard: bool) -> axum::
 async fn shutdown_signal(
     deletion_task_abort_handle: AbortHandle,
     service_register: ServiceRegister,
+    fleet: Fleet,
     shutdown: Option<BoxFuture<'static, ()>>,
 ) {
     match shutdown {
@@ -153,6 +162,7 @@ async fn shutdown_signal(
         None => os_shutdown_signal().await,
     }
     deletion_task_abort_handle.abort();
+    fleet.shutdown().await;
     service_register.cleanup().await;
 }
 

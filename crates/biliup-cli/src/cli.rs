@@ -4,7 +4,9 @@ use clap::{Parser, Subcommand};
 
 use crate::UploadLine;
 use crate::season_cli::SeasonArgs;
+use crate::server::fleet::RelayListen;
 use std::path::PathBuf;
+use url::Url;
 
 /// 扩展路径中的 ~ 为用户主目录
 pub fn expand_path(path: PathBuf) -> PathBuf {
@@ -179,6 +181,20 @@ pub enum Commands {
         /// 使用 biliup 1.0.7 风格配置文件启动录制
         #[arg(short, long, value_name = "FILE")]
         config: Option<PathBuf>,
+
+        /// 以 Fleet 控制面运行：接受其他 biliup 节点加入并显示它们的状态（数据在 data/fleet.sqlite3）
+        #[arg(long)]
+        controller: bool,
+
+        /// 控制面内嵌 relay 的 TCP 监听地址（默认 0.0.0.0:19160），节点必须能连到它；
+        /// off 表示不起内嵌 relay，此时必须用 --relay-url 指定外部 relay。只在 --controller 时生效
+        #[arg(long, value_name = "ADDR|off")]
+        relay_listen: Option<RelayListen>,
+
+        /// 写进加入票据的 relay 地址，可重复；不给时自动列出本机网卡地址。
+        /// 用于域名、端口转发、反向代理或外部 relay。只在 --controller 时生效
+        #[arg(long, value_name = "URL")]
+        relay_url: Vec<Url>,
     },
     /// 管理自己的合集：列合集、查小节、加入 / 移出稿件、排序
     Season(SeasonArgs),
@@ -186,6 +202,11 @@ pub enum Commands {
     User {
         #[command(subcommand)]
         action: UserAction,
+    },
+    /// 把这台机器加入 Fleet 控制面或退出（在 biliup 服务的工作目录下执行，读写 data/node.json）
+    Node {
+        #[command(subcommand)]
+        action: NodeAction,
     },
     /// 列出所有已上传的视频
     List {
@@ -220,6 +241,22 @@ pub enum UserAction {
         /// 用户名（大小写不敏感）
         username: String,
     },
+}
+
+#[derive(Subcommand)]
+pub enum NodeAction {
+    /// 用控制面「添加节点」给出的票据加入；成功后重启 biliup server 生效
+    Join {
+        /// 以 bfleet 开头的加入票据
+        ticket: String,
+        /// 允许控制面下发的房间使用钩子（各 *processor，等于允许在本机执行命令）
+        #[arg(long)]
+        allow_hooks: bool,
+    },
+    /// 通知控制面移除本节点，并删除本地凭据 data/node.json
+    Leave,
+    /// 查看本机的节点凭据（不连控制面）
+    Status,
 }
 
 fn human_size(s: &str) -> Result<u64, String> {
@@ -259,6 +296,62 @@ mod tests {
                 ..
             } if bind == "127.0.0.1"
         ));
+    }
+
+    #[test]
+    fn fleet_server_flags_parse() {
+        use crate::server::fleet::RelayListen;
+        let cli = Cli::try_parse_from(["biliup", "server"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Server {
+                controller: false,
+                relay_listen: None,
+                ref relay_url,
+                ..
+            } if relay_url.is_empty()
+        ));
+        let cli = Cli::try_parse_from([
+            "biliup",
+            "server",
+            "--controller",
+            "--relay-listen",
+            "off",
+            "--relay-url",
+            "http://relay.example.com:19160",
+            "--relay-url",
+            "http://10.0.0.2:19160",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Server {
+                controller: true,
+                relay_listen: Some(RelayListen::Off),
+                ref relay_url,
+                ..
+            } if relay_url.len() == 2
+        ));
+        assert!(Cli::try_parse_from(["biliup", "server", "--relay-listen", "nope"]).is_err());
+    }
+
+    #[test]
+    fn node_subcommands_parse() {
+        let cli =
+            Cli::try_parse_from(["biliup", "node", "join", "bfleetabc", "--allow-hooks"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Node {
+                action: super::NodeAction::Join { ref ticket, allow_hooks: true }
+            } if ticket == "bfleetabc"
+        ));
+        for (name, leave) in [("leave", true), ("status", false)] {
+            let cli = Cli::try_parse_from(["biliup", "node", name]).unwrap();
+            let Commands::Node { action } = cli.command else {
+                panic!("not a node command")
+            };
+            assert_eq!(matches!(action, super::NodeAction::Leave), leave);
+        }
     }
 
     #[test]
