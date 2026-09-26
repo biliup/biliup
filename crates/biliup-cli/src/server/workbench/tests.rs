@@ -1068,3 +1068,58 @@ async fn only_replayable_segments_and_sessions_with_a_timeline_are_listed() {
     assert_eq!(flag(session), Some(serde_json::Value::Bool(true)));
     assert_eq!(flag(legacy), Some(serde_json::Value::Bool(false)));
 }
+
+#[tokio::test]
+async fn session_totals_count_segments_waiting_for_deletion() {
+    let (_dir, pool) = setup().await;
+    let session = go_live(&pool, 10_000, 0).await.id;
+    store::set_started_at(&pool, session, 10_000).await.unwrap();
+    for (i, state) in [
+        SegmentState::Finished,
+        SegmentState::PendingDelete,
+        SegmentState::Deleted,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let start = i as i64 * 60_000;
+        let id = store::insert_segment(&pool, session, &format!("{i}.flv"), "flv", start, 0)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE segments SET end_ms = ?, bytes = 1000 WHERE id = ?")
+            .bind(start + 60_000)
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        store::set_segment_state(&pool, id, state).await.unwrap();
+    }
+
+    let (rows, total) = store::list_sessions(&pool, None, 10, 0).await.unwrap();
+    assert_eq!(total, 1);
+    let row = &rows[0];
+    assert_eq!(
+        (row.segment_count, row.bytes, row.end_ms),
+        (2, 2000, 120_000),
+        "等着被删的分段还能回看，算进合计；已删的不算"
+    );
+    assert_eq!(
+        store::session_summary(&pool, session)
+            .await
+            .unwrap()
+            .as_ref(),
+        Some(row)
+    );
+
+    let response = crate::server::api::sessions::get_session(
+        axum::extract::State(pool.clone()),
+        axum::extract::Path(session),
+    )
+    .await;
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let detail: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(detail["segment_count"], 2);
+    assert_eq!(detail["duration_ms"], 120_000);
+}

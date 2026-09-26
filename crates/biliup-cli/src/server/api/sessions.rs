@@ -57,7 +57,7 @@ pub struct SessionSummary {
     /// 写完的分段；详情接口按已写入的内容算到最新。
     pub duration_ms: i64,
     pub segment_count: i64,
-    /// 只算写完的分段。
+    /// 可读分段的字节数，只算写完的分段。
     pub bytes: i64,
 }
 
@@ -124,7 +124,7 @@ pub struct SegmentView {
     /// `flv` / `ts` / `mp4` / `mkv`
     pub container: String,
     /// `recording` / `finished` / `missing` / `deleted` / `pending_delete`；
-    /// 只有 `recording`、`finished` 能回看和剪。
+    /// `recording`、`finished`、`pending_delete`（文件还在，等着到期清理）能回看和剪。
     pub state: &'static str,
     pub start_ms: i64,
     /// 正在写的分段只算到盘上已经能读到的内容：还没有落盘的关键帧时等于 `start_ms`（还不能回看）。
@@ -226,7 +226,7 @@ pub async fn get_session(State(pool): State<ConnectionPool>, Path(id): Path<i64>
     let mut summary = summary;
     if let Some(end) = segments
         .iter()
-        .filter(|s| matches!(s.state, "recording" | "finished"))
+        .filter(|s| matches!(s.state, "recording" | "finished" | "pending_delete"))
         .filter_map(|s| s.end_ms)
         .max()
     {
