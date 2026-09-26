@@ -26,6 +26,7 @@ import { PlatformPanels } from '../../ui/plugins'
 import Global from '../../ui/plugins/global'
 import Developer from '../../ui/plugins/developer'
 import LocalSecretsSheet, { ManagedConfigBanner } from './LocalSecretsSheet'
+import AutoClip, { normalizeAutoClip } from '../../ui/plugins/auto-clip'
 
 const TAB_GLOBAL = '1'
 const TAB_PLATFORM = '2'
@@ -192,6 +193,9 @@ const { data: entity, error, isLoading, mutate } = useSWR('/v1/configuration', f
               ) {
                 payload.retention_hours = 0
               }
+              const autoClip = normalizeAutoClip(payload.auto_clip)
+              if (autoClip === undefined) delete payload.auto_clip
+              else payload.auto_clip = autoClip
               await trigger(payload)
               Toast.success('保存成功')
             } catch (e: any) {
@@ -213,6 +217,7 @@ const { data: entity, error, isLoading, mutate } = useSWR('/v1/configuration', f
             <TabPane tab="全局设置" itemKey={TAB_GLOBAL}>
               <div className={styles.pane} data-tab={TAB_GLOBAL}>
                 <Global disabled={!editable} />
+                <AutoClip disabled={!editable} entity={entity} />
               </div>
             </TabPane>
             <TabPane tab="平台设置" itemKey={TAB_PLATFORM}>

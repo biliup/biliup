@@ -49,10 +49,85 @@
   flex-direction: column;
   row-gap: 10px;
 }
-.frameUpload {
+.frameUpload,
+.frameAutoClip {
   margin-top: 24px;
   padding-top: 24px;
   border-top: 1px solid var(--semi-color-border);
+}
+
+/* 自动切片（实验）：默认折叠，标题行整行可点 */
+.collapseHead {
+  appearance: none;
+  border: none;
+  background: transparent;
+  width: 100%;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  color: var(--semi-color-text-2);
+  text-align: left;
+}
+.collapseHead:focus-visible {
+  outline: 2px solid var(--semi-color-primary);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+.collapseSummary {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+.autoClipBody {
+  display: flex;
+  flex-direction: column;
+  row-gap: 10px;
+  padding-top: 12px;
+}
+.subTitle {
+  margin-top: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+}
+.autoClipTest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 8px;
+}
+.autoClipResults {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: var(--semi-color-fill-0);
+    :global(.semi-icon) {
+      align-self: center;
+    }
+  }
+}
+.autoClipMessage {
+  flex-basis: 100%;
+  font-size: 13px;
+  color: var(--semi-color-text-1);
+  word-break: break-word;
 }
 
 /* 平台设置：左列平台列表 + 右栏选中平台的字段。两栏并排、各自独立滚动，
