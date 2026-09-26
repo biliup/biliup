@@ -193,6 +193,8 @@ export function PublishDrawer({
       title={<span data-publish-drawer-title="">{title}</span>}
       width={Math.min(DRAWER_WIDTH, width || DRAWER_WIDTH)}
       bodyStyle={{ padding: 0 }}
+      // 窄屏布局的浮动菜单按钮是 1001，默认的 1000 会被它压住标题
+      zIndex={1002}
       closeOnEsc
     >
       {target ? (
