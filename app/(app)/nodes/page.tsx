@@ -29,6 +29,7 @@ import NodeCard from './NodeCard'
 import JoinDialog from './JoinDialog'
 import RoomsPanel, { CreateRoomButton } from './RoomsPanel'
 import TemplatesPanel from './TemplatesPanel'
+import RemovalNotices from './RemovalNotices'
 import FleetTemplateModal from './FleetTemplateModal'
 import FleetConfigSheet, { type ConfigTarget } from './FleetConfigSheet'
 import styles from './page.module.scss'
@@ -141,13 +142,14 @@ function Nodes() {
         await revokeNode(node.id)
         Toast.success(`已移除 ${node.name}`)
       } else {
-        const { reassigned, unplaced } = await revokeAndReassign(node.id)
-        Toast.success(`已移除 ${node.name}，${reassigned.length} 个房间已改派`)
-        if (unplaced.length > 0) {
-          Toast.warning({
-            content: `${unplaced.length} 个房间没找到合适的节点，留在未分派：${unplaced[0].reason}`,
-            duration: 8,
+        const removal = await revokeAndReassign(node.id)
+        if (removal.state === 'removing') {
+          Toast.info({
+            content: `正在把 ${node.name} 的 ${removal.rooms.length} 个房间迁到其他节点，它确认释放后移除`,
+            duration: 5,
           })
+        } else {
+          Toast.success(`已移除 ${node.name}`)
         }
       }
     } catch (e) {
@@ -298,6 +300,9 @@ function Nodes() {
             ) : null}
             <Tabs type="line" activeKey={tab} onChange={switchTab} className={styles.tabs} lazyRender>
               <TabPane tab="节点" itemKey="nodes">
+                {data?.removals?.length ? (
+                  <RemovalNotices removals={data.removals} rooms={rooms} nodes={nodes} />
+                ) : null}
                 {nodesBody}
                 {controller ? <PendingTokens canManage={canManage} /> : null}
               </TabPane>

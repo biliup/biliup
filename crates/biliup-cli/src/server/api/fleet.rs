@@ -5,7 +5,7 @@
 use crate::server::api::access::Caller;
 use crate::server::api::fleet_config;
 use crate::server::api::fleet_rooms;
-use crate::server::errors::report_to_response;
+use crate::server::errors::{ApiError, report_to_response};
 use crate::server::fleet::controller::{CONTROLLER_VERSION, Controller};
 use crate::server::fleet::protocol::PROTOCOL_MINOR;
 use crate::server::fleet::store;
@@ -81,6 +81,7 @@ async fn list_nodes(State(controller): State<Arc<Controller>>) -> Response {
             "controller_version": CONTROLLER_VERSION,
             "controller_proto": PROTOCOL_MINOR,
             "nodes": nodes,
+            "removals": controller.removals(),
         }))
         .into_response(),
         Err(e) => report_to_response(e),
@@ -102,6 +103,15 @@ async fn revoke_node(
         None => {}
         Some("auto") => return fleet_rooms::revoke_and_reassign(&controller, id).await,
         Some(_) => return (StatusCode::BAD_REQUEST, "reassign 只能是 auto").into_response(),
+    }
+    if controller.is_removing(id) {
+        return (
+            StatusCode::CONFLICT,
+            Json(ApiError::new(
+                "这台节点正在移除：等它确认释放房间后会自动移除".to_string(),
+            )),
+        )
+            .into_response();
     }
     match controller.revoke(id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),

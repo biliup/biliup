@@ -51,29 +51,8 @@ pub struct CreateRoom {
     pub auto_node: bool,
 }
 
-/// 移除节点并自动改派的结果
-#[derive(Debug, Default, Serialize)]
-pub struct Reassigned {
-    /// 改派成功的房间 → 新节点
-    pub reassigned: Vec<Placed>,
-    /// 没找到合适节点、留在未分派的房间
-    pub unplaced: Vec<Unplaced>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct Placed {
-    pub room_id: i64,
-    pub node_id: i64,
-}
-
-#[derive(Debug, Serialize)]
-pub struct Unplaced {
-    pub room_id: i64,
-    pub reason: String,
-}
-
 impl DispatchError {
-    fn message(&self) -> String {
+    pub(super) fn message(&self) -> String {
         match self {
             DispatchError::NotFound(message) => message.to_string(),
             DispatchError::Invalid(message) | DispatchError::Conflict(message) => message.clone(),
@@ -196,7 +175,7 @@ fn url_taken(_: UrlTaken) -> DispatchError {
 }
 
 impl Controller {
-    async fn template_or_invalid(&self, id: Option<i64>) -> Result<Option<Template>> {
+    pub(super) async fn template_or_invalid(&self, id: Option<i64>) -> Result<Option<Template>> {
         let Some(id) = id else {
             return Ok(None);
         };
@@ -220,6 +199,12 @@ impl Controller {
         spec: &RoomSpec,
         template: Option<&Template>,
     ) -> Result<()> {
+        if self.is_removing(node.id) {
+            return Err(DispatchError::Invalid(format!(
+                "节点「{}」正在移除，不再接收房间",
+                node.name
+            )));
+        }
         let outdated = self
             .live
             .lock()
@@ -276,7 +261,11 @@ impl Controller {
     }
 
     /// 按负载给房间选一台节点（见 `placement`）；一台都不行时说明每台的原因
-    async fn auto_node(&self, spec: &RoomSpec, template: Option<&Template>) -> Result<i64> {
+    pub(super) async fn auto_node(
+        &self,
+        spec: &RoomSpec,
+        template: Option<&Template>,
+    ) -> Result<i64> {
         let rows = store::list_nodes(&self.pool).await?;
         let counts = assignments::assigned_counts(&self.pool).await?;
         let mut accounts: HashMap<i64, Vec<u64>> = HashMap::new();
@@ -297,6 +286,7 @@ impl Controller {
                     Candidate {
                         id: row.id,
                         online: node.is_some(),
+                        removing: self.is_removing(row.id),
                         outdated: node.is_some_and(|node| !node.accepts_desired_state()),
                         allow_hooks: row.allow_hooks,
                         accounts: accounts.remove(&row.id).unwrap_or_default(),
@@ -467,47 +457,6 @@ impl Controller {
                 Ok(Some(room))
             }
         }
-    }
-
-    /// 移除节点，并把分派给它的房间按负载改派到其他节点（`DELETE /v1/fleet/nodes/{id}?reassign=auto`）。
-    /// 被移除的节点若还在运行，会按约定把这些房间转成本地房间继续录，与新节点重复录制，界面上要写明。
-    /// 返回 `None` 表示节点不存在或已被移除。
-    pub async fn revoke_and_reassign(&self, id: i64) -> Result<Option<Reassigned>> {
-        let rooms: Vec<Room> = assignments::list_rooms(&self.pool)
-            .await?
-            .into_iter()
-            .filter(|room| room.node_id == Some(id) && room.deleted_at.is_none())
-            .collect();
-        if !self.revoke(id).await? {
-            return Ok(None);
-        }
-        let mut outcome = Reassigned::default();
-        for room in rooms {
-            let placed = async {
-                let template = self.template_or_invalid(room.template_id).await?;
-                let target = self.auto_node(&room.spec, template.as_ref()).await?;
-                self.assign(room.id, Some(target), false).await?;
-                Ok::<_, DispatchError>(target)
-            }
-            .await;
-            match placed {
-                Ok(node_id) => outcome.reassigned.push(Placed {
-                    room_id: room.id,
-                    node_id,
-                }),
-                Err(error) => outcome.unplaced.push(Unplaced {
-                    room_id: room.id,
-                    reason: error.message(),
-                }),
-            }
-        }
-        tracing::info!(
-            node = id,
-            reassigned = outcome.reassigned.len(),
-            unplaced = outcome.unplaced.len(),
-            "fleet node revoked with automatic reassignment"
-        );
-        Ok(Some(outcome))
     }
 
     pub async fn templates(&self) -> Result<Vec<Template>> {

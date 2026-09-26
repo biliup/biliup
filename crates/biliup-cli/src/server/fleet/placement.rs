@@ -1,9 +1,9 @@
 //! 按负载自动选节点（§10.2「动态负载均衡」倾向 A：控制面仲裁、不漂移）。
 //!
-//! 只在两种时候用：新建房间时选了「自动」，以及移除节点时选了「自动改派」。
+//! 只在两种时候用：新建房间时选了「自动」，以及移除节点时选了「自动改派」（正在移除的节点不参与）。
 //! 已经在录的房间不会因为负载变化被挪走（D9）。
 //!
-//! 先按硬约束筛：在线、版本够新、登记了模板要用的账号、带钩子的房间只给允许钩子的节点；
+//! 先按硬约束筛：不在移除中、在线、版本够新、登记了模板要用的账号、带钩子的房间只给允许钩子的节点；
 //! 再按软指标排：下载池空位（容量 − 占用）多的优先，其次分到的房间少的，再次录制目录剩余空间大的，
 //! 都一样时取 id 小的，结果可复现。
 
@@ -13,6 +13,8 @@ pub struct Candidate {
     pub id: i64,
     pub name: String,
     pub online: bool,
+    /// 正在「移除并自动改派」
+    pub removing: bool,
     /// 协议版本太旧，收不了房间
     pub outdated: bool,
     pub allow_hooks: bool,
@@ -37,6 +39,7 @@ pub struct Needs {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Rejected {
     Offline,
+    Removing,
     Outdated,
     NoHooks,
     MissingAccount(u64),
@@ -46,6 +49,7 @@ impl Rejected {
     pub fn describe(&self) -> String {
         match self {
             Rejected::Offline => "离线".into(),
+            Rejected::Removing => "正在移除".into(),
             Rejected::Outdated => "版本太旧".into(),
             Rejected::NoHooks => "不允许钩子".into(),
             Rejected::MissingAccount(mid) => format!("没有登记 B 站账号 {mid}"),
@@ -54,6 +58,9 @@ impl Rejected {
 }
 
 fn check(candidate: &Candidate, needs: Needs) -> Result<(), Rejected> {
+    if candidate.removing {
+        return Err(Rejected::Removing);
+    }
     if !candidate.online {
         return Err(Rejected::Offline);
     }
@@ -176,6 +183,19 @@ mod tests {
             ]
         );
         assert!(explain(&rejected).contains("「n1」离线"));
+    }
+
+    #[test]
+    fn a_node_being_removed_is_not_chosen() {
+        let mut removing = node(1, 5, 0, 900);
+        removing.removing = true;
+        assert_eq!(
+            choose(&[removing.clone(), node(2, 1, 3, 1)], Needs::default()),
+            Ok(2)
+        );
+        let rejected = choose(&[removing], Needs::default()).unwrap_err();
+        assert_eq!(rejected, [("n1".to_string(), Rejected::Removing)]);
+        assert!(explain(&rejected).contains("「n1」正在移除"));
     }
 
     #[test]

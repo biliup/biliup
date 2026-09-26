@@ -60,6 +60,35 @@ export interface FleetNode {
   /** 最近一次下发的房间与模板它是否已经确认；离线为 null */
   synced: boolean | null
   config: NodeConfigState
+  /** 正在「移除并自动改派」，等它确认释放房间 */
+  removing: boolean
+}
+
+/**
+ * 一个房间在被移除节点上的释放情况（与后端 `Release` 一致）：`released` 为节点确认释放后新节点才接手；
+ * `offline` / `timeout` 为没等到确认就移除了，节点发现被移除后会暂停这个房间
+ */
+export type RoomRelease = 'waiting' | 'released' | 'offline' | 'timeout'
+
+export interface RemovedRoom {
+  room_id: number
+  remark: string
+  /** 改派到的节点；null 为没找到合适的节点、留在未分派，原因在 `unplaced` */
+  node_id: number | null
+  unplaced: string | null
+  release: RoomRelease
+}
+
+/** 与后端 `Removal` 一致：一次「移除并自动改派」的进度与结果，结束后留 10 分钟 */
+export interface Removal {
+  node_id: number
+  node_name: string
+  state: 'removing' | 'done'
+  started_at: number
+  /** 最晚这时移除 */
+  deadline: number
+  finished_at: number | null
+  rooms: RemovedRoom[]
 }
 
 export interface FleetNodes {
@@ -68,6 +97,7 @@ export interface FleetNodes {
   controller_version: string
   controller_proto: number
   nodes: FleetNode[]
+  removals: Removal[]
 }
 
 /** `POST /v1/fleet/join-tokens` 的响应；票据只在这一次返回 */
@@ -214,13 +244,14 @@ export async function revokeNode(id: number): Promise<void> {
   await handleResponse(await fetch(`${API_BASE}${FLEET_NODES_KEY}/${id}`, { method: 'DELETE' }))
 }
 
-export interface Reassigned {
-  reassigned: { room_id: number; node_id: number }[]
-  unplaced: { room_id: number; reason: string }[]
-}
+/** 与后端 `REMOVAL_WAIT` 一致：在线节点确认释放房间最多等这么久 */
+export const REMOVAL_WAIT_SECONDS = 60
 
-/** 移除节点，并把它的房间按负载改派到其他节点 */
-export async function revokeAndReassign(id: number): Promise<Reassigned> {
+/**
+ * 移除节点，并把它的房间按负载改派到其他节点。在线节点先迁移、等它确认释放再移除，
+ * 返回 `state: 'removing'`，结果随后出现在节点列表的 `removals` 里；离线节点当场移除，返回 `done`
+ */
+export async function revokeAndReassign(id: number): Promise<Removal> {
   const res = await fetch(`${API_BASE}${FLEET_NODES_KEY}/${id}?reassign=auto`, { method: 'DELETE' })
   await handleResponse(res)
   return res.json()

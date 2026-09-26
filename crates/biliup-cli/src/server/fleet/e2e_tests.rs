@@ -1,6 +1,9 @@
 //! 进程内跑一整套：控制面 + 内嵌 relay（127.0.0.1 随机端口）+ 真实的节点代理。
 
-use super::controller::{Controller, CreateRoom, DispatchError, NodeView, RelaySetup, RoomStatus};
+use super::controller::{
+    Controller, CreateRoom, DispatchError, NodeView, RelaySetup, Release, Removal, RemovalState,
+    RoomStatus,
+};
 use super::guard::ManagedHandle;
 use super::node::{self, NodeAgent};
 use super::relay::{EmbeddedRelay, FleetAccess};
@@ -164,6 +167,25 @@ async fn wait_for_node(
             "node {id} did not become online={online} within {within:?}"
         );
         tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+/// 等「移除并自动改派」结束，返回结果
+async fn wait_removed(controller: &Controller, id: i64, within: Duration) -> Removal {
+    let deadline = tokio::time::Instant::now() + within;
+    loop {
+        let done = controller
+            .removals()
+            .into_iter()
+            .find(|removal| removal.node_id == id && removal.state == RemovalState::Done);
+        if let Some(removal) = done {
+            return removal;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "removal of node {id} did not finish within {within:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
@@ -494,24 +516,50 @@ async fn automatic_placement_respects_accounts_and_spreads_rooms() {
         "{rejected:?}"
     );
 
-    // 移除 B 并自动改派：它的房间去 A
-    let outcome = controller.revoke_and_reassign(b).await.unwrap().unwrap();
-    assert_eq!(outcome.unplaced.len(), 0);
+    // 移除在线的 B 并自动改派：先迁移，B 确认释放后 A 才接手，然后才吊销 B
+    let started = controller.revoke_and_reassign(b).await.unwrap().unwrap();
+    assert_eq!(started.state, RemovalState::Removing);
     assert_eq!(
-        (outcome.reassigned[0].room_id, outcome.reassigned[0].node_id),
-        (second.id, a)
+        (started.rooms[0].room_id, started.rooms[0].node_id),
+        (second.id, Some(a))
     );
+    let done = wait_removed(&controller, b, Duration::from_secs(20)).await;
+    assert_eq!(done.rooms.len(), 1);
+    assert_eq!(done.rooms[0].release, Release::Released);
+    assert!(done.finished_at.unwrap() <= started.deadline);
     let services_a = nodes[0].1.clone();
+    let services_b = nodes[1].1.clone();
     eventually("A records both rooms", Duration::from_secs(20), || {
         let services = services_a.clone();
         async move { local_urls(&services).await.len() == 2 }
     })
     .await;
-    // 再移除 A：没有节点可去，房间留在未分派
-    let outcome = controller.revoke_and_reassign(a).await.unwrap().unwrap();
-    assert_eq!(outcome.reassigned.len(), 0);
-    assert_eq!(outcome.unplaced.len(), 2);
+    // B 交出了房间，吊销后本机也没留下它
+    assert!(local_urls(&services_b).await.is_empty());
+    eventually("B agent stops", Duration::from_secs(10), || {
+        let finished = nodes[1].2.is_finished();
+        async move { finished }
+    })
+    .await;
+    assert!(controller.revoke_and_reassign(b).await.unwrap().is_none());
+
+    // A 离线时移除 A：当场吊销；没有节点可去，房间留在未分派
+    let (_, _, agent_a) = nodes.remove(0);
+    agent_a.shutdown().await;
+    wait_for_node(&controller, a, false, Duration::from_secs(10)).await;
+    let done = controller.revoke_and_reassign(a).await.unwrap().unwrap();
+    assert_eq!(done.state, RemovalState::Done);
+    assert_eq!(done.rooms.len(), 2);
+    for room in &done.rooms {
+        assert_eq!(room.node_id, None);
+        assert!(
+            room.unplaced.as_deref().unwrap().contains("没有节点"),
+            "{room:?}"
+        );
+        assert_eq!(room.release, Release::Offline);
+    }
     assert!(controller.revoke_and_reassign(a).await.unwrap().is_none());
+    assert!(controller.nodes().await.unwrap().is_empty());
 
     for (_, _, agent) in nodes {
         agent.shutdown().await;

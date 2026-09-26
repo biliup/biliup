@@ -6,7 +6,7 @@ import { diskPercent, formatBytes, memoryPercent, toSeries } from '@/app/lib/use
 import { formatRate, timeAgo } from '@/app/lib/use-dashboard'
 import { formatVersion } from '@/app/lib/status'
 import { humDate } from '@/app/lib/utils'
-import { nodeOutdated, type FleetNode, type PoolUsage } from '@/app/lib/use-fleet'
+import { REMOVAL_WAIT_SECONDS, nodeOutdated, type FleetNode, type PoolUsage } from '@/app/lib/use-fleet'
 import styles from './page.module.scss'
 import NodeConfigStatus from './NodeConfigStatus'
 
@@ -123,6 +123,13 @@ export default function NodeCard({
           >
             <Tag size="small" color={node.path === 'relay' ? 'orange' : 'cyan'}>
               {node.path === 'relay' ? '中继' : '直连'}
+            </Tag>
+          </Tooltip>
+        ) : null}
+        {node.removing ? (
+          <Tooltip content={`正在把房间迁到其他节点，它确认释放全部房间后移除（最多等 ${REMOVAL_WAIT_SECONDS} 秒）`}>
+            <Tag size="small" color="orange">
+              移除中
             </Tag>
           </Tooltip>
         ) : null}
@@ -269,7 +276,7 @@ export default function NodeCard({
             <span className={styles.endpoint}>{node.endpoint_id.slice(0, 10)}</span>
           </Tooltip>
         </span>
-        {canManage ? (
+        {canManage && !node.removing ? (
           <Popconfirm
             title={`移除节点 ${node.name}？`}
             content={
@@ -284,7 +291,9 @@ export default function NodeCard({
                   </Checkbox>
                   {reassign ? (
                     <span className={styles.revokeWarn}>
-                      {node.name} 如果还在运行，会和新节点同时录这些房间（重复录制与投稿），直到在它本机删掉
+                      {node.online
+                        ? `先迁移再移除：每个房间等 ${node.name} 停录、确认释放后才交给新节点，不会重复录制（最多等 ${REMOVAL_WAIT_SECONDS} 秒）。超时没释放的房间直接改派，${node.name} 发现被移除后会暂停它们`
+                        : `${node.name} 现在离线，会当场移除并改派：它离线期间这些房间可能两边同时录，它连回来发现被移除后会暂停它们`}
                     </span>
                   ) : null}
                 </div>
