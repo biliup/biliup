@@ -151,7 +151,9 @@ impl Controller {
 
     async fn place(&self, room: &Room) -> Result<i64, DispatchError> {
         let template = self.template_or_invalid(room.template_id).await?;
-        let target = self.auto_node(&room.spec, template.as_ref()).await?;
+        let target = self
+            .auto_node(&room.spec, template.as_ref(), &room.required_labels)
+            .await?;
         self.assign(room.id, Some(target), false).await?;
         Ok(target)
     }

@@ -565,6 +565,60 @@ async fn automatic_placement_respects_accounts_and_spreads_rooms() {
         "{rejected:?}"
     );
 
+    // 标签：只有 B 带「海外」。不看标签时平局取 id 小的 A，要求「海外」就只能去 B
+    controller
+        .set_node_labels(b, &["海外".to_string()])
+        .await
+        .unwrap();
+    let mut abroad = auto("https://stuck.example/abroad", None);
+    abroad.required_labels = vec!["海外".into()];
+    let abroad = controller.create_room(abroad).await.unwrap();
+    assert_eq!(abroad.node_id, Some(b));
+    let mut pinned = auto("https://stuck.example/pinned", None);
+    pinned.auto_node = false;
+    pinned.node_id = Some(a);
+    pinned.required_labels = vec!["海外".into()];
+    let rejected = controller.create_room(pinned).await.unwrap_err();
+    assert!(
+        matches!(&rejected, DispatchError::Invalid(m) if m.contains("缺少房间要求的标签「海外」")),
+        "{rejected:?}"
+    );
+    let rejected = controller
+        .assign(abroad.id, Some(a), false)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&rejected, DispatchError::Invalid(m) if m.contains("缺少房间要求的标签「海外」")),
+        "{rejected:?}"
+    );
+    let mut nowhere = auto("https://stuck.example/nowhere", Some(template.id));
+    nowhere.required_labels = vec!["海外".into()];
+    let rejected = controller.create_room(nowhere).await.unwrap_err();
+    assert!(
+        matches!(&rejected, DispatchError::Invalid(m)
+            if m.contains("」缺少标签「海外」") && m.contains("」没有登记 B 站账号 42")),
+        "{rejected:?}"
+    );
+    // 摘掉 B 的标签：房间不挪，只标出来
+    controller.set_node_labels(b, &[]).await.unwrap();
+    let rooms = controller.rooms(true).await.unwrap();
+    let view = rooms.iter().find(|room| room.room.id == abroad.id).unwrap();
+    assert_eq!(view.room.node_id, Some(b));
+    assert_eq!(view.labels_missing, ["海外"]);
+    assert!(
+        rooms
+            .iter()
+            .filter(|room| room.room.id != abroad.id)
+            .all(|room| room.labels_missing.is_empty())
+    );
+    assert!(
+        controller
+            .delete_room(abroad.id, true)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
     // 移除在线的 B 并自动改派：先迁移，B 确认释放后 A 才接手，然后才吊销 B
     let started = controller.revoke_and_reassign(b).await.unwrap().unwrap();
     assert_eq!(started.state, RemovalState::Removing);
