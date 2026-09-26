@@ -28,3 +28,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run tests
         run: cargo test --locked --workspace
+
+  # 桌面程序是独立 workspace，依赖变动时根 Cargo.lock 会更新，它的锁不会跟着变；
+  # desktop-publish.yml 只在发版时跑，漂移要到那时才暴露（v1.2.9 就是这样）
+  desktop-lockfile:
+    name: Desktop Cargo.lock up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: cargo metadata --locked
+        run: cargo metadata --locked --format-version 1 --manifest-path tauri-app/src-tauri/Cargo.toml > /dev/null
