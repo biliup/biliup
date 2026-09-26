@@ -2,7 +2,7 @@
 import { Suspense } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { Spin, Tabs, TabPane } from '@douyinfe/semi-ui'
-import { IconVideoListStroked } from '@douyinfe/semi-icons'
+import { IconHistory } from '@douyinfe/semi-icons'
 import { type HistoryTab, parseHistoryTab } from '@/app/lib/history'
 import PageHeader from '../components/PageHeader'
 import LiveMonitor from '@/app/ui/LiveMonitor'
@@ -45,7 +45,7 @@ function HistoryTabs() {
   return (
     <>
       <PageHeader
-        icon={<IconVideoListStroked size="large" />}
+        icon={<IconHistory size="large" />}
         title="历史记录"
         description="按场次回看、打标记和剪切片，或按文件在线回放；「实时监视」同屏查看正在录制的直播间"
       />
