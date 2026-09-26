@@ -9,6 +9,7 @@
 //! 被移除的节点把原受管主播转成本地并暂停，等管理员确认后恢复（[`revoked`]）。
 
 pub mod accounts;
+pub mod alerts;
 pub mod assignments;
 pub mod config_store;
 pub mod controller;

@@ -29,6 +29,14 @@ pub fn subscribe() -> broadcast::Receiver<Event> {
         .subscribe()
 }
 
+/// 测试里绕过录制与投稿流程直接发一条
+#[cfg(test)]
+pub(crate) fn inject(event: Event) {
+    if let Some(sink) = SINK.get() {
+        let _ = sink.send(event);
+    }
+}
+
 fn emit(kind: &str, ctx: &Context, error: String) {
     let Some(sink) = SINK.get() else {
         return;

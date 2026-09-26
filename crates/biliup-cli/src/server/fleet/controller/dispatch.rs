@@ -117,7 +117,7 @@ pub struct RoomView {
     pub labels_missing: Vec<String>,
 }
 
-fn heartbeat_status<'a>(node: &'a LiveNode, url: &str) -> Option<&'a str> {
+pub(super) fn heartbeat_status<'a>(node: &'a LiveNode, url: &str) -> Option<&'a str> {
     node.rooms.iter().find_map(|room| {
         let streamer = room.get("live_streamer")?;
         (streamer.get("url")?.as_str()? == url)

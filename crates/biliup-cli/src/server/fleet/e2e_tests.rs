@@ -863,3 +863,131 @@ async fn layered_config_reaches_nodes_without_their_secrets() {
     }
     controller.shutdown().await;
 }
+
+/// 告警：节点上报的事件变成告警、同一个直播间合并计数；离线告警出现、重连后恢复；「知道了」清掉。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn alerts_follow_node_events_and_connectivity() {
+    use super::alerts::AlertKind;
+    use super::controller::OFFLINE_ALERT_AFTER_MS;
+    use super::events;
+    use super::protocol::{EVENT_RECORDING_ERROR, EVENT_UPLOAD_FAILED, Event, RoomEvent};
+
+    let dir = tempfile::tempdir().unwrap();
+    let (controller, url, pool) = start_controller(dir.path()).await;
+    controller.stop_alert_loop();
+    let root = dir.path().join("a");
+    let node_file = root.join("data/node.json");
+    let joined = node::join(
+        &ticket_for(&controller, &pool, &url).await,
+        false,
+        &node_file,
+    )
+    .await
+    .unwrap();
+    let id = joined.node_id;
+    let services = node_services(&root).await;
+    let start = || {
+        NodeAgent::start(
+            node_file.clone(),
+            services.clone(),
+            ManagedHandle::default(),
+            revoked_for(&node_file, &services),
+        )
+    };
+    let agent = start().await.unwrap();
+    wait_for_node(&controller, id, true, Duration::from_secs(30)).await;
+
+    let room_url = "https://stuck.example/alerts";
+    let room = controller
+        .create_room(
+            serde_json::from_value(serde_json::json!({ "url": room_url, "remark": "房间" }))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let event = |kind: &str, error: &str| Event {
+        kind: kind.into(),
+        at: now_ms(),
+        detail: serde_json::to_value(RoomEvent {
+            url: room_url.into(),
+            remark: "房间".into(),
+            error: error.into(),
+        })
+        .unwrap(),
+    };
+    events::inject(event(EVENT_RECORDING_ERROR, "mesio error: boom"));
+    events::inject(event(EVENT_RECORDING_ERROR, "mesio error: again"));
+    events::inject(event(EVENT_UPLOAD_FAILED, "open cookies file: x.json"));
+    events::inject(event("from_the_future", "ignored"));
+    eventually("events become alerts", Duration::from_secs(10), || {
+        let controller = controller.clone();
+        async move {
+            let alerts = controller.alert_list().alerts;
+            alerts.len() == 2 && alerts.iter().map(|alert| alert.count).sum::<u32>() == 3
+        }
+    })
+    .await;
+    let alerts = controller.alert_list().alerts;
+    let recording = alerts
+        .iter()
+        .find(|alert| alert.kind == AlertKind::RecordingError)
+        .unwrap();
+    assert_eq!(recording.node_id, id);
+    assert_eq!(recording.count, 2);
+    assert_eq!(recording.message, "mesio error: again");
+    assert_eq!(recording.room_id, Some(room.id));
+    assert_eq!(recording.room.as_deref(), Some("房间"));
+    assert_eq!(recording.url.as_deref(), Some(room_url));
+    let upload = alerts
+        .iter()
+        .find(|alert| alert.kind == AlertKind::UploadFailed)
+        .unwrap();
+    assert_eq!(upload.count, 1);
+    let summary = controller.summary().await.unwrap();
+    assert_eq!(
+        (
+            summary.nodes_total,
+            summary.nodes_online,
+            summary.alerts,
+            summary.alerts_open
+        ),
+        (1, 1, 2, 2)
+    );
+
+    // 离线：60 s 之内不算，之后告警；重连后恢复
+    agent.shutdown().await;
+    wait_for_node(&controller, id, false, Duration::from_secs(10)).await;
+    controller.evaluate_alerts_at(now_ms()).await;
+    assert_eq!(controller.alert_list().alerts.len(), 2);
+    let later = now_ms() + OFFLINE_ALERT_AFTER_MS + 1_000;
+    controller.evaluate_alerts_at(later).await;
+    let offline = controller
+        .alert_list()
+        .alerts
+        .into_iter()
+        .find(|alert| alert.kind == AlertKind::NodeOffline)
+        .expect("offline alert");
+    assert!(offline.is_open());
+    assert!(offline.first_at <= now_ms());
+    assert_eq!(controller.summary().await.unwrap().nodes_online, 0);
+
+    let agent = start().await.unwrap();
+    wait_for_node(&controller, id, true, Duration::from_secs(30)).await;
+    controller.evaluate_alerts_at(now_ms()).await;
+    let alerts = controller.alert_list().alerts;
+    let offline = alerts
+        .iter()
+        .find(|alert| alert.kind == AlertKind::NodeOffline)
+        .unwrap();
+    assert!(offline.resolved_at.is_some());
+    // 事件类不因重连恢复
+    assert_eq!(alerts.iter().filter(|alert| alert.is_open()).count(), 2);
+
+    assert!(controller.acknowledge_alert(upload.id));
+    assert!(!controller.acknowledge_alert(upload.id));
+    assert_eq!(controller.acknowledge_alerts(), 2);
+    assert!(controller.alert_list().alerts.is_empty());
+
+    agent.shutdown().await;
+    controller.shutdown().await;
+}
