@@ -8,6 +8,7 @@
 
 pub mod accounts;
 pub mod assignments;
+pub mod config_store;
 pub mod controller;
 #[cfg(test)]
 mod e2e_tests;
@@ -363,6 +364,10 @@ mod tests {
                 2,
                 "647b577b8a045a666dcd6bef202e002f6f5b47124fb3e34428b2183954ac3c0c9f5515abc8db85836f5fa142cfef97c9",
             ),
+            (
+                3,
+                "4e2c70a99c89784c8dd484b6194b435b44aec807acbd8050d26d79b45d11a03753fe1d79943e804b84fb3045a30a6112",
+            ),
         ];
         let embedded: Vec<(i64, String)> = FLEET_MIGRATOR
             .iter()
@@ -387,7 +392,7 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(versions, [1, 2]);
+        assert_eq!(versions, [1, 2, 3]);
         let tables: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'fleet_%' ORDER BY name",
         )
@@ -397,6 +402,7 @@ mod tests {
         assert_eq!(
             tables,
             [
+                "fleet_config",
                 "fleet_identity",
                 "fleet_join_tokens",
                 "fleet_node_accounts",
@@ -422,6 +428,6 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(count, 2);
+        assert_eq!(count, 3);
     }
 }
