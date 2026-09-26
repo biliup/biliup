@@ -2,7 +2,7 @@
 import React, { useState } from 'react'
 import useSWR from 'swr'
 import { Button, Empty, Select, Switch, Tag, Tooltip, Typography } from '@douyinfe/semi-ui'
-import { IconPlay, IconStop } from '@douyinfe/semi-icons'
+import { IconMaximize, IconPlay, IconStop } from '@douyinfe/semi-icons'
 import { fetcher, LiveStreamerEntity, StreamerInfo } from '@/app/lib/api-streamer'
 import { LIVE_STATUS, platformName } from '@/app/lib/status'
 import {
@@ -17,7 +17,7 @@ import {
 } from '@/app/lib/use-dashboard'
 import { useBoolPref, useChoicePref } from '@/app/lib/use-local-pref'
 import { useDanmakuFeed } from '@/app/lib/danmaku-feed'
-import { LivePreviewPlayer, useLatencyProfile } from './LivePreview'
+import { LivePreviewPlayer, useLatencyProfile, useOpenLivePage } from './LivePreview'
 import { type LatencyProfile, RELAY_PROFILES, RELAY_PROFILES_SEGMENTED } from '@/app/lib/live-buffer'
 import { LiveRateChart, SPARK_RATE_WINDOW_MS } from './LiveRateChart'
 import { MarkerCount } from './MarkerControls'
@@ -98,6 +98,7 @@ export default function LiveMonitor() {
   const transport = usePreviewTransport()
   const [rateChart, setRateChart] = useBoolPref(RATE_CHART_KEY, false)
   const [selection, setSelection] = useState<Selection>({ order: [], stopped: [] })
+  const openLivePage = useOpenLivePage()
 
   const live = (streamers ?? []).filter((s) => s.status === LIVE_STATUS)
   const previewable = live.filter(canPreview)
@@ -216,7 +217,7 @@ export default function LiveMonitor() {
       </div>
       <Text type="tertiary" size="small" className={styles.hint}>
         画面来自各直播间正在写盘的同一路流，默认静音；每路小窗占用该直播间的 1 个预览连接。
-        超出路数的直播间显示封面，点击可替换最早开始的一路。
+        超出路数的直播间显示封面，点击可替换最早开始的一路；要打标记，点小窗右上角的放大按钮进预览页。
       </Text>
       <div className={styles.grid}>
         {live.map((s) => {
@@ -248,6 +249,18 @@ export default function LiveMonitor() {
                 ) : null}
                 <MarkerCount count={s.marker_count} compact />
                 <span className={styles.tileRate}>{rate ?? '—'}</span>
+                {can ? (
+                  <Tooltip content="在直播预览页打开：可以打标记、回看本场（离开监视页，小窗全部断开）">
+                    <Button
+                      size="small"
+                      theme="borderless"
+                      type="tertiary"
+                      icon={<IconMaximize />}
+                      aria-label={`在预览页打开 ${name}`}
+                      onClick={(e) => openLivePage(s.id, e)}
+                    />
+                  </Tooltip>
+                ) : null}
                 {playing ? (
                   <Tooltip content="停止这一路">
                     <Button
