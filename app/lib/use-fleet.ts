@@ -278,11 +278,10 @@ export function deleteTemplate(id: number) {
   return send<null>('DELETE', `${FLEET_TEMPLATES_KEY}/${id}`)
 }
 
-/** 与后端 `RoomSpec::has_hooks` 一致：设了 override，或处理器里有 `rm` 以外的步骤 */
+/** 与后端 `RoomSpec::has_hooks` 一致：处理器里有 `run` 步骤（rm、mv、remux 等文件操作和 override 都不算） */
 export function roomHasHooks(room: RoomSpec): boolean {
-  const override = room.override && Object.values(room.override).some((v) => v !== null && v !== undefined)
   const steps = [room.preprocessor, room.segment_processor, room.downloaded_processor, room.postprocessor]
-  return Boolean(override) || steps.some((list) => (list ?? []).some((step) => step !== 'rm'))
+  return steps.some((list) => (list ?? []).some((step) => typeof step === 'object' && step !== null && 'run' in step))
 }
 
 /** 节点是否版本太旧、收不了房间（离线时不知道版本，不算） */
@@ -296,7 +295,7 @@ export function nodeOutdated(node: FleetNode): boolean {
  */
 export function placementIssue(node: FleetNode, room: RoomSpec, template: FleetTemplate | undefined): string | null {
   if (nodeOutdated(node)) return '版本太旧，收不了房间'
-  if (roomHasHooks(room) && !node.allow_hooks) return '没带 --allow-hooks，不能放带钩子的房间'
+  if (roomHasHooks(room) && !node.allow_hooks) return '没带 --allow-hooks，不能放带 run 命令的房间'
   if (template?.account_mid && !node.accounts.some((a) => a.mid === template.account_mid)) {
     return `没有登记模板要用的 B 站账号 ${template.account_mid}`
   }

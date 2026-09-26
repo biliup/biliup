@@ -235,7 +235,7 @@ impl Controller {
         }
         if spec.has_hooks() && !node.allow_hooks {
             return Err(DispatchError::Invalid(format!(
-                "节点「{}」加入时没有带 --allow-hooks，不能分派带钩子（override 或处理器命令）的房间",
+                "节点「{}」加入时没有带 --allow-hooks，不能分派带 run 命令（能执行任意命令）的房间",
                 node.name
             )));
         }

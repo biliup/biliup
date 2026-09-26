@@ -135,7 +135,7 @@ export default function NodeCard({
           </Tooltip>
         ) : null}
         {node.allow_hooks ? (
-          <Tooltip content="加入时带了 --allow-hooks：带钩子（override 或处理器命令）的房间可以派到这台机器">
+          <Tooltip content="加入时带了 --allow-hooks：处理器里带 run 命令（能执行任意命令）的房间可以派到这台机器；rm、mv 等文件操作不受这个限制">
             <Tag size="small" color="red">
               允许钩子
             </Tag>

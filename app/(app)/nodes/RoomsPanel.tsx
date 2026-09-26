@@ -505,7 +505,7 @@ export function CreateRoomButton({
           optionList={nodeOptions}
           showClear
           placeholder="暂不分派"
-          extraText="模板要用的 B 站账号必须在节点上登记过；带钩子的房间只能派给允许钩子的节点。「自动」在满足这些条件的在线节点里挑空闲下载位多、房间少、磁盘余量大的一台，之后不会因负载变化挪走"
+          extraText="模板要用的 B 站账号必须在节点上登记过；处理器里带 run 命令的房间只能派给允许钩子的节点（rm、mv 等文件操作不算）。「自动」在满足这些条件的在线节点里挑空闲下载位多、房间少、磁盘余量大的一台，之后不会因负载变化挪走"
         />
       }
     >

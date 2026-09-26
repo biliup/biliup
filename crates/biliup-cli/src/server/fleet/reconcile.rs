@@ -355,7 +355,8 @@ impl Reconciler {
             if room.spec.has_hooks() && !self.allow_hooks {
                 errors.insert(
                     room.id,
-                    "这台节点加入时没有带 --allow-hooks，不接收带钩子（override 或处理器命令）的房间".into(),
+                    "这台节点加入时没有带 --allow-hooks，不接收带 run 命令（能执行任意命令）的房间"
+                        .into(),
                 );
                 continue;
             }

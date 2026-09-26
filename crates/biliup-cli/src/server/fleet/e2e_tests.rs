@@ -348,11 +348,12 @@ async fn rooms_follow_assignments_across_two_nodes() {
 
     // 迁移不能去没有账号的 B
     assert!(controller.assign(room.id, Some(b), false).await.is_err());
-    // 换一个不投稿的房间做迁移
-    let plain = controller
-        .create_room(request("https://stuck.example/2", a, None))
-        .await
-        .unwrap();
+    // 换一个不投稿的房间做迁移。它的后处理只有 rm / mv 这类文件操作，不算钩子，
+    // 两台都没带 --allow-hooks 也能收
+    let mut plain = request("https://stuck.example/2", a, None);
+    plain.spec.postprocessor =
+        serde_json::from_value(serde_json::json!(["rm", { "mv": "backup/" }])).unwrap();
+    let plain = controller.create_room(plain).await.unwrap();
     eventually("plain room lands on A", Duration::from_secs(20), || {
         let services = services_a.clone();
         async move { local_urls(&services).await.len() == 2 }

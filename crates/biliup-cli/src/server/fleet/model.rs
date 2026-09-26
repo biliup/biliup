@@ -57,31 +57,26 @@ impl RoomSpec {
         self
     }
 
-    /// 是否带钩子：`override`，或任何一个处理器里有 `rm` 以外的步骤。
+    /// 是否带钩子：任何一个处理器里有 `run` 步骤。
     ///
-    /// 钩子走 `sh -c`、`override` 能改任意配置，下发它们等于控制面能在节点上执行命令，
-    /// 所以只派给加入时带了 `--allow-hooks` 的节点（D12）。只有 `rm` 的后处理是表单默认值，不算钩子。
+    /// `run` 走 `sh -c`，下发它等于控制面能在节点上执行任意命令，所以只派给加入时带了
+    /// `--allow-hooks` 的节点（D12）。`rm`、`mv`、`remux` 是内置的文件操作，`override` 只改录制设置，
+    /// 都执行不了任意命令，不算钩子。
     pub fn has_hooks(&self) -> bool {
-        let override_set = self.override_cfg.as_ref().is_some_and(|patch| {
-            serde_json::to_value(patch)
-                .ok()
-                .and_then(|value| value.as_object().cloned())
-                .is_some_and(|fields| fields.values().any(|v| !v.is_null()))
-        });
-        let processors = [
+        [
             &self.preprocessor,
             &self.segment_processor,
             &self.downloaded_processor,
             &self.postprocessor,
-        ];
-        override_set
-            || processors.iter().any(|steps| {
-                steps.as_ref().is_some_and(|steps| {
-                    steps
-                        .iter()
-                        .any(|step| !matches!(step, HookStep::Remove(cmd) if cmd == "rm"))
-                })
+        ]
+        .iter()
+        .any(|steps| {
+            steps.as_ref().is_some_and(|steps| {
+                steps
+                    .iter()
+                    .any(|step| matches!(step, HookStep::Run { .. }))
             })
+        })
     }
 }
 
@@ -191,30 +186,34 @@ mod tests {
     }
 
     #[test]
-    fn only_rm_postprocessing_is_not_a_hook() {
+    fn only_run_steps_are_hooks() {
         assert!(!room(serde_json::json!({ "url": "u", "remark": "r" })).has_hooks());
+        // 内置的文件操作不算
         assert!(
             !room(serde_json::json!({ "url": "u", "remark": "r", "postprocessor": ["rm"] }))
                 .has_hooks()
         );
         assert!(
-            room(serde_json::json!({ "url": "u", "remark": "r", "postprocessor": [{ "run": "echo" }] }))
+            !room(serde_json::json!({
+                "url": "u",
+                "remark": "r",
+                "segment_processor": [{ "remux": "mp4" }],
+                "postprocessor": [{ "mv": "backup/" }, "rm"]
+            }))
+            .has_hooks()
+        );
+        // override 只改录制设置，不算
+        assert!(
+            !room(serde_json::json!({ "url": "u", "remark": "r", "override": { "downloader": "ffmpeg" } }))
                 .has_hooks()
         );
+        // 任何一个处理器里有 run 就算
         assert!(
-            room(serde_json::json!({ "url": "u", "remark": "r", "postprocessor": ["rm", { "mv": "backup/" }] }))
+            room(serde_json::json!({ "url": "u", "remark": "r", "postprocessor": ["rm", { "run": "echo" }] }))
                 .has_hooks()
         );
         assert!(
             room(serde_json::json!({ "url": "u", "remark": "r", "preprocessor": [{ "run": "echo" }] }))
-                .has_hooks()
-        );
-        // 空的 override 不算，设了任意一项就算
-        assert!(
-            !room(serde_json::json!({ "url": "u", "remark": "r", "override": {} })).has_hooks()
-        );
-        assert!(
-            room(serde_json::json!({ "url": "u", "remark": "r", "override": { "downloader": "ffmpeg" } }))
                 .has_hooks()
         );
     }
