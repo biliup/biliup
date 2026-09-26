@@ -10,6 +10,8 @@ pub mod bilibili_endpoints;
 pub mod clip_publish;
 /// 切片工作台的切片与导出
 pub mod clips;
+/// 弹幕密度曲线（回看页用）
+pub mod danmaku_density;
 /// 通用API端点
 pub mod endpoints;
 /// 控制面的节点与加入票据（只在 `--controller` 时注册）

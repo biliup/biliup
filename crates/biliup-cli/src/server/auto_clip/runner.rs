@@ -97,7 +97,7 @@ pub fn kick() {
     }
 }
 
-fn root() -> PathBuf {
+pub(crate) fn root() -> PathBuf {
     RUNNER
         .get()
         .map_or_else(|| PathBuf::from(AUTO_CLIP_DIR), |r| r.options.root.clone())

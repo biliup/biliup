@@ -194,6 +194,7 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         "/v1/sessions/{id}/auto-clip" if method == Method::POST || method == Method::DELETE => {
             ClipEdit
         }
+        "/v1/sessions/{id}/danmaku-density" if get => FileView,
         "/v1/streamer-info" | "/v1/streamer-info/files/{id}" if get => StreamerView,
         "/v1/sessions/{id}" if method == Method::PATCH => ClipEdit,
         "/v1/upload/streamers" | "/v1/upload/streamers/{id}" if get => StreamerView,

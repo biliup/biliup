@@ -12,6 +12,7 @@ use crate::server::api::clip_publish::{
 use crate::server::api::clips::{
     create_clip, delete_clip, download_clip, export_clip, get_clip, list_clips, update_clip,
 };
+use crate::server::api::danmaku_density::get_danmaku_density;
 use crate::server::api::endpoints::{
     add_upload_streamer_endpoint, add_user_endpoint, delete_streamers_endpoint,
     delete_template_endpoint, delete_user_endpoint, get_configuration, get_qrcode, get_status,
@@ -127,6 +128,11 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
             get(get_session_auto_clip)
                 .post(start_session_auto_clip)
                 .delete(cancel_session_auto_clip),
+        )
+        // 弹幕密度曲线：10 秒一桶、基线与高峰
+        .route(
+            "/v1/sessions/{id}/danmaku-density",
+            get(get_danmaku_density),
         )
         // 主播信息路由
         .route("/v1/streamer-info", get(get_streamer_info)) // 获取主播信息
