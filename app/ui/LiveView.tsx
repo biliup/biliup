@@ -176,10 +176,11 @@ function LiveStage({ streamer, streamers }: { streamer: LiveStreamerEntity; stre
     Toast.error({ content: `预览中断：${text}`, duration: 4 })
   }, [])
 
-  // 换直播间：只列正在录、能预览的，当前这一路总在里面
+  // 换直播间：只列正在录、能预览的，当前这一路总在里面。用 replace 不叠历史，
+  // 「返回」和浏览器后退回到进预览页之前的页面，而不是上一个直播间
   const switchable = streamers.filter((s) => s.id === streamer.id || canPreview(s))
   const switchTo = (id: number) => {
-    if (id !== streamer.id) router.push(livePageHref(id))
+    if (id !== streamer.id) router.replace(livePageHref(id))
   }
 
   const sessionId = streamer.session_id ?? null
