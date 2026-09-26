@@ -267,6 +267,9 @@ export interface FieldMarks {
   badges?: { keys: string[]; text: string; tone: keyof typeof BADGE_TONES }[]
 }
 
+/** 全宽的配置抽屉要压住移动端固定在左上角的菜单按钮（z-index 1001），否则标题被挡 */
+export const SHEET_Z_INDEX = 1002
+
 const fieldSelector = (keys: string[]) => keys.map((key) => `[x-field-id="${key}"]`).join(',')
 
 /**

@@ -6,7 +6,13 @@ import { put } from '@/app/lib/api-streamer'
 import { useWindowWidth } from '@/app/lib/useIsMobile'
 import FormSnapshot from '@/app/ui/FormSnapshot'
 import { errorMessage } from '@/app/lib/use-fleet'
-import { fieldMarksCss, LOCAL_SECRET_FIELDS, secretsPayload, type ConfigValues } from '@/app/lib/fleet-config'
+import {
+  fieldMarksCss,
+  LOCAL_SECRET_FIELDS,
+  secretsPayload,
+  SHEET_Z_INDEX,
+  type ConfigValues,
+} from '@/app/lib/fleet-config'
 import { PlatformPanels } from '@/app/ui/plugins'
 import dashboard from '@/app/styles/dashboard.module.scss'
 import styles from '../nodes/fleet-config.module.scss'
@@ -92,6 +98,7 @@ export default function LocalSecretsSheet({
       visible
       title="本机密钥"
       width={Number.isFinite(width) ? Math.min(760, width) : 760}
+      zIndex={SHEET_Z_INDEX}
       onCancel={onClose}
       footer={null}
       bodyStyle={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}

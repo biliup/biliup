@@ -33,6 +33,7 @@ import {
   PER_NODE_KEYS,
   saveFleetConfig,
   saveNodeOverride,
+  SHEET_Z_INDEX,
   type ConfigHistory,
   type ConfigValues,
   type FieldMarks,
@@ -497,6 +498,7 @@ export default function FleetConfigSheet({
       visible
       title={target.mode === 'global' ? 'Fleet 配置' : `节点覆盖 · ${node?.name ?? ''}`}
       width={Number.isFinite(width) ? Math.min(960, width) : 960}
+      zIndex={SHEET_Z_INDEX}
       onCancel={onClose}
       footer={null}
       bodyStyle={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
