@@ -2,6 +2,8 @@
 
 .player {
   position: relative;
+  /* Artplayer 内部各层带 z-index（视频层就是 10），不隔开会压过页面里吸顶的页头 */
+  isolation: isolate;
   width: 100%;
   aspect-ratio: 16 / 9;
   background: #000;
