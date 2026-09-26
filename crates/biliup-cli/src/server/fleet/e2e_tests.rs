@@ -107,6 +107,7 @@ async fn a_node_joins_reports_and_is_revoked_through_the_embedded_relay() {
     let agent = NodeAgent::start(
         node_file.clone(),
         node_services(&dir.path().join("node")).await,
+        super::guard::ManagedHandle::default(),
     )
     .await
     .unwrap();

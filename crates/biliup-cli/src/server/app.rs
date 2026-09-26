@@ -80,6 +80,7 @@ impl ApplicationController {
         if let Some(fleet_routes) = fleet.router() {
             protected_routes = protected_routes.merge(fleet_routes);
         }
+        protected_routes = fleet.guard(protected_routes);
         let mut app = with_optional_auth(protected_routes, enable_login_guard);
         app = app
             .layer(Extension(fleet.capability()))
