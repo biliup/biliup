@@ -79,11 +79,48 @@ async fn revoke_node(State(controller): State<Arc<Controller>>, Path(id): Path<i
     }
 }
 
+/// 界面一次最多补几个 relay 地址
+const MAX_EXTRA_RELAYS: usize = 4;
+
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct CreateToken {
     /// 有效期（秒），默认 24 小时，允许 1 分钟到 7 天
     ttl_secs: Option<i64>,
+    /// 额外写进票据的 relay 地址（「添加节点」弹层里的候选地址）；`--relay-url` 仍排在它们前面
+    #[serde(default)]
+    extra_relays: Vec<String>,
+}
+
+/// 校验界面补充的 relay 地址：只收 http / https、带主机名、没有账号密码 / 查询串 / 片段 / 路径
+fn parse_extra_relays(extra: &[String]) -> Result<Vec<url::Url>, String> {
+    if extra.len() > MAX_EXTRA_RELAYS {
+        return Err(format!("额外的 relay 地址最多 {MAX_EXTRA_RELAYS} 个"));
+    }
+    extra
+        .iter()
+        .map(|text| {
+            let text = text.trim();
+            let url = url::Url::parse(text).map_err(|_| format!("不是有效的地址：{text}"))?;
+            if !matches!(url.scheme(), "http" | "https") {
+                return Err(format!("relay 地址只能是 http:// 或 https://：{text}"));
+            }
+            if url.host_str().is_none_or(str::is_empty) {
+                return Err(format!("relay 地址缺少主机名：{text}"));
+            }
+            if !url.username().is_empty()
+                || url.password().is_some()
+                || url.query().is_some()
+                || url.fragment().is_some()
+                || url.path() != "/"
+            {
+                return Err(format!(
+                    "relay 地址只写 协议://主机:端口，不要带路径、参数或账号：{text}"
+                ));
+            }
+            Ok(url)
+        })
+        .collect()
 }
 
 async fn create_token(
@@ -107,11 +144,15 @@ async fn create_token(
         )
             .into_response();
     }
-    let relays = controller.advertised_relays();
+    let extra = match parse_extra_relays(&request.extra_relays) {
+        Ok(extra) => extra,
+        Err(message) => return (StatusCode::UNPROCESSABLE_ENTITY, message).into_response(),
+    };
+    let relays = controller.ticket_relays(&extra);
     if relays.is_empty() {
         return (
             StatusCode::CONFLICT,
-            "找不到可以写进票据的 relay 地址：本机没有非回环网卡地址，请用 --relay-url 指定",
+            "找不到可以写进票据的 relay 地址：本机没有非回环网卡地址，请用 --relay-url 指定，或在「添加节点」里填候选地址",
         )
             .into_response();
     }
@@ -149,6 +190,7 @@ async fn create_token(
             "docker_env": format!("BILIUP_JOIN_TICKET={ticket}"),
             "relays": relay_strings,
             "private_only": net::only_private(&relays),
+            "relay_port": controller.relay_port(),
         })),
     )
         .into_response()
@@ -469,6 +511,118 @@ mod tests {
         );
         let (status, accounts) = send(&app, Method::GET, "/v1/fleet/accounts").await;
         assert_eq!((status, accounts), (StatusCode::OK, json!([])));
+        controller.shutdown().await;
+    }
+
+    async fn controller_with(dir: &std::path::Path, relays: RelaySetup) -> Arc<Controller> {
+        let pool = ConnectionManager::new_pool_with(
+            dir.join("fleet.sqlite3").to_str().unwrap(),
+            &FLEET_MIGRATOR,
+        )
+        .await
+        .unwrap();
+        let secret = store::identity(&pool, now_ms()).await.unwrap();
+        Controller::start(pool, secret, relays, None).await.unwrap()
+    }
+
+    fn ticket_relays(created: &serde_json::Value) -> Vec<String> {
+        JoinTicket::decode_string(created["ticket"].as_str().unwrap())
+            .unwrap()
+            .relays
+    }
+
+    #[tokio::test]
+    async fn extra_relays_are_validated_and_come_after_relay_url() {
+        let dir = tempfile::tempdir().unwrap();
+        let relay: url::Url = "http://192.168.7.2:19160/".parse().unwrap();
+        let controller = controller_with(
+            dir.path(),
+            RelaySetup {
+                local: vec![relay.clone()],
+                advertised: vec![relay.clone()],
+                embedded_port: None,
+            },
+        )
+        .await;
+        let app = router(controller.clone()).route_layer(from_fn(access::unrestricted));
+        let issue = |extra: serde_json::Value| {
+            send_json(
+                &app,
+                Method::POST,
+                "/v1/fleet/join-tokens",
+                Some(json!({ "extra_relays": extra })),
+            )
+        };
+
+        let (status, created) = issue(json!([
+            " http://nas.example:19160 ",
+            "https://relay.example",
+            "http://192.168.7.2:19160"
+        ]))
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let expected = [
+            "http://192.168.7.2:19160/",
+            "http://nas.example:19160/",
+            "https://relay.example/",
+        ];
+        assert_eq!(ticket_relays(&created), expected);
+        assert_eq!(created["relays"], json!(expected));
+        assert_eq!(created["private_only"], false);
+        assert_eq!(created["relay_port"], serde_json::Value::Null);
+
+        for bad in [
+            json!(["ftp://nas.example:19160"]),
+            json!(["nas.example:19160"]),
+            json!(["http://nas.example:19160/relay"]),
+            json!(["http://user:pass@nas.example:19160"]),
+            json!(["http://nas.example:19160/?a=1"]),
+            json!([
+                "http://a/",
+                "http://b/",
+                "http://c/",
+                "http://d/",
+                "http://e/"
+            ]),
+        ] {
+            let (status, _) = issue(bad.clone()).await;
+            assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+        }
+        let (_, listed) = send(&app, Method::GET, "/v1/fleet/join-tokens").await;
+        assert_eq!(listed["tokens"].as_array().unwrap().len(), 1);
+        controller.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn without_relay_url_extra_relays_come_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let local: url::Url = "http://10.0.0.5:19160/".parse().unwrap();
+        let controller = controller_with(
+            dir.path(),
+            RelaySetup {
+                local: vec![local.clone()],
+                advertised: Vec::new(),
+                embedded_port: None,
+            },
+        )
+        .await;
+        let app = router(controller.clone()).route_layer(from_fn(access::unrestricted));
+        let (status, created) = send_json(
+            &app,
+            Method::POST,
+            "/v1/fleet/join-tokens",
+            Some(json!({ "extra_relays": ["http://nas.example.com:19160"] })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(
+            ticket_relays(&created),
+            ["http://nas.example.com:19160/", "http://10.0.0.5:19160/"]
+        );
+        assert_eq!(created["private_only"], false);
+        let (_, plain) = send(&app, Method::POST, "/v1/fleet/join-tokens").await;
+        assert_eq!(ticket_relays(&plain), ["http://10.0.0.5:19160/"]);
+        assert_eq!(plain["private_only"], true);
         controller.shutdown().await;
     }
 }

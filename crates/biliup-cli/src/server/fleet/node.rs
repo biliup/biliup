@@ -175,6 +175,27 @@ async fn pick_relay(relays: &[RelayUrl]) -> Option<RelayUrl> {
         .find_map(|(url, ok)| ok.then(|| url.clone()))
 }
 
+/// 写进 node.json 的 relay：这次连通的那个排第一（票据里可能有控制面自己列不出的地址，
+/// 例如「添加节点」里填的候选地址，Welcome 里永远不会有），后面跟控制面 Welcome 给的；Welcome 没给就用票据里的。
+/// 加入时与之后每次重连收到 Welcome / Relays 都这样存，否则第一次重连后候选地址就被 Welcome 覆盖掉了。
+fn saved_relays(joined_via: &[RelayUrl], welcome: Vec<String>, ticket: &[String]) -> Vec<String> {
+    let rest = if welcome.is_empty() {
+        ticket.to_vec()
+    } else {
+        welcome
+    };
+    let mut saved: Vec<String> = joined_via.iter().map(ToString::to_string).collect();
+    for relay in rest {
+        let joined = relay
+            .parse::<RelayUrl>()
+            .is_ok_and(|url| joined_via.contains(&url));
+        if !joined && !saved.contains(&relay) {
+            saved.push(relay);
+        }
+    }
+    saved
+}
+
 /// 一次性的连接（join / leave）：探测不到就用第一个，交给 iroh 自己去试（比如本机解析不了 relay 的域名）
 async fn pick_relay_or_first(relays: &[RelayUrl]) -> Vec<RelayUrl> {
     pick_relay(relays)
@@ -398,16 +419,13 @@ pub async fn join(ticket: &str, allow_hooks: bool, node_file: &Path) -> AppResul
                 }
             };
         let reply = read_welcome(&connection, &mut recv).await;
+        let joined_via = &relays;
         let outcome = match reply {
             Ok((node_id, relays)) => {
                 let file = NodeFile {
                     version: NODE_FILE_VERSION,
                     controller: ticket.controller.to_string(),
-                    relays: if relays.is_empty() {
-                        ticket.relays.clone()
-                    } else {
-                        relays
-                    },
+                    relays: saved_relays(joined_via, relays, &ticket.relays),
                     node_id,
                     secret_key: hex(&secret.to_bytes()),
                     allow_hooks,
@@ -676,10 +694,11 @@ async fn session(
             return Outcome::Failed;
         }
     };
+    let connected = relays.clone();
     match read_welcome(&connection, &mut recv).await {
         Ok((node_id, relays)) => {
             info!(node = node_id, "connected to fleet controller");
-            update_relays(node_file, file, relays);
+            update_relays(node_file, file, &connected, relays);
         }
         Err(code) => return closed_outcome(code, false),
     }
@@ -702,7 +721,9 @@ async fn session(
                 }
             }
             frame = protocol::read_frame::<_, ControllerMessage>(&mut recv) => match frame {
-                Ok(Some(ControllerMessage::Relays { relays })) => update_relays(node_file, file, relays),
+                Ok(Some(ControllerMessage::Relays { relays })) => {
+                    update_relays(node_file, file, &connected, relays)
+                }
                 Ok(Some(ControllerMessage::DesiredState(desired))) => {
                     let ack = reconciler.apply(desired).await;
                     if let Err(e) = protocol::write_frame(&mut send, &NodeMessage::Ack(ack)).await {
@@ -742,8 +763,17 @@ fn closed_outcome(code: Option<CloseCode>, was_connected: bool) -> Outcome {
     }
 }
 
-fn update_relays(node_file: &Path, file: &mut NodeFile, relays: Vec<String>) {
-    if relays.is_empty() || relays == file.relays {
+fn update_relays(
+    node_file: &Path,
+    file: &mut NodeFile,
+    connected: &[RelayUrl],
+    welcome: Vec<String>,
+) {
+    if welcome.is_empty() {
+        return;
+    }
+    let relays = saved_relays(connected, welcome, &[]);
+    if relays == file.relays {
         return;
     }
     info!(?relays, "fleet controller relays changed");
@@ -809,6 +839,51 @@ async fn heartbeat(services: &ServiceRegister, since: &mut Option<i64>) -> Heart
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_relay_used_to_join_is_kept_first() {
+        let via: Vec<RelayUrl> = vec!["http://nas.example:19160".parse().unwrap()];
+        let welcome = vec![
+            "http://172.17.0.2:19160/".to_string(),
+            "http://nas.example:19160/".to_string(),
+        ];
+        assert_eq!(
+            saved_relays(&via, welcome, &[]),
+            ["http://nas.example:19160/", "http://172.17.0.2:19160/"]
+        );
+        let ticket = ["http://10.0.0.5:19160/".to_string()];
+        assert_eq!(
+            saved_relays(&via, Vec::new(), &ticket),
+            ["http://nas.example:19160/", "http://10.0.0.5:19160/"]
+        );
+    }
+
+    #[test]
+    fn reconnecting_through_a_candidate_address_keeps_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("node.json");
+        let mut file = NodeFile {
+            relays: vec![
+                "http://nas.example:19160/".into(),
+                "http://192.168.1.2:19160/".into(),
+            ],
+            ..sample()
+        };
+        file.save(&path).unwrap();
+        let via: Vec<RelayUrl> = vec!["http://nas.example:19160".parse().unwrap()];
+        update_relays(
+            &path,
+            &mut file,
+            &via,
+            vec!["http://192.168.1.2:19160/".into()],
+        );
+        let expected = ["http://nas.example:19160/", "http://192.168.1.2:19160/"];
+        assert_eq!(file.relays, expected);
+        assert_eq!(NodeFile::load(&path).unwrap().relays, expected);
+
+        update_relays(&path, &mut file, &via, Vec::new());
+        assert_eq!(file.relays, expected);
+    }
 
     fn sample() -> NodeFile {
         NodeFile {

@@ -233,6 +233,28 @@ impl Controller {
         }
     }
 
+    /// 内嵌 relay 的端口；界面拿它和浏览器地址栏里的主机名拼候选地址
+    pub fn relay_port(&self) -> Option<u16> {
+        self.relays.embedded_port
+    }
+
+    /// 写进票据的 relay：`--relay-url` 在前，然后是界面补充的地址（`extra`），
+    /// 没有 `--relay-url` 时最后是按网卡地址列的
+    pub fn ticket_relays(&self, extra: &[Url]) -> Vec<Url> {
+        let mut relays = self.relays.advertised.clone();
+        let rest = if self.relays.advertised.is_empty() {
+            self.advertised_relays()
+        } else {
+            Vec::new()
+        };
+        for url in extra.iter().chain(&rest) {
+            if !relays.contains(url) {
+                relays.push(url.clone());
+            }
+        }
+        relays
+    }
+
     fn advertised_strings(&self) -> Vec<String> {
         self.advertised_relays()
             .into_iter()

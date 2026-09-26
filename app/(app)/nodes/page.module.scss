@@ -327,6 +327,26 @@
   overflow-wrap: anywhere;
 }
 
+.candidate {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px dashed var(--semi-color-border);
+}
+
+.candidateRow {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+
+  :global(.semi-input-wrapper) {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
 .nodeAccounts {
   display: flex;
   flex-wrap: wrap;

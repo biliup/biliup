@@ -77,6 +77,8 @@ export interface IssuedTicket {
   docker_env: string
   relays: string[]
   private_only: boolean
+  /** 内嵌 relay 的端口；用外部 relay（--relay-listen off）时为 null */
+  relay_port: number | null
 }
 
 export interface JoinToken {
@@ -193,8 +195,13 @@ export const FLEET_ACCOUNTS_KEY = '/v1/fleet/accounts'
 /** 节点每 10 秒一次心跳，列表 5 秒拉一次足够 */
 export const FLEET_REFRESH_MS = 5000
 
-export async function issueTicket(): Promise<IssuedTicket> {
-  const res = await fetch(API_BASE + FLEET_TOKENS_KEY, { method: 'POST' })
+/** `extraRelays`：额外写进票据的 relay 地址（候选地址）；`--relay-url` 仍排在它们前面 */
+export async function issueTicket(extraRelays: string[] = []): Promise<IssuedTicket> {
+  const res = await fetch(API_BASE + FLEET_TOKENS_KEY, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(extraRelays.length ? { extra_relays: extraRelays } : {}),
+  })
   await handleResponse(res)
   return res.json()
 }
