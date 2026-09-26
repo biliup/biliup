@@ -518,3 +518,196 @@ async fn automatic_placement_respects_accounts_and_spreads_rooms() {
     }
     controller.shutdown().await;
 }
+
+/// 控制面 + 两台节点：全局配置两台都生效，覆盖只动一台，本机密钥不出节点、不进控制面的库。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn layered_config_reaches_nodes_without_their_secrets() {
+    use crate::server::api::access;
+    use axum::body::Body;
+    use axum::http::{Method, Request, StatusCode};
+    use tower::ServiceExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let (controller, url, pool) = start_controller(dir.path()).await;
+    let app = crate::server::api::fleet::router(controller.clone())
+        .route_layer(axum::middleware::from_fn(access::unrestricted));
+    let send = |method: Method, uri: String, body: serde_json::Value| {
+        let app = app.clone();
+        async move {
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(uri)
+                        .header("content-type", "application/json")
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = response.status();
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            (
+                status,
+                serde_json::from_slice::<serde_json::Value>(&bytes)
+                    .unwrap_or(serde_json::Value::Null),
+            )
+        }
+    };
+
+    let mut nodes = Vec::new();
+    for name in ["a", "b"] {
+        let root = dir.path().join(name);
+        let node_file = root.join("data/node.json");
+        let joined = node::join(
+            &ticket_for(&controller, &pool, &url).await,
+            false,
+            &node_file,
+        )
+        .await
+        .unwrap();
+        let services = node_services(&root).await;
+        {
+            let mut config = services.config.write().unwrap();
+            config.kuaishou_cookie = Some(format!("ks-secret-{name}"));
+            config.pool1_size = 2;
+        }
+        let managed = ManagedHandle::default();
+        let agent = NodeAgent::start(node_file, services.clone(), managed.clone())
+            .await
+            .unwrap();
+        wait_for_node(&controller, joined.node_id, true, Duration::from_secs(30)).await;
+        nodes.push((joined.node_id, services, managed, agent));
+    }
+    let (a, b) = (nodes[0].0, nodes[1].0);
+    let config_of = |index: usize| nodes[index].1.config.read().unwrap().clone();
+    let sync_of = |id: i64| {
+        let controller = controller.clone();
+        async move {
+            controller
+                .nodes()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|node| node.id == id)
+                .unwrap()
+                .config
+        }
+    };
+
+    // 连上就托管配置；控制面还没存全局配置，本机配置不变
+    eventually(
+        "both nodes report config applied",
+        Duration::from_secs(20),
+        || async {
+            sync_of(a).await.sync == Some("applied") && sync_of(b).await.sync == Some("applied")
+        },
+    )
+    .await;
+    assert!(
+        nodes[0]
+            .2
+            .read()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .config
+            .is_some()
+    );
+    assert_eq!(config_of(0).pool1_size, 2);
+
+    let (status, saved) = send(
+        Method::PUT,
+        "/v1/fleet/configuration".into(),
+        serde_json::json!({
+            "segment_time": "01:00:00",
+            "filename_prefix": "{streamer}%Y-%m-%d",
+            "pool1_size": 9,
+            "kuaishou_cookie": null,
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(
+        saved["ignored"],
+        serde_json::json!(["kuaishou_cookie", "pool1_size"])
+    );
+    eventually(
+        "global config applied on both nodes",
+        Duration::from_secs(20),
+        || async {
+            [0, 1].iter().all(|index| {
+                let config = config_of(*index);
+                config.segment_time.as_deref() == Some("01:00:00")
+                    && config.filename_prefix.as_deref() == Some("{streamer}%Y-%m-%d")
+            })
+        },
+    )
+    .await;
+    // 按节点的键全局不管
+    assert_eq!(config_of(0).pool1_size, 2);
+
+    let (status, error) = send(
+        Method::PUT,
+        format!("/v1/fleet/nodes/{a}/config"),
+        serde_json::json!({ "pool1_size": 0 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(error["message"].as_str().unwrap().contains("pool1_size"));
+    let (status, _) = send(
+        Method::PUT,
+        format!("/v1/fleet/nodes/{a}/config"),
+        serde_json::json!({ "pool1_size": 1 }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    eventually(
+        "override applied on node a",
+        Duration::from_secs(20),
+        || async { nodes[0].1.managers.download_pool_size() == 1 },
+    )
+    .await;
+    eventually(
+        "node a acknowledges the override",
+        Duration::from_secs(20),
+        || async { sync_of(a).await.sync == Some("applied") },
+    )
+    .await;
+    assert_eq!(nodes[1].1.managers.download_pool_size(), 2);
+    assert_eq!(sync_of(a).await.override_keys, ["pool1_size"]);
+    assert!(sync_of(b).await.override_keys.is_empty());
+
+    // 密钥留在各自节点上，控制面的库里没有
+    assert_eq!(config_of(0).kuaishou_cookie.as_deref(), Some("ks-secret-a"));
+    assert_eq!(config_of(1).kuaishou_cookie.as_deref(), Some("ks-secret-b"));
+    let (status, rejected) = send(
+        Method::PUT,
+        "/v1/fleet/configuration".into(),
+        serde_json::json!({ "kuaishou_cookie": "ks-secret-controller" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{rejected}");
+    let (_, node_view) = send(
+        Method::GET,
+        format!("/v1/fleet/nodes/{a}/config"),
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(node_view["delivered"]["pool1_size"], 1);
+    assert_eq!(node_view["delivered"]["segment_time"], "01:00:00");
+    for file in ["fleet.sqlite3", "fleet.sqlite3-wal"] {
+        let path = dir.path().join(file);
+        if let Ok(bytes) = std::fs::read(&path) {
+            let text = String::from_utf8_lossy(&bytes);
+            assert!(!text.contains("ks-secret"), "{file} contains a node secret");
+        }
+    }
+
+    for (_, _, _, agent) in nodes {
+        agent.shutdown().await;
+    }
+    controller.shutdown().await;
+}

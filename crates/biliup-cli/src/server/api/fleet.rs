@@ -1,11 +1,13 @@
 //! 控制面的 `/v1/fleet/*` 接口，只在 `--controller` 时注册。
 //! 节点列表归 `streamer.view`，生成 / 作废票据与移除节点归 `node.manage`（见 `permissions.rs`）。
-//! 房间、投稿模板与节点账号的处理函数在 `fleet_rooms.rs`。
+//! 房间、投稿模板与节点账号的处理函数在 `fleet_rooms.rs`，Fleet 配置的在 `fleet_config.rs`。
 
 use crate::server::api::access::Caller;
+use crate::server::api::fleet_config;
 use crate::server::api::fleet_rooms;
 use crate::server::errors::report_to_response;
-use crate::server::fleet::controller::Controller;
+use crate::server::fleet::controller::{CONTROLLER_VERSION, Controller};
+use crate::server::fleet::protocol::PROTOCOL_MINOR;
 use crate::server::fleet::store;
 use crate::server::fleet::ticket::JoinTicket;
 use crate::server::fleet::{net, now_ms};
@@ -56,6 +58,18 @@ pub fn router(controller: Arc<Controller>) -> Router<()> {
             put(fleet_rooms::update_template).delete(fleet_rooms::delete_template),
         )
         .route("/v1/fleet/accounts", get(fleet_rooms::list_accounts))
+        .route(
+            "/v1/fleet/configuration",
+            get(fleet_config::get_configuration).put(fleet_config::put_configuration),
+        )
+        .route(
+            "/v1/fleet/configuration/history",
+            get(fleet_config::configuration_history),
+        )
+        .route(
+            "/v1/fleet/nodes/{id}/config",
+            get(fleet_config::get_node_config).put(fleet_config::put_node_config),
+        )
         .with_state(controller)
 }
 
@@ -64,6 +78,8 @@ async fn list_nodes(State(controller): State<Arc<Controller>>) -> Response {
         Ok(nodes) => Json(json!({
             "now": now_ms(),
             "controller": controller.endpoint_id().to_string(),
+            "controller_version": CONTROLLER_VERSION,
+            "controller_proto": PROTOCOL_MINOR,
             "nodes": nodes,
         }))
         .into_response(),
@@ -322,6 +338,31 @@ mod tests {
                 "/v1/fleet/templates/{id}",
                 Permission::NodeManage,
             ),
+            (
+                Method::GET,
+                "/v1/fleet/configuration",
+                Permission::ConfigView,
+            ),
+            (
+                Method::GET,
+                "/v1/fleet/configuration/history",
+                Permission::ConfigView,
+            ),
+            (
+                Method::GET,
+                "/v1/fleet/nodes/{id}/config",
+                Permission::ConfigView,
+            ),
+            (
+                Method::PUT,
+                "/v1/fleet/configuration",
+                Permission::NodeManage,
+            ),
+            (
+                Method::PUT,
+                "/v1/fleet/nodes/{id}/config",
+                Permission::NodeManage,
+            ),
         ];
         for (method, route, permission) in cases {
             assert_eq!(
@@ -333,6 +374,156 @@ mod tests {
         assert!(Role::Admin.has(Permission::NodeManage));
         assert!(!Role::Operator.has(Permission::NodeManage));
         assert!(!Role::Viewer.has(Permission::NodeManage));
+        assert!(Role::Viewer.has(Permission::ConfigView));
+    }
+
+    #[tokio::test]
+    async fn fleet_config_is_versioned_and_keeps_secrets_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let relay: url::Url = "http://192.168.7.2:19160/".parse().unwrap();
+        let controller = controller_with(
+            dir.path(),
+            RelaySetup {
+                local: vec![relay.clone()],
+                advertised: vec![relay],
+                embedded_port: None,
+            },
+        )
+        .await;
+        let app = router(controller.clone()).route_layer(from_fn(access::unrestricted));
+
+        let (status, initial) = send(&app, Method::GET, "/v1/fleet/configuration").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(initial["version"], 0);
+        assert_eq!(initial["saved"], false);
+        assert_eq!(initial["config"]["delay"], 300);
+        assert!(initial["config"].get("pool1_size").is_none());
+        assert!(initial["config"].get("user").is_none());
+        assert!(
+            initial["per_node_keys"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("ffmpeg_path"))
+        );
+
+        // 白名单外带值：整体拒绝，什么都不存
+        let (status, error) = send_json(
+            &app,
+            Method::PUT,
+            "/v1/fleet/configuration",
+            Some(json!({ "segment_time": "01:00:00", "user": { "bili_cookie": "SESSDATA=x" } })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            error["message"].as_str().unwrap().contains("user"),
+            "{error}"
+        );
+        let (status, error) = send_json(
+            &app,
+            Method::PUT,
+            "/v1/fleet/configuration",
+            Some(json!([1])),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+
+        // 回传整份（含按节点键与脱敏成 null 的密钥）：按节点键与 null 密钥丢掉并列出
+        let mut body = initial["config"].clone();
+        body["segment_time"] = json!("01:00:00");
+        body["pool1_size"] = json!(9);
+        body["kuaishou_cookie"] = serde_json::Value::Null;
+        let (status, saved) = send_json(
+            &app,
+            Method::PUT,
+            "/v1/fleet/configuration",
+            Some(body.clone()),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{saved}");
+        assert_eq!(saved["version"], 1);
+        assert_eq!(saved["changed"], true);
+        assert_eq!(saved["ignored"], json!(["kuaishou_cookie", "pool1_size"]));
+        assert_eq!(saved["config"]["segment_time"], "01:00:00");
+        assert!(saved["updated_at"].is_i64());
+
+        // 原样再存：不记新版本
+        let (status, again) =
+            send_json(&app, Method::PUT, "/v1/fleet/configuration", Some(body)).await;
+        assert_eq!(
+            (status, again["version"].clone()),
+            (StatusCode::OK, json!(1))
+        );
+        assert_eq!(again["changed"], false);
+
+        let (status, history) = send(&app, Method::GET, "/v1/fleet/configuration/history").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(history["versions"].as_array().unwrap().len(), 1);
+        assert_eq!(history["versions"][0]["config"]["segment_time"], "01:00:00");
+
+        // 节点覆盖：不存在的节点 404
+        let (status, _) = send(&app, Method::GET, "/v1/fleet/nodes/9/config").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _) = send_json(
+            &app,
+            Method::PUT,
+            "/v1/fleet/nodes/9/config",
+            Some(json!({})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let (token, secret) = store::create_token(controller.pool(), None, 1, i64::MAX)
+            .await
+            .unwrap();
+        let store::Redeem::Joined(node) =
+            store::redeem_token(controller.pool(), &token.id, &secret, "aa", "n", false, 2)
+                .await
+                .unwrap()
+        else {
+            panic!()
+        };
+        let uri = format!("/v1/fleet/nodes/{}/config", node.id);
+        let (status, error) =
+            send_json(&app, Method::PUT, &uri, Some(json!({ "pool1_size": 0 }))).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(error["message"].as_str().unwrap().contains("pool1_size"));
+        let (status, error) = send_json(
+            &app,
+            Method::PUT,
+            &uri,
+            Some(json!({ "twitcasting_password": "pw" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+        let (status, saved) = send_json(
+            &app,
+            Method::PUT,
+            &uri,
+            Some(json!({ "pool1_size": 2, "segment_time": "", "delay": 30, "user": null })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{saved}");
+        assert_eq!(saved["override"], json!({ "pool1_size": 2, "delay": 30 }));
+        assert_eq!(saved["ignored"], json!(["user"]));
+
+        let (status, view) = send(&app, Method::GET, &uri).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(view["override"], json!({ "pool1_size": 2, "delay": 30 }));
+        assert_eq!(view["delivered"]["delay"], 30);
+        assert_eq!(view["delivered"]["pool1_size"], 2);
+        assert_eq!(view["delivered"]["segment_time"], "01:00:00");
+        assert_eq!(view["global"]["version"], 1);
+        assert_eq!(view["state"]["sync"], serde_json::Value::Null);
+
+        let (_, nodes) = send(&app, Method::GET, "/v1/fleet/nodes").await;
+        assert_eq!(nodes["controller_version"], CONTROLLER_VERSION);
+        assert_eq!(nodes["controller_proto"], PROTOCOL_MINOR);
+        assert_eq!(
+            nodes["nodes"][0]["config"]["override_keys"],
+            json!(["delay", "pool1_size"])
+        );
+        controller.shutdown().await;
     }
 
     async fn send(app: &Router<()>, method: Method, uri: &str) -> (StatusCode, serde_json::Value) {

@@ -220,6 +220,15 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         {
             StreamerView
         }
+        // Fleet 配置只含白名单字段，查看与空间配置同级；修改会下发到节点，归 node.manage
+        "/v1/fleet/configuration"
+        | "/v1/fleet/configuration/history"
+        | "/v1/fleet/nodes/{id}/config"
+            if get =>
+        {
+            ConfigView
+        }
+        "/v1/fleet/configuration" | "/v1/fleet/nodes/{id}/config" => NodeManage,
         "/v1/fleet/nodes/{id}"
         | "/v1/fleet/join-tokens"
         | "/v1/fleet/join-tokens/{id}"

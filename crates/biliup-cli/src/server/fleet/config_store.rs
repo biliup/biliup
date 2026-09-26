@@ -13,7 +13,7 @@ use serde_json::{Map, Value};
 pub const KEEP_VERSIONS: i64 = 20;
 
 /// `fleet_config` 的一行
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct ConfigVersion {
     pub version: i64,
     pub config: Map<String, Value>,
@@ -119,6 +119,20 @@ pub async fn node_override(
         .map(parse_object)
         .transpose()
         .attach("fleet_nodes.config_override")
+}
+
+/// 未移除节点的覆盖，节点列表用
+pub async fn node_overrides(
+    pool: &ConnectionPool,
+) -> AppResult<std::collections::HashMap<i64, Map<String, Value>>> {
+    let rows: Vec<(i64, String)> =
+        sqlx::query_as("SELECT id, config_override FROM fleet_nodes WHERE revoked_at IS NULL")
+            .fetch_all(pool)
+            .await
+            .change_context(db_error("list node config overrides"))?;
+    rows.into_iter()
+        .map(|(id, text)| Ok((id, parse_object(&text)?)))
+        .collect()
 }
 
 /// 整份替换节点覆盖；节点不存在或已移除时返回 `false`
@@ -229,7 +243,14 @@ mod tests {
 
         let patch = object(json!({"pool1_size": 2, "file_size": null}));
         assert!(set_node_override(&pool, node.id, &patch).await.unwrap());
-        assert_eq!(node_override(&pool, node.id).await.unwrap(), Some(patch));
+        assert_eq!(
+            node_override(&pool, node.id).await.unwrap(),
+            Some(patch.clone())
+        );
+        assert_eq!(
+            node_overrides(&pool).await.unwrap(),
+            std::collections::HashMap::from([(node.id, patch)])
+        );
         assert!(
             !set_node_override(&pool, node.id + 1, &Map::new())
                 .await
