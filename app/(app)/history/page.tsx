@@ -1,80 +1,45 @@
 'use client'
-import { Modal, Table, Tabs, TabPane, Typography } from '@douyinfe/semi-ui'
+import { Suspense } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { Spin, Tabs, TabPane } from '@douyinfe/semi-ui'
 import { IconVideoListStroked } from '@douyinfe/semi-icons'
-import { SortOrder } from '@douyinfe/semi-ui/lib/es/table'
-import useSWR from 'swr'
-import { fetcher, FileList } from '@/app/lib/api-streamer'
-import { useState } from 'react'
-import dynamic from 'next/dynamic'
-import Link from 'next/link'
-import { humDate } from '@/app/lib/utils'
-import { formatSize } from '@/app/lib/use-dashboard'
-import { replayHref } from '@/app/lib/sessions'
+import { type HistoryTab, parseHistoryTab } from '@/app/lib/history'
 import PageHeader from '../components/PageHeader'
 import LiveMonitor from '@/app/ui/LiveMonitor'
+import SessionsTab from './SessionsTab'
+import FilesTab from './FilesTab'
 import dc from '@/app/ui/data-card.module.scss'
 import styles from './page.module.scss'
 
-const Players = dynamic(() => import('@/app/ui/Player'), {
-  ssr: false,
-})
-
-type HistoryTab = 'files' | 'monitor'
-
 /**
- * 历史记录：「录制文件」（已录完的文件回放）与「实时监视」（正在录制的直播间多路同屏）两个 Tab。
- * 监视器是独立组件 <LiveMonitor />，要挪到别的页面只需换个挂载点。
+ * 历史记录：「直播场次」（每场一行，从这里进回看页）、「录制文件」（按文件回放）、
+ * 「实时监视」（正在录制的直播间多路同屏）三个 Tab，当前 Tab 在查询串 `?tab=` 里。
+ * 旧的「直播历史」`/job` 重定向到 `?tab=sessions`。
  */
 export default function History() {
-  const { Text } = Typography
-  const [tab, setTab] = useState<HistoryTab>('files')
-  const { data: data, error, isLoading } = useSWR<FileList[]>('/v1/videos', fetcher)
-  const [fileName, setFileName] = useState<string>()
-  const [visible, setVisible] = useState(false)
+  return (
+    <Suspense
+      fallback={
+        <div style={{ padding: '80px 0', textAlign: 'center' }}>
+          <Spin size="large" />
+        </div>
+      }
+    >
+      <HistoryTabs />
+    </Suspense>
+  )
+}
 
-  const columns = [
-    {
-      title: '标题',
-      dataIndex: 'name',
-      render: (text: any) => <Text strong>{text}</Text>,
-    },
-    {
-      title: '大小',
-      dataIndex: 'size',
-      render: (size: number) => formatSize(size || 0),
-    },
-    {
-      title: '更新日期',
-      dataIndex: 'updateTime',
-      defaultSortOrder: 'descend' as SortOrder,
-      sorter: (a: any, b: any) => (a.updateTime - b.updateTime > 0 ? 1 : -1),
-      render: (time: number) => humDate(time),
-    },
-    {
-      title: '',
-      dataIndex: 'operate',
-      render: (text: any, record: FileList) => (
-        <span className={styles.actions}>
-          <Text link style={{ cursor: 'pointer' }} onClick={() => showDialog(record.name)}>
-            播放
-          </Text>
-          {record.session_id !== undefined ? (
-            <Link
-              href={replayHref(record.session_id, record.segment_start_ms)}
-              className={styles.replayLink}
-              title="打开这一场的回看页，定位到这个文件的开头；可以拖到整场任意位置"
-            >
-              按场次回看
-            </Link>
-          ) : null}
-        </span>
-      ),
-    },
-  ]
+function HistoryTabs() {
+  const router = useRouter()
+  const pathname = usePathname()
+  const params = useSearchParams()
+  const tab = parseHistoryTab(params.get('tab'))
 
-  const showDialog = (name: string) => {
-    setVisible(true)
-    setFileName(name)
+  const switchTab = (key: string) => {
+    const next = new URLSearchParams(params.toString())
+    next.set('tab', key)
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false })
   }
 
   return (
@@ -82,45 +47,29 @@ export default function History() {
       <PageHeader
         icon={<IconVideoListStroked size="large" />}
         title="历史记录"
-        description="已录制的视频文件可在线回放；「实时监视」同屏查看正在录制的直播间"
+        description="按场次回看、打标记和剪切片，或按文件在线回放；「实时监视」同屏查看正在录制的直播间"
       />
       <div className={dc.content}>
+        {/* keepDOM + lazyRender：场次和文件两个列表切走再切回，筛选、排序、分页、展开行都还在 */}
         <Tabs
           type="line"
           activeKey={tab}
-          onChange={(key) => setTab(key as HistoryTab)}
+          onChange={switchTab}
           className={styles.tabs}
-          keepDOM={false}
+          keepDOM
+          lazyRender
         >
-          <TabPane tab="录制文件" itemKey="files">
-            <div className={dc.card}>
-              <Table
-                size="small"
-                scroll={{ x: 'max-content' }}
-                columns={columns}
-                dataSource={data}
-                loading={isLoading}
-                empty={error ? '加载失败，请检查后端连接' : '暂无数据'}
-              />
-            </div>
+          <TabPane tab="直播场次" itemKey={'sessions' satisfies HistoryTab}>
+            <SessionsTab />
           </TabPane>
-          <TabPane tab="实时监视" itemKey="monitor">
-            {/* keepDOM=false：切走即卸载播放器、断开全部预览连接 */}
-            <LiveMonitor />
+          <TabPane tab="录制文件" itemKey={'files' satisfies HistoryTab}>
+            <FilesTab />
+          </TabPane>
+          <TabPane tab="实时监视" itemKey={'monitor' satisfies HistoryTab}>
+            {/* 切走即卸载播放器、断开全部预览连接 */}
+            {tab === 'monitor' ? <LiveMonitor /> : null}
           </TabPane>
         </Tabs>
-        <Modal
-          visible={visible}
-          onCancel={() => setVisible(false)}
-          closeOnEsc={true}
-          style={{ width: 'min(600px, 90vw)' }}
-          size="large"
-          bodyStyle={{ height: 500 }}
-          footer={null}
-        >
-          <Players url={(process.env.NEXT_PUBLIC_API_SERVER ?? '') + '/static/' + fileName} />
-          <div id="mse" />
-        </Modal>
       </div>
     </>
   )
