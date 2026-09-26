@@ -981,3 +981,145 @@ async fn open_tapped_segments_are_observed_from_the_index_task() {
     assert_eq!(index::live::written(&part), None, "关段后不再跟踪");
     drop(guard);
 }
+
+#[test]
+fn segment_files_are_matched_to_the_working_directory_by_name() {
+    let file = |session_id, path: &str, start_ms| store::SegmentFile {
+        session_id,
+        path: path.to_string(),
+        start_ms,
+    };
+    let dir = Path::new("/rec");
+    let by_name = store::segment_files_in_dir(
+        vec![
+            file(1, "a.flv", 0),
+            file(1, "./b.ts", 60_000),
+            file(2, "/rec/c.flv", 5_000),
+            file(3, "/elsewhere/d.flv", 0),
+            file(3, "sub/e.flv", 0),
+            file(4, "a.flv", 7_000),
+        ],
+        Some(dir),
+    );
+    let mut names: Vec<_> = by_name.keys().cloned().collect();
+    names.sort();
+    assert_eq!(names, ["a.flv", "b.ts", "c.flv"]);
+    assert_eq!(
+        (by_name["a.flv"].session_id, by_name["a.flv"].start_ms),
+        (4, 7_000)
+    );
+    assert_eq!(
+        (by_name["b.ts"].session_id, by_name["b.ts"].start_ms),
+        (1, 60_000)
+    );
+    assert_eq!(by_name["c.flv"].session_id, 2);
+    let no_cwd = store::segment_files_in_dir(vec![file(2, "/rec/c.flv", 0)], None);
+    assert!(no_cwd.is_empty());
+}
+
+#[tokio::test]
+async fn only_replayable_segments_and_sessions_with_a_timeline_are_listed() {
+    let (_dir, pool) = setup().await;
+    let legacy = go_live(&pool, 1_000, 0).await.id;
+    store::close_session(&pool, legacy, 2_000).await.unwrap();
+    let session = go_live(&pool, 10_000, 0).await.id;
+    store::set_started_at(&pool, session, 10_000).await.unwrap();
+    let insert = |path: &'static str, container: &'static str, start_ms: i64| {
+        let pool = pool.clone();
+        async move {
+            store::insert_segment(&pool, session, path, container, start_ms, 0)
+                .await
+                .unwrap()
+        }
+    };
+    insert("a.flv", "flv", 0).await;
+    let waiting = insert("b.flv", "flv", 60_000).await;
+    let deleted = insert("c.flv", "flv", 120_000).await;
+    insert("d.mp4", "mp4", 180_000).await;
+    store::set_segment_state(&pool, waiting, SegmentState::PendingDelete)
+        .await
+        .unwrap();
+    store::set_segment_state(&pool, deleted, SegmentState::Deleted)
+        .await
+        .unwrap();
+
+    let files = store::replayable_segment_files(&pool).await.unwrap();
+    let listed: Vec<_> = files
+        .iter()
+        .map(|f| (f.session_id, f.path.as_str(), f.start_ms))
+        .collect();
+    assert_eq!(listed, [(session, "a.flv", 0), (session, "b.flv", 60_000)]);
+    let with_timeline = store::sessions_with_timeline(&pool).await.unwrap();
+    assert!(with_timeline.contains(&session));
+    assert!(!with_timeline.contains(&legacy));
+
+    let axum::Json(rows) =
+        crate::server::api::endpoints::get_streamer_info(axum::extract::State(pool.clone()))
+            .await
+            .unwrap();
+    let rows = serde_json::to_value(rows).unwrap();
+    let flag = |id: i64| {
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == id)
+            .map(|r| r["has_timeline"].clone())
+    };
+    assert_eq!(flag(session), Some(serde_json::Value::Bool(true)));
+    assert_eq!(flag(legacy), Some(serde_json::Value::Bool(false)));
+}
+
+#[tokio::test]
+async fn session_totals_count_segments_waiting_for_deletion() {
+    let (_dir, pool) = setup().await;
+    let session = go_live(&pool, 10_000, 0).await.id;
+    store::set_started_at(&pool, session, 10_000).await.unwrap();
+    for (i, state) in [
+        SegmentState::Finished,
+        SegmentState::PendingDelete,
+        SegmentState::Deleted,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let start = i as i64 * 60_000;
+        let id = store::insert_segment(&pool, session, &format!("{i}.flv"), "flv", start, 0)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE segments SET end_ms = ?, bytes = 1000 WHERE id = ?")
+            .bind(start + 60_000)
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        store::set_segment_state(&pool, id, state).await.unwrap();
+    }
+
+    let (rows, total) = store::list_sessions(&pool, None, 10, 0).await.unwrap();
+    assert_eq!(total, 1);
+    let row = &rows[0];
+    assert_eq!(
+        (row.segment_count, row.bytes, row.end_ms),
+        (2, 2000, 120_000),
+        "等着被删的分段还能回看，算进合计；已删的不算"
+    );
+    assert_eq!(
+        store::session_summary(&pool, session)
+            .await
+            .unwrap()
+            .as_ref(),
+        Some(row)
+    );
+
+    let response = crate::server::api::sessions::get_session(
+        axum::extract::State(pool.clone()),
+        axum::extract::Path(session),
+    )
+    .await;
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let detail: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(detail["segment_count"], 2);
+    assert_eq!(detail["duration_ms"], 120_000);
+}

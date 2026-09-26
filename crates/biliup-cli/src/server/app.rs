@@ -92,6 +92,11 @@ impl ApplicationController {
                 // 参考：https://github.com/tokio-rs/axum/issues/849
                 CorsLayer::new()
                     .allow_headers([http::header::CONTENT_TYPE])
+                    // 录像回看要读起播关键帧的场次时间；开发时前端（:3000）和后端不同源
+                    .expose_headers([
+                        http::HeaderName::from_static("x-dvr-start-ms"),
+                        http::HeaderName::from_static("x-dvr-segment-id"),
+                    ])
                     .allow_origin("http://localhost:3000".parse::<HeaderValue>().unwrap())
                     .allow_methods(AllowMethods::any()),
             )
