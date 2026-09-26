@@ -149,6 +149,12 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_clip: Option<AutoClipConfig>,
 
+    /// 自动切片：这个主播下播（过了断流合并窗口）后自动生成候选。只认主播覆写，全局配置里写了
+    /// 不生效（按主播开，免得每一场都花钱）；还要全局 `auto_clip.enabled` 打开才会跑。
+    #[patch(attribute(serde(skip_serializing_if = "Option::is_none")))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_clip_after_live: Option<bool>,
+
     // ===== 各平台录播设置 =====
     /// 是否使用直播封面
     #[serde(default)]

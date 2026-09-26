@@ -65,6 +65,7 @@ pub async fn apply_config(
     // 下载池 / 上传池的容量不是每次从配置里读的，要在这里同步过去才能不重启就生效
     managers.resize_pools(saved_config.pool1_size, saved_config.pool2_size);
     *config.write().unwrap() = saved_config;
+    crate::server::auto_clip::runner::kick();
     let guard = config.read().unwrap();
     if let Some(loggers_level) = &guard.loggers_level {
         let new_filter = EnvFilter::try_new(loggers_level)

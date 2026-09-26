@@ -1,4 +1,7 @@
-use crate::server::api::auto_clip::{auto_clip_status, test_auto_clip};
+use crate::server::api::auto_clip::{
+    auto_clip_status, cancel_session_auto_clip, get_session_auto_clip, start_session_auto_clip,
+    test_auto_clip,
+};
 use crate::server::api::bilibili_endpoints::{
     archive_pre_endpoint, get_user_archives_endpoint, get_user_profile_endpoint,
 };
@@ -118,6 +121,13 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         // 自动切片（实验）：模型接口连通性测试与状态
         .route("/v1/auto-clip/test", post(test_auto_clip))
         .route("/v1/auto-clip/status", get(auto_clip_status))
+        // 按场次生成候选：GET 看任务与用量预估，POST 先预估、确认后入队，DELETE 取消
+        .route(
+            "/v1/sessions/{id}/auto-clip",
+            get(get_session_auto_clip)
+                .post(start_session_auto_clip)
+                .delete(cancel_session_auto_clip),
+        )
         // 主播信息路由
         .route("/v1/streamer-info", get(get_streamer_info)) // 获取主播信息
         .route("/v1/streamer-info/files/{id}", get(get_streamer_info_files)) // 获取主播信息

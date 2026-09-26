@@ -19,6 +19,8 @@ use tower_sessions::SessionManagerLayer;
 use tower_sessions_sqlx_store::SqliteStore;
 use tracing_subscriber::{EnvFilter, reload};
 
+mod session;
+
 const KEY: &str = "sk-stored-0123456789abcdef";
 const MASK: &str = "sk-…cdef";
 

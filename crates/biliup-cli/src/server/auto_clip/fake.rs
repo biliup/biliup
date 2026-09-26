@@ -29,6 +29,14 @@ pub enum Scenario {
     Slow {
         secs: u64,
     },
+    /// 每个请求都等这么久再正常返回
+    Delay {
+        millis: u64,
+    },
+    /// 前 `ok` 个请求正常返回，之后都是 500
+    FailAfter {
+        ok: usize,
+    },
     /// 转写只给 `text`，没有 `segments`
     NoSegments,
     /// 转写不认 `verbose_json`（400），`json` 可以
@@ -69,6 +77,8 @@ pub struct Seen {
     pub body: Value,
     /// transcriptions 的表单字段；`file` 记的是文件名
     pub form: HashMap<String, String>,
+    /// 上传的 FLAC 的时长（毫秒），读不出来为空
+    pub audio_ms: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -139,6 +149,7 @@ async fn chat(State(shared): State<Shared>, headers: HeaderMap, body: Bytes) -> 
         &headers,
         body,
         HashMap::new(),
+        None,
         &model,
     );
     if let Some(response) = common_failure(scenario, attempt, &headers).await {
@@ -180,12 +191,15 @@ async fn transcriptions(State(shared): State<Shared>, headers: HeaderMap, body: 
     let form = parse_multipart(&headers, &body);
     let model = form.get("model").cloned().unwrap_or_default();
     let verbose = form.get("response_format").map(String::as_str) == Some("verbose_json");
+    let audio_ms =
+        file_bytes(&headers, &body).and_then(|file| super::audio::flac_duration_ms(&file));
     let (scenario, attempt) = record(
         &shared,
         "/v1/audio/transcriptions",
         &headers,
         Value::Null,
         form,
+        audio_ms,
         &model,
     );
     if let Some(response) = common_failure(scenario, attempt, &headers).await {
@@ -198,6 +212,9 @@ async fn transcriptions(State(shared): State<Shared>, headers: HeaderMap, body: 
         ),
         Scenario::NoSegments | Scenario::NoVerboseJson => {
             axum::Json(json!({"text": "测试"})).into_response()
+        }
+        _ if verbose && audio_ms.is_some() => {
+            axum::Json(sentences(audio_ms.unwrap_or_default())).into_response()
         }
         _ if verbose => axum::Json(json!({
             "task": "transcribe",
@@ -218,6 +235,7 @@ fn record(
     headers: &HeaderMap,
     body: Value,
     form: HashMap<String, String>,
+    audio_ms: Option<i64>,
     model: &str,
 ) -> (Scenario, usize) {
     let scenario = match shared.scenario {
@@ -242,6 +260,7 @@ fn record(
             .map(str::to_string),
         body,
         form,
+        audio_ms,
     });
     (scenario, attempt)
 }
@@ -283,7 +302,42 @@ async fn common_failure(
             tokio::time::sleep(Duration::from_secs(secs)).await;
             return None;
         }
+        Scenario::Delay { millis } => {
+            tokio::time::sleep(Duration::from_millis(millis)).await;
+            return None;
+        }
+        Scenario::FailAfter { ok } if attempt >= ok => {
+            error(StatusCode::INTERNAL_SERVER_ERROR, "The server had an error")
+        }
         _ => return None,
+    })
+}
+
+/// 按上传音频的时长每 2 秒给一句，文字是这句在块内的起点（秒），测试据此核对时间换算。
+fn sentences(audio_ms: i64) -> Value {
+    let mut segments = Vec::new();
+    let mut start = 0;
+    while start < audio_ms {
+        let end = (start + 2000).min(audio_ms);
+        segments.push(json!({
+            "id": segments.len(),
+            "start": start as f64 / 1000.0,
+            "end": end as f64 / 1000.0,
+            "text": format!("块内{}秒", start / 1000),
+        }));
+        start = end;
+    }
+    let text = segments
+        .iter()
+        .map(|segment| segment["text"].as_str().unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join("");
+    json!({
+        "task": "transcribe",
+        "language": "chinese",
+        "duration": audio_ms as f64 / 1000.0,
+        "text": text,
+        "segments": segments,
     })
 }
 
@@ -323,6 +377,29 @@ fn parse_multipart(headers: &HeaderMap, body: &[u8]) -> HashMap<String, String> 
         fields.insert(name, value);
     }
     fields
+}
+
+/// multipart 里文件字段的原始字节。
+fn file_bytes(headers: &HeaderMap, body: &[u8]) -> Option<Vec<u8>> {
+    let boundary = headers
+        .get(header::CONTENT_TYPE)?
+        .to_str()
+        .ok()?
+        .split("boundary=")
+        .nth(1)?
+        .trim_matches('"')
+        .to_string();
+    let find = |haystack: &[u8], needle: &[u8], from: usize| {
+        haystack
+            .get(from..)?
+            .windows(needle.len())
+            .position(|window| window == needle)
+            .map(|at| at + from)
+    };
+    let name = find(body, b"filename=\"", 0)?;
+    let start = find(body, b"\r\n\r\n", name)? + 4;
+    let end = find(body, format!("\r\n--{boundary}").as_bytes(), start)?;
+    Some(body[start..end].to_vec())
 }
 
 /// 手工点界面用：按模型名选场景，一直跑到进程被停掉。
