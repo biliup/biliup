@@ -37,10 +37,19 @@ function delayFromDtime(dtime: any): { hours: number; minutes: number } {
   return { hours: 4, minutes: 0 }
 }
 
-const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>> = ({
+type TemplateFieldsProps = FormFCChild<StudioEntity & { isDtime: boolean }> & {
+  /** 替换「投稿账号」一栏（Fleet 控制面按节点上报的 mid 选账号，而不是本机的凭据文件） */
+  accountField?: React.ReactNode
+  /** 分区树拉不到时（本机没有 B 站账号）改为直接填分区 ID，值是数字而不是 [父, 子] */
+  plainTid?: boolean
+}
+
+const TemplateFields: React.FC<TemplateFieldsProps> = ({
   formState,
   formApi,
   values,
+  accountField,
+  plainTid,
 }) => {
   const {
     Section,
@@ -197,13 +206,15 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
           label="模板名称"
           style={{ width: 464 }}
         />
-        <Form.Select
-          rules={[{ required: true }]}
-          field="user_cookie"
-          label={{ text: '投稿账号' }}
-          style={{ width: 176 }}
-          optionList={list}
-        />
+        {accountField ?? (
+          <Form.Select
+            rules={[{ required: true }]}
+            field="user_cookie"
+            label={{ text: '投稿账号' }}
+            style={{ width: 176 }}
+            optionList={list}
+          />
+        )}
       </Section>
       <Section text={'基本设置'}>
         <Input
@@ -242,15 +253,26 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
             <Radio value={1}>自制</Radio>
           </div>
         </RadioGroup>
-        <Cascader
-          field="tid"
-          label="分区"
-          style={{ width: 272 }}
-          treeData={treeData}
-          placeholder="投稿分区"
-          dropdownStyle={{ maxWidth: 670 }}
-          rules={[{ required: true }]}
-        />
+        {plainTid ? (
+          <InputNumber
+            field="tid"
+            label="分区 ID"
+            style={{ width: 272 }}
+            placeholder="投稿分区 tid"
+            extraText="本机没有可用的 B 站账号，拉不到分区列表，请直接填分区 ID"
+            rules={[{ required: true }]}
+          />
+        ) : (
+          <Cascader
+            field="tid"
+            label="分区"
+            style={{ width: 272 }}
+            treeData={treeData}
+            placeholder="投稿分区"
+            dropdownStyle={{ maxWidth: 670 }}
+            rules={[{ required: true }]}
+          />
+        )}
         <InputNumber
           field="tid_v2"
           label="分区 tid_v2"

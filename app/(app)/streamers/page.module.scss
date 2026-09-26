@@ -12,6 +12,11 @@
   min-height: calc(100vh - 140px);
 }
 
+/* 本机加入了控制面时的只读说明 */
+.fleetBanner {
+  margin-bottom: 14px;
+}
+
 /* ===== 工具栏 ===== */
 .toolbar {
   display: flex;

@@ -8,6 +8,9 @@ import {
   Empty,
   Notification,
   Typography,
+  Tag,
+  Tooltip,
+  Banner,
 } from '@douyinfe/semi-ui'
 import {
   IconPlusCircle,
@@ -74,12 +77,16 @@ export default function StreamersPage() {
     return map
   }, [infos])
 
-  const { can } = useMe()
+  const { me, can } = useMe()
   const canEdit = can('streamer.edit')
   const canControl = can('recording.control')
   const canHooks = can('streamer.hooks')
   // 批量操作至少要能暂停或删除其一，否则连勾选框都不显示
   const canBatch = canEdit || canControl
+  // 本机加入了控制面时，控制面分派下来的直播间只读（后端对它们的增删改返回 409）
+  const fleet = me?.fleet_node
+  const managedIds = useMemo(() => new Set(fleet?.streamers ?? []), [fleet])
+  const managedHint = fleet ? `由控制面 ${fleet.controller} 管理，请到控制面修改` : undefined
 
   // ---- 增删改 ----
   const { trigger: deleteStreamers } = useSWRMutation('/v1/streamers', requestDelete)
@@ -167,8 +174,9 @@ export default function StreamersPage() {
       return next
     })
   }
+  const selectable = filtered.filter((s) => !managedIds.has(s.id))
   const toggleAll = (checked: boolean) => {
-    setSelected(checked ? new Set(filtered.map((s) => s.id)) : new Set())
+    setSelected(checked ? new Set(selectable.map((s) => s.id)) : new Set())
   }
 
   const batchPause = async () => {
@@ -234,32 +242,51 @@ export default function StreamersPage() {
   // 返回数组而不是 Fragment:ButtonGroup 会对每个直接子元素 cloneElement 注入 disabled 等 props,
   // React 19 起会对带这些 props 的 Fragment 报 "Invalid prop supplied to React.Fragment"
   // 按角色只渲染有权限的按钮（只读观察者一个都没有）
-  const actionButtons = (item: LiveStreamerEntity) =>
-    [
+  const actionButtons = (item: LiveStreamerEntity) => {
+    const locked = managedIds.has(item.id)
+    const lock = locked ? { disabled: true, title: managedHint } : {}
+    return [
+      locked && (
+        <Tooltip key="managed" content={managedHint}>
+          <Tag size="small" color="violet">
+            托管
+          </Tag>
+        </Tooltip>
+      ),
       canEdit && (
         <TemplateModal key="edit" onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
-          <Button theme="borderless" type="primary" icon={<IconEdit2Stroked />} aria-label="编辑" />
+          <Button theme="borderless" type="primary" icon={<IconEdit2Stroked />} aria-label="编辑" {...lock} />
         </TemplateModal>
       ),
-      canControl && <PauseButton key="pause" streamer={item} />,
+      canControl && <PauseButton key="pause" streamer={item} {...lock} />,
       canEdit && (
-        <Popconfirm key="delete" title="确定是否要删除？" content="此操作将不可逆" onConfirm={() => onConfirm(item.id)}>
-          <Button theme="borderless" type="danger" icon={<IconDeleteStroked />} aria-label="删除" />
+        <Popconfirm
+          key="delete"
+          title="确定是否要删除？"
+          content="此操作将不可逆"
+          onConfirm={() => onConfirm(item.id)}
+          disabled={locked}
+        >
+          <Button theme="borderless" type="danger" icon={<IconDeleteStroked />} aria-label="删除" {...lock} />
         </Popconfirm>
       ),
       canHooks && (
         <OverrideModal key="override" onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
-          <Button theme="borderless" type="tertiary" icon={<IconWrench />} aria-label="高级" />
+          <Button theme="borderless" type="tertiary" icon={<IconWrench />} aria-label="高级" {...lock} />
         </OverrideModal>
       ),
     ].filter(Boolean)
+  }
   const hasActions = canEdit || canControl || canHooks
   const renderActions = (item: LiveStreamerEntity) =>
-    hasActions ? (
+    !hasActions ? null : managedIds.has(item.id) ? (
+      // ButtonGroup 会给每个子元素注入按钮属性，托管行里多了一个标签，改用普通容器
+      <div className={styles.rowActions}>{actionButtons(item)}</div>
+    ) : (
       <ButtonGroup theme="borderless" className={styles.cardActions}>
         {actionButtons(item)}
       </ButtonGroup>
-    ) : null
+    )
   const renderRowActions = (item: LiveStreamerEntity) => (
     <div className={styles.rowActions}>{actionButtons(item)}</div>
   )
@@ -283,6 +310,19 @@ export default function StreamersPage() {
         }
       />
       <Content className={styles.content}>
+        {fleet ? (
+          <Banner
+            type="info"
+            fullMode={false}
+            closeIcon={null}
+            className={styles.fleetBanner}
+            description={
+              managedIds.size > 0
+                ? `本机已加入控制面：标着「托管」的 ${managedIds.size} 个直播间由控制面 ${fleet.controller} 管理，这里只能查看，编辑、暂停、删除请到控制面操作。本机自己添加的直播间不受影响。`
+                : `本机已加入控制面 ${fleet.controller}；控制面分派来的直播间会由控制面 ${fleet.controller} 管理，这里只能查看。本机自己添加的直播间不受影响。`
+            }
+          />
+        ) : null}
         {isLoading ? (
           <div className={styles.center}>
             <Spin size="large" />
@@ -414,7 +454,7 @@ export default function StreamersPage() {
                           <input
                             type="checkbox"
                             className={styles.chk}
-                            checked={filtered.length > 0 && filtered.every((s) => selected.has(s.id))}
+                            checked={selectable.length > 0 && selectable.every((s) => selected.has(s.id))}
                             onChange={(e) => toggleAll(e.target.checked)}
                             aria-label="全选"
                           />
@@ -436,12 +476,13 @@ export default function StreamersPage() {
                         ? liveImageUrl(item.id, 'avatar', item.live_avatar_url)
                         : null
                       const rate = live ? formatRate(item.live_bytes_per_sec) : null
+                      const rowSelectable = canBatch && !managedIds.has(item.id)
                       return (
                         <tr
                           key={item.id}
                           className={selected.has(item.id) ? styles.rowSel : ''}
-                          onClick={canBatch ? () => toggleSel(item.id) : undefined}
-                          style={canBatch ? undefined : { cursor: 'default' }}
+                          onClick={rowSelectable ? () => toggleSel(item.id) : undefined}
+                          style={rowSelectable ? undefined : { cursor: 'default' }}
                         >
                           {canBatch && (
                             <td onClick={(e) => e.stopPropagation()}>
@@ -449,6 +490,8 @@ export default function StreamersPage() {
                                 type="checkbox"
                                 className={styles.chk}
                                 checked={selected.has(item.id)}
+                                disabled={!rowSelectable}
+                                title={rowSelectable ? undefined : managedHint}
                                 onChange={() => toggleSel(item.id)}
                                 aria-label={`选择 ${item.remark}`}
                               />

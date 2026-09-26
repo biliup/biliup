@@ -6,7 +6,7 @@ import { diskPercent, formatBytes, memoryPercent, toSeries } from '@/app/lib/use
 import { formatRate, timeAgo } from '@/app/lib/use-dashboard'
 import { formatVersion } from '@/app/lib/status'
 import { humDate } from '@/app/lib/utils'
-import type { FleetNode, PoolUsage } from '@/app/lib/use-fleet'
+import { nodeOutdated, type FleetNode, type PoolUsage } from '@/app/lib/use-fleet'
 import styles from './page.module.scss'
 
 const SystemChart = dynamic(() => import('@/app/ui/SystemChart'), { ssr: false, loading: () => null })
@@ -120,8 +120,21 @@ export default function NodeCard({
             </Tag>
           </Tooltip>
         ) : null}
+        {nodeOutdated(node) ? (
+          <Tooltip content="这台节点的 biliup 版本太旧，收不了控制面分派的房间，请先升级">
+            <Tag size="small" color="red">
+              版本旧
+            </Tag>
+          </Tooltip>
+        ) : node.synced === false ? (
+          <Tooltip content="已下发最新的房间与模板，节点还没确认">
+            <Tag size="small" color="blue">
+              同步中
+            </Tag>
+          </Tooltip>
+        ) : null}
         {node.allow_hooks ? (
-          <Tooltip content="加入时带了 --allow-hooks：以后下发的配置可以在这台机器上执行命令钩子">
+          <Tooltip content="加入时带了 --allow-hooks：带钩子（override 或处理器命令）的房间可以派到这台机器">
             <Tag size="small" color="red">
               允许钩子
             </Tag>
@@ -142,6 +155,36 @@ export default function NodeCard({
         </span>
         <Pool label="下载池" usage={summary?.pools.download} />
         <Pool label="上传池" usage={summary?.pools.upload} />
+        <Tooltip content="控制面分派给它的房间（含迁移中、还没交给它的）；它自己添加的直播间不算">
+          <span className={styles.pool}>
+            分派
+            <b>{node.assigned_rooms}</b>
+          </span>
+        </Tooltip>
+      </div>
+
+      <div className={styles.nodeAccounts}>
+        {node.accounts.length ? (
+          <>
+            <span className={styles.nodeAccountsLabel}>B 站账号</span>
+            {node.accounts.map((account) => (
+              <Tooltip key={account.mid} content={`mid ${account.mid}`}>
+                <Tag size="small" color="white">
+                  {account.uname || account.mid}
+                </Tag>
+              </Tooltip>
+            ))}
+          </>
+        ) : (
+          <Text type="tertiary" size="small">
+            未登记 B 站账号
+          </Text>
+        )}
+        {node.tools && !node.tools.ffmpeg.available ? (
+          <Tag size="small" color="orange">
+            没有 ffmpeg
+          </Tag>
+        ) : null}
       </div>
 
       {!node.online && summary ? (
@@ -217,7 +260,11 @@ export default function NodeCard({
         {canManage ? (
           <Popconfirm
             title={`移除节点 ${node.name}？`}
-            content="立即断开，它的身份作废；要再加入得重新生成票据"
+            content={
+              node.assigned_rooms > 0
+                ? `立即断开，它的身份作废；分派给它的 ${node.assigned_rooms} 个房间变为未分派，它本机转为自己管理、继续录这些房间`
+                : '立即断开，它的身份作废；要再加入得重新生成票据'
+            }
             okType="danger"
             onConfirm={() => onRevoke(node)}
           >
