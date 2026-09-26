@@ -276,8 +276,9 @@ function ExportButton({
       setBusy(false)
     }
   }
+  const tip = `${mode === 'quick' ? QUICK_TIP : PRECISE_TIP}${clip.file_name ? '。之前导出的文件会被新文件替换' : ''}`
   return (
-    <Tooltip content={reason ?? (mode === 'quick' ? QUICK_TIP : PRECISE_TIP)} className={styles.passTip}>
+    <Tooltip content={reason ?? tip} className={styles.passTip}>
       <span className={styles.inlineWrap}>
         <Button size="small" theme={primary ? 'solid' : 'light'} loading={busy} disabled={reason !== null} onClick={run}>
           {label}
