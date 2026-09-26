@@ -73,14 +73,19 @@ function rgbInt(color: number): string {
  * 拉流连接就留在服务端占着该路的预览许可直到刷新页面（真实 Twitch TS 房间连开 4 次就 429）。
  * 这里每次 `open()` 建一个 AbortController，`abort()` 直接调它，其余行为与原 loader 一致
  * （直播不需要 Range，`needStash` 同样为 true）。
+ *
+ * mpegts.js 把整份播放器配置传给 loader 的构造函数；配置里带了 `onResponse` 就在拿到响应头时回调一次
+ * （DVR 回看靠它读 `X-Dvr-Start-Ms`，以及非 2xx 时服务端写的原因）。
  */
 class AbortableFetchLoader extends mpegts.BaseLoader {
   private controller: AbortController | null = null
   private received = 0
+  private onResponse: ((res: Response) => void) | null
   _needStash = true
 
-  constructor(_seekHandler: unknown, _config: unknown) {
+  constructor(_seekHandler: unknown, config: unknown) {
     super('abortable-fetch-loader')
+    this.onResponse = (config as LoaderHooks | null)?.onResponse ?? null
   }
 
   static isSupported() {
@@ -105,6 +110,8 @@ class AbortableFetchLoader extends mpegts.BaseLoader {
       signal: controller.signal,
     })
       .then(async (res) => {
+        if (controller.signal.aborted) return
+        this.onResponse?.(res)
         if (!res.ok || !res.body) {
           // 服务端的说明（如 429 是该直播间满了还是进程内满了）在正文里，带给上层原样显示
           const body = res.ok ? '' : await res.text().catch(() => '')
@@ -150,8 +157,13 @@ class AbortableFetchLoader extends mpegts.BaseLoader {
   }
 }
 
+/** 随 mpegts.js 配置传给 `AbortableFetchLoader` 的钩子 */
+export interface LoaderHooks {
+  onResponse?: (res: Response) => void
+}
+
 /** 销毁 mpegts.js 实例；`destroy()` 内部清 SourceBuffer 在元素出错后可能抛，拉流已由 loader 的 abort 保证断开。 */
-function destroyMpegts(player: mpegts.Player) {
+export function destroyMpegts(player: mpegts.Player) {
   try {
     player.destroy()
   } catch (e) {
@@ -468,7 +480,7 @@ function playWithMediaSource(
   video.src = objectUrl
 }
 
-function describeMpegtsError(errorType: string, detail: string, info?: { code?: number; msg?: string }): string {
+export function describeMpegtsError(errorType: string, detail: string, info?: { code?: number; msg?: string }): string {
   if (errorType === mpegts.ErrorTypes.NETWORK_ERROR) {
     if (detail === mpegts.ErrorDetails.NETWORK_STATUS_CODE_INVALID) {
       const code = info?.code

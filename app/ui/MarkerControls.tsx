@@ -47,7 +47,7 @@ export function MarkerCount({
 }
 
 /** 焦点在输入框里（改名、搜索）时，M 是在打字，不是标记 */
-function isTyping(target: EventTarget | null): boolean {
+export function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null
   return !!el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))
 }
@@ -192,7 +192,7 @@ function MarkerToast({ marker, onClose }: { marker: Marker; onClose: () => void 
   )
 }
 
-function showMarkerToast(marker: Marker) {
+export function showMarkerToast(marker: Marker) {
   const id = `marker-${marker.id}`
   const close = () => Toast.close(id)
   Toast.success({ id, duration: 0, content: <MarkerToast marker={marker} onClose={close} /> })

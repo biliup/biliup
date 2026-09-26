@@ -17,7 +17,7 @@ export interface Marker {
   lookahead_ms: number
 }
 
-const markersUrl = (sessionId: number) => `/v1/sessions/${sessionId}/markers`
+export const markersUrl = (sessionId: number) => `/v1/sessions/${sessionId}/markers`
 
 /** 401 / 403：`handleResponse` 已经跳登录页或提示过，调用方不必再弹一次 */
 export class ReportedError extends Error {}
@@ -43,9 +43,10 @@ async function sendJson<T>(url: string, method: string, body: unknown): Promise<
   return res.json()
 }
 
-/** 卡片、监视器上的本场标记数来自 /v1/streamers，标记增删后刷新一次 */
-function refreshMarkerCounts() {
-  void mutate('/v1/streamers')
+/** 卡片、监视器上的本场标记数来自 /v1/streamers，回看页的列表来自本场的标记接口，标记增删改后各刷新一次 */
+function refreshMarkers(sessionId: number, counts = true) {
+  void mutate(markersUrl(sessionId))
+  if (counts) void mutate('/v1/streamers')
 }
 
 /**
@@ -61,17 +62,26 @@ export async function createLiveMarker(
     client_now: Date.now(),
     latency_ms: latencyMs,
   })
-  refreshMarkerCounts()
+  refreshMarkers(sessionId)
+  return marker
+}
+
+/** 回看时按播放器位置打标记：位置本身就是场次时间，不需要服务端换算 */
+export async function createMarkerAt(sessionId: number, atMs: number): Promise<Marker> {
+  const marker = await sendJson<Marker>(markersUrl(sessionId), 'POST', { at_ms: Math.max(0, Math.round(atMs)) })
+  refreshMarkers(sessionId)
   return marker
 }
 
 export async function renameMarker(sessionId: number, id: number, label: string): Promise<Marker> {
-  return sendJson<Marker>(`${markersUrl(sessionId)}/${id}`, 'PATCH', { label })
+  const marker = await sendJson<Marker>(`${markersUrl(sessionId)}/${id}`, 'PATCH', { label })
+  refreshMarkers(sessionId, false)
+  return marker
 }
 
 export async function deleteMarker(sessionId: number, id: number): Promise<void> {
   await send(`${markersUrl(sessionId)}/${id}`, { method: 'DELETE' })
-  refreshMarkerCounts()
+  refreshMarkers(sessionId)
 }
 
 /**
