@@ -1240,7 +1240,8 @@ async fn the_controller_records_fleet_rooms_as_its_own_local_node() {
         serde_json::from_value(serde_json::json!([{ "run": "echo" }])).unwrap();
     let rejected = controller.create_room(hooked).await.unwrap_err();
     assert!(
-        matches!(&rejected, DispatchError::Invalid(m) if m.contains("--allow-hooks")),
+        matches!(&rejected, DispatchError::Invalid(m)
+            if m.contains("「本机」") && m.contains("启用时没有勾选「允许钩子」") && !m.contains("--allow-hooks")),
         "{rejected:?}"
     );
 

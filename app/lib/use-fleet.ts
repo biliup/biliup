@@ -406,7 +406,11 @@ export function placementIssue(
   template: FleetTemplate | undefined,
 ): string | null {
   if (nodeOutdated(node)) return `${outdatedReason(node)}，请先升级 biliup`
-  if (roomHasHooks(room) && !node.allow_hooks) return '没带 --allow-hooks，不能放带 run 命令的房间'
+  if (roomHasHooks(room) && !node.allow_hooks) {
+    return node.local
+      ? '启用时没有勾选「允许钩子」，不能放带 run 命令的房间'
+      : '没带 --allow-hooks，不能放带 run 命令的房间'
+  }
   if (template?.account_mid && !node.accounts.some((a) => a.mid === template.account_mid)) {
     return `没有登记模板要用的 B 站账号 ${template.account_mid}`
   }

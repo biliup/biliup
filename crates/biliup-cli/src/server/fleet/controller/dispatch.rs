@@ -241,10 +241,17 @@ impl Controller {
             return Err(DispatchError::Invalid(outdated_message(&node.name, proto)));
         }
         if spec.has_hooks() && !node.allow_hooks {
-            return Err(DispatchError::Invalid(format!(
-                "节点「{}」加入时没有带 --allow-hooks，不能分派带 run 命令（能执行任意命令）的房间",
-                node.name
-            )));
+            return Err(DispatchError::Invalid(if self.is_local(node.id) {
+                format!(
+                    "节点「{}」启用时没有勾选「允许钩子」，不能分派带 run 命令（能执行任意命令）的房间",
+                    node.name
+                )
+            } else {
+                format!(
+                    "节点「{}」加入时没有带 --allow-hooks，不能分派带 run 命令（能执行任意命令）的房间",
+                    node.name
+                )
+            }));
         }
         if let Some(template) = template
             && let Some(mid) = template.spec.account_mid

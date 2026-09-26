@@ -405,11 +405,12 @@ impl Reconciler {
         let mut wanted: Vec<DesiredRoom> = Vec::new();
         for room in desired.rooms {
             if room.spec.has_hooks() && !self.allow_hooks {
-                errors.insert(
-                    room.id,
+                let error = if self.local {
+                    "启用「本机」节点时没有勾选「允许钩子」，不接收带 run 命令（能执行任意命令）的房间"
+                } else {
                     "这台节点加入时没有带 --allow-hooks，不接收带 run 命令（能执行任意命令）的房间"
-                        .into(),
-                );
+                };
+                errors.insert(room.id, error.into());
                 continue;
             }
             if let Some(template) = room.template_id {
@@ -773,12 +774,16 @@ mod tests {
         }
 
         async fn reconciler(&self, allow_hooks: bool) -> Reconciler {
+            self.reconciler_as(allow_hooks, false).await
+        }
+
+        async fn reconciler_as(&self, allow_hooks: bool, local: bool) -> Reconciler {
             Reconciler::resume(
                 self.path(),
                 "controller",
                 "10.0.0.2".into(),
                 allow_hooks,
-                false,
+                local,
                 self.services.clone(),
                 self.managed.clone(),
             )
@@ -978,6 +983,23 @@ mod tests {
         assert_eq!(streamers.len(), 1);
         assert_eq!(streamers[0].remark, "本地");
         assert!(f.templates().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_local_node_names_its_allow_hooks_switch_when_refusing_hooked_rooms() {
+        let f = Fixture::new().await;
+        let mut reconciler = f.reconciler_as(false, true).await;
+        let mut hooked = room(1, "https://stuck.example/1", None);
+        hooked.spec.postprocessor = serde_json::from_value(json!([{ "run": "echo" }])).unwrap();
+        let ack = reconciler.apply(desired(1, vec![hooked], vec![])).await;
+        assert_eq!(ack.failed.len(), 1);
+        let reason = &ack.failed[0].error;
+        assert!(
+            reason.contains("启用「本机」节点时没有勾选「允许钩子」"),
+            "{reason}"
+        );
+        assert!(!reason.contains("--allow-hooks"), "{reason}");
+        assert!(f.streamers().await.is_empty());
     }
 
     #[tokio::test]
