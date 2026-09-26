@@ -7,8 +7,10 @@
 //! - `transcript.jsonl`：每行一句 `{chunk, from_ms, to_ms, text}`，时间是场次时间；
 //! - `asr_done.txt`：转写完的块，每行一个 key。一块的句子全部写进 `transcript.jsonl` 之后才记在这里，
 //!   续跑时没记上的块的句子先删掉再重转，不会重复。
+//! - `danmaku.json`：弹幕密度与高峰。
 
 use super::audio::{Chunk, SegmentAudio};
+use super::danmaku::Density;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::io;
@@ -186,6 +188,25 @@ impl SessionFiles {
             .lines()
             .filter_map(|line| serde_json::from_str(line).ok())
             .collect()
+    }
+
+    fn danmaku(&self) -> PathBuf {
+        self.dir.join("danmaku.json")
+    }
+
+    pub async fn load_danmaku(&self) -> Option<Density> {
+        read_json(&self.danmaku()).await
+    }
+
+    /// 存弹幕密度；`None`（这一场没有弹幕）删掉旧的。
+    pub async fn save_danmaku(&self, density: Option<&Density>) -> io::Result<()> {
+        match density {
+            Some(density) => write_json(&self.danmaku(), density).await,
+            None => {
+                let _ = tokio::fs::remove_file(self.danmaku()).await;
+                Ok(())
+            }
+        }
     }
 }
 

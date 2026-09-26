@@ -756,6 +756,7 @@ dependencies = [
  "password-auth",
  "pipeline-common",
  "qrcode",
+ "quick-xml 0.37.5",
  "rand 0.8.6",
  "regex",
  "reqwest 0.13.4",

@@ -4,6 +4,7 @@
 //! 没配置 `auto_clip` 时什么都不跑。
 
 pub mod audio;
+pub mod danmaku;
 #[cfg(test)]
 pub(crate) mod fake;
 pub mod files;
