@@ -317,10 +317,10 @@ function DrawerBody({
     return b
   }, [target, combine, templateId, perClip, form])
 
-  const [preview, setPreview] = useState<{ archives: PreviewArchive[] | null; error: string | null; loading: boolean }>({
+  const [preview, setPreview] = useState<{ key: string | null; archives: PreviewArchive[] | null; error: string | null }>({
+    key: null,
     archives: null,
     error: null,
-    loading: true,
   })
   const bodyKey = JSON.stringify(body)
   const previewOn = canSubmit && !tooMany && !problem && result === null
@@ -328,10 +328,9 @@ function DrawerBody({
     if (!previewOn) return
     let cancelled = false
     const timer = window.setTimeout(() => {
-      setPreview((p) => ({ ...p, loading: true }))
       previewPublish(JSON.parse(bodyKey))
-        .then((archives) => !cancelled && setPreview({ archives, error: null, loading: false }))
-        .catch((e) => !cancelled && setPreview({ archives: null, error: errorText(e), loading: false }))
+        .then((archives) => !cancelled && setPreview({ key: bodyKey, archives, error: null }))
+        .catch((e) => !cancelled && setPreview({ key: bodyKey, archives: null, error: errorText(e) }))
     }, 350)
     return () => {
       cancelled = true
@@ -339,6 +338,8 @@ function DrawerBody({
     }
   }, [bodyKey, previewOn])
 
+  // 改了设置、预览还没按新设置回来之前，旧预览和它的问题都不作数
+  const previewLoading = preview.key !== bodyKey
   const archives = preview.archives ?? []
   const firstRendered = archives[0]?.rendered ?? null
   const blocking = archives.find((a) => a.problem)?.problem ?? null
@@ -400,7 +401,7 @@ function DrawerBody({
             ? '先到 B 站稿件管理核对，勾选上面的确认'
             : null
   const submitReason =
-    localReason ?? (preview.loading ? null : (blocking ?? (preview.error ? `预览失败：${preview.error}` : null)))
+    localReason ?? (previewLoading ? null : (blocking ?? (preview.error ? `预览失败：${preview.error}` : null)))
 
   const publish = async () => {
     setPublishing(true)
@@ -824,10 +825,10 @@ function DrawerBody({
         </div>
 
         {canSubmit ? (
-          <section className={styles.previewBox} aria-label="稿件预览" aria-busy={preview.loading}>
+          <section className={styles.previewBox} aria-label="稿件预览" aria-busy={previewOn && previewLoading}>
             <div className={styles.previewHead}>
               <strong>预览</strong>
-              {preview.loading && previewOn ? <Spin size="small" /> : null}
+              {previewLoading && previewOn ? <Spin size="small" /> : null}
             </div>
             {preview.error ? <Text type="danger">{preview.error}</Text> : null}
             {archives.map((a, i) => (
@@ -882,7 +883,7 @@ function DrawerBody({
         <Button
           theme="solid"
           icon={<IconSend />}
-          disabled={submitReason !== null || preview.loading || saving}
+          disabled={submitReason !== null || previewLoading || saving}
           loading={publishing}
           onClick={publish}
         >
