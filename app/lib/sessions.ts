@@ -62,9 +62,11 @@ export interface KeyframeList {
 }
 
 export const sessionUrl = (id: number) => `/v1/sessions/${id}`
-/** 回看页的地址；`t` 是起播位置（场次时间，毫秒） */
-export const replayHref = (id: number, t?: number | null) =>
-  `/replay?session=${id}${t === undefined || t === null ? '' : `&t=${Math.max(0, Math.round(t))}`}`
+/** 回看页的地址；`t` 是起播位置（场次时间，毫秒），`clip` 是打开后载入到选段、在右侧切片列表里选中的切片 */
+export const replayHref = (id: number, t?: number | null, clip?: number | null) =>
+  `/replay?session=${id}${t === undefined || t === null ? '' : `&t=${Math.max(0, Math.round(t))}`}${
+    clip === undefined || clip === null ? '' : `&clip=${clip}`
+  }`
 export const keyframesUrl = (id: number, from: number, to: number) =>
   `/v1/sessions/${id}/keyframes?from=${Math.max(0, Math.floor(from))}&to=${Math.max(0, Math.ceil(to))}`
 export const mediaUrl = (id: number, from: number) =>

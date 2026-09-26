@@ -606,6 +606,25 @@
 .clipProgress {
   max-width: 220px;
 }
+.clipTools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-top: 4px;
+}
+
+/* 选段栏里的「导出」：快速剪 / 精确剪 */
+.exportGroup {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.exportLabel {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  white-space: nowrap;
+}
 /* ===== 宽度适配 ===== */
 @media (max-width: 1180px) {
   .page {

@@ -51,13 +51,22 @@ import {
   sessionUrl,
   unavailableIn,
 } from '@/app/lib/sessions'
-import { type Clip, createClip, updateClip, useSessionClips } from '@/app/lib/clips'
+import {
+  type Clip,
+  type ClipMode,
+  clipModeText,
+  createClip,
+  exportClip,
+  updateClip,
+  useFfmpeg,
+  useSessionClips,
+} from '@/app/lib/clips'
 import { useBoolPref } from '@/app/lib/use-local-pref'
 import { LivePreviewPlayer } from '@/app/ui/LivePreview'
 import { isTyping, showMarkerToast } from '@/app/ui/MarkerControls'
 import DvrPlayer, { type DvrHandle, type DvrPhase } from './DvrPlayer'
 import { DetailBar, OverviewBar, type Selection } from './Timeline'
-import { type PanelTab, SidePanel } from './SidePanel'
+import { type PanelTab, PRECISE_TIP, QUICK_TIP, SidePanel } from './SidePanel'
 import styles from './replay.module.scss'
 
 /** 细节条的范围：当前位置前后各 5 分钟 */
@@ -102,12 +111,25 @@ function Kbd({ children }: { children: React.ReactNode }) {
   )
 }
 
-/** 按场次的回看页：`/replay?session=<id>&t=<场次毫秒>`，路由壳见 `app/(app)/replay/page.tsx` */
-export default function ReplayView({ sessionId, initialT }: { sessionId: number; initialT: number | null }) {
+/**
+ * 按场次的回看页：`/replay?session=<id>&t=<场次毫秒>&clip=<切片 id>`，路由壳见 `app/(app)/replay/page.tsx`。
+ * 带 `clip` 时打开后把这个切片载入选段，并在右侧「切片」里选中它（直播预览「剪下刚才」的 Toast 从这里进）。
+ */
+export default function ReplayView({
+  sessionId,
+  initialT,
+  initialClip = null,
+}: {
+  sessionId: number
+  initialT: number | null
+  initialClip?: number | null
+}) {
   const { Text } = Typography
   const router = useRouter()
   const { can, isLoading: meLoading } = useMe()
   const canEdit = can('clip.edit')
+  const canDownload = can('file.view')
+  const ffmpeg = useFfmpeg()
   const editReason = meLoading
     ? '正在读取权限…'
     : '只读观察者不能改标记和切片：需要 clip.edit 权限，请让管理员把你的角色改成操作员'
@@ -229,8 +251,31 @@ export default function ReplayView({ sessionId, initialT }: { sessionId: number;
   const [selectionMarker, setSelectionMarker] = useState<number | null>(null)
   const [snap, setSnap] = useBoolPref('biliup.replay.snap', true)
   const [saving, setSaving] = useState(false)
-  const [tab, setTab] = useState<PanelTab>('markers')
+  const [tab, setTab] = useState<PanelTab>(initialClip === null ? 'markers' : 'clips')
   const [pickedMarker, setPickedMarker] = useState<number | null>(null)
+  const [exporting, setExporting] = useState<ClipMode | null>(null)
+
+  // `?clip=`：切片列表第一次到手时载入一次；找不到（已被删掉）就只停在 `?t=`
+  const [pendingClip, setPendingClip] = useState(initialClip)
+  if (pendingClip !== null && clipData) {
+    const c = clips.find((x) => x.id === pendingClip)
+    setPendingClip(null)
+    if (c) {
+      setActiveClip(c.id)
+      setSelectionMarker(c.marker_id)
+      setSelection({ in: c.in_ms, out: c.out_ms })
+    }
+  }
+  // 选中的切片滚进右侧列表的可视范围；只滚列表自己，不带着整页走（窄窗口列表在页面里，不滚）
+  useEffect(() => {
+    if (tab !== 'clips' || activeClip === null) return
+    const row = document.getElementById(`clip-row-${activeClip}`)
+    const box = row?.closest<HTMLElement>('.semi-tabs-content')
+    if (!row || !box || box.scrollHeight <= box.clientHeight) return
+    const r = row.getBoundingClientRect()
+    const b = box.getBoundingClientRect()
+    if (r.top < b.top || r.bottom > b.bottom) box.scrollTop += r.top - b.top - 8
+  }, [tab, activeClip])
 
   const blocked = useCallback((segment: SegmentView) => {
     Toast.warning({
@@ -463,6 +508,52 @@ export default function ReplayView({ sessionId, initialT }: { sessionId: number;
       setSaving(false)
     }
   }
+
+  /**
+   * 选段栏的「导出」：载入的切片没改范围就直接导出它；否则按当前入点、出点建一个新切片并立即导出
+   * （载入的切片保持原样，和「另存为新切片」一致）
+   */
+  const exportSelection = async (mode: ClipMode) => {
+    if (selection.in === null || selection.out === null) return
+    if (!canEdit) {
+      Toast.warning({ id: 'clip-disabled', content: editReason, duration: 3 })
+      return
+    }
+    if (selProblem) {
+      Toast.warning({ content: selProblem, duration: 3 })
+      return
+    }
+    setExporting(mode)
+    try {
+      if (loadedClip && !clipChanged) {
+        await exportClip(loadedClip, mode)
+      } else {
+        const created = await createClip(sessionId, {
+          in_ms: selection.in,
+          out_ms: selection.out,
+          marker_id: selectionMarker,
+          export: mode,
+        })
+        setActiveClip(created.id)
+      }
+      setTab('clips')
+      Toast.info({ content: `开始${clipModeText(mode)}，进度在右侧「切片」里`, duration: 2 })
+    } catch (e) {
+      if (!(e instanceof ReportedError)) Toast.error({ content: `没能开始导出：${errorText(e)}`, duration: 4 })
+    } finally {
+      setExporting(null)
+    }
+  }
+  const loadedBusy = !!loadedClip && !clipChanged && loadedClip.state !== 'draft' && loadedClip.state !== 'ready' && loadedClip.state !== 'failed'
+  const exportReason = (mode: ClipMode): string | null => {
+    if (!canEdit) return editReason
+    if (selection.in === null || selection.out === null) return '先用「入点」「出点」选一段'
+    if (selProblem) return selProblem
+    if (loadedBusy) return loadedClip?.state === 'exporting' ? '这个切片正在导出，等它结束' : '已发布的切片不能再导出'
+    if (mode === 'precise' && ffmpeg.reason) return ffmpeg.reason
+    return null
+  }
+  const exportTarget = loadedClip && !clipChanged ? '导出载入的这个切片' : '按入点、出点存成新切片并立即导出'
 
   const loadClip = (c: Clip) => {
     setActiveClip(c.id)
@@ -923,6 +1014,27 @@ export default function ReplayView({ sessionId, initialT }: { sessionId: number;
                       </Button>
                     </span>
                   </Tooltip>
+                  <span className={styles.exportGroup} role="group" aria-label="导出">
+                    <span className={styles.exportLabel}>导出</span>
+                    {(['quick', 'precise'] as const).map((m) => {
+                      const reason = exportReason(m)
+                      return (
+                        <Tooltip key={m} content={reason ?? `${m === 'quick' ? QUICK_TIP : PRECISE_TIP}。${exportTarget}`}>
+                          <span className={styles.inlineWrap}>
+                            <Button
+                              theme={m === 'quick' ? 'solid' : 'light'}
+                              type={m === 'quick' ? 'secondary' : 'primary'}
+                              loading={exporting === m}
+                              disabled={reason !== null || exporting !== null}
+                              onClick={() => exportSelection(m)}
+                            >
+                              {clipModeText(m)}
+                            </Button>
+                          </span>
+                        </Tooltip>
+                      )
+                    })}
+                  </span>
                   <Button
                     theme="borderless"
                     type="tertiary"
@@ -955,6 +1067,8 @@ export default function ReplayView({ sessionId, initialT }: { sessionId: number;
             currentMarker={currentMarker}
             canEdit={canEdit}
             editReason={editReason}
+            canDownload={canDownload}
+            ffmpeg={ffmpeg}
             onSeekMarker={pickMarker}
             onSelectMarker={selectFromMarker}
             onLoadClip={loadClip}
