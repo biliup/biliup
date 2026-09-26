@@ -1,7 +1,19 @@
 'use client'
 import React, { useMemo, useState } from 'react'
 import useSWR from 'swr'
-import { Button, Empty, Form, Popconfirm, Select, Spin, Tag, Toast, Tooltip, Typography } from '@douyinfe/semi-ui'
+import {
+  Button,
+  Empty,
+  Form,
+  Popconfirm,
+  Select,
+  Spin,
+  Tag,
+  Toast,
+  Tooltip,
+  Typography,
+  useFormState,
+} from '@douyinfe/semi-ui'
 import { IconDeleteStroked, IconEdit2Stroked, IconPause, IconPlay, IconSend, IconVideo } from '@douyinfe/semi-icons'
 import TemplateModal from '@/app/ui/TemplateModal'
 import { fetcher } from '@/app/lib/api-streamer'
@@ -16,7 +28,9 @@ import {
   deleteRoom,
   errorMessage,
   forceRelease,
+  missingLabels,
   pauseRoom,
+  quoteLabels,
   updateRoom,
   type FleetNode,
   type FleetRoom,
@@ -26,7 +40,9 @@ import {
   type RoomStatus,
 } from '@/app/lib/use-fleet'
 import AssignModal from './AssignModal'
+import RequiredLabelsField from './RequiredLabelsField'
 import styles from './page.module.scss'
+import labelStyles from './labels.module.scss'
 
 const { Text } = Typography
 
@@ -67,6 +83,7 @@ function roomFromForm(values: Record<string, any>): RoomInput {
   for (const key of ROOM_KEYS) room[key] = values[key] ?? null
   room.postprocessor = values.postprocessor ? formListToHookStep(values.postprocessor) : null
   room.template_id = values.upload_streamers_id ?? null
+  room.required_labels = Array.isArray(values.required_labels) ? values.required_labels : []
   return room as unknown as RoomInput
 }
 
@@ -81,6 +98,7 @@ function roomToForm(room: FleetRoom) {
 const FILTER_ALL = 'all'
 const FILTER_NONE = 'none'
 const FILTER_PENDING = 'pending'
+const FILTER_LABELS = 'labels'
 
 export default function RoomsPanel({
   nodes,
@@ -122,12 +140,14 @@ export default function RoomsPanel({
     const byNode = new Map<number, number>()
     let none = 0
     let pending = 0
+    let labels = 0
     for (const room of rooms) {
       if (room.node_id === null) none++
       else byNode.set(room.node_id, (byNode.get(room.node_id) ?? 0) + 1)
       if (room.releasing_node_id !== null) pending++
+      if (room.labels_missing?.length) labels++
     }
-    return { byNode, none, pending }
+    return { byNode, none, pending, labels }
   }, [rooms])
 
   const filtered = useMemo(() => {
@@ -137,6 +157,7 @@ export default function RoomsPanel({
         filter === FILTER_ALL ||
         (filter === FILTER_NONE && room.node_id === null) ||
         (filter === FILTER_PENDING && room.releasing_node_id !== null) ||
+        (filter === FILTER_LABELS && (room.labels_missing?.length ?? 0) > 0) ||
         String(room.node_id) === filter ||
         String(room.releasing_node_id) === filter
       const okQuery = !q || room.remark.toLowerCase().includes(q) || room.url.toLowerCase().includes(q)
@@ -189,6 +210,31 @@ export default function RoomsPanel({
       </Tooltip>
     )
   }
+
+  const labelsTag = (room: FleetRoom) => {
+    const missing = room.labels_missing ?? []
+    if (!missing.length) return null
+    return (
+      <Tooltip
+        content={`${nodeName(room.node_id) ?? '当前节点'} 缺少房间要求的标签${quoteLabels(missing)}：节点标签是分派之后改的，房间不会自动挪走，需要时手动迁移`}
+      >
+        <Tag size="small" color="orange">
+          标签不满足
+        </Tag>
+      </Tooltip>
+    )
+  }
+
+  const requiredTags = (room: FleetRoom) =>
+    room.required_labels?.length ? (
+      <span className={labelStyles.required} aria-label={`要求的标签：${room.required_labels.join('、')}`}>
+        {room.required_labels.map((label) => (
+          <Tag key={label} size="small" color="violet">
+            {label}
+          </Tag>
+        ))}
+      </span>
+    ) : null
 
   const nodeCell = (room: FleetRoom) => {
     const target = nodeName(room.node_id)
@@ -255,6 +301,7 @@ export default function RoomsPanel({
           entity={roomToForm(room)}
           templateOptions={templateOptions}
           onOk={handleUpdate(room)}
+          extraFields={<RequiredLabelsField nodes={nodes} />}
         >
           <Button theme="borderless" type="primary" icon={<IconEdit2Stroked />} aria-label="编辑" title="编辑" />
         </TemplateModal>
@@ -334,6 +381,7 @@ export default function RoomsPanel({
           <article key={room.id} className={styles.roomCard} aria-label={`房间 ${room.remark}`}>
             <div className={styles.roomCardHead}>
               {statusTag(room)}
+              {labelsTag(room)}
               <Text strong ellipsis={{ showTooltip: true }} className={styles.roomName}>
                 {room.remark}
               </Text>
@@ -344,6 +392,7 @@ export default function RoomsPanel({
             <div className={styles.roomCardMeta}>
               <span>节点：{nodeCell(room)}</span>
               <span>模板：{templateName(room)}</span>
+              {room.required_labels?.length ? <span>要求：{requiredTags(room)}</span> : null}
             </div>
             {canManage ? <div className={styles.roomCardActions}>{actions(room)}</div> : null}
           </article>
@@ -366,9 +415,16 @@ export default function RoomsPanel({
           <tbody>
             {filtered.map((room) => (
               <tr key={room.id} aria-label={`房间 ${room.remark}`}>
-                <td>{statusTag(room)}</td>
+                <td>
+                  <div className={labelStyles.required}>
+                    {statusTag(room)}
+                    {labelsTag(room)}
+                  </div>
+                </td>
                 <td className={styles.roomMain}>
-                  <div className={styles.roomName}>{room.remark}</div>
+                  <div className={styles.roomName}>
+                    {room.remark} {requiredTags(room)}
+                  </div>
                   <div className={styles.roomSub}>
                     <Text type="tertiary" size="small">
                       {platformName(room.url)}
@@ -399,6 +455,7 @@ export default function RoomsPanel({
     { value: FILTER_ALL, label: `全部节点（${rooms.length}）` },
     { value: FILTER_NONE, label: `未分派（${counts.none}）` },
     ...(counts.pending > 0 ? [{ value: FILTER_PENDING, label: `迁移 / 删除中（${counts.pending}）` }] : []),
+    ...(counts.labels > 0 ? [{ value: FILTER_LABELS, label: `标签不满足（${counts.labels}）` }] : []),
     ...nodes.map((n) => ({ value: String(n.id), label: `${n.name}（${counts.byNode.get(n.id) ?? 0}）` })),
   ]
 
@@ -466,15 +523,6 @@ export function CreateRoomButton({
   children: React.ReactElement
 }) {
   const templateOptions = templates.map((t) => ({ value: t.id, label: t.template_name }))
-  const nodeOptions = [
-    ...(nodes.length > 0 ? [{ value: AUTO_NODE, label: '自动（按负载选）' }] : []),
-    ...[...nodes]
-      .sort((a, b) => Number(b.online) - Number(a.online) || a.id - b.id)
-      .map((n) => ({
-        value: n.id,
-        label: `${n.name}${n.online ? '' : '（离线）'}`,
-      })),
-  ]
   const create = async (values: Record<string, any>) => {
     const auto = values.node_id === AUTO_NODE
     try {
@@ -503,18 +551,43 @@ export function CreateRoomButton({
       templateOptions={templateOptions}
       onOk={create}
       extraFields={
-        <Form.Select
-          field="node_id"
-          label={{ text: '分派到节点', optional: true }}
-          style={{ width: 240 }}
-          optionList={nodeOptions}
-          showClear
-          placeholder="暂不分派"
-          extraText="模板要用的 B 站账号必须在节点上登记过；处理器里带 run 命令的房间只能派给允许钩子的节点（rm、mv 等文件操作不算）。「自动」在满足这些条件的在线节点里挑空闲下载位多、房间少、磁盘余量大的一台，之后不会因负载变化挪走"
-        />
+        <>
+          <RequiredLabelsField nodes={nodes} />
+          <TargetNodeField nodes={nodes} />
+        </>
       }
     >
       {children}
     </TemplateModal>
+  )
+}
+
+/** 新建房间的「分派到节点」：缺少所填标签的节点标出来、不能选 */
+function TargetNodeField({ nodes }: { nodes: FleetNode[] }) {
+  const { values } = useFormState()
+  const required: string[] = Array.isArray(values?.required_labels) ? values.required_labels : []
+  const nodeOptions = [
+    ...(nodes.length > 0 ? [{ value: AUTO_NODE, label: '自动（按负载选）' }] : []),
+    ...[...nodes]
+      .sort((a, b) => Number(b.online) - Number(a.online) || a.id - b.id)
+      .map((n) => {
+        const missing = missingLabels(n.labels, required)
+        return {
+          value: n.id,
+          disabled: missing.length > 0,
+          label: `${n.name}${n.online ? '' : '（离线）'}${missing.length ? `（缺少标签${quoteLabels(missing)}）` : ''}`,
+        }
+      }),
+  ]
+  return (
+    <Form.Select
+      field="node_id"
+      label={{ text: '分派到节点', optional: true }}
+      style={{ width: 'min(320px, 100%)' }}
+      optionList={nodeOptions}
+      showClear
+      placeholder="暂不分派"
+      extraText="模板要用的 B 站账号必须在节点上登记过；处理器里带 run 命令的房间只能派给允许钩子的节点（rm、mv 等文件操作不算）；节点要带齐房间要求的标签。「自动」在满足这些条件的在线节点里挑空闲下载位多、房间少、磁盘余量大的一台，之后不会因负载变化挪走"
+    />
   )
 }

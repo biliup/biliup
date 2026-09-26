@@ -75,12 +75,18 @@ export default function NodeCard({
   onRevoke,
   controllerVersion,
   onEditConfig,
+  badge,
+  children,
 }: {
   node: FleetNode
   canManage: boolean
   onRevoke: (node: FleetNode, reassign: boolean) => void
   controllerVersion?: string
   onEditConfig?: (node: FleetNode) => void
+  /** 名字旁的告警标记 */
+  badge?: React.ReactNode
+  /** 放在账号行下面（标签） */
+  children?: React.ReactNode
 }) {
   const [reassign, setReassign] = useState(false)
   const summary = node.summary
@@ -119,6 +125,7 @@ export default function NodeCard({
         <Tag size="small" color={node.online ? 'green' : 'grey'}>
           {node.online ? '在线' : '离线'}
         </Tag>
+        {badge}
         {node.online && node.path ? (
           <Tooltip
             content={
@@ -205,6 +212,8 @@ export default function NodeCard({
           </Tag>
         ) : null}
       </div>
+
+      {children}
 
       <NodeConfigStatus
         node={node}

@@ -13,6 +13,7 @@ import EventTimeline from '../ui/EventTimeline'
 import SystemStatsPanel from '../ui/SystemStatsPanel'
 import BackgroundSetter from './components/BackgroundSetter'
 import FleetRevokedBanner from '../ui/FleetRevokedBanner'
+import FleetSummary from '../ui/FleetSummary'
 import styles from './page.module.scss'
 
 const { Text } = Typography
@@ -75,6 +76,7 @@ export default function Home() {
       ) : (
         <>
           <FleetRevokedBanner className={styles.revokedBanner} linkToStreamers />
+          <FleetSummary />
           {d.streamersFailed && (
             <div className={styles.warnBox}>
               <Text>

@@ -174,6 +174,10 @@ export interface FleetRoom extends RoomSpec {
   status: RoomStatus
   error: string | null
   releasing_online: boolean | null
+  /** 放这个房间的节点必须带的标签 */
+  required_labels: string[]
+  /** 当前节点缺的要求标签：分派后节点标签改了不会挪走房间，只在这里标出来 */
+  labels_missing: string[]
 }
 
 export interface FleetRooms {
@@ -250,6 +254,8 @@ export const REMOVAL_WAIT_SECONDS = 60
 /** 与后端 `protocol::DESIRED_STATE_SINCE` / `CONFIG_SINCE` 一致：收房间、收配置各要的最低协议次版本 */
 export const DESIRED_STATE_SINCE = 1
 export const CONFIG_SINCE = 2
+/** 与后端 `protocol::EVENTS_SINCE` 一致：低于它的节点不上报录制出错、投稿失败 */
+export const EVENTS_SINCE = 3
 
 /**
  * 移除节点，并把它的房间按负载改派到其他节点。在线节点先迁移、等它确认释放再移除，
@@ -275,7 +281,31 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T 
   return res.status === 204 ? null : res.json()
 }
 
-export type RoomInput = RoomSpec & { template_id: number | null }
+/** 更新时不带 `required_labels` 为保持原样 */
+export type RoomInput = RoomSpec & { template_id: number | null; required_labels?: string[] }
+
+/** 返回规范化（去空白、去重）后的标签 */
+export async function setNodeLabels(id: number, labels: string[]): Promise<string[]> {
+  const res = await send<{ labels: string[] }>('PUT', `${FLEET_NODES_KEY}/${id}/labels`, { labels })
+  return res?.labels ?? labels
+}
+
+/** 与后端 `labels::missing` 一致：精确匹配、区分大小写 */
+export function missingLabels(have: string[], required: string[] | undefined): string[] {
+  return (required ?? []).filter((label) => !have.includes(label))
+}
+
+/** 与后端 `labels::quoted` 一致：「海外」「移动」 */
+export function quoteLabels(labels: string[]): string {
+  return labels.map((label) => `「${label}」`).join('')
+}
+
+/** 各节点已有的标签，按出现次数从多到少 */
+export function knownLabels(nodes: FleetNode[]): string[] {
+  const counts = new Map<string, number>()
+  for (const node of nodes) for (const label of node.labels) counts.set(label, (counts.get(label) ?? 0) + 1)
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([label]) => label)
+}
 
 /** `auto_node`：由控制面按负载选节点，此时 `node_id` 必须为 null */
 export function createRoom(room: RoomInput & { node_id: number | null; paused?: boolean; auto_node?: boolean }) {
@@ -337,12 +367,18 @@ export function outdatedReason(node: FleetNode): string {
  * 房间放到这台节点上违反哪条硬约束（与后端 `check_target` 一致）；能放返回 null。
  * 只是提前提示，最终以后端为准。
  */
-export function placementIssue(node: FleetNode, room: RoomSpec, template: FleetTemplate | undefined): string | null {
+export function placementIssue(
+  node: FleetNode,
+  room: RoomSpec & { required_labels?: string[] },
+  template: FleetTemplate | undefined,
+): string | null {
   if (nodeOutdated(node)) return `${outdatedReason(node)}，请先升级 biliup`
   if (roomHasHooks(room) && !node.allow_hooks) return '没带 --allow-hooks，不能放带 run 命令的房间'
   if (template?.account_mid && !node.accounts.some((a) => a.mid === template.account_mid)) {
     return `没有登记模板要用的 B 站账号 ${template.account_mid}`
   }
+  const missing = missingLabels(node.labels, room.required_labels)
+  if (missing.length) return `缺少标签${quoteLabels(missing)}`
   return null
 }
 
