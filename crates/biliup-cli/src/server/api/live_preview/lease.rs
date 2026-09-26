@@ -8,9 +8,12 @@
 //!   （浏览器自动回 Pong，后台标签页也照回），[`LEASE_TIMEOUT`] 内没收到 Pong 就断开。
 //!   心跳连接断开时，该会话下的全部预览立即结束（[`TicketEnd::LeaseLost`]）。WebSocket 连不上时
 //!   前端退回每秒轮询 `/v1/live-rates?session=`，每次轮询把租约续到 [`LEASE_TIMEOUT`] 之后。
-//! - **连接**（`conn`）：每条预览响应一个，也由浏览器生成（`/live?session=&conn=`）。
-//!   `DELETE /v1/streamers/{id}/live?conn=`（页面关闭时 `sendBeacon` 发同一路径的 POST）
-//!   立即结束它（[`TicketEnd::Released`]）。
+//! - **连接**（`conn`）：每条预览响应一个，也由浏览器生成（`/live?session=&conn=`），形如
+//!   `<会话号>.<序号>`，序号在页面内递增。`DELETE /v1/streamers/{id}/live?conn=`（页面关闭时
+//!   `sendBeacon` 发同一路径的 POST）立即结束它（[`TicketEnd::Released`]）。页面还会在它开着的
+//!   连接集合变化时，经心跳 WebSocket 发一条 `{"conns": [...], "seq": N}`（[`Leases::sync`]）：
+//!   序号不大于 N、又不在集合里的连接一律结束——`DELETE` 丢了（断网瞬间、被代理吞掉）也不会留下
+//!   幽灵连接。序号保证先发的消息不会误杀它之后才建的连接。
 //! - **宽限**：没有会话（`curl`、外部播放器）或会话暂时没有心跳时，预览最多再推
 //!   [`LEASE_TIMEOUT`]；到点仍没有心跳 / 轮询续约就结束。
 //!
@@ -38,6 +41,11 @@ pub fn valid_id(id: &str) -> bool {
         && id
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+/// `<会话号>.<序号>` 里的序号；不是这个会话的连接号时为 `None`
+fn conn_seq(session: &str, conn: &str) -> Option<u64> {
+    conn.strip_prefix(session)?.strip_prefix('.')?.parse().ok()
 }
 
 struct Session {
@@ -185,6 +193,27 @@ impl Leases {
             }
             None => false,
         }
+    }
+
+    /// 页面报来它此刻开着的连接（心跳 WebSocket 上的消息）：该会话下序号不大于 `upto`、
+    /// 又不在 `alive` 里的连接结束；序号更大的是这条消息发出之后才建的，不动。
+    /// 返回结束了几条。
+    pub fn sync(&self, session: &str, alive: &[String], upto: u64) -> usize {
+        let inner = self.lock();
+        let mut ended = 0;
+        for (conn, entry) in &inner.conns {
+            if entry.session != session || alive.iter().any(|a| a == conn) {
+                continue;
+            }
+            let Some(seq) = conn_seq(session, conn) else {
+                continue;
+            };
+            if seq <= upto && entry.ticket.ended_by().is_none() {
+                entry.ticket.end(TicketEnd::Released);
+                ended += 1;
+            }
+        }
+        ended
     }
 
     /// 当前登记的会话数与预览数（测试 / 排障用）。
@@ -383,6 +412,29 @@ mod tests {
         assert_eq!(other.ended_by(), None);
         drop((bind_a, bind_b, bind_other));
         assert_eq!(leases.counts(), (0, 0));
+    }
+
+    /// 页面报来的连接集合：序号不大于 N 又不在集合里的结束；更新的、别的会话的、形状不对的不动。
+    #[tokio::test]
+    async fn sync_ends_connections_the_page_no_longer_has() {
+        let leases = Leases::default();
+        let tickets: Vec<_> = (0..4).map(|_| PreviewTicket::new()).collect();
+        let _b1 = leases.bind(Some("p"), Some("p.1"), &tickets[0]);
+        let _b2 = leases.bind(Some("p"), Some("p.2"), &tickets[1]);
+        let _b5 = leases.bind(Some("p"), Some("p.5"), &tickets[2]);
+        let _other = leases.bind(Some("q"), Some("q.1"), &tickets[3]);
+        assert_eq!(leases.sync("p", &["p.2".to_string()], 3), 1);
+        assert_eq!(tickets[0].ended_by(), Some(TicketEnd::Released));
+        assert_eq!(tickets[1].ended_by(), None, "still open on the page");
+        assert_eq!(
+            tickets[2].ended_by(),
+            None,
+            "created after the message was sent"
+        );
+        assert_eq!(tickets[3].ended_by(), None, "another page");
+        assert_eq!(conn_seq("p", "p.12"), Some(12));
+        assert_eq!(conn_seq("p", "px.1"), None);
+        assert_eq!(conn_seq("p", "q.1"), None);
     }
 
     /// 客户端释放：只结束那一条；同一个连接号重新登记时旧的那条被释放，新的不受旧绑定注销影响。

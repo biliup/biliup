@@ -1,7 +1,7 @@
 'use client'
 import { useSyncExternalStore } from 'react'
 import { API_BASE, handleResponse, revalidateMe } from './api-streamer'
-import { previewSessionId } from './preview-lease'
+import { onOpenPreviewsChange, openPreviewsMessage, previewSessionId } from './preview-lease'
 
 /**
  * 录制中各房间的写盘速率采样：页面内唯一的一份数据源，供弹层折线图、卡片与监视器的 sparkline 共用。
@@ -121,6 +121,12 @@ let wsFailures = 0
 let visibilityBound = false
 /** 正在播放的中转预览数；大于 0 时连接必须保持（租约心跳），不论有没有图表订阅、页面是否可见 */
 let leaseHolders = 0
+let openPreviewsBound = false
+
+/** 把本页开着的中转预览集合发给服务端（只在 WebSocket 已连上时；连上那一刻 onopen 也会发一次） */
+function sendOpenPreviews() {
+  if (socket && socket.readyState === WebSocket.OPEN) socket.send(openPreviewsMessage())
+}
 
 function emit() {
   listeners.forEach((l) => l())
@@ -193,6 +199,13 @@ function connectSocket() {
     return
   }
   socket = ws
+  if (!openPreviewsBound) {
+    onOpenPreviewsChange(sendOpenPreviews)
+    openPreviewsBound = true
+  }
+  ws.onopen = () => {
+    if (socket === ws) sendOpenPreviews()
+  }
   let gotFrame = false
   ws.onmessage = (event: MessageEvent<string>) => {
     let frames: LiveRateFrame[]

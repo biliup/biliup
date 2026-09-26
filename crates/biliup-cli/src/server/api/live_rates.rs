@@ -12,8 +12,9 @@
 //! 不落库、不新开采样任务、服务端不存历史：曲线的历史由浏览器自己累积（最近 3 分钟）。
 //!
 //! 带 `?session=` 时这条 WebSocket 还是该页面中转预览的租约心跳（见 `live_preview::lease`）：
-//! 服务端每 15 s 发 Ping，45 s 收不到 Pong 就断开，断开即结束该页面的全部中转预览；
-//! 回退轮询带同一个 `session` 时每次都续约。
+//! 服务端每 15 s 发 Ping，45 s 收不到 Pong 就断开，断开即结束该页面的全部中转预览；页面在
+//! 开着的预览变化时发来 `{"conns": [...], "seq": N}`，不在里面的预览结束。回退轮询带同一个
+//! `session` 时每次都续约。
 //!
 //! 两个路由都注册在 `router()` 里，`--auth` 时与 `/v1/streamers` 同一道登录校验。
 //!
@@ -47,6 +48,13 @@ fn rate_connection_limit() -> &'static Arc<Semaphore> {
 
 fn acquire_rate_permit(limiter: Arc<Semaphore>) -> Option<OwnedSemaphorePermit> {
     limiter.try_acquire_owned().ok()
+}
+
+/// 页面经心跳 WebSocket 报来的「我此刻开着的中转预览」，见 `Leases::sync`。
+#[derive(Debug, Deserialize)]
+struct OpenConns {
+    conns: Vec<String>,
+    seq: u64,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -139,13 +147,17 @@ pub async fn ws_live_rates(
         let _permit = permit;
         let _lease = session.as_deref().map(|s| leases().heartbeat(s));
         tokio::select! {
-            _ = push_live_rates(socket, managers) => {}
+            _ = push_live_rates(socket, managers, session) => {}
             _ = caller.revoked() => debug!("会话失效，关闭码率推送"),
         }
     })
 }
 
-async fn push_live_rates(mut ws: WebSocket, managers: Arc<DownloadManager>) {
+async fn push_live_rates(
+    mut ws: WebSocket,
+    managers: Arc<DownloadManager>,
+    session: Option<String>,
+) {
     let mut tick = interval(PUSH_INTERVAL);
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut ping =
@@ -163,6 +175,15 @@ async fn push_live_rates(mut ws: WebSocket, managers: Arc<DownloadManager>) {
                         last_heard = Instant::now();
                         if ws.send(Message::Pong(payload)).await.is_err() {
                             break;
+                        }
+                    }
+                    Some(Ok(Message::Text(text))) => {
+                        last_heard = Instant::now();
+                        if let Some(session) = &session
+                            && let Ok(open) = serde_json::from_str::<OpenConns>(&text)
+                        {
+                            let ended = leases().sync(session, &open.conns, open.seq);
+                            debug!(ended, seq = open.seq, "页面报来开着的中转预览");
                         }
                     }
                     Some(Ok(_)) => last_heard = Instant::now(),
