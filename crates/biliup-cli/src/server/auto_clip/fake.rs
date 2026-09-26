@@ -81,15 +81,21 @@ pub struct Seen {
     pub audio_ms: Option<i64>,
 }
 
+/// 分析请求（system 消息是候选生成的那段）的回复：拿到请求体和这是第几个分析请求（从 0 数），
+/// 返回回复内容，或 `Err((HTTP 状态, 错误说明))`。
+pub type Analyst = Arc<dyn Fn(&Value, usize) -> Result<String, (u16, String)> + Send + Sync>;
+
 #[derive(Clone)]
 struct Shared {
     scenario: Scenario,
     seen: Arc<Mutex<Vec<Seen>>>,
+    analyst: Arc<Mutex<Option<Analyst>>>,
 }
 
 pub struct FakeServer {
     base_url: String,
     seen: Arc<Mutex<Vec<Seen>>>,
+    analyst: Arc<Mutex<Option<Analyst>>>,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -102,12 +108,14 @@ impl FakeServer {
     fn serve(listener: tokio::net::TcpListener, scenario: Scenario) -> FakeServer {
         let addr = listener.local_addr().unwrap();
         let seen = Arc::new(Mutex::new(Vec::new()));
+        let analyst = Arc::new(Mutex::new(None));
         let app = Router::new()
             .route("/v1/chat/completions", post(chat))
             .route("/v1/audio/transcriptions", post(transcriptions))
             .with_state(Shared {
                 scenario,
                 seen: seen.clone(),
+                analyst: analyst.clone(),
             });
         let task = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
@@ -115,6 +123,7 @@ impl FakeServer {
         FakeServer {
             base_url: format!("http://{addr}/v1"),
             seen,
+            analyst,
             task,
         }
     }
@@ -126,6 +135,53 @@ impl FakeServer {
     pub fn requests(&self) -> Vec<Seen> {
         self.seen.lock().unwrap().clone()
     }
+
+    /// 收到的转写请求。
+    pub fn transcriptions(&self) -> Vec<Seen> {
+        self.requests()
+            .into_iter()
+            .filter(|seen| seen.path == "/v1/audio/transcriptions")
+            .collect()
+    }
+
+    /// 候选生成的请求怎么回；没设时回 `{"candidates": []}`。
+    pub fn set_analyst(
+        &self,
+        analyst: impl Fn(&Value, usize) -> Result<String, (u16, String)> + Send + Sync + 'static,
+    ) {
+        *self.analyst.lock().unwrap() = Some(Arc::new(analyst));
+    }
+
+    /// 收到的候选生成请求。
+    pub fn analysis_requests(&self) -> Vec<Seen> {
+        self.requests()
+            .into_iter()
+            .filter(|seen| is_analysis(&seen.body))
+            .collect()
+    }
+}
+
+/// 候选生成的请求：system 消息是 [`super::prompt::system_message`]。
+pub fn is_analysis(body: &Value) -> bool {
+    body["messages"][0]["content"]
+        .as_str()
+        .is_some_and(|system| system.starts_with("你是直播切片助手"))
+}
+
+/// 请求里 user 消息的文字部分。
+pub fn user_text(body: &Value) -> String {
+    let content = &body["messages"][1]["content"];
+    match content.as_str() {
+        Some(text) => text.to_string(),
+        None => content[0]["text"].as_str().unwrap_or_default().to_string(),
+    }
+}
+
+/// 请求里附的图数。
+pub fn image_count(body: &Value) -> usize {
+    body["messages"][1]["content"]
+        .as_array()
+        .map_or(0, |parts| parts.len().saturating_sub(1))
 }
 
 impl Drop for FakeServer {
@@ -143,6 +199,25 @@ async fn chat(State(shared): State<Shared>, headers: HeaderMap, body: Bytes) -> 
         .flatten()
         .any(|message| message["content"].is_array());
     let json_mode = body.get("response_format").is_some();
+    let analysis = is_analysis(&body).then(|| {
+        let tokens = super::prompt::estimate_text_tokens(
+            body["messages"][0]["content"].as_str().unwrap_or_default(),
+        ) + super::prompt::estimate_text_tokens(&user_text(&body))
+            + image_count(&body) as i64 * super::prompt::IMAGE_TOKENS;
+        let nth = shared
+            .seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|seen| is_analysis(&seen.body))
+            .count();
+        let analyst = shared.analyst.lock().unwrap().clone();
+        let reply = match analyst {
+            Some(analyst) => analyst(&body, nth),
+            None => Ok("{\"candidates\": []}".to_string()),
+        };
+        (reply, tokens)
+    });
     let (scenario, attempt) = record(
         &shared,
         "/v1/chat/completions",
@@ -169,6 +244,25 @@ async fn chat(State(shared): State<Shared>, headers: HeaderMap, body: Bytes) -> 
             );
         }
         _ => {}
+    }
+    if let Some((reply, prompt_tokens)) = analysis {
+        return match reply {
+            Ok(content) => {
+                let completion = super::prompt::estimate_text_tokens(&content);
+                axum::Json(json!({
+                    "id": "chatcmpl-fake",
+                    "object": "chat.completion",
+                    "model": model,
+                    "choices": [{"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion, "total_tokens": prompt_tokens + completion},
+                }))
+                .into_response()
+            }
+            Err((status, message)) => error(
+                StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST),
+                &message,
+            ),
+        };
     }
     let content = if has_image {
         "{\"color\": \"红色\"}".to_string()

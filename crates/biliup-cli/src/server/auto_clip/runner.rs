@@ -1,4 +1,4 @@
-//! 按场次的自动切片任务：排队、调度、抽音频、转写。
+//! 按场次的自动切片任务：排队、调度、抽音频、转写，接着生成候选（见 [`super::analyze`]）。
 //!
 //! - 下播后：全局 `auto_clip.enabled` 打开、且这个主播在覆写里开了 `auto_clip_after_live`，
 //!   就排一条自动任务，过了断流合并窗口（`live_merge_minutes` + 1 分钟）才跑；到点时这一场又接着录了
@@ -7,10 +7,12 @@
 //! - 全局一个调度任务、同时只跑一个任务；ffmpeg 以低优先级运行。
 //! - 取消：库里改成 `canceled`，运行中的任务每秒查一次，发现后停下（ffmpeg 随之被杀，在途的请求丢弃）。
 //! - 重启：运行中的回到排队，按 `stage` 和场次目录下的缓存续跑，已转写的块不重传。
-//! - 每场送转写的分钟数有上限（`max_asr_minutes`，默认 300），超了不调用转写，任务失败并说明。
+//! - 每场送转写的分钟数有上限（`max_asr_minutes`，默认 300），超了不调用转写，任务失败并说明；
+//!   chat 用量同样有上限（`max_chat_tokens`，默认 30 万 token）。
 //!
 //! 没配置 `auto_clip`（或没打开）时不起调度任务、不建任务、不跑 ffmpeg。
 
+use super::analyze::{self, Analysis, ChatEstimate};
 use super::audio::{self, AudioError, Chunk, SegmentAudio, Span};
 use super::files::{Line, SessionFiles};
 use super::jobs::{self, Job, JobState, Stage, Trigger};
@@ -165,6 +167,13 @@ pub fn asr_endpoint(config: &AutoClipConfig) -> Option<Endpoint> {
     )
 }
 
+/// 候选生成用的 chat 端点：没填地址或模型为 `None`。
+pub fn chat_endpoint(config: &AutoClipConfig) -> Option<Endpoint> {
+    let url = config.base_url.as_ref()?;
+    let model = config.chat_model.as_ref()?;
+    Some(Endpoint::new(url, model.clone()).with_key(config.chat_key().map(|(key, _)| key)))
+}
+
 /// 能拿去转写的分段：已录完、文件还在（含等着被删的）、容器认得。
 fn transcribable(segment: &SegmentRow) -> bool {
     matches!(
@@ -203,6 +212,12 @@ pub struct Estimate {
     pub over_limit: bool,
     /// 超上限时给用户看的一句话
     pub message: Option<String>,
+    /// 候选生成的 chat 用量
+    pub chat: ChatEstimate,
+    pub max_chat_tokens: u64,
+    pub chat_over_limit: bool,
+    /// chat 超上限时给用户看的一句话
+    pub chat_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -238,12 +253,13 @@ pub async fn estimate_in(
         .into_iter()
         .map(|audio| (audio.segment_id, audio))
         .collect();
-    let (mut recorded_ms, mut speech_ms, mut all_known) = (0, 0, true);
+    let (mut recorded_ms, mut speech_ms, mut all_known, mut end_ms) = (0, 0, true, 0);
     for segment in store::session_segments(pool, session_id)
         .await?
         .iter()
         .filter(|s| transcribable(s))
     {
+        end_ms = end_ms.max(segment.end_ms.unwrap_or(segment.start_ms));
         let length = segment.end_ms.unwrap_or(segment.start_ms) - segment.start_ms;
         recorded_ms += length.max(0);
         match silence
@@ -285,6 +301,22 @@ pub async fn estimate_in(
             minutes(to_send)
         ),
     });
+    let lines = if reuse_transcript {
+        files.lines().await
+    } else {
+        Vec::new()
+    };
+    let chat =
+        analyze::estimate_chat(pool, &files, config, session_id, end_ms, &lines, to_send).await?;
+    let max_chat_tokens = config.max_chat_tokens();
+    let chat_over_limit = chat.tokens > max_chat_tokens as i64;
+    let chat_message = chat_over_limit.then(|| match chat.basis {
+        analyze::ChatBasis::Transcript => analyze::chat_limit_message(chat.tokens, max_chat_tokens),
+        analyze::ChatBasis::Duration => format!(
+            "按录像时长估，候选生成约要 {} token，超过每场 chat 上限 {max_chat_tokens} token；转写完如果仍然超过，任务会停下，不调用 chat",
+            chat.tokens
+        ),
+    });
     Ok(Estimate {
         recorded_seconds: ceil_secs(recorded_ms),
         asr_seconds: ceil_secs(to_send),
@@ -293,6 +325,10 @@ pub async fn estimate_in(
         max_asr_minutes: limit,
         over_limit,
         message,
+        chat,
+        max_chat_tokens,
+        chat_over_limit,
+        chat_message,
     })
 }
 
@@ -492,6 +528,9 @@ impl Runner {
         let endpoint = asr_endpoint(&config).ok_or(
             "没有配置转写接口：到设置页「自动切片（实验）」填好转写的接口地址和模型".to_string(),
         )?;
+        let chat = chat_endpoint(&config).ok_or(
+            "没有配置 chat 接口：到设置页「自动切片（实验）」填好接口地址和 chat 模型".to_string(),
+        )?;
         let ffmpeg = crate::tools::ffmpeg_status().await;
         if !ffmpeg.available {
             return Err(format!(
@@ -505,10 +544,13 @@ impl Runner {
                 files.clear_transcript().await;
             }
             files.remove_audio().await;
+            files.clear_analysis().await;
         }
-        let models = json!({
+        let mut models = json!({
             "asr_model": endpoint.model(),
             "asr_host": display_host(endpoint.base_url()),
+            "chat_model": chat.model(),
+            "chat_host": display_host(chat.base_url()),
         });
         let mut warnings = Vec::new();
 
@@ -666,6 +708,26 @@ impl Runner {
                 files.remove_segment_audio(chunk.segment_id).await;
             }
         }
+        files.remove_audio().await;
+
+        let end_ms = segments
+            .iter()
+            .map(|s| s.end_ms.unwrap_or(s.start_ms))
+            .max()
+            .unwrap_or(0);
+        Analysis {
+            pool,
+            job,
+            files,
+            config: &config,
+            client: &client,
+            endpoint: &chat,
+            end_ms,
+            models: &mut models,
+            warnings: &mut warnings,
+        }
+        .run()
+        .await?;
         Ok(Outcome::Done)
     }
 

@@ -7,6 +7,8 @@ use crate::server::auto_clip::jobs::NewJob;
 use crate::server::infrastructure::connection_pool::ConnectionManager;
 use std::sync::atomic::AtomicI64;
 
+mod analyze;
+
 const KEY: &str = "sk-test-0123456789abcdef";
 
 /// 场次 id 从一个大数起，免得和同一进程里别的用例登记的「正在录」的场次撞上。
@@ -150,7 +152,7 @@ impl Env {
 
     fn sent_ms(&self) -> i64 {
         self.server
-            .requests()
+            .transcriptions()
             .iter()
             .filter_map(|seen| seen.audio_ms)
             .sum()
@@ -279,17 +281,26 @@ async fn transcribes_mixed_segments_and_skips_silence() {
 
     let job = env.job(job.id).await;
     assert_eq!(job.state, JobState::Done);
-    assert_eq!(job.stage, Some(Stage::Asr));
-    assert_eq!((job.progress_done, job.progress_total), (3, 3));
+    // 转写完同一个任务接着生成候选：一窗、默认的假回复没有候选
+    assert_eq!(job.stage, Some(Stage::Analyze));
+    assert_eq!((job.progress_done, job.progress_total), (1, 1));
+    assert_eq!(env.server.analysis_requests().len(), 1);
+    assert!(job.tokens_in > 0 && job.tokens_out > 0, "{job:?}");
     assert!(job.error.is_none());
     assert!(job.finished_at.is_some());
-    assert_eq!(job.warnings.len(), 1, "{:?}", job.warnings);
+    assert_eq!(job.warnings.len(), 3, "{:?}", job.warnings);
     assert!(job.warnings[0].contains("c.flv") && job.warnings[0].contains("没有音频"));
+    assert!(
+        job.warnings[1].contains("没有弹幕记录"),
+        "{:?}",
+        job.warnings
+    );
+    assert!(job.warnings[2].contains("没有发截图"), "{:?}", job.warnings);
     assert_eq!(job.models.as_ref().unwrap()["asr_model"], "whisper-1");
 
     let recorded_ms: i64 = PIECES.iter().map(|p| p.secs * 1000).sum();
     let sent_ms = env.sent_ms();
-    let requests = env.server.requests();
+    let requests = env.server.transcriptions();
     assert_eq!(requests.len(), 3, "每段一块");
     assert!(
         requests
@@ -367,7 +378,7 @@ async fn over_the_per_session_limit_nothing_is_sent() {
     };
     assert!(error.contains("超过每场上限 1 分钟"), "{error}");
     assert!(error.contains("没有调用转写"), "{error}");
-    assert!(env.server.requests().is_empty(), "超上限不调用转写");
+    assert!(env.server.transcriptions().is_empty(), "超上限不调用转写");
     let job = env.job(job.id).await;
     assert_eq!(job.state, JobState::Failed);
     assert_eq!(job.error.as_deref(), Some(error.as_str()));
@@ -393,7 +404,7 @@ async fn a_rejected_key_fails_at_once_and_is_masked() {
     let Outcome::Failed(error) = outcome else {
         panic!("{outcome:?}");
     };
-    assert_eq!(env.server.requests().len(), 1, "401 不重试");
+    assert_eq!(env.server.transcriptions().len(), 1, "401 不重试");
     assert!(!error.contains(KEY), "{error}");
     let job = env.job(job.id).await;
     assert_eq!(job.state, JobState::Failed);
@@ -411,7 +422,7 @@ async fn rate_limits_are_waited_out() {
     let (_, outcome) = env.runner().run_next().await.unwrap().unwrap();
     assert_eq!(outcome, Outcome::Done);
     assert_eq!(
-        env.server.requests().len(),
+        env.server.transcriptions().len(),
         4,
         "第一次 429，重试后三块都成功"
     );
@@ -430,7 +441,7 @@ async fn timeouts_fail_the_job_after_retrying() {
         panic!("{outcome:?}");
     };
     assert!(error.contains("转写失败"), "{error}");
-    assert_eq!(env.server.requests().len(), 2, "首次 + 重试一次");
+    assert_eq!(env.server.transcriptions().len(), 2, "首次 + 重试一次");
     assert_eq!(env.job(job.id).await.state, JobState::Failed);
 }
 
@@ -443,12 +454,12 @@ async fn a_failed_job_keeps_finished_chunks_for_the_next_run() {
     let (_, outcome) = env.runner().run_next().await.unwrap().unwrap();
     assert!(matches!(outcome, Outcome::Failed(_)), "{outcome:?}");
     // 第一块成功，第二块首次 + 重试一次都是 500
-    assert_eq!(env.server.requests().len(), 3);
+    assert_eq!(env.server.transcriptions().len(), 3);
     let failed = env.job(first.id).await;
     assert_eq!(failed.progress_done, 1);
     let kept = env.files().lines().await;
     assert_eq!(distinct_chunks(&kept).len(), 1);
-    let first_chunk_ms = env.server.requests()[0].audio_ms.unwrap();
+    let first_chunk_ms = env.server.transcriptions()[0].audio_ms.unwrap();
 
     // 服务恢复后再跑一次：沿用已转写的块，只送剩下的
     let server = FakeServer::start(Scenario::Ok).await;
@@ -462,7 +473,7 @@ async fn a_failed_job_keeps_finished_chunks_for_the_next_run() {
     let second = env.enqueue(true).await;
     let (_, outcome) = env.runner().run_next().await.unwrap().unwrap();
     assert_eq!(outcome, Outcome::Done);
-    assert_eq!(server.requests().len(), 2);
+    assert_eq!(server.transcriptions().len(), 2);
     let lines = env.files().lines().await;
     assert_eq!(distinct_chunks(&lines).len(), 3);
     assert_eq!(&lines[..kept.len()], &kept[..]);
@@ -476,7 +487,7 @@ async fn a_failed_job_keeps_finished_chunks_for_the_next_run() {
     env.enqueue(false).await;
     let (_, outcome) = env.runner().run_next().await.unwrap().unwrap();
     assert_eq!(outcome, Outcome::Done);
-    assert_eq!(server.requests().len(), 5);
+    assert_eq!(server.transcriptions().len(), 5);
     assert_eq!(env.files().lines().await.len(), lines.len());
 }
 
@@ -505,7 +516,7 @@ async fn a_new_segment_only_sends_the_new_audio() {
         env.runner().run_next().await.unwrap().unwrap().1,
         Outcome::Done
     );
-    let requests = env.server.requests();
+    let requests = env.server.transcriptions();
     assert_eq!(requests.len(), 4);
     assert_eq!(requests[3].audio_ms, requests[1].audio_ms);
     let lines = env.files().lines().await;
@@ -527,7 +538,7 @@ async fn an_oversized_upload_is_split_in_halves() {
     assert!(matches!(outcome, Outcome::Failed(_)), "{outcome:?}");
     let sizes: Vec<i64> = env
         .server
-        .requests()
+        .transcriptions()
         .iter()
         .map(|seen| seen.audio_ms.unwrap())
         .collect();
@@ -554,7 +565,7 @@ async fn cancel_stops_a_running_job() {
     let runner = env.runner();
     let task = tokio::spawn(async move { runner.run_next().await });
     wait_until("转写请求发出", async || {
-        !env.server.requests().is_empty()
+        !env.server.transcriptions().is_empty()
     })
     .await;
     assert_eq!(env.pins().await, 1, "运行中引用整场素材");
@@ -598,7 +609,7 @@ async fn a_restart_resumes_without_resending_finished_chunks() {
     // 进程在第二块的请求途中被杀
     task.abort();
     let _ = task.await;
-    let sent_before = env.server.requests().len();
+    let sent_before = env.server.transcriptions().len();
     assert_eq!(env.job(job.id).await.state, JobState::Running);
 
     assert_eq!(jobs::recover(&env.pool).await.unwrap(), 1);
@@ -608,7 +619,7 @@ async fn a_restart_resumes_without_resending_finished_chunks() {
     let (id, outcome) = env.runner().run_next().await.unwrap().unwrap();
     assert_eq!((id, outcome), (job.id, Outcome::Done));
 
-    let requests = env.server.requests();
+    let requests = env.server.transcriptions();
     let resent = requests.len() - sent_before;
     // 断在第二块途中：续跑送第二、三块，第一块不重传
     assert_eq!(resent, 2, "{} 次请求，断之前 {sent_before}", requests.len());
@@ -621,7 +632,8 @@ async fn a_restart_resumes_without_resending_finished_chunks() {
     assert_lines_fall_on_tones(&lines);
     let job = env.job(job.id).await;
     assert_eq!(job.state, JobState::Done);
-    assert_eq!(job.progress_done, 3);
+    assert_eq!(job.stage, Some(Stage::Analyze));
+    assert_eq!(job.progress_done, 1);
     assert_eq!(env.pins().await, 0);
 }
 

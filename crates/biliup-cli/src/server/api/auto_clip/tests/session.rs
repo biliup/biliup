@@ -114,8 +114,10 @@ async fn estimate_then_confirm_then_cancel() {
     .await;
     assert_eq!(body["enabled"], true);
     assert_eq!(body["job"], Value::Null);
+    let mut estimate = body["estimate"].clone();
+    let chat = estimate.as_object_mut().unwrap().remove("chat").unwrap();
     assert_eq!(
-        body["estimate"],
+        estimate,
         json!({
             "recorded_seconds": 1200,
             "asr_seconds": 1200,
@@ -124,7 +126,19 @@ async fn estimate_then_confirm_then_cancel() {
             "max_asr_minutes": 300,
             "over_limit": false,
             "message": null,
+            "max_chat_tokens": 300_000,
+            "chat_over_limit": false,
+            "chat_message": null,
         })
+    );
+    // 还没转写：20 分钟语音按每分钟 260 token 估，加一窗的固定部分与预留的回复
+    assert_eq!(chat["basis"], "duration");
+    assert_eq!(chat["windows"], 1);
+    assert_eq!(chat["images"], 0, "没做连通性测试时缩图不开");
+    let tokens = chat["tokens"].as_i64().unwrap();
+    assert!(
+        (20 * 260 + 1_000..20 * 260 + 3_000).contains(&tokens),
+        "{chat}"
     );
 
     // 看的人不能生成
@@ -247,6 +261,27 @@ async fn requests_that_cannot_run_are_refused() {
     let body = json_of(response, StatusCode::CONFLICT).await;
     assert!(
         body["message"].as_str().unwrap().contains("转写接口"),
+        "{body}"
+    );
+
+    // 没填 chat 模型
+    {
+        let mut config = f.config.write().unwrap();
+        let auto_clip = config.auto_clip.as_mut().unwrap();
+        auto_clip.asr_model = Some("whisper-1".into());
+        auto_clip.chat_model = None;
+    }
+    let response = call(
+        &f.app,
+        Some(&f.admin),
+        "POST",
+        &uri(ended),
+        Some(json!({"confirm": true})),
+    )
+    .await;
+    let body = json_of(response, StatusCode::CONFLICT).await;
+    assert!(
+        body["message"].as_str().unwrap().contains("chat 接口"),
         "{body}"
     );
     assert_eq!(job_count(&f.pool).await, 0);

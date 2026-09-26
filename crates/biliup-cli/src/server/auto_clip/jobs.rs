@@ -327,6 +327,28 @@ pub async fn record_chunk(
     Ok(())
 }
 
+/// 问完一窗 chat：累加实际用量。
+pub async fn record_chat(
+    pool: &ConnectionPool,
+    id: i64,
+    tokens_in: i64,
+    tokens_out: i64,
+    images: i64,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE auto_clip_jobs SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ?,
+             images = images + ?
+         WHERE id = ? AND state = 'running'",
+    )
+    .bind(tokens_in)
+    .bind(tokens_out)
+    .bind(images)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn set_planned(pool: &ConnectionPool, id: i64, seconds: i64) -> sqlx::Result<()> {
     sqlx::query("UPDATE auto_clip_jobs SET asr_planned_seconds = ? WHERE id = ?")
         .bind(seconds)
