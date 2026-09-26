@@ -246,6 +246,9 @@ export interface FileList {
 	name: string;
 	updateTime: number;
 	size: number;
+	/** 属于某一场、能按场次回看时才有：场次 id 和这一段在场次时间轴上的起点（毫秒） */
+	session_id?: number;
+	segment_start_ms?: number;
 }
 
 export interface StreamerInfo {
@@ -256,4 +259,6 @@ export interface StreamerInfo {
 	/** Unix 时间戳（秒），由后端 ts_seconds 序列化 */
 	date: number;
 	live_cover_path: string;
+	/** 这一场有时间轴，能在回看页打开（升级前录的场次没有） */
+	has_timeline?: boolean;
 }

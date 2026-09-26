@@ -7,3 +7,17 @@
 .tabs :global(.semi-tabs-bar) {
   margin-bottom: 16px;
 }
+
+.actions {
+  display: inline-flex;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.replayLink {
+  color: var(--semi-color-link);
+  text-decoration: none;
+}
+.replayLink:hover {
+  text-decoration: underline;
+}

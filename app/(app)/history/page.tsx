@@ -6,8 +6,10 @@ import useSWR from 'swr'
 import { fetcher, FileList } from '@/app/lib/api-streamer'
 import { useState } from 'react'
 import dynamic from 'next/dynamic'
+import Link from 'next/link'
 import { humDate } from '@/app/lib/utils'
 import { formatSize } from '@/app/lib/use-dashboard'
+import { replayHref } from '@/app/lib/sessions'
 import PageHeader from '../components/PageHeader'
 import LiveMonitor from '@/app/ui/LiveMonitor'
 import dc from '@/app/ui/data-card.module.scss'
@@ -51,10 +53,21 @@ export default function History() {
     {
       title: '',
       dataIndex: 'operate',
-      render: (text: any, record: any) => (
-        <Text link style={{ cursor: 'pointer' }} onClick={() => showDialog(record.name)}>
-          播放
-        </Text>
+      render: (text: any, record: FileList) => (
+        <span className={styles.actions}>
+          <Text link style={{ cursor: 'pointer' }} onClick={() => showDialog(record.name)}>
+            播放
+          </Text>
+          {record.session_id !== undefined ? (
+            <Link
+              href={replayHref(record.session_id, record.segment_start_ms)}
+              className={styles.replayLink}
+              title="打开这一场的回看页，定位到这个文件的开头；可以拖到整场任意位置"
+            >
+              按场次回看
+            </Link>
+          ) : null}
+        </span>
       ),
     },
   ]

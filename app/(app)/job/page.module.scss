@@ -1,0 +1,20 @@
+/* 直播历史：每场的「回看」入口 */
+.replayLink,
+.fileReplay {
+  color: var(--semi-color-link);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.replayLink:hover,
+.fileReplay:hover {
+  text-decoration: underline;
+}
+
+.replayOff {
+  cursor: not-allowed;
+  white-space: nowrap;
+}
+
+.fileReplay {
+  margin-left: 12px;
+}
