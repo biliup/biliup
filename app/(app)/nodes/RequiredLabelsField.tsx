@@ -31,6 +31,7 @@ export default function RequiredLabelsField({ nodes }: { nodes: FleetNode[] }) {
       allowCreate
       showClear
       optionList={options}
+      renderSelectedItem={(option: { value?: unknown }) => ({ isRenderInTag: true, content: String(option.value) })}
       placeholder="不限节点"
       emptyContent="输入标签后回车"
       extraText={
