@@ -13,3 +13,4 @@ pub mod model;
 pub mod probe;
 pub mod runner;
 pub mod settings;
+pub mod thumbs;

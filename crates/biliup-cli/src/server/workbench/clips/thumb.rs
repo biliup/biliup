@@ -60,6 +60,17 @@ pub async fn frame(
     t_ms: i64,
     width: u32,
 ) -> Result<Vec<u8>, ThumbError> {
+    frame_with_quality(pool, session_id, t_ms, width, 3).await
+}
+
+/// 同 [`frame`]，JPEG 质量用 ffmpeg 的 `-q:v`（2–31，越大越糊越小）。
+pub async fn frame_with_quality(
+    pool: &ConnectionPool,
+    session_id: i64,
+    t_ms: i64,
+    width: u32,
+    quality: u32,
+) -> Result<Vec<u8>, ThumbError> {
     let status = crate::tools::ffmpeg_status().await;
     if !status.available {
         return Err(ThumbError::NoFfmpeg(format!(
@@ -91,7 +102,8 @@ pub async fn frame(
         .args(["-ss", &format!("{}.{:03}", at / 1000, at % 1000)])
         .args(["-map", "0:v:0", "-frames:v", "1"])
         .args(["-vf", &format!("scale='min({width},iw)':-2")])
-        .args(["-c:v", "mjpeg", "-q:v", "3", "-f", "image2pipe", "pipe:1"])
+        .args(["-c:v", "mjpeg", "-q:v", &quality.clamp(2, 31).to_string()])
+        .args(["-f", "image2pipe", "pipe:1"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

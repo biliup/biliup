@@ -7,7 +7,8 @@
 //! - `transcript.jsonl`：每行一句 `{chunk, from_ms, to_ms, text}`，时间是场次时间；
 //! - `asr_done.txt`：转写完的块，每行一个 key。一块的句子全部写进 `transcript.jsonl` 之后才记在这里，
 //!   续跑时没记上的块的句子先删掉再重转，不会重复。
-//! - `danmaku.json`：弹幕密度与高峰。
+//! - `danmaku.json`：弹幕密度与高峰；
+//! - `thumbs/<场次毫秒>.jpg`：送给模型的关键帧缩图。
 
 use super::audio::{Chunk, SegmentAudio};
 use super::danmaku::Density;
@@ -207,6 +208,14 @@ impl SessionFiles {
                 Ok(())
             }
         }
+    }
+
+    pub fn thumbs_dir(&self) -> PathBuf {
+        self.dir.join("thumbs")
+    }
+
+    pub fn thumb(&self, t_ms: i64) -> PathBuf {
+        self.thumbs_dir().join(format!("{t_ms}.jpg"))
     }
 }
 
