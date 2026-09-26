@@ -47,7 +47,7 @@ impl Connection for FakeConnection {
     async fn upload(
         &self,
         path: &std::path::Path,
-        progress: &(dyn Fn(usize) + Send + Sync),
+        progress: &(dyn Fn(usize) -> bool + Send + Sync),
     ) -> Result<Video, Failure> {
         tokio::time::sleep(Duration::from_millis(20)).await;
         if let Some(failure) = self.0.upload_failures.lock().unwrap().pop_front() {

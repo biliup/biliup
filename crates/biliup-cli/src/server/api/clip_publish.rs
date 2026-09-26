@@ -481,13 +481,14 @@ pub async fn retry_publish(
     }
 }
 
-/// `DELETE /v1/publish-jobs/{jid}`
+/// `DELETE /v1/publish-jobs/{jid}`：进行中的任务返回 202 和正在取消的任务，投稿已发出时 409。
 pub async fn remove_publish(
     State(publisher): State<Arc<ClipPublisher>>,
     Path(jid): Path<u64>,
 ) -> Response {
     match publisher.remove(jid) {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Ok(true) => (StatusCode::ACCEPTED, Json(publisher.job(jid))).into_response(),
+        Ok(false) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => action_error(e),
     }
 }

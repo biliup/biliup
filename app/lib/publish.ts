@@ -34,7 +34,7 @@ export const MAX_COVER_BYTES = 5 * 1024 * 1024
 /** B 站的稿件管理页：投稿结果未知时让用户去这里核对 */
 export const ARCHIVE_MANAGER_URL = 'https://member.bilibili.com/platform/upload-manager/article'
 
-export type JobState = 'queued' | 'running' | 'paused' | 'failed' | 'done'
+export type JobState = 'queued' | 'running' | 'paused' | 'failed' | 'done' | 'cancelled'
 export type JobStep = 'export' | 'upload' | 'submit'
 export const JOB_STEPS: JobStep[] = ['export', 'upload', 'submit']
 
@@ -54,6 +54,8 @@ export interface PublishJob {
   uploaded: number
   error: string | null
   bvid: string | null
+  /** 进行中的任务已要求取消，还没停下 */
+  cancelling: boolean
   title: string | null
   created_by: number | null
   created_at: number
@@ -122,6 +124,8 @@ export const thumbUrl = (sessionId: number, t: number, w = 480) =>
 export const archiveUrl = (bvid: string) => `https://www.bilibili.com/video/${bvid}`
 
 const active = (job: PublishJob) => job.state === 'queued' || job.state === 'running'
+/** 已发布或已取消：不再占着切片 */
+export const jobFinished = (job: PublishJob) => job.state === 'done' || job.state === 'cancelled'
 const queueRefresh = (data?: PublishQueue) => (data?.jobs.some(active) ? 1000 : 0)
 
 /**
@@ -138,7 +142,7 @@ export function usePublishQueue(sessionId: number | null, enabled = true) {
     const sessions = new Set<number>()
     for (const job of jobs) {
       const before = seen.current.get(job.id)
-      if (before !== undefined && before !== job.state && (job.state === 'done' || job.state === 'failed')) {
+      if (before !== undefined && before !== job.state && (jobFinished(job) || job.state === 'failed')) {
         sessions.add(job.session_id)
         for (const id of job.clip_ids) void mutate(clipUrl(id))
       }
@@ -152,7 +156,11 @@ export function usePublishQueue(sessionId: number | null, enabled = true) {
       for (const id of job.clip_ids) {
         const seen = map.get(id)
         // 同一个切片以未完成的任务为准，其次是最新的
-        if (!seen || (seen.state === 'done' && job.state !== 'done') || (seen.state === job.state && job.id > seen.id)) {
+        if (
+          !seen ||
+          (jobFinished(seen) && !jobFinished(job)) ||
+          (jobFinished(seen) === jobFinished(job) && job.id > seen.id)
+        ) {
           map.set(id, job)
         }
       }
@@ -248,5 +256,5 @@ export function needsConfirm(clip: Pick<Clip, 'submit_state'>): boolean {
 
 /** 能发布：没发布过、不在发布队列里未完成的任务中 */
 export function canPublish(clip: Clip, job: PublishJob | undefined): boolean {
-  return clip.state !== 'published' && clip.state !== 'discarded' && !(job && job.state !== 'done')
+  return clip.state !== 'published' && clip.state !== 'discarded' && !(job && !jobFinished(job))
 }

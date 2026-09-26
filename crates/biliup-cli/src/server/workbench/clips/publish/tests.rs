@@ -43,6 +43,7 @@ fn info() -> StreamerInfo {
 
 fn clip(title: &str, at_ms: i64) -> ClipVars {
     ClipVars {
+        id: 12,
         title: title.into(),
         at_ms,
     }
@@ -117,6 +118,24 @@ fn whole_stream_titles_are_not_reused_for_clips() {
     assert_eq!(
         title_template(&with_vars, &over, "名场面", true),
         "自己写的"
+    );
+}
+
+#[test]
+fn untitled_clips_are_called_by_their_number_in_titles() {
+    let mut t = template();
+    t.title = Some("【{streamer}】{clip_title}".into());
+    let over = StudioOverride::default();
+    let a = archive(t.clone(), over.clone(), vec![clip(" ", 0)]);
+    assert_eq!(a.render().title, "【主播%d】切片 #12");
+    t.title = Some("{clip_title}".into());
+    let a = archive(t, over, vec![clip("", 0)]);
+    assert_eq!(a.render().title, "切片 #12");
+    assert_eq!(a.problem(), None, "标题不再是空的");
+    // 起了名的照旧
+    assert_eq!(
+        render("{clip_title}", &info(), &clip("名场面", 0)),
+        "名场面"
     );
 }
 

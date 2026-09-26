@@ -223,14 +223,15 @@ pub(crate) async fn upload_single_file(
     file_path: &Path,
     context: &UploadContext,
 ) -> AppResult<Video> {
-    upload_single_file_with_progress(file_path, context, |_| {}).await
+    upload_single_file_with_progress(file_path, context, |_| true).await
 }
 
-/// 同 [`upload_single_file`]，每读出一块交给上传时用这块的字节数回调 `progress`。
+/// 同 [`upload_single_file`]，每读出一块交给上传前用这块的字节数回调 `progress`；
+/// 回调返回 `false` 时不再传后面的分块，上传以错误结束。
 pub(crate) async fn upload_single_file_with_progress(
     file_path: &Path,
     context: &UploadContext,
-    progress: impl Fn(usize) + Send + Sync,
+    progress: impl Fn(usize) -> bool + Send + Sync,
 ) -> AppResult<Video> {
     let video_path = file_path;
     let UploadContext {
@@ -263,7 +264,9 @@ pub(crate) async fn upload_single_file_with_progress(
             vs.map(|vs| {
                 let chunk = vs?;
                 let len = chunk.len();
-                progress(len);
+                if !progress(len) {
+                    return Err(Kind::Custom("上传已取消".into()));
+                }
                 Ok((chunk, len))
             })
         })

@@ -7,6 +7,8 @@
 //!
 //! B 站返回 601（上传太频繁）时整个队列暂停，等用户点「继续」，不自动重试。失败的任务留着原因，
 //! 重试时已经传好的 P 不再重传。任务只在内存里：服务重启后队列清空，已发布的切片不受影响。
+//! 进行中的任务移出队列时只记下取消，任务在分块之间、投稿之前看到后停下，记为已取消；
+//! 投稿请求发出之后就撤不回了，这时拒绝取消，任务照常记成已发布。
 //! 只有「投稿中」落库（`clips.submit_state`）：投稿返回后、记账前服务退出的切片，重启后记为
 //! 投稿结果未知，再次发布要用户先去 B 站确认过（`confirm_unknown`）。
 
@@ -33,7 +35,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::Duration;
 use tokio::sync::Notify;
-use tokio::task::AbortHandle;
 use tracing::{info, warn};
 
 /// 队列里最多留多少个已结束的任务（成功的先丢）。
@@ -42,6 +43,7 @@ const KEEP_FINISHED: usize = 200;
 const EXPORT_POLL: Duration = Duration::from_millis(500);
 pub const RATE_LIMITED: &str = "B 站提示上传太频繁，已暂停，稍后点继续";
 pub const UNKNOWN_HINT: &str = "请先到 B 站稿件管理确认是否已投稿";
+pub const SUBMITTED: &str = "投稿已提交，无法撤回；投完后这里会显示稿件号";
 
 /// 上传、投稿出错。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,10 +75,11 @@ pub trait Bilibili: Send + Sync {
 
 #[async_trait]
 pub trait Connection: Send + Sync {
+    /// `progress` 在每块上传前拿到这块的字节数，返回 `false` 时停止上传。
     async fn upload(
         &self,
         path: &Path,
-        progress: &(dyn Fn(usize) + Send + Sync),
+        progress: &(dyn Fn(usize) -> bool + Send + Sync),
     ) -> Result<Video, Failure>;
     /// 上传封面，返回 B 站的图片地址。
     async fn cover(&self, path: &Path) -> Result<String, Failure>;
@@ -175,7 +178,7 @@ impl Connection for BiliConnection {
     async fn upload(
         &self,
         path: &Path,
-        progress: &(dyn Fn(usize) + Send + Sync),
+        progress: &(dyn Fn(usize) -> bool + Send + Sync),
     ) -> Result<Video, Failure> {
         upload_single_file_with_progress(path, &self.context, progress)
             .await
@@ -217,6 +220,14 @@ pub enum JobState {
     Paused,
     Failed,
     Done,
+    /// 投稿前被取消，没有投稿。
+    Cancelled,
+}
+
+impl JobState {
+    fn finished(self) -> bool {
+        matches!(self, JobState::Done | JobState::Cancelled)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -250,6 +261,8 @@ pub struct JobView {
     pub uploaded: usize,
     pub error: Option<String>,
     pub bvid: Option<String>,
+    /// 进行中的任务已被要求取消，还没停下。
+    pub cancelling: bool,
     /// 稿件标题（开始上传后才有）。
     pub title: Option<String>,
     pub created_by: Option<i64>,
@@ -263,7 +276,8 @@ struct Job {
     mode: Mode,
     /// 各 P 传好之后的结果，重试时不重传。
     videos: Vec<Option<Video>>,
-    abort: Option<AbortHandle>,
+    /// 这一轮已经过了投稿前的最后一次取消检查，投稿请求随时会到 B 站。
+    submitting: bool,
 }
 
 #[derive(Default)]
@@ -314,6 +328,7 @@ enum Outcome {
     },
     Paused(String),
     Failed(String),
+    Cancelled,
 }
 
 impl ClipPublisher {
@@ -398,6 +413,7 @@ impl ClipPublisher {
             uploaded: 0,
             error: None,
             bvid: None,
+            cancelling: false,
             title: None,
             created_by,
             created_at: now,
@@ -408,7 +424,7 @@ impl ClipPublisher {
             settings,
             mode,
             videos: vec![None; clips.len()],
-            abort: None,
+            submitting: false,
         });
         prune(&mut queue.jobs);
         drop(queue);
@@ -465,30 +481,29 @@ impl ClipPublisher {
         Ok(view)
     }
 
-    /// 移出队列：排队中、暂停、失败、已完成的直接移除；正在导出或上传的停下；正在投稿时不能取消
-    /// （请求可能已经到了 B 站，停下来会不知道稿件建没建）。
-    pub fn remove(&self, id: u64) -> Result<(), ActionError> {
+    /// 移出队列：不在进行中的直接移除，返回 `false`；进行中的只记下取消、留在列表里，返回 `true`，
+    /// 任务在下一个上传分块之前或投稿之前停下，记为已取消。投稿请求已经发出时拒绝（撤不回）。
+    pub fn remove(&self, id: u64) -> Result<bool, ActionError> {
         let mut queue = lock(&self.queue);
         let index = queue
             .jobs
             .iter()
             .position(|j| j.view.id == id)
             .ok_or(ActionError::NotFound)?;
-        let job = &queue.jobs[index];
+        let job = &mut queue.jobs[index];
         if job.view.state == JobState::Running {
-            if job.view.step == Some(Step::Submit) {
-                return Err(ActionError::Conflict(
-                    "正在投稿，不能取消；等它结束（成功或失败）".into(),
-                ));
+            if job.submitting {
+                return Err(ActionError::Conflict(SUBMITTED.into()));
             }
-            if let Some(abort) = &job.abort {
-                abort.abort();
-            }
+            job.view.cancelling = true;
+            job.view.detail = "正在取消".into();
+            job.view.updated_at = now_ms();
+            return Ok(true);
         }
         queue.jobs.remove(index);
         drop(queue);
         self.wake.notify_one();
-        Ok(())
+        Ok(false)
     }
 
     /// 切片所在的未完成任务的状态（排队、进行中、暂停、失败）；不在队列里时为 `None`。
@@ -496,7 +511,7 @@ impl ClipPublisher {
         lock(&self.queue)
             .jobs
             .iter()
-            .find(|j| j.view.state != JobState::Done && j.view.clip_ids.contains(&clip_id))
+            .find(|j| !j.view.state.finished() && j.view.clip_ids.contains(&clip_id))
             .map(|j| j.view.state)
     }
 
@@ -525,9 +540,32 @@ impl ClipPublisher {
         let detail = detail.into();
         self.update(id, |job| {
             job.view.step = Some(step);
-            job.view.detail = detail;
+            if !job.view.cancelling {
+                job.view.detail = detail;
+            }
             job.view.ratio = ratio;
         });
+    }
+
+    /// 任务被要求取消了（或已经不在列表里）。
+    fn cancelled(&self, id: u64) -> bool {
+        lock(&self.queue)
+            .jobs
+            .iter()
+            .find(|j| j.view.id == id)
+            .is_none_or(|j| j.view.cancelling)
+    }
+
+    /// 投稿前最后一次看取消，与 [`Self::remove`] 在同一把锁里：没取消就记下投稿已发出，之后不能再取消。
+    fn start_submit(&self, id: u64) -> bool {
+        let mut queue = lock(&self.queue);
+        match queue.jobs.iter_mut().find(|j| j.view.id == id) {
+            Some(job) if !job.view.cancelling => {
+                job.submitting = true;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// 取下一个排队的任务，标成进行中；暂停时不取。
@@ -555,12 +593,8 @@ impl ClipPublisher {
                 continue;
             };
             let this = self.clone();
-            let handle = tokio::spawn(async move { this.run(id).await });
-            self.update(id, |job| job.abort = Some(handle.abort_handle()));
-            let outcome = match handle.await {
+            let outcome = match tokio::spawn(async move { this.run(id).await }).await {
                 Ok(outcome) => outcome,
-                // 被移出队列时停下，任务已经不在列表里
-                Err(e) if e.is_cancelled() => continue,
                 Err(e) => Outcome::Failed(format!("发布任务异常退出：{e}")),
             };
             self.finish(id, outcome);
@@ -572,10 +606,25 @@ impl ClipPublisher {
         let Some(job) = queue.jobs.iter_mut().find(|j| j.view.id == id) else {
             return;
         };
-        job.abort = None;
+        job.submitting = false;
         job.view.updated_at = now_ms();
         job.view.ratio = None;
+        // 取消后上传以错误结束、或碰上 601，都按取消收场；投稿发出后不会再被取消，Done 照记
+        let outcome = match outcome {
+            Outcome::Done { .. } => outcome,
+            _ if job.view.cancelling => Outcome::Cancelled,
+            _ => outcome,
+        };
         match outcome {
+            Outcome::Cancelled => {
+                info!(job = id, "切片发布已取消，没有投稿");
+                job.view.state = JobState::Cancelled;
+                job.view.cancelling = false;
+                job.view.detail = "已取消".into();
+                job.view.error = None;
+                job.videos.clear();
+                job.view.uploaded = 0;
+            }
             Outcome::Done {
                 bvid,
                 title,
@@ -671,6 +720,9 @@ impl ClipPublisher {
             if videos[index].is_some() {
                 continue;
             }
+            if self.cancelled(id) {
+                return Outcome::Cancelled;
+            }
             let done_before: u64 = sizes[..index].iter().sum();
             let label = if total > 1 {
                 format!("上传 P{}/{total}", index + 1)
@@ -688,7 +740,12 @@ impl ClipPublisher {
             let report = |len: usize| {
                 let n = read.fetch_add(len as u64, Ordering::Relaxed) + len as u64;
                 let ratio = ((done_before + n.min(sizes[index])) as f64 / all as f64).min(1.0);
-                self.update(id, |job| job.view.ratio = Some(ratio));
+                let mut go_on = false;
+                self.update(id, |job| {
+                    job.view.ratio = Some(ratio);
+                    go_on = !job.view.cancelling;
+                });
+                go_on
             };
             match connection.upload(&path, &report).await {
                 Ok(video) => {
@@ -737,6 +794,9 @@ impl ClipPublisher {
         }
         // 先落库再投稿：投稿返回之后、记账之前服务退出的话，重启后能认出这些切片
         let ids: Vec<i64> = parts.iter().map(|c| c.id).collect();
+        if !self.start_submit(id) {
+            return Outcome::Cancelled;
+        }
         let job = i64::try_from(id).unwrap_or(i64::MAX);
         if let Err(e) = clips::begin_submit(&self.pool, &ids, job, now_ms()).await {
             return Outcome::Failed(format!("投稿前写数据库出错，没有投稿：{e}"));
@@ -781,6 +841,9 @@ impl ClipPublisher {
     ) -> Result<Clip, String> {
         let mut started = false;
         loop {
+            if self.cancelled(id) {
+                return Err("已取消".into());
+            }
             let clip = clips::get(&self.pool, clip_id)
                 .await
                 .map_err(|e| format!("读切片出错：{e}"))?
@@ -870,6 +933,7 @@ pub async fn archive(
         parts: parts
             .iter()
             .map(|c| ClipVars {
+                id: c.id,
                 title: c.title.clone(),
                 at_ms: started_at + c.in_ms,
             })
@@ -894,7 +958,7 @@ fn check_clips(clips: &[Clip]) -> Result<(), EnqueueError> {
 
 fn check_queue(queue: &Queue, clips: &[Clip]) -> Result<(), EnqueueError> {
     for job in &queue.jobs {
-        if job.view.state == JobState::Done {
+        if job.view.state.finished() {
             continue;
         }
         if let Some(id) = clips
@@ -929,15 +993,10 @@ fn check_submit(clips: &[Clip], confirm_unknown: bool) -> Result<(), EnqueueErro
     }
 }
 
-/// 已结束的任务最多留 [`KEEP_FINISHED`] 个，先丢成功的旧任务，失败的留给用户处理。
+/// 已结束的任务最多留 [`KEEP_FINISHED`] 个，先丢成功、取消的旧任务，失败的留给用户处理。
 fn prune(jobs: &mut Vec<Job>) {
-    while jobs
-        .iter()
-        .filter(|j| j.view.state == JobState::Done)
-        .count()
-        > KEEP_FINISHED
-    {
-        if let Some(index) = jobs.iter().position(|j| j.view.state == JobState::Done) {
+    while jobs.iter().filter(|j| j.view.state.finished()).count() > KEEP_FINISHED {
+        if let Some(index) = jobs.iter().position(|j| j.view.state.finished()) {
             jobs.remove(index);
         }
     }
