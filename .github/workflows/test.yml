@@ -26,6 +26,9 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # 自动切片抽音频、取帧等用例要真的调 ffmpeg，没有时会跳过（日志里是 `SKIPPED ...`）
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Run tests
         run: cargo test --locked --workspace
 
