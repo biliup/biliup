@@ -1,5 +1,6 @@
 pub mod api;
 pub mod app;
+pub mod auto_clip;
 pub mod common;
 pub mod config;
 pub mod core;

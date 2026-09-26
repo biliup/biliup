@@ -3,6 +3,7 @@
 //! 配置按字段**白名单**输出：不在名单里的键一律置 `null`，所以新增的配置字段默认不外露，
 //! 要让操作员 / 只读用户看到必须显式加进来。
 
+use crate::server::config::Config;
 use serde_json::Value;
 
 /// 非超管可见的全局配置字段：都是录制与投稿参数，不含凭据、路径形式的凭据或钩子。
@@ -91,6 +92,14 @@ pub const STREAMER_HOOK_KEYS: &[&str] = &[
     "postprocessor",
 ];
 
+/// 自动切片的 API key 对所有人都只给掩码（包括有 `config.edit` 的人），保存时收到掩码保留原值，
+/// 见 [`crate::server::auto_clip::settings`]。所有返回配置的接口在输出前都要调它。
+pub fn mask_api_keys(config: &mut Config) {
+    if let Some(auto_clip) = &mut config.auto_clip {
+        *auto_clip = auto_clip.masked();
+    }
+}
+
 pub fn config(config: &impl serde::Serialize) -> Value {
     let mut value = serde_json::to_value(config).unwrap_or(Value::Null);
     if let Value::Object(map) = &mut value {
@@ -162,6 +171,32 @@ mod tests {
                 .unwrap()
                 .contains_key("kuaishou_cookie")
         );
+    }
+
+    #[test]
+    fn auto_clip_keys_are_masked_and_hidden_from_non_admins() {
+        use crate::server::auto_clip::settings::AutoClipConfig;
+        let secret = "sk-secret-0123456789";
+        let mut config = Config {
+            auto_clip: Some(
+                AutoClipConfig::builder()
+                    .base_url("https://api.example.com/v1".into())
+                    .api_key(secret.into())
+                    .build(),
+            ),
+            ..Config::default()
+        };
+        mask_api_keys(&mut config);
+        let full = serde_json::to_string(&config).unwrap();
+        assert!(
+            !full.contains(secret) && full.contains("sk-…6789"),
+            "{full}"
+        );
+        assert_eq!(super::config(&config)["auto_clip"], Value::Null);
+
+        let mut untouched = Config::default();
+        mask_api_keys(&mut untouched);
+        assert_eq!(untouched, Config::default());
     }
 
     #[test]
