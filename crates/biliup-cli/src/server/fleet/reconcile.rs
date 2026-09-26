@@ -3,10 +3,12 @@
 //! 只动自己按控制面建的那些行（映射记在 `data/fleet-state.json`），本机自己加的主播与模板一概不碰。
 //! 控制面连不上时照常按本机数据库录；重启后按 `fleet-state.json` 认回托管行、恢复暂停状态。
 //! 离开或被移除时删掉 `fleet-state.json`，托管行就地变成本地行，录制不中断。
+//! 期望状态里的配置交给 [`super::node_config`]，在房间之前落地。
 
 use super::accounts;
 use super::guard::{Managed, ManagedHandle};
 use super::model::{DesiredRoom, RoomSpec, TemplateSpec};
+use super::node_config::{self, ManagedConfig};
 use super::protocol::{Ack, DesiredState, FailedRoom, HeldRoom};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::WorkerStatus;
@@ -45,6 +47,9 @@ pub struct FleetState {
     /// 正在新增、还没记下本地 id 的房间（控制面房间 id → 地址）。进程在这一步中途退出时，下次按地址认领
     #[serde(default)]
     pub adding: BTreeMap<i64, String>,
+    /// 控制面在管本机配置时才有（F3 控制面）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<ManagedConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -270,6 +275,11 @@ impl Reconciler {
                 changed = true;
             }
         }
+        if let Some(config) = self.state.config.as_mut() {
+            let before = config.clone();
+            node_config::resume(&self.services, config).await;
+            changed |= *config != before;
+        }
         if changed {
             self.persist();
         }
@@ -309,6 +319,11 @@ impl Reconciler {
                 .values()
                 .map(|template| template.local_id)
                 .collect(),
+            config: self
+                .state
+                .config
+                .as_ref()
+                .map(|config| config.applied.clone()),
         };
         *self.managed.write().unwrap() = Some(managed);
     }
@@ -321,7 +336,13 @@ impl Reconciler {
     }
 
     /// 落地一份期望状态，返回给控制面的 `Ack`
-    pub async fn apply(&mut self, desired: DesiredState) -> Ack {
+    pub async fn apply(&mut self, mut desired: DesiredState) -> Ack {
+        let config = node_config::apply(
+            &self.services,
+            &mut self.state.config,
+            desired.config.take(),
+        )
+        .await;
         let local_accounts = accounts::scan(&self.services.pool).await;
         let mut errors: BTreeMap<i64, String> = BTreeMap::new();
 
@@ -438,7 +459,7 @@ impl Reconciler {
             version: desired.version,
             held: self.held(),
             failed,
-            ..Default::default()
+            config,
         }
     }
 
@@ -1035,5 +1056,67 @@ mod tests {
         assert_eq!(streamers.len(), 1);
         assert_eq!(streamers[0].remark, "本地");
         assert!(reconciler.state().templates.is_empty());
+    }
+
+    #[tokio::test]
+    async fn config_is_applied_with_the_rooms_and_survives_a_restart_and_release() {
+        let f = Fixture::new().await;
+        f.services.config.write().unwrap().kuaishou_cookie = Some("ks-secret".into());
+        let mut reconciler = f.reconciler(false).await;
+        assert_eq!(f.managed.read().unwrap().as_ref().unwrap().config, None);
+
+        let mut state = desired(3, vec![room(1, "https://stuck.example/1", None)], vec![]);
+        state.config = Some(crate::server::fleet::protocol::DesiredConfig {
+            global_version: 2,
+            values: json!({"segment_time": "01:00:00", "pool2_size": 1})
+                .as_object()
+                .unwrap()
+                .clone(),
+        });
+        let ack = reconciler.apply(state).await;
+        assert_eq!(
+            ack.config,
+            Some(crate::server::fleet::protocol::ConfigAck::applied())
+        );
+        assert_eq!(ack.held, [HeldRoom { id: 1, epoch: 1 }]);
+        assert_eq!(f.services.managers.upload_pool_size(), 1);
+        let effective = crate::server::fleet::layers::project(&f.services.config.read().unwrap());
+        assert_eq!(
+            f.managed.read().unwrap().as_ref().unwrap().config.as_ref(),
+            Some(&effective)
+        );
+        let text = std::fs::read_to_string(f.path()).unwrap();
+        assert!(text.contains("\"global_version\": 2"), "{text}");
+        assert!(!text.contains("ks-secret"), "{text}");
+        drop(reconciler);
+
+        // 控制面连不上时重启：照记录继续，界面仍按托管显示
+        *f.managed.write().unwrap() = None;
+        let mut reconciler = f.reconciler(false).await;
+        assert_eq!(
+            f.managed.read().unwrap().as_ref().unwrap().config.as_ref(),
+            Some(&effective)
+        );
+        assert_eq!(
+            f.services.config.read().unwrap().segment_time.as_deref(),
+            Some("01:00:00")
+        );
+
+        // 离开后生效的配置就是本机配置
+        reconciler.release();
+        assert!(f.managed.read().unwrap().is_none());
+        let config = f.services.config.read().unwrap().clone();
+        assert_eq!(config.segment_time.as_deref(), Some("01:00:00"));
+        assert_eq!(config.kuaishou_cookie.as_deref(), Some("ks-secret"));
+    }
+
+    #[tokio::test]
+    async fn a_controller_without_config_leaves_the_local_config_editable() {
+        let f = Fixture::new().await;
+        let mut reconciler = f.reconciler(false).await;
+        let ack = reconciler.apply(desired(1, vec![], vec![])).await;
+        assert_eq!(ack.config, None);
+        assert_eq!(reconciler.state().config, None);
+        assert_eq!(f.managed.read().unwrap().as_ref().unwrap().config, None);
     }
 }

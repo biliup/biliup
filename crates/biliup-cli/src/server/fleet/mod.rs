@@ -4,7 +4,8 @@
 //! 两端都经控制面内嵌的 relay 中转、能打洞时转直连。单机模式（不带 `--controller`、
 //! 也没有 `data/node.json`）不创建 iroh 端点、不开任何端口、不写任何 Fleet 文件。
 //!
-//! 房间与投稿模板的真身在控制面，按期望状态整份下发给节点（F2）；全局配置还不下发（F3）。
+//! 房间与投稿模板的真身在控制面，按期望状态整份下发给节点（F2）；配置按「Fleet 全局 ⊕ 节点覆盖」
+//! 随期望状态下发，节点叠上本机密钥后生效，Cookie、密码等白名单外的键不出节点（F3）。
 
 pub mod accounts;
 pub mod assignments;
@@ -17,6 +18,7 @@ pub mod layers;
 pub mod model;
 pub mod net;
 pub mod node;
+pub mod node_config;
 pub mod placement;
 pub mod protocol;
 pub mod reconcile;
