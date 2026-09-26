@@ -111,6 +111,7 @@ const AutoClip: React.FC<Props> = ({ disabled, entity }) => {
   const { values } = useFormState()
   const formApi = useFormApi()
   const [open, setOpen] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   const [testing, setTesting] = useState(false)
   const [report, setReport] = useState<ProbeReport | null>(null)
   const { data: status, mutate: refreshStatus } = useSWR<AutoClipStatus>(
@@ -129,23 +130,8 @@ const AutoClip: React.FC<Props> = ({ disabled, entity }) => {
     keyIsMask(section.asr_api_key) && (section.asr_base_url ?? '') !== (saved.asr_base_url ?? '')
 
   const toggle = (on: boolean) => {
-    if (!on) {
-      formApi.setValue('auto_clip.enabled', false)
-      return
-    }
-    Modal.confirm({
-      title: '开启自动切片（实验）',
-      content: (
-        <div>
-          开启后，录像的音频（静音部分除外）、弹幕摘要和截图（每场最多 64 张，可关）会发送到
-          <strong> {host || '你配置的接口地址'} </strong>
-          ，由该服务按它的条款处理和计费。确定开启吗？
-        </div>
-      ),
-      okText: '开启',
-      cancelText: '取消',
-      onOk: () => formApi.setValue('auto_clip.enabled', true),
-    })
+    if (on) setConfirming(true)
+    else formApi.setValue('auto_clip.enabled', false)
   }
 
   const runTest = async () => {
@@ -336,7 +322,7 @@ const AutoClip: React.FC<Props> = ({ disabled, entity }) => {
             extraText="超过就不转写并提示，防止长场次费用失控。留空为 300 分钟。"
             min={1}
             precision={0}
-            placeholder={300}
+            placeholder="默认 300"
             suffix="分钟"
             style={{ width: '100%' }}
             fieldStyle={fieldStyle}
@@ -347,7 +333,7 @@ const AutoClip: React.FC<Props> = ({ disabled, entity }) => {
             extraText="输入加输出的 token 总数。留空为 300000。"
             min={1}
             precision={0}
-            placeholder={300000}
+            placeholder="默认 300000"
             suffix="token"
             style={{ width: '100%' }}
             fieldStyle={fieldStyle}
@@ -358,7 +344,7 @@ const AutoClip: React.FC<Props> = ({ disabled, entity }) => {
             extraText="单次请求的最长等待时间，留空为 180 秒。「测试连接」最多等 30 秒。"
             min={1}
             precision={0}
-            placeholder={180}
+            placeholder="默认 180"
             suffix="秒"
             style={{ width: '100%' }}
             fieldStyle={fieldStyle}
@@ -369,7 +355,7 @@ const AutoClip: React.FC<Props> = ({ disabled, entity }) => {
             extraText="单块音频的最长等待时间，留空为 300 秒。「测试连接」最多等 60 秒。"
             min={1}
             precision={0}
-            placeholder={300}
+            placeholder="默认 300"
             suffix="秒"
             style={{ width: '100%' }}
             fieldStyle={fieldStyle}
@@ -404,6 +390,21 @@ const AutoClip: React.FC<Props> = ({ disabled, entity }) => {
           )}
         </div>
       </Collapsible>
+      <Modal
+        title="开启自动切片（实验）"
+        visible={confirming}
+        okText="开启"
+        cancelText="取消"
+        onOk={() => {
+          formApi.setValue('auto_clip.enabled', true)
+          setConfirming(false)
+        }}
+        onCancel={() => setConfirming(false)}
+      >
+        开启后，录像的音频（静音部分除外）、弹幕摘要和截图（每场最多 64 张，可关）会发送到
+        <strong> {host || '你配置的接口地址'} </strong>
+        ，由该服务按它的条款处理和计费。确定开启吗？
+      </Modal>
     </div>
   )
 }
