@@ -74,7 +74,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
         href: '/history',
         perm: 'file.view',
         label: '历史记录',
-        activeOn: ['/replay', '/job'],
+        activeOn: ['/replay'],
         icon: <Ic d="M12 7v5l3 2" extra="M12 21a9 9 0 110-18 9 9 0 010 18z" />,
       },
     ],

@@ -14,7 +14,6 @@ import styles from './page.module.scss'
 /**
  * 历史记录：「直播场次」（每场一行，从这里进回看页）、「录制文件」（按文件回放）、
  * 「实时监视」（正在录制的直播间多路同屏）三个 Tab，当前 Tab 在查询串 `?tab=` 里。
- * 旧的「直播历史」`/job` 重定向到 `?tab=sessions`。
  */
 export default function History() {
   return (
