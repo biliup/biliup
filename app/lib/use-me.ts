@@ -74,6 +74,8 @@ export interface FleetManaged {
   streamers: number[]
   /** 托管的本地投稿模板 id */
   templates: number[]
+  /** 控制面在管这台机器的配置：空间配置页只读，Cookie、密码等本机密钥仍可保存 */
+  config?: boolean
 }
 
 /**

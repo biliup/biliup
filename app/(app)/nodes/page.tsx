@@ -3,7 +3,7 @@ import { Suspense, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import useSWR, { mutate as revalidate } from 'swr'
 import { Button, Empty, Popconfirm, Spin, TabPane, Tabs, Tag, Toast, Typography } from '@douyinfe/semi-ui'
-import { IconPlusCircle, IconServer } from '@douyinfe/semi-icons'
+import { IconPlusCircle, IconServer, IconSetting } from '@douyinfe/semi-icons'
 import PageHeader from '../components/PageHeader'
 import dc from '@/app/ui/data-card.module.scss'
 import { fetcher } from '@/app/lib/api-streamer'
@@ -30,6 +30,7 @@ import JoinDialog from './JoinDialog'
 import RoomsPanel, { CreateRoomButton } from './RoomsPanel'
 import TemplatesPanel from './TemplatesPanel'
 import FleetTemplateModal from './FleetTemplateModal'
+import FleetConfigSheet, { type ConfigTarget } from './FleetConfigSheet'
 import styles from './page.module.scss'
 
 const { Text } = Typography
@@ -116,6 +117,8 @@ function Nodes() {
   const [joining, setJoining] = useState(false)
   /** undefined 为没打开，null 为新建 */
   const [editingTemplate, setEditingTemplate] = useState<FleetTemplate | null | undefined>(undefined)
+  const [configTarget, setConfigTarget] = useState<ConfigTarget | null>(null)
+  const canViewConfig = can('config.view')
 
   const refresh = () => {
     mutate().catch(() => undefined)
@@ -176,6 +179,16 @@ function Nodes() {
       {isMobile ? '添加' : '添加节点'}
     </Button>
   )
+  const nodeActions = (
+    <>
+      {canViewConfig ? (
+        <Button icon={<IconSetting />} onClick={() => setConfigTarget({ mode: 'global' })}>
+          {isMobile ? '配置' : 'Fleet 配置'}
+        </Button>
+      ) : null}
+      {canManage ? addNode : null}
+    </>
+  )
 
   let nodesBody
   if (!data && (isLoading || !me)) {
@@ -218,13 +231,31 @@ function Nodes() {
         {[...nodes]
           .sort((a, b) => Number(b.online) - Number(a.online) || a.id - b.id)
           .map((node) => (
-            <NodeCard key={node.id} node={node} canManage={canManage} onRevoke={revoke} />
+            <NodeCard
+              key={node.id}
+              node={node}
+              canManage={canManage}
+              onRevoke={revoke}
+              controllerVersion={data.controller_version}
+              onEditConfig={canViewConfig ? (n) => setConfigTarget({ mode: 'override', nodeId: n.id }) : undefined}
+            />
           ))}
       </div>
     )
   }
 
-  const actions = !controller || !canManage ? null : tab === 'rooms' ? createRoom : tab === 'templates' ? createTemplate : addNode
+  const actions =
+    !controller
+      ? null
+      : tab === 'nodes'
+        ? canViewConfig || canManage
+          ? nodeActions
+          : null
+        : !canManage
+          ? null
+          : tab === 'rooms'
+            ? createRoom
+            : createTemplate
 
   return (
     <>
@@ -307,6 +338,14 @@ function Nodes() {
             refresh()
             revalidate(FLEET_TOKENS_KEY).catch(() => undefined)
           }}
+        />
+      ) : null}
+      {configTarget ? (
+        <FleetConfigSheet
+          target={configTarget}
+          node={configTarget.mode === 'override' ? nodes.find((n) => n.id === configTarget.nodeId) : undefined}
+          canManage={canManage}
+          onClose={() => setConfigTarget(null)}
         />
       ) : null}
       {editingTemplate !== undefined ? (

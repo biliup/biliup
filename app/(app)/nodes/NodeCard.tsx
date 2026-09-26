@@ -8,6 +8,7 @@ import { formatVersion } from '@/app/lib/status'
 import { humDate } from '@/app/lib/utils'
 import { nodeOutdated, type FleetNode, type PoolUsage } from '@/app/lib/use-fleet'
 import styles from './page.module.scss'
+import NodeConfigStatus from './NodeConfigStatus'
 
 const SystemChart = dynamic(() => import('@/app/ui/SystemChart'), { ssr: false, loading: () => null })
 
@@ -66,10 +67,14 @@ export default function NodeCard({
   node,
   canManage,
   onRevoke,
+  controllerVersion,
+  onEditConfig,
 }: {
   node: FleetNode
   canManage: boolean
   onRevoke: (node: FleetNode, reassign: boolean) => void
+  controllerVersion?: string
+  onEditConfig?: (node: FleetNode) => void
 }) {
   const [reassign, setReassign] = useState(false)
   const summary = node.summary
@@ -187,6 +192,12 @@ export default function NodeCard({
           </Tag>
         ) : null}
       </div>
+
+      <NodeConfigStatus
+        node={node}
+        controllerVersion={controllerVersion}
+        onOpen={onEditConfig ? () => onEditConfig(node) : undefined}
+      />
 
       {!node.online && summary ? (
         <div className={styles.stale}>离线，下面是最后一次上报的数据</div>

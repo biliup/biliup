@@ -333,6 +333,27 @@ mod tests {
         assert!(!accepts_null("delay") && !accepts_null("retention_hours"));
     }
 
+    /// 前端 `app/lib/fleet-config.ts` 手写了可下发键与按节点键，两边必须一致
+    #[test]
+    fn frontend_key_lists_match() {
+        fn ts_list(source: &str, name: &str) -> Vec<String> {
+            let head = format!("export const {name} = [");
+            let start = source.find(&head).expect("前端常量不见了") + head.len();
+            let end = start + source[start..].find(']').unwrap();
+            source[start..end]
+                .split(',')
+                .map(|item| item.trim().trim_matches('\'').to_string())
+                .filter(|item| !item.is_empty())
+                .collect()
+        }
+        let source = include_str!("../../../../../app/lib/fleet-config.ts");
+        assert_eq!(
+            ts_list(source, "DELIVERABLE_KEYS"),
+            VISIBLE_CONFIG_KEYS.to_vec()
+        );
+        assert_eq!(ts_list(source, "PER_NODE_KEYS"), PER_NODE_KEYS.to_vec());
+    }
+
     #[test]
     fn secrets_with_values_are_rejected_by_both_layers() {
         let body = object(json!({

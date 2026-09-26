@@ -1,6 +1,7 @@
 'use client'
 import { API_BASE, handleResponse } from './api-streamer'
 import type { SystemCpu, SystemDisk, SystemMemory, SystemSample } from './use-system-stats'
+import type { NodeConfigState } from './fleet-config'
 
 /**
  * Fleet 控制面的接口（只有以 `--controller` 启动的实例才有，普通实例全部 404）。
@@ -58,11 +59,14 @@ export interface FleetNode {
   accounts: FleetAccount[]
   /** 最近一次下发的房间与模板它是否已经确认；离线为 null */
   synced: boolean | null
+  config: NodeConfigState
 }
 
 export interface FleetNodes {
   now: number
   controller: string
+  controller_version: string
+  controller_proto: number
   nodes: FleetNode[]
 }
 
