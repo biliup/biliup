@@ -24,6 +24,7 @@ import PageHeader from '@/app/(app)/components/PageHeader'
 import { LivePreviewPlayer, livePageHref, useLatencyProfile } from './LivePreview'
 import { LiveRateChart, LiveRateSummary, MODAL_RATE_WINDOW_MS } from './LiveRateChart'
 import { LiveMarkBar } from './MarkerControls'
+import { PublishQueueBanner } from './publish/JobStatus'
 import styles from './live-view.module.scss'
 
 /** 预览页的弹幕开关记在本地，默认开；监视器另有自己的开关（默认关）。键名沿用弹层时代，老用户的选择不丢 */
@@ -131,6 +132,7 @@ export default function LiveView({ streamerId }: { streamerId: number }) {
   return (
     <>
       {header}
+      <PublishQueueBanner />
       {body}
     </>
   )
