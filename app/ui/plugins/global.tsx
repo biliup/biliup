@@ -354,6 +354,26 @@ const Global: React.FC<Props> = ({ disabled }) => {
           <Form.Select.Option value="relay">经 biliup 中转（relay）</Form.Select.Option>
           <Form.Select.Option value="direct">浏览器直连 CDN（direct）</Form.Select.Option>
         </Form.Select>
+        <Form.InputNumber
+          field="preview_max_minutes"
+          label="单条中转预览最长时长（preview_max_minutes）"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              一条经 biliup 中转的预览连接最多持续这么多分钟，到点断开，页面里的播放器会自动重连接着播。
+              关掉的预览平时由页面心跳在 45 秒内回收（经过代理 / 隧道访问也一样），这里是再往后的兜底。
+              留空为 30 分钟，填 0 不限。另外每个直播间最多 4 路、全部合计最多 16 路，满了再打开会接替最早的一路。
+            </div>
+          }
+          min={0}
+          placeholder={30}
+          suffix="分钟"
+          style={{ width: '100%' }}
+          fieldStyle={{
+            alignSelf: 'stretch',
+            padding: 0,
+          }}
+          showClear={true}
+        />
       </div>
 
       <Space />

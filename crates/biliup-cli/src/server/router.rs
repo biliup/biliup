@@ -18,7 +18,7 @@ use crate::server::api::endpoints::{
 };
 use crate::server::api::live_media::{get_live_avatar, get_live_cover};
 use crate::server::api::live_preview::{
-    get_live_danmaku, get_live_danmaku_multi, get_live_stream, get_live_url,
+    get_live_danmaku, get_live_danmaku_multi, get_live_stream, get_live_url, release_live_stream,
 };
 use crate::server::api::live_rates::{get_live_rates, ws_live_rates};
 use crate::server::api::markers::{create_marker, delete_marker, list_markers, update_marker};
@@ -55,7 +55,13 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         .route("/v1/streamers/{id}/cover", get(get_live_cover))
         .route("/v1/streamers/{id}/avatar", get(get_live_avatar))
         // 直播预览：复用正在录制的那一路流（chunked FLV / MPEG-TS），同样在登录校验之内
-        .route("/v1/streamers/{id}/live", get(get_live_stream))
+        // DELETE / POST（sendBeacon）：播放器销毁时立即释放这条预览，见 live_preview::lease
+        .route(
+            "/v1/streamers/{id}/live",
+            get(get_live_stream)
+                .delete(release_live_stream)
+                .post(release_live_stream),
+        )
         // 浏览器直连模式：当前录制中那条流的 CDN 直链
         .route("/v1/streamers/{id}/live-url", get(get_live_url))
         // 预览播放器的实时弹幕（SSE），同样在登录校验之内；监视器多路复用一条

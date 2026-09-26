@@ -138,6 +138,10 @@ export interface LivePreviewInfo {
 	danmaku: boolean;
 	/** 浏览器能否直连 CDN 拉这一路（全局配置 preview_transport = direct 时用；不能则回落中转并显示原因） */
 	direct: DirectCapability;
+	/** 此刻经 biliup 中转在看这一路的预览连接数（直连 CDN 的不算）；旧版后端没有这个字段 */
+	subscribers?: number;
+	/** 这一路的中转预览路数上限；满了新打开的预览会接替最早的一路 */
+	max_subscribers?: number;
 }
 
 export interface DirectCapability {

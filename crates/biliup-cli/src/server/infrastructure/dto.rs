@@ -18,6 +18,10 @@ pub struct LivePreviewResponse {
     pub danmaku: bool,
     /// 浏览器能否直连 CDN 拉这一路（`preview_transport = direct` 时前端据此选直连或回落中转）
     pub direct: DirectCapability,
+    /// 此刻占着这一路槽位的中转预览连接数（`GET /v1/streamers/{id}/live`；直连 CDN 的不算）
+    pub subscribers: usize,
+    /// 这一路的中转预览槽位数；满了新打开的预览会挤掉最早的一条。不可预览时为 0
+    pub max_subscribers: usize,
 }
 
 /// 浏览器直连 CDN 的能力判定（按平台 CDN 的跨域放行与并发策略实测得出）。
@@ -37,6 +41,8 @@ impl LivePreviewResponse {
             reason: status.reason,
             danmaku,
             direct,
+            subscribers: status.subscribers,
+            max_subscribers: status.max_subscribers,
         }
     }
 }

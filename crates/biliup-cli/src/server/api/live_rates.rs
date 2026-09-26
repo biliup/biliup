@@ -11,21 +11,27 @@
 //! 与 `/v1/streamers` 的 `live_bytes_per_sec` 是同一个数，同一秒读到的值相同。
 //! 不落库、不新开采样任务、服务端不存历史：曲线的历史由浏览器自己累积（最近 3 分钟）。
 //!
+//! 带 `?session=` 时这条 WebSocket 还是该页面中转预览的租约心跳（见 `live_preview::lease`）：
+//! 服务端每 15 s 发 Ping，45 s 收不到 Pong 就断开，断开即结束该页面的全部中转预览；页面在
+//! 开着的预览变化时发来 `{"conns": [...], "seq": N}`，不在里面的预览结束。回退轮询带同一个
+//! `session` 时每次都续约。
+//!
 //! 两个路由都注册在 `router()` 里，`--auth` 时与 `/v1/streamers` 同一道登录校验。
 //!
 //! [`RateMeter`]: crate::server::common::throughput::RateMeter
 
+use crate::server::api::live_preview::lease::{LEASE_TIMEOUT, PING_INTERVAL, leases, valid_id};
 use crate::server::api::ws::websocket_origin_allowed;
 use crate::server::core::download_manager::DownloadManager;
 use crate::server::infrastructure::context::{Worker, WorkerStatus};
 use axum::Json;
-use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::{MissedTickBehavior, interval};
 use tracing::debug;
@@ -42,6 +48,25 @@ fn rate_connection_limit() -> &'static Arc<Semaphore> {
 
 fn acquire_rate_permit(limiter: Arc<Semaphore>) -> Option<OwnedSemaphorePermit> {
     limiter.try_acquire_owned().ok()
+}
+
+/// 页面经心跳 WebSocket 报来的「我此刻开着的中转预览」，见 `Leases::sync`。
+#[derive(Debug, Deserialize)]
+struct OpenConns {
+    conns: Vec<String>,
+    seq: u64,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct LeaseQuery {
+    /// 页面的中转预览会话号，见 `live_preview::lease`
+    pub session: Option<String>,
+}
+
+impl LeaseQuery {
+    fn session(&self) -> Option<&str> {
+        self.session.as_deref().filter(|s| valid_id(s))
+    }
 }
 
 /// 一个正在录制的直播间在某一秒的写盘速率。
@@ -81,8 +106,14 @@ async fn current_frames(managers: &DownloadManager) -> Vec<LiveRateFrame> {
     live_rate_frames(&workers, chrono::Utc::now().timestamp_millis())
 }
 
-/// `GET /v1/live-rates`
-pub async fn get_live_rates(State(managers): State<Arc<DownloadManager>>) -> Response {
+/// `GET /v1/live-rates[?session=]`：带会话号时顺带给该页面的中转预览续约（WebSocket 连不上时的回退）。
+pub async fn get_live_rates(
+    State(managers): State<Arc<DownloadManager>>,
+    Query(query): Query<LeaseQuery>,
+) -> Response {
+    if let Some(session) = query.session() {
+        leases().renew(session);
+    }
     let mut response = Json(current_frames(&managers).await).into_response();
     response
         .headers_mut()
@@ -90,13 +121,15 @@ pub async fn get_live_rates(State(managers): State<Arc<DownloadManager>>) -> Res
     response
 }
 
-/// `GET /v1/ws/live-rates`：WebSocket，连上后立刻发一帧，之后每秒一帧（与 `/v1/live-rates` 同一形状的
-/// JSON 数组）。客户端不需要发任何东西；Ping 回 Pong，Close 即结束。Origin 校验与连接数上限
-/// 与 `/v1/ws/logs` 同款。
+/// `GET /v1/ws/live-rates[?session=]`：WebSocket，连上后立刻发一帧，之后每秒一帧（与 `/v1/live-rates`
+/// 同一形状的 JSON 数组）。客户端不需要发任何东西；服务端每 [`PING_INTERVAL`] 发 Ping，
+/// [`LEASE_TIMEOUT`] 内没有 Pong 就断开；客户端的 Ping 回 Pong，Close 即结束。带 `session` 时
+/// 连接存活期间持有该页面的中转预览租约。Origin 校验与连接数上限与 `/v1/ws/logs` 同款。
 pub async fn ws_live_rates(
     caller: crate::server::api::access::Caller,
     ws: WebSocketUpgrade,
     State(managers): State<Arc<DownloadManager>>,
+    Query(query): Query<LeaseQuery>,
     headers: HeaderMap,
 ) -> Response {
     if !websocket_origin_allowed(&headers) {
@@ -109,18 +142,29 @@ pub async fn ws_live_rates(
         )
             .into_response();
     };
+    let session = query.session().map(str::to_string);
     ws.on_upgrade(move |socket| async move {
         let _permit = permit;
+        let _lease = session.as_deref().map(|s| leases().heartbeat(s));
         tokio::select! {
-            _ = push_live_rates(socket, managers) => {}
+            _ = push_live_rates(socket, managers, session) => {}
             _ = caller.revoked() => debug!("会话失效，关闭码率推送"),
         }
     })
 }
 
-async fn push_live_rates(mut ws: WebSocket, managers: Arc<DownloadManager>) {
+async fn push_live_rates(
+    mut ws: WebSocket,
+    managers: Arc<DownloadManager>,
+    session: Option<String>,
+) {
     let mut tick = interval(PUSH_INTERVAL);
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut ping =
+        tokio::time::interval_at(tokio::time::Instant::now() + PING_INTERVAL, PING_INTERVAL);
+    ping.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    // 最近一次收到客户端的任何帧（浏览器对 Ping 自动回 Pong，后台标签页也一样）
+    let mut last_heard = Instant::now();
     debug!("开始码率推送");
     loop {
         tokio::select! {
@@ -128,14 +172,33 @@ async fn push_live_rates(mut ws: WebSocket, managers: Arc<DownloadManager>) {
                 match maybe_msg {
                     Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
                     Some(Ok(Message::Ping(payload))) => {
+                        last_heard = Instant::now();
                         if ws.send(Message::Pong(payload)).await.is_err() {
                             break;
                         }
                     }
-                    Some(Ok(_)) => {}
+                    Some(Ok(Message::Text(text))) => {
+                        last_heard = Instant::now();
+                        if let Some(session) = &session
+                            && let Ok(open) = serde_json::from_str::<OpenConns>(&text)
+                        {
+                            let ended = leases().sync(session, &open.conns, open.seq);
+                            debug!(ended, seq = open.seq, "页面报来开着的中转预览");
+                        }
+                    }
+                    Some(Ok(_)) => last_heard = Instant::now(),
+                }
+            }
+            _ = ping.tick() => {
+                if ws.send(Message::Ping(Default::default())).await.is_err() {
+                    break;
                 }
             }
             _ = tick.tick() => {
+                if last_heard.elapsed() > LEASE_TIMEOUT {
+                    debug!("码率推送 {} s 没有收到 Pong，断开", LEASE_TIMEOUT.as_secs());
+                    break;
+                }
                 let frames = current_frames(&managers).await;
                 let Ok(json) = serde_json::to_string(&frames) else { continue };
                 if ws.send(Message::Text(json.into())).await.is_err() {
@@ -324,8 +387,17 @@ mod tests {
             (stream, status)
         }
 
-        /// 读一帧文本（服务端发出的帧不带掩码）；Close 帧返回 None。
+        /// 读一帧文本（服务端发出的帧不带掩码），跳过 Ping；Close 帧返回 None。
         pub async fn read_text(stream: &mut TcpStream) -> Option<String> {
+            loop {
+                if let Some(frame) = read_frame(stream).await {
+                    return frame;
+                }
+            }
+        }
+
+        /// 读一帧：文本 → `Some(Some(text))`，Close → `Some(None)`，Ping → `None`
+        async fn read_frame(stream: &mut TcpStream) -> Option<Option<String>> {
             let mut header = [0u8; 2];
             stream.read_exact(&mut header).await.unwrap();
             let opcode = header[0] & 0x0f;
@@ -342,8 +414,9 @@ mod tests {
             let mut payload = vec![0u8; len as usize];
             stream.read_exact(&mut payload).await.unwrap();
             match opcode {
-                0x1 => Some(String::from_utf8(payload).unwrap()),
-                0x8 => None,
+                0x1 => Some(Some(String::from_utf8(payload).unwrap())),
+                0x8 => Some(None),
+                0x9 => None,
                 other => panic!("unexpected opcode {other}"),
             }
         }
@@ -397,6 +470,41 @@ mod tests {
         let _: Vec<LiveRateFrame> = serde_json::from_str(&second).unwrap();
     }
 
+    /// 带 `session` 的码率 WebSocket 持有该页面的中转预览租约：连着时预览不到期，
+    /// 断开（页面关闭）时该页面的预览立即结束。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_session_websocket_holds_the_preview_lease_until_it_closes() {
+        use biliup::downloader::preview::{PreviewTicket, TicketEnd};
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let managers = Arc::new(DownloadManager::new(1, 0, pool));
+        let addr = serve(managers).await;
+        let session = format!("ws-lease-test-{}", std::process::id());
+
+        let (mut stream, status) = ws_client::handshake(
+            &addr,
+            &format!("/v1/ws/live-rates?session={session}"),
+            &format!("http://{addr}"),
+        )
+        .await;
+        assert_eq!(status, 101);
+        ws_client::read_text(&mut stream).await.unwrap();
+        let ticket = PreviewTicket::new();
+        let _binding = leases().bind(Some(&session), Some(&format!("{session}.1")), &ticket);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(ticket.ended_by(), None);
+
+        drop(stream);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while ticket.ended_by().is_none() && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(ticket.ended_by(), Some(TicketEnd::LeaseLost));
+    }
+
     /// 码率 WebSocket 连接数有上限，断开后释放。
     /// 用独立的信号量而不是进程级那个：同一测试二进制里的 WebSocket 测试会并发占着一个许可。
     #[test]
@@ -420,7 +528,7 @@ mod tests {
             .unwrap();
         let managers = Arc::new(DownloadManager::new(1, 0, pool));
 
-        let response = get_live_rates(State(managers)).await;
+        let response = get_live_rates(State(managers), Query(LeaseQuery::default())).await;
         assert_eq!(response.status(), axum::http::StatusCode::OK);
         assert_eq!(
             response.headers().get(header::CACHE_CONTROL).unwrap(),

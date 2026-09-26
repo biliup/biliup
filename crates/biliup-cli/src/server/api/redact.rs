@@ -28,6 +28,7 @@ const VISIBLE_CONFIG_KEYS: &[&str] = &[
     "retention_hours",
     "min_free_space",
     "preview_transport",
+    "preview_max_minutes",
     "use_live_cover",
     "douyu_cdn",
     "douyu_force_hs",

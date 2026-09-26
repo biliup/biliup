@@ -1,6 +1,7 @@
 'use client'
 import { useSyncExternalStore } from 'react'
 import { API_BASE, handleResponse, revalidateMe } from './api-streamer'
+import { onOpenPreviewsChange, openPreviewsMessage, previewSessionId } from './preview-lease'
 
 /**
  * 录制中各房间的写盘速率采样：页面内唯一的一份数据源，供弹层折线图、卡片与监视器的 sparkline 共用。
@@ -8,6 +9,8 @@ import { API_BASE, handleResponse, revalidateMe } from './api-streamer'
  * - 有订阅者时连一条 WebSocket `GET /v1/ws/live-rates`，服务端每秒推一帧（只含录制中房间的
  *   `{id, bytes_per_sec, ts}`，只读内存）；WebSocket 连不上（反代没放行 upgrade）就回退到每秒
  *   `GET /v1/live-rates` 轮询。没有订阅者就断开，标签页切到后台也断，回前台立刻重连。**不调快 `/v1/streamers`**。
+ * - 这条连接同时是中转预览的租约心跳（见 `preview-lease.ts`）：地址带本页会话号；页面上有中转预览时
+ *   （{@link holdPreviewLease}）即使没有图表订阅、标签页在后台也保持连着，否则服务端会结束这个页面的预览。
  *   选 WebSocket 而不是 SSE：WebSocket 不占浏览器对同一主机 HTTP/1.1 的六个并发连接，
  *   监视器 4 路视频 + 1 条弹幕 SSE 已经用掉五个。
  * - 历史放在模块级的环形缓冲里（每房间最近 3 分钟），组件卸载不清：切走再切回来曲线还在，
@@ -32,6 +35,11 @@ export const LIVE_RATES_HISTORY_MS = 3 * 60 * 1000
 const RING_CAPACITY = 240
 /** 拉取失败 / WebSocket 断开后的退避基数 */
 const RETRY_MS = 3000
+/**
+ * 连上后这么久还没收到第一帧，就当 WebSocket 不可用（被别的服务接走了，比如反代把 upgrade 转错了地方）
+ * 改用轮询：否则既没有码率，也没有中转预览的租约心跳
+ */
+const FIRST_FRAME_TIMEOUT_MS = 5000
 
 /** 一段用于画图的序列：x 为 Unix 秒（uPlot 时间轴单位），y 为字节/秒，null 是断口 */
 export interface RateSeries {
@@ -116,6 +124,14 @@ let wsUnusable = false
 /** WebSocket 连续失败次数，决定重连退避 */
 let wsFailures = 0
 let visibilityBound = false
+/** 正在播放的中转预览数；大于 0 时连接必须保持（租约心跳），不论有没有图表订阅、页面是否可见 */
+let leaseHolders = 0
+let openPreviewsBound = false
+
+/** 把本页开着的中转预览集合发给服务端（只在 WebSocket 已连上时；连上那一刻 onopen 也会发一次） */
+function sendOpenPreviews() {
+  if (socket && socket.readyState === WebSocket.OPEN) socket.send(openPreviewsMessage())
+}
 
 function emit() {
   listeners.forEach((l) => l())
@@ -163,12 +179,14 @@ function setTransport(transport: LiveRatesSnapshot['transport']) {
 
 /** 与日志页同一套推导：生产同源，开发模式指向 NEXT_PUBLIC_API_SERVER */
 function liveRatesSocketUrl(): string {
-  if (API_BASE) return `${API_BASE.replace(/^http/, 'ws')}/v1/ws/live-rates`
+  const query = `?session=${previewSessionId()}`
+  if (API_BASE) return `${API_BASE.replace(/^http/, 'ws')}/v1/ws/live-rates${query}`
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}/v1/ws/live-rates`
+  return `${protocol}//${window.location.host}/v1/ws/live-rates${query}`
 }
 
 function active(): boolean {
+  if (leaseHolders > 0) return true
   return listeners.size > 0 && !(typeof document !== 'undefined' && document.visibilityState === 'hidden')
 }
 
@@ -186,7 +204,17 @@ function connectSocket() {
     return
   }
   socket = ws
+  if (!openPreviewsBound) {
+    onOpenPreviewsChange(sendOpenPreviews)
+    openPreviewsBound = true
+  }
+  ws.onopen = () => {
+    if (socket === ws) sendOpenPreviews()
+  }
   let gotFrame = false
+  const firstFrameTimer = setTimeout(() => {
+    if (!gotFrame && socket === ws) ws.close()
+  }, FIRST_FRAME_TIMEOUT_MS)
   ws.onmessage = (event: MessageEvent<string>) => {
     let frames: LiveRateFrame[]
     try {
@@ -196,11 +224,13 @@ function connectSocket() {
     }
     if (!Array.isArray(frames)) return
     gotFrame = true
+    clearTimeout(firstFrameTimer)
     wsFailures = 0
     if (snapshot.transport !== 'ws') setTransport('ws')
     ingestFrames(frames)
   }
   ws.onclose = () => {
+    clearTimeout(firstFrameTimer)
     if (socket !== ws) return
     socket = null
     if (!active()) return
@@ -229,7 +259,10 @@ async function pollOnce() {
   inflight = controller
   let ok = false
   try {
-    const res = await fetch(`${API_BASE}/v1/live-rates`, { cache: 'no-store', signal: controller.signal })
+    const res = await fetch(`${API_BASE}/v1/live-rates?session=${previewSessionId()}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
     // 与其它接口同一套处理：会话失效（401）跳登录页，失去权限（403）刷新权限点、页面随之收起
     await handleResponse(res)
     const frames = (await res.json()) as LiveRateFrame[]
@@ -272,21 +305,42 @@ function stop() {
 }
 
 function onVisibilityChange() {
-  if (document.visibilityState === 'hidden') stop()
-  else if (listeners.size > 0 && !timer && !inflight && !socket) schedule(0)
+  if (!active()) stop()
+  else if (!timer && !inflight && !socket) schedule(0)
 }
 
-function subscribe(listener: () => void) {
-  listeners.add(listener)
+function bindVisibility() {
   if (typeof document !== 'undefined' && !visibilityBound) {
     document.addEventListener('visibilitychange', onVisibilityChange)
     visibilityBound = true
   }
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener)
+  bindVisibility()
   // 首个订阅者：下一拍再连（StrictMode 的订阅 → 退订 → 再订阅只会连一次）
   if (listeners.size === 1 && !timer && !inflight && !socket) schedule(0)
   return () => {
     listeners.delete(listener)
-    if (listeners.size === 0) stop()
+    if (!active()) stop()
+  }
+}
+
+/**
+ * 页面上开着一路中转预览期间调用，返回的函数在预览关掉时调用。持有期间码率连接一直保持
+ * （码率图折叠、标签页切到后台也不断），它就是这个页面的租约心跳。
+ */
+export function holdPreviewLease(): () => void {
+  leaseHolders += 1
+  bindVisibility()
+  if (!timer && !inflight && !socket) schedule(0)
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    leaseHolders -= 1
+    if (!active()) stop()
   }
 }
 

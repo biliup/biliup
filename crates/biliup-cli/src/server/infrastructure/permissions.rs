@@ -146,6 +146,9 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         {
             PreviewView
         }
+        "/v1/streamers/{id}/live" if method == Method::DELETE || method == Method::POST => {
+            PreviewView
+        }
         "/v1/ws/live-rates" | "/v1/live-rates" if get => StreamerView,
         "/v1/sessions" | "/v1/sessions/{id}" | "/v1/sessions/{id}/keyframes" if get => FileView,
         "/v1/sessions/{id}/media" if get => PreviewView,

@@ -18,6 +18,8 @@ import {
   usePreviewTransport,
 } from '@/app/lib/use-dashboard'
 import { useBoolPref, useEnumPref } from '@/app/lib/use-local-pref'
+import { relayLease } from '@/app/lib/preview-lease'
+import { holdPreviewLease } from '@/app/lib/use-live-rates'
 import { type DanmakuFeed, useDanmakuFeed } from '@/app/lib/danmaku-feed'
 import {
   type LatencyProfile,
@@ -37,6 +39,11 @@ const Players = dynamic(() => import('@/app/ui/Player'), { ssr: false })
 /** 服务端断开（掉队 / 换直链）后自动重连的次数上限；超过后交给用户手动重试 */
 const MAX_AUTO_RECONNECT = 3
 const RECONNECT_DELAY_MS = 2000
+/**
+ * 一条连接播够这么久再断（比如到了服务端单连接的最长时长 preview_max_minutes），不算连续失败：
+ * 重连计数清零，长时间开着的预览不会在第 4 次到期时停下
+ */
+const RESET_ATTEMPTS_AFTER_MS = 60_000
 /** 弹层弹幕开关记在本地，默认开；监视器另有自己的开关（默认关） */
 const MODAL_DANMAKU_KEY = 'biliup.preview.danmaku'
 /** 中转延迟档位（弹层与监视器共用），默认低延迟；卡顿后本次播放自动升到流畅 */
@@ -96,6 +103,8 @@ export function LivePreviewPlayer({
   const [phase, setPhase] = useState<Phase>('connecting')
   const [message, setMessage] = useState<string | null>(null)
   const attemptsRef = useRef(0)
+  /** 当前连接开始播放的时刻；0 表示还没播起来 */
+  const playingSinceRef = useRef(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const transport = usePreviewTransport()
   const directCapable = !!streamer.preview?.direct?.capable
@@ -146,6 +155,9 @@ export function LivePreviewPlayer({
   const levelKey = `${streamer.id}:${profilePref}`
   const [escalated, setEscalated] = useState<string | null>(null)
   const level: LatencyProfile = escalated === levelKey ? 'smooth' : profilePref
+  // 自动重连的请求带 reconnect=1：服务端满员时回 429 而不去挤掉别人（被挤掉的页面若也去挤，
+  // 几个真在看的页面会轮流挤掉对方）。同样记 key，换房间 / 换档位就是新打开，自然作废
+  const [reconnectKey, setReconnectKey] = useState<string | null>(null)
   const policy: LiveBufferPolicy = relayPolicy(level, relayFormat)
   const stallsRef = useRef<number[]>([])
   const handleStall = useCallback(
@@ -156,6 +168,7 @@ export function LivePreviewPlayer({
       if (info.seconds < ESCALATE_STALL_S && stallsRef.current.length < 2) return
       stallsRef.current = []
       setEscalated(levelKey)
+      setReconnectKey(null)
       setPhase('connecting')
       setMessage(null)
       setNonce((n) => n + 1)
@@ -163,8 +176,16 @@ export function LivePreviewPlayer({
     [level, levelKey]
   )
 
+  // 中转流挂在本页面的租约上：码率连接是心跳（播放期间一直连着），播放器销毁时释放这条连接
+  const relay = source?.kind === 'relay'
+  useEffect(() => {
+    if (!relay) return
+    return holdPreviewLease()
+  }, [relay])
+  const lease = useMemo(() => (relay ? relayLease(streamer.id) : undefined), [relay, streamer.id])
+
   const codecs = streamer.preview?.codecs ?? null
-  const relayUrl = livePreviewUrl(streamer.id, snapshotMsFor(policy))
+  const relayUrl = livePreviewUrl(streamer.id, snapshotMsFor(policy), { reconnect: reconnectKey === levelKey })
   const url = source?.kind === 'direct' ? source.url : relayUrl
   const format = source?.kind === 'direct' ? (source.format ?? 'flv') : relayFormat
   // 平台有弹幕客户端才装弹幕层；开关只控制订阅与显示
@@ -185,6 +206,10 @@ export function LivePreviewPlayer({
     (why: string) => {
       // 会话被收回时后端会截断预览流，表现为一次断流：刷新权限点，失效就跳登录页，降级就收起页面
       revalidateMe()
+      if (playingSinceRef.current && Date.now() - playingSinceRef.current >= RESET_ATTEMPTS_AFTER_MS) {
+        attemptsRef.current = 0
+      }
+      playingSinceRef.current = 0
       if (attemptsRef.current >= MAX_AUTO_RECONNECT) {
         setPhase('ended')
         setMessage(`${why}，已重连 ${MAX_AUTO_RECONNECT} 次`)
@@ -195,12 +220,13 @@ export function LivePreviewPlayer({
       setPhase('reconnecting')
       setMessage(`${why}，${RECONNECT_DELAY_MS / 1000} 秒后重连（${attemptsRef.current}/${MAX_AUTO_RECONNECT}）`)
       timerRef.current = setTimeout(() => {
+        setReconnectKey(levelKey)
         setPhase('connecting')
         setMessage(null)
         setNonce((n) => n + 1)
       }, RECONNECT_DELAY_MS)
     },
-    [onFatal]
+    [onFatal, levelKey]
   )
 
   // 直连出问题（CDN 403 / 直链过期 / 断开）：重取一次直链再播；再失败就回落中转，不再试直连
@@ -272,6 +298,7 @@ export function LivePreviewPlayer({
   )
   const retry = () => {
     attemptsRef.current = 0
+    setReconnectKey(null)
     setPhase('connecting')
     setMessage(null)
     setNonce((n) => n + 1)
@@ -280,7 +307,10 @@ export function LivePreviewPlayer({
   // 播放器一旦起播就当作在放（mpegts.js 没有可靠的 first-frame 事件；错误会另行回调）
   useEffect(() => {
     if (phase !== 'connecting') return
-    const t = setTimeout(() => setPhase((p) => (p === 'connecting' ? 'playing' : p)), 1500)
+    const t = setTimeout(() => {
+      playingSinceRef.current = Date.now()
+      setPhase((p) => (p === 'connecting' ? 'playing' : p))
+    }, 1500)
     return () => clearTimeout(t)
   }, [phase, nonce])
 
@@ -316,6 +346,7 @@ export function LivePreviewPlayer({
           onError={handleError}
           onStall={handleStall}
           danmaku={danmakuLayer}
+          lease={lease}
         />
       ) : null}
       {badge ? (
@@ -394,6 +425,8 @@ export function LivePreviewModal({
   const [chartOpen, setChartOpen] = useBoolPref(MODAL_RATE_CHART_KEY, true)
   const transport = usePreviewTransport()
   const [latency, setLatency] = useLatencyProfile()
+  const subscribers = streamer.preview?.subscribers
+  const maxSubscribers = streamer.preview?.max_subscribers
   const notifiedRef = useRef(false)
   const playerRootRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -505,6 +538,12 @@ export function LivePreviewModal({
           {transport === 'direct'
             ? '直连模式：能直连的平台由浏览器直接向 CDN 拉流，不经 biliup；不能的自动回落到录制流中转（角标标出原因）。关闭弹窗即断开。'
             : '画面来自正在写盘的同一路流，不另外向直播平台拉流；关闭弹窗即断开。'}
+          {subscribers !== undefined && maxSubscribers ? (
+            <>
+              {' '}
+              这一路当前 {subscribers}/{maxSubscribers} 路中转预览，满了再打开会接替最早的一路。
+            </>
+          ) : null}
         </Text>
       </div>
     </Modal>

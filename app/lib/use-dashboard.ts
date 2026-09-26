@@ -115,10 +115,15 @@ export function liveImageUrl(
 /**
  * 正在录制的那一路流的同源地址（chunked FLV / MPEG-TS / fMP4），供页面内播放器直接拉取。
  * `snapshotMs`：起播快照回溯多少毫秒的已完成 GOP（播放器要维持多深的缓冲就要多深）；不传给服务端的整个保留窗口。
+ * `reconnect`：断开后的自动重连。该直播间 / 进程内的预览连接满了时，服务端对它返回 429 而不是挤掉最早的一路，
+ * 免得几个真在看的页面互相挤；用户手动打开 / 重试不带，总能挤进来。
  */
-export function livePreviewUrl(id: number, snapshotMs?: number): string {
-  const base = `${API_BASE}/v1/streamers/${id}/live`
-  return snapshotMs === undefined ? base : `${base}?snapshot_ms=${Math.max(0, Math.round(snapshotMs))}`
+export function livePreviewUrl(id: number, snapshotMs?: number, opts: { reconnect?: boolean } = {}): string {
+  const params = new URLSearchParams()
+  if (snapshotMs !== undefined) params.set('snapshot_ms', String(Math.max(0, Math.round(snapshotMs))))
+  if (opts.reconnect) params.set('reconnect', '1')
+  const query = params.toString()
+  return `${API_BASE}/v1/streamers/${id}/live${query ? `?${query}` : ''}`
 }
 
 /**

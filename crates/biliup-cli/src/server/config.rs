@@ -135,6 +135,13 @@ pub struct Config {
     #[serde(default)]
     pub preview_transport: Option<PreviewTransport>,
 
+    /// 单条中转预览连接最长持续多少分钟，到点结束响应，播放器自动重连。服务端看不出客户端是否
+    /// 还在看（经过会替客户端读完上游的代理 / 隧道时，关掉播放器 TCP 也不断），这是回收这类
+    /// 「幽灵连接」的兜底。空 = 默认 30 分钟；0 = 不限。只认全局配置。
+    #[patch(skip)]
+    #[serde(default)]
+    pub preview_max_minutes: Option<u64>,
+
     // ===== 各平台录播设置 =====
     /// 是否使用直播封面
     #[serde(default)]
@@ -590,7 +597,21 @@ impl Default for Config {
     }
 }
 
+/// [`Config::preview_max_minutes`] 不填时的默认值。
+pub const DEFAULT_PREVIEW_MAX_MINUTES: u64 = 30;
+
 impl Config {
+    /// 单条中转预览连接的最长寿命，`None` 为不限，见 [`Config::preview_max_minutes`]。
+    pub fn preview_max_lifetime(&self) -> Option<std::time::Duration> {
+        match self
+            .preview_max_minutes
+            .unwrap_or(DEFAULT_PREVIEW_MAX_MINUTES)
+        {
+            0 => None,
+            minutes => Some(std::time::Duration::from_secs(minutes.saturating_mul(60))),
+        }
+    }
+
     pub fn validate_segment_limits(&self) -> AppResult<()> {
         Ok(())
     }

@@ -17,15 +17,16 @@
 //! （已完成 GOP + 当前 GOP）最多 [`MAX_SNAPSHOT_BYTES`]，超过就先丢最旧的 GOP；
 //! 广播缓冲按格式固定槽位数（[`BROADCAST_CAPACITY_FLV`] / [`BROADCAST_CAPACITY_SEGMENTED`]），
 //! 每槽最多 [`MAX_CHUNK_BYTES`]（更大的分块会被切开），
-//! 且只在有订阅者时才占用。订阅者数量由信号量限制（[`PreviewHub::new`] 的参数）。
+//! 且只在有订阅者时才占用。订阅者数量是固定槽位（[`PreviewHub::new`] 的参数，见 [`PreviewSlots`]）：
+//! 满了由 HTTP 订阅路径决定拒绝新来的还是挤掉最早的一条，写入端不参与。
 
 use bytes::Bytes;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc as std_mpsc;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, RwLock};
 use std::time::{Duration, Instant};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, broadcast, oneshot};
+use tokio::sync::{broadcast, oneshot, watch};
 use tracing::debug;
 
 /// 每路直播默认允许同时观看的预览连接数。
@@ -121,6 +122,223 @@ pub struct PreviewStatus {
     pub codecs: Option<String>,
     /// 不可预览的原因，面向用户的中文说明
     pub reason: Option<String>,
+    /// 此刻占着该路槽位的预览连接数
+    pub subscribers: usize,
+    /// 该路的槽位数；不可预览的 hub 为 0
+    pub max_subscribers: usize,
+}
+
+/// 预览许可池所在的层级，决定满员时挤掉的范围与说明文字。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlotScope {
+    /// 单个直播间（[`PreviewHub`] 自己的槽位）
+    Room,
+    /// 整个进程（所有直播间合计）
+    Process,
+}
+
+impl SlotScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SlotScope::Room => "该直播间",
+            SlotScope::Process => "进程内",
+        }
+    }
+}
+
+/// 一条预览连接为什么被服务端结束（而不是客户端断开 / 写入端换代）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TicketEnd {
+    /// 满员时被新连接挤掉，附挤掉它的那一级
+    Evicted(SlotScope),
+    /// 客户端声明不再需要（播放器销毁时主动释放）
+    Released,
+    /// 客户端的租约没了（心跳超时 / 心跳连接断开）
+    LeaseLost,
+}
+
+/// 一条预览连接在各级许可池里的身份。服务端要结束这条连接（池满被挤掉、客户端释放、
+/// 租约丢失）时通过它通知，响应随之结束。
+///
+/// `Clone` 得到的是同一张票；同一张票可以同时占多个池（直播间 + 进程）的槽位，
+/// 一旦被结束，它在所有池里的槽位都不再计入占用（见 [`PreviewSlots::acquire`]）。
+#[derive(Clone)]
+pub struct PreviewTicket(Arc<TicketInner>);
+
+struct TicketInner {
+    id: u64,
+    opened: Instant,
+    ended: watch::Sender<Option<TicketEnd>>,
+}
+
+impl Default for PreviewTicket {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for PreviewTicket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreviewTicket")
+            .field("id", &self.0.id)
+            .field("ended_by", &self.ended_by())
+            .finish()
+    }
+}
+
+impl PreviewTicket {
+    pub fn new() -> Self {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+        Self(Arc::new(TicketInner {
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+            opened: Instant::now(),
+            ended: watch::Sender::new(None),
+        }))
+    }
+
+    /// 进程内唯一的连接编号，日志里用
+    pub fn id(&self) -> u64 {
+        self.0.id
+    }
+
+    /// 拿到这张票（开始占槽位）以来的时长
+    pub fn age(&self) -> Duration {
+        self.0.opened.elapsed()
+    }
+
+    /// 服务端为什么结束了它；还没被结束为 `None`
+    pub fn ended_by(&self) -> Option<TicketEnd> {
+        *self.0.ended.borrow()
+    }
+
+    /// 被服务端结束时完成（已经结束则立刻完成）。可放进 `select!`，丢弃即取消等待。
+    pub async fn ended(&self) -> TicketEnd {
+        let mut rx = self.0.ended.subscribe();
+        let cause = rx.wait_for(Option::is_some).await.ok().and_then(|v| *v);
+        match cause {
+            Some(cause) => cause,
+            // 发送端就在 `self` 里，活得比这个 future 久，走不到这里
+            None => std::future::pending().await,
+        }
+    }
+
+    /// 结束这条连接；已经结束的保留第一次的原因。只改一个 `watch` 值，不等待。
+    pub fn end(&self, cause: TicketEnd) {
+        self.0.ended.send_if_modified(|current| {
+            if current.is_some() {
+                return false;
+            }
+            *current = Some(cause);
+            true
+        });
+    }
+}
+
+/// [`PreviewSlots::acquire`] 挤掉的那条连接。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Evicted {
+    /// 被挤掉的连接编号（[`PreviewTicket::id`]）
+    pub id: u64,
+    /// 它占了多久
+    pub age: Duration,
+}
+
+/// 固定槽位的预览许可池。满员时可以拒绝新连接，也可以挤掉最早进来的那一条：
+/// 服务端看不出客户端是否还在看（经过替客户端读完上游的代理 / 隧道时，关掉播放器 TCP 也不断），
+/// 所以不能指望旧连接自己释放；而用户新打开的预览一定是他此刻想看的。
+///
+/// 只在 HTTP 订阅路径上使用（短暂加锁、挤人都在这里），写入端热路径不碰它。
+#[derive(Clone)]
+pub struct PreviewSlots(Arc<SlotsInner>);
+
+struct SlotsInner {
+    scope: SlotScope,
+    capacity: usize,
+    /// 按拿到槽位的先后排列，队首最早
+    holders: Mutex<VecDeque<PreviewTicket>>,
+}
+
+impl SlotsInner {
+    fn holders(&self) -> MutexGuard<'_, VecDeque<PreviewTicket>> {
+        self.holders.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl PreviewSlots {
+    pub fn new(scope: SlotScope, capacity: usize) -> Self {
+        Self(Arc::new(SlotsInner {
+            scope,
+            capacity,
+            holders: Mutex::new(VecDeque::with_capacity(capacity)),
+        }))
+    }
+
+    pub fn scope(&self) -> SlotScope {
+        self.0.scope
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.0.capacity
+    }
+
+    /// 占着槽位的连接数；已被服务端结束（挤掉 / 释放 / 租约丢失）、正在收尾的连接不算
+    pub fn occupied(&self) -> usize {
+        self.0
+            .holders()
+            .iter()
+            .filter(|t| t.ended_by().is_none())
+            .count()
+    }
+
+    /// 为 `ticket` 占一个槽位。满员时：`evict` 为真就挤掉最早进来的那条，把位置让给它；
+    /// 否则返回 `Err(当前占用数)`。已被结束、响应还没来得及收尾的连接不占名额，
+    /// 所以直播间一级挤掉的那条不会让进程一级再多挤一条。
+    pub fn acquire(
+        &self,
+        ticket: &PreviewTicket,
+        evict: bool,
+    ) -> Result<(PreviewSlot, Option<Evicted>), usize> {
+        let mut holders = self.0.holders();
+        holders.retain(|t| t.ended_by().is_none());
+        let mut evicted = None;
+        if holders.len() >= self.0.capacity {
+            if !evict {
+                return Err(holders.len());
+            }
+            let Some(oldest) = holders.pop_front() else {
+                return Err(0);
+            };
+            oldest.end(TicketEnd::Evicted(self.0.scope));
+            evicted = Some(Evicted {
+                id: oldest.id(),
+                age: oldest.age(),
+            });
+        }
+        holders.push_back(ticket.clone());
+        drop(holders);
+        Ok((
+            PreviewSlot {
+                slots: self.0.clone(),
+                ticket: ticket.id(),
+            },
+            evicted,
+        ))
+    }
+}
+
+/// 占着的一个槽位，drop 即归还（被挤掉的连接此时早已不计入占用，归还是空操作）。
+pub struct PreviewSlot {
+    slots: Arc<SlotsInner>,
+    ticket: u64,
+}
+
+impl Drop for PreviewSlot {
+    fn drop(&mut self) {
+        let mut holders = self.slots.holders();
+        if let Some(i) = holders.iter().position(|t| t.id() == self.ticket) {
+            holders.remove(i);
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,8 +371,7 @@ struct Shared {
     /// 当前写入端的订阅请求入口，`(代数, 发送端)`；没有写入端时为 `None`
     requests: RwLock<Option<(u64, std_mpsc::Sender<SnapshotRequest>)>>,
     generation: AtomicU64,
-    subscribers: Arc<Semaphore>,
-    max_subscribers: usize,
+    subscribers: PreviewSlots,
 }
 
 /// 一路录制的预览 hub，`Clone` 得到的是同一个 hub 的另一个句柄。
@@ -172,7 +389,8 @@ impl std::fmt::Debug for PreviewHub {
         f.debug_struct("PreviewHub")
             .field("state", &*self.0.state.read().unwrap())
             .field("attached", &self.0.requests.read().unwrap().is_some())
-            .field("max_subscribers", &self.0.max_subscribers)
+            .field("subscribers", &self.0.subscribers.occupied())
+            .field("max_subscribers", &self.0.subscribers.capacity())
             .finish()
     }
 }
@@ -184,7 +402,7 @@ pub enum SubscribeError {
     Unavailable(String),
     /// 能预览，但此刻没有写入端（还没开始拉流，或正在断流重试）
     NotAttached,
-    /// 该路的预览连接数已达上限
+    /// 该路的预览连接数已达上限（附上限），且调用方不许挤掉旧连接
     TooManySubscribers(usize),
     /// 等待关键帧超时（流停滞）
     Timeout,
@@ -196,7 +414,7 @@ impl std::fmt::Display for SubscribeError {
             SubscribeError::Unavailable(reason) => write!(f, "当前下载器不支持预览: {reason}"),
             SubscribeError::NotAttached => write!(f, "录制尚未开始拉流或正在重连"),
             SubscribeError::TooManySubscribers(n) => {
-                write!(f, "该直播间的预览连接数已达上限（{n}）")
+                write!(f, "该直播间的预览连接数已达上限（每个直播间最多 {n} 路）")
             }
             SubscribeError::Timeout => write!(f, "等待关键帧超时"),
         }
@@ -207,7 +425,7 @@ impl std::error::Error for SubscribeError {}
 
 /// 一个预览订阅：先发 `snapshot` 里的分块，再从 `rx` 取实时分块。
 ///
-/// 持有该路的一个连接许可，drop 即释放；掉队后可用 [`PreviewHub::resubscribe`] 原地重新对齐。
+/// 持有该路的一个槽位，drop 即释放；掉队后可用 [`PreviewHub::resubscribe`] 原地重新对齐。
 pub struct Subscription {
     pub format: PreviewFormat,
     pub snapshot: Vec<Bytes>,
@@ -215,7 +433,7 @@ pub struct Subscription {
     header_len: usize,
     /// 订阅时要的快照深度，掉队重新对齐时沿用
     depth: Option<Duration>,
-    _permit: OwnedSemaphorePermit,
+    _permit: PreviewSlot,
 }
 
 impl Subscription {
@@ -233,8 +451,7 @@ impl PreviewHub {
             state: RwLock::new(HubState::Pending),
             requests: RwLock::new(None),
             generation: AtomicU64::new(0),
-            subscribers: Arc::new(Semaphore::new(max_subscribers)),
-            max_subscribers,
+            subscribers: PreviewSlots::new(SlotScope::Room, max_subscribers),
         }))
     }
 
@@ -251,29 +468,42 @@ impl PreviewHub {
     }
 
     pub fn max_subscribers(&self) -> usize {
-        self.0.max_subscribers
+        self.0.subscribers.capacity()
+    }
+
+    /// 此刻占着该路槽位的预览连接数
+    pub fn subscribers(&self) -> usize {
+        self.0.subscribers.occupied()
     }
 
     /// 当前状态，供 `/v1/streamers` 透出。
     pub fn status(&self) -> PreviewStatus {
+        let subscribers = self.subscribers();
+        let max_subscribers = self.max_subscribers();
         match &*self.0.state.read().unwrap() {
             HubState::Pending => PreviewStatus {
                 available: true,
                 format: None,
                 codecs: None,
                 reason: None,
+                subscribers,
+                max_subscribers,
             },
             HubState::Available { format, codecs } => PreviewStatus {
                 available: true,
                 format: Some(*format),
                 codecs: codecs.clone(),
                 reason: None,
+                subscribers,
+                max_subscribers,
             },
             HubState::Unavailable(reason) => PreviewStatus {
                 available: false,
                 format: None,
                 codecs: None,
                 reason: Some(reason.clone()),
+                subscribers,
+                max_subscribers,
             },
         }
     }
@@ -326,21 +556,33 @@ impl PreviewHub {
     /// 从当前 GOP 往前，取到第一个关键帧到达时刻早于「现在 − depth」的 GOP 为止（含），
     /// 所以起播缓冲在 `depth` 到 `depth + 一个 GOP` 之间；`Some(ZERO)` 只给当前 GOP，
     /// `None` 给整个 [`SNAPSHOT_WINDOW`]。播放器要多深的缓冲就要多深的快照，多要的只会被追帧丢掉。
+    ///
+    /// 满员时拒绝（[`SubscribeError::TooManySubscribers`]）；要挤掉最早的连接用
+    /// [`reserve`](Self::reserve) + [`subscribe_reserved`](Self::subscribe_reserved)。
     pub async fn subscribe_with_depth(
         &self,
         depth: Option<Duration>,
         timeout: Duration,
     ) -> Result<Subscription, SubscribeError> {
+        let (slot, _) = self.reserve(&PreviewTicket::new(), false)?;
+        self.subscribe_reserved(slot, depth, timeout).await
+    }
+
+    /// 为 `ticket` 占该路一个槽位（不等写入端）。满员时 `evict` 为真就挤掉该路最早的那条连接
+    /// （它的 `ticket` 随之报告被挤掉，由持有者结束响应），并把被挤掉的是谁交回；
+    /// 否则返回 [`SubscribeError::TooManySubscribers`]。不可预览时返回 `Unavailable`。
+    pub fn reserve(
+        &self,
+        ticket: &PreviewTicket,
+        evict: bool,
+    ) -> Result<(PreviewSlot, Option<Evicted>), SubscribeError> {
         if let HubState::Unavailable(reason) = &*self.0.state.read().unwrap() {
             return Err(SubscribeError::Unavailable(reason.clone()));
         }
-        let permit = self
-            .0
+        self.0
             .subscribers
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| SubscribeError::TooManySubscribers(self.0.max_subscribers))?;
-        self.subscribe_holding(permit, depth, timeout).await
+            .acquire(ticket, evict)
+            .map_err(|_| SubscribeError::TooManySubscribers(self.max_subscribers()))
     }
 
     /// 掉队（`Lagged`）后原地重新对齐：复用 `previous` 的连接许可与快照深度，向写入端再要一份从最近
@@ -352,12 +594,13 @@ impl PreviewHub {
         timeout: Duration,
     ) -> Result<Subscription, SubscribeError> {
         let Subscription { _permit, depth, .. } = previous;
-        self.subscribe_holding(_permit, depth, timeout).await
+        self.subscribe_reserved(_permit, depth, timeout).await
     }
 
-    async fn subscribe_holding(
+    /// 用 [`reserve`](Self::reserve) 占到的槽位订阅；语义同 [`subscribe_with_depth`](Self::subscribe_with_depth)。
+    pub async fn subscribe_reserved(
         &self,
-        permit: OwnedSemaphorePermit,
+        permit: PreviewSlot,
         depth: Option<Duration>,
         timeout: Duration,
     ) -> Result<Subscription, SubscribeError> {
@@ -1733,7 +1976,9 @@ mod tests {
                 available: true,
                 format: None,
                 codecs: None,
-                reason: None
+                reason: None,
+                subscribers: 0,
+                max_subscribers: 4,
             }
         );
         assert!(!hub.is_attached());
@@ -1752,6 +1997,7 @@ mod tests {
         let status = unavailable.status();
         assert!(!status.available);
         assert_eq!(status.reason.as_deref(), Some("ffmpeg"));
+        assert_eq!(status.max_subscribers, 0);
         assert!(format!("{unavailable:?}").contains("Unavailable"));
     }
 
@@ -2128,7 +2374,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(20)).await;
         sink.push(ChunkKind::Media, inter(2));
         let mut sub = pending.await.unwrap().unwrap();
-        assert_eq!(hub.0.subscribers.available_permits(), 0);
+        assert_eq!(hub.subscribers(), 1);
         // 名额已满，第二个订阅被拒
         assert_eq!(
             hub.subscribe(Duration::from_secs(1)).await.err(),
@@ -2147,7 +2393,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(20)).await;
         sink.push(ChunkKind::Keyframe, key(9));
         let mut again = pending.await.unwrap().unwrap();
-        assert_eq!(hub.0.subscribers.available_permits(), 0, "same permit");
+        assert_eq!(hub.subscribers(), 1, "same permit");
         assert_eq!(sink.receiver_count(), 1, "old receiver is gone");
         assert_eq!(
             again.snapshot,
@@ -2164,7 +2410,7 @@ mod tests {
         sink.push(ChunkKind::Media, inter(10));
         assert_eq!(again.rx.recv().await.unwrap(), inter(10));
         drop(again);
-        assert_eq!(hub.0.subscribers.available_permits(), 1);
+        assert_eq!(hub.subscribers(), 0);
     }
 
     /// 订阅者上限：超出的订阅立刻被拒，释放一个后又能进。
@@ -2194,6 +2440,120 @@ mod tests {
         sink.push(ChunkKind::Media, inter(3));
         assert!(c.await.unwrap().is_ok());
         drop(b);
+    }
+
+    /// 满员且允许挤：最早的那张票被挤掉（并得知是哪一级挤的），槽位数不变；
+    /// 被挤掉的连接晚些 drop 槽位时不会把新来的那条算掉。不许挤时照旧报当前占用数。
+    #[tokio::test]
+    async fn full_slots_evict_the_oldest_ticket_and_stay_fixed_size() {
+        let slots = PreviewSlots::new(SlotScope::Room, 2);
+        let (a, b, c) = (
+            PreviewTicket::new(),
+            PreviewTicket::new(),
+            PreviewTicket::new(),
+        );
+        let (slot_a, none) = slots.acquire(&a, true).unwrap();
+        assert!(none.is_none());
+        let (slot_b, _) = slots.acquire(&b, true).unwrap();
+        assert_eq!(slots.occupied(), 2);
+
+        assert_eq!(slots.acquire(&c, false).err(), Some(2));
+        assert_eq!(a.ended_by(), None, "a refusal evicts nobody");
+
+        let (slot_c, evicted) = slots.acquire(&c, true).unwrap();
+        assert_eq!(evicted.map(|e| e.id), Some(a.id()));
+        assert_eq!(a.ended_by(), Some(TicketEnd::Evicted(SlotScope::Room)));
+        assert_eq!(b.ended_by(), None);
+        assert_eq!(c.ended_by(), None);
+        assert_eq!(slots.occupied(), 2);
+        // 被挤掉的那条随时能得知（已经被挤掉，立刻完成）
+        let cause = tokio::time::timeout(Duration::from_secs(1), a.ended())
+            .await
+            .unwrap();
+        assert_eq!(cause, TicketEnd::Evicted(SlotScope::Room));
+        // 被挤掉的连接收尾时归还槽位：空操作
+        drop(slot_a);
+        assert_eq!(slots.occupied(), 2);
+        drop(slot_b);
+        assert_eq!(slots.occupied(), 1);
+        drop(slot_c);
+        assert_eq!(slots.occupied(), 0);
+    }
+
+    /// 一张票同时占直播间与进程两级：直播间一级挤掉它以后，它在进程一级的位置立刻不算数，
+    /// 新连接进进程池不必再挤掉另一个直播间的观众。
+    #[test]
+    fn a_ticket_evicted_by_one_pool_frees_its_place_in_the_other() {
+        let room = PreviewSlots::new(SlotScope::Room, 1);
+        let process = PreviewSlots::new(SlotScope::Process, 2);
+        let (old, other_room, new) = (
+            PreviewTicket::new(),
+            PreviewTicket::new(),
+            PreviewTicket::new(),
+        );
+        let _old_room = room.acquire(&old, true).unwrap();
+        let _old_process = process.acquire(&old, true).unwrap();
+        let _other = process.acquire(&other_room, true).unwrap();
+        assert_eq!(process.occupied(), 2);
+
+        let (_new_room, evicted) = room.acquire(&new, true).unwrap();
+        assert_eq!(evicted.map(|e| e.id), Some(old.id()));
+        assert_eq!(process.occupied(), 1, "the evicted ticket no longer counts");
+        let (_new_process, evicted) = process.acquire(&new, true).unwrap();
+        assert!(evicted.is_none());
+        assert_eq!(other_room.ended_by(), None);
+        assert_eq!(process.occupied(), 2);
+    }
+
+    /// hub 一级：`reserve(evict = true)` 在满员时挤掉最早的订阅，新订阅照常拿到快照；
+    /// 被挤掉的订阅 drop 后占用数不变，两条都 drop 后归零。`evict = false` 维持拒绝。
+    #[tokio::test]
+    async fn hub_reserve_evicts_the_oldest_subscription_when_full() {
+        let hub = PreviewHub::new(1);
+        let mut sink = hub.attach(PreviewFormat::Flv);
+        sink.push(ChunkKind::Keyframe, key(1));
+        let subscribe = |hub: PreviewHub, ticket: PreviewTicket| {
+            tokio::spawn(async move {
+                let (slot, evicted) = hub.reserve(&ticket, true)?;
+                let sub = hub
+                    .subscribe_reserved(slot, None, Duration::from_secs(5))
+                    .await?;
+                Ok::<_, SubscribeError>((sub, evicted))
+            })
+        };
+        let first_ticket = PreviewTicket::new();
+        let first = subscribe(hub.clone(), first_ticket.clone());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sink.push(ChunkKind::Media, inter(2));
+        let (first, evicted) = first.await.unwrap().unwrap();
+        assert!(evicted.is_none());
+        assert_eq!(hub.status().subscribers, 1);
+
+        assert_eq!(
+            hub.reserve(&PreviewTicket::new(), false).err(),
+            Some(SubscribeError::TooManySubscribers(1))
+        );
+
+        let second = subscribe(hub.clone(), PreviewTicket::new());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sink.push(ChunkKind::Media, inter(3));
+        let (second, evicted) = second.await.unwrap().unwrap();
+        assert_eq!(evicted.map(|e| e.id), Some(first_ticket.id()));
+        assert_eq!(
+            first_ticket.ended_by(),
+            Some(TicketEnd::Evicted(SlotScope::Room))
+        );
+        assert_eq!(hub.subscribers(), 1);
+        drop(first);
+        assert_eq!(hub.subscribers(), 1);
+        drop(second);
+        assert_eq!(hub.subscribers(), 0);
+
+        let unavailable = PreviewHub::unavailable("ffmpeg");
+        assert!(matches!(
+            unavailable.reserve(&PreviewTicket::new(), true),
+            Err(SubscribeError::Unavailable(_))
+        ));
     }
 
     /// 慢订阅者不拖慢写入端：一个从不读取的订阅者在场，写入端推 20 倍缓冲容量的分块也
