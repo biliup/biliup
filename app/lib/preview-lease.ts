@@ -10,7 +10,7 @@ import { API_BASE } from './api-streamer'
  * - 会话号：每个页面一个随机串。码率 WebSocket（`use-live-rates.ts`）带着它连上即持有租约，服务端
  *   每 15 s Ping、浏览器自动回 Pong；WebSocket 断开（页面关了）或 45 s 没 Pong，这个页面的中转预览全部结束。
  *   WebSocket 连不上时退回每秒轮询，轮询同样带会话号续约。
- * - 连接号：每次建播放器一个（`<会话号>.<序号>`），拼进 `/live` 的地址。播放器销毁（关弹层、切档位、重连）时
+ * - 连接号：每次建播放器一个（`<会话号>.<序号>`），拼进 `/live` 的地址。播放器销毁（离开预览页、切档位、重连）时
  *   `DELETE /v1/streamers/{id}/live?conn=` 立即释放；页面关闭时用 `sendBeacon` 发同一路径的 POST 兜底。
  * - 开着的连接一变，码率 WebSocket 就把整份集合发给服务端（{@link openPreviewsMessage}），
  *   不在集合里的连接由服务端结束——哪次 DELETE 丢了也不会留下幽灵连接。只在变化时发，不靠定时器。
