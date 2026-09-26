@@ -11,7 +11,7 @@ import {
   useNowSec,
   canPreview,
 } from '@/app/lib/use-dashboard'
-import { LivePreviewButton, LivePreviewModal } from './LivePreview'
+import { LivePreviewButton, useOpenLivePage } from './LivePreview'
 import { MarkerCount } from './MarkerControls'
 import { LiveRateChart, SPARK_RATE_WINDOW_MS, useCardRateChart } from './LiveRateChart'
 import styles from './streamer-card.module.scss'
@@ -50,7 +50,7 @@ function platTint(color: string): string {
  * 录制中的直播间封面缩略图(16:9,懒加载)。
  * 加载失败就整块消失,卡片回到没有封面时的样式;加载中显示占位底色。
  * 调用方用 key={src} 挂载,封面地址变化时状态自然重置。
- * 传入 onPreview 时封面可点击,中央显示播放标记,点击打开直播预览。
+ * 传入 onPreview 时封面可点击,中央显示播放标记,点击进入直播预览页。
  */
 export function LiveCover({
   src,
@@ -61,7 +61,7 @@ export function LiveCover({
 }: {
   src: string
   alt: string
-  onPreview?: () => void
+  onPreview?: (e: React.MouseEvent | React.KeyboardEvent) => void
   /** 叠在封面底部的一层（码率 sparkline）；点击会冒泡到封面本身的 onClick */
   overlay?: React.ReactNode
   /** 加载结果回调：父组件据此决定 overlay 放不放得下（加载失败整块消失） */
@@ -83,7 +83,7 @@ export function LiveCover({
           ? (e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault()
-                onPreview?.()
+                onPreview?.(e)
               }
             }
           : undefined
@@ -160,8 +160,8 @@ export default function StreamerCard({
   const live = streamer.status === 'Working'
   const paused = streamer.status === 'Pause'
   const name = streamer.remark || streamer.url
-  // 封面点击打开的预览弹层;按钮自带一套,两处入口共用同一个弹层状态
-  const [previewOpen, setPreviewOpen] = useState(false)
+  // 封面和「预览」按钮都进直播预览页
+  const openLivePage = useOpenLivePage()
   const previewable = canPreview(streamer)
 
   const lastRec = info?.date && !live ? timeAgo(info.date) : null
@@ -235,7 +235,7 @@ export default function StreamerCard({
           key={coverSrc}
           src={coverSrc}
           alt={`${name} 的直播间封面`}
-          onPreview={previewable ? () => setPreviewOpen(true) : undefined}
+          onPreview={previewable ? (e) => openLivePage(streamer.id, e) : undefined}
           overlay={coverShown ? sparkline : null}
           onStateChange={(s) => setCoverFailed(s === 'error')}
         />
@@ -284,13 +284,6 @@ export default function StreamerCard({
       </a>
       <div className={styles.meta}>{uploadStatusTag(streamer.upload_status)}</div>
       {actions ? <div className={styles.actions}>{actions}</div> : null}
-      {previewOpen ? (
-        <LivePreviewModal
-          streamer={streamer}
-          visible={previewOpen}
-          onClose={() => setPreviewOpen(false)}
-        />
-      ) : null}
     </article>
   )
 }

@@ -1,37 +1,32 @@
 'use client'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
-import { Button, Modal, Radio, RadioGroup, Switch, Tag, Toast, Tooltip, Typography } from '@douyinfe/semi-ui'
-import { IconChevronDown, IconPlay, IconRefresh } from '@douyinfe/semi-icons'
+import { useRouter } from 'next/navigation'
+import { Button, Tooltip } from '@douyinfe/semi-ui'
+import { IconPlay, IconRefresh } from '@douyinfe/semi-icons'
 import type { ButtonProps } from '@douyinfe/semi-ui/lib/es/button'
 import { LiveStreamerEntity, revalidateMe } from '@/app/lib/api-streamer'
-import { platformName } from '@/app/lib/status'
 import {
   canPreview,
   directPlayableUrl,
   fetchLiveUrl,
-  formatRate,
   liveImageUrl,
   livePreviewUrl,
   previewDisabledReason,
-  previewFormatLabel,
   usePreviewTransport,
 } from '@/app/lib/use-dashboard'
-import { useBoolPref, useEnumPref } from '@/app/lib/use-local-pref'
+import { useEnumPref } from '@/app/lib/use-local-pref'
 import { relayLease } from '@/app/lib/preview-lease'
 import { holdPreviewLease } from '@/app/lib/use-live-rates'
-import { type DanmakuFeed, useDanmakuFeed } from '@/app/lib/danmaku-feed'
+import type { DanmakuFeed } from '@/app/lib/danmaku-feed'
 import {
   type LatencyProfile,
   type LiveBufferPolicy,
   RELAY_PROFILES,
-  RELAY_PROFILES_SEGMENTED,
   relayPolicy,
   snapshotMsFor,
   type StallInfo,
 } from '@/app/lib/live-buffer'
-import { LiveRateChart, LiveRateSummary, MODAL_RATE_WINDOW_MS } from './LiveRateChart'
-import { LiveMarkBar } from './MarkerControls'
 import styles from './live-preview.module.scss'
 
 const Players = dynamic(() => import('@/app/ui/Player'), { ssr: false })
@@ -44,9 +39,7 @@ const RECONNECT_DELAY_MS = 2000
  * 重连计数清零，长时间开着的预览不会在第 4 次到期时停下
  */
 const RESET_ATTEMPTS_AFTER_MS = 60_000
-/** 弹层弹幕开关记在本地，默认开；监视器另有自己的开关（默认关） */
-const MODAL_DANMAKU_KEY = 'biliup.preview.danmaku'
-/** 中转延迟档位（弹层与监视器共用），默认低延迟；卡顿后本次播放自动升到流畅 */
+/** 中转延迟档位（预览页与监视器共用），默认低延迟；卡顿后本次播放自动升到流畅 */
 const LATENCY_PROFILE_KEY = 'biliup.preview.latency'
 const LATENCY_PROFILES: readonly LatencyProfile[] = ['low', 'smooth']
 /** 低延迟档下，稳态里一次卡住这么久、或 60 s 内卡两次，就升到流畅档重连 */
@@ -57,8 +50,6 @@ const ESCALATE_WINDOW_MS = 60_000
 export function useLatencyProfile(): [LatencyProfile, (v: LatencyProfile) => void] {
   return useEnumPref(LATENCY_PROFILE_KEY, LATENCY_PROFILES, 'low')
 }
-/** 弹层底部的码率折线默认展开，折叠状态记在本地 */
-const MODAL_RATE_CHART_KEY = 'biliup.preview.rateChart'
 
 type Phase = 'connecting' | 'playing' | 'reconnecting' | 'ended' | 'error'
 
@@ -81,7 +72,7 @@ type Source =
  *
  * 播放器（Artplayer + mpegts.js）挂在 `key={nonce}` 上，重连即换 key 重建；
  * 组件卸载时播放器销毁、fetch 中止，服务端随之释放该连接的槽位。
- * 既用于卡片弹层，也用于历史记录页的监视器小窗。
+ * 既用于直播预览页，也用于历史记录页的监视器小窗。
  */
 export function LivePreviewPlayer({
   streamer,
@@ -404,154 +395,32 @@ export function LivePreviewPlayer({
   )
 }
 
-/** 卡片里的「预览」弹层：关闭即卸载播放器、断开连接。 */
-export function LivePreviewModal({
-  streamer,
-  visible,
-  onClose,
-}: {
-  streamer: LiveStreamerEntity
-  visible: boolean
-  onClose: () => void
-}) {
-  const { Text } = Typography
-  const name = streamer.remark || streamer.url
-  const rate = formatRate(streamer.live_bytes_per_sec)
-  const format = streamer.preview?.format
-  const danmakuAvailable = !!streamer.preview?.danmaku
-  const [danmakuPref, setDanmakuPref] = useBoolPref(MODAL_DANMAKU_KEY, true)
-  const danmakuOn = visible && danmakuAvailable && danmakuPref
-  const danmakuFeed = useDanmakuFeed([streamer.id], danmakuOn)
-  const [chartOpen, setChartOpen] = useBoolPref(MODAL_RATE_CHART_KEY, true)
-  const transport = usePreviewTransport()
-  const [latency, setLatency] = useLatencyProfile()
-  const subscribers = streamer.preview?.subscribers
-  const maxSubscribers = streamer.preview?.max_subscribers
-  const notifiedRef = useRef(false)
-  const playerRootRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!visible) notifiedRef.current = false
-  }, [visible])
-  const handleFatal = useCallback(
-    (text: string) => {
-      if (notifiedRef.current) return
-      notifiedRef.current = true
-      Toast.error({ content: `预览中断：${text}`, duration: 4 })
-    },
-    []
-  )
+/** 直播预览页的地址（静态导出不支持动态路由，直播间走查询串） */
+export function livePageHref(id: number): string {
+  return `/live?streamer=${id}`
+}
 
-  return (
-    <Modal
-      visible={visible}
-      onCancel={onClose}
-      closeOnEsc
-      footer={null}
-      className={styles.modal}
-      style={{ width: 'min(960px, 94vw)' }}
-      bodyStyle={{ padding: 0 }}
-      title={
-        <div className={styles.modalTitle}>
-          <span className={styles.modalName} title={name}>
-            {name}
-          </span>
-          <Tag size="small" color="green">
-            {platformName(streamer.url)}
-          </Tag>
-          {previewFormatLabel(format) ? (
-            <Tag size="small" color="grey">
-              {previewFormatLabel(format)}
-            </Tag>
-          ) : null}
-          <Text type="tertiary" size="small">
-            {rate ? `写盘 ${rate}` : '写盘速率 —'}
-          </Text>
-          <Tooltip
-            content={
-              danmakuAvailable
-                ? '显示录制中的实时弹幕（来自本进程的弹幕客户端）'
-                : '这一路没有弹幕客户端：平台不支持，或未开启对应的 *_danmaku 配置（B 站 / 抖音 / 斗鱼 / 虎牙可开）'
-            }
-          >
-            <span className={styles.danmakuSwitch}>
-              <Text type="tertiary" size="small">
-                弹幕
-              </Text>
-              <Switch
-                size="small"
-                checked={danmakuAvailable && danmakuPref}
-                disabled={!danmakuAvailable}
-                onChange={(v) => setDanmakuPref(!!v)}
-                aria-label="弹幕"
-              />
-            </span>
-          </Tooltip>
-          {transport === 'relay' ? (
-            <Tooltip
-              content={`中转缓冲深度，也就是画面延迟。低延迟：FLV 约 ${RELAY_PROFILES.low.target} s、HLS 分片流（fMP4 / TS）约 ${RELAY_PROFILES_SEGMENTED.low.target} s，链路抖动大时可能偶发缓冲，卡了会自动切到流畅；流畅：约 ${RELAY_PROFILES.smooth.target} s。直连 CDN 时不适用`}
-            >
-              <span className={styles.danmakuSwitch}>
-                <RadioGroup
-                  type="button"
-                  buttonSize="small"
-                  value={latency}
-                  onChange={(e) => setLatency(e.target.value as LatencyProfile)}
-                  aria-label="中转延迟"
-                >
-                  <Radio value="low">低延迟</Radio>
-                  <Radio value="smooth">流畅</Radio>
-                </RadioGroup>
-              </span>
-            </Tooltip>
-          ) : null}
-        </div>
+/**
+ * 打开直播预览页：普通点击在本标签页里跳转；按住 Ctrl / ⌘ / Shift 点击在新标签页打开
+ * （新标签页有自己的租约会话，和本页互不影响）。
+ */
+export function useOpenLivePage(): (id: number, e?: React.MouseEvent | React.KeyboardEvent) => void {
+  const router = useRouter()
+  return useCallback(
+    (id, e) => {
+      const href = livePageHref(id)
+      if (e && (e.ctrlKey || e.metaKey || e.shiftKey)) {
+        window.open(href, '_blank', 'noopener')
+        return
       }
-    >
-      {/* 弹层关闭即卸载：不留后台连接 */}
-      <div ref={playerRootRef}>
-        {visible ? (
-          <LivePreviewPlayer streamer={streamer} danmakuFeed={danmakuOn ? danmakuFeed : null} onFatal={handleFatal} />
-        ) : null}
-      </div>
-      <LiveMarkBar streamer={streamer} playerRoot={playerRootRef} active={visible} />
-      {/* 写盘速率折线：每秒轮询瘦端点 /v1/live-rates，最近 3 分钟；折叠时不轮询、不加载 uPlot */}
-      <section className={styles.rateSection} data-open={chartOpen ? 'true' : 'false'}>
-        <button
-          type="button"
-          className={styles.rateHead}
-          onClick={() => setChartOpen(!chartOpen)}
-          aria-expanded={chartOpen}
-          aria-controls={`live-rate-chart-${streamer.id}`}
-        >
-          <IconChevronDown className={styles.rateChevron} aria-hidden="true" />
-          <span className={styles.rateTitle}>写盘速率 · 最近 3 分钟</span>
-          {visible && chartOpen ? <LiveRateSummary id={streamer.id} windowMs={MODAL_RATE_WINDOW_MS} /> : null}
-        </button>
-        {visible && chartOpen ? (
-          <div id={`live-rate-chart-${streamer.id}`} className={styles.rateBody}>
-            <LiveRateChart id={streamer.id} windowMs={MODAL_RATE_WINDOW_MS} variant="full" height={150} label={name} />
-          </div>
-        ) : null}
-      </section>
-      <div className={styles.modalFoot}>
-        <Text type="tertiary" size="small">
-          {transport === 'direct'
-            ? '直连模式：能直连的平台由浏览器直接向 CDN 拉流，不经 biliup；不能的自动回落到录制流中转（角标标出原因）。关闭弹窗即断开。'
-            : '画面来自正在写盘的同一路流，不另外向直播平台拉流；关闭弹窗即断开。'}
-          {subscribers !== undefined && maxSubscribers ? (
-            <>
-              {' '}
-              这一路当前 {subscribers}/{maxSubscribers} 路中转预览，满了再打开会接替最早的一路。
-            </>
-          ) : null}
-        </Text>
-      </div>
-    </Modal>
+      router.push(href)
+    },
+    [router]
   )
 }
 
 /**
- * 「预览」按钮 + 弹层。录制中且下载器能旁路时可点；否则禁用并用 tooltip 说明原因
+ * 「预览」按钮：进入直播预览页。录制中且下载器能旁路时可点；否则禁用并用 tooltip 说明原因
  * （ffmpeg / streamlink 子进程落盘、fMP4、HEVC、容器尚未确定）。
  */
 export function LivePreviewButton({
@@ -567,7 +436,7 @@ export function LivePreviewButton({
   iconOnly?: boolean
   className?: string
 }) {
-  const [open, setOpen] = useState(false)
+  const openLivePage = useOpenLivePage()
   const enabled = canPreview(streamer)
   const reason = previewDisabledReason(streamer)
   const button = (
@@ -581,25 +450,18 @@ export function LivePreviewButton({
       aria-label={iconOnly ? '预览' : undefined}
       onClick={(e) => {
         e.stopPropagation()
-        setOpen(true)
+        openLivePage(streamer.id, e)
       }}
     >
       {iconOnly ? null : '预览'}
     </Button>
   )
-  return (
-    <>
-      {enabled ? (
-        button
-      ) : (
-        <Tooltip content={reason ?? '暂不可预览'}>
-          {/* disabled 按钮不触发鼠标事件，包一层让 tooltip 仍能弹出 */}
-          <span className={styles.disabledWrap}>{button}</span>
-        </Tooltip>
-      )}
-      {open ? (
-        <LivePreviewModal streamer={streamer} visible={open} onClose={() => setOpen(false)} />
-      ) : null}
-    </>
+  return enabled ? (
+    button
+  ) : (
+    <Tooltip content={reason ?? '暂不可预览'}>
+      {/* disabled 按钮不触发鼠标事件，包一层让 tooltip 仍能弹出 */}
+      <span className={styles.disabledWrap}>{button}</span>
+    </Tooltip>
   )
 }

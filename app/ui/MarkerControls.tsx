@@ -199,7 +199,7 @@ export function showMarkerToast(marker: Marker) {
 }
 
 /**
- * 预览弹层里的「标记」：按钮 + 快捷键 M（弹层打开期间）。
+ * 直播预览页里的「标记」：按钮 + 快捷键 M（在预览页期间）。
  * 标记的是屏幕上正在放的这一帧：按下时刻减去播放器延迟，由服务端换算成场次时间。
  */
 export function LiveMarkBar({
@@ -210,7 +210,7 @@ export function LiveMarkBar({
   streamer: LiveStreamerEntity
   /** 播放区容器，从里面找 `<video>` 读缓冲深度 */
   playerRoot: React.RefObject<HTMLDivElement | null>
-  /** 弹层打开时才响应快捷键 */
+  /** 为 true 时才响应快捷键 */
   active: boolean
 }) {
   const { Text } = Typography

@@ -1,7 +1,9 @@
-/* 直播预览：卡片弹层播放区 + 监视器小窗共用 */
+/* 直播预览：预览页播放区 + 监视器小窗共用 */
 
 .player {
   position: relative;
+  /* Artplayer 内部各层带 z-index（视频层就是 10），不隔开会压过页面里吸顶的页头 */
+  isolation: isolate;
   width: 100%;
   aspect-ratio: 16 / 9;
   background: #000;
@@ -57,30 +59,6 @@
   word-break: break-word;
 }
 
-/* ===== 弹层 ===== */
-.modal :global(.semi-modal-header) {
-  margin-bottom: 0;
-  padding-bottom: 12px;
-}
-
-.modalTitle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  /* 右侧留出关闭按钮的位置 */
-  padding-right: 28px;
-}
-
-.modalName {
-  font-size: 15px;
-  font-weight: 650;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-
 /* 取流方式角标：左上角，不挡播放器控制栏 */
 .badge {
   position: absolute;
@@ -112,74 +90,6 @@
   font-size: 11px;
   line-height: 16px;
   padding: 1px 6px;
-}
-
-.danmakuSwitch {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-  flex-shrink: 0;
-}
-
-.modalFoot {
-  padding: 10px 24px 14px;
-}
-
-/* ===== 弹层底部：写盘速率折线（可折叠） ===== */
-.rateSection {
-  border-top: 1px solid var(--semi-color-border);
-}
-.rateHead {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 24px;
-  border: 0;
-  background: transparent;
-  color: var(--semi-color-text-1);
-  font: inherit;
-  font-size: 12.5px;
-  text-align: left;
-  cursor: pointer;
-}
-.rateHead:hover {
-  background: var(--semi-color-fill-0);
-}
-.rateHead:focus-visible {
-  outline: 2px solid var(--semi-color-primary);
-  outline-offset: -2px;
-}
-.rateTitle {
-  font-weight: 600;
-  white-space: nowrap;
-  margin-right: auto;
-}
-.rateChevron {
-  flex-shrink: 0;
-  color: var(--semi-color-text-2);
-  transition: transform 0.15s ease;
-}
-.rateSection[data-open='false'] .rateChevron {
-  transform: rotate(-90deg);
-}
-.rateBody {
-  padding: 4px 24px 8px;
-}
-@media (max-width: 600px) {
-  .rateHead {
-    flex-wrap: wrap;
-    padding: 8px 16px;
-  }
-  .rateBody {
-    padding: 4px 12px 8px;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .rateChevron {
-    transition: none;
-  }
 }
 
 /* disabled 的按钮不响应鼠标，包一层让 Tooltip 仍能弹出 */

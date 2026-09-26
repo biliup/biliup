@@ -135,6 +135,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
 
 /** 不在侧栏里、但同样需要权限的子页面（按前缀匹配，先匹配到的生效） */
 const EXTRA_PAGE_PERMS: { prefix: string; perm: Permission }[] = [
+  { prefix: '/live', perm: 'preview.view' },
   { prefix: '/upload-manager/add', perm: 'template.edit' },
   { prefix: '/upload-manager/edit', perm: 'template.edit' },
   { prefix: '/replay', perm: 'file.view' },
