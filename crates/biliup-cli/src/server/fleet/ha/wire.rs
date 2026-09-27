@@ -5,6 +5,7 @@
 //! 控制面只把次版本 ≥ 4 的节点指定为备机；节点只在这条连接上收到过带 [`HaAssignment`] 的期望状态之后才发。
 
 use super::params::{HaMode, HaParams};
+use super::store::Pair;
 use serde::{Deserialize, Serialize};
 
 /// 期望状态里的主副角色：控制面只发给备机
@@ -18,6 +19,17 @@ pub struct HaAssignment {
     /// 镜像过来的房间（控制面房间 id）；它们与本机被分派的房间一起在期望状态的 `rooms` 里
     #[serde(default)]
     pub rooms: Vec<i64>,
+}
+
+impl HaAssignment {
+    pub fn of(pair: &Pair, rooms: Vec<i64>) -> Self {
+        HaAssignment {
+            mode: pair.mode,
+            params: pair.params,
+            primary: pair.primary_node_id,
+            rooms,
+        }
+    }
 }
 
 /// 主机那份没投的原因
@@ -181,6 +193,14 @@ pub enum HaMessage {
     StandbyReport {
         sessions: Vec<ReportedSession>,
     },
+    /// 备机的一场进入了主机从别的消息推不出来的状态（等主机、待人工、放弃、不用投）；主机据此列出待人工的场次
+    SessionState {
+        key: String,
+        room: i64,
+        state: ReportedState,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
     /// 主机界面上点的人工处理，转给备机执行
     Manual {
         key: String,
@@ -199,6 +219,7 @@ impl HaMessage {
             | HaMessage::Uploaded { key, .. }
             | HaMessage::UploadFailed { key, .. }
             | HaMessage::UploadSkipped { key, .. }
+            | HaMessage::SessionState { key, .. }
             | HaMessage::Manual { key, .. } => Some(key),
             HaMessage::StandbyReport { .. } => None,
         }
@@ -214,6 +235,7 @@ impl HaMessage {
             HaMessage::UploadFailed { .. } => "upload_failed",
             HaMessage::UploadSkipped { .. } => "upload_skipped",
             HaMessage::StandbyReport { .. } => "standby_report",
+            HaMessage::SessionState { .. } => "session_state",
             HaMessage::Manual { .. } => "manual",
         }
     }

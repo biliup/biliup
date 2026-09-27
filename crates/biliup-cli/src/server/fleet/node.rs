@@ -816,7 +816,7 @@ async fn session(
                 }
                 Ok(Some(ControllerMessage::DesiredState(desired))) => {
                     // 备机的上报先于落地房间：主机只等它 10 秒
-                    if let Some(report) = ha.assign(desired.ha.clone(), &ha_link)
+                    if let Some(report) = ha.assign(desired.ha.clone(), &desired.rooms, &ha_link)
                         && let Err(e) = protocol::write_frame(&mut send, &NodeMessage::Ha(report)).await
                     {
                         debug!(error = %e, "fleet HA report failed");

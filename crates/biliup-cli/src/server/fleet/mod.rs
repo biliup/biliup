@@ -198,13 +198,15 @@ impl Fleet {
         }
     }
 
-    /// 控制面的 `/v1/fleet/*` 路由；被移除过的节点（与控制面的「本机」）的 `/v1/node/revoked*`
+    /// 控制面的 `/v1/fleet/*` 路由；节点的 `/v1/node/ha*`（被指定为备机时才有）；
+    /// 被移除过的节点（与控制面的「本机」）的 `/v1/node/revoked*`
     pub fn router(&self) -> Option<axum::Router<()>> {
         let controller = match &self.role {
             Role::Controller(controller, _) => {
                 Some(crate::server::api::fleet::router(controller.clone()))
             }
-            _ => None,
+            Role::Node(..) => Some(crate::server::api::fleet_ha::node_router()),
+            Role::Standalone => None,
         };
         let revoked = self.revoked.clone().map(|revoked| {
             let router = crate::server::api::fleet::revoked_router(revoked.clone());
@@ -349,6 +351,9 @@ async fn start_controller_role(
     let revoked = Arc::new(Revoked::load(revoked_file, services.clone()));
     revoked.apply().await;
     let controller = start_controller(options).await?;
+    // 先挂上配对：之前就连上来的备机等配对载入完再收期望状态，不会先收到一份不带配对的而解除
+    let pairing = Arc::new(ha::pairing::Pairing::new(services.clone()));
+    controller.attach_ha(pairing.clone());
     let managed = ManagedHandle::default();
     let local = Arc::new(local::LocalNode::new(
         Path::new(local::LOCAL_NODE_FILE).to_path_buf(),
@@ -357,9 +362,7 @@ async fn start_controller_role(
         revoked.clone(),
     ));
     local.resume(&controller).await;
-    let pairing = Arc::new(ha::pairing::Pairing::new(services.clone()));
-    pairing.resume(&controller).await;
-    controller.attach_ha(pairing);
+    pairing.resume(&controller, local.node_id()).await;
     Ok(Fleet::controller(controller, local, managed, revoked))
 }
 

@@ -707,6 +707,30 @@ mod tests {
                 ..
             })
         ));
+        let manual = NodeMessage::Ha(HaMessage::SessionState {
+            key: "standby:7:3000".into(),
+            room: 7,
+            state: ReportedState::Manual,
+            reason: Some("主机投稿失败，模式 2 待人工".into()),
+        });
+        let json = serde_json::to_value(&manual).unwrap();
+        assert_eq!(json["kind"], "session_state");
+        assert_eq!(json["state"], "manual");
+        let NodeMessage::Ha(back) = serde_json::from_value(json).unwrap() else {
+            panic!()
+        };
+        let NodeMessage::Ha(manual) = manual else {
+            panic!()
+        };
+        assert_eq!(back, manual);
+        let bare: NodeMessage = serde_json::from_value(serde_json::json!({
+            "type": "ha", "kind": "session_state", "key": "7:1", "room": 7, "state": "done",
+        }))
+        .unwrap();
+        assert!(matches!(
+            bare,
+            NodeMessage::Ha(HaMessage::SessionState { reason: None, .. })
+        ));
         // 次版本 3 的一端不认识 `ha`
         #[derive(Deserialize)]
         #[serde(tag = "type", rename_all = "snake_case")]

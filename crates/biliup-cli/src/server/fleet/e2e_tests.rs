@@ -1532,3 +1532,238 @@ async fn a_local_node_file_from_another_controller_is_dropped() {
     assert!(!fx.file.exists() && !fx.state().exists());
     controller.shutdown().await;
 }
+
+/// 一主一备的控制面一侧：主机是「本机」，指定一台普通节点当备机。「本机」的房间与模板镜像给备机
+/// （边录边传的不镜像），第三台节点不受影响，F2 的分派不变；备机连上先上报；改模式就地生效；
+/// 解除后备机的镜像房间撤掉；备机被移除时配对跟着解除。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_local_node_is_mirrored_to_a_designated_standby() {
+    use super::ha::agent::{load as load_ha_state, state_path as ha_state_path};
+    use super::ha::pairing::{Designate, Pairing, Refused};
+    use super::ha::params::HaMode;
+
+    let _role = super::ha::test_guard().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (controller, url, pool) = start_controller(dir.path()).await;
+    let fx = LocalFixture::new(dir.path()).await;
+    // 与 `fleet::start` 同序：先挂配对，「本机」恢复之后再载入
+    let pairing = Arc::new(Pairing::new(fx.services.clone()));
+    controller.attach_ha(pairing.clone());
+    let local = fx.attach(&controller).await;
+    controller.attach_local(local.clone());
+    pairing.resume(&controller, local.node_id()).await;
+    let designate = |standby: i64, mode: u8| -> Designate {
+        serde_json::from_value(serde_json::json!({ "standby": standby, "mode": mode })).unwrap()
+    };
+
+    let refused = pairing
+        .designate(&controller, designate(2, 1))
+        .await
+        .unwrap();
+    assert!(
+        matches!(&refused, Err(Refused::Conflict(m)) if m.contains("启用「本机」")),
+        "{refused:?}"
+    );
+
+    let primary = local.enable(&controller, false).await.unwrap().unwrap();
+    wait_for_node(&controller, primary, true, Duration::from_secs(30)).await;
+    let mut nodes = Vec::new();
+    for name in ["standby", "other"] {
+        let root = dir.path().join(name);
+        let node_file = root.join("data/node.json");
+        let joined = node::join(
+            &ticket_for(&controller, &pool, &url).await,
+            false,
+            &node_file,
+        )
+        .await
+        .unwrap();
+        let services = node_services(&root).await;
+        let agent = NodeAgent::start(
+            node_file.clone(),
+            services.clone(),
+            ManagedHandle::default(),
+            revoked_for(&node_file, &services),
+        )
+        .await
+        .unwrap();
+        wait_for_node(&controller, joined.node_id, true, Duration::from_secs(30)).await;
+        nodes.push((joined.node_id, services, agent, node_file));
+    }
+    let (standby, other) = (nodes[0].0, nodes[1].0);
+    let (standby_services, other_services) = (nodes[0].1.clone(), nodes[1].1.clone());
+    let standby_state = ha_state_path(&nodes[0].3);
+
+    let template = controller
+        .create_template(
+            serde_json::from_value(
+                serde_json::json!({ "template_name": "ha", "title": "{title}" }),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let room = |url: &str, node: i64, downloader: Option<&str>| -> CreateRoom {
+        serde_json::from_value(serde_json::json!({
+            "url": url, "remark": "房间", "template_id": template.id, "node_id": node,
+            "override": downloader.map(|downloader| serde_json::json!({ "downloader": downloader })),
+        }))
+        .unwrap()
+    };
+    let mirrored = controller
+        .create_room(room("https://stuck.example/m", primary, None))
+        .await
+        .unwrap();
+    let sync = controller
+        .create_room(room(
+            "https://stuck.example/s",
+            primary,
+            Some("sync-downloader"),
+        ))
+        .await
+        .unwrap();
+    controller
+        .create_room(room("https://stuck.example/o", other, None))
+        .await
+        .unwrap();
+    eventually("rooms land", Duration::from_secs(20), || {
+        let (local, other) = (fx.services.clone(), other_services.clone());
+        async move { local_urls(&local).await.len() == 2 && local_urls(&other).await.len() == 1 }
+    })
+    .await;
+
+    // 备机不能是「本机」，也得是存在的节点
+    let refused = pairing
+        .designate(&controller, designate(primary, 1))
+        .await
+        .unwrap();
+    assert!(matches!(refused, Err(Refused::Invalid(_))), "{refused:?}");
+    let refused = pairing
+        .designate(&controller, designate(999, 1))
+        .await
+        .unwrap();
+    assert!(matches!(refused, Err(Refused::NotFound(_))), "{refused:?}");
+    assert!(!standby_state.exists());
+
+    let pair = pairing
+        .designate(&controller, designate(standby, 1))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (pair.primary_node_id, pair.standby_node_id),
+        (primary, standby)
+    );
+    eventually(
+        "the standby records the mirror",
+        Duration::from_secs(20),
+        || {
+            let services = standby_services.clone();
+            async move { local_urls(&services).await == ["https://stuck.example/m"] }
+        },
+    )
+    .await;
+    eventually("the standby reports first", Duration::from_secs(20), || {
+        let (pairing, controller) = (pairing.clone(), controller.clone());
+        async move {
+            let view = pairing.view(&controller).await.unwrap();
+            view["standby"]["linked"] == true && view["standby"]["reported"] == true
+        }
+    })
+    .await;
+    let state = load_ha_state(&standby_state).expect("备机建了 ha-state.json");
+    let assignment = state.assignment.unwrap();
+    assert_eq!(assignment.rooms, [mirrored.id]);
+    assert_eq!(assignment.mode, HaMode::DualRecord);
+    let view = pairing.view(&controller).await.unwrap();
+    assert_eq!(view["active"], true);
+    assert_eq!(view["local_node"], primary);
+    assert_eq!(view["standby"]["proto"], super::protocol::PROTOCOL_MINOR);
+    assert_eq!(view["excluded"][0]["id"], sync.id);
+    assert_eq!(
+        local_urls(&other_services).await,
+        ["https://stuck.example/o"]
+    );
+    // 镜像不改分派：房间还在「本机」上，状态照常
+    let rooms = controller.rooms(true).await.unwrap();
+    let row = rooms.iter().find(|row| row.room.id == mirrored.id).unwrap();
+    assert_eq!(row.room.node_id, Some(primary));
+    assert_eq!(row.status, RoomStatus::Monitoring);
+
+    // 后加到「本机」的房间也镜像过去
+    controller
+        .create_room(room("https://stuck.example/n", primary, None))
+        .await
+        .unwrap();
+    eventually("new rooms are mirrored", Duration::from_secs(20), || {
+        let services = standby_services.clone();
+        async move { local_urls(&services).await.len() == 2 }
+    })
+    .await;
+
+    // 只改模式：就地生效，备机收到新的配对
+    pairing
+        .designate(&controller, designate(standby, 2))
+        .await
+        .unwrap()
+        .unwrap();
+    eventually(
+        "the standby switches to mode 2",
+        Duration::from_secs(20),
+        || {
+            let path = standby_state.clone();
+            async move {
+                load_ha_state(&path)
+                    .and_then(|state| state.assignment)
+                    .is_some_and(|assignment| assignment.mode == HaMode::Takeover)
+            }
+        },
+    )
+    .await;
+    assert!(
+        pairing
+            .manual("1:1", super::ha::wire::ManualAction::Drop)
+            .is_ok()
+    );
+
+    // 解除：备机撤掉镜像房间，ha-state.json 留着但不再有配对
+    assert!(pairing.dissolve(&controller).await.unwrap());
+    eventually("the mirror is withdrawn", Duration::from_secs(20), || {
+        let services = standby_services.clone();
+        async move { local_urls(&services).await.is_empty() }
+    })
+    .await;
+    eventually(
+        "the standby drops the pair",
+        Duration::from_secs(20),
+        || {
+            let path = standby_state.clone();
+            async move { load_ha_state(&path).is_some_and(|state| state.assignment.is_none()) }
+        },
+    )
+    .await;
+    assert!(!pairing.dissolve(&controller).await.unwrap());
+    assert_eq!(fx.services.managers.get_rooms().await.len(), 3);
+
+    // 备机被移除：配对跟着解除
+    pairing
+        .designate(&controller, designate(standby, 1))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(controller.revoke(standby).await.unwrap());
+    assert!(
+        super::ha::store::pair(controller.pool())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(pairing.view(&controller).await.unwrap()["active"], false);
+
+    for (_, _, agent, _) in nodes {
+        agent.shutdown().await;
+    }
+    pairing.shutdown();
+    local.shutdown().await;
+    controller.shutdown().await;
+}

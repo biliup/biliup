@@ -9,12 +9,14 @@
 use super::key;
 use super::standby::{Out, PrimaryView, SavedSegment, Session, StandbyCore, UnitData};
 use super::upload::{self, Plan, Submitted};
-use super::wire::{HaAssignment, HaMessage};
-use super::{Hold, Role, Unit, UnitOutput, set_role};
+use super::wire::{HaAssignment, HaMessage, ManualAction};
+use super::{Hold, Role, Unit, UnitOutput, set_role, sync_downloader};
 use crate::server::common::upload::execute_postprocessor;
+use crate::server::config::ConfigPatch;
 use crate::server::core::downloader::SegmentInfo;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::fleet::events;
+use crate::server::fleet::model::DesiredRoom;
 use crate::server::fleet::now_ms;
 use crate::server::fleet::reconcile::FleetState;
 use crate::server::infrastructure::context::Context;
@@ -22,8 +24,10 @@ use crate::server::infrastructure::service_register::ServiceRegister;
 use biliup::downloader::live::LiveStream;
 use error_stack::ResultExt;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use serde_json::json;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -33,6 +37,8 @@ use tracing::{debug, info, warn};
 pub const STATE_FILE_NAME: &str = "ha-state.json";
 const STATE_FILE_VERSION: u32 = 1;
 const TICK: Duration = Duration::from_secs(1);
+/// 认下的录制段留多久（按开播时刻）
+const UNIT_KEEP_MS: i64 = 48 * 60 * 60 * 1000;
 
 pub fn state_path(node_file: &Path) -> PathBuf {
     node_file.with_file_name(STATE_FILE_NAME)
@@ -117,6 +123,15 @@ fn window(services: &ServiceRegister) -> i64 {
     i64::try_from(minutes.saturating_mul(60_000)).unwrap_or(i64::MAX)
 }
 
+/// 镜像过来的一个房间
+#[derive(Debug, Clone)]
+struct Mirrored {
+    /// 控制面房间 id
+    id: i64,
+    /// 房间覆写（判断在本机是不是边录边传）
+    override_cfg: Option<ConfigPatch>,
+}
+
 /// 被指定为备机的节点进程里的备机
 pub struct Standby {
     core: Mutex<StandbyCore>,
@@ -124,8 +139,13 @@ pub struct Standby {
     controller: String,
     assignment: Mutex<HaAssignment>,
     services: ServiceRegister,
-    /// 镜像过来的房间：主播地址 → 控制面房间 id
-    rooms: RwLock<HashMap<String, i64>>,
+    /// 镜像过来的房间：主播地址 → 房间
+    rooms: RwLock<HashMap<String, Mirrored>>,
+    /// 开录时认下的录制段（地址, 开播时刻）→（房间, 备机场次键）。
+    /// 录到一半房间不再镜像（解除配对、改派走）时，这一段照样按场次走，不落到普通投稿流程
+    units: Mutex<HashMap<(String, i64), (i64, String)>>,
+    /// 配对已解除：手里的场次不再投，录到一半的段只留在本地
+    retired: AtomicBool,
     link: Mutex<Option<mpsc::UnboundedSender<HaMessage>>>,
     /// 正在投的场次
     uploading: Mutex<HashSet<String>>,
@@ -152,6 +172,8 @@ impl Standby {
             assignment: Mutex::new(assignment),
             services,
             rooms: RwLock::default(),
+            units: Mutex::default(),
+            retired: AtomicBool::new(false),
             link: Mutex::default(),
             uploading: Mutex::default(),
             tasks: Mutex::default(),
@@ -163,29 +185,34 @@ impl Standby {
         standby
     }
 
-    /// 解除配对或节点代理停止：停掉计时与在投的任务，场次留在 `ha-state.json`
-    fn stop(&self, dissolved: bool) {
+    /// 节点代理停止：停掉计时与在投的任务，场次留在 `ha-state.json`，重启后接着来
+    fn stop(&self) {
         for task in self.tasks.lock().unwrap().drain(..) {
             task.abort();
         }
         *self.link.lock().unwrap() = None;
-        if dissolved {
-            let core = self.core.lock().unwrap();
-            let state = HaState {
-                assignment: None,
-                ..self.state(&core)
-            };
-            if let Err(e) = save(&self.path, &state) {
-                warn!(error = ?e, "could not write {}", self.path.display());
-            }
+    }
+
+    /// 控制面解除了配对：停下，`ha-state.json` 去掉配对、场次留着备查。
+    /// 录到一半的镜像房间只把录像留在本地（[`Plan::Keep`]），主机那边照常投
+    fn retire(&self) {
+        self.retired.store(true, Ordering::Release);
+        self.stop();
+        let core = self.core.lock().unwrap();
+        if let Err(e) = save(&self.path, &self.state(&core)) {
+            warn!(error = ?e, "could not write {}", self.path.display());
         }
+    }
+
+    pub(crate) fn retired(&self) -> bool {
+        self.retired.load(Ordering::Acquire)
     }
 
     fn state(&self, core: &StandbyCore) -> HaState {
         HaState {
             version: STATE_FILE_VERSION,
             controller: self.controller.clone(),
-            assignment: Some(self.assignment.lock().unwrap().clone()),
+            assignment: (!self.retired()).then(|| self.assignment.lock().unwrap().clone()),
             sessions: core.sessions().cloned().collect(),
             primary: core.primary_views().cloned().collect(),
         }
@@ -206,7 +233,11 @@ impl Standby {
         let result = f(&mut core, now_ms());
         let dirty = core.take_dirty();
         self.persist(&core, dirty);
-        for out in core.take() {
+        let outs = core.take();
+        if self.retired() {
+            return result;
+        }
+        for out in outs {
             match out {
                 Out::Send(message) => {
                     if let Some(link) = self.link.lock().unwrap().as_ref() {
@@ -236,12 +267,39 @@ impl Standby {
         self.persist(&self.core.lock().unwrap(), true);
     }
 
-    fn set_rooms(&self, rooms: HashMap<String, i64>) {
-        *self.rooms.write().unwrap() = rooms;
+    fn set_rooms(&self, rooms: HashMap<String, Mirrored>) {
+        let config = self.services.config.read().unwrap().clone();
+        let sync = |rooms: &HashMap<String, Mirrored>| -> BTreeSet<i64> {
+            rooms
+                .values()
+                .filter(|room| sync_downloader(&config, room.override_cfg.clone()))
+                .map(|room| room.id)
+                .collect()
+        };
+        let mut current = self.rooms.write().unwrap();
+        let blocked = sync(&rooms);
+        if !blocked.is_empty() && blocked != sync(&current) {
+            warn!(rooms = ?blocked, "HA：这些镜像房间在本机是边录边传（sync-downloader），备机不录它们");
+        }
+        *current = rooms;
     }
 
     fn room_of(&self, url: &str) -> Option<i64> {
-        self.rooms.read().unwrap().get(url).copied()
+        self.rooms.read().unwrap().get(url).map(|room| room.id)
+    }
+
+    /// 镜像房间在本机的配置下是边录边传：备机不录（§5.1），不然主机投一份、备机边录边投又一份
+    fn sync_room(&self, url: &str) -> bool {
+        let Some(override_cfg) = self
+            .rooms
+            .read()
+            .unwrap()
+            .get(url)
+            .map(|room| room.override_cfg.clone())
+        else {
+            return false;
+        };
+        sync_downloader(&self.services.config.read().unwrap(), override_cfg)
     }
 
     /// 这条连接上第一次收到配对：接上连接，返回要先发的 `StandbyReport`
@@ -272,23 +330,45 @@ impl Standby {
     }
 
     pub(crate) fn mirrors(&self, url: &str) -> bool {
-        self.room_of(url).is_some()
+        !self.retired() && self.room_of(url).is_some()
     }
 
     pub(crate) fn hold(&self, url: &str) -> Option<Hold> {
         let room = self.room_of(url)?;
+        if self.retired() {
+            return None;
+        }
+        if self.sync_room(url) {
+            return Some(Hold {
+                reason: "这个镜像房间在本机是边录边传（sync-downloader），备机不录".into(),
+                quick: false,
+            });
+        }
         self.core.lock().unwrap().hold(now_ms(), room)
     }
 
+    /// 开录时认下的录制段
     fn id_of(&self, unit: &Unit) -> Option<(i64, String)> {
-        let room = self.room_of(&unit.url)?;
-        Some((room, key::standby_key(room, unit.started_at)))
+        self.units
+            .lock()
+            .unwrap()
+            .get(&(unit.url.clone(), unit.started_at))
+            .cloned()
     }
 
     pub(crate) fn unit_started(self: &Arc<Self>, unit: &Unit, ctx: &Context) {
-        let Some((room, id)) = self.id_of(unit) else {
+        if self.retired() {
+            return;
+        }
+        let Some(room) = self.room_of(&unit.url) else {
             return;
         };
+        let id = key::standby_key(room, unit.started_at);
+        {
+            let mut units = self.units.lock().unwrap();
+            units.retain(|(_, started_at), _| *started_at >= unit.started_at - UNIT_KEEP_MS);
+            units.insert((unit.url.clone(), unit.started_at), (room, id.clone()));
+        }
         let data = UnitData {
             url: unit.url.clone(),
             remark: ctx.live_streamer().remark.clone(),
@@ -300,23 +380,39 @@ impl Standby {
     }
 
     pub(crate) fn unit_ended(self: &Arc<Self>, unit: &Unit, output: UnitOutput) {
+        if self.retired() {
+            return;
+        }
         let Some((_, id)) = self.id_of(unit) else {
             return;
         };
         self.update(|core, now| core.unit_ended(now, &id, output.sent > 0));
     }
 
+    /// 镜像房间录下的段一律不走普通投稿流程：认下的交给场次，认不下的（开录时还不知道它是镜像房间、
+    /// 场次已经清掉、配对已解除）只把录像留在本地。备机自己分派到的普通房间照常投
     pub(crate) fn plan(self: &Arc<Self>, unit: &Unit) -> Option<Plan> {
-        let (_, id) = self.id_of(unit)?;
-        self.core
-            .lock()
-            .unwrap()
-            .session(&id)
-            .is_some()
-            .then(|| Plan::Collect {
-                standby: self.clone(),
-                id,
-            })
+        let tracked = self.id_of(unit);
+        if self.retired() {
+            return tracked.map(|_| Plan::Keep {
+                reason: "配对已解除，这一段由主机投",
+            });
+        }
+        match tracked {
+            Some((_, id)) if self.core.lock().unwrap().session(&id).is_some() => {
+                Some(Plan::Collect {
+                    standby: self.clone(),
+                    id,
+                })
+            }
+            Some(_) => Some(Plan::Keep {
+                reason: "这一场备机已经处理完",
+            }),
+            None if self.room_of(&unit.url).is_some() => Some(Plan::Keep {
+                reason: "开录时还没认下这个镜像房间",
+            }),
+            None => None,
+        }
     }
 
     pub(crate) fn segment(self: &Arc<Self>, id: &str, event: &SegmentInfo) {
@@ -334,6 +430,52 @@ impl Standby {
 
     pub(crate) fn begin_submit(self: &Arc<Self>, id: &str) -> bool {
         self.update(|core, now| core.begin_submit(now, id))
+    }
+
+    /// 备机本地节点页上点的人工处理（§6 H）；主机面板上点的经控制面转来，走 [`Self::primary_message`]
+    pub(crate) fn manual(self: &Arc<Self>, key: &str, action: ManualAction) -> Result<(), String> {
+        if self.retired() {
+            return Err("配对已解除".into());
+        }
+        info!(key, ?action, "HA：备机本地的人工处理");
+        self.update(|core, now| core.manual(now, key, action))
+    }
+
+    /// `GET /v1/node/ha`：配对、与主机的连接和手里的场次（不带开播信息与分段路径）
+    pub(crate) fn view(&self) -> serde_json::Value {
+        let assignment = self.assignment.lock().unwrap().clone();
+        let core = self.core.lock().unwrap();
+        let sessions: Vec<serde_json::Value> = core
+            .sessions()
+            .map(|session| {
+                json!({
+                    "id": session.id,
+                    "key": session.key,
+                    "room": session.room,
+                    "url": session.unit.url,
+                    "remark": session.unit.remark,
+                    "kind": session.kind,
+                    "state": session.state.as_str(),
+                    "started_at": session.started_at,
+                    "ended_at": session.ended_at,
+                    "takeover_of": session.takeover_of,
+                    "bvid": session.bvid,
+                    "reason": session.reason,
+                    "since": session.since,
+                    "collected": session.collected,
+                    "segments": session.unit.segments.len(),
+                })
+            })
+            .collect();
+        json!({
+            "mode": assignment.mode,
+            "params": assignment.params,
+            "primary": assignment.primary,
+            "rooms": assignment.rooms,
+            "linked": self.linked(),
+            "primary_offline": core.primary_offline(now_ms()),
+            "sessions": sessions,
+        })
     }
 
     fn spawn(self: &Arc<Self>, id: String, job: impl Future<Output = ()> + Send + 'static) {
@@ -482,8 +624,10 @@ pub struct NodeHa {
     /// 控制面进程内嵌的「本机」节点就是主机，不会是备机
     enabled: bool,
     standby: Option<Arc<Standby>>,
-    /// 期望状态里的房间：控制面房间 id → 主播地址
-    managed: HashMap<i64, String>,
+    /// 解除配对后留着的备机（角色还在，见 [`Standby::retire`]），重启或再次被指定时换掉
+    retired: Option<Arc<Standby>>,
+    /// 期望状态里的房间：控制面房间 id → 主播地址与覆写
+    managed: HashMap<i64, (String, Option<ConfigPatch>)>,
 }
 
 impl NodeHa {
@@ -501,6 +645,7 @@ impl NodeHa {
             services,
             enabled: !local,
             standby: None,
+            retired: None,
             managed: HashMap::new(),
         };
         if !ha.enabled {
@@ -532,16 +677,19 @@ impl NodeHa {
         );
         set_role(Some(Role::Standby(standby.clone())));
         self.standby = Some(standby);
+        self.retired = None;
     }
 
     pub fn is_standby(&self) -> bool {
         self.standby.is_some()
     }
 
-    /// 期望状态里的配对。这条连接上第一次收到配对时返回要先发的 `StandbyReport`
+    /// 期望状态里的配对（落地房间之前）。这条连接上第一次收到配对时返回要先发的 `StandbyReport`。
+    /// 镜像房间先按期望状态里的地址认下，免得落地之后、认下之前就开录的一段落到普通投稿流程
     pub fn assign(
         &mut self,
         assignment: Option<HaAssignment>,
+        rooms: &[DesiredRoom],
         link: &mpsc::UnboundedSender<HaMessage>,
     ) -> Option<HaMessage> {
         if !self.enabled {
@@ -550,11 +698,18 @@ impl NodeHa {
         let Some(assignment) = assignment else {
             if let Some(standby) = self.standby.take() {
                 warn!("HA：控制面解除了配对，本机不再是备机");
-                set_role(None);
-                standby.stop(true);
+                standby.retire();
+                self.retired = Some(standby);
             }
             return None;
         };
+        for room in rooms {
+            let entry = self
+                .managed
+                .entry(room.id)
+                .or_insert_with(|| (room.spec.url.clone(), None));
+            entry.1 = room.spec.override_cfg.clone();
+        }
         match &self.standby {
             Some(standby) => standby.assign(assignment),
             None => {
@@ -568,14 +723,23 @@ impl NodeHa {
         (!standby.linked()).then(|| standby.link_up(link.clone()))
     }
 
-    fn mirrored(&self) -> HashMap<String, i64> {
+    fn mirrored(&self) -> HashMap<String, Mirrored> {
         let Some(standby) = &self.standby else {
             return HashMap::new();
         };
         let wanted = standby.assignment.lock().unwrap().rooms.clone();
         wanted
             .into_iter()
-            .filter_map(|id| self.managed.get(&id).map(|url| (url.clone(), id)))
+            .filter_map(|id| {
+                let (url, override_cfg) = self.managed.get(&id)?;
+                Some((
+                    url.clone(),
+                    Mirrored {
+                        id,
+                        override_cfg: override_cfg.clone(),
+                    },
+                ))
+            })
             .collect()
     }
 
@@ -584,7 +748,15 @@ impl NodeHa {
         self.managed = fleet
             .rooms
             .iter()
-            .map(|(id, room)| (*id, room.url.clone()))
+            .map(|(id, room)| {
+                let override_cfg = room
+                    .applied
+                    .get("spec")
+                    .and_then(|spec| spec.get("override"))
+                    .filter(|value| !value.is_null())
+                    .and_then(|value| serde_json::from_value(value.clone()).ok());
+                (*id, (room.url.clone(), override_cfg))
+            })
             .collect();
         let rooms = self.mirrored();
         if let Some(standby) = &self.standby {
@@ -609,7 +781,10 @@ impl NodeHa {
     pub fn shutdown(&mut self) {
         if let Some(standby) = self.standby.take() {
             set_role(None);
-            standby.stop(false);
+            standby.stop();
+        }
+        if self.retired.take().is_some() {
+            set_role(None);
         }
     }
 }
@@ -770,7 +945,7 @@ mod tests {
             reason: "x".into(),
         });
         ha.link_down();
-        assert_eq!(ha.assign(None, &link), None);
+        assert_eq!(ha.assign(None, &[], &link), None);
         ha.set_rooms(f.reconciler.state());
         ha.shutdown();
         assert!(
@@ -780,7 +955,7 @@ mod tests {
 
         // 控制面进程内嵌的「本机」节点是主机，期望状态里带了配对也不当备机
         let mut local = f.resume(true);
-        assert_eq!(local.assign(Some(assignment(1)), &link), None);
+        assert_eq!(local.assign(Some(assignment(1)), &[], &link), None);
         assert!(!local.is_standby());
         assert!(!f.state_file().exists());
         assert!(frames.try_recv().is_err());
@@ -821,7 +996,7 @@ mod tests {
 
         let mut ha = f.resume(false);
         let (link, mut frames) = mpsc::unbounded_channel();
-        let report = ha.assign(Some(assignment(1)), &link);
+        let report = ha.assign(Some(assignment(1)), &[], &link);
         assert!(
             matches!(&report, Some(HaMessage::StandbyReport { sessions }) if sessions.is_empty())
         );
@@ -831,7 +1006,7 @@ mod tests {
             Some(assignment(1))
         );
         assert_eq!(
-            ha.assign(Some(assignment(1)), &link),
+            ha.assign(Some(assignment(1)), &[], &link),
             None,
             "同一条连接只上报一次"
         );
@@ -904,7 +1079,8 @@ mod tests {
         let mut ha = f.resume(false);
         assert!(ha.is_standby());
         let (link, _frames) = mpsc::unbounded_channel();
-        let Some(HaMessage::StandbyReport { sessions }) = ha.assign(Some(assignment(1)), &link)
+        let Some(HaMessage::StandbyReport { sessions }) =
+            ha.assign(Some(assignment(1)), &[], &link)
         else {
             panic!("重连后应先上报");
         };
@@ -916,21 +1092,109 @@ mod tests {
         assert_eq!(reported.bvid.as_deref(), Some("BVS0001"));
 
         // 改成模式 2：主机在线时备机只监控不录
-        assert_eq!(ha.assign(Some(assignment(2)), &link), None);
+        assert_eq!(ha.assign(Some(assignment(2)), &[], &link), None);
         assert_eq!(
             load(&f.state_file()).unwrap().assignment.unwrap().mode,
             HaMode::Takeover
         );
         assert!(crate::server::fleet::ha::hold_recording(URL).is_some());
 
-        // 解除配对：不再是备机，场次留在文件里备查
-        assert_eq!(ha.assign(None, &link), None);
+        // 重启前开录的那一段新进程不认识：镜像房间的段不落到普通投稿流程，只留在本地
+        assert!(matches!(
+            crate::server::fleet::ha::upload_plan(&ctx).await,
+            Some(Plan::Keep { .. })
+        ));
+        let in_flight = f.context(now_ms() - 60_000).await;
+        crate::server::fleet::ha::unit_started(&in_flight);
+        assert!(matches!(
+            crate::server::fleet::ha::upload_plan(&in_flight).await,
+            Some(Plan::Collect { .. })
+        ));
+
+        // 解除配对：不再是备机，场次留在文件里备查；录到一半的那段不投（主机投）
+        let submitted = double.entries().len();
+        assert_eq!(ha.assign(None, &[], &link), None);
         assert!(!ha.is_standby());
+        assert!(crate::server::fleet::ha::standby().is_none());
         assert_eq!(crate::server::fleet::ha::hold_recording(URL), None);
+        assert!(matches!(
+            crate::server::fleet::ha::upload_plan(&in_flight).await,
+            Some(Plan::Keep { .. })
+        ));
+        let later = f.context(now_ms()).await;
+        crate::server::fleet::ha::unit_started(&later);
+        assert!(
+            crate::server::fleet::ha::upload_plan(&later)
+                .await
+                .is_none(),
+            "解除之后开录的段照常投"
+        );
         let saved = load(&f.state_file()).unwrap();
         assert_eq!(saved.assignment, None);
-        assert_eq!(saved.sessions.len(), 1);
+        assert_eq!(saved.sessions.len(), 2);
+        assert_eq!(double.entries().len(), submitted, "解除之后没有再投");
+        ha.shutdown();
+        assert!(
+            crate::server::fleet::ha::upload_plan(&in_flight)
+                .await
+                .is_none()
+        );
         assert!(!f.resume(false).is_standby());
         double::install(None);
+    }
+
+    /// 镜像房间在落地之前就按期望状态认下；在本机配置下是边录边传的不录
+    #[tokio::test]
+    async fn mirrored_rooms_are_known_before_they_land_and_sync_rooms_are_not_recorded() {
+        let _guard = crate::server::fleet::ha::test_guard().await;
+        let f = Fixture::new().await;
+        let mut ha = f.resume(false);
+        let (link, _frames) = mpsc::unbounded_channel();
+        let desired = |id: i64, url: &str, downloader: Option<&str>| -> DesiredRoom {
+            serde_json::from_value(json!({
+                "id": id, "epoch": 1, "template_id": 1, "url": url, "remark": "r",
+                "override": downloader.map(|downloader| json!({ "downloader": downloader })),
+            }))
+            .unwrap()
+        };
+        let assignment: HaAssignment =
+            serde_json::from_value(json!({ "mode": 1, "primary": 1, "rooms": [7, 8] })).unwrap();
+        let rooms = [
+            desired(7, URL, None),
+            desired(8, "https://stuck.example/8", None),
+        ];
+        assert!(ha.assign(Some(assignment.clone()), &rooms, &link).is_some());
+        let standby = crate::server::fleet::ha::standby().unwrap();
+        assert!(
+            standby.mirrors("https://stuck.example/8"),
+            "还没落地的房间也认下"
+        );
+        assert_eq!(crate::server::fleet::ha::hold_recording(URL), None);
+
+        let rooms = [
+            desired(7, URL, Some("sync-downloader")),
+            desired(8, "https://stuck.example/8", None),
+        ];
+        assert_eq!(ha.assign(Some(assignment), &rooms, &link), None);
+        let hold = crate::server::fleet::ha::hold_recording(URL).expect("边录边传的镜像房间不录");
+        assert!(hold.reason.contains("边录边传"), "{}", hold.reason);
+        assert_eq!(
+            crate::server::fleet::ha::hold_recording("https://stuck.example/8"),
+            None
+        );
+
+        let view = standby.view();
+        assert_eq!(view["mode"], 1);
+        assert_eq!(view["rooms"], json!([7, 8]));
+        assert_eq!(view["linked"], true);
+        assert_eq!(view["sessions"], json!([]));
+        assert!(
+            standby
+                .manual("7:1", ManualAction::Drop)
+                .unwrap_err()
+                .contains("没有场次")
+        );
+        ha.shutdown();
+        assert!(crate::server::fleet::ha::standby().is_none());
     }
 }

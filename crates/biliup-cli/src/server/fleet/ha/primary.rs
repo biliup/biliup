@@ -129,6 +129,12 @@ impl PrimaryCore {
         self.params
     }
 
+    /// 控制面改了模式或参数；已经在进行的场次保持原来的情形
+    pub(crate) fn configure(&mut self, mode: HaMode, params: HaParams) {
+        self.mode = mode;
+        self.params = params;
+    }
+
     pub(crate) fn gate_open(&self) -> bool {
         self.gate_until.is_none()
     }
@@ -394,6 +400,20 @@ impl PrimaryCore {
                 self.note(now, &key, room, started_at, None, "failed", None);
                 if let Some(row) = self.touch(&key, now) {
                     row.reason = Some(reason);
+                }
+            }
+            HaMessage::SessionState {
+                key,
+                room,
+                state,
+                reason,
+            } => {
+                let started_at = key::parse(&key).map_or(now, |(_, started_at)| started_at);
+                self.note(now, &key, room, started_at, None, state.as_str(), None);
+                if reason.is_some()
+                    && let Some(row) = self.touch(&key, now)
+                {
+                    row.reason = reason;
                 }
             }
             HaMessage::UploadProgress { .. }
@@ -762,7 +782,8 @@ impl Primary {
             gate: watch::channel(false).0,
             tasks: Mutex::default(),
         });
-        let writing = tokio::spawn(async move {
+        // 写入任务不随 `stop` 中止：主机被换掉、解除配对时排着的写入照样落盘，最后一个引用放掉时结束
+        tokio::spawn(async move {
             while let Some(item) = queue.recv().await {
                 match item {
                     Write::Save(record) => {
@@ -778,7 +799,7 @@ impl Primary {
             }
         });
         let ticking = tokio::spawn(tick_loop(Arc::downgrade(&primary)));
-        primary.tasks.lock().unwrap().extend([writing, ticking]);
+        primary.tasks.lock().unwrap().push(ticking);
         primary.update(|_, _| ());
         info!(%mode, "HA：本机是主机");
         Ok(primary)
@@ -829,6 +850,29 @@ impl Primary {
 
     pub(crate) fn params(&self) -> HaParams {
         self.core.lock().unwrap().params()
+    }
+
+    pub(crate) fn configure(&self, mode: HaMode, params: HaParams) {
+        info!(%mode, "HA：配对的模式或参数改了");
+        self.update(|core, _| core.configure(mode, params));
+    }
+
+    /// 备机连着（收得到场次消息）
+    pub(crate) fn linked(&self) -> bool {
+        self.link.lock().unwrap().is_some()
+    }
+
+    /// 已经收到备机的上报（或等满了 10 秒）
+    pub(crate) fn reported(&self) -> bool {
+        self.core.lock().unwrap().gate_open()
+    }
+
+    /// 转给备机；没连着时返回 `false`
+    pub(crate) fn forward(&self, message: HaMessage) -> bool {
+        match self.link.lock().unwrap().as_ref() {
+            Some(link) => link.send(ControllerMessage::Ha(message)).is_ok(),
+            None => false,
+        }
     }
 
     pub(crate) fn set_rooms(&self, rooms: HashMap<String, i64>) {
@@ -1394,6 +1438,33 @@ mod tests {
         );
         let outs = core.take();
         assert_eq!(kinds(&outs), ["uploaded", "upload_failed"]);
+    }
+
+    /// 待人工、放弃这类状态备机单独告诉主机，主机面板据此列出待人工的场次
+    #[test]
+    fn standby_states_are_recorded_for_the_panel() {
+        let failed = SessionRecord {
+            reason: Some("拒稿".into()),
+            ..row("7:60000", 7, MIN, PrimaryState::Failed)
+        };
+        let mut core = core(HaMode::Takeover, vec![failed]);
+        online(&mut core, 0);
+        core.standby_message(
+            MIN,
+            HaMessage::SessionState {
+                key: "standby:7:120000".into(),
+                room: 7,
+                state: ReportedState::Manual,
+                reason: Some("主机那半投稿失败：拒稿".into()),
+            },
+        );
+        let outs = core.take();
+        let row = saved(&outs, "standby:7:120000").unwrap();
+        assert_eq!(row.standby_state.as_deref(), Some("manual"));
+        assert_eq!(row.reason.as_deref(), Some("主机那半投稿失败：拒稿"));
+        assert_eq!(row.primary_state, PrimaryState::None);
+        assert_eq!(row.started_at, 120_000);
+        assert!(sends(&outs).is_empty());
     }
 
     #[test]

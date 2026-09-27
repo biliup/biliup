@@ -38,6 +38,8 @@ pub enum Plan {
     Primary { primary: Arc<Primary>, key: String },
     /// 备机：只把分段收下，投不投录完再定
     Collect { standby: Arc<Standby>, id: String },
+    /// 备机：镜像房间里不归场次管的一段，只把录像留在本地
+    Keep { reason: &'static str },
 }
 
 impl Plan {
@@ -51,6 +53,14 @@ impl Plan {
             }
             Plan::Collect { standby, id } => {
                 collect(&standby, &id, rx).await;
+                Ok(())
+            }
+            Plan::Keep { reason } => {
+                let kept = drain(rx).await;
+                info!(
+                    url = ctx.live_streamer().url,
+                    kept, reason, "HA：镜像房间的这一段不投，录像留在本地"
+                );
                 Ok(())
             }
         }

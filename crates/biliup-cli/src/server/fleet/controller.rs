@@ -293,6 +293,16 @@ impl Controller {
         self.local_node_id() == Some(node)
     }
 
+    /// 在线节点的协议次版本与发往它的帧
+    pub(crate) fn node_link(
+        &self,
+        node: i64,
+    ) -> Option<(u32, mpsc::UnboundedSender<ControllerMessage>)> {
+        let live = self.live.lock().unwrap();
+        live.get(&node)
+            .map(|live| (live.proto, live.outbox.clone()))
+    }
+
     /// 「本机」节点连的 relay：控制面自己连的那些（内嵌 relay 时是回环地址）
     pub fn local_relays(&self) -> Vec<String> {
         self.relays.local.iter().map(Url::to_string).collect()
@@ -401,6 +411,9 @@ impl Controller {
                 .retire(&self.endpoint_id().to_string(), connected)
                 .await;
         }
+        if let Some(pairing) = self.ha() {
+            pairing.node_removed(self, id).await;
+        }
         // 等它释放的房间不再等，交给各自的新节点
         self.push_all().await;
         Ok(true)
@@ -447,12 +460,27 @@ impl Controller {
             return;
         };
         let version = self.next_version();
-        let (rooms, templates) = match assignments::desired_state(&self.pool, node).await {
+        let (mut rooms, mut templates) = match assignments::desired_state(&self.pool, node).await {
             Ok(desired) => desired,
             Err(e) => {
                 warn!(node, error = ?e, "could not build the desired state");
                 return;
             }
+        };
+        let ha = match self.ha() {
+            Some(pairing) => {
+                match pairing
+                    .desired(self, node, proto, &mut rooms, &mut templates)
+                    .await
+                {
+                    Ok(ha) => ha,
+                    Err(e) => {
+                        warn!(node, error = ?e, "could not build the HA part of the desired state");
+                        return;
+                    }
+                }
+            }
+            None => None,
         };
         // 次版本 1 的节点照常收房间，配置不发；「本机」节点用控制面自己的配置，也不发
         let config = if proto >= CONFIG_SINCE && !self.is_local(node) {
@@ -471,7 +499,7 @@ impl Controller {
             rooms,
             templates,
             config,
-            ha: None,
+            ha,
         });
         if let Some(live) = self.live.lock().unwrap().get_mut(&node)
             && live.outbox.send(message).is_ok()
@@ -482,6 +510,9 @@ impl Controller {
 
     pub async fn push_many(&self, nodes: impl IntoIterator<Item = Option<i64>>) {
         let mut nodes: Vec<i64> = nodes.into_iter().flatten().collect();
+        if let Some(standby) = self.ha().and_then(|pairing| pairing.mirror_target(&nodes)) {
+            nodes.push(standby);
+        }
         nodes.sort_unstable();
         nodes.dedup();
         let _guard = self.dispatch.lock().await;

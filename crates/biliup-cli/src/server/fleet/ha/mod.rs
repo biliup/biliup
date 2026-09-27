@@ -17,9 +17,13 @@ pub mod store;
 pub mod upload;
 pub mod wire;
 
+use crate::server::config::{Config, ConfigPatch};
+use crate::server::core::downloader::DownloaderType;
 use crate::server::infrastructure::context::Context;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, LazyLock, RwLock};
+use struct_patch::Patch;
+use tokio::sync::watch;
 
 /// 本进程在配对里的角色；没配对时为空
 #[derive(Clone)]
@@ -42,6 +46,38 @@ fn role() -> Option<Role> {
         return None;
     }
     ROLE.read().unwrap().clone()
+}
+
+/// 本进程是备机时的备机（节点本地的 `/v1/node/ha`）；配对解除后留着的不算
+pub(crate) fn standby() -> Option<Arc<agent::Standby>> {
+    match role()? {
+        Role::Standby(standby) if !standby.retired() => Some(standby),
+        Role::Standby(_) | Role::Primary(_) => None,
+    }
+}
+
+static CONFIG: LazyLock<watch::Sender<u64>> = LazyLock::new(|| watch::channel(0).0);
+
+/// 本机的配置改了（`services::configuration::apply_config`）。配对中的主机据此重新判断哪些房间边录边传、
+/// 给备机重发镜像；没配对时只读一次原子变量
+pub fn config_changed() {
+    if ACTIVE.load(Ordering::Acquire) {
+        CONFIG.send_modify(|version| *version = version.wrapping_add(1));
+    }
+}
+
+pub(crate) fn config_changes() -> watch::Receiver<u64> {
+    CONFIG.subscribe()
+}
+
+/// 边录边传（sync-downloader）的房间不纳入配对（§5.1）：它一开播就建稿件、边录边追加，两台同时录必然两份稿件。
+/// 按这台机器的配置叠上房间的覆写判断
+pub(crate) fn sync_downloader(config: &Config, override_cfg: Option<ConfigPatch>) -> bool {
+    let mut config = config.clone();
+    if let Some(patch) = override_cfg {
+        config.apply(patch);
+    }
+    config.downloader == Some(DownloaderType::SyncDownloader)
 }
 
 /// 角色是整个进程共用的，设置角色的测试先拿这把锁
@@ -113,6 +149,8 @@ pub fn unit_started(ctx: &Context) {
         return;
     }
     match role {
+        // 按开录这一刻的配置：房间刚改成边录边传、还没来得及从配对里去掉时，主机当它不在配对里
+        Role::Primary(_) if ctx.config().downloader == Some(DownloaderType::SyncDownloader) => {}
         Role::Primary(primary) => primary.unit_started(&Unit::of(ctx)),
         Role::Standby(standby) => standby.unit_started(&Unit::of(ctx), ctx),
     }

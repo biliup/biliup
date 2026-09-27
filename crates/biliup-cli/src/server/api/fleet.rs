@@ -6,6 +6,7 @@
 use crate::server::api::access::Caller;
 use crate::server::api::fleet_alerts;
 use crate::server::api::fleet_config;
+use crate::server::api::fleet_ha;
 use crate::server::api::fleet_local;
 use crate::server::api::fleet_rooms;
 use crate::server::errors::{ApiError, report_to_response};
@@ -85,6 +86,16 @@ pub fn router(controller: Arc<Controller>) -> Router<()> {
         )
         .route("/v1/fleet/alerts/{id}", delete(fleet_alerts::clear_alert))
         .route("/v1/fleet/summary", get(fleet_alerts::summary))
+        .route(
+            "/v1/fleet/ha",
+            get(fleet_ha::get_pair)
+                .put(fleet_ha::put_pair)
+                .delete(fleet_ha::delete_pair),
+        )
+        .route(
+            "/v1/fleet/ha/sessions/{key}/{action}",
+            post(fleet_ha::manual),
+        )
         .with_state(controller)
 }
 

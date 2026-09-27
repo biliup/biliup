@@ -547,6 +547,7 @@ impl StandbyCore {
             State::Holding
         };
         info!(id, state = session.state.as_str(), "HA：备机录完一段");
+        self.tell_state(id);
         self.evaluate(now, id);
     }
 
@@ -752,6 +753,27 @@ impl StandbyCore {
             session.since = now;
             session.reason = Some(reason);
         }
+        self.tell_state(id);
+    }
+
+    /// 等主机、待人工、放弃、不用投：主机从别的消息推不出来，单独告诉它
+    fn tell_state(&mut self, id: &str) {
+        let Some(session) = self.sessions.get(id) else {
+            return;
+        };
+        if !matches!(
+            session.state,
+            State::AwaitingPrimary | State::Manual | State::Done | State::Dropped
+        ) {
+            return;
+        }
+        let message = HaMessage::SessionState {
+            key: session.key.clone(),
+            room: session.room,
+            state: session.state.reported(),
+            reason: session.reason.clone(),
+        };
+        self.send(message);
     }
 
     fn start_upload(&mut self, now: i64, id: &str, reason: String) {
@@ -916,7 +938,7 @@ impl StandbyCore {
                 }
                 return;
             }
-            HaMessage::StandbyReport { .. } => return,
+            HaMessage::StandbyReport { .. } | HaMessage::SessionState { .. } => return,
             HaMessage::SessionStarted { room, .. }
             | HaMessage::SessionEnded { room, .. }
             | HaMessage::UploadStarted { room, .. }
@@ -987,7 +1009,9 @@ impl StandbyCore {
                     view.reason = detail;
                 }
             }
-            HaMessage::StandbyReport { .. } | HaMessage::Manual { .. } => {}
+            HaMessage::StandbyReport { .. }
+            | HaMessage::SessionState { .. }
+            | HaMessage::Manual { .. } => {}
         }
         self.dirty = true;
         if !key::is_standby_key(&key) {
@@ -1734,6 +1758,39 @@ mod tests {
                 .is_ok()
         );
         assert_eq!(uploads(&outs(&mut core)), [id]);
+    }
+
+    #[test]
+    fn states_the_primary_cannot_infer_are_sent_to_it() {
+        fn states(outs: &[Out]) -> Vec<(String, ReportedState)> {
+            outs.iter()
+                .filter_map(|out| match out {
+                    Out::Send(HaMessage::SessionState { key, state, .. }) => {
+                        Some((key.clone(), *state))
+                    }
+                    _ => None,
+                })
+                .collect()
+        }
+        let mut core = linked(HaMode::Takeover);
+        let id = takeover(&mut core, 0, 60 * MIN, 120 * MIN);
+        assert!(states(&outs(&mut core)).is_empty(), "断着时不发");
+        core.link_up(200 * MIN);
+        core.primary_message(200 * MIN, failed(&primary_key(0)));
+        assert_eq!(
+            states(&outs(&mut core)),
+            [(id.clone(), ReportedState::Manual)]
+        );
+        core.manual(201 * MIN, &id, ManualAction::Drop).unwrap();
+        assert_eq!(states(&outs(&mut core)), [(id, ReportedState::Dropped)]);
+
+        let mut core = linked(HaMode::DualRecord);
+        let key = primary_key(0);
+        core.primary_message(0, started(&key, 0));
+        record(&mut core, 0, 30 * MIN);
+        outs(&mut core);
+        core.primary_message(40 * MIN, uploaded(&key, 0, Some(30 * MIN)));
+        assert_eq!(states(&outs(&mut core)), [(key, ReportedState::Done)]);
     }
 
     #[test]

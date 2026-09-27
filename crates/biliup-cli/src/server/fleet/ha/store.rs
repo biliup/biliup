@@ -4,7 +4,7 @@ use super::params::{HaMode, HaParams};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use error_stack::ResultExt;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 fn db_error(what: &'static str) -> AppError {
     AppError::Custom(format!("fleet database: {what}"))
@@ -19,7 +19,7 @@ fn stored(value: u64) -> i64 {
 }
 
 /// 主副配对
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pair {
     pub primary_node_id: i64,
     pub standby_node_id: i64,
