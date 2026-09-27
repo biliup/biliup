@@ -46,6 +46,17 @@ export default function SessionsTab() {
       onFilter: (value: any, record: any) => record.title.includes(value),
       renderFilterDropdown: Filter,
     },
+    ...(autoClip.visible
+      ? [
+          {
+            title: '自动切片',
+            dataIndex: 'auto_clip',
+            render: (_: unknown, record: StreamerInfo) => (
+              <AutoClipCell record={record} availability={autoClip} />
+            ),
+          },
+        ]
+      : []),
     ...(isMobile
       ? []
       : [
@@ -65,17 +76,6 @@ export default function SessionsTab() {
       sorter: (a: any, b: any) => (a.date - b.date > 0 ? 1 : -1),
       render: (time: number) => humDate(time),
     },
-    ...(autoClip.visible
-      ? [
-          {
-            title: '自动切片',
-            dataIndex: 'auto_clip',
-            render: (_: unknown, record: StreamerInfo) => (
-              <AutoClipCell record={record} availability={autoClip} />
-            ),
-          },
-        ]
-      : []),
     {
       title: '',
       dataIndex: 'replay',
