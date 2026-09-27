@@ -5,10 +5,11 @@
 //! - `GET /v1/auto-clip/status`（`file.view`）：是否启用、模型名、能否看图、上限，不含 key 和地址。
 //! - `GET /v1/sessions/{id}/auto-clip`（`file.view`）：这一场最近的任务与用量预估。
 //! - `POST /v1/sessions/{id}/auto-clip`（`clip.edit`）：不带 `confirm` 只回预估；`confirm: true`
-//!   入队（超过每场转写上限时拒绝）。
+//!   入队（超过每场转写上限、或转写已齐而 chat 用量超过每场上限时拒绝）。
 //! - `DELETE /v1/sessions/{id}/auto-clip`（`clip.edit`）：取消排队或运行中的任务。
 
 use crate::server::api::access::Caller;
+use crate::server::auto_clip::analyze::ChatBasis;
 use crate::server::auto_clip::jobs::{self, Job, NewJob, Trigger};
 use crate::server::auto_clip::probe::{self, CheckStatus, ProbeReport, Targets};
 use crate::server::auto_clip::runner::{self, Basis, Estimate};
@@ -237,6 +238,12 @@ pub async fn start_session_auto_clip(
             "没有配置转写接口：到设置页「自动切片（实验）」填好转写的接口地址和模型",
         ));
     }
+    if runner::chat_endpoint(&current).is_none() {
+        return Err(reject(
+            StatusCode::CONFLICT,
+            "没有配置 chat 接口：到设置页「自动切片（实验）」填好接口地址和 chat 模型",
+        ));
+    }
     if session.ended_at.is_none() || live::is_recording(id) {
         return Err(reject(StatusCode::CONFLICT, "这一场还在录，下播后再生成"));
     }
@@ -272,6 +279,12 @@ pub async fn start_session_auto_clip(
             estimate.message.clone().unwrap_or_default(),
         ));
     }
+    if estimate.chat_over_limit && estimate.chat.basis == ChatBasis::Transcript {
+        return Err(reject(
+            StatusCode::CONFLICT,
+            estimate.chat_message.clone().unwrap_or_default(),
+        ));
+    }
     let now = now_ms();
     let new_job = NewJob::builder()
         .session_id(id)
@@ -289,6 +302,7 @@ pub async fn start_session_auto_clip(
         session = id,
         job = job.id,
         asr_seconds = estimate.asr_seconds,
+        chat_tokens = estimate.chat.tokens,
         "自动切片：手动生成候选入队"
     );
     runner::kick();

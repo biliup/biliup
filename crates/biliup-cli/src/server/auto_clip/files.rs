@@ -7,10 +7,14 @@
 //! - `transcript.jsonl`：每行一句 `{chunk, from_ms, to_ms, text}`，时间是场次时间；
 //! - `asr_done.txt`：转写完的块，每行一个 key。一块的句子全部写进 `transcript.jsonl` 之后才记在这里，
 //!   续跑时没记上的块的句子先删掉再重转，不会重复。
+//! - `danmaku.json`：弹幕密度与高峰；
+//! - `thumbs/<场次毫秒>.jpg`：送给模型的关键帧缩图；
+//! - `analysis.jsonl`：每窗 chat 的原始回复与用量，按请求内容的摘要查，服务重启续跑时不重复花钱。
 
 use super::audio::{Chunk, SegmentAudio};
+use super::danmaku::Density;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
@@ -22,6 +26,19 @@ pub struct Line {
     pub from_ms: i64,
     pub to_ms: i64,
     pub text: String,
+}
+
+/// 一窗 chat 的结果。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CachedWindow {
+    /// 请求内容（模型、提示词、图）的摘要
+    pub key: String,
+    pub from_ms: i64,
+    pub to_ms: i64,
+    pub content: String,
+    pub tokens_in: i64,
+    pub tokens_out: i64,
+    pub images: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -186,6 +203,59 @@ impl SessionFiles {
             .lines()
             .filter_map(|line| serde_json::from_str(line).ok())
             .collect()
+    }
+
+    fn danmaku(&self) -> PathBuf {
+        self.dir.join("danmaku.json")
+    }
+
+    pub async fn load_danmaku(&self) -> Option<Density> {
+        read_json(&self.danmaku()).await
+    }
+
+    /// 存弹幕密度；`None`（这一场没有弹幕）删掉旧的。
+    pub async fn save_danmaku(&self, density: Option<&Density>) -> io::Result<()> {
+        match density {
+            Some(density) => write_json(&self.danmaku(), density).await,
+            None => {
+                let _ = tokio::fs::remove_file(self.danmaku()).await;
+                Ok(())
+            }
+        }
+    }
+
+    pub fn thumbs_dir(&self) -> PathBuf {
+        self.dir.join("thumbs")
+    }
+
+    pub fn thumb(&self, t_ms: i64) -> PathBuf {
+        self.thumbs_dir().join(format!("{t_ms}.jpg"))
+    }
+
+    fn analysis(&self) -> PathBuf {
+        self.dir.join("analysis.jsonl")
+    }
+
+    pub async fn load_analysis(&self) -> HashMap<String, CachedWindow> {
+        tokio::fs::read_to_string(self.analysis())
+            .await
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<CachedWindow>(line).ok())
+            .map(|window| (window.key.clone(), window))
+            .collect()
+    }
+
+    pub async fn save_window(&self, window: &CachedWindow) -> io::Result<()> {
+        tokio::fs::create_dir_all(&self.dir).await?;
+        let mut line = serde_json::to_string(window).map_err(io::Error::other)?;
+        line.push('\n');
+        append(&self.analysis(), line.as_bytes()).await
+    }
+
+    /// 新任务重新分析：清掉上次的 chat 结果（转写、弹幕密度和缩图留着）。
+    pub async fn clear_analysis(&self) {
+        let _ = tokio::fs::remove_file(self.analysis()).await;
     }
 }
 

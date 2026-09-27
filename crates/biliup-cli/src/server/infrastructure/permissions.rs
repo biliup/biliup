@@ -194,6 +194,15 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         "/v1/sessions/{id}/auto-clip" if method == Method::POST || method == Method::DELETE => {
             ClipEdit
         }
+        // 候选：看和切片列表一样；接受会建切片草稿，丢弃也改候选，归切片编辑
+        "/v1/sessions/{id}/suggestions" if get => FileView,
+        "/v1/sessions/{id}/danmaku-density" if get => FileView,
+        "/v1/sessions/{id}/suggestions/{sid}/accept"
+        | "/v1/sessions/{id}/suggestions/{sid}/dismiss"
+            if method == Method::POST =>
+        {
+            ClipEdit
+        }
         "/v1/streamer-info" | "/v1/streamer-info/files/{id}" if get => StreamerView,
         "/v1/sessions/{id}" if method == Method::PATCH => ClipEdit,
         "/v1/upload/streamers" | "/v1/upload/streamers/{id}" if get => StreamerView,

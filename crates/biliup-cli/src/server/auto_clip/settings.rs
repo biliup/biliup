@@ -15,6 +15,11 @@ pub const DEFAULT_MAX_ASR_MINUTES: u64 = 300;
 pub const DEFAULT_MAX_CHAT_TOKENS: u64 = 300_000;
 pub const DEFAULT_CHAT_TIMEOUT_SECS: u64 = 180;
 pub const DEFAULT_ASR_TIMEOUT_SECS: u64 = 300;
+pub const DEFAULT_MIN_CLIP_SECS: u64 = 15;
+pub const DEFAULT_MAX_CLIP_SECS: u64 = 180;
+pub const DEFAULT_MAX_CANDIDATES: u64 = 20;
+/// `max_candidates` 填得再大也只留这么多（每窗最多 10 个，一场几十窗）。
+const MAX_CANDIDATES_LIMIT: u64 = 200;
 
 /// 掩码里的省略号。真实的 API key 不会含这个字符，所以收到含它的值就当作「没改」。
 const MASK_MARK: char = '…';
@@ -71,6 +76,15 @@ pub struct AutoClipConfig {
     /// 单次转写请求的超时秒数；空 = 300
     #[serde(default)]
     pub asr_timeout_secs: Option<u64>,
+    /// 候选最短秒数；空 = 15
+    #[serde(default)]
+    pub min_clip_secs: Option<u64>,
+    /// 候选最长秒数；空 = 180
+    #[serde(default)]
+    pub max_clip_secs: Option<u64>,
+    /// 每场最多保留几个候选；空 = 20
+    #[serde(default)]
+    pub max_candidates: Option<u64>,
 }
 
 impl std::fmt::Debug for AutoClipConfig {
@@ -91,6 +105,9 @@ impl std::fmt::Debug for AutoClipConfig {
             .field("max_chat_tokens", &masked.max_chat_tokens)
             .field("chat_timeout_secs", &masked.chat_timeout_secs)
             .field("asr_timeout_secs", &masked.asr_timeout_secs)
+            .field("min_clip_secs", &masked.min_clip_secs)
+            .field("max_clip_secs", &masked.max_clip_secs)
+            .field("max_candidates", &masked.max_candidates)
             .finish()
     }
 }
@@ -152,6 +169,20 @@ impl AutoClipConfig {
                 .filter(|secs| *secs > 0)
                 .unwrap_or(DEFAULT_ASR_TIMEOUT_SECS),
         )
+    }
+
+    /// 候选时长范围（秒）：没填用 15–180；填反了或最短为 0 时按 1 秒起、最长不短于最短。
+    pub fn clip_secs(&self) -> (u64, u64) {
+        let min = self.min_clip_secs.unwrap_or(DEFAULT_MIN_CLIP_SECS).max(1);
+        let max = self.max_clip_secs.unwrap_or(DEFAULT_MAX_CLIP_SECS).max(min);
+        (min, max)
+    }
+
+    pub fn max_candidates(&self) -> usize {
+        self.max_candidates
+            .filter(|n| *n > 0)
+            .unwrap_or(DEFAULT_MAX_CANDIDATES)
+            .min(MAX_CANDIDATES_LIMIT) as usize
     }
 
     /// 转写用的地址：没单独填就用 chat 的。

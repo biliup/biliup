@@ -9,9 +9,13 @@ use crate::server::api::clip_publish::{
     cover_route, get_session_thumb, list_publish_jobs, preview_publish, publish_batch,
     publish_clip, remove_publish, resume_publish, retry_publish,
 };
+use crate::server::api::clip_suggestions::{
+    accept_suggestion, dismiss_suggestion, list_suggestions,
+};
 use crate::server::api::clips::{
     create_clip, delete_clip, download_clip, export_clip, get_clip, list_clips, update_clip,
 };
+use crate::server::api::danmaku_density::get_danmaku_density;
 use crate::server::api::endpoints::{
     add_upload_streamer_endpoint, add_user_endpoint, delete_streamers_endpoint,
     delete_template_endpoint, delete_user_endpoint, get_configuration, get_qrcode, get_status,
@@ -127,6 +131,21 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
             get(get_session_auto_clip)
                 .post(start_session_auto_clip)
                 .delete(cancel_session_auto_clip),
+        )
+        // 候选：列表、接受（建切片草稿）、丢弃
+        .route("/v1/sessions/{id}/suggestions", get(list_suggestions))
+        .route(
+            "/v1/sessions/{id}/suggestions/{sid}/accept",
+            post(accept_suggestion),
+        )
+        .route(
+            "/v1/sessions/{id}/suggestions/{sid}/dismiss",
+            post(dismiss_suggestion),
+        )
+        // 弹幕密度曲线：10 秒一桶、基线与高峰
+        .route(
+            "/v1/sessions/{id}/danmaku-density",
+            get(get_danmaku_density),
         )
         // 主播信息路由
         .route("/v1/streamer-info", get(get_streamer_info)) // 获取主播信息

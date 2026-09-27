@@ -79,6 +79,18 @@ pub fn ffmpeg_command() -> tokio::process::Command {
     command(ffmpeg())
 }
 
+/// For tests that return early because a tool (ffmpeg, an encoder) is
+/// missing. A skipped test still reports `ok`, and libtest captures
+/// `eprintln!`, so this writes to stderr directly: CI logs then show which
+/// tests did not really run.
+#[cfg(test)]
+pub(crate) fn note_skipped_test(reason: &str) {
+    use std::io::Write;
+    let thread = std::thread::current();
+    let name = thread.name().unwrap_or("?");
+    let _ = writeln!(std::io::stderr(), "SKIPPED {name}: {reason}");
+}
+
 /// [`ffmpeg_command`] at a lower CPU priority, for background work that must
 /// not slow down recording: `nice 10` on Unix, `BELOW_NORMAL_PRIORITY_CLASS`
 /// on Windows.

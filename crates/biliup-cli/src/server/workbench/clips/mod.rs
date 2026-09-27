@@ -17,8 +17,8 @@ pub mod thumb;
 use super::retention;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
+use sqlx::{Row, SqliteConnection};
 use std::path::Path;
 use tracing::warn;
 
@@ -194,11 +194,12 @@ pub fn pin_owner(id: i64) -> String {
     format!("clip:{id}")
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(bon::Builder, Debug, Clone, PartialEq, Eq)]
 pub struct NewClip {
     pub marker_id: Option<i64>,
     pub in_ms: i64,
     pub out_ms: i64,
+    #[builder(into)]
     pub title: String,
     pub created_by: Option<i64>,
     pub created_at: i64,
@@ -207,6 +208,17 @@ pub struct NewClip {
 /// 插入切片并引用它覆盖的分段（同一个事务）。
 pub async fn insert(pool: &ConnectionPool, session_id: i64, clip: &NewClip) -> sqlx::Result<Clip> {
     let mut tx = pool.begin().await?;
+    let clip = insert_in(&mut tx, session_id, clip).await?;
+    tx.commit().await?;
+    Ok(clip)
+}
+
+/// 同 [`insert`]，在调用方的事务里做。
+pub async fn insert_in(
+    conn: &mut SqliteConnection,
+    session_id: i64,
+    clip: &NewClip,
+) -> sqlx::Result<Clip> {
     let sql = format!(
         "INSERT INTO clips (session_id, marker_id, in_ms, out_ms, title, created_by, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING {COLUMNS}"
@@ -220,18 +232,17 @@ pub async fn insert(pool: &ConnectionPool, session_id: i64, clip: &NewClip) -> s
         .bind(clip.created_by)
         .bind(clip.created_at)
         .bind(clip.created_at)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut *conn)
         .await?;
     let clip = Clip::from_row(&row)?;
     retention::pin(
-        &mut tx,
+        conn,
         &pin_owner(clip.id),
         session_id,
         clip.in_ms,
         clip.out_ms,
     )
     .await?;
-    tx.commit().await?;
     Ok(clip)
 }
 
