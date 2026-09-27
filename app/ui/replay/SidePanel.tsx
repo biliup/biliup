@@ -631,7 +631,7 @@ function ClipRow({
   )
 }
 
-export type PanelTab = 'markers' | 'clips'
+export type PanelTab = 'markers' | 'clips' | 'suggestions'
 
 export function SidePanel({
   tab,
@@ -656,6 +656,7 @@ export function SidePanel({
   canSubmit,
   jobs,
   onPublish,
+  suggestions,
 }: {
   tab: PanelTab
   onTab: (tab: PanelTab) => void
@@ -681,6 +682,8 @@ export function SidePanel({
   /** 各切片最近的发布任务 */
   jobs: Map<number, PublishJob>
   onPublish: (target: PublishTarget) => void
+  /** 「候选」页：自动切片没配置过时不传，不出现这一页 */
+  suggestions?: { pending: number; content: React.ReactNode }
 }) {
   const { Text } = Typography
   const [selecting, setSelecting] = useState(false)
@@ -821,6 +824,11 @@ export function SidePanel({
             </ul>
           )}
         </TabPane>
+        {suggestions ? (
+          <TabPane tab={`候选 ${suggestions.pending}`} itemKey="suggestions">
+            {suggestions.content}
+          </TabPane>
+        ) : null}
       </Tabs>
     </section>
   )

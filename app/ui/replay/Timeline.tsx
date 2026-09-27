@@ -156,9 +156,57 @@ function Pins({
   )
 }
 
+/** 概览条上的候选色带 */
+export interface SuggestionBand {
+  id: number
+  from: number
+  to: number
+  label: string
+  expired: boolean
+}
+
+function Bands({
+  bands,
+  to,
+  current,
+  onPick,
+}: {
+  bands: SuggestionBand[]
+  to: number
+  current: number | null
+  onPick: (id: number) => void
+}) {
+  return (
+    <>
+      {bands.map((b) => {
+        const left = clampPct(b.from, 0, to)
+        const width = Math.max(0.3, clampPct(b.to, 0, to) - left)
+        const title = `候选 ${formatSessionTime(b.from)}–${formatSessionTime(b.to)} ${b.label}${b.expired ? '（已过期）' : ''}`
+        return (
+          <button
+            type="button"
+            key={b.id}
+            className={styles.suggestionBand}
+            data-suggestion-band={b.id}
+            data-expired={b.expired || undefined}
+            data-current={current === b.id || undefined}
+            style={{ left: `${left}%`, width: `${width}%` }}
+            title={title}
+            aria-label={title}
+            onClick={(e) => {
+              e.stopPropagation()
+              onPick(b.id)
+            }}
+          />
+        )
+      })}
+    </>
+  )
+}
+
 /**
  * 概览条：整场时间轴。分段色块（已清理的画灰）、断流缺口、标记针、选段、播放头和细节条的范围；
- * 点哪里就跳到哪里（已清理的录像不能回看）。
+ * 点哪里就跳到哪里（已清理的录像不能回看）。有候选时下沿画出候选色带，点色带跳到那条候选。
  */
 export function OverviewBar({
   duration,
@@ -172,6 +220,9 @@ export function OverviewBar({
   onSeek,
   onBlocked,
   onPickMarker,
+  bands = [],
+  currentBand = null,
+  onPickBand,
 }: {
   duration: number
   segments: SegmentView[]
@@ -184,6 +235,9 @@ export function OverviewBar({
   onSeek: (ms: number) => void
   onBlocked: (segment: SegmentView) => void
   onPickMarker: (m: Marker) => void
+  bands?: SuggestionBand[]
+  currentBand?: number | null
+  onPickBand?: (id: number) => void
 }) {
   const trackRef = useRef<HTMLDivElement>(null)
   const [hover, setHover] = useState<number | null>(null)
@@ -221,6 +275,7 @@ export function OverviewBar({
           />
         ) : null}
         <SelectionBand selection={selection} from={0} to={to} />
+        {onPickBand && bands.length ? <Bands bands={bands} to={to} current={currentBand} onPick={onPickBand} /> : null}
         <Pins markers={markers} from={0} to={to} onPick={onPickMarker} />
         {playhead !== null ? (
           <div

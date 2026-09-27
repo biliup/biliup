@@ -1,0 +1,160 @@
+/* 自动切片：任务状态、提示、预估弹窗（工作台场次行与回看页共用） */
+.inlineWrap {
+  display: inline-flex;
+}
+
+.badgeLine {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.badge {
+  flex-shrink: 0;
+}
+.badgeDetail {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+}
+
+.progress {
+  max-width: 240px;
+}
+
+.hints {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hints > li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 18px;
+  word-break: break-word;
+  background: var(--semi-color-warning-light-default);
+  color: var(--semi-color-text-0);
+}
+.hints > li[data-level='error'] {
+  background: var(--semi-color-danger-light-default);
+}
+.hintText {
+  color: var(--semi-color-text-0);
+}
+.hintTodo {
+  color: var(--semi-color-text-1);
+}
+.settingsLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  align-self: flex-start;
+  color: var(--semi-color-link);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.settingsLink:hover {
+  text-decoration: underline;
+}
+
+.setupNote {
+  display: block;
+}
+
+/* 工作台场次行 */
+.cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.cellBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+}
+.cellWarn {
+  color: var(--semi-color-warning);
+}
+.cellWarn[data-level='error'] {
+  color: var(--semi-color-danger);
+}
+.cellNone {
+  color: var(--semi-color-text-3);
+}
+.cellTip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  max-width: min(360px, 86vw);
+  white-space: normal;
+}
+
+/* 预估弹窗 */
+.estimateLoading {
+  display: flex;
+  justify-content: center;
+  padding: 32px 0;
+}
+.estimate {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.estimateList {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 10px 16px;
+  margin: 0;
+}
+.estimateList dt {
+  font-size: 13px;
+  color: var(--semi-color-text-2);
+  padding-top: 1px;
+}
+.estimateList dd {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.prices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+.prices :global(.semi-input-number) {
+  width: 160px;
+}
+.limitNote {
+  display: block;
+}
+.retranscribe {
+  margin-top: 2px;
+}
+
+@media (max-width: 480px) {
+  .estimateList {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+  .estimateList dd {
+    margin-bottom: 8px;
+  }
+}

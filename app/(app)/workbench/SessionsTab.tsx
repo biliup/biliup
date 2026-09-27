@@ -6,6 +6,8 @@ import useSWR from 'swr'
 import { fetcher, type StreamerInfo } from '@/app/lib/api-streamer'
 import { isReadable, replayHref, type SessionDetail, sessionUrl } from '@/app/lib/sessions'
 import { humDate } from '@/app/lib/utils'
+import { type AutoClipAvailability, useAutoClip, useSessionAutoClip } from '@/app/lib/auto-clip'
+import { JobCell } from '@/app/ui/auto-clip/AutoClipJob'
 import Filter from './Filter'
 import { useIsMobile } from '../../lib/useIsMobile'
 import dc from '@/app/ui/data-card.module.scss'
@@ -16,6 +18,7 @@ export default function SessionsTab() {
   const isMobile = useIsMobile()
   const { Text } = Typography
   const { data: data, error, isLoading } = useSWR<any[]>('/v1/streamer-info', fetcher)
+  const autoClip = useAutoClip()
 
   if (isLoading) {
     return (
@@ -43,6 +46,17 @@ export default function SessionsTab() {
       onFilter: (value: any, record: any) => record.title.includes(value),
       renderFilterDropdown: Filter,
     },
+    ...(autoClip.visible
+      ? [
+          {
+            title: '自动切片',
+            dataIndex: 'auto_clip',
+            render: (_: unknown, record: StreamerInfo) => (
+              <AutoClipCell record={record} availability={autoClip} />
+            ),
+          },
+        ]
+      : []),
     ...(isMobile
       ? []
       : [
@@ -95,6 +109,21 @@ export default function SessionsTab() {
       />
     </div>
   )
+}
+
+/** 只在当前页渲染，所以只请求当前页的场次；没有时间轴的场次不能生成 */
+function AutoClipCell({ record, availability }: { record: StreamerInfo; availability: AutoClipAvailability }) {
+  const { data, isLoading } = useSessionAutoClip(record.has_timeline ? record.id : null)
+  if (!record.has_timeline) {
+    return (
+      <Tooltip content="这一场在升级前录制，没有时间轴，不能生成候选">
+        <Typography.Text type="tertiary" className={styles.replayOff}>
+          —
+        </Typography.Text>
+      </Tooltip>
+    )
+  }
+  return <JobCell sessionId={record.id} job={data?.job ?? null} availability={availability} loading={isLoading} />
 }
 
 const baseName = (path: string) => path.split(/[\\/]/).pop() ?? path

@@ -693,3 +693,99 @@
   gap: 6px;
   padding: 8px 12px 0;
 }
+
+/* ===== 候选（自动切片） ===== */
+.sgJob {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--semi-color-fill-1);
+}
+.sgJobHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 8px;
+}
+.sgJobActions {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.sgBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 8px 12px 0;
+}
+.sgReason {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--semi-color-text-1);
+  word-break: break-word;
+}
+.sgSignals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+.sgState {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+}
+.sgState[data-state='accepted'] {
+  color: var(--semi-color-success);
+}
+.sgState[data-state='expiring'] {
+  color: var(--semi-color-warning);
+}
+.sgLink {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--semi-color-link);
+  font: inherit;
+  cursor: pointer;
+}
+.sgLink:hover {
+  text-decoration: underline;
+}
+/* 过期的候选画灰，不能接受 */
+.row[data-suggestion-state='expired'] .rowLabel,
+.row[data-suggestion-state='expired'] .sgReason,
+.row[data-suggestion-state='expired'] .rowTime,
+.row[data-suggestion-state='dismissed'] .rowLabel,
+.row[data-suggestion-state='dismissed'] .rowTime {
+  color: var(--semi-color-text-3);
+}
+.row[data-suggestion-state='expired'] .sgSignals,
+.row[data-suggestion-state='dismissed'] .sgSignals {
+  opacity: 0.55;
+}
+
+/* 概览条下沿的候选色带；点它跳到候选 */
+.suggestionBand {
+  position: absolute;
+  bottom: -3px;
+  height: 9px;
+  min-width: 4px;
+  box-sizing: border-box;
+  border-radius: 3px;
+  background: rgba(var(--semi-violet-5), 0.75);
+  border: 1px solid rgb(var(--semi-violet-6));
+  cursor: pointer;
+  z-index: 2;
+}
+.suggestionBand:hover,
+.suggestionBand[data-current] {
+  background: rgb(var(--semi-violet-5));
+  box-shadow: 0 0 0 2px rgba(var(--semi-violet-5), 0.3);
+}
+.suggestionBand[data-expired] {
+  background: var(--semi-color-fill-2);
+  border-color: var(--semi-color-text-3);
+}
