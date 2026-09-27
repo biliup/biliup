@@ -453,6 +453,13 @@ impl Pairing {
             );
             return;
         };
+        // 重连后节点先重发离线期间排下的修改、再应答期望状态（`node_acked` 才接上连接）；它发来配对帧说明
+        // 它的同步端已经起好了，这时就接上，免得对这些修改的应答无处可发、节点的队列一直不出队
+        if let Some((proto, outbox)) = controller.node_link(node)
+            && proto >= PAIR_SINCE
+        {
+            active.member.link_up(Link::Controller(outbox)).await;
+        }
         if let PairMessage::Ha(change) = message {
             let result = self.requested(controller, change).await;
             if let Err(reason) = &result {

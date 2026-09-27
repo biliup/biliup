@@ -2085,6 +2085,21 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
     away.stop();
     agent = start_standby(&standby_file, &s, &standby_managed).await;
     converged("the later standby edit wins", "离线-备机").await;
+    // 重连后备机先重发队列、后应答期望状态：控制面的应答不能因为还没接上同步连接而丢掉
+    eventually(
+        "the controller acknowledges the replayed queue",
+        Duration::from_secs(20),
+        || {
+            let s = s.clone();
+            async move {
+                match member_for(&s) {
+                    Some(member) => member.pending().await == 0,
+                    None => false,
+                }
+            }
+        },
+    )
+    .await;
 
     // 备机先改、控制面后改：控制面的赢
     let away = standby_offline(&controller, standby, agent, &s, &data).await;
