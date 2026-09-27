@@ -2521,11 +2521,14 @@ fn listed(view: &serde_json::Value, kind: &str, id: i64) -> serde_json::Value {
         .unwrap_or_else(|| panic!("{kind} 里没有 {id}：{view}"))
 }
 
-/// 指定备机时备机上已有的本地主播与模板缺省全部纳入，勾掉的留作备机的本地行，不能纳入的逐条带原因。
-/// 加入是原地认下（监控不重建、不重复建行）
+/// 指定备机时备机上已有的本地主播与模板缺省全部纳入，勾掉的留作备机的本地行，不能纳入的逐条带原因；
+/// 配对之后按 id 把备机或主机上还没纳入的本地行加进来。加入都是原地认下（监控不重建、不重复建行），
+/// 上一场还没投完的主播等它投完才加入；最后两台一致（不能纳入的那一行除外）
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn existing_standby_rows_join_the_pair_by_default_without_a_rebuild() {
-    use super::ha::pairing::{Designate, Pairing, Refused};
+async fn existing_local_rows_join_the_pair_by_default_or_later_without_a_rebuild() {
+    use super::ha::member::member_for;
+    use super::ha::pairing::{Designate, Join, Pairing, Refused};
+    use crate::server::infrastructure::context::WorkerStatus;
     use axum::http::{Method, StatusCode};
 
     let _role = super::ha::test_guard().await;
@@ -2576,12 +2579,16 @@ async fn existing_standby_rows_join_the_pair_by_default_without_a_rebuild() {
         serde_json::json!({ "url": h_url, "remark": "备机钩子", "postprocessor": [{ "run": "echo" }] }),
     )
     .await;
-    local_streamer(&c, serde_json::json!({ "url": p_url, "remark": "本机P" })).await;
+    let p = local_streamer(&c, serde_json::json!({ "url": p_url, "remark": "本机P" })).await;
     let worker = |services: &ServiceRegister, id: i64| {
         let services = services.clone();
         async move { services.managers.get_room_by_id(id).await.unwrap() }
     };
-    let worker_a = worker(&s, a).await;
+    let (worker_a, worker_b, worker_p) = (
+        worker(&s, a).await,
+        worker(&s, b).await,
+        worker(&c, p).await,
+    );
 
     // 确认弹层的清单：能纳入的缺省都纳入，带 run 命令的不能纳入并说明原因
     let preview = pairing
@@ -2603,6 +2610,10 @@ async fn existing_standby_rows_join_the_pair_by_default_without_a_rebuild() {
     for id in [t1, t2] {
         assert_eq!(listed(view, "templates", id)["included"], true, "{view}");
     }
+    assert_eq!(
+        listed(&preview["primary"], "streamers", p)["included"],
+        true
+    );
     let refused = pairing
         .candidates(&controller, Some(primary))
         .await
@@ -2720,6 +2731,128 @@ async fn existing_standby_rows_join_the_pair_by_default_without_a_rebuild() {
             .contains("run 命令")
     );
     assert_eq!(body["streamers"].as_array().unwrap().len(), 2, "{body}");
+
+    // 事后加入 b：上一场还没投完时不加入，投完了才加入，也是原地认下
+    *worker_b.uploader_status.write().unwrap() = WorkerStatus::Pending;
+    let join: Join =
+        serde_json::from_value(serde_json::json!({ "side": "node", "streamers": [b] })).unwrap();
+    let answer = pairing.join(&controller, join).await.unwrap().unwrap();
+    let row = listed(&answer, "streamers", b);
+    assert_eq!(
+        (row["included"].clone(), row["busy"].clone()),
+        (true.into(), true.into())
+    );
+    eventually("the standby queues b", Duration::from_secs(20), || {
+        let s = s.clone();
+        async move {
+            let (status, body) = node_ha_request(
+                &s,
+                Method::GET,
+                "/v1/node/ha/candidates",
+                serde_json::Value::Null,
+            )
+            .await;
+            status == StatusCode::OK && listed(&body, "streamers", b)["state"] == "waiting"
+        }
+    })
+    .await;
+    let member = member_for(&s).expect("备机上有同步端");
+    for _ in 0..4 {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        member.scan().await;
+    }
+    assert!(fleet_room(b_url).await.is_none(), "在投的主播不加入");
+    assert!(!paired(b));
+    assert!(matches!(
+        *worker_b.uploader_status.read().unwrap(),
+        WorkerStatus::Pending
+    ));
+    *worker_b.uploader_status.write().unwrap() = WorkerStatus::Idle;
+    eventually("b joins once idle", Duration::from_secs(40), || {
+        let c = c.clone();
+        async move {
+            fleet_room(b_url)
+                .await
+                .is_some_and(|room| room.node_id == Some(primary))
+                && paired(b)
+                && remark_on(&c, b_url).await.as_deref() == Some("备机B")
+        }
+    })
+    .await;
+    assert!(
+        Arc::ptr_eq(&worker_b, &worker(&s, b).await),
+        "备机原地认下 b，监控不重建"
+    );
+
+    // 事后加入主机「本机」上的 p：控制面按它建房间分派给「本机」，「本机」原地认下，备机收到镜像
+    let join: Join =
+        serde_json::from_value(serde_json::json!({ "side": "controller", "streamers": [p, 999] }))
+            .unwrap();
+    let answer = pairing.join(&controller, join).await.unwrap().unwrap();
+    assert_eq!(listed(&answer, "streamers", p)["included"], true);
+    let missing = listed(&answer, "streamers", 999);
+    assert_eq!(missing["included"], false);
+    assert!(missing["reason"].is_string(), "{missing}");
+    eventually("p joins the pair", Duration::from_secs(40), || {
+        let (s, fx_managed) = (s.clone(), fx.managed.clone());
+        async move {
+            fleet_room(p_url)
+                .await
+                .is_some_and(|room| room.node_id == Some(primary))
+                && fx_managed
+                    .read()
+                    .unwrap()
+                    .as_ref()
+                    .is_some_and(|view| view.streamers.contains_key(&p))
+                && remark_on(&s, p_url).await.as_deref() == Some("本机P")
+        }
+    })
+    .await;
+    assert!(
+        Arc::ptr_eq(&worker_p, &worker(&c, p).await),
+        "「本机」原地认下 p，监控不重建"
+    );
+
+    // 备机本机的接口：带 run 命令的 h 仍然不能加入，原因逐条给出
+    let (status, body) = node_ha_request(
+        &s,
+        Method::POST,
+        "/v1/node/ha/join",
+        serde_json::json!({ "streamers": [h] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let hooks = listed(&body, "streamers", h);
+    assert_eq!(hooks["included"], false);
+    assert!(
+        hooks["reason"].as_str().unwrap().contains("run 命令"),
+        "{hooks}"
+    );
+    let (status, _) =
+        node_ha_request(&s, Method::POST, "/v1/node/ha/join", serde_json::json!({})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // 两台一致：除了不能纳入的 h，每个主播与模板两台各一行
+    assert_eq!(sorted_urls(&c).await, [a_url, b_url, p_url]);
+    assert_eq!(sorted_urls(&s).await, [a_url, b_url, h_url, p_url]);
+    assert_eq!(template_names(&c).await, ["备机单独模板", "备机模板A"]);
+    assert_eq!(template_names(&s).await, ["备机单独模板", "备机模板A"]);
+    let view = pairing
+        .candidates(&controller, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(view["paired"], true);
+    assert_eq!(
+        view["standby"]["streamers"].as_array().unwrap().len(),
+        1,
+        "{view}"
+    );
+    assert_eq!(
+        view["primary"]["streamers"].as_array().unwrap().len(),
+        0,
+        "{view}"
+    );
 
     agent.shutdown().await;
     pairing.shutdown();

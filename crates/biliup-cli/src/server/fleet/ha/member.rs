@@ -30,7 +30,7 @@ use crate::server::infrastructure::service_register::ServiceRegister;
 use crate::server::services::configuration::{ApplyConfigError, apply_config};
 use biliup::uploader::credential::{LoginInfo, save_login_info};
 use serde_json::{Map, Value};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -157,7 +157,7 @@ pub struct Member {
     pub(super) services: ServiceRegister,
     /// 控制面：认出 Fleet 上的改动与落地节点的房间修改一个一个来（先拿它再拿 `state`；
     /// 落地时会拿控制面的分派锁，所以拿着 `state` 时不改 Fleet）
-    fleet: tokio::sync::Mutex<()>,
+    pub(super) fleet: tokio::sync::Mutex<()>,
     pub(super) state: tokio::sync::Mutex<State>,
     link: Mutex<Option<Link>>,
     /// 当前的主机（同一毫秒的两条修改谁赢）
@@ -439,14 +439,40 @@ impl Member {
         ack
     }
 
-    /// 控制面：主机「本机」（同一个进程里的节点代理）落地期望状态：单独加入配对的模板没有房间用也留着
+    /// 控制面：主机「本机」（同一个进程里的节点代理）落地期望状态。「本机」上加入配对的本地行按提示原地认下，
+    /// 不重建监控；单独加入配对的模板没有房间用也留着。提示只给这一次期望状态里有的，免得认下之后又当成多余的删掉
     pub async fn reconcile_local(&self, desired: DesiredState, reconciler: &mut Reconciler) -> Ack {
         if self.side != Side::Controller {
             return reconciler.apply(desired).await;
         }
-        let pinned = self.state.lock().await.file.adoption.pinned.clone();
-        reconciler.pin_templates(pinned);
-        reconciler.apply(desired).await
+        let (rooms, templates, pinned) = {
+            let mut state = self.state.lock().await;
+            let adoption = &mut state.file.adoption;
+            let joining: BTreeSet<i64> = adoption.joining.keys().copied().collect();
+            adoption.hint_rooms.retain(|id, local| {
+                joining.contains(local) || desired.rooms.iter().any(|room| room.id == *id)
+            });
+            let rooms: BTreeMap<i64, i64> = adoption
+                .hint_rooms
+                .iter()
+                .filter(|(id, _)| desired.rooms.iter().any(|room| room.id == **id))
+                .map(|(id, local)| (*id, *local))
+                .collect();
+            let templates: BTreeMap<i64, i64> = adoption
+                .hint_templates
+                .iter()
+                .filter(|(id, _)| desired.templates.iter().any(|t| t.id == **id))
+                .map(|(id, local)| (*id, *local))
+                .collect();
+            (rooms, templates, adoption.pinned.clone())
+        };
+        reconciler.adopt_local(&rooms, &templates, pinned).await;
+        let ack = reconciler.apply(desired).await;
+        let mut state = self.state.lock().await;
+        if self.landed(&mut state, reconciler.state()) {
+            self.persist(&state);
+        }
+        ack
     }
 
     /// 节点：配对中本机新建了主播（`POST /v1/streamers` 成功之后），加入配对发给控制面

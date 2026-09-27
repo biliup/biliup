@@ -1,10 +1,12 @@
 //! 把配对之外的本地主播与模板加入配对（ha-pair 方案 H2）。
 //!
 //! 指定备机时，备机上已有的本地主播与模板缺省全部纳入（`PUT /v1/fleet/ha` 的 `adopt` 可以勾掉其中一些，
-//! 勾掉的留作备机的本地行）。清单与不能加入的原因见 [`local_rows`] 与 [`evaluate`]。
+//! 勾掉的留作备机的本地行）；配对之后也能按 id 把两台上还没纳入的本地行加进来（`POST /v1/fleet/ha/join`、
+//! `POST /v1/node/ha/join`）。清单与不能加入的原因见 [`local_rows`] 与 [`evaluate`]。
 //!
 //! 备机上的行走现成的「节点新建的主播」路径：排进同步队列、控制面仲裁（[`super::rooms::apply_room`]），
-//! 收下后备机按控制面 id 原地认下，不重建监控；收不下的留作本地行，原因记下来。
+//! 收下后备机按控制面 id 原地认下，不重建监控；收不下的留作本地行，原因记下来。主机「本机」上的行由控制面
+//! 直接建 Fleet 房间，「本机」落地时按提示原地认下原来那一行（`Reconciler::adopt_local`）。
 //!
 //! 不中断录制、不出双稿：主播只在空闲（没在录、没在投）时加入，正在录的等它录完投完。加入之前先按地址
 //! 挡住开录（[`holding`]），隔一个扫描周期确认仍然空闲才发出，一直挡到两台都按配对的房间落地。于是加入之前
@@ -17,14 +19,17 @@ use super::Hold;
 use super::agent::UNIT_KEEP_MS;
 use super::member::{Member, State, identity};
 use super::outbox::PairFile;
-use super::rooms::{self, SYNC_DOWNLOADER, URL_TAKEN};
-use super::sync::{AdoptRequest, LocalRow, ROOM, RowState, TEMPLATE};
+use super::rooms::{self, SYNC_DOWNLOADER, URL_TAKEN, internal};
+use super::sync::{AdoptRequest, LocalRow, ROOM, RowState, Side, TEMPLATE};
 use super::sync_downloader;
 use crate::server::config::{Config, ConfigPatch};
 use crate::server::fleet::accounts::{self, LocalAccount};
+use crate::server::fleet::assignments;
+use crate::server::fleet::controller::{Controller, check_room_spec};
 use crate::server::fleet::model::RoomSpec;
 use crate::server::fleet::now_ms;
 use crate::server::fleet::reconcile::{self, FleetState};
+use crate::server::fleet::store;
 use crate::server::infrastructure::context::WorkerStatus;
 use crate::server::infrastructure::models::live_streamer::LiveStreamer;
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
@@ -45,6 +50,8 @@ pub(super) const HOLD_MS: i64 = 60_000;
 
 const HOOKS_NODE: &str =
     "带 run 命令（能执行任意命令）的主播不能从节点加入配对：在这台上去掉 run 步骤之后再加";
+const HOOKS_LOCAL: &str =
+    "「本机」节点启用时没有勾选「允许钩子」，带 run 命令（能执行任意命令）的主播不能加入配对";
 const MISSING: &str = "这台机器上没有这个本地行，或它已经在配对里";
 
 /// `pair-outbox.json` 里要加入配对的本地行（都是这台机器上的本地 id）
@@ -76,6 +83,11 @@ pub struct Adoption {
     /// 控制面：单独加入配对的 Fleet 模板，没有房间用也留在配对里
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub pinned: BTreeSet<i64>,
+    /// 控制面：「本机」落地时原地认下的本地行，Fleet id → 本地 id
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub hint_rooms: BTreeMap<i64, i64>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub hint_templates: BTreeMap<i64, i64>,
 }
 
 impl Adoption {
@@ -117,9 +129,12 @@ pub struct Joining {
     pub url: String,
     /// 开始挡的时刻
     pub since: i64,
-    /// 发出的账本键
+    /// 节点：发出的账本键
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
+    /// 控制面：建好的 Fleet 房间
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fleet: Option<i64>,
 }
 
 impl Joining {
@@ -132,7 +147,7 @@ impl Joining {
     }
 
     fn sent(&self) -> bool {
-        self.key.is_some()
+        self.key.is_some() || self.fleet.is_some()
     }
 }
 
@@ -342,30 +357,39 @@ pub fn node_checks(rooms: &mut [LocalRow]) {
     }
 }
 
-/// 控制面判断备机上的本地主播能不能加入配对：`fleet_urls` 是控制面房间列表里的地址 → 房间 id，
-/// `other` 是主机「本机」上还没纳入配对的本地主播（地址 → 本地 id）。与控制面仲裁（[`super::rooms::apply_room`]）同样的规矩
+/// 控制面判断 `side` 那台上的本地主播能不能加入配对：`fleet_urls` 是控制面房间列表里的地址 → 房间 id，
+/// `other` 是另一台上还没纳入配对的本地主播（地址 → 本地 id，读不到另一台时为空），
+/// `hooks_allowed` 是主机「本机」节点允许带 run 命令的房间。与控制面仲裁（[`super::rooms::apply_room`]）同样的规矩
 pub fn evaluate(
     rooms: &mut [LocalRow],
+    side: Side,
     config: &Config,
     fleet_urls: &HashMap<String, i64>,
     other: &HashMap<String, i64>,
+    hooks_allowed: bool,
 ) {
     for row in rooms
         .iter_mut()
         .filter(|row| row.state == RowState::Local && row.reason.is_none())
     {
-        row.reason = room_reason(row, config, fleet_urls, other);
+        row.reason = room_reason(row, side, config, fleet_urls, other, hooks_allowed);
     }
 }
 
 fn room_reason(
     row: &LocalRow,
+    side: Side,
     config: &Config,
     fleet_urls: &HashMap<String, i64>,
     other: &HashMap<String, i64>,
+    hooks_allowed: bool,
 ) -> Option<String> {
     if row.hooks {
-        return Some(HOOKS_NODE.into());
+        match side {
+            Side::Node => return Some(HOOKS_NODE.into()),
+            Side::Controller if !hooks_allowed => return Some(HOOKS_LOCAL.into()),
+            Side::Controller => {}
+        }
     }
     let patch = row.downloader.clone().and_then(|downloader| {
         serde_json::from_value::<ConfigPatch>(serde_json::json!({ "downloader": downloader })).ok()
@@ -377,9 +401,13 @@ fn room_reason(
     if let Some(id) = fleet_urls.get(url) {
         return Some(format!("{URL_TAKEN}（房间 {id}）"));
     }
+    let machine = match side {
+        Side::Node => "主机",
+        Side::Controller => "备机",
+    };
     other.get(url).map(|id| {
         format!(
-            "主机上也有同一地址的本地主播（id {id}）：两台是同一个主播，先删掉其中一台上的这一行，再把留下的那行加入配对"
+            "{machine}上也有同一地址的本地主播（id {id}）：两台是同一个主播，先删掉其中一台上的这一行，再把留下的那行加入配对"
         )
     })
 }
@@ -459,7 +487,8 @@ impl Member {
         }
     }
 
-    /// 加入的主播按配对的房间落地了（期望状态落地之后）：放开开录
+    /// 加入的主播两台都按配对的房间落地了（节点：期望状态落地之后；控制面：「本机」落地之后）：放开开录。
+    /// 控制面上认下了的提示不再给
     pub(super) fn landed(&self, state: &mut State, fleet: &FleetState) -> bool {
         let owner = identity(&self.services);
         let file = &mut state.file;
@@ -469,7 +498,9 @@ impl Member {
             .iter()
             .filter(|(local, joining)| {
                 let record = joining.key.as_ref().map(|key| file.book.get(key));
-                let id = record.flatten().and_then(|record| record.fleet);
+                let id = joining
+                    .fleet
+                    .or_else(|| record.flatten().and_then(|record| record.fleet));
                 let dropped = matches!(record, Some(None));
                 dropped
                     || id
@@ -477,13 +508,28 @@ impl Member {
             })
             .map(|(local, _)| *local)
             .collect();
-        let changed = !done.is_empty();
+        let mut changed = !done.is_empty();
         for local in done {
             if let Some(joining) = file.adoption.joining.remove(&local) {
                 release(owner, &joining.url);
                 info!(streamer = local, "配对：加入的主播两台都落地了，放开开录");
             }
         }
+        let hints = (
+            file.adoption.hint_rooms.len(),
+            file.adoption.hint_templates.len(),
+        );
+        file.adoption
+            .hint_rooms
+            .retain(|id, local| fleet.rooms.get(id).map(|r| r.local_id) != Some(*local));
+        file.adoption
+            .hint_templates
+            .retain(|id, local| fleet.templates.get(id).map(|t| t.local_id) != Some(*local));
+        changed |= hints
+            != (
+                file.adoption.hint_rooms.len(),
+                file.adoption.hint_templates.len(),
+            );
         changed
     }
 
@@ -604,6 +650,173 @@ impl Member {
         changed
     }
 
+    /// 控制面：主机「本机」上要加入的本地行往前走一步（[`super::pairing::Pairing::adopt_tick`]）。模板直接建成
+    /// Fleet 模板；空闲的主播先挡住开录，隔一个周期仍然空闲就建成分派给「本机」的 Fleet 房间、记下提示，
+    /// 等「本机」落地时原地认下原来那一行。返回真时要给主机与备机重发期望状态
+    pub async fn advance_local(
+        &self,
+        controller: &Controller,
+        node: i64,
+        fleet: &FleetState,
+        now: i64,
+    ) -> bool {
+        let _fleet = self.fleet.lock().await;
+        let mut state = self.state.lock().await;
+        if !state.file.adoption.pending() {
+            return false;
+        }
+        let owner = identity(&self.services);
+        let mut push = false;
+        let mut changed = false;
+        for local in std::mem::take(&mut state.file.adoption.templates) {
+            changed = true;
+            match self
+                .fleet_template(controller, &mut state, fleet, local, now)
+                .await
+            {
+                Ok(id) => {
+                    info!(template = local, fleet = id, "配对：本机的投稿模板加入配对");
+                    state.file.adoption.pinned.insert(id);
+                    push = true;
+                }
+                Err(reason) => {
+                    warn!(template = local, reason, "配对：本机的投稿模板没能加入配对");
+                    state.file.adoption.refused_templates.insert(local, reason);
+                }
+            }
+        }
+        changed |= self.hold_idle(&mut state, fleet, now, true).await;
+        for (local, joining) in state.file.adoption.joining.clone() {
+            if joining.sent() {
+                if now - joining.since >= HOLD_MS {
+                    self.expire(&mut state, local);
+                    changed = true;
+                }
+                continue;
+            }
+            if now - joining.since < SETTLE_MS {
+                continue;
+            }
+            changed = true;
+            if busy(&self.services, local).await {
+                release(owner, &joining.url);
+                state.file.adoption.joining.remove(&local);
+                continue;
+            }
+            match self
+                .fleet_room(controller, node, &mut state, fleet, local, now)
+                .await
+            {
+                Ok(id) => {
+                    info!(
+                        streamer = local,
+                        room = id,
+                        "配对：本机的主播空闲，建成配对里的房间"
+                    );
+                    let adoption = &mut state.file.adoption;
+                    adoption.rooms.remove(&local);
+                    adoption.refused_rooms.remove(&local);
+                    adoption.hint_rooms.insert(id, local);
+                    if let Some(entry) = adoption.joining.get_mut(&local) {
+                        entry.fleet = Some(id);
+                    }
+                    push = true;
+                }
+                Err(reason) => {
+                    warn!(streamer = local, reason, "配对：本机的主播没能加入配对");
+                    release(owner, &joining.url);
+                    let adoption = &mut state.file.adoption;
+                    adoption.joining.remove(&local);
+                    adoption.rooms.remove(&local);
+                    adoption.refused_rooms.insert(local, reason);
+                }
+            }
+        }
+        if changed || push {
+            self.persist(&state);
+        }
+        push
+    }
+
+    /// 控制面：「本机」上的本地模板对应的 Fleet 模板；还没有就按它建一个，记下提示
+    async fn fleet_template(
+        &self,
+        controller: &Controller,
+        state: &mut State,
+        fleet: &FleetState,
+        local: i64,
+        now: i64,
+    ) -> Result<i64, String> {
+        let managed = fleet.templates.iter().find(|(_, t)| t.local_id == local);
+        if let Some((id, _)) = managed {
+            return Ok(*id);
+        }
+        let hints = &state.file.adoption.hint_templates;
+        if let Some((id, _)) = hints.iter().find(|(_, hinted)| **hinted == local) {
+            return Ok(*id);
+        }
+        let accounts = accounts::scan(&self.services.pool).await;
+        let spec = rooms::node_template(&self.services, &accounts, local)
+            .await
+            .ok_or("读不出这个投稿模板")?
+            .normalized();
+        if spec.template_name.is_empty() {
+            return Err("模板名为空".into());
+        }
+        let template = assignments::insert_template(controller.pool(), &spec, now)
+            .await
+            .map_err(internal)?;
+        state
+            .file
+            .adoption
+            .hint_templates
+            .insert(template.id, local);
+        Ok(template.id)
+    }
+
+    /// 控制面：按「本机」上的本地主播建分派给「本机」的 Fleet 房间（与仲裁节点新建的主播同样的检查）
+    async fn fleet_room(
+        &self,
+        controller: &Controller,
+        node: i64,
+        state: &mut State,
+        fleet: &FleetState,
+        local: i64,
+        now: i64,
+    ) -> Result<i64, String> {
+        let room = rooms::node_room(&self.services, local)
+            .await
+            .map_err(|_| "读不出这个主播的设置（监控还没建好），稍后再加".to_string())?;
+        let spec = room.spec.normalized();
+        check_room_spec(&spec).map_err(|e| e.message())?;
+        let config = self.services.config.read().unwrap().clone();
+        if sync_downloader(&config, spec.override_cfg.clone()) {
+            return Err(SYNC_DOWNLOADER.into());
+        }
+        let pool = controller.pool();
+        let node_row = store::node(pool, node)
+            .await
+            .map_err(internal)?
+            .ok_or("主机「本机」节点不在了")?;
+        controller
+            .check_target(&node_row, &spec, None, &[])
+            .await
+            .map_err(|e| e.message())?;
+        let template = match room.template {
+            Some(template) => Some(
+                self.fleet_template(controller, state, fleet, template, now)
+                    .await?,
+            ),
+            None => None,
+        };
+        let inserted =
+            assignments::insert_room_with(pool, &spec, template, Some(node), room.paused, &[], now)
+                .await
+                .map_err(internal)?
+                .map_err(|_| URL_TAKEN.to_string())?;
+        Ok(inserted.id)
+    }
+
     /// 本机还没纳入配对的主播与模板
     pub async fn local_rows(&self, fleet: &FleetState) -> (Vec<LocalRow>, Vec<LocalRow>) {
         let state = self.state.lock().await;
@@ -618,6 +831,34 @@ impl Member {
         select(&mut rooms, None);
         select_templates(&mut templates, None, &rooms);
         (rooms, templates)
+    }
+
+    /// 排上本机要加入的本地行（控制面：「本机」上的；节点：本机的）
+    pub async fn queue(&self, rooms: &[i64], templates: &[i64]) {
+        let mut state = self.state.lock().await;
+        if state.file.adoption.queue(rooms, templates) {
+            self.persist(&state);
+        }
+    }
+
+    /// 节点：本机上按 id 加入配对（`POST /v1/node/ha/join`）。控制面的判断在它收下时才做，
+    /// 没收下的原因看清单里的 `refused`
+    pub async fn join_local(
+        &self,
+        streamers: &[i64],
+        templates: &[i64],
+    ) -> (Vec<LocalRow>, Vec<LocalRow>) {
+        let fleet = fleet_state(&self.dir);
+        let mut state = self.state.lock().await;
+        let (mut rooms, mut template_rows) =
+            local_rows(&self.services, &fleet, Some(&state.file)).await;
+        node_checks(&mut rooms);
+        let room_ids = select(&mut rooms, Some(streamers));
+        let template_ids = select_templates(&mut template_rows, Some(templates), &rooms);
+        if state.file.adoption.queue(&room_ids, &template_ids) {
+            self.persist(&state);
+        }
+        (rooms, template_rows)
     }
 
     /// 控制面：请节点加入这些本地行（随下一次期望状态带过去）
@@ -640,11 +881,15 @@ impl Member {
     pub async fn pinned(&self) -> BTreeSet<i64> {
         self.state.lock().await.file.adoption.pinned.clone()
     }
+
+    /// 控制面：「本机」上有没有要往前走的
+    pub async fn adopting(&self) -> bool {
+        self.state.lock().await.file.adoption.pending()
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::sync::Side;
     use super::*;
 
     fn row(id: i64, url: &str) -> LocalRow {
@@ -672,7 +917,7 @@ mod tests {
         rooms[2].downloader = Some(serde_json::json!("sync-downloader"));
         let fleet = HashMap::from([("https://a/4".to_string(), 44)]);
         let other = HashMap::from([("https://a/5".to_string(), 55)]);
-        evaluate(&mut rooms, &config, &fleet, &other);
+        evaluate(&mut rooms, Side::Node, &config, &fleet, &other, true);
         assert_eq!(rooms[0].reason, None);
         assert!(rooms[1].reason.as_deref().unwrap().contains("run 命令"));
         assert!(rooms[2].reason.as_deref().unwrap().contains("边录边传"));
@@ -717,10 +962,28 @@ mod tests {
             [Some(true), Some(true), Some(false)]
         );
 
+        // 主机上的行：钩子看「本机」允不允许；另一台是备机
+        let mut local = vec![row(6, "https://a/6"), row(7, "https://a/5")];
+        local[0].hooks = true;
+        evaluate(&mut local, Side::Controller, &config, &fleet, &other, false);
+        assert!(local[0].reason.as_deref().unwrap().contains("允许钩子"));
+        assert!(local[1].reason.as_deref().unwrap().contains("备机上也有"));
+        let mut allowed = vec![row(6, "https://a/6")];
+        allowed[0].hooks = true;
+        evaluate(
+            &mut allowed,
+            Side::Controller,
+            &config,
+            &fleet,
+            &other,
+            true,
+        );
+        assert_eq!(allowed[0].reason, None);
+
         // 已经在路上的不再判断、不再请求
         let mut waiting = vec![row(8, "https://a/4")];
         waiting[0].state = RowState::Waiting;
-        evaluate(&mut waiting, &config, &fleet, &other);
+        evaluate(&mut waiting, Side::Node, &config, &fleet, &other, true);
         assert_eq!(waiting[0].reason, None);
         assert!(select(&mut waiting, None).is_empty());
     }
@@ -916,6 +1179,20 @@ mod tests {
                 "同一个请求不再收"
             );
         }
+
+        // 事后再加入（`POST /v1/node/ha/join`）：原因划掉，重新排上
+        let (rooms, _) = member.join_local(&[a.id, 999], &[]).await;
+        let row = rooms.iter().find(|row| row.id == a.id).unwrap();
+        assert_eq!(row.included, Some(true));
+        assert!(
+            rooms
+                .iter()
+                .any(|row| row.id == 999 && row.reason.as_deref() == Some(MISSING))
+        );
+        let (rooms, _) = member.candidates().await;
+        let row = rooms.iter().find(|row| row.id == a.id).unwrap();
+        assert_eq!(row.state, RowState::Waiting);
+        assert_eq!(row.refused, None);
         member.stop();
         assert_eq!(holding(url), None);
     }

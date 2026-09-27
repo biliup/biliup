@@ -51,6 +51,8 @@ const READY_WAIT: Duration = Duration::from_secs(30);
 const RECENT_SESSIONS: i64 = 200;
 /// 问节点本地行清单最多等多久
 const INVENTORY_WAIT: Duration = Duration::from_secs(10);
+/// 「本机」上要加入配对的本地行多久往前走一步（与节点扫描本机改动同一个周期）
+const ADOPT_TICK: Duration = Duration::from_secs(5);
 
 pub struct Pairing {
     services: ServiceRegister,
@@ -63,7 +65,8 @@ pub struct Pairing {
     ready: watch::Sender<bool>,
     /// 指定、解除与换上传主机一个一个来
     busy: tokio::sync::Mutex<()>,
-    /// 控制面的配置改了就给主机与备机重发期望状态（边录边传的房间可能变了）
+    /// 控制面的配置改了就给主机与备机重发期望状态（边录边传的房间可能变了）；
+    /// 也定时让「本机」上要加入配对的本地行往前走（[`Self::adopt_tick`]）
     watcher: Mutex<Option<JoinHandle<()>>>,
     /// 问节点本地行清单还没回话的：（节点, 问的 id）→ 等回话的
     inventories: Mutex<HashMap<(i64, u64), oneshot::Sender<Inventory>>>,
@@ -176,6 +179,18 @@ pub struct Selection {
     pub streamers: Option<Vec<i64>>,
     #[serde(default)]
     pub templates: Option<Vec<i64>>,
+}
+
+/// `POST /v1/fleet/ha/join`：配对之后把一台上还没纳入的本地主播与模板加进配对
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Join {
+    /// 哪一台上的本地行：`controller`（主机「本机」）或 `node`（配对里的节点）
+    pub side: Side,
+    #[serde(default)]
+    pub streamers: Vec<i64>,
+    #[serde(default)]
+    pub templates: Vec<i64>,
 }
 
 /// `POST /v1/fleet/ha/role`
@@ -955,6 +970,15 @@ impl Pairing {
         }
     }
 
+    /// 主机「本机」节点允许带 run 命令的房间
+    async fn local_hooks(&self, controller: &Controller) -> AppResult<bool> {
+        let Some(local) = controller.local_node_id() else {
+            return Ok(false);
+        };
+        let node = crate::server::fleet::store::node(controller.pool(), local).await?;
+        Ok(node.is_some_and(|node| node.allow_hooks))
+    }
+
     /// 请备机把它上面的本地行加入配对：问清单、按控制面的规矩逐条判断（[`adopt::evaluate`]），
     /// 挑出这一次纳入的，随期望状态带过去。不纳入的逐条带原因、留作备机的本地行
     async fn adopt_standby(
@@ -976,9 +1000,11 @@ impl Pairing {
         let (mut rooms, mut template_rows) = (inventory.rooms, inventory.templates);
         adopt::evaluate(
             &mut rooms,
+            Side::Node,
             &self.config(),
             &fleet_urls(controller).await?,
             &adopt::urls(&primary_rooms),
+            false,
         );
         let room_ids = adopt::select(&mut rooms, streamers);
         let template_ids = adopt::select_templates(&mut template_rows, templates, &rooms);
@@ -995,7 +1021,7 @@ impl Pairing {
         Ok(rows_view(Some(standby), (rooms, template_rows)))
     }
 
-    /// `GET /v1/fleet/ha/candidates`：备机上还没纳入配对的本地主播与模板，逐条标出能不能加入、为什么，
+    /// `GET /v1/fleet/ha/candidates`：两台上还没纳入配对的本地主播与模板，逐条标出能不能加入、为什么，
     /// `included` 是缺省纳入的（能加入的都纳入）。`standby` 不填时是配对里的节点；
     /// 指定备机之前填上候选节点，确认弹层按它列出缺省纳入的清单
     pub async fn candidates(
@@ -1012,29 +1038,144 @@ impl Pairing {
                 "备机不能是「本机」节点：选一台普通节点".into(),
             )));
         }
-        let standby_view = match standby {
-            Some(node) => match self.inventory(controller, node).await {
-                Ok(inventory) => {
-                    let (primary_rooms, _) = self.local_rows(controller, active.as_ref()).await;
-                    let (mut rooms, mut templates) = (inventory.rooms, inventory.templates);
-                    adopt::evaluate(
-                        &mut rooms,
-                        &self.config(),
-                        &fleet_urls(controller).await?,
-                        &adopt::urls(&primary_rooms),
-                    );
-                    adopt::select(&mut rooms, None);
-                    adopt::select_templates(&mut templates, None, &rooms);
-                    rows_view(standby, (rooms, templates))
-                }
-                Err(reason) => rows_error(standby, reason),
-            },
+        let config = self.config();
+        let urls = fleet_urls(controller).await?;
+        let (mut primary_rooms, mut primary_templates) =
+            self.local_rows(controller, active.as_ref()).await;
+        let inventory = match standby {
+            Some(node) => Some(self.inventory(controller, node).await),
+            None => None,
+        };
+        let standby_urls = match &inventory {
+            Some(Ok(inventory)) => adopt::urls(&inventory.rooms),
+            _ => HashMap::new(),
+        };
+        let standby_view = match inventory {
+            Some(Ok(inventory)) => {
+                let (mut rooms, mut templates) = (inventory.rooms, inventory.templates);
+                let other = adopt::urls(&primary_rooms);
+                adopt::evaluate(&mut rooms, Side::Node, &config, &urls, &other, false);
+                adopt::select(&mut rooms, None);
+                adopt::select_templates(&mut templates, None, &rooms);
+                rows_view(standby, (rooms, templates))
+            }
+            Some(Err(reason)) => rows_error(standby, reason),
+            None => Value::Null,
+        };
+        let primary_view = match local {
+            Some(_) => {
+                let hooks = self.local_hooks(controller).await?;
+                adopt::evaluate(
+                    &mut primary_rooms,
+                    Side::Controller,
+                    &config,
+                    &urls,
+                    &standby_urls,
+                    hooks,
+                );
+                adopt::select(&mut primary_rooms, None);
+                adopt::select_templates(&mut primary_templates, None, &primary_rooms);
+                rows_view(local, (primary_rooms, primary_templates))
+            }
             None => Value::Null,
         };
         Ok(Ok(json!({
             "paired": active.is_some(),
             "standby": standby_view,
+            "primary": primary_view,
         })))
+    }
+
+    /// `POST /v1/fleet/ha/join`：配对之后按 id 把一台上还没纳入的本地行加进配对。
+    /// 节点上的随期望状态请它加入；主机「本机」上的由控制面建成配对里的房间与模板，主播等空闲才加入
+    pub async fn join(
+        &self,
+        controller: &Controller,
+        request: Join,
+    ) -> AppResult<Result<Value, Refused>> {
+        self.wait_ready().await;
+        let _busy = self.busy.lock().await;
+        let Some(active) = self.active() else {
+            return Ok(Err(Refused::Conflict(
+                "没有生效中的配对：先指定备机".into(),
+            )));
+        };
+        if request.streamers.is_empty() && request.templates.is_empty() {
+            return Ok(Err(Refused::Invalid(
+                "streamers 与 templates 至少填一个".into(),
+            )));
+        }
+        let (streamers, templates) = (
+            Some(request.streamers.as_slice()),
+            Some(request.templates.as_slice()),
+        );
+        if request.side == Side::Node {
+            let adoption = self
+                .adopt_standby(controller, &active, streamers, templates)
+                .await?;
+            return Ok(match adoption.get("error").and_then(Value::as_str) {
+                Some(reason) => Err(Refused::Conflict(reason.to_string())),
+                None => Ok(adoption),
+            });
+        }
+        // 另一台上有同一个主播时两台会各录各投：读不到备机的清单就不加
+        let other = match self
+            .inventory(controller, active.pair.standby_node_id)
+            .await
+        {
+            Ok(inventory) => adopt::urls(&inventory.rooms),
+            Err(reason) => {
+                return Ok(Err(Refused::Conflict(format!(
+                    "{reason}：主机上的主播要先确认备机上没有同一个主播才能加入，等备机在线再加"
+                ))));
+            }
+        };
+        let (mut rooms, mut template_rows) = self.local_rows(controller, Some(&active)).await;
+        adopt::evaluate(
+            &mut rooms,
+            Side::Controller,
+            &self.config(),
+            &fleet_urls(controller).await?,
+            &other,
+            self.local_hooks(controller).await?,
+        );
+        let room_ids = adopt::select(&mut rooms, streamers);
+        let template_ids = adopt::select_templates(&mut template_rows, templates, &rooms);
+        if !room_ids.is_empty() || !template_ids.is_empty() {
+            info!(
+                rooms = ?room_ids,
+                templates = ?template_ids,
+                "配对：主机「本机」上的这些本地行加入配对"
+            );
+            active.member.queue(&room_ids, &template_ids).await;
+            self.adopt_tick(controller).await;
+        }
+        Ok(Ok(rows_view(
+            controller.local_node_id(),
+            (rooms, template_rows),
+        )))
+    }
+
+    /// 主机「本机」上要加入配对的本地行往前走一步（每 [`ADOPT_TICK`]，与加入接口）；建好了就给两台重发期望状态
+    pub async fn adopt_tick(&self, controller: &Controller) {
+        let Some(active) = self.active() else {
+            return;
+        };
+        if !active.member.adopting().await {
+            return;
+        }
+        let Some(local) = controller.local() else {
+            return;
+        };
+        let fleet = local.fleet_state();
+        let node = active.pair.primary_node_id;
+        if active
+            .member
+            .advance_local(controller, node, &fleet, now_ms())
+            .await
+        {
+            controller.push_many([Some(node)]).await;
+        }
     }
 
     async fn designate_locked(
@@ -1309,12 +1450,25 @@ impl Pairing {
     }
 }
 
+/// 控制面的配置改了就重发主机与备机的期望状态；定时让「本机」上要加入配对的本地行往前走
 async fn watch_config(pairing: Weak<Pairing>, controller: Weak<Controller>) {
     let mut changes = super::config_changes();
-    while changes.changed().await.is_ok() {
+    let mut ticker = tokio::time::interval(ADOPT_TICK);
+    loop {
+        let changed = tokio::select! {
+            changed = changes.changed() => match changed {
+                Ok(()) => true,
+                Err(_) => return,
+            },
+            _ = ticker.tick() => false,
+        };
         let (Some(pairing), Some(controller)) = (pairing.upgrade(), controller.upgrade()) else {
             return;
         };
+        if !changed {
+            pairing.adopt_tick(&controller).await;
+            continue;
+        }
         if let Some(active) = pairing.active() {
             debug!("HA：控制面的配置改了，重发主机与备机的期望状态");
             controller

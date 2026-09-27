@@ -330,6 +330,8 @@ pub struct Reconciler {
     local: bool,
     managed: ManagedHandle,
     state: FleetState,
+    /// 主机「本机」这一次落地要原地认下的行（加入配对，H2）：像配对里的行一样先比一比，已经一样就不重建监控
+    adopted: PairRows,
     /// 主机「本机」上单独加入配对的模板：没有房间用也留着
     pinned: BTreeSet<i64>,
 }
@@ -363,6 +365,7 @@ impl Reconciler {
             local,
             managed,
             state,
+            adopted: PairRows::default(),
             pinned: BTreeSet::new(),
         };
         reconciler.recover().await;
@@ -511,8 +514,24 @@ impl Reconciler {
         self.apply_paired(desired, None).await
     }
 
-    /// 主机「本机」上单独加入配对的模板（H2）：没有房间用也留着，只管紧接着的这一次落地
-    pub fn pin_templates(&mut self, pinned: BTreeSet<i64>) {
+    /// 主机「本机」上加入配对的本地行（H2）：按控制面的提示（控制面 id → 本机行 id）原地认下，只管紧接着的
+    /// 这一次落地。认下的行不算配对里的行（「本机」上的 Fleet 房间照旧只能在控制面改）
+    pub async fn adopt_local(
+        &mut self,
+        rooms: &BTreeMap<i64, i64>,
+        templates: &BTreeMap<i64, i64>,
+        pinned: BTreeSet<i64>,
+    ) {
+        if !rooms.is_empty() || !templates.is_empty() {
+            let plan = PairPlan {
+                adopt_rooms: rooms.clone(),
+                adopt_templates: templates.clone(),
+                ..PairPlan::default()
+            };
+            self.adopt(&plan).await;
+        }
+        self.adopted.rooms = rooms.keys().copied().collect();
+        self.adopted.templates = templates.keys().copied().collect();
         self.pinned = pinned;
     }
 
@@ -604,13 +623,9 @@ impl Reconciler {
                 continue;
             }
             let (spec, cookie) = &resolved[template];
+            let compare = paired_template(template) || self.adopted.templates.contains(template);
             if let Err(error) = self
-                .upsert_template(
-                    *template,
-                    spec,
-                    cookie.as_deref(),
-                    paired_template(template),
-                )
+                .upsert_template(*template, spec, cookie.as_deref(), compare)
                 .await
             {
                 template_errors.insert(*template, error);
@@ -639,7 +654,8 @@ impl Reconciler {
             self.remove_room(id).await;
         }
         for room in wanted {
-            if let Err(error) = self.upsert_room(&room, paired_room(&room.id)).await {
+            let compare = paired_room(&room.id) || self.adopted.rooms.contains(&room.id);
+            if let Err(error) = self.upsert_room(&room, compare).await {
                 errors.insert(room.id, error);
             }
         }
@@ -657,6 +673,7 @@ impl Reconciler {
         }
 
         self.state.pair = plan.map(|plan| plan.rows);
+        self.adopted = PairRows::default();
         self.pinned.clear();
         self.state.state_version = Some(desired.version);
         self.persist();

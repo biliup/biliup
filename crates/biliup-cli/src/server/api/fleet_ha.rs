@@ -6,8 +6,10 @@
 //!   "adopt": {"streamers": [...], "templates": [...]}}`），`DELETE /v1/fleet/ha`：解除配对，都归 `node.manage`。
 //!   指定一台新的备机时它上面已有的本地主播与模板缺省全部纳入配对，`adopt` 里列出的才纳入（某一项不填就是
 //!   这一项全部）；应答的 `adoption` 逐条列出纳入与否、不能纳入的原因
-//! - `GET /v1/fleet/ha/candidates?standby=节点 id`：备机上还没纳入配对的本地主播与模板、能不能加入与原因
+//! - `GET /v1/fleet/ha/candidates?standby=节点 id`：两台上还没纳入配对的本地主播与模板、能不能加入与原因
 //!   （确认弹层用；`standby` 不填时是配对里的节点），归 `streamer.view`
+//! - `POST /v1/fleet/ha/join`：配对之后按 id 把一台上还没纳入的本地行加进配对
+//!   （`{"side": "controller" | "node", "streamers": [...], "templates": [...]}`），归 `node.manage`
 //! - `POST /v1/fleet/ha/role`：换上传主机（`{"primary": "controller" | "node"}`），两台都在线才换，归 `node.manage`
 //! - `POST /v1/fleet/ha/sessions/{key}/{action}`：面板上的人工处理（`standby-upload` / `drop`），
 //!   控制面是主机时转给备机执行、是备机时在本机执行，归 `upload.submit`
@@ -15,14 +17,15 @@
 //! 配对里的节点（[`node_router`]）：`GET /v1/node/ha` 与 `POST /v1/node/ha/sessions/{key}/{action}`（本地的
 //! 人工处理，§6 H），权限同上；`POST /v1/node/ha/role`（换上传主机）与 `PUT /v1/node/ha`（改模式与参数，
 //! `{"mode": 1|2, "params": {...}}`）经控制面提交、两台都在线才行，归 `node.manage`。
-//! `GET /v1/node/ha/candidates`：本机还没纳入配对的本地行，归 `streamer.view`。
+//! `GET /v1/node/ha/candidates`（本机还没纳入配对的本地行，归 `streamer.view`）与 `POST /v1/node/ha/join`
+//! （`{"streamers": [...], "templates": [...]}`，把本机的本地行加进配对，归 `node.manage`）。
 //! 本机不在配对里时这组地址落回页面，与没有这组路由时一样。
 
 use crate::server::errors::{ApiError, report_to_response};
 use crate::server::fleet::controller::Controller;
 use crate::server::fleet::ha;
 use crate::server::fleet::ha::member::member_for;
-use crate::server::fleet::ha::pairing::{Designate, Refused, Switch};
+use crate::server::fleet::ha::pairing::{Designate, Join, Refused, Switch};
 use crate::server::fleet::ha::params::{HaMode, HaParams};
 use crate::server::fleet::ha::sync::HaValue;
 use crate::server::fleet::ha::wire::{HaMessage, ManualAction};
@@ -117,6 +120,21 @@ pub async fn candidates(
     }
 }
 
+pub async fn join(State(controller): State<Arc<Controller>>, body: Bytes) -> Response {
+    let Some(pairing) = controller.ha() else {
+        return not_supported();
+    };
+    let request: Join = match parse(&body) {
+        Ok(request) => request,
+        Err(reason) => return refused(reason),
+    };
+    match pairing.join(&controller, request).await {
+        Ok(Ok(view)) => Json(view).into_response(),
+        Ok(Err(reason)) => refused(reason),
+        Err(e) => report_to_response(e),
+    }
+}
+
 pub async fn delete_pair(State(controller): State<Arc<Controller>>) -> Response {
     let Some(pairing) = controller.ha() else {
         return not_supported();
@@ -166,6 +184,7 @@ pub fn node_router(services: ServiceRegister) -> Router<()> {
         .route("/v1/node/ha", get(node_view).put(node_configure))
         .route("/v1/node/ha/role", post(node_switch))
         .route("/v1/node/ha/candidates", get(node_candidates))
+        .route("/v1/node/ha/join", post(node_join))
         .route("/v1/node/ha/sessions/{key}/{action}", post(node_manual))
         .route_layer(axum::middleware::from_fn(paired_only))
         .with_state(services)
@@ -280,6 +299,38 @@ async fn node_candidates(State(services): State<ServiceRegister>) -> Response {
         return not_synced();
     };
     let (streamers, templates) = member.candidates().await;
+    Json(json!({ "streamers": streamers, "templates": templates })).into_response()
+}
+
+/// `POST /v1/node/ha/join`
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NodeJoin {
+    #[serde(default)]
+    streamers: Vec<i64>,
+    #[serde(default)]
+    templates: Vec<i64>,
+}
+
+/// 按 id 把本机还没纳入的本地行加进配对：主播等空闲才发给控制面，控制面没收下的原因见清单里的 `refused`
+async fn node_join(State(services): State<ServiceRegister>, body: Bytes) -> Response {
+    let request: NodeJoin = match parse(&body) {
+        Ok(request) => request,
+        Err(reason) => return refused(reason),
+    };
+    if request.streamers.is_empty() && request.templates.is_empty() {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "streamers 与 templates 至少填一个".to_string(),
+        );
+    }
+    let Some(member) = member_for(&services) else {
+        return not_synced();
+    };
+    let (streamers, templates) = member
+        .join_local(&request.streamers, &request.templates)
+        .await;
+    member.scan().await;
     Json(json!({ "streamers": streamers, "templates": templates })).into_response()
 }
 
