@@ -655,8 +655,10 @@ mod tests {
             .await
             .unwrap();
 
-        // 写入端已把整段报给索引任务，盘上只有文件头
-        let tap = index::live::spawn();
+        // 写入端已把整段报给索引任务，盘上只有文件头。这里不测落盘节奏：间隔调短，
+        // 写入端的事件被索引任务分成几批收到时也不用等满 5 秒
+        let policy = index::live::FlushPolicy::default().interval(Duration::from_millis(50));
+        let tap = index::live::spawn_with(policy);
         let file_tap = tap.open(&path);
         index::live::tests::feed_flv_tags(&file_tap, &flv.bytes);
         tokio::time::timeout(Duration::from_secs(3), async {
