@@ -63,14 +63,25 @@ import {
   useSessionClips,
 } from '@/app/lib/clips'
 import { useBoolPref } from '@/app/lib/use-local-pref'
+import {
+  acceptSuggestion,
+  autoClipError,
+  effectiveState,
+  type Suggestion,
+  useAutoClip,
+  useSessionAutoClip,
+  useSuggestions,
+} from '@/app/lib/auto-clip'
+import { useNowSec } from '@/app/lib/use-dashboard'
 import { LivePreviewPlayer } from '@/app/ui/LivePreview'
 import { isTyping, showMarkerToast } from '@/app/ui/MarkerControls'
 import { usePublishQueue } from '@/app/lib/publish'
 import { QueueBanner, useJobToasts } from '@/app/ui/publish/JobStatus'
 import { PublishDrawer, type PublishTarget } from '@/app/ui/publish/PublishDrawer'
 import DvrPlayer, { type DvrHandle, type DvrPhase } from './DvrPlayer'
-import { DetailBar, OverviewBar, type Selection } from './Timeline'
+import { DetailBar, OverviewBar, type Selection, type SuggestionBand } from './Timeline'
 import { type PanelTab, PRECISE_TIP, QUICK_TIP, SidePanel } from './SidePanel'
+import { SuggestionsPanel } from './SuggestionsPanel'
 import styles from './replay.module.scss'
 
 /** 细节条的范围：当前位置前后各 5 分钟 */
@@ -168,6 +179,17 @@ export default function ReplayView({
   )
   const { data: clipData, error: clipsError, isLoading: clipsLoading } = useSessionClips(notFound ? null : sessionId)
   const clips = useMemo(() => clipData?.clips ?? [], [clipData])
+  // 自动切片没配置过（没填接口也没开）时不出现「候选」，也不请求场次级的接口
+  const autoClip = useAutoClip()
+  const autoClipOn = autoClip.visible && !notFound
+  const { data: autoClipData } = useSessionAutoClip(autoClipOn ? sessionId : null)
+  const {
+    data: suggestionData,
+    error: suggestionsError,
+    isLoading: suggestionsLoading,
+  } = useSuggestions(autoClipOn ? sessionId : null)
+  const suggestions = useMemo(() => suggestionData?.suggestions ?? [], [suggestionData])
+  const nowMs = useNowSec() * 1000
   const publishQueue = usePublishQueue(sessionId, !notFound && canDownload)
   useJobToasts(publishQueue.data?.jobs)
   const [publishTarget, setPublishTarget] = useState<PublishTarget | null>(null)
@@ -262,6 +284,10 @@ export default function ReplayView({
   const [tab, setTab] = useState<PanelTab>(initialClip === null ? 'markers' : 'clips')
   const [pickedMarker, setPickedMarker] = useState<number | null>(null)
   const [exporting, setExporting] = useState<ClipMode | null>(null)
+  /** 载入到选段的候选；接受时按当前选段 */
+  const [activeSuggestion, setActiveSuggestion] = useState<number | null>(null)
+  // 「候选」页被收起（自动切片的设置变了）时回到标记
+  if (tab === 'suggestions' && autoClip.status && !autoClipOn) setTab('markers')
 
   // `?clip=`：切片列表第一次到手时载入一次；找不到（已被删掉）就只停在 `?t=`
   const [pendingClip, setPendingClip] = useState(initialClip)
@@ -284,6 +310,15 @@ export default function ReplayView({
     const b = box.getBoundingClientRect()
     if (r.top < b.top || r.bottom > b.bottom) box.scrollTop += r.top - b.top - 8
   }, [tab, activeClip])
+  useEffect(() => {
+    if (tab !== 'suggestions' || activeSuggestion === null) return
+    const row = document.getElementById(`suggestion-row-${activeSuggestion}`)
+    const box = row?.closest<HTMLElement>('.semi-tabs-content')
+    if (!row || !box || box.scrollHeight <= box.clientHeight) return
+    const r = row.getBoundingClientRect()
+    const b = box.getBoundingClientRect()
+    if (r.top < b.top || r.bottom > b.bottom) box.scrollTop += r.top - b.top - 8
+  }, [tab, activeSuggestion])
 
   const blocked = useCallback((segment: SegmentView) => {
     Toast.warning({
@@ -505,6 +540,7 @@ export default function ReplayView({
         marker_id: selectionMarker,
       })
       setActiveClip(created.id)
+      setActiveSuggestion(null)
       setTab('clips')
       Toast.success({
         content: `已存为切片（${formatSpan(created.out_ms - created.in_ms)}）`,
@@ -565,6 +601,7 @@ export default function ReplayView({
 
   const loadClip = (c: Clip) => {
     setActiveClip(c.id)
+    setActiveSuggestion(null)
     setSelectionMarker(c.marker_id)
     setSelection({ in: c.in_ms, out: c.out_ms })
     seek(c.in_ms)
@@ -576,6 +613,75 @@ export default function ReplayView({
     document.getElementById(`marker-row-${m.id}`)?.scrollIntoView({ block: 'nearest' })
     seek(m.at_ms)
   }
+
+  const seekSuggestion = (sg: Suggestion) => {
+    setActiveSuggestion(sg.id)
+    seek(sg.in_ms)
+  }
+  const pickSuggestion = (id: number) => {
+    const sg = suggestions.find((x) => x.id === id)
+    if (!sg) return
+    setTab('suggestions')
+    seekSuggestion(sg)
+  }
+  const loadSuggestion = (sg: Suggestion) => {
+    setActiveClip(null)
+    setSelectionMarker(null)
+    setSelection({ in: sg.in_ms, out: sg.out_ms })
+    seekSuggestion(sg)
+  }
+  /** 接受候选建切片草稿；载入过选段并改了入点、出点时按改过的 */
+  const acceptOne = async (sg: Suggestion) => {
+    if (!canEdit) {
+      Toast.warning({ id: 'clip-disabled', content: editReason, duration: 3 })
+      return
+    }
+    const edited =
+      activeSuggestion === sg.id &&
+      selection.in !== null &&
+      selection.out !== null &&
+      (selection.in !== sg.in_ms || selection.out !== sg.out_ms)
+    try {
+      const { clip } = await acceptSuggestion(sg, edited ? { in_ms: selection.in!, out_ms: selection.out! } : {})
+      setActiveSuggestion(null)
+      setActiveClip(clip.id)
+      setSelectionMarker(null)
+      if (!compact) setSelection({ in: clip.in_ms, out: clip.out_ms })
+      Toast.success({
+        content: `已建切片草稿「${clip.title || `#${clip.id}`}」（${formatSpan(clip.out_ms - clip.in_ms)}），在「切片」里导出`,
+        duration: 3,
+      })
+    } catch (e) {
+      if (!(e instanceof ReportedError)) Toast.error({ content: `接受失败：${autoClipError(e)}`, duration: 5 })
+    }
+  }
+  const openClip = (id: number) => {
+    const c = clips.find((x) => x.id === id)
+    if (!c) {
+      Toast.info({ id: 'clip-gone', content: `切片 #${id} 已经不在了`, duration: 2 })
+      return
+    }
+    setTab('clips')
+    if (compact) {
+      setActiveClip(c.id)
+      seek(c.in_ms)
+    } else loadClip(c)
+  }
+  const bands: SuggestionBand[] = useMemo(
+    () =>
+      suggestions
+        .map((sg) => ({ sg, state: effectiveState(sg, nowMs) }))
+        .filter(({ state }) => state === 'pending' || state === 'expired')
+        .map(({ sg, state }) => ({
+          id: sg.id,
+          from: sg.in_ms,
+          to: sg.out_ms,
+          label: sg.title,
+          expired: state === 'expired',
+        })),
+    [suggestions, nowMs]
+  )
+  const pendingSuggestions = bands.filter((b) => !b.expired).length
 
   // 按标记的默认范围选段：范围两端不一定在当前细节条里，单独取一次那附近的关键帧
   const selectFromMarker = async (m: Marker) => {
@@ -600,6 +706,7 @@ export default function ReplayView({
       const problem = selectionProblem(inMs, outMs)
       if (problem) Toast.warning({ content: problem, duration: 3 })
       setActiveClip(null)
+      setActiveSuggestion(null)
       setSelectionMarker(m.id)
       setSelection({ in: inMs, out: outMs })
       setPickedMarker(m.id)
@@ -957,6 +1064,9 @@ export default function ReplayView({
                 onSeek={seek}
                 onBlocked={blocked}
                 onPickMarker={pickMarker}
+                bands={autoClipOn ? bands : []}
+                currentBand={activeSuggestion}
+                onPickBand={pickSuggestion}
               />
               <DetailBar
                 from={winFrom}
@@ -1056,6 +1166,7 @@ export default function ReplayView({
                       setSelection({ in: null, out: null })
                       setActiveClip(null)
                       setSelectionMarker(null)
+                      setActiveSuggestion(null)
                     }}
                   >
                     清除
@@ -1089,6 +1200,33 @@ export default function ReplayView({
             canSubmit={canSubmit}
             jobs={publishQueue.byClip}
             onPublish={setPublishTarget}
+            suggestions={
+              autoClipOn
+                ? {
+                    pending: pendingSuggestions,
+                    content: (
+                      <SuggestionsPanel
+                        sessionId={sessionId}
+                        suggestions={suggestions}
+                        loading={suggestionsLoading}
+                        error={!!suggestionsError}
+                        job={autoClipData?.job ?? null}
+                        availability={autoClip}
+                        recording={detail.recording}
+                        activeSuggestion={activeSuggestion}
+                        selection={selection}
+                        canEdit={canEdit}
+                        compact={compact}
+                        problemOf={selectionProblem}
+                        onSeek={seekSuggestion}
+                        onLoad={loadSuggestion}
+                        onAccept={acceptOne}
+                        onOpenClip={openClip}
+                      />
+                    ),
+                  }
+                : undefined
+            }
           />
         </aside>
       </div>

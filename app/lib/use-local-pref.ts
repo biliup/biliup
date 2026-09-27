@@ -65,6 +65,16 @@ export function useEnumPref<T extends string>(key: string, options: readonly T[]
   return [value, (v: T) => writePref(key, v)]
 }
 
+/** 任意文本偏好；没存过时是 `fallback`。 */
+export function useTextPref(key: string, fallback = ''): [string, (v: string) => void] {
+  const value = useSyncExternalStore(
+    subscribe,
+    () => readPref(key) ?? fallback,
+    () => fallback
+  )
+  return [value, (v: string) => writePref(key, v)]
+}
+
 /** 只接受给定候选值的数字偏好。 */
 export function useChoicePref(key: string, options: number[], fallback: number): [number, (v: number) => void] {
   const value = useSyncExternalStore(
