@@ -49,7 +49,15 @@ type AutoClipStatus = {
 
 export type AutoClipValues = Record<string, unknown> | null | undefined
 
-const NUMBER_FIELDS = ['max_asr_minutes', 'max_chat_tokens', 'chat_timeout_secs', 'asr_timeout_secs']
+const NUMBER_FIELDS = [
+  'max_asr_minutes',
+  'max_chat_tokens',
+  'chat_timeout_secs',
+  'asr_timeout_secs',
+  'min_clip_secs',
+  'max_clip_secs',
+  'max_candidates',
+]
 
 /** 掩码里的省略号：后端只回显 key 的首尾，交回原样的掩码表示「不改」 */
 const MASK_MARK = '…'
@@ -77,6 +85,53 @@ function hostOf(url: unknown) {
   } catch {
     return url.trim()
   }
+}
+
+/** 与后端保存时的整理一致：空白算没填，地址去掉结尾的 `/` */
+function filled(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function normalUrl(value: unknown): string | null {
+  const text = filled(value)
+  return text === null ? null : text.replace(/\/+$/, '')
+}
+
+const isMask = (key: unknown) => typeof key === 'string' && key.includes(MASK_MARK)
+
+/**
+ * 两把 key 各自会发往哪些地址，与后端 `chat_key_destinations` / `asr_key_destinations` 一致：
+ * 转写地址没填就用 chat 的；没单独填转写 key 时，chat 的 key 也会发往转写地址。
+ */
+function keyDestinations(section: Record<string, any>) {
+  const base = normalUrl(section.base_url)
+  const asrBase = normalUrl(section.asr_base_url) ?? base
+  const chat = new Set<string>()
+  if (base) chat.add(base)
+  if (filled(section.asr_api_key) === null && asrBase) chat.add(asrBase)
+  const asr = new Set<string>()
+  if (asrBase) asr.add(asrBase)
+  return { chat, asr }
+}
+
+/**
+ * 交回掩码时后端会不会拒绝保存，拒绝时给出与后端相同的原因：服务器上没存过这把 key，
+ * 或者这把 key 要发往的地址多出了保存时没有的。
+ */
+export function maskedKeyProblem(
+  section: Record<string, any>,
+  saved: Record<string, any>,
+  which: 'chat' | 'asr',
+): string | null {
+  const field = which === 'chat' ? 'api_key' : 'asr_api_key'
+  if (!isMask(section[field])) return null
+  const label = which === 'chat' ? 'API key' : '转写 API key'
+  if (filled(saved[field]) === null) return `${label} 是掩码，但服务器上没有保存过 key：请粘贴完整的 key`
+  const allowed = keyDestinations(saved)[which]
+  for (const target of keyDestinations(section)[which]) {
+    if (!allowed.has(target)) return `改了接口地址后请重新填写完整的 ${label}：已保存的 key 不会发往新地址`
+  }
+  return null
 }
 
 const CHECK_LABELS: [keyof Pick<ProbeReport, 'chat' | 'vision' | 'asr'>, string][] = [
@@ -123,11 +178,12 @@ const AutoClip: React.FC<Props> = ({ disabled, entity }) => {
   const saved = (entity?.auto_clip ?? {}) as Record<string, any>
   const enabled = section.enabled === true
   const host = hostOf(section.base_url)
-  const keyIsMask = (key: unknown) => typeof key === 'string' && key.includes(MASK_MARK)
-  const chatKeyNeedsRetype =
-    keyIsMask(section.api_key) && (section.base_url ?? '') !== (saved.base_url ?? '')
-  const asrKeyNeedsRetype =
-    keyIsMask(section.asr_api_key) && (section.asr_base_url ?? '') !== (saved.asr_base_url ?? '')
+  const asrHost = hostOf(filled(section.asr_base_url) ?? section.base_url)
+  const chatKeyProblem = maskedKeyProblem(section, saved, 'chat')
+  const asrKeyProblem = maskedKeyProblem(section, saved, 'asr')
+  // 清空了单独的转写 key 时，chat 的 key 会跟着发往转写地址，提示里说清楚是为什么
+  const chatKeyFollowsAsr =
+    !!chatKeyProblem && filled(section.asr_api_key) === null && filled(saved.asr_api_key) !== null
 
   const toggle = (on: boolean) => {
     if (on) setConfirming(true)
@@ -168,7 +224,9 @@ const AutoClip: React.FC<Props> = ({ disabled, entity }) => {
   }
 
   const summary = enabled
-    ? `已开启 · ${section.chat_model || '未填模型'}${host ? ` · ${host}` : ''}`
+    ? `已开启 · ${section.chat_model || '未填模型'}${host ? ` · ${host}` : ''}${
+        asrHost && asrHost !== host ? ` · 转写 ${asrHost}` : ''
+      }`
     : '未开启'
 
   return (
@@ -195,8 +253,9 @@ const AutoClip: React.FC<Props> = ({ disabled, entity }) => {
       <Collapsible isOpen={open} keepDOM>
         <div id="auto-clip-body" className={styles.autoClipBody}>
           <Typography.Paragraph type="tertiary" style={{ fontSize: 14 }}>
-            直播结束后用你配置的模型从录像里挑出候选片段（语音转写 + 弹幕 + 截图），接受后才变成切片草稿，不会自动导出或投稿。
-            这一版先提供模型配置和连通性测试，候选生成在后续版本接上。只支持 OpenAI 兼容接口（/chat/completions 与
+            用你配置的模型从录像里挑出候选片段（语音转写 + 弹幕 + 截图），接受后才变成切片草稿，不会自动导出或投稿。
+            候选在回看页的「候选」里处理；可以在剪辑台「直播场次」或回看页手动「生成候选」，也可以在直播间编辑里打开
+            「下播后自动生成候选」。只支持 OpenAI 兼容接口（/chat/completions 与
             /audio/transcriptions）；接口地址可以指向自建服务（whisper.cpp server、LocalAI、vLLM 等）。
           </Typography.Paragraph>
 
@@ -229,9 +288,10 @@ const AutoClip: React.FC<Props> = ({ disabled, entity }) => {
                 {status?.key_source === 'env' && (
                   <div>已设置环境变量 BILIUP_AUTO_CLIP_API_KEY，它优先于这里填的 key。</div>
                 )}
-                {chatKeyNeedsRetype && (
-                  <div style={{ color: 'var(--semi-color-warning)' }}>
-                    改了接口地址后需要重新填写完整的 key：已保存的 key 不会发往新地址。
+                {chatKeyProblem && (
+                  <div style={{ color: 'var(--semi-color-warning)' }} data-testid="auto-clip-key-retype">
+                    {chatKeyProblem}
+                    {chatKeyFollowsAsr ? '（清空了转写 API key，这把 key 也要发往转写地址）' : ''}。
                   </div>
                 )}
               </div>
@@ -265,9 +325,12 @@ const AutoClip: React.FC<Props> = ({ disabled, entity }) => {
             placeholder="留空 = 同上面的 API key"
             autoComplete="off"
             extraText={
-              asrKeyNeedsRetype ? (
-                <div style={{ fontSize: 14, color: 'var(--semi-color-warning)' }}>
-                  改了转写接口地址后需要重新填写完整的转写 key。
+              asrKeyProblem ? (
+                <div
+                  style={{ fontSize: 14, color: 'var(--semi-color-warning)' }}
+                  data-testid="auto-clip-asr-key-retype"
+                >
+                  {asrKeyProblem}。
                 </div>
               ) : undefined
             }
@@ -279,7 +342,7 @@ const AutoClip: React.FC<Props> = ({ disabled, entity }) => {
             field="auto_clip.asr_model"
             label="转写模型（asr_model）"
             placeholder="例如 whisper-1"
-            extraText="不填就不转写，只靠弹幕和截图出候选。"
+            extraText="生成候选必填：先转写语音，候选的边界按分句时间定。转写服务不返回分句时间戳时边界会粗一些。"
             style={{ width: '100%' }}
             fieldStyle={fieldStyle}
             showClear
@@ -361,6 +424,42 @@ const AutoClip: React.FC<Props> = ({ disabled, entity }) => {
             fieldStyle={fieldStyle}
           />
 
+          <div className={styles.subTitle}>候选</div>
+          <Form.InputNumber
+            field="auto_clip.min_clip_secs"
+            label="候选最短（min_clip_secs）"
+            extraText="告诉模型候选的长度范围，短于它的候选会被丢掉。留空为 15 秒。"
+            min={1}
+            precision={0}
+            placeholder="默认 15"
+            suffix="秒"
+            style={{ width: '100%' }}
+            fieldStyle={fieldStyle}
+          />
+          <Form.InputNumber
+            field="auto_clip.max_clip_secs"
+            label="候选最长（max_clip_secs）"
+            extraText="长于它的候选会被丢掉；比最短还短时按最短算。留空为 180 秒。"
+            min={1}
+            precision={0}
+            placeholder="默认 180"
+            suffix="秒"
+            style={{ width: '100%' }}
+            fieldStyle={fieldStyle}
+          />
+          <Form.InputNumber
+            field="auto_clip.max_candidates"
+            label="每场最多候选数（max_candidates）"
+            extraText="按模型自评从高到低保留这么多个，最多 200。留空为 20。"
+            min={1}
+            max={200}
+            precision={0}
+            placeholder="默认 20"
+            suffix="个"
+            style={{ width: '100%' }}
+            fieldStyle={fieldStyle}
+          />
+
           <div className={styles.autoClipTest}>
             <Button onClick={runTest} loading={testing} disabled={disabled}>
               测试连接
@@ -401,9 +500,24 @@ const AutoClip: React.FC<Props> = ({ disabled, entity }) => {
         }}
         onCancel={() => setConfirming(false)}
       >
-        开启后，录像的音频（静音部分除外）、弹幕摘要和截图（每场最多 64 张，可关）会发送到
-        <strong> {host || '你配置的接口地址'} </strong>
-        ，由该服务按它的条款处理和计费。确定开启吗？
+        <div data-testid="auto-clip-privacy">
+          {asrHost && asrHost !== host ? (
+            <>
+              开启后，生成候选时录像的音频（静音部分除外）会发送到转写接口
+              <strong> {asrHost} </strong>
+              ；弹幕摘要、转写文字和截图（每场最多 64 张，可关）会发送到分析接口
+              <strong> {host || '你配置的接口地址'} </strong>
+              。这两家服务按各自的条款处理和计费。
+            </>
+          ) : (
+            <>
+              开启后，生成候选时录像的音频（静音部分除外）、弹幕摘要、转写文字和截图（每场最多 64 张，可关）会发送到
+              <strong> {host || '你配置的接口地址'} </strong>
+              ，由该服务按它的条款处理和计费。
+            </>
+          )}
+          只有手动「生成候选」或直播间打开了「下播后自动生成候选」时才会发送。确定开启吗？
+        </div>
       </Modal>
     </div>
   )
