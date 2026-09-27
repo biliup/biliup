@@ -233,8 +233,13 @@ impl Book {
 
 /// 内容摘要：键排好序的 JSON 的 SHA-256
 pub fn digest(value: &Value) -> String {
+    digest_bytes(canonical(value).as_bytes())
+}
+
+/// 文件内容（凭据文件）的摘要
+pub fn digest_bytes(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(canonical(value).as_bytes());
+    hasher.update(bytes);
     crate::server::fleet::store::hex(&hasher.finalize())
 }
 

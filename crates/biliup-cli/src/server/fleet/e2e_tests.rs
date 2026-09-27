@@ -1547,7 +1547,7 @@ async fn the_local_node_is_mirrored_to_a_designated_standby() {
     let (controller, url, pool) = start_controller(dir.path()).await;
     let fx = LocalFixture::new(dir.path()).await;
     // 与 `fleet::start` 同序：先挂配对，「本机」恢复之后再载入
-    let pairing = Arc::new(Pairing::new(fx.services.clone()));
+    let pairing = Arc::new(Pairing::new(fx.services.clone(), dir.path()));
     controller.attach_ha(pairing.clone());
     let local = fx.attach(&controller).await;
     controller.attach_local(local.clone());

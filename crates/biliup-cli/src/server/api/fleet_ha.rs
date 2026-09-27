@@ -220,7 +220,7 @@ mod tests {
         let (status, _) = send(&app, Method::GET, "/v1/fleet/ha", "").await;
         assert_eq!(status, StatusCode::NOT_FOUND, "没挂配对的控制面");
 
-        let pairing = Arc::new(Pairing::new(services(dir.path()).await));
+        let pairing = Arc::new(Pairing::new(services(dir.path()).await, dir.path()));
         controller.attach_ha(pairing.clone());
         pairing.resume(&controller, None).await;
 

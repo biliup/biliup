@@ -144,6 +144,8 @@ impl FleetCapability {
 pub struct Fleet {
     role: Role,
     revoked: Option<RevokedHandle>,
+    /// 控制面进程与节点进程的服务（配对同步认出本机接口上的改动用）；单机没有
+    services: Option<ServiceRegister>,
 }
 
 #[derive(Clone, Default)]
@@ -163,10 +165,12 @@ impl Fleet {
         managed: ManagedHandle,
         revoked: RevokedHandle,
     ) -> Self {
+        let services = Some(local.services().clone());
         controller.attach_local(local);
         Fleet {
             role: Role::Controller(controller, managed),
             revoked: Some(revoked),
+            services,
         }
     }
 
@@ -182,12 +186,18 @@ impl Fleet {
     }
 
     /// 节点进程（与启用了「本机」节点的控制面）上拒绝本机改动托管行（D7）；
-    /// 被移除过时跟踪本机对暂停中主播的恢复与删除
+    /// 被移除过时跟踪本机对暂停中主播的恢复与删除；配对中把本机接口上的改动交给配对同步（[`ha::capture`]）
     pub fn guard(&self, mut router: axum::Router<()>) -> axum::Router<()> {
         if let Some(revoked) = &self.revoked {
             router = router.layer(axum::middleware::from_fn_with_state(
                 revoked.clone(),
                 revoked::track,
+            ));
+        }
+        if let Some(services) = &self.services {
+            router = router.layer(axum::middleware::from_fn_with_state(
+                services.clone(),
+                ha::capture::capture,
             ));
         }
         match &self.role {
@@ -253,6 +263,7 @@ pub async fn start(options: &FleetOptions, services: &ServiceRegister) -> AppRes
     let standalone = |revoked: Option<RevokedHandle>| Fleet {
         role: Role::Standalone,
         revoked,
+        services: None,
     };
     if options.controller {
         if node_file.exists() {
@@ -304,6 +315,7 @@ pub async fn start(options: &FleetOptions, services: &ServiceRegister) -> AppRes
         Ok(agent) => Ok(Fleet {
             role: Role::Node(Arc::new(Mutex::new(Some(agent))), managed),
             revoked: Some(revoked),
+            services: Some(services.clone()),
         }),
         Err(e) => {
             error!(error = ?e, "节点代理没能启动，本次以单机模式运行");
@@ -352,7 +364,8 @@ async fn start_controller_role(
     revoked.apply().await;
     let controller = start_controller(options).await?;
     // 先挂上配对：之前就连上来的备机等配对载入完再收期望状态，不会先收到一份不带配对的而解除
-    let pairing = Arc::new(ha::pairing::Pairing::new(services.clone()));
+    let data = Path::new(FLEET_DB).parent().unwrap_or(Path::new("."));
+    let pairing = Arc::new(ha::pairing::Pairing::new(services.clone(), data));
     controller.attach_ha(pairing.clone());
     let managed = ManagedHandle::default();
     let local = Arc::new(local::LocalNode::new(

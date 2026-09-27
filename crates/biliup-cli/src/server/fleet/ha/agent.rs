@@ -7,10 +7,13 @@
 //! 按场次里记下的开播信息重建上下文再投（[`super::upload::run_standby`]）。
 
 use super::key;
+use super::member::Member;
+use super::outbox::{self, PairFile};
 use super::standby::{Out, PrimaryView, SavedSegment, Session, StandbyCore, UnitData};
+use super::sync::{PairMessage, Side};
 use super::upload::{self, Plan, Submitted};
 use super::wire::{HaAssignment, HaMessage, ManualAction};
-use super::{Hold, Role, Unit, UnitOutput, set_role, sync_downloader};
+use super::{Hold, Link, Role, Unit, UnitOutput, set_role, sync_downloader};
 use crate::server::common::upload::execute_postprocessor;
 use crate::server::config::ConfigPatch;
 use crate::server::core::downloader::SegmentInfo;
@@ -18,6 +21,7 @@ use crate::server::errors::{AppError, AppResult};
 use crate::server::fleet::events;
 use crate::server::fleet::model::DesiredRoom;
 use crate::server::fleet::now_ms;
+use crate::server::fleet::protocol::DesiredState;
 use crate::server::fleet::reconcile::FleetState;
 use crate::server::infrastructure::context::Context;
 use crate::server::infrastructure::service_register::ServiceRegister;
@@ -30,7 +34,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::Duration;
-use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
@@ -146,7 +149,7 @@ pub struct Standby {
     units: Mutex<HashMap<(String, i64), (i64, String)>>,
     /// 配对已解除：手里的场次不再投，录到一半的段只留在本地
     retired: AtomicBool,
-    link: Mutex<Option<mpsc::UnboundedSender<HaMessage>>>,
+    link: Mutex<Option<Link>>,
     /// 正在投的场次
     uploading: Mutex<HashSet<String>>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
@@ -241,7 +244,7 @@ impl Standby {
             match out {
                 Out::Send(message) => {
                     if let Some(link) = self.link.lock().unwrap().as_ref() {
-                        let _ = link.send(message);
+                        link.ha(message);
                     }
                 }
                 Out::Upload(id) => self.spawn_upload(id),
@@ -303,7 +306,7 @@ impl Standby {
     }
 
     /// 这条连接上第一次收到配对：接上连接，返回要先发的 `StandbyReport`
-    fn link_up(self: &Arc<Self>, link: mpsc::UnboundedSender<HaMessage>) -> HaMessage {
+    fn link_up(self: &Arc<Self>, link: Link) -> HaMessage {
         *self.link.lock().unwrap() = Some(link);
         info!("HA：连上主机，先上报手里的场次");
         self.update(|core, now| core.link_up(now))
@@ -629,6 +632,8 @@ pub struct NodeHa {
     retired: Option<Arc<Standby>>,
     /// 期望状态里的房间：控制面房间 id → 主播地址与覆写
     managed: HashMap<i64, (String, Option<ConfigPatch>)>,
+    /// 与控制面的双向同步（H2）：控制面次版本 ≥ 5、期望状态带 `pair` 时才有
+    pair: Option<Arc<Member>>,
 }
 
 impl NodeHa {
@@ -648,6 +653,7 @@ impl NodeHa {
             standby: None,
             retired: None,
             managed: HashMap::new(),
+            pair: None,
         };
         if !ha.enabled {
             return ha;
@@ -685,13 +691,87 @@ impl NodeHa {
         self.standby.is_some()
     }
 
+    fn data_dir(&self) -> PathBuf {
+        self.path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default()
+    }
+
+    /// 节点代理启动时：上次在与控制面同步（有属于这个控制面的 `pair-outbox.json`）就接着来，
+    /// 连不上控制面期间本机的修改照样记账、排队
+    pub async fn resume_pair(&mut self) {
+        if !self.enabled || self.pair.is_some() {
+            return;
+        }
+        let dir = self.data_dir();
+        if PairFile::load(&outbox::path_in(&dir), &self.controller).is_none() {
+            return;
+        }
+        self.pair = Some(
+            Member::start(
+                Side::Node,
+                &dir,
+                &self.controller,
+                self.services.clone(),
+                Side::Controller,
+            )
+            .await,
+        );
+    }
+
+    /// 期望状态里的同步版本（落地房间与上报场次之前）：带了 `pair` 就建好同步端、接上连接，
+    /// 先发离线期间排下的修改；不再带（解除配对，或控制面不支持同步）就停下并删掉同步账本
+    pub async fn pair(&mut self, desired: &DesiredState, link: &Link) {
+        if !self.enabled {
+            return;
+        }
+        if desired.ha.is_none() || desired.pair.is_none() {
+            if let Some(member) = self.pair.take() {
+                member.dissolve();
+            }
+            return;
+        }
+        if self.pair.is_none() {
+            self.pair = Some(
+                Member::start(
+                    Side::Node,
+                    &self.data_dir(),
+                    &self.controller,
+                    self.services.clone(),
+                    Side::Controller,
+                )
+                .await,
+            );
+        }
+        if let Some(member) = &self.pair {
+            member.link_up(link.clone()).await;
+        }
+    }
+
+    /// 控制面发来的同步消息
+    pub async fn pair_message(&self, message: PairMessage) {
+        match &self.pair {
+            Some(member) => member.receive(message).await,
+            None => debug!(op = message.op(), "pair frame while not paired"),
+        }
+    }
+
+    /// 离开控制面、被移除：同步账本删掉
+    pub fn forget_pair(&mut self) {
+        if let Some(member) = self.pair.take() {
+            member.dissolve();
+        }
+        PairFile::forget(&outbox::path_in(&self.data_dir()));
+    }
+
     /// 期望状态里的配对（落地房间之前）。这条连接上第一次收到配对时返回要先发的 `StandbyReport`。
     /// 镜像房间先按期望状态里的地址认下，免得落地之后、认下之前就开录的一段落到普通投稿流程
     pub fn assign(
         &mut self,
         assignment: Option<HaAssignment>,
         rooms: &[DesiredRoom],
-        link: &mpsc::UnboundedSender<HaMessage>,
+        link: &Link,
     ) -> Option<HaMessage> {
         if !self.enabled {
             return None;
@@ -769,6 +849,9 @@ impl NodeHa {
         if let Some(standby) = &self.standby {
             standby.link_down();
         }
+        if let Some(member) = &self.pair {
+            member.link_down();
+        }
     }
 
     pub fn message(&self, message: HaMessage) {
@@ -780,6 +863,9 @@ impl NodeHa {
 
     /// 节点代理停止
     pub fn shutdown(&mut self) {
+        if let Some(member) = self.pair.take() {
+            member.stop();
+        }
         if let Some(standby) = self.standby.take() {
             set_role(None);
             standby.stop();
@@ -800,12 +886,13 @@ mod tests {
     use crate::server::fleet::ha::standby::State;
     use crate::server::fleet::ha::upload::double::{self, Double};
     use crate::server::fleet::ha::wire::ReportedState;
-    use crate::server::fleet::protocol::DesiredState;
+    use crate::server::fleet::protocol::NodeMessage;
     use crate::server::fleet::reconcile::{self, Reconciler};
     use crate::server::infrastructure::connection_pool::ConnectionManager;
     use async_trait::async_trait;
     use biliup::downloader::live::{LivePlugin, LiveRequest, LiveResult, LiveStatus};
     use serde_json::json;
+    use tokio::sync::mpsc;
     use tracing_subscriber::{EnvFilter, reload};
 
     const URL: &str = "https://stuck.example/7";
@@ -926,17 +1013,26 @@ mod tests {
         SegmentInfo::new(path, None, None, 0)
     }
 
-    async fn next(frames: &mut mpsc::UnboundedReceiver<HaMessage>) -> HaMessage {
-        tokio::time::timeout(Duration::from_secs(10), frames.recv())
+    fn node_link() -> (Link, mpsc::UnboundedReceiver<NodeMessage>) {
+        let (frames, receiver) = mpsc::unbounded_channel();
+        (Link::Node(frames), receiver)
+    }
+
+    async fn next(frames: &mut mpsc::UnboundedReceiver<NodeMessage>) -> HaMessage {
+        match tokio::time::timeout(Duration::from_secs(10), frames.recv())
             .await
             .expect("备机应该发出场次消息")
             .unwrap()
+        {
+            NodeMessage::Ha(message) => message,
+            other => panic!("unexpected frame {other:?}"),
+        }
     }
 
     #[tokio::test]
     async fn a_node_that_is_not_a_standby_keeps_no_state() {
         let f = Fixture::new().await;
-        let (link, mut frames) = mpsc::unbounded_channel();
+        let (link, mut frames) = node_link();
 
         let mut ha = f.resume(false);
         assert!(!ha.is_standby());
@@ -996,7 +1092,7 @@ mod tests {
         double::install(Some(double.clone()));
 
         let mut ha = f.resume(false);
-        let (link, mut frames) = mpsc::unbounded_channel();
+        let (link, mut frames) = node_link();
         let report = ha.assign(Some(assignment(1)), &[], &link);
         assert!(
             matches!(&report, Some(HaMessage::StandbyReport { sessions }) if sessions.is_empty())
@@ -1079,7 +1175,7 @@ mod tests {
         assert!(crate::server::fleet::ha::upload_plan(&ctx).await.is_none());
         let mut ha = f.resume(false);
         assert!(ha.is_standby());
-        let (link, _frames) = mpsc::unbounded_channel();
+        let (link, _frames) = node_link();
         let Some(HaMessage::StandbyReport { sessions }) =
             ha.assign(Some(assignment(1)), &[], &link)
         else {
@@ -1167,7 +1263,7 @@ mod tests {
         .unwrap();
 
         let mut ha = f.resume(false);
-        let (link, _frames) = mpsc::unbounded_channel();
+        let (link, _frames) = node_link();
         assert!(ha.assign(Some(assignment.clone()), &[], &link).is_some());
         let primary_start = now_ms() - 30 * 60_000;
         let primary = key::primary_key(7, primary_start);
@@ -1212,7 +1308,7 @@ mod tests {
         assert!(double.entries().is_empty(), "接手的一场先不投");
 
         // 主机回来：先上报，再收到主机投成它那半
-        let (link, mut frames) = mpsc::unbounded_channel();
+        let (link, mut frames) = node_link();
         let Some(HaMessage::StandbyReport { sessions }) = ha.assign(Some(assignment), &[], &link)
         else {
             panic!("重连后应先上报");
@@ -1260,7 +1356,7 @@ mod tests {
         let _guard = crate::server::fleet::ha::test_guard().await;
         let f = Fixture::new().await;
         let mut ha = f.resume(false);
-        let (link, _frames) = mpsc::unbounded_channel();
+        let (link, _frames) = node_link();
         let desired = |id: i64, url: &str, downloader: Option<&str>| -> DesiredRoom {
             serde_json::from_value(json!({
                 "id": id, "epoch": 1, "template_id": 1, "url": url, "remark": "r",

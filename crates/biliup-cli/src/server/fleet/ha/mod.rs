@@ -8,9 +8,11 @@
 //! 没有配对时 [`ROLE`] 是空的，每处调用只读一次原子变量就返回：不分配、不记日志、不改任何状态。
 
 pub mod agent;
+pub mod capture;
 #[cfg(test)]
 mod harness;
 pub mod key;
+pub mod member;
 pub mod outbox;
 pub mod pairing;
 pub mod params;
@@ -23,11 +25,45 @@ pub mod wire;
 
 use crate::server::config::{Config, ConfigPatch};
 use crate::server::core::downloader::DownloaderType;
+use crate::server::fleet::protocol::{ControllerMessage, NodeMessage};
 use crate::server::infrastructure::context::Context;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, RwLock};
 use struct_patch::Patch;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
+
+/// 发往配对对端的帧：控制面这一侧发 `ControllerMessage`，节点这一侧发 `NodeMessage`。
+/// 场次消息与同步消息走同一条通道，先后不乱
+#[derive(Debug, Clone)]
+pub enum Link {
+    Controller(mpsc::UnboundedSender<ControllerMessage>),
+    Node(mpsc::UnboundedSender<NodeMessage>),
+}
+
+impl Link {
+    pub fn ha(&self, message: wire::HaMessage) -> bool {
+        match self {
+            Link::Controller(frames) => frames.send(ControllerMessage::Ha(message)).is_ok(),
+            Link::Node(frames) => frames.send(NodeMessage::Ha(message)).is_ok(),
+        }
+    }
+
+    pub fn pair(&self, message: sync::PairMessage) -> bool {
+        match self {
+            Link::Controller(frames) => frames.send(ControllerMessage::Pair(message)).is_ok(),
+            Link::Node(frames) => frames.send(NodeMessage::Pair(message)).is_ok(),
+        }
+    }
+
+    /// 同一条连接
+    pub fn same(&self, other: &Link) -> bool {
+        match (self, other) {
+            (Link::Controller(a), Link::Controller(b)) => a.same_channel(b),
+            (Link::Node(a), Link::Node(b)) => a.same_channel(b),
+            _ => false,
+        }
+    }
+}
 
 /// 本进程在配对里的角色；没配对时为空
 #[derive(Clone)]

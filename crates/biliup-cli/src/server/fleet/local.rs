@@ -63,6 +63,10 @@ impl LocalNode {
         }
     }
 
+    pub fn services(&self) -> &ServiceRegister {
+        &self.services
+    }
+
     /// 启用中的「本机」节点 id
     pub fn node_id(&self) -> Option<i64> {
         *self.node_id.lock().unwrap()

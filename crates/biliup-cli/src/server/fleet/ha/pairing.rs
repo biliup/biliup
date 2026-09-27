@@ -7,22 +7,25 @@
 //! 配对只在「本机」节点（F5）启用、且它就是 `ha_pair` 里的主机时生效；没有配对时这里什么都不做，
 //! 下发的期望状态与以前逐字相同。
 
+use super::member::Member;
 use super::params::{HaMode, HaParams};
 use super::primary::Primary;
 use super::store::{self, Pair};
+use super::sync::{PairMessage, PairState, Side};
 use super::wire::{HaAssignment, HaMessage, ManualAction};
-use super::{Role, set_role, sync_downloader};
+use super::{Link, Role, set_role, sync_downloader};
 use crate::server::config::Config;
 use crate::server::errors::AppResult;
 use crate::server::fleet::assignments;
 use crate::server::fleet::controller::Controller;
 use crate::server::fleet::model::{DesiredRoom, DesiredTemplate};
 use crate::server::fleet::now_ms;
-use crate::server::fleet::protocol::{ControllerMessage, HA_SINCE};
+use crate::server::fleet::protocol::{ControllerMessage, HA_SINCE, PAIR_SINCE};
 use crate::server::infrastructure::service_register::ServiceRegister;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
@@ -36,6 +39,8 @@ const RECENT_SESSIONS: i64 = 200;
 
 pub struct Pairing {
     services: ServiceRegister,
+    /// `data/`：同步账本 `pair-outbox.json` 放在这里
+    dir: PathBuf,
     active: Mutex<Option<Active>>,
     /// 启动时载入过 `ha_pair`。之前连上来的备机先等一等，免得收到不带配对的期望状态而解除
     ready: watch::Sender<bool>,
@@ -50,6 +55,13 @@ pub struct Pairing {
 struct Active {
     pair: Pair,
     primary: Arc<Primary>,
+    /// 与配对节点的双向同步（H2）
+    member: Arc<Member>,
+}
+
+/// 控制面上同步账本的对端标识
+fn peer(standby: i64) -> String {
+    format!("node:{standby}")
 }
 
 /// `PUT /v1/fleet/ha`
@@ -175,9 +187,10 @@ fn refusal(
 }
 
 impl Pairing {
-    pub fn new(services: ServiceRegister) -> Self {
+    pub fn new(services: ServiceRegister, dir: &Path) -> Self {
         Pairing {
             services,
+            dir: dir.to_path_buf(),
             active: Mutex::default(),
             ready: watch::channel(false).0,
             busy: tokio::sync::Mutex::default(),
@@ -218,13 +231,54 @@ impl Pairing {
             );
             return;
         }
-        primary.connected(outbox.clone());
+        primary.connected(Link::Controller(outbox.clone()));
     }
 
     /// 节点离线（它的连接从在线表里移除之后）
     pub fn node_offline(&self, node: i64) {
         if let Some(primary) = self.primary_for(node) {
             primary.disconnected();
+        }
+        if let Some(member) = self.member_for(node) {
+            member.link_down();
+        }
+    }
+
+    /// 生效中配对的同步端，以及 `node` 是不是配对节点
+    fn member_for(&self, node: i64) -> Option<Arc<Member>> {
+        let active = self.active.lock().unwrap();
+        let active = active.as_ref()?;
+        (active.pair.standby_node_id == node).then(|| active.member.clone())
+    }
+
+    /// 配对节点次版本 ≥ 5 时与控制面双向同步：给它的期望状态不带 F3 的配置，带 `pair`
+    pub fn syncs(&self, node: i64, proto: u32) -> bool {
+        proto >= PAIR_SINCE && self.member_for(node).is_some()
+    }
+
+    /// 节点应答了期望状态（`Controller::ack`）。配对节点这时已经按带 `pair` 的期望状态建好了同步端，
+    /// 控制面这边接上连接、发出排着的修改
+    pub async fn node_acked(&self, controller: &Controller, node: i64) {
+        let Some(member) = self.member_for(node) else {
+            return;
+        };
+        match controller.node_link(node) {
+            Some((proto, outbox)) if proto >= PAIR_SINCE => {
+                member.link_up(Link::Controller(outbox)).await;
+            }
+            _ => {}
+        }
+    }
+
+    /// 配对节点发来的同步消息；不是配对节点的丢掉
+    pub async fn pair_message(&self, node: i64, message: PairMessage) {
+        match self.member_for(node) {
+            Some(member) => member.receive(message).await,
+            None => debug!(
+                node,
+                op = message.op(),
+                "pair frame from a node that is not paired"
+            ),
         }
     }
 
@@ -308,26 +362,48 @@ impl Pairing {
         }
         primary.set_rooms(room_map(&kept));
         set_role(Some(Role::Primary(primary.clone())));
-        let active = Active {
+        let previous = self.active.lock().unwrap().take();
+        if let Some(previous) = &previous {
+            previous.primary.stop();
+            if previous.pair.standby_node_id == pair.standby_node_id {
+                previous.member.stop();
+            } else {
+                previous.member.dissolve();
+            }
+        }
+        let member = Member::start(
+            Side::Controller,
+            &self.dir,
+            &peer(pair.standby_node_id),
+            self.services.clone(),
+            Side::Controller,
+        )
+        .await;
+        *self.active.lock().unwrap() = Some(Active {
             pair: pair.clone(),
             primary,
-        };
-        if let Some(previous) = self.active.lock().unwrap().replace(active) {
-            previous.primary.stop();
-        }
+            member,
+        });
         Ok(())
     }
 
-    fn deactivate(&self) {
+    /// 停下配对；`dissolved` 为真（解除配对、节点被移除）时同步账本也删掉
+    fn deactivate(&self, dissolved: bool) {
         if let Some(active) = self.active.lock().unwrap().take() {
             active.primary.stop();
+            if dissolved {
+                active.member.dissolve();
+                info!(standby = active.pair.standby_node_id, "HA：配对已解除");
+            } else {
+                active.member.stop();
+            }
             set_role(None);
-            info!(standby = active.pair.standby_node_id, "HA：配对已解除");
         }
     }
 
     /// 给节点下发期望状态时（`Controller::push_locked`）。主机「本机」：刷新主机钩子认的房间；
-    /// 次版本 ≥ 4 的备机：加上镜像的房间与模板，返回要带的 [`HaAssignment`]；其余节点原样
+    /// 次版本 ≥ 4 的备机：加上镜像的房间与模板，返回要带的 [`HaAssignment`]，次版本 ≥ 5 时再带上
+    /// 同步版本（[`PairState`]）；其余节点原样
     pub async fn desired(
         &self,
         controller: &Controller,
@@ -335,10 +411,10 @@ impl Pairing {
         proto: u32,
         rooms: &mut Vec<DesiredRoom>,
         templates: &mut Vec<DesiredTemplate>,
-    ) -> AppResult<Option<HaAssignment>> {
+    ) -> AppResult<(Option<HaAssignment>, Option<PairState>)> {
         self.wait_ready().await;
         let Some(active) = self.active() else {
-            return Ok(None);
+            return Ok((None, None));
         };
         if node == active.pair.primary_node_id {
             let config = self.config();
@@ -348,10 +424,10 @@ impl Pairing {
                 .cloned()
                 .collect();
             active.primary.set_rooms(room_map(&kept));
-            return Ok(None);
+            return Ok((None, None));
         }
         if node != active.pair.standby_node_id || proto < HA_SINCE {
-            return Ok(None);
+            return Ok((None, None));
         }
         let (primary_rooms, primary_templates) =
             assignments::desired_state(controller.pool(), active.pair.primary_node_id).await?;
@@ -362,13 +438,9 @@ impl Pairing {
                 "HA：边录边传的房间不镜像给备机"
             );
         }
-        Ok(Some(mirror(
-            &active.pair,
-            kept,
-            primary_templates,
-            rooms,
-            templates,
-        )))
+        let assignment = mirror(&active.pair, kept, primary_templates, rooms, templates);
+        let pair = (proto >= PAIR_SINCE).then(PairState::default);
+        Ok((Some(assignment), pair))
     }
 
     /// 要给主机「本机」重发期望状态时，备机的镜像也跟着重发
@@ -438,12 +510,13 @@ impl Pairing {
                 *self.active.lock().unwrap() = Some(Active {
                     pair: pair.clone(),
                     primary: active.primary,
+                    member: active.member,
                 });
             }
             _ => {
                 if let Err(e) = self.activate(controller, &pair).await {
                     let _ = store::clear_pair(pool).await;
-                    self.deactivate();
+                    self.deactivate(true);
                     return Err(e);
                 }
                 if let Some((proto, outbox)) = &link {
@@ -469,7 +542,7 @@ impl Pairing {
         let _busy = self.busy.lock().await;
         let pair = store::pair(controller.pool()).await?;
         store::clear_pair(controller.pool()).await?;
-        self.deactivate();
+        self.deactivate(true);
         let Some(pair) = pair else {
             return Ok(false);
         };
@@ -485,7 +558,7 @@ impl Pairing {
                 if let Err(e) = store::clear_pair(controller.pool()).await {
                     warn!(error = ?e, "HA：没能删掉配对设置");
                 }
-                self.deactivate();
+                self.deactivate(true);
                 warn!(node, "HA：配对里的节点被移除，配对已解除");
             }
             Ok(_) => {}
@@ -528,6 +601,14 @@ impl Pairing {
                 "reported": active.as_ref().is_some_and(|active| active.primary.reported()),
             })
         });
+        let sync = match &active {
+            Some(active) => json!({
+                "min_proto": PAIR_SINCE,
+                "linked": active.member.linked(),
+                "pending": active.member.pending().await,
+            }),
+            None => json!({ "min_proto": PAIR_SINCE }),
+        };
         let excluded = match pair.as_ref().map(|pair| pair.primary_node_id).or(local) {
             Some(node) => {
                 let (rooms, _) = assignments::desired_state(pool, node).await?;
@@ -542,6 +623,7 @@ impl Pairing {
             "local_node": local,
             "standby": standby,
             "min_proto": HA_SINCE,
+            "sync": sync,
             "excluded": excluded,
             "sessions": sessions,
         }))
@@ -551,7 +633,7 @@ impl Pairing {
         if let Some(task) = self.watcher.lock().unwrap().take() {
             task.abort();
         }
-        self.deactivate();
+        self.deactivate(false);
     }
 }
 
