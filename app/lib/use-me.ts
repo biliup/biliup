@@ -94,6 +94,30 @@ export interface FleetManaged {
   templates: number[]
   /** 控制面在管这台机器的配置：空间配置页只读，Cookie、密码等本机密钥仍可保存 */
   config?: boolean
+  /**
+   * 本机是一主一备里的节点那台时才有：对端就是 `controller` 那台。配对里的直播间与模板不算托管
+   * （不在上面两项里），在哪台改都行，两台之间双向同步；空间配置与 B 站账号同样同步
+   */
+  pair?: FleetPair
+}
+
+export interface FleetPair {
+  /** 本机此刻是上传主机（两台对调过）；否则是备机 */
+  primary: boolean
+  /** 配对里的本地直播间 id */
+  streamers: number[]
+  /** 配对里的本地投稿模板 id（配对里的直播间在用，本机不能删） */
+  templates: number[]
+}
+
+/** 配对行的徽标文字，按对端此刻是主机还是备机 */
+export function pairLabel(pair: FleetPair) {
+  return pair.primary ? '与备机同步' : '与主机同步'
+}
+
+/** 对端此刻的角色 */
+export function pairPeer(pair: FleetPair) {
+  return pair.primary ? '备机' : '主机'
 }
 
 /**

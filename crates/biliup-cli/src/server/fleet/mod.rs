@@ -126,11 +126,17 @@ pub struct FleetCapability {
 }
 
 impl FleetCapability {
-    /// `/v1/me` 的 `fleet_node`；没有被控制面托管时为 `None`，响应里不出现这个键
+    /// `/v1/me` 的 `fleet_node`；没有被控制面托管时为 `None`，响应里不出现这个键。
+    /// 配对里的节点另带 `pair.primary`：本机此刻是不是上传主机
     pub fn managed_view(&self) -> Option<serde_json::Value> {
         let node = self.node.as_ref()?;
         let managed = node.read().unwrap();
-        managed.as_ref().map(guard::Managed::view)
+        let mut view = managed.as_ref().map(guard::Managed::view)?;
+        // 上传主备两台都在线时随时能对调，对账状态里不记，按此刻的角色给
+        if let Some(pair) = view.get_mut("pair") {
+            pair["primary"] = ha::primary().is_some().into();
+        }
+        Some(view)
     }
 
     /// `/v1/me` 的 `fleet_revoked`；没有等确认的主播时为 `None`，响应里不出现这个键

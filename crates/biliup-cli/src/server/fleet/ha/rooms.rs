@@ -563,8 +563,8 @@ fn hooks(spec: &RoomSpec) -> Value {
     ])
 }
 
-const HOOKS: &str = "备机上改的房间带 run 命令（能执行任意命令），配对同步不接受；钩子请到主机的「节点 › 房间」修改";
-const SYNC_DOWNLOADER: &str = "边录边传（sync-downloader）的房间不纳入一主一备，两台同时录会出两份稿件；请到主机的「节点 › 房间」设置";
+const HOOKS: &str = "节点上改的房间带 run 命令（能执行任意命令），配对同步不接受；钩子请到控制面的「节点 › 房间」修改";
+const SYNC_DOWNLOADER: &str = "边录边传（sync-downloader）的房间不纳入一主一备，两台同时录会出两份稿件；请到控制面的「节点 › 房间」设置";
 const URL_TAKEN: &str = "这个直播间地址已经在控制面的房间列表里了";
 
 fn internal(report: error_stack::Report<crate::server::errors::AppError>) -> String {
