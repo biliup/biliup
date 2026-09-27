@@ -534,12 +534,9 @@ fn move_index(from: &Path, to: &Path) {
     if from == to {
         return;
     }
-    let from_index = index::index_path(from);
-    if from_index.exists()
-        && let Err(e) = std::fs::rename(&from_index, index::index_path(to))
-    {
+    if let Err(e) = index::rename(from, to) {
         debug!(error = %e, "索引缓存改名失败，稍后重新扫描");
-        let _ = std::fs::remove_file(&from_index);
+        index::remove(from);
     }
 }
 

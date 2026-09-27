@@ -879,3 +879,76 @@ async fn default_config_sweep_touches_nothing() {
 fn available_space_reports_the_current_disk() {
     assert!(available_space(Path::new(".")).unwrap() > 0);
 }
+
+/// 升级前留在分段旁的 `.idx`：删除点（有没有数据库都一样）、过滤删除、清理任务删视频时一起删，
+/// `mv` 时搬进索引目录并改库，录制文件夹里不留。
+#[tokio::test]
+async fn legacy_sidecar_indexes_follow_rm_mv_and_sweep() {
+    use crate::server::workbench::index::tests::write_legacy_stub;
+    let (dir, pool) = setup().await;
+    let s = session(&pool, 1_000_000).await;
+
+    let (_, a) = segment(&pool, dir.path(), s, "a.flv", 0, Some(1000), 10).await;
+    let a_legacy = write_legacy_stub(&a);
+    remove(&retention(&pool, 0), &[&a]).await.unwrap();
+    assert!(gone(&a) && !a_legacy.exists());
+
+    let b = dir.path().join("b.flv");
+    std::fs::write(&b, b"v").unwrap();
+    let b_legacy = write_legacy_stub(&b);
+    HookStep::remove_file(&[&b]).await.unwrap();
+    assert!(!b.exists() && !b_legacy.exists());
+
+    let small = dir.path().join("small.flv");
+    std::fs::write(&small, b"v").unwrap();
+    let small_legacy = write_legacy_stub(&small);
+    assert!(
+        FileValidator::new(1000, true)
+            .validate(&small, async {})
+            .is_err()
+    );
+    for _ in 0..200 {
+        if !small.exists() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(!small.exists() && !small_legacy.exists());
+
+    let (c_id, c) = segment(&pool, dir.path(), s, "c.flv", 1000, Some(2000), 10).await;
+    let c_legacy = write_legacy_stub(&c);
+    remove(&retention(&pool, HOUR), &[&c]).await.unwrap();
+    assert_eq!(state(&pool, c_id).await, "pending_delete");
+    assert!(c_legacy.exists(), "推迟删除时一起留着");
+    assert_eq!(sweep_pending(&pool, now_ms() + 2 * HOUR).await.unwrap(), 1);
+    assert!(gone(&c) && !c_legacy.exists());
+
+    let (d_id, d) = segment(&pool, dir.path(), s, "d.flv", 2000, Some(3000), 10).await;
+    std::fs::remove_file(index::index_path(&d)).unwrap();
+    let d_legacy = write_legacy_stub(&d);
+    let target = dir.path().join("archive");
+    let mv = HookStep::Move {
+        mv: target.display().to_string(),
+    };
+    mv.execute_with_retention(&[&d], Some(&retention(&pool, 0)))
+        .await
+        .unwrap();
+    let moved = target.join("d.flv");
+    assert!(!d_legacy.exists());
+    assert!(!index::legacy_index_path(&moved).exists());
+    assert!(index::index_path(&moved).exists());
+    let recorded: Option<String> =
+        sqlx::query_scalar("SELECT index_path FROM segments WHERE id = ?")
+            .bind(d_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(recorded, Some(path_string(&index::index_path(&moved))));
+
+    let left: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with(".idx"))
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
+}

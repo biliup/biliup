@@ -217,35 +217,30 @@ async fn delete_video(path: &Path) -> io::Result<()> {
 }
 
 /// 删 `video` 的关键帧索引缓存。索引任务还在边写边建时不删：它关段时还会再存一次，删了会留下
-/// 孤儿 `.idx`；这种分段由录制器在索引任务处理完之后删（过滤删除的分段关段时带 `discard`）。
+/// 孤儿缓存；这种分段由录制器在索引任务处理完之后删（过滤删除的分段关段时带 `discard`）。
 fn remove_index(video: &Path) {
     if !index::live::is_live(video) {
-        let _ = std::fs::remove_file(index::index_path(video));
+        index::remove(video);
     }
 }
 
-/// 后处理 `mv` 把 `from` 搬到了 `to`：关键帧索引跟着搬（搬不过去就删掉，用到时重建）；
+/// 后处理 `mv` 把 `from` 搬到了 `to`：关键帧索引换成新路径对应的缓存（搬不过去就删掉，用到时重建）；
 /// 给了数据库时，分段的 `path` / `index_path`，或记着这个弹幕文件的分段的 `danmaku_path` 跟着改。
 pub async fn moved(pool: Option<&ConnectionPool>, from: &Path, to: &Path) {
-    let from_index = index::index_path(from);
-    let to_index = index::index_path(to);
-    // 后处理只在录制任务结束后执行，这时不该还有索引任务在写；万一有，不去抢它的 `.idx`
-    let live = index::live::is_live(from);
-    let index_moved = match tokio::fs::metadata(&from_index).await {
-        Ok(_) if live => false,
-        Ok(_) => match move_file(&from_index, &to_index).await {
-            Ok(()) => true,
+    // 后处理只在录制任务结束后执行，这时不该还有索引任务在写；万一有，不去抢它的缓存
+    let index_moved = !index::live::is_live(from)
+        && match index::rename(from, to) {
+            Ok(moved) => moved,
             Err(e) => {
                 debug!(error = %e, "关键帧索引没能跟着搬，删掉，用到时重建");
-                let _ = tokio::fs::remove_file(&from_index).await;
+                index::remove(from);
                 false
             }
-        },
-        Err(_) => false,
-    };
+        };
     let Some(pool) = pool else {
         return;
     };
+    let to_index = index::index_path(to);
     if let Err(e) = update_moved(pool, from, to, index_moved.then_some(&to_index)).await {
         warn!(from = %from.display(), to = %to.display(), error = %e, "文件已移动，但更新分段路径失败");
     }
@@ -271,16 +266,6 @@ async fn update_moved(
         .execute(pool)
         .await?;
     Ok(())
-}
-
-async fn move_file(from: &Path, to: &Path) -> io::Result<()> {
-    match tokio::fs::rename(from, to).await {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            tokio::fs::copy(from, to).await?;
-            tokio::fs::remove_file(from).await
-        }
-    }
 }
 
 // ===== 引用 =====
