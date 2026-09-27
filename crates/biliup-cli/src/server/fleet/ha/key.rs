@@ -45,9 +45,11 @@ pub const SKEW_MS: i64 = 2 * 60 * 1000;
 /// 重叠只容忍时钟差、不用合并窗口：下播后几分钟又开播的下一场不能算进上一场。
 /// 没有结束时刻的一段按录到 `now` 算
 pub fn same_session(a: Span, b: Span, window_ms: i64, now: i64) -> bool {
-    if (a.start - b.start).abs() <= window_ms {
-        return true;
-    }
+    (a.start - b.start).abs() <= window_ms || overlaps(a, b, now)
+}
+
+/// 两段录制真的在时间上重叠（容差 [`SKEW_MS`]）；没有结束时刻的一段按录到 `now` 算
+pub fn overlaps(a: Span, b: Span, now: i64) -> bool {
     let a_end = a.end.unwrap_or(now);
     let b_end = b.end.unwrap_or(now);
     a.start < b_end.saturating_add(SKEW_MS) && b.start < a_end.saturating_add(SKEW_MS)

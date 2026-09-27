@@ -492,12 +492,14 @@ impl DownloadTask {
             warn!(url = url, "切片工作台场次收尾超时，转入后台完成");
         }
         crate::server::fleet::ha::unit_ended(ctx, processor.output());
-        crate::server::auto_clip::runner::session_finished(
-            ctx.pool(),
-            &ctx.config(),
-            ctx.live_streamer(),
-            ctx.id(),
-        );
+        if crate::server::fleet::ha::auto_clip_allowed(ctx) {
+            crate::server::auto_clip::runner::session_finished(
+                ctx.pool(),
+                &ctx.config(),
+                ctx.live_streamer(),
+                ctx.id(),
+            );
+        }
         // 清理资源
         // 确保状态更新和资源清理
         rooms_handle.wake_waker(ctx.worker_id()).await;

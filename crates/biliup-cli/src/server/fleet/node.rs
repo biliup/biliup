@@ -3,6 +3,7 @@
 use super::accounts;
 use super::events;
 use super::guard::ManagedHandle;
+use super::ha::agent::{self as ha_agent, NodeHa};
 use super::protocol::{
     self, CloseCode, ControllerMessage, Event, HEARTBEAT_INTERVAL, Heartbeat, Hello, JoinProof,
     NodeMessage, PROTOCOL_MINOR, PoolUsage, Pools, ToolStatus, Tools,
@@ -28,7 +29,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
@@ -38,6 +39,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 const REPLY_TIMEOUT: Duration = Duration::from_secs(15);
 const BACKOFF_MIN: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(30);
+/// 备机重连的退避上限：主机（控制面）重启后只等备机上报 10 秒，备机要赶在这之前连上
+const STANDBY_BACKOFF_MAX: Duration = Duration::from_secs(2);
 /// 被同一把钥匙的新连接顶掉后，等这么久再试，免得两个进程来回互顶
 const SUPERSEDED_WAIT: Duration = Duration::from_secs(30);
 /// 探测 relay 地址 TCP 端口的超时
@@ -522,6 +525,7 @@ pub async fn leave(node_file: &Path) -> AppResult<bool> {
         .attach_with(|| format!("could not remove {}", node_file.display()))?;
     // 托管的房间与模板留在本机库里，从此是本地的
     reconcile::forget(&reconcile::state_path(node_file));
+    ha_agent::forget(&ha_agent::state_path(node_file));
     Ok(notified)
 }
 
@@ -624,6 +628,13 @@ async fn run_agent(
 ) {
     // 在代理的整个生命周期里持有：断线期间的事件留在通道里，重连后接着发
     let mut events = events::subscribe();
+    let mut ha = NodeHa::resume(
+        &node_file,
+        &file.controller,
+        file.local,
+        services.clone(),
+        reconciler.state(),
+    );
     let mut backoff = BACKOFF_MIN;
     let mut relays = Vec::new();
     loop {
@@ -644,8 +655,10 @@ async fn run_agent(
             &mut reconciler,
             &mut stopped,
             &mut events,
+            &mut ha,
         )
         .await;
+        ha.link_down();
         let rejoin = if file.local {
             "要再用请到「节点」页重新启用本机节点"
         } else {
@@ -694,7 +707,12 @@ async fn run_agent(
             }
             Outcome::Failed => {
                 let wait = backoff;
-                backoff = (backoff * 2).min(BACKOFF_MAX);
+                let max = if ha.is_standby() {
+                    STANDBY_BACKOFF_MAX
+                } else {
+                    BACKOFF_MAX
+                };
+                backoff = (backoff * 2).min(max);
                 wait
             }
         };
@@ -704,6 +722,7 @@ async fn run_agent(
             _ = stopped.changed() => break,
         }
     }
+    ha.shutdown();
     endpoint.close().await;
 }
 
@@ -717,6 +736,7 @@ async fn session(
     reconciler: &mut Reconciler,
     stopped: &mut watch::Receiver<bool>,
     events: &mut broadcast::Receiver<Event>,
+    ha: &mut NodeHa,
 ) -> Outcome {
     let Ok(controller) = file.controller_id() else {
         return Outcome::Rejected("node.json 里的控制面 id 无效".into());
@@ -771,6 +791,8 @@ async fn session(
         Err(code) => return closed_outcome(code, false),
     }
 
+    // 这条连接上的场次消息；连接断了随它一起丢，重连后备机先发 `StandbyReport`
+    let (ha_link, mut ha_frames) = mpsc::unbounded_channel();
     let mut since = None;
     let mut ticker = tokio::time::interval(HEARTBEAT_INTERVAL);
     loop {
@@ -793,7 +815,16 @@ async fn session(
                     update_relays(node_file, file, &connected, relays)
                 }
                 Ok(Some(ControllerMessage::DesiredState(desired))) => {
+                    // 备机的上报先于落地房间：主机只等它 10 秒
+                    if let Some(report) = ha.assign(desired.ha.clone(), &ha_link)
+                        && let Err(e) = protocol::write_frame(&mut send, &NodeMessage::Ha(report)).await
+                    {
+                        debug!(error = %e, "fleet HA report failed");
+                        let reason = connection.closed().await;
+                        return closed_outcome(close_code(&reason), true);
+                    }
                     let ack = reconciler.apply(desired).await;
+                    ha.set_rooms(reconciler.state());
                     if let Err(e) = protocol::write_frame(&mut send, &NodeMessage::Ack(ack)).await {
                         debug!(error = %e, "fleet ack failed");
                         let reason = connection.closed().await;
@@ -801,14 +832,19 @@ async fn session(
                     }
                 }
                 Ok(Some(ControllerMessage::Welcome { .. })) => {}
-                Ok(Some(ControllerMessage::Ha(message))) => {
-                    debug!(kind = message.kind(), "HA frame while not a standby");
-                }
+                Ok(Some(ControllerMessage::Ha(message))) => ha.message(message),
                 Ok(None) | Err(_) => {
                     let reason = connection.closed().await;
                     return closed_outcome(close_code(&reason), true);
                 }
             },
+            Some(message) = ha_frames.recv() => {
+                if let Err(e) = protocol::write_frame(&mut send, &NodeMessage::Ha(message)).await {
+                    debug!(error = %e, "fleet HA frame failed");
+                    let reason = connection.closed().await;
+                    return closed_outcome(close_code(&reason), true);
+                }
+            }
             Some(event) = next_event(events) => {
                 if let Err(e) = protocol::write_frame(&mut send, &NodeMessage::Event(event)).await {
                     debug!(error = %e, "fleet event failed");

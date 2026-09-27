@@ -4,9 +4,13 @@
 //! `progress_interval` 发一次累计字节（§6 C），提交前再确认备机没有接手，投成发 `Uploaded{bvid}`，
 //! 失败发 `UploadFailed`。交给备机的场次不传、不跑后处理，录像留在本地。
 //!
+//! 备机：录的时候只把分段收下（[`Plan::Collect`]），决定要投时由 [`super::agent`] 另起任务调
+//! [`run_standby`]，提交前再确认主机没有投成。
+//!
 //! 与 B 站打交道的几步（登录、传分段、提交）集中在 [`Session`]。测试构建里可以装上 [`double`]
 //! 代替 B 站；发布构建里没有这个模块，只有真实实现。
 
+use super::agent::Standby;
 use super::primary::{Begin, Primary};
 use crate::server::common::upload::{
     UploadContext, build_studio, execute_postprocessor, initialize_upload_context,
@@ -32,6 +36,8 @@ use tracing::info;
 pub enum Plan {
     /// 主机：照常投，向备机报告生命周期
     Primary { primary: Arc<Primary>, key: String },
+    /// 备机：只把分段收下，投不投录完再定
+    Collect { standby: Arc<Standby>, id: String },
 }
 
 impl Plan {
@@ -42,6 +48,10 @@ impl Plan {
         match self {
             Plan::Primary { primary, key } => {
                 run_primary(&primary, &key, rx, ctx, upload_config).await
+            }
+            Plan::Collect { standby, id } => {
+                collect(&standby, &id, rx).await;
+                Ok(())
             }
         }
     }
@@ -57,7 +67,19 @@ async fn drain<S: Stream<Item = SegmentInfo>>(rx: S) -> usize {
     kept
 }
 
-enum Submitted {
+/// 备机：把分段记进场次，录像留在本地
+async fn collect<S: Stream<Item = SegmentInfo>>(standby: &Arc<Standby>, id: &str, rx: S) {
+    pin!(rx);
+    let mut kept = 0;
+    while let Some(event) = rx.next().await {
+        standby.segment(id, &event);
+        kept += 1;
+    }
+    info!(id, kept, "HA：备机收下这一场的分段，先不投");
+    standby.collected(id);
+}
+
+pub(crate) enum Submitted {
     Done {
         bvid: String,
         paths: Vec<PathBuf>,
@@ -124,6 +146,37 @@ where
         return Ok(Submitted::Fenced);
     }
     let bvid = session.submit(ctx, upload_config, uploaded.videos).await?;
+    Ok(Submitted::Done {
+        bvid,
+        paths: uploaded.paths,
+    })
+}
+
+/// 备机把收下的分段作为完整稿件投：分段一样先过 segment_processor，提交前确认主机没有投成
+pub(crate) async fn run_standby(
+    standby: &Arc<Standby>,
+    id: &str,
+    ctx: &Context,
+    segments: Vec<SegmentInfo>,
+) -> AppResult<Submitted> {
+    let upload_config = ctx
+        .upload_config()
+        .clone()
+        .ok_or_else(|| AppError::Custom("这个房间没有投稿模板".into()))?;
+    let session = Session::login(ctx, &upload_config).await?;
+    let processors = segment_processors(ctx);
+    let bytes = AtomicU64::new(0);
+    let uploaded = pipeline_upload_videos(futures::stream::iter(segments), &processors, |path| {
+        session.upload(path, &bytes)
+    })
+    .await?;
+    if uploaded.videos.is_empty() {
+        return Err(AppError::Custom("没有一个分段上传成功".into()).into());
+    }
+    if !standby.begin_submit(id) {
+        return Ok(Submitted::Fenced);
+    }
+    let bvid = session.submit(ctx, &upload_config, uploaded.videos).await?;
     Ok(Submitted::Done {
         bvid,
         paths: uploaded.paths,

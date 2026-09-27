@@ -373,8 +373,8 @@ impl PrimaryCore {
                 at,
                 ..
             } => {
-                if self.held.get(&room) == Some(&key) {
-                    self.held.remove(&room);
+                // 备机一个房间同时只录一段；它中途可能改用了主机的键，按房间放开
+                if self.held.remove(&room).is_some() {
                     info!(room, key, "HA：备机录完了这一场，主机恢复开录这个房间");
                 }
                 self.note(now, &key, room, started_at, Some(at), "recorded", None);

@@ -4,12 +4,15 @@
 //! 自动镜像给备机；两台对每一场直播交换场次消息，决定「这一场谁投」，保证不出重复稿件、主机离线时不漏投。
 //!
 //! 录制与投稿流程里只有几行调用（`core/monitor.rs`、`common/download.rs`、`common/upload.rs`）。
+//! 主机的一侧在 [`primary`]，备机的决策在 [`standby`]、接线在 [`agent`]。
 //! 没有配对时 [`ROLE`] 是空的，每处调用只读一次原子变量就返回：不分配、不记日志、不改任何状态。
 
+pub mod agent;
 pub mod key;
 pub mod pairing;
 pub mod params;
 pub mod primary;
+pub mod standby;
 pub mod store;
 pub mod upload;
 pub mod wire;
@@ -22,6 +25,7 @@ use std::sync::{Arc, RwLock};
 #[derive(Clone)]
 pub(crate) enum Role {
     Primary(Arc<primary::Primary>),
+    Standby(Arc<agent::Standby>),
 }
 
 static ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -96,6 +100,7 @@ fn uploads(ctx: &Context) -> bool {
 pub fn hold_recording(url: &str) -> Option<Hold> {
     match role()? {
         Role::Primary(primary) => primary.hold(url),
+        Role::Standby(standby) => standby.hold(url),
     }
 }
 
@@ -109,6 +114,7 @@ pub fn unit_started(ctx: &Context) {
     }
     match role {
         Role::Primary(primary) => primary.unit_started(&Unit::of(ctx)),
+        Role::Standby(standby) => standby.unit_started(&Unit::of(ctx), ctx),
     }
 }
 
@@ -119,6 +125,15 @@ pub fn unit_ended(ctx: &Context, output: UnitOutput) {
     };
     match role {
         Role::Primary(primary) => primary.unit_ended(&Unit::of(ctx), output),
+        Role::Standby(standby) => standby.unit_ended(&Unit::of(ctx), output),
+    }
+}
+
+/// 场次收尾后要不要跑自动切片（`common/download.rs`）：自动切片只在主机跑（§5.2），备机镜像过来的房间不跑
+pub fn auto_clip_allowed(ctx: &Context) -> bool {
+    match role() {
+        Some(Role::Standby(standby)) => !standby.mirrors(&ctx.live_streamer().url),
+        Some(Role::Primary(_)) | None => true,
     }
 }
 
@@ -126,5 +141,6 @@ pub fn unit_ended(ctx: &Context, output: UnitOutput) {
 pub async fn upload_plan(ctx: &Context) -> Option<upload::Plan> {
     match role()? {
         Role::Primary(primary) => primary.plan(&Unit::of(ctx)),
+        Role::Standby(standby) => standby.plan(&Unit::of(ctx)),
     }
 }

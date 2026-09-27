@@ -48,14 +48,18 @@ pub(crate) fn inject(event: Event) {
 }
 
 fn emit(kind: &str, ctx: &Context, error: String) {
+    let streamer = ctx.live_streamer();
+    emit_room(kind, &streamer.url, &streamer.remark, &error);
+}
+
+fn emit_room(kind: &str, url: &str, remark: &str, error: &str) {
     let Some(sink) = SINK.get() else {
         return;
     };
-    let streamer = ctx.live_streamer();
     let detail = RoomEvent {
-        url: streamer.url.clone(),
-        remark: streamer.remark.clone(),
-        error: scrub(&error),
+        url: url.to_string(),
+        remark: remark.to_string(),
+        error: scrub(error),
     };
     let _ = sink.send(Event {
         kind: kind.to_string(),
@@ -92,6 +96,11 @@ pub fn upload_failed(ctx: &Context, report: &error_stack::Report<AppError>) {
         }
         _ => {}
     }
+}
+
+/// 一主一备里要人看一眼的场次（待人工处理、备机自己投稿失败）：备机的投稿不经过投稿流程，按投稿失败上报
+pub fn ha_attention(url: &str, remark: &str, message: &str) {
+    emit_room(EVENT_UPLOAD_FAILED, url, remark, message);
 }
 
 /// 去掉链接里的查询串（直链常带签名），本机的绝对路径只留文件名，合并空白，截到 [`MAX_ERROR_CHARS`]
