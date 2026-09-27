@@ -32,23 +32,25 @@ export default function AfterLiveSwitch({
   }
 
   return (
-    <Form.Slot label="下播后自动生成候选" data-testid="auto-clip-after-live">
-      {canOverride ? (
-        <>
-          <Switch checked={on} onChange={toggle} aria-label="下播后自动生成候选" />
-          <div className="semi-form-field-extra">
-            打开后，这个直播间每次下播（等断流合并的时间过去、确认真的下播了）自动排队生成候选：会调用你配置的付费模型，
-            受每场上限约束，候选要人工接受才变成切片。
-          </div>
-          {!availability.enabled ? (
-            <SetupNote reason="自动切片的总开关现在是关的，打开后这里才会生效。" />
-          ) : null}
-        </>
-      ) : (
-        <Typography.Text type="tertiary" size="small">
-          这个开关存在直播间的覆写配置里，只有超级管理员能改；需要时请超级管理员在这里打开。也可以在回看页或剪辑台手动「生成候选」。
-        </Typography.Text>
-      )}
-    </Form.Slot>
+    <div data-testid="auto-clip-after-live">
+      <Form.Slot label="下播后自动生成候选">
+        {canOverride ? (
+          <>
+            <Switch checked={on} onChange={toggle} aria-label="下播后自动生成候选" />
+            <div className="semi-form-field-extra">
+              打开后，这个直播间每次下播（等断流合并的时间过去、确认真的下播了）自动排队生成候选：会调用你配置的付费模型，
+              受每场上限约束，候选要人工接受才变成切片。
+            </div>
+            {!availability.enabled ? (
+              <SetupNote reason="自动切片的总开关现在是关的，打开后这里才会生效。" />
+            ) : null}
+          </>
+        ) : (
+          <Typography.Text type="tertiary" size="small">
+            这个开关存在直播间的覆写配置里，只有超级管理员能改；需要时请超级管理员在这里打开。也可以在回看页或剪辑台手动「生成候选」。
+          </Typography.Text>
+        )}
+      </Form.Slot>
+    </div>
   )
 }
