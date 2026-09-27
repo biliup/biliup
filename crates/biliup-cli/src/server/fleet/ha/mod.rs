@@ -8,6 +8,8 @@
 //! 没有配对时 [`ROLE`] 是空的，每处调用只读一次原子变量就返回：不分配、不记日志、不改任何状态。
 
 pub mod agent;
+#[cfg(test)]
+mod harness;
 pub mod key;
 pub mod pairing;
 pub mod params;

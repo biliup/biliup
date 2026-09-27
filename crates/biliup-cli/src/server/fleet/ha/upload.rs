@@ -369,8 +369,9 @@ impl Session {
 #[cfg(test)]
 pub(crate) mod double {
     //! 测试里代替 B 站的上传端（只在测试构建里存在）：不发任何网络请求，登录、分段上传、提交都只记进
-    //! JSONL 日志。控制目录里放 `stall`（进度停住）、`fail-upload`、`fail-submit`、`fail-login` 文件可以
-    //! 让对应的一步停住或失败；`rate` 是每秒推进多少字节（0 为瞬间传完）。
+    //! JSONL 日志。控制目录里放 `stall`（进度停住）、`fail-upload`、`fail-submit`、`fail-append`、
+    //! `fail-login` 文件可以让对应的一步停住或失败；`rate` 是每秒推进多少字节（0 为瞬间传完），
+    //! 控制目录里的 `rate` 文件（内容是一个数）在运行中覆盖它。
 
     use crate::server::errors::{AppError, AppResult};
     use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
@@ -404,19 +405,34 @@ pub(crate) mod double {
     }
 
     impl Double {
+        /// 日志里已有的成功提交接着编号：进程重启后稿件号不重复
         pub(crate) fn new(log: PathBuf, control: PathBuf, rate: u64, prefix: &str) -> Self {
-            Double {
+            let double = Double {
                 log,
                 control,
                 rate,
                 prefix: prefix.to_string(),
                 submitted: AtomicU64::new(0),
                 lock: Mutex::new(()),
-            }
+            };
+            let submitted = double
+                .entries()
+                .iter()
+                .filter(|entry| entry["op"] == "submit" && entry["ok"] == true)
+                .count();
+            double.submitted.store(submitted as u64, Ordering::Relaxed);
+            double
         }
 
         fn flag(&self, name: &str) -> bool {
             self.control.join(name).exists()
+        }
+
+        fn rate(&self) -> u64 {
+            std::fs::read_to_string(self.control.join("rate"))
+                .ok()
+                .and_then(|text| text.trim().parse().ok())
+                .unwrap_or(self.rate)
         }
 
         pub(crate) fn record(&self, mut entry: serde_json::Value) {
@@ -463,13 +479,14 @@ pub(crate) mod double {
                     tokio::time::sleep(STEP).await;
                     continue;
                 }
-                let step = match self.rate {
+                let rate = self.rate();
+                let step = match rate {
                     0 => size - sent,
                     rate => (rate / 5).max(1).min(size - sent),
                 };
                 sent += step;
                 bytes.fetch_add(step, Ordering::Relaxed);
-                if self.rate > 0 {
+                if rate > 0 {
                     tokio::time::sleep(STEP).await;
                 }
             }
