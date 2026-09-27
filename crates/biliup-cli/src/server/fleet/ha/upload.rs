@@ -5,7 +5,7 @@
 //! 失败发 `UploadFailed`。交给备机的场次不传、不跑后处理，录像留在本地。
 //!
 //! 备机：录的时候只把分段收下（[`Plan::Collect`]），决定要投时由 [`super::agent`] 另起任务调
-//! [`run_standby`]，提交前再确认主机没有投成。
+//! [`run_standby`]（提交前再确认主机没有投成），模式 2 追加分 P 时调 [`run_append`]。
 //!
 //! 与 B 站打交道的几步（登录、传分段、提交）集中在 [`Session`]。测试构建里可以装上 [`double`]
 //! 代替 B 站；发布构建里没有这个模块，只有真实实现。
@@ -13,8 +13,9 @@
 use super::agent::Standby;
 use super::primary::{Begin, Primary};
 use crate::server::common::upload::{
-    UploadContext, build_studio, execute_postprocessor, initialize_upload_context,
-    pipeline_upload_videos, submit_to_bilibili, upload_single_file_with_progress,
+    UploadContext, build_studio, edit_to_bilibili, execute_postprocessor,
+    initialize_upload_context, pipeline_upload_videos, submit_to_bilibili,
+    upload_single_file_with_progress,
 };
 use crate::server::core::downloader::SegmentInfo;
 use crate::server::errors::{AppError, AppResult};
@@ -22,7 +23,8 @@ use crate::server::fleet::events::scrub;
 use crate::server::infrastructure::context::Context;
 use crate::server::infrastructure::models::hook_step::HookStep;
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
-use biliup::bilibili::{ResponseData, Video};
+use biliup::bilibili::{ResponseData, Vid, Video};
+use error_stack::ResultExt;
 use futures::{Stream, StreamExt};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -193,6 +195,39 @@ pub(crate) async fn run_standby(
     })
 }
 
+/// 模式 2：主机投成了它那半，备机把收下的分段追加为主机稿件（`bvid`）的后续分 P（§4）。
+/// 分 P 标题与普通投稿同一规则（按模板的文件名），接在主机那半后面，B 站的分 P 序号就续上了
+pub(crate) async fn run_append(
+    standby: &Arc<Standby>,
+    id: &str,
+    ctx: &Context,
+    segments: Vec<SegmentInfo>,
+    bvid: &str,
+) -> AppResult<Submitted> {
+    let upload_config = ctx
+        .upload_config()
+        .clone()
+        .ok_or_else(|| AppError::Custom("这个房间没有投稿模板".into()))?;
+    let session = Session::login(ctx, &upload_config).await?;
+    let processors = segment_processors(ctx);
+    let bytes = AtomicU64::new(0);
+    let uploaded = pipeline_upload_videos(futures::stream::iter(segments), &processors, |path| {
+        session.upload(path, &bytes)
+    })
+    .await?;
+    if uploaded.videos.is_empty() {
+        return Err(AppError::Custom("没有一个分段上传成功".into()).into());
+    }
+    if !standby.begin_submit(id) {
+        return Ok(Submitted::Fenced);
+    }
+    session.append(ctx, bvid, uploaded.videos).await?;
+    Ok(Submitted::Done {
+        bvid: bvid.to_string(),
+        paths: uploaded.paths,
+    })
+}
+
 fn segment_processors(ctx: &Context) -> Vec<HookStep> {
     ctx.live_streamer()
         .segment_processor
@@ -308,6 +343,25 @@ impl Session {
                 );
                 double.submit(&studio)
             }
+        }
+    }
+
+    /// 取回已有稿件、把新的分 P 接在后面再编辑提交（与 `biliup append` 同一做法）
+    async fn append(&self, ctx: &Context, bvid: &str, mut videos: Vec<Video>) -> AppResult<()> {
+        match self {
+            Session::Real(context) => {
+                let mut studio = context
+                    .bilibili
+                    .studio_data(&Vid::Bvid(bvid.to_string()), None)
+                    .await
+                    .change_context(AppError::Unknown)?;
+                studio.videos.append(&mut videos);
+                let submit_api = ctx.config().submit_api.clone();
+                edit_to_bilibili(&context.bilibili, &studio, submit_api.as_deref()).await?;
+                Ok(())
+            }
+            #[cfg(test)]
+            Session::Double(double) => double.append(bvid, &videos),
         }
     }
 }
@@ -453,6 +507,21 @@ pub(crate) mod double {
                 "parts": Self::parts(&studio.videos),
             }));
             Ok(bvid)
+        }
+
+        /// 给已有稿件追加分 P；控制目录里有 `fail-append` 时失败
+        pub(crate) fn append(&self, bvid: &str, videos: &[Video]) -> AppResult<()> {
+            if self.flag("fail-append") {
+                self.record(serde_json::json!({ "op": "append", "ok": false, "bvid": bvid }));
+                return Err(AppError::Custom("upload double: append rejected".into()).into());
+            }
+            self.record(serde_json::json!({
+                "op": "append",
+                "ok": true,
+                "bvid": bvid,
+                "parts": Self::parts(videos),
+            }));
+            Ok(())
         }
 
         /// 日志里的每一条

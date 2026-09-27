@@ -892,6 +892,12 @@ impl StandbyCore {
         self.sent_upload(now, id, State::Uploaded, bvid);
     }
 
+    /// 备机这半追加到了主机的稿件（同一个稿件号）
+    pub(crate) fn appended(&mut self, now: i64, id: &str, bvid: &str) {
+        info!(id, bvid, "HA：备机这半已追加为主机稿件的后续分 P");
+        self.sent_upload(now, id, State::Appended, bvid);
+    }
+
     pub(crate) fn upload_failed(&mut self, now: i64, id: &str, reason: &str) {
         let Some(session) = self.touch(id, now) else {
             return;
@@ -1698,6 +1704,25 @@ mod tests {
             id: id.clone(),
             bvid: "BVP".into()
         }));
+        // 提交前确认一次（追加不受「主机已投成」的栅栏影响），追加成功后告诉主机同一个稿件号
+        assert!(core.begin_submit(202 * MIN, &id));
+        core.appended(203 * MIN, &id, "BVP");
+        assert_eq!(state(&core, &id), State::Appended);
+        assert!(state(&core, &id).settled());
+        let started_at = core.session(&id).unwrap().started_at;
+        let sent = outs(&mut core);
+        assert!(
+            sent.iter().any(|out| matches!(out,
+                Out::Send(HaMessage::Uploaded { key, bvid, from, to, .. })
+                    if *key == id && bvid == "BVP" && *from == started_at && *to == Some(120 * MIN))),
+            "{sent:?}"
+        );
+        assert!(!core.session(&id).unwrap().submitting);
+        assert_eq!(
+            core.report(204 * MIN)[0].state,
+            ReportedState::Uploaded,
+            "重连时报成投成，主机不会再让谁投"
+        );
     }
 
     #[test]

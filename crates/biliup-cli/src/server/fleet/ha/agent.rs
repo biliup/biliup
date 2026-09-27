@@ -495,21 +495,13 @@ impl Standby {
     fn spawn_upload(self: &Arc<Self>, id: String) {
         let standby = self.clone();
         let job_id = id.clone();
-        self.spawn(id, async move { standby.run_upload(job_id).await });
+        self.spawn(id, async move { standby.run(job_id, None).await });
     }
 
     fn spawn_append(self: &Arc<Self>, id: String, bvid: String) {
         let standby = self.clone();
         let job_id = id.clone();
-        self.spawn(id, async move {
-            standby.update(|core, now| {
-                core.require_manual(
-                    now,
-                    &job_id,
-                    format!("主机已投成它那半（{bvid}），本版本的备机还不能追加分 P"),
-                )
-            });
-        });
+        self.spawn(id, async move { standby.run(job_id, Some(bvid)).await });
     }
 
     /// 按场次里记下的开播信息与本机的房间重建上下文
@@ -544,7 +536,8 @@ impl Standby {
         Ok(ctx)
     }
 
-    async fn run_upload(self: Arc<Self>, id: String) {
+    /// 投这一场：`append` 为空时作为完整稿件投，否则追加为这个稿件的后续分 P。占上传池的一个槽位
+    async fn run(self: Arc<Self>, id: String, append: Option<String>) {
         let slots = self.services.managers.upload_slots();
         let _slot = slots.acquire().await;
         let Some(session) = self.core.lock().unwrap().session(&id).cloned() else {
@@ -560,6 +553,7 @@ impl Standby {
         info!(
             id,
             segments = session.unit.segments.len(),
+            append = append.as_deref(),
             "HA：备机开始投这一场"
         );
         self.update(|core, now| core.upload_started(now, &id));
@@ -576,9 +570,16 @@ impl Standby {
                 )
             })
             .collect();
-        match upload::run_standby(&self, &id, &ctx, segments).await {
+        let result = match &append {
+            None => upload::run_standby(&self, &id, &ctx, segments).await,
+            Some(bvid) => upload::run_append(&self, &id, &ctx, segments, bvid).await,
+        };
+        match result {
             Ok(Submitted::Done { bvid, paths }) => {
-                self.update(|core, now| core.uploaded(now, &id, &bvid));
+                match append {
+                    None => self.update(|core, now| core.uploaded(now, &id, &bvid)),
+                    Some(_) => self.update(|core, now| core.appended(now, &id, &bvid)),
+                }
                 if let Err(e) = execute_postprocessor(paths, &ctx).await {
                     warn!(id, error = ?e, "HA：备机投成后的后处理失败");
                 }
@@ -1140,6 +1141,115 @@ mod tests {
                 .is_none()
         );
         assert!(!f.resume(false).is_standby());
+        double::install(None);
+    }
+
+    /// 模式 2：主机在线时备机只监控；主机断开超过 offline_grace，备机接手它正在录的一场，录完等主机；
+    /// 主机回来先投它那半，备机把自己这半追加为那个稿件的后续分 P（经测试替身，不另建稿件）
+    #[tokio::test]
+    async fn a_mode_two_takeover_is_appended_to_the_primary_half() {
+        let _guard = crate::server::fleet::ha::test_guard().await;
+        let f = Fixture::new().await;
+        let control = f.dir.path().join("control");
+        std::fs::create_dir_all(&control).unwrap();
+        let recording = f.dir.path().join("rec");
+        std::fs::create_dir_all(&recording).unwrap();
+        let double = Arc::new(Double::new(
+            f.dir.path().join("double.jsonl"),
+            control,
+            0,
+            "S",
+        ));
+        double::install(Some(double.clone()));
+        let assignment: HaAssignment = serde_json::from_value(json!({
+            "mode": 2, "primary": 1, "rooms": [7], "params": { "offline_grace": 1 },
+        }))
+        .unwrap();
+
+        let mut ha = f.resume(false);
+        let (link, _frames) = mpsc::unbounded_channel();
+        assert!(ha.assign(Some(assignment.clone()), &[], &link).is_some());
+        let primary_start = now_ms() - 30 * 60_000;
+        let primary = key::primary_key(7, primary_start);
+        ha.message(HaMessage::SessionStarted {
+            key: primary.clone(),
+            room: 7,
+            started_at: primary_start,
+            at: primary_start,
+        });
+        assert!(
+            crate::server::fleet::ha::hold_recording(URL).is_some(),
+            "主机在线：只监控不录"
+        );
+
+        ha.link_down();
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        assert_eq!(
+            crate::server::fleet::ha::hold_recording(URL),
+            None,
+            "主机离线超过 offline_grace：接手"
+        );
+        let started_at = now_ms();
+        let ctx = f.context(started_at).await;
+        crate::server::fleet::ha::unit_started(&ctx);
+        let plan = crate::server::fleet::ha::upload_plan(&ctx).await.unwrap();
+        assert!(matches!(plan, Plan::Collect { .. }));
+        let config = ctx.upload_config().clone().unwrap();
+        let segments = vec![
+            segment(&recording, "b-part1.flv", 1000),
+            segment(&recording, "b-part2.flv", 1000),
+        ];
+        plan.run(futures::stream::iter(segments), &ctx, &config)
+            .await
+            .unwrap();
+        crate::server::fleet::ha::unit_ended(&ctx, UnitOutput { seen: 2, sent: 2 });
+        let standby = crate::server::fleet::ha::standby().unwrap();
+        let view = standby.view();
+        assert_eq!(view["primary_offline"], true);
+        assert_eq!(view["sessions"][0]["kind"], "takeover");
+        assert_eq!(view["sessions"][0]["state"], "awaiting_primary");
+        assert_eq!(view["sessions"][0]["takeover_of"], primary.as_str());
+        assert!(double.entries().is_empty(), "接手的一场先不投");
+
+        // 主机回来：先上报，再收到主机投成它那半
+        let (link, mut frames) = mpsc::unbounded_channel();
+        let Some(HaMessage::StandbyReport { sessions }) = ha.assign(Some(assignment), &[], &link)
+        else {
+            panic!("重连后应先上报");
+        };
+        assert_eq!(sessions[0].state, ReportedState::AwaitingPrimary);
+        assert_eq!(sessions[0].takeover_of.as_deref(), Some(primary.as_str()));
+        ha.message(HaMessage::Uploaded {
+            key: primary.clone(),
+            room: 7,
+            bvid: "BVP0001".into(),
+            from: primary_start,
+            to: Some(started_at - 5 * 60_000),
+        });
+        let id = key::standby_key(7, started_at);
+        loop {
+            match next(&mut frames).await {
+                HaMessage::Uploaded { key, bvid, .. } => {
+                    assert_eq!((key.as_str(), bvid.as_str()), (id.as_str(), "BVP0001"));
+                    break;
+                }
+                HaMessage::UploadStarted { key, .. } => assert_eq!(key, id),
+                other => panic!("{other:?}"),
+            }
+        }
+        let entries = double.entries();
+        assert!(
+            !entries.iter().any(|entry| entry["op"] == "submit"),
+            "不另建稿件"
+        );
+        let append = entries.last().unwrap();
+        assert_eq!(append["op"], "append");
+        assert_eq!(append["bvid"], "BVP0001");
+        assert_eq!(append["parts"], json!(["b-part1", "b-part2"]));
+        let saved = load(&f.state_file()).unwrap();
+        assert_eq!(saved.sessions[0].state, State::Appended);
+        assert_eq!(saved.sessions[0].bvid.as_deref(), Some("BVP0001"));
+        ha.shutdown();
         double::install(None);
     }
 
