@@ -167,6 +167,14 @@ pub fn unit_ended(ctx: &Context, output: UnitOutput) {
     }
 }
 
+/// 拉流中断、重连之前（`common/download.rs`）：模式 2 里备机已接手这个房间时主机不续录，返回真时结束这一段
+pub fn yield_recording(ctx: &Context) -> bool {
+    match role() {
+        Some(Role::Primary(primary)) => primary.yield_unit(&Unit::of(ctx)),
+        Some(Role::Standby(_)) | None => false,
+    }
+}
+
 /// 场次收尾后要不要跑自动切片（`common/download.rs`）：自动切片只在主机跑（§5.2），备机镜像过来的房间不跑
 pub fn auto_clip_allowed(ctx: &Context) -> bool {
     match role() {

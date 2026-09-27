@@ -664,11 +664,13 @@ mod tests {
             bvid: "BV1xx".into(),
             from: 1000,
             to: Some(5000),
+            yielded: false,
         });
         let json = serde_json::to_value(&uploaded).unwrap();
         assert_eq!(json["type"], "ha");
         assert_eq!(json["kind"], "uploaded");
         assert_eq!(json["bvid"], "BV1xx");
+        assert!(json.get("yielded").is_none());
         let NodeMessage::Ha(back) = serde_json::from_value(json).unwrap() else {
             panic!()
         };

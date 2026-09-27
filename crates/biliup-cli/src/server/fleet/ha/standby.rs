@@ -210,6 +210,9 @@ pub struct PrimaryView {
     /// 主机稿件覆盖到的时刻（主机时钟）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub to: Option<i64>,
+    /// 主机这份在备机接手后没有续录：不算录到下播
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub yielded: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     /// 最近一次收到这一场消息的时刻（备机时钟，下同）
@@ -681,7 +684,7 @@ impl StandbyCore {
             return Verdict::Upload("主机那半被过滤或没有文件，备机投完整的一份".into());
         };
         let ended = session.ended_at.unwrap_or(now);
-        if latest.to.is_some_and(|to| to >= ended - key::SKEW_MS) {
+        if !latest.yielded && latest.to.is_some_and(|to| to >= ended - key::SKEW_MS) {
             return Verdict::Done(format!(
                 "主机那份（{}）已经录到下播",
                 latest.bvid.as_deref().unwrap_or_default()
@@ -884,6 +887,7 @@ impl StandbyCore {
             bvid: bvid.to_string(),
             from: session.started_at,
             to: session.ended_at,
+            yielded: false,
         };
         self.send(message);
     }
@@ -998,10 +1002,13 @@ impl StandbyCore {
                     }
                 }
             }
-            HaMessage::Uploaded { bvid, to, .. } => {
+            HaMessage::Uploaded {
+                bvid, to, yielded, ..
+            } => {
                 view.upload = PrimaryUpload::Uploaded;
                 view.bvid = Some(bvid);
                 view.to = to;
+                view.yielded = yielded;
                 view.ended_at = view.ended_at.or(to);
                 view.reason = None;
             }
@@ -1211,6 +1218,7 @@ mod tests {
             bvid: "BVP".into(),
             from,
             to,
+            yielded: false,
         }
     }
 
@@ -1888,6 +1896,23 @@ mod tests {
         assert_eq!(state(&core, &id), State::Holding);
         core.primary_message(61 * MIN, uploaded(&key, 4 * MIN, Some(60 * MIN)));
         assert_eq!(state(&core, &id), State::Done);
+    }
+
+    #[test]
+    fn a_primary_half_that_yielded_near_the_live_end_is_still_appended() {
+        // 主机回来时因为备机已接手而不续录：它那份结束得离下播再近，也不算录到了下播
+        for (yielded, expected) in [(false, State::Done), (true, State::Appending)] {
+            let mut core = linked(HaMode::Takeover);
+            let id = takeover(&mut core, 0, 60 * MIN, 120 * MIN);
+            core.link_up(121 * MIN);
+            outs(&mut core);
+            let mut message = uploaded(&primary_key(0), 0, Some(119 * MIN));
+            if let HaMessage::Uploaded { yielded: flag, .. } = &mut message {
+                *flag = yielded;
+            }
+            core.primary_message(122 * MIN, message);
+            assert_eq!(state(&core, &id), expected, "yielded = {yielded}");
+        }
     }
 
     // ---------- 重启 ----------

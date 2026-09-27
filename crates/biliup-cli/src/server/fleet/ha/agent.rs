@@ -1225,6 +1225,7 @@ mod tests {
             bvid: "BVP0001".into(),
             from: primary_start,
             to: Some(started_at - 5 * 60_000),
+            yielded: false,
         });
         let id = key::standby_key(7, started_at);
         loop {

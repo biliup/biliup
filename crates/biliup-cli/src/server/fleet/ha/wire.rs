@@ -171,7 +171,8 @@ pub enum HaMessage {
         bytes: u64,
         at: i64,
     },
-    /// 投稿成功；`from` / `to` 是这份稿件覆盖的录制时段（发送方时钟）
+    /// 投稿成功；`from` / `to` 是这份稿件覆盖的录制时段（发送方时钟）。
+    /// `yielded` 为真表示主机这份在备机接手后没有续录（模式 2），`to` 之后只有备机那份
     Uploaded {
         key: String,
         room: i64,
@@ -179,6 +180,8 @@ pub enum HaMessage {
         from: i64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to: Option<i64>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        yielded: bool,
     },
     UploadFailed {
         key: String,

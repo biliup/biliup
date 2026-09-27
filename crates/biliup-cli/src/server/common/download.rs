@@ -477,6 +477,10 @@ impl DownloadTask {
 
             info!("Retrying download in {:?}...", delay);
             tokio::time::sleep(delay).await;
+            if crate::server::fleet::ha::yield_recording(ctx) {
+                info!(url = url, "一主一备：备机已接手这个房间，主机不续录");
+                break components;
+            }
         };
         // 异步清理任务
         if let Some(client) = danmaku_client.clone()

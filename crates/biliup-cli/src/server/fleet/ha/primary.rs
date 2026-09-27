@@ -76,6 +76,8 @@ pub(crate) struct PrimaryCore {
     gate_until: Option<i64>,
     /// 备机正在录、主机暂不开录的房间 → 备机那一场的键
     held: BTreeMap<i64, String>,
+    /// 模式 2 里因为备机接手而没有续录的主机段
+    yielded: BTreeSet<String>,
     dirty: BTreeSet<String>,
     outs: Vec<Out>,
 }
@@ -99,6 +101,7 @@ impl PrimaryCore {
             disconnected_at: now,
             gate_until: Some(now + REPORT_WAIT_MS),
             held: BTreeMap::new(),
+            yielded: BTreeSet::new(),
             dirty: BTreeSet::new(),
             outs: Vec::new(),
         };
@@ -172,6 +175,26 @@ impl PrimaryCore {
         })
     }
 
+    /// 主机这一段拉流中断、准备重连：模式 2 里备机已经接手这个房间就不续录，等备机下播（§4）。
+    /// 返回真时调用方结束这一段
+    pub(crate) fn yield_unit(&mut self, now: i64, key: &str) -> bool {
+        if self.mode != HaMode::Takeover {
+            return false;
+        }
+        let Some(room) = self.rows.get(key).map(|row| row.room_id) else {
+            return false;
+        };
+        let Some(standby_key) = self.held.get(&room).cloned() else {
+            return false;
+        };
+        self.yielded.insert(key.to_string());
+        if let Some(row) = self.touch(key, now) {
+            row.reason = Some(format!("备机已接手（{standby_key}），主机不续录"));
+        }
+        info!(key, standby_key, "HA：备机已接手这个房间，主机这一段不续录");
+        true
+    }
+
     pub(crate) fn connected(&mut self, now: i64) {
         self.connected = Some(now);
         self.gate_until = Some(now + REPORT_WAIT_MS);
@@ -200,6 +223,8 @@ impl PrimaryCore {
         let active = &self.active;
         self.rows
             .retain(|key, row| row.updated_at >= now - KEEP_MS || active.contains_key(key));
+        let rows = &self.rows;
+        self.yielded.retain(|key| rows.contains_key(key));
     }
 
     pub(crate) fn unit_started(
@@ -339,6 +364,7 @@ impl PrimaryCore {
             bvid: bvid.to_string(),
             from: row.started_at,
             to: row.ended_at,
+            yielded: self.yielded.contains(key),
         };
         self.send(message);
     }
@@ -576,6 +602,7 @@ impl PrimaryCore {
                 bvid: row.bvid.clone().unwrap_or_default(),
                 from: row.started_at,
                 to: row.ended_at,
+                yielded: self.yielded.contains(&key),
             }],
             PrimaryState::Failed => vec![HaMessage::UploadFailed {
                 key: key.clone(),
@@ -664,7 +691,8 @@ impl PrimaryCore {
                     }
                 }
                 ReportedState::Recording => {
-                    if matches.iter().any(|key| self.active.contains_key(key)) {
+                    let taken_over = self.mode == HaMode::Takeover && session.takeover_of.is_some();
+                    if !taken_over && matches.iter().any(|key| self.active.contains_key(key)) {
                         // 连接抖了一下，两台都还在录：照常
                         for key in &matches {
                             self.answer(key, now);
@@ -972,6 +1000,13 @@ impl Primary {
         self.update(|core, now| core.unit_ended(now, &key, output));
     }
 
+    pub(crate) fn yield_unit(&self, unit: &Unit) -> bool {
+        let Some(key) = self.key_of(unit) else {
+            return false;
+        };
+        self.update(|core, now| core.yield_unit(now, &key))
+    }
+
     pub(crate) fn plan(self: &Arc<Self>, unit: &Unit) -> Option<Plan> {
         let key = self.key_of(unit)?;
         self.core
@@ -1177,6 +1212,7 @@ mod tests {
                 bvid: "BV1".into(),
                 from: MIN,
                 to: Some(10 * MIN),
+                yielded: false,
             }]
         );
         let row = saved(&outs, "7:60000").unwrap();
@@ -1284,6 +1320,7 @@ mod tests {
                 bvid: "BVS".into(),
                 from: 2 * MIN,
                 to: Some(25 * MIN),
+                yielded: false,
             },
         );
         let outs = core.take();
@@ -1317,6 +1354,7 @@ mod tests {
                 bvid: "BVS".into(),
                 from: MIN + 5000,
                 to: Some(30 * MIN),
+                yielded: false,
             },
         );
         let outs = core.take();
@@ -1698,6 +1736,101 @@ mod tests {
         assert!(core.hold(7).is_some());
         assert!(core.hold(8).is_some());
         assert_eq!(core.hold(9), None);
+    }
+
+    /// 模式 2 主机断网期间这一段一直开着，网络回来时备机已接手：主机不续录，
+    /// 投成后告诉备机这份没录到下播，备机才会追加它那半
+    #[test]
+    fn mode_two_yields_an_open_unit_the_standby_took_over() {
+        let mut core = core(HaMode::Takeover, Vec::new());
+        online(&mut core, 0);
+        core.unit_started(MIN, "7:60000", 7, MIN, 3);
+        assert!(!core.yield_unit(2 * MIN, "7:60000"), "备机没接手：照常续录");
+        core.disconnected(3 * MIN);
+        core.connected(6 * MIN);
+        core.take();
+        core.standby_message(
+            6 * MIN,
+            report(vec![ReportedSession {
+                takeover_of: Some("7:60000".into()),
+                ..reported("standby:7:240000", 7, 4 * MIN, ReportedState::Recording)
+            }]),
+        );
+        let outs = core.take();
+        assert_eq!(kinds(&outs), ["session_started"]);
+        assert!(core.hold(7).is_some(), "主机这一段还开着，也等备机下播");
+
+        assert!(core.yield_unit(6 * MIN + 2000, "7:60000"));
+        core.unit_ended(6 * MIN + 3000, "7:60000", UnitOutput { seen: 2, sent: 2 });
+        assert_eq!(core.upload_begin(7 * MIN, "7:60000"), Begin::Proceed);
+        core.uploaded(8 * MIN, "7:60000", "BVP");
+        let outs = core.take();
+        assert!(sends(&outs).iter().any(|message| matches!(
+            message,
+            HaMessage::Uploaded { key, to: Some(to), yielded: true, .. }
+                if key == "7:60000" && *to == 6 * MIN + 3000
+        )));
+
+        // 重连后的上报再问一遍，回复里也带着
+        core.disconnected(9 * MIN);
+        core.connected(9 * MIN + 5000);
+        core.standby_message(
+            9 * MIN + 5000,
+            report(vec![ReportedSession {
+                takeover_of: Some("7:60000".into()),
+                ..reported("standby:7:240000", 7, 4 * MIN, ReportedState::Recording)
+            }]),
+        );
+        assert!(sends(&core.take()).iter().any(|message| matches!(
+            message,
+            HaMessage::Uploaded { key, yielded: true, .. } if key == "7:60000"
+        )));
+
+        core.standby_message(
+            20 * MIN,
+            HaMessage::SessionEnded {
+                key: "standby:7:240000".into(),
+                room: 7,
+                started_at: 4 * MIN,
+                at: 20 * MIN,
+                produced: true,
+            },
+        );
+        assert_eq!(core.hold(7), None);
+    }
+
+    /// 模式 1、以及模式 2 里备机没有接手的房间：拉流重连照常
+    #[test]
+    fn units_are_not_yielded_without_a_takeover() {
+        let mut core = core(HaMode::DualRecord, Vec::new());
+        online(&mut core, 0);
+        core.unit_started(MIN, "7:60000", 7, MIN, 3);
+        core.disconnected(2 * MIN);
+        core.connected(3 * MIN);
+        core.standby_message(
+            3 * MIN,
+            report(vec![ReportedSession {
+                takeover_of: Some("7:60000".into()),
+                ..reported("standby:7:120000", 7, 2 * MIN, ReportedState::Recording)
+            }]),
+        );
+        assert!(!core.yield_unit(3 * MIN + 2000, "7:60000"));
+
+        let mut core = self::core(HaMode::Takeover, Vec::new());
+        online(&mut core, 0);
+        core.unit_started(MIN, "7:60000", 7, MIN, 3);
+        core.unit_started(MIN, "8:60000", 8, MIN, 4);
+        core.disconnected(2 * MIN);
+        core.connected(4 * MIN);
+        core.standby_message(
+            4 * MIN,
+            report(vec![ReportedSession {
+                takeover_of: Some("8:60000".into()),
+                ..reported("standby:8:180000", 8, 3 * MIN, ReportedState::Recording)
+            }]),
+        );
+        assert!(!core.yield_unit(4 * MIN + 2000, "7:60000"));
+        assert!(core.yield_unit(4 * MIN + 2000, "8:60000"));
     }
 
     fn context(url: &str, date: &str) -> crate::server::infrastructure::context::Context {
