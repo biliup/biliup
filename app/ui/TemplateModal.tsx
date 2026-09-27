@@ -17,6 +17,8 @@ import { fetcher, LiveStreamerEntity, sendRequest, StudioEntity } from '../lib/a
 import useSWR from 'swr'
 import useSWRMutation from 'swr/mutation'
 import { useMe } from '../lib/use-me'
+import { useAutoClip } from '../lib/auto-clip'
+import AfterLiveSwitch from './auto-clip/AfterLiveSwitch'
 
 type TemplateModalProps = {
   visible?: boolean
@@ -94,6 +96,8 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
   } = useSWR<StudioEntity[]>(templateOptions ? null : '/v1/upload/streamers', fetcher)
 
   const [visible, setVisible] = useState(false)
+  // Fleet 控制面的直播间不在本机生成候选，不显示这个开关
+  const autoClip = useAutoClip(visible && !templateOptions)
   const showDialog = () => {
     setVisible(true)
   }
@@ -193,6 +197,8 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
           />
 
           {extraFields}
+
+          {templateOptions ? null : <AfterLiveSwitch availability={autoClip} canOverride={hooks} />}
 
           {hooks ? (
             <ArrayField
