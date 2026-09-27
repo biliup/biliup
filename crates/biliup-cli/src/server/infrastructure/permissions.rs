@@ -238,9 +238,18 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         | "/v1/fleet/accounts"
         | "/v1/fleet/alerts"
         | "/v1/fleet/summary"
+        | "/v1/fleet/ha"
+        | "/v1/node/ha"
             if get =>
         {
             StreamerView
+        }
+        // 一主一备：指定与解除归 node.manage，场次的人工处理（备机直接投 / 放弃）与投稿同级
+        "/v1/fleet/ha" if method == Method::PUT || method == Method::DELETE => NodeManage,
+        "/v1/fleet/ha/sessions/{key}/{action}" | "/v1/node/ha/sessions/{key}/{action}"
+            if method == Method::POST =>
+        {
+            UploadSubmit
         }
         // Fleet 配置只含白名单字段，查看与空间配置同级；修改会下发到节点，归 node.manage
         "/v1/fleet/configuration"
@@ -307,6 +316,7 @@ mod tests {
             include_str!("../app.rs"),
             include_str!("../api/web_users.rs"),
             include_str!("../api/fleet.rs"),
+            include_str!("../api/fleet_ha.rs"),
         ];
         // 这些路由有意不挂权限层：登录相关对外公开，`/v1/me*` 只要求登录。
         let unguarded = [
@@ -384,6 +394,35 @@ mod tests {
             required_permission(&Method::GET, "/static/{path}", "/static/a.flv"),
             Some(Permission::FileView)
         );
+    }
+
+    #[test]
+    fn ha_pairing_is_node_manage_and_manual_handling_is_upload_submit() {
+        let of = |method: Method, route: &str| required_permission(&method, route, route);
+        assert_eq!(
+            of(Method::GET, "/v1/fleet/ha"),
+            Some(Permission::StreamerView)
+        );
+        assert_eq!(
+            of(Method::GET, "/v1/node/ha"),
+            Some(Permission::StreamerView)
+        );
+        assert_eq!(
+            of(Method::PUT, "/v1/fleet/ha"),
+            Some(Permission::NodeManage)
+        );
+        assert_eq!(
+            of(Method::DELETE, "/v1/fleet/ha"),
+            Some(Permission::NodeManage)
+        );
+        for route in [
+            "/v1/fleet/ha/sessions/{key}/{action}",
+            "/v1/node/ha/sessions/{key}/{action}",
+        ] {
+            assert_eq!(of(Method::POST, route), Some(Permission::UploadSubmit));
+            assert_eq!(of(Method::GET, route), None);
+        }
+        assert_eq!(of(Method::POST, "/v1/node/ha"), None);
     }
 
     /// `export type <name> = 'a' | 'b'` 里的字符串字面量；单行或每行一个 `| 'x'` 都行。

@@ -13,6 +13,7 @@ pub use removal::{REMOVAL_WAIT, Release, Removal, RemovalState, RemovedRoom};
 use super::alerts::Alerts;
 use super::assignments;
 use super::config_store;
+use super::ha::pairing::Pairing;
 use super::local::LocalNode;
 use super::model::Account;
 use super::protocol::{
@@ -206,6 +207,8 @@ pub struct Controller {
     alert_task: Mutex<Option<JoinHandle<()>>>,
     /// 「本机」节点（[`super::local`]）；测试里的控制面没有
     local: OnceLock<Arc<LocalNode>>,
+    /// 一主一备（[`super::ha`]）；测试里的控制面没有
+    ha: OnceLock<Arc<Pairing>>,
 }
 
 impl Controller {
@@ -245,6 +248,7 @@ impl Controller {
             started_at: now_ms(),
             alert_task: Mutex::default(),
             local: OnceLock::new(),
+            ha: OnceLock::new(),
         });
         let task = tokio::spawn(accept_loop(
             Arc::downgrade(&controller),
@@ -272,6 +276,14 @@ impl Controller {
         self.local.get()
     }
 
+    pub fn attach_ha(&self, pairing: Arc<Pairing>) {
+        let _ = self.ha.set(pairing);
+    }
+
+    pub fn ha(&self) -> Option<&Arc<Pairing>> {
+        self.ha.get()
+    }
+
     /// 启用中的「本机」节点 id
     pub fn local_node_id(&self) -> Option<i64> {
         self.local.get().and_then(|local| local.node_id())
@@ -279,6 +291,16 @@ impl Controller {
 
     pub fn is_local(&self, node: i64) -> bool {
         self.local_node_id() == Some(node)
+    }
+
+    /// 在线节点的协议次版本与发往它的帧
+    pub(crate) fn node_link(
+        &self,
+        node: i64,
+    ) -> Option<(u32, mpsc::UnboundedSender<ControllerMessage>)> {
+        let live = self.live.lock().unwrap();
+        live.get(&node)
+            .map(|live| (live.proto, live.outbox.clone()))
     }
 
     /// 「本机」节点连的 relay：控制面自己连的那些（内嵌 relay 时是回环地址）
@@ -389,6 +411,9 @@ impl Controller {
                 .retire(&self.endpoint_id().to_string(), connected)
                 .await;
         }
+        if let Some(pairing) = self.ha() {
+            pairing.node_removed(self, id).await;
+        }
         // 等它释放的房间不再等，交给各自的新节点
         self.push_all().await;
         Ok(true)
@@ -435,12 +460,27 @@ impl Controller {
             return;
         };
         let version = self.next_version();
-        let (rooms, templates) = match assignments::desired_state(&self.pool, node).await {
+        let (mut rooms, mut templates) = match assignments::desired_state(&self.pool, node).await {
             Ok(desired) => desired,
             Err(e) => {
                 warn!(node, error = ?e, "could not build the desired state");
                 return;
             }
+        };
+        let ha = match self.ha() {
+            Some(pairing) => {
+                match pairing
+                    .desired(self, node, proto, &mut rooms, &mut templates)
+                    .await
+                {
+                    Ok(ha) => ha,
+                    Err(e) => {
+                        warn!(node, error = ?e, "could not build the HA part of the desired state");
+                        return;
+                    }
+                }
+            }
+            None => None,
         };
         // 次版本 1 的节点照常收房间，配置不发；「本机」节点用控制面自己的配置，也不发
         let config = if proto >= CONFIG_SINCE && !self.is_local(node) {
@@ -459,6 +499,7 @@ impl Controller {
             rooms,
             templates,
             config,
+            ha,
         });
         if let Some(live) = self.live.lock().unwrap().get_mut(&node)
             && live.outbox.send(message).is_ok()
@@ -469,6 +510,9 @@ impl Controller {
 
     pub async fn push_many(&self, nodes: impl IntoIterator<Item = Option<i64>>) {
         let mut nodes: Vec<i64> = nodes.into_iter().flatten().collect();
+        if let Some(standby) = self.ha().and_then(|pairing| pairing.mirror_target(&nodes)) {
+            nodes.push(standby);
+        }
         nodes.sort_unstable();
         nodes.dedup();
         let _guard = self.dispatch.lock().await;
@@ -633,6 +677,7 @@ impl Controller {
         let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
         let now = now_ms();
         let (outbox, mut frames) = mpsc::unbounded_channel();
+        let ha_outbox = outbox.clone();
         let previous = self.live.lock().unwrap().insert(
             id,
             LiveNode {
@@ -666,6 +711,9 @@ impl Controller {
         }
         info!(node = id, name = %node.name, version = %hello.version, "fleet node online");
         store::record_seen(&self.pool, id, now, &hello.version, None).await?;
+        if let Some(pairing) = self.ha() {
+            pairing.node_connected(id, hello.proto, &ha_outbox);
+        }
 
         let welcome = ControllerMessage::Welcome {
             node_id: id,
@@ -718,6 +766,9 @@ impl Controller {
             )
             .await;
             info!(node = id, "fleet node offline");
+            if let Some(pairing) = self.ha() {
+                pairing.node_offline(id);
+            }
             self.wake_removals();
         }
         result
@@ -769,6 +820,13 @@ impl Controller {
                     self.record_event(id, event).await;
                 }
                 NodeMessage::Ack(ack) => self.ack(id, seq, ack).await,
+                NodeMessage::Ha(message) => {
+                    self.touch(id, seq);
+                    match self.ha() {
+                        Some(pairing) => pairing.node_message(id, message),
+                        None => debug!(node = id, kind = message.kind(), "HA frame without a pair"),
+                    }
+                }
                 NodeMessage::Leave => {
                     {
                         let _guard = self.dispatch.lock().await;

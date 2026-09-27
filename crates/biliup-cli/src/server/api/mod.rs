@@ -20,6 +20,7 @@ pub mod endpoints;
 pub mod fleet;
 pub mod fleet_alerts;
 pub mod fleet_config;
+pub mod fleet_ha;
 pub mod fleet_local;
 pub mod fleet_rooms;
 /// 录制中直播间的封面 / 头像图片代理

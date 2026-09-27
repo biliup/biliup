@@ -12,6 +12,7 @@ use crate::server::core::downloader::{
 use crate::server::core::live::{danmaku_client, downloader_runtime, live_request};
 use crate::server::core::monitor::Monitor;
 use crate::server::errors::{AppError, AppResult};
+use crate::server::fleet::ha::UnitOutput;
 use crate::server::infrastructure::context::{Context, Stage, WorkerStatus};
 use crate::server::infrastructure::models::hook_step::process;
 use crate::server::workbench::index;
@@ -56,6 +57,7 @@ pub struct SegmentEventProcessor {
     uploader: Sender<UploaderMessage>,
     ctx: Context,
     file_validator: FileValidator,
+    output: UnitOutput,
 }
 
 impl SegmentEventProcessor {
@@ -70,7 +72,13 @@ impl SegmentEventProcessor {
             )
             .with_retention(Retention::without_delay(ctx.pool().clone())),
             ctx,
+            output: UnitOutput::default(),
         }
+    }
+
+    /// 录完的分段数与交给投稿流程的分段数
+    pub fn output(&self) -> UnitOutput {
+        self.output
     }
 
     /// 这个分段交给 [`Self::process`] 后会不会被过滤删除。
@@ -84,6 +92,7 @@ impl SegmentEventProcessor {
         event: SegmentInfo,
         settled: impl Future<Output = ()> + Send + 'static,
     ) -> AppResult<()> {
+        self.output.seen += 1;
         // 验证文件有效性
         self.file_validator
             .validate(&event.prev_file_path, settled)?;
@@ -132,6 +141,7 @@ impl SegmentEventProcessor {
                 }
             }
         }
+        self.output.sent += 1;
 
         Ok(())
     }
@@ -347,20 +357,35 @@ impl DownloadTask {
             Some(session) => session.lock().await.committed_parts(),
             None => 0,
         };
+        crate::server::fleet::ha::unit_started(ctx);
         let result = loop {
             // 创建守卫确保清理
             // 创建事件处理器
             // 执行下载
             let bytes_before = self.meter.counter().total();
-            let components = self
-                .download(
+            let components = {
+                let attempt = self.download(
                     &mut processor,
                     ctx.clone(),
                     danmaku_client.clone(),
                     &stream,
                     workbench.handle(),
-                )
-                .await;
+                );
+                // 一主一备模式 2：备机接手了主机断网期间中断过的这一段，停掉这次拉流（没有配对时不会就绪）
+                let stop = crate::server::fleet::ha::stop_requested(ctx);
+                tokio::pin!(attempt, stop);
+                tokio::select! {
+                    biased;
+                    components = &mut attempt => components,
+                    () = &mut stop => {
+                        info!(url = url, "一主一备：备机已接手这个房间，主机停止这次拉流");
+                        if let Err(e) = self.downloader.stop().await {
+                            warn!(url = url, error = ?e, "停止拉流失败");
+                        }
+                        attempt.await
+                    }
+                }
+            };
             if !matches!(self.downloader, DownloaderRuntime::StreamGears(_))
                 && ws_expire_override_failed(
                     &stream.raw_stream_url,
@@ -466,6 +491,10 @@ impl DownloadTask {
 
             info!("Retrying download in {:?}...", delay);
             tokio::time::sleep(delay).await;
+            if crate::server::fleet::ha::yield_recording(ctx) {
+                info!(url = url, "一主一备：备机已接手这个房间，主机不续录");
+                break components;
+            }
         };
         // 异步清理任务
         if let Some(client) = danmaku_client.clone()
@@ -480,12 +509,15 @@ impl DownloadTask {
         {
             warn!(url = url, "切片工作台场次收尾超时，转入后台完成");
         }
-        crate::server::auto_clip::runner::session_finished(
-            ctx.pool(),
-            &ctx.config(),
-            ctx.live_streamer(),
-            ctx.id(),
-        );
+        crate::server::fleet::ha::unit_ended(ctx, processor.output());
+        if crate::server::fleet::ha::auto_clip_allowed(ctx) {
+            crate::server::auto_clip::runner::session_finished(
+                ctx.pool(),
+                &ctx.config(),
+                ctx.live_streamer(),
+                ctx.id(),
+            );
+        }
         // 清理资源
         // 确保状态更新和资源清理
         rooms_handle.wake_waker(ctx.worker_id()).await;

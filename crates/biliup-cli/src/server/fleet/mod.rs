@@ -18,6 +18,7 @@ pub mod controller;
 mod e2e_tests;
 pub mod events;
 pub mod guard;
+pub mod ha;
 pub mod labels;
 pub mod layers;
 pub mod local;
@@ -197,13 +198,15 @@ impl Fleet {
         }
     }
 
-    /// 控制面的 `/v1/fleet/*` 路由；被移除过的节点（与控制面的「本机」）的 `/v1/node/revoked*`
+    /// 控制面的 `/v1/fleet/*` 路由；节点的 `/v1/node/ha*`（被指定为备机时才有）；
+    /// 被移除过的节点（与控制面的「本机」）的 `/v1/node/revoked*`
     pub fn router(&self) -> Option<axum::Router<()>> {
         let controller = match &self.role {
             Role::Controller(controller, _) => {
                 Some(crate::server::api::fleet::router(controller.clone()))
             }
-            _ => None,
+            Role::Node(..) => Some(crate::server::api::fleet_ha::node_router()),
+            Role::Standalone => None,
         };
         let revoked = self.revoked.clone().map(|revoked| {
             let router = crate::server::api::fleet::revoked_router(revoked.clone());
@@ -225,6 +228,9 @@ impl Fleet {
         match &self.role {
             Role::Standalone => {}
             Role::Controller(controller, _) => {
+                if let Some(pairing) = controller.ha() {
+                    pairing.shutdown();
+                }
                 if let Some(local) = controller.local() {
                     local.shutdown().await;
                 }
@@ -345,6 +351,9 @@ async fn start_controller_role(
     let revoked = Arc::new(Revoked::load(revoked_file, services.clone()));
     revoked.apply().await;
     let controller = start_controller(options).await?;
+    // 先挂上配对：之前就连上来的备机等配对载入完再收期望状态，不会先收到一份不带配对的而解除
+    let pairing = Arc::new(ha::pairing::Pairing::new(services.clone()));
+    controller.attach_ha(pairing.clone());
     let managed = ManagedHandle::default();
     let local = Arc::new(local::LocalNode::new(
         Path::new(local::LOCAL_NODE_FILE).to_path_buf(),
@@ -353,6 +362,7 @@ async fn start_controller_role(
         revoked.clone(),
     ));
     local.resume(&controller).await;
+    pairing.resume(&controller, local.node_id()).await;
     Ok(Fleet::controller(controller, local, managed, revoked))
 }
 
@@ -480,6 +490,10 @@ mod tests {
                 4,
                 "46a662525e8dd5178e903abb31db633c26eeaf4c924be73ba3e3031a80f5dc0025341c635167ad28e18440ea13c2b29a",
             ),
+            (
+                5,
+                "c23607563211161fda918092a2f7be5466a181665b80e12e7075ed4c1f2dba53a885f56987cd7c4309074547f3b1d4af",
+            ),
         ];
         let embedded: Vec<(i64, String)> = FLEET_MIGRATOR
             .iter()
@@ -504,7 +518,7 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(versions, [1, 2, 3, 4]);
+        assert_eq!(versions, [1, 2, 3, 4, 5]);
         let tables: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'fleet_%' ORDER BY name",
         )
@@ -523,6 +537,13 @@ mod tests {
                 "fleet_templates"
             ]
         );
+        let ha: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'ha_%' ORDER BY name",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(ha, ["ha_pair", "ha_sessions"]);
         // 主库的表一张都不在这里
         let foreign: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM sqlite_master WHERE name IN ('livestreamers', 'web_users', 'clips')",
@@ -540,6 +561,6 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(count, 4);
+        assert_eq!(count, 5);
     }
 }

@@ -78,6 +78,11 @@ impl DownloadManager {
         self.upload_slots.occupied()
     }
 
+    /// 上传池本身：一主一备的备机录完后才投的场次也占它的槽位
+    pub(crate) fn upload_slots(&self) -> Arc<Slots> {
+        self.upload_slots.clone()
+    }
+
     pub async fn add_plugin(&self, plugin: Arc<dyn LivePlugin + Send + Sync>) {
         let name = plugin.name().to_string();
         self.rooms_handle.add_plugin(plugin).await;
