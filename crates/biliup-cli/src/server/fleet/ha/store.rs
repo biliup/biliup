@@ -273,6 +273,15 @@ pub async fn session(pool: &ConnectionPool, key: &str) -> AppResult<Option<Sessi
     Ok(row.map(SessionRecord::from))
 }
 
+pub async fn delete_session(pool: &ConnectionPool, key: &str) -> AppResult<()> {
+    sqlx::query("DELETE FROM ha_sessions WHERE session_key = ?")
+        .bind(key)
+        .execute(pool)
+        .await
+        .change_context(db_error("delete ha_sessions"))?;
+    Ok(())
+}
+
 /// 整行写入（新增或覆盖）
 pub async fn save_session(pool: &ConnectionPool, record: &SessionRecord) -> AppResult<()> {
     sqlx::query(

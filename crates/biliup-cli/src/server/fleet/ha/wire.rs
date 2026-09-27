@@ -117,6 +117,9 @@ pub struct ReportedSession {
     pub takeover_of: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bvid: Option<String>,
+    /// 对上了主机场次（`key`）的一场在备机上自己的键：主机那边可能还留着按它记的一行
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adopted_from: Option<String>,
 }
 
 /// 人工处理：「备机直接投」或「放弃」
@@ -193,6 +196,12 @@ pub enum HaMessage {
     StandbyReport {
         sessions: Vec<ReportedSession>,
     },
+    /// 备机先开录的一场对上了主机的场次：之后的消息都用主机的键 `key`，`from` 是它之前用的备机键
+    Adopted {
+        key: String,
+        room: i64,
+        from: String,
+    },
     /// 备机的一场进入了主机从别的消息推不出来的状态（等主机、待人工、放弃、不用投）；主机据此列出待人工的场次
     SessionState {
         key: String,
@@ -219,6 +228,7 @@ impl HaMessage {
             | HaMessage::Uploaded { key, .. }
             | HaMessage::UploadFailed { key, .. }
             | HaMessage::UploadSkipped { key, .. }
+            | HaMessage::Adopted { key, .. }
             | HaMessage::SessionState { key, .. }
             | HaMessage::Manual { key, .. } => Some(key),
             HaMessage::StandbyReport { .. } => None,
@@ -235,6 +245,7 @@ impl HaMessage {
             HaMessage::UploadFailed { .. } => "upload_failed",
             HaMessage::UploadSkipped { .. } => "upload_skipped",
             HaMessage::StandbyReport { .. } => "standby_report",
+            HaMessage::Adopted { .. } => "adopted",
             HaMessage::SessionState { .. } => "session_state",
             HaMessage::Manual { .. } => "manual",
         }

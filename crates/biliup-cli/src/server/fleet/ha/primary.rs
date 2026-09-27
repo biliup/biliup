@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// 备机（重）连上后、主机进程启动后最多等 `StandbyReport` 这么久（§2 硬规则）
 pub const REPORT_WAIT_MS: i64 = 10_000;
@@ -41,6 +41,8 @@ pub(crate) enum Out {
     Send(HaMessage),
     /// 写进 `ha_sessions`
     Save(SessionRecord),
+    /// 从 `ha_sessions` 删掉这一行
+    Delete(String),
 }
 
 /// 主机的投稿流程要不要真的投
@@ -416,10 +418,29 @@ impl PrimaryCore {
                     row.reason = reason;
                 }
             }
+            HaMessage::Adopted { key, from, .. } => self.adopted(now, &key, &from),
             HaMessage::UploadProgress { .. }
             | HaMessage::UploadSkipped { .. }
             | HaMessage::Manual { .. } => {}
         }
+    }
+
+    /// 备机那一场改用了主机的键：它之前用备机键记下的那一行并进主机这一行
+    fn adopted(&mut self, now: i64, key: &str, from: &str) {
+        let Some(alias) = self.rows.remove(from) else {
+            return;
+        };
+        self.dirty.remove(from);
+        self.outs.push(Out::Delete(from.to_string()));
+        for held in self.held.values_mut().filter(|held| held.as_str() == from) {
+            *held = key.to_string();
+        }
+        if let Some(row) = self.touch(key, now)
+            && row.standby_state.is_none()
+        {
+            row.standby_state = alias.standby_state;
+        }
+        debug!(key, from, "HA：备机那一场改用了主机的键");
     }
 
     /// 记下备机那边这一场的状态；备机自己起的场次（主机没有）新建一行
@@ -626,6 +647,9 @@ impl PrimaryCore {
                     .clone()
                     .filter(|_| session.state == ReportedState::Uploaded),
             );
+            if let Some(from) = &session.adopted_from {
+                self.adopted(now, &session.key, from);
+            }
             let matches = self.matching(
                 session.room,
                 span,
@@ -744,6 +768,7 @@ impl PrimaryCore {
 
 enum Write {
     Save(SessionRecord),
+    Delete(String),
     #[cfg(test)]
     Flush(tokio::sync::oneshot::Sender<()>),
 }
@@ -791,6 +816,11 @@ impl Primary {
                             warn!(key = record.session_key, error = ?e, "HA：没能写入 ha_sessions");
                         }
                     }
+                    Write::Delete(key) => {
+                        if let Err(e) = store::delete_session(&pool, &key).await {
+                            warn!(key, error = ?e, "HA：没能删掉 ha_sessions 里的行");
+                        }
+                    }
                     #[cfg(test)]
                     Write::Flush(done) => {
                         let _ = done.send(());
@@ -828,6 +858,9 @@ impl Primary {
                 }
                 Out::Save(record) => {
                     let _ = self.writer.send(Write::Save(record));
+                }
+                Out::Delete(key) => {
+                    let _ = self.writer.send(Write::Delete(key));
                 }
             }
         }
@@ -1014,7 +1047,7 @@ mod tests {
         outs.iter()
             .filter_map(|out| match out {
                 Out::Send(message) => Some(message.clone()),
-                Out::Save(_) => None,
+                Out::Save(_) | Out::Delete(_) => None,
             })
             .collect()
     }
@@ -1023,7 +1056,7 @@ mod tests {
         outs.iter()
             .filter_map(|out| match out {
                 Out::Send(message) => Some(message.kind()),
-                Out::Save(_) => None,
+                Out::Save(_) | Out::Delete(_) => None,
             })
             .collect()
     }
@@ -1044,6 +1077,7 @@ mod tests {
             state,
             takeover_of: None,
             bvid: None,
+            adopted_from: None,
         }
     }
 
@@ -1465,6 +1499,77 @@ mod tests {
         assert_eq!(row.primary_state, PrimaryState::None);
         assert_eq!(row.started_at, 120_000);
         assert!(sends(&outs).is_empty());
+    }
+
+    /// 备机先开录、后来对上了主机的场次：备机键那一行并进主机那一行，不留一行永远「录制中」
+    #[test]
+    fn a_standby_session_that_adopts_the_primary_key_is_merged_into_its_row() {
+        let mut core = core(HaMode::DualRecord, Vec::new());
+        online(&mut core, 0);
+        core.standby_message(
+            MIN,
+            HaMessage::SessionStarted {
+                key: "standby:7:60000".into(),
+                room: 7,
+                started_at: MIN,
+                at: MIN,
+            },
+        );
+        core.unit_started(MIN + 30_000, "7:90000", 7, MIN + 30_000, 1);
+        core.take();
+        assert!(core.tracks("standby:7:60000"));
+
+        core.standby_message(
+            2 * MIN,
+            HaMessage::Adopted {
+                key: "7:90000".into(),
+                room: 7,
+                from: "standby:7:60000".into(),
+            },
+        );
+        let outs = core.take();
+        assert!(!core.tracks("standby:7:60000"));
+        assert!(
+            outs.iter()
+                .any(|out| matches!(out, Out::Delete(key) if key == "standby:7:60000"))
+        );
+        assert!(saved(&outs, "standby:7:60000").is_none());
+        let row = saved(&outs, "7:90000").unwrap();
+        assert_eq!(row.primary_state, PrimaryState::Recording);
+        assert_eq!(row.standby_state.as_deref(), Some("recording"));
+        assert!(sends(&outs).is_empty());
+
+        // 改键那条消息丢在断线里：重连后的上报带着原来的键，照样并掉
+        core.standby_message(
+            3 * MIN,
+            HaMessage::SessionStarted {
+                key: "standby:8:180000".into(),
+                room: 8,
+                started_at: 3 * MIN,
+                at: 3 * MIN,
+            },
+        );
+        core.unit_started(3 * MIN, "8:180000", 8, 3 * MIN, 2);
+        core.disconnected(4 * MIN);
+        core.connected(4 * MIN + 5_000);
+        core.standby_message(
+            4 * MIN + 5_000,
+            report(vec![ReportedSession {
+                adopted_from: Some("standby:8:180000".into()),
+                ..reported("8:180000", 8, 3 * MIN, ReportedState::Recording)
+            }]),
+        );
+        let outs = core.take();
+        assert!(!core.tracks("standby:8:180000"));
+        assert!(
+            outs.iter()
+                .any(|out| matches!(out, Out::Delete(key) if key == "standby:8:180000"))
+        );
+        assert_eq!(
+            saved(&outs, "8:180000").unwrap().standby_state.as_deref(),
+            Some("recording")
+        );
+        assert!(core.gate_open());
     }
 
     #[test]

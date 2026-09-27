@@ -674,16 +674,13 @@ mod tests {
         };
         assert_eq!(back.key(), Some("7:1000"));
 
+        let session: ReportedSession = serde_json::from_value(serde_json::json!({
+            "key": "standby:7:2000", "room": 7, "started_at": 2000, "state": "recording",
+        }))
+        .unwrap();
+        assert_eq!(session.state, ReportedState::Recording);
         let report = ControllerMessage::Ha(HaMessage::StandbyReport {
-            sessions: vec![ReportedSession {
-                key: "standby:7:2000".into(),
-                room: 7,
-                started_at: 2000,
-                ended_at: None,
-                state: ReportedState::Recording,
-                takeover_of: None,
-                bvid: None,
-            }],
+            sessions: vec![session],
         });
         let json = serde_json::to_value(&report).unwrap();
         assert_eq!(json["sessions"][0]["state"], "recording");

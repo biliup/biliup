@@ -412,6 +412,7 @@ impl StandbyCore {
                 state: session.state.reported(),
                 takeover_of: session.takeover_of.clone(),
                 bvid: session.bvid.clone(),
+                adopted_from: (session.key != session.id).then(|| session.id.clone()),
             })
             .collect()
     }
@@ -944,7 +945,9 @@ impl StandbyCore {
                 }
                 return;
             }
-            HaMessage::StandbyReport { .. } | HaMessage::SessionState { .. } => return,
+            HaMessage::StandbyReport { .. }
+            | HaMessage::SessionState { .. }
+            | HaMessage::Adopted { .. } => return,
             HaMessage::SessionStarted { room, .. }
             | HaMessage::SessionEnded { room, .. }
             | HaMessage::UploadStarted { room, .. }
@@ -1017,6 +1020,7 @@ impl StandbyCore {
             }
             HaMessage::StandbyReport { .. }
             | HaMessage::SessionState { .. }
+            | HaMessage::Adopted { .. }
             | HaMessage::Manual { .. } => {}
         }
         self.dirty = true;
@@ -1053,6 +1057,11 @@ impl StandbyCore {
             if let Some(session) = self.touch(&id, now) {
                 info!(id, key, "HA：备机这一场对上了主机的场次");
                 session.key = key.to_string();
+                self.send(HaMessage::Adopted {
+                    key: key.to_string(),
+                    room,
+                    from: id,
+                });
             }
         }
     }
@@ -1255,8 +1264,24 @@ mod tests {
         let second = id(100 * MIN);
         core.unit_started(100 * MIN, &second, ROOM, 100 * MIN, unit());
         assert_eq!(core.session(&second).unwrap().key, second);
+        outs(&mut core);
         core.primary_message(103 * MIN, started(&primary_key(103 * MIN), 103 * MIN));
         assert_eq!(core.session(&second).unwrap().key, primary_key(103 * MIN));
+        // 告诉主机：之前用备机键记的那一场改用主机的键；重连后的上报也带上原来的键
+        assert!(outs(&mut core).contains(&Out::Send(HaMessage::Adopted {
+            key: primary_key(103 * MIN),
+            room: ROOM,
+            from: second.clone(),
+        })));
+        core.link_down(104 * MIN);
+        let HaMessage::StandbyReport { sessions } = core.link_up(104 * MIN + 1000) else {
+            panic!("expected a report");
+        };
+        let adopted = sessions
+            .iter()
+            .find(|session| session.key == primary_key(103 * MIN))
+            .unwrap();
+        assert_eq!(adopted.adopted_from.as_deref(), Some(second.as_str()));
         // 窗口外开播的是另一场
         let third = id(200 * MIN);
         core.unit_started(200 * MIN, &third, ROOM, 200 * MIN, unit());
