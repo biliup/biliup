@@ -1,0 +1,37 @@
+{
+  "name": "biliup",
+  "version": "0.0.0",
+  "description": "biliup 直播录制与投稿工具的原生二进制，npx biliup server 直接运行",
+  "keywords": [
+    "bilibili",
+    "live",
+    "recorder",
+    "upload"
+  ],
+  "homepage": "https://github.com/biliup/biliup",
+  "bugs": "https://github.com/biliup/biliup/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/biliup/biliup.git",
+    "directory": "npm/biliup"
+  },
+  "license": "MIT",
+  "bin": {
+    "biliup": "bin/biliup.js"
+  },
+  "files": [
+    "bin"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@biliup/darwin-arm64": "0.0.0",
+    "@biliup/darwin-x64": "0.0.0",
+    "@biliup/linux-arm-gnueabi": "0.0.0",
+    "@biliup/linux-arm64-gnu": "0.0.0",
+    "@biliup/linux-x64-gnu": "0.0.0",
+    "@biliup/linux-x64-musl": "0.0.0",
+    "@biliup/win32-x64": "0.0.0"
+  }
+}
