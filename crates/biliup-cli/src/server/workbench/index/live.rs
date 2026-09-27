@@ -1,8 +1,9 @@
 //! 录制时边写边建关键帧索引。
 //!
 //! 进程内写盘的下载器（stream-gears、mesio）经 [`IndexTap`] 把每个分段写了什么、从哪个偏移开始
-//! 交过来，`<分段>.idx` 每 [`SAVE_INTERVAL`] 最多落一次盘。录制中的分段查索引直接读这个缓存
-//!（[`is_live`]），不扫盘；写到哪里、什么时候写到的见 [`written`]（打标记换算场次时间用）。
+//! 交过来，每出现一个关键帧往缓存末尾追加一次（[`FlushPolicy`]）。录制中的分段查索引直接读这个
+//! 缓存（[`is_live`]），不扫盘；写到哪里、什么时候写到的见 [`written`]（打标记换算场次时间用，
+//! 不经过缓存文件）。
 //!
 //! FLV 收到的是写盘处用扫盘同一套判定（[`super::classify_flv_tag`]）就地得出的结论，直接记进索引；
 //! TS / fMP4 收到写入端持有的原样字节（引用计数，不复制），按偏移拼成一个稀疏的内存窗口，用与扫盘
@@ -11,7 +12,8 @@
 //! 写入端丢了事件（[`TapFile::lost`]）、偏移对不上或扫描出错时，保存已建好的部分、不再跟踪这个
 //! 文件，分段关闭时由 [`super::refresh`] 从那里扫盘补齐。外部进程下载器没有旁路，同样在关段时扫。
 
-use super::{Container, KeyframeIndex, Source, flv, save};
+use super::cache::Appender;
+use super::{Container, KeyframeIndex, Source, flv, index_path};
 use crate::server::workbench::segment_path;
 use biliup::downloader::index_tap::{IndexEvent, IndexTap, TapFile};
 use bytes::Bytes;
@@ -25,7 +27,6 @@ use tracing::{debug, info};
 
 /// 写入端到索引任务的事件队列长度。FLV 每个 tag 一个事件，一路 8 Mbps 的流每秒约百来个。
 const CHANNEL_CAPACITY: usize = 4096;
-const SAVE_INTERVAL: Duration = Duration::from_secs(2);
 /// 没有新事件时隔这么久检查一次被写入端放弃的文件。
 const SWEEP_INTERVAL: Duration = Duration::from_secs(1);
 /// 一次最多连续处理这么多事件再扫一轮。
@@ -89,12 +90,48 @@ fn unregister(path: &Path) {
     updated();
 }
 
+/// 录制中的缓存什么时候落盘：攒了 `max_pending` 个新关键帧（默认 1，即每个关键帧一次），或者没有
+/// 新关键帧但距上次落盘满 `interval`、内容又往后写了，就追加一次；关段和录制任务结束时再追加最后一次。
+/// 进程崩溃丢掉的最后一截由关段 / 启动收尾时扫盘补齐。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FlushPolicy {
+    interval: Duration,
+    max_pending: usize,
+}
+
+impl Default for FlushPolicy {
+    fn default() -> Self {
+        Self {
+            interval: Duration::from_secs(5),
+            max_pending: 1,
+        }
+    }
+}
+
+#[cfg(test)]
+impl FlushPolicy {
+    pub(crate) fn interval(self, interval: Duration) -> Self {
+        Self { interval, ..self }
+    }
+
+    pub(crate) fn max_pending(self, max_pending: usize) -> Self {
+        Self {
+            max_pending,
+            ..self
+        }
+    }
+}
+
 /// 起一个索引任务（阻塞线程池里的一个线程），返回写入端用的句柄。
 /// 所有句柄都释放后任务保存手上的索引并退出。
 pub fn spawn() -> IndexTap {
+    spawn_with(FlushPolicy::default())
+}
+
+pub fn spawn_with(policy: FlushPolicy) -> IndexTap {
     let (tap, rx) = IndexTap::channel(CHANNEL_CAPACITY, super::classify_flv_tag);
     let runtime = tokio::runtime::Handle::current();
-    tokio::task::spawn_blocking(move || Indexer::default().run(&runtime, rx));
+    tokio::task::spawn_blocking(move || Indexer::with_policy(policy).run(&runtime, rx));
     tap
 }
 
@@ -204,8 +241,11 @@ struct LiveFile {
     file: Arc<TapFile>,
     index: KeyframeIndex,
     window: Window,
+    /// 缓存文件，第一次落盘时建好后一直开着、只追加；写失败就丢掉，下次落盘整份重写。
+    cache: Option<Appender>,
     last_save: Option<Instant>,
     saved_upto: u64,
+    saved_keyframes: usize,
 }
 
 impl LiveFile {
@@ -222,6 +262,8 @@ impl LiveFile {
             window,
             last_save: None,
             saved_upto: 0,
+            saved_keyframes: 0,
+            cache: None,
         }
     }
 
@@ -242,22 +284,32 @@ impl LiveFile {
     fn save(&mut self) {
         self.index.complete = false;
         self.index.source_len = self.window.end;
-        if let Err(e) = save(self.file.path(), &self.index) {
+        let saved = match &mut self.cache {
+            Some(cache) => cache.append(&self.index),
+            None => Appender::create(&index_path(self.file.path()), &self.index)
+                .map(|cache| self.cache = Some(cache)),
+        };
+        if let Err(e) = saved {
             debug!(path = %self.path().display(), error = %e, "保存流式关键帧索引失败");
+            self.cache = None;
         }
         self.last_save = Some(Instant::now());
         self.saved_upto = self.index.scanned_upto;
+        self.saved_keyframes = self.index.keyframes.len();
         updated();
     }
 
-    /// 录制中定时落盘：第一个关键帧出现后立即存一次，之后每 [`SAVE_INTERVAL`] 最多一次。
-    fn maybe_save(&mut self) {
+    /// 录制中按 [`FlushPolicy`] 落盘。
+    fn maybe_save(&mut self, policy: FlushPolicy) {
         if self.index.scanned_upto == self.saved_upto {
             return;
         }
         let due = match self.last_save {
             None => !self.index.keyframes.is_empty(),
-            Some(at) => at.elapsed() >= SAVE_INTERVAL,
+            Some(at) => {
+                at.elapsed() >= policy.interval
+                    || self.index.keyframes.len() - self.saved_keyframes >= policy.max_pending
+            }
         };
         if due {
             self.save();
@@ -270,6 +322,7 @@ struct Indexer {
     /// 以 [`TapFile`] 的地址为键：同一路径被重开时是另一个文件。
     files: HashMap<usize, LiveFile>,
     dirty: HashSet<usize>,
+    policy: FlushPolicy,
 }
 
 fn key(file: &Arc<TapFile>) -> usize {
@@ -277,6 +330,13 @@ fn key(file: &Arc<TapFile>) -> usize {
 }
 
 impl Indexer {
+    fn with_policy(policy: FlushPolicy) -> Self {
+        Self {
+            policy,
+            ..Self::default()
+        }
+    }
+
     fn run(mut self, runtime: &tokio::runtime::Handle, mut rx: mpsc::Receiver<IndexEvent>) {
         loop {
             let next = runtime.block_on(tokio::time::timeout(SWEEP_INTERVAL, rx.recv()));
@@ -378,7 +438,7 @@ impl Indexer {
             }
         }
         for live in self.files.values_mut() {
-            live.maybe_save();
+            live.maybe_save(self.policy);
         }
     }
 

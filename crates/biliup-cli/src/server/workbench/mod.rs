@@ -2,7 +2,7 @@
 //!
 //! - [`store`]：开播时插入或复用场次行（断流合并），以及分段的读写；
 //! - [`recorder`]：下载器开段 / 关段时写库，维护场次时间轴；
-//! - [`index`]：分段文件旁的 `<分段>.idx` 关键帧索引（不进 SQLite）；
+//! - [`index`]：分段的关键帧索引，缓存在 `data/index/`（不进 SQLite，也不放在录制文件夹里）；
 //! - [`live`]：本进程正在录的场次，以及场次时间与墙钟的换算；
 //! - [`markers`]：看直播时打的标记（`markers`）；
 //! - [`locate`] / [`session_keyframes`]：按场次时间找到可以落刀 / 起播的分段与字节偏移；
@@ -78,16 +78,18 @@ fn readable(segment: &SegmentRow) -> bool {
     ) && Container::from_path(Path::new(&segment.path)).is_some()
 }
 
-/// 录制中、正由索引任务边写边建的分段直接读它落盘的缓存（最多落后几秒），不扫盘；
+/// 录制中、正由索引任务边写边建的分段直接读它落盘的缓存（最多落后几秒），不扫盘；还没落过盘
+/// （第一个关键帧之前）就只读地扫一遍，不写缓存：录制中缓存文件只有索引任务一个写者。
 /// 其余的按需续扫。
 pub(crate) async fn segment_index(segment: &SegmentRow) -> io::Result<index::KeyframeIndex> {
     let path = PathBuf::from(&segment.path);
     let finished = segment.state != SegmentState::Recording;
     tokio::task::spawn_blocking(move || {
-        if index::live::is_live(&path)
-            && let Some(cached) = index::load(&path)
-        {
-            return Ok(on_disk(cached, &path));
+        if index::live::is_live(&path) {
+            return match index::load(&path) {
+                Some(cached) => Ok(on_disk(cached, &path)),
+                None => index::rescan(&path, None),
+            };
         }
         index::refresh(&path, finished)
     })
@@ -264,8 +266,8 @@ async fn recover_segment(
         store::delete_segment(pool, segment.id).await?;
         return Ok(());
     };
-    if path != recorded {
-        let _ = std::fs::rename(index::index_path(&recorded), index::index_path(&path));
+    if path != recorded && index::rename(&recorded, &path).is_err() {
+        index::remove(&recorded);
     }
     let scan = {
         let path = path.clone();

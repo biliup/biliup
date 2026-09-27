@@ -409,7 +409,7 @@ impl HookStep {
                 .await
                 .change_context(AppError::Unknown)?;
             // 切片工作台的关键帧索引缓存随视频一起删
-            let _ = fs::remove_file(crate::server::workbench::index::index_path(video_path)).await;
+            crate::server::workbench::index::remove(video_path);
         }
         Ok(())
     }

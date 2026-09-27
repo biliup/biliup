@@ -13,8 +13,13 @@ fn drain(indexer: &mut Indexer, rx: &mut mpsc::Receiver<IndexEvent>) {
 
 /// 像 stream-gears 的 `FlvFile` 那样逐 tag 报告：偏移、tag 类型、时间戳、body。
 pub(crate) fn feed_flv_tags(tap: &FileTap, bytes: &[u8]) {
-    let mut offset = 13;
-    while offset + 15 <= bytes.len() {
+    feed_flv_tag_range(tap, bytes, FLV_FIRST_TAG as usize, bytes.len());
+}
+
+/// 报告从 `from`（tag 头）起、`to` 之前开始的 tag，返回下一个 tag 的偏移。
+fn feed_flv_tag_range(tap: &FileTap, bytes: &[u8], from: usize, to: usize) -> usize {
+    let mut offset = from;
+    while offset < to && offset + 15 <= bytes.len() {
         let head = &bytes[offset..offset + 11];
         let size = u32::from_be_bytes([0, head[1], head[2], head[3]]) as usize;
         let ts = u32::from_be_bytes([head[7], head[4], head[5], head[6]]);
@@ -22,6 +27,7 @@ pub(crate) fn feed_flv_tags(tap: &FileTap, bytes: &[u8]) {
         tap.flv_tag(offset as u64, head[0], ts, &body);
         offset += 15 + size;
     }
+    offset
 }
 
 /// 按伪随机大小的块原样报告（HTTP 分块 / HLS 分片的边界与容器单元无关）。
@@ -188,6 +194,97 @@ fn flv_verdicts_at_the_write_point_match_the_disk_scan() {
     file.closed(out.len() as u64);
     drain(&mut indexer, &mut rx);
     assert_same_as_disk_scan(&path, &out);
+}
+
+/// 已落盘的缓存里有几个关键帧。
+fn saved_keyframes(path: &Path) -> usize {
+    load(path).map_or(0, |index| index.keyframes.len())
+}
+
+/// 第 `n` 个关键帧 tag 的偏移（超出时为文件末尾）：报告到这里为止就是交出了前 `n` 个关键帧。
+fn before_keyframe(flv: &super::super::tests::Flv, n: usize) -> usize {
+    flv.keyframes
+        .get(n)
+        .map_or(flv.bytes.len(), |(_, offset)| *offset as usize)
+}
+
+#[test]
+fn default_flush_policy_is_every_keyframe_or_5_seconds() {
+    assert_eq!(
+        FlushPolicy::default(),
+        FlushPolicy::default()
+            .interval(Duration::from_secs(5))
+            .max_pending(1)
+    );
+}
+
+/// 第一个关键帧立即落盘；之后没到间隔时，攒够 `max_pending` 个新关键帧才再存；关段时存最后一次。
+#[test]
+fn streaming_saves_wait_for_enough_new_keyframes() {
+    let dir = tempfile::tempdir().unwrap();
+    let flv = build_flv(0, 300, 25, None);
+    assert_eq!(flv.keyframes.len(), 12);
+    let path = dir.path().join("batched.flv");
+    std::fs::write(&path, &flv.bytes).unwrap();
+    let (tap, mut rx) = IndexTap::channel(1 << 16, super::super::classify_flv_tag);
+    let mut indexer = Indexer::with_policy(
+        FlushPolicy::default()
+            .interval(Duration::from_secs(3600))
+            .max_pending(4),
+    );
+    let file = tap.open(&path);
+
+    let mut next = FLV_FIRST_TAG as usize;
+    let mut cache: Vec<u8> = Vec::new();
+    for (keyframes, saved) in [(1, 1), (4, 1), (5, 5), (8, 5), (9, 9)] {
+        next = feed_flv_tag_range(&file, &flv.bytes, next, before_keyframe(&flv, keyframes));
+        drain(&mut indexer, &mut rx);
+        assert_eq!(saved_keyframes(&path), saved, "交出 {keyframes} 个关键帧后");
+        let now = std::fs::read(index_path(&path)).unwrap();
+        assert!(now.starts_with(&cache), "录制中只追加");
+        cache = now;
+    }
+    assert!(is_live(&path));
+
+    feed_flv_tag_range(&file, &flv.bytes, next, flv.bytes.len());
+    drain(&mut indexer, &mut rx);
+    assert_eq!(saved_keyframes(&path), 9, "剩下 3 个没攒够");
+    file.closed(flv.bytes.len() as u64);
+    drain(&mut indexer, &mut rx);
+    assert!(!is_live(&path));
+    assert_same_as_disk_scan(&path, &flv.bytes);
+}
+
+/// 没攒够关键帧时，距上次落盘满间隔就存。
+#[test]
+fn streaming_saves_wait_for_the_interval() {
+    let dir = tempfile::tempdir().unwrap();
+    let flv = build_flv(0, 300, 25, None);
+    let path = dir.path().join("timed.flv");
+    std::fs::write(&path, &flv.bytes).unwrap();
+    let (tap, mut rx) = IndexTap::channel(1 << 16, super::super::classify_flv_tag);
+    let interval = Duration::from_millis(200);
+    let mut indexer =
+        Indexer::with_policy(FlushPolicy::default().interval(interval).max_pending(1000));
+    let file = tap.open(&path);
+
+    let next = feed_flv_tag_range(
+        &file,
+        &flv.bytes,
+        FLV_FIRST_TAG as usize,
+        before_keyframe(&flv, 1),
+    );
+    drain(&mut indexer, &mut rx);
+    assert_eq!(saved_keyframes(&path), 1);
+    let started = Instant::now();
+    feed_flv_tag_range(&file, &flv.bytes, next, before_keyframe(&flv, 3));
+    drain(&mut indexer, &mut rx);
+    if started.elapsed() < interval {
+        assert_eq!(saved_keyframes(&path), 1, "没到间隔");
+    }
+    std::thread::sleep(interval);
+    indexer.scan_dirty();
+    assert_eq!(saved_keyframes(&path), 3);
 }
 
 /// 队列满时写入端丢事件并标记；索引任务保存已建好的部分，关段时扫盘从那里补齐。
