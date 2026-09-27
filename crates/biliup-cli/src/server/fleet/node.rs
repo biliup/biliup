@@ -801,6 +801,9 @@ async fn session(
                     }
                 }
                 Ok(Some(ControllerMessage::Welcome { .. })) => {}
+                Ok(Some(ControllerMessage::Ha(message))) => {
+                    debug!(kind = message.kind(), "HA frame while not a standby");
+                }
                 Ok(None) | Err(_) => {
                     let reason = connection.closed().await;
                     return closed_outcome(close_code(&reason), true);

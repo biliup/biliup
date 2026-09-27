@@ -459,6 +459,7 @@ impl Controller {
             rooms,
             templates,
             config,
+            ha: None,
         });
         if let Some(live) = self.live.lock().unwrap().get_mut(&node)
             && live.outbox.send(message).is_ok()
@@ -769,6 +770,14 @@ impl Controller {
                     self.record_event(id, event).await;
                 }
                 NodeMessage::Ack(ack) => self.ack(id, seq, ack).await,
+                NodeMessage::Ha(message) => {
+                    self.touch(id, seq);
+                    debug!(
+                        node = id,
+                        kind = message.kind(),
+                        "HA frame from a node that is not paired"
+                    );
+                }
                 NodeMessage::Leave => {
                     {
                         let _guard = self.dispatch.lock().await;

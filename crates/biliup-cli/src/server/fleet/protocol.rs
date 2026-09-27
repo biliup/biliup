@@ -4,6 +4,7 @@
 //! `u32 大端长度 + JSON`，单帧上限 [`MAX_FRAME`]。主版本号放在 ALPN 里（[`ALPN`]），
 //! 次版本号在 [`Hello::proto`] 里，只增字段不改语义，所以两端都忽略不认识的字段。
 
+use super::ha::wire::{HaAssignment, HaMessage};
 use super::model::{Account, DesiredRoom, DesiredTemplate};
 use crate::server::common::system_stats::{CpuInfo, DiskUsage, MemoryUsage, SystemStats};
 use serde::de::DeserializeOwned;
@@ -16,7 +17,8 @@ pub const ALPN: &[u8] = b"biliup/fleet/1";
 /// 协议次版本号。1：`Hello` 带账号、工具与已持有的房间，控制面下发 `DesiredState`，节点回 `Ack`。
 /// 2：`DesiredState` 带配置（[`DesiredConfig`]），`Ack` 带配置是否生效（[`ConfigAck`]）。
 /// 3：节点发 `Event`（录制出错、投稿失败，见 [`RoomEvent`]），`Heartbeat` 带 `min_free_space`。
-pub const PROTOCOL_MINOR: u32 = 3;
+/// 4：主副配对（[`super::ha`]）：给备机的 `DesiredState` 带 `ha`，主备之间互发 `Ha` 场次消息。
+pub const PROTOCOL_MINOR: u32 = 4;
 /// 能收 `DesiredState` 的最低次版本号。更旧的节点收到不认识的帧会卡住，控制面不给它们发。
 pub const DESIRED_STATE_SINCE: u32 = 1;
 /// 能收配置的最低次版本号。次版本 1 的节点照常收房间，配置不发给它。
@@ -24,6 +26,8 @@ pub const CONFIG_SINCE: u32 = 2;
 /// 会上报 `Event` 的最低次版本号。更旧的节点不发，控制面对它们只有离线、磁盘、配置与落地这几类告警。
 /// `Event` 帧自 F1 就在协议里，旧控制面收到只记一行 debug，所以新节点连旧控制面照发无妨。
 pub const EVENTS_SINCE: u32 = 3;
+/// 能当备机、收发 `Ha` 帧的最低次版本号。更旧的节点收到 `ha` 帧解不了会断开重连，控制面不把它们指定为备机。
+pub const HA_SINCE: u32 = 4;
 /// [`Event::kind`]：一次拉流以错误结束（不含用户停止、迁移等取消）
 pub const EVENT_RECORDING_ERROR: &str = "recording_error";
 /// [`Event::kind`]：一场投稿流程失败（登录、上传、提交或之后的后处理）
@@ -82,6 +86,8 @@ pub enum NodeMessage {
     Leave,
     /// 对 `DesiredState` 的应答：按哪一版对的账、现在持有哪些房间
     Ack(Ack),
+    /// 备机发给主机的场次消息（自次版本 4 起，只在收到过带 `ha` 的期望状态之后）
+    Ha(HaMessage),
 }
 
 /// 控制面 → 节点
@@ -95,6 +101,8 @@ pub enum ControllerMessage {
     /// 这台节点应该录的全部房间与它们用到的模板（整份快照，不是增量）。
     /// 节点只动自己按控制面建的那些本地行，本机自己加的房间与模板不受影响。
     DesiredState(DesiredState),
+    /// 主机发给备机的场次消息（自次版本 4 起，只发给备机）
+    Ha(HaMessage),
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -107,6 +115,9 @@ pub struct DesiredState {
     /// 没有这个字段表示控制面不管配置，节点的配置照旧在本机改。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config: Option<DesiredConfig>,
+    /// 这台节点是主机的备机时才有（自次版本 4 起）：模式、参数与镜像过来的房间
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ha: Option<HaAssignment>,
 }
 
 /// 下发给一台节点的配置：Fleet 全局 ⊕ 这台节点的覆盖，只含白名单键（D11），
@@ -592,6 +603,123 @@ mod tests {
         }))
         .unwrap();
         assert!(out.get("min_free_space").is_none());
+    }
+
+    /// 次版本 3 与 4 混跑：3 的节点解期望状态时忽略 `ha`，不带 `ha` 的期望状态与以前逐字相同；
+    /// `ha` 帧两个方向都按 `type` + `kind` 标记，3 的一端解不了（所以只在两端都 ≥ 4 时发）。
+    #[test]
+    fn ha_frames_and_assignment_are_compatible_both_ways() {
+        use crate::server::fleet::ha::params::{HaMode, HaParams};
+        use crate::server::fleet::ha::wire::{ReportedSession, ReportedState, SkipReason};
+
+        let plain = serde_json::to_value(DesiredState {
+            version: 3,
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            plain,
+            serde_json::json!({ "version": 3, "rooms": [], "templates": [] })
+        );
+        let with = serde_json::to_value(DesiredState {
+            version: 4,
+            ha: Some(HaAssignment {
+                mode: HaMode::Takeover,
+                params: HaParams::default(),
+                primary: 1,
+                rooms: vec![7, 8],
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(with["ha"]["mode"], 2);
+        assert_eq!(with["ha"]["rooms"], serde_json::json!([7, 8]));
+        assert_eq!(with["ha"]["params"]["offline_grace"], 60);
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct MinorThree {
+            version: u64,
+            rooms: Vec<DesiredRoom>,
+            templates: Vec<DesiredTemplate>,
+            #[serde(default)]
+            config: Option<DesiredConfig>,
+        }
+        assert_eq!(
+            serde_json::from_value::<MinorThree>(with.clone())
+                .unwrap()
+                .version,
+            4
+        );
+        let back: DesiredState = serde_json::from_value(with).unwrap();
+        assert_eq!(back.ha.unwrap().primary, 1);
+        // 参数缺了用默认值（以后加参数时旧控制面发来的也能解）
+        let sparse: HaAssignment =
+            serde_json::from_value(serde_json::json!({ "mode": 1, "primary": 1 })).unwrap();
+        assert_eq!(sparse.params, HaParams::default());
+        assert!(sparse.rooms.is_empty());
+
+        let uploaded = NodeMessage::Ha(HaMessage::Uploaded {
+            key: "7:1000".into(),
+            room: 7,
+            bvid: "BV1xx".into(),
+            from: 1000,
+            to: Some(5000),
+        });
+        let json = serde_json::to_value(&uploaded).unwrap();
+        assert_eq!(json["type"], "ha");
+        assert_eq!(json["kind"], "uploaded");
+        assert_eq!(json["bvid"], "BV1xx");
+        let NodeMessage::Ha(back) = serde_json::from_value(json).unwrap() else {
+            panic!()
+        };
+        assert_eq!(back.key(), Some("7:1000"));
+
+        let report = ControllerMessage::Ha(HaMessage::StandbyReport {
+            sessions: vec![ReportedSession {
+                key: "standby:7:2000".into(),
+                room: 7,
+                started_at: 2000,
+                ended_at: None,
+                state: ReportedState::Recording,
+                takeover_of: None,
+                bvid: None,
+            }],
+        });
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["sessions"][0]["state"], "recording");
+        assert!(json["sessions"][0].get("bvid").is_none());
+        let ControllerMessage::Ha(HaMessage::StandbyReport { sessions }) =
+            serde_json::from_value(json).unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(sessions[0].key, "standby:7:2000");
+
+        let skipped: NodeMessage = serde_json::from_value(serde_json::json!({
+            "type": "ha", "kind": "upload_skipped", "key": "7:1", "room": 7, "reason": "filtered",
+        }))
+        .unwrap();
+        assert!(matches!(
+            skipped,
+            NodeMessage::Ha(HaMessage::UploadSkipped {
+                reason: SkipReason::Filtered,
+                detail: None,
+                ..
+            })
+        ));
+        // 次版本 3 的一端不认识 `ha`
+        #[derive(Deserialize)]
+        #[serde(tag = "type", rename_all = "snake_case")]
+        #[allow(dead_code)]
+        enum MinorThreeNode {
+            Hello(Hello),
+            Heartbeat(Heartbeat),
+            Event(Event),
+            Leave,
+            Ack(Ack),
+        }
+        let frame = serde_json::to_vec(&uploaded).unwrap();
+        assert!(decode::<MinorThreeNode>(&frame).is_err());
     }
 
     #[test]
