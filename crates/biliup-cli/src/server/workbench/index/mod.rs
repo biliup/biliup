@@ -4,9 +4,9 @@
 //! 旧版本放在分段旁边的 `<分段>.idx` 不再读取，用到时重新扫描。
 //!
 //! 进程内写盘的下载器（stream-gears、mesio）录制时由 [`live`] 边写边建，录制热路径上只有一次
-//! 非阻塞发送，缓存每隔几秒落一次盘（[`live::FlushPolicy`]）；外部进程下载器、旧文件、
-//! 异常退出后不完整的缓存，在关段 / 启动收尾时只读地扫描分段文件的 tag 头 / TS 包头 /
-//! fMP4 box 头，从缓存扫到的偏移续扫。两条路径用同一套扫描器。mesio 写在 FLV 文件头的
+//! 非阻塞发送，缓存每隔几秒往文件末尾追加一次（[`live::FlushPolicy`]，格式见 [`cache`]）；
+//! 外部进程下载器、旧文件、异常退出后不完整的缓存，在关段 / 启动收尾时只读地扫描分段文件的
+//! tag 头 / TS 包头 / fMP4 box 头，从缓存扫到的偏移续扫。两条路径用同一套扫描器。mesio 写在 FLV 文件头的
 //! `onMetaData.keyframes` 会跳过间隔不到 1.9 s 的关键帧，所以不用它，一律逐 tag 扫。
 //!
 //! 段内时间 `t_ms` 以段内第一个关键帧为 0（[`KeyframeIndex::base_ts`] 记着它的容器原始时间戳），
@@ -14,6 +14,7 @@
 //! 改写文件：读取方按 `原始时间戳 - base_ts` 换算即可。FLV 的原始时间戳是 tag 时间戳（DTS），
 //! TS 是 PES 的 PTS，fMP4 是 `tfdt` 起算的解码时间。
 
+mod cache;
 mod flv;
 mod fmp4;
 pub mod live;
@@ -25,22 +26,16 @@ use super::segment_path;
 use bytes::Bytes;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
-use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::debug;
 
-/// 索引缓存的目录，相对工作目录（与 `data/data.sqlite3` 放在一起）。录制中的缓存每隔几秒就要重写一次，
+/// 索引缓存的目录，相对工作目录（与 `data/data.sqlite3` 放在一起）。录制中的缓存每隔几秒就要追加一次，
 /// 放在录制文件夹里会让文件管理器不停刷新那个文件夹。
 pub const INDEX_DIR: &str = "data/index";
 /// 索引缓存文件的扩展名。
 pub const INDEX_EXTENSION: &str = "idx";
 
-const MAGIC: &[u8; 8] = b"BLUPKIDX";
-/// 缓存格式版本。读到别的版本一律当作没有缓存、重新扫描。
-pub const FORMAT_VERSION: u16 = 2;
-const FIXED_HEADER_SIZE: usize = 80;
-const ENTRY_SIZE: usize = 12;
 /// 扫描时读缓冲的大小。
 const READ_BUFFER: usize = 256 * 1024;
 
@@ -223,89 +218,6 @@ impl KeyframeIndex {
             self.header_final = true;
         }
     }
-
-    fn encode(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(FIXED_HEADER_SIZE + self.keyframes.len() * ENTRY_SIZE);
-        out.extend_from_slice(MAGIC);
-        out.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
-        out.extend_from_slice(&(FIXED_HEADER_SIZE as u16).to_le_bytes());
-        out.push(self.container.code());
-        out.push(0);
-        let flags = u8::from(self.complete)
-            | (u8::from(self.base_ts.is_some()) << 1)
-            | (u8::from(self.header_final) << 2);
-        out.push(flags);
-        out.push(0);
-        out.extend_from_slice(&self.header_len.to_le_bytes());
-        out.extend_from_slice(&self.timescale.to_le_bytes());
-        out.extend_from_slice(&self.duration_ms.to_le_bytes());
-        out.extend_from_slice(&self.base_ts.unwrap_or(0).to_le_bytes());
-        out.extend_from_slice(&self.scanned_upto.to_le_bytes());
-        out.extend_from_slice(&self.source_len.to_le_bytes());
-        out.extend_from_slice(&self.track.id.to_le_bytes());
-        out.extend_from_slice(&self.track.aux.to_le_bytes());
-        out.extend_from_slice(&self.track.default_flags.to_le_bytes());
-        out.push(self.track.codec);
-        out.extend_from_slice(&[0; 7]);
-        out.extend_from_slice(&(self.keyframes.len() as u32).to_le_bytes());
-        debug_assert_eq!(out.len(), FIXED_HEADER_SIZE);
-        for k in &self.keyframes {
-            out.extend_from_slice(&k.t_ms.to_le_bytes());
-            out.extend_from_slice(&k.offset.to_le_bytes());
-        }
-        out
-    }
-
-    fn decode(bytes: &[u8]) -> io::Result<Self> {
-        let bad = |what: &str| io::Error::new(io::ErrorKind::InvalidData, what.to_string());
-        if bytes.len() < FIXED_HEADER_SIZE || &bytes[..8] != MAGIC {
-            return Err(bad("not a keyframe index"));
-        }
-        let u16_at = |i: usize| u16::from_le_bytes(bytes[i..i + 2].try_into().unwrap());
-        let u32_at = |i: usize| u32::from_le_bytes(bytes[i..i + 4].try_into().unwrap());
-        let u64_at = |i: usize| u64::from_le_bytes(bytes[i..i + 8].try_into().unwrap());
-        if u16_at(8) != FORMAT_VERSION {
-            return Err(bad("unsupported keyframe index version"));
-        }
-        let header_size = u16_at(10) as usize;
-        if header_size < FIXED_HEADER_SIZE || header_size > bytes.len() {
-            return Err(bad("bad keyframe index header size"));
-        }
-        let container = Container::from_code(bytes[12]).ok_or_else(|| bad("bad container"))?;
-        let flags = bytes[14];
-        let count = u32_at(76) as usize;
-        let entries = &bytes[header_size..];
-        if entries.len() != count * ENTRY_SIZE {
-            return Err(bad("keyframe index entry count mismatch"));
-        }
-        let keyframes = entries
-            .as_chunks::<ENTRY_SIZE>()
-            .0
-            .iter()
-            .map(|e| Keyframe {
-                t_ms: u32::from_le_bytes(e[..4].try_into().unwrap()),
-                offset: u64::from_le_bytes(e[4..].try_into().unwrap()),
-            })
-            .collect();
-        Ok(Self {
-            container,
-            complete: flags & 1 != 0,
-            base_ts: (flags & 2 != 0).then(|| u64_at(32) as i64),
-            header_final: flags & 4 != 0,
-            header_len: u64_at(16),
-            timescale: u32_at(24),
-            duration_ms: u32_at(28),
-            scanned_upto: u64_at(40),
-            source_len: u64_at(48),
-            track: Track {
-                id: u32_at(56),
-                aux: u32_at(60),
-                default_flags: u32_at(64),
-                codec: bytes[68],
-            },
-            keyframes,
-        })
-    }
 }
 
 /// 分段对应的索引缓存路径：[`INDEX_DIR`] 下，文件名取分段路径（库里的写法，见 [`segment_path`]）
@@ -326,10 +238,10 @@ fn index_dir() -> PathBuf {
     tests::index_dir()
 }
 
-/// 读缓存；没有、读不了或版本不对都返回 `None`。
+/// 读缓存（回放到最后一个提交点，见 [`cache`]）；没有、读不了或版本不对都返回 `None`。
 pub fn load(segment: &Path) -> Option<KeyframeIndex> {
     let bytes = fs::read(index_path(segment)).ok()?;
-    KeyframeIndex::decode(&bytes).ok()
+    cache::decode(&bytes).ok().map(|(index, _)| index)
 }
 
 /// 分段改了名或搬了家：缓存换成新路径对应的文件。没有缓存时返回 `Ok(false)`。
@@ -345,36 +257,7 @@ pub fn rename(from: &Path, to: &Path) -> io::Result<bool> {
     Ok(true)
 }
 
-/// 同一分段可能同时被录制收尾和 DVR 请求续扫：各写各的临时文件，rename 后到者覆盖，两份都是完整的索引。
-fn tmp_path(path: &Path) -> PathBuf {
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let mut name = path.as_os_str().to_os_string();
-    name.push(format!(
-        ".{}-{}.tmp",
-        std::process::id(),
-        SEQ.fetch_add(1, Ordering::Relaxed)
-    ));
-    PathBuf::from(name)
-}
-
-fn save(segment: &Path, index: &KeyframeIndex) -> io::Result<()> {
-    let path = index_path(segment);
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir)?;
-    }
-    let tmp = tmp_path(&path);
-    let written = File::create(&tmp).and_then(|mut file| {
-        file.write_all(&index.encode())?;
-        file.flush()
-    });
-    if let Err(e) = written.and_then(|()| fs::rename(&tmp, &path)) {
-        let _ = fs::remove_file(&tmp);
-        return Err(e);
-    }
-    Ok(())
-}
-
-/// 取分段的关键帧索引：有可用缓存就续扫，没有就从头建，扫完写回缓存。
+/// 取分段的关键帧索引：有可用缓存就续扫，没有就从头建，扫完把新内容追加进缓存。
 ///
 /// `finished` = 分段已经写完（关段之后）。
 /// 缓存与文件对不上（文件被截断、被同名覆盖）时按文件长度截断缓存或整个重建。
@@ -408,7 +291,7 @@ pub fn refresh(segment: &Path, finished: bool) -> io::Result<KeyframeIndex> {
     }
     index.complete = finished;
     index.source_len = file_len;
-    save(segment, &index)?;
+    cache::store(&index_path(segment), &index)?;
     Ok(index)
 }
 

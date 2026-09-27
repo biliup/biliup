@@ -1,6 +1,7 @@
 use super::*;
 use std::ffi::OsString;
 use std::fs::OpenOptions;
+use std::io::Write;
 use std::sync::LazyLock;
 
 /// 测试进程的工作目录是 crate 目录：缓存放进本进程独占的临时目录，不往源码树里写。
@@ -391,27 +392,113 @@ fn flv_timestamps_never_go_backwards_in_the_index() {
 
 // ---------- 缓存格式与查询 ----------
 
+fn cache_bytes(segment: &Path) -> Vec<u8> {
+    fs::read(index_path(segment)).unwrap()
+}
+
+/// 录制到一半的分段先建一次缓存（前 2 个关键帧），再写完整段续扫一次：返回续扫前后的缓存字节与两次的结果。
+fn grown_cache(dir: &Path) -> (PathBuf, Vec<u8>, KeyframeIndex, Vec<u8>, KeyframeIndex) {
+    let flv = build_flv(0, 100, 25, None);
+    let cut = flv.keyframes[2].1 as usize + 100;
+    let path = write(dir, "a.flv", &flv.bytes[..cut]);
+    let first = refresh(&path, false).unwrap();
+    let before = cache_bytes(&path);
+    fs::write(&path, &flv.bytes).unwrap();
+    let second = refresh(&path, false).unwrap();
+    let after = cache_bytes(&path);
+    (path, before, first, after, second)
+}
+
 #[test]
-fn cache_round_trips_and_other_versions_are_ignored() {
+fn cache_is_an_append_only_record_stream() {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, before, first, after, second) = grown_cache(dir.path());
+    assert_eq!(&before[..8], b"BLUPKIDX");
+    assert_eq!(first.keyframes.len(), 2);
+    assert_eq!(second.keyframes.len(), 4);
+    assert!(after.starts_with(&before), "续扫只在末尾追加");
+    assert_eq!(
+        after.len() - before.len(),
+        2 * cache::KEYFRAME_RECORD_SIZE + cache::PROGRESS_RECORD_SIZE,
+        "两个新关键帧加一条进度记录"
+    );
+    assert_eq!(load(&path).unwrap(), second);
+
+    // 分段写完：只追加一条进度记录；再查不写
+    let finished = refresh(&path, true).unwrap();
+    assert!(finished.complete);
+    let done = cache_bytes(&path);
+    assert!(done.starts_with(&after));
+    assert_eq!(done.len() - after.len(), cache::PROGRESS_RECORD_SIZE);
+    assert_eq!(refresh(&path, true).unwrap(), finished);
+    assert_eq!(cache_bytes(&path), done);
+}
+
+/// 崩溃时一次落盘只写了一半（或文件系统在尾部补了零）：回放停在上一个提交点，续扫截掉尾巴再接着追加。
+#[test]
+fn a_torn_tail_is_dropped_and_repaired() {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, before, first, after, second) = grown_cache(dir.path());
+    let delta = &after[before.len()..];
+    let tails: Vec<Vec<u8>> = vec![
+        delta[..1].to_vec(),
+        delta[..cache::KEYFRAME_RECORD_SIZE].to_vec(),
+        delta[..delta.len() - cache::PROGRESS_RECORD_SIZE].to_vec(),
+        delta[..delta.len() - 1].to_vec(),
+        vec![0; 4096],
+    ];
+    for (i, tail) in tails.iter().enumerate() {
+        let torn = [before.as_slice(), tail].concat();
+        fs::write(index_path(&path), &torn).unwrap();
+        assert_eq!(load(&path).as_ref(), Some(&first), "尾巴 {i}");
+        assert_eq!(cache::decode(&torn).unwrap().1, before.len(), "尾巴 {i}");
+
+        assert_eq!(refresh(&path, false).unwrap(), second, "尾巴 {i}");
+        let repaired = cache_bytes(&path);
+        assert_eq!(repaired, after, "尾巴 {i}：截掉后追加的与没崩溃时一样");
+        assert_eq!(cache::decode(&repaired).unwrap().1, repaired.len());
+    }
+}
+
+/// 两次续扫先后写同一个文件：后写的那份算数；同一段续扫被追加两遍也不会重复。
+#[test]
+fn concurrent_scans_leave_the_last_written_view() {
+    let dir = tempfile::tempdir().unwrap();
+    let (path, before, first, after, second) = grown_cache(dir.path());
+    let delta = &after[before.len()..];
+    let doubled = [before.as_slice(), delta, delta].concat();
+    assert_eq!(cache::decode(&doubled).unwrap().0, second);
+
+    // 先写全的，再写只扫到一半的那份（例如文件被截断后的续扫）：读到后写的
+    cache::store(&index_path(&path), &first).unwrap();
+    let shorter = cache_bytes(&path);
+    assert!(shorter.starts_with(&after), "接得上就只追加");
+    assert_eq!(load(&path).unwrap(), first);
+    assert_eq!(refresh(&path, true).unwrap().keyframes, second.keyframes);
+    assert!(cache_bytes(&path).starts_with(&shorter));
+}
+
+#[test]
+fn other_versions_and_garbage_are_rebuilt() {
     let dir = tempfile::tempdir().unwrap();
     let flv = build_flv(0, 100, 25, None);
     let path = write(dir.path(), "a.flv", &flv.bytes);
     let index = refresh(&path, true).unwrap();
-    let bytes = index.encode();
-    assert_eq!(&bytes[..8], MAGIC);
-    assert_eq!(
-        bytes.len(),
-        FIXED_HEADER_SIZE + index.keyframes.len() * ENTRY_SIZE
-    );
-    assert_eq!(KeyframeIndex::decode(&bytes).unwrap(), index);
+    let mut bytes = cache_bytes(&path);
+    assert_eq!(cache::decode(&bytes).unwrap(), (index.clone(), bytes.len()));
 
-    let mut other = bytes.clone();
-    other[8..10].copy_from_slice(&(FORMAT_VERSION + 1).to_le_bytes());
-    fs::write(index_path(&path), &other).unwrap();
-    assert!(load(&path).is_none());
-    // 读不了的缓存直接重建
-    assert_eq!(refresh(&path, true).unwrap(), index);
-    assert!(KeyframeIndex::decode(&bytes[..bytes.len() - 1]).is_err());
+    bytes[8..10].copy_from_slice(&(cache::FORMAT_VERSION - 1).to_le_bytes());
+    for broken in [
+        bytes.clone(),
+        bytes[..cache::HEADER_SIZE].to_vec(),
+        b"garbage".to_vec(),
+    ] {
+        fs::write(index_path(&path), &broken).unwrap();
+        assert!(load(&path).is_none());
+        // 读不了的缓存整份重写
+        assert_eq!(refresh(&path, true).unwrap(), index);
+        assert_eq!(load(&path).unwrap(), index);
+    }
 }
 
 #[test]

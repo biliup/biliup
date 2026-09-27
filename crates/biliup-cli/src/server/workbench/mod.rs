@@ -78,16 +78,18 @@ fn readable(segment: &SegmentRow) -> bool {
     ) && Container::from_path(Path::new(&segment.path)).is_some()
 }
 
-/// 录制中、正由索引任务边写边建的分段直接读它落盘的缓存（最多落后几秒），不扫盘；
+/// 录制中、正由索引任务边写边建的分段直接读它落盘的缓存（最多落后几秒），不扫盘；还没落过盘
+/// （第一个关键帧之前）就只读地扫一遍，不写缓存：录制中缓存文件只有索引任务一个写者。
 /// 其余的按需续扫。
 pub(crate) async fn segment_index(segment: &SegmentRow) -> io::Result<index::KeyframeIndex> {
     let path = PathBuf::from(&segment.path);
     let finished = segment.state != SegmentState::Recording;
     tokio::task::spawn_blocking(move || {
-        if index::live::is_live(&path)
-            && let Some(cached) = index::load(&path)
-        {
-            return Ok(on_disk(cached, &path));
+        if index::live::is_live(&path) {
+            return match index::load(&path) {
+                Some(cached) => Ok(on_disk(cached, &path)),
+                None => index::rescan(&path, None),
+            };
         }
         index::refresh(&path, finished)
     })

@@ -235,10 +235,14 @@ fn streaming_saves_wait_for_enough_new_keyframes() {
     let file = tap.open(&path);
 
     let mut next = FLV_FIRST_TAG as usize;
+    let mut cache: Vec<u8> = Vec::new();
     for (keyframes, saved) in [(1, 1), (4, 1), (5, 5), (8, 5), (9, 9)] {
         next = feed_flv_tag_range(&file, &flv.bytes, next, before_keyframe(&flv, keyframes));
         drain(&mut indexer, &mut rx);
         assert_eq!(saved_keyframes(&path), saved, "交出 {keyframes} 个关键帧后");
+        let now = std::fs::read(index_path(&path)).unwrap();
+        assert!(now.starts_with(&cache), "录制中只追加");
+        cache = now;
     }
     assert!(is_live(&path));
 

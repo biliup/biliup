@@ -12,7 +12,8 @@
 //! 写入端丢了事件（[`TapFile::lost`]）、偏移对不上或扫描出错时，保存已建好的部分、不再跟踪这个
 //! 文件，分段关闭时由 [`super::refresh`] 从那里扫盘补齐。外部进程下载器没有旁路，同样在关段时扫。
 
-use super::{Container, KeyframeIndex, Source, flv, save};
+use super::cache::Appender;
+use super::{Container, KeyframeIndex, Source, flv, index_path};
 use crate::server::workbench::segment_path;
 use biliup::downloader::index_tap::{IndexEvent, IndexTap, TapFile};
 use bytes::Bytes;
@@ -240,6 +241,8 @@ struct LiveFile {
     file: Arc<TapFile>,
     index: KeyframeIndex,
     window: Window,
+    /// 缓存文件，第一次落盘时建好后一直开着、只追加；写失败就丢掉，下次落盘整份重写。
+    cache: Option<Appender>,
     last_save: Option<Instant>,
     saved_upto: u64,
     saved_keyframes: usize,
@@ -260,6 +263,7 @@ impl LiveFile {
             last_save: None,
             saved_upto: 0,
             saved_keyframes: 0,
+            cache: None,
         }
     }
 
@@ -280,8 +284,14 @@ impl LiveFile {
     fn save(&mut self) {
         self.index.complete = false;
         self.index.source_len = self.window.end;
-        if let Err(e) = save(self.file.path(), &self.index) {
+        let saved = match &mut self.cache {
+            Some(cache) => cache.append(&self.index),
+            None => Appender::create(&index_path(self.file.path()), &self.index)
+                .map(|cache| self.cache = Some(cache)),
+        };
+        if let Err(e) = saved {
             debug!(path = %self.path().display(), error = %e, "保存流式关键帧索引失败");
+            self.cache = None;
         }
         self.last_save = Some(Instant::now());
         self.saved_upto = self.index.scanned_upto;
