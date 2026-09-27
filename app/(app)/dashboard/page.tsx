@@ -27,6 +27,7 @@ import Global from '../../ui/plugins/global'
 import Developer from '../../ui/plugins/developer'
 import LocalSecretsSheet, { ManagedConfigBanner } from './LocalSecretsSheet'
 import AutoClip, { normalizeAutoClip } from '../../ui/plugins/auto-clip'
+import { autoClipError } from '../../lib/auto-clip'
 
 const TAB_GLOBAL = '1'
 const TAB_PLATFORM = '2'
@@ -202,7 +203,7 @@ const { data: entity, error, isLoading, mutate } = useSWR('/v1/configuration', f
               // error handling
               Notification.error({
                 title: '保存失败',
-                content: <Typography style={{ maxWidth: 450 }}>{e.message}</Typography>,
+                content: <Typography style={{ maxWidth: 450 }}>{autoClipError(e)}</Typography>,
                 // theme: 'light',
                 // duration: 0,
                 style: { width: 'min-content' },

@@ -198,7 +198,7 @@ export function effectiveState(s: Suggestion, nowMs: number): SuggestionState {
   return s.state === 'pending' && s.expires_at !== null && s.expires_at <= nowMs ? 'expired' : s.state
 }
 
-/** 自动切片接口的错误是 `{"message": …}`，其余接口是纯文本 */
+/** 后端的错误有的是 `{"message": …}`（`ApiError`），有的是纯文本：取出给人看的那句 */
 export function autoClipError(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e)
   try {
