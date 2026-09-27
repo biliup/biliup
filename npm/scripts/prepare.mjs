@@ -204,7 +204,20 @@ try {
   fs.rmSync(work, { recursive: true, force: true })
 }
 
-// 发布顺序：先平台子包，最后根包
+// 根包按 optionalDependencies 里钉死的版本装子包，任何一个对不上，用户就装不到二进制或装到别的版本
+const rootOutPkg = readJson(path.join(outDir, 'biliup', 'package.json'))
+const mismatched = [
+  ...(rootOutPkg.version === version ? [] : [`${rootOutPkg.name}@${rootOutPkg.version}`]),
+  ...Object.entries(rootOutPkg.optionalDependencies)
+    .filter(([, v]) => v !== version)
+    .map(([name, v]) => `${rootOutPkg.name} optionalDependencies ${name}@${v}`),
+  ...TARGETS.map((t) => readJson(path.join(outDir, t.dir, 'package.json')))
+    .filter((pj) => pj.version !== version)
+    .map((pj) => `${pj.name}@${pj.version}`),
+]
+if (mismatched.length > 0) die(`以下版本与 ${version} 不一致：${mismatched.join(', ')}`)
+
+// 发布顺序：先平台子包，最后根包 @biliup/cli
 const order = [...TARGETS.map((t) => t.dir), 'biliup']
 fs.writeFileSync(path.join(outDir, 'publish-order.txt'), `${order.join('\n')}\n`)
 console.table(summary)

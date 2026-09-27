@@ -1,7 +1,7 @@
 {
   "name": "@biliup/linux-arm-gnueabi",
   "version": "0.0.0",
-  "description": "biliup 的 Linux ARMv6+ glibc（arm-unknown-linux-gnueabi）二进制，由 biliup 包按平台自动安装",
+  "description": "biliup 的 Linux ARMv6+ glibc（arm-unknown-linux-gnueabi）二进制，由 @biliup/cli 按平台自动安装",
   "homepage": "https://github.com/biliup/biliup",
   "repository": {
     "type": "git",

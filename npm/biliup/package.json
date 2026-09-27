@@ -1,7 +1,7 @@
 {
-  "name": "biliup",
+  "name": "@biliup/cli",
   "version": "0.0.0",
-  "description": "biliup 直播录制与投稿工具的原生二进制，npx biliup server 直接运行",
+  "description": "biliup 直播录制与投稿工具的原生二进制，npx @biliup/cli server 直接运行",
   "keywords": [
     "bilibili",
     "live",

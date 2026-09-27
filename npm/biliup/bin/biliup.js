@@ -80,12 +80,12 @@ function resolveBinary() {
   if (!bin) {
     fail([
       `biliup: 没有找到当前平台（${key}）的二进制子包 ${candidates[0]}@${pkg.version}。`,
-      '它作为 optionalDependencies 随 biliup 一起安装，常见原因：',
+      `它作为 optionalDependencies 随 ${pkg.name} 一起安装，常见原因：`,
       '  - 安装时用了 --omit=optional / --no-optional / --ignore-optional（yarn 同名参数）',
       '    或 npm config 里设了 omit=optional；',
       '  - package-lock.json / node_modules 是在别的平台上生成后拷过来的；',
       '  - 安装时访问不到该子包（镜像源尚未同步等）。',
-      '重新安装：删除 node_modules 与 lock 文件后执行 `npm install biliup --include=optional`，',
+      `重新安装：删除 node_modules 与 lock 文件后执行 \`npm install ${pkg.name} --include=optional\`，`,
       `或直接安装子包：\`npm install ${candidates[0]}@${pkg.version}\`。`,
     ])
   }
