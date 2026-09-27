@@ -3,16 +3,16 @@
 //! - `POST /v1/auto-clip/test`（`config.edit`）：用表单里当前的值（未保存也能测）测 chat、
 //!   看图与转写，结果存下来供缩图「自动」使用。表单里的 key 是掩码时换成已保存的 key，规则同保存。
 //! - `GET /v1/auto-clip/status`（`file.view`）：是否启用、模型名、能否看图、上限，不含 key 和地址。
-//! - `GET /v1/sessions/{id}/auto-clip`（`file.view`）：这一场最近的任务与用量预估。
-//! - `POST /v1/sessions/{id}/auto-clip`（`clip.edit`）：不带 `confirm` 只回预估；`confirm: true`
-//!   入队（超过每场转写上限、或转写已齐而 chat 用量超过每场上限时拒绝）。
+//! - `GET /v1/sessions/{id}/auto-clip`（`file.view`）：这一场最近的任务与它入队时存下的用量预估，不重算。
+//! - `POST /v1/sessions/{id}/auto-clip`（`clip.edit`）：不带 `confirm` 只回现算的预估；`confirm: true`
+//!   入队并把预估存进任务行（超过每场转写上限、或转写已齐而 chat 用量超过每场上限时拒绝）。
 //! - `DELETE /v1/sessions/{id}/auto-clip`（`clip.edit`）：取消排队或运行中的任务。
 
 use crate::server::api::access::Caller;
 use crate::server::auto_clip::analyze::ChatBasis;
 use crate::server::auto_clip::jobs::{self, Job, NewJob, Trigger};
 use crate::server::auto_clip::probe::{self, CheckStatus, ProbeReport, Targets};
-use crate::server::auto_clip::runner::{self, Basis, Estimate};
+use crate::server::auto_clip::runner::{self, Basis};
 use crate::server::auto_clip::settings::{
     self, API_KEY_ENV, AutoClipConfig, KeySource, Thumbnails, display_host,
 };
@@ -25,6 +25,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use std::sync::{Arc, RwLock};
 use tracing::{info, warn};
 
@@ -147,8 +148,8 @@ pub struct SessionAutoClip {
     pub enabled: bool,
     /// 这一场最近的一条任务
     pub job: Option<Job>,
-    /// 这次要送转写多少；没打开时为空
-    pub estimate: Option<Estimate>,
+    /// GET：最近那条任务入队时存下的预估（没有任务或任务早于这一列时为空）；POST：现算的
+    pub estimate: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -193,17 +194,14 @@ pub async fn get_session_auto_clip(
     Path(id): Path<i64>,
 ) -> Result<Json<SessionAutoClip>, Rejection> {
     require_session(&pool, id).await?;
-    let current = config.read().unwrap().auto_clip.clone();
-    let enabled = current.as_ref().is_some_and(|c| c.enabled);
+    let enabled = config
+        .read()
+        .unwrap()
+        .auto_clip
+        .as_ref()
+        .is_some_and(|c| c.enabled);
     let job = jobs::latest(&pool, id).await.map_err(internal)?;
-    let estimate = match current.filter(|c| c.enabled) {
-        Some(current) => Some(
-            runner::estimate(&pool, &current, id, true)
-                .await
-                .map_err(internal)?,
-        ),
-        None => None,
-    };
+    let estimate = job.as_ref().and_then(|job| job.estimate.clone());
     Ok(Json(SessionAutoClip {
         enabled,
         job,
@@ -269,7 +267,7 @@ pub async fn start_session_auto_clip(
             Json(SessionAutoClip {
                 enabled: true,
                 job: latest,
-                estimate: Some(estimate),
+                estimate: Some(json!(estimate)),
             }),
         ));
     }
@@ -293,6 +291,7 @@ pub async fn start_session_auto_clip(
         .reuse_transcript(request.reuse_transcript)
         .maybe_created_by(caller.subject.user_id)
         .created_at(now)
+        .estimate(json!(estimate))
         .build();
     let job = jobs::insert(&pool, &new_job)
         .await
@@ -310,8 +309,8 @@ pub async fn start_session_auto_clip(
         StatusCode::CREATED,
         Json(SessionAutoClip {
             enabled: true,
+            estimate: job.estimate.clone(),
             job: Some(job),
-            estimate: Some(estimate),
         }),
     ))
 }

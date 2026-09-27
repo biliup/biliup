@@ -79,6 +79,7 @@ export interface AutoClipEstimate {
 export interface SessionAutoClip {
   enabled: boolean
   job: AutoClipJob | null
+  /** GET：最近那条任务入队时存下的预估（后端不重算）；POST：现算的 */
   estimate: AutoClipEstimate | null
 }
 

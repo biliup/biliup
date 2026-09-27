@@ -112,8 +112,23 @@ async fn estimate_then_confirm_then_cancel() {
         StatusCode::OK,
     )
     .await;
-    assert_eq!(body["enabled"], true);
-    assert_eq!(body["job"], Value::Null);
+    assert_eq!(
+        body,
+        json!({"enabled": true, "job": null, "estimate": null}),
+        "GET 不算预估"
+    );
+
+    // 看的人不能生成
+    let response = call(&f.app, Some(&f.viewer), "POST", &uri(session), None).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    // 不带 confirm 只回预估
+    let body = json_of(
+        call(&f.app, Some(&f.operator), "POST", &uri(session), None).await,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(job_count(&f.pool).await, 0);
     let mut estimate = body["estimate"].clone();
     let chat = estimate.as_object_mut().unwrap().remove("chat").unwrap();
     assert_eq!(
@@ -140,19 +155,6 @@ async fn estimate_then_confirm_then_cancel() {
         (20 * 260 + 1_000..20 * 260 + 3_000).contains(&tokens),
         "{chat}"
     );
-
-    // 看的人不能生成
-    let response = call(&f.app, Some(&f.viewer), "POST", &uri(session), None).await;
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
-
-    // 不带 confirm 只回预估
-    let body = json_of(
-        call(&f.app, Some(&f.operator), "POST", &uri(session), None).await,
-        StatusCode::OK,
-    )
-    .await;
-    assert_eq!(body["estimate"]["asr_seconds"], 1200);
-    assert_eq!(job_count(&f.pool).await, 0);
 
     let response = call(
         &f.app,

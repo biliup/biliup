@@ -37,7 +37,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 use std::time::Duration;
 use tokio::sync::Notify;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// 分析数据的目录（相对工作目录），与切片产物的 `clips/` 并列。
 pub const AUTO_CLIP_DIR: &str = "auto_clip";
@@ -131,14 +131,20 @@ pub fn session_finished(
     }
     let pool = pool.clone();
     let merge_minutes = config.live_merge_minutes;
+    let auto_clip = config.auto_clip.clone().unwrap_or_default();
     tokio::spawn(async move {
         match schedule_after_live(&pool, merge_minutes, session_id, now_ms()).await {
-            Ok(Some(job)) => info!(
-                session = session_id,
-                job = job.id,
-                not_before = job.not_before,
-                "自动切片：下播后排上任务，过了断流合并窗口再跑"
-            ),
+            Ok(Some(job)) => {
+                info!(
+                    session = session_id,
+                    job = job.id,
+                    not_before = job.not_before,
+                    "自动切片：下播后排上任务，过了断流合并窗口再跑"
+                );
+                if let Err(error) = store_estimate(&pool, &auto_clip, &job).await {
+                    warn!(%error, session = session_id, "自动切片：预估用量失败");
+                }
+            }
             Ok(None) => {}
             Err(error) => warn!(%error, session = session_id, "自动切片：排任务失败"),
         }
@@ -155,6 +161,16 @@ pub async fn schedule_after_live(
 ) -> sqlx::Result<Option<Job>> {
     let wait_ms = (live_merge_minutes as i64 + 1).saturating_mul(60_000);
     jobs::schedule_auto(pool, session_id, now.saturating_add(wait_ms), now).await
+}
+
+/// 自动任务排上（或因又下播一次推迟）时算一次预估存进任务行，状态接口直接回这份。
+async fn store_estimate(
+    pool: &ConnectionPool,
+    config: &AutoClipConfig,
+    job: &Job,
+) -> sqlx::Result<()> {
+    let estimate = estimate(pool, config, job.session_id, job.reuse_transcript).await?;
+    jobs::set_estimate(pool, job.id, &json!(estimate)).await
 }
 
 /// 转写用的端点：没填地址或模型为 `None`。
@@ -245,6 +261,7 @@ pub async fn estimate_in(
     session_id: i64,
     reuse_transcript: bool,
 ) -> sqlx::Result<Estimate> {
+    debug!(session = session_id, "自动切片：计算用量预估");
     let files = SessionFiles::new(root, session_id);
     let silence: HashMap<i64, SegmentAudio> = files
         .load_silence()

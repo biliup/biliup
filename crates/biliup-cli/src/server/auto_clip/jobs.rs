@@ -125,6 +125,9 @@ pub struct Job {
     pub created_at: i64,
     pub started_at: Option<i64>,
     pub finished_at: Option<i64>,
+    /// 入队时算的用量预估；场次接口以 `estimate` 单独回，不随任务序列化
+    #[serde(skip)]
+    pub estimate: Option<Value>,
 }
 
 impl Job {
@@ -160,6 +163,7 @@ impl Job {
             created_at: row.try_get("created_at")?,
             started_at: row.try_get("started_at")?,
             finished_at: row.try_get("finished_at")?,
+            estimate: json("estimate")?,
         })
     }
 
@@ -170,7 +174,7 @@ impl Job {
 
 const COLUMNS: &str = "id, session_id, trigger, state, stage, progress_done, progress_total, \
      not_before, error, asr_planned_seconds, asr_seconds, tokens_in, tokens_out, images, models, \
-     warnings, reuse_transcript, created_by, created_at, started_at, finished_at";
+     warnings, reuse_transcript, created_by, created_at, started_at, finished_at, estimate";
 
 #[derive(bon::Builder, Debug, Clone)]
 pub struct NewJob {
@@ -181,6 +185,7 @@ pub struct NewJob {
     pub reuse_transcript: bool,
     pub created_by: Option<i64>,
     pub created_at: i64,
+    pub estimate: Option<Value>,
 }
 
 /// 任务排队与运行期间引用整场素材时用的名义。
@@ -203,8 +208,8 @@ async fn one<'q>(
 /// 插一条排队任务并引用整场素材；这一场已经有排队或运行中的任务时不插，返回 `None`。
 pub async fn insert(pool: &ConnectionPool, job: &NewJob) -> sqlx::Result<Option<Job>> {
     let sql = format!(
-        "INSERT INTO auto_clip_jobs (session_id, trigger, not_before, reuse_transcript, created_by, created_at)
-         VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING {COLUMNS}"
+        "INSERT INTO auto_clip_jobs (session_id, trigger, not_before, reuse_transcript, created_by, created_at, estimate)
+         VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING {COLUMNS}"
     );
     let mut tx = pool.begin().await?;
     let inserted = sqlx::query(&sql)
@@ -214,6 +219,7 @@ pub async fn insert(pool: &ConnectionPool, job: &NewJob) -> sqlx::Result<Option<
         .bind(job.reuse_transcript)
         .bind(job.created_by)
         .bind(job.created_at)
+        .bind(job.estimate.as_ref().map(Value::to_string))
         .fetch_optional(&mut *tx)
         .await?
         .as_ref()
@@ -362,6 +368,15 @@ pub async fn record_chat(
 pub async fn set_planned(pool: &ConnectionPool, id: i64, seconds: i64) -> sqlx::Result<()> {
     sqlx::query("UPDATE auto_clip_jobs SET asr_planned_seconds = ? WHERE id = ?")
         .bind(seconds)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn set_estimate(pool: &ConnectionPool, id: i64, estimate: &Value) -> sqlx::Result<()> {
+    sqlx::query("UPDATE auto_clip_jobs SET estimate = ? WHERE id = ?")
+        .bind(estimate.to_string())
         .bind(id)
         .execute(pool)
         .await?;

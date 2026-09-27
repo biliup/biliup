@@ -820,4 +820,12 @@ async fn without_auto_clip_nothing_is_scheduled_or_started() {
             .is_some_and(|job| job.trigger == Trigger::Auto && job.state == JobState::Queued)
     })
     .await;
+    wait_until("自动任务排上时存下预估", async || {
+        jobs::latest(&pool, other)
+            .await
+            .unwrap()
+            .and_then(|job| job.estimate)
+            .is_some_and(|estimate| estimate["recorded_seconds"] == 0)
+    })
+    .await;
 }
