@@ -1,6 +1,7 @@
 use crate::server::api::access::Caller;
 use crate::server::api::live_preview::direct_capability;
 use crate::server::api::redact;
+use crate::server::auto_clip::runner::streamer_opted_in;
 use crate::server::common::recording_policy::{self, Rejection};
 use crate::server::common::upload::{build_studio, submit_to_bilibili, upload};
 use crate::server::common::util::Recorder;
@@ -15,6 +16,7 @@ use crate::server::infrastructure::models::upload_streamer::{
     InsertUploadStreamer, UploadStreamer,
 };
 use crate::server::infrastructure::models::{Configuration, FileItem, StreamerInfo};
+use crate::server::infrastructure::permissions::Permission;
 use crate::server::infrastructure::policy::{Field, Subject};
 use crate::server::infrastructure::repositories::{
     delete_bilibili_cookie, get_all_streamer, register_bilibili_cookie,
@@ -61,11 +63,14 @@ pub async fn get_streamers_endpoint(
     caller: Caller,
     State(pool): State<ConnectionPool>,
     State(managers): State<Arc<DownloadManager>>,
+    State(config): State<Arc<RwLock<Config>>>,
 ) -> Result<Json<Vec<LiveStreamerResponse>>, Response> {
     let live_streamers = get_all_streamer(&pool).await.map_err(report_to_response)?;
     let mut results = Vec::new();
     let workers = managers.get_rooms().await;
     let show_hooks = caller.can_access(Field::StreamerHooks);
+    let show_after_live =
+        config.read().unwrap().auto_clip.is_some() && caller.can(Permission::ClipEdit);
     for mut x in live_streamers {
         let option = workers
             .clone()
@@ -103,6 +108,7 @@ pub async fn get_streamers_endpoint(
             None => (None, Default::default(), None),
         };
 
+        let auto_clip_after_live = show_after_live.then(|| streamer_opted_in(&x));
         if !show_hooks {
             strip_hooks(&mut x);
         }
@@ -122,6 +128,7 @@ pub async fn get_streamers_endpoint(
             session_id,
             marker_count: None,
             preview,
+            auto_clip_after_live,
         });
     }
     fill_marker_counts(&pool, &mut results).await;
@@ -937,10 +944,14 @@ mod recording_policy_status_tests {
             .unwrap();
 
         let managers = Arc::new(DownloadManager::new(1, 0, pool.clone()));
-        let Json(responses) =
-            get_streamers_endpoint(Caller::unrestricted(), State(pool), State(managers))
-                .await
-                .expect("接口应返回成功");
+        let Json(responses) = get_streamers_endpoint(
+            Caller::unrestricted(),
+            State(pool),
+            State(managers),
+            State(Default::default()),
+        )
+        .await
+        .expect("接口应返回成功");
 
         let status_of = |url: &str| {
             responses
@@ -972,10 +983,14 @@ mod recording_policy_status_tests {
             .unwrap();
 
         let managers = Arc::new(DownloadManager::new(1, 0, pool.clone()));
-        let Json(responses) =
-            get_streamers_endpoint(Caller::unrestricted(), State(pool), State(managers))
-                .await
-                .unwrap();
+        let Json(responses) = get_streamers_endpoint(
+            Caller::unrestricted(),
+            State(pool),
+            State(managers),
+            State(Default::default()),
+        )
+        .await
+        .unwrap();
 
         // 前端 app/(app)/streamers/page.tsx 就是对这个字符串做 switch
         let json: Value = serde_json::to_value(&responses[0]).unwrap();

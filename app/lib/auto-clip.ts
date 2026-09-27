@@ -79,6 +79,7 @@ export interface AutoClipEstimate {
 export interface SessionAutoClip {
   enabled: boolean
   job: AutoClipJob | null
+  /** GET：最近那条任务入队时存下的预估（后端不重算）；POST：现算的 */
   estimate: AutoClipEstimate | null
 }
 
@@ -114,6 +115,10 @@ export interface Suggestion {
 
 export const AUTO_CLIP_STATUS_KEY = '/v1/auto-clip/status'
 export const sessionAutoClipUrl = (sessionId: number) => `/v1/sessions/${sessionId}/auto-clip`
+/** 剪辑台一行的任务：SWR 按场次缓存，请求由 {@link loadJob} 攒成批量 */
+const sessionJobKey = (sessionId: number) => ['auto-clip-job', sessionId] as const
+/** 与后端 `api/auto_clip.rs::MAX_JOB_SESSIONS` 一致 */
+const MAX_JOB_SESSIONS = 100
 export const suggestionsUrl = (sessionId: number) => `/v1/sessions/${sessionId}/suggestions`
 
 /** 设置页里自动切片那一节 */
@@ -181,6 +186,44 @@ export function useSessionAutoClip(sessionId: number | null) {
   return swr
 }
 
+type JobWaiter = { resolve: (job: AutoClipJob | null) => void; reject: (e: unknown) => void }
+let waitingJobs = new Map<number, JobWaiter[]>()
+
+/** 同一轮渲染里各行要的任务攒到一起，用 `GET /v1/auto-clip/jobs` 一次取回 */
+function loadJob(sessionId: number): Promise<AutoClipJob | null> {
+  return new Promise((resolve, reject) => {
+    if (waitingJobs.size === 0) setTimeout(flushJobs, 0)
+    waitingJobs.set(sessionId, [...(waitingJobs.get(sessionId) ?? []), { resolve, reject }])
+  })
+}
+
+function flushJobs() {
+  const batch = waitingJobs
+  waitingJobs = new Map()
+  const ids = [...batch.keys()]
+  for (let i = 0; i < ids.length; i += MAX_JOB_SESSIONS) {
+    const chunk = ids.slice(i, i + MAX_JOB_SESSIONS)
+    fetcher(`/v1/auto-clip/jobs?session_ids=${chunk.join(',')}`).then(
+      ({ jobs }: { jobs: AutoClipJob[] }) => {
+        const bySession = new Map(jobs.map((job) => [job.session_id, job]))
+        for (const id of chunk) batch.get(id)?.forEach((w) => w.resolve(bySession.get(id) ?? null))
+      },
+      (e) => {
+        for (const id of chunk) batch.get(id)?.forEach((w) => w.reject(e))
+      }
+    )
+  }
+}
+
+/** 剪辑台一行的任务（不含预估）；任务在排队或运行时每 3 秒刷新。`sessionId` 为 null 时不请求 */
+export function useSessionJob(sessionId: number | null) {
+  return useSWR(sessionId === null ? null : sessionJobKey(sessionId), () => loadJob(sessionId!), {
+    refreshInterval: (job) => (isActive(job) ? ACTIVE_POLL_MS : 0),
+    revalidateOnFocus: false,
+    shouldRetryOnError: false,
+  })
+}
+
 const suggestionsRefresh = (data?: { suggestions: Suggestion[] }) =>
   data?.suggestions.some((s) => s.state === 'pending') ? PENDING_POLL_MS : 0
 
@@ -231,12 +274,13 @@ export async function startAutoClip(sessionId: number, reuseTranscript: boolean)
     reuse_transcript: reuseTranscript,
   })
   await mutate(sessionAutoClipUrl(sessionId), result, { revalidate: false })
+  await mutate(sessionJobKey(sessionId), result.job, { revalidate: false })
   return result
 }
 
 export async function cancelAutoClip(sessionId: number): Promise<void> {
   await send(sessionAutoClipUrl(sessionId), { method: 'DELETE' })
-  await mutate(sessionAutoClipUrl(sessionId))
+  await Promise.all([mutate(sessionAutoClipUrl(sessionId)), mutate(sessionJobKey(sessionId))])
 }
 
 /** 接受候选：按给的入点、出点（不给就用候选自己的）建切片草稿 */

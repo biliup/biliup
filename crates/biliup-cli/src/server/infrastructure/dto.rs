@@ -73,4 +73,8 @@ pub struct LiveStreamerResponse {
     pub session_id: Option<i64>,
     /// 正在录的这一场已经打了几个标记；`session_id` 为 `null` 时也为 `null`。
     pub marker_count: Option<i64>,
+    /// 「下播后自动生成候选」（覆写里的 `auto_clip_after_live`）的当前值，只读：改它仍要改覆写、需要
+    /// `streamer.hooks`。没配置自动切片、或调用者没有 `clip.edit` 时不出现。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_clip_after_live: Option<bool>,
 }

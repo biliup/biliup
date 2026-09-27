@@ -190,6 +190,8 @@ export interface LiveStreamerEntity {
 	session_id?: number | null;
 	/** 正在录的这一场已经打了几个标记；session_id 为 null 时也为 null */
 	marker_count?: number | null;
+	/** 「下播后自动生成候选」的当前值（只读）；没配置自动切片或没有 clip.edit 时没有这个键 */
+	auto_clip_after_live?: boolean;
 	statusTag?: React.ReactNode;
 	format?: string;
     time_range?: string | Date[];
