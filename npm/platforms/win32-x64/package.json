@@ -1,0 +1,22 @@
+{
+  "name": "@biliup/win32-x64",
+  "version": "0.0.0",
+  "description": "biliup 的 Windows x64 二进制，由 biliup 包按平台自动安装",
+  "homepage": "https://github.com/biliup/biliup",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/biliup/biliup.git",
+    "directory": "npm/platforms/win32-x64"
+  },
+  "license": "MIT",
+  "files": [
+    "bin"
+  ],
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "preferUnplugged": true
+}

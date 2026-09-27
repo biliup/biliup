@@ -1,0 +1,73 @@
+name: npm
+
+on:
+  release:
+    types: [published]
+  # 补发某个已有 Release（如本工作流加入之前的 v1.2.9），或勾选 dry_run 只打包验证
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag，如 v1.2.9'
+        required: true
+      dry_run:
+        description: '只打包、冒烟测试并 npm publish --dry-run，不发布（不需要 NPM_TOKEN）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to npm
+    # 预发布不发 npm，与 release.yml / ci.yml 只认严格版本号 tag 一致
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    # Release 建好时二进制还没构建完（release.yml 由 tag push 触发，v1.2.9 用了约 2 小时 20 分钟），prepare 最多等 300 分钟
+    timeout-minutes: 330
+    permissions:
+      contents: read
+      # npm publish --provenance
+      id-token: write
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+    steps:
+      - name: Check NPM_TOKEN
+        if: env.DRY_RUN != 'true'
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error title=NPM_TOKEN is not configured::仓库 Settings → Secrets and variables → Actions 里没有 NPM_TOKEN，未发布任何包。请维护者在 npmjs.com 生成可发布 biliup 与 @biliup/* 的 token 并添加为仓库 secret，然后在 Actions 里手动运行本工作流（tag 填 ${TAG}）。"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Prepare packages from release assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node npm/scripts/prepare.mjs --tag "$TAG" --wait 300
+
+      - name: Smoke test (linux x64)
+        run: npm/scripts/smoke-test.sh npm/dist linux-x64-gnu
+
+      - name: Publish
+        if: env.DRY_RUN != 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm/scripts/publish.sh npm/dist --provenance
+
+      - name: Publish (dry run)
+        if: env.DRY_RUN == 'true'
+        run: npm/scripts/publish.sh npm/dist --dry-run
