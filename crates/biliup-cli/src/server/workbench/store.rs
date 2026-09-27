@@ -340,6 +340,22 @@ pub async fn set_segment_state(
     Ok(())
 }
 
+/// 分段文件改了名（一主一备的主机补投时给中断留下的 `.part` 去掉后缀）。
+pub async fn move_segment(
+    pool: &ConnectionPool,
+    id: i64,
+    path: &str,
+    index_path: Option<&str>,
+) -> sqlx::Result<()> {
+    sqlx::query("UPDATE segments SET path = ?, index_path = ? WHERE id = ?")
+        .bind(path)
+        .bind(index_path)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// 从没写出过数据的分段（文件没生成或是空的）直接删行。
 pub async fn delete_segment(pool: &ConnectionPool, id: i64) -> sqlx::Result<()> {
     sqlx::query("DELETE FROM segments WHERE id = ?")

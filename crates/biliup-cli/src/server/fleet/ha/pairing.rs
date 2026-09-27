@@ -294,6 +294,7 @@ impl Pairing {
     async fn activate(&self, controller: &Controller, pair: &Pair) -> AppResult<()> {
         let primary = Primary::start(
             controller.pool().clone(),
+            self.services.clone(),
             pair.mode,
             pair.params,
             self.window(),
