@@ -325,7 +325,7 @@ async fn resume_input(
         .iter()
         .filter(|row| row.state == SegmentState::Finished)
     {
-        let written = workbench::modified_ms(Path::new(&row.path));
+        let written = modified_ms(Path::new(&row.path));
         let Some(written) = written.filter(|at| (job.unit_started_at..started).contains(at)) else {
             continue;
         };
@@ -544,6 +544,15 @@ impl Session {
             Session::Double(double) => double.append(bvid, &videos),
         }
     }
+}
+
+/// 文件最后修改时间（毫秒）；读不到时为 `None`
+fn modified_ms(path: &Path) -> Option<i64> {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
 }
 
 #[cfg(test)]

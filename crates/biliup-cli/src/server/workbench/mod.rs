@@ -319,7 +319,7 @@ async fn recover_segment(
     Ok(())
 }
 
-pub(crate) fn modified_ms(path: &Path) -> Option<i64> {
+fn modified_ms(path: &Path) -> Option<i64> {
     std::fs::metadata(path)
         .and_then(|m| m.modified())
         .ok()
