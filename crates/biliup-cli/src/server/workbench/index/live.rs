@@ -1,9 +1,9 @@
 //! 录制时边写边建关键帧索引。
 //!
 //! 进程内写盘的下载器（stream-gears、mesio）经 [`IndexTap`] 把每个分段写了什么、从哪个偏移开始
-//! 交过来，索引在内存里累积，按 [`FlushPolicy`] 隔几秒落一次盘。录制中的分段查索引直接读这个缓存
-//!（[`is_live`]），不扫盘，最多落后一个落盘间隔；写到哪里、什么时候写到的见 [`written`]
-//!（打标记换算场次时间用，不经过缓存文件）。
+//! 交过来，每出现一个关键帧往缓存末尾追加一次（[`FlushPolicy`]）。录制中的分段查索引直接读这个
+//! 缓存（[`is_live`]），不扫盘；写到哪里、什么时候写到的见 [`written`]（打标记换算场次时间用，
+//! 不经过缓存文件）。
 //!
 //! FLV 收到的是写盘处用扫盘同一套判定（[`super::classify_flv_tag`]）就地得出的结论，直接记进索引；
 //! TS / fMP4 收到写入端持有的原样字节（引用计数，不复制），按偏移拼成一个稀疏的内存窗口，用与扫盘
@@ -90,8 +90,8 @@ fn unregister(path: &Path) {
     updated();
 }
 
-/// 录制中的缓存什么时候落盘：第一个关键帧出现时立即存一次（DVR 接下一段、详情里「能播」不用等），
-/// 之后距上次落盘满 `interval`，或又攒了 `max_pending` 个关键帧，才再存；关段和录制任务结束时存最后一次。
+/// 录制中的缓存什么时候落盘：攒了 `max_pending` 个新关键帧（默认 1，即每个关键帧一次），或者没有
+/// 新关键帧但距上次落盘满 `interval`、内容又往后写了，就追加一次；关段和录制任务结束时再追加最后一次。
 /// 进程崩溃丢掉的最后一截由关段 / 启动收尾时扫盘补齐。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FlushPolicy {
@@ -103,7 +103,7 @@ impl Default for FlushPolicy {
     fn default() -> Self {
         Self {
             interval: Duration::from_secs(5),
-            max_pending: 64,
+            max_pending: 1,
         }
     }
 }

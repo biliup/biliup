@@ -209,12 +209,12 @@ fn before_keyframe(flv: &super::super::tests::Flv, n: usize) -> usize {
 }
 
 #[test]
-fn default_flush_policy_is_every_5_seconds_or_64_keyframes() {
+fn default_flush_policy_is_every_keyframe_or_5_seconds() {
     assert_eq!(
         FlushPolicy::default(),
         FlushPolicy::default()
             .interval(Duration::from_secs(5))
-            .max_pending(64)
+            .max_pending(1)
     );
 }
 
