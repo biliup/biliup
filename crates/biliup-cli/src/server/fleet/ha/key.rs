@@ -38,7 +38,11 @@ impl Span {
     }
 }
 
-/// 同一房间的两段录制是不是同一场：开播时刻相差不超过 `window_ms`，或两段在 `window_ms` 容差内有重叠。
+/// 判断时间重叠时容忍的两台机器时钟差
+pub const SKEW_MS: i64 = 2 * 60 * 1000;
+
+/// 同一房间的两段录制是不是同一场：开播时刻相差不超过 `window_ms`，或两段真的重叠（容差 [`SKEW_MS`]）。
+/// 重叠只容忍时钟差、不用合并窗口：下播后几分钟又开播的下一场不能算进上一场。
 /// 没有结束时刻的一段按录到 `now` 算
 pub fn same_session(a: Span, b: Span, window_ms: i64, now: i64) -> bool {
     if (a.start - b.start).abs() <= window_ms {
@@ -46,19 +50,18 @@ pub fn same_session(a: Span, b: Span, window_ms: i64, now: i64) -> bool {
     }
     let a_end = a.end.unwrap_or(now);
     let b_end = b.end.unwrap_or(now);
-    a.start <= b_end.saturating_add(window_ms) && b.start <= a_end.saturating_add(window_ms)
+    a.start < b_end.saturating_add(SKEW_MS) && b.start < a_end.saturating_add(SKEW_MS)
 }
 
-/// 在 `candidates`（键, 范围）里找与 `span` 同一场、开播时刻最接近的那个
+/// 在 `candidates`（键, 范围）里找开播时刻与 `span` 相差不超过 `window_ms`、最接近的那个（备机采用主机的场次键）
 pub fn best_match<'a>(
     span: Span,
     candidates: impl IntoIterator<Item = (&'a str, Span)>,
     window_ms: i64,
-    now: i64,
 ) -> Option<&'a str> {
     candidates
         .into_iter()
-        .filter(|(_, candidate)| same_session(span, *candidate, window_ms, now))
+        .filter(|(_, candidate)| (candidate.start - span.start).abs() <= window_ms)
         .min_by_key(|(_, candidate)| (candidate.start - span.start).abs())
         .map(|(key, _)| key)
 }
@@ -114,10 +117,24 @@ mod tests {
             window,
             NOW
         ));
+        // 下播 5 分钟后又开播：开播时刻差得远，也没有真的重叠，是下一场
+        assert!(!same_session(
+            primary,
+            Span::new(165 * MIN, Some(200 * MIN)),
+            window,
+            NOW
+        ));
+        // 还在录的一段按录到此刻算，不会和以后才开播的场次对上
+        assert!(!same_session(
+            Span::new(250 * MIN, None),
+            Span::new(300 * MIN, None),
+            window,
+            260 * MIN
+        ));
     }
 
     #[test]
-    fn the_closest_start_wins_when_several_sessions_match() {
+    fn the_closest_start_within_the_window_is_adopted() {
         let window = 10 * MIN;
         let candidates = [
             ("3:1", Span::new(0, Some(30 * MIN))),
@@ -125,25 +142,16 @@ mod tests {
             ("3:3", Span::new(300 * MIN, None)),
         ];
         assert_eq!(
-            best_match(Span::new(36 * MIN, None), candidates, window, NOW),
+            best_match(Span::new(36 * MIN, None), candidates, window),
             Some("3:2")
         );
         assert_eq!(
-            best_match(Span::new(2 * MIN, Some(20 * MIN)), candidates, window, NOW),
+            best_match(Span::new(2 * MIN, Some(20 * MIN)), candidates, window),
             Some("3:1")
         );
+        // 重叠但开播时刻差得远（接手时主机那场早开始了）：不采用它的键
         assert_eq!(
-            best_match(
-                Span::new(150 * MIN, Some(160 * MIN)),
-                candidates,
-                window,
-                NOW
-            ),
-            None
-        );
-        // 还在录的一段按录到此刻算，不会和以后才开播的场次对上
-        assert_eq!(
-            best_match(Span::new(250 * MIN, None), candidates, window, 260 * MIN),
+            best_match(Span::new(60 * MIN, None), candidates, window),
             None
         );
     }

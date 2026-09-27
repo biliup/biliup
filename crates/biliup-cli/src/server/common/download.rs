@@ -12,6 +12,7 @@ use crate::server::core::downloader::{
 use crate::server::core::live::{danmaku_client, downloader_runtime, live_request};
 use crate::server::core::monitor::Monitor;
 use crate::server::errors::{AppError, AppResult};
+use crate::server::fleet::ha::UnitOutput;
 use crate::server::infrastructure::context::{Context, Stage, WorkerStatus};
 use crate::server::infrastructure::models::hook_step::process;
 use crate::server::workbench::index;
@@ -56,6 +57,7 @@ pub struct SegmentEventProcessor {
     uploader: Sender<UploaderMessage>,
     ctx: Context,
     file_validator: FileValidator,
+    output: UnitOutput,
 }
 
 impl SegmentEventProcessor {
@@ -70,7 +72,13 @@ impl SegmentEventProcessor {
             )
             .with_retention(Retention::without_delay(ctx.pool().clone())),
             ctx,
+            output: UnitOutput::default(),
         }
+    }
+
+    /// 录完的分段数与交给投稿流程的分段数
+    pub fn output(&self) -> UnitOutput {
+        self.output
     }
 
     /// 这个分段交给 [`Self::process`] 后会不会被过滤删除。
@@ -84,6 +92,7 @@ impl SegmentEventProcessor {
         event: SegmentInfo,
         settled: impl Future<Output = ()> + Send + 'static,
     ) -> AppResult<()> {
+        self.output.seen += 1;
         // 验证文件有效性
         self.file_validator
             .validate(&event.prev_file_path, settled)?;
@@ -132,6 +141,7 @@ impl SegmentEventProcessor {
                 }
             }
         }
+        self.output.sent += 1;
 
         Ok(())
     }
@@ -347,6 +357,7 @@ impl DownloadTask {
             Some(session) => session.lock().await.committed_parts(),
             None => 0,
         };
+        crate::server::fleet::ha::unit_started(ctx);
         let result = loop {
             // 创建守卫确保清理
             // 创建事件处理器
@@ -480,6 +491,7 @@ impl DownloadTask {
         {
             warn!(url = url, "切片工作台场次收尾超时，转入后台完成");
         }
+        crate::server::fleet::ha::unit_ended(ctx, processor.output());
         crate::server::auto_clip::runner::session_finished(
             ctx.pool(),
             &ctx.config(),

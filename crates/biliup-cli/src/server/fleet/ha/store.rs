@@ -312,6 +312,17 @@ pub async fn recent_sessions(pool: &ConnectionPool, limit: i64) -> AppResult<Vec
     Ok(rows.into_iter().map(SessionRecord::from).collect())
 }
 
+/// `since` 之后更新过的场次（主机进程启动时载入）
+pub async fn updated_since(pool: &ConnectionPool, since: i64) -> AppResult<Vec<SessionRecord>> {
+    let rows: Vec<SessionRow> =
+        sqlx::query_as("SELECT * FROM ha_sessions WHERE updated_at >= ? ORDER BY started_at")
+            .bind(since)
+            .fetch_all(pool)
+            .await
+            .change_context(db_error("read ha_sessions"))?;
+    Ok(rows.into_iter().map(SessionRecord::from).collect())
+}
+
 /// `since` 之后更新过、已经有 bvid 的场次（主机重启、备机重连后重发 `Uploaded` 用）
 pub async fn uploaded_since(pool: &ConnectionPool, since: i64) -> AppResult<Vec<SessionRecord>> {
     let rows: Vec<SessionRow> = sqlx::query_as(
@@ -450,10 +461,10 @@ pub(crate) mod tests {
         let interrupted = sessions_in_state(&pool, &[PrimaryState::Recording])
             .await
             .unwrap();
-        assert_eq!(interrupted, [recording.clone()]);
+        assert_eq!(interrupted, std::slice::from_ref(&recording));
         assert_eq!(
             uploaded_since(&pool, 4000).await.unwrap(),
-            [uploaded.clone()]
+            std::slice::from_ref(&uploaded)
         );
         assert!(uploaded_since(&pool, 6000).await.unwrap().is_empty());
         let recent = recent_sessions(&pool, 10).await.unwrap();

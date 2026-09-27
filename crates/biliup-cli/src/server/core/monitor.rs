@@ -166,6 +166,19 @@ impl Monitor {
                         info!(url = url, "检测期间已暂停，不开录");
                         continue;
                     }
+                    // 一主一备：主机在等备机上报 / 备机正在录这一场，模式 2 备机在主机在线时只监控不录
+                    if let Some(hold) = crate::server::fleet::ha::hold_recording(&url) {
+                        drop(download_slot);
+                        self.wake_waker(room.id()).await;
+                        info!(url = url, reason = hold.reason, "开播但不录制（HA）");
+                        let wait = if hold.quick {
+                            QUICK_ROTATE_SLEEP
+                        } else {
+                            Duration::from_secs(interval)
+                        };
+                        tokio::time::sleep(wait).await;
+                        continue;
+                    }
                     // 依赖房间标题的策略要拿到流信息才能判定。命中就按「本轮不录」处理：
                     // 不建场次记录、不启动下载，等下个检测周期再看。
                     if let Some(rejection) =

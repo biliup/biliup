@@ -32,6 +32,25 @@ pub enum SkipReason {
     Handover,
 }
 
+impl SkipReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SkipReason::Filtered => "filtered",
+            SkipReason::NoFiles => "no_files",
+            SkipReason::Handover => "handover",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "filtered" => Some(SkipReason::Filtered),
+            "no_files" => Some(SkipReason::NoFiles),
+            "handover" => Some(SkipReason::Handover),
+            _ => None,
+        }
+    }
+}
+
 /// 备机上一场的状态（`StandbyReport`）
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -52,6 +71,23 @@ pub enum ReportedState {
     Failed,
     /// 模式 2：主机在线，备机只监控不录（不会出现在上报里，留给界面用）
     Standby,
+}
+
+impl ReportedState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ReportedState::Recording => "recording",
+            ReportedState::Holding => "holding",
+            ReportedState::Uploading => "uploading",
+            ReportedState::Uploaded => "uploaded",
+            ReportedState::AwaitingPrimary => "awaiting_primary",
+            ReportedState::Manual => "manual",
+            ReportedState::Done => "done",
+            ReportedState::Dropped => "dropped",
+            ReportedState::Failed => "failed",
+            ReportedState::Standby => "standby",
+        }
+    }
 }
 
 /// `StandbyReport` 里的一场

@@ -226,6 +226,9 @@ impl Fleet {
         match &self.role {
             Role::Standalone => {}
             Role::Controller(controller, _) => {
+                if let Some(pairing) = controller.ha() {
+                    pairing.shutdown();
+                }
                 if let Some(local) = controller.local() {
                     local.shutdown().await;
                 }
@@ -354,6 +357,9 @@ async fn start_controller_role(
         revoked.clone(),
     ));
     local.resume(&controller).await;
+    let pairing = Arc::new(ha::pairing::Pairing::new(services.clone()));
+    pairing.resume(&controller).await;
+    controller.attach_ha(pairing);
     Ok(Fleet::controller(controller, local, managed, revoked))
 }
 

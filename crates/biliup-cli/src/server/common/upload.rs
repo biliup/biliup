@@ -43,9 +43,9 @@ pub(crate) struct UploadContext {
 }
 
 #[derive(Default)]
-struct UploadedVideos {
-    videos: Vec<Video>,
-    paths: Vec<PathBuf>,
+pub(crate) struct UploadedVideos {
+    pub(crate) videos: Vec<Video>,
+    pub(crate) paths: Vec<PathBuf>,
 }
 
 pub async fn process_with_upload<F>(
@@ -57,6 +57,9 @@ where
     F: FnMut(&SegmentInfo),
 {
     info!(upload_config=?upload_config, "Starting process with upload");
+    if let Some(plan) = crate::server::fleet::ha::upload_plan(ctx).await {
+        return plan.run(rx, ctx, upload_config).await;
+    }
     // 1. 初始化上传环境
     let upload_context =
         initialize_upload_context(&ctx.config(), &ctx.stateless_client(), upload_config).await?;
@@ -68,7 +71,10 @@ where
         .segment_processor
         .clone()
         .unwrap_or_default();
-    let uploaded_videos = pipeline_upload_videos(rx, &upload_context, &segment_processors).await?;
+    let uploaded_videos = pipeline_upload_videos(rx, &segment_processors, |path| {
+        upload_owned_file(path, &upload_context)
+    })
+    .await?;
 
     // 3. 提交到B站
     if !uploaded_videos.videos.is_empty() {
@@ -169,13 +175,16 @@ pub(crate) fn segment_paths(event: &SegmentInfo) -> Vec<PathBuf> {
     paths
 }
 
-async fn pipeline_upload_videos<F>(
-    rx: Inspect<Receiver<SegmentInfo>, F>,
-    context: &UploadContext,
+/// 逐段跑 segment_processor 再交给 `upload` 上传
+pub(crate) async fn pipeline_upload_videos<S, U, Fut>(
+    rx: S,
     segment_processors: &[HookStep],
+    upload: U,
 ) -> AppResult<UploadedVideos>
 where
-    F: FnMut(&SegmentInfo),
+    S: Stream<Item = SegmentInfo>,
+    U: Fn(PathBuf) -> Fut,
+    Fut: Future<Output = AppResult<Video>>,
 {
     let mut uploaded = UploadedVideos::default();
     pin!(rx);
@@ -199,7 +208,7 @@ where
             .first()
             .cloned()
             .unwrap_or_else(|| event.prev_file_path.clone());
-        match upload_single_file(&upload_path, context).await {
+        match upload(upload_path.clone()).await {
             Ok(video) => {
                 uploaded.videos.push(video);
                 // 1.0.7 的 FileInfo(video, danmaku) 语义：上传完成后的 postprocessor
@@ -224,6 +233,10 @@ pub(crate) async fn upload_single_file(
     context: &UploadContext,
 ) -> AppResult<Video> {
     upload_single_file_with_progress(file_path, context, |_| true).await
+}
+
+async fn upload_owned_file(file_path: PathBuf, context: &UploadContext) -> AppResult<Video> {
+    upload_single_file(&file_path, context).await
 }
 
 /// 同 [`upload_single_file`]，每读出一块交给上传前用这块的字节数回调 `progress`；

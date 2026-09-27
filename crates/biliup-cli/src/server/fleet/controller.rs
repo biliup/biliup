@@ -13,6 +13,7 @@ pub use removal::{REMOVAL_WAIT, Release, Removal, RemovalState, RemovedRoom};
 use super::alerts::Alerts;
 use super::assignments;
 use super::config_store;
+use super::ha::pairing::Pairing;
 use super::local::LocalNode;
 use super::model::Account;
 use super::protocol::{
@@ -206,6 +207,8 @@ pub struct Controller {
     alert_task: Mutex<Option<JoinHandle<()>>>,
     /// 「本机」节点（[`super::local`]）；测试里的控制面没有
     local: OnceLock<Arc<LocalNode>>,
+    /// 一主一备（[`super::ha`]）；测试里的控制面没有
+    ha: OnceLock<Arc<Pairing>>,
 }
 
 impl Controller {
@@ -245,6 +248,7 @@ impl Controller {
             started_at: now_ms(),
             alert_task: Mutex::default(),
             local: OnceLock::new(),
+            ha: OnceLock::new(),
         });
         let task = tokio::spawn(accept_loop(
             Arc::downgrade(&controller),
@@ -270,6 +274,14 @@ impl Controller {
 
     pub fn local(&self) -> Option<&Arc<LocalNode>> {
         self.local.get()
+    }
+
+    pub fn attach_ha(&self, pairing: Arc<Pairing>) {
+        let _ = self.ha.set(pairing);
+    }
+
+    pub fn ha(&self) -> Option<&Arc<Pairing>> {
+        self.ha.get()
     }
 
     /// 启用中的「本机」节点 id
@@ -634,6 +646,7 @@ impl Controller {
         let seq = self.next_seq.fetch_add(1, Ordering::Relaxed);
         let now = now_ms();
         let (outbox, mut frames) = mpsc::unbounded_channel();
+        let ha_outbox = outbox.clone();
         let previous = self.live.lock().unwrap().insert(
             id,
             LiveNode {
@@ -667,6 +680,9 @@ impl Controller {
         }
         info!(node = id, name = %node.name, version = %hello.version, "fleet node online");
         store::record_seen(&self.pool, id, now, &hello.version, None).await?;
+        if let Some(pairing) = self.ha() {
+            pairing.node_connected(id, hello.proto, &ha_outbox);
+        }
 
         let welcome = ControllerMessage::Welcome {
             node_id: id,
@@ -719,6 +735,9 @@ impl Controller {
             )
             .await;
             info!(node = id, "fleet node offline");
+            if let Some(pairing) = self.ha() {
+                pairing.node_offline(id);
+            }
             self.wake_removals();
         }
         result
@@ -772,11 +791,10 @@ impl Controller {
                 NodeMessage::Ack(ack) => self.ack(id, seq, ack).await,
                 NodeMessage::Ha(message) => {
                     self.touch(id, seq);
-                    debug!(
-                        node = id,
-                        kind = message.kind(),
-                        "HA frame from a node that is not paired"
-                    );
+                    match self.ha() {
+                        Some(pairing) => pairing.node_message(id, message),
+                        None => debug!(node = id, kind = message.kind(), "HA frame without a pair"),
+                    }
                 }
                 NodeMessage::Leave => {
                     {
