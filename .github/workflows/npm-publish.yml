@@ -43,7 +43,7 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ -z "$NPM_TOKEN" ]; then
-            echo "::error title=NPM_TOKEN is not configured::仓库 Settings → Secrets and variables → Actions 里没有 NPM_TOKEN，未发布任何包。请维护者在 npmjs.com 生成可发布 biliup 与 @biliup/* 的 token 并添加为仓库 secret，然后在 Actions 里手动运行本工作流（tag 填 ${TAG}）。"
+            echo "::error title=NPM_TOKEN is not configured::仓库 Settings → Secrets and variables → Actions 里没有 NPM_TOKEN，未发布任何包。请维护者在 npmjs.com 生成可发布 @biliup/*（根包 @biliup/cli 与 7 个平台子包）的 token 并添加为仓库 secret，然后在 Actions 里手动运行本工作流（tag 填 ${TAG}）。"
             exit 1
           fi
 
@@ -62,6 +62,7 @@ jobs:
       - name: Smoke test (linux x64)
         run: npm/scripts/smoke-test.sh npm/dist linux-x64-gnu
 
+      # 先发 7 个 @biliup/<平台> 子包，最后发根包 @biliup/cli；registry 上已有的版本跳过，失败后可直接重跑
       - name: Publish
         if: env.DRY_RUN != 'true'
         env:
