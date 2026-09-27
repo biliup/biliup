@@ -1,17 +1,9 @@
 use super::*;
-use std::cell::RefCell;
 use std::ffi::OsString;
 use std::fs::OpenOptions;
 use std::sync::LazyLock;
 
-// ---------- 缓存目录 ----------
-
-thread_local! {
-    static INDEX_DIR_OVERRIDE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
-}
-
 /// 测试进程的工作目录是 crate 目录：缓存放进本进程独占的临时目录，不往源码树里写。
-/// [`with_index_dir`] 可以在当前线程上临时换一个。
 pub(crate) fn index_dir() -> PathBuf {
     static DIR: LazyLock<tempfile::TempDir> = LazyLock::new(|| {
         tempfile::Builder::new()
@@ -19,34 +11,7 @@ pub(crate) fn index_dir() -> PathBuf {
             .tempdir()
             .unwrap()
     });
-    INDEX_DIR_OVERRIDE
-        .with(|dir| dir.borrow().clone())
-        .unwrap_or_else(|| DIR.path().to_path_buf())
-}
-
-fn with_index_dir<T>(dir: PathBuf, f: impl FnOnce() -> T) -> T {
-    INDEX_DIR_OVERRIDE.with(|d| *d.borrow_mut() = Some(dir));
-    let out = f();
-    INDEX_DIR_OVERRIDE.with(|d| *d.borrow_mut() = None);
-    out
-}
-
-/// 按旧版本的布局在分段旁写一份缓存：只留前 `keep` 个关键帧、标成完整，读到的若是它就说明没有重扫。
-pub(crate) fn write_legacy_cache(segment: &Path, keep: usize) -> PathBuf {
-    let mut index = rescan(segment, None).unwrap();
-    index.keyframes.truncate(keep);
-    index.complete = true;
-    index.source_len = fs::metadata(segment).unwrap().len();
-    let legacy = legacy_index_path(segment);
-    fs::write(&legacy, index.encode()).unwrap();
-    legacy
-}
-
-/// 在分段旁写一份旧版本布局的空缓存，不要求分段是可扫描的媒体文件。
-pub(crate) fn write_legacy_stub(segment: &Path) -> PathBuf {
-    let legacy = legacy_index_path(segment);
-    fs::write(&legacy, KeyframeIndex::new(Container::Flv).encode()).unwrap();
-    legacy
+    DIR.path().to_path_buf()
 }
 
 // ---------- FLV ----------
@@ -207,7 +172,6 @@ fn flv_scan_indexes_keyframes_relative_to_the_first_one() {
 
     // 缓存命中：内容一致，且写在索引目录里、不在分段旁
     assert!(index_path(&path).exists());
-    assert!(!legacy_index_path(&path).exists());
     assert_eq!(load(&path).unwrap(), index);
     assert_eq!(refresh(&path, true).unwrap(), index);
 }
@@ -484,74 +448,22 @@ fn cache_is_kept_out_of_the_recording_folder() {
     assert_eq!(INDEX_DIR, "data/index");
 }
 
-/// 旧版本放在分段旁的缓存：第一次读时整个搬进索引目录，不重扫分段。
 #[test]
-fn legacy_cache_is_moved_not_rebuilt_on_first_read() {
-    let dir = tempfile::tempdir().unwrap();
-    let flv = build_flv(0, 100, 25, None);
-    let path = write(dir.path(), "a.flv", &flv.bytes);
-    let legacy = write_legacy_cache(&path, 2);
-
-    let index = refresh(&path, true).unwrap();
-    assert_eq!(
-        index.keyframes,
-        flv_expected(&flv)[..2].to_vec(),
-        "读到的是搬来的缓存"
-    );
-    assert!(!legacy.exists());
-    assert_eq!(load(&path).unwrap(), index);
-}
-
-/// 索引目录建不出来时旧缓存搬不动：按原路径读，文件留在原处；之后能搬了再搬。
-#[test]
-fn legacy_cache_that_cannot_be_moved_is_read_in_place() {
-    let dir = tempfile::tempdir().unwrap();
-    let flv = build_flv(0, 100, 25, None);
-    let path = write(dir.path(), "a.flv", &flv.bytes);
-    let legacy = write_legacy_cache(&path, 2);
-    let blocker = write(dir.path(), "not-a-dir", b"");
-
-    let cached = with_index_dir(blocker.join("index"), || {
-        assert!(adopt_legacy(&path).is_err());
-        load(&path)
-    });
-    assert_eq!(cached.expect("按原路径读到").keyframes.len(), 2);
-    assert!(legacy.exists());
-
-    assert_eq!(load(&path).unwrap().keyframes.len(), 2);
-    assert!(!legacy.exists());
-    assert!(index_path(&path).exists());
-}
-
-#[test]
-fn rename_and_remove_cover_both_locations() {
+fn rename_and_remove_use_the_index_dir() {
     let dir = tempfile::tempdir().unwrap();
     let flv = build_flv(0, 100, 25, None);
     let part = write(dir.path(), "a.flv.part", &flv.bytes);
-    let legacy = write_legacy_cache(&part, 3);
+    refresh(&part, false).unwrap();
     let done = dir.path().join("a.flv");
     fs::rename(&part, &done).unwrap();
 
     assert!(rename(&part, &done).unwrap());
-    assert!(!legacy.exists() && !index_path(&part).exists());
-    assert_eq!(load(&done).unwrap().keyframes.len(), 3);
+    assert!(!index_path(&part).exists());
+    assert_eq!(load(&done).unwrap().keyframes.len(), 4);
     assert!(!rename(&part, &done).unwrap(), "没有缓存可搬");
 
-    // 新旧两处都有：新的为准，旧的删掉
-    let legacy = write_legacy_cache(&done, 1);
-    assert!(adopt_legacy(&done).unwrap());
-    assert!(!legacy.exists());
-    assert_eq!(load(&done).unwrap().keyframes.len(), 3);
-
-    let legacy = write_legacy_cache(&done, 1);
     remove(&done);
-    assert!(!legacy.exists() && !index_path(&done).exists());
-
-    // 分段旁同名但不是索引缓存的文件不动
-    let foreign = write(dir.path(), "a.flv.idx", b"not a keyframe index");
-    assert!(!adopt_legacy(&done).unwrap());
-    remove(&done);
-    assert!(foreign.exists());
+    assert!(!index_path(&done).exists());
     assert!(load(&done).is_none());
 }
 

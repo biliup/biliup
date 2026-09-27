@@ -1,7 +1,7 @@
 //! 分段文件的关键帧索引：把「段内时间」对应到「文件字节偏移」。
 //!
 //! 索引不进 SQLite，缓存在工作目录的 [`INDEX_DIR`] 下（[`index_path`]），录制文件夹里只有视频。
-//! 旧版本缓存在分段旁边的 `<分段>.idx`，启动收尾和第一次读到时搬过来（[`adopt_legacy`]）。
+//! 旧版本放在分段旁边的 `<分段>.idx` 不再读取，用到时重新扫描。
 //!
 //! 进程内写盘的下载器（stream-gears、mesio）录制时由 [`live`] 边写边建，录制热路径上只有一次
 //! 非阻塞发送，缓存每隔几秒落一次盘（[`live::FlushPolicy`]）；外部进程下载器、旧文件、
@@ -28,7 +28,7 @@ use std::fs::{self, File};
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// 索引缓存的目录，相对工作目录（与 `data/data.sqlite3` 放在一起）。录制中的缓存每隔几秒就要重写一次，
 /// 放在录制文件夹里会让文件管理器不停刷新那个文件夹。
@@ -326,101 +326,23 @@ fn index_dir() -> PathBuf {
     tests::index_dir()
 }
 
-/// 旧版本的缓存位置：分段旁边的 `<分段>.idx`。
-pub fn legacy_index_path(segment: &Path) -> PathBuf {
-    let mut name = segment.as_os_str().to_os_string();
-    name.push(".");
-    name.push(INDEX_EXTENSION);
-    PathBuf::from(name)
-}
-
-/// 读缓存；没有、读不了或版本不对都返回 `None`。分段旁还留着旧版本的缓存时先搬进 [`INDEX_DIR`]，
-/// 搬不动就按原路径读。
+/// 读缓存；没有、读不了或版本不对都返回 `None`。
 pub fn load(segment: &Path) -> Option<KeyframeIndex> {
-    let bytes = match fs::read(index_path(segment)) {
-        Ok(bytes) => bytes,
-        Err(_) => load_legacy(segment)?,
-    };
+    let bytes = fs::read(index_path(segment)).ok()?;
     KeyframeIndex::decode(&bytes).ok()
 }
 
-fn load_legacy(segment: &Path) -> Option<Vec<u8>> {
-    match adopt_legacy(segment) {
-        Ok(true) => fs::read(index_path(segment)).ok(),
-        Ok(false) => None,
-        Err(e) => {
-            let legacy = legacy_index_path(segment);
-            warn!(path = %legacy.display(), error = %e, "旧关键帧索引没能搬进 data/index，按原路径读");
-            fs::read(legacy).ok()
-        }
-    }
-}
-
-/// 把分段旁旧版本的缓存搬进 [`INDEX_DIR`]：移动文件，不重扫分段。新位置已经有缓存时以新的为准，
-/// 删掉旧的。没有旧缓存（或同名文件不是索引缓存，不去动它）返回 `Ok(false)`。
-pub fn adopt_legacy(segment: &Path) -> io::Result<bool> {
-    let legacy = legacy_index_path(segment);
-    if !is_index_file(&legacy)? {
-        return Ok(false);
-    }
-    let target = index_path(segment);
-    if target.exists() {
-        fs::remove_file(&legacy)?;
-    } else {
-        move_file(&legacy, &target)?;
-    }
-    Ok(true)
-}
-
-/// 分段改了名或搬了家：缓存换成新路径对应的文件（旧版本放在分段旁的一并搬进 [`INDEX_DIR`]）。
-/// 没有缓存时返回 `Ok(false)`。
+/// 分段改了名或搬了家：缓存换成新路径对应的文件。没有缓存时返回 `Ok(false)`。
 pub fn rename(from: &Path, to: &Path) -> io::Result<bool> {
-    adopt_legacy(from)?;
     let source = index_path(from);
     if !source.exists() {
         return Ok(false);
     }
     let target = index_path(to);
     if source != target {
-        move_file(&source, &target)?;
+        fs::rename(&source, &target)?;
     }
     Ok(true)
-}
-
-fn is_index_file(path: &Path) -> io::Result<bool> {
-    let mut magic = [0u8; MAGIC.len()];
-    match File::open(path).and_then(|mut file| file.read_exact(&mut magic)) {
-        Ok(()) => Ok(&magic == MAGIC),
-        Err(e)
-            if matches!(
-                e.kind(),
-                io::ErrorKind::NotFound | io::ErrorKind::UnexpectedEof
-            ) =>
-        {
-            Ok(false)
-        }
-        Err(e) => Err(e),
-    }
-}
-
-/// rename；跨盘时（录制目录在另一块盘上）拷到目标旁的临时文件再改名，最后删源文件。
-/// 目标已经就位、只是源文件删不掉时仍算成功。
-fn move_file(from: &Path, to: &Path) -> io::Result<()> {
-    if let Some(dir) = to.parent() {
-        fs::create_dir_all(dir)?;
-    }
-    if fs::rename(from, to).is_ok() {
-        return Ok(());
-    }
-    let tmp = tmp_path(to);
-    if let Err(e) = fs::copy(from, &tmp).and_then(|_| fs::rename(&tmp, to)) {
-        let _ = fs::remove_file(&tmp);
-        return Err(e);
-    }
-    if let Err(e) = fs::remove_file(from) {
-        warn!(path = %from.display(), error = %e, "关键帧索引已复制到新位置，但原文件删不掉");
-    }
-    Ok(())
 }
 
 /// 同一分段可能同时被录制收尾和 DVR 请求续扫：各写各的临时文件，rename 后到者覆盖，两份都是完整的索引。
@@ -534,13 +456,9 @@ pub fn keyframes(
     Ok(refresh(segment, finished)?.range(from_ms, to_ms).to_vec())
 }
 
-/// 删掉分段的索引缓存（分段被删时一起删），分段旁还留着的旧版本缓存也删。
+/// 删掉分段的索引缓存（分段被删时一起删）。
 pub fn remove(segment: &Path) {
     let _ = fs::remove_file(index_path(segment));
-    let legacy = legacy_index_path(segment);
-    if is_index_file(&legacy).unwrap_or(false) {
-        let _ = fs::remove_file(legacy);
-    }
 }
 
 /// 缓存与当前文件核对：文件变短就截掉越界的关键帧并从最后一个保留的关键帧续扫；

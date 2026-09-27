@@ -192,15 +192,11 @@ pub async fn session_keyframes(
 
 /// 启动时（开始监控之前）收尾上次异常退出留下的状态：
 ///
-/// - 旧版本放在分段旁的索引缓存搬进 [`index::INDEX_DIR`]，见 [`adopt_legacy_indexes`]；
 /// - `recording` 分段：文件还在就按文件长度记为 `finished`，按索引扫出的时长（扫不出时用
 ///   文件修改时间）回填 `end_ms`，同时核对 / 截断 / 续扫索引缓存；文件没生成或是空的就删行；
 /// - 没有 `ended_at` 的场次：记为最后一个分段文件的修改时间；文件不在了按时间轴上最后一个
 ///   分段的结束位置算，没有分段的记为开播时间。
 pub async fn recover(pool: &ConnectionPool) -> Result<()> {
-    if let Err(e) = adopt_legacy_indexes(pool).await {
-        warn!(error = %e, "搬旧关键帧索引失败，读到时再搬");
-    }
     let leftovers = store::segments_in_state(pool, SegmentState::Recording).await?;
     let mut started: HashMap<i64, i64> = HashMap::new();
     for segment in &leftovers {
@@ -244,69 +240,6 @@ pub async fn recover(pool: &ConnectionPool) -> Result<()> {
         );
     }
     Ok(())
-}
-
-/// 库里 `index_path` 还指着旧位置（分段旁的 `<分段>.idx`）的分段：把缓存搬进 [`index::INDEX_DIR`]
-/// （移动，不重扫分段），`index_path` 改成新位置；旧缓存已经不在了就按新位置有没有缓存记。
-/// 搬不动的记 warn、`index_path` 不动，读的时候按原路径读，下次启动再搬。返回搬了几个。
-pub async fn adopt_legacy_indexes(pool: &ConnectionPool) -> Result<usize> {
-    let rows: Vec<(i64, String, String)> = sqlx::query_as(
-        "SELECT id, path, index_path FROM segments
-         WHERE index_path IS NOT NULL AND state != 'deleted'",
-    )
-    .fetch_all(pool)
-    .await?;
-    let stale: Vec<(i64, String)> = rows
-        .into_iter()
-        .filter(|(_, path, recorded)| Path::new(recorded) != index::index_path(Path::new(path)))
-        .map(|(id, path, _)| (id, path))
-        .collect();
-    if stale.is_empty() {
-        return Ok(0);
-    }
-    let (updates, moved) = tokio::task::spawn_blocking(move || {
-        let mut updates: Vec<(i64, Option<String>)> = Vec::new();
-        let mut moved = 0;
-        for (id, path) in stale {
-            let path = Path::new(&path);
-            match index::adopt_legacy(path) {
-                Ok(adopted) => {
-                    moved += usize::from(adopted);
-                    let current = index::index_path(path);
-                    let recorded = current
-                        .exists()
-                        .then(|| current.to_string_lossy().into_owned());
-                    updates.push((id, recorded));
-                }
-                Err(e) => warn!(
-                    path = %index::legacy_index_path(path).display(),
-                    error = %e,
-                    "旧关键帧索引没能搬进 data/index，先按原路径读"
-                ),
-            }
-        }
-        (updates, moved)
-    })
-    .await
-    .map_err(io::Error::other)?;
-    // 一个事务提交：库没开 WAL，逐行提交在机械盘上每行都要等一次落盘
-    let mut tx = pool.begin().await?;
-    for (id, recorded) in &updates {
-        sqlx::query("UPDATE segments SET index_path = ? WHERE id = ?")
-            .bind(recorded)
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
-    }
-    tx.commit().await?;
-    if moved > 0 {
-        info!(
-            moved,
-            dir = index::INDEX_DIR,
-            "切片工作台：已把录制文件夹里的关键帧索引搬到新位置"
-        );
-    }
-    Ok(moved)
 }
 
 async fn recover_segment(
