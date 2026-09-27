@@ -269,6 +269,28 @@ pub async fn latest(pool: &ConnectionPool, session_id: i64) -> sqlx::Result<Opti
     one(pool, sqlx::query(&sql).bind(session_id)).await
 }
 
+/// 每一场最近的一个任务；没有任务的场次不出现。
+pub async fn latest_many(pool: &ConnectionPool, session_ids: &[i64]) -> sqlx::Result<Vec<Job>> {
+    if session_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = vec!["?"; session_ids.len()].join(", ");
+    let sql = format!(
+        "SELECT {COLUMNS} FROM auto_clip_jobs WHERE id IN (SELECT MAX(id) FROM auto_clip_jobs
+         WHERE session_id IN ({placeholders}) GROUP BY session_id) ORDER BY session_id"
+    );
+    let mut query = sqlx::query(&sql);
+    for id in session_ids {
+        query = query.bind(id);
+    }
+    query
+        .fetch_all(pool)
+        .await?
+        .iter()
+        .map(Job::from_row)
+        .collect()
+}
+
 /// 最早该跑的排队任务（可能还没到点）。
 pub async fn next_queued(pool: &ConnectionPool) -> sqlx::Result<Option<Job>> {
     let sql = format!(

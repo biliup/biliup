@@ -3,6 +3,8 @@
 //! - `POST /v1/auto-clip/test`（`config.edit`）：用表单里当前的值（未保存也能测）测 chat、
 //!   看图与转写，结果存下来供缩图「自动」使用。表单里的 key 是掩码时换成已保存的 key，规则同保存。
 //! - `GET /v1/auto-clip/status`（`file.view`）：是否启用、模型名、能否看图、上限，不含 key 和地址。
+//! - `GET /v1/auto-clip/jobs?session_ids=1,2,3`（`file.view`）：多场各自最近的任务，一次最多
+//!   [`MAX_JOB_SESSIONS`] 场。
 //! - `GET /v1/sessions/{id}/auto-clip`（`file.view`）：这一场最近的任务与它入队时存下的用量预估，不重算。
 //! - `POST /v1/sessions/{id}/auto-clip`（`clip.edit`）：不带 `confirm` 只回现算的预估；`confirm: true`
 //!   入队并把预估存进任务行（超过每场转写上限、或转写已齐而 chat 用量超过每场上限时拒绝）。
@@ -22,7 +24,7 @@ use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::workbench::recorder::now_ms;
 use crate::server::workbench::{live, store};
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -207,6 +209,43 @@ pub async fn get_session_auto_clip(
         job,
         estimate,
     }))
+}
+
+/// 一次最多查多少场：剪辑台一页 10 场，留足余量又不让一条请求拼出过长的 SQL。
+pub const MAX_JOB_SESSIONS: usize = 100;
+
+#[derive(Debug, Deserialize)]
+pub struct JobsQuery {
+    /// 逗号分隔的场次 id
+    pub session_ids: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct JobList {
+    /// 每场最近的一条任务，按场次 id 升序；没有任务的场次不出现
+    pub jobs: Vec<Job>,
+}
+
+pub async fn list_auto_clip_jobs(
+    State(pool): State<ConnectionPool>,
+    Query(query): Query<JobsQuery>,
+) -> Result<Json<JobList>, Rejection> {
+    let mut ids = query
+        .session_ids
+        .split(',')
+        .map(|id| id.trim().parse::<i64>())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| reject(StatusCode::BAD_REQUEST, "session_ids 要是逗号分隔的场次 id"))?;
+    ids.sort_unstable();
+    ids.dedup();
+    if ids.len() > MAX_JOB_SESSIONS {
+        return Err(reject(
+            StatusCode::BAD_REQUEST,
+            format!("一次最多查 {MAX_JOB_SESSIONS} 场"),
+        ));
+    }
+    let jobs = jobs::latest_many(&pool, &ids).await.map_err(internal)?;
+    Ok(Json(JobList { jobs }))
 }
 
 pub async fn start_session_auto_clip(

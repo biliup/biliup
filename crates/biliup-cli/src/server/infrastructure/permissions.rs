@@ -188,7 +188,7 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         "/v1/configuration" if method == Method::PUT => ConfigEdit,
         // 连通性测试会用已保存的 key 调外部接口，归配置编辑；状态不含 key 和地址
         "/v1/auto-clip/test" if method == Method::POST => ConfigEdit,
-        "/v1/auto-clip/status" if get => FileView,
+        "/v1/auto-clip/status" | "/v1/auto-clip/jobs" if get => FileView,
         // 生成候选会花转写/模型的钱，和做切片一样归切片编辑
         "/v1/sessions/{id}/auto-clip" if get => FileView,
         "/v1/sessions/{id}/auto-clip" if method == Method::POST || method == Method::DELETE => {
