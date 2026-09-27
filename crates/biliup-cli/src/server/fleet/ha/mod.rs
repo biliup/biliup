@@ -11,11 +11,13 @@ pub mod agent;
 #[cfg(test)]
 mod harness;
 pub mod key;
+pub mod outbox;
 pub mod pairing;
 pub mod params;
 pub mod primary;
 pub mod standby;
 pub mod store;
+pub mod sync;
 pub mod upload;
 pub mod wire;
 

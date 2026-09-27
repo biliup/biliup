@@ -500,6 +500,7 @@ impl Controller {
             templates,
             config,
             ha,
+            pair: None,
         });
         if let Some(live) = self.live.lock().unwrap().get_mut(&node)
             && live.outbox.send(message).is_ok()
@@ -826,6 +827,10 @@ impl Controller {
                         Some(pairing) => pairing.node_message(id, message),
                         None => debug!(node = id, kind = message.kind(), "HA frame without a pair"),
                     }
+                }
+                NodeMessage::Pair(message) => {
+                    self.touch(id, seq);
+                    debug!(node = id, op = message.op(), "pair frame without a pair");
                 }
                 NodeMessage::Leave => {
                     {

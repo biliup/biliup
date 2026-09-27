@@ -4,6 +4,7 @@
 //! `u32 大端长度 + JSON`，单帧上限 [`MAX_FRAME`]。主版本号放在 ALPN 里（[`ALPN`]），
 //! 次版本号在 [`Hello::proto`] 里，只增字段不改语义，所以两端都忽略不认识的字段。
 
+use super::ha::sync::{PairMessage, PairState};
 use super::ha::wire::{HaAssignment, HaMessage};
 use super::model::{Account, DesiredRoom, DesiredTemplate};
 use crate::server::common::system_stats::{CpuInfo, DiskUsage, MemoryUsage, SystemStats};
@@ -18,7 +19,8 @@ pub const ALPN: &[u8] = b"biliup/fleet/1";
 /// 2：`DesiredState` 带配置（[`DesiredConfig`]），`Ack` 带配置是否生效（[`ConfigAck`]）。
 /// 3：节点发 `Event`（录制出错、投稿失败，见 [`RoomEvent`]），`Heartbeat` 带 `min_free_space`。
 /// 4：主副配对（[`super::ha`]）：给备机的 `DesiredState` 带 `ha`，主备之间互发 `Ha` 场次消息。
-pub const PROTOCOL_MINOR: u32 = 4;
+/// 5：配对双向同步（[`super::ha::sync`]）：给配对节点的 `DesiredState` 带 `pair`，两台之间互发 `Pair`。
+pub const PROTOCOL_MINOR: u32 = 5;
 /// 能收 `DesiredState` 的最低次版本号。更旧的节点收到不认识的帧会卡住，控制面不给它们发。
 pub const DESIRED_STATE_SINCE: u32 = 1;
 /// 能收配置的最低次版本号。次版本 1 的节点照常收房间，配置不发给它。
@@ -28,6 +30,8 @@ pub const CONFIG_SINCE: u32 = 2;
 pub const EVENTS_SINCE: u32 = 3;
 /// 能当备机、收发 `Ha` 帧的最低次版本号。更旧的节点收到 `ha` 帧解不了会断开重连，控制面不把它们指定为备机。
 pub const HA_SINCE: u32 = 4;
+/// 能与控制面双向同步设置、收发 `Pair` 帧、切换主备的最低次版本号。次版本 4 的备机照 H1 只收镜像
+pub const PAIR_SINCE: u32 = 5;
 /// [`Event::kind`]：一次拉流以错误结束（不含用户停止、迁移等取消）
 pub const EVENT_RECORDING_ERROR: &str = "recording_error";
 /// [`Event::kind`]：一场投稿流程失败（登录、上传、提交或之后的后处理）
@@ -86,8 +90,11 @@ pub enum NodeMessage {
     Leave,
     /// 对 `DesiredState` 的应答：按哪一版对的账、现在持有哪些房间
     Ack(Ack),
-    /// 备机发给主机的场次消息（自次版本 4 起，只在收到过带 `ha` 的期望状态之后）
+    /// 配对节点发给控制面的场次消息（自次版本 4 起，只在收到过带 `ha` 的期望状态之后）。
+    /// 节点是备机时是备机 → 主机，切换主备之后节点是主机时是主机 → 备机
     Ha(HaMessage),
+    /// 配对节点发给控制面的同步消息（自次版本 5 起，只在收到过带 `pair` 的期望状态之后）
+    Pair(PairMessage),
 }
 
 /// 控制面 → 节点
@@ -101,8 +108,10 @@ pub enum ControllerMessage {
     /// 这台节点应该录的全部房间与它们用到的模板（整份快照，不是增量）。
     /// 节点只动自己按控制面建的那些本地行，本机自己加的房间与模板不受影响。
     DesiredState(DesiredState),
-    /// 主机发给备机的场次消息（自次版本 4 起，只发给备机）
+    /// 控制面发给配对节点的场次消息（自次版本 4 起，只发给配对节点）
     Ha(HaMessage),
+    /// 控制面发给配对节点的同步消息（自次版本 5 起，只发给次版本 ≥ 5 的配对节点）
+    Pair(PairMessage),
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -115,9 +124,12 @@ pub struct DesiredState {
     /// 没有这个字段表示控制面不管配置，节点的配置照旧在本机改。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config: Option<DesiredConfig>,
-    /// 这台节点是主机的备机时才有（自次版本 4 起）：模式、参数与镜像过来的房间
+    /// 这台节点在配对里时才有（自次版本 4 起）：模式、参数、谁是主机与镜像过来的房间
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ha: Option<HaAssignment>,
+    /// 与 `ha` 一起、只给次版本 ≥ 5 的配对节点（自次版本 5 起）：镜像房间与模板的同步版本
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pair: Option<PairState>,
 }
 
 /// 下发给一台节点的配置：Fleet 全局 ⊕ 这台节点的覆盖，只含白名单键（D11），
@@ -743,6 +755,100 @@ mod tests {
         }
         let frame = serde_json::to_vec(&uploaded).unwrap();
         assert!(decode::<MinorThreeNode>(&frame).is_err());
+    }
+
+    /// 次版本 4 与 5 混跑：4 的节点解期望状态时忽略 `pair`，不带 `pair` 的期望状态与以前逐字相同；
+    /// `pair` 帧两个方向都按 `type` + `op` 标记，4 的一端解不了（所以只在两端都 ≥ 5 时发）
+    #[test]
+    fn pair_frames_and_state_are_compatible_both_ways() {
+        use crate::server::fleet::ha::params::{HaMode, HaParams};
+        use crate::server::fleet::ha::sync::{Gone, PairEdit, PairRef, PairSecret, Side, Stamp};
+
+        let assignment = HaAssignment {
+            mode: HaMode::DualRecord,
+            params: HaParams::default(),
+            primary: 1,
+            rooms: vec![7],
+        };
+        let without = serde_json::to_value(DesiredState {
+            version: 4,
+            ha: Some(assignment.clone()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(without.get("pair").is_none());
+        let stamp = Stamp {
+            at: 1_000,
+            side: Side::Node,
+        };
+        let with = serde_json::to_value(DesiredState {
+            version: 5,
+            ha: Some(assignment),
+            pair: Some(PairState {
+                rooms: vec![PairRef {
+                    id: 7,
+                    uid: "n00ff".into(),
+                    stamp,
+                }],
+                gone: vec![Gone {
+                    key: "room/8".into(),
+                    stamp,
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(with["pair"]["rooms"][0]["uid"], "n00ff");
+        assert_eq!(with["pair"]["gone"][0]["stamp"]["side"], "node");
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct MinorFour {
+            version: u64,
+            rooms: Vec<DesiredRoom>,
+            templates: Vec<DesiredTemplate>,
+            #[serde(default)]
+            config: Option<DesiredConfig>,
+            #[serde(default)]
+            ha: Option<HaAssignment>,
+        }
+        let old: MinorFour = serde_json::from_value(with.clone()).unwrap();
+        assert_eq!(old.ha.unwrap().rooms, [7]);
+        let back: DesiredState = serde_json::from_value(with).unwrap();
+        assert_eq!(back.pair.unwrap().room(7).unwrap().stamp, stamp);
+
+        let edit = NodeMessage::Pair(PairMessage::Edit(PairEdit {
+            seq: 2,
+            key: "config/segment_time".into(),
+            stamp,
+            value: Some(serde_json::json!("01:00:00")),
+        }));
+        let json = serde_json::to_value(&edit).unwrap();
+        assert_eq!(json["type"], "pair");
+        assert_eq!(json["op"], "edit");
+        let NodeMessage::Pair(PairMessage::Edit(back)) = serde_json::from_value(json).unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(back.seq, 2);
+        let secret = ControllerMessage::Pair(PairMessage::Secret(PairSecret {
+            seq: 1,
+            mid: 42,
+            stamp,
+            content: Some("{}".into()),
+        }));
+        let frame = serde_json::to_vec(&secret).unwrap();
+        assert!(decode::<ControllerMessage>(&frame).is_ok());
+        #[derive(Deserialize)]
+        #[serde(tag = "type", rename_all = "snake_case")]
+        #[allow(dead_code)]
+        enum MinorFourController {
+            Welcome { node_id: i64, relays: Vec<String> },
+            Relays { relays: Vec<String> },
+            DesiredState(DesiredState),
+            Ha(HaMessage),
+        }
+        assert!(decode::<MinorFourController>(&frame).is_err());
     }
 
     #[test]
