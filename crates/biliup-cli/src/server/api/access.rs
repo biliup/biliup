@@ -5,7 +5,7 @@ use crate::server::infrastructure::permissions::Permission;
 use crate::server::infrastructure::policy::{Field, RouteRequirement, Subject};
 use crate::server::infrastructure::users::{AuthSession, Backend};
 use axum::Json;
-use axum::body::Body;
+use axum::body::{Body, HttpBody};
 use axum::extract::{FromRequestParts, MatchedPath, Request};
 use axum::http::request::Parts;
 use axum::http::{StatusCode, header};
@@ -149,9 +149,14 @@ pub async fn unrestricted(mut request: Request, next: Next) -> Response {
     next.run(request).await
 }
 
-/// 没有 `Content-Length` 的成功响应是流（SSE 弹幕、`/live` 媒体流）：会话失效后截断。
+/// 长度未知的成功响应是流（SSE 弹幕、`/live` 媒体流）：会话失效后截断。
+/// 整包响应（`Json` 等）在这一层还没有 `Content-Length` 头（hyper 写出时才按 `size_hint` 补），
+/// 只看头会把它们也包成流、改走 chunked。
 fn cut_off_when_revoked(response: Response, caller: &Caller) -> Response {
-    if !response.status().is_success() || response.headers().contains_key(header::CONTENT_LENGTH) {
+    if !response.status().is_success()
+        || response.headers().contains_key(header::CONTENT_LENGTH)
+        || response.body().size_hint().exact().is_some()
+    {
         return response;
     }
     let (parts, body) = response.into_parts();
@@ -370,6 +375,10 @@ mod tests {
     }
 
     async fn app() -> (tempfile::TempDir, Backend, Router) {
+        app_with(stub_router()).await
+    }
+
+    async fn app_with(routes: Router) -> (tempfile::TempDir, Backend, Router) {
         let dir = tempfile::tempdir().unwrap();
         let db = dir.path().join("data.sqlite3");
         let pool = ConnectionManager::new_pool(db.to_str().unwrap())
@@ -383,7 +392,7 @@ mod tests {
             SessionManagerLayer::new(session_store).with_secure(false),
         )
         .build();
-        let app = stub_router()
+        let app = routes
             .merge(crate::server::api::auth::router())
             .layer(auth_layer);
         (dir, backend, app)
@@ -598,5 +607,51 @@ mod tests {
             chunks += 1;
             assert!(chunks < 100, "会话失效后流应在一两个复查周期内结束");
         }
+    }
+
+    /// 经真实的 hyper 连接取一次，返回小写的响应头。
+    async fn raw_get(addr: &str, path: &str, cookie: &str) -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let request = format!(
+            "GET {path} HTTP/1.1\r\nHost: {addr}\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n"
+        );
+        stream.write_all(request.as_bytes()).await.unwrap();
+        let mut raw = Vec::new();
+        stream.read_to_end(&mut raw).await.unwrap();
+        let raw = String::from_utf8_lossy(&raw).to_lowercase();
+        raw.split("\r\n\r\n").next().unwrap().to_string()
+    }
+
+    #[tokio::test]
+    async fn whole_responses_keep_content_length_and_streams_stay_chunked() {
+        let routes = Router::new()
+            .route(
+                "/v1/videos",
+                get(|| async { Json(serde_json::json!([{ "name": "a.flv" }])) }),
+            )
+            .route(
+                "/v1/danmaku",
+                get(|| async {
+                    let chunks = [Ok::<_, std::io::Error>(bytes::Bytes::from_static(b"x"))];
+                    Body::from_stream(futures::stream::iter(chunks))
+                }),
+            )
+            .route_layer(from_fn(require_permission));
+        let (_dir, backend, app) = app_with(routes).await;
+        seed(&backend).await;
+        let cookie = login(&app, "ro", "viewer-password").await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let json = raw_get(&addr, "/v1/videos", &cookie).await;
+        assert!(json.starts_with("http/1.1 200"), "{json}");
+        assert!(json.contains("content-length: 18"), "{json}");
+        assert!(!json.contains("transfer-encoding"), "{json}");
+
+        let stream = raw_get(&addr, "/v1/danmaku", &cookie).await;
+        assert!(stream.starts_with("http/1.1 200"), "{stream}");
+        assert!(stream.contains("transfer-encoding: chunked"), "{stream}");
     }
 }
