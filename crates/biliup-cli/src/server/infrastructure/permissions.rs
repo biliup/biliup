@@ -240,6 +240,8 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         | "/v1/fleet/summary"
         | "/v1/fleet/ha"
         | "/v1/node/ha"
+        | "/v1/fleet/ha/candidates"
+        | "/v1/node/ha/candidates"
             if get =>
         {
             StreamerView
@@ -425,6 +427,10 @@ mod tests {
             assert_eq!(of(Method::GET, route), None);
         }
         assert_eq!(of(Method::POST, "/v1/node/ha"), None);
+        for route in ["/v1/fleet/ha/candidates", "/v1/node/ha/candidates"] {
+            assert_eq!(of(Method::GET, route), Some(Permission::StreamerView));
+            assert_eq!(of(Method::POST, route), None);
+        }
     }
 
     /// `export type <name> = 'a' | 'b'` 里的字符串字面量；单行或每行一个 `| 'x'` 都行。

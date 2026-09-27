@@ -8,7 +8,7 @@
 //! （Cookie、密码等本机密钥，控制面不下发）照常保存。
 //!
 //! 一主一备的备机与控制面双向同步时（H2），配对里的行不算托管（[`Managed::pair`]）：本机照常增删改，
-//! 改动由配对同步发给控制面；配置也不再由控制面分层下发。只有删配对里还在用的模板仍然 409。
+//! 改动由配对同步发给控制面；配置也不再由控制面分层下发。只有删配对里的模板（房间还在用的、单独加入配对的）仍然 409。
 
 use super::layers::{self, Object};
 use crate::server::config::Config;
@@ -72,7 +72,8 @@ impl Managed {
         view
     }
 
-    /// 删配对里的模板：用它的都是配对里的房间，删了会连带删掉它们（控制面上同样不让删在用的模板）
+    /// 删配对里的模板：用它的都是配对里的房间，删了会连带删掉它们（控制面上同样不让删在用的模板）；
+    /// 单独加入配对的模板删了也会被控制面那份补回来
     fn deletes_paired_template(&self, method: &Method, path: &str) -> bool {
         let Some(pair) = &self.pair else {
             return false;
@@ -187,8 +188,7 @@ pub async fn guard(State(handle): State<ManagedHandle>, request: Request, next: 
     } else if managed.blocks(&method, &path, &bytes) {
         return (StatusCode::CONFLICT, Json(ApiError::new(managed.message()))).into_response();
     } else if managed.deletes_paired_template(&method, &path) {
-        let message =
-            "这个模板在一主一备的两台之间同步，配对里的房间还在用它：先把这些房间改用别的模板";
+        let message = "这个模板在一主一备的两台之间同步：配对里的房间还在用它时先把这些房间改用别的模板，单独加入配对的模板到控制面的模板页删除";
         return (StatusCode::CONFLICT, Json(ApiError::new(message.into()))).into_response();
     }
     next.run(Request::from_parts(parts, Body::from(bytes)))

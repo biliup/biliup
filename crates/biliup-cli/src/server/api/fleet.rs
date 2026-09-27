@@ -93,6 +93,7 @@ pub fn router(controller: Arc<Controller>) -> Router<()> {
                 .delete(fleet_ha::delete_pair),
         )
         .route("/v1/fleet/ha/role", post(fleet_ha::switch_role))
+        .route("/v1/fleet/ha/candidates", get(fleet_ha::candidates))
         .route(
             "/v1/fleet/ha/sessions/{key}/{action}",
             post(fleet_ha::manual),

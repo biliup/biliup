@@ -43,6 +43,16 @@ pub struct Template {
     pub updated_at: i64,
 }
 
+impl Template {
+    /// 期望状态里下发给节点的样子
+    pub fn desired(self) -> DesiredTemplate {
+        DesiredTemplate {
+            id: self.id,
+            spec: self.spec,
+        }
+    }
+}
+
 #[derive(sqlx::FromRow)]
 struct TemplateRow {
     id: i64,
@@ -749,13 +759,7 @@ pub async fn desired_state(
         rooms.iter().map(Room::desired).collect(),
         templates
             .into_iter()
-            .map(|row| {
-                let template = Template::from(row);
-                DesiredTemplate {
-                    id: template.id,
-                    spec: template.spec,
-                }
-            })
+            .map(|row| Template::from(row).desired())
             .collect(),
     ))
 }

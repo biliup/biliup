@@ -847,7 +847,7 @@ async fn session(
                 }
                 Ok(Some(ControllerMessage::Welcome { .. })) => {}
                 Ok(Some(ControllerMessage::Ha(message))) => ha.message(message),
-                Ok(Some(ControllerMessage::Pair(message))) => ha.pair_message(message).await,
+                Ok(Some(ControllerMessage::Pair(message))) => ha.pair_message(message, &link).await,
                 Ok(None) | Err(_) => {
                     let reason = connection.closed().await;
                     return closed_outcome(close_code(&reason), true);

@@ -1645,7 +1645,7 @@ async fn the_local_node_is_mirrored_to_a_designated_standby() {
     assert!(matches!(refused, Err(Refused::NotFound(_))), "{refused:?}");
     assert!(!standby_state.exists());
 
-    let pair = pairing
+    let (pair, _) = pairing
         .designate(&controller, designate(standby, 1))
         .await
         .unwrap()
@@ -2469,6 +2469,259 @@ async fn the_upload_primary_switches_from_either_side_only_while_both_are_online
     );
     offline.stop();
 
+    pairing.shutdown();
+    local.shutdown().await;
+    controller.shutdown().await;
+}
+
+async fn local_template(services: &ServiceRegister, name: &str) -> i64 {
+    let insert: crate::server::infrastructure::models::upload_streamer::InsertUploadStreamer =
+        serde_json::from_value(serde_json::json!({ "template_name": name, "tags": [] })).unwrap();
+    ormlite::Insert::insert(insert, &services.pool)
+        .await
+        .unwrap()
+        .id
+}
+
+async fn local_streamer(services: &ServiceRegister, fields: serde_json::Value) -> i64 {
+    crate::server::services::streamers::add_streamer(
+        services,
+        serde_json::from_value(fields).unwrap(),
+    )
+    .await
+    .unwrap()
+    .id
+}
+
+async fn template_names(services: &ServiceRegister) -> Vec<String> {
+    let mut names: Vec<String> =
+        crate::server::infrastructure::models::upload_streamer::UploadStreamer::select()
+            .fetch_all(&services.pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| row.template_name)
+            .collect();
+    names.sort();
+    names
+}
+
+async fn sorted_urls(services: &ServiceRegister) -> Vec<String> {
+    let mut urls = local_urls(services).await;
+    urls.sort();
+    urls
+}
+
+/// 清单里的一行（`streamers` 或 `templates`）
+fn listed(view: &serde_json::Value, kind: &str, id: i64) -> serde_json::Value {
+    view[kind]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|row| row["id"] == id))
+        .cloned()
+        .unwrap_or_else(|| panic!("{kind} 里没有 {id}：{view}"))
+}
+
+/// 指定备机时备机上已有的本地主播与模板缺省全部纳入，勾掉的留作备机的本地行，不能纳入的逐条带原因。
+/// 加入是原地认下（监控不重建、不重复建行）
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn existing_standby_rows_join_the_pair_by_default_without_a_rebuild() {
+    use super::ha::pairing::{Designate, Pairing, Refused};
+    use axum::http::{Method, StatusCode};
+
+    let _role = super::ha::test_guard().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (controller, url, pool) = start_controller(dir.path()).await;
+    let fx = LocalFixture::new(dir.path()).await;
+    let pairing = Arc::new(Pairing::new(fx.services.clone(), dir.path()));
+    controller.attach_ha(pairing.clone());
+    let local = fx.attach(&controller).await;
+    controller.attach_local(local.clone());
+    pairing.resume(&controller, local.node_id()).await;
+    let primary = local.enable(&controller, false).await.unwrap().unwrap();
+    wait_for_node(&controller, primary, true, Duration::from_secs(30)).await;
+
+    let root = dir.path().join("standby");
+    let node_file = root.join("data/node.json");
+    let joined = node::join(
+        &ticket_for(&controller, &pool, &url).await,
+        false,
+        &node_file,
+    )
+    .await
+    .unwrap();
+    let standby = joined.node_id;
+    let s = node_services(&root).await;
+    let managed = ManagedHandle::default();
+    let agent = start_standby(&node_file, &s, &managed).await;
+    wait_for_node(&controller, standby, true, Duration::from_secs(30)).await;
+    let c = fx.services.clone();
+
+    // 备机上的本地行：用模板的主播 a、要勾掉的 b、带 run 命令的 h、没有主播用的模板；主机「本机」上的 p
+    let (a_url, b_url, h_url, p_url) = (
+        "https://stuck.example/a",
+        "https://stuck.example/b",
+        "https://stuck.example/h",
+        "https://stuck.example/p",
+    );
+    let t1 = local_template(&s, "备机模板A").await;
+    let t2 = local_template(&s, "备机单独模板").await;
+    let a = local_streamer(
+        &s,
+        serde_json::json!({ "url": a_url, "remark": "备机A", "upload_streamers_id": t1 }),
+    )
+    .await;
+    let b = local_streamer(&s, serde_json::json!({ "url": b_url, "remark": "备机B" })).await;
+    let h = local_streamer(
+        &s,
+        serde_json::json!({ "url": h_url, "remark": "备机钩子", "postprocessor": [{ "run": "echo" }] }),
+    )
+    .await;
+    local_streamer(&c, serde_json::json!({ "url": p_url, "remark": "本机P" })).await;
+    let worker = |services: &ServiceRegister, id: i64| {
+        let services = services.clone();
+        async move { services.managers.get_room_by_id(id).await.unwrap() }
+    };
+    let worker_a = worker(&s, a).await;
+
+    // 确认弹层的清单：能纳入的缺省都纳入，带 run 命令的不能纳入并说明原因
+    let preview = pairing
+        .candidates(&controller, Some(standby))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(preview["paired"], false);
+    let view = &preview["standby"];
+    for id in [a, b] {
+        assert_eq!(listed(view, "streamers", id)["included"], true, "{view}");
+    }
+    let hooks = listed(view, "streamers", h);
+    assert_eq!(hooks["included"], false);
+    assert!(
+        hooks["reason"].as_str().unwrap().contains("run 命令"),
+        "{hooks}"
+    );
+    for id in [t1, t2] {
+        assert_eq!(listed(view, "templates", id)["included"], true, "{view}");
+    }
+    let refused = pairing
+        .candidates(&controller, Some(primary))
+        .await
+        .unwrap();
+    assert!(matches!(refused, Err(Refused::Invalid(_))), "{refused:?}");
+
+    // 指定备机，勾掉 b：a（连同它的模板）与单独的模板纳入，b 留作备机的本地行，h 带着原因不纳入
+    let designate: Designate = serde_json::from_value(serde_json::json!({
+        "standby": standby, "mode": 1, "adopt": { "streamers": [a, h] },
+    }))
+    .unwrap();
+    let (_, adoption) = pairing
+        .designate(&controller, designate)
+        .await
+        .unwrap()
+        .unwrap();
+    let adoption = adoption.expect("新的备机：应答里带纳入的清单");
+    assert_eq!(listed(&adoption, "streamers", a)["included"], true);
+    let unchecked = listed(&adoption, "streamers", b);
+    assert_eq!(unchecked["included"], false);
+    assert!(
+        unchecked.get("reason").is_none(),
+        "勾掉的不算不能纳入：{unchecked}"
+    );
+    let hooks = listed(&adoption, "streamers", h);
+    assert_eq!(hooks["included"], false);
+    assert!(
+        hooks["reason"].as_str().unwrap().contains("run 命令"),
+        "{hooks}"
+    );
+    for id in [t1, t2] {
+        assert_eq!(listed(&adoption, "templates", id)["included"], true);
+    }
+
+    let fleet_room = |url: &'static str| {
+        let controller = controller.clone();
+        async move {
+            super::assignments::list_rooms(controller.pool())
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|room| room.spec.url == url && room.deleted_at.is_none())
+        }
+    };
+    let paired = |id: i64| {
+        managed
+            .read()
+            .unwrap()
+            .as_ref()
+            .and_then(|view| view.pair.clone())
+            .is_some_and(|pair| pair.streamers.contains(&id))
+    };
+    eventually(
+        "the included rows join the pair",
+        Duration::from_secs(40),
+        || {
+            let c = c.clone();
+            async move {
+                fleet_room(a_url)
+                    .await
+                    .is_some_and(|room| room.node_id == Some(primary))
+                    && paired(a)
+                    && remark_on(&c, a_url).await.as_deref() == Some("备机A")
+                    && template_names(&c).await == ["备机单独模板", "备机模板A"]
+            }
+        },
+    )
+    .await;
+    assert!(
+        Arc::ptr_eq(&worker_a, &worker(&s, a).await),
+        "备机原地认下 a，监控不重建"
+    );
+    let primary_a = row_by_url(&c, a_url).await.unwrap();
+    let primary_template =
+        crate::server::infrastructure::models::upload_streamer::UploadStreamer::select()
+            .where_("id = ?")
+            .bind(primary_a.upload_streamers_id.unwrap())
+            .fetch_one(&c.pool)
+            .await
+            .unwrap();
+    assert_eq!(primary_template.template_name, "备机模板A");
+    let standby_state = super::ha::adopt::fleet_state(node_file.parent().unwrap());
+    let adopted: Vec<i64> = standby_state
+        .templates
+        .values()
+        .map(|t| t.local_id)
+        .collect();
+    assert!(
+        adopted.contains(&t1) && adopted.contains(&t2),
+        "{adopted:?}"
+    );
+    assert_eq!(template_names(&s).await, ["备机单独模板", "备机模板A"]);
+    assert_eq!(sorted_urls(&s).await, [a_url, b_url, h_url]);
+    assert_eq!(sorted_urls(&c).await, [a_url, p_url]);
+    assert!(fleet_room(b_url).await.is_none() && fleet_room(h_url).await.is_none());
+
+    // 备机本机的清单：勾掉的 b 仍是本地行、缺省纳入，带 run 命令的 h 说明原因
+    let (status, body) = node_ha_request(
+        &s,
+        Method::GET,
+        "/v1/node/ha/candidates",
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let unchecked = listed(&body, "streamers", b);
+    assert_eq!(
+        (unchecked["state"].clone(), unchecked["included"].clone()),
+        ("local".into(), true.into())
+    );
+    assert!(
+        listed(&body, "streamers", h)["reason"]
+            .as_str()
+            .unwrap()
+            .contains("run 命令")
+    );
+    assert_eq!(body["streamers"].as_array().unwrap().len(), 2, "{body}");
+
+    agent.shutdown().await;
     pairing.shutdown();
     local.shutdown().await;
     controller.shutdown().await;

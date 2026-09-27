@@ -301,6 +301,9 @@ pub enum PairMessage {
     /// 改配对设置：控制面问节点能不能换上传主机，或节点请控制面换上传主机、改模式与参数
     Ha(HaChange),
     HaResult(HaResult),
+    /// 控制面问节点有哪些还没纳入配对的本地主播与模板（指定备机之前也问，节点不在配对里也回）
+    InventoryAsk(InventoryAsk),
+    Inventory(Inventory),
 }
 
 impl PairMessage {
@@ -311,6 +314,8 @@ impl PairMessage {
             PairMessage::Ack(_) => "ack",
             PairMessage::Ha(_) => "ha",
             PairMessage::HaResult(_) => "ha_result",
+            PairMessage::InventoryAsk(_) => "inventory_ask",
+            PairMessage::Inventory(_) => "inventory",
         }
     }
 }
@@ -323,6 +328,9 @@ pub struct PairEdit {
     pub stamp: Stamp,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<Value>,
+    /// 单独加入配对的模板：没有房间用它也留在配对里
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pin: bool,
 }
 
 /// 凭据文件的内容只在这里出现：不进日志（`Debug` 抹掉，帧日志也抹掉）、不进控制面库
@@ -391,6 +399,138 @@ pub struct PairState {
     pub templates: Vec<PairRef>,
     #[serde(default)]
     pub gone: Vec<Gone>,
+    /// 请节点把这些本地行加入配对（指定备机时纳入的既有主播与模板、之后按 id 加入的）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adopt: Option<Box<AdoptRequest>>,
+}
+
+/// 控制面请节点加入配对的本地行：节点上的本地 id → 请求它的 `generation`。一直随期望状态带着、只增不减，
+/// 节点只收 `generation` 比它处理过的大的那些（同一行再请求一次时它的 `generation` 跟着变大）
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdoptRequest {
+    pub generation: u64,
+    #[serde(default, with = "id_pairs")]
+    pub rooms: BTreeMap<i64, u64>,
+    #[serde(default, with = "id_pairs")]
+    pub templates: BTreeMap<i64, u64>,
+}
+
+/// 按 `[[id, generation], …]` 收发：帧是按 `type` 区分的枚举，serde 先整帧缓存再解，
+/// 缓存里映射的键都是字符串，解不成 `i64`
+mod id_pairs {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::collections::BTreeMap;
+
+    pub fn serialize<S: Serializer>(
+        map: &BTreeMap<i64, u64>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(map)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<BTreeMap<i64, u64>, D::Error> {
+        Ok(Vec::<(i64, u64)>::deserialize(deserializer)?
+            .into_iter()
+            .collect())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InventoryAsk {
+    pub id: u64,
+}
+
+/// 节点上还没纳入配对的本地主播与模板
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Inventory {
+    pub id: u64,
+    #[serde(default)]
+    pub rooms: Vec<LocalRow>,
+    #[serde(default)]
+    pub templates: Vec<LocalRow>,
+}
+
+/// 一台机器上还没纳入配对的一个本地主播或模板。只有名字、地址与判断能不能加入要的几项，
+/// 钩子命令、覆写里的 Cookie、凭据路径都不带
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalRow {
+    /// 这台机器上的本地 id
+    pub id: i64,
+    /// 主播的备注、模板的模板名
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// 主播用的本地模板 id
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template: Option<i64>,
+    /// 主播带 run 命令的钩子
+    #[serde(default)]
+    pub hooks: bool,
+    /// 主播覆写里的下载器（控制面按自己的配置判断是不是边录边传）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub downloader: Option<Value>,
+    /// 正在录，或上一场还没投完：空闲了才加入
+    #[serde(default)]
+    pub busy: bool,
+    #[serde(default)]
+    pub state: RowState,
+    /// 不能加入的原因；为空就能加入
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// 上次加入时控制面没收下的原因（改好之后可以再加）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refused: Option<String>,
+    /// 这一次请求有没有纳入（指定备机与加入接口的应答里才有）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub included: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RowState {
+    /// 本地行，没有要加入
+    #[default]
+    Local,
+    /// 要加入，等它空闲（没在录、上一场投完了）
+    Waiting,
+    /// 已经发出，等控制面收下、两台落地
+    Joining,
+}
+
+impl AdoptRequest {
+    /// 再请求这些行（`generation` 至少是 `now`，时钟回拨也不变小）
+    pub fn add(&mut self, rooms: &[i64], templates: &[i64], now: u64) {
+        self.generation = self.generation.saturating_add(1).max(now);
+        for id in rooms {
+            self.rooms.insert(*id, self.generation);
+        }
+        for id in templates {
+            self.templates.insert(*id, self.generation);
+        }
+    }
+
+    /// `seen` 之后才请求的行
+    pub fn since(&self, seen: u64) -> (Vec<i64>, Vec<i64>) {
+        let fresh = |ids: &BTreeMap<i64, u64>| {
+            ids.iter()
+                .filter(|(_, generation)| **generation > seen)
+                .map(|(id, _)| *id)
+                .collect()
+        };
+        (fresh(&self.rooms), fresh(&self.templates))
+    }
+}
+
+impl Inventory {
+    pub fn new(id: u64, (rooms, templates): (Vec<LocalRow>, Vec<LocalRow>)) -> Self {
+        Inventory {
+            id,
+            rooms,
+            templates,
+        }
+    }
 }
 
 impl PairState {
@@ -477,6 +617,31 @@ mod tests {
         let mut fresh = Book::default();
         assert_eq!(fresh.judge("config/a", &stamp(9_000, N), C), Verdict::Take);
         assert_eq!(fresh.write("config/b", C, 10, None).at, 9_001);
+    }
+
+    /// 加入请求随期望状态走：节点那边经按 `type` 区分的帧解出来仍是同一份，只收比处理过的新的
+    #[test]
+    fn an_adopt_request_survives_the_desired_state_frame() {
+        use crate::server::fleet::protocol::{ControllerMessage, DesiredState, decode};
+        let mut request = AdoptRequest::default();
+        request.add(&[1, 3], &[2], 7);
+        request.add(&[3], &[], 7);
+        assert_eq!(request.generation, 8);
+        let desired = DesiredState {
+            pair: Some(PairState {
+                adopt: Some(Box::new(request.clone())),
+                ..PairState::default()
+            }),
+            ..DesiredState::default()
+        };
+        let body = serde_json::to_vec(&ControllerMessage::DesiredState(desired)).unwrap();
+        let ControllerMessage::DesiredState(decoded) = decode(&body).unwrap() else {
+            panic!("不是期望状态");
+        };
+        let decoded = *decoded.pair.and_then(|pair| pair.adopt).unwrap();
+        assert_eq!(decoded, request);
+        assert_eq!(decoded.since(0), (vec![1, 3], vec![2]));
+        assert_eq!(decoded.since(7), (vec![3], vec![]));
     }
 
     #[test]

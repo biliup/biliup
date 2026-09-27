@@ -165,6 +165,7 @@ pub fn pair_state(book: &Book, set: &PairSet) -> PairState {
                 stamp: record.stamp,
             })
             .collect(),
+        ..PairState::default()
     }
 }
 
@@ -223,22 +224,25 @@ pub fn plan(book: &mut Book, pair: &PairState, fleet: &FleetState, primary: Side
 }
 
 /// 节点上一个配对行此刻的样子
-struct NodeRoom {
-    spec: RoomSpec,
-    template: Option<i64>,
-    paused: bool,
+pub(super) struct NodeRoom {
+    pub spec: RoomSpec,
+    pub template: Option<i64>,
+    pub paused: bool,
 }
 
 /// 读不出配对行的原因
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Unreadable {
+pub(super) enum Unreadable {
     /// 行没了（本机删掉了）
     Missing,
     /// 行在，监控还没建好（读不出暂停状态），这一轮不认
     Unknown,
 }
 
-async fn node_room(services: &ServiceRegister, local: i64) -> Result<NodeRoom, Unreadable> {
+pub(super) async fn node_room(
+    services: &ServiceRegister,
+    local: i64,
+) -> Result<NodeRoom, Unreadable> {
     let row = reconcile::local_row(services, local)
         .await
         .ok_or(Unreadable::Missing)?;
@@ -260,7 +264,7 @@ async fn node_room(services: &ServiceRegister, local: i64) -> Result<NodeRoom, U
 }
 
 /// 节点上的模板行按控制面模板的形状：凭据路径换回 mid（按登记的账号，或直接读那个文件）
-async fn node_template(
+pub(super) async fn node_template(
     services: &ServiceRegister,
     accounts: &[LocalAccount],
     local: i64,
@@ -313,6 +317,18 @@ async fn join_template(
     file.enqueue(&key);
     info!(template = local, "配对同步：房间用的本机模板加入配对");
     Some(uid)
+}
+
+/// 节点：单独加入配对的本机模板（没有房间用它），返回它的键。已经在配对里的也返回键
+pub async fn join_template_alone(
+    file: &mut PairFile,
+    services: &ServiceRegister,
+    local: i64,
+    now: i64,
+) -> Option<String> {
+    let accounts = accounts::scan(&services.pool).await;
+    let uid = join_template(file, services, &accounts, local, now).await?;
+    Some(template_key(&uid))
 }
 
 /// 节点上一个配对行的内容；房间用的模板不在配对里时随之加入
@@ -563,11 +579,11 @@ fn hooks(spec: &RoomSpec) -> Value {
     ])
 }
 
-const HOOKS: &str = "节点上改的房间带 run 命令（能执行任意命令），配对同步不接受；钩子请到控制面的「节点 › 房间」修改";
-const SYNC_DOWNLOADER: &str = "边录边传（sync-downloader）的房间不纳入一主一备，两台同时录会出两份稿件；请到控制面的「节点 › 房间」设置";
-const URL_TAKEN: &str = "这个直播间地址已经在控制面的房间列表里了";
+pub(super) const HOOKS: &str = "节点上改的房间带 run 命令（能执行任意命令），配对同步不接受；钩子请到控制面的「节点 › 房间」修改";
+pub(super) const SYNC_DOWNLOADER: &str = "边录边传（sync-downloader）的房间不纳入一主一备，两台同时录会出两份稿件；请到控制面的「节点 › 房间」设置";
+pub(super) const URL_TAKEN: &str = "这个直播间地址已经在控制面的房间列表里了";
 
-fn internal(report: error_stack::Report<crate::server::errors::AppError>) -> String {
+pub(super) fn internal(report: error_stack::Report<crate::server::errors::AppError>) -> String {
     format!("控制面出错：{report}")
 }
 

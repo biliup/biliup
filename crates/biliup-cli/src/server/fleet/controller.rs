@@ -1129,6 +1129,7 @@ mod tests {
             key: "config/user".into(),
             stamp,
             value: Some(serde_json::json!({ "bili_cookie": "SESSDATA=PLACEHOLDER" })),
+            pin: false,
         }));
         let logged = redacted_frame(&serde_json::to_vec(&edit).unwrap());
         assert!(!logged.contains("PLACEHOLDER"), "{logged}");

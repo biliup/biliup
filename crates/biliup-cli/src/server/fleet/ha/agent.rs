@@ -6,13 +6,14 @@
 //! 备机录的场次只把分段收下（[`super::upload::Plan::Collect`]），要投时另起任务、占上传池的一个槽位，
 //! 按场次里记下的开播信息重建上下文再投（[`super::upload::run_standby`]）。
 
+use super::adopt;
 use super::key;
-use super::member::Member;
+use super::member::{Member, member_for};
 use super::outbox::{self, PairFile};
 use super::params::{HaMode, HaParams};
 use super::primary::Primary;
 use super::standby::{Out, PrimaryView, SavedSegment, Session, StandbyCore, State, UnitData};
-use super::sync::{PairMessage, Side};
+use super::sync::{Inventory, PairMessage, Side};
 use super::upload::{self, Plan, Submitted};
 use super::wire::{HaAssignment, HaMessage, ManualAction};
 use super::{Hold, Link, Role, Unit, UnitOutput, set_role, sync_downloader};
@@ -46,7 +47,7 @@ pub const PRIMARY_DB_NAME: &str = "ha-primary.sqlite3";
 const STATE_FILE_VERSION: u32 = 1;
 const TICK: Duration = Duration::from_secs(1);
 /// 认下的录制段留多久（按开播时刻）
-const UNIT_KEEP_MS: i64 = 48 * 60 * 60 * 1000;
+pub(super) const UNIT_KEEP_MS: i64 = 48 * 60 * 60 * 1000;
 
 pub fn state_path(node_file: &Path) -> PathBuf {
     node_file.with_file_name(STATE_FILE_NAME)
@@ -456,7 +457,8 @@ impl Standby {
     }
 
     /// 镜像房间录下的段一律不走普通投稿流程：认下的交给场次，认不下的（开录时还不知道它是镜像房间、
-    /// 场次已经清掉、配对已解除）只把录像留在本地。备机自己分派到的普通房间照常投
+    /// 场次已经清掉、配对已解除）只把录像留在本地。备机自己分派到的普通房间照常投，
+    /// 开录时还是本地行、之后才加入配对的那一段也照常投
     pub(crate) fn plan(self: &Arc<Self>, unit: &Unit) -> Option<Plan> {
         let tracked = self.id_of(unit);
         if self.retired() {
@@ -474,9 +476,13 @@ impl Standby {
             Some(_) => Some(Plan::Keep {
                 reason: "这一场备机已经处理完",
             }),
-            None if self.room_of(&unit.url).is_some() => Some(Plan::Keep {
-                reason: "开录时还没认下这个镜像房间",
-            }),
+            None if self.room_of(&unit.url).is_some()
+                && !adopt::joined_after(&self.services, &unit.url, unit.started_at) =>
+            {
+                Some(Plan::Keep {
+                    reason: "开录时还没认下这个镜像房间",
+                })
+            }
             None => None,
         }
     }
@@ -907,8 +913,15 @@ impl NodeHa {
         }
     }
 
-    /// 控制面发来的同步消息。控制面问能不能换上传主机时按本机有没有做到一半的场次回话
-    pub async fn pair_message(&self, message: PairMessage) {
+    /// 控制面发来的同步消息。控制面问能不能换上传主机时按本机有没有做到一半的场次回话；
+    /// 问本机还没纳入配对的本地行时（指定备机之前也问）照实回
+    pub async fn pair_message(&self, message: PairMessage, link: &Link) {
+        if let PairMessage::InventoryAsk(ask) = &message {
+            if self.enabled {
+                link.pair(PairMessage::Inventory(self.inventory(ask.id).await));
+            }
+            return;
+        }
         let Some(member) = &self.pair else {
             debug!(op = message.op(), "pair frame while not paired");
             return;
@@ -928,10 +941,24 @@ impl NodeHa {
         }
     }
 
-    /// 落地期望状态：与控制面同步时本机版本更新的配对行先不动（[`Member::reconcile`]）
+    async fn inventory(&self, id: u64) -> Inventory {
+        let fleet = adopt::fleet_state(&self.data_dir());
+        let rows = match &self.pair {
+            Some(member) => member.local_rows(&fleet).await,
+            None => adopt::local_rows(&self.services, &fleet, None).await,
+        };
+        Inventory::new(id, rows)
+    }
+
+    /// 落地期望状态：与控制面同步时本机版本更新的配对行先不动（[`Member::reconcile`]）。
+    /// 控制面的「本机」按控制面的同步端落地（加入配对的本地行原地认下，[`Member::reconcile_local`]）
     pub async fn reconcile(&self, desired: DesiredState, reconciler: &mut Reconciler) -> Ack {
         match &self.pair {
             Some(member) => member.reconcile(desired, reconciler).await,
+            None if !self.enabled => match member_for(&self.services) {
+                Some(member) => member.reconcile_local(desired, reconciler).await,
+                None => reconciler.apply(desired).await,
+            },
             None => reconciler.apply(desired).await,
         }
     }
@@ -1375,6 +1402,47 @@ mod tests {
         let ha = f.resume(false).await;
         assert!(!ha.is_standby());
         assert!(!f.state_file().exists());
+    }
+
+    /// 本地行录完、在上传池里排队时加入了配对：轮到投时这个地址已经是镜像房间，这一段照本地行投；
+    /// 开始加入之后开录、又没认下的段照旧只留在本地
+    #[tokio::test]
+    async fn a_unit_recorded_before_its_row_joined_uploads_as_a_local_row() {
+        let _guard = crate::server::fleet::ha::test_guard().await;
+        let f = Fixture::new().await;
+        let (link, _frames) = node_link();
+        let started_at = now_ms() - 10 * 60_000;
+        let queued = f.context(started_at).await;
+        crate::server::fleet::ha::unit_started(&queued);
+        let owner = crate::server::fleet::ha::member::identity(&f.services);
+        adopt::hold(owner, URL, started_at + 60_000);
+
+        let mut ha = f.resume(false).await;
+        assert!(ha.assign(Some(assignment(1)), &[], &link).await.is_some());
+        assert!(
+            crate::server::fleet::ha::upload_plan(&queued)
+                .await
+                .is_none(),
+            "开录时还是本地行：照常投"
+        );
+        let unknown = f.context(started_at + 120_000).await;
+        assert!(
+            matches!(
+                crate::server::fleet::ha::upload_plan(&unknown).await,
+                Some(Plan::Keep { .. })
+            ),
+            "开始加入之后开录、没认下的段只留在本地"
+        );
+
+        adopt::release_all(owner);
+        assert!(
+            matches!(
+                crate::server::fleet::ha::upload_plan(&queued).await,
+                Some(Plan::Keep { .. })
+            ),
+            "同步端停下时加入记录一起清掉"
+        );
+        ha.shutdown();
     }
 
     /// 备机走真实的录制钩子收下分段；主机投稿失败后按场次记下的开播信息重建上下文、经测试替身投出，

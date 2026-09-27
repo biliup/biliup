@@ -10,6 +10,7 @@
 //! 配置里有 Cookie、密码，凭据文件更是整份密钥。
 
 use super::Link;
+use super::adopt;
 use super::outbox::{self, PairFile, Queued};
 use super::rooms::{self, Arbiter, PairSet};
 use super::sync::{
@@ -109,7 +110,7 @@ fn modified_ms(path: &Path) -> Option<i64> {
 static ANY: AtomicBool = AtomicBool::new(false);
 static MEMBERS: Mutex<Vec<(usize, Weak<Member>)>> = Mutex::new(Vec::new());
 
-fn identity(services: &ServiceRegister) -> usize {
+pub(super) fn identity(services: &ServiceRegister) -> usize {
     Arc::as_ptr(&services.config) as *const () as usize
 }
 
@@ -142,8 +143,8 @@ fn unregister(services: &ServiceRegister) {
     ANY.store(!members.is_empty(), Ordering::Release);
 }
 
-struct State {
-    file: PairFile,
+pub(super) struct State {
+    pub(super) file: PairFile,
     /// 这条连接上已经发出的最大序号
     sent: u64,
 }
@@ -151,13 +152,13 @@ struct State {
 /// 配对里一台机器的同步端
 pub struct Member {
     side: Side,
-    dir: PathBuf,
+    pub(super) dir: PathBuf,
     path: PathBuf,
-    services: ServiceRegister,
+    pub(super) services: ServiceRegister,
     /// 控制面：认出 Fleet 上的改动与落地节点的房间修改一个一个来（先拿它再拿 `state`；
     /// 落地时会拿控制面的分派锁，所以拿着 `state` 时不改 Fleet）
     fleet: tokio::sync::Mutex<()>,
-    state: tokio::sync::Mutex<State>,
+    pub(super) state: tokio::sync::Mutex<State>,
     link: Mutex<Option<Link>>,
     /// 当前的主机（同一毫秒的两条修改谁赢）
     primary: Mutex<Side>,
@@ -202,6 +203,7 @@ impl Member {
                 member.seed(&mut state);
             }
             member.scan_locked(&mut state).await;
+            member.rearm(&state);
             member.persist(&state);
             info!(
                 side = side.as_str(),
@@ -237,6 +239,7 @@ impl Member {
         for task in self.tasks.lock().unwrap().drain(..) {
             task.abort();
         }
+        adopt::release_all(identity(&self.services));
         unregister(&self.services);
     }
 
@@ -276,7 +279,7 @@ impl Member {
         }
     }
 
-    fn persist(&self, state: &State) {
+    pub(super) fn persist(&self, state: &State) {
         if let Err(e) = state.file.save(&self.path) {
             warn!(error = ?e, "could not write {}", self.path.display());
         }
@@ -365,7 +368,12 @@ impl Member {
     /// 本机上可能有改动：扫一遍，有就排队、发出
     pub async fn scan(&self) {
         let mut state = self.state.lock().await;
-        if self.scan_locked(&mut state).await {
+        let mut changed = self.scan_locked(&mut state).await;
+        if self.side == Side::Node && state.file.adoption.pending() {
+            let fleet = adopt::fleet_state(&self.dir);
+            changed |= self.advance(&mut state, &fleet, now_ms()).await;
+        }
+        if changed {
             self.persist(&state);
             self.flush_locked(&mut state).await;
         }
@@ -407,6 +415,7 @@ impl Member {
             return reconciler.apply(desired).await;
         };
         let mut state = self.state.lock().await;
+        state.file.adoption.take(pair.adopt.as_deref());
         let primary = self.primary();
         let plan = rooms::plan(&mut state.file.book, &pair, reconciler.state(), primary);
         let (desired_rooms, desired_templates) = (desired.rooms.clone(), desired.templates.clone());
@@ -425,8 +434,19 @@ impl Member {
             primary,
         )
         .await;
+        self.landed(&mut state, reconciler.state());
         self.persist(&state);
         ack
+    }
+
+    /// 控制面：主机「本机」（同一个进程里的节点代理）落地期望状态：单独加入配对的模板没有房间用也留着
+    pub async fn reconcile_local(&self, desired: DesiredState, reconciler: &mut Reconciler) -> Ack {
+        if self.side != Side::Controller {
+            return reconciler.apply(desired).await;
+        }
+        let pinned = self.state.lock().await.file.adoption.pinned.clone();
+        reconciler.pin_templates(pinned);
+        reconciler.apply(desired).await
     }
 
     /// 节点：配对中本机新建了主播（`POST /v1/streamers` 成功之后），加入配对发给控制面
@@ -560,6 +580,7 @@ impl Member {
                 key: queued.key.clone(),
                 stamp,
                 value: Some(config_value(&object, name)),
+                pin: false,
             }));
         }
         if let Some(mid) = queued.key.strip_prefix(ACCOUNT) {
@@ -591,6 +612,7 @@ impl Member {
                 key: queued.key.clone(),
                 stamp,
                 value,
+                pin: file.adoption.pins.contains(&queued.key),
             }));
         }
         debug!(key = queued.key, "配对同步：不认识的键，不发");
@@ -656,13 +678,15 @@ impl Member {
                         "配对同步：对端没有采用本机的修改，按对端的那份为准"
                     );
                     // 本机新建、控制面没收下的主播与模板留作本机的，不在配对里
-                    if state
+                    let local = state
                         .file
                         .book
                         .get(&rejected.key)
-                        .is_some_and(|record| record.local.is_some() && record.fleet.is_none())
-                    {
+                        .filter(|record| record.fleet.is_none())
+                        .and_then(|record| record.local);
+                    if let Some(local) = local {
                         state.file.book.records.remove(&rejected.key);
+                        self.refused(&mut state, &rejected.key, local, &rejected.reason);
                     }
                 }
             }
@@ -713,6 +737,9 @@ impl Member {
         let mut state = self.state.lock().await;
         match result {
             Ok(Some(id)) => {
+                if edit.pin && !room {
+                    state.file.adoption.pinned.insert(id);
+                }
                 let hash = rooms::fleet_digest(arbiter, &state.file.book, &edit.key, id).await;
                 state
                     .file
@@ -1253,6 +1280,7 @@ pub(crate) mod tests {
                     ..recorded
                 },
                 value: Some(serde_json::json!("05:00:00")),
+                pin: false,
             }),
             None,
         )
@@ -1270,6 +1298,7 @@ pub(crate) mod tests {
                     side: Side::Controller,
                 },
                 value: Some(serde_json::json!("not a number")),
+                pin: false,
             }),
             None,
         )

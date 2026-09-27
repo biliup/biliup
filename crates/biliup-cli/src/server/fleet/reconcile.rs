@@ -129,6 +129,11 @@ pub fn state_path(node_file: &Path) -> PathBuf {
     node_file.with_file_name(STATE_FILE_NAME)
 }
 
+/// 读 `fleet-state.json`（看这台机器上哪些行归 Fleet 管）；没有或读不了时为空
+pub fn read_state(path: &Path) -> Option<FleetState> {
+    load(path)
+}
+
 fn load(path: &Path) -> Option<FleetState> {
     let text = std::fs::read_to_string(path).ok()?;
     match serde_json::from_str::<FleetState>(&text) {
@@ -325,6 +330,8 @@ pub struct Reconciler {
     local: bool,
     managed: ManagedHandle,
     state: FleetState,
+    /// 主机「本机」上单独加入配对的模板：没有房间用也留着
+    pinned: BTreeSet<i64>,
 }
 
 impl Reconciler {
@@ -356,6 +363,7 @@ impl Reconciler {
             local,
             managed,
             state,
+            pinned: BTreeSet::new(),
         };
         reconciler.recover().await;
         reconciler
@@ -503,6 +511,11 @@ impl Reconciler {
         self.apply_paired(desired, None).await
     }
 
+    /// 主机「本机」上单独加入配对的模板（H2）：没有房间用也留着，只管紧接着的这一次落地
+    pub fn pin_templates(&mut self, pinned: BTreeSet<i64>) {
+        self.pinned = pinned;
+    }
+
     /// 与控制面双向同步时的落地：`plan` 里本机更新的行不动，本机新建的行按 id 认下；
     /// 配对里的行要改时先比一比本机的行，已经一样（本机刚改过、控制面收下了）就不重建监控。
     /// `plan` 为空表示没有配对
@@ -580,6 +593,12 @@ impl Reconciler {
         // 配对里的模板都留着：用它的房间可能正因为本机改过而这一次不动
         let mut needed: BTreeSet<i64> = wanted.iter().filter_map(|room| room.template_id).collect();
         needed.extend(resolved.keys().copied().filter(|id| paired_template(id)));
+        needed.extend(
+            resolved
+                .keys()
+                .copied()
+                .filter(|id| self.pinned.contains(id)),
+        );
         for template in &needed {
             if keep_template(template) && self.state.templates.contains_key(template) {
                 continue;
@@ -638,6 +657,7 @@ impl Reconciler {
         }
 
         self.state.pair = plan.map(|plan| plan.rows);
+        self.pinned.clear();
         self.state.state_version = Some(desired.version);
         self.persist();
         self.publish();

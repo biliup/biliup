@@ -7,8 +7,10 @@
 //!
 //! 录制与投稿流程里只有几行调用（`core/monitor.rs`、`common/download.rs`、`common/upload.rs`）。
 //! 主机的一侧在 [`primary`]，备机的决策在 [`standby`]、接线在 [`agent`]。
-//! 没有配对时 [`ROLE`] 是空的，每处调用只读一次原子变量就返回：不分配、不记日志、不改任何状态。
+//! 没有配对时 [`ROLE`] 是空的，每处调用只读一次原子变量就返回（开录前多读一个「有没有正在加入配对的主播」）：
+//! 不分配、不记日志、不改任何状态。
 
+pub mod adopt;
 pub mod agent;
 pub mod capture;
 #[cfg(test)]
@@ -192,8 +194,11 @@ fn uploads(ctx: &Context) -> bool {
         .is_some_and(|config| !config.is_noop_uploader())
 }
 
-/// 监控循环检测到开播、开录之前（`core/monitor.rs`）
+/// 监控循环检测到开播、开录之前（`core/monitor.rs`）。正在加入配对的主播（[`adopt`]）先挡着
 pub fn hold_recording(url: &str) -> Option<Hold> {
+    if let Some(hold) = adopt::holding(url) {
+        return Some(hold);
+    }
     match role()? {
         Role::Primary(primary) => primary.hold(url),
         Role::Standby(standby) => standby.hold(url),

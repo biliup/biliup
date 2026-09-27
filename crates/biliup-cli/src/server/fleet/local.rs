@@ -76,6 +76,11 @@ impl LocalNode {
         reconcile::state_path(&self.file)
     }
 
+    /// 「本机」上哪些行归 Fleet 管（`data/fleet-state.json`）；没启用过时为空
+    pub fn fleet_state(&self) -> reconcile::FleetState {
+        reconcile::read_state(&self.state_path()).unwrap_or_default()
+    }
+
     /// 控制面启动时：有 `local-node.json` 就接着跑，按缓存认回托管行后连上来对账
     pub async fn resume(&self, controller: &Controller) {
         if !self.file.exists() {

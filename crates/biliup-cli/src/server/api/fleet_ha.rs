@@ -2,8 +2,12 @@
 //!
 //! 控制面（路由在 `fleet.rs` 里注册）：
 //! - `GET /v1/fleet/ha`：配对、备机连接、不纳入配对的房间与最近的场次，归 `streamer.view`
-//! - `PUT /v1/fleet/ha`：指定备机或改模式 / 参数（`{"standby": 节点 id, "mode": 1|2, "params": {...}}`），
-//!   `DELETE /v1/fleet/ha`：解除配对，都归 `node.manage`
+//! - `PUT /v1/fleet/ha`：指定备机或改模式 / 参数（`{"standby": 节点 id, "mode": 1|2, "params": {...},
+//!   "adopt": {"streamers": [...], "templates": [...]}}`），`DELETE /v1/fleet/ha`：解除配对，都归 `node.manage`。
+//!   指定一台新的备机时它上面已有的本地主播与模板缺省全部纳入配对，`adopt` 里列出的才纳入（某一项不填就是
+//!   这一项全部）；应答的 `adoption` 逐条列出纳入与否、不能纳入的原因
+//! - `GET /v1/fleet/ha/candidates?standby=节点 id`：备机上还没纳入配对的本地主播与模板、能不能加入与原因
+//!   （确认弹层用；`standby` 不填时是配对里的节点），归 `streamer.view`
 //! - `POST /v1/fleet/ha/role`：换上传主机（`{"primary": "controller" | "node"}`），两台都在线才换，归 `node.manage`
 //! - `POST /v1/fleet/ha/sessions/{key}/{action}`：面板上的人工处理（`standby-upload` / `drop`），
 //!   控制面是主机时转给备机执行、是备机时在本机执行，归 `upload.submit`
@@ -11,6 +15,7 @@
 //! 配对里的节点（[`node_router`]）：`GET /v1/node/ha` 与 `POST /v1/node/ha/sessions/{key}/{action}`（本地的
 //! 人工处理，§6 H），权限同上；`POST /v1/node/ha/role`（换上传主机）与 `PUT /v1/node/ha`（改模式与参数，
 //! `{"mode": 1|2, "params": {...}}`）经控制面提交、两台都在线才行，归 `node.manage`。
+//! `GET /v1/node/ha/candidates`：本机还没纳入配对的本地行，归 `streamer.view`。
 //! 本机不在配对里时这组地址落回页面，与没有这组路由时一样。
 
 use crate::server::errors::{ApiError, report_to_response};
@@ -23,7 +28,7 @@ use crate::server::fleet::ha::sync::HaValue;
 use crate::server::fleet::ha::wire::{HaMessage, ManualAction};
 use crate::server::infrastructure::service_register::ServiceRegister;
 use axum::body::Bytes;
-use axum::extract::{Path, Request, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -83,7 +88,30 @@ pub async fn put_pair(State(controller): State<Arc<Controller>>, body: Bytes) ->
         Err(reason) => return refused(reason),
     };
     match pairing.designate(&controller, request).await {
-        Ok(Ok(pair)) => Json(json!({ "pair": pair })).into_response(),
+        Ok(Ok((pair, adoption))) => {
+            Json(json!({ "pair": pair, "adoption": adoption })).into_response()
+        }
+        Ok(Err(reason)) => refused(reason),
+        Err(e) => report_to_response(e),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CandidatesQuery {
+    #[serde(default)]
+    standby: Option<i64>,
+}
+
+pub async fn candidates(
+    State(controller): State<Arc<Controller>>,
+    Query(query): Query<CandidatesQuery>,
+) -> Response {
+    let Some(pairing) = controller.ha() else {
+        return not_supported();
+    };
+    match pairing.candidates(&controller, query.standby).await {
+        Ok(Ok(view)) => Json(view).into_response(),
         Ok(Err(reason)) => refused(reason),
         Err(e) => report_to_response(e),
     }
@@ -137,6 +165,7 @@ pub fn node_router(services: ServiceRegister) -> Router<()> {
     Router::new()
         .route("/v1/node/ha", get(node_view).put(node_configure))
         .route("/v1/node/ha/role", post(node_switch))
+        .route("/v1/node/ha/candidates", get(node_candidates))
         .route("/v1/node/ha/sessions/{key}/{action}", post(node_manual))
         .route_layer(axum::middleware::from_fn(paired_only))
         .with_state(services)
@@ -193,13 +222,17 @@ async fn node_manual(Path((key, action_text)): Path<(String, String)>) -> Respon
     }
 }
 
+fn not_synced() -> Response {
+    error(
+        StatusCode::CONFLICT,
+        "与控制面的双向同步没有接上（控制面的协议次版本低于 5，或本机还没收到配对），只能在控制面上改".to_string(),
+    )
+}
+
 /// 经控制面提交一条配对修改；与控制面的双向同步没接上（控制面次版本低于 5）时不行
 async fn submit(services: &ServiceRegister, change: Change) -> Response {
     let Some(member) = member_for(services) else {
-        return error(
-            StatusCode::CONFLICT,
-            "与控制面的双向同步没有接上（控制面的协议次版本低于 5，或本机还没收到配对），只能在控制面上改".to_string(),
-        );
+        return not_synced();
     };
     let (primary, ha) = match change {
         Change::Role(primary) => {
@@ -239,6 +272,15 @@ struct Configure {
     mode: HaMode,
     #[serde(default)]
     params: HaParams,
+}
+
+/// 本机还没纳入配对的本地主播与模板，能加入的缺省纳入（`included`）；控制面那边的判断在它收下时才做
+async fn node_candidates(State(services): State<ServiceRegister>) -> Response {
+    let Some(member) = member_for(&services) else {
+        return not_synced();
+    };
+    let (streamers, templates) = member.candidates().await;
+    Json(json!({ "streamers": streamers, "templates": templates })).into_response()
 }
 
 async fn node_configure(State(services): State<ServiceRegister>, body: Bytes) -> Response {

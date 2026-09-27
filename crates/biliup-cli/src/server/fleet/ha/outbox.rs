@@ -3,7 +3,9 @@
 //! 只在配对生效时才建，解除配对时删掉；不配对的机器上没有这个文件。队列里只记键与序号，
 //! 内容在发的那一刻按本机现状取（所以凭据原文从不落进这个文件）。同一个键排了几次只留最后一次；
 //! 对端应答 `upto` 之后，序号不大于它的都出队。重连后整个队列重发一遍，对端按版本认出重放，不会重复生效。
+//! 要加入配对的本地行（[`super::adopt`]）也记在这里，重启后接着加入。
 
+use super::adopt::Adoption;
 use super::sync::Book;
 use crate::server::errors::{AppError, AppResult};
 use error_stack::ResultExt;
@@ -25,7 +27,7 @@ pub struct Queued {
     pub key: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PairFile {
     pub version: u32,
     /// 配对的对端：节点上是控制面的 EndpointId，控制面上是 `node:<节点 id>`。对不上时整份作废
@@ -37,6 +39,8 @@ pub struct PairFile {
     pub book: Book,
     #[serde(default)]
     pub queue: Vec<Queued>,
+    #[serde(default)]
+    pub adoption: Adoption,
 }
 
 impl PairFile {
@@ -44,9 +48,7 @@ impl PairFile {
         PairFile {
             version: FILE_VERSION,
             peer: peer.to_string(),
-            seq: 0,
-            book: Book::default(),
-            queue: Vec::new(),
+            ..PairFile::default()
         }
     }
 

@@ -14,13 +14,16 @@
 //! 上传主机改成那台节点，自己改跑备机（[`Standby`]，场次记在 `data/ha-state.json`），再给节点下发带
 //! `leader` 的配对。控制面仍是控制面、房间仍归「本机」节点，只是「这一场谁先投」换了过来。
 
+use super::adopt;
 use super::agent::{self, Mirrored, STATE_FILE_NAME, Standby};
 use super::member::Member;
 use super::params::{HaMode, HaParams};
 use super::primary::Primary;
 use super::rooms::{Arbiter, PairSet};
 use super::store::{self, Pair};
-use super::sync::{HaChange, PairMessage, PairState, ROOM, Side, TEMPLATE};
+use super::sync::{
+    HaChange, Inventory, InventoryAsk, LocalRow, PairMessage, PairState, ROOM, Side, TEMPLATE,
+};
 use super::wire::{HaAssignment, HaMessage, ManualAction};
 use super::{Link, Role, set_role, sync_downloader};
 use crate::server::config::Config;
@@ -35,9 +38,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
@@ -45,6 +49,8 @@ use tracing::{debug, error, info, warn};
 const READY_WAIT: Duration = Duration::from_secs(30);
 /// `GET /v1/fleet/ha` 带多少条最近的场次
 const RECENT_SESSIONS: i64 = 200;
+/// 问节点本地行清单最多等多久
+const INVENTORY_WAIT: Duration = Duration::from_secs(10);
 
 pub struct Pairing {
     services: ServiceRegister,
@@ -59,6 +65,9 @@ pub struct Pairing {
     busy: tokio::sync::Mutex<()>,
     /// 控制面的配置改了就给主机与备机重发期望状态（边录边传的房间可能变了）
     watcher: Mutex<Option<JoinHandle<()>>>,
+    /// 问节点本地行清单还没回话的：（节点, 问的 id）→ 等回话的
+    inventories: Mutex<HashMap<(i64, u64), oneshot::Sender<Inventory>>>,
+    next_ask: AtomicU64,
 }
 
 /// 生效中的配对
@@ -153,6 +162,20 @@ pub struct Designate {
     /// 不填时沿用现有配对的参数（没有配对时用默认值）；填了就整份替换，缺的字段取默认值
     #[serde(default)]
     pub params: Option<HaParams>,
+    /// 备机上已有的本地主播与模板里纳入配对的。指定一台新的备机时不填就是全部；
+    /// 备机不变（只改模式或参数）时不填就不纳入
+    #[serde(default)]
+    pub adopt: Option<Selection>,
+}
+
+/// 纳入配对的本地主播与模板 id；某一项不填就是这一项全部
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Selection {
+    #[serde(default)]
+    pub streamers: Option<Vec<i64>>,
+    #[serde(default)]
+    pub templates: Option<Vec<i64>>,
 }
 
 /// `POST /v1/fleet/ha/role`
@@ -259,6 +282,47 @@ fn mirror(
     HaAssignment::of(pair, ids)
 }
 
+/// 期望状态里加上这些模板，已有的不重复
+fn add_templates(templates: &mut Vec<DesiredTemplate>, extra: Vec<DesiredTemplate>) {
+    for template in extra {
+        if !templates.iter().any(|t| t.id == template.id) {
+            templates.push(template);
+        }
+    }
+}
+
+/// 单独加入配对的模板（没有房间用也在配对里，[`adopt`]）；控制面上已经删掉的不算
+async fn pinned_templates(
+    controller: &Controller,
+    member: &Member,
+) -> AppResult<Vec<DesiredTemplate>> {
+    let mut templates = Vec::new();
+    for id in member.pinned().await {
+        if let Some(template) = assignments::template(controller.pool(), id).await? {
+            templates.push(template.desired());
+        }
+    }
+    Ok(templates)
+}
+
+/// 控制面房间列表里的直播间地址 → 房间 id（删到一半的也算）
+async fn fleet_urls(controller: &Controller) -> AppResult<HashMap<String, i64>> {
+    Ok(assignments::list_rooms(controller.pool())
+        .await?
+        .into_iter()
+        .map(|room| (room.spec.url, room.id))
+        .collect())
+}
+
+/// 一台机器上的本地行清单与这一次纳入的（`GET /v1/fleet/ha/candidates`、指定备机与加入接口的应答）
+fn rows_view(node: Option<i64>, (streamers, templates): (Vec<LocalRow>, Vec<LocalRow>)) -> Value {
+    json!({ "node": node, "streamers": streamers, "templates": templates })
+}
+
+fn rows_error(node: Option<i64>, error: String) -> Value {
+    json!({ "node": node, "error": error })
+}
+
 /// 指定备机之前的检查：主机是启用中的「本机」，备机是一台在线、协议次版本 ≥ 4 的普通节点。
 /// 只改模式或参数（备机不变）时备机可以不在线，连上来时收到新的参数
 /// `node` 是备机候选的节点名与是否已被移除
@@ -333,6 +397,8 @@ impl Pairing {
             ready: watch::channel(false).0,
             busy: tokio::sync::Mutex::default(),
             watcher: Mutex::default(),
+            inventories: Mutex::default(),
+            next_ask: AtomicU64::new(1),
         }
     }
 
@@ -445,6 +511,18 @@ impl Pairing {
     /// 配对节点发来的同步消息；不是配对节点的丢掉。节点改的房间与模板由控制面仲裁、改 Fleet，
     /// 之后给两台重发期望状态。节点请求换上传主机、改模式与参数时照办或说明原因
     pub async fn pair_message(&self, controller: &Controller, node: i64, message: PairMessage) {
+        // 本地行清单：指定备机之前也问，那时它还不是配对节点
+        if let PairMessage::Inventory(inventory) = message {
+            let waiting = self
+                .inventories
+                .lock()
+                .unwrap()
+                .remove(&(node, inventory.id));
+            if let Some(waiting) = waiting {
+                let _ = waiting.send(inventory);
+            }
+            return;
+        }
         let Some(active) = self.active().filter(|a| a.pair.standby_node_id == node) else {
             debug!(
                 node,
@@ -471,7 +549,7 @@ impl Pairing {
         let rows = matches!(&message, PairMessage::Edit(edit)
             if edit.key.starts_with(ROOM) || edit.key.starts_with(TEMPLATE));
         let set = if rows {
-            match self.pair_set(controller, &active.pair).await {
+            match self.pair_set(controller, &active).await {
                 Ok(set) => set,
                 Err(e) => {
                     warn!(error = ?e, "配对同步：读不了配对里的房间，这条修改等节点重发");
@@ -521,16 +599,20 @@ impl Pairing {
         Ok(())
     }
 
-    /// 配对里的房间（主机「本机」持有、不是边录边传）与它们用的模板
-    async fn pair_set(&self, controller: &Controller, pair: &Pair) -> AppResult<PairSet> {
+    /// 配对里的房间（主机「本机」持有、不是边录边传）与它们用的模板，以及单独加入配对的模板
+    async fn pair_set(&self, controller: &Controller, active: &Active) -> AppResult<PairSet> {
         let (rooms, templates) =
-            assignments::desired_state(controller.pool(), pair.primary_node_id).await?;
+            assignments::desired_state(controller.pool(), active.pair.primary_node_id).await?;
         let (rooms, _) = split(&self.config(), rooms);
         let used: BTreeSet<i64> = rooms.iter().filter_map(|room| room.template_id).collect();
-        let templates = templates
+        let mut templates: Vec<DesiredTemplate> = templates
             .into_iter()
             .filter(|template| used.contains(&template.id))
             .collect();
+        add_templates(
+            &mut templates,
+            pinned_templates(controller, &active.member).await?,
+        );
         Ok(PairSet { rooms, templates })
     }
 
@@ -539,7 +621,7 @@ impl Pairing {
         let Some(active) = self.active() else {
             return;
         };
-        match self.pair_set(controller, &active.pair).await {
+        match self.pair_set(controller, &active).await {
             Ok(set) => active.member.scan_fleet(&set).await,
             Err(e) => warn!(error = ?e, "配对同步：读不了配对里的房间，这次不认控制面上的改动"),
         }
@@ -727,6 +809,10 @@ impl Pairing {
                 .cloned()
                 .collect();
             active.upload.set_rooms(&kept);
+            add_templates(
+                templates,
+                pinned_templates(controller, &active.member).await?,
+            );
             return Ok((None, None));
         }
         if node != active.pair.standby_node_id || proto < HA_SINCE {
@@ -741,19 +827,26 @@ impl Pairing {
                 "HA：边录边传的房间不镜像给备机"
             );
         }
+        let mut pinned = Vec::new();
         let pair = if proto >= PAIR_SINCE {
+            pinned = pinned_templates(controller, &active.member).await?;
+            let mut set_templates = primary_templates.clone();
+            add_templates(&mut set_templates, pinned.clone());
             let set = PairSet {
                 rooms: kept.clone(),
-                templates: primary_templates.clone(),
+                templates: set_templates,
             };
-            let state = active.member.pair_state(&set).await;
+            let mut state = active.member.pair_state(&set).await;
+            state.adopt = active.member.adopt_request().await.map(Box::new);
             // 还没记进账本的房间（节点新建、控制面正在收下）这次先不镜像，免得备机按控制面 id 再建一行
             kept.retain(|room| state.room(room.id).is_some());
+            pinned.retain(|template| state.template(template.id).is_some());
             Some(state)
         } else {
             None
         };
         let assignment = mirror(&active.pair, kept, primary_templates, rooms, templates);
+        add_templates(templates, pinned);
         Ok((Some(assignment), pair))
     }
 
@@ -775,16 +868,173 @@ impl Pairing {
             .then_some(pair.standby_node_id)
     }
 
-    /// 指定备机、改模式或参数。备机已经连着时先接上主机，再给它下发带配对的期望状态
+    /// 指定备机、改模式或参数。备机已经连着时先接上主机，再给它下发带配对的期望状态。
+    /// 指定一台新的备机时，它上面已有的本地主播与模板按 `adopt` 纳入配对（不填就是全部），
+    /// 返回的第二项是逐条的清单（[`Self::adopt_standby`]）；备机不变、也没填 `adopt` 时为空
     pub async fn designate(
         &self,
         controller: &Controller,
         request: Designate,
-    ) -> AppResult<Result<Pair, Refused>> {
+    ) -> AppResult<Result<(Pair, Option<Value>), Refused>> {
         self.wait_ready().await;
         let _busy = self.busy.lock().await;
-        self.designate_locked(controller, request.standby, request.mode, request.params)
-            .await
+        let fresh = store::pair(controller.pool())
+            .await?
+            .is_none_or(|pair| pair.standby_node_id != request.standby);
+        let pair = match self
+            .designate_locked(controller, request.standby, request.mode, request.params)
+            .await?
+        {
+            Ok(pair) => pair,
+            Err(refused) => return Ok(Err(refused)),
+        };
+        let selection = match request.adopt {
+            Some(selection) => selection,
+            None if fresh => Selection::default(),
+            None => return Ok(Ok((pair, None))),
+        };
+        let Some(active) = self.active() else {
+            return Ok(Ok((pair, None)));
+        };
+        let adoption = self
+            .adopt_standby(
+                controller,
+                &active,
+                selection.streamers.as_deref(),
+                selection.templates.as_deref(),
+            )
+            .await?;
+        Ok(Ok((pair, Some(adoption))))
+    }
+
+    /// 问节点还没纳入配对的本地主播与模板（节点不在配对里也回）
+    async fn inventory(&self, controller: &Controller, node: i64) -> Result<Inventory, String> {
+        let Some((proto, outbox)) = controller.node_link(node) else {
+            return Err("备机不在线，读不到它上面的本地主播与模板".into());
+        };
+        if proto < PAIR_SINCE {
+            return Err(format!(
+                "备机的协议次版本是 {proto}，低于 {PAIR_SINCE}：它不认识配对同步，上面的本地主播与模板不能纳入配对（仍是它的本地行）"
+            ));
+        }
+        let id = self.next_ask.fetch_add(1, Ordering::Relaxed);
+        let (answer, answered) = oneshot::channel();
+        self.inventories.lock().unwrap().insert((node, id), answer);
+        let ask = ControllerMessage::Pair(PairMessage::InventoryAsk(InventoryAsk { id }));
+        let result = match outbox.send(ask) {
+            Ok(()) => tokio::time::timeout(INVENTORY_WAIT, answered)
+                .await
+                .ok()
+                .map(|answer| answer.map_err(drop)),
+            Err(_) => Some(Err(())),
+        };
+        self.inventories.lock().unwrap().remove(&(node, id));
+        match result {
+            Some(Ok(inventory)) => Ok(inventory),
+            Some(Err(_)) => Err("备机的连接断了，读不到它上面的本地主播与模板".into()),
+            None => Err(format!(
+                "备机 {} 秒内没有回话，读不到它上面的本地主播与模板",
+                INVENTORY_WAIT.as_secs()
+            )),
+        }
+    }
+
+    /// 主机「本机」上还没纳入配对的本地行
+    async fn local_rows(
+        &self,
+        controller: &Controller,
+        active: Option<&Active>,
+    ) -> (Vec<LocalRow>, Vec<LocalRow>) {
+        let fleet = controller
+            .local()
+            .map(|local| local.fleet_state())
+            .unwrap_or_default();
+        match active {
+            Some(active) => active.member.local_rows(&fleet).await,
+            None => adopt::local_rows(&self.services, &fleet, None).await,
+        }
+    }
+
+    /// 请备机把它上面的本地行加入配对：问清单、按控制面的规矩逐条判断（[`adopt::evaluate`]），
+    /// 挑出这一次纳入的，随期望状态带过去。不纳入的逐条带原因、留作备机的本地行
+    async fn adopt_standby(
+        &self,
+        controller: &Controller,
+        active: &Active,
+        streamers: Option<&[i64]>,
+        templates: Option<&[i64]>,
+    ) -> AppResult<Value> {
+        let standby = active.pair.standby_node_id;
+        let inventory = match self.inventory(controller, standby).await {
+            Ok(inventory) => inventory,
+            Err(reason) => {
+                warn!(standby, reason, "配对：备机上已有的本地行这次没能纳入配对");
+                return Ok(rows_error(Some(standby), reason));
+            }
+        };
+        let (primary_rooms, _) = self.local_rows(controller, Some(active)).await;
+        let (mut rooms, mut template_rows) = (inventory.rooms, inventory.templates);
+        adopt::evaluate(
+            &mut rooms,
+            &self.config(),
+            &fleet_urls(controller).await?,
+            &adopt::urls(&primary_rooms),
+        );
+        let room_ids = adopt::select(&mut rooms, streamers);
+        let template_ids = adopt::select_templates(&mut template_rows, templates, &rooms);
+        if !room_ids.is_empty() || !template_ids.is_empty() {
+            info!(
+                standby,
+                rooms = ?room_ids,
+                templates = ?template_ids,
+                "配对：请备机把这些本地行加入配对"
+            );
+            active.member.request(&room_ids, &template_ids).await;
+            controller.push_many([Some(standby)]).await;
+        }
+        Ok(rows_view(Some(standby), (rooms, template_rows)))
+    }
+
+    /// `GET /v1/fleet/ha/candidates`：备机上还没纳入配对的本地主播与模板，逐条标出能不能加入、为什么，
+    /// `included` 是缺省纳入的（能加入的都纳入）。`standby` 不填时是配对里的节点；
+    /// 指定备机之前填上候选节点，确认弹层按它列出缺省纳入的清单
+    pub async fn candidates(
+        &self,
+        controller: &Controller,
+        standby: Option<i64>,
+    ) -> AppResult<Result<Value, Refused>> {
+        self.wait_ready().await;
+        let active = self.active();
+        let local = controller.local_node_id();
+        let standby = standby.or(active.as_ref().map(|a| a.pair.standby_node_id));
+        if standby.is_some() && standby == local {
+            return Ok(Err(Refused::Invalid(
+                "备机不能是「本机」节点：选一台普通节点".into(),
+            )));
+        }
+        let standby_view = match standby {
+            Some(node) => match self.inventory(controller, node).await {
+                Ok(inventory) => {
+                    let (primary_rooms, _) = self.local_rows(controller, active.as_ref()).await;
+                    let (mut rooms, mut templates) = (inventory.rooms, inventory.templates);
+                    adopt::evaluate(
+                        &mut rooms,
+                        &self.config(),
+                        &fleet_urls(controller).await?,
+                        &adopt::urls(&primary_rooms),
+                    );
+                    adopt::select(&mut rooms, None);
+                    adopt::select_templates(&mut templates, None, &rooms);
+                    rows_view(standby, (rooms, templates))
+                }
+                Err(reason) => rows_error(standby, reason),
+            },
+            None => Value::Null,
+        };
+        Ok(Ok(json!({
+            "paired": active.is_some(),
+            "standby": standby_view,
+        })))
     }
 
     async fn designate_locked(

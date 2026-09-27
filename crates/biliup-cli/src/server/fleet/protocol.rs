@@ -839,6 +839,7 @@ mod tests {
             key: "config/segment_time".into(),
             stamp,
             value: Some(serde_json::json!("01:00:00")),
+            pin: false,
         }));
         let json = serde_json::to_value(&edit).unwrap();
         assert_eq!(json["type"], "pair");
