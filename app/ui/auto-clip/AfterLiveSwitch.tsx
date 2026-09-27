@@ -9,7 +9,7 @@ const KEY = 'auto_clip_after_live'
 /**
  * 直播间编辑里的「下播后自动生成候选」：存在这个直播间的覆写配置（`override.auto_clip_after_live`）里，
  * 默认关。表单整体覆盖保存，只在拨动时改 `override`，不拨就原样交回。后端只让有 streamer.hooks 的人
- * 改覆写配置，其他角色看不到它的值，这里只给说明。
+ * 改覆写配置；其他角色拿不到覆写，只读展示 `/v1/streamers` 单独给的当前值（有 clip.edit 才有）。
  */
 export default function AfterLiveSwitch({
   availability,
@@ -21,7 +21,7 @@ export default function AfterLiveSwitch({
   const { values } = useFormState()
   const formApi = useFormApi()
   const override = (values?.override ?? null) as Record<string, unknown> | null
-  const on = override?.[KEY] === true
+  const on = canOverride ? override?.[KEY] === true : values?.[KEY] === true
   if (!availability.status || (!availability.visible && !on)) return null
 
   const toggle = (checked: boolean) => {
@@ -47,9 +47,19 @@ export default function AfterLiveSwitch({
             ) : null}
           </>
         ) : (
-          <Typography.Text type="tertiary" size="small">
-            这个开关存在直播间的覆写配置里，只有超级管理员能改；需要时请超级管理员在这里打开。也可以在回看页或剪辑台手动「生成候选」。
-          </Typography.Text>
+          <>
+            {typeof values?.[KEY] === 'boolean' ? (
+              <span data-testid="auto-clip-after-live-readonly" data-on={on}>
+                <Switch checked={on} disabled aria-label="下播后自动生成候选（只读）" />{' '}
+                <Typography.Text type="secondary" size="small">
+                  当前{on ? '已打开' : '关闭'}（只读）
+                </Typography.Text>
+              </span>
+            ) : null}
+            <div className="semi-form-field-extra">
+              这个开关存在直播间的覆写配置里，只有超级管理员（streamer.hooks）能改；需要时请超级管理员在这里打开或关闭。也可以在回看页或剪辑台手动「生成候选」。
+            </div>
+          </>
         )}
       </Form.Slot>
     </div>

@@ -1,4 +1,4 @@
-//! 预估只在入队时算一次、多场任务一次取回。
+//! 预估只在入队时算一次、多场任务一次取回、直播间「下播后自动生成候选」对操作员只读。
 
 use super::*;
 
@@ -188,4 +188,68 @@ async fn one_request_returns_the_latest_job_of_each_session() {
     let response = call(&f.app, Some(&f.viewer), "GET", &many(limit + 1), None).await;
     let body = json_of(response, StatusCode::BAD_REQUEST).await;
     assert!(body["message"].as_str().unwrap().contains("最多"), "{body}");
+}
+
+async fn add_streamer(pool: &ConnectionPool, url: &str, override_cfg: Option<Value>) {
+    sqlx::query("INSERT INTO livestreamers (url, remark, override) VALUES (?, 'r', ?)")
+        .bind(url)
+        .bind(override_cfg.map(|value| value.to_string()))
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+async fn after_live(f: &Fixture, cookie: &str) -> Vec<Option<Value>> {
+    let body = json_of(
+        call(&f.app, Some(cookie), "GET", "/v1/streamers", None).await,
+        StatusCode::OK,
+    )
+    .await;
+    body.as_array()
+        .unwrap()
+        .iter()
+        .map(|streamer| streamer.get("auto_clip_after_live").cloned())
+        .collect()
+}
+
+#[tokio::test]
+async fn operators_see_the_after_live_switch_but_not_the_override() {
+    let seed = async |f: &Fixture| {
+        add_streamer(
+            &f.pool,
+            "https://live.example/on",
+            Some(json!({"auto_clip_after_live": true})),
+        )
+        .await;
+        add_streamer(&f.pool, "https://live.example/off", None).await;
+    };
+
+    let f = fixture(None).await;
+    seed(&f).await;
+    for cookie in [&f.admin, &f.operator, &f.viewer] {
+        assert_eq!(
+            after_live(&f, cookie).await,
+            vec![None, None],
+            "没配置自动切片时不出现"
+        );
+    }
+
+    let f = fixture(Some(stored("https://api.example.com/v1"))).await;
+    seed(&f).await;
+    let on_off = vec![Some(json!(true)), Some(json!(false))];
+    assert_eq!(after_live(&f, &f.admin).await, on_off);
+    assert_eq!(after_live(&f, &f.operator).await, on_off);
+    assert_eq!(
+        after_live(&f, &f.viewer).await,
+        vec![None, None],
+        "没有 clip.edit 不给"
+    );
+
+    // 覆写本身仍只给有 streamer.hooks 的人
+    let rows = json_of(
+        call(&f.app, Some(&f.operator), "GET", "/v1/streamers", None).await,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(rows[0]["override"], Value::Null);
 }
