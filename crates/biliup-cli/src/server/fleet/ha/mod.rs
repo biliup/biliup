@@ -170,8 +170,18 @@ pub fn unit_ended(ctx: &Context, output: UnitOutput) {
 /// 拉流中断、重连之前（`common/download.rs`）：模式 2 里备机已接手这个房间时主机不续录，返回真时结束这一段
 pub fn yield_recording(ctx: &Context) -> bool {
     match role() {
-        Some(Role::Primary(primary)) => primary.yield_unit(&Unit::of(ctx)),
+        Some(Role::Primary(primary)) => primary.retrying(&Unit::of(ctx)),
         Some(Role::Standby(_)) | None => false,
+    }
+}
+
+/// 一次拉流进行中（`common/download.rs`）：就绪时调用方停掉这次拉流——模式 2 里备机接手了这个房间，
+/// 而主机这段在断线期间重连过、录像有缺口。没有配对或不是配对里的房间时永远不就绪
+pub async fn stop_requested(ctx: &Context) {
+    if let Some(Role::Primary(primary)) = role() {
+        primary.stop_requested(&Unit::of(ctx)).await;
+    } else {
+        std::future::pending::<()>().await;
     }
 }
 

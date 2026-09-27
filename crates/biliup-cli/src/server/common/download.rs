@@ -363,15 +363,29 @@ impl DownloadTask {
             // 创建事件处理器
             // 执行下载
             let bytes_before = self.meter.counter().total();
-            let components = self
-                .download(
+            let components = {
+                let attempt = self.download(
                     &mut processor,
                     ctx.clone(),
                     danmaku_client.clone(),
                     &stream,
                     workbench.handle(),
-                )
-                .await;
+                );
+                // 一主一备模式 2：备机接手了主机断网期间中断过的这一段，停掉这次拉流（没有配对时不会就绪）
+                let stop = crate::server::fleet::ha::stop_requested(ctx);
+                tokio::pin!(attempt, stop);
+                tokio::select! {
+                    biased;
+                    components = &mut attempt => components,
+                    () = &mut stop => {
+                        info!(url = url, "一主一备：备机已接手这个房间，主机停止这次拉流");
+                        if let Err(e) = self.downloader.stop().await {
+                            warn!(url = url, error = ?e, "停止拉流失败");
+                        }
+                        attempt.await
+                    }
+                }
+            };
             if !matches!(self.downloader, DownloaderRuntime::StreamGears(_))
                 && ws_expire_override_failed(
                     &stream.raw_stream_url,
