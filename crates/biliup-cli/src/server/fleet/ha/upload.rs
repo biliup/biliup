@@ -1,6 +1,6 @@
 //! 配对房间的投稿流程：`common/upload.rs` 里 `process_with_upload` 开头一行转到这里。
 //!
-//! 主机：先等备机上报（最多 10 秒）；该主机投的照常边录边传，开始时发 `UploadStarted`，之后每隔
+//! 主机：先等备机上报（有时限，见 `primary::REPORT_WAIT_MS`）；该主机投的照常边录边传，开始时发 `UploadStarted`，之后每隔
 //! `progress_interval` 发一次累计字节（§6 C），提交前再确认备机没有接手，投成发 `Uploaded{bvid}`，
 //! 失败发 `UploadFailed`。交给备机的场次不传、不跑后处理，录像留在本地。
 //!

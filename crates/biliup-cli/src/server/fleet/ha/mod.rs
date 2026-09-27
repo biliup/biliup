@@ -123,7 +123,7 @@ pub struct UnitOutput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hold {
     pub reason: String,
-    /// 很快就会放开（等备机上报最多 10 秒）：监控循环按快速轮换再看，不睡一整个检测周期
+    /// 很快就会放开（等备机上报，有时限）：监控循环按快速轮换再看，不睡一整个检测周期
     pub quick: bool,
 }
 

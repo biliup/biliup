@@ -35,12 +35,12 @@ use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
 
 pub const NODE_FILE_VERSION: u32 = 1;
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+pub(super) const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 const REPLY_TIMEOUT: Duration = Duration::from_secs(15);
 const BACKOFF_MIN: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(30);
-/// 备机重连的退避上限：主机（控制面）重启后只等备机上报 10 秒，备机要赶在这之前连上
-const STANDBY_BACKOFF_MAX: Duration = Duration::from_secs(2);
+/// 备机重连的退避上限：主机（控制面）重启后等备机上报的时限按它算（`ha::primary::STARTUP_WAIT_MS`）
+pub(super) const STANDBY_BACKOFF_MAX: Duration = Duration::from_secs(2);
 /// 被同一把钥匙的新连接顶掉后，等这么久再试，免得两个进程来回互顶
 const SUPERSEDED_WAIT: Duration = Duration::from_secs(30);
 /// 探测 relay 地址 TCP 端口的超时
@@ -815,7 +815,7 @@ async fn session(
                     update_relays(node_file, file, &connected, relays)
                 }
                 Ok(Some(ControllerMessage::DesiredState(desired))) => {
-                    // 备机的上报先于落地房间：主机只等它 10 秒
+                    // 备机的上报先于落地房间：主机只等它一会儿
                     if let Some(report) = ha.assign(desired.ha.clone(), &desired.rooms, &ha_link)
                         && let Err(e) = protocol::write_frame(&mut send, &NodeMessage::Ha(report)).await
                     {

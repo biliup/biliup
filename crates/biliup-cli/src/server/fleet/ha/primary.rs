@@ -1,9 +1,9 @@
 //! 主机这一侧（ha-pair 方案 §2、§3、§4 里主机的部分）。
 //!
 //! 主机就是控制面进程，「本机」节点录的每一段都经钩子直接调到这里：开录、录完、开始投、进度、投成 / 失败，
-//! 记进 `ha_sessions` 并发给备机。备机（重）连上后、以及主机进程刚启动时，先等备机的 `StandbyReport`
-//! （最多 [`REPORT_WAIT_MS`]）：这期间不开始任何投稿、不开录配对里的房间。收到上报后把备机在录 / 在投的场次
-//! 交给备机、按上报逐场回复主机这边的结果，再重发近 24 小时投成的场次。
+//! 记进 `ha_sessions` 并发给备机。备机（重）连上后先等备机的 `StandbyReport`（最多 [`REPORT_WAIT_MS`]），
+//! 主机进程刚启动时最多等 [`STARTUP_WAIT_MS`]：这期间不开始任何投稿、不开录配对里的房间。
+//! 收到上报后把备机在录 / 在投的场次交给备机、按上报逐场回复主机这边的结果，再重发近 24 小时投成的场次。
 //!
 //! [`PrimaryCore`] 不碰时钟、不做 I/O，测试用虚拟时间驱动；[`Primary`] 把它接到钩子、数据库与备机连接上。
 
@@ -14,8 +14,8 @@ use super::upload::Plan;
 use super::wire::{HaMessage, ReportedSession, ReportedState, SkipReason};
 use super::{Hold, Unit, UnitOutput};
 use crate::server::errors::AppResult;
-use crate::server::fleet::now_ms;
 use crate::server::fleet::protocol::ControllerMessage;
+use crate::server::fleet::{node, now_ms};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, RwLock, Weak};
@@ -24,8 +24,17 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
-/// 备机（重）连上后、主机进程启动后最多等 `StandbyReport` 这么久（§2 硬规则）
+/// 备机（重）连上后最多等 `StandbyReport` 这么久（§2 硬规则）
 pub const REPORT_WAIT_MS: i64 = 10_000;
+/// 主机进程启动后最多等 `StandbyReport` 这么久。备机这时可能还挂在旧连接上，要到 QUIC 空闲超时才发现断了；
+/// 也可能卡在主机停机期间发起的一次拨号里，要等拨号超时再退避一次才重拨。早于它的上报就开录，会与备机
+/// 正在录的场次撞上：主机那份从重启后才开始，备机那份反倒被当成多余
+pub const STARTUP_WAIT_MS: i64 = {
+    let idle = crate::server::fleet::IDLE_TIMEOUT.as_millis() as i64;
+    let redial = (node::CONNECT_TIMEOUT.as_millis() + node::STANDBY_BACKOFF_MAX.as_millis()) as i64;
+    let reconnect = if idle > redial { idle } else { redial };
+    reconnect + REPORT_WAIT_MS
+};
 /// 重发 `Uploaded` 的回看范围（§3）
 pub const RESEND_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
 /// 内存里留多久的场次（更早的只在库里，界面按库查）
@@ -104,7 +113,7 @@ impl PrimaryCore {
             retried: HashMap::new(),
             connected: None,
             disconnected_at: now,
-            gate_until: Some(now + REPORT_WAIT_MS),
+            gate_until: Some(now + STARTUP_WAIT_MS),
             held: BTreeMap::new(),
             yielded: BTreeSet::new(),
             dirty: BTreeSet::new(),
@@ -169,7 +178,7 @@ impl PrimaryCore {
     pub(crate) fn hold(&self, room: i64) -> Option<Hold> {
         if self.gate_until.is_some() {
             return Some(Hold {
-                reason: "等备机上报它手里的场次（最多 10 秒）".into(),
+                reason: "等备机上报它手里的场次".into(),
                 quick: true,
             });
         }
@@ -220,7 +229,7 @@ impl PrimaryCore {
     pub(crate) fn tick(&mut self, now: i64) {
         if self.gate_until.is_some_and(|until| now >= until) {
             self.gate_until = None;
-            info!("HA：{REPORT_WAIT_MS} 毫秒内没等到备机的场次上报，主机照常开录、开投");
+            info!("HA：等满了时限也没收到备机的场次上报，主机照常开录、开投");
         }
         let grace = HaParams::ms(self.params.offline_grace);
         if self.connected.is_none() && now - self.disconnected_at >= grace && !self.held.is_empty()
@@ -962,7 +971,7 @@ impl Primary {
         self.link.lock().unwrap().is_some()
     }
 
-    /// 已经收到备机的上报（或等满了 10 秒）
+    /// 已经收到备机的上报（或等满了时限）
     pub(crate) fn reported(&self) -> bool {
         self.core.lock().unwrap().gate_open()
     }
@@ -1206,21 +1215,55 @@ mod tests {
             );
         }
         assert!(saved(&outs, "4:0").is_none());
-        // 备机没连上：10 秒内不开录不开投，之后照常
+        // 备机一直没连上：启动后 STARTUP_WAIT_MS 内不开录不开投，之后照常
         assert!(!core.gate_open());
         assert!(core.hold(1).is_some_and(|hold| hold.quick));
         assert!(core.hold(99).is_some(), "等上报期间配对里的房间都不开录");
-        core.tick(REPORT_WAIT_MS - 1);
+        core.tick(STARTUP_WAIT_MS - 1);
         assert!(!core.gate_open());
-        core.tick(REPORT_WAIT_MS);
+        core.tick(STARTUP_WAIT_MS);
         assert!(core.gate_open());
         assert_eq!(core.hold(1), None);
     }
 
     #[test]
+    fn a_restarted_primary_waits_until_the_standby_can_have_redialled() {
+        // 主机进程被杀后重启，备机正在接手录 7 号房间：它要么到 QUIC 空闲超时才发现旧连接断了，
+        // 要么卡在停机期间发起的那次拨号里，连上、上报之前主机都不能开录这个房间
+        let idle = crate::server::fleet::IDLE_TIMEOUT.as_millis() as i64;
+        let redial =
+            (node::CONNECT_TIMEOUT.as_millis() + node::STANDBY_BACKOFF_MAX.as_millis()) as i64;
+        for late in [idle, redial] {
+            let rows = vec![row("7:0", 7, 0, PrimaryState::Recording)];
+            let mut core =
+                PrimaryCore::new(HaMode::Takeover, HaParams::default(), WINDOW, rows, MIN);
+            core.take();
+            let reported_at = MIN + late + 2_000;
+            core.tick(reported_at);
+            assert!(
+                core.hold(7).is_some_and(|hold| hold.quick),
+                "备机 {late} 毫秒后才重连：主机还在等"
+            );
+            core.connected(reported_at);
+            core.standby_message(
+                reported_at,
+                report(vec![ReportedSession {
+                    takeover_of: Some("7:0".into()),
+                    ..reported("standby:7:40000", 7, 40_000, ReportedState::Recording)
+                }]),
+            );
+            assert!(core.gate_open());
+            assert!(
+                core.hold(7).is_some_and(|hold| !hold.quick),
+                "备机在录这一场：主机等它下播再开录"
+            );
+        }
+    }
+
+    #[test]
     fn a_reconnect_closes_the_gate_until_the_report_or_ten_seconds() {
         let mut core = core(HaMode::DualRecord, Vec::new());
-        core.tick(REPORT_WAIT_MS);
+        core.tick(STARTUP_WAIT_MS);
         assert!(core.gate_open());
         core.connected(MIN);
         assert!(!core.gate_open());
@@ -1706,7 +1749,7 @@ mod tests {
     #[test]
     fn units_started_while_apart_are_announced_after_the_report() {
         let mut core = core(HaMode::DualRecord, Vec::new());
-        core.tick(REPORT_WAIT_MS);
+        core.tick(STARTUP_WAIT_MS);
         core.unit_started(MIN, "7:60000", 7, MIN, 3);
         core.connected(2 * MIN);
         core.take();
