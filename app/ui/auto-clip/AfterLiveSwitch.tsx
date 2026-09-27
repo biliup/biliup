@@ -28,7 +28,8 @@ export default function AfterLiveSwitch({
     const next: Record<string, unknown> = { ...(override ?? {}) }
     if (checked) next[KEY] = true
     else delete next[KEY]
-    formApi.setValue('override', Object.keys(next).length ? next : null)
+    // 后端存回的覆写是整份 ConfigPatch（没填的项是 null），全是 null 时等同于没有覆写
+    formApi.setValue('override', Object.values(next).some(v => v != null) ? next : null)
   }
 
   return (
