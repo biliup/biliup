@@ -165,7 +165,6 @@ pub fn pair_state(book: &Book, set: &PairSet) -> PairState {
                 stamp: record.stamp,
             })
             .collect(),
-        ha: None,
     }
 }
 

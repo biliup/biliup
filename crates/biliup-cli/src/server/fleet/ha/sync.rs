@@ -1,7 +1,9 @@
 //! 一主一备的双向同步（ha-pair 方案 H2）：同步哪些记录、谁赢、线上的形状。
 //!
-//! 两台都能改设置：配对里的房间与模板、空间配置、B 站账号凭据、配对的模式与参数。每条记录带一个版本
+//! 两台都能改设置：配对里的房间与模板、空间配置、B 站账号凭据。每条记录带一个版本
 //! [`Stamp`]（写入时刻 + 写入方），后写者赢，同一毫秒时当前的主机赢（[`Stamp::beats`]）。
+//! 配对本身的设置（谁是上传主机、模式与参数）不走版本：只在控制面库里落一份，节点上改要两台都在线、
+//! 经控制面提交（[`HaChange`]），所以不会有两边各自离线改出的冲突。
 //! 删除留墓碑（[`Record::deleted`]），墓碑与修改按同一个版本比：旧的修改复活不了删掉的记录，
 //! 旧的删除也吞不掉之后的修改。墓碑一直留到解除配对。
 //!
@@ -9,7 +11,7 @@
 //! 看到对端的修改之后再改，一定排在它后面；两台各自离线改同一条时比的是两边的墙钟，墙钟快的一台占便宜。
 //!
 //! 记录的键：`room/<uid>`、`template/<uid>`（`uid` 是控制面 id 的十进制，或节点新建时起的 `n…`）、
-//! `config/<键名>`、`account/<mid>`、`ha`。内容摘要（[`digest`]）只在本机比较，用来认出本机上的改动，
+//! `config/<键名>`、`account/<mid>`。内容摘要（[`digest`]）只在本机比较，用来认出本机上的改动，
 //! 从不跨机器比较。
 
 use super::params::{HaMode, HaParams};
@@ -24,7 +26,6 @@ pub const ROOM: &str = "room/";
 pub const TEMPLATE: &str = "template/";
 pub const CONFIG: &str = "config/";
 pub const ACCOUNT: &str = "account/";
-pub const HA: &str = "ha";
 
 pub fn room_key(uid: &str) -> String {
     format!("{ROOM}{uid}")
@@ -278,7 +279,7 @@ pub struct RoomValue {
     pub paused: bool,
 }
 
-/// 配对的模式与参数（键 `ha`）
+/// 配对的模式与参数
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HaValue {
     pub mode: HaMode,
@@ -297,9 +298,9 @@ pub enum PairMessage {
     Secret(PairSecret),
     /// 收到并处理完了 `upto` 及之前的消息
     Ack(PairAck),
-    /// 请对端（只会是控制面）切换上传主备
-    Role(RoleSwitch),
-    RoleResult(RoleResult),
+    /// 改配对设置：控制面问节点能不能换上传主机，或节点请控制面换上传主机、改模式与参数
+    Ha(HaChange),
+    HaResult(HaResult),
 }
 
 impl PairMessage {
@@ -308,8 +309,8 @@ impl PairMessage {
             PairMessage::Edit(_) => "edit",
             PairMessage::Secret(_) => "secret",
             PairMessage::Ack(_) => "ack",
-            PairMessage::Role(_) => "role",
-            PairMessage::RoleResult(_) => "role_result",
+            PairMessage::Ha(_) => "ha",
+            PairMessage::HaResult(_) => "ha_result",
         }
     }
 }
@@ -360,22 +361,28 @@ pub struct Rejected {
     pub reason: String,
 }
 
+/// 对端按 `id` 回一条 [`HaResult`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RoleSwitch {
+pub struct HaChange {
     pub id: u64,
-    /// 切换之后当主机的一台
-    pub primary: Side,
+    /// 换成由这一台上传
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary: Option<Side>,
+    /// 新的模式与参数（只由节点发给控制面）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ha: Option<HaValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RoleResult {
+pub struct HaResult {
     pub id: u64,
+    /// 为空表示照办了（或本来就是这样）；不然是给人看的原因
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
 /// 控制面给配对节点的期望状态里带的同步版本（自次版本 5 起）：镜像房间与模板各自的 uid 与版本、
-/// 墓碑、配对参数的版本。节点按它认出期望状态里哪些已经比本机旧（本机的修改还没送到控制面）
+/// 墓碑。节点按它认出期望状态里哪些已经比本机旧（本机的修改还没送到控制面）
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PairState {
     #[serde(default)]
@@ -384,8 +391,6 @@ pub struct PairState {
     pub templates: Vec<PairRef>,
     #[serde(default)]
     pub gone: Vec<Gone>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ha: Option<Stamp>,
 }
 
 impl PairState {

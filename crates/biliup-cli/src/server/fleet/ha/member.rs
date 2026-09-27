@@ -13,8 +13,9 @@ use super::Link;
 use super::outbox::{self, PairFile, Queued};
 use super::rooms::{self, Arbiter, PairSet};
 use super::sync::{
-    ACCOUNT, Book, CONFIG, PairAck, PairEdit, PairMessage, PairSecret, PairState, ROOM, Rejected,
-    RoomValue, Side, Stamp, TEMPLATE, Verdict, account_key, config_key, digest, digest_bytes,
+    ACCOUNT, Book, CONFIG, HaChange, HaResult, HaValue, PairAck, PairEdit, PairMessage, PairSecret,
+    PairState, ROOM, Rejected, RoomValue, Side, Stamp, TEMPLATE, Verdict, account_key, config_key,
+    digest, digest_bytes,
 };
 use crate::server::config::Config;
 use crate::server::fleet::layers::is_per_node;
@@ -28,16 +29,19 @@ use crate::server::infrastructure::service_register::ServiceRegister;
 use crate::server::services::configuration::{ApplyConfigError, apply_config};
 use biliup::uploader::credential::{LoginInfo, save_login_info};
 use serde_json::{Map, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
 /// 扫一遍凭据文件与配置的间隔（投稿时刷新的凭据靠它发现）
 const SCAN_INTERVAL: Duration = Duration::from_secs(5);
+/// 改配对设置时最多等对端回话这么久
+const ASK_WAIT: Duration = Duration::from_secs(10);
 
 /// 不同步的配置键：按机器的键（[`crate::server::fleet::layers::PER_NODE_KEYS`]）与旧的配置文件主播表
 pub fn synced_config_key(name: &str) -> bool {
@@ -157,6 +161,9 @@ pub struct Member {
     link: Mutex<Option<Link>>,
     /// 当前的主机（同一毫秒的两条修改谁赢）
     primary: Mutex<Side>,
+    /// 等对端回 [`HaResult`] 的请求
+    asks: Mutex<HashMap<u64, oneshot::Sender<Option<String>>>>,
+    next_ask: AtomicU64,
     tasks: Mutex<Vec<JoinHandle<()>>>,
 }
 
@@ -185,6 +192,8 @@ impl Member {
             }),
             link: Mutex::default(),
             primary: Mutex::new(primary),
+            asks: Mutex::default(),
+            next_ask: AtomicU64::new(1),
             tasks: Mutex::default(),
         });
         {
@@ -306,6 +315,46 @@ impl Member {
 
     fn current_link(&self) -> Option<Link> {
         self.link.lock().unwrap().clone()
+    }
+
+    /// 请对端改配对设置（[`HaChange`]），等它回话。对端不在线、没回话时给出原因
+    pub async fn ask(&self, primary: Option<Side>, ha: Option<HaValue>) -> Result<(), String> {
+        let offline = || "对端不在线：只剩一台在线时不能改配对设置".to_string();
+        let link = self.current_link().ok_or_else(offline)?;
+        let id = self.next_ask.fetch_add(1, Ordering::Relaxed);
+        let (answer, answered) = oneshot::channel();
+        self.asks.lock().unwrap().insert(id, answer);
+        if !link.pair(PairMessage::Ha(HaChange { id, primary, ha })) {
+            self.asks.lock().unwrap().remove(&id);
+            return Err(offline());
+        }
+        match tokio::time::timeout(ASK_WAIT, answered).await {
+            Ok(Ok(None)) => Ok(()),
+            Ok(Ok(Some(error))) => Err(error),
+            Ok(Err(_)) | Err(_) => {
+                self.asks.lock().unwrap().remove(&id);
+                Err(format!(
+                    "对端 {} 秒内没有回话，这次没改；稍后再试",
+                    ASK_WAIT.as_secs()
+                ))
+            }
+        }
+    }
+
+    /// 回对端的 [`HaChange`]
+    pub fn answer(&self, id: u64, error: Option<String>) {
+        if let Some(link) = self.current_link() {
+            link.pair(PairMessage::HaResult(HaResult { id, error }));
+        }
+    }
+
+    fn answered(&self, result: HaResult) {
+        match self.asks.lock().unwrap().remove(&result.id) {
+            Some(waiting) => {
+                let _ = waiting.send(result.error);
+            }
+            None => debug!(id = result.id, "配对同步：没有在等的回话"),
+        }
     }
 
     /// 排着没发到对端（或对端没应答）的修改条数
@@ -551,6 +600,13 @@ impl Member {
     /// 对端发来的同步消息。控制面这一侧带 `arbiter`（落地节点改的房间与模板要改 Fleet）；
     /// 返回真时调用方给两台重发期望状态（Fleet 房间改了、账号到了可能让落地失败的房间能落地了）
     pub async fn receive(&self, message: PairMessage, arbiter: Option<&Arbiter<'_>>) -> bool {
+        let message = match message {
+            PairMessage::HaResult(result) => {
+                self.answered(result);
+                return false;
+            }
+            other => other,
+        };
         let _fleet = self.fleet.lock().await;
         if let PairMessage::Edit(edit) = &message
             && (edit.key.starts_with(ROOM) || edit.key.starts_with(TEMPLATE))
@@ -1057,6 +1113,52 @@ pub(crate) mod tests {
             Side::Controller,
         )
         .await
+    }
+
+    /// 改配对设置是一问一答：对端按 id 回话，照办或给出原因；对端不在线时马上说明
+    #[tokio::test]
+    async fn a_pair_change_waits_for_the_answer_of_the_other_side() {
+        let c = machine().await;
+        let n = machine().await;
+        let cm = start(Side::Controller, &c).await;
+        let nm = start(Side::Node, &n).await;
+        let offline = cm.ask(Some(Side::Node), None).await.unwrap_err();
+        assert!(offline.contains("只剩一台在线"), "{offline}");
+
+        let (to_node, mut at_node) = mpsc::unbounded_channel::<ControllerMessage>();
+        let (to_controller, mut at_controller) = mpsc::unbounded_channel::<NodeMessage>();
+        cm.link_up(Link::Controller(to_node)).await;
+        nm.link_up(Link::Node(to_controller)).await;
+        let node = nm.clone();
+        let answering = tokio::spawn(async move {
+            let mut asked = 0;
+            while let Some(frame) = at_node.recv().await {
+                if let ControllerMessage::Pair(PairMessage::Ha(change)) = frame {
+                    asked += 1;
+                    assert_eq!(change.primary, Some(Side::Node));
+                    let error = (asked == 2).then(|| "节点上有一场在录".to_string());
+                    node.answer(change.id, error);
+                }
+            }
+        });
+        let controller = cm.clone();
+        let forwarding = tokio::spawn(async move {
+            while let Some(frame) = at_controller.recv().await {
+                if let NodeMessage::Pair(message) = frame {
+                    controller.receive(message, None).await;
+                }
+            }
+        });
+        assert_eq!(cm.ask(Some(Side::Node), None).await, Ok(()));
+        assert_eq!(
+            cm.ask(Some(Side::Node), None).await,
+            Err("节点上有一场在录".to_string())
+        );
+        assert!(cm.asks.lock().unwrap().is_empty(), "回过话的请求不留着");
+        answering.abort();
+        forwarding.abort();
+        cm.stop();
+        nm.stop();
     }
 
     /// 第一次配对时配置按主机（控制面）的起步，按机器的键不动；之后哪边改都同步到另一边；

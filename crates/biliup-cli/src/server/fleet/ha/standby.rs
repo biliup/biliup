@@ -1133,6 +1133,7 @@ mod tests {
             params: HaParams::default(),
             primary: 1,
             rooms: vec![ROOM],
+            leader: crate::server::fleet::ha::sync::Side::Controller,
         }
     }
 

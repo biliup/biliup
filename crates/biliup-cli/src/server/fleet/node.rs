@@ -639,7 +639,8 @@ async fn run_agent(
         file.local,
         services.clone(),
         reconciler.state(),
-    );
+    )
+    .await;
     ha.resume_pair().await;
     let mut backoff = BACKOFF_MIN;
     let mut relays = Vec::new();
@@ -715,7 +716,7 @@ async fn run_agent(
             }
             Outcome::Failed => {
                 let wait = backoff;
-                let max = if ha.is_standby() {
+                let max = if ha.is_standby() || ha.is_primary() {
                     STANDBY_BACKOFF_MAX
                 } else {
                     BACKOFF_MAX
@@ -825,7 +826,7 @@ async fn session(
                 }
                 Ok(Some(ControllerMessage::DesiredState(desired))) => {
                     ha.pair(&desired, &link).await;
-                    if let Some(report) = ha.assign(desired.ha.clone(), &desired.rooms, &link) {
+                    if let Some(report) = ha.assign(desired.ha.clone(), &desired.rooms, &link).await {
                         link.ha(report);
                     }
                     // 同步队列与备机的上报先于落地房间：主机只等上报一会儿

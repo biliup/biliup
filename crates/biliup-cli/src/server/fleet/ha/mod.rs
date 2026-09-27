@@ -2,6 +2,8 @@
 //!
 //! 主机 = 控制面 + 「本机」节点（F5），备机 = 一台被指定为备机的普通节点。主机「本机」持有的房间与模板
 //! 自动镜像给备机；两台对每一场直播交换场次消息，决定「这一场谁投」，保证不出重复稿件、主机离线时不漏投。
+//! H2 起两台双向同步设置（[`member`]），上传主备也可以对调：对调后节点进程跑 [`primary`]、控制面进程跑备机，
+//! 控制面的身份与房间归属不变。
 //!
 //! 录制与投稿流程里只有几行调用（`core/monitor.rs`、`common/download.rs`、`common/upload.rs`）。
 //! 主机的一侧在 [`primary`]，备机的决策在 [`standby`]、接线在 [`agent`]。
@@ -94,6 +96,23 @@ pub(crate) fn standby() -> Option<Arc<agent::Standby>> {
     match role()? {
         Role::Standby(standby) if !standby.retired() => Some(standby),
         Role::Standby(_) | Role::Primary(_) => None,
+    }
+}
+
+/// 本进程是上传主机时的主机（上传主机换到节点之后，节点本地的 `/v1/node/ha`）
+pub(crate) fn primary() -> Option<Arc<primary::Primary>> {
+    match role()? {
+        Role::Primary(primary) => Some(primary),
+        Role::Standby(_) => None,
+    }
+}
+
+/// 本进程有没有做到一半的场次：有就不能换上传主机，返回其中一场的说明
+pub(crate) fn busy() -> Option<String> {
+    match role()? {
+        Role::Primary(primary) => primary.busy(),
+        Role::Standby(standby) if !standby.retired() => standby.busy(),
+        Role::Standby(_) => None,
     }
 }
 

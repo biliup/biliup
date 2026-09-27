@@ -3,22 +3,37 @@
 //! 主机就是控制面进程，备机是节点：备机 → 主机走 `NodeMessage::Ha`，主机 → 备机走 `ControllerMessage::Ha`，
 //! 两个方向用同一组 [`HaMessage`]。次版本低于 4 的一端不认识 `ha` 帧，所以只在两端都 ≥ 4 时出现：
 //! 控制面只把次版本 ≥ 4 的节点指定为备机；节点只在这条连接上收到过带 [`HaAssignment`] 的期望状态之后才发。
+//!
+//! 次版本 5 起上传主备可以对调（[`HaAssignment::leader`]）：这时节点进程跑主机那一侧、控制面进程跑备机那一侧，
+//! 场次消息照旧走同一条连接，只是方向反过来。控制面只在节点次版本 ≥ 5 时对调。
 
 use super::params::{HaMode, HaParams};
 use super::store::Pair;
+use super::sync::Side;
 use serde::{Deserialize, Serialize};
 
-/// 期望状态里的主副角色：控制面只发给备机
+fn controller_side() -> Side {
+    Side::Controller
+}
+
+fn is_controller(side: &Side) -> bool {
+    *side == Side::Controller
+}
+
+/// 期望状态里的主副角色：控制面只发给配对里的那台节点
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HaAssignment {
     pub mode: HaMode,
     #[serde(default)]
     pub params: HaParams,
-    /// 主机（控制面「本机」节点）的 id
+    /// 此刻上传主机的节点 id
     pub primary: i64,
     /// 镜像过来的房间（控制面房间 id）；它们与本机被分派的房间一起在期望状态的 `rooms` 里
     #[serde(default)]
     pub rooms: Vec<i64>,
+    /// 上传主机在哪一台。是控制面（H1 的默认）时不出现在帧里，与次版本 4 的帧逐字相同
+    #[serde(default = "controller_side", skip_serializing_if = "is_controller")]
+    pub leader: Side,
 }
 
 impl HaAssignment {
@@ -26,8 +41,9 @@ impl HaAssignment {
         HaAssignment {
             mode: pair.mode,
             params: pair.params,
-            primary: pair.primary_node_id,
+            primary: pair.leader_id(),
             rooms,
+            leader: pair.leader(),
         }
     }
 }

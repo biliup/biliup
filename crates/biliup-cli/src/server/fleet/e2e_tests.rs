@@ -2228,3 +2228,233 @@ async fn start_standby(
     .await
     .unwrap()
 }
+
+/// 经节点本地的 `/v1/node/ha*` 发一个请求
+async fn node_ha_request(
+    services: &ServiceRegister,
+    method: axum::http::Method,
+    uri: &str,
+    body: serde_json::Value,
+) -> (axum::http::StatusCode, serde_json::Value) {
+    use tower::ServiceExt;
+    let app = crate::server::api::fleet_ha::node_router(services.clone()).route_layer(
+        axum::middleware::from_fn(crate::server::api::access::unrestricted),
+    );
+    let response = app
+        .oneshot(
+            axum::http::Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}
+
+/// 上传主机两台都在线时能从任一台换：控制面换到节点（控制面改当备机、节点起主机并收到控制面的上报），
+/// 节点上换回控制面、改模式；只剩一台在线时两边都拒绝，上传主机不变
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_upload_primary_switches_from_either_side_only_while_both_are_online() {
+    use super::ha::agent::{load as load_ha_state, state_path as ha_state_path};
+    use super::ha::pairing::{Designate, Pairing, Refused};
+    use super::ha::params::HaMode;
+    use super::ha::sync::Side;
+    use axum::http::{Method, StatusCode};
+
+    let _role = super::ha::test_guard().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (controller, url, pool) = start_controller(dir.path()).await;
+    let fx = LocalFixture::new(dir.path()).await;
+    let pairing = Arc::new(Pairing::new(fx.services.clone(), dir.path()));
+    controller.attach_ha(pairing.clone());
+    let local = fx.attach(&controller).await;
+    controller.attach_local(local.clone());
+    pairing.resume(&controller, local.node_id()).await;
+    let primary = local.enable(&controller, false).await.unwrap().unwrap();
+    wait_for_node(&controller, primary, true, Duration::from_secs(30)).await;
+
+    let root = dir.path().join("standby");
+    let node_file = root.join("data/node.json");
+    let joined = node::join(
+        &ticket_for(&controller, &pool, &url).await,
+        false,
+        &node_file,
+    )
+    .await
+    .unwrap();
+    let standby = joined.node_id;
+    let s = node_services(&root).await;
+    let managed = ManagedHandle::default();
+    let agent = start_standby(&node_file, &s, &managed).await;
+    wait_for_node(&controller, standby, true, Duration::from_secs(30)).await;
+    let template = controller
+        .create_template(
+            serde_json::from_value(
+                serde_json::json!({ "template_name": "ha", "title": "{title}" }),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    controller
+        .create_room(
+            serde_json::from_value(serde_json::json!({
+                "url": "https://stuck.example/m", "remark": "房间", "template_id": template.id,
+                "node_id": primary,
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let designate: Designate =
+        serde_json::from_value(serde_json::json!({ "standby": standby, "mode": 1 })).unwrap();
+    pairing
+        .designate(&controller, designate)
+        .await
+        .unwrap()
+        .unwrap();
+    let linked = |leader: &'static str| {
+        let (pairing, controller) = (pairing.clone(), controller.clone());
+        async move {
+            eventually("both links are up", Duration::from_secs(30), || {
+                let (pairing, controller) = (pairing.clone(), controller.clone());
+                async move {
+                    let view = pairing.view(&controller).await.unwrap();
+                    view["leader"] == leader
+                        && view["sync"]["linked"] == true
+                        && view["standby"]["linked"] == true
+                        && view["standby"]["reported"] == true
+                }
+            })
+            .await;
+        }
+    };
+    linked("controller").await;
+    let state_file = ha_state_path(&node_file);
+    let leader_on_node = || {
+        load_ha_state(&state_file)
+            .and_then(|state| state.assignment)
+            .map(|assignment| assignment.leader)
+    };
+
+    // 控制面上换到节点
+    let pair = pairing
+        .switch(&controller, Side::Node)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(pair.leader(), Side::Node);
+    assert_eq!(pair.primary_node_id, primary, "机器身份不变");
+    linked("node").await;
+    let view = pairing.view(&controller).await.unwrap();
+    assert_eq!(view["local_role"], "standby");
+    assert_eq!(view["local_standby"]["role"], "standby");
+    assert_eq!(leader_on_node(), Some(Side::Node));
+    assert!(root.join("data/ha-primary.sqlite3").exists());
+    eventually(
+        "the node primary got the controller's report",
+        Duration::from_secs(20),
+        || async { super::ha::primary().is_some_and(|primary| primary.view()["reported"] == true) },
+    )
+    .await;
+    let (status, body) =
+        node_ha_request(&s, Method::GET, "/v1/node/ha", serde_json::Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["role"], "primary");
+    assert_eq!(body["leader"], "node");
+    // 同一台再换一次：什么都不做
+    let again = pairing
+        .switch(&controller, Side::Node)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(again.updated_at, pair.updated_at);
+
+    // 节点上换回控制面，再改模式
+    let (status, body) = node_ha_request(
+        &s,
+        Method::POST,
+        "/v1/node/ha/role",
+        serde_json::json!({ "primary": "controller" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    linked("controller").await;
+    assert_eq!(
+        pairing.view(&controller).await.unwrap()["local_role"],
+        "primary"
+    );
+    assert_eq!(leader_on_node(), Some(Side::Controller));
+    let (status, body) = node_ha_request(
+        &s,
+        Method::PUT,
+        "/v1/node/ha",
+        serde_json::json!({ "mode": 2, "params": { "offline_grace": 30 } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let saved = super::ha::store::pair(controller.pool())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved.mode, HaMode::Takeover);
+    assert_eq!(saved.params.offline_grace, 30);
+    assert_eq!(saved.leader(), Side::Controller);
+    eventually(
+        "the node follows the new mode",
+        Duration::from_secs(20),
+        || async {
+            load_ha_state(&state_file)
+                .and_then(|state| state.assignment)
+                .is_some_and(|assignment| assignment.mode == HaMode::Takeover)
+        },
+    )
+    .await;
+    let (status, body) = node_ha_request(
+        &s,
+        Method::PUT,
+        "/v1/node/ha",
+        serde_json::json!({ "mode": 1, "params": { "upload_start_timeout": 0 } }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+
+    // 节点离线：控制面上换被拒绝；节点那边（进程还在、连不上控制面）请求也被拒绝
+    let data = node_file.parent().unwrap().to_path_buf();
+    let offline = standby_offline(&controller, standby, agent, &s, &data).await;
+    let refused = pairing
+        .switch(&controller, Side::Node)
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert!(
+        matches!(&refused, Refused::Conflict(m) if m.contains("只剩一台在线")),
+        "{refused:?}"
+    );
+    let refused = offline.ask(Some(Side::Node), None).await.unwrap_err();
+    assert!(refused.contains("只剩一台在线"), "{refused}");
+    let saved = super::ha::store::pair(controller.pool())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved.leader(), Side::Controller);
+    assert_eq!(
+        pairing.view(&controller).await.unwrap()["local_role"],
+        "primary"
+    );
+    offline.stop();
+
+    pairing.shutdown();
+    local.shutdown().await;
+    controller.shutdown().await;
+}

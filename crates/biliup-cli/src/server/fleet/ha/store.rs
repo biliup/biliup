@@ -1,6 +1,8 @@
-//! `ha_pair` 与 `ha_sessions` 在 `data/fleet.sqlite3` 里的读写，表结构见 `fleet_migrations/5_ha.sql`。
+//! `ha_pair` 与 `ha_sessions` 在 `data/fleet.sqlite3` 里的读写，表结构见 `fleet_migrations/5_ha.sql`
+//! 与 `6_ha_role.sql`。节点当上传主机时，它的 `ha_sessions` 在节点本地的 `data/ha-primary.sqlite3` 里。
 
 use super::params::{HaMode, HaParams};
+use super::sync::Side;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use error_stack::ResultExt;
@@ -18,15 +20,38 @@ fn stored(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
 }
 
-/// 主副配对
+/// 主副配对。`primary_node_id` 是控制面的「本机」节点、`standby_node_id` 是那台普通节点，
+/// 切换上传主备不改它们，只改 `leader_node_id`（[`Pair::leader`]）
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pair {
     pub primary_node_id: i64,
     pub standby_node_id: i64,
     pub mode: HaMode,
     pub params: HaParams,
+    /// 此刻负责上传的一台；为空表示「本机」节点
+    #[serde(default)]
+    pub leader_node_id: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+impl Pair {
+    /// 此刻的上传主机在哪一台
+    pub fn leader(&self) -> Side {
+        if self.leader_node_id == Some(self.standby_node_id) {
+            Side::Node
+        } else {
+            Side::Controller
+        }
+    }
+
+    /// 此刻上传主机的节点 id
+    pub fn leader_id(&self) -> i64 {
+        match self.leader() {
+            Side::Controller => self.primary_node_id,
+            Side::Node => self.standby_node_id,
+        }
+    }
 }
 
 #[derive(sqlx::FromRow)]
@@ -41,6 +66,7 @@ struct PairRow {
     progress_interval: i64,
     manual_timeout: i64,
     delete_standby_copy: bool,
+    leader_node_id: Option<i64>,
     created_at: i64,
     updated_at: i64,
 }
@@ -64,6 +90,7 @@ impl PairRow {
                 manual_timeout: seconds(self.manual_timeout),
                 delete_standby_copy: self.delete_standby_copy,
             },
+            leader_node_id: self.leader_node_id,
             created_at: self.created_at,
             updated_at: self.updated_at,
         })
@@ -78,7 +105,7 @@ pub async fn pair(pool: &ConnectionPool) -> AppResult<Option<Pair>> {
     row.map(PairRow::decode).transpose()
 }
 
-/// 指定或改掉主副配对；已有配对时保留 `created_at`
+/// 指定或改掉主副配对；已有配对时保留 `created_at`，备机不变时也保留此刻的上传主机，换了备机就回到「本机」
 pub async fn save_pair(
     pool: &ConnectionPool,
     primary: i64,
@@ -98,7 +125,9 @@ pub async fn save_pair(
          upload_start_timeout = excluded.upload_start_timeout, \
          upload_stall_timeout = excluded.upload_stall_timeout, \
          progress_interval = excluded.progress_interval, manual_timeout = excluded.manual_timeout, \
-         delete_standby_copy = excluded.delete_standby_copy, updated_at = excluded.updated_at \
+         delete_standby_copy = excluded.delete_standby_copy, updated_at = excluded.updated_at, \
+         leader_node_id = CASE WHEN ha_pair.standby_node_id = excluded.standby_node_id \
+         THEN ha_pair.leader_node_id ELSE NULL END \
          RETURNING *",
     )
     .bind(primary)
@@ -117,6 +146,20 @@ pub async fn save_pair(
     .await
     .change_context(db_error("save ha_pair"))?;
     row.decode()
+}
+
+/// 换上传主机：`leader` 为 [`Side::Node`] 时由备机那台上传。没有配对时返回 `None`
+pub async fn set_leader(pool: &ConnectionPool, leader: Side, now: i64) -> AppResult<Option<Pair>> {
+    let row: Option<PairRow> = sqlx::query_as(
+        "UPDATE ha_pair SET leader_node_id = CASE WHEN ? THEN standby_node_id ELSE NULL END, \
+         updated_at = ? WHERE id = 1 RETURNING *",
+    )
+    .bind(leader == Side::Node)
+    .bind(now)
+    .fetch_optional(pool)
+    .await
+    .change_context(db_error("save ha_pair"))?;
+    row.map(PairRow::decode).transpose()
 }
 
 /// 解除配对；本来就没有时返回 `false`
@@ -424,7 +467,31 @@ pub(crate) mod tests {
         .unwrap();
         assert_eq!(changed.created_at, 100);
         assert_eq!(changed.updated_at, 200);
+        assert_eq!(changed.leader(), Side::Controller);
         assert_eq!(pair(&pool).await.unwrap(), Some(changed));
+
+        // 上传主机换到备机那台；只改模式时留着，换了备机就回到「本机」
+        let switched = set_leader(&pool, Side::Node, 250).await.unwrap().unwrap();
+        assert_eq!(switched.leader(), Side::Node);
+        assert_eq!(switched.leader_id(), standby);
+        assert_eq!(switched.primary_node_id, primary, "机器身份不变");
+        let kept = save_pair(&pool, primary, standby, HaMode::Takeover, &params, 260)
+            .await
+            .unwrap();
+        assert_eq!(kept.leader(), Side::Node);
+        let other = node(&pool, "other").await;
+        let replaced = save_pair(&pool, primary, other, HaMode::Takeover, &params, 270)
+            .await
+            .unwrap();
+        assert_eq!(replaced.leader(), Side::Controller);
+        assert_eq!(replaced.leader_node_id, None);
+        let back = set_leader(&pool, Side::Node, 280).await.unwrap().unwrap();
+        assert_eq!(back.leader_id(), other);
+        let back = set_leader(&pool, Side::Controller, 290)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(back.leader(), Side::Controller);
         // 主副不能是同一台
         assert!(
             save_pair(&pool, primary, primary, HaMode::DualRecord, &params, 300)
@@ -434,6 +501,7 @@ pub(crate) mod tests {
         assert!(clear_pair(&pool).await.unwrap());
         assert!(!clear_pair(&pool).await.unwrap());
         assert!(pair(&pool).await.unwrap().is_none());
+        assert!(set_leader(&pool, Side::Node, 400).await.unwrap().is_none());
     }
 
     #[tokio::test]

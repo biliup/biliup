@@ -208,14 +208,17 @@ impl Fleet {
         }
     }
 
-    /// 控制面的 `/v1/fleet/*` 路由；节点的 `/v1/node/ha*`（被指定为备机时才有）；
+    /// 控制面的 `/v1/fleet/*` 路由；节点的 `/v1/node/ha*`（在配对里时才有）；
     /// 被移除过的节点（与控制面的「本机」）的 `/v1/node/revoked*`
     pub fn router(&self) -> Option<axum::Router<()>> {
         let controller = match &self.role {
             Role::Controller(controller, _) => {
                 Some(crate::server::api::fleet::router(controller.clone()))
             }
-            Role::Node(..) => Some(crate::server::api::fleet_ha::node_router()),
+            Role::Node(..) => self
+                .services
+                .clone()
+                .map(crate::server::api::fleet_ha::node_router),
             Role::Standalone => None,
         };
         let revoked = self.revoked.clone().map(|revoked| {
@@ -507,6 +510,10 @@ mod tests {
                 5,
                 "c23607563211161fda918092a2f7be5466a181665b80e12e7075ed4c1f2dba53a885f56987cd7c4309074547f3b1d4af",
             ),
+            (
+                6,
+                "c0ca05edd662e1687e2c52dcf3c49842e839447b39cd1e9fc4fd22e0b36534069ba71e94282a6c401f622667c0e6cef7",
+            ),
         ];
         let embedded: Vec<(i64, String)> = FLEET_MIGRATOR
             .iter()
@@ -531,7 +538,7 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(versions, [1, 2, 3, 4, 5]);
+        assert_eq!(versions, [1, 2, 3, 4, 5, 6]);
         let tables: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'fleet_%' ORDER BY name",
         )
@@ -574,6 +581,6 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(count, 5);
+        assert_eq!(count, 6);
     }
 }

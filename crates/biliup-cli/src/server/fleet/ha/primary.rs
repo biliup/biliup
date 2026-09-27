@@ -162,6 +162,16 @@ impl PrimaryCore {
         self.params
     }
 
+    /// 主机这份在录、录完待投或在投的一场（换上传主机之前要等它了结）
+    pub(crate) fn busy(&self) -> Option<&SessionRecord> {
+        self.rows.values().find(|row| {
+            matches!(
+                row.primary_state,
+                PrimaryState::Recording | PrimaryState::Recorded | PrimaryState::Uploading
+            )
+        })
+    }
+
     /// 控制面改了模式或参数；已经在进行的场次保持原来的情形
     pub(crate) fn configure(&mut self, mode: HaMode, params: HaParams) {
         self.mode = mode;
@@ -1070,6 +1080,33 @@ impl Primary {
 
     pub(crate) fn params(&self) -> HaParams {
         self.core.lock().unwrap().params()
+    }
+
+    /// 有没有做到一半的场次：有就不能换上传主机，返回其中一场的说明
+    pub(crate) fn busy(&self) -> Option<String> {
+        let core = self.core.lock().unwrap();
+        core.busy().map(|row| {
+            format!(
+                "主机上房间 {} 的一场还没了结（{}）",
+                row.room_id,
+                row.primary_state.as_str()
+            )
+        })
+    }
+
+    /// 节点当上传主机时的 `GET /v1/node/ha`：模式、参数、与备机的连接和内存里的场次（新的在前）
+    pub(crate) fn view(&self) -> serde_json::Value {
+        let core = self.core.lock().unwrap();
+        let mut sessions: Vec<&SessionRecord> = core.rows.values().collect();
+        sessions.sort_by_key(|row| std::cmp::Reverse(row.started_at));
+        serde_json::json!({
+            "role": "primary",
+            "mode": core.mode,
+            "params": core.params,
+            "linked": self.linked(),
+            "reported": core.gate_open(),
+            "sessions": sessions,
+        })
     }
 
     pub(crate) fn configure(&self, mode: HaMode, params: HaParams) {

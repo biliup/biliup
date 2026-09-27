@@ -244,8 +244,10 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         {
             StreamerView
         }
-        // 一主一备：指定与解除归 node.manage，场次的人工处理（备机直接投 / 放弃）与投稿同级
+        // 一主一备：指定、解除、换上传主机与改参数归 node.manage，场次的人工处理（备机直接投 / 放弃）与投稿同级
         "/v1/fleet/ha" if method == Method::PUT || method == Method::DELETE => NodeManage,
+        "/v1/node/ha" if method == Method::PUT => NodeManage,
+        "/v1/fleet/ha/role" | "/v1/node/ha/role" if method == Method::POST => NodeManage,
         "/v1/fleet/ha/sessions/{key}/{action}" | "/v1/node/ha/sessions/{key}/{action}"
             if method == Method::POST =>
         {

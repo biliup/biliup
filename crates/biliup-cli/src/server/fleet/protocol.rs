@@ -640,12 +640,14 @@ mod tests {
                 params: HaParams::default(),
                 primary: 1,
                 rooms: vec![7, 8],
+                leader: crate::server::fleet::ha::sync::Side::Controller,
             }),
             ..Default::default()
         })
         .unwrap();
         assert_eq!(with["ha"]["mode"], 2);
         assert_eq!(with["ha"]["rooms"], serde_json::json!([7, 8]));
+        assert!(with["ha"].get("leader").is_none(), "{with}");
         assert_eq!(with["ha"]["params"]["offline_grace"], 60);
         #[derive(Deserialize)]
         #[allow(dead_code)]
@@ -769,7 +771,22 @@ mod tests {
             params: HaParams::default(),
             primary: 1,
             rooms: vec![7],
+            leader: Side::Controller,
         };
+        // 上传主机对调到节点时多一个 `leader`，次版本 4 的节点解得开（它不会被对调）
+        let switched = serde_json::to_value(HaAssignment {
+            primary: 5,
+            leader: Side::Node,
+            ..assignment.clone()
+        })
+        .unwrap();
+        assert_eq!(switched["leader"], "node");
+        assert_eq!(
+            serde_json::from_value::<HaAssignment>(switched)
+                .unwrap()
+                .leader,
+            Side::Node
+        );
         let without = serde_json::to_value(DesiredState {
             version: 4,
             ha: Some(assignment.clone()),
