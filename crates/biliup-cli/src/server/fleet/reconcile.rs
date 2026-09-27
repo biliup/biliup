@@ -211,6 +211,8 @@ pub struct Reconciler {
     services: ServiceRegister,
     allow_hooks: bool,
     label: String,
+    /// 控制面进程内嵌的「本机」节点
+    local: bool,
     managed: ManagedHandle,
     state: FleetState,
 }
@@ -223,6 +225,7 @@ impl Reconciler {
         controller: &str,
         label: String,
         allow_hooks: bool,
+        local: bool,
         services: ServiceRegister,
         managed: ManagedHandle,
     ) -> Self {
@@ -240,6 +243,7 @@ impl Reconciler {
             services,
             allow_hooks,
             label,
+            local,
             managed,
             state,
         };
@@ -310,6 +314,7 @@ impl Reconciler {
     fn publish(&self) {
         let managed = Managed {
             controller: self.label.clone(),
+            local: self.local,
             streamers: self
                 .state
                 .rooms
@@ -354,7 +359,9 @@ impl Reconciler {
             }
         }
         let paused = streamers.len();
-        revoked.record(&self.label, streamers, now_ms()).await;
+        revoked
+            .record(&self.label, self.local, streamers, now_ms())
+            .await;
         self.release();
         paused
     }
@@ -398,11 +405,12 @@ impl Reconciler {
         let mut wanted: Vec<DesiredRoom> = Vec::new();
         for room in desired.rooms {
             if room.spec.has_hooks() && !self.allow_hooks {
-                errors.insert(
-                    room.id,
+                let error = if self.local {
+                    "启用「本机」节点时没有勾选「允许钩子」，不接收带 run 命令（能执行任意命令）的房间"
+                } else {
                     "这台节点加入时没有带 --allow-hooks，不接收带 run 命令（能执行任意命令）的房间"
-                        .into(),
-                );
+                };
+                errors.insert(room.id, error.into());
                 continue;
             }
             if let Some(template) = room.template_id {
@@ -766,11 +774,16 @@ mod tests {
         }
 
         async fn reconciler(&self, allow_hooks: bool) -> Reconciler {
+            self.reconciler_as(allow_hooks, false).await
+        }
+
+        async fn reconciler_as(&self, allow_hooks: bool, local: bool) -> Reconciler {
             Reconciler::resume(
                 self.path(),
                 "controller",
                 "10.0.0.2".into(),
                 allow_hooks,
+                local,
                 self.services.clone(),
                 self.managed.clone(),
             )
@@ -973,6 +986,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_local_node_names_its_allow_hooks_switch_when_refusing_hooked_rooms() {
+        let f = Fixture::new().await;
+        let mut reconciler = f.reconciler_as(false, true).await;
+        let mut hooked = room(1, "https://stuck.example/1", None);
+        hooked.spec.postprocessor = serde_json::from_value(json!([{ "run": "echo" }])).unwrap();
+        let ack = reconciler.apply(desired(1, vec![hooked], vec![])).await;
+        assert_eq!(ack.failed.len(), 1);
+        let reason = &ack.failed[0].error;
+        assert!(
+            reason.contains("启用「本机」节点时没有勾选「允许钩子」"),
+            "{reason}"
+        );
+        assert!(!reason.contains("--allow-hooks"), "{reason}");
+        assert!(f.streamers().await.is_empty());
+    }
+
+    #[tokio::test]
     async fn a_restart_resumes_from_the_state_file_and_release_turns_rows_local() {
         let f = Fixture::new().await;
         let mut reconciler = f.reconciler(true).await;
@@ -1008,6 +1038,7 @@ mod tests {
             "another",
             "x".into(),
             true,
+            false,
             f.services.clone(),
             ManagedHandle::default(),
         )

@@ -149,7 +149,8 @@ export interface ConfigHistory {
 /** 与后端 `NodeConfigState` 一致 */
 export interface NodeConfigState {
   /** 离线为 null；`unsupported` 是节点的 Fleet 协议版本低于 `CONFIG_SINCE`，只收房间不收配置 */
-  sync: 'unsupported' | 'pending' | 'applied' | 'failed' | null
+  /** `local`：「本机」节点，用控制面自己的「空间配置」，不收 Fleet 配置 */
+  sync: 'unsupported' | 'pending' | 'applied' | 'failed' | 'local' | null
   error: string | null
   /** 节点的 biliup 版本或协议次版本比控制面旧 */
   outdated: boolean

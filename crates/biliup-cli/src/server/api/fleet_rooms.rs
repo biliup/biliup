@@ -70,8 +70,8 @@ pub async fn update_room(
 
 /// `DELETE /v1/fleet/nodes/{id}?reassign=auto`：在线节点在后台等它释放房间，当场回 202；
 /// 离线节点当场移除，回 200。两种都带上这次移除的进度（见 `Removal`）。
-pub async fn revoke_and_reassign(controller: &Arc<Controller>, id: i64) -> Response {
-    match controller.revoke_and_reassign(id).await {
+pub async fn remove_node(controller: &Arc<Controller>, id: i64, reassign: bool) -> Response {
+    match controller.remove_node(id, reassign).await {
         Ok(Some(removal)) if removal.state == RemovalState::Removing => {
             (StatusCode::ACCEPTED, Json(removal)).into_response()
         }

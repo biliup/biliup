@@ -160,6 +160,11 @@ pub async fn put_node_config(
     Path(id): Path<i64>,
     body: Bytes,
 ) -> Response {
+    if controller.is_local(id) {
+        return bad_request(
+            "「本机」节点用控制面自己的配置，不收 Fleet 配置；请在「空间配置」里修改".into(),
+        );
+    }
     let body = match parse_body(&body) {
         Ok(body) => body,
         Err(message) => return bad_request(message),

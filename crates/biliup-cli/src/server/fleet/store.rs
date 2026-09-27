@@ -251,6 +251,28 @@ pub async fn redeem_token(
     Ok(Redeem::Joined(node))
 }
 
+/// 不经票据直接登记一台节点：控制面进程内嵌的「本机」节点（见 [`super::local`]）
+pub async fn insert_node(
+    pool: &ConnectionPool,
+    endpoint_id: &str,
+    name: &str,
+    allow_hooks: bool,
+    now: i64,
+) -> AppResult<NodeRow> {
+    sqlx::query_as(
+        "INSERT INTO fleet_nodes (name, endpoint_id, allow_hooks, created_at, last_seen_at) \
+         VALUES (?, ?, ?, ?, ?) RETURNING *",
+    )
+    .bind(name)
+    .bind(endpoint_id)
+    .bind(allow_hooks)
+    .bind(now)
+    .bind(now)
+    .fetch_one(pool)
+    .await
+    .change_context(db_error("insert node"))
+}
+
 pub async fn node_by_endpoint(
     pool: &ConnectionPool,
     endpoint_id: &str,

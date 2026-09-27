@@ -62,6 +62,8 @@ export interface FleetNode {
   config: NodeConfigState
   /** 正在「移除并自动改派」，等它确认释放房间 */
   removing: boolean
+  /** 控制面进程内嵌的「本机」节点：录制的就是控制面这台机器，用控制面自己的配置 */
+  local: boolean
 }
 
 /**
@@ -89,6 +91,10 @@ export interface Removal {
   deadline: number
   finished_at: number | null
   rooms: RemovedRoom[]
+  /** 是否把房间改派到其他节点；否则取消分派 */
+  reassign: boolean
+  /** 关掉的是「本机」节点 */
+  local: boolean
 }
 
 export interface FleetNodes {
@@ -98,6 +104,8 @@ export interface FleetNodes {
   controller_proto: number
   nodes: FleetNode[]
   removals: Removal[]
+  /** 启用中的「本机」节点 id */
+  local_node: number | null
 }
 
 /** `POST /v1/fleet/join-tokens` 的响应；票据只在这一次返回 */
@@ -267,6 +275,31 @@ export async function revokeAndReassign(id: number): Promise<Removal> {
   return res.json()
 }
 
+export const FLEET_LOCAL_NODE_KEY = '/v1/fleet/local-node'
+
+/** 启用「本机」节点：控制面自己也接收 Fleet 房间。`allowHooks` 与 `biliup node join --allow-hooks` 相同 */
+export async function enableLocalNode(allowHooks: boolean): Promise<{ node_id: number }> {
+  const res = await fetch(API_BASE + FLEET_LOCAL_NODE_KEY, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ allow_hooks: allowHooks }),
+  })
+  await handleResponse(res)
+  return res.json()
+}
+
+/**
+ * 关闭「本机」节点：不论改不改派，都先交出房间（改派到其他节点或取消分派）、等它确认释放再关闭，
+ * 不会重复录制，也不留暂停的主播
+ */
+export async function disableLocalNode(id: number, reassign: boolean): Promise<Removal> {
+  const res = await fetch(`${API_BASE}${FLEET_NODES_KEY}/${id}${reassign ? '?reassign=auto' : ''}`, {
+    method: 'DELETE',
+  })
+  await handleResponse(res)
+  return res.json()
+}
+
 export async function voidToken(id: string): Promise<void> {
   await handleResponse(await fetch(`${API_BASE}${FLEET_TOKENS_KEY}/${encodeURIComponent(id)}`, { method: 'DELETE' }))
 }
@@ -373,7 +406,11 @@ export function placementIssue(
   template: FleetTemplate | undefined,
 ): string | null {
   if (nodeOutdated(node)) return `${outdatedReason(node)}，请先升级 biliup`
-  if (roomHasHooks(room) && !node.allow_hooks) return '没带 --allow-hooks，不能放带 run 命令的房间'
+  if (roomHasHooks(room) && !node.allow_hooks) {
+    return node.local
+      ? '启用时没有勾选「允许钩子」，不能放带 run 命令的房间'
+      : '没带 --allow-hooks，不能放带 run 命令的房间'
+  }
   if (template?.account_mid && !node.accounts.some((a) => a.mid === template.account_mid)) {
     return `没有登记模板要用的 B 站账号 ${template.account_mid}`
   }

@@ -5,6 +5,7 @@ use super::controller::{
     RoomStatus,
 };
 use super::guard::ManagedHandle;
+use super::local::LocalNode;
 use super::node::{self, NodeAgent};
 use super::relay::{EmbeddedRelay, FleetAccess};
 use super::revoked::{Revoked, RevokedHandle, revoked_path};
@@ -1092,5 +1093,442 @@ async fn alerts_follow_node_events_and_connectivity() {
     assert!(controller.alert_list().alerts.is_empty());
 
     agent.shutdown().await;
+    controller.shutdown().await;
+}
+
+fn worker_paused(worker: &crate::server::infrastructure::context::Worker) -> bool {
+    matches!(
+        *worker.downloader_status.read().unwrap(),
+        crate::server::infrastructure::context::WorkerStatus::Pause
+    )
+}
+
+/// 控制面的「本机」节点：数据库与录制就是控制面自己的
+struct LocalFixture {
+    services: ServiceRegister,
+    file: std::path::PathBuf,
+    managed: ManagedHandle,
+    revoked: RevokedHandle,
+}
+
+impl LocalFixture {
+    async fn new(dir: &std::path::Path) -> Self {
+        let root = dir.join("controller");
+        let file = root.join("data/local-node.json");
+        let services = node_services(&root).await;
+        let revoked = revoked_for(&file, &services);
+        LocalFixture {
+            services,
+            file,
+            managed: ManagedHandle::default(),
+            revoked,
+        }
+    }
+
+    /// 与 `fleet::start` 一样：新建、按文件接着跑、挂到控制面上
+    async fn attach(&self, controller: &Controller) -> Arc<LocalNode> {
+        let local = Arc::new(LocalNode::new(
+            self.file.clone(),
+            self.services.clone(),
+            self.managed.clone(),
+            self.revoked.clone(),
+        ));
+        local.resume(controller).await;
+        local
+    }
+
+    fn state(&self) -> std::path::PathBuf {
+        super::reconcile::state_path(&self.file)
+    }
+}
+
+/// 启用「本机」：不用票据加入自己，房间手动与自动都能分派给它，不收 Fleet 配置，
+/// 控制面自己的主播不受影响；重启后按缓存接着录；关掉时先交出房间再吊销，不留暂停的本地行。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_controller_records_fleet_rooms_as_its_own_local_node() {
+    let dir = tempfile::tempdir().unwrap();
+    let (controller, _url, _pool) = start_controller(dir.path()).await;
+    let fx = LocalFixture::new(dir.path()).await;
+    let own = "https://stuck.example/own";
+    crate::server::services::streamers::add_streamer(
+        &fx.services,
+        serde_json::from_value(serde_json::json!({ "url": own, "remark": "控制面自己的" }))
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    // 没启用：什么文件都不写
+    let local = fx.attach(&controller).await;
+    controller.attach_local(local.clone());
+    assert_eq!(controller.local_node_id(), None);
+    assert!(!fx.file.exists() && !fx.state().exists());
+    assert!(fx.managed.read().unwrap().is_none());
+
+    let id = local.enable(&controller, false).await.unwrap().unwrap();
+    assert_eq!(local.enable(&controller, true).await.unwrap(), None);
+    let file = node::NodeFile::load(&fx.file).unwrap();
+    assert!(file.local);
+    assert_eq!(file.controller, controller.endpoint_id().to_string());
+    assert_eq!(file.relays, controller.local_relays());
+    let node = wait_for_node(&controller, id, true, Duration::from_secs(30)).await;
+    assert!(node.local);
+    assert_eq!(node.name, "本机");
+    assert!(!node.allow_hooks);
+    assert_eq!(controller.local_node_id(), Some(id));
+    eventually("config shows as local", Duration::from_secs(20), || {
+        let controller = controller.clone();
+        async move { controller.node_config_state(id, None).sync == Some("local") }
+    })
+    .await;
+
+    // 手动分派
+    let manual = controller
+        .create_room(
+            serde_json::from_value(serde_json::json!({
+                "url": "https://stuck.example/1", "remark": "手动", "node_id": id,
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(manual.node_id, Some(id));
+    eventually(
+        "room lands on the controller",
+        Duration::from_secs(20),
+        || {
+            let services = fx.services.clone();
+            async move { local_urls(&services).await.len() == 2 }
+        },
+    )
+    .await;
+    // 自动选节点：只有「本机」时选它
+    let auto = controller
+        .create_room(
+            serde_json::from_value(serde_json::json!({
+                "url": "https://stuck.example/2", "remark": "自动", "auto_node": true,
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(auto.node_id, Some(id));
+    eventually("both rooms are monitored", Duration::from_secs(20), || {
+        let controller = controller.clone();
+        async move {
+            let rooms = controller.rooms(true).await.unwrap();
+            rooms.len() == 2
+                && rooms
+                    .iter()
+                    .all(|room| room.status == RoomStatus::Monitoring)
+        }
+    })
+    .await;
+    let managed = fx.managed.read().unwrap().clone().unwrap();
+    assert!(managed.local);
+    assert_eq!(managed.controller, "本机");
+    assert_eq!(managed.streamers.len(), 2);
+    assert!(!managed.streamers.values().any(|url| url == own));
+    assert!(managed.config.is_none());
+
+    // 带 run 命令的房间：没勾 allow_hooks 不收
+    let mut hooked: CreateRoom = serde_json::from_value(serde_json::json!({
+        "url": "https://stuck.example/h", "remark": "钩子", "node_id": id,
+    }))
+    .unwrap();
+    hooked.spec.postprocessor =
+        serde_json::from_value(serde_json::json!([{ "run": "echo" }])).unwrap();
+    let rejected = controller.create_room(hooked).await.unwrap_err();
+    assert!(
+        matches!(&rejected, DispatchError::Invalid(m)
+            if m.contains("「本机」") && m.contains("启用时没有勾选「允许钩子」") && !m.contains("--allow-hooks")),
+        "{rejected:?}"
+    );
+
+    // 与控制面自己的主播同地址的房间：节点拒收，不会两份一起录
+    let clash = controller
+        .create_room(
+            serde_json::from_value(serde_json::json!({
+                "url": own, "remark": "撞车", "node_id": id,
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    eventually("clash is reported", Duration::from_secs(20), || {
+        let controller = controller.clone();
+        async move {
+            controller
+                .rooms(true)
+                .await
+                .unwrap()
+                .iter()
+                .any(|room| room.room.id == clash.id && room.status == RoomStatus::Failed)
+        }
+    })
+    .await;
+    controller.delete_room(clash.id, true).await.unwrap();
+
+    // Fleet 配置不下发给「本机」：即使库里有覆盖，控制面自己的配置也不变
+    let pool1 = fx.services.config.read().unwrap().pool1_size;
+    let patch = serde_json::json!({ "pool1_size": pool1 + 3 });
+    super::config_store::set_node_override(controller.pool(), id, patch.as_object().unwrap())
+        .await
+        .unwrap();
+    controller.push(id).await;
+    eventually("push is acknowledged", Duration::from_secs(20), || {
+        let controller = controller.clone();
+        async move {
+            controller
+                .nodes()
+                .await
+                .unwrap()
+                .iter()
+                .any(|node| node.id == id && node.synced == Some(true))
+        }
+    })
+    .await;
+    assert_eq!(fx.services.config.read().unwrap().pool1_size, pool1);
+    assert!(
+        fx.managed
+            .read()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .config
+            .is_none()
+    );
+
+    // 控制面重启（内嵌 relay 换了端口）：按缓存认回托管行，relay 改成新的回环地址，连上后对账
+    local.shutdown().await;
+    controller.shutdown().await;
+    let (controller, _url, _pool) = start_controller(dir.path()).await;
+    let local = fx.attach(&controller).await;
+    controller.attach_local(local.clone());
+    assert_eq!(local.node_id(), Some(id));
+    assert_eq!(
+        fx.managed.read().unwrap().as_ref().unwrap().streamers.len(),
+        2
+    );
+    assert_eq!(
+        node::NodeFile::load(&fx.file).unwrap().relays,
+        controller.local_relays()
+    );
+    wait_for_node(&controller, id, true, Duration::from_secs(30)).await;
+    eventually("rooms are monitored again", Duration::from_secs(20), || {
+        let controller = controller.clone();
+        async move {
+            let rooms = controller.rooms(true).await.unwrap();
+            rooms.len() == 2
+                && rooms
+                    .iter()
+                    .all(|room| room.status == RoomStatus::Monitoring)
+        }
+    })
+    .await;
+    assert_eq!(local_urls(&fx.services).await.len(), 3);
+
+    // 关掉「本机」（不改派）：先取消分派、等它释放，再吊销；房间留在控制面未分派，本机只剩自己的主播
+    let started = controller.remove_node(id, false).await.unwrap().unwrap();
+    assert_eq!(started.state, RemovalState::Removing);
+    let removed = wait_removed(&controller, id, Duration::from_secs(70)).await;
+    assert!(removed.local && !removed.reassign);
+    assert_eq!(removed.rooms.len(), 2);
+    assert!(
+        removed
+            .rooms
+            .iter()
+            .all(|room| room.release == Release::Released && room.node_id.is_none()),
+        "{removed:?}"
+    );
+    assert_eq!(local_urls(&fx.services).await, [own]);
+    let worker = fx.services.managers.get_rooms().await;
+    assert!(!worker_paused(&worker[0]));
+    assert!(fx.managed.read().unwrap().is_none());
+    assert!(fx.revoked.is_empty());
+    assert!(!fx.file.exists() && !fx.state().exists());
+    assert_eq!(controller.local_node_id(), None);
+    assert!(controller.nodes().await.unwrap().is_empty());
+    let rooms = controller.rooms(true).await.unwrap();
+    assert!(
+        rooms
+            .iter()
+            .all(|room| room.status == RoomStatus::Unassigned)
+    );
+
+    // 可以再启用：新的节点身份
+    let again = local.enable(&controller, true).await.unwrap().unwrap();
+    assert_ne!(again, id);
+    wait_for_node(&controller, again, true, Duration::from_secs(30)).await;
+    local.shutdown().await;
+    controller.shutdown().await;
+}
+
+/// 「本机」节点代理停了（等价于远端节点离线）时关掉它：没法等它确认，控制面替它把托管行转本地并暂停，
+/// 然后才改派，两边不会同时录。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn disabling_a_stalled_local_node_pauses_its_rooms_before_reassigning() {
+    let dir = tempfile::tempdir().unwrap();
+    let (controller, _url, _pool) = start_controller(dir.path()).await;
+    let fx = LocalFixture::new(dir.path()).await;
+    let local = fx.attach(&controller).await;
+    controller.attach_local(local.clone());
+    let id = local.enable(&controller, false).await.unwrap().unwrap();
+    wait_for_node(&controller, id, true, Duration::from_secs(30)).await;
+    controller
+        .create_room(
+            serde_json::from_value(serde_json::json!({
+                "url": "https://stuck.example/1", "remark": "房间", "node_id": id,
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    eventually(
+        "room lands on the controller",
+        Duration::from_secs(20),
+        || {
+            let services = fx.services.clone();
+            async move { local_urls(&services).await.len() == 1 }
+        },
+    )
+    .await;
+
+    local.shutdown().await;
+    wait_for_node(&controller, id, false, Duration::from_secs(10)).await;
+    let done = controller.remove_node(id, true).await.unwrap().unwrap();
+    assert_eq!(done.state, RemovalState::Done);
+    assert!(done.local && done.reassign);
+    assert_eq!(done.rooms[0].release, Release::Offline);
+    // 没有别的节点，留在未分派
+    assert_eq!(done.rooms[0].node_id, None);
+    let worker = fx.services.managers.get_rooms().await;
+    assert_eq!(worker.len(), 1);
+    assert!(worker_paused(&worker[0]));
+    assert_eq!(fx.revoked.ids(), [worker[0].live_streamer.id]);
+    assert!(fx.managed.read().unwrap().is_none());
+    assert!(!fx.file.exists() && !fx.state().exists());
+    assert_eq!(controller.local_node_id(), None);
+    controller.shutdown().await;
+}
+
+/// 运行中启用、卡住后关闭的「本机」：暂停的主播不用重启就出现在 `/v1/me` 里，「全部恢复」能用；
+/// 清单空时 `/v1/node/revoked*` 与没挂一样
+#[tokio::test]
+async fn a_local_node_closed_at_runtime_offers_its_paused_rooms_without_a_restart() {
+    use axum::body::Body;
+    use axum::http::{Method, Request, StatusCode};
+    use tower::ServiceExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let (controller, _url, _pool) = start_controller(dir.path()).await;
+    let fx = LocalFixture::new(dir.path()).await;
+    let local = fx.attach(&controller).await;
+    let fleet = super::Fleet::controller(
+        controller.clone(),
+        local.clone(),
+        fx.managed.clone(),
+        fx.revoked.clone(),
+    );
+    let app = fleet.router().unwrap();
+    let send = |method: Method, uri: &'static str| {
+        let app = app.clone();
+        async move {
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(uri)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let status = response.status();
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            (
+                status,
+                serde_json::from_slice::<serde_json::Value>(&bytes).ok(),
+            )
+        }
+    };
+    assert_eq!(fleet.capability().revoked_view(), None);
+    let (status, _) = send(Method::POST, "/v1/node/revoked/resume").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = send(Method::DELETE, "/v1/node/revoked").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let id = local.enable(&controller, false).await.unwrap().unwrap();
+    wait_for_node(&controller, id, true, Duration::from_secs(30)).await;
+    controller
+        .create_room(
+            serde_json::from_value(serde_json::json!({
+                "url": "https://stuck.example/1", "remark": "房间", "node_id": id,
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    eventually(
+        "room lands on the controller",
+        Duration::from_secs(20),
+        || {
+            let services = fx.services.clone();
+            async move { local_urls(&services).await.len() == 1 }
+        },
+    )
+    .await;
+
+    local.shutdown().await;
+    wait_for_node(&controller, id, false, Duration::from_secs(10)).await;
+    let done = controller.remove_node(id, false).await.unwrap().unwrap();
+    assert_eq!(done.rooms[0].release, Release::Offline);
+    let worker = fx.services.managers.get_rooms().await;
+    assert!(worker_paused(&worker[0]));
+    let streamer = worker[0].live_streamer.id;
+    let view = fleet
+        .capability()
+        .revoked_view()
+        .expect("fleet_revoked right away");
+    assert_eq!(view["controller"], "本机");
+    assert_eq!(view["local"], true);
+    assert_eq!(view["streamers"], serde_json::json!([streamer]));
+
+    let (status, body) = send(Method::POST, "/v1/node/revoked/resume").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.unwrap()["resumed"], serde_json::json!([streamer]));
+    let worker = fx.services.managers.get_rooms().await;
+    assert!(!worker_paused(&worker[0]));
+    assert_eq!(fleet.capability().revoked_view(), None);
+    assert!(!revoked_path(&fx.file).exists());
+    let (status, _) = send(Method::POST, "/v1/node/revoked/resume").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    controller.shutdown().await;
+}
+
+/// `local-node.json` 与控制面对不上（控制面的数据被重置过）：不启动，托管行留作本地行
+#[tokio::test]
+async fn a_local_node_file_from_another_controller_is_dropped() {
+    let dir = tempfile::tempdir().unwrap();
+    let (controller, _url, _pool) = start_controller(dir.path()).await;
+    let fx = LocalFixture::new(dir.path()).await;
+    let stale = node::NodeFile {
+        local: true,
+        ..node::NodeFile::new(
+            iroh::SecretKey::generate().public(),
+            controller.local_relays(),
+            1,
+            &iroh::SecretKey::generate(),
+            false,
+        )
+    };
+    stale.save(&fx.file).unwrap();
+    std::fs::write(fx.state(), "{}").unwrap();
+    let local = fx.attach(&controller).await;
+    assert_eq!(local.node_id(), None);
+    assert!(!local.agent_running().await);
+    assert!(!fx.file.exists() && !fx.state().exists());
     controller.shutdown().await;
 }

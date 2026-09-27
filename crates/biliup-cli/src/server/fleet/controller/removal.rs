@@ -7,6 +7,9 @@
 //!
 //! 等待在后台做，接口当场返回 202；进度与结果放在内存里，由 `GET /v1/fleet/nodes` 的 `removals` 带给界面。
 //! 控制面在等待中途重启时进度随之丢失：房间已经改派，迁移照常完成，节点没被吊销，界面上可以再移除一次。
+//!
+//! 「本机」节点（[`crate::server::fleet::local`]）不论勾不勾自动改派都走这里：不改派时房间取消分派，
+//! 同样先等它确认释放再吊销，不留暂停的本地行。
 
 use super::{Controller, DispatchError};
 use crate::server::fleet::assignments::{self, Room};
@@ -26,6 +29,8 @@ use tracing::{info, warn};
 /// 又不让节点长时间停在「移除中」。超时照样吊销：节点被吊销后会把没交出去的房间转成本地并暂停，
 /// 重叠只到它收到吊销为止。
 pub const REMOVAL_WAIT: Duration = Duration::from_secs(60);
+/// 不改派时房间留在未分派，界面上显示的原因
+const NOT_REASSIGNED: &str = "没有勾选自动改派";
 /// 没有 `Ack` 唤醒时多久重新查一次（兜底，正常由 `Ack` 与掉线唤醒）
 const RECHECK: Duration = Duration::from_secs(1);
 /// 移除结束后结果留多久，给没开着页面的管理员回来看
@@ -75,6 +80,10 @@ pub struct Removal {
     pub deadline: i64,
     pub finished_at: Option<i64>,
     pub rooms: Vec<RemovedRoom>,
+    /// 是否把房间改派到其他节点；否则取消分派
+    pub reassign: bool,
+    /// 关掉的是「本机」节点
+    pub local: bool,
 }
 
 /// 等待中每次查到的情况
@@ -149,7 +158,10 @@ impl Controller {
         self.released.notify_waiters();
     }
 
-    async fn place(&self, room: &Room) -> Result<i64, DispatchError> {
+    async fn place(&self, room: &Room, reassign: bool) -> Result<i64, DispatchError> {
+        if !reassign {
+            return Err(DispatchError::Invalid(NOT_REASSIGNED.into()));
+        }
         let template = self.template_or_invalid(room.template_id).await?;
         let target = self
             .auto_node(&room.spec, template.as_ref(), &room.required_labels)
@@ -159,12 +171,21 @@ impl Controller {
     }
 
     /// 移除节点，并把分派给它的房间按负载改派到其他节点。
-    ///
-    /// 节点在线时先迁移、等它确认释放再吊销，返回的 `state` 为 `removing`，结果随后出现在 [`Self::removals`]；
-    /// 离线时当场吊销并改派，返回 `done`。返回 `None` 表示节点不存在或已被移除。
     pub async fn revoke_and_reassign(
         self: &Arc<Self>,
         id: i64,
+    ) -> Result<Option<Removal>, DispatchError> {
+        self.remove_node(id, true).await
+    }
+
+    /// 移除节点；`reassign` 为真时把分派给它的房间按负载改派到其他节点，否则取消分派。
+    ///
+    /// 节点在线时先迁移、等它确认释放再吊销，返回的 `state` 为 `removing`，结果随后出现在 [`Self::removals`]；
+    /// 离线时当场吊销并改派，返回 `done`。返回 `None` 表示节点不存在或已被移除。
+    pub async fn remove_node(
+        self: &Arc<Self>,
+        id: i64,
+        reassign: bool,
     ) -> Result<Option<Removal>, DispatchError> {
         let Some(node) = store::node(&self.pool, id)
             .await?
@@ -204,6 +225,8 @@ impl Controller {
                     deadline,
                     finished_at: None,
                     rooms: Vec::new(),
+                    reassign,
+                    local: self.is_local(id),
                 },
             );
         }
@@ -213,9 +236,10 @@ impl Controller {
             .filter(|room| room.node_id == Some(id) && room.deleted_at.is_none())
             .collect();
         let result = if online {
-            self.migrate_then_revoke(id, rooms, deadline).await
+            self.migrate_then_revoke(id, rooms, deadline, reassign)
+                .await
         } else {
-            self.revoke_then_place(id, rooms).await
+            self.revoke_then_place(id, rooms, reassign).await
         };
         let mut removals = self.removals.lock().unwrap();
         match result {
@@ -235,6 +259,7 @@ impl Controller {
         &self,
         id: i64,
         rooms: Vec<Room>,
+        reassign: bool,
     ) -> Result<Option<Removal>, DispatchError> {
         let Some(mut removal) = self.removals.lock().unwrap().get(&id).cloned() else {
             return Ok(None);
@@ -243,7 +268,7 @@ impl Controller {
             return Ok(None);
         }
         for room in rooms {
-            let placed = self.place(&room).await;
+            let placed = self.place(&room, reassign).await;
             removal.rooms.push(RemovedRoom {
                 room_id: room.id,
                 remark: room.spec.remark.clone(),
@@ -268,12 +293,13 @@ impl Controller {
         id: i64,
         rooms: Vec<Room>,
         deadline: i64,
+        reassign: bool,
     ) -> Result<Option<Removal>, DispatchError> {
         let Some(mut removal) = self.removals.lock().unwrap().get(&id).cloned() else {
             return Ok(None);
         };
         for room in rooms {
-            let placed = self.place(&room).await;
+            let placed = self.place(&room, reassign).await;
             let unplaced = match &placed {
                 Ok(_) => None,
                 Err(error) => {
@@ -509,6 +535,8 @@ mod tests {
                 deadline: now_ms() + 60_000,
                 finished_at: None,
                 rooms: Vec::new(),
+                reassign: true,
+                local: false,
             },
         );
         let rejected = controller
@@ -564,6 +592,8 @@ mod tests {
             deadline: 0,
             finished_at,
             rooms: Vec::new(),
+            reassign: true,
+            local: false,
         };
         let mut removals = HashMap::from([
             (1, removal(Some(1_000))),

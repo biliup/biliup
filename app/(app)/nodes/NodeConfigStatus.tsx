@@ -41,6 +41,14 @@ export function ConfigSyncTag({ state }: { state: NodeConfigState }) {
           配置已生效
         </Tag>
       )
+    case 'local':
+      return (
+        <Tooltip content="「本机」节点不收 Fleet 配置，录制用这台机器自己的「空间配置」">
+          <Tag size="small" color="white">
+            用本机配置
+          </Tag>
+        </Tooltip>
+      )
     default:
       return null
   }
@@ -67,7 +75,7 @@ export default function NodeConfigStatus({
         <ConfigSyncTag state={state} />
       ) : (
         <Text type="tertiary" size="small">
-          离线，上线后下发
+          {node.local ? '离线' : '离线，上线后下发'}
         </Text>
       )}
       {state.outdated && state.sync !== 'unsupported' ? (

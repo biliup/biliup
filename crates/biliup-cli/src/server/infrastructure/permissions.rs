@@ -252,6 +252,7 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         }
         "/v1/fleet/configuration" | "/v1/fleet/nodes/{id}/config" => NodeManage,
         "/v1/fleet/nodes/{id}"
+        | "/v1/fleet/local-node"
         | "/v1/fleet/nodes/{id}/labels"
         | "/v1/fleet/alerts"
         | "/v1/fleet/alerts/{id}"

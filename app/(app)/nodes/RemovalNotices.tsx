@@ -41,8 +41,8 @@ export default function RemovalNotices({
               type="info"
               closeIcon={null}
               data-removal={removal.node_id}
-              title={`正在移除 ${removal.node_name}`}
-              description={`${released} / ${removal.rooms.length} 个房间已确认释放并交给新节点；全部释放后移除它，最晚 ${humDate(Math.floor(removal.deadline / 1000))}`}
+              title={removal.local ? '正在关闭「本机」节点' : `正在移除 ${removal.node_name}`}
+              description={`${released} / ${removal.rooms.length} 个房间已确认释放${removal.reassign ? '并交给新节点' : ''}；全部释放后${removal.local ? '关闭' : '移除它'}，最晚 ${humDate(Math.floor(removal.deadline / 1000))}`}
             />
           )
         }
@@ -51,12 +51,15 @@ export default function RemovalNotices({
         const forced = removal.rooms.filter((room) => room.node_id !== null && unconfirmed(room.release))
         const unplaced = removal.rooms.filter((room) => room.node_id === null)
         const targets = [...new Set(handed.map((room) => nodeName(room.node_id as number)))]
+        const pausedNote = removal.local
+          ? '；本机已把它们转为本地直播间并暂停，确认后在「直播管理」恢复'
+          : '；原节点将在发现被移除后暂停它们'
         return (
           <Banner
             key={key(removal)}
             type={forced.length || unplaced.length ? 'warning' : 'success'}
             data-removal={removal.node_id}
-            title={`已移除 ${removal.node_name}`}
+            title={removal.local ? '已关闭「本机」节点' : `已移除 ${removal.node_name}`}
             onClose={() => setDismissed((current) => [...current, key(removal)])}
             description={
               <ul className={styles.removalList}>
@@ -70,13 +73,15 @@ export default function RemovalNotices({
                   <li>
                     {list(forced.map((room) => room.remark))}：
                     {forced.some((room) => room.release === 'timeout') ? '节点超时未释放' : '节点离线'}
-                    ，没等到确认就改派了；原节点将在发现被移除后暂停它们
+                    ，没等到确认就改派了{pausedNote}
                   </li>
                 ) : null}
                 {unplaced.length ? (
                   <li>
-                    {list(unplaced.map((room) => room.remark))} 没找到合适的节点，留在未分派：{unplaced[0].unplaced}
-                    {unplaced.some((room) => unconfirmed(room.release)) ? '；原节点将在发现被移除后暂停它们' : ''}
+                    {removal.reassign
+                      ? `${list(unplaced.map((room) => room.remark))} 没找到合适的节点，留在未分派：${unplaced[0].unplaced}`
+                      : `${list(unplaced.map((room) => room.remark))} 已${unplaced.some((room) => unconfirmed(room.release)) ? '' : '确认释放并'}留在未分派`}
+                    {unplaced.some((room) => unconfirmed(room.release)) ? pausedNote : ''}
                   </li>
                 ) : null}
               </ul>

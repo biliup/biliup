@@ -16,6 +16,7 @@ import {
   FLEET_ROOMS_KEY,
   FLEET_TEMPLATES_KEY,
   FLEET_TOKENS_KEY,
+  disableLocalNode,
   knownLabels,
   revokeAndReassign,
   revokeNode,
@@ -27,6 +28,7 @@ import {
   type JoinTokens,
 } from '@/app/lib/use-fleet'
 import NodeCard from './NodeCard'
+import LocalNodeOffer from './LocalNodeOffer'
 import JoinDialog from './JoinDialog'
 import RoomsPanel, { CreateRoomButton } from './RoomsPanel'
 import TemplatesPanel from './TemplatesPanel'
@@ -152,7 +154,17 @@ function Nodes() {
 
   const revoke = async (node: FleetNode, reassign: boolean) => {
     try {
-      if (!reassign) {
+      if (node.local) {
+        const removal = await disableLocalNode(node.id, reassign)
+        if (removal.state === 'removing') {
+          Toast.info({
+            content: `正在让本机交出 ${removal.rooms.length} 个房间，它停录、确认释放后关闭`,
+            duration: 5,
+          })
+        } else {
+          Toast.success('已关闭「本机」节点')
+        }
+      } else if (!reassign) {
         await revokeNode(node.id)
         Toast.success(`已移除 ${node.name}`)
       } else {
@@ -283,7 +295,7 @@ function Nodes() {
         ) : (
           <div className={styles.grid}>
             {[...shownNodes]
-              .sort((a, b) => Number(b.online) - Number(a.online) || a.id - b.id)
+              .sort((a, b) => Number(b.local) - Number(a.local) || Number(b.online) - Number(a.online) || a.id - b.id)
               .map((node) => (
                 <NodeCard
                   key={node.id}
@@ -372,6 +384,7 @@ function Nodes() {
                 {data?.removals?.length ? (
                   <RemovalNotices removals={data.removals} rooms={rooms} nodes={nodes} />
                 ) : null}
+                {canManage && data && data.local_node === null ? <LocalNodeOffer onEnabled={refresh} /> : null}
                 {nodesBody}
                 {controller ? <PendingTokens canManage={canManage} /> : null}
               </TabPane>

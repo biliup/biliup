@@ -4,8 +4,9 @@
 //! 广播通道，由节点代理转成 [`NodeMessage::Event`](super::protocol::NodeMessage::Event) 发出去；
 //! 断线期间最多攒 [`CAPACITY`] 条，更早的丢掉。
 //!
-//! 通道只在节点代理启动时创建。单机与控制面进程里 [`SINK`] 一直是空的，两处调用只读一次
-//! `OnceLock`，不分配、不记日志、不改任何状态。
+//! 通道只在节点代理启动时创建。单机与没启用「本机」节点（[`super::local`]）的控制面进程里 [`SINK`]
+//! 一直是空的，两处调用只读一次 `OnceLock`，不分配、不记日志、不改任何状态。启用之后与节点相同：
+//! 本进程里所有房间（含控制面自己的主播）的事件都记在「本机」名下。
 
 use super::now_ms;
 use super::protocol::{EVENT_RECORDING_ERROR, EVENT_UPLOAD_FAILED, Event, RoomEvent};
