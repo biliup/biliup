@@ -6,12 +6,16 @@
 //!
 //! 配对只在「本机」节点（F5）启用、且它就是 `ha_pair` 里的主机时生效；没有配对时这里什么都不做，
 //! 下发的期望状态与以前逐字相同。
+//!
+//! 备机次版本 ≥ 5 时两台双向同步（H2，[`super::member`]）：镜像的房间与模板在备机上可以改，备机的修改由这里
+//! 仲裁后改 Fleet 房间（[`super::rooms`]）；每次给配对里的一台下发之前先认出控制面上的改动（[`Pairing::rescan`]）。
 
 use super::member::Member;
 use super::params::{HaMode, HaParams};
 use super::primary::Primary;
+use super::rooms::{Arbiter, PairSet};
 use super::store::{self, Pair};
-use super::sync::{PairMessage, PairState, Side};
+use super::sync::{PairMessage, PairState, ROOM, Side, TEMPLATE};
 use super::wire::{HaAssignment, HaMessage, ManualAction};
 use super::{Link, Role, set_role, sync_downloader};
 use crate::server::config::Config;
@@ -270,15 +274,63 @@ impl Pairing {
         }
     }
 
-    /// 配对节点发来的同步消息；不是配对节点的丢掉
-    pub async fn pair_message(&self, node: i64, message: PairMessage) {
-        match self.member_for(node) {
-            Some(member) => member.receive(message).await,
-            None => debug!(
+    /// 配对节点发来的同步消息；不是配对节点的丢掉。节点改的房间与模板由控制面仲裁、改 Fleet，
+    /// 之后给两台重发期望状态
+    pub async fn pair_message(&self, controller: &Controller, node: i64, message: PairMessage) {
+        let Some(active) = self.active().filter(|a| a.pair.standby_node_id == node) else {
+            debug!(
                 node,
                 op = message.op(),
                 "pair frame from a node that is not paired"
-            ),
+            );
+            return;
+        };
+        let rows = matches!(&message, PairMessage::Edit(edit)
+            if edit.key.starts_with(ROOM) || edit.key.starts_with(TEMPLATE));
+        let set = if rows {
+            match self.pair_set(controller, &active.pair).await {
+                Ok(set) => set,
+                Err(e) => {
+                    warn!(error = ?e, "配对同步：读不了配对里的房间，这条修改等节点重发");
+                    return;
+                }
+            }
+        } else {
+            PairSet::default()
+        };
+        let arbiter = Arbiter {
+            controller,
+            node: active.pair.primary_node_id,
+            set,
+        };
+        if active.member.receive(message, Some(&arbiter)).await {
+            controller
+                .push_many([Some(active.pair.primary_node_id)])
+                .await;
+        }
+    }
+
+    /// 配对里的房间（主机「本机」持有、不是边录边传）与它们用的模板
+    async fn pair_set(&self, controller: &Controller, pair: &Pair) -> AppResult<PairSet> {
+        let (rooms, templates) =
+            assignments::desired_state(controller.pool(), pair.primary_node_id).await?;
+        let (rooms, _) = split(&self.config(), rooms);
+        let used: BTreeSet<i64> = rooms.iter().filter_map(|room| room.template_id).collect();
+        let templates = templates
+            .into_iter()
+            .filter(|template| used.contains(&template.id))
+            .collect();
+        Ok(PairSet { rooms, templates })
+    }
+
+    /// 控制面要给主机「本机」下发之前（`Controller::push_many`）：认出配对里房间与模板在控制面上的改动
+    pub async fn rescan(&self, controller: &Controller) {
+        let Some(active) = self.active() else {
+            return;
+        };
+        match self.pair_set(controller, &active.pair).await {
+            Ok(set) => active.member.scan_fleet(&set).await,
+            Err(e) => warn!(error = ?e, "配对同步：读不了配对里的房间，这次不认控制面上的改动"),
         }
     }
 
@@ -384,6 +436,7 @@ impl Pairing {
             primary,
             member,
         });
+        self.rescan(controller).await;
         Ok(())
     }
 
@@ -431,16 +484,36 @@ impl Pairing {
         }
         let (primary_rooms, primary_templates) =
             assignments::desired_state(controller.pool(), active.pair.primary_node_id).await?;
-        let (kept, excluded) = split(&self.config(), primary_rooms);
+        let (mut kept, excluded) = split(&self.config(), primary_rooms);
         if !excluded.is_empty() {
             debug!(
                 rooms = ?excluded.iter().map(|room| room.id).collect::<Vec<_>>(),
                 "HA：边录边传的房间不镜像给备机"
             );
         }
+        let pair = if proto >= PAIR_SINCE {
+            let set = PairSet {
+                rooms: kept.clone(),
+                templates: primary_templates.clone(),
+            };
+            let state = active.member.pair_state(&set).await;
+            // 还没记进账本的房间（节点新建、控制面正在收下）这次先不镜像，免得备机按控制面 id 再建一行
+            kept.retain(|room| state.room(room.id).is_some());
+            Some(state)
+        } else {
+            None
+        };
         let assignment = mirror(&active.pair, kept, primary_templates, rooms, templates);
-        let pair = (proto >= PAIR_SINCE).then(PairState::default);
         Ok((Some(assignment), pair))
+    }
+
+    /// 要下发的节点里有配对里的一台
+    pub fn involves(&self, nodes: &[i64]) -> bool {
+        let active = self.active.lock().unwrap();
+        active.as_ref().is_some_and(|active| {
+            nodes.contains(&active.pair.primary_node_id)
+                || nodes.contains(&active.pair.standby_node_id)
+        })
     }
 
     /// 要给主机「本机」重发期望状态时，备机的镜像也跟着重发

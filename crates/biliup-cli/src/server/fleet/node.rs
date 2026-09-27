@@ -836,7 +836,7 @@ async fn session(
                             return closed_outcome(close_code(&reason), true);
                         }
                     }
-                    let ack = reconciler.apply(desired).await;
+                    let ack = ha.reconcile(desired, reconciler).await;
                     ha.set_rooms(reconciler.state());
                     if let Err(e) = protocol::write_frame(&mut send, &NodeMessage::Ack(ack)).await {
                         debug!(error = %e, "fleet ack failed");

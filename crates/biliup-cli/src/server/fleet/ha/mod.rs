@@ -17,6 +17,7 @@ pub mod outbox;
 pub mod pairing;
 pub mod params;
 pub mod primary;
+pub mod rooms;
 pub mod standby;
 pub mod store;
 pub mod sync;

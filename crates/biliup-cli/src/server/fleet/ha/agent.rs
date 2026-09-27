@@ -21,8 +21,8 @@ use crate::server::errors::{AppError, AppResult};
 use crate::server::fleet::events;
 use crate::server::fleet::model::DesiredRoom;
 use crate::server::fleet::now_ms;
-use crate::server::fleet::protocol::DesiredState;
-use crate::server::fleet::reconcile::FleetState;
+use crate::server::fleet::protocol::{Ack, DesiredState};
+use crate::server::fleet::reconcile::{FleetState, Reconciler};
 use crate::server::infrastructure::context::Context;
 use crate::server::infrastructure::service_register::ServiceRegister;
 use biliup::downloader::live::LiveStream;
@@ -752,8 +752,18 @@ impl NodeHa {
     /// 控制面发来的同步消息
     pub async fn pair_message(&self, message: PairMessage) {
         match &self.pair {
-            Some(member) => member.receive(message).await,
+            Some(member) => {
+                member.receive(message, None).await;
+            }
             None => debug!(op = message.op(), "pair frame while not paired"),
+        }
+    }
+
+    /// 落地期望状态：与控制面同步时本机版本更新的配对行先不动（[`Member::reconcile`]）
+    pub async fn reconcile(&self, desired: DesiredState, reconciler: &mut Reconciler) -> Ack {
+        match &self.pair {
+            Some(member) => member.reconcile(desired, reconciler).await,
+            None => reconciler.apply(desired).await,
         }
     }
 

@@ -7,7 +7,9 @@ mod removal;
 
 pub use alerting::{AlertList, FleetSummary, OFFLINE_ALERT_AFTER_MS};
 pub use configuration::{CONTROLLER_VERSION, NodeConfigState, version_older};
-pub use dispatch::{CreateRoom, DispatchError, RoomStatus, RoomView, UpdateRoom, strip_hooks};
+pub use dispatch::{
+    CreateRoom, DispatchError, RoomStatus, RoomView, UpdateRoom, check_room_spec, strip_hooks,
+};
 pub use removal::{REMOVAL_WAIT, Release, Removal, RemovalState, RemovedRoom};
 
 use super::alerts::Alerts;
@@ -444,8 +446,18 @@ impl Controller {
     /// 给一台在线节点下发它此刻完整的期望状态。离线或太旧（收不了 `DesiredState`）的节点跳过，
     /// 它连上来时会收到。
     pub async fn push(&self, node: i64) {
+        self.rescan_pair(&[node]).await;
         let _guard = self.dispatch.lock().await;
         self.push_locked(node).await;
+    }
+
+    /// 要给配对里的一台下发时，先认出配对里房间与模板在控制面上的改动（不能拿着分派锁调）
+    async fn rescan_pair(&self, nodes: &[i64]) {
+        if let Some(pairing) = self.ha()
+            && pairing.involves(nodes)
+        {
+            pairing.rescan(self).await;
+        }
     }
 
     async fn push_locked(&self, node: i64) {
@@ -517,6 +529,7 @@ impl Controller {
         }
         nodes.sort_unstable();
         nodes.dedup();
+        self.rescan_pair(&nodes).await;
         let _guard = self.dispatch.lock().await;
         for node in nodes {
             self.push_locked(node).await;
@@ -832,7 +845,7 @@ impl Controller {
                 NodeMessage::Pair(message) => {
                     self.touch(id, seq);
                     match self.ha() {
-                        Some(pairing) => pairing.pair_message(id, message).await,
+                        Some(pairing) => pairing.pair_message(self, id, message).await,
                         None => debug!(node = id, op = message.op(), "pair frame without a pair"),
                     }
                 }

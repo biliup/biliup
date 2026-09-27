@@ -6,6 +6,9 @@
 //!
 //! 控制面管配置时（F3），`PUT /v1/configuration` 改到白名单键同样 409；只改名单外的键
 //! （Cookie、密码等本机密钥，控制面不下发）照常保存。
+//!
+//! 一主一备的备机与控制面双向同步时（H2），配对里的行不算托管（[`Managed::pair`]）：本机照常增删改，
+//! 改动由配对同步发给控制面；配置也不再由控制面分层下发。只有删配对里还在用的模板仍然 409。
 
 use super::layers::{self, Object};
 use crate::server::config::Config;
@@ -36,6 +39,15 @@ pub struct Managed {
     pub templates: BTreeSet<i64>,
     /// 控制面在管配置时，此刻生效配置的白名单投影
     pub config: Option<Object>,
+    /// 一主一备的备机与控制面双向同步时（H2）：配对里的行不在上面两项里，本机可以改
+    pub pair: Option<PairLocal>,
+}
+
+/// 配对里的本地行：本机的改动由配对同步发给控制面
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PairLocal {
+    pub streamers: BTreeSet<i64>,
+    pub templates: BTreeSet<i64>,
 }
 
 /// 节点代理与 HTTP 层共享；`None` 表示没有被任何控制面托管（没加入、已离开或已被移除）
@@ -44,13 +56,34 @@ pub type ManagedHandle = Arc<RwLock<Option<Managed>>>;
 impl Managed {
     /// `/v1/me` 的 `fleet_node`
     pub fn view(&self) -> Value {
-        serde_json::json!({
+        let mut view = serde_json::json!({
             "controller": self.controller,
             "local": self.local,
             "streamers": self.streamers.keys().collect::<Vec<_>>(),
             "templates": self.templates.iter().collect::<Vec<_>>(),
             "config": self.config.is_some(),
-        })
+        });
+        if let Some(pair) = &self.pair {
+            view["pair"] = serde_json::json!({
+                "streamers": pair.streamers,
+                "templates": pair.templates,
+            });
+        }
+        view
+    }
+
+    /// 删配对里的模板：用它的都是配对里的房间，删了会连带删掉它们（控制面上同样不让删在用的模板）
+    fn deletes_paired_template(&self, method: &Method, path: &str) -> bool {
+        let Some(pair) = &self.pair else {
+            return false;
+        };
+        let segments: Vec<&str> = path.trim_matches('/').split('/').collect();
+        match (method.as_str(), segments.as_slice()) {
+            ("DELETE", ["v1", "upload", "streamers", template]) => template
+                .parse::<i64>()
+                .is_ok_and(|id| pair.templates.contains(&id)),
+            _ => false,
+        }
     }
 
     /// 本机保存配置的请求改到了哪些控制面管的键；控制面不管配置或请求体解不开时为空（交给接口本身处理）
@@ -153,6 +186,10 @@ pub async fn guard(State(handle): State<ManagedHandle>, request: Request, next: 
         }
     } else if managed.blocks(&method, &path, &bytes) {
         return (StatusCode::CONFLICT, Json(ApiError::new(managed.message()))).into_response();
+    } else if managed.deletes_paired_template(&method, &path) {
+        let message =
+            "这个模板在一主一备的两台之间同步，配对里的房间还在用它：先把这些房间改用别的模板";
+        return (StatusCode::CONFLICT, Json(ApiError::new(message.into()))).into_response();
     }
     next.run(Request::from_parts(parts, Body::from(bytes)))
         .await
@@ -286,6 +323,40 @@ mod tests {
         assert_eq!(code, StatusCode::OK);
         let (code, _) = status(&app, Method::PUT, "/v1/streamers/3/pause", "").await;
         assert_eq!(code, StatusCode::OK);
+    }
+
+    /// 备机与控制面双向同步时：配对里的行照常改，只有删配对里的模板 409；普通托管行照旧 409
+    #[tokio::test]
+    async fn paired_rows_are_editable_except_deleting_a_paired_template() {
+        let paired = Managed {
+            pair: Some(PairLocal {
+                streamers: BTreeSet::from([8]),
+                templates: BTreeSet::from([9]),
+            }),
+            ..managed()
+        };
+        let view = paired.view();
+        assert_eq!(view["pair"]["streamers"], serde_json::json!([8]));
+        assert_eq!(view["streamers"], serde_json::json!([3]));
+        assert!(managed().view().get("pair").is_none(), "不配对时没有这个键");
+        let handle: ManagedHandle = Arc::new(RwLock::new(Some(paired)));
+        let app = Router::new()
+            .route("/v1/streamers", any(|body: String| async move { body }))
+            .route("/v1/streamers/{id}", any(|| async { "ok" }))
+            .route("/v1/upload/streamers/{id}", any(|| async { "ok" }))
+            .layer(axum::middleware::from_fn_with_state(handle, guard));
+
+        let (code, _) = status(&app, Method::PUT, "/v1/streamers", r#"{"id":8}"#).await;
+        assert_eq!(code, StatusCode::OK);
+        let (code, _) = status(&app, Method::DELETE, "/v1/streamers/8", "").await;
+        assert_eq!(code, StatusCode::OK);
+        let (code, body) = status(&app, Method::DELETE, "/v1/upload/streamers/9", "").await;
+        assert_eq!(code, StatusCode::CONFLICT);
+        assert!(body.contains("一主一备"), "{body}");
+        let (code, _) = status(&app, Method::PUT, "/v1/streamers", r#"{"id":3}"#).await;
+        assert_eq!(code, StatusCode::CONFLICT, "不在配对里的托管行照旧 409");
+        let (code, _) = status(&app, Method::DELETE, "/v1/upload/streamers/5", "").await;
+        assert_eq!(code, StatusCode::CONFLICT);
     }
 
     fn config_body(config: &Config) -> String {

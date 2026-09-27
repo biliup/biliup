@@ -11,13 +11,16 @@
 
 use super::Link;
 use super::outbox::{self, PairFile, Queued};
+use super::rooms::{self, Arbiter, PairSet};
 use super::sync::{
-    ACCOUNT, Book, CONFIG, PairAck, PairEdit, PairMessage, PairSecret, Rejected, Side, Stamp,
-    Verdict, account_key, config_key, digest, digest_bytes,
+    ACCOUNT, Book, CONFIG, PairAck, PairEdit, PairMessage, PairSecret, PairState, ROOM, Rejected,
+    RoomValue, Side, Stamp, TEMPLATE, Verdict, account_key, config_key, digest, digest_bytes,
 };
 use crate::server::config::Config;
 use crate::server::fleet::layers::is_per_node;
 use crate::server::fleet::now_ms;
+use crate::server::fleet::protocol::{Ack, DesiredState};
+use crate::server::fleet::reconcile::Reconciler;
 use crate::server::infrastructure::repositories::{
     delete_bilibili_cookie, register_bilibili_cookie,
 };
@@ -147,6 +150,9 @@ pub struct Member {
     dir: PathBuf,
     path: PathBuf,
     services: ServiceRegister,
+    /// 控制面：认出 Fleet 上的改动与落地节点的房间修改一个一个来（先拿它再拿 `state`；
+    /// 落地时会拿控制面的分派锁，所以拿着 `state` 时不改 Fleet）
+    fleet: tokio::sync::Mutex<()>,
     state: tokio::sync::Mutex<State>,
     link: Mutex<Option<Link>>,
     /// 当前的主机（同一毫秒的两条修改谁赢）
@@ -172,6 +178,7 @@ impl Member {
             dir: dir.to_path_buf(),
             path,
             services,
+            fleet: tokio::sync::Mutex::default(),
             state: tokio::sync::Mutex::new(State {
                 file: previous.unwrap_or_else(|| PairFile::new(peer)),
                 sent: 0,
@@ -318,7 +325,73 @@ impl Member {
     async fn scan_locked(&self, state: &mut State) -> bool {
         let config = self.scan_config(state);
         let accounts = self.scan_accounts(state).await;
-        config || accounts
+        let rows = match self.side {
+            Side::Node => rooms::scan_rows(&mut state.file, &self.services, now_ms()).await,
+            Side::Controller => Vec::new(),
+        };
+        if !rows.is_empty() {
+            info!(keys = ?rows, "配对同步：本机改了配对里的房间或模板");
+        }
+        config || accounts || !rows.is_empty()
+    }
+
+    /// 控制面：认出 Fleet 房间与模板上的改动（每次下发之前，[`super::pairing::Pairing::rescan`]）
+    pub async fn scan_fleet(&self, set: &PairSet) {
+        let _fleet = self.fleet.lock().await;
+        let mut state = self.state.lock().await;
+        let changed = rooms::stamp_fleet(&mut state.file.book, set, now_ms());
+        if !changed.is_empty() {
+            info!(keys = ?changed, "配对同步：控制面上配对里的房间或模板有改动");
+            self.persist(&state);
+        }
+    }
+
+    /// 控制面：给配对节点的期望状态里带的同步版本
+    pub async fn pair_state(&self, set: &PairSet) -> PairState {
+        rooms::pair_state(&self.state.lock().await.file.book, set)
+    }
+
+    /// 节点：落地带 `pair` 的期望状态。本机版本更新的配对行不动，落地之后记下各行落地的版本；
+    /// 整个过程拿着账本，扫描不会把落地写的行当成本机的改动
+    pub async fn reconcile(&self, desired: DesiredState, reconciler: &mut Reconciler) -> Ack {
+        let Some(pair) = desired.pair.clone() else {
+            return reconciler.apply(desired).await;
+        };
+        let mut state = self.state.lock().await;
+        let primary = self.primary();
+        let plan = rooms::plan(&mut state.file.book, &pair, reconciler.state(), primary);
+        let (desired_rooms, desired_templates) = (desired.rooms.clone(), desired.templates.clone());
+        let ack = reconciler.apply_paired(desired, Some(plan.clone())).await;
+        let applied = rooms::Applied {
+            pair: &pair,
+            rooms: &desired_rooms,
+            templates: &desired_templates,
+        };
+        rooms::record_applied(
+            &mut state.file,
+            &self.services,
+            &applied,
+            &plan,
+            reconciler.state(),
+            primary,
+        )
+        .await;
+        self.persist(&state);
+        ack
+    }
+
+    /// 节点：配对中本机新建了主播（`POST /v1/streamers` 成功之后），加入配对发给控制面
+    pub async fn join_room(&self, local: i64) {
+        if self.side != Side::Node {
+            return;
+        }
+        let mut state = self.state.lock().await;
+        if let Some(key) = rooms::join_room(&mut state.file, &self.services, local, now_ms()).await
+        {
+            info!(key, "配对同步：本机新建的主播加入配对");
+            self.persist(&state);
+            self.flush_locked(&mut state).await;
+        }
     }
 
     fn scan_config(&self, state: &mut State) -> bool {
@@ -458,12 +531,48 @@ impl Member {
                 content,
             }));
         }
+        if queued.key.starts_with(ROOM) || queued.key.starts_with(TEMPLATE) {
+            let value = if record.deleted() {
+                None
+            } else {
+                Some(rooms::node_value(file, &self.services, &queued.key).await?)
+            };
+            return Some(PairMessage::Edit(PairEdit {
+                seq: queued.seq,
+                key: queued.key.clone(),
+                stamp,
+                value,
+            }));
+        }
         debug!(key = queued.key, "配对同步：不认识的键，不发");
         None
     }
 
-    /// 对端发来的同步消息
-    pub async fn receive(&self, message: PairMessage) {
+    /// 对端发来的同步消息。控制面这一侧带 `arbiter`（落地节点改的房间与模板要改 Fleet）；
+    /// 返回真时调用方给两台重发期望状态（Fleet 房间改了、账号到了可能让落地失败的房间能落地了）
+    pub async fn receive(&self, message: PairMessage, arbiter: Option<&Arbiter<'_>>) -> bool {
+        let _fleet = self.fleet.lock().await;
+        if let PairMessage::Edit(edit) = &message
+            && (edit.key.starts_with(ROOM) || edit.key.starts_with(TEMPLATE))
+        {
+            let PairMessage::Edit(edit) = message else {
+                unreachable!()
+            };
+            let seq = edit.seq;
+            let rejected = match arbiter {
+                Some(arbiter) => self.apply_row(arbiter, edit).await,
+                None => {
+                    debug!(key = edit.key, "配对同步：房间与模板只由控制面仲裁");
+                    None
+                }
+            };
+            let mut state = self.state.lock().await;
+            self.reply(seq, rejected);
+            self.persist(&state);
+            self.flush_locked(&mut state).await;
+            return arbiter.is_some();
+        }
+        let mut repush = false;
         let mut state = self.state.lock().await;
         match message {
             PairMessage::Edit(edit) => {
@@ -475,8 +584,14 @@ impl Member {
                 let seq = secret.seq;
                 let rejected = self.apply_secret(&mut state, secret).await;
                 self.reply(seq, rejected);
+                repush = true;
             }
             PairMessage::Ack(ack) => {
+                repush = state
+                    .file
+                    .queue
+                    .iter()
+                    .any(|queued| queued.seq <= ack.upto && queued.key.starts_with(ACCOUNT));
                 state.file.acked(ack.upto);
                 for rejected in &ack.rejected {
                     warn!(
@@ -484,12 +599,109 @@ impl Member {
                         reason = rejected.reason,
                         "配对同步：对端没有采用本机的修改，按对端的那份为准"
                     );
+                    // 本机新建、控制面没收下的主播与模板留作本机的，不在配对里
+                    if state
+                        .file
+                        .book
+                        .get(&rejected.key)
+                        .is_some_and(|record| record.local.is_some() && record.fleet.is_none())
+                    {
+                        state.file.book.records.remove(&rejected.key);
+                    }
                 }
             }
             other => debug!(op = other.op(), "配对同步：这条消息由配对角色处理"),
         }
         self.persist(&state);
         self.flush_locked(&mut state).await;
+        repush && arbiter.is_some()
+    }
+
+    /// 控制面：落地节点改的一个房间或模板。先按版本判断，再改 Fleet（这时不拿账本，免得与下发互相等），
+    /// 最后按落地后的样子记账；落地失败时把控制面那份盖上新版本，随下一次下发回到节点
+    async fn apply_row(&self, arbiter: &Arbiter<'_>, edit: PairEdit) -> Option<Rejected> {
+        let room = edit.key.starts_with(ROOM);
+        let (verdict, current, template) = {
+            let mut state = self.state.lock().await;
+            let book = &mut state.file.book;
+            let verdict = book.judge(&edit.key, &edit.stamp, self.primary());
+            let current = book.get(&edit.key).and_then(|record| record.fleet);
+            let template = edit
+                .value
+                .as_ref()
+                .and_then(|value| value.get("template"))
+                .and_then(Value::as_str)
+                .map(|uid| rooms::fleet_template_id(book, uid))
+                .transpose();
+            (verdict, current, template)
+        };
+        if verdict != Verdict::Take {
+            return None;
+        }
+        let result = if room {
+            let value = edit
+                .value
+                .clone()
+                .map(serde_json::from_value::<RoomValue>)
+                .transpose()
+                .map_err(|_| "房间的格式不对".to_string());
+            match (value, template) {
+                (Ok(value), Ok(template)) => {
+                    rooms::apply_room(arbiter, current, value, template).await
+                }
+                (Err(reason), _) | (_, Err(reason)) => Err(reason),
+            }
+        } else {
+            rooms::apply_template(arbiter, current, edit.value.clone()).await
+        };
+        let mut state = self.state.lock().await;
+        match result {
+            Ok(Some(id)) => {
+                let hash = rooms::fleet_digest(arbiter, &state.file.book, &edit.key, id).await;
+                state
+                    .file
+                    .book
+                    .put(&edit.key, edit.stamp, Some(hash.unwrap_or_default()));
+                if let Some(record) = state.file.book.get_mut(&edit.key) {
+                    record.fleet = Some(id);
+                }
+                None
+            }
+            Ok(None) => {
+                state.file.book.put(&edit.key, edit.stamp, None);
+                None
+            }
+            Err(reason) => {
+                warn!(
+                    key = edit.key,
+                    reason, "配对同步：节点改的房间或模板在控制面不能生效，按控制面的为准"
+                );
+                let book = &mut state.file.book;
+                let current_value = current.and_then(|id| match room {
+                    true => arbiter
+                        .set
+                        .room(id)
+                        .map(|room| rooms::fleet_room_value(book, room)),
+                    false => arbiter
+                        .set
+                        .template(id)
+                        .map(|template| rooms::template_value(&template.spec)),
+                });
+                match current_value {
+                    Some(value) => {
+                        book.write(&edit.key, Side::Controller, now_ms(), Some(digest(&value)));
+                    }
+                    None if book.get(&edit.key).is_some_and(|record| !record.deleted()) => {
+                        book.write(&edit.key, Side::Controller, now_ms(), None);
+                    }
+                    None => {}
+                }
+                Some(Rejected {
+                    key: edit.key,
+                    reason,
+                })
+            }
+        }
     }
 
     fn reply(&self, upto: u64, rejected: Option<Rejected>) {
@@ -807,7 +1019,9 @@ pub(crate) mod tests {
                     while let Some(frame) = at_node.recv().await {
                         match frame {
                             ControllerMessage::Pair(PairMessage::Ack(_)) if drop_acks => {}
-                            ControllerMessage::Pair(message) => node.receive(message).await,
+                            ControllerMessage::Pair(message) => {
+                                node.receive(message, None).await;
+                            }
                             _ => {}
                         }
                     }
@@ -815,7 +1029,7 @@ pub(crate) mod tests {
                 tokio::spawn(async move {
                     while let Some(frame) = at_controller.recv().await {
                         if let NodeMessage::Pair(message) = frame {
-                            controller.receive(message).await;
+                            controller.receive(message, None).await;
                         }
                     }
                 }),
@@ -892,6 +1106,7 @@ pub(crate) mod tests {
             c.services.config.read().unwrap().filename_prefix.as_deref() == Some("N")
         })
         .await;
+        eventually("节点收到应答", || async { nm.pending().await == 0 }).await;
 
         // 断开后两边各改同一个键：控制面先改，节点后改；重连后都是节点的
         wire.cut(&cm, &nm);
@@ -927,29 +1142,35 @@ pub(crate) mod tests {
         // 同一毫秒、不同来源：主机（控制面）赢。节点账本里是节点在 X 写的，控制面在同一个 X 写的到了就收下
         let recorded = nm.book().await.get(&key).unwrap().stamp;
         assert_eq!(recorded.side, Side::Node);
-        nm.receive(PairMessage::Edit(PairEdit {
-            seq: 99,
-            key: key.clone(),
-            stamp: Stamp {
-                side: Side::Controller,
-                ..recorded
-            },
-            value: Some(serde_json::json!("05:00:00")),
-        }))
+        nm.receive(
+            PairMessage::Edit(PairEdit {
+                seq: 99,
+                key: key.clone(),
+                stamp: Stamp {
+                    side: Side::Controller,
+                    ..recorded
+                },
+                value: Some(serde_json::json!("05:00:00")),
+            }),
+            None,
+        )
         .await;
         assert_eq!(segment_time(&n.services).as_deref(), Some("05:00:00"));
 
         // 对端的值在本机不合法：不生效，本机这份盖新版本发回去
         let before = n.services.config.read().unwrap().clone();
-        nm.receive(PairMessage::Edit(PairEdit {
-            seq: 101,
-            key: config_key("filtering_threshold"),
-            stamp: Stamp {
-                at: now_ms() + 60_000,
-                side: Side::Controller,
-            },
-            value: Some(serde_json::json!("not a number")),
-        }))
+        nm.receive(
+            PairMessage::Edit(PairEdit {
+                seq: 101,
+                key: config_key("filtering_threshold"),
+                stamp: Stamp {
+                    at: now_ms() + 60_000,
+                    side: Side::Controller,
+                },
+                value: Some(serde_json::json!("not a number")),
+            }),
+            None,
+        )
         .await;
         assert_eq!(
             n.services.config.read().unwrap().filtering_threshold,

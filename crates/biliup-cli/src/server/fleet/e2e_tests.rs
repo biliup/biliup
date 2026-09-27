@@ -1767,3 +1767,464 @@ async fn the_local_node_is_mirrored_to_a_designated_standby() {
     local.shutdown().await;
     controller.shutdown().await;
 }
+
+async fn row_by_url(services: &ServiceRegister, url: &str) -> Option<LiveStreamer> {
+    LiveStreamer::select()
+        .where_("url = ?")
+        .bind(url)
+        .fetch_optional(&services.pool)
+        .await
+        .unwrap()
+}
+
+async fn remark_on(services: &ServiceRegister, url: &str) -> Option<String> {
+    row_by_url(services, url).await.map(|row| row.remark)
+}
+
+/// 在节点本机改一个主播的备注（与「直播管理」保存一样走 `update_streamer`）
+async fn edit_remark(services: &ServiceRegister, url: &str, remark: &str) {
+    let mut row = row_by_url(services, url).await.expect("本机有这一行");
+    row.remark = remark.to_string();
+    crate::server::services::streamers::update_streamer(services, row)
+        .await
+        .unwrap();
+}
+
+/// 一主一备的双向同步（H2）：备机镜像行可以改，改动经控制面仲裁回到 Fleet 房间、再到主机；主机的改动到备机；
+/// 备机新建的主播加入配对（控制面按它建房间，备机认下自己那一行，不重复）；两边删除互相跟随。
+/// 两台断开期间各改同一个房间，重连后按版本后写者赢（含「删了又被改」「改了又被删」）。
+/// 备机的账号凭据到了主机，控制面库里没有凭据内容；普通节点不参与同步、托管行照旧只读
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
+    use super::ha::member::member_for;
+    use super::ha::pairing::{Designate, Pairing};
+    use crate::server::services::streamers::{add_streamer, delete_streamer, toggle_pause};
+
+    let _role = super::ha::test_guard().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (controller, url, pool) = start_controller(dir.path()).await;
+    let fx = LocalFixture::new(dir.path()).await;
+    let pairing = Arc::new(Pairing::new(fx.services.clone(), dir.path()));
+    controller.attach_ha(pairing.clone());
+    let local = fx.attach(&controller).await;
+    controller.attach_local(local.clone());
+    pairing.resume(&controller, local.node_id()).await;
+    let primary = local.enable(&controller, false).await.unwrap().unwrap();
+    wait_for_node(&controller, primary, true, Duration::from_secs(30)).await;
+
+    let mut nodes = Vec::new();
+    for name in ["standby", "other"] {
+        let root = dir.path().join(name);
+        let node_file = root.join("data/node.json");
+        let joined = node::join(
+            &ticket_for(&controller, &pool, &url).await,
+            false,
+            &node_file,
+        )
+        .await
+        .unwrap();
+        let services = node_services(&root).await;
+        let managed = ManagedHandle::default();
+        let agent = NodeAgent::start(
+            node_file.clone(),
+            services.clone(),
+            managed.clone(),
+            revoked_for(&node_file, &services),
+        )
+        .await
+        .unwrap();
+        wait_for_node(&controller, joined.node_id, true, Duration::from_secs(30)).await;
+        nodes.push((joined.node_id, services, Some(agent), node_file, managed));
+    }
+    let (standby, other) = (nodes[0].0, nodes[1].0);
+    let s = nodes[0].1.clone();
+    let standby_file = nodes[0].3.clone();
+    let standby_managed = nodes[0].4.clone();
+    let (other_services, other_managed) = (nodes[1].1.clone(), nodes[1].4.clone());
+    let c = fx.services.clone();
+
+    let template = controller
+        .create_template(
+            serde_json::from_value(
+                serde_json::json!({ "template_name": "ha", "title": "{title}" }),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    let m = "https://stuck.example/m";
+    let room = |url: &str, node: i64| -> CreateRoom {
+        serde_json::from_value(serde_json::json!({
+            "url": url, "remark": "房间", "template_id": template.id, "node_id": node,
+        }))
+        .unwrap()
+    };
+    let mirrored = controller.create_room(room(m, primary)).await.unwrap();
+    controller
+        .create_room(room("https://stuck.example/o", other))
+        .await
+        .unwrap();
+    let designate: Designate =
+        serde_json::from_value(serde_json::json!({ "standby": standby, "mode": 1 })).unwrap();
+    pairing
+        .designate(&controller, designate)
+        .await
+        .unwrap()
+        .unwrap();
+    let paired_row = |managed: ManagedHandle, id: i64| {
+        managed
+            .read()
+            .unwrap()
+            .as_ref()
+            .and_then(|managed| managed.pair.clone())
+            .is_some_and(|pair| pair.streamers.contains(&id))
+    };
+    eventually(
+        "the mirror is a paired row",
+        Duration::from_secs(20),
+        || {
+            let (s, managed) = (s.clone(), standby_managed.clone());
+            async move {
+                let Some(row) = row_by_url(&s, m).await else {
+                    return false;
+                };
+                let Some(member) = member_for(&s) else {
+                    return false;
+                };
+                paired_row(managed, row.id)
+                    && member
+                        .book()
+                        .await
+                        .key_of_local(super::ha::sync::ROOM, row.id)
+                        .is_some()
+            }
+        },
+    )
+    .await;
+    let row = row_by_url(&s, m).await.unwrap();
+    assert!(
+        !standby_managed
+            .read()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .streamers
+            .contains_key(&row.id),
+        "配对里的行不算托管，本机能改"
+    );
+    let member = || member_for(&s).expect("备机上有同步端");
+    let fleet_room = |id: i64| {
+        let controller = controller.clone();
+        async move {
+            super::assignments::room(controller.pool(), id)
+                .await
+                .unwrap()
+                .filter(|room| room.deleted_at.is_none())
+        }
+    };
+    let converged = |what: &'static str, remark: &'static str| {
+        let (c, s, fleet_room) = (c.clone(), s.clone(), fleet_room);
+        async move {
+            eventually(what, Duration::from_secs(30), || {
+                let (c, s) = (c.clone(), s.clone());
+                async move {
+                    fleet_room(mirrored.id)
+                        .await
+                        .is_some_and(|room| room.spec.remark == remark)
+                        && remark_on(&c, m).await.as_deref() == Some(remark)
+                        && remark_on(&s, m).await.as_deref() == Some(remark)
+                }
+            })
+            .await;
+        }
+    };
+
+    // 备机上改：控制面的房间与主机的行跟着变
+    edit_remark(&s, m, "备机改的").await;
+    member().scan().await;
+    converged(
+        "a standby edit reaches the controller and the primary",
+        "备机改的",
+    )
+    .await;
+
+    // 主机（控制面）上改：到备机
+    let update = |remark: &str| -> super::controller::UpdateRoom {
+        serde_json::from_value(serde_json::json!({
+            "url": m, "remark": remark, "template_id": template.id,
+        }))
+        .unwrap()
+    };
+    controller
+        .update_room(mirrored.id, update("控制面改的"), true)
+        .await
+        .unwrap();
+    converged("a controller edit reaches the standby", "控制面改的").await;
+
+    // 备机暂停：控制面的房间跟着暂停
+    let local_id = row_by_url(&s, m).await.unwrap().id;
+    // 行先落库、监控任务后重建；重建前的 toggle_pause 找不到任务，什么也不做
+    eventually(
+        "the standby rebuilds the monitor after the controller edit",
+        Duration::from_secs(20),
+        || {
+            let s = s.clone();
+            async move {
+                s.managers
+                    .get_room_by_id(local_id)
+                    .await
+                    .is_some_and(|worker| worker.live_streamer.remark == "控制面改的")
+            }
+        },
+    )
+    .await;
+    toggle_pause(&s.managers, local_id).await;
+    member().scan().await;
+    eventually(
+        "a standby pause reaches the controller",
+        Duration::from_secs(20),
+        || async move {
+            fleet_room(mirrored.id)
+                .await
+                .is_some_and(|room| room.paused)
+        },
+    )
+    .await;
+    controller.pause_room(mirrored.id, false).await.unwrap();
+    eventually(
+        "the controller resumes it on the standby",
+        Duration::from_secs(20),
+        || {
+            let s = s.clone();
+            async move {
+                s.managers
+                    .get_room_by_id(local_id)
+                    .await
+                    .is_some_and(|worker| !worker_paused(&worker))
+            }
+        },
+    )
+    .await;
+
+    // 备机新建主播：加入配对，控制面建房间分派给主机，备机认下自己那一行
+    let fresh = "https://stuck.example/fresh";
+    let created = add_streamer(
+        &s,
+        serde_json::from_value(serde_json::json!({ "url": fresh, "remark": "备机新建" })).unwrap(),
+    )
+    .await
+    .unwrap();
+    member().join_room(created.id).await;
+    eventually(
+        "the new streamer becomes a fleet room",
+        Duration::from_secs(30),
+        || {
+            let (c, controller, managed) = (c.clone(), controller.clone(), standby_managed.clone());
+            async move {
+                let rooms = super::assignments::list_rooms(controller.pool())
+                    .await
+                    .unwrap();
+                let fleet = rooms.iter().any(|room| {
+                    room.spec.url == fresh
+                        && room.node_id == Some(primary)
+                        && room.deleted_at.is_none()
+                });
+                fleet
+                    && remark_on(&c, fresh).await.as_deref() == Some("备机新建")
+                    && paired_row(managed, created.id)
+            }
+        },
+    )
+    .await;
+    assert_eq!(
+        local_urls(&s)
+            .await
+            .iter()
+            .filter(|url| *url == fresh)
+            .count(),
+        1,
+        "备机不按控制面 id 再建一行"
+    );
+
+    // 备机删掉：控制面的房间与主机的行跟着删
+    delete_streamer(&s.pool, &s.managers, created.id)
+        .await
+        .unwrap();
+    member().scan().await;
+    eventually(
+        "a standby delete reaches the controller",
+        Duration::from_secs(30),
+        || {
+            let (c, controller) = (c.clone(), controller.clone());
+            async move {
+                let rooms = super::assignments::list_rooms(controller.pool())
+                    .await
+                    .unwrap();
+                !rooms.iter().any(|room| room.spec.url == fresh)
+                    && remark_on(&c, fresh).await.is_none()
+            }
+        },
+    )
+    .await;
+
+    // 两台断开期间各改同一个房间，重连后后写者赢
+    let data = standby_file.parent().unwrap().to_path_buf();
+    let mut agent = nodes[0].2.take().unwrap();
+    let pause = || tokio::time::sleep(Duration::from_millis(30));
+
+    // 控制面先改、备机后改：备机的赢
+    let away = standby_offline(&controller, standby, agent, &s, &data).await;
+    controller
+        .update_room(mirrored.id, update("离线-控制面"), true)
+        .await
+        .unwrap();
+    pause().await;
+    edit_remark(&s, m, "离线-备机").await;
+    away.scan().await;
+    assert!(away.pending().await > 0, "断开期间的修改排进队列");
+    away.stop();
+    agent = start_standby(&standby_file, &s, &standby_managed).await;
+    converged("the later standby edit wins", "离线-备机").await;
+
+    // 备机先改、控制面后改：控制面的赢
+    let away = standby_offline(&controller, standby, agent, &s, &data).await;
+    edit_remark(&s, m, "离线-备机2").await;
+    away.scan().await;
+    away.stop();
+    pause().await;
+    controller
+        .update_room(mirrored.id, update("离线-控制面2"), true)
+        .await
+        .unwrap();
+    agent = start_standby(&standby_file, &s, &standby_managed).await;
+    converged("the later controller edit wins", "离线-控制面2").await;
+
+    // 备机先删、控制面后改：改的赢，备机按控制面重建这一行
+    let away = standby_offline(&controller, standby, agent, &s, &data).await;
+    let id = row_by_url(&s, m).await.unwrap().id;
+    delete_streamer(&s.pool, &s.managers, id).await.unwrap();
+    away.scan().await;
+    away.stop();
+    pause().await;
+    controller
+        .update_room(mirrored.id, update("删了又改"), true)
+        .await
+        .unwrap();
+    agent = start_standby(&standby_file, &s, &standby_managed).await;
+    converged("a later edit revives a deleted row", "删了又改").await;
+
+    // 控制面先改、备机后删：删的赢，三处都没了
+    let away = standby_offline(&controller, standby, agent, &s, &data).await;
+    controller
+        .update_room(mirrored.id, update("改了又删"), true)
+        .await
+        .unwrap();
+    pause().await;
+    let id = row_by_url(&s, m).await.unwrap().id;
+    delete_streamer(&s.pool, &s.managers, id).await.unwrap();
+    away.scan().await;
+    away.stop();
+    agent = start_standby(&standby_file, &s, &standby_managed).await;
+    eventually("a later delete wins", Duration::from_secs(30), || {
+        let (c, s, fleet_room) = (c.clone(), s.clone(), fleet_room);
+        async move {
+            fleet_room(mirrored.id).await.is_none()
+                && remark_on(&c, m).await.is_none()
+                && remark_on(&s, m).await.is_none()
+        }
+    })
+    .await;
+
+    // 备机登录（伪造的凭据）：主机写进本机并登记；控制面库里没有凭据内容
+    let login = data.join("5151.json");
+    std::fs::write(&login, super::ha::member::tests::credential(5151, "e2e")).unwrap();
+    crate::server::infrastructure::repositories::register_bilibili_cookie(&s.pool, &login)
+        .await
+        .unwrap();
+    member().scan().await;
+    let received = dir.path().join("5151.json");
+    eventually(
+        "the credential reaches the primary",
+        Duration::from_secs(20),
+        || {
+            let received = received.clone();
+            async move {
+                std::fs::read_to_string(&received)
+                    .is_ok_and(|text| text.contains("PLACEHOLDER-ACCESS-e2e"))
+            }
+        },
+    )
+    .await;
+    let registered: Vec<String> =
+        sqlx::query_scalar("SELECT value FROM configuration WHERE key = 'bilibili-cookies'")
+            .fetch_all(&c.pool)
+            .await
+            .unwrap();
+    assert_eq!(registered, [received.to_string_lossy().into_owned()]);
+    for entry in std::fs::read_dir(dir.path()).unwrap() {
+        let path = entry.unwrap().path();
+        if path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("fleet.sqlite3"))
+        {
+            let bytes = std::fs::read(&path).unwrap();
+            assert!(
+                !bytes.windows(11).any(|window| window == b"PLACEHOLDER"),
+                "控制面库 {} 里不能有凭据内容",
+                path.display()
+            );
+        }
+    }
+
+    // 普通节点：不参与同步，托管行照旧只读，也没收到凭据
+    let other_view = other_managed.read().unwrap().clone().unwrap();
+    assert!(other_view.pair.is_none());
+    assert_eq!(other_view.streamers.len(), 1);
+    let other_data = nodes[1].3.parent().unwrap().to_path_buf();
+    assert!(!super::ha::outbox::path_in(&other_data).exists());
+    assert!(!other_data.join("5151.json").exists());
+    assert!(member_for(&other_services).is_none());
+
+    agent.shutdown().await;
+    if let Some(agent) = nodes[1].2.take() {
+        agent.shutdown().await;
+    }
+    pairing.shutdown();
+    local.shutdown().await;
+    controller.shutdown().await;
+}
+
+/// 模拟备机进程还在、只是连不上控制面：停掉节点代理，单独起一个同步端记下断开期间本机的修改
+async fn standby_offline(
+    controller: &Controller,
+    standby: i64,
+    agent: NodeAgent,
+    services: &ServiceRegister,
+    data: &std::path::Path,
+) -> Arc<super::ha::member::Member> {
+    agent.shutdown().await;
+    wait_for_node(controller, standby, false, Duration::from_secs(30)).await;
+    super::ha::member::Member::start(
+        super::ha::sync::Side::Node,
+        data,
+        &controller.endpoint_id().to_string(),
+        services.clone(),
+        super::ha::sync::Side::Controller,
+    )
+    .await
+}
+
+async fn start_standby(
+    node_file: &std::path::Path,
+    services: &ServiceRegister,
+    managed: &ManagedHandle,
+) -> NodeAgent {
+    NodeAgent::start(
+        node_file.to_path_buf(),
+        services.clone(),
+        managed.clone(),
+        revoked_for(node_file, services),
+    )
+    .await
+    .unwrap()
+}
