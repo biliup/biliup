@@ -222,8 +222,13 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
                 FileView
             }
         }
-        // Fleet 控制面：节点、房间、模板与账号的列表与 /v1/status 同级，管理与分派归 node.manage
-        "/v1/fleet/nodes" | "/v1/fleet/rooms" | "/v1/fleet/templates" | "/v1/fleet/accounts"
+        // Fleet 控制面：节点、房间、模板、账号、告警与汇总的查看与 /v1/status 同级，管理、分派与清除告警归 node.manage
+        "/v1/fleet/nodes"
+        | "/v1/fleet/rooms"
+        | "/v1/fleet/templates"
+        | "/v1/fleet/accounts"
+        | "/v1/fleet/alerts"
+        | "/v1/fleet/summary"
             if get =>
         {
             StreamerView
@@ -238,6 +243,9 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         }
         "/v1/fleet/configuration" | "/v1/fleet/nodes/{id}/config" => NodeManage,
         "/v1/fleet/nodes/{id}"
+        | "/v1/fleet/nodes/{id}/labels"
+        | "/v1/fleet/alerts"
+        | "/v1/fleet/alerts/{id}"
         | "/v1/fleet/join-tokens"
         | "/v1/fleet/join-tokens/{id}"
         | "/v1/fleet/rooms"

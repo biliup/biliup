@@ -565,6 +565,60 @@ async fn automatic_placement_respects_accounts_and_spreads_rooms() {
         "{rejected:?}"
     );
 
+    // 标签：只有 B 带「海外」。不看标签时平局取 id 小的 A，要求「海外」就只能去 B
+    controller
+        .set_node_labels(b, &["海外".to_string()])
+        .await
+        .unwrap();
+    let mut abroad = auto("https://stuck.example/abroad", None);
+    abroad.required_labels = vec!["海外".into()];
+    let abroad = controller.create_room(abroad).await.unwrap();
+    assert_eq!(abroad.node_id, Some(b));
+    let mut pinned = auto("https://stuck.example/pinned", None);
+    pinned.auto_node = false;
+    pinned.node_id = Some(a);
+    pinned.required_labels = vec!["海外".into()];
+    let rejected = controller.create_room(pinned).await.unwrap_err();
+    assert!(
+        matches!(&rejected, DispatchError::Invalid(m) if m.contains("缺少房间要求的标签「海外」")),
+        "{rejected:?}"
+    );
+    let rejected = controller
+        .assign(abroad.id, Some(a), false)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&rejected, DispatchError::Invalid(m) if m.contains("缺少房间要求的标签「海外」")),
+        "{rejected:?}"
+    );
+    let mut nowhere = auto("https://stuck.example/nowhere", Some(template.id));
+    nowhere.required_labels = vec!["海外".into()];
+    let rejected = controller.create_room(nowhere).await.unwrap_err();
+    assert!(
+        matches!(&rejected, DispatchError::Invalid(m)
+            if m.contains("」缺少标签「海外」") && m.contains("」没有登记 B 站账号 42")),
+        "{rejected:?}"
+    );
+    // 摘掉 B 的标签：房间不挪，只标出来
+    controller.set_node_labels(b, &[]).await.unwrap();
+    let rooms = controller.rooms(true).await.unwrap();
+    let view = rooms.iter().find(|room| room.room.id == abroad.id).unwrap();
+    assert_eq!(view.room.node_id, Some(b));
+    assert_eq!(view.labels_missing, ["海外"]);
+    assert!(
+        rooms
+            .iter()
+            .filter(|room| room.room.id != abroad.id)
+            .all(|room| room.labels_missing.is_empty())
+    );
+    assert!(
+        controller
+            .delete_room(abroad.id, true)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
     // 移除在线的 B 并自动改派：先迁移，B 确认释放后 A 才接手，然后才吊销 B
     let started = controller.revoke_and_reassign(b).await.unwrap().unwrap();
     assert_eq!(started.state, RemovalState::Removing);
@@ -807,5 +861,236 @@ async fn layered_config_reaches_nodes_without_their_secrets() {
     for (_, _, _, agent) in nodes {
         agent.shutdown().await;
     }
+    controller.shutdown().await;
+}
+
+/// 告警：节点上报的事件变成告警、同一个直播间合并计数；房间落地失败与配置应用失败随节点的 Ack 出现和恢复；离线告警出现、重连后恢复；「知道了」清掉。
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn alerts_follow_node_events_and_connectivity() {
+    use super::alerts::AlertKind;
+    use super::controller::OFFLINE_ALERT_AFTER_MS;
+    use super::events;
+    use super::protocol::{EVENT_RECORDING_ERROR, EVENT_UPLOAD_FAILED, Event, RoomEvent};
+
+    let _guard = events::test_guard().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (controller, url, pool) = start_controller(dir.path()).await;
+    controller.stop_alert_loop();
+    let root = dir.path().join("a");
+    let node_file = root.join("data/node.json");
+    let joined = node::join(
+        &ticket_for(&controller, &pool, &url).await,
+        false,
+        &node_file,
+    )
+    .await
+    .unwrap();
+    let id = joined.node_id;
+    let services = node_services(&root).await;
+    let start = || {
+        NodeAgent::start(
+            node_file.clone(),
+            services.clone(),
+            ManagedHandle::default(),
+            revoked_for(&node_file, &services),
+        )
+    };
+    let agent = start().await.unwrap();
+    wait_for_node(&controller, id, true, Duration::from_secs(30)).await;
+
+    let room_url = "https://stuck.example/alerts";
+    let room = controller
+        .create_room(
+            serde_json::from_value(serde_json::json!({ "url": room_url, "remark": "房间" }))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let event = |kind: &str, error: &str| Event {
+        kind: kind.into(),
+        at: now_ms(),
+        detail: serde_json::to_value(RoomEvent {
+            url: room_url.into(),
+            remark: "房间".into(),
+            error: error.into(),
+        })
+        .unwrap(),
+    };
+    events::inject(event(EVENT_RECORDING_ERROR, "mesio error: boom"));
+    events::inject(event(EVENT_RECORDING_ERROR, "mesio error: again"));
+    events::inject(event(EVENT_UPLOAD_FAILED, "open cookies file: x.json"));
+    events::inject(event("from_the_future", "ignored"));
+    eventually("events become alerts", Duration::from_secs(10), || {
+        let controller = controller.clone();
+        async move {
+            let alerts = controller.alert_list().alerts;
+            alerts.len() == 2 && alerts.iter().map(|alert| alert.count).sum::<u32>() == 3
+        }
+    })
+    .await;
+    let alerts = controller.alert_list().alerts;
+    let recording = alerts
+        .iter()
+        .find(|alert| alert.kind == AlertKind::RecordingError)
+        .unwrap();
+    assert_eq!(recording.node_id, id);
+    assert_eq!(recording.count, 2);
+    assert_eq!(recording.message, "mesio error: again");
+    assert_eq!(recording.room_id, Some(room.id));
+    assert_eq!(recording.room.as_deref(), Some("房间"));
+    assert_eq!(recording.url.as_deref(), Some(room_url));
+    let upload = alerts
+        .iter()
+        .find(|alert| alert.kind == AlertKind::UploadFailed)
+        .unwrap();
+    assert_eq!(upload.count, 1);
+    let summary = controller.summary().await.unwrap();
+    assert_eq!(
+        (
+            summary.nodes_total,
+            summary.nodes_online,
+            summary.alerts,
+            summary.alerts_open
+        ),
+        (1, 1, 2, 2)
+    );
+    let open_alert = |kind: AlertKind| {
+        let controller = controller.clone();
+        async move {
+            controller.evaluate_alerts_at(now_ms()).await;
+            controller
+                .alert_list()
+                .alerts
+                .into_iter()
+                .find(|alert| alert.kind == kind && alert.is_open())
+        }
+    };
+
+    // 房间落地失败：节点上已有同一地址的本地主播，节点拒收并在 Ack 里说明；撤回分派后恢复
+    let taken = "https://stuck.example/taken";
+    crate::server::services::streamers::add_streamer(
+        &services,
+        serde_json::from_value(serde_json::json!({ "url": taken, "remark": "本地" })).unwrap(),
+    )
+    .await
+    .unwrap();
+    let clash = controller
+        .create_room(
+            serde_json::from_value(
+                serde_json::json!({ "url": taken, "remark": "撞车", "node_id": id }),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    eventually("room failure alert", Duration::from_secs(20), || async {
+        open_alert(AlertKind::RoomFailed).await.is_some()
+    })
+    .await;
+    let failed = open_alert(AlertKind::RoomFailed).await.unwrap();
+    assert_eq!(failed.room_id, Some(clash.id));
+    assert_eq!(failed.room.as_deref(), Some("撞车"));
+    assert!(failed.message.contains("本地主播"), "{}", failed.message);
+    controller.assign(clash.id, None, false).await.unwrap();
+    eventually("room failure resolves", Duration::from_secs(20), || async {
+        open_alert(AlertKind::RoomFailed).await.is_none()
+    })
+    .await;
+
+    // 配置应用失败：节点写不进自己的库，保持原配置并在 Ack 里报原因；库恢复后再下发一次就好了
+    for event in ["INSERT", "UPDATE"] {
+        sqlx::query(&format!(
+            "CREATE TRIGGER no_config_{event} BEFORE {event} ON configuration \
+             WHEN NEW.key = 'config' BEGIN SELECT RAISE(ABORT, 'disk is full'); END"
+        ))
+        .execute(&services.pool)
+        .await
+        .unwrap();
+    }
+    let set_pool1 = |size: u32| {
+        let controller = controller.clone();
+        async move {
+            let patch = serde_json::json!({ "pool1_size": size });
+            super::config_store::set_node_override(
+                controller.pool(),
+                id,
+                patch.as_object().unwrap(),
+            )
+            .await
+            .unwrap();
+            controller.push(id).await;
+        }
+    };
+    set_pool1(3).await;
+    eventually("config failure alert", Duration::from_secs(20), || async {
+        open_alert(AlertKind::ConfigFailed).await.is_some()
+    })
+    .await;
+    let failed = open_alert(AlertKind::ConfigFailed).await.unwrap();
+    assert!(
+        failed.message.contains("disk is full"),
+        "{}",
+        failed.message
+    );
+    assert_ne!(services.config.read().unwrap().pool1_size, 3);
+    for event in ["INSERT", "UPDATE"] {
+        sqlx::query(&format!("DROP TRIGGER no_config_{event}"))
+            .execute(&services.pool)
+            .await
+            .unwrap();
+    }
+    set_pool1(4).await;
+    eventually(
+        "config failure resolves",
+        Duration::from_secs(20),
+        || async { open_alert(AlertKind::ConfigFailed).await.is_none() },
+    )
+    .await;
+    assert_eq!(services.config.read().unwrap().pool1_size, 4);
+    assert_eq!(
+        controller
+            .alert_list()
+            .alerts
+            .iter()
+            .filter(|alert| alert.resolved_at.is_some())
+            .count(),
+        2
+    );
+
+    // 离线：60 s 之内不算，之后告警；重连后恢复
+    agent.shutdown().await;
+    wait_for_node(&controller, id, false, Duration::from_secs(10)).await;
+    controller.evaluate_alerts_at(now_ms()).await;
+    assert_eq!(controller.alert_list().alerts.len(), 4);
+    let later = now_ms() + OFFLINE_ALERT_AFTER_MS + 1_000;
+    controller.evaluate_alerts_at(later).await;
+    let offline = controller
+        .alert_list()
+        .alerts
+        .into_iter()
+        .find(|alert| alert.kind == AlertKind::NodeOffline)
+        .expect("offline alert");
+    assert!(offline.is_open());
+    assert!(offline.first_at <= now_ms());
+    assert_eq!(controller.summary().await.unwrap().nodes_online, 0);
+
+    let agent = start().await.unwrap();
+    wait_for_node(&controller, id, true, Duration::from_secs(30)).await;
+    controller.evaluate_alerts_at(now_ms()).await;
+    let alerts = controller.alert_list().alerts;
+    let offline = alerts
+        .iter()
+        .find(|alert| alert.kind == AlertKind::NodeOffline)
+        .unwrap();
+    assert!(offline.resolved_at.is_some());
+    // 事件类不因重连恢复
+    assert_eq!(alerts.iter().filter(|alert| alert.is_open()).count(), 2);
+
+    assert!(controller.acknowledge_alert(upload.id));
+    assert!(!controller.acknowledge_alert(upload.id));
+    assert_eq!(controller.acknowledge_alerts(), 4);
+    assert!(controller.alert_list().alerts.is_empty());
+
+    agent.shutdown().await;
     controller.shutdown().await;
 }

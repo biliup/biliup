@@ -1,13 +1,16 @@
 //! 控制面：接受节点的 iroh 连接，维护在线状态与最近 5 分钟的曲线，按分派给节点下发期望状态。
 
+mod alerting;
 mod configuration;
 mod dispatch;
 mod removal;
 
+pub use alerting::{AlertList, FleetSummary, OFFLINE_ALERT_AFTER_MS};
 pub use configuration::{CONTROLLER_VERSION, NodeConfigState, version_older};
 pub use dispatch::{CreateRoom, DispatchError, RoomStatus, RoomView, UpdateRoom, strip_hooks};
 pub use removal::{REMOVAL_WAIT, Release, Removal, RemovalState, RemovedRoom};
 
+use super::alerts::Alerts;
 use super::assignments;
 use super::config_store;
 use super::model::Account;
@@ -67,6 +70,10 @@ struct LiveNode {
     interval_ms: u64,
     samples: VecDeque<Sample>,
     rooms: Vec<serde_json::Value>,
+    /// 最近一次心跳的到达时间（控制面时钟），`rooms` 就是那时的
+    heartbeat_at: i64,
+    /// 心跳里带的 `min_free_space`（次版本 ≥ 3 且节点设了才有）
+    min_free_space: Option<u64>,
     /// 发往这条连接的帧；写帧的循环在 `session` 里
     outbox: mpsc::UnboundedSender<ControllerMessage>,
     /// 最近一次下发的期望状态版本号
@@ -118,6 +125,8 @@ impl LiveNode {
             }
         }
         self.rooms = heartbeat.rooms;
+        self.min_free_space = heartbeat.min_free_space;
+        self.heartbeat_at = now;
         self.last_message_at = now;
     }
 
@@ -142,7 +151,7 @@ pub struct NodeView {
     pub id: i64,
     pub name: String,
     pub endpoint_id: String,
-    pub labels: serde_json::Value,
+    pub labels: Vec<String>,
     pub allow_hooks: bool,
     pub created_at: i64,
     pub last_seen_at: Option<i64>,
@@ -188,6 +197,10 @@ pub struct Controller {
     removals: Mutex<HashMap<i64, Removal>>,
     /// 节点确认释放了房间或掉线时通知等待中的移除
     released: tokio::sync::Notify,
+    /// 界面告警，只在内存里（见 [`super::alerts`]）
+    alerts: Mutex<Alerts>,
+    started_at: i64,
+    alert_task: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl Controller {
@@ -223,12 +236,17 @@ impl Controller {
             dispatch: tokio::sync::Mutex::new(()),
             removals: Mutex::default(),
             released: tokio::sync::Notify::new(),
+            alerts: Mutex::default(),
+            started_at: now_ms(),
+            alert_task: Mutex::default(),
         });
         let task = tokio::spawn(accept_loop(
             Arc::downgrade(&controller),
             controller.endpoint.clone(),
         ));
         *controller.accept_task.lock().unwrap() = Some(task);
+        let task = tokio::spawn(alerting::alert_loop(Arc::downgrade(&controller)));
+        *controller.alert_task.lock().unwrap() = Some(task);
         Ok(controller)
     }
 
@@ -425,6 +443,9 @@ impl Controller {
         if let Some(task) = self.accept_task.lock().unwrap().take() {
             task.abort();
         }
+        if let Some(task) = self.alert_task.lock().unwrap().take() {
+            task.abort();
+        }
         let live: Vec<LiveNode> = self.live.lock().unwrap().drain().map(|(_, n)| n).collect();
         for node in &live {
             close_with(&node.connection, CloseCode::Normal);
@@ -587,6 +608,8 @@ impl Controller {
                 interval_ms: 0,
                 samples: VecDeque::new(),
                 rooms: Vec::new(),
+                heartbeat_at: 0,
+                min_free_space: None,
                 outbox,
                 pushed_version: None,
                 acked_version: None,
@@ -699,8 +722,8 @@ impl Controller {
             match message {
                 NodeMessage::Heartbeat(heartbeat) => self.heartbeat(id, seq, heartbeat).await,
                 NodeMessage::Event(event) => {
-                    debug!(node = id, kind = %event.kind, "fleet node event");
                     self.touch(id, seq);
+                    self.record_event(id, event).await;
                 }
                 NodeMessage::Ack(ack) => self.ack(id, seq, ack).await,
                 NodeMessage::Leave => {
@@ -830,7 +853,7 @@ impl Controller {
 }
 
 fn view(row: NodeRow, live: Option<&LiveNode>, now: i64) -> NodeView {
-    let labels = serde_json::from_str(&row.labels).unwrap_or(serde_json::Value::Array(vec![]));
+    let labels = super::labels::parse(&row.labels);
     let stored_summary = row
         .last_summary
         .as_deref()

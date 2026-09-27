@@ -3,10 +3,12 @@
 //! 只在两种时候用：新建房间时选了「自动」，以及移除节点时选了「自动改派」（正在移除的节点不参与）。
 //! 已经在录的房间不会因为负载变化被挪走（D9）。
 //!
-//! 先按硬约束筛：不在移除中、在线、版本够新、登记了模板要用的账号、带钩子的房间只给允许钩子的节点；
+//! 先按硬约束筛：不在移除中、在线、版本够新、登记了模板要用的账号、带钩子的房间只给允许钩子的节点、
+//! 带齐房间要求的标签；
 //! 再按软指标排：下载池空位（容量 − 占用）多的优先，其次分到的房间少的，再次录制目录剩余空间大的，
 //! 都一样时取 id 小的，结果可复现。
 
+use super::labels;
 use super::protocol::DESIRED_STATE_SINCE;
 
 /// 参与挑选的一台节点此刻的情况
@@ -21,6 +23,7 @@ pub struct Candidate {
     pub outdated: Option<u32>,
     pub allow_hooks: bool,
     pub accounts: Vec<u64>,
+    pub labels: Vec<String>,
     /// 最近一次心跳里的下载池
     pub download_capacity: usize,
     pub download_occupied: usize,
@@ -32,9 +35,11 @@ pub struct Candidate {
 
 /// 房间对节点的要求
 #[derive(Debug, Clone, Copy, Default)]
-pub struct Needs {
+pub struct Needs<'a> {
     pub hooks: bool,
     pub account: Option<u64>,
+    /// 房间要求的标签，节点必须全有
+    pub labels: &'a [String],
 }
 
 /// 一台节点为什么不能选
@@ -46,6 +51,8 @@ pub enum Rejected {
     Outdated(u32),
     NoHooks,
     MissingAccount(u64),
+    /// 节点缺的标签
+    MissingLabels(Vec<String>),
 }
 
 impl Rejected {
@@ -56,6 +63,7 @@ impl Rejected {
             Rejected::Outdated(proto) => outdated_reason(*proto),
             Rejected::NoHooks => "不允许钩子".into(),
             Rejected::MissingAccount(mid) => format!("没有登记 B 站账号 {mid}"),
+            Rejected::MissingLabels(missing) => format!("缺少标签{}", labels::quoted(missing)),
         }
     }
 }
@@ -82,6 +90,10 @@ fn check(candidate: &Candidate, needs: Needs) -> Result<(), Rejected> {
         && !candidate.accounts.contains(&mid)
     {
         return Err(Rejected::MissingAccount(mid));
+    }
+    let missing = labels::missing(&candidate.labels, needs.labels);
+    if !missing.is_empty() {
+        return Err(Rejected::MissingLabels(missing));
     }
     Ok(())
 }
@@ -236,6 +248,69 @@ mod tests {
         assert_eq!(
             choose(&[node(1, 5, 0, 900)], needs).unwrap_err(),
             [("n1".to_string(), Rejected::NoHooks)]
+        );
+    }
+
+    #[test]
+    fn nodes_must_carry_every_required_label() {
+        let required = vec!["海外".to_string(), "家庭宽带".to_string()];
+        let needs = Needs {
+            labels: &required,
+            ..Needs::default()
+        };
+        let mut abroad = node(1, 5, 0, 900);
+        abroad.labels = vec!["海外".into()];
+        let mut both = node(2, 1, 5, 1);
+        both.labels = vec!["家庭宽带".into(), "海外".into(), "GPU".into()];
+        // 负载更轻的 1 缺标签，只能选 2
+        assert_eq!(choose(&[abroad.clone(), both.clone()], needs), Ok(2));
+        let rejected = choose(&[abroad.clone(), node(3, 5, 0, 900)], needs).unwrap_err();
+        assert_eq!(
+            rejected,
+            [
+                (
+                    "n1".to_string(),
+                    Rejected::MissingLabels(vec!["家庭宽带".into()])
+                ),
+                ("n3".to_string(), Rejected::MissingLabels(required.clone())),
+            ]
+        );
+        assert_eq!(
+            explain(&rejected),
+            "没有节点满足条件：「n1」缺少标签「家庭宽带」；「n3」缺少标签「海外」「家庭宽带」"
+        );
+        // 不要求标签时标签不影响排序
+        assert_eq!(choose(&[both, abroad], Needs::default()), Ok(1));
+    }
+
+    #[test]
+    fn labels_are_checked_alongside_accounts_and_hooks() {
+        let required = vec!["海外".to_string()];
+        let needs = Needs {
+            hooks: true,
+            account: Some(1),
+            labels: &required,
+        };
+        let mut labelled = node(1, 5, 0, 900);
+        labelled.labels = required.clone();
+        // 有标签但不允许钩子
+        assert_eq!(
+            choose(std::slice::from_ref(&labelled), needs).unwrap_err(),
+            [("n1".to_string(), Rejected::NoHooks)]
+        );
+        labelled.allow_hooks = true;
+        labelled.accounts = vec![2];
+        assert_eq!(
+            choose(std::slice::from_ref(&labelled), needs).unwrap_err(),
+            [("n1".to_string(), Rejected::MissingAccount(1))]
+        );
+        labelled.accounts = vec![1];
+        assert_eq!(choose(std::slice::from_ref(&labelled), needs), Ok(1));
+        let mut outdated = labelled.clone();
+        outdated.outdated = Some(0);
+        assert_eq!(
+            choose(&[outdated], needs).unwrap_err(),
+            [("n1".to_string(), Rejected::Outdated(0))]
         );
     }
 

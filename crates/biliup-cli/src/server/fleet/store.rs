@@ -301,6 +301,19 @@ pub async fn set_allow_hooks(pool: &ConnectionPool, id: i64, allow_hooks: bool) 
     Ok(())
 }
 
+/// 改节点标签（调用方先 [`super::labels::normalize`]）；节点不存在或已移除时返回 `false`。
+pub async fn set_labels(pool: &ConnectionPool, id: i64, labels: &[String]) -> AppResult<bool> {
+    let affected =
+        sqlx::query("UPDATE fleet_nodes SET labels = ? WHERE id = ? AND revoked_at IS NULL")
+            .bind(super::labels::to_json(labels))
+            .bind(id)
+            .execute(pool)
+            .await
+            .change_context(db_error("update node labels"))?
+            .rows_affected();
+    Ok(affected > 0)
+}
+
 pub async fn record_seen(
     pool: &ConnectionPool,
     id: i64,
@@ -443,6 +456,26 @@ mod tests {
         assert_eq!(row.last_seen_at, Some(4_000));
         assert_eq!(row.last_summary.as_deref(), Some("{\"rooms\":1}"));
         assert!(row.allow_hooks);
+    }
+
+    #[tokio::test]
+    async fn labels_are_stored_as_a_json_array() {
+        let (_dir, pool) = pool().await;
+        let (token, secret) = create_token(&pool, None, 1_000, 10_000).await.unwrap();
+        let Redeem::Joined(node) = redeem_token(&pool, &token.id, &secret, "aa", "n", false, 2_000)
+            .await
+            .unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(node.labels, "[]");
+        let labels = vec!["海外".to_string(), "家庭宽带".to_string()];
+        assert!(set_labels(&pool, node.id, &labels).await.unwrap());
+        let row = super::node(&pool, node.id).await.unwrap().unwrap();
+        assert_eq!(super::super::labels::parse(&row.labels), labels);
+        assert!(!set_labels(&pool, node.id + 1, &labels).await.unwrap());
+        revoke_node(&pool, node.id, 3_000).await.unwrap();
+        assert!(!set_labels(&pool, node.id, &[]).await.unwrap());
     }
 
     #[test]

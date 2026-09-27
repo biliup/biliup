@@ -1,0 +1,127 @@
+.memo {
+  margin-bottom: 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--semi-color-text-2);
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.status {
+  width: 140px;
+}
+.node {
+  width: 200px;
+}
+.clearAll {
+  margin-left: auto;
+}
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--semi-color-bg-1);
+  border: 1px solid var(--semi-color-fill-2);
+  border-left: 3px solid var(--semi-color-danger);
+}
+.resolved {
+  border-left-color: var(--semi-color-success);
+  .message {
+    color: var(--semi-color-text-2);
+  }
+}
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+}
+.iconBad {
+  color: var(--semi-color-danger);
+}
+.iconOk {
+  color: var(--semi-color-success);
+}
+.nodeName {
+  max-width: 220px;
+}
+.subject {
+  min-width: 0;
+  max-width: 360px;
+  flex: 0 1 auto;
+}
+.message {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--semi-color-text-0);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.time {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.url {
+  font-family: var(--semi-font-family-mono, monospace);
+}
+.ack {
+  flex: none;
+}
+
+/* 节点卡片上的告警标记 */
+.badge {
+  display: inline-flex;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  border-radius: 4px;
+  &:focus-visible {
+    outline: 2px solid var(--semi-color-primary);
+    outline-offset: 1px;
+  }
+}
+
+@media (max-width: 640px) {
+  .status,
+  .node {
+    flex: 1 1 140px;
+    width: auto;
+  }
+  .clearAll {
+    margin-left: 0;
+    flex: 1 1 100%;
+  }
+  .nodeName,
+  .subject {
+    max-width: 100%;
+  }
+  .url {
+    display: none;
+  }
+}

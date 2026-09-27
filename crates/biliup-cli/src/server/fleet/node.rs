@@ -1,9 +1,10 @@
 //! 节点端：`biliup node join / leave / status` 与 `biliup server` 里的节点代理。
 
 use super::accounts;
+use super::events;
 use super::guard::ManagedHandle;
 use super::protocol::{
-    self, CloseCode, ControllerMessage, HEARTBEAT_INTERVAL, Heartbeat, Hello, JoinProof,
+    self, CloseCode, ControllerMessage, Event, HEARTBEAT_INTERVAL, Heartbeat, Hello, JoinProof,
     NodeMessage, PROTOCOL_MINOR, PoolUsage, Pools, ToolStatus, Tools,
 };
 use super::reconcile::{self, Reconciler};
@@ -27,7 +28,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::watch;
+use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
@@ -595,6 +596,8 @@ async fn run_agent(
     revoked: RevokedHandle,
     mut stopped: watch::Receiver<bool>,
 ) {
+    // 在代理的整个生命周期里持有：断线期间的事件留在通道里，重连后接着发
+    let mut events = events::subscribe();
     let mut backoff = BACKOFF_MIN;
     let mut relays = Vec::new();
     loop {
@@ -614,6 +617,7 @@ async fn run_agent(
             &services,
             &mut reconciler,
             &mut stopped,
+            &mut events,
         )
         .await;
         let wait = match outcome {
@@ -663,6 +667,7 @@ async fn run_agent(
     endpoint.close().await;
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn session(
     endpoint: &Endpoint,
     relays: &mut Vec<RelayUrl>,
@@ -671,6 +676,7 @@ async fn session(
     services: &ServiceRegister,
     reconciler: &mut Reconciler,
     stopped: &mut watch::Receiver<bool>,
+    events: &mut broadcast::Receiver<Event>,
 ) -> Outcome {
     let Ok(controller) = file.controller_id() else {
         return Outcome::Rejected("node.json 里的控制面 id 无效".into());
@@ -760,11 +766,34 @@ async fn session(
                     return closed_outcome(close_code(&reason), true);
                 }
             },
+            Some(event) = next_event(events) => {
+                if let Err(e) = protocol::write_frame(&mut send, &NodeMessage::Event(event)).await {
+                    debug!(error = %e, "fleet event failed");
+                    let reason = connection.closed().await;
+                    return closed_outcome(close_code(&reason), true);
+                }
+            }
             reason = connection.closed() => return closed_outcome(close_code(&reason), true),
             _ = stopped.changed() => {
                 close_with(&connection, CloseCode::Normal);
                 return Outcome::Stopped;
             }
+        }
+    }
+}
+
+/// 下一条要上报的事件；攒得太多被挤掉的记一笔跳过
+async fn next_event(events: &mut broadcast::Receiver<Event>) -> Option<Event> {
+    loop {
+        match events.recv().await {
+            Ok(event) => return Some(event),
+            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                warn!(
+                    skipped,
+                    "fleet events dropped while the controller was unreachable"
+                );
+            }
+            Err(broadcast::error::RecvError::Closed) => return None,
         }
     }
 }
@@ -855,6 +884,12 @@ async fn heartbeat(services: &ServiceRegister, since: &mut Option<i64>) -> Heart
         rooms,
         recording,
         accounts: None,
+        min_free_space: services
+            .config
+            .read()
+            .unwrap()
+            .min_free_space
+            .filter(|bytes| *bytes > 0),
     }
 }
 

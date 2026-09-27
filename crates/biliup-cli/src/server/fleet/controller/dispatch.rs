@@ -1,14 +1,18 @@
 //! 控制面上房间与投稿模板的增删改、分派与迁移（`/v1/fleet/rooms`、`/v1/fleet/templates`）。
 //!
 //! 硬约束在这里检查：目标节点必须在册、版本够新；模板用的 B 站账号必须在目标节点上登记过；
-//! 带钩子的房间只派给加入时带了 `--allow-hooks` 的节点。节点离线不影响分派：
-//! 它连上来时会收到期望状态。
+//! 带钩子的房间只派给加入时带了 `--allow-hooks` 的节点；节点必须带齐房间要求的标签。
+//! 节点离线不影响分派：它连上来时会收到期望状态。
+//!
+//! 标签只在分派（新建时指定节点、「自动」、改派、移除时自动改派）时检查。之后改了节点标签或房间要求的标签，
+//! 已分派的房间不会被挪走，房间列表里用 `labels_missing` 标出来，由管理员决定要不要迁移。
 
 use super::{Controller, LiveNode};
 use crate::server::errors::AppError;
 use crate::server::fleet::assignments::{
     self, DeleteRoom, DeleteTemplate, NodeAccount, Room, Template, UrlTaken,
 };
+use crate::server::fleet::labels;
 use crate::server::fleet::model::{RoomSpec, TemplateSpec};
 use crate::server::fleet::now_ms;
 use crate::server::fleet::placement::{self, Candidate, Needs};
@@ -49,6 +53,9 @@ pub struct CreateRoom {
     /// 由控制面按负载选节点（与 `node_id` 二选一）
     #[serde(default)]
     pub auto_node: bool,
+    /// 分到的节点必须带齐的标签
+    #[serde(default)]
+    pub required_labels: Vec<String>,
 }
 
 impl DispatchError {
@@ -68,6 +75,9 @@ pub struct UpdateRoom {
     pub spec: RoomSpec,
     #[serde(default)]
     pub template_id: Option<i64>,
+    /// 不带（旧界面）时保留原值
+    #[serde(default)]
+    pub required_labels: Option<Vec<String>>,
 }
 
 /// 房间此刻的状况，给界面看
@@ -103,9 +113,11 @@ pub struct RoomView {
     pub error: Option<String>,
     /// 上一台（`releasing_node_id`）是否在线：离线时迁移会一直等，界面据此提示强制迁移
     pub releasing_online: Option<bool>,
+    /// 分到的节点缺房间要求的哪些标签；空表示满足或未分派
+    pub labels_missing: Vec<String>,
 }
 
-fn heartbeat_status<'a>(node: &'a LiveNode, url: &str) -> Option<&'a str> {
+pub(super) fn heartbeat_status<'a>(node: &'a LiveNode, url: &str) -> Option<&'a str> {
     node.rooms.iter().find_map(|room| {
         let streamer = room.get("live_streamer")?;
         (streamer.get("url")?.as_str()? == url)
@@ -176,6 +188,10 @@ fn outdated_message(node: &str, proto: u32) -> String {
     )
 }
 
+fn normalize_labels(labels: &[String]) -> Result<Vec<String>> {
+    labels::normalize(labels).map_err(DispatchError::Invalid)
+}
+
 fn url_taken(_: UrlTaken) -> DispatchError {
     DispatchError::Conflict(
         "这个直播间地址已经在房间列表里了（包括正在删除、等节点释放的房间）".into(),
@@ -200,12 +216,13 @@ impl Controller {
             .ok_or_else(|| DispatchError::Invalid(format!("节点 {id} 不存在或已被移除")))
     }
 
-    /// 硬约束：房间能不能放到节点 `node` 上
+    /// 硬约束：房间能不能放到节点 `node` 上。`required_labels` 传空表示这次不查标签。
     pub(crate) async fn check_target(
         &self,
         node: &NodeRow,
         spec: &RoomSpec,
         template: Option<&Template>,
+        required_labels: &[String],
     ) -> Result<()> {
         if self.is_removing(node.id) {
             return Err(DispatchError::Invalid(format!(
@@ -238,11 +255,24 @@ impl Controller {
                 node.name, template.spec.template_name
             )));
         }
+        let missing = labels::missing(&labels::parse(&node.labels), required_labels);
+        if !missing.is_empty() {
+            return Err(DispatchError::Invalid(format!(
+                "节点「{}」缺少房间要求的标签{}",
+                node.name,
+                labels::quoted(&missing)
+            )));
+        }
         Ok(())
     }
 
     pub async fn rooms(&self, show_hooks: bool) -> Result<Vec<RoomView>> {
         let rooms = assignments::list_rooms(&self.pool).await?;
+        let node_labels: HashMap<i64, Vec<String>> = store::list_nodes(&self.pool)
+            .await?
+            .into_iter()
+            .map(|node| (node.id, labels::parse(&node.labels)))
+            .collect();
         let now = now_ms();
         let live = self.live.lock().unwrap();
         Ok(rooms
@@ -252,6 +282,11 @@ impl Controller {
                 let releasing_online = room
                     .releasing_node_id
                     .map(|node| live.get(&node).is_some_and(|node| node.online(now)));
+                let labels_missing = room
+                    .node_id
+                    .and_then(|node| node_labels.get(&node))
+                    .map(|have| labels::missing(have, &room.required_labels))
+                    .unwrap_or_default();
                 if !show_hooks {
                     strip_hooks(&mut room.spec);
                 }
@@ -260,6 +295,7 @@ impl Controller {
                     status,
                     error,
                     releasing_online,
+                    labels_missing,
                 }
             })
             .collect())
@@ -270,6 +306,7 @@ impl Controller {
         &self,
         spec: &RoomSpec,
         template: Option<&Template>,
+        required_labels: &[String],
     ) -> Result<i64> {
         let rows = store::list_nodes(&self.pool).await?;
         let counts = assignments::assigned_counts(&self.pool).await?;
@@ -297,6 +334,7 @@ impl Controller {
                             .map(|node| node.proto),
                         allow_hooks: row.allow_hooks,
                         accounts: accounts.remove(&row.id).unwrap_or_default(),
+                        labels: labels::parse(&row.labels),
                         download_capacity: download.map_or(0, |pool| pool.capacity),
                         download_occupied: download.map_or(0, |pool| pool.occupied),
                         assigned_rooms: counts.get(&row.id).copied().unwrap_or(0),
@@ -311,6 +349,7 @@ impl Controller {
         let needs = Needs {
             hooks: spec.has_hooks(),
             account: template.and_then(|template| template.spec.account_mid),
+            labels: required_labels,
         };
         placement::choose(&candidates, needs)
             .map_err(|rejected| DispatchError::Invalid(placement::explain(&rejected)))
@@ -319,6 +358,7 @@ impl Controller {
     pub async fn create_room(&self, request: CreateRoom) -> Result<Room> {
         let spec = request.spec.normalized();
         check_room_spec(&spec)?;
+        let required_labels = normalize_labels(&request.required_labels)?;
         let template = self.template_or_invalid(request.template_id).await?;
         let node_id = match (request.auto_node, request.node_id) {
             (true, Some(_)) => {
@@ -326,19 +366,24 @@ impl Controller {
                     "「自动」与指定节点只能选一个".into(),
                 ));
             }
-            (true, None) => Some(self.auto_node(&spec, template.as_ref()).await?),
+            (true, None) => Some(
+                self.auto_node(&spec, template.as_ref(), &required_labels)
+                    .await?,
+            ),
             (false, node_id) => node_id,
         };
         if let Some(node) = node_id {
             let node = self.node_or_invalid(node).await?;
-            self.check_target(&node, &spec, template.as_ref()).await?;
+            self.check_target(&node, &spec, template.as_ref(), &required_labels)
+                .await?;
         }
-        let room = assignments::insert_room(
+        let room = assignments::insert_room_with(
             &self.pool,
             &spec,
             request.template_id,
             node_id,
             request.paused,
+            &required_labels,
             now_ms(),
         )
         .await?
@@ -368,15 +413,29 @@ impl Controller {
             spec.postprocessor = current.spec.postprocessor.clone();
         }
         check_room_spec(&spec)?;
+        let required_labels = request
+            .required_labels
+            .as_deref()
+            .map(normalize_labels)
+            .transpose()?;
         let template = self.template_or_invalid(request.template_id).await?;
         if let Some(node) = current.node_id {
             let node = self.node_or_invalid(node).await?;
-            self.check_target(&node, &spec, template.as_ref()).await?;
+            // 标签不在这里查：改了要求的标签也不挪房间，列表里会标出不满足
+            self.check_target(&node, &spec, template.as_ref(), &[])
+                .await?;
         }
-        let room = assignments::update_room(&self.pool, id, &spec, request.template_id, now_ms())
-            .await?
-            .map_err(url_taken)?
-            .ok_or(DispatchError::NotFound("房间不存在"))?;
+        let room = assignments::update_room_with(
+            &self.pool,
+            id,
+            &spec,
+            request.template_id,
+            required_labels.as_deref(),
+            now_ms(),
+        )
+        .await?
+        .map_err(url_taken)?
+        .ok_or(DispatchError::NotFound("房间不存在"))?;
         self.push_many([room.node_id]).await;
         Ok(room)
     }
@@ -391,8 +450,13 @@ impl Controller {
         if let Some(target) = target {
             let node = self.node_or_invalid(target).await?;
             let template = self.template_or_invalid(current.template_id).await?;
-            self.check_target(&node, &current.spec, template.as_ref())
-                .await?;
+            self.check_target(
+                &node,
+                &current.spec,
+                template.as_ref(),
+                &current.required_labels,
+            )
+            .await?;
         }
         let room = {
             let _guard = self.dispatch.lock().await;
@@ -529,6 +593,16 @@ impl Controller {
                 "还有 {count} 个房间在用这个模板，先改掉它们的模板"
             ))),
         }
+    }
+
+    /// 改节点标签。已分派的房间不因此迁移，房间列表里会标出标签不满足的房间。
+    pub async fn set_node_labels(&self, id: i64, labels: &[String]) -> Result<Vec<String>> {
+        let labels = normalize_labels(labels)?;
+        if !store::set_labels(&self.pool, id, &labels).await? {
+            return Err(DispatchError::NotFound("节点不存在或已被移除"));
+        }
+        tracing::info!(node = id, ?labels, "fleet node labels changed");
+        Ok(labels)
     }
 
     pub async fn accounts(&self) -> Result<Vec<NodeAccount>> {

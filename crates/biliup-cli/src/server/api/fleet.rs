@@ -4,6 +4,7 @@
 //! 被控制面移除过的机器另有 `/v1/node/revoked*`（恢复暂停中的原受管主播），归 `recording.control`。
 
 use crate::server::api::access::Caller;
+use crate::server::api::fleet_alerts;
 use crate::server::api::fleet_config;
 use crate::server::api::fleet_rooms;
 use crate::server::errors::{ApiError, report_to_response};
@@ -32,6 +33,10 @@ pub fn router(controller: Arc<Controller>) -> Router<()> {
     Router::new()
         .route("/v1/fleet/nodes", get(list_nodes))
         .route("/v1/fleet/nodes/{id}", delete(revoke_node))
+        .route(
+            "/v1/fleet/nodes/{id}/labels",
+            put(fleet_rooms::set_node_labels),
+        )
         .route("/v1/fleet/join-tokens", get(list_tokens).post(create_token))
         .route("/v1/fleet/join-tokens/{id}", delete(delete_token))
         .route(
@@ -72,6 +77,12 @@ pub fn router(controller: Arc<Controller>) -> Router<()> {
             "/v1/fleet/nodes/{id}/config",
             get(fleet_config::get_node_config).put(fleet_config::put_node_config),
         )
+        .route(
+            "/v1/fleet/alerts",
+            get(fleet_alerts::list_alerts).delete(fleet_alerts::clear_alerts),
+        )
+        .route("/v1/fleet/alerts/{id}", delete(fleet_alerts::clear_alert))
+        .route("/v1/fleet/summary", get(fleet_alerts::summary))
         .with_state(controller)
 }
 
@@ -392,6 +403,19 @@ mod tests {
             (
                 Method::PUT,
                 "/v1/fleet/nodes/{id}/config",
+                Permission::NodeManage,
+            ),
+            (
+                Method::PUT,
+                "/v1/fleet/nodes/{id}/labels",
+                Permission::NodeManage,
+            ),
+            (Method::GET, "/v1/fleet/alerts", Permission::StreamerView),
+            (Method::GET, "/v1/fleet/summary", Permission::StreamerView),
+            (Method::DELETE, "/v1/fleet/alerts", Permission::NodeManage),
+            (
+                Method::DELETE,
+                "/v1/fleet/alerts/{id}",
                 Permission::NodeManage,
             ),
             (
@@ -758,6 +782,130 @@ mod tests {
         );
         let (status, accounts) = send(&app, Method::GET, "/v1/fleet/accounts").await;
         assert_eq!((status, accounts), (StatusCode::OK, json!([])));
+        controller.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn node_labels_and_room_required_labels_over_http() {
+        let dir = tempfile::tempdir().unwrap();
+        let relay: url::Url = "http://192.168.7.2:19160/".parse().unwrap();
+        let controller = controller_with(
+            dir.path(),
+            RelaySetup {
+                local: vec![relay.clone()],
+                advertised: vec![relay],
+                embedded_port: None,
+            },
+        )
+        .await;
+        let app = router(controller.clone()).route_layer(from_fn(access::unrestricted));
+        let (token, secret) = store::create_token(controller.pool(), None, 1, i64::MAX)
+            .await
+            .unwrap();
+        let store::Redeem::Joined(node) =
+            store::redeem_token(controller.pool(), &token.id, &secret, "aa", "n", false, 2)
+                .await
+                .unwrap()
+        else {
+            panic!()
+        };
+        let uri = format!("/v1/fleet/nodes/{}/labels", node.id);
+        let (status, saved) = send_json(
+            &app,
+            Method::PUT,
+            &uri,
+            Some(json!({ "labels": [" 海外 ", "", "家庭宽带", "海外"] })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{saved}");
+        assert_eq!(saved["labels"], json!(["海外", "家庭宽带"]));
+        let (_, nodes) = send(&app, Method::GET, "/v1/fleet/nodes").await;
+        assert_eq!(nodes["nodes"][0]["labels"], json!(["海外", "家庭宽带"]));
+        let (status, error) = send_json(
+            &app,
+            Method::PUT,
+            &uri,
+            Some(json!({ "labels": ["x".repeat(40)] })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(error["message"].as_str().unwrap().contains("太长"));
+        let (status, _) = send_json(
+            &app,
+            Method::PUT,
+            "/v1/fleet/nodes/99/labels",
+            Some(json!({ "labels": [] })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let (status, room) = send_json(
+            &app,
+            Method::POST,
+            "/v1/fleet/rooms",
+            Some(json!({ "url": "https://live.example/l", "remark": "r", "required_labels": ["海外", " 海外"] })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{room}");
+        assert_eq!(room["required_labels"], json!(["海外"]));
+        let room_uri = format!("/v1/fleet/rooms/{}", room["id"]);
+        // 旧界面不带 required_labels：保留原值
+        let (status, kept) = send_json(
+            &app,
+            Method::PUT,
+            &room_uri,
+            Some(json!({ "url": "https://live.example/l", "remark": "r2" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{kept}");
+        assert_eq!(kept["required_labels"], json!(["海外"]));
+        let (_, cleared) = send_json(
+            &app,
+            Method::PUT,
+            &room_uri,
+            Some(json!({ "url": "https://live.example/l", "remark": "r2", "required_labels": [] })),
+        )
+        .await;
+        assert_eq!(cleared["required_labels"], json!([]));
+        controller.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn alerts_and_the_console_summary_over_http() {
+        let dir = tempfile::tempdir().unwrap();
+        let relay: url::Url = "http://192.168.7.2:19160/".parse().unwrap();
+        let controller = controller_with(
+            dir.path(),
+            RelaySetup {
+                local: vec![relay.clone()],
+                advertised: vec![relay],
+                embedded_port: None,
+            },
+        )
+        .await;
+        let app = router(controller.clone()).route_layer(from_fn(access::unrestricted));
+        let (status, alerts) = send(&app, Method::GET, "/v1/fleet/alerts").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(alerts["alerts"], json!([]));
+        assert_eq!(alerts["capacity"], 200);
+        assert_eq!(alerts["events_since"], 3);
+        let (status, cleared) = send(&app, Method::DELETE, "/v1/fleet/alerts").await;
+        assert_eq!((status, cleared), (StatusCode::OK, json!({ "cleared": 0 })));
+        let (status, _) = send(&app, Method::DELETE, "/v1/fleet/alerts/7").await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let (token, secret) = store::create_token(controller.pool(), None, 1, i64::MAX)
+            .await
+            .unwrap();
+        store::redeem_token(controller.pool(), &token.id, &secret, "aa", "n", false, 2)
+            .await
+            .unwrap();
+        let (status, summary) = send(&app, Method::GET, "/v1/fleet/summary").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            summary,
+            json!({ "nodes_total": 1, "nodes_online": 0, "recording": 0, "alerts": 0, "alerts_open": 0 })
+        );
         controller.shutdown().await;
     }
 

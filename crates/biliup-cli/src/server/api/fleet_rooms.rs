@@ -175,6 +175,24 @@ pub async fn delete_template(
     }
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Labels {
+    labels: Vec<String>,
+}
+
+/// `PUT /v1/fleet/nodes/{id}/labels`：整份替换，回规范化后的标签
+pub async fn set_node_labels(
+    State(controller): State<Arc<Controller>>,
+    Path(id): Path<i64>,
+    Json(request): Json<Labels>,
+) -> Response {
+    match controller.set_node_labels(id, &request.labels).await {
+        Ok(labels) => Json(json!({ "labels": labels })).into_response(),
+        Err(error) => error_response(error),
+    }
+}
+
 pub async fn list_accounts(State(controller): State<Arc<Controller>>) -> Response {
     respond(controller.accounts().await)
 }
