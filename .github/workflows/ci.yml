@@ -16,6 +16,11 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+'
   pull_request:
   workflow_dispatch:
+    inputs:
+      publish_pypi:
+        description: '上传到 PyPI（Use workflow from 须选版本 tag，如 v1.2.11）'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -252,7 +257,9 @@ jobs:
         with:
           subject-path: 'wheels-*/*'
       - name: Publish to PyPI
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        # PyPI 项目空间接近 10 GiB 上限，传到一半超限会留下残缺版本、版本号作废，所以 tag 推送默认不上传。
+        # 仓库变量 PUBLISH_PYPI=true 恢复自动上传；补发某个 tag 时在该 tag 上手动运行并勾选 publish_pypi
+        if: ${{ startsWith(github.ref, 'refs/tags/') && (vars.PUBLISH_PYPI == 'true' || inputs.publish_pypi) }}
         uses: PyO3/maturin-action@v1
         env:
           MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
