@@ -21,15 +21,24 @@
 //! 节点离线（解除配对时不在线，或之后断开）时停在第 3 步之前：房间留在主机「本机」照常录，等它回来应答了
 //! 再往下走（「待归还」）。节点被移除时不再交还（留在主机，即做法 A）。再次把同一台指定为备机时，
 //! 还没交的房间回到配对里，仍记成交还给它的。
+//!
+//! 面板上的两个手动动作（[`Handbacks::act`]，H3）：
+//! - 放弃交还：还没交完的房间或模板从账本里去掉、留在主机（这一行按做法 A）。节点那一行在它下次落地时撤掉，
+//!   撤掉之后才放开它挡的开录（[`NodeHolds::settle`]），所以任何时刻仍只有一台会开录。
+//! - 立即交还：节点挡住了开录、主机「本机」只在投（没在录）的房间不等投完就交接：按第 3 步挡住「本机」开录、
+//!   隔 [`SETTLE_MS`] 仍没在录就删掉 Fleet 房间。F2 的释放只撤掉监控与那一行，在投的一场在上传池里接着投完
+//!   （它拿着开录时的上下文，不再读那一行），不中断、不重传。
 
 use super::adopt::{self, HoldBy, SETTLE_MS};
 use super::member::{Member, identity};
+use super::pairing::Refused;
 use super::sync::{ROOM, TEMPLATE, room_key, template_key};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::fleet::assignments::{self, DeleteTemplate};
 use crate::server::fleet::controller::{Controller, DispatchError};
 use crate::server::fleet::model::{DesiredRoom, DesiredTemplate};
 use crate::server::fleet::protocol::{DesiredState, PAIR_SINCE};
+use crate::server::fleet::reconcile::FleetState;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::service_register::ServiceRegister;
 use error_stack::ResultExt;
@@ -89,6 +98,9 @@ pub struct Entry {
     /// 主机「本机」空闲、开始挡开录的时刻
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub since: Option<i64>,
+    /// 点了「立即交还」：「本机」只要没在录就交接，不等在投的投完
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub force: bool,
     /// 第一个带着这一步的期望状态版本；不落盘，控制面重启后重发
     #[serde(skip)]
     sent: Option<u64>,
@@ -109,6 +121,7 @@ impl Entry {
     fn advance(&mut self, stage: Stage) {
         self.stage = stage;
         self.since = None;
+        self.force = false;
         self.sent = None;
         self.acked = false;
     }
@@ -252,6 +265,58 @@ pub struct Handbacks {
     /// 主机「本机」挡开录用的
     leaving: HoldBy,
     ledger: Mutex<Ledger>,
+    /// 定时的一步与面板上的手动动作一个一个来：一步里删了 Fleet 房间之后，账本上这一行不能已经被放弃
+    turn: tokio::sync::Mutex<()>,
+}
+
+/// 面板上对一行交还的手动动作（`POST /v1/fleet/ha/handback/{kind}/{id}/{action}`）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Action {
+    /// 放弃交还，留在主机
+    Abandon,
+    /// 立即交还：不等「本机」上在投的一场投完
+    Force,
+}
+
+impl Action {
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "abandon" => Some(Action::Abandon),
+            "force" => Some(Action::Force),
+            _ => None,
+        }
+    }
+}
+
+/// 交还中的一行是房间还是模板
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Room,
+    Template,
+}
+
+impl Kind {
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "rooms" => Some(Kind::Room),
+            "templates" => Some(Kind::Template),
+            _ => None,
+        }
+    }
+}
+
+/// 「本机」上这个房间此刻在做什么（面板上「立即交还」能不能点）
+async fn local_activity(services: &ServiceRegister, local: Option<i64>) -> &'static str {
+    let Some(local) = local else {
+        return "gone";
+    };
+    if adopt::recording(services, local).await {
+        "recording"
+    } else if adopt::busy(services, local).await {
+        "uploading"
+    } else {
+        "idle"
+    }
 }
 
 /// 一次扫描里对一行要做的
@@ -271,6 +336,7 @@ impl Handbacks {
             path: dir.join(FILE_NAME),
             leaving: HoldBy::Leaving(identity(services)),
             ledger: Mutex::default(),
+            turn: tokio::sync::Mutex::default(),
         }
     }
 
@@ -456,10 +522,11 @@ impl Handbacks {
         services: &ServiceRegister,
         now: i64,
     ) -> Vec<i64> {
-        let snapshot = self.ledger.lock().unwrap().clone();
-        if snapshot.nodes.is_empty() {
+        if self.ledger.lock().unwrap().nodes.is_empty() {
             return Vec::new();
         }
+        let _turn = self.turn.lock().await;
+        let snapshot = self.ledger.lock().unwrap().clone();
         let pool = controller.pool();
         let local = controller
             .local()
@@ -497,6 +564,7 @@ impl Handbacks {
                     continue;
                 }
                 let busy = match local.rooms.get(&id) {
+                    Some(room) if entry.force => adopt::recording(services, room.local_id).await,
                     Some(room) => adopt::busy(services, room.local_id).await,
                     None => false,
                 };
@@ -618,6 +686,157 @@ impl Handbacks {
         let ledger = self.ledger.lock().unwrap();
         (!ledger.nodes.is_empty()).then(|| serde_json::to_value(&ledger.nodes).unwrap_or_default())
     }
+
+    /// [`Self::view`] 再给面板补上：那台节点在不在线（`online`），每个房间在「本机」上此刻在录、在投还是空闲
+    /// （`local`：`recording` / `uploading` / `idle`，「本机」上已经没有这一行时为 `gone`）
+    pub async fn annotated(
+        &self,
+        controller: &Controller,
+        services: &ServiceRegister,
+    ) -> Option<Value> {
+        let mut view = self.view()?;
+        let local = controller
+            .local()
+            .map(|local| local.fleet_state())
+            .unwrap_or_default();
+        let Some(nodes) = view.as_object_mut() else {
+            return Some(view);
+        };
+        for (node, returning) in nodes.iter_mut() {
+            let online = node
+                .parse::<i64>()
+                .is_ok_and(|node| controller.node_link(node).is_some());
+            returning["online"] = online.into();
+            let Some(rooms) = returning.get_mut("rooms").and_then(Value::as_object_mut) else {
+                continue;
+            };
+            for (id, entry) in rooms.iter_mut() {
+                let row = id
+                    .parse::<i64>()
+                    .ok()
+                    .and_then(|id| local.rooms.get(&id))
+                    .map(|room| room.local_id);
+                entry["local"] = local_activity(services, row).await.into();
+            }
+        }
+        Some(view)
+    }
+
+    /// 面板上的「放弃交还」「立即交还」。成功时返回要重发期望状态的节点
+    pub async fn act(
+        &self,
+        controller: &Controller,
+        services: &ServiceRegister,
+        kind: Kind,
+        id: i64,
+        action: Action,
+    ) -> Result<i64, Refused> {
+        let _turn = self.turn.lock().await;
+        let found = {
+            let ledger = self.ledger.lock().unwrap();
+            ledger.nodes.iter().find_map(|(node, returning)| {
+                let entry = match kind {
+                    Kind::Room => returning.rooms.get(&id),
+                    Kind::Template => returning.templates.get(&id),
+                }?;
+                let users: Vec<i64> = returning
+                    .rooms
+                    .iter()
+                    .filter(|(_, room)| room.stage != Stage::Released && room.template == Some(id))
+                    .map(|(room, _)| *room)
+                    .collect();
+                Some((*node, returning.primary, entry.clone(), users))
+            })
+        };
+        let Some((node, primary, entry, users)) = found else {
+            return Err(Refused::NotFound(match kind {
+                Kind::Room => "这个房间不在交还中（可能刚交完或已经放弃）".into(),
+                Kind::Template => "这个模板不在交还中（可能刚交完或已经放弃）".into(),
+            }));
+        };
+        if entry.stage == Stage::Released {
+            return Err(Refused::Conflict(
+                "已经交给备机了，只差它确认，不能再放弃或重复交还".into(),
+            ));
+        }
+        match (action, kind) {
+            (Action::Abandon, Kind::Template) if !users.is_empty() => {
+                Err(Refused::Conflict(format!(
+                    "交还中的房间 {} 还在用这个模板：先放弃它们，或等它们交完",
+                    users
+                        .iter()
+                        .map(i64::to_string)
+                        .collect::<Vec<_>>()
+                        .join("、")
+                )))
+            }
+            (Action::Abandon, _) => {
+                let mut ledger = self.ledger.lock().unwrap();
+                if let Some(returning) = ledger.nodes.get_mut(&node) {
+                    match kind {
+                        Kind::Room => {
+                            if let Some(entry) = returning.rooms.remove(&id) {
+                                self.unblock(&entry);
+                            }
+                        }
+                        Kind::Template => {
+                            returning.templates.remove(&id);
+                        }
+                    }
+                }
+                ledger.nodes.retain(|_, returning| !returning.is_empty());
+                self.save(&ledger);
+                info!(
+                    node,
+                    ?kind,
+                    id,
+                    "配对交还：放弃交还，这一行留在主机（备机那一行在它下次落地时撤掉）"
+                );
+                Ok(node)
+            }
+            (Action::Force, Kind::Template) => Err(Refused::Invalid(
+                "模板没有「立即交还」：用它的房间都交完之后它自动交还".into(),
+            )),
+            (Action::Force, Kind::Room) => {
+                if entry.stage == Stage::Hold {
+                    return Err(Refused::Conflict(
+                        "备机还没确认挡住这个房间的开录（它可能离线），现在不能立即交还；可以放弃交还".into(),
+                    ));
+                }
+                if controller.node_link(node).is_none() {
+                    return Err(Refused::Conflict(
+                        "备机离线时不能立即交还，等它回来；也可以放弃交还、留在主机".into(),
+                    ));
+                }
+                let local = controller
+                    .local()
+                    .filter(|local| local.node_id() == Some(primary))
+                    .and_then(|local| local.fleet_state().rooms.get(&id).map(|room| room.local_id));
+                if let Some(local) = local
+                    && adopt::recording(services, local).await
+                {
+                    return Err(Refused::Conflict(
+                        "本机正在录这个房间：现在交还会让这一场被两台各录一段，等它录完（只剩投稿）再立即交还".into(),
+                    ));
+                }
+                let mut ledger = self.ledger.lock().unwrap();
+                if let Some(entry) = ledger
+                    .nodes
+                    .get_mut(&node)
+                    .and_then(|returning| returning.rooms.get_mut(&id))
+                {
+                    entry.force = true;
+                }
+                self.save(&ledger);
+                info!(
+                    node,
+                    room = id,
+                    "配对交还：立即交还，本机没在录就交接，不等在投的投完"
+                );
+                Ok(node)
+            }
+        }
+    }
 }
 
 impl Member {
@@ -694,6 +913,8 @@ pub struct NodeHolds {
     controller: String,
     by: HoldBy,
     rooms: BTreeMap<i64, String>,
+    /// 不再交还、期望状态里也没有了的房间（主机上放弃交还、删掉或改派）：落地撤掉那一行之后才放开
+    leaving: BTreeSet<i64>,
 }
 
 impl NodeHolds {
@@ -716,6 +937,7 @@ impl NodeHolds {
             controller: controller.to_string(),
             by: HoldBy::Returning(identity(services)),
             rooms,
+            leaving: BTreeSet::new(),
         };
         for url in holds.rooms.values() {
             adopt::block(holds.by, url);
@@ -726,9 +948,11 @@ impl NodeHolds {
         holds
     }
 
-    /// 期望状态落地之前：按 `handback.hold` 挡（地址取期望状态里的房间）；不带时一个都不挡
+    /// 期望状态落地之前：按 `handback.hold` 挡（地址取期望状态里的房间）；不带时一个都不挡。
+    /// 交完的（`handback.rooms`）与仍在期望状态里的当场放开；期望状态里没有了的（主机上放弃交还、删掉或改派，
+    /// 这次落地会撤掉那一行）接着挡到撤掉之后（[`Self::settle`]），免得撤掉之前开录一场
     pub fn apply(&mut self, desired: &DesiredState) {
-        let wanted: BTreeMap<i64, String> = desired
+        let mut wanted: BTreeMap<i64, String> = desired
             .handback
             .iter()
             .flat_map(|handback| &handback.hold)
@@ -737,6 +961,20 @@ impl NodeHolds {
                 Some((*id, room.spec.url.clone()))
             })
             .collect();
+        let handed: &[i64] = desired
+            .handback
+            .as_deref()
+            .map_or(&[], |handback| &handback.rooms);
+        self.leaving.clear();
+        for (id, url) in &self.rooms {
+            if wanted.contains_key(id) {
+                continue;
+            }
+            if !handed.contains(id) && !desired.rooms.iter().any(|room| room.id == *id) {
+                wanted.insert(*id, url.clone());
+                self.leaving.insert(*id);
+            }
+        }
         if wanted == self.rooms {
             return;
         }
@@ -750,9 +988,31 @@ impl NodeHolds {
         }
         info!(
             rooms = ?wanted.keys().collect::<Vec<_>>(),
+            leaving = ?self.leaving,
             "配对交还：主播交还给本机，主机那边交接完之前挡着开录"
         );
         self.rooms = wanted;
+        self.save();
+    }
+
+    /// 期望状态落地之后（与启动时）：不再交还的房间那一行撤掉了就放开
+    pub fn settle(&mut self, fleet: &FleetState) {
+        let gone: Vec<i64> = self
+            .leaving
+            .iter()
+            .filter(|id| !fleet.rooms.contains_key(id))
+            .copied()
+            .collect();
+        if gone.is_empty() {
+            return;
+        }
+        for id in &gone {
+            self.leaving.remove(id);
+            if let Some(url) = self.rooms.remove(id) {
+                adopt::unblock(self.by, &url);
+            }
+        }
+        info!(rooms = ?gone, "配对交还：不再交还的房间在本机撤掉了，放开开录");
         self.save();
     }
 
@@ -776,6 +1036,7 @@ impl NodeHolds {
             adopt::unblock(self.by, url);
         }
         self.rooms.clear();
+        self.leaving.clear();
         remove_file(&self.path);
     }
 }
@@ -805,6 +1066,12 @@ fn remove_file(path: &Path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => warn!(error = %e, "could not remove {}", path.display()),
     }
+}
+
+/// 测试：同一进程里的两台机器，`services` 那台此刻挡着 `url` 开录没有
+#[cfg(test)]
+pub(crate) fn blocked_on(services: &ServiceRegister, url: &str) -> bool {
+    adopt::blocked(identity(services), url)
 }
 
 #[cfg(test)]
@@ -1019,5 +1286,102 @@ mod tests {
         assert!(!dir.path().join(HOLDS_FILE_NAME).exists());
         holds.forget();
         assert!(holding(a).is_none());
+    }
+
+    /// 主机上放弃交还（或删掉、改派）之后，期望状态里既没有这个房间、也不在交完的里：节点先接着挡，
+    /// 落地撤掉那一行之后才放开，撤掉之前不会开录一场。交完的与仍在期望状态里的当场放开
+    #[tokio::test]
+    async fn a_room_no_longer_handed_back_stays_held_until_its_row_is_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let services = services(&dir.path().join("node")).await;
+        let (a, b, c) = (
+            "https://handback.example/settle-a",
+            "https://handback.example/settle-b",
+            "https://handback.example/settle-c",
+        );
+        let room = |id: i64, url: &str| -> DesiredRoom {
+            serde_json::from_value(json!({ "id": id, "epoch": 1, "url": url, "remark": "r" }))
+                .unwrap()
+        };
+        let managed = |ids: &[(i64, &str)]| FleetState {
+            rooms: ids
+                .iter()
+                .map(|(id, url)| {
+                    let row =
+                        serde_json::from_value(json!({ "local_id": id, "epoch": 1, "url": url }))
+                            .unwrap();
+                    (*id, row)
+                })
+                .collect(),
+            ..FleetState::default()
+        };
+        let mut holds = NodeHolds::resume(dir.path(), "controller", &services);
+        holds.apply(&DesiredState {
+            rooms: vec![room(1, a), room(2, b), room(3, c)],
+            handback: Some(Box::new(Handback {
+                hold: vec![1, 2, 3],
+                ..Handback::default()
+            })),
+            ..DesiredState::default()
+        });
+        assert!(holding(a).is_some() && holding(b).is_some() && holding(c).is_some());
+
+        // a 放弃交还、b 交完了、c 还在交还
+        holds.apply(&DesiredState {
+            rooms: vec![room(3, c)],
+            handback: Some(Box::new(Handback {
+                hold: vec![3],
+                rooms: vec![2],
+                ..Handback::default()
+            })),
+            ..DesiredState::default()
+        });
+        assert!(holding(a).is_some(), "撤掉那一行之前接着挡");
+        assert!(holding(b).is_none(), "交完的当场放开");
+        assert!(holding(c).is_some());
+        holds.settle(&managed(&[(1, a), (3, c)]));
+        assert!(holding(a).is_some(), "那一行还在（落地失败）就接着挡");
+
+        let mut restarted = NodeHolds::resume(dir.path(), "controller", &services);
+        assert!(holding(a).is_some(), "重启后接着挡");
+        restarted.apply(&DesiredState {
+            rooms: vec![room(3, c)],
+            handback: Some(Box::new(Handback {
+                hold: vec![3],
+                ..Handback::default()
+            })),
+            ..DesiredState::default()
+        });
+        restarted.settle(&managed(&[(3, c)]));
+        assert!(holding(a).is_none(), "撤掉之后放开");
+        assert!(holding(c).is_some());
+
+        // 最后一行也放弃了：期望状态不再带交还，同样等撤掉
+        restarted.apply(&DesiredState::default());
+        assert!(holding(c).is_some());
+        restarted.settle(&managed(&[]));
+        assert!(holding(c).is_none());
+        assert!(!dir.path().join(HOLDS_FILE_NAME).exists());
+    }
+
+    /// 放弃、立即交还只认 `rooms` / `templates` 与 `abandon` / `force`；账本里的 `force` 不改变没点过时的文件
+    #[test]
+    fn actions_parse_and_force_is_absent_until_used() {
+        assert_eq!(Kind::parse("rooms"), Some(Kind::Room));
+        assert_eq!(Kind::parse("templates"), Some(Kind::Template));
+        assert_eq!(Kind::parse("room"), None);
+        assert_eq!(Action::parse("abandon"), Some(Action::Abandon));
+        assert_eq!(Action::parse("force"), Some(Action::Force));
+        assert_eq!(Action::parse("drop"), None);
+        let mut ledger = ledger();
+        let plain = serde_json::to_value(&ledger).unwrap();
+        assert!(plain["nodes"]["5"]["rooms"]["7"].get("force").is_none());
+        room(&mut ledger, 7).advance(Stage::Held);
+        room(&mut ledger, 7).force = true;
+        let text = serde_json::to_string(&ledger).unwrap();
+        let back: Ledger = serde_json::from_str(&text).unwrap();
+        assert!(back.nodes[&5].rooms[&7].force);
+        room(&mut ledger, 7).advance(Stage::Released);
+        assert!(!room(&mut ledger, 7).force, "交接之后不再带");
     }
 }

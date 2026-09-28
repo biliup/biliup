@@ -1,0 +1,14 @@
+.hint {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--semi-color-text-1);
+  background: var(--semi-color-fill-0);
+  border: 1px solid var(--semi-color-fill-1);
+}
+
+.warn {
+  color: rgb(var(--semi-orange-5));
+}

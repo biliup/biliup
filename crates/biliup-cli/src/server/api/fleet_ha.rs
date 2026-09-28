@@ -1,7 +1,8 @@
 //! 一主一备（HA Pair）接口。
 //!
 //! 控制面（路由在 `fleet.rs` 里注册）：
-//! - `GET /v1/fleet/ha`：配对、备机连接、不纳入配对的房间与最近的场次，归 `streamer.view`
+//! - `GET /v1/fleet/ha`：配对、备机连接、不纳入配对的房间与最近的场次、解除时会交还给备机的行（`returns`），
+//!   归 `streamer.view`
 //! - `PUT /v1/fleet/ha`：指定备机或改模式 / 参数（`{"standby": 节点 id, "mode": 1|2, "params": {...},
 //!   "adopt": {"streamers": [...], "templates": [...]}}`），`DELETE /v1/fleet/ha`：解除配对，都归 `node.manage`。
 //!   指定一台新的备机时它上面已有的本地主播与模板缺省全部纳入配对，`adopt` 里列出的才纳入（某一项不填就是
@@ -20,6 +21,9 @@
 //! `GET /v1/node/ha/candidates`（本机还没纳入配对的本地行，归 `streamer.view`）与 `POST /v1/node/ha/join`
 //! （`{"streamers": [...], "templates": [...]}`，把本机的本地行加进配对，归 `node.manage`）。
 //! 本机不在配对里时这组地址落回页面，与没有这组路由时一样。
+//!
+//! 两边的 `GET` 应答里 `sync.accounts` 是 B 站账号的同步情况（登记了几个、最近一次变化的时刻与在哪一台、
+//! 几个没送到对端），只有个数与时刻，不带凭据内容与路径。
 
 use crate::server::errors::{ApiError, report_to_response};
 use crate::server::fleet::controller::Controller;
@@ -46,7 +50,7 @@ fn error(status: StatusCode, message: String) -> Response {
     (status, Json(ApiError::new(message))).into_response()
 }
 
-fn refused(refused: Refused) -> Response {
+pub(crate) fn refused(refused: Refused) -> Response {
     match refused {
         Refused::Invalid(message) => error(StatusCode::BAD_REQUEST, message),
         Refused::NotFound(message) => error(StatusCode::NOT_FOUND, message),
@@ -203,18 +207,25 @@ fn not_paired() -> Response {
     error(StatusCode::NOT_FOUND, "本机不在配对里".to_string())
 }
 
-async fn node_view() -> Response {
-    if let Some(standby) = ha::standby() {
-        return Json(standby.view()).into_response();
+/// 与控制面双向同步时带 `sync`：连没连上、排着没发的修改条数与 B 站账号的同步情况（只有个数与时刻）
+async fn node_view(State(services): State<ServiceRegister>) -> Response {
+    let mut view = if let Some(standby) = ha::standby() {
+        standby.view()
+    } else if let Some(primary) = ha::primary() {
+        let mut view = primary.view();
+        view["leader"] = json!("node");
+        view
+    } else {
+        return not_paired();
+    };
+    if let Some(member) = member_for(&services) {
+        view["sync"] = json!({
+            "linked": member.linked(),
+            "pending": member.pending().await,
+            "accounts": member.accounts_status().await,
+        });
     }
-    match ha::primary() {
-        Some(primary) => {
-            let mut view = primary.view();
-            view["leader"] = json!("node");
-            Json(view).into_response()
-        }
-        None => not_paired(),
-    }
+    Json(view).into_response()
 }
 
 /// 本机是备机时就地执行；上传主机换到本机时转给控制面（它这时是备机）执行

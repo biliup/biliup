@@ -7,6 +7,7 @@ use crate::server::api::access::Caller;
 use crate::server::api::fleet_alerts;
 use crate::server::api::fleet_config;
 use crate::server::api::fleet_ha;
+use crate::server::api::fleet_handback;
 use crate::server::api::fleet_local;
 use crate::server::api::fleet_rooms;
 use crate::server::errors::{ApiError, report_to_response};
@@ -98,6 +99,10 @@ pub fn router(controller: Arc<Controller>) -> Router<()> {
         .route(
             "/v1/fleet/ha/sessions/{key}/{action}",
             post(fleet_ha::manual),
+        )
+        .route(
+            "/v1/fleet/ha/handback/{kind}/{id}/{action}",
+            post(fleet_handback::act),
         )
         .with_state(controller)
 }

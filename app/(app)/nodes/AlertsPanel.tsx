@@ -239,20 +239,23 @@ export function NodeAlertBadge({ alerts, onOpen }: { alerts: FleetAlert[]; onOpe
   )
 }
 
-function AlertItem({
+/** `label`：换掉告警种类的标签与说明（一主一备面板按内容认出的四类） */
+export function AlertItem({
   alert,
   now,
   canManage,
   clearing,
   onAcknowledge,
+  label,
 }: {
   alert: FleetAlert
   now: number
   canManage: boolean
   clearing: boolean
   onAcknowledge: () => void
+  label?: (typeof ALERT_KINDS)[keyof typeof ALERT_KINDS]
 }) {
-  const kind = ALERT_KINDS[alert.kind]
+  const kind = label ?? ALERT_KINDS[alert.kind]
   const resolved = alert.resolved_at !== null
   const subject = alert.room || alert.url
   return (

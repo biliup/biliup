@@ -1793,12 +1793,13 @@ async fn edit_remark(services: &ServiceRegister, url: &str, remark: &str) {
 /// 一主一备的双向同步（H2）：备机镜像行可以改，改动经控制面仲裁回到 Fleet 房间、再到主机；主机的改动到备机；
 /// 备机新建的主播加入配对（控制面按它建房间，备机认下自己那一行，不重复）；两边删除互相跟随。
 /// 两台断开期间各改同一个房间，重连后按版本后写者赢（含「删了又被改」「改了又被删」）。
-/// 备机的账号凭据到了主机，控制面库里没有凭据内容；普通节点不参与同步、托管行照旧只读
+/// 备机的账号凭据到了主机，控制面库里没有凭据内容，两边读到的账号同步情况也没有；普通节点不参与同步、托管行照旧只读
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
     use super::ha::member::member_for;
     use super::ha::pairing::{Designate, Pairing};
     use crate::server::services::streamers::{add_streamer, delete_streamer, toggle_pause};
+    use axum::http::{Method, StatusCode};
 
     let _role = super::ha::test_guard().await;
     let dir = tempfile::tempdir().unwrap();
@@ -2188,6 +2189,32 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
                 "控制面库 {} 里不能有凭据内容",
                 path.display()
             );
+        }
+    }
+    // 两边面板与账号页读到的账号同步情况：只有个数与时刻，没有凭据内容与路径
+    eventually(
+        "both sides count the account",
+        Duration::from_secs(20),
+        || async { member().pending().await == 0 },
+    )
+    .await;
+    let (status, node_view) =
+        node_ha_request(&s, Method::GET, "/v1/node/ha", serde_json::Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{node_view}");
+    let controller_view = pairing.view(&controller).await.unwrap();
+    for view in [&node_view, &controller_view] {
+        let accounts = &view["sync"]["accounts"];
+        assert_eq!(accounts["count"], 1, "{view}");
+        assert_eq!(accounts["changed_on"], "node", "{view}");
+        assert_eq!(accounts["pending"], 0, "{view}");
+        let text = view.to_string();
+        for secret in [
+            "PLACEHOLDER",
+            "5151.json",
+            &*dir.path().to_string_lossy(),
+            &*data.to_string_lossy(),
+        ] {
+            assert!(!text.contains(secret), "{secret} 出现在 {text}");
         }
     }
 
@@ -2984,6 +3011,13 @@ async fn rows_adopted_from_the_standby_go_back_to_it_when_the_pair_is_dissolved(
     let busy_a = c.managers.get_room_by_id(local_a).await.unwrap();
     *busy_a.uploader_status.write().unwrap() = WorkerStatus::Pending;
 
+    // 解除之前面板就能列出会交还的：从备机纳入的 a 与它的模板；配对期间新建的 n 留在主机
+    let view = pairing.view(&controller).await.unwrap();
+    assert_eq!(
+        view["returns"],
+        serde_json::json!({ "rooms": [room_a.id], "templates": [room_a.template_id.unwrap()] })
+    );
+
     assert!(pairing.dissolve(&controller).await.unwrap());
     let stage = || {
         let (pairing, controller) = (pairing.clone(), controller.clone());
@@ -3068,3 +3102,5 @@ async fn rows_adopted_from_the_standby_go_back_to_it_when_the_pair_is_dissolved(
     local.shutdown().await;
     controller.shutdown().await;
 }
+
+mod handback_actions;

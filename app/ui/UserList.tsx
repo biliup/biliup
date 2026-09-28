@@ -23,6 +23,7 @@ import useSWRMutation from 'swr/mutation'
 import { useBiliUsers } from '../lib/use-streamers'
 import QRcode from '@/app/ui/QRcode'
 import { useWindowWidth } from '../lib/useIsMobile';
+import PairAccountsHint from './PairAccountsHint'
 
 type UserListProps = {
   onCancel?: (e: React.MouseEvent<Element, MouseEvent> | React.KeyboardEvent<Element>) => void
@@ -134,6 +135,7 @@ const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
       bodyStyle={{ borderBottom: '1px solid var(--semi-color-border)' }}
       onCancel={onCancel}
     >
+      <PairAccountsHint visible={visible} />
       <List
         className="component-list-demo-booklist"
         dataSource={list}
