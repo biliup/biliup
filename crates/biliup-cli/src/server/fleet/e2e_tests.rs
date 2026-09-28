@@ -1661,16 +1661,12 @@ async fn the_local_node_is_mirrored_to_a_designated_standby() {
         (pair.primary_node_id, pair.standby_node_id),
         (primary, standby)
     );
-    eventually(
-        "the standby records the mirror",
-        Duration::from_secs(20),
-        || {
-            let services = standby_services.clone();
-            async move { local_urls(&services).await == ["https://stuck.example/m"] }
-        },
-    )
+    eventually("the standby records the mirror", via_link(20), || {
+        let services = standby_services.clone();
+        async move { local_urls(&services).await == ["https://stuck.example/m"] }
+    })
     .await;
-    eventually("the standby reports first", Duration::from_secs(20), || {
+    eventually("the standby reports first", via_link(20), || {
         let (pairing, controller) = (pairing.clone(), controller.clone());
         async move {
             let view = pairing.view(&controller).await.unwrap();
@@ -1702,7 +1698,7 @@ async fn the_local_node_is_mirrored_to_a_designated_standby() {
         .create_room(room("https://stuck.example/n", primary, None))
         .await
         .unwrap();
-    eventually("new rooms are mirrored", Duration::from_secs(20), || {
+    eventually("new rooms are mirrored", via_link(20), || {
         let services = standby_services.clone();
         async move { local_urls(&services).await.len() == 2 }
     })
@@ -1714,18 +1710,14 @@ async fn the_local_node_is_mirrored_to_a_designated_standby() {
         .await
         .unwrap()
         .unwrap();
-    eventually(
-        "the standby switches to mode 2",
-        Duration::from_secs(20),
-        || {
-            let path = standby_state.clone();
-            async move {
-                load_ha_state(&path)
-                    .and_then(|state| state.assignment)
-                    .is_some_and(|assignment| assignment.mode == HaMode::Takeover)
-            }
-        },
-    )
+    eventually("the standby switches to mode 2", via_link(20), || {
+        let path = standby_state.clone();
+        async move {
+            load_ha_state(&path)
+                .and_then(|state| state.assignment)
+                .is_some_and(|assignment| assignment.mode == HaMode::Takeover)
+        }
+    })
     .await;
     assert!(
         pairing
@@ -1735,19 +1727,15 @@ async fn the_local_node_is_mirrored_to_a_designated_standby() {
 
     // 解除：备机撤掉镜像房间，ha-state.json 留着但不再有配对
     assert!(pairing.dissolve(&controller).await.unwrap());
-    eventually("the mirror is withdrawn", Duration::from_secs(20), || {
+    eventually("the mirror is withdrawn", via_link(20), || {
         let services = standby_services.clone();
         async move { local_urls(&services).await.is_empty() }
     })
     .await;
-    eventually(
-        "the standby drops the pair",
-        Duration::from_secs(20),
-        || {
-            let path = standby_state.clone();
-            async move { load_ha_state(&path).is_some_and(|state| state.assignment.is_none()) }
-        },
-    )
+    eventually("the standby drops the pair", via_link(20), || {
+        let path = standby_state.clone();
+        async move { load_ha_state(&path).is_some_and(|state| state.assignment.is_none()) }
+    })
     .await;
     assert!(!pairing.dissolve(&controller).await.unwrap());
     assert_eq!(fx.services.managers.get_rooms().await.len(), 3);
