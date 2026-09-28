@@ -1073,8 +1073,11 @@ impl NodeHa {
             .collect()
     }
 
-    /// 期望状态落地之后（房间的本地地址才齐）
+    /// 期望状态落地之后（房间的本地地址才齐）；不再交还的房间撤掉了才放开开录（[`NodeHolds::settle`]）
     pub fn set_rooms(&mut self, fleet: &FleetState) {
+        if let Some(holds) = &mut self.holds {
+            holds.settle(fleet);
+        }
         self.managed = fleet
             .rooms
             .iter()

@@ -3068,3 +3068,5 @@ async fn rows_adopted_from_the_standby_go_back_to_it_when_the_pair_is_dissolved(
     local.shutdown().await;
     controller.shutdown().await;
 }
+
+mod handback_actions;

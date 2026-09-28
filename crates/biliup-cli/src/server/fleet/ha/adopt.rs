@@ -294,6 +294,26 @@ pub(super) async fn busy(services: &ServiceRegister, local: i64) -> bool {
         )
 }
 
+/// 正在录（不管有没有在投）
+pub(super) async fn recording(services: &ServiceRegister, local: i64) -> bool {
+    let Some(worker) = services.managers.get_room_by_id(local).await else {
+        return false;
+    };
+    matches!(
+        *worker.downloader_status.read().unwrap(),
+        WorkerStatus::Working(_)
+    )
+}
+
+/// 测试：同一进程里的两台各自挡着哪些地址
+#[cfg(test)]
+pub(super) fn blocked(owner: usize, url: &str) -> bool {
+    HOLDS.lock().unwrap().iter().any(|(by, held)| {
+        held == url
+            && matches!(by, HoldBy::Join(id) | HoldBy::Leaving(id) | HoldBy::Returning(id) if *id == owner)
+    })
+}
+
 fn downloader_of(spec: &RoomSpec) -> Option<Value> {
     let patch = serde_json::to_value(spec.override_cfg.as_ref()?).ok()?;
     patch

@@ -1507,10 +1507,29 @@ impl Pairing {
             "local_standby": local_standby,
         });
         // 没有交还中的行时不带，与以前逐字相同
-        if let Some(handback) = self.handback.view() {
+        if let Some(handback) = self.handback.annotated(controller, &self.services).await {
             view["handback"] = handback;
         }
         Ok(view)
+    }
+
+    /// 面板上对一行交还的「放弃交还」「立即交还」（[`Handbacks::act`]）；立即交还当场往前走一步
+    pub async fn handback_action(
+        &self,
+        controller: &Controller,
+        kind: handback::Kind,
+        id: i64,
+        action: handback::Action,
+    ) -> Result<(), Refused> {
+        let node = self
+            .handback
+            .act(controller, &self.services, kind, id, action)
+            .await?;
+        controller.push_many([Some(node)]).await;
+        if action == handback::Action::Force {
+            self.handback_tick(controller).await;
+        }
+        Ok(())
     }
 
     pub fn shutdown(&self) {

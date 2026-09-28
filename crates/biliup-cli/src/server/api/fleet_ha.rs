@@ -46,7 +46,7 @@ fn error(status: StatusCode, message: String) -> Response {
     (status, Json(ApiError::new(message))).into_response()
 }
 
-fn refused(refused: Refused) -> Response {
+pub(crate) fn refused(refused: Refused) -> Response {
     match refused {
         Refused::Invalid(message) => error(StatusCode::BAD_REQUEST, message),
         Refused::NotFound(message) => error(StatusCode::NOT_FOUND, message),
