@@ -87,7 +87,6 @@
   2. [请查看参考](https://biliup.github.io/biliup/docs/guide/introduction/#linuxxia-pei-zhi-kai-ji-zi-qi)
 ### Termux
 - 详见[Wiki](https://github.com/biliup/biliup/wiki/Termux-%E4%B8%AD%E4%BD%BF%E7%94%A8-biliup)
-- Release 附带 Android（aarch64）wheel `biliup-*-android_24_arm64_v8a.whl`
 
 > [!NOTE]
 > 默认下载器 `mesio`（rust-srec 引擎）和可选的 `stream-gears` 都由 Rust 实现、编进 biliup，无需外部依赖。若配置 `ffmpeg` 下载器或使用后处理，需要本机安装 `ffmpeg`；YouTube、niconico 等平台与通用适配器则依赖 `yt-dlp` 或 `streamlink`。Docker 镜像已内置 `ffmpeg`。

@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false # don't fail other jobs if one fails
       matrix:
-        build: [x86_64-linux, x86_64-linux-musl, aarch64-linux, arm-linux, x86_64-macos, x86_64-windows, aarch64-macos] #, x86_64-win-gnu, win32-msvc
+        build: [x86_64-linux, x86_64-linux-musl, aarch64-linux, arm-linux, x86_64-macos, x86_64-windows, aarch64-macos, aarch64-android] #, x86_64-win-gnu, win32-msvc
         include:
           - build: x86_64-linux
             os: ubuntu-22.04
@@ -61,6 +61,11 @@ jobs:
             rust: stable
             target: aarch64-apple-darwin
             cross: false
+          - build: aarch64-android
+            os: ubuntu-latest
+            rust: stable
+            target: aarch64-linux-android
+            cross: false
         # - build: x86_64-win-gnu
         #   os: windows-2019
         #   rust: stable-x86_64-gnu
@@ -95,15 +100,45 @@ jobs:
         with:
           tool: cross
 
+      - name: Install Android NDK
+        if: matrix.build == 'aarch64-android'
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26d
+          add-to-path: false
+
+      - name: Install cargo-ndk
+        if: matrix.build == 'aarch64-android'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+
+      # NDK 里没有系统 OpenSSL 开发库，pkg-config 找不到库会直接编译失败，
+      # 这里改用 vendored（源码内置编译 OpenSSL）的方式规避
+      - name: Patch Cargo.toml for Android (vendored OpenSSL)
+        if: matrix.build == 'aarch64-android'
+        run: |
+          sed -i 's|reqwest = { version = "0.13.4", features = \["cookies", "form", "query"\] }|reqwest = { version = "0.13.4", default-features = false, features = ["cookies", "form", "query", "native-tls-vendored"] }|' Cargo.toml
+          cargo update
+
       - name: Run cargo test
-        if: matrix.build != 'aarch64-macos'
+        if: matrix.build != 'aarch64-macos' && matrix.build != 'aarch64-android'
         shell: bash
         run: ${{ matrix.cross && 'cross' || 'cargo' }} test --release --locked --target ${{ matrix.target }} -p biliup
 
       - name: Build release binary
+        if: matrix.build != 'aarch64-android'
         shell: bash
         run: ${{ matrix.cross && 'cross' || 'cargo' }} build --release --locked --target ${{ matrix.target }} --bin biliup
 
+      - name: Build release binary (Android)
+        if: matrix.build == 'aarch64-android'
+        shell: bash
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: cargo ndk -t arm64-v8a --platform 24 build --release --locked --target ${{ matrix.target }} --bin biliup
+        
       - name: Strip release binary (linux and macos)
         if: matrix.build == 'x86_64-linux' || matrix.build == 'x86_64-macos'
         run: strip "target/${{ matrix.target }}/release/$BIN_NAME"
@@ -116,7 +151,6 @@ jobs:
             rustembedded/cross:${{ matrix.target }} \
             aarch64-linux-gnu-strip \
             /target/${{ matrix.target }}/release/$BIN_NAME
-
       - name: Build archive
         shell: bash
         run: |
@@ -127,7 +161,6 @@ jobs:
           else
             cp "target/${{ matrix.target }}/release/$BIN_NAME" "dist/"
           fi
-
       - uses: actions/upload-artifact@v4
         with:
           name: bins-${{ matrix.build }}
@@ -166,11 +199,9 @@ jobs:
         shell: bash
         run: |
           set -ex
-
           rm -rf tmp
           mkdir tmp
           mkdir dist
-
           for dir in bins-* ; do
               platform=${dir#"bins-"}
               # 每次迭代重置，否则 exe 会从 windows 平台泄漏到后续平台
@@ -183,14 +214,12 @@ jobs:
               # cp LICENSE README.md tmp/$pkgname
               mv bins-$platform/$BIN_NAME$exe tmp/$pkgname
               chmod +x tmp/$pkgname/$BIN_NAME$exe
-
               if [ "$exe" = "" ]; then
                   tar cJf dist/$pkgname.tar.xz -C tmp $pkgname
               else
                   (cd tmp && 7z a -r ../dist/$pkgname.zip $pkgname)
               fi
           done
-
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
         with:
