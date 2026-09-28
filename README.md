@@ -85,6 +85,9 @@
 * 后台运行 
   1. `nohup biliup server --auth &`
   2. [请查看参考](https://biliup.github.io/biliup/docs/guide/introduction/#linuxxia-pei-zhi-kai-ji-zi-qi)
+### npm
+- 直接运行：`npx @biliup/cli server --auth`；或全局安装 `npm i -g @biliup/cli`，之后用 `biliup server --auth`
+- 需要 Node.js ≥ 18，只下载本机平台的 biliupR 二进制：Linux x64（glibc / musl）、arm64 / armv6+（glibc），macOS x64 / arm64，Windows x64
 ### Termux
 - 详见[Wiki](https://github.com/biliup/biliup/wiki/Termux-%E4%B8%AD%E4%BD%BF%E7%94%A8-biliup)
 - Release 附带 Android（aarch64）wheel `biliup-*-android_24_arm64_v8a.whl`
