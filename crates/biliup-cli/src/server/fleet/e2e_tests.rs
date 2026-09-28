@@ -1979,6 +1979,7 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
         },
     )
     .await;
+    landed(&member()).await;
     toggle_pause(&s.managers, local_id).await;
     member().scan().await;
     eventually(
@@ -2048,6 +2049,7 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
     );
 
     // 备机删掉：控制面的房间与主机的行跟着删
+    landed(&member()).await;
     delete_streamer(&s.pool, &s.managers, created.id)
         .await
         .unwrap();
@@ -2234,6 +2236,12 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
     pairing.shutdown();
     local.shutdown().await;
     controller.shutdown().await;
+}
+
+/// 等备机上正在落地的期望状态做完：落地从改行、重建监控、套暂停到记下各行落地的版本一直拿着同步端的锁。
+/// 锁放开之前本机再动同一行，暂停会被这次落地按期望状态套回去，删掉的行落地记不下，之后的扫描都认不出来
+async fn landed(member: &super::ha::member::Member) {
+    member.pending().await;
 }
 
 /// 模拟备机进程还在、只是连不上控制面：停掉节点代理，单独起一个同步端记下断开期间本机的修改
