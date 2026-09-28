@@ -38,20 +38,25 @@ import FleetConfigSheet, { type ConfigTarget } from './FleetConfigSheet'
 import NodeLabels from './NodeLabels'
 import AlertsPanel, { NodeAlertBadge } from './AlertsPanel'
 import { useFleetAlerts } from '@/app/lib/fleet-alerts'
+import { FLEET_HA_KEY, type FleetHa } from '@/app/lib/fleet-ha'
+import ControllerHa from './ha/ControllerHa'
+import NodeHa from './ha/NodeHa'
+import PairDialog, { PairEntry } from './ha/PairDialog'
 import styles from './page.module.scss'
 import labelStyles from './labels.module.scss'
 
 const { Text } = Typography
 
-type Tab = 'nodes' | 'rooms' | 'templates' | 'alerts'
+type Tab = 'nodes' | 'rooms' | 'templates' | 'alerts' | 'ha'
 
 const DESCRIPTIONS: Record<Tab, string> = {
   nodes: '加入本控制面的 biliup 实例。各节点仍各自录制、各自上传，这里汇总它们的状态',
   rooms: '把直播间分派给节点录制；迁移时上一台先停录、确认释放后才交给新节点',
   templates: '房间录完按模板投稿；账号按 mid 在节点本机的凭据里找，凭据不出节点',
   alerts: '节点离线、磁盘不足、配置或房间没能落地、录制出错、投稿失败；只在这里显示',
+  ha: '「本机」与一台节点录同样的直播间、只由一台投稿；在哪台上改都会同步',
 }
-const TABS: Tab[] = ['nodes', 'rooms', 'templates', 'alerts']
+const TABS: Tab[] = ['nodes', 'rooms', 'templates', 'alerts', 'ha']
 
 function NotController() {
   return (
@@ -109,7 +114,6 @@ function Nodes() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const requested = searchParams.get('tab')
-  const tab: Tab = TABS.find((t) => t === requested) ?? 'nodes'
   const nodeParam = Number(searchParams.get('node'))
   const alertNode = Number.isInteger(nodeParam) && nodeParam > 0 ? nodeParam : null
   const controller = me?.fleet_controller === true
@@ -127,8 +131,14 @@ function Nodes() {
     refreshInterval: FLEET_REFRESH_MS,
   })
   const { data: alertList } = useFleetAlerts(controller)
+  const { data: ha, mutate: mutateHa } = useSWR<FleetHa>(controller ? FLEET_HA_KEY : null, fetcher, {
+    refreshInterval: FLEET_REFRESH_MS,
+  })
+  const showHa = !!ha && (ha.pair !== null || Object.keys(ha.handback ?? {}).length > 0)
+  const tab: Tab = TABS.find((t) => t === requested && (t !== 'ha' || showHa)) ?? 'nodes'
   const [labelFilter, setLabelFilter] = useState<string[]>([])
   const [joining, setJoining] = useState(false)
+  const [pairing, setPairing] = useState(false)
   /** undefined 为没打开，null 为新建 */
   const [editingTemplate, setEditingTemplate] = useState<FleetTemplate | null | undefined>(undefined)
   const [configTarget, setConfigTarget] = useState<ConfigTarget | null>(null)
@@ -144,6 +154,10 @@ function Nodes() {
   const refreshTemplates = () => {
     mutateTemplates().catch(() => undefined)
     refreshRooms()
+  }
+  const refreshHa = () => {
+    mutateHa().catch(() => undefined)
+    refreshTemplates()
   }
   const switchTab = (key: string) => {
     router.replace(key === 'nodes' ? pathname : `${pathname}?tab=${key}`, { scroll: false })
@@ -329,11 +343,13 @@ function Nodes() {
         ? canViewConfig || canManage
           ? nodeActions
           : null
-        : !canManage || tab === 'alerts'
+        : !canManage || tab === 'alerts' || tab === 'ha'
           ? null
           : tab === 'rooms'
             ? createRoom
             : createTemplate
+
+  if (me && !controller && me.fleet_node?.pair) return <NodeHa />
 
   return (
     <>
@@ -385,6 +401,9 @@ function Nodes() {
                   <RemovalNotices removals={data.removals} rooms={rooms} nodes={nodes} />
                 ) : null}
                 {canManage && data && data.local_node === null ? <LocalNodeOffer onEnabled={refresh} /> : null}
+                {canManage && data && ha && !showHa && nodes.some((n) => !n.local) ? (
+                  <PairEntry onOpen={() => setPairing(true)} />
+                ) : null}
                 {nodesBody}
                 {controller ? <PendingTokens canManage={canManage} /> : null}
               </TabPane>
@@ -419,10 +438,36 @@ function Nodes() {
                   <AlertsPanel nodes={nodes} canManage={canManage} nodeFilter={alertNode} onNodeFilter={openAlerts} />
                 ) : null}
               </TabPane>
+              {showHa && ha ? (
+                <TabPane tab="一主一备" itemKey="ha">
+                  <ControllerHa
+                    ha={ha}
+                    nodes={nodes}
+                    rooms={rooms}
+                    templates={templates ?? []}
+                    alerts={alerts}
+                    alertsNow={alertList?.now ?? 0}
+                    canManage={canManage}
+                    canSubmit={can('upload.submit')}
+                    onChanged={refreshHa}
+                  />
+                </TabPane>
+              ) : null}
             </Tabs>
           </>
         )}
       </div>
+      {pairing && data ? (
+        <PairDialog
+          nodes={nodes}
+          localNode={data.local_node}
+          onPaired={refreshHa}
+          onClose={(paired) => {
+            setPairing(false)
+            if (paired) switchTab('ha')
+          }}
+        />
+      ) : null}
       {joining ? (
         <JoinDialog
           onClose={() => {

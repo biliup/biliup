@@ -304,7 +304,7 @@ export async function voidToken(id: string): Promise<void> {
   await handleResponse(await fetch(`${API_BASE}${FLEET_TOKENS_KEY}/${encodeURIComponent(id)}`, { method: 'DELETE' }))
 }
 
-async function send<T>(method: string, path: string, body?: unknown): Promise<T | null> {
+export async function send<T>(method: string, path: string, body?: unknown): Promise<T | null> {
   const res = await fetch(API_BASE + path, {
     method,
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },

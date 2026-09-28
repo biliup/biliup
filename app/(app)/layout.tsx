@@ -31,7 +31,7 @@ function Ic({ d, extra }: { d: string; extra?: string }) {
 }
 
 /**
- * `controllerOnly`：只在本机以 `--controller` 运行时出现；
+ * `controllerOnly`：只在本机以 `--controller` 运行时出现；`pairLabel`：本机是一主一备里的节点时也出现，换成这个名字；
  * `activeOn`：从这一项进去的子页面（不在侧栏里），停在这些页面时这一项也高亮
  */
 type NavItem = {
@@ -40,6 +40,7 @@ type NavItem = {
   icon: ReactNode
   perm: Permission
   controllerOnly?: boolean
+  pairLabel?: string
   activeOn?: string[]
 }
 
@@ -120,6 +121,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
         href: '/nodes',
         perm: 'streamer.view',
         controllerOnly: true,
+        pairLabel: '一主一备',
         label: '节点',
         icon: <Ic d="M4 4h16v6H4zM4 14h16v6H4z" extra="M8 7h.01M8 17h.01" />,
       },
@@ -228,7 +230,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const visibleGroups = me
     ? NAV_GROUPS.map((group) => ({
         ...group,
-        items: group.items.filter((item) => can(item.perm) && (!item.controllerOnly || me.fleet_controller)),
+        items: group.items
+          .filter(
+            (item) =>
+              can(item.perm) &&
+              (!item.controllerOnly || me.fleet_controller || (!!item.pairLabel && !!me.fleet_node?.pair)),
+          )
+          .map((item) =>
+            item.controllerOnly && !me.fleet_controller && item.pairLabel ? { ...item, label: item.pairLabel } : item,
+          ),
       })).filter((group) => group.items.length > 0)
     : NAV_GROUPS.map((group) => ({
         ...group,
