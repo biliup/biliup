@@ -67,8 +67,8 @@ async fn reported(recv: &mut RecvStream, seq: i64) {
     .await;
 }
 
-/// 必须是单线程 runtime（`#[tokio::test]` 的缺省）：节点、relay 与假控制面轮流跑。节点发完 `Ack` 在同一轮里
-/// 就进下一次 `select!`，读帧那一支把已经到了的半帧收进去才让出，假控制面这才读得到这个 `Ack`
+/// 必须是单线程 runtime（`#[tokio::test]` 的缺省）：节点、relay 与假控制面轮流跑。节点发完 `Ack` 之后没有别的
+/// 分支要处理时，在同一轮里就进下一次 `select!`，读帧那一支把已经到了的半帧收进去才让出，假控制面这才读得到这个 `Ack`
 #[tokio::test]
 async fn a_controller_frame_split_around_another_ready_branch_is_read_whole() {
     let _guard = events::test_guard().await;
@@ -143,6 +143,11 @@ async fn a_controller_frame_split_around_another_ready_branch_is_read_whole() {
         relays: Vec::new(),
     };
     send.write_all(&encoded(&welcome)).await.unwrap();
+    // 心跳的处理要查库、会让出：等连上就触发的第一下发完，下一下在 10 秒之后
+    from_node(&mut recv, "the first heartbeat", |message| {
+        matches!(message, NodeMessage::Heartbeat(_))
+    })
+    .await;
 
     // 第 2 版的长度与前半截跟着第 1 版一起发出去：节点落地第 1 版、回完 `Ack` 就把这半帧读进来等后半截
     let second = encoded(&desired(2));
