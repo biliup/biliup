@@ -91,11 +91,21 @@ export interface Pair {
   updated_at: number
 }
 
+/** B 站账号的同步情况：只有个数与时刻，不带凭据内容与路径 */
+export interface AccountSync {
+  count: number
+  changed_at: number | null
+  changed_on: Side | null
+  /** 还没送到对端的账号变化 */
+  pending: number
+}
+
 export interface PairSync {
   min_proto?: number
   linked?: boolean
   /** 排着还没送到对端的修改条数 */
   pending?: number
+  accounts?: AccountSync
 }
 
 /** 与后端 `SessionRecord` 一致（主机那一侧记的场次） */

@@ -202,7 +202,7 @@ export function PairCard({
   )
 }
 
-/** 同步：连接、排着没送到的修改 */
+/** 同步：连接、排着没送到的修改、B 站账号（只有个数与时刻） */
 export function SyncCard({ model }: { model: PairModel }) {
   const sync = model.sync
   if (!sync || sync.linked === undefined) {
@@ -220,6 +220,7 @@ export function SyncCard({ model }: { model: PairModel }) {
       </section>
     )
   }
+  const accounts = sync.accounts
   return (
     <section className={styles.card} aria-label="同步">
       <div className={styles.cardHead}>
@@ -232,6 +233,20 @@ export function SyncCard({ model }: { model: PairModel }) {
         <span>
           还没送到对端的修改 <b>{sync.pending ?? 0}</b> 条
         </span>
+        {accounts ? (
+          <>
+            <span>
+              B 站账号 <b>{accounts.count}</b> 个
+            </span>
+            <span>
+              账号最近一次变化 <b>{ms(accounts.changed_at)}</b>
+              {accounts.changed_on ? `（在${model.names[accounts.changed_on]}）` : ''}
+            </span>
+            <span>
+              还没送到对端的账号变化 <b>{accounts.pending}</b> 个
+            </span>
+          </>
+        ) : null}
       </div>
       <p className={styles.explain}>
         {sync.linked
