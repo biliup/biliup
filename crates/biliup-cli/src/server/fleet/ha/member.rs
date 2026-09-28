@@ -1077,6 +1077,14 @@ pub(crate) mod tests {
         ServiceRegister::new(pool, Arc::new(RwLock::new(config)), managers, log_handle).await
     }
 
+    /// 停掉后台扫描（`watch`）：按假时钟手动推进的测试用。5 秒定时器或进程级配置通道（同一进程里别的测试改配置）
+    /// 叫醒的扫描会按真实时间插进一轮 `advance`
+    pub(crate) fn stop_watch(member: &Member) {
+        for task in member.tasks.lock().unwrap().drain(..) {
+            task.abort();
+        }
+    }
+
     /// 伪造的凭据文件：形状与扫码登录写出的一样，值全是占位串（`tag` 区分版本）
     pub(crate) fn credential(mid: u64, tag: &str) -> String {
         serde_json::json!({
