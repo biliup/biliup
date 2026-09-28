@@ -16,206 +16,12 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+'
   pull_request:
   workflow_dispatch:
-    inputs:
-      publish_pypi:
-        description: '上传到 PyPI（Use workflow from 须选版本 tag，如 v1.2.11）'
-        type: boolean
-        default: false
 
 permissions:
   contents: read
 
 jobs:
-  linux:
-    runs-on: ${{ matrix.platform.runner }}
-    env:
-      # aws-lc-sys >= 0.42.0 (via rustls) calls getauxval(AT_HWCAP2) unconditionally
-      # on Linux in cpu_ppc64le.c, but manylinux2014's glibc 2.17 headers predate
-      # AT_HWCAP2 (added in glibc 2.18). Define the stable kernel ABI value ourselves;
-      # glibc 2.17 already provides getauxval, which returns 0 for unknown entries.
-      # Only cc invocations targeting ppc64le read this variable.
-      CFLAGS_powerpc64le_unknown_linux_gnu: -DAT_HWCAP2=26
-    strategy:
-      matrix:
-        platform:
-          - runner: ubuntu-22.04
-            target: x86_64
-          - runner: ubuntu-22.04
-            target: x86
-          - runner: ubuntu-22.04
-            target: aarch64
-          - runner: ubuntu-22.04
-            target: armv7
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Build frontend
-        run: |
-          npm install
-          npm run build
-      - uses: actions/setup-python@v5
-        with:
-          python-version: 3.x
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist -m crates/stream-gears/Cargo.toml
-          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-          manylinux: ${{ matrix.platform.target == 'aarch64' && '2_28' || 'auto' }}
-      - name: Smoke test wheel
-        if: matrix.platform.target == 'x86_64'
-        run: |
-          python -m venv /tmp/smoke-venv
-          # mypy is pinned because new stubtest releases add checks.
-          /tmp/smoke-venv/bin/pip install dist/biliup-*-abi3-*.whl pytest mypy==2.3.1
-          /tmp/smoke-venv/bin/pytest crates/stream-gears/tests -v
-      - name: Check type stubs against the wheel
-        if: matrix.platform.target == 'x86_64'
-        run: /tmp/smoke-venv/bin/python -m mypy.stubtest stream_gears
-      - name: Build free-threaded wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist -m crates/stream-gears/Cargo.toml -i python3.14t
-          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-          manylinux: ${{ matrix.platform.target == 'aarch64' && '2_28' || 'auto' }}
-      - name: Upload wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-linux-${{ matrix.platform.target }}
-          path: dist
-
-  musllinux:
-    runs-on: ${{ matrix.platform.runner }}
-    strategy:
-      matrix:
-        platform:
-          - runner: ubuntu-22.04
-            target: x86_64
-          - runner: ubuntu-22.04
-            target: x86
-          - runner: ubuntu-22.04
-            target: aarch64
-          - runner: ubuntu-22.04
-            target: armv7
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Build frontend
-        run: |
-          npm install
-          npm run build
-      - uses: actions/setup-python@v5
-        with:
-          python-version: 3.x
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist -m crates/stream-gears/Cargo.toml
-          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-          manylinux: musllinux_1_2
-      - name: Build free-threaded wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist -m crates/stream-gears/Cargo.toml -i python3.14t
-          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-          manylinux: musllinux_1_2
-      - name: Upload wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-musllinux-${{ matrix.platform.target }}
-          path: dist
-
-  windows:
-    runs-on: ${{ matrix.platform.runner }}
-    strategy:
-      matrix:
-        platform:
-          - runner: windows-latest
-            target: x64
-          - runner: windows-latest
-            target: x86
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Build frontend
-        run: |
-          npm install
-          npm run build
-      - uses: actions/setup-python@v5
-        with:
-          python-version: 3.x
-          architecture: ${{ matrix.platform.target }}
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist -m crates/stream-gears/Cargo.toml
-          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: 3.14t
-          architecture: ${{ matrix.platform.target }}
-      - name: Build free-threaded wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist -m crates/stream-gears/Cargo.toml -i python3.14t
-          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-      - name: Upload wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-windows-${{ matrix.platform.target }}
-          path: dist
-
-  macos:
-    runs-on: ${{ matrix.platform.runner }}
-    strategy:
-      matrix:
-        platform:
-          - runner: macos-15-intel
-            target: x86_64
-          - runner: macos-14
-            target: aarch64
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Build frontend
-        run: |
-          npm install
-          npm run build
-      - uses: actions/setup-python@v5
-        with:
-          python-version: 3.x
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist -m crates/stream-gears/Cargo.toml
-          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-      - name: Build free-threaded wheels
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.platform.target }}
-          args: --release --out dist -m crates/stream-gears/Cargo.toml -i python3.14t
-          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-      - name: Upload wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-macos-${{ matrix.platform.target }}
-          path: dist
-
+  # PyPI 只发源码包，不再预编译 wheel；各平台二进制由 release.yml 构建
   sdist:
     runs-on: ubuntu-latest
     steps:
@@ -227,11 +33,27 @@ jobs:
         run: |
           npm install
           npm run build
+          # biliup-cli 编译时内嵌 out/，sdist 必须带上；pyproject 的 include 相对 crates/stream-gears，即 sdist 根目录
+          cp -r out crates/stream-gears/out
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
           command: sdist
           args: --out dist -m crates/stream-gears/Cargo.toml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+      # 和用户 pip install biliup 一样从 sdist 现场编译
+      - name: Smoke test sdist
+        run: |
+          python -m venv /tmp/smoke-venv
+          # mypy is pinned because new stubtest releases add checks.
+          /tmp/smoke-venv/bin/pip install dist/biliup-*.tar.gz pytest mypy==2.3.1
+          /tmp/smoke-venv/bin/pytest crates/stream-gears/tests -v
+      - name: Check type stubs against the installed package
+        run: /tmp/smoke-venv/bin/python -m mypy.stubtest stream_gears
       - name: Upload sdist
         uses: actions/upload-artifact@v4
         with:
@@ -242,7 +64,7 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
-    needs: [linux, musllinux, windows, macos, sdist]
+    needs: [sdist]
     permissions:
       # Use to sign the release artifacts
       id-token: write
@@ -257,13 +79,10 @@ jobs:
         with:
           subject-path: 'wheels-*/*'
       - name: Publish to PyPI
-        # PyPI 项目空间接近 10 GiB 上限，传到一半超限会留下残缺版本、版本号作废，所以 tag 推送默认不上传。
-        # 仓库变量 PUBLISH_PYPI=true 恢复自动上传；补发某个 tag 时在该 tag 上手动运行并勾选 publish_pypi
-        if: ${{ startsWith(github.ref, 'refs/tags/') && (vars.PUBLISH_PYPI == 'true' || inputs.publish_pypi) }}
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         uses: PyO3/maturin-action@v1
         env:
           MATURIN_PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         with:
           command: upload
           args: --non-interactive --skip-existing wheels-*/*
-
