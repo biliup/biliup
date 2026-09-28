@@ -163,7 +163,7 @@ async fn pending_handbacks_can_be_abandoned_or_handed_over_at_once() {
             .and_then(|view| view.pair.clone())
             .is_some_and(|pair| pair.streamers.contains(&id))
     };
-    eventually("all four join the pair", Duration::from_secs(60), || {
+    eventually("all four join the pair", via_link(60), || {
         let ids = ids.clone();
         async move {
             for url in [a_url, b_url, c_url, d_url] {
@@ -205,16 +205,12 @@ async fn pending_handbacks_can_be_abandoned_or_handed_over_at_once() {
         }
     };
     let stage = |view: &Value, room: i64| view["rooms"][room.to_string().as_str()]["stage"].clone();
-    eventually(
-        "the standby holds all four",
-        Duration::from_secs(40),
-        || async move {
-            let view = handback().await;
-            [room_a, room_b, room_c, room_d]
-                .iter()
-                .all(|room| stage(&view, *room) == "held")
-        },
-    )
+    eventually("the standby holds all four", via_link(40), || async move {
+        let view = handback().await;
+        [room_a, room_b, room_c, room_d]
+            .iter()
+            .all(|room| stage(&view, *room) == "held")
+    })
     .await;
     let stop = Arc::new(AtomicBool::new(false));
     let watcher = watch_single_recorder(
@@ -254,7 +250,7 @@ async fn pending_handbacks_can_be_abandoned_or_handed_over_at_once() {
     assert_eq!(status, StatusCode::OK, "{body}");
     eventually(
         "b goes back while the upload is still running",
-        Duration::from_secs(40),
+        via_link(40),
         || {
             let (c, s) = (c.clone(), s.clone());
             async move {
@@ -282,7 +278,7 @@ async fn pending_handbacks_can_be_abandoned_or_handed_over_at_once() {
     // 放弃交还 a（备机在线）：a 留在主机，备机那一行撤掉
     let (status, body) = send(&app, Method::POST, &path("rooms", room_a, "abandon")).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    eventually("a stays on the primary", Duration::from_secs(40), || {
+    eventually("a stays on the primary", via_link(40), || {
         let (c, s) = (c.clone(), s.clone());
         async move {
             row_by_url(&s, a_url).await.is_none()
@@ -316,7 +312,7 @@ async fn pending_handbacks_can_be_abandoned_or_handed_over_at_once() {
     // 备机回来：c 那一行撤掉，d 照常交接，模板交还（主机上的 a 还在用，主机留一份）
     let agent = start_standby(&node_file, &s, &managed).await;
     wait_for_node(&controller, standby, true, Duration::from_secs(30)).await;
-    eventually("the rest settles", Duration::from_secs(60), || {
+    eventually("the rest settles", via_link(60), || {
         let (c, s, pairing, controller) =
             (c.clone(), s.clone(), pairing.clone(), controller.clone());
         async move {
