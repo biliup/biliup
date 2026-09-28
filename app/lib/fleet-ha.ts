@@ -369,6 +369,23 @@ export function handbackBlocker(entry: HandbackEntry, online: boolean | undefine
   }
 }
 
+export type HandbackAction = 'abandon' | 'force'
+
+/** 待归还的一行：`abandon` 放弃交还、留在主机；`force` 立即交还（只有房间） */
+export function handbackAction(kind: 'rooms' | 'templates', id: number, action: HandbackAction) {
+  return send<unknown>('POST', `${FLEET_HA_KEY}/handback/${kind}/${id}/${action}`)
+}
+
+/** 「立即交还」此刻为什么不能点；能点返回 null（以服务端为准） */
+export function forceIssue(entry: HandbackEntry, online: boolean): string | null {
+  if (entry.stage === 'released') return '已经交给备机了'
+  if (!online) return '备机离线时不能立即交还'
+  if (entry.stage === 'hold') return '备机还没确认挡住开录'
+  if (entry.local === 'recording') return '本机正在录：等它录完'
+  if (entry.force) return '已经点过立即交还'
+  return null
+}
+
 type TagColor = React.ComponentProps<typeof Tag>['color']
 
 export type HaAlertKind = 'manual' | 'standby_failed' | 'standby_offline' | 'missing_account'

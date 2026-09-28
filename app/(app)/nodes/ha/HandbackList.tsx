@@ -1,4 +1,5 @@
 'use client'
+import type { ReactNode } from 'react'
 import { Tag, Typography } from '@douyinfe/semi-ui'
 import type { FleetNode, FleetRoom, FleetTemplate } from '@/app/lib/use-fleet'
 import { handbackBlocker, type HandbackEntry, type Returning } from '@/app/lib/fleet-ha'
@@ -27,11 +28,14 @@ export default function HandbackList({
   nodes,
   rooms,
   templates,
+  actions,
 }: {
   handback: Record<string, Returning>
   nodes: FleetNode[]
   rooms: FleetRoom[]
   templates: FleetTemplate[]
+  /** 每行右侧的操作；`label` 是这一行的称呼，`nodeName` 是交还给的节点 */
+  actions?: (row: HandbackRow, label: string, nodeName: string) => ReactNode
 }) {
   return (
     <>
@@ -87,6 +91,7 @@ export default function HandbackList({
                       </span>
                     </div>
                     {stageTag(row.entry, row.online)}
+                    {actions ? <div className={styles.rowActions}>{actions(row, label, name)}</div> : null}
                   </li>
                 )
               })}

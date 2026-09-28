@@ -19,6 +19,7 @@ import {
   type RoomLine,
 } from './HaPanel'
 import HandbackList from './HandbackList'
+import HandbackActions from './HandbackActions'
 import ModeDialog from './ModeDialog'
 import HaJoinDialog from './HaJoinDialog'
 import DissolveDialog from './DissolveDialog'
@@ -57,7 +58,19 @@ export default function ControllerHa({
 
   const handback = ha.handback && Object.keys(ha.handback).length ? ha.handback : null
   const handbackList = handback ? (
-    <HandbackList handback={handback} nodes={nodes} rooms={rooms} templates={templates} />
+    <HandbackList
+      handback={handback}
+      nodes={nodes}
+      rooms={rooms}
+      templates={templates}
+      actions={
+        canManage
+          ? (row, label, nodeName) => (
+              <HandbackActions row={row} label={label} nodeName={nodeName} onChanged={onChanged} />
+            )
+          : undefined
+      }
+    />
   ) : null
 
   if (!pair) {

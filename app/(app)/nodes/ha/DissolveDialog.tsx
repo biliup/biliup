@@ -87,7 +87,7 @@ export default function DissolveDialog({
           </li>
           <li>
             {online ? `${standbyName} 此刻在线。` : <span className={styles.warn}>{standbyName} 此刻不在线。</span>}
-            它不在线时，这些行先列在「待归还」里，等它回来再交。
+            它不在线时，这些行先列在「待归还」里，等它回来再交；在那里也可以「放弃交还」留在主机。
           </li>
           <li>之后两台不再同步；各自已有的 B 站账号都留着。</li>
         </ul>
