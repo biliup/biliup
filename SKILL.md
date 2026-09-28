@@ -90,12 +90,12 @@ try {
 
 If the target directory is not on `PATH`, tell the user to run `biliup` by its full path or add the target directory to `PATH`.
 
-### Linux or macOS uv
+### npm
 
-Use this path when the user is on Linux or macOS and has `uv` available:
+Use this path when the user has Node.js (npm) available:
 
 ```bash
-uv tool install biliup
+npm i -g @biliup/cli
 ```
 
 Then verify:

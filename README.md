@@ -74,14 +74,13 @@
 ## 🚀 快速开始
 
 ### Windows
-- 下载 Release 中的桌面版安装包 [biliup_*_x64-setup.exe](https://github.com/biliup/biliup/releases/latest)，内置 FFmpeg。v1.2.9 未附带安装包，请先用下面的 uv 方式
-- 或同 Linux：`uv tool install biliup`
+- 下载 Release 中的桌面版安装包 [biliup_*_x64-setup.exe](https://github.com/biliup/biliup/releases/latest)，内置 FFmpeg
+- 或用 Release 中的二进制 `biliupR-*-x86_64-windows.zip`，或下方 npm 方式
 
 ### Linux 或 macOS
-1. 安装 [uv](https://docs.astral.sh/uv/getting-started/installation/) 
-2. 安装：`uv tool install biliup`（也可以用 `pipx install biliup`）
-3. 启动：`biliup server --auth`
-4. 访问 WebUI：`http://127.0.0.1:19159`（默认只监听本机，远程访问见下方说明）
+1. 安装：下载 Release 中对应平台的 [biliupR](https://github.com/biliup/biliup/releases/latest) 二进制，解压后把 `biliup` 放进 PATH；或用下方 npm 方式
+2. 启动：`biliup server --auth`
+3. 访问 WebUI：`http://127.0.0.1:19159`（默认只监听本机，远程访问见下方说明）
 * 后台运行 
   1. `nohup biliup server --auth &`
   2. [请查看参考](https://biliup.github.io/biliup/docs/guide/introduction/#linuxxia-pei-zhi-kai-ji-zi-qi)
