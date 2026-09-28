@@ -30,7 +30,7 @@ import UserList from '../../ui/UserList'
 import useSWRMutation from 'swr/mutation'
 import { useBiliUsers } from '../../lib/use-streamers'
 import PageHeader from '../components/PageHeader'
-import { useMe } from '../../lib/use-me'
+import { pairLabel, pairPeer, useMe } from '../../lib/use-me'
 import dc from '@/app/ui/data-card.module.scss'
 
 export default function UploadManager() {
@@ -55,6 +55,13 @@ export default function UploadManager() {
       ? '这是 Fleet 投稿模板，请到「节点 › 投稿模板」修改'
       : `由控制面 ${fleet.controller} 管理，请到控制面修改`
     : undefined
+  // 一主一备里的节点：配对里的模板照常修改，改动与对端双向同步；配对里的直播间在用，删除仍返回 409
+  const pair = fleet?.pair
+  const pairedIds = new Set(pair?.templates ?? [])
+  const pairHint = pair
+    ? `在两台之间同步：这里的修改会同步到${pairPeer(pair)} ${fleet?.controller}，那边的修改也会同步过来`
+    : undefined
+  const pairDeleteHint = '配对里的直播间在用这个模板，不能在这里删除'
 
   const handleAddLinkClick = (event: React.MouseEvent) => {
     if (biliUsers.length === 0) {
@@ -160,7 +167,20 @@ export default function UploadManager() {
         actions={canEditTemplates || canManageAccounts ? actions : undefined}
       />
       <div className={dc.content}>
-        {fleet ? (
+        {pair && fleet ? (
+          <Banner
+            type="info"
+            fullMode={false}
+            closeIcon={null}
+            style={{ marginBottom: 12 }}
+            description={
+              `本机与 ${fleet.controller} 组成一主一备：标着「${pairLabel(pair)}」的 ${pairedIds.size} 个模板是配对里的直播间在用的，在两台之间双向同步，在哪台修改都可以，同一项两边都改过时以后改的为准。B 站账号也在两台之间同步，在哪台登录都行。` +
+              (managedIds.size > 0
+                ? `标着「托管」的 ${managedIds.size} 个模板由控制面 ${fleet.controller} 管理，这里只能查看和用来投稿。`
+                : '')
+            }
+          />
+        ) : fleet ? (
           <Banner
             type="info"
             fullMode={false}
@@ -223,6 +243,13 @@ export default function UploadManager() {
                     </Tag>
                   </Tooltip>
                 ) : null}
+                {pair && pairedIds.has(item.id) ? (
+                  <Tooltip content={pairHint}>
+                    <Tag size="small" color="green" style={{ flexShrink: 0 }}>
+                      {pairLabel(pair)}
+                    </Tag>
+                  </Tooltip>
+                ) : null}
                 {(canSubmit || canEditTemplates) && (
                   <ButtonGroup style={{ flexShrink: 0 }} theme="borderless">
                     {[
@@ -250,15 +277,21 @@ export default function UploadManager() {
                           title="确定是否要删除？"
                           content="此操作将不可逆"
                           margin={50}
-                          disabled={managedIds.has(item.id)}
+                          disabled={managedIds.has(item.id) || pairedIds.has(item.id)}
                           onConfirm={async () => await onConfirm(item.id)}
                         >
                           <Button
                             theme="borderless"
                             icon={<IconDeleteStroked />}
                             aria-label="删除"
-                            disabled={managedIds.has(item.id)}
-                            title={managedIds.has(item.id) ? managedHint : undefined}
+                            disabled={managedIds.has(item.id) || pairedIds.has(item.id)}
+                            title={
+                              managedIds.has(item.id)
+                                ? managedHint
+                                : pairedIds.has(item.id)
+                                  ? pairDeleteHint
+                                  : undefined
+                            }
                           />
                         </Popconfirm>
                       ),

@@ -2,26 +2,43 @@
 //!
 //! 控制面（路由在 `fleet.rs` 里注册）：
 //! - `GET /v1/fleet/ha`：配对、备机连接、不纳入配对的房间与最近的场次，归 `streamer.view`
-//! - `PUT /v1/fleet/ha`：指定备机或改模式 / 参数（`{"standby": 节点 id, "mode": 1|2, "params": {...}}`），
-//!   `DELETE /v1/fleet/ha`：解除配对，都归 `node.manage`
-//! - `POST /v1/fleet/ha/sessions/{key}/{action}`：主机面板上的人工处理（`standby-upload` / `drop`），
-//!   转给备机执行，归 `upload.submit`
+//! - `PUT /v1/fleet/ha`：指定备机或改模式 / 参数（`{"standby": 节点 id, "mode": 1|2, "params": {...},
+//!   "adopt": {"streamers": [...], "templates": [...]}}`），`DELETE /v1/fleet/ha`：解除配对，都归 `node.manage`。
+//!   指定一台新的备机时它上面已有的本地主播与模板缺省全部纳入配对，`adopt` 里列出的才纳入（某一项不填就是
+//!   这一项全部）；应答的 `adoption` 逐条列出纳入与否、不能纳入的原因
+//! - `GET /v1/fleet/ha/candidates?standby=节点 id`：两台上还没纳入配对的本地主播与模板、能不能加入与原因
+//!   （确认弹层用；`standby` 不填时是配对里的节点），归 `streamer.view`
+//! - `POST /v1/fleet/ha/join`：配对之后按 id 把一台上还没纳入的本地行加进配对
+//!   （`{"side": "controller" | "node", "streamers": [...], "templates": [...]}`），归 `node.manage`
+//! - `POST /v1/fleet/ha/role`：换上传主机（`{"primary": "controller" | "node"}`），两台都在线才换，归 `node.manage`
+//! - `POST /v1/fleet/ha/sessions/{key}/{action}`：面板上的人工处理（`standby-upload` / `drop`），
+//!   控制面是主机时转给备机执行、是备机时在本机执行，归 `upload.submit`
 //!
-//! 备机节点（[`node_router`]）：`GET /v1/node/ha` 与 `POST /v1/node/ha/sessions/{key}/{action}`（备机本地的
-//! 人工处理，§6 H），权限同上。本机不是备机时这两个地址落回页面，与没有这组路由时一样。
+//! 配对里的节点（[`node_router`]）：`GET /v1/node/ha` 与 `POST /v1/node/ha/sessions/{key}/{action}`（本地的
+//! 人工处理，§6 H），权限同上；`POST /v1/node/ha/role`（换上传主机）与 `PUT /v1/node/ha`（改模式与参数，
+//! `{"mode": 1|2, "params": {...}}`）经控制面提交、两台都在线才行，归 `node.manage`。
+//! `GET /v1/node/ha/candidates`（本机还没纳入配对的本地行，归 `streamer.view`）与 `POST /v1/node/ha/join`
+//! （`{"streamers": [...], "templates": [...]}`，把本机的本地行加进配对，归 `node.manage`）。
+//! 本机不在配对里时这组地址落回页面，与没有这组路由时一样。
 
 use crate::server::errors::{ApiError, report_to_response};
 use crate::server::fleet::controller::Controller;
 use crate::server::fleet::ha;
-use crate::server::fleet::ha::pairing::{Designate, Refused};
-use crate::server::fleet::ha::wire::ManualAction;
+use crate::server::fleet::ha::member::member_for;
+use crate::server::fleet::ha::pairing::{Designate, Join, Refused, Switch};
+use crate::server::fleet::ha::params::{HaMode, HaParams};
+use crate::server::fleet::ha::sync::HaValue;
+use crate::server::fleet::ha::wire::{HaMessage, ManualAction};
+use crate::server::infrastructure::service_register::ServiceRegister;
 use axum::body::Bytes;
-use axum::extract::{Path, Request, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -35,6 +52,10 @@ fn refused(refused: Refused) -> Response {
         Refused::NotFound(message) => error(StatusCode::NOT_FOUND, message),
         Refused::Conflict(message) => error(StatusCode::CONFLICT, message),
     }
+}
+
+fn parse<T: DeserializeOwned>(body: &Bytes) -> Result<T, Refused> {
+    serde_json::from_slice(body).map_err(|e| Refused::Invalid(format!("请求体无效：{e}")))
 }
 
 fn not_supported() -> Response {
@@ -65,12 +86,50 @@ pub async fn put_pair(State(controller): State<Arc<Controller>>, body: Bytes) ->
     let Some(pairing) = controller.ha() else {
         return not_supported();
     };
-    let request: Designate = match serde_json::from_slice(&body) {
+    let request: Designate = match parse(&body) {
         Ok(request) => request,
-        Err(e) => return error(StatusCode::BAD_REQUEST, format!("请求体无效：{e}")),
+        Err(reason) => return refused(reason),
     };
     match pairing.designate(&controller, request).await {
-        Ok(Ok(pair)) => Json(json!({ "pair": pair })).into_response(),
+        Ok(Ok((pair, adoption))) => {
+            Json(json!({ "pair": pair, "adoption": adoption })).into_response()
+        }
+        Ok(Err(reason)) => refused(reason),
+        Err(e) => report_to_response(e),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CandidatesQuery {
+    #[serde(default)]
+    standby: Option<i64>,
+}
+
+pub async fn candidates(
+    State(controller): State<Arc<Controller>>,
+    Query(query): Query<CandidatesQuery>,
+) -> Response {
+    let Some(pairing) = controller.ha() else {
+        return not_supported();
+    };
+    match pairing.candidates(&controller, query.standby).await {
+        Ok(Ok(view)) => Json(view).into_response(),
+        Ok(Err(reason)) => refused(reason),
+        Err(e) => report_to_response(e),
+    }
+}
+
+pub async fn join(State(controller): State<Arc<Controller>>, body: Bytes) -> Response {
+    let Some(pairing) = controller.ha() else {
+        return not_supported();
+    };
+    let request: Join = match parse(&body) {
+        Ok(request) => request,
+        Err(reason) => return refused(reason),
+    };
+    match pairing.join(&controller, request).await {
+        Ok(Ok(view)) => Json(view).into_response(),
         Ok(Err(reason)) => refused(reason),
         Err(e) => report_to_response(e),
     }
@@ -86,7 +145,23 @@ pub async fn delete_pair(State(controller): State<Arc<Controller>>) -> Response 
     }
 }
 
-/// 转给备机就返回 202；备机执行的结果看 `GET /v1/fleet/ha` 里这一场的状态
+/// 换好就返回配对（`leader` 是新的上传主机）
+pub async fn switch_role(State(controller): State<Arc<Controller>>, body: Bytes) -> Response {
+    let Some(pairing) = controller.ha() else {
+        return not_supported();
+    };
+    let request: Switch = match parse(&body) {
+        Ok(request) => request,
+        Err(reason) => return refused(reason),
+    };
+    match pairing.switch(&controller, request.primary).await {
+        Ok(Ok(pair)) => Json(json!({ "pair": pair, "leader": pair.leader() })).into_response(),
+        Ok(Err(reason)) => refused(reason),
+        Err(e) => report_to_response(e),
+    }
+}
+
+/// 转给备机就返回 202（控制面是备机时在本机执行）；执行的结果看 `GET /v1/fleet/ha` 里这一场的状态
 pub async fn manual(
     State(controller): State<Arc<Controller>>,
     Path((key, action_text)): Path<(String, String)>,
@@ -104,15 +179,19 @@ pub async fn manual(
 }
 
 /// 节点进程的 `/v1/node/ha*`
-pub fn node_router() -> Router<()> {
+pub fn node_router(services: ServiceRegister) -> Router<()> {
     Router::new()
-        .route("/v1/node/ha", get(node_view))
+        .route("/v1/node/ha", get(node_view).put(node_configure))
+        .route("/v1/node/ha/role", post(node_switch))
+        .route("/v1/node/ha/candidates", get(node_candidates))
+        .route("/v1/node/ha/join", post(node_join))
         .route("/v1/node/ha/sessions/{key}/{action}", post(node_manual))
-        .route_layer(axum::middleware::from_fn(standby_only))
+        .route_layer(axum::middleware::from_fn(paired_only))
+        .with_state(services)
 }
 
-async fn standby_only(request: Request, next: Next) -> Response {
-    if ha::standby().is_none() {
+async fn paired_only(request: Request, next: Next) -> Response {
+    if ha::standby().is_none() && ha::primary().is_none() {
         return crate::server::api::spa::static_handler(request.uri().clone())
             .await
             .into_response();
@@ -120,24 +199,154 @@ async fn standby_only(request: Request, next: Next) -> Response {
     next.run(request).await
 }
 
+fn not_paired() -> Response {
+    error(StatusCode::NOT_FOUND, "本机不在配对里".to_string())
+}
+
 async fn node_view() -> Response {
-    match ha::standby() {
-        Some(standby) => Json(standby.view()).into_response(),
-        None => error(StatusCode::NOT_FOUND, "本机不是备机".to_string()),
+    if let Some(standby) = ha::standby() {
+        return Json(standby.view()).into_response();
+    }
+    match ha::primary() {
+        Some(primary) => {
+            let mut view = primary.view();
+            view["leader"] = json!("node");
+            Json(view).into_response()
+        }
+        None => not_paired(),
     }
 }
 
+/// 本机是备机时就地执行；上传主机换到本机时转给控制面（它这时是备机）执行
 async fn node_manual(Path((key, action_text)): Path<(String, String)>) -> Response {
-    let Some(standby) = ha::standby() else {
-        return error(StatusCode::NOT_FOUND, "本机不是备机".to_string());
-    };
     let Some(action) = ManualAction::parse(&action_text) else {
         return unknown_action(&action_text);
     };
-    match standby.manual(&key, action) {
+    if let Some(standby) = ha::standby() {
+        return match standby.manual(&key, action) {
+            Ok(()) => Json(json!({ "done": true })).into_response(),
+            Err(message) => error(StatusCode::CONFLICT, message),
+        };
+    }
+    let Some(primary) = ha::primary() else {
+        return not_paired();
+    };
+    if primary.forward(HaMessage::Manual { key, action }) {
+        (StatusCode::ACCEPTED, Json(json!({ "forwarded": true }))).into_response()
+    } else {
+        error(
+            StatusCode::CONFLICT,
+            "控制面不在线：到控制面的一主一备面板上处理这一场".to_string(),
+        )
+    }
+}
+
+fn not_synced() -> Response {
+    error(
+        StatusCode::CONFLICT,
+        "与控制面的双向同步没有接上（控制面的协议次版本低于 5，或本机还没收到配对），只能在控制面上改".to_string(),
+    )
+}
+
+/// 经控制面提交一条配对修改；与控制面的双向同步没接上（控制面次版本低于 5）时不行
+async fn submit(services: &ServiceRegister, change: Change) -> Response {
+    let Some(member) = member_for(services) else {
+        return not_synced();
+    };
+    let (primary, ha) = match change {
+        Change::Role(primary) => {
+            if let Some(busy) = ha::busy() {
+                return error(
+                    StatusCode::CONFLICT,
+                    format!("{busy}：等它了结再换上传主机"),
+                );
+            }
+            (Some(primary), None)
+        }
+        Change::Ha(value) => (None, Some(value)),
+    };
+    match member.ask(primary, ha).await {
         Ok(()) => Json(json!({ "done": true })).into_response(),
         Err(message) => error(StatusCode::CONFLICT, message),
     }
+}
+
+enum Change {
+    Role(ha::sync::Side),
+    Ha(HaValue),
+}
+
+async fn node_switch(State(services): State<ServiceRegister>, body: Bytes) -> Response {
+    let request: Switch = match parse(&body) {
+        Ok(request) => request,
+        Err(reason) => return refused(reason),
+    };
+    submit(&services, Change::Role(request.primary)).await
+}
+
+/// `PUT /v1/node/ha`
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Configure {
+    mode: HaMode,
+    #[serde(default)]
+    params: HaParams,
+}
+
+/// 本机还没纳入配对的本地主播与模板，能加入的缺省纳入（`included`）；控制面那边的判断在它收下时才做
+async fn node_candidates(State(services): State<ServiceRegister>) -> Response {
+    let Some(member) = member_for(&services) else {
+        return not_synced();
+    };
+    let (streamers, templates) = member.candidates().await;
+    Json(json!({ "streamers": streamers, "templates": templates })).into_response()
+}
+
+/// `POST /v1/node/ha/join`
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NodeJoin {
+    #[serde(default)]
+    streamers: Vec<i64>,
+    #[serde(default)]
+    templates: Vec<i64>,
+}
+
+/// 按 id 把本机还没纳入的本地行加进配对：主播等空闲才发给控制面，控制面没收下的原因见清单里的 `refused`
+async fn node_join(State(services): State<ServiceRegister>, body: Bytes) -> Response {
+    let request: NodeJoin = match parse(&body) {
+        Ok(request) => request,
+        Err(reason) => return refused(reason),
+    };
+    if request.streamers.is_empty() && request.templates.is_empty() {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "streamers 与 templates 至少填一个".to_string(),
+        );
+    }
+    let Some(member) = member_for(&services) else {
+        return not_synced();
+    };
+    let (streamers, templates) = member
+        .join_local(&request.streamers, &request.templates)
+        .await;
+    member.scan().await;
+    Json(json!({ "streamers": streamers, "templates": templates })).into_response()
+}
+
+async fn node_configure(State(services): State<ServiceRegister>, body: Bytes) -> Response {
+    let request: Configure = match parse(&body) {
+        Ok(request) => request,
+        Err(reason) => return refused(reason),
+    };
+    if let Err(message) = request.params.validate() {
+        return error(StatusCode::BAD_REQUEST, message);
+    }
+    let value = HaValue {
+        mode: request.mode,
+        params: request.params,
+    };
+    submit(&services, Change::Ha(value)).await
 }
 
 #[cfg(test)]
@@ -220,7 +429,7 @@ mod tests {
         let (status, _) = send(&app, Method::GET, "/v1/fleet/ha", "").await;
         assert_eq!(status, StatusCode::NOT_FOUND, "没挂配对的控制面");
 
-        let pairing = Arc::new(Pairing::new(services(dir.path()).await));
+        let pairing = Arc::new(Pairing::new(services(dir.path()).await, dir.path()));
         controller.attach_ha(pairing.clone());
         pairing.resume(&controller, None).await;
 
@@ -281,13 +490,17 @@ mod tests {
         controller.shutdown().await;
     }
 
-    /// 不是备机的节点：`/v1/node/ha*` 落回页面，与没有这组路由时一样
+    /// 不在配对里的节点：`/v1/node/ha*` 落回页面，与没有这组路由时一样
     #[tokio::test]
     async fn the_node_ha_routes_fall_back_to_the_page_when_not_a_standby() {
         let _role = crate::server::fleet::ha::test_guard().await;
-        let app = super::node_router().route_layer(from_fn(access::unrestricted));
+        let dir = tempfile::tempdir().unwrap();
+        let app = super::node_router(services(dir.path()).await)
+            .route_layer(from_fn(access::unrestricted));
         for (method, uri) in [
             (Method::GET, "/v1/node/ha"),
+            (Method::PUT, "/v1/node/ha"),
+            (Method::POST, "/v1/node/ha/role"),
             (Method::POST, "/v1/node/ha/sessions/7:1000/drop"),
         ] {
             let response = app

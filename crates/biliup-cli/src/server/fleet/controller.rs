@@ -7,7 +7,9 @@ mod removal;
 
 pub use alerting::{AlertList, FleetSummary, OFFLINE_ALERT_AFTER_MS};
 pub use configuration::{CONTROLLER_VERSION, NodeConfigState, version_older};
-pub use dispatch::{CreateRoom, DispatchError, RoomStatus, RoomView, UpdateRoom, strip_hooks};
+pub use dispatch::{
+    CreateRoom, DispatchError, RoomStatus, RoomView, UpdateRoom, check_room_spec, strip_hooks,
+};
 pub use removal::{REMOVAL_WAIT, Release, Removal, RemovalState, RemovedRoom};
 
 use super::alerts::Alerts;
@@ -444,8 +446,18 @@ impl Controller {
     /// 给一台在线节点下发它此刻完整的期望状态。离线或太旧（收不了 `DesiredState`）的节点跳过，
     /// 它连上来时会收到。
     pub async fn push(&self, node: i64) {
+        self.rescan_pair(&[node]).await;
         let _guard = self.dispatch.lock().await;
         self.push_locked(node).await;
+    }
+
+    /// 要给配对里的一台下发时，先认出配对里房间与模板在控制面上的改动（不能拿着分派锁调）
+    async fn rescan_pair(&self, nodes: &[i64]) {
+        if let Some(pairing) = self.ha()
+            && pairing.involves(nodes)
+        {
+            pairing.rescan(self).await;
+        }
     }
 
     async fn push_locked(&self, node: i64) {
@@ -467,7 +479,7 @@ impl Controller {
                 return;
             }
         };
-        let ha = match self.ha() {
+        let (ha, pair, handback) = match self.ha() {
             Some(pairing) => {
                 match pairing
                     .desired(self, node, proto, &mut rooms, &mut templates)
@@ -480,10 +492,11 @@ impl Controller {
                     }
                 }
             }
-            None => None,
+            None => (None, None, None),
         };
-        // 次版本 1 的节点照常收房间，配置不发；「本机」节点用控制面自己的配置，也不发
-        let config = if proto >= CONFIG_SINCE && !self.is_local(node) {
+        // 次版本 1 的节点照常收房间，配置不发；「本机」节点用控制面自己的配置，也不发；
+        // 与控制面双向同步的配对节点，配置随同步走（H2），也不发
+        let config = if proto >= CONFIG_SINCE && !self.is_local(node) && pair.is_none() {
             match self.desired_config(node).await {
                 Ok(config) => Some(config),
                 Err(e) => {
@@ -494,12 +507,17 @@ impl Controller {
         } else {
             None
         };
+        if let (Some(pairing), Some(handback)) = (self.ha(), &handback) {
+            pairing.handback_sent(node, handback, version);
+        }
         let message = ControllerMessage::DesiredState(DesiredState {
             version,
             rooms,
             templates,
             config,
             ha,
+            pair,
+            handback: handback.map(Box::new),
         });
         if let Some(live) = self.live.lock().unwrap().get_mut(&node)
             && live.outbox.send(message).is_ok()
@@ -510,11 +528,13 @@ impl Controller {
 
     pub async fn push_many(&self, nodes: impl IntoIterator<Item = Option<i64>>) {
         let mut nodes: Vec<i64> = nodes.into_iter().flatten().collect();
-        if let Some(standby) = self.ha().and_then(|pairing| pairing.mirror_target(&nodes)) {
-            nodes.push(standby);
+        if let Some(pairing) = self.ha() {
+            let targets = pairing.mirror_target(&nodes);
+            nodes.extend(targets);
         }
         nodes.sort_unstable();
         nodes.dedup();
+        self.rescan_pair(&nodes).await;
         let _guard = self.dispatch.lock().await;
         for node in nodes {
             self.push_locked(node).await;
@@ -827,6 +847,13 @@ impl Controller {
                         None => debug!(node = id, kind = message.kind(), "HA frame without a pair"),
                     }
                 }
+                NodeMessage::Pair(message) => {
+                    self.touch(id, seq);
+                    match self.ha() {
+                        Some(pairing) => pairing.pair_message(self, id, message).await,
+                        None => debug!(node = id, op = message.op(), "pair frame without a pair"),
+                    }
+                }
                 NodeMessage::Leave => {
                     {
                         let _guard = self.dispatch.lock().await;
@@ -884,6 +911,9 @@ impl Controller {
                 return;
             };
             node.apply_ack(&ack, now);
+        }
+        if let Some(pairing) = self.ha() {
+            pairing.node_acked(self, id, ack.version).await;
         }
         let held: Vec<i64> = ack.held.iter().map(|room| room.id).collect();
         let version = i64::try_from(ack.version).unwrap_or(i64::MAX);
@@ -1040,9 +1070,22 @@ fn redacted_frame(body: &[u8]) -> String {
             if let Some(secret) = value.pointer_mut("/join/secret") {
                 *secret = serde_json::Value::String("[redacted]".into());
             }
+            redact_pair(&mut value);
             value.to_string()
         }
         Err(_) => format!("<{} bytes, not json>", body.len()),
+    }
+}
+
+/// 配对两台之间的同步帧（H2）带着配置值与凭据原文：记录前把值抹掉，只留键名与版本
+fn redact_pair(value: &mut serde_json::Value) {
+    if value.get("type").and_then(serde_json::Value::as_str) != Some("pair") {
+        return;
+    }
+    for field in ["value", "content"] {
+        if let Some(inner) = value.get_mut(field) {
+            *inner = serde_json::Value::String("[redacted]".into());
+        }
     }
 }
 
@@ -1051,7 +1094,9 @@ fn log_outgoing(node: i64, remote: EndpointId, message: &ControllerMessage) {
     if !tracing::enabled!(target: FRAME_LOG_TARGET, tracing::Level::DEBUG) {
         return;
     }
-    let body = serde_json::to_string(message).unwrap_or_default();
+    let mut value = serde_json::to_value(message).unwrap_or_default();
+    redact_pair(&mut value);
+    let body = value.to_string();
     debug!(
         target: FRAME_LOG_TARGET,
         node,
@@ -1069,5 +1114,47 @@ async fn accept_loop(controller: std::sync::Weak<Controller>, endpoint: Endpoint
             break;
         };
         tokio::spawn(controller.handle(incoming));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::fleet::ha::sync::{PairEdit, PairMessage, PairSecret, Side, Stamp};
+
+    /// 配对同步帧里的配置值与凭据原文在帧日志里抹掉，键名、版本与别的帧照旧
+    #[test]
+    fn pair_values_and_credentials_are_redacted_in_frame_logs() {
+        let stamp = Stamp {
+            at: 1,
+            side: Side::Node,
+        };
+        let edit = NodeMessage::Pair(PairMessage::Edit(PairEdit {
+            seq: 3,
+            key: "config/user".into(),
+            stamp,
+            value: Some(serde_json::json!({ "bili_cookie": "SESSDATA=PLACEHOLDER" })),
+            pin: false,
+            returns: false,
+        }));
+        let logged = redacted_frame(&serde_json::to_vec(&edit).unwrap());
+        assert!(!logged.contains("PLACEHOLDER"), "{logged}");
+        assert!(logged.contains("config/user") && logged.contains("[redacted]"));
+
+        let secret = ControllerMessage::Pair(PairMessage::Secret(PairSecret {
+            seq: 4,
+            mid: 42,
+            stamp,
+            content: Some(r#"{"token_info":{"access_token":"PLACEHOLDER"}}"#.into()),
+        }));
+        let mut value = serde_json::to_value(&secret).unwrap();
+        redact_pair(&mut value);
+        assert!(!value.to_string().contains("PLACEHOLDER"));
+        assert_eq!(value["mid"], 42);
+
+        let heartbeat_like =
+            serde_json::json!({ "type": "event", "kind": "x", "at": 1, "value": "kept" });
+        let logged = redacted_frame(heartbeat_like.to_string().as_bytes());
+        assert!(logged.contains("kept"), "别的帧不动");
     }
 }

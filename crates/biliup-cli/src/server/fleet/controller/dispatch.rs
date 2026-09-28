@@ -59,7 +59,7 @@ pub struct CreateRoom {
 }
 
 impl DispatchError {
-    pub(super) fn message(&self) -> String {
+    pub fn message(&self) -> String {
         match self {
             DispatchError::NotFound(message) => message.to_string(),
             DispatchError::Invalid(message) | DispatchError::Conflict(message) => message.clone(),
@@ -170,7 +170,7 @@ pub fn strip_hooks(spec: &mut RoomSpec) {
     spec.postprocessor = None;
 }
 
-fn check_room_spec(spec: &RoomSpec) -> Result<()> {
+pub fn check_room_spec(spec: &RoomSpec) -> Result<()> {
     if spec.url.is_empty() {
         return Err(DispatchError::Invalid("直播间地址不能为空".into()));
     }
@@ -519,11 +519,7 @@ impl Controller {
     /// 删除房间：没有节点在录时直接删；否则先从期望状态里拿掉，节点确认释放后再删（`force` 不等）。
     /// 返回 `Some` 表示还在等节点释放。
     pub async fn delete_room(&self, id: i64, force: bool) -> Result<Option<Room>> {
-        let outcome = {
-            let _guard = self.dispatch.lock().await;
-            let version = self.current_version();
-            assignments::delete_room(&self.pool, id, force, version, now_ms()).await?
-        };
+        let outcome = self.delete_room_unpushed_with(id, force).await?;
         match outcome {
             DeleteRoom::NotFound => Err(DispatchError::NotFound("房间不存在")),
             DeleteRoom::Deleted(room) => {
@@ -534,6 +530,21 @@ impl Controller {
                 self.push_many([room.releasing_node_id]).await;
                 Ok(Some(room))
             }
+        }
+    }
+
+    async fn delete_room_unpushed_with(&self, id: i64, force: bool) -> Result<DeleteRoom> {
+        let _guard = self.dispatch.lock().await;
+        let version = self.current_version();
+        Ok(assignments::delete_room(&self.pool, id, force, version, now_ms()).await?)
+    }
+
+    /// 配对同步按节点的删除删房间：与 [`Self::delete_room`] 相同（在录就等释放），只是不下发，
+    /// 调用方处理完一批修改后一起下发
+    pub async fn delete_room_unpushed(&self, id: i64) -> Result<()> {
+        match self.delete_room_unpushed_with(id, false).await? {
+            DeleteRoom::NotFound => Err(DispatchError::NotFound("房间不存在")),
+            DeleteRoom::Deleted(_) | DeleteRoom::Releasing(_) => Ok(()),
         }
     }
 

@@ -126,11 +126,17 @@ pub struct FleetCapability {
 }
 
 impl FleetCapability {
-    /// `/v1/me` 的 `fleet_node`；没有被控制面托管时为 `None`，响应里不出现这个键
+    /// `/v1/me` 的 `fleet_node`；没有被控制面托管时为 `None`，响应里不出现这个键。
+    /// 配对里的节点另带 `pair.primary`：本机此刻是不是上传主机
     pub fn managed_view(&self) -> Option<serde_json::Value> {
         let node = self.node.as_ref()?;
         let managed = node.read().unwrap();
-        managed.as_ref().map(guard::Managed::view)
+        let mut view = managed.as_ref().map(guard::Managed::view)?;
+        // 上传主备两台都在线时随时能对调，对账状态里不记，按此刻的角色给
+        if let Some(pair) = view.get_mut("pair") {
+            pair["primary"] = ha::primary().is_some().into();
+        }
+        Some(view)
     }
 
     /// `/v1/me` 的 `fleet_revoked`；没有等确认的主播时为 `None`，响应里不出现这个键
@@ -144,6 +150,8 @@ impl FleetCapability {
 pub struct Fleet {
     role: Role,
     revoked: Option<RevokedHandle>,
+    /// 控制面进程与节点进程的服务（配对同步认出本机接口上的改动用）；单机没有
+    services: Option<ServiceRegister>,
 }
 
 #[derive(Clone, Default)]
@@ -163,10 +171,12 @@ impl Fleet {
         managed: ManagedHandle,
         revoked: RevokedHandle,
     ) -> Self {
+        let services = Some(local.services().clone());
         controller.attach_local(local);
         Fleet {
             role: Role::Controller(controller, managed),
             revoked: Some(revoked),
+            services,
         }
     }
 
@@ -182,12 +192,18 @@ impl Fleet {
     }
 
     /// 节点进程（与启用了「本机」节点的控制面）上拒绝本机改动托管行（D7）；
-    /// 被移除过时跟踪本机对暂停中主播的恢复与删除
+    /// 被移除过时跟踪本机对暂停中主播的恢复与删除；配对中把本机接口上的改动交给配对同步（[`ha::capture`]）
     pub fn guard(&self, mut router: axum::Router<()>) -> axum::Router<()> {
         if let Some(revoked) = &self.revoked {
             router = router.layer(axum::middleware::from_fn_with_state(
                 revoked.clone(),
                 revoked::track,
+            ));
+        }
+        if let Some(services) = &self.services {
+            router = router.layer(axum::middleware::from_fn_with_state(
+                services.clone(),
+                ha::capture::capture,
             ));
         }
         match &self.role {
@@ -198,14 +214,17 @@ impl Fleet {
         }
     }
 
-    /// 控制面的 `/v1/fleet/*` 路由；节点的 `/v1/node/ha*`（被指定为备机时才有）；
+    /// 控制面的 `/v1/fleet/*` 路由；节点的 `/v1/node/ha*`（在配对里时才有）；
     /// 被移除过的节点（与控制面的「本机」）的 `/v1/node/revoked*`
     pub fn router(&self) -> Option<axum::Router<()>> {
         let controller = match &self.role {
             Role::Controller(controller, _) => {
                 Some(crate::server::api::fleet::router(controller.clone()))
             }
-            Role::Node(..) => Some(crate::server::api::fleet_ha::node_router()),
+            Role::Node(..) => self
+                .services
+                .clone()
+                .map(crate::server::api::fleet_ha::node_router),
             Role::Standalone => None,
         };
         let revoked = self.revoked.clone().map(|revoked| {
@@ -253,6 +272,7 @@ pub async fn start(options: &FleetOptions, services: &ServiceRegister) -> AppRes
     let standalone = |revoked: Option<RevokedHandle>| Fleet {
         role: Role::Standalone,
         revoked,
+        services: None,
     };
     if options.controller {
         if node_file.exists() {
@@ -304,6 +324,7 @@ pub async fn start(options: &FleetOptions, services: &ServiceRegister) -> AppRes
         Ok(agent) => Ok(Fleet {
             role: Role::Node(Arc::new(Mutex::new(Some(agent))), managed),
             revoked: Some(revoked),
+            services: Some(services.clone()),
         }),
         Err(e) => {
             error!(error = ?e, "节点代理没能启动，本次以单机模式运行");
@@ -352,7 +373,8 @@ async fn start_controller_role(
     revoked.apply().await;
     let controller = start_controller(options).await?;
     // 先挂上配对：之前就连上来的备机等配对载入完再收期望状态，不会先收到一份不带配对的而解除
-    let pairing = Arc::new(ha::pairing::Pairing::new(services.clone()));
+    let data = Path::new(FLEET_DB).parent().unwrap_or(Path::new("."));
+    let pairing = Arc::new(ha::pairing::Pairing::new(services.clone(), data));
     controller.attach_ha(pairing.clone());
     let managed = ManagedHandle::default();
     let local = Arc::new(local::LocalNode::new(
@@ -494,6 +516,10 @@ mod tests {
                 5,
                 "c23607563211161fda918092a2f7be5466a181665b80e12e7075ed4c1f2dba53a885f56987cd7c4309074547f3b1d4af",
             ),
+            (
+                6,
+                "c0ca05edd662e1687e2c52dcf3c49842e839447b39cd1e9fc4fd22e0b36534069ba71e94282a6c401f622667c0e6cef7",
+            ),
         ];
         let embedded: Vec<(i64, String)> = FLEET_MIGRATOR
             .iter()
@@ -518,7 +544,7 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(versions, [1, 2, 3, 4, 5]);
+        assert_eq!(versions, [1, 2, 3, 4, 5, 6]);
         let tables: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'fleet_%' ORDER BY name",
         )
@@ -561,6 +587,6 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(count, 5);
+        assert_eq!(count, 6);
     }
 }

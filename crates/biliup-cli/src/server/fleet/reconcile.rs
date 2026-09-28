@@ -7,7 +7,8 @@
 //! 期望状态里的配置交给 [`super::node_config`]，在房间之前落地。
 
 use super::accounts;
-use super::guard::{Managed, ManagedHandle};
+use super::guard::{Managed, ManagedHandle, PairLocal};
+use super::ha::handback::Handback;
 use super::model::{DesiredRoom, RoomSpec, TemplateSpec};
 use super::node_config::{self, ManagedConfig};
 use super::now_ms;
@@ -16,7 +17,9 @@ use super::revoked::Revoked;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::WorkerStatus;
 use crate::server::infrastructure::models::live_streamer::{InsertLiveStreamer, LiveStreamer};
-use crate::server::infrastructure::models::upload_streamer::InsertUploadStreamer;
+use crate::server::infrastructure::models::upload_streamer::{
+    InsertUploadStreamer, UploadStreamer,
+};
 use crate::server::infrastructure::service_register::ServiceRegister;
 use crate::server::services::streamers::{
     AddStreamerError, add_streamer, delete_streamer, toggle_pause, update_streamer,
@@ -53,6 +56,31 @@ pub struct FleetState {
     /// 控制面在管本机配置时才有（F3 控制面）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config: Option<ManagedConfig>,
+    /// 与控制面双向同步时才有（一主一备的备机，H2）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pair: Option<PairRows>,
+}
+
+/// 配对里的镜像房间与模板（控制面 id）：本机可以改，改动由配对同步发给控制面；
+/// 连不上控制面时也照样能改，所以记在文件里
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PairRows {
+    #[serde(default)]
+    pub rooms: BTreeSet<i64>,
+    #[serde(default)]
+    pub templates: BTreeSet<i64>,
+}
+
+/// 配对同步对这一次落地的要求（[`Reconciler::apply_paired`]）
+#[derive(Debug, Clone, Default)]
+pub struct PairPlan {
+    pub rows: PairRows,
+    /// 本机有比期望状态更新的修改（还没被控制面收下）：这一次不改、不删
+    pub keep_rooms: BTreeSet<i64>,
+    pub keep_templates: BTreeSet<i64>,
+    /// 按本机已有的行认下（本机新建、控制面刚按它建好的房间与模板）：控制面 id → 本机行 id
+    pub adopt_rooms: BTreeMap<i64, i64>,
+    pub adopt_templates: BTreeMap<i64, i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -100,6 +128,11 @@ impl FleetState {
 
 pub fn state_path(node_file: &Path) -> PathBuf {
     node_file.with_file_name(STATE_FILE_NAME)
+}
+
+/// 读 `fleet-state.json`（看这台机器上哪些行归 Fleet 管）；没有或读不了时为空
+pub fn read_state(path: &Path) -> Option<FleetState> {
+    load(path)
 }
 
 fn load(path: &Path) -> Option<FleetState> {
@@ -171,6 +204,89 @@ fn local_template(spec: &TemplateSpec, cookie: Option<&str>, id: Option<i64>) ->
     Some(value)
 }
 
+pub(crate) async fn local_row(services: &ServiceRegister, id: i64) -> Option<LiveStreamer> {
+    LiveStreamer::select()
+        .where_("id = ?")
+        .bind(id)
+        .fetch_optional(&services.pool)
+        .await
+        .ok()
+        .flatten()
+}
+
+pub(crate) async fn local_template_row(
+    services: &ServiceRegister,
+    id: i64,
+) -> Option<UploadStreamer> {
+    UploadStreamer::select()
+        .where_("id = ?")
+        .bind(id)
+        .fetch_optional(&services.pool)
+        .await
+        .ok()
+        .flatten()
+}
+
+/// 本地主播行按房间设置的形状读出来（[`local_streamer`] 的反方向），带它用的本地模板 id
+pub(crate) fn room_spec_of(row: &LiveStreamer) -> Option<(RoomSpec, Option<i64>)> {
+    let spec: RoomSpec = serde_json::from_value(serde_json::to_value(row).ok()?).ok()?;
+    Some((spec.normalized(), row.upload_streamers_id))
+}
+
+/// 本地模板行按控制面模板的形状（开关是 0 / 1）读出来，带它的 `user_cookie`（[`local_template`] 的反方向）
+pub(crate) fn template_value_of(row: &UploadStreamer) -> Option<Value> {
+    let mut value = serde_json::to_value(row).ok()?;
+    let object = value.as_object_mut()?;
+    for key in ["up_selection_reply", "up_close_reply", "up_close_danmu"] {
+        if let Some(flag) = object.get(key).and_then(Value::as_bool) {
+            object.insert(key.into(), json!(u8::from(flag)));
+        }
+    }
+    Some(value)
+}
+
+/// 本地主播行是否已经就是按这份设置写出来的样子
+pub(crate) async fn row_matches(
+    services: &ServiceRegister,
+    local_id: i64,
+    spec: &RoomSpec,
+    template: Option<i64>,
+) -> bool {
+    let (Some(row), Some(wanted)) = (
+        local_row(services, local_id).await,
+        local_streamer(spec, template, Some(local_id)),
+    ) else {
+        return false;
+    };
+    let Ok(wanted) = serde_json::from_value::<LiveStreamer>(wanted) else {
+        return false;
+    };
+    serde_json::to_value(&row).ok() == serde_json::to_value(&wanted).ok()
+}
+
+async fn template_row_matches(
+    services: &ServiceRegister,
+    local_id: i64,
+    spec: &TemplateSpec,
+    cookie: Option<&str>,
+) -> bool {
+    let (Some(row), Some(wanted)) = (
+        local_template_row(services, local_id).await,
+        local_template(spec, cookie, Some(local_id)),
+    ) else {
+        return false;
+    };
+    let Ok(wanted) = serde_json::from_value::<InsertUploadStreamer>(wanted) else {
+        return false;
+    };
+    let current = template_value_of(&row);
+    let Some(Value::Object(mut wanted)) = serde_json::to_value(&wanted).ok() else {
+        return false;
+    };
+    wanted.insert("id".into(), json!(local_id));
+    current == Some(Value::Object(wanted))
+}
+
 async fn local_id_by_url(services: &ServiceRegister, url: &str) -> Option<i64> {
     sqlx::query_scalar("SELECT id FROM livestreamers WHERE url = ?")
         .bind(url)
@@ -215,6 +331,10 @@ pub struct Reconciler {
     local: bool,
     managed: ManagedHandle,
     state: FleetState,
+    /// 主机「本机」这一次落地要原地认下的行（加入配对，H2）：像配对里的行一样先比一比，已经一样就不重建监控
+    adopted: PairRows,
+    /// 主机「本机」上单独加入配对的模板：没有房间用也留着
+    pinned: BTreeSet<i64>,
 }
 
 impl Reconciler {
@@ -246,6 +366,8 @@ impl Reconciler {
             local,
             managed,
             state,
+            adopted: PairRows::default(),
+            pinned: BTreeSet::new(),
         };
         reconciler.recover().await;
         reconciler
@@ -311,27 +433,49 @@ impl Reconciler {
         }
     }
 
+    /// 配对里的行不算托管：本机可以改（改动由配对同步发给控制面）
     fn publish(&self) {
+        let rows = self.state.pair.as_ref();
+        let paired_room = |id: &i64| rows.is_some_and(|rows| rows.rooms.contains(id));
+        let paired_template = |id: &i64| rows.is_some_and(|rows| rows.templates.contains(id));
         let managed = Managed {
             controller: self.label.clone(),
             local: self.local,
             streamers: self
                 .state
                 .rooms
-                .values()
-                .map(|room| (room.local_id, room.url.clone()))
+                .iter()
+                .filter(|(id, _)| !paired_room(id))
+                .map(|(_, room)| (room.local_id, room.url.clone()))
                 .collect(),
             templates: self
                 .state
                 .templates
-                .values()
-                .map(|template| template.local_id)
+                .iter()
+                .filter(|(id, _)| !paired_template(id))
+                .map(|(_, template)| template.local_id)
                 .collect(),
             config: self
                 .state
                 .config
                 .as_ref()
                 .map(|config| config.applied.clone()),
+            pair: rows.map(|_| PairLocal {
+                streamers: self
+                    .state
+                    .rooms
+                    .iter()
+                    .filter(|(id, _)| paired_room(id))
+                    .map(|(_, room)| room.local_id)
+                    .collect(),
+                templates: self
+                    .state
+                    .templates
+                    .iter()
+                    .filter(|(id, _)| paired_template(id))
+                    .map(|(_, template)| template.local_id)
+                    .collect(),
+            }),
         };
         *self.managed.write().unwrap() = Some(managed);
     }
@@ -367,7 +511,79 @@ impl Reconciler {
     }
 
     /// 落地一份期望状态，返回给控制面的 `Ack`
-    pub async fn apply(&mut self, mut desired: DesiredState) -> Ack {
+    pub async fn apply(&mut self, desired: DesiredState) -> Ack {
+        self.apply_paired(desired, None).await
+    }
+
+    /// 主机「本机」上加入配对的本地行（H2）：按控制面的提示（控制面 id → 本机行 id）原地认下，只管紧接着的
+    /// 这一次落地。认下的行不算配对里的行（「本机」上的 Fleet 房间照旧只能在控制面改）
+    pub async fn adopt_local(
+        &mut self,
+        rooms: &BTreeMap<i64, i64>,
+        templates: &BTreeMap<i64, i64>,
+        pinned: BTreeSet<i64>,
+    ) {
+        if !rooms.is_empty() || !templates.is_empty() {
+            let plan = PairPlan {
+                adopt_rooms: rooms.clone(),
+                adopt_templates: templates.clone(),
+                ..PairPlan::default()
+            };
+            self.adopt(&plan).await;
+        }
+        self.adopted.rooms = rooms.keys().copied().collect();
+        self.adopted.templates = templates.keys().copied().collect();
+        self.pinned = pinned;
+    }
+
+    /// 解除配对后交还给本机的行（H2，落地期望状态之前）：还在交还的像配对里的行一样先比一比再落地
+    /// （本来就是本机的那一行，不重建监控），没有房间用的模板也留着；交完的转成本地行，库里的行与监控不动
+    pub fn hand_back(&mut self, handback: Option<&Handback>) {
+        let Some(handback) = handback else {
+            return;
+        };
+        self.adopted.rooms.extend(&handback.hold);
+        self.adopted.templates.extend(&handback.hold_templates);
+        self.pinned.extend(&handback.hold_templates);
+        let mut changed = false;
+        for id in &handback.rooms {
+            if let Some(room) = self.state.rooms.remove(id) {
+                info!(room = id, local = room.local_id, url = %room.url, "fleet room handed back as a local streamer");
+                changed = true;
+            }
+        }
+        for id in &handback.templates {
+            if let Some(template) = self.state.templates.remove(id) {
+                info!(
+                    template = id,
+                    local = template.local_id,
+                    "fleet template handed back as a local template"
+                );
+                changed = true;
+            }
+        }
+        if let Some(rows) = self.state.pair.as_mut() {
+            rows.rooms.retain(|id| !handback.rooms.contains(id));
+            rows.templates.retain(|id| !handback.templates.contains(id));
+        }
+        if changed {
+            self.persist();
+            self.publish();
+        }
+    }
+
+    /// 与控制面双向同步时的落地：`plan` 里本机更新的行不动，本机新建的行按 id 认下；
+    /// 配对里的行要改时先比一比本机的行，已经一样（本机刚改过、控制面收下了）就不重建监控。
+    /// `plan` 为空表示没有配对
+    pub async fn apply_paired(&mut self, mut desired: DesiredState, plan: Option<PairPlan>) -> Ack {
+        if let Some(plan) = &plan {
+            self.adopt(plan).await;
+        }
+        let pair = plan.as_ref();
+        let keep_room = |id: &i64| pair.is_some_and(|plan| plan.keep_rooms.contains(id));
+        let keep_template = |id: &i64| pair.is_some_and(|plan| plan.keep_templates.contains(id));
+        let paired_room = |id: &i64| pair.is_some_and(|plan| plan.rows.rooms.contains(id));
+        let paired_template = |id: &i64| pair.is_some_and(|plan| plan.rows.templates.contains(id));
         let config = node_config::apply(
             &self.services,
             &mut self.state.config,
@@ -404,6 +620,9 @@ impl Reconciler {
 
         let mut wanted: Vec<DesiredRoom> = Vec::new();
         for room in desired.rooms {
+            if keep_room(&room.id) {
+                continue;
+            }
             if room.spec.has_hooks() && !self.allow_hooks {
                 let error = if self.local {
                     "启用「本机」节点时没有勾选「允许钩子」，不接收带 run 命令（能执行任意命令）的房间"
@@ -426,12 +645,24 @@ impl Reconciler {
             wanted.push(room);
         }
 
-        // 用得到的模板先落地（新建或更新），落不了的连带房间一起算失败
-        let needed: BTreeSet<i64> = wanted.iter().filter_map(|room| room.template_id).collect();
+        // 用得到的模板先落地（新建或更新），落不了的连带房间一起算失败。
+        // 配对里的模板都留着：用它的房间可能正因为本机改过而这一次不动
+        let mut needed: BTreeSet<i64> = wanted.iter().filter_map(|room| room.template_id).collect();
+        needed.extend(resolved.keys().copied().filter(|id| paired_template(id)));
+        needed.extend(
+            resolved
+                .keys()
+                .copied()
+                .filter(|id| self.pinned.contains(id)),
+        );
         for template in &needed {
+            if keep_template(template) && self.state.templates.contains_key(template) {
+                continue;
+            }
             let (spec, cookie) = &resolved[template];
+            let compare = paired_template(template) || self.adopted.templates.contains(template);
             if let Err(error) = self
-                .upsert_template(*template, spec, cookie.as_deref())
+                .upsert_template(*template, spec, cookie.as_deref(), compare)
                 .await
             {
                 template_errors.insert(*template, error);
@@ -453,14 +684,15 @@ impl Reconciler {
             .state
             .rooms
             .keys()
-            .filter(|id| !keep.contains(id))
+            .filter(|id| !keep.contains(id) && !keep_room(id))
             .copied()
             .collect();
         for id in stale {
             self.remove_room(id).await;
         }
         for room in wanted {
-            if let Err(error) = self.upsert_room(&room).await {
+            let compare = paired_room(&room.id) || self.adopted.rooms.contains(&room.id);
+            if let Err(error) = self.upsert_room(&room, compare).await {
                 errors.insert(room.id, error);
             }
         }
@@ -477,6 +709,9 @@ impl Reconciler {
             self.drop_template(id, local_id).await;
         }
 
+        self.state.pair = plan.map(|plan| plan.rows);
+        self.adopted = PairRows::default();
+        self.pinned.clear();
         self.state.state_version = Some(desired.version);
         self.persist();
         self.publish();
@@ -495,16 +730,88 @@ impl Reconciler {
         }
     }
 
+    /// 配对同步认下本机已有的行：同一行之前记在别的控制面 id 下（房间删了又按本机的修改重建）就换过来；
+    /// 本机已经没有的配对行忘掉，下面按期望状态重建
+    async fn adopt(&mut self, plan: &PairPlan) {
+        for (&id, &local_id) in &plan.adopt_templates {
+            if self.state.templates.get(&id).map(|t| t.local_id) == Some(local_id)
+                || !row_exists(&self.services, "uploadstreamers", local_id).await
+            {
+                continue;
+            }
+            self.state
+                .templates
+                .retain(|_, template| template.local_id != local_id);
+            self.state.templates.insert(
+                id,
+                ManagedTemplate {
+                    local_id,
+                    applied: Value::Null,
+                },
+            );
+            info!(template = id, local = local_id, "paired template adopted");
+        }
+        for (&id, &local_id) in &plan.adopt_rooms {
+            if self.state.rooms.get(&id).map(|r| r.local_id) == Some(local_id) {
+                continue;
+            }
+            let Some(row) = local_row(&self.services, local_id).await else {
+                continue;
+            };
+            self.state.rooms.retain(|_, room| room.local_id != local_id);
+            self.state.adding.remove(&id);
+            self.state.rooms.insert(
+                id,
+                ManagedRoom {
+                    local_id,
+                    epoch: 0,
+                    url: row.url,
+                    paused: false,
+                    applied: Value::Null,
+                    error: None,
+                },
+            );
+            info!(room = id, local = local_id, "paired room adopted");
+        }
+        // 本机删掉的配对行、控制面之后又改了（后改的赢）：按期望状态重建
+        let paired: Vec<(i64, i64)> = self
+            .state
+            .rooms
+            .iter()
+            .filter(|(id, _)| plan.rows.rooms.contains(id) && !plan.keep_rooms.contains(id))
+            .map(|(id, room)| (*id, room.local_id))
+            .collect();
+        for (id, local_id) in paired {
+            if local_row(&self.services, local_id).await.is_none() {
+                self.state.rooms.remove(&id);
+                info!(room = id, local = local_id, "paired room is recreated");
+            }
+        }
+        self.persist();
+    }
+
     async fn upsert_template(
         &mut self,
         id: i64,
         spec: &TemplateSpec,
         cookie: Option<&str>,
+        pair: bool,
     ) -> Result<(), String> {
         let applied = json!({ "spec": spec, "user_cookie": cookie });
         let existing = self.state.templates.get(&id).cloned();
         if let Some(existing) = &existing {
             if existing.applied == applied {
+                return Ok(());
+            }
+            if pair && template_row_matches(&self.services, existing.local_id, spec, cookie).await {
+                self.state.templates.insert(
+                    id,
+                    ManagedTemplate {
+                        local_id: existing.local_id,
+                        applied,
+                    },
+                );
+                self.persist();
                 return Ok(());
             }
             if row_exists(&self.services, "uploadstreamers", existing.local_id).await {
@@ -585,7 +892,7 @@ impl Reconciler {
         self.persist();
     }
 
-    async fn upsert_room(&mut self, room: &DesiredRoom) -> Result<(), String> {
+    async fn upsert_room(&mut self, room: &DesiredRoom, pair: bool) -> Result<(), String> {
         let template = match room.template_id {
             Some(template) => Some(
                 self.state
@@ -624,6 +931,14 @@ impl Reconciler {
 
         match self.state.rooms.get(&room.id).cloned() {
             Some(mut managed) => {
+                if pair
+                    && managed.applied != applied
+                    && managed.error.is_none()
+                    && row_matches(&self.services, managed.local_id, &room.spec, template).await
+                {
+                    managed.applied = applied.clone();
+                    managed.url = room.spec.url.clone();
+                }
                 if managed.applied != applied || managed.error.is_some() {
                     let streamer: LiveStreamer =
                         local_streamer(&room.spec, template, Some(managed.local_id))
@@ -1214,6 +1529,73 @@ mod tests {
         assert_eq!(streamers.len(), 1);
         assert_eq!(streamers[0].remark, "本地");
         assert!(reconciler.state().templates.is_empty());
+    }
+
+    /// 解除配对后交还给本机的行：交还中按原来那一行落地（本机改过、与期望状态一样时不重建监控），没有房间用的
+    /// 模板也留着；交完的转成本地行，之后的期望状态不再带它们也不删、监控不动
+    #[tokio::test]
+    async fn rows_handed_back_stay_in_place_and_turn_local() {
+        use super::super::ha::handback::Handback;
+        let f = Fixture::new().await;
+        let mut reconciler = f.reconciler(false).await;
+        let url = "https://stuck.example/back";
+        reconciler
+            .apply(desired(
+                1,
+                vec![room(1, url, Some(7))],
+                vec![template(7, None)],
+            ))
+            .await;
+        let local = reconciler.state().rooms[&1].local_id;
+        let mut row = f.streamers().await.remove(0);
+        row.remark = "备机改的".into();
+        update_streamer(&f.services, row).await.unwrap();
+        let worker = f.services.managers.get_room_by_id(local).await.unwrap();
+
+        let edited: DesiredRoom = serde_json::from_value(json!({
+            "id": 1, "epoch": 1, "template_id": 7, "url": url, "remark": "备机改的",
+        }))
+        .unwrap();
+        let hold = Handback {
+            hold: vec![1],
+            hold_templates: vec![8],
+            ..Handback::default()
+        };
+        reconciler.hand_back(Some(&hold));
+        reconciler
+            .apply(desired(
+                2,
+                vec![edited.clone()],
+                vec![template(7, None), template(8, None)],
+            ))
+            .await;
+        let same = f.services.managers.get_room_by_id(local).await.unwrap();
+        assert!(
+            Arc::ptr_eq(&worker, &same),
+            "交还中按原来那一行认下，不重建监控"
+        );
+        assert_eq!(f.templates().await.len(), 2, "没有房间用的交还模板也留着");
+
+        let released = Handback {
+            rooms: vec![1],
+            templates: vec![7, 8],
+            ..Handback::default()
+        };
+        reconciler.hand_back(Some(&released));
+        assert!(reconciler.state().rooms.is_empty() && reconciler.state().templates.is_empty());
+        reconciler.apply(desired(3, vec![], vec![])).await;
+        let streamers = f.streamers().await;
+        assert_eq!(streamers.len(), 1);
+        assert_eq!(
+            (streamers[0].id, streamers[0].remark.as_str()),
+            (local, "备机改的")
+        );
+        assert_eq!(f.templates().await.len(), 2);
+        let same = f.services.managers.get_room_by_id(local).await.unwrap();
+        assert!(Arc::ptr_eq(&worker, &same), "转成本地行，监控不动");
+        let managed = f.managed.read().unwrap().clone().unwrap();
+        assert!(managed.streamers.is_empty() && managed.templates.is_empty());
+        reconciler.hand_back(None);
     }
 
     #[tokio::test]

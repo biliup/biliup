@@ -6,6 +6,7 @@ import { put } from '@/app/lib/api-streamer'
 import { useWindowWidth } from '@/app/lib/useIsMobile'
 import FormSnapshot from '@/app/ui/FormSnapshot'
 import { errorMessage } from '@/app/lib/use-fleet'
+import { pairLabel, type FleetPair } from '@/app/lib/use-me'
 import {
   fieldMarksCss,
   LOCAL_SECRET_FIELDS,
@@ -54,6 +55,20 @@ export function ManagedConfigBanner({ controller, canEditSecrets }: { controller
           ? '下载、上传与各平台参数请到控制面「节点」页的「Fleet 配置」或「节点覆盖」里改。Cookie、密码等本机密钥不随控制面下发，点右上角「本机密钥」修改。'
           : '下载、上传与各平台参数请到控制面「节点」页修改。'
       }
+    />
+  )
+}
+
+/** 空间配置页顶部：一主一备里的节点，配置与对端双向同步、本机照常保存 */
+export function PairConfigBanner({ controller, pair }: { controller: string; pair: FleetPair }) {
+  return (
+    <Banner
+      type="info"
+      fullMode={false}
+      closeIcon={null}
+      style={{ marginBottom: 12 }}
+      title={`${pairLabel(pair)}：本机与 ${controller} 组成一主一备，这里的配置在两台之间双向同步`}
+      description="在哪台保存都可以，同一项两边都改过时以后保存的为准；各平台的 Cookie 也同步。池大小、ffmpeg 路径、边录边传目录、最低可用空间、日志级别跟机器走，不同步。只有一台在线时改动先记在本机，对端回来后再同步。"
     />
   )
 }

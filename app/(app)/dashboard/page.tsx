@@ -25,7 +25,7 @@ import PageHeader from '../components/PageHeader'
 import { PlatformPanels } from '../../ui/plugins'
 import Global from '../../ui/plugins/global'
 import Developer from '../../ui/plugins/developer'
-import LocalSecretsSheet, { ManagedConfigBanner } from './LocalSecretsSheet'
+import LocalSecretsSheet, { ManagedConfigBanner, PairConfigBanner } from './LocalSecretsSheet'
 import AutoClip, { normalizeAutoClip } from '../../ui/plugins/auto-clip'
 import { autoClipError } from '../../lib/auto-clip'
 
@@ -79,6 +79,8 @@ const { data: entity, error, isLoading, mutate } = useSWR('/v1/configuration', f
   const { can, me } = useMe()
   // 加入了控制面、配置由控制面下发的节点：整页只读，本机密钥另开侧栏保存
   const managedBy = me?.fleet_node?.config ? me.fleet_node.controller : null
+  // 一主一备里的节点：控制面不再下发配置，本机照常保存，改动与对端双向同步
+  const pair = me?.fleet_node?.pair
   // 非超管拿到的是脱敏后的配置（凭据、账号 Cookie 等为空），只读展示，不能保存
   const editable = can('config.edit') && !managedBy
   const [secretsOpen, setSecretsOpen] = useState(false)
@@ -165,7 +167,11 @@ const { data: entity, error, isLoading, mutate } = useSWR('/v1/configuration', f
       />
       {/* 页头下方占满剩余高度；每个 Tab 面板在内部滚动，页面本身不滚，「保存」始终可见 */}
       <div className={styles.page}>
-        {managedBy ? <ManagedConfigBanner controller={managedBy} canEditSecrets={can('config.edit')} /> : null}
+        {managedBy ? (
+          <ManagedConfigBanner controller={managedBy} canEditSecrets={can('config.edit')} />
+        ) : pair && me?.fleet_node ? (
+          <PairConfigBanner controller={me.fleet_node.controller} pair={pair} />
+        ) : null}
         <Form
           key={formKey}
           className={styles.form}

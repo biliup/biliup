@@ -63,6 +63,10 @@ impl LocalNode {
         }
     }
 
+    pub fn services(&self) -> &ServiceRegister {
+        &self.services
+    }
+
     /// 启用中的「本机」节点 id
     pub fn node_id(&self) -> Option<i64> {
         *self.node_id.lock().unwrap()
@@ -70,6 +74,11 @@ impl LocalNode {
 
     fn state_path(&self) -> PathBuf {
         reconcile::state_path(&self.file)
+    }
+
+    /// 「本机」上哪些行归 Fleet 管（`data/fleet-state.json`）；没启用过时为空
+    pub fn fleet_state(&self) -> reconcile::FleetState {
+        reconcile::read_state(&self.state_path()).unwrap_or_default()
     }
 
     /// 控制面启动时：有 `local-node.json` 就接着跑，按缓存认回托管行后连上来对账

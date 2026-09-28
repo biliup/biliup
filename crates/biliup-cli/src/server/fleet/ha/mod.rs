@@ -2,30 +2,74 @@
 //!
 //! 主机 = 控制面 + 「本机」节点（F5），备机 = 一台被指定为备机的普通节点。主机「本机」持有的房间与模板
 //! 自动镜像给备机；两台对每一场直播交换场次消息，决定「这一场谁投」，保证不出重复稿件、主机离线时不漏投。
+//! H2 起两台双向同步设置（[`member`]），上传主备也可以对调：对调后节点进程跑 [`primary`]、控制面进程跑备机，
+//! 控制面的身份与房间归属不变。
 //!
 //! 录制与投稿流程里只有几行调用（`core/monitor.rs`、`common/download.rs`、`common/upload.rs`）。
 //! 主机的一侧在 [`primary`]，备机的决策在 [`standby`]、接线在 [`agent`]。
-//! 没有配对时 [`ROLE`] 是空的，每处调用只读一次原子变量就返回：不分配、不记日志、不改任何状态。
+//! 没有配对时 [`ROLE`] 是空的，每处调用只读一次原子变量就返回（开录前多读一个「有没有正在加入配对的主播」）：
+//! 不分配、不记日志、不改任何状态。
 
+pub mod adopt;
 pub mod agent;
+pub mod capture;
+pub mod handback;
 #[cfg(test)]
 mod harness;
 pub mod key;
+pub mod member;
+pub mod outbox;
 pub mod pairing;
 pub mod params;
 pub mod primary;
+pub mod rooms;
 pub mod standby;
 pub mod store;
+pub mod sync;
 pub mod upload;
 pub mod wire;
 
 use crate::server::config::{Config, ConfigPatch};
 use crate::server::core::downloader::DownloaderType;
+use crate::server::fleet::protocol::{ControllerMessage, NodeMessage};
 use crate::server::infrastructure::context::Context;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, RwLock};
 use struct_patch::Patch;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
+
+/// 发往配对对端的帧：控制面这一侧发 `ControllerMessage`，节点这一侧发 `NodeMessage`。
+/// 场次消息与同步消息走同一条通道，先后不乱
+#[derive(Debug, Clone)]
+pub enum Link {
+    Controller(mpsc::UnboundedSender<ControllerMessage>),
+    Node(mpsc::UnboundedSender<NodeMessage>),
+}
+
+impl Link {
+    pub fn ha(&self, message: wire::HaMessage) -> bool {
+        match self {
+            Link::Controller(frames) => frames.send(ControllerMessage::Ha(message)).is_ok(),
+            Link::Node(frames) => frames.send(NodeMessage::Ha(message)).is_ok(),
+        }
+    }
+
+    pub fn pair(&self, message: sync::PairMessage) -> bool {
+        match self {
+            Link::Controller(frames) => frames.send(ControllerMessage::Pair(message)).is_ok(),
+            Link::Node(frames) => frames.send(NodeMessage::Pair(message)).is_ok(),
+        }
+    }
+
+    /// 同一条连接
+    pub fn same(&self, other: &Link) -> bool {
+        match (self, other) {
+            (Link::Controller(a), Link::Controller(b)) => a.same_channel(b),
+            (Link::Node(a), Link::Node(b)) => a.same_channel(b),
+            _ => false,
+        }
+    }
+}
 
 /// 本进程在配对里的角色；没配对时为空
 #[derive(Clone)]
@@ -55,6 +99,23 @@ pub(crate) fn standby() -> Option<Arc<agent::Standby>> {
     match role()? {
         Role::Standby(standby) if !standby.retired() => Some(standby),
         Role::Standby(_) | Role::Primary(_) => None,
+    }
+}
+
+/// 本进程是上传主机时的主机（上传主机换到节点之后，节点本地的 `/v1/node/ha`）
+pub(crate) fn primary() -> Option<Arc<primary::Primary>> {
+    match role()? {
+        Role::Primary(primary) => Some(primary),
+        Role::Standby(_) => None,
+    }
+}
+
+/// 本进程有没有做到一半的场次：有就不能换上传主机，返回其中一场的说明
+pub(crate) fn busy() -> Option<String> {
+    match role()? {
+        Role::Primary(primary) => primary.busy(),
+        Role::Standby(standby) if !standby.retired() => standby.busy(),
+        Role::Standby(_) => None,
     }
 }
 
@@ -134,8 +195,12 @@ fn uploads(ctx: &Context) -> bool {
         .is_some_and(|config| !config.is_noop_uploader())
 }
 
-/// 监控循环检测到开播、开录之前（`core/monitor.rs`）
+/// 监控循环检测到开播、开录之前（`core/monitor.rs`）。正在加入配对（[`adopt`]）、解除配对后正在交还的主播
+/// （[`handback`]）先挡着
 pub fn hold_recording(url: &str) -> Option<Hold> {
+    if let Some(hold) = adopt::holding(url) {
+        return Some(hold);
+    }
     match role()? {
         Role::Primary(primary) => primary.hold(url),
         Role::Standby(standby) => standby.hold(url),

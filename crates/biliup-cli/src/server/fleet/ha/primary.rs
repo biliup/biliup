@@ -13,9 +13,8 @@ use super::params::{HaMode, HaParams};
 use super::store::{self, PrimaryState, SessionRecord, Uploader};
 use super::upload::{self, Plan};
 use super::wire::{HaMessage, ReportedSession, ReportedState, SkipReason};
-use super::{Hold, Unit, UnitOutput};
+use super::{Hold, Link, Unit, UnitOutput};
 use crate::server::errors::AppResult;
-use crate::server::fleet::protocol::ControllerMessage;
 use crate::server::fleet::{node, now_ms};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::service_register::ServiceRegister;
@@ -161,6 +160,16 @@ impl PrimaryCore {
 
     pub(crate) fn params(&self) -> HaParams {
         self.params
+    }
+
+    /// 主机这份在录、录完待投或在投的一场（换上传主机之前要等它了结）
+    pub(crate) fn busy(&self) -> Option<&SessionRecord> {
+        self.rows.values().find(|row| {
+            matches!(
+                row.primary_state,
+                PrimaryState::Recording | PrimaryState::Recorded | PrimaryState::Uploading
+            )
+        })
     }
 
     /// 控制面改了模式或参数；已经在进行的场次保持原来的情形
@@ -946,7 +955,7 @@ pub struct Primary {
     rooms: RwLock<HashMap<String, i64>>,
     /// 录制段（地址, 开播时刻）→ 场次键
     keys: Mutex<HashMap<(String, i64), String>>,
-    link: Mutex<Option<mpsc::UnboundedSender<ControllerMessage>>>,
+    link: Mutex<Option<Link>>,
     writer: mpsc::UnboundedSender<Write>,
     gate: watch::Sender<bool>,
     /// 该停掉拉流的段（场次键）
@@ -1031,7 +1040,7 @@ impl Primary {
             match out {
                 Out::Send(message) => {
                     if let Some(link) = link.as_ref() {
-                        let _ = link.send(ControllerMessage::Ha(message));
+                        link.ha(message);
                     }
                 }
                 Out::Save(record) => {
@@ -1073,6 +1082,33 @@ impl Primary {
         self.core.lock().unwrap().params()
     }
 
+    /// 有没有做到一半的场次：有就不能换上传主机，返回其中一场的说明
+    pub(crate) fn busy(&self) -> Option<String> {
+        let core = self.core.lock().unwrap();
+        core.busy().map(|row| {
+            format!(
+                "主机上房间 {} 的一场还没了结（{}）",
+                row.room_id,
+                row.primary_state.as_str()
+            )
+        })
+    }
+
+    /// 节点当上传主机时的 `GET /v1/node/ha`：模式、参数、与备机的连接和内存里的场次（新的在前）
+    pub(crate) fn view(&self) -> serde_json::Value {
+        let core = self.core.lock().unwrap();
+        let mut sessions: Vec<&SessionRecord> = core.rows.values().collect();
+        sessions.sort_by_key(|row| std::cmp::Reverse(row.started_at));
+        serde_json::json!({
+            "role": "primary",
+            "mode": core.mode,
+            "params": core.params,
+            "linked": self.linked(),
+            "reported": core.gate_open(),
+            "sessions": sessions,
+        })
+    }
+
     pub(crate) fn configure(&self, mode: HaMode, params: HaParams) {
         info!(%mode, "HA：配对的模式或参数改了");
         self.update(|core, _| core.configure(mode, params));
@@ -1091,7 +1127,7 @@ impl Primary {
     /// 转给备机；没连着时返回 `false`
     pub(crate) fn forward(&self, message: HaMessage) -> bool {
         match self.link.lock().unwrap().as_ref() {
-            Some(link) => link.send(ControllerMessage::Ha(message)).is_ok(),
+            Some(link) => link.ha(message),
             None => false,
         }
     }
@@ -1104,8 +1140,8 @@ impl Primary {
         self.rooms.read().unwrap().get(url).copied()
     }
 
-    pub(crate) fn connected(&self, outbox: mpsc::UnboundedSender<ControllerMessage>) {
-        *self.link.lock().unwrap() = Some(outbox);
+    pub(crate) fn connected(&self, link: Link) {
+        *self.link.lock().unwrap() = Some(link);
         info!("HA：备机连上了，等它上报场次");
         self.update(|core, now| core.connected(now));
     }
@@ -1264,6 +1300,7 @@ mod tests {
     use super::*;
     use crate::server::fleet::ha::upload::double::{self, Double};
     use crate::server::fleet::ha::wire::ReportedSession;
+    use crate::server::fleet::protocol::ControllerMessage;
 
     const MIN: i64 = 60_000;
     const WINDOW: i64 = 10 * MIN;
@@ -2409,7 +2446,7 @@ mod tests {
             (other.to_string(), 8),
         ]));
         let (outbox, _frames) = mpsc::unbounded_channel();
-        primary.connected(outbox);
+        primary.connected(Link::Controller(outbox));
         primary.standby_message(report(Vec::new()));
         let unit = Unit::of(&context(url, "2026-01-01T00:00:00Z"));
         let unrelated = Unit::of(&context(other, "2026-01-01T00:00:00Z"));
@@ -2420,7 +2457,7 @@ mod tests {
         assert!(!primary.retrying(&unrelated));
 
         let (outbox, _frames) = mpsc::unbounded_channel();
-        primary.connected(outbox);
+        primary.connected(Link::Controller(outbox));
         let key = key::primary_key(7, unit.started_at);
         let taken = unit.started_at + MIN;
         primary.standby_message(report(vec![ReportedSession {
@@ -2527,7 +2564,7 @@ mod tests {
         let url = "https://live.example/7";
         primary.set_rooms(HashMap::from([(url.to_string(), 7)]));
         let (outbox, mut frames) = mpsc::unbounded_channel();
-        primary.connected(outbox);
+        primary.connected(Link::Controller(outbox));
         primary.standby_message(report(Vec::new()));
 
         let ctx = context(url, "2026-01-01T00:00:00Z");
@@ -2858,7 +2895,7 @@ mod tests {
         .unwrap();
         primary.set_rooms(HashMap::from([(url.clone(), 7)]));
         let (outbox, mut frames) = mpsc::unbounded_channel();
-        primary.connected(outbox);
+        primary.connected(Link::Controller(outbox));
         primary.standby_message(report(vec![taken.clone()]));
         let messages = until(&mut frames, "uploaded").await;
         let kinds: Vec<&str> = messages.iter().map(HaMessage::kind).collect();
@@ -2912,7 +2949,7 @@ mod tests {
         .unwrap();
         primary.set_rooms(HashMap::from([(url, 7)]));
         let (outbox, mut frames) = mpsc::unbounded_channel();
-        primary.connected(outbox);
+        primary.connected(Link::Controller(outbox));
         primary.standby_message(report(vec![taken]));
         let messages = until(&mut frames, "uploaded").await;
         assert!(matches!(
@@ -2992,7 +3029,7 @@ mod tests {
         .unwrap();
         primary.set_rooms(rooms);
         let (outbox, mut frames) = mpsc::unbounded_channel();
-        primary.connected(outbox);
+        primary.connected(Link::Controller(outbox));
         primary.standby_message(report(reports));
         let mut skipped = BTreeMap::new();
         while skipped.len() < 3 {

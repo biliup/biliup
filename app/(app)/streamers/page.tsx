@@ -46,7 +46,7 @@ import {
 import StreamerCard, { LiveAvatar } from '@/app/ui/StreamerCard'
 import { CardRateSwitch } from '@/app/ui/LiveRateChart'
 import PageHeader from '../components/PageHeader'
-import { useMe } from '@/app/lib/use-me'
+import { pairLabel, pairPeer, useMe } from '@/app/lib/use-me'
 import FleetRevokedBanner, { revokedHint } from '@/app/ui/FleetRevokedBanner'
 import styles from './page.module.scss'
 
@@ -91,6 +91,12 @@ export default function StreamersPage() {
     ? fleet.local
       ? '这是分派到本机的 Fleet 房间，请到「节点 › 房间」修改'
       : `由控制面 ${fleet.controller} 管理，请到控制面修改`
+    : undefined
+  // 一主一备里的节点：配对里的直播间照常增删改、暂停，改动与对端双向同步
+  const pair = fleet?.pair
+  const pairedIds = useMemo(() => new Set(pair?.streamers ?? []), [pair])
+  const pairHint = pair
+    ? `在两台之间同步：这里的修改会同步到${pairPeer(pair)} ${fleet?.controller}，那边的修改也会同步过来。run 命令与边录边传（sync-downloader）不随配对同步，请到控制面的「节点 › 房间」设置，这里改了会被退回`
     : undefined
   // 被控制面移除后转为本机自管并暂停、等确认恢复的直播间；手动恢复后标记立即消失
   const revokedIds = useMemo(() => new Set(me?.fleet_revoked?.streamers ?? []), [me?.fleet_revoked])
@@ -261,6 +267,13 @@ export default function StreamersPage() {
           </Tag>
         </Tooltip>
       ),
+      pair && pairedIds.has(item.id) && (
+        <Tooltip key="paired" content={pairHint}>
+          <Tag size="small" color="green">
+            {pairLabel(pair)}
+          </Tag>
+        </Tooltip>
+      ),
       awaitingResume(item) && (
         <Tooltip key="revoked" content={revokedHint(me?.fleet_revoked?.local)}>
           <Tag size="small" color="orange">
@@ -294,8 +307,8 @@ export default function StreamersPage() {
   }
   const hasActions = canEdit || canControl || canHooks
   const renderActions = (item: LiveStreamerEntity) =>
-    !hasActions ? null : managedIds.has(item.id) || awaitingResume(item) ? (
-      // ButtonGroup 会给每个子元素注入按钮属性，托管 / 待恢复行里多了一个标签，改用普通容器
+    !hasActions ? null : managedIds.has(item.id) || pairedIds.has(item.id) || awaitingResume(item) ? (
+      // ButtonGroup 会给每个子元素注入按钮属性，托管 / 配对 / 待恢复行里多了一个标签，改用普通容器
       <div className={styles.rowActions}>{actionButtons(item)}</div>
     ) : (
       <ButtonGroup theme="borderless" className={styles.cardActions}>
@@ -325,7 +338,21 @@ export default function StreamersPage() {
         }
       />
       <Content className={styles.content}>
-        {fleet ? (
+        {pair && fleet ? (
+          <Banner
+            type="info"
+            fullMode={false}
+            closeIcon={null}
+            className={styles.fleetBanner}
+            description={
+              `本机与 ${fleet.controller} 组成一主一备，本机现在是${pair.primary ? '上传主机' : '备机'}：标着「${pairLabel(pair)}」的 ${pairedIds.size} 个直播间在两台之间双向同步，在哪台编辑、暂停、删除都可以，同一项两边都改过时以后改的为准；在这里新建的直播间也会加入配对。` +
+              (managedIds.size > 0
+                ? `标着「托管」的 ${managedIds.size} 个直播间由控制面 ${fleet.controller} 管理，这里只能查看。`
+                : '') +
+              '配对前本机已有的直播间不同步。'
+            }
+          />
+        ) : fleet ? (
           <Banner
             type="info"
             fullMode={false}
