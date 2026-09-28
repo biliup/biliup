@@ -12,6 +12,9 @@ features = ["pyo3/extension-module"]
 # alongside the native module, which becomes `stream_gears.stream_gears`.
 module-name = "stream_gears.stream_gears"
 python-packages = ["biliup"]
+# biliup-cli 用 rust-embed 在编译时内嵌前端产物 out/（gitignore，不在 cargo 打包清单里），sdist 不带它 pip 就装不上。
+# maturin 不接受 ..，路径相对本目录（在 sdist 里即根目录）：打 sdist 前先 npm run build && cp -r out crates/stream-gears/out
+include = [{ path = "out/**/*", format = "sdist" }]
 
 [project]
 name = "biliup"
