@@ -1218,6 +1218,7 @@ mod tests {
             Side::Controller,
         )
         .await;
+        super::super::member::tests::stop_watch(&member);
         let (frames, _sent) = tokio::sync::mpsc::unbounded_channel::<NodeMessage>();
         member.link_up(super::super::Link::Node(frames)).await;
 
