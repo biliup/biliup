@@ -13,6 +13,7 @@
 pub mod adopt;
 pub mod agent;
 pub mod capture;
+pub mod handback;
 #[cfg(test)]
 mod harness;
 pub mod key;
@@ -194,7 +195,8 @@ fn uploads(ctx: &Context) -> bool {
         .is_some_and(|config| !config.is_noop_uploader())
 }
 
-/// 监控循环检测到开播、开录之前（`core/monitor.rs`）。正在加入配对的主播（[`adopt`]）先挡着
+/// 监控循环检测到开播、开录之前（`core/monitor.rs`）。正在加入配对（[`adopt`]）、解除配对后正在交还的主播
+/// （[`handback`]）先挡着
 pub fn hold_recording(url: &str) -> Option<Hold> {
     if let Some(hold) = adopt::holding(url) {
         return Some(hold);

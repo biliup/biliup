@@ -201,6 +201,9 @@ impl Member {
             let mut state = member.state.lock().await;
             if !resumed {
                 member.seed(&mut state);
+                if side == Side::Node {
+                    member.remember_local(&mut state).await;
+                }
             }
             member.scan_locked(&mut state).await;
             member.rearm(&state);
@@ -607,6 +610,7 @@ impl Member {
                 stamp,
                 value: Some(config_value(&object, name)),
                 pin: false,
+                returns: false,
             }));
         }
         if let Some(mid) = queued.key.strip_prefix(ACCOUNT) {
@@ -639,6 +643,7 @@ impl Member {
                 stamp,
                 value,
                 pin: file.adoption.pins.contains(&queued.key),
+                returns: file.adoption.adopted.contains(&queued.key),
             }));
         }
         debug!(key = queued.key, "配对同步：不认识的键，不发");
@@ -729,6 +734,9 @@ impl Member {
         let room = edit.key.starts_with(ROOM);
         let (verdict, current, template) = {
             let mut state = self.state.lock().await;
+            if edit.returns {
+                state.file.adoption.returns.insert(edit.key.clone());
+            }
             let book = &mut state.file.book;
             let verdict = book.judge(&edit.key, &edit.stamp, self.primary());
             let current = book.get(&edit.key).and_then(|record| record.fleet);
@@ -1307,6 +1315,7 @@ pub(crate) mod tests {
                 },
                 value: Some(serde_json::json!("05:00:00")),
                 pin: false,
+                returns: false,
             }),
             None,
         )
@@ -1325,6 +1334,7 @@ pub(crate) mod tests {
                 },
                 value: Some(serde_json::json!("not a number")),
                 pin: false,
+                returns: false,
             }),
             None,
         )

@@ -331,6 +331,9 @@ pub struct PairEdit {
     /// 单独加入配对的模板：没有房间用它也留在配对里
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub pin: bool,
+    /// 节点配对之前就有、纳入配对的行：解除配对时交还给节点（[`super::handback`]）
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub returns: bool,
 }
 
 /// 凭据文件的内容只在这里出现：不进日志（`Debug` 抹掉，帧日志也抹掉）、不进控制面库

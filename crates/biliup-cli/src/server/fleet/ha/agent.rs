@@ -7,6 +7,7 @@
 //! 按场次里记下的开播信息重建上下文再投（[`super::upload::run_standby`]）。
 
 use super::adopt;
+use super::handback::NodeHolds;
 use super::key;
 use super::member::{Member, member_for};
 use super::outbox::{self, PairFile};
@@ -713,6 +714,8 @@ pub struct NodeHa {
     managed: HashMap<i64, (String, Option<ConfigPatch>)>,
     /// 与控制面的双向同步（H2）：控制面次版本 ≥ 5、期望状态带 `pair` 时才有
     pair: Option<Arc<Member>>,
+    /// 解除配对后正在交还给本机的房间：交接完之前挡着开录（H2，[`super::handback`]）
+    holds: Option<NodeHolds>,
 }
 
 impl NodeHa {
@@ -735,10 +738,12 @@ impl NodeHa {
             assignment: None,
             managed: HashMap::new(),
             pair: None,
+            holds: None,
         };
         if !ha.enabled {
             return ha;
         }
+        ha.holds = Some(NodeHolds::resume(&ha.data_dir(), controller, &ha.services));
         match load(&ha.path) {
             Some(state) if state.controller != controller => {
                 warn!("{} belongs to another controller", ha.path.display());
@@ -880,10 +885,14 @@ impl NodeHa {
     }
 
     /// 期望状态里的同步版本（落地房间与上报场次之前）：带了 `pair` 就建好同步端、接上连接，
-    /// 先发离线期间排下的修改；不再带（解除配对，或控制面不支持同步）就停下并删掉同步账本
+    /// 先发离线期间排下的修改；不再带（解除配对，或控制面不支持同步）就停下并删掉同步账本。
+    /// 交还中的房间先挡住开录（在解除配对、备机退下之前，免得中间开录一场按普通投稿流程投）
     pub async fn pair(&mut self, desired: &DesiredState, link: &Link) {
         if !self.enabled {
             return;
+        }
+        if let Some(holds) = &mut self.holds {
+            holds.apply(desired);
         }
         if desired.ha.is_none() || desired.pair.is_none() {
             if let Some(member) = self.pair.take() {
@@ -951,8 +960,10 @@ impl NodeHa {
     }
 
     /// 落地期望状态：与控制面同步时本机版本更新的配对行先不动（[`Member::reconcile`]）。
-    /// 控制面的「本机」按控制面的同步端落地（加入配对的本地行原地认下，[`Member::reconcile_local`]）
+    /// 控制面的「本机」按控制面的同步端落地（加入配对的本地行原地认下，[`Member::reconcile_local`]）。
+    /// 交还给本机的行先认下或转成本地行（[`Reconciler::hand_back`]）
     pub async fn reconcile(&self, desired: DesiredState, reconciler: &mut Reconciler) -> Ack {
+        reconciler.hand_back(desired.handback.as_deref());
         match &self.pair {
             Some(member) => member.reconcile(desired, reconciler).await,
             None if !self.enabled => match member_for(&self.services) {
@@ -967,6 +978,9 @@ impl NodeHa {
     pub fn forget_pair(&mut self) {
         if !self.enabled {
             return;
+        }
+        if let Some(holds) = &mut self.holds {
+            holds.forget();
         }
         if let Some(member) = self.pair.take() {
             member.dissolve();

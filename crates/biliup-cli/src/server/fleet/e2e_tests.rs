@@ -2859,3 +2859,212 @@ async fn existing_local_rows_join_the_pair_by_default_or_later_without_a_rebuild
     local.shutdown().await;
     controller.shutdown().await;
 }
+
+/// 解除配对（做法 B）：从备机纳入的主播与模板回到备机、成为它的本地行（带着配对期间在主机上改的设置、
+/// 原来那一行不重建），并从控制面移除；配对期间在备机上新建的主播留在主机、备机上撤掉。
+/// 交接等主机「本机」上那一场投完：这之前备机那一行挡着开录、只有「本机」录，交接之后只有备机录
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn rows_adopted_from_the_standby_go_back_to_it_when_the_pair_is_dissolved() {
+    use super::ha::member::member_for;
+    use super::ha::pairing::{Designate, Pairing};
+    use crate::server::infrastructure::context::WorkerStatus;
+
+    let _role = super::ha::test_guard().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (controller, url, pool) = start_controller(dir.path()).await;
+    let fx = LocalFixture::new(dir.path()).await;
+    let pairing = Arc::new(Pairing::new(fx.services.clone(), dir.path()));
+    controller.attach_ha(pairing.clone());
+    let local = fx.attach(&controller).await;
+    controller.attach_local(local.clone());
+    pairing.resume(&controller, local.node_id()).await;
+    let primary = local.enable(&controller, false).await.unwrap().unwrap();
+    wait_for_node(&controller, primary, true, Duration::from_secs(30)).await;
+
+    let root = dir.path().join("standby");
+    let node_file = root.join("data/node.json");
+    let joined = node::join(
+        &ticket_for(&controller, &pool, &url).await,
+        false,
+        &node_file,
+    )
+    .await
+    .unwrap();
+    let standby = joined.node_id;
+    let s = node_services(&root).await;
+    let managed = ManagedHandle::default();
+    let agent = start_standby(&node_file, &s, &managed).await;
+    wait_for_node(&controller, standby, true, Duration::from_secs(30)).await;
+    let c = fx.services.clone();
+
+    // 备机上已有的主播 a，用备机的模板
+    let (a_url, n_url) = (
+        "https://stuck.example/back-a",
+        "https://stuck.example/back-n",
+    );
+    let t1 = local_template(&s, "备机模板").await;
+    let a = local_streamer(
+        &s,
+        serde_json::json!({ "url": a_url, "remark": "备机A", "upload_streamers_id": t1 }),
+    )
+    .await;
+    let designate: Designate =
+        serde_json::from_value(serde_json::json!({ "standby": standby, "mode": 1 })).unwrap();
+    pairing
+        .designate(&controller, designate)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let fleet_room = |url: &'static str| {
+        let controller = controller.clone();
+        async move {
+            super::assignments::list_rooms(controller.pool())
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|room| room.spec.url == url && room.deleted_at.is_none())
+        }
+    };
+    let on_primary = move |room: Option<super::assignments::Room>| {
+        room.is_some_and(|room| room.node_id == Some(primary))
+    };
+    let paired = |id: i64| {
+        managed
+            .read()
+            .unwrap()
+            .as_ref()
+            .and_then(|view| view.pair.clone())
+            .is_some_and(|pair| pair.streamers.contains(&id))
+    };
+    eventually("a joins the pair", Duration::from_secs(40), || {
+        let c = c.clone();
+        async move {
+            on_primary(fleet_room(a_url).await)
+                && paired(a)
+                && remark_on(&c, a_url).await.as_deref() == Some("备机A")
+        }
+    })
+    .await;
+    let room_a = fleet_room(a_url).await.unwrap();
+
+    // 配对期间：主机上改 a 的备注，备机上新建主播 n
+    let update: super::controller::UpdateRoom = serde_json::from_value(serde_json::json!({
+        "url": a_url, "remark": "主机改的", "template_id": room_a.template_id,
+    }))
+    .unwrap();
+    controller
+        .update_room(room_a.id, update, true)
+        .await
+        .unwrap();
+    let n = local_streamer(
+        &s,
+        serde_json::json!({ "url": n_url, "remark": "备机新建" }),
+    )
+    .await;
+    member_for(&s).expect("备机上有同步端").join_room(n).await;
+    eventually(
+        "the edit and the new streamer converge",
+        Duration::from_secs(40),
+        || {
+            let (s, c) = (s.clone(), c.clone());
+            async move {
+                remark_on(&s, a_url).await.as_deref() == Some("主机改的")
+                    && on_primary(fleet_room(n_url).await)
+                    && paired(n)
+                    && remark_on(&c, n_url).await.as_deref() == Some("备机新建")
+            }
+        },
+    )
+    .await;
+    let worker_a = s.managers.get_room_by_id(a).await.unwrap();
+
+    // 「本机」上 a 的上一场还没投完
+    let local_a = row_by_url(&c, a_url).await.unwrap().id;
+    let busy_a = c.managers.get_room_by_id(local_a).await.unwrap();
+    *busy_a.uploader_status.write().unwrap() = WorkerStatus::Pending;
+
+    assert!(pairing.dissolve(&controller).await.unwrap());
+    let stage = || {
+        let (pairing, controller) = (pairing.clone(), controller.clone());
+        async move {
+            let view = pairing.view(&controller).await.unwrap();
+            view["handback"][standby.to_string().as_str()]["rooms"][room_a.id.to_string().as_str()]
+                ["stage"]
+                .clone()
+        }
+    };
+    eventually(
+        "the standby holds a and drops n",
+        Duration::from_secs(40),
+        || {
+            let s = s.clone();
+            async move { stage().await == "held" && !sorted_urls(&s).await.contains(&n_url.into()) }
+        },
+    )
+    .await;
+    assert!(
+        super::ha::hold_recording(a_url).is_some(),
+        "交还中备机不录 a"
+    );
+    assert!(
+        Arc::ptr_eq(&worker_a, &s.managers.get_room_by_id(a).await.unwrap()),
+        "交还中是原来那一行，监控不重建"
+    );
+    tokio::time::sleep(Duration::from_secs(12)).await;
+    assert_eq!(stage().await, "held", "「本机」上那一场投完之前不交接");
+    assert!(on_primary(fleet_room(a_url).await));
+    assert_eq!(row_by_url(&c, a_url).await.map(|row| row.id), Some(local_a));
+
+    // 投完了：交接
+    *busy_a.uploader_status.write().unwrap() = WorkerStatus::Idle;
+    eventually(
+        "a goes back to the standby",
+        Duration::from_secs(60),
+        || {
+            let (pairing, controller, c) = (pairing.clone(), controller.clone(), c.clone());
+            async move {
+                fleet_room(a_url).await.is_none()
+                    && row_by_url(&c, a_url).await.is_none()
+                    && pairing
+                        .view(&controller)
+                        .await
+                        .unwrap()
+                        .get("handback")
+                        .is_none()
+                    && template_names(&c).await.is_empty()
+            }
+        },
+    )
+    .await;
+    let back = row_by_url(&s, a_url).await.unwrap();
+    assert_eq!((back.id, back.remark.as_str()), (a, "主机改的"));
+    assert_eq!(back.upload_streamers_id, Some(t1));
+    assert!(
+        Arc::ptr_eq(&worker_a, &s.managers.get_room_by_id(a).await.unwrap()),
+        "交接不重建监控"
+    );
+    assert!(
+        super::ha::hold_recording(a_url).is_none(),
+        "交接完备机照常录"
+    );
+    let view = managed.read().unwrap().clone().unwrap();
+    assert!(
+        view.streamers.is_empty() && view.templates.is_empty() && view.pair.is_none(),
+        "a 与它的模板是备机的本地行"
+    );
+    assert_eq!(template_names(&s).await, ["备机模板"]);
+    assert!(controller.templates().await.unwrap().is_empty());
+
+    // 配对期间新建的 n 留在主机
+    assert!(on_primary(fleet_room(n_url).await));
+    assert_eq!(sorted_urls(&c).await, [n_url]);
+    assert_eq!(sorted_urls(&s).await, [a_url]);
+    assert!(!root.join("data/pair-holds.json").exists());
+    assert!(!dir.path().join("pair-handback.json").exists());
+
+    agent.shutdown().await;
+    pairing.shutdown();
+    local.shutdown().await;
+    controller.shutdown().await;
+}

@@ -4,6 +4,7 @@
 //! `u32 大端长度 + JSON`，单帧上限 [`MAX_FRAME`]。主版本号放在 ALPN 里（[`ALPN`]），
 //! 次版本号在 [`Hello::proto`] 里，只增字段不改语义，所以两端都忽略不认识的字段。
 
+use super::ha::handback::Handback;
 use super::ha::sync::{PairMessage, PairState};
 use super::ha::wire::{HaAssignment, HaMessage};
 use super::model::{Account, DesiredRoom, DesiredTemplate};
@@ -130,6 +131,9 @@ pub struct DesiredState {
     /// 与 `ha` 一起、只给次版本 ≥ 5 的配对节点（自次版本 5 起）：镜像房间与模板的同步版本
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pair: Option<PairState>,
+    /// 解除配对后正在交还给这台节点的行（自次版本 5 起，只给那台节点）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handback: Option<Box<Handback>>,
 }
 
 /// 下发给一台节点的配置：Fleet 全局 ⊕ 这台节点的覆盖，只含白名单键（D11），
@@ -840,6 +844,7 @@ mod tests {
             stamp,
             value: Some(serde_json::json!("01:00:00")),
             pin: false,
+            returns: false,
         }));
         let json = serde_json::to_value(&edit).unwrap();
         assert_eq!(json["type"], "pair");

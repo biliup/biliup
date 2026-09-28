@@ -88,6 +88,31 @@ pub struct Adoption {
     pub hint_rooms: BTreeMap<i64, i64>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub hint_templates: BTreeMap<i64, i64>,
+    /// 节点：第一次配对时这台机器上的本地行（不含 Fleet 托管行）
+    #[serde(default, skip_serializing_if = "Before::is_empty")]
+    pub before: Before,
+    /// 节点：纳入配对的、配对之前就在这台上的行的账本键（发出时带 `returns`，解除配对时交还给这台）
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub adopted: BTreeSet<String>,
+    /// 控制面：节点标了 `returns` 的账本键（[`super::handback`]）
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub returns: BTreeSet<String>,
+}
+
+/// 节点第一次配对时这台机器上的本地行
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Before {
+    /// 本地主播 id → 地址。库里的 id 会被复用，地址也对得上才算配对之前的那一行
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub rooms: BTreeMap<i64, String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub templates: BTreeSet<i64>,
+}
+
+impl Before {
+    fn is_empty(&self) -> bool {
+        self.rooms.is_empty() && self.templates.is_empty()
+    }
 }
 
 impl Adoption {
@@ -151,22 +176,70 @@ impl Joining {
     }
 }
 
+/// 谁挡着开录。都按这台机器的 [`identity`] 分开，同一进程里的两台（测试）互不放开对方挡的
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum HoldBy {
+    /// 同步端：正在加入配对
+    Join(usize),
+    /// 解除配对后主机「本机」：正在把主播交还给备机（[`super::handback`]）
+    Leaving(usize),
+    /// 解除配对后的备机：主播正在交还回来，主机那边交接完之前不录
+    Returning(usize),
+}
+
+impl HoldBy {
+    fn reason(self) -> &'static str {
+        match self {
+            HoldBy::Join(_) => "正在加入配对：两台都按配对的房间落地之后再录",
+            HoldBy::Leaving(_) => "配对已解除，这个主播正在交还给备机：交接完之后由备机录",
+            HoldBy::Returning(_) => {
+                "配对已解除，这个主播正在交还给这台：主机那边这一场录完投完、交接完之后再录"
+            }
+        }
+    }
+}
+
 static HOLDING: AtomicBool = AtomicBool::new(false);
-/// 挡着开录的地址与挡它的同步端（[`identity`]）
-static HOLDS: Mutex<Vec<(usize, String)>> = Mutex::new(Vec::new());
+/// 挡着开录的地址与挡它的
+static HOLDS: Mutex<Vec<(HoldBy, String)>> = Mutex::new(Vec::new());
 /// 开始加入配对的主播：（同步端, 地址）→ 最近一次开始挡开录的时刻（[`joined_after`]）
 static JOINED: Mutex<BTreeMap<(usize, String), i64>> = Mutex::new(BTreeMap::new());
 
-/// 监控循环开录之前（[`super::hold_recording`]）：正在加入配对的主播先不录。没在加入时只读一次原子变量
+/// 监控循环开录之前（[`super::hold_recording`]）：正在加入配对、正在交还的主播先不录。
+/// 都没有时只读一次原子变量
 pub(super) fn holding(url: &str) -> Option<Hold> {
     if !HOLDING.load(Ordering::Acquire) {
         return None;
     }
-    let held = HOLDS.lock().unwrap().iter().any(|(_, held)| held == url);
-    held.then(|| Hold {
-        reason: "正在加入配对：两台都按配对的房间落地之后再录".into(),
-        quick: true,
+    let by = HOLDS
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|(_, held)| held == url)
+        .map(|(by, _)| *by)?;
+    Some(Hold {
+        reason: by.reason().into(),
+        // 交还回来的要等主机那边录完投完，可能很久，按检测周期再看
+        quick: !matches!(by, HoldBy::Returning(_)),
     })
+}
+
+/// 按地址挡住开录（同一个挡的重复调用只算一次）
+pub(super) fn block(by: HoldBy, url: &str) {
+    let mut holds = HOLDS.lock().unwrap();
+    if !holds
+        .iter()
+        .any(|(held_by, held)| *held_by == by && held == url)
+    {
+        holds.push((by, url.to_string()));
+    }
+    HOLDING.store(true, Ordering::Release);
+}
+
+pub(super) fn unblock(by: HoldBy, url: &str) {
+    let mut holds = HOLDS.lock().unwrap();
+    holds.retain(|(held_by, held)| !(*held_by == by && held == url));
+    HOLDING.store(!holds.is_empty(), Ordering::Release);
 }
 
 /// 备机投稿流程开始时（[`super::agent::Standby::plan`]）：这一段开录之后这台机器才开始把这个地址加入配对，
@@ -185,24 +258,18 @@ pub(super) fn hold(owner: usize, url: &str, since: i64) {
         joined.retain(|_, at| *at >= since - UNIT_KEEP_MS);
         joined.insert((owner, url.to_string()), since);
     }
-    let mut holds = HOLDS.lock().unwrap();
-    if !holds.iter().any(|(by, held)| *by == owner && held == url) {
-        holds.push((owner, url.to_string()));
-    }
-    HOLDING.store(true, Ordering::Release);
+    block(HoldBy::Join(owner), url);
 }
 
 fn release(owner: usize, url: &str) {
-    let mut holds = HOLDS.lock().unwrap();
-    holds.retain(|(by, held)| !(*by == owner && held == url));
-    HOLDING.store(!holds.is_empty(), Ordering::Release);
+    unblock(HoldBy::Join(owner), url);
 }
 
-/// 同步端停下：它挡的都放开，加入记录也清掉
+/// 同步端停下：它为加入配对挡的都放开，加入记录也清掉（交还挡的不在这里放）
 pub(super) fn release_all(owner: usize) {
     JOINED.lock().unwrap().retain(|(by, _), _| *by != owner);
     let mut holds = HOLDS.lock().unwrap();
-    holds.retain(|(by, _)| *by != owner);
+    holds.retain(|(by, _)| *by != HoldBy::Join(owner));
     HOLDING.store(!holds.is_empty(), Ordering::Release);
 }
 
@@ -212,7 +279,7 @@ pub fn fleet_state(dir: &Path) -> FleetState {
 }
 
 /// 正在录，或上一场还没投完
-async fn busy(services: &ServiceRegister, local: i64) -> bool {
+pub(super) async fn busy(services: &ServiceRegister, local: i64) -> bool {
     let Some(worker) = services.managers.get_room_by_id(local).await else {
         return false;
     };
@@ -465,6 +532,34 @@ pub fn select_templates(
 }
 
 impl Member {
+    /// 节点第一次配对时：记下这台机器上此刻的本地主播与模板（Fleet 托管行不算）。之后纳入配对的这些行
+    /// 解除配对时交还给这台（[`super::handback`]）；配对期间在这台上新建的不在里面，解除配对后留在主机
+    pub(super) async fn remember_local(&self, state: &mut State) {
+        let fleet = fleet_state(&self.dir);
+        let managed_rooms: BTreeSet<i64> = fleet.rooms.values().map(|room| room.local_id).collect();
+        let managed_templates: BTreeSet<i64> =
+            fleet.templates.values().map(|t| t.local_id).collect();
+        let rooms = LiveStreamer::select()
+            .fetch_all(&self.services.pool)
+            .await
+            .unwrap_or_default();
+        let templates = UploadStreamer::select()
+            .fetch_all(&self.services.pool)
+            .await
+            .unwrap_or_default();
+        let before = &mut state.file.adoption.before;
+        before.rooms = rooms
+            .into_iter()
+            .filter(|row| !managed_rooms.contains(&row.id))
+            .map(|row| (row.id, row.url))
+            .collect();
+        before.templates = templates
+            .into_iter()
+            .map(|row| row.id)
+            .filter(|id| !managed_templates.contains(id))
+            .collect();
+    }
+
     /// 重启后接着挡住正在加入的主播
     pub(super) fn rearm(&self, state: &State) {
         let owner = identity(&self.services);
@@ -635,6 +730,9 @@ impl Member {
                 Some(key) => {
                     info!(streamer = local, key, "配对：本机的主播空闲，加入配对");
                     let adoption = &mut state.file.adoption;
+                    if adoption.before.rooms.get(&local) == Some(&joining.url) {
+                        adoption.adopted.insert(key.clone());
+                    }
                     adoption.rooms.remove(&local);
                     adoption.refused_rooms.remove(&local);
                     if let Some(entry) = adoption.joining.get_mut(&local) {

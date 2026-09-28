@@ -479,7 +479,7 @@ impl Controller {
                 return;
             }
         };
-        let (ha, pair) = match self.ha() {
+        let (ha, pair, handback) = match self.ha() {
             Some(pairing) => {
                 match pairing
                     .desired(self, node, proto, &mut rooms, &mut templates)
@@ -492,7 +492,7 @@ impl Controller {
                     }
                 }
             }
-            None => (None, None),
+            None => (None, None, None),
         };
         // 次版本 1 的节点照常收房间，配置不发；「本机」节点用控制面自己的配置，也不发；
         // 与控制面双向同步的配对节点，配置随同步走（H2），也不发
@@ -507,6 +507,9 @@ impl Controller {
         } else {
             None
         };
+        if let (Some(pairing), Some(handback)) = (self.ha(), &handback) {
+            pairing.handback_sent(node, handback, version);
+        }
         let message = ControllerMessage::DesiredState(DesiredState {
             version,
             rooms,
@@ -514,6 +517,7 @@ impl Controller {
             config,
             ha,
             pair,
+            handback: handback.map(Box::new),
         });
         if let Some(live) = self.live.lock().unwrap().get_mut(&node)
             && live.outbox.send(message).is_ok()
@@ -524,8 +528,9 @@ impl Controller {
 
     pub async fn push_many(&self, nodes: impl IntoIterator<Item = Option<i64>>) {
         let mut nodes: Vec<i64> = nodes.into_iter().flatten().collect();
-        if let Some(standby) = self.ha().and_then(|pairing| pairing.mirror_target(&nodes)) {
-            nodes.push(standby);
+        if let Some(pairing) = self.ha() {
+            let targets = pairing.mirror_target(&nodes);
+            nodes.extend(targets);
         }
         nodes.sort_unstable();
         nodes.dedup();
@@ -908,7 +913,7 @@ impl Controller {
             node.apply_ack(&ack, now);
         }
         if let Some(pairing) = self.ha() {
-            pairing.node_acked(self, id).await;
+            pairing.node_acked(self, id, ack.version).await;
         }
         let held: Vec<i64> = ack.held.iter().map(|room| room.id).collect();
         let version = i64::try_from(ack.version).unwrap_or(i64::MAX);
@@ -1130,6 +1135,7 @@ mod tests {
             stamp,
             value: Some(serde_json::json!({ "bili_cookie": "SESSDATA=PLACEHOLDER" })),
             pin: false,
+            returns: false,
         }));
         let logged = redacted_frame(&serde_json::to_vec(&edit).unwrap());
         assert!(!logged.contains("PLACEHOLDER"), "{logged}");

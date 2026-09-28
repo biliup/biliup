@@ -8,6 +8,7 @@
 
 use super::accounts;
 use super::guard::{Managed, ManagedHandle, PairLocal};
+use super::ha::handback::Handback;
 use super::model::{DesiredRoom, RoomSpec, TemplateSpec};
 use super::node_config::{self, ManagedConfig};
 use super::now_ms;
@@ -533,6 +534,42 @@ impl Reconciler {
         self.adopted.rooms = rooms.keys().copied().collect();
         self.adopted.templates = templates.keys().copied().collect();
         self.pinned = pinned;
+    }
+
+    /// 解除配对后交还给本机的行（H2，落地期望状态之前）：还在交还的像配对里的行一样先比一比再落地
+    /// （本来就是本机的那一行，不重建监控），没有房间用的模板也留着；交完的转成本地行，库里的行与监控不动
+    pub fn hand_back(&mut self, handback: Option<&Handback>) {
+        let Some(handback) = handback else {
+            return;
+        };
+        self.adopted.rooms.extend(&handback.hold);
+        self.adopted.templates.extend(&handback.hold_templates);
+        self.pinned.extend(&handback.hold_templates);
+        let mut changed = false;
+        for id in &handback.rooms {
+            if let Some(room) = self.state.rooms.remove(id) {
+                info!(room = id, local = room.local_id, url = %room.url, "fleet room handed back as a local streamer");
+                changed = true;
+            }
+        }
+        for id in &handback.templates {
+            if let Some(template) = self.state.templates.remove(id) {
+                info!(
+                    template = id,
+                    local = template.local_id,
+                    "fleet template handed back as a local template"
+                );
+                changed = true;
+            }
+        }
+        if let Some(rows) = self.state.pair.as_mut() {
+            rows.rooms.retain(|id| !handback.rooms.contains(id));
+            rows.templates.retain(|id| !handback.templates.contains(id));
+        }
+        if changed {
+            self.persist();
+            self.publish();
+        }
     }
 
     /// 与控制面双向同步时的落地：`plan` 里本机更新的行不动，本机新建的行按 id 认下；
@@ -1492,6 +1529,73 @@ mod tests {
         assert_eq!(streamers.len(), 1);
         assert_eq!(streamers[0].remark, "本地");
         assert!(reconciler.state().templates.is_empty());
+    }
+
+    /// 解除配对后交还给本机的行：交还中按原来那一行落地（本机改过、与期望状态一样时不重建监控），没有房间用的
+    /// 模板也留着；交完的转成本地行，之后的期望状态不再带它们也不删、监控不动
+    #[tokio::test]
+    async fn rows_handed_back_stay_in_place_and_turn_local() {
+        use super::super::ha::handback::Handback;
+        let f = Fixture::new().await;
+        let mut reconciler = f.reconciler(false).await;
+        let url = "https://stuck.example/back";
+        reconciler
+            .apply(desired(
+                1,
+                vec![room(1, url, Some(7))],
+                vec![template(7, None)],
+            ))
+            .await;
+        let local = reconciler.state().rooms[&1].local_id;
+        let mut row = f.streamers().await.remove(0);
+        row.remark = "备机改的".into();
+        update_streamer(&f.services, row).await.unwrap();
+        let worker = f.services.managers.get_room_by_id(local).await.unwrap();
+
+        let edited: DesiredRoom = serde_json::from_value(json!({
+            "id": 1, "epoch": 1, "template_id": 7, "url": url, "remark": "备机改的",
+        }))
+        .unwrap();
+        let hold = Handback {
+            hold: vec![1],
+            hold_templates: vec![8],
+            ..Handback::default()
+        };
+        reconciler.hand_back(Some(&hold));
+        reconciler
+            .apply(desired(
+                2,
+                vec![edited.clone()],
+                vec![template(7, None), template(8, None)],
+            ))
+            .await;
+        let same = f.services.managers.get_room_by_id(local).await.unwrap();
+        assert!(
+            Arc::ptr_eq(&worker, &same),
+            "交还中按原来那一行认下，不重建监控"
+        );
+        assert_eq!(f.templates().await.len(), 2, "没有房间用的交还模板也留着");
+
+        let released = Handback {
+            rooms: vec![1],
+            templates: vec![7, 8],
+            ..Handback::default()
+        };
+        reconciler.hand_back(Some(&released));
+        assert!(reconciler.state().rooms.is_empty() && reconciler.state().templates.is_empty());
+        reconciler.apply(desired(3, vec![], vec![])).await;
+        let streamers = f.streamers().await;
+        assert_eq!(streamers.len(), 1);
+        assert_eq!(
+            (streamers[0].id, streamers[0].remark.as_str()),
+            (local, "备机改的")
+        );
+        assert_eq!(f.templates().await.len(), 2);
+        let same = f.services.managers.get_room_by_id(local).await.unwrap();
+        assert!(Arc::ptr_eq(&worker, &same), "转成本地行，监控不动");
+        let managed = f.managed.read().unwrap().clone().unwrap();
+        assert!(managed.streamers.is_empty() && managed.templates.is_empty());
+        reconciler.hand_back(None);
     }
 
     #[tokio::test]

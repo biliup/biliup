@@ -13,9 +13,12 @@
 //! 上传主备可以对调（[`Pairing::switch`]，H2）：两台都在线、各自没有做到一半的场次时，控制面把 `ha_pair` 的
 //! 上传主机改成那台节点，自己改跑备机（[`Standby`]，场次记在 `data/ha-state.json`），再给节点下发带
 //! `leader` 的配对。控制面仍是控制面、房间仍归「本机」节点，只是「这一场谁先投」换了过来。
+//!
+//! 解除配对时，从备机纳入配对的行交还给备机、从控制面移除，配对期间新建的行留在主机（[`super::handback`]）。
 
 use super::adopt;
 use super::agent::{self, Mirrored, STATE_FILE_NAME, Standby};
+use super::handback::{self, Handback, Handbacks};
 use super::member::Member;
 use super::params::{HaMode, HaParams};
 use super::primary::Primary;
@@ -71,6 +74,8 @@ pub struct Pairing {
     /// 问节点本地行清单还没回话的：（节点, 问的 id）→ 等回话的
     inventories: Mutex<HashMap<(i64, u64), oneshot::Sender<Inventory>>>,
     next_ask: AtomicU64,
+    /// 解除配对后正在交还给备机的行（`data/pair-handback.json`，[`handback`]）
+    handback: Handbacks,
 }
 
 /// 生效中的配对
@@ -405,6 +410,7 @@ fn switch_refusal(
 impl Pairing {
     pub fn new(services: ServiceRegister, dir: &Path) -> Self {
         Pairing {
+            handback: Handbacks::new(dir, &services),
             services,
             dir: dir.to_path_buf(),
             active: Mutex::default(),
@@ -478,9 +484,11 @@ impl Pairing {
         proto >= PAIR_SINCE && self.member_for(node).is_some()
     }
 
-    /// 节点应答了期望状态（`Controller::ack`）。配对节点这时已经按带 `pair` 的期望状态建好了同步端，
-    /// 控制面这边接上连接、发出排着的修改；控制面当备机时再上报手里的场次（节点这时已经起好了主机）
-    pub async fn node_acked(&self, controller: &Controller, node: i64) {
+    /// 节点应答了期望状态 `version`（`Controller::ack`）。配对节点这时已经按带 `pair` 的期望状态建好了同步端，
+    /// 控制面这边接上连接、发出排着的修改；控制面当备机时再上报手里的场次（节点这时已经起好了主机）。
+    /// 交还中的节点：确认它落地了带着的那一步
+    pub async fn node_acked(&self, controller: &Controller, node: i64, version: u64) {
+        self.handback.acked(node, version);
         let Some(active) = self.active().filter(|a| a.pair.standby_node_id == node) else {
             return;
         };
@@ -663,6 +671,7 @@ impl Pairing {
 
     /// 控制面启动时（「本机」节点恢复之后，`local` 是它的 id）。载入之后才给备机下发期望状态
     pub async fn resume(self: &Arc<Self>, controller: &Arc<Controller>, local: Option<i64>) {
+        self.handback.load();
         self.load(controller, local).await;
         self.ready.send_replace(true);
         let task = tokio::spawn(watch_config(
@@ -803,7 +812,8 @@ impl Pairing {
 
     /// 给节点下发期望状态时（`Controller::push_locked`）。主机「本机」：刷新钩子认的房间；
     /// 次版本 ≥ 4 的备机：加上镜像的房间与模板，返回要带的 [`HaAssignment`]，次版本 ≥ 5 时再带上
-    /// 同步版本（[`PairState`]）；其余节点原样
+    /// 同步版本（[`PairState`]）；解除配对后交还中的节点：加上还在交还的房间与模板，带上 [`Handback`]；
+    /// 其余节点原样
     pub async fn desired(
         &self,
         controller: &Controller,
@@ -811,8 +821,31 @@ impl Pairing {
         proto: u32,
         rooms: &mut Vec<DesiredRoom>,
         templates: &mut Vec<DesiredTemplate>,
-    ) -> AppResult<(Option<HaAssignment>, Option<PairState>)> {
+    ) -> AppResult<(Option<HaAssignment>, Option<PairState>, Option<Handback>)> {
         self.wait_ready().await;
+        let (ha, pair) = self
+            .pair_desired(controller, node, proto, rooms, templates)
+            .await?;
+        let handback = self
+            .handback
+            .desired(controller.pool(), node, proto, rooms, templates)
+            .await?;
+        Ok((ha, pair, handback))
+    }
+
+    /// 带着 `handback` 的期望状态 `version` 发给了 `node`（`Controller::push_locked`）
+    pub fn handback_sent(&self, node: i64, handback: &Handback, version: u64) {
+        self.handback.sent(node, handback, version);
+    }
+
+    async fn pair_desired(
+        &self,
+        controller: &Controller,
+        node: i64,
+        proto: u32,
+        rooms: &mut Vec<DesiredRoom>,
+        templates: &mut Vec<DesiredTemplate>,
+    ) -> AppResult<(Option<HaAssignment>, Option<PairState>)> {
         let Some(active) = self.active() else {
             return Ok((None, None));
         };
@@ -874,13 +907,16 @@ impl Pairing {
         })
     }
 
-    /// 要给主机「本机」重发期望状态时，备机的镜像也跟着重发
-    pub fn mirror_target(&self, nodes: &[i64]) -> Option<i64> {
+    /// 要给主机「本机」重发期望状态时，备机的镜像也跟着重发；交还中、还挡着开录的节点也重发
+    pub fn mirror_target(&self, nodes: &[i64]) -> Vec<i64> {
+        let mut targets = self.handback.targets(nodes);
         let active = self.active.lock().unwrap();
-        let pair = &active.as_ref()?.pair;
-        nodes
-            .contains(&pair.primary_node_id)
-            .then_some(pair.standby_node_id)
+        if let Some(pair) = active.as_ref().map(|active| &active.pair)
+            && nodes.contains(&pair.primary_node_id)
+        {
+            targets.push(pair.standby_node_id);
+        }
+        targets
     }
 
     /// 指定备机、改模式或参数。备机已经连着时先接上主机，再给它下发带配对的期望状态。
@@ -1178,6 +1214,17 @@ impl Pairing {
         }
     }
 
+    /// 解除配对后交还给备机的行往前走一步（与加入配对同一个周期，[`Handbacks::tick`]）
+    pub async fn handback_tick(&self, controller: &Controller) {
+        let push = self
+            .handback
+            .tick(controller, &self.services, now_ms())
+            .await;
+        if !push.is_empty() {
+            controller.push_many(push.into_iter().map(Some)).await;
+        }
+    }
+
     async fn designate_locked(
         &self,
         controller: &Controller,
@@ -1234,6 +1281,12 @@ impl Pairing {
                     let _ = store::clear_pair(pool).await;
                     self.deactivate(true);
                     return Err(e);
+                }
+                let (rooms, templates) = self.handback.cancel(pair.standby_node_id);
+                if let Some(active) = self.active()
+                    && !(rooms.is_empty() && templates.is_empty())
+                {
+                    active.member.mark_returns(&rooms, &templates).await;
                 }
                 if let Some((proto, outbox)) = &link {
                     self.node_connected(pair.standby_node_id, *proto, outbox);
@@ -1330,12 +1383,29 @@ impl Pairing {
         Ok(pair)
     }
 
-    /// 解除配对：主机停下，给备机下发不带配对、不带镜像房间的期望状态。本来就没有配对时返回 `false`
+    /// 解除配对：主机停下，给备机下发不带配对、不带镜像房间的期望状态。从备机纳入配对的行交还给备机
+    /// （[`handback`]：交还中的房间仍在它的期望状态里、挡着开录，主机那边空闲之后交接）。
+    /// 本来就没有配对时返回 `false`
     pub async fn dissolve(&self, controller: &Controller) -> AppResult<bool> {
         self.wait_ready().await;
         let _busy = self.busy.lock().await;
         let pair = store::pair(controller.pool()).await?;
+        let returning = match self.active() {
+            Some(active) if pair.is_some() => Some((
+                active.pair.standby_node_id,
+                handback::collect(
+                    controller.pool(),
+                    &active.member,
+                    active.pair.primary_node_id,
+                )
+                .await?,
+            )),
+            _ => None,
+        };
         store::clear_pair(controller.pool()).await?;
+        if let Some((node, returning)) = returning {
+            self.handback.start(node, returning);
+        }
         self.deactivate(true);
         let Some(pair) = pair else {
             return Ok(false);
@@ -1344,9 +1414,10 @@ impl Pairing {
         Ok(true)
     }
 
-    /// 节点被移除（吊销）时：它在配对里就解除配对（之后的全量下发会让备机解除）
+    /// 节点被移除（吊销）时：它在配对里就解除配对（之后的全量下发会让备机解除）；交还给它的行不再交还，留在主机
     pub async fn node_removed(&self, controller: &Controller, node: i64) {
         let _busy = self.busy.lock().await;
+        self.handback.forget(node);
         match store::pair(controller.pool()).await {
             Ok(Some(pair)) if pair.primary_node_id == node || pair.standby_node_id == node => {
                 if let Err(e) = store::clear_pair(controller.pool()).await {
@@ -1385,7 +1456,7 @@ impl Pairing {
     }
 
     /// `GET /v1/fleet/ha`。`standby` 是配对里那台节点（机器身份，与此刻谁上传无关），`leader` 是此刻的上传主机；
-    /// 控制面当备机时 `local_standby` 是它手里的场次
+    /// 控制面当备机时 `local_standby` 是它手里的场次；解除配对后还有没交还完的行时 `handback` 是节点 id → 那些行
     pub async fn view(&self, controller: &Controller) -> AppResult<Value> {
         let pool = controller.pool();
         let pair = store::pair(pool).await?;
@@ -1421,7 +1492,7 @@ impl Pairing {
             _ => Value::Null,
         };
         let sessions = store::recent_sessions(pool, RECENT_SESSIONS).await?;
-        Ok(json!({
+        let mut view = json!({
             "pair": pair,
             "active": active.is_some(),
             "local_node": local,
@@ -1434,7 +1505,12 @@ impl Pairing {
             "excluded": excluded,
             "sessions": sessions,
             "local_standby": local_standby,
-        }))
+        });
+        // 没有交还中的行时不带，与以前逐字相同
+        if let Some(handback) = self.handback.view() {
+            view["handback"] = handback;
+        }
+        Ok(view)
     }
 
     pub fn shutdown(&self) {
@@ -1450,7 +1526,7 @@ impl Pairing {
     }
 }
 
-/// 控制面的配置改了就重发主机与备机的期望状态；定时让「本机」上要加入配对的本地行往前走
+/// 控制面的配置改了就重发主机与备机的期望状态；定时让「本机」上要加入配对的本地行、解除配对后交还给备机的行往前走
 async fn watch_config(pairing: Weak<Pairing>, controller: Weak<Controller>) {
     let mut changes = super::config_changes();
     let mut ticker = tokio::time::interval(ADOPT_TICK);
@@ -1467,6 +1543,7 @@ async fn watch_config(pairing: Weak<Pairing>, controller: Weak<Controller>) {
         };
         if !changed {
             pairing.adopt_tick(&controller).await;
+            pairing.handback_tick(&controller).await;
             continue;
         }
         if let Some(active) = pairing.active() {

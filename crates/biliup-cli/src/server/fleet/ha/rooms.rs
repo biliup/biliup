@@ -314,6 +314,9 @@ async fn join_template(
     if let Some(record) = file.book.get_mut(&key) {
         record.local = Some(local);
     }
+    if file.adoption.before.templates.contains(&local) {
+        file.adoption.adopted.insert(key.clone());
+    }
     file.enqueue(&key);
     info!(template = local, "配对同步：房间用的本机模板加入配对");
     Some(uid)
