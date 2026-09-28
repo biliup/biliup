@@ -7,6 +7,7 @@ use super::controller::{
 use super::guard::ManagedHandle;
 use super::local::LocalNode;
 use super::node::{self, NodeAgent};
+use super::protocol::OFFLINE_AFTER;
 use super::relay::{EmbeddedRelay, FleetAccess};
 use super::revoked::{Revoked, RevokedHandle, revoked_path};
 use super::ticket::JoinTicket;
@@ -81,6 +82,12 @@ where
         );
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
+}
+
+/// 经配对备机连接的等待：这条连接可能停顿一次，节点读控制面的帧读到一半被打断会丢掉这半帧、之后不收不发，
+/// 直到控制面 [`OFFLINE_AFTER`] 收不到心跳把它断开、它重连。在平常要等的秒数上多留出这一段（重连再留 15 秒）
+fn via_link(secs: u64) -> Duration {
+    Duration::from_secs(secs) + OFFLINE_AFTER + Duration::from_secs(15)
 }
 
 async fn local_urls(services: &ServiceRegister) -> Vec<String> {
@@ -1880,27 +1887,23 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
             .and_then(|managed| managed.pair.clone())
             .is_some_and(|pair| pair.streamers.contains(&id))
     };
-    eventually(
-        "the mirror is a paired row",
-        Duration::from_secs(20),
-        || {
-            let (s, managed) = (s.clone(), standby_managed.clone());
-            async move {
-                let Some(row) = row_by_url(&s, m).await else {
-                    return false;
-                };
-                let Some(member) = member_for(&s) else {
-                    return false;
-                };
-                paired_row(managed, row.id)
-                    && member
-                        .book()
-                        .await
-                        .key_of_local(super::ha::sync::ROOM, row.id)
-                        .is_some()
-            }
-        },
-    )
+    eventually("the mirror is a paired row", via_link(20), || {
+        let (s, managed) = (s.clone(), standby_managed.clone());
+        async move {
+            let Some(row) = row_by_url(&s, m).await else {
+                return false;
+            };
+            let Some(member) = member_for(&s) else {
+                return false;
+            };
+            paired_row(managed, row.id)
+                && member
+                    .book()
+                    .await
+                    .key_of_local(super::ha::sync::ROOM, row.id)
+                    .is_some()
+        }
+    })
     .await;
     let row = row_by_url(&s, m).await.unwrap();
     assert!(
@@ -1926,7 +1929,7 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
     let converged = |what: &'static str, remark: &'static str| {
         let (c, s, fleet_room) = (c.clone(), s.clone(), fleet_room);
         async move {
-            eventually(what, Duration::from_secs(30), || {
+            eventually(what, via_link(30), || {
                 let (c, s) = (c.clone(), s.clone());
                 async move {
                     fleet_room(mirrored.id)
@@ -1979,11 +1982,12 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
         },
     )
     .await;
+    landed(&member()).await;
     toggle_pause(&s.managers, local_id).await;
     member().scan().await;
     eventually(
         "a standby pause reaches the controller",
-        Duration::from_secs(20),
+        via_link(20),
         || async move {
             fleet_room(mirrored.id)
                 .await
@@ -1994,7 +1998,7 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
     controller.pause_room(mirrored.id, false).await.unwrap();
     eventually(
         "the controller resumes it on the standby",
-        Duration::from_secs(20),
+        via_link(20),
         || {
             let s = s.clone();
             async move {
@@ -2018,7 +2022,7 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
     member().join_room(created.id).await;
     eventually(
         "the new streamer becomes a fleet room",
-        Duration::from_secs(30),
+        via_link(30),
         || {
             let (c, controller, managed) = (c.clone(), controller.clone(), standby_managed.clone());
             async move {
@@ -2048,13 +2052,14 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
     );
 
     // 备机删掉：控制面的房间与主机的行跟着删
+    landed(&member()).await;
     delete_streamer(&s.pool, &s.managers, created.id)
         .await
         .unwrap();
     member().scan().await;
     eventually(
         "a standby delete reaches the controller",
-        Duration::from_secs(30),
+        via_link(30),
         || {
             let (c, controller) = (c.clone(), controller.clone());
             async move {
@@ -2089,7 +2094,7 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
     // 重连后备机先重发队列、后应答期望状态：控制面的应答不能因为还没接上同步连接而丢掉
     eventually(
         "the controller acknowledges the replayed queue",
-        Duration::from_secs(20),
+        via_link(20),
         || {
             let s = s.clone();
             async move {
@@ -2141,7 +2146,7 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
     away.scan().await;
     away.stop();
     agent = start_standby(&standby_file, &s, &standby_managed).await;
-    eventually("a later delete wins", Duration::from_secs(30), || {
+    eventually("a later delete wins", via_link(30), || {
         let (c, s, fleet_room) = (c.clone(), s.clone(), fleet_room);
         async move {
             fleet_room(mirrored.id).await.is_none()
@@ -2159,17 +2164,13 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
         .unwrap();
     member().scan().await;
     let received = dir.path().join("5151.json");
-    eventually(
-        "the credential reaches the primary",
-        Duration::from_secs(20),
-        || {
-            let received = received.clone();
-            async move {
-                std::fs::read_to_string(&received)
-                    .is_ok_and(|text| text.contains("PLACEHOLDER-ACCESS-e2e"))
-            }
-        },
-    )
+    eventually("the credential reaches the primary", via_link(20), || {
+        let received = received.clone();
+        async move {
+            std::fs::read_to_string(&received)
+                .is_ok_and(|text| text.contains("PLACEHOLDER-ACCESS-e2e"))
+        }
+    })
     .await;
     let registered: Vec<String> =
         sqlx::query_scalar("SELECT value FROM configuration WHERE key = 'bilibili-cookies'")
@@ -2192,11 +2193,9 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
         }
     }
     // 两边面板与账号页读到的账号同步情况：只有个数与时刻，没有凭据内容与路径
-    eventually(
-        "both sides count the account",
-        Duration::from_secs(20),
-        || async { member().pending().await == 0 },
-    )
+    eventually("both sides count the account", via_link(20), || async {
+        member().pending().await == 0
+    })
     .await;
     let (status, node_view) =
         node_ha_request(&s, Method::GET, "/v1/node/ha", serde_json::Value::Null).await;
@@ -2234,6 +2233,12 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
     pairing.shutdown();
     local.shutdown().await;
     controller.shutdown().await;
+}
+
+/// 等备机上正在落地的期望状态做完：落地从改行、重建监控、套暂停到记下各行落地的版本一直拿着同步端的锁。
+/// 锁放开之前本机再动同一行，暂停会被这次落地按期望状态套回去，删掉的行落地记不下，之后的扫描都认不出来
+async fn landed(member: &super::ha::member::Member) {
+    member.pending().await;
 }
 
 /// 模拟备机进程还在、只是连不上控制面：停掉节点代理，单独起一个同步端记下断开期间本机的修改
@@ -2368,7 +2373,7 @@ async fn the_upload_primary_switches_from_either_side_only_while_both_are_online
     let linked = |leader: &'static str| {
         let (pairing, controller) = (pairing.clone(), controller.clone());
         async move {
-            eventually("both links are up", Duration::from_secs(30), || {
+            eventually("both links are up", via_link(30), || {
                 let (pairing, controller) = (pairing.clone(), controller.clone());
                 async move {
                     let view = pairing.view(&controller).await.unwrap();
@@ -2405,7 +2410,7 @@ async fn the_upload_primary_switches_from_either_side_only_while_both_are_online
     assert!(root.join("data/ha-primary.sqlite3").exists());
     eventually(
         "the node primary got the controller's report",
-        Duration::from_secs(20),
+        via_link(20),
         || async { super::ha::primary().is_some_and(|primary| primary.view()["reported"] == true) },
     )
     .await;
@@ -2452,15 +2457,11 @@ async fn the_upload_primary_switches_from_either_side_only_while_both_are_online
     assert_eq!(saved.mode, HaMode::Takeover);
     assert_eq!(saved.params.offline_grace, 30);
     assert_eq!(saved.leader(), Side::Controller);
-    eventually(
-        "the node follows the new mode",
-        Duration::from_secs(20),
-        || async {
-            load_ha_state(&state_file)
-                .and_then(|state| state.assignment)
-                .is_some_and(|assignment| assignment.mode == HaMode::Takeover)
-        },
-    )
+    eventually("the node follows the new mode", via_link(20), || async {
+        load_ha_state(&state_file)
+            .and_then(|state| state.assignment)
+            .is_some_and(|assignment| assignment.mode == HaMode::Takeover)
+    })
     .await;
     let (status, body) = node_ha_request(
         &s,
@@ -2693,21 +2694,17 @@ async fn existing_local_rows_join_the_pair_by_default_or_later_without_a_rebuild
             .and_then(|view| view.pair.clone())
             .is_some_and(|pair| pair.streamers.contains(&id))
     };
-    eventually(
-        "the included rows join the pair",
-        Duration::from_secs(40),
-        || {
-            let c = c.clone();
-            async move {
-                fleet_room(a_url)
-                    .await
-                    .is_some_and(|room| room.node_id == Some(primary))
-                    && paired(a)
-                    && remark_on(&c, a_url).await.as_deref() == Some("备机A")
-                    && template_names(&c).await == ["备机单独模板", "备机模板A"]
-            }
-        },
-    )
+    eventually("the included rows join the pair", via_link(40), || {
+        let c = c.clone();
+        async move {
+            fleet_room(a_url)
+                .await
+                .is_some_and(|room| room.node_id == Some(primary))
+                && paired(a)
+                && remark_on(&c, a_url).await.as_deref() == Some("备机A")
+                && template_names(&c).await == ["备机单独模板", "备机模板A"]
+        }
+    })
     .await;
     assert!(
         Arc::ptr_eq(&worker_a, &worker(&s, a).await),
@@ -2769,7 +2766,7 @@ async fn existing_local_rows_join_the_pair_by_default_or_later_without_a_rebuild
         (row["included"].clone(), row["busy"].clone()),
         (true.into(), true.into())
     );
-    eventually("the standby queues b", Duration::from_secs(20), || {
+    eventually("the standby queues b", via_link(20), || {
         let s = s.clone();
         async move {
             let (status, body) = node_ha_request(
@@ -2795,7 +2792,7 @@ async fn existing_local_rows_join_the_pair_by_default_or_later_without_a_rebuild
         WorkerStatus::Pending
     ));
     *worker_b.uploader_status.write().unwrap() = WorkerStatus::Idle;
-    eventually("b joins once idle", Duration::from_secs(40), || {
+    eventually("b joins once idle", via_link(40), || {
         let c = c.clone();
         async move {
             fleet_room(b_url)
@@ -2820,7 +2817,7 @@ async fn existing_local_rows_join_the_pair_by_default_or_later_without_a_rebuild
     let missing = listed(&answer, "streamers", 999);
     assert_eq!(missing["included"], false);
     assert!(missing["reason"].is_string(), "{missing}");
-    eventually("p joins the pair", Duration::from_secs(40), || {
+    eventually("p joins the pair", via_link(40), || {
         let (s, fx_managed) = (s.clone(), fx.managed.clone());
         async move {
             fleet_room(p_url)
@@ -2964,7 +2961,7 @@ async fn rows_adopted_from_the_standby_go_back_to_it_when_the_pair_is_dissolved(
             .and_then(|view| view.pair.clone())
             .is_some_and(|pair| pair.streamers.contains(&id))
     };
-    eventually("a joins the pair", Duration::from_secs(40), || {
+    eventually("a joins the pair", via_link(40), || {
         let c = c.clone();
         async move {
             on_primary(fleet_room(a_url).await)
@@ -2992,7 +2989,7 @@ async fn rows_adopted_from_the_standby_go_back_to_it_when_the_pair_is_dissolved(
     member_for(&s).expect("备机上有同步端").join_room(n).await;
     eventually(
         "the edit and the new streamer converge",
-        Duration::from_secs(40),
+        via_link(40),
         || {
             let (s, c) = (s.clone(), c.clone());
             async move {
@@ -3028,14 +3025,10 @@ async fn rows_adopted_from_the_standby_go_back_to_it_when_the_pair_is_dissolved(
                 .clone()
         }
     };
-    eventually(
-        "the standby holds a and drops n",
-        Duration::from_secs(40),
-        || {
-            let s = s.clone();
-            async move { stage().await == "held" && !sorted_urls(&s).await.contains(&n_url.into()) }
-        },
-    )
+    eventually("the standby holds a and drops n", via_link(40), || {
+        let s = s.clone();
+        async move { stage().await == "held" && !sorted_urls(&s).await.contains(&n_url.into()) }
+    })
     .await;
     assert!(
         super::ha::hold_recording(a_url).is_some(),
@@ -3052,24 +3045,20 @@ async fn rows_adopted_from_the_standby_go_back_to_it_when_the_pair_is_dissolved(
 
     // 投完了：交接
     *busy_a.uploader_status.write().unwrap() = WorkerStatus::Idle;
-    eventually(
-        "a goes back to the standby",
-        Duration::from_secs(60),
-        || {
-            let (pairing, controller, c) = (pairing.clone(), controller.clone(), c.clone());
-            async move {
-                fleet_room(a_url).await.is_none()
-                    && row_by_url(&c, a_url).await.is_none()
-                    && pairing
-                        .view(&controller)
-                        .await
-                        .unwrap()
-                        .get("handback")
-                        .is_none()
-                    && template_names(&c).await.is_empty()
-            }
-        },
-    )
+    eventually("a goes back to the standby", via_link(60), || {
+        let (pairing, controller, c) = (pairing.clone(), controller.clone(), c.clone());
+        async move {
+            fleet_room(a_url).await.is_none()
+                && row_by_url(&c, a_url).await.is_none()
+                && pairing
+                    .view(&controller)
+                    .await
+                    .unwrap()
+                    .get("handback")
+                    .is_none()
+                && template_names(&c).await.is_empty()
+        }
+    })
     .await;
     let back = row_by_url(&s, a_url).await.unwrap();
     assert_eq!((back.id, back.remark.as_str()), (a, "主机改的"));
