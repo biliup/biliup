@@ -3011,6 +3011,13 @@ async fn rows_adopted_from_the_standby_go_back_to_it_when_the_pair_is_dissolved(
     let busy_a = c.managers.get_room_by_id(local_a).await.unwrap();
     *busy_a.uploader_status.write().unwrap() = WorkerStatus::Pending;
 
+    // 解除之前面板就能列出会交还的：从备机纳入的 a 与它的模板；配对期间新建的 n 留在主机
+    let view = pairing.view(&controller).await.unwrap();
+    assert_eq!(
+        view["returns"],
+        serde_json::json!({ "rooms": [room_a.id], "templates": [room_a.template_id.unwrap()] })
+    );
+
     assert!(pairing.dissolve(&controller).await.unwrap());
     let stage = || {
         let (pairing, controller) = (pairing.clone(), controller.clone());

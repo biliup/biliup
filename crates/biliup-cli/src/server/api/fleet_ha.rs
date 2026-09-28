@@ -1,7 +1,8 @@
 //! 一主一备（HA Pair）接口。
 //!
 //! 控制面（路由在 `fleet.rs` 里注册）：
-//! - `GET /v1/fleet/ha`：配对、备机连接、不纳入配对的房间与最近的场次，归 `streamer.view`
+//! - `GET /v1/fleet/ha`：配对、备机连接、不纳入配对的房间与最近的场次、解除时会交还给备机的行（`returns`），
+//!   归 `streamer.view`
 //! - `PUT /v1/fleet/ha`：指定备机或改模式 / 参数（`{"standby": 节点 id, "mode": 1|2, "params": {...},
 //!   "adopt": {"streamers": [...], "templates": [...]}}`），`DELETE /v1/fleet/ha`：解除配对，都归 `node.manage`。
 //!   指定一台新的备机时它上面已有的本地主播与模板缺省全部纳入配对，`adopt` 里列出的才纳入（某一项不填就是

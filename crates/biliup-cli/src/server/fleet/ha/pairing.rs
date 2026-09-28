@@ -1456,7 +1456,8 @@ impl Pairing {
     }
 
     /// `GET /v1/fleet/ha`。`standby` 是配对里那台节点（机器身份，与此刻谁上传无关），`leader` 是此刻的上传主机；
-    /// 控制面当备机时 `local_standby` 是它手里的场次；解除配对后还有没交还完的行时 `handback` 是节点 id → 那些行
+    /// 控制面当备机时 `local_standby` 是它手里的场次；解除配对后还有没交还完的行时 `handback` 是节点 id → 那些行。
+    /// 配对生效时 `returns` 是解除时会交还给备机的 Fleet 房间与模板（从备机纳入、还在「本机」上的）
     pub async fn view(&self, controller: &Controller) -> AppResult<Value> {
         let pool = controller.pool();
         let pair = store::pair(pool).await?;
@@ -1510,6 +1511,10 @@ impl Pairing {
         // 没有交还中的行时不带，与以前逐字相同
         if let Some(handback) = self.handback.annotated(controller, &self.services).await {
             view["handback"] = handback;
+        }
+        if let Some(active) = &active {
+            let (rooms, templates) = active.member.returning().await;
+            view["returns"] = json!({ "rooms": rooms, "templates": templates });
         }
         Ok(view)
     }
