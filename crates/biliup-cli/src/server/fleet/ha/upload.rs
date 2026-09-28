@@ -7,32 +7,43 @@
 //! 备机：录的时候只把分段收下（[`Plan::Collect`]），决定要投时由 [`super::agent`] 另起任务调
 //! [`run_standby`]（提交前再确认主机没有投成），模式 2 追加分 P 时调 [`run_append`]。
 //!
+//! 模式 2 主机回来补投上次中断的那半时调 [`run_resume`]：分段从切片工作台找回，之后同主机的投稿流程。
+//!
 //! 与 B 站打交道的几步（登录、传分段、提交）集中在 [`Session`]。测试构建里可以装上 [`double`]
 //! 代替 B 站；发布构建里没有这个模块，只有真实实现。
 
 use super::agent::Standby;
-use super::primary::{Begin, Primary};
+use super::primary::{Begin, Primary, Resume};
+use super::wire::SkipReason;
 use crate::server::common::upload::{
     UploadContext, build_studio, edit_to_bilibili, execute_postprocessor,
     initialize_upload_context, pipeline_upload_videos, submit_to_bilibili,
     upload_single_file_with_progress,
 };
+use crate::server::common::util::FileValidator;
 use crate::server::core::downloader::SegmentInfo;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::fleet::events::scrub;
+use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::Context;
+use crate::server::infrastructure::models::StreamerInfo;
 use crate::server::infrastructure::models::hook_step::HookStep;
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
+use crate::server::infrastructure::service_register::ServiceRegister;
+use crate::server::workbench::store::{SegmentRow, SegmentState};
+use crate::server::workbench::{self, index};
 use biliup::bilibili::{ResponseData, Vid, Video};
+use biliup::downloader::live::LiveStream;
 use error_stack::ResultExt;
 use futures::{Stream, StreamExt};
-use std::path::PathBuf;
+use ormlite::Model;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::pin;
 use tokio::task::JoinHandle;
-use tracing::info;
+use tracing::{info, warn};
 
 /// 配对房间这一段怎么投
 pub enum Plan {
@@ -228,6 +239,175 @@ pub(crate) async fn run_append(
     })
 }
 
+/// 模式 2：主机进程中断、备机接手了这一段，主机回来后先投盘上它那半（§4「主机先投、副机追加分 P」），
+/// 投成后备机据 `Uploaded` 追加它那半。`started` 是这个主机的启动时刻。占上传池的一个槽位
+pub(crate) async fn run_resume(
+    primary: Arc<Primary>,
+    services: ServiceRegister,
+    job: Resume,
+    started: i64,
+) {
+    let slots = services.managers.upload_slots();
+    let _slot = slots.acquire().await;
+    match resume_input(&primary, &services, &job, started).await {
+        Ok(found) => {
+            primary.resume_ended(&job.key, found.ended_at);
+            let segments = futures::stream::iter(found.segments);
+            let result = run_primary(&primary, &job.key, segments, &found.ctx, &found.config).await;
+            if let Err(e) = result {
+                warn!(key = job.key, error = ?e, "HA：主机补投它那半没有做完");
+            }
+        }
+        Err(Missing::Skip(reason, detail)) => primary.resume_skipped(&job.key, reason, detail),
+        Err(Missing::Fail(reason)) => primary.upload_failed(&job.key, &reason),
+    }
+}
+
+struct Found {
+    ctx: Context,
+    config: UploadStreamer,
+    segments: Vec<SegmentInfo>,
+    /// 最后一个分段写盘的时刻
+    ended_at: i64,
+}
+
+enum Missing {
+    Skip(SkipReason, &'static str),
+    Fail(String),
+}
+
+/// 主机那半：切片工作台这一场里、这一段检测到开播之后到本主机启动之前写完的分段，
+/// 按 `filtering_threshold` 过滤（太小的留在盘上，不删）
+async fn resume_input(
+    primary: &Primary,
+    services: &ServiceRegister,
+    job: &Resume,
+    started: i64,
+) -> Result<Found, Missing> {
+    const GONE: &str = "主机那半的录像已不在盘上";
+    let session = job
+        .session
+        .ok_or(Missing::Skip(SkipReason::NoFiles, GONE))?;
+    let info = match StreamerInfo::fetch_one(session, &services.pool).await {
+        Ok(info) => info,
+        Err(ormlite::Error::SqlxError(sqlx::Error::RowNotFound)) => {
+            return Err(Missing::Skip(SkipReason::NoFiles, GONE));
+        }
+        Err(e) => return Err(Missing::Fail(format!("读不到这一场的开播信息：{e}"))),
+    };
+    let url = primary
+        .room_url(job.room)
+        .ok_or_else(|| Missing::Fail("这个房间已经不在配对里".into()))?;
+    let worker = services
+        .managers
+        .get_rooms()
+        .await
+        .into_iter()
+        .find(|worker| worker.live_streamer.url == url)
+        .ok_or_else(|| Missing::Fail("这个房间已经不在本机".into()))?;
+    let ctx = Context::new(
+        session,
+        worker,
+        services.pool.clone(),
+        live_stream(&info, job.unit_started_at).map_err(Missing::Fail)?,
+    );
+    let config = ctx
+        .upload_config()
+        .clone()
+        .filter(|config| !config.is_noop_uploader())
+        .ok_or_else(|| Missing::Fail("这个房间没有投稿模板".into()))?;
+    let rows = workbench::store::session_segments(&services.pool, session)
+        .await
+        .map_err(|e| Missing::Fail(format!("读不到这一场的分段：{e}")))?;
+    let validator = FileValidator::new(ctx.config().filtering_threshold * 1000 * 1000, true);
+    let (mut segments, mut filtered, mut ended_at) = (Vec::new(), false, job.unit_started_at);
+    for row in rows
+        .iter()
+        .filter(|row| row.state == SegmentState::Finished)
+    {
+        let written = modified_ms(Path::new(&row.path));
+        let Some(written) = written.filter(|at| (job.unit_started_at..started).contains(at)) else {
+            continue;
+        };
+        if validator.will_delete(Path::new(&row.path)) {
+            filtered = true;
+            continue;
+        }
+        let path = finish_part(&services.pool, row).await;
+        let danmaku = row
+            .danmaku_path
+            .as_deref()
+            .map(PathBuf::from)
+            .filter(|path| path.exists());
+        segments.push(SegmentInfo::new(path, danmaku, None, segments.len()));
+        ended_at = ended_at.max(written);
+    }
+    match (segments.is_empty(), filtered) {
+        (false, _) => Ok(Found {
+            ctx,
+            config,
+            segments,
+            ended_at,
+        }),
+        (true, true) => Err(Missing::Skip(
+            SkipReason::Filtered,
+            "主机那半小于 filtering_threshold",
+        )),
+        (true, false) => Err(Missing::Skip(SkipReason::NoFiles, GONE)),
+    }
+}
+
+/// 按场次记录重建开播信息。主播名是房间备注（场次里只记了它），`{streamer}` 按它填
+fn live_stream(info: &StreamerInfo, unit_started_at: i64) -> Result<LiveStream, String> {
+    let date = chrono::DateTime::from_timestamp_millis(unit_started_at).unwrap_or(info.date);
+    serde_json::from_value(serde_json::json!({
+        "name": info.name,
+        "url": info.url,
+        "title": info.title,
+        "date": date,
+        "live_cover_url": info.live_cover_path,
+        "raw_stream_url": "",
+        "platform": "",
+        "stream_headers": {},
+        "suffix": "",
+        "danmaku": null,
+        "downloader_hint": "StreamGears",
+        "runtime_options": null,
+    }))
+    .map_err(|e| format!("重建这一场的开播信息失败：{e}"))
+}
+
+/// 崩溃时正在写的分段还带着 `.part`：改回正式文件名再投，索引缓存与切片工作台的记录一起改
+async fn finish_part(pool: &ConnectionPool, row: &SegmentRow) -> PathBuf {
+    let path = PathBuf::from(&row.path);
+    let Some(done) = row.path.strip_suffix(".part").map(PathBuf::from) else {
+        return path;
+    };
+    if done.exists() {
+        return path;
+    }
+    if let Err(e) = std::fs::rename(&path, &done) {
+        warn!(path = row.path, error = %e, "HA：没能给中断留下的分段去掉 .part");
+        return path;
+    }
+    let index_path = row.index_path.as_ref().map(|old| {
+        let new = index::index_path(&done);
+        let _ = std::fs::rename(old, &new);
+        new.to_string_lossy().into_owned()
+    });
+    let moved = workbench::store::move_segment(
+        pool,
+        row.id,
+        &done.to_string_lossy(),
+        index_path.as_deref(),
+    )
+    .await;
+    if let Err(e) = moved {
+        warn!(path = row.path, error = %e, "HA：分段改名后没能更新切片工作台的记录");
+    }
+    done
+}
+
 fn segment_processors(ctx: &Context) -> Vec<HookStep> {
     ctx.live_streamer()
         .segment_processor
@@ -364,6 +544,15 @@ impl Session {
             Session::Double(double) => double.append(bvid, &videos),
         }
     }
+}
+
+/// 文件最后修改时间（毫秒）；读不到时为 `None`
+fn modified_ms(path: &Path) -> Option<i64> {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
 }
 
 #[cfg(test)]

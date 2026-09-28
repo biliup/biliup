@@ -4,19 +4,21 @@
 //! 记进 `ha_sessions` 并发给备机。备机（重）连上后先等备机的 `StandbyReport`（最多 [`REPORT_WAIT_MS`]），
 //! 主机进程刚启动时最多等 [`STARTUP_WAIT_MS`]：这期间不开始任何投稿、不开录配对里的房间。
 //! 收到上报后把备机在录 / 在投的场次交给备机、按上报逐场回复主机这边的结果，再重发近 24 小时投成的场次。
+//! 模式 2 里备机接手的正是主机上次中断的那一场时，主机先把盘上它那半投了，备机再追加它那半（§4）。
 //!
 //! [`PrimaryCore`] 不碰时钟、不做 I/O，测试用虚拟时间驱动；[`Primary`] 把它接到钩子、数据库与备机连接上。
 
 use super::key::{self, Span};
 use super::params::{HaMode, HaParams};
 use super::store::{self, PrimaryState, SessionRecord, Uploader};
-use super::upload::Plan;
+use super::upload::{self, Plan};
 use super::wire::{HaMessage, ReportedSession, ReportedState, SkipReason};
 use super::{Hold, Unit, UnitOutput};
 use crate::server::errors::AppResult;
 use crate::server::fleet::protocol::ControllerMessage;
 use crate::server::fleet::{node, now_ms};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
+use crate::server::infrastructure::service_register::ServiceRegister;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::Duration;
@@ -54,6 +56,19 @@ pub(crate) enum Out {
     Delete(String),
     /// 停掉这一段正在进行的拉流
     Stop(String),
+    /// 补投主机上次中断的那一段
+    Resume(Resume),
+}
+
+/// 模式 2：主机进程中断、备机接手了的一段，主机回来后补投盘上它那半
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Resume {
+    pub key: String,
+    pub room: i64,
+    /// 切片工作台的场次 id（`stream_sessions.id`）
+    pub session: Option<i64>,
+    /// 这一段检测到开播的时刻：场次里更早的分段属于之前的录制
+    pub unit_started_at: i64,
 }
 
 /// 主机的投稿流程要不要真的投
@@ -414,6 +429,83 @@ impl PrimaryCore {
         }
     }
 
+    /// 模式 2：备机接手的正是主机上次中断的这一段（`takeover_of`），主机先投它那半，投成后备机追加（§4）。
+    /// 每段只补投一次：`uploader` 已是主机而没有稿件号，说明上次补投开始了却没结果；开始传了就不知道
+    /// 提交成没成功，转人工，免得两份稿件。返回假时调用方照常回复这一段的现状
+    fn resume(&mut self, now: i64, key: &str, takeover_of: Option<&str>) -> bool {
+        if self.mode != HaMode::Takeover || takeover_of != Some(key) {
+            return false;
+        }
+        let Some(row) = self.rows.get(key) else {
+            return false;
+        };
+        if row.primary_state != PrimaryState::Interrupted || standby_owns(row) {
+            return false;
+        }
+        let job = Resume {
+            key: key.to_string(),
+            room: row.room_id,
+            session: row.local_session_id,
+            unit_started_at: row.unit_started_at.unwrap_or(row.started_at),
+        };
+        let again = row.uploader == Some(Uploader::Primary);
+        let began = again && row.progress_at.is_some();
+        let Some(row) = self.touch(key, now) else {
+            return false;
+        };
+        if began {
+            row.primary_state = PrimaryState::Failed;
+            row.reason = Some("主机补投它那半时进程又中断了，不知道提交成没成功".into());
+            warn!(key, "HA：上次补投中途中断，转人工");
+            return false;
+        }
+        row.primary_state = PrimaryState::Recorded;
+        row.uploader = Some(Uploader::Primary);
+        row.progress_at = None;
+        row.upload_bytes = 0;
+        row.reason = Some("主机回来补投它那半".into());
+        self.yielded.insert(key.to_string());
+        self.outs.push(Out::Resume(job));
+        info!(key, "HA：备机接手了主机中断的这一段，主机先投它那半");
+        true
+    }
+
+    /// 补投找到了主机那半：它录到最后一个分段写盘的时刻
+    pub(crate) fn resume_ended(&mut self, now: i64, key: &str, ended_at: i64) {
+        let Some(row) = self.touch(key, now) else {
+            return;
+        };
+        if row.ended_at.is_some() {
+            return;
+        }
+        row.ended_at = Some(ended_at);
+        let (room, started_at) = (row.room_id, row.started_at);
+        self.send(HaMessage::SessionEnded {
+            key: key.to_string(),
+            room,
+            started_at,
+            at: ended_at,
+            produced: true,
+        });
+    }
+
+    /// 补投时主机那半没有可投的文件（太小被过滤，或已不在盘上）：备机投完整的一份（§6 F）
+    pub(crate) fn resume_skipped(&mut self, now: i64, key: &str, reason: SkipReason, detail: &str) {
+        let Some(row) = self.touch(key, now) else {
+            return;
+        };
+        row.primary_state = PrimaryState::Skipped;
+        row.uploader = None;
+        row.reason = Some(reason.as_str().into());
+        let room = row.room_id;
+        self.send(HaMessage::UploadSkipped {
+            key: key.to_string(),
+            room,
+            reason,
+            detail: Some(detail.into()),
+        });
+    }
+
     pub(crate) fn standby_message(&mut self, now: i64, message: HaMessage) {
         match message {
             HaMessage::StandbyReport { sessions } => self.report(now, sessions),
@@ -760,7 +852,9 @@ impl PrimaryCore {
                                     });
                                 }
                                 for key in &matches {
-                                    self.answer(key, now);
+                                    if !self.resume(now, key, Some(takeover_of)) {
+                                        self.answer(key, now);
+                                    }
                                 }
                             }
                             // 主机离线期间新开播的一场：备机自己投
@@ -800,7 +894,9 @@ impl PrimaryCore {
                         });
                     }
                     for key in &matches {
-                        self.answer(key, now);
+                        if !self.resume(now, key, session.takeover_of.as_deref()) {
+                            self.answer(key, now);
+                        }
                     }
                     answered.extend(matches);
                 }
@@ -856,11 +952,17 @@ pub struct Primary {
     /// 该停掉拉流的段（场次键）
     stop: watch::Sender<BTreeSet<String>>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
+    /// 补投要用的房间、上传池与主库
+    services: ServiceRegister,
+    /// 本主机的启动时刻：之后才写盘的分段不属于上次中断的录制
+    started: i64,
+    me: Weak<Primary>,
 }
 
 impl Primary {
     pub(crate) async fn start(
         pool: ConnectionPool,
+        services: ServiceRegister,
         mode: HaMode,
         params: HaParams,
         window: i64,
@@ -870,7 +972,7 @@ impl Primary {
         let rows = store::updated_since(&pool, now - KEEP_MS).await?;
         let core = PrimaryCore::new(mode, params, window, rows, now);
         let (writer, mut queue) = mpsc::unbounded_channel();
-        let primary = Arc::new(Primary {
+        let primary = Arc::new_cyclic(|me| Primary {
             core: Mutex::new(core),
             rooms: RwLock::default(),
             keys: Mutex::default(),
@@ -879,6 +981,9 @@ impl Primary {
             gate: watch::channel(false).0,
             stop: watch::channel(BTreeSet::new()).0,
             tasks: Mutex::default(),
+            services,
+            started: now,
+            me: me.clone(),
         });
         // 写入任务不随 `stop` 中止：主机被换掉、解除配对时排着的写入照样落盘，最后一个引用放掉时结束
         tokio::spawn(async move {
@@ -937,6 +1042,13 @@ impl Primary {
                 }
                 Out::Stop(key) => {
                     self.stop.send_if_modified(|keys| keys.insert(key));
+                }
+                Out::Resume(job) => {
+                    // 与普通投稿一样，解除配对、换主机时不中止：提交中途被打断就说不清投没投成
+                    if let Some(primary) = self.me.upgrade() {
+                        let services = self.services.clone();
+                        tokio::spawn(upload::run_resume(primary, services, job, self.started));
+                    }
                 }
             }
         }
@@ -1110,6 +1222,30 @@ impl Primary {
         warn!(key, "HA：提交前发现备机已在投这一场，主机不提交");
         self.update(|core, now| core.upload_fenced(now, key));
     }
+
+    /// 配对里这个控制面房间的主播地址
+    pub(crate) fn room_url(&self, room: i64) -> Option<String> {
+        self.rooms
+            .read()
+            .unwrap()
+            .iter()
+            .find(|(_, id)| **id == room)
+            .map(|(url, _)| url.clone())
+    }
+
+    pub(crate) fn resume_ended(&self, key: &str, ended_at: i64) {
+        self.update(|core, now| core.resume_ended(now, key, ended_at));
+    }
+
+    pub(crate) fn resume_skipped(&self, key: &str, reason: SkipReason, detail: &str) {
+        info!(
+            key,
+            reason = reason.as_str(),
+            detail,
+            "HA：主机那半没有可投的文件，交给备机投完整的一份"
+        );
+        self.update(|core, now| core.resume_skipped(now, key, reason, detail));
+    }
 }
 
 async fn tick_loop(primary: Weak<Primary>) {
@@ -1142,7 +1278,7 @@ mod tests {
         outs.iter()
             .filter_map(|out| match out {
                 Out::Send(message) => Some(message.clone()),
-                Out::Save(_) | Out::Delete(_) | Out::Stop(_) => None,
+                Out::Save(_) | Out::Delete(_) | Out::Stop(_) | Out::Resume(_) => None,
             })
             .collect()
     }
@@ -1151,7 +1287,16 @@ mod tests {
         outs.iter()
             .filter_map(|out| match out {
                 Out::Send(message) => Some(message.kind()),
-                Out::Save(_) | Out::Delete(_) | Out::Stop(_) => None,
+                Out::Save(_) | Out::Delete(_) | Out::Stop(_) | Out::Resume(_) => None,
+            })
+            .collect()
+    }
+
+    fn resumed(outs: &[Out]) -> Vec<String> {
+        outs.iter()
+            .filter_map(|out| match out {
+                Out::Resume(job) => Some(job.key.clone()),
+                _ => None,
             })
             .collect()
     }
@@ -1808,10 +1953,17 @@ mod tests {
         );
         let outs = core.take();
         let messages = sends(&outs);
-        assert!(messages.iter().any(|message| matches!(
-            message,
-            HaMessage::UploadSkipped { key, reason: SkipReason::Handover, .. } if key == "7:60000"
-        )));
+        assert_eq!(
+            resumed(&outs),
+            ["7:60000"],
+            "备机接手的正是主机中断的那场：主机先投它那半"
+        );
+        assert!(
+            !messages
+                .iter()
+                .any(|message| message.key() == Some("7:60000")),
+            "补投开始前不回复这一场"
+        );
         assert!(messages.iter().any(|message| matches!(
             message,
             HaMessage::Uploaded { key, bvid, .. } if key == "9:60000" && bvid == "BVP"
@@ -1830,6 +1982,264 @@ mod tests {
         assert!(core.hold(7).is_some());
         assert!(core.hold(8).is_some());
         assert_eq!(core.hold(9), None);
+    }
+
+    /// 主机边录边传、录到一半进程没了的 7:60000
+    fn crashed() -> SessionRecord {
+        SessionRecord {
+            local_session_id: Some(3),
+            unit_started_at: Some(MIN),
+            progress_at: Some(3 * MIN),
+            upload_bytes: 500,
+            ..row("7:60000", 7, MIN, PrimaryState::Uploading)
+        }
+    }
+
+    /// 备机接手了 7:60000，它那场从第 4 分钟录起
+    fn takeover(state: ReportedState) -> ReportedSession {
+        ReportedSession {
+            takeover_of: Some("7:60000".into()),
+            ended_at: (state != ReportedState::Recording).then_some(30 * MIN),
+            ..reported("standby:7:240000", 7, 4 * MIN, state)
+        }
+    }
+
+    /// 模式 2 主机重启后收到上报：先补投它那半，投成的 `Uploaded` 带着「让给了备机」，备机据此追加
+    #[test]
+    fn mode_two_resumes_the_interrupted_half_so_the_standby_appends() {
+        let mut core = core(HaMode::Takeover, vec![crashed()]);
+        core.connected(40 * MIN);
+        core.standby_message(
+            40 * MIN,
+            report(vec![takeover(ReportedState::AwaitingPrimary)]),
+        );
+        assert!(core.gate_open());
+        let outs = core.take();
+        assert!(outs.contains(&Out::Resume(Resume {
+            key: "7:60000".into(),
+            room: 7,
+            session: Some(3),
+            unit_started_at: MIN,
+        })));
+        assert!(kinds(&outs).is_empty(), "补投开始前不回复这一场");
+        let row = saved(&outs, "7:60000").unwrap();
+        assert_eq!(row.primary_state, PrimaryState::Recorded);
+        assert_eq!(row.uploader, Some(Uploader::Primary));
+        assert_eq!((row.progress_at, row.upload_bytes), (None, 0));
+
+        core.resume_ended(41 * MIN, "7:60000", 3 * MIN);
+        assert_eq!(core.upload_begin(41 * MIN, "7:60000"), Begin::Proceed);
+        core.progress(42 * MIN, "7:60000", 800);
+        assert!(core.may_submit("7:60000"));
+        core.uploaded(43 * MIN, "7:60000", "BVP");
+        let outs = core.take();
+        assert_eq!(
+            kinds(&outs),
+            [
+                "session_ended",
+                "upload_started",
+                "upload_progress",
+                "uploaded"
+            ]
+        );
+        assert!(sends(&outs).iter().any(|message| matches!(
+            message,
+            HaMessage::Uploaded { key, bvid, from: MIN, to: Some(to), yielded: true, .. }
+                if key == "7:60000" && bvid == "BVP" && *to == 3 * MIN
+        )));
+        assert_eq!(
+            saved(&outs, "7:60000").unwrap().primary_state,
+            PrimaryState::Uploaded
+        );
+
+        // 重连后的上报：不再补投，回复投成的稿件号
+        core.disconnected(44 * MIN);
+        core.connected(45 * MIN);
+        core.standby_message(
+            45 * MIN,
+            report(vec![takeover(ReportedState::AwaitingPrimary)]),
+        );
+        let outs = core.take();
+        assert!(resumed(&outs).is_empty());
+        assert!(sends(&outs).iter().any(|message| matches!(
+            message,
+            HaMessage::Uploaded { key, yielded: true, .. } if key == "7:60000"
+        )));
+    }
+
+    /// 补投有了结果之后主机再重启：投成的回复稿件号，跳过 / 失败的照旧回复，都不再投
+    #[test]
+    fn a_restart_after_the_catch_up_does_not_upload_again() {
+        let done = SessionRecord {
+            primary_state: PrimaryState::Uploaded,
+            bvid: Some("BVP".into()),
+            uploader: Some(Uploader::Primary),
+            ended_at: Some(3 * MIN),
+            ..crashed()
+        };
+        let skipped = SessionRecord {
+            primary_state: PrimaryState::Skipped,
+            reason: Some(SkipReason::Filtered.as_str().into()),
+            ..crashed()
+        };
+        let failed = SessionRecord {
+            primary_state: PrimaryState::Failed,
+            reason: Some("upload double: submit rejected".into()),
+            uploader: Some(Uploader::Primary),
+            ..crashed()
+        };
+        for (row, expected) in [
+            (done, "uploaded"),
+            (skipped, "upload_skipped"),
+            (failed, "upload_failed"),
+        ] {
+            let mut core = core(HaMode::Takeover, vec![row]);
+            core.connected(50 * MIN);
+            core.standby_message(
+                50 * MIN,
+                report(vec![takeover(ReportedState::AwaitingPrimary)]),
+            );
+            let outs = core.take();
+            assert!(resumed(&outs).is_empty(), "{expected}：只投一次");
+            assert_eq!(kinds(&outs), [expected]);
+        }
+    }
+
+    /// 补投中途进程又没了：还没开始传的再补投一次；开始传了就不知道提交成没成功，转人工
+    #[test]
+    fn a_catch_up_cut_short_is_retried_only_before_it_started_uploading() {
+        let waiting = SessionRecord {
+            primary_state: PrimaryState::Recorded,
+            uploader: Some(Uploader::Primary),
+            progress_at: None,
+            upload_bytes: 0,
+            ..crashed()
+        };
+        let uploading = SessionRecord {
+            primary_state: PrimaryState::Uploading,
+            uploader: Some(Uploader::Primary),
+            progress_at: Some(41 * MIN),
+            ..crashed()
+        };
+        let restart = |row: SessionRecord| {
+            let mut core = core(HaMode::Takeover, vec![row]);
+            core.connected(50 * MIN);
+            core.standby_message(
+                50 * MIN,
+                report(vec![takeover(ReportedState::AwaitingPrimary)]),
+            );
+            core.take()
+        };
+        assert_eq!(resumed(&restart(waiting)), ["7:60000"]);
+
+        let outs = restart(uploading);
+        assert!(resumed(&outs).is_empty());
+        assert_eq!(
+            saved(&outs, "7:60000").unwrap().primary_state,
+            PrimaryState::Failed
+        );
+        assert!(sends(&outs).iter().any(|message| matches!(
+            message,
+            HaMessage::UploadFailed { key, reason, .. }
+                if key == "7:60000" && reason.contains("不知道提交成没成功")
+        )));
+    }
+
+    /// 主机那半太小或已不在盘上：`UploadSkipped` 让备机投完整的一份（§6 F），重连后照旧回复
+    #[test]
+    fn a_catch_up_without_usable_files_hands_the_whole_session_to_the_standby() {
+        for reason in [SkipReason::Filtered, SkipReason::NoFiles] {
+            let mut core = core(HaMode::Takeover, vec![crashed()]);
+            core.connected(40 * MIN);
+            core.standby_message(40 * MIN, report(vec![takeover(ReportedState::Recording)]));
+            assert_eq!(resumed(&core.take()), ["7:60000"]);
+            core.resume_skipped(41 * MIN, "7:60000", reason, "说明");
+            let outs = core.take();
+            assert_eq!(
+                sends(&outs),
+                [HaMessage::UploadSkipped {
+                    key: "7:60000".into(),
+                    room: 7,
+                    reason,
+                    detail: Some("说明".into()),
+                }]
+            );
+            let row = saved(&outs, "7:60000").unwrap();
+            assert_eq!(row.primary_state, PrimaryState::Skipped);
+            assert_eq!(row.uploader, None);
+
+            core.disconnected(42 * MIN);
+            core.connected(43 * MIN);
+            core.standby_message(43 * MIN, report(vec![takeover(ReportedState::Recording)]));
+            let outs = core.take();
+            assert!(resumed(&outs).is_empty());
+            assert!(sends(&outs).iter().any(|message| matches!(
+                message,
+                HaMessage::UploadSkipped { key, reason: skipped, .. }
+                    if key == "7:60000" && *skipped == reason
+            )));
+        }
+    }
+
+    /// 备机已经处理过（在投、投成、转人工、放弃、不用投）的场次，模式 1，以及备机接手的不是这一段：不补投
+    #[test]
+    fn no_catch_up_unless_the_standby_is_waiting_for_this_very_unit() {
+        for state in [
+            ReportedState::Uploading,
+            ReportedState::Uploaded,
+            ReportedState::Manual,
+            ReportedState::Dropped,
+            ReportedState::Done,
+            ReportedState::Failed,
+        ] {
+            let mut core = core(HaMode::Takeover, vec![crashed()]);
+            core.connected(40 * MIN);
+            let session = ReportedSession {
+                bvid: Some("BVS".into()),
+                ..takeover(state)
+            };
+            core.standby_message(40 * MIN, report(vec![session]));
+            let outs = core.take();
+            assert!(resumed(&outs).is_empty(), "{state:?}");
+            assert!(
+                !sends(&outs)
+                    .iter()
+                    .any(|message| message.kind() == "upload_started"),
+                "{state:?}"
+            );
+        }
+
+        let outs = {
+            let mut core = core(HaMode::DualRecord, vec![crashed()]);
+            core.connected(40 * MIN);
+            core.standby_message(40 * MIN, report(vec![takeover(ReportedState::Recording)]));
+            core.take()
+        };
+        assert!(resumed(&outs).is_empty());
+        assert!(sends(&outs).iter().any(|message| matches!(
+            message,
+            HaMessage::UploadSkipped { key, reason: SkipReason::Handover, .. } if key == "7:60000"
+        )));
+
+        // 同一房间另一段中断的也按时间对得上，但备机接手的是 7:60000：那一段照旧交给备机
+        let earlier = SessionRecord {
+            local_session_id: Some(3),
+            ..row("7:0", 7, 0, PrimaryState::Recording)
+        };
+        let outs = {
+            let mut core = core(HaMode::Takeover, vec![earlier, crashed()]);
+            core.connected(40 * MIN);
+            core.standby_message(
+                40 * MIN,
+                report(vec![takeover(ReportedState::AwaitingPrimary)]),
+            );
+            core.take()
+        };
+        assert_eq!(resumed(&outs), ["7:60000"]);
+        assert!(sends(&outs).iter().any(|message| matches!(
+            message,
+            HaMessage::UploadSkipped { key, reason: SkipReason::Handover, .. } if key == "7:0"
+        )));
     }
 
     /// 模式 2 主机断网期间这一段一直开着，网络回来时备机已接手：主机不续录，
@@ -1982,10 +2392,17 @@ mod tests {
 
     #[tokio::test]
     async fn the_stop_signal_reaches_only_the_unit_the_standby_took_over() {
+        let dir = tempfile::tempdir().unwrap();
         let (_db, pool) = store::tests::pool().await;
-        let primary = Primary::start(pool, HaMode::Takeover, HaParams::default(), WINDOW)
-            .await
-            .unwrap();
+        let primary = Primary::start(
+            pool,
+            services(dir.path()).await,
+            HaMode::Takeover,
+            HaParams::default(),
+            WINDOW,
+        )
+        .await
+        .unwrap();
         let (url, other) = ("https://live.example/7", "https://live.example/8");
         primary.set_rooms(HashMap::from([
             (url.to_string(), 7),
@@ -2100,6 +2517,7 @@ mod tests {
         let (_db, pool) = store::tests::pool().await;
         let primary = Primary::start(
             pool.clone(),
+            services(dir.path()).await,
             HaMode::DualRecord,
             HaParams::default(),
             WINDOW,
@@ -2205,6 +2623,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_restarted_primary_marks_unfinished_rows_interrupted_in_the_database() {
+        let dir = tempfile::tempdir().unwrap();
         let (_db, pool) = store::tests::pool().await;
         let now = now_ms();
         store::save_session(&pool, &row("7:1", 7, now - MIN, PrimaryState::Uploading))
@@ -2212,6 +2631,7 @@ mod tests {
             .unwrap();
         let primary = Primary::start(
             pool.clone(),
+            services(dir.path()).await,
             HaMode::DualRecord,
             HaParams::default(),
             WINDOW,
@@ -2229,5 +2649,378 @@ mod tests {
             "没连着也可以先收到上报（测试直接喂）"
         );
         primary.stop();
+    }
+
+    const RESUME_URL: &str = "https://resume.example/";
+
+    /// 只认 [`RESUME_URL`] 开头的平台；检测一直不返回，不向任何真实平台发请求
+    struct Idle;
+
+    #[async_trait::async_trait]
+    impl biliup::downloader::live::LivePlugin for Idle {
+        fn name(&self) -> &'static str {
+            "idle"
+        }
+
+        fn matches(&self, url: &str) -> bool {
+            url.starts_with(RESUME_URL)
+        }
+
+        async fn check_stream(
+            &self,
+            _request: biliup::downloader::live::LiveRequest,
+        ) -> biliup::downloader::live::LiveResult<biliup::downloader::live::LiveStatus> {
+            std::future::pending().await
+        }
+    }
+
+    /// 本机的主库、上传池与房间表（还没有房间）
+    async fn services(dir: &std::path::Path) -> ServiceRegister {
+        use crate::server::config::Config;
+        use crate::server::core::download_manager::DownloadManager;
+        use crate::server::infrastructure::connection_pool::ConnectionManager;
+        use tracing_subscriber::{EnvFilter, reload};
+        let db = dir.join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let config = Config::default();
+        let managers = DownloadManager::new(config.pool1_size, config.pool2_size, pool.clone());
+        managers.add_plugin(Arc::new(Idle)).await;
+        let (_layer, log_handle) = reload::Layer::new(EnvFilter::new("info"));
+        ServiceRegister::new(pool, Arc::new(RwLock::new(config)), managers, log_handle).await
+    }
+
+    /// 本机加一个带模板的房间 `{RESUME_URL}{room}`（备注「房间{room}」）
+    async fn add_room(services: &ServiceRegister, room: i64) -> String {
+        let url = format!("{RESUME_URL}{room}");
+        sqlx::query("INSERT INTO livestreamers (id, url, remark) VALUES (?, ?, ?)")
+            .bind(room)
+            .bind(&url)
+            .bind(format!("房间{room}"))
+            .execute(&services.pool)
+            .await
+            .unwrap();
+        let streamer = serde_json::from_value(
+            serde_json::json!({ "id": room, "url": url, "remark": format!("房间{room}") }),
+        )
+        .unwrap();
+        let upload = serde_json::from_value(serde_json::json!({
+            "id": room, "template_name": "模板", "title": "{streamer}：{title}", "tags": ["t"],
+            "uploader": "bili_web",
+        }))
+        .unwrap();
+        services
+            .managers
+            .add_room(services.worker(streamer, Some(upload)))
+            .await
+            .unwrap();
+        url
+    }
+
+    /// 切片工作台里一场录制的分段：`(文件名, 字节数, 写盘时刻)`，按顺序接在时间轴上；
+    /// 像上次异常退出那样都还是 `recording`，再跑一遍启动收尾。返回场次 id
+    async fn recorded(
+        services: &ServiceRegister,
+        recording: &std::path::Path,
+        streamer: i64,
+        started_at: i64,
+        files: &[(&str, u64, i64)],
+    ) -> i64 {
+        use crate::server::infrastructure::models::StreamerInfo;
+        use crate::server::workbench::{self, store as bench};
+        let pool = &services.pool;
+        let date = chrono::DateTime::from_timestamp_millis(started_at).unwrap();
+        let url = format!("{RESUME_URL}{streamer}");
+        let info = StreamerInfo::new(&format!("房间{streamer}"), &url, "直播标题", date, "");
+        let session = bench::open_session(pool, streamer, &info, started_at, 0)
+            .await
+            .unwrap()
+            .id;
+        bench::set_started_at(pool, session, started_at)
+            .await
+            .unwrap();
+        for (n, (name, size, written)) in files.iter().enumerate() {
+            let path = recording.join(name);
+            let file = std::fs::File::create(&path).unwrap();
+            file.set_len(*size).unwrap();
+            let at = std::time::UNIX_EPOCH + Duration::from_millis(*written as u64);
+            file.set_modified(at).unwrap();
+            let start_ms = n as i64 * 5 * MIN;
+            bench::insert_segment(pool, session, path.to_str().unwrap(), "flv", start_ms, 0)
+                .await
+                .unwrap();
+        }
+        workbench::recover(pool).await.unwrap();
+        session
+    }
+
+    fn ops(double: &Double) -> Vec<String> {
+        double
+            .entries()
+            .iter()
+            .map(|entry| {
+                let op = entry["op"].as_str().unwrap_or_default();
+                match entry["file"].as_str() {
+                    Some(file) => format!("{op} {file}"),
+                    None => op.to_string(),
+                }
+            })
+            .collect()
+    }
+
+    /// 等主机发出 `kind` 这一条，返回到它为止发出的场次消息
+    async fn until(
+        frames: &mut mpsc::UnboundedReceiver<ControllerMessage>,
+        kind: &str,
+    ) -> Vec<HaMessage> {
+        let mut out = Vec::new();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while let Some(frame) = frames.recv().await {
+                if let ControllerMessage::Ha(message) = frame {
+                    let done = message.kind() == kind;
+                    out.push(message);
+                    if done {
+                        return;
+                    }
+                }
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("主机应该发出 {kind}，只发了 {out:?}"));
+        out
+    }
+
+    /// 模式 2 主机重启后按切片工作台补投它那半（经测试替身）：只投这一段、没被过滤的分段，
+    /// 中断留下的 `.part` 改回正式文件名；`Uploaded` 让备机追加。再重启一次不再投，只回复稿件号
+    #[tokio::test]
+    async fn a_restarted_primary_uploads_its_half_from_the_workbench() {
+        let _guard = crate::server::fleet::ha::test_guard().await;
+        let dir = tempfile::tempdir().unwrap();
+        let control = dir.path().join("control");
+        std::fs::create_dir_all(&control).unwrap();
+        let recording = dir.path().join("rec");
+        std::fs::create_dir_all(&recording).unwrap();
+        let double = Arc::new(Double::new(
+            dir.path().join("double.jsonl"),
+            control,
+            0,
+            "P",
+        ));
+        double::install(Some(double.clone()));
+
+        let services = services(dir.path()).await;
+        let url = add_room(&services, 7).await;
+        let unit = now_ms() - 60 * MIN;
+        const BIG: u64 = 25_000_000;
+        // 同一场里上一段录制（已经投过）的分段、这一段录完的、太小的、中断时正在写的
+        let session = recorded(
+            &services,
+            &recording,
+            7,
+            unit - 30 * MIN,
+            &[
+                ("old.flv", BIG, unit - MIN),
+                ("a-1.flv", BIG, unit + 5 * MIN),
+                ("tiny.flv", 1000, unit + 6 * MIN),
+                ("a-2.flv.part", BIG, unit + 9 * MIN),
+            ],
+        )
+        .await;
+        let key = key::primary_key(7, unit);
+        let (_db, pool) = store::tests::pool().await;
+        let crashed = SessionRecord {
+            local_session_id: Some(session),
+            unit_started_at: Some(unit),
+            progress_at: Some(unit + 5 * MIN),
+            ..row(&key, 7, unit, PrimaryState::Uploading)
+        };
+        store::save_session(&pool, &crashed).await.unwrap();
+        let taken = ReportedSession {
+            takeover_of: Some(key.clone()),
+            ended_at: Some(unit + 40 * MIN),
+            ..reported(
+                &key::standby_key(7, unit + 11 * MIN),
+                7,
+                unit + 11 * MIN,
+                ReportedState::AwaitingPrimary,
+            )
+        };
+
+        let primary = Primary::start(
+            pool.clone(),
+            services.clone(),
+            HaMode::Takeover,
+            HaParams::default(),
+            WINDOW,
+        )
+        .await
+        .unwrap();
+        primary.set_rooms(HashMap::from([(url.clone(), 7)]));
+        let (outbox, mut frames) = mpsc::unbounded_channel();
+        primary.connected(outbox);
+        primary.standby_message(report(vec![taken.clone()]));
+        let messages = until(&mut frames, "uploaded").await;
+        let kinds: Vec<&str> = messages.iter().map(HaMessage::kind).collect();
+        assert_eq!(kinds, ["session_ended", "upload_started", "uploaded"]);
+        assert!(matches!(
+            messages.last(),
+            Some(HaMessage::Uploaded { key: k, bvid, to: Some(to), yielded: true, .. })
+                if *k == key && bvid == "BVP0001" && *to == unit + 9 * MIN
+        ));
+        assert_eq!(
+            ops(&double),
+            [
+                "login",
+                "upload_start a-1.flv",
+                "upload a-1.flv",
+                "upload_start a-2.flv",
+                "upload a-2.flv",
+                "submit",
+            ]
+        );
+        let submit = double.entries().pop().unwrap();
+        assert_eq!(submit["parts"], serde_json::json!(["a-1", "a-2"]));
+        assert_eq!(submit["title"], "房间7：直播标题");
+        assert!(recording.join("a-2.flv").exists());
+        assert!(!recording.join("a-2.flv.part").exists());
+        assert!(recording.join("old.flv").exists() && recording.join("tiny.flv").exists());
+        let paths: Vec<String> =
+            crate::server::workbench::store::session_segments(&services.pool, session)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|segment| segment.path)
+                .collect();
+        assert!(paths.contains(&recording.join("a-2.flv").to_string_lossy().into_owned()));
+        primary.flush().await;
+        let stored = store::session(&pool, &key).await.unwrap().unwrap();
+        assert_eq!(stored.primary_state, PrimaryState::Uploaded);
+        assert_eq!(stored.bvid.as_deref(), Some("BVP0001"));
+        assert_eq!(stored.uploader, Some(Uploader::Primary));
+        primary.stop();
+
+        // 主机又重启：不再投，回复稿件号
+        let primary = Primary::start(
+            pool.clone(),
+            services.clone(),
+            HaMode::Takeover,
+            HaParams::default(),
+            WINDOW,
+        )
+        .await
+        .unwrap();
+        primary.set_rooms(HashMap::from([(url, 7)]));
+        let (outbox, mut frames) = mpsc::unbounded_channel();
+        primary.connected(outbox);
+        primary.standby_message(report(vec![taken]));
+        let messages = until(&mut frames, "uploaded").await;
+        assert!(matches!(
+            messages.last(),
+            Some(HaMessage::Uploaded { key: k, bvid, .. }) if *k == key && bvid == "BVP0001"
+        ));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(double.entries().len(), 6, "只投了一次");
+        primary.stop();
+        double::install(None);
+    }
+
+    /// 主机那半只剩太小的分段，或文件已经不在盘上：`UploadSkipped`，备机投完整的一份（§6 F）
+    #[tokio::test]
+    async fn a_catch_up_without_usable_files_reports_upload_skipped() {
+        let _guard = crate::server::fleet::ha::test_guard().await;
+        let dir = tempfile::tempdir().unwrap();
+        let control = dir.path().join("control");
+        std::fs::create_dir_all(&control).unwrap();
+        let recording = dir.path().join("rec");
+        std::fs::create_dir_all(&recording).unwrap();
+        let double = Arc::new(Double::new(
+            dir.path().join("double.jsonl"),
+            control,
+            0,
+            "P",
+        ));
+        double::install(Some(double.clone()));
+
+        let services = services(dir.path()).await;
+        let unit = now_ms() - 60 * MIN;
+        let mut rooms = HashMap::new();
+        let mut rows = Vec::new();
+        let mut reports = Vec::new();
+        for room in [7, 8, 9] {
+            rooms.insert(add_room(&services, room).await, room);
+            let files: &[(&str, u64, i64)] = match room {
+                7 => &[
+                    ("tiny-1.flv", 1000, unit + MIN),
+                    ("tiny-2.flv.part", 10, unit + 2 * MIN),
+                ],
+                8 => &[("gone.flv", 25_000_000, unit + MIN)],
+                _ => &[("unlinked.flv", 25_000_000, unit + MIN)],
+            };
+            let session = recorded(&services, &recording, room, unit, files).await;
+            let key = key::primary_key(room, unit);
+            rows.push(SessionRecord {
+                // 9：场次记录也没有
+                local_session_id: (room != 9).then_some(session),
+                unit_started_at: Some(unit),
+                ..row(&key, room, unit, PrimaryState::Recording)
+            });
+            reports.push(ReportedSession {
+                takeover_of: Some(key),
+                ..reported(
+                    &key::standby_key(room, unit + 3 * MIN),
+                    room,
+                    unit + 3 * MIN,
+                    ReportedState::Recording,
+                )
+            });
+        }
+        std::fs::remove_file(recording.join("gone.flv")).unwrap();
+        let (_db, pool) = store::tests::pool().await;
+        for row in &rows {
+            store::save_session(&pool, row).await.unwrap();
+        }
+
+        let primary = Primary::start(
+            pool.clone(),
+            services.clone(),
+            HaMode::Takeover,
+            HaParams::default(),
+            WINDOW,
+        )
+        .await
+        .unwrap();
+        primary.set_rooms(rooms);
+        let (outbox, mut frames) = mpsc::unbounded_channel();
+        primary.connected(outbox);
+        primary.standby_message(report(reports));
+        let mut skipped = BTreeMap::new();
+        while skipped.len() < 3 {
+            for message in until(&mut frames, "upload_skipped").await {
+                if let HaMessage::UploadSkipped { room, reason, .. } = message {
+                    skipped.insert(room, reason);
+                }
+            }
+        }
+        assert_eq!(
+            skipped,
+            BTreeMap::from([
+                (7, SkipReason::Filtered),
+                (8, SkipReason::NoFiles),
+                (9, SkipReason::NoFiles),
+            ])
+        );
+        assert!(double.entries().is_empty(), "没有碰上传端");
+        assert!(recording.join("tiny-1.flv").exists(), "太小的留在盘上");
+        primary.flush().await;
+        for row in &rows {
+            let stored = store::session(&pool, &row.session_key)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(stored.primary_state, PrimaryState::Skipped);
+        }
+        primary.stop();
+        double::install(None);
     }
 }
