@@ -1477,6 +1477,7 @@ impl Pairing {
                 "min_proto": PAIR_SINCE,
                 "linked": active.member.linked(),
                 "pending": active.member.pending().await,
+                "accounts": active.member.accounts_status().await,
             }),
             None => json!({ "min_proto": PAIR_SINCE }),
         };

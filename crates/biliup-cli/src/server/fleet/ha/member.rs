@@ -368,6 +368,29 @@ impl Member {
         self.state.lock().await.file.queue.len()
     }
 
+    /// B 站账号的同步情况（面板与账号页的提示用）：登记了几个账号、最近一次账号变化（登录、刷新或删除）的时刻
+    /// 与在哪一台、还有几个账号的变化没送到对端。只有个数与时刻，不带凭据内容与路径
+    pub async fn accounts_status(&self) -> Value {
+        let state = self.state.lock().await;
+        let book = &state.file.book;
+        let latest = book
+            .with_prefix(ACCOUNT)
+            .map(|(_, record)| record.stamp)
+            .filter(|stamp| stamp.at > 0)
+            .max_by_key(|stamp| stamp.at);
+        serde_json::json!({
+            "count": book.with_prefix(ACCOUNT).filter(|(_, record)| !record.deleted()).count(),
+            "changed_at": latest.map(|stamp| stamp.at),
+            "changed_on": latest.map(|stamp| stamp.side.as_str()),
+            "pending": state
+                .file
+                .queue
+                .iter()
+                .filter(|queued| queued.key.starts_with(ACCOUNT))
+                .count(),
+        })
+    }
+
     /// 本机上可能有改动：扫一遍，有就排队、发出
     pub async fn scan(&self) {
         let mut state = self.state.lock().await;
@@ -1533,5 +1556,67 @@ pub(crate) mod tests {
             .into_iter()
             .map(|account| account.mid)
             .collect()
+    }
+
+    /// 账号的同步情况：个数、最近一次变化的时刻与哪一台、断线期间没送到的个数，重连后补上归零。
+    /// 只有个数与时刻，凭据内容、文件路径都不出现
+    #[tokio::test]
+    async fn the_account_status_has_counts_and_times_but_no_credentials() {
+        let c = machine().await;
+        let n = machine().await;
+        let cm = start(Side::Controller, &c).await;
+        let nm = start(Side::Node, &n).await;
+        let empty = cm.accounts_status().await;
+        assert_eq!(
+            empty,
+            serde_json::json!({ "count": 0, "changed_at": null, "changed_on": null, "pending": 0 })
+        );
+        let wire = Wire::connect(&cm, &nm, false).await;
+        eventually("起步同步完", || async { cm.pending().await == 0 }).await;
+
+        let first = n.dir.path().join("9900001.json");
+        login(&n.services, &first, 9900001, "h3a").await;
+        nm.scan().await;
+        eventually("控制面收到账号", || async {
+            accounts_of(&c.services).await == [9900001] && nm.pending().await == 0
+        })
+        .await;
+        for status in [cm.accounts_status().await, nm.accounts_status().await] {
+            assert_eq!(status["count"], 1, "{status}");
+            assert_eq!(status["changed_on"], "node", "{status}");
+            assert_eq!(status["pending"], 0, "{status}");
+            assert!(status["changed_at"].as_i64().unwrap() > 0, "{status}");
+            let text = status.to_string();
+            for secret in ["PLACEHOLDER", "SESSDATA", "cookie", ".json", "9900001"] {
+                assert!(!text.contains(secret), "{secret} 出现在 {text}");
+            }
+            assert!(!text.contains(&*n.dir.path().to_string_lossy()));
+            assert!(!text.contains(&*c.dir.path().to_string_lossy()));
+        }
+
+        // 断线期间备机又登录一个：它那边排着一个没送到，控制面还是一个；重连后补上
+        wire.cut(&cm, &nm);
+        login(
+            &n.services,
+            &n.dir.path().join("9900002.json"),
+            9900002,
+            "h3b",
+        )
+        .await;
+        nm.scan().await;
+        let offline = nm.accounts_status().await;
+        assert_eq!(
+            (offline["count"].clone(), offline["pending"].clone()),
+            (2.into(), 1.into())
+        );
+        assert_eq!(cm.accounts_status().await["count"], 1);
+        let wire = Wire::connect(&cm, &nm, false).await;
+        eventually("重连后补上", || async {
+            nm.accounts_status().await["pending"] == 0 && cm.accounts_status().await["count"] == 2
+        })
+        .await;
+        wire.cut(&cm, &nm);
+        cm.stop();
+        nm.stop();
     }
 }
