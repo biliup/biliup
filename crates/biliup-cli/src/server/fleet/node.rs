@@ -805,6 +805,8 @@ async fn session(
     let link = Link::Node(link_frames);
     let mut since = None;
     let mut ticker = tokio::time::interval(HEARTBEAT_INTERVAL);
+    // 读帧不能在 `select!` 里每轮重建：别的分支先就绪时，读了一半的长度或正文随它丢掉，之后的字节就对不上帧边界了
+    let mut reading = Box::pin(next_frame(recv));
     loop {
         tokio::select! {
             _ = ticker.tick() => {
@@ -820,39 +822,42 @@ async fn session(
                     return closed_outcome(close_code(&reason), true);
                 }
             }
-            frame = protocol::read_frame::<_, ControllerMessage>(&mut recv) => match frame {
-                Ok(Some(ControllerMessage::Relays { relays })) => {
-                    update_relays(node_file, file, &connected, relays)
-                }
-                Ok(Some(ControllerMessage::DesiredState(desired))) => {
-                    ha.pair(&desired, &link).await;
-                    if let Some(report) = ha.assign(desired.ha.clone(), &desired.rooms, &link).await {
-                        link.ha(report);
+            (rest, frame) = &mut reading => {
+                reading.set(next_frame(rest));
+                match frame {
+                    Ok(Some(ControllerMessage::Relays { relays })) => {
+                        update_relays(node_file, file, &connected, relays)
                     }
-                    // 同步队列与备机的上报先于落地房间：主机只等上报一会儿
-                    while let Ok(frame) = frames.try_recv() {
-                        if let Err(e) = protocol::write_frame(&mut send, &frame).await {
-                            debug!(error = %e, "fleet HA frame failed");
+                    Ok(Some(ControllerMessage::DesiredState(desired))) => {
+                        ha.pair(&desired, &link).await;
+                        if let Some(report) = ha.assign(desired.ha.clone(), &desired.rooms, &link).await {
+                            link.ha(report);
+                        }
+                        // 同步队列与备机的上报先于落地房间：主机只等上报一会儿
+                        while let Ok(frame) = frames.try_recv() {
+                            if let Err(e) = protocol::write_frame(&mut send, &frame).await {
+                                debug!(error = %e, "fleet HA frame failed");
+                                let reason = connection.closed().await;
+                                return closed_outcome(close_code(&reason), true);
+                            }
+                        }
+                        let ack = ha.reconcile(desired, reconciler).await;
+                        ha.set_rooms(reconciler.state());
+                        if let Err(e) = protocol::write_frame(&mut send, &NodeMessage::Ack(ack)).await {
+                            debug!(error = %e, "fleet ack failed");
                             let reason = connection.closed().await;
                             return closed_outcome(close_code(&reason), true);
                         }
                     }
-                    let ack = ha.reconcile(desired, reconciler).await;
-                    ha.set_rooms(reconciler.state());
-                    if let Err(e) = protocol::write_frame(&mut send, &NodeMessage::Ack(ack)).await {
-                        debug!(error = %e, "fleet ack failed");
+                    Ok(Some(ControllerMessage::Welcome { .. })) => {}
+                    Ok(Some(ControllerMessage::Ha(message))) => ha.message(message),
+                    Ok(Some(ControllerMessage::Pair(message))) => ha.pair_message(message, &link).await,
+                    Ok(None) | Err(_) => {
                         let reason = connection.closed().await;
                         return closed_outcome(close_code(&reason), true);
                     }
                 }
-                Ok(Some(ControllerMessage::Welcome { .. })) => {}
-                Ok(Some(ControllerMessage::Ha(message))) => ha.message(message),
-                Ok(Some(ControllerMessage::Pair(message))) => ha.pair_message(message, &link).await,
-                Ok(None) | Err(_) => {
-                    let reason = connection.closed().await;
-                    return closed_outcome(close_code(&reason), true);
-                }
-            },
+            }
             Some(message) = frames.recv() => {
                 if let Err(e) = protocol::write_frame(&mut send, &message).await {
                     debug!(error = %e, "fleet HA frame failed");
@@ -874,6 +879,17 @@ async fn session(
             }
         }
     }
+}
+
+/// 读控制面的下一帧，读取端一起交回，接着读下一帧
+async fn next_frame(
+    mut recv: RecvStream,
+) -> (
+    RecvStream,
+    Result<Option<ControllerMessage>, protocol::FrameError>,
+) {
+    let frame = protocol::read_frame(&mut recv).await;
+    (recv, frame)
 }
 
 /// 下一条要上报的事件；攒得太多被挤掉的记一笔跳过
