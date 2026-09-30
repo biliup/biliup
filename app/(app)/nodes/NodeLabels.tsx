@@ -1,8 +1,9 @@
 'use client'
 import { useRef, useState } from 'react'
-import { Button, Modal, Tag, TagInput, Toast, Typography } from '@douyinfe/semi-ui'
+import { Button, Tag, TagInput, Toast, Typography } from '@douyinfe/semi-ui'
 import { IconEdit2Stroked } from '@douyinfe/semi-icons'
 import { errorMessage, setNodeLabels, type FleetNode } from '@/app/lib/use-fleet'
+import { FormDialog } from '@/app/ui/shell'
 import styles from './labels.module.scss'
 
 const { Text } = Typography
@@ -102,14 +103,13 @@ function LabelsModal({
   }
 
   return (
-    <Modal
-      title={`编辑标签 · ${node.name}`}
-      visible
+    <FormDialog
+      title={`编辑标签「${node.name}」`}
+      size="sm"
       onCancel={onClose}
       onOk={save}
       okText="保存"
-      okButtonProps={{ loading: saving }}
-      style={{ width: 'min(480px, 92vw)' }}
+      confirmLoading={saving}
     >
       <div className={styles.modal}>
         <TagInput
@@ -153,6 +153,6 @@ function LabelsModal({
           </Text>
         ) : null}
       </div>
-    </Modal>
+    </FormDialog>
   )
 }
