@@ -1,8 +1,9 @@
 'use client'
 import { useRef, useState } from 'react'
-import { Form, Modal, Toast, Typography } from '@douyinfe/semi-ui'
+import { Form, Toast, Typography } from '@douyinfe/semi-ui'
 import type { FormApi } from '@douyinfe/semi-ui/lib/es/form'
 import { API_BASE } from '../lib/api-streamer'
+import { FormDialog } from './shell'
 
 export const MIN_PASSWORD_LENGTH = 8
 
@@ -60,15 +61,14 @@ export default function ChangePasswordModal({
   }
 
   return (
-    <Modal
+    <FormDialog
       title="修改密码"
+      size="sm"
       visible={visible}
       onOk={submit}
       onCancel={onClose}
       okText="保存"
       confirmLoading={saving}
-      style={{ width: 'min(440px, 92vw)' }}
-      closeOnEsc
     >
       <Form<Values> getFormApi={(formApi) => (api.current = formApi)} labelPosition="top">
         <Form.Input
@@ -110,6 +110,6 @@ export default function ChangePasswordModal({
       <Typography.Text type="tertiary" size="small">
         保存后当前浏览器保持登录，其它设备需要用新密码重新登录。
       </Typography.Text>
-    </Modal>
+    </FormDialog>
   )
 }
