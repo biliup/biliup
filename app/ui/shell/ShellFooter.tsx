@@ -49,16 +49,18 @@ export default function ShellFooter({
   return (
     <div className={styles.footer}>
       {footerExtra ? <div className={styles.footerExtra}>{footerExtra}</div> : null}
-      {onCancel && cancelText !== null ? (
-        <Button onClick={onCancel} disabled={loading}>
-          {cancelText}
-        </Button>
-      ) : null}
-      {okText ? (
-        <Button theme={okTheme} type={okType} icon={okIcon} onClick={run} loading={loading} disabled={okDisabled}>
-          {okText}
-        </Button>
-      ) : null}
+      <div className={styles.footerActions}>
+        {onCancel && cancelText !== null ? (
+          <Button onClick={onCancel} disabled={loading}>
+            {cancelText}
+          </Button>
+        ) : null}
+        {okText ? (
+          <Button theme={okTheme} type={okType} icon={okIcon} onClick={run} loading={loading} disabled={okDisabled}>
+            {okText}
+          </Button>
+        ) : null}
+      </div>
     </div>
   )
 }

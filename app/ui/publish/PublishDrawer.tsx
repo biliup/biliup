@@ -11,7 +11,6 @@ import {
   Radio,
   RadioGroup,
   Select,
-  SideSheet,
   Slider,
   Spin,
   TagInput,
@@ -27,7 +26,6 @@ import { formatSessionTime, ReportedError } from '@/app/lib/markers'
 import { formatPrecise } from '@/app/lib/sessions'
 import { useMe } from '@/app/lib/use-me'
 import { useTypeTree } from '@/app/lib/use-streamers'
-import { useWindowWidth } from '@/app/lib/useIsMobile'
 import {
   ARCHIVE_MANAGER_URL,
   COVER_TYPES,
@@ -58,13 +56,13 @@ import {
   usePublishQueue,
 } from '@/app/lib/publish'
 import { JobStatus, NO_SUBMIT, QueueBanner } from './JobStatus'
+import { FormSheet, SheetFooterBar } from '@/app/ui/shell'
 import styles from './publish.module.scss'
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-const DRAWER_WIDTH = 560
 type DtimeMode = 'template' | 'now' | 'at'
 const STREAMER_TEMPLATE = 'streamer'
 const NO_EDIT = '改封面、保存发布设置需要 clip.edit 权限'
@@ -180,22 +178,19 @@ export function PublishDrawer({
   onClose: () => void
   currentMs?: (() => number) | null
 }) {
-  const width = useWindowWidth()
   const title = target
     ? target.batch
       ? `集中发布 ${target.clips.length} 个切片`
       : `发布「${clipName(target.clips[0])}」`
     : '发布'
   return (
-    <SideSheet
+    <FormSheet
       visible={target !== null}
       onCancel={onClose}
       title={<span data-publish-drawer-title="">{title}</span>}
-      width={Math.min(DRAWER_WIDTH, width || DRAWER_WIDTH)}
-      bodyStyle={{ padding: 0 }}
-      // 窄屏布局的浮动菜单按钮是 1001，默认的 1000 会被它压住标题
-      zIndex={1002}
-      closeOnEsc
+      size="md"
+      flush
+      footer={null}
     >
       {target ? (
         <DrawerBody
@@ -205,7 +200,7 @@ export function PublishDrawer({
           currentMs={currentMs ?? null}
         />
       ) : null}
-    </SideSheet>
+    </FormSheet>
   )
 }
 
@@ -496,11 +491,7 @@ function DrawerBody({
             })}
           </ul>
         </div>
-        <footer className={styles.drawerFoot}>
-          <Button theme="solid" onClick={onClose}>
-            关闭
-          </Button>
-        </footer>
+        <SheetFooterBar okText="关闭" onOk={onClose} />
       </div>
     )
   }
@@ -865,35 +856,36 @@ function DrawerBody({
         ) : null}
       </div>
 
-      <footer className={styles.drawerFoot}>
-        {submitReason ? (
-          <Text type="danger" size="small" className={styles.drawerReason} data-publish-reason="">
-            {submitReason}
-          </Text>
-        ) : (
-          <Text type="tertiary" size="small" className={styles.drawerReason}>
-            提交后：导出（还没导出时快速剪）→ 上传 → 投稿；同一时间只传一个稿件
-          </Text>
-        )}
-        {!target.batch ? (
-          <Tooltip content={canEdit ? '只存设置，不发布' : NO_EDIT}>
-            <span className={styles.inlineWrap}>
-              <Button disabled={!canEdit || !!problem || publishing} loading={saving} onClick={save}>
-                只保存
-              </Button>
-            </span>
-          </Tooltip>
-        ) : null}
-        <Button
-          theme="solid"
-          icon={<IconSend />}
-          disabled={submitReason !== null || previewLoading || saving}
-          loading={publishing}
-          onClick={publish}
-        >
-          {combine ? '发布多 P 稿件' : target.clips.length > 1 ? `发布 ${target.clips.length} 个稿件` : '发布'}
-        </Button>
-      </footer>
+      <SheetFooterBar
+        footerExtra={
+          <>
+            {submitReason ? (
+              <Text type="danger" size="small" className={styles.drawerReason} data-publish-reason="">
+                {submitReason}
+              </Text>
+            ) : (
+              <Text type="tertiary" size="small" className={styles.drawerReason}>
+                提交后：导出（还没导出时快速剪）→ 上传 → 投稿；同一时间只传一个稿件
+              </Text>
+            )}
+            {!target.batch ? (
+              <Tooltip content={canEdit ? '只存设置，不发布' : NO_EDIT}>
+                <span className={styles.inlineWrap}>
+                  <Button disabled={!canEdit || !!problem || publishing} loading={saving} onClick={save}>
+                    只保存
+                  </Button>
+                </span>
+              </Tooltip>
+            ) : null}
+          </>
+        }
+        onCancel={onClose}
+        okText={combine ? '发布多 P 稿件' : target.clips.length > 1 ? `发布 ${target.clips.length} 个稿件` : '发布'}
+        okIcon={<IconSend />}
+        okDisabled={submitReason !== null || previewLoading || saving}
+        confirmLoading={publishing}
+        onOk={publish}
+      />
     </div>
   )
 }
