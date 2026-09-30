@@ -1,6 +1,5 @@
 import {
   Form,
-  Modal,
   Notification,
   Collapse,
   Select,
@@ -13,6 +12,7 @@ import { LiveStreamerEntity } from '../lib/api-streamer'
 import { SupportedPlatforms } from '@/app/ui/plugins'
 import { useBiliUsers } from '../lib/use-streamers'
 import { FileSizeField } from './FileSizeInput'
+import { FormSheet } from './shell'
 
 type PluginProps = {
   entity?: LiveStreamerEntity
@@ -251,18 +251,13 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
   return (
     <>
       {childrenWithProps}
-      <Modal
-        title="配置覆写"
+      <FormSheet
+        title={entity?.remark ? `配置覆写「${entity.remark}」` : '配置覆写'}
         visible={visible}
+        size="md"
+        okText="保存"
         onOk={handleOk}
-        style={{ width: 'min(600px, 90vw)' }}
         onCancel={handleCancel}
-        bodyStyle={{
-          overflow: 'auto',
-          maxHeight: 'calc(100vh - 320px)',
-          paddingLeft: 10,
-          paddingRight: 10,
-        }}
       >
         <Form initValues={entity} getFormApi={formApi => (api.current = formApi)}>
           <Form.TextArea
@@ -296,7 +291,7 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
             </Collapse>
           </Form.Section>
         </Form>
-      </Modal>
+      </FormSheet>
     </>
   )
 }
