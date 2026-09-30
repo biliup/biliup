@@ -32,6 +32,7 @@ import LocalNodeOffer from './LocalNodeOffer'
 import JoinDialog from './JoinDialog'
 import RoomsPanel, { CreateRoomButton } from './RoomsPanel'
 import TemplatesPanel from './TemplatesPanel'
+import { NodeOverrideSheet } from './FleetConfigEditor'
 import RemovalNotices from './RemovalNotices'
 import NodeLabels from './NodeLabels'
 import AlertsPanel, { NodeAlertBadge } from './AlertsPanel'
@@ -114,6 +115,9 @@ function Nodes() {
   const requested = searchParams.get('tab')
   const nodeParam = Number(searchParams.get('node'))
   const alertNode = Number.isInteger(nodeParam) && nodeParam > 0 ? nodeParam : null
+  // 节点覆盖是节点的附属内容：在本页以抽屉打开，地址带 ?override=N，关掉即去掉
+  const overrideParam = Number(searchParams.get('override'))
+  const overrideId = Number.isInteger(overrideParam) && overrideParam > 0 ? overrideParam : null
   const controller = me?.fleet_controller === true
   const canManage = can('node.manage')
   const { data, error, isLoading, mutate } = useSWR<FleetNodes>(controller ? FLEET_NODES_KEY : null, fetcher, {
@@ -313,7 +317,9 @@ function Nodes() {
                   onRevoke={revoke}
                   controllerVersion={data.controller_version}
                   onEditConfig={
-                    canViewConfig ? (n) => router.push(`/nodes/config?node=${n.id}`) : undefined
+                    canViewConfig
+                      ? (n) => router.replace(`${pathname}?override=${n.id}`, { scroll: false })
+                      : undefined
                   }
                   badge={
                     <NodeAlertBadge
@@ -461,6 +467,14 @@ function Nodes() {
             setPairing(false)
             if (paired) switchTab('ha')
           }}
+        />
+      ) : null}
+      {overrideId !== null && canViewConfig && data ? (
+        <NodeOverrideSheet
+          key={overrideId}
+          node={nodes.find((n) => n.id === overrideId)}
+          canManage={canManage}
+          onClose={() => router.replace(pathname, { scroll: false })}
         />
       ) : null}
       {joining ? (

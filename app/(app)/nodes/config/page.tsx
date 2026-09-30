@@ -1,58 +1,35 @@
 'use client'
-import { Suspense } from 'react'
-import useSWR from 'swr'
-import { useSearchParams } from 'next/navigation'
-import { Button, Empty, Spin } from '@douyinfe/semi-ui'
-import { fetcher } from '@/app/lib/api-streamer'
+import { Suspense, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { Spin } from '@douyinfe/semi-ui'
 import { useMe } from '@/app/lib/use-me'
-import { errorMessage, FLEET_NODES_KEY, FLEET_REFRESH_MS, type FleetNodes } from '@/app/lib/use-fleet'
-import { FLEET_CONFIG_BACK, FleetConfigStatePage, FleetGlobalConfigPage, FleetNodeConfigPage } from '../FleetConfigEditor'
+import { FLEET_CONFIG_BACK, FleetConfigStatePage, FleetGlobalConfigPage } from '../FleetConfigEditor'
 import FleetPageGate from '../FleetPageGate'
 import styles from '../fleet-config.module.scss'
 
-/** `/nodes/config` 为全局 Fleet 配置，`/nodes/config?node=N` 为这台节点的覆盖 */
+/** `/nodes/config`：全局 Fleet 配置。节点覆盖是节点的附属内容，在节点页上以抽屉打开（`/nodes?override=N`） */
 function FleetConfig() {
+  const router = useRouter()
   const searchParams = useSearchParams()
   const nodeId = Number(searchParams.get('node'))
-  const override = Number.isInteger(nodeId) && nodeId > 0
+  const legacyOverride = Number.isInteger(nodeId) && nodeId > 0
   const { can } = useMe()
-  const canManage = can('node.manage')
-  const { data, error, mutate } = useSWR<FleetNodes>(
-    override ? FLEET_NODES_KEY : null,
-    fetcher,
-    { refreshInterval: FLEET_REFRESH_MS },
-  )
 
-  if (!override) return <FleetGlobalConfigPage canManage={canManage} />
+  // #1797 时节点覆盖是 /nodes/config?node=N，旧链接转到节点页并打开那台节点的抽屉
+  useEffect(() => {
+    if (legacyOverride) router.replace(`/nodes?override=${nodeId}`)
+  }, [legacyOverride, nodeId, router])
 
-  const title = '节点覆盖'
-  if (!data) {
+  if (legacyOverride) {
     return (
-      <FleetConfigStatePage title={title}>
+      <FleetConfigStatePage title="节点覆盖">
         <div className={styles.center}>
-          {error ? (
-            <>
-              <Empty title="加载失败" description={errorMessage(error)} />
-              <Button onClick={() => mutate()}>重试</Button>
-            </>
-          ) : (
-            <Spin size="large" />
-          )}
+          <Spin size="large" />
         </div>
       </FleetConfigStatePage>
     )
   }
-  const node = data.nodes.find((n) => n.id === nodeId)
-  if (!node) {
-    return (
-      <FleetConfigStatePage title={title}>
-        <div className={styles.center}>
-          <Empty title="节点不存在或已被移除" />
-        </div>
-      </FleetConfigStatePage>
-    )
-  }
-  return <FleetNodeConfigPage key={node.id} node={node} canManage={canManage} />
+  return <FleetGlobalConfigPage canManage={can('node.manage')} />
 }
 
 export default function Page() {
