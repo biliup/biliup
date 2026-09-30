@@ -1,11 +1,12 @@
 'use client'
-import React, { useMemo, useRef, useState } from 'react'
-import { Form, Modal, Spin, Toast, Typography } from '@douyinfe/semi-ui'
+import React, { useMemo, useRef } from 'react'
+import { Form, Spin, Toast, Typography } from '@douyinfe/semi-ui'
 import type { FormApi, FormFCChild } from '@douyinfe/semi-ui/lib/es/form'
 import TemplateFields from '@/app/ui/TemplateFields'
 import type { BiliType } from '@/app/lib/api-streamer'
 import { useTypeTree } from '@/app/lib/use-streamers'
-import { useIsMobile } from '@/app/lib/useIsMobile'
+import { IconPlusCircle } from '@douyinfe/semi-icons'
+import { FormPage, usePageLabelPosition } from '@/app/ui/shell'
 import {
   createTemplate,
   errorMessage,
@@ -67,25 +68,24 @@ function fromForm(values: Record<string, any>): TemplateInput {
   }
 }
 
+export const FLEET_TEMPLATES_BACK = { href: '/nodes?tab=templates', label: '投稿模板' }
+
 /**
- * 控制面上的投稿模板表单：字段与本机「投稿管理」共用 `TemplateFields`，
+ * 控制面上的投稿模板页：字段与本机「投稿管理」的模板页共用 `TemplateFields` 和同一个页面外壳，
  * 只是「投稿账号」按节点上报的 mid 选（凭据文件留在各节点上）。
  */
-export default function FleetTemplateModal({
+export default function FleetTemplateEditor({
   template,
   nodes,
-  onClose,
   onSaved,
 }: {
   /** null 为新建 */
   template: FleetTemplate | null
   nodes: FleetNode[]
-  onClose: () => void
   onSaved: () => void
 }) {
-  const isMobile = useIsMobile()
+  const labelPosition = usePageLabelPosition()
   const api = useRef<FormApi>(undefined)
-  const [saving, setSaving] = useState(false)
   const { typeTree, isLoading } = useTypeTree()
 
   const accounts = useMemo(() => {
@@ -132,9 +132,8 @@ export default function FleetTemplateModal({
   const initValues = useMemo(() => toForm(template, typeTree), [template, typeTree])
 
   const save = async () => {
-    const values = await api.current?.validate().catch(() => undefined)
+    const values = await api.current?.validate()
     if (!values) return
-    setSaving(true)
     try {
       const input = fromForm(values)
       if (template) await updateTemplate(template.id, input)
@@ -143,8 +142,7 @@ export default function FleetTemplateModal({
       onSaved()
     } catch (e) {
       Toast.error({ content: errorMessage(e), duration: 6 })
-    } finally {
-      setSaving(false)
+      throw e
     }
   }
 
@@ -152,7 +150,7 @@ export default function FleetTemplateModal({
     <Form.Select
       field="account_mid"
       label={{ text: '投稿账号', optional: true }}
-      style={{ width: 320 }}
+      style={{ width: '100%', maxWidth: 320 }}
       optionList={accounts}
       showClear
       placeholder={accounts.length ? '选择节点上报的账号' : '还没有节点上报 B 站账号'}
@@ -161,16 +159,13 @@ export default function FleetTemplateModal({
   )
 
   return (
-    <Modal
+    <FormPage
       title={template ? `编辑投稿模板「${template.template_name}」` : '新建投稿模板'}
-      visible
-      fullScreen={isMobile}
-      width={isMobile ? undefined : 'min(820px, 94vw)'}
-      onCancel={onClose}
-      onOk={save}
-      okText="保存"
-      confirmLoading={saving}
-      bodyStyle={{ overflow: 'auto', maxHeight: isMobile ? undefined : 'calc(100vh - 260px)' }}
+      description="Fleet 投稿模板：保存后下发到用它的节点"
+      back={FLEET_TEMPLATES_BACK}
+      okText={template ? '保存模板' : '创建模板'}
+      okIcon={template ? undefined : <IconPlusCircle />}
+      onOk={isLoading ? undefined : save}
     >
       {isLoading ? (
         <div className={styles.dialogCenter}>
@@ -181,11 +176,11 @@ export default function FleetTemplateModal({
           className={styles.templateForm}
           initValues={initValues}
           getFormApi={(formApi) => (api.current = formApi)}
-          labelPosition={isMobile ? 'top' : 'left'}
+          labelPosition={labelPosition}
           labelWidth="140px"
           render={(props: FormFCChild<any>) => <TemplateFields {...props} accountField={accountField} plainTid={!typeTree} />}
         />
       )}
-    </Modal>
+    </FormPage>
   )
 }

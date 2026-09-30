@@ -1,8 +1,7 @@
 'use client'
 
-import React, { Suspense, useEffect, useRef, useState } from 'react'
-import { Button, Form, Notification, Toast, Typography } from '@douyinfe/semi-ui'
-import { IconPlusCircle } from '@douyinfe/semi-icons'
+import React, { Suspense, useRef } from 'react'
+import { Form, Notification, Spin, Toast, Typography } from '@douyinfe/semi-ui'
 import {
   BiliType,
   fetcher,
@@ -11,14 +10,14 @@ import {
   StudioEntity,
 } from '@/app/lib/api-streamer'
 import TemplateFields from '@/app/ui/TemplateFields'
-import { registerMediaQuery, responsiveMap } from '@/app/lib/utils'
 import useSWRMutation from 'swr/mutation'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { FormApi } from '@douyinfe/semi-ui/lib/es/form'
 import useSWR from 'swr'
 import { useTypeTree } from '@/app/lib/use-streamers'
-import PageHeader from '../../components/PageHeader'
-import dc from '@/app/ui/data-card.module.scss'
+import { FormPage, usePageLabelPosition } from '@/app/ui/shell'
+
+const BACK = { href: '/upload-manager', label: '投稿管理' }
 
 const Edit = () => {
   const { Paragraph } = Typography
@@ -31,18 +30,7 @@ const Edit = () => {
   const router = useRouter()
   const { typeTree, isError } = useTypeTree()
   const api = useRef<FormApi>(undefined)
-  const [labelPosition, setLabelPosition] = useState<'top' | 'left' | 'inset'>('inset')
-  useEffect(() => {
-    const unRegister = registerMediaQuery(responsiveMap.lg, {
-      match: () => {
-        setLabelPosition('left')
-      },
-      unmatch: () => {
-        setLabelPosition('top')
-      },
-    })
-    return () => unRegister()
-  }, [])
+  const labelPosition = usePageLabelPosition()
 
   // 分区树来自 /bili/archive/pre，需要一个可用的 B 站 cookie；没有账号时后端返回 500，
   // 这里必须给出可读的原因而不是空白页。
@@ -63,22 +51,20 @@ const Edit = () => {
       : undefined
   if (loadError) {
     return (
-      <>
-        <PageHeader
-          icon={<IconPlusCircle size="large" />}
-          title="编辑投稿模板"
-          description="修改模板信息并保存"
-        />
-        <div className={dc.content}>
-          <div className={dc.card} style={{ padding: '28px 32px' }}>
-            <Typography.Text type="danger">{loadError}</Typography.Text>
-          </div>
-        </div>
-      </>
+      <FormPage title="编辑投稿模板" back={BACK}>
+        <Typography.Text type="danger">{loadError}</Typography.Text>
+      </FormPage>
     )
   }
-  if (isLoading) return <div>Loading...</div>
-  if (!data || !typeTree) return null
+  if (isLoading || !data || !typeTree) {
+    return (
+      <FormPage title="编辑投稿模板" back={BACK}>
+        <div style={{ padding: '64px 0', textAlign: 'center' }}>
+          <Spin size="large" />
+        </div>
+      </FormPage>
+    )
+  }
 
   let uploadStreamers = {
     ...data,
@@ -138,35 +124,28 @@ const Edit = () => {
         content: <Paragraph style={{ maxWidth: 450 }}>{e.message}</Paragraph>,
         style: { width: 'min-content' },
       })
+      throw e
     }
   }
 
   return (
-    <>
-      <PageHeader
-        icon={<IconPlusCircle size="large" />}
-        title="编辑投稿模板"
-        description="修改模板信息并保存"
-        actions={
-          <Button onClick={handleSave} type="primary" icon={<IconPlusCircle />} theme="solid">
-            保存模板
-          </Button>
-        }
+    <FormPage
+      title={`编辑投稿模板「${data.template_name}」`}
+      description="修改模板信息并保存"
+      back={BACK}
+      okText="保存模板"
+      onOk={handleSave}
+    >
+      <Form
+        initValues={uploadStreamers}
+        autoScrollToError
+        onSubmit={handleSave}
+        component={TemplateFields}
+        getFormApi={(formApi) => (api.current = formApi)}
+        labelWidth="140px"
+        labelPosition={labelPosition}
       />
-      <div className={dc.content}>
-        <div className={dc.card} style={{ padding: '28px 32px 40px' }}>
-          <Form
-            initValues={uploadStreamers}
-            autoScrollToError
-            onSubmit={handleSave}
-            component={TemplateFields}
-            getFormApi={(formApi) => (api.current = formApi)}
-            labelWidth="180px"
-            labelPosition={labelPosition}
-          />
-        </div>
-      </div>
-    </>
+    </FormPage>
   )
 }
 
