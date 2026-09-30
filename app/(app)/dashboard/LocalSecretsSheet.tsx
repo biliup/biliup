@@ -1,16 +1,14 @@
 'use client'
 import React, { useRef, useState } from 'react'
-import useSWR from 'swr'
-import { Avatar, Banner, Button, Empty, Form, Spin, Toast } from '@douyinfe/semi-ui'
+import { Banner, Form, Toast } from '@douyinfe/semi-ui'
 import type { FormApi } from '@douyinfe/semi-ui/lib/es/form'
-import { fetcher, put } from '@/app/lib/api-streamer'
+import { put } from '@/app/lib/api-streamer'
 import FormSnapshot from '@/app/ui/FormSnapshot'
 import { errorMessage } from '@/app/lib/use-fleet'
-import { pairLabel, useMe, type FleetPair } from '@/app/lib/use-me'
-import { useBiliUsers } from '@/app/lib/use-streamers'
+import { pairLabel, type FleetPair } from '@/app/lib/use-me'
 import { fieldMarksCss, LOCAL_SECRET_FIELDS, secretsPayload, type ConfigValues } from '@/app/lib/fleet-config'
 import { PlatformPanels } from '@/app/ui/plugins'
-import { FormPage } from '@/app/ui/shell'
+import { FormSheet } from '@/app/ui/shell'
 import dashboard from '@/app/styles/dashboard.module.scss'
 import styles from '../nodes/fleet-config.module.scss'
 
@@ -69,45 +67,35 @@ export function PairConfigBanner({ controller, pair }: { controller: string; pai
   )
 }
 
-const TITLE = '本机密钥'
-const BACK = { href: '/dashboard', label: '空间配置' }
-
 /**
- * `/dashboard/secrets`：受控节点上改 Cookie、密码的页面，空间配置页头的「本机密钥」进来。
- * 只显示本机密钥字段，保存时其余配置原样回传（secretsPayload）
+ * 空间配置页上的「本机密钥」抽屉（空间配置的附属内容，`/dashboard?secrets=1`）：
+ * 受控节点上改 Cookie、密码，只显示本机密钥字段，保存时其余配置原样回传（secretsPayload）
  */
-export default function LocalSecretsPage() {
-  const { data: entity, error, isLoading, mutate } = useSWR<ConfigValues>('/v1/configuration', fetcher)
-  const { biliUsers } = useBiliUsers()
-  const { me, can } = useMe()
-  const editable = can('config.edit')
-  const managed = !!me?.fleet_node?.config
+export default function LocalSecretsSheet({
+  entity,
+  list,
+  onClose,
+  onSaved,
+}: {
+  entity: ConfigValues
+  list: unknown
+  onClose: () => void
+  onSaved: () => void
+}) {
   const apiRef = useRef<FormApi>(undefined)
   const snapshotRef = useRef<ConfigValues>({})
   const busy = useRef(false)
   const [saving, setSaving] = useState(false)
-  const [formKey, setFormKey] = useState(0)
   const [platform, setPlatform] = useState(PLATFORMS[0].key)
 
-  const list = biliUsers.map((item) => ({
-    value: item.value,
-    label: (
-      <>
-        <Avatar size="extra-small" src={item.face} />
-        <span style={{ marginLeft: 8 }}>{item.name}</span>
-      </>
-    ),
-  }))
-
   const save = async (values: ConfigValues) => {
-    if (busy.current || !entity) return
+    if (busy.current) return
     busy.current = true
     setSaving(true)
     try {
       await put('/v1/configuration', { arg: secretsPayload(entity, snapshotRef.current, values) })
       Toast.success('本机密钥已保存')
-      await mutate()
-      setFormKey((key) => key + 1)
+      onSaved()
     } catch (e) {
       Toast.error({ content: errorMessage(e), duration: 6 })
     } finally {
@@ -116,54 +104,29 @@ export default function LocalSecretsPage() {
     }
   }
 
-  if (isLoading || !entity) {
-    return (
-      <FormPage title={TITLE} back={BACK} fill>
-        <div className={styles.center}>
-          {error ? (
-            <>
-              <Empty title="加载失败" description={errorMessage(error)} />
-              <Button onClick={() => mutate()}>重试</Button>
-            </>
-          ) : (
-            <Spin size="large" />
-          )}
-        </div>
-      </FormPage>
-    )
-  }
-
   return (
-    <FormPage
-      title={TITLE}
-      description={
-        editable
-          ? 'Cookie、账号密码只存在这台机器上，不随控制面下发，控制面也看不到'
-          : '只读：修改本机密钥需要超级管理员'
-      }
-      back={BACK}
-      okText={editable ? '保存' : undefined}
-      onOk={() => apiRef.current?.submitForm()}
-      okLoading={saving}
+    <FormSheet
+      title="本机密钥"
+      size="md"
       fill
+      onCancel={onClose}
+      okText="保存"
+      onOk={() => apiRef.current?.submitForm()}
+      confirmLoading={saving}
     >
-      {managed ? null : (
-        <div className={styles.intro}>
-          <Banner
-            type="info"
-            fullMode={false}
-            closeIcon={null}
-            description="这台机器的配置不由控制面管理，这些字段也可以直接在「空间配置」里改。"
-          />
-        </div>
-      )}
+      <div className={styles.intro}>
+        <Banner
+          type="info"
+          fullMode={false}
+          closeIcon={null}
+          description="Cookie、账号密码只存在这台机器上，不随控制面下发，控制面也看不到。"
+        />
+      </div>
       <div className={styles.formHost} data-field-scope={SCOPE}>
         <style>{fieldMarksCss(SCOPE, { show: LOCAL_SECRET_FIELDS })}</style>
         <Form
-          key={formKey}
           className={dashboard.form}
           initValues={entity}
-          disabled={!editable}
           getFormApi={(formApi) => (apiRef.current = formApi)}
           onSubmit={(values) => save(values)}
         >
@@ -192,6 +155,6 @@ export default function LocalSecretsPage() {
           <FormSnapshot snapshotRef={snapshotRef} />
         </Form>
       </div>
-    </FormPage>
+    </FormSheet>
   )
 }
