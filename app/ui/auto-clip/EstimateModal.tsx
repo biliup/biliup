@@ -1,7 +1,7 @@
 'use client'
 import React, { useState } from 'react'
 import useSWR from 'swr'
-import { Banner, Button, Checkbox, InputNumber, Modal, Spin, Toast, Typography } from '@douyinfe/semi-ui'
+import { Banner, Checkbox, InputNumber, Spin, Toast, Typography } from '@douyinfe/semi-ui'
 import {
   type AutoClipStatus,
   autoClipError,
@@ -12,6 +12,7 @@ import {
 import { ReportedError } from '@/app/lib/markers'
 import { formatSpan } from '@/app/lib/sessions'
 import { useTextPref } from '@/app/lib/use-local-pref'
+import { FormDialog } from '@/app/ui/shell'
 import styles from './auto-clip.module.scss'
 
 /** 单价只存在这个浏览器里，只用来把预估换算成金额 */
@@ -79,25 +80,14 @@ export default function EstimateModal({
 
   const images = status?.thumbnails_active ? '截图' : null
   return (
-    <Modal
+    <FormDialog
       title="生成候选"
-      visible
+      size="sm"
       onCancel={onClose}
-      width={520}
-      footer={
-        <>
-          <Button onClick={onClose}>取消</Button>
-          <Button
-            theme="solid"
-            loading={starting}
-            disabled={!estimate || blocked}
-            onClick={start}
-            data-testid="auto-clip-confirm"
-          >
-            确认生成
-          </Button>
-        </>
-      }
+      okText="确认生成"
+      onOk={start}
+      confirmLoading={starting}
+      okDisabled={!estimate || blocked}
     >
       {error ? (
         <Banner type="danger" fullMode={false} closeIcon={null} description={autoClipError(error)} />
@@ -200,6 +190,6 @@ export default function EstimateModal({
           ) : null}
         </div>
       )}
-    </Modal>
+    </FormDialog>
   )
 }

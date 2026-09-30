@@ -5,7 +5,6 @@ import {
   Button,
   Collapsible,
   Form,
-  Modal,
   Switch,
   Tag,
   Toast,
@@ -25,6 +24,7 @@ import {
 import SectionTitle from '../../(app)/components/SectionTitle'
 import { API_BASE, fetcher, handleResponse } from '../../lib/api-streamer'
 import styles from '../../styles/dashboard.module.scss'
+import { FormDialog } from '../shell'
 
 type CheckStatus = 'ok' | 'warning' | 'failed' | 'skipped'
 
@@ -489,11 +489,11 @@ const AutoClip: React.FC<Props> = ({ disabled, entity }) => {
           )}
         </div>
       </Collapsible>
-      <Modal
+      <FormDialog
         title="开启自动切片（实验）"
+        size="sm"
         visible={confirming}
         okText="开启"
-        cancelText="取消"
         onOk={() => {
           formApi.setValue('auto_clip.enabled', true)
           setConfirming(false)
@@ -518,7 +518,7 @@ const AutoClip: React.FC<Props> = ({ disabled, entity }) => {
           )}
           只有手动「生成候选」或直播间打开了「下播后自动生成候选」时才会发送。确定开启吗？
         </div>
-      </Modal>
+      </FormDialog>
     </div>
   )
 }
