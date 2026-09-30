@@ -135,9 +135,9 @@
 
 /* ===== 抽屉 ===== */
 .drawer {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  height: 100%;
   min-height: 0;
 }
 .drawerScroll {
@@ -148,16 +148,6 @@
   flex-direction: column;
   gap: 14px;
   padding: 16px 24px 20px;
-}
-.drawerFoot {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 24px;
-  border-top: 1px solid var(--semi-color-border);
-  background: var(--semi-color-bg-2);
 }
 .drawerReason {
   flex: 1 1 200px;
