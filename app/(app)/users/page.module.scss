@@ -69,11 +69,16 @@
 
 .roleOption {
   padding: 6px 0;
+
+  :global(.semi-radio-addon) {
+    align-items: baseline;
+  }
 }
 
 .roleName {
   font-weight: 600;
   margin-right: 8px;
+  white-space: nowrap;
 }
 
 .roleDesc {
