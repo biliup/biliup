@@ -46,6 +46,15 @@
   padding: 16px 24px 24px;
 }
 
+/* fill：正文本身不滚，内容占满剩余高度（配置表单的 Tab 面板各自滚动） */
+.sheetFill :global(.semi-sidesheet-body) {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+  padding: 12px 24px 0;
+}
+
 .sheet :global(.semi-sidesheet-footer) {
   padding: 12px 24px;
   border-top: 1px solid var(--semi-color-border);

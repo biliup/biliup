@@ -12,6 +12,8 @@ export type FormSheetProps = ShellActions & {
   size?: SheetSize
   /** 省略时用统一底栏；null 为不要底栏 */
   footer?: ReactNode | null
+  /** 正文不滚、占满标题与底栏之间，由内容自己分区滚动（带 Tab 的配置） */
+  fill?: boolean
   closable?: boolean
   children?: ReactNode
 }
@@ -22,6 +24,7 @@ export default function FormSheet({
   visible = true,
   size = 'md',
   footer,
+  fill,
   closable = true,
   children,
   ...actions
@@ -32,7 +35,7 @@ export default function FormSheet({
     <SideSheet
       visible={visible}
       width={isMobile ? '100%' : SHEET_WIDTH[size]}
-      className={styles.sheet}
+      className={`${styles.sheet} ${fill ? styles.sheetFill : ''}`}
       closable={closable}
       closeOnEsc={closable}
       onCancel={onCancel}
