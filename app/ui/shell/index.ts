@@ -1,5 +1,5 @@
 export { default as FormDialog } from './FormDialog'
-export { default as FormSheet } from './FormSheet'
+export { default as FormSheet, SheetFooterBar } from './FormSheet'
 export { default as FormPage, usePageLabelPosition } from './FormPage'
 export { default as ShellFooter } from './ShellFooter'
 export * from './sizes'

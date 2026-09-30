@@ -14,6 +14,8 @@ export type FormSheetProps = ShellActions & {
   footer?: ReactNode | null
   /** 正文不滚、占满标题与底栏之间，由内容自己分区滚动（带 Tab 的配置） */
   fill?: boolean
+  /** 同 fill，但正文不留边距：内容自己分出滚动区和底栏（底栏状态在内容组件里时，配合 footer={null} 与 SheetFooterBar） */
+  flush?: boolean
   closable?: boolean
   children?: ReactNode
 }
@@ -25,6 +27,7 @@ export default function FormSheet({
   size = 'md',
   footer,
   fill,
+  flush,
   closable = true,
   children,
   ...actions
@@ -35,7 +38,7 @@ export default function FormSheet({
     <SideSheet
       visible={visible}
       width={isMobile ? '100%' : SHEET_WIDTH[size]}
-      className={`${styles.sheet} ${fill ? styles.sheetFill : ''}`}
+      className={`${styles.sheet} ${fill ? styles.sheetFill : ''} ${flush ? styles.sheetFlush : ''}`}
       closable={closable}
       closeOnEsc={closable}
       onCancel={onCancel}
@@ -48,5 +51,14 @@ export default function FormSheet({
     >
       {children}
     </SideSheet>
+  )
+}
+
+/** 由内容自己渲染的抽屉底栏，外观与 FormSheet 自带的底栏一致；放不下时左侧的说明与次要操作自动折到上一行 */
+export function SheetFooterBar(props: ShellActions) {
+  return (
+    <div className={styles.sheetFooterBar}>
+      <ShellFooter {...props} />
+    </div>
   )
 }

@@ -55,6 +55,28 @@
   padding: 12px 24px 0;
 }
 
+.sheetFlush :global(.semi-sidesheet-body) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.sheetFooterBar {
+  flex-shrink: 0;
+  padding: 12px 24px;
+  border-top: 1px solid var(--semi-color-border);
+}
+
+.sheetFooterBar .footer {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.sheetFooterBar .footerExtra {
+  flex: 1 1 200px;
+}
+
 .sheet :global(.semi-sidesheet-footer) {
   padding: 12px 24px;
   border-top: 1px solid var(--semi-color-border);
