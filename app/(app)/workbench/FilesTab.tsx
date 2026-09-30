@@ -81,11 +81,10 @@ export default function FilesTab() {
           empty={error ? '加载失败，请检查后端连接' : '暂无数据'}
         />
       </div>
-      <FormDialog title={fileName} size="lg" visible={visible} onCancel={() => setVisible(false)} footer={null}>
-        <div style={{ height: 'min(500px, calc(100dvh - 180px))' }}>
+      <FormDialog title={fileName} immersive visible={visible} onCancel={() => setVisible(false)}>
+        <div className={styles.playerStage}>
           <Players url={(process.env.NEXT_PUBLIC_API_SERVER ?? '') + '/static/' + fileName} />
         </div>
-        <div id="mse" />
       </FormDialog>
     </>
   )

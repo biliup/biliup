@@ -15,9 +15,13 @@
  * - 主按钮写动作（创建模板 / 保存 / 添加…），不写「确定」。
  */
 
-/** 弹窗三档：确认与 1–2 个输入 / 一般表单与结果 / 选择器、双栏、播放器 */
+/** 弹窗三档：确认与 1–2 个输入 / 一般表单与结果 / 选择器、双栏；播放器用沉浸式（见 IMMERSIVE_MAX_WIDTH） */
 export const DIALOG_WIDTH = { sm: 480, md: 640, lg: 820 } as const
 export type DialogSize = keyof typeof DIALOG_WIDTH
+
+/** 沉浸式弹窗（播放器）：最宽 1120，顶栏 48 高；宽度同时受视口高度限制，16:9 的画面连顶栏整个放得下 */
+export const IMMERSIVE_MAX_WIDTH = 1120
+export const IMMERSIVE_TITLE_HEIGHT = 48
 
 /** 抽屉三档，与 Semi SideSheet 的 small / medium / large 一致：列表型 / 表单型 / 带 Tab 的整组配置 */
 export const SHEET_WIDTH = { sm: 448, md: 684, lg: 920 } as const
