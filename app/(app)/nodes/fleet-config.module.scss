@@ -1,15 +1,5 @@
-/* Fleet 配置 / 节点覆盖侧栏：表单沿用空间配置页的 Tabs 与平台两栏布局（dashboard.module.scss），
-   这里只管侧栏里的外框、顶部说明和节点卡片上的配置状态行。 */
-
-.body {
-  height: 100%;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px 24px 0;
-  box-sizing: border-box;
-}
+/* Fleet 配置 / 节点覆盖页与本机密钥页：表单沿用空间配置页的 Tabs 与平台两栏布局（dashboard.module.scss），
+   页面外框由 FormPage 的 fill 布局负责，这里只管顶部说明、历史版本和节点卡片上的配置状态行。 */
 
 .center {
   flex: 1;
@@ -44,30 +34,12 @@
   overflow-wrap: anywhere;
 }
 
-/* 表单占满中间，每个 Tab 面板在内部滚动；底部按钮始终可见 */
+/* 表单占满说明下方的剩余高度，每个 Tab 面板在内部滚动 */
 .formHost {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-}
-
-.footer {
-  flex-shrink: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  margin: 0 -24px;
-  padding: 12px 24px;
-  border-top: 1px solid var(--semi-color-border);
-}
-
-.footerHint {
-  margin-right: auto;
-  font-size: 12px;
-  color: var(--semi-color-text-2);
 }
 
 .history {
@@ -124,14 +96,4 @@
   flex-basis: 100%;
   color: var(--semi-color-danger);
   overflow-wrap: anywhere;
-}
-
-@media (max-width: 680px) {
-  .body {
-    padding: 8px 12px 0;
-  }
-  .footer {
-    margin: 0 -12px;
-    padding: 10px 12px;
-  }
 }
