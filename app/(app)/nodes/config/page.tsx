@@ -6,7 +6,8 @@ import { Button, Empty, Spin } from '@douyinfe/semi-ui'
 import { fetcher } from '@/app/lib/api-streamer'
 import { useMe } from '@/app/lib/use-me'
 import { errorMessage, FLEET_NODES_KEY, FLEET_REFRESH_MS, type FleetNodes } from '@/app/lib/use-fleet'
-import { FleetConfigStatePage, FleetGlobalConfigPage, FleetNodeConfigPage } from '../FleetConfigEditor'
+import { FLEET_CONFIG_BACK, FleetConfigStatePage, FleetGlobalConfigPage, FleetNodeConfigPage } from '../FleetConfigEditor'
+import FleetPageGate from '../FleetPageGate'
 import styles from '../fleet-config.module.scss'
 
 /** `/nodes/config` 为全局 Fleet 配置，`/nodes/config?node=N` 为这台节点的覆盖 */
@@ -14,10 +15,10 @@ function FleetConfig() {
   const searchParams = useSearchParams()
   const nodeId = Number(searchParams.get('node'))
   const override = Number.isInteger(nodeId) && nodeId > 0
-  const { me, can } = useMe()
+  const { can } = useMe()
   const canManage = can('node.manage')
   const { data, error, mutate } = useSWR<FleetNodes>(
-    override && me?.fleet_controller ? FLEET_NODES_KEY : null,
+    override ? FLEET_NODES_KEY : null,
     fetcher,
     { refreshInterval: FLEET_REFRESH_MS },
   )
@@ -57,7 +58,15 @@ function FleetConfig() {
 export default function Page() {
   return (
     <Suspense>
-      <FleetConfig />
+      <FleetPageGate
+        title="Fleet 配置"
+        back={FLEET_CONFIG_BACK}
+        perm="config.view"
+        denied="查看 Fleet 配置需要「查看配置」权限"
+        fill
+      >
+        <FleetConfig />
+      </FleetPageGate>
     </Suspense>
   )
 }
