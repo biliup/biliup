@@ -6,7 +6,6 @@ import {
   Popconfirm,
   Notification,
   Typography,
-  Modal,
   Transfer,
   Card,
   Tag,
@@ -32,6 +31,7 @@ import { useBiliUsers } from '../../lib/use-streamers'
 import PageHeader from '../components/PageHeader'
 import { pairLabel, pairPeer, useMe } from '../../lib/use-me'
 import dc from '@/app/ui/data-card.module.scss'
+import { FormDialog } from '@/app/ui/shell'
 
 export default function UploadManager() {
   const { Text } = Typography
@@ -71,7 +71,7 @@ export default function UploadManager() {
         title: 'B 站账号列表为空',
         position: 'top',
         content: canManageAccounts
-          ? '请先在右侧点击新增账号'
+          ? '请先在右侧抽屉里添加账号'
           : '请联系超级管理员先登记 B 站账号',
         duration: 3,
       })
@@ -91,12 +91,17 @@ export default function UploadManager() {
     setVisibleModal(true)
   }
   const handleOk = async () => {
-    await sendRequest('/v1/uploads', {
-      arg: {
-        files: selectFiles.map(String),
-        template_id: selectEntity?.id,
-      },
-    })
+    try {
+      await sendRequest('/v1/uploads', {
+        arg: {
+          files: selectFiles.map(String),
+          template_id: selectEntity?.id,
+        },
+      })
+    } catch (e: any) {
+      Notification.error({ title: '投稿失败', content: e?.message ?? String(e) })
+      throw e
+    }
     setVisibleModal(false)
   }
 
@@ -117,13 +122,9 @@ export default function UploadManager() {
   const actions = (
     <>
       {canManageAccounts && (
-        <Button
-          onClick={change}
-          type="tertiary"
-          icon={<IconUserListStroked />}
-          aria-label="B 站账号"
-          title="B 站账号"
-        />
+        <Button onClick={change} type="tertiary" icon={<IconUserListStroked />}>
+          B 站账号
+        </Button>
       )}
       {canEditTemplates && (
         <Link href="/upload-manager/add" prefetch={false} onClick={handleAddLinkClick}>
@@ -138,25 +139,26 @@ export default function UploadManager() {
   return (
     <>
       {canManageAccounts && <UserList visible={visible} onCancel={change} />}
-      <Modal
-        size="medium"
-        title="文件选择"
-        okText="上传"
-        style={{ width: 'min(600px, 90vw)' }}
+      <FormDialog
+        size="lg"
+        title="选择要投稿的文件"
         visible={visibleModal}
+        okText={selectFiles.length > 0 ? `投稿 ${selectFiles.length} 个文件` : '投稿'}
+        okDisabled={selectFiles.length === 0}
         onOk={handleOk}
         onCancel={() => setVisibleModal(false)}
-        bodyStyle={{ overflow: 'auto' }}
-        closeOnEsc={true}
       >
+        <Text type="tertiary" size="small" ellipsis={{ showTooltip: true }} style={{ display: 'block', marginBottom: 12 }}>
+          投稿模板：{selectEntity?.template_name}
+        </Text>
         <Transfer
-          style={{ height: 416 }}
+          style={{ height: 'min(416px, calc(100dvh - 280px))', minWidth: 0 }}
           dataSource={data}
           draggable
           value={transferData}
           onChange={handleTransferChange}
         />
-      </Modal>
+      </FormDialog>
 
       <PageHeader
         icon={<IconCloudStroked size="large" />}
