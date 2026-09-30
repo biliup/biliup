@@ -1,6 +1,5 @@
 import {
   Form,
-  Modal,
   Input,
   Notification,
   Typography,
@@ -19,6 +18,7 @@ import useSWRMutation from 'swr/mutation'
 import { useMe } from '../lib/use-me'
 import { useAutoClip } from '../lib/auto-clip'
 import AfterLiveSwitch from './auto-clip/AfterLiveSwitch'
+import { FormSheet } from './shell'
 
 type TemplateModalProps = {
   visible?: boolean
@@ -36,7 +36,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
   children,
   entity,
   onOk,
-  title = '录播管理',
+  title = entity ? `编辑直播间「${entity.remark}」` : '新建直播间',
   templateOptions,
   extraFields,
 }) => {
@@ -154,18 +154,13 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
   return (
     <>
       {childrenWithProps}
-      <Modal
+      <FormSheet
         title={title}
         visible={visible}
+        size="md"
+        okText={entity ? '保存' : '创建'}
         onOk={handleOk}
-        style={{ width: 'min(600px, 90vw)' }}
         onCancel={handleCancel}
-        bodyStyle={{
-          overflow: 'auto',
-          maxHeight: 'calc(100vh - 320px)',
-          paddingLeft: 10,
-          paddingRight: 10,
-        }}
       >
         <Form initValues={initValues} getFormApi={formApi => (api.current = formApi)}>
           <Form.Input
@@ -232,7 +227,8 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
                           label="="
                           labelPosition="inset"
                           rules={[{ required: true, message }]}
-                          style={{ width: 300, marginRight: 16 }}
+                          fieldStyle={{ flex: 1, minWidth: 0 }}
+                          style={{ width: '100%' }}
                           placeholder={ api.current?.getValue(field)?.cmd === 'webhook' ? 'https://example.com/notify' : undefined }
                         ></Form.Input>
                       ) : null}
@@ -456,7 +452,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({
             </Collapse.Panel>
           </Collapse>
         </Form>
-      </Modal>
+      </FormSheet>
     </>
   )
 }
