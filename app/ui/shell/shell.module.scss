@@ -11,6 +11,15 @@
   margin-left: 0 !important;
 }
 
+/* 「取消」和主按钮是一组：底栏折行时一起换到下一行，不会被拆开 */
+.footerActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+
 .footerExtra {
   display: flex;
   align-items: center;
