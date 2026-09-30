@@ -1,8 +1,9 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Banner, Button, Empty, Input, Modal, Spin, Toast, Typography } from '@douyinfe/semi-ui'
+import { Banner, Button, Empty, Input, Spin, Toast, Typography } from '@douyinfe/semi-ui'
 import { IconCopy } from '@douyinfe/semi-icons'
 import { copyText, errorMessage, issueTicket, voidToken, type IssuedTicket } from '@/app/lib/use-fleet'
+import { FormDialog } from '@/app/ui/shell'
 import styles from './page.module.scss'
 
 const { Text } = Typography
@@ -219,26 +220,20 @@ export default function JoinDialog({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal
+    <FormDialog
       title="添加节点"
-      visible
+      size="md"
       onCancel={onClose}
-      closeOnEsc
-      style={{ width: 'min(640px, 94vw)' }}
-      // 内容比矮屏高时只滚正文，「完成」始终露在外面
-      bodyStyle={{ maxHeight: 'calc(100dvh - 200px)', overflowY: 'auto' }}
-      footer={
-        <div className={styles.dialogFoot}>
-          <Button onClick={() => generate(extra)} loading={loading} disabled={loading}>
-            {ticket || error ? '重新生成' : '生成'}
-          </Button>
-          <Button theme="solid" onClick={onClose}>
-            完成
-          </Button>
-        </div>
+      cancelText={null}
+      okText="完成"
+      onOk={onClose}
+      footerExtra={
+        <Button onClick={() => generate(extra)} loading={loading} disabled={loading}>
+          {ticket || error ? '重新生成' : '生成'}
+        </Button>
       }
     >
       {body}
-    </Modal>
+    </FormDialog>
   )
 }
