@@ -17,11 +17,29 @@ export type FormPageProps = {
   /** 返回 Promise 时按钮自动转圈；reject 时停在页面上（调用方负责提示），不丢已填内容 */
   onOk?: () => unknown
   okDisabled?: boolean
+  /** 保存由表单自己的 onSubmit 驱动时，由调用方给出转圈状态 */
+  okLoading?: boolean
+  /** 页头主按钮左边的次要操作（如「清空覆盖」） */
+  headerExtra?: ReactNode
+  /** 内容占满页头下方的剩余高度、页面本身不滚，由内容自己分区滚动（配置页的 Tab 面板） */
+  fill?: boolean
   children?: ReactNode
 }
 
 /** 表单页：页头（返回箭头 + 标题 + 右上角主按钮）+ 内容列。不套卡片，分区靠表单自己的分节标题 */
-export default function FormPage({ title, description, back, okText, okIcon, onOk, okDisabled, children }: FormPageProps) {
+export default function FormPage({
+  title,
+  description,
+  back,
+  okText,
+  okIcon,
+  onOk,
+  okDisabled,
+  okLoading,
+  headerExtra,
+  fill,
+  children,
+}: FormPageProps) {
   const [busy, setBusy] = useState(false)
   const run = async () => {
     if (!onOk || busy) return
@@ -51,14 +69,25 @@ export default function FormPage({ title, description, back, okText, okIcon, onO
         title={title}
         description={description}
         actions={
-          okText ? (
-            <Button theme="solid" icon={okIcon} onClick={run} loading={busy} disabled={okDisabled || !onOk}>
-              {okText}
-            </Button>
+          headerExtra || okText ? (
+            <>
+              {headerExtra}
+              {okText ? (
+                <Button
+                  theme="solid"
+                  icon={okIcon}
+                  onClick={run}
+                  loading={busy || okLoading}
+                  disabled={okDisabled || !onOk}
+                >
+                  {okText}
+                </Button>
+              ) : null}
+            </>
           ) : undefined
         }
       />
-      <div className={styles.pageBody}>{children}</div>
+      <div className={fill ? styles.pageFill : styles.pageBody}>{children}</div>
     </>
   )
 }

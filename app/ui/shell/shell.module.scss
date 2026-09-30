@@ -98,8 +98,28 @@
   min-width: 0;
 }
 
+/* 占满页头下方的剩余高度（主内容区是 flex 列），页面本身不滚，里面的面板各自滚动 */
+.pageFill {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 12px 28px 20px;
+  box-sizing: border-box;
+}
+
 @media (max-width: 880px) {
   .pageBody {
     padding: 12px 16px 36px;
+  }
+}
+
+@media (max-width: 680px) {
+  .pageFill {
+    padding: 8px 12px 12px;
   }
 }

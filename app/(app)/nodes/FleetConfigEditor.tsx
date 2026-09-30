@@ -7,7 +7,6 @@ import {
   Empty,
   Form,
   Popconfirm,
-  SideSheet,
   Spin,
   TabPane,
   Tabs,
@@ -18,7 +17,6 @@ import {
 import type { FormApi } from '@douyinfe/semi-ui/lib/es/form'
 import { fetcher } from '@/app/lib/api-streamer'
 import { humDate } from '@/app/lib/utils'
-import { useWindowWidth } from '@/app/lib/useIsMobile'
 import FormSnapshot from '@/app/ui/FormSnapshot'
 import { CONFIG_SINCE, errorMessage, FLEET_NODES_KEY, type FleetNode } from '@/app/lib/use-fleet'
 import {
@@ -33,7 +31,6 @@ import {
   PER_NODE_KEYS,
   saveFleetConfig,
   saveNodeOverride,
-  SHEET_Z_INDEX,
   type ConfigHistory,
   type ConfigValues,
   type FieldMarks,
@@ -44,12 +41,13 @@ import { PlatformPanels } from '@/app/ui/plugins'
 import Global from '@/app/ui/plugins/global'
 import Developer from '@/app/ui/plugins/developer'
 import dashboard from '@/app/styles/dashboard.module.scss'
+import { FormPage } from '@/app/ui/shell'
 import { ConfigSyncTag } from './NodeConfigStatus'
 import styles from './fleet-config.module.scss'
 
 const { Text } = Typography
 
-export type ConfigTarget = { mode: 'global' } | { mode: 'override'; nodeId: number }
+export const FLEET_CONFIG_BACK = { href: '/nodes', label: '节点' }
 
 const TAB_GLOBAL = 'global'
 const TAB_PLATFORM = 'platform'
@@ -265,7 +263,19 @@ function useSaving() {
   return { saving, run }
 }
 
-function GlobalSheetBody({ canManage }: { canManage: boolean }) {
+/** 加载中、出错、节点不存在时的页面：同样的页头，没有主按钮 */
+export function FleetConfigStatePage({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <FormPage title={title} back={FLEET_CONFIG_BACK} fill>
+      {children}
+    </FormPage>
+  )
+}
+
+const GLOBAL_TITLE = 'Fleet 配置'
+
+/** `/nodes/config`：全局配置，保存后下发到所有在线节点 */
+export function FleetGlobalConfigPage({ canManage }: { canManage: boolean }) {
   const { data, error, isLoading, mutate } = useSWR<FleetConfig>(FLEET_CONFIG_KEY, fetcher, SWR_OPTIONS)
   const apiRef = useRef<FormApi>(undefined)
   const snapshotRef = useRef<ConfigValues>({})
@@ -286,11 +296,25 @@ function GlobalSheetBody({ canManage }: { canManage: boolean }) {
     })
 
 
-  if (isLoading) return <Loading />
-  if (!data) return <LoadFailed error={error} onRetry={() => mutate()} />
+  if (isLoading) return <FleetConfigStatePage title={GLOBAL_TITLE}><Loading /></FleetConfigStatePage>
+  if (!data) {
+    return (
+      <FleetConfigStatePage title={GLOBAL_TITLE}>
+        <LoadFailed error={error} onRetry={() => mutate()} />
+      </FleetConfigStatePage>
+    )
+  }
 
   return (
-    <>
+    <FormPage
+      title={GLOBAL_TITLE}
+      description={canManage ? '所有节点共享的下载、上传与平台参数，保存后下发到所有在线节点' : '只读：修改需要「管理节点」权限'}
+      back={FLEET_CONFIG_BACK}
+      okText={canManage ? '保存' : undefined}
+      onOk={() => apiRef.current?.submitForm()}
+      okLoading={saving}
+      fill
+    >
       <div className={styles.intro}>
         <div className={styles.meta}>
           {data.saved ? (
@@ -339,21 +363,12 @@ function GlobalSheetBody({ canManage }: { canManage: boolean }) {
         snapshotRef={snapshotRef}
         onSubmit={save}
       />
-      <div className={styles.footer}>
-        <span className={styles.footerHint}>
-          {canManage ? '保存后下发到所有在线节点' : '只读：修改需要「管理节点」权限'}
-        </span>
-        {canManage ? (
-          <Button theme="solid" loading={saving} onClick={() => apiRef.current?.submitForm()}>
-            保存
-          </Button>
-        ) : null}
-      </div>
-    </>
+    </FormPage>
   )
 }
 
-function OverrideSheetBody({ node, canManage }: { node: FleetNode; canManage: boolean }) {
+/** `/nodes/config?node=N`：只存这台节点与全局不同的项 */
+export function FleetNodeConfigPage({ node, canManage }: { node: FleetNode; canManage: boolean }) {
   const { data, error, isLoading, mutate } = useSWR<NodeConfig>(nodeConfigKey(node.id), fetcher, SWR_OPTIONS)
   const apiRef = useRef<FormApi>(undefined)
   const snapshotRef = useRef<ConfigValues>({})
@@ -381,13 +396,41 @@ function OverrideSheetBody({ node, canManage }: { node: FleetNode; canManage: bo
   }
 
 
-  if (isLoading) return <Loading />
-  if (!data) return <LoadFailed error={error} onRetry={() => mutate()} />
+  const title = `节点覆盖 · ${node.name}`
+  if (isLoading) return <FleetConfigStatePage title={title}><Loading /></FleetConfigStatePage>
+  if (!data) {
+    return (
+      <FleetConfigStatePage title={title}>
+        <LoadFailed error={error} onRetry={() => mutate()} />
+      </FleetConfigStatePage>
+    )
+  }
 
   const state = data.state
   const overrideKeys = Object.keys(data.override)
   return (
-    <>
+    <FormPage
+      title={title}
+      description={canManage ? '只保存这台节点与全局不同的项' : '只读：修改需要「管理节点」权限'}
+      back={FLEET_CONFIG_BACK}
+      okText={canManage ? '保存' : undefined}
+      onOk={() => apiRef.current?.submitForm()}
+      okLoading={saving}
+      headerExtra={
+        canManage ? (
+          <Popconfirm
+            title={`清空 ${node.name} 的覆盖？`}
+            content="共享字段回到全局配置，按节点的字段回到它接入时本机的值"
+            onConfirm={() => store({}, `已清空覆盖，${where}`)}
+          >
+            <Button type="danger" disabled={!overrideKeys.length || saving}>
+              清空覆盖
+            </Button>
+          </Popconfirm>
+        ) : undefined
+      }
+      fill
+    >
       <div className={styles.intro}>
         <div className={styles.meta}>
           {node.online ? <ConfigSyncTag state={state} /> : <Tag size="small">离线</Tag>}
@@ -444,66 +487,6 @@ function OverrideSheetBody({ node, canManage }: { node: FleetNode; canManage: bo
         snapshotRef={snapshotRef}
         onSubmit={save}
       />
-      <div className={styles.footer}>
-        <span className={styles.footerHint}>{canManage ? '只保存与全局不同的项' : '只读：修改需要「管理节点」权限'}</span>
-        {canManage ? (
-          <>
-            <Popconfirm
-              title={`清空 ${node.name} 的覆盖？`}
-              content="共享字段回到全局配置，按节点的字段回到它接入时本机的值"
-              onConfirm={() => store({}, `已清空覆盖，${where}`)}
-            >
-              <Button type="danger" disabled={!overrideKeys.length || saving}>
-                清空覆盖
-              </Button>
-            </Popconfirm>
-            <Button theme="solid" loading={saving} onClick={() => apiRef.current?.submitForm()}>
-              保存
-            </Button>
-          </>
-        ) : null}
-      </div>
-    </>
-  )
-}
-
-/** 节点页的「Fleet 配置」（全局）与节点卡片上的「节点覆盖」，表单复用空间配置页的组件 */
-export default function FleetConfigSheet({
-  target,
-  node,
-  canManage,
-  onClose,
-}: {
-  target: ConfigTarget
-  /** 覆盖模式下的节点；节点已被移除时为 undefined */
-  node: FleetNode | undefined
-  canManage: boolean
-  onClose: () => void
-}) {
-  const width = useWindowWidth()
-  let body: React.ReactNode
-  if (target.mode === 'global') {
-    body = <GlobalSheetBody canManage={canManage} />
-  } else if (node) {
-    body = <OverrideSheetBody node={node} canManage={canManage} />
-  } else {
-    body = (
-      <div className={styles.center}>
-        <Empty title="节点不存在或已被移除" />
-      </div>
-    )
-  }
-  return (
-    <SideSheet
-      visible
-      title={target.mode === 'global' ? 'Fleet 配置' : `节点覆盖 · ${node?.name ?? ''}`}
-      width={Number.isFinite(width) ? Math.min(960, width) : 960}
-      zIndex={SHEET_Z_INDEX}
-      onCancel={onClose}
-      footer={null}
-      bodyStyle={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
-    >
-      <div className={styles.body}>{body}</div>
-    </SideSheet>
+    </FormPage>
   )
 }

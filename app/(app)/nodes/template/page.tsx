@@ -14,6 +14,7 @@ import {
 } from '@/app/lib/use-fleet'
 import { FormPage } from '@/app/ui/shell'
 import FleetTemplateEditor, { FLEET_TEMPLATES_BACK } from '../FleetTemplateEditor'
+import FleetPageGate from '../FleetPageGate'
 
 /** `/nodes/template` 新建、`/nodes/template?id=N` 编辑 Fleet 投稿模板 */
 function FleetTemplatePage() {
@@ -71,7 +72,14 @@ function FleetTemplatePage() {
 export default function Page() {
   return (
     <Suspense>
-      <FleetTemplatePage />
+      <FleetPageGate
+        title="Fleet 投稿模板"
+        back={FLEET_TEMPLATES_BACK}
+        perm="node.manage"
+        denied="新建和修改 Fleet 投稿模板需要「管理节点」权限"
+      >
+        <FleetTemplatePage />
+      </FleetPageGate>
     </Suspense>
   )
 }

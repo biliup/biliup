@@ -1,5 +1,6 @@
 'use client'
 import React, { useRef, useState } from 'react'
+import Link from 'next/link'
 import { flushSync } from 'react-dom'
 import {
   Button,
@@ -25,7 +26,7 @@ import PageHeader from '../components/PageHeader'
 import { PlatformPanels } from '../../ui/plugins'
 import Global from '../../ui/plugins/global'
 import Developer from '../../ui/plugins/developer'
-import LocalSecretsSheet, { ManagedConfigBanner, PairConfigBanner } from './LocalSecretsSheet'
+import { ManagedConfigBanner, PairConfigBanner } from './LocalSecrets'
 import AutoClip, { normalizeAutoClip } from '../../ui/plugins/auto-clip'
 import { autoClipError } from '../../lib/auto-clip'
 
@@ -47,7 +48,7 @@ const fieldElement = (path: string) =>
   document.querySelector<HTMLElement>(`.semi-form-field[x-field-id="${path}"]`)
 
 const Dashboard: React.FC = () => {
-const { data: entity, error, isLoading, mutate } = useSWR('/v1/configuration', fetcher)
+const { data: entity, error, isLoading } = useSWR('/v1/configuration', fetcher)
   const { trigger } = useSWRMutation('/v1/configuration', put)
   const formRef = useRef<FormApi>(undefined)
   // const [formKey, setFormKey] = useState(0); // 初始化一个key
@@ -77,14 +78,12 @@ const { data: entity, error, isLoading, mutate } = useSWR('/v1/configuration', f
 
   const { biliUsers } = useBiliUsers()
   const { can, me } = useMe()
-  // 加入了控制面、配置由控制面下发的节点：整页只读，本机密钥另开侧栏保存
+  // 加入了控制面、配置由控制面下发的节点：整页只读，本机密钥在单独的页面 /dashboard/secrets 保存
   const managedBy = me?.fleet_node?.config ? me.fleet_node.controller : null
   // 一主一备里的节点：控制面不再下发配置，本机照常保存，改动与对端双向同步
   const pair = me?.fleet_node?.pair
   // 非超管拿到的是脱敏后的配置（凭据、账号 Cookie 等为空），只读展示，不能保存
   const editable = can('config.edit') && !managedBy
-  const [secretsOpen, setSecretsOpen] = useState(false)
-  const [formKey, setFormKey] = useState(0)
 
   // 平台设置：左列平台名是唯一的导航，右栏只显示选中平台的字段。列表来自插件注册表 PlatformPanels
   const [activePlatform, setActivePlatform] = useState(PlatformPanels[0].key)
@@ -150,9 +149,11 @@ const { data: entity, error, isLoading, mutate } = useSWR('/v1/configuration', f
         actions={
           managedBy ? (
             can('config.edit') && (
-              <Button icon={<IconKey />} theme="solid" onClick={() => setSecretsOpen(true)}>
-                本机密钥
-              </Button>
+              <Link href="/dashboard/secrets" prefetch={false}>
+                <Button icon={<IconKey />} theme="solid">
+                  本机密钥
+                </Button>
+              </Link>
             )
           ) : editable && <Button
             onClick={() => {
@@ -173,7 +174,6 @@ const { data: entity, error, isLoading, mutate } = useSWR('/v1/configuration', f
           <PairConfigBanner controller={me.fleet_node.controller} pair={pair} />
         ) : null}
         <Form
-          key={formKey}
           className={styles.form}
           initValues={entity}
           disabled={!editable}
@@ -271,17 +271,6 @@ const { data: entity, error, isLoading, mutate } = useSWR('/v1/configuration', f
           </Tabs>
         </Form>
       </div>
-      {secretsOpen ? (
-        <LocalSecretsSheet
-          entity={entity}
-          list={list}
-          onClose={() => setSecretsOpen(false)}
-          onSaved={() => {
-            setSecretsOpen(false)
-            mutate().then(() => setFormKey(key => key + 1)).catch(() => undefined)
-          }}
-        />
-      ) : null}
     </>
   )
 }

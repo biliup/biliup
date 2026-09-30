@@ -33,9 +33,20 @@ function errorText(e: any): string {
 function AddAccountDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (value: string) => Promise<boolean> }) {
   const [method, setMethod] = useState<Method>('cookie')
   const api = useRef<FormApi>(undefined)
-  const submitCookie = async () => {
-    const values = await api.current?.validate()
-    if (!(await onAdd(values?.value?.trim()))) throw new Error('add failed')
+  const busy = useRef(false)
+  const [adding, setAdding] = useState(false)
+  // 点「添加」和在输入框里回车都走表单提交，校验通过才到这里；连按只发一次。
+  // 失败原因 onAdd 已经提示过，弹窗留着让人改路径，这里不再抛错
+  const add = async (value: string) => {
+    if (busy.current) return
+    busy.current = true
+    setAdding(true)
+    try {
+      await onAdd(value.trim())
+    } finally {
+      busy.current = false
+      setAdding(false)
+    }
   }
   return (
     <FormDialog
@@ -43,7 +54,8 @@ function AddAccountDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (val
       size="sm"
       onCancel={onClose}
       okText={method === 'cookie' ? '添加' : undefined}
-      onOk={submitCookie}
+      onOk={() => api.current?.submitForm()}
+      confirmLoading={adding}
       footerExtra={method === 'qrcode' ? '在 B 站 App 里扫码确认后自动添加' : undefined}
     >
       <RadioGroup type="button" value={method} onChange={(e) => setMethod(e.target.value as Method)} aria-label="添加方式">
@@ -51,7 +63,11 @@ function AddAccountDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (val
         <Radio value="qrcode">扫码登录</Radio>
       </RadioGroup>
       {method === 'cookie' ? (
-        <Form getFormApi={(formApi) => (api.current = formApi)} onSubmit={submitCookie} style={{ marginTop: 12 }}>
+        <Form
+          getFormApi={(formApi) => (api.current = formApi)}
+          onSubmit={(values) => add(String(values.value ?? ''))}
+          style={{ marginTop: 12 }}
+        >
           <Form.Input
             field="value"
             label="Cookie 文件路径"

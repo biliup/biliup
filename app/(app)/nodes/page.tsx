@@ -33,7 +33,6 @@ import JoinDialog from './JoinDialog'
 import RoomsPanel, { CreateRoomButton } from './RoomsPanel'
 import TemplatesPanel from './TemplatesPanel'
 import RemovalNotices from './RemovalNotices'
-import FleetConfigSheet, { type ConfigTarget } from './FleetConfigSheet'
 import NodeLabels from './NodeLabels'
 import AlertsPanel, { NodeAlertBadge } from './AlertsPanel'
 import { useFleetAlerts } from '@/app/lib/fleet-alerts'
@@ -138,7 +137,6 @@ function Nodes() {
   const [labelFilter, setLabelFilter] = useState<string[]>([])
   const [joining, setJoining] = useState(false)
   const [pairing, setPairing] = useState(false)
-  const [configTarget, setConfigTarget] = useState<ConfigTarget | null>(null)
   const canViewConfig = can('config.view')
 
   const refresh = () => {
@@ -226,7 +224,7 @@ function Nodes() {
   const nodeActions = (
     <>
       {canViewConfig ? (
-        <Button icon={<IconSetting />} onClick={() => setConfigTarget({ mode: 'global' })}>
+        <Button icon={<IconSetting />} onClick={() => router.push('/nodes/config')}>
           {isMobile ? '配置' : 'Fleet 配置'}
         </Button>
       ) : null}
@@ -315,7 +313,7 @@ function Nodes() {
                   onRevoke={revoke}
                   controllerVersion={data.controller_version}
                   onEditConfig={
-                    canViewConfig ? (n) => setConfigTarget({ mode: 'override', nodeId: n.id }) : undefined
+                    canViewConfig ? (n) => router.push(`/nodes/config?node=${n.id}`) : undefined
                   }
                   badge={
                     <NodeAlertBadge
@@ -472,14 +470,6 @@ function Nodes() {
             refresh()
             revalidate(FLEET_TOKENS_KEY).catch(() => undefined)
           }}
-        />
-      ) : null}
-      {configTarget ? (
-        <FleetConfigSheet
-          target={configTarget}
-          node={configTarget.mode === 'override' ? nodes.find((n) => n.id === configTarget.nodeId) : undefined}
-          canManage={canManage}
-          onClose={() => setConfigTarget(null)}
         />
       ) : null}
     </>
