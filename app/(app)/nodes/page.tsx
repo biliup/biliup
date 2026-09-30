@@ -33,7 +33,6 @@ import JoinDialog from './JoinDialog'
 import RoomsPanel, { CreateRoomButton } from './RoomsPanel'
 import TemplatesPanel from './TemplatesPanel'
 import RemovalNotices from './RemovalNotices'
-import FleetTemplateModal from './FleetTemplateModal'
 import FleetConfigSheet, { type ConfigTarget } from './FleetConfigSheet'
 import NodeLabels from './NodeLabels'
 import AlertsPanel, { NodeAlertBadge } from './AlertsPanel'
@@ -139,8 +138,6 @@ function Nodes() {
   const [labelFilter, setLabelFilter] = useState<string[]>([])
   const [joining, setJoining] = useState(false)
   const [pairing, setPairing] = useState(false)
-  /** undefined 为没打开，null 为新建 */
-  const [editingTemplate, setEditingTemplate] = useState<FleetTemplate | null | undefined>(undefined)
   const [configTarget, setConfigTarget] = useState<ConfigTarget | null>(null)
   const canViewConfig = can('config.view')
 
@@ -217,7 +214,7 @@ function Nodes() {
     </CreateRoomButton>
   )
   const createTemplate = (
-    <Button icon={<IconPlusCircle />} theme="solid" onClick={() => setEditingTemplate(null)}>
+    <Button icon={<IconPlusCircle />} theme="solid" onClick={() => router.push('/nodes/template')}>
       {isMobile ? '添加' : '新建模板'}
     </Button>
   )
@@ -428,7 +425,7 @@ function Nodes() {
                     error={templatesError}
                     canManage={canManage}
                     creating={createTemplate}
-                    onEdit={setEditingTemplate}
+                    onEdit={(template) => router.push(`/nodes/template?id=${template.id}`)}
                     onChanged={refreshTemplates}
                   />
                 ) : null}
@@ -483,17 +480,6 @@ function Nodes() {
           node={configTarget.mode === 'override' ? nodes.find((n) => n.id === configTarget.nodeId) : undefined}
           canManage={canManage}
           onClose={() => setConfigTarget(null)}
-        />
-      ) : null}
-      {editingTemplate !== undefined ? (
-        <FleetTemplateModal
-          template={editingTemplate}
-          nodes={nodes}
-          onClose={() => setEditingTemplate(undefined)}
-          onSaved={() => {
-            setEditingTemplate(undefined)
-            refreshTemplates()
-          }}
         />
       ) : null}
     </>

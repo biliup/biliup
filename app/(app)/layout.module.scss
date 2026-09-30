@@ -298,7 +298,8 @@
   position: fixed;
   top: 12px;
   left: 12px;
-  z-index: 1001;
+  /* 低于 Semi 弹层（Modal / SideSheet 的遮罩是 1000）：弹窗、抽屉打开时菜单按钮在遮罩下面，不压标题 */
+  z-index: 990;
   width: 36px;
   height: 36px;
   border: 1px solid var(--semi-color-border);

@@ -1,8 +1,9 @@
 'use client'
 import { useState } from 'react'
-import { Button, Checkbox, Modal, Toast, Typography } from '@douyinfe/semi-ui'
+import { Button, Checkbox, Toast, Typography } from '@douyinfe/semi-ui'
 import { IconServer } from '@douyinfe/semi-icons'
 import { enableLocalNode, errorMessage } from '@/app/lib/use-fleet'
+import { FormDialog } from '@/app/ui/shell'
 import styles from './page.module.scss'
 
 const { Text } = Typography
@@ -23,22 +24,14 @@ function LocalNodeDialog({ onClose, onEnabled }: { onClose: () => void; onEnable
     }
   }
   return (
-    <Modal
+    <FormDialog
       title="启用「本机」节点"
-      visible
-      onCancel={busy ? undefined : onClose}
-      closeOnEsc={!busy}
-      style={{ width: 'min(520px, 94vw)' }}
-      footer={
-        <div className={styles.dialogFoot}>
-          <Button onClick={onClose} disabled={busy}>
-            取消
-          </Button>
-          <Button theme="solid" onClick={enable} loading={busy}>
-            启用
-          </Button>
-        </div>
-      }
+      size="sm"
+      closable={!busy}
+      onCancel={onClose}
+      okText="启用"
+      onOk={enable}
+      confirmLoading={busy}
     >
       <ul className={styles.localList}>
         <li>节点列表里多一台「本机」：房间可以手动分派给它，自动选节点时它也是候选。</li>
@@ -54,7 +47,7 @@ function LocalNodeDialog({ onClose, onEnabled }: { onClose: () => void; onEnable
       <Text type="tertiary" size="small" className={styles.localHint}>
         与 <code>biliup node join --allow-hooks</code> 相同：处理器里带 run 命令（能执行任意命令）的房间才能派到这台机器
       </Text>
-    </Modal>
+    </FormDialog>
   )
 }
 
