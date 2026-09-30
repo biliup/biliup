@@ -1,8 +1,9 @@
 'use client'
 import { useState } from 'react'
-import { Button, Modal, Toast, Typography } from '@douyinfe/semi-ui'
+import { Toast, Typography } from '@douyinfe/semi-ui'
 import { errorMessage, type FleetRoom, type FleetTemplate } from '@/app/lib/use-fleet'
 import { dissolve, type FleetHa } from '@/app/lib/fleet-ha'
+import { FormDialog } from '@/app/ui/shell'
 import pageStyles from '../page.module.scss'
 import styles from './ha.module.scss'
 
@@ -58,24 +59,17 @@ export default function DissolveDialog({
   }
 
   return (
-    <Modal
+    <FormDialog
       title="解除一主一备"
-      visible
-      onCancel={busy ? undefined : onClose}
-      closeOnEsc={!busy}
-      style={{ width: 'min(600px, 94vw)' }}
-      footer={
-        <div className={pageStyles.dialogFoot}>
-          <Button onClick={onClose} disabled={busy}>
-            取消
-          </Button>
-          <Button theme="solid" type="danger" onClick={confirm} loading={busy}>
-            解除配对
-          </Button>
-        </div>
-      }
+      size="md"
+      closable={!busy}
+      onCancel={onClose}
+      okText="解除配对"
+      okType="danger"
+      onOk={confirm}
+      confirmLoading={busy}
     >
-      <div className={`${pageStyles.dialogBody} ${styles.dialogScroll}`}>
+      <div className={pageStyles.dialogBody}>
         <ul className={styles.bullets}>
           <li>
             当初从 <b>{standbyName}</b> 纳入的直播间与模板<b>还给它</b>：它上面照旧是这些行，「本机」上撤掉。
@@ -128,6 +122,6 @@ export default function DissolveDialog({
           留在「本机」的直播间 {staying.length} 个{staying.length ? `：${staying.slice(0, 5).map((r) => r.remark || r.url).join('、')}${staying.length > 5 ? ' 等' : ''}` : ''}
         </Text>
       </div>
-    </Modal>
+    </FormDialog>
   )
 }

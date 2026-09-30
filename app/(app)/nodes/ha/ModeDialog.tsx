@@ -1,11 +1,11 @@
 'use client'
 import { useState } from 'react'
-import { Button, Modal, Toast } from '@douyinfe/semi-ui'
+import { Toast } from '@douyinfe/semi-ui'
 import { errorMessage } from '@/app/lib/use-fleet'
 import { configureOnNode, designate, paramsIssue, type HaMode, type HaParams } from '@/app/lib/fleet-ha'
 import ModeFields from './ModeFields'
+import { FormDialog } from '@/app/ui/shell'
 import pageStyles from '../page.module.scss'
-import styles from './ha.module.scss'
 
 /** 改模式与参数：控制面上直接改，配对节点上经控制面提交 */
 export default function ModeDialog({
@@ -43,26 +43,19 @@ export default function ModeDialog({
     }
   }
   return (
-    <Modal
+    <FormDialog
       title="改模式与参数"
-      visible
-      onCancel={busy ? undefined : onClose}
-      closeOnEsc={!busy}
-      style={{ width: 'min(640px, 94vw)' }}
-      footer={
-        <div className={pageStyles.dialogFoot}>
-          <Button onClick={onClose} disabled={busy}>
-            取消
-          </Button>
-          <Button theme="solid" onClick={save} loading={busy} disabled={!!issue || unchanged}>
-            保存
-          </Button>
-        </div>
-      }
+      size="md"
+      closable={!busy}
+      onCancel={onClose}
+      okText="保存"
+      onOk={save}
+      confirmLoading={busy}
+      okDisabled={!!issue || unchanged}
     >
-      <div className={`${pageStyles.dialogBody} ${styles.dialogScroll}`}>
+      <div className={pageStyles.dialogBody}>
         <ModeFields mode={mode} params={params} onMode={setMode} onParams={setParams} disabled={busy} />
       </div>
-    </Modal>
+    </FormDialog>
   )
 }

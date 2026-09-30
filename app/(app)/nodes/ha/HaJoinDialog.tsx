@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import useSWR from 'swr'
-import { Button, Modal, Spin, Toast, Typography } from '@douyinfe/semi-ui'
+import { Spin, Toast, Typography } from '@douyinfe/semi-ui'
 import { fetcher } from '@/app/lib/api-streamer'
 import { errorMessage } from '@/app/lib/use-fleet'
 import {
@@ -14,6 +14,7 @@ import {
   type Side,
 } from '@/app/lib/fleet-ha'
 import { AdoptionResult, RowPicker, defaultPicked, pickedCount, type Picked } from './RowPicker'
+import { FormDialog } from '@/app/ui/shell'
 import pageStyles from '../page.module.scss'
 import styles from './ha.module.scss'
 
@@ -81,32 +82,18 @@ export default function HaJoinDialog({
     : { node: peerName, controller: '「本机」' }
 
   return (
-    <Modal
+    <FormDialog
       title={result ? '加入的结果' : '加入配对'}
-      visible
-      onCancel={busy ? undefined : onClose}
-      closeOnEsc={!busy}
-      style={{ width: 'min(680px, 94vw)' }}
-      footer={
-        <div className={pageStyles.dialogFoot}>
-          {result ? (
-            <Button theme="solid" onClick={onClose}>
-              完成
-            </Button>
-          ) : (
-            <>
-              <Button onClick={onClose} disabled={busy}>
-                取消
-              </Button>
-              <Button theme="solid" onClick={submit} loading={busy} disabled={total === 0}>
-                加入（{total} 项）
-              </Button>
-            </>
-          )}
-        </div>
-      }
+      size="lg"
+      closable={!busy}
+      onCancel={onClose}
+      cancelText={result ? null : undefined}
+      okText={result ? '完成' : `加入（${total} 项）`}
+      onOk={result ? onClose : submit}
+      confirmLoading={busy}
+      okDisabled={!result && total === 0}
     >
-      <div className={`${pageStyles.dialogBody} ${styles.dialogScroll}`}>
+      <div className={pageStyles.dialogBody}>
         {result ? (
           <>
             <Text type="tertiary" size="small">
@@ -142,6 +129,6 @@ export default function HaJoinDialog({
           </>
         )}
       </div>
-    </Modal>
+    </FormDialog>
   )
 }
