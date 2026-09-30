@@ -1,6 +1,6 @@
 'use client'
 import { useMemo, useState } from 'react'
-import { Banner, Checkbox, Modal, Select, Tag, Toast, Typography } from '@douyinfe/semi-ui'
+import { Banner, Checkbox, Select, Tag, Toast, Typography } from '@douyinfe/semi-ui'
 import {
   assignRoom,
   errorMessage,
@@ -9,6 +9,7 @@ import {
   type FleetRoom,
   type FleetTemplate,
 } from '@/app/lib/use-fleet'
+import { FormDialog } from '@/app/ui/shell'
 import styles from './page.module.scss'
 
 const { Text } = Typography
@@ -88,15 +89,15 @@ export default function AssignModal({
   }
 
   return (
-    <Modal
+    <FormDialog
       title={`${room.node_id !== null ? '迁移' : '分派'}「${room.remark}」`}
-      visible
+      size="md"
       onCancel={onClose}
       onOk={submit}
-      okText={moving && force ? '强制迁移' : '确定'}
-      okButtonProps={{ type: moving && force ? 'danger' : 'primary', disabled: unchanged }}
+      okText={moving ? (force ? '强制迁移' : '迁移') : '分派'}
+      okType={moving && force ? 'danger' : 'primary'}
+      okDisabled={unchanged}
       confirmLoading={saving}
-      width="min(520px, 94vw)"
     >
       <div className={styles.dialogBody}>
         <div className={styles.assignNow}>
@@ -146,6 +147,6 @@ export default function AssignModal({
           </>
         ) : null}
       </div>
-    </Modal>
+    </FormDialog>
   )
 }

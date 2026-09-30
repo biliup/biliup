@@ -349,6 +349,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           {showUser && (
             <Dropdown
               trigger="click"
+              clickToHide
               position={navCollapsed ? 'rightBottom' : 'topLeft'}
               render={
                 <Dropdown.Menu>

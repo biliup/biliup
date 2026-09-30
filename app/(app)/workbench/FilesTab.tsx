@@ -1,5 +1,5 @@
 'use client'
-import { Modal, Table, Typography } from '@douyinfe/semi-ui'
+import { Table, Typography } from '@douyinfe/semi-ui'
 import { SortOrder } from '@douyinfe/semi-ui/lib/es/table'
 import useSWR from 'swr'
 import { fetcher, FileList } from '@/app/lib/api-streamer'
@@ -10,6 +10,7 @@ import { humDate } from '@/app/lib/utils'
 import { formatSize } from '@/app/lib/use-dashboard'
 import { replayHref } from '@/app/lib/sessions'
 import dc from '@/app/ui/data-card.module.scss'
+import { FormDialog } from '@/app/ui/shell'
 import styles from './page.module.scss'
 
 const Players = dynamic(() => import('@/app/ui/Player'), {
@@ -80,18 +81,11 @@ export default function FilesTab() {
           empty={error ? '加载失败，请检查后端连接' : '暂无数据'}
         />
       </div>
-      <Modal
-        visible={visible}
-        onCancel={() => setVisible(false)}
-        closeOnEsc={true}
-        style={{ width: 'min(600px, 90vw)' }}
-        size="large"
-        bodyStyle={{ height: 500 }}
-        footer={null}
-      >
-        <Players url={(process.env.NEXT_PUBLIC_API_SERVER ?? '') + '/static/' + fileName} />
-        <div id="mse" />
-      </Modal>
+      <FormDialog title={fileName} immersive visible={visible} onCancel={() => setVisible(false)}>
+        <div className={styles.playerStage}>
+          <Players url={(process.env.NEXT_PUBLIC_API_SERVER ?? '') + '/static/' + fileName} />
+        </div>
+      </FormDialog>
     </>
   )
 }

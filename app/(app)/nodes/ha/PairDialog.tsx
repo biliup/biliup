@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import useSWR from 'swr'
-import { Banner, Button, Modal, Select, Spin, Toast, Typography } from '@douyinfe/semi-ui'
+import { Banner, Button, Select, Spin, Toast, Typography } from '@douyinfe/semi-ui'
 import { IconServer } from '@douyinfe/semi-icons'
 import { fetcher } from '@/app/lib/api-streamer'
 import { errorMessage, type FleetNode } from '@/app/lib/use-fleet'
@@ -20,6 +20,7 @@ import {
 } from '@/app/lib/fleet-ha'
 import ModeFields from './ModeFields'
 import { AdoptionResult, RowPicker, defaultPicked, pickedCount, type Picked } from './RowPicker'
+import { FormDialog } from '@/app/ui/shell'
 import pageStyles from '../page.module.scss'
 import styles from './ha.module.scss'
 
@@ -104,49 +105,37 @@ export default function PairDialog({
 
   if (result) {
     return (
-      <Modal
+      <FormDialog
         title="配对好了"
-        visible
+        size="md"
         onCancel={() => onClose(true)}
-        style={{ width: 'min(640px, 94vw)' }}
-        footer={
-          <div className={pageStyles.dialogFoot}>
-            <Button theme="solid" onClick={() => onClose(true)}>
-              完成
-            </Button>
-          </div>
-        }
+        cancelText={null}
+        okText="完成"
+        onOk={() => onClose(true)}
       >
-        <div className={`${pageStyles.dialogBody} ${styles.dialogScroll}`}>
+        <div className={pageStyles.dialogBody}>
           <Text type="tertiary" size="small">
             在录或上一场还没投完的，等这一场录完投完再加入；没纳入的照旧是那台自己的本地行，之后可以在面板上「加入配对」
           </Text>
           <AdoptionResult title={`${chosen?.name ?? '备机'}（备机）`} view={result.standby} />
           <AdoptionResult title="「本机」（主机）" view={result.primary} />
         </div>
-      </Modal>
+      </FormDialog>
     )
   }
 
   return (
-    <Modal
+    <FormDialog
       title="设置一主一备"
-      visible
-      onCancel={busy ? undefined : () => onClose(false)}
-      closeOnEsc={!busy}
-      style={{ width: 'min(720px, 94vw)' }}
-      footer={
-        <div className={pageStyles.dialogFoot}>
-          <Button onClick={() => onClose(false)} disabled={busy}>
-            取消
-          </Button>
-          <Button theme="solid" onClick={submit} loading={busy} disabled={blocked}>
-            {picks ? `配对（纳入 ${pickedCount(picks.primary) + pickedCount(picks.node)} 项）` : '配对'}
-          </Button>
-        </div>
-      }
+      size="lg"
+      closable={!busy}
+      onCancel={() => onClose(false)}
+      okText={picks ? `配对（纳入 ${pickedCount(picks.primary) + pickedCount(picks.node)} 项）` : '配对'}
+      onOk={submit}
+      confirmLoading={busy}
+      okDisabled={blocked}
     >
-      <div className={`${pageStyles.dialogBody} ${styles.dialogScroll}`}>
+      <div className={pageStyles.dialogBody}>
         <Text type="tertiary" size="small">
           两台录同样的房间，只有一台投稿，避免两份稿件。配对之后在哪台上改直播间、模板、空间配置、B 站账号都行，两台会同步
         </Text>
@@ -234,7 +223,7 @@ export default function PairDialog({
           </div>
         ) : null}
       </div>
-    </Modal>
+    </FormDialog>
   )
 }
 

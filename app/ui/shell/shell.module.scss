@@ -45,6 +45,49 @@
   margin-top: 16px;
 }
 
+/* 沉浸式（播放器）：整块深色，画面左右与底边贴齐，标题与关闭按钮收在 48 高的顶栏里；浅色主题下也是深色 */
+.immersive :global(.semi-modal-content) {
+  padding: 0;
+  border: none;
+  background: #000;
+}
+
+.immersive :global(.semi-modal-header) {
+  align-items: center;
+  box-sizing: border-box;
+  height: 48px;
+  margin: 0;
+  padding: 0 8px 0 16px;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.immersive :global(.semi-modal-title) {
+  overflow: hidden;
+  color: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.immersive :global(.semi-modal-close) {
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.75);
+
+  &:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.12);
+  }
+}
+
+.immersive :global(.semi-modal-body) {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  max-height: none;
+  overflow: hidden;
+}
+
 /* ===== 抽屉 ===== */
 .sheet :global(.semi-sidesheet-header) {
   padding: 14px 16px 14px 24px;

@@ -21,3 +21,10 @@
 .replayLink:hover {
   text-decoration: underline;
 }
+
+/* 录制文件的播放器：16:9 画面，贴满沉浸式弹窗的宽度 */
+.playerStage {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+}

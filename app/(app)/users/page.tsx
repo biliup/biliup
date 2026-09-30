@@ -5,7 +5,6 @@ import {
   Button,
   Empty,
   Form,
-  Modal,
   Popconfirm,
   Spin,
   Table,
@@ -24,6 +23,7 @@ import { MIN_PASSWORD_LENGTH } from '@/app/ui/ChangePasswordModal'
 import { humDate } from '@/app/lib/utils'
 import { timeAgo } from '@/app/lib/use-dashboard'
 import { useIsMobile } from '@/app/lib/useIsMobile'
+import { FormDialog } from '@/app/ui/shell'
 import styles from './page.module.scss'
 
 const { Text } = Typography
@@ -167,15 +167,13 @@ function UserDialog({
   }
 
   return (
-    <Modal
+    <FormDialog
       title={title}
-      visible
+      size="sm"
       onOk={submit}
       onCancel={onClose}
       okText={dialog.kind === 'create' ? '创建' : '保存'}
       confirmLoading={saving}
-      style={{ width: 'min(520px, 94vw)' }}
-      closeOnEsc
     >
       <Form<DialogValues>
         getFormApi={(formApi) => (api.current = formApi)}
@@ -212,7 +210,7 @@ function UserDialog({
           </Form.RadioGroup>
         )}
       </Form>
-    </Modal>
+    </FormDialog>
   )
 }
 
