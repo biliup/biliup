@@ -31,7 +31,7 @@ jobs:
     timeout-minutes: 330
     permissions:
       contents: read
-      # npm publish --provenance
+      # trusted publishing（OIDC）与 npm publish --provenance
       id-token: write
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
@@ -49,9 +49,10 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      # trusted publishing 需要 npm >= 11.5.1；Node 22 自带 npm 10，Node 24 自带 npm 11
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Prepare packages from release assets
@@ -63,6 +64,7 @@ jobs:
         run: npm/scripts/smoke-test.sh npm/dist linux-x64-gnu
 
       # 先发 7 个 @biliup/<平台> 子包，最后发根包 @biliup/cli；registry 上已有的版本跳过，失败后可直接重跑
+      # npm 逐个包先用 OIDC 换发布 token，该包在 npmjs.com 没配 trusted publisher（或换取失败）时回落到 NODE_AUTH_TOKEN
       - name: Publish
         if: env.DRY_RUN != 'true'
         env:
