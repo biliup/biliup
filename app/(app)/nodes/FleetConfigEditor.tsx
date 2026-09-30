@@ -41,7 +41,7 @@ import { PlatformPanels } from '@/app/ui/plugins'
 import Global from '@/app/ui/plugins/global'
 import Developer from '@/app/ui/plugins/developer'
 import dashboard from '@/app/styles/dashboard.module.scss'
-import { FormPage } from '@/app/ui/shell'
+import { FormPage, FormSheet } from '@/app/ui/shell'
 import { ConfigSyncTag } from './NodeConfigStatus'
 import styles from './fleet-config.module.scss'
 
@@ -367,16 +367,28 @@ export function FleetGlobalConfigPage({ canManage }: { canManage: boolean }) {
   )
 }
 
-/** `/nodes/config?node=N`：只存这台节点与全局不同的项 */
-export function FleetNodeConfigPage({ node, canManage }: { node: FleetNode; canManage: boolean }) {
-  const { data, error, isLoading, mutate } = useSWR<NodeConfig>(nodeConfigKey(node.id), fetcher, SWR_OPTIONS)
+/**
+ * 节点页上的「节点覆盖」抽屉（节点的附属内容，开在节点页上，`/nodes?override=N`）：只存这台节点与全局不同的项
+ */
+export function NodeOverrideSheet({
+  node,
+  canManage,
+  onClose,
+}: {
+  /** 节点已被移除时为 undefined */
+  node: FleetNode | undefined
+  canManage: boolean
+  onClose: () => void
+}) {
+  const { data, error, isLoading, mutate } = useSWR<NodeConfig>(node ? nodeConfigKey(node.id) : null, fetcher, SWR_OPTIONS)
   const apiRef = useRef<FormApi>(undefined)
   const snapshotRef = useRef<ConfigValues>({})
   const { saving, run } = useSaving()
-  const where = node.online ? `正在下发到 ${node.name}` : `${node.name} 上线后下发`
+  const where = node?.online ? `正在下发到 ${node.name}` : `${node?.name ?? '节点'} 上线后下发`
 
   const store = (override: ConfigValues, message: string) =>
     run(async () => {
+      if (!node) return
       await saveNodeOverride(node.id, override)
       Toast.success(message)
       await mutate()
@@ -395,29 +407,95 @@ export function FleetNodeConfigPage({ node, canManage }: { node: FleetNode; canM
     return store(override, count ? `已保存 ${count} 项覆盖，${where}` : `已撤掉全部覆盖，${where}`)
   }
 
-
-  const title = `节点覆盖 · ${node.name}`
-  if (isLoading) return <FleetConfigStatePage title={title}><Loading /></FleetConfigStatePage>
-  if (!data) {
-    return (
-      <FleetConfigStatePage title={title}>
-        <LoadFailed error={error} onRetry={() => mutate()} />
-      </FleetConfigStatePage>
+  const ready = !!node && !!data
+  const overrideKeys = data ? Object.keys(data.override) : []
+  let body: React.ReactNode
+  if (!node) {
+    body = (
+      <div className={styles.center}>
+        <Empty title="节点不存在或已被移除" />
+      </div>
+    )
+  } else if (isLoading) {
+    body = <Loading />
+  } else if (!data) {
+    body = <LoadFailed error={error} onRetry={() => mutate()} />
+  } else {
+    const state = data.state
+    body = (
+      <>
+        <div className={styles.intro}>
+          <div className={styles.meta}>
+            {node.online ? <ConfigSyncTag state={state} /> : <Tag size="small">离线</Tag>}
+            {state.outdated ? (
+              <Tag size="small" color="orange">
+                版本比控制面旧
+              </Tag>
+            ) : null}
+            <span className={styles.keys}>{overrideKeys.length ? `已覆盖：${keyList(overrideKeys)}` : '没有覆盖，全部跟随全局'}</span>
+          </div>
+          {node.online && state.sync === 'failed' ? (
+            <Banner
+              type="danger"
+              fullMode={false}
+              closeIcon={null}
+              title="节点没有应用最近下发的配置，仍按原来的配置运行"
+              description={state.error ?? undefined}
+            />
+          ) : null}
+          {node.online && state.sync === 'unsupported' ? (
+            <Banner
+              type="warning"
+              fullMode={false}
+              closeIcon={null}
+              description={`这台节点的 Fleet 协议版本是 ${node.proto ?? 0}，需要至少 ${CONFIG_SINCE} 才收配置。覆盖照样保存，升级 biliup 后自动生效。`}
+            />
+          ) : null}
+          <Banner
+            type="info"
+            fullMode={false}
+            closeIcon={null}
+            description={`只填这台节点与全局不同的项，留空或改回与全局相同就撤掉覆盖。${
+              data.global.saved
+                ? ''
+                : '还没保存过全局配置，节点只收这里的覆盖，其余字段用它本机的值。'
+            }带「按节点」标记的字段（${PER_NODE_TEXT}）控制面不知道节点本机的值，空着表示节点保留自己的。`}
+          />
+        </div>
+        <ConfigForm
+          scope={`fleet-node-${node.id}`}
+          formKey={`${data.global.version}:${JSON.stringify(data.override)}`}
+          initValues={data.global.saved ? data.delivered : data.override}
+          marks={{
+            show: DELIVERABLE_KEYS,
+            badges: [
+              { keys: overrideKeys, text: '已覆盖', tone: 'primary' },
+              { keys: PER_NODE_KEYS.filter((key) => !overrideKeys.includes(key)), text: '按节点', tone: 'grey' },
+            ],
+          }}
+          editable={canManage}
+          withHistory={false}
+          withFfmpegPath
+          apiRef={apiRef}
+          snapshotRef={snapshotRef}
+          onSubmit={save}
+        />
+      </>
     )
   }
 
-  const state = data.state
-  const overrideKeys = Object.keys(data.override)
   return (
-    <FormPage
-      title={title}
-      description={canManage ? '只保存这台节点与全局不同的项' : '只读：修改需要「管理节点」权限'}
-      back={FLEET_CONFIG_BACK}
-      okText={canManage ? '保存' : undefined}
+    <FormSheet
+      title={`节点覆盖 · ${node?.name ?? ''}`}
+      size="lg"
+      fill
+      onCancel={onClose}
+      cancelText={canManage && ready ? '取消' : '关闭'}
+      okText={canManage && ready ? '保存' : undefined}
       onOk={() => apiRef.current?.submitForm()}
-      okLoading={saving}
-      headerExtra={
-        canManage ? (
+      confirmLoading={saving}
+      footerExtra={
+        !node || !data ? undefined : canManage ? (
           <Popconfirm
             title={`清空 ${node.name} 的覆盖？`}
             content="共享字段回到全局配置，按节点的字段回到它接入时本机的值"
@@ -427,66 +505,12 @@ export function FleetNodeConfigPage({ node, canManage }: { node: FleetNode; canM
               清空覆盖
             </Button>
           </Popconfirm>
-        ) : undefined
+        ) : (
+          '只读：修改需要「管理节点」权限'
+        )
       }
-      fill
     >
-      <div className={styles.intro}>
-        <div className={styles.meta}>
-          {node.online ? <ConfigSyncTag state={state} /> : <Tag size="small">离线</Tag>}
-          {state.outdated ? (
-            <Tag size="small" color="orange">
-              版本比控制面旧
-            </Tag>
-          ) : null}
-          <span className={styles.keys}>{overrideKeys.length ? `已覆盖：${keyList(overrideKeys)}` : '没有覆盖，全部跟随全局'}</span>
-        </div>
-        {node.online && state.sync === 'failed' ? (
-          <Banner
-            type="danger"
-            fullMode={false}
-            closeIcon={null}
-            title="节点没有应用最近下发的配置，仍按原来的配置运行"
-            description={state.error ?? undefined}
-          />
-        ) : null}
-        {node.online && state.sync === 'unsupported' ? (
-          <Banner
-            type="warning"
-            fullMode={false}
-            closeIcon={null}
-            description={`这台节点的 Fleet 协议版本是 ${node.proto ?? 0}，需要至少 ${CONFIG_SINCE} 才收配置。覆盖照样保存，升级 biliup 后自动生效。`}
-          />
-        ) : null}
-        <Banner
-          type="info"
-          fullMode={false}
-          closeIcon={null}
-          description={`只填这台节点与全局不同的项，留空或改回与全局相同就撤掉覆盖。${
-            data.global.saved
-              ? ''
-              : '还没保存过全局配置，节点只收这里的覆盖，其余字段用它本机的值。'
-          }带「按节点」标记的字段（${PER_NODE_TEXT}）控制面不知道节点本机的值，空着表示节点保留自己的。`}
-        />
-      </div>
-      <ConfigForm
-        scope={`fleet-node-${node.id}`}
-        formKey={`${data.global.version}:${JSON.stringify(data.override)}`}
-        initValues={data.global.saved ? data.delivered : data.override}
-        marks={{
-          show: DELIVERABLE_KEYS,
-          badges: [
-            { keys: overrideKeys, text: '已覆盖', tone: 'primary' },
-            { keys: PER_NODE_KEYS.filter((key) => !overrideKeys.includes(key)), text: '按节点', tone: 'grey' },
-          ],
-        }}
-        editable={canManage}
-        withHistory={false}
-        withFfmpegPath
-        apiRef={apiRef}
-        snapshotRef={snapshotRef}
-        onSubmit={save}
-      />
-    </FormPage>
+      {body}
+    </FormSheet>
   )
 }
