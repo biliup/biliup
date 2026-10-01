@@ -331,14 +331,34 @@ pub async fn submit_to_bilibili(
 /// 「转载类型稿件不支持活动参加哦~」。B 站 app 端投稿在稿件没带活动 ID 时，会拿第一个标签去匹配
 /// 进行中的活动，匹配上就当作参加了这个活动，转载稿因此被拒——用户并没有选活动。Web 接口没有这一步。
 const REPRINT_JOINED_MISSION: i32 = 21071;
+/// 「投稿过于频繁，建议将APP升级至最新版本后再试」。B 站风控要这个账号投稿前先过一次验证，旧版 app
+/// 弹不出验证就只让升级；biliup 冒充的 app 同样弹不出。用户反馈改走 Web 接口能投上（#1583、#1609）。
+const APP_NEEDS_VERIFICATION: i32 = 21566;
 
 /// app / 必剪接口返回这些 code 时改用 Web 接口再投一次：`(code, 重投前的 warn, Web 投成功后的 info)`。
 /// 都是投稿前的校验，稿件还没建，重投不会重复。
-static WEB_FALLBACKS: [(i32, &str, &str); 1] = [(
-    REPRINT_JOINED_MISSION,
-    "B 站把这条转载稿当成参加了活动（第一个标签和进行中的活动同名时会这样），改用 Web 接口重投",
-    "改用 Web 接口投稿成功；B 站会从稿件里去掉活动标签",
-)];
+static WEB_FALLBACKS: [(i32, &str, &str); 2] = [
+    (
+        REPRINT_JOINED_MISSION,
+        "B 站把这条转载稿当成参加了活动（第一个标签和进行中的活动同名时会这样），改用 Web 接口重投",
+        "改用 Web 接口投稿成功；B 站会从稿件里去掉活动标签",
+    ),
+    (
+        APP_NEEDS_VERIFICATION,
+        "B 站风控要求这个账号投稿前先过验证，app 接口过不了，改用 Web 接口重投",
+        "改用 Web 接口投稿成功；经常遇到 21566 的话可以把 submit_api 设为 web，直接走 Web 接口",
+    ),
+];
+
+/// 最后还是被拒时追加给用户的说明。
+fn rejection_hint(code: i32) -> Option<&'static str> {
+    match code {
+        APP_NEEDS_VERIFICATION => Some(
+            "B 站风控拦下了这个账号的投稿（code 21566）：到 B 站网页创作中心或手机 app 手动投一次稿、按提示完成验证后再试",
+        ),
+        _ => None,
+    }
+}
 
 /// 按 `option` 投稿；app / 必剪接口报 [`WEB_FALLBACKS`] 里的 code 时改用 Web 接口再投一次。
 async fn submit_with_web_fallback<F, Fut>(
@@ -351,25 +371,47 @@ where
 {
     let ret = match submit(option.clone()).await {
         Err(Kind::SubmitRejected(ret)) if !matches!(option, SubmitOption::Web) => ret,
-        result => return result.change_context(AppError::Unknown),
+        result => return submit_result(result),
     };
     let Some((_, reason, recovered)) = WEB_FALLBACKS.iter().find(|(code, ..)| *code == ret.code)
     else {
-        return Err(Kind::SubmitRejected(ret)).change_context(AppError::Unknown);
+        return submit_result(Err(Kind::SubmitRejected(ret)));
     };
     warn!(api = ?option, code = ret.code, message = ret.message(), "{reason}");
     let retried = submit(SubmitOption::Web).await;
     if retried.is_ok() {
         info!("{recovered}");
     }
+    // 说明放在最外层（`error!` 日志那一行只显示最外层）；Web 的原因比 app 的更接近该怎么改
+    let hint = hint_for(&retried).or(rejection_hint(ret.code));
     let fallback_failed = format!(
         "{option:?} 接口投稿被拒：{}（code {}），改用 Web 接口重投也失败了",
         ret.message(),
         ret.code
     );
-    retried
+    let result = retried
         .change_context(AppError::Unknown)
-        .change_context_lazy(|| AppError::Custom(fallback_failed))
+        .change_context_lazy(|| AppError::Custom(fallback_failed));
+    with_hint(result, hint)
+}
+
+fn submit_result(result: biliup::error::Result<ResponseData>) -> AppResult<ResponseData> {
+    let hint = hint_for(&result);
+    with_hint(result.change_context(AppError::Unknown), hint)
+}
+
+fn hint_for(result: &biliup::error::Result<ResponseData>) -> Option<&'static str> {
+    match result {
+        Err(Kind::SubmitRejected(ret)) => rejection_hint(ret.code),
+        _ => None,
+    }
+}
+
+fn with_hint<T>(result: AppResult<T>, hint: Option<&'static str>) -> AppResult<T> {
+    match hint {
+        Some(hint) => result.change_context_lazy(|| AppError::Custom(hint.into())),
+        None => result,
+    }
 }
 
 pub async fn edit_to_bilibili(
@@ -1629,6 +1671,126 @@ mod credit_tests {
         })
         .await;
         assert!(result.is_err());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(custom_messages(&result.unwrap_err()).is_empty());
+    }
+
+    const THROTTLED: &str = "投稿过于频繁，建议将APP升级至最新版本后再试";
+
+    fn rejected(code: i32) -> Kind {
+        let message = match code {
+            21566 => THROTTLED,
+            21564 => "投稿过于频繁，请24小时后再试",
+            _ => "未知",
+        };
+        Kind::SubmitRejected(response(code, message))
+    }
+
+    /// issue #1791：app / 必剪接口被风控拦下（21566）时改用 Web 接口重投；Web 也没投上时，
+    /// 报告最外层（`error!` 日志那一行）是该怎么办，而不是 `Unknown Error`。
+    #[tokio::test]
+    async fn app_needing_verification_falls_back_to_web() {
+        use std::sync::Mutex;
+        let verify = rejection_hint(21566).unwrap();
+        let app_failed =
+            format!("App 接口投稿被拒：{THROTTLED}（code 21566），改用 Web 接口重投也失败了");
+        struct Case {
+            api: SubmitOption,
+            /// Web 接口返回的 code，`None` 为投稿成功
+            web: Option<i32>,
+            calls: &'static [&'static str],
+            /// 失败时错误链里的 `AppError::Custom`，最外层在前
+            customs: Vec<String>,
+        }
+        let cases = [
+            Case {
+                api: SubmitOption::App,
+                web: None,
+                calls: &["App", "Web"],
+                customs: vec![],
+            },
+            Case {
+                api: SubmitOption::BCutAndroid,
+                web: None,
+                calls: &["BCutAndroid", "Web"],
+                customs: vec![],
+            },
+            // Web 同样 21566：只说一次该怎么办。
+            Case {
+                api: SubmitOption::App,
+                web: Some(21566),
+                calls: &["App", "Web"],
+                customs: vec![verify.into(), app_failed.clone()],
+            },
+            // Web 被别的原因拒（24 小时限额）：仍提示去过验证，Web 的原因留在链里。
+            Case {
+                api: SubmitOption::App,
+                web: Some(21564),
+                calls: &["App", "Web"],
+                customs: vec![verify.into(), app_failed.clone()],
+            },
+            // 配的就是 Web：没有可回退的，直接提示。
+            Case {
+                api: SubmitOption::Web,
+                web: Some(21566),
+                calls: &["Web"],
+                customs: vec![verify.into()],
+            },
+        ];
+        for case in cases {
+            let calls = Mutex::new(Vec::new());
+            let result = submit_with_web_fallback(case.api.clone(), |api| {
+                calls.lock().unwrap().push(format!("{api:?}"));
+                let result = match (api, case.web) {
+                    (SubmitOption::Web, None) => Ok(response(0, "0")),
+                    (SubmitOption::Web, Some(code)) => Err(rejected(code)),
+                    _ => Err(rejected(21566)),
+                };
+                async move { result }
+            })
+            .await;
+            let label = format!("{:?} web={:?}", case.api, case.web);
+            assert_eq!(*calls.lock().unwrap(), case.calls, "{label}");
+            if case.customs.is_empty() {
+                assert!(result.is_ok(), "{label}: {result:?}");
+                continue;
+            }
+            let report = result.expect_err(&label);
+            assert_eq!(custom_messages(&report), case.customs, "{label}");
+            assert_eq!(report.to_string(), case.customs[0], "{label}");
+            let web_code = report
+                .frames()
+                .find_map(|f| match f.downcast_ref::<Kind>() {
+                    Some(Kind::SubmitRejected(ret)) => Some(ret.code),
+                    _ => None,
+                });
+            assert_eq!(web_code, case.web, "{label}");
+        }
+    }
+
+    #[tokio::test]
+    async fn web_fallback_after_21566_keeps_web_reason() {
+        let result = submit_with_web_fallback(SubmitOption::App, |api| async move {
+            match api {
+                SubmitOption::Web => Err(Kind::Custom("jct error".into())),
+                _ => Err(rejected(21566)),
+            }
+        })
+        .await;
+        let report = result.unwrap_err();
+        assert_eq!(report.to_string(), rejection_hint(21566).unwrap());
+        assert!(format!("{report:?}").contains("jct error"));
+    }
+
+    /// 21564「请24小时后再试」是账号级的限额，换接口一样被拒（#1346），不重投。
+    #[tokio::test]
+    async fn daily_limit_is_not_retried() {
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let result = submit_with_web_fallback(SubmitOption::App, |_| {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async { Err(rejected(21564)) }
+        })
+        .await;
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert!(custom_messages(&result.unwrap_err()).is_empty());
     }
