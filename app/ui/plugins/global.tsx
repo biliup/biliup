@@ -385,7 +385,8 @@ const Global: React.FC<Props> = ({ disabled }) => {
         <Form.Select
           field="submit_api"
           label="提交接口（submit_api）"
-          extraText="B站投稿提交接口，默认为自动选择。"
+          extraText="B站投稿提交接口，不选时用网页（web）。"
+          placeholder="网页（web）"
           style={{ width: '100%' }}
           fieldStyle={{
             alignSelf: 'stretch',

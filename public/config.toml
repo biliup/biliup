@@ -21,8 +21,8 @@ filtering_threshold = 20
 #segment_processor_parallel = false
 
 #------上传------#
-### b站提交接口，默认自动选择，可选web，client
-#submit_api = "client"
+### b站投稿接口，默认web，可选web，app，b-cut-android
+#submit_api = "web"
 ### 选择全局默认上传插件，Noop为不上传，但会执行后处理,可选bili_web，biliup-rs(默认值)
 #uploader = "Noop"
 ### b站上传线路选择，默认自动选择最优线路。目前可手动切换为alia（海外）, bda2（大陆）, bldsa（大陆）, tx（大陆）, txa（海外）, estx（大陆）, akbd（大陆）

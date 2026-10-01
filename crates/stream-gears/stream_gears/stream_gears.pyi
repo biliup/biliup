@@ -242,7 +242,7 @@ def upload(
     :param dtime: 定时发布的 10 位时间戳，须在提交后 2 小时到 15 天之间
     :param line: 上传线路，`None` 时自动测速
     :param extra_fields: 追加到投稿请求里的 JSON 对象字符串；`None` 或空串表示没有
-    :param submit: 投稿接口：`app`（默认）、`web`、`bcutandroid`，不区分大小写，无法识别时用 `app`
+    :param submit: 投稿接口：`web`（默认）、`app`、`bcutandroid`，不区分大小写，无法识别时用 `web`
     :param proxy: 代理
     :raises StreamGearsError: 登录、上传或投稿失败
     :raises ValueError: `extra_fields` 不是合法的 JSON 对象
