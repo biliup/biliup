@@ -316,22 +316,60 @@ pub async fn submit_to_bilibili(
         _ => SubmitOption::App,
     };
 
-    let result = match submit_option {
-        SubmitOption::BCutAndroid => bilibili
-            .submit_by_bcut_android(studio, None)
-            .await
-            .change_context(AppError::Unknown)?,
-        SubmitOption::Web => bilibili
-            .submit_by_web(studio, None)
-            .await
-            .change_context(AppError::Unknown)?,
-        _ => bilibili
-            .submit_by_app(studio, None)
-            .await
-            .change_context(AppError::Unknown)?,
-    };
+    let result = submit_with_web_fallback(submit_option, |option| async move {
+        match option {
+            SubmitOption::BCutAndroid => bilibili.submit_by_bcut_android(studio, None).await,
+            SubmitOption::Web => bilibili.submit_by_web(studio, None).await,
+            SubmitOption::App => bilibili.submit_by_app(studio, None).await,
+        }
+    })
+    .await?;
     info!("Submit successful");
     Ok(result)
+}
+
+/// 「转载类型稿件不支持活动参加哦~」。B 站 app 端投稿在稿件没带活动 ID 时，会拿第一个标签去匹配
+/// 进行中的活动，匹配上就当作参加了这个活动，转载稿因此被拒——用户并没有选活动。Web 接口没有这一步。
+const REPRINT_JOINED_MISSION: i32 = 21071;
+
+/// app / 必剪接口返回这些 code 时改用 Web 接口再投一次：`(code, 重投前的 warn, Web 投成功后的 info)`。
+/// 都是投稿前的校验，稿件还没建，重投不会重复。
+static WEB_FALLBACKS: [(i32, &str, &str); 1] = [(
+    REPRINT_JOINED_MISSION,
+    "B 站把这条转载稿当成参加了活动（第一个标签和进行中的活动同名时会这样），改用 Web 接口重投",
+    "改用 Web 接口投稿成功；B 站会从稿件里去掉活动标签",
+)];
+
+/// 按 `option` 投稿；app / 必剪接口报 [`WEB_FALLBACKS`] 里的 code 时改用 Web 接口再投一次。
+async fn submit_with_web_fallback<F, Fut>(
+    option: SubmitOption,
+    submit: F,
+) -> AppResult<ResponseData>
+where
+    F: Fn(SubmitOption) -> Fut,
+    Fut: Future<Output = biliup::error::Result<ResponseData>>,
+{
+    let ret = match submit(option.clone()).await {
+        Err(Kind::SubmitRejected(ret)) if !matches!(option, SubmitOption::Web) => ret,
+        result => return result.change_context(AppError::Unknown),
+    };
+    let Some((_, reason, recovered)) = WEB_FALLBACKS.iter().find(|(code, ..)| *code == ret.code)
+    else {
+        return Err(Kind::SubmitRejected(ret)).change_context(AppError::Unknown);
+    };
+    warn!(api = ?option, code = ret.code, message = ret.message(), "{reason}");
+    let retried = submit(SubmitOption::Web).await;
+    if retried.is_ok() {
+        info!("{recovered}");
+    }
+    let fallback_failed = format!(
+        "{option:?} 接口投稿被拒：{}（code {}），改用 Web 接口重投也失败了",
+        ret.message(),
+        ret.code
+    );
+    retried
+        .change_context(AppError::Unknown)
+        .change_context_lazy(|| AppError::Custom(fallback_failed))
 }
 
 pub async fn edit_to_bilibili(
@@ -1304,6 +1342,295 @@ mod credit_tests {
                 text("  2026年06月15日直播回放-游戏日！来博弈了"),
             ])
         );
+    }
+
+    /// issue #1762 的模板：转载、来源留空、`extra_fields` 为空串、只有一个标签。
+    fn issue_1762_template(copyright: u8, tags: &[&str]) -> UploadStreamer {
+        serde_json::from_value(serde_json::json!({
+            "id": 3,
+            "template_name": "test",
+            "title": "{title}%Y-%m-%d",
+            "tid": 21,
+            "copyright": copyright,
+            "copyright_source": "",
+            "cover_path": "",
+            "description": "",
+            "dynamic": "",
+            "dolby": 0,
+            "hires": 0,
+            "charging_pay": 0,
+            "no_reprint": 0,
+            "is_only_self": 1,
+            "uploader": "biliup-rs",
+            "tags": tags,
+            "credits": null,
+            "up_selection_reply": false,
+            "up_close_reply": false,
+            "up_close_danmu": false,
+            "extra_fields": "",
+        }))
+        .unwrap()
+    }
+
+    fn request_body(copyright: u8, tags: &[&str]) -> serde_json::Value {
+        let studio = studio_from_template(
+            &issue_1762_template(copyright, tags),
+            Vec::new(),
+            &recorder(),
+        );
+        serde_json::to_value(&studio).unwrap()
+    }
+
+    #[test]
+    fn issue_1762_request_body_carries_no_mission() {
+        for copyright in [1, 2] {
+            let body = request_body(copyright, &["测试"]);
+            let mut keys: Vec<&str> = body
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(|k| k.as_str())
+                .collect();
+            keys.sort_unstable();
+            // 空串 `extra_fields` 不注入任何键；没有 topic_id / act_reserve_create 之类的活动字段。
+            assert_eq!(
+                keys,
+                [
+                    "aid",
+                    "charging_pay",
+                    "copyright",
+                    "cover",
+                    "desc",
+                    "desc_format_id",
+                    "desc_v2",
+                    "dolby",
+                    "dtime",
+                    "dynamic",
+                    "interactive",
+                    "is_only_self",
+                    "lossless_music",
+                    "mission_id",
+                    "no_reprint",
+                    "open_subtitle",
+                    "source",
+                    "subtitle",
+                    "tag",
+                    "tid",
+                    "title",
+                    "up_close_danmu",
+                    "up_close_reply",
+                    "up_selection_reply",
+                    "videos",
+                ]
+            );
+            assert!(body["mission_id"].is_null());
+            assert_eq!(body["copyright"], copyright);
+            assert_eq!(body["source"], "https://live.bilibili.com/1");
+            assert_eq!(body["tid"], 21);
+            assert_eq!(body["tag"], "测试");
+            assert_eq!(body["is_only_self"], 1);
+        }
+    }
+
+    fn response(code: i32, message: &str) -> ResponseData {
+        serde_json::from_value(serde_json::json!({
+            "code": code,
+            "data": if code == 0 { serde_json::json!({"aid": 1, "bvid": "BV1"}) } else { serde_json::Value::Null },
+            "message": message,
+            "ttl": 1
+        }))
+        .unwrap()
+    }
+
+    /// 按 B 站投稿服务的校验顺序模拟两个接口（go-common `videoup`：`AppAdd` 的
+    /// `freshAppMissionByFirstTag`、`preAdd` 的 `checkMission` / `checkMissionTag`）。
+    /// `missions` 是进行中活动的第一个标签。
+    fn fake_add(
+        api: &SubmitOption,
+        body: &serde_json::Value,
+        missions: &[&str],
+    ) -> biliup::error::Result<ResponseData> {
+        let tags: Vec<&str> = body["tag"].as_str().unwrap().split(',').collect();
+        let mut mission = body["mission_id"].as_u64().unwrap_or(0);
+        if mission == 0 && !matches!(api, SubmitOption::Web) && missions.contains(&tags[0]) {
+            mission = 1;
+        }
+        if mission > 0 && body["copyright"] == 2 {
+            return Err(Kind::SubmitRejected(response(
+                21071,
+                "转载类型稿件不支持活动参加哦~",
+            )));
+        }
+        if mission == 0 && tags.iter().all(|t| missions.contains(t)) {
+            return Err(Kind::SubmitRejected(response(
+                21067,
+                "自定义标签包含不可选的活动tag，请修改后重新提交",
+            )));
+        }
+        Ok(response(0, "0"))
+    }
+
+    fn custom_messages(report: &error_stack::Report<AppError>) -> Vec<String> {
+        report
+            .frames()
+            .filter_map(|f| match f.downcast_ref::<AppError>() {
+                Some(AppError::Custom(m)) => Some(m.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn reprint_rejected_by_app_as_mission_falls_back_to_web() {
+        use std::sync::Mutex;
+        struct Case {
+            api: SubmitOption,
+            copyright: u8,
+            tags: &'static [&'static str],
+            calls: &'static [&'static str],
+            code: Option<i32>,
+        }
+        let cases = [
+            // 转载 × app：首个标签是活动标签 → 21071，改走 Web，B 站剔掉活动标签后投稿成功。
+            Case {
+                api: SubmitOption::App,
+                copyright: 2,
+                tags: &["测试", "直播回放"],
+                calls: &["App", "Web"],
+                code: None,
+            },
+            Case {
+                api: SubmitOption::BCutAndroid,
+                copyright: 2,
+                tags: &["测试", "直播回放"],
+                calls: &["BCutAndroid", "Web"],
+                code: None,
+            },
+            // 只有这一个标签：Web 剔完没有标签 → 21067。
+            Case {
+                api: SubmitOption::App,
+                copyright: 2,
+                tags: &["测试"],
+                calls: &["App", "Web"],
+                code: Some(21067),
+            },
+            Case {
+                api: SubmitOption::App,
+                copyright: 2,
+                tags: &["直播回放", "测试"],
+                calls: &["App"],
+                code: None,
+            },
+            // 自制 × app：B 站默默让稿件参加活动，不报错。
+            Case {
+                api: SubmitOption::App,
+                copyright: 1,
+                tags: &["测试", "直播回放"],
+                calls: &["App"],
+                code: None,
+            },
+            // Web 接口不会自动参加活动，也就不会 21071；21071 之外的错误不重投。
+            Case {
+                api: SubmitOption::Web,
+                copyright: 2,
+                tags: &["测试", "直播回放"],
+                calls: &["Web"],
+                code: None,
+            },
+            Case {
+                api: SubmitOption::Web,
+                copyright: 2,
+                tags: &["测试"],
+                calls: &["Web"],
+                code: Some(21067),
+            },
+            Case {
+                api: SubmitOption::Web,
+                copyright: 1,
+                tags: &["测试"],
+                calls: &["Web"],
+                code: Some(21067),
+            },
+            Case {
+                api: SubmitOption::App,
+                copyright: 1,
+                tags: &["测试"],
+                calls: &["App"],
+                code: None,
+            },
+        ];
+        for case in cases {
+            let body = request_body(case.copyright, case.tags);
+            let calls = Mutex::new(Vec::new());
+            let result = submit_with_web_fallback(case.api.clone(), |api| {
+                calls.lock().unwrap().push(format!("{api:?}"));
+                let result = fake_add(&api, &body, &["测试"]);
+                async move { result }
+            })
+            .await;
+            let label = format!(
+                "{:?} copyright={} tags={:?}",
+                case.api, case.copyright, case.tags
+            );
+            assert_eq!(*calls.lock().unwrap(), case.calls, "{label}");
+            match case.code {
+                None => assert!(result.is_ok(), "{label}: {result:?}"),
+                Some(code) => {
+                    let report = result.expect_err(&label);
+                    let rejected = report
+                        .frames()
+                        .find_map(|f| match f.downcast_ref::<Kind>() {
+                            Some(Kind::SubmitRejected(ret)) => Some(ret.code),
+                            _ => None,
+                        });
+                    assert_eq!(rejected, Some(code), "{label}");
+                    let messages = custom_messages(&report);
+                    let fallback_failed = messages.iter().any(|m| {
+                        m.contains("code 21071") && m.contains("改用 Web 接口重投也失败了")
+                    });
+                    assert_eq!(
+                        fallback_failed,
+                        case.calls.len() == 2,
+                        "{label}: {messages:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn web_fallback_failure_keeps_both_reasons() {
+        let result = submit_with_web_fallback(SubmitOption::App, |api| async move {
+            match api {
+                SubmitOption::Web => Err(Kind::Custom("cookie 里没有 bili_jct".into())),
+                _ => Err(Kind::SubmitRejected(response(
+                    21071,
+                    "转载类型稿件不支持活动参加哦~",
+                ))),
+            }
+        })
+        .await;
+        let report = result.unwrap_err();
+        assert_eq!(
+            custom_messages(&report),
+            [
+                "App 接口投稿被拒：转载类型稿件不支持活动参加哦~（code 21071），改用 Web 接口重投也失败了"
+            ]
+        );
+        assert!(format!("{report:?}").contains("cookie 里没有 bili_jct"));
+    }
+
+    #[tokio::test]
+    async fn other_rejections_are_not_retried() {
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let result = submit_with_web_fallback(SubmitOption::App, |_| {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async { Err(Kind::SubmitRejected(response(21012, "标题不合法"))) }
+        })
+        .await;
+        assert!(result.is_err());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(custom_messages(&result.unwrap_err()).is_empty());
     }
 
     #[tokio::test]

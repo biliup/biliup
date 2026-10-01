@@ -484,7 +484,7 @@ impl BiliBili {
             info!("BCUT接口投稿成功");
             Ok(ret)
         } else {
-            Err(Kind::Custom(format!("{:?}", ret)))
+            Err(Kind::SubmitRejected(ret))
         }
     }
 
@@ -533,7 +533,7 @@ impl BiliBili {
             info!("APP接口投稿成功");
             Ok(ret)
         } else {
-            Err(Kind::Custom(format!("{:?}", ret)))
+            Err(Kind::SubmitRejected(ret))
         }
     }
 
@@ -574,7 +574,7 @@ impl BiliBili {
             info!("Web 接口投稿成功");
             Ok(ret)
         } else {
-            Err(Kind::Custom(format!("{:?}", ret)))
+            Err(Kind::SubmitRejected(ret))
         }
     }
 
@@ -991,6 +991,12 @@ pub struct ResponseData<T = Value> {
     ttl: Option<u8>,
 }
 
+impl<T> ResponseData<T> {
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
 impl<T: Serialize> Display for ResponseData<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -1201,5 +1207,30 @@ mod studio_tid_v2_tests {
                 .unwrap()["state"],
             0
         );
+    }
+}
+
+#[cfg(test)]
+mod submit_rejected_tests {
+    use super::ResponseData;
+    use crate::error::Kind;
+
+    /// 切片发布队列按 `ResponseData { code: .., message: ".." .. }` 挑出 code 和文案，显示不能变。
+    #[test]
+    fn submit_rejected_displays_like_response_debug() {
+        let ret: ResponseData = serde_json::from_value(serde_json::json!({
+            "code": 21071,
+            "data": null,
+            "message": "转载类型稿件不支持活动参加哦~",
+            "ttl": 1
+        }))
+        .unwrap();
+        let expected = format!("{ret:?}");
+        assert_eq!(
+            expected,
+            r#"ResponseData { code: 21071, data: None, message: "转载类型稿件不支持活动参加哦~", ttl: Some(1) }"#
+        );
+        assert_eq!(ret.message(), "转载类型稿件不支持活动参加哦~");
+        assert_eq!(Kind::SubmitRejected(ret).to_string(), expected);
     }
 }
