@@ -334,6 +334,8 @@ const REPRINT_JOINED_MISSION: i32 = 21071;
 /// 「投稿过于频繁，建议将APP升级至最新版本后再试」。B 站风控要这个账号投稿前先过一次验证，旧版 app
 /// 弹不出验证就只让升级；biliup 冒充的 app 同样弹不出。用户反馈改走 Web 接口能投上（#1583、#1609）。
 const APP_NEEDS_VERIFICATION: i32 = 21566;
+/// 「自定义标签包含不可选的活动tag」：B 站剔掉活动标签后一个标签都不剩。
+const ONLY_MISSION_TAGS: i32 = 21067;
 
 /// app / 必剪接口返回这些 code 时改用 Web 接口再投一次：`(code, 重投前的 warn, Web 投成功后的 info)`。
 /// 都是投稿前的校验，稿件还没建，重投不会重复。
@@ -353,6 +355,9 @@ static WEB_FALLBACKS: [(i32, &str, &str); 2] = [
 /// 最后还是被拒时追加给用户的说明。
 fn rejection_hint(code: i32) -> Option<&'static str> {
     match code {
+        ONLY_MISSION_TAGS => Some(
+            "投稿模板里的标签都是 B 站进行中的活动标签，B 站去掉它们后就没有标签了，请再加一个普通标签",
+        ),
         APP_NEEDS_VERIFICATION => Some(
             "B 站风控拦下了这个账号的投稿（code 21566）：到 B 站网页创作中心或手机 app 手动投一次稿、按提示完成验证后再试",
         ),
@@ -1548,7 +1553,7 @@ mod credit_tests {
                 calls: &["BCutAndroid", "Web"],
                 code: None,
             },
-            // 只有这一个标签：Web 剔完没有标签 → 21067。
+            // 只有这一个标签：Web 剔完没有标签 → 21067，带上提示。
             Case {
                 api: SubmitOption::App,
                 copyright: 2,
@@ -1627,6 +1632,11 @@ mod credit_tests {
                         });
                     assert_eq!(rejected, Some(code), "{label}");
                     let messages = custom_messages(&report);
+                    assert_eq!(
+                        report.to_string(),
+                        rejection_hint(21067).unwrap(),
+                        "{label}"
+                    );
                     let fallback_failed = messages.iter().any(|m| {
                         m.contains("code 21071") && m.contains("改用 Web 接口重投也失败了")
                     });
@@ -1681,6 +1691,7 @@ mod credit_tests {
         let message = match code {
             21566 => THROTTLED,
             21564 => "投稿过于频繁，请24小时后再试",
+            21067 => "自定义标签包含不可选的活动tag，请修改后重新提交",
             _ => "未知",
         };
         Kind::SubmitRejected(response(code, message))
@@ -1692,6 +1703,7 @@ mod credit_tests {
     async fn app_needing_verification_falls_back_to_web() {
         use std::sync::Mutex;
         let verify = rejection_hint(21566).unwrap();
+        let tags = rejection_hint(21067).unwrap();
         let app_failed =
             format!("App 接口投稿被拒：{THROTTLED}（code 21566），改用 Web 接口重投也失败了");
         struct Case {
@@ -1728,6 +1740,13 @@ mod credit_tests {
                 web: Some(21564),
                 calls: &["App", "Web"],
                 customs: vec![verify.into(), app_failed.clone()],
+            },
+            // Web 只是标签问题：改标签就能投上，提示标签而不是验证。
+            Case {
+                api: SubmitOption::App,
+                web: Some(21067),
+                calls: &["App", "Web"],
+                customs: vec![tags.into(), app_failed.clone()],
             },
             // 配的就是 Web：没有可回退的，直接提示。
             Case {
