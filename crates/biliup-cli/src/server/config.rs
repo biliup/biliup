@@ -72,7 +72,7 @@ pub struct Config {
     #[serde(default)]
     pub uploader: Option<String>,
 
-    /// 提交API类型：web | client
+    /// 投稿接口：web（默认）| app | b-cut-android
     #[serde(default)]
     pub submit_api: Option<String>,
 

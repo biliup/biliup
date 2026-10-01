@@ -311,9 +311,10 @@ pub async fn submit_to_bilibili(
     //     _ => bilibili.submit_by_app(&studio, None).await,
     // };
 
+    // 默认走 Web：app 接口会拿第一个标签自动参加活动（转载稿因此 21071，#1762），也更容易被风控（21566）
     let submit_option = match submit_api {
-        Some(submit) => SubmitOption::from_str(submit).unwrap_or(SubmitOption::App),
-        _ => SubmitOption::App,
+        Some(submit) => SubmitOption::from_str(submit).unwrap_or(SubmitOption::Web),
+        _ => SubmitOption::Web,
     };
 
     let result = match submit_option {
@@ -340,8 +341,8 @@ pub async fn edit_to_bilibili(
     submit_api: Option<&str>,
 ) -> AppResult<serde_json::Value> {
     let submit_option = match submit_api {
-        Some(submit) => SubmitOption::from_str(submit).unwrap_or(SubmitOption::App),
-        _ => SubmitOption::App,
+        Some(submit) => SubmitOption::from_str(submit).unwrap_or(SubmitOption::Web),
+        _ => SubmitOption::Web,
     };
 
     let result = match submit_option {
@@ -919,8 +920,10 @@ async fn handle_message(msg: UploaderMessage) {
             if let Err(e) = &result {
                 error!("Process segment event failed: {}", e);
                 crate::server::fleet::events::upload_failed(&ctx, e);
+                info!(url=ctx.live_streamer().url, result=?result, "处理失败，后处理未执行或未执行完（投稿失败时不会执行后处理）：Finished processing segment event with an error");
+            } else {
+                info!(url=ctx.live_streamer().url, result=?result, "后处理执行完毕：Finished processing segment event");
             }
-            info!(url=ctx.live_streamer().url, result=?result, "后处理执行完毕：Finished processing segment event");
             ctx.change_status(Stage::Upload, WorkerStatus::Idle).await;
         }
     }
