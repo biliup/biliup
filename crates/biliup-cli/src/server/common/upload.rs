@@ -1004,8 +1004,10 @@ async fn handle_message(msg: UploaderMessage) {
             if let Err(e) = &result {
                 error!("Process segment event failed: {}", e);
                 crate::server::fleet::events::upload_failed(&ctx, e);
+                info!(url=ctx.live_streamer().url, result=?result, "处理失败，后处理未执行或未执行完（投稿失败时不会执行后处理）：Finished processing segment event with an error");
+            } else {
+                info!(url=ctx.live_streamer().url, result=?result, "后处理执行完毕：Finished processing segment event");
             }
-            info!(url=ctx.live_streamer().url, result=?result, "后处理执行完毕：Finished processing segment event");
             ctx.change_status(Stage::Upload, WorkerStatus::Idle).await;
         }
     }
