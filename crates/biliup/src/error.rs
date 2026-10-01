@@ -1,4 +1,3 @@
-use crate::uploader::bilibili::ResponseData;
 use reqwest::header::{InvalidHeaderName, InvalidHeaderValue};
 
 use thiserror::Error;
@@ -39,10 +38,6 @@ pub enum Kind {
 
     #[error("upload rate limit (code: {code}): {message}")]
     RateLimit { code: i64, message: String },
-
-    /// 投稿接口返回了非 0 的 code；显示成 `ResponseData { code: .., message: ".." .. }`。
-    #[error("{0:?}")]
-    SubmitRejected(ResponseData),
 }
 
 impl From<&str> for Kind {
