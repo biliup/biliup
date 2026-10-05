@@ -91,16 +91,17 @@ impl GopCache {
             prev_timestamp,
         } = self;
         // drain：中途写失败时剩下的 tag 也一并丢弃，不会在收尾时再写一遍造成重复
-        for (tag_header, flv_tag_data, previous_tag_size_bytes) in tags.drain(..) {
+        for (mut tag_header, flv_tag_data, previous_tag_size_bytes) in tags.drain(..) {
             if tag_header.timestamp < *prev_timestamp {
                 warn!(
-                    "Non-monotonous DTS in output stream; previous: {prev_timestamp}, current: {};",
+                    "Non-monotonous DTS in output stream; previous: {prev_timestamp}, current: {}; clamping to previous",
                     tag_header.timestamp
                 );
+                tag_header.timestamp = *prev_timestamp;
             }
             out.write_tag(&tag_header, &flv_tag_data, &previous_tag_size_bytes)?;
             segment.increase_size((11 + tag_header.data_size + 4) as u64);
-            *prev_timestamp = tag_header.timestamp
+            *prev_timestamp = tag_header.timestamp;
         }
         Ok(())
     }
@@ -117,6 +118,9 @@ async fn read_tags(
     let mut aac_sequence_header = None;
     let mut h264_sequence_header: Option<(TagHeader, Bytes, Bytes)> = None;
     let mut create_new = false;
+    let mut timestamp_offset: u32 = 0;
+    let mut prev_raw_timestamp: u32 = 0;
+    let mut has_prev_tag = false;
     loop {
         let tag_header_bytes = connection.read_frame(11).await?;
         if tag_header_bytes.is_empty() {
@@ -125,7 +129,23 @@ async fn read_tags(
             break;
         }
 
-        let (_, tag_header) = map_parse_err(tag_header(&tag_header_bytes), "tag header")?;
+        let (_, mut tag_header) = map_parse_err(tag_header(&tag_header_bytes), "tag header")?;
+        // 上游 CDN（如斗鱼）在流分发切片或重连时时间戳可能断裂或重置回 0。
+        // 通过累加 offset 矫正时间戳，保证输出流的时间戳单调递增，避免下游播放与分段逻辑异常。
+        if has_prev_tag {
+            if tag_header.timestamp < prev_raw_timestamp {
+                let diff = prev_raw_timestamp.saturating_sub(tag_header.timestamp);
+                warn!(
+                    "Non-monotonous DTS in upstream stream; previous: {prev_raw_timestamp}, current: {}; adjusting offset by +{diff}",
+                    tag_header.timestamp
+                );
+                timestamp_offset = timestamp_offset.wrapping_add(diff);
+            }
+        } else {
+            has_prev_tag = true;
+        }
+        prev_raw_timestamp = tag_header.timestamp;
+        tag_header.timestamp = tag_header.timestamp.wrapping_add(timestamp_offset);
         // write_tag_header(&mut out, &tag_header)?;
 
         let bytes = connection.read_frame(tag_header.data_size as usize).await?;
@@ -154,8 +174,10 @@ async fn read_tags(
         let flv_tag = match flv_tag_data {
             TagData::Audio(audio_data) => {
                 let packet_type = if audio_data.sound_format == SoundFormat::AAC {
-                    let (_, packet_header) = aac_audio_packet_header(audio_data.sound_data)
-                        .expect("Error in parsing aac audio packet header.");
+                    let (_, packet_header) = map_parse_err(
+                        aac_audio_packet_header(audio_data.sound_data),
+                        "aac audio packet header",
+                    )?;
                     if packet_header.packet_type == AACPacketType::SequenceHeader {
                         if aac_sequence_header.is_some() {
                             warn!("Unexpected aac sequence header tag. {tag_header:?}");
@@ -183,8 +205,10 @@ async fn read_tags(
             }
             TagData::Video(video_data) => {
                 let (packet_type, composition_time) = if CodecId::H264 == video_data.codec_id {
-                    let (_, avc_video_header) = avc_video_packet_header(video_data.video_data)
-                        .expect("Error in parsing avc video packet header.");
+                    let (_, avc_video_header) = map_parse_err(
+                        avc_video_packet_header(video_data.video_data),
+                        "avc video packet header",
+                    )?;
                     if avc_video_header.packet_type == AVCPacketType::SequenceHeader {
                         if let Some((_, binary_data, _)) = &h264_sequence_header {
                             warn!("Unexpected h264 sequence header tag. {tag_header:?}");
@@ -215,7 +239,7 @@ async fn read_tags(
                 }
             }
             TagData::Script => {
-                let (_, tag_data) = script_data(i).expect("Error in parsing script tag.");
+                let (_, tag_data) = map_parse_err(script_data(i), "script tag")?;
                 if on_meta_data.is_some() {
                     warn!("Unexpected script tag. {tag_header:?}");
                 }
@@ -869,6 +893,74 @@ mod tests {
             }
             assert_eq!(*tags, on_disk, "{}", path.display());
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn non_monotonous_dts_is_repaired_monotonically() -> Result<(), Box<dyn std::error::Error>> {
+        use crate::downloader::util::{LifecycleFile, Segmentable};
+
+        fn tag(data: &mut Vec<u8>, tag_type: u8, ts: u32, body: &[u8]) {
+            data.push(tag_type);
+            data.extend_from_slice(&(body.len() as u32).to_be_bytes()[1..]);
+            data.extend_from_slice(&(ts & 0xff_ffff).to_be_bytes()[1..]);
+            data.push((ts >> 24) as u8);
+            data.extend_from_slice(&[0, 0, 0]);
+            data.extend_from_slice(body);
+            data.extend_from_slice(&((11 + body.len()) as u32).to_be_bytes());
+        }
+        let mut data = vec![0, 0, 0, 0];
+        tag(
+            &mut data,
+            18,
+            0,
+            &[
+                0x02, 0x00, 0x0A, b'o', b'n', b'M', b'e', b't', b'a', b'D', b'a', b't', b'a', 0x05,
+            ],
+        );
+        // AVC sequence header
+        tag(&mut data, 9, 0, &[0x17, 0x00, 0x00, 0x00, 0x00, 0x01, 0x64]);
+
+        let key_body = &[0x17, 0x01, 0, 0, 0, 0xaa, 0xbb];
+        tag(&mut data, 9, 1000, key_body);
+        tag(&mut data, 9, 2000, key_body);
+        // Stream discontinuity: timestamp resets to 0!
+        tag(&mut data, 9, 0, key_body);
+        tag(&mut data, 9, 1000, key_body);
+
+        let http_resp = http::Response::builder()
+            .status(200)
+            .body(data)?;
+        let connection = super::Connection::new(reqwest::Response::from(http_resp));
+
+        let dir = tempfile::tempdir()?;
+        let file_stem = dir.path().join("dts_repair_test");
+        let file = LifecycleFile::new(file_stem.to_str().unwrap(), "flv");
+        let segment = Segmentable::new(None, None);
+
+        super::parse_flv(connection, file, segment, None).await?;
+
+        let out_path = file_stem.with_extension("flv");
+        let bytes = std::fs::read(&out_path)?;
+        assert!(bytes.len() >= 9 + 4);
+
+        let mut offset = 13;
+        let mut prev_ts: Option<u32> = None;
+        while offset < bytes.len() {
+            let h = &bytes[offset..offset + 11];
+            let size = u32::from_be_bytes([0, h[1], h[2], h[3]]);
+            let ts = u32::from_be_bytes([h[7], h[4], h[5], h[6]]);
+            if let Some(prev) = prev_ts {
+                assert!(
+                    ts >= prev,
+                    "Timestamps must be monotonically increasing! prev: {prev}, current: {ts}"
+                );
+            }
+            prev_ts = Some(ts);
+            offset += 15 + size as usize;
+        }
+        assert!(prev_ts.is_some());
+        assert!(prev_ts.unwrap() >= 3000);
         Ok(())
     }
 }
