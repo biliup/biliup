@@ -2,6 +2,7 @@ use super::{
     DanmakuSource, DownloaderHint, LiveError, LivePlugin, LiveRequest, LiveResult, LiveStatus,
     LiveStream, RuntimeOptions, YtDlpBackend, YtDlpOptions, media_ext_from_url,
 };
+use crate::tools;
 use async_trait::async_trait;
 use chrono::Utc;
 use regex::Regex;
@@ -11,7 +12,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::process::Stdio;
 use tokio::fs;
-use tokio::process::Command;
 
 pub struct Youtube {
     re: Regex,
@@ -138,6 +138,7 @@ impl YoutubeLive {
                 title: selection.title.clone(),
                 date: Utc::now(),
                 live_cover_url: selection.thumbnail.clone(),
+                avatar_url: None,
                 raw_stream_url,
                 platform: "youtube".to_string(),
                 stream_headers: HashMap::new(),
@@ -170,7 +171,7 @@ impl YoutubeLive {
     }
 
     async fn extract_info(&self, url: &str, flat: bool) -> LiveResult<Option<Value>> {
-        let mut command = Command::new("yt-dlp");
+        let mut command = tools::command("yt-dlp");
         command
             .stdin(Stdio::null())
             .arg("--dump-single-json")

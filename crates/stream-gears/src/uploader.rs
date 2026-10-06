@@ -1,7 +1,10 @@
 use biliup::uploader::bilibili::{Credit, ResponseData, Studio};
+use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::pyclass;
+use pyo3::types::PyMapping;
 
+use crate::get_field;
 use biliup_cli::server::common;
 use biliup_cli::server::common::upload::submit_to_bilibili;
 use biliup_cli::server::errors::{AppError, AppResult};
@@ -56,14 +59,37 @@ impl From<UploadLine> for biliup_cli::UploadLine {
     }
 }
 
-#[derive(FromPyObject)]
+/// `desc_v2` 的元素：`{"type", "raw_text", "biz_id"}` 形式的 dict，
+/// 或带 `type_id` / `raw_text` / `biz_id` 属性的对象。`biz_id` 可省略。
 pub struct PyCredit {
-    #[pyo3(item("type"))]
     type_id: i8,
-    #[pyo3(item("raw_text"))]
     raw_text: String,
-    #[pyo3(item("biz_id"))]
     biz_id: Option<String>,
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for PyCredit {
+    type Error = PyErr;
+
+    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        let obj = obj.to_owned();
+        let type_key = if obj.cast::<PyMapping>().is_ok() {
+            "type"
+        } else {
+            "type_id"
+        };
+        let required = |key: &str| -> PyResult<Bound<'py, PyAny>> {
+            get_field(&obj, key)?
+                .ok_or_else(|| PyTypeError::new_err(format!("desc_v2 item is missing `{key}`")))
+        };
+        Ok(PyCredit {
+            type_id: required(type_key)?.extract()?,
+            raw_text: required("raw_text")?.extract()?,
+            biz_id: get_field(&obj, "biz_id")?
+                .map(|value| value.extract::<Option<String>>())
+                .transpose()?
+                .flatten(),
+        })
+    }
 }
 
 #[derive(Builder)]

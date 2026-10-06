@@ -1,11 +1,14 @@
 use crate::downloader::error::{Error, Result};
+use crate::downloader::index_tap::FileTap;
+use crate::downloader::preview::{ChunkKind, PreviewSink};
 use crate::downloader::util::{LifecycleFile, Segmentable};
+use bytes::Bytes;
 use m3u8_rs::{MediaPlaylist, Playlist};
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::time::{Duration, Instant};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 use url::Url;
 
 use crate::client::StatelessClient;
@@ -26,6 +29,10 @@ fn playlist_should_refresh(playlist: &MediaPlaylist) -> bool {
     !playlist.end_list
 }
 
+/// 轮询 m3u8 并把分片追加进同一个 `.ts` 文件。
+///
+/// `preview` 为直播预览的写入端：每个分片的字节在落盘的同时旁路一份给它，`None` 则不旁路。
+/// 上一片之后跳过了至少一个媒体序号。`previous_last_segment` 为 0 表示还没写过切片。
 fn has_sequence_gap(previous_last_segment: u64, current_segment: u64) -> bool {
     previous_last_segment > 0 && current_segment > previous_last_segment.saturating_add(1)
 }
@@ -35,6 +42,7 @@ pub async fn download(
     client: &StatelessClient,
     file: LifecycleFile<'_>,
     mut splitting: Segmentable,
+    mut preview: Option<PreviewSink>,
 ) -> Result<()> {
     info!("Downloading {}...", url);
     let resp = client.retryable(url).await?;
@@ -90,32 +98,30 @@ pub async fn download(
         let mut seq = pl.media_sequence;
         for segment in &pl.segments {
             if seq > previous_last_segment {
-                let mut split_before_segment = false;
-                if has_sequence_gap(previous_last_segment, seq) {
+                // 媒体序号跳号：漏掉的切片补不回来，已写的内容与下一片接不上，在这里切段，
+                // 让每个文件内部的时间戳和弹幕保持连续
+                let gap = has_sequence_gap(previous_last_segment, seq);
+                if gap {
                     warn!(
                         previous = previous_last_segment,
                         current = seq,
                         "HLS segment sequence gap detected; starting a new file"
                     );
-                    // A missing media sequence means the bytes already written
-                    // cannot be made continuous with the next segment.  Split
-                    // here so timestamps and danmaku remain aligned per file.
-                    ts_file.create_new()?;
-                    splitting.reset();
-                    split_before_segment = true;
                 }
-                debug!("Yield segment");
                 if segment.discontinuity {
                     warn!("#EXT-X-DISCONTINUITY");
-                    if !split_before_segment {
-                        ts_file.create_new()?;
-                    }
+                }
+                debug!("Yield segment");
+                // 刚切过段的空文件不再切，免得发布空分段
+                if (gap || segment.discontinuity) && ts_file.pos > 0 {
+                    ts_file.create_new()?;
                     splitting.reset();
                 }
                 let length = download_to_file(
                     media_url.join(&segment.uri)?,
                     client,
-                    &mut ts_file.buf_writer,
+                    &mut ts_file,
+                    preview.as_mut(),
                 )
                 .await?;
                 splitting.increase_size(length);
@@ -147,17 +153,40 @@ pub async fn download(
         last_playlist_load = Instant::now();
     }
     info!("Done...");
-    ts_file.finish();
     Ok(())
 }
 
-async fn download_to_file(url: Url, client: &StatelessClient, out: &mut impl Write) -> Result<u64> {
+async fn download_to_file(
+    url: Url,
+    client: &StatelessClient,
+    out: &mut TsFile<'_>,
+    mut preview: Option<&mut PreviewSink>,
+) -> Result<u64> {
     debug!("url: {url}");
     let mut response = client.retryable(url.as_str()).await?;
     let mut length: u64 = 0;
+    // 分片起点即预览的关键帧边界（HLS 分片自带 PAT/PMT、从关键帧开始），
+    // 新订阅者从最近一个分片的开头起播
+    let mut segment_start = true;
     while let Some(chunk) = response.chunk().await? {
         length += chunk.len() as u64;
-        out.write_all(&chunk)?;
+        out.write_chunk(&chunk)?;
+        if let Some(sink) = preview.as_deref_mut() {
+            if segment_start && chunk.first() != Some(&0x47) {
+                // 不是 TS 同步字节：多半是 fMP4（m4s）分片。这条路径没有下载 #EXT-X-MAP 的
+                // 初始化分片（录制文件同样如此），没有 init segment 就播不了，明确标为不可预览
+                sink.mark_unavailable(
+                    "HLS 分片不是 MPEG-TS（可能是 fMP4），stream-gears 暂不支持预览此格式，可改用 mesio",
+                );
+            }
+            if segment_start {
+                // 分片起点：嗅探首个视频 PES 是否从 IDR 起，决定要不要作为新 GOP 的起点
+                sink.push_ts_segment_start(chunk);
+            } else {
+                sink.push(ChunkKind::Media, chunk);
+            }
+        }
+        segment_start = false;
     }
     // let mut out = File::options()
     //     .append(true)
@@ -169,30 +198,61 @@ async fn download_to_file(url: Url, client: &StatelessClient, out: &mut impl Wri
 pub struct TsFile<'a> {
     pub buf_writer: BufWriter<File>,
     pub file: LifecycleFile<'a>,
-    completed: bool,
+    /// 当前分段已交给 [`LifecycleFile::finish`]，`Drop` 不再重复改名、触发钩子。
+    finished: bool,
+    /// 当前分段已写的字节数。
+    pos: u64,
+    index: Option<FileTap>,
 }
 
 impl<'a> TsFile<'a> {
     pub fn new(mut file: LifecycleFile<'a>) -> std::io::Result<Self> {
         let path = file.create()?;
+        let buf_writer = Self::create(path)?;
+        let index = file.index.as_ref().map(|tap| tap.open(&file.path));
         Ok(Self {
-            buf_writer: Self::create(path)?,
+            buf_writer,
             file,
-            completed: false,
+            finished: false,
+            pos: 0,
+            index,
         })
     }
 
+    /// 结束当前分段并开始下一个。当前分段 flush 失败时返回错误，不再开新文件。
     pub fn create_new(&mut self) -> std::io::Result<()> {
-        self.completed = true;
-        self.file.rename();
+        self.finish()?;
         let path = self.file.create()?;
         self.buf_writer = Self::create(path)?;
-        self.completed = false;
+        self.finished = false;
+        self.pos = 0;
+        self.index = self
+            .file
+            .index
+            .as_ref()
+            .map(|tap| tap.open(&self.file.path));
         Ok(())
     }
 
-    pub fn finish(&mut self) {
-        self.completed = true;
+    /// 把一块分片字节追加进当前分段。
+    pub fn write_chunk(&mut self, chunk: &Bytes) -> std::io::Result<()> {
+        self.buf_writer.write_all(chunk)?;
+        self.file.bytes_written.add(chunk.len() as u64);
+        if let Some(index) = &self.index {
+            index.bytes(self.pos, chunk);
+        }
+        self.pos += chunk.len() as u64;
+        Ok(())
+    }
+
+    /// flush 并检查错误 → 去掉 `.part` → 触发钩子，见 [`LifecycleFile::finish`]。
+    fn finish(&mut self) -> std::io::Result<()> {
+        self.finished = true;
+        // 先于改名钩子发出：录制器收到分段关闭时，索引任务队列里已有这个文件的全部事件
+        if let Some(index) = self.index.take() {
+            index.closed(self.pos);
+        }
+        self.file.finish(&mut self.buf_writer)
     }
 
     fn create<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<BufWriter<File>> {
@@ -213,16 +273,10 @@ impl<'a> TsFile<'a> {
 
 impl Drop for TsFile<'_> {
     fn drop(&mut self) {
-        if self.completed {
-            self.file.rename();
-        } else if !self.file.path.as_os_str().is_empty() {
-            if let Err(error) = std::fs::remove_file(&self.file.path)
-                && error.kind() != std::io::ErrorKind::NotFound
-            {
-                warn!(path = %self.file.path.display(), %error, "failed to remove incomplete TS segment");
-            } else {
-                warn!(path = %self.file.path.display(), "discarded incomplete TS segment");
-            }
+        if !self.finished
+            && let Err(e) = self.finish()
+        {
+            error!("{e}");
         }
     }
 }
@@ -294,6 +348,36 @@ mod tests {
         assert!(playlist.end_list);
         assert!(!playlist_should_refresh(&playlist));
         assert_eq!(playlist.segments.len(), 1);
+    }
+
+    /// 分段钩子触发时 `BufWriter` 里的数据已经写进文件：钩子看到的大小就是最终大小。
+    #[test]
+    fn the_segment_hook_sees_the_flushed_file() -> Result<(), Box<dyn std::error::Error>> {
+        use super::TsFile;
+        use crate::downloader::util::LifecycleFile;
+        use std::io::Write;
+        use std::sync::{Arc, Mutex};
+
+        let dir = tempfile::tempdir()?;
+        let seen: Arc<Mutex<Vec<u64>>> = Arc::default();
+        let file = LifecycleFile::with_hook(dir.path().join("rec").to_str().unwrap(), "ts", {
+            let seen = seen.clone();
+            let dir = dir.path().to_path_buf();
+            move |name: &str| {
+                let mut seen = seen.lock().unwrap();
+                seen.push(std::fs::metadata(name).unwrap().len());
+                std::fs::rename(name, dir.join(format!("seg-{}.ts", seen.len()))).unwrap();
+            }
+        });
+        let mut ts = TsFile::new(file)?;
+        ts.buf_writer.write_all(&[0x47; 188 * 3])?;
+        ts.create_new()?;
+        ts.buf_writer.write_all(&[0x47; 188])?;
+        drop(ts);
+
+        assert_eq!(*seen.lock().unwrap(), vec![188 * 3, 188]);
+        assert_eq!(std::fs::metadata(dir.path().join("seg-2.ts"))?.len(), 188);
+        Ok(())
     }
 
     #[test]

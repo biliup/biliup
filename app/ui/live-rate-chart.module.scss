@@ -1,0 +1,31 @@
+/* 码率折线的懒加载壳与统计条 */
+
+.slot {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.switchRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.summary {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.summary b {
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+}
+.summary[data-state='empty'] {
+  color: var(--semi-color-text-3);
+}

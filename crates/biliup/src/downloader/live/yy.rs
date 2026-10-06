@@ -149,6 +149,7 @@ impl YYLive {
                 title: String::new(),
                 date: Utc::now(),
                 live_cover_url: String::new(),
+                avatar_url: None,
                 raw_stream_url: raw_stream_url.clone(),
                 platform: "yy".to_string(),
                 stream_headers: HashMap::new(),

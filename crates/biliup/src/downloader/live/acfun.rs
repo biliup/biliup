@@ -79,6 +79,7 @@ impl AcfunLive {
                 title: data.caption,
                 date: Utc::now(),
                 live_cover_url: String::new(),
+                avatar_url: None,
                 suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "flv".to_string()),
                 raw_stream_url,
                 platform: "acfun".to_string(),

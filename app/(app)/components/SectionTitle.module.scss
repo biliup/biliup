@@ -1,0 +1,24 @@
+.wrap {
+  display: inline-flex;
+  align-items: center;
+  column-gap: 8px;
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--semi-border-radius-medium);
+  background: var(--semi-color-primary-light-default);
+  color: var(--semi-color-primary);
+  flex-shrink: 0;
+}
+
+.title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+  vertical-align: bottom;
+}

@@ -94,6 +94,7 @@ impl TwitcastingLive {
                 title: room_page.title,
                 date: Utc::now(),
                 live_cover_url: String::new(),
+                avatar_url: None,
                 suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "m3u8".to_string()),
                 raw_stream_url,
                 platform: "twitcasting".to_string(),

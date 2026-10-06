@@ -1,0 +1,208 @@
+/* 三种容器共用的底栏：右对齐「取消」+ 主按钮，左侧可放次要操作或提示 */
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+}
+
+.footer :global(.semi-button) {
+  margin-left: 0 !important;
+}
+
+/* 「取消」和主按钮是一组：底栏折行时一起换到下一行，不会被拆开 */
+.footerActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.footerExtra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-right: auto;
+  color: var(--semi-color-text-2);
+  font-size: 12px;
+}
+
+/* ===== 弹窗 ===== */
+/* 内容比矮屏高时只滚正文，标题与底栏始终露在外面 */
+.dialog :global(.semi-modal-body) {
+  max-height: calc(100dvh - 200px);
+  overflow-y: auto;
+}
+
+.dialogFull :global(.semi-modal-body) {
+  max-height: none;
+}
+
+.dialog :global(.semi-modal-footer) {
+  margin-top: 16px;
+}
+
+/* 沉浸式（播放器）：整块深色，画面左右与底边贴齐，标题与关闭按钮收在 48 高的顶栏里；浅色主题下也是深色 */
+.immersive :global(.semi-modal-content) {
+  padding: 0;
+  border: none;
+  background: #000;
+}
+
+.immersive :global(.semi-modal-header) {
+  align-items: center;
+  box-sizing: border-box;
+  height: 48px;
+  margin: 0;
+  padding: 0 8px 0 16px;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.immersive :global(.semi-modal-title) {
+  overflow: hidden;
+  color: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.immersive :global(.semi-modal-close) {
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.75);
+
+  &:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.12);
+  }
+}
+
+.immersive :global(.semi-modal-body) {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  max-height: none;
+  overflow: hidden;
+}
+
+/* ===== 抽屉 ===== */
+.sheet :global(.semi-sidesheet-header) {
+  padding: 14px 16px 14px 24px;
+  border-bottom: 1px solid var(--semi-color-border);
+}
+
+.sheet :global(.semi-sidesheet-body) {
+  padding: 16px 24px 24px;
+}
+
+/* fill：正文本身不滚，内容占满剩余高度（配置表单的 Tab 面板各自滚动） */
+.sheetFill :global(.semi-sidesheet-body) {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+  padding: 12px 24px 0;
+}
+
+.sheetFlush :global(.semi-sidesheet-body) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+.sheetFooterBar {
+  flex-shrink: 0;
+  padding: 12px 24px;
+  border-top: 1px solid var(--semi-color-border);
+}
+
+.sheetFooterBar .footer {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.sheetFooterBar .footerExtra {
+  flex: 1 1 200px;
+}
+
+.sheet :global(.semi-sidesheet-footer) {
+  padding: 12px 24px;
+  border-top: 1px solid var(--semi-color-border);
+}
+
+.sheetTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 32px;
+  color: var(--semi-color-text-0);
+}
+
+.sheetTitleText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ===== 表单页 ===== */
+.pageBack {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: inherit;
+  border-radius: inherit;
+}
+
+.pageBack:hover {
+  background: var(--semi-color-primary-light-hover);
+}
+
+.pageBack:focus-visible {
+  outline: 2px solid var(--semi-color-primary);
+  outline-offset: 2px;
+}
+
+.pageBody {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 20px 28px 48px;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+/* 占满页头下方的剩余高度（主内容区是 flex 列），页面本身不滚，里面的面板各自滚动 */
+.pageFill {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 12px 28px 20px;
+  box-sizing: border-box;
+}
+
+@media (max-width: 880px) {
+  .pageBody {
+    padding: 12px 16px 36px;
+  }
+}
+
+@media (max-width: 680px) {
+  .pageFill {
+    padding: 8px 12px 12px;
+  }
+}

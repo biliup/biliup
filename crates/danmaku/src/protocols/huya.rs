@@ -180,24 +180,14 @@ impl Huya {
     fn parse_danmaku(data: &[u8]) -> Option<DanmakuEvent> {
         let mut ios = TarsInputStream::new(data);
 
-        // User info is at tag 0, which is a struct
-        // Within user info, username is at tag 2
-        // Content is at tag 3
-        // Color is at tag 6 (inside a struct)
-
-        // For simplicity, we'll try to parse the username at tag 2 of nested struct
-        // and content at tag 3
-
-        // Skip to find the username - it's nested, so we need a different approach
-        // Let's read the raw structure:
-        // Tag 0: User struct containing:
-        //   - Tag 2: username (string)
-        // Tag 3: content (string)
-        // Tag 6: DColor struct containing:
-        //   - Tag 0: color (int32)
-
-        // This is a simplified parser - we look for string patterns
-        let name = ios.read_string(2).unwrap_or_default();
+        // MessageNotice:
+        //   tag 0: sender struct, nickname at inner tag 2
+        //   tag 1: lTid (int64)
+        //   tag 2: lSid (int64)  —— 旧实现把这个当成用户名来读
+        //   tag 3: sContent
+        let name = ios
+            .read_struct(0, |user| user.read_string(2).unwrap_or_default())
+            .unwrap_or_default();
         let content = ios.read_string(3).unwrap_or_default();
 
         // Try to read color from tag 6 struct
@@ -267,6 +257,8 @@ impl Platform for Huya {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::codec::tars::{TarsInputStream, TarsOutputStream};
+    use crate::message::DanmakuEvent;
 
     #[test]
     fn test_extract_room_id() {
@@ -300,5 +292,43 @@ mod tests {
         // Verify structure
         let mut ios = TarsInputStream::new(&cmd);
         assert_eq!(ios.read_int32(0), Some(cmd_type::REGISTER_REQ));
+    }
+
+    fn encode_message_notice(nick: &str, sid: i64, content: &str) -> Vec<u8> {
+        let mut oos = TarsOutputStream::new();
+        oos.write_struct_begin(0);
+        oos.write_int64(0, 42);
+        oos.write_string(2, nick);
+        oos.write_struct_end();
+        oos.write_int64(1, 1);
+        oos.write_int64(2, sid);
+        oos.write_string(3, content);
+        oos.get_buffer().to_vec()
+    }
+
+    #[test]
+    fn parse_danmaku_reads_nested_nick_when_sid_nonzero() {
+        let data = encode_message_notice("nickname", 99, "hello danmaku");
+        let event = Huya::parse_danmaku(&data).expect("danmaku");
+        match event {
+            DanmakuEvent::Chat(chat) => {
+                assert_eq!(chat.name.as_deref(), Some("nickname"));
+                assert_eq!(chat.content, "hello danmaku");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_danmaku_reads_content_when_sid_is_zero() {
+        let data = encode_message_notice("alice", 0, "zero sid");
+        let event = Huya::parse_danmaku(&data).expect("danmaku");
+        match event {
+            DanmakuEvent::Chat(chat) => {
+                assert_eq!(chat.name.as_deref(), Some("alice"));
+                assert_eq!(chat.content, "zero sid");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
     }
 }

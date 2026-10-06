@@ -87,6 +87,7 @@ impl CCLive {
                 title,
                 date: Utc::now(),
                 live_cover_url: String::new(),
+                avatar_url: None,
                 raw_stream_url,
                 platform: "cc".to_string(),
                 stream_headers: HashMap::new(),

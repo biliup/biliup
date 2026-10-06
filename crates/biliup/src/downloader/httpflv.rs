@@ -3,6 +3,7 @@ use crate::downloader::flv_parser::{
     aac_audio_packet_header, avc_video_packet_header, script_data, tag_data, tag_header,
 };
 use crate::downloader::flv_writer::{FlvFile, FlvTag, TagDataHeader};
+use crate::downloader::preview::{self, ChunkKind, PreviewSink};
 use crate::downloader::util::{LifecycleFile, Segmentable};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use nom::{Err, IResult};
@@ -12,19 +13,17 @@ use std::time::Duration;
 use tokio::time::timeout;
 use tracing::{info, warn};
 
-/// Small timestamp reorderings can occur when audio/video tags are interleaved,
-/// but a large backwards jump indicates a reconnect/discontinuity.  Waiting
-/// for the next keyframe before creating a file keeps each FLV independently
-/// decodable and avoids carrying the discontinuity into the previous segment.
-const TIMESTAMP_DISCONTINUITY_THRESHOLD_MS: u32 = 1_000;
-
-fn is_timestamp_discontinuity(previous: u32, current: u32) -> bool {
-    previous.saturating_sub(current) > TIMESTAMP_DISCONTINUITY_THRESHOLD_MS
-}
-
-pub async fn download(connection: Connection, file: LifecycleFile<'_>, segment: Segmentable) {
+/// 下载 FLV 流并按关键帧分段落盘。
+///
+/// `preview` 为直播预览的写入端：每个写盘的 tag 顺带旁路一份给它，`None` 则不旁路。
+pub async fn download(
+    connection: Connection,
+    file: LifecycleFile<'_>,
+    segment: Segmentable,
+    preview: Option<PreviewSink>,
+) {
     let file_name = file.file_name.clone();
-    match parse_flv(connection, file, segment).await {
+    match parse_flv(connection, file, segment, preview).await {
         Ok(_) => {
             info!("Done... {}", file_name);
         }
@@ -34,25 +33,94 @@ pub async fn download(connection: Connection, file: LifecycleFile<'_>, segment: 
     }
 }
 
-pub(crate) async fn parse_flv(
+/// 同 [`download`]，但把错误返回给调用方，而不是只打一条 `warn` 日志。
+pub async fn parse_flv(
     mut connection: Connection,
     file: LifecycleFile<'_>,
     mut segment: Segmentable,
+    mut preview: Option<PreviewSink>,
 ) -> crate::downloader::error::Result<()> {
-    let mut flv_tags_cache: Vec<(TagHeader, Bytes, Bytes)> = Vec::new();
     // println!("parse_flv Segment: {:?}", segment);
     let _previous_tag_size = connection.read_frame(4).await?;
 
     let mut out = FlvFile::new(file)?;
     segment.set_size_position(9 + 4);
-    // let mut downloaded_size = 9 + 4;
+    if let Some(sink) = preview.as_mut() {
+        sink.push(
+            ChunkKind::Header,
+            Bytes::from_static(&preview::flv::FILE_HEADER),
+        );
+    }
+    let mut gop = GopCache::default();
+    let result = read_tags(
+        &mut connection,
+        &mut out,
+        &mut segment,
+        &mut preview,
+        &mut gop,
+    )
+    .await;
+    // 连接因 EOF、读超时或解析错误结束时，缓存里还留着最后一个 GOP（都是完整读到并解析过的 tag）：
+    // 先写出再返回原结果，否则每次断流、重连、下播都会丢掉最后 1–10 秒
+    let drained = gop.write_to(&mut out, &mut segment);
+    match (result, drained) {
+        (Ok(()), drained) => Ok(drained?),
+        (Err(e), Err(drained)) => {
+            warn!("writing the cached GOP after `{e}` failed: {drained}");
+            Err(e)
+        }
+        (Err(e), Ok(())) => Err(e),
+    }
+}
+
+/// 写盘循环的 GOP 缓存：tag 先攒着，遇到下一个关键帧或连接结束时整组落盘。
+#[derive(Default)]
+struct GopCache {
+    tags: Vec<(TagHeader, Bytes, Bytes)>,
+    prev_timestamp: u32,
+}
+
+impl GopCache {
+    fn write_to(
+        &mut self,
+        out: &mut FlvFile<'_>,
+        segment: &mut Segmentable,
+    ) -> std::io::Result<()> {
+        let Self {
+            tags,
+            prev_timestamp,
+        } = self;
+        // drain：中途写失败时剩下的 tag 也一并丢弃，不会在收尾时再写一遍造成重复
+        for (mut tag_header, flv_tag_data, previous_tag_size_bytes) in tags.drain(..) {
+            if tag_header.timestamp < *prev_timestamp {
+                warn!(
+                    "Non-monotonous DTS in output stream; previous: {prev_timestamp}, current: {}; clamping to previous",
+                    tag_header.timestamp
+                );
+                tag_header.timestamp = *prev_timestamp;
+            }
+            out.write_tag(&tag_header, &flv_tag_data, &previous_tag_size_bytes)?;
+            segment.increase_size((11 + tag_header.data_size + 4) as u64);
+            *prev_timestamp = tag_header.timestamp;
+        }
+        Ok(())
+    }
+}
+
+async fn read_tags(
+    connection: &mut Connection,
+    out: &mut FlvFile<'_>,
+    segment: &mut Segmentable,
+    preview: &mut Option<PreviewSink>,
+    gop: &mut GopCache,
+) -> crate::downloader::error::Result<()> {
     let mut on_meta_data = None;
     let mut aac_sequence_header = None;
-    let mut video_sequence_header: Option<(TagHeader, Bytes, Bytes)> = None;
-    let mut prev_timestamp = 0;
-    let mut last_tag_timestamp = None;
+    let mut h264_sequence_header: Option<(TagHeader, Bytes, Bytes)> = None;
     let mut create_new = false;
-    let mut discard_until_keyframe = false;
+    let mut timestamp_offset: u32 = 0;
+    let mut prev_raw_timestamp: u32 = 0;
+    let mut has_prev_tag = false;
     loop {
         let tag_header_bytes = connection.read_frame(11).await?;
         if tag_header_bytes.is_empty() {
@@ -61,25 +129,23 @@ pub(crate) async fn parse_flv(
             break;
         }
 
-        let (_, tag_header) = map_parse_err(tag_header(&tag_header_bytes), "tag header")?;
-        if let Some(previous) = last_tag_timestamp
-            && previous > tag_header.timestamp
-        {
-            warn!(
-                previous,
-                current = tag_header.timestamp,
-                "FLV timestamp moved backwards"
-            );
-            if is_timestamp_discontinuity(previous, tag_header.timestamp) {
-                create_new = true;
-                discard_until_keyframe = true;
-                // Do not write tags from after the discontinuity into the
-                // previous file. They belong to the next keyframe-aligned
-                // segment.
-                flv_tags_cache.clear();
+        let (_, mut tag_header) = map_parse_err(tag_header(&tag_header_bytes), "tag header")?;
+        // 上游 CDN（如斗鱼）在流分发切片或重连时时间戳可能断裂或重置回 0。
+        // 通过累加 offset 矫正时间戳，保证输出流的时间戳单调递增，避免下游播放与分段逻辑异常。
+        if has_prev_tag {
+            if tag_header.timestamp < prev_raw_timestamp {
+                let diff = prev_raw_timestamp.saturating_sub(tag_header.timestamp);
+                warn!(
+                    "Non-monotonous DTS in upstream stream; previous: {prev_raw_timestamp}, current: {}; adjusting offset by +{diff}",
+                    tag_header.timestamp
+                );
+                timestamp_offset = timestamp_offset.wrapping_add(diff);
             }
+        } else {
+            has_prev_tag = true;
         }
-        last_tag_timestamp = Some(tag_header.timestamp);
+        prev_raw_timestamp = tag_header.timestamp;
+        tag_header.timestamp = tag_header.timestamp.wrapping_add(timestamp_offset);
         // write_tag_header(&mut out, &tag_header)?;
 
         let bytes = connection.read_frame(tag_header.data_size as usize).await?;
@@ -89,11 +155,29 @@ pub(crate) async fn parse_flv(
             tag_data(tag_header.tag_type, tag_header.data_size as usize)(&bytes),
             "tag data",
         )?;
+        // 直播预览旁路：在解析点、进 GOP 缓存之前就推给 hub，让预览端按 tag 实时收到。
+        // 写盘循环要等到下一个关键帧才把整个 GOP 一起落盘，若在那里旁路，预览端会每个
+        // GOP 间隔收到一次整 GOP 的突发、其余时间颗粒不进，播放器缓冲刚好在下一个突发到达时
+        // 耗尽，链路上稍有 RTT / 抖动就 waiting（#1713 ForgQi 异地实测「非常卡」的根因）。
+        // 与写盘同一份字节，只是 push：不 await、不返回错误，预览端的状况不改变这里的控制流。
+        if let Some(sink) = preview.as_mut() {
+            let tag_type = tag_header.tag_type as u8;
+            sink.push(
+                preview::flv::classify(tag_type, &bytes),
+                preview::flv::tag_chunk_from_parts(
+                    &preview::flv::tag_header(tag_type, tag_header.data_size, tag_header.timestamp),
+                    &bytes,
+                    &previous_tag_size,
+                ),
+            );
+        }
         let flv_tag = match flv_tag_data {
             TagData::Audio(audio_data) => {
                 let packet_type = if audio_data.sound_format == SoundFormat::AAC {
-                    let (_, packet_header) = aac_audio_packet_header(audio_data.sound_data)
-                        .expect("Error in parsing aac audio packet header.");
+                    let (_, packet_header) = map_parse_err(
+                        aac_audio_packet_header(audio_data.sound_data),
+                        "aac audio packet header",
+                    )?;
                     if packet_header.packet_type == AACPacketType::SequenceHeader {
                         if aac_sequence_header.is_some() {
                             warn!("Unexpected aac sequence header tag. {tag_header:?}");
@@ -120,25 +204,22 @@ pub(crate) async fn parse_flv(
                 }
             }
             TagData::Video(video_data) => {
+                // 斗鱼的 HEVC（codec id 12）沿用 AVC 的包头布局：packet type + composition time
                 let (packet_type, composition_time) =
                     if matches!(video_data.codec_id, CodecId::H264 | CodecId::H265) {
-                        let (_, avc_video_header) = avc_video_packet_header(video_data.video_data)
-                            .expect("Error in parsing AVC/HEVC video packet header.");
+                        let (_, avc_video_header) = map_parse_err(
+                            avc_video_packet_header(video_data.video_data),
+                            "avc video packet header",
+                        )?;
                         if avc_video_header.packet_type == AVCPacketType::SequenceHeader {
-                            if let Some((_, binary_data, _)) = &video_sequence_header {
-                                warn!(
-                                    codec = ?video_data.codec_id,
-                                    "Unexpected video sequence header tag. {tag_header:?}"
-                                );
+                            if let Some((_, binary_data, _)) = &h264_sequence_header {
+                                warn!("Unexpected h264 sequence header tag. {tag_header:?}");
                                 if bytes != binary_data {
                                     create_new = true;
-                                    warn!(
-                                        codec = ?video_data.codec_id,
-                                        "Different video sequence header tag. {tag_header:?}"
-                                    );
+                                    warn!("Different h264 sequence header tag. {tag_header:?}");
                                 }
                             }
-                            video_sequence_header =
+                            h264_sequence_header =
                                 Some((tag_header, bytes.clone(), previous_tag_size.clone()))
                         }
                         (
@@ -160,7 +241,7 @@ pub(crate) async fn parse_flv(
                 }
             }
             TagData::Script => {
-                let (_, tag_data) = script_data(i).expect("Error in parsing script tag.");
+                let (_, tag_data) = map_parse_err(script_data(i), "script tag")?;
                 if on_meta_data.is_some() {
                     warn!("Unexpected script tag. {tag_header:?}");
                 }
@@ -182,24 +263,11 @@ pub(crate) async fn parse_flv(
                 ..
             } => {
                 let timestamp = flv_tag.header.timestamp as u64;
-                if prev_timestamp == 0 && timestamp != 0 {
+                if gop.prev_timestamp == 0 && timestamp != 0 {
                     segment.set_start_time(Duration::from_millis(timestamp));
                 }
                 segment.set_time_position(Duration::from_millis(timestamp));
-                for (tag_header, flv_tag_data, previous_tag_size_bytes) in &flv_tags_cache {
-                    if tag_header.timestamp < prev_timestamp {
-                        warn!(
-                            "Non-monotonous DTS in output stream; previous: {prev_timestamp}, current: {};",
-                            tag_header.timestamp
-                        );
-                    }
-                    out.write_tag(tag_header, flv_tag_data, previous_tag_size_bytes)?;
-                    segment.increase_size((11 + tag_header.data_size + 4) as u64);
-                    // downloaded_size += (11 + tag_header.data_size + 4) as u64;
-                    prev_timestamp = tag_header.timestamp
-                    // println!("{downloaded_size}");
-                }
-                flv_tags_cache.clear();
+                gop.write_to(out, segment)?;
 
                 if segment.needed() || create_new {
                     segment.set_start_time(Duration::from_millis(timestamp));
@@ -212,7 +280,7 @@ pub(crate) async fn parse_flv(
                     if let Some((meta_header, meta_bytes, previous_meta_tag_size)) =
                         on_meta_data.as_ref()
                     {
-                        flv_tags_cache.push((
+                        gop.tags.push((
                             *meta_header,
                             meta_bytes.clone(),
                             previous_meta_tag_size.clone(),
@@ -224,39 +292,32 @@ pub(crate) async fn parse_flv(
                     if let Some((aac_header, aac_bytes, aac_prev_tag_size)) =
                         aac_sequence_header.as_ref()
                     {
-                        flv_tags_cache.push((
-                            *aac_header,
-                            aac_bytes.clone(),
-                            aac_prev_tag_size.clone(),
-                        ));
+                        gop.tags
+                            .push((*aac_header, aac_bytes.clone(), aac_prev_tag_size.clone()));
                     }
-                    // AVC/HEVC sequence header. Always inject the latest
-                    // header, including when a changed header itself caused
-                    // this split; otherwise the first keyframe of the new
-                    // file would be missing codec configuration.
-                    if let Some(video_header) = video_sequence_header.as_ref() {
-                        flv_tags_cache.push(video_header.clone());
-                    } else {
-                        warn!(
-                            "video sequence header not found before segmenting; new segment may be unplayable."
-                        );
+                    if !create_new {
+                        // H264SequenceHeader
+                        if let Some(h264_header) = h264_sequence_header.as_ref() {
+                            gop.tags.push(h264_header.clone());
+                        } else {
+                            warn!(
+                                "h264_sequence_header not found before segmenting; new segment may be unplayable."
+                            );
+                        }
                     }
                     info!("{} splitting.{segment:?}", out.file.file_name);
                     out.create_new()?;
                     create_new = false;
-                    discard_until_keyframe = false;
-                    prev_timestamp = timestamp as u32;
                 }
-                flv_tags_cache.push((tag_header, bytes.clone(), previous_tag_size.clone()));
+                gop.tags
+                    .push((tag_header, bytes.clone(), previous_tag_size.clone()));
             }
             _ => {
-                if !discard_until_keyframe {
-                    flv_tags_cache.push((tag_header, bytes.clone(), previous_tag_size.clone()));
-                }
+                gop.tags
+                    .push((tag_header, bytes.clone(), previous_tag_size.clone()));
             }
         }
     }
-    out.finish();
     Ok(())
 }
 
@@ -374,21 +435,9 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn large_timestamp_regressions_are_treated_as_discontinuities() {
-        assert!(!super::is_timestamp_discontinuity(10_000, 9_500));
-        assert!(super::is_timestamp_discontinuity(10_000, 8_000));
-    }
-
-    /// 回归测试：纯视频流（没有任何音频标签）在首次分段时不应 panic。
-    ///
-    /// 该流只包含一个 onMetaData 脚本标签和一个 H264 序列头关键帧，`aac_sequence_header`
-    /// 全程为 `None`。修复前，分段重建逻辑会对 `aac_sequence_header` 执行
-    /// `expect("aac_sequence_header does not exist")` 而 panic，导致纯视频直播录制中断。
-    #[tokio::test]
-    async fn pure_video_stream_segments_without_panic() -> Result<(), Box<dyn std::error::Error>> {
-        use crate::downloader::util::{LifecycleFile, Segmentable};
-
+    /// 一段最小的纯视频 FLV 流体（不含 9 字节文件头）：
+    /// onMetaData 脚本标签 + 一个 H264 序列头关键帧，没有任何音频标签。
+    fn pure_video_flv_body() -> Vec<u8> {
         let mut data: Vec<u8> = Vec::new();
         // parse_flv 起始会先读取 4 字节（上一个 tag 的大小），这里给占位。
         data.extend_from_slice(&[0, 0, 0, 0]);
@@ -415,8 +464,21 @@ mod tests {
         ]);
         data.extend_from_slice(&video_body);
         data.extend_from_slice(&[0, 0, 0, 0]); // previous_tag_size
+        data
+    }
 
-        let http_resp = http::Response::builder().status(200).body(data)?;
+    /// 回归测试：纯视频流（没有任何音频标签）在首次分段时不应 panic。
+    ///
+    /// 该流只包含一个 onMetaData 脚本标签和一个 H264 序列头关键帧，`aac_sequence_header`
+    /// 全程为 `None`。修复前，分段重建逻辑会对 `aac_sequence_header` 执行
+    /// `expect("aac_sequence_header does not exist")` 而 panic，导致纯视频直播录制中断。
+    #[tokio::test]
+    async fn pure_video_stream_segments_without_panic() -> Result<(), Box<dyn std::error::Error>> {
+        use crate::downloader::util::{LifecycleFile, Segmentable};
+
+        let http_resp = http::Response::builder()
+            .status(200)
+            .body(pure_video_flv_body())?;
         let resp = reqwest::Response::from(http_resp);
         let connection = super::Connection::new(resp);
 
@@ -428,54 +490,478 @@ mod tests {
         let segment = Segmentable::new(None, Some(1));
 
         // 修复前：此调用会 panic（aac_sequence_header does not exist）。
-        super::parse_flv(connection, file, segment).await?;
+        super::parse_flv(connection, file, segment, None).await?;
+        Ok(())
+    }
+
+    /// 一段带 onMetaData、AVC 序列头与 `keyframes` 个 GOP（每 GOP 一个关键帧 + 两个普通帧）
+    /// 的 FLV 流体（不含 9 字节文件头，含起始的 PreviousTagSize0）。
+    fn gop_flv_body(keyframes: u32) -> Vec<u8> {
+        fn tag(data: &mut Vec<u8>, tag_type: u8, ts: u32, body: &[u8]) {
+            data.push(tag_type);
+            data.extend_from_slice(&(body.len() as u32).to_be_bytes()[1..]);
+            data.extend_from_slice(&(ts & 0xff_ffff).to_be_bytes()[1..]);
+            data.push((ts >> 24) as u8);
+            data.extend_from_slice(&[0, 0, 0]);
+            data.extend_from_slice(body);
+            data.extend_from_slice(&((11 + body.len()) as u32).to_be_bytes());
+        }
+        let mut data = vec![0, 0, 0, 0];
+        tag(
+            &mut data,
+            18,
+            0,
+            &[
+                0x02, 0x00, 0x0A, b'o', b'n', b'M', b'e', b't', b'a', b'D', b'a', b't', b'a', 0x05,
+            ],
+        );
+        // AVC 序列头（packet_type 0）
+        tag(&mut data, 9, 0, &[0x17, 0x00, 0x00, 0x00, 0x00, 0x01, 0x64]);
+        for i in 0..keyframes {
+            let base = i * 3000;
+            // 关键帧 NALU（packet_type 1）+ 两个普通帧，载荷里带序号便于比对
+            let mut key = vec![0x17, 0x01, 0, 0, 0];
+            key.extend_from_slice(&i.to_be_bytes());
+            key.resize(300, 0xaa);
+            tag(&mut data, 9, base, &key);
+            tag(&mut data, 9, base + 1000, &[0x27, 0x01, 0, 0, 0, 0x11]);
+            tag(&mut data, 9, base + 2000, &[0x27, 0x01, 0, 0, 0, 0x22]);
+        }
+        data
+    }
+
+    fn concat(chunks: &[bytes::Bytes]) -> Vec<u8> {
+        chunks.iter().flat_map(|b| b.iter().copied()).collect()
+    }
+
+    /// 预览快照 + 实时分块拼起来，恰好等于源流「文件头 + 从第一个关键帧起的全部 tag」，
+    /// 即预览在解析点按 tag 实时旁路，不等写盘循环在下一个关键帧才整 GOP 落盘（那会让
+    /// 预览端每个 GOP 间隔收到一次突发，缓冲刚好在下一个突发到达时耗尽）；
+    /// 跨多个分段文件（rolling）时连接不断、不重发 FLV 文件头，分段本身照常切。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn preview_follows_the_parsed_tags_across_rolling_segments()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::downloader::preview::{PreviewFormat, PreviewHub};
+        use crate::downloader::util::{LifecycleFile, Segmentable};
+        use futures::StreamExt;
+        use std::sync::{Arc, Mutex};
+        use std::time::Duration;
+
+        // 按真实直播的节奏分块送入（每块之间隔 2 ms），而不是一次性给完：
+        // 瞬时灌完会让订阅者必然掉队（Lagged），那是另一个测试覆盖的场景
+        let body = gop_flv_body(120);
+        let pieces: Vec<Vec<u8>> = body.chunks(512).map(|c| c.to_vec()).collect();
+        let paced = futures::stream::iter(pieces).then(|piece| async move {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+            Ok::<_, std::io::Error>(piece)
+        });
+        let http_resp = http::Response::builder()
+            .status(200)
+            .body(reqwest::Body::wrap_stream(paced))?;
+        let connection = super::Connection::new(reqwest::Response::from(http_resp));
+
+        // 文件名模板不含时间占位符时每个分段都叫同一个名字，会互相覆盖；
+        // 在 rename 钩子里把每个分段改成带序号的名字留下来，并记下钩子触发时的文件大小
+        let dir = tempfile::tempdir()?;
+        let file_stem = dir.path().join("rolling");
+        let segments: Arc<Mutex<Vec<(std::path::PathBuf, u64)>>> = Arc::default();
+        let file = LifecycleFile::with_hook(file_stem.to_str().unwrap(), "flv", {
+            let segments = segments.clone();
+            let dir = dir.path().to_path_buf();
+            move |name: &str| {
+                let mut segments = segments.lock().unwrap();
+                let size_at_hook = std::fs::metadata(name).unwrap().len();
+                let kept = dir.join(format!("seg-{:04}.flv", segments.len()));
+                std::fs::rename(name, &kept).unwrap();
+                segments.push((kept, size_at_hook));
+            }
+        });
+
+        let hub = PreviewHub::new(4);
+        let sink = hub.attach(PreviewFormat::Flv);
+        // 每个分段 2 KB 左右，120 个 GOP 会切出二十多个文件
+        let segment = Segmentable::new(None, Some(2 * 1024));
+
+        // 先把订阅请求确定地排进写入端的队列（poll 一次即入队），再开始写盘，
+        // 这样快照一定在第一个关键帧被回应，预览覆盖整条流
+        let mut subscribe = Box::pin({
+            let hub = hub.clone();
+            async move { hub.subscribe(Duration::from_secs(5)).await }
+        });
+        assert!(futures::poll!(subscribe.as_mut()).is_pending());
+        let subscriber = tokio::spawn(async move {
+            let mut sub = subscribe.await.unwrap();
+            let mut live = Vec::new();
+            while let Ok(chunk) = sub.rx.recv().await {
+                live.extend_from_slice(&chunk);
+            }
+            (sub.snapshot, live)
+        });
+
+        super::parse_flv(connection, file, segment, Some(sink)).await?;
+
+        let (snapshot, live) = subscriber.await?;
+        // 快照 = 文件头 + onMetaData + AVC 序列头 + 从第一个关键帧起的 GOP
+        assert_eq!(
+            &snapshot[0][..],
+            &crate::downloader::preview::flv::FILE_HEADER
+        );
+        let is_key_nalu =
+            |c: &bytes::Bytes| c.len() > 12 && c[0] == 9 && c[11] == 0x17 && c[12] == 0x01;
+        let first_key = snapshot
+            .iter()
+            .position(is_key_nalu)
+            .expect("snapshot must contain a keyframe");
+        let seq_headers: Vec<u8> = snapshot[1..first_key].iter().map(|c| c[0]).collect();
+        assert_eq!(
+            seq_headers,
+            vec![18, 9],
+            "onMetaData + AVC sequence header before the GOP"
+        );
+        let mut received = concat(&snapshot);
+        received.extend_from_slice(&live);
+        // 整条流里不再出现第二个文件头
+        assert_eq!(
+            received[13..].windows(3).filter(|w| *w == b"FLV").count(),
+            0,
+            "existing subscribers must never get the FLV file header again"
+        );
+
+        // 预览 = 文件头 + 序列头 + 从第一个关键帧起的全部 tag = 源流逐字节（源流体不含 9 字节
+        // 文件头、含 PreviousTagSize0）
+        assert_eq!(
+            &received[13..],
+            &body[4..],
+            "preview must reproduce the source tags byte for byte"
+        );
+
+        // 落盘不受影响：多个分段，每个都以 FLV 头开始，tag 序列是源流的子序列（分段处补了序列头）
+        let segments = segments.lock().unwrap();
+        assert!(
+            segments.len() > 5,
+            "expected rolling into many segments, got {}",
+            segments.len()
+        );
+        let mut written_tags = Vec::new();
+        for (path, size_at_hook) in segments.iter() {
+            let data = std::fs::read(path)?;
+            assert_eq!(&data[..13], &crate::downloader::preview::flv::FILE_HEADER);
+            assert_eq!(
+                *size_at_hook,
+                data.len() as u64,
+                "the hook must see the flushed file ({})",
+                path.display()
+            );
+            written_tags.extend_from_slice(&data[13..]);
+        }
+        // 关键帧 NALU 的标记：连接结束时缓存里的最后一个 GOP 也落盘，写盘与预览都是 120 个
+        assert_eq!(keyframes(&written_tags), 120);
+        assert_eq!(keyframes(&received), 120);
+        Ok(())
+    }
+
+    fn keyframes(data: &[u8]) -> usize {
+        data.windows(5)
+            .filter(|w| *w == [0x17, 0x01, 0, 0, 0])
+            .count()
+    }
+
+    /// 录一段不分段的流，返回 `parse_flv` 的结果与落盘文件内容。
+    async fn record_unsegmented(
+        body: reqwest::Body,
+    ) -> (crate::downloader::error::Result<()>, Vec<u8>) {
+        use crate::downloader::util::{LifecycleFile, Segmentable};
+
+        let http_resp = http::Response::builder().status(200).body(body).unwrap();
+        let connection = super::Connection::new(reqwest::Response::from(http_resp));
+        let dir = tempfile::tempdir().unwrap();
+        let file_stem = dir.path().join("rec");
+        let file = LifecycleFile::new(file_stem.to_str().unwrap(), "flv");
+        let result = super::parse_flv(connection, file, Segmentable::new(None, None), None).await;
+        let data = std::fs::read(dir.path().join("rec.flv")).unwrap();
+        (result, data)
+    }
+
+    /// 下播：源站在 tag 边界干净地关掉连接，最后一个 GOP 照样落盘。
+    #[tokio::test]
+    async fn the_last_gop_is_written_when_the_stream_ends() {
+        let body = gop_flv_body(5);
+        let (result, data) = record_unsegmented(body.clone().into()).await;
+        result.unwrap();
+        assert_eq!(keyframes(&data), 5);
+        assert_eq!(&data[13..], &body[4..], "every source tag is on disk");
+    }
+
+    /// 断流：读到一半 30 秒没有新数据，读超时照样作为错误返回，但此前完整读到的 GOP 都已落盘。
+    #[tokio::test(start_paused = true)]
+    async fn the_last_gop_is_written_when_a_read_times_out() {
+        use futures::StreamExt;
+
+        let body = gop_flv_body(5);
+        let stalled = futures::stream::iter([Ok::<_, std::io::Error>(body.clone())])
+            .chain(futures::stream::pending());
+        let (result, data) = record_unsegmented(reqwest::Body::wrap_stream(stalled)).await;
+        assert!(
+            matches!(
+                result,
+                Err(crate::downloader::error::Error::ElapsedError(_))
+            ),
+            "the read timeout must still be reported: {result:?}"
+        );
+        assert_eq!(keyframes(&data), 5);
+        assert_eq!(&data[13..], &body[4..]);
+    }
+
+    /// 解析错误：流里混进一个坏 tag，错误照样返回，坏 tag 之前的 GOP 都已落盘，坏字节不落盘。
+    #[tokio::test]
+    async fn the_last_gop_is_written_when_parsing_fails() {
+        let good = gop_flv_body(5);
+        let mut body = good.clone();
+        body.extend_from_slice(&[0xff; 32]);
+        let (result, data) = record_unsegmented(body.into()).await;
+        assert!(result.is_err(), "the parse error must still be reported");
+        assert_eq!(keyframes(&data), 5);
+        assert_eq!(&data[13..], &good[4..]);
+    }
+
+    /// 一个从不读取的订阅者在场时，录制照常结束、落盘内容与无订阅者时完全一致。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn stalled_preview_subscriber_does_not_change_what_is_written()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::downloader::preview::{PreviewFormat, PreviewHub, PreviewSink};
+        use crate::downloader::util::{LifecycleFile, Segmentable};
+        use std::time::Duration;
+
+        // 足够多的 tag，让掉队的订阅者远超广播缓冲容量
+        let body = gop_flv_body(PreviewFormat::Flv.broadcast_capacity() as u32 * 2);
+        let run = |body: Vec<u8>, dir: &std::path::Path, sink: Option<PreviewSink>| {
+            let dir = dir.to_path_buf();
+            async move {
+                let http_resp = http::Response::builder().status(200).body(body).unwrap();
+                let connection = super::Connection::new(reqwest::Response::from(http_resp));
+                let file_stem = dir.join("rec");
+                let file = LifecycleFile::new(file_stem.to_str().unwrap(), "flv");
+                let started = std::time::Instant::now();
+                super::parse_flv(connection, file, Segmentable::new(None, None), sink)
+                    .await
+                    .unwrap();
+                let data = std::fs::read(dir.join("rec.flv")).unwrap();
+                (data, started.elapsed())
+            }
+        };
+
+        let plain_dir = tempfile::tempdir()?;
+        let (plain, _) = run(body.clone(), plain_dir.path(), None).await;
+
+        let hub = PreviewHub::new(4);
+        let sink = hub.attach(PreviewFormat::Flv);
+        let mut subscribe = Box::pin({
+            let hub = hub.clone();
+            async move { hub.subscribe(Duration::from_secs(5)).await }
+        });
+        assert!(futures::poll!(subscribe.as_mut()).is_pending());
+        let stalled = tokio::spawn(async move {
+            let sub = subscribe.await.unwrap();
+            // 拿到订阅后一个字节都不读，直到写入端结束
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            sub
+        });
+        let teed_dir = tempfile::tempdir()?;
+        let (teed, elapsed) = run(body, teed_dir.path(), Some(sink)).await;
+
+        assert_eq!(
+            teed, plain,
+            "the recording must not depend on preview subscribers"
+        );
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "the producer must not wait for a stalled subscriber ({elapsed:?})"
+        );
+        let mut sub = stalled.await?;
+        assert!(matches!(
+            sub.rx.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_))
+                | Err(tokio::sync::broadcast::error::TryRecvError::Closed)
+        ));
+        Ok(())
+    }
+
+    /// 写盘字节计数：只统计真正经 `write_tag` 落盘的 tag（11 字节头 + 数据 + 4 字节 previous tag size）。
+    ///
+    /// 这段流里 onMetaData 脚本标签在遇到关键帧时写出（14 字节数据 → 29 字节），
+    /// 关键帧（5 字节数据 → 20 字节）留在缓存里，流结束时一并落盘。
+    #[tokio::test]
+    async fn written_bytes_are_counted_on_the_shared_counter()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::downloader::util::{ByteCounter, LifecycleFile, Segmentable};
+
+        let http_resp = http::Response::builder()
+            .status(200)
+            .body(pure_video_flv_body())?;
+        let connection = super::Connection::new(reqwest::Response::from(http_resp));
+
+        let dir = tempfile::tempdir()?;
+        let file_stem = dir.path().join("counted");
+        let counter = ByteCounter::new();
+        let file =
+            LifecycleFile::new(file_stem.to_str().unwrap(), "flv").with_counter(counter.clone());
+
+        super::parse_flv(connection, file, Segmentable::new(None, None), None).await?;
+        assert_eq!(counter.total(), (11 + 14 + 4) + (11 + 5 + 4));
+        Ok(())
+    }
+
+    /// 关键帧索引旁路报告的每个 tag（偏移、时间戳、长度、判定）与落盘文件逐一对应，
+    /// 跨分段时每个文件从头计偏移，关段报告的长度就是文件长度。
+    #[tokio::test]
+    async fn index_tap_reports_the_on_disk_offset_of_every_tag()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::downloader::index_tap::{FlvTagKind, IndexEvent, IndexTap};
+        use crate::downloader::util::{LifecycleFile, Segmentable};
+        use std::sync::{Arc, Mutex};
+
+        fn classify(tag_type: u8, body: &[u8]) -> FlvTagKind {
+            FlvTagKind {
+                media: matches!(tag_type, 8 | 9),
+                sequence_header: tag_type == 9 && body.get(1) == Some(&0),
+                keyframe: tag_type == 9 && body[0] >> 4 == 1,
+            }
+        }
+
+        let http_resp = http::Response::builder()
+            .status(200)
+            .body(gop_flv_body(40))?;
+        let connection = super::Connection::new(reqwest::Response::from(http_resp));
+
+        let dir = tempfile::tempdir()?;
+        let kept: Arc<Mutex<Vec<std::path::PathBuf>>> = Arc::default();
+        let file = LifecycleFile::with_hook(dir.path().join("tap").to_str().unwrap(), "flv", {
+            let kept = kept.clone();
+            let dir = dir.path().to_path_buf();
+            move |name: &str| {
+                let mut kept = kept.lock().unwrap();
+                let path = dir.join(format!("seg-{:04}.flv", kept.len()));
+                std::fs::rename(name, &path).unwrap();
+                kept.push(path);
+            }
+        });
+        let (tap, mut rx) = IndexTap::channel(1 << 16, |tag_type, body| classify(tag_type, body));
+        let file = file.with_index_tap(Some(tap));
+        super::parse_flv(connection, file, Segmentable::new(None, Some(2048)), None).await?;
+
+        type Tags = Vec<(u64, u32, u32, FlvTagKind)>;
+        let mut reported: Vec<(Tags, Option<u64>)> = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                IndexEvent::Opened(file) => {
+                    assert!(file.path().to_string_lossy().ends_with("tap.flv.part"));
+                    reported.push((Vec::new(), None));
+                }
+                IndexEvent::FlvTag {
+                    offset,
+                    timestamp,
+                    data_size,
+                    kind,
+                    ..
+                } => reported
+                    .last_mut()
+                    .unwrap()
+                    .0
+                    .push((offset, timestamp, data_size, kind)),
+                IndexEvent::Closed { len, .. } => reported.last_mut().unwrap().1 = Some(len),
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+
+        let kept = kept.lock().unwrap();
+        assert!(
+            kept.len() > 3,
+            "expected several segments, got {}",
+            kept.len()
+        );
+        assert_eq!(reported.len(), kept.len());
+        for ((tags, closed), path) in reported.iter().zip(kept.iter()) {
+            let bytes = std::fs::read(path)?;
+            assert_eq!(*closed, Some(bytes.len() as u64));
+            let mut on_disk = Vec::new();
+            let mut offset = 13;
+            while offset < bytes.len() {
+                let h = &bytes[offset..offset + 11];
+                let size = u32::from_be_bytes([0, h[1], h[2], h[3]]);
+                let ts = u32::from_be_bytes([h[7], h[4], h[5], h[6]]);
+                let body = &bytes[offset + 11..offset + 11 + size as usize];
+                on_disk.push((offset as u64, ts, size, classify(h[0], body)));
+                offset += 15 + size as usize;
+            }
+            assert_eq!(*tags, on_disk, "{}", path.display());
+        }
         Ok(())
     }
 
     #[tokio::test]
-    async fn timestamp_reset_starts_a_new_keyframe_aligned_segment()
-    -> Result<(), Box<dyn std::error::Error>> {
+    async fn non_monotonous_dts_is_repaired_monotonically() -> Result<(), Box<dyn std::error::Error>>
+    {
         use crate::downloader::util::{LifecycleFile, Segmentable};
-        use std::sync::{Arc, Mutex};
 
-        fn video_tag(timestamp: u32, body: [u8; 5]) -> Vec<u8> {
-            let mut tag = vec![
-                0x09,
-                0,
-                0,
-                5,
-                ((timestamp >> 16) & 0xff) as u8,
-                ((timestamp >> 8) & 0xff) as u8,
-                (timestamp & 0xff) as u8,
-                (timestamp >> 24) as u8,
-                0,
-                0,
-                0,
-            ];
-            tag.extend_from_slice(&body);
-            tag.extend_from_slice(&[0, 0, 0, 0]);
-            tag
+        fn tag(data: &mut Vec<u8>, tag_type: u8, ts: u32, body: &[u8]) {
+            data.push(tag_type);
+            data.extend_from_slice(&(body.len() as u32).to_be_bytes()[1..]);
+            data.extend_from_slice(&(ts & 0xff_ffff).to_be_bytes()[1..]);
+            data.push((ts >> 24) as u8);
+            data.extend_from_slice(&[0, 0, 0]);
+            data.extend_from_slice(body);
+            data.extend_from_slice(&((11 + body.len()) as u32).to_be_bytes());
         }
-
         let mut data = vec![0, 0, 0, 0];
-        data.extend(video_tag(10_000, [0x17, 0, 0, 0, 0]));
-        data.extend(video_tag(12_000, [0x27, 1, 0, 0, 0]));
-        data.extend(video_tag(0, [0x27, 1, 0, 0, 0]));
-        data.extend(video_tag(100, [0x17, 1, 0, 0, 0]));
-
-        let response = http::Response::builder().status(200).body(data)?;
-        let connection = super::Connection::new(reqwest::Response::from(response));
-        let dir = tempfile::tempdir()?;
-        let completed = Arc::new(Mutex::new(Vec::new()));
-        let completed_hook = Arc::clone(&completed);
-        let file = LifecycleFile::with_hook(
-            dir.path().join("timestamp_reset").to_str().unwrap(),
-            "flv",
-            move |name| completed_hook.lock().unwrap().push(name.to_string()),
+        tag(
+            &mut data,
+            18,
+            0,
+            &[
+                0x02, 0x00, 0x0A, b'o', b'n', b'M', b'e', b't', b'a', b'D', b'a', b't', b'a', 0x05,
+            ],
         );
+        // AVC sequence header
+        tag(&mut data, 9, 0, &[0x17, 0x00, 0x00, 0x00, 0x00, 0x01, 0x64]);
 
-        super::parse_flv(connection, file, Segmentable::default()).await?;
-        assert_eq!(completed.lock().unwrap().len(), 2);
+        let key_body = &[0x17, 0x01, 0, 0, 0, 0xaa, 0xbb];
+        tag(&mut data, 9, 1000, key_body);
+        tag(&mut data, 9, 2000, key_body);
+        // Stream discontinuity: timestamp resets to 0!
+        tag(&mut data, 9, 0, key_body);
+        tag(&mut data, 9, 1000, key_body);
+
+        let http_resp = http::Response::builder().status(200).body(data)?;
+        let connection = super::Connection::new(reqwest::Response::from(http_resp));
+
+        let dir = tempfile::tempdir()?;
+        let file_stem = dir.path().join("dts_repair_test");
+        let file = LifecycleFile::new(file_stem.to_str().unwrap(), "flv");
+        let segment = Segmentable::new(None, None);
+
+        super::parse_flv(connection, file, segment, None).await?;
+
+        let out_path = file_stem.with_extension("flv");
+        let bytes = std::fs::read(&out_path)?;
+        assert!(bytes.len() >= 9 + 4);
+
+        let mut offset = 13;
+        let mut prev_ts: Option<u32> = None;
+        while offset < bytes.len() {
+            let h = &bytes[offset..offset + 11];
+            let size = u32::from_be_bytes([0, h[1], h[2], h[3]]);
+            let ts = u32::from_be_bytes([h[7], h[4], h[5], h[6]]);
+            if let Some(prev) = prev_ts {
+                assert!(
+                    ts >= prev,
+                    "Timestamps must be monotonically increasing! prev: {prev}, current: {ts}"
+                );
+            }
+            prev_ts = Some(ts);
+            offset += 15 + size as usize;
+        }
+        assert!(prev_ts.is_some());
+        assert!(prev_ts.unwrap() >= 3000);
         Ok(())
     }
 }

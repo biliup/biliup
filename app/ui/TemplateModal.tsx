@@ -1,6 +1,5 @@
 import {
   Form,
-  Modal,
   Input,
   Notification,
   Typography,
@@ -11,20 +10,36 @@ import {
 } from '@douyinfe/semi-ui'
 import { IconPlusCircle, IconMinusCircle } from '@douyinfe/semi-icons'
 import { FormApi } from '@douyinfe/semi-ui/lib/es/form'
-import React, { CSSProperties, useRef } from 'react'
+import React, { CSSProperties, useMemo, useRef } from 'react'
 import { useState } from 'react'
 import { fetcher, LiveStreamerEntity, sendRequest, StudioEntity } from '../lib/api-streamer'
 import useSWR from 'swr'
 import useSWRMutation from 'swr/mutation'
+import { useMe } from '../lib/use-me'
+import { useAutoClip } from '../lib/auto-clip'
+import AfterLiveSwitch from './auto-clip/AfterLiveSwitch'
+import { FormSheet } from './shell'
 
 type TemplateModalProps = {
   visible?: boolean
   entity?: LiveStreamerEntity
   children?: React.ReactNode
   onOk: (e: any) => Promise<void>
+  title?: string
+  /** 投稿模板的候选项；不传时取本机的 `/v1/upload/streamers`（Fleet 控制面传自己的模板） */
+  templateOptions?: { value: number; label: React.ReactNode }[]
+  /** 放在投稿模板下面的额外字段（Fleet 控制面的「分派到节点」） */
+  extraFields?: React.ReactNode
 }
 
-const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk }) => {
+const TemplateModal: React.FC<TemplateModalProps> = ({
+  children,
+  entity,
+  onOk,
+  title = entity ? `编辑直播间「${entity.remark}」` : '新建直播间',
+  templateOptions,
+  extraFields,
+}) => {
   const { Paragraph, Title, Text } = Typography
   let message = '该项为必填项'
   const [isOpen, setOpen] = useState(false)
@@ -70,14 +85,19 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
     fontWeight: 700,
     cursor: 'pointer',
   }
-  const api = useRef<FormApi>()
+  const api = useRef<FormApi>(undefined)
+  // 各类处理器会在服务器上执行 shell 命令，只有超级管理员能看到和修改；后端也会忽略其他角色提交的这几项
+  const { can } = useMe()
+  const hooks = can('streamer.hooks')
   const {
     data: templates,
     error,
     isLoading,
-  } = useSWR<StudioEntity[]>('/v1/upload/streamers', fetcher)
+  } = useSWR<StudioEntity[]>(templateOptions ? null : '/v1/upload/streamers', fetcher)
 
   const [visible, setVisible] = useState(false)
+  // Fleet 控制面的直播间不在本机生成候选，不显示这个开关
+  const autoClip = useAutoClip(visible && !templateOptions)
   const showDialog = () => {
     setVisible(true)
   }
@@ -98,7 +118,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
   }
 
   const childrenWithProps = React.Children.map(children, child => {
-    if (React.isValidElement<any>(child)) {
+    if (React.isValidElement<{ onClick?: () => void }>(child)) {
       return React.cloneElement(child, {
         onClick: () => {
           showDialog()
@@ -108,39 +128,41 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
     }
   })
 
-  const list = templates?.map(template => {
-    return {
-      value: template.id,
-      label: template.template_name,
-    }
-  })
+  const list =
+    templateOptions ??
+    templates?.map(template => {
+      return {
+        value: template.id,
+        label: template.template_name,
+      }
+    })
 
-  try {
-    if (entity && entity.time_range && typeof entity.time_range === "string") {
-      const tr: string[] = JSON.parse(entity.time_range)
-      entity.time_range = tr.map(t => new Date(t))
+  // 后端把 time_range 存成 JSON 字串,TimePicker 需要 Date[]。entity 是上层传下来的 props,
+  // 渲染期不能就地改写,转换结果放进一份本地副本作为表单初始值;解析失败时保持原样(与之前一致)
+  const initValues = useMemo(() => {
+    if (entity && entity.time_range && typeof entity.time_range === 'string') {
+      try {
+        const tr: string[] = JSON.parse(entity.time_range)
+        return { ...entity, time_range: tr.map(t => new Date(t)) }
+      } catch (e) {
+        console.error(e)
+      }
     }
-  } catch (e) {
-    console.error(e)
-  }
+    return entity
+  }, [entity])
 
   return (
     <>
       {childrenWithProps}
-      <Modal
-        title="录播管理"
+      <FormSheet
+        title={title}
         visible={visible}
+        size="md"
+        okText={entity ? '保存' : '创建'}
         onOk={handleOk}
-        style={{ width: 'min(600px, 90vw)' }}
         onCancel={handleCancel}
-        bodyStyle={{
-          overflow: 'auto',
-          maxHeight: 'calc(100vh - 320px)',
-          paddingLeft: 10,
-          paddingRight: 10,
-        }}
       >
-        <Form initValues={entity} getFormApi={formApi => (api.current = formApi)}>
+        <Form initValues={initValues} getFormApi={formApi => (api.current = formApi)}>
           <Form.Input
             field="remark"
             label="录播备注"
@@ -169,69 +191,80 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
             optionList={list}
           />
 
-          <ArrayField
-            field="postprocessor"
-            initValue={entity === undefined ? [{ cmd: 'rm' }] : undefined}
-          >
-            {({ add, arrayFields }) => (
-              <>
-                <Form.Slot label={{ text: '后处理' }} labelPosition="left">
-                  <Button icon={<IconPlusCircle />} onClick={add} theme="light">
-                    添加行
-                  </Button>
-                </Form.Slot>
+          {extraFields}
 
-                {arrayFields.map(({ field, key, remove }, i) => (
-                  <div key={key} style={{ display: 'flex' }}>
-                    <Form.Select
-                      field={`${field}.cmd`}
-                      label="操作"
-                      rules={[{ required: true, message }]}
-                      noLabel
-                    >
-                      <Form.Select.Option value="run">run（运行）</Form.Select.Option>
-                      <Form.Select.Option value="mv">mv（移动到）</Form.Select.Option>
-                      <Form.Select.Option value="rm">rm（删除文件）</Form.Select.Option>
-                      <Form.Select.Option value="webhook">webhook</Form.Select.Option>
-                    </Form.Select>
-                    {api.current?.getValue(field)?.cmd !== 'rm' ? (
-                      <Form.Input
-                        field={`${field}.value`}
-                        label="="
-                        labelPosition="inset"
+          {templateOptions ? null : <AfterLiveSwitch availability={autoClip} canOverride={hooks} />}
+
+          {hooks ? (
+            <ArrayField
+              field="postprocessor"
+              initValue={entity === undefined ? [{ cmd: 'rm' }] : undefined}
+            >
+              {({ add, arrayFields }) => (
+                <>
+                  <Form.Slot label={{ text: '后处理' }} labelPosition="left">
+                    <Button icon={<IconPlusCircle />} onClick={() => add()} theme="light">
+                      添加行
+                    </Button>
+                  </Form.Slot>
+
+                  {arrayFields.map(({ field, key, remove }, i) => (
+                    <div key={key} style={{ display: 'flex' }}>
+                      <Form.Select
+                        field={`${field}.cmd`}
+                        label="操作"
                         rules={[{ required: true, message }]}
-                        style={{ width: 300, marginRight: 16 }}
-                        placeholder={ api.current?.getValue(field)?.cmd === 'webhook' ? 'https://example.com/notify' : undefined }
-                      ></Form.Input>
-                    ) : null}
-                    <Button
-                      type="danger"
-                      theme="borderless"
-                      icon={<IconMinusCircle />}
-                      onClick={remove}
-                      disabled={arrayFields.length <= 1}
-                      style={{ margin: 12 }}
-                    />
+                        noLabel
+                      >
+                        <Form.Select.Option value="run">run（运行）</Form.Select.Option>
+                        <Form.Select.Option value="mv">mv（移动到）</Form.Select.Option>
+                        <Form.Select.Option value="rm">rm（删除文件）</Form.Select.Option>
+                        <Form.Select.Option value="webhook">webhook</Form.Select.Option>
+                      </Form.Select>
+                      {api.current?.getValue(field)?.cmd !== 'rm' ? (
+                        <Form.Input
+                          field={`${field}.value`}
+                          label="="
+                          labelPosition="inset"
+                          rules={[{ required: true, message }]}
+                          fieldStyle={{ flex: 1, minWidth: 0 }}
+                          style={{ width: '100%' }}
+                          placeholder={ api.current?.getValue(field)?.cmd === 'webhook' ? 'https://example.com/notify' : undefined }
+                        ></Form.Input>
+                      ) : null}
+                      <Button
+                        type="danger"
+                        theme="borderless"
+                        icon={<IconMinusCircle />}
+                        onClick={remove}
+                        disabled={arrayFields.length <= 1}
+                        style={{ margin: 12 }}
+                      />
+                    </div>
+                  ))}
+                  <div style={{ position: 'relative' }}>
+                    <Collapsible isOpen={isOpen} collapseHeight={60} style={{ ...maskStyle }}>
+                      {collapsed}
+                    </Collapsible>
+                    <a onClick={toggle} style={{ ...linkStyle }}>
+                      {isOpen ? '收起' : '展开更多'}
+                    </a>
                   </div>
-                ))}
-                <div style={{ position: 'relative' }}>
-                  <Collapsible isOpen={isOpen} collapseHeight={60} style={{ ...maskStyle }}>
-                    {collapsed}
-                  </Collapsible>
-                  <a onClick={toggle} style={{ ...linkStyle }}>
-                    + Show {isOpen ? 'Less' : 'More'}
-                  </a>
-                </div>
-              </>
-            )}
-          </ArrayField>
+                </>
+              )}
+            </ArrayField>
+          ) : (
+            <Form.Slot label={{ text: '后处理' }}>
+              <Text type="tertiary">后处理与各类处理器命令仅超级管理员可配置，保存时保持原样。</Text>
+            </Form.Slot>
+          )}
 
           <Form.Input
             field="format"
             label="视频格式"
             placeholder="flv"
             style={{ width: 176 }}
-            helpText="视频保存格式。不支持stream-gears下载器和Youtube平台。"
+            helpText="视频保存格式（转封装）。mesio、stream-gears 下载器不转封装，按源站容器保存；YouTube 平台也不支持。"
           />
 
           <Collapse keepDOM>
@@ -250,7 +283,6 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                   text: '录制时间范围',
                   optional: true,
                   style: {
-                    fontSize: '18px',
                     marginBottom: '4px',
                     paddingBottom: '8px',
                     borderBottom: '1px solid var(--semi-color-border)',
@@ -266,11 +298,11 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                       如果房间名包含关键词，则停止或不录制该场直播，每个关键词需单独一行<br />
                       暂不支持<strong>cc直播</strong>、<strong>yy直播</strong>、<strong>twitch直播</strong>
                     </div>
-                    <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+                    <Button icon={<IconPlusCircle />} onClick={() => add()} theme="light">
                       添加关键词
                     </Button>
                     {arrayFields.map(({ field, key, remove }, i) => (
-                      <div key={key} style={{ width: 1000, display: 'flex' }}>
+                      <div key={key} style={{ width: '100%', display: 'flex' }}>
                         <Form.Input
                           field={field}
                           label={`关键词${i + 1}`}
@@ -290,98 +322,103 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                 )}
               </ArrayField>
 
-              <ArrayField field="preprocessor">
-                {({ add, arrayFields }) => (
-                  <Form.Section text="下载前处理">
-                    <div className="semi-form-field-extra">
-                      下载直播前触发，将按自定义顺序执行自定义操作，仅支持shell指令
-                    </div>
-                    <Button icon={<IconPlusCircle />} onClick={add} theme="light">
-                      添加行
-                    </Button>
-                    {arrayFields.map(({ field, key, remove }, i) => (
-                      <div key={key} style={{ width: 1000, display: 'flex' }}>
-                        <Form.Input
-                          field={`${field}[run]`}
-                          label={`run = `}
-                          labelPosition="inset"
-                          rules={[{ required: true, message }]}
-                          style={{ width: 400, marginRight: 16 }}
-                        ></Form.Input>
-                        <Button
-                          type="danger"
-                          theme="borderless"
-                          icon={<IconMinusCircle />}
-                          onClick={remove}
-                          style={{ margin: 12 }}
-                        />
-                      </div>
-                    ))}
-                  </Form.Section>
-                )}
-              </ArrayField>
+              {hooks && (
+                <>
+                  <ArrayField field="preprocessor">
+                    {({ add, arrayFields }) => (
+                      <Form.Section text="下载前处理">
+                        <div className="semi-form-field-extra">
+                          下载直播前触发，将按自定义顺序执行自定义操作，仅支持shell指令
+                        </div>
+                        <Button icon={<IconPlusCircle />} onClick={() => add()} theme="light">
+                          添加行
+                        </Button>
+                        {arrayFields.map(({ field, key, remove }, i) => (
+                          <div key={key} style={{ width: '100%', display: 'flex' }}>
+                            <Form.Input
+                              field={`${field}[run]`}
+                              label={`run = `}
+                              labelPosition="inset"
+                              rules={[{ required: true, message }]}
+                              style={{ flex: 1, minWidth: 0, marginRight: 16 }}
+                            ></Form.Input>
+                            <Button
+                              type="danger"
+                              theme="borderless"
+                              icon={<IconMinusCircle />}
+                              onClick={remove}
+                              style={{ margin: 12 }}
+                            />
+                          </div>
+                        ))}
+                      </Form.Section>
+                    )}
+                  </ArrayField>
 
-              <ArrayField field="segment_processor">
-                {({ add, arrayFields }) => (
-                  <Form.Section text="分段时后处理">
-                    <div className="semi-form-field-extra">
-                      分段时触发，将按自定义顺序执行自定义操作，仅支持shell指令
-                    </div>
-                    <Button icon={<IconPlusCircle />} onClick={add} theme="light">
-                      添加行
-                    </Button>
-                    {arrayFields.map(({ field, key, remove }, i) => (
-                      <div key={key} style={{ width: 1000, display: 'flex' }}>
-                        <Form.Input
-                          field={`${field}[run]`}
-                          label={`run = `}
-                          labelPosition="inset"
-                          rules={[{ required: true, message }]}
-                          style={{ width: 400, marginRight: 16 }}
-                        ></Form.Input>
-                        <Button
-                          type="danger"
-                          theme="borderless"
-                          icon={<IconMinusCircle />}
-                          onClick={remove}
-                          style={{ margin: 12 }}
-                        />
-                      </div>
-                    ))}
-                  </Form.Section>
-                )}
-              </ArrayField>
+                  <ArrayField field="segment_processor">
+                    {({ add, arrayFields }) => (
+                      <Form.Section text="分段时后处理">
+                        <div className="semi-form-field-extra">
+                          分段时触发，将按自定义顺序执行自定义操作，仅支持shell指令
+                        </div>
+                        <Button icon={<IconPlusCircle />} onClick={() => add()} theme="light">
+                          添加行
+                        </Button>
+                        {arrayFields.map(({ field, key, remove }, i) => (
+                          <div key={key} style={{ width: '100%', display: 'flex' }}>
+                            <Form.Input
+                              field={`${field}[run]`}
+                              label={`run = `}
+                              labelPosition="inset"
+                              rules={[{ required: true, message }]}
+                              style={{ flex: 1, minWidth: 0, marginRight: 16 }}
+                            ></Form.Input>
+                            <Button
+                              type="danger"
+                              theme="borderless"
+                              icon={<IconMinusCircle />}
+                              onClick={remove}
+                              style={{ margin: 12 }}
+                            />
+                          </div>
+                        ))}
+                      </Form.Section>
+                    )}
+                  </ArrayField>
 
-              <ArrayField field="downloaded_processor">
-                {({ add, arrayFields }) => (
-                  <Form.Section text="下载后处理">
-                    <div className="semi-form-field-extra">
-                      准备上传直播时触发，将按自定义顺序执行自定义操作，仅支持shell指令，如果对上传的视频进行修改，需要保证和filename_prefix命名规则一致，会自动检测上传
-                    </div>
-                    <Button icon={<IconPlusCircle />} onClick={add} theme="light">
-                      添加行
-                    </Button>
-                    {arrayFields.map(({ field, key, remove }, i) => (
-                      <div key={key} style={{ width: 1000, display: 'flex' }}>
-                        <Form.Input
-                          field={`${field}[run]`}
-                          label={`run = `}
-                          labelPosition="inset"
-                          rules={[{ required: true, message }]}
-                          style={{ width: 400, marginRight: 16 }}
-                        ></Form.Input>
-                        <Button
-                          type="danger"
-                          theme="borderless"
-                          icon={<IconMinusCircle />}
-                          onClick={remove}
-                          style={{ margin: 12 }}
-                        />
-                      </div>
-                    ))}
-                  </Form.Section>
-                )}
-              </ArrayField>
+                  <ArrayField field="downloaded_processor">
+                    {({ add, arrayFields }) => (
+                      <Form.Section text="下载后处理">
+                        <div className="semi-form-field-extra">
+                          准备上传直播时触发，将按自定义顺序执行自定义操作，仅支持shell指令，如果对上传的视频进行修改，需要保证和filename_prefix命名规则一致，会自动检测上传
+                        </div>
+                        <Button icon={<IconPlusCircle />} onClick={() => add()} theme="light">
+                          添加行
+                        </Button>
+                        {arrayFields.map(({ field, key, remove }, i) => (
+                          <div key={key} style={{ width: '100%', display: 'flex' }}>
+                            <Form.Input
+                              field={`${field}[run]`}
+                              label={`run = `}
+                              labelPosition="inset"
+                              rules={[{ required: true, message }]}
+                              style={{ flex: 1, minWidth: 0, marginRight: 16 }}
+                            ></Form.Input>
+                            <Button
+                              type="danger"
+                              theme="borderless"
+                              icon={<IconMinusCircle />}
+                              onClick={remove}
+                              style={{ margin: 12 }}
+                            />
+                          </div>
+                        ))}
+                      </Form.Section>
+                    )}
+                  </ArrayField>
+
+                </>
+              )}
 
               <ArrayField field="opt_args">
                 {({ add, arrayFields }) => (
@@ -389,11 +426,11 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
                     <div className="semi-form-field-extra">
                       如：&quot;-ss&quot;、&quot;00:00:16&quot;，每个参数需单独一行
                     </div>
-                    <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+                    <Button icon={<IconPlusCircle />} onClick={() => add()} theme="light">
                       添加行
                     </Button>
                     {arrayFields.map(({ field, key, remove }, i) => (
-                      <div key={key} style={{ width: 1000, display: 'flex' }}>
+                      <div key={key} style={{ width: '100%', display: 'flex' }}>
                         <Form.Input
                           field={field}
                           label={`参数${i + 1}`}
@@ -415,7 +452,7 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
             </Collapse.Panel>
           </Collapse>
         </Form>
-      </Modal>
+      </FormSheet>
     </>
   )
 }

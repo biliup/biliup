@@ -4,9 +4,10 @@ import { BiliArchive, BiliArchivePage, fetcher } from '@/app/lib/api-streamer'
 import { humDate } from '@/app/lib/utils'
 import { useBiliUsers } from '@/app/lib/use-streamers'
 import { IconUserCardVideo } from '@douyinfe/semi-icons'
-import { Banner, Layout, Nav, Pagination, Select, Table, Typography } from '@douyinfe/semi-ui'
+import { Banner, Layout, Pagination, Select, Table, Typography } from '@douyinfe/semi-ui'
 import { useState } from 'react'
 import useSWR from 'swr'
+import PageHeader from '../components/PageHeader'
 
 const statusOptions = [
   { label: '全部状态', value: 'all' },
@@ -16,7 +17,7 @@ const statusOptions = [
 ]
 
 export default function ArchivesPage() {
-  const { Header, Content } = Layout
+  const { Content } = Layout
   const { Text } = Typography
   const { biliUsers, isLoading: usersLoading } = useBiliUsers()
   const [userId, setUserId] = useState<number>()
@@ -65,18 +66,7 @@ export default function ArchivesPage() {
 
   return (
     <>
-      <Header style={{ backgroundColor: 'var(--semi-color-bg-1)' }}>
-        <Nav
-          style={{ border: 'none' }}
-          header={
-            <>
-              <IconUserCardVideo size="large" />
-              <h4 style={{ marginLeft: 12 }}>B站稿件</h4>
-            </>
-          }
-          mode="horizontal"
-        />
-      </Header>
+      <PageHeader icon={<IconUserCardVideo size="large" />} title="B站稿件" />
       <Content style={{ padding: 24, backgroundColor: 'var(--semi-color-bg-0)' }}>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
           <Select

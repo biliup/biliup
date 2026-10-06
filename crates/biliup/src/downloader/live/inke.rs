@@ -90,6 +90,7 @@ impl InkeLive {
                 title: data.title.unwrap_or(uid),
                 date: Utc::now(),
                 live_cover_url: data.image.unwrap_or_default(),
+                avatar_url: None,
                 suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "flv".to_string()),
                 raw_stream_url,
                 platform: "inke".to_string(),

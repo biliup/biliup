@@ -1,10 +1,14 @@
 use crate::LogHandle;
+use crate::server::api::live_media::ImageProxy;
+use crate::server::common::system_stats::SystemMonitor;
 use crate::server::config::Config;
 use crate::server::core::download_manager::DownloadManager;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::Worker;
 use crate::server::infrastructure::models::live_streamer::LiveStreamer;
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
+use crate::server::workbench::clips::export::ClipExports;
+use crate::server::workbench::clips::publish::queue::{BiliBackend, ClipPublisher};
 use axum::extract::FromRef;
 use biliup::client::StatelessClient;
 use biliup::downloader::live::builtin_plugins;
@@ -12,6 +16,9 @@ use error_stack::Report;
 use error_stack::fmt::ColorMode;
 use std::sync::{Arc, RwLock};
 use tracing::info;
+
+/// 切片产物的目录（相对工作目录）。
+pub const CLIPS_DIR: &str = "clips";
 
 /// 服务注册器
 /// 负责管理应用程序中的各种服务实例，包括数据库连接池、工作器、下载管理器等
@@ -27,6 +34,17 @@ pub struct ServiceRegister {
     pub client: StatelessClient,
 
     pub log_handle: LogHandle,
+
+    /// 录制中直播间封面 / 头像的图片代理（抓取客户端 + 内存缓存）
+    pub image_proxy: Arc<ImageProxy>,
+
+    /// 控制台首页的系统状态采样（CPU / 内存 / 磁盘 / 网速），随服务启停
+    pub system: Arc<SystemMonitor>,
+    /// 切片导出任务（产物在工作目录下的 `clips/`）
+    pub clips: Arc<ClipExports>,
+
+    /// 切片发布队列（同一时间只传一个稿件；任务只在内存里）
+    pub publisher: Arc<ClipPublisher>,
 }
 
 /// 简单的服务容器，负责管理API端点通过axum扩展获取的各种服务
@@ -56,13 +74,25 @@ impl ServiceRegister {
             download_manager.add_plugin(plugin).await;
         }
 
+        let clips = Arc::new(ClipExports::new(pool.clone(), CLIPS_DIR));
+        let publisher = Arc::new(ClipPublisher::new(
+            pool.clone(),
+            clips.clone(),
+            Arc::new(BiliBackend::new(config.clone(), client.clone())),
+        ));
+        publisher.spawn();
+
         info!("feature services successfully initialized!");
         ServiceRegister {
+            clips,
+            publisher,
             pool,
             managers: Arc::new(download_manager),
             config: config.clone(),
             client,
             log_handle,
+            image_proxy: Arc::new(ImageProxy::new()),
+            system: SystemMonitor::spawn(),
         }
     }
 

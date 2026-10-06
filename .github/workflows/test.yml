@@ -1,0 +1,45 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # biliup-cli 通过 rust-embed 嵌入 out/ 前端产物，需要先构建
+      - name: Build frontend
+        run: |
+          npm install
+          npm run build
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # 自动切片抽音频、取帧等用例要真的调 ffmpeg，没有时会跳过（日志里是 `SKIPPED ...`）
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Run tests
+        run: cargo test --locked --workspace
+
+  # 桌面程序是独立 workspace，依赖变动时根 Cargo.lock 会更新，它的锁不会跟着变；
+  # desktop-publish.yml 只在发版时跑，漂移要到那时才暴露（v1.2.9 就是这样）
+  desktop-lockfile:
+    name: Desktop Cargo.lock up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: cargo metadata --locked
+        run: cargo metadata --locked --format-version 1 --manifest-path tauri-app/src-tauri/Cargo.toml > /dev/null

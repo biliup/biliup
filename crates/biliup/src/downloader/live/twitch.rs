@@ -3,6 +3,7 @@ use super::{
     LiveResult, LiveStatus, LiveStream, RuntimeOptions, StreamlinkOptions, StreamlinkPlatform,
     YtDlpOptions, media_ext_from_url,
 };
+use crate::tools;
 use async_trait::async_trait;
 use chrono::Utc;
 use regex::Regex;
@@ -18,7 +19,6 @@ use std::process::Stdio;
 use std::sync::{OnceLock, RwLock};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time::Duration;
 use tracing::warn;
@@ -272,6 +272,7 @@ impl TwitchLive {
                 title: stream.title.unwrap_or_default(),
                 date: Utc::now(),
                 live_cover_url: stream.preview_image_url.unwrap_or_default(),
+                avatar_url: None,
                 suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "m3u8".to_string()),
                 raw_stream_url,
                 platform: "twitch".to_string(),
@@ -386,6 +387,7 @@ impl TwitchVideosLive {
                 title: selection.title,
                 date: Utc::now(),
                 live_cover_url: selection.thumbnail.clone(),
+                avatar_url: None,
                 suffix: "mp4".to_string(),
                 raw_stream_url,
                 platform: "twitch".to_string(),
@@ -421,7 +423,7 @@ impl TwitchVideosLive {
                 Some(token) => write_cookie_file(token).await,
                 None => None,
             };
-            let mut command = Command::new("yt-dlp");
+            let mut command = tools::command("yt-dlp");
             command
                 .stdin(Stdio::null())
                 .arg("--dump-single-json")

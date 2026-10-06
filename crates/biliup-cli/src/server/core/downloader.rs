@@ -1,25 +1,36 @@
 pub mod cover_downloader;
 /// FFmpeg下载器实现
 pub mod ffmpeg_downloader;
+/// mesio（rust-srec）进程内下载 + 修复管线
+pub mod mesio;
 /// Stream-gears下载器实现
 pub mod stream_gears;
 pub mod streamlink;
+/// 边录边传（零落盘流式上传）
+pub mod sync_downloader;
+pub mod ws_expire;
 pub mod ytdlp;
 
 use crate::server::common::timerange;
-use crate::server::common::util::Recorder;
+use crate::server::common::util::{Recorder, parse_segment_time};
 use crate::server::core::downloader::ffmpeg_downloader::FfmpegDownloader;
+use crate::server::core::downloader::mesio::Mesio;
 use crate::server::core::downloader::stream_gears::StreamGears;
 use crate::server::core::downloader::streamlink::Streamlink;
+use crate::server::core::downloader::sync_downloader::SyncDownloader;
 use crate::server::core::downloader::ytdlp::YouTubeDownloader;
 use crate::server::errors::{AppError, AppResult};
 use async_trait::async_trait;
+use biliup::downloader::index_tap::IndexTap;
+use biliup::downloader::preview::PreviewHub;
+use biliup::downloader::util::ByteCounter;
 use danmaku_client::{DanmakuRecorder, RecorderConfig, RecorderHandle};
 use error_stack::Report;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use tracing::warn;
 
 /// 下载器配置
 /// 包含下载过程中需要的各种参数和设置
@@ -47,6 +58,22 @@ pub struct DownloadConfig {
     pub output_dir: PathBuf,
 
     pub suffix: String,
+
+    /// 本次录制任务的写盘字节累计，由各下载器在写出点累加，供界面显示实时速率。
+    /// 只是一个原子计数器的句柄：不参与序列化，也不影响任何下载控制流。
+    #[serde(skip)]
+    pub bytes_written: ByteCounter,
+
+    /// 本次录制任务的直播预览 hub。进程内写盘的下载器（stream-gears / mesio）开始拉流时
+    /// 从它 `attach` 一个写入端，在写盘点旁边旁路媒体字节；其它下载器不碰它。
+    /// 与 `bytes_written` 一样只是句柄，不参与序列化，不影响任何下载控制流。
+    #[serde(skip)]
+    pub preview: PreviewHub,
+
+    /// 关键帧索引旁路：进程内写盘的下载器（stream-gears / mesio）在写盘处把每个分段写了什么
+    /// 交给录制任务的索引任务，边录边建 `.idx`；为 `None` 或外部进程下载器时关段后扫盘建索引。
+    #[serde(skip)]
+    pub index_tap: Option<IndexTap>,
 }
 
 impl DownloadConfig {
@@ -65,6 +92,23 @@ impl DownloadConfig {
     /// 因此必须用这个方法而不是直接读 [`Self::segment_time`]。
     pub fn segment_duration(&self) -> Option<String> {
         timerange::clamp_segment_time(self.segment_time.as_deref(), self.time_range.as_deref())
+    }
+
+    /// 进程内下载器（stream-gears、mesio）按时长分段的上限，已按录制时间范围裁短。
+    /// 未配置或为 0 时不按时长分段；无法解析时同样不分段，但打 warn 说明原因。
+    pub fn segment_time_limit(&self) -> Option<std::time::Duration> {
+        let raw = self.segment_duration()?;
+        match parse_segment_time(&raw) {
+            Some(limit) if !limit.is_zero() => Some(limit),
+            Some(_) => None,
+            None => {
+                warn!(
+                    segment_time = raw,
+                    "segment_time 无法解析（支持 HH:MM:SS、MM:SS 或秒数），本次录制不按时长分段"
+                );
+                None
+            }
+        }
     }
 
     /// 距录制时间范围结束还剩多久（`"HH:MM:SS"`）；未配置录制时间范围时为 `None`。
@@ -96,6 +140,8 @@ pub enum DownloaderType {
     Streamlink,
     /// yt-dlp下载器
     YtDlp,
+    /// mesio（rust-srec）：进程内 FLV/HLS 下载与修复管线
+    Mesio,
 }
 
 /// 实际的下载器枚举（包含实例）
@@ -104,21 +150,33 @@ pub enum DownloaderRuntime {
     StreamGears(StreamGears),
     StreamLink(Streamlink),
     YtDlp(YouTubeDownloader),
+    Sync(SyncDownloader),
+    Mesio(Mesio),
 }
 
 impl DownloaderRuntime {
     /// 从配置创建
     pub fn from_type(downloader_type: DownloaderType) -> Self {
         match downloader_type {
-            DownloaderType::Ffmpeg | DownloaderType::FfmpegExternal => Self::Ffmpeg(
-                FfmpegDownloader::new(Vec::new(), DownloaderType::FfmpegExternal),
-            ),
-            DownloaderType::FfmpegInternal => Self::Ffmpeg(FfmpegDownloader::new(
+            // `ffmpeg-internal` 的 segment muxer 实现从未接通过，与 `ffmpeg` / `ffmpeg-external`
+            // 一样按外部分段跑，至少不再静默换成 stream-gears
+            DownloaderType::Ffmpeg
+            | DownloaderType::FfmpegExternal
+            | DownloaderType::FfmpegInternal => Self::Ffmpeg(FfmpegDownloader::new(
                 Vec::new(),
-                DownloaderType::FfmpegInternal,
+                DownloaderType::FfmpegExternal,
             )),
-            _ => Self::StreamGears(StreamGears::new(None)),
-            // ...
+            DownloaderType::SyncDownloader => Self::Sync(SyncDownloader::new()),
+            DownloaderType::Mesio => Self::Mesio(Mesio::new()),
+            DownloaderType::StreamGears => Self::StreamGears(StreamGears::new(None)),
+            // 这三种要用到直播流里的参数，由 `core::live::downloader_runtime` 构造，走不到这里
+            DownloaderType::Streamlink | DownloaderType::YtDlp | DownloaderType::Ytarchive => {
+                warn!(
+                    ?downloader_type,
+                    "this downloader needs the live stream to be built, using stream-gears"
+                );
+                Self::StreamGears(StreamGears::new(None))
+            }
         }
     }
 
@@ -132,6 +190,11 @@ impl DownloaderRuntime {
             Self::StreamGears(d) => d.download(callback, download_config).await,
             DownloaderRuntime::StreamLink(d) => d.download(callback, download_config).await,
             Self::YtDlp(d) => d.download(callback, download_config).await,
+            Self::Mesio(d) => d.download(callback, download_config).await,
+            Self::Sync(_) => Err(AppError::Custom(
+                "sync-downloader 应走边录边传专用流程，而不是落盘分段回调".into(),
+            )
+            .into()),
         }
     }
 
@@ -141,6 +204,8 @@ impl DownloaderRuntime {
             Self::StreamGears(d) => d.stop().await,
             DownloaderRuntime::StreamLink(d) => d.stop().await,
             Self::YtDlp(d) => d.stop().await,
+            Self::Sync(d) => d.stop().await,
+            Self::Mesio(d) => d.stop().await,
         }
     }
 }
@@ -153,6 +218,10 @@ pub struct SegmentInfo {
     pub next_file_path: Option<PathBuf>,
     /// 分段序号
     pub segment_index: usize,
+    /// 分段时长（秒）。下载器报告了才有，目前只有 mesio
+    pub duration_secs: Option<f64>,
+    /// 分段文件的字节数。下载器报告了才有，目前只有 mesio
+    pub size_bytes: Option<u64>,
     // /// 分段开始时间戳
     // start_time: std::time::SystemTime,
     // /// 分段结束时间戳
@@ -171,7 +240,16 @@ impl SegmentInfo {
             danmaku_file_path,
             next_file_path,
             segment_index,
+            duration_secs: None,
+            size_bytes: None,
         }
+    }
+
+    /// 附上下载器报告的分段时长与字节数。
+    pub fn with_stats(mut self, duration_secs: f64, size_bytes: u64) -> Self {
+        self.duration_secs = Some(duration_secs);
+        self.size_bytes = Some(size_bytes);
+        self
     }
 }
 
@@ -328,3 +406,64 @@ fn parse_duration(duration: &str) -> u64 {
 //
 //     Ok(())
 // }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sync_downloader_is_not_silently_mapped_to_stream_gears() {
+        let runtime = DownloaderRuntime::from_type(DownloaderType::SyncDownloader);
+        assert!(
+            matches!(runtime, DownloaderRuntime::Sync(_)),
+            "选择 sync-downloader 必须走边录边传，不能再落到 stream-gears 落盘"
+        );
+        let gears = DownloaderRuntime::from_type(DownloaderType::StreamGears);
+        assert!(matches!(gears, DownloaderRuntime::StreamGears(_)));
+    }
+
+    #[test]
+    fn segment_time_limit_is_shared_by_the_in_process_downloaders() {
+        let limit = |segment_time: &str| {
+            DownloadConfig {
+                segment_time: Some(segment_time.to_string()),
+                ..Default::default()
+            }
+            .segment_time_limit()
+        };
+        let secs = |s| Some(std::time::Duration::from_secs(s));
+        assert_eq!(limit("01:00:00"), secs(3600));
+        assert_eq!(limit("30:00"), secs(1800));
+        assert_eq!(limit("3600"), secs(3600));
+        assert_eq!(limit("00:00:00"), None);
+        assert_eq!(limit("abc"), None);
+        assert_eq!(DownloadConfig::default().segment_time_limit(), None);
+    }
+
+    #[test]
+    fn ffmpeg_variants_are_not_silently_mapped_to_stream_gears() {
+        for configured in ["\"ffmpeg\"", "\"ffmpeg-external\"", "\"ffmpeg-internal\""] {
+            let downloader_type: DownloaderType = serde_json::from_str(configured).unwrap();
+            match DownloaderRuntime::from_type(downloader_type) {
+                DownloaderRuntime::Ffmpeg(ffmpeg) => {
+                    assert_eq!(ffmpeg.downloader_type, DownloaderType::FfmpegExternal)
+                }
+                _ => panic!("{configured} must run ffmpeg"),
+            }
+        }
+    }
+
+    #[test]
+    fn mesio_maps_to_its_own_runtime_and_kebab_case_name() {
+        let runtime = DownloaderRuntime::from_type(DownloaderType::Mesio);
+        assert!(matches!(runtime, DownloaderRuntime::Mesio(_)));
+        assert_eq!(
+            serde_json::to_string(&DownloaderType::Mesio).unwrap(),
+            "\"mesio\""
+        );
+        assert_eq!(
+            serde_json::from_str::<DownloaderType>("\"mesio\"").unwrap(),
+            DownloaderType::Mesio
+        );
+    }
+}

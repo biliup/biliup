@@ -1,256 +1,177 @@
-import React, { useRef, useState } from 'react'
-import {
-  proxy,
-  requestDelete,
-  sendRequest,
-} from '../lib/api-streamer'
-import {
-  Button,
-  Form,
-  List,
-  Modal,
-  Notification,
-  Radio,
-  RadioGroup,
-  Row,
-  SideSheet,
-  Toast,
-  Typography,
-} from '@douyinfe/semi-ui'
+import React, { useCallback, useRef, useState } from 'react'
+import { requestDelete, sendRequest } from '../lib/api-streamer'
+import { Button, Empty, Form, List, Notification, Radio, RadioGroup, Spin, Toast, Typography } from '@douyinfe/semi-ui'
 import AvatarCard from './AvatarCard'
 import { IconPlusCircle } from '@douyinfe/semi-icons'
 import { FormApi } from '@douyinfe/semi-ui/lib/es/form'
 import useSWRMutation from 'swr/mutation'
 import { useBiliUsers } from '../lib/use-streamers'
 import QRcode from '@/app/ui/QRcode'
-import { useWindowSize } from 'react-use';
+import PairAccountsHint from './PairAccountsHint'
+import { FormDialog, FormSheet } from './shell'
 
 type UserListProps = {
-  onCancel?: (e: React.MouseEvent<Element, MouseEvent> | React.KeyboardEvent<Element>) => void
+  onCancel?: () => void
   visible?: boolean
-  children?: React.ReactNode
 }
-const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
-  const { trigger } = useSWRMutation('/v1/users', sendRequest)
-  const { trigger: deleteUser } = useSWRMutation('/v1/users', requestDelete)
-  const { biliUsers: list } = useBiliUsers()
-  const [modalVisible, setVisible] = useState(false)
-  const [confirmLoading, setConfirmLoading] = useState(false)
-  const [passwordVisible, setPasswordVisible] = useState(false)
-  const [passwordLoading, setPasswordLoading] = useState(false)
-  const { width } = useWindowSize()
-  const showDialog = () => {
-    setVisible(true)
-  }
 
-  const addUser = async (value: any) => {
-    setConfirmLoading(true)
+type Method = 'cookie' | 'qrcode'
+
+function errorText(e: any): string {
+  const raw = e?.message ?? String(e)
+  try {
+    return JSON.parse(raw).error ?? JSON.parse(raw).message ?? raw
+  } catch {
+    return raw
+  }
+}
+
+/**
+ * 添加 B 站账号：内容少，用居中小弹窗（从账号抽屉里打开，最多叠这一层）。
+ * 默认「Cookie 文件」：改造前的第一项、内容最少（一个输入框），打开时也不会先去 B 站拉二维码
+ */
+function AddAccountDialog({ onClose, onAdd }: { onClose: () => void; onAdd: (value: string) => Promise<boolean> }) {
+  const [method, setMethod] = useState<Method>('cookie')
+  const api = useRef<FormApi>(undefined)
+  const busy = useRef(false)
+  const [adding, setAdding] = useState(false)
+  // 点「添加」和在输入框里回车都走表单提交，校验通过才到这里；连按只发一次。
+  // 失败原因 onAdd 已经提示过，弹窗留着让人改路径，这里不再抛错
+  const add = async (value: string) => {
+    if (busy.current) return
+    busy.current = true
+    setAdding(true)
     try {
-      await trigger({
-        value: value
-      })
-      setVisible(false)
-      Toast.success('创建成功')
-    } catch (e: any) {
-      let messageObj = e.message
-      try {
-        messageObj = JSON.parse(messageObj).error
-      } catch (e: any) {
-        console.log(e)
-      }
-      return Notification.error({
-        title: '创建失败',
-        content: (
-          <Typography.Paragraph style={{ maxWidth: 450 }}>{messageObj}</Typography.Paragraph>
-        ),
-        // theme: 'light',
-        // duration: 0,
-        style: { width: 'min-content' },
-      })
+      await onAdd(value.trim())
     } finally {
-      setConfirmLoading(false)
-    }
-  }
-  const handleOk = async () => {
-    let values = await api.current?.validate()
-    await addUser(values?.value)
-  }
-  const passwordApi = useRef<FormApi>()
-  const handlePasswordOk = async () => {
-    const values = await passwordApi.current?.validate()
-    if (!values) return
-    setPasswordLoading(true)
-    try {
-      await proxy('/v1/users/password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(values),
-      })
-      Toast.success('密码修改成功，请重新登录')
-      setPasswordVisible(false)
-      window.location.assign('/login')
-    } catch (e: any) {
-      let message = e.message
-      try {
-        const body = JSON.parse(message)
-        message = body.message || body.error || message
-      } catch {
-        // Keep the plain response text.
-      }
-      Notification.error({
-        title: '密码修改失败',
-        content: <Typography.Paragraph style={{ maxWidth: 450 }}>{message}</Typography.Paragraph>,
-        style: { width: 'min-content' },
-      })
-    } finally {
-      setPasswordLoading(false)
-    }
-  }
-  const handleCancel = () => {
-    setVisible(false)
-    console.log('Cancel button clicked')
-  }
-  const handleAfterClose = () => {
-    console.log('After Close callback executed')
-  }
-  const updateList = async (id: number) => {
-    try {
-      await deleteUser(id)
-      Toast.success('删除成功')
-    } catch (e: any) {
-      Notification.error({
-        title: '删除失败',
-        content: <Typography.Paragraph style={{ maxWidth: 450 }}>{e.message}</Typography.Paragraph>,
-        // theme: 'light',
-        // duration: 0,
-        style: { width: 'min-content' },
-      })
-    }
-  }
-  const api = useRef<FormApi>()
-  const [value, setValue] = useState()
-  const [panel, setPanel] = useState(<></>)
-  const onChange = (e: any) => {
-    setValue(e.target.value)
-    if (e.target.value === 2) {
-      setPanel(<QRcode onSuccess={addUser} />)
-    }
-    if (e.target.value === 1) {
-      setPanel(
-        <Form getFormApi={formApi => (api.current = formApi)}>
-          <Form.Input
-            field="value"
-            label="Cookie路径"
-            trigger="blur"
-            placeholder="cookies.json"
-            rules={[{ required: true }]}
-          />
-        </Form>
-      )
+      busy.current = false
+      setAdding(false)
     }
   }
   return (
-    <SideSheet
-      title={<Typography.Title heading={4}>用户管理</Typography.Title>}
-      visible={visible}
-      width={Math.min(448, width ?? Number.MIN_VALUE)}
-      footer={
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <Button onClick={() => setPasswordVisible(true)} theme="light">
-            修改 Web 密码
-          </Button>
-          <Button
-            onClick={showDialog}
-            icon={<IconPlusCircle size="large" />}
-            style={{ marginRight: 4, backgroundColor: 'rgba(var(--semi-indigo-0), 1)' }}
-          >
-            新增
-          </Button>
-        </div>
-      }
-      headerStyle={{ borderBottom: '1px solid var(--semi-color-border)' }}
-      bodyStyle={{ borderBottom: '1px solid var(--semi-color-border)' }}
-      onCancel={onCancel}
+    <FormDialog
+      title="添加 B 站账号"
+      size="sm"
+      onCancel={onClose}
+      okText={method === 'cookie' ? '添加' : undefined}
+      onOk={() => api.current?.submitForm()}
+      confirmLoading={adding}
+      footerExtra={method === 'qrcode' ? '在 B 站 App 里扫码确认后自动添加' : undefined}
     >
-      <List
-        className="component-list-demo-booklist"
-        dataSource={list}
-        split={false}
-        size="small"
-        style={{ flexBasis: '100%', flexShrink: 0 }}
-        renderItem={
-          item => (
-            <AvatarCard
-              url={item.face}
-              abbr={item.name}
-              label={item.name}
-              value={item.value}
-              onRemove={async () => await updateList(item.id)}
-            />
-          )
-          // <div style={{ margin: 4 }} className='list-item'>
-          //     <Button type='danger' theme='borderless' icon={<IconMinusCircle />} onClick={() => updateList(item)} style={{ marginRight: 4 }} />
-          //     {item}
-          // </div>
-        }
-      />
-
-      <Modal
-        title="新建"
-        visible={modalVisible}
-        onOk={handleOk}
-        style={{ width: 'min(600px, 90vw)' }}
-        afterClose={handleAfterClose} //>=1.16.0
-        onCancel={handleCancel}
-        closeOnEsc={true}
-        confirmLoading={confirmLoading}
-        okButtonProps={{ disabled: value === 2 }}
-        bodyStyle={{
-          overflow: 'auto',
-          maxHeight: 'calc(100vh - 320px)',
-          paddingLeft: 10,
-          paddingRight: 10,
-        }}
-      >
-        <Row type="flex" justify="center">
-          <RadioGroup type="button" buttonSize="large" onChange={onChange} value={value}>
-            <Radio value={1}>cookie文件</Radio>
-            <Radio value={2}>扫码登录</Radio>
-          </RadioGroup>
-        </Row>
-        <Row>{panel}</Row>
-      </Modal>
-
-      <Modal
-        title="修改 Web 密码"
-        visible={passwordVisible}
-        onOk={handlePasswordOk}
-        onCancel={() => setPasswordVisible(false)}
-        confirmLoading={passwordLoading}
-        closeOnEsc={true}
-      >
-        <Form getFormApi={formApi => (passwordApi.current = formApi)}>
+      <RadioGroup type="button" value={method} onChange={(e) => setMethod(e.target.value as Method)} aria-label="添加方式">
+        <Radio value="cookie">Cookie 文件</Radio>
+        <Radio value="qrcode">扫码登录</Radio>
+      </RadioGroup>
+      {method === 'cookie' ? (
+        <Form
+          getFormApi={(formApi) => (api.current = formApi)}
+          onSubmit={(values) => add(String(values.value ?? ''))}
+          style={{ marginTop: 12 }}
+        >
           <Form.Input
-            field="current_password"
-            label="当前密码"
-            type="password"
-            rules={[{ required: true, message: '请输入当前密码' }]}
-          />
-          <Form.Input
-            field="new_password"
-            label="新密码"
-            type="password"
-            rules={[{ required: true, message: '请输入新密码' }]}
-          />
-          <Form.Input
-            field="confirm_password"
-            label="确认新密码"
-            type="password"
-            rules={[{ required: true, message: '请再次输入新密码' }]}
+            field="value"
+            label="Cookie 文件路径"
+            placeholder="cookies.json"
+            trigger="blur"
+            rules={[{ required: true, message: '填写 biliup 所在机器上的凭据文件路径' }]}
+            extraText="biliup login 生成的凭据文件；相对路径从 biliup 的工作目录算起"
           />
         </Form>
-      </Modal>
-    </SideSheet>
+      ) : (
+        <QRcode onSuccess={onAdd} />
+      )}
+    </FormDialog>
+  )
+}
+
+/** 投稿管理页的「B 站账号」：可增删的账号列表用抽屉（背后留着投稿模板），「+ 添加账号」在底栏 */
+const UserList: React.FC<UserListProps> = ({ onCancel, visible }) => {
+  const { trigger } = useSWRMutation('/v1/users', sendRequest)
+  const { trigger: deleteUser } = useSWRMutation('/v1/users', requestDelete)
+  const { biliUsers: list, isLoading } = useBiliUsers()
+  const [adding, setAdding] = useState(false)
+
+  /** 成功返回 true；失败已弹出原因 */
+  const addUser = useCallback(
+    async (value: string) => {
+      try {
+        await trigger({ value })
+        setAdding(false)
+        Toast.success('账号已添加')
+        return true
+      } catch (e: any) {
+        Notification.error({
+          title: '添加失败',
+          content: <Typography.Paragraph style={{ maxWidth: 450 }}>{errorText(e)}</Typography.Paragraph>,
+          style: { width: 'min-content' },
+        })
+        return false
+      }
+    },
+    [trigger],
+  )
+
+  const remove = async (id: number) => {
+    try {
+      await deleteUser(id)
+      Toast.success('已删除')
+    } catch (e: any) {
+      Notification.error({
+        title: '删除失败',
+        content: <Typography.Paragraph style={{ maxWidth: 450 }}>{errorText(e)}</Typography.Paragraph>,
+        style: { width: 'min-content' },
+      })
+    }
+  }
+
+  const close = () => {
+    setAdding(false)
+    onCancel?.()
+  }
+
+  return (
+    <>
+      <FormSheet
+        size="sm"
+        visible={visible}
+        title="B 站账号"
+        onCancel={close}
+        cancelText={null}
+        okText={list.length > 0 ? '添加账号' : undefined}
+        okIcon={<IconPlusCircle />}
+        okTheme="light"
+        onOk={() => setAdding(true)}
+      >
+        <PairAccountsHint visible={visible} />
+        {isLoading ? (
+          <div style={{ padding: '48px 0', textAlign: 'center' }}>
+            <Spin />
+          </div>
+        ) : list.length === 0 ? (
+          <Empty title="还没有 B 站账号" description="投稿模板要选一个账号才能投稿" style={{ padding: '48px 0' }}>
+            <Button icon={<IconPlusCircle />} theme="solid" onClick={() => setAdding(true)}>
+              添加账号
+            </Button>
+          </Empty>
+        ) : (
+          <List
+            dataSource={list}
+            split={false}
+            size="small"
+            renderItem={(item) => (
+              <AvatarCard
+                url={item.face}
+                abbr={item.name}
+                label={item.name}
+                value={item.value}
+                onRemove={async () => await remove(item.id)}
+              />
+            )}
+          />
+        )}
+      </FormSheet>
+      {visible && adding ? <AddAccountDialog onClose={() => setAdding(false)} onAdd={addUser} /> : null}
+    </>
   )
 }
 

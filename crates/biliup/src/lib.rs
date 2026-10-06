@@ -7,6 +7,7 @@ use tracing::info;
 pub mod client;
 pub mod downloader;
 pub mod error;
+pub mod tools;
 pub mod uploader;
 
 pub use uploader::bilibili;

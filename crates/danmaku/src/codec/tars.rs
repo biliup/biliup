@@ -428,11 +428,29 @@ impl<'a> TarsInputStream<'a> {
                         None
                     }
                 }
-                _ => None,
+                other => {
+                    self.skip_field(other);
+                    None
+                }
             }
         } else {
             None
         }
+    }
+
+    /// Read the struct at `tag` and invoke `f` on its fields.
+    pub fn read_struct<T>(&mut self, tag: u8, f: impl FnOnce(&mut Self) -> T) -> Option<T> {
+        if !self.skip_to_tag(tag) {
+            return None;
+        }
+        let (_, tars_type) = self.read_head()?;
+        if tars_type != TarsType::StructBegin {
+            self.skip_field(tars_type);
+            return None;
+        }
+        let result = f(self);
+        self.skip_to_struct_end();
+        Some(result)
     }
 
     /// Read a string value at a tag.
@@ -473,7 +491,10 @@ impl<'a> TarsInputStream<'a> {
                     }
                     None
                 }
-                _ => None,
+                other => {
+                    self.skip_field(other);
+                    None
+                }
             }
         } else {
             None
@@ -487,6 +508,7 @@ impl<'a> TarsInputStream<'a> {
         }
         if let Some((_, tars_type)) = self.read_head() {
             if tars_type != TarsType::Bytes {
+                self.skip_field(tars_type);
                 return None;
             }
             // Read inner type head (should be int8)

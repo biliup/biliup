@@ -3,7 +3,9 @@ pub mod flv_parser;
 pub mod flv_writer;
 pub mod hls;
 pub mod httpflv;
+pub mod index_tap;
 pub mod live;
+pub mod preview;
 pub mod util;
 
 // fn retry<O, E: std::fmt::Display>(mut f: impl FnMut() -> Result<O, E>) -> Result<O, E> {

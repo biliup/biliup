@@ -1,8 +1,7 @@
 'use client'
 
-import React, { Suspense, useEffect, useRef, useState } from 'react'
-import { Button, Form, Notification, Toast, Typography } from '@douyinfe/semi-ui'
-import { IconPlusCircle } from '@douyinfe/semi-icons'
+import React, { Suspense, useRef } from 'react'
+import { Form, Notification, Spin, Toast, Typography } from '@douyinfe/semi-ui'
 import {
   BiliType,
   fetcher,
@@ -11,12 +10,14 @@ import {
   StudioEntity,
 } from '@/app/lib/api-streamer'
 import TemplateFields from '@/app/ui/TemplateFields'
-import { registerMediaQuery, responsiveMap } from '@/app/lib/utils'
 import useSWRMutation from 'swr/mutation'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { FormApi } from '@douyinfe/semi-ui/lib/es/form'
 import useSWR from 'swr'
 import { useTypeTree } from '@/app/lib/use-streamers'
+import { FormPage, usePageLabelPosition } from '@/app/ui/shell'
+
+const BACK = { href: '/upload-manager', label: '投稿管理' }
 
 const Edit = () => {
   const { Paragraph } = Typography
@@ -28,28 +29,48 @@ const Edit = () => {
   )
   const router = useRouter()
   const { typeTree, isError } = useTypeTree()
-  const api = useRef<FormApi>()
-  const [labelPosition, setLabelPosition] = useState<'top' | 'left' | 'inset'>('inset')
-  useEffect(() => {
-    const unRegister = registerMediaQuery(responsiveMap.lg, {
-      match: () => {
-        setLabelPosition('left')
-      },
-      unmatch: () => {
-        setLabelPosition('top')
-      },
-    })
-    return () => unRegister()
-  }, [])
+  const api = useRef<FormApi>(undefined)
+  const labelPosition = usePageLabelPosition()
 
-  if (error || isError) return <div>{error?.message}</div>
-  if (isLoading) return <div>Loading...</div>
-  if (!data || !typeTree) return null
+  // 分区树来自 /bili/archive/pre，需要一个可用的 B 站 cookie；没有账号时后端返回 500，
+  // 这里必须给出可读的原因而不是空白页。
+  const serverMessage = (e: any): string | undefined => {
+    const raw = e?.message
+    if (typeof raw !== 'string' || !raw) return undefined
+    try {
+      const parsed = JSON.parse(raw)
+      return typeof parsed?.message === 'string' ? parsed.message : raw
+    } catch {
+      return raw
+    }
+  }
+  const loadError: string | undefined = error
+    ? `模板加载失败：${serverMessage(error) ?? '未知错误'}`
+    : isError
+      ? `分区列表加载失败：${serverMessage(isError) ?? '未知错误'}（需要至少一个可用的 B 站账号）`
+      : undefined
+  if (loadError) {
+    return (
+      <FormPage title="编辑投稿模板" back={BACK}>
+        <Typography.Text type="danger">{loadError}</Typography.Text>
+      </FormPage>
+    )
+  }
+  if (isLoading || !data || !typeTree) {
+    return (
+      <FormPage title="编辑投稿模板" back={BACK}>
+        <div style={{ padding: '64px 0', textAlign: 'center' }}>
+          <Spin size="large" />
+        </div>
+      </FormPage>
+    )
+  }
+
   let uploadStreamers = {
     ...data,
     tid: [
       typeTree.find((tt: BiliType) => {
-        return tt.children.some(ct => ct.id === data?.tid)
+        return tt.children.some((ct) => ct.id === data?.tid)
       })?.value,
       data.tid,
     ],
@@ -62,81 +83,76 @@ const Edit = () => {
     is_only_self: data.is_only_self === 1,
     isDtime: data.dtime ? true : false,
   }
+
+  const handleSave = async () => {
+    const values = await api.current?.validate()
+    try {
+      const studioEntity: StudioEntity = {
+        template_name: values?.template_name,
+        user_cookie: values?.user_cookie,
+        copyright: values?.copyright,
+        id: values?.id,
+        copyright_source: values?.copyright_source ?? '',
+        tid: values?.tid[1],
+        tid_v2: values?.tid_v2 || null,
+        cover_path: values?.cover_path ?? '',
+        title: values?.title ?? '',
+        description: values?.description ?? '',
+        dynamic: values?.dynamic ?? '',
+        tags: values?.tags ?? [],
+        dolby: values?.sound.includes('dolby') ? 1 : 0,
+        hires: values?.sound.includes('hires') ? 1 : 0,
+        up_selection_reply: values?.interaction.includes('up_selection_reply') ? 1 : 0,
+        up_close_reply: values?.interaction.includes('up_close_reply') ? 1 : 0,
+        up_close_danmu: values?.interaction.includes('up_close_danmu') ? 1 : 0,
+        charging_pay: values?.charging_pay ? 1 : 0,
+        no_reprint: values?.no_reprint ? 1 : 0,
+        is_only_self: values?.is_only_self ? 1 : 0,
+        mission_id: values?.mission_id,
+        dtime: values?.isDtime ? values?.dtime : null,
+        credits: values?.credits ?? null,
+        uploader: values?.uploader ?? null,
+        extra_fields: values?.extra_fields ?? '',
+      }
+      const result = await trigger(studioEntity)
+      await mutate(result)
+      Toast.success('更新成功')
+      router.push('/upload-manager')
+    } catch (e: any) {
+      Notification.error({
+        title: '保存失败',
+        content: <Paragraph style={{ maxWidth: 450 }}>{e.message}</Paragraph>,
+        style: { width: 'min-content' },
+      })
+      throw e
+    }
+  }
+
   return (
-    <>
-      <div style={{ display: 'flex', flexDirection: 'row-reverse', paddingRight: 12 }}>
-        <Button
-          onClick={async () => {
-            let values = await api.current?.validate()
-            try {
-              const studioEntity = {
-                template_name: values?.template_name,
-                user_cookie: values?.user_cookie,
-                copyright: values?.copyright,
-                id: values?.id,
-                copyright_source: values?.copyright_source ?? '',
-                tid: values?.tid[1],
-                tid_v2: values?.tid_v2 || null,
-                cover_path: values?.cover_path ?? '',
-                title: values?.title ?? '',
-                description: values?.description ?? '',
-                dynamic: values?.dynamic ?? '',
-                tags: values?.tags ?? [],
-                // interactive: values?.interactive ?? 0,
-                dolby: values?.sound.includes('dolby') ? 1 : 0,
-                hires: values?.sound.includes('hires') ? 1 : 0,
-                up_selection_reply: values?.interaction.includes('up_selection_reply') ? 1 : 0,
-                up_close_reply: values?.interaction.includes('up_close_reply') ? 1 : 0,
-                up_close_danmu: values?.interaction.includes('up_close_danmu') ? 1 : 0,
-                charging_pay: values?.charging_pay ? 1 : 0,
-                no_reprint: values?.no_reprint ? 1 : 0,
-                is_only_self: values?.is_only_self ? 1 : 0,
-                mission_id: values?.mission_id,
-                dtime: values?.isDtime ? values?.dtime : null,
-                credits: values?.credits ?? null,
-                uploader: values?.uploader ?? null,
-                extra_fields: values?.extra_fields ?? '',
-              }
-              const result = await trigger(studioEntity)
-              await mutate(result)
-              Toast.success('更新成功')
-              router.push('/upload-manager')
-            } catch (e: any) {
-              // error handling
-              Notification.error({
-                title: '创建失败',
-                content: <Paragraph style={{ maxWidth: 450 }}>{e.message}</Paragraph>,
-                // theme: 'light',
-                // duration: 0,
-                style: { width: 'min-content' },
-              })
-            }
-          }}
-          type="primary"
-          icon={<IconPlusCircle size="large" />}
-          theme="solid"
-          style={{ marginTop: 12, marginRight: 4 }}
-        >
-          保存模板
-        </Button>
-      </div>
+    <FormPage
+      title={`编辑投稿模板「${data.template_name}」`}
+      description="修改模板信息并保存"
+      back={BACK}
+      okText="保存模板"
+      onOk={handleSave}
+    >
       <Form
         initValues={uploadStreamers}
-        style={{ paddingLeft: 30, paddingBottom: 40 }}
-        getFormApi={formApi => (api.current = formApi)}
         autoScrollToError
+        onSubmit={handleSave}
         component={TemplateFields}
-        labelWidth="180px"
+        getFormApi={(formApi) => (api.current = formApi)}
+        labelWidth="140px"
         labelPosition={labelPosition}
       />
-    </>
+    </FormPage>
   )
 }
 
 const EditTemplate: React.FC = () => {
   return (
     <Suspense>
-      <Edit></Edit>
+      <Edit />
     </Suspense>
   )
 }

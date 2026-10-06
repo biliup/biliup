@@ -11,7 +11,7 @@ interface ICardProps {
   value: string
 }
 
-const AvatarCard: React.FC<ICardProps> = ({ abbr, label, value, onRemove, url }): JSX.Element => (
+const AvatarCard: React.FC<ICardProps> = ({ abbr, label, value, onRemove, url }): React.JSX.Element => (
   <div className={styles.components} key={label}>
     <Avatar size="small" src={url}>
       {abbr}

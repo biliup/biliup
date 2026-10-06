@@ -1,52 +1,74 @@
 'use client'
-import React, { useEffect } from 'react'
+import React from 'react'
 import styles from '../../styles/dashboard.module.scss'
-import { Form, Select, Space, useFormApi } from '@douyinfe/semi-ui'
+import SectionTitle from '../../(app)/components/SectionTitle'
+import { Form, Select, Space, Switch, useFormApi, useFormState } from '@douyinfe/semi-ui'
 import { IconUpload, IconDownload } from '@douyinfe/semi-icons'
+import { FileSizeField } from '../FileSizeInput'
 
-const Global: React.FC = () => {
+/** 打开「投稿后保留录像」时默认保留的小时数 */
+const DEFAULT_RETENTION_HOURS = 24
+
+type Props = {
+  /** 只读角色：表单整体禁用，不是表单字段的开关也要跟着禁用 */
+  disabled?: boolean
+}
+
+const Global: React.FC<Props> = ({ disabled }) => {
+  // useFormApi 不订阅表单值变化，切换下拉框后条件渲染不会刷新；useFormState 会
+  const { values } = useFormState()
   const formApi = useFormApi()
+  const isSyncDownloader = values?.downloader === 'sync-downloader'
+  // 开关不是表单字段（整体覆盖保存时不能多出键），状态由小时数推出来：大于 0 即开
+  const retentionOn = Number(values?.retention_hours) > 0
 
   return (
     <>
       {/* 全局下载 */}
       <div className={styles.frameDownload}>
-        <div className={styles.frameInside}>
-          <div className={styles.group}>
-            <div className={styles.buttonOnlyIconSecond} />
-            <div
-              className={styles.lineStory}
-              style={{
-                color: 'var(--semi-color-bg-0)',
-                display: 'flex',
-              }}
-            >
-              <IconDownload size="small" />
-            </div>
-          </div>
-          <p className={styles.meegoSharedWebWorkIt}>全局下载设置</p>
-        </div>
+        <SectionTitle icon={<IconDownload size="small" />} title="全局下载设置" />
         <Form.Select
           label="下载插件（downloader）"
           field="downloader"
-          placeholder="stream-gears（默认）"
-          // initValue="stream-gears"
+          placeholder="mesio（默认）"
           extraText={
             <div style={{ fontSize: '14px' }}>
-              选择全局默认的下载插件, 可选:
+              全局默认的下载插件，可在单个主播的覆写设置里另选。可选：
               <br />
-              1. streamlink（仅限 hls 流，不支持的流将回退到 ffmpeg。非 Docker 用户需自行安装 FFmpeg）
+              1. <strong>mesio</strong>（默认）：内置 rust-srec 引擎，无需额外安装。进程内下载 FLV / HLS，修复时间戳（每段从
+              0 开始）、写入关键帧索引（onMetaData.keyframes），支持 HEVC 和 hls_fmp4；不转封装，按源站的容器保存（FLV /
+              TS，hls_fmp4 存为 .mp4）。详见{' '}
+              <a
+                href="https://github.com/hua0512/rust-srec"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'var(--semi-color-link)' }}
+              >
+                项目主页
+              </a>
+              。
               <br />
-              2. ffmpeg（非 Docker 用户需自行安装 FFmpeg）
+              2. ffmpeg：非 Docker 用户需自行安装 FFmpeg。
               <br />
-              3. stream-gears（默认。防 FLV 流花屏）
+              3. streamlink：多线程下载 HLS 分片，也可下载 FLV 直链；需系统中有 streamlink 命令。
               <br />
-              4. sync-downloader（流式边录边传，需先为主播设定上传模板。不受
-              pool2/threads/segment_time 控制，默认 3 线程上传，请确保上传带宽充足。非 Docker 用户需自行安装 FFmpeg）详见 Wiki <a href="https://github.com/biliup/biliup/wiki/%E8%BE%B9%E5%BD%95%E8%BE%B9%E4%BC%A0%E5%8A%9F%E8%83%BD" target="_blank" rel="noopener noreferrer" >点击查看</a>
+              4. sync-downloader（边录边传）：录制的同时流式上传，<strong>需先为主播设置上传模板</strong>；不受
+              pool2 / threads / segment_time 控制，固定 3 线程上传，请确保上传带宽充足；非 Docker 用户需自行安装
+              FFmpeg。详见 Wiki{' '}
+              <a
+                href="https://github.com/biliup/biliup/wiki/%E8%BE%B9%E5%BD%95%E8%BE%B9%E4%BC%A0%E5%8A%9F%E8%83%BD"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'var(--semi-color-link)' }}
+              >
+                边录边传功能
+              </a>
+              。
               <br />
-              5. ytarchive（仅适用于 Youtube Live）
+              5. ytarchive：仅适用于 YouTube 直播。
               <br />
-              {/* 6. mesio（基于 Rust 的命令行视频下载/修复器）详见 <a href="https://github.com/hua0512/rust-srec/tree/main/mesio-cli" target="_blank" rel="noopener noreferrer" >项目主页</a> */}
+              6. stream-gears：内置，无需额外安装，可防 FLV 流花屏；不支持 HEVC 编码和 hls_fmp4 流，FLV
+              时间戳沿用源站的原值（不从 0 开始）。
             </div>
           }
           style={{ width: '100%' }}
@@ -58,12 +80,12 @@ const Global: React.FC = () => {
         >
           <Select.Option value="streamlink">streamlink（hls多线程下载）</Select.Option>
           <Select.Option value="ffmpeg">ffmpeg</Select.Option>
-          <Select.Option value="stream-gears">stream-gears（默认）</Select.Option>
+          <Select.Option value="stream-gears">stream-gears</Select.Option>
           <Select.Option value="sync-downloader">sync-downloader（边录边传）</Select.Option>
           <Select.Option value="ytarchive">ytarchive（仅适用于 Youtube Live）</Select.Option>
-          {/* <Select.Option value="mesio">mesio</Select.Option> */}
+          <Select.Option value="mesio">mesio（默认）</Select.Option>
         </Form.Select>
-        {formApi.getValue('downloader') === 'sync-downloader' ? (
+        {isSyncDownloader ? (
           <>
             <Form.Input
               field="sync_save_dir"
@@ -75,7 +97,6 @@ const Global: React.FC = () => {
                 padding: 0,
               }}
               showClear={true}
-              disabled={formApi.getValue('downloader') === 'sync-downloader' ? false : true}
               rules={[
                 {
                   pattern: /^[^*|?"<>]*$/,
@@ -106,24 +127,20 @@ const Global: React.FC = () => {
             />
           </>
         ) : null}
-        <Form.InputNumber
+        <FileSizeField
           label="视频分段大小（file_size）"
           extraText={
             <div style={{ fontSize: '14px' }}>
-              录像单文件大小限制，超过此大小触发文件分割。下载回放时无法使用。
+              录像单文件大小上限，超过后开始写下一个文件。下载回放时无法使用。留空表示不按大小分段。
               <br />
-              单位：Byte，示例：4294967296（4GB）
+              按 1024 进制换算：1 GB = 1024 MB = 1073741824 字节，与 Windows 资源管理器显示的大小一致。配置文件里存的仍是字节数。
             </div>
           }
           field="file_size"
-          placeholder=""
-          suffix={'Byte'}
-          style={{ width: '100%' }}
           fieldStyle={{
             alignSelf: 'stretch',
             padding: 0,
           }}
-          showClear={true}
         />
         <Form.Input
           field="segment_time"
@@ -207,6 +224,55 @@ const Global: React.FC = () => {
           }}
           showClear={true}
         />
+        <Form.Slot
+          label="投稿后保留录像（retention_hours）"
+          style={{ alignSelf: 'stretch', padding: 0 }}
+        >
+          <Switch
+            aria-label="投稿后保留录像"
+            checked={retentionOn}
+            disabled={disabled}
+            onChange={on => formApi.setValue('retention_hours', on ? DEFAULT_RETENTION_HOURS : 0)}
+          />
+        </Form.Slot>
+        <Form.InputNumber
+          field="retention_hours"
+          noLabel={true}
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              后处理 rm、边录边传投稿后删除临时文件时，录像先保留这么多小时，到期后由每分钟一次的清理任务删除（连同弹幕 XML
+              和 .idx 关键帧索引）。关闭或填 0 表示立即删除，与以前一样。
+              <br />
+              剪辑台里被标记、切片引用的片段，以及点了「保留这场」的场次，不论这里怎么设都会等引用释放后再删。
+            </div>
+          }
+          min={0}
+          precision={0}
+          suffix="小时"
+          placeholder="0"
+          style={{ width: '100%' }}
+          fieldStyle={{
+            alignSelf: 'stretch',
+            padding: 0,
+          }}
+        />
+        <FileSizeField
+          field="min_free_space"
+          label="磁盘最低可用空间（min_free_space）"
+          placeholder="不启用"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              录像所在磁盘的可用空间低于这个值时，每分钟检查一次，按「没被剪辑台引用的最旧录像 → 被引用的最旧录像」
+              逐个删除，直到回到这个值以上。正在录的分段不删；只删剪辑台记录过的录像（本版本之后录制的），其它文件不碰。
+              <br />
+              <strong>会删掉还没投稿的录像</strong>，只作磁盘写满前的兜底。留空表示不启用（默认）。按 1024 进制换算。
+            </div>
+          }
+          fieldStyle={{
+            alignSelf: 'stretch',
+            padding: 0,
+          }}
+        />
 
         <Form.InputNumber
           field="delay"
@@ -249,9 +315,58 @@ const Global: React.FC = () => {
         />
         <Form.InputNumber
           field="pool1_size"
-          extraText="负责下载事件的线程池大小，用于限制最大同时录制数。"
+          extraText="负责下载事件的线程池大小，用于限制最大同时录制数。保存后立即生效（等待中的直播间在下一轮检测时开始录制），调小不会中断正在进行的录制。"
+          min={1}
           label="下载线程池大小（pool1_size）"
           placeholder={5}
+          style={{ width: '100%' }}
+          fieldStyle={{
+            alignSelf: 'stretch',
+            padding: 0,
+          }}
+          showClear={true}
+        />
+        <Form.Select
+          field="preview_transport"
+          label="直播预览取流方式（preview_transport）"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              <div>
+                <strong>经 biliup 中转</strong>（默认）：页面里的预览复用正在录制的那一路流，不向直播平台多拉一路。
+                浏览器与 biliup 在同一台机器或同一内网时选这个，不多占 CDN 带宽。
+              </div>
+              <div>
+                <strong>浏览器直连 CDN</strong>：biliup 向平台另取一条直链（新 token，不影响录制那条），浏览器自己去
+                CDN 拉，媒体流量不经过 biliup，适合 biliup 部署在异地服务器、浏览器远程访问的情况，省服务器出口带宽。
+                只有 CDN 放行跨域的平台能直连（B 站 / 抖音 / 斗鱼 / 虎牙，FLV 与 HLS 都行）；Twitch 等按 Origin 白名单放行
+                的平台在直连模式下自动回落中转并在播放器角标标出原因。
+              </div>
+            </div>
+          }
+          placeholder="经 biliup 中转（relay）"
+          style={{ width: '100%' }}
+          fieldStyle={{
+            alignSelf: 'stretch',
+            padding: 0,
+          }}
+          showClear={true}
+        >
+          <Form.Select.Option value="relay">经 biliup 中转（relay）</Form.Select.Option>
+          <Form.Select.Option value="direct">浏览器直连 CDN（direct）</Form.Select.Option>
+        </Form.Select>
+        <Form.InputNumber
+          field="preview_max_minutes"
+          label="单条中转预览最长时长（preview_max_minutes）"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              一条经 biliup 中转的预览连接最多持续这么多分钟，到点断开，页面里的播放器会自动重连接着播。
+              关掉的预览平时由页面心跳在 45 秒内回收（经过代理 / 隧道访问也一样），这里是再往后的兜底。
+              留空为 30 分钟，填 0 不限。另外每个直播间最多 4 路、全部合计最多 16 路，满了再打开会接替最早的一路。
+            </div>
+          }
+          min={0}
+          placeholder={30}
+          suffix="分钟"
           style={{ width: '100%' }}
           fieldStyle={{
             alignSelf: 'stretch',
@@ -265,26 +380,13 @@ const Global: React.FC = () => {
 
       {/* 全局上传 */}
       <div className={styles.frameUpload}>
-        <div className={styles.frameInside}>
-          <div className={styles.group}>
-            <div className={styles.buttonOnlyIconSecond} />
-            <div
-              className={styles.lineStory}
-              style={{
-                color: 'var(--semi-color-bg-0)',
-                display: 'flex',
-              }}
-            >
-              <IconUpload size="small" />
-            </div>
-          </div>
-          <p className={styles.meegoSharedWebWorkIt}>全局上传设置</p>
-        </div>
+        <SectionTitle icon={<IconUpload size="small" />} title="全局上传设置" />
 
         <Form.Select
           field="submit_api"
           label="提交接口（submit_api）"
-          extraText="B站投稿提交接口，默认为自动选择。"
+          extraText="B站投稿提交接口，不选时用网页（web）。"
+          placeholder="网页（web）"
           style={{ width: '100%' }}
           fieldStyle={{
             alignSelf: 'stretch',
@@ -362,8 +464,11 @@ const Global: React.FC = () => {
 
         <Form.InputNumber
           field="pool2_size"
+          min={1}
           extraText={
-            <div style={{ fontSize: '14px' }}>负责上传事件的线程池大小。根据实际带宽设置。</div>
+            <div style={{ fontSize: '14px' }}>
+              负责上传事件的线程池大小。根据实际带宽设置。保存后立即生效，调小不会中断正在进行的上传。
+            </div>
           }
           placeholder={3}
           label="上传线程池大小（pool2_size）"

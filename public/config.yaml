@@ -1,10 +1,11 @@
 ######### 全局录播与上传设置 #########
 #------录制与下载------#
-### 选择全局默认的下载插件，默认为stream-gears。可选：
+### 选择全局默认的下载插件，默认为mesio。可选：
 ### 1.streamlink(streamlink配合ffmpeg混合下载模式，适合用于下载hls_fmp4与hls_ts流，因为streamlink支持多线程拉取）。
 ### 使用该模式下载flv流时，将会仅使用ffmpeg。请手动安装streamlink以及ffmpeg。
 ### 2.ffmpeg（纯ffmpeg下载），请手动安装ffmpeg。
-### 3.stream-gears
+### 3.stream-gears（不支持 HEVC 与 hls_fmp4，FLV 时间戳沿用源站原值）
+### 4.mesio（默认。内置 rust-srec 引擎，进程内下载 FLV/HLS 并修复时间戳、注入关键帧索引，支持按大小/时长分段，无需额外安装）
 #downloader: ffmpeg
 ### 录像单文件大小限制，单位Byte，超过此大小分段下载，下载回放时无法使用
 file_size: 2621440000
@@ -22,8 +23,8 @@ filtering_threshold: 20
 #------上传------#
 ### 选择全局默认上传插件，Noop为不上传，但会执行后处理,可选bili_web，biliup-rs(默认值)
 #uploader: Noop
-### b站提交接口，默认自动选择，可选web，client
-#submit_api: client
+### b站投稿接口，默认web，可选web，app，b-cut-android
+#submit_api: web
 ### b站上传线路选择，默认自动选择最优线路。目前可手动切换为alia（海外）, bda2（大陆）, bldsa（大陆）, tx（大陆）, txa（海外）, estx（大陆）, akbd（大陆）
 lines: AUTO
 ### 单文件并发上传数,未达到带宽上限时,增大此值可提高上传速度(不要设置过大,部分线路限制为8,如速度不佳优先调整上传线路)
@@ -41,6 +42,12 @@ checker_sleep: 10
 pool1_size: 3
 ### 线程池2大小，负责上传事件。应设置为比主播数量略大，如不确定请设置为999。
 pool2_size: 3
+### 同一主播下播后多少分钟内再开播，接着记在上一场（剪辑台的「直播场次」里算一场），0 为不合并。不影响投稿。
+#live_merge_minutes: 10
+### 投稿后保留录像的小时数：后处理 rm、边录边传投稿后先留这么久再删。0 为立即删除（默认）。
+#retention_hours: 0
+### 录像所在磁盘的最低可用空间（字节），低于它时从最旧的录像开始删。不写或 0 为不启用。
+#min_free_space: 10737418240
 ### 检测源码文件变化间隔，单位：秒，检测源码到变化后，程序会在空闲时自动重启
 check_sourcecode: 15
 
@@ -56,14 +63,16 @@ check_sourcecode: 15
 #douyu_cdn: tct-h5
 ### 强制hs流使用构造链接，防止部分海外机器遇到频繁断流。使用时需修改douyu_cdn为hs-h5
 #douyu_force_hs: true
+### 斗鱼设备 ID：在浏览器 Cookie 中找到 acf_did，只填它的值；留空使用默认设备 ID
+#douyu_deviceId: ""
+### 斗鱼视频编码：留空、AVC 或 HEVC（也接受 h264 / h265）；HEVC 使用 player_1 流地址，没有时回退 AVC
+#douyu_codec: ""
 ### 录制斗鱼弹幕，默认关闭
 #douyu_danmaku: false
 ### 斗鱼自选画质
 ### 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段(仅ffmpeg streamlink)时录制设置的画质
 ### 0 原画,4 蓝光4m,3 超清,2 高清
 #douyu_rate:  0
-### 斗鱼视频编码，可选 h264（默认）或 h265；没有 H.265 流时自动回退
-#douyu_codec: h264
 
 #------虎牙------#
 ### 如遇到虎牙录制卡顿可以尝试切换线路。可选以下线路
@@ -197,7 +206,7 @@ streamers:
             - https://www.panda.tv/1160340 #填写多个url时只能同时下载一个，如需多个同时下载请单独配置
         title: "{title}第一视角%Y-%m-%d{streamer}{url}" ### 自定义标题的时间格式, {title}代表当场直播间标题 {streamer}代表在本config里面设置的主播名称 {url}代表设置的该主播的第一条直播间链接
         tid: 171 ### 投稿分区码,171为电子竞技分区
-        #tid_v2: 1003 ### 可选新版投稿分区 ID（投稿字段 human_type2）
+        #tid_v2: 2102 ### 新版投稿分区码 tid_v2（可选；例如摄影摄像二级分区；投稿时以 B 站字段 human_type2 提交）
         copyright: 2 ### 1为自制
         #cover_path: /cover/up.jpg ###封面
         description: |- ### 支持strftime, {title}, {streamer}, {url}占位符。注：此处请注意缩进，确保所有文字的缩进都与"视频简介"相同或者更多。

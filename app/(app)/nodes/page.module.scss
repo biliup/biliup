@@ -1,0 +1,714 @@
+/* 节点页：卡片与控制台系统状态卡片同一套底色 / 边框 / 阴影 */
+
+.center {
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.notice {
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(var(--semi-orange-4), 0.12);
+  color: rgb(var(--semi-orange-5));
+  font-size: 13px;
+  border: 1px solid rgba(var(--semi-orange-4), 0.32);
+  overflow-wrap: anywhere;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr));
+  gap: 16px;
+}
+
+.node {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px 16px 10px;
+  background: var(--semi-color-bg-1);
+  border: 1px solid var(--semi-color-fill-2);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(var(--semi-grey-9), 0.04), 0 2px 6px rgba(var(--semi-grey-9), 0.03);
+}
+
+.offline .metrics,
+.offline .nodeStats {
+  opacity: 0.6;
+}
+
+.nodeHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--semi-color-text-3);
+}
+
+.dotOn {
+  background: var(--semi-color-success);
+  box-shadow: 0 0 0 3px rgba(var(--semi-green-5), 0.18);
+}
+
+.nodeName {
+  min-width: 0;
+  font-size: 15px;
+}
+
+.nodeVersion {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.nodeStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  font-size: 12.5px;
+  color: var(--semi-color-text-2);
+}
+
+.pool {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.pool b {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--semi-color-text-0);
+  font-variant-numeric: tabular-nums;
+}
+
+.pool b.recording {
+  color: var(--semi-color-danger);
+}
+
+.pool b.poolFull {
+  color: var(--semi-color-warning);
+}
+
+.poolOf {
+  font-variant-numeric: tabular-nums;
+}
+
+.stale {
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--semi-color-fill-0);
+}
+
+.metricHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.metricTitle {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--semi-color-text-1);
+}
+
+.metricValue {
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--semi-color-text-0);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.metricBody {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.metricFoot {
+  font-size: 11.5px;
+  color: var(--semi-color-text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bar {
+  width: 100%;
+}
+
+.placeholder {
+  color: var(--semi-color-text-3);
+  user-select: none;
+}
+
+.net {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 8px;
+  white-space: nowrap;
+}
+
+.rx {
+  color: rgb(var(--semi-cyan-5));
+}
+
+.tx {
+  color: rgb(var(--semi-violet-5));
+}
+
+.nodeFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  margin: 0 -8px 0 0;
+}
+
+.nodeMeta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--semi-color-text-2);
+}
+
+.endpoint {
+  font-family: var(--semi-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--semi-color-text-3);
+}
+
+.revokeBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(320px, calc(100vw - 64px));
+}
+
+.removals {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.removalList {
+  margin: 0;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+}
+
+.revokeWarn {
+  font-size: 12px;
+  color: var(--semi-color-warning);
+}
+
+.tokens {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tokensHead {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--semi-color-text-1);
+  margin-bottom: 2px;
+}
+
+.tokenRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+/* 等宽数字，让各行的「作废」对齐 */
+.tokenId {
+  font-family: var(--semi-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.tokenTime {
+  font-variant-numeric: tabular-nums;
+}
+
+.dialogCenter {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dialogBody {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-bottom: 8px;
+}
+
+.dialogBody code {
+  font-family: var(--semi-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+
+.expiry {
+  font-size: 13px;
+  color: var(--semi-color-text-1);
+}
+
+.expiry b {
+  font-variant-numeric: tabular-nums;
+}
+
+.expired {
+  color: var(--semi-color-danger);
+}
+
+.copyBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.copyHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.copyLabel {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--semi-color-text-1);
+}
+
+.code {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--semi-color-fill-0);
+  border: 1px solid var(--semi-color-fill-1);
+  font-family: var(--semi-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--semi-color-text-0);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 120px;
+  overflow: auto;
+  user-select: all;
+}
+
+.relays {
+  overflow-wrap: anywhere;
+}
+
+.candidate {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px dashed var(--semi-color-border);
+}
+
+.candidateRow {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+
+  :global(.semi-input-wrapper) {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.nodeAccounts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.nodeAccountsLabel {
+  color: var(--semi-color-text-2);
+  margin-right: 2px;
+}
+
+.tabs {
+  :global(.semi-tabs-bar) {
+    margin-bottom: 16px;
+  }
+}
+
+/* 房间 */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--semi-color-fill-2);
+  border-radius: 8px;
+  padding: 6px 12px;
+  background: var(--semi-color-bg-1);
+  width: 260px;
+  max-width: 100%;
+  color: var(--semi-color-text-2);
+  transition: border-color 0.15s ease;
+}
+
+.search:focus-within {
+  border-color: var(--semi-color-primary);
+}
+
+.search input {
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--semi-color-text-0);
+  font-size: 13px;
+  width: 100%;
+}
+
+.nodeFilter {
+  width: 220px;
+  max-width: 100%;
+}
+
+.tableWrap {
+  background: var(--semi-color-bg-1);
+  border: 1px solid var(--semi-color-fill-2);
+  border-radius: 12px;
+  overflow-x: auto;
+  box-shadow: 0 1px 2px rgba(var(--semi-grey-9), 0.04), 0 2px 6px rgba(var(--semi-grey-9), 0.03);
+}
+
+.roomTable {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.roomTable th {
+  text-align: left;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--semi-color-text-2);
+  letter-spacing: 0.5px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--semi-color-border);
+  background: var(--semi-color-bg-2);
+  white-space: nowrap;
+}
+
+.roomTable td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--semi-color-border);
+  vertical-align: middle;
+}
+
+.roomTable tr:last-child td {
+  border-bottom: none;
+}
+
+.roomTable tbody tr:hover td {
+  background: var(--semi-color-fill-0);
+}
+
+.roomName {
+  min-width: 0;
+  font-weight: 600;
+  color: var(--semi-color-text-0);
+}
+
+.roomMain {
+  width: 100%;
+  max-width: 0;
+}
+
+.roomMain .roomName {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.roomSub {
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.roomUrl {
+  overflow-wrap: anywhere;
+}
+
+.roomNode {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.roomNodeName {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.rowActions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 2px;
+}
+
+.roomCards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.roomCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px 14px 6px;
+  background: var(--semi-color-bg-1);
+  border: 1px solid var(--semi-color-fill-2);
+  border-radius: 12px;
+}
+
+.roomCardHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.roomCardMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--semi-color-text-1);
+
+  > span {
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+  }
+}
+
+.roomCardActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px;
+  border-top: 1px solid var(--semi-color-border);
+  padding-top: 4px;
+}
+
+.assignNow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.nodeOption {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.nodeOptionName {
+  font-weight: 600;
+}
+
+/* 投稿模板 */
+
+.templateGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+  gap: 12px;
+}
+
+.templateCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px 16px 6px;
+  background: var(--semi-color-bg-1);
+  border: 1px solid var(--semi-color-fill-2);
+  border-radius: 12px;
+}
+
+.templateHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.templateName {
+  min-width: 0;
+  flex: 1;
+  font-size: 14px;
+}
+
+.templateMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 12.5px;
+  color: var(--semi-color-text-2);
+
+  b {
+    color: var(--semi-color-text-0);
+    font-weight: 650;
+  }
+}
+
+.templateActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+  border-top: 1px solid var(--semi-color-border);
+  padding-top: 4px;
+}
+
+.accountOption {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+/* TemplateFields 里的输入框写死了宽度，弹层变窄时不能撑出去 */
+.templateForm :global(.semi-form-field) {
+  max-width: 100%;
+}
+
+.templateForm :global(.semi-form-field-main) > * {
+  max-width: 100%;
+}
+
+/* 控制面还没启用「本机」节点时的入口 */
+.localOffer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px dashed var(--semi-color-border);
+  background: var(--semi-color-fill-0);
+}
+
+.localIcon {
+  flex: none;
+  color: var(--semi-color-primary);
+}
+
+.localText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.localList {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--semi-color-text-1);
+  font-size: 13px;
+}
+
+.localHint {
+  display: block;
+  margin-top: 4px;
+  padding-left: 24px;
+}
+
+@media (max-width: 640px) {
+  .localOffer {
+    flex-wrap: wrap;
+  }
+
+  .localOffer > :global(.semi-button) {
+    width: 100%;
+  }
+
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .search,
+  .nodeFilter {
+    width: 100%;
+  }
+}

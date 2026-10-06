@@ -110,13 +110,9 @@ impl<'a> DouyinLive<'a> {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
-        let cover = room_info
-            .pointer("/cover/url_list")
-            .and_then(Value::as_array)
-            .and_then(|url_list| url_list.first())
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
+        let cover = first_url(room_info.pointer("/cover/url_list")).unwrap_or_default();
+        // web 与 H5 两个接口的房间对象里都带 owner.avatar_thumb
+        let avatar_url = first_url(room_info.pointer("/owner/avatar_thumb/url_list"));
 
         Ok(LiveStatus::Live {
             stream: Box::new(LiveStream {
@@ -125,6 +121,7 @@ impl<'a> DouyinLive<'a> {
                 title,
                 date: Utc::now(),
                 live_cover_url: cover,
+                avatar_url,
                 suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "flv".to_string()),
                 raw_stream_url,
                 platform: "douyin".to_string(),
@@ -242,14 +239,7 @@ impl<'a> DouyinLive<'a> {
             return Ok(true);
         }
 
-        let web_rid = self
-            .url
-            .split("douyin.com/")
-            .nth(1)
-            .and_then(|part| part.split('/').next())
-            .and_then(|part| part.split('?').next())
-            .map(|part| part.trim_start_matches('+').to_string())
-            .filter(|part| !part.is_empty())
+        let web_rid = web_rid_from_live_url(&self.url)
             .ok_or_else(|| LiveError::custom("抖音直播间地址错误"))?;
         self.web_rid = Some(web_rid);
         Ok(true)
@@ -485,6 +475,16 @@ impl<'a> DouyinLive<'a> {
     }
 }
 
+/// 抖音图片字段形如 `{"url_list": ["https://...", ...]}`，取第一个非空地址
+fn first_url(url_list: Option<&Value>) -> Option<String> {
+    url_list?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .find(|url| !url.is_empty())
+        .map(ToString::to_string)
+}
+
 fn common_params() -> Vec<(String, String)> {
     vec![
         ("app_name".to_string(), "douyin_web".to_string()),
@@ -513,6 +513,18 @@ fn sign_query(params: &[(String, String)]) -> LiveResult<String> {
         .map_err(|err| LiveError::custom(format!("编码抖音请求参数失败: {err}")))?;
     let mut abogus = ABogus::new(Some(DOUYIN_USER_AGENT));
     Ok(abogus.generate_abogus(&query, ""))
+}
+
+fn web_rid_from_live_url(url: &str) -> Option<String> {
+    let mut path = url.split("douyin.com/").nth(1)?;
+    path = path.split('?').next().unwrap_or(path);
+    path = path.trim_start_matches('+');
+    // www.douyin.com/live/{web_rid} 与 live.douyin.com/{web_rid}
+    if let Some(rest) = path.strip_prefix("live/") {
+        path = rest;
+    }
+    let web_rid = path.split('/').next()?.trim();
+    (!web_rid.is_empty()).then(|| web_rid.to_string())
 }
 
 fn capture(input: &str, pattern: &str) -> Option<String> {
@@ -970,9 +982,8 @@ impl ABogus {
 
 #[cfg(test)]
 mod tests {
-    use super::{DOUYIN_LIVE_URL, DouyinLive};
-    use reqwest::Client;
-    use tokio::sync::Mutex;
+    use super::*;
+    use crate::downloader::live::{LiveCredentials, LiveOptions, LiveRequest, LiveStatus};
 
     fn live<'a>(quality: &str, protocol: &str, cache: &'a Mutex<Option<String>>) -> DouyinLive<'a> {
         DouyinLive {
@@ -1030,5 +1041,109 @@ mod tests {
         let headers = live.stream_headers();
         assert_eq!(headers.get("referer"), Some(&DOUYIN_LIVE_URL.to_string()));
         assert!(headers.contains_key("user-agent"));
+    }
+
+    #[test]
+    fn web_rid_from_www_live_path_skips_live_prefix() {
+        assert_eq!(
+            web_rid_from_live_url("https://www.douyin.com/live/68621666216"),
+            Some("68621666216".into())
+        );
+        assert_eq!(
+            web_rid_from_live_url("https://live.douyin.com/68621666216?extra=1"),
+            Some("68621666216".into())
+        );
+        assert_eq!(
+            web_rid_from_live_url("https://www.douyin.com/+68621666216"),
+            Some("68621666216".into())
+        );
+    }
+
+    #[test]
+    fn first_url_picks_the_first_non_empty_entry_and_tolerates_missing_fields() {
+        let room = serde_json::json!({
+            "cover": { "url_list": ["", "https://p3.douyinpic.com/cover.jpg"] },
+            "owner": { "avatar_thumb": { "url_list": ["https://p3.douyinpic.com/face.jpeg"] } }
+        });
+        assert_eq!(
+            first_url(room.pointer("/cover/url_list")).as_deref(),
+            Some("https://p3.douyinpic.com/cover.jpg")
+        );
+        assert_eq!(
+            first_url(room.pointer("/owner/avatar_thumb/url_list")).as_deref(),
+            Some("https://p3.douyinpic.com/face.jpeg")
+        );
+        assert_eq!(
+            first_url(room.pointer("/owner/avatar_large/url_list")),
+            None
+        );
+        assert_eq!(first_url(Some(&serde_json::json!([]))), None);
+    }
+
+    #[tokio::test]
+    #[ignore = "需要外网访问抖音直播间"]
+    async fn douyin_live_room_resolves_and_streams_flv() {
+        use futures::StreamExt;
+
+        let plugin = Douyin::new();
+        let test_url = std::env::var("DOUYIN_TEST_URL")
+            .unwrap_or_else(|_| "https://www.douyin.com/live/68621666216".to_string());
+        let request = LiveRequest {
+            client: reqwest::Client::new(),
+            url: test_url.clone(),
+            name: "sync-test".to_string(),
+            options: LiveOptions::default(),
+            credentials: LiveCredentials::default(),
+        };
+        let status = plugin
+            .check_stream(request)
+            .await
+            .expect("抖音开播检测不应返回硬错误");
+        match status {
+            LiveStatus::Live { stream } => {
+                assert!(!stream.raw_stream_url.is_empty(), "开播时应返回直链");
+                assert_eq!(stream.platform, "douyin");
+                assert_eq!(stream.suffix, "flv");
+                let client = reqwest::Client::new();
+                let mut req = client.get(&stream.raw_stream_url);
+                for (key, value) in &stream.stream_headers {
+                    if let (Ok(name), Ok(val)) = (
+                        reqwest::header::HeaderName::from_bytes(key.as_bytes()),
+                        reqwest::header::HeaderValue::from_str(value),
+                    ) {
+                        req = req.header(name, val);
+                    }
+                }
+                let response = tokio::time::timeout(std::time::Duration::from_secs(15), req.send())
+                    .await
+                    .expect("拉流超时")
+                    .expect("拉流请求失败");
+                assert!(
+                    response.status().is_success(),
+                    "拉流 HTTP {}",
+                    response.status()
+                );
+                let mut body = response.bytes_stream();
+                let first = tokio::time::timeout(std::time::Duration::from_secs(10), body.next())
+                    .await
+                    .expect("读取直播流首包超时")
+                    .expect("直播流为空")
+                    .expect("读取直播流失败");
+                assert!(
+                    first.starts_with(b"FLV"),
+                    "直链首包不是 FLV: {:?}",
+                    first.get(..8)
+                );
+                eprintln!(
+                    "LIVE title={} suffix={} first_bytes={}",
+                    stream.title,
+                    stream.suffix,
+                    first.len()
+                );
+            }
+            LiveStatus::Offline => {
+                panic!("测试直播间当前未开播：{test_url}");
+            }
+        }
     }
 }

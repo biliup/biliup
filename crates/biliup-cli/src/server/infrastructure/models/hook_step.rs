@@ -1,11 +1,13 @@
 use crate::server::errors::{AppError, AppResult};
+use crate::server::infrastructure::connection_pool::ConnectionPool;
+use crate::server::workbench::retention::{self, Retention};
+use crate::tools;
 use error_stack::{ResultExt, bail};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::fs;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::process::Command;
 use tracing::{error, info};
 
 /// 钩子步骤枚举：支持多种操作格式
@@ -36,6 +38,16 @@ impl HookStep {
     /// # 返回
     /// 执行成功返回Ok(())，失败返回错误信息
     pub async fn execute(&self, video_paths: &[&Path]) -> AppResult<()> {
+        self.execute_with_retention(video_paths, None).await
+    }
+
+    /// 同 [`Self::execute`]；给了 `retention` 时 `rm` 对切片工作台记录的分段按引用与保留期推迟删除，
+    /// `mv` 之后更新分段的路径（见 [`retention`]）。
+    pub async fn execute_with_retention(
+        &self,
+        video_paths: &[&Path],
+        retention: Option<&Retention>,
+    ) -> AppResult<()> {
         match self {
             HookStep::Run { run } => {
                 // 执行自定义命令
@@ -51,7 +63,8 @@ impl HookStep {
             }
             HookStep::Move { mv } => {
                 // 移动文件到指定目录
-                self.move_file(video_paths, mv).await?;
+                self.move_file(video_paths, mv, retention.map(|r| &r.pool))
+                    .await?;
             }
             HookStep::Remux { remux } => {
                 bail!(AppError::Custom(format!(
@@ -60,10 +73,14 @@ impl HookStep {
                     remux
                 )));
             }
-            HookStep::Remove(cmd) if cmd == "rm" => {
-                // 删除文件
-                HookStep::remove_file(video_paths).await?;
-            }
+            HookStep::Remove(cmd) if cmd == "rm" => match retention {
+                Some(retention) => {
+                    retention::remove(retention, video_paths)
+                        .await
+                        .change_context(AppError::Unknown)?;
+                }
+                None => HookStep::remove_file(video_paths).await?,
+            },
             HookStep::Remove(cmd) => {
                 // 未知命令，返回错误
                 bail!(AppError::Custom(format!("Unknown command: {}", cmd)));
@@ -121,7 +138,7 @@ impl HookStep {
     async fn ffmpeg_remux_to_mp4(src: &Path, dst: &Path) -> AppResult<()> {
         info!("remux ts→mp4: {} → {}", src.display(), dst.display());
         let started = std::time::Instant::now();
-        let status = Command::new("ffmpeg")
+        let status = tools::ffmpeg_command()
             .args([
                 "-hide_banner",
                 "-loglevel",
@@ -214,7 +231,7 @@ impl HookStep {
         // 执行自定义命令
         // 解析命令和参数
         // 启动子进程，配置标准输入管道
-        let mut process = Command::new(shell)
+        let mut process = tools::command(shell)
             .arg(flag)
             .arg(cmd)
             .stdin(std::process::Stdio::piped())
@@ -309,7 +326,12 @@ impl HookStep {
     /// # 参数
     /// * `video_paths` - 视频文件路径列表
     /// * `target_dir` - 目标目录路径
-    async fn move_file(&self, video_paths: &[&Path], target_dir: &str) -> AppResult<()> {
+    async fn move_file(
+        &self,
+        video_paths: &[&Path],
+        target_dir: &str,
+        pool: Option<&ConnectionPool>,
+    ) -> AppResult<()> {
         let target_path = Path::new(target_dir);
 
         if !target_path.exists() {
@@ -319,13 +341,14 @@ impl HookStep {
         }
 
         for video_path in video_paths {
-            self.move_single_file(video_path, target_path).await?;
+            let destination = self.move_single_file(video_path, target_path).await?;
+            retention::moved(pool, video_path, &destination).await;
         }
         Ok(())
     }
 
     /// 移动单个文件，支持跨文件系统
-    async fn move_single_file(&self, source: &Path, target_dir: &Path) -> AppResult<()> {
+    async fn move_single_file(&self, source: &Path, target_dir: &Path) -> AppResult<PathBuf> {
         let file_name = source
             .file_name()
             .ok_or(AppError::Custom("Invalid file name".to_string()))?;
@@ -335,7 +358,7 @@ impl HookStep {
 
         // 先尝试 rename（快速，仅同文件系统）
         match fs::rename(source, &destination).await {
-            Ok(_) => Ok(()),
+            Ok(_) => Ok(destination),
             Err(e) => {
                 // 检查是否是跨文件系统错误
                 if HookStep::is_cross_device_error(&e) {
@@ -350,7 +373,7 @@ impl HookStep {
                         .await
                         .change_context(AppError::Unknown)?;
 
-                    Ok(())
+                    Ok(destination)
                 } else {
                     Err(e).change_context(AppError::Unknown)?
                 }
@@ -385,6 +408,8 @@ impl HookStep {
             fs::remove_file(video_path)
                 .await
                 .change_context(AppError::Unknown)?;
+            // 切片工作台的关键帧索引缓存随视频一起删
+            crate::server::workbench::index::remove(video_path);
         }
         Ok(())
     }
@@ -397,12 +422,18 @@ impl HookStep {
 /// # 参数
 /// * `video_path` - 视频文件路径列表
 /// * `processors` - 处理器步骤列表
-pub async fn process_video(video_path: &[&Path], processors: &[HookStep]) -> AppResult<()> {
+pub async fn process_video(
+    video_path: &[&Path],
+    processors: &[HookStep],
+    retention: Option<&Retention>,
+) -> AppResult<()> {
     info!("Starting video processing...");
 
     // 依次执行每个处理器步骤
     for processor in processors {
-        processor.execute(video_path).await?;
+        processor
+            .execute_with_retention(video_path, retention)
+            .await?;
     }
 
     info!("Video processing completed");

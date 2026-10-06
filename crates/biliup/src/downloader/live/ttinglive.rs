@@ -80,6 +80,7 @@ impl TTingLiveLive {
                 title: info.title.unwrap_or(room_id),
                 date: Utc::now(),
                 live_cover_url: info.thumb_url.unwrap_or_default(),
+                avatar_url: None,
                 suffix: media_ext_from_url(&raw_stream_url).unwrap_or_else(|| "m3u8".to_string()),
                 raw_stream_url,
                 platform: "ttinglive".to_string(),

@@ -5,3 +5,5 @@ pub mod downloader;
 pub mod live;
 /// 监控器
 pub mod monitor;
+/// 容量可在运行时调整的并发槽位（下载池 / 上传池）
+pub mod slots;

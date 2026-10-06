@@ -1,18 +1,22 @@
 use axum::http;
 
 use crate::server;
-use crate::server::api::auth;
 use crate::server::api::spa::static_handler;
 use crate::server::api::ws::ws_logs;
+use crate::server::api::{access, auth, web_users};
 use crate::server::errors::{AppError, AppResult};
+use crate::server::fleet::Fleet;
 use crate::server::infrastructure::service_register::ServiceRegister;
 use crate::server::infrastructure::users::Backend;
+use axum::Extension;
 use axum::http::HeaderValue;
+use axum::middleware::from_fn;
 use axum::routing::get;
-use axum_login::{AuthManagerLayerBuilder, login_required};
+use axum_login::AuthManagerLayerBuilder;
 use error_stack::ResultExt;
-use std::net::SocketAddr;
+use futures::future::BoxFuture;
 use time::Duration;
+use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::task::AbortHandle;
 use tower_http::cors::{AllowMethods, CorsLayer};
@@ -26,10 +30,12 @@ pub struct ApplicationController;
 impl ApplicationController {
     /// 启动Web服务器
     pub async fn serve(
-        addr: &SocketAddr,
+        listener: TcpListener,
         enable_login_guard: bool,
         secure_session_cookie: bool,
         service_register: ServiceRegister,
+        fleet: Fleet,
+        shutdown: Option<BoxFuture<'static, ()>>,
     ) -> AppResult<()> {
         // 会话层配置
         // 使用 tower-sessions 建立会话层，将会话作为请求扩展提供
@@ -69,10 +75,15 @@ impl ApplicationController {
 
         // 构建应用程序路由
         // 是否启用登录保护
-        let protected_routes =
+        let mut protected_routes =
             server::router::router(service_register.clone()).route("/v1/ws/logs", get(ws_logs));
+        if let Some(fleet_routes) = fleet.router() {
+            protected_routes = protected_routes.merge(fleet_routes);
+        }
+        protected_routes = fleet.guard(protected_routes);
         let mut app = with_optional_auth(protected_routes, enable_login_guard);
         app = app
+            .layer(Extension(fleet.capability()))
             .layer(auth_layer) // 添加认证层
             .layer(
                 // CORS配置 - 跨域资源共享
@@ -82,21 +93,26 @@ impl ApplicationController {
                 // 参考：https://github.com/tokio-rs/axum/issues/849
                 CorsLayer::new()
                     .allow_headers([http::header::CONTENT_TYPE])
+                    // 录像回看要读起播关键帧的场次时间；开发时前端（:3000）和后端不同源
+                    .expose_headers([
+                        http::HeaderName::from_static("x-dvr-start-ms"),
+                        http::HeaderName::from_static("x-dvr-segment-id"),
+                    ])
                     .allow_origin("http://localhost:3000".parse::<HeaderValue>().unwrap())
                     .allow_methods(AllowMethods::any()),
             )
             .fallback(static_handler); // 静态文件处理回退
 
         // 启动HTTP服务器
+        let addr = listener.local_addr().change_context(AppError::Unknown)?;
         info!("routes initialized, listening on {}", addr);
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .change_context(AppError::Unknown)?;
 
         axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal(
                 deletion_task.abort_handle(),
                 service_register,
+                fleet,
+                shutdown,
             ))
             .await
             .change_context(AppError::Unknown)
@@ -126,12 +142,17 @@ impl ApplicationController {
     }
 }
 
+/// 业务路由统一挂访问控制层：`--auth` 开启时校验登录与权限点（默认拒绝），
+/// 关闭时视为超管。登录相关接口与 `/v1/me*` 在这层之外。
 fn with_optional_auth(app: axum::Router<()>, enable_login_guard: bool) -> axum::Router<()> {
     if enable_login_guard {
-        app.route_layer(login_required!(Backend))
+        app.merge(web_users::admin_router())
+            .route_layer(from_fn(access::require_permission))
+            .merge(web_users::me_router())
             .merge(auth::router())
     } else {
-        app
+        app.route_layer(from_fn(access::unrestricted))
+            .merge(web_users::unrestricted_me_router())
     }
 }
 
@@ -139,7 +160,19 @@ fn with_optional_auth(app: axum::Router<()>, enable_login_guard: bool) -> axum::
 async fn shutdown_signal(
     deletion_task_abort_handle: AbortHandle,
     service_register: ServiceRegister,
+    fleet: Fleet,
+    shutdown: Option<BoxFuture<'static, ()>>,
 ) {
+    match shutdown {
+        Some(shutdown) => shutdown.await,
+        None => os_shutdown_signal().await,
+    }
+    deletion_task_abort_handle.abort();
+    fleet.shutdown().await;
+    service_register.cleanup().await;
+}
+
+async fn os_shutdown_signal() {
     // 监听Ctrl+C信号
     let ctrl_c = async {
         signal::ctrl_c()
@@ -160,12 +193,11 @@ async fn shutdown_signal(
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
 
-    // 等待任一信号触发，然后中止清理任务
+    // 等待任一信号触发
     tokio::select! {
-        _ = ctrl_c => { deletion_task_abort_handle.abort() },
-        _ = terminate => { deletion_task_abort_handle.abort() },
+        _ = ctrl_c => {},
+        _ = terminate => {},
     }
-    service_register.cleanup().await;
 }
 
 #[cfg(test)]

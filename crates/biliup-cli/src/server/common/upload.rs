@@ -1,7 +1,8 @@
 use crate::UploadLine;
 use crate::server::common::util::Recorder;
-use crate::server::config::Config;
+use crate::server::config::{Config, TemplateCredit};
 use crate::server::core::downloader::SegmentInfo;
+use crate::server::core::slots::Slots;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Stage, WorkerStatus};
 use crate::server::infrastructure::models::InsertFileItem;
@@ -9,31 +10,37 @@ use crate::server::infrastructure::models::hook_step::{
     HookStep, process_video, process_video_paths,
 };
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
+use crate::server::workbench::retention::Retention;
 use async_channel::Receiver;
-use biliup::bilibili::{BiliBili, ResponseData, Studio, Video};
+use biliup::bilibili::{BiliBili, Credit, ResponseData, Studio, Video};
 use biliup::client::StatelessClient;
 use biliup::credential::login_by_cookies;
 use biliup::error::Kind;
-use biliup::uploader::line::{Line, Probe};
+use biliup::uploader::line::{Line, Probe, StreamParcel, UploadedStream};
 use biliup::uploader::util::SubmitOption;
 use biliup::uploader::{VideoFile, line};
+use bytes::Bytes;
 use error_stack::ResultExt;
+use futures::Stream;
 use futures::StreamExt;
 use futures::stream::Inspect;
 use ormlite::Insert;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::pin;
+use tokio::task::{JoinError, JoinSet};
 use tracing::{error, info, warn};
 
 // 辅助结构体
-struct UploadContext {
-    bilibili: BiliBili,
-    line: Line,
-    threads: usize,
-    client: StatelessClient,
+#[derive(Clone)]
+pub(crate) struct UploadContext {
+    pub(crate) bilibili: BiliBili,
+    pub(crate) line: Line,
+    pub(crate) threads: usize,
+    pub(crate) client: StatelessClient,
 }
 
 /// Metadata required to retry a submission after file bytes were accepted but
@@ -86,9 +93,9 @@ fn clear_pending_submission(ctx: &Context) {
 }
 
 #[derive(Default)]
-struct UploadedVideos {
-    videos: Vec<Video>,
-    paths: Vec<PathBuf>,
+pub(crate) struct UploadedVideos {
+    pub(crate) videos: Vec<Video>,
+    pub(crate) paths: Vec<PathBuf>,
 }
 
 pub async fn process_with_upload<F>(
@@ -100,6 +107,9 @@ where
     F: FnMut(&SegmentInfo),
 {
     info!(upload_config=?upload_config, "Starting process with upload");
+    if let Some(plan) = crate::server::fleet::ha::upload_plan(ctx).await {
+        return plan.run(rx, ctx, upload_config).await;
+    }
     // 1. 初始化上传环境
     let upload_context =
         initialize_upload_context(&ctx.config(), &ctx.stateless_client(), upload_config).await?;
@@ -111,7 +121,10 @@ where
         .segment_processor
         .clone()
         .unwrap_or_default();
-    let uploaded_videos = pipeline_upload_videos(rx, &upload_context, &segment_processors).await?;
+    let uploaded_videos = pipeline_upload_videos(rx, &segment_processors, |path| {
+        upload_owned_file(path, &upload_context)
+    })
+    .await?;
 
     // 3. 提交到B站
     if !uploaded_videos.videos.is_empty() {
@@ -156,7 +169,7 @@ where
     execute_postprocessor(paths, ctx).await
 }
 
-async fn initialize_upload_context(
+pub(crate) async fn initialize_upload_context(
     config: &Config,
     client: &StatelessClient,
     upload_config: &UploadStreamer,
@@ -166,9 +179,15 @@ async fn initialize_upload_context(
         .user_cookie
         .clone()
         .unwrap_or("cookies.json".to_string());
-    let bilibili = login_by_cookies(&cookie_file, None)
-        .await
-        .change_context(AppError::Unknown)?;
+    let bilibili = login_by_cookies(&cookie_file, None).await;
+    let bilibili = match bilibili {
+        Err(Kind::IO(_)) => bilibili.change_context_lazy(|| {
+            AppError::Custom(format!("open cookies file: {cookie_file}"))
+        })?,
+        _ => bilibili.change_context_lazy(|| {
+            AppError::Custom(format!("login by cookies file failed: {cookie_file}"))
+        })?,
+    };
 
     // 获取上传线路
     let line = get_upload_line(&client.client, &config.lines).await?;
@@ -190,7 +209,14 @@ async fn get_upload_line(client: &reqwest::Client, line: &str) -> AppResult<Line
         "alia" => line::alia(),
         "estx" => line::estx(),
         "akbd" => line::akbd(),
-        _ => Probe::probe(client).await.unwrap_or_default(),
+        _ => match Probe::probe(client).await {
+            Ok(line) => line,
+            Err(e) => {
+                let fallback = Line::default();
+                warn!(error = %e, ?fallback, "AUTO 线路测速失败，回退到默认线路");
+                fallback
+            }
+        },
     };
     Ok(line)
 }
@@ -203,13 +229,16 @@ pub(crate) fn segment_paths(event: &SegmentInfo) -> Vec<PathBuf> {
     paths
 }
 
-async fn pipeline_upload_videos<F>(
-    rx: Inspect<Receiver<SegmentInfo>, F>,
-    context: &UploadContext,
+/// 逐段跑 segment_processor 再交给 `upload` 上传
+pub(crate) async fn pipeline_upload_videos<S, U, Fut>(
+    rx: S,
     segment_processors: &[HookStep],
+    upload: U,
 ) -> AppResult<UploadedVideos>
 where
-    F: FnMut(&SegmentInfo),
+    S: Stream<Item = SegmentInfo>,
+    U: Fn(PathBuf) -> Fut,
+    Fut: Future<Output = AppResult<Video>>,
 {
     let mut uploaded = UploadedVideos::default();
     pin!(rx);
@@ -233,7 +262,7 @@ where
             .first()
             .cloned()
             .unwrap_or_else(|| event.prev_file_path.clone());
-        match upload_single_file(&upload_path, context).await {
+        match upload(upload_path.clone()).await {
             Ok(video) => {
                 uploaded.videos.push(video);
                 // 1.0.7 的 FileInfo(video, danmaku) 语义：上传完成后的 postprocessor
@@ -253,7 +282,24 @@ where
     Ok(uploaded)
 }
 
-async fn upload_single_file(file_path: &Path, context: &UploadContext) -> AppResult<Video> {
+pub(crate) async fn upload_single_file(
+    file_path: &Path,
+    context: &UploadContext,
+) -> AppResult<Video> {
+    upload_single_file_with_progress(file_path, context, |_| true).await
+}
+
+async fn upload_owned_file(file_path: PathBuf, context: &UploadContext) -> AppResult<Video> {
+    upload_single_file(&file_path, context).await
+}
+
+/// 同 [`upload_single_file`]，每读出一块交给上传前用这块的字节数回调 `progress`；
+/// 回调返回 `false` 时不再传后面的分块，上传以错误结束。
+pub(crate) async fn upload_single_file_with_progress(
+    file_path: &Path,
+    context: &UploadContext,
+    progress: impl Fn(usize) -> bool + Send + Sync,
+) -> AppResult<Video> {
     let video_path = file_path;
     let UploadContext {
         bilibili,
@@ -285,6 +331,9 @@ async fn upload_single_file(file_path: &Path, context: &UploadContext) -> AppRes
             vs.map(|vs| {
                 let chunk = vs?;
                 let len = chunk.len();
+                if !progress(len) {
+                    return Err(Kind::Custom("上传已取消".into()));
+                }
                 Ok((chunk, len))
             })
         })
@@ -316,9 +365,10 @@ pub async fn submit_to_bilibili(
     //     _ => bilibili.submit_by_app(&studio, None).await,
     // };
 
+    // 默认走 Web：app 接口会拿第一个标签自动参加活动（转载稿因此 21071，#1762），也更容易被风控（21566）
     let submit_option = match submit_api {
-        Some(submit) => SubmitOption::from_str(submit).unwrap_or(SubmitOption::App),
-        _ => SubmitOption::App,
+        Some(submit) => SubmitOption::from_str(submit).unwrap_or(SubmitOption::Web),
+        _ => SubmitOption::Web,
     };
 
     let result = match submit_option {
@@ -339,14 +389,205 @@ pub async fn submit_to_bilibili(
     Ok(result)
 }
 
+pub async fn edit_to_bilibili(
+    bilibili: &BiliBili,
+    studio: &Studio,
+    submit_api: Option<&str>,
+) -> AppResult<serde_json::Value> {
+    let submit_option = match submit_api {
+        Some(submit) => SubmitOption::from_str(submit).unwrap_or(SubmitOption::Web),
+        _ => SubmitOption::Web,
+    };
+
+    let result = match submit_option {
+        SubmitOption::Web => bilibili
+            .edit_by_web(studio)
+            .await
+            .change_context(AppError::Unknown)?,
+        _ => bilibili
+            .edit_by_app(studio, None)
+            .await
+            .change_context(AppError::Unknown)?,
+    };
+    info!("Edit successful");
+    Ok(result)
+}
+
+pub(crate) fn aid_from_submit(ret: &ResponseData) -> AppResult<u64> {
+    ret.data
+        .as_ref()
+        .and_then(|v| v.get("aid"))
+        .and_then(|v| v.as_u64().or_else(|| v.as_i64().map(|i| i as u64)))
+        .ok_or_else(|| AppError::Custom("投稿成功但未返回 aid".into()).into())
+}
+
+/// 边录边传：把内存分片流上传到 UPOS。上传并发固定为 3，对齐原 sync-downloader。
+pub(crate) async fn upload_byte_stream_parts<S>(
+    context: &UploadContext,
+    parcel: StreamParcel,
+    stream: S,
+) -> AppResult<UploadedStream>
+where
+    S: Stream<Item = biliup::error::Result<(Bytes, usize)>>,
+{
+    let file_name = parcel.file_name().to_string();
+    let total_size = parcel.total_size();
+    info!("开始流式上传：{file_name} ({total_size} bytes)");
+    info!("线路选择：{:?}", context.line);
+    let instant = Instant::now();
+    let uploaded = parcel
+        .upload_parts(context.client.clone(), 3, stream)
+        .await
+        .change_context(AppError::Unknown)?;
+    let t = instant.elapsed().as_millis().max(1);
+    info!(
+        "Stream parts uploaded: {file_name} => cost {:.2}s, {:.2} MB/s.",
+        t as f64 / 1000.,
+        uploaded.uploaded_size() as f64 / 1000. / t as f64
+    );
+    Ok(uploaded)
+}
+
+pub(crate) async fn complete_byte_stream(uploaded: UploadedStream) -> AppResult<Video> {
+    uploaded.complete().await.change_context(AppError::Unknown)
+}
+
 // 解析投稿的「转载来源」(source) 字段。
 // 前端表单留空时会把 copyright_source 提交为空字符串 `Some("")`，
 // 若直接透传则 B 站接口收到空 source，且不会回退到直播间地址。
 // 这里把 None 以及空白字符串都视作「未填写」，统一回退到直播间地址，
-fn resolve_source(copyright_source: Option<&str>, fallback_url: &str) -> String {
+pub(crate) fn resolve_source(copyright_source: Option<&str>, fallback_url: &str) -> String {
     match copyright_source.map(str::trim) {
         Some(s) if !s.is_empty() => s.to_string(),
         _ => fallback_url.to_string(),
+    }
+}
+
+/// 把配置里的 `dtime` 转成 B 站要求的 10 位 Unix 时间戳。
+///
+/// Web UI / Python 版存的是**延迟秒数**（提交后再等这么久公开），B 站接口要的是绝对时间。
+/// 已经是 Unix 时间戳（≥ 1_000_000_000）的值原样透传，避免 CLI `--dtime` 被加两次。
+pub(crate) fn scheduled_publish_ts(dtime: Option<u32>, now_unix: u64) -> Option<u32> {
+    let value = dtime?;
+    const UNIX_TS_FLOOR: u32 = 1_000_000_000; // 2001-09-09
+    let ts = if value >= UNIX_TS_FLOOR {
+        value as u64
+    } else {
+        now_unix.saturating_add(value as u64)
+    };
+    u32::try_from(ts).ok()
+}
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+const CREDIT_PLACEHOLDER: &str = "@credit";
+
+/// 读出模板里能用的 credits：用户名去掉首尾空白和误填的 `@`，uid 必须是纯数字。
+/// 不合格的项跳过并告警，不占用 `@credit` 占位符，免得一项填错让整次投稿被 B 站拒掉。
+fn template_credits(credits: Option<&serde_json::Value>) -> Vec<TemplateCredit> {
+    let Some(serde_json::Value::Array(items)) = credits else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let credit = serde_json::from_value::<TemplateCredit>(item.clone())
+                .inspect_err(|e| warn!(credit = %item, error = %e, "忽略无法解析的简介 @ 配置"))
+                .ok()?;
+            let username = credit.username.trim().trim_start_matches('@').trim();
+            let uid = credit.uid.trim();
+            if username.is_empty() || uid.is_empty() || !uid.bytes().all(|b| b.is_ascii_digit()) {
+                warn!(credit = %item, "忽略用户名为空或 uid 不是数字的简介 @ 配置");
+                return None;
+            }
+            Some(TemplateCredit {
+                username: username.to_string(),
+                uid: uid.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// 把简介里的 `@credit` 依次换成 `credits`，返回纯文本简介和 B 站的 `desc_v2`。
+///
+/// 形状与旧 Python 版 `creditsToDesc_v2` 一致（B 站已长期接受）：纯文本里写成
+/// `@用户名` 加两个空格；`desc_v2` 里被 @ 的用户是 `type: 2` 节点，其后的文本节点前补一个空格。
+/// 与旧版不同的是不产出空文本节点——`@credit` 在开头时，B 站对开头的空 `type: 1`
+/// 节点报 21010。没有 credits 或简介里没有占位符时返回 `None`，简介原样提交。
+fn credits_to_desc_v2(desc: &str, credits: &[TemplateCredit]) -> Option<(String, Vec<Credit>)> {
+    if credits.is_empty() || !desc.contains(CREDIT_PLACEHOLDER) {
+        return None;
+    }
+    fn push_text(nodes: &mut Vec<Credit>, text: &str, after_mention: bool) {
+        if text.is_empty() {
+            return;
+        }
+        let raw_text = if after_mention {
+            format!(" {text}")
+        } else {
+            text.to_string()
+        };
+        nodes.push(Credit {
+            type_id: 1,
+            raw_text,
+            biz_id: Some(String::new()),
+        });
+    }
+
+    let mut plain = String::with_capacity(desc.len());
+    let mut nodes = Vec::new();
+    let mut rest = desc;
+    let mut used = 0;
+    for credit in credits {
+        let Some(pos) = rest.find(CREDIT_PLACEHOLDER) else {
+            break;
+        };
+        let before = &rest[..pos];
+        push_text(&mut nodes, before, used > 0);
+        plain.push_str(before);
+        plain.push('@');
+        plain.push_str(&credit.username);
+        plain.push_str("  ");
+        nodes.push(Credit {
+            type_id: 2,
+            raw_text: credit.username.clone(),
+            biz_id: Some(credit.uid.clone()),
+        });
+        rest = &rest[pos + CREDIT_PLACEHOLDER.len()..];
+        used += 1;
+    }
+    push_text(&mut nodes, rest, true);
+    plain.push_str(rest);
+
+    if used < credits.len() {
+        warn!(
+            credits = credits.len(),
+            placeholders = used,
+            "简介里的 @credit 少于 credits，多出的 credits 未使用"
+        );
+    } else if rest.contains(CREDIT_PLACEHOLDER) {
+        warn!(
+            credits = credits.len(),
+            "简介里的 @credit 多于 credits，多出的占位符按原文提交"
+        );
+    }
+    Some((plain, nodes))
+}
+
+/// 按模板的 credits 展开简介里的 `@credit`，返回提交用的简介和 `desc_v2`
+/// （没有可用的 credits 或占位符时为 `None`，简介原样返回）。
+pub(crate) fn desc_with_credits(
+    desc: String,
+    credits: Option<&serde_json::Value>,
+) -> (String, Option<Vec<Credit>>) {
+    match credits_to_desc_v2(&desc, &template_credits(credits)) {
+        Some((plain, nodes)) => (plain, Some(nodes)),
+        None => (desc, None),
     }
 }
 
@@ -356,10 +597,31 @@ pub(crate) async fn build_studio(
     videos: Vec<Video>,
     recorder: &Recorder,
 ) -> AppResult<Studio> {
-    // 使用 Builder 模式简化构建
-    let mut studio: Studio = Studio::builder()
-        .desc(recorder.format(&upload_config.description.clone().unwrap_or_default()))
-        .maybe_dtime(upload_config.dtime)
+    let mut studio = studio_from_template(upload_config, videos, recorder);
+    // 处理封面上传
+    if !studio.cover.is_empty()
+        && let Ok(c) = &std::fs::read(&studio.cover).inspect_err(|e| error!(e=?e))
+        && let Ok(url) = bilibili.cover_up(c).await.inspect_err(|e| error!(e=?e))
+    {
+        studio.cover = url;
+    };
+
+    Ok(studio)
+}
+
+/// 按上传模板拼出稿件；`cover` 还是本地路径，由调用方上传。
+pub(crate) fn studio_from_template(
+    upload_config: &UploadStreamer,
+    videos: Vec<Video>,
+    recorder: &Recorder,
+) -> Studio {
+    let (desc, desc_v2) = desc_with_credits(
+        recorder.format(&upload_config.description.clone().unwrap_or_default()),
+        upload_config.credits.as_ref(),
+    );
+    Studio::builder()
+        .desc(desc)
+        .maybe_dtime(scheduled_publish_ts(upload_config.dtime, now_unix()))
         .maybe_copyright(upload_config.copyright)
         .cover(upload_config.cover_path.clone().unwrap_or_default())
         .dynamic(upload_config.dynamic.clone().unwrap_or_default())
@@ -380,27 +642,19 @@ pub(crate) async fn build_studio(
         .up_selection_reply(upload_config.up_selection_reply.unwrap_or_default())
         .up_close_danmu(upload_config.up_close_danmu.unwrap_or_default())
         .maybe_is_only_self(upload_config.is_only_self)
-        .maybe_desc_v2(None)
+        .maybe_desc_v2(desc_v2)
         .extra_fields(
             serde_json::from_str(&upload_config.extra_fields.clone().unwrap_or_default())
                 .unwrap_or_default(), // 处理额外字段
         )
-        .build();
-    // 处理封面上传
-    if !studio.cover.is_empty()
-        && let Ok(c) = &std::fs::read(&studio.cover).inspect_err(|e| error!(e=?e))
-        && let Ok(url) = bilibili.cover_up(c).await.inspect_err(|e| error!(e=?e))
-    {
-        studio.cover = url;
-    };
-
-    Ok(studio)
+        .build()
 }
 
 pub async fn execute_postprocessor(video_paths: Vec<PathBuf>, ctx: &Context) -> AppResult<()> {
     if let Some(processor) = &ctx.live_streamer().postprocessor {
         let paths: Vec<&Path> = video_paths.iter().map(|p| p.as_path()).collect();
-        process_video(&paths, processor).await?;
+        let retention = Retention::after_upload(ctx.pool().clone(), &ctx.config());
+        process_video(&paths, processor, Some(&retention)).await?;
     }
     Ok(())
 }
@@ -442,7 +696,14 @@ pub async fn upload(
         Some(UploadLine::Alia) => line::alia(),
         Some(UploadLine::Estx) => line::estx(),
         Some(UploadLine::Akbd) => line::akbd(),
-        _ => Probe::probe(&client.client).await.unwrap_or_default(),
+        _ => match Probe::probe(&client.client).await {
+            Ok(line) => line,
+            Err(e) => {
+                let fallback = Line::default();
+                warn!(error = %e, ?fallback, "AUTO 线路测速失败，回退到默认线路");
+                fallback
+            }
+        },
     };
     for video_path in video_paths {
         println!(
@@ -553,6 +814,88 @@ mod tests {
             "https://b23.tv/abc"
         );
     }
+
+    #[test]
+    fn scheduled_publish_ts_adds_delay_seconds() {
+        // UI 选 4 小时后公开：存 14400，投稿时应写成 now+14400
+        assert_eq!(
+            scheduled_publish_ts(Some(4 * 3600), 1_700_000_000),
+            Some(1_700_000_000 + 4 * 3600)
+        );
+    }
+
+    #[test]
+    fn scheduled_publish_ts_passes_through_unix_timestamp() {
+        assert_eq!(
+            scheduled_publish_ts(Some(1_700_014_400), 1_700_000_000),
+            Some(1_700_014_400)
+        );
+    }
+
+    #[test]
+    fn scheduled_publish_ts_none_stays_none() {
+        assert_eq!(scheduled_publish_ts(None, 1_700_000_000), None);
+    }
+
+    #[test]
+    fn studio_submit_payload_includes_tid_v2_when_set() {
+        // submit_by_app / submit_by_web both POST `.json(studio)`; verify body shape.
+        let studio: Studio = serde_json::from_value(serde_json::json!({
+            "tid": 95,
+            "tid_v2": 2102,
+            "title": "payload",
+            "copyright": 1,
+            "up_selection_reply": false,
+            "up_close_reply": false,
+            "up_close_danmu": false
+        }))
+        .unwrap();
+        let body = serde_json::to_value(&studio).unwrap();
+        assert_eq!(body["tid"], 95);
+        // B 站投稿接口的新版分区字段名是 human_type2
+        assert_eq!(body["human_type2"], 2102);
+    }
+
+    #[test]
+    fn studio_submit_payload_omits_tid_v2_for_tid_only() {
+        let studio: Studio = serde_json::from_value(serde_json::json!({
+            "tid": 171,
+            "title": "payload",
+            "copyright": 1,
+            "up_selection_reply": false,
+            "up_close_reply": false,
+            "up_close_danmu": false
+        }))
+        .unwrap();
+        let body = serde_json::to_value(&studio).unwrap();
+        assert_eq!(body["tid"], 171);
+        assert!(body.get("tid_v2").is_none());
+        assert!(body.get("human_type2").is_none());
+    }
+
+    #[test]
+    fn aid_from_submit_reads_numeric_aid() {
+        let ret: ResponseData = serde_json::from_value(serde_json::json!({
+            "code": 0,
+            "data": {"aid": 12345, "bvid": "BV1xx"},
+            "message": "0",
+            "ttl": 1
+        }))
+        .unwrap();
+        assert_eq!(aid_from_submit(&ret).unwrap(), 12345);
+    }
+
+    #[test]
+    fn aid_from_submit_rejects_missing_data() {
+        let ret: ResponseData = serde_json::from_value(serde_json::json!({
+            "code": 0,
+            "data": {},
+            "message": "0",
+            "ttl": 1
+        }))
+        .unwrap();
+        assert!(aid_from_submit(&ret).is_err());
+    }
 }
 
 /// 上传Actor
@@ -560,71 +903,103 @@ mod tests {
 pub struct UActor {
     /// 上传消息接收器
     receiver: Receiver<UploaderMessage>,
+    /// 上传池槽位（pool2_size）：每条消息的上传流程占用一个，处理完归还
+    slots: Arc<Slots>,
 }
 
 impl UActor {
     /// 创建新的上传Actor实例
-    pub fn new(receiver: Receiver<UploaderMessage>) -> Self {
-        Self { receiver }
+    pub fn new(receiver: Receiver<UploaderMessage>, slots: Arc<Slots>) -> Self {
+        Self { receiver, slots }
     }
 
     /// 运行Actor主循环，处理接收到的消息
-    pub(crate) async fn run(&mut self) {
-        while let Ok(msg) = self.receiver.recv().await {
-            self.handle_message(msg).await;
-        }
-    }
-
-    /// 处理上传消息
     ///
-    /// # 参数
-    /// * `msg` - 要处理的上传消息
-    async fn handle_message(&mut self, msg: UploaderMessage) {
-        match msg {
-            UploaderMessage::SegmentEvent(rx, ctx) => {
-                ctx.change_status(Stage::Upload, WorkerStatus::Pending)
-                    .await;
-                let inspect = rx.inspect(|f| {
-                    let pool = ctx.pool().clone();
-                    let streamer_info_id = ctx.id();
-                    let file = f.prev_file_path.display().to_string();
-                    tokio::spawn(async move {
-                        let result = InsertFileItem {
-                            file,
-                            streamer_info_id,
-                        }
-                        .insert(&pool)
-                        .await;
-                        info!(result=?result, "Insert file");
-                    });
-                });
-                let result = match ctx.upload_config() {
-                    Some(config) if config.is_noop_uploader() => {
-                        info!(
-                            uploader = ?config.uploader,
-                            "Skipping upload because uploader is Noop"
-                        );
-                        process_without_upload(inspect, &ctx).await
-                    }
-                    Some(config) => process_with_upload(inspect, &ctx, config).await,
-                    None => {
-                        let mut paths = Vec::new();
-                        pin!(inspect);
-                        while let Some(event) = inspect.next().await {
-                            paths.extend(segment_paths(&event));
-                        }
-                        // 无上传配置时，直接执行后处理
-                        execute_postprocessor(paths, &ctx).await
-                    }
-                };
+    /// 同时处理的消息数不超过上传池容量，容量调整后立即生效。
+    pub(crate) async fn run(self) {
+        run_in_slots(self.receiver, self.slots, handle_message).await
+    }
+}
 
-                if let Err(e) = &result {
-                    error!("Process segment event failed: {}", e);
-                    // 可以添加错误通知机制
+/// 按到达顺序取出消息，占到一个槽位后交给 `handle` 在独立任务里处理，处理完归还槽位。
+///
+/// 先取消息再占槽位：只有真有消息要处理时才占用，调小容量后不会有闲置却占着的槽位。
+/// 处理任务都在本函数的 `JoinSet` 里，本函数所在任务被 abort 时一并取消。
+async fn run_in_slots<M, F, Fut>(receiver: Receiver<M>, slots: Arc<Slots>, handle: F)
+where
+    F: Fn(M) -> Fut,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    let mut tasks = JoinSet::new();
+    while let Ok(msg) = receiver.recv().await {
+        let slot = slots.acquire().await;
+        // 回收已经结束的任务
+        while let Some(result) = tasks.try_join_next() {
+            report_task_exit(result);
+        }
+        let task = handle(msg);
+        tasks.spawn(async move {
+            let _slot = slot;
+            task.await
+        });
+    }
+    while let Some(result) = tasks.join_next().await {
+        report_task_exit(result);
+    }
+}
+
+fn report_task_exit(result: Result<(), JoinError>) {
+    if let Err(e) = result {
+        error!(error = %e, "上传任务异常退出");
+    }
+}
+
+/// 处理上传消息
+///
+/// # 参数
+/// * `msg` - 要处理的上传消息
+async fn handle_message(msg: UploaderMessage) {
+    match msg {
+        UploaderMessage::SegmentEvent(rx, ctx) => {
+            ctx.change_status(Stage::Upload, WorkerStatus::Pending)
+                .await;
+            let inspect = rx.inspect(|f| {
+                let pool = ctx.pool().clone();
+                let session_id = ctx.id();
+                let file = f.prev_file_path.display().to_string();
+                tokio::spawn(async move {
+                    let result = InsertFileItem { file, session_id }.insert(&pool).await;
+                    info!(result=?result, "Insert file");
+                });
+            });
+            let result = match ctx.upload_config() {
+                Some(config) if config.is_noop_uploader() => {
+                    info!(
+                        uploader = ?config.uploader,
+                        "Skipping upload because uploader is Noop"
+                    );
+                    process_without_upload(inspect, &ctx).await
                 }
+                Some(config) => process_with_upload(inspect, &ctx, config).await,
+                None => {
+                    let mut paths = Vec::new();
+                    pin!(inspect);
+                    while let Some(event) = inspect.next().await {
+                        paths.extend(segment_paths(&event));
+                    }
+                    // 无上传配置时，直接执行后处理
+                    execute_postprocessor(paths, &ctx).await
+                }
+            };
+
+            if let Err(e) = &result {
+                error!("Process segment event failed: {}", e);
+                crate::server::fleet::events::upload_failed(&ctx, e);
+                info!(url=ctx.live_streamer().url, result=?result, "处理失败，后处理未执行或未执行完（投稿失败时不会执行后处理）：Finished processing segment event with an error");
+            } else {
                 info!(url=ctx.live_streamer().url, result=?result, "后处理执行完毕：Finished processing segment event");
-                ctx.change_status(Stage::Upload, WorkerStatus::Idle).await;
             }
+            ctx.change_status(Stage::Upload, WorkerStatus::Idle).await;
         }
     }
 }
@@ -635,4 +1010,388 @@ impl UActor {
 pub enum UploaderMessage {
     /// 分段事件消息，包含事件、接收器和工作器
     SegmentEvent(Receiver<SegmentInfo>, Context),
+}
+
+#[cfg(test)]
+mod upload_pool_tests {
+    use super::run_in_slots;
+    use crate::server::core::slots::Slots;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::{mpsc, oneshot};
+
+    /// 等下一个开始处理的消息；超时说明本该开始的没有开始
+    async fn next_start<T>(started: &mut mpsc::UnboundedReceiver<T>) -> T {
+        tokio::time::timeout(Duration::from_secs(5), started.recv())
+            .await
+            .expect("应有上传任务开始")
+            .unwrap()
+    }
+
+    async fn assert_nothing_starts<T: std::fmt::Debug>(started: &mut mpsc::UnboundedReceiver<T>) {
+        let next = tokio::time::timeout(Duration::from_millis(100), started.recv()).await;
+        assert!(next.is_err(), "不应有新的上传任务开始：{next:?}");
+    }
+
+    /// 同时处理的消息数不超过上传池容量；扩容 / 缩容都立即生效，缩容不打断在跑的任务
+    #[tokio::test]
+    async fn uploads_stay_within_the_pool_and_resizing_applies_immediately() {
+        let (tx, rx) = async_channel::bounded(16);
+        let slots = Arc::new(Slots::new(1));
+        let (started_tx, mut started) = mpsc::unbounded_channel();
+        let dispatcher = tokio::spawn(run_in_slots(
+            rx,
+            slots.clone(),
+            move |(id, release): (usize, oneshot::Receiver<()>)| {
+                let started_tx = started_tx.clone();
+                async move {
+                    started_tx.send(id).unwrap();
+                    let _ = release.await;
+                }
+            },
+        ));
+
+        let mut releases = Vec::new();
+        for id in 0..3 {
+            let (release, wait) = oneshot::channel();
+            tx.send((id, wait)).await.unwrap();
+            releases.push(release);
+        }
+        let mut releases = releases.into_iter();
+
+        // 容量 1：只有第一条在处理
+        assert_eq!(next_start(&mut started).await, 0);
+        assert_nothing_starts(&mut started).await;
+
+        // 扩容后下一条立即开始，不必等在跑的结束
+        slots.resize(2);
+        assert_eq!(next_start(&mut started).await, 1);
+        assert_nothing_starts(&mut started).await;
+
+        // 缩回 1：在跑的两条照常跑完；结束一条后还占着 1 个，第三条要等占用数低于新容量
+        slots.resize(1);
+        releases.next().unwrap().send(()).unwrap();
+        assert_nothing_starts(&mut started).await;
+        releases.next().unwrap().send(()).unwrap();
+        assert_eq!(next_start(&mut started).await, 2);
+
+        releases.next().unwrap().send(()).unwrap();
+        drop(tx);
+        dispatcher.await.unwrap();
+    }
+
+    /// 某条消息的处理 panic 只结束它自己，槽位照常归还，后面的消息继续处理
+    #[tokio::test]
+    async fn a_panicking_upload_returns_its_slot() {
+        let (tx, rx) = async_channel::bounded(16);
+        let (started_tx, mut started) = mpsc::unbounded_channel();
+        let dispatcher = tokio::spawn(run_in_slots(
+            rx,
+            Arc::new(Slots::new(1)),
+            move |id: usize| {
+                let started_tx = started_tx.clone();
+                async move {
+                    started_tx.send(id).unwrap();
+                    assert_ne!(id, 0, "第一条消息的处理故意 panic");
+                }
+            },
+        ));
+
+        tx.send(0).await.unwrap();
+        tx.send(1).await.unwrap();
+        assert_eq!(next_start(&mut started).await, 0);
+        assert_eq!(next_start(&mut started).await, 1);
+
+        drop(tx);
+        dispatcher.await.unwrap();
+    }
+
+    /// DownloadManager 销毁时 abort 上传Actor，在跑的上传任务要一起取消并归还槽位
+    #[tokio::test]
+    async fn aborting_the_actor_cancels_running_uploads() {
+        let (tx, rx) = async_channel::bounded(16);
+        let slots = Arc::new(Slots::new(1));
+        let (started_tx, mut started) = mpsc::unbounded_channel();
+        let dispatcher = tokio::spawn(run_in_slots(
+            rx,
+            slots.clone(),
+            move |alive: oneshot::Sender<()>| {
+                let started_tx = started_tx.clone();
+                async move {
+                    let _alive = alive;
+                    started_tx.send(()).unwrap();
+                    std::future::pending::<()>().await;
+                }
+            },
+        ));
+
+        let (alive, cancelled) = oneshot::channel();
+        tx.send(alive).await.unwrap();
+        next_start(&mut started).await;
+        assert!(slots.try_acquire().is_none());
+
+        dispatcher.abort();
+        tokio::time::timeout(Duration::from_secs(5), cancelled)
+            .await
+            .expect("在跑的上传任务应随上传Actor一起取消")
+            .unwrap_err();
+        tokio::time::timeout(Duration::from_secs(5), slots.acquire())
+            .await
+            .expect("取消的上传任务应归还槽位");
+    }
+}
+
+#[cfg(test)]
+mod credit_tests {
+    use super::*;
+
+    fn credits(pairs: &[(&str, &str)]) -> Vec<TemplateCredit> {
+        pairs
+            .iter()
+            .map(|(username, uid)| TemplateCredit {
+                username: (*username).into(),
+                uid: (*uid).into(),
+            })
+            .collect()
+    }
+
+    fn desc_v2_json(desc: &str, pairs: &[(&str, &str)]) -> (String, serde_json::Value) {
+        let (plain, nodes) = credits_to_desc_v2(desc, &credits(pairs)).expect("应生成 desc_v2");
+        (plain, serde_json::to_value(nodes).unwrap())
+    }
+
+    fn text(raw: &str) -> serde_json::Value {
+        serde_json::json!({"type": 1, "raw_text": raw, "biz_id": ""})
+    }
+
+    fn mention(name: &str, uid: &str) -> serde_json::Value {
+        serde_json::json!({"type": 2, "raw_text": name, "biz_id": uid})
+    }
+
+    #[test]
+    fn desc_v2_leading_credit_has_no_empty_text_node() {
+        let (plain, v2) = desc_v2_json(
+            "@credit 2026年09月24日直播回放-游戏日",
+            &[("羊腿umer", "22158819")],
+        );
+        assert_eq!(plain, "@羊腿umer   2026年09月24日直播回放-游戏日");
+        assert_eq!(
+            v2,
+            serde_json::json!([
+                mention("羊腿umer", "22158819"),
+                text("  2026年09月24日直播回放-游戏日"),
+            ])
+        );
+    }
+
+    #[test]
+    fn desc_v2_leading_credit_keeps_following_lines() {
+        let desc =
+            "@credit2026年09月23日直播录屏\nhttps://live.douyin.com/1\nhttps://live.douyin.com/2";
+        let (plain, v2) = desc_v2_json(desc, &[("允崽来啦", "2063092494")]);
+        assert_eq!(
+            plain,
+            "@允崽来啦  2026年09月23日直播录屏\nhttps://live.douyin.com/1\nhttps://live.douyin.com/2"
+        );
+        assert_eq!(
+            v2,
+            serde_json::json!([
+                mention("允崽来啦", "2063092494"),
+                text(
+                    " 2026年09月23日直播录屏\nhttps://live.douyin.com/1\nhttps://live.douyin.com/2"
+                ),
+            ])
+        );
+    }
+
+    #[test]
+    fn desc_v2_credit_in_middle_of_sentence() {
+        let (plain, v2) = desc_v2_json("感谢@credit的投喂", &[("花花", "1")]);
+        assert_eq!(plain, "感谢@花花  的投喂");
+        assert_eq!(
+            v2,
+            serde_json::json!([text("感谢"), mention("花花", "1"), text(" 的投喂")])
+        );
+    }
+
+    #[test]
+    fn desc_v2_credit_at_end_has_no_trailing_node() {
+        let (plain, v2) = desc_v2_json("剪辑：@credit", &[("剪刀手", "2")]);
+        assert_eq!(plain, "剪辑：@剪刀手  ");
+        assert_eq!(
+            v2,
+            serde_json::json!([text("剪辑："), mention("剪刀手", "2")])
+        );
+    }
+
+    #[test]
+    fn desc_v2_multiple_credits_replace_in_order() {
+        let (plain, v2) = desc_v2_json(
+            "主播@credit 剪辑@credit\n【@credit】",
+            &[
+                ("羊腿umer", "22158819"),
+                ("允崽来啦", "2063092494"),
+                ("Nya Rime", "3"),
+            ],
+        );
+        assert_eq!(plain, "主播@羊腿umer   剪辑@允崽来啦  \n【@Nya Rime  】");
+        assert_eq!(
+            v2,
+            serde_json::json!([
+                text("主播"),
+                mention("羊腿umer", "22158819"),
+                text("  剪辑"),
+                mention("允崽来啦", "2063092494"),
+                text(" \n【"),
+                mention("Nya Rime", "3"),
+                text(" 】"),
+            ])
+        );
+    }
+
+    #[test]
+    fn desc_v2_adjacent_credits() {
+        let (plain, v2) = desc_v2_json("@credit@credit", &[("a", "1"), ("b", "2")]);
+        assert_eq!(plain, "@a  @b  ");
+        assert_eq!(
+            v2,
+            serde_json::json!([mention("a", "1"), mention("b", "2")])
+        );
+    }
+
+    #[test]
+    fn desc_v2_extra_credits_are_ignored() {
+        let (plain, v2) = desc_v2_json("by @credit", &[("a", "1"), ("b", "2")]);
+        assert_eq!(plain, "by @a  ");
+        assert_eq!(v2, serde_json::json!([text("by "), mention("a", "1")]));
+    }
+
+    #[test]
+    fn desc_v2_extra_placeholders_stay_literal() {
+        let (plain, v2) = desc_v2_json("@credit 和 @credit", &[("a", "1")]);
+        assert_eq!(plain, "@a   和 @credit");
+        assert_eq!(
+            v2,
+            serde_json::json!([mention("a", "1"), text("  和 @credit")])
+        );
+    }
+
+    #[test]
+    fn desc_v2_absent_without_credits_or_placeholder() {
+        assert!(credits_to_desc_v2("@credit 简介", &[]).is_none());
+        assert!(credits_to_desc_v2("没有占位符", &credits(&[("a", "1")])).is_none());
+    }
+
+    #[test]
+    fn template_credits_accepts_web_form_and_config_shapes() {
+        let value = serde_json::json!([
+            {"uid": "2063092494", "username": "允崽来啦"},
+            {"uid": 22158819, "username": " @羊腿umer "},
+            {"uid": " 3 ", "username": "Nya Rime"},
+        ]);
+        assert_eq!(
+            template_credits(Some(&value)),
+            credits(&[
+                ("允崽来啦", "2063092494"),
+                ("羊腿umer", "22158819"),
+                ("Nya Rime", "3")
+            ])
+        );
+    }
+
+    #[test]
+    fn template_credits_skips_unusable_entries() {
+        let value = serde_json::json!([
+            {"uid": "", "username": "空uid"},
+            {"uid": "abc", "username": "非数字"},
+            {"uid": "1", "username": "  "},
+            {"username": "缺uid"},
+            null,
+            {"uid": "7", "username": "ok"},
+        ]);
+        assert_eq!(template_credits(Some(&value)), credits(&[("ok", "7")]));
+        assert!(template_credits(None).is_empty());
+        assert!(template_credits(Some(&serde_json::Value::Null)).is_empty());
+    }
+
+    fn fake_bilibili() -> BiliBili {
+        BiliBili {
+            client: reqwest::Client::new(),
+            login_info: serde_json::from_value(serde_json::json!({
+                "cookie_info": {"cookies": []},
+                "sso": [],
+                "token_info": {"access_token": "", "expires_in": 0, "mid": 0, "refresh_token": ""},
+                "platform": null
+            }))
+            .unwrap(),
+        }
+    }
+
+    fn template(description: &str, credits: serde_json::Value) -> UploadStreamer {
+        serde_json::from_value(serde_json::json!({
+            "id": 3,
+            "template_name": "羊",
+            "title": "羊腿umer%Y年%m月%d日直播回放",
+            "tid": 21,
+            "copyright": 1,
+            "description": description,
+            "tags": ["直播回放"],
+            "credits": credits,
+        }))
+        .unwrap()
+    }
+
+    fn recorder() -> Recorder {
+        use crate::server::infrastructure::models::StreamerInfo;
+        let date = chrono::DateTime::parse_from_rfc3339("2026-06-15T12:00:00Z")
+            .unwrap()
+            .to_utc();
+        Recorder::new(
+            None,
+            StreamerInfo::new(
+                "羊",
+                "https://live.bilibili.com/1",
+                "游戏日！来博弈了",
+                date,
+                "",
+            ),
+        )
+    }
+
+    /// `submit_by_app` / `submit_by_web` / `edit_by_*` 都是 `.json(studio)`，
+    /// 这里断言的就是发给 B 站的请求体。
+    #[tokio::test]
+    async fn build_studio_request_body_carries_credit_mentions() {
+        let upload_config = template(
+            "@credit %Y年%m月%d日直播回放-{title}",
+            serde_json::json!([{"uid": "22158819", "username": "羊腿umer"}]),
+        );
+        let studio = build_studio(&upload_config, &fake_bilibili(), Vec::new(), &recorder())
+            .await
+            .unwrap();
+        let body = serde_json::to_value(&studio).unwrap();
+        assert_eq!(
+            body["desc"],
+            "@羊腿umer   2026年06月15日直播回放-游戏日！来博弈了"
+        );
+        assert_eq!(body["desc_format_id"], 0);
+        assert_eq!(
+            body["desc_v2"],
+            serde_json::json!([
+                mention("羊腿umer", "22158819"),
+                text("  2026年06月15日直播回放-游戏日！来博弈了"),
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn build_studio_without_credits_keeps_desc_and_null_desc_v2() {
+        let upload_config = template("%Y年%m月%d日直播回放-{title}", serde_json::Value::Null);
+        let studio = build_studio(&upload_config, &fake_bilibili(), Vec::new(), &recorder())
+            .await
+            .unwrap();
+        let body = serde_json::to_value(&studio).unwrap();
+        assert_eq!(body["desc"], "2026年06月15日直播回放-游戏日！来博弈了");
+        assert!(body["desc_v2"].is_null());
+    }
 }

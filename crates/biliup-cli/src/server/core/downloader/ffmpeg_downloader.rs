@@ -1,16 +1,19 @@
+use crate::server::common::throughput::SubprocessProgress;
+use crate::server::common::util::redact_process_debug;
 use crate::server::core::downloader;
 use crate::server::core::downloader::{
     DownloadConfig, DownloadStatus, DownloaderType, SegmentEvent, SegmentInfo,
 };
 use crate::server::errors::{AppError, AppResult};
+use crate::tools;
+use biliup::downloader::util::ByteCounter;
 use error_stack::{ResultExt, bail};
 use std::path::PathBuf;
 use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{debug, info, warn};
 
 /// FFmpeg下载器实现
 /// 使用FFmpeg进行直播流下载，支持内部和外部分段
@@ -25,8 +28,12 @@ pub struct FfmpegDownloader {
     pub downloader_type: DownloaderType,
 }
 
-fn is_complete_ffmpeg_exit(status_code: Option<i32>) -> bool {
+/// 一段录制能否发布：ffmpeg 正常结束（0 / 255）时总能发布；被杀或异常退出时，FLV / TS
+/// 等流式容器截断后仍可播放，照常发布；MP4 / MOV 的 moov 在结束时才写，截断后无法播放，
+/// 不发布也不上传。
+fn publishes_segment(status_code: Option<i32>, suffix: &str) -> bool {
     matches!(status_code, Some(0) | Some(255))
+        || !matches!(suffix.to_ascii_lowercase().as_str(), "mp4" | "mov")
 }
 
 impl FfmpegDownloader {
@@ -130,6 +137,12 @@ impl FfmpegDownloader {
     fn append_common_input_args(&self, args: &mut Vec<String>, download_config: &DownloadConfig) {
         args.push("-y".to_string()); // 覆盖已存在文件
 
+        // -progress pipe:2: 把 key=value 形式的进度（含累计写出字节 total_size）打到 stderr，
+        // 由 spawn_log 解析出写盘速率；不受 -loglevel 影响。
+        // -nostats: 关掉同样写 stderr、以 \r 刷新的单行统计，避免与进度行混在一起
+        args.extend(["-progress".to_string(), "pipe:2".to_string()]);
+        args.push("-nostats".to_string());
+
         // HTTP headers
         // -headers: 设置HTTP请求头，格式为"Key: Value\r\n"
         // 用于传递User-Agent、Cookie等信息
@@ -203,30 +216,39 @@ impl FfmpegDownloader {
         let args = self.build_ffmpeg_args_external_segment(&download_config);
         let output_file = download_config.generate_output_filename(&download_config.suffix);
 
-        let mut cmd = Command::new("ffmpeg");
+        let part_file = format!("{}.part", output_file.display());
+        let mut cmd = tools::ffmpeg_command();
         cmd.args(&args)
-            .arg(format!("{}.part", output_file.display()))
+            .arg(&part_file)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
         let child = cmd.spawn().change_context(AppError::Unknown)?;
+        callback(SegmentEvent::Start {
+            next_file_path: PathBuf::from(&part_file),
+        });
 
-        let status = spawn_log(child, &self.process_handle).await?;
-        let part_file = format!("{}.part", output_file.display());
+        let status = spawn_log(
+            child,
+            &self.process_handle,
+            download_config.bytes_written.clone(),
+        )
+        .await?;
         let status_code = status.code();
-        if !is_complete_ffmpeg_exit(status_code) {
-            // A cancellation/kill can leave a partial MP4/FLV without a
-            // trailer. Never publish it as a completed segment or enqueue it
-            // for upload; the next retry will start a fresh file.
-            let _ = tokio::fs::remove_file(&part_file).await;
+        if !publishes_segment(status_code, &download_config.suffix) {
+            // 截断的 MP4 没有 moov，留在磁盘上供手动恢复，但不进入上传流程。
+            warn!(
+                part_file,
+                ?status_code,
+                "ffmpeg exited before finishing the MP4 trailer, not publishing the segment"
+            );
             return Ok(DownloadStatus::Error(format!(
                 "FFmpeg error: {status_code:?}"
             )));
         }
-
-        // 退出时，重命名完整文件
+        // 退出时，重命名文件
         tokio::fs::rename(&part_file, &output_file)
             .await
             .change_context(AppError::Custom(String::from("退出时，重命名文件")))?;
@@ -239,6 +261,8 @@ impl FfmpegDownloader {
             danmaku_file_path: None,
             segment_index: 0,
             next_file_path: None,
+            duration_secs: None,
+            size_bytes: None,
         }));
         // 根据退出码判断状态
         match status_code {
@@ -257,7 +281,7 @@ impl FfmpegDownloader {
     ) -> AppResult<DownloadStatus> {
         let args = self.build_ffmpeg_args_internal_segment(&download_config);
 
-        let mut cmd = Command::new("ffmpeg");
+        let mut cmd = tools::ffmpeg_command();
         cmd.args(&args)
             .arg(format!(
                 "{}.{}.part",
@@ -269,7 +293,7 @@ impl FfmpegDownloader {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
-        info!("FFmpeg cmd: {:?}", cmd);
+        info!("FFmpeg cmd: {}", redact_process_debug(&cmd));
         let mut child = cmd.spawn().change_context(AppError::Unknown)?;
 
         // 获取stdout用于读取分段文件名
@@ -304,6 +328,8 @@ impl FfmpegDownloader {
                 danmaku_file_path: None,
                 next_file_path: None,
                 segment_index,
+                duration_secs: None,
+                size_bytes: None,
                 // start_time: std::time::SystemTime::now(),
                 // end_time: std::time::SystemTime::now(),
             }));
@@ -311,7 +337,12 @@ impl FfmpegDownloader {
             segment_index += 1;
             prev_file_path = Some(file_path);
         }
-        let status = spawn_log(child, &self.process_handle).await?;
+        let status = spawn_log(
+            child,
+            &self.process_handle,
+            download_config.bytes_written.clone(),
+        )
+        .await?;
 
         if let Some(file_path) = prev_file_path {
             // 重命名文件
@@ -324,6 +355,8 @@ impl FfmpegDownloader {
                 danmaku_file_path: None,
                 next_file_path: None,
                 segment_index,
+                duration_secs: None,
+                size_bytes: None,
                 // start_time: std::time::SystemTime::now(),
                 // end_time: std::time::SystemTime::now(),
             }));
@@ -375,9 +408,12 @@ impl FfmpegDownloader {
     // }
 }
 
+/// 等待 ffmpeg 结束，期间把 stderr 转成日志；`-progress` 的进度行不打日志，
+/// 只把 `total_size` 的增量累加到 `bytes_written`（写盘速率的来源）。
 async fn spawn_log(
     mut child: tokio::process::Child,
     process_handle: &RwLock<Option<tokio::process::Child>>,
+    bytes_written: ByteCounter,
 ) -> AppResult<ExitStatus> {
     let stderr = child.stderr.take().ok_or(AppError::Custom(
         "failed to capture stderr pipe".to_string(),
@@ -390,9 +426,14 @@ async fn spawn_log(
     }
 
     let mut stderr_lines = BufReader::new(stderr).lines();
-    // 将 stderr 打印到当前进程的 stderr
+    // 将 stderr 打印到当前进程的 stderr；进度行只解析不打印
     let stderr_task = tokio::spawn(async move {
+        let mut progress = SubprocessProgress::default();
         while let Ok(Some(line)) = stderr_lines.next_line().await {
+            if progress.observe_ffmpeg(&line, &bytes_written) {
+                debug!("[ffmpeg] {line}");
+                continue;
+            }
             info!("[ffmpeg] {line}");
         }
     });
@@ -459,11 +500,32 @@ mod tests {
     }
 
     #[test]
-    fn only_successful_or_stream_end_exits_publish_a_segment() {
-        assert!(is_complete_ffmpeg_exit(Some(0)));
-        assert!(is_complete_ffmpeg_exit(Some(255)));
-        assert!(!is_complete_ffmpeg_exit(None));
-        assert!(!is_complete_ffmpeg_exit(Some(1)));
+    fn truncated_mp4_is_not_published_but_streamable_containers_are() {
+        for code in [Some(0), Some(255)] {
+            assert!(publishes_segment(code, "mp4"));
+            assert!(publishes_segment(code, "flv"));
+        }
+        for code in [None, Some(1)] {
+            assert!(!publishes_segment(code, "mp4"));
+            assert!(!publishes_segment(code, "MOV"));
+            assert!(publishes_segment(code, "flv"));
+            assert!(publishes_segment(code, "ts"));
+        }
+    }
+
+    #[test]
+    fn both_modes_ask_ffmpeg_for_machine_readable_progress_on_stderr() {
+        for args in [
+            external().build_ffmpeg_args_external_segment(&config(None, None)),
+            internal().build_ffmpeg_args_internal_segment(&config(None, None)),
+        ] {
+            assert_eq!(value_of(&args, "-progress"), Some("pipe:2".to_string()));
+            assert!(args.contains(&"-nostats".to_string()));
+            // 全局选项必须在 -i 之前
+            let progress_at = args.iter().position(|a| a == "-progress").unwrap();
+            let input_at = args.iter().position(|a| a == "-i").unwrap();
+            assert!(progress_at < input_at);
+        }
     }
 
     #[test]

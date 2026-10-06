@@ -7,10 +7,12 @@ use chrono::serde::ts_seconds;
 use chrono::{DateTime, Utc};
 use ormlite::{Insert, Model};
 use serde::{Deserialize, Serialize};
-/// 主播信息模型
-/// 存储主播的基本信息和直播状态
+/// 一场直播（`stream_sessions` 表）：开播时的主播名、直播间、标题与开播时间。
+/// 表里还有切片工作台的列（主播外键、时间轴零点、结束时间等），由
+/// [`crate::server::workbench::store`] 读写，不在这个模型里，`/v1/streamer-info` 的
+/// JSON 因此保持原样。
 #[derive(Model, Debug, Clone, Serialize, Deserialize, Default)]
-#[ormlite(table = "streamerinfo")]
+#[ormlite(table = "stream_sessions")]
 pub struct StreamerInfo {
     /// 主键ID
     pub id: i64,
@@ -55,8 +57,9 @@ pub struct FileItem {
     pub id: i64,
     /// 文件路径
     pub file: String,
-    /// 关联的主播信息ID（外键，非空）
-    pub streamer_info_id: i64,
+    /// 所属场次（`stream_sessions.id`，非空）。JSON 仍叫 `streamer_info_id`。
+    #[serde(rename = "streamer_info_id")]
+    pub session_id: i64,
 }
 
 /// 配置模型

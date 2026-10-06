@@ -1,7 +1,9 @@
 use crate::server::core::downloader::{
     DownloadConfig as RuntimeDownloadConfig, DownloadStatus, SegmentEvent, SegmentInfo,
 };
+use crate::server::common::util::redact_process_debug;
 use crate::server::errors::{AppError, AppResult};
+use crate::tools;
 use error_stack::{ResultExt, bail};
 use std::{
     path::{Path, PathBuf},
@@ -11,7 +13,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::{fs, process::Command, time::timeout};
+use tokio::{fs, time::timeout};
 use tracing::{debug, info, warn};
 
 #[derive(Clone, Debug)]
@@ -213,7 +215,7 @@ impl YouTubeDownloader {
             "best".to_string()
         };
 
-        let mut cmd = Command::new(&self.cfg.ytdlp_bin);
+        let mut cmd = tools::command(&self.cfg.ytdlp_bin);
         cmd.arg("--outtmpl")
             .arg(format!(
                 "{}/{}.%(ext)s",
@@ -254,7 +256,7 @@ impl YouTubeDownloader {
             return Ok(());
         }
 
-        info!("运行: {:?}", cmd);
+        info!("运行: {}", redact_process_debug(&cmd));
         let output = cmd.output().await.change_context(AppError::Custom(format!(
             "运行 {} 失败，请确认已安装并在 PATH 中",
             &self.cfg.ytdlp_bin
@@ -320,7 +322,7 @@ impl YouTubeDownloader {
             )))?;
 
         // 在缓存目录中执行 ytarchive
-        let mut cmd = Command::new(&self.cfg.ytarchive_bin);
+        let mut cmd = tools::command(&self.cfg.ytarchive_bin);
         cmd.current_dir(&cache_dir)
             .arg(&self.cfg.webpage_url)
             .arg("best")
@@ -346,7 +348,11 @@ impl YouTubeDownloader {
         if self.stopped.load(Ordering::Relaxed) {
             return Ok(());
         }
-        info!("运行: (cwd: {}) {:?}", cache_dir.display(), cmd);
+        info!(
+            "运行: (cwd: {}) {}",
+            cache_dir.display(),
+            redact_process_debug(&cmd)
+        );
 
         let output = cmd.output().await.change_context(AppError::Custom(format!(
             "运行 {} 失败，请确认已安装并在 PATH 中",

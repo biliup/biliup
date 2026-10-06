@@ -100,17 +100,17 @@ biliup --user-cookie ./cookies.json retry-upload data/pending_uploads/1.json
 
 只有投稿成功后清单才会删除；失败时可保留清单稍后再次重试。
 
-录播配置中的 `format: mp4` 会自动选择 FFmpeg 进行有效 remux，不需要手动把 FLV 文件改名；未指定格式时仍使用下载器的源容器。
+录播配置中的 `format: mp4` 在未配置下载插件或配置为 stream-gears 时会自动改用 FFmpeg 进行有效 remux，不需要手动把 FLV 文件改名；边录边传和显式配置的 mesio 保持原样（mesio 按源容器保存）。未指定格式时使用下载器的源容器。
 
 ### 斗鱼 H.265
 
 斗鱼默认使用 H.264。需要尝试 H.265 时，在全局配置中设置：
 
 ```toml
-douyu_codec = "h265"
+douyu_codec = "HEVC"
 ```
 
-可选值只有 `h264` 和 `h265`。如果直播间没有 H.265 流，程序会记录警告并自动回退到 H.264；H.265 直链不会套用 `douyu_force_hs` 的 hs 构造 URL。原生 FLV 下载器和 FFmpeg 下载器都可以录制并分段 HEVC 流。
+可选值为 `AVC`（默认）和 `HEVC`，也接受 `h264` / `h265` 写法，大小写不敏感。如果直播间没有 H.265 流，程序会记录警告并自动回退到 H.264。mesio、原生 FLV 下载器和 FFmpeg 下载器都可以录制并分段 HEVC 流。
 
 > ARM平台用户，需要使用到stream-gears（默认下载器与上传器）进行下载和上传的，请参考此教程降级stream-gears版本。 https://github.com/biliup/biliup/discussions/407
 
@@ -161,20 +161,20 @@ sudo docker exec -it imageId /bin/bash
 
 ## 从源码运行biliup
 * 下载源码: `git clone https://github.com/ForgQi/bilibiliupload.git`
-* 安装: `pip3 install -e .`
+* 安装: `pip3 install -e ./crates/stream-gears`
 * 启动: `python3 -m biliup`
 * 构建:
   ```shell
   $ npm install
   $ npm run build
-  $ python3 -m build
+  $ python3 -m build crates/stream-gears
   ```
 * 调试 webUI: `python3 -m biliup --static-dir public`
 
 
 ## yaml配置文件示例
 可选项见[完整配置文件](https://github.com/biliup/biliup/tree/master/public/config.yaml),
-tid投稿分区见[Wiki](https://github.com/biliup/biliup/wiki)
+tid投稿分区见[Wiki](https://github.com/biliup/biliup/wiki)；可选 `tid_v2` 指定新版分区 ID（与旧版 `tid` 可同时设置）
 ```yaml
 streamers:
     xxx直播录像:
@@ -196,6 +196,7 @@ video.desc = '视频简介'
 video.source = '添加转载地址说明'
 # 设置视频分区,默认为122 野生技能协会
 video.tid = 171
+# video.tid_v2 = 2102  # 可选：新版分区 ID
 video.set_tag(['星际争霸2', '电子竞技'])
 video.dynamic = '动态内容'
 lines = 'AUTO'

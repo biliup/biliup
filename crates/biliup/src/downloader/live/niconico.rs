@@ -2,6 +2,7 @@ use super::{
     DownloaderHint, LiveError, LivePlugin, LiveRequest, LiveResult, LiveStatus, LiveStream,
     RuntimeOptions, StreamlinkOptions, StreamlinkPlatform,
 };
+use crate::tools;
 use async_trait::async_trait;
 use chrono::Utc;
 use regex::Regex;
@@ -79,6 +80,7 @@ impl NiconicoLive {
                 title,
                 date: Utc::now(),
                 live_cover_url: String::new(),
+                avatar_url: None,
                 raw_stream_url: self.url.clone(),
                 platform: "niconico".to_string(),
                 stream_headers: HashMap::new(),
@@ -99,7 +101,7 @@ impl NiconicoLive {
     }
 
     async fn streamlink_available(&self) -> LiveResult<bool> {
-        let mut command = Command::new("streamlink");
+        let mut command = tools::command("streamlink");
         command.stdin(Stdio::null()).arg("--stream-url");
         self.apply_streamlink_args(&mut command);
         let output = command

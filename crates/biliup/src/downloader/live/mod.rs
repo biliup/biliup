@@ -35,7 +35,7 @@ pub use bigo::Bigo;
 pub use bilibili::Bilibili;
 pub use cc::CC;
 pub use douyin::Douyin;
-pub use douyu::Douyu;
+pub use douyu::{Douyu, strip_ws_expire_override};
 pub use general::General;
 pub use huya::Huya;
 pub use inke::Inke;
@@ -195,17 +195,10 @@ pub struct DouyuOptions {
     pub cdn: String,
     pub force_hs: bool,
     pub rate: u32,
-    pub codec: DouyuCodec,
+    pub device_id: String,
+    pub codec: String,
     pub disable_interactive_game: bool,
     pub danmaku: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum DouyuCodec {
-    #[default]
-    H264,
-    H265,
 }
 
 impl Default for DouyuOptions {
@@ -214,7 +207,8 @@ impl Default for DouyuOptions {
             cdn: "hw-h5".to_string(),
             force_hs: false,
             rate: 0,
-            codec: DouyuCodec::H264,
+            device_id: String::new(),
+            codec: String::new(),
             disable_interactive_game: false,
             danmaku: false,
         }
@@ -346,6 +340,9 @@ pub struct LiveStream {
     pub title: String,
     pub date: DateTime<Utc>,
     pub live_cover_url: String,
+    /// 主播头像地址；平台响应里没有或尚未解析的平台为 `None`。
+    #[serde(default)]
+    pub avatar_url: Option<String>,
     pub raw_stream_url: String,
     pub platform: String,
     pub stream_headers: HashMap<String, String>,

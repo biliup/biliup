@@ -1,0 +1,1125 @@
+use super::index::tests::build_flv;
+use super::recorder::{ClosedSegment, GAP_TOLERANCE_MS, SessionRecorder, SessionTarget, place};
+use super::store::{self, OpenedSession, SegmentRow, SegmentState};
+use super::*;
+use crate::server::infrastructure::connection_pool::ConnectionManager;
+use crate::server::infrastructure::models::StreamerInfo;
+use biliup::downloader::index_tap::FileTap;
+use chrono::{DateTime, Utc};
+use ormlite::Model;
+use tempfile::TempDir;
+
+/// 100 帧、每 25 帧一个关键帧的 FLV：关键帧在 0 / 1000 / 2000 / 3000 ms，时长 3965 ms。
+const FLV_DURATION_MS: i64 = 3965;
+
+async fn setup() -> (TempDir, ConnectionPool) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = ConnectionManager::new_pool(dir.path().join("data.sqlite3").to_str().unwrap())
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO livestreamers (id, url, remark) VALUES (1, 'https://a', 'a')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    (dir, pool)
+}
+
+fn info(title: &str, at_ms: i64) -> StreamerInfo {
+    StreamerInfo::new(
+        "a",
+        "https://a",
+        title,
+        DateTime::<Utc>::from_timestamp_millis(at_ms).unwrap(),
+        "",
+    )
+}
+
+/// 监控循环检测到开播：插入或复用场次行。
+async fn go_live(pool: &ConnectionPool, at: i64, merge_minutes: i64) -> OpenedSession {
+    store::open_session(pool, 1, &info("标题", at), at, merge_minutes * 60_000)
+        .await
+        .unwrap()
+}
+
+fn target(session_id: i64) -> SessionTarget {
+    SessionTarget {
+        session_id,
+        streamer_id: 1,
+        bytes: None,
+    }
+}
+
+fn write_flv(dir: &Path, name: &str) -> PathBuf {
+    let path = dir.join(name);
+    std::fs::write(&path, build_flv(0, 100, 25, None).bytes).unwrap();
+    path
+}
+
+async fn sessions(pool: &ConnectionPool) -> Vec<(i64, Option<i64>, Option<i64>)> {
+    sqlx::query_as("SELECT id, started_at, ended_at FROM stream_sessions ORDER BY id")
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+async fn segments(pool: &ConnectionPool, session_id: i64) -> Vec<SegmentRow> {
+    store::session_segments(pool, session_id).await.unwrap()
+}
+
+fn s(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+#[test]
+fn small_gaps_are_absorbed_and_real_ones_recorded() {
+    assert_eq!(place(0, None), (0, 0));
+    assert_eq!(place(4000, Some(-50)), (4000, 0));
+    assert_eq!(place(4000, Some(200)), (4000, 0));
+    assert_eq!(place(4000, Some(GAP_TOLERANCE_MS)), (4000, 0));
+    assert_eq!(place(4000, Some(26_000)), (30_000, 26_000));
+}
+
+/// 同一连接按时间切段：每段墙钟比内容长一点（开段晚、关段晚），差值不能跨段累积成断流。
+#[tokio::test]
+async fn wall_clock_drift_between_segments_is_not_a_gap() {
+    let (dir, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let session = go_live(&pool, t0, 10).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
+    let handle = recorder.handle();
+    handle.run_started_at(t0);
+    let mut at = t0;
+    for i in 0..10 {
+        let path = write_flv(dir.path(), &format!("{i}.flv"));
+        handle.opened_at(&path, at);
+        // 内容 3965 ms，墙钟 4600 ms，下一段 150 ms 后才开写：每段偏出 785 ms
+        at += 4600;
+        handle.closed_at(&path, at, ClosedSegment::default());
+        at += 150;
+    }
+    recorder.finish().await;
+
+    let rows = segments(&pool, session.id).await;
+    assert_eq!(rows.len(), 10);
+    for (i, row) in rows.iter().enumerate() {
+        assert_eq!(row.gap_before_ms, 0, "第 {i} 段");
+        assert_eq!(row.start_ms, i as i64 * FLV_DURATION_MS);
+    }
+}
+
+/// 输出目录是 `.` 时下载器给出 `./x.flv` 这种相对路径；要在测试里原样复现，文件得放在当前目录下。
+/// 返回的路径以 `./` 开头。
+pub(super) fn dot_prefixed_dir() -> (TempDir, PathBuf) {
+    let dir = tempfile::tempdir_in(".").unwrap();
+    let rel = Path::new(".").join(dir.path().file_name().unwrap());
+    (dir, rel)
+}
+
+pub(super) fn without_dot(path: &Path) -> PathBuf {
+    path.strip_prefix(".").unwrap().to_path_buf()
+}
+
+/// 开段报 `./x.flv`、关段报 `x.flv`（同一个文件的两种写法）只记一行，库里存不带 `./` 的写法。
+#[tokio::test]
+async fn dot_prefixed_open_and_bare_close_are_one_segment() {
+    let (_guard, dir) = dot_prefixed_dir();
+    let (_db, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let session = go_live(&pool, t0, 10).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
+    let handle = recorder.handle();
+    handle.run_started_at(t0);
+    let opened = write_flv(&dir, "x.flv");
+    let closed = without_dot(&opened);
+    handle.opened_at(&opened, t0);
+    handle.closed_at(
+        &closed,
+        t0 + 4000,
+        ClosedSegment {
+            duration_ms: Some(4000),
+            danmaku_path: Some(dir.join("x.xml")),
+            ..Default::default()
+        },
+    );
+    recorder.finish().await;
+
+    let rows = segments(&pool, session.id).await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].path, s(&closed));
+    assert_eq!(rows[0].state, SegmentState::Finished);
+    assert_eq!(
+        (rows[0].start_ms, rows[0].end_ms),
+        (0, Some(FLV_DURATION_MS))
+    );
+    assert_eq!(rows[0].index_path, Some(s(&index::index_path(&closed))));
+    assert_eq!(
+        rows[0].danmaku_path,
+        Some(s(&without_dot(&dir.join("x.xml"))))
+    );
+}
+
+/// mesio 按时间切 3 段：3 行，时间轴首尾相接。
+#[tokio::test]
+async fn three_dot_prefixed_segments_are_three_rows() {
+    let (_guard, dir) = dot_prefixed_dir();
+    let (_db, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let session = go_live(&pool, t0, 10).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
+    let handle = recorder.handle();
+    handle.run_started_at(t0);
+    let mut at = t0;
+    let mut closed = Vec::new();
+    for i in 0..3 {
+        let path = write_flv(&dir, &format!("{i}.flv"));
+        handle.opened_at(&path, at);
+        at += 4000;
+        closed.push(without_dot(&path));
+        handle.closed_at(
+            closed.last().unwrap(),
+            at,
+            ClosedSegment {
+                duration_ms: Some(4000),
+                ..Default::default()
+            },
+        );
+    }
+    recorder.finish().await;
+
+    let rows = segments(&pool, session.id).await;
+    let summary: Vec<(String, i64, Option<i64>, i64)> = rows
+        .iter()
+        .map(|r| (r.path.clone(), r.start_ms, r.end_ms, r.gap_before_ms))
+        .collect();
+    let expected: Vec<_> = closed
+        .iter()
+        .enumerate()
+        .map(|(i, path)| {
+            let start = i as i64 * FLV_DURATION_MS;
+            (s(path), start, Some(start + FLV_DURATION_MS), 0)
+        })
+        .collect();
+    assert_eq!(summary, expected);
+}
+
+/// 外部 ffmpeg / streamlink：开段 `./x.flv.part`、关段 `./x.flv`，同样只记一行。
+#[tokio::test]
+async fn dot_prefixed_part_file_renamed_at_close_is_one_segment() {
+    let (_guard, dir) = dot_prefixed_dir();
+    let (_db, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let session = go_live(&pool, t0, 10).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
+    let handle = recorder.handle();
+    handle.run_started_at(t0);
+    let part = write_flv(&dir, "x.flv.part");
+    handle.opened_at(&part, t0);
+    let done = dir.join("x.flv");
+    std::fs::rename(&part, &done).unwrap();
+    handle.closed_at(&done, t0 + 4000, ClosedSegment::default());
+    recorder.finish().await;
+
+    let rows = segments(&pool, session.id).await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].path, s(&without_dot(&done)));
+    assert_eq!(rows[0].end_ms, Some(FLV_DURATION_MS));
+}
+
+/// 场次有了第一个分段才登记为正在录（之前对外给出的场次 id 查不到详情），任务结束即注销。
+#[tokio::test]
+async fn a_session_is_registered_as_recording_once_it_has_a_segment() {
+    let (dir, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let session = go_live(&pool, t0, 10).await;
+    let id = live::unique_session_id(&pool, session.id).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(id), None);
+    let handle = recorder.handle();
+    handle.run_started_at(t0);
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert!(!live::is_recording(id));
+
+    handle.opened_at(&write_flv(dir.path(), "a.flv"), t0 + 500);
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while !live::is_recording(id) {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("开段后应登记为正在录");
+    recorder.finish().await;
+    assert!(!live::is_recording(id));
+}
+
+#[tokio::test]
+async fn segments_are_laid_out_on_one_session_timeline() {
+    let (dir, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let session = go_live(&pool, t0, 10).await;
+    assert!(!session.resumed);
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
+    let handle = recorder.handle();
+
+    // mesio：开段 / 关段都有，关段带时长与字节数；报告的时长和内容对不上时以索引为准
+    handle.run_started_at(t0);
+    let a = write_flv(dir.path(), "a.flv");
+    handle.opened_at(&a, t0 + 500);
+    handle.closed_at(
+        &a,
+        t0 + 4500,
+        ClosedSegment {
+            duration_ms: Some(4000),
+            bytes: Some(123),
+            danmaku_path: Some(dir.path().join("a.xml")),
+            discard: false,
+        },
+    );
+    // 紧接着的下一段，没有报告时长：取索引扫出的时长
+    let b = write_flv(dir.path(), "b.flv");
+    handle.opened_at(&b, t0 + 4500);
+    handle.closed_at(&b, t0 + 8600, ClosedSegment::default());
+
+    // 断流重连（stream-gears：`.part` 开写，改名后关段）
+    handle.run_started_at(t0 + 20_000);
+    let c_part = write_flv(dir.path(), "c.flv.part");
+    handle.opened_at(&c_part, t0 + 30_000);
+    let c = dir.path().join("c.flv");
+    std::fs::rename(&c_part, &c).unwrap();
+    handle.closed_at(&c, t0 + 34_000, ClosedSegment::default());
+
+    // 小于过滤阈值、关段时已被删掉的分段
+    let d = write_flv(dir.path(), "d.flv");
+    handle.opened_at(&d, t0 + 34_000);
+    std::fs::remove_file(&d).unwrap();
+    handle.closed_at(
+        &d,
+        t0 + 34_100,
+        ClosedSegment {
+            discard: true,
+            ..Default::default()
+        },
+    );
+    recorder.finish().await;
+
+    let all = sessions(&pool).await;
+    assert_eq!(all.len(), 1);
+    let (session_id, started_at, ended_at) = all[0];
+    assert_eq!(
+        started_at,
+        Some(t0 + 500),
+        "场次 0 点是第一个分段开写的墙钟"
+    );
+    assert_eq!(ended_at, Some(t0 + 34_100));
+
+    let rows = segments(&pool, session_id).await;
+    let summary: Vec<(String, SegmentState, i64, Option<i64>, i64)> = rows
+        .iter()
+        .map(|r| {
+            (
+                r.path.clone(),
+                r.state,
+                r.start_ms,
+                r.end_ms,
+                r.gap_before_ms,
+            )
+        })
+        .collect();
+    // 断流从上一段关段（t0 + 8600）算到这一段开写（t0 + 30000）
+    let c_gap = 30_000 - 8600;
+    let c_start = 2 * FLV_DURATION_MS + c_gap;
+    assert_eq!(
+        summary,
+        vec![
+            (s(&a), SegmentState::Finished, 0, Some(FLV_DURATION_MS), 0),
+            (
+                s(&b),
+                SegmentState::Finished,
+                FLV_DURATION_MS,
+                Some(2 * FLV_DURATION_MS),
+                0
+            ),
+            (
+                s(&c),
+                SegmentState::Finished,
+                c_start,
+                Some(c_start + FLV_DURATION_MS),
+                c_gap
+            ),
+            (
+                s(&d),
+                SegmentState::Deleted,
+                c_start + FLV_DURATION_MS,
+                Some(c_start + FLV_DURATION_MS + 100),
+                0
+            ),
+        ]
+    );
+    assert_eq!(rows[0].bytes, Some(123));
+    assert_eq!(rows[0].danmaku_path, Some(s(&dir.path().join("a.xml"))));
+    assert_eq!(
+        rows[1].bytes,
+        Some(std::fs::metadata(&b).unwrap().len() as i64)
+    );
+    for (row, path) in rows.iter().zip([&a, &b, &c]) {
+        assert_eq!(row.container, "flv");
+        assert_eq!(row.index_path, Some(s(&index::index_path(path))));
+        assert!(index::index_path(path).exists());
+    }
+    assert_eq!(rows[3].index_path, None);
+    assert!(!index::index_path(&d).exists());
+    assert!(!index::index_path(&c_part).exists());
+}
+
+#[tokio::test]
+async fn reopening_within_the_merge_window_resumes_the_session() {
+    let (dir, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let record = |merge: i64, title: &'static str, name: &str, at: i64| {
+        let pool = pool.clone();
+        let path = write_flv(dir.path(), name);
+        async move {
+            let session = store::open_session(&pool, 1, &info(title, at), at, merge * 60_000)
+                .await
+                .unwrap();
+            let recorder = SessionRecorder::spawn(pool, target(session.id), None);
+            let handle = recorder.handle();
+            handle.run_started_at(at);
+            handle.opened_at(&path, at);
+            handle.closed_at(&path, at + 4000, ClosedSegment::default());
+            recorder.finish().await;
+            session
+        }
+    };
+
+    let first = record(10, "第一次", "a.flv", t0).await;
+    // 下播 5 分钟后又开播：复用同一行，断流从上次停下（t0 + 4000）算起
+    let second = record(10, "第二次", "b.flv", t0 + 4000 + 5 * 60_000).await;
+    assert!(second.resumed);
+    assert_eq!(second.id, first.id);
+    let all = sessions(&pool).await;
+    assert_eq!(all.len(), 1);
+    let rows = segments(&pool, first.id).await;
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1].gap_before_ms, 5 * 60_000);
+    assert_eq!(rows[1].start_ms, FLV_DURATION_MS + 5 * 60_000);
+    assert_eq!(all[0].1, Some(t0), "时间轴 0 点不变");
+    assert_eq!(all[0].2, Some(t0 + 8000 + 5 * 60_000));
+    // 直播历史里还是一条，标题和开播时间取第一次
+    let history = StreamerInfo::select().fetch_all(&pool).await.unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].title, "第一次");
+    assert_eq!(history[0].date.timestamp_millis(), t0);
+
+    // 超出窗口：新的一场
+    let third = record(10, "第三次", "c.flv", t0 + 8000 + 16 * 60_000).await;
+    assert!(!third.resumed);
+    assert_eq!(sessions(&pool).await.len(), 2);
+    // 窗口为 0：从不合并
+    let fourth = record(0, "第四次", "d.flv", t0 + 12_000 + 16 * 60_000 + 1000).await;
+    assert!(!fourth.resumed);
+    let all = sessions(&pool).await;
+    assert_eq!(all.len(), 3);
+    assert_eq!(segments(&pool, fourth.id).await[0].start_ms, 0);
+    let history = StreamerInfo::select().fetch_all(&pool).await.unwrap();
+    assert_eq!(
+        history.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(),
+        vec!["第一次", "第三次", "第四次"]
+    );
+}
+
+/// 上一场还在录（或崩溃后还没收尾）时不去接它；别的主播的场次也不会被接上。
+#[tokio::test]
+async fn unfinished_or_foreign_sessions_are_not_resumed() {
+    let (_dir, pool) = setup().await;
+    sqlx::query("INSERT INTO livestreamers (id, url, remark) VALUES (2, 'https://b', 'b')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let t0 = 1_700_000_000_000;
+    let first = go_live(&pool, t0, 10).await;
+    // 刚插入的行 ended_at 为空（正在录）
+    let again = go_live(&pool, t0 + 1000, 10).await;
+    assert_ne!(again.id, first.id);
+    store::close_session(&pool, again.id, t0 + 2000)
+        .await
+        .unwrap();
+    let other = store::open_session(&pool, 2, &info("b", t0 + 3000), t0 + 3000, 600_000)
+        .await
+        .unwrap();
+    assert!(!other.resumed);
+    assert_ne!(other.id, again.id);
+    let streamer_ids: Vec<Option<i64>> =
+        sqlx::query_scalar("SELECT streamer_id FROM stream_sessions ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(streamer_ids, vec![Some(1), Some(1), Some(2)]);
+}
+
+#[tokio::test]
+async fn completion_only_downloaders_get_a_start_from_the_content() {
+    let (dir, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let session = go_live(&pool, t0, 10).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
+    let handle = recorder.handle();
+    handle.run_started_at(t0);
+    let a = write_flv(dir.path(), "a.flv");
+    handle.closed_at(&a, t0 + 10_000, ClosedSegment::default());
+    let b = write_flv(dir.path(), "b.flv");
+    handle.closed_at(&b, t0 + 14_000, ClosedSegment::default());
+    recorder.finish().await;
+
+    let (session_id, started_at, _) = sessions(&pool).await[0];
+    assert_eq!(started_at, Some(t0 + 10_000 - FLV_DURATION_MS));
+    let rows = segments(&pool, session_id).await;
+    assert_eq!(
+        rows.iter()
+            .map(|r| (r.start_ms, r.end_ms, r.gap_before_ms))
+            .collect::<Vec<_>>(),
+        vec![
+            (0, Some(FLV_DURATION_MS), 0),
+            (FLV_DURATION_MS, Some(2 * FLV_DURATION_MS), 0)
+        ]
+    );
+}
+
+#[tokio::test]
+async fn reported_duration_is_used_when_no_index_can_be_built() {
+    let (dir, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let session = go_live(&pool, t0, 10).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
+    let handle = recorder.handle();
+    handle.run_started_at(t0);
+    let a = dir.path().join("a.mkv");
+    std::fs::write(&a, b"not indexable").unwrap();
+    handle.opened_at(&a, t0);
+    handle.closed_at(
+        &a,
+        t0 + 9_000,
+        ClosedSegment {
+            duration_ms: Some(7_500),
+            ..Default::default()
+        },
+    );
+    recorder.finish().await;
+
+    let (session_id, _, _) = sessions(&pool).await[0];
+    let rows = segments(&pool, session_id).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!((rows[0].start_ms, rows[0].end_ms), (0, Some(7_500)));
+    assert_eq!(rows[0].index_path, None);
+}
+
+#[tokio::test]
+async fn segments_that_never_reached_the_disk_leave_no_rows() {
+    let (dir, pool) = setup().await;
+    let session = go_live(&pool, recorder::now_ms(), 10).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
+    let handle = recorder.handle();
+    handle.run_started();
+    handle.opened(&dir.path().join("never.flv.part"));
+    handle.run_started();
+    let empty = dir.path().join("empty.flv");
+    std::fs::write(&empty, b"").unwrap();
+    handle.opened(&empty);
+    recorder.finish().await;
+    // 场次行照样留着（直播历史里有这一场），只是没有时间轴
+    let all = sessions(&pool).await;
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].1, None);
+    assert!(all[0].2.is_some());
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM segments")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn open_segment_is_finalized_from_disk_when_the_run_ends() {
+    let (dir, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let session = go_live(&pool, t0, 10).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
+    let handle = recorder.handle();
+    handle.run_started_at(t0);
+    // 下载器出错退出，没等到关段事件
+    let part = write_flv(dir.path(), "a.flv.part");
+    handle.opened_at(&part, t0);
+    handle.run_started_at(t0 + 60_000);
+    recorder.finish().await;
+
+    let (session_id, _, ended_at) = sessions(&pool).await[0];
+    let rows = segments(&pool, session_id).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].path, s(&part));
+    assert_eq!(rows[0].state, SegmentState::Finished);
+    assert_eq!(rows[0].end_ms, Some(FLV_DURATION_MS));
+    assert_eq!(ended_at, Some(t0 + 60_000));
+}
+
+async fn locate_fixture() -> (TempDir, ConnectionPool, i64, Vec<SegmentRow>) {
+    let (dir, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let session = go_live(&pool, t0, 10).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
+    let handle = recorder.handle();
+    for (name, at) in [("a.flv", t0), ("b.flv", t0 + 3965), ("c.flv", t0 + 30_000)] {
+        let path = write_flv(dir.path(), name);
+        handle.opened_at(&path, at);
+        handle.closed_at(&path, at + FLV_DURATION_MS, ClosedSegment::default());
+    }
+    recorder.finish().await;
+    let session_id = sessions(&pool).await[0].0;
+    let rows = segments(&pool, session_id).await;
+    assert_eq!(
+        rows.iter().map(|r| r.start_ms).collect::<Vec<_>>(),
+        vec![0, 3965, 30_000]
+    );
+    (dir, pool, session_id, rows)
+}
+
+#[tokio::test]
+async fn locate_maps_session_time_to_a_keyframe_offset() {
+    let (_dir, pool, session_id, rows) = locate_fixture().await;
+    let flv = build_flv(0, 100, 25, None);
+
+    let hit = locate(&pool, session_id, 1500).await.unwrap().unwrap();
+    assert_eq!(hit.segment_id, rows[0].id);
+    assert_eq!(hit.keyframe_ms, 1000);
+    assert_eq!(hit.offset, flv.keyframes[1].1);
+    assert_eq!(hit.header_len, flv.header_len);
+    assert_eq!(hit.container, Container::Flv);
+    assert_eq!(hit.base_ts, Some(0));
+
+    let hit = locate(&pool, session_id, 3965 + 2500)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(hit.segment_id, rows[1].id);
+    assert_eq!(hit.keyframe_ms, 3965 + 2000);
+    assert_eq!(hit.offset, flv.keyframes[2].1);
+
+    // 落在断流空档：前进到下一段的第一个关键帧
+    let hit = locate(&pool, session_id, 10_000).await.unwrap().unwrap();
+    assert_eq!(hit.segment_id, rows[2].id);
+    assert_eq!(hit.keyframe_ms, 30_000);
+    assert_eq!(hit.offset, flv.keyframes[0].1);
+
+    // 晚于最后一段：最后一个关键帧
+    let hit = locate(&pool, session_id, 1_000_000).await.unwrap().unwrap();
+    assert_eq!(hit.keyframe_ms, 33_000);
+
+    // 从偏移起读就是一个关键帧 tag
+    let bytes = std::fs::read(&hit.path).unwrap();
+    assert_eq!(bytes[hit.offset as usize], 9);
+    assert_eq!(bytes[hit.offset as usize + 11], 0x17);
+
+    assert!(locate(&pool, session_id + 1, 0).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn session_keyframes_span_segments_in_order() {
+    let (_dir, pool, session_id, rows) = locate_fixture().await;
+    let keys = session_keyframes(&pool, session_id, 2000, 31_000)
+        .await
+        .unwrap();
+    assert_eq!(
+        keys.iter()
+            .map(|k| (k.t_ms, k.segment_id))
+            .collect::<Vec<_>>(),
+        vec![
+            (2000, rows[0].id),
+            (3000, rows[0].id),
+            (3965, rows[1].id),
+            (4965, rows[1].id),
+            (5965, rows[1].id),
+            (6965, rows[1].id),
+            (30_000, rows[2].id),
+            (31_000, rows[2].id),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn startup_recovery_finalizes_leftover_recording_segments() {
+    let (dir, pool) = setup().await;
+    let started_at = 1_700_000_000_000;
+    let opened = go_live(&pool, started_at, 10).await;
+    store::begin_recording(&pool, opened.id).await.unwrap();
+    store::set_started_at(&pool, opened.id, started_at)
+        .await
+        .unwrap();
+
+    // 1. 被 kill -9 的 mesio 分段：文件写到一半，索引缓存比文件新
+    let flv = build_flv(0, 100, 25, None);
+    let killed = dir.path().join("killed.flv");
+    std::fs::write(&killed, &flv.bytes).unwrap();
+    index::refresh(&killed, false).unwrap();
+    let cut = flv.keyframes[3].1 + 20;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&killed)
+        .unwrap()
+        .set_len(cut)
+        .unwrap();
+    let killed_id = store::insert_segment(&pool, opened.id, &s(&killed), "flv", 0, 0)
+        .await
+        .unwrap();
+    // 2. 录制中的 `.part` 已经被改名；最后一次写盘在 started_at + 20 s
+    let renamed = write_flv(dir.path(), "renamed.flv");
+    let last_write = started_at + 20_000;
+    std::fs::File::options()
+        .write(true)
+        .open(&renamed)
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_millis(last_write as u64))
+        .unwrap();
+    let renamed_id = store::insert_segment(
+        &pool,
+        opened.id,
+        &format!("{}.part", s(&renamed)),
+        "flv",
+        10_000,
+        5000,
+    )
+    .await
+    .unwrap();
+    // 3. 文件从没生成
+    let ghost_id = store::insert_segment(
+        &pool,
+        opened.id,
+        &s(&dir.path().join("ghost.flv")),
+        "flv",
+        20_000,
+        0,
+    )
+    .await
+    .unwrap();
+    // 另一场的分段文件已经被搬走：按时间轴算
+    let moved_id: i64 = sqlx::query_scalar(
+        "INSERT INTO stream_sessions (name, url, title, date, live_cover_path)
+         VALUES ('c', 'https://c', 't', '2026-09-24T08:00:00Z', '') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    store::set_started_at(&pool, moved_id, started_at)
+        .await
+        .unwrap();
+    let moved_seg = store::insert_segment(&pool, moved_id, "moved-away.flv", "flv", 0, 0)
+        .await
+        .unwrap();
+    store::finish_segment(
+        &pool,
+        moved_seg,
+        &store::FinishedSegment {
+            path: "moved-away.flv".into(),
+            state: SegmentState::Finished,
+            end_ms: 7000,
+            bytes: Some(1),
+            index_path: None,
+            danmaku_path: None,
+        },
+    )
+    .await
+    .unwrap();
+    // 再一场（别的主播）一个分段都没有
+    let empty_date = "2026-09-24T08:00:00.123456789+00:00";
+    let empty_id: i64 = sqlx::query_scalar(
+        "INSERT INTO stream_sessions (name, url, title, date, live_cover_path)
+         VALUES ('b', 'https://b', 't', ?, '') RETURNING id",
+    )
+    .bind(empty_date)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    recover(&pool).await.unwrap();
+
+    let rows = segments(&pool, opened.id).await;
+    assert_eq!(
+        rows.iter().map(|r| r.id).collect::<Vec<_>>(),
+        vec![killed_id, renamed_id]
+    );
+    assert!(!rows.iter().any(|r| r.id == ghost_id));
+    let killed_row = &rows[0];
+    assert_eq!(killed_row.state, SegmentState::Finished);
+    assert_eq!(killed_row.bytes, Some(cut as i64));
+    // 截断后最后一个完整 tag 在第三个关键帧之后、第四个之前
+    let index = index::load(&killed).unwrap();
+    assert!(index.complete);
+    assert_eq!(index.keyframes.len(), 3);
+    assert!(index.keyframes.iter().all(|k| k.offset < cut));
+    assert_eq!(killed_row.end_ms, Some(index.duration_ms as i64));
+    assert!(killed_row.end_ms.unwrap() < 3000 + 40);
+
+    let renamed_row = &rows[1];
+    assert_eq!(renamed_row.path, s(&renamed));
+    assert_eq!(renamed_row.state, SegmentState::Finished);
+    assert_eq!(renamed_row.end_ms, Some(10_000 + FLV_DURATION_MS));
+    assert_eq!(
+        renamed_row.index_path,
+        Some(s(&index::index_path(&renamed)))
+    );
+
+    let all = sessions(&pool).await;
+    assert_eq!(all.len(), 3, "没有分段的场次也保留（直播历史里有它）");
+    let ended_at = last_write;
+    assert_eq!(all[0].2, Some(ended_at), "取最后一个分段文件的修改时间");
+    assert_eq!(
+        all[1],
+        (moved_id, Some(started_at), Some(started_at + 7000))
+    );
+    assert_eq!(
+        all[2],
+        (
+            empty_id,
+            None,
+            Some(
+                DateTime::parse_from_rfc3339(empty_date)
+                    .unwrap()
+                    .timestamp_millis()
+            )
+        ),
+        "没有分段的记为开播时间"
+    );
+
+    // 收尾过的场次可以被很快开播的下一次录制接上
+    let resumed = go_live(&pool, ended_at + 60_000, 10).await;
+    assert!(resumed.resumed);
+    assert_eq!(resumed.id, opened.id);
+    let start = store::begin_recording(&pool, resumed.id).await.unwrap();
+    assert_eq!(start.started_at, Some(started_at));
+    assert_eq!(start.last_end_ms, 10_000 + FLV_DURATION_MS);
+    assert_eq!(start.resumed_after, Some(ended_at));
+    assert_eq!(sessions(&pool).await[0].2, None, "开始录就清空 ended_at");
+}
+
+/// 像写入端那样把 `bytes` 里时间戳早于 `before_ts` 的 FLV tag 交给索引旁路。
+fn tap_flv_tags(file: &FileTap, bytes: &[u8], before_ts: u32) -> Option<u32> {
+    tap_flv_tags_from(file, bytes, 0, before_ts)
+}
+
+/// 同 [`tap_flv_tags`]，只交时间戳在 `[from_ts, before_ts)` 里的；返回交出的最后一个时间戳。
+fn tap_flv_tags_from(file: &FileTap, bytes: &[u8], from_ts: u32, before_ts: u32) -> Option<u32> {
+    let mut offset = 13;
+    let mut last = None;
+    while offset < bytes.len() {
+        let h = &bytes[offset..offset + 11];
+        let size = u32::from_be_bytes([0, h[1], h[2], h[3]]) as usize;
+        let ts = u32::from_be_bytes([h[7], h[4], h[5], h[6]]);
+        if ts >= before_ts {
+            break;
+        }
+        if ts >= from_ts {
+            let body = bytes::Bytes::copy_from_slice(&bytes[offset + 11..offset + 11 + size]);
+            file.flv_tag(offset as u64, h[0], ts, &body);
+            last = Some(ts);
+        }
+        offset += 15 + size;
+    }
+    last
+}
+
+/// stream-gears 边写 `.part` 边建索引：改名后录制器先等索引任务处理完已发出的事件，
+/// 再让 `.idx` 跟着改名；段长取流式建好的索引，关段续扫只做兜底。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn streamed_index_follows_the_rename_at_close() {
+    let (dir, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let session = go_live(&pool, t0, 10).await;
+    let tap = index::live::spawn();
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), Some(tap));
+    let handle = recorder.handle();
+    let tap = handle.index_tap().expect("index tap");
+    handle.run_started_at(t0);
+
+    let part = dir.path().join("a.flv.part");
+    let flv = build_flv(0, 100, 25, None);
+    std::fs::write(&part, &flv.bytes).unwrap();
+    handle.opened_at(&part, t0);
+    let file = tap.open(&part);
+    tap_flv_tags(&file, &flv.bytes, u32::MAX);
+    file.closed(flv.bytes.len() as u64);
+    let done = dir.path().join("a.flv");
+    std::fs::rename(&part, &done).unwrap();
+    handle.closed_at(&done, t0 + 4200, ClosedSegment::default());
+    recorder.finish().await;
+
+    let rows = segments(&pool, session.id).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].end_ms, Some(FLV_DURATION_MS));
+    assert_eq!(rows[0].index_path, Some(s(&index::index_path(&done))));
+    assert!(!index::index_path(&part).exists());
+    let cached = index::load(&done).unwrap();
+    assert!(cached.complete);
+    assert_eq!(cached.keyframes.len(), 4);
+    assert_eq!(cached.source_len, flv.bytes.len() as u64);
+}
+
+/// 场次记录器写完库后异步更新登记表，等它跟上。
+async fn wait_for_anchor(session_id: i64, expected: Option<live::Anchor>) {
+    for _ in 0..200 {
+        if live::anchor(session_id) == expected {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("锚点应为 {expected:?}，实际 {:?}", live::anchor(session_id));
+}
+
+#[tokio::test]
+async fn recording_sessions_are_registered_with_a_timeline_anchor() {
+    let (dir, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let opened = go_live(&pool, t0, 10).await;
+    let id = live::unique_session_id(&pool, opened.id).await;
+    // 主播 id 也换一个别的测试不会用到的
+    let recorder = SessionRecorder::spawn(
+        pool.clone(),
+        SessionTarget {
+            session_id: id,
+            streamer_id: 3_001,
+            bytes: None,
+        },
+        None,
+    );
+    let handle = recorder.handle();
+    handle.run_started_at(t0);
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(!live::is_recording(id), "第一个分段放上时间轴之前不登记");
+    assert_eq!(live::session_of_streamer(3_001), None);
+
+    let a = write_flv(dir.path(), "a.flv");
+    handle.opened_at(&a, t0 + 500);
+    wait_for_anchor(
+        id,
+        Some(live::Anchor {
+            session_ms: 0,
+            wall_ms: t0 + 500,
+        }),
+    )
+    .await;
+    assert_eq!(live::session_of_streamer(3_001), Some(id));
+
+    // 关段：锚点换成内容末尾对应的墙钟，开段时 CDN 先发的缓存造成的偏差到这里消掉
+    handle.closed_at(&a, t0 + 4_300, ClosedSegment::default());
+    wait_for_anchor(
+        id,
+        Some(live::Anchor {
+            session_ms: FLV_DURATION_MS,
+            wall_ms: t0 + 4_300,
+        }),
+    )
+    .await;
+
+    // 断流 10 s 后重连：新段接在断流之后
+    let b = write_flv(dir.path(), "b.flv");
+    handle.opened_at(&b, t0 + 14_300);
+    wait_for_anchor(
+        id,
+        Some(live::Anchor {
+            session_ms: FLV_DURATION_MS + 10_000,
+            wall_ms: t0 + 14_300,
+        }),
+    )
+    .await;
+
+    recorder.finish().await;
+    assert!(!live::is_recording(id), "录制结束即注销");
+    assert_eq!(live::session_of_streamer(3_001), None);
+}
+
+/// 边写边建索引的分段，录制中的观测取索引任务扫到的时长和扫到那里的墙钟，不扫盘。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn open_tapped_segments_are_observed_from_the_index_task() {
+    let dir = tempfile::tempdir().unwrap();
+    let part = dir.path().join("a.flv.part");
+    let flv = build_flv(0, 100, 25, None);
+    // 盘上已是整段，写入端只交出前两个 GOP：观测到的时长短于整段，说明没扫盘
+    std::fs::write(&part, &flv.bytes).unwrap();
+    let tap = index::live::spawn();
+    let file = tap.open(&part);
+    let last_ts = tap_flv_tags(&file, &flv.bytes, 2_000).unwrap();
+    let mut written = None;
+    for _ in 0..200 {
+        written = index::live::written(&part);
+        if written.is_some_and(|(ms, _)| ms == last_ts) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let (written_ms, written_at) = written.expect("索引任务扫到了关键帧");
+    assert_eq!(written_ms, last_ts);
+
+    let id = 9_200_003;
+    let mut guard = live::register(id, 1, None);
+    guard.sample_segment(part.clone(), 50_000);
+    let expected = Some(live::Anchor {
+        session_ms: 50_000 + i64::from(written_ms),
+        wall_ms: written_at,
+    });
+    for _ in 0..200 {
+        if live::written_anchor(id, written_at) == expected {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(live::written_anchor(id, written_at), expected);
+
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert_eq!(
+        index::live::written(&part),
+        Some((written_ms, written_at)),
+        "时长没变长，墙钟不往后挪"
+    );
+    tap_flv_tags_from(&file, &flv.bytes, 2_000, u32::MAX);
+    file.closed(flv.bytes.len() as u64);
+    tap.sync().await;
+    assert_eq!(index::live::written(&part), None, "关段后不再跟踪");
+    drop(guard);
+}
+
+#[test]
+fn segment_files_are_matched_to_the_working_directory_by_name() {
+    let file = |session_id, path: &str, start_ms| store::SegmentFile {
+        session_id,
+        path: path.to_string(),
+        start_ms,
+    };
+    let dir = Path::new("/rec");
+    let by_name = store::segment_files_in_dir(
+        vec![
+            file(1, "a.flv", 0),
+            file(1, "./b.ts", 60_000),
+            file(2, "/rec/c.flv", 5_000),
+            file(3, "/elsewhere/d.flv", 0),
+            file(3, "sub/e.flv", 0),
+            file(4, "a.flv", 7_000),
+        ],
+        Some(dir),
+    );
+    let mut names: Vec<_> = by_name.keys().cloned().collect();
+    names.sort();
+    assert_eq!(names, ["a.flv", "b.ts", "c.flv"]);
+    assert_eq!(
+        (by_name["a.flv"].session_id, by_name["a.flv"].start_ms),
+        (4, 7_000)
+    );
+    assert_eq!(
+        (by_name["b.ts"].session_id, by_name["b.ts"].start_ms),
+        (1, 60_000)
+    );
+    assert_eq!(by_name["c.flv"].session_id, 2);
+    let no_cwd = store::segment_files_in_dir(vec![file(2, "/rec/c.flv", 0)], None);
+    assert!(no_cwd.is_empty());
+}
+
+#[tokio::test]
+async fn only_replayable_segments_and_sessions_with_a_timeline_are_listed() {
+    let (_dir, pool) = setup().await;
+    let legacy = go_live(&pool, 1_000, 0).await.id;
+    store::close_session(&pool, legacy, 2_000).await.unwrap();
+    let session = go_live(&pool, 10_000, 0).await.id;
+    store::set_started_at(&pool, session, 10_000).await.unwrap();
+    let insert = |path: &'static str, container: &'static str, start_ms: i64| {
+        let pool = pool.clone();
+        async move {
+            store::insert_segment(&pool, session, path, container, start_ms, 0)
+                .await
+                .unwrap()
+        }
+    };
+    insert("a.flv", "flv", 0).await;
+    let waiting = insert("b.flv", "flv", 60_000).await;
+    let deleted = insert("c.flv", "flv", 120_000).await;
+    insert("d.mp4", "mp4", 180_000).await;
+    store::set_segment_state(&pool, waiting, SegmentState::PendingDelete)
+        .await
+        .unwrap();
+    store::set_segment_state(&pool, deleted, SegmentState::Deleted)
+        .await
+        .unwrap();
+
+    let files = store::replayable_segment_files(&pool).await.unwrap();
+    let listed: Vec<_> = files
+        .iter()
+        .map(|f| (f.session_id, f.path.as_str(), f.start_ms))
+        .collect();
+    assert_eq!(listed, [(session, "a.flv", 0), (session, "b.flv", 60_000)]);
+    let with_timeline = store::sessions_with_timeline(&pool).await.unwrap();
+    assert!(with_timeline.contains(&session));
+    assert!(!with_timeline.contains(&legacy));
+
+    let axum::Json(rows) =
+        crate::server::api::endpoints::get_streamer_info(axum::extract::State(pool.clone()))
+            .await
+            .unwrap();
+    let rows = serde_json::to_value(rows).unwrap();
+    let flag = |id: i64| {
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == id)
+            .map(|r| r["has_timeline"].clone())
+    };
+    assert_eq!(flag(session), Some(serde_json::Value::Bool(true)));
+    assert_eq!(flag(legacy), Some(serde_json::Value::Bool(false)));
+}
+
+#[tokio::test]
+async fn session_totals_count_segments_waiting_for_deletion() {
+    let (_dir, pool) = setup().await;
+    let session = go_live(&pool, 10_000, 0).await.id;
+    store::set_started_at(&pool, session, 10_000).await.unwrap();
+    for (i, state) in [
+        SegmentState::Finished,
+        SegmentState::PendingDelete,
+        SegmentState::Deleted,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let start = i as i64 * 60_000;
+        let id = store::insert_segment(&pool, session, &format!("{i}.flv"), "flv", start, 0)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE segments SET end_ms = ?, bytes = 1000 WHERE id = ?")
+            .bind(start + 60_000)
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        store::set_segment_state(&pool, id, state).await.unwrap();
+    }
+
+    let (rows, total) = store::list_sessions(&pool, None, 10, 0).await.unwrap();
+    assert_eq!(total, 1);
+    let row = &rows[0];
+    assert_eq!(
+        (row.segment_count, row.bytes, row.end_ms),
+        (2, 2000, 120_000),
+        "等着被删的分段还能回看，算进合计；已删的不算"
+    );
+    assert_eq!(
+        store::session_summary(&pool, session)
+            .await
+            .unwrap()
+            .as_ref(),
+        Some(row)
+    );
+
+    let response = crate::server::api::sessions::get_session(
+        axum::extract::State(pool.clone()),
+        axum::extract::Path(session),
+    )
+    .await;
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let detail: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(detail["segment_count"], 2);
+    assert_eq!(detail["duration_ms"], 120_000);
+}

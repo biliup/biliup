@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react'
+import React, { useState, useMemo, useCallback } from 'react'
 import { FormFCChild } from '@douyinfe/semi-ui/lib/es/form'
 import {
   IconChevronDown,
@@ -25,10 +25,31 @@ import useSWR from 'swr'
 import { BiliType, fetcher, StudioEntity } from '../lib/api-streamer'
 import { useBiliUsers, useTypeTree } from '../lib/use-streamers'
 
-const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>> = ({
+/** 把已保存的定时发布延迟 dtime(秒)换算成滚轮的「小时 / 分钟」;没有或不在可选范围内时用默认的 4 小时 0 分 */
+function delayFromDtime(dtime: any): { hours: number; minutes: number } {
+  if (dtime) {
+    const hours = Math.floor(dtime / 3600)
+    const minutes = Math.floor((dtime % 3600) / 60)
+    if (hours >= 4 && hours < 24 * 15) {
+      return { hours, minutes: Math.floor(minutes / 5) * 5 }
+    }
+  }
+  return { hours: 4, minutes: 0 }
+}
+
+type TemplateFieldsProps = FormFCChild<StudioEntity & { isDtime: boolean }> & {
+  /** 替换「投稿账号」一栏（Fleet 控制面按节点上报的 mid 选账号，而不是本机的凭据文件） */
+  accountField?: React.ReactNode
+  /** 分区树拉不到时（本机没有 B 站账号）改为直接填分区 ID，值是数字而不是 [父, 子] */
+  plainTid?: boolean
+}
+
+const TemplateFields: React.FC<TemplateFieldsProps> = ({
   formState,
   formApi,
   values,
+  accountField,
+  plainTid,
 }) => {
   const {
     Section,
@@ -47,7 +68,7 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
     TextArea,
   } = Form
   const { Text } = Typography
-  const { typeTree, typeTreeV2, isError, isLoading } = useTypeTree()
+  const { typeTree, isError, isLoading } = useTypeTree()
   const treeData = typeTree?.map((type: BiliType) => {
     return {
       ...type,
@@ -87,12 +108,12 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
         direction="horizontal"
         label="互动设置"
       />
-      <Input field="dynamic" label="粉丝动态" style={{ width: 464 }} />
+      <Input field="dynamic" label="粉丝动态" style={{ width: '100%', maxWidth: 464 }} />
       <Form.Select
         field="uploader"
         label="上传插件"
         initValue={values.uploader ?? 'biliup-rs'}
-        style={{ width: 250 }}
+        style={{ width: '100%', maxWidth: 250 }}
         showClear
       >
         <Form.Select.Option value="bili_web">bili_web</Form.Select.Option>
@@ -112,11 +133,11 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
               <br />
               其中的&quot;@credits&quot;会依次替换为下面输入的@
             </div>
-            <Button icon={<IconPlusCircle />} onClick={add} theme="light">
+            <Button icon={<IconPlusCircle />} onClick={() => add()} theme="light">
               添加行
             </Button>
             {arrayFields.map(({ field, key, remove }, i) => (
-              <div key={key} style={{ width: 1000, display: 'flex' }}>
+              <div key={key} style={{ width: '100%', display: 'flex' }}>
                 <InputGroup>
                   <Input field={`${field}.username`} label="需要@的用户名" placeholder="username" />
                   <Input field={`${field}.uid`} label="需要@的uid" placeholder="uid" />
@@ -171,20 +192,10 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
       text: `${i * 5}分钟`,
     }
   })
-  const [selectedHours, setSelectedHours] = useState(4)
-  const [selectedMinutes, setSelectedMinutes] = useState(0)
-
-  useEffect(() => {
-    const dtime = formApi.getValue('dtime')
-    if (dtime) {
-      const hours = Math.floor(dtime / 3600)
-      const minutes = Math.floor((dtime % 3600) / 60)
-      if (hours >= 4 && hours < 24 * 15) {
-        setSelectedHours(hours)
-        setSelectedMinutes(Math.floor(minutes / 5) * 5)
-      }
-    }
-  }, [formApi])
+  // 滚轮的初始选中值取自表单里已有的 dtime(编辑模板时)。Semi Form 在构造时就把 initValues 放进
+  // store,首次渲染即可读到,直接作为 useState 初始值,不必挂载后在 effect 里再 setState 一轮
+  const [selectedHours, setSelectedHours] = useState(() => delayFromDtime(formApi.getValue('dtime')).hours)
+  const [selectedMinutes, setSelectedMinutes] = useState(() => delayFromDtime(formApi.getValue('dtime')).minutes)
 
   return (
     <>
@@ -193,21 +204,23 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
           rules={[{ required: true }]}
           field="template_name"
           label="模板名称"
-          style={{ width: 464 }}
+          style={{ width: '100%', maxWidth: 464 }}
         />
-        <Form.Select
-          rules={[{ required: true }]}
-          field="user_cookie"
-          label={{ text: '投稿账号' }}
-          style={{ width: 176 }}
-          optionList={list}
-        />
+        {accountField ?? (
+          <Form.Select
+            rules={[{ required: true }]}
+            field="user_cookie"
+            label={{ text: '投稿账号' }}
+            style={{ width: '100%', maxWidth: 176 }}
+            optionList={list}
+          />
+        )}
       </Section>
       <Section text={'基本设置'}>
         <Input
           field="title"
           label="视频标题"
-          style={{ width: 464 }}
+          style={{ width: '100%', maxWidth: 464 }}
           placeholder="稿件标题"
           extraText={
             <div style={{ fontSize: 14 }}>
@@ -226,37 +239,46 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
           initValue={formApi.getValue('copyright') ?? 2}
           extraText={<div style={{ fontSize: 14 }}>如不填写转载来源默认为直播间地址</div>}
         >
-          <Radio value={2} style={{ alignItems: 'center', flexShrink: 0 }}>
+          <Radio value={2} style={{ alignItems: 'center', width: '100%' }} addonStyle={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 0 }}>
             <span style={{ flexShrink: 0 }}>转载</span>
             <Input
               field="copyright_source"
               onClick={() => formApi.setValue('copyright', 2)}
               placeholder="转载视频请注明来源（例：转自http://www.xx.com/yy）注明来源会更快地通过审核哦"
               noLabel
-              fieldStyle={{ padding: 0, marginLeft: 24, width: 560 }}
+              fieldStyle={{ padding: 0, marginLeft: 12, flex: 1, minWidth: 0, maxWidth: 560 }}
             />
           </Radio>
           <div onClick={() => formApi.setValue('copyright_source', '')}>
             <Radio value={1}>自制</Radio>
           </div>
         </RadioGroup>
-        <Cascader
-          field="tid"
-          label="分区"
-          style={{ width: 272 }}
-          treeData={treeData}
-          placeholder="投稿分区"
-          dropdownStyle={{ maxWidth: 670 }}
-          rules={[{ required: true }]}
-        />
-        <Select
+        {plainTid ? (
+          <InputNumber
+            field="tid"
+            label="分区 ID"
+            style={{ width: '100%', maxWidth: 272 }}
+            placeholder="投稿分区 tid"
+            extraText="本机没有可用的 B 站账号，拉不到分区列表，请直接填分区 ID"
+            rules={[{ required: true }]}
+          />
+        ) : (
+          <Cascader
+            field="tid"
+            label="分区"
+            style={{ width: '100%', maxWidth: 272 }}
+            treeData={treeData}
+            placeholder="投稿分区"
+            dropdownStyle={{ maxWidth: 670 }}
+            rules={[{ required: true }]}
+          />
+        )}
+        <InputNumber
           field="tid_v2"
-          label="新版分区"
-          style={{ width: 272 }}
-          placeholder="可选新版分区"
-          optionList={typeTreeV2.map(type => ({ label: type.name, value: type.id }))}
-          filter
-          showClear
+          label="分区 tid_v2"
+          style={{ width: '100%', maxWidth: 272 }}
+          placeholder="可选，新版分区 ID"
+          extraText="对应 B 站 tid_v2；不填则仅使用上方分区"
         />
         <TagInput
           max={12}
@@ -267,8 +289,7 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
           addOnBlur={true}
           separator=","
           placeholder="可用英文逗号分隔以批量输入标签，失焦/Enter 以保存"
-          onChange={v => console.log(v)}
-          style={{ width: 560 }}
+          style={{ width: '100%', maxWidth: 560 }}
           rules={[{ required: true, message: 'Tag不能为空' }]}
           onExceed={v => {
             Notification.warning({
@@ -290,11 +311,11 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
         <Input
           field="cover_path"
           label="视频封面"
-          style={{ width: 464 }}
+          style={{ width: '100%', maxWidth: 464 }}
           placeholder="/cover/up.jpg"
         />
         <TextArea
-          style={{ maxWidth: 560 }}
+          style={{ width: '100%', maxWidth: 560 }}
           field="description"
           label="简介"
           placeholder="填写更全面的相关信息，让更多的人能找到你的视频吧"
@@ -303,7 +324,7 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
           showClear
         />
         <TextArea
-          style={{ maxWidth: 560 }}
+          style={{ width: '100%', maxWidth: 560 }}
           field="extra_fields"
           label="额外字段"
           placeholder="Json格式，示例：{key: 'value'}"
@@ -355,7 +376,6 @@ const TemplateFields: React.FC<FormFCChild<StudioEntity & { isDtime: boolean }>>
                     duration: 3,
                     position: 'top',
                   })
-                  console.log(delaySeconds)
                 }}
               >
                 确认

@@ -1,6 +1,5 @@
 .idea
 .vscode
-.gitattributes
 *.pyc
 *.flv
 *.mp4
@@ -38,6 +37,7 @@ biliup/**/public
 !package-lock.json
 qrcode.png
 *.log
+*.tsbuildinfo
 /*.ts
 /biliup/stream-gears/
 data/
@@ -56,3 +56,5 @@ cookies.json
 logs/
 CLAUDE.md
 .claude/
+/crates/stream-gears/stream_gears/*.so
+/crates/stream-gears/stream_gears/*.pyd

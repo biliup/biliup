@@ -15,7 +15,7 @@ pub struct UploadStreamer {
     pub title: Option<String>,
     /// 分区ID
     pub tid: Option<u16>,
-    /// 新版分区ID
+    /// 新版分区ID (tid_v2)
     pub tid_v2: Option<u32>,
     /// 版权类型（1-自制，2-转载）
     pub copyright: Option<u8>,

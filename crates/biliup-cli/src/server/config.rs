@@ -1,24 +1,53 @@
+use crate::server::auto_clip::settings::AutoClipConfig;
 use crate::server::core::downloader::DownloaderType;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::models::hook_step::HookStep;
-use biliup::bilibili::Credit;
-use biliup::downloader::live::DouyuCodec;
 use error_stack::{ResultExt, bail};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, path::Path, path::PathBuf};
 use struct_patch::Patch;
+
+/// 直播预览的取流方式，见 [`Config::preview_transport`]。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PreviewTransport {
+    /// 经 biliup 中转：复用正在写盘的那一路，不多拉 CDN
+    #[default]
+    Relay,
+    /// 浏览器直连 CDN：每个观众自己拉一路，省服务器出口带宽
+    Direct,
+}
 
 /// 全局配置结构体
 #[derive(bon::Builder, Debug, PartialEq, Clone, Serialize, Deserialize, Patch)]
 #[patch(attribute(derive(Debug, Clone, Default, Deserialize, Serialize)))]
 pub struct Config {
     // ===== 全局录播与上传设置 =====
-    /// 下载器类型：streamlink | ffmpeg | stream-gears | 自定义
+    /// 下载器类型：streamlink | ffmpeg | stream-gears | sync-downloader | mesio | 自定义
     #[serde(default)]
     pub downloader: Option<DownloaderType>,
 
+    /// 边录边传额外保存本地目录（仅 sync-downloader）
+    #[serde(default)]
+    pub sync_save_dir: Option<String>,
+
+    /// ffmpeg 可执行文件路径。不填时先用桌面版安装包自带的，再到 PATH 里找 `ffmpeg`。
+    /// 全局生效，主播覆写里不能改。
+    #[patch(skip)]
+    #[serde(default)]
+    pub ffmpeg_path: Option<String>,
+
     /// 文件大小限制（字节）
-    #[patch(attribute(serde(default, deserialize_with = "deserialize_option_patch")))]
+    ///
+    /// 主播覆写里这个字段的 `null` 是“显式清除、按主播关闭大小分段”，与其它字段不同。
+    /// 因此补丁序列化时必须略过未设置（`None`）：整份补丁会随主播落库、经接口回传，
+    /// 若把未设置也写成 `null`，下一次读取就会被当成显式清除，把全局 `file_size`
+    /// 清掉（边录边传因此退回 2 GiB 默认分段，stream-gears 则不再按大小分段）。
+    #[patch(attribute(serde(
+        default,
+        deserialize_with = "deserialize_option_patch",
+        skip_serializing_if = "Option::is_none"
+    )))]
     #[serde(default = "default_file_size")]
     pub file_size: Option<u64>,
 
@@ -43,7 +72,7 @@ pub struct Config {
     #[serde(default)]
     pub uploader: Option<String>,
 
-    /// 提交API类型：web | client
+    /// 投稿接口：web（默认）| app | b-cut-android
     #[serde(default)]
     pub submit_api: Option<String>,
 
@@ -82,6 +111,50 @@ pub struct Config {
     #[serde(default = "default_pool2_size")]
     pub pool2_size: u32,
 
+    /// 同一主播下播后多少分钟内再开播，接着记在上一场（直播历史里算一场，断流记在切片工作台
+    /// 的时间轴上）；0 = 不合并。投稿不受影响：断流后重新开始的录制仍单独投稿。
+    #[builder(default = default_live_merge_minutes())]
+    #[serde(default = "default_live_merge_minutes")]
+    pub live_merge_minutes: u64,
+
+    /// 投稿后保留录像的小时数：后处理 `rm`、边录边传投稿后删除临时文件时，录像先留这么久，
+    /// 到期后由每分钟一次的清理任务删除。0（默认）= 立即删除，与以前一样。
+    /// 被切片工作台引用、或所在场次设了「保留这场」的分段，不论这里怎么设都会等引用释放后再删。
+    #[builder(default)]
+    #[serde(default)]
+    pub retention_hours: u64,
+
+    /// 录像所在磁盘的最低可用空间（字节）：低于它时，每分钟一次按「没被引用的最旧 → 被引用的最旧」
+    /// 删已录完的分段，直到回到阈值以上。只删切片工作台记录过的分段，不删正在录的。
+    /// 空或 0（默认）= 不启用。
+    #[serde(default)]
+    pub min_free_space: Option<u64>,
+
+    /// 直播预览的取流方式：`relay`（默认，复用正在录制的那一路、经 biliup 中转，不多拉 CDN）
+    /// 或 `direct`（浏览器直接向 CDN 拉一路，省服务器带宽；平台不支持时自动回落中转）。
+    /// `None` 视同 `relay`。
+    #[serde(default)]
+    pub preview_transport: Option<PreviewTransport>,
+
+    /// 单条中转预览连接最长持续多少分钟，到点结束响应，播放器自动重连。服务端看不出客户端是否
+    /// 还在看（经过会替客户端读完上游的代理 / 隧道时，关掉播放器 TCP 也不断），这是回收这类
+    /// 「幽灵连接」的兜底。空 = 默认 30 分钟；0 = 不限。只认全局配置。
+    #[patch(skip)]
+    #[serde(default)]
+    pub preview_max_minutes: Option<u64>,
+
+    /// 自动切片（实验）：OpenAI 兼容的 chat / 转写接口。没配置时不序列化，与以前的配置完全一样。
+    /// 只认全局配置；接口只回显 key 的掩码，见 [`crate::server::auto_clip::settings`]。
+    #[patch(skip)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_clip: Option<AutoClipConfig>,
+
+    /// 自动切片：这个主播下播（过了断流合并窗口）后自动生成候选。只认主播覆写，全局配置里写了
+    /// 不生效（按主播开，免得每一场都花钱）；还要全局 `auto_clip.enabled` 打开才会跑。
+    #[patch(attribute(serde(skip_serializing_if = "Option::is_none")))]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_clip_after_live: Option<bool>,
+
     // ===== 各平台录播设置 =====
     /// 是否使用直播封面
     #[serde(default)]
@@ -100,9 +173,12 @@ pub struct Config {
     /// 斗鱼码率
     #[serde(default)]
     pub douyu_rate: Option<u32>,
-    /// 斗鱼视频编码：h264 | h265
+    /// 用户 Cookie 中 acf_did 的值
+    #[serde(default, rename = "douyu_deviceId", alias = "douyu_device_id")]
+    pub douyu_device_id: Option<String>,
+    /// 斗鱼视频编码：AVC 或 HEVC
     #[serde(default)]
-    pub douyu_codec: Option<DouyuCodec>,
+    pub douyu_codec: Option<String>,
     /// 斗鱼互动游戏运行时跳过录制
     #[serde(default)]
     pub douyu_disable_interactive_game: Option<bool>,
@@ -268,6 +344,33 @@ pub struct Config {
     pub loggers_level: Option<String>,
 }
 
+/// 投稿模板 `credits` 的一项：简介里的一个 `@credit` 换成 @ 这个用户。
+///
+/// 与 Web 表单存进 `uploadstreamers.credits` 的形状相同；表单存的 uid 是字符串，
+/// 配置文件里通常写成数字，两种都接受，统一存成字符串。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TemplateCredit {
+    pub username: String,
+    #[serde(deserialize_with = "uid_from_number_or_string")]
+    pub uid: String,
+}
+
+fn uid_from_number_or_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Uid {
+        Number(u64),
+        Text(String),
+    }
+    Ok(match Uid::deserialize(deserializer)? {
+        Uid::Number(n) => n.to_string(),
+        Uid::Text(s) => s,
+    })
+}
+
 /// 主播配置结构体
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct StreamerConfig {
@@ -282,7 +385,7 @@ pub struct StreamerConfig {
     #[serde(default)]
     pub tid: Option<u32>,
 
-    /// 新版分区ID
+    /// 新版分区ID (tid_v2)
     #[serde(default)]
     pub tid_v2: Option<u32>,
 
@@ -302,8 +405,9 @@ pub struct StreamerConfig {
     #[serde(default)]
     pub description: Option<String>,
 
+    /// 简介里 `@credit` 占位符依次替换成的用户
     #[serde(default)]
-    pub credits: Option<Vec<Credit>>,
+    pub credits: Option<Vec<TemplateCredit>>,
 
     #[serde(default)]
     pub dynamic: Option<String>,
@@ -495,14 +599,44 @@ fn default_pool2_size() -> u32 {
     3
 }
 
+/// 默认断流合并窗口：10 分钟
+fn default_live_merge_minutes() -> u64 {
+    10
+}
+
 impl Default for Config {
     fn default() -> Self {
         serde_json::from_value(serde_json::json!({})).expect("default config should deserialize")
     }
 }
 
+/// [`Config::preview_max_minutes`] 不填时的默认值。
+pub const DEFAULT_PREVIEW_MAX_MINUTES: u64 = 30;
+
 impl Config {
+    /// 单条中转预览连接的最长寿命，`None` 为不限，见 [`Config::preview_max_minutes`]。
+    pub fn preview_max_lifetime(&self) -> Option<std::time::Duration> {
+        match self
+            .preview_max_minutes
+            .unwrap_or(DEFAULT_PREVIEW_MAX_MINUTES)
+        {
+            0 => None,
+            minutes => Some(std::time::Duration::from_secs(minutes.saturating_mul(60))),
+        }
+    }
+
     pub fn validate_segment_limits(&self) -> AppResult<()> {
+        Ok(())
+    }
+
+    /// 下载池 / 上传池至少为 1：保存即生效，0 会让新录制 / 上传静默地再也不开始
+    pub fn validate_pool_sizes(&self) -> Result<(), String> {
+        if self.pool1_size == 0 {
+            return Err("下载线程池大小（pool1_size）至少为 1".to_string());
+        }
+        if self.pool2_size == 0 {
+            return Err("上传线程池大小（pool2_size）至少为 1".to_string());
+        }
         Ok(())
     }
 
@@ -621,14 +755,135 @@ mod tests {
         assert!(config.validate_segment_limits().is_ok());
     }
 
+    /// 主播覆写只写了 downloader 时，补丁经落库/接口回传一轮（序列化再反序列化）
+    /// 也不能凭空长出 `file_size: null` 把全局值清掉。
     #[test]
-    fn douyu_codec_accepts_supported_values_and_rejects_typos() {
-        let h264: Config = serde_json::from_str(r#"{"douyu_codec":"h264"}"#).unwrap();
-        assert_eq!(h264.douyu_codec, Some(DouyuCodec::H264));
+    fn override_round_trip_without_file_size_keeps_global_value() {
+        let global_size = 104_857_600;
+        let mut config = Config {
+            file_size: Some(global_size),
+            ..Config::default()
+        };
+        let patch: ConfigPatch =
+            serde_json::from_str(r#"{"downloader":"sync-downloader"}"#).unwrap();
 
-        let h265: Config = serde_json::from_str(r#"{"douyu_codec":"h265"}"#).unwrap();
-        assert_eq!(h265.douyu_codec, Some(DouyuCodec::H265));
+        let stored = serde_json::to_string(&patch).unwrap();
+        assert!(
+            !stored.contains("file_size"),
+            "未设置的 file_size 不应被序列化成占位 null: {stored}"
+        );
 
-        assert!(serde_json::from_str::<Config>(r#"{"douyu_codec":"hevc"}"#).is_err());
+        let reloaded: ConfigPatch = serde_json::from_str(&stored).unwrap();
+        config.apply(reloaded);
+        assert_eq!(config.downloader, Some(DownloaderType::SyncDownloader));
+        assert_eq!(config.file_size, Some(global_size));
+    }
+
+    /// 用户显式清空（前端发 null）依旧表示按主播关闭大小分段，且能在落库后保留。
+    #[test]
+    fn override_explicit_null_file_size_survives_round_trip() {
+        let mut config = Config {
+            file_size: Some(104_857_600),
+            ..Config::default()
+        };
+        let patch: ConfigPatch = serde_json::from_str(r#"{"file_size":null}"#).unwrap();
+
+        let stored = serde_json::to_string(&patch).unwrap();
+        assert!(stored.contains(r#""file_size":null"#), "{stored}");
+
+        let reloaded: ConfigPatch = serde_json::from_str(&stored).unwrap();
+        config.apply(reloaded);
+        assert_eq!(config.file_size, None);
+    }
+
+    #[test]
+    fn streamer_config_tid_v2_round_trip() {
+        let raw = r#"{"url":["https://example.com"],"tid":95,"tid_v2":2102,"tags":["a"]}"#;
+        let cfg: StreamerConfig = serde_json::from_str(raw).unwrap();
+        assert_eq!(cfg.tid, Some(95));
+        assert_eq!(cfg.tid_v2, Some(2102));
+        let back = serde_json::to_value(&cfg).unwrap();
+        assert_eq!(back["tid"], 95);
+        assert_eq!(back["tid_v2"], 2102);
+    }
+
+    #[test]
+    fn streamer_config_tid_only_leaves_tid_v2_unset() {
+        let cfg: StreamerConfig =
+            serde_json::from_str(r#"{"url":["https://example.com"],"tid":171}"#).unwrap();
+        assert_eq!(cfg.tid, Some(171));
+        assert!(cfg.tid_v2.is_none());
+    }
+
+    fn credit(username: &str, uid: &str) -> TemplateCredit {
+        TemplateCredit {
+            username: username.into(),
+            uid: uid.into(),
+        }
+    }
+
+    #[test]
+    fn toml_streamer_credits_follow_documented_format() {
+        let config: Config = toml::from_str(
+            r#"
+[streamers."羊腿"]
+url = ["https://live.bilibili.com/1"]
+description = "@credit 直播回放"
+credits = [
+  { username = "羊腿umer", uid = 22158819 },
+  { username = "允崽来啦", uid = "2063092494" },
+]
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.streamers["羊腿"].credits,
+            Some(vec![
+                credit("羊腿umer", "22158819"),
+                credit("允崽来啦", "2063092494"),
+            ])
+        );
+    }
+
+    #[test]
+    fn yaml_streamer_credits_follow_documented_format() {
+        let config: Config = serde_yaml::from_str(
+            r#"
+streamers:
+  羊腿:
+    url: [https://live.bilibili.com/1]
+    credits:
+      - username: 羊腿umer
+        uid: 22158819
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.streamers["羊腿"].credits,
+            Some(vec![credit("羊腿umer", "22158819")])
+        );
+    }
+
+    #[test]
+    fn template_credit_round_trips_web_form_shape() {
+        let raw = r#"{"uid":"2063092494","username":"允崽来啦"}"#;
+        let parsed: TemplateCredit = serde_json::from_str(raw).unwrap();
+        assert_eq!(parsed, credit("允崽来啦", "2063092494"));
+        assert_eq!(
+            serde_json::to_value(&parsed).unwrap(),
+            serde_json::json!({"username": "允崽来啦", "uid": "2063092494"})
+        );
+    }
+
+    #[test]
+    fn deserialize_sync_save_dir() {
+        let config: Config =
+            serde_json::from_str(r#"{"sync_save_dir":"/tmp/sync","downloader":"sync-downloader"}"#)
+                .unwrap();
+        assert_eq!(config.sync_save_dir.as_deref(), Some("/tmp/sync"));
+        assert_eq!(config.downloader, Some(DownloaderType::SyncDownloader));
+
+        let empty: Config = serde_json::from_str(r#"{}"#).unwrap();
+        assert_eq!(empty.sync_save_dir, None);
     }
 }

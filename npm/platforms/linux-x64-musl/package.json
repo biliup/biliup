@@ -1,0 +1,25 @@
+{
+  "name": "@biliup/linux-x64-musl",
+  "version": "0.0.0",
+  "description": "biliup 的 Linux x64 musl（静态链接）二进制，由 @biliup/cli 按平台自动安装",
+  "homepage": "https://github.com/biliup/biliup",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/biliup/biliup.git",
+    "directory": "npm/platforms/linux-x64-musl"
+  },
+  "license": "MIT",
+  "files": [
+    "bin"
+  ],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "libc": [
+    "musl"
+  ],
+  "preferUnplugged": true
+}

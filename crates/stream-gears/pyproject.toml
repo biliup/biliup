@@ -1,0 +1,53 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+# "extension-module" tells pyo3 we want to build an extension module (skips linking against libpython.so)
+features = ["pyo3/extension-module"]
+# Include additional files
+#include = [ "biliup/web/public/**/*" ]
+#data = "biliup/web/public"
+# Mixed layout: `stream_gears/` (`__init__.py`, stubs, `py.typed`) ships
+# alongside the native module, which becomes `stream_gears.stream_gears`.
+module-name = "stream_gears.stream_gears"
+python-packages = ["biliup"]
+# biliup-cli 用 rust-embed 在编译时内嵌前端产物 out/（gitignore，不在 cargo 打包清单里），sdist 不带它 pip 就装不上。
+# maturin 不接受 ..，路径相对本目录（在 sdist 里即根目录）：打 sdist 前先 npm run build && cp -r out crates/stream-gears/out
+include = [{ path = "out/**/*", format = "sdist" }]
+
+[project]
+name = "biliup"
+readme = "../../README.md"
+license = { file = "../../LICENSE" }
+authors = [{ name = "ForgQi" }]
+description = "stream download and upload"
+keywords = ["bilibili douyu huya"]
+urls = { Homepage = "https://github.com/ForgQi/bilibiliupload" }
+requires-python = ">= 3.9"
+dependencies = [
+    "yt-dlp >= 2025.7.21",
+    "aiohttp[speedups] >= 3.9.5",
+    "Pillow >= 5.2.0",
+    "requests >= 2.32.3",
+    "streamlink >= 7.5.0",
+    "rsa >= 4.6",
+]
+dynamic = ["version"]
+
+[project.scripts]
+biliup = "biliup.__main__:main"
+
+#[tool.setuptools]
+#license-files = ["LICENSE"]
+#include-package-data = false
+
+#[tool.setuptools.package-data]
+#biliup = ["common/*.ini", "web/public/**", "web/public/build/*", "database/migration/*", "Danmaku/douyin_util/webmssdk.js"]
+#
+#[tool.setuptools.packages.find]
+#include = ["biliup*"]
+#namespaces = false
+#
+#[tool.setuptools.dynamic]
+#version = { attr = "biliup.__version__" }

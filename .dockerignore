@@ -1,0 +1,25 @@
+# 版本控制与 CI
+.git
+.github
+
+# 构建产物（镜像内会重新构建）
+target
+node_modules
+.next
+out
+dist
+tauri-app/node_modules
+tauri-app/src-tauri/target
+
+# 本地运行时数据与凭据，绝不能进入构建上下文
+data
+*.sqlite3
+*.sqlite3-*
+cookies.json
+*.log
+.env.local
+.env.*.local
+
+# 文档站与桌面端与镜像无关
+docs
+tauri-app

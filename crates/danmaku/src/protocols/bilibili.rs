@@ -38,6 +38,11 @@ const USER_AGENT_STRING: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Apple
 /// Default WebSocket URL.
 const DEFAULT_WS_URL: &str = "wss://broadcastlv.chat.bilibili.com/sub";
 
+/// Maximum nesting depth for compressed packets.
+/// The real protocol only nests one level (compressed packet contains raw packets);
+/// deeper nesting indicates malformed or hostile input.
+const MAX_DECODE_DEPTH: u8 = 8;
+
 /// Heartbeat packet.
 /// Header: len=31, header_len=16, ver=1, op=2, seq=1
 /// Body: "[object Object] "
@@ -270,6 +275,10 @@ impl Bilibili {
 
     /// Decode a single packet, handling compression.
     fn decode_packet(data: &[u8]) -> Vec<DecodedPacket> {
+        Self::decode_packet_at_depth(data, 0)
+    }
+
+    fn decode_packet_at_depth(data: &[u8], depth: u8) -> Vec<DecodedPacket> {
         let mut packets = Vec::new();
         let mut offset = 0;
 
@@ -280,6 +289,17 @@ impl Bilibili {
             let operation = BigEndian::read_u32(&data[offset + 8..offset + 12]);
             let _sequence = BigEndian::read_u32(&data[offset + 12..offset + 16]);
 
+            // 声明长度必须至少覆盖 16 字节包头，否则该帧不可信：
+            // packet_len < 16 时反向切片会 panic，packet_len == 0 还会死循环
+            if packet_len < 16 {
+                debug!(
+                    "Malformed packet length {}, dropping remaining {} bytes",
+                    packet_len,
+                    data.len() - offset
+                );
+                break;
+            }
+
             if offset + packet_len > data.len() {
                 break;
             }
@@ -287,16 +307,19 @@ impl Bilibili {
             let body = &data[offset + 16..offset + packet_len];
 
             match version {
+                ver::ZLIB | ver::BROTLI if depth >= MAX_DECODE_DEPTH => {
+                    debug!("Packet nesting exceeds depth {}, dropping", MAX_DECODE_DEPTH);
+                }
                 ver::ZLIB => {
                     // Zlib compressed
                     if let Ok(decompressed) = decompress_zlib(body) {
-                        packets.extend(Self::decode_packet(&decompressed));
+                        packets.extend(Self::decode_packet_at_depth(&decompressed, depth + 1));
                     }
                 }
                 ver::BROTLI => {
                     // Brotli compressed
                     if let Ok(decompressed) = decompress_brotli(body) {
-                        packets.extend(Self::decode_packet(&decompressed));
+                        packets.extend(Self::decode_packet_at_depth(&decompressed, depth + 1));
                     }
                 }
                 ver::RAW_JSON | ver::POPULARITY => {
@@ -675,5 +698,77 @@ mod tests {
         let buvid = generate_fake_buvid3();
         assert!(buvid.ends_with("infoc"));
         assert!(buvid.contains("-"));
+    }
+
+    /// 构造指定协议版本的数据包（build_packet 固定 ver=1）。
+    fn build_packet_with_version(body: &[u8], operation: u32, version: u16) -> Vec<u8> {
+        let mut packet = build_packet(body, operation);
+        packet[6..8].copy_from_slice(&version.to_be_bytes());
+        packet
+    }
+
+    fn zlib_compress(data: &[u8]) -> Vec<u8> {
+        use flate2::Compression;
+        use flate2::write::ZlibEncoder;
+        use std::io::Write;
+
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(data).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    /// packet_len=0：修复前反向切片 panic（若跳过切片还会因 offset 不前进死循环）。
+    #[test]
+    fn malformed_zero_length_packet_does_not_panic_or_hang() {
+        let mut packet = build_packet(br#"{"cmd":"TEST"}"#, op::NOTIFICATION);
+        packet[0..4].copy_from_slice(&0u32.to_be_bytes());
+
+        assert!(Bilibili::decode_packet(&packet).is_empty());
+    }
+
+    /// packet_len < 16（小于包头长度）：修复前 &data[offset+16..offset+packet_len] 直接 panic。
+    #[test]
+    fn malformed_short_length_packet_does_not_panic() {
+        let mut packet = build_packet(br#"{"cmd":"TEST"}"#, op::NOTIFICATION);
+        packet[0..4].copy_from_slice(&8u32.to_be_bytes());
+
+        assert!(Bilibili::decode_packet(&packet).is_empty());
+    }
+
+    /// 合法包之后跟畸形头：保留已解析的包，丢弃不可信的剩余数据。
+    #[test]
+    fn valid_packet_before_malformed_header_is_preserved() {
+        let body = br#"{"cmd":"TEST"}"#;
+        let mut data = build_packet(body, op::NOTIFICATION);
+        let mut garbage = build_packet(b"x", op::NOTIFICATION);
+        garbage[0..4].copy_from_slice(&3u32.to_be_bytes());
+        data.extend_from_slice(&garbage);
+
+        let decoded = Bilibili::decode_packet(&data);
+        assert_eq!(decoded.len(), 1);
+        assert_eq!(decoded[0].body, body);
+    }
+
+    /// 正常一层压缩嵌套（真实协议形态）仍能解码。
+    #[test]
+    fn single_level_zlib_packet_still_decodes() {
+        let body = br#"{"cmd":"TEST"}"#;
+        let inner = build_packet(body, op::NOTIFICATION);
+        let packet = build_packet_with_version(&zlib_compress(&inner), op::NOTIFICATION, ver::ZLIB);
+
+        let decoded = Bilibili::decode_packet(&packet);
+        assert_eq!(decoded.len(), 1);
+        assert_eq!(decoded[0].body, body);
+    }
+
+    /// 超过深度上限的恶意多层压缩嵌套被丢弃，不发生栈溢出。
+    #[test]
+    fn deeply_nested_compressed_packets_are_dropped() {
+        let mut data = build_packet(br#"{"cmd":"TEST"}"#, op::NOTIFICATION);
+        for _ in 0..(MAX_DECODE_DEPTH as usize + 8) {
+            data = build_packet_with_version(&zlib_compress(&data), op::NOTIFICATION, ver::ZLIB);
+        }
+
+        assert!(Bilibili::decode_packet(&data).is_empty());
     }
 }

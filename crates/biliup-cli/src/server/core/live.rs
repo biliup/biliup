@@ -84,7 +84,8 @@ fn live_options(config: &Config) -> LiveOptions {
                 .unwrap_or_else(|| "hw-h5".to_string()),
             force_hs: config.douyu_force_hs.unwrap_or(false),
             rate: config.douyu_rate.unwrap_or(0),
-            codec: config.douyu_codec.unwrap_or_default(),
+            device_id: config.douyu_device_id.clone().unwrap_or_default(),
+            codec: config.douyu_codec.clone().unwrap_or_default(),
             disable_interactive_game: config.douyu_disable_interactive_game.unwrap_or(false),
             danmaku: config.douyu_danmaku.unwrap_or(false),
         },
@@ -174,25 +175,26 @@ pub fn downloader_runtime(
     stream: &LiveStream,
     output_format: Option<&str>,
 ) -> DownloaderRuntime {
-    let mut downloader_type = config_type.unwrap_or_else(|| match stream.downloader_hint {
-        DownloaderHint::StreamGears => DownloaderType::StreamGears,
+    // mesio 与 stream-gears 都不转封装，只把扩展名改成 .mp4 会得到没有可用视频流的文件
+    let wants_mp4 = output_format
+        .is_some_and(|format| format.trim_start_matches('.').eq_ignore_ascii_case("mp4"));
+    let downloader_type = config_type.unwrap_or_else(|| match stream.downloader_hint {
+        // 要求 MP4 输出时改用 ffmpeg 真正转封装
+        DownloaderHint::StreamGears if wants_mp4 => DownloaderType::Ffmpeg,
+        // 未配置下载器时用 mesio：写出的 FLV 带 onMetaData.keyframes、每段时间戳从 0 开始，
+        // 能录 HEVC / Enhanced-FLV 与 HLS fMP4。显式配置 stream-gears 的不受影响
+        DownloaderHint::StreamGears => DownloaderType::Mesio,
         DownloaderHint::Ffmpeg => DownloaderType::Ffmpeg,
         DownloaderHint::Streamlink => DownloaderType::Streamlink,
         DownloaderHint::YtDlp => DownloaderType::YtDlp,
     });
 
-    // The native stream-gears writer preserves the source container (FLV/TS)
-    // and cannot produce a valid MP4 merely by changing the filename.  Select
-    // FFmpeg automatically when an MP4 output was requested so the container
-    // is actually remuxed and the resulting file has a video stream.
-    if output_format.is_some_and(|format| format.eq_ignore_ascii_case("mp4"))
-        && matches!(
-            downloader_type,
-            DownloaderType::StreamGears | DownloaderType::SyncDownloader
-        )
-    {
-        downloader_type = DownloaderType::Ffmpeg;
-    }
+    // 显式选了 stream-gears 同样不转封装。边录边传（sync-downloader）不改，以免丢掉流式上传；
+    // 显式选了 mesio 的由 mesio 自己提示扩展名不一致
+    let downloader_type = match downloader_type {
+        DownloaderType::StreamGears if wants_mp4 => DownloaderType::Ffmpeg,
+        other => other,
+    };
 
     match downloader_type {
         DownloaderType::Streamlink => streamlink_runtime(stream),
@@ -216,20 +218,24 @@ pub fn downloader_runtime(
 }
 
 fn streamlink_runtime(stream: &LiveStream) -> DownloaderRuntime {
-    let (url, platform) = match stream.runtime_options.as_ref() {
+    let (url, platform, from_stream_url) = match stream.runtime_options.as_ref() {
         Some(RuntimeOptions::Streamlink(StreamlinkOptions { url, platform })) => (
             url.clone().unwrap_or_else(|| stream.raw_stream_url.clone()),
             streamlink_platform(platform),
+            false,
         ),
         // yt-dlp 型来源（如 YouTube）交给 streamlink 时，传入网页地址让其自行提取，
         // 而非已解析的 manifest 直链（对齐 youtube.py:96-101）
         Some(RuntimeOptions::YtDlp(options)) if !options.webpage_url.is_empty() => {
-            (options.webpage_url.clone(), Platform::Generic)
+            (options.webpage_url.clone(), Platform::Generic, false)
         }
-        _ => (stream.raw_stream_url.clone(), Platform::Generic),
+        _ => (stream.raw_stream_url.clone(), Platform::Generic, true),
     };
-    let downloader =
+    let mut downloader =
         StreamlinkDownloader::new(url, platform).with_headers(stream.stream_headers.clone());
+    if from_stream_url {
+        downloader = downloader.following_stream_url();
+    }
     DownloaderRuntime::StreamLink(Streamlink::new(downloader))
 }
 
@@ -301,10 +307,13 @@ fn ytdlp_backend(
     }
 }
 
+/// 构造弹幕客户端。`live_tx` 为直播预览的实时弹幕广播：客户端每解出一条就 `send` 一份
+/// （不等待、无订阅者时丢弃），XML 录制不受影响。
 pub fn danmaku_client(
     source: Option<&DanmakuSource>,
     filename_prefix: Option<&str>,
     name: &str,
+    live_tx: Option<tokio::sync::broadcast::Sender<danmaku_client::DanmakuEvent>>,
 ) -> Option<Arc<dyn crate::server::core::downloader::DanmakuClient + Send + Sync>> {
     let source = source?;
     let mut context = PlatformContext::new();
@@ -318,59 +327,91 @@ pub fn danmaku_client(
     context.movie_id = source.movie_id.clone();
     context.password = source.password.clone();
 
-    let config = RecorderConfig::new(
+    let mut config = RecorderConfig::new(
         source.url.clone(),
         PathBuf::from(danmaku_filename_template(filename_prefix, name)),
     )
     .with_context(context)
     .with_raw(source.raw)
     .with_detail(source.detail);
+    if let Some(tx) = live_tx {
+        config = config.with_live_tx(tx);
+    }
 
     Some(Arc::new(RustDanmakuClient::new(config)))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::downloader_runtime;
-    use crate::server::core::downloader::{DownloaderRuntime, DownloaderType};
-    use biliup::downloader::live::{DownloaderHint, LiveStream};
-    use chrono::Utc;
+    use super::*;
     use std::collections::HashMap;
 
-    fn stream() -> LiveStream {
+    fn stream(hint: DownloaderHint) -> LiveStream {
         LiveStream {
-            name: "fixture".into(),
-            url: "https://example.com/live".into(),
-            title: "fixture".into(),
-            date: Utc::now(),
+            name: "room".into(),
+            url: "https://live.bilibili.com/1".into(),
+            title: "t".into(),
+            date: chrono::Utc::now(),
             live_cover_url: String::new(),
-            raw_stream_url: "https://example.com/live.flv".into(),
-            platform: "fixture".into(),
+            avatar_url: None,
+            raw_stream_url: "https://cdn.example/live.flv".into(),
+            platform: "bilibili".into(),
             stream_headers: HashMap::new(),
             suffix: "flv".into(),
             danmaku: None,
-            downloader_hint: DownloaderHint::StreamGears,
+            downloader_hint: hint,
             runtime_options: None,
         }
     }
 
     #[test]
-    fn mp4_output_promotes_native_stream_gears_to_ffmpeg() {
-        assert!(matches!(
-            downloader_runtime(None, &stream(), Some("mp4")),
-            DownloaderRuntime::Ffmpeg(_)
-        ));
-        assert!(matches!(
-            downloader_runtime(Some(DownloaderType::StreamGears), &stream(), Some("mp4")),
-            DownloaderRuntime::Ffmpeg(_)
-        ));
-        assert!(matches!(
-            downloader_runtime(None, &stream(), Some("flv")),
-            DownloaderRuntime::StreamGears(_)
-        ));
-        assert!(matches!(
-            downloader_runtime(Some(DownloaderType::FfmpegInternal), &stream(), Some("flv")),
-            DownloaderRuntime::Ffmpeg(_)
-        ));
+    fn unconfigured_rooms_default_to_mesio() {
+        let runtime = downloader_runtime(None, &stream(DownloaderHint::StreamGears), None);
+        assert!(matches!(runtime, DownloaderRuntime::Mesio(_)));
+        let runtime = downloader_runtime(None, &stream(DownloaderHint::StreamGears), Some("flv"));
+        assert!(matches!(runtime, DownloaderRuntime::Mesio(_)));
+    }
+
+    #[test]
+    fn an_explicit_stream_gears_choice_is_kept() {
+        let runtime = downloader_runtime(
+            Some(DownloaderType::StreamGears),
+            &stream(DownloaderHint::StreamGears),
+            None,
+        );
+        assert!(matches!(runtime, DownloaderRuntime::StreamGears(_)));
+    }
+
+    #[test]
+    fn mp4_output_switches_non_remuxing_downloaders_to_ffmpeg() {
+        let runtime = downloader_runtime(None, &stream(DownloaderHint::StreamGears), Some("mp4"));
+        assert!(matches!(runtime, DownloaderRuntime::Ffmpeg(_)));
+        let runtime = downloader_runtime(
+            Some(DownloaderType::StreamGears),
+            &stream(DownloaderHint::StreamGears),
+            Some(".MP4"),
+        );
+        assert!(matches!(runtime, DownloaderRuntime::Ffmpeg(_)));
+        // 边录边传与显式 mesio 保持用户的选择
+        let runtime = downloader_runtime(
+            Some(DownloaderType::SyncDownloader),
+            &stream(DownloaderHint::StreamGears),
+            Some("mp4"),
+        );
+        assert!(matches!(runtime, DownloaderRuntime::Sync(_)));
+        let runtime = downloader_runtime(
+            Some(DownloaderType::Mesio),
+            &stream(DownloaderHint::StreamGears),
+            Some("mp4"),
+        );
+        assert!(matches!(runtime, DownloaderRuntime::Mesio(_)));
+    }
+
+    #[test]
+    fn plugin_hints_for_external_tools_are_unchanged() {
+        let runtime = downloader_runtime(None, &stream(DownloaderHint::Streamlink), Some("mp4"));
+        assert!(matches!(runtime, DownloaderRuntime::StreamLink(_)));
+        let runtime = downloader_runtime(None, &stream(DownloaderHint::Ffmpeg), None);
+        assert!(matches!(runtime, DownloaderRuntime::Ffmpeg(_)));
     }
 }

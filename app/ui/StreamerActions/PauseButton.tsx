@@ -2,30 +2,26 @@ import React, { useState } from 'react';
 import { useSWRConfig } from 'swr';
 import useSWRMutation from 'swr/mutation';
 import {Button} from "@douyinfe/semi-ui";
+import type {ButtonProps} from "@douyinfe/semi-ui/lib/es/button";
 import {IconPause, IconPlay} from "@douyinfe/semi-icons";
-import {API_BASE, LiveStreamerEntity} from "@/app/lib/api-streamer";
+import {LiveStreamerEntity, proxy} from "@/app/lib/api-streamer";
 
-interface PauseButtonProps {
+interface PauseButtonProps extends Omit<ButtonProps, 'onClick' | 'icon' | 'theme' | 'onError'> {
     streamer: LiveStreamerEntity;
     onSuccess?: () => void;
     onError?: (error: Error) => void;
 }
 
 // 暂停主播
-export const pauseStreamer = async (url: string,  ) => {
-    const response = await fetch(API_BASE + url,
-        {
-            method: 'PUT',
-            // headers: {'Content-Type': 'application/json'},
-        }
-);
-    return response;
-};
+// 走统一的响应处理：未登录跳转登录页，没有权限时提示，其它失败抛给调用方
+export const pauseStreamer = (url: string) => proxy(url, { method: 'PUT' });
 
 export const PauseButton: React.FC<PauseButtonProps> = ({
                                                             streamer,
                                                             onSuccess,
-                                                            onError
+                                                            onError,
+                                                            type = 'tertiary',
+                                                            ...rest
                                                         }) => {
     const { mutate } = useSWRConfig();
 
@@ -47,6 +43,6 @@ export const PauseButton: React.FC<PauseButtonProps> = ({
     };
 
     return (
-        <Button onClick={handlePause} icon={streamer.status === 'Pause'? <IconPlay />: <IconPause />} theme="borderless" aria-label="暂停" />
+        <Button onClick={handlePause} icon={streamer.status === 'Pause'? <IconPlay />: <IconPause />} theme="borderless" type={type} aria-label="暂停" {...rest} />
     );
 };

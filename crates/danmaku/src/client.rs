@@ -4,7 +4,7 @@
 //! message processing, and XML output for recording live stream chat.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,7 +12,7 @@ use futures::{SinkExt, StreamExt};
 use rustls_platform_verifier::BuilderVerifierExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::time::interval;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -20,11 +20,33 @@ use tokio_tungstenite::{Connector, connect_async_tls_with_config};
 use tracing::{debug, error, info, warn};
 
 use crate::error::{DanmakuError, Result};
+use crate::message::DanmakuEvent;
 use crate::output::xml::{XmlWriter, XmlWriterConfig};
 use crate::protocols::{
-    ConnectionInfo, ConnectionTransport, HeartbeatData, Platform, PlatformContext,
+    ConnectionInfo, ConnectionTransport, DecodeResult, HeartbeatData, Platform, PlatformContext,
     RegistrationData, create_platform,
 };
+
+/// 捕获平台解码器的 panic，降级为解码错误：
+/// 录制任务在 tokio::spawn 中运行，panic 会直接杀死任务且没有任何
+/// 重启机制，一条畸形消息就会让弹幕录制静默永久停止。
+fn decode_message_guarded(
+    platform: &dyn Platform,
+    data: &[u8],
+    platform_name: &str,
+) -> Result<DecodeResult> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        platform.decode_message(data)
+    }))
+    .unwrap_or_else(|_| {
+        error!(
+            "{}: decoder panicked on a {}-byte message, skipping it",
+            platform_name,
+            data.len()
+        );
+        Err(DanmakuError::Decode("decoder panicked".to_string()))
+    })
+}
 
 /// Configuration for the danmaku recorder.
 #[derive(Debug, Clone)]
@@ -39,6 +61,10 @@ pub struct RecorderConfig {
     pub save_raw: bool,
     /// Whether to save detailed info.
     pub save_detail: bool,
+    /// Optional live tee: every decoded event is also `send` to this broadcast channel
+    /// (best effort — no subscribers or a full ring just drops the copy). Used by the
+    /// web UI's live preview to overlay danmaku; never affects the XML recording.
+    pub live_tx: Option<broadcast::Sender<DanmakuEvent>>,
 }
 
 impl RecorderConfig {
@@ -50,7 +76,14 @@ impl RecorderConfig {
             context: PlatformContext::new(),
             save_raw: false,
             save_detail: false,
+            live_tx: None,
         }
+    }
+
+    /// Also broadcast every decoded event to `tx` (see [`RecorderConfig::live_tx`]).
+    pub fn with_live_tx(mut self, tx: broadcast::Sender<DanmakuEvent>) -> Self {
+        self.live_tx = Some(tx);
+        self
     }
 
     /// Set the platform context.
@@ -127,6 +160,14 @@ impl DanmakuRecorder {
             config,
             platform: Arc::from(platform),
         })
+    }
+
+    /// Tee one decoded event to the live broadcast, if configured. `send` never waits:
+    /// with no receivers the copy is dropped, with a full ring the oldest is overwritten.
+    fn emit_live(&self, event: &DanmakuEvent) {
+        if let Some(tx) = &self.config.live_tx {
+            let _ = tx.send(event.clone());
+        }
     }
 
     /// Start recording in a background task.
@@ -280,6 +321,7 @@ impl DanmakuRecorder {
                 _ = ticker.tick() => {
                     let events = self.platform.poll_messages(&self.config.url, &mut context).await?;
                     for event in events {
+                        self.emit_live(&event);
                         if let Err(e) = xml_writer.write_event(&event) {
                             warn!("Failed to write event: {}", e);
                         }
@@ -435,11 +477,12 @@ impl DanmakuRecorder {
                             };
 
                             // Decode message
-                            match self.platform.decode_message(&data) {
+                            match decode_message_guarded(self.platform.as_ref(), &data, platform_name) {
                                 Ok(result) => {
                                     consecutive_decode_errors = 0;
                                     // Write decoded events
                                     for event in result.events {
+                                        self.emit_live(&event);
                                         if let Err(e) = xml_writer.write_event(&event) {
                                             warn!("Failed to write event: {}", e);
                                         }
@@ -561,10 +604,11 @@ impl DanmakuRecorder {
 
                 frame = read_tcp_frame(&mut tcp_reader) => {
                     let frame = frame?;
-                    match self.platform.decode_message(&frame) {
+                    match decode_message_guarded(self.platform.as_ref(), &frame, platform_name) {
                         Ok(result) => {
                             consecutive_decode_errors = 0;
                             for event in result.events {
+                                self.emit_live(&event);
                                 if let Err(e) = xml_writer.write_event(&event) {
                                     warn!("Failed to write event: {}", e);
                                 }
@@ -757,19 +801,37 @@ fn roll_writer(
         return Ok(false);
     }
 
-    if let Some(new_path) = new_file_name {
-        if current_path != new_path {
-            if let Some(parent) = new_path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            if new_path.exists() {
-                fs::remove_file(&new_path)?;
-            }
-            fs::rename(current_path, new_path)?;
+    if let Some(new_path) = new_file_name
+        && !is_same_file(&current_path, &new_path)
+    {
+        if let Some(parent) = new_path.parent() {
+            fs::create_dir_all(parent)?;
         }
+        if new_path.exists() {
+            fs::remove_file(&new_path)?;
+        }
+        fs::rename(current_path, new_path)?;
     }
 
     Ok(true)
+}
+
+/// `Path` 的相等比较保留开头的 `.`，`./x.xml` 和 `x.xml` 会被当成两个文件；
+/// 这时 `roll_writer` 会把目标（其实就是当前文件）删掉，再改名就失败了。
+fn is_same_file(a: &Path, b: &Path) -> bool {
+    fn lexical(path: &Path) -> PathBuf {
+        path.components()
+            .filter(|component| !matches!(component, Component::CurDir))
+            .collect()
+    }
+
+    if lexical(a) == lexical(b) {
+        return true;
+    }
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
 }
 
 fn next_output_path(template: &Path) -> PathBuf {
@@ -853,6 +915,97 @@ mod tests {
         assert!(roll_writer(&mut writer, &template, &config, Some(new_path.clone())).is_ok());
 
         assert!(!new_path.exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn dot_prefixed_path_is_the_same_file() {
+        assert!(is_same_file(Path::new("./x.xml"), Path::new("x.xml")));
+        assert!(is_same_file(Path::new("x.xml"), Path::new("./x.xml")));
+        assert!(is_same_file(Path::new("./a/x.xml"), Path::new("a/x.xml")));
+        assert!(!is_same_file(Path::new("./x.xml"), Path::new("y.xml")));
+        assert!(!is_same_file(Path::new("a/x.xml"), Path::new("b/x.xml")));
+    }
+
+    fn write_one_chat(writer: &mut XmlWriter) {
+        let chat = crate::message::ChatMessage::new("hello".to_string()).with_name("user");
+        writer.write_event(&DanmakuEvent::Chat(chat)).unwrap();
+    }
+
+    /// 视频分段路径带 `./`、当前 XML 路径不带时，分段不能把当前 XML 删掉。
+    #[test]
+    fn rolling_onto_dot_prefixed_current_path_keeps_the_xml() {
+        // 相对路径才能复现：绝对路径中间的 `.` 在 `Path` 比较时本来就会被忽略
+        let dir = PathBuf::from(format!(
+            "danmaku-roll-dot-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let template = dir.join("danmaku");
+        let config = XmlWriterConfig::default();
+        let mut writer = XmlWriter::new(format_output_path(&template), config.clone()).unwrap();
+        write_one_chat(&mut writer);
+        let current_path = writer.file_path().to_path_buf();
+        let dotted = Path::new(".").join(&current_path);
+        assert_ne!(current_path, dotted);
+
+        let rolled = roll_writer(&mut writer, &template, &config, Some(dotted.clone()));
+
+        let content = std::fs::read_to_string(&current_path);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(rolled.unwrap());
+        let content = content.unwrap();
+        assert!(content.contains("hello"));
+        assert!(content.trim_end().ends_with("</i>"));
+    }
+
+    #[test]
+    fn rolling_onto_another_spelling_of_the_current_path_keeps_the_xml() {
+        let dir = std::env::temp_dir().join(format!(
+            "danmaku-roll-alias-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        let template = dir.join("danmaku");
+        let config = XmlWriterConfig::default();
+        let mut writer = XmlWriter::new(format_output_path(&template), config.clone()).unwrap();
+        write_one_chat(&mut writer);
+        let current_path = writer.file_path().to_path_buf();
+        let alias = dir
+            .join("sub")
+            .join("..")
+            .join(current_path.file_name().unwrap());
+
+        assert!(roll_writer(&mut writer, &template, &config, Some(alias)).unwrap());
+
+        let content = std::fs::read_to_string(&current_path).unwrap();
+        assert!(content.contains("hello"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn rolling_replaces_a_different_existing_target() {
+        let dir = std::env::temp_dir().join(format!(
+            "danmaku-roll-replace-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let template = dir.join("danmaku");
+        let new_path = dir.join("segment.xml");
+        std::fs::write(&new_path, "stale").unwrap();
+        let config = XmlWriterConfig::default();
+        let mut writer = XmlWriter::new(format_output_path(&template), config.clone()).unwrap();
+        write_one_chat(&mut writer);
+        let current_path = writer.file_path().to_path_buf();
+
+        assert!(roll_writer(&mut writer, &template, &config, Some(new_path.clone())).unwrap());
+
+        assert!(!current_path.exists());
+        let content = std::fs::read_to_string(&new_path).unwrap();
+        assert!(content.contains("hello"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
