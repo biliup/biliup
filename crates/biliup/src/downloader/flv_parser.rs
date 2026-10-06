@@ -636,18 +636,32 @@ pub fn script_data(input: &[u8]) -> IResult<&[u8], ScriptData<'_>> {
     .parse(input)
 }
 
+/// AMF0 容器（Object / ECMA 数组 / 严格数组）的最大嵌套层数。真实的 onMetaData 只有两三层；
+/// 解析是递归的，不设上限时一个每层只占 3 字节的畸形脚本 tag 就能把栈打爆、abort 整个进程。
+const MAX_SCRIPT_DATA_DEPTH: usize = 64;
+
 pub fn script_data_value(input: &[u8]) -> IResult<&[u8], ScriptDataValue<'_>> {
+    script_data_value_at(input, 0)
+}
+
+fn script_data_value_at(input: &[u8], depth: usize) -> IResult<&[u8], ScriptDataValue<'_>> {
+    if depth > MAX_SCRIPT_DATA_DEPTH {
+        return Err(Err::Failure(Error::new(input, ErrorKind::TooLarge)));
+    }
     be_u8(input).and_then(|v| match v {
         (i, 0) => map(be_f64, ScriptDataValue::Number).parse(i),
         (i, 1) => map(be_u8, |n| ScriptDataValue::Boolean(n != 0)).parse(i),
         (i, 2) => map(script_data_string, ScriptDataValue::String).parse(i),
-        (i, 3) => map(script_data_objects, ScriptDataValue::Object).parse(i),
+        (i, 3) => script_data_objects_at(i, depth + 1)
+            .map(|(i, objects)| (i, ScriptDataValue::Object(objects))),
         (i, 4) => map(script_data_string, ScriptDataValue::MovieClip).parse(i),
         (i, 5) => Ok((i, ScriptDataValue::Null)), // to remove
         (i, 6) => Ok((i, ScriptDataValue::Undefined)), // to remove
         (i, 7) => map(be_u16, ScriptDataValue::Reference).parse(i),
-        (i, 8) => map(script_data_ecma_array, ScriptDataValue::ECMAArray).parse(i),
-        (i, 10) => map(script_data_strict_array, ScriptDataValue::StrictArray).parse(i),
+        (i, 8) => script_data_ecma_array_at(i, depth + 1)
+            .map(|(i, objects)| (i, ScriptDataValue::ECMAArray(objects))),
+        (i, 10) => script_data_strict_array_at(i, depth + 1)
+            .map(|(i, values)| (i, ScriptDataValue::StrictArray(values))),
         (i, 11) => map(script_data_date, ScriptDataValue::Date).parse(i),
         (i, 12) => map(script_data_long_string, ScriptDataValue::LongString).parse(i),
         _ => Err(Err::Error(Error::new(input, ErrorKind::Alt))),
@@ -655,12 +669,24 @@ pub fn script_data_value(input: &[u8]) -> IResult<&[u8], ScriptDataValue<'_>> {
 }
 
 pub fn script_data_objects(input: &[u8]) -> IResult<&[u8], Vec<ScriptDataObject<'_>>> {
-    terminated(many0(script_data_object), script_data_object_end).parse(input)
+    script_data_objects_at(input, 0)
+}
+
+fn script_data_objects_at(input: &[u8], depth: usize) -> IResult<&[u8], Vec<ScriptDataObject<'_>>> {
+    terminated(
+        many0(|i| script_data_object_at(i, depth)),
+        script_data_object_end,
+    )
+    .parse(input)
 }
 
 pub fn script_data_object(input: &[u8]) -> IResult<&[u8], ScriptDataObject<'_>> {
+    script_data_object_at(input, 0)
+}
+
+fn script_data_object_at(input: &[u8], depth: usize) -> IResult<&[u8], ScriptDataObject<'_>> {
     map(
-        pair(script_data_string, script_data_value),
+        pair(script_data_string, |i| script_data_value_at(i, depth)),
         |(name, data)| ScriptDataObject { name, data },
     )
     .parse(input)
@@ -693,12 +719,86 @@ pub fn script_data_date(input: &[u8]) -> IResult<&[u8], ScriptDataDate> {
 }
 
 pub fn script_data_ecma_array(input: &[u8]) -> IResult<&[u8], Vec<ScriptDataObject<'_>>> {
-    map(pair(be_u32, script_data_objects), |(_, data_objects)| {
-        data_objects
-    })
-    .parse(input)
+    script_data_ecma_array_at(input, 0)
+}
+
+fn script_data_ecma_array_at(
+    input: &[u8],
+    depth: usize,
+) -> IResult<&[u8], Vec<ScriptDataObject<'_>>> {
+    let (input, _) = be_u32(input)?;
+    script_data_objects_at(input, depth)
 }
 
 pub fn script_data_strict_array(input: &[u8]) -> IResult<&[u8], Vec<ScriptDataValue<'_>>> {
-    flat_map(be_u32, |o| many_m_n(1, o as usize, script_data_value)).parse(input)
+    script_data_strict_array_at(input, 0)
+}
+
+fn script_data_strict_array_at(
+    input: &[u8],
+    depth: usize,
+) -> IResult<&[u8], Vec<ScriptDataValue<'_>>> {
+    let (input, count) = be_u32(input)?;
+    many_m_n(1, count as usize, |i| script_data_value_at(i, depth)).parse(input)
+}
+
+#[cfg(test)]
+mod script_data_tests {
+    use super::{ScriptDataValue, script_data};
+
+    /// 嵌套极深的 AMF0（每层只要 3 字节：空键名 + Object 标记）不能把解析栈打爆：
+    /// 栈溢出会直接 abort 整个进程（catch_unwind 也接不住），解析器必须返回错误。
+    #[test]
+    fn deeply_nested_script_data_is_an_error_not_a_stack_overflow() {
+        let levels = 200_000;
+        let mut tag = vec![0x02, 0x00, 0x0A];
+        tag.extend_from_slice(b"onMetaData");
+        tag.push(0x03);
+        for _ in 0..levels {
+            tag.extend_from_slice(&[0x00, 0x00, 0x03]);
+        }
+        for _ in 0..=levels {
+            tag.extend_from_slice(&[0x00, 0x00, 0x09]);
+        }
+        // tokio 工作线程默认 2 MiB 栈，与录制时解析所在的线程一致
+        let parsed = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || script_data(&tag).is_err())
+            .unwrap()
+            .join()
+            .unwrap();
+        assert!(parsed, "nesting this deep must be rejected");
+    }
+
+    /// 真实的 onMetaData 只有两三层嵌套（ECMA 数组 → keyframes 对象 → 数字严格数组），照常解析。
+    #[test]
+    fn ordinary_nested_script_data_still_parses() {
+        let mut tag = vec![0x02, 0x00, 0x0A];
+        tag.extend_from_slice(b"onMetaData");
+        // ECMA array(1 项): "keyframes" → Object { "times": StrictArray[Number 1.5] }
+        tag.extend_from_slice(&[0x08, 0x00, 0x00, 0x00, 0x01]);
+        tag.extend_from_slice(&[0x00, 0x09]);
+        tag.extend_from_slice(b"keyframes");
+        tag.push(0x03);
+        tag.extend_from_slice(&[0x00, 0x05]);
+        tag.extend_from_slice(b"times");
+        tag.extend_from_slice(&[0x0a, 0x00, 0x00, 0x00, 0x01, 0x00]);
+        tag.extend_from_slice(&1.5f64.to_be_bytes());
+        tag.extend_from_slice(&[0x00, 0x00, 0x09]); // keyframes 对象结束
+        tag.extend_from_slice(&[0x00, 0x00, 0x09]); // ECMA 数组结束
+        let (rest, parsed) = script_data(&tag).unwrap();
+        assert!(rest.is_empty());
+        assert_eq!(parsed.name, "onMetaData");
+        let ScriptDataValue::ECMAArray(items) = parsed.arguments else {
+            panic!("expected an ECMA array: {:?}", parsed.arguments);
+        };
+        assert_eq!(items[0].name, "keyframes");
+        let ScriptDataValue::Object(keyframes) = &items[0].data else {
+            panic!("expected an object");
+        };
+        assert_eq!(
+            keyframes[0].data,
+            ScriptDataValue::StrictArray(vec![ScriptDataValue::Number(1.5)])
+        );
+    }
 }

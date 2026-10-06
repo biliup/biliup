@@ -1,5 +1,5 @@
 use crate::downloader::flv_parser::{
-    AACPacketType, AVCPacketType, CodecId, FrameType, SoundFormat, TagData, TagHeader,
+    AACPacketType, AVCPacketType, CodecId, FrameType, SoundFormat, TagData, TagHeader, TagType,
     aac_audio_packet_header, avc_video_packet_header, script_data, tag_data, tag_header,
 };
 use crate::downloader::flv_writer::{FlvFile, FlvTag, TagDataHeader};
@@ -73,11 +73,27 @@ pub async fn parse_flv(
     }
 }
 
+/// 时间戳单调性按轨道判断时，音频、视频各自状态的下标。
+///
+/// FLV 只要求同一轨道内 DTS 单调：音视频交错时彼此的时间戳本就可以前后差几十毫秒，
+/// 跨轨道比较会把每次正常的交错都当成回退。脚本 tag（onMetaData）中途重发时时间戳常为 0，
+/// 也不参与判断。
+fn track_index(tag_type: TagType) -> Option<usize> {
+    match tag_type {
+        TagType::Audio => Some(0),
+        TagType::Video => Some(1),
+        TagType::Script => None,
+    }
+}
+
 /// 写盘循环的 GOP 缓存：tag 先攒着，遇到下一个关键帧或连接结束时整组落盘。
 #[derive(Default)]
 struct GopCache {
     tags: Vec<(TagHeader, Bytes, Bytes)>,
+    /// 此前写出的最大时间戳（0 即还没写出过时间戳非 0 的 tag）。
     prev_timestamp: u32,
+    /// 音频、视频各自上一个写出的时间戳，见 [`track_index`]。
+    prev_track_timestamp: [Option<u32>; 2],
 }
 
 impl GopCache {
@@ -89,19 +105,31 @@ impl GopCache {
         let Self {
             tags,
             prev_timestamp,
+            prev_track_timestamp,
         } = self;
         // drain：中途写失败时剩下的 tag 也一并丢弃，不会在收尾时再写一遍造成重复
         for (mut tag_header, flv_tag_data, previous_tag_size_bytes) in tags.drain(..) {
-            if tag_header.timestamp < *prev_timestamp {
+            // 音视频各自保持单调；脚本 tag 不早于此前写出的任何 tag
+            let track = track_index(tag_header.tag_type);
+            let floor = match track {
+                Some(track) => prev_track_timestamp[track],
+                None => Some(*prev_timestamp),
+            };
+            if let Some(floor) = floor
+                && tag_header.timestamp < floor
+            {
                 warn!(
-                    "Non-monotonous DTS in output stream; previous: {prev_timestamp}, current: {}; clamping to previous",
+                    "Non-monotonous DTS in output stream; previous: {floor}, current: {}; clamping to previous",
                     tag_header.timestamp
                 );
-                tag_header.timestamp = *prev_timestamp;
+                tag_header.timestamp = floor;
+            }
+            if let Some(track) = track {
+                prev_track_timestamp[track] = Some(tag_header.timestamp);
             }
             out.write_tag(&tag_header, &flv_tag_data, &previous_tag_size_bytes)?;
             segment.increase_size((11 + tag_header.data_size + 4) as u64);
-            *prev_timestamp = tag_header.timestamp;
+            *prev_timestamp = (*prev_timestamp).max(tag_header.timestamp);
         }
         Ok(())
     }
@@ -119,8 +147,8 @@ async fn read_tags(
     let mut h264_sequence_header: Option<(TagHeader, Bytes, Bytes)> = None;
     let mut create_new = false;
     let mut timestamp_offset: u32 = 0;
-    let mut prev_raw_timestamp: u32 = 0;
-    let mut has_prev_tag = false;
+    // 音频、视频各自上一个 tag 矫正后的时间戳，见 [`track_index`]
+    let mut prev_track_timestamp: [Option<u32>; 2] = [None, None];
     loop {
         let tag_header_bytes = connection.read_frame(11).await?;
         if tag_header_bytes.is_empty() {
@@ -132,20 +160,23 @@ async fn read_tags(
         let (_, mut tag_header) = map_parse_err(tag_header(&tag_header_bytes), "tag header")?;
         // 上游 CDN（如斗鱼）在流分发切片或重连时时间戳可能断裂或重置回 0。
         // 通过累加 offset 矫正时间戳，保证输出流的时间戳单调递增，避免下游播放与分段逻辑异常。
-        if has_prev_tag {
-            if tag_header.timestamp < prev_raw_timestamp {
-                let diff = prev_raw_timestamp.saturating_sub(tag_header.timestamp);
+        // 只在同一轨道回退时累加：跨轨道比较会把每次音视频交错都当成断裂，offset 越积越大，
+        // 录像时间轴被越拉越长。比较的是矫正后的时间戳，音视频同时重置时 offset 只加一次。
+        let mut timestamp = tag_header.timestamp.wrapping_add(timestamp_offset);
+        if let Some(track) = track_index(tag_header.tag_type) {
+            if let Some(prev) = prev_track_timestamp[track]
+                && timestamp < prev
+            {
+                let diff = prev - timestamp;
                 warn!(
-                    "Non-monotonous DTS in upstream stream; previous: {prev_raw_timestamp}, current: {}; adjusting offset by +{diff}",
-                    tag_header.timestamp
+                    "Non-monotonous DTS in upstream stream; previous: {prev}, current: {timestamp}; adjusting offset by +{diff}"
                 );
                 timestamp_offset = timestamp_offset.wrapping_add(diff);
+                timestamp = prev;
             }
-        } else {
-            has_prev_tag = true;
+            prev_track_timestamp[track] = Some(timestamp);
         }
-        prev_raw_timestamp = tag_header.timestamp;
-        tag_header.timestamp = tag_header.timestamp.wrapping_add(timestamp_offset);
+        tag_header.timestamp = timestamp;
         // write_tag_header(&mut out, &tag_header)?;
 
         let bytes = connection.read_frame(tag_header.data_size as usize).await?;
@@ -963,5 +994,103 @@ mod tests {
         assert!(prev_ts.is_some());
         assert!(prev_ts.unwrap() >= 3000);
         Ok(())
+    }
+
+    fn push_tag(data: &mut Vec<u8>, tag_type: u8, ts: u32, body: &[u8]) {
+        data.push(tag_type);
+        data.extend_from_slice(&(body.len() as u32).to_be_bytes()[1..]);
+        data.extend_from_slice(&(ts & 0xff_ffff).to_be_bytes()[1..]);
+        data.push((ts >> 24) as u8);
+        data.extend_from_slice(&[0, 0, 0]);
+        data.extend_from_slice(body);
+        data.extend_from_slice(&((11 + body.len()) as u32).to_be_bytes());
+    }
+
+    /// 从 `offset` 起逐个读出 tag 的（类型, 时间戳）。
+    fn tag_timestamps(bytes: &[u8], mut offset: usize) -> Vec<(u8, u32)> {
+        let mut out = Vec::new();
+        while offset + 11 <= bytes.len() {
+            let h = &bytes[offset..offset + 11];
+            let size = u32::from_be_bytes([0, h[1], h[2], h[3]]) as usize;
+            out.push((h[0], u32::from_be_bytes([h[7], h[4], h[5], h[6]])));
+            offset += 15 + size;
+        }
+        out
+    }
+
+    /// 音视频交错：音频 tag 先到、时间戳比紧随其后的视频帧晚 30 ms（FLV 只要求同一轨道单调），
+    /// 中途还重发了一次时间戳为 0 的 onMetaData。这些都不是时间戳断裂：落盘的音视频时间戳
+    /// 必须与源流逐个相同，不能每遇到一次交错就把 offset 累加一次、把整条时间轴越拉越长。
+    #[tokio::test]
+    async fn interleaved_audio_video_timestamps_are_kept_as_is() {
+        let meta = [
+            0x02, 0x00, 0x0A, b'o', b'n', b'M', b'e', b't', b'a', b'D', b'a', b't', b'a', 0x05,
+        ];
+        let mut body = vec![0, 0, 0, 0];
+        push_tag(&mut body, 18, 0, &meta);
+        push_tag(&mut body, 9, 0, &[0x17, 0x00, 0x00, 0x00, 0x00, 0x01, 0x64]);
+        push_tag(&mut body, 8, 0, &[0xaf, 0x00, 0x12, 0x10]);
+        for i in 0..50u32 {
+            let video_ts = i * 40;
+            push_tag(&mut body, 8, video_ts + 30, &[0xaf, 0x01, 0x21]);
+            let video: &[u8] = if i % 10 == 0 {
+                &[0x17, 0x01, 0, 0, 0, 0xaa]
+            } else {
+                &[0x27, 0x01, 0, 0, 0, 0xbb]
+            };
+            push_tag(&mut body, 9, video_ts, video);
+            if i == 25 {
+                push_tag(&mut body, 18, 0, &meta);
+            }
+        }
+
+        let (result, data) = record_unsegmented(body.clone().into()).await;
+        result.unwrap();
+        let media = |tags: Vec<(u8, u32)>| -> Vec<(u8, u32)> {
+            tags.into_iter().filter(|(t, _)| *t != 18).collect()
+        };
+        let written = media(tag_timestamps(&data, 13));
+        let source = media(tag_timestamps(&body, 4));
+        assert_eq!(written.len(), 102);
+        assert_eq!(written, source);
+    }
+
+    /// 每个关键帧前都重发一次时间戳为 0 的 onMetaData 时，按时长分段照常进行：
+    /// 写出的脚本 tag 不能让「已写出的时间戳」退回 0，否则每个关键帧都会重置分段起点、永远不切。
+    #[tokio::test]
+    async fn resent_metadata_does_not_reset_the_segment_clock() {
+        use crate::downloader::util::{LifecycleFile, Segmentable};
+        use std::sync::{Arc, Mutex};
+        use std::time::Duration;
+
+        let meta = [
+            0x02, 0x00, 0x0A, b'o', b'n', b'M', b'e', b't', b'a', b'D', b'a', b't', b'a', 0x05,
+        ];
+        let mut body = vec![0, 0, 0, 0];
+        push_tag(&mut body, 18, 0, &meta);
+        push_tag(&mut body, 9, 0, &[0x17, 0x00, 0x00, 0x00, 0x00, 0x01, 0x64]);
+        for i in 0..10u32 {
+            push_tag(&mut body, 18, 0, &meta);
+            push_tag(&mut body, 9, i * 500, &[0x17, 0x01, 0, 0, 0, 0xaa]);
+            push_tag(&mut body, 9, i * 500 + 250, &[0x27, 0x01, 0, 0, 0, 0xbb]);
+        }
+
+        let http_resp = http::Response::builder().status(200).body(body).unwrap();
+        let connection = super::Connection::new(reqwest::Response::from(http_resp));
+        let dir = tempfile::tempdir().unwrap();
+        let segments = Arc::new(Mutex::new(0usize));
+        let file = LifecycleFile::with_hook(dir.path().join("rec").to_str().unwrap(), "flv", {
+            let segments = segments.clone();
+            move |_: &str| *segments.lock().unwrap() += 1
+        });
+        let segment = Segmentable::new(Some(Duration::from_secs(1)), None);
+        super::parse_flv(connection, file, segment, None)
+            .await
+            .unwrap();
+        let segments = *segments.lock().unwrap();
+        assert!(
+            segments >= 4,
+            "4.5 s of stream split every second, got {segments} segment(s)"
+        );
     }
 }
