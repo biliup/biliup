@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
 use rustls_platform_verifier::BuilderVerifierExt;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::time::interval;
@@ -224,7 +224,7 @@ impl DanmakuRecorder {
             }
         } else {
             loop {
-                if *stop_rx.borrow() {
+                if stop_requested(&stop_rx) {
                     break;
                 }
 
@@ -245,7 +245,7 @@ impl DanmakuRecorder {
                             tokio::select! {
                                 _ = &mut reconnect_sleep => break,
                                 _ = stop_rx.changed() => {
-                                    if *stop_rx.borrow() {
+                                    if stop_requested(&stop_rx) {
                                         break;
                                     }
                                 }
@@ -256,7 +256,7 @@ impl DanmakuRecorder {
                                 }
                             }
 
-                            if *stop_rx.borrow() {
+                            if stop_requested(&stop_rx) {
                                 break;
                             }
                         }
@@ -307,7 +307,7 @@ impl DanmakuRecorder {
         loop {
             tokio::select! {
                 _ = stop_rx.changed() => {
-                    if *stop_rx.borrow() {
+                    if stop_requested(stop_rx) {
                         return Err(DanmakuError::Stopped);
                     }
                 }
@@ -434,7 +434,7 @@ impl DanmakuRecorder {
             tokio::select! {
                 // Check stop signal
                 _ = stop_rx.changed() => {
-                    if *stop_rx.borrow() {
+                    if stop_requested(stop_rx) {
                         return Err(DanmakuError::Stopped);
                     }
                 }
@@ -575,12 +575,13 @@ impl DanmakuRecorder {
         };
 
         let (mut tcp_reader, mut tcp_writer) = tcp_stream.into_split();
+        let mut frame_reader = TcpFrameReader::default();
 
         let mut consecutive_decode_errors = 0u64;
         loop {
             tokio::select! {
                 _ = stop_rx.changed() => {
-                    if *stop_rx.borrow() {
+                    if stop_requested(stop_rx) {
                         return Err(DanmakuError::Stopped);
                     }
                 }
@@ -602,7 +603,7 @@ impl DanmakuRecorder {
                     }
                 }
 
-                frame = read_tcp_frame(&mut tcp_reader) => {
+                frame = frame_reader.read_frame(&mut tcp_reader) => {
                     let frame = frame?;
                     match decode_message_guarded(self.platform.as_ref(), &frame, platform_name) {
                         Ok(result) => {
@@ -680,22 +681,65 @@ fn parse_tcp_addr(url: &str) -> Result<String> {
         .ok_or_else(|| DanmakuError::Decode(format!("Invalid TCP endpoint: {url}")))
 }
 
-async fn read_tcp_frame(reader: &mut tokio::net::tcp::OwnedReadHalf) -> Result<Vec<u8>> {
-    let mut header = [0u8; 12];
-    reader.read_exact(&mut header).await?;
+/// TCP 帧头：`u32 LE 长度 | u32 LE 长度 | u32 LE 类型`，长度不含自身的 4 字节。
+const TCP_FRAME_HEADER_LEN: usize = 12;
 
-    let length = u32::from_le_bytes([header[0], header[1], header[2], header[3]]) as usize;
-    if length < 8 {
-        return Err(DanmakuError::Decode(format!(
-            "Invalid TCP frame length: {length}"
-        )));
+/// 单帧长度上限。真实的斗鱼消息只有几百字节到几十 KB；长度字段是对端给的 u32，
+/// 流一旦错位就是任意值，不能照着它缓冲/分配（最大可达 4 GiB）。
+const MAX_TCP_FRAME_LEN: usize = 1 << 20;
+
+/// 从 TCP 字节流中切出完整帧。
+///
+/// 读帧在 `select!` 里与心跳、命令分支竞争，随时可能被丢弃。`read_exact` 不是
+/// 取消安全的：被抢先时已读进局部缓冲的半帧会丢失，之后的字节被当成帧头，整个
+/// 流错位。这里把已读字节留在 `buf` 里，只在取消安全的 `read_buf` 上等待。
+#[derive(Default)]
+struct TcpFrameReader {
+    buf: Vec<u8>,
+}
+
+impl TcpFrameReader {
+    async fn read_frame<R: AsyncRead + Unpin>(&mut self, reader: &mut R) -> Result<Vec<u8>> {
+        loop {
+            if let Some(frame) = self.take_frame()? {
+                return Ok(frame);
+            }
+            self.buf.reserve(8 * 1024);
+            if reader.read_buf(&mut self.buf).await? == 0 {
+                return Err(DanmakuError::ConnectionClosed);
+            }
+        }
     }
 
-    let mut frame = Vec::with_capacity(4 + length);
-    frame.extend_from_slice(&header);
-    frame.resize(4 + length, 0);
-    reader.read_exact(&mut frame[12..]).await?;
-    Ok(frame)
+    /// 缓冲区里已有完整帧时取出它；帧还没收全时返回 `None`。
+    fn take_frame(&mut self) -> Result<Option<Vec<u8>>> {
+        if self.buf.len() < TCP_FRAME_HEADER_LEN {
+            return Ok(None);
+        }
+
+        let length = u32::from_le_bytes([self.buf[0], self.buf[1], self.buf[2], self.buf[3]]);
+        let length = length as usize;
+        if !(8..=MAX_TCP_FRAME_LEN).contains(&length) {
+            return Err(DanmakuError::Decode(format!(
+                "Invalid TCP frame length: {length}"
+            )));
+        }
+
+        let total = 4 + length;
+        if self.buf.len() < total {
+            return Ok(None);
+        }
+        let rest = self.buf.split_off(total);
+        Ok(Some(std::mem::replace(&mut self.buf, rest)))
+    }
+}
+
+/// 是否应当停止录制。所有 [`RecorderHandle`] 都被丢弃（例如持有它的任务被 abort）
+/// 后，`stop_rx.changed()` 每次都立即返回 `Err`，而 `borrow()` 仍是 `false`；
+/// 只看 `borrow()` 会让 `select!` 循环在该分支上空转、永不让出线程。没有句柄就
+/// 再也无法停止或滚动这个录制，按停止处理。
+fn stop_requested(stop_rx: &watch::Receiver<bool>) -> bool {
+    *stop_rx.borrow() || stop_rx.has_changed().is_err()
 }
 
 fn platform_tls_connector() -> Result<Connector> {
@@ -1015,5 +1059,216 @@ mod tests {
         let result = format_output_path(&template);
         assert!(result.to_string_lossy().contains("/tmp/test_"));
         assert!(result.extension().map(|e| e == "xml").unwrap_or(false));
+    }
+
+    fn test_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "danmaku-{tag}-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// 连接总是失败的平台：录制器会一直停在 30s 重连等待里。
+    struct UnreachablePlatform;
+
+    #[async_trait::async_trait]
+    impl Platform for UnreachablePlatform {
+        fn name(&self) -> &'static str {
+            "Unreachable"
+        }
+
+        async fn get_connection_info(
+            &self,
+            _url: &str,
+            _context: &PlatformContext,
+        ) -> Result<ConnectionInfo> {
+            Err(DanmakuError::ConnectionClosed)
+        }
+
+        fn heartbeat_config(&self) -> crate::protocols::HeartbeatConfig {
+            crate::protocols::HeartbeatConfig::none()
+        }
+
+        fn decode_message(&self, _data: &[u8]) -> Result<DecodeResult> {
+            Ok(DecodeResult::empty())
+        }
+    }
+
+    /// 所有 RecorderHandle 被丢弃（例如持有它的下载任务被 abort）后，
+    /// `stop_rx.changed()` 每次都立即返回 Err。修复前只看 `borrow()`（仍为 false），
+    /// `select!` 在这个分支上空转：任务永不让出工作线程、永不结束。
+    #[test]
+    fn dropping_every_handle_stops_the_recorder() {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let dir = test_dir("handle-dropped");
+        let recorder = DanmakuRecorder {
+            config: RecorderConfig::new("https://example.invalid/room", dir.join("danmaku")),
+            platform: Arc::new(UnreachablePlatform),
+        };
+        let (cmd_tx, cmd_rx) = mpsc::channel(16);
+        let (stop_tx, stop_rx) = watch::channel(false);
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        rt.spawn(async move {
+            let result = recorder.run(cmd_rx, stop_rx).await;
+            let _ = done_tx.send(result.is_ok());
+        });
+
+        // 等录制器进入重连等待，再丢掉全部句柄
+        std::thread::sleep(Duration::from_millis(200));
+        drop(cmd_tx);
+        drop(stop_tx);
+
+        let finished = done_rx.recv_timeout(Duration::from_secs(5));
+        // 修复前任务在空转，不能等它让出线程
+        rt.shutdown_background();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            finished,
+            Ok(true),
+            "recorder kept running after every handle was dropped"
+        );
+    }
+
+    /// 斗鱼式 TCP 帧：`len | len | type | body`，len = 8 + body.len()（小端）。
+    fn tcp_frame(body: &[u8]) -> Vec<u8> {
+        let len = (8 + body.len()) as u32;
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&len.to_le_bytes());
+        frame.extend_from_slice(&len.to_le_bytes());
+        frame.extend_from_slice(&690u32.to_le_bytes());
+        frame.extend_from_slice(body);
+        frame
+    }
+
+    #[tokio::test]
+    async fn tcp_frame_reader_splits_coalesced_frames_and_survives_cancellation() {
+        let (mut server, mut client) = tokio::io::duplex(1024);
+        let first = tcp_frame(b"first-body");
+        let second = tcp_frame(b"second");
+        let mut reader = TcpFrameReader::default();
+
+        // 半帧到达后读 future 被丢弃（模拟 select! 里其它分支抢先）
+        server.write_all(&first[..15]).await.unwrap();
+        let cancelled =
+            tokio::time::timeout(Duration::from_millis(20), reader.read_frame(&mut client)).await;
+        assert!(cancelled.is_err());
+
+        // 剩余部分与下一帧粘在一起到达
+        let mut rest = first[15..].to_vec();
+        rest.extend_from_slice(&second);
+        server.write_all(&rest).await.unwrap();
+        assert_eq!(reader.read_frame(&mut client).await.unwrap(), first);
+        assert_eq!(reader.read_frame(&mut client).await.unwrap(), second);
+
+        drop(server);
+        assert!(matches!(
+            reader.read_frame(&mut client).await,
+            Err(DanmakuError::ConnectionClosed)
+        ));
+    }
+
+    #[test]
+    fn tcp_frame_reader_rejects_bogus_lengths_without_buffering_them() {
+        for length in [0u32, 7, u32::MAX] {
+            let mut header = Vec::new();
+            header.extend_from_slice(&length.to_le_bytes());
+            header.extend_from_slice(&length.to_le_bytes());
+            header.extend_from_slice(&690u32.to_le_bytes());
+            let mut reader = TcpFrameReader { buf: header };
+            assert!(
+                matches!(reader.take_frame(), Err(DanmakuError::Decode(_))),
+                "length {length} accepted"
+            );
+        }
+    }
+
+    /// 走 TCP 传输、心跳极频繁的平台；每帧解出一条正文为帧体的弹幕。
+    struct TcpEchoPlatform {
+        addr: String,
+    }
+
+    #[async_trait::async_trait]
+    impl Platform for TcpEchoPlatform {
+        fn name(&self) -> &'static str {
+            "TcpEcho"
+        }
+
+        async fn get_connection_info(
+            &self,
+            _url: &str,
+            _context: &PlatformContext,
+        ) -> Result<ConnectionInfo> {
+            Ok(ConnectionInfo::new(format!("tcp://{}", self.addr)).with_tcp_transport())
+        }
+
+        fn heartbeat_config(&self) -> crate::protocols::HeartbeatConfig {
+            crate::protocols::HeartbeatConfig::binary(b"hb".to_vec(), Duration::from_millis(5))
+        }
+
+        fn decode_message(&self, data: &[u8]) -> Result<DecodeResult> {
+            let body = String::from_utf8_lossy(&data[12..]).into_owned();
+            Ok(DecodeResult::with_events(vec![DanmakuEvent::Chat(
+                crate::message::ChatMessage::new(body),
+            )]))
+        }
+    }
+
+    /// 一帧分两次到达、中间心跳分支抢先完成时，读帧 future 被 `select!` 丢弃。
+    /// 修复前用 `read_exact` 读进局部缓冲的半帧随之丢失，后续字节被当成帧头，
+    /// 流整体错位（这里错位后的“长度”为 1，连接报错并进入 30s 重连）。
+    #[tokio::test]
+    async fn tcp_frame_split_across_heartbeats_is_not_lost() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let first_body = b"AA\x01\x00\x00\x00-first";
+        let first = tcp_frame(first_body);
+        let second = tcp_frame(b"second");
+        let server = {
+            let (first, second) = (first.clone(), second.clone());
+            tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                // 帧头 + 2 字节正文先到，剩余部分在若干次心跳之后才到
+                socket.write_all(&first[..14]).await.unwrap();
+                tokio::time::sleep(Duration::from_millis(150)).await;
+                socket.write_all(&first[14..]).await.unwrap();
+                socket.write_all(&second).await.unwrap();
+                // 保持连接直到测试结束
+                tokio::time::sleep(Duration::from_secs(10)).await;
+            })
+        };
+
+        let dir = test_dir("tcp-split");
+        let (live_tx, mut live_rx) = broadcast::channel(16);
+        let recorder = DanmakuRecorder {
+            config: RecorderConfig::new("tcp-echo", dir.join("danmaku")).with_live_tx(live_tx),
+            platform: Arc::new(TcpEchoPlatform { addr }),
+        };
+        let handle = recorder.start();
+
+        let mut received = Vec::new();
+        for _ in 0..2 {
+            match tokio::time::timeout(Duration::from_secs(5), live_rx.recv()).await {
+                Ok(Ok(DanmakuEvent::Chat(chat))) => received.push(chat.content),
+                _ => break,
+            }
+        }
+
+        handle.stop().await.unwrap();
+        server.abort();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(
+            received,
+            vec![
+                String::from_utf8(first_body.to_vec()).unwrap(),
+                "second".to_string()
+            ]
+        );
     }
 }

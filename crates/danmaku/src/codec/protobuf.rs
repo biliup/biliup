@@ -114,12 +114,14 @@ impl<'a> ProtoReader<'a> {
 
     /// Read bytes (length-delimited).
     pub fn read_bytes(&mut self) -> Option<Vec<u8>> {
-        let len = self.read_varint()? as usize;
-        if self.pos + len > self.data.len() {
+        // 长度来自对端，可达 u64::MAX：`pos + len` 必须做溢出检查
+        let len = usize::try_from(self.read_varint()?).ok()?;
+        let end = self.pos.checked_add(len)?;
+        if end > self.data.len() {
             return None;
         }
-        let bytes = self.data[self.pos..self.pos + len].to_vec();
-        self.pos += len;
+        let bytes = self.data[self.pos..end].to_vec();
+        self.pos = end;
         Some(bytes)
     }
 
@@ -184,12 +186,14 @@ impl<'a> ProtoReader<'a> {
                 }
             }
             WireType::LengthDelimited => {
-                if let Some(len) = self.read_varint() {
-                    let len = len as usize;
-                    if self.pos + len <= self.data.len() {
-                        self.pos += len;
-                        return true;
-                    }
+                if let Some(end) = self
+                    .read_varint()
+                    .and_then(|len| usize::try_from(len).ok())
+                    .and_then(|len| self.pos.checked_add(len))
+                    && end <= self.data.len()
+                {
+                    self.pos = end;
+                    return true;
                 }
                 false
             }
@@ -364,5 +368,17 @@ mod tests {
     fn strict_parser_rejects_truncated_length_delimited_field() {
         let mut reader = ProtoReader::new(&[0x0a, 0x02, b'x']);
         assert!(reader.parse_all_strict().is_none());
+    }
+
+    /// 长度前缀为 u64::MAX（10 字节 varint）：修复前 `pos + len` 溢出（debug）
+    /// 或回绕后以 end < start 切片（release），两种构建都会 panic。
+    #[test]
+    fn huge_length_prefix_is_rejected_without_panicking() {
+        let data = [
+            0x0a, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01,
+        ];
+        assert!(ProtoReader::new(&data).parse_all_strict().is_none());
+        assert!(ProtoReader::new(&data[1..]).read_bytes().is_none());
+        assert!(!ProtoReader::new(&data[1..]).skip_field(WireType::LengthDelimited));
     }
 }

@@ -10,6 +10,7 @@
 //! </i>
 //! ```
 
+use std::borrow::Cow;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -40,6 +41,26 @@ impl Default for XmlWriterConfig {
             save_detail: false,
             save_interval: 10,
         }
+    }
+}
+
+/// XML 1.0 的 `Char` 产生式：`#x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] |
+/// [#x10000-#x10FFFF]`。
+fn is_xml_char(c: char) -> bool {
+    matches!(
+        c,
+        '\u{9}' | '\u{A}' | '\u{D}' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..
+    )
+}
+
+/// 去掉 XML 1.0 不允许出现的字符。quick-xml 只转义 `<>&'"`，其余控制字符
+/// （如 Twitch `/me` 消息的 `\x01ACTION ...\x01`）会原样写出，一条这样的弹幕就让
+/// 整个文件无法被严格的 XML 解析器读取（字符引用 `&#1;` 在 XML 1.0 里同样非法）。
+fn xml_safe(s: &str) -> Cow<'_, str> {
+    if s.chars().all(is_xml_char) {
+        Cow::Borrowed(s)
+    } else {
+        Cow::Owned(s.chars().filter(|&c| is_xml_char(c)).collect())
     }
 }
 
@@ -175,13 +196,13 @@ impl XmlWriter {
             elem.push_attribute(("timestamp", timestamp.to_string().as_str()));
             elem.push_attribute(("uid", uid.to_string().as_str()));
             if let Some(ref name) = msg.name {
-                elem.push_attribute(("user", name.as_str()));
+                elem.push_attribute(("user", xml_safe(name).as_ref()));
             }
         }
 
         self.writer.write_event(Event::Start(elem))?;
         self.writer
-            .write_event(Event::Text(BytesText::new(&msg.content)))?;
+            .write_event(Event::Text(BytesText::new(&xml_safe(&msg.content))))?;
         self.writer.write_event(Event::End(BytesEnd::new("d")))?;
 
         Ok(())
@@ -198,15 +219,15 @@ impl XmlWriter {
         let mut elem = BytesStart::new("s");
         elem.push_attribute(("timestamp", timestamp.to_string().as_str()));
         elem.push_attribute(("uid", msg.uid.to_string().as_str()));
-        elem.push_attribute(("username", msg.name.as_str()));
+        elem.push_attribute(("username", xml_safe(&msg.name).as_ref()));
         elem.push_attribute(("price", msg.price.to_string().as_str()));
         elem.push_attribute(("type", "gift"));
         elem.push_attribute(("num", msg.num.to_string().as_str()));
-        elem.push_attribute(("giftname", msg.gift_name.as_str()));
+        elem.push_attribute(("giftname", xml_safe(&msg.gift_name).as_ref()));
 
         self.writer.write_event(Event::Start(elem))?;
         self.writer
-            .write_event(Event::Text(BytesText::new(&msg.content)))?;
+            .write_event(Event::Text(BytesText::new(&xml_safe(&msg.content))))?;
         self.writer.write_event(Event::End(BytesEnd::new("s")))?;
 
         Ok(())
@@ -223,7 +244,7 @@ impl XmlWriter {
         let mut elem = BytesStart::new("s");
         elem.push_attribute(("timestamp", timestamp.to_string().as_str()));
         elem.push_attribute(("uid", msg.uid.to_string().as_str()));
-        elem.push_attribute(("username", msg.name.as_str()));
+        elem.push_attribute(("username", xml_safe(&msg.name).as_ref()));
         elem.push_attribute(("price", msg.price.to_string().as_str()));
         elem.push_attribute(("type", "super_chat"));
         elem.push_attribute(("num", "1"));
@@ -231,7 +252,7 @@ impl XmlWriter {
 
         self.writer.write_event(Event::Start(elem))?;
         self.writer
-            .write_event(Event::Text(BytesText::new(&msg.content)))?;
+            .write_event(Event::Text(BytesText::new(&xml_safe(&msg.content))))?;
         self.writer.write_event(Event::End(BytesEnd::new("s")))?;
 
         Ok(())
@@ -249,15 +270,15 @@ impl XmlWriter {
         let mut elem = BytesStart::new("s");
         elem.push_attribute(("timestamp", timestamp.to_string().as_str()));
         elem.push_attribute(("uid", msg.uid.to_string().as_str()));
-        elem.push_attribute(("username", msg.name.as_str()));
+        elem.push_attribute(("username", xml_safe(&msg.name).as_ref()));
         elem.push_attribute(("price", msg.price.to_string().as_str()));
         elem.push_attribute(("type", "guard_buy"));
         elem.push_attribute(("num", msg.num.to_string().as_str()));
-        elem.push_attribute(("giftname", msg.gift_name.as_str()));
+        elem.push_attribute(("giftname", xml_safe(&msg.gift_name).as_ref()));
 
         self.writer.write_event(Event::Start(elem))?;
         self.writer
-            .write_event(Event::Text(BytesText::new(&content)))?;
+            .write_event(Event::Text(BytesText::new(&xml_safe(&content))))?;
         self.writer.write_event(Event::End(BytesEnd::new("s")))?;
 
         Ok(())
@@ -272,7 +293,7 @@ impl XmlWriter {
 
         self.writer.write_event(Event::Start(elem))?;
         self.writer
-            .write_event(Event::Text(BytesText::new(raw_data)))?;
+            .write_event(Event::Text(BytesText::new(&xml_safe(raw_data))))?;
         self.writer.write_event(Event::End(BytesEnd::new("o")))?;
 
         Ok(())
@@ -359,5 +380,58 @@ mod tests {
         assert!(!writer.has_messages());
         let _ = writer.finish().unwrap();
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// XML 1.0 的 Char 产生式；不在其中的字符会让整个文件无法被严格解析器读取。
+    fn allowed_in_xml(c: char) -> bool {
+        matches!(c, '\t' | '\n' | '\r' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..)
+    }
+
+    #[test]
+    fn control_characters_are_stripped_so_the_xml_stays_well_formed() {
+        let dir = std::env::temp_dir().join(format!(
+            "danmaku-xml-ctrl-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = XmlWriterConfig {
+            save_raw: true,
+            save_detail: true,
+            ..XmlWriterConfig::default()
+        };
+        let mut writer = XmlWriter::new(dir.join("danmaku.xml"), config).unwrap();
+
+        // Twitch 的 `/me` 消息正文是 `\x01ACTION ...\x01`
+        let chat = ChatMessage::new("\u{1}ACTION waves\u{1} <&> \u{8}ok\u{fffe}".to_string())
+            .with_name("bad\u{0}name\u{b}");
+        writer.write_event(&DanmakuEvent::Chat(chat)).unwrap();
+        writer
+            .write_event(&DanmakuEvent::Gift(GiftMessage {
+                name: "gifter\u{1f}".to_string(),
+                uid: 1,
+                gift_name: "rose\u{c}".to_string(),
+                price: 1,
+                num: 1,
+                content: "gifter\u{1f}投喂了1个rose\u{c}".to_string(),
+                timestamp: Utc::now(),
+            }))
+            .unwrap();
+        writer
+            .write_event(&DanmakuEvent::Other {
+                raw_data: "raw\u{2}data".to_string(),
+            })
+            .unwrap();
+        let path = writer.finish().unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+
+        let bad: Vec<char> = content.chars().filter(|&c| !allowed_in_xml(c)).collect();
+        assert!(bad.is_empty(), "invalid XML chars {bad:?} in:\n{content}");
+        assert!(content.contains("ACTION waves &lt;&amp;&gt; ok</d>"));
+        assert!(content.contains(r#"user="badname""#));
+        assert!(content.contains(r#"username="gifter""#));
+        assert!(content.contains(r#"giftname="rose""#));
+        assert!(content.contains(">rawdata</o>"));
     }
 }
