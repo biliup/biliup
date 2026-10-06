@@ -10,31 +10,30 @@ import { revalidateMe } from '@/app/lib/api-streamer'
 // 日志内容组件
 interface LogContentProps {
   logs: string[]
-  logContainerRef: React.RefObject<HTMLDivElement | null>
   isLoading: boolean
 }
 
-const LogContent = ({ logs, logContainerRef, isLoading }: LogContentProps) => {
-  // 判断滚动条是否接近底部
-  const isScrolledToBottom = () => {
-    const containers = document.getElementsByClassName('log-container')
-    if (containers.length === 0) return false
-    const container = containers[0] as HTMLElement
-    const diff = container.scrollHeight - container.scrollTop
-    return diff - container.clientHeight <= 50
-  }
-
-  const scrollToBottom = () => {
-    const containers = document.getElementsByClassName('log-container')
-    if (containers.length > 0) {
-      const container = containers[0] as HTMLElement
-      container.scrollTop = container.scrollHeight
-    }
+const LogContent = ({ logs, isLoading }: LogContentProps) => {
+  // 两个 Tab 的内容都挂载着（未选中的 display: none），每个实例只管自己的容器；
+  // 按 class 取第一个容器时，第二个 Tab 永远在滚那个隐藏的
+  const containerRef = useRef<HTMLDivElement>(null)
+  // 用户没往上翻时跟随新日志。在滚动时记下，不能等新行渲染后再量：一批到达多行就超过阈值，跟随断掉
+  const followRef = useRef(true)
+  const handleScroll = () => {
+    const container = containerRef.current
+    if (!container) return
+    followRef.current = container.scrollHeight - container.scrollTop - container.clientHeight <= 50
   }
 
   useEffect(() => {
-    if (logs.length > 0 && isScrolledToBottom()) {
-      scrollToBottom()
+    // 清空 / 切换 Tab / 重连后从头跟随
+    if (logs.length === 0) {
+      followRef.current = true
+      return
+    }
+    const container = containerRef.current
+    if (container && followRef.current) {
+      container.scrollTop = container.scrollHeight
     }
   }, [logs])
 
@@ -49,7 +48,8 @@ const LogContent = ({ logs, logContainerRef, isLoading }: LogContentProps) => {
   return (
     <div
       className="log-container"
-      ref={logContainerRef}
+      ref={containerRef}
+      onScroll={handleScroll}
       style={{
         height: 'calc(100vh - 220px)',
         minHeight: 320,
@@ -86,7 +86,6 @@ export default function LogViewer() {
   const [activeTab, setActiveTab] = useState('ds_update')
   // 每加一就重建一次 WebSocket(「刷新」按钮);切换 Tab 也会重建
   const [connectSeq, setConnectSeq] = useState(0)
-  const logContainerRef = useRef<HTMLDivElement>(null)
   const isMobile = useIsMobile()
 
   // 清空旧日志并进入加载态,在触发重连的事件里同步完成,不放在 effect 里
@@ -178,10 +177,10 @@ export default function LogViewer() {
         <div className={dc.card} style={{ padding: 16 }}>
           <Tabs type="line" activeKey={activeTab} onChange={handleTabChange}>
             <TabPane tab="主程序运行日志" itemKey="ds_update">
-              <LogContent logs={logs} logContainerRef={logContainerRef} isLoading={isLoading} />
+              <LogContent logs={logs} isLoading={isLoading} />
             </TabPane>
             <TabPane tab="biliup下载和上传日志" itemKey="download">
-              <LogContent logs={logs} logContainerRef={logContainerRef} isLoading={isLoading} />
+              <LogContent logs={logs} isLoading={isLoading} />
             </TabPane>
           </Tabs>
         </div>

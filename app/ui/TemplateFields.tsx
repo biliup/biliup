@@ -353,6 +353,13 @@ const TemplateFields: React.FC<TemplateFieldsProps> = ({
             label={{ text: '定时发布' }}
             checkedText="｜"
             uncheckedText="〇"
+            onChange={checked => {
+              // 打开时滚轮已显示一个延迟（默认 4 小时），没点「确认」也按它保存；
+              // 否则 dtime 为空，保存后定时发布被悄悄丢掉，再打开开关也是关的
+              if (checked && !formApi.getValue('dtime')) {
+                formApi.setValue('dtime', selectedHours * 3600 + selectedMinutes * 60)
+              }
+            }}
           />
           <span style={{ paddingLeft: 12, fontSize: 12 }}>
             (当前+2小时 ≤ 可选时间 ≤

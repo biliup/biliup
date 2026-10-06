@@ -66,6 +66,10 @@ const Edit = () => {
     )
   }
 
+  // 本机模板接口回来的这三个互动开关是布尔值（后端 UploadStreamer 里是 Option<bool>），
+  // 其余开关是 0 / 1。只认 1 时打开过的开关回显成关，一保存就被写成 0
+  const flagOn = (flag: unknown) => flag === 1 || flag === true
+
   let uploadStreamers = {
     ...data,
     tid: [
@@ -75,9 +79,9 @@ const Edit = () => {
       data.tid,
     ],
     sound: (data.dolby === 1 ? ['dolby'] : []).concat(data.hires === 1 ? ['hires'] : []),
-    interaction: (data.up_close_danmu === 1 ? ['up_close_danmu'] : [])
-      .concat(data.up_close_reply === 1 ? ['up_close_reply'] : [])
-      .concat(data.up_selection_reply === 1 ? ['up_selection_reply'] : []),
+    interaction: (flagOn(data.up_close_danmu) ? ['up_close_danmu'] : [])
+      .concat(flagOn(data.up_close_reply) ? ['up_close_reply'] : [])
+      .concat(flagOn(data.up_selection_reply) ? ['up_selection_reply'] : []),
     charging_pay: data.charging_pay === 1,
     no_reprint: data.no_reprint === 1,
     is_only_self: data.is_only_self === 1,

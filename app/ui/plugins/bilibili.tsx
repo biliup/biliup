@@ -1,7 +1,7 @@
 'use client'
 import React, { useEffect } from 'react'
 import { Form, Select, useFormApi } from '@douyinfe/semi-ui'
-import PlatformPanel from './PlatformPanel'
+import PlatformPanel, { digitsToNumber } from './PlatformPanel'
 
 type Props = {
   entity: any
@@ -29,6 +29,7 @@ const Bilibili: React.FC<Props> = props => {
           allowCreate={true}
           filter
           field="bili_qn"
+          convert={digitsToNumber}
           extraText={
             <div style={{ fontSize: '14px' }}>
               录制画质，默认原画。

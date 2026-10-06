@@ -83,7 +83,8 @@ export default function FilesTab() {
       </div>
       <FormDialog title={fileName} immersive visible={visible} onCancel={() => setVisible(false)}>
         <div className={styles.playerStage}>
-          <Players url={(process.env.NEXT_PUBLIC_API_SERVER ?? '') + '/static/' + fileName} />
+          {/* 文件名常带直播标题，里面的 #、% 不编码会被当成片段 / 转义，请求到的不是这个文件 */}
+          <Players url={(process.env.NEXT_PUBLIC_API_SERVER ?? '') + '/static/' + encodeURIComponent(fileName ?? '')} />
         </div>
       </FormDialog>
     </>

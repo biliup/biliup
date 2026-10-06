@@ -1,7 +1,7 @@
 'use client'
 import React, { useEffect } from 'react'
 import { Form, Radio, Select, useFormApi } from '@douyinfe/semi-ui'
-import PlatformPanel from './PlatformPanel'
+import PlatformPanel, { digitsToNumber } from './PlatformPanel'
 
 type Props = {
   entity: any
@@ -46,6 +46,7 @@ const Douyu: React.FC<Props> = props => {
           allowCreate={true}
           filter
           field="douyu_rate"
+          convert={digitsToNumber}
           extraText={
             <div style={{ fontSize: '14px' }}>
               录制画质，默认 0（最高画质）。可选：0 最高画质 / 8 蓝光 8M / 4 蓝光 4M / 3 超清 / 2
