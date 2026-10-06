@@ -48,7 +48,8 @@ pub async fn add_streamer(
     Ok(live_streamers)
 }
 
-/// 整体覆盖保存主播，并用新设置重建它的监控
+/// 整体覆盖保存主播，并用新设置重建它的监控。暂停只在内存里，重建时带过去：
+/// 否则给暂停中的主播改个备注，它就又开始检测、开播即录。
 pub async fn update_streamer(
     services: &ServiceRegister,
     streamer: LiveStreamer,
@@ -59,6 +60,16 @@ pub async fn update_streamer(
         .change_context(AppError::Unknown)?;
 
     let id = streamer.id;
+    let paused = services
+        .managers
+        .get_room_by_id(id)
+        .await
+        .is_some_and(|worker| {
+            matches!(
+                *worker.downloader_status.read().unwrap(),
+                WorkerStatus::Pause
+            )
+        });
     services.managers.del_room(id).await;
 
     let upload_config = get_upload_config(&services.pool, id).await?;
@@ -68,9 +79,25 @@ pub async fn update_streamer(
         .add_room(services.worker(streamer.clone(), upload_config))
         .await
         .ok_or(AppError::Unknown)?;
+    if paused {
+        keep_paused(&services.managers, id).await;
+    }
 
-    info!(id = id, "successfully update live streamers");
+    info!(id = id, paused, "successfully update live streamers");
     Ok(streamer)
+}
+
+/// 把刚重建的房间恢复成暂停。先移出检测队列、再标暂停：监控循环从队列取房间时会把状态改成
+/// `Pending`，反过来做的话中间被取走就白标了；先移出的话，已被取走、正在检测的房间检测完看到
+/// 暂停既不开录也不放回队列（与 [`toggle_pause`] 一样）。
+async fn keep_paused(managers: &DownloadManager, id: i64) {
+    let Some(worker) = managers.get_room_by_id(id).await else {
+        return;
+    };
+    managers.make_waker(id).await;
+    worker
+        .change_status(Stage::Download, WorkerStatus::Pause)
+        .await;
 }
 
 /// 停止监控并删除主播，返回删掉的主播
@@ -275,6 +302,38 @@ mod tests {
         let rooms = f.services.managers.get_rooms().await;
         assert_eq!(rooms.len(), 1);
         assert_eq!(rooms[0].live_streamer.remark, "新备注");
+    }
+
+    /// 暂停只在内存里：保存设置会重建监控，暂停必须带过去，不能改个备注就又开始检测、开录
+    #[tokio::test]
+    async fn updating_a_paused_streamer_keeps_it_paused() {
+        let mut f = fixture().await;
+        let added = add_streamer(&f.services, insert("https://stuck.example/1"))
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), f.probed.recv())
+            .await
+            .expect("新房间应很快轮到检测");
+        let managers = &f.services.managers;
+        toggle_pause(managers, added.id).await;
+
+        let edited = LiveStreamer {
+            remark: "新备注".to_string(),
+            ..added.clone()
+        };
+        update_streamer(&f.services, edited).await.unwrap();
+
+        let room = managers.get_room_by_id(added.id).await.unwrap();
+        assert_eq!(room.live_streamer.remark, "新备注");
+        let status = || room.downloader_status.read().unwrap().clone();
+        assert!(
+            matches!(status(), WorkerStatus::Pause),
+            "重建后仍应暂停，实际是 {:?}",
+            status()
+        );
+        // 恢复照常可用
+        toggle_pause(managers, added.id).await;
+        assert!(matches!(status(), WorkerStatus::Idle));
     }
 
     #[tokio::test]

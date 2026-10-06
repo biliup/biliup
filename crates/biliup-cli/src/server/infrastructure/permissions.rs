@@ -224,8 +224,11 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         "/v1/tools" if get => StreamerView,
         "/v1/ws/logs" if get => LogView,
         "/static/{path}" if get => {
+            // 处理函数按百分号解码后的文件名取文件，这里也要按解码后的判断：
+            // 否则 `/static/ds%5Fupdate.log` 读到的是日志，却只按录像的 file.view 放行
             let name = raw_path.rsplit('/').next().unwrap_or_default();
-            if crate::server::router::ALLOWED_LOG_FILES.contains(&name) {
+            let name = urlencoding::decode(name).unwrap_or_default();
+            if crate::server::router::ALLOWED_LOG_FILES.contains(&&*name) {
                 LogView
             } else {
                 FileView
@@ -404,6 +407,26 @@ mod tests {
         );
         assert_eq!(
             required_permission(&Method::GET, "/static/{path}", "/static/a.flv"),
+            Some(Permission::FileView)
+        );
+    }
+
+    /// `Path` 提取器会做百分号解码，编码过的日志文件名也得按日志判断
+    #[test]
+    fn static_route_classifies_the_decoded_file_name() {
+        for raw in [
+            "/static/ds%5Fupdate.log",
+            "/static/%64ownload.log",
+            "/static/upload%2Elog",
+        ] {
+            assert_eq!(
+                required_permission(&Method::GET, "/static/{path}", raw),
+                Some(Permission::LogView),
+                "{raw}"
+            );
+        }
+        assert_eq!(
+            required_permission(&Method::GET, "/static/{path}", "/static/%E5%BD%95.flv"),
             Some(Permission::FileView)
         );
     }

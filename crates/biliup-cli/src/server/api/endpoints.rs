@@ -433,24 +433,41 @@ pub async fn get_upload_streamer_endpoint(
         .map_err(report_to_response)?;
     Ok(Json(uploader_streamers))
 }
+/// 有主播在用的模板不删（409）：`livestreamers.upload_streamers_id` 是 `ON DELETE CASCADE`，
+/// 直接删会把绑着它的主播一起从库里删掉，而它们在监控里的房间还照常录、传。
+/// 判断与删除在同一条语句里，不会和并发的「主播改用这个模板」错开。
 pub async fn delete_template_endpoint(
     State(pool): State<ConnectionPool>,
     Path(id): Path<i64>,
 ) -> Result<Json<()>, Response> {
-    let uploader_streamers = UploadStreamer::select()
-        .where_("id = ?")
-        .bind(id)
-        .fetch_one(&pool)
-        .await
-        .change_context(AppError::Unknown)
-        .map_err(report_to_response)?;
-    Ok(Json(
-        uploader_streamers
-            .delete(&pool)
+    let deleted = sqlx::query(
+        "DELETE FROM uploadstreamers WHERE id = ?1
+           AND NOT EXISTS (SELECT 1 FROM livestreamers WHERE upload_streamers_id = ?1)",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .change_context(AppError::Unknown)
+    .map_err(report_to_response)?
+    .rows_affected();
+    if deleted > 0 {
+        return Ok(Json(()));
+    }
+    let in_use: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM livestreamers WHERE upload_streamers_id = ?")
+            .bind(id)
+            .fetch_one(&pool)
             .await
             .change_context(AppError::Unknown)
-            .map_err(report_to_response)?,
-    ))
+            .map_err(report_to_response)?;
+    if in_use > 0 {
+        return Err((
+            StatusCode::CONFLICT,
+            format!("还有 {in_use} 个主播在用这个模板，先给它们换个模板再删除"),
+        )
+            .into_response());
+    }
+    Err((StatusCode::NOT_FOUND, "上传模板不存在").into_response())
 }
 
 pub async fn get_users_endpoint(
@@ -612,6 +629,84 @@ mod template_field_tests {
             assert_eq!(edit.cover_path.as_deref(), Some("/srv/new.jpg"));
             assert_eq!(edit.user_cookie.as_deref(), Some("/tmp/any.json"));
         }
+    }
+}
+
+#[cfg(test)]
+mod template_delete_tests {
+    use super::delete_template_endpoint;
+    use crate::server::infrastructure::connection_pool::ConnectionManager;
+    use crate::server::infrastructure::models::live_streamer::{InsertLiveStreamer, LiveStreamer};
+    use crate::server::infrastructure::models::upload_streamer::{
+        InsertUploadStreamer, UploadStreamer,
+    };
+    use axum::extract::{Path, State};
+    use axum::http::StatusCode;
+    use ormlite::{Insert, Model};
+
+    /// `livestreamers.upload_streamers_id` 是 `ON DELETE CASCADE`：直接删模板会连带删掉绑着它的主播
+    /// （库里没了，监控里的房间却还在录）。有主播在用时必须拒绝，什么都不删。
+    #[tokio::test]
+    async fn deleting_a_template_in_use_keeps_it_and_its_streamers() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let template = |name: &str| -> InsertUploadStreamer {
+            serde_json::from_value(serde_json::json!({ "template_name": name, "tags": [] }))
+                .unwrap()
+        };
+        let used = Insert::insert(template("used"), &pool).await.unwrap();
+        let unused = Insert::insert(template("unused"), &pool).await.unwrap();
+        let streamer: InsertLiveStreamer = serde_json::from_value(serde_json::json!({
+            "url": "https://live.example.com/1",
+            "remark": "a",
+            "upload_streamers_id": used.id,
+        }))
+        .unwrap();
+        let streamer = streamer.insert(&pool).await.unwrap();
+
+        let rejected = delete_template_endpoint(State(pool.clone()), Path(used.id))
+            .await
+            .unwrap_err();
+        assert_eq!(rejected.status(), StatusCode::CONFLICT);
+        let kept = LiveStreamer::select()
+            .where_("id = ?")
+            .bind(streamer.id)
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            kept.and_then(|s| s.upload_streamers_id),
+            Some(used.id),
+            "主播与它绑定的模板都要留着"
+        );
+        let template_exists = |id: i64| {
+            let pool = pool.clone();
+            async move {
+                UploadStreamer::select()
+                    .where_("id = ?")
+                    .bind(id)
+                    .fetch_optional(&pool)
+                    .await
+                    .unwrap()
+                    .is_some()
+            }
+        };
+        assert!(template_exists(used.id).await);
+
+        // 没人用的模板照常删除；再删一次是 404，不是 500
+        assert!(
+            delete_template_endpoint(State(pool.clone()), Path(unused.id))
+                .await
+                .is_ok()
+        );
+        assert!(!template_exists(unused.id).await);
+        let missing = delete_template_endpoint(State(pool.clone()), Path(unused.id))
+            .await
+            .unwrap_err();
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
     }
 }
 

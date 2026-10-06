@@ -188,6 +188,10 @@ fn resolve_target(
     Ok((url, worker.live_streamer.url.clone()))
 }
 
+/// 图片的类型来自上游（通用插件的封面是任意网页给的缩略图，可能是带脚本的 SVG），却从本站的源发出：
+/// 用 CSP `sandbox` 与 `nosniff` 保证直接打开这个地址时脚本跑不起来，`<img>` 里显示不受影响。
+const IMAGE_CSP: &str = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+
 fn image_response(content_type: &str, body: Bytes, cache_control: &'static str) -> Response {
     let mut response = body.into_response();
     let headers = response.headers_mut();
@@ -197,6 +201,14 @@ fn image_response(content_type: &str, body: Bytes, cache_control: &'static str) 
     headers.insert(
         header::CACHE_CONTROL,
         HeaderValue::from_static(cache_control),
+    );
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(IMAGE_CSP),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
     );
     response
 }
@@ -371,6 +383,29 @@ mod tests {
         assert_eq!(
             to_bytes(response.into_body(), usize::MAX).await.unwrap(),
             first.body
+        );
+    }
+
+    /// 封面 / 头像的类型来自上游（通用插件的封面是任意网页给的缩略图），可能是带脚本的 SVG。
+    /// 它们从 biliup 自己的源发出：直接打开这个地址时不能让里面的脚本拿着当前登录态跑起来。
+    #[test]
+    fn proxied_images_cannot_run_scripts_on_our_origin() {
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>"#;
+        let response = image_response(
+            "image/svg+xml",
+            Bytes::from_static(svg),
+            "private, max-age=300",
+        );
+        let headers = response.headers();
+        let csp = headers
+            .get(header::CONTENT_SECURITY_POLICY)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        assert!(csp.contains("sandbox"), "{csp:?}");
+        assert!(csp.contains("default-src 'none'"), "{csp:?}");
+        assert_eq!(
+            headers.get(header::X_CONTENT_TYPE_OPTIONS).unwrap(),
+            "nosniff"
         );
     }
 
