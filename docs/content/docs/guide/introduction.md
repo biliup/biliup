@@ -216,6 +216,14 @@ bupfetch模式支持的上传方式及线路有：
 - [AList](https://alist.nn.ci/zh/) 检测到同文件夹下的XML文件会自动挂载弹幕，实现带弹幕的录播效果
 - 使用 [弹弹play](https://www.dandanplay.com/) 可直接挂载XML弹幕文件观看
 
+### 5. 录制中断时的未完成录像
+biliup **不会删除未完成的录像**。断流、CDN 切换、下载器出错、暂停或删除房间、退出程序时，已经写下的内容都会保留：
+- FLV / TS（stream-gears、mesio、ffmpeg 录 FLV / TS 时）：截断后前面的内容仍可播放，照常作为一个分段保存，并照常进入上传和后处理（stream-gears 遇到读到一半断开的最后一个 tag 时只丢弃这一个 tag）。
+- ffmpeg 录 MP4（`format: mp4`）：MP4 的索引（moov）在录制结束时才写，被中止的 MP4 无法播放，因此**不进入上传流程**；但文件不会被删除，会以 `.mp4.part` 的名字留在录像目录里，可以用 untrunc 等工具尝试修复，或自行删除。
+
+### 6. 斗鱼录制中的 `Non-monotonous DTS` 日志
+斗鱼 CDN 切换节点或主播推流重连时，FLV 流里的时间戳常会归 0（日志形如 `Non-monotonous DTS ... previous: 4877, current: 0`），切换瞬间还可能夹着空的 tag、重发的 onMetaData / 序列头，甚至重发整个 FLV 文件头。stream-gears 会按音频、视频轨道分别把后续时间戳平移接上，跳过残缺的 tag，录制继续进行；连接在 tag 中间断开时按正常断流结束，已录内容全部保留。这条日志只是提示，不需要处理。
+
 
 ## 自定义插件
 下载整合了ykdl、youtube-dl、streamlink，不支持或者支持的不够好的网站可自行拓展。

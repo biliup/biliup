@@ -28,9 +28,15 @@ pub struct FfmpegDownloader {
     pub downloader_type: DownloaderType,
 }
 
-/// 一段录制能否发布：ffmpeg 正常结束（0 / 255）时总能发布；被杀或异常退出时，FLV / TS
-/// 等流式容器截断后仍可播放，照常发布；MP4 / MOV 的 moov 在结束时才写，截断后无法播放，
-/// 不发布也不上传。
+/// 一段录制能否发布（改名为正式文件名并进入上传 / 后处理）。
+///
+/// **未完成的录像一律不删除**：`stop()` 用 SIGKILL 结束 ffmpeg，暂停、删除房间、退出程序、
+/// 断流后的异常退出都会走到这里，删掉 `.part` 就等于丢掉整段（可能是几个小时的）录像。
+///
+/// - ffmpeg 正常结束（0 / 255）：照常发布。
+/// - 被杀或异常退出的 FLV / TS / MKV 等流式容器：截断后仍可播放，照常发布、照常上传。
+/// - 被杀或异常退出的 MP4 / MOV：moov 在结束时才写，截断后无法播放，不发布也不上传，
+///   但 `.part` 文件原样留在磁盘上，供用户手动恢复或自行删除。
 fn publishes_segment(status_code: Option<i32>, suffix: &str) -> bool {
     matches!(status_code, Some(0) | Some(255))
         || !matches!(suffix.to_ascii_lowercase().as_str(), "mp4" | "mov")
@@ -238,7 +244,8 @@ impl FfmpegDownloader {
         .await?;
         let status_code = status.code();
         if !publishes_segment(status_code, &download_config.suffix) {
-            // 截断的 MP4 没有 moov，留在磁盘上供手动恢复，但不进入上传流程。
+            // 截断的 MP4 没有 moov：不进入上传流程，但 `.part` 文件不删除（见 publishes_segment），
+            // 留在磁盘上供手动恢复。
             warn!(
                 part_file,
                 ?status_code,

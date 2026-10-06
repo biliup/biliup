@@ -135,6 +135,10 @@ impl<'a> FlvFile<'a> {
     }
 }
 
+/// 分段没正常收尾就被丢弃（断流、出错、录制被停止）时照常收尾：flush、去掉 `.part`、触发钩子。
+///
+/// **未完成的录像一律保留，不删除**：FLV 截断后前面的内容仍可播放，删掉就等于丢掉这一段录像；
+/// 读到一半断开的最后一个 tag 在 `httpflv` 里已经丢弃，不会写进文件。
 impl Drop for FlvFile<'_> {
     fn drop(&mut self) {
         if !self.finished

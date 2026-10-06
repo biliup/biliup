@@ -285,6 +285,9 @@ impl<'a> TsFile<'a> {
     }
 }
 
+/// 分段没正常收尾就被丢弃（断流、出错、录制被停止）时照常收尾：flush、去掉 `.part`、触发钩子。
+///
+/// **未完成的录像一律保留，不删除**：TS 按切片追加，截断后前面的内容仍可播放，删掉就等于丢掉这一段录像。
 impl Drop for TsFile<'_> {
     fn drop(&mut self) {
         if !self.finished
