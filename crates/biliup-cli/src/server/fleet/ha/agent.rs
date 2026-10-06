@@ -388,6 +388,15 @@ impl Standby {
         self.link.lock().unwrap().is_some()
     }
 
+    /// 接着的就是这条连接
+    pub(crate) fn linked_to(&self, link: &Link) -> bool {
+        self.link
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|current| current.same(link))
+    }
+
     pub(crate) fn primary_message(self: &Arc<Self>, message: HaMessage) {
         debug!(
             kind = message.kind(),

@@ -730,7 +730,11 @@ impl Controller {
             close_with(&previous.connection, CloseCode::Superseded);
         }
         info!(node = id, name = %node.name, version = %hello.version, "fleet node online");
-        store::record_seen(&self.pool, id, now, &hello.version, None).await?;
+        // 已经进了在线表：记不下「最近在线」只是少一笔展示用的记录（与心跳落盘一样），不能在这里返回，
+        // 否则这一条连同没人收的发帧通道留在在线表里，配对也接不上这条连接
+        if let Err(e) = store::record_seen(&self.pool, id, now, &hello.version, None).await {
+            warn!(node = id, error = ?e, "could not record the fleet node as seen");
+        }
         if let Some(pairing) = self.ha() {
             pairing.node_connected(id, hello.proto, &ha_outbox);
         }
@@ -862,6 +866,10 @@ impl Controller {
                     }
                     info!(node = id, "fleet node left");
                     close_with(connection, CloseCode::Normal);
+                    // 与移除（`revoke`）一样：它在配对里就解除配对，交还给它的行不再交还
+                    if let Some(pairing) = self.ha() {
+                        pairing.node_removed(self, id).await;
+                    }
                     self.push_all().await;
                     return Ok(());
                 }

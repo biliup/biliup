@@ -108,9 +108,12 @@ pub fn scrub(text: &str) -> String {
     let mut out = String::with_capacity(text.len().min(MAX_ERROR_CHARS));
     let mut rest = text;
     while let Some(start) = rest.find("://") {
+        // 链接前紧挨着的可能是多字节字符（「失败：https://…」）：跳过整个字符，不能只加 1 个字节
         let scheme_start = rest[..start]
-            .rfind(|c: char| !c.is_ascii_alphanumeric() && c != '+' && c != '-' && c != '.')
-            .map_or(0, |i| i + 1);
+            .char_indices()
+            .rev()
+            .find(|&(_, c)| !c.is_ascii_alphanumeric() && c != '+' && c != '-' && c != '.')
+            .map_or(0, |(i, c)| i + c.len_utf8());
         let end = rest[start..]
             .find(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '<' | '>' | ')' | ']'))
             .map_or(rest.len(), |i| start + i);
@@ -270,6 +273,20 @@ mod tests {
         );
         assert_eq!(scrub("no links here"), "no links here");
         assert_eq!(scrub("a://"), "a://");
+    }
+
+    /// 中文错误信息里链接常紧跟在全角标点或汉字后面：照样去掉查询串，不能在多字节字符中间切开而 panic
+    #[test]
+    fn links_right_after_multibyte_characters_are_scrubbed_without_panicking() {
+        assert_eq!(
+            scrub("录制失败：https://cdn.example/live/a.flv?sign=abc"),
+            "录制失败：https://cdn.example/live/a.flv?…"
+        );
+        assert_eq!(
+            scrub("请访问https://live.example/1?token=x 重试"),
+            "请访问https://live.example/1?… 重试"
+        );
+        assert_eq!(scrub("错误「://」"), "错误「://」");
     }
 
     #[test]

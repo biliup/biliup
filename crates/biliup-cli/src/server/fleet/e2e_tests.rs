@@ -284,6 +284,51 @@ async fn a_node_joins_reports_and_is_revoked_through_the_embedded_relay() {
     controller.shutdown().await;
 }
 
+/// 节点连上时记不下「最近在线」（库写失败）：连接照常建立，节点停下后从在线表里拿掉，不留一条没人收帧的连接
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failed_last_seen_write_does_not_strand_the_connection() {
+    let dir = tempfile::tempdir().unwrap();
+    let (controller, url, pool) = start_controller(dir.path()).await;
+    let node_file = dir.path().join("node/data/node.json");
+    let joined = node::join(
+        &ticket_for(&controller, &pool, &url).await,
+        false,
+        &node_file,
+    )
+    .await
+    .unwrap();
+    sqlx::query(
+        "CREATE TRIGGER no_last_seen BEFORE UPDATE OF last_seen_at ON fleet_nodes \
+         BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let services = node_services(&dir.path().join("node")).await;
+    let agent = NodeAgent::start(
+        node_file.clone(),
+        services.clone(),
+        ManagedHandle::default(),
+        revoked_for(&node_file, &services),
+    )
+    .await
+    .unwrap();
+    wait_for_node(&controller, joined.node_id, true, Duration::from_secs(30)).await;
+
+    agent.shutdown().await;
+    let id = joined.node_id;
+    eventually(
+        "the stopped node leaves the live table",
+        Duration::from_secs(10),
+        || {
+            let controller = controller.clone();
+            async move { controller.node_link(id).is_none() }
+        },
+    )
+    .await;
+    controller.shutdown().await;
+}
+
 /// 控制面 + 两台节点：分派、迁移（先释放后接手）、硬约束、移除后转本地并暂停、离开后转本地接着录。
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn rooms_follow_assignments_across_two_nodes() {
@@ -1759,6 +1804,31 @@ async fn the_local_node_is_mirrored_to_a_designated_standby() {
             .is_none()
     );
     assert_eq!(pairing.view(&controller).await.unwrap()["active"], false);
+
+    // 备机自己离开（`biliup node leave`）：与被移除一样，配对跟着解除
+    pairing
+        .designate(&controller, designate(other, 1))
+        .await
+        .unwrap()
+        .unwrap();
+    let (_, _, other_agent, other_file) = nodes.pop().unwrap();
+    other_agent.shutdown().await;
+    assert!(node::leave(&other_file).await.unwrap());
+    eventually(
+        "the pair is dissolved after the standby left",
+        Duration::from_secs(20),
+        || {
+            let (pairing, controller) = (pairing.clone(), controller.clone());
+            async move {
+                super::ha::store::pair(controller.pool())
+                    .await
+                    .unwrap()
+                    .is_none()
+                    && pairing.view(&controller).await.unwrap()["active"] == false
+            }
+        },
+    )
+    .await;
 
     for (_, _, agent, _) in nodes {
         agent.shutdown().await;
