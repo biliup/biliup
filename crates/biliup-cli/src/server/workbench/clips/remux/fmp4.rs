@@ -31,7 +31,8 @@ fn boxes(data: &[u8]) -> Vec<([u8; 4], usize, usize, usize)> {
             },
             n => (n, 8),
         };
-        if size < header || at + size > data.len() {
+        // `at + 8 <= data.len()`，减法不会下溢；不写成 `at + size`：坏数据里的 largesize 会让它溢出
+        if size < header || size > data.len() - at {
             break;
         }
         out.push((kind, at, header, size));

@@ -111,8 +111,10 @@ pub enum Attempt {
 /// 录制端关段和开下一段是先后两个事件，中间分段表里暂时没有下一段。
 const NEXT_SEGMENT_GRACE: Duration = Duration::from_secs(5);
 
+/// 分段和 `[in_ms, out_ms)` 有交集。出点不含：正好从出点开始的分段（断流缺口之后的那一段）一帧都不在
+/// 所选范围里，带上它会多剪出它的第一个 GOP。
 fn overlaps(segment: &SegmentRow, in_ms: i64, out_ms: i64) -> bool {
-    segment.start_ms <= out_ms && segment.end_ms.is_none_or(|end| end > in_ms)
+    segment.start_ms < out_ms && segment.end_ms.is_none_or(|end| end > in_ms)
 }
 
 fn unavailable(segment: &SegmentRow) -> PlanError {

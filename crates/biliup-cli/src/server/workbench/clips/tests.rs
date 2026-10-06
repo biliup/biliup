@@ -155,6 +155,37 @@ async fn cuts_snap_to_keyframes_like_the_keyframe_endpoint() {
     assert!(matches!(err, PlanError::Unavailable(_)), "{err}");
 }
 
+/// 出点正好落在断流缺口之后那一段的开头（吸附到它的第一个关键帧）：那一段一帧都不在所选范围里，
+/// 不能把它的第一个 GOP 带进来。
+#[tokio::test]
+async fn an_out_point_at_the_start_of_the_segment_after_a_gap_excludes_that_segment() {
+    let (_dir, pool, session, _) = flv_session().await;
+
+    let plan = ready(&pool, session, 5000, 30_000).await;
+    assert_eq!(
+        (plan.cut_in_ms, plan.cut_out_ms),
+        (FLV_MS + 1000, 2 * FLV_MS)
+    );
+    assert_eq!(
+        spans(&plan),
+        vec![(FLV_MS + 1000, 2 * FLV_MS, FLV_MS - 1000)]
+    );
+    assert_eq!(plan.output_ms(30_000), FLV_MS - 1000);
+
+    // 整段落在缺口里，出点碰到下一段开头也一样没有画面
+    let err = plan::compute(&pool, session, 10_000, 30_000)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, PlanError::Unavailable(_)), "{err}");
+
+    // 下一段已被清理时，不碰它的范围照样能剪
+    sqlx::query("UPDATE segments SET state = 'deleted' WHERE start_ms = 30000")
+        .execute(&pool)
+        .await
+        .unwrap();
+    ready(&pool, session, 5000, 30_000).await;
+}
+
 #[tokio::test]
 async fn unreadable_or_mismatched_segments_are_reported_not_skipped() {
     let (dir, pool, session, ids) = flv_session().await;

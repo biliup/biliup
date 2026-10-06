@@ -44,13 +44,15 @@ fn read_box_header(
         }
         n => (n, 8),
     };
-    if size < header {
+    // 64 位 largesize 是文件里的原样数据：加上偏移会溢出的必定是坏数据。不拦住的话回绕后的
+    // 「末尾」落回前面，扫描器倒退回去重扫，永远停不下来
+    let Some(end) = offset.checked_add(size).filter(|_| size >= header) else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("MP4 box at offset {offset} has size {size}"),
         ));
-    }
-    if offset + size > file_len {
+    };
+    if end > file_len {
         return Ok(None);
     }
     Ok(Some(BoxHeader { kind, size, header }))
