@@ -141,6 +141,30 @@ const MAX_CONSECUTIVE_MALFORMED_TAGS: u32 = 32;
 /// FLV 文件头里 DataOffset 的合理上限（规范值是 9）。
 const MAX_FLV_HEADER_LEN: usize = 1024;
 
+/// stream-gears 解析不了、但能认出来的视频编码：整条视频轨都录不了，要报错让用户换 mesio / ffmpeg，
+/// 不能当成个别残缺的 tag 跳过（那样会悄悄录出一个只有音频的文件）。
+///
+/// 只认明确的标记，免得把 CDN 切换时的随机残缺字节误判成不支持的编码：
+/// - 国内 CDN（斗鱼、抖音、虎牙等）的 HEVC 用非标准的 codec id 12，AV1 用 13；
+/// - Enhanced-FLV（Enhanced RTMP）用 `IsExHeader` 位加 FourCC（`hvc1`、`av01`、`vp09`）。
+fn unsupported_video_codec(body: &[u8]) -> Option<String> {
+    let first = *body.first()?;
+    if first & 0x80 != 0 {
+        let fourcc = body.get(1..5)?;
+        return match fourcc {
+            b"hvc1" => Some("HEVC (Enhanced-FLV hvc1)".to_string()),
+            b"av01" => Some("AV1 (Enhanced-FLV av01)".to_string()),
+            b"vp09" => Some("VP9 (Enhanced-FLV vp09)".to_string()),
+            _ => None,
+        };
+    }
+    match first & 0x0f {
+        12 => Some("HEVC (FLV codec id 12)".to_string()),
+        13 => Some("AV1 (FLV codec id 13)".to_string()),
+        _ => None,
+    }
+}
+
 /// 连接是否在一个 tag 中间断开。
 ///
 /// [`Connection::read_frame`] 在 EOF（或连接出错）时返回不足 `chunk_size` 的剩余字节。
@@ -274,6 +298,13 @@ async fn read_tags(
                 tag_header.tag_type
             );
             break;
+        }
+        if tag_header.tag_type == TagType::Video
+            && let Some(codec) = unsupported_video_codec(&bytes)
+        {
+            return Err(crate::downloader::error::Error::Custom(format!(
+                "unsupported video codec {codec}: stream-gears only records H.264 FLV, use the mesio or ffmpeg downloader for this stream"
+            )));
         }
         // out.write(&bytes)?;
         let parsed = 'parse: {
@@ -1361,5 +1392,36 @@ mod tests {
         assert!(result.is_err(), "{result:?}");
         // 出错之前读到的都已落盘
         assert_eq!(keyframes(&data), 1);
+    }
+
+    /// stream-gears 只会解析 H.264 的 FLV。斗鱼 / 抖音 / 虎牙的 HEVC 流（FLV codec id 12，或
+    /// Enhanced-FLV 的 `hvc1`）里，视频 tag 不是「残缺的 tag」，而是整条视频轨都录不了：
+    /// 必须报错（换 mesio / ffmpeg），不能把视频 tag 逐个跳过、只录出一个纯音频文件。
+    #[tokio::test]
+    async fn an_hevc_stream_is_an_error_not_an_audio_only_recording() {
+        for (keyframe, inter) in [
+            // 国内 CDN 常用的 codec id 12
+            (
+                vec![0x1c, 0x01, 0, 0, 0, 0xaa],
+                vec![0x2c, 0x01, 0, 0, 0, 0xbb],
+            ),
+            // Enhanced-FLV：IsExHeader 位 + FourCC `hvc1`
+            (
+                vec![0x91, b'h', b'v', b'c', b'1', 0, 0, 0, 0xaa],
+                vec![0xa1, b'h', b'v', b'c', b'1', 0, 0, 0, 0xbb],
+            ),
+        ] {
+            let mut body = vec![0, 0, 0, 0];
+            push_tag(&mut body, 18, 0, &META);
+            push_tag(&mut body, 8, 0, &AAC_SEQUENCE_HEADER);
+            for i in 0..50u32 {
+                let video = if i % 25 == 0 { &keyframe } else { &inter };
+                push_tag(&mut body, 9, i * 40, video);
+                push_tag(&mut body, 8, i * 40 + 20, &[0xaf, 0x01, 0x21]);
+            }
+            let (result, _) = record_unsegmented(body.into()).await;
+            let error = result.expect_err("an HEVC stream must not be recorded as audio only");
+            assert!(error.to_string().contains("HEVC"), "{error}");
+        }
     }
 }
