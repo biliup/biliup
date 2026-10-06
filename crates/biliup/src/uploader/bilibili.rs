@@ -410,9 +410,10 @@ impl FromStr for Vid {
         if s.len() < 3 {
             return s.parse::<u64>().map(Vid::Aid);
         }
-        match &s[..2] {
-            "BV" => Ok(Vid::Bvid(s.to_string())),
-            "av" => Ok(Vid::Aid(s[2..].parse()?)),
+        // `get` 而不是 `&s[..2]`：第 2 字节落在多字节字符中间时切片会 panic
+        match s.get(..2) {
+            Some("BV") => Ok(Vid::Bvid(s.to_string())),
+            Some("av") => Ok(Vid::Aid(s[2..].parse()?)),
             _ => Ok(Vid::Aid(s.parse()?)),
         }
     }
@@ -590,9 +591,7 @@ impl BiliBili {
         let params = [("t", ts.to_string()), ("csrf", csrf.to_string())];
         let url = reqwest::Url::parse_with_params(url_str, &params).unwrap();
 
-        let cookie = self.get_cookie()?;
-        let jar = reqwest::cookie::Jar::default();
-        jar.add_cookie_str(&cookie, &url);
+        let jar = self.web_cookie_jar(&url)?;
 
         let ret: ResponseData = reqwest::Client::proxy_builder(proxy)
             .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36")
@@ -1017,22 +1016,23 @@ impl BiliBili {
             .archives)
     }
 
-    fn get_cookie(&self) -> Result<String> {
-        let cookie = self
+    /// Web 投稿请求用的 cookie jar。`Jar::add_cookie_str` 按单条 `Set-Cookie` 解析，
+    /// 把 `a=1; b=2` 整串传进去只会存下第一个 cookie（其余被当成属性丢掉），
+    /// 所以逐个加入。
+    fn web_cookie_jar(&self, url: &reqwest::Url) -> Result<reqwest::cookie::Jar> {
+        let jar = reqwest::cookie::Jar::default();
+        let cookies = self
             .login_info
             .cookie_info
             .get("cookies")
             .and_then(|c: &Value| c.as_array())
-            .ok_or("get cookie error")?
-            .iter()
-            .filter_map(|c| match (c["name"].as_str(), c["value"].as_str()) {
-                (Some(name), Some(value)) => Some((name, value)),
-                _ => None,
-            })
-            .map(|c| format!("{}={}", c.0, c.1))
-            .collect::<Vec<_>>()
-            .join("; ");
-        Ok(cookie)
+            .ok_or("get cookie error")?;
+        for cookie in cookies {
+            if let (Some(name), Some(value)) = (cookie["name"].as_str(), cookie["value"].as_str()) {
+                jar.add_cookie_str(&format!("{name}={value}"), url);
+            }
+        }
+        Ok(jar)
     }
 }
 
@@ -1217,6 +1217,62 @@ mod archive_tests {
             )
             .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod vid_and_cookie_tests {
+    use super::{BiliBili, Vid};
+    use reqwest::cookie::CookieStore;
+    use serde_json::json;
+    use std::str::FromStr;
+
+    /// `Vid` 是 CLI 参数解析器；非 ASCII 输入必须报错，而不是在字节下标切片处 panic。
+    #[test]
+    fn vid_rejects_non_ascii_input_without_panicking() {
+        for input in ["中文", "a中", "B中V1", "BV", "av", ""] {
+            assert!(Vid::from_str(input).is_err(), "{input:?}");
+        }
+        assert_eq!(Vid::from_str(" av170001 "), Ok(Vid::Aid(170001)));
+        assert_eq!(
+            Vid::from_str("BV1ip4y1x7Gi"),
+            Ok(Vid::Bvid("BV1ip4y1x7Gi".into()))
+        );
+    }
+
+    /// Web 投稿用的 cookie jar 要带上登录信息里的全部 cookie，而不只是第一个。
+    #[test]
+    fn web_submit_cookie_jar_carries_every_login_cookie() {
+        let bili = BiliBili {
+            client: reqwest::Client::new(),
+            login_info: serde_json::from_value(json!({
+                "cookie_info": {"cookies": [
+                    {"name": "SESSDATA", "value": "sess%2C1*11"},
+                    {"name": "bili_jct", "value": "jct"},
+                    {"name": "DedeUserID", "value": "42"},
+                    {"name": "broken"}
+                ]},
+                "sso": [],
+                "token_info": {
+                    "access_token": "",
+                    "expires_in": 0,
+                    "mid": 42,
+                    "refresh_token": ""
+                },
+                "platform": null
+            }))
+            .unwrap(),
+        };
+        let url = reqwest::Url::parse("https://member.bilibili.com/x/vu/web/add/v3?t=1&csrf=jct")
+            .unwrap();
+
+        let jar = bili.web_cookie_jar(&url).unwrap();
+        let header = jar.cookies(&url).expect("jar holds no cookie for the URL");
+        let header = header.to_str().unwrap();
+        for expected in ["SESSDATA=sess%2C1*11", "bili_jct=jct", "DedeUserID=42"] {
+            assert!(header.contains(expected), "{expected} missing in {header}");
+        }
+        assert!(!header.contains("broken"), "{header}");
     }
 }
 

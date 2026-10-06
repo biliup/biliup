@@ -133,21 +133,16 @@ pub async fn retry_pending_upload(
         user_cookie
     };
     let bili = login_by_cookies(cookie_file, proxy).await?;
-    match pending.submit_api.as_deref() {
-        Some(api) if api.eq_ignore_ascii_case("web") => bili
+    match pending_submit_option(pending.submit_api.as_deref()) {
+        SubmitOption::Web => bili
             .submit_by_web(&pending.studio, proxy)
             .await
             .change_context_lazy(|| AppError::Unknown)?,
-        Some(api)
-            if api.eq_ignore_ascii_case("b-cut-android")
-                || api.eq_ignore_ascii_case("bcutandroid")
-                || api.eq_ignore_ascii_case("bcut_android") =>
-        {
-            bili.submit_by_bcut_android(&pending.studio, proxy)
-                .await
-                .change_context_lazy(|| AppError::Unknown)?
-        }
-        _ => bili
+        SubmitOption::BCutAndroid => bili
+            .submit_by_bcut_android(&pending.studio, proxy)
+            .await
+            .change_context_lazy(|| AppError::Unknown)?,
+        SubmitOption::App => bili
             .submit_by_app(&pending.studio, proxy)
             .await
             .change_context_lazy(|| AppError::Unknown)?,
@@ -158,6 +153,14 @@ pub async fn retry_pending_upload(
     })?;
     info!(manifest = %manifest.display(), "Pending Bilibili submission completed");
     Ok(())
+}
+
+/// 清单里的 `submit_api` 原样来自服务端配置；与 `submit_to_bilibili` 一样，
+/// 未设置或无法识别时走 Web 接口，重试不能悄悄换成 app 接口。
+fn pending_submit_option(submit_api: Option<&str>) -> SubmitOption {
+    submit_api
+        .and_then(|api| api.parse().ok())
+        .unwrap_or(SubmitOption::Web)
 }
 
 pub async fn upload_by_command(
@@ -673,6 +676,32 @@ mod checkpoint_tests {
         let loaded = UploadCheckpoint::load(&path).unwrap();
         assert!(loaded.is_uploaded(&source));
         assert_eq!(loaded.videos[0].filename, "remote-file");
+    }
+
+    /// 服务端保存的 `submit_api` 原样来自配置：没设置（None）或不认识时服务端走 Web
+    /// 接口，`retry-upload` 必须用同一个接口重试，而不是换成 app 接口。
+    #[test]
+    fn pending_submission_uses_the_same_default_api_as_the_server() {
+        let cases = [
+            (None, "web"),
+            (Some("web"), "web"),
+            (Some("WEB"), "web"),
+            (Some("client"), "web"),
+            (Some(""), "web"),
+            (Some("app"), "app"),
+            (Some("App"), "app"),
+            (Some("b-cut-android"), "bcut"),
+            (Some("bcutandroid"), "bcut"),
+            (Some("BCut_Android"), "bcut"),
+        ];
+        for (submit_api, expected) in cases {
+            let actual = match pending_submit_option(submit_api) {
+                SubmitOption::Web => "web",
+                SubmitOption::App => "app",
+                SubmitOption::BCutAndroid => "bcut",
+            };
+            assert_eq!(actual, expected, "submit_api = {submit_api:?}");
+        }
     }
 }
 

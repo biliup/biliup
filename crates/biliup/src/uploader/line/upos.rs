@@ -153,7 +153,9 @@ impl Upos {
                     len,
                 ))
             })
-            .buffer_unordered(limit);
+            // `buffer_unordered(0)` 永远不拉取分块、也不唤醒，上传会无声挂死；
+            // `--limit 0` / `limit=0` / `threads: 0` 都按 1 处理。
+            .buffer_unordered(limit.max(1));
         Ok(stream)
     }
 
@@ -244,7 +246,93 @@ fn sorted_parts(parts: &[UposPart]) -> Result<Vec<UposPart>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{UposPart, sorted_parts};
+    use super::{Bucket, Upos, UposPart, sorted_parts};
+    use crate::client::StatelessClient;
+    use crate::error::Kind;
+    use bytes::Bytes;
+    use futures::TryStreamExt;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    /// 接受任意请求并返回 200 的假 UPOS，记录每个 PUT 的查询参数。
+    async fn fake_upos() -> (Upos, Arc<Mutex<Vec<HashMap<String, String>>>>) {
+        let puts = Arc::new(Mutex::new(Vec::new()));
+        let recorded = puts.clone();
+        let app =
+            axum::Router::new().fallback(move |uri: axum::http::Uri, _body: axum::body::Bytes| {
+                let recorded = recorded.clone();
+                async move {
+                    let query: HashMap<String, String> =
+                        serde_urlencoded::from_str(uri.query().unwrap_or_default()).unwrap();
+                    recorded.lock().unwrap().push(query);
+                    ""
+                }
+            });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let upos = Upos {
+            client: StatelessClient::default(),
+            bucket: Bucket {
+                chunk_size: 4,
+                auth: "auth".into(),
+                endpoint: format!("//{addr}"),
+                biz_id: 1,
+                upos_uri: "upos://bucket/file.mp4".into(),
+            },
+            url: format!("http://{addr}/bucket/file.mp4"),
+            upload_id: "upload-id".into(),
+        };
+        (upos, puts)
+    }
+
+    /// 并发上限为 0（CLI `--limit 0`、stream-gears `limit=0`、服务端 `threads: 0`）时
+    /// 也必须把每个分块传完，而不是永远挂起。
+    #[tokio::test]
+    async fn zero_concurrency_limit_still_uploads_every_chunk() {
+        let (upos, puts) = fake_upos().await;
+        let chunks = vec![
+            Ok::<_, Kind>((Bytes::from_static(b"abcd"), 4)),
+            Ok((Bytes::from_static(b"ef"), 2)),
+        ];
+
+        let uploaded = tokio::time::timeout(Duration::from_secs(20), async {
+            upos.upload_stream(futures::stream::iter(chunks), 6, 0)
+                .await?
+                .try_collect::<Vec<_>>()
+                .await
+        })
+        .await
+        .expect("upload with limit 0 hung")
+        .unwrap();
+
+        let mut numbers: Vec<_> = uploaded
+            .iter()
+            .map(|(part, len)| (part.part_number, *len))
+            .collect();
+        numbers.sort();
+        assert_eq!(numbers, [(1, 4), (2, 2)]);
+
+        let mut puts = puts.lock().unwrap().clone();
+        puts.sort_by_key(|query| query["partNumber"].clone());
+        let ranges: Vec<_> = puts
+            .iter()
+            .map(|q| {
+                (
+                    q["partNumber"].as_str(),
+                    q["start"].as_str(),
+                    q["end"].as_str(),
+                    q["chunks"].as_str(),
+                    q["total"].as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            ranges,
+            [("1", "0", "4", "2", "6"), ("2", "4", "6", "2", "6")]
+        );
+    }
 
     fn part(part_number: usize) -> UposPart {
         UposPart {
