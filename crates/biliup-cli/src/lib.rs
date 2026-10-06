@@ -338,7 +338,7 @@ fn to_upload_streamer_insert(
                 })
             })
             .transpose()?,
-        tid_v2: streamer.tid_v2.filter(|value| *value > 0),
+        tid_v2: streamer.tid_v2,
         copyright: streamer.copyright,
         copyright_source: streamer.copyright_source.clone(),
         cover_path: streamer
@@ -524,19 +524,6 @@ mod tid_v2_config_tests {
             .unwrap()
             .expect("should create insert");
         assert_eq!(insert.tid, Some(171));
-        assert!(insert.tid_v2.is_none());
-    }
-
-    #[test]
-    fn upload_insert_treats_zero_tid_v2_as_unset() {
-        let streamer = StreamerConfig {
-            tid: Some(171),
-            tid_v2: Some(0),
-            ..Default::default()
-        };
-        let insert = to_upload_streamer_insert("demo", &streamer, None)
-            .unwrap()
-            .expect("should create insert");
         assert!(insert.tid_v2.is_none());
     }
 }

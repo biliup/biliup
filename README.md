@@ -82,9 +82,8 @@
 2. 启动：`biliup server --auth`
 3. 访问 WebUI：`http://127.0.0.1:19159`（默认只监听本机，远程访问见下方说明）
 * 后台运行 
-  1. `biliup server --auth --background`（内置后台模式，启动后立即返回）
-  2. 或使用 `nohup biliup server --auth &`
-  3. [请查看参考](https://biliup.github.io/biliup/docs/guide/introduction/#linuxxia-pei-zhi-kai-ji-zi-qi)
+  1. `nohup biliup server --auth &`
+  2. [请查看参考](https://biliup.github.io/biliup/docs/guide/introduction/#linuxxia-pei-zhi-kai-ji-zi-qi)
 ### npm
 - 直接运行：`npx @biliup/cli server --auth`；或全局安装 `npm i -g @biliup/cli`，之后用 `biliup server --auth`
 ### Termux

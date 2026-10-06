@@ -45,11 +45,6 @@ pub enum Commands {
     Login,
     /// 手动验证并刷新登录信息
     Renew,
-    /// 重试已上传文件但尚未完成投稿的任务
-    RetryUpload {
-        /// data/pending_uploads 下的待投稿清单
-        manifest: PathBuf,
-    },
     /// 上传视频
     Upload {
         /// 提交接口
@@ -177,10 +172,6 @@ pub enum Commands {
         /// 开启登录密码认证
         #[arg(long, default_value = "false")]
         auth: bool,
-
-        /// 在后台启动并立即返回（等价于旧版 start 的常驻行为）
-        #[arg(long)]
-        background: bool,
 
         /// 为会话 Cookie 附加 Secure 属性。仅当通过 HTTPS 反向代理访问 Web UI 时开启；
         /// 直接通过 HTTP 远程访问时开启会导致浏览器丢弃登录态
@@ -392,18 +383,5 @@ mod tests {
         .unwrap();
 
         assert_eq!(cli.user_cookie, Path::new("/tmp/private-account.json"));
-    }
-
-    #[test]
-    fn server_background_flag_is_opt_in() {
-        let cli = Cli::try_parse_from(["biliup", "server", "--background"]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Commands::Server {
-                background: true,
-                auth: false,
-                ..
-            }
-        ));
     }
 }

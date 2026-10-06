@@ -21,8 +21,7 @@ use crate::downloader::{download, generate_json};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::fleet::FleetOptions;
 use crate::uploader::{
-    append, comments, list, login, renew, reply, retry_pending_upload, show, upload_by_command,
-    upload_by_config,
+    append, comments, list, login, renew, reply, show, upload_by_command, upload_by_config,
 };
 
 pub const DEFAULT_LOG_FILTER: &str = "tower_http=debug,info";
@@ -135,68 +134,8 @@ pub fn init_tracing_with(filter: &str, log_file: bool) -> Logging {
 
 /// Initialises logging and runs the command described by `cli`.
 pub async fn run(cli: Cli) -> AppResult<()> {
-    if matches!(
-        cli.command,
-        Commands::Server {
-            background: true,
-            ..
-        }
-    ) {
-        return spawn_background();
-    }
     let logging = init_tracing(&cli);
     dispatch(cli, logging.handle()).await
-}
-
-/// Arguments for the detached child of `biliup server --background`: the
-/// current process arguments without `argv[0]` and without `--background`.
-fn background_child_args<I, T>(args: I) -> Vec<OsString>
-where
-    I: IntoIterator<Item = T>,
-    T: Into<OsString>,
-{
-    args.into_iter()
-        .map(Into::into)
-        .skip(1)
-        .filter(|arg| arg != "--background")
-        .collect()
-}
-
-/// Re-runs the current process without `--background`, detached from the
-/// terminal, and returns once the child has started. Uses the real process
-/// arguments, so the Python `main_loop` wrapper re-runs the interpreter with
-/// the same script.
-fn spawn_background() -> AppResult<()> {
-    use std::process::{Command, Stdio};
-
-    let executable = std::env::current_exe().change_context(AppError::Unknown)?;
-    let mut command = Command::new(executable);
-    command
-        .args(background_child_args(std::env::args_os()))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-
-    // Detach from the controlling terminal on Unix so an SSH logout does
-    // not send SIGHUP to the server. Windows keeps spawned processes alive
-    // after the parent exits when standard handles are detached.
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        // SAFETY: `setsid` is async-signal-safe and touches no Rust state.
-        unsafe {
-            command.pre_exec(|| {
-                if libc::setsid() == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-    }
-
-    let child = command.spawn().change_context(AppError::Unknown)?;
-    println!("biliup server started in background (pid {})", child.id());
-    Ok(())
 }
 
 /// Runs the command described by `cli`. Logging must already be initialised;
@@ -208,9 +147,6 @@ pub async fn dispatch(cli: Cli, log_handle: LogHandle) -> AppResult<()> {
     match cli.command {
         Commands::Login => login(user_cookie, proxy).await?,
         Commands::Renew => renew(user_cookie, proxy).await?,
-        Commands::RetryUpload { manifest } => {
-            retry_pending_upload(expand_path(manifest), user_cookie, proxy).await?
-        }
         Commands::Upload {
             video_path,
             config: None,
@@ -278,7 +214,6 @@ pub async fn dispatch(cli: Cli, log_handle: LogHandle) -> AppResult<()> {
             bind,
             port,
             auth,
-            background: _,
             secure_session_cookie,
             config,
             controller,
@@ -449,12 +384,6 @@ mod tests {
         assert_eq!(log_filter_directives(None, Some("warn")), "warn");
         assert_eq!(log_filter_directives(None, Some(" ")), DEFAULT_LOG_FILTER);
         assert_eq!(log_filter_directives(None, None), DEFAULT_LOG_FILTER);
-    }
-
-    #[test]
-    fn background_child_drops_flag_and_argv0() {
-        let args = background_child_args(["biliup", "server", "--background", "--auth"]);
-        assert_eq!(args, ["server", "--auth"]);
     }
 
     #[test]

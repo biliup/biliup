@@ -44,18 +44,19 @@ top = false
 `pip3 install biliup`
 3. 开始使用 __biliup__：
 ```shell
-# 启动 Web 服务（默认监听 127.0.0.1:19159）
-$ biliup server --auth
-# 后台运行可使用内置 --background（停止时结束该进程）
-$ biliup server --auth --background
-# 也可以使用 nohup 或 systemd
-$ nohup biliup server --auth > biliup.log 2>&1 &
+# 默认监听 0.0.0.0:19159。可使用-H及-P选项配置。
+# 考虑到安全性，建议指定本地地址配合web server或者添加验证。
+$ biliup start
+# 退出
+$ biliup stop
+# 重启
+$ biliup restart
 # 查看版本
 $ biliup --version
 # 显示帮助以查看更多选项
 $ biliup -h
 # 指定配置文件路径
-$ biliup server --auth --config ./config.yaml
+$ biliup --config ./config.yaml start
 ```
 从 v0.2.15 版本开始，配置文件支持 toml 格式，详见 [config.toml](https://github.com/biliup/biliup/tree/master/public/config.toml) ，
 yaml配置文件完整内容可参照 [config.yaml](https://github.com/biliup/biliup/tree/master/public/config.yaml) 。
@@ -63,58 +64,9 @@ __FFmpeg__ 作为可选依赖。如果还有问题可以 [加群讨论](https://
 
 > 使用上传功能需要登录B站，通过 [命令行投稿工具](https://github.com/biliup/biliup-rs) 获取 cookies.json，并放入启动 biliup 的路径即可
 
-Web UI 也可以在“用户管理”中直接登记已有的 `cookies.json`，或使用扫码登录；登记后的账号可用于新版投稿分区和录播上传。启用 Web 认证后，也可在此处修改管理员密码，修改完成需要重新登录。
-
-## 当前 master 的新版分区与斗鱼 H.265
-
-### B站新版投稿分区
-
-旧版 `tid` 仍然必填；可以额外配置新版分区 ID `tid_v2`。投稿请求会把它发送为 B 站接口字段 `human_type2`，不填写时不会发送该字段。
-
-Web UI 的模板编辑页会自动加载新版分区列表；如果该接口暂时不可用，旧版分区列表仍可正常使用。
-
-```yaml
-streamers:
-    示例直播录像:
-        url:
-            - https://live.bilibili.com/1
-        tid: 171
-        tid_v2: 1003
-```
-
-命令行投稿可以使用 `--tid-v2`：
-
-```bash
-biliup upload --tid 171 --tid-v2 1003 ./video.mp4
-```
-
-Python/stream-gears 上传入口支持同名关键字参数 `tid_v2`，例如 `stream_gears.upload(..., tid_v2=1003)`。
-
-如果上传文件已经被 B 站接收、但账号在最终投稿前失效，命令行上传会保留断点文件。账号恢复后使用完全相同的视频路径和投稿参数重新执行命令，即可复用已上传文件的元数据，避免重复上传；投稿成功后断点文件会自动删除。
-
-边录边传任务在最终投稿失败时会把稿件元数据保存到 `data/pending_uploads/`（不包含 Cookie）。更新 Cookie 后可使用 `retry-upload` 重试，例如：
-
-```bash
-biliup --user-cookie ./cookies.json retry-upload data/pending_uploads/1.json
-```
-
-只有投稿成功后清单才会删除；失败时可保留清单稍后再次重试。
-
-录播配置中的 `format: mp4` 在未配置下载插件或配置为 stream-gears 时会自动改用 FFmpeg 进行有效 remux，不需要手动把 FLV 文件改名；边录边传和显式配置的 mesio 保持原样（mesio 按源容器保存）。未指定格式时使用下载器的源容器。
-
-### 斗鱼 H.265
-
-斗鱼默认使用 H.264。需要尝试 H.265 时，在全局配置中设置：
-
-```toml
-douyu_codec = "HEVC"
-```
-
-可选值为 `AVC`（默认）和 `HEVC`，也接受 `h264` / `h265` 写法，大小写不敏感。如果直播间没有 H.265 流，程序会记录警告并自动回退到 H.264。mesio、原生 FLV 下载器和 FFmpeg 下载器都可以录制并分段 HEVC 流。
-
 > ARM平台用户，需要使用到stream-gears（默认下载器与上传器）进行下载和上传的，请参考此教程降级stream-gears版本。 https://github.com/biliup/biliup/discussions/407
 
-> Linux 下可使用上面的 `--background`、`nohup` 或 systemd 以后台服务运行；录像和日志文件保存在执行目录下，启动后可用 `ps -A | grep biliup` 检查进程。
+> Linux下以daemon进程启动，录像和日志文件保存在执行目录下，程序执行过程可查看日志文件。启动之后使用命令`ps -A | grep biliup` 查看进程biliup是否启动成功。
 
 
 ## Docker使用 🔨
@@ -125,19 +77,19 @@ douyu_codec = "HEVC"
 # 在下载目录创建配置文件
 vim /host/path/config.toml
 # 启动biliup的docker容器
-docker run -P --name biliup -v /host/path:/opt -d ghcr.io/biliup/caution:master server --bind 0.0.0.0 --auth --config /opt/config.toml
+docker run -P --name biliup -v /host/path:/opt -d ghcr.io/biliup/caution:master
 ```
 * 从自定义的配置文件启动
 ```bash
 # 在下载目录创建配置文件
 vim /host/path/config.toml
-# 启动biliup的docker容器，并启用用户验证；首次访问 Web UI 时设置密码
-docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/caution:latest server --bind 0.0.0.0 --auth --config /opt/config.toml
+# 启动biliup的docker容器，并启用用户验证。请注意替换 yourpassword 为你的密码。
+docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/caution:latest --password yourpassword
 ```
  > Web-UI 默认用户名为 biliup。
 * 从默认配置文件启动
 ```bash
-docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/caution:latest server --bind 0.0.0.0 --auth
+docker run -P --name biliup -v /host/path:/opt -p 19159:19159 -d --restart always ghcr.io/biliup/caution:latest --password yourpassword
 ```
 ### 方式二 手动构建镜像
 ```bash
@@ -320,3 +272,4 @@ $ systemctl --user start biliupd
 > 关于B站为什么不能多p上传\
 目前bilibili网页端是根据用户权重来限制分p数量的，权重不够的用户切换到客户端的提交接口即可解除这一限制。
 > 用户等级大于3，且粉丝数>1000，web端投稿不限制分p数量
+

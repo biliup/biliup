@@ -65,7 +65,7 @@ check_sourcecode: 15
 #douyu_force_hs: true
 ### 斗鱼设备 ID：在浏览器 Cookie 中找到 acf_did，只填它的值；留空使用默认设备 ID
 #douyu_deviceId: ""
-### 斗鱼视频编码：留空、AVC 或 HEVC（也接受 h264 / h265）；HEVC 使用 player_1 流地址，没有时回退 AVC
+### 斗鱼视频编码：留空、AVC 或 HEVC；HEVC 使用 player_1 流地址
 #douyu_codec: ""
 ### 录制斗鱼弹幕，默认关闭
 #douyu_danmaku: false
@@ -206,7 +206,7 @@ streamers:
             - https://www.panda.tv/1160340 #填写多个url时只能同时下载一个，如需多个同时下载请单独配置
         title: "{title}第一视角%Y-%m-%d{streamer}{url}" ### 自定义标题的时间格式, {title}代表当场直播间标题 {streamer}代表在本config里面设置的主播名称 {url}代表设置的该主播的第一条直播间链接
         tid: 171 ### 投稿分区码,171为电子竞技分区
-        #tid_v2: 2102 ### 新版投稿分区码 tid_v2（可选；例如摄影摄像二级分区；投稿时以 B 站字段 human_type2 提交）
+        #tid_v2: 2102 ### 新版投稿分区码 tid_v2（可选；例如摄影摄像二级分区）
         copyright: 2 ### 1为自制
         #cover_path: /cover/up.jpg ###封面
         description: |- ### 支持strftime, {title}, {streamer}, {url}占位符。注：此处请注意缩进，确保所有文字的缩进都与"视频简介"相同或者更多。
@@ -259,7 +259,7 @@ streamers:
         #    - run: python3 path/to/mail.py ### 执行一个 Python 脚本，可以用来发送邮件等。自动发信通知脚本示例 https://biliup.github.io/biliup/Guide.html#%E4%B8%8A%E4%BC%A0%E5%AE%8C%E6%88%90%E5%90%8E%E5%8F%91%E9%80%81%E9%82%AE%E4%BB%B6%E9%80%9A%E7%9F%A5
         #    - run: sh ./run.sh ### 执行一个shell脚本，用途多样，主要调用系统内的cli工具。自动上传网盘脚本示例 https://gist.github.com/UVJkiNTQ/ae4282e8f9fe4e45b3144b57605b4178
             #- rm ### 删除文件，为默认操作
-        #format: mp4 ### 视频保存格式。设置 mp4 时会自动使用 FFmpeg 进行有效封装（YouTube 不支持）。
+        #format: mp4 ### 视频保存格式。设置 mp4 时，未配置下载插件或配置为 stream-gears 的主播会自动改用 ffmpeg 转封装；youtube不支持。
         #opt_args: ### ffmpeg参数
         #    - '-ss'
         #    - '00:00:16' # 跳过开始的16秒

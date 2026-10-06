@@ -22,7 +22,7 @@ Before using the biliup, you need to install the [python](https://www.python.org
 
 ```bash
 pipx install biliup
-biliup server --auth
+biliup
 ```
 
 Visit `http://127.0.0.1:19159/` in the browser.
@@ -87,10 +87,8 @@ streamers:
 
 ### Step 4: Run the project
 
-Run the Web server in the root path of the project (the default bind address is local-only):
+Just run `biliup start` in the root path of the project:
 
 ```bash
-biliup server --auth --config ./config.toml
+biliup start
 ```
-
-需要后台运行时增加 `--background`；停止时结束该进程即可。

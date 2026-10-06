@@ -461,16 +461,8 @@ fn random_android_device() -> String {
     )
 }
 
-/// `douyu_codec` 取 `AVC` / `HEVC`；也接受 `h264` / `h265` 这类写法，大小写不敏感。
-fn wants_hevc(codec: &str) -> bool {
-    matches!(
-        codec.trim().to_ascii_lowercase().as_str(),
-        "hevc" | "h265" | "h.265"
-    )
-}
-
 fn select_stream_url(play_info: PlayInfo, codec: &str) -> String {
-    if wants_hevc(codec) {
+    if codec == "HEVC" {
         if let Some(url) = play_info.player_1.filter(|url| !url.trim().is_empty()) {
             return url;
         }
@@ -725,18 +717,16 @@ mod tests {
             rtmp_live: "/avc.flv".into(),
             player_1: Some("https://cdn.example/hevc.flv".into()),
         };
-        for codec in ["", "AVC", "h264", "unexpected"] {
+        for codec in ["", "AVC", "unexpected"] {
             assert_eq!(
                 select_stream_url(info(), codec),
                 "https://cdn.example/live/avc.flv"
             );
         }
-        for codec in ["HEVC", "hevc", "h265", "H.265"] {
-            assert_eq!(
-                select_stream_url(info(), codec),
-                "https://cdn.example/hevc.flv"
-            );
-        }
+        assert_eq!(
+            select_stream_url(info(), "HEVC"),
+            "https://cdn.example/hevc.flv"
+        );
         for player_1 in [None, Some(String::new()), Some("  ".into())] {
             let mut play_info = info();
             play_info.player_1 = player_1;

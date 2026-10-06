@@ -391,7 +391,6 @@ pub enum CodecId {
     // Not in FLV standard
     H263,
     MPEG4Part2, // MPEG-4 Part 2
-    H265,       // HEVC in FLV (codec id 12, used by Douyu)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -500,7 +499,6 @@ pub fn video_data(input: &[u8], size: usize) -> IResult<&[u8], VideoData<'_>> {
             7 => CodecId::H264,
             8 => CodecId::H263,
             9 => CodecId::MPEG4Part2,
-            12 => CodecId::H265,
             _ => return Err(Err::Error(Error::new(input, ErrorKind::Alt))),
         };
 
@@ -553,7 +551,6 @@ pub fn video_data_header(input: &[u8]) -> IResult<&[u8], VideoDataHeader> {
                 7 => CodecId::H264,
                 8 => CodecId::H263,
                 9 => CodecId::MPEG4Part2,
-                12 => CodecId::H265,
                 _ => return Err(Err::Error(Error::new(input, ErrorKind::Alt))),
             };
 
@@ -564,26 +561,6 @@ pub fn video_data_header(input: &[u8]) -> IResult<&[u8], VideoDataHeader> {
         },
     )
     .parse(input)
-}
-
-#[cfg(test)]
-mod hevc_tests {
-    use super::{AVCPacketType, CodecId, FrameType, avc_video_packet_header, video_data};
-
-    #[test]
-    fn parses_douyu_hevc_video_tag_and_sequence_header() {
-        // FrameType=key frame, CodecId=12 (HEVC), followed by the FLV video packet header.
-        let input = [0x1c, 0x00, 0x00, 0x00, 0x00];
-        let (remaining, video) = video_data(&input, input.len()).unwrap();
-
-        assert!(remaining.is_empty());
-        assert_eq!(video.frame_type, FrameType::Key);
-        assert_eq!(video.codec_id, CodecId::H265);
-
-        let (_, packet) = avc_video_packet_header(video.video_data).unwrap();
-        assert_eq!(packet.packet_type, AVCPacketType::SequenceHeader);
-        assert_eq!(packet.composition_time, 0);
-    }
 }
 
 #[derive(Debug, PartialEq, Serialize)]

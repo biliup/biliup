@@ -66,7 +66,7 @@ check_sourcecode = 15
 #douyu_force_hs = true
 ### 斗鱼设备 ID：在浏览器 Cookie 中找到 acf_did，只填它的值；留空使用默认设备 ID
 #douyu_deviceId = ""
-### 斗鱼视频编码：留空、"AVC" 或 "HEVC"（也接受 "h264" / "h265"）；HEVC 使用 player_1 流地址，没有时回退 AVC
+### 斗鱼视频编码：留空、"AVC" 或 "HEVC"；HEVC 使用 player_1 流地址
 #douyu_codec = ""
 ### 录制斗鱼弹幕，默认关闭
 #douyu_danmaku = false
@@ -211,7 +211,6 @@ url = [
 ] #填写多个url时只能同时下载一个，如需多个同时下载请单独配置
 title = "{title}第一视角%Y-%m-%d{streamer}{url}" ### 自定义标题的时间格式, {title}代表当场直播间标题 {streamer}代表在本config里面设置的主播名称 {url}代表设置的该主播的第一条直播间链接
 tid = 171 ### 投稿分区码,171为电子竞技分区
-#tid_v2 = 2102 ### 新版投稿分区码 tid_v2（可选；投稿时以 B 站字段 human_type2 提交）
 copyright = 2 ### 1为自制
 #cover_path = "/cover/up.jpg"
 ### 支持strftime, {title}, {streamer}, {url}占位符。
@@ -244,7 +243,7 @@ dynamic = "#空间动态#"
 user_cookie = "cookies.json" ### 使用指定的账号上传
 #use_live_cover = true # 获取BILIBILI直播间封面并作为投稿封面。此封面优先级低于单个主播指定的自定义封面。
 tags = ["biliup", "视频标签"]
-#format = "mp4" ### 视频保存格式。设置 mp4 时会自动使用 FFmpeg 进行有效封装（YouTube 不支持）。
+#format = "mp4" ### 视频保存格式。设置 mp4 时，未配置下载插件或配置为 stream-gears 的主播会自动改用 ffmpeg 转封装；youtube不支持。
 #time_range: "[\"2025-03-26T16:00:00.000Z\",\"2025-03-27T15:59:59.000Z\"]" ### 录制时间范围 ISO 8601 格式的时间数组字符串
 #excluded_keywords: ### 如果房间名包含关键词，则停止或不录制该场直播，每个关键词需单独一行
 ### 开始下载直播时触发，将按自定义顺序执行自定义操作 注：preprocessor仅支持shell指令

@@ -235,31 +235,29 @@ async fn read_tags(
                 }
             }
             TagData::Video(video_data) => {
-                // 斗鱼的 HEVC（codec id 12）沿用 AVC 的包头布局：packet type + composition time
-                let (packet_type, composition_time) =
-                    if matches!(video_data.codec_id, CodecId::H264 | CodecId::H265) {
-                        let (_, avc_video_header) = map_parse_err(
-                            avc_video_packet_header(video_data.video_data),
-                            "avc video packet header",
-                        )?;
-                        if avc_video_header.packet_type == AVCPacketType::SequenceHeader {
-                            if let Some((_, binary_data, _)) = &h264_sequence_header {
-                                warn!("Unexpected h264 sequence header tag. {tag_header:?}");
-                                if bytes != binary_data {
-                                    create_new = true;
-                                    warn!("Different h264 sequence header tag. {tag_header:?}");
-                                }
+                let (packet_type, composition_time) = if CodecId::H264 == video_data.codec_id {
+                    let (_, avc_video_header) = map_parse_err(
+                        avc_video_packet_header(video_data.video_data),
+                        "avc video packet header",
+                    )?;
+                    if avc_video_header.packet_type == AVCPacketType::SequenceHeader {
+                        if let Some((_, binary_data, _)) = &h264_sequence_header {
+                            warn!("Unexpected h264 sequence header tag. {tag_header:?}");
+                            if bytes != binary_data {
+                                create_new = true;
+                                warn!("Different h264 sequence header tag. {tag_header:?}");
                             }
-                            h264_sequence_header =
-                                Some((tag_header, bytes.clone(), previous_tag_size.clone()))
                         }
-                        (
-                            Some(avc_video_header.packet_type),
-                            Some(avc_video_header.composition_time),
-                        )
-                    } else {
-                        (None, None)
-                    };
+                        h264_sequence_header =
+                            Some((tag_header, bytes.clone(), previous_tag_size.clone()))
+                    }
+                    (
+                        Some(avc_video_header.packet_type),
+                        Some(avc_video_header.composition_time),
+                    )
+                } else {
+                    (None, None)
+                };
 
                 FlvTag {
                     header: tag_header,
