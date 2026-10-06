@@ -210,8 +210,12 @@ impl Monitor {
                     {
                         Ok(session) => session,
                         Err(e) => {
+                            drop(download_slot);
                             error!(e=?e, "插入数据库失败");
                             self.wake_waker(room.id()).await;
+                            // 失败多半是持续性的（磁盘满、直播间行已删）：不等检测间隔就
+                            // 立刻重新检测，只有这一个房间时会零间隔地反复请求平台接口
+                            tokio::time::sleep(Duration::from_secs(interval)).await;
                             continue;
                         }
                     };
@@ -988,5 +992,69 @@ mod tests {
             .unwrap();
         assert_eq!(sessions, 0, "没有开场次，也就没有开录");
         assert!(probed.try_recv().is_err(), "暂停的房间不再被检测");
+    }
+
+    /// 每次检测都报开播的平台，数检测次数
+    struct AlwaysLive {
+        probes: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl LivePlugin for AlwaysLive {
+        fn name(&self) -> &'static str {
+            "always"
+        }
+
+        fn matches(&self, url: &str) -> bool {
+            url.starts_with("https://always.example/")
+        }
+
+        async fn check_stream(&self, request: LiveRequest) -> LiveResult<LiveStatus> {
+            self.probes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let stream = serde_json::from_value(serde_json::json!({
+                "name": "always", "url": request.url, "title": "t", "date": "2026-01-01T00:00:00Z",
+                "live_cover_url": "", "raw_stream_url": "http://127.0.0.1:9/x.flv", "platform": "always",
+                "stream_headers": {}, "suffix": "flv", "danmaku": null, "downloader_hint": "StreamGears",
+                "runtime_options": null,
+            }))
+            .unwrap();
+            Ok(LiveStatus::Live { stream })
+        }
+    }
+
+    /// 开播了但建场次记录失败（磁盘满、直播间行已被删）：等下一个检测间隔再检测。
+    /// 立刻重新检测的话，只剩这一个房间时会零间隔地反复请求平台接口。
+    #[tokio::test]
+    async fn a_failed_session_insert_waits_for_the_next_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        // 不插直播间行：场次记录挂在它上面，开场次必然失败
+        let (uploader, _) = async_channel::bounded(1);
+        let monitor = Arc::new(Monitor::new(uploader, Arc::new(Slots::new(1)), pool));
+        let probes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        monitor
+            .add_plugin(Arc::new(AlwaysLive {
+                probes: probes.clone(),
+            }))
+            .await;
+        monitor
+            .add(worker(1, "https://always.example/1"))
+            .await
+            .unwrap();
+
+        let probed = || probes.load(std::sync::atomic::Ordering::SeqCst);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while probed() == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("房间应当开始检测");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(probed(), 1, "建场次失败后应等一个检测间隔（30 s）再检测");
     }
 }
