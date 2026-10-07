@@ -82,6 +82,7 @@ struct DouyuLive<'a> {
     douyu_codec: String,
     douyu_disable_interactive_game: bool,
     douyu_danmaku: bool,
+    douyu_cookie: Option<String>,
     room_id: Option<String>,
     real_room_id_cache: &'a RwLock<HashMap<String, String>>,
 }
@@ -100,6 +101,7 @@ impl<'a> DouyuLive<'a> {
             douyu_codec: options.codec,
             douyu_disable_interactive_game: options.disable_interactive_game,
             douyu_danmaku: options.danmaku,
+            douyu_cookie: request.credentials.douyu_cookie,
             room_id: None,
             real_room_id_cache,
         }
@@ -329,6 +331,21 @@ impl<'a> DouyuLive<'a> {
         let auth = signature::header_auth(&path, timestamp, "android1", &params);
         let user_device =
             base64::engine::general_purpose::STANDARD.encode(format!("{device_id}|v8.2.2.0"));
+
+        // 构建Cookie：如果用户提供了完整cookie，使用它；否则只使用device_id
+        let cookie_header = if let Some(ref cookie) = self.douyu_cookie {
+            // 用户提供了完整cookie，确保包含acf_did
+            if cookie.contains("acf_did=") {
+                cookie.clone()
+            } else {
+                // cookie中没有acf_did，添加它
+                format!("{cookie}; acf_did={device_id}")
+            }
+        } else {
+            // 没有提供cookie，只使用device_id（向后兼容）
+            format!("acf_did={device_id}")
+        };
+
         let rsp = self
             .client
             .get(format!("https://playclient.douyucdn.cn{path}"))
@@ -342,7 +359,7 @@ impl<'a> DouyuLive<'a> {
             )
             .header("time", timestamp.to_string())
             .header("auth", auth)
-            .header("Cookie", format!("acf_did={device_id}"))
+            .header("Cookie", cookie_header)
             .send()
             .await
             .map_err(|err| LiveError::custom(format!("请求斗鱼播放信息失败: {err}")))?;

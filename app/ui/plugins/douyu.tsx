@@ -26,6 +26,23 @@ const Douyu: React.FC<Props> = props => {
     <>
       <PlatformPanel header="斗鱼" itemKey="douyu" bare={bare}>
         <Form.Input
+          field="douyu_cookie"
+          label="登录 Cookie（douyu_cookie）"
+          placeholder="acf_username=xxx; acf_uid=xxx; acf_auth=xxx; ..."
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              斗鱼网页版登录 Cookie（www.douyu.com 的完整 Cookie）。
+              <br />
+              <strong>自 2026 年 9 月起，原画（1080P60/2K）和蓝光4M等高码率需要登录才能获取。</strong>
+              <br />
+              登录斗鱼账号后，从浏览器开发者工具的 Network 面板中复制完整 Cookie 字符串粘贴到这里。
+              <br />
+              留空时只能获取较低画质。
+            </div>
+          }
+          style={{ width: '100%' }}
+        />
+        <Form.Input
           field="douyu_deviceId"
           label="设备 ID（douyu_deviceId）"
           placeholder="10000000000000000000000000001511"
