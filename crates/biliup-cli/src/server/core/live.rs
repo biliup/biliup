@@ -141,13 +141,22 @@ fn live_options(config: &Config) -> LiveOptions {
 }
 
 fn live_credentials(config: &Config) -> LiveCredentials {
+    // 斗鱼 Cookie 是顶层配置（可按主播覆写），不在 `user` 里，没有 `user` 段时也要带上
+    let douyu_cookie = config
+        .douyu_cookie
+        .clone()
+        .filter(|cookie| !cookie.trim().is_empty());
     let Some(user) = &config.user else {
-        return LiveCredentials::default();
+        return LiveCredentials {
+            douyu_cookie,
+            ..LiveCredentials::default()
+        };
     };
     LiveCredentials {
         bilibili_cookie: user.bili_cookie.clone(),
         bilibili_cookie_file: user.bili_cookie_file.clone(),
         douyin_cookie: user.douyin_cookie.clone(),
+        douyu_cookie,
         twitcasting_cookie: user.twitcasting_cookie.clone(),
         twitch_cookie: user.twitch_cookie.clone(),
         youtube_cookie: user.youtube_cookie.clone(),

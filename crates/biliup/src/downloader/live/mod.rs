@@ -316,6 +316,8 @@ pub struct LiveCredentials {
     pub bilibili_cookie: Option<String>,
     pub bilibili_cookie_file: Option<PathBuf>,
     pub douyin_cookie: Option<String>,
+    /// 斗鱼网页版登录 Cookie（www.douyu.com 的整段 Cookie）。原画等高码率档需登录才能取到
+    pub douyu_cookie: Option<String>,
     pub twitcasting_cookie: Option<String>,
     pub twitch_cookie: Option<String>,
     pub youtube_cookie: Option<PathBuf>,

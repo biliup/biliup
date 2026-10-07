@@ -176,6 +176,10 @@ pub struct Config {
     /// 用户 Cookie 中 acf_did 的值
     #[serde(default, rename = "douyu_deviceId", alias = "douyu_device_id")]
     pub douyu_device_id: Option<String>,
+    /// 斗鱼网页版登录 Cookie（www.douyu.com 的整段 Cookie）。2026 年 9 月起原画等高码率档需登录才能取到。
+    /// 属于账号凭据：不在 `VISIBLE_CONFIG_KEYS` 里，非超管看不到，Fleet 也不下发
+    #[serde(default)]
+    pub douyu_cookie: Option<String>,
     /// 斗鱼视频编码：AVC 或 HEVC
     #[serde(default)]
     pub douyu_codec: Option<String>,
