@@ -827,6 +827,7 @@ mod tests {
             douyu_codec: String::new(),
             douyu_disable_interactive_game: false,
             douyu_danmaku: false,
+            douyu_cookie: None,
             room_id: None,
             real_room_id_cache,
         }

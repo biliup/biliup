@@ -9,6 +9,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@douyinfe/semi-icons": "^2.103.0",
     "@douyinfe/semi-ui": "^2.103.0",
     "artplayer": "^5.4.0",
     "artplayer-plugin-danmuku": "^5.3.0",

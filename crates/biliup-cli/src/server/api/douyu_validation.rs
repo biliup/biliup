@@ -7,7 +7,6 @@ use axum::{
     Json,
 };
 use biliup::downloader::live::Douyu;
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use crate::server::infrastructure::service_register::ServiceRegister;
 
@@ -62,11 +61,11 @@ async fn validate_cookie(
             .into_response();
     }
 
-    // 获取HTTP客户端
-    let client = service_register.client();
+    // 获取HTTP客户端 - ServiceRegister的client字段是public的
+    let client = &service_register.client.client;
 
     // 调用实际验证逻辑
-    match Douyu::validate_cookie(&payload.cookie, &client).await {
+    match Douyu::validate_cookie(&payload.cookie, client).await {
         Ok(true) => (
             StatusCode::OK,
             Json(ValidateCookieResponse {
