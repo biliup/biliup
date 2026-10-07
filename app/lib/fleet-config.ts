@@ -23,6 +23,7 @@ export const DELIVERABLE_KEYS = [
   'submit_api',
   'lines',
   'threads',
+  'max_upload_limit',
   'delay',
   'event_loop_interval',
   'checker_sleep',
