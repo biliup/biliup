@@ -54,8 +54,21 @@ impl Douyu {
     }
 
     /// 验证斗鱼Cookie是否有效
-    /// 通过请求betard API来检测cookie的有效性
+    /// 通过检查必需字段和请求betard API来检测cookie的有效性
     pub async fn validate_cookie(cookie: &str, client: &Client) -> LiveResult<bool> {
+        // 首先验证cookie格式和必需字段
+        let cookie_lower = cookie.to_lowercase();
+        let has_acf_uid = cookie_lower.contains("acf_uid=");
+        let has_acf_auth = cookie_lower.contains("acf_auth=");
+
+        if !has_acf_uid || !has_acf_auth {
+            debug!(
+                "Cookie缺少必需字段: acf_uid={}, acf_auth={}",
+                has_acf_uid, has_acf_auth
+            );
+            return Ok(false);
+        }
+
         // 使用一个稳定的大主播房间号进行测试（例如：斗鱼官方房间）
         const TEST_ROOM_ID: &str = "288016";
 
@@ -69,7 +82,9 @@ impl Douyu {
             .map_err(|err| LiveError::custom(format!("Cookie验证请求失败: {err}")))?;
 
         // 检查HTTP状态码
-        if !response.status().is_success() {
+        let status = response.status();
+        if !status.is_success() {
+            debug!("Cookie验证失败: HTTP {}", status);
             return Ok(false);
         }
 
@@ -81,8 +96,20 @@ impl Douyu {
 
         // 如果能成功解析JSON响应，说明cookie有效
         match serde_json::from_str::<BetardResponse>(&text) {
-            Ok(_) => Ok(true),
-            Err(_) => Ok(false),
+            Ok(resp) => {
+                // 额外检查：确认响应中有room数据
+                if resp.room.is_some() {
+                    debug!("Cookie验证成功");
+                    Ok(true)
+                } else {
+                    debug!("Cookie验证响应无room数据");
+                    Ok(false)
+                }
+            }
+            Err(e) => {
+                debug!("Cookie验证失败: JSON解析错误 - {}", e);
+                Ok(false)
+            }
         }
     }
 }
@@ -350,7 +377,9 @@ impl<'a> DouyuLive<'a> {
         );
         params.insert("token".to_string(), String::new()); // 已登录账号Token
         params.insert("rate".to_string(), self.douyu_rate.to_string());
-        params.insert("hevc".to_string(), "1".to_string()); // 设备 Codec 偏好
+        // 根据用户选择的编码设置hevc参数：HEVC时为1，否则为0
+        let hevc_value = if self.douyu_codec.eq_ignore_ascii_case("HEVC") { "1" } else { "0" };
+        params.insert("hevc".to_string(), hevc_value.to_string());
         params.insert("ilow".to_string(), "0".to_string()); // 低端设备
         params.insert("iar".to_string(), "0".to_string()); // 首屏加载（非 0 时忽略 rate，提供最低画质）
         params.insert("net".to_string(), "WIFI".to_string());
@@ -368,12 +397,7 @@ impl<'a> DouyuLive<'a> {
         // 构建Cookie：如果用户提供了完整cookie，使用它；否则只使用device_id
         let cookie_header = if let Some(ref cookie) = self.douyu_cookie {
             // 用户提供了完整cookie，确保包含acf_did
-            if cookie.contains("acf_did=") {
-                cookie.clone()
-            } else {
-                // cookie中没有acf_did，添加它
-                format!("{cookie}; acf_did={device_id}")
-            }
+            build_cookie_header(cookie.trim(), device_id)
         } else {
             // 没有提供cookie，只使用device_id（向后兼容）
             format!("acf_did={device_id}")
@@ -511,18 +535,50 @@ fn random_android_device() -> String {
     )
 }
 
+/// 解析并合并用户cookie和device_id，确保格式正确
+fn build_cookie_header(user_cookie: &str, device_id: &str) -> String {
+    use std::collections::HashMap;
+
+    let mut cookie_map = HashMap::new();
+
+    // 解析用户提供的cookie
+    for pair in user_cookie.split(';') {
+        let pair = pair.trim();
+        if let Some((key, value)) = pair.split_once('=') {
+            let key = key.trim();
+            let value = value.trim();
+            if !key.is_empty() && !value.is_empty() {
+                cookie_map.insert(key, value);
+            }
+        }
+    }
+
+    // 确保acf_did存在
+    cookie_map.entry("acf_did").or_insert(device_id);
+
+    // 重新组装成规范格式
+    cookie_map
+        .iter()
+        .map(|(k, v)| format!("{}={}", k, v))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 fn select_stream_url(play_info: PlayInfo, codec: &str) -> String {
-    if codec == "HEVC" {
+    if codec.eq_ignore_ascii_case("HEVC") {
         if let Some(url) = play_info.player_1.filter(|url| !url.trim().is_empty()) {
+            debug!("使用 HEVC 流: player_1");
             return url;
         }
-        warn!("斗鱼未提供 HEVC 流，回退到 AVC");
+        warn!("斗鱼未提供 HEVC 流 (player_1 为空)，回退到 AVC 流");
     }
-    format!(
+    let avc_url = format!(
         "{}/{}",
         play_info.rtmp_url.trim_end_matches('/'),
         play_info.rtmp_live.trim_start_matches('/')
-    )
+    );
+    debug!("使用 AVC 流: rtmp_url + rtmp_live");
+    avc_url
 }
 
 fn deserialize_optional_player_url<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
@@ -1076,5 +1132,66 @@ mod tests {
             let response: BetardResponse = serde_json::from_str(&body).unwrap();
             assert_eq!(response.room.unwrap().is_live(), expected);
         }
+    }
+
+    #[test]
+    fn build_cookie_header_merges_correctly() {
+        // 测试完整cookie合并
+        let cookie = "acf_username=test; acf_uid=12345; acf_auth=abc123";
+        let device_id = "device999";
+        let result = build_cookie_header(cookie, device_id);
+
+        assert!(result.contains("acf_username=test"));
+        assert!(result.contains("acf_uid=12345"));
+        assert!(result.contains("acf_auth=abc123"));
+        assert!(result.contains("acf_did=device999"));
+
+        // 测试已有acf_did的情况
+        let cookie_with_did = "acf_username=test; acf_did=original; acf_uid=12345";
+        let result2 = build_cookie_header(cookie_with_did, device_id);
+        assert!(result2.contains("acf_did=original"));
+
+        // 测试格式清理
+        let messy_cookie = "  acf_username=test  ;  acf_uid=12345  ; ";
+        let result3 = build_cookie_header(messy_cookie, device_id);
+        assert!(result3.contains("acf_username=test"));
+        assert!(result3.contains("acf_uid=12345"));
+        assert!(!result3.contains("  "));
+    }
+
+    #[test]
+    fn hevc_codec_selection_respects_user_choice() {
+        // 测试HEVC选择
+        let hevc_info = PlayInfo {
+            rtmp_url: "https://cdn.example/live/".into(),
+            rtmp_live: "/avc.flv".into(),
+            player_1: Some("https://cdn.example/hevc.flv".into()),
+        };
+        assert_eq!(
+            select_stream_url(hevc_info, "HEVC"),
+            "https://cdn.example/hevc.flv"
+        );
+
+        // 测试AVC选择
+        let avc_info = PlayInfo {
+            rtmp_url: "https://cdn.example/live/".into(),
+            rtmp_live: "/avc.flv".into(),
+            player_1: Some("https://cdn.example/hevc.flv".into()),
+        };
+        assert_eq!(
+            select_stream_url(avc_info, "AVC"),
+            "https://cdn.example/live/avc.flv"
+        );
+
+        // 测试空字符串也被当作AVC
+        let default_info = PlayInfo {
+            rtmp_url: "https://cdn.example/live/".into(),
+            rtmp_live: "/avc.flv".into(),
+            player_1: Some("https://cdn.example/hevc.flv".into()),
+        };
+        assert_eq!(
+            select_stream_url(default_info, ""),
+            "https://cdn.example/live/avc.flv"
+        );
     }
 }

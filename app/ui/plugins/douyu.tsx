@@ -66,18 +66,20 @@ const Douyu: React.FC<Props> = props => {
           <Form.Input
             field="douyu_cookie"
             label="登录 Cookie（douyu_cookie）"
-            placeholder="acf_username=xxx; acf_uid=xxx; acf_auth=xxx; ..."
+            placeholder="acf_username=xxx; acf_uid=xxx; acf_auth=xxx; acf_did=xxx; ..."
             extraText={
               <div style={{ fontSize: '14px' }}>
                 斗鱼网页版登录 Cookie（www.douyu.com 的完整 Cookie）。
                 <br />
                 <strong>自 2026 年 9 月起，原画（1080P60/2K）和蓝光4M等高码率需要登录才能获取。</strong>
                 <br />
+                必需字段：<code>acf_uid</code> 和 <code>acf_auth</code>（用于身份验证）
+                <br />
                 登录斗鱼账号后，从浏览器开发者工具的 Network 面板中复制完整 Cookie 字符串粘贴到这里。
                 <br />
-                留空时只能获取较低画质。
+                留空时只能获取较低画质（最高超清）。
                 <br />
-                <a href="/docs/DOUYU_COOKIE_GUIDE.md" target="_blank" style={{ color: '#1890ff' }}>
+                <a href="/docs/tutorials/douyu-cookie-guide" target="_blank" style={{ color: '#1890ff' }}>
                   📖 查看详细Cookie获取教程
                 </a>
               </div>
@@ -125,11 +127,23 @@ const Douyu: React.FC<Props> = props => {
           field="douyu_codec"
           label="视频编码（douyu_codec）"
           mode="advanced"
-          extraText="默认 AVC。"
+          extraText={
+            <div style={{ fontSize: '14px' }}>
+              默认 AVC。
+              <br />
+              <strong style={{ color: '#ff4d4f' }}>
+                ⚠️ 重要提示：HEVC 编码仅在使用 mesio 或 ffmpeg 下载器时有效。
+              </strong>
+              <br />
+              使用 stream-gears 下载器时，即使选择 HEVC，如果收到 HEVC 流也会导致录制失败。
+              <br />
+              建议：除非明确需要 HEVC 且已配置兼容的下载器，否则请选择 AVC。
+            </div>
+          }
           initValue={entity?.douyu_codec ?? ''}
         >
-          <Radio value="AVC">AVC</Radio>
-          <Radio value="HEVC">HEVC</Radio>
+          <Radio value="AVC">AVC (H.264) - 兼容所有下载器</Radio>
+          <Radio value="HEVC">HEVC (H.265) - 需要 mesio/ffmpeg 下载器</Radio>
         </Form.RadioGroup>
         <Form.Select
           allowCreate={true}
@@ -140,6 +154,10 @@ const Douyu: React.FC<Props> = props => {
             <div style={{ fontSize: '14px' }}>
               录制画质，默认 0（最高画质）。可选：0 最高画质 / 8 蓝光 8M / 4 蓝光 4M / 3 超清 / 2
               高清，也可手动输入其他数值。
+              <br />
+              <strong style={{ color: '#1890ff' }}>
+                💡 提示：原画（0）和蓝光4M（4）需要登录 Cookie 才能获取。
+              </strong>
               <br />
               刚开播时可能只有原画，会先录原画；下载插件为 ffmpeg / streamlink
               时之后每次分段会重新取流并切到所选画质，stream-gears / mesio 整场沿用首次取到的流。
@@ -159,9 +177,9 @@ const Douyu: React.FC<Props> = props => {
           ]}
           showClear={true}
         >
-          <Select.Option value={0}>最高画质（0）</Select.Option>
+          <Select.Option value={0}>最高画质/原画（0）⭐ 需要登录</Select.Option>
           <Select.Option value={8}>蓝光8M（8）</Select.Option>
-          <Select.Option value={4}>蓝光4M（4）</Select.Option>
+          <Select.Option value={4}>蓝光4M（4）⭐ 需要登录</Select.Option>
           <Select.Option value={3}>超清（3）</Select.Option>
           <Select.Option value={2}>高清（2）</Select.Option>
         </Form.Select>

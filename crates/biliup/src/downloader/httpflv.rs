@@ -303,7 +303,11 @@ async fn read_tags(
             && let Some(codec) = unsupported_video_codec(&bytes)
         {
             return Err(crate::downloader::error::Error::Custom(format!(
-                "unsupported video codec {codec}: stream-gears only records H.264 FLV, use the mesio or ffmpeg downloader for this stream"
+                "收到 {codec} 编码的视频流，但 stream-gears 下载器只支持 H.264。\n\
+                解决方案：\n\
+                1. 将下载器切换为 mesio 或 ffmpeg\n\
+                2. 或在平台设置中将视频编码改为 AVC (H.264)\n\
+                提示：如果您在斗鱼平台设置中选择了 HEVC 编码，请改为 AVC"
             )));
         }
         // out.write(&bytes)?;
