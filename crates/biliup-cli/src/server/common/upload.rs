@@ -20,7 +20,7 @@ use biliup::uploader::line::{Line, Probe, StreamParcel, UploadedStream};
 use biliup::uploader::util::SubmitOption;
 use biliup::uploader::{VideoFile, line};
 use bytes::Bytes;
-use error_stack::ResultExt;
+use error_stack::{Report, ResultExt};
 use futures::Stream;
 use futures::StreamExt;
 use futures::stream::Inspect;
@@ -28,7 +28,7 @@ use ormlite::Insert;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::pin;
 use tokio::task::{JoinError, JoinSet};
 use tracing::{error, info, warn};
@@ -235,8 +235,57 @@ pub(crate) async fn upload_single_file(
     upload_single_file_with_progress(file_path, context, |_| true).await
 }
 
+/// 整个文件重传前的等待。`pre_upload` 与分片各自的重试只扛得住十几秒的断网，
+/// 断得更久就隔一阵从头再传；总共约 12.5 分钟，仍失败就照旧跳过这一段。
+const FILE_RETRY_DELAYS: [Duration; 5] = [
+    Duration::from_secs(30),
+    Duration::from_secs(60),
+    Duration::from_secs(120),
+    Duration::from_secs(240),
+    Duration::from_secs(300),
+];
+
 async fn upload_owned_file(file_path: PathBuf, context: &UploadContext) -> AppResult<Video> {
-    upload_single_file(&file_path, context).await
+    retry_on_network_error(&file_path, &FILE_RETRY_DELAYS, || {
+        upload_single_file(&file_path, context)
+    })
+    .await
+}
+
+/// 网络类错误（[`Kind::is_transient`]）按 `delays` 依次等待后重来，用完返回最后一次的错误；
+/// 其他错误（限流、风控、本地文件）立即返回。
+async fn retry_on_network_error<T, F, Fut>(
+    file: &Path,
+    delays: &[Duration],
+    mut attempt: F,
+) -> AppResult<T>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = AppResult<T>>,
+{
+    for (retry, delay) in delays.iter().enumerate() {
+        match attempt().await {
+            Err(e) if is_network_error(&e) => {
+                warn!(
+                    file = ?file,
+                    "上传遇到网络错误，{}s 后整个文件重传（第 {}/{} 次）：{e:#}",
+                    delay.as_secs(),
+                    retry + 1,
+                    delays.len()
+                );
+                tokio::time::sleep(*delay).await;
+            }
+            result => return result,
+        }
+    }
+    attempt().await
+}
+
+fn is_network_error(report: &Report<AppError>) -> bool {
+    report
+        .frames()
+        .filter_map(|frame| frame.downcast_ref::<Kind>())
+        .any(Kind::is_transient)
 }
 
 /// 同 [`upload_single_file`]，每读出一块交给上传前用这块的字节数回调 `progress`；
@@ -695,6 +744,125 @@ pub async fn upload(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 断网时上传得到的错误：连接被拒与 DNS 解析失败同属连接错误
+    async fn network_error() -> Report<AppError> {
+        let error = reqwest::Client::new()
+            .get("http://127.0.0.1:1/")
+            .send()
+            .await
+            .unwrap_err();
+        Report::new(Kind::from(error)).change_context(AppError::Unknown)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn network_errors_retry_the_whole_file_until_it_goes_through() {
+        let attempts = std::sync::atomic::AtomicUsize::new(0);
+        let started = tokio::time::Instant::now();
+        let result = retry_on_network_error(Path::new("a.flv"), &FILE_RETRY_DELAYS, || async {
+            match attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
+                0 | 1 => Err(network_error().await),
+                _ => Ok("uploaded"),
+            }
+        })
+        .await;
+
+        assert_eq!(result.unwrap(), "uploaded");
+        assert_eq!(attempts.into_inner(), 3);
+        assert_eq!(started.elapsed().as_secs(), 30 + 60);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn network_retries_are_bounded() {
+        let attempts = std::sync::atomic::AtomicUsize::new(0);
+        let started = tokio::time::Instant::now();
+        let result: AppResult<()> =
+            retry_on_network_error(Path::new("a.flv"), &FILE_RETRY_DELAYS, || async {
+                attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Err(network_error().await)
+            })
+            .await;
+
+        assert!(is_network_error(&result.unwrap_err()));
+        assert_eq!(attempts.into_inner(), 1 + FILE_RETRY_DELAYS.len());
+        assert_eq!(started.elapsed().as_secs(), 30 + 60 + 120 + 240 + 300);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rejections_and_local_errors_are_not_retried() {
+        let rejections: Vec<fn() -> Report<AppError>> = vec![
+            || {
+                Report::new(Kind::RateLimit {
+                    code: 601,
+                    message: "上传过快".into(),
+                })
+                .change_context(AppError::Unknown)
+            },
+            || {
+                Report::new(Kind::Custom(
+                    r#"Failed to pre_upload from {"code":406}"#.into(),
+                ))
+                .change_context(AppError::Unknown)
+            },
+            || {
+                Report::new(std::io::Error::from(std::io::ErrorKind::NotFound))
+                    .change_context(AppError::Unknown)
+            },
+        ];
+        for rejection in rejections {
+            let attempts = std::sync::atomic::AtomicUsize::new(0);
+            let started = tokio::time::Instant::now();
+            let result: AppResult<()> =
+                retry_on_network_error(Path::new("a.flv"), &FILE_RETRY_DELAYS, || async {
+                    attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Err(rejection())
+                })
+                .await;
+
+            assert!(result.is_err());
+            assert_eq!(attempts.into_inner(), 1);
+            assert_eq!(started.elapsed(), Duration::ZERO);
+        }
+    }
+
+    /// #1804：第 2 段上传时断网，网络恢复后补传成功，稿件里三段按顺序都在
+    #[tokio::test(start_paused = true)]
+    async fn a_segment_hit_by_an_outage_stays_in_the_submission() {
+        let offline_attempts = std::sync::atomic::AtomicUsize::new(0);
+        let segments = ["seg1.flv", "seg2.flv", "seg3.flv"]
+            .iter()
+            .enumerate()
+            .map(|(i, name)| SegmentInfo::new(PathBuf::from(name), None, None, i))
+            .collect::<Vec<_>>();
+
+        let uploaded = pipeline_upload_videos(futures::stream::iter(segments), &[], |path| {
+            let offline_attempts = &offline_attempts;
+            async move {
+                retry_on_network_error(&path, &FILE_RETRY_DELAYS, || async {
+                    if path == Path::new("seg2.flv")
+                        && offline_attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2
+                    {
+                        return Err(network_error().await);
+                    }
+                    Ok(Video::new(path.to_str().unwrap()))
+                })
+                .await
+            }
+        })
+        .await
+        .unwrap();
+
+        let names: Vec<_> = uploaded
+            .videos
+            .iter()
+            .map(|v| v.filename.as_str())
+            .collect();
+        assert_eq!(names, ["seg1.flv", "seg2.flv", "seg3.flv"]);
+        assert_eq!(
+            uploaded.paths,
+            ["seg1.flv", "seg2.flv", "seg3.flv"].map(PathBuf::from)
+        );
+    }
 
     #[test]
     fn segment_paths_keeps_video_only_without_danmaku() {
