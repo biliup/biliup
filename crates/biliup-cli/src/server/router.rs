@@ -178,6 +178,8 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         .route("/v1/tools", get(get_tools)) // ffmpeg 是否可用、版本与许可
         .route("/v1/uploads", post(post_uploads))
         .route("/static/{path}", get(using_serve_file_from_a_route))
+        // 斗鱼Cookie验证
+        .merge(crate::server::api::douyu_validation::router())
         .with_state(service_register) // 注入服务注册器状态
 }
 

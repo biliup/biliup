@@ -52,6 +52,39 @@ impl Douyu {
             real_room_id: RwLock::new(HashMap::new()),
         }
     }
+
+    /// 验证斗鱼Cookie是否有效
+    /// 通过请求betard API来检测cookie的有效性
+    pub async fn validate_cookie(cookie: &str, client: &Client) -> LiveResult<bool> {
+        // 使用一个稳定的大主播房间号进行测试（例如：斗鱼官方房间）
+        const TEST_ROOM_ID: &str = "288016";
+
+        let response = client
+            .get(format!("https://{DOUYU_WEB_DOMAIN}/betard/{TEST_ROOM_ID}"))
+            .header("referer", format!("https://{DOUYU_WEB_DOMAIN}"))
+            .header("user-agent", DOUYU_USER_AGENT)
+            .header("cookie", cookie)
+            .send()
+            .await
+            .map_err(|err| LiveError::custom(format!("Cookie验证请求失败: {err}")))?;
+
+        // 检查HTTP状态码
+        if !response.status().is_success() {
+            return Ok(false);
+        }
+
+        // 尝试解析响应以确认cookie有效
+        let text = response
+            .text()
+            .await
+            .map_err(|err| LiveError::custom(format!("读取验证响应失败: {err}")))?;
+
+        // 如果能成功解析JSON响应，说明cookie有效
+        match serde_json::from_str::<BetardResponse>(&text) {
+            Ok(_) => Ok(true),
+            Err(_) => Ok(false),
+        }
+    }
 }
 
 #[async_trait]

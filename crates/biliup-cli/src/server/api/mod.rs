@@ -14,6 +14,8 @@ pub mod clip_suggestions;
 pub mod clips;
 /// 弹幕密度曲线（回看页用）
 pub mod danmaku_density;
+/// 斗鱼Cookie验证
+pub mod douyu_validation;
 /// 通用API端点
 pub mod endpoints;
 /// 控制面的节点与加入票据（只在 `--controller` 时注册）

@@ -22,26 +22,98 @@ const Douyu: React.FC<Props> = props => {
     }
   }, [initValues, formApi])
 
+  const [testingCookie, setTestingCookie] = React.useState(false)
+  const [testResult, setTestResult] = React.useState<{ success: boolean; message: string } | null>(null)
+
+  const handleTestCookie = async () => {
+    const cookieValue = formApi.getValue('douyu_cookie')
+    if (!cookieValue || cookieValue.trim() === '') {
+      setTestResult({ success: false, message: 'Cookie不能为空' })
+      return
+    }
+
+    setTestingCookie(true)
+    setTestResult(null)
+
+    try {
+      const response = await fetch('/api/v1/douyu/validate-cookie', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ cookie: cookieValue }),
+      })
+
+      const data = await response.json()
+      setTestResult({
+        success: data.valid,
+        message: data.message || (data.valid ? 'Cookie有效' : 'Cookie无效'),
+      })
+    } catch (error) {
+      setTestResult({
+        success: false,
+        message: `测试失败: ${error instanceof Error ? error.message : '未知错误'}`,
+      })
+    } finally {
+      setTestingCookie(false)
+    }
+  }
+
   return (
     <>
       <PlatformPanel header="斗鱼" itemKey="douyu" bare={bare}>
-        <Form.Input
-          field="douyu_cookie"
-          label="登录 Cookie（douyu_cookie）"
-          placeholder="acf_username=xxx; acf_uid=xxx; acf_auth=xxx; ..."
-          extraText={
-            <div style={{ fontSize: '14px' }}>
-              斗鱼网页版登录 Cookie（www.douyu.com 的完整 Cookie）。
-              <br />
-              <strong>自 2026 年 9 月起，原画（1080P60/2K）和蓝光4M等高码率需要登录才能获取。</strong>
-              <br />
-              登录斗鱼账号后，从浏览器开发者工具的 Network 面板中复制完整 Cookie 字符串粘贴到这里。
-              <br />
-              留空时只能获取较低画质。
-            </div>
-          }
-          style={{ width: '100%' }}
-        />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <Form.Input
+            field="douyu_cookie"
+            label="登录 Cookie（douyu_cookie）"
+            placeholder="acf_username=xxx; acf_uid=xxx; acf_auth=xxx; ..."
+            extraText={
+              <div style={{ fontSize: '14px' }}>
+                斗鱼网页版登录 Cookie（www.douyu.com 的完整 Cookie）。
+                <br />
+                <strong>自 2026 年 9 月起，原画（1080P60/2K）和蓝光4M等高码率需要登录才能获取。</strong>
+                <br />
+                登录斗鱼账号后，从浏览器开发者工具的 Network 面板中复制完整 Cookie 字符串粘贴到这里。
+                <br />
+                留空时只能获取较低画质。
+                <br />
+                <a href="/docs/DOUYU_COOKIE_GUIDE.md" target="_blank" style={{ color: '#1890ff' }}>
+                  📖 查看详细Cookie获取教程
+                </a>
+              </div>
+            }
+            style={{ width: '100%' }}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <button
+              type="button"
+              onClick={handleTestCookie}
+              disabled={testingCookie}
+              style={{
+                padding: '6px 16px',
+                backgroundColor: '#1890ff',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: testingCookie ? 'not-allowed' : 'pointer',
+                opacity: testingCookie ? 0.6 : 1,
+                fontSize: '14px',
+              }}
+            >
+              {testingCookie ? '测试中...' : '🔍 测试Cookie'}
+            </button>
+            {testResult && (
+              <span
+                style={{
+                  fontSize: '14px',
+                  color: testResult.success ? '#52c41a' : '#ff4d4f',
+                }}
+              >
+                {testResult.success ? '✅' : '❌'} {testResult.message}
+              </span>
+            )}
+          </div>
+        </div>
         <Form.Input
           field="douyu_deviceId"
           label="设备 ID（douyu_deviceId）"
