@@ -315,9 +315,17 @@ impl<'a> DouyuLive<'a> {
     }
 
     async fn fetch_room_info_text(&self, room_id: &str) -> Result<String, reqwest::Error> {
-        self.client
+        let mut request = self.client
             .get(format!("https://{DOUYU_WEB_DOMAIN}/betard/{room_id}"))
             .header("referer", format!("https://{DOUYU_WEB_DOMAIN}"))
+            .header("user-agent", DOUYU_USER_AGENT);
+
+        // 如果提供了cookie，添加到请求头以获取高清流质量
+        if let Some(ref cookie) = self.douyu_cookie {
+            request = request.header("cookie", cookie);
+        }
+
+        request
             .send()
             .await?
             .text()
@@ -325,13 +333,20 @@ impl<'a> DouyuLive<'a> {
     }
 
     async fn has_interactive_game(&self, room_id: &str) -> LiveResult<bool> {
-        let data: Value = self
+        let mut request = self
             .client
             .get(format!(
                 "https://{DOUYU_WEB_DOMAIN}/api/interactive/web/v2/list?rid={room_id}"
             ))
             .header("referer", format!("https://{DOUYU_WEB_DOMAIN}"))
-            .header("user-agent", DOUYU_USER_AGENT)
+            .header("user-agent", DOUYU_USER_AGENT);
+
+        // 添加Cookie以获取完整的互动游戏信息
+        if let Some(ref cookie) = self.douyu_cookie {
+            request = request.header("cookie", cookie);
+        }
+
+        let data: Value = request
             .send()
             .await
             .map_err(|err| LiveError::custom(format!("获取斗鱼互动游戏信息失败: {err}")))?
@@ -356,6 +371,16 @@ impl<'a> DouyuLive<'a> {
         let room_number: u32 = room_id
             .parse()
             .map_err(|_| LiveError::custom("斗鱼房间号无效"))?;
+
+        // 验证 douyu_rate 配置值是否有效
+        // 有效值: 0(原画), 2(超清), 3(高清), 4(流畅)
+        if !matches!(self.douyu_rate, 0 | 2 | 3 | 4) {
+            return Err(LiveError::custom(format!(
+                "douyu_rate 配置值无效: {}。有效值为: 0(原画), 2(超清), 3(高清), 4(流畅)",
+                self.douyu_rate
+            )));
+        }
+
         let device_id = if self.douyu_device_id.trim().is_empty() {
             signature::DEFAULT_DEVICE_ID
         } else {
@@ -397,11 +422,24 @@ impl<'a> DouyuLive<'a> {
         // 构建Cookie：如果用户提供了完整cookie，使用它；否则只使用device_id
         let cookie_header = if let Some(ref cookie) = self.douyu_cookie {
             // 用户提供了完整cookie，确保包含acf_did
+            debug!(
+                "使用用户提供的Cookie (长度: {} 字节, 包含acf_uid: {}, 包含acf_auth: {})",
+                cookie.len(),
+                cookie.contains("acf_uid="),
+                cookie.contains("acf_auth=")
+            );
             build_cookie_header(cookie.trim(), device_id)
         } else {
-            // 没有提供cookie，只使用device_id（向后兼容）
+            debug!("未提供Cookie，仅使用device_id");
             format!("acf_did={device_id}")
         };
+
+        debug!(
+            "请求参数: rate={}, hevc={}, cdn={}",
+            self.douyu_rate,
+            if self.douyu_codec.eq_ignore_ascii_case("HEVC") { "1" } else { "0" },
+            self.douyu_cdn
+        );
 
         let rsp = self
             .client
@@ -425,9 +463,43 @@ impl<'a> DouyuLive<'a> {
             .text()
             .await
             .map_err(|err| LiveError::custom(format!("读取斗鱼播放信息失败: {err}")))?;
+
+        debug!("斗鱼API响应长度: {} 字节", body.len());
+
+        // 记录完整响应用于调试画质问题
+        if body.len() < 4000 {
+            debug!("完整API响应: {}", body);
+        } else {
+            debug!("API响应前1000字符: {}", &body[..1000.min(body.len())]);
+        }
+
         let parsed: PlayResponse = serde_json::from_str(&body).map_err(|err| {
+            warn!("解析失败的响应: {}", body);
             LiveError::custom(format!("解析斗鱼播放信息失败 (HTTP {status}): {err}"))
         })?;
+
+        debug!(
+            "API返回: error={}, rtmp_url长度={}, player_1={}, player_2={}, player_3={}, player_4={}, multirates数量={}",
+            parsed.error,
+            parsed.data.as_ref().map(|d| d.rtmp_url.len()).unwrap_or(0),
+            parsed.data.as_ref().and_then(|d| d.player_1.as_ref().map(|p| p.len())).unwrap_or(0),
+            parsed.data.as_ref().and_then(|d| d.player_2.as_ref().map(|p| p.len())).unwrap_or(0),
+            parsed.data.as_ref().and_then(|d| d.player_3.as_ref().map(|p| p.len())).unwrap_or(0),
+            parsed.data.as_ref().and_then(|d| d.player_4.as_ref().map(|p| p.len())).unwrap_or(0),
+            parsed.data.as_ref().map(|d| d.multirates.len()).unwrap_or(0)
+        );
+
+        // 如果有multirates或额外播放器字段，记录详细信息
+        if let Some(ref data) = parsed.data {
+            if !data.multirates.is_empty() {
+                debug!("🎯 发现multirates数据: {:?}", data.multirates);
+            }
+            if data.player_2.is_some() || data.player_3.is_some() || data.player_4.is_some() {
+                debug!("🎯 发现额外播放器字段 - player_2: {}, player_3: {}, player_4: {}",
+                    data.player_2.is_some(), data.player_3.is_some(), data.player_4.is_some());
+            }
+        }
+
         play_info_from_response(parsed)
     }
 
@@ -461,11 +533,25 @@ impl<'a> DouyuLive<'a> {
     }
 
     async fn request_txsecret(&self, api: &str, stream_id: &str) -> LiveResult<XP2PTxSecret> {
+        let device_id = if self.douyu_device_id.trim().is_empty() {
+            signature::DEFAULT_DEVICE_ID
+        } else {
+            self.douyu_device_id.trim()
+        };
+
+        // 构建Cookie：如果用户提供了完整cookie，使用它；否则只使用device_id
+        let cookie_header = if let Some(ref cookie) = self.douyu_cookie {
+            build_cookie_header(cookie.trim(), device_id)
+        } else {
+            format!("acf_did={device_id}")
+        };
+
         let tx_secret: XP2PTxSecret = self
             .client
             .get(format!("{api}/p2p/get_txsecret"))
             .query(&[("lid", stream_id)])
             .header("user-agent", DOUYU_USER_AGENT)
+            .header("Cookie", cookie_header)
             .send()
             .await
             .map_err(|err| {
@@ -779,12 +865,29 @@ struct PlayResponse {
     data: Option<PlayInfo>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct PlayInfo {
     rtmp_url: String,
     rtmp_live: String,
     #[serde(default, deserialize_with = "deserialize_optional_player_url")]
     player_1: Option<String>,
+    // 额外的播放器字段 - 可能包含不同画质的流
+    #[serde(default, deserialize_with = "deserialize_optional_player_url")]
+    player_2: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_player_url")]
+    player_3: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_player_url")]
+    player_4: Option<String>,
+    // 多码率流列表 - 可能包含不同画质选项
+    #[serde(default)]
+    multirates: Vec<serde_json::Value>, // 先用Value捕获，了解结构后再定义类型
+    // 其他可能的字段
+    #[serde(default)]
+    #[allow(dead_code)]
+    rate: Option<i32>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    is_mixed: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -1193,5 +1296,36 @@ mod tests {
             select_stream_url(default_info, ""),
             "https://cdn.example/live/avc.flv"
         );
+    }
+
+    #[tokio::test]
+    async fn get_app_play_info_validates_rate() {
+        let real_room_id_cache = RwLock::new(HashMap::new());
+
+        // 测试无效的 rate 值
+        for invalid_rate in [1, 5, 10, 999] {
+            let mut live = make_live("https://www.douyu.com/10568722", &real_room_id_cache);
+            live.douyu_rate = invalid_rate;
+
+            let result = live.get_app_play_info("10568722").await;
+            assert!(result.is_err());
+            let err_msg = result.unwrap_err().to_string();
+            assert!(err_msg.contains("douyu_rate 配置值无效"));
+            assert!(err_msg.contains(&invalid_rate.to_string()));
+        }
+
+        // 测试有效的 rate 值 (0, 2, 3, 4)
+        // 注意: 这些测试会因为网络请求失败，但不会因为验证失败
+        for valid_rate in [0, 2, 3, 4] {
+            let mut live = make_live("https://www.douyu.com/10568722", &real_room_id_cache);
+            live.douyu_rate = valid_rate;
+
+            let result = live.get_app_play_info("10568722").await;
+            // 如果失败，错误信息不应该包含 "douyu_rate 配置值无效"
+            if let Err(e) = result {
+                let err_msg = e.to_string();
+                assert!(!err_msg.contains("douyu_rate 配置值无效"));
+            }
+        }
     }
 }
