@@ -86,6 +86,12 @@ pub struct Config {
     #[serde(default = "default_threads")]
     pub threads: u32,
 
+    /// 同一分段因网络故障（断网、DNS 解析失败、超时、5xx）上传失败时最多上传几次，含第一次；
+    /// 两次之间从 30 秒起翻倍等待，最长 5 分钟。不填为 6 次，0 与 1 都是不重试。
+    /// B 站限流、风控等拒绝不重试；次数用完仍失败就跳过该分段，文件留在本地。
+    #[serde(default)]
+    pub max_upload_limit: Option<u32>,
+
     /// 延迟时间（秒）
     #[builder(default = default_delay())]
     #[serde(default = "default_delay")]

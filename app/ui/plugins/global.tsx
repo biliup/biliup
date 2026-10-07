@@ -451,8 +451,10 @@ const Global: React.FC<Props> = ({ disabled }) => {
         />
         <Form.InputNumber
           field="max_upload_limit"
-          placeholder={8}
-          extraText="录播上传次数上限，防止因意外情况如B站接口抽风、录播本身损坏导致录播反复上传浪费宽带或被B站风控（注：限制是记录在程序上下文中的，重启程序会重置上传次数限制；且为了保证尽量不改动老用户使用逻辑，默认将此值设置为一个较大的值，一般推荐设置为2-3）"
+          min={1}
+          precision={0}
+          placeholder={6}
+          extraText="同一分段因断网、超时等网络故障上传失败时最多上传几次（含第一次），两次之间从 30 秒起翻倍等待、最长 5 分钟，用完仍失败就跳过该分段、保留录像文件。不填为 6 次（约 12.5 分钟内网络恢复都能补传），填 1 为不重试。B 站限流、风控等拒绝不会重试"
           label="上传重试次数限制（max_upload_limit）"
           style={{ width: '100%' }}
           fieldStyle={{

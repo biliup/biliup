@@ -146,6 +146,7 @@ async fn save_config(pool: &ConnectionPool, config: &Config) -> AppResult<Config
 mod tests {
     use super::*;
     use crate::server::infrastructure::connection_pool::ConnectionManager;
+    use serde_json::json;
     use tracing_subscriber::{Registry, reload};
 
     struct Fixture {
@@ -238,6 +239,22 @@ mod tests {
                 .unwrap(),
             "debug"
         );
+    }
+
+    /// WebUI 的「上传重试次数限制」整份配置提交上来时存进库、读回内存；清空（`null`）后回到未设置
+    #[tokio::test]
+    async fn max_upload_limit_from_the_web_form_is_saved() {
+        let f = fixture().await;
+        for (submitted, expected) in [(json!(3), Some(3)), (json!(null), None)] {
+            let form: Config =
+                serde_json::from_value(json!({ "threads": 3, "max_upload_limit": submitted }))
+                    .unwrap();
+            let applied = f.apply(form).await.expect("合法配置应保存成功");
+
+            assert_eq!(applied.max_upload_limit, expected);
+            assert_eq!(f.saved_rows().await[0].max_upload_limit, expected);
+            assert_eq!(f.config.read().unwrap().max_upload_limit, expected);
+        }
     }
 
     /// 再次保存更新同一行，不会插入第二行

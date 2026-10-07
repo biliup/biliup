@@ -21,6 +21,7 @@ pub const VISIBLE_CONFIG_KEYS: &[&str] = &[
     "submit_api",
     "lines",
     "threads",
+    "max_upload_limit",
     "delay",
     "event_loop_interval",
     "checker_sleep",
@@ -141,6 +142,7 @@ mod tests {
             kuaishou_cookie: Some("ks-secret".into()),
             twitcasting_password: Some("tc-secret".into()),
             preview_transport: Some(crate::server::config::PreviewTransport::Direct),
+            max_upload_limit: Some(3),
             user: Some(UserConfig {
                 bili_cookie: Some("SESSDATA=secret".into()),
                 douyin_cookie: Some("dy-secret".into()),
@@ -164,6 +166,7 @@ mod tests {
         assert_eq!(redacted["streamers"], Value::Null);
         assert_eq!(redacted["preview_transport"], "direct");
         assert_eq!(redacted["pool1_size"], 5);
+        assert_eq!(redacted["max_upload_limit"], 3);
         // 键本身保留，前端按同一套字段渲染
         assert!(
             redacted

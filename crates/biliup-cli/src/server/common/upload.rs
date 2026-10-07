@@ -72,7 +72,8 @@ where
         .clone()
         .unwrap_or_default();
     let uploaded_videos = pipeline_upload_videos(rx, &segment_processors, |path| {
-        upload_owned_file(path, &upload_context)
+        let retries = upload_retries(ctx.config().max_upload_limit);
+        upload_owned_file(path, &upload_context, retries)
     })
     .await?;
 
@@ -235,45 +236,55 @@ pub(crate) async fn upload_single_file(
     upload_single_file_with_progress(file_path, context, |_| true).await
 }
 
-/// 整个文件重传前的等待。`pre_upload` 与分片各自的重试只扛得住十几秒的断网，
-/// 断得更久就隔一阵从头再传；总共约 12.5 分钟，仍失败就照旧跳过这一段。
-const FILE_RETRY_DELAYS: [Duration; 5] = [
-    Duration::from_secs(30),
-    Duration::from_secs(60),
-    Duration::from_secs(120),
-    Duration::from_secs(240),
-    Duration::from_secs(300),
-];
+/// `max_upload_limit` 没配时，网络类失败下同一分段最多上传几次（含第一次）。
+/// `pre_upload` 与分片各自的重试只扛得住十几秒的断网，断得更久就隔一阵从头再传；
+/// 6 次的等待共约 12.5 分钟。
+const DEFAULT_UPLOAD_ATTEMPTS: u32 = 6;
 
-async fn upload_owned_file(file_path: PathBuf, context: &UploadContext) -> AppResult<Video> {
-    retry_on_network_error(&file_path, &FILE_RETRY_DELAYS, || {
+/// 按 `max_upload_limit`（同一分段最多上传几次，含第一次）算出整段重传几次；0 与 1 都不重传
+fn upload_retries(max_upload_limit: Option<u32>) -> u32 {
+    max_upload_limit.unwrap_or(DEFAULT_UPLOAD_ATTEMPTS).max(1) - 1
+}
+
+/// 第 `retry` 次（从 0 数）整段重传前的等待：30 s 起翻倍，最长 5 分钟
+fn retry_delay(retry: u32) -> Duration {
+    Duration::from_secs(30 << retry.min(4)).min(Duration::from_secs(300))
+}
+
+async fn upload_owned_file(
+    file_path: PathBuf,
+    context: &UploadContext,
+    retries: u32,
+) -> AppResult<Video> {
+    retry_on_network_error(&file_path, retries, || {
         upload_single_file(&file_path, context)
     })
     .await
 }
 
-/// 网络类错误（[`Kind::is_transient`]）按 `delays` 依次等待后重来，用完返回最后一次的错误；
-/// 其他错误（限流、风控、本地文件）立即返回。
+/// 网络类错误（[`Kind::is_transient`]）按 [`retry_delay`] 等待后重来，最多重来 `retries` 次，
+/// 用完返回最后一次的错误；其他错误（限流、风控、本地文件）立即返回。
 async fn retry_on_network_error<T, F, Fut>(
     file: &Path,
-    delays: &[Duration],
+    retries: u32,
     mut attempt: F,
 ) -> AppResult<T>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = AppResult<T>>,
 {
-    for (retry, delay) in delays.iter().enumerate() {
+    for retry in 0..retries {
         match attempt().await {
             Err(e) if is_network_error(&e) => {
+                let delay = retry_delay(retry);
                 warn!(
                     file = ?file,
                     "上传遇到网络错误，{}s 后整个文件重传（第 {}/{} 次）：{e:#}",
                     delay.as_secs(),
                     retry + 1,
-                    delays.len()
+                    retries
                 );
-                tokio::time::sleep(*delay).await;
+                tokio::time::sleep(delay).await;
             }
             result => return result,
         }
@@ -759,7 +770,7 @@ mod tests {
     async fn network_errors_retry_the_whole_file_until_it_goes_through() {
         let attempts = std::sync::atomic::AtomicUsize::new(0);
         let started = tokio::time::Instant::now();
-        let result = retry_on_network_error(Path::new("a.flv"), &FILE_RETRY_DELAYS, || async {
+        let result = retry_on_network_error(Path::new("a.flv"), upload_retries(None), || async {
             match attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
                 0 | 1 => Err(network_error().await),
                 _ => Ok("uploaded"),
@@ -777,15 +788,47 @@ mod tests {
         let attempts = std::sync::atomic::AtomicUsize::new(0);
         let started = tokio::time::Instant::now();
         let result: AppResult<()> =
-            retry_on_network_error(Path::new("a.flv"), &FILE_RETRY_DELAYS, || async {
+            retry_on_network_error(Path::new("a.flv"), upload_retries(None), || async {
                 attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Err(network_error().await)
             })
             .await;
 
         assert!(is_network_error(&result.unwrap_err()));
-        assert_eq!(attempts.into_inner(), 1 + FILE_RETRY_DELAYS.len());
+        assert_eq!(attempts.into_inner(), 6);
         assert_eq!(started.elapsed().as_secs(), 30 + 60 + 120 + 240 + 300);
+    }
+
+    #[test]
+    fn retry_delays_double_from_30_seconds_up_to_5_minutes() {
+        let delays: Vec<u64> = (0..7).map(|n| retry_delay(n).as_secs()).collect();
+        assert_eq!(delays, [30, 60, 120, 240, 300, 300, 300]);
+        assert_eq!(retry_delay(u32::MAX).as_secs(), 300);
+    }
+
+    /// `max_upload_limit` 是同一分段最多上传几次（含第一次），不填为 6 次，0 与 1 都不重试
+    #[tokio::test(start_paused = true)]
+    async fn max_upload_limit_caps_the_attempts() {
+        for (limit, attempts, waited) in [
+            (None, 6, 750),
+            (Some(0), 1, 0),
+            (Some(1), 1, 0),
+            (Some(2), 2, 30),
+            (Some(8), 8, 750 + 300 + 300),
+        ] {
+            let count = std::sync::atomic::AtomicU32::new(0);
+            let started = tokio::time::Instant::now();
+            let result: AppResult<()> =
+                retry_on_network_error(Path::new("a.flv"), upload_retries(limit), || async {
+                    count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    Err(network_error().await)
+                })
+                .await;
+
+            assert!(result.is_err());
+            assert_eq!(count.into_inner(), attempts, "{limit:?}");
+            assert_eq!(started.elapsed().as_secs(), waited, "{limit:?}");
+        }
     }
 
     #[tokio::test(start_paused = true)]
@@ -813,7 +856,7 @@ mod tests {
             let attempts = std::sync::atomic::AtomicUsize::new(0);
             let started = tokio::time::Instant::now();
             let result: AppResult<()> =
-                retry_on_network_error(Path::new("a.flv"), &FILE_RETRY_DELAYS, || async {
+                retry_on_network_error(Path::new("a.flv"), upload_retries(None), || async {
                     attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     Err(rejection())
                 })
@@ -838,7 +881,7 @@ mod tests {
         let uploaded = pipeline_upload_videos(futures::stream::iter(segments), &[], |path| {
             let offline_attempts = &offline_attempts;
             async move {
-                retry_on_network_error(&path, &FILE_RETRY_DELAYS, || async {
+                retry_on_network_error(&path, upload_retries(None), || async {
                     if path == Path::new("seg2.flv")
                         && offline_attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2
                     {
