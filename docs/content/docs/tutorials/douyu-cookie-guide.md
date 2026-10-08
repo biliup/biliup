@@ -84,7 +84,7 @@ cargo run --locked -p biliup --example douyu_probe -- --room 288016 --codec HEVC
 
 探测输出包含实际媒体信息，不输出 Cookie、签名或完整播放 URL。不要将含凭据的文件提交到仓库。
 
-GitHub Actions 的 **Douyu live stream smoke test** 工作流支持手动运行，输入房间号后分别检查 AVC 和 HEVC 的匿名播放。仓库维护者可自行配置 `DOUYU_COOKIE` Secret，以额外检查登录播放；没有 Secret 时该步骤会跳过。工作流不会上传 Cookie 或媒体样本。线上检查受房间状态、地域、账号和 CDN 可达性影响，独立于每次 PR 执行的离线测试。
+线上探测在本机手动运行，受房间状态、地域、账号和 CDN 可达性影响。GitHub Actions 只执行不需要斗鱼账号的离线回归测试。
 
 ## Cookie 过期与保管
 
