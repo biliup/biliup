@@ -79,6 +79,7 @@ async-channel = { version = "2.5.0" }
 nom = "8"
 tokio-util = "0.7.16"
 libc = "0.2.174"
+once_cell = "1.20"
 # 控制台首页的系统状态（CPU / 内存 / 网速），见 server/common/system_stats.rs；
 # 磁盘容量直接对录制目录调 statvfs / GetDiskFreeSpaceExW，不用 sysinfo 的挂载点列表
 sysinfo = { version = "0.39", default-features = false, features = ["network", "system"] }

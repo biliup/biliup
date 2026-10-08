@@ -46,6 +46,7 @@ impl SegmentState {
 pub fn container_of(path: &Path) -> Option<&'static str> {
     let name = path.file_name()?.to_str()?.to_ascii_lowercase();
     let name = name.strip_suffix(".part").unwrap_or(&name);
+    let name = name.strip_suffix(".unmasked").unwrap_or(name);
     match name.rsplit_once('.')?.1 {
         "flv" => Some("flv"),
         "ts" => Some("ts"),

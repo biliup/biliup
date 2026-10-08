@@ -222,6 +222,9 @@ pub struct SegmentInfo {
     pub duration_secs: Option<f64>,
     /// 分段文件的字节数。下载器报告了才有，目前只有 mesio
     pub size_bytes: Option<u64>,
+    /// Completed masking must wait for the workbench/index writer to finish
+    /// consuming the original file before replacing it.
+    pub(crate) ready: Option<SegmentReady>,
     // /// 分段开始时间戳
     // start_time: std::time::SystemTime,
     // /// 分段结束时间戳
@@ -242,6 +245,7 @@ impl SegmentInfo {
             segment_index,
             duration_secs: None,
             size_bytes: None,
+            ready: None,
         }
     }
 
@@ -250,6 +254,17 @@ impl SegmentInfo {
         self.duration_secs = Some(duration_secs);
         self.size_bytes = Some(size_bytes);
         self
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct SegmentReady(
+    pub futures::future::Shared<futures::future::BoxFuture<'static, ()>>,
+);
+
+impl std::fmt::Debug for SegmentReady {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("SegmentReady")
     }
 }
 

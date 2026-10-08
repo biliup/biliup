@@ -25,6 +25,7 @@ use biliup::downloader::live::{LivePlugin, LiveStatus, LiveStream, strip_ws_expi
 use biliup::downloader::preview::PreviewHub;
 use danmaku_client::DanmakuEvent;
 use error_stack::ResultExt;
+use futures::FutureExt;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -89,13 +90,21 @@ impl SegmentEventProcessor {
     /// 处理分段事件。`settled`：录制器处理完这次关段（过滤删除要等它）。
     pub fn process(
         &mut self,
-        event: SegmentInfo,
+        mut event: SegmentInfo,
         settled: impl Future<Output = ()> + Send + 'static,
     ) -> AppResult<()> {
         self.output.seen += 1;
         // 验证文件有效性
+        let settled = settled.boxed().shared();
         self.file_validator
-            .validate(&event.prev_file_path, settled)?;
+            .validate(&event.prev_file_path, settled.clone())?;
+        if crate::server::plugins::mosaic::masking_required(
+            &self.ctx.config(),
+            &self.ctx.live_streamer().override_cfg,
+        ) || crate::server::plugins::mosaic::is_unmasked(&event.prev_file_path)
+        {
+            event.ready = Some(crate::server::core::downloader::SegmentReady(settled));
+        }
 
         // 上一轮 process_with_upload 可能因上传失败提前返回，UActor 已 drop rx，
         // 这里挂着的 tx 是死的；丢弃后下面会重建一条新的管道。
@@ -557,6 +566,17 @@ impl DownloadTask {
         // 获取配置和主播信息
         let streamer = ctx.live_streamer();
         let mut download_config = ctx.download_config(stream);
+        if crate::server::plugins::mosaic::masking_required(&ctx.config(), &streamer.override_cfg) {
+            // Put a durable raw marker in the basename before any byte is written.
+            // A crash/restart or later config change must not make a `.part` raw
+            // recording eligible for HA recovery uploads.
+            let prefix = download_config
+                .recorder
+                .filename_prefix
+                .as_deref()
+                .unwrap_or("{streamer}%Y-%m-%dT%H_%M_%S");
+            download_config.recorder.filename_prefix = Some(format!("{prefix}.unmasked"));
+        }
         // stream-gears 在自己的首连里处理网宿 403，其它下载器拉流前先探一次
         if !matches!(self.downloader, DownloaderRuntime::StreamGears(_)) {
             download_config.url = match strip_ws_expire_override(&download_config.url) {
@@ -572,6 +592,14 @@ impl DownloadTask {
         download_config.preview = self.preview.clone();
         download_config.index_tap = workbench.index_tap();
         if let crate::server::core::downloader::DownloaderRuntime::Sync(sync) = &self.downloader {
+            if crate::server::plugins::mosaic::masking_required(
+                &ctx.config(),
+                &streamer.override_cfg,
+            ) {
+                return Err(AppError::Custom(
+                    "画面遮挡需要落盘处理，不能与边录边传同时启用；请选择 mesio、stream-gears 或 ffmpeg 下载器".into(),
+                ).into());
+            }
             info!(
                 page_url = streamer.url,
                 stream_url = download_config.url,
@@ -598,6 +626,10 @@ impl DownloadTask {
                     workbench.opened(&next_file_path);
                 }
                 SegmentEvent::Segment(mut event) => {
+                    let protect = crate::server::plugins::mosaic::masking_required(
+                        &ctx.config(),
+                        &streamer.override_cfg,
+                    );
                     // 分段时，获取到的是已下载的文件名
                     // 触发弹幕滚动保存
                     if let Some(ref client) = danmaku_client {
@@ -608,6 +640,23 @@ impl DownloadTask {
                             Err(e) => error!("Danmaku rolling error: {}", e),
                         }
                     }
+                    // Rename the actual closed file before enqueueing it. A failed
+                    // processor/restart must never leave raw media at a normal
+                    // uploadable filename. All disk downloaders share this hook.
+                    let quarantined = if protect {
+                        match crate::server::plugins::mosaic::quarantine(&event.prev_file_path) {
+                            Ok(path) => {
+                                event.prev_file_path = path;
+                                true
+                            }
+                            Err(e) => {
+                                error!(path = ?event.prev_file_path, error = %e, "无法隔离未遮挡录像，本段停止投稿");
+                                false
+                            }
+                        }
+                    } else {
+                        true
+                    };
                     workbench.closed(
                         &event.prev_file_path,
                         ClosedSegment {
@@ -622,7 +671,7 @@ impl DownloadTask {
                     );
                     // 异步处理事件
                     // let processor = processor.clone();
-                    if let Err(e) = processor.process(event, workbench.settled()) {
+                    if quarantined && let Err(e) = processor.process(event, workbench.settled()) {
                         error!("Failed to process segment event: {}", e);
                     }
                 }

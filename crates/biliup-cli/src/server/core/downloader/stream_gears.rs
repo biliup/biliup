@@ -93,6 +93,7 @@ impl StreamGears {
                     segment_index: i,
                     duration_secs: None,
                     size_bytes: None,
+                    ready: None,
                 };
                 (callback.lock().unwrap())(SegmentEvent::Segment(event));
 

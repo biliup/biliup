@@ -546,7 +546,12 @@ fn strip_part(path: &Path) -> PathBuf {
 }
 
 fn same_segment(open: &Path, closed: &Path) -> bool {
-    open == closed || strip_part(open) == closed
+    open == closed || strip_part(open) == strip_unmasked(closed)
+}
+
+fn strip_unmasked(path: &Path) -> PathBuf {
+    let s = path.as_os_str().to_string_lossy();
+    PathBuf::from(s.strip_suffix(".unmasked").unwrap_or(&s).to_string())
 }
 
 fn path_string(path: &Path) -> String {

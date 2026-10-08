@@ -7,6 +7,7 @@ pub mod core;
 pub mod errors;
 pub mod fleet;
 pub mod infrastructure;
+pub mod plugins;
 mod router;
 pub mod services;
 pub mod workbench;

@@ -270,6 +270,7 @@ impl FfmpegDownloader {
             next_file_path: None,
             duration_secs: None,
             size_bytes: None,
+            ready: None,
         }));
         // 根据退出码判断状态
         match status_code {
@@ -337,6 +338,7 @@ impl FfmpegDownloader {
                 segment_index,
                 duration_secs: None,
                 size_bytes: None,
+                ready: None,
                 // start_time: std::time::SystemTime::now(),
                 // end_time: std::time::SystemTime::now(),
             }));
@@ -364,6 +366,7 @@ impl FfmpegDownloader {
                 segment_index,
                 duration_secs: None,
                 size_bytes: None,
+                ready: None,
                 // start_time: std::time::SystemTime::now(),
                 // end_time: std::time::SystemTime::now(),
             }));

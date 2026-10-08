@@ -160,8 +160,11 @@ where
 {
     let session = Session::login(ctx, upload_config).await?;
     let processors = segment_processors(ctx);
-    let uploaded =
-        pipeline_upload_videos(rx, &processors, |path| session.upload(path, bytes)).await?;
+    let plugins = crate::server::plugins::get_all_plugins();
+    let uploaded = pipeline_upload_videos(rx, &processors, &plugins, ctx, |path| {
+        session.upload(path, bytes)
+    })
+    .await?;
     if uploaded.videos.is_empty() {
         return Err(AppError::Custom("没有一个分段上传成功".into()).into());
     }
@@ -188,10 +191,15 @@ pub(crate) async fn run_standby(
         .ok_or_else(|| AppError::Custom("这个房间没有投稿模板".into()))?;
     let session = Session::login(ctx, &upload_config).await?;
     let processors = segment_processors(ctx);
+    let plugins = crate::server::plugins::get_all_plugins();
     let bytes = AtomicU64::new(0);
-    let uploaded = pipeline_upload_videos(futures::stream::iter(segments), &processors, |path| {
-        session.upload(path, &bytes)
-    })
+    let uploaded = pipeline_upload_videos(
+        futures::stream::iter(segments),
+        &processors,
+        &plugins,
+        ctx,
+        |path| session.upload(path, &bytes),
+    )
     .await?;
     if uploaded.videos.is_empty() {
         return Err(AppError::Custom("没有一个分段上传成功".into()).into());
@@ -221,10 +229,15 @@ pub(crate) async fn run_append(
         .ok_or_else(|| AppError::Custom("这个房间没有投稿模板".into()))?;
     let session = Session::login(ctx, &upload_config).await?;
     let processors = segment_processors(ctx);
+    let plugins = crate::server::plugins::get_all_plugins();
     let bytes = AtomicU64::new(0);
-    let uploaded = pipeline_upload_videos(futures::stream::iter(segments), &processors, |path| {
-        session.upload(path, &bytes)
-    })
+    let uploaded = pipeline_upload_videos(
+        futures::stream::iter(segments),
+        &processors,
+        &plugins,
+        ctx,
+        |path| session.upload(path, &bytes),
+    )
     .await?;
     if uploaded.videos.is_empty() {
         return Err(AppError::Custom("没有一个分段上传成功".into()).into());
