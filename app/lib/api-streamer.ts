@@ -154,6 +154,25 @@ export interface DirectCapability {
 	reason: string | null;
 }
 
+/** 马赛克区域配置 */
+export interface MosaicRegion {
+	id: string;
+	x: number;      // 归一化坐标 0-1
+	y: number;
+	width: number;
+	height: number;
+	effectType: 'mosaic' | 'blur' | 'solid';
+	strength: number; // 马赛克块大小 (4-64) 或模糊半径 (1-100)
+	color?: string | null;   // 纯色遮挡的颜色
+}
+
+/** 完整的马赛克配置 */
+export interface MosaicConfig {
+	enabled: boolean;
+	regions: MosaicRegion[];
+	mode?: string | null; // 后端保留的可选处理模式
+}
+
 /** GET /v1/streamers/{id}/live-url：正在录制的那条流的 CDN 直链 */
 export interface LiveUrlInfo {
 	url: string;

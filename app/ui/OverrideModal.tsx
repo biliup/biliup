@@ -8,11 +8,13 @@ import {
 import { FormApi } from '@douyinfe/semi-ui/lib/es/form'
 import React, { useRef } from 'react'
 import { useState } from 'react'
-import { LiveStreamerEntity } from '../lib/api-streamer'
+import { LiveStreamerEntity, type MosaicConfig } from '../lib/api-streamer'
 import { SupportedPlatforms } from '@/app/ui/plugins'
 import { useBiliUsers } from '../lib/use-streamers'
 import { FileSizeField } from './FileSizeInput'
 import { FormSheet } from './shell'
+import { MosaicPanel } from './MosaicPanel'
+import { parseOverrideText, updateMosaicOverrideText, validateMosaicConfig } from '../lib/mosaic-config'
 
 type PluginProps = {
   entity?: LiveStreamerEntity
@@ -87,7 +89,8 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
     setVisible(true)
   }
   const handleOk = async () => {
-    let values = await api.current?.validate()
+    const submitted = await api.current?.validate()
+    const values = submitted ? { ...submitted } : undefined
     // 从 LiveStreamerEntity 接口定义中获取所有字段
     const entityFields = new Set([
       'id',
@@ -113,10 +116,9 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
 
     if (values) {
       // 处理 override_text
-      if (values.override_text) {
+      if (typeof values.override_text === 'string') {
         try {
-          values.override = JSON.parse(values.override_text)
-          delete values.override_text
+          values.override = parseOverrideText(values.override_text)
         } catch (e) {
           Notification.error({
             title: '错误',
@@ -125,6 +127,7 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
           return
         }
       }
+      delete values.override_text
 
       const overrideConfig = { ...(values.override || {}) }
       Object.keys(values).forEach(key => {
@@ -135,6 +138,11 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
           delete values[key]
         }
       })
+      const mosaicError = validateMosaicConfig(overrideConfig.mosaic_config)
+      if (mosaicError) {
+        Notification.error({ title: '画面遮挡配置错误', content: mosaicError })
+        return
+      }
       values.override = overrideConfig
 
       // PUT /v1/streamers 会按整行覆盖。漏掉 upload_streamers_id 会被写成 NULL，
@@ -157,6 +165,15 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
   }
   const handleCancel = () => {
     setVisible(false)
+  }
+
+  const syncMosaicConfig = (config: MosaicConfig) => {
+    try {
+      const text = api.current?.getValue('override_text')
+      api.current?.setValue('override_text', updateMosaicOverrideText(typeof text === 'string' ? text : '', config))
+    } catch {
+      // Retain incomplete JSON edits; the form validator will report them on save.
+    }
   }
 
   const childrenWithProps = React.Children.map(children, child => {
@@ -266,25 +283,35 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
             placeholder="请输入 JSON 格式的配置"
             style={{ marginBottom: 12 }}
             initValue={entity?.override ? JSON.stringify(entity.override, null, 2) : ''}
+            onChange={text => {
+              // Keep the visual editor aligned with valid JSON edits, including removing the override.
+              try {
+                const override = parseOverrideText(text)
+                api.current?.setValue('mosaic_config', override.mosaic_config)
+              } catch {
+                // While a JSON edit is incomplete, retain the last usable configuration.
+              }
+            }}
             rules={[
               { required: false },
               {
                 validator: (rule, value) => {
                   if (!value) return true
                   try {
-                    JSON.parse(value)
+                    parseOverrideText(value)
                     return true
                   } catch (e) {
                     return false
                   }
                 },
-                message: '请输入有效的 JSON 格式',
+                message: '请输入有效的 JSON 对象',
               },
             ]}
           />
           <Form.Section>
-            <Collapse defaultActiveKey={['plugin']}>
+            <Collapse defaultActiveKey={['plugin']} keepDOM lazyRender={false}>
               {downloadSettings}
+              <MosaicPanel entity={entity} initValues={entity?.override} onChange={syncMosaicConfig} />
               {PlatformPlugin ? (
                 <PlatformPlugin entity={entity} list={list} initValues={entity?.override} />
               ) : null}
