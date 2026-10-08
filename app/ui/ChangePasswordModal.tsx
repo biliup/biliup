@@ -31,6 +31,7 @@ export default function ChangePasswordModal({
     try {
       const res = await fetch(`${API_BASE}/v1/me/password`, {
         method: 'PUT',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           old_password: values.old_password,

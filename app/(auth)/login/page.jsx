@@ -4,10 +4,10 @@ import React, {useState, useRef} from 'react';
 import {Nav, Avatar, Form, Checkbox, Button, Toast} from '@douyinfe/semi-ui';
 import { IconSemiLogo, IconFeishuLogo, IconHelpCircle, IconBell } from '@douyinfe/semi-icons';
 import styles from './index.module.scss';
-import {API_BASE} from "../../lib/api-streamer";
+import {apiFetch} from "../../lib/api-streamer";
 import useSWR from "swr";
 
-const fetcher = (url) => fetch(API_BASE + url).then(res => {
+const fetcher = (url) => apiFetch(url).then(res => {
     if (!res.ok) {
         throw new Error('not found');
     }
@@ -50,7 +50,7 @@ const Component = () => {
 
         try {
             const endpoint = isRegisterMode ? '/v1/users/register' : '/v1/users/login';
-            const response = await fetch(API_BASE + endpoint, {
+            const response = await apiFetch(endpoint, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

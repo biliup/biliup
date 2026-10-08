@@ -169,6 +169,11 @@ const TemplateFields: React.FC<TemplateFieldsProps> = ({
       ),
     }
   })
+  const currentAccount = formApi.getValue('user_cookie')
+  const accountOptions =
+    currentAccount === 'account:current'
+      ? [{ value: currentAccount, label: '保留当前账号' }, ...(list ?? [])]
+      : list
   const toggle = () => {
     setOpen(!isOpen)
     formApi.scrollToField('isDtime')
@@ -212,7 +217,7 @@ const TemplateFields: React.FC<TemplateFieldsProps> = ({
             field="user_cookie"
             label={{ text: '投稿账号' }}
             style={{ width: '100%', maxWidth: 176 }}
-            optionList={list}
+            optionList={accountOptions}
           />
         )}
       </Section>

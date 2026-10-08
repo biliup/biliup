@@ -195,6 +195,7 @@ const AutoClip: React.FC<Props> = ({ disabled, entity }) => {
     try {
       const res = await fetch(`${API_BASE}/v1/auto-clip/test`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(normalizeAutoClip(section) ?? {}),
       })

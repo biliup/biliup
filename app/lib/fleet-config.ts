@@ -175,6 +175,7 @@ export const nodeConfigKey = (id: number) => `/v1/fleet/nodes/${id}/config`
 async function putJson<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(API_BASE + path, {
     method: 'PUT',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })

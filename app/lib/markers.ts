@@ -1,5 +1,5 @@
 import { mutate } from 'swr'
-import { API_BASE, handleResponse } from './api-streamer'
+import { apiFetch, handleResponse } from './api-streamer'
 
 /** GET / POST /v1/sessions/{id}/markers 返回的标记 */
 export interface Marker {
@@ -23,7 +23,7 @@ export const markersUrl = (sessionId: number) => `/v1/sessions/${sessionId}/mark
 export class ReportedError extends Error {}
 
 async function send(url: string, init: RequestInit): Promise<Response> {
-  const res = await fetch(API_BASE + url, init)
+  const res = await apiFetch(url, init)
   try {
     return await handleResponse(res)
   } catch (e) {

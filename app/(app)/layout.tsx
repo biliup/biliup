@@ -253,7 +253,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [passwordOpen, setPasswordOpen] = useState(false)
   const logout = async () => {
     try {
-      await fetch(`${API_BASE}/v1/logout`, { method: 'POST' })
+      await fetch(`${API_BASE}/v1/logout`, { method: 'POST', credentials: 'include' })
     } finally {
       window.location.assign('/login')
     }

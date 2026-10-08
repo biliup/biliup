@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import useSWR, { mutate, type SWRConfiguration } from 'swr'
-import { API_BASE, fetcher, handleResponse } from './api-streamer'
+import { API_BASE, apiFetch, fetcher, handleResponse } from './api-streamer'
 import { ReportedError } from './markers'
 import type { StudioOverride } from './publish'
 
@@ -108,7 +108,7 @@ export function clipModeText(mode: ClipMode | null): string {
 }
 
 export async function send(url: string, init: RequestInit): Promise<Response> {
-  const res = await fetch(API_BASE + url, init)
+  const res = await apiFetch(url, init)
   try {
     return await handleResponse(res)
   } catch (e) {
@@ -201,10 +201,10 @@ export async function exportClip(clip: Pick<Clip, 'id' | 'session_id'>, mode: Cl
  */
 export async function downloadClip(clip: Pick<Clip, 'id'>, format: 'source' | 'mp4'): Promise<void> {
   const url = downloadUrl(clip.id, format)
-  const head = await fetch(url, { method: 'HEAD' })
+  const head = await fetch(url, { method: 'HEAD', credentials: 'include' })
   if (!head.ok) {
     const abort = new AbortController()
-    const res = await fetch(url, { signal: abort.signal })
+    const res = await fetch(url, { signal: abort.signal, credentials: 'include' })
     if (!res.ok) {
       try {
         await handleResponse(res)

@@ -122,7 +122,11 @@ async function pollOnce() {
   const since = samples.length > 0 ? `?since=${samples[samples.length - 1].ts}` : ''
   let ok = false
   try {
-    const res = await fetch(`${API_BASE}/v1/system-stats${since}`, { cache: 'no-store', signal: controller.signal })
+    const res = await fetch(`${API_BASE}/v1/system-stats${since}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+      credentials: 'include',
+    })
     await handleResponse(res)
     const body = (await res.json()) as SystemStatsResponse
     if (controller.signal.aborted) return

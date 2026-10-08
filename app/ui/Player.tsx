@@ -791,7 +791,22 @@ const Players: React.FC<PlayerConfig> = ({
       cancelled = true
       unsubscribe?.()
     }
-  }, [danmakuId, danmakuFeed, url, type, codecs])
+  }, [
+    danmakuId,
+    danmakuFeed,
+    url,
+    height,
+    width,
+    type,
+    codecs,
+    isLive,
+    transport,
+    muted,
+    autoplay,
+    danmakuCapable,
+    danmakuFontSize,
+    lease,
+  ])
 
   return <div ref={containerRef} style={{ width, height }} />
 }
