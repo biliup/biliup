@@ -200,6 +200,9 @@ const { data: entity, error, isLoading, mutate } = useSWR('/v1/configuration', f
               if (payload.preview_max_minutes === undefined || payload.preview_max_minutes === '') {
                 payload.preview_max_minutes = null
               }
+              if (payload.max_upload_limit === undefined || payload.max_upload_limit === '') {
+                payload.max_upload_limit = null
+              }
               // 后端是非负整数，不接受空值；清空即关闭
               if (
                 payload.retention_hours === undefined ||

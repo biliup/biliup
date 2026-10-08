@@ -1,6 +1,7 @@
-use crate::error::Result;
+use crate::error::{Kind, Result};
+use crate::retry_with_config;
 use crate::uploader::{Uploader, VideoFile, VideoStream};
-use futures::{Stream, TryStreamExt};
+use futures::{Stream, TryFutureExt, TryStreamExt};
 use reqwest::{Body, RequestBuilder};
 
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,8 @@ use tracing::{info, warn};
 
 /// 拉取线路列表（`preupload?r=probe`）的超时。
 const PROBE_LIST_TIMEOUT: Duration = Duration::from_secs(15);
+/// 申请上传（`preupload`）的超时：登录客户端只有连接超时，断网时半开的连接会让它一直挂着。
+const PRE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(30);
 /// 单条线路测速的硬上限。
 ///
 /// 共用的 HTTP 客户端只设了连接超时，没有请求超时；一条半开连接或极慢的线路会让
@@ -327,15 +330,23 @@ impl Line {
         });
         info!("pre_upload: {}", params);
 
-        let response = bili
-            .client
-            .get(format!(
-                "https://member.bilibili.com/preupload?{}",
-                self.query
-            ))
-            .query(&params)
-            .send()
-            .await?;
+        // 只重试没拿到响应的网络故障（与分片 PUT 同样 3 次）；B 站回了非 2xx（含 601）照旧交给下面
+        let response = retry_with_config(
+            || {
+                bili.client
+                    .get(format!(
+                        "https://member.bilibili.com/preupload?{}",
+                        self.query
+                    ))
+                    .query(&params)
+                    .timeout(PRE_UPLOAD_TIMEOUT)
+                    .send()
+                    .map_err(Kind::from)
+            },
+            3,
+            Some(Kind::is_transient),
+        )
+        .await?;
 
         if !response.status().is_success() {
             let response_text = response.text().await?;
