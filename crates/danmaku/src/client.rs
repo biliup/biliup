@@ -4,6 +4,7 @@
 //! message processing, and XML output for recording live stream chat.
 
 use std::fs;
+use std::future::Future;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -213,52 +214,52 @@ impl DanmakuRecorder {
         let output_path = format_output_path(&self.config.output_file);
         let mut xml_writer = XmlWriter::new(&output_path, xml_config.clone())?;
 
-        // Main loop with reconnection
-        if is_polling_url(&self.config.url) {
-            match self
-                .poll_and_run(&mut cmd_rx, &mut stop_rx, &mut xml_writer, &xml_config)
-                .await
-            {
-                Ok(()) | Err(DanmakuError::Stopped) => {}
-                Err(e) => return Err(e),
+        // Retain polling continuations across temporary connection failures.
+        let mut polling_context = self.config.context.clone();
+        loop {
+            if stop_requested(&stop_rx) {
+                break;
             }
-        } else {
-            loop {
-                if stop_requested(&stop_rx) {
-                    break;
-                }
 
-                match self
-                    .connect_and_run(&mut cmd_rx, &mut stop_rx, &mut xml_writer, &xml_config)
+            let result = if is_polling_url(&self.config.url) {
+                self.poll_and_run(
+                    &mut cmd_rx,
+                    &mut stop_rx,
+                    &mut xml_writer,
+                    &xml_config,
+                    &mut polling_context,
+                )
+                .await
+            } else {
+                self.connect_and_run(&mut cmd_rx, &mut stop_rx, &mut xml_writer, &xml_config)
                     .await
-                {
-                    Ok(()) | Err(DanmakuError::Stopped) => break,
-                    Err(e) => {
-                        warn!(
-                            "{}: Connection error: {}. Reconnecting in 30s...",
-                            platform_name, e
-                        );
+            };
+            match result {
+                Ok(()) | Err(DanmakuError::Stopped) => break,
+                Err(e) => {
+                    warn!(
+                        "{}: Connection error: {}. Reconnecting in 30s...",
+                        platform_name, e
+                    );
 
-                        let mut reconnect_sleep =
-                            Box::pin(tokio::time::sleep(Duration::from_secs(30)));
-                        loop {
-                            tokio::select! {
-                                _ = &mut reconnect_sleep => break,
-                                _ = stop_rx.changed() => {
-                                    if stop_requested(&stop_rx) {
-                                        break;
-                                    }
-                                }
-                                Some(command) = cmd_rx.recv() => {
-                                    if handle_command(command, &self.config.output_file, &mut xml_writer, &xml_config)? {
-                                        break;
-                                    }
+                    let mut reconnect_sleep = Box::pin(tokio::time::sleep(Duration::from_secs(30)));
+                    loop {
+                        tokio::select! {
+                            _ = &mut reconnect_sleep => break,
+                            _ = stop_rx.changed() => {
+                                if stop_requested(&stop_rx) {
+                                    break;
                                 }
                             }
-
-                            if stop_requested(&stop_rx) {
-                                break;
+                            Some(command) = cmd_rx.recv() => {
+                                if handle_command(command, &self.config.output_file, &mut xml_writer, &xml_config)? {
+                                    break;
+                                }
                             }
+                        }
+
+                        if stop_requested(&stop_rx) {
+                            break;
                         }
                     }
                 }
@@ -286,13 +287,14 @@ impl DanmakuRecorder {
         stop_rx: &mut watch::Receiver<bool>,
         xml_writer: &mut XmlWriter,
         xml_config: &XmlWriterConfig,
+        context: &mut PlatformContext,
     ) -> Result<()> {
         let platform_name = self.platform.name();
-        let mut context = self.config.context.clone();
-        let conn_info = self
-            .platform
-            .get_connection_info(&self.config.url, &context)
-            .await?;
+        let conn_info = until_stopped(
+            self.platform.get_connection_info(&self.config.url, context),
+            stop_rx,
+        )
+        .await?;
         let continuation = conn_info
             .ws_url
             .strip_prefix("poll://youtube?continuation=")
@@ -319,7 +321,10 @@ impl DanmakuRecorder {
                 }
 
                 _ = ticker.tick() => {
-                    let events = self.platform.poll_messages(&self.config.url, &mut context).await?;
+                    let events = until_stopped(
+                        self.platform.poll_messages(&self.config.url, context),
+                        stop_rx,
+                    ).await?;
                     for event in events {
                         self.emit_live(&event);
                         if let Err(e) = xml_writer.write_event(&event) {
@@ -342,10 +347,12 @@ impl DanmakuRecorder {
         let platform_name = self.platform.name();
 
         // Get connection info
-        let conn_info = self
-            .platform
-            .get_connection_info(&self.config.url, &self.config.context)
-            .await?;
+        let conn_info = until_stopped(
+            self.platform
+                .get_connection_info(&self.config.url, &self.config.context),
+            stop_rx,
+        )
+        .await?;
 
         match conn_info.transport {
             ConnectionTransport::WebSocket => {
@@ -385,7 +392,8 @@ impl DanmakuRecorder {
         debug!("{}: Connecting to {}", platform_name, conn_info.ws_url);
 
         // Connect
-        let ws_stream = connect_websocket(&conn_info, platform_name).await?;
+        let ws_stream =
+            until_stopped(connect_websocket(&conn_info, platform_name), stop_rx).await?;
         let (mut ws_sink, mut ws_stream) = ws_stream.split();
 
         info!("{}: Connected to WebSocket", platform_name);
@@ -396,7 +404,7 @@ impl DanmakuRecorder {
                 RegistrationData::Text(text) => Message::Text(text.clone().into()),
                 RegistrationData::Binary(data) => Message::Binary(data.clone().into()),
             };
-            ws_sink.send(msg).await?;
+            until_stopped(async { Ok(ws_sink.send(msg).await?) }, stop_rx).await?;
         }
 
         // Get heartbeat config
@@ -539,7 +547,7 @@ impl DanmakuRecorder {
     ) -> Result<()> {
         debug!("{}: Connecting to {}", platform_name, conn_info.ws_url);
 
-        let mut tcp_stream = connect_tcp(&conn_info, platform_name).await?;
+        let mut tcp_stream = until_stopped(connect_tcp(&conn_info, platform_name), stop_rx).await?;
         info!("{}: Connected to TCP danmaku endpoint", platform_name);
 
         for reg_data in &conn_info.registration_data {
@@ -740,6 +748,20 @@ impl TcpFrameReader {
 /// 再也无法停止或滚动这个录制，按停止处理。
 fn stop_requested(stop_rx: &watch::Receiver<bool>) -> bool {
     *stop_rx.borrow() || stop_rx.has_changed().is_err()
+}
+
+async fn until_stopped<T>(
+    operation: impl Future<Output = Result<T>>,
+    stop_rx: &mut watch::Receiver<bool>,
+) -> Result<T> {
+    if stop_requested(stop_rx) {
+        return Err(DanmakuError::Stopped);
+    }
+    tokio::select! {
+        biased;
+        _ = stop_rx.changed() => Err(DanmakuError::Stopped),
+        result = operation => result,
+    }
 }
 
 fn platform_tls_connector() -> Result<Connector> {
@@ -1069,6 +1091,151 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    struct PendingPlatform {
+        entered: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait::async_trait]
+    impl Platform for PendingPlatform {
+        fn name(&self) -> &'static str {
+            "Pending"
+        }
+
+        async fn get_connection_info(
+            &self,
+            _url: &str,
+            _context: &PlatformContext,
+        ) -> Result<ConnectionInfo> {
+            self.entered.notify_one();
+            futures::future::pending().await
+        }
+
+        fn heartbeat_config(&self) -> crate::protocols::HeartbeatConfig {
+            crate::protocols::HeartbeatConfig::none()
+        }
+
+        fn decode_message(&self, _data: &[u8]) -> Result<DecodeResult> {
+            Ok(DecodeResult::empty())
+        }
+    }
+
+    #[tokio::test]
+    async fn stop_cancels_pending_connection_setup_and_finalizes_output() {
+        let dir = test_dir("pending-stop");
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let recorder = DanmakuRecorder {
+            config: RecorderConfig::new("https://example.invalid/room", dir.join("danmaku")),
+            platform: Arc::new(PendingPlatform {
+                entered: entered.clone(),
+            }),
+        };
+        let (cmd_tx, cmd_rx) = mpsc::channel(16);
+        let (stop_tx, stop_rx) = watch::channel(false);
+        let recording = tokio::spawn(recorder.run(cmd_rx, stop_rx));
+        entered.notified().await;
+        stop_tx.send(true).unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), recording)
+                .await
+                .unwrap()
+                .unwrap()
+                .is_ok()
+        );
+        assert!(!dir.join("danmaku.xml").exists());
+        drop(cmd_tx);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    struct FlakyPollingPlatform {
+        attempts: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl Platform for FlakyPollingPlatform {
+        fn name(&self) -> &'static str {
+            "FlakyPolling"
+        }
+
+        async fn get_connection_info(
+            &self,
+            _url: &str,
+            context: &PlatformContext,
+        ) -> Result<ConnectionInfo> {
+            let continuation = context
+                .extra
+                .get("continuation")
+                .map_or("initial", String::as_str);
+            Ok(ConnectionInfo::new(format!(
+                "poll://youtube?continuation={continuation}"
+            )))
+        }
+
+        fn heartbeat_config(&self) -> crate::protocols::HeartbeatConfig {
+            crate::protocols::HeartbeatConfig::none()
+        }
+
+        fn decode_message(&self, _data: &[u8]) -> Result<DecodeResult> {
+            Ok(DecodeResult::empty())
+        }
+
+        async fn poll_messages(
+            &self,
+            _url: &str,
+            context: &mut PlatformContext,
+        ) -> Result<Vec<DanmakuEvent>> {
+            let attempt = self
+                .attempts
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if attempt == 1 {
+                return Err(DanmakuError::ConnectionClosed);
+            }
+            if attempt > 1 {
+                assert_eq!(
+                    context.extra.get("continuation").map(String::as_str),
+                    Some("next")
+                );
+            }
+            context
+                .extra
+                .insert("continuation".to_string(), "next".to_string());
+            Ok(vec![DanmakuEvent::Chat(crate::message::ChatMessage::new(
+                format!("message-{attempt}"),
+            ))])
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn polling_reconnects_after_failure_without_losing_continuation() {
+        let dir = test_dir("polling-reconnect");
+        let (live_tx, mut live_rx) = broadcast::channel(16);
+        let recorder = DanmakuRecorder {
+            config: RecorderConfig::new("https://youtube.com/watch?v=test", dir.join("danmaku"))
+                .with_live_tx(live_tx),
+            platform: Arc::new(FlakyPollingPlatform {
+                attempts: std::sync::atomic::AtomicUsize::new(0),
+            }),
+        };
+        let (cmd_tx, cmd_rx) = mpsc::channel(16);
+        let (stop_tx, stop_rx) = watch::channel(false);
+        let recording = tokio::spawn(recorder.run(cmd_rx, stop_rx));
+        for expected in ["message-0", "message-2"] {
+            let event = tokio::time::timeout(Duration::from_secs(60), live_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let DanmakuEvent::Chat(chat) = event else {
+                panic!("expected chat")
+            };
+            assert_eq!(chat.content, expected);
+        }
+        stop_tx.send(true).unwrap();
+        assert!(recording.await.unwrap().is_ok());
+        let content = fs::read_to_string(dir.join("danmaku.xml")).unwrap();
+        assert!(content.trim_end().ends_with("</i>"));
+        drop(cmd_tx);
+        let _ = fs::remove_dir_all(dir);
     }
 
     /// 连接总是失败的平台：录制器会一直停在 30s 重连等待里。

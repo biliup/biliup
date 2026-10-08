@@ -8,7 +8,6 @@
 //! - JSON messages for chat, gifts, super chat, etc.
 
 use std::collections::BTreeMap;
-use std::io::Read;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -23,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::debug;
 
+use crate::codec::{MAX_DECOMPRESSED_SIZE, decompress_limited};
 use crate::error::{DanmakuError, Result};
 use crate::message::{
     ChatMessage, DEFAULT_COLOR, DanmakuEvent, GiftMessage, GuardBuyMessage, SuperChatMessage,
@@ -275,23 +275,28 @@ impl Bilibili {
 
     /// Decode a single packet, handling compression.
     fn decode_packet(data: &[u8]) -> Vec<DecodedPacket> {
-        Self::decode_packet_at_depth(data, 0)
+        let mut decompression_budget = MAX_DECOMPRESSED_SIZE;
+        Self::decode_packet_at_depth(data, 0, &mut decompression_budget)
     }
 
-    fn decode_packet_at_depth(data: &[u8], depth: u8) -> Vec<DecodedPacket> {
+    fn decode_packet_at_depth(
+        data: &[u8],
+        depth: u8,
+        decompression_budget: &mut usize,
+    ) -> Vec<DecodedPacket> {
         let mut packets = Vec::new();
         let mut offset = 0;
 
         while offset + 16 <= data.len() {
             let packet_len = BigEndian::read_u32(&data[offset..offset + 4]) as usize;
-            let _header_len = BigEndian::read_u16(&data[offset + 4..offset + 6]);
+            let header_len = BigEndian::read_u16(&data[offset + 4..offset + 6]) as usize;
             let version = BigEndian::read_u16(&data[offset + 6..offset + 8]);
             let operation = BigEndian::read_u32(&data[offset + 8..offset + 12]);
             let _sequence = BigEndian::read_u32(&data[offset + 12..offset + 16]);
 
             // 声明长度必须至少覆盖 16 字节包头，否则该帧不可信：
             // packet_len < 16 时反向切片会 panic，packet_len == 0 还会死循环
-            if packet_len < 16 {
+            if header_len < 16 || packet_len < header_len {
                 debug!(
                     "Malformed packet length {}, dropping remaining {} bytes",
                     packet_len,
@@ -300,26 +305,39 @@ impl Bilibili {
                 break;
             }
 
-            if offset + packet_len > data.len() {
+            if packet_len > data.len() - offset {
                 break;
             }
 
-            let body = &data[offset + 16..offset + packet_len];
+            let body = &data[offset + header_len..offset + packet_len];
 
             match version {
                 ver::ZLIB | ver::BROTLI if depth >= MAX_DECODE_DEPTH => {
-                    debug!("Packet nesting exceeds depth {}, dropping", MAX_DECODE_DEPTH);
+                    debug!(
+                        "Packet nesting exceeds depth {}, dropping",
+                        MAX_DECODE_DEPTH
+                    );
                 }
                 ver::ZLIB => {
                     // Zlib compressed
-                    if let Ok(decompressed) = decompress_zlib(body) {
-                        packets.extend(Self::decode_packet_at_depth(&decompressed, depth + 1));
+                    if let Ok(decompressed) = decompress_zlib(body, *decompression_budget) {
+                        *decompression_budget -= decompressed.len();
+                        packets.extend(Self::decode_packet_at_depth(
+                            &decompressed,
+                            depth + 1,
+                            decompression_budget,
+                        ));
                     }
                 }
                 ver::BROTLI => {
                     // Brotli compressed
-                    if let Ok(decompressed) = decompress_brotli(body) {
-                        packets.extend(Self::decode_packet_at_depth(&decompressed, depth + 1));
+                    if let Ok(decompressed) = decompress_brotli(body, *decompression_budget) {
+                        *decompression_budget -= decompressed.len();
+                        packets.extend(Self::decode_packet_at_depth(
+                            &decompressed,
+                            depth + 1,
+                            decompression_budget,
+                        ));
                     }
                 }
                 ver::RAW_JSON | ver::POPULARITY => {
@@ -591,21 +609,13 @@ fn build_packet(body: &[u8], operation: u32) -> Vec<u8> {
 }
 
 /// Decompress zlib data.
-fn decompress_zlib(data: &[u8]) -> Result<Vec<u8>> {
-    let mut decoder = ZlibDecoder::new(data);
-    let mut decompressed = Vec::new();
-    decoder
-        .read_to_end(&mut decompressed)
-        .map_err(|e| DanmakuError::Compression(format!("zlib: {}", e)))?;
-    Ok(decompressed)
+fn decompress_zlib(data: &[u8], limit: usize) -> Result<Vec<u8>> {
+    decompress_limited(ZlibDecoder::new(data), "zlib", limit)
 }
 
 /// Decompress brotli data.
-fn decompress_brotli(data: &[u8]) -> Result<Vec<u8>> {
-    let mut decompressed = Vec::new();
-    brotli::BrotliDecompress(&mut std::io::Cursor::new(data), &mut decompressed)
-        .map_err(|e| DanmakuError::Compression(format!("brotli: {}", e)))?;
-    Ok(decompressed)
+fn decompress_brotli(data: &[u8], limit: usize) -> Result<Vec<u8>> {
+    decompress_limited(brotli::Decompressor::new(data, 4096), "brotli", limit)
 }
 
 /// Generate a fake buvid3.
@@ -759,6 +769,35 @@ mod tests {
         let decoded = Bilibili::decode_packet(&packet);
         assert_eq!(decoded.len(), 1);
         assert_eq!(decoded[0].body, body);
+    }
+
+    #[test]
+    fn compressed_payloads_stop_at_the_decompression_limit() {
+        let data = vec![b'x'; 1025];
+        assert!(decompress_zlib(&zlib_compress(&data), 1024).is_err());
+        let mut compressed = Vec::new();
+        brotli::BrotliCompress(
+            &mut std::io::Cursor::new(&data),
+            &mut compressed,
+            &brotli::enc::BrotliEncoderParams::default(),
+        )
+        .unwrap();
+        assert!(decompress_brotli(&compressed, 1024).is_err());
+        assert_eq!(decompress_brotli(&compressed, 1025).unwrap(), data);
+    }
+
+    #[test]
+    fn extended_headers_are_respected_and_invalid_headers_are_dropped() {
+        let body = br#"{"cmd":"TEST"}"#;
+        let mut packet = build_packet(body, op::NOTIFICATION);
+        packet.splice(16..16, [0, 0, 0, 0]);
+        packet[..4].copy_from_slice(&((20 + body.len()) as u32).to_be_bytes());
+        packet[4..6].copy_from_slice(&20u16.to_be_bytes());
+        assert_eq!(Bilibili::decode_packet(&packet)[0].body, body);
+        for header_len in [0u16, 15, u16::MAX] {
+            packet[4..6].copy_from_slice(&header_len.to_be_bytes());
+            assert!(Bilibili::decode_packet(&packet).is_empty());
+        }
     }
 
     /// 超过深度上限的恶意多层压缩嵌套被丢弃，不发生栈溢出。

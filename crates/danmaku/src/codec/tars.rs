@@ -71,8 +71,7 @@ impl TarsOutputStream {
             let head = (tag << 4) | (tars_type as u8);
             self.buffer.push(head);
         } else {
-            let head = (0xF0 | (tars_type as u8)) as u16;
-            self.buffer.push((head >> 8) as u8);
+            self.buffer.push(0xF0 | (tars_type as u8));
             self.buffer.push(tag);
         }
     }
@@ -611,6 +610,16 @@ mod tests {
 
         let mut ios = TarsInputStream::new(buffer);
         assert_eq!(ios.read_bytes(0), Some(b"test data".to_vec()));
+    }
+
+    #[test]
+    fn extended_tags_round_trip() {
+        let mut oos = TarsOutputStream::new();
+        oos.write_int32(15, 12345);
+        oos.write_string(255, "extended");
+        let mut ios = TarsInputStream::new(oos.get_buffer());
+        assert_eq!(ios.read_int32(15), Some(12345));
+        assert_eq!(ios.read_string(255), Some("extended".to_string()));
     }
 
     /// 跳过 tag 0 的 SimpleList 时长度为 -7：修复前 `pos += size as usize`

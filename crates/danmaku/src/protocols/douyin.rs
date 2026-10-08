@@ -5,7 +5,6 @@
 //! - Response containing message list
 //! - ChatMessage for danmaku content
 
-use std::io::Read;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -15,6 +14,7 @@ use reqwest::header::{COOKIE, HeaderMap, HeaderValue, ORIGIN, REFERER, USER_AGEN
 use tracing::{debug, warn};
 
 use crate::codec::protobuf::{ProtoReader, ProtoValue, ProtoWriter};
+use crate::codec::{MAX_DECOMPRESSED_SIZE, decompress_limited};
 use crate::error::{DanmakuError, Result};
 use crate::message::{ChatMessage, DEFAULT_COLOR, DanmakuEvent};
 use crate::protocols::{ConnectionInfo, DecodeResult, HeartbeatConfig, Platform, PlatformContext};
@@ -210,12 +210,7 @@ impl Douyin {
 
     /// Decompress gzip data.
     fn decompress_gzip(data: &[u8]) -> Result<Vec<u8>> {
-        let mut decoder = GzDecoder::new(data);
-        let mut decompressed = Vec::new();
-        decoder
-            .read_to_end(&mut decompressed)
-            .map_err(|e| DanmakuError::Compression(format!("gzip: {}", e)))?;
-        Ok(decompressed)
+        decompress_limited(GzDecoder::new(data), "gzip", MAX_DECOMPRESSED_SIZE)
     }
 
     /// Parse PushFrame.
@@ -630,5 +625,18 @@ mod tests {
         push.write_string(7, "msg");
         push.write_bytes(8, b"not gzip");
         assert!(Douyin::new().decode_message(&push.into_buffer()).is_err());
+    }
+
+    #[test]
+    fn oversized_gzip_payload_is_rejected() {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder
+            .write_all(&vec![b'x'; MAX_DECOMPRESSED_SIZE + 1])
+            .unwrap();
+        let compressed = encoder.finish().unwrap();
+        assert!(matches!(
+            Douyin::decompress_gzip(&compressed),
+            Err(DanmakuError::Compression(_))
+        ));
     }
 }
