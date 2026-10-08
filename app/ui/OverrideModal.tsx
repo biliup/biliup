@@ -26,6 +26,7 @@ type TemplateModalProps = {
   visible?: boolean
   entity?: LiveStreamerEntity
   children?: React.ReactNode
+  initialPanel?: 'plugin' | 'mosaic'
   onOk: (e: any) => Promise<void>
 }
 
@@ -56,12 +57,8 @@ type PlatformPattern = keyof typeof SupportedPlatforms
 const matchPlatformPattern = (url?: string): PlatformPattern | undefined =>
   (Object.keys(SupportedPlatforms) as PlatformPattern[]).find(pattern => url?.match(new RegExp(pattern)))
 
-const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk }) => {
-  const [isOpen, setOpen] = useState(false)
-
-  const toggle = () => {
-    setOpen(!isOpen)
-  }
+const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, initialPanel = 'plugin', onOk }) => {
+  const [activePanels, setActivePanels] = useState<string[]>([initialPanel])
 
   // 平台插件组件从模块级常量表里按键取出,渲染间始终是同一个引用,不会因为重渲染而重置内部状态
   const platformPattern = matchPlatformPattern(entity?.url)
@@ -86,6 +83,7 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
 
   const [visible, setVisible] = useState(false)
   const showDialog = () => {
+    setActivePanels([initialPanel])
     setVisible(true)
   }
   const handleOk = async () => {
@@ -269,7 +267,7 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
     <>
       {childrenWithProps}
       <FormSheet
-        title={entity?.remark ? `配置覆写「${entity.remark}」` : '配置覆写'}
+        title={`${initialPanel === 'mosaic' ? '画面遮挡' : '配置覆写'}${entity?.remark ? `「${entity.remark}」` : ''}`}
         visible={visible}
         size="md"
         okText="保存"
@@ -309,7 +307,12 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, onOk })
             ]}
           />
           <Form.Section>
-            <Collapse defaultActiveKey={['plugin']} keepDOM lazyRender={false}>
+            <Collapse
+              activeKey={activePanels}
+              onChange={keys => setActivePanels(Array.isArray(keys) ? keys : keys ? [keys] : [])}
+              keepDOM
+              lazyRender={false}
+            >
               {downloadSettings}
               <MosaicPanel entity={entity} initValues={entity?.override} onChange={syncMosaicConfig} />
               {PlatformPlugin ? (

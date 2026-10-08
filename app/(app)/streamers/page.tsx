@@ -252,7 +252,7 @@ export default function StreamersPage() {
     }
   }
 
-  // 编辑 / 暂停 / 删除 / 高级四个操作，网格卡片与列表行共用，只是外层容器不同
+  // 编辑 / 暂停 / 删除 / 画面遮挡 / 高级操作，网格卡片与列表行共用，只是外层容器不同
   // 返回数组而不是 Fragment:ButtonGroup 会对每个直接子元素 cloneElement 注入 disabled 等 props,
   // React 19 起会对带这些 props 的 Fragment 报 "Invalid prop supplied to React.Fragment"
   // 按角色只渲染有权限的按钮（只读观察者一个都没有）
@@ -299,8 +299,33 @@ export default function StreamersPage() {
         </Popconfirm>
       ),
       canHooks && (
+        <OverrideModal
+          key="mosaic"
+          initialPanel="mosaic"
+          onOk={handleUpdate}
+          entity={handleEntityPostprocessor({ ...item })}
+        >
+          <Button
+            theme="borderless"
+            type="tertiary"
+            size="small"
+            title="配置录制分段的马赛克、模糊或纯色遮挡"
+            {...lock}
+          >
+            画面遮挡
+          </Button>
+        </OverrideModal>
+      ),
+      canHooks && (
         <OverrideModal key="override" onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
-          <Button theme="borderless" type="tertiary" icon={<IconWrench />} aria-label="高级" {...lock} />
+          <Button
+            theme="borderless"
+            type="tertiary"
+            icon={<IconWrench />}
+            aria-label="配置覆写"
+            title="配置覆写（平台与下载设置）"
+            {...lock}
+          />
         </OverrideModal>
       ),
     ].filter(Boolean)
