@@ -21,6 +21,11 @@ use url::{Url, form_urlencoded};
 
 #[path = "douyu_cookie.rs"]
 mod cookie;
+#[path = "douyu_refresh.rs"]
+mod refresh;
+pub use refresh::{
+    DouyuCookieInput, DouyuCookieRefresh, DouyuLoginIdentity, DouyuRefreshClient, DouyuRefreshError,
+};
 #[path = "douyu_signature.rs"]
 mod signature;
 const DOUYU_WEB_DOMAIN: &str = "www.douyu.com";

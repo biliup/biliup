@@ -1,9 +1,7 @@
-use super::{DOUYU_USER_AGENT, DOUYU_WEB_DOMAIN, LiveError, LiveResult};
+use super::{DOUYU_WEB_DOMAIN, LiveError, LiveResult};
 use reqwest::{Client, header::HeaderValue};
 use serde::Deserialize;
 use std::collections::BTreeMap;
-use std::time::Duration;
-use url::Url;
 
 #[derive(Deserialize)]
 struct ExportedCookie {
@@ -16,19 +14,37 @@ struct ExportedCookie {
 /// Accept a Cookie request header or a browser extension's JSON cookie array.
 /// Keep credentials out of parser errors: serde and cookie errors can echo input.
 pub(super) fn normalize_cookie_header(input: &str) -> LiveResult<String> {
+    let (mut pairs, _) = parse_cookie_scopes(input)?;
+    // Passport's long-lived ticket is never a Web API credential.
+    pairs.remove("LTP0");
+    format_cookie_header(&pairs)
+}
+
+pub(super) fn parse_cookie_scopes(
+    input: &str,
+) -> LiveResult<(BTreeMap<String, String>, BTreeMap<String, String>)> {
     let input = input.trim();
     let mut pairs = BTreeMap::new();
+    let mut passport = BTreeMap::new();
     if input.starts_with('[') {
         let cookies: Vec<ExportedCookie> = serde_json::from_str(input)
             .map_err(|_| LiveError::custom("斗鱼 Cookie JSON 格式错误，需要 name/value 数组"))?;
         for cookie in cookies {
-            if cookie.domain.as_deref().is_some_and(|domain| {
-                let domain = domain.trim_start_matches('.');
-                domain != DOUYU_WEB_DOMAIN && domain != "douyu.com"
-            }) {
-                continue;
+            match cookie
+                .domain
+                .as_deref()
+                .map(|domain| domain.trim_start_matches('.'))
+            {
+                Some("passport.douyu.com") => {
+                    if matches!(cookie.name.as_str(), "LTP0" | "dy_did") {
+                        insert_cookie(&mut passport, &cookie.name, &cookie.value)?;
+                    }
+                }
+                None | Some(DOUYU_WEB_DOMAIN) | Some("douyu.com") => {
+                    insert_cookie(&mut pairs, &cookie.name, &cookie.value)?;
+                }
+                _ => {}
             }
-            insert_cookie(&mut pairs, &cookie.name, &cookie.value)?;
         }
     } else {
         let input = input
@@ -42,8 +58,12 @@ pub(super) fn normalize_cookie_header(input: &str) -> LiveResult<String> {
             insert_cookie(&mut pairs, name.trim(), value.trim())?;
         }
     }
+    Ok((pairs, passport))
+}
+
+pub(super) fn format_cookie_header(pairs: &BTreeMap<String, String>) -> LiveResult<String> {
     let header = pairs
-        .into_iter()
+        .iter()
         .map(|(name, value)| format!("{name}={value}"))
         .collect::<Vec<_>>()
         .join("; ");
@@ -61,6 +81,11 @@ fn insert_cookie(pairs: &mut BTreeMap<String, String>, name: &str, value: &str) 
     {
         return Err(LiveError::custom("斗鱼 Cookie 包含无效的名称或值"));
     }
+    if pairs.get(name).is_some_and(|current| current != value) {
+        return Err(LiveError::custom(
+            "斗鱼 Cookie 存在冲突的同名字段，请重新导出同一账号的 Cookie",
+        ));
+    }
     pairs.insert(name.to_owned(), value.to_owned());
     Ok(())
 }
@@ -72,38 +97,16 @@ pub(super) fn cookie_value<'a>(cookie: &'a str, name: &str) -> Option<&'a str> {
     })
 }
 
-pub(super) async fn validate_cookie(input: &str, client: &Client) -> LiveResult<bool> {
-    let cookie = normalize_cookie_header(input)?;
-    if !["acf_uid", "acf_auth"]
-        .iter()
-        .all(|name| cookie_value(&cookie, name).is_some())
-    {
-        return Ok(false);
-    }
-
-    // betard is public and succeeds for arbitrary cookies. The account page
-    // redirects unauthenticated requests to /member/login (then passport).
-    let response = client
-        .get(format!("https://{DOUYU_WEB_DOMAIN}/member/cp"))
-        .header("referer", format!("https://{DOUYU_WEB_DOMAIN}/"))
-        .header("user-agent", DOUYU_USER_AGENT)
-        .header("cookie", cookie)
-        .timeout(Duration::from_secs(15))
-        .send()
+pub(super) async fn validate_cookie(input: &str, _client: &Client) -> LiveResult<bool> {
+    // The caller's client may follow redirects or carry another account's jar.
+    // Keep the old API while using the same isolated authenticated probe as renewal.
+    let client = super::refresh::DouyuRefreshClient::new()
+        .map_err(|err| LiveError::custom(err.to_string()))?;
+    client
+        .validate(input, None)
         .await
-        .map_err(|err| LiveError::custom(format!("斗鱼登录状态检查失败: {}", err.without_url())))?;
-
-    if response.status().is_redirection() {
-        return Ok(false);
-    }
-    let response = response
-        .error_for_status()
-        .map_err(|err| LiveError::custom(format!("斗鱼登录状态检查失败: {}", err.without_url())))?;
-    Ok(is_account_page(response.url()))
-}
-
-fn is_account_page(url: &Url) -> bool {
-    url.host_str() == Some(DOUYU_WEB_DOMAIN) && url.path().trim_end_matches('/') == "/member/cp"
+        .map(|identity| identity.is_some())
+        .map_err(|err| LiveError::custom(err.to_string()))
 }
 
 #[cfg(test)]
@@ -148,21 +151,6 @@ mod tests {
             let error = normalize_cookie_header(input).unwrap_err().to_string();
             assert!(!error.contains("secret"));
         }
-    }
-
-    #[test]
-    fn login_redirect_is_not_a_valid_session() {
-        for url in [
-            "https://www.douyu.com/member/login",
-            "https://passport.douyu.com/member/login?state=/member/cp",
-            "https://www.douyu.com/betard/288016",
-            "https://www.douyu.com/",
-        ] {
-            assert!(!is_account_page(&Url::parse(url).unwrap()));
-        }
-        assert!(is_account_page(
-            &Url::parse("https://www.douyu.com/member/cp").unwrap()
-        ));
     }
 
     #[tokio::test]

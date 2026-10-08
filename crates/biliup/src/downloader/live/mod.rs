@@ -35,7 +35,10 @@ pub use bigo::Bigo;
 pub use bilibili::Bilibili;
 pub use cc::CC;
 pub use douyin::Douyin;
-pub use douyu::{Douyu, strip_ws_expire_override};
+pub use douyu::{
+    Douyu, DouyuCookieInput, DouyuCookieRefresh, DouyuLoginIdentity, DouyuRefreshClient,
+    DouyuRefreshError, strip_ws_expire_override,
+};
 pub use general::General;
 pub use huya::Huya;
 pub use inke::Inke;
@@ -311,7 +314,7 @@ impl Default for YoutubeOptions {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct LiveCredentials {
     pub bilibili_cookie: Option<String>,
     pub bilibili_cookie_file: Option<PathBuf>,
@@ -327,6 +330,72 @@ pub struct LiveCredentials {
     pub niconico_password: Option<String>,
     pub niconico_user_session: Option<String>,
     pub niconico_purge_credentials: Option<String>,
+}
+
+/// Requests derive Debug for diagnostics. Report credential availability only,
+/// including cookie-file paths, so formatting a request cannot leak account data.
+impl std::fmt::Debug for LiveCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LiveCredentials")
+            .field("has_bilibili_cookie", &self.bilibili_cookie.is_some())
+            .field(
+                "has_bilibili_cookie_file",
+                &self.bilibili_cookie_file.is_some(),
+            )
+            .field("has_douyin_cookie", &self.douyin_cookie.is_some())
+            .field("has_douyu_cookie", &self.douyu_cookie.is_some())
+            .field("has_twitcasting_cookie", &self.twitcasting_cookie.is_some())
+            .field("has_twitch_cookie", &self.twitch_cookie.is_some())
+            .field("has_youtube_cookie", &self.youtube_cookie.is_some())
+            .field("has_afreecatv_username", &self.afreecatv_username.is_some())
+            .field("has_afreecatv_password", &self.afreecatv_password.is_some())
+            .field("has_niconico_email", &self.niconico_email.is_some())
+            .field("has_niconico_password", &self.niconico_password.is_some())
+            .field(
+                "has_niconico_user_session",
+                &self.niconico_user_session.is_some(),
+            )
+            .field(
+                "has_niconico_purge_credentials",
+                &self.niconico_purge_credentials.is_some(),
+            )
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod credential_debug_tests {
+    use super::LiveCredentials;
+    use std::path::PathBuf;
+
+    #[test]
+    fn request_credential_debug_never_contains_secret_values_or_file_paths() {
+        let secret = "fixture-private-credential";
+        let path = PathBuf::from("/fixture/private/cookie.json");
+        let credentials = LiveCredentials {
+            bilibili_cookie: Some(secret.into()),
+            bilibili_cookie_file: Some(path.clone()),
+            douyin_cookie: Some(secret.into()),
+            douyu_cookie: Some(format!("acf_auth={secret}; LTP0={secret}; dy_did={secret}")),
+            twitcasting_cookie: Some(secret.into()),
+            twitch_cookie: Some(secret.into()),
+            youtube_cookie: Some(path),
+            afreecatv_username: Some(secret.into()),
+            afreecatv_password: Some(secret.into()),
+            niconico_email: Some(secret.into()),
+            niconico_password: Some(secret.into()),
+            niconico_user_session: Some(secret.into()),
+            niconico_purge_credentials: Some(secret.into()),
+        };
+        for text in [format!("{credentials:?}"), format!("{credentials:#?}")] {
+            assert!(!text.contains(secret));
+            assert!(!text.contains("/fixture/private"));
+            assert!(!text.contains("acf_auth="));
+            assert!(!text.contains("LTP0="));
+            assert!(text.contains("has_douyu_cookie: true"));
+        }
+        assert!(format!("{:?}", LiveCredentials::default()).contains("has_douyu_cookie: false"));
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
