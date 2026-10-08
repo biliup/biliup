@@ -172,6 +172,7 @@ pub async fn post_streamers_endpoint(
         payload.downloaded_processor = None;
         payload.postprocessor = None;
     }
+    validate_streamer_mosaic(&payload.override_cfg)?;
     match add_streamer(&service_register, payload).await {
         Ok(live_streamers) => Ok(Json(live_streamers)),
         Err(AddStreamerError::UnsupportedUrl) => {
@@ -203,6 +204,7 @@ pub async fn put_streamers_endpoint(
         payload.downloaded_processor = current.downloaded_processor;
         payload.postprocessor = current.postprocessor;
     }
+    validate_streamer_mosaic(&payload.override_cfg)?;
     let mut streamer = update_streamer(&service_register, payload)
         .await
         .map_err(report_to_response)?;
@@ -210,6 +212,21 @@ pub async fn put_streamers_endpoint(
         strip_hooks(&mut streamer);
     }
     Ok(Json(streamer))
+}
+
+fn validate_streamer_mosaic(
+    patch: &Option<crate::server::config::ConfigPatch>,
+) -> Result<(), Response> {
+    let value = patch
+        .as_ref()
+        .and_then(|patch| patch.mosaic_config.as_ref())
+        .and_then(|value| value.clone());
+    Config {
+        mosaic_config: value,
+        ..Config::default()
+    }
+    .validate_mosaic()
+    .map_err(|message| (StatusCode::BAD_REQUEST, Json(ApiError::new(message))).into_response())
 }
 
 pub async fn delete_streamers_endpoint(
@@ -708,14 +725,11 @@ mod template_field_tests {
         assert_eq!(written["user_cookie"], selector);
         assert!(written["cover_path"].is_null());
         assert!(!written.to_string().contains("/srv/private"));
-        let admin = get_upload_streamer_endpoint(
-            Caller::unrestricted(),
-            State(pool.clone()),
-            Path(id),
-        )
-        .await
-        .unwrap()
-        .0;
+        let admin =
+            get_upload_streamer_endpoint(Caller::unrestricted(), State(pool.clone()), Path(id))
+                .await
+                .unwrap()
+                .0;
         assert_eq!(admin["user_cookie"], "/srv/private/account.json");
         assert_eq!(admin["cover_path"], "/srv/private/cover.jpg");
         assert_eq!(admin["title"], "changed title");
@@ -733,16 +747,14 @@ mod template_field_tests {
         let edit = template(Some(id), "account:current", "");
         let written = add_upload_streamer_endpoint(operator(), State(pool.clone()), Json(edit))
             .await
-            .unwrap().0;
+            .unwrap()
+            .0;
         assert_eq!(written["user_cookie"], "account:current");
-        let admin = get_upload_streamer_endpoint(
-            Caller::unrestricted(),
-            State(pool.clone()),
-            Path(id),
-        )
-        .await
-        .unwrap()
-        .0;
+        let admin =
+            get_upload_streamer_endpoint(Caller::unrestricted(), State(pool.clone()), Path(id))
+                .await
+                .unwrap()
+                .0;
         assert_eq!(admin["user_cookie"], "unregistered.json");
 
         let mut forged = template(None, "account:current", "");
@@ -1345,6 +1357,26 @@ mod configuration_tests {
     use super::*;
     use crate::server::infrastructure::connection_pool::ConnectionManager;
     use tracing_subscriber::{EnvFilter, reload};
+
+    #[test]
+    fn streamer_mosaic_save_rejects_invalid_configuration() {
+        let invalid = serde_json::from_value(serde_json::json!({
+            "mosaic_config": {"enabled": true, "regions": []}
+        }))
+        .unwrap();
+        assert_eq!(
+            validate_streamer_mosaic(&Some(invalid))
+                .unwrap_err()
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert!(validate_streamer_mosaic(&None).is_ok());
+        let disabled = serde_json::from_value(serde_json::json!({
+            "mosaic_config": {"enabled": false, "regions": []}
+        }))
+        .unwrap();
+        assert!(validate_streamer_mosaic(&Some(disabled)).is_ok());
+    }
 
     /// Web 界面保存配置后，下载池 / 上传池容量立即换成新值，不需要重启
     #[tokio::test]

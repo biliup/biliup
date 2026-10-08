@@ -45,6 +45,8 @@ impl ApplicationController {
             .await
             .change_context(AppError::Unknown)?;
 
+        service_register.douyu_keeper.start();
+
         // 启动定期清理过期会话的任务
         let deletion_task = tokio::task::spawn(
             session_store

@@ -37,6 +37,9 @@ pub async fn apply_config(
     new_config.normalize_segment_limits();
     new_config.validate_segment_limits()?;
     new_config
+        .validate_mosaic()
+        .map_err(ApplyConfigError::Invalid)?;
+    new_config
         .validate_pool_sizes()
         .map_err(ApplyConfigError::Invalid)?;
     // Validate before saving or resizing pools: a rejected form must not
@@ -261,6 +264,23 @@ mod tests {
         }
     }
 
+    /// 遮挡配置错误时，数据库和运行中的设置均保持不变。
+    #[tokio::test]
+    async fn invalid_mosaic_cannot_be_saved_or_applied() {
+        let f = fixture().await;
+        for mosaic in [json!({"enabled": true, "regions": []}), json!("invalid")] {
+            let result = f
+                .apply(Config {
+                    mosaic_config: Some(mosaic),
+                    ..Config::default()
+                })
+                .await;
+            assert!(matches!(result, Err(ApplyConfigError::Invalid(_))));
+            assert!(f.saved_rows().await.is_empty());
+            assert!(f.config.read().unwrap().mosaic_config.is_none());
+        }
+    }
+
     /// 再次保存更新同一行，不会插入第二行
     #[tokio::test]
     async fn applying_again_updates_the_same_row() {
@@ -365,7 +385,10 @@ mod tests {
         assert_eq!(saved[0].pool1_size, 2);
         assert_eq!(saved[0].loggers_level.as_deref(), Some("warn"));
         assert_eq!(f.config.read().unwrap().pool1_size, 2);
-        assert_eq!(f.config.read().unwrap().loggers_level.as_deref(), Some("warn"));
+        assert_eq!(
+            f.config.read().unwrap().loggers_level.as_deref(),
+            Some("warn")
+        );
         assert_eq!(f.pool_sizes().0, 2);
         assert_eq!(
             f.log_handle

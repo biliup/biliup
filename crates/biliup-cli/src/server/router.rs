@@ -120,7 +120,9 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         // 配置管理路由
         .route(
             "/v1/configuration",
-            get(get_configuration).put(put_configuration), // 获取/更新配置
+            get(get_configuration)
+                .put(put_configuration)
+                .layer(axum::middleware::from_fn(no_store)), // 含账号凭据，禁止 HTTP 缓存
         )
         // 自动切片（实验）：模型接口连通性测试与状态
         .route("/v1/auto-clip/test", post(test_auto_clip))
@@ -181,6 +183,15 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         // 斗鱼Cookie验证
         .merge(crate::server::api::douyu_validation::router())
         .with_state(service_register) // 注入服务注册器状态
+}
+
+async fn no_store(request: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let mut response = next.run(request).await;
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    response
 }
 
 async fn using_serve_file_from_a_route(

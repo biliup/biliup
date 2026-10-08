@@ -111,12 +111,38 @@ impl ConnectionManager {
         let db_url = format!("sqlite://{path}");
 
         // 创建数据库文件（如果不存在）
-        std::fs::OpenOptions::new()
+        let mut options = std::fs::OpenOptions::new();
+        // Cookie refresh tickets live in this database. New databases must not
+        // become world-readable with a permissive process umask.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        options
             .write(true)
             .create(true)
             .truncate(false)
             .open(path)
             .change_context(AppError::Unknown)?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // Upgrades add long-lived passport credentials to existing DBs too.
+            // Tighten existing database and SQLite sidecars before connecting.
+            for file in [
+                path.to_owned(),
+                format!("{path}-wal"),
+                format!("{path}-shm"),
+            ] {
+                match std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound && file != path => {}
+                    Err(error) => return Err(error).change_context(AppError::Unknown),
+                }
+            }
+        }
 
         // 创建连接池，最大连接数设为2
         let pool = SqlitePoolOptions::new()
@@ -342,6 +368,31 @@ fn hex_lower(bytes: &[u8]) -> String {
 mod tests {
     use super::{ConnectionManager, ConnectionPool, crlf_checksum, hex_lower};
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn database_credentials_are_private_on_creation_and_upgrade() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("private.sqlite3");
+        let pool = ConnectionManager::new_pool(path.to_str().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        pool.close().await;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let pool = ConnectionManager::new_pool(path.to_str().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        pool.close().await;
+    }
+
     /// v1.1.8 ~ v1.2.4 发布包给迁移 2（改写前的内容）记下的摘要：Linux / macOS / Docker
     /// 包是 LF 检出，Windows 包是在 `windows-latest` 上以 CRLF 检出后编的。
     const V1_2_4_MIGRATION_2_LF: &str = "fcc6436a889297e5c28f2a0f12196e5eee5975ba352032c8201dfa61fb1b9c3fd01ddc41ddfa71bd7423999521b895eb";
@@ -450,6 +501,10 @@ mod tests {
                 14,
                 "207150b7a466885c0938452490143426063ac93209ebf697e6cb7dae243c9fa98474d71c6cb223b3d0dcd6e7862ebdf5",
             ),
+            (
+                15,
+                "dbb5e3baea73ded770ca9103a4f29e44c6a59b8832c762b0758aa5e958a85c52b60527314ff7d467a4c9a978aa241d18",
+            ),
         ];
         let embedded = sqlx::migrate!();
         let actual: Vec<(i64, String)> = embedded
@@ -516,7 +571,7 @@ mod tests {
                 .unwrap();
         assert_eq!(
             migrations.iter().map(|m| m.0).collect::<Vec<_>>(),
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+            (1..=15).collect::<Vec<_>>(),
             "待应用的迁移必须补齐"
         );
         let embedded = sqlx::migrate!();
@@ -748,10 +803,7 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(
-            versions,
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
-        );
+        assert_eq!(versions, (1..=15).collect::<Vec<_>>());
         let tables: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN \
              ('streamerinfo', 'stream_sessions', 'session_streamerinfo', 'segments') ORDER BY name",

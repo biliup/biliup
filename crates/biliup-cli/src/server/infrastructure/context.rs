@@ -8,12 +8,12 @@ use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::models::StreamerInfo;
 use crate::server::infrastructure::models::live_streamer::LiveStreamer;
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
+use crate::server::services::douyu_keeper::{DouyuCookieKeeper, apply_douyu_override};
 use biliup::client::StatelessClient;
 use biliup::downloader::live::LiveStream;
 use core::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use struct_patch::Patch;
 use tracing::{error, info};
 
 /// 应用程序上下文，包含工作器和扩展信息
@@ -149,6 +149,7 @@ pub struct Worker {
     pub upload_streamer: Option<UploadStreamer>,
     /// 全局配置
     config: Arc<RwLock<Config>>,
+    douyu_keeper: Option<Arc<DouyuCookieKeeper>>,
     /// HTTP客户端
     pub client: StatelessClient,
     /// 最近一次开播探测被录制策略挡下的原因，仅用于向界面解释「为什么没在录」。
@@ -178,6 +179,7 @@ impl Worker {
             live_streamer,
             upload_streamer,
             config,
+            douyu_keeper: None,
             client,
             last_rejection: RwLock::new(None),
         }
@@ -185,6 +187,11 @@ impl Worker {
 
     pub fn id(&self) -> i64 {
         self.live_streamer.id
+    }
+
+    pub fn with_douyu_keeper(mut self, keeper: Arc<DouyuCookieKeeper>) -> Self {
+        self.douyu_keeper = Some(keeper);
+        self
     }
 
     /// 记录本轮开播探测的策略判定结果（`None` 表示未被挡下）。
@@ -215,7 +222,10 @@ impl Worker {
         let mut cfg = self.config.read().unwrap().clone();
 
         if let Some(cfg_p) = self.live_streamer.override_cfg.clone() {
-            cfg.apply(cfg_p)
+            apply_douyu_override(&mut cfg, &cfg_p);
+        }
+        if let Some(keeper) = &self.douyu_keeper {
+            keeper.resolve(&mut cfg);
         }
         cfg
     }

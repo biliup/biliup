@@ -7,6 +7,7 @@ use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::Worker;
 use crate::server::infrastructure::models::live_streamer::LiveStreamer;
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
+use crate::server::services::douyu_keeper::DouyuCookieKeeper;
 use crate::server::workbench::clips::export::ClipExports;
 use crate::server::workbench::clips::publish::queue::{BiliBackend, ClipPublisher};
 use axum::extract::FromRef;
@@ -45,6 +46,8 @@ pub struct ServiceRegister {
 
     /// 切片发布队列（同一时间只传一个稿件；任务只在内存里）
     pub publisher: Arc<ClipPublisher>,
+    /// 本机斗鱼登录 Cookie 的持久化续期与运行时读取。
+    pub douyu_keeper: Arc<DouyuCookieKeeper>,
 }
 
 /// 简单的服务容器，负责管理API端点通过axum扩展获取的各种服务
@@ -82,10 +85,16 @@ impl ServiceRegister {
         ));
         publisher.spawn();
 
+        let douyu_keeper = DouyuCookieKeeper::new(pool.clone(), config.clone());
+        if douyu_keeper.initialize().await.is_err() {
+            tracing::warn!("斗鱼续期状态恢复失败，将在后台重试");
+        }
+
         info!("feature services successfully initialized!");
         ServiceRegister {
             clips,
             publisher,
+            douyu_keeper,
             pool,
             managers: Arc::new(download_manager),
             config: config.clone(),
@@ -107,9 +116,11 @@ impl ServiceRegister {
             self.config.clone(),
             self.client.clone(),
         )
+        .with_douyu_keeper(self.douyu_keeper.clone())
     }
 
     pub async fn cleanup(&self) {
+        self.douyu_keeper.stop();
         self.managers.cleanup().await;
     }
 }

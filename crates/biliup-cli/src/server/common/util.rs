@@ -4,13 +4,13 @@ use crate::server::infrastructure::models::hook_step::HookStep;
 use crate::server::workbench::retention::{self, Disposal, Retention};
 use chrono::{Duration, Local};
 use error_stack::{ResultExt, bail};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use tracing::{error, info};
 use url::Url;
-use regex::Regex;
-use std::sync::OnceLock;
 
 /// 录制器配置结构体
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -366,7 +366,10 @@ mod tests {
         let redacted = redact_secrets(raw);
         assert!(!redacted.contains("tok3n"), "{redacted}");
         assert!(!redacted.contains("hunter2"), "{redacted}");
-        assert!(redacted.contains(r#""Authorization=[redacted]""#), "{redacted}");
+        assert!(
+            redacted.contains(r#""Authorization=[redacted]""#),
+            "{redacted}"
+        );
         assert!(
             redacted.contains(r#""--niconico-password" "[redacted]""#),
             "{redacted}"
@@ -376,7 +379,8 @@ mod tests {
 
     #[test]
     fn redact_secrets_keeps_unrelated_args() {
-        let raw = r#""streamlink" "--hls-duration" "01:00:00" "https://example.com/live?sid=42" "best""#;
+        let raw =
+            r#""streamlink" "--hls-duration" "01:00:00" "https://example.com/live?sid=42" "best""#;
         assert_eq!(redact_secrets(raw), raw);
     }
 
@@ -535,6 +539,8 @@ impl FileValidator {
 
     fn validate_format(&self, path: &Path) -> AppResult<()> {
         // 简单的格式验证 - 检查扩展名
+        let masked = crate::server::plugins::mosaic::masked_path(path);
+        let path = masked.as_path();
         if let Some(extension) = path.extension() {
             let ext = extension.to_string_lossy().to_lowercase();
             match ext.as_str() {

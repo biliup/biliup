@@ -186,6 +186,15 @@ pub struct Config {
     /// 属于账号凭据：不在 `VISIBLE_CONFIG_KEYS` 里，非超管看不到，Fleet 也不下发
     #[serde(default)]
     pub douyu_cookie: Option<String>,
+    /// 斗鱼 passport 长期续期凭据 LTP0；仅本机保存，不下发到 Fleet。
+    #[serde(default)]
+    pub douyu_ltp0: Option<String>,
+    /// 续期时使用的斗鱼 Web 设备号（dy_did）。不填时从 Cookie / 导出 JSON 读取。
+    #[serde(default)]
+    pub douyu_refresh_device_id: Option<String>,
+    /// 是否自动续期斗鱼 Web 登录 Cookie；有 LTP0 时默认开启。
+    #[serde(default)]
+    pub douyu_auto_refresh: Option<bool>,
     /// 斗鱼视频编码：AVC 或 HEVC
     #[serde(default)]
     pub douyu_codec: Option<String>,
@@ -352,6 +361,11 @@ pub struct Config {
     pub user: Option<UserConfig>,
 
     pub loggers_level: Option<String>,
+
+    /// 马赛克配置（画面遮挡功能）
+    #[patch(attribute(serde(skip_serializing_if = "Option::is_none")))]
+    #[serde(default)]
+    pub mosaic_config: Option<serde_json::Value>,
 }
 
 /// 投稿模板 `credits` 的一项：简介里的一个 `@credit` 换成 @ 这个用户。
@@ -624,6 +638,17 @@ impl Default for Config {
 pub const DEFAULT_PREVIEW_MAX_MINUTES: u64 = 30;
 
 impl Config {
+    /// Validate new masking settings before persisting. The processor also checks
+    /// imported/legacy settings so invalid config never bypasses masking.
+    pub fn validate_mosaic(&self) -> Result<(), String> {
+        let Some(value) = &self.mosaic_config else {
+            return Ok(());
+        };
+        let mosaic: crate::server::plugins::mosaic::MosaicConfig =
+            serde_json::from_value(value.clone())
+                .map_err(|_| "画面遮挡配置格式错误".to_string())?;
+        mosaic.validate()
+    }
     /// 单条中转预览连接的最长寿命，`None` 为不限，见 [`Config::preview_max_minutes`]。
     pub fn preview_max_lifetime(&self) -> Option<std::time::Duration> {
         match self

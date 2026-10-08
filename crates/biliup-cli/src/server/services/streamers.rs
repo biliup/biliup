@@ -109,7 +109,7 @@ pub async fn delete_streamer(
     managers.del_room(id).await;
 
     let live_streamers = del_streamer(pool, id).await?;
-    info!(workers=?live_streamers, "successfully inserted new live streamers");
+    info!(id = live_streamers.id, url = %live_streamers.url, "successfully deleted live streamer");
     Ok(live_streamers)
 }
 
@@ -213,6 +213,10 @@ mod tests {
             Arc::new(BiliBackend::new(config.clone(), client.clone())),
         ));
         let services = ServiceRegister {
+            douyu_keeper: crate::server::services::douyu_keeper::DouyuCookieKeeper::new(
+                pool.clone(),
+                config.clone(),
+            ),
             clips,
             publisher,
             pool,
