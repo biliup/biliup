@@ -181,6 +181,14 @@ pub async fn compute(
         // 空分段（开了就断）不占时间轴
         .filter(|s| s.end_ms != Some(s.start_ms) || readable(s))
         .collect();
+    if segments
+        .iter()
+        .any(|segment| crate::server::plugins::mosaic::is_unmasked(Path::new(&segment.path)))
+    {
+        return Err(PlanError::Unavailable(
+            "所选录像尚未完成画面遮挡，请等待处理完成后重新导出".into(),
+        ));
+    }
     if let Some(bad) = segments.iter().find(|s| !readable(s)) {
         return Err(unavailable(bad));
     }

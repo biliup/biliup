@@ -155,6 +155,36 @@ async fn cuts_snap_to_keyframes_like_the_keyframe_endpoint() {
     assert!(matches!(err, PlanError::Unavailable(_)), "{err}");
 }
 
+#[tokio::test]
+async fn mosaic_pending_recordings_cannot_be_exported_to_unmarked_clips() {
+    for name in [
+        "raw.flv.unmasked",
+        "raw.unmasked.flv",
+        "raw.unmasked.flv.part",
+    ] {
+        let (dir, pool, session) = setup().await;
+        let raw = write(dir.path(), name, &build_flv(0, 100, 25, None).bytes);
+        let id = add_segment(&pool, session, &raw, "finished", 0, Some(FLV_MS)).await;
+        let error = plan::compute(&pool, session, 0, 1000).await.unwrap_err();
+        assert!(matches!(error, PlanError::Unavailable(_)), "{error}");
+        assert!(error.to_string().contains("尚未完成画面遮挡"));
+        // Publication replaces the raw record with a masked, normal path. The
+        // same clip range is then exportable without removing the marker by hand.
+        let done = dir.path().join("masked.flv");
+        std::fs::rename(&raw, &done).unwrap();
+        sqlx::query("UPDATE segments SET path = ? WHERE id = ?")
+            .bind(done.to_string_lossy().as_ref())
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(matches!(
+            plan::compute(&pool, session, 0, 1000).await.unwrap(),
+            Attempt::Ready(_)
+        ));
+    }
+}
+
 /// 出点正好落在断流缺口之后那一段的开头（吸附到它的第一个关键帧）：那一段一帧都不在所选范围里，
 /// 不能把它的第一个 GOP 带进来。
 #[tokio::test]
