@@ -14,8 +14,11 @@ import {
   refreshDouyuAuth,
 } from '../../lib/douyu-auth'
 
-/** Only mounted for local saved configuration, never a Fleet editor or room override form. */
-export default function DouyuAuthPanel({ savedValues }: { savedValues: Record<string, unknown> }) {
+/** Local saved configuration or a saved room's effective credentials; never a Fleet editor. */
+export default function DouyuAuthPanel({ savedValues, streamerId }: {
+  savedValues: Record<string, unknown>
+  streamerId?: number
+}) {
   const { can } = useMe()
   const { values } = useFormState<Record<string, unknown>>()
   const hostRef = useRef<HTMLDivElement>(null)
@@ -43,18 +46,18 @@ export default function DouyuAuthPanel({ savedValues }: { savedValues: Record<st
   }, [allowed])
 
   const { data: status, error, isLoading, mutate } = useSWR(
-    allowed && visible ? douyuAuthStatusKey() : null,
+    allowed && visible ? douyuAuthStatusKey(streamerId) : null,
     fetchDouyuAuthStatus,
     { refreshInterval: 30_000, revalidateOnFocus: true, refreshWhenHidden: false, shouldRetryOnError: false },
   )
 
-  const dirty = !douyuAuthFieldsEqual(values ?? {}, savedValues)
+  const dirty = !douyuAuthFieldsEqual(values ?? {}, savedValues, streamerId !== undefined)
 
   useEffect(() => {
-    const changed = !douyuAuthFieldsEqual(previousSavedRef.current, savedValues)
+    const changed = !douyuAuthFieldsEqual(previousSavedRef.current, savedValues, streamerId !== undefined)
     previousSavedRef.current = savedValues
     if (changed && allowed && visible) void mutate().catch(() => undefined)
-  }, [savedValues, allowed, visible, mutate])
+  }, [savedValues, streamerId, allowed, visible, mutate])
 
   const handleRefresh = async () => {
     if (!allowed || dirty || !status || busyRef.current || status.refresh_state === 'refreshing') return
@@ -63,7 +66,7 @@ export default function DouyuAuthPanel({ savedValues }: { savedValues: Record<st
     setRefreshing(true)
     setActionMessage(null)
     try {
-      const next = await refreshDouyuAuth()
+      const next = await refreshDouyuAuth(streamerId)
       await mutate(next, { revalidate: false })
       setActionMessage(douyuManualRefreshMessage(previous, next))
     } catch {
@@ -81,9 +84,9 @@ export default function DouyuAuthPanel({ savedValues }: { savedValues: Record<st
 
   return (
     <div ref={hostRef} style={{ margin: '12px 0 20px', padding: 16, background: 'var(--semi-color-fill-0)', borderRadius: 6 }}>
-      <div style={{ fontWeight: 600, marginBottom: 10 }}>本机已保存的斗鱼登录状态</div>
+      <div style={{ fontWeight: 600, marginBottom: 10 }}>{streamerId === undefined ? '本机已保存的斗鱼登录状态' : '此房间已保存配置实际使用的斗鱼登录状态'}</div>
       <div style={{ fontSize: 13, color: 'var(--semi-color-text-2)', marginBottom: 12 }}>
-        这里显示本机已保存来源凭据的运行状态；表单修改须先保存才会用于续期。
+        {streamerId === undefined ? '这里显示本机已保存来源凭据的运行状态；' : '这里按此房间已保存的覆写和空间配置计算实际登录状态；'}表单修改须先保存才会用于续期。
         续期后的 Cookie 由程序单独维护，输入框保留导入的来源值。
       </div>
       {status ? (

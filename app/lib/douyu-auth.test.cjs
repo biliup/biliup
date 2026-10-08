@@ -48,6 +48,21 @@ test('unsaved auth change detection respects empty values and default enabled sw
   assert.equal(auth.douyuAuthFieldsEqual({ douyu_cookie: 'acf_auth=a%2F==' }, { douyu_cookie: 'acf_auth=a/==' }), false)
 })
 
+test('room cookie choices keep inheritance and explicit anonymous requests distinct', () => {
+  const auth = loadAuth()
+  for (const value of [undefined, null]) assert.equal(auth.douyuCookieOverrideMode(value), 'inherit')
+  assert.equal(auth.douyuCookieOverrideMode(''), 'anonymous')
+  assert.equal(auth.douyuCookieOverrideMode('acf_auth=fixture%2F=='), 'custom')
+  assert.equal(auth.douyuRoomCookieValue('', 'custom'), null)
+  assert.equal(auth.douyuRoomCookieValue('  ', 'custom'), null)
+  assert.equal(auth.douyuRoomCookieValue('acf_auth=fixture', 'inherit'), null)
+  assert.equal(auth.douyuRoomCookieValue(null, 'anonymous'), '')
+  assert.equal(auth.douyuRoomCookieValue('acf_auth=fixture%2F==', 'custom'), 'acf_auth=fixture%2F==')
+  assert.equal(auth.douyuAuthFieldsEqual({}, { douyu_cookie: null }, true), true)
+  assert.equal(auth.douyuAuthFieldsEqual({}, { douyu_cookie: '' }, true), false)
+  assert.equal(auth.douyuAuthFieldsEqual({ douyu_cookie: '' }, { douyu_cookie: null }, true), false)
+})
+
 test('manual refresh reports success only with a new successful exchange', () => {
   const auth = loadAuth()
   const previous = status()

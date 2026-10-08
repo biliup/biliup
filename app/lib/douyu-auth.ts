@@ -108,9 +108,27 @@ export const DOUYU_AUTH_FIELDS = [
   'douyu_cookie', 'douyu_ltp0', 'douyu_refresh_device_id', 'douyu_auto_refresh',
 ] as const
 
+export type DouyuCookieMode = 'inherit' | 'custom' | 'anonymous'
+
+/** Room overrides use null/absence for inheritance and an explicit empty string for anonymity. */
+export function douyuCookieOverrideMode(cookie: unknown): DouyuCookieMode {
+  if (typeof cookie !== 'string') return 'inherit'
+  return cookie.trim() === '' ? 'anonymous' : 'custom'
+}
+
+/** A blank independent Cookie input must not accidentally disable the space's saved login. */
+export function douyuRoomCookieValue(cookie: unknown, mode: DouyuCookieMode): string | null {
+  if (mode === 'anonymous') return ''
+  if (mode === 'inherit' || typeof cookie !== 'string' || cookie.trim() === '') return null
+  return cookie
+}
+
 /** Empty field representations are equivalent; an unset switch uses the server's enabled default. */
-export function douyuAuthFieldsEqual(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+export function douyuAuthFieldsEqual(a: Record<string, unknown>, b: Record<string, unknown>, roomOverride = false): boolean {
   return DOUYU_AUTH_FIELDS.every((key) => {
+    if (roomOverride && key === 'douyu_cookie') {
+      return (a[key] ?? null) === (b[key] ?? null)
+    }
     const normalize = (value: unknown) => key === 'douyu_auto_refresh'
       ? value ?? true
       : value === undefined || value === null || value === '' ? '' : value

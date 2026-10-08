@@ -1,7 +1,10 @@
 //! Live smoke check: cargo run -p biliup --example douyu_probe -- --room 288016
 //! Add --cookie-file /path/to/cookies.json to check an authenticated session.
+//! For playback-only diagnostics, --validate-cookie false skips the separate login probe.
 //! Output is safe for public CI logs; API messages, URLs and credentials are omitted.
-use biliup::downloader::live::{Douyu, LiveCredentials, LiveOptions, LivePlugin, LiveRequest, LiveStatus};
+use biliup::downloader::live::{
+    Douyu, LiveCredentials, LiveOptions, LivePlugin, LiveRequest, LiveStatus,
+};
 use futures::StreamExt;
 use serde_json::{Value, json};
 use std::{collections::HashMap, path::PathBuf, process::Command, time::Duration};
@@ -14,6 +17,7 @@ struct Options {
     rate: u32,
     cdn: String,
     cookie: Option<String>,
+    validate_cookie: bool,
     seconds: u64,
     output_dir: PathBuf,
 }
@@ -28,7 +32,14 @@ impl Options {
         for pair in args.chunks_exact(2) {
             if !matches!(
                 pair[0].as_str(),
-                "--room" | "--codec" | "--rate" | "--cdn" | "--cookie-file" | "--seconds" | "--output-dir"
+                "--room"
+                    | "--codec"
+                    | "--rate"
+                    | "--cdn"
+                    | "--cookie-file"
+                    | "--validate-cookie"
+                    | "--seconds"
+                    | "--output-dir"
             ) {
                 return Err("unknown_argument");
             }
@@ -42,7 +53,11 @@ impl Options {
         {
             return Err("room_requires_safe_id_or_alias");
         }
-        let codec = values.get("--codec").copied().unwrap_or("AVC").to_ascii_uppercase();
+        let codec = values
+            .get("--codec")
+            .copied()
+            .unwrap_or("AVC")
+            .to_ascii_uppercase();
         if !matches!(codec.as_str(), "AVC" | "HEVC") {
             return Err("codec_requires_AVC_or_HEVC");
         }
@@ -69,6 +84,12 @@ impl Options {
             rate,
             cdn: values.get("--cdn").copied().unwrap_or("hw-h5").to_owned(),
             cookie,
+            validate_cookie: values
+                .get("--validate-cookie")
+                .copied()
+                .unwrap_or("true")
+                .parse()
+                .map_err(|_| "validate_cookie_requires_true_or_false")?,
             seconds,
             output_dir: values
                 .get("--output-dir")
@@ -106,7 +127,9 @@ async fn run(options: Options) -> Result<(), &'static str> {
         .timeout(Duration::from_secs(25))
         .build()
         .map_err(|_| "http_client_creation_failed")?;
-    if let Some(cookie) = &options.cookie {
+    if let Some(cookie) = &options.cookie
+        && options.validate_cookie
+    {
         let valid = Douyu::validate_cookie(cookie, &client)
             .await
             .map_err(|_| "cookie_validation_request_failed")?;
@@ -114,6 +137,11 @@ async fn run(options: Options) -> Result<(), &'static str> {
         if !valid {
             return Err("cookie_session_is_invalid");
         }
+    } else if options.cookie.is_some() {
+        println!(
+            "{}",
+            json!({"room":options.room,"cookie_validation_skipped":true})
+        );
     }
     let mut live_options = LiveOptions::default();
     live_options.douyu.codec = options.codec.clone();
@@ -144,6 +172,16 @@ async fn run(options: Options) -> Result<(), &'static str> {
             return Ok(());
         }
     };
+    // Only a generic bitrate/codec suffix, never the signed query or stream identifier.
+    // The filename is a diagnostic clue; actual dimensions come from the captured media.
+    let media_suffix = url::Url::parse(&stream.raw_stream_url)
+        .ok()
+        .and_then(|url| {
+            regex::Regex::new(r"(_\d+h?)?\.(flv|xs)$")
+                .unwrap()
+                .find(url.path())
+                .map(|suffix| suffix.as_str().to_owned())
+        });
     let mut request = client.get(&stream.raw_stream_url);
     for (name, value) in &stream.stream_headers {
         request = request.header(name, value);
@@ -201,11 +239,16 @@ async fn run(options: Options) -> Result<(), &'static str> {
     if !probe.status.success() {
         return Err("ffprobe_failed");
     }
-    let metadata: Value = serde_json::from_slice(&probe.stdout).map_err(|_| "ffprobe_invalid_JSON")?;
+    let metadata: Value =
+        serde_json::from_slice(&probe.stdout).map_err(|_| "ffprobe_invalid_JSON")?;
     let video = metadata
         .get("streams")
         .and_then(Value::as_array)
-        .and_then(|streams| streams.iter().find(|stream| stream["codec_type"] == "video"))
+        .and_then(|streams| {
+            streams
+                .iter()
+                .find(|stream| stream["codec_type"] == "video")
+        })
         .ok_or("sample_has_no_video_stream")?;
     let decode = Command::new("ffmpeg")
         .args(["-v", "error", "-xerror", "-i"])
@@ -224,6 +267,7 @@ async fn run(options: Options) -> Result<(), &'static str> {
         "{}",
         json!({"room": options.room, "requested_codec": options.codec,
         "requested_rate": options.rate, "offline": false, "bytes": data.len(),
+        "media_suffix": media_suffix,
         "codec_name": video["codec_name"], "width": video["width"], "height": video["height"],
         "fps": video["r_frame_rate"], "decode_ok": decoded})
     );

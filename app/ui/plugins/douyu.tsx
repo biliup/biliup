@@ -1,9 +1,14 @@
 'use client'
 import React, { useEffect } from 'react'
-import { Form, Radio, Select, useFormApi } from '@douyinfe/semi-ui'
+import { Form, Radio, RadioGroup, Select, useFormApi, useFormState } from '@douyinfe/semi-ui'
 import { usePathname } from 'next/navigation'
 import { useMe } from '../../lib/use-me'
-import { testDouyuCookie } from '../../lib/douyu-auth'
+import {
+  douyuCookieOverrideMode,
+  douyuRoomCookieValue,
+  testDouyuCookie,
+  type DouyuCookieMode,
+} from '../../lib/douyu-auth'
 import DouyuAuthPanel from './DouyuAuthPanel'
 import PlatformPanel, { digitsToNumber } from './PlatformPanel'
 
@@ -17,13 +22,20 @@ type Props = {
 const Douyu: React.FC<Props> = props => {
   const { entity, list, initValues, bare } = props
   const formApi = useFormApi()
+  const { values } = useFormState<Record<string, unknown>>()
   const pathname = usePathname()
   const { can } = useMe()
   // Fleet editors reuse the platform forms while editing remote configuration.
   // Local credential actions must never operate on the controller's own account there.
   const fleetEditor = pathname === '/nodes' || pathname?.startsWith('/nodes/')
   const localConfig = !!bare && !fleetEditor
+  const roomOverride = !bare && !fleetEditor
+  const roomId = typeof entity?.id === 'number' && entity.id > 0 ? entity.id : undefined
   const canTestCookie = !fleetEditor && can('config.edit')
+  const [customCookieInput, setCustomCookieInput] = React.useState(false)
+  const cookieValue = values?.douyu_cookie
+  const savedCookieMode = douyuCookieOverrideMode(cookieValue === undefined ? initValues?.douyu_cookie : cookieValue)
+  const cookieMode: DouyuCookieMode = customCookieInput && savedCookieMode === 'inherit' ? 'custom' : savedCookieMode
 
   useEffect(() => {
     if (initValues) {
@@ -32,6 +44,13 @@ const Douyu: React.FC<Props> = props => {
       })
     }
   }, [initValues, formApi])
+
+  const selectCookieMode = (mode: DouyuCookieMode) => {
+    // Keep an empty independent input available while typing; saving it still inherits login.
+    setCustomCookieInput(mode === 'custom')
+    formApi.setValue('douyu_cookie', douyuRoomCookieValue(formApi.getValue('douyu_cookie'), mode))
+    setTestResult(null)
+  }
 
   const [testingCookie, setTestingCookie] = React.useState(false)
   const [testResult, setTestResult] = React.useState<{ success: boolean; message: string } | null>(null)
@@ -68,11 +87,26 @@ const Douyu: React.FC<Props> = props => {
   return (
     <>
       <PlatformPanel header="斗鱼" itemKey="douyu" bare={bare}>
+        {roomOverride && <div style={{ marginBottom: 12 }}>
+          <div style={{ marginBottom: 8 }}>此房间的斗鱼登录来源</div>
+          <RadioGroup value={cookieMode} onChange={event => selectCookieMode(event.target.value as DouyuCookieMode)}>
+            <Radio value="inherit">继承空间配置</Radio>
+            <Radio value="custom">此房间独立 Cookie</Radio>
+            <Radio value="anonymous">此房间匿名取流</Radio>
+          </RadioGroup>
+          <div style={{ marginTop: 8, fontSize: 13, color: 'var(--semi-color-text-2)' }}>
+            {cookieMode === 'inherit' ? '使用「空间配置 → 平台设置 → 斗鱼」中已保存的 Cookie，并共享其续期结果。无需在此重复填写。'
+              : cookieMode === 'anonymous' ? '保存后此房间不使用空间配置中的登录凭据，平台可能限制原画画质。'
+                : '仅此房间使用下面的 Cookie；输入框留空时仍继承空间配置。独立账号不会复用空间配置的续期凭据。'}
+          </div>
+        </div>}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <Form.TextArea
             field="douyu_cookie"
             label="登录 Cookie（douyu_cookie）"
-            placeholder="acf_username=xxx; acf_uid=xxx; acf_auth=xxx; acf_did=xxx; ..."
+            placeholder={roomOverride && cookieMode === 'inherit' ? '已选择继承空间配置，无需重复填写 Cookie' : 'acf_username=xxx; acf_uid=xxx; acf_auth=xxx; acf_did=xxx; ...'}
+            disabled={roomOverride && cookieMode !== 'custom'}
+            convert={roomOverride ? value => douyuRoomCookieValue(value, cookieMode) : undefined}
             onChange={() => setTestResult(null)}
             autosize={{ minRows: 2, maxRows: 6 }}
             extraText={
@@ -86,7 +120,7 @@ const Douyu: React.FC<Props> = props => {
                 支持 Network 面板里的 Cookie 字符串，也支持浏览器插件导出的 Cookie JSON 数组。
                 {localConfig && <><br />完整 JSON 可同时包含 www.douyu.com 和 passport.douyu.com 的 Cookie，保存时会分离续期凭据。</>}
                 <br />
-                留空时尝试匿名取流，实际画质以平台返回为准。
+                {roomOverride ? '此房间默认继承空间配置；需要匿名取流时请明确选择上方「此房间匿名取流」。' : '留空时尝试匿名取流，实际画质以平台返回为准。'}
                 <br />
                 <a
                   href="https://biliup.github.io/biliup/docs/tutorials/douyu-cookie-guide/"
@@ -100,7 +134,7 @@ const Douyu: React.FC<Props> = props => {
             }
             style={{ width: '100%' }}
           />
-          {canTestCookie && <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {canTestCookie && (!roomOverride || cookieMode === 'custom') && <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button
               type="button"
               onClick={handleTestCookie}
@@ -156,7 +190,8 @@ const Douyu: React.FC<Props> = props => {
           />
           <DouyuAuthPanel savedValues={entity ?? {}} />
         </>}
-        {!bare && can('config.edit') && <div style={{ fontSize: 13, color: 'var(--semi-color-text-2)', margin: '12px 0' }}>
+        {roomOverride && roomId !== undefined && <DouyuAuthPanel savedValues={initValues ?? {}} streamerId={roomId} />}
+        {roomOverride && can('config.edit') && <div style={{ fontSize: 13, color: 'var(--semi-color-text-2)', margin: '12px 0' }}>
           自动续期凭据与登录状态请在本机「空间配置 → 平台设置 → 斗鱼」中管理。
           此处测试的是当前表单里的 Cookie，尚未保存的修改不会用于自动续期。
         </div>}

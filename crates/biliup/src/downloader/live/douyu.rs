@@ -396,6 +396,14 @@ impl<'a> DouyuLive<'a> {
             .parse()
             .map_err(|_| WebPlayError::Rejected(LiveError::custom("斗鱼房间号无效")))?;
         let device_id = self.device_id(true).map_err(WebPlayError::Rejected)?;
+        // Browser exports can include unrelated application and tracking cookies.
+        // Sending those to the playback API can trigger HTTP 403 even with a valid
+        // login, causing the anonymous App fallback to lose access to original quality.
+        let playback_cookie = self
+            .douyu_cookie
+            .as_deref()
+            .map(web_playback_cookie_header)
+            .filter(|header| !header.is_empty());
         let referer = format!("{web_origin}/{room_id}");
         let mut key_request = self
             .client
@@ -406,7 +414,7 @@ impl<'a> DouyuLive<'a> {
             .header("user-agent", DOUYU_USER_AGENT)
             .header("referer", &referer)
             .timeout(Duration::from_secs(15));
-        if let Some(cookie) = &self.douyu_cookie {
+        if let Some(cookie) = &playback_cookie {
             key_request = key_request.header("cookie", cookie);
         }
         let response = key_request
@@ -466,7 +474,7 @@ impl<'a> DouyuLive<'a> {
             .header("user-agent", DOUYU_USER_AGENT)
             .header("referer", referer)
             .timeout(Duration::from_secs(15));
-        if let Some(cookie) = &self.douyu_cookie {
+        if let Some(cookie) = &playback_cookie {
             play_request = play_request.header("cookie", cookie);
         }
         play_request
@@ -698,6 +706,20 @@ fn build_cookie_header(user_cookie: &str, device_id: &str) -> String {
         .collect::<Vec<_>>();
     parts.push(format!("acf_did={device_id}"));
     parts.join("; ")
+}
+
+/// The official Web playback endpoints need the login cookies and their Web DID.
+/// Keep the full imported source separately for renewal and other request types.
+fn web_playback_cookie_header(cookie: &str) -> String {
+    cookie
+        .split(';')
+        .map(str::trim)
+        .filter(|part| {
+            part.split_once('=')
+                .is_some_and(|(name, _)| name.starts_with("acf_") || name == "dy_did")
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 fn room_id_from_mobile_page(page: &str) -> Option<String> {
@@ -1371,6 +1393,18 @@ mod tests {
     }
 
     #[test]
+    fn web_playback_cookie_omits_unrelated_fields_and_preserves_encoded_login() {
+        let header = web_playback_cookie_header(
+            " huya_ua={\"source\":\"browser\"}; acf_auth=encoded%2F==; PHPSESSID=other; acf_uid=42; dy_did=device; LTP0=passport-only; _ga=tracking; acf_did=app-device ",
+        );
+        assert_eq!(
+            header,
+            "acf_auth=encoded%2F==; acf_uid=42; dy_did=device; acf_did=app-device"
+        );
+        assert!(web_playback_cookie_header("PHPSESSID=other; _ga=tracking").is_empty());
+    }
+
+    #[test]
     fn hevc_codec_selection_respects_user_choice() {
         // 测试HEVC选择
         let hevc_info = PlayInfo {
@@ -1504,6 +1538,10 @@ mod tests {
             .headers()
             .get("cookie")
             .map(|value| value.to_str().unwrap().to_string());
+        let unrelated_cookie = cookie.as_deref().is_some_and(|header| {
+            cookie::cookie_value(header, "huya_ua").is_some()
+                || cookie::cookie_value(header, "PHPSESSID").is_some()
+        });
         let query = form_urlencoded::parse(request.uri().query().unwrap_or_default().as_bytes())
             .into_owned()
             .collect();
@@ -1521,7 +1559,13 @@ mod tests {
         let (status, body) = if path.ends_with("/getEncryption") {
             (axum::http::StatusCode::OK, encryption_fixture().to_string())
         } else if path.contains("getH5PlayV1") {
-            (mock.web_status, mock.web_body.clone())
+            if unrelated_cookie {
+                // Reproduce the observed Web rejection of an otherwise valid
+                // full browser export, before the App fallback loses login quality.
+                (axum::http::StatusCode::FORBIDDEN, r#""forbidden""#.into())
+            } else {
+                (mock.web_status, mock.web_body.clone())
+            }
         } else if path.contains("appGetPlayer") {
             (axum::http::StatusCode::OK, r#"{"error":0,"data":{"rtmp_url":"https://cdn.example/live","rtmp_live":"fallback.flv","rate":3,"rateSetting":[{"name":"超清","rate":3,"bit":2000}]}}"#.into())
         } else {
@@ -1570,7 +1614,7 @@ mod tests {
             // Dynamic room qualities must not be rejected by a fixed whitelist.
             live.douyu_rate = 8;
             if logged_in {
-                live.douyu_cookie = Some(cookie::normalize_cookie_header(r#"[{"name":"acf_auth","value":"fixture%2F==","domain":"www.douyu.com"},{"name":"dy_did","value":"fixtureDevice","domain":".douyu.com"}]"#).unwrap());
+                live.douyu_cookie = Some(cookie::normalize_cookie_header(r#"[{"name":"acf_auth","value":"fixture%2F==","domain":"www.douyu.com"},{"name":"dy_did","value":"fixtureDevice","domain":".douyu.com"},{"name":"huya_ua","value":"{\"source\":\"browser\"}","domain":".douyu.com"},{"name":"PHPSESSID","value":"other-session","domain":".douyu.com"}]"#).unwrap());
             }
             let info = live
                 .get_play_info_at("6979222", &origin, &origin)
@@ -1611,6 +1655,10 @@ mod tests {
                     assert_eq!(
                         cookie::cookie_value(request.cookie.as_deref().unwrap(), "acf_auth"),
                         Some("fixture%2F==")
+                    );
+                    assert_eq!(
+                        request.cookie.as_deref(),
+                        Some("acf_auth=fixture%2F==; dy_did=fixtureDevice")
                     );
                 }
             }
