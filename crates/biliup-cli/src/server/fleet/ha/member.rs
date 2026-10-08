@@ -28,6 +28,7 @@ use crate::server::infrastructure::repositories::{
 };
 use crate::server::infrastructure::service_register::ServiceRegister;
 use crate::server::services::configuration::{ApplyConfigError, apply_config};
+use biliup::downloader::live::DouyuCookieInput;
 use biliup::uploader::credential::{LoginInfo, save_login_info};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -44,16 +45,95 @@ const SCAN_INTERVAL: Duration = Duration::from_secs(5);
 /// 改配对设置时最多等对端回话这么久
 const ASK_WAIT: Duration = Duration::from_secs(10);
 
-/// 不同步的配置键：按机器的键（[`crate::server::fleet::layers::PER_NODE_KEYS`]）与旧的配置文件主播表
+/// Passport renewal tickets belong to the local login session. Sharing a ticket
+/// between independent SQLite keepers would cause duplicate exchanges and lose
+/// rotations. Web cookies continue to participate in the existing HA sync.
 pub fn synced_config_key(name: &str) -> bool {
-    !is_per_node(name) && name != "streamers"
+    !is_per_node(name)
+        && !matches!(
+            name,
+            "streamers" | "douyu_ltp0" | "douyu_refresh_device_id" | "douyu_auto_refresh"
+        )
 }
 
 fn config_object(config: &Config) -> Map<String, Value> {
+    let mut object = local_config_object(config);
+    for field in [
+        "douyu_ltp0",
+        "douyu_refresh_device_id",
+        "douyu_auto_refresh",
+    ] {
+        object.remove(field);
+    }
+    let cookie = config
+        .douyu_cookie
+        .as_deref()
+        .and_then(|input| DouyuCookieInput::parse(input).ok())
+        .map(|parsed| Value::String(parsed.cookie))
+        .unwrap_or(Value::Null);
+    object.insert("douyu_cookie".into(), cookie);
+    object
+}
+
+fn local_config_object(config: &Config) -> Map<String, Value> {
     match serde_json::to_value(config) {
         Ok(Value::Object(map)) => map,
         _ => Map::new(),
     }
+}
+
+fn shared_cookie_value(value: Value) -> Result<Value, String> {
+    match value {
+        Value::Null => Ok(Value::Null),
+        Value::String(input) => DouyuCookieInput::parse(&input)
+            .map(|parsed| Value::String(parsed.cookie))
+            .map_err(|_| "斗鱼 Cookie 格式无效，未同步登录凭据".into()),
+        _ => Err("斗鱼 Cookie 格式无效，未同步登录凭据".into()),
+    }
+}
+
+fn apply_shared_cookie(config: &mut Config, value: Value) -> Result<(), String> {
+    let value = shared_cookie_value(value)?;
+    let current = config
+        .douyu_cookie
+        .as_deref()
+        .and_then(|input| DouyuCookieInput::parse(input).ok());
+    let incoming = value
+        .as_str()
+        .and_then(|input| DouyuCookieInput::parse(input).ok());
+    let same_account = current
+        .as_ref()
+        .and_then(|parsed| parsed.account_id.as_ref())
+        .zip(
+            incoming
+                .as_ref()
+                .and_then(|parsed| parsed.account_id.as_ref()),
+        )
+        .is_some_and(|(old, new)| old == new);
+    if same_account {
+        // Move this machine's imported passport pair into explicit local fields
+        // before the imported JSON is replaced by the peer's Web-only header.
+        if config
+            .douyu_ltp0
+            .as_deref()
+            .is_none_or(|ticket| ticket.trim().is_empty())
+        {
+            config.douyu_ltp0 = current.as_ref().and_then(|parsed| parsed.ltp0.clone());
+        }
+        if config
+            .douyu_refresh_device_id
+            .as_deref()
+            .is_none_or(|did| did.trim().is_empty())
+        {
+            config.douyu_refresh_device_id =
+                current.as_ref().and_then(|parsed| parsed.dy_did.clone());
+        }
+    } else {
+        config.douyu_ltp0 = None;
+        config.douyu_refresh_device_id = None;
+    }
+    config.douyu_cookie = value.as_str().map(str::to_owned);
+    Ok(())
 }
 
 fn config_value(object: &Map<String, Value>, name: &str) -> Value {
@@ -529,6 +609,9 @@ impl Member {
                 .with_prefix(CONFIG)
                 .map(|(key, _)| key[CONFIG.len()..].to_string()),
         );
+        // Older outboxes may already contain newly local keys. Do not enqueue
+        // them again; materialize also refuses queued legacy entries.
+        names.retain(|name| synced_config_key(name));
         let now = now_ms();
         let mut changed = Vec::new();
         for name in names {
@@ -626,6 +709,9 @@ impl Member {
         let record = file.book.get(&queued.key)?;
         let stamp = record.stamp;
         if let Some(name) = queued.key.strip_prefix(CONFIG) {
+            if !synced_config_key(name) {
+                return None;
+            }
             let object = config_object(&self.services.config.read().unwrap());
             return Some(PairMessage::Edit(PairEdit {
                 seq: queued.seq,
@@ -878,7 +964,19 @@ impl Member {
             Verdict::Same | Verdict::Keep => return None,
             Verdict::Take => {}
         }
-        let value = edit.value.unwrap_or(Value::Null);
+        let value = if name == "douyu_cookie" {
+            match shared_cookie_value(edit.value.unwrap_or(Value::Null)) {
+                Ok(value) => value,
+                Err(reason) => {
+                    return Some(Rejected {
+                        key: edit.key,
+                        reason,
+                    });
+                }
+            }
+        } else {
+            edit.value.unwrap_or(Value::Null)
+        };
         let current = config_value(&config_object(&self.services.config.read().unwrap()), &name);
         if digest(&current) == digest(&value) {
             state
@@ -912,10 +1010,17 @@ impl Member {
 
     /// 换掉配置里的一个键并让它生效，返回生效后这个键的值
     async fn apply_config_value(&self, name: &str, value: Value) -> Result<Value, String> {
-        let mut object = config_object(&self.services.config.read().unwrap());
-        object.insert(name.to_string(), value);
-        let config: Config = serde_json::from_value(Value::Object(object))
-            .map_err(|e| format!("配置的形状不对：{e}"))?;
+        let current = self.services.config.read().unwrap().clone();
+        let config = if name == "douyu_cookie" {
+            let mut config = current;
+            apply_shared_cookie(&mut config, value)?;
+            config
+        } else {
+            let mut object = local_config_object(&current);
+            object.insert(name.to_string(), value);
+            serde_json::from_value(Value::Object(object))
+                .map_err(|_| "配置的形状不对，未同步配置".to_string())?
+        };
         let applied = apply_config(
             &self.services.config,
             &self.services.pool,
@@ -1065,6 +1170,179 @@ pub(crate) mod tests {
     use std::sync::RwLock;
     use tokio::sync::mpsc;
     use tracing_subscriber::{EnvFilter, reload};
+
+    fn douyu_import(uid: &str, auth: &str, ticket: &str, device: &str) -> String {
+        serde_json::json!([
+            {"name":"acf_uid","value":uid,"domain":"www.douyu.com"},
+            {"name":"acf_auth","value":auth,"domain":"www.douyu.com"},
+            {"name":"LTP0","value":ticket,"domain":"passport.douyu.com"},
+            {"name":"dy_did","value":device,"domain":"passport.douyu.com"},
+        ])
+        .to_string()
+    }
+
+    #[test]
+    fn douyu_passport_fields_and_embedded_tickets_are_local_only() {
+        for name in [
+            "douyu_ltp0",
+            "douyu_refresh_device_id",
+            "douyu_auto_refresh",
+        ] {
+            assert!(!synced_config_key(name));
+        }
+        assert!(synced_config_key("douyu_cookie"));
+        let config = Config {
+            douyu_cookie: Some(douyu_import(
+                "42",
+                "web",
+                "private-ticket",
+                "private-device",
+            )),
+            douyu_ltp0: Some("explicit-private-ticket".into()),
+            douyu_refresh_device_id: Some("explicit-private-device".into()),
+            douyu_auto_refresh: Some(false),
+            ..Config::default()
+        };
+        let shared = config_object(&config);
+        assert!(!serde_json::to_string(&shared).unwrap().contains("private"));
+        assert_eq!(shared["douyu_cookie"], "acf_auth=web; acf_uid=42");
+        let invalid = Config {
+            douyu_cookie: Some("secret-invalid".into()),
+            ..Config::default()
+        };
+        assert!(config_object(&invalid)["douyu_cookie"].is_null());
+        assert!(
+            !serde_json::to_string(&config_object(&invalid))
+                .unwrap()
+                .contains("secret-invalid")
+        );
+    }
+
+    #[test]
+    fn douyu_web_update_preserves_only_the_current_accounts_local_passport_pair() {
+        let mut config = Config {
+            douyu_cookie: Some(douyu_import("42", "old", "local-ticket", "local-device")),
+            douyu_auto_refresh: Some(false),
+            ..Config::default()
+        };
+        let remote = douyu_import("42", "new", "remote-ticket", "remote-device");
+        apply_shared_cookie(&mut config, Value::String(remote)).unwrap();
+        assert_eq!(
+            config.douyu_cookie.as_deref(),
+            Some("acf_auth=new; acf_uid=42")
+        );
+        assert_eq!(config.douyu_ltp0.as_deref(), Some("local-ticket"));
+        assert_eq!(
+            config.douyu_refresh_device_id.as_deref(),
+            Some("local-device")
+        );
+        assert_eq!(config.douyu_auto_refresh, Some(false));
+        apply_shared_cookie(
+            &mut config,
+            Value::String(douyu_import(
+                "99",
+                "other",
+                "foreign-ticket",
+                "foreign-device",
+            )),
+        )
+        .unwrap();
+        assert!(config.douyu_ltp0.is_none());
+        assert!(config.douyu_refresh_device_id.is_none());
+        assert!(!config.douyu_cookie.as_ref().unwrap().contains("foreign"));
+    }
+
+    #[test]
+    fn douyu_invalid_incoming_cookie_does_not_replace_or_echo_credentials() {
+        let mut config = Config {
+            douyu_cookie: Some("acf_uid=42; acf_auth=old".into()),
+            douyu_ltp0: Some("local-ticket".into()),
+            douyu_refresh_device_id: Some("local-device".into()),
+            ..Config::default()
+        };
+        let error = apply_shared_cookie(
+            &mut config,
+            Value::String("secret\r\nInjected: secret".into()),
+        )
+        .unwrap_err();
+        assert!(!error.contains("secret"));
+        assert_eq!(config.douyu_ltp0.as_deref(), Some("local-ticket"));
+        assert_eq!(
+            config.douyu_cookie.as_deref(),
+            Some("acf_uid=42; acf_auth=old")
+        );
+        apply_shared_cookie(&mut config, Value::Null).unwrap();
+        assert!(config.douyu_cookie.is_none());
+        assert!(config.douyu_ltp0.is_none());
+        assert!(config.douyu_refresh_device_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn douyu_config_sync_preserves_local_credentials_and_drops_legacy_queued_passports() {
+        let machine = machine().await;
+        set_config(&machine.services, |config| {
+            config.douyu_cookie = Some(douyu_import("42", "old", "local-ticket", "local-device"));
+            config.douyu_auto_refresh = Some(false);
+        })
+        .await;
+        let member = start(Side::Controller, &machine).await;
+        stop_watch(&member);
+        member
+            .apply_config_value("segment_time", Value::String("01:00:00".into()))
+            .await
+            .unwrap();
+        assert!(
+            machine
+                .services
+                .config
+                .read()
+                .unwrap()
+                .douyu_cookie
+                .as_ref()
+                .unwrap()
+                .contains("local-ticket")
+        );
+        member
+            .apply_config_value(
+                "douyu_cookie",
+                Value::String(douyu_import("42", "new", "remote-ticket", "remote-device")),
+            )
+            .await
+            .unwrap();
+        {
+            let config = machine.services.config.read().unwrap();
+            assert_eq!(config.douyu_ltp0.as_deref(), Some("local-ticket"));
+            assert_eq!(
+                config.douyu_refresh_device_id.as_deref(),
+                Some("local-device")
+            );
+            assert_eq!(config.douyu_auto_refresh, Some(false));
+            assert!(!config.douyu_cookie.as_ref().unwrap().contains("remote"));
+        }
+        let mut state = member.state.lock().await;
+        for name in [
+            "douyu_ltp0",
+            "douyu_refresh_device_id",
+            "douyu_auto_refresh",
+        ] {
+            let key = config_key(name);
+            state
+                .file
+                .book
+                .write(&key, Side::Controller, now_ms(), Some("legacy-hash".into()));
+            state.file.enqueue(&key);
+            let queued = state
+                .file
+                .queue
+                .iter()
+                .find(|queued| queued.key == key)
+                .unwrap();
+            assert!(member.materialize(&state.file, queued).await.is_none());
+        }
+        drop(state);
+        member.stop();
+        machine.services.cleanup().await;
+    }
 
     pub(crate) async fn services(dir: &Path) -> ServiceRegister {
         std::fs::create_dir_all(dir).unwrap();
