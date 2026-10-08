@@ -29,6 +29,8 @@ jobs:
       run: |
         npm install
         npm run build
+    - name: Set desktop installer version
+      run: node .github/scripts/desktop-version.mjs
     # 只取 ffmpeg.exe 和许可文本，由 tauri.ffmpeg.conf.json 作为资源打进安装包（安装目录下的 ffmpeg\）。
     # GPL 对应源码不由我们托管：README.txt 和 Release 说明链接到上游固定 commit 的 FFmpeg 源码
     # 与 BtbN 构建脚本（scripts.d/ 固定了各依赖的版本与源码地址）。
