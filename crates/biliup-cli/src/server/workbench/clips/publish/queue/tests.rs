@@ -11,6 +11,7 @@ struct Fake {
     uploads: Mutex<Vec<PathBuf>>,
     covers: Mutex<Vec<PathBuf>>,
     submitted: Mutex<Vec<Studio>>,
+    submit_attempts: AtomicU64,
     /// 下一次上传 / 投稿返回的失败（先进先出）。
     upload_failures: Mutex<VecDeque<Failure>>,
     submit_failures: Mutex<VecDeque<Failure>>,
@@ -84,6 +85,7 @@ impl Connection for FakeConnection {
     }
 
     async fn submit(&self, studio: &Studio) -> Result<Submitted, Failure> {
+        self.0.submit_attempts.fetch_add(1, Ordering::Relaxed);
         tokio::time::sleep(self.0.delay).await;
         if let Some(failure) = lock(&self.0.submit_failures).pop_front() {
             return Err(failure);
@@ -536,6 +538,7 @@ fn rate_limits_and_bilibili_rejections_are_told_apart() {
         message,
         "提交视频失败：B 站拒绝了投稿：您投稿的频率过快（code 21070）"
     );
+    assert!(matches!(describe_submit(&report), Failure::Other(_)));
     assert_eq!(
         bilibili_message(
             r#"ResponseData { code: 21566, data: None, message: "封面格式不对", ttl: Some(1) }"#,
@@ -543,6 +546,68 @@ fn rate_limits_and_bilibili_rejections_are_told_apart() {
         ),
         "B 站拒绝了封面：封面格式不对（code 21566）"
     );
+}
+
+#[tokio::test]
+async fn submit_timeouts_preserve_the_marker_and_require_confirmation() {
+    // A local server accepts the request but never replies, as if the response was lost.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (_socket, _) = listener.accept().await.unwrap();
+        std::future::pending::<()>().await;
+    });
+    let error = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_millis(30))
+        .build()
+        .unwrap()
+        .post(format!("http://{address}/submit"))
+        .send()
+        .await
+        .unwrap_err();
+    server.abort();
+    assert!(error.is_timeout());
+    let report = Report::new(Kind::from(error)).change_context(AppError::Unknown);
+    let failure = describe_submit(&report);
+    assert!(matches!(&failure, Failure::Unknown(message) if message.contains(UNKNOWN_HINT)));
+
+    let env = env().await;
+    let clip = env.clip(1000, 2000, "a").await;
+    lock(&env.fake.submit_failures).push_back(failure);
+    let job = env.enqueue(std::slice::from_ref(&clip));
+    let (failed, _) = env.wait(job.id, JobState::Failed).await;
+    assert_eq!(failed.detail, "投稿结果未知");
+    let row = clips::get(&env.pool, clip.id).await.unwrap().unwrap();
+    assert_eq!(row.submit_state, Some(SubmitState::Submitting));
+    assert_eq!(row.submit_job, Some(job.id as i64));
+    assert!(matches!(
+        env.publisher.retry(job.id),
+        Err(ActionError::Conflict(message)) if message.contains(UNKNOWN_HINT)
+    ));
+    assert_eq!(env.fake.submit_attempts.load(Ordering::Relaxed), 1);
+
+    env.publisher.remove(job.id).unwrap();
+    assert!(
+        env.publisher
+            .check(std::slice::from_ref(&row), false)
+            .is_err()
+    );
+    let confirmed = env
+        .publisher
+        .enqueue(
+            env.session,
+            std::slice::from_ref(&row),
+            Settings::default(),
+            Mode::Quick,
+            None,
+            true,
+        )
+        .unwrap();
+    env.wait(confirmed.id, JobState::Done).await;
+    assert_eq!(env.fake.submit_attempts.load(Ordering::Relaxed), 2);
+    let row = clips::get(&env.pool, clip.id).await.unwrap().unwrap();
+    assert_eq!(row.submit_state, None);
 }
 
 /// 投稿请求到了 B 站、还没记账时进程退出：重启后切片记为投稿结果未知，再次发布要显式确认。

@@ -186,6 +186,7 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         "/v1/publish-jobs/{jid}" if method == Method::DELETE => UploadSubmit,
         "/v1/configuration" if get => ConfigView,
         "/v1/configuration" if method == Method::PUT => ConfigEdit,
+        "/v1/douyu/validate-cookie" if method == Method::POST => ConfigEdit,
         // 连通性测试会用已保存的 key 调外部接口，归配置编辑；状态不含 key 和地址
         "/v1/auto-clip/test" if method == Method::POST => ConfigEdit,
         "/v1/auto-clip/status" | "/v1/auto-clip/jobs" if get => FileView,
@@ -332,6 +333,7 @@ mod tests {
             include_str!("../api/web_users.rs"),
             include_str!("../api/fleet.rs"),
             include_str!("../api/fleet_ha.rs"),
+            include_str!("../api/douyu_validation.rs"),
         ];
         // 这些路由有意不挂权限层：登录相关对外公开，`/v1/me*` 只要求登录。
         let unguarded = [
@@ -397,6 +399,29 @@ mod tests {
             assert!(Role::Operator.has(permission), "{permission:?}");
             assert!(Role::Viewer.has(permission), "{permission:?}");
         }
+    }
+
+    #[test]
+    fn validating_douyu_credentials_requires_configuration_editing() {
+        assert_eq!(
+            required_permission(
+                &Method::POST,
+                "/v1/douyu/validate-cookie",
+                "/v1/douyu/validate-cookie",
+            ),
+            Some(Permission::ConfigEdit)
+        );
+        for role in Role::ALL {
+            assert_eq!(role.has(Permission::ConfigEdit), role == Role::Admin);
+        }
+        assert_eq!(
+            required_permission(
+                &Method::GET,
+                "/v1/douyu/validate-cookie",
+                "/v1/douyu/validate-cookie",
+            ),
+            None
+        );
     }
 
     #[test]

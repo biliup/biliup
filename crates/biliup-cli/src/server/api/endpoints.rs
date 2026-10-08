@@ -323,19 +323,52 @@ pub async fn get_upload_streamers_endpoint(
     caller: Caller,
     // Extension(streamers_service): Extension<DynUploadStreamersRepository>,
     State(pool): State<ConnectionPool>,
-) -> Result<Json<Vec<UploadStreamer>>, Response> {
-    let mut uploader_streamers = UploadStreamer::select()
+) -> Result<Json<Vec<serde_json::Value>>, Response> {
+    let uploader_streamers = UploadStreamer::select()
         .fetch_all(&pool)
         .await
         .change_context(AppError::Unknown)
         .map_err(report_to_response)?;
-    if !caller.can_access(Field::TemplateAccount) {
-        for template in &mut uploader_streamers {
-            template.user_cookie = None;
-            template.cover_path = None;
-        }
+    let mut response = Vec::with_capacity(uploader_streamers.len());
+    for template in uploader_streamers {
+        response.push(template_view(&caller.subject, &pool, &template).await?);
     }
-    Ok(Json(uploader_streamers))
+    Ok(Json(response))
+}
+
+async fn template_view(
+    subject: &Subject,
+    pool: &ConnectionPool,
+    template: &impl Serialize,
+) -> Result<serde_json::Value, Response> {
+    let mut view = serde_json::to_value(template)
+        .change_context(AppError::Unknown)
+        .map_err(report_to_response)?;
+    if !subject.can_access(Field::TemplateCoverPath) {
+        view["cover_path"] = serde_json::Value::Null;
+    }
+    if !subject.can_access(Field::TemplateAccount) {
+        let selector = if let Some(path) =
+            view["user_cookie"].as_str().filter(|path| !path.is_empty())
+        {
+            let id: Option<i64> = sqlx::query_scalar(
+                "SELECT id FROM configuration WHERE key = 'bilibili-cookies' AND value = ? ORDER BY id LIMIT 1",
+            )
+            .bind(path)
+            .fetch_optional(pool)
+            .await
+            .change_context(AppError::Unknown)
+            .map_err(report_to_response)?;
+            Some(id.map_or_else(
+                || "account:current".to_string(),
+                |id| format!("account:{id}"),
+            ))
+        } else {
+            None
+        };
+        view["user_cookie"] = serde_json::to_value(selector).unwrap_or_default();
+    }
+    Ok(view)
 }
 
 /// 保存投稿模板时的两个受保护字段：没有 [`Field::TemplateAccount`] 的人只能从已登记的
@@ -347,9 +380,6 @@ async fn protect_template_fields(
 ) -> Result<(), Response> {
     let keep_cover = !subject.can_access(Field::TemplateCoverPath);
     let check_account = !subject.can_access(Field::TemplateAccount);
-    if !keep_cover && !check_account {
-        return Ok(());
-    }
     let current = match upload_streamer.id {
         Some(id) => UploadStreamer::select()
             .where_("id = ?")
@@ -365,19 +395,29 @@ async fn protect_template_fields(
             .as_ref()
             .and_then(|template| template.cover_path.clone());
     }
-    if !check_account {
-        return Ok(());
-    }
     let Some(cookie) = upload_streamer
         .user_cookie
         .as_deref()
         .filter(|c| !c.is_empty())
     else {
+        if check_account {
+            upload_streamer.user_cookie = current.and_then(|template| template.user_cookie);
+        }
         return Ok(());
     };
     // Non-account managers receive an opaque `account:<id>` selector. Resolve
     // it server-side so the API never needs to expose credential file paths.
     let resolved_cookie = if let Some(id) = cookie.strip_prefix("account:") {
+        if id == "current" {
+            upload_streamer.user_cookie = current
+                .as_ref()
+                .and_then(|template| template.user_cookie.clone())
+                .filter(|path| !path.is_empty());
+            if upload_streamer.user_cookie.is_none() {
+                return Err((StatusCode::BAD_REQUEST, "没有可保留的投稿账号").into_response());
+            }
+            return Ok(());
+        }
         let id = id
             .parse::<i64>()
             .map_err(|_| (StatusCode::BAD_REQUEST, "账号 ID 无效").into_response())?;
@@ -394,6 +434,9 @@ async fn protect_template_fields(
         cookie.to_string()
     };
     upload_streamer.user_cookie = Some(resolved_cookie.clone());
+    if !check_account {
+        return Ok(());
+    }
     if current
         .as_ref()
         .is_some_and(|template| template.user_cookie.as_deref() == Some(resolved_cookie.as_str()))
@@ -420,29 +463,28 @@ pub async fn add_upload_streamer_endpoint(
     Json(mut upload_streamer): Json<InsertUploadStreamer>,
 ) -> Result<Json<serde_json::Value>, Response> {
     protect_template_fields(&caller.subject, &pool, &mut upload_streamer).await?;
-    let mut response = if upload_streamer.id.is_none() {
-        serde_json::to_value(
-            ormlite::Insert::insert(upload_streamer, &pool)
+    let response = if upload_streamer.id.is_none() {
+        template_view(
+            &caller.subject,
+            &pool,
+            &ormlite::Insert::insert(upload_streamer, &pool)
                 .await
                 .change_context(AppError::Unknown)
                 .map_err(report_to_response)?,
         )
-        .change_context(AppError::Unknown)
-        .map_err(report_to_response)?
+        .await?
     } else {
-        serde_json::to_value(
-            upload_streamer
+        template_view(
+            &caller.subject,
+            &pool,
+            &upload_streamer
                 .update_all_fields(&pool)
                 .await
                 .change_context(AppError::Unknown)
                 .map_err(report_to_response)?,
         )
-        .change_context(AppError::Unknown)
-        .map_err(report_to_response)?
+        .await?
     };
-    if !caller.can_access(Field::TemplateAccount) {
-        redact::upload_template(&mut response);
-    }
     Ok(Json(response))
 }
 
@@ -450,19 +492,17 @@ pub async fn get_upload_streamer_endpoint(
     caller: Caller,
     State(pool): State<ConnectionPool>,
     Path(id): Path<i64>,
-) -> Result<Json<UploadStreamer>, Response> {
-    let mut uploader_streamer = UploadStreamer::select()
+) -> Result<Json<serde_json::Value>, Response> {
+    let uploader_streamer = UploadStreamer::select()
         .where_("id = ?")
         .bind(id)
         .fetch_one(&pool)
         .await
         .change_context(AppError::Unknown)
         .map_err(report_to_response)?;
-    if !caller.can_access(Field::TemplateAccount) {
-        uploader_streamer.user_cookie = None;
-        uploader_streamer.cover_path = None;
-    }
-    Ok(Json(uploader_streamer))
+    Ok(Json(
+        template_view(&caller.subject, &pool, &uploader_streamer).await?,
+    ))
 }
 /// 有主播在用的模板不删（409）：`livestreamers.upload_streamers_id` 是 `ON DELETE CASCADE`，
 /// 直接删会把绑着它的主播一起从库里删掉，而它们在监控里的房间还照常录、传。
@@ -593,12 +633,20 @@ mod user_payload_tests {
 
 #[cfg(test)]
 mod template_field_tests {
-    use super::protect_template_fields;
+    use super::{
+        add_upload_streamer_endpoint, get_upload_streamer_endpoint, get_users_endpoint,
+        protect_template_fields,
+    };
+    use crate::server::api::access::Caller;
     use crate::server::infrastructure::connection_pool::ConnectionManager;
     use crate::server::infrastructure::models::upload_streamer::InsertUploadStreamer;
     use crate::server::infrastructure::permissions::Role;
     use crate::server::infrastructure::policy::Subject;
     use axum::http::StatusCode;
+    use axum::{
+        Json,
+        extract::{Path, State},
+    };
     use ormlite::Model;
 
     fn template(id: Option<i64>, cookie: &str, cover: &str) -> InsertUploadStreamer {
@@ -610,6 +658,109 @@ mod template_field_tests {
             "tags": [],
         }))
         .unwrap()
+    }
+
+    fn operator() -> Caller {
+        let mut caller = Caller::unrestricted();
+        caller.subject = Subject::user(2, Role::Operator);
+        caller
+    }
+
+    #[tokio::test]
+    async fn operator_edits_preserve_bindings_without_exposing_credential_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = ConnectionManager::new_pool(dir.path().join("data.sqlite3").to_str().unwrap())
+            .await
+            .unwrap();
+        let account = sqlx::query("INSERT INTO configuration (key, value) VALUES ('bilibili-cookies', '/srv/private/account.json')")
+            .execute(&pool).await.unwrap().last_insert_rowid();
+        let saved = template(None, "/srv/private/account.json", "/srv/private/cover.jpg")
+            .insert(&pool)
+            .await
+            .unwrap();
+        let users = get_users_endpoint(operator(), State(pool.clone()))
+            .await
+            .unwrap()
+            .0;
+        let selector = format!("account:{account}");
+        assert_eq!(users[0]["value"], selector);
+        assert!(
+            !serde_json::to_string(&users)
+                .unwrap()
+                .contains("/srv/private")
+        );
+
+        let id = saved.id.unwrap();
+        let read = get_upload_streamer_endpoint(operator(), State(pool.clone()), Path(id))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(read["user_cookie"], selector);
+        assert!(read["cover_path"].is_null());
+        // Simulate the edit form: the visible selection and a changed title
+        // are submitted, while the hidden cover path remains null.
+        let mut edit = template(Some(id), read["user_cookie"].as_str().unwrap(), "");
+        edit.title = Some("changed title".into());
+        let written = add_upload_streamer_endpoint(operator(), State(pool.clone()), Json(edit))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(written["user_cookie"], selector);
+        assert!(written["cover_path"].is_null());
+        assert!(!written.to_string().contains("/srv/private"));
+        let admin = get_upload_streamer_endpoint(
+            Caller::unrestricted(),
+            State(pool.clone()),
+            Path(id),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(admin["user_cookie"], "/srv/private/account.json");
+        assert_eq!(admin["cover_path"], "/srv/private/cover.jpg");
+        assert_eq!(admin["title"], "changed title");
+
+        let saved = template(None, "unregistered.json", "/srv/private/cover.jpg")
+            .insert(&pool)
+            .await
+            .unwrap();
+        let id = saved.id.unwrap();
+        let read = get_upload_streamer_endpoint(operator(), State(pool.clone()), Path(id))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(read["user_cookie"], "account:current");
+        let edit = template(Some(id), "account:current", "");
+        let written = add_upload_streamer_endpoint(operator(), State(pool.clone()), Json(edit))
+            .await
+            .unwrap().0;
+        assert_eq!(written["user_cookie"], "account:current");
+        let admin = get_upload_streamer_endpoint(
+            Caller::unrestricted(),
+            State(pool.clone()),
+            Path(id),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(admin["user_cookie"], "unregistered.json");
+
+        let mut forged = template(None, "account:current", "");
+        assert_eq!(
+            protect_template_fields(&operator().subject, &pool, &mut forged)
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        let mut missing = template(None, "account:999999", "");
+        assert_eq!(
+            protect_template_fields(&operator().subject, &pool, &mut missing)
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
     }
 
     #[tokio::test]

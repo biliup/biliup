@@ -26,6 +26,7 @@ struct Fixture {
     _dir: tempfile::TempDir,
     app: Router,
     pool: ConnectionPool,
+    publisher: Arc<ClipPublisher>,
     /// 录完的一场：两段 FLV `[0, 3965)`、`[3965, 7930)`
     ended: i64,
     /// 正在录的一场（登记了但还没有锚点）
@@ -94,13 +95,14 @@ async fn fixture() -> Fixture {
     )
     .build();
     let clips = Arc::new(ClipExports::new(pool.clone(), dir.path().join("clips")));
+    let publisher = Arc::new(ClipPublisher::new(
+        pool.clone(),
+        clips.clone(),
+        Arc::new(crate::server::workbench::clips::publish::queue::Offline),
+    ));
     let state = AppState {
         pool: pool.clone(),
-        publisher: Arc::new(ClipPublisher::new(
-            pool.clone(),
-            clips.clone(),
-            Arc::new(crate::server::workbench::clips::publish::queue::Offline),
-        )),
+        publisher: publisher.clone(),
         clips,
     };
     let app = Router::new()
@@ -120,6 +122,7 @@ async fn fixture() -> Fixture {
         _dir: dir,
         app,
         pool,
+        publisher,
         ended,
         live: live_id,
         _guard: guard,
@@ -297,6 +300,53 @@ async fn wait_exported(f: &Fixture, cookie: &str, id: i64) -> Value {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     panic!("导出没有结束");
+}
+
+#[tokio::test]
+async fn publishing_clips_cannot_be_reexported_and_lose_the_upload_source() {
+    let f = fixture().await;
+    let operator = login(&f.app, "op", "operator-password").await;
+    let saved = json_of(
+        call(
+            &f.app,
+            Some(&operator),
+            "POST",
+            &format!("/v1/sessions/{}/clips", f.ended),
+            Some(json!({ "in_ms": 1000, "out_ms": 3000, "export": "quick" })),
+        )
+        .await,
+        StatusCode::CREATED,
+    )
+    .await;
+    let id = saved["id"].as_i64().unwrap();
+    let done = wait_exported(&f, &operator, id).await;
+    assert_eq!(done["state"], "ready", "{done}");
+    let clip = clips::get(&f.pool, id).await.unwrap().unwrap();
+    let source = clip.output_path.as_ref().unwrap();
+    let original = tokio::fs::read(source).await.unwrap();
+    let job = f
+        .publisher
+        .enqueue(
+            f.ended,
+            &[clip.clone()],
+            Default::default(),
+            Mode::Quick,
+            None,
+            false,
+        )
+        .unwrap();
+    let response = call(
+        &f.app,
+        Some(&operator),
+        "POST",
+        &format!("/v1/clips/{id}/export"),
+        Some(json!({ "mode": "precise" })),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(clips::get(&f.pool, id).await.unwrap().unwrap(), clip);
+    assert_eq!(tokio::fs::read(source).await.unwrap(), original);
+    f.publisher.remove(job.id).unwrap();
 }
 
 #[tokio::test]

@@ -440,11 +440,19 @@ pub struct ExportClip {
 pub async fn export_clip(
     State(pool): State<ConnectionPool>,
     State(exports): State<Arc<ClipExports>>,
+    State(publisher): State<Arc<ClipPublisher>>,
     Path(cid): Path<i64>,
     Json(body): Json<ExportClip>,
 ) -> Response {
+    if matches!(
+        publisher.state_of(cid),
+        Some(JobState::Queued | JobState::Running | JobState::Paused)
+    ) {
+        return conflict("这个切片在发布队列里，等它发完或先移出队列再导出");
+    }
     match clips::begin_export(&pool, cid, body.mode, recorder::now_ms()).await {
         Ok(Some(clip)) => {
+            publisher.forget_upload(cid);
             exports.start(clip.clone());
             (StatusCode::ACCEPTED, Json(view(clip, &exports))).into_response()
         }

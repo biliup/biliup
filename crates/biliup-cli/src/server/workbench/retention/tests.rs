@@ -114,6 +114,43 @@ fn retention(pool: &ConnectionPool, keep_for_ms: i64) -> Retention {
 }
 
 #[tokio::test]
+async fn deletion_keeps_files_when_the_retention_database_is_unavailable() {
+    let (dir, pool) = setup().await;
+    let s = session(&pool, 1_000_000).await;
+    let (_, video) = segment(&pool, dir.path(), s, "a.flv", 0, Some(1000), 10).await;
+    let xml = video.with_extension("xml");
+    pool.close().await;
+    assert!(remove(&retention(&pool, 0), &[&video, &xml]).await.is_err());
+    assert!(video.exists());
+    assert!(xml.exists());
+    assert!(index::index_path(&video).exists());
+}
+
+#[tokio::test]
+async fn deletion_keeps_pinned_files_when_deferring_the_delete_fails() {
+    let (dir, pool) = setup().await;
+    let s = session(&pool, 1_000_000).await;
+    let (id, video) = segment(&pool, dir.path(), s, "a.flv", 0, Some(1000), 10).await;
+    let xml = video.with_extension("xml");
+    let mut conn = pool.acquire().await.unwrap();
+    pin(&mut conn, "marker:test", s, 0, 1000).await.unwrap();
+    drop(conn);
+    sqlx::query(
+        "CREATE TRIGGER fail_pending_delete BEFORE UPDATE OF state ON segments
+         WHEN NEW.state = 'pending_delete'
+         BEGIN SELECT RAISE(FAIL, 'retention update failed'); END",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(remove(&retention(&pool, 0), &[&video, &xml]).await.is_err());
+    assert!(video.exists());
+    assert!(xml.exists());
+    assert!(index::index_path(&video).exists());
+    assert_eq!(state(&pool, id).await, "finished");
+}
+
+#[tokio::test]
 async fn pins_follow_time_ranges_including_the_live_tail() {
     let (dir, pool) = setup().await;
     let s = session(&pool, 1_000_000).await;

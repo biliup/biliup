@@ -94,27 +94,25 @@ async fn tracked(pool: &ConnectionPool, path: &Path) -> sqlx::Result<Option<Trac
 /// 删除点：删掉 `paths`（视频与弹幕文件混在一起，与后处理拿到的列表相同）。
 ///
 /// 工作台记录的分段在被引用、场次保留期内或 `keep_for_ms > 0` 时推迟删除，同一批里它的弹幕文件
-/// 跟着留下；其余的立即删，分段行标 `deleted`，关键帧索引一起删。数据库出错时按原来的方式立即删。
+/// 跟着留下；其余的立即删，分段行标 `deleted`，关键帧索引一起删。数据库出错时停止删除，避免
+/// 无法确认引用或保留期时丢失源录像。
 /// 删文件出错时返回错误，与原来的 `rm` 一样停在出错的那个文件。
 pub async fn remove(retention: &Retention, paths: &[&Path]) -> io::Result<Vec<Disposal>> {
     let now = now_ms();
     let mut outcome: Vec<Option<Disposal>> = vec![None; paths.len()];
     let mut kept_danmaku: Vec<PathBuf> = Vec::new();
     for (i, path) in paths.iter().enumerate() {
-        let segment = match tracked(&retention.pool, path).await {
-            Ok(segment) => segment,
-            Err(e) => {
-                warn!(path = %path.display(), error = %e, "查询分段记录失败，按原方式直接删除");
-                None
-            }
-        };
+        let segment = tracked(&retention.pool, path).await.map_err(|e| {
+            warn!(path = %path.display(), error = %e, "查询分段记录失败，保留文件并停止删除");
+            io::Error::other(e)
+        })?;
         let Some(segment) = segment else {
             continue;
         };
         let referenced = segment.pin_count > 0 || segment.retain_until.is_some_and(|t| t > now);
         if referenced || retention.keep_for_ms > 0 {
             let danmaku = danmaku_in_batch(path, segment.danmaku_path.as_deref(), paths);
-            match defer(
+            defer(
                 &retention.pool,
                 segment.id,
                 retention.keep_for_ms,
@@ -122,22 +120,19 @@ pub async fn remove(retention: &Retention, paths: &[&Path]) -> io::Result<Vec<Di
                 danmaku.as_deref(),
             )
             .await
-            {
-                Ok(()) => {
-                    info!(
-                        path = %path.display(),
-                        referenced,
-                        keep_hours = retention.keep_for_ms / HOUR_MS,
-                        "分段被引用或在保留期内，暂不删除，到期后由清理任务删除"
-                    );
-                    outcome[i] = Some(Disposal::Deferred);
-                    kept_danmaku.extend(danmaku);
-                    continue;
-                }
-                Err(e) => {
-                    warn!(path = %path.display(), error = %e, "标记推迟删除失败，按原方式直接删除")
-                }
-            }
+            .map_err(|e| {
+                warn!(path = %path.display(), error = %e, "标记推迟删除失败，保留文件并停止删除");
+                io::Error::other(e)
+            })?;
+            info!(
+                path = %path.display(),
+                referenced,
+                keep_hours = retention.keep_for_ms / HOUR_MS,
+                "分段被引用或在保留期内，暂不删除，到期后由清理任务删除"
+            );
+            outcome[i] = Some(Disposal::Deferred);
+            kept_danmaku.extend(danmaku);
+            continue;
         }
         delete_video(path).await?;
         if let Err(e) = set_deleted(&retention.pool, segment.id).await {

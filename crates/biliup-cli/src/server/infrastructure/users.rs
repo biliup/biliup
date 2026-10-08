@@ -473,7 +473,7 @@ impl Backend {
                 role = COALESCE(?2, role),
                 disabled = COALESCE(?3, disabled),
                 password_hash = COALESCE(?4, password_hash),
-                session_version = session_version + (?4 IS NOT NULL),
+                session_version = session_version + (?4 IS NOT NULL OR (COALESCE(?3, 0) = 1 AND disabled = 0)),
                 updated_at = unixepoch()
              WHERE id = ?1
                AND (
@@ -549,11 +549,34 @@ impl Backend {
         {
             return Ok(None);
         }
-        let changes = UserChanges {
-            password: Some(new_password),
-            ..Default::default()
-        };
-        self.update_user(id, changes).await.map(Some)
+        let password_hash = hash_password(new_password).await?;
+        self.set_own_password_if_current(&user, &password_hash)
+            .await
+    }
+
+    /// Password verification and hashing can take long enough for another request to
+    /// reset credentials or revoke sessions. Only the verified account version may
+    /// authorize this password change.
+    async fn set_own_password_if_current(
+        &self,
+        verified: &User,
+        password_hash: &str,
+    ) -> Result<Option<User>, UpdateUserError> {
+        let row: Option<UserRow> = sqlx::query_as(&format!(
+            "UPDATE web_users SET password_hash = ?1,
+                session_version = session_version + 1, updated_at = unixepoch()
+             WHERE id = ?2 AND password_hash = ?3 AND session_version = ?4 AND disabled = 0
+             RETURNING {USER_COLUMNS}"
+        ))
+        .bind(password_hash)
+        .bind(verified.id)
+        .bind(&verified.password_hash)
+        .bind(verified.session_version)
+        .fetch_optional(&self.db)
+        .await?;
+        row.map(User::try_from)
+            .transpose()
+            .map_err(UpdateUserError::Database)
     }
 
     /// CLI 用：按用户名重置密码并让该用户所有会话失效。
@@ -1004,6 +1027,111 @@ mod tests {
                 .await,
             Err(UpdateUserError::NotFound)
         ));
+    }
+
+    #[tokio::test]
+    async fn pending_password_changes_cannot_override_resets_or_revocations() {
+        let (_dir, backend) = backend().await;
+        let admin = backend
+            .bootstrap_admin(credentials("biliup", "password-1"))
+            .await
+            .unwrap();
+        let viewer = backend
+            .create_user("viewer", "password-2".into(), Role::Viewer)
+            .await
+            .unwrap();
+
+        // This snapshot represents credentials verified before another request
+        // finishes a reset, logout or disable operation.
+        let reset = backend
+            .reset_password("viewer", "password-reset".into())
+            .await
+            .unwrap();
+        assert!(
+            backend
+                .set_own_password_if_current(&viewer, &admin.password_hash)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            backend
+                .find_by_id(viewer.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .password_hash,
+            reset.password_hash
+        );
+
+        backend.logout_everywhere(viewer.id).await.unwrap();
+        assert!(
+            backend
+                .set_own_password_if_current(&reset, &admin.password_hash)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let before_disable = backend.find_by_id(viewer.id).await.unwrap().unwrap();
+        let disabled = backend
+            .update_user(
+                viewer.id,
+                UserChanges {
+                    disabled: Some(true),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_ne!(
+            disabled.session_auth_hash(),
+            before_disable.session_auth_hash()
+        );
+        assert!(
+            backend
+                .set_own_password_if_current(&before_disable, &admin.password_hash)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let enabled = backend
+            .update_user(
+                viewer.id,
+                UserChanges {
+                    disabled: Some(false),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_ne!(
+            enabled.session_auth_hash(),
+            before_disable.session_auth_hash()
+        );
+        assert!(
+            backend
+                .set_own_password_if_current(&before_disable, &admin.password_hash)
+                .await
+                .unwrap()
+                .is_none(),
+            "re-enabling an account must not restore a revoked session"
+        );
+
+        let changed = backend
+            .set_own_password_if_current(&enabled, &admin.password_hash)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(changed.session_auth_hash(), enabled.session_auth_hash());
+        assert!(
+            backend
+                .set_own_password_if_current(&enabled, &reset.password_hash)
+                .await
+                .unwrap()
+                .is_none(),
+            "two requests verified against the same password cannot both commit"
+        );
     }
 
     #[tokio::test]
