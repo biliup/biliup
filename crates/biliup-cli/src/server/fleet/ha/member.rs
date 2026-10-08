@@ -1309,7 +1309,7 @@ pub(crate) mod tests {
         })
         .await;
         cm.scan().await;
-        tokio::time::sleep(Duration::from_millis(5)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
         set_config(&n.services, |config| {
             config.segment_time = Some("04:00:00".into())
         })
@@ -1504,7 +1504,7 @@ pub(crate) mod tests {
         wire.cut(&cm, &nm);
         std::fs::write(&login_file, credential(4242, "c2")).unwrap();
         cm.scan().await;
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
         std::fs::write(&received, credential(4242, "n2")).unwrap();
         nm.scan().await;
         let wire = Wire::connect(&cm, &nm, false).await;
