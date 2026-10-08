@@ -124,10 +124,12 @@ pub fn streamer_hooks(streamer: &mut Value) {
 }
 
 pub fn upload_template(template: &mut Value) {
-    if let Value::Object(map) = template
-        && let Some(field) = map.get_mut("user_cookie")
-    {
-        *field = Value::Null;
+    if let Value::Object(map) = template {
+        for key in ["user_cookie", "cover_path"] {
+            if let Some(field) = map.get_mut(key) {
+                *field = Value::Null;
+            }
+        }
     }
 }
 
@@ -135,6 +137,19 @@ pub fn upload_template(template: &mut Value) {
 mod tests {
     use super::*;
     use crate::server::config::{Config, UserConfig};
+
+    #[test]
+    fn upload_template_hides_credentials_and_local_paths() {
+        let mut template = serde_json::json!({
+            "user_cookie": "/data/secret.json",
+            "cover_path": "/srv/private-cover.jpg",
+            "template_name": "public"
+        });
+        upload_template(&mut template);
+        assert_eq!(template["user_cookie"], Value::Null);
+        assert_eq!(template["cover_path"], Value::Null);
+        assert_eq!(template["template_name"], "public");
+    }
 
     #[test]
     fn secrets_are_hidden_and_ordinary_settings_are_kept() {

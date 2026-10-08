@@ -320,14 +320,21 @@ pub async fn get_streamer_info_files(
 }
 
 pub async fn get_upload_streamers_endpoint(
+    caller: Caller,
     // Extension(streamers_service): Extension<DynUploadStreamersRepository>,
     State(pool): State<ConnectionPool>,
 ) -> Result<Json<Vec<UploadStreamer>>, Response> {
-    let uploader_streamers = UploadStreamer::select()
+    let mut uploader_streamers = UploadStreamer::select()
         .fetch_all(&pool)
         .await
         .change_context(AppError::Unknown)
         .map_err(report_to_response)?;
+    if !caller.can_access(Field::TemplateAccount) {
+        for template in &mut uploader_streamers {
+            template.user_cookie = None;
+            template.cover_path = None;
+        }
+    }
     Ok(Json(uploader_streamers))
 }
 
@@ -368,16 +375,35 @@ async fn protect_template_fields(
     else {
         return Ok(());
     };
+    // Non-account managers receive an opaque `account:<id>` selector. Resolve
+    // it server-side so the API never needs to expose credential file paths.
+    let resolved_cookie = if let Some(id) = cookie.strip_prefix("account:") {
+        let id = id
+            .parse::<i64>()
+            .map_err(|_| (StatusCode::BAD_REQUEST, "账号 ID 无效").into_response())?;
+        Configuration::select()
+            .where_("id = ? AND key = 'bilibili-cookies'")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .change_context(AppError::Unknown)
+            .map_err(report_to_response)?
+            .ok_or_else(|| (StatusCode::FORBIDDEN, "只能选择已登记的 B 站账号").into_response())?
+            .value
+    } else {
+        cookie.to_string()
+    };
+    upload_streamer.user_cookie = Some(resolved_cookie.clone());
     if current
         .as_ref()
-        .is_some_and(|template| template.user_cookie.as_deref() == Some(cookie))
+        .is_some_and(|template| template.user_cookie.as_deref() == Some(resolved_cookie.as_str()))
     {
         return Ok(());
     }
     let registered: i64 = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM configuration WHERE key = 'bilibili-cookies' AND value = ?)",
     )
-    .bind(cookie)
+    .bind(&resolved_cookie)
     .fetch_one(pool)
     .await
     .change_context(AppError::Unknown)
@@ -394,44 +420,49 @@ pub async fn add_upload_streamer_endpoint(
     Json(mut upload_streamer): Json<InsertUploadStreamer>,
 ) -> Result<Json<serde_json::Value>, Response> {
     protect_template_fields(&caller.subject, &pool, &mut upload_streamer).await?;
-    if upload_streamer.id.is_none() {
-        Ok(Json(
-            serde_json::to_value(
-                ormlite::Insert::insert(upload_streamer, &pool)
-                    .await
-                    .change_context(AppError::Unknown)
-                    .map_err(report_to_response)?,
-            )
-            .change_context(AppError::Unknown)
-            .map_err(report_to_response)?,
-        ))
+    let mut response = if upload_streamer.id.is_none() {
+        serde_json::to_value(
+            ormlite::Insert::insert(upload_streamer, &pool)
+                .await
+                .change_context(AppError::Unknown)
+                .map_err(report_to_response)?,
+        )
+        .change_context(AppError::Unknown)
+        .map_err(report_to_response)?
     } else {
-        Ok(Json(
-            serde_json::to_value(
-                upload_streamer
-                    .update_all_fields(&pool)
-                    .await
-                    .change_context(AppError::Unknown)
-                    .map_err(report_to_response)?,
-            )
-            .change_context(AppError::Unknown)
-            .map_err(report_to_response)?,
-        ))
+        serde_json::to_value(
+            upload_streamer
+                .update_all_fields(&pool)
+                .await
+                .change_context(AppError::Unknown)
+                .map_err(report_to_response)?,
+        )
+        .change_context(AppError::Unknown)
+        .map_err(report_to_response)?
+    };
+    if !caller.can_access(Field::TemplateAccount) {
+        redact::upload_template(&mut response);
     }
+    Ok(Json(response))
 }
 
 pub async fn get_upload_streamer_endpoint(
+    caller: Caller,
     State(pool): State<ConnectionPool>,
     Path(id): Path<i64>,
 ) -> Result<Json<UploadStreamer>, Response> {
-    let uploader_streamers = UploadStreamer::select()
+    let mut uploader_streamer = UploadStreamer::select()
         .where_("id = ?")
         .bind(id)
         .fetch_one(&pool)
         .await
         .change_context(AppError::Unknown)
         .map_err(report_to_response)?;
-    Ok(Json(uploader_streamers))
+    if !caller.can_access(Field::TemplateAccount) {
+        uploader_streamer.user_cookie = None;
+        uploader_streamer.cover_path = None;
+    }
+    Ok(Json(uploader_streamer))
 }
 /// 有主播在用的模板不删（409）：`livestreamers.upload_streamers_id` 是 `ON DELETE CASCADE`，
 /// 直接删会把绑着它的主播一起从库里删掉，而它们在监控里的房间还照常录、传。
@@ -471,6 +502,7 @@ pub async fn delete_template_endpoint(
 }
 
 pub async fn get_users_endpoint(
+    caller: Caller,
     State(pool): State<ConnectionPool>,
 ) -> Result<Json<Vec<serde_json::Value>>, Response> {
     let configurations = Configuration::select()
@@ -481,10 +513,11 @@ pub async fn get_users_endpoint(
         .map_err(report_to_response)?;
     let mut res = Vec::new();
     for cookies in configurations {
+        let can_see_path = caller.can_access(Field::TemplateAccount);
         res.push(json!({
             "id": cookies.id,
-            "name": cookies.value,
-            "value": cookies.value,
+            "name": if can_see_path { cookies.value.clone() } else { format!("账号 #{}", cookies.id) },
+            "value": if can_see_path { cookies.value } else { format!("account:{}", cookies.id) },
             "platform": cookies.key,
         }))
     }

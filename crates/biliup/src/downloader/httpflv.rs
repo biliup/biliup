@@ -224,7 +224,9 @@ async fn read_tags(
     let mut aac_sequence_header = None;
     let mut h264_sequence_header: Option<(TagHeader, Bytes, Bytes)> = None;
     let mut create_new = false;
-    let mut timestamp_offset: u32 = 0;
+    // Keep timestamp correction per media track. A restart of one encoder must
+    // not shift the timestamps of the other track, which may still be running.
+    let mut timestamp_offsets: [u32; 2] = [0, 0];
     // 音频、视频各自上一个 tag 矫正后的时间戳，见 [`track_index`]
     let mut prev_track_timestamp: [Option<u32>; 2] = [None, None];
     // 已经正常解析过 tag：流确实是 FLV，之后 CDN 切换、断流时的残缺数据按「跳过 / 正常结束」处理，
@@ -268,22 +270,24 @@ async fn read_tags(
 
         let (_, mut tag_header) = map_parse_err(tag_header(&tag_header_bytes), "tag header")?;
         // 上游 CDN（如斗鱼）在流分发切片或重连时时间戳可能断裂或重置回 0。
-        // 通过累加 offset 矫正时间戳，保证输出流的时间戳单调递增，避免下游播放与分段逻辑异常。
+        // 通过按轨道累加 offset 矫正时间戳，保证输出流的时间戳单调递增，避免下游播放与分段逻辑异常。
         // 只在同一轨道回退时累加：跨轨道比较会把每次音视频交错都当成断裂，offset 越积越大，
-        // 录像时间轴被越拉越长。比较的是矫正后的时间戳，音视频同时重置时 offset 只加一次。
+        // 录像时间轴被越拉越长。脚本 tag 没有轨道，使用当前最大的轨道 offset，保持在共享时间轴上。
         // 这里只算出矫正结果，tag 解析成功后才记账：被跳过的残缺 tag（常见的是 CDN 切换瞬间
         // 时间戳为 0 的空 tag）不能把 offset 带偏。
         let raw_timestamp = tag_header.timestamp;
         let track = track_index(tag_header.tag_type);
-        let mut timestamp = raw_timestamp.wrapping_add(timestamp_offset);
-        let mut offset_after = timestamp_offset;
+        let script_offset = timestamp_offsets.iter().copied().max().unwrap_or_default();
+        let offset = track.map_or(script_offset, |track| timestamp_offsets[track]);
+        let mut timestamp = raw_timestamp.wrapping_add(offset);
+        let mut offset_after = offset;
         let mut rewound_from = None;
         if let Some(track) = track
             && let Some(prev) = prev_track_timestamp[track]
             && timestamp < prev
         {
             rewound_from = Some(prev);
-            offset_after = timestamp_offset.wrapping_add(prev - timestamp);
+            offset_after = offset.wrapping_add(prev - timestamp);
             timestamp = prev;
         }
         tag_header.timestamp = timestamp;
@@ -426,11 +430,13 @@ async fn read_tags(
         if let Some(prev) = rewound_from {
             warn!(
                 "Non-monotonous DTS in upstream stream; previous: {prev}, current: {}; adjusting offset by +{}",
-                raw_timestamp.wrapping_add(timestamp_offset),
-                offset_after.wrapping_sub(timestamp_offset)
+                raw_timestamp.wrapping_add(offset),
+                offset_after.wrapping_sub(offset)
             );
         }
-        timestamp_offset = offset_after;
+        if let Some(track) = track {
+            timestamp_offsets[track] = offset_after;
+        }
         if let Some(track) = track {
             prev_track_timestamp[track] = Some(timestamp);
         }
@@ -1220,6 +1226,32 @@ mod tests {
         let source = media(tag_timestamps(&body, 4));
         assert_eq!(written.len(), 102);
         assert_eq!(written, source);
+    }
+
+    /// A restart of only the audio encoder must not shift the video timeline.
+    /// The correction is tracked per media track; the old global offset made
+    /// the video jump forward when an audio timestamp reset to zero.
+    #[tokio::test]
+    async fn an_audio_timestamp_reset_does_not_shift_video() {
+        let mut body = vec![0, 0, 0, 0];
+        push_tag(&mut body, 18, 0, &META);
+        push_tag(&mut body, 9, 0, &AVC_SEQUENCE_HEADER);
+        push_tag(&mut body, 8, 0, &AAC_SEQUENCE_HEADER);
+        push_tag(&mut body, 9, 1000, &[0x17, 0x01, 0, 0, 0, 0xaa]);
+        push_tag(&mut body, 8, 1000, &[0xaf, 0x01, 0x21]);
+        // Only the audio clock restarts at zero.
+        push_tag(&mut body, 8, 0, &[0xaf, 0x01, 0x21]);
+        push_tag(&mut body, 9, 1040, &[0x17, 0x01, 0, 0, 0, 0xbb]);
+        push_tag(&mut body, 8, 40, &[0xaf, 0x01, 0x21]);
+
+        let (result, data) = record_unsegmented(body.into()).await;
+        result.unwrap();
+        let video_timestamps: Vec<u32> = tag_timestamps(&data, 13)
+            .into_iter()
+            .filter(|(tag_type, _)| *tag_type == 9)
+            .map(|(_, timestamp)| timestamp)
+            .collect();
+        assert_eq!(video_timestamps, vec![0, 1000, 1040]);
     }
 
     /// 每个关键帧前都重发一次时间戳为 0 的 onMetaData 时，按时长分段照常进行：
