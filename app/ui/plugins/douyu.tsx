@@ -1,6 +1,7 @@
 'use client'
 import React, { useEffect } from 'react'
 import { Form, Radio, Select, useFormApi } from '@douyinfe/semi-ui'
+import { fetcher } from '../../lib/api-streamer'
 import PlatformPanel, { digitsToNumber } from './PlatformPanel'
 
 type Props = {
@@ -36,7 +37,7 @@ const Douyu: React.FC<Props> = props => {
     setTestResult(null)
 
     try {
-      const response = await fetch('/api/v1/douyu/validate-cookie', {
+      const data: unknown = await fetcher('/v1/douyu/validate-cookie', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -44,10 +45,17 @@ const Douyu: React.FC<Props> = props => {
         body: JSON.stringify({ cookie: cookieValue }),
       })
 
-      const data = await response.json()
+      if (!data || typeof data !== 'object' || !('valid' in data) || typeof data.valid !== 'boolean') {
+        throw new Error('Cookie 验证接口返回了无效响应，请检查前后端版本是否一致')
+      }
       setTestResult({
         success: data.valid,
-        message: data.message || (data.valid ? 'Cookie有效' : 'Cookie无效'),
+        message:
+          'message' in data && typeof data.message === 'string' && data.message
+            ? data.message
+            : data.valid
+              ? 'Cookie有效'
+              : 'Cookie无效或已过期',
       })
     } catch (error) {
       setTestResult({
@@ -63,23 +71,29 @@ const Douyu: React.FC<Props> = props => {
     <>
       <PlatformPanel header="斗鱼" itemKey="douyu" bare={bare}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <Form.Input
+          <Form.TextArea
             field="douyu_cookie"
             label="登录 Cookie（douyu_cookie）"
             placeholder="acf_username=xxx; acf_uid=xxx; acf_auth=xxx; acf_did=xxx; ..."
+            autosize={{ minRows: 2, maxRows: 6 }}
             extraText={
               <div style={{ fontSize: '14px' }}>
                 斗鱼网页版登录 Cookie（www.douyu.com 的完整 Cookie）。
                 <br />
-                <strong>自 2026 年 9 月起，原画（1080P60/2K）和蓝光4M等高码率需要登录才能获取。</strong>
+                部分直播间的原画需要登录；匿名请求可能被平台降到较低档位。
                 <br />
-                必需字段：<code>acf_uid</code> 和 <code>acf_auth</code>（用于身份验证）
+                登录凭据应包含 <code>acf_uid</code> 和 <code>acf_auth</code>。
                 <br />
-                登录斗鱼账号后，从浏览器开发者工具的 Network 面板中复制完整 Cookie 字符串粘贴到这里。
+                支持 Network 面板里的 Cookie 字符串，也支持浏览器插件导出的 Cookie JSON 数组。
                 <br />
-                留空时只能获取较低画质（最高超清）。
+                留空时尝试匿名取流，实际画质以平台返回为准。
                 <br />
-                <a href="/docs/tutorials/douyu-cookie-guide" target="_blank" style={{ color: '#1890ff' }}>
+                <a
+                  href="https://biliup.github.io/biliup/docs/tutorials/douyu-cookie-guide/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: '#1890ff' }}
+                >
                   📖 查看详细Cookie获取教程
                 </a>
               </div>
@@ -120,7 +134,7 @@ const Douyu: React.FC<Props> = props => {
           field="douyu_deviceId"
           label="设备 ID（douyu_deviceId）"
           placeholder="10000000000000000000000000001511"
-          extraText="在浏览器登录自己的斗鱼账号后，从 Cookie 中复制 acf_did 的值粘贴到这里；留空时使用默认设备 ID。"
+          extraText="可填写 Cookie 中的设备 ID；留空时优先使用 dy_did，其次 acf_did，再使用默认设备 ID。"
           style={{ width: '100%' }}
         />
         <Form.RadioGroup
@@ -129,15 +143,9 @@ const Douyu: React.FC<Props> = props => {
           mode="advanced"
           extraText={
             <div style={{ fontSize: '14px' }}>
-              默认 AVC。
+              默认 AVC。HEVC 需直播间提供对应视频流，并使用 mesio 或支持该格式的新版 FFmpeg。
               <br />
-              <strong style={{ color: '#ff4d4f' }}>
-                ⚠️ 重要提示：HEVC 编码仅在使用 mesio 或 ffmpeg 下载器时有效。
-              </strong>
-              <br />
-              使用 stream-gears 下载器时，即使选择 HEVC，如果收到 HEVC 流也会导致录制失败。
-              <br />
-              建议：除非明确需要 HEVC 且已配置兼容的下载器，否则请选择 AVC。
+              stream-gears 不支持 HEVC；平台未提供 HEVC 地址时会回退到 AVC，并在日志中提示。
             </div>
           }
           initValue={entity?.douyu_codec ?? ''}
@@ -152,12 +160,9 @@ const Douyu: React.FC<Props> = props => {
           convert={digitsToNumber}
           extraText={
             <div style={{ fontSize: '14px' }}>
-              录制画质，默认 0（最高画质）。可选：0 最高画质 / 8 蓝光 8M / 4 蓝光 4M / 3 超清 / 2
-              高清，也可手动输入其他数值。
-              <br />
-              <strong style={{ color: '#1890ff' }}>
-                💡 提示：原画（0）和蓝光4M（4）需要登录 Cookie 才能获取。
-              </strong>
+              默认 0（请求最高画质）。常见档位：0 原画 / 8 蓝光 8M / 4 蓝光 4M / 3 超清 / 2
+              高清；档位编号随房间变化，也可手动输入其他数值。平台可能限制匿名用户的画质，
+              降档时会在日志中显示请求档位和实际档位。
               <br />
               刚开播时可能只有原画，会先录原画；下载插件为 ffmpeg / streamlink
               时之后每次分段会重新取流并切到所选画质，stream-gears / mesio 整场沿用首次取到的流。
@@ -177,9 +182,9 @@ const Douyu: React.FC<Props> = props => {
           ]}
           showClear={true}
         >
-          <Select.Option value={0}>最高画质/原画（0）⭐ 需要登录</Select.Option>
+          <Select.Option value={0}>最高画质/原画（0）</Select.Option>
           <Select.Option value={8}>蓝光8M（8）</Select.Option>
-          <Select.Option value={4}>蓝光4M（4）⭐ 需要登录</Select.Option>
+          <Select.Option value={4}>蓝光4M（4）</Select.Option>
           <Select.Option value={3}>超清（3）</Select.Option>
           <Select.Option value={2}>高清（2）</Select.Option>
         </Form.Select>

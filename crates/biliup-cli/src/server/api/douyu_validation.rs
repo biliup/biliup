@@ -1,18 +1,10 @@
-use axum::{
-    Router,
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::post,
-    Json,
-};
+use crate::server::infrastructure::service_register::ServiceRegister;
+use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::post};
 use biliup::downloader::live::Douyu;
 use serde::{Deserialize, Serialize};
-use crate::server::infrastructure::service_register::ServiceRegister;
 
 pub fn router() -> Router<ServiceRegister> {
-    Router::new()
-        .route("/v1/douyu/validate-cookie", post(validate_cookie))
+    Router::new().route("/v1/douyu/validate-cookie", post(validate_cookie))
 }
 
 #[derive(Deserialize)]
@@ -39,23 +31,6 @@ async fn validate_cookie(
             Json(ValidateCookieResponse {
                 valid: false,
                 message: Some("Cookie不能为空".to_string()),
-            }),
-        )
-            .into_response();
-    }
-
-    // 检查cookie是否包含必需字段
-    let required_fields = ["acf_uid", "acf_auth"];
-    let has_required_fields = required_fields.iter().all(|field| {
-        payload.cookie.contains(&format!("{}=", field))
-    });
-
-    if !has_required_fields {
-        return (
-            StatusCode::OK,
-            Json(ValidateCookieResponse {
-                valid: false,
-                message: Some("Cookie缺少必需字段（acf_uid, acf_auth）".to_string()),
             }),
         )
             .into_response();

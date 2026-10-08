@@ -66,15 +66,17 @@ check_sourcecode: 15
 #douyu_cdn: tct-h5
 ### 强制hs流使用构造链接，防止部分海外机器遇到频繁断流。使用时需修改douyu_cdn为hs-h5
 #douyu_force_hs: true
-### 斗鱼设备 ID：在浏览器 Cookie 中找到 acf_did，只填它的值；留空使用默认设备 ID
+### 网页版登录 Cookie：请求头字符串或浏览器导出 JSON 数组字符串；部分房间的原画需要登录
+#douyu_cookie: ""
+### 斗鱼设备 ID：留空时优先从 Cookie 读取 dy_did/acf_did，再使用默认设备 ID
 #douyu_deviceId: ""
-### 斗鱼视频编码：留空、AVC 或 HEVC；HEVC 使用 player_1 流地址
+### 斗鱼视频编码：留空、AVC 或 HEVC；HEVC 需 mesio 或兼容的新版 FFmpeg，房间不提供时回退 AVC
 #douyu_codec: ""
 ### 录制斗鱼弹幕，默认关闭
 #douyu_danmaku: false
 ### 斗鱼自选画质
 ### 刚开播可能没有除了原画之外的画质 会先录制原画 后续视频分段(仅ffmpeg streamlink)时录制设置的画质
-### 0 原画,4 蓝光4m,3 超清,2 高清
+### 0 请求原画,8 蓝光8m,4 蓝光4m,3 超清,2 高清；实际档位由平台返回，降档会记录日志
 #douyu_rate:  0
 
 #------虎牙------#

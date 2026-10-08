@@ -1,0 +1,66 @@
+name: Douyu live stream smoke test
+
+# Live rooms and CDN responses vary. Keep this opt-in, apart from the
+# deterministic protocol tests run by test.yml on every pull request.
+on:
+  workflow_dispatch:
+    inputs:
+      room:
+        description: Douyu room ID or alias (must currently be live)
+        required: true
+        default: '288016'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        codec: [AVC, HEVC]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Ubuntu's distro FFmpeg may predate HEVC-in-FLV support. Use the
+      # same linux64 build as Dockerfile; update this checksum with it.
+      - name: Install the pinned FFmpeg build
+        shell: bash
+        run: |
+          eval "$(bash .github/scripts/ffmpeg-version.sh)"
+          archive="$RUNNER_TEMP/douyu-ffmpeg.tar.xz"
+          curl -fsSL --retry 3 -o "$archive" \
+            "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_TAG}/ffmpeg-${FFMPEG_VERSION}-linux64-gpl-${FFMPEG_BRANCH}.tar.xz"
+          echo "c733b4b2951e5957e15505f788b2c65a7a41b6da4b289e295852cc38079b4d2b  $archive" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/douyu-ffmpeg"
+          tar -xJf "$archive" -C "$RUNNER_TEMP/douyu-ffmpeg" --strip-components=1
+          echo "$RUNNER_TEMP/douyu-ffmpeg/bin" >> "$GITHUB_PATH"
+      - name: Build probe
+        run: cargo build --locked -p biliup --example douyu_probe
+      - name: Probe anonymous playback
+        env:
+          DOUYU_ROOM: ${{ inputs.room }}
+          DOUYU_CODEC: ${{ matrix.codec }}
+        run: target/debug/examples/douyu_probe --room "$DOUYU_ROOM" --codec "$DOUYU_CODEC" --rate 0 --seconds 5
+      - name: Probe authenticated playback when a cookie secret is configured
+        if: ${{ !cancelled() }}
+        env:
+          DOUYU_ROOM: ${{ inputs.room }}
+          DOUYU_CODEC: ${{ matrix.codec }}
+          DOUYU_COOKIE: ${{ secrets.DOUYU_COOKIE }}
+        shell: bash
+        run: |
+          if [ -z "$DOUYU_COOKIE" ]; then
+            echo 'Authenticated probe skipped: DOUYU_COOKIE secret is not configured.'
+            exit 0
+          fi
+          cookie_file="$(mktemp)"
+          trap 'rm -f "$cookie_file"' EXIT
+          chmod 600 "$cookie_file"
+          printf '%s' "$DOUYU_COOKIE" > "$cookie_file"
+          unset DOUYU_COOKIE
+          target/debug/examples/douyu_probe --room "$DOUYU_ROOM" --codec "$DOUYU_CODEC" --rate 0 --seconds 5 --cookie-file "$cookie_file"

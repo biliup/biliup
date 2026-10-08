@@ -23,11 +23,9 @@ top = false
 
 ## INSTALLATION
 0. 安装 __Python 3.7+__ 和 __pip__
- > 如需录制 斗鱼(Douyu) 平台，请额外安装至少一个 __JavaScript 解释器__。
- > 支持且不限于以下的  __JavaScript 解释器__，点击名字可跳转至下载页。
- > Please install at least one of the following Javascript interpreter.
- > python packages: [QuickJS](https://pypi.org/project/quickjs/)
- > applications: [Node.js](https://nodejs.org/zh-cn/download)
+ > 当前 Rust 版斗鱼插件内置网页播放签名，无需额外安装 JavaScript 解释器。
+ > 部分房间的原画需配置网页版 Cookie；HEVC 录制请使用 mesio 或兼容的新版 FFmpeg。
+ > 详见 [斗鱼 Cookie 与画质设置](@/docs/tutorials/douyu-cookie-guide.md)。
 1. 创建配置文件 **[config.toml](https://github.com/biliup/biliup/tree/master/public/config.toml)**
     ```toml
     # 以下为必填项
@@ -280,4 +278,3 @@ $ systemctl --user start biliupd
 > 关于B站为什么不能多p上传\
 目前bilibili网页端是根据用户权重来限制分p数量的，权重不够的用户切换到客户端的提交接口即可解除这一限制。
 > 用户等级大于3，且粉丝数>1000，web端投稿不限制分p数量
-
