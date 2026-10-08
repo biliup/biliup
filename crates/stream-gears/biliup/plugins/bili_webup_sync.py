@@ -49,7 +49,8 @@ class BiliWebAsync:
             self, principal, data, submit_api=None, copyright=2, postprocessor=None, dtime=None,
             dynamic='', lines='AUTO', threads=3, tid=122, tid_v2=None, tags=None, cover_path=None, description='',
             dolby=0, hires=0, no_reprint=0, is_only_self=0, charging_pay=0, credits=None,
-            user_cookie='cookies.json', copyright_source=None, extra_fields="", video_queue=None
+            user_cookie='cookies.json', copyright_source=None, extra_fields="", video_queue=None,
+            sync_save_dir=None
     ):
         self.principal = principal
         self.data: dict = data
@@ -86,13 +87,14 @@ class BiliWebAsync:
 
         self.user_cookie = user_cookie
         self.video_queue: queue.SimpleQueue = video_queue
+        self.sync_save_dir = sync_save_dir
 
     def upload(self, total_size: int, stop_event: threading.Event, output_prefix: str, file_name_callback: Callable[[str], None] = None, database_row_id=0) -> List[FileInfo]:
         # print("开始同步上传")
         logger.info(f"开始同步上传 {database_row_id}")
         file_index = 1
         videos = Data()
-        bili = BiliBili(videos)
+        bili = BiliBili(videos, save_dir=self.sync_save_dir)
         bili.database_row_id = database_row_id
 
         bili.login(self.persistence_path, self.user_cookie)
@@ -203,7 +205,7 @@ class BiliWebAsync:
                 self.desc = self.desc.replace(
                     "@credit", "@" + credit["username"] + "  ", 1)
                 desc_v2_tmp = desc_v2_tmp[num + 7:]
-            except IndexError:
+            except ValueError:
                 logger.error('简介中的@credit占位符少于credits的数量,替换失败')
         desc_v2.append({
             "raw_text": " " + desc_v2_tmp,
@@ -215,7 +217,7 @@ class BiliWebAsync:
 
 
 class BiliBili:
-    def __init__(self, video: 'Data'):
+    def __init__(self, video: 'Data', save_dir=None):
         self.app_key = None
         self.appsec = None
         # if self.app_key is None or self.appsec is None:
@@ -237,7 +239,8 @@ class BiliBili:
         self._auto_os = None
         self.persistence_path = 'engine/bili.cookie'
 
-        self.save_dir = config.get('sync_save_dir', None)
+        self.save_dir = save_dir
+        self._submit_lock = threading.Lock()
         self.save_path = ''
         if self.save_dir and not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
@@ -381,11 +384,8 @@ class BiliBili:
             file_name_callback: Callable[[str], None] = None,
             submit_api: Callable[[str], None] = None
     ):
-        from biliup.app import context
-
         logger.info(f"{file_name} 开始上传")
-        if self.save_dir:
-            self.save_path = os.path.join(self.save_dir, file_name)
+        save_path = os.path.join(self.save_dir, file_name) if self.save_dir else ''
         cs_upcdn = ['alia', 'bda2', 'bldsa', 'tx', 'txa']
         jd_upcdn = ['jd-alia', 'jd-bd', 'jd-bldsa', 'jd-tx', 'jd-txa']
         special_upcdn = {
@@ -460,25 +460,17 @@ class BiliBili:
             return
         video_part['title'] = video_part['title'][:80]
 
-        if str(self.database_row_id) in context["sync_downloader_map"]:
-            context_data = context["sync_downloader_map"][str(self.database_row_id)].copy()
-            context_data.pop('subtitle', None)
-            videos = Data(**context_data)
-
-        videos.append(video_part)  # 添加已经上传的视频
-        edit = False if videos.aid is None else True
-        ret = self.submit(submit_api=submit_api, edit=edit, videos=videos)
-        # logger.info(f"上传成功: {ret}")
-        if edit:
-            logger.info("编辑添加成功: %s", _safe_response_status(ret))
-        else:
-            logger.info("上传成功: %s", _safe_response_status(ret))
-        aid = ret['data']['aid']
-        videos.aid = aid
-        context['sync_downloader_map'][str(self.database_row_id)] = videos.__dict__
-        logger.info(f"上传完成 {file_name} {context['sync_downloader_map'][str(self.database_row_id)] }")
+        # Uploads may finish concurrently; serialize appending and submitting
+        # the shared video's parts so one edit cannot overwrite another.
+        with self._submit_lock:
+            videos = videos if videos is not None else self.video
+            videos.append(video_part)
+            edit = videos.aid is not None
+            ret = self.submit(submit_api=submit_api, edit=edit, videos=videos)
+            videos.aid = ret['data']['aid']
+            logger.info("上传完成 %s: %s", file_name, _safe_response_status(ret))
         if file_name_callback:
-            file_name_callback(self.save_path)
+            file_name_callback(save_path)
 
     async def upos_stream(self, stream_queue, file_name, total_size, ret):
         # print("--------------, ", file_name)
@@ -510,7 +502,8 @@ class BiliBili:
         semaphore = threading.Semaphore(max_workers)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = []
-            for index, chunk in enumerate(self.queue_reader_generator(stream_queue, chunk_size, total_size)):
+            save_path = os.path.join(self.save_dir, file_name) if self.save_dir else None
+            for index, chunk in enumerate(self.queue_reader_generator(stream_queue, chunk_size, total_size, save_path)):
                 if not chunk:
                     break
                 const_time = time.perf_counter() - st
@@ -535,19 +528,14 @@ class BiliBili:
                 futures.append(future)
                 st = time.perf_counter()
 
-                for f in list(futures):
-                    if f.done():
-                        futures.remove(f)
-
-                # 等待所有分片上传完成，并按顺序收集结果
+            # Keep completed futures too: every uploaded part must succeed
+            # before the merge request can be sent.
             for future in concurrent.futures.as_completed(futures):
-                pass
-
-            results = [{
-                "partNumber": i + 1,
-                "eTag": "etag"
-            } for i in range(chunks)]
-            parts.extend(results)
+                result = future.result()
+                if result is None:
+                    raise RuntimeError(f"{file_name}: a chunk failed after all retries")
+                parts.append(result)
+            parts.sort(key=lambda part: part['partNumber'])
 
         if n == 0:
             return None
@@ -620,7 +608,7 @@ class BiliBili:
         logger.error(f"{file_name} - chunks-{params_clone['chunk']} - Upload failed after {max_retries} attempts.")
         return None
 
-    def queue_reader_generator(self, simple_queue: queue.SimpleQueue, chunk_size: int, max_size: int):
+    def queue_reader_generator(self, simple_queue: queue.SimpleQueue, chunk_size: int, max_size: int, save_path=None):
         """
         从 simple_queue 中读取数据并按 chunk_size 大小分块产出 (yield)
         当队列中获取到 None 或者数据总量达到 max_size 后，就用 0x00 补齐到 chunk_size
@@ -638,7 +626,7 @@ class BiliBili:
         current_buffer = bytearray()
         save_file = None
         if self.save_dir:
-            save_file = open(self.save_path, "wb")
+            save_file = open(save_path or self.save_path, "wb")
 
         while chunks_yielded < total_chunks:
             try:
@@ -743,15 +731,16 @@ class BiliBili:
                 raise RuntimeError("Access token is required, but account and access_token does not exist!")
             self.login_by_password(**self.account)
             self.store()
-        api = 'http://member.bilibili.com/x/vu/client/add?access_key=' + self.access_token
-        if edit:
-            api = 'http://member.bilibili.com/x/vu/client/edit?access_key=' + self.access_token
+        action = 'edit' if edit else 'add'
         logger.debug("client api submit prepared with %d fields", len(post_data))
-        while True:
+        for attempt in range(2):
+            api = f'http://member.bilibili.com/x/vu/client/{action}?access_key={self.access_token}'
             ret = self.__session.post(api, timeout=5, json=post_data).json()
-            if ret['code'] == -101:
+            if ret['code'] == -101 and attempt == 0:
                 logger.info("客户端登录状态失效，正在刷新凭据: %s", _safe_response_status(ret))
-                self.login_by_password(**config['user']['account'])
+                if self.account is None:
+                    raise RuntimeError("Access token expired and no account is available to refresh it")
+                self.login_by_password(**self.account)
                 self.store()
                 continue
             return ret

@@ -223,7 +223,7 @@ pub async fn renew_login_info_file(path: impl AsRef<Path>, proxy: Option<&str>) 
 
 pub fn bilibili_from_info(login_info: LoginInfo, proxy: Option<&str>) -> Result<BiliBili> {
     let client = Credential::new(proxy);
-    client.set_cookie(&login_info.cookie_info);
+    client.set_cookie(&login_info.cookie_info)?;
     debug!("通过cookie登录");
     Ok(BiliBili {
         client: client.0.client,
@@ -331,7 +331,9 @@ impl std::fmt::Debug for OAuthInfo {
 
 #[cfg(test)]
 mod redaction_tests {
-    use super::{LoginInfo, OAuthInfo, ResponseValue, TokenInfo, save_login_info};
+    use super::{
+        LoginInfo, OAuthInfo, ResponseValue, TokenInfo, bilibili_from_info, save_login_info,
+    };
     use serde_json::json;
 
     fn login_info(token: &str) -> LoginInfo {
@@ -371,6 +373,67 @@ mod redaction_tests {
             !format!("{:?}", ResponseValue::Value(json!({"token": "raw-secret"})))
                 .contains("raw-secret")
         );
+    }
+
+    #[test]
+    fn malformed_cookie_info_returns_an_error_without_panicking_or_leaking_values() {
+        for cookies in [
+            json!(null),
+            json!({}),
+            json!({"cookies": {}}),
+            json!({"cookies": [{"value": "cookie-secret"}]}),
+            json!({"cookies": [{"name": "", "value": "cookie-secret"}]}),
+            json!({"cookies": [{"name": "SESSDATA", "value": 42}]}),
+        ] {
+            let mut login = login_info("cookie-secret");
+            login.cookie_info = cookies;
+            let error = bilibili_from_info(login, None).unwrap_err();
+            assert!(!error.to_string().contains("cookie-secret"));
+        }
+    }
+
+    #[test]
+    fn valid_cookie_info_loads_every_cookie() {
+        use reqwest::cookie::CookieStore;
+
+        let credential = super::Credential::new(None);
+        credential
+            .set_cookie(&json!({"cookies": [
+                {"name": "SESSDATA", "value": "session"},
+                {"name": "bili_jct", "value": "csrf"}
+            ]}))
+            .unwrap();
+        let header = credential
+            .0
+            .cookie_store
+            .cookies(&url::Url::parse("https://member.bilibili.com/").unwrap())
+            .unwrap();
+        let header = header.to_str().unwrap();
+        assert!(header.contains("SESSDATA=session"));
+        assert!(header.contains("bili_jct=csrf"));
+    }
+
+    #[test]
+    fn malformed_cookie_refresh_preserves_the_previous_cookie_store() {
+        use reqwest::cookie::CookieStore;
+
+        let credential = super::Credential::new(None);
+        credential
+            .set_cookie(&json!({"cookies": [
+                {"name": "SESSDATA", "value": "previous-session"}
+            ]}))
+            .unwrap();
+        let error = credential
+            .set_cookie(&json!({"cookies": [
+                {"name": "SESSDATA", "value": "replacement-secret"},
+                {"name": "bili_jct", "value": null}
+            ]}))
+            .unwrap_err();
+        assert!(!error.to_string().contains("replacement-secret"));
+
+        let origin = url::Url::parse("https://member.bilibili.com/").unwrap();
+        let header = credential.0.cookie_store.cookies(&origin).unwrap();
+        assert_eq!(header.to_str().unwrap(), "SESSDATA=previous-session");
     }
 
     #[tokio::test]
@@ -505,9 +568,8 @@ impl Credential {
     pub async fn renew_tokens(&self, login_info: LoginInfo) -> Result<LoginInfo> {
         let keypair = match login_info.platform.as_deref() {
             Some("BiliTV") => AppKeyStore::BiliTV,
-            Some("Android") => AppKeyStore::Android,
+            Some("Android") | None => AppKeyStore::Android,
             Some(_) => return Err("未知平台".into()),
-            None => return Ok(login_info),
         };
         let payload = {
             let mut payload = json!({
@@ -536,7 +598,7 @@ impl Credential {
         let response_code = response.code;
         match response.data {
             Some(ResponseValue::Login(info)) if !info.cookie_info.is_null() => {
-                self.set_cookie(&info.cookie_info);
+                self.set_cookie(&info.cookie_info)?;
                 Ok(LoginInfo {
                     platform: login_info.platform,
                     ..info
@@ -591,7 +653,7 @@ impl Credential {
         let response_code = response.code;
         match response.data {
             Some(ResponseValue::Login(info)) if !info.cookie_info.is_null() => {
-                self.set_cookie(&info.cookie_info);
+                self.set_cookie(&info.cookie_info)?;
                 Ok(LoginInfo {
                     platform: Some("Android".to_string()),
                     ..info
@@ -624,7 +686,7 @@ impl Credential {
         let response_code = res.code;
         match res.data {
             Some(ResponseValue::Login(info)) => {
-                self.set_cookie(&info.cookie_info);
+                self.set_cookie(&info.cookie_info)?;
                 Ok(LoginInfo {
                     platform: Some("Android".to_string()),
                     ..info
@@ -789,7 +851,7 @@ impl Credential {
                     data: Some(ResponseValue::Login(info)),
                     ..
                 } => {
-                    self.set_cookie(&info.cookie_info);
+                    self.set_cookie(&info.cookie_info)?;
                     break Ok(LoginInfo {
                         platform: Some("BiliTV".to_string()),
                         ..info
@@ -966,20 +1028,33 @@ impl Credential {
         format!("{:x}", hasher.finalize())
     }
 
-    fn set_cookie(&self, cookie_info: &serde_json::Value) {
-        let mut store = self.0.cookie_store.lock().unwrap();
-        for cookie in cookie_info["cookies"].as_array().unwrap() {
-            let cookie = Cookie::build((
-                cookie["name"].as_str().unwrap(),
-                cookie["value"].as_str().unwrap(),
-            ))
-            .domain("bilibili.com")
-            .into();
+    fn set_cookie(&self, cookie_info: &serde_json::Value) -> Result<()> {
+        let cookies = cookie_info["cookies"]
+            .as_array()
+            .ok_or_else(|| Kind::Custom("credential cookies must be an array".into()))?;
+        let mut store = self
+            .0
+            .cookie_store
+            .lock()
+            .map_err(|_| Kind::Custom("credential cookie store is unavailable".into()))?;
+        let mut updated = store.clone();
+        let origin = Url::parse("https://bilibili.com/").expect("static cookie origin");
+        for (index, cookie) in cookies.iter().enumerate() {
+            let name = cookie["name"]
+                .as_str()
+                .filter(|name| !name.is_empty())
+                .ok_or_else(|| Kind::Custom(format!("credential cookie {index} has no name")))?;
+            let value = cookie["value"].as_str().ok_or_else(|| {
+                Kind::Custom(format!("credential cookie {index} has no string value"))
+            })?;
+            let cookie = Cookie::build((name, value)).domain("bilibili.com").into();
 
-            store
-                .insert_raw(&cookie, &Url::parse("https://bilibili.com/").unwrap())
-                .unwrap();
+            updated
+                .insert_raw(&cookie, &origin)
+                .map_err(|_| Kind::Custom(format!("credential cookie {index} is invalid")))?;
         }
+        *store = updated;
+        Ok(())
     }
 
     fn get_cookie(&self, name: &str) -> Result<String> {

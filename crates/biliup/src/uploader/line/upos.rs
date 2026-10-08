@@ -53,6 +53,11 @@ pub(crate) struct UposPart {
 
 impl Upos {
     pub async fn from(client: StatelessClient, bucket: Bucket) -> Result<Self> {
+        if bucket.chunk_size == 0 {
+            return Err(Kind::Custom(
+                "UPOS chunk_size must be greater than zero".into(),
+            ));
+        }
         let url = format!(
             "https:{}/{}",
             bucket.endpoint,
@@ -208,25 +213,22 @@ impl Upos {
         )
         .await?;
         debug_assert_eq!(res["OK"], 1);
-        let filename = Path::new(&self.bucket.upos_uri)
-            .file_stem()
-            .unwrap()
-            .to_str()
-            .unwrap();
-
-        // B站限制分P视频标题不能超过80字符，需要截断filename字段
-        let truncated_filename = if filename.chars().count() >= 80 {
-            Video::truncate_title(filename, 80)
-        } else {
-            filename.to_string()
-        };
-
-        Ok(Video {
-            title: None,
-            filename: truncated_filename,
-            desc: "".into(),
-        })
+        uploaded_video(&self.bucket.upos_uri)
     }
+}
+
+fn uploaded_video(upos_uri: &str) -> Result<Video> {
+    let filename = Path::new(upos_uri)
+        .file_stem()
+        .and_then(OsStr::to_str)
+        .filter(|filename| !filename.is_empty())
+        .ok_or_else(|| Kind::Custom("UPOS response contains no video filename".into()))?;
+    // This is the uploaded object's key. Only the human-readable P title can be truncated.
+    Ok(Video {
+        title: None,
+        filename: filename.to_string(),
+        desc: "".into(),
+    })
 }
 
 fn sorted_parts(parts: &[UposPart]) -> Result<Vec<UposPart>> {
@@ -246,7 +248,7 @@ fn sorted_parts(parts: &[UposPart]) -> Result<Vec<UposPart>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Bucket, Upos, UposPart, sorted_parts};
+    use super::{Bucket, Upos, UposPart, sorted_parts, uploaded_video};
     use crate::client::StatelessClient;
     use crate::error::Kind;
     use bytes::Bytes;
@@ -357,5 +359,30 @@ mod tests {
     fn complete_parts_must_be_contiguous() {
         assert!(sorted_parts(&[part(1), part(3)]).is_err());
         assert!(sorted_parts(&[part(1), part(1)]).is_err());
+    }
+
+    #[test]
+    fn uploaded_object_key_is_preserved_even_when_longer_than_a_title() {
+        let key = "a".repeat(120);
+        let video = uploaded_video(&format!("upos://bucket/{key}.mp4")).unwrap();
+        assert_eq!(video.filename, key);
+        assert!(video.title.is_none());
+        assert!(uploaded_video("").is_err());
+    }
+
+    #[tokio::test]
+    async fn zero_chunk_size_is_rejected_before_requesting_an_upload_id() {
+        let bucket = Bucket {
+            chunk_size: 0,
+            auth: "auth".into(),
+            endpoint: "//127.0.0.1:1".into(),
+            biz_id: 1,
+            upos_uri: "upos://bucket/file.mp4".into(),
+        };
+        let error = Upos::from(StatelessClient::default(), bucket)
+            .await
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("chunk_size"));
     }
 }
