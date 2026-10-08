@@ -114,6 +114,10 @@ export const LOCAL_SECRET_FIELDS = [
   'user.niconico-user-session',
   'user.niconico-purge-credentials',
   'kuaishou_cookie',
+  'douyu_cookie',
+  'douyu_ltp0',
+  'douyu_refresh_device_id',
+  'douyu_auto_refresh',
   'douyu_deviceId',
   'twitcasting_password',
 ]

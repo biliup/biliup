@@ -1,7 +1,10 @@
 'use client'
 import React, { useEffect } from 'react'
 import { Form, Radio, Select, useFormApi } from '@douyinfe/semi-ui'
-import { fetcher } from '../../lib/api-streamer'
+import { usePathname } from 'next/navigation'
+import { useMe } from '../../lib/use-me'
+import { testDouyuCookie } from '../../lib/douyu-auth'
+import DouyuAuthPanel from './DouyuAuthPanel'
 import PlatformPanel, { digitsToNumber } from './PlatformPanel'
 
 type Props = {
@@ -14,6 +17,13 @@ type Props = {
 const Douyu: React.FC<Props> = props => {
   const { entity, list, initValues, bare } = props
   const formApi = useFormApi()
+  const pathname = usePathname()
+  const { can } = useMe()
+  // Fleet editors reuse the platform forms while editing remote configuration.
+  // Local credential actions must never operate on the controller's own account there.
+  const fleetEditor = pathname === '/nodes' || pathname?.startsWith('/nodes/')
+  const localConfig = !!bare && !fleetEditor
+  const canTestCookie = !fleetEditor && can('config.edit')
 
   useEffect(() => {
     if (initValues) {
@@ -27,8 +37,9 @@ const Douyu: React.FC<Props> = props => {
   const [testResult, setTestResult] = React.useState<{ success: boolean; message: string } | null>(null)
 
   const handleTestCookie = async () => {
+    if (!canTestCookie || testingCookie) return
     const cookieValue = formApi.getValue('douyu_cookie')
-    if (!cookieValue || cookieValue.trim() === '') {
+    if (typeof cookieValue !== 'string' || cookieValue.trim() === '') {
       setTestResult({ success: false, message: 'Cookie不能为空' })
       return
     }
@@ -37,30 +48,17 @@ const Douyu: React.FC<Props> = props => {
     setTestResult(null)
 
     try {
-      const data: unknown = await fetcher('/v1/douyu/validate-cookie', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ cookie: cookieValue }),
-      })
-
-      if (!data || typeof data !== 'object' || !('valid' in data) || typeof data.valid !== 'boolean') {
-        throw new Error('Cookie 验证接口返回了无效响应，请检查前后端版本是否一致')
-      }
+      const valid = await testDouyuCookie(cookieValue)
+      if (formApi.getValue('douyu_cookie') !== cookieValue) return
       setTestResult({
-        success: data.valid,
-        message:
-          'message' in data && typeof data.message === 'string' && data.message
-            ? data.message
-            : data.valid
-              ? 'Cookie有效'
-              : 'Cookie无效或已过期',
+        success: valid,
+        message: valid ? 'Cookie有效（已通过登录验证）' : 'Cookie无效或已过期，请重新登录并更新',
       })
-    } catch (error) {
+    } catch {
+      if (formApi.getValue('douyu_cookie') !== cookieValue) return
       setTestResult({
         success: false,
-        message: `测试失败: ${error instanceof Error ? error.message : '未知错误'}`,
+        message: '登录验证未完成，请检查网络连接或稍后重试',
       })
     } finally {
       setTestingCookie(false)
@@ -75,6 +73,7 @@ const Douyu: React.FC<Props> = props => {
             field="douyu_cookie"
             label="登录 Cookie（douyu_cookie）"
             placeholder="acf_username=xxx; acf_uid=xxx; acf_auth=xxx; acf_did=xxx; ..."
+            onChange={() => setTestResult(null)}
             autosize={{ minRows: 2, maxRows: 6 }}
             extraText={
               <div style={{ fontSize: '14px' }}>
@@ -85,6 +84,7 @@ const Douyu: React.FC<Props> = props => {
                 登录凭据应包含 <code>acf_uid</code> 和 <code>acf_auth</code>。
                 <br />
                 支持 Network 面板里的 Cookie 字符串，也支持浏览器插件导出的 Cookie JSON 数组。
+                {localConfig && <><br />完整 JSON 可同时包含 www.douyu.com 和 passport.douyu.com 的 Cookie，保存时会分离续期凭据。</>}
                 <br />
                 留空时尝试匿名取流，实际画质以平台返回为准。
                 <br />
@@ -100,7 +100,7 @@ const Douyu: React.FC<Props> = props => {
             }
             style={{ width: '100%' }}
           />
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {canTestCookie && <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button
               type="button"
               onClick={handleTestCookie}
@@ -128,8 +128,38 @@ const Douyu: React.FC<Props> = props => {
                 {testResult.success ? '✅' : '❌'} {testResult.message}
               </span>
             )}
-          </div>
+          </div>}
         </div>
+        {localConfig && <>
+          <Form.Input
+            field="douyu_ltp0"
+            label="长期续期凭据 LTP0（douyu_ltp0）"
+            mode="password"
+            autoComplete="new-password"
+            placeholder="passport.douyu.com 的 LTP0；完整 Cookie 导出包含时可留空"
+            extraText="用于自动换取新的登录 Cookie。请与下方 dy_did 使用同一账号、同一次浏览器登录取得的值；这些敏感字段不通过 Fleet 配置下发。"
+            style={{ width: '100%' }}
+          />
+          <Form.Input
+            field="douyu_refresh_device_id"
+            label="续期设备标识 dy_did（douyu_refresh_device_id）"
+            autoComplete="off"
+            placeholder="与 LTP0 配套的 dy_did；完整 Cookie 导出包含时可留空"
+            extraText="续期使用 passport 登录对应的 dy_did。它与下方取流设备 ID 分开；请勿混用其他账号的设备号。"
+            style={{ width: '100%' }}
+          />
+          <Form.Switch
+            field="douyu_auto_refresh"
+            label="自动续期登录 Cookie（douyu_auto_refresh）"
+            initValue={entity?.douyu_auto_refresh ?? true}
+            extraText="默认开启；保存有效 LTP0 和 dy_did 后每 3 天续期，失败时自动退避重试，重启后恢复。续期成功会更新正在运行的 Web API 请求。"
+          />
+          <DouyuAuthPanel savedValues={entity ?? {}} />
+        </>}
+        {!bare && can('config.edit') && <div style={{ fontSize: 13, color: 'var(--semi-color-text-2)', margin: '12px 0' }}>
+          自动续期凭据与登录状态请在本机「空间配置 → 平台设置 → 斗鱼」中管理。
+          此处测试的是当前表单里的 Cookie，尚未保存的修改不会用于自动续期。
+        </div>}
         <Form.Input
           field="douyu_deviceId"
           label="设备 ID（douyu_deviceId）"
