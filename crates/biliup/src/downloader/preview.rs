@@ -349,6 +349,10 @@ enum HubState {
         format: PreviewFormat,
         codecs: Option<String>,
     },
+    /// Media bytes remain available to server decoders, but the browser player
+    /// cannot decode this codec. This is deliberately distinct from missing
+    /// init segments or downloaders that do not tee media at all.
+    BrowserUnavailable(String),
     Unavailable(String),
 }
 
@@ -497,7 +501,7 @@ impl PreviewHub {
                 subscribers,
                 max_subscribers,
             },
-            HubState::Unavailable(reason) => PreviewStatus {
+            HubState::Unavailable(reason) | HubState::BrowserUnavailable(reason) => PreviewStatus {
                 available: false,
                 format: None,
                 codecs: None,
@@ -552,6 +556,34 @@ impl PreviewHub {
         self.subscribe_with_depth(None, timeout).await
     }
 
+    /// Subscribe to the latest GOP for a server-side decoder. A browser-only
+    /// codec limitation (e.g. HEVC FLV) is allowed here; unavailable media and
+    /// missing writers still fail. Normal viewer limits and attachment
+    /// generations apply exactly as they do for browser subscriptions.
+    ///
+    /// The caller should copy the snapshot and immediately drop the subscription
+    /// before decoding, rather than keep a live viewer slot occupied.
+    pub async fn subscribe_for_decoder(
+        &self,
+        timeout: Duration,
+    ) -> Result<Subscription, SubscribeError> {
+        let ticket = PreviewTicket::new();
+        let permit = {
+            if let HubState::Unavailable(reason) = &*self.0.state.read().unwrap() {
+                return Err(SubscribeError::Unavailable(reason.clone()));
+            }
+            // BrowserUnavailable is intentional here. subscribe_reserved still
+            // obtains the latest attached writer and rejects missing writers.
+            self.0
+                .subscribers
+                .acquire(&ticket, false)
+                .map_err(|_| SubscribeError::TooManySubscribers(self.max_subscribers()))?
+                .0
+        };
+        self.subscribe_reserved(permit, Some(Duration::ZERO), timeout)
+            .await
+    }
+
     /// 同 [`subscribe`](Self::subscribe)，但快照里的已完成 GOP 只回溯 `depth`：
     /// 从当前 GOP 往前，取到第一个关键帧到达时刻早于「现在 − depth」的 GOP 为止（含），
     /// 所以起播缓冲在 `depth` 到 `depth + 一个 GOP` 之间；`Some(ZERO)` 只给当前 GOP，
@@ -576,7 +608,9 @@ impl PreviewHub {
         ticket: &PreviewTicket,
         evict: bool,
     ) -> Result<(PreviewSlot, Option<Evicted>), SubscribeError> {
-        if let HubState::Unavailable(reason) = &*self.0.state.read().unwrap() {
+        if let HubState::Unavailable(reason) | HubState::BrowserUnavailable(reason) =
+            &*self.0.state.read().unwrap()
+        {
             return Err(SubscribeError::Unavailable(reason.clone()));
         }
         self.0
@@ -687,10 +721,16 @@ impl PreviewSink {
         self.tx.receiver_count()
     }
 
-    /// 写入端在流里发现浏览器放不了的内容（如 HEVC 序列头）时把 hub 标为不可预览。
-    /// 只在序列头出现时调用一次，不在逐 tag 的路径上。
+    /// Media is incomplete/unsupported, so neither browsers nor server decoders
+    /// should subscribe. Browser-only codec limits use mark_browser_unavailable.
     pub fn mark_unavailable(&self, reason: impl Into<String>) {
         *self.hub.state.write().unwrap() = HubState::Unavailable(reason.into());
+    }
+
+    /// The tee contains complete decodable bytes, but the browser player cannot
+    /// handle the codec. Recording and server-side JPEG decoding remain usable.
+    pub fn mark_browser_unavailable(&self, reason: impl Into<String>) {
+        *self.hub.state.write().unwrap() = HubState::BrowserUnavailable(reason.into());
     }
 
     /// 推送一个 fMP4 分段（可能含多个 moof/mdat 对）：按分片切开，视频首帧是关键帧的分片
@@ -2013,6 +2053,71 @@ mod tests {
             unavailable.subscribe(Duration::from_millis(50)).await.err(),
             Some(SubscribeError::Unavailable("streamlink".into()))
         );
+    }
+
+    #[tokio::test]
+    async fn decoder_snapshot_allows_only_browser_codec_limits_and_keeps_latest_gop() {
+        let hub = PreviewHub::new(1);
+        let mut sink = hub.attach(PreviewFormat::Flv);
+        sink.push(ChunkKind::Header, Bytes::from_static(&flv::FILE_HEADER));
+        sink.push(ChunkKind::SequenceHeader(9), Bytes::from_static(b"hevc"));
+        sink.push(ChunkKind::Keyframe, key(1));
+        sink.push(ChunkKind::Keyframe, key(2));
+        sink.mark_browser_unavailable("HEVC is unsupported by the browser player");
+        assert!(!hub.status().available);
+        assert!(matches!(
+            hub.subscribe(Duration::from_millis(50)).await,
+            Err(SubscribeError::Unavailable(_))
+        ));
+
+        let pending = tokio::spawn({
+            let hub = hub.clone();
+            async move { hub.subscribe_for_decoder(Duration::from_secs(2)).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        sink.push(ChunkKind::Media, inter(3));
+        let subscription = pending.await.unwrap().unwrap();
+        assert_eq!(subscription.format, PreviewFormat::Flv);
+        assert_eq!(
+            subscription.snapshot,
+            vec![
+                Bytes::from_static(&flv::FILE_HEADER),
+                Bytes::from_static(b"hevc"),
+                key(2),
+                inter(3),
+            ]
+        );
+        assert_eq!(hub.subscribers(), 1);
+        assert!(matches!(
+            hub.subscribe_for_decoder(Duration::from_millis(50)).await,
+            Err(SubscribeError::TooManySubscribers(1))
+        ));
+        drop(subscription);
+        assert_eq!(hub.subscribers(), 0);
+        drop(sink);
+        assert!(matches!(
+            hub.subscribe_for_decoder(Duration::from_millis(50)).await,
+            Err(SubscribeError::NotAttached)
+        ));
+    }
+
+    #[tokio::test]
+    async fn decoder_snapshot_rejects_generically_unavailable_media_even_when_attached() {
+        let hub = PreviewHub::new(1);
+        let sink = hub.attach(PreviewFormat::MpegTs);
+        sink.mark_unavailable("missing fMP4 init segment");
+        assert!(hub.is_attached());
+        assert!(matches!(
+            hub.subscribe_for_decoder(Duration::from_millis(50)).await,
+            Err(SubscribeError::Unavailable(_))
+        ));
+        assert_eq!(hub.subscribers(), 0);
+        assert!(matches!(
+            PreviewHub::unavailable("ffmpeg directly writes to disk")
+                .subscribe_for_decoder(Duration::from_millis(50))
+                .await,
+            Err(SubscribeError::Unavailable(_))
+        ));
     }
 
     /// 新订阅者拿到的快照 = 文件头 + 序列头 + 从最近关键帧起的整个 GOP，
