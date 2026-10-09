@@ -30,8 +30,11 @@ if [[ "$platform" == linux ]]; then
   cc -std=gnu11 -O2 "${sources[@]}" "${pcre_flags[@]}" -lm -o "$tmp/DanmakuFactory-cli"
   factory="$tmp/DanmakuFactory-cli"
 else
-  xmake -C "$tmp/DanmakuFactory" f -y -m release
-  xmake -C "$tmp/DanmakuFactory" build -y cli
+  (
+    cd "$tmp/DanmakuFactory"
+    xmake f -y -m release
+    xmake build -y cli
+  )
   factory="$(find "$tmp/DanmakuFactory/build" -type f \( -iname 'DanmakuFactory.exe' -o -iname 'DanmakuFactory' -o -name 'cli' \) -print -quit)"
 fi
 [[ -n "$factory" && -f "$factory" ]] || { echo "DanmakuFactory executable missing from archive" >&2; exit 1; }

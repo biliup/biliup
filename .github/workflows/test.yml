@@ -36,9 +36,13 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # 自动切片抽音频、取帧等用例要真的调 ffmpeg，没有时会跳过（日志里是 `SKIPPED ...`）
-      - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      # 媒体测试必须使用真实 FFmpeg、XML 转换器和与预览共用的中文字体。
+      - name: Install media test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg build-essential libpcre2-dev pkg-config
+          bash .github/scripts/build-render-tools.sh linux "$RUNNER_TEMP/render-tools"
+          echo "BILIUP_RENDER_TOOLS_DIR=$RUNNER_TEMP/render-tools" >> "$GITHUB_ENV"
       - name: Run tests
         run: cargo test --locked --workspace
 
