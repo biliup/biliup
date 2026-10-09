@@ -490,7 +490,7 @@ pub async fn begin_export(
     now: i64,
 ) -> sqlx::Result<Option<Clip>> {
     let sql = format!(
-        "UPDATE clips SET state = 'exporting', mode = ?, error = NULL, cut_in_ms = NULL,
+        "UPDATE clips SET state = 'exporting', mode = ?, active_render_id = NULL, error = NULL, cut_in_ms = NULL,
              cut_out_ms = NULL, output_path = NULL, output_bytes = NULL, duration_ms = NULL,
              updated_at = ?
          WHERE id = ? AND state IN ('draft', 'ready', 'failed') RETURNING {COLUMNS}"
@@ -514,6 +514,71 @@ pub struct Exported {
     pub output_path: String,
     pub output_bytes: i64,
     pub duration_ms: i64,
+}
+
+/// Associate a composition with a clip without discarding its previous product.
+pub async fn begin_render_export(
+    pool: &ConnectionPool,
+    id: i64,
+    job_id: i64,
+    now: i64,
+) -> sqlx::Result<Option<Clip>> {
+    let sql = format!("UPDATE clips SET state = 'exporting', mode = 'precise', active_render_id = ?,
+        error = NULL, updated_at = ? WHERE id = ? AND state IN ('draft','ready','failed') RETURNING {COLUMNS}");
+    sqlx::query(&sql)
+        .bind(job_id)
+        .bind(now)
+        .bind(id)
+        .fetch_optional(pool)
+        .await?
+        .as_ref()
+        .map(Clip::from_row)
+        .transpose()
+}
+
+pub async fn finish_render_export(
+    pool: &ConnectionPool,
+    id: i64,
+    job_id: i64,
+    done: &Exported,
+    now: i64,
+) -> sqlx::Result<bool> {
+    let changed = sqlx::query(
+        "UPDATE clips SET state = 'ready', cut_in_ms = ?, cut_out_ms = ?,
+        output_path = ?, output_bytes = ?, duration_ms = ?, error = NULL, active_render_id = NULL,
+        updated_at = ? WHERE id = ? AND state = 'exporting' AND active_render_id = ?",
+    )
+    .bind(done.cut_in_ms)
+    .bind(done.cut_out_ms)
+    .bind(&done.output_path)
+    .bind(done.output_bytes)
+    .bind(done.duration_ms)
+    .bind(now)
+    .bind(id)
+    .bind(job_id)
+    .execute(pool)
+    .await?;
+    Ok(changed.rows_affected() > 0)
+}
+
+pub async fn fail_render_export(
+    pool: &ConnectionPool,
+    id: i64,
+    job_id: i64,
+    error: &str,
+    now: i64,
+) -> sqlx::Result<bool> {
+    let changed = sqlx::query(
+        "UPDATE clips SET state = 'failed', error = ?, active_render_id = NULL,
+        updated_at = ? WHERE id = ? AND state = 'exporting' AND active_render_id = ?",
+    )
+    .bind(error)
+    .bind(now)
+    .bind(id)
+    .bind(job_id)
+    .execute(pool)
+    .await?;
+    Ok(changed.rows_affected() > 0)
 }
 
 pub async fn finish_export(
@@ -594,7 +659,7 @@ pub fn remove_leftovers(root: &Path) {
 /// 启动时把上次没导出完的切片记为失败（后台任务随进程没了）。
 pub async fn recover(pool: &ConnectionPool, now: i64) -> sqlx::Result<u64> {
     let done = sqlx::query(
-        "UPDATE clips SET state = 'failed', error = ?, updated_at = ? WHERE state = 'exporting'",
+        "UPDATE clips SET state = 'failed', error = ?, updated_at = ? WHERE state = 'exporting' AND active_render_id IS NULL",
     )
     .bind(INTERRUPTED)
     .bind(now)

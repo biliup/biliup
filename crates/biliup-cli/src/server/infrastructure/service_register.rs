@@ -10,6 +10,7 @@ use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
 use crate::server::services::douyu_keeper::DouyuCookieKeeper;
 use crate::server::workbench::clips::export::ClipExports;
 use crate::server::workbench::clips::publish::queue::{BiliBackend, ClipPublisher};
+use crate::server::workbench::renders::RenderJobs;
 use axum::extract::FromRef;
 use biliup::client::StatelessClient;
 use biliup::downloader::live::builtin_plugins;
@@ -20,6 +21,8 @@ use tracing::info;
 
 /// 切片产物的目录（相对工作目录）。
 pub const CLIPS_DIR: &str = "clips";
+/// 原素材的录后合成产物及图片资产目录。
+pub const RENDERS_DIR: &str = "renders";
 
 /// 服务注册器
 /// 负责管理应用程序中的各种服务实例，包括数据库连接池、工作器、下载管理器等
@@ -43,6 +46,8 @@ pub struct ServiceRegister {
     pub system: Arc<SystemMonitor>,
     /// 切片导出任务（产物在工作目录下的 `clips/`）
     pub clips: Arc<ClipExports>,
+    /// 录后合成任务；与精确剪和自动遮挡共用转码并发限制。
+    pub renders: Arc<RenderJobs>,
 
     /// 切片发布队列（同一时间只传一个稿件；任务只在内存里）
     pub publisher: Arc<ClipPublisher>,
@@ -78,6 +83,10 @@ impl ServiceRegister {
         }
 
         let clips = Arc::new(ClipExports::new(pool.clone(), CLIPS_DIR));
+        let renders = Arc::new(RenderJobs::new(pool.clone(), RENDERS_DIR));
+        if let Err(error) = renders.initialize().await {
+            tracing::warn!(%error, "录后合成任务恢复失败");
+        }
         let publisher = Arc::new(ClipPublisher::new(
             pool.clone(),
             clips.clone(),
@@ -93,6 +102,7 @@ impl ServiceRegister {
         info!("feature services successfully initialized!");
         ServiceRegister {
             clips,
+            renders,
             publisher,
             douyu_keeper,
             pool,
@@ -120,6 +130,7 @@ impl ServiceRegister {
     }
 
     pub async fn cleanup(&self) {
+        self.renders.shutdown().await;
         self.douyu_keeper.stop();
         self.managers.cleanup().await;
     }

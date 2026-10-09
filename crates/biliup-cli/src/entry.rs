@@ -232,6 +232,7 @@ pub async fn dispatch(cli: Cli, log_handle: LogHandle) -> AppResult<()> {
                 listener: None,
                 shutdown: None,
                 ffmpeg: None,
+                render_tools_dir: None,
                 fleet: FleetOptions {
                     controller,
                     relay_listen,
@@ -287,6 +288,8 @@ pub struct ServeOptions {
     /// An ffmpeg shipped with the host (the desktop app passes the one in its
     /// installer). Used when the `ffmpeg_path` setting is empty, before `PATH`.
     pub ffmpeg: Option<PathBuf>,
+    /// Render tools directory shipped with the host (DanmakuFactory + fonts).
+    pub render_tools_dir: Option<PathBuf>,
     /// Fleet controller options (`--controller`, `--relay-listen`, `--relay-url`).
     /// The default runs standalone, or as a node when `data/node.json` exists.
     pub fleet: FleetOptions,
@@ -303,6 +306,7 @@ pub async fn serve(opts: ServeOptions) -> AppResult<()> {
             .attach_with(|| format!("could not switch to work dir {}", dir.display()))?;
     }
     crate::tools::set_bundled_ffmpeg(opts.ffmpeg);
+    crate::tools::set_bundled_render_tools(opts.render_tools_dir);
     let listener = match opts.listener {
         Some(listener) => listener
             .set_nonblocking(true)

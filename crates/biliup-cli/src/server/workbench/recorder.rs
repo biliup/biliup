@@ -430,6 +430,13 @@ impl Writer {
             gap,
         )
         .await?;
+        // File-open time is an estimate, not a source-site presentation clock.
+        // Preserve it separately from the gap-compressed session timeline.
+        sqlx::query("UPDATE segments SET recorded_at_ms = ? WHERE id = ?")
+            .bind(opened_at)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         self.register_live();
         if let Some(live) = &mut self.live {
             live.anchor(start_ms, opened_at);

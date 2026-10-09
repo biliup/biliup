@@ -4,7 +4,12 @@
     "resources": {
       "ffmpeg/ffmpeg.exe": "ffmpeg/ffmpeg.exe",
       "ffmpeg/LICENSE.txt": "ffmpeg/LICENSE.txt",
-      "ffmpeg/README.txt": "ffmpeg/README.txt"
+      "ffmpeg/README.txt": "ffmpeg/README.txt",
+      "render-tools/DanmakuFactory.exe": "render-tools/DanmakuFactory.exe",
+      "render-tools/README.txt": "render-tools/README.txt",
+      "render-tools/DANMAKUFACTORY-LICENSE.txt": "render-tools/DANMAKUFACTORY-LICENSE.txt",
+      "render-tools/fonts/NotoSansSC-Regular.otf": "render-tools/fonts/NotoSansSC-Regular.otf",
+      "render-tools/fonts/OFL.txt": "render-tools/fonts/OFL.txt"
     }
   }
 }

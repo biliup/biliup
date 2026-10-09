@@ -93,6 +93,77 @@ async fn ready(pool: &ConnectionPool, session: i64, in_ms: i64, out_ms: i64) -> 
     }
 }
 
+#[tokio::test]
+async fn stale_render_completion_cannot_replace_new_clip_product() {
+    let (_dir, pool, session, _) = flv_session().await;
+    let clip = insert(
+        &pool,
+        session,
+        &NewClip {
+            marker_id: None,
+            in_ms: 1000,
+            out_ms: 2000,
+            title: "render".into(),
+            created_by: None,
+            created_at: 5,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        begin_render_export(&pool, clip.id, 10, 6)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        fail_render_export(&pool, clip.id, 10, "cancelled", 7)
+            .await
+            .unwrap()
+    );
+    assert!(
+        begin_render_export(&pool, clip.id, 11, 8)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    let old = Exported {
+        cut_in_ms: 1000,
+        cut_out_ms: 2000,
+        output_path: "old.mp4".into(),
+        output_bytes: 1,
+        duration_ms: 1000,
+    };
+    assert!(
+        !finish_render_export(&pool, clip.id, 10, &old, 9)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !fail_render_export(&pool, clip.id, 10, "late failure", 9)
+            .await
+            .unwrap()
+    );
+    let new = Exported {
+        output_path: "new.mp4".into(),
+        ..old
+    };
+    assert!(
+        finish_render_export(&pool, clip.id, 11, &new, 10)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        get(&pool, clip.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .output_path
+            .as_deref(),
+        Some("new.mp4")
+    );
+}
+
 fn spans(plan: &plan::Plan) -> Vec<(i64, i64, i64)> {
     plan.pieces
         .iter()

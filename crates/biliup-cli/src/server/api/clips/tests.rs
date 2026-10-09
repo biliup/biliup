@@ -17,6 +17,7 @@ use tower_sessions_sqlx_store::SqliteStore;
 
 #[derive(Clone, FromRef)]
 struct AppState {
+    renders: Arc<crate::server::workbench::renders::RenderJobs>,
     pool: ConnectionPool,
     clips: Arc<ClipExports>,
     publisher: Arc<ClipPublisher>,
@@ -101,6 +102,10 @@ async fn fixture() -> Fixture {
         Arc::new(crate::server::workbench::clips::publish::queue::Offline),
     ));
     let state = AppState {
+        renders: Arc::new(crate::server::workbench::renders::RenderJobs::new(
+            pool.clone(),
+            dir.path().join("renders"),
+        )),
         pool: pool.clone(),
         publisher: publisher.clone(),
         clips,

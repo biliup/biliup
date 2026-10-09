@@ -75,6 +75,7 @@ async fn tools_report_follows_setting_then_host_ffmpeg() {
             let _ = stopped.await;
         })),
         ffmpeg: Some(bundled.clone()),
+        render_tools_dir: None,
         fleet: Default::default(),
     }));
 

@@ -16,12 +16,10 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
-use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
 
 // Encoding must not grow without bound when several rooms close a segment.
 // This also prevents two pipelines from modifying the same segment concurrently.
-static ENCODING_SLOT: Semaphore = Semaphore::const_new(1);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(3600);
 const STDERR_TAIL: usize = 8192;
@@ -221,10 +219,9 @@ impl MosaicPlugin {
 
     async fn process_file(&self, input: &Path, regions: &[MosaicRegion]) -> AppResult<PathBuf> {
         info!(file = %input.display(), regions = regions.len(), "录像已进入画面遮挡队列");
-        let _slot = ENCODING_SLOT
-            .acquire()
+        let _slot = crate::server::workbench::transcode::acquire(&tokio_util::sync::CancellationToken::new())
             .await
-            .map_err(|_| AppError::Custom("画面遮挡处理队列已关闭".into()))?;
+            .map_err(AppError::Custom)?;
         let started = std::time::Instant::now();
         let destination = masked_path(input);
         // Files from new downloads are already quarantined. Protect legacy/HA

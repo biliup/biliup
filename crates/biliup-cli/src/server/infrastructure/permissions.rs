@@ -174,6 +174,36 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         }
         "/v1/clips/{cid}/cover" | "/v1/sessions/{id}/thumb" | "/v1/publish-jobs" if get => FileView,
         "/v1/clips/{cid}/cover" if method == Method::PUT || method == Method::DELETE => ClipEdit,
+        "/v1/sessions/{id}/render-recipe"
+        | "/v1/sessions/{id}/render-settings"
+        | "/v1/sessions/{id}/render-assets"
+        | "/v1/sessions/{id}/renders"
+        | "/v1/render-assets/{aid}"
+        | "/v1/renders/{jid}"
+        | "/v1/renders/{jid}/download"
+        | "/v1/render-fonts/{id}"
+            if get =>
+        {
+            FileView
+        }
+        "/v1/sessions/{id}/render-recipe" | "/v1/sessions/{id}/render-settings"
+            if method == Method::PUT =>
+        {
+            ClipEdit
+        }
+        "/v1/sessions/{id}/render-assets"
+        | "/v1/sessions/{id}/renders"
+        | "/v1/renders/{jid}/cancel"
+        | "/v1/renders/{jid}/retry"
+            if method == Method::POST =>
+        {
+            ClipEdit
+        }
+        "/v1/render-assets/{aid}" if method == Method::DELETE => ClipEdit,
+        "/v1/renders/{jid}" if method == Method::DELETE => ClipEdit,
+        // Preview converts a recipe snapshot but does not persist a change.
+        "/v1/sessions/{id}/render-preview" if method == Method::POST => FileView,
+        "/v1/render-tools" | "/v1/render-capabilities" if get => StreamerView,
         "/v1/clips/{cid}/publish"
         | "/v1/publish-jobs"
         | "/v1/publish-jobs/preview"

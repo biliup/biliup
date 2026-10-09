@@ -290,6 +290,14 @@ impl ClipExports {
             Mode::Precise => &self.precise,
         };
         let _permit = slots.acquire().await.map_err(|e| e.to_string())?;
+        let _encoder = if mode == Mode::Precise {
+            Some(
+                super::super::transcode::acquire(&tokio_util::sync::CancellationToken::new())
+                    .await?,
+            )
+        } else {
+            None
+        };
         *lock(progress) = Progress::phase("准备中");
         if mode == Mode::Precise
             && let Some(error) = ffmpeg_unavailable().await
@@ -451,7 +459,12 @@ impl ClipExports {
         let source = clip
             .output_path
             .as_deref()
-            .filter(|_| clip.state == super::State::Ready || clip.state == super::State::Published)
+            .filter(|_| {
+                matches!(
+                    clip.state,
+                    super::State::Ready | super::State::Published | super::State::Failed
+                )
+            })
             .map(PathBuf::from)
             .ok_or(DownloadError::NotReady)?;
         if !tokio::fs::try_exists(&source).await.unwrap_or(false) {

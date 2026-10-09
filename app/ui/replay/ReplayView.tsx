@@ -82,6 +82,8 @@ import DvrPlayer, { type DvrHandle, type DvrPhase } from './DvrPlayer'
 import { DetailBar, OverviewBar, type Selection, type SuggestionBand } from './Timeline'
 import { type PanelTab, PRECISE_TIP, QUICK_TIP, SidePanel } from './SidePanel'
 import { SuggestionsPanel } from './SuggestionsPanel'
+import RenderEditor, { useRenderEditor } from './RenderEditor'
+import RenderEditorOverlay from './RenderEditorOverlay'
 import styles from './replay.module.scss'
 
 /** 细节条的范围：当前位置前后各 5 分钟 */
@@ -145,6 +147,14 @@ export default function ReplayView({
   const canEdit = can('clip.edit')
   const canDownload = can('file.view')
   const canSubmit = can('upload.submit')
+  const renderEditor = useRenderEditor(sessionId, canDownload)
+  const [editorVideo, setEditorVideo] = useState<HTMLVideoElement | null>(null)
+  const [editorSnapshot, setEditorSnapshot] = useState<HTMLCanvasElement | null>(null)
+  const [editorDimensions, setEditorDimensions] = useState<{ width: number; height: number } | null>(null)
+  const receiveEditorVideo = useCallback((video: HTMLVideoElement | null) => {
+    setEditorVideo(video)
+    if (video) setEditorSnapshot(null)
+  }, [])
   const ffmpeg = useFfmpeg()
   const editReason = meLoading
     ? '正在读取权限…'
@@ -395,10 +405,19 @@ export default function ReplayView({
     if (modeKind !== 'dvr' || phase !== 'paused') return
     const timer = setTimeout(() => {
       const at = dvrRef.current?.position()
-      if (at !== undefined) setMode({ kind: 'detached', at })
+      if (at !== undefined) {
+        // Keep a real raw frame for paused visual editing while releasing the streaming buffer.
+        const video = dvrRef.current?.video()
+        if (renderEditor.open && video?.videoWidth && video.videoHeight) {
+          const snapshot = document.createElement('canvas')
+          snapshot.width = video.videoWidth; snapshot.height = video.videoHeight
+          try { snapshot.getContext('2d')?.drawImage(video, 0, 0); setEditorSnapshot(snapshot) } catch { /* Browser media restrictions: detached state explains resuming. */ }
+        }
+        setMode({ kind: 'detached', at })
+      }
     }, DETACH_AFTER_PAUSE_MS)
     return () => clearTimeout(timer)
-  }, [modeKind, phase])
+  }, [modeKind, phase, renderEditor.open])
 
   // 连不上、连接中途断掉或服务端 5xx 时从停下的地方自动重开几次；服务端明确拒绝（404、415 等）不重试
   const retryable = errorStatus !== null && (errorStatus === 0 || errorStatus >= 500)
@@ -598,6 +617,21 @@ export default function ReplayView({
     return null
   }
   const exportTarget = loadedClip && !clipChanged ? '导出载入的这个切片' : '按入点、出点存成新切片并立即导出'
+
+  const exportComposedSelection = async () => {
+    if (selection.in === null || selection.out === null || !canEdit || selProblem || loadedBusy) return
+    setExporting('precise')
+    try {
+      await renderEditor.save()
+      const clip = loadedClip && !clipChanged ? loadedClip : await createClip(sessionId, {
+        in_ms: selection.in, out_ms: selection.out, marker_id: selectionMarker,
+      })
+      setActiveClip(clip.id)
+      await exportClip(clip, 'precise', renderEditor.recipe)
+      setTab('clips')
+      Toast.info('合成导出已加入队列，完成后可在切片列表下载和投稿')
+    } finally { setExporting(null) }
+  }
 
   const loadClip = (c: Clip) => {
     setActiveClip(c.id)
@@ -898,6 +932,7 @@ export default function ReplayView({
           onPhase={onPhase}
           onEnded={onEnded}
           onMutedChange={setMuted}
+          onVideo={receiveEditorVideo}
         />
         {overlay ? (
           <div className={styles.stageOverlay} data-kind={phase}>
@@ -945,6 +980,9 @@ export default function ReplayView({
         <div className={styles.main}>
           <div className={styles.stage} ref={liveRootRef} data-mode={mode?.kind ?? 'none'}>
             {stage}
+            {canDownload && <RenderEditorOverlay state={renderEditor} video={mode?.kind === 'dvr' ? editorVideo : mode?.kind === 'detached' ? editorSnapshot : null}
+              current={current} segments={segments} canEdit={canEdit} onDimensions={setEditorDimensions}
+              canvasSegmentId={segments.find(segment => isReadable(segment) && (selection.in === null || segmentEnd(segment) > selection.in))?.id} />}
             {live ? <span className={styles.liveBadge}>直播</span> : null}
           </div>
 
@@ -1175,6 +1213,10 @@ export default function ReplayView({
               </div>
             </>
           )}
+          {canDownload && <RenderEditor state={renderEditor} canEdit={canEdit} canDownload={canDownload}
+            recording={detail.recording} segments={segments} duration={duration} current={current}
+            dimensions={editorDimensions} onExportClip={exportComposedSelection} exportReason={exportReason('precise')}
+            exporting={exporting !== null} />}
         </div>
         <aside className={styles.aside}>
           <SidePanel

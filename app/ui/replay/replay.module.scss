@@ -754,6 +754,88 @@
 .sgLink:hover {
   text-decoration: underline;
 }
+
+/* Recorded sources remain underneath the effects preview. All editing uses picture coordinates. */
+.renderOverlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+.renderPicture { position: absolute; }
+.renderCanvas, .renderAss { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.renderAss { z-index: 1; }
+.renderRegion {
+  position: absolute;
+  border: 1px dashed #fff;
+  box-sizing: border-box;
+  pointer-events: auto;
+  cursor: move;
+  touch-action: none;
+  z-index: 2;
+  & > span { position: absolute; left: 0; top: 0; background: #0009; color: #fff; font-size: 11px; padding: 1px 3px; }
+  &[data-selected='true'] { border: 2px solid #ffb13b; z-index: 3; }
+  &[data-inactive='true'] { border-color: #aaa; opacity: 0.55; }
+}
+.renderResize {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  transform: translate(-50%, -50%);
+  background: #fff;
+  border: 1px solid #b97914;
+  touch-action: none;
+  &[data-handle='n'], &[data-handle='s'] { cursor: ns-resize; }
+  &[data-handle='e'], &[data-handle='w'] { cursor: ew-resize; }
+  &[data-handle='nw'], &[data-handle='se'] { cursor: nwse-resize; }
+  &[data-handle='ne'], &[data-handle='sw'] { cursor: nesw-resize; }
+}
+.renderPreviewNotice {
+  position: absolute; top: 8px; right: 8px; max-width: min(560px, calc(100% - 16px)); padding: 8px 12px;
+  background: #000c; color: #fff; font-size: 12px; line-height: 1.6; border-radius: 6px;
+}
+.renderTimingNotice { position: absolute; bottom: 8px; left: 8px; padding: 4px 8px; background: #000b; color: #fff; font-size: 11px; border-radius: 4px; }
+.renderPanel {
+  padding: 12px; background: var(--semi-color-bg-1); border: 1px solid var(--semi-color-fill-2); border-radius: 10px;
+  font-size: 13px;
+  input, button { font: inherit; }
+  input:not([type='checkbox']):not([type='color']), select {
+    min-width: 0; width: 100%; box-sizing: border-box; padding: 5px 7px; border-radius: 4px;
+    border: 1px solid var(--semi-color-border); background: var(--semi-color-bg-0); color: var(--semi-color-text-0);
+  }
+  input:disabled { opacity: 0.6; }
+  button:disabled { cursor: not-allowed; }
+}
+.renderToolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-bottom: 8px; }
+.renderColumns { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; min-width: 0; }
+.renderColumns > div { min-width: 0; }
+.renderHint { color: var(--semi-color-text-2); font-size: 12px; line-height: 1.7; }
+.renderError { color: var(--semi-color-danger); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.renderFields {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 10px; margin: 8px 0 12px;
+  border: 1px solid var(--semi-color-border); border-radius: 6px; min-width: 0;
+  legend { color: var(--semi-color-text-2); font-size: 12px; }
+}
+.renderField { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.renderField > span { font-size: 12px; color: var(--semi-color-text-1); }
+.renderIntervals, .renderSegmentOffsets { grid-column: 1 / -1; min-width: 0; }
+.renderIntervals { display: flex; flex-direction: column; gap: 8px; }
+.renderIntervals > div { display: flex; flex-wrap: wrap; gap: 6px; align-items: end; padding: 6px; background: var(--semi-color-fill-0); }
+.renderIntervals .renderField { flex: 1 1 110px; }
+.renderSegmentOffsets { max-height: 220px; overflow: auto; }
+.renderSegmentOffsets .renderField { margin: 5px 0; }
+.renderLayers { list-style: none; padding: 0; margin: 8px 0; }
+.renderLayers li { display: flex; gap: 5px; align-items: center; padding: 6px; border-radius: 4px; }
+.renderLayers li[data-selected='true'] { background: var(--semi-color-primary-light-default); }
+.renderLayers li > button:first-child { flex: 1; text-align: left; border: 0; background: none; color: var(--semi-color-text-0); cursor: pointer; }
+.renderAssets { display: flex; gap: 8px; flex-wrap: wrap; }
+.renderAssets > div { display: flex; flex-direction: column; align-items: center; }
+.renderAssets button:has(img) { border: 1px solid var(--semi-color-border); background: repeating-conic-gradient(#bbb 0% 25%, #eee 0% 50%) 50% / 12px 12px; padding: 0; cursor: pointer; }
+.renderAssets img { width: 64px; height: 48px; object-fit: contain; display: block; }
+.renderJobs { list-style: none; padding: 0; margin: 8px 0; max-height: 300px; overflow: auto; }
+.renderJobs li { border-bottom: 1px solid var(--semi-color-border); padding: 8px 0; }
+.renderResult { width: 100%; max-height: 360px; background: #000; }
+@media (max-width: 720px) { .renderColumns { grid-template-columns: minmax(0, 1fr); } }
 /* 过期的候选画灰，不能接受 */
 .row[data-suggestion-state='expired'] .rowLabel,
 .row[data-suggestion-state='expired'] .sgReason,

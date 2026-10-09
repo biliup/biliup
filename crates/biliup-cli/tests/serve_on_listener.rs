@@ -43,6 +43,7 @@ async fn serves_on_prebound_listener_until_host_shutdown() {
             let _ = stopped.await;
         })),
         ffmpeg: None,
+        render_tools_dir: None,
         fleet: Default::default(),
     }));
 

@@ -32,6 +32,7 @@ const STARTUP_PAGE: &str = "tauri://localhost/";
 const BUNDLED_FFMPEG: [&str; 2] = ["ffmpeg", "ffmpeg.exe"];
 #[cfg(not(windows))]
 const BUNDLED_FFMPEG: [&str; 2] = ["ffmpeg", "ffmpeg"];
+const BUNDLED_RENDER_TOOLS: &str = "render-tools";
 
 struct Server {
     stop: Mutex<Option<oneshot::Sender<()>>>,
@@ -65,8 +66,10 @@ pub fn run() {
                 let legacy_roots = data_dir::legacy_roots(&install_dir);
                 match data_dir::resolve(&app, &window, &install_dir, &legacy_roots) {
                     Ok(Some(data_dir)) => {
-                        let ffmpeg = bundled_ffmpeg(app.path().resource_dir().ok());
-                        start(&app, &window, &data_dir, &legacy_roots, ffmpeg)
+                        let resource_dir = app.path().resource_dir().ok();
+                        let ffmpeg = bundled_ffmpeg(resource_dir.clone());
+                        let render_tools = bundled_render_tools(resource_dir);
+                        start(&app, &window, &data_dir, &legacy_roots, ffmpeg, render_tools)
                     }
                     Ok(None) => app.exit(0),
                     Err(message) => show_error(&window, &message),
@@ -97,6 +100,7 @@ fn start(
     data_dir: &Path,
     legacy_roots: &[PathBuf],
     ffmpeg: Option<PathBuf>,
+    render_tools: Option<PathBuf>,
 ) {
     // The server keeps data/, ds_update.log and recordings relative to the
     // working directory, and the log file is opened relative to it as well.
@@ -176,6 +180,7 @@ fn start(
         work_dir: None,
         log_handle: logging.handle(),
         ffmpeg,
+        render_tools_dir: render_tools,
         fleet: Default::default(),
         listener: Some(listener),
         shutdown: Some(Box::pin(async move {
@@ -310,6 +315,11 @@ fn bundled_ffmpeg(resource_dir: Option<PathBuf>) -> Option<PathBuf> {
     let mut path = dunce::simplified(&resource_dir?).to_path_buf();
     path.extend(BUNDLED_FFMPEG);
     Some(path).filter(|path| path.is_file())
+}
+
+fn bundled_render_tools(resource_dir: Option<PathBuf>) -> Option<PathBuf> {
+    let path = dunce::simplified(&resource_dir?).to_path_buf().join(BUNDLED_RENDER_TOOLS);
+    Some(path).filter(|path| path.is_dir())
 }
 
 /// Where this executable lives. The old PyInstaller sidecar used it as its

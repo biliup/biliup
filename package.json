@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "prepare:jassub": "node scripts/prepare-jassub.mjs",
+    "predev": "npm run prepare:jassub",
+    "prebuild": "npm run prepare:jassub"
   },
   "dependencies": {
     "@douyinfe/semi-icons": "^2.103.0",
@@ -14,6 +17,7 @@
     "artplayer": "^5.4.0",
     "artplayer-plugin-danmuku": "^5.3.0",
     "hls.js": "^1.7.3",
+    "jassub": "2.5.18",
     "mpegts.js": "^1.8.2",
     "next": "^16.3.5",
     "qrcode.react": "^4.2.0",
@@ -27,6 +31,7 @@
     "@types/node": "^26.6.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "esbuild": "0.25.12",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.5",
     "eslint-config-prettier": "^10.1.8",

@@ -37,6 +37,13 @@ pub struct Config {
     #[serde(default)]
     pub ffmpeg_path: Option<String>,
 
+    /// DanmakuFactory executable used to convert recorded XML to ASS. When
+    /// empty, the desktop bundled tool or `DanmakuFactory` on PATH is used.
+    /// Global-only, like `ffmpeg_path`.
+    #[patch(skip)]
+    #[serde(default)]
+    pub danmaku_factory_path: Option<String>,
+
     /// 文件大小限制（字节）
     ///
     /// 主播覆写里这个字段的 `null` 是“显式清除、按主播关闭大小分段”，与其它字段不同。

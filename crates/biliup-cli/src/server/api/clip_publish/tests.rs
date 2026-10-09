@@ -73,6 +73,7 @@ impl Connection for FakeConnection {
 
 #[derive(Clone, FromRef)]
 struct AppState {
+    renders: Arc<crate::server::workbench::renders::RenderJobs>,
     pool: ConnectionPool,
     clips: Arc<ClipExports>,
     publisher: Arc<ClipPublisher>,
@@ -167,6 +168,7 @@ async fn fixture() -> Fixture {
     ));
     publisher.spawn();
     let state = AppState {
+        renders: Arc::new(crate::server::workbench::renders::RenderJobs::new(pool.clone(), dir.path().join("renders"))),
         pool: pool.clone(),
         clips,
         publisher: publisher.clone(),

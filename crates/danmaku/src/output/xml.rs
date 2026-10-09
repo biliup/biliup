@@ -104,10 +104,13 @@ impl XmlWriter {
         writer.write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)))?;
 
         // Write root element start
-        let root = BytesStart::new("i");
-        writer.write_event(Event::Start(root))?;
-
+        // Retain the wall-clock origin of p[0] for recording/post-edit alignment.
+        // The optional root attribute remains compatible with ordinary XML readers.
+        let origin = Utc::now().timestamp_millis().to_string();
         let now = Instant::now();
+        let mut root = BytesStart::new("i");
+        root.push_attribute(("recording_start_time_ms", origin.as_str()));
+        writer.write_event(Event::Start(root))?;
 
         Ok(Self {
             file_path,
@@ -425,6 +428,14 @@ mod tests {
         let path = writer.finish().unwrap();
         let content = std::fs::read_to_string(&path).unwrap();
         let _ = std::fs::remove_dir_all(dir);
+
+        let origin = content
+            .split("recording_start_time_ms=\"")
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+            .and_then(|value| value.parse::<i64>().ok())
+            .expect("XML records its clock origin");
+        assert!((Utc::now().timestamp_millis() - origin).abs() < 10_000);
 
         let bad: Vec<char> = content.chars().filter(|&c| !allowed_in_xml(c)).collect();
         assert!(bad.is_empty(), "invalid XML chars {bad:?} in:\n{content}");

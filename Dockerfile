@@ -29,7 +29,7 @@ COPY . /biliup
 RUN set -eux; \
 	\
 	apt-get update; \
-	apt-get install -y --no-install-recommends python3-pip g++ patchelf; \
+	apt-get install -y --no-install-recommends python3-pip g++ patchelf libpcre2-dev pkg-config git curl unzip; \
 	pip3 install maturin --break-system-packages; \
 	if [ ! -f /biliup/crates/stream-gears/pyproject.toml ]; then \
 	rm -rf /biliup; \
@@ -39,6 +39,8 @@ RUN set -eux; \
 COPY --from=webui-builder /biliup/out /biliup/out
 
 WORKDIR /biliup
+
+RUN .github/scripts/build-render-tools.sh linux /biliup/render-tools
 
 RUN set -eux; \
 	maturin build --release -m crates/stream-gears/Cargo.toml;
@@ -51,11 +53,13 @@ ENV TZ="Asia/Shanghai"
 ENV LANG="C.UTF-8"
 ENV LANGUAGE="C.UTF-8"
 ENV LC_ALL="C.UTF-8"
+ENV BILIUP_RENDER_TOOLS_DIR="/opt/render-tools"
 EXPOSE 19159/tcp
 VOLUME /opt
 
 # 需要遵守 wheel 文件名规范
 COPY --from=wheel-builder /biliup/target/wheels/* /tmp/
+COPY --from=wheel-builder /biliup/render-tools /opt/render-tools
 
 RUN set -eux; \
 	\
@@ -71,11 +75,12 @@ RUN set -eux; \
 	apt-get update; \
 	apt-get install -y --no-install-recommends \
 		wget \
+		libpcre2-8-0 \
 		curl \
 		xz-utils \
 	; \
 	apt-mark auto '.*' > /dev/null; \
-	apt-mark manual curl wget; \
+	apt-mark manual curl wget libpcre2-8-0; \
 	\
 	arch="$(dpkg --print-architecture)"; arch="${arch##*-}"; \
 	# 固定 FFmpeg 到确定版本并校验 SHA-256：

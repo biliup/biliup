@@ -189,8 +189,8 @@ export async function deleteClip(clip: Pick<Clip, 'id' | 'session_id'>): Promise
 }
 
 /** 开始导出（失败后重试也是它）；导出在后台进行，列表按导出中自动轮询 */
-export async function exportClip(clip: Pick<Clip, 'id' | 'session_id'>, mode: ClipMode): Promise<Clip> {
-  const exporting = await sendJson<Clip>(`${clipUrl(clip.id)}/export`, 'POST', { mode })
+export async function exportClip(clip: Pick<Clip, 'id' | 'session_id'>, mode: ClipMode, recipe?: import('./renders').RenderRecipe): Promise<Clip> {
+  const exporting = await sendJson<Clip>(`${clipUrl(clip.id)}/export`, 'POST', { mode, ...(recipe ? { recipe } : {}) })
   refresh(exporting)
   return exporting
 }

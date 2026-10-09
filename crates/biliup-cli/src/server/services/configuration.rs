@@ -75,6 +75,7 @@ pub async fn apply_config(
     saved_config.normalize_segment_limits();
     saved_config.validate_segment_limits()?;
     crate::tools::set_configured_ffmpeg(saved_config.ffmpeg_path.as_deref());
+    crate::tools::set_configured_danmaku_factory(saved_config.danmaku_factory_path.as_deref());
     // 下载池 / 上传池的容量不是每次从配置里读的，要在这里同步过去才能不重启就生效
     managers.resize_pools(saved_config.pool1_size, saved_config.pool2_size);
     *config.write().unwrap() = saved_config;

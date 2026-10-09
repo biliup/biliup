@@ -57,6 +57,9 @@ cookies.json
 logs/
 CLAUDE.md
 .claude/
+/public/jassub/
+/tauri-app/src-tauri/render-tools/
+/renders/
 /crates/stream-gears/stream_gears/*.so
 /crates/stream-gears/stream_gears/*.pyd
 cilps/

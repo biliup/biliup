@@ -24,6 +24,10 @@ jobs:
     - uses: actions/setup-node@v7
       with:
         node-version: lts/*
+    - name: Setup Xmake
+      uses: xmake-io/github-action-setup-xmake@v1
+      with:
+        xmake-version: ~3
     # biliup-cli 通过 rust-embed 把 out/ 编进桌面程序
     - name: Build frontend
       run: |
@@ -77,6 +81,9 @@ jobs:
         EOF
         ls -l "$dest"
         rm ffmpeg.zip
+    - name: Build render tools
+      shell: bash
+      run: bash .github/scripts/build-render-tools.sh windows tauri-app/src-tauri/render-tools
     - name: Render download notes
       shell: bash
       run: |

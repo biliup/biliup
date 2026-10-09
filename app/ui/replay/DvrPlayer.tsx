@@ -16,6 +16,7 @@ export interface DvrHandle {
   position(): number
   paused(): boolean
   setMuted(muted: boolean): void
+  video(): HTMLVideoElement | null
 }
 
 /** 缓冲区判断的容差（秒）：MSE 的 buffered 边界和帧时间有几十毫秒的出入 */
@@ -59,8 +60,9 @@ const DvrPlayer = forwardRef<
     onPhase: (phase: DvrPhase, message?: string, status?: number) => void
     onEnded: (lastMs: number) => void
     onMutedChange: (muted: boolean) => void
+    onVideo?: (video: HTMLVideoElement | null) => void
   }
->(function DvrPlayer({ sessionId, from, type, muted, onPosition, onPhase, onEnded, onMutedChange }, ref) {
+>(function DvrPlayer({ sessionId, from, type, muted, onPosition, onPhase, onEnded, onMutedChange, onVideo }, ref) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const callbacks = useRef({ onPosition, onPhase, onEnded, onMutedChange })
   useEffect(() => {
@@ -105,7 +107,13 @@ const DvrPlayer = forwardRef<
     setMuted(value: boolean) {
       if (videoRef.current) videoRef.current.muted = value
     },
+    video() { return videoRef.current },
   }))
+
+  useEffect(() => {
+    onVideo?.(videoRef.current)
+    return () => onVideo?.(null)
+  }, [onVideo])
 
   useEffect(() => {
     const video = videoRef.current

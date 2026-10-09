@@ -916,3 +916,37 @@ async fn default_config_sweep_touches_nothing() {
 fn available_space_reports_the_current_disk() {
     assert!(available_space(Path::new(".")).unwrap() > 0);
 }
+
+#[tokio::test]
+async fn render_sources_survive_low_disk_and_remove_until_worker_finishes() {
+    let (dir, pool) = setup().await;
+    let s = session(&pool, 1_000_000).await;
+    let (id, path) = segment(&pool, dir.path(), s, "render.flv", 0, Some(1000), 1000).await;
+    let jid: i64 = sqlx::query_scalar("INSERT INTO render_jobs(session_id,state,phase,spec_json,created_at,updated_at) VALUES(?,'running','encoding','{}',0,0) RETURNING id")
+        .bind(s).fetch_one(&pool).await.unwrap();
+    sqlx::query("INSERT INTO render_sources(job_id,segment_id) VALUES(?,?)")
+        .bind(jid)
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        enforce_free_space(&pool, 10_000, now_ms(), |_| Ok(0))
+            .await
+            .unwrap(),
+        0
+    );
+    assert!(path.exists());
+    let result = remove(&Retention::without_delay(pool.clone()), &[path.as_path()])
+        .await
+        .unwrap();
+    assert_eq!(result, vec![Disposal::Deferred]);
+    assert_eq!(sweep_pending(&pool, now_ms()).await.unwrap(), 0);
+    sqlx::query("UPDATE render_jobs SET state='failed' WHERE id=?")
+        .bind(jid)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(sweep_pending(&pool, now_ms()).await.unwrap(), 1);
+    assert!(!path.exists());
+}

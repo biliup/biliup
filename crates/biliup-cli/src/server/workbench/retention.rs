@@ -28,6 +28,10 @@ pub const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
 const HOUR_MS: i64 = 3_600_000;
 
+/// Serialize cleanup's file operations with render enqueue. Database pins alone
+/// cannot protect a file already selected by an earlier cleanup query.
+pub(crate) static MEDIA_LIFECYCLE: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
 /// 删除点要用到的上下文：数据库，以及删之前还要保留多久。
 #[derive(Debug, Clone)]
 pub struct Retention {
@@ -76,12 +80,15 @@ struct Tracked {
     id: i64,
     danmaku_path: Option<String>,
     pin_count: i64,
+    rendering: bool,
     retain_until: Option<i64>,
 }
 
 async fn tracked(pool: &ConnectionPool, path: &Path) -> sqlx::Result<Option<Tracked>> {
     sqlx::query_as(
-        "SELECT g.id, g.danmaku_path, g.pin_count, s.retain_until
+        "SELECT g.id, g.danmaku_path, g.pin_count, s.retain_until,
+                EXISTS (SELECT 1 FROM render_sources r JOIN render_jobs j ON j.id = r.job_id
+                        WHERE r.segment_id = g.id AND j.state IN ('queued','running')) AS rendering
          FROM segments g JOIN stream_sessions s ON s.id = g.session_id
          WHERE g.path = ? AND g.state IN ('recording', 'finished', 'missing', 'pending_delete')
          ORDER BY g.id DESC LIMIT 1",
@@ -98,6 +105,7 @@ async fn tracked(pool: &ConnectionPool, path: &Path) -> sqlx::Result<Option<Trac
 /// 无法确认引用或保留期时丢失源录像。
 /// 删文件出错时返回错误，与原来的 `rm` 一样停在出错的那个文件。
 pub async fn remove(retention: &Retention, paths: &[&Path]) -> io::Result<Vec<Disposal>> {
+    let _lifecycle = MEDIA_LIFECYCLE.write().await;
     let now = now_ms();
     let mut outcome: Vec<Option<Disposal>> = vec![None; paths.len()];
     let mut kept_danmaku: Vec<PathBuf> = Vec::new();
@@ -109,7 +117,9 @@ pub async fn remove(retention: &Retention, paths: &[&Path]) -> io::Result<Vec<Di
         let Some(segment) = segment else {
             continue;
         };
-        let referenced = segment.pin_count > 0 || segment.retain_until.is_some_and(|t| t > now);
+        let referenced = segment.rendering
+            || segment.pin_count > 0
+            || segment.retain_until.is_some_and(|t| t > now);
         if referenced || retention.keep_for_ms > 0 {
             let danmaku = danmaku_in_batch(path, segment.danmaku_path.as_deref(), paths);
             defer(
@@ -384,10 +394,13 @@ fn delete_segment_files(segment: &Doomed) -> io::Result<()> {
 /// 删掉到期（`delete_after` 已过）、没有引用、场次也不在保留期内的 `pending_delete` 分段，
 /// 返回删了几个。
 pub async fn sweep_pending(pool: &ConnectionPool, now: i64) -> sqlx::Result<usize> {
+    let _lifecycle = MEDIA_LIFECYCLE.write().await;
     let due: Vec<Doomed> = sqlx::query_as(
         "SELECT g.id, g.path, g.index_path, g.danmaku_path
          FROM segments g JOIN stream_sessions s ON s.id = g.session_id
          WHERE g.state = 'pending_delete' AND g.pin_count = 0
+           AND NOT EXISTS (SELECT 1 FROM render_sources r JOIN render_jobs j ON j.id = r.job_id
+                           WHERE r.segment_id = g.id AND j.state IN ('queued','running'))
            AND (g.delete_after IS NULL OR g.delete_after <= ?1)
            AND (s.retain_until IS NULL OR s.retain_until <= ?1)
          ORDER BY g.id",
@@ -433,11 +446,14 @@ pub async fn enforce_free_space<F>(
 where
     F: FnMut(&Path) -> io::Result<u64>,
 {
+    let _lifecycle = MEDIA_LIFECYCLE.write().await;
     let candidates: Vec<Candidate> = sqlx::query_as(
         "SELECT g.id, g.path, g.index_path, g.danmaku_path,
                 (g.pin_count > 0 OR COALESCE(s.retain_until, 0) > ?) AS referenced
          FROM segments g JOIN stream_sessions s ON s.id = g.session_id
          WHERE g.state IN ('finished', 'pending_delete')
+           AND NOT EXISTS (SELECT 1 FROM render_sources r JOIN render_jobs j ON j.id = r.job_id
+                           WHERE r.segment_id = g.id AND j.state IN ('queued','running'))
          ORDER BY referenced, COALESCE(s.started_at, 0) + g.start_ms, g.id",
     )
     .bind(now)

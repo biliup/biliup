@@ -420,6 +420,7 @@ function ClipTools({
   return (
     <div className={styles.clipTools}>
       {publish}
+      {clip.state === 'failed' && clip.file_name && <DownloadButton clip={clip} format="source" label="下载上次成功成品" disabledReason={null} canDownload={canDownload} />}
       {retry ? (
         <ExportButton
           mode={retry}

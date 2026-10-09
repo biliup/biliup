@@ -213,6 +213,10 @@ mod tests {
             Arc::new(BiliBackend::new(config.clone(), client.clone())),
         ));
         let services = ServiceRegister {
+            renders: Arc::new(crate::server::workbench::renders::RenderJobs::new(
+                pool.clone(),
+                dir.path().join("renders"),
+            )),
             douyu_keeper: crate::server::services::douyu_keeper::DouyuCookieKeeper::new(
                 pool.clone(),
                 config.clone(),

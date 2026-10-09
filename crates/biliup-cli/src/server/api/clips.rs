@@ -413,10 +413,28 @@ pub async fn delete_clip(
     State(pool): State<ConnectionPool>,
     State(exports): State<Arc<ClipExports>>,
     State(publisher): State<Arc<ClipPublisher>>,
+    State(renders): State<Arc<crate::server::workbench::renders::RenderJobs>>,
     Path((id, cid)): Path<(i64, i64)>,
 ) -> Response {
     if publisher.state_of(cid).is_some() {
         return conflict("这个切片在发布队列里，先把它移出队列再删");
+    }
+    let active: Option<i64> = match sqlx::query_scalar(
+        "SELECT active_render_id FROM clips WHERE id = ? AND session_id = ?",
+    )
+    .bind(cid)
+    .bind(id)
+    .fetch_optional(&pool)
+    .await
+    {
+        Ok(value) => value.flatten(),
+        Err(error) => return internal(error),
+    };
+    if let Some(job) = active {
+        if let Err(error) = renders.cancel(job).await {
+            return internal(error);
+        }
+        return conflict("合成任务正在停止，请等任务结束后再删除切片");
     }
     match clips::delete(&pool, id, cid).await {
         Ok(Some(_)) => {
@@ -434,6 +452,8 @@ pub async fn delete_clip(
 #[serde(deny_unknown_fields)]
 pub struct ExportClip {
     pub mode: Mode,
+    #[serde(default)]
+    pub recipe: Option<crate::server::workbench::renders::RenderRecipe>,
 }
 
 /// `POST /v1/clips/{cid}/export`：开始导出（失败后重试也是它），返回 202 和导出中的切片。
@@ -441,6 +461,7 @@ pub async fn export_clip(
     State(pool): State<ConnectionPool>,
     State(exports): State<Arc<ClipExports>>,
     State(publisher): State<Arc<ClipPublisher>>,
+    State(renders): State<Arc<crate::server::workbench::renders::RenderJobs>>,
     Path(cid): Path<i64>,
     Json(body): Json<ExportClip>,
 ) -> Response {
@@ -449,6 +470,25 @@ pub async fn export_clip(
         Some(JobState::Queued | JobState::Running | JobState::Paused)
     ) {
         return conflict("这个切片在发布队列里，等它发完或先移出队列再导出");
+    }
+    if let Some(recipe) = body.recipe {
+        if body.mode != Mode::Precise {
+            return bad_request("弹幕和遮挡需要合成导出，不能使用快速剪");
+        }
+        let clip = match clips::get(&pool, cid).await {
+            Ok(Some(clip)) => clip,
+            Ok(None) => return clip_not_found(),
+            Err(error) => return internal(error),
+        };
+        if let Err(error) = renders.enqueue_clip(&clip, recipe).await {
+            return conflict(error);
+        }
+        publisher.forget_upload(cid);
+        return match clips::get(&pool, cid).await {
+            Ok(Some(clip)) => (StatusCode::ACCEPTED, Json(view(clip, &exports))).into_response(),
+            Ok(None) => clip_not_found(),
+            Err(error) => internal(error),
+        };
     }
     match clips::begin_export(&pool, cid, body.mode, recorder::now_ms()).await {
         Ok(Some(clip)) => {
@@ -520,7 +560,12 @@ pub async fn download_clip(
     };
     let path = match query.format {
         DownloadFormat::Source => match clip.output_path.as_deref() {
-            Some(path) if matches!(clip.state, ClipState::Ready | ClipState::Published) => {
+            Some(path)
+                if matches!(
+                    clip.state,
+                    ClipState::Ready | ClipState::Published | ClipState::Failed
+                ) =>
+            {
                 std::path::PathBuf::from(path)
             }
             _ => return conflict(DownloadError::NotReady.to_string()),
