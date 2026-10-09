@@ -7,17 +7,20 @@ import { MosaicEditor } from './MosaicEditor'
 
 interface MosaicPanelProps {
   entity?: LiveStreamerEntity
+  active?: boolean
   initValues?: Record<string, unknown>
   onChange?: (config: MosaicConfig) => void
 }
 
 interface MosaicInputProps {
   value?: MosaicConfig | null
+  streamerId?: number
+  active?: boolean
   onChange?: (config: MosaicConfig) => void
 }
 
 /** The form owns the configuration; changing a switch or a region commits an object directly. */
-function MosaicInput({ value, onChange }: MosaicInputProps) {
+function MosaicInput({ value, streamerId, active, onChange }: MosaicInputProps) {
   if (value != null && !isMosaicConfig(value)) {
     return <Typography.Text type="danger">画面遮挡配置格式不正确，请在上方配置 JSON 中修正。</Typography.Text>
   }
@@ -37,7 +40,7 @@ function MosaicInput({ value, onChange }: MosaicInputProps) {
           分段录制完成后使用 FFmpeg 处理遮挡，再进入上传流程。启用后会增加 CPU 负载和处理时间，需安装 FFmpeg。
         </div>
       )}
-      <MosaicEditor config={config} onChange={next => onChange?.(next)} />
+      <MosaicEditor config={config} streamerId={streamerId} active={active} onChange={next => onChange?.(next)} />
       {value == null && (
         <Typography.Text type="tertiary" size="small">尚未设置主播遮挡覆写；如有全局遮挡配置，将继续跟随全局设置。</Typography.Text>
       )}
@@ -48,12 +51,14 @@ function MosaicInput({ value, onChange }: MosaicInputProps) {
 const MosaicField = withField(MosaicInput)
 
 /** Keep the field registered when the collapse panel is closed, so saving still validates it. */
-export function MosaicPanel({ initValues, onChange }: MosaicPanelProps) {
+export function MosaicPanel({ entity, active = false, initValues, onChange }: MosaicPanelProps) {
   return (
     <Collapse.Panel header="画面遮挡（实验性）" itemKey="mosaic">
       <MosaicField
         field="mosaic_config"
         initValue={initValues?.mosaic_config}
+        streamerId={entity?.id}
+        active={active}
         noLabel
         validator={validateMosaicConfig}
         onChange={onChange}
