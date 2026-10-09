@@ -28,7 +28,7 @@ use error_stack::ResultExt;
 use futures::FutureExt;
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::sync::{Mutex, Notify, broadcast};
 use tokio_util::sync::CancellationToken;
@@ -59,6 +59,10 @@ pub struct SegmentEventProcessor {
     ctx: Context,
     file_validator: FileValidator,
     output: UnitOutput,
+    sent: Arc<AtomicUsize>,
+    processing_failed: Arc<AtomicBool>,
+    processing: Vec<tokio::task::JoinHandle<()>>,
+    last_processing: Option<futures::future::Shared<futures::future::BoxFuture<'static, ()>>>,
 }
 
 impl SegmentEventProcessor {
@@ -74,12 +78,47 @@ impl SegmentEventProcessor {
             .with_retention(Retention::without_delay(ctx.pool().clone())),
             ctx,
             output: UnitOutput::default(),
+            sent: Arc::new(AtomicUsize::new(0)),
+            processing_failed: Arc::new(AtomicBool::new(false)),
+            processing: Vec::new(),
+            last_processing: None,
         }
     }
 
     /// 录完的分段数与交给投稿流程的分段数
     pub fn output(&self) -> UnitOutput {
-        self.output
+        UnitOutput {
+            seen: self.output.seen,
+            sent: self.sent.load(Ordering::Acquire),
+        }
+    }
+
+    /// Finish checks before session hooks/automatic clips inspect completed
+    /// recordings. The bounded drain keeps a failed recording local and marks
+    /// the session so downloaded hooks are not run against an unchecked file.
+    pub(crate) async fn finish_processing(&mut self) -> bool {
+        let finish = async {
+            for task in self.processing.drain(..) {
+                if let Err(e) = task.await {
+                    error!(error = %e, "录制分段音频检查任务异常退出，保留原片");
+                    self.processing_failed.store(true, Ordering::Release);
+                }
+            }
+        };
+        if tokio::time::timeout(Duration::from_secs(120), finish)
+            .await
+            .is_err()
+        {
+            error!("等待已结束分段的音频检查超过 120 秒，取消尚未完成的检查并保留原片");
+            for task in &self.processing {
+                task.abort();
+            }
+            for task in self.processing.drain(..) {
+                let _ = task.await;
+            }
+            self.processing_failed.store(true, Ordering::Release);
+        }
+        !self.processing_failed.load(Ordering::Acquire)
     }
 
     /// 这个分段交给 [`Self::process`] 后会不会被过滤删除。
@@ -100,13 +139,20 @@ impl SegmentEventProcessor {
             &self.ctx.config(),
             &self.ctx.live_streamer().override_cfg,
         ) || crate::server::plugins::mosaic::is_unmasked(&event.prev_file_path);
+        // A filtered segment can still be kept by a marker/retention pin. Check
+        // its audio before retention decides whether to retain or delete it.
+        let filtered = !protected && self.file_validator.will_delete(&event.prev_file_path);
+        self.file_validator
+            .validate_without_size(&event.prev_file_path)?;
         if protected {
-            self.file_validator
-                .validate_without_size(&event.prev_file_path)?;
-            event.ready = Some(crate::server::core::downloader::SegmentReady(settled));
-        } else {
-            self.file_validator
-                .validate(&event.prev_file_path, settled)?;
+            event.ready = Some(crate::server::core::downloader::SegmentReady(
+                settled.clone(),
+            ));
+        }
+
+        if filtered {
+            self.spawn_audio_check(event, settled, None);
+            return Ok(());
         }
 
         // 上一轮 process_with_upload 可能因上传失败提前返回，UActor 已 drop rx，
@@ -121,7 +167,7 @@ impl SegmentEventProcessor {
             self.channel = None;
         }
 
-        match &self.channel {
+        let tx = match &self.channel {
             None => {
                 // 不设上限：投稿流程可能整场都轮不到上传槽位（槽位由别的房间整场占着），
                 // 有界通道满了 `force_send` 会挤掉最早的分段，那一段就再也不会投稿或后处理
@@ -136,28 +182,79 @@ impl SegmentEventProcessor {
                     warn!(SegmentEvent = ?prev, "replace an existing message in the channel");
                 }
 
-                // 发送到缓冲区
-                let res = tx
-                    .force_send(event)
-                    .change_context(AppError::Custom("Failed to send to buffer".to_string()))?;
-                if let Some(prev) = res {
-                    warn!(SegmentEvent = ?prev, "replace an existing message in the channel");
-                }
-                self.channel = Some(tx);
+                self.channel = Some(tx.clone());
+                tx
             }
-            Some(tx) => {
-                // 发送到缓冲区
-                let res = tx
-                    .force_send(event)
-                    .change_context(AppError::Custom("Failed to send to buffer".to_string()))?;
-                if let Some(prev) = res {
-                    warn!(SegmentEvent = ?prev, "replace an existing message in the channel");
-                }
-            }
+            Some(tx) => tx.clone(),
+        };
+        if protected {
+            tx.force_send(event)
+                .change_context(AppError::Custom("Failed to send to buffer".to_string()))?;
+            self.sent.fetch_add(1, Ordering::Release);
+        } else {
+            // Independent of the uploader's login/slot availability, and off
+            // the downloader's synchronous segment callback.
+            self.spawn_audio_check(event, settled, Some(tx));
         }
-        self.output.sent += 1;
 
         Ok(())
+    }
+
+    fn spawn_audio_check(
+        &mut self,
+        event: SegmentInfo,
+        settled: futures::future::Shared<futures::future::BoxFuture<'static, ()>>,
+        output: Option<Sender<SegmentInfo>>,
+    ) {
+        // Preserve recording order even if recorder barriers settle together.
+        let previous = self.last_processing.take();
+        let (completion, completed) = tokio::sync::oneshot::channel::<()>();
+        self.last_processing = Some(
+            async move {
+                let _ = completed.await;
+            }
+            .boxed()
+            .shared(),
+        );
+        self.processing.retain(|task| !task.is_finished());
+        let ctx = self.ctx.clone();
+        let failed = self.processing_failed.clone();
+        let sent = self.sent.clone();
+        self.processing.push(tokio::spawn(async move {
+            if let Some(previous) = previous {
+                previous.await;
+            }
+            settled.await;
+            if let Err(e) =
+                crate::server::common::upload::prepare_segment_audio(&ctx, &event.prev_file_path)
+                    .await
+            {
+                failed.store(true, Ordering::Release);
+                error!(file = ?event.prev_file_path, error = %e,
+                    "分段音频检查或修复失败，保留原片并阻止投稿和后处理");
+                let _ = completion.send(());
+                return;
+            }
+            if let Some(output) = output {
+                if output.send(event).await.is_ok() {
+                    sent.fetch_add(1, Ordering::Release);
+                } else {
+                    failed.store(true, Ordering::Release);
+                    warn!("分段音频检查已完成，但投稿管道关闭，保留检查后的本地录像");
+                }
+            } else {
+                let paths = crate::server::common::upload::segment_paths(&event);
+                let refs: Vec<_> = paths.iter().map(std::path::PathBuf::as_path).collect();
+                let retention = Retention::without_delay(ctx.pool().clone());
+                if let Err(e) = crate::server::workbench::retention::remove(&retention, &refs).await
+                {
+                    failed.store(true, Ordering::Release);
+                    error!(file = ?event.prev_file_path, error = %e,
+                    "音频检查完成后碎片过滤失败，保留录像并跳过后处理");
+                }
+            }
+            let _ = completion.send(());
+        }));
     }
 }
 
@@ -221,6 +318,7 @@ pub struct DownloadTask {
     /// 追加 `expire=0` 的网宿直链探测通过、下载器却一个字节没拿到就失败过：
     /// 本任务余下的拉流不再追加，直接用原直链（stream-gears 有自己的首连兜底，不受影响）。
     ws_expire_rejected: AtomicBool,
+    audio_processing_failed: Arc<AtomicBool>,
 }
 
 /// 每路实时弹幕广播的槽位数；掉队的订阅者跳过丢掉的那几条继续收，不断开。
@@ -246,6 +344,7 @@ impl DownloadTask {
             preview,
             danmaku_tx,
             ws_expire_rejected: AtomicBool::new(false),
+            audio_processing_failed: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -540,6 +639,13 @@ impl DownloadTask {
         {
             warn!(url = url, "切片工作台场次收尾超时，转入后台完成");
         }
+        if !processor.finish_processing().await {
+            self.audio_processing_failed.store(true, Ordering::Release);
+            warn!(
+                url = url,
+                "部分录制分段音频检查失败；失败分段已保留且未进入投稿或后处理"
+            );
+        }
         crate::server::fleet::ha::unit_ended(ctx, processor.output());
         if crate::server::fleet::ha::auto_clip_allowed(ctx) {
             crate::server::auto_clip::runner::session_finished(
@@ -832,7 +938,14 @@ pub async fn start_download_workflow(
 
     let _ = task.execute(&ctx, sender, downloader, rooms_handle).await;
 
-    process(&[], &ctx.live_streamer().downloaded_processor).await;
+    if task.audio_processing_failed.load(Ordering::Acquire) {
+        error!(
+            url = ctx.live_streamer().url,
+            "音频检查未能全部完成，跳过场次后处理"
+        );
+    } else {
+        process(&[], &ctx.live_streamer().downloaded_processor).await;
+    }
 
     info!(
         "Download workflow completed {} => {:?}",
@@ -965,6 +1078,7 @@ mod tests {
                 .unwrap();
             recorded.push(path);
         }
+        assert!(processor.finish_processing().await);
 
         let UploaderMessage::SegmentEvent(segments, _) = uploads.try_recv().unwrap();
         let queued: Vec<PathBuf> = std::iter::from_fn(|| segments.try_recv().ok())

@@ -39,9 +39,9 @@ acf_uid=123456; acf_auth=your_auth_value; acf_did=your_device_id; ...
 
 ```json
 [
-  {"domain": ".douyu.com", "name": "acf_uid", "value": "123456"},
-  {"domain": ".douyu.com", "name": "acf_auth", "value": "your_auth_value"},
-  {"domain": ".douyu.com", "name": "acf_did", "value": "your_device_id"}
+  { "domain": ".douyu.com", "name": "acf_uid", "value": "123456" },
+  { "domain": ".douyu.com", "name": "acf_auth", "value": "your_auth_value" },
+  { "domain": ".douyu.com", "name": "acf_did", "value": "your_device_id" }
 ]
 ```
 
@@ -60,29 +60,18 @@ acf_uid=123456; acf_auth=your_auth_value; acf_did=your_device_id; ...
 
 不要只复制 passport Cookie 代替 Web Cookie；passport 的长期票据与网页的 `acf_auth` 用途不同。浏览器中没有 `LTP0` 时，重新完成登录并检查；已有 Web Cookie 仍可用于登录取流，但无法自动续期。
 
-| GUI 字段 / 配置键 | 用途 |
-| --- | --- |
-| 登录 Cookie / `douyu_cookie` | Web 请求头字符串或浏览器 Cookie JSON 数组 |
-| 长期续期凭据 LTP0 / `douyu_ltp0` | passport 长期票据；完整 JSON 已包含时可留空 |
+| GUI 字段 / 配置键                               | 用途                                             |
+| ----------------------------------------------- | ------------------------------------------------ |
+| 登录 Cookie / `douyu_cookie`                    | Web 请求头字符串或浏览器 Cookie JSON 数组        |
+| 长期续期凭据 LTP0 / `douyu_ltp0`                | passport 长期票据；完整 JSON 已包含时可留空      |
 | 续期设备标识 dy_did / `douyu_refresh_device_id` | 与该票据配套的设备标识；完整 JSON 已包含时可留空 |
-| 自动续期登录 Cookie / `douyu_auto_refresh` | 默认开启，保存有效凭据对后自动调度 |
-| 设备 ID / `douyu_deviceId` | 取流设备 ID，与续期设备字段分开；通常可留空 |
+| 自动续期登录 Cookie / `douyu_auto_refresh`      | 默认开启，保存有效凭据对后自动调度               |
+| 设备 ID / `douyu_deviceId`                      | 取流设备 ID，与续期设备字段分开；通常可留空      |
 
 网页版取流设备 ID 留空时，优先使用 Web Cookie 中的 `dy_did`，其次是 `acf_did`，再使用默认值；App 回退使用 `acf_did` 或默认值。不要为了续期把 passport 设备号填到取流设备字段。
 
-下列图片示例使用当前站点的 `/biliup` 部署前缀；部署到其他前缀时，请相应调整图片 URL。图片补齐前，保留占位说明和代码块，不要直接插入指向缺失文件的图片。
-
-> **图片占位：浏览器导出与作用域。** 请截取开发者工具或导出工具中 Cookie 的名称和域名，展示 Web 与 passport 两种作用域；遮住所有 Cookie 值、账号 ID、设备号和 token。图片保存为 `docs/static/images/douyu-tutorial/passport-cookie-export.png`。补图后可将下面的代码替换为图片引用：
-
-```markdown
 ![浏览器中 Web Cookie 与 passport 长期凭据的作用域](/biliup/images/douyu-tutorial/passport-cookie-export.png)
-```
-
-> **图片占位：本机斗鱼登录设置。** 请截取“空间配置 → 平台设置 → 斗鱼”的登录 Cookie、LTP0、续期设备标识和自动续期开关；遮住全部凭据值、账号 ID 和设备号。图片保存为 `docs/static/images/douyu-tutorial/douyu-login-settings.png`。补图后可插入：
-
-```markdown
-![本机斗鱼登录与自动续期配置](/biliup/images/douyu-tutorial/douyu-login-settings.png)
-```
+![浏览器中 Web Cookie 与 passport 长期凭据的作用域](/biliup/images/douyu-tutorial/passport-cookie-export_2.png)
 
 ## 查看登录状态和手动续期
 
@@ -92,20 +81,16 @@ acf_uid=123456; acf_auth=your_auth_value; acf_did=your_device_id; ...
 
 **手动续期** 使用已经保存的配置。凭据或续期开关有未保存修改时，先保存再点击；自动续期关闭时仍可手动续期。同一来源最短 60 秒操作一次，正在续期和重复点击不会再启动一份交换。需要 `config.edit` 权限才能查看状态和操作这些按钮。
 
-| 状态 | 处理方式 |
-| --- | --- |
-| 等待下次续期 | 已安排自动续期；可以查看下次时间 |
-| 正在续期 | 等待状态更新，不要重复发起交换 |
-| 缺少续期凭据 | 补充同一次登录的 `LTP0` 与 `dy_did`，再保存 |
-| 续期失败，等待重试 | 临时失败已安排退避；检查网络，避免连续点击 |
+| 状态                        | 处理方式                                                   |
+| --------------------------- | ---------------------------------------------------------- |
+| 等待下次续期                | 已安排自动续期；可以查看下次时间                           |
+| 正在续期                    | 等待状态更新，不要重复发起交换                             |
+| 缺少续期凭据                | 补充同一次登录的 `LTP0` 与 `dy_did`，再保存                |
+| 续期失败，等待重试          | 临时失败已安排退避；检查网络，避免连续点击                 |
 | 续期凭据已失效 / 登录已失效 | 重新登录斗鱼，导出同一会话的 Web Cookie 与长期凭据，再保存 |
-| 自动续期已关闭 | 按需开启；已有 Cookie 仍会做登录校验 |
+| 自动续期已关闭              | 按需开启；已有 Cookie 仍会做登录校验                       |
 
-> **图片占位：保存后的登录状态。** 请截取登录、续期、上次校验、下次时间及“手动续期”按钮；遮住账号 ID，以及画面内任何 Cookie、设备号或 token。图片保存为 `docs/static/images/douyu-tutorial/douyu-login-status.png`。补图后可插入：
-
-```markdown
-![斗鱼登录状态与下次续期时间](/biliup/images/douyu-tutorial/douyu-login-status.png)
-```
+![本机斗鱼登录与自动续期配置](/biliup/images/douyu-tutorial/douyu-login-settings.png)
 
 ### 自动调度、持久化与重启
 

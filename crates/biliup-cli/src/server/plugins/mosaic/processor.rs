@@ -5,6 +5,7 @@ use super::ffmpeg_filter::build_filter_graph;
 use crate::server::config::{Config, ConfigPatch};
 use crate::server::core::downloader::SegmentInfo;
 use crate::server::errors::{AppError, AppResult};
+use crate::server::plugins::audio::{self, AudioEncoding};
 use crate::server::plugins::plugin_api::{ProcessResult, SegmentProcessorPlugin};
 use crate::tools;
 use async_trait::async_trait;
@@ -16,7 +17,7 @@ use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::sync::Semaphore;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 // Encoding must not grow without bound when several rooms close a segment.
 // This also prevents two pipelines from modifying the same segment concurrently.
@@ -174,28 +175,37 @@ impl MosaicPlugin {
         }
     }
 
-    fn build_ffmpeg_command(input: &Path, output: &Path, filter: &str, format: &str) -> Command {
+    fn build_ffmpeg_command(
+        input: &Path,
+        output: &Path,
+        filter: &str,
+        format: &str,
+        audio: AudioEncoding,
+    ) -> Command {
         let mut cmd = tools::low_priority_ffmpeg_command();
-        cmd.args(["-nostdin", "-hide_banner", "-loglevel", "error", "-i"])
-            .arg(input)
-            .args([
-                "-filter_complex_threads",
-                "1",
-                "-filter_complex",
-                filter,
-                "-map",
-                "[masked]",
-                "-map",
-                "0:a?",
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-crf",
-                "20",
-                "-c:a",
-                "copy",
-            ]);
+        cmd.args(["-nostdin", "-hide_banner", "-loglevel", "error"]);
+        if matches!(audio, AudioEncoding::RepairAac { .. }) {
+            // Otherwise FFmpeg subtracts the demuxer start time and rounds the
+            // video independently to its frame timebase, shifting the A/V origin.
+            cmd.arg("-copyts");
+        }
+        cmd.arg("-i").arg(input).args([
+            "-filter_complex_threads",
+            "1",
+            "-filter_complex",
+            filter,
+            "-map",
+            "[masked]",
+            "-map",
+            "0:a?",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "20",
+        ]);
+        audio::append_encoding_args(&mut cmd, audio);
         // Fragmented MP4 is understood by the existing workbench indexer.
         if matches!(format, "mp4" | "mov") {
             cmd.args(["-movflags", "+frag_keyframe+empty_moov+default_base_moof"]);
@@ -223,6 +233,14 @@ impl MosaicPlugin {
             quarantine(input).map_err(|e| AppError::Custom(format!("无法隔离未遮挡录像: {e}")))?;
         let format = Self::output_format(&destination)?;
         let (width, height) = Self::detect_video_dimensions(&input).await?;
+        let audio = audio::inspect_file(&input).await?;
+        if let AudioEncoding::RepairAac {
+            non_increasing_packets,
+        } = audio
+        {
+            warn!(file = %input.display(), non_increasing_packets,
+                "检测到 AAC 音频包时间戳重复或回退，将在遮挡时修复音频以避免播放卡顿");
+        }
         let pixels: Vec<_> = regions.iter().map(|r| r.to_pixel(width, height)).collect();
         let filter = build_filter_graph(&pixels, width, height);
         debug!(width, height, filter, "生成画面遮挡滤镜");
@@ -235,7 +253,7 @@ impl MosaicPlugin {
             .suffix(".tmp")
             .tempfile_in(parent)
             .map_err(|e| AppError::Custom(format!("创建遮挡临时文件失败: {e}")))?;
-        let mut child = Self::build_ffmpeg_command(&input, temp.path(), &filter, format)
+        let mut child = Self::build_ffmpeg_command(&input, temp.path(), &filter, format, audio)
             .spawn()
             .map_err(|e| AppError::Custom(format!("启动 FFmpeg 失败: {e}")))?;
         let mut stderr = child.stderr.take().expect("stderr is piped");
@@ -277,6 +295,14 @@ impl MosaicPlugin {
         }
         if temp.as_file().metadata().map(|m| m.len()).unwrap_or(0) == 0 {
             return Err(AppError::Custom("FFmpeg 没有生成遮挡后的视频".into()).into());
+        }
+        if format == "flv" || matches!(audio, AudioEncoding::RepairAac { .. }) {
+            audio::validate_output(
+                temp.path(),
+                format,
+                matches!(audio, AudioEncoding::RepairAac { .. }),
+            )
+            .await?;
         }
         // Publishing is atomic and occurs only after a successful encode. Keep the
         // quarantined original until the destination is durable and ready.
@@ -341,6 +367,10 @@ impl SegmentProcessorPlugin for MosaicPlugin {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "audio_tests.rs"]
+mod audio_tests;
 
 #[cfg(test)]
 mod tests {

@@ -2,6 +2,7 @@
 //
 // 提供分段处理插件的注册和管理功能
 
+pub(crate) mod audio;
 pub mod mosaic;
 pub mod plugin_api;
 

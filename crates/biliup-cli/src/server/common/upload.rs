@@ -181,6 +181,43 @@ pub(crate) fn segment_paths(event: &SegmentInfo) -> Vec<PathBuf> {
     paths
 }
 
+/// Check a completed recording before any uploader, retry, HA handoff, or
+/// postprocessor can consume it. The audio helper is a no-op for non-FLV and
+/// already-valid files; when it replaces a file in place, invalidate the
+/// byte-offset index because AAC re-encoding changes packet sizes.
+pub(crate) async fn prepare_segment_audio(ctx: &Context, path: &Path) -> AppResult<()> {
+    if crate::server::plugins::audio::repair_file_if_needed(path).await? {
+        crate::server::workbench::index::remove(path);
+        // Keep the persisted byte count in sync without changing the path. The
+        // recorder has settled before this function is called, so no writer can
+        // race the replacement.
+        let bytes = std::fs::metadata(path)
+            .ok()
+            .map(|metadata| metadata.len() as i64);
+        sqlx::query(
+            "UPDATE segments SET bytes = ?, index_path = NULL WHERE session_id = ? AND path = ?",
+        )
+        .bind(bytes)
+        .bind(ctx.id())
+        .bind(
+            crate::server::workbench::segment_path(path)
+                .to_string_lossy()
+                .into_owned(),
+        )
+        .execute(ctx.pool())
+        .await
+        .change_context(AppError::Unknown)?;
+    }
+    Ok(())
+}
+
+async fn prepare_upload_audio(path: &Path) -> AppResult<()> {
+    if crate::server::plugins::audio::repair_file_if_needed(path).await? {
+        crate::server::workbench::index::remove(path);
+    }
+    Ok(())
+}
+
 async fn update_processed_path(ctx: &Context, from: &Path, to: &Path) -> AppResult<()> {
     use crate::server::workbench::{index, segment_path};
     let from = segment_path(from).to_string_lossy().into_owned();
@@ -500,6 +537,7 @@ pub(crate) async fn upload_single_file_with_progress(
     if crate::server::plugins::mosaic::is_unmasked(file_path) {
         return Err(AppError::Custom("未遮挡录像禁止上传，请先完成画面遮挡".into()).into());
     }
+    prepare_upload_audio(file_path).await?;
     let video_path = file_path;
     let UploadContext {
         bilibili,
@@ -912,6 +950,7 @@ pub async fn upload(
         },
     };
     for video_path in video_paths {
+        prepare_upload_audio(video_path).await?;
         println!(
             "{:?}",
             video_path
