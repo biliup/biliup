@@ -96,14 +96,17 @@ impl SegmentEventProcessor {
         self.output.seen += 1;
         // 验证文件有效性
         let settled = settled.boxed().shared();
-        self.file_validator
-            .validate(&event.prev_file_path, settled.clone())?;
-        if crate::server::plugins::mosaic::masking_required(
+        let protected = crate::server::plugins::mosaic::masking_required(
             &self.ctx.config(),
             &self.ctx.live_streamer().override_cfg,
-        ) || crate::server::plugins::mosaic::is_unmasked(&event.prev_file_path)
-        {
+        ) || crate::server::plugins::mosaic::is_unmasked(&event.prev_file_path);
+        if protected {
+            self.file_validator
+                .validate_without_size(&event.prev_file_path)?;
             event.ready = Some(crate::server::core::downloader::SegmentReady(settled));
+        } else {
+            self.file_validator
+                .validate(&event.prev_file_path, settled)?;
         }
 
         // 上一轮 process_with_upload 可能因上传失败提前返回，UActor 已 drop rx，

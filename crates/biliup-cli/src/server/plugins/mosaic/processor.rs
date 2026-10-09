@@ -210,10 +210,12 @@ impl MosaicPlugin {
     }
 
     async fn process_file(&self, input: &Path, regions: &[MosaicRegion]) -> AppResult<PathBuf> {
+        info!(file = %input.display(), regions = regions.len(), "录像已进入画面遮挡队列");
         let _slot = ENCODING_SLOT
             .acquire()
             .await
             .map_err(|_| AppError::Custom("画面遮挡处理队列已关闭".into()))?;
+        let started = std::time::Instant::now();
         let destination = masked_path(input);
         // Files from new downloads are already quarantined. Protect legacy/HA
         // retry inputs too, so an encoding error never leaves an uploadable raw file.
@@ -285,7 +287,7 @@ impl MosaicPlugin {
         crate::server::workbench::index::remove(&input);
         // The upload pipeline removes the raw source only after persisting the
         // new workbench/filelist paths. A database error must retain both files.
-        info!(path = %destination.display(), regions = regions.len(), "画面遮挡处理完成");
+        info!(path = %destination.display(), width, height, regions = regions.len(), elapsed_secs = started.elapsed().as_secs_f64(), "画面遮挡处理完成");
         Ok(destination)
     }
 }

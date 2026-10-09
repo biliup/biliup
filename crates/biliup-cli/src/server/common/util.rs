@@ -537,6 +537,17 @@ impl FileValidator {
         Ok(())
     }
 
+    /// Mandatory recording processors run before size filtering. A small
+    /// segment may be retained by a marker/session pin, so its local contents
+    /// still need masking even when it will never be uploaded.
+    pub(crate) fn validate_without_size(&self, path: &Path) -> AppResult<()> {
+        fs::metadata(path).change_context(AppError::Unknown)?;
+        if self.check_format {
+            self.validate_format(path)?;
+        }
+        Ok(())
+    }
+
     fn validate_format(&self, path: &Path) -> AppResult<()> {
         // 简单的格式验证 - 检查扩展名
         let masked = crate::server::plugins::mosaic::masked_path(path);

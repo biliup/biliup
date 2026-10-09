@@ -244,6 +244,18 @@ where
         let config = ctx.config();
         let override_cfg = &ctx.live_streamer().override_cfg;
         let protect = crate::server::plugins::mosaic::masking_required(&config, override_cfg);
+        // Keep the original recording size as the filtering criterion. Encoding
+        // can substantially shrink a video; changing the threshold to encoded
+        // bytes would filter recordings that were previously eligible.
+        let protected_input =
+            protect || crate::server::plugins::mosaic::is_unmasked(&event.prev_file_path);
+        let original_bytes = std::fs::metadata(&event.prev_file_path)
+            .ok()
+            .map(|m| m.len())
+            .or(event.size_bytes);
+        let minimum_bytes = config.filtering_threshold.saturating_mul(1_000_000);
+        let filtered_after_mask =
+            protected_input && original_bytes.is_some_and(|bytes| bytes < minimum_bytes);
         if protect {
             match crate::server::plugins::mosaic::quarantine(&event.prev_file_path) {
                 Ok(path) => event.prev_file_path = path,
@@ -341,6 +353,28 @@ where
             || crate::server::plugins::mosaic::is_unmasked(&event.prev_file_path)
         {
             error!(file = ?event.prev_file_path, "本段未完成画面遮挡，已阻止投稿和后处理");
+            continue;
+        }
+        if filtered_after_mask {
+            // Size filtering still suppresses upload/postprocessors. Apply it
+            // only after masking so retention pins never preserve an unmasked
+            // original indefinitely. Retention decides whether to delete or keep
+            // the safe result exactly as it does for ordinary small segments.
+            let paths = segment_paths(&event);
+            let refs: Vec<_> = paths.iter().map(PathBuf::as_path).collect();
+            let retention = Retention::without_delay(ctx.pool().clone());
+            match crate::server::workbench::retention::remove(&retention, &refs).await {
+                Ok(outcome) => info!(
+                    streamer_id = ctx.live_streamer().id,
+                    file = ?event.prev_file_path,
+                    original_bytes,
+                    minimum_bytes,
+                    ?outcome,
+                    "录像遮挡已完成，原始分段小于碎片过滤阈值，跳过投稿与后处理"
+                ),
+                Err(e) => error!(file = ?event.prev_file_path, error = %e,
+                    "遮挡后碎片过滤清理失败，保留安全输出并跳过投稿与后处理"),
+            }
             continue;
         }
 
@@ -1025,6 +1059,7 @@ mod tests {
             return;
         }
         let mut config = Config::default();
+        config.filtering_threshold = 0;
         config.mosaic_config = Some(
             json!({"enabled": true, "regions": [{"id":"solid","x":0.25,"y":0.25,"width":0.5,"height":0.5,"effectType":"solid","strength":0,"color":"#000000"}]}),
         );
@@ -1081,6 +1116,130 @@ mod tests {
             .await
             .unwrap();
         assert!(cached.is_some(), "masked FLV indexes must be rebuilt");
+    }
+
+    #[tokio::test]
+    async fn mosaic_small_retained_segments_are_masked_before_filtering_and_never_uploaded() {
+        use crate::server::common::download::SegmentEventProcessor;
+        use crate::server::infrastructure::connection_pool::ConnectionManager;
+        use crate::server::workbench::store;
+        use serde_json::json;
+        use std::process::Stdio;
+        if crate::tools::ffmpeg_command()
+            .arg("-version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .is_err()
+        {
+            crate::tools::note_skipped_test("FFmpeg unavailable");
+            return;
+        }
+        for pinned in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let raw = dir.path().join("small.unmasked.flv");
+            let status = crate::tools::ffmpeg_command()
+                .args([
+                    "-nostdin",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=white:s=64x64:d=0.2",
+                    "-c:v",
+                    "libx264",
+                    "-f",
+                    "flv",
+                    "-y",
+                ])
+                .arg(&raw)
+                .status()
+                .await
+                .unwrap();
+            if !status.success() {
+                crate::tools::note_skipped_test("FFmpeg libx264 unavailable");
+                return;
+            }
+            let original_bytes = std::fs::metadata(&raw).unwrap().len();
+            assert!(original_bytes < 20_000_000);
+            let mut config = Config::default();
+            config.filtering_threshold = 20;
+            config.mosaic_config = Some(json!({"enabled":true,"regions":[{
+                "id":"solid","x":0.25,"y":0.25,"width":0.5,"height":0.5,
+                "effectType":"solid","strength":0,"color":"#000000"
+            }]}));
+            let base = test_context(config);
+            let pool =
+                ConnectionManager::new_pool(dir.path().join("data.sqlite3").to_str().unwrap())
+                    .await
+                    .unwrap();
+            sqlx::query("INSERT INTO stream_sessions (id,name,url,title,date,live_cover_path,started_at,ended_at) VALUES (1,'test','https://www.douyu.com/1','test','2026-10-09 00:00:00','',1,2)")
+                .execute(&pool).await.unwrap();
+            let segment_id = store::insert_segment(&pool, 1, raw.to_str().unwrap(), "flv", 0, 0)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE segments SET state='finished',end_ms=200,pin_count=? WHERE id=?")
+                .bind(if pinned { 1 } else { 0 })
+                .bind(segment_id)
+                .execute(&pool)
+                .await
+                .unwrap();
+            let ctx = Context::new(
+                1,
+                base.worker().clone(),
+                pool.clone(),
+                base.live_stream().clone(),
+            );
+            let (uploader, messages) = async_channel::unbounded();
+            let mut processor = SegmentEventProcessor::new(uploader, ctx.clone());
+            processor
+                .process(SegmentInfo::new(raw.clone(), None, None, 0), async {})
+                .unwrap();
+            let UploaderMessage::SegmentEvent(segments, _) = messages.try_recv().unwrap();
+            drop(processor);
+            let upload_calls = std::sync::atomic::AtomicUsize::new(0);
+            let result = pipeline_upload_videos(segments, &[], &get_all_plugins(), &ctx, |_| {
+                upload_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                async { Ok(Video::new("must-not-upload")) }
+            })
+            .await
+            .unwrap();
+            assert_eq!(upload_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+            assert!(
+                result.paths.is_empty(),
+                "filtered video must never reach postprocessors"
+            );
+            assert!(!raw.exists());
+            let published = dir.path().join("small.flv");
+            assert_eq!(published.exists(), pinned);
+            let (path, state): (String, String) =
+                sqlx::query_as("SELECT path,state FROM segments WHERE id=?")
+                    .bind(segment_id)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(path, published.to_string_lossy());
+            assert_eq!(state, if pinned { "pending_delete" } else { "deleted" });
+            if pinned {
+                let frame = crate::tools::ffmpeg_command()
+                    .args(["-nostdin", "-loglevel", "error", "-i"])
+                    .arg(&published)
+                    .args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+                    .output()
+                    .await
+                    .unwrap();
+                assert!(frame.status.success());
+                let pixel =
+                    |x: usize, y: usize| &frame.stdout[(y * 64 + x) * 3..(y * 64 + x) * 3 + 3];
+                assert!(
+                    pixel(20, 20).iter().all(|c| *c < 30),
+                    "retained small segment must contain the mask"
+                );
+                assert!(pixel(5, 5).iter().all(|c| *c > 220));
+            }
+        }
     }
 
     /// 断网时上传得到的错误：连接被拒与 DNS 解析失败同属连接错误
