@@ -20,7 +20,7 @@
 
 「手动续期」只使用已经保存的配置。表单有未保存修改时按钮不可用，应先保存；「测试 Cookie」校验当前输入框的 Cookie，不会保存输入值。手动续期即使自动开关关闭也可调用，但同一来源最短 60 秒一次，重复点击和正在续期时不会启动第二次交换。
 
-续期管理界面只挂载在本机全局配置页，不在 Fleet 配置页或主播覆写抽屉操作控制面的本机账号。后端状态与手动接口也支持 `streamer_id` 指定主播范围；主播配置中的 Cookie 发生变化时会隔离全局长期凭据，避免继承其他账号的票据和设备号。
+本机全局配置页展示全局状态；主播覆写抽屉展示该主播实际使用的登录状态，并明确选择继承、独立 Cookie 或匿名取流。Fleet 配置页不会操作控制面的本机账号。状态与手动接口使用 `streamer_id` 指定主播范围；主播配置中的 Cookie 发生变化时会隔离全局长期凭据，避免继承其他账号的票据和设备号。
 
 ## 来源配置与运行时凭据
 
@@ -86,3 +86,5 @@ node --test app/lib/douyu-auth.test.cjs
 ```
 
 实际接口和实现分别位于 `crates/biliup/src/downloader/live/douyu_refresh.rs`、`crates/biliup-cli/src/server/services/douyu_keeper.rs`、`server/api/douyu_validation.rs` 与 `app/ui/plugins/DouyuAuthPanel.tsx`。
+
+播放接口使用独立的 Cookie Header，仅发送已核实需要的 `acf_*` 和 `dy_did`。完整来源仍用于续期与存储；浏览器导出的其他 Cookie 可能导致网页播放接口 403，从而回退到限制画质的 App 接口。此次在 10035066 实际验证修复后可取得并录制 4K60。

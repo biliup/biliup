@@ -188,6 +188,7 @@ mod tests {
         ("PUT", "/v1/streamers/1/pause"),
         ("GET", "/v1/streamers/1/cover"),
         ("GET", "/v1/streamers/1/avatar"),
+        ("GET", "/v1/streamers/1/mosaic-frame"),
         ("GET", "/v1/streamers/1/live"),
         ("GET", "/v1/streamers/1/live-url"),
         ("GET", "/v1/streamers/1/danmaku"),
@@ -318,6 +319,7 @@ mod tests {
             .route("/v1/streamers/{id}/pause", put(|| async { StatusCode::OK }))
             .route("/v1/streamers/{id}/cover", ok())
             .route("/v1/streamers/{id}/avatar", ok())
+            .route("/v1/streamers/{id}/mosaic-frame", ok())
             .route("/v1/streamers/{id}/live", ok())
             .route("/v1/streamers/{id}/live-url", ok())
             .route("/v1/streamers/{id}/danmaku", ok())

@@ -14,6 +14,8 @@ import { useBiliUsers } from '../lib/use-streamers'
 import { FileSizeField } from './FileSizeInput'
 import { FormSheet } from './shell'
 import { MosaicPanel } from './MosaicPanel'
+import { SegmentTimeField } from './SegmentTimeField'
+import { updateSegmentTimeOverride, validateSegmentTime, type SegmentTimeValue } from '../lib/segment-time'
 import { parseOverrideText, updateMosaicOverrideText, validateMosaicConfig } from '../lib/mosaic-config'
 
 type PluginProps = {
@@ -131,7 +133,7 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, initial
       Object.keys(values).forEach(key => {
         if (!entityFields.has(key)) {
           if (values[key] !== undefined) {
-            overrideConfig[key] = values[key] === '' ? null : values[key]
+            overrideConfig[key] = values[key] === '' && key !== 'douyu_cookie' ? null : values[key]
           }
           delete values[key]
         }
@@ -139,6 +141,11 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, initial
       const mosaicError = validateMosaicConfig(overrideConfig.mosaic_config)
       if (mosaicError) {
         Notification.error({ title: '画面遮挡配置错误', content: mosaicError })
+        return
+      }
+      const durationError = validateSegmentTime(overrideConfig.segment_time)
+      if (durationError) {
+        Notification.error({ title: '分段时长配置错误', content: durationError })
         return
       }
       values.override = overrideConfig
@@ -171,6 +178,16 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, initial
       api.current?.setValue('override_text', updateMosaicOverrideText(typeof text === 'string' ? text : '', config))
     } catch {
       // Retain incomplete JSON edits; the form validator will report them on save.
+    }
+  }
+
+  const syncSegmentTime = (value: SegmentTimeValue) => {
+    try {
+      const text = api.current?.getValue('override_text')
+      const override = parseOverrideText(typeof text === 'string' ? text : '')
+      api.current?.setValue('override_text', JSON.stringify(updateSegmentTimeOverride(override, value), null, 2))
+    } catch {
+      // Incomplete JSON is retained for validation when saving.
     }
   }
 
@@ -222,31 +239,14 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, initial
         }}
       />
 
-      <Form.Input
+      <SegmentTimeField
         field="segment_time"
+        scope="room"
+        initValue={entity?.override?.segment_time}
+        onChange={syncSegmentTime}
         label="视频分段时长（segment_time）"
-        placeholder="01:00:00"
-        style={{ width: '100%' }}
-        fieldStyle={{
-          alignSelf: 'stretch',
-          padding: 0,
-        }}
-        showClear={true}
-        rules={[
-          {
-            pattern: /^[^：]*$/,
-            message: '请使用英文冒号',
-          },
-          {
-            pattern: /^[0-9:]*$/,
-            message: '只接受数字和英文冒号',
-          },
-          {
-            pattern: /^$|^[0-9]{2,4}:[0-5][0-9]:[0-5][0-9]$/,
-            message: '分或秒不符合规范',
-          },
-        ]}
-        stopValidateWithError={true}
+        extraText="可选择预设或自定义时长。跟随全局、不按时长分段和独立时长分别保存；分段较短时请同时检查碎片过滤阈值，低于阈值的分段会被过滤。"
+        fieldStyle={{ alignSelf: 'stretch', padding: 0 }}
       />
 
       <Form.InputNumber
@@ -286,6 +286,8 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, initial
               try {
                 const override = parseOverrideText(text)
                 api.current?.setValue('mosaic_config', override.mosaic_config)
+                api.current?.setValue('segment_time', override.segment_time)
+                api.current?.setValue('douyu_cookie', override.douyu_cookie ?? null)
               } catch {
                 // While a JSON edit is incomplete, retain the last usable configuration.
               }
@@ -314,7 +316,7 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, initial
               lazyRender={false}
             >
               {downloadSettings}
-              <MosaicPanel entity={entity} initValues={entity?.override} onChange={syncMosaicConfig} />
+              <MosaicPanel entity={entity} active={visible && activePanels.includes('mosaic')} initValues={entity?.override} onChange={syncMosaicConfig} />
               {PlatformPlugin ? (
                 <PlatformPlugin entity={entity} list={list} initValues={entity?.override} />
               ) : null}

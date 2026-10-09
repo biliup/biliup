@@ -62,6 +62,10 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         // 正在录制的直播间封面 / 主播头像（服务端带 Referer 转发，避开图片 CDN 防盗链）
         .route("/v1/streamers/{id}/cover", get(get_live_cover))
         .route("/v1/streamers/{id}/avatar", get(get_live_avatar))
+        .route(
+            "/v1/streamers/{id}/mosaic-frame",
+            get(crate::server::api::mosaic_frame::get_mosaic_frame),
+        )
         // 直播预览：复用正在录制的那一路流（chunked FLV / MPEG-TS），同样在登录校验之内
         // DELETE / POST（sendBeacon）：播放器销毁时立即释放这条预览，见 live_preview::lease
         .route(

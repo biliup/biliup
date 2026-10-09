@@ -221,12 +221,28 @@ fn validate_streamer_mosaic(
         .as_ref()
         .and_then(|patch| patch.mosaic_config.as_ref())
         .and_then(|value| value.clone());
-    Config {
+    let duration = patch
+        .as_ref()
+        .and_then(|patch| patch.segment_time.as_ref())
+        .and_then(|value| value.clone());
+    let mut config = Config {
         mosaic_config: value,
+        segment_time: duration,
         ..Config::default()
-    }
-    .validate_mosaic()
-    .map_err(|message| (StatusCode::BAD_REQUEST, Json(ApiError::new(message))).into_response())
+    };
+    config.normalize_segment_limits();
+    config.validate_segment_limits().map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new(
+                "视频分段时长格式无效，请输入大于 0 的时:分:秒、分:秒或秒数".to_string(),
+            )),
+        )
+            .into_response()
+    })?;
+    config
+        .validate_mosaic()
+        .map_err(|message| (StatusCode::BAD_REQUEST, Json(ApiError::new(message))).into_response())
 }
 
 pub async fn delete_streamers_endpoint(

@@ -188,6 +188,7 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         "/v1/configuration" if method == Method::PUT => ConfigEdit,
         "/v1/douyu/validate-cookie" if method == Method::POST => ConfigEdit,
         "/v1/douyu/auth/status" if get => ConfigEdit,
+        "/v1/streamers/{id}/mosaic-frame" if get => StreamerHooks,
         "/v1/douyu/auth/refresh" if method == Method::POST => ConfigEdit,
         // 连通性测试会用已保存的 key 调外部接口，归配置编辑；状态不含 key 和地址
         "/v1/auto-clip/test" if method == Method::POST => ConfigEdit,

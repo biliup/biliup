@@ -34,6 +34,7 @@ pub mod live_preview;
 pub mod live_rates;
 /// 切片工作台的标记
 pub mod markers;
+pub mod mosaic_frame;
 /// 非超管的配置与主播数据脱敏
 pub mod redact;
 /// 「保留这场」：改场次的保留期
