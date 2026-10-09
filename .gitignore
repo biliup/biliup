@@ -60,3 +60,4 @@ CLAUDE.md
 /crates/stream-gears/stream_gears/*.so
 /crates/stream-gears/stream_gears/*.pyd
 cilps/
+*.tmp
