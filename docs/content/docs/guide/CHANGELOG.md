@@ -2,7 +2,7 @@
 title = "更新日志"
 description = "CHANGELOG"
 date = 2021-05-01T08:20:00+00:00
-updated = 2021-05-01T08:20:00+00:00
+updated = 2026-10-09T00:00:00+00:00
 draft = false
 weight = 20
 sort_by = "weight"
@@ -20,6 +20,9 @@ top = false
 - ⚠️需要手动操作的更新信息
 
 ## 未发布
+- 💡斗鱼 Web 登录 Cookie 支持使用 `LTP0` 与配套 `dy_did` 自动续期，保存调度状态并更新运行中的请求；房间配置可明确继承全局登录、使用独立 Cookie 或匿名取流。说明见[斗鱼登录、Cookie 续期与画质设置](@/docs/tutorials/douyu-cookie-guide.md)。
+- 💡增加画面遮挡编辑器：在真实直播截帧上圈选马赛克、模糊或纯色区域，分段关闭后处理；待遮挡原片不会进入投稿或切片导出。分段时长支持预设、自定义和主播级继承／关闭。
+- 🔧必要遮挡在碎片过滤之前执行，工作台引用而保留的小分段也会完成遮挡。默认不自动合并本地分段；快速合并与后处理脚本说明见[录制分段、画面遮挡与本地合并](@/docs/tutorials/recording-and-masking.md)。
 - ⚠️没有配置下载插件（`downloader`）的主播，默认下载插件从 stream-gears 改为 mesio。显式配置了 `downloader` 的不受影响；想保持原样，把 `downloader` 设为 `stream-gears` 即可。mesio 写出的 FLV 带关键帧索引（`onMetaData.keyframes`）、每段时间戳从 0 开始，播放器可以拖动进度条；能录 HEVC / Enhanced-FLV 和 B 站 `hls_fmp4`。行为上的变化：
   - 不转封装，容器跟随源站：FLV 流存 `.flv`，HLS TS 存 `.ts`，HLS fMP4（如 B 站 `hls_fmp4`）存 `.mp4`；配置的 `format` 与实际容器不一致时只在日志里提示。
   - 录制中直接写最终文件名，不再先写 `.part` 再改名。

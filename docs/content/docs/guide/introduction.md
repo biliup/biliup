@@ -219,7 +219,13 @@ biliup **不会删除未完成的录像**。断流、CDN 切换、下载器出�
 - FLV / TS（stream-gears、mesio、ffmpeg 录 FLV / TS 时）：截断后前面的内容仍可播放，照常作为一个分段保存，并照常进入上传和后处理（stream-gears 遇到读到一半断开的最后一个 tag 时只丢弃这一个 tag）。
 - ffmpeg 录 MP4（`format: mp4`）：MP4 的索引（moov）在录制结束时才写，被中止的 MP4 无法播放，因此**不进入上传流程**；但文件不会被删除，会以 `.mp4.part` 的名字留在录像目录里，可以用 untrunc 等工具尝试修复，或自行删除。
 
-### 6. 斗鱼录制中的 `Non-monotonous DTS` 日志
+### 6. 录制分段、画面遮挡和本地合并
+
+录制分段时长可以使用预设或自定义值；启用画面遮挡时，可以在当前直播截帧上圈选区域，分段关闭后自动处理。程序默认不会将多个本地分段拼成单个文件；处理完成后可使用 FFmpeg `-c copy` 快速合并，也可自行配置后处理脚本。
+
+入口、截图说明、碎片过滤与无重编码合并步骤见[录制分段、画面遮挡与本地合并](@/docs/tutorials/recording-and-masking.md)。斗鱼账号和自动续期见[斗鱼登录、Cookie 续期与画质设置](@/docs/tutorials/douyu-cookie-guide.md)。
+
+### 7. 斗鱼录制中的 `Non-monotonous DTS` 日志
 斗鱼 CDN 切换节点或主播推流重连时，FLV 流里的时间戳常会归 0（日志形如 `Non-monotonous DTS ... previous: 4877, current: 0`），切换瞬间还可能夹着空的 tag、重发的 onMetaData / 序列头，甚至重发整个 FLV 文件头。stream-gears 会按音频、视频轨道分别把后续时间戳平移接上，跳过残缺的 tag，录制继续进行；连接在 tag 中间断开时按正常断流结束，已录内容全部保留。这条日志只是提示，不需要处理。
 
 
