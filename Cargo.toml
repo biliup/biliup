@@ -40,6 +40,10 @@ reqwest = { version = "0.13.4", features = ["cookies", "form", "query"] }
 url = "2.5"
 
 
+# Avoid stale anonymous LLVM symbols from optimized incremental dev builds.
+[profile.dev]
+incremental = false
+
 [profile.release]
 lto = true
 codegen-units = 1

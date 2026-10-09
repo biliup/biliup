@@ -1,0 +1,5 @@
+# Optimized incremental builds can leave inconsistent LLVM objects, which fail
+# to link with undefined hidden anon.* symbols. Keep development and inherited
+# test builds reproducible, including when user-level Cargo config enables it.
+[profile.dev]
+incremental = false
