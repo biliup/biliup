@@ -9,10 +9,8 @@
 mod index_tap;
 
 use crate::server::common::construct_headers;
-use crate::server::common::util::media_ext_from_url;
-use crate::server::core::downloader::{
-    self, DownloadConfig, DownloadStatus, SegmentEvent, SegmentInfo,
-};
+use crate::server::common::util::{media_ext_from_url, parse_segment_time};
+use crate::server::core::downloader::{DownloadConfig, DownloadStatus, SegmentEvent, SegmentInfo};
 use crate::server::errors::{AppError, AppResult};
 use biliup::downloader::preview::{self, ChunkKind, PreviewFormat, PreviewSink};
 use biliup::downloader::util::ByteCounter;
@@ -38,6 +36,7 @@ use pipeline_common::{
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
+#[cfg(test)]
 use std::time::Duration;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tracing::{debug, info, warn};
@@ -121,15 +120,18 @@ impl Mesio {
 
         // 录制时间范围：管线只负责按时长切片而不会自行退出，到点后主动取消，
         // 与 ffmpeg 内部分段用 `-t` 截停的语义一致。
-        let window_timer = download_config.time_range_remaining().map(|remaining| {
-            let secs = downloader::parse_duration(&remaining);
-            let token = token.clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(secs)).await;
-                info!("录制时间范围结束，停止 mesio 拉流");
-                token.cancel();
-            })
-        });
+        let window_timer = download_config
+            .time_range_remaining()
+            .as_deref()
+            .and_then(parse_segment_time)
+            .map(|remaining| {
+                let token = token.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(remaining).await;
+                    info!("录制时间范围结束，停止 mesio 拉流");
+                    token.cancel();
+                })
+            });
 
         let outcome = match session {
             DownloaderSession::Flv(session) => {
@@ -493,7 +495,7 @@ fn tee_flv(sink: &mut PreviewSink, item: &FlvData) {
                 ChunkKind::SequenceHeader(preview::flv::TAG_AUDIO)
             } else if tag.is_video_sequence_header() {
                 if class.codec == Some(CodecKind::Hevc) {
-                    sink.mark_unavailable(
+                    sink.mark_browser_unavailable(
                         "视频为 HEVC 编码，浏览器内的播放器无法解码，录制不受影响",
                     );
                 }

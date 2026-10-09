@@ -214,6 +214,7 @@ export function globalPayload(saved: ConfigValues, initial: ConfigValues, values
 /**
  * 节点覆盖的请求体：只含这台节点与全局不同的键。
  * 没动过的字段保留原有覆盖；改动后清空的字段、改成与全局相同的共享字段都撤掉覆盖。
+ * 分段大小 / 时长的显式 null 表示关闭这个限制，须保留；undefined / 空串仍表示撤掉覆盖。
  * `global` 为 null 表示还没保存过全局配置（节点不收共享键），这时填了什么就覆盖什么。
  */
 export function overridePayload(
@@ -224,8 +225,16 @@ export function overridePayload(
 ): ConfigValues {
   const body: ConfigValues = {}
   for (const key of DELIVERABLE_KEYS) {
-    if (same(values[key], initial[key])) {
+    const clearable = key === 'file_size' || key === 'segment_time'
+    const unchanged = clearable && (values[key] === null || initial[key] === null)
+      ? values[key] === initial[key]
+      : same(values[key], initial[key])
+    if (unchanged) {
       if (key in current) body[key] = current[key]
+      continue
+    }
+    if (clearable && values[key] === null) {
+      body[key] = null
       continue
     }
     const value = blank(values[key])

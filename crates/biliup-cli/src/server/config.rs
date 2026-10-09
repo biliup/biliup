@@ -51,7 +51,13 @@ pub struct Config {
     #[serde(default = "default_file_size")]
     pub file_size: Option<u64>,
 
-    /// 分段时间，格式如 "00:00:00"，保留为字符串以保持直观
+    /// 分段时间：[HH:]MM:SS[.小数] 或秒数，保留字符串以保持直观。
+    /// 主播补丁缺少此键时继承全局，显式 null 关闭时长分段。
+    #[patch(attribute(serde(
+        default,
+        deserialize_with = "deserialize_option_patch",
+        skip_serializing_if = "Option::is_none"
+    )))]
     #[serde(default)]
     pub segment_time: Option<String>,
 
@@ -661,6 +667,18 @@ impl Config {
     }
 
     pub fn validate_segment_limits(&self) -> AppResult<()> {
+        if let Some(value) = self
+            .segment_time
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            let duration = crate::server::common::util::parse_segment_time(value);
+            if duration.is_none_or(|duration| duration.is_zero()) {
+                bail!(AppError::Custom(
+                    "视频分段时长（segment_time）必须为大于 0 的时:分:秒、分:秒或秒数，例如 00:07:30、7:30、450；关闭时长分段请清空此字段".to_string()
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -676,12 +694,21 @@ impl Config {
     }
 
     pub fn normalize_segment_limits(&mut self) {
-        if self
-            .segment_time
-            .as_deref()
-            .is_some_and(|value| value.trim().is_empty())
-        {
-            self.segment_time = None;
+        if let Some(value) = self.segment_time.as_deref() {
+            let trimmed = value.trim();
+            // Older configs used zero to disable the limit. Keep that behavior on upgrade,
+            // but do not turn a positive value smaller than the recorder's precision into zero.
+            let legacy_zero = crate::server::common::util::parse_segment_time(trimmed)
+                .is_some_and(|duration| duration.is_zero())
+                && trimmed
+                    .bytes()
+                    .filter(u8::is_ascii_digit)
+                    .all(|byte| byte == b'0');
+            self.segment_time = if trimmed.is_empty() || legacy_zero {
+                None
+            } else {
+                Some(trimmed.to_string())
+            };
         }
     }
 
@@ -829,6 +856,149 @@ mod tests {
         let reloaded: ConfigPatch = serde_json::from_str(&stored).unwrap();
         config.apply(reloaded);
         assert_eq!(config.file_size, None);
+    }
+
+    #[test]
+    fn custom_segment_times_and_legacy_disabled_values_normalize_and_validate() {
+        for value in ["00:07:30", "7:30", "450", " 00:07:30.5 ", "0.001"] {
+            let mut config = Config {
+                segment_time: Some(value.to_string()),
+                ..Config::default()
+            };
+            config.normalize_segment_limits();
+            assert!(config.validate_segment_limits().is_ok(), "{value}");
+            assert_eq!(config.segment_time.as_deref(), Some(value.trim()));
+        }
+        for value in ["", " ", "0", "0.0", "00:00:00", "00:00:00.000"] {
+            let mut config = Config {
+                segment_time: Some(value.to_string()),
+                ..Config::default()
+            };
+            config.normalize_segment_limits();
+            assert_eq!(config.segment_time, None, "{value}");
+            assert!(config.validate_segment_limits().is_ok());
+        }
+        for value in [
+            "abc",
+            "7:60",
+            "90:00",
+            "-450",
+            "NaN",
+            "1e3",
+            "0.0000000001",
+            "999999999999999999999:00:00",
+        ] {
+            let mut config = Config {
+                segment_time: Some(value.to_string()),
+                ..Config::default()
+            };
+            config.normalize_segment_limits();
+            assert!(config.validate_segment_limits().is_err(), "{value}");
+        }
+    }
+
+    #[test]
+    fn custom_segment_time_patch_round_trips_and_distinguishes_inheritance_from_disabled() {
+        let global_time = "00:30:00";
+        for raw in [
+            r#"{"downloader":"mesio"}"#,
+            r#"{"segment_time":null}"#,
+            r#"{"segment_time":"00:07:30"}"#,
+        ] {
+            let patch: ConfigPatch = serde_json::from_str(raw).unwrap();
+            let stored = serde_json::to_value(patch).unwrap();
+            let submitted: serde_json::Value = serde_json::from_str(raw).unwrap();
+            assert_eq!(stored.get("segment_time"), submitted.get("segment_time"));
+            let reloaded: ConfigPatch = serde_json::from_value(stored).unwrap();
+            let mut config = Config {
+                segment_time: Some(global_time.to_string()),
+                ..Config::default()
+            };
+            config.apply(reloaded);
+            let expected = match submitted.get("segment_time") {
+                None => Some(global_time),
+                Some(serde_json::Value::Null) => None,
+                Some(value) => value.as_str(),
+            };
+            assert_eq!(config.segment_time.as_deref(), expected, "{raw}");
+            assert!(config.validate_segment_limits().is_ok());
+        }
+    }
+
+    #[tokio::test]
+    async fn segment_time_migration_removes_legacy_null_and_preserves_custom_duration() {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE livestreamers (id INTEGER PRIMARY KEY, override TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for (id, value) in [
+            (
+                1,
+                r#"{"segment_time":null,"downloader":"mesio","file_size":123}"#,
+            ),
+            (2, r#"{"segment_time":"00:07:30","file_size":456}"#),
+            (3, r#"{"downloader":"ffmpeg"}"#),
+        ] {
+            sqlx::query("INSERT INTO livestreamers VALUES (?, ?)")
+                .bind(id)
+                .bind(value)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        sqlx::raw_sql(include_str!(
+            "../../migrations/16_override_segment_time_placeholder_null.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        let rows: Vec<String> =
+            sqlx::query_scalar("SELECT override FROM livestreamers ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        let values: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|raw| serde_json::from_str(raw).unwrap())
+            .collect();
+        assert!(values[0].get("segment_time").is_none());
+        assert_eq!(values[0]["downloader"], "mesio");
+        assert_eq!(values[0]["file_size"], 123);
+        assert_eq!(values[1]["segment_time"], "00:07:30");
+        assert_eq!(values[1]["file_size"], 456);
+        assert_eq!(values[2], serde_json::json!({"downloader":"ffmpeg"}));
+        let patch: ConfigPatch = serde_json::from_str(&rows[0]).unwrap();
+        let mut config = Config {
+            segment_time: Some("01:00:00".into()),
+            ..Config::default()
+        };
+        config.apply(patch);
+        assert_eq!(config.segment_time.as_deref(), Some("01:00:00"));
+        sqlx::query("CREATE TABLE fleet_rooms AS SELECT * FROM livestreamers")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE fleet_rooms SET override = ? WHERE id = 1")
+            .bind(r#"{"segment_time":null,"downloader":"mesio"}"#)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::raw_sql(include_str!(
+            "../../fleet_migrations/7_override_segment_time_placeholder_null.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        let fleet: String = sqlx::query_scalar("SELECT override FROM fleet_rooms WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&fleet).unwrap(),
+            serde_json::json!({"downloader":"mesio"})
+        );
+        pool.close().await;
     }
 
     #[test]

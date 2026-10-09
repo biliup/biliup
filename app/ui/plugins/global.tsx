@@ -5,6 +5,7 @@ import SectionTitle from '../../(app)/components/SectionTitle'
 import { Form, Select, Space, Switch, useFormApi, useFormState } from '@douyinfe/semi-ui'
 import { IconUpload, IconDownload } from '@douyinfe/semi-icons'
 import { FileSizeField } from '../FileSizeInput'
+import { SegmentTimeField } from '../SegmentTimeField'
 
 /** 打开「投稿后保留录像」时默认保留的小时数 */
 const DEFAULT_RETENTION_HOURS = 24
@@ -142,38 +143,22 @@ const Global: React.FC<Props> = ({ disabled }) => {
             padding: 0,
           }}
         />
-        <Form.Input
+        <SegmentTimeField
           field="segment_time"
           extraText={
             <div style={{ fontSize: '14px' }}>
               录像单文件时间限制，超过此时长触发文件分割。
               <br />
-              格式：&apos;00:00:00&apos;（时:分:秒）
+              选择预设或自定义，例如 00:07:30、7:30（7 分 30 秒）、450（秒）。不按时长分段时仍可按文件大小分段。
+              <br />
+              分段较短时请同时检查碎片过滤阈值，低于阈值的分段会被过滤。
             </div>
           }
           label="视频分段时长（segment_time）"
-          placeholder="01:00:00"
-          style={{ width: '100%' }}
           fieldStyle={{
             alignSelf: 'stretch',
             padding: 0,
           }}
-          showClear={true}
-          rules={[
-            {
-              pattern: /^[^：]*$/,
-              message: '请使用英文冒号',
-            },
-            {
-              pattern: /^[0-9:]*$/,
-              message: '只接受数字和英文冒号',
-            },
-            {
-              pattern: /^$|^[0-9]{2,4}:[0-5][0-9]:[0-5][0-9]$/,
-              message: '分或秒不符合规范',
-            },
-          ]}
-          stopValidateWithError={true}
         />
         <Form.Input
           field="filename_prefix"

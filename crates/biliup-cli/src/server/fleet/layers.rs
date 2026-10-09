@@ -6,7 +6,7 @@
 //!   跟机器走，全局配置不管它们；只有写进节点覆盖才下发，否则节点保留自己的值。
 //! - **全局配置**存全部共享键（白名单减按节点的键），`null` 就是「未设置」，同样会下发、覆盖节点。
 //! - **节点覆盖**是 `ConfigPatch` 语义：只存设置了的键，`null` 与空字符串都当没设置；
-//!   唯一能显式清空的是 `file_size`（写 `null`）。其余字段覆盖不能清空（沿用 WEB-23）。
+//!   `file_size` 与 `segment_time` 可以写 `null` 显式清空。其余字段覆盖不能清空（沿用 WEB-23）。
 //!   与 `ConfigPatch` 不同的是 `ffmpeg_path` / `preview_max_minutes` 也能覆盖（`ConfigPatch` 跳过它们）。
 //!
 //! 节点收到的是「全局 ⊕ 覆盖」（[`delivered`]），自己再按 [`merge`] 叠到本机配置上：
@@ -27,8 +27,8 @@ pub const PER_NODE_KEYS: &[&str] = &[
     "loggers_level",
 ];
 
-/// 覆盖里唯一可以写 `null` 表示「显式清空」的键
-const CLEARABLE_KEY: &str = "file_size";
+/// 覆盖里可以写 `null` 表示「显式清空」的键
+const CLEARABLE_KEYS: &[&str] = &["file_size", "segment_time"];
 
 pub type Object = Map<String, Value>;
 
@@ -130,6 +130,9 @@ fn parse(object: Object) -> Result<Config, LayerError> {
 /// 单机的 `apply_config` 在落库之后才检查日志级别，Fleet 在应用前就拦下。
 pub fn validate(config: &Config) -> Result<(), String> {
     config.validate_pool_sizes()?;
+    config
+        .validate_segment_limits()
+        .map_err(|error| error.current_context().to_string())?;
     if let Some(level) = &config.loggers_level {
         EnvFilter::try_new(level).map_err(|e| format!("日志级别（loggers_level）格式不对：{e}"))?;
     }
@@ -157,6 +160,7 @@ pub fn normalize_global(body: Object) -> Result<Normalized, LayerError> {
         }
     }
     let config = parse(shared)?;
+    validate(&config).map_err(LayerError::Invalid)?;
     let config = project(&config)
         .into_iter()
         .filter(|(key, _)| is_shared(key))
@@ -166,14 +170,14 @@ pub fn normalize_global(body: Object) -> Result<Normalized, LayerError> {
 }
 
 /// 整理 `PUT /v1/fleet/nodes/{id}/config` 的请求体（整份替换这台节点的覆盖）：
-/// `null` 与空白字符串当没设置（`file_size: null` 除外），白名单外带值的键整体拒绝。
+/// `null` 与空白字符串当没设置（`file_size` / `segment_time` 的显式 null 除外），白名单外带值的键整体拒绝。
 /// 取值叠在默认配置上检查，`pool1_size = 0` 这类值在这里就拒掉。
 pub fn normalize_override(body: Object) -> Result<Normalized, LayerError> {
     let (kept, mut ignored) = split_foreign(body)?;
     let patch: Object = kept
         .into_iter()
         .filter(|(key, value)| match value {
-            Value::Null => key == CLEARABLE_KEY,
+            Value::Null => CLEARABLE_KEYS.contains(&key.as_str()),
             Value::String(text) => !text.trim().is_empty(),
             _ => true,
         })
@@ -381,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn override_keeps_only_set_keys_with_file_size_clearable() {
+    fn override_keeps_only_set_keys_with_segment_limits_clearable() {
         let normalized = normalize_override(object(json!({
             "pool1_size": 1,
             "segment_time": null,
@@ -393,13 +397,41 @@ mod tests {
         .unwrap();
         assert_eq!(
             normalized.config,
-            object(json!({"pool1_size": 1, "file_size": null, "douyu_cdn": "hw-h5"}))
+            object(
+                json!({"pool1_size": 1, "file_size": null, "segment_time": null, "douyu_cdn": "hw-h5"})
+            )
         );
         assert_eq!(normalized.ignored, ["user"]);
         assert_eq!(
             normalize_override(Object::new()).unwrap().config,
             Object::new()
         );
+    }
+
+    #[test]
+    fn arbitrary_segment_time_is_validated_in_global_and_node_forms() {
+        for value in ["00:07:30", "7:30", "450", "00:07:30.5"] {
+            let body = object(json!({"segment_time": value}));
+            assert_eq!(
+                normalize_global(body.clone()).unwrap().config["segment_time"],
+                value
+            );
+            assert_eq!(
+                normalize_override(body).unwrap().config["segment_time"],
+                value
+            );
+        }
+        for value in ["bad", "7:60", "-1", "999999999999999999999:00:00"] {
+            let body = object(json!({"segment_time": value}));
+            assert!(
+                matches!(normalize_global(body.clone()), Err(LayerError::Invalid(_))),
+                "{value}"
+            );
+            assert!(
+                matches!(normalize_override(body), Err(LayerError::Invalid(_))),
+                "{value}"
+            );
+        }
     }
 
     #[test]

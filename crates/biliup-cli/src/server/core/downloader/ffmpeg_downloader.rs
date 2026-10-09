@@ -1,6 +1,5 @@
 use crate::server::common::throughput::SubprocessProgress;
-use crate::server::common::util::redact_process_debug;
-use crate::server::core::downloader;
+use crate::server::common::util::{parse_segment_time, redact_process_debug};
 use crate::server::core::downloader::{
     DownloadConfig, DownloadStatus, DownloaderType, SegmentEvent, SegmentInfo,
 };
@@ -93,9 +92,16 @@ impl FfmpegDownloader {
         args.extend(["-strftime".to_string(), "1".to_string()]);
 
         // -segment_time: 分段时长（秒）
-        if let Some(segment_time) = &download_config.segment_time {
-            let seconds = downloader::parse_duration(segment_time);
-            args.extend(["-segment_time".to_string(), seconds.to_string()]);
+        if let Some(duration) = download_config
+            .segment_time
+            .as_deref()
+            .and_then(parse_segment_time)
+            .filter(|duration| !duration.is_zero())
+        {
+            args.extend([
+                "-segment_time".to_string(),
+                duration.as_secs_f64().to_string(),
+            ]);
         }
 
         // -t: 录制总时长上限。内部分段由 segment muxer 自己切片、进程不会自行退出，
@@ -594,5 +600,24 @@ mod tests {
         let args = internal().build_ffmpeg_args_internal_segment(&config(Some("01:00:00"), None));
         assert_eq!(value_of(&args, "-segment_time"), Some("3600".to_string()));
         assert_eq!(value_of(&args, "-t"), None);
+    }
+
+    #[test]
+    fn custom_duration_formats_and_subseconds_reach_both_ffmpeg_segmentation_modes() {
+        for (duration, seconds) in [
+            ("00:07:30", "450"),
+            ("7:30", "450"),
+            ("450", "450"),
+            ("00:07:30.5", "450.5"),
+        ] {
+            let config = config(Some(duration), None);
+            let internal_args = internal().build_ffmpeg_args_internal_segment(&config);
+            assert_eq!(
+                value_of(&internal_args, "-segment_time").as_deref(),
+                Some(seconds)
+            );
+            let external_args = external().build_ffmpeg_args_external_segment(&config);
+            assert_eq!(value_of(&external_args, "-to").as_deref(), Some(duration));
+        }
     }
 }

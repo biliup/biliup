@@ -35,7 +35,9 @@ pub async fn apply_config(
 ) -> Result<Config, ApplyConfigError> {
     let mut new_config = new_config;
     new_config.normalize_segment_limits();
-    new_config.validate_segment_limits()?;
+    new_config
+        .validate_segment_limits()
+        .map_err(|error| ApplyConfigError::Invalid(error.current_context().to_string()))?;
     new_config
         .validate_mosaic()
         .map_err(ApplyConfigError::Invalid)?;
@@ -246,6 +248,41 @@ mod tests {
                 .unwrap(),
             "debug"
         );
+    }
+
+    #[tokio::test]
+    async fn custom_segment_time_saves_and_invalid_duration_does_not_change_runtime_or_database() {
+        let f = fixture().await;
+        let valid = Config {
+            segment_time: Some("00:07:30".into()),
+            ..Config::default()
+        };
+        f.apply(valid.clone()).await.unwrap();
+        assert_eq!(
+            f.saved_rows().await[0].segment_time.as_deref(),
+            Some("00:07:30")
+        );
+        assert_eq!(
+            f.config.read().unwrap().segment_time.as_deref(),
+            Some("00:07:30")
+        );
+        let original_sizes = f.pool_sizes();
+        for value in ["7:60", "bad", "-1", "0.0000000001"] {
+            let result = f
+                .apply(Config {
+                    segment_time: Some(value.into()),
+                    pool1_size: 8,
+                    ..valid.clone()
+                })
+                .await;
+            assert!(
+                matches!(result, Err(ApplyConfigError::Invalid(_))),
+                "{value}"
+            );
+            assert_eq!(f.saved_rows().await[0], valid);
+            assert_eq!(*f.config.read().unwrap(), valid);
+            assert_eq!(f.pool_sizes(), original_sizes);
+        }
     }
 
     /// WebUI 的「上传重试次数限制」整份配置提交上来时存进库、读回内存；清空（`null`）后回到未设置
