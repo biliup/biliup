@@ -32,6 +32,8 @@ const STARTUP_PAGE: &str = "tauri://localhost/";
 const BUNDLED_FFMPEG: [&str; 2] = ["ffmpeg", "ffmpeg.exe"];
 #[cfg(not(windows))]
 const BUNDLED_FFMPEG: [&str; 2] = ["ffmpeg", "ffmpeg"];
+/// Fonts shared by the danmaku preview and FFmpeg (`render-tools/fonts`).
+/// Danmaku conversion itself is linked into this executable.
 const BUNDLED_RENDER_TOOLS: &str = "render-tools";
 
 struct Server {

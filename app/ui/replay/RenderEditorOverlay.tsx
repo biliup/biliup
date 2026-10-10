@@ -166,7 +166,7 @@ export default function RenderEditorOverlay({ state: s, video, current, segments
     let renderer: AssRenderer | undefined, disposed = false, raf = 0
     setAssError(null); setAssLoading(danmakuEnabled)
     const timeout = setTimeout(() => {
-      setAssError('ASS 预览初始化超时。请检查服务器字体、DanmakuFactory 以及浏览器是否允许 Web Worker，然后关闭并重新开启实时预览。')
+      setAssError('ASS 预览初始化超时。请检查服务器字体、弹幕转换以及浏览器是否允许 Web Worker，然后关闭并重新开启实时预览。')
       setAssLoading(false)
     }, 20000)
     const debounce = setTimeout(async () => {

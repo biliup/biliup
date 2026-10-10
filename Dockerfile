@@ -29,7 +29,7 @@ COPY . /biliup
 RUN set -eux; \
 	\
 	apt-get update; \
-	apt-get install -y --no-install-recommends python3-pip g++ patchelf libpcre2-dev pkg-config git curl unzip; \
+	apt-get install -y --no-install-recommends python3-pip g++ patchelf git curl; \
 	pip3 install maturin --break-system-packages; \
 	if [ ! -f /biliup/crates/stream-gears/pyproject.toml ]; then \
 	rm -rf /biliup; \
@@ -40,7 +40,8 @@ COPY --from=webui-builder /biliup/out /biliup/out
 
 WORKDIR /biliup
 
-RUN .github/scripts/build-render-tools.sh linux /biliup/render-tools
+# 只准备字体与第三方声明：弹幕 XML -> ASS 已静态链接进 biliup（含 PCRE2），不再构建 DanmakuFactory
+RUN .github/scripts/build-render-tools.sh /biliup/render-tools
 
 RUN set -eux; \
 	maturin build --release -m crates/stream-gears/Cargo.toml;
@@ -75,12 +76,11 @@ RUN set -eux; \
 	apt-get update; \
 	apt-get install -y --no-install-recommends \
 		wget \
-		libpcre2-8-0 \
 		curl \
 		xz-utils \
 	; \
 	apt-mark auto '.*' > /dev/null; \
-	apt-mark manual curl wget libpcre2-8-0; \
+	apt-mark manual curl wget; \
 	\
 	arch="$(dpkg --print-architecture)"; arch="${arch##*-}"; \
 	# 固定 FFmpeg 到确定版本并校验 SHA-256：

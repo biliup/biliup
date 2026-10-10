@@ -97,7 +97,7 @@ export default function RenderEditor({ state: s, canEdit, canDownload, recording
     : !cap ? '正在检查服务器的合成工具…'
     : !cap.ffmpeg || !cap.libx264 ? (cap.error ?? '服务器需要安装支持 libx264 的 FFmpeg')
     : d.enabled && d.font !== 'Noto Sans CJK SC' ? '请将弹幕字体改为共享的随包中文字体，以保证预览和导出一致'
-    : d.enabled && (!cap.libass || !cap.danmaku_factory || !cap.font) ? (cap.error ?? '弹幕合成需要 libass、DanmakuFactory 和随包中文字体')
+    : d.enabled && (!cap.libass || !cap.danmaku_factory || !cap.font) ? (cap.error ?? '弹幕合成需要 libass、内置弹幕转换和随包中文字体')
     : null
   return <section className={styles.renderPanel} aria-label="画面与弹幕">
     <div className={styles.renderToolbar}>
@@ -112,7 +112,7 @@ export default function RenderEditor({ state: s, canEdit, canDownload, recording
         : !s.settings.data ? <p>正在读取合成配置…</p> : null}
       {!canEdit && <p className={styles.renderHint}>需要 clip.edit 权限才能修改配置和创建合成任务。</p>}
       <p className={styles.renderHint}>在纯净画面上编辑，导出依次应用遮挡和弹幕。配置中的位置以视频画面百分比计；正偏移表示弹幕延后。原素材会保留。</p>
-      {capabilityReason && <p className={styles.renderError}>{capabilityReason}。安装随包合成工具或配置 ffmpeg_path、danmaku_factory_path / BILIUP_RENDER_TOOLS_DIR 后，<button onClick={() => s.capabilities.mutate()}>重新检查</button>。</p>}
+      {capabilityReason && <p className={styles.renderError}>{capabilityReason}。安装随包字体或配置 ffmpeg_path / BILIUP_RENDER_TOOLS_DIR 后，<button onClick={() => s.capabilities.mutate()}>重新检查</button>。</p>}
       <div className={styles.renderColumns}>
         <div>
           <div className={styles.renderToolbar}>

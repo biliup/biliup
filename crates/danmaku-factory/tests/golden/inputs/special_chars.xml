@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?><i>
+<d p="0.200,1,25,16777215,0,0,0,0">{\b1}not bold{\i1}</d>
+<d p="0.500,1,25,16777215,0,0,0,0">back\slash \n \N \h literal</d>
+<d p="0.800,5,25,16777215,0,0,0,0">line one
+line two</d>
+<d p="1.100,4,25,16777215,0,0,0,0">tab	here</d>
+<d p="1.400,1,25,16777215,0,0,0,0">quotes " and ' here</d>
+<d p="1.700,1,25,16777215,0,0,0,0">amp &amp; lt &lt; gt &gt; done</d>
+<d p="2.000,1,25,16777215,0,0,0,0">comma, semicolon; colon:</d>
+<d p="2.300,1,25,16777215,0,0,0,0">printf %s %d %n %x</d>
+<d p="2.600,6,25,16777215,0,0,0,0">left to right</d>
+<d p="2.900,1,25,16777215,0,0,0,0">  leading and trailing  </d>
+<d p="3.200,1,25,16777215,0,0,0,0">&amp;amp; already escaped</d>
+</i>

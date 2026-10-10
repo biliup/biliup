@@ -1,15 +1,33 @@
 //! Strict XML validation and complete-segment ASS generation. Never clips or
 //! re-lays out comments at a clip's in-point.
+//!
+//! The layout itself is DanmakuFactory's, statically linked
+//! (`danmaku-factory`) and run by [`convert_in_worker`] in a child process of
+//! this program, so it can be cancelled, timed out and survive a crash.
 use super::engine::{AssPreview, run_process};
 use super::model::{DanmakuSettings, RenderSource};
+use crate::danmaku_worker::{self, PROTOCOL, Request, Response};
+use danmaku_factory::{ConvertError, ConvertOptions, ConvertStats, ErrorKind};
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
 use std::path::Path;
 use std::process::Stdio;
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 const MAX_XML_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_COMMENTS: usize = 1_000_000;
+const CONVERT_TIMEOUT: Duration = Duration::from_secs(120);
+const SELF_TEST_TIMEOUT: Duration = Duration::from_secs(15);
+/// Comments further than 250 hours from the segment start can never be on
+/// screen. Dropping them keeps every time the core sees within its `int`
+/// milliseconds (see csrc/df_ffi.h); real recordings never get close.
+const MAX_COMMENT_OFFSET_MS: i64 = 250 * 3_600_000;
+/// File names inside the conversion's private work directory.
+const XML_FILE: &str = "danmaku.xml";
+const ASS_FILE: &str = "danmaku.ass";
+const REQUEST_FILE: &str = "danmaku-request.json";
+const RESULT_FILE: &str = "danmaku-result.json";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct XmlComment {
@@ -309,7 +327,11 @@ pub async fn generate(
         .comments
         .iter()
         .map(|comment| (comment, comment.elapsed_ms + correction + offset))
+        .filter(|(_, at)| at.abs() <= MAX_COMMENT_OFFSET_MS)
         .collect();
+    if comments.is_empty() {
+        return Ok(preview);
+    }
     let origin = comments.iter().map(|(_, at)| *at).min().unwrap_or(0).min(0);
     preview.time_origin_ms = origin;
     let mut normalized = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?><i>\n");
@@ -324,70 +346,24 @@ pub async fn generate(
         ));
     }
     normalized.push_str("</i>\n");
-    let input = work.join("danmaku.xml");
-    let output = work.join("danmaku.ass");
-    tokio::fs::write(&input, normalized)
+    let expected = normalized.matches("<d p=").count();
+    tokio::fs::write(work.join(XML_FILE), normalized)
         .await
         .map_err(|e| format!("创建弹幕转换文件失败：{e}"))?;
-    let factory = crate::tools::danmaku_factory()?;
-    let factory =
-        std::fs::canonicalize(&factory).map_err(|e| format!("打开 DanmakuFactory 失败：{e}"))?;
-    let mut command = crate::tools::command(factory);
-    // Work in an isolated directory: Factory's implicit config lookup must never
-    // inherit another user's settings or write next to their source XML.
-    command
-        .current_dir(work)
-        .args([
-            "-i",
-            "danmaku.xml",
-            "-o",
-            "danmaku.ass",
-            "--ignore-warnings",
-            "--force",
-        ])
-        .args(["--resolution", &format!("{width}x{height}")])
-        .args([
-            "--fontname",
-            &settings.font,
-            "--fontsize",
-            &settings.font_size.round().to_string(),
-            "--font-size-strict",
-        ])
-        .args([
-            "--opacity",
-            &((settings.opacity * 255.).round().max(1.) as u32).to_string(),
-        ])
-        .args([
-            "--outline",
-            &settings.outline.min(4.).to_string(),
-            "--shadow",
-            "0",
-        ])
-        .args([
-            "--scrolltime",
-            &settings.scroll_seconds.to_string(),
-            "--fixtime",
-            &settings.scroll_seconds.to_string(),
-        ])
-        .args([
-            "--displayarea",
-            &settings.display_area.to_string(),
-            "--density",
-            &settings.density.to_string(),
-        ])
-        .stdin(Stdio::null());
-    let _ = run_process(
-        command,
-        cancel,
-        std::time::Duration::from_secs(120),
-        |_, _| {},
-    )
-    .await?;
-    preview.ass = tokio::fs::read_to_string(&output)
+    let stats = convert_in_worker(work, &factory_options(settings, width, height), cancel).await?;
+    if stats.danmaku_count as usize != expected {
+        tracing::warn!(
+            expected,
+            read = stats.danmaku_count,
+            "DanmakuFactory read a different number of danmaku than were written"
+        );
+    }
+    let bytes = tokio::fs::read(work.join(ASS_FILE))
         .await
-        .map_err(|e| format!("DanmakuFactory 没有生成 ASS：{e}"))?;
+        .map_err(|e| format!("弹幕转换没有生成 ASS：{e}"))?;
+    preview.ass = decode_ass(&bytes);
     if !preview.ass.contains("[Events]") || !preview.ass.contains("PlayResX:") {
-        return Err("DanmakuFactory 生成的 ASS 无效".into());
+        return Err("弹幕转换生成的 ASS 无效".into());
     }
     // Factory accepts outline <= 4, while our public style allows wider borders.
     // Change style values after layout without touching cue times or motion.
@@ -409,6 +385,140 @@ pub async fn generate(
         .collect::<Vec<_>>()
         .join("\n");
     Ok(preview)
+}
+
+/// The DanmakuFactory options biliup has always used: those of the former
+/// `DanmakuFactory --resolution WxH --fontname .. --fontsize N
+/// --font-size-strict --opacity N --outline N --shadow 0 --scrolltime S
+/// --fixtime S --displayarea A --density D`, everything else at the CLI's
+/// defaults. Values go through f32 exactly like the CLI's atof()+cast.
+pub(super) fn factory_options(settings: &DanmakuSettings, width: u32, height: u32) -> ConvertOptions {
+    ConvertOptions {
+        width,
+        height,
+        font_name: settings.font.clone(),
+        font_size: settings.font_size.round() as i32,
+        font_size_strict: true,
+        opacity: (settings.opacity * 255.).round().clamp(1., 255.) as u8,
+        outline: settings.outline.min(4.) as f32,
+        shadow: 0.,
+        scroll_time: settings.scroll_seconds as f32,
+        fix_time: settings.scroll_seconds as f32,
+        display_area: settings.display_area as f32,
+        density: settings.density,
+        ..ConvertOptions::default()
+    }
+}
+
+/// Converts `danmaku.xml` in `work` to `danmaku.ass` in a worker process.
+/// Cancelling, a timeout or dropping the future kills and reaps the worker.
+pub(super) async fn convert_in_worker(
+    work: &Path,
+    options: &ConvertOptions,
+    cancel: &CancellationToken,
+) -> Result<ConvertStats, String> {
+    let request = Request {
+        protocol: PROTOCOL,
+        input: XML_FILE.into(),
+        output: ASS_FILE.into(),
+        result: RESULT_FILE.into(),
+        options: options.clone(),
+        #[cfg(test)]
+        test_hook: None,
+    };
+    run_worker(work, &request, cancel, CONVERT_TIMEOUT).await
+}
+
+async fn run_worker(
+    work: &Path,
+    request: &Request,
+    cancel: &CancellationToken,
+    timeout: Duration,
+) -> Result<ConvertStats, String> {
+    let json = serde_json::to_vec(request).map_err(|e| format!("创建弹幕转换请求失败：{e}"))?;
+    tokio::fs::write(work.join(REQUEST_FILE), json)
+        .await
+        .map_err(|e| format!("创建弹幕转换请求失败：{e}"))?;
+    for stale in [&request.result, &request.output] {
+        let _ = tokio::fs::remove_file(work.join(stale)).await;
+    }
+    let mut command = danmaku_worker::command(work, Path::new(REQUEST_FILE))?;
+    command.stdin(Stdio::null());
+    let outcome = run_process(command, cancel, timeout, |_, _| {}).await;
+    if cancel.is_cancelled() {
+        return Err("合成已取消".into());
+    }
+    match (outcome, danmaku_worker::read_response(work, &request.result)) {
+        (Ok(_), Some(Ok(Response::Converted { stats, .. }))) => Ok(stats),
+        (_, Some(Ok(Response::Failed { error, .. }))) => Err(describe(&error)),
+        (_, Some(Err(error))) => Err(error),
+        (Err(error), _) => Err(format!("弹幕转换失败：{error}")),
+        (Ok(_), _) => Err("弹幕转换进程没有返回结果".into()),
+    }
+}
+
+fn describe(error: &ConvertError) -> String {
+    const ENOSPC: i32 = 28;
+    match error.kind {
+        ErrorKind::OutputWrite if error.os_error == Some(ENOSPC) => "磁盘空间不足，弹幕转换失败".into(),
+        ErrorKind::OutputWrite | ErrorKind::OutputCreate | ErrorKind::OutputExists => {
+            format!("写入弹幕 ASS 失败：{error}")
+        }
+        ErrorKind::InputOpen | ErrorKind::InputRead => format!("读取弹幕转换文件失败：{error}"),
+        ErrorKind::InvalidArgument => format!("弹幕转换参数无效：{error}"),
+        ErrorKind::NoDanmaku => "弹幕转换没有读到弹幕".into(),
+        ErrorKind::UnsupportedInput => format!("弹幕 XML 含有无法转换的弹幕：{error}"),
+        ErrorKind::OutOfMemory => "弹幕转换内存不足".into(),
+        ErrorKind::Locale => "弹幕转换进程的数字格式（LC_NUMERIC）不受支持".into(),
+        ErrorKind::Internal => format!("弹幕转换内部错误：{error}"),
+    }
+}
+
+/// The core writes a BOM on Windows and copies texts byte by byte, cutting a
+/// comment over 1023 bytes in the middle of a character; one such comment
+/// must not fail a whole export. Invalid sequences are dropped.
+pub(super) fn decode_ass(bytes: &[u8]) -> String {
+    let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
+    let mut text = String::with_capacity(bytes.len());
+    for chunk in bytes.utf8_chunks() {
+        text.push_str(chunk.valid());
+    }
+    text
+}
+
+const SELF_TEST_XML: &str =
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?><i>\n<d p=\"0.000,1,25,16777215,0,0,0,0\">biliup 弹幕</d>\n</i>\n";
+
+/// Converts a one-comment XML in a worker, which proves that this
+/// installation can start the worker and that the linked core works.
+pub async fn check_converter(cancel: &CancellationToken) -> Result<(), String> {
+    let temp = tempfile::tempdir().map_err(|e| format!("无法创建弹幕转换检查目录：{e}"))?;
+    tokio::fs::write(temp.path().join(XML_FILE), SELF_TEST_XML)
+        .await
+        .map_err(|e| format!("无法创建弹幕转换检查文件：{e}"))?;
+    let request = Request {
+        protocol: PROTOCOL,
+        input: XML_FILE.into(),
+        output: ASS_FILE.into(),
+        result: RESULT_FILE.into(),
+        options: ConvertOptions {
+            width: 64,
+            height: 36,
+            font_size: 16,
+            ..ConvertOptions::default()
+        },
+        #[cfg(test)]
+        test_hook: None,
+    };
+    let stats = run_worker(temp.path(), &request, cancel, SELF_TEST_TIMEOUT).await?;
+    let ass = tokio::fs::read(temp.path().join(ASS_FILE))
+        .await
+        .map(|bytes| decode_ass(&bytes))
+        .map_err(|e| format!("弹幕转换检查没有生成 ASS：{e}"))?;
+    if stats.danmaku_count != 1 || !ass.contains("biliup\\h弹幕") {
+        return Err("弹幕转换检查的结果不正确".into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]

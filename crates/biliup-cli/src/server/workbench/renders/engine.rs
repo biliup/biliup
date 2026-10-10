@@ -57,6 +57,8 @@ pub struct RenderCapabilities {
     pub ffmpeg: bool,
     pub libass: bool,
     pub libx264: bool,
+    /// The built-in DanmakuFactory converter ran in a worker process. The
+    /// name is kept for API compatibility; no external program is involved.
     pub danmaku_factory: bool,
     pub font: bool,
     pub error: Option<String>,
@@ -222,19 +224,25 @@ async fn probe(path: &Path, cancel: &CancellationToken) -> Result<MediaInfo, Str
     })
 }
 
-/// Tool support is probed on demand before queueing an export. Empty XML still
-/// counts as recorded danmaku; it does not require invoking Factory.
+/// Tool support is probed on demand before queueing an export. The danmaku
+/// converter is checked by converting a one-line XML in a real worker
+/// process, which also proves this host can start the worker.
 pub async fn capabilities() -> RenderCapabilities {
+    let cancel = CancellationToken::new();
+    let converter = super::danmaku::check_converter(&cancel).await;
     let mut status = RenderCapabilities {
         available: false,
         ffmpeg: false,
         libass: false,
         libx264: false,
-        danmaku_factory: crate::tools::danmaku_factory().is_ok(),
+        danmaku_factory: converter.is_ok(),
         font: crate::tools::render_font().is_some(),
         error: None,
     };
-    let cancel = CancellationToken::new();
+    if let Err(error) = converter {
+        tracing::warn!(%error, "built-in danmaku converter check failed");
+        status.error = Some(format!("内置弹幕转换不可用：{error}"));
+    }
     let mut command = crate::tools::ffmpeg_command();
     // ffmpeg prints filter/encoder lists to stdout; run_process intentionally
     // ignores those lines, so the actual one-frame graph below tests both.
@@ -256,20 +264,20 @@ pub async fn capabilities() -> RenderCapabilities {
             status.libx264 = true;
         }
         Err(error) => {
-            status.error = Some(error);
+            status.error.get_or_insert(error);
             return status;
         }
     }
     let temp = match tempfile::tempdir() {
         Ok(temp) => temp,
         Err(e) => {
-            status.error = Some(e.to_string());
+            status.error.get_or_insert(e.to_string());
             return status;
         }
     };
     let ass = temp.path().join("check.ass");
     if let Err(e) = tokio::fs::write(&ass, super::danmaku::empty_ass(16, 16)).await {
-        status.error = Some(e.to_string());
+        status.error.get_or_insert(e.to_string());
         return status;
     }
     let mut command = crate::tools::ffmpeg_command();
@@ -288,12 +296,14 @@ pub async fn capabilities() -> RenderCapabilities {
         .args(["-vf", "ass=check.ass", "-frames:v", "1", "-f", "null", "-"]);
     match run_process(command, &cancel, Duration::from_secs(15), |_, _| {}).await {
         Ok(_) => status.libass = true,
-        Err(error) => status.error = Some(error),
+        Err(error) => {
+            status.error.get_or_insert(error);
+        }
     }
     status.available =
         status.ffmpeg && status.libx264 && status.libass && status.danmaku_factory && status.font;
     if status.error.is_none() && !status.available {
-        status.error = Some("未找到 DanmakuFactory 或弹幕字体，请安装所需工具".into());
+        status.error = Some("未找到弹幕字体，请安装随包字体或设置 BILIUP_RENDER_TOOLS_DIR".into());
     }
     status
 }

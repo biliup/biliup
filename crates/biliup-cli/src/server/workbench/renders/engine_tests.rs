@@ -248,9 +248,14 @@ async fn non_advancing_process_is_stopped_by_watchdog() {
 
 #[tokio::test]
 async fn factory_ass_remains_in_flight_at_clip_start_and_preserves_xml() {
-    if crate::tools::danmaku_factory().is_err() || crate::tools::render_font().is_none() {
+    // XML -> ASS is built in; the font comes from the render tools directory.
+    if crate::tools::render_font().is_none() {
+        assert!(
+            std::env::var_os("BILIUP_REQUIRE_RENDER_TESTS").is_none(),
+            "BILIUP_REQUIRE_RENDER_TESTS is set but no render font was found; set BILIUP_RENDER_TOOLS_DIR"
+        );
         crate::tools::note_skipped_test(
-            "set BILIUP_RENDER_TOOLS_DIR to test real DanmakuFactory/libass export",
+            "set BILIUP_RENDER_TOOLS_DIR to a directory with fonts/ to test the real libass export",
         );
         return;
     }

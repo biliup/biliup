@@ -730,6 +730,7 @@ dependencies = [
  "chrono",
  "clap",
  "danmaku",
+ "danmaku-factory",
  "dialoguer",
  "dirs",
  "error-stack",
@@ -1728,6 +1729,21 @@ dependencies = [
  "tracing",
  "url",
  "urlencoding",
+]
+
+[[package]]
+name = "danmaku-factory"
+version = "1.2.11"
+dependencies = [
+ "danmaku-factory-sys",
+ "serde",
+]
+
+[[package]]
+name = "danmaku-factory-sys"
+version = "1.2.11"
+dependencies = [
+ "cc",
 ]
 
 [[package]]

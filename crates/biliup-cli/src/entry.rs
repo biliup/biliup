@@ -288,7 +288,8 @@ pub struct ServeOptions {
     /// An ffmpeg shipped with the host (the desktop app passes the one in its
     /// installer). Used when the `ffmpeg_path` setting is empty, before `PATH`.
     pub ffmpeg: Option<PathBuf>,
-    /// Render tools directory shipped with the host (DanmakuFactory + fonts).
+    /// Render tools directory shipped with the host: the `fonts/` shared by
+    /// the danmaku preview and FFmpeg. (Danmaku conversion is built in.)
     pub render_tools_dir: Option<PathBuf>,
     /// Fleet controller options (`--controller`, `--relay-listen`, `--relay-url`).
     /// The default runs standalone, or as a node when `data/node.json` exists.

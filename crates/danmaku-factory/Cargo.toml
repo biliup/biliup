@@ -1,0 +1,14 @@
+[package]
+name = "danmaku-factory"
+version.workspace = true
+edition = "2024"
+description = "Safe XML to ASS danmaku conversion with the statically linked DanmakuFactory core"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+danmaku-factory-sys = { path = "../danmaku-factory-sys" }
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tempfile = "3.14"

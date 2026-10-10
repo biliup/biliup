@@ -3,18 +3,21 @@
 //! ffmpeg is looked up in this order: the `ffmpeg_path` setting, then the one
 //! the embedding host ships (the desktop app passes the ffmpeg bundled in its
 //! installer through `ServeOptions::ffmpeg`), then `ffmpeg` on `PATH`.
+//!
+//! Danmaku XML -> ASS conversion needs no external program: DanmakuFactory's
+//! core is linked into biliup (see `crate::danmaku_worker`). The render tools
+//! directory only provides the font shared by the browser preview and FFmpeg.
 
 use serde::Serialize;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Mutex, PoisonError, RwLock};
+use std::sync::{Mutex, Once, PoisonError, RwLock};
 use std::time::Duration;
 
 pub use biliup::tools::{command, std_command};
 
 const FFMPEG: &str = "ffmpeg";
-const DANMAKU_FACTORY: &str = "DanmakuFactory";
 const RENDER_TOOLS_ENV: &str = "BILIUP_RENDER_TOOLS_DIR";
 const RENDER_TOOLS_DIR: &str = "render-tools";
 const RENDER_FONT: &str = "NotoSansSC-Regular.otf";
@@ -34,14 +37,12 @@ pub enum FfmpegSource {
 struct Locations {
     configured: Option<PathBuf>,
     bundled: Option<PathBuf>,
-    configured_danmaku_factory: Option<PathBuf>,
     bundled_render_tools: Option<PathBuf>,
 }
 
 static LOCATIONS: RwLock<Locations> = RwLock::new(Locations {
     configured: None,
     bundled: None,
-    configured_danmaku_factory: None,
     bundled_render_tools: None,
 });
 
@@ -68,20 +69,23 @@ pub fn set_bundled_ffmpeg(path: Option<PathBuf>) {
         .bundled = path;
 }
 
-/// Applies the optional `danmaku_factory_path` setting; blank means unset.
-pub fn set_configured_danmaku_factory(path: Option<&str>) {
-    let path = path
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .map(PathBuf::from);
-    LOCATIONS
-        .write()
-        .unwrap_or_else(PoisonError::into_inner)
-        .configured_danmaku_factory = path;
+/// The legacy `danmaku_factory_path` setting is accepted but ignored: the
+/// converter is built in, and a failing built-in conversion is reported
+/// rather than silently handed to an external program.
+pub fn warn_legacy_danmaku_factory_path(path: Option<&str>) {
+    static WARNED: Once = Once::new();
+    if path.is_some_and(|p| !p.trim().is_empty()) {
+        WARNED.call_once(|| {
+            tracing::warn!(
+                "danmaku_factory_path is no longer used: XML to ASS conversion is built in; \
+                 remove the setting"
+            );
+        });
+    }
 }
 
-/// Sets the directory shipped by an embedding host. It contains
-/// `DanmakuFactory[.exe]` and a `fonts/` directory.
+/// Sets the directory shipped by an embedding host. It contains a `fonts/`
+/// directory.
 pub fn set_bundled_render_tools(path: Option<PathBuf>) {
     LOCATIONS
         .write()
@@ -100,43 +104,6 @@ fn bundled_render_tools() -> Option<PathBuf> {
     std::env::current_exe()
         .ok()
         .and_then(|path| path.parent().map(|parent| parent.join(RENDER_TOOLS_DIR)))
-}
-
-fn danmaku_factory_path() -> Option<PathBuf> {
-    let configured = LOCATIONS
-        .read()
-        .unwrap_or_else(PoisonError::into_inner)
-        .configured_danmaku_factory
-        .clone();
-    if let Some(path) = configured {
-        return Some(if path.is_absolute() {
-            path
-        } else {
-            std::env::current_dir().ok()?.join(path)
-        });
-    }
-    bundled_render_tools()
-        .map(|dir| {
-            dir.join(if cfg!(windows) {
-                "DanmakuFactory.exe"
-            } else {
-                DANMAKU_FACTORY
-            })
-        })
-        .filter(|path| path.is_file())
-        .or_else(|| find_in_path(DANMAKU_FACTORY, std::env::var_os("PATH").as_deref()))
-}
-
-/// Finds DanmakuFactory using configured path, bundled resources, then PATH.
-pub fn danmaku_factory() -> Result<PathBuf, String> {
-    danmaku_factory_path().ok_or_else(|| {
-        "找不到 DanmakuFactory：请配置 danmaku_factory_path、安装随包工具，或将 DanmakuFactory 加入 PATH".into()
-    })
-}
-
-/// A tokio command that runs DanmakuFactory.
-pub fn danmaku_factory_command() -> Result<tokio::process::Command, String> {
-    Ok(command(danmaku_factory()?))
 }
 
 /// Directory containing fonts shared by FFmpeg/libass and browser preview.
