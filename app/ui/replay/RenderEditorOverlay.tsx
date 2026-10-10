@@ -132,6 +132,11 @@ export default function RenderEditorOverlay({ state: s, video, current, segments
             sample.width = Math.max(1, Math.floor(w / block)); sample.height = Math.max(1, Math.floor(h / block))
             sampled.imageSmoothingEnabled = false; sampled.drawImage(composite, x, y, w, h, 0, 0, sample.width, sample.height)
             drawing.imageSmoothingEnabled = false; drawing.drawImage(sample, x, y, w, h)
+          } else if (r.effect_type === 'smooth_blur') {
+            const block = Math.max(1, Math.round(r.strength))
+            sample.width = Math.max(1, Math.floor(w / block)); sample.height = Math.max(1, Math.floor(h / block))
+            sampled.imageSmoothingEnabled = true; sampled.drawImage(composite, x, y, w, h, 0, 0, sample.width, sample.height)
+            drawing.imageSmoothingEnabled = true; drawing.drawImage(sample, x, y, w, h)
           } else {
             sample.width = Math.max(1, Math.round(w)); sample.height = Math.max(1, Math.round(h))
             if (!('filter' in sampled)) throw new Error('浏览器不支持 Canvas 模糊滤镜，请使用 Chrome、Edge 或 Firefox 预览。')
