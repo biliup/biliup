@@ -515,10 +515,17 @@ fn qsv_danmaku_ass(ass: &str, full_height: u32, band_height: u32) -> Option<Stri
     ass.contains(&full).then(|| ass.replacen(&full, &band, 1))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QsvMosaicBackend {
+    OpenClNearest,
+    QsvVpp,
+}
+
 /// A QSV decoder/encoder path for persistent mosaic and smooth-blur masks.
-/// Mosaic keeps the existing nearest-neighbour block pattern; smooth blur uses
-/// QSV scaling. ASS stays on libass and only its occupied display band crosses
-/// between QSV surfaces and system memory.
+/// Mosaic uses OpenCL remapping to keep the NV12 nearest-neighbour block pattern
+/// on shared QSV surfaces. Smooth blur uses QSV scaling. ASS stays on libass
+/// and only its occupied display band crosses between QSV surfaces and system
+/// memory.
 fn qsv_filter_graph(
     source: &SourceSpan,
     settings: &RenderRecipe,
@@ -530,6 +537,7 @@ fn qsv_filter_graph(
     include_audio: bool,
     frame_rate: &str,
     encoder: &SelectedEncoder,
+    mosaic_backend: QsvMosaicBackend,
 ) -> Option<String> {
     if encoder.encoder != encoding::VideoEncoder::H264Qsv
         || target.0 % 2 != 0
@@ -577,12 +585,26 @@ fn qsv_filter_graph(
         let alpha = (region.opacity * 255.).round().clamp(0., 255.) as u8;
         parts.push(format!("[v{index}]split=2[keep{index}][crop{index}]"));
         match region.effect_type {
-            EffectType::Mosaic => {
-                // Download one QSV sample per block; nearest CPU upscale retains hard block edges.
+            EffectType::Mosaic if mosaic_backend == QsvMosaicBackend::OpenClNearest => {
+                // Share the cropped QSV surface with OpenCL. A one-frame gray16
+                // coordinate ramp is scaled with the same nearest rules as the
+                // CPU reference, then reused for every frame without ROI copies.
                 parts.push(format!(
-                    "[crop{index}]vpp_qsv=cw={w}:ch={h}:cx={left}:cy={top}:w={low_w}:h={low_h}:async_depth=8,hwdownload,format=nv12,scale={w}:{h}:flags=neighbor,format=nv12,hwupload=extra_hw_frames=64[effect{index}]"
+                    "[crop{index}]vpp_qsv=cw={w}:ch={h}:cx={left}:cy={top}:w={w}:h={h}:async_depth=8,hwmap=derive_device=opencl:mode=read+direct,format=opencl[remap-source{index}]"
+                ));
+                parts.push(format!(
+                    "nullsrc=s={w}x{h}:r=1,format=gray16le,geq=lum='X',scale={low_w}:{low_h}:flags=neighbor,scale={w}:{h}:flags=neighbor,trim=end_frame=1,setpts=PTS-86400000/TB,hwupload=derive_device=opencl[xmap{index}]"
+                ));
+                parts.push(format!(
+                    "nullsrc=s={w}x{h}:r=1,format=gray16le,geq=lum='Y',scale={low_w}:{low_h}:flags=neighbor,scale={w}:{h}:flags=neighbor,trim=end_frame=1,setpts=PTS-86400000/TB,hwupload=derive_device=opencl[ymap{index}]"
+                ));
+                parts.push(format!(
+                    "[remap-source{index}][xmap{index}][ymap{index}]remap_opencl=interp=near,hwmap=derive_device=qsv:mode=write+direct:reverse=1,format=qsv[effect{index}]"
                 ));
             }
+            EffectType::Mosaic => parts.push(format!(
+                "[crop{index}]vpp_qsv=cw={w}:ch={h}:cx={left}:cy={top}:w={low_w}:h={low_h}:async_depth=8,hwdownload,format=nv12,scale={w}:{h}:flags=neighbor,format=nv12,hwupload=extra_hw_frames=64[effect{index}]"
+            )),
             EffectType::SmoothBlur => parts.push(format!(
                 "[crop{index}]vpp_qsv=cw={w}:ch={h}:cx={left}:cy={top}:w={low_w}:h={low_h}:async_depth=8,scale_qsv=w={w}:h={h}:format=nv12[effect{index}]"
             )),
@@ -1011,7 +1033,12 @@ pub async fn render(
             images.insert(id, input);
         }
         let audio_input = images.len() + 1;
-        let qsv_graph = qsv_filter_graph(
+        let has_mosaic = request
+            .settings
+            .regions
+            .iter()
+            .any(|region| region.effect_type == EffectType::Mosaic && region.opacity > 0.);
+        let mut qsv_graph = qsv_filter_graph(
             source,
             &request.settings,
             &media,
@@ -1022,6 +1049,7 @@ pub async fn render(
             true,
             &first.frame_rate,
             &selected,
+            QsvMosaicBackend::OpenClNearest,
         );
         let mut use_qsv_graph = qsv_graph.is_some();
         if use_qsv_graph && has_ass {
@@ -1043,43 +1071,90 @@ pub async fn render(
             }
         }
         if use_qsv_graph {
-            let probe_graph = qsv_filter_graph(
-                source,
-                &request.settings,
-                &media,
-                target,
-                ass.time_origin_ms,
-                has_ass,
-                audio_input,
-                false,
-                &first.frame_rate,
-                &selected,
-            )
-            .expect("video-only QSV graph has the same eligibility as the full graph");
-            tokio::fs::write(segment_dir.join("filters-qsv-probe.txt"), probe_graph)
-                .await
-                .map_err(|e| format!("保存 QSV 探测滤镜失败：{e}"))?;
-            let command = segment_command(
-                &selected,
-                &segment_dir,
-                source,
-                &media,
-                seek_ms,
-                0,
-                filter_file_option,
-                "filters-qsv-probe.txt",
-                true,
-                "2",
-                Some(8),
-            )?;
-            match run_process(command, &cancel, Duration::from_secs(20), |_, _| {}).await {
-                Ok(_) => {}
-                Err(_) if cancel.is_cancelled() => return Err("合成已取消".into()),
-                Err(error) => {
-                    tracing::warn!(segment_id = source.segment_id, %error, "QSV 解码与滤镜探测失败，改用软件滤镜");
-                    record_filter_fallback(&mut active_selected, &error);
-                    use_qsv_graph = false;
+            let backends: &[QsvMosaicBackend] = if has_mosaic {
+                &[
+                    QsvMosaicBackend::OpenClNearest,
+                    QsvMosaicBackend::QsvVpp,
+                ]
+            } else {
+                &[QsvMosaicBackend::OpenClNearest]
+            };
+            let mut working_backend = None;
+            let mut probe_error = None;
+            for &backend in backends {
+                let probe_graph = qsv_filter_graph(
+                    source,
+                    &request.settings,
+                    &media,
+                    target,
+                    ass.time_origin_ms,
+                    has_ass,
+                    audio_input,
+                    false,
+                    &first.frame_rate,
+                    &selected,
+                    backend,
+                )
+                .expect("video-only QSV graph has the same eligibility as the full graph");
+                tokio::fs::write(segment_dir.join("filters-qsv-probe.txt"), probe_graph)
+                    .await
+                    .map_err(|e| format!("保存 QSV 探测滤镜失败：{e}"))?;
+                let command = segment_command(
+                    &selected,
+                    &segment_dir,
+                    source,
+                    &media,
+                    seek_ms,
+                    0,
+                    filter_file_option,
+                    "filters-qsv-probe.txt",
+                    true,
+                    "2",
+                    Some(8),
+                )?;
+                match run_process(command, &cancel, Duration::from_secs(20), |_, _| {}).await {
+                    Ok(_) => {
+                        working_backend = Some(backend);
+                        break;
+                    }
+                    Err(_) if cancel.is_cancelled() => return Err("合成已取消".into()),
+                    Err(error) => {
+                        tracing::warn!(
+                            segment_id = source.segment_id,
+                            ?backend,
+                            %error,
+                            "QSV 滤镜图探测失败，尝试兼容的硬件滤镜路径"
+                        );
+                        probe_error = Some(error);
+                    }
                 }
+            }
+            if let Some(backend) = working_backend {
+                if has_mosaic {
+                    tracing::info!(
+                        segment_id = source.segment_id,
+                        ?backend,
+                        "QSV 马赛克渲染滤镜图已就绪"
+                    );
+                } else {
+                    tracing::info!(segment_id = source.segment_id, "QSV 渲染滤镜图已就绪");
+                }
+                qsv_graph = qsv_filter_graph(
+                    source,
+                    &request.settings,
+                    &media,
+                    target,
+                    ass.time_origin_ms,
+                    has_ass,
+                    audio_input,
+                    true,
+                    &first.frame_rate,
+                    &selected,
+                    backend,
+                );
+            } else if let Some(error) = probe_error {
+                record_filter_fallback(&mut active_selected, &error);
+                use_qsv_graph = false;
             }
         }
 

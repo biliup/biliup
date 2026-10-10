@@ -109,6 +109,7 @@ fn qsv_graph_keeps_mosaic_blocks_and_separates_smooth_blur() {
         false,
         "60/1",
         &encoder,
+        QsvMosaicBackend::OpenClNearest,
     )
     .unwrap();
     assert!(smooth.contains("scale_qsv=w=384:h=216:format=nv12"));
@@ -140,13 +141,35 @@ fn qsv_graph_keeps_mosaic_blocks_and_separates_smooth_blur() {
         false,
         "60/1",
         &encoder,
+        QsvMosaicBackend::OpenClNearest,
     )
     .unwrap();
     assert!(mosaic_graph.contains(
+        "vpp_qsv=cw=384:ch=216:cx=960:cy=432:w=384:h=216:async_depth=8,hwmap=derive_device=opencl:mode=read+direct,format=opencl"
+    ));
+    assert!(mosaic_graph.contains("scale=32:18:flags=neighbor,scale=384:216:flags=neighbor"));
+    assert!(mosaic_graph.contains("remap_opencl=interp=near"));
+    assert!(mosaic_graph.contains("hwmap=derive_device=qsv:mode=write+direct:reverse=1"));
+    assert_eq!(mosaic_graph.matches("hwdownload").count(), 1); // ASS band only
+
+    let legacy_mosaic_graph = qsv_filter_graph(
+        &source,
+        &mosaic,
+        &media,
+        (1920, 1080),
+        0,
+        true,
+        1,
+        false,
+        "60/1",
+        &encoder,
+        QsvMosaicBackend::QsvVpp,
+    )
+    .unwrap();
+    assert!(legacy_mosaic_graph.contains(
         "vpp_qsv=cw=384:ch=216:cx=960:cy=432:w=32:h=18:async_depth=8,hwdownload,format=nv12,scale=384:216:flags=neighbor"
     ));
-    assert!(!mosaic_graph.contains("scale=32:18:flags=neighbor"));
-    assert_eq!(mosaic_graph.matches("hwdownload").count(), 2); // ROI plus ASS
+    assert_eq!(legacy_mosaic_graph.matches("hwdownload").count(), 2); // ROI plus ASS
 
     let mut timed = mosaic;
     timed.regions[0].intervals.push(TimeInterval {
@@ -165,6 +188,7 @@ fn qsv_graph_keeps_mosaic_blocks_and_separates_smooth_blur() {
             false,
             "60/1",
             &encoder,
+            QsvMosaicBackend::OpenClNearest,
         )
         .is_none()
     );
