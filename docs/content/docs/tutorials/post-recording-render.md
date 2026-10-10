@@ -96,9 +96,6 @@ top = false
 
 参考实现和参数说明：[Jellyfin 硬件转码](https://jellyfin.org/docs/general/post-install/transcoding/hardware-acceleration/)、[Immich 硬件转码](https://docs.immich.app/features/hardware-transcoding/)、[NVIDIA FFmpeg 指南](https://docs.nvidia.com/video-technologies/video-codec-sdk/13.0/ffmpeg-with-nvidia-gpu/index.html) 和 [FFmpeg 视频编码器](https://ffmpeg.org/ffmpeg-codecs.html#Video-Encoders)。
 
-仓库的 `Test` workflow 验证 CPU 合成、硬件参数、回退、监测解析和前端逻辑；`GPU render acceptance` workflow 可手动在带 GPU、FFmpeg 和驱动的自托管 runner 上运行，要求所指定的编码器完成真实滤镜合成和 MP4 拼接。也可在本机设置 `BILIUP_TEST_ENCODER=h264_vaapi` 和 `BILIUP_TEST_ENCODER_DEVICE=/dev/dri/renderD128` 后执行 `cargo test --locked -p biliup-cli --lib hardware_render -- --nocapture`。
-
-
 ### Intel QSV 检测失败
 
 如果 VAAPI 正常但 QSV 报 `Error creating a MFX session: -9`，先检查 oneVPL GPU 运行库。仅安装 `libvpl` 调度库不足以运行 Intel GPU 编码；Arch Linux 还需要官方包 `vpl-gpu-rt`（与 `intel-media-driver` 版本匹配）。运行库补齐后重新检测，原先失败结果可能最多缓存 30 秒。不要把这个错误直接解释为显卡缺少编码能力。
