@@ -5,13 +5,49 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection};
 use std::path::PathBuf;
 
-const COLS: &str = "id,session_id,clip_id,state,phase,ratio,spec_json,output_path,output_bytes,duration_ms,error,created_at";
+const COLS: &str = "id,session_id,clip_id,state,phase,ratio,spec_json,output_path,output_bytes,duration_ms,error,created_at,updated_at,encoder,encoder_device,fallback_reason,fps,speed,processed_ms,total_ms,started_at,finished_at";
+const SESSION_COLS: &str = "(SELECT name FROM stream_sessions WHERE id=render_jobs.session_id) AS session_name,(SELECT title FROM stream_sessions WHERE id=render_jobs.session_id) AS session_title";
 fn json_error(e: serde_json::Error) -> sqlx::Error {
     sqlx::Error::Decode(Box::new(e))
 }
 fn job(row: &SqliteRow) -> sqlx::Result<JobRecord> {
     let id = row.try_get("id")?;
     let state: String = row.try_get("state")?;
+    let spec: RenderSpec =
+        serde_json::from_str(row.try_get::<&str, _>("spec_json")?).map_err(json_error)?;
+    let started_at: Option<i64> = row.try_get("started_at")?;
+    let finished_at: Option<i64> = row.try_get("finished_at")?;
+    let elapsed_ms = started_at
+        .map(|start| {
+            finished_at
+                .unwrap_or_else(crate::server::workbench::recorder::now_ms)
+                .saturating_sub(start)
+                .max(0)
+        })
+        .unwrap_or(0);
+    let processed_ms: Option<i64> = row.try_get("processed_ms")?;
+    let total_ms: Option<i64> = row.try_get::<Option<i64>, _>("total_ms")?.or_else(|| {
+        Some(
+            spec.sources
+                .iter()
+                .map(|s| s.trim_end_ms - s.trim_start_ms)
+                .sum(),
+        )
+    });
+    let phase: String = row.try_get("phase")?;
+    let encoding_sample_visible = state != "running" || phase.starts_with("合成分段 ");
+    let speed: Option<f64> = if encoding_sample_visible {
+        row.try_get("speed")?
+    } else {
+        None
+    };
+    let fps: Option<f64> = if encoding_sample_visible {
+        row.try_get("fps")?
+    } else {
+        None
+    };
+    let eta_ms = estimate_remaining(&state, processed_ms, total_ms, speed);
+    let requested_encoder = spec.recipe.encoding.encoder.name().to_owned();
     Ok(JobRecord {
         view: JobView {
             id,
@@ -19,18 +55,57 @@ fn job(row: &SqliteRow) -> sqlx::Result<JobRecord> {
             clip_id: row.try_get("clip_id")?,
             download_url: (state == "ready").then(|| format!("/v1/renders/{id}/download")),
             state,
-            phase: row.try_get("phase")?,
+            phase,
             ratio: row.try_get("ratio")?,
             error: row.try_get("error")?,
             output_bytes: row.try_get("output_bytes")?,
             duration_ms: row.try_get("duration_ms")?,
             created_at: row.try_get("created_at")?,
+            session_name: row.try_get("session_name").unwrap_or_default(),
+            session_title: row.try_get("session_title").unwrap_or_default(),
+            requested_encoder,
+            requested_device: spec.recipe.encoding.device.clone(),
+            encoder: row.try_get("encoder")?,
+            encoder_device: row.try_get("encoder_device")?,
+            fallback_reason: row.try_get("fallback_reason")?,
+            fps,
+            speed,
+            processed_ms,
+            total_ms,
+            started_at,
+            finished_at,
+            updated_at: row.try_get("updated_at")?,
+            elapsed_ms,
+            eta_ms,
         },
-        spec: serde_json::from_str(row.try_get::<&str, _>("spec_json")?).map_err(json_error)?,
+        spec,
         output_path: row
             .try_get::<Option<String>, _>("output_path")?
             .map(PathBuf::from),
     })
+}
+/// FFmpeg speed is media seconds per wall-clock second. Preparation and final
+/// publication have no reliable ETA; zero, NaN and missing samples stay unknown.
+fn estimate_remaining(
+    state: &str,
+    processed: Option<i64>,
+    total: Option<i64>,
+    speed: Option<f64>,
+) -> Option<i64> {
+    if state != "running" {
+        return None;
+    }
+    let speed = speed.filter(|s| s.is_finite() && *s > 0.)?;
+    let processed = processed?;
+    let total = total?;
+    if processed < 0 || total <= 0 || processed >= total {
+        return None;
+    }
+    Some(
+        ((total - processed) as f64 / speed)
+            .ceil()
+            .min(i64::MAX as f64) as i64,
+    )
 }
 pub fn pin_owner(id: i64) -> String {
     format!("render:{id}")
@@ -159,17 +234,19 @@ pub async fn insert(pool: &ConnectionPool, spec: &RenderSpec, now: i64) -> sqlx:
     Ok(record)
 }
 pub async fn get(pool: &ConnectionPool, id: i64) -> sqlx::Result<Option<JobRecord>> {
-    sqlx::query(&format!("SELECT {COLS} FROM render_jobs WHERE id=?"))
-        .bind(id)
-        .fetch_optional(pool)
-        .await?
-        .as_ref()
-        .map(job)
-        .transpose()
+    sqlx::query(&format!(
+        "SELECT {COLS},{SESSION_COLS} FROM render_jobs WHERE id=?"
+    ))
+    .bind(id)
+    .fetch_optional(pool)
+    .await?
+    .as_ref()
+    .map(job)
+    .transpose()
 }
 pub async fn list(pool: &ConnectionPool, session_id: i64) -> sqlx::Result<Vec<JobView>> {
     sqlx::query(&format!(
-        "SELECT {COLS} FROM render_jobs WHERE session_id=? ORDER BY id DESC LIMIT 100"
+        "SELECT {COLS},{SESSION_COLS} FROM render_jobs WHERE session_id=? ORDER BY id DESC LIMIT 100"
     ))
     .bind(session_id)
     .fetch_all(pool)
@@ -178,9 +255,45 @@ pub async fn list(pool: &ConnectionPool, session_id: i64) -> sqlx::Result<Vec<Jo
     .map(|r| job(r).map(|j| j.view))
     .collect()
 }
+#[derive(Debug, serde::Serialize)]
+pub struct JobPage {
+    pub jobs: Vec<JobView>,
+    pub total: i64,
+    pub limit: i64,
+    pub offset: i64,
+}
+pub async fn list_all(
+    pool: &ConnectionPool,
+    state: Option<&str>,
+    session_id: Option<i64>,
+    limit: i64,
+    offset: i64,
+) -> sqlx::Result<JobPage> {
+    let filter = "(?1 IS NULL OR state=?1) AND (?2 IS NULL OR session_id=?2)";
+    let mut tx = pool.begin().await?;
+    let total: i64 =
+        sqlx::query_scalar(&format!("SELECT COUNT(*) FROM render_jobs WHERE {filter}"))
+            .bind(state)
+            .bind(session_id)
+            .fetch_one(&mut *tx)
+            .await?;
+    let rows = sqlx::query(&format!("SELECT {COLS},{SESSION_COLS} FROM render_jobs WHERE {filter} ORDER BY id DESC LIMIT ?3 OFFSET ?4"))
+        .bind(state).bind(session_id).bind(limit).bind(offset).fetch_all(&mut *tx).await?;
+    let jobs = rows
+        .iter()
+        .map(|row| job(row).map(|r| r.view))
+        .collect::<sqlx::Result<Vec<_>>>()?;
+    tx.commit().await?;
+    Ok(JobPage {
+        jobs,
+        total,
+        limit,
+        offset,
+    })
+}
 pub async fn running(pool: &ConnectionPool, id: i64, now: i64) -> sqlx::Result<bool> {
-    Ok(sqlx::query("UPDATE render_jobs SET state='running',phase='preparing',updated_at=? WHERE id=? AND state='queued'")
-        .bind(now).bind(id).execute(pool).await?.rows_affected()>0)
+    Ok(sqlx::query("UPDATE render_jobs SET state='running',phase='preparing',started_at=?,updated_at=? WHERE id=? AND state='queued'")
+        .bind(now).bind(now).bind(id).execute(pool).await?.rows_affected()>0)
 }
 pub async fn progress(
     pool: &ConnectionPool,
@@ -200,6 +313,17 @@ pub async fn progress(
     .await?;
     Ok(())
 }
+pub async fn progress_snapshot(
+    pool: &ConnectionPool,
+    id: i64,
+    progress: &super::engine::EngineProgress,
+    now: i64,
+) -> sqlx::Result<()> {
+    sqlx::query("UPDATE render_jobs SET phase=?,ratio=?,encoder=COALESCE(?,encoder),encoder_device=COALESCE(?,encoder_device),fallback_reason=COALESCE(?,fallback_reason),fps=COALESCE(?,fps),speed=COALESCE(?,speed),processed_ms=?,total_ms=COALESCE(?,total_ms),updated_at=? WHERE id=? AND state='running'")
+        .bind(&progress.phase).bind(progress.ratio).bind(&progress.encoder).bind(&progress.encoder_device).bind(&progress.fallback_reason)
+        .bind(progress.fps).bind(progress.speed).bind(progress.processed_ms).bind(progress.total_ms).bind(now).bind(id).execute(pool).await?;
+    Ok(())
+}
 pub async fn finish(
     pool: &ConnectionPool,
     id: i64,
@@ -209,8 +333,8 @@ pub async fn finish(
     now: i64,
 ) -> sqlx::Result<bool> {
     let mut tx = pool.begin().await?;
-    let result=sqlx::query("UPDATE render_jobs SET state='ready',phase='ready',ratio=1,output_path=?,output_bytes=?,duration_ms=?,error=NULL,updated_at=? WHERE id=? AND state='running'")
-        .bind(path).bind(bytes).bind(duration).bind(now).bind(id).execute(&mut *tx).await?;
+    let result=sqlx::query("UPDATE render_jobs SET state='ready',phase='ready',ratio=1,output_path=?,output_bytes=?,duration_ms=?,error=NULL,updated_at=?,finished_at=?,processed_ms=total_ms WHERE id=? AND state='running'")
+        .bind(path).bind(bytes).bind(duration).bind(now).bind(now).bind(id).execute(&mut *tx).await?;
     if result.rows_affected() > 0 {
         // Publish the clip result with the job in the same transaction. A crash
         // must not leave a finished product paired with an interrupted clip.
@@ -236,8 +360,8 @@ pub async fn terminal(
     now: i64,
 ) -> sqlx::Result<bool> {
     let mut tx = pool.begin().await?;
-    let result=sqlx::query("UPDATE render_jobs SET state=?,phase=?,error=?,updated_at=? WHERE id=? AND state IN ('queued','running')")
-        .bind(state).bind(state).bind(error).bind(now).bind(id).execute(&mut *tx).await?;
+    let result=sqlx::query("UPDATE render_jobs SET state=?,phase=?,error=?,updated_at=?,finished_at=? WHERE id=? AND state IN ('queued','running')")
+        .bind(state).bind(state).bind(error).bind(now).bind(now).bind(id).execute(&mut *tx).await?;
     if result.rows_affected() > 0 {
         sqlx::query(
             "UPDATE clips SET state='failed', error=?, active_render_id=NULL, updated_at=?
@@ -286,4 +410,42 @@ pub async fn update_snapshot(
         .execute(pool)
         .await?;
     Ok(result.rows_affected() > 0)
+}
+
+#[cfg(test)]
+mod telemetry_tests {
+    use super::estimate_remaining;
+    #[test]
+    fn eta_requires_active_encoding_and_advancing_valid_speed() {
+        assert_eq!(
+            estimate_remaining("running", Some(2500), Some(10000), Some(2.)),
+            Some(3750)
+        );
+        for speed in [
+            None,
+            Some(0.),
+            Some(-1.),
+            Some(f64::NAN),
+            Some(f64::INFINITY),
+        ] {
+            assert_eq!(
+                estimate_remaining("running", Some(2500), Some(10000), speed),
+                None
+            );
+        }
+        for state in ["queued", "ready", "failed", "cancelled"] {
+            assert_eq!(
+                estimate_remaining(state, Some(2500), Some(10000), Some(2.)),
+                None
+            );
+        }
+        assert_eq!(
+            estimate_remaining("running", Some(10000), Some(10000), Some(2.)),
+            None
+        );
+        assert_eq!(
+            estimate_remaining("running", None, Some(10000), Some(2.)),
+            None
+        );
+    }
 }

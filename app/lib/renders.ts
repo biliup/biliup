@@ -14,26 +14,53 @@ export interface MaskRegion {
   strength: number; color: string; opacity: number; asset_id: number | null; lock_aspect: boolean
   intervals: { from_ms: number; to_ms: number }[]
 }
-export interface RenderRecipe { danmaku: DanmakuSettings; regions: MaskRegion[] }
+export interface RenderRecipe { danmaku: DanmakuSettings; regions: MaskRegion[]; encoding?: EncoderConfig }
 export interface RenderAsset { id: number; width: number; height: number; sha256: string; url: string }
+export type VideoEncoder = 'auto' | 'libx264' | 'h264_nvenc' | 'h264_qsv' | 'h264_vaapi' | 'h264_amf'
+export interface EncoderConfig { encoder: VideoEncoder; device: string | null }
+export const defaultEncoderConfig = (): EncoderConfig => ({ encoder: 'auto', device: null })
+export interface RenderEncoderCapability {
+  name: Exclude<VideoEncoder, 'auto'>; label: string; available: boolean; device: string | null; error: string | null
+}
 export interface RenderJob {
   id: number; session_id: number; clip_id: number | null
   state: 'queued' | 'running' | 'ready' | 'failed' | 'cancelled'; phase: string; ratio: number | null
   error: string | null; output_bytes: number | null; duration_ms: number | null; created_at: number
   download_url: string | null
+  requested_encoder?: VideoEncoder; requested_device?: string | null
+  encoder?: string | null; encoder_device?: string | null; fallback_reason?: string | null
+  fps?: number | null; speed?: number | null; processed_ms?: number | null; total_ms?: number | null
+  started_at?: number | null; finished_at?: number | null; elapsed_ms?: number; eta_ms?: number | null
+  updated_at?: number; session_name?: string; session_title?: string
 }
 export interface RenderCapabilities {
   available: boolean; ffmpeg: boolean; libass: boolean; libx264: boolean
+  encoders?: RenderEncoderCapability[]
   /** 内置弹幕转换（静态链接的 DanmakuFactory 核心）在工作进程中自检通过；不需要外部程序 */
   danmaku_factory: boolean; font: boolean; error: string | null
 }
 export const defaultRecipe = (): RenderRecipe => ({
   danmaku: { enabled: false, font: 'Noto Sans CJK SC', font_size: 38, opacity: 0.8, outline: 2,
     scroll_seconds: 12, display_area: 0.4, density: -1, offset_ms: 0, segment_offsets: {} }, regions: [],
+  encoding: defaultEncoderConfig(),
 })
 export const recipeUrl = (session: number) => `/v1/sessions/${session}/render-recipe`
 export const assetsUrl = (session: number) => `/v1/sessions/${session}/render-assets`
 export const jobsUrl = (session: number) => `/v1/sessions/${session}/renders`
+export const allJobsUrl = (filters: { state?: string; session_id?: string; limit?: number; offset?: number } = {}) => {
+  const params = new URLSearchParams()
+  if (filters.state) params.set('state', filters.state)
+  if (filters.session_id) params.set('session_id', filters.session_id)
+  params.set('limit', String(filters.limit ?? 25))
+  params.set('offset', String(filters.offset ?? 0))
+  return `/v1/renders?${params.toString()}`
+}
+export interface RenderGpuDevice {
+  id: string; name: string; vendor: 'nvidia' | 'intel' | 'amd' | 'unknown'; render_node: string | null
+  utilization_percent: number | null; encoder_utilization_percent: number | null
+  memory_used_bytes: number | null; memory_total_bytes: number | null; error: string | null
+}
+export interface RenderGpuSnapshot { devices: RenderGpuDevice[]; sampled_at: number }
 export const assetUrl = (id: number) => `${API_BASE}/v1/render-assets/${id}`
 export const renderDownloadUrl = (id: number) => `${API_BASE}/v1/renders/${id}/download`
 export const apiResourceUrl = (url: string) => url.startsWith('/v1/') ? API_BASE + url : url
@@ -45,6 +72,14 @@ export function useRenderAssets(session: number | null) {
 }
 export function useRenderJobs(session: number | null) {
   return useSWR<{ jobs: RenderJob[] }>(session === null ? null : jobsUrl(session), fetcher, { refreshInterval: 2000 })
+}
+export function useAllRenderJobs(filters: { state?: string; session_id?: string; limit?: number; offset?: number }, allowed = true) {
+  return useSWR<{ jobs: RenderJob[]; total: number; limit: number; offset: number }>(allowed ? allJobsUrl(filters) : null, fetcher,
+    { refreshInterval: 2000, revalidateOnFocus: false })
+}
+export function useRenderGpus(allowed: boolean) {
+  return useSWR<RenderGpuSnapshot>(allowed ? '/v1/render-gpus' : null, fetcher,
+    { refreshInterval: 2000, revalidateOnFocus: false, shouldRetryOnError: false })
 }
 export function useRenderCapabilities(allowed: boolean) {
   return useSWR<{ tools: RenderCapabilities; font_urls: string[] }>(allowed ? '/v1/render-tools' : null, fetcher,
@@ -68,7 +103,8 @@ export async function createRender(session: number, clipId?: number, recipe?: Re
   void mutate(jobsUrl(session)); return job
 }
 export async function renderJobAction(session: number, id: number, action: 'cancel' | 'retry') {
-  await send(`/v1/renders/${id}/${action}`, { method: 'POST' }); void mutate(jobsUrl(session))
+  await send(`/v1/renders/${id}/${action}`, { method: 'POST' })
+  void mutate(jobsUrl(session)); void mutate(key => typeof key === 'string' && key.startsWith('/v1/renders?'))
 }
 export interface AssPreview { ass: string; font_urls: string[]; width: number; height: number; origin_ms: number; estimated_timing: boolean; comment_count: number }
 export async function assPreview(session: number, recipe: RenderRecipe, from: number, to: number, signal: AbortSignal, canvasSegmentId?: number) {

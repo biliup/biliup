@@ -1,14 +1,15 @@
 'use client'
 import React, { useEffect, useRef, useState } from 'react'
-import { Button, Progress, Toast } from '@douyinfe/semi-ui'
+import { Button, Toast } from '@douyinfe/semi-ui'
 import {
-  apiResourceUrl, createRender, defaultRecipe, deleteAsset, renderJobAction, saveRecipe, uploadAsset,
+  apiResourceUrl, createRender, defaultEncoderConfig, defaultRecipe, deleteAsset, saveRecipe, uploadAsset,
   useRenderAssets, useRenderCapabilities, useRenderJobs, useRenderSettings, type DanmakuSettings, type EffectType,
-  type MaskRegion, type RenderAsset, type RenderRecipe,
+  type MaskRegion, type RenderAsset, type RenderRecipe, type VideoEncoder,
 } from '@/app/lib/renders'
 import { imageRegionSize } from '@/app/lib/render-geometry'
 import type { SegmentView } from '@/app/lib/sessions'
 import { formatSessionTime } from '@/app/lib/markers'
+import RenderJobList from '@/app/ui/renders/RenderJobList'
 import styles from './replay.module.scss'
 
 export function useRenderEditor(sessionId: number, allowed: boolean) {
@@ -27,7 +28,7 @@ export function useRenderEditor(sessionId: number, allowed: boolean) {
   const loaded = useRef<number | null>(null)
   useEffect(() => {
     if (settings.data && loaded.current !== sessionId) {
-      loaded.current = sessionId; setRecipe(settings.data); setDirty(false)
+      loaded.current = sessionId; setRecipe({ ...settings.data, encoding: settings.data.encoding ?? defaultEncoderConfig() }); setDirty(false)
     }
   }, [settings.data, sessionId])
   const change = (next: RenderRecipe | ((current: RenderRecipe) => RenderRecipe)) => {
@@ -66,7 +67,6 @@ export default function RenderEditor({ state: s, canEdit, canDownload, recording
   onExportClip: () => Promise<void>; exportReason: string | null; exporting: boolean
 }) {
   const [busy, setBusy] = useState(false)
-  const [view, setView] = useState<string | null>(null)
   const file = useRef<HTMLInputElement>(null)
   const region = s.recipe.regions.find(r => r.id === s.selected)
   const run = async (action: () => Promise<unknown>, message?: string) => {
@@ -93,9 +93,27 @@ export default function RenderEditor({ state: s, canEdit, canDownload, recording
   const disabled = !canEdit || !s.settings.data || !!s.settings.error
   const d = s.recipe.danmaku
   const cap = s.capabilities.data?.tools
+  const encoding = s.recipe.encoding ?? defaultEncoderConfig()
+  const encoderCapabilities = cap?.encoders ?? []
+  const selectedEncoders = encoderCapabilities.filter(e => e.name === encoding.encoder)
+  const selectedEncoder = encoding.encoder === 'auto' ? null : encoding.device === null
+    ? selectedEncoders.find(e => e.available)
+    : selectedEncoders.find(e => e.device === encoding.device)
+  const adapterNeedsProbe = encoding.device !== null && /^(0|[1-9]\d*)$/.test(encoding.device)
+    && Number(encoding.device) <= 2147483647
+    && ['h264_nvenc', 'h264_qsv', 'h264_amf'].includes(encoding.encoder)
+    && !selectedEncoder && selectedEncoders.some(item => item.device === null)
+  const selectedEncoderUnavailable = encoding.encoder === 'libx264' ? !cap?.libx264 : !adapterNeedsProbe && !selectedEncoder?.available
+  const encoderNames: VideoEncoder[] = ['auto', ...Array.from(new Set(encoderCapabilities.map(e => e.name)))]
+  if (cap?.libx264 && !encoderNames.includes('libx264')) encoderNames.push('libx264')
+  const savedEncoderMissing = encoding.encoder !== 'auto' && cap !== undefined && !encoderNames.includes(encoding.encoder)
   const capabilityReason = s.capabilities.error ? `无法检查合成工具：${errorText(s.capabilities.error)}`
     : !cap ? '正在检查服务器的合成工具…'
-    : !cap.ffmpeg || !cap.libx264 ? (cap.error ?? '服务器需要安装支持 libx264 的 FFmpeg')
+    : !cap.ffmpeg ? (cap.error ?? '服务器需要安装 FFmpeg')
+    : (encoding.encoder === 'auto' || savedEncoderMissing) && !cap.libx264 && !encoderCapabilities.some(e => e.available)
+      ? (cap.error ?? '没有可用的 H.264 编码器')
+    : encoding.encoder !== 'auto' && (savedEncoderMissing || selectedEncoderUnavailable)
+      ? (selectedEncoder?.error ?? `所选编码器 ${encoding.encoder} 当前不可用`)
     : d.enabled && d.font !== 'Noto Sans CJK SC' ? '请将弹幕字体改为共享的随包中文字体，以保证预览和导出一致'
     : d.enabled && (!cap.libass || !cap.danmaku_factory || !cap.font) ? (cap.error ?? '弹幕合成需要 libass、内置弹幕转换和随包中文字体')
     : null
@@ -115,6 +133,34 @@ export default function RenderEditor({ state: s, canEdit, canDownload, recording
       {capabilityReason && <p className={styles.renderError}>{capabilityReason}。安装随包字体或配置 ffmpeg_path / BILIUP_RENDER_TOOLS_DIR 后，<button onClick={() => s.capabilities.mutate()}>重新检查</button>。</p>}
       <div className={styles.renderColumns}>
         <div>
+          <fieldset disabled={disabled || busy} className={styles.renderFields}>
+            <legend>视频编码</legend>
+            <label className={styles.renderField}><span>编码器</span><select value={encoding.encoder} onChange={e => {
+              const encoder = e.target.value as VideoEncoder
+              const first = encoderCapabilities.find(item => item.name === encoder && item.available)
+              s.change(current => ({ ...current, encoding: { encoder, device: encoder === 'auto' ? null : first?.device ?? null } }))
+            }}>
+              {savedEncoderMissing && <option value={encoding.encoder} disabled>{encoding.encoder}（旧配置，当前不可用）</option>}
+              {encoderNames.map(name => {
+                const candidates = encoderCapabilities.filter(item => item.name === name)
+                const label = name === 'auto' ? '自动选择（优先可用硬件）'
+                  : candidates[0]?.label ?? (name === 'libx264' ? 'CPU · libx264' : name)
+                const unavailable = name !== 'auto' && (name === 'libx264' ? !cap?.libx264 : !candidates.some(item => item.available))
+                return <option key={name} value={name}>{label}{unavailable ? '（不可用）' : ''}</option>
+              })}
+            </select></label>
+            {encoding.encoder !== 'auto' && (selectedEncoders.length > 1 || encoding.device !== null) && <label className={styles.renderField}><span>设备</span><select value={encoding.device ?? ''} onChange={e => s.change(current => ({ ...current, encoding: { ...encoding, device: e.target.value || null } }))}>
+              <option value="">自动选择可用设备</option>
+              {encoding.device !== null && !selectedEncoders.some(item => item.device === encoding.device) && <option value={encoding.device}>
+                {encoding.device}（{adapterNeedsProbe ? '开始任务时检测' : '当前不可用'}）
+              </option>}
+              {selectedEncoders.filter(item => item.device !== null).map(item => <option key={item.device} value={item.device!} disabled={!item.available}>
+                {item.device}{item.available ? '' : '（不可用）'}
+              </option>)}
+            </select></label>}
+            {adapterNeedsProbe && <p className={styles.renderHint}>已保留设备 {encoding.device}；此适配器将在任务开始前实际编码检测。</p>}
+            {encoding.encoder !== 'auto' && (savedEncoderMissing || selectedEncoderUnavailable) && <p className={styles.renderError}>{selectedEncoder?.error ?? (encoding.encoder === 'libx264' ? cap?.error : null) ?? '当前设备不可用'}</p>}
+          </fieldset>
           <div className={styles.renderToolbar}>
             <strong>遮挡图层 · 从下至上</strong>
             {(['mosaic', 'blur', 'solid'] as const).map((type, i) => <Button key={type} size="small" disabled={disabled || s.recipe.regions.length >= 32}
@@ -199,23 +245,12 @@ export default function RenderEditor({ state: s, canEdit, canDownload, recording
             <Button disabled={disabled || recording || busy || duration <= 0 || !!capabilityReason} title={recording ? '场次结束后可以导出整场' : capabilityReason ?? undefined} onClick={() => run(async () => { await s.save(); await createRender(s.sessionId, undefined, s.recipe) }, '整场合成任务已加入队列')}>导出整场 MP4</Button>
           </div>
           {exportReason && <p className={styles.renderHint}>{exportReason}</p>}
-          <strong>合成任务</strong>
+          <div className={styles.renderToolbar}>
+            <strong>合成任务</strong>
+            <a href="/renders">查看所有场次的任务</a>
+          </div>
           {s.jobs.error && <p className={styles.renderError}>任务列表加载失败：{errorText(s.jobs.error)}</p>}
-          <ul className={styles.renderJobs}>{s.jobs.data?.jobs.map(job => <li key={job.id}>
-            <div>#{job.id} {job.clip_id ? `切片 #${job.clip_id}` : '整场'} · {({ queued: '排队中', running: '合成中', ready: '完成', failed: '失败', cancelled: '已取消' })[job.state]} · {job.phase}</div>
-            {job.ratio !== null && <Progress percent={Math.round(job.ratio * 100)} showInfo />}
-            {job.error && <p className={styles.renderError}>{job.error}</p>}
-            <div className={styles.renderToolbar}>
-              {['queued', 'running'].includes(job.state) && <Button size="small" disabled={!canEdit || busy} onClick={() => run(() => renderJobAction(s.sessionId, job.id, 'cancel'))}>取消</Button>}
-              {['failed', 'cancelled'].includes(job.state) && <Button size="small" disabled={!canEdit || busy} onClick={() => run(() => renderJobAction(s.sessionId, job.id, 'retry'))}>重试原配置</Button>}
-              {job.state === 'ready' && job.download_url && canDownload && <>
-                <Button size="small" onClick={() => setView(apiResourceUrl(job.download_url!))}>播放</Button>
-                <a href={`${apiResourceUrl(job.download_url)}?attachment=true`} download>下载 MP4</a>
-              </>}
-            </div>
-          </li>)}</ul>
-          {s.jobs.data?.jobs.length === 0 && <p className={styles.renderHint}>还没有合成任务。</p>}
-          {view && <div><Button size="small" onClick={() => setView(null)}>关闭成品预览</Button><video src={view} controls className={styles.renderResult} /></div>}
+          <RenderJobList jobs={s.jobs.data?.jobs ?? []} canEdit={canEdit} canDownload={canDownload} />
         </div>
       </div>
     </>}

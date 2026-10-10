@@ -359,3 +359,82 @@ async fn job_and_clip_product_publish_in_one_transaction() {
         .unwrap();
     assert_eq!(active, None);
 }
+
+#[tokio::test]
+async fn global_jobs_filter_page_and_persist_telemetry_through_terminal_states() {
+    let (dir, pool, session, _) = setup().await;
+    let original = spec(&pool, dir.path().join("renders"), session).await;
+    let first = store::insert(&pool, &original, 1000).await.unwrap();
+    let second = store::insert(&pool, &original, 1100).await.unwrap();
+    assert!(store::running(&pool, first.view.id, 2000).await.unwrap());
+    let progress = engine::EngineProgress {
+        phase: "合成分段 1/1".into(),
+        ratio: Some(0.25),
+        encoder: Some("h264_vaapi".into()),
+        encoder_device: Some("/dev/dri/renderD128".into()),
+        fallback_reason: Some("QSV 不可用，改用 VAAPI".into()),
+        fps: Some(60.),
+        speed: Some(2.),
+        processed_ms: Some(2500),
+        total_ms: Some(10000),
+    };
+    store::progress_snapshot(&pool, first.view.id, &progress, 3000)
+        .await
+        .unwrap();
+    let page = store::list_all(&pool, None, None, 1, 0).await.unwrap();
+    assert_eq!(page.total, 2);
+    assert_eq!(page.jobs[0].id, second.view.id);
+    let page = store::list_all(&pool, Some("running"), Some(session), 25, 0)
+        .await
+        .unwrap();
+    assert_eq!(page.total, 1);
+    let job = &page.jobs[0];
+    assert_eq!(job.session_name, "a");
+    assert_eq!(job.requested_encoder, "auto");
+    assert_eq!(job.encoder.as_deref(), Some("h264_vaapi"));
+    assert_eq!(job.eta_ms, Some(3750));
+    assert_eq!(job.started_at, Some(2000));
+    assert!(
+        store::terminal(&pool, first.view.id, "cancelled", Some("已取消"), 7000)
+            .await
+            .unwrap()
+    );
+    store::progress_snapshot(&pool, first.view.id, &progress, 9000)
+        .await
+        .unwrap();
+    let job = store::get(&pool, first.view.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .view;
+    assert_eq!(job.finished_at, Some(7000));
+    assert_eq!(job.elapsed_ms, 5000);
+    assert_eq!(job.eta_ms, None);
+    assert_eq!(job.state, "cancelled");
+    assert_eq!(job.updated_at, 7000);
+    assert_eq!(job.encoder.as_deref(), Some("h264_vaapi"));
+    assert_eq!(
+        store::list_all(&pool, None, Some(session + 999), 25, 0)
+            .await
+            .unwrap()
+            .total,
+        0
+    );
+    assert!(
+        store::list_all(&pool, None, None, 25, 50)
+            .await
+            .unwrap()
+            .jobs
+            .is_empty()
+    );
+}
+
+#[test]
+fn legacy_recipes_default_to_auto_and_unknown_encoders_are_rejected() {
+    let recipe: RenderRecipe = serde_json::from_str(r#"{"regions":[]}"#).unwrap();
+    assert_eq!(
+        serde_json::to_value(&recipe.encoding.encoder).unwrap(),
+        "auto"
+    );
+    assert!(serde_json::from_str::<RenderRecipe>(r#"{"encoding":{"encoder":"shell"}}"#).is_err());
+}

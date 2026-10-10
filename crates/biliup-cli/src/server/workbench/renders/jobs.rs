@@ -13,6 +13,20 @@ pub struct RenderJobs {
     root: PathBuf,
     tokens: Mutex<HashMap<i64, CancellationToken>>,
 }
+#[derive(Default)]
+struct ProgressSamples {
+    fps: Option<f64>,
+    speed: Option<f64>,
+}
+impl ProgressSamples {
+    fn retain(&mut self, mut progress: engine::EngineProgress) -> engine::EngineProgress {
+        self.fps = progress.fps.or(self.fps);
+        self.speed = progress.speed.or(self.speed);
+        progress.fps = self.fps;
+        progress.speed = self.speed;
+        progress
+    }
+}
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -442,14 +456,33 @@ impl RenderJobs {
             output_path: output_dir.join(format!("{id}.mp4")),
             font_path: spec.font_path.clone(),
         };
+        // Coalesce fast progress updates and write them in order. Await the
+        // final update before publishing the terminal state so a late writer
+        // cannot lose the encoder information or regress the progress.
         let pool = self.pool.clone();
+        let (progress_tx, mut progress_rx) =
+            tokio::sync::watch::channel::<Option<engine::EngineProgress>>(None);
+        let writer = tokio::spawn(async move {
+            while progress_rx.changed().await.is_ok() {
+                let progress = progress_rx.borrow_and_update().clone();
+                if let Some(progress) = progress {
+                    if let Err(error) =
+                        store::progress_snapshot(&pool, id, &progress, recorder::now_ms()).await
+                    {
+                        tracing::warn!(%error, id, "保存合成进度失败");
+                    }
+                }
+            }
+        });
+        let mut samples = ProgressSamples::default();
         let done = engine::render(request, cancel.clone(), move |p| {
-            let pool = pool.clone();
-            tokio::spawn(async move {
-                let _ = store::progress(&pool, id, &p.phase, p.ratio, recorder::now_ms()).await;
-            });
+            // Short GPU renders can finish while the writer is saving an
+            // earlier update. Retain real encoding samples when the watch
+            // channel coalesces them with a preparation/join/final snapshot.
+            progress_tx.send_replace(Some(samples.retain(p)));
         })
         .await;
+        let _ = writer.await;
         drop(permit);
         done
     }
@@ -518,5 +551,43 @@ impl RenderJobs {
         for token in lock(&self.tokens).values() {
             token.cancel();
         }
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+    #[tokio::test]
+    async fn coalesced_final_snapshot_keeps_last_encoding_speed_for_slow_writer() {
+        let mut samples = ProgressSamples::default();
+        let (tx, mut rx) = tokio::sync::watch::channel(None);
+        let mut progress = engine::EngineProgress {
+            phase: "合成分段 1/1".into(),
+            ratio: Some(0.95),
+            encoder: Some("h264_nvenc".into()),
+            encoder_device: Some("0".into()),
+            fallback_reason: None,
+            fps: Some(120.),
+            speed: Some(4.),
+            processed_ms: Some(10000),
+            total_ms: Some(10000),
+        };
+        // The writer intentionally has not read while multiple updates arrive.
+        tx.send_replace(Some(samples.retain(progress.clone())));
+        progress.phase = "拼接并保存".into();
+        progress.fps = None;
+        progress.speed = None;
+        tx.send_replace(Some(samples.retain(progress.clone())));
+        progress.phase = "已完成".into();
+        progress.ratio = Some(1.);
+        tx.send_replace(Some(samples.retain(progress)));
+        drop(tx);
+        rx.changed().await.unwrap();
+        let snapshot = rx.borrow_and_update().clone().unwrap();
+        assert_eq!(snapshot.phase, "已完成");
+        assert_eq!(snapshot.fps, Some(120.));
+        assert_eq!(snapshot.speed, Some(4.));
+        assert_eq!(snapshot.encoder.as_deref(), Some("h264_nvenc"));
+        assert!(rx.changed().await.is_err());
     }
 }

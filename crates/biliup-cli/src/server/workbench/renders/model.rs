@@ -1,4 +1,5 @@
 //! Public recipe and private, immutable render job snapshots.
+pub use super::encoding::EncoderConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -6,6 +7,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RenderRecipe {
+    pub encoding: EncoderConfig,
     pub danmaku: DanmakuSettings,
     pub regions: Vec<MaskRegion>,
 }
@@ -92,6 +94,7 @@ pub struct TimeInterval {
 
 impl RenderRecipe {
     pub fn validate(&self) -> Result<(), String> {
+        self.encoding.validate()?;
         let between = |n: f64, low: f64, high: f64| n.is_finite() && n >= low && n <= high;
         let d = &self.danmaku;
         if (d.enabled && d.font != "Noto Sans CJK SC")
@@ -210,6 +213,22 @@ pub struct JobView {
     pub duration_ms: Option<i64>,
     pub created_at: i64,
     pub download_url: Option<String>,
+    pub session_name: String,
+    pub session_title: String,
+    pub requested_encoder: String,
+    pub requested_device: Option<String>,
+    pub encoder: Option<String>,
+    pub encoder_device: Option<String>,
+    pub fallback_reason: Option<String>,
+    pub fps: Option<f64>,
+    pub speed: Option<f64>,
+    pub processed_ms: Option<i64>,
+    pub total_ms: Option<i64>,
+    pub started_at: Option<i64>,
+    pub finished_at: Option<i64>,
+    pub updated_at: i64,
+    pub elapsed_ms: i64,
+    pub eta_ms: Option<i64>,
 }
 #[derive(Debug, Clone)]
 pub struct JobRecord {

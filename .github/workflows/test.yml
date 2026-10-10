@@ -19,6 +19,10 @@ jobs:
         with:
           node-version: '20'
       - run: node --test npm/tests/*.test.cjs
+      - name: Frontend render and workbench logic tests
+        run: |
+          npm ci --no-audit --no-fund
+          node --test app/lib/*.test.cjs
 
   rust:
     name: Rust tests

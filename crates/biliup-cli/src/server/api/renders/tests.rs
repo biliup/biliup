@@ -95,6 +95,8 @@ async fn fixture() -> Fixture {
             "/v1/sessions/{id}/renders",
             get(list_renders).post(create_render),
         )
+        .route("/v1/renders", get(list_all_renders))
+        .route("/v1/render-gpus", get(render_gpus))
         .route("/v1/renders/{jid}", get(get_render).delete(cancel_render))
         .route("/v1/renders/{jid}/cancel", post(cancel_render))
         .route("/v1/renders/{jid}/retry", post(retry_render))
@@ -592,6 +594,8 @@ fn read_and_edit_routes_have_explicit_permissions() {
         "/v1/sessions/{id}/render-settings",
         "/v1/sessions/{id}/render-assets",
         "/v1/sessions/{id}/renders",
+        "/v1/renders",
+        "/v1/render-gpus",
         "/v1/renders/{jid}",
         "/v1/renders/{jid}/download",
         "/v1/render-assets/{aid}",
@@ -790,4 +794,66 @@ async fn asset_symlink_cannot_escape_managed_directory() {
         .status(),
         StatusCode::CONFLICT
     );
+}
+
+#[tokio::test]
+async fn global_render_list_enforces_permissions_and_validates_pagination() {
+    let f = fixture().await;
+    let response = call(&f.app, None, "GET", "/v1/renders", None, Body::empty()).await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let response = call(
+        &f.app,
+        Some(&f.viewer),
+        "GET",
+        "/v1/renders",
+        None,
+        Body::empty(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let page = json_of(
+        call(
+            &f.app,
+            Some(&f.op),
+            "GET",
+            "/v1/renders?limit=1&offset=0",
+            None,
+            Body::empty(),
+        )
+        .await,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(page["total"], 0);
+    assert_eq!(page["jobs"], json!([]));
+    assert_eq!(page["limit"], 1);
+    for query in [
+        "limit=0",
+        "limit=101",
+        "offset=-1",
+        "state=invalid",
+        "session_id=0",
+        "unknown=1",
+    ] {
+        let response = call(
+            &f.app,
+            Some(&f.op),
+            "GET",
+            &format!("/v1/renders?{query}"),
+            None,
+            Body::empty(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{query}");
+    }
+    let response = call(
+        &f.app,
+        Some(&f.viewer),
+        "POST",
+        "/v1/renders/1/cancel",
+        None,
+        Body::empty(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }

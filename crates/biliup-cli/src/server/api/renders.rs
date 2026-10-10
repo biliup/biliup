@@ -207,6 +207,47 @@ pub async fn list_renders(State(pool): State<ConnectionPool>, Path(id): Path<i64
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RenderListQuery {
+    pub state: Option<String>,
+    pub session_id: Option<i64>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+/// A bounded, newest-first list across all recording sessions.
+pub async fn list_all_renders(
+    State(pool): State<ConnectionPool>,
+    Query(query): Query<RenderListQuery>,
+) -> Response {
+    if query
+        .state
+        .as_deref()
+        .is_some_and(|s| !matches!(s, "queued" | "running" | "ready" | "failed" | "cancelled"))
+        || query.session_id.is_some_and(|id| id <= 0)
+        || query.limit.is_some_and(|n| !(1..=100).contains(&n))
+        || query.offset.is_some_and(|n| n < 0)
+    {
+        return bad_request("任务筛选或分页参数无效");
+    }
+    match store::list_all(
+        &pool,
+        query.state.as_deref(),
+        query.session_id,
+        query.limit.unwrap_or(25),
+        query.offset.unwrap_or(0),
+    )
+    .await
+    {
+        Ok(page) => Json(page).into_response(),
+        Err(error) => internal(error),
+    }
+}
+
+pub async fn render_gpus() -> Response {
+    Json(crate::server::workbench::renders::gpu::snapshot().await).into_response()
+}
+
+#[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreateRender {
     pub clip_id: Option<i64>,

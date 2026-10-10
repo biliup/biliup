@@ -72,6 +72,12 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
         activeOn: ['/replay'],
         icon: <Ic d="M6 9a3 3 0 100-6 3 3 0 000 6zM6 21a3 3 0 100-6 3 3 0 000 6z" extra="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12" />,
       },
+      {
+        href: '/renders',
+        perm: 'file.view',
+        label: '压制任务',
+        icon: <Ic d="M4 5h16v14H4z" extra="M8 9h8M8 13h5M8 16h3" />,
+      },
     ],
   },
   {

@@ -178,6 +178,8 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         | "/v1/sessions/{id}/render-settings"
         | "/v1/sessions/{id}/render-assets"
         | "/v1/sessions/{id}/renders"
+        | "/v1/renders"
+        | "/v1/render-gpus"
         | "/v1/render-assets/{aid}"
         | "/v1/renders/{jid}"
         | "/v1/renders/{jid}/download"

@@ -1,4 +1,5 @@
 //! Immutable source recordings -> one encode per segment -> a copy-only MP4 join.
+use super::encoding::{self, EncoderCapability, SelectedEncoder};
 use super::model::{EffectType, MaskRegion, RenderRecipe, RenderSource};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -31,12 +32,22 @@ pub struct EngineOutput {
     pub output_path: PathBuf,
     pub output_bytes: i64,
     pub duration_ms: i64,
+    pub encoder: Option<String>,
+    pub encoder_device: Option<String>,
+    pub fallback_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct EngineProgress {
     pub phase: String,
     pub ratio: Option<f64>,
+    pub encoder: Option<String>,
+    pub encoder_device: Option<String>,
+    pub fallback_reason: Option<String>,
+    pub fps: Option<f64>,
+    pub speed: Option<f64>,
+    pub processed_ms: Option<i64>,
+    pub total_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -61,7 +72,97 @@ pub struct RenderCapabilities {
     /// name is kept for API compatibility; no external program is involved.
     pub danmaku_factory: bool,
     pub font: bool,
+    pub encoders: Vec<EncoderCapability>,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct FfmpegProgress {
+    processed_ms: Option<i64>,
+    frames: Option<i64>,
+    fps: Option<f64>,
+    speed: Option<f64>,
+}
+
+impl FfmpegProgress {
+    fn parse(block: &str) -> Self {
+        let mut stats = Self::default();
+        for line in block.lines() {
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            let number = || {
+                value
+                    .trim()
+                    .trim_end_matches('x')
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|n| n.is_finite() && *n >= 0.)
+            };
+            match key {
+                "frame" => stats.frames = value.trim().parse::<i64>().ok().filter(|n| *n >= 0),
+                "out_time_us" => stats.processed_ms = value.parse::<i64>().ok().map(|n| n / 1000),
+                // Despite its historic name, FFmpeg reports microseconds here.
+                "out_time_ms" if stats.processed_ms.is_none() => {
+                    stats.processed_ms = value.parse::<i64>().ok().map(|n| n / 1000)
+                }
+                "fps" => stats.fps = number(),
+                "speed" => stats.speed = number(),
+                _ => {}
+            }
+        }
+        stats
+    }
+
+    fn encoded_time(&self, frame_rate: &str) -> i64 {
+        // With -copyts FFmpeg can report out_time=0 for a complete short
+        // encode. All segments are CFR, so output frame count also measures
+        // completed media time and avoids a stalled zero-percent display.
+        let frame_time = self
+            .frames
+            .zip(frame_rate.split_once('/'))
+            .and_then(|(frames, (num, den))| {
+                let num = num.parse::<f64>().ok()?;
+                let den = den.parse::<f64>().ok()?;
+                (num > 0. && den > 0.).then_some((frames as f64 * 1000. * den / num).round() as i64)
+            })
+            .unwrap_or(0);
+        self.processed_ms.unwrap_or(0).max(frame_time)
+    }
+
+    fn with_elapsed(mut self, frame_rate: &str, elapsed: Duration) -> Self {
+        let seconds = elapsed.as_secs_f64();
+        if seconds > 0. {
+            if self.fps.is_none_or(|fps| fps == 0.) {
+                self.fps = self.frames.map(|frames| frames as f64 / seconds);
+            }
+            if self.speed.is_none_or(|speed| speed == 0.) {
+                self.speed = Some(self.encoded_time(frame_rate).max(0) as f64 / 1000. / seconds);
+            }
+        }
+        self
+    }
+}
+
+fn engine_progress(
+    selected: Option<&SelectedEncoder>,
+    phase: String,
+    ratio: Option<f64>,
+    processed_ms: i64,
+    total_ms: i64,
+    stats: FfmpegProgress,
+) -> EngineProgress {
+    EngineProgress {
+        phase,
+        ratio,
+        encoder: selected.map(|s| s.encoder.name().to_owned()),
+        encoder_device: selected.and_then(|s| s.device.clone()),
+        fallback_reason: selected.and_then(|s| s.fallback_reason.clone()),
+        fps: stats.fps,
+        speed: stats.speed,
+        processed_ms: Some(processed_ms.clamp(0, total_ms)),
+        total_ms: Some(total_ms),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -75,8 +176,8 @@ struct MediaInfo {
 }
 
 /// Child stdout progress and stderr are drained concurrently and bounded. The
-/// watchdog is based on *advancing media time*, so an hours-long encode is fine
-/// while a hung child is stopped. Cancellation kills and reaps the child.
+/// watchdog accepts advancing media time or output frames, so an hours-long
+/// encode is fine while a hung child is stopped. Cancellation kills and reaps.
 pub(super) async fn run_process(
     mut command: Command,
     cancel: &CancellationToken,
@@ -112,32 +213,61 @@ pub(super) async fn run_process(
     });
     let mut lines = BufReader::new(stdout).lines();
     let mut latest = -1i64;
+    let mut latest_frame = -1i64;
     let mut stdout_open = true;
+    let mut block = String::new();
+    let mut exit_status = None;
     let watch = tokio::time::sleep(stall);
     tokio::pin!(watch);
     let outcome = loop {
+        // Drain the final progress=end block even if wait() becomes ready
+        // before the pipe. Otherwise fast encodes can lose all telemetry.
+        if !stdout_open {
+            if let Some(status) = exit_status.take() {
+                break status;
+            }
+        }
         tokio::select! {
             _ = cancel.cancelled() => { break Err("合成已取消".to_string()); }
             _ = &mut watch => { break Err(format!("处理程序连续 {} 秒没有推进，任务已停止；可重试", stall.as_secs())); }
             line = lines.next_line(), if stdout_open => {
                 match line {
                     Ok(Some(line)) => {
-                        let at = line.strip_prefix("out_time_us=").and_then(|v| v.parse::<i64>().ok()).map(|v| v / 1000);
+                        let at = line.strip_prefix("out_time_us=").or_else(|| line.strip_prefix("out_time_ms="))
+                            .and_then(|v| v.parse::<i64>().ok()).map(|v| v / 1000);
                         if let Some(at) = at {
                             if at > latest {
                                 latest = at;
                                 watch.as_mut().reset(tokio::time::Instant::now() + stall);
                             }
-                            report(at, &line);
+                        }
+                        let frame = line.strip_prefix("frame=").and_then(|v| v.trim().parse::<i64>().ok());
+                        if let Some(frame) = frame.filter(|frame| *frame > latest_frame) {
+                            latest_frame = frame;
+                            watch.as_mut().reset(tokio::time::Instant::now() + stall);
+                        }
+                        // Only store the small, documented FFmpeg progress
+                        // fields; other commands may print arbitrary stdout.
+                        if line.starts_with("frame=") || line.starts_with("out_time_us=") || line.starts_with("out_time_ms=")
+                            || line.starts_with("fps=") || line.starts_with("speed=") {
+                            if block.len() + line.len() > MAX_DIAGNOSTICS { block.clear(); }
+                            if line.len() > MAX_DIAGNOSTICS { continue; }
+                            block.push_str(&line);
+                            block.push('\n');
+                        }
+                        if line.starts_with("progress=") {
+                            let stats = FfmpegProgress::parse(&block);
+                            if stats.processed_ms.is_some() || stats.frames.is_some() { report(stats.processed_ms.unwrap_or(0), &block); }
+                            block.clear();
                         }
                     }
                     _ => stdout_open = false,
                 }
             }
-            status = child.wait() => {
-                break status.map_err(|e| format!("等待处理程序失败：{e}")).and_then(|status| {
+            status = child.wait(), if exit_status.is_none() => {
+                exit_status = Some(status.map_err(|e| format!("等待处理程序失败：{e}")).and_then(|status| {
                     if status.success() { Ok(()) } else { Err(format!("处理程序失败（{status}）")) }
-                });
+                }));
             }
         }
     };
@@ -230,43 +360,28 @@ async fn probe(path: &Path, cancel: &CancellationToken) -> Result<MediaInfo, Str
 pub async fn capabilities() -> RenderCapabilities {
     let cancel = CancellationToken::new();
     let converter = super::danmaku::check_converter(&cancel).await;
+    let encoders = encoding::capabilities(&cancel).await;
     let mut status = RenderCapabilities {
         available: false,
-        ffmpeg: false,
+        ffmpeg: encoders.iter().any(|encoder| encoder.available),
         libass: false,
-        libx264: false,
+        libx264: encoders
+            .iter()
+            .any(|encoder| encoder.name == "libx264" && encoder.available),
         danmaku_factory: converter.is_ok(),
         font: crate::tools::render_font().is_some(),
+        encoders,
         error: None,
     };
     if let Err(error) = converter {
         tracing::warn!(%error, "built-in danmaku converter check failed");
         status.error = Some(format!("内置弹幕转换不可用：{error}"));
     }
-    let mut command = crate::tools::ffmpeg_command();
-    // ffmpeg prints filter/encoder lists to stdout; run_process intentionally
-    // ignores those lines, so the actual one-frame graph below tests both.
-    command
-        .args([
-            "-nostdin",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=s=16x16:d=0.04",
-        ])
-        .args(["-frames:v", "1", "-c:v", "libx264", "-f", "null", "-"]);
-    match run_process(command, &cancel, Duration::from_secs(15), |_, _| {}).await {
-        Ok(_) => {
-            status.ffmpeg = true;
-            status.libx264 = true;
-        }
-        Err(error) => {
-            status.error.get_or_insert(error);
-            return status;
-        }
+    if !status.ffmpeg {
+        status
+            .error
+            .get_or_insert_with(|| "没有可用的 H.264 编码器，请检查 FFmpeg 与显卡驱动".into());
+        return status;
     }
     let temp = match tempfile::tempdir() {
         Ok(temp) => temp,
@@ -300,8 +415,7 @@ pub async fn capabilities() -> RenderCapabilities {
             status.error.get_or_insert(error);
         }
     }
-    status.available =
-        status.ffmpeg && status.libx264 && status.libass && status.danmaku_factory && status.font;
+    status.available = status.ffmpeg && status.libass && status.danmaku_factory && status.font;
     if status.error.is_none() && !status.available {
         status.error = Some("未找到弹幕字体，请安装随包字体或设置 BILIUP_RENDER_TOOLS_DIR".into());
     }
@@ -370,6 +484,7 @@ fn filter_graph(
     image_inputs: &HashMap<i64, usize>,
     audio_input: usize,
     frame_rate: &str,
+    encoder: &SelectedEncoder,
 ) -> String {
     let mut parts = vec![format!(
         "[0:v:0]setpts=PTS-({:.9})/TB-({})/TB,format=rgb24[v0]",
@@ -419,10 +534,11 @@ fn filter_graph(
     let start = source.trim_start_ms - origin;
     let end = source.trim_end_ms - origin;
     parts.push(format!(
-        "[canvas]{ass_filter}trim=start={}:end={},setpts=PTS-({})/TB,fps={frame_rate},format=yuv420p[video]",
+        "[canvas]{ass_filter}trim=start={}:end={},setpts=PTS-({})/TB,fps={frame_rate},{}[video]",
         secs(start),
         secs(end),
-        secs(start)
+        secs(start),
+        encoder.video_filter(),
     ));
     let span = source.trim_end_ms - source.trim_start_ms;
     if media.has_audio {
@@ -481,6 +597,14 @@ pub async fn render(
         .map(|s| s.trim_end_ms - s.trim_start_ms)
         .sum::<i64>()
         .max(1);
+    report(engine_progress(
+        None,
+        "检测编码器".into(),
+        Some(0.),
+        0,
+        total,
+        FfmpegProgress::default(),
+    ));
     let mut completed = 0i64;
     // FFmpeg 7 introduced /option file loading; older builds use the now-removed
     // filter_complex_script spelling. Probe once to support both without a
@@ -510,12 +634,25 @@ pub async fn render(
     // All segments use the first segment's canvas/FPS and a fixed audio format
     // so concat can copy even when input codecs, resolution or audio differ.
     let target = (first.width.div_ceil(2) * 2, first.height.div_ceil(2) * 2);
+    // Freeze the selection before encoding any source. A later hardware
+    // failure stops the job rather than joining incompatible segment streams.
+    let selected = encoding::select(
+        &request.settings.encoding,
+        target,
+        &first.frame_rate,
+        &cancel,
+    )
+    .await?;
     let mut manifest = String::from("ffconcat version 1.0\n");
     for (number, source) in request.sources.iter().enumerate() {
-        report(EngineProgress {
-            phase: format!("准备分段 {}/{}", number + 1, request.sources.len()),
-            ratio: Some(completed as f64 / total as f64 * 0.95),
-        });
+        report(engine_progress(
+            Some(&selected),
+            format!("准备分段 {}/{}", number + 1, request.sources.len()),
+            Some(completed as f64 / total as f64 * 0.95),
+            completed,
+            total,
+            FfmpegProgress::default(),
+        ));
         let media = if number == 0 {
             first.clone()
         } else {
@@ -574,7 +711,8 @@ pub async fn render(
                 "-progress",
                 "pipe:1",
             ])
-            .args(["-copyts", "-threads", "2"]);
+            .args(["-copyts", "-threads", "2"])
+            .args(selected.input_args());
         // Input-side seek prevents decoding hours of material for a short tail
         // clip. Complete-segment ASS has already been laid out, and original
         // timestamps are retained so seeking cannot restart a scrolling cue.
@@ -629,6 +767,7 @@ pub async fn render(
             &images,
             audio_input,
             &first.frame_rate,
+            &selected,
         );
         // A region can contain many intervals; loading a task-private script
         // avoids the OS argument-length limit on Windows and Linux.
@@ -642,13 +781,9 @@ pub async fn render(
                 filter_file_option,
                 "filters.txt",
             ])
-            .args([
-                "-map", "[video]", "-map", "[audio]", "-c:v", "libx264", "-preset", "veryfast",
-                "-crf", "20", "-threads", "2",
-            ])
-            .args([
-                "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k",
-            ])
+            .args(["-map", "[video]", "-map", "[audio]"])
+            .args(selected.output_args())
+            .args(["-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k"])
             .args([
                 "-t",
                 &secs(source.trim_end_ms - source.trim_start_ms),
@@ -664,14 +799,22 @@ pub async fn render(
             .stdin(Stdio::null());
         let phase = format!("合成分段 {}/{}", number + 1, request.sources.len());
         let duration = source.trim_end_ms - source.trim_start_ms;
-        run_process(command, &cancel, PROCESS_STALL, |at, _| {
-            report(EngineProgress {
-                phase: phase.clone(),
-                ratio: Some(
+        let encode_started = std::time::Instant::now();
+        run_process(command, &cancel, PROCESS_STALL, |_, block| {
+            let stats = FfmpegProgress::parse(block)
+                .with_elapsed(&first.frame_rate, encode_started.elapsed());
+            let at = stats.encoded_time(&first.frame_rate);
+            report(engine_progress(
+                Some(&selected),
+                phase.clone(),
+                Some(
                     ((completed + at.clamp(0, duration)) as f64 / total as f64 * 0.95)
                         .clamp(0., 0.95),
                 ),
-            });
+                completed + at.clamp(0, duration),
+                total,
+                stats,
+            ));
         })
         .await?;
         completed += duration;
@@ -707,15 +850,24 @@ pub async fn render(
             "result.mp4",
         ])
         .stdin(Stdio::null());
-    report(EngineProgress {
-        phase: "拼接并保存".into(),
-        ratio: Some(0.95),
-    });
+    report(engine_progress(
+        Some(&selected),
+        "拼接并保存".into(),
+        Some(0.95),
+        total,
+        total,
+        FfmpegProgress::default(),
+    ));
     run_process(command, &cancel, PROCESS_STALL, |at, _| {
-        report(EngineProgress {
-            phase: "拼接并保存".into(),
-            ratio: Some(0.95 + 0.04 * (at as f64 / total as f64).clamp(0., 1.)),
-        });
+        // Copy-only joining speed is not encoding speed; keep it unavailable.
+        report(engine_progress(
+            Some(&selected),
+            "拼接并保存".into(),
+            Some(0.95 + 0.04 * (at as f64 / total as f64).clamp(0., 1.)),
+            total,
+            total,
+            FfmpegProgress::default(),
+        ));
     })
     .await?;
     if cancel.is_cancelled() {
@@ -741,14 +893,21 @@ pub async fn render(
     tokio::fs::hard_link(&result, &request.output_path)
         .await
         .map_err(|e| format!("发布合成产物失败：{e}"))?;
-    report(EngineProgress {
-        phase: "已完成".into(),
-        ratio: Some(1.),
-    });
+    report(engine_progress(
+        Some(&selected),
+        "已完成".into(),
+        Some(1.),
+        total,
+        total,
+        FfmpegProgress::default(),
+    ));
     Ok(EngineOutput {
         output_path: request.output_path,
         output_bytes: bytes as i64,
         duration_ms,
+        encoder: Some(selected.encoder.name().into()),
+        encoder_device: selected.device,
+        fallback_reason: selected.fallback_reason,
     })
 }
 

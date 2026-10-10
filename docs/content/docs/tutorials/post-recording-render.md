@@ -48,7 +48,7 @@ top = false
 
 「合成导出选段」会把精确剪辑、遮挡、图片叠加和弹幕压制放进同一次 FFmpeg 编码。多个源分段最后用无重编码方式拼接，完成后得到可播放的 MP4；「导出整场 MP4」只在场次结束后可用。
 
-第一次导出前，请在 **空间配置** 确认 FFmpeg 可用，并检查 `libass`、`libx264` 和中文字体。工具页面会显示检测结果。
+第一次导出前，请在 **空间配置** 确认 FFmpeg 可用。打开回看中的「画面与弹幕」面板后，编码器检测会实际生成短视频，显示可用设备及失败原因。启用弹幕时还需要 `libass` 和随包中文字体。
 
 弹幕 XML 到 ASS 的转换已经内置在 biliup 中：使用的是 [DanmakuFactory](https://github.com/hihkm/DanmakuFactory) 的转换与排布核心，编译时静态链接进 biliup 本体、桌面版和 Python 包，不需要再安装 DanmakuFactory，也不再读取 `danmaku_factory_path` 配置（旧配置仍可正常加载，但该项会被忽略并在日志中提示）。预览和导出使用同一个转换流程和同一份字体：
 
@@ -67,8 +67,38 @@ top = false
 
 ## 性能和故障处理
 
-合成会重新编码视频，CPU 和临时磁盘占用会随分辨率、帧率和时长增加。默认使用 CPU 编码；长场次可以先导出需要的切片，再按需导出整场。
+合成会重新编码视频，CPU 和临时磁盘占用会随分辨率、帧率和时长增加。默认「自动选择」优先使用通过真实编码探测的 GPU；没有可用硬件时使用 CPU，并在任务卡显示回退原因。长场次可以先导出需要的切片，再按需导出整场。
 
 每次弹幕转换都在 biliup 自身启动的独立工作进程中进行（Python 安装时由当前解释器加载同一个扩展模块）。单次转换超过 120 秒、任务被取消或预览请求中断时，该进程会被结束并回收；转换进程出错只会让本次预览或导出失败，不影响录制和其他任务。
 
 缺失或损坏的 XML 会让启用弹幕的任务失败，并指出问题分段。关闭弹幕后可以重新导出；合法的空 XML 可以正常完成没有弹幕的成品。若任务失败，先检查 FFmpeg、编码器、字体、磁盘空间和源分段完整性，再使用任务列表中的「重试原配置」。
+
+
+## GPU 编码和使用情况
+
+在回看「画面与弹幕 → 视频编码」中选择自动模式、CPU 或具体硬件编码器；多块 DRM GPU 可以选择设备节点。配置随场次保存，新任务冻结当时的配置。手动指定的编码器或设备无法使用时任务会失败，自动模式才会在开始合成前回退 CPU。同一任务的所有分段使用同一编码器，然后流复制拼接。
+
+| 平台与显卡 | H.264 编码器 | 运行条件 |
+| --- | --- | --- |
+| NVIDIA，Linux / Windows | `h264_nvenc` | FFmpeg 启用 NVENC，安装匹配的 NVIDIA 驱动；容器须透传 GPU 和驱动运行库 |
+| Intel，Linux / Windows | `h264_qsv` | FFmpeg 启用 QSV / oneVPL，并同时安装调度库与 GPU 运行库（Arch Linux 为 `libvpl`、`vpl-gpu-rt`） |
+| Intel / AMD，Linux | `h264_vaapi` | FFmpeg 启用 VAAPI，安装驱动，进程可访问 `/dev/dri/renderD*` |
+| AMD，Windows / 支持 AMF 的 Linux 驱动 | `h264_amf` | FFmpeg 启用 AMF，安装对应 AMD 驱动和 AMF 运行库；Linux 可优先使用 VAAPI |
+| 任意平台，CPU | `libx264` | FFmpeg 启用 libx264 |
+
+列在 FFmpeg 的 `-encoders` 输出里并不代表驱动可用。界面会在检测后显示短编码结果，任务开始时也会按视频实际尺寸和帧率确认可用性。探测结果短暂缓存，避免多个页面同时反复启动 FFmpeg。修改工具或驱动后可点击「重新检查」；失败结果最多缓存 30 秒。
+
+弹幕、马赛克、模糊和图片叠加仍通过软件滤镜计算，随后把帧交给 GPU 编码。GPU 加速提升编码部分的速度；大量滤镜、解码、帧上传或磁盘吞吐仍可能限制整体速度。质量参数按各编码器采用约 20 的质量设置，不同编码器的画质和文件大小不保证完全相同。
+
+侧栏 **压制任务** 显示所有场次的任务，支持按状态和场次 ID 筛选、分页、取消、重试、播放及下载；回看页面仍显示本场任务。任务卡每 2 秒刷新，包含实际编码器和设备、百分比、处理 FPS、倍速、耗时及预计剩余时间。倍速优先使用 FFmpeg 的媒体时间 / 实际时间；若硬件编码的时间戳为零，则按固定输出帧率和已编码帧数估算。准备、拼接、排队或缺少有效速度时不估算剩余时间。重试会创建新任务，保留原任务和原配置。
+
+任务页的 GPU 卡分别显示整体利用率、视频编码引擎和显存。Linux 上 NVIDIA 读取 `nvidia-smi`（CSV / dmon，必要时回退 XML），AMD 读取驱动 sysfs，Intel 读取 `intel_gpu_top`。Windows 默认读取 WDDM 的 GPU Engine / GPU Adapter Memory 系统性能计数器，通过 DXGI 适配器 LUID 对应设备；NVIDIA 的 `nvidia-smi` 作为系统计数器不可用时的后备。Intel Video 引擎包含编码和解码活动。读不到的单项显示「不可用」，不会用整体占用代替编码占用，也不会把共享内存当独立显存。缺少工具、驱动不提供计数器或权限不足时仍可进行 GPU 编码，监测与编码可用性分别判断。Windows 的整体占用取最忙 GPU 引擎，编码占用单独取 Video Encode；计数器或显存预算不可读时对应指标显示不可用。
+
+参考实现和参数说明：[Jellyfin 硬件转码](https://jellyfin.org/docs/general/post-install/transcoding/hardware-acceleration/)、[Immich 硬件转码](https://docs.immich.app/features/hardware-transcoding/)、[NVIDIA FFmpeg 指南](https://docs.nvidia.com/video-technologies/video-codec-sdk/13.0/ffmpeg-with-nvidia-gpu/index.html) 和 [FFmpeg 视频编码器](https://ffmpeg.org/ffmpeg-codecs.html#Video-Encoders)。
+
+仓库的 `Test` workflow 验证 CPU 合成、硬件参数、回退、监测解析和前端逻辑；`GPU render acceptance` workflow 可手动在带 GPU、FFmpeg 和驱动的自托管 runner 上运行，要求所指定的编码器完成真实滤镜合成和 MP4 拼接。也可在本机设置 `BILIUP_TEST_ENCODER=h264_vaapi` 和 `BILIUP_TEST_ENCODER_DEVICE=/dev/dri/renderD128` 后执行 `cargo test --locked -p biliup-cli --lib hardware_render -- --nocapture`。
+
+
+### Intel QSV 检测失败
+
+如果 VAAPI 正常但 QSV 报 `Error creating a MFX session: -9`，先检查 oneVPL GPU 运行库。仅安装 `libvpl` 调度库不足以运行 Intel GPU 编码；Arch Linux 还需要官方包 `vpl-gpu-rt`（与 `intel-media-driver` 版本匹配）。运行库补齐后重新检测，原先失败结果可能最多缓存 30 秒。不要把这个错误直接解释为显卡缺少编码能力。

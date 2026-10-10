@@ -1,5 +1,16 @@
+use super::super::encoding::{EncoderConfig, VideoEncoder};
 use super::super::model::{DanmakuSettings, TimeInterval};
 use super::*;
+
+fn cpu_recipe() -> RenderRecipe {
+    RenderRecipe {
+        encoding: EncoderConfig {
+            encoder: VideoEncoder::Libx264,
+            device: None,
+        },
+        ..Default::default()
+    }
+}
 use sha2::{Digest, Sha256};
 
 fn hash(path: &Path) -> Vec<u8> {
@@ -90,6 +101,7 @@ async fn ffmpeg_combines_mixed_sources_timed_masks_and_images_without_touching_o
         .unwrap();
     let originals = (hash(&a), hash(&b), hash(&image_path));
     let settings = RenderRecipe {
+        encoding: cpu_recipe().encoding,
         danmaku: DanmakuSettings::default(),
         regions: vec![
             MaskRegion {
@@ -160,9 +172,24 @@ async fn ffmpeg_combines_mixed_sources_timed_masks_and_images_without_touching_o
     .unwrap();
     assert_eq!((hash(&a), hash(&b), hash(&image_path)), originals);
     assert!(done.output_bytes > 1000);
+    assert_eq!(done.encoder.as_deref(), Some("libx264"));
     assert!((done.duration_ms - 1700).abs() < 100, "{done:?}");
     assert!(phases.iter().any(|p| p.phase.contains("合成分段")));
     assert_eq!(phases.last().unwrap().ratio, Some(1.));
+    assert!(
+        phases
+            .iter()
+            .any(|p| p.phase.contains("合成分段") && p.fps.is_some() && p.speed.is_some()),
+        "{phases:?}"
+    );
+    assert!(phases.iter().all(|p| p.total_ms == Some(1700)));
+    assert!(
+        phases
+            .iter()
+            .filter(|p| p.phase != "检测编码器")
+            .all(|p| p.encoder.as_deref() == Some("libx264"))
+    );
+    assert_eq!(phases.last().unwrap().processed_ms, Some(1700));
     let info = probe(&target, &CancellationToken::new()).await.unwrap();
     assert_eq!((info.width, info.height, info.has_audio), (96, 64, true));
     let before = pixel(&target, 0.02, 8, 8, 96).await;
@@ -267,7 +294,7 @@ async fn factory_ass_remains_in_flight_at_clip_start_and_preserves_xml() {
     let original_hash = (hash(&original), hash(&xml));
     let mut span = source(original.clone(), 1, 0, 12000, 10000, 11000);
     span.danmaku_path = Some(xml.clone());
-    let mut recipe = RenderRecipe::default();
+    let mut recipe = cpu_recipe();
     recipe.danmaku.enabled = true;
     recipe.danmaku.font_size = 26.;
     recipe.danmaku.scroll_seconds = 4.;
@@ -409,7 +436,7 @@ async fn audio_delay_and_first_source_frame_rate_survive_export() {
     render(
         EngineRequest {
             sources: vec![source(original.clone(), 1, 0, 1000, 0, 1000)],
-            settings: RenderRecipe::default(),
+            settings: cpu_recipe(),
             assets: HashMap::new(),
             output_path: target.clone(),
             font_path: None,
@@ -450,4 +477,152 @@ async fn audio_delay_and_first_source_frame_rate_survive_export() {
         "originally delayed audio moved to the clip start"
     );
     assert!(rms(26000, 33000) > 0.04, "delayed tone is missing");
+}
+
+#[test]
+fn ffmpeg_progress_is_parsed_as_a_complete_block() {
+    let progress = FfmpegProgress::parse(
+        "frame=32\nfps=29.97\nout_time_us=1234567\nout_time_ms=1234567\nspeed=2.5x\nprogress=continue\n",
+    );
+    assert_eq!(
+        progress,
+        FfmpegProgress {
+            processed_ms: Some(1234),
+            frames: Some(32),
+            fps: Some(29.97),
+            speed: Some(2.5)
+        }
+    );
+    assert_eq!(
+        FfmpegProgress::parse("out_time_ms=9000\nfps=NaN\nspeed=N/A\n"),
+        FfmpegProgress {
+            processed_ms: Some(9),
+            frames: None,
+            fps: None,
+            speed: None
+        }
+    );
+    assert_eq!(FfmpegProgress::parse("fps=-1\nspeed=infx\n").fps, None);
+    let zero_clock = FfmpegProgress::parse("frame=24\nout_time_us=0\nfps=0.00\nspeed=0x\n")
+        .with_elapsed("30/1", Duration::from_millis(200));
+    assert_eq!(zero_clock.encoded_time("30/1"), 800);
+    assert_eq!(zero_clock.fps, Some(120.));
+    assert_eq!(zero_clock.speed, Some(4.));
+}
+
+/// Run on an opted-in real GPU runner. An explicitly requested backend must
+/// pass the complete software-mask -> hardware-upload -> two-segment concat
+/// path and produce a decodable file; unavailable hardware is a test failure.
+#[tokio::test]
+async fn hardware_render() {
+    let Ok(name) = std::env::var("BILIUP_TEST_ENCODER") else {
+        return;
+    };
+    let encoder: VideoEncoder = serde_json::from_value(serde_json::Value::String(name.clone()))
+        .unwrap_or_else(|_| panic!("unsupported BILIUP_TEST_ENCODER: {name}"));
+    assert!(
+        !matches!(encoder, VideoEncoder::Auto | VideoEncoder::Libx264),
+        "choose an explicit GPU encoder"
+    );
+    let device = std::env::var("BILIUP_TEST_ENCODER_DEVICE")
+        .ok()
+        .filter(|s| !s.is_empty());
+    let dir = tempfile::tempdir().unwrap();
+    let a = dir.path().join("first.mp4");
+    let b = dir.path().join("second.mp4");
+    fixture(&a, "blue", "320x192", "libx264", true, 0.8).await;
+    fixture(&b, "green", "256x192", "libx264", false, 0.8).await;
+    let originals = (hash(&a), hash(&b));
+    let target = dir.path().join("hardware.mp4");
+    let recipe = RenderRecipe {
+        encoding: EncoderConfig {
+            encoder,
+            device: device.clone(),
+        },
+        regions: vec![MaskRegion {
+            id: "hardware-solid".into(),
+            effect_type: EffectType::Solid,
+            color: "#ff0000".into(),
+            x: 0.1,
+            y: 0.1,
+            width: 0.3,
+            height: 0.3,
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let mut progress = vec![];
+    let done = render(
+        EngineRequest {
+            sources: vec![
+                source(a.clone(), 1, 0, 800, 0, 800),
+                source(b.clone(), 2, 800, 1600, 0, 800),
+            ],
+            settings: recipe,
+            assets: HashMap::new(),
+            output_path: target.clone(),
+            font_path: None,
+        },
+        CancellationToken::new(),
+        |update| progress.push(update),
+    )
+    .await
+    .unwrap();
+    assert_eq!(done.encoder.as_deref(), Some(name.as_str()));
+    if device.is_some() {
+        assert_eq!(done.encoder_device, device);
+    }
+    assert!(done.fallback_reason.is_none());
+    assert!((done.duration_ms - 1600).abs() < 150, "{done:?}");
+    assert_eq!((hash(&a), hash(&b)), originals);
+    assert!(
+        progress
+            .iter()
+            .filter(|p| p.phase != "检测编码器")
+            .all(|p| p.encoder.as_deref() == Some(name.as_str()))
+    );
+    assert!(
+        progress
+            .iter()
+            .any(|p| p.phase == "合成分段 2/2" && p.processed_ms.unwrap_or(0) > 800),
+        "{progress:?}"
+    );
+    assert!(
+        progress
+            .iter()
+            .any(|p| p.phase.contains("合成分段") && p.fps.is_some() && p.speed.is_some()),
+        "{progress:?}"
+    );
+    let output_info = probe(&target, &CancellationToken::new()).await.unwrap();
+    assert_eq!(
+        (output_info.width, output_info.height, output_info.has_audio),
+        (320, 192, true)
+    );
+    assert_eq!(output_info.frame_rate, "30/1");
+    for at in [0.3, 1.1] {
+        let masked = pixel(&target, at, 70, 40, 320).await;
+        assert!(
+            masked[0] > 160 && masked[2] < 100,
+            "mask missing at {at}: {masked:?}"
+        );
+    }
+    let decoded = crate::tools::ffmpeg_command()
+        .args([
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-i",
+        ])
+        .arg(&target)
+        .args(["-f", "null", "-"])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        decoded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&decoded.stderr)
+    );
 }

@@ -32,8 +32,9 @@ use crate::server::api::live_rates::{get_live_rates, ws_live_rates};
 use crate::server::api::markers::{create_marker, delete_marker, list_markers, update_marker};
 use crate::server::api::renders::{
     cancel_render, create_render, delete_render_asset, download_render, get_render,
-    get_render_asset, get_render_font, get_render_recipe, list_renders, preview_render,
-    put_render_recipe, render_assets_route, render_tools, retry_render,
+    get_render_asset, get_render_font, get_render_recipe, list_all_renders, list_renders,
+    preview_render, put_render_recipe, render_assets_route, render_gpus, render_tools,
+    retry_render,
 };
 use crate::server::api::session_retention::patch_session;
 use crate::server::api::sessions::{
@@ -132,6 +133,8 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
             "/v1/sessions/{id}/renders",
             get(list_renders).post(create_render),
         )
+        .route("/v1/renders", get(list_all_renders))
+        .route("/v1/render-gpus", get(render_gpus))
         .route("/v1/renders/{jid}", get(get_render).delete(cancel_render))
         .route("/v1/renders/{jid}/cancel", post(cancel_render))
         .route("/v1/renders/{jid}/retry", post(retry_render))
