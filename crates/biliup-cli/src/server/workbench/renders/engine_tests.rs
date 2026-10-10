@@ -142,7 +142,10 @@ fn qsv_graph_keeps_mosaic_blocks_and_separates_smooth_blur() {
         &encoder,
     )
     .unwrap();
-    assert!(mosaic_graph.contains("scale=32:18:flags=neighbor,scale=384:216:flags=neighbor"));
+    assert!(mosaic_graph.contains(
+        "vpp_qsv=cw=384:ch=216:cx=960:cy=432:w=32:h=18:async_depth=8,hwdownload,format=nv12,scale=384:216:flags=neighbor"
+    ));
+    assert!(!mosaic_graph.contains("scale=32:18:flags=neighbor"));
     assert_eq!(mosaic_graph.matches("hwdownload").count(), 2); // ROI plus ASS
 
     let mut timed = mosaic;

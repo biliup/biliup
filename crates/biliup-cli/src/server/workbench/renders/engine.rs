@@ -577,9 +577,12 @@ fn qsv_filter_graph(
         let alpha = (region.opacity * 255.).round().clamp(0., 255.) as u8;
         parts.push(format!("[v{index}]split=2[keep{index}][crop{index}]"));
         match region.effect_type {
-            EffectType::Mosaic => parts.push(format!(
-                "[crop{index}]vpp_qsv=cw={w}:ch={h}:cx={left}:cy={top}:w={w}:h={h}:async_depth=8,hwdownload,format=nv12,scale={low_w}:{low_h}:flags=neighbor,scale={w}:{h}:flags=neighbor,format=nv12,hwupload=extra_hw_frames=64[effect{index}]"
-            )),
+            EffectType::Mosaic => {
+                // Download one QSV sample per block; nearest CPU upscale retains hard block edges.
+                parts.push(format!(
+                    "[crop{index}]vpp_qsv=cw={w}:ch={h}:cx={left}:cy={top}:w={low_w}:h={low_h}:async_depth=8,hwdownload,format=nv12,scale={w}:{h}:flags=neighbor,format=nv12,hwupload=extra_hw_frames=64[effect{index}]"
+                ));
+            }
             EffectType::SmoothBlur => parts.push(format!(
                 "[crop{index}]vpp_qsv=cw={w}:ch={h}:cx={left}:cy={top}:w={low_w}:h={low_h}:async_depth=8,scale_qsv=w={w}:h={h}:format=nv12[effect{index}]"
             )),
